@@ -24,7 +24,7 @@ export interface BoardComparison {
   baseline: BoardWindowValue; current: BoardWindowValue; delta: number;
   improvement: number; sinceFirstGame: boolean;
 }
-export type BoardNumber = { state: "not_shared" | "hidden" } | { state: "pending"; reason?: "no_readings" } | {
+export type BoardNumber = { state: "not_shared" } | { state: "pending"; reason?: "no_readings" } | {
   state: "available"; unit: string; source?: string; latest: BoardDayValue; stale: boolean;
   daily: BoardDayValue[]; comparison: BoardComparison | null;
 };
@@ -41,7 +41,6 @@ export interface PairBoard {
 
 export function boardNumber(metric: BoardMetric, projection: HostedGroupBoardProjection,
   window: PairBoard["window"], firstGameOn: string): BoardNumber {
-  if (projection.state === "hidden") return { state: "hidden" };
   if (projection.state === "not_granted") return { state: "not_shared" };
   if (projection.state === "missing") return { state: "pending", reason: "no_readings" };
   if (projection.state !== "available") return { state: "pending" };

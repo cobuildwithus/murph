@@ -31,7 +31,8 @@ import { hostedAuthAdapter } from "@/src/lib/better-auth/adapter";
 import { serializeHostedNativeSessionToken } from "@/src/lib/better-auth/transport";
 import { readPairBoard, savePairBoardSharing as saveSharing } from "@/src/lib/game/board";
 import { readHostedGroupBoardData, leaveHostedGroupMemberTx } from "@/src/lib/hosted-groups/group-store";
-import { recordHostedConsentGrant, buildCurrentHostedConsentDocumentVersions } from "@/src/lib/legal/consent";
+import { hasHostedRuntimeActiveAccess } from "@/src/lib/hosted-mailbox/runtime-access";
+import { recordHostedConsentGrant, revokeHostedConsentScope, buildCurrentHostedConsentDocumentVersions } from "@/src/lib/legal/consent";
 import { createHostedEmailLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { createHostedLinqParticipantContact } from "@/src/lib/hosted-onboarding/linq-participant-contact";
 import { grantHostedVaultShareTx } from "@/src/lib/hosted-vault-share/share-grant-store";
@@ -123,8 +124,8 @@ afterAll(async () => {
 });
 
 describe.skipIf(!enabled)("pair board PostgreSQL authority and routes", () => {
-  it("shows age group only for the other person on an exact granted ranking scope", async () => {
-    const f = await fixture(true);
+  it.each([false, true])("shows age group only for the other person on an exact granted ranking scope (viewer joined: %s)", async joined => {
+    const f = await fixture(joined);
     const group = { biologicalSex: "female", ageFrom: 30 } as const;
     const rhr = await f.share(f.b, "resting-heart-rate-days.v0", true, false, 1, 90, group);
     await f.share(f.a, "resting-heart-rate-days.v0", true, false, 1, 90, group);
@@ -221,12 +222,18 @@ describe.skipIf(!enabled)("pair board PostgreSQL authority and routes", () => {
     expect(board.people[0].numbers.vo2Max).toEqual({ state: "pending", reason: "no_readings" });
     expect(board.people[1].numbers.vo2Max).toEqual({ state: "pending" });
   });
-  it("shows an unjoined shell, admits a pair seat and publishes all four scopes through existing grants", async () => {
+  it("shows shared numbers before joining, admits a pair seat and publishes all four scopes through existing grants", async () => {
     const f = await fixture();
     await f.share(f.b, "steps-days.v0", true);
     expect(await f.read()).toMatchObject({ membershipId: null, myShares: [], people: [
-      { member: false, numbers: { steps: { state: "not_shared" } } }, { member: true, numbers: { steps: { state: "hidden" } } },
+      { member: false, numbers: { steps: { state: "not_shared" } } },
+      { member: true, numbers: { steps: { state: "available" }, sleep: { state: "not_shared" } } },
     ] });
+    const response = await GET(f.request(), { params: Promise.resolve({ memberId: f.b }) });
+    expect(response.status).toBe(200);
+    expect((await response.json()).board.people[1].numbers.steps).toMatchObject({ state: "available", latest: { value: 8000 } });
+    await db.game.update({ where: { id: f.gameId }, data: { status: "settled" } });
+    expect((await f.read())?.people[1].numbers.steps.state).toBe("available");
     const board = await savePairBoardSharing(f.a, f.b, { expectedMembershipId: null, numbers: ["restingHeartRate", "sleep", "steps", "vo2Max"] });
     expect(board?.membershipId).toBeTruthy();
     expect(board?.myShares).toEqual(["restingHeartRate", "sleep", "steps", "vo2Max"]);
@@ -287,6 +294,8 @@ describe.skipIf(!enabled)("pair board PostgreSQL authority and routes", () => {
   });
   it("refuses outsiders, departed seats, unbound games, changed provider audiences and changed routes", async () => {
     const f = await fixture();
+    await f.share(f.b, "steps-days.v0", true);
+    await expect(readPairBoard(f.room, f.b)).rejects.toMatchObject({ httpStatus: 404 });
     await expect(savePairBoardSharing(f.room, f.b, { expectedMembershipId: null, numbers: [] })).rejects.toMatchObject({ httpStatus: 404 });
     mocks.route.mockResolvedValueOnce({ containerMemberId: "different-room" });
     await expect(savePairBoardSharing(f.a, f.b, { expectedMembershipId: null, numbers: [] })).rejects.toMatchObject({ httpStatus: 404 });
@@ -312,24 +321,55 @@ describe.skipIf(!enabled)("pair board PostgreSQL authority and routes", () => {
       .resolves.toMatchObject({ myShares: ["steps"] });
     expect(await db.hostedVaultShare.count({ where: { grantorMemberId: f.a, destinationMemberId: f.room, status: "granted", projectionKind: "steps-days.v0" } })).toBe(1);
   });
-  it("keeps legacy and missing snapshots pending and revalidates viewer membership after decryption", async () => {
-    const f = await fixture(true);
+  it.each(["join", "leave", "rejoin"])("keeps legacy snapshots pending and rejects a viewer %s during decryption", async change => {
+    const f = await fixture(change !== "join");
     await f.share(f.b, "steps-days.v0", true, true);
     expect((await f.read())?.people[1].numbers.steps).toEqual({ state: "pending" });
     await f.share(f.b, "steps-days.v0", true);
+    if (change !== "join") await f.share(f.a, "steps-days.v0", true);
     mocks.afterDecrypt.mockImplementationOnce(async () => {
-      await db.hostedGroupMember.delete({ where: { groupId_memberId: { groupId: f.groupId, memberId: f.a } } });
-      await db.hostedGroupMember.create({ data: { id: randomUUID(), groupId: f.groupId, memberId: f.a, role: "member", joinedAt: new Date() } });
+      if (change !== "join") await db.hostedGroupMember.delete({ where: { groupId_memberId: { groupId: f.groupId, memberId: f.a } } });
+      if (change !== "leave") await db.hostedGroupMember.create({ data: { id: randomUUID(), groupId: f.groupId, memberId: f.a, role: "member", joinedAt: new Date() } });
     });
-    expect((await f.read())?.people[1].numbers.steps).toEqual({ state: "hidden" });
+    const response = await GET(f.request(), { params: Promise.resolve({ memberId: f.b }) });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ board: null });
+    expect((await f.read())?.people[1].numbers.steps.state).toBe("available");
   });
-  it("withholds a grant replaced during decryption, and masks a new game block before returning", async () => {
-    const f = await fixture(true);
+  it.each(["id", "grantedAt"])("withholds a grant whose %s changes during decryption, and masks a new game block before returning", async field => {
+    const f = await fixture();
     const shareId = await f.share(f.b, "steps-days.v0", true);
-    mocks.afterDecrypt.mockImplementationOnce(async () => { await db.hostedVaultShare.update({ where: { id: shareId }, data: { id: randomUUID(), projectionSnapshotCiphertext: null } }); });
+    mocks.afterDecrypt.mockImplementationOnce(async () => { await db.hostedVaultShare.update({ where: { id: shareId }, data:
+      field === "id" ? { id: randomUUID() } : { grantedAt: new Date(Date.now() + 1000) } }); });
     expect((await f.read())?.people[1].numbers.steps).toEqual({ state: "pending" });
     await f.share(f.b, "steps-days.v0", true);
     mocks.afterDecrypt.mockImplementationOnce(async () => { await db.gameBlock.create({ data: { blockerMemberId: f.b, blockedMemberId: f.a } }); });
+    await expect(f.read()).rejects.toMatchObject({ httpStatus: 404 });
+    await expect(f.read()).rejects.toMatchObject({ httpStatus: 404 });
+  });
+  it.each(["grant", "consent", "suspension", "membership"])("withholds numbers and demographics after grantor %s changes", async change => {
+    const f = await fixture();
+    const shareId = await f.share(f.b, "resting-heart-rate-days.v0", true, false, 1, 90, { biologicalSex: "female", ageFrom: 30 });
+    expect((await f.read())?.people[1].numbers.restingHeartRate.state).toBe("available");
+    mocks.afterDecrypt.mockImplementationOnce(async () => {
+      if (change === "grant") await db.hostedVaultShare.update({ where: { id: shareId }, data: { status: "revoked" } });
+      if (change === "consent") await revokeHostedConsentScope({ memberId: f.b, scope: "launch.health-data", prisma: db });
+      if (change === "suspension") await db.hostedMember.update({ where: { id: f.b }, data: { suspendedAt: new Date() } });
+      if (change === "membership") await db.hostedGroupMember.update({ where: { groupId_memberId: { groupId: f.groupId, memberId: f.b } }, data: { id: randomUUID() } });
+    });
+    const person = (await f.read())?.people[1];
+    expect(person?.numbers.restingHeartRate).toEqual({ state: change === "membership" ? "pending" : "not_shared" });
+    expect(person).not.toHaveProperty("demographics");
+    if (change !== "membership") expect((await f.read())?.people[1].numbers.restingHeartRate).toEqual({ state: "not_shared" });
+  });
+  it("withholds a non-member's read when runtime access or a pair seat is lost during decryption", async () => {
+    const f = await fixture();
+    await f.share(f.b, "steps-days.v0", true);
+    mocks.afterDecrypt.mockImplementationOnce(() => { vi.mocked(hasHostedRuntimeActiveAccess).mockResolvedValueOnce(false); });
+    expect((await f.read())?.people[1].numbers.steps).toEqual({ state: "pending" });
+    mocks.afterDecrypt.mockImplementationOnce(async () => {
+      await db.gamePlayer.update({ where: { gameId_memberId: { gameId: f.gameId, memberId: f.b } }, data: { leftAt: new Date() } });
+    });
     await expect(f.read()).rejects.toMatchObject({ httpStatus: 404 });
   });
   it("reads canonical Day 1 older than the health window and independently of the streak cap", async () => {
