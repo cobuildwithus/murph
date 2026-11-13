@@ -1532,6 +1532,110 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
+    it("finishes an app-started Junction connection from the forwarded return query, once, for its owner only", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-03-26T12:00:00.000Z"));
+      const sourceProviderSlug = "garmin";
+      let fixture: Fixture | null = null;
+
+      try {
+        fixture = await createFixture({
+          setupPhase: "pending_link",
+          sourceLastErrorCode: null,
+          sourceProviderSlug,
+        });
+        const activeFixture = fixture;
+        await activeFixture.prisma.deviceConnectionSource.delete({
+          where: { id: activeFixture.sourceId },
+        });
+        await activeFixture.prisma.deviceConnection.delete({
+          where: { id: activeFixture.connectionId },
+        });
+
+        const redirectUrls: string[] = [];
+        const providerFetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+          const request = input instanceof Request ? input : null;
+          const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+          if (url.startsWith("https://api.sandbox.us.junction.com/v2/user/resolve/")) {
+            return Response.json({ id: activeFixture.externalAccountId });
+          }
+          if (url === "https://api.sandbox.us.junction.com/v2/link/token") {
+            const body = JSON.parse(request ? await request.clone().text() : String(init?.body)) as {
+              redirect_url: string;
+            };
+            redirectUrls.push(body.redirect_url);
+            return Response.json({ link_web_url: "https://link.junction.com/session/app-started" });
+          }
+          if (
+            url
+            === `https://api.sandbox.us.junction.com/v2/user/providers/${activeFixture.externalAccountId}`
+          ) {
+            return Response.json({ data: [{ slug: sourceProviderSlug, status: "connected" }] });
+          }
+          throw new Error(`Unexpected Junction request: ${url}`);
+        });
+        const registry = createJunctionRegistry(providerFetch);
+        const service = () => createIngressService({
+          headers: new Headers(),
+          registry,
+          store: activeFixture.store,
+        });
+
+        vi.setSystemTime(new Date("2026-03-26T12:01:00.000Z"));
+        const started = await service().startConnection(activeFixture.memberId, "junction", null, {
+          appReturn: "ios",
+          sourceProviderSlug,
+        });
+        expect(redirectUrls).toEqual([
+          `https://control.example.test/api/device-sync/companion/connect-return/ios?murph_state=${started.state}`,
+        ]);
+        const readState = () => activeFixture.prisma.deviceOauthSession.findUnique({
+          select: { consumedAt: true },
+          where: { state: started.state },
+        });
+        await expect(readState()).resolves.toEqual({ consumedAt: null });
+
+        // The query the bridge handed to the app, forwarded in a request body.
+        const query = () => new URLSearchParams(
+          `murph_state=${started.state}&state=success&provider=${sourceProviderSlug}&isMobile=false`,
+        );
+        vi.setSystemTime(new Date("2026-03-26T12:02:00.000Z"));
+        await expect(service().handleConnectionCallback("junction", {
+          expectedOwnerId: "another-member",
+          query: query(),
+        })).rejects.toMatchObject({ code: "OAUTH_STATE_OWNER_MISMATCH" });
+        await expect(readState()).resolves.toEqual({ consumedAt: null });
+
+        const completed = await service().handleConnectionCallback("junction", {
+          expectedOwnerId: activeFixture.memberId,
+          query: query(),
+        });
+        const connection = await activeFixture.prisma.deviceConnection.findFirstOrThrow({
+          select: { id: true, setupPhase: true, status: true },
+          where: { provider: "junction", userId: activeFixture.memberId },
+        });
+        activeFixture.connectionId = connection.id;
+        expect(completed.account.id).toBe(connection.id);
+        expect(connection).toMatchObject({ setupPhase: "source_confirmed", status: "active" });
+        const source = await activeFixture.prisma.deviceConnectionSource.findFirstOrThrow({
+          select: { id: true, lastDataAt: true, status: true },
+          where: { connectionId: connection.id, sourceProviderSlug },
+        });
+        activeFixture.sourceId = source.id;
+        expect(source).toMatchObject({ lastDataAt: null, status: "connected" });
+
+        await expect(service().handleConnectionCallback("junction", {
+          expectedOwnerId: activeFixture.memberId,
+          query: query(),
+        })).rejects.toMatchObject({ code: expect.stringMatching(/^OAUTH_STATE_(INVALID|REPLAYED)$/u) });
+      } finally {
+        vi.useRealTimers();
+        if (fixture) {
+          await cleanupFixture(fixture);
+        }
+      }
+    });
+
     it("confirms pending setup and recovers a missed runtime handoff from durable mailbox state", async () => {
       const sourceProviderSlug = "garmin";
       const fixture = await createFixture({
