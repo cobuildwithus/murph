@@ -223,7 +223,10 @@ export function collectWearableDataset(
   const filteredSleepWindows = dedupedSleepWindows.filter((candidate) => matchesDateFilters(candidate.date, filters));
   const sleepStageAggregates = buildSleepStageAggregateCandidates(sleepStageCandidates, dedupedSleepWindows)
     .filter((candidate) => matchesDateFilters(candidate.date, filters));
-  const sanitizedMetricCandidates = sanitizeWearableMetricCandidates(rawMetricCandidates, dedupedSleepWindows);
+  const sanitizedMetricCandidates = sanitizeWearableMetricCandidates(
+    dropJunctionTimeseriesTotalsBesideActivitySummary(rawMetricCandidates),
+    dedupedSleepWindows,
+  );
   const metricCandidates = [
     ...dedupeExactMetricCandidates(sanitizedMetricCandidates.candidates).candidates,
     ...dedupeExactMetricCandidates(sleepStageAggregates).candidates,
@@ -240,6 +243,53 @@ export function collectWearableDataset(
     sleepWindows: filteredSleepWindows,
     workoutFeatures: collectJunctionWorkoutFeatures(vault.events, filters),
   };
+}
+
+// The timeseries whose day sum is a quantity the activity summary also reports.
+const JUNCTION_ACTIVITY_TIMESERIES_RESOURCES = ["steps", "distance", "floors-climbed"] as const;
+
+/**
+ * A day total summed from one source's own timeseries stands in for a day that
+ * source sent no activity summary for. Beside that summary it is a partial
+ * copy of the same quantity (one device's samples, over a UTC day), not a
+ * second opinion, so it is not a candidate.
+ */
+export function dropJunctionTimeseriesTotalsBesideActivitySummary(
+  candidates: readonly WearableMetricCandidate[],
+): WearableMetricCandidate[] {
+  // Junction names a record's resource type `junction-<source>-<resource>`.
+  const describe = (candidate: WearableMetricCandidate) => {
+    const source = normalizeWearableOriginSourceSlug(candidate.dataOrigin?.sourceProviderSlug);
+    const resourceType = normalizeLowercaseString(candidate.externalRef?.resourceType);
+    if (
+      candidate.sourceFamily !== "event"
+      || candidate.externalRef?.system !== "junction"
+      || !source
+      || !resourceType?.startsWith(`junction-${source}-`)
+    ) {
+      return null;
+    }
+    return {
+      key: `${source}|${candidate.date}|${candidate.metric}`,
+      resource: resourceType.slice(`junction-${source}-`.length),
+    };
+  };
+  const summarized = new Set<string>();
+  for (const candidate of candidates) {
+    const described = describe(candidate);
+    if (described?.resource === "activity") {
+      summarized.add(described.key);
+    }
+  }
+  if (summarized.size === 0) {
+    return [...candidates];
+  }
+  return candidates.filter((candidate) => {
+    const described = describe(candidate);
+    return !described
+      || !summarized.has(described.key)
+      || !(JUNCTION_ACTIVITY_TIMESERIES_RESOURCES as readonly string[]).includes(described.resource);
+  });
 }
 
 function sanitizeWearableMetricCandidates(
