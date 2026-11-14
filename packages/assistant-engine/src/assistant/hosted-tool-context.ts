@@ -4,7 +4,7 @@ import { resolveElevenLabsApiKey } from '@murphai/operator-config/elevenlabs-run
 import type { GeneratedMediaFileRuntime } from '../assistant-codex/generated-media-file.js'
 import type { GenerateImageToolArgs } from '../assistant-codex/generate-image-tool.js'
 import type { GenerateSongToolArgs } from '../assistant-codex/generate-voice-memo-tool.js'
-import { fetchRecapReference, materializeRecapWorkspace } from './recap-workspace.js'
+import { fetchRecapReference, materializeRecapWorkspace, recapReferenceId } from './recap-workspace.js'
 import type { ConversationPollTool } from "@murphai/hosted-execution/conversation-polls";
 import { createHash } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
@@ -657,11 +657,14 @@ export function createAssistantHostedToolContext(input: {
       const workspace = recapWorkspace
       const tool = executionContext?.groupTool
       if (!scope?.show || !workspace || !tool) throw new Error('Read recap material first.')
-      const referenceIds = request.kind === 'image' ? [...(request.args.referenceImageRefs ?? [])] : []
+      const refs = request.kind === 'image' ? request.args.referenceImageRefs ?? [] : []
+      const unknown = refs.filter(ref => !recapReferenceId(workspace.material, ref))
+      if (unknown.length) throw new Error(`Nothing was generated and no media request was used. referenceImageRefs takes the path of a photo listed under references in game.json. Not one of them: ${unknown.map(ref => JSON.stringify(ref.slice(0, 120))).join(', ')}.`)
+      const referenceIds = refs.map(ref => recapReferenceId(workspace.material, ref)!)
       return {
         elevenLabsApiKey: resolveElevenLabsApiKey(input.messageInput.turnEnvironment?.env ?? process.env) ?? undefined,
         fetchImpl,
-        resolveReferences: async refs => Promise.all(refs.map(async id => {
+        resolveReferences: async () => Promise.all(referenceIds.map(async id => {
           const ref = await fetchRecapReference({ ...scope, material: workspace.material, id, tool })
           return { bytes: ref.bytes, filename: `${id}.jpg`, mediaType: 'image/jpeg' as const,
             sha256: ref.hash, sourceRef: id, sourceRefSha256: createHash('sha256').update(id).digest('hex') }

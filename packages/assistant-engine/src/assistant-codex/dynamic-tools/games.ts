@@ -29,6 +29,24 @@ export const MURPH_READ_GAME_RECAP_TOOL = {
   description: 'Read the finished game, shared chat, pair lore, photo reference IDs and writing guide bound to this recap turn. Call first.',
   inputSchema: { type: 'object', additionalProperties: false, properties: {}, required: [] },
 } as const
+export const MURPH_GENERATE_IMAGE_RECAP_TOOL = {
+  namespace: 'murph', name: 'generate_image',
+  description: 'Generate one scene for the show from the cast\'s photos. Returns the path of the picture, a portrait JPEG, for the draft\'s files.',
+  inputSchema: { type: 'object', additionalProperties: false, required: ['prompt', 'referenceImageRefs'], properties: {
+    prompt: { type: 'string', minLength: 1, maxLength: 4000 },
+    referenceImageRefs: { type: 'array', minItems: 1, maxItems: 16, items: { type: 'string', minLength: 1, maxLength: 1024 },
+      description: 'Paths of photos listed under references in game.json, in the order the prompt names them.' },
+  } },
+} as const
+export const MURPH_GENERATE_SONG_RECAP_TOOL = {
+  namespace: 'murph', name: 'generate_song',
+  description: 'Generate the show\'s twenty-second theme song. Returns the path of the song for the draft\'s files.',
+  inputSchema: { type: 'object', additionalProperties: false, required: ['prompt', 'lyrics'], properties: {
+    prompt: { type: 'string', minLength: 1, maxLength: 4100, description: 'The sound only: genre, tempo, instruments, the kind of voice.' },
+    lyrics: { type: 'array', minItems: 1, maxItems: 20, items: { type: 'string', minLength: 1, maxLength: 200 },
+      description: 'The exact lines to sing, in order, one per item, with no labels like [Chorus].' },
+  } },
+} as const
 export const MURPH_WRITE_RECAP_TOOL = {
   namespace: 'murph', name: 'write_recap',
   description: 'Save the recap for this finished game. Include superlatives only when read_game supplies eligible player memberIds, and then give at most one {memberId, title, line} for each player. A title completes the heading "Most likely to" without repeating those words: 2 to 6 words, at most 80 characters, no full stop at the end, and different for each player. A line is one short, warm, teasing sentence of at most 160 characters. Base each one only on this game’s entries and on text every player can see: posts, words, timing, streaks, shared excuses and tasks. Never invent details, use private information, be mean, or joke about bodies or weight. In a group game, give every eligible person one kind superlative and do not shame anyone for missed days. Returns ok, or a list of problems to fix (unknown entries, a quote that is not verbatim, text over its limit, banned words). Fix every problem and call it again. The first accepted story is final; only an explicit regeneration replaces it.',

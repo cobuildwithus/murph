@@ -329,6 +329,32 @@ describe('murph.generate_image dynamic tool schema', () => {
     releaseUsage()
   })
 
+  it('fixes the media format in a recap show, whatever the model sent, and passes the recap refusal through', async () => {
+    const prepared: unknown[] = []
+    const hostedToolContext = {
+      computerToolsAvailable: false,
+      currentHostedDeliveryContext: () => null,
+      currentHostedMailboxItemIds: () => [],
+      currentGameRecapScope: () => ({ gameId: 'game_synthetic', eventId: 'game-recap:game_synthetic', pairFingerprint: 'a'.repeat(32), show: true }),
+      prepareRecapMedia: async (request) => { prepared.push(request); throw new Error('Synthetic recap refusal.') },
+      sendVaultFile: async () => ({ filename: 'unused', status: 'denied' as const }),
+      vaultFileSendAvailable: false,
+    } satisfies AssistantHostedToolContext
+    const run = (request: Parameters<typeof executeMurphDynamicToolRequest>[0]['request']) => executeMurphDynamicToolRequest({
+      deliveryContextOrdinal: 0, env: {}, fetchImpl: fetch, hostedToolContext, nextUsageOrdinal: () => 1, progressDelivery: null, request })
+    const results = [
+      await run({ kind: 'generate-image', args: { alt: null, outputFormat: 'webp', prompt: 'A synthetic stage.', quality: 'low', referenceImageRefs: [], size: '1024x1024' } }),
+      await run({ kind: 'generate-song', args: { durationSeconds: 180, instrumental: true, prompt: 'Playful piano', lyrics: ['Leo goes'] } }),
+    ]
+    expect(prepared).toEqual([
+      { kind: 'image', args: expect.objectContaining({ outputFormat: 'jpeg', quality: 'high', size: '1024x1536' }) },
+      { kind: 'song', args: expect.objectContaining({ durationSeconds: 20, instrumental: false, lyrics: ['Leo goes'] }) },
+    ])
+    for (const result of results) {
+      expect(result.rpcResult).toEqual({ success: false, contentItems: [{ type: 'inputText', text: 'Synthetic recap refusal.' }] })
+    }
+  })
+
   it('binds an irreversible continuation to its exact accepted group input', async () => {
     const exactInputId = `ain_${'a'.repeat(32)}`
     const batchTailInputId = `ain_${'b'.repeat(32)}`

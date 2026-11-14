@@ -1,6 +1,6 @@
 import { MURPH_MATERIALIZE_VAULT_MEDIA_TOOL, VAULT_MEDIA_EXPORT_GUIDANCE } from './dynamic-tools/materialize-vault-media.js'
 export { MURPH_MATERIALIZE_VAULT_MEDIA_TOOL } from './dynamic-tools/materialize-vault-media.js'
-import { MURPH_WRITE_RECAP_FILE_TOOL, MURPH_READ_GAME_TOOL, MURPH_READ_GAME_RECAP_TOOL, MURPH_UPDATE_GAME_TOOL, MURPH_GAME_PHOTO_TOOL, MURPH_WRITE_RECAP_TOOL, MURPH_GAME_LORE_TOOL, MURPH_MY_GAME_REMINDERS_TOOL } from './dynamic-tools/games.js'
+import { MURPH_GENERATE_IMAGE_RECAP_TOOL, MURPH_GENERATE_SONG_RECAP_TOOL, MURPH_WRITE_RECAP_FILE_TOOL, MURPH_READ_GAME_TOOL, MURPH_READ_GAME_RECAP_TOOL, MURPH_UPDATE_GAME_TOOL, MURPH_GAME_PHOTO_TOOL, MURPH_WRITE_RECAP_TOOL, MURPH_GAME_LORE_TOOL, MURPH_MY_GAME_REMINDERS_TOOL } from './dynamic-tools/games.js'
 import { MURPH_LEAVE_GROUP_TOOL } from './dynamic-tools/leave-group.js'
 export { MURPH_LEAVE_GROUP_TOOL } from './dynamic-tools/leave-group.js'
 import { MURPH_GET_SENDER_CONTACT_TOOL } from './dynamic-tools/sender-contact.js'
@@ -383,12 +383,11 @@ export const MURPH_GENERATE_IMAGE_TOOL = {
   name: 'generate_image',
   deferLoading: true,
   description:
-    `Generate one image. Use it when the member asks for an image, when a saved preference says visuals help them, or when a skill says an image is welcome and privacy-safe here. Describe the image in prompt. Pass member photos or earlier generated images as referenceImageRefs and say in the prompt what each one is for. Include ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}, Murph's character sheet, whenever Murph appears. In a conversation turn the image is generated in the background and delivered when it is ready. In a scheduled run it is attached to this run's reply and uses one of its ${ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS} image slots, so leave one free before calling. For a graph, chart, or trend line that no card or chart tool can show, put the chart type, the axis labels, and the values in the prompt, and ask for this style: cream paper (#f5f0e8), slate text (#2d3436), solid sage data lines (#7a8c6e), dashed sand reference lines (#d4c4a8), a second series in slate told apart by markers, Fraunces-style serif titles and numbers, DM Sans body text, DM Mono labels, flat with no gradients or shadows, sparse rounded axis ticks, a compact legend, and no number labels on points or bars unless the member asked for them. In an authorized recap, output=file writes the image to a local file and returns its path; nothing is attached. Use the recap's reference IDs.`,
+    `Generate one image. Use it when the member asks for an image, when a saved preference says visuals help them, or when a skill says an image is welcome and privacy-safe here. Describe the image in prompt. Pass member photos or earlier generated images as referenceImageRefs and say in the prompt what each one is for. Include ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}, Murph's character sheet, whenever Murph appears. In a conversation turn the image is generated in the background and delivered when it is ready. In a scheduled run it is attached to this run's reply and uses one of its ${ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS} image slots, so leave one free before calling. For a graph, chart, or trend line that no card or chart tool can show, put the chart type, the axis labels, and the values in the prompt, and ask for this style: cream paper (#f5f0e8), slate text (#2d3436), solid sage data lines (#7a8c6e), dashed sand reference lines (#d4c4a8), a second series in slate told apart by markers, Fraunces-style serif titles and numbers, DM Sans body text, DM Mono labels, flat with no gradients or shadows, sparse rounded axis ticks, a compact legend, and no number labels on points or bars unless the member asked for them.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
     properties: {
-      output: { type: 'string', enum: ['chat', 'file'] },
       prompt: {
         type: 'string',
         minLength: 1,
@@ -397,12 +396,12 @@ export const MURPH_GENERATE_IMAGE_TOOL = {
       size: {
         type: 'string',
         enum: ['1024x1024', '1024x1536', '1536x1024'],
-        description: 'Defaults to 1024x1536 portrait for file output and 1024x1024 for chat output.',
+        default: '1024x1024',
       },
       quality: {
         type: 'string',
         enum: ['low', 'medium', 'high'],
-        description: 'Defaults to high for file output and medium for chat output.',
+        default: 'medium',
       },
       outputFormat: {
         type: 'string',
@@ -1863,6 +1862,8 @@ export type MurphDynamicTool =
   | typeof MURPH_ATTACH_FOLLOW_UP_TOOL
   | typeof MURPH_MEMBER_MEMORY_TOOL
   | typeof MURPH_READ_GAME_RECAP_TOOL
+  | typeof MURPH_GENERATE_IMAGE_RECAP_TOOL
+  | typeof MURPH_GENERATE_SONG_RECAP_TOOL
   | typeof MURPH_WRITE_RECAP_TOOL
   | typeof MURPH_WRITE_RECAP_FILE_TOOL
   | typeof MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL

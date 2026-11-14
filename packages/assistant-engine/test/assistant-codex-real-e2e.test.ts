@@ -48684,6 +48684,83 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
       throw error;
     } finally { await removeRealCodexTemporaryPaths([vault, ...permissionHome.temporaryPaths, ...config.temporaryPaths]); }
   }, 600_000)
+  // Production instructions and tools, a real model, synthetic Web and media.
+  // The claim is about the tool surface: nothing the model sends for a scene is refused.
+  it('pair recap show scene requests are accepted on the first try', async () => {
+    const config = await resolveRealCodexE2eConfig();
+    const permissionHome = await materializeRealCodexHostedPermissionHome(config);
+    const vault = await mkdtemp(path.join(tmpdir(), 'murph-recap-scenes-'));
+    const { buildGameRecapInstructions } = await import('@murphai/hosted-execution/runtime-control');
+    const { createRecapShowLiveProviders } = await import('../src/recap-show-testkit.ts');
+    const gameId = 'synthetic-scenes', eventId = `game-recap:${gameId}`, pairFingerprint = '0123456789abcdef0123456789abcdef';
+    const players = [{ memberId: 'synthetic-a', name: 'Player A' }, { memberId: 'synthetic-b', name: 'Player B' }];
+    const posts: [string, string, string][] = [
+      ['Player A', 'mon', 'Twenty push-ups before coffee'], ['Player B', 'mon', 'Twenty push-ups, counted by the dog'],
+      ['Player A', 'tue', 'Push-ups on the purple mat'], ['Player B', 'tue', 'Did them in the hallway at 11:58pm'],
+      ['Player A', 'wed', 'Push-ups next to the laundry basket'],
+      ['Player A', 'thu', 'Twenty more, the basket is still full'], ['Player B', 'thu', 'Back at it, hallway again'],
+      ['Player A', 'fri', 'Last set, mat retired with honors'],
+    ];
+    const entries = posts.map(([playerName, day, text]) => ({ entryId: `synthetic-${day}-${playerName.slice(-1).toLowerCase()}`, playerName, kind: 'photo', text, visibleToBoth: true }));
+    const chat = [
+      { playerName: 'Player B', text: 'I am not missing a single day this week, write that down.' },
+      { playerName: 'Player A', text: 'Written down.' },
+      { playerName: 'Player B', text: 'Wednesday does not count, the hallway was being painted.' },
+      { playerName: 'Player A', text: 'The laundry basket saw everything.' },
+      // A real week of chat is long. Keep the tool result past Codex's output limit.
+      ...Array.from({ length: Number(process.env.MURPH_RECAP_JOURNEY_CHAT_LINES ?? 110) }, (_, index) => ({ playerName: index % 2 ? 'Player A' : 'Player B',
+        text: [`Did you post yet or are you stalling again, it is nearly ${7 + index % 5} already`, 'Posted. Check the app before you start making accusations',
+          `That does not look like twenty to me, I counted maybe ${11 + index % 8}`, 'Count again with your glasses on, the dog is my witness',
+          'Fine. Tomorrow I am going first and you will see how it is done'][index % 5]! })),
+    ];
+    const providers = await createRecapShowLiveProviders({
+      // A real game record is large: every post carries its time, place and numbers.
+      game: { id: gameId, maxPlayers: 2, recapShow: true, task: 'Twenty push-ups a day, with a photo', prize: 'Loser folds the winner’s laundry', lengthDays: 5,
+        days: ['mon', 'tue', 'wed', 'thu', 'fri'].map((day, dayIndex) => ({ day, posts: posts.filter(post => post[1] === day).map(([player, , text], postIndex) => ({
+          player, text, postedAt: `2026-11-0${2 + dayIndex}T${postIndex ? '23:58' : '07:12'}:00-05:00`, incomplete: false, proveIt: null,
+          data: { reps: 20, durationSeconds: 61 + dayIndex * 7 + postIndex, place: postIndex ? 'hallway' : 'bedroom',
+            heartRate: Array.from({ length: 24 }, (_, second) => ({ second: second * 3, beatsPerMinute: 92 + (second * 7 + dayIndex * 5 + postIndex * 11) % 41 })) } })) })) },
+      players, entries, chat, result: players.map((player, index) => ({ ...player, score: index ? 3 : 5 })),
+    });
+    const events: unknown[] = [];
+    try {
+      await initializeVault({ timezone: 'UTC', vaultRoot: vault });
+      await mkdir(path.join(vault, 'games'), { recursive: true });
+      await writeFile(path.join(vault, `games/lore-${pairFingerprint}.md`), '# Synthetic pair lore\nThe laundry basket is a running bit.\n');
+      const target = createAssistantModelTarget({ approvalPolicy: 'never', codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND), codexHome: permissionHome.codexHome,
+        model: config.model, modelProvider: config.modelProvider, provider: 'codex-cli', reasoningEffort: 'low', sandbox: 'workspace-write' });
+      if (!target) throw new Error('Expected real Codex target.');
+      await sendAssistantNotificationLocal({ channel: 'linq', deliveryTarget: 'synthetic-game-room', threadId: 'synthetic-game-room', threadIsDirect: false,
+        deliveryDispatchMode: 'queue-only', deliveryIdempotencyKey: eventId, deliveryDedupeToken: eventId,
+        executionContext: { hosted: { defaultTarget: target, memberId: 'synthetic-room', userEnvKeys: [],
+          gameRecapScope: { gameId, eventId, pairFingerprint, show: true },
+          groupTool: { request: providers.control }, providerFetch: providers.providerFetch } },
+        instructions: buildGameRecapInstructions([], undefined, false, true),
+        responsePolicy: { kind: 'require_game_recap', gameId, eventId, pairFingerprint, show: true },
+        onTraceEvent: event => events.push(event.rawEvent),
+        turnEnvironment: { currentWorkingDirectory: vault, env: { ...config.env, OPENAI_API_KEY: 'synthetic', ELEVENLABS_API_KEY: 'synthetic' } },
+        turnTrigger: 'manual-deliver', vault, workingDirectory: vault,
+      });
+    } finally {
+      const ids = new Set(providers.material.references.map(reference => reference.id));
+      const media = readCapabilityRoutingActions(events).flatMap(action => action.kind === 'dynamic' && ['generate_image', 'generate_song', 'write_recap'].includes(action.tool) ? [action] : []);
+      const actions = readCapabilityRoutingActions(events);
+      const proof = { model: config.model, saved: providers.saved.length, providerCalls: providers.providerCalls,
+        readGame: actions.flatMap(action => action.kind === 'dynamic' && action.tool === 'read_game' ? [{ bytes: Buffer.byteLength(action.output) }] : []),
+        commands: actions.flatMap(action => action.kind === 'command' ? [action.command.replace(/[a-f0-9]{32,64}/gu, '<hex>').slice(0, 140)] : []).slice(0, 20),
+        calls: media.map(call => ({ tool: call.tool, success: call.success, output: call.success ? '' : call.output.slice(0, 300),
+          keys: Object.keys(call.argumentsValue).sort(),
+          ...(call.tool === 'generate_image' ? { references: (Array.isArray(call.argumentsValue.referenceImageRefs) ? call.argumentsValue.referenceImageRefs : []).map(ref =>
+            typeof ref !== 'string' ? typeof ref : ids.has(ref) ? 'id' : ids.has(path.basename(ref, '.jpg')) ? 'path' : ref.slice(0, 60)) } : {}) })) };
+      process.stdout.write(`[recap scene proof] ${JSON.stringify(proof).replace(/\/Users\/[^/\s"]+/gu, '<HOME_DIR>')}\n`);
+      await removeRealCodexTemporaryPaths([vault, ...permissionHome.temporaryPaths, ...config.temporaryPaths]);
+      expect(proof.calls.filter(call => call.tool !== 'write_recap' && !call.success)).toEqual([]);
+      expect(proof.calls.some(call => call.tool === 'generate_image')).toBe(true);
+      expect(proof.saved).toBe(1);
+      // What read_game returns fits in what the model is shown, so nothing is cut out of it.
+      for (const read of proof.readGame) expect(read.bytes).toBeLessThan(10_000 * 4);
+    }
+  }, 900_000)
 
 })
 

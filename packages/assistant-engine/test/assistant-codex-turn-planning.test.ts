@@ -24,7 +24,7 @@ import {
   createHostedExecutionPrivateAssistantAskCompletionDeliveryKey,
 } from '@murphai/hosted-execution/assistant-identifiers'
 import { GAME_LIVE_LORE_GUIDANCE } from '@murphai/hosted-execution/runtime-control'
-import { GAME_PHOTO_CHAT_GUIDANCE } from '../src/assistant-codex/dynamic-tools/games.js'
+import { GAME_PHOTO_CHAT_GUIDANCE, MURPH_GENERATE_IMAGE_RECAP_TOOL, MURPH_GENERATE_SONG_RECAP_TOOL } from '../src/assistant-codex/dynamic-tools/games.js'
 import { createDefaultLocalAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
 import {
   buildCodexResumeState,
@@ -287,6 +287,19 @@ describe('assistant Codex turn planning', () => {
       onboardingGoalCheckin: false,
     })
     expect(result.attachmentAllowed).toBe(expected)
+  })
+
+  it('offers recap shows media tools that take only what varies', async () => {
+    const plan = await planTurn({ hostedToolContext: {
+      ...createHostedToolContext(),
+      currentGameRecapScope: () => ({ gameId: 'game_synthetic', eventId: 'game-recap:game_synthetic', pairFingerprint: 'synthetic-pair', show: true }),
+    } })
+    const media = plan.dynamicTools.filter(tool => tool.name === 'generate_image' || tool.name === 'generate_song')
+    expect(media).toEqual([MURPH_GENERATE_IMAGE_RECAP_TOOL, MURPH_GENERATE_SONG_RECAP_TOOL])
+    expect(Object.keys(MURPH_GENERATE_IMAGE_RECAP_TOOL.inputSchema.properties)).toEqual(['prompt', 'referenceImageRefs'])
+    expect(Object.keys(MURPH_GENERATE_SONG_RECAP_TOOL.inputSchema.properties)).toEqual(['prompt', 'lyrics'])
+    // Nothing here may point the model at a reference or a mode the recap does not take.
+    expect(JSON.stringify(media)).not.toMatch(/skill-assets|raw\/|output|chat|chart|deferLoading/u)
   })
 
   it('resumes an isolated recap binding and refuses an incompatible retry instead of repeating media', async () => {

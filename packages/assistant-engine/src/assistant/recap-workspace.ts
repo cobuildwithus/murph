@@ -16,7 +16,11 @@ export function recapTaskDirectory(vault: string, eventId: string): string {
   return path.join(vault, 'tmp/recap', createHash('sha256').update(eventId).digest('hex').slice(0, 32))
 }
 
-/** The trusted context owns material in memory; editable JSON cannot authorize a write. */
+/**
+ * The model reads the game from files, so what read_game returns never grows with the game:
+ * a tool result past the model's output limit loses its middle, and a file can be paged.
+ * The trusted context owns material in memory; the editable files cannot authorize a write.
+ */
 export async function materializeRecapWorkspace(input: {
   vault: string; eventId: string; gameId: string; sessionId: string;
   material: unknown; lore: string; tool: AssistantHostedGroupTool;
@@ -48,24 +52,32 @@ export async function materializeRecapWorkspace(input: {
   const replies = await readCommittedRecapReplies(input.vault, input.sessionId, material.startedAt, material.settledAt)
   chat.push(...replies.messages)
   chat.sort((a, b) => Date.parse(a.at) - Date.parse(b.at) || (a.laneSeq && b.laneSeq ? Number(BigInt(a.laneSeq) - BigInt(b.laneSeq)) : a.id.localeCompare(b.id)))
+  const write = async (file: string, bytes: string | Uint8Array) => {
+    const directory = await recapDirectory(input.vault, path.dirname(`${relativeRoot}/${file}`))
+    await writeFile(path.join(directory, path.basename(file)), bytes, {
+      flag: constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW, mode: 0o600,
+    })
+    return `${relativeRoot}/${file}`
+  }
   const references: (RecapMaterial['references'][number] & { path?: string })[] = []
   for (const reference of material.references) {
-    let photoPath: string | undefined
-    if (reference.kind !== 'murph') {
-      try {
-        const { bytes } = await fetchRecapReference({ ...input, material, id: reference.id })
-        const directory = await recapDirectory(input.vault, `${relativeRoot}/refs`)
-        await writeFile(path.join(directory, `${reference.id}.jpg`), bytes, {
-          flag: constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW, mode: 0o600,
-        })
-        photoPath = `${relativeRoot}/refs/${reference.id}.jpg`
-      } catch { /* An unavailable photo must not prevent the recap. */ }
-    }
-    references.push({ ...reference, ...(photoPath ? { path: photoPath } : {}) })
+    try {
+      const { bytes } = await fetchRecapReference({ ...input, material, id: reference.id })
+      references.push({ ...reference, path: await write(`refs/${reference.id}.jpg`, bytes) })
+    } catch { references.push(reference) /* An unavailable photo must not prevent the recap. */ }
   }
-  const manifest = { directory: relativeRoot, instructions: RECAP_SHOW_CRAFT,
-    material: { ...material, references }, chat, lore: input.lore, coverage: { retainedSince, throughConversationLaneSeq: through, incomplete: incomplete || replies.incomplete } }
+  const manifest = { directory: relativeRoot, instructions: RECAP_SHOW_CRAFT, files: {
+    game: await write('game.json', JSON.stringify({ ...material, references }, null, 1)),
+    chat: await write('chat.jsonl', chat.map(message => `${JSON.stringify(message)}\n`).join('')),
+    lore: await write('lore.md', input.lore),
+  }, coverage: { retainedSince, throughConversationLaneSeq: through, incomplete: incomplete || replies.incomplete } }
   return { root, material, chat, manifest }
+}
+
+/** A reference is named by its ID. The path of its photo, refs/<id>.jpg, names it too. */
+export function recapReferenceId(material: RecapMaterial, ref: string): string | null {
+  const id = path.basename(ref, '.jpg')
+  return material.references.some(reference => reference.id === id) ? id : null
 }
 
 const referenceBytesSchema = z.object({

@@ -9,7 +9,3 @@ export interface GeneratedMediaFileRuntime {
   resolveReferences(refs: readonly string[]): Promise<ResolvedGenerateImageReference[]>
   save(bytes: Uint8Array, mediaType: 'image/jpeg' | 'audio/mpeg', wordsTimestamps?: SongWordTimestamp[]): Promise<string>
 }
-
-export interface GeneratedMediaFileArgs {
-  output?: 'chat' | 'file'
-}
