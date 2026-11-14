@@ -260,20 +260,28 @@ test("record-only memory reads and compact mutation receipts preserve exact reco
   const unknown = await execute(["show", "missing-record", "--record-only"]);
   assert.equal(unknown.envelope.ok, false);
 
-  for (const args of [
-    ["upsert", "Synthetic preference for short summaries.", "--section", "Preferences"],
-    ["update", selected.id, "Synthetic corrected context."],
-    ["set-name", "Sample"],
-  ]) {
-    const saved = await execute([...args, "--compact"]);
+  // Writes are compact by default; --compact stays accepted for older callers.
+  for (const [args, compactFlag] of [
+    [["upsert", "Synthetic preference for short summaries.", "--section", "Preferences"], []],
+    [["update", selected.id, "Synthetic corrected context."], ["--compact"]],
+    [["set-name", "Sample"], []],
+  ] as const) {
+    const saved = await execute([...args, ...compactFlag]);
     assert.equal(saved.envelope.ok, true);
-    const receipt = saved.envelope.data as { created: boolean; memory: { id: string } };
+    const receipt = saved.envelope.data as {
+      created: boolean;
+      memory: { id: string; section: string; text: string };
+    };
     assert.deepEqual(Object.keys(receipt).sort(), ["created", "memory"]);
+    assert.deepEqual(Object.keys(receipt.memory), ["id", "section", "text"]);
     const readback = await execute(["show", receipt.memory.id, "--record-only"]);
     assert.equal(readback.envelope.ok, true);
-    assert.deepEqual(readback.envelope.data, { memory: receipt.memory });
+    const { id, section, text } = (readback.envelope.data as {
+      memory: { id: string; section: string; text: string };
+    }).memory;
+    assert.deepEqual(receipt.memory, { id, section, text });
   }
-  const removed = await execute(["forget", selected.id, "--compact"]);
+  const removed = await execute(["forget", selected.id]);
   assert.equal(removed.envelope.ok, true);
   const receipt = removed.envelope.data as { existed: boolean; memory: { id: string } };
   assert.deepEqual(Object.keys(receipt).sort(), ["existed", "memory"]);
@@ -283,6 +291,41 @@ test("record-only memory reads and compact mutation receipts preserve exact reco
   const after = await readMemoryDocumentFromCore(vaultRoot);
   assert.equal(after.records.some((record) => record.id === selected.id), false);
   assert.ok(records.slice(1).every((record) => after.records.some((current) => current.id === record.id && current.text === record.text)));
+});
+
+test("memory writes return the document and storage metadata only with --full", async () => {
+  const { parentRoot, vaultRoot } = await createTempVaultContext("murph-memory-full-write-");
+  cleanupPaths.push(parentRoot);
+  const cli = Cli.create("vault-cli", { description: "memory full write test", version: "0.0.0-test" });
+  registerMemoryCommands(cli);
+  await seedPrivateFreeMemoryFixture(vaultRoot);
+  const execute = (args: string[]) => runInProcessJsonCli(cli, ["memory", ...args, "--vault", vaultRoot]);
+
+  const compact = await execute(["upsert", "Synthetic compact receipt.", "--section", "Context"]);
+  const full = await execute(["upsert", "Synthetic full receipt.", "--section", "Context", "--full"]);
+  assert.equal(compact.envelope.ok, true);
+  assert.equal(full.envelope.ok, true);
+  const fullData = full.envelope.data as {
+    created: boolean;
+    document: { exists: boolean; records: unknown[] };
+    memory: Record<string, unknown>;
+  };
+  assert.deepEqual(Object.keys(fullData).sort(), ["created", "document", "memory"]);
+  assert.equal(fullData.document.exists, true);
+  assert.equal(fullData.document.records.length, 26);
+  assert.deepEqual(Object.keys(fullData.memory).sort(), [
+    "createdAt",
+    "id",
+    "section",
+    "sourceLine",
+    "sourcePath",
+    "text",
+    "updatedAt",
+  ]);
+  const compactBytes = Buffer.byteLength(JSON.stringify(compact.envelope.data), "utf8");
+  const fullBytes = Buffer.byteLength(JSON.stringify(fullData), "utf8");
+  assert.ok(compactBytes < 200, `compact write receipt was ${compactBytes} bytes`);
+  assert.ok(fullBytes > compactBytes * 10, `full=${fullBytes}, compact=${compactBytes}`);
 });
 
 test("memory show compact preserves all canonical facts while materially reducing serialized output", async () => {
@@ -628,6 +671,7 @@ test("memory commands round-trip upsert, update, show, and forget through the re
     "memory",
     "forget",
     createdMemoryId.memory.id,
+    "--full",
     "--vault",
     vaultRoot,
   ]);

@@ -395,10 +395,104 @@ const wearableSleepPatternFiltersResultSchema = wearableSurfaceFiltersSchema.ext
   windowDays: z.number().int().positive().max(366),
 })
 
-export const wearablesSleepPatternResultSchema = z.object({
+const wearableSleepPatternServiceResultSchema = z.object({
   filters: wearableSleepPatternFiltersResultSchema,
   summary: wearableSleepPatternSummarySchema,
 })
+
+// The assistant reads this result on every later model call. Keep coverage,
+// missing nights, medians and spread, freshness, and notes; drop constants,
+// zero counters, empty stat blocks, and values already shown elsewhere.
+const wearableSleepNumericPatternKeys = [
+  'awakeMinutes',
+  'sessionDurationMinutes',
+  'sleepLatencyMinutes',
+  'totalSleepMinutes',
+] as const
+const wearableSleepClockPatternKeys = ['bedtime', 'midpoint', 'wakeTime'] as const
+const wearableSleepPatternAlwaysShownCounts = new Set([
+  'expectedNightCount',
+  'missingNightCount',
+  'validNightCount',
+])
+const wearableSleepClockPatternPublicSchema = wearableSleepClockPatternSchema.omit({
+  medianLocalMinutes: true,
+})
+
+export const wearablesSleepPatternResultSchema = z.object({
+  filters: wearableSleepPatternFiltersResultSchema.partial(),
+  summary: wearableSleepPatternSummarySchema
+    .omit({ asOfInstant: true, timingTimeZoneMode: true })
+    .extend({
+      bedtime: wearableSleepClockPatternPublicSchema,
+      midpoint: wearableSleepClockPatternPublicSchema,
+      wakeTime: wearableSleepClockPatternPublicSchema,
+    })
+    .partial()
+    .required({
+      allSourcesStale: true,
+      asOfDate: true,
+      coveragePercent: true,
+      expectedNightCount: true,
+      from: true,
+      missingNightCount: true,
+      notes: true,
+      providerMix: true,
+      reportingTimeZoneSource: true,
+      staleAfterDays: true,
+      to: true,
+      validNightCount: true,
+    }),
+})
+
+function toPublicWearableSleepPattern(
+  result: z.infer<typeof wearableSleepPatternServiceResultSchema>,
+): z.infer<typeof wearablesSleepPatternResultSchema> {
+  const { asOfInstant, timingTimeZoneMode, ...summary } = result.summary
+  void asOfInstant
+  void timingTimeZoneMode
+  const publicSummary: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(summary)) {
+    const isZeroCount = value === 0 &&
+      key.endsWith('Count') &&
+      !wearableSleepPatternAlwaysShownCounts.has(key)
+    if (value === null || (Array.isArray(value) && value.length === 0) || isZeroCount) {
+      continue
+    }
+    publicSummary[key] = value
+  }
+  for (const key of wearableSleepNumericPatternKeys) {
+    if (summary[key].count === 0) {
+      delete publicSummary[key]
+    }
+  }
+  for (const key of wearableSleepClockPatternKeys) {
+    const { medianLocalMinutes, ...clock } = summary[key]
+    void medianLocalMinutes
+    if (clock.count === 0) {
+      delete publicSummary[key]
+    } else {
+      publicSummary[key] = clock
+    }
+  }
+  const sampleCounts = summary.weekdayWeekendMidpointSampleCounts
+  if (sampleCounts.weekday === 0 && sampleCounts.weekend === 0) {
+    delete publicSummary.weekdayWeekendMidpointSampleCounts
+  }
+
+  // summary.from/to are the resolved window; windowDays only shapes it when no
+  // start date was given.
+  const { from, to, windowDays, ...filters } = result.filters
+  return wearablesSleepPatternResultSchema.parse({
+    filters: {
+      ...filters,
+      ...(from === summary.from ? {} : { from }),
+      ...(to === summary.to ? {} : { to }),
+      ...(from === null && filters.date === null ? { windowDays } : {}),
+    },
+    summary: publicSummary,
+  })
+}
 
 const wearableMetricSummaryKindSchema = z.enum([
   'activity',
@@ -507,7 +601,7 @@ type WearablesLatestResult = z.infer<typeof wearablesLatestResultSchema>
 type WearablesMetricLatestResult = z.infer<typeof wearablesMetricLatestResultSchema>
 type WearablesMetricTrendResult = z.infer<typeof wearablesMetricTrendResultSchema>
 type WearablesDriftResult = z.infer<typeof wearablesDriftResultSchema>
-type WearablesSleepPatternResult = z.infer<typeof wearablesSleepPatternResultSchema>
+type WearablesSleepPatternResult = z.infer<typeof wearableSleepPatternServiceResultSchema>
 
 interface WearablesLatestInput {
   requestId: string | null
@@ -896,7 +990,9 @@ export function registerWearablesCommands(
         windowDays: options.windowDays,
       })
 
-      return wearablesSleepPatternResultSchema.parse(withoutWearableVaultPath(result))
+      return toPublicWearableSleepPattern(
+        wearableSleepPatternServiceResultSchema.parse(withoutWearableVaultPath(result)),
+      )
     },
   })
 

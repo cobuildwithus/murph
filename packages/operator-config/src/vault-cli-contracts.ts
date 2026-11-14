@@ -116,7 +116,8 @@ export const vaultCliBatchCommandResultSchema =
 
 export const vaultCliBatchResultEnvelopeSchema = z.object({
   schema: z.literal(VAULT_CLI_BATCH_RESULT_SCHEMA),
-  vault: pathSchema,
+  // vault-cli no longer echoes the vault root; readers still accept older output.
+  vault: pathSchema.optional(),
   count: z.number().int().nonnegative(),
   requested: z.number().int().nonnegative().optional().describe(
     'Number of child commands requested by the caller.',

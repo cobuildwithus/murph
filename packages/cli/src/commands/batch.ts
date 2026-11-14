@@ -61,7 +61,6 @@ export function registerBatchCommands(cli: Cli.Cli) {
       return {
         schema:
           VAULT_CLI_BATCH_RESULT_SCHEMA as typeof VAULT_CLI_BATCH_RESULT_SCHEMA,
-        vault: options.vault,
         count: commands.length,
         requested: options.command.length,
         executed: commands.length,

@@ -54,6 +54,25 @@ describe('Codex workout delivery context', () => {
     expect(tracker.readReferences(1)).toBeUndefined()
   })
 
+  it('still reads a start result that echoes the vault root and storage fields', () => {
+    const tracker = createCodexWorkoutDeliveryContextTracker({})
+    observeCommand(tracker, {
+      command: 'vault-cli workout start Current --format json',
+      id: 'start-with-echoed-fields',
+      output: {
+        ...workoutStartResult(currentWorkoutId),
+        ledgerFile: 'ledger/events/2026/2026-08.jsonl',
+        lookupId: currentWorkoutId,
+        vault: '/vault',
+      },
+    })
+
+    expect(tracker.readReferences(0)).toEqual([{
+      entityId: currentWorkoutId,
+      entityKind: 'activity_session',
+    }])
+  })
+
   it('recognizes a note-less workout start result', () => {
     const tracker = createCodexWorkoutDeliveryContextTracker({})
     observeCommand(tracker, {
@@ -355,6 +374,7 @@ function observeCommand(
   })
 }
 
+// vault-cli omits the vault root, ledger path, and duplicate lookup id.
 function workoutStartResult(
   eventId: string,
   note: string | null = 'Current workout',
@@ -366,12 +386,9 @@ function workoutStartResult(
     durationMinutes: 60,
     eventId,
     kind: 'activity_session',
-    ledgerFile: '/vault/bank/ledger.md',
-    lookupId: eventId,
     note,
     occurredAt: '2026-08-24T14:00:00.000Z',
     title: 'Current workout',
-    vault: '/vault',
     workout: null,
   }
 }
@@ -399,10 +416,9 @@ function workoutShowResult(eventId: string) {
       links: [],
       markdown: null,
       occurredAt: '2026-08-24T14:00:00.000Z',
-      path: '/vault/bank/ledger.md',
+      path: 'ledger/events/2026/2026-08.jsonl',
       title: 'Current workout',
     },
-    vault: '/vault',
   }
 }
 
@@ -423,6 +439,5 @@ function batchResult(commands: Array<{
     count: commands.length,
     failed: commands.filter((command) => !command.ok).length,
     schema: VAULT_CLI_BATCH_RESULT_SCHEMA,
-    vault: '/vault',
   }
 }

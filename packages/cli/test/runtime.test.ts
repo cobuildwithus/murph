@@ -15,7 +15,6 @@ interface FixtureVault {
   vaultRoot: string
   document: {
     documentId: string
-    lookupId: string
   }
   meal: {
     mealId: string
@@ -86,7 +85,6 @@ async function makeFixtureVault(): Promise<FixtureVault> {
   const document = requireData(
     await runCli<{
       documentId: string
-      lookupId: string
     }>([
       'document',
       'import',
@@ -222,7 +220,6 @@ test(
     try {
       const document = await runCli<{
         documentId: string
-        lookupId: string
         rawFile: string
         manifestFile: string
       }>([
@@ -235,14 +232,13 @@ test(
       assert.equal(document.ok, true)
       assert.equal(document.meta?.command, 'document import')
       assert.match(requireData(document).documentId, /^doc_/u)
-      assert.equal(requireData(document).lookupId, requireData(document).documentId)
+      assert.equal('lookupId' in requireData(document), false)
       assert.equal(requireData(document).rawFile.length > 0, true)
       assert.equal(requireData(document).manifestFile.length > 0, true)
       await access(path.join(fixture.vaultRoot, requireData(document).manifestFile))
 
       const meal = await runCli<{
         mealId: string
-        lookupId: string
         manifestFile: string
         source: string | null
         ingredients: string[] | null
@@ -259,7 +255,7 @@ test(
       assert.equal(meal.ok, true)
       assert.equal(meal.meta?.command, 'meal add')
       assert.match(requireData(meal).mealId, /^meal_/u)
-      assert.equal(requireData(meal).lookupId, requireData(meal).mealId)
+      assert.equal('lookupId' in requireData(meal), false)
       assert.equal(requireData(meal).manifestFile.length > 0, true)
       assert.equal(requireData(meal).source, 'manual')
       assert.equal(requireData(meal).ingredients, null)
@@ -397,7 +393,7 @@ test(
         }
       }>([
         'show',
-        fixture.document.lookupId,
+        fixture.document.documentId,
         '--vault',
         fixture.vaultRoot,
       ])

@@ -115,11 +115,10 @@ test('batch runs multiple vault-cli argv arrays in one process', async () => {
         stdout: string
       }>
       schema: string
-      vault: string
     }
 
     assert.equal(result.schema, VAULT_CLI_BATCH_RESULT_SCHEMA)
-    assert.equal(result.vault, vault)
+    assert.equal('vault' in result, false)
     assert.equal(result.count, 2)
     assert.equal(result.failed, 0)
     assert.deepEqual(result.commands.map((command) => command.ok), [true, true])

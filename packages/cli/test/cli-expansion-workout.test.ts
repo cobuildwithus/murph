@@ -35,8 +35,6 @@ const WORKOUT_CAPTURE_DEFAULTS_TIMEOUT_MS = 300_000
 
 interface WorkoutAddEnvelope {
   eventId: string
-  lookupId: string
-  ledgerFile: string
   created: boolean
   occurredAt: string
   kind: 'activity_session'
@@ -372,7 +370,7 @@ test(
       const showLoggedWorkout = await runCli<ShowEnvelope>([
         'event',
         'show',
-        requireData(logFormat).lookupId,
+        requireData(logFormat).eventId,
         '--vault',
         vaultRoot,
       ])
@@ -926,7 +924,7 @@ template:
       const shown = await runCli<ShowEnvelope>([
         'event',
         'show',
-        requireData(logged).lookupId,
+        requireData(logged).eventId,
         '--vault',
         vaultRoot,
       ])
@@ -1109,10 +1107,8 @@ test(
       assert.equal(runWorkout.ok, true)
       assert.equal(runWorkout.meta?.command, 'workout add')
       assert.match(requireData(runWorkout).eventId, /^evt_/u)
-      assert.equal(
-        requireData(runWorkout).lookupId,
-        requireData(runWorkout).eventId,
-      )
+      assert.equal('lookupId' in requireData(runWorkout), false)
+      assert.equal('ledgerFile' in requireData(runWorkout), false)
       assert.equal(requireData(runWorkout).kind, 'activity_session')
       assert.equal(requireData(runWorkout).activityType, 'running')
       assert.equal(requireData(runWorkout).durationMinutes, 30)
@@ -1127,14 +1123,14 @@ test(
       const showWorkout = await runCli<ShowEnvelope>([
         'event',
         'show',
-        requireData(runWorkout).lookupId,
+        requireData(runWorkout).eventId,
         '--vault',
         vaultRoot,
       ])
       assert.equal(showWorkout.ok, true)
       assert.equal(
         requireData(showWorkout).entity.id,
-        requireData(runWorkout).lookupId,
+        requireData(runWorkout).eventId,
       )
       assert.equal(requireData(showWorkout).entity.kind, 'activity_session')
       assert.equal(requireData(showWorkout).entity.title, '30-minute run')
@@ -1176,7 +1172,7 @@ test(
       const showStructuredStrengthWorkout = await runCli<ShowEnvelope>([
         'event',
         'show',
-        requireData(structuredStrengthWorkout).lookupId,
+        requireData(structuredStrengthWorkout).eventId,
         '--vault',
         vaultRoot,
       ])

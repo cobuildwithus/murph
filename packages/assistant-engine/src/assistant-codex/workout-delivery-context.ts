@@ -15,6 +15,9 @@ import { isCodexActionStructurallyFailed } from './action-outcome.js'
 import { resolveCodexVaultCliCommandArgv } from './command-family.js'
 
 const ACTIVITY_SESSION_KIND = 'activity_session'
+// vault-cli omits echoed vault roots, storage paths, and duplicate lookup ids,
+// so read only the fields this tracker needs.
+const workoutStartReadSchema = workoutAddResultSchema.pick({ eventId: true, kind: true })
 
 // Workout show returns a compact record and live workout commands a full one;
 // delivery context needs only the record identity from either.
@@ -278,7 +281,7 @@ function readWorkoutResultSessionId(
     return null
   }
   if (commandKind === 'start') {
-    const result = workoutAddResultSchema.safeParse(parsed)
+    const result = workoutStartReadSchema.safeParse(parsed)
     return result.success ? result.data.eventId : null
   }
   const result = workoutEntityResultSchema.safeParse(parsed)

@@ -15,8 +15,6 @@ import { requireData, runCli } from './cli-test-helpers.js'
 
 interface InterventionAddEnvelope {
   eventId: string
-  lookupId: string
-  ledgerFile: string
   created: boolean
   occurredAt: string
   kind: 'intervention_session'
@@ -182,7 +180,7 @@ test.sequential(
       assert.equal(sauna.ok, true)
       assert.equal(sauna.meta?.command, 'intervention add')
       assert.match(requireData(sauna).eventId, /^evt_/u)
-      assert.equal(requireData(sauna).lookupId, requireData(sauna).eventId)
+      assert.equal('lookupId' in requireData(sauna), false)
       assert.equal(requireData(sauna).kind, 'intervention_session')
       assert.equal(requireData(sauna).interventionType, 'sauna')
       assert.equal(requireData(sauna).durationMinutes, 20)
@@ -193,7 +191,7 @@ test.sequential(
       const showSauna = await runCli<ShowEnvelope>([
         'event',
         'show',
-        requireData(sauna).lookupId,
+        requireData(sauna).eventId,
         '--vault',
         vaultRoot,
       ])
@@ -231,7 +229,7 @@ test.sequential(
       const showHbot = await runCli<ShowEnvelope>([
         'event',
         'show',
-        requireData(hbot).lookupId,
+        requireData(hbot).eventId,
         '--vault',
         vaultRoot,
       ])

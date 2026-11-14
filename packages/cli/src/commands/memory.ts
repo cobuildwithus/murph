@@ -8,6 +8,8 @@ import {
   memoryRecordSchema,
   memorySectionSchema,
   memoryDemographicsSchema,
+  type MemoryDocumentSnapshot,
+  type MemoryRecord,
   type MemorySection,
 } from "@murphai/contracts";
 import {
@@ -28,15 +30,21 @@ const vaultOptionSchema = z.object({
 
 const memoryMutationOptionsSchema = vaultOptionSchema.extend({
   compact: z.boolean().optional().describe(
-    "Return the mutation outcome and exact affected record without the full memory document.",
+    "Accepted for compatibility; memory writes are already compact.",
   ),
 });
 
-const memoryUpsertOptionsSchema = memoryMutationOptionsSchema.extend({
+const memoryWriteOptionsSchema = memoryMutationOptionsSchema.extend({
+  full: z.boolean().optional().describe(
+    "Also return the full memory document and the affected record's storage metadata.",
+  ),
+});
+
+const memoryUpsertOptionsSchema = memoryWriteOptionsSchema.extend({
   section: memorySectionSchema.describe("Memory section to write into."),
 });
 
-const memoryUpdateOptionsSchema = memoryMutationOptionsSchema.extend({
+const memoryUpdateOptionsSchema = memoryWriteOptionsSchema.extend({
   section: memorySectionSchema.optional().describe(
     "Optional replacement memory section. Defaults to the current section.",
   ),
@@ -99,28 +107,28 @@ const memoryShowOptionsSchema = vaultOptionSchema.extend({
   ),
 });
 
-const fullMemoryUpsertResultSchema = z.object({
-  vault: z.string().min(1),
-  created: z.boolean(),
-  document: memoryDocumentSnapshotSchema,
-  memory: memoryRecordSchema,
-});
-
 const memoryUpsertResultSchema = z.union([
-  fullMemoryUpsertResultSchema,
-  fullMemoryUpsertResultSchema.omit({ vault: true, document: true }),
+  z.object({
+    created: z.boolean(),
+    memory: compactMemoryRecordSchema,
+  }),
+  z.object({
+    created: z.boolean(),
+    document: memoryDocumentSnapshotSchema,
+    memory: memoryRecordSchema,
+  }),
 ]);
 
-const fullMemoryForgetResultSchema = z.object({
-  vault: z.string().min(1),
-  existed: z.boolean(),
-  document: memoryDocumentSnapshotSchema,
-  memory: memoryRecordSchema.nullable(),
-});
-
 const memoryForgetResultSchema = z.union([
-  fullMemoryForgetResultSchema,
-  fullMemoryForgetResultSchema.omit({ vault: true, document: true }),
+  z.object({
+    existed: z.boolean(),
+    memory: compactMemoryRecordSchema.nullable(),
+  }),
+  z.object({
+    existed: z.boolean(),
+    document: memoryDocumentSnapshotSchema,
+    memory: memoryRecordSchema.nullable(),
+  }),
 ]);
 
 export function registerMemoryCommands(cli: Cli.Cli) {
@@ -188,7 +196,7 @@ export function registerMemoryCommands(cli: Cli.Cli) {
     args: z.object({
       displayName: memoryDisplayNameArgSchema,
     }),
-    options: memoryMutationOptionsSchema,
+    options: memoryWriteOptionsSchema,
     output: memoryUpsertResultSchema,
     async run({ args, options }) {
       return runMemoryCommand(async () => {
@@ -196,9 +204,8 @@ export function registerMemoryCommands(cli: Cli.Cli) {
           displayName: args.displayName,
         });
         return {
-          ...(options.compact ? {} : { vault: options.vault, document: result.document }),
           created: result.created,
-          memory: result.record,
+          ...memoryWriteReceipt(options.full, result.document, result.record),
         };
       });
     },
@@ -253,9 +260,8 @@ export function registerMemoryCommands(cli: Cli.Cli) {
           text: args.text,
         });
         return {
-          ...(options.compact ? {} : { vault: options.vault, document: result.document }),
           created: result.created,
-          memory: result.record,
+          ...memoryWriteReceipt(options.full, result.document, result.record),
         };
       });
     },
@@ -277,9 +283,8 @@ export function registerMemoryCommands(cli: Cli.Cli) {
           text: args.text,
         });
         return {
-          ...(options.compact ? {} : { vault: options.vault, document: result.document }),
           created: false,
-          memory: result.record,
+          ...memoryWriteReceipt(options.full, result.document, result.record),
         };
       });
     },
@@ -290,7 +295,7 @@ export function registerMemoryCommands(cli: Cli.Cli) {
     args: z.object({
       memoryId: memoryIdArgSchema,
     }),
-    options: memoryMutationOptionsSchema,
+    options: memoryWriteOptionsSchema,
     output: memoryForgetResultSchema,
     async run({ args, options }) {
       return runMemoryCommand(async () => {
@@ -298,15 +303,28 @@ export function registerMemoryCommands(cli: Cli.Cli) {
           recordId: args.memoryId,
         });
         return {
-          ...(options.compact ? {} : { vault: options.vault, document: result.document }),
           existed: result.existed,
-          memory: result.record,
+          ...memoryWriteReceipt(options.full, result.document, result.record),
         };
       });
     },
   });
 
   cli.command(memory);
+}
+
+// The record is the readback; the whole document grows with memory, so it is opt-in.
+function memoryWriteReceipt<TRecord extends MemoryRecord | null>(
+  full: boolean | undefined,
+  document: MemoryDocumentSnapshot,
+  record: TRecord,
+) {
+  if (full) {
+    return { document, memory: record };
+  }
+  return {
+    memory: record && { id: record.id, section: record.section, text: record.text },
+  };
 }
 
 async function runMemoryCommand<TResult>(run: () => Promise<TResult>): Promise<TResult> {

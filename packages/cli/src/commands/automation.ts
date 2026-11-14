@@ -143,13 +143,21 @@ export const automationCompactListItemSchema = automationRecordSchema
     slug: true,
     title: true,
     status: true,
-    summary: true,
-    activeUntil: true,
     schedule: true,
-    supportKind: true,
     updatedAt: true,
   })
+  .extend({
+    summary: z.string().min(1).optional(),
+    activeUntil: automationActiveUntilSchema.optional(),
+    supportKind: z.enum(automationSupportKindValues).optional(),
+  })
   .strict();
+
+const automationListPageFields = {
+  count: z.number().int().nonnegative(),
+  totalCount: z.number().int().nonnegative(),
+  nextCursor: z.string().min(1).nullable(),
+};
 
 const automationListResultFields = {
   vault: pathSchema,
@@ -161,14 +169,12 @@ const automationListResultFields = {
     cursor: z.string().nullable(),
     limit: z.number().int().positive().max(200),
   }),
-  count: z.number().int().nonnegative(),
-  totalCount: z.number().int().nonnegative(),
-  nextCursor: z.string().min(1).nullable(),
+  ...automationListPageFields,
 };
 
+// Compact inventory reads keep only paging and the fields needed to pick a record.
 export const automationCompactListResultSchema = z.object({
-  ...automationListResultFields,
-  compact: z.literal(true),
+  ...automationListPageFields,
   items: z.array(automationCompactListItemSchema),
 });
 
@@ -249,10 +255,10 @@ function automationCompactListItem(
     slug: record.slug,
     title: record.title,
     status: record.status,
-    summary: record.summary,
-    activeUntil: record.activeUntil,
+    ...(record.summary === null ? {} : { summary: record.summary }),
+    ...(record.activeUntil === null ? {} : { activeUntil: record.activeUntil }),
     schedule: record.schedule,
-    supportKind: record.supportKind,
+    ...(record.supportKind === null ? {} : { supportKind: record.supportKind }),
     updatedAt: record.updatedAt,
   };
 }
@@ -1480,8 +1486,9 @@ export function registerAutomationCommands(
 
       if (context.options.compact) {
         return {
-          ...result,
-          compact: true,
+          count: result.count,
+          totalCount: result.totalCount,
+          nextCursor: result.nextCursor,
           items: page.items.map((item) => automationCompactListItem(item)),
         };
       }

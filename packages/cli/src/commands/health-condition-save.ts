@@ -14,7 +14,6 @@ import {
 import {
   createHealthEntityCrudGroup,
 } from "./health-entity-command-registry.js";
-import { suggestedCommandsCta } from "./command-factory-primitives.js";
 
 const conditionSlugSchema = z
   .string()
@@ -169,27 +168,7 @@ export function registerConditionSaveCommand(condition: Cli.Cli) {
       );
       const saved = toConditionSaveResult(context.options.vault, result);
 
-      return context.ok(saved, {
-        cta: suggestedCommandsCta([
-          {
-            command: "condition show",
-            args: {
-              id: saved.conditionId,
-            },
-            description: "Show the saved condition record.",
-            options: {
-              vault: true,
-            },
-          },
-          {
-            command: "condition list",
-            description: "List conditions.",
-            options: {
-              vault: true,
-            },
-          },
-        ]),
-      });
+      return saved;
     },
   });
 }

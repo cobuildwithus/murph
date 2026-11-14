@@ -9,7 +9,6 @@ import {
 import { withBaseOptions } from "@murphai/operator-config/command-helpers";
 import { pathSchema } from "@murphai/operator-config/vault-cli-contracts";
 import { normalizeRepeatableFlagOption } from "@murphai/vault-usecases";
-import { suggestedCommandsCta } from "./command-factory-primitives.js";
 import type { VaultServices } from "@murphai/vault-usecases";
 import {
   createHealthEntityCrudGroup,
@@ -151,27 +150,7 @@ export function registerFamilySaveCommand(family: Cli.Cli) {
       );
       const saved = toFamilySaveResult(context.options.vault, result);
 
-      return context.ok(saved, {
-        cta: suggestedCommandsCta([
-          {
-            command: "family show",
-            args: {
-              id: saved.familyMemberId,
-            },
-            description: "Show the saved family member.",
-            options: {
-              vault: true,
-            },
-          },
-          {
-            command: "family list",
-            description: "List family members.",
-            options: {
-              vault: true,
-            },
-          },
-        ]),
-      });
+      return saved;
     },
   });
 }

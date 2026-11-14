@@ -41,10 +41,10 @@ vault-cli knowledge lint --vault <path> [--request-id <id>]
 vault-cli knowledge log tail --vault <path> [--limit <n>] [--request-id <id>]
 vault-cli knowledge index rebuild --vault <path> [--request-id <id>]
 vault-cli memory show [memoryId] --vault <path> [--compact] [--record-only]
-vault-cli memory set-name <displayName> --vault <path> [--compact]
-vault-cli memory upsert <text> --vault <path> [--compact] --section <section>
-vault-cli memory update <memoryId> <text> --vault <path> [--compact] [--section <section>]
-vault-cli memory forget <memoryId> --vault <path> [--compact]
+vault-cli memory set-name <displayName> --vault <path> [--full]
+vault-cli memory upsert <text> --vault <path> [--full] --section <section>
+vault-cli memory update <memoryId> <text> --vault <path> [--full] [--section <section>]
+vault-cli memory forget <memoryId> --vault <path> [--full]
 vault-cli automation scaffold --vault <path>
 vault-cli automation save <title> --vault <path> --instructions <text> --schedule-kind <kind> [--channel <channel>] [...]
 vault-cli automation show <lookup> --vault <path>
@@ -212,8 +212,10 @@ of data JSON per page in immutable-id order. Follow every `nextCursor`, retainin
 the same filters. An oversized instruction body is `null` with
 `instructionsComplete: false`; read that exact automation before judging it.
 This mode is incompatible with `--compact`. Ordinary listings retain their
-existing projection and ordering. Mutation candidates still require exact
-readback and their current revision.
+existing projection and ordering. `--compact` returns only `count`,
+`totalCount`, `nextCursor`, and items with id, slug, title, status, schedule,
+and `updatedAt`, plus `summary`, `activeUntil`, and `supportKind` when set.
+Mutation candidates still require exact readback and their current revision.
 
 When `experiment session log` receives `--reminder-intent-id`, the strict sent outbox intent is the immutable occurrence proof. The canonical writer validates private provider delivery, the exact `experiment:<experimentId>` support owner, `scheduledOccurrenceAt`, and `plannedOccurrenceAt`; derives one event identity from the experiment and planned occurrence; returns the existing event when the same planned session is confirmed through an identical retry or another accepted reminder; rejects a replay that changes the already logged effect so the caller can edit that event explicitly; and includes canonical experiment progress in the result. `--date`, `--occurred-at`, and `--source` are invalid in this mode because the writer derives the occurrence and records an explicit manual report. A legacy reminder without `plannedOccurrenceAt` remains conversational context and must use ordinary plan-based session resolution rather than this strict writer. Later automation edits, archival, or deletion do not invalidate the historical occurrence; the current automation revision and consent remain pre-send authority for future delivery.
 
@@ -399,11 +401,11 @@ Read surfaces intentionally separate summary from detail:
 - `--baseUrl <url>` remains in device command signatures. Hosted execution rejects explicit local control-plane targets.
 - `--request-id` is optional where exposed, forwarded to package service calls, and reserved for audit correlation.
 - Incur's global output flags are available everywhere; this contract freezes only the command-specific option semantics and JSON payload shapes described below.
-- Machine-stable callers that need metadata or CTA suggestions should prefer `--full-output --format json`. The payload examples below describe the `data` body emitted by plain JSON mode.
+- Machine-stable callers that need metadata or CTA suggestions should prefer `--full-output --format json`. The payload examples below describe the `data` body emitted by plain JSON mode. Save, stop, and import writes return no CTA; their payload is the readback.
 - Retrieval filters and similar multi-value options use repeatable flags such as `--kind meal --kind note`, `--entry-type event --entry-type sample_summary`, or `--metadata-columns device --metadata-columns context`. Comma-delimited tokens such as `--kind meal,note` are invalid and should be rewritten as repeated flags. `sample_summary` refers to display-grade metric/sample summaries, not raw generic `ledger/samples` telemetry.
 - Canonical ids emitted by core/import flows follow the frozen `<prefix>_<ULID>` policy in `docs/contracts/02-record-schemas.md`.
 - Commands that create or read canonical records align to the generated schemas in `packages/contracts/generated/`.
-- Write/import commands return `lookupId` or `lookupIds` when the follow-on read path should use the canonical read id rather than a batch id or internal provenance id.
+- Write/import commands return `lookupId` or `lookupIds` when the follow-on read path should use the canonical read id rather than a batch id or internal provenance id. A `lookupId` that would repeat another id in the same payload, such as `eventId` or `mealId`, is omitted; use that named id.
 - `import-json --input @file.json` uses one file argument and does not expose per-field mutation flags in the public grammar.
 
 ## Lookup Rules
@@ -431,7 +433,6 @@ For plain `--format json`, successful commands write the command payload directl
 
 ```json
 {
-  "vault": "<path>",
   "created": true,
   "directories": ["journal/2026"],
   "files": ["CORE.md"]
@@ -441,6 +442,8 @@ For plain `--format json`, successful commands write the command payload directl
 Field rules:
 
 - Success output is the command-specific payload described below, with no extra wrapper fields.
+- Vault-scoped payloads never echo the caller's vault root or an internal `ledgerFile` path, omit a null `manifestFile` and a top-level `path` that repeats `entity.path`, and echo only the `filters` that were set or resolved, such as `limit`. The assistant re-reads every byte of a tool result on later model calls.
+- Memory writes (`memory upsert|update|forget|set-name`) return the outcome plus the affected record's `id`, `section`, and `text`; `--full` adds the whole memory document and the record's storage metadata. `--compact` is still accepted and changes nothing.
 - With `--full-output --format json`, the same payload appears under `data` in incur's success envelope.
 - Exit code `0` indicates success.
 - The payload examples below are representative rather than exhaustive. Newer noun and mutation commands follow the same direct-payload rule and are covered by the runtime schemas in `packages/cli/src/**/*.ts`.
@@ -472,7 +475,6 @@ The examples below are the full successful plain `--format json` response bodies
 
 ```json
 {
-  "vault": "<path>",
   "created": true,
   "directories": ["journal/2026"],
   "files": ["CORE.md"]
@@ -483,7 +485,6 @@ The examples below are the full successful plain `--format json` response bodies
 
 ```json
 {
-  "vault": "<path>",
   "valid": true,
   "issues": [
     {
@@ -515,13 +516,11 @@ document.
 ```json
 {
   "created": true,
-  "vault": "<path>",
   "sourceFile": "<path>",
   "rawFile": "<path>",
   "manifestFile": "<path>",
   "documentId": "doc_123",
-  "eventId": "evt_123",
-  "lookupId": "doc_123"
+  "eventId": "evt_123"
 }
 ```
 
@@ -529,10 +528,8 @@ document.
 
 ```json
 {
-  "vault": "<path>",
   "mealId": "meal_123",
   "eventId": "evt_123",
-  "lookupId": "meal_123",
   "occurredAt": "2026-03-12T09:30:00-05:00",
   "photoPath": null,
   "audioPath": null,
@@ -545,10 +542,7 @@ document.
 
 ```json
 {
-  "vault": "<path>",
   "eventId": "evt_123",
-  "lookupId": "evt_123",
-  "ledgerFile": "ledger/events/2026/2026-03.jsonl",
   "created": true,
   "occurredAt": "2026-03-12T17:30:00Z",
   "kind": "activity_session",
@@ -620,7 +614,6 @@ The generic transform does not invent `externalRef` identity. Exact-artifact com
 
 ```json
 {
-  "vault": "<path>",
   "name": "Push Day A",
   "slug": "push-day-a",
   "path": "bank/workout-formats/push-day-a.md",
@@ -638,10 +631,7 @@ Saved workout formats are vault-local Markdown docs only. They store a reusable 
 
 ```json
 {
-  "vault": "<path>",
   "eventId": "evt_123",
-  "lookupId": "evt_123",
-  "ledgerFile": "ledger/events/2026/2026-03.jsonl",
   "created": true,
   "occurredAt": "2026-03-12T19:30:00Z",
   "kind": "intervention_session",
@@ -668,7 +658,6 @@ When `--include-summary` is supplied, the command summarizes the planned numeric
 
 ```json
 {
-  "vault": "<path>",
   "sourceFile": "<path>",
   "file": {
     "kind": "csv",
@@ -721,7 +710,6 @@ Source hints are advisory only. They may describe familiar export shapes, but du
 
 ```json
 {
-  "vault": "<path>",
   "summary": {
     "stream": "spo2",
     "unit": "%",
@@ -758,7 +746,6 @@ For `--profile oxygen-night`, the summary defaults to SpO2 threshold burden belo
 
 ```json
 {
-  "vault": "<path>",
   "sourceFile": "<path>",
   "timeZone": "America/New_York",
   "tsColumn": "Time",
@@ -800,7 +787,6 @@ Each entry in `imports` represents one stream-specific batch attempt. When a str
 
 ```json
 {
-  "vault": "<path>",
   "dryRun": false,
   "plan": {
     "planId": null,
@@ -830,7 +816,6 @@ The `plan.operations` values are internal core plan operation names, not public 
 
 ```json
 {
-  "vault": "<path>",
   "date": "2026-03-12",
   "lookupId": "journal:2026-03-12",
   "journalPath": "<path>",
@@ -849,7 +834,6 @@ The `plan.operations` values are internal core plan operation names, not public 
 
 ```json
 {
-  "vault": "<path>",
   "entity": {
     "id": "meal_123",
     "kind": "meal",
@@ -873,12 +857,9 @@ The `plan.operations` values are internal core plan operation names, not public 
 
 ```json
 {
-  "vault": "<path>",
   "filters": {
     "recordType": ["event"],
     "kind": "meal",
-    "status": null,
-    "stream": [],
     "experiment": "sleep-window",
     "from": "2026-03-01",
     "to": "2026-03-12",
@@ -933,7 +914,6 @@ The query text may be passed either positionally as `vault-cli search query <que
 
 ```json
 {
-  "vault": "<path>",
   "dbPath": ".runtime/projections/query-entities.sqlite",
   "exists": true,
   "schemaVersion": "murph.query-projection",
@@ -954,7 +934,6 @@ is published; `fresh` requires all three sections to match the canonical manifes
 
 ```json
 {
-  "vault": "<path>",
   "dbPath": ".runtime/projections/query-entities.sqlite",
   "exists": true,
   "schemaVersion": "murph.query-projection",
@@ -1001,7 +980,6 @@ is published; `fresh` requires all three sections to match the canonical manifes
 
 ```json
 {
-  "vault": "<path>",
   "from": "2026-03-01",
   "to": "2026-03-12",
   "experiment": "sleep-window",
