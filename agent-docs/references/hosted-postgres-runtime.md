@@ -277,6 +277,13 @@ preemption can discard partial background cold-start work in that case.
 While a system-mailbox starting fence remains, foreground rechecks after at most
 one second. Other startup waits keep the 30-second startup deadline. Expiry starts ordinary exact
 retirement proof; it does not establish stoppedness or release authority.
+A foreground start whose native readiness rejects before launch does not wait
+for that deadline: the same command enters exact retirement, and after confirmed
+stop and release it re-admits on a fresh target. Nothing preempts a foreground
+claim and no invocation exists yet, so the rejection is that command's own
+failure. A readiness deadline, a busy result, a failed preparation or launch,
+and every background start keep the deadline, because their start may still be
+in flight or deliberately cancelled by foreground priority.
 Deploy cancellation-capable Cloudflare before the Web claim change. Old Web keeps
 the startup fence until launch or expiry; old Cloudflare still retires safely but
 can wait for preparation before stopping. Existing state and RPC shapes remain
