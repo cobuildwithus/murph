@@ -569,6 +569,12 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Deletes the Apple push token, installation id, environment, and alert preference used for the member's companion app and game notifications. Browser-vault export omits the route and token.",
   },
   {
+    slug: "prisma.apple_health_reopen_push",
+    label: "Apple Health reopen reminder receipts",
+    deletion: "live-delete",
+    note: "Deletes the record of each \"Open Murph\" push sent after the phone stopped delivering Apple Health data: the time data last arrived, the schedule step, the outcome, and when. Rows hold no health values or message content.",
+  },
+  {
     slug: "prisma.device_browser_assertion_nonce",
     label: "Device browser assertion nonces",
     deletion: "live-delete",
@@ -3097,6 +3103,11 @@ async function deleteHostedAccountPrismaRows(input: {
           DELETE FROM companion_push_route AS route
           WHERE route.user_id IN (SELECT id FROM target_members)
           RETURNING 1
+        ),
+        deleted_apple_health_reopen_pushes AS (
+          DELETE FROM apple_health_reopen_push AS reopen_push
+          WHERE reopen_push.user_id IN (SELECT id FROM target_members)
+          RETURNING 1
         )
         SELECT
           (SELECT count(*) FROM deleted_mailbox_lane_counters)
@@ -3170,7 +3181,9 @@ async function deleteHostedAccountPrismaRows(input: {
           (SELECT count(*) FROM deleted_web_internal_nonces)
             AS "prisma.hosted_web_internal_request_nonce",
           (SELECT count(*) FROM deleted_companion_push_routes)
-            AS "prisma.companion_push_route"
+            AS "prisma.companion_push_route",
+          (SELECT count(*) FROM deleted_apple_health_reopen_pushes)
+            AS "prisma.apple_health_reopen_push"
       `,
     ),
   );

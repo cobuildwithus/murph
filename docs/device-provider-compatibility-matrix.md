@@ -149,6 +149,33 @@ No snapshot wire fields change, so this expansion supports Web-first and
 runner-first deploys from the current three-day-capable baseline. Older runners
 continue showing account summaries; newer runners read existing source fields.
 
+The mailbox row is the only record that an episode was already asked about.
+Mailbox retention removes its content after 30 days and keeps the row's
+identity (`assistant.notification.requested:device-delivery-stalled:v1:`), so
+an unchanged months-old episode is never asked about a second time. The check
+is evaluated on wall time, not on the wake's own timestamp.
+
+Apple Health also has a push, on its own clock. The phone uploads only while
+the Murph app is alive, so a member whose app was quit produces no runtime
+wake for the text check to ride on. A Vercel cron runs
+`apps/web/src/lib/device-sync/apple-health-reopen-push.ts` every 15 minutes:
+when a member's newest Apple Health delivery is at least 24 hours old and the
+app has made no contact for 24 hours, it sends the app's own local notice
+("Open Murph") to the registered push route. The schedule is days 1, 2, 3, 10,
+17 and 24 of the silence, then nothing until data arrives; a silence first seen
+later than that gets the one remaining step. It sends at most once per member
+per 24 hours, between 9am and 9pm in the member's game-profile time zone (17:00
+to 19:00 UTC when no zone is known), and only with alerts allowed, the app's
+"Reopen reminders" switch not reported off, hosted access, health-data consent
+not revoked, and the text check-in not stopped (a "wait N days" choice delays
+the first push to day N). Each push is one `apple_health_reopen_push` row keyed
+by member, episode and step. Never-delivered sources are left out: a connect
+that never streamed is a setup failure, and reopening the app does not fix it.
+It reads silence through the text check's own predicate
+(`isSourceRecoveryNoticeEligible`: a daily catalog source, connected, delivered
+before) and differs only in the wait, a day instead of three.
+The push observes only; it changes no source status and wakes no runner.
+
 Recovering a dead push carrier cannot be done by pulling, because there is
 nothing to pull and a data refresh cannot make the provider push again. The only
 lever short of member re-authorization is asking the aggregator to re-run its

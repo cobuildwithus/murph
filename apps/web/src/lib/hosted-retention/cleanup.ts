@@ -1,6 +1,10 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { hostedConnectedAppStartedIntentOwnerCutoff } from "../connected-apps/connect-intent-ownership";
+import {
+  HOSTED_SOURCE_DELIVERY_STALL_MAILBOX_DEDUPE_PREFIX,
+  HOSTED_SOURCE_DELIVERY_STALL_MAILBOX_KIND,
+} from "../device-sync/source-delivery-stall-episode";
 import { hostedRuntimeMemberEligibleSql } from "../hosted-onboarding/member-access";
 import { getPrisma } from "../prisma";
 import { HOSTED_OPERATOR_TASK_RESULT_RETENTION_MS } from "../hosted-ops/operator-task-retention";
@@ -422,7 +426,10 @@ export async function retireExpiredMailboxContent(input: {
   // constraint was installed, so retention deletes that already-handled legacy
   // tombstone directly instead of inventing a causal sequence. Both content
   // retirement and later structural pruning are bounded so an hourly cleanup
-  // cannot monopolize the production pool while a backlog drains.
+  // cannot monopolize the production pool while a backlog drains. A wearable
+  // no-data check-in keeps its retired row: that row's dedupe key is the only
+  // record that its silence episode was already asked about, and pruning it
+  // let the same months-old episode be asked about again every 30 days.
   return await runMailboxRetentionBatches(async () => {
     const rows = await input.prisma.$queryRaw<
       Array<{
@@ -583,6 +590,10 @@ export async function retireExpiredMailboxContent(input: {
         WHERE item."content_retired_at" IS NOT NULL
           AND item."retention_disposition" IS NULL
           AND item."created_at" < ${structuralCutoff}
+          AND NOT (
+            item."kind" = ${HOSTED_SOURCE_DELIVERY_STALL_MAILBOX_KIND}
+            AND starts_with(item."dedupe_key", ${HOSTED_SOURCE_DELIVERY_STALL_MAILBOX_DEDUPE_PREFIX})
+          )
           AND NOT EXISTS (
             SELECT 1
             FROM "hosted_member" AS member

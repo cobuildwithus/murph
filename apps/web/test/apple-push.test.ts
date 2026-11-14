@@ -63,6 +63,18 @@ describe("Apple push sender", () => {
     expect(JSON.parse(send.mock.calls[1]![0].body).aps).toEqual({ "content-available": 1 });
   });
 
+  it("adds a thread and interruption level only when requested on an alert", async () => {
+    const send = transport();
+    const options = { threadId: "murph.sync-interruption-reminder", interruptionLevel: "time-sensitive" } as const;
+    await sendApplePush({ ...request, ...options, message: { kind: "alert", title: "Open Murph", body: "Reopen Murph." } }, { credentials, transport: send });
+    expect(JSON.parse(send.mock.calls[0]![0].body).aps).toEqual({
+      alert: { body: "Reopen Murph.", title: "Open Murph" }, "content-available": 1,
+      "thread-id": "murph.sync-interruption-reminder", "interruption-level": "time-sensitive",
+    });
+    await sendApplePush({ ...request, ...options }, { credentials, transport: send });
+    expect(JSON.parse(send.mock.calls[1]![0].body).aps).toEqual({ "content-available": 1 });
+  });
+
   it("reuses one provider token instead of re-signing every push", async () => {
     const send = transport();
     const now = Date.parse("2026-10-05T13:00:00.000Z");

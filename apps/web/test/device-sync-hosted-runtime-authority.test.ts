@@ -1250,6 +1250,27 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     });
   });
 
+  it("measures silence on wall time, not the wake's own timestamp", async () => {
+    createAuthorityHarness({
+      connectionSources: [{
+        displayName: "Garmin",
+        id: "dcs_abcdefghijklmnop",
+        lastDataAt: "2026-08-01T00:00:00.000Z",
+        sourceInstanceKey: "junction:garmin",
+        sourceProviderSlug: "garmin",
+      }],
+    });
+
+    // The wake was stamped one day into the silence and applied long after.
+    const occurredAt = "2026-08-02T00:00:00.000Z";
+    await applyRuntimeUpdates([{ connectionId: "conn_123" }], occurredAt);
+
+    const [scheduled] = mocks.scheduleHostedSourceDeliveryStallNotices.mock.calls.at(-1)!;
+    expect(scheduled.candidates).toHaveLength(1);
+    expect(scheduled.now).not.toBe(occurredAt);
+    expect(Math.abs(Date.parse(scheduled.now) - Date.now())).toBeLessThan(60_000);
+  });
+
   it("bounds an N=100 no-op apply to one set read and 100 serial transactions", async () => {
     const harness = createRuntimeApplyFanoutHarness();
 

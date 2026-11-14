@@ -11,6 +11,8 @@ export const companionPushRouteRegistrationSchema = z.object({
   alertsAllowed: z.boolean(),
   environment: z.enum(["development", "production"]),
   installationId: z.string().uuid(),
+  // The phone's "Reopen reminders" switch. Builds that predate it send nothing, which reads as on.
+  reopenReminders: z.boolean().optional(),
   token: z.string().regex(/^[a-f0-9]{64,200}$/u),
   topic: z.enum(APPLE_PUSH_TOPICS),
 }).strict();
@@ -31,8 +33,10 @@ export async function registerCompanionPushRoute(memberId: string, registration:
       && current.topic === registration.topic;
     // A wearable-only registration cannot move another installation's game
     // enrollment. Same-address permission refreshes keep its session binding.
+    // An unreported switch keeps what this same phone last said; a new phone starts unknown.
     const data = { ...registration, gameSessionId: sameAddress ? current.gameSessionId : null,
-      gameReminders: sameAddress ? current.gameReminders : false, updatedAt: new Date() };
+      gameReminders: sameAddress ? current.gameReminders : false,
+      reopenReminders: registration.reopenReminders ?? (sameAddress ? current.reopenReminders : null), updatedAt: new Date() };
     await tx.companionPushRoute.upsert({ where: { userId: memberId }, create: { userId: memberId, ...data }, update: data });
   }, transactionOptions);
 }

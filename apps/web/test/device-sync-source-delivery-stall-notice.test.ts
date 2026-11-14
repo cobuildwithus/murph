@@ -59,6 +59,8 @@ const BASE_INPUT = {
 
 const MAILBOX_ITEM = {
   consumedAt: null,
+  payloadInlineCiphertext: "encrypted-notice",
+  payloadRef: null,
   id: "mailbox-1",
   kind: "assistant.notification.requested",
   lane: "system",
@@ -379,6 +381,25 @@ describe("hosted source delivery-stall notice materialization", () => {
     );
     expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(consumedAt ? 0 : 1);
+  });
+
+  it("asks once per episode after retention has retired the check-in's content", async () => {
+    const candidate = resolveHostedSourceDeliveryStallNoticeCandidate(BASE_INPUT);
+    if (!candidate) throw new Error("Expected recovery candidate");
+    // Retention removed the payload and kept the row, sent or not.
+    const retired = { ...MAILBOX_ITEM, payloadInlineCiphertext: null };
+    const later = { candidate, now: "2026-10-30T00:00:00.000Z", userId: "member-1" };
+
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue(retired);
+    await materializeHostedSourceDeliveryStallNotice(later);
+    expect(mocks.runWithPreparedHostedMailboxItemAppendCrypto).not.toHaveBeenCalled();
+
+    // Retired between the first lookup and the locked one.
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValueOnce(MAILBOX_ITEM).mockResolvedValueOnce(retired);
+    await materializeHostedSourceDeliveryStallNotice(later);
+
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
   it("rejects a queued episode identity belonging to another mailbox kind", async () => {

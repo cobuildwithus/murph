@@ -14,7 +14,9 @@ export const POST = withJsonError(async (request: Request) => {
   const memberId = auth.member.id;
   const parsed = registrationSchema.safeParse(await readJsonObject(request, { limitBytes: 1_024 }));
   if (!parsed.success) throw invalidGameRequest("Invalid notification registration.");
-  const data = { ...parsed.data, gameReminders: parsed.data.gameReminders === true, gameSessionId: auth.sessionId, updatedAt: new Date() };
+  // The build that now holds the route speaks for the switch; one that predates it leaves it unknown.
+  const data = { ...parsed.data, gameReminders: parsed.data.gameReminders === true, reopenReminders: parsed.data.reopenReminders ?? null,
+    gameSessionId: auth.sessionId, updatedAt: new Date() };
   await getPrisma().$transaction(async (tx) => {
     await assertGameMemberAuthCurrentTx(auth, tx);
     await tx.companionPushRoute.upsert({

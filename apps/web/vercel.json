@@ -25,6 +25,10 @@
       "schedule": "*/5 * * * *"
     },
     {
+      "path": "/api/internal/device-sync/apple-health-reopen-push/cron",
+      "schedule": "7-59/15 * * * *"
+    },
+    {
       "path": "/api/internal/hosted-runtime/latency-alert/cron",
       "schedule": "*/5 * * * *"
     },

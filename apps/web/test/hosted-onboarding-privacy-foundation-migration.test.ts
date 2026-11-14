@@ -67,6 +67,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
   ],
   HostedMember: [
     "authRecords HostedAuthRecord[]",
+    "appleHealthReopenPushes AppleHealthReopenPush[]",
     "id String @id",
     'assistantModelPreference String? @map("assistant_model_preference")',
     'assistantPersona String? @map("assistant_persona")',
