@@ -6,6 +6,8 @@ export const JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG = "google_health";
 export interface DeviceConnectSource {
   readonly connectSourceId: string;
   readonly label: string;
+  /** Whether an ordinarily connected member is expected to deliver data daily. */
+  readonly expectsDailyData: boolean;
   readonly routes: readonly DeviceConnectRoute[];
 }
 
@@ -42,76 +44,91 @@ export const DEVICE_CONNECT_SOURCES = Object.freeze([
   {
     connectSourceId: "whoop",
     label: "WHOOP",
+    expectsDailyData: true,
     routes: [junctionLinkRoute("whoop_v2", { connectTarget: "whoop" })],
   },
   {
     connectSourceId: "mapmyfitness",
     label: "MapMyFitness",
+    expectsDailyData: false,
     routes: [junctionLinkRoute("map_my_fitness")],
   },
   {
     connectSourceId: "ultrahuman",
     label: "Ultrahuman",
+    expectsDailyData: true,
     routes: [junctionLinkRoute("ultrahuman")],
   },
   {
     connectSourceId: "dexcom-g6-and-older",
     label: "Dexcom (G6 and older)",
+    expectsDailyData: false,
     routes: [junctionLinkRoute("dexcom")],
   },
   {
     connectSourceId: "renpho",
     label: "Renpho",
+    expectsDailyData: false,
     routes: [junctionLinkRoute("renpho")],
   },
   {
     connectSourceId: "runkeeper",
     label: "Runkeeper",
+    expectsDailyData: false,
     routes: [junctionLinkRoute("runkeeper")],
   },
   {
     connectSourceId: "samsung-health",
     label: "Samsung Health",
+    expectsDailyData: true,
     routes: [junctionSdkRoute("samsung_health")],
   },
   {
     connectSourceId: "tandem-source",
     label: "Tandem Source",
+    expectsDailyData: false,
     routes: [junctionLinkRoute("tandem_source")],
   },
   {
     connectSourceId: "beurer",
     label: "Beurer",
+    expectsDailyData: false,
     routes: [junctionLinkRoute("beurer_api")],
   },
   {
     connectSourceId: "strava",
     label: "Strava",
+    expectsDailyData: false,
     routes: [junctionLinkRoute("strava")],
   },
   {
     connectSourceId: "freestyle-libre-ble",
     label: "Freestyle Libre BLE",
+    expectsDailyData: false,
     routes: [junctionSdkRoute("freestyle_libre_ble")],
   },
   {
     connectSourceId: "omron",
     label: "Omron",
+    expectsDailyData: false,
     routes: [junctionLinkRoute("omron")],
   },
   {
     connectSourceId: "accuchek",
     label: "Accu-Chek",
+    expectsDailyData: false,
     routes: [junctionSdkRoute("accuchek_ble")],
   },
   {
     connectSourceId: "eight-sleep",
     label: "Eight Sleep",
+    expectsDailyData: true,
     routes: [junctionLinkRoute("eight_sleep")],
   },
   {
     connectSourceId: "fitbit",
     label: "Fitbit",
+    expectsDailyData: true,
     routes: [
       junctionLinkRoute(JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG, {
         connectTarget: "fitbit",
@@ -127,96 +144,115 @@ export const DEVICE_CONNECT_SOURCES = Object.freeze([
   {
     connectSourceId: "freestyle-libre",
     label: "Freestyle Libre",
+    expectsDailyData: false,
     routes: [junctionLinkRoute("freestyle_libre")],
   },
   {
     connectSourceId: "garmin",
     label: "Garmin",
+    expectsDailyData: true,
     routes: [junctionLinkRoute("garmin")],
   },
   {
     connectSourceId: "hammerhead",
     label: "Hammerhead",
+    expectsDailyData: false,
     routes: [junctionLinkRoute("hammerhead")],
   },
   {
     connectSourceId: "ihealth",
     label: "iHealth",
+    expectsDailyData: false,
     routes: [junctionLinkRoute("ihealth")],
   },
   {
     connectSourceId: "oura",
     label: "Oura",
+    expectsDailyData: true,
     routes: [junctionLinkRoute("oura")],
   },
   {
     connectSourceId: "peloton",
     label: "Peloton",
+    expectsDailyData: false,
     routes: [junctionLinkRoute("peloton")],
   },
   {
     connectSourceId: "wahoo",
     label: "Wahoo",
+    expectsDailyData: false,
     routes: [junctionLinkRoute("wahoo")],
   },
   {
     connectSourceId: "contour-ble",
     label: "Contour BLE",
+    expectsDailyData: false,
     routes: [junctionSdkRoute("contour_ble")],
   },
   {
     connectSourceId: "withings",
     label: "Withings",
+    expectsDailyData: false,
     routes: [junctionLinkRoute("withings")],
   },
   {
     connectSourceId: "google-fit",
     label: "Google Fit",
+    expectsDailyData: true,
     routes: [junctionLinkRoute("google_fit")],
   },
   {
     connectSourceId: "zwift",
     label: "Zwift",
+    expectsDailyData: false,
     routes: [junctionLinkRoute("zwift")],
   },
   {
     connectSourceId: "onetouch",
     label: "OneTouch",
+    expectsDailyData: false,
     routes: [junctionSdkRoute("onetouch_ble")],
   },
   {
     connectSourceId: "abbott-libreview",
     label: "Abbott LibreView",
+    expectsDailyData: false,
     routes: [junctionLinkRoute("abbott_libreview")],
   },
   {
     connectSourceId: "dexcom",
     label: "Dexcom",
+    expectsDailyData: false,
     routes: [junctionLinkRoute("dexcom_v3")],
   },
   {
     connectSourceId: "kardia",
     label: "Kardia",
+    expectsDailyData: false,
     routes: [junctionLinkRoute("kardia")],
   },
   {
     connectSourceId: "cronometer",
     label: "Cronometer",
+    expectsDailyData: false,
     routes: [junctionLinkRoute("cronometer")],
   },
   {
     connectSourceId: "polar",
     label: "Polar",
+    expectsDailyData: true,
     routes: [junctionLinkRoute("polar")],
   },
   {
     connectSourceId: "apple-health",
     label: "Apple Health",
+    expectsDailyData: true,
     routes: [junctionSdkRoute("apple_health_kit", { aliases: ["apple_health", "apple_healthkit"] })],
   },
   {
     connectSourceId: "zepp",
     label: "Zepp / Amazfit",
+    expectsDailyData: true,
     routes: [
       unavailableRoute(
         "Zepp and Amazfit sync through Apple Health in the Murph iOS app.",
@@ -226,6 +262,7 @@ export const DEVICE_CONNECT_SOURCES = Object.freeze([
   {
     connectSourceId: "xiaomi-mi-fitness",
     label: "Xiaomi / Mi Fitness",
+    expectsDailyData: true,
     routes: [
       unavailableRoute(
         "Xiaomi and Mi Fitness devices sync supported data through Apple Health in the Murph iOS app.",
@@ -235,6 +272,7 @@ export const DEVICE_CONNECT_SOURCES = Object.freeze([
   {
     connectSourceId: "ringconn",
     label: "RingConn",
+    expectsDailyData: true,
     routes: [
       unavailableRoute(
         "RingConn devices sync supported data through Apple Health in the Murph iOS app.",
@@ -244,6 +282,7 @@ export const DEVICE_CONNECT_SOURCES = Object.freeze([
   {
     connectSourceId: "coros",
     label: "COROS",
+    expectsDailyData: true,
     routes: [
       unavailableRoute(
         "COROS devices sync supported data through Apple Health in the Murph iOS app.",
@@ -253,6 +292,7 @@ export const DEVICE_CONNECT_SOURCES = Object.freeze([
   {
     connectSourceId: "suunto",
     label: "Suunto",
+    expectsDailyData: true,
     routes: [
       unavailableRoute(
         "Suunto devices sync supported data through Apple Health in the Murph iOS app.",
@@ -262,6 +302,7 @@ export const DEVICE_CONNECT_SOURCES = Object.freeze([
   {
     connectSourceId: "huawei-health",
     label: "Huawei Health",
+    expectsDailyData: true,
     routes: [
       unavailableRoute(
         "Supported Huawei Health data can sync through Apple Health in the Murph iOS app, depending on device, region, and app version.",
@@ -271,6 +312,7 @@ export const DEVICE_CONNECT_SOURCES = Object.freeze([
   {
     connectSourceId: "health-connect",
     label: "Health Connect",
+    expectsDailyData: true,
     routes: [unavailableRoute("Health Connect is a mobile/local device flow, not hosted Junction Link.")],
   },
 ] as const satisfies readonly DeviceConnectSource[]);

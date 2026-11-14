@@ -85,6 +85,35 @@ describe('hosted device dynamic tool recovery', () => {
       .toBe('invalid-device-arguments')
   })
 
+  it('exposes only source delivery facts and omits empty source values', async () => {
+    const account = { accountId: 'synthetic-account', displayName: null,
+      lastErrorCode: null, lastSyncCompletedAt: null, provider: 'junction', status: 'active' as const }
+    const result = await executeDeviceDynamicTool({
+      deviceTool: { request: async () => ({ action: 'list_accounts', provider: null, sourceProvider: null,
+        accounts: [account, { ...account, sources: [] }, { ...account, sources: [{
+          sourceProvider: 'google_health', status: 'connected',
+          firstSeenAt: '2030-01-08T12:00:00.000Z', lastDataAt: null,
+        }, {
+          sourceProvider: 'fitbit', status: 'connected',
+          firstSeenAt: '2030-01-01T00:00:00.000Z', lastDataAt: '2030-01-02T00:00:00.000Z',
+        }] }],
+      }) },
+      request: { kind: 'device', request: { action: 'list_accounts' } },
+    })
+    expect(result.rpcResult.success).toBe(true)
+    const payload = JSON.parse(result.rpcResult.contentItems[0]!.text!)
+    expect(payload.accounts).toEqual([account, account, { ...account, sources: [{
+      sourceProvider: 'google_health', status: 'connected', firstSeenAt: '2030-01-08T12:00:00.000Z',
+    }, {
+      sourceProvider: 'fitbit', status: 'connected', firstSeenAt: '2030-01-01T00:00:00.000Z',
+      lastDataAt: '2030-01-02T00:00:00.000Z',
+    }] }])
+    expect(MURPH_DEVICE_TOOL.description).toContain('server validates eligibility')
+    expect(MURPH_DEVICE_TOOL.description).not.toContain('garmin, apple_health_kit, or whoop_v2')
+    expect(MURPH_DEVICE_TOOL.description).toContain('history is still importing')
+    expect(MURPH_DEVICE_TOOL.description).toContain('Missing data does not show that a source is disconnected')
+  })
+
   it('returns only the called action\'s argument issues', async () => {
     const feedback = async (args: unknown) => {
       const request = readDeviceDynamicToolRequest({ tool: 'device', arguments: args })

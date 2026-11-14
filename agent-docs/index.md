@@ -2149,3 +2149,9 @@ Game reminder writes at maximum cardinality: [execution plan](exec-plans/complet
 [Reply-only prompt-cache retention](exec-plans/completed/2026-11-12-reply-cache-retention.md)
 tracks the native opt-in and accounting proof. The current rollout contract is
 owned by [Cloudflare deployment](../apps/cloudflare/DEPLOY.md#native-prompt-cache-retention).
+
+Wearable source silence visibility is derived from the connect catalog; the
+[provider compatibility matrix](../docs/device-provider-compatibility-matrix.md)
+owns daily-source notices and per-source tool visibility. The
+[execution plan](exec-plans/active/2026-11-14-source-silence-visibility.md) records
+classification, diagnostics and deploy compatibility proof.

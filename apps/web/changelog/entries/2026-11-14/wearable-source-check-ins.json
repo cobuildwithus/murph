@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-14",
+  "order": 100,
+  "item": {
+    "id": "wearable-source-check-ins",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "A check-in when wearable data goes quiet",
+    "summary": "Murph now checks in when more daily wearable sources stop sending data, including Fitbit, Oura and Ultrahuman.",
+    "details": "After a source has delivered data, Murph can send one private iMessage check-in after five quiet days, or three for Apple Health, if you have messaged recently. You can ask to wait 5–30 days or stop these check-ins while keeping syncing on. Workout apps, scales and glucose systems are excluded.",
+    "relevanceTags": ["wearables", "reliability"],
+    "sourcePullRequests": []
+  }
+}

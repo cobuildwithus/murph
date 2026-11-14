@@ -79,11 +79,6 @@ export async function materializeHostedSourceDeliveryStallNotice(input: {
     return;
   }
   const notificationKey = buildHostedSourceDeliveryStallNoticeKey(input.candidate);
-  const messageKey = input.candidate.sourceProviderSlug === "apple_health_kit"
-    ? "linq.apple_health_delivery_stalled"
-    : input.candidate.sourceProviderSlug === "whoop_v2"
-    ? "linq.device_connection_check"
-    : "linq.device_delivery_stalled";
   const dedupeKey = `assistant.notification.requested:${notificationKey}`;
   const existing = await readHostedMailboxItemByDedupeKey({
     dedupeKey,
@@ -93,6 +88,16 @@ export async function materializeHostedSourceDeliveryStallNotice(input: {
   if (existing && existing.consumedAt !== null) {
     return;
   }
+  const checkIn = renderUserFacingMessage({
+    context: {
+      companionAppName: policy.companionAppName ?? "",
+      deviceDisplayName: policy.deviceDisplayName ?? "",
+      providerDisplayName: policy.providerDisplayName,
+    },
+    key: policy.messageKey,
+    seed: notificationKey,
+  }).text;
+  const text = `${checkIn} If this gap is expected, tell me to wait 5–30 days or stop these check-ins.`;
   const appended = await runWithPreparedHostedMailboxItemAppendCrypto({
     append: (prepared) => prisma.$transaction(async (tx) => {
       // Serialize first materialization and retries on the existing episode
@@ -176,16 +181,6 @@ export async function materializeHostedSourceDeliveryStallNotice(input: {
         // timestamp, copy, or route would produce a false dedupe conflict.
         return { item: alreadyQueued };
       }
-      const checkIn = renderUserFacingMessage({
-        context: {
-          companionAppName: policy.companionAppName,
-          deviceDisplayName: policy.deviceDisplayName,
-          providerDisplayName: policy.providerDisplayName,
-        },
-        key: messageKey,
-        seed: notificationKey,
-      }).text;
-      const text = `${checkIn} If this gap is expected, tell me to wait 5–30 days or stop these check-ins.`;
       return appendHostedMailboxEnvelopeWithPreparedCryptoTx({
         envelope: buildHostedExecutionAssistantNotificationRequestedWake({
           eventId: dedupeKey,
