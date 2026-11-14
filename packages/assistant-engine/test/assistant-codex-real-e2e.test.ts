@@ -20476,6 +20476,53 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
   }, 720_000)
 })
 
+// A tool result past the model's output limit is shown with its middle cut out.
+// The claim: the model still answers from every record, not only the ones it was shown.
+describeRealCodex('real Codex oversized tool result e2e', () => {
+  it('answers from every record of a connected-app result larger than the model is shown', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-oversized-result-e2e-'))
+    // Opaque codes: none can be guessed from its neighbours, and each must be paired with its own order.
+    const codes = Array.from({ length: 24 }, (_, index) => `PICKUP-${createHash('sha256').update(`synthetic-order-${index}`).digest('hex').slice(0, 6).toUpperCase()}`)
+    const filler = 'Thank you for shopping at Synthetic Depot. Your order is being prepared by our team and will be ready soon. '
+    const messages = codes.map((code, index) => ({ id: `mail_synthetic_${index + 1}`, subject: `Order ${index + 1} is ready`,
+      from: 'orders@synthetic-depot.example', body: `${filler.repeat(13)}Your pickup code is ${code}. ${filler.repeat(13)}` }))
+    const executes: unknown[] = []
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        allowFinishWithoutReply: false, approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined, codexHome: config.codexHome,
+        abortSignal: AbortSignal.timeout(600_000),
+        dynamicTools: [MURPH_CONNECTED_APPS_MANAGE_TOOL, MURPH_CONNECTED_APPS_SEARCH_TOOL, MURPH_CONNECTED_APPS_EXECUTE_TOOL],
+        env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot() },
+        hostedToolContext: {
+          computerToolsAvailable: false,
+          connectedApps: { request: async request => {
+            if (request.operation === 'manage') return { result: { accounts: [{ alias: 'Personal', id: 'gmail_synthetic', status: 'ACTIVE', toolkit: 'gmail' }] } }
+            if (request.operation === 'search') return { result: { success: true, tool_schemas: { GMAIL_FETCH_EMAILS: {
+              description: 'Fetch emails matching a query, with their full bodies.',
+              input_schema: { type: 'object', additionalProperties: false, properties: { query: { type: 'string' }, max_results: { type: 'integer' } }, required: ['query'] } } } } }
+            if (request.operation !== 'execute') throw new Error('Unexpected provider operation.')
+            executes.push(request.input.arguments)
+            return { result: { messages } }
+          } },
+          currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+          sendVaultFile: async () => { throw new Error('Unexpected file send.') }, vaultFileSendAvailable: false,
+        },
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: 'I have 24 order emails from Synthetic Depot in my Gmail. Read them and list the pickup code from every one, numbered by order.',
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const missing = codes.flatMap((code, index) => new RegExp(`(^|\\D)${index + 1}\\D[^\\n]*${code}`, 'mu').test(result.finalMessage) ? [] : [index + 1])
+      process.stdout.write(`[oversized-result-proof] ${JSON.stringify({ model: config.model, resultBytes: Buffer.byteLength(JSON.stringify({ messages })), executes: executes.length, missing })}\n`)
+      expect(missing).toEqual([])
+    } finally {
+      await removeRealCodexTemporaryPath(workingDirectory)
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 720_000)
+})
+
 describeRealCodex('real Codex lodging destination evidence e2e', () => {
   it.each(['explicit destination', 'unknown destination', 'repair imported destination'] as const)(
     'grounds lodging geography in the full confirmation: %s', async (scenario) => {
@@ -48863,8 +48910,11 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
       const media = readCapabilityRoutingActions(events).flatMap(action => action.kind === 'dynamic' && ['generate_image', 'generate_song', 'write_recap'].includes(action.tool) ? [action] : []);
       const actions = readCapabilityRoutingActions(events);
       const proof = { model: config.model, saved: providers.saved.length, providerCalls: providers.providerCalls,
+        workingFilesLeft: existsSync(path.join(vault, 'tmp/recap')),
         readGame: actions.flatMap(action => action.kind === 'dynamic' && action.tool === 'read_game' ? [{ bytes: Buffer.byteLength(action.output) }] : []),
         commands: actions.flatMap(action => action.kind === 'command' ? [action.command.replace(/[a-f0-9]{32,64}/gu, '<hex>').slice(0, 140)] : []).slice(0, 20),
+        failedCommands: actions.flatMap(action => action.kind === 'command' && !action.ok
+          ? [{ command: action.command.replace(/[a-f0-9]{32,64}/gu, '<hex>').slice(0, 400), output: action.output.replace(/[a-f0-9]{32,64}/gu, '<hex>').slice(-300) }] : []),
         calls: media.map(call => ({ tool: call.tool, success: call.success, output: call.success ? '' : call.output.slice(0, 300),
           keys: Object.keys(call.argumentsValue).sort(),
           ...(call.tool === 'generate_image' ? { references: (Array.isArray(call.argumentsValue.referenceImageRefs) ? call.argumentsValue.referenceImageRefs : []).map(ref =>
@@ -48876,6 +48926,8 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
       expect(proof.saved).toBe(1);
       // What read_game returns fits in what the model is shown, so nothing is cut out of it.
       for (const read of proof.readGame) expect(read.bytes).toBeLessThan(10_000 * 4);
+      // Photos, media and the chat copy are gone when the turn ends, so the room's workspace never saves them.
+      expect(proof.workingFilesLeft).toBe(false);
     }
   }, 900_000)
 

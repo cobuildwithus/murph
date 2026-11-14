@@ -1,10 +1,10 @@
-import { readRecapFile, readRecapDraftFile, saveRecapMediaFile } from './recap-files.js'
+import { readRecapFile, readRecapDraftFile, removeRecapWorkspace, saveRecapMediaFile } from './recap-files.js'
 import type { SongWordTimestamp } from '@murphai/contracts/recap-show'
 import { resolveElevenLabsApiKey } from '@murphai/operator-config/elevenlabs-runtime'
 import type { GeneratedMediaFileRuntime } from '../assistant-codex/generated-media-file.js'
 import type { GenerateImageToolArgs } from '../assistant-codex/generate-image-tool.js'
 import type { GenerateSongToolArgs } from '../assistant-codex/generate-voice-memo-tool.js'
-import { fetchRecapReference, materializeRecapWorkspace, recapReferenceId } from './recap-workspace.js'
+import { fetchRecapReference, materializeRecapWorkspace, recapReferenceId, RecapReferenceRefusal } from './recap-workspace.js'
 import type { ConversationPollTool } from "@murphai/hosted-execution/conversation-polls";
 import { createHash } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
@@ -216,6 +216,8 @@ export interface AssistantHostedToolContext {
   currentGameRecapScope?(): NonNullable<AssistantHostedExecutionContext['gameRecapScope']> | null
   prepareRecapMedia?(request: { kind: 'image'; args: GenerateImageToolArgs } | { kind: 'song'; args: GenerateSongToolArgs }, fetchImpl: typeof fetch): Promise<GeneratedMediaFileRuntime>
   prepareGameRecapInputs?(material: unknown): Promise<unknown>
+  /** Remove every recap working file from the workspace, so none is saved with it. */
+  discardGameRecapWorkspace?(): Promise<void>
   readGameRecapDraft?(draftPath: string): Promise<unknown>
   readGameRecapMedia?(file: string): Promise<{ bytes: string; referenceIds: string[]; mediaType: 'image/jpeg' | 'audio/mpeg'; wordsTimestamps?: SongWordTimestamp[] }>
   currentGameMissedCheckInScope?(): NonNullable<AssistantHostedExecutionContext['gameMissedCheckInScope']> | null
@@ -659,7 +661,7 @@ export function createAssistantHostedToolContext(input: {
       if (!scope?.show || !workspace || !tool) throw new Error('Read recap material first.')
       const refs = request.kind === 'image' ? request.args.referenceImageRefs ?? [] : []
       const unknown = refs.filter(ref => !recapReferenceId(workspace.material, ref))
-      if (unknown.length) throw new Error(`Nothing was generated and no media request was used. referenceImageRefs takes the path of a photo listed under references in game.json. Not one of them: ${unknown.map(ref => JSON.stringify(ref.slice(0, 120))).join(', ')}.`)
+      if (unknown.length) throw new RecapReferenceRefusal(workspace.material, unknown)
       const referenceIds = refs.map(ref => recapReferenceId(workspace.material, ref)!)
       return {
         elevenLabsApiKey: resolveElevenLabsApiKey(input.messageInput.turnEnvironment?.env ?? process.env) ?? undefined,
@@ -676,6 +678,11 @@ export function createAssistantHostedToolContext(input: {
           return file
         },
       }
+    },
+    discardGameRecapWorkspace: async () => {
+      if (!executionContext?.gameRecapScope?.show) return
+      recapWorkspace = null
+      await removeRecapWorkspace(input.messageInput.vault)
     },
     prepareGameRecapInputs: async material => {
       const scope = executionContext?.gameRecapScope

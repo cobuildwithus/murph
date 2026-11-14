@@ -182,6 +182,7 @@ import {
   scoreGroupChallengeJson,
 } from '../assistant/group-challenge-scorecard-schema.js'
 import type { AssistantRuntimeIssueInput } from '../assistant/issue-reporting.js'
+import { RecapReferenceRefusal } from '../assistant/recap-workspace.js'
 import {
   createAssistantHostedDeviceActivityRequestKey,
   createAssistantHostedScheduledRequestKey,
@@ -8882,6 +8883,10 @@ function recapMediaPreparer(input: ExecuteMurphDynamicToolRequestInput) {
   return context?.currentGameRecapScope?.()?.show ? context.prepareRecapMedia : undefined
 }
 
-function recapMediaToolFailure(error: unknown) {
+function recapMediaToolFailure(error: unknown): MurphDynamicToolExecutionResult {
+  // A reference the recap does not have is the model's input, not a backend failure.
+  if (error instanceof RecapReferenceRefusal) {
+    return { ...toolTextResult(false, error.message), failureDiagnostic: { ...toolFailureDiagnostic('invalid_input'), recapRefusedReferences: error.shapes } }
+  }
   return toolTextResult(false, error instanceof Error ? error.message : 'Media generation failed.', 'handler_exception', error)
 }

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
-import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import sharp from 'sharp'
@@ -7,7 +8,7 @@ import * as z from '@murphai/contracts/zod-runtime'
 import { afterEach, expect, test, vi } from 'vitest'
 import { executeGenerateImageTool } from '../src/assistant-codex/generate-image-tool.ts'
 import { executeGenerateSongTool } from '../src/assistant-codex/generate-voice-memo-tool.ts'
-import { readRecapFile, saveRecapMediaFile } from '../src/assistant/recap-files.ts'
+import { readRecapFile, removeRecapWorkspace, saveRecapMediaFile } from '../src/assistant/recap-files.ts'
 import { createAssistantHostedToolContext } from '../src/assistant/hosted-tool-context.ts'
 import { resolveAssistantSession } from '../src/assistant/store.ts'
 import { parseGenerateSongArguments } from '../src/assistant-codex/dynamic-tools/generate-song.ts'
@@ -157,6 +158,8 @@ test('a scene names its references by photo path or id, and anything else is ref
   const args = { outputFormat: 'jpeg' as const, prompt: 'Synthetic paper theatre.', alt: null, quality: 'high' as const, size: '1024x1536' as const }
   const unknownRefs = ['skill-assets/murph-character-sheet-v1.png', 'c'.repeat(64), 'x'.repeat(200)]
   await expect(context.prepareRecapMedia!({ kind: 'image', args: { ...args, referenceImageRefs: [photoPath, ...unknownRefs] } }, fetchImpl))
+    .rejects.toMatchObject({ shapes: ['skill_asset', 'unlisted_reference', 'other'] })
+  await expect(context.prepareRecapMedia!({ kind: 'image', args: { ...args, referenceImageRefs: [photoPath, ...unknownRefs] } }, fetchImpl))
     .rejects.toThrow(`Nothing was generated and no media request was used. referenceImageRefs takes the path of a photo listed under references in game.json. Not one of them: "skill-assets/murph-character-sheet-v1.png", "${'c'.repeat(64)}", "${'x'.repeat(120)}".`)
   expect(request).not.toHaveBeenCalled()
   expect(fetchImpl).not.toHaveBeenCalled()
@@ -185,4 +188,22 @@ test('explicit lyrics guard conflicting modes and propagate cancellation without
     fileRuntime: { fetchImpl, save, resolveReferences: async () => [] } })).rejects.toBe(reason)
   expect(save).not.toHaveBeenCalled()
   expect(fetchImpl).not.toHaveBeenCalled()
+})
+
+test('removing the recap workspace takes every recap directory and never follows a symlinked parent', async () => {
+  const root = await vault()
+  await mkdir(path.join(root, 'tmp/recap/earlier/refs'), { recursive: true })
+  await writeFile(path.join(root, 'tmp/recap/earlier/refs/photo.jpg'), 'synthetic')
+  await writeFile(path.join(root, 'tmp/keep.txt'), 'synthetic')
+  await removeRecapWorkspace(root)
+  expect(existsSync(path.join(root, 'tmp/recap'))).toBe(false)
+  expect(existsSync(path.join(root, 'tmp/keep.txt'))).toBe(true)
+  await removeRecapWorkspace(root)
+
+  const outside = await vault(), linked = await vault()
+  await mkdir(path.join(outside, 'recap'))
+  await writeFile(path.join(outside, 'recap/not-ours.txt'), 'synthetic')
+  await symlink(outside, path.join(linked, 'tmp'))
+  await removeRecapWorkspace(linked)
+  expect(existsSync(path.join(outside, 'recap/not-ours.txt'))).toBe(true)
 })

@@ -1,8 +1,18 @@
 import { createHash } from 'node:crypto'
 import { constants } from 'node:fs'
-import { lstat, mkdir, open, realpath } from 'node:fs/promises'
+import { lstat, mkdir, open, realpath, rm } from 'node:fs/promises'
 import path from 'node:path'
 import { gameRecapDraftSchema } from '@murphai/contracts/recap-show'
+
+/** Holds one recap attempt's working files. Nothing in it outlives the attempt. */
+export const RECAP_WORKSPACE_ROOT = 'tmp/recap'
+
+/** The model can write in the vault, so never remove through a parent it could have replaced with a symlink. */
+export async function removeRecapWorkspace(vault: string): Promise<void> {
+  const parent = path.join(await realpath(vault), path.dirname(RECAP_WORKSPACE_ROOT))
+  if (!(await lstat(parent).catch(() => null))?.isDirectory()) return
+  await rm(path.join(parent, path.basename(RECAP_WORKSPACE_ROOT)), { recursive: true, force: true })
+}
 
 /** Refuse symlinks, including intermediate components, before trusted file IO. */
 export async function recapDirectory(vault: string, relative: string): Promise<string> {
