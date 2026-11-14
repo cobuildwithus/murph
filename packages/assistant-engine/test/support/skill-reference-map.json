@@ -218,7 +218,10 @@
       "training"
     ],
     "tools": [
-      "murph.automation"
+      "murph.automation",
+      "murph.connected_apps_execute",
+      "murph.connected_apps_manage",
+      "murph.connected_apps_search"
     ]
   },
   "lab-tests": {
