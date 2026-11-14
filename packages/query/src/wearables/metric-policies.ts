@@ -92,8 +92,13 @@ export function resolveLocalDayEndMs(
   }
 
   const nextDate = addDaysToIsoDate(date, 1);
+  const nextDateUtcMs = Date.parse(`${nextDate}T00:00:00.000Z`);
+  if (!Number.isFinite(nextDateUtcMs)) {
+    return null;
+  }
+
   const offsetEndMs = typeof timeZoneOffsetMinutes === "number" && Number.isFinite(timeZoneOffsetMinutes)
-    ? Date.parse(`${nextDate}T00:00:00.000Z`) - timeZoneOffsetMinutes * 60_000
+    ? nextDateUtcMs - timeZoneOffsetMinutes * 60_000
     : null;
   const zone = normalizeIanaTimeZone(timeZone);
   if (!zone) {

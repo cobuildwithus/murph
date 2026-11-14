@@ -194,6 +194,8 @@ test("a record's UTC offset stands in when it names no usable time zone", () => 
   assert.equal(end(null, null), null);
   assert.equal(end("Not/AZone"), null);
   assert.equal(resolveLocalDayEndMs("not-a-date", "UTC", 0), null);
+  // The last representable date has no next day to end on.
+  assert.equal(resolveLocalDayEndMs("9999-12-31", "America/New_York", -300), null);
 });
 
 test("a total is a partial count only when recorded before a day end the vault has seen pass", () => {
