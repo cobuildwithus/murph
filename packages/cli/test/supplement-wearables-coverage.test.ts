@@ -664,12 +664,8 @@ test('real wearable CLI provider filters select Fitbit and Withings evidence', a
   type DayResult = {
     filters: { providers: string[] }
     summary: {
-      activity?: {
-        steps?: { provider?: string | null; value: number | null }
-      } | null
-      bodyState?: {
-        weightKg?: { provider?: string | null; value: number | null }
-      } | null
+      activity?: { provider?: string; steps?: number } | null
+      bodyState?: { provider?: string; weightKg?: number } | null
     } | null
   }
 
@@ -685,8 +681,8 @@ test('real wearable CLI provider filters select Fitbit and Withings evidence', a
   assert.equal(fitbit.exitCode, null)
   const fitbitData = requireData(fitbit.envelope)
   assert.deepEqual(fitbitData.filters.providers, ['fitbit'])
-  assert.equal(fitbitData.summary?.activity?.steps?.provider, 'fitbit')
-  assert.equal(fitbitData.summary?.activity?.steps?.value, 4_321)
+  assert.equal(fitbitData.summary?.activity?.provider, 'fitbit')
+  assert.equal(fitbitData.summary?.activity?.steps, 4_321)
   assert.equal(fitbitData.summary?.bodyState ?? null, null)
 
   const withings = await runInProcessJsonCli<DayResult>(cli, [
@@ -701,8 +697,8 @@ test('real wearable CLI provider filters select Fitbit and Withings evidence', a
   assert.equal(withings.exitCode, null)
   const withingsData = requireData(withings.envelope)
   assert.deepEqual(withingsData.filters.providers, ['withings'])
-  assert.equal(withingsData.summary?.bodyState?.weightKg?.provider, 'withings')
-  assert.equal(withingsData.summary?.bodyState?.weightKg?.value, 72.4)
+  assert.equal(withingsData.summary?.bodyState?.provider, 'withings')
+  assert.equal(withingsData.summary?.bodyState?.weightKg, 72.4)
   assert.equal(withingsData.summary?.activity ?? null, null)
 
   const absent = await runInProcessJsonCli<DayResult>(cli, [

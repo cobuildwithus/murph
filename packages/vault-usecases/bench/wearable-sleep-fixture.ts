@@ -96,11 +96,10 @@ export async function readSleepProof(services: VaultServices, root: string, days
   assert.equal(result.items[0]?.date, sleepDate(days - 1));
   assert.ok(result.items.every(item => item.totalSleepMinutes && item.sleepStartAt));
   if (expectedLatest !== undefined) {
-    const total = result.items[0]?.totalSleepMinutes;
-    assert.ok(total && typeof total === "object" && !Array.isArray(total));
-    assert.equal(total.value, expectedLatest, "The canonical correction must be reflected in the answer");
-    assert.equal(total.provider, "oura");
-    assert.equal(total.unit, "minutes");
+    // A high-confidence value from the night's provider is a bare number in the `units` legend.
+    assert.equal(result.items[0]?.totalSleepMinutes, expectedLatest, "The canonical correction must be reflected in the answer");
+    assert.equal(result.items[0]?.provider, "oura");
+    assert.equal(result.units?.totalSleepMinutes, "minutes");
   }
   return result;
 }

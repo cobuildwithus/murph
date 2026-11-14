@@ -644,7 +644,7 @@ test('wearables activity list exposes explicit bounded workout detail on demand'
   )
   assert.match(
     generatedTypes,
-    /'wearables activity list': \{ args: \{\}; options: \{ requestId\?: string; date\?: string; from\?: string; to\?: string; provider\?: string\[\]; limit: number; includeWorkoutSummaries: boolean; includeWorkoutDetails: boolean \} \}/u,
+    /'wearables activity list': \{ args: \{\}; options: \{ requestId\?: string; date\?: string; from\?: string; to\?: string; provider\?: string\[\]; limit\?: number; includeWorkoutSummaries: boolean; includeWorkoutDetails: boolean \} \}/u,
   )
   assert.deepEqual(
     commandConfigOptionNames(configSchema, 'wearables activity list').sort(),

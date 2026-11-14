@@ -1734,25 +1734,11 @@ text(result.output);
           items: [{
             activityTypes: ['running'],
             date: '2026-07-12',
-            sessionCount: {
-              confidence: 'high',
-              metric: 'sessionCount',
-              provider: 'garmin',
-              unit: 'count',
-              value: 1,
-            },
-            sessionMinutes: {
-              confidence: 'high',
-              metric: 'sessionMinutes',
-              provider: 'garmin',
-              unit: 'minutes',
-              value: 48,
-            },
-            summaryConfidence: {
-              level: 'high',
-              selectedProviders: ['garmin'],
-            },
+            provider: 'garmin',
+            sessionCount: 1,
+            sessionMinutes: 48,
           }],
+          units: { sessionCount: 'count', sessionMinutes: 'minutes' },
         },
         prompt: 'How long was my workout on July 12?',
         skillSlug: 'daily-activity',
@@ -1765,17 +1751,8 @@ text(result.output);
           items: [{
             activityTypes: ['cycling', 'running'],
             date: '2026-07-12',
-            sessionCount: {
-              confidence: 'high',
-              metric: 'sessionCount',
-              provider: 'garmin',
-              unit: 'count',
-              value: 2,
-            },
-            summaryConfidence: {
-              level: 'high',
-              selectedProviders: ['garmin'],
-            },
+            provider: 'garmin',
+            sessionCount: 2,
             workoutFeatures: [{
               activityType: 'running',
               averageHeartRate: 142,
@@ -1800,6 +1777,7 @@ text(result.output);
               startedAt: '2026-07-12T18:00:00.000Z',
             }],
           }],
+          units: { sessionCount: 'count' },
         },
         prompt: 'Compare my two workouts on July 12: average heart rate, cycling cadence, speed, power, and retained splits.',
         skillSlug: 'daily-activity',

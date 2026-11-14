@@ -64,11 +64,11 @@ test("sleep service equals an independently full-built oracle across scopes, con
   const all = await services.query.listWearableSleep(input);
   assert.equal(all.count, days);
   assert.deepEqual(all.items.map(item => item.date), [4, 3, 2, 1, 0].map(sleepDate));
-  const total = all.items[0]?.totalSleepMinutes;
-  assert.ok(total && typeof total === "object" && !Array.isArray(total));
-  assert.equal(total.value, 455);
-  assert.equal(total.unit, "minutes");
-  assert.equal(total.provider, "oura");
+  // A high-confidence value from the night's provider is a bare number whose
+  // unit comes from the list-level legend.
+  assert.equal(all.items[0]?.totalSleepMinutes, 455);
+  assert.equal(all.items[0]?.provider, "oura");
+  assert.equal(all.units?.totalSleepMinutes, "minutes");
   // Exact confidence, candidate details and provenance are covered by the
   // complete oracle comparison above, not reimplemented as fixture policy.
   const night = await services.query.listWearableSleep({ ...input, date: "2026-01-03", providers: ["oura"] });
@@ -81,17 +81,24 @@ test("sleep service equals an independently full-built oracle across scopes, con
   assert.equal(Date.parse(String(end)), Date.parse("2026-01-03T07:00:00Z"));
   assert.ok(night.items[0]?.deepMinutes && night.items[0]?.remMinutes && night.items[0]?.lightMinutes);
   const context = await services.query.listWearableSleep({ ...input, providers: ["oura"] });
-  assert.deepEqual(night.items[0], context.items.find(item => item.date === "2026-01-03"));
+  // Notes shared by every listed night move to the list, so compare each night
+  // together with the list-level notes that apply to it.
+  const withListNotes = (list: typeof night, item: (typeof night.items)[number] | undefined) => ({
+    ...item,
+    notes: [...(list.notes ?? []), ...((item?.notes as string[] | undefined) ?? [])].sort(),
+  });
+  assert.deepEqual(
+    withListNotes(night, night.items[0]),
+    withListNotes(context, context.items.find(item => item.date === "2026-01-03")),
+  );
   // Neighboring nights exist on both sides; the selected night retains its
   // previous-date start, complete stages and unchanged normal composition.
   assert.ok(context.items.some(item => item.date === "2026-01-02"));
   assert.ok(context.items.some(item => item.date === "2026-01-04"));
   for (const [provider, expected] of [["oura", 460], ["whoop", 445], ["garmin", 430]] as const) {
     const scoped = await services.query.listWearableSleep({ ...input, date: "2026-01-03", providers: [provider] });
-    const metric = scoped.items[0]?.totalSleepMinutes;
-    assert.ok(metric && typeof metric === "object" && !Array.isArray(metric));
-    assert.equal(metric.provider, provider);
-    assert.equal(metric.value, expected);
+    assert.equal(scoped.items[0]?.provider, provider);
+    assert.equal(scoped.items[0]?.totalSleepMinutes, expected);
   }
   assert.equal((await services.query.listWearableSleep({ ...input, providers: [] })).count, days);
   assert.equal((await services.query.listWearableSleep({ ...input, providers: [" "] })).count, 0);

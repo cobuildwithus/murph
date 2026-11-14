@@ -149,22 +149,15 @@ test("showWearableLatest forwards normalized surface filters to the shared query
       day: {
         date: "2026-04-04",
         providers: ["whoop"],
-        summaryConfidence: "high",
+        // High confidence and the day's own date are implied, so both drop out.
         sleep: {
-          date: "2026-04-04",
-          summaryConfidence: {
-            level: "high",
-            selectedProviders: ["whoop"],
-          },
-          totalSleepMinutes: {
-            confidence: "high",
-            metric: "totalSleepMinutes",
-            provider: "whoop",
-            unit: "minutes",
-            value: 420,
-          },
+          provider: "whoop",
+          totalSleepMinutes: 420,
         },
       },
+    },
+    units: {
+      totalSleepMinutes: "minutes",
     },
   });
   const serialized = JSON.stringify(result);
@@ -291,22 +284,12 @@ test("wearable day and drift outputs compact verbose metric envelopes", async ()
   });
 
   assert.deepEqual(day.summary?.sleep, {
-    date: "2026-04-04",
-    summaryConfidence: {
-      level: "high",
-      selectedProviders: ["whoop"],
-    },
-    totalSleepMinutes: {
-      confidence: "high",
-      metric: "totalSleepMinutes",
-      provider: "whoop",
-      unit: "minutes",
-      value: 420,
-    },
+    provider: "whoop",
+    totalSleepMinutes: 420,
   });
-  assert.equal(Object.hasOwn(drift.summary?.latest as Record<string, unknown>, "sleep"), false);
-  assert.equal(Object.hasOwn(drift.summary?.latest as Record<string, unknown>, "activity"), false);
-  assert.equal(Object.hasOwn(drift.summary?.latest as Record<string, unknown>, "sourceHealth"), false);
+  assert.deepEqual(day.units, { totalSleepMinutes: "minutes" });
+  // Drift returns its own signals and notes, never the embedded latest bundle.
+  assert.deepEqual(drift.summary, { notes: [], signals: [], windowDays: 7 });
 
   for (const compactOutput of [day, drift]) {
     const serialized = JSON.stringify(compactOutput);
@@ -418,8 +401,9 @@ test("metric and drift wearable service methods use the shared assistant-aligned
       windowDays: 7,
     },
     summary: {
-      windowDays: 7,
+      notes: [],
       signals: [],
+      windowDays: 7,
     },
   });
   assert.equal(loadQueryRuntime.mock.calls.length, 3);
@@ -475,6 +459,55 @@ test("wearable services preserve explicit blank provider filters as empty runtim
   assert.equal(loadQueryRuntime.mock.calls.length, 2);
   assert.equal(loadCoreRuntime.mock.calls.length, 0);
   assert.equal(loadImporterRuntime.mock.calls.length, 0);
+});
+
+test("wearable lists default to the whole date range up to the cap and mark a cut page", async () => {
+  const nights = Array.from({ length: 20 }, (_, index) => ({
+    date: `2026-04-${String(20 - index).padStart(2, "0")}`,
+    notes: [],
+    provider: "oura",
+  }));
+  const summarizeWearableSleepRuntime = vi.fn(async () => nights);
+  const loadQueryRuntime = vi.fn(async () => ({ summarizeWearableSleepRuntime }));
+  const integratedServicesModule = await importWithMocks<
+    typeof import("../src/usecases/integrated-services.ts")
+  >("../src/usecases/integrated-services.ts", {
+    "../src/usecases/runtime.ts": () => ({
+      createUnwiredMethod: vi.fn(),
+      loadCoreRuntime: vi.fn(),
+      loadImporterRuntime: vi.fn(),
+      loadQueryRuntime,
+    }),
+  });
+  const services = integratedServicesModule.createIntegratedVaultServices();
+  const list = (input: { date?: string; from?: string; to?: string; limit?: number }) =>
+    services.query.listWearableSleep({ vault: "./vault", requestId: null, ...input });
+
+  // The query gets no limit, so the service knows how many summaries matched.
+  const range = await list({ from: "2026-04-01", to: "2026-04-20" });
+  assert.deepEqual(summarizeWearableSleepRuntime.mock.calls[0], ["./vault", {
+    from: "2026-04-01",
+    providers: undefined,
+    to: "2026-04-20",
+  }]);
+  assert.equal(range.filters.limit, 14);
+  assert.equal(range.count, 14);
+  assert.equal(range.truncated, true);
+  assert.equal(range.remaining, 6);
+  assert.equal(range.items[0]?.date, "2026-04-20");
+
+  const day = await list({ date: "2026-04-20" });
+  assert.equal(day.filters.limit, 14);
+
+  const recent = await list({});
+  assert.equal(recent.filters.limit, 3);
+  assert.equal(recent.count, 3);
+  assert.equal(recent.remaining, 17);
+
+  const whole = await list({ from: "2026-04-01", to: "2026-04-20", limit: 20 });
+  assert.equal(whole.count, 20);
+  assert.equal(Object.hasOwn(whole, "truncated"), false);
+  assert.equal(Object.hasOwn(whole, "remaining"), false);
 });
 
 test("showWearableSleepPattern forwards the normalized window and preserves every caveat", async () => {
