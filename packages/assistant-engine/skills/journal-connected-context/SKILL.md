@@ -10,7 +10,7 @@ or permission. A failed, partial, or window-limited read never shows that
 something was canceled, deleted, or completed, and never raises certainty:
 keep saved facts and verification times.
 
-## Ledger and opt-outs
+## Eligibility and opt-out check
 
 Before any connected-app call, read the ledger with
 `vault-cli knowledge show journal-connected-context --if-exists` (`page: null`
@@ -53,8 +53,9 @@ and record it in the controls.
 
 ## Connected reads
 
-Only while global capture is permitted; these steps replace the general
-connected-app reading page for this skill. List accounts with
+Only while global capture is permitted. For these reads, this section takes
+precedence over the general connected-app reading page; you do not need to
+read that page. List accounts with
 `murph.connected_apps_manage` (`action: "list"`) and set `activeAccounts` to
 the active Google Calendar, Gmail, and Outlook accounts, the only providers
 read automatically. Find each tool's slug and schema once per capability (such as
@@ -87,7 +88,7 @@ one is not, delete plans captured from it. All-day events count only for clear
 travel or races unless earlier evidence shows they matter; keep their local
 dates without inventing a clock time.
 
-Each included event becomes one `journal-plan` note (see Canonical plans) with
+Each included event becomes one `journal-plan` note (see Canonical plan reconciliation) with
 category, start and end, timezone, a short safe title, confirmed or tentative
 status, and the practical logistics (places, segments, return, constraints),
 separating source facts from implications. No raw descriptions, exact
@@ -122,7 +123,7 @@ calendar and email evidence to that plan instead of duplicating it, and
 reconcile changes and cancellations into it. Never save email bodies, prices,
 booking codes, attachments, exact addresses, or other passengers.
 
-## Follow-ups
+## Due follow-up checks
 
 A plan is context, not a reason to message. Never ask whether an event or trip
 happened just to fill in the Journal; a confirmation or category alone never
@@ -155,7 +156,7 @@ follow-up only while its time is still ahead; never a catch-up, and never
 reactivate a completed or disabled one. Apply opt-outs first, skip canceled
 plans, and deduplicate aliases by canonical plan.
 
-## Canonical plans
+## Canonical plan reconciliation
 
 Write facts once, in the `journal-plan` note. Upcoming context derives from
 these notes automatically; never write an `upcoming-context` Knowledge page.
@@ -196,7 +197,7 @@ their owners; never rewrite them to fit a plan. A planned trip does not prove
 arrival, current location, or an experiment confounder, and never changes the
 member's saved home timezone.
 
-## Reminder reconciliation
+## Existing reminder reconciliation
 
 Every morning, even with no new plans or accounts, review the whole private
 reminder inventory:
@@ -255,6 +256,8 @@ does not block repairs other canonical context supports.
 
 Check that the ledger maps every captured source to its event and revision.
 Saves, updates, cancellations, and scheduled check-ins are silent: return
-`skip` with an internal `privateSummary`. Message only for a needed
-clarification or a due follow-up that passive evidence has not resolved, never
-for a new plan, and never with a process report.
+`skip` with an internal `privateSummary`. This is an unattended run, so when
+unsure, leave the item unchanged and carry on instead of asking. Message only
+for a clarification that blocks a needed repair or a due follow-up that
+passive evidence has not resolved, never for a new plan, and never with a
+process report.
