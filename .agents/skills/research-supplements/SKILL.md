@@ -1,86 +1,137 @@
 ---
 name: research-supplements
-description: Research supplement brands for Murph's supplement database. Use when Codex needs to take one or more supplement brands, find current official product labels from the web, extract products, variants, Supplement Facts/Nutrition Facts, full active and other ingredient text, UPC/SKU/source URLs, deduplicate against the Murph supplement DB, and dry-run or upsert fresh label records through MURPH_LABELS_DB_URL. Also use for bulk brand runs where one subagent should research each brand and return normalized import rows.
+description: Research supplement brands for Murph's supplement database. Use to take one or more brands, find current official product labels, extract products, variants, Supplement Facts or Nutrition Facts, ingredient text, UPC/SKU and source URLs, deduplicate against the Murph supplement DB, and dry-run or upsert label records through MURPH_LABELS_DB_URL. Also covers repairing existing brand_site rows and bulk brand runs.
 ---
 
 # Research Supplements
 
-## Core Rule
+Supplement labels are queryable product facts. Their home is the Murph
+supplement DB, as `brand_site` rows, written only after a dry run shows how
+each row matches or duplicates what is there. Assistant runtime state is never
+the source of truth for them.
 
-Supplement product labels are queryable product facts. Do not store research output in assistant runtime state as the source of truth. Normalize evidence into `brand_site` supplement rows and write through the Murph supplement DB only after a dry run proves duplicate and match behavior.
+The helper scripts read only `MURPH_LABELS_DB_URL`, connect without putting it
+in argv, and redact it from errors. Keep `.env` files, database URLs and
+credentials out of your output.
 
-Never print `.env`, `.env.local`, database URLs, credentials, tokens, or raw connection strings. Use the helper scripts; they read only `MURPH_LABELS_DB_URL`, connect through libpq env/passfile inputs instead of argv, and redact sensitive values from errors.
+## What a production row is
 
-## Workflow
+One standalone supplement product or variant, from current official evidence,
+with normalized `label.ingredientRows` and `label.servingSizes`. A row missing
+either, or marked `needsManualReview: true`, stays in review output and out of
+an upsert. Raw `factsText` and `ingredientText` are evidence; they do not
+stand in for the normalized arrays.
 
-1. **Plan the brand run**
-   - Normalize the brand list into stable source slugs such as `momentous`, `thorne`, or `life-extension`.
-   - For multiple brands, spawn one subagent per brand when subagent tooling is available. Give each subagent the brand name, official site, this skill path, and the output contract below. Keep database writing in the parent agent unless the user explicitly wants workers to write.
-   - If subagents are unavailable, process brands sequentially and keep per-brand outputs separate.
+Leave these out of production rows and list them as skipped or delete
+candidates: bundles, kits, stacks, plans, variety packs, multi-bottle
+duplicates, samples, promos, merch, topical and test products, and
+conventional food (bars, snacks, ready-to-eat or ready-to-drink products) even
+when the page shows a clean Nutrition Facts panel.
 
-2. **Collect source evidence**
-   - Prefer official brand product pages, official Shopify product feeds, Supplement Facts images, PDFs, and official structured data.
-   - Use search snippets only as leads. Do not treat snippets, reviews, affiliate pages, or retailer pages as authoritative unless official pages are missing and the row is clearly marked lower-confidence.
-   - If static HTTP fetches are blocked, rate-limited, or miss UI-rendered label evidence, Computer Use may be used with Safari for read-only official-page inspection.
-   - Allowed Safari actions: open official brand product pages, scroll, use product image galleries or tabs, zoom label/PDF viewers, download official label images or PDFs, and copy visible Supplement Facts, Nutrition Facts, ingredients, UPC/SKU, and source URLs.
-   - Disallowed Safari actions: logging in, creating accounts, adding to cart, purchasing, submitting forms, solving CAPTCHAs, bypassing browser/security/paywall barriers, changing settings, uploading/transmitting user data, or accepting prompts beyond ordinary cookie consent.
-   - Capture variant-level data when flavors, serving sizes, UPCs, or formulas differ.
-   - Store exactly one standalone supplement product/label per row. Do not import bundles, kits, stacks that combine multiple products, regimens/plans, variety packs, multi-bottle pack duplicates, samples, promos, merch, shakers, apparel, topical products, or test products as dietary supplements.
-   - Do not import conventional food or snack products as supplement rows, even when the page has a clean Nutrition Facts panel. Reject protein bars, nutrition bars, energy bars, snack-category products, ready-to-eat foods, ready-to-drink shakes/beverages, cookies, brownies, chips/crisps, candy-like foods, meal bars, and grocery-style food products. Keep them in skipped/delete-candidate output instead of production JSON.
+Row fields:
 
-3. **Normalize rows**
-   - Emit JSON rows with: `id`, `dataOrigin`, `dataOriginId`, `dataOriginUrl`, `source`, `sourceId`, `name`, `brand`, optional `upc`, `offMarket`, and `label`. Do not provide custom `searchText`; the DB helper derives compact search text from normalized product fields.
-   - Treat `search_text` as a compact derived search document only. It should contain product identity and searchable ingredient names, not raw evidence, page bodies, marketing copy, statements, contacts, daily values, dosage-panel detail, or whole label payloads. Preserve raw/full source evidence, including ingredient amounts and units, in `label`.
-   - `dataOrigin` must be `brand_site`. Use `dataOriginId = <brand-slug>:<sourceId>` and `id = dataOriginId`.
-   - `sourceId` must be stable within the brand. Use the product handle for one-formula products and `handle--variant-slug` for variant-specific rows.
-   - Production rows must include normalized `label.ingredientRows` and `label.servingSizes`. Raw `factsText` and `ingredientText` are allowed as source evidence, but they are not a substitute for normalized rows.
-   - `label` must include `schemaVersion`, `sourceFetchedAt`, `sourceUrl`, normalized facts, raw facts evidence, full active and other ingredient text, variant metadata when relevant, and evidence status.
-   - Do not store full page bodies, FAQ text, reviews, marketing sections, or nearby product copy in `label`. If a short product description is useful, store it as a concise `descriptionText` excerpt; keep page-body extraction as local scratch data only.
-   - If full facts or normalized rows are missing, mark `needsManualReview: true` and do not include the row in a production upsert.
+- `id`, `dataOrigin`, `dataOriginId`, `dataOriginUrl`, `source`, `sourceId`,
+  `name`, `brand`, optional `upc`, `offMarket`, `label`.
+- `dataOrigin` is always `brand_site` (priority 5); there are no per-brand
+  origins. `dataOriginId` is `<brand-slug>:<sourceId>` and `id` equals it.
+- `sourceId` is stable within the brand: the product handle, or
+  `handle--variant-slug` when flavors, serving sizes, UPCs or formulas differ.
+- `label` carries `schemaVersion`, `sourceFetchedAt`, `sourceUrl`, the
+  normalized facts, the raw facts evidence, full active and other ingredient
+  text, variant metadata and evidence status. A short `descriptionText`
+  excerpt is fine. Page bodies, FAQ text, reviews and marketing copy stay in
+  local scratch files.
+- The DB helper derives `search_text` (product identity plus ingredient
+  names); don't supply your own.
+- A facts panel with per-audience amounts stays manual until the normalized
+  shape can hold it without loss.
 
-4. **Dry-run against the DB**
-   - Read `.agents/skills/research-supplements/references/database-contract.md` before writing.
-   - For whole-corpus cleanup, run `supplement-db-audit.mjs` first. It audits the complete table in PostgreSQL `READ ONLY` transactions and prints aggregate JSON by default; use `--candidate-limit <n>` only when a bounded ID-only review sample is needed. Treat missing normalized arrays and duplicate groups as origin-specific review candidates, not automatic corruption or deletion proof.
-   - Always run `supplement-db-brand-site-labels.mjs dry-run` before `upsert`.
-   - Treat dry-run `productionBlockedRows` as blockers. The helper blocks production upserts for missing `ingredientRows`, missing `servingSizes`, manual-review rows, obvious non-standalone products, likely food/snack products such as protein bars, oversized page-body text, raw page text, or oversized search text.
-   - For existing-row cleanup, run `supplement-db-brand-site-repair-preview.mjs` first. It is read-only and writes review artifacts showing proposed compact search text, parser coverage, normalized row additions, and superfluous field candidates. Do not write repair updates until the preview has been reviewed.
-   - Treat repair preview `automatedBackfillReady: true` rows as the only candidates for automated backfill. `structured_ready` is diagnostic parser state and can still have blockers; do not use it alone as a write/delete gate. Keep blocked, `partial_parse`, and `needs_better_parser` rows in manual review/refetch/OCR queues, even when some facts were recovered.
-   - After repair/refetch/OCR produces candidate rows, run the normal `supplement-db-brand-site-labels.mjs dry-run` on the exact candidate artifact before any upsert. Inspect candidate `name`, `brand`, `source`, `sourceId`, UPC, `ingredientRows`, `servingSizes`, and removable raw-evidence fields; do not write candidates that are mechanically accepted but still have stale category-like brands, ambiguous variants, lossy parsed facts, or missing official provenance.
-   - Use the preview's `brand_site_evidence_recovery_queue.json` / `.csv` and `brand_site_evidence_recovery_by_brand.json` artifacts to prioritize remaining blocked rows. Process `refetch_official_label_or_ocr` and `refetch_official_page_body` rows from official sources before adding more parser regex; these rows usually lack trustworthy saved label evidence.
-   - Before deleting raw evidence fields such as `bodyText`, `rawPageText`, or `allProductFactsText`, confirm the row has `automatedBackfillReady: true` with production-quality `label.ingredientRows` and `label.servingSizes`; preserve raw evidence for blocked, partial, uncertain, image-only, OCR-fragmented, or whole-page evidence rows.
-   - For image-only labels, OCR-fragmented facts, or saved text that is just page captions/alt text, prefer a fresh official-page refetch/OCR pass over guessing from marketing copy.
-   - If the saved row has no real facts text, refetch official evidence instead of expanding parser regexes. Prefer official HTML facts tables first, then official product JSON/media (`/products/<handle>.js` on Shopify when available), official Supplement Facts/Nutrition Facts images, and PDFs. Store only the resulting normalized single-product facts, plus concise provenance; do not store full HTML/page bodies.
-   - Use `supplement-db-brand-site-refetch-preview.mjs` for recovery-queue rows before writing any backfill. The helper is read-only and emits official refetch candidates plus image/PDF evidence pointers; rows that still lack parsed `ingredientRows` and `servingSizes` must remain manual-review/output artifacts only. Treat variant-matched Shopify media filenames with `SFP` as Supplement Facts Panel evidence, not as parsed facts. When current official product/variant data has an exact UPC match, `--hydrate-dsld-upc` may read DSLD rows and copy structured facts into the preview artifact, but only exact UPC matches with DSLD `ingredientRows` and `servingSizes` can become production-ready.
-   - Use `supplement-db-brand-site-ocr-preview.mjs` only after refetch preview has found official facts image URLs. It sends those official image URLs to a vision model for OCR and writes local artifacts; OCR rows can become production-ready only when the existing parser extracts both `label.ingredientRows` and `label.servingSizes`.
-   - When recovery-queue rows have a `data_origin_url` but no usable saved facts (the high-volume image-based brands), the **context.dev re-scrape + vision-OCR** path is a strong, proven alternative to expanding parser regexes. context.dev (`CONTEXT_DEV_API_KEY`) scrapes pages to clean markdown and enumerates label images; a vision model reads the facts-panel image natively (no OCR corruption). See `references/context-dev-and-vision-ocr.md` for the full pipeline, the image-selection scoring that drives yield, the anchor-based safeguards, and the helper scripts `scripts/context-dev-image-fetch.py` and `scripts/vision-ocr-process-batch.py`. Image selection (alt-text panel phrasing first, then SFP/facts-filename patterns and name-token match to isolate the product's own images from cross-sell) is the yield bottleneck, not the vision model. Two operational must-knows: the context.dev rate gate is mandatory (unthrottled workers silently lose ~60% of scrapes to retryable `scrape_error`, which masquerades as "image-less"), and a `model:'sonnet'` re-read of the already-downloaded chunks is a free second lever for the hard tail. Do not declare a pool image-less until it has been run through the current selector + gate. The `dailymed` origin is a separate, scrape-free win — structure it from its own SPL array via `scripts/dailymed-spl-transform.py`.
-   - Refetch/OCR output must still produce one standalone product/variant row with `label.ingredientRows` and `label.servingSizes`. Rows that remain image-only, caption-only, ambiguous, bundle-like, multi-pack-only, or variant-mismatched stay out of production upserts.
-   - Do not flatten complex multi-audience facts panels into a simple row if doing so would lose per-audience amounts or daily values. Preserve the raw official facts evidence in local review artifacts and keep the row manual until the normalized shape can represent the label accurately.
-   - Duplicate prevention is by `id` plus `(data_origin, data_origin_id)`. UPCs are used to point `canonical_key` at an existing DSLD row when an exact UPC match exists.
-   - Treat duplicate input rows for the same `(dataOrigin, dataOriginId)` as a batch error. Resolve them before writing.
+## Sources
 
-5. **Upsert only fresh evidence**
-   - Use official current-page evidence to overwrite existing rows for the same `id` / `(data_origin, data_origin_id)`.
-   - Preserve source provenance in `data_origin_url`, `label.sourceFetchedAt`, and `label.sourceUrl`.
-   - Brand web data belongs in `supplements` with `data_origin = 'brand_site'`, `data_origin_priority = 5`, and `data_origin_id = <brand-slug>:<sourceId>`. Do not create separate per-brand `data_origin` values.
+Prefer official product pages, official Shopify product feeds
+(`/products/<handle>.js`), Supplement Facts images, PDFs and official
+structured data. Search snippets are leads. Retailer, review and affiliate
+pages count only when official pages are missing, and the row is then marked
+lower-confidence. `references/source-quality.md` has the full hierarchy.
 
-6. **Report gaps**
-   - Report rows inserted/updated, UPC-matched rows, no-UPC rows, skipped products, and products needing manual OCR or review.
-   - For 20-brand batches, return a per-brand checklist before the final bulk upsert.
+When static fetches are blocked or miss rendered label evidence, Safari
+through Computer Use is allowed for reading official pages: open them, scroll,
+use image galleries and tabs, zoom label and PDF viewers, download official
+label images or PDFs, and copy visible facts. Stay read-only: no login,
+account, cart, purchase, form, CAPTCHA, barrier bypass, settings change or
+data upload, and no prompts beyond ordinary cookie consent.
 
-## Brand Batch Flow
+## Brand run
 
-Create a normalized JSON batch from official current label evidence, then use the DB helper for the database dry run and upsert:
+1. Turn the brand list into stable slugs (`momentous`, `thorne`,
+   `life-extension`). Brands are independent, so a multi-brand run can use one
+   worker per brand with the prompt below; the parent keeps the database
+   writes. Otherwise go brand by brand and keep outputs separate.
+2. Collect evidence and build a normalized JSON batch.
+3. Read `references/database-contract.md`, then dry-run and upsert:
 
-```bash
-node .agents/skills/research-supplements/scripts/supplement-db-brand-site-labels.mjs dry-run --input /tmp/brand-labels.json
-node .agents/skills/research-supplements/scripts/supplement-db-brand-site-labels.mjs upsert --input /tmp/brand-labels.json
-```
+   ```bash
+   node .agents/skills/research-supplements/scripts/supplement-db-brand-site-labels.mjs dry-run --input /tmp/brand-labels.json
+   node .agents/skills/research-supplements/scripts/supplement-db-brand-site-labels.mjs upsert --input /tmp/brand-labels.json
+   ```
 
-Use temporary brand-specific extraction scripts only as scratch tooling outside the committed skill. Do not add brand-specific import helpers to this skill unless the format is reusable across brands. If replacing stale per-brand legacy origins, `--delete-origin` must match the single input source after `_` normalization; it rejects core origins such as `brand_site`, `dsld`, and `dailymed`.
+   Every `productionBlockedRows` entry in the dry run is a blocker. Duplicate
+   input rows for one `(dataOrigin, dataOriginId)` are a batch error to fix
+   before writing. Rows are matched by `id` and `(data_origin,
+   data_origin_id)`; an exact UPC match points `canonical_key` at the existing
+   DSLD row. Fresh official evidence overwrites the existing row and keeps its
+   provenance in `data_origin_url`, `label.sourceFetchedAt` and
+   `label.sourceUrl`.
+4. Report rows inserted and updated, UPC-matched and no-UPC rows, skipped
+   products, and products that need manual OCR or review. For a large batch,
+   give a per-brand checklist before the final upsert.
 
-## Subagent Prompt
+Brand-specific extraction scripts are scratch tooling and stay out of this
+skill unless the format is reusable. When replacing a stale per-brand origin,
+`--delete-origin` must match the single input source and rejects `brand_site`,
+`dsld` and `dailymed`.
 
-Use this shape for each brand worker:
+## Repairing existing rows
+
+Everything here is read-only until the final dry run and upsert.
+
+1. For a whole-table view, run `supplement-db-audit.mjs`. It prints aggregate
+   JSON; `--candidate-limit <n>` adds a bounded sample of IDs. Missing
+   normalized arrays and duplicate groups are review candidates, not proof of
+   corruption.
+2. Run `supplement-db-brand-site-repair-preview.mjs`. Only rows with
+   `automatedBackfillReady: true` are candidates for automated backfill.
+   `structured_ready` is parser state and can still carry blockers.
+   `partial_parse` and `needs_better_parser` rows stay in the manual, refetch
+   or OCR queues.
+3. Work the preview's recovery queue
+   (`brand_site_evidence_recovery_queue.json`, `.csv` and
+   `brand_site_evidence_recovery_by_brand.json`). A row with no real facts
+   text needs fresh official evidence, not more parser regex:
+   - `supplement-db-brand-site-refetch-preview.mjs` fetches official product
+     JSON and media. A Shopify media filename with `SFP` is a Supplement Facts
+     Panel image: evidence, not parsed facts. `--hydrate-dsld-upc` copies
+     structured facts from DSLD only on an exact UPC match.
+   - `supplement-db-brand-site-ocr-preview.mjs` sends the official facts
+     images that refetch found to a vision model.
+   - For image-heavy brands with a `data_origin_url` and no usable saved
+     facts, use the context.dev re-scrape with vision OCR in
+     `references/context-dev-and-vision-ocr.md`. Two things decide its yield:
+     image selection, and the context.dev rate gate (without it about 60% of
+     scrapes fail with a retryable `scrape_error` that looks like "no
+     images"). Run a pool through the current selector and gate before calling
+     it image-less.
+   - The `dailymed` origin needs no scrape:
+     `scripts/dailymed-spl-transform.py` structures it from its own SPL array.
+4. Run the normal `dry-run` on the exact candidate artifact and read the
+   candidates: name, brand, source, `sourceId`, UPC, the normalized arrays.
+   Hold back rows the helper accepts that still show a category-like brand, an
+   ambiguous variant, lossy facts or missing official provenance.
+5. Delete raw evidence fields (`bodyText`, `rawPageText`,
+   `allProductFactsText`) only from rows that are `automatedBackfillReady:
+   true` with production-quality normalized arrays.
+
+## Worker prompt
 
 ```text
 Use $research-supplements at <skill-path> to research <brand>.
@@ -91,16 +142,23 @@ For each row include id, dataOrigin=brand_site, dataOriginId, dataOriginUrl, sou
 Report skipped products and why. Put snack, protein-bar, ready-to-eat, and ready-to-drink food products in skipped/delete-candidate output, not production rows.
 ```
 
-## Resources
+## Scripts and references
 
-- `scripts/supplement-db-audit.mjs`: deterministic whole-table schema, identity, canonical-link, label-shape, provenance, duplicate-candidate, search-document, timestamp, and product-test integrity audit; read-only with bounded optional candidate IDs.
-- `scripts/supplement-db-brand-site-labels.mjs`: DB schema inspect, dry-run, and upsert helper for `supplements` rows where `data_origin = 'brand_site'`.
-- `scripts/supplement-db-brand-site-repair-preview.mjs`: read-only existing-row repair preview for compact search text, normalized facts parsing, automated-backfill readiness, and official refetch/OCR queue artifacts.
-- `scripts/supplement-db-brand-site-refetch-preview.mjs`: read-only recovery-queue refetch preview for official product JSON/media evidence, reusable Shopify variant/Supplement Facts image selection, and optional exact-UPC DSLD structured-facts hydration.
-- `scripts/supplement-db-brand-site-ocr-preview.mjs`: read-only OCR preview for official facts image URLs emitted by the refetch preview, with parser-gated normalized row promotion.
-- `scripts/context-dev-image-fetch.py`: context.dev re-scrape + facts-panel **image selection/download** for the recovery queue (Stage A of the vision-OCR loop). Has a mandatory rate gate and alt-text/SFP selector scoring — see `references/context-dev-and-vision-ocr.md`.
-- `scripts/vision-ocr-process-batch.py`: anchor-validates vision subagent extractions against their verbatim `factsText` readout and emits `labels.mjs` items (Stage C).
-- `scripts/dailymed-spl-transform.py`: structures the `dailymed` origin from its own `label.ingredients` SPL array (active→ingredientRows, inactive→otherIngredientRows, denominator→serving). Pure deterministic map, no scrape/vision/LLM. Dry-run, then `--write`.
-- `references/context-dev-and-vision-ocr.md`: full context.dev re-scrape + vision-OCR recovery pipeline, image-selection scoring, rate-gate lesson, DSLD-UPC/DailyMed free recovery, and the reversible-delete protocol for the genuinely-dead tail.
-- `references/database-contract.md`: current supplement DB table contract and write rules.
-- `references/source-quality.md`: source hierarchy and extraction quality rules.
+All under `.agents/skills/research-supplements/`:
+
+- `scripts/supplement-db-audit.mjs`: read-only whole-table audit.
+- `scripts/supplement-db-brand-site-labels.mjs`: schema inspect, dry-run and
+  upsert for `brand_site` rows.
+- `scripts/supplement-db-brand-site-repair-preview.mjs`: repair preview and
+  recovery-queue artifacts.
+- `scripts/supplement-db-brand-site-refetch-preview.mjs`: official refetch
+  preview with optional exact-UPC DSLD hydration.
+- `scripts/supplement-db-brand-site-ocr-preview.mjs`: OCR preview for official
+  facts images.
+- `scripts/context-dev-image-fetch.py`, `scripts/vision-ocr-process-batch.py`:
+  the context.dev image fetch and the check of each vision extraction against
+  its verbatim `factsText`.
+- `scripts/dailymed-spl-transform.py`: DailyMed SPL transform; dry-run, then
+  `--write`.
+- `references/database-contract.md`, `references/source-quality.md`,
+  `references/context-dev-and-vision-ocr.md`.
