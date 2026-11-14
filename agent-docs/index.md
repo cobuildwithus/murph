@@ -2153,5 +2153,5 @@ owned by [Cloudflare deployment](../apps/cloudflare/DEPLOY.md#native-prompt-cach
 Wearable source silence visibility is derived from the connect catalog; the
 [provider compatibility matrix](../docs/device-provider-compatibility-matrix.md)
 owns daily-source notices and per-source tool visibility. The
-[execution plan](exec-plans/active/2026-11-14-source-silence-visibility.md) records
+[execution plan](exec-plans/completed/2026-11-14-source-silence-visibility.md) records
 classification, diagnostics and deploy compatibility proof.
