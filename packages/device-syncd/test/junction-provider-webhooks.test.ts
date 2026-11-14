@@ -33,7 +33,10 @@ import {
 } from "@murphai/contracts";
 import { test, vi } from "vitest";
 import { DeviceSyncError } from "../src/errors.ts";
+import { createDeviceSyncPublicIngress } from "../src/public-ingress.ts";
+import { createDeviceSyncRegistry } from "../src/registry.ts";
 import { SqliteDeviceSyncStore } from "../src/store.ts";
+import { InMemoryPublicIngressStore } from "./public-ingress-store-fixture.ts";
 import { seedStoredAccount } from "./store-test-helpers.ts";
 import {
   buildJunctionProviderSourceInstanceKey,
@@ -596,6 +599,112 @@ test("Junction historical sleep completion webhooks fetch the bounded summary wi
     assert.equal(JSON.stringify(parsed.jobs).includes("junction-user-1"), false);
     assert.equal(JSON.stringify(importedSnapshots).includes("murph_blinded"), false);
   }
+});
+
+test("Junction fetches a summary record too large to carry inline instead of failing the webhook", async () => {
+  const requests: string[] = [];
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionProvider(
+    async (input) => {
+      const url = readUrl(input);
+      requests.push(url);
+      if (url.includes("/v2/user/providers/junction-user-1")) {
+        return createJsonResponse({
+          providers: [{
+            slug: "apple_health_kit",
+            name: "Apple Health",
+            status: "connected",
+            resource_availability: { sleep: true },
+          }],
+        });
+      }
+      if (url.includes("/v2/summary/sleep/junction-user-1")) {
+        return createJsonResponse({
+          data: [{
+            date: "2026-04-02",
+            id: "apple-sleep-fetched-1",
+            source: { provider: "apple_health_kit" },
+            total_sleep_minutes: 420,
+          }],
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    },
+    {
+      summaryResources: ["sleep"],
+      timeseriesResources: [],
+      webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+    },
+  );
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([provider]),
+    store: new InMemoryPublicIngressStore(),
+  });
+  const prepare = (stageCount: number, messageId: string) => {
+    const webhook = createJunctionSvixWebhook({
+      body: {
+        event_type: "daily.data.sleep.created",
+        user_id: "junction-user-1",
+        client_user_id: "murph_blinded",
+        data: {
+          date: "2026-04-02",
+          id: "apple-sleep-1",
+          resource: "sleep",
+          source: { provider: "apple_health_kit" },
+          sleep_stream: { hypnogram: Array.from({ length: stageCount }, () => 4) },
+          total_sleep_minutes: 420,
+        },
+      },
+      messageId,
+      timestamp: "1775174400",
+    });
+    return ingress.prepareWebhookForDurableEnqueue(
+      "junction",
+      webhook.headers,
+      webhook.rawBody,
+      new Date("2026-04-03T00:00:00.000Z"),
+    );
+  };
+
+  // 16,000 two-character stages stay under the 32,768-character carrier.
+  const inline = await prepare(16_000, "msg_apple_sleep_inline");
+  assert.equal(typeof inline.jobs[0]?.payload?.webhookDataJson, "string");
+  assert.equal(inline.acceptanceMode, "durable_webhook_work");
+
+  const oversized = await prepare(17_000, "msg_apple_sleep_oversized");
+  assert.equal(oversized.dataSourceProviderSlug, "apple_health_kit");
+  assert.equal(oversized.jobs.length, 1);
+  const job = oversized.jobs[0];
+  assert.equal(job?.kind, "resource");
+  assert.equal(job?.payload?.resource, "sleep");
+  assert.equal(job?.payload?.sourceProviderSlug, "apple_health_kit");
+  assert.equal(job?.payload?.windowStart, "2026-04-01T00:00:00.000Z");
+  assert.equal(job?.payload?.windowEnd, "2026-04-03T00:00:00.000Z");
+  assert.equal("webhookDataJson" in (job?.payload ?? {}), false);
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+    }),
+    createJob(job?.kind ?? "resource", job?.payload ?? {}),
+  );
+  assert.equal(
+    requests.some((url) =>
+      url.includes("/v2/summary/sleep/junction-user-1")
+      && url.includes("provider=apple_health_kit")
+    ),
+    true,
+    `the oversized record should be fetched for its window; requests=${JSON.stringify(requests)}`,
+  );
+  const snapshot = importedSnapshots[0] as {
+    summaries?: Record<string, Array<Record<string, unknown>>>;
+  };
+  assert.equal(snapshot.summaries?.sleep?.[0]?.id, "apple-sleep-fetched-1");
 });
 
 test("Junction admits Google Health completion's original window while Fitbit remains connected", async () => {

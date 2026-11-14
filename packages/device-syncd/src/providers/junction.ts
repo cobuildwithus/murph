@@ -58,6 +58,7 @@ import {
   type JunctionReconcileProof,
 } from "../junction-reconcile-proof.ts";
 import { deviceSyncError, isDeviceSyncError, type DeviceSyncError } from "../errors.ts";
+import { fitsPreparedDeviceSyncWebhookInlineString } from "../prepared-webhook.ts";
 import type { JunctionDeviceSyncJobPayloads } from "../config/provider-manifests.ts";
 import { JunctionTimeseriesProgressError } from "../junction-timeseries-progress.ts";
 import {
@@ -12538,7 +12539,9 @@ function buildJunctionWebhookDataJobJsons(input: {
     ...record,
     sourceProviderSlug: input.sourceProviderSlug ?? undefined,
   });
-  return [serializeJunctionWebhookDataJobRecord(withSource)];
+  const json = serializeJunctionWebhookDataJobRecord(withSource);
+  // A record too large to carry inline is fetched for its window instead.
+  return fitsPreparedDeviceSyncWebhookInlineString(json) ? [json] : [];
 }
 
 function resolveJunctionWebhookDataSourceProviderSlug(input: {
