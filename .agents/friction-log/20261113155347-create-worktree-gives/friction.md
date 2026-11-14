@@ -1,6 +1,7 @@
 ---
 title: 'create-worktree gives up after a 5-second lock wait while another worktree checks out'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4950'
 ---
 
 ## Expected Behavior

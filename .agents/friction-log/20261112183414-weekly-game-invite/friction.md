@@ -1,6 +1,7 @@
 ---
 title: 'Weekly game invite design-proof spec fails on main for closed-invite states'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4910'
 ---
 
 ## Expected Behavior
