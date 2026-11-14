@@ -99,7 +99,9 @@ export const JUNCTION_SCHEDULE_TIME_EXTENDED_HISTORY_RESOURCE_VERSIONS = Object.
   ...JUNCTION_SPARSE_DAILY_TIMESERIES_HISTORY_BACKFILL_RESOURCES.map(
     (resource) => [resource, 2] as const,
   ),
-  ["weight", 2] as const,
+  // Generation 3: a weight scan that began while fetched rows were being
+  // dropped may still hold its cursor, and must not certify the re-read.
+  ["weight", 3] as const,
 ]);
 export const JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_VERSIONS = Object.freeze([
   ["blood_pressure", 2] as const,

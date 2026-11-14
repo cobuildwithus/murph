@@ -270,7 +270,7 @@ describe("Junction extended timeseries history coverage", () => {
       ["sleep_breathing_disturbance", 2],
       ["vo2_max", 2],
       ["water", 2],
-      ["weight", 2],
+      ["weight", 3],
     ]);
 
     let current: Record<string, unknown> = {};

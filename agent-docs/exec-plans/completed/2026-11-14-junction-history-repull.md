@@ -85,12 +85,12 @@ runtime deploy on a build that carries #4954 and #4956.
 3. Source projection keeps an exhausted window's reconnect markers whatever
    its generation, so the reconcile that runs before the re-read in the same
    pass cannot clear them.
-4. Weight: advance the matrix envelope to `m3`. An `m2` matrix stays a read
-   input with its weight column ignored, dropped from each input before the
-   union; every other bit carries forward. Writes are always `m3`. The weight
-   resource generation stays 2: a job in flight at deploy has read with the
-   fixed client since #4954 went live, so its certification is valid, and a
-   new generation would only orphan its daily retry beside a second scan.
+4. Weight: advance the matrix envelope to `m3` and the weight resource
+   generation to 3. An `m2` matrix stays a read input with its weight column
+   ignored, dropped from each input before the union; every other bit carries
+   forward. Writes are always `m3`. The resource generation moves with it so a
+   scan that kept its cursor from before #4954 can finish importing but cannot
+   certify the re-read; the full scan is queued under its own identity.
 5. No pacing machinery. The summary re-read is one job per connection, queued
    by that connection's own six-hour reconcile clock. Weight uses the existing
    one-history-job-per-connection-per-interval selector.
@@ -215,6 +215,20 @@ Also taken from the review: the weight generation fences certification and
 job identity, not fetches; an `m3` prefix does not prove weight was re-read
 (the progress query counts weight bits per envelope); the weight scan covers
 180 days before the day it is scheduled.
+
+## Final review (ReviewGPT, PR round 1)
+
+- First pass: PASS, no findings.
+- Second pass on the same head, asked to go deeper: one High. A weight scan
+  that read its first chunks before #4954 and then held its cursor through
+  incomplete-fetch retries would finish its suffix under this change and
+  certify `m3`, because weight was still generation 2. Accepted: the first
+  version of this plan kept generation 2 on the argument that such a scan
+  restarts from the history start, which is true of a pending-upstream retry
+  and false of an incomplete-fetch retry. Fixed by advancing weight to
+  generation 3, with a test that the retained scan cannot certify and the full
+  scan stays queued. The pass also noted the real-vault test never fetched the
+  day a webhook had delivered; it now does and asserts that day gains no event.
 
 ## Verification
 

@@ -456,7 +456,10 @@ different thing.
   the existing one-history-job-per-connection-per-interval selector queues it.
   The scan covers the 180 days before the day it is scheduled. The per-resource
   generation in `JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_VERSIONS` does
-  not re-read anything: it fences which in-flight job may certify a bit.
+  not re-read anything on its own: it fences which in-flight job may certify a
+  bit. It advances with the envelope (weight is generation 3), so a scan that
+  kept its cursor from before the fix can finish importing but cannot certify
+  the re-read, and the full scan is queued under its own identity.
 
 `fat`, `body_mass_index`, `lean_body_mass` and `waist_circumference` timeseries
 have no extended history, so neither generation reaches their readings older

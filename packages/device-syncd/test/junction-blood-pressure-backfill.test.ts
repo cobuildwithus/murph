@@ -6179,6 +6179,57 @@ test("the last matrix generation re-opens weight history and nothing else", () =
   assert.equal(weight?.payload?.historicalWindowStart, EXTENDED_HISTORY_WINDOW_START);
 });
 
+test("a weight scan retained from the last generation cannot certify the re-read", async () => {
+  const requests: TimeseriesRequest[] = [];
+  const provider = createProvider({
+    requests, timeseriesResources: ["weight"],
+    historicalPullState: { resource: "weight", status: "success" },
+    providerState: { resourceAvailability: { weight: true }, status: "connected" },
+  });
+  const executor = requireValue(provider.jobExecutor);
+  const sources = [createSourceSummary("omron", "2026-01-01T00:00:00.000Z", "connected", { weight: true })];
+  const metadata = toLastExtendedHistoryCoverage(addHistoryCoverage({}, "omron", "weight"));
+  const current = findResourceJob(
+    requireValue(executor.createScheduledJobs)(createStoredAccount({ metadata, sources }), NOW).jobs,
+    "weight",
+  );
+  // The weight generation that was live while fetched rows were being dropped.
+  const lastGeneration = 2;
+  const lastGenerationKey = scheduleTimeHistoryDedupeKey({
+    providerSlug: "omron", resource: "weight", sourceLifecycleEpoch: 1, version: lastGeneration,
+  });
+  // A scan that read its first chunks while fetched rows were being dropped,
+  // then held its cursor through retries: only the suffix is left to read.
+  const retained = toJobRecord({
+    ...current,
+    dedupeKey: lastGenerationKey,
+    payload: {
+      ...current.payload,
+      historicalBackfillVersion: lastGeneration,
+      windowStart: "2026-05-12T00:00:00.000Z",
+    },
+  }, 1);
+
+  const finished = await executeImmediateResourceContinuations({
+    context: createJobContext({ account: createAccount({ metadata, sources }) }),
+    job: retained, provider, resource: "weight",
+  });
+
+  assert.ok(requests.length > 0, "the retained scan still reads its suffix");
+  assert.ok(requests.every((request) => request.start! >= "2026-05-12"), "and never its prefix");
+  assertHistoryCoverage({ ...metadata, ...finished.result.metadataPatch }, "omron", "weight", false);
+  // The full scan is still queued beside it, under its own identity.
+  const rescheduled = requireValue(executor.createScheduledJobs)(
+    createStoredAccount({ metadata: { ...metadata, ...finished.result.metadataPatch }, sources }),
+    NOW,
+    { findActiveDedupeKeys: (keys) => new Set(keys.filter((key) => key === lastGenerationKey)) },
+  );
+  const fullScan = findResourceJob(rescheduled.jobs, "weight");
+  assert.notEqual(fullScan.dedupeKey, lastGenerationKey);
+  assert.equal(fullScan.payload?.windowStart, EXTENDED_HISTORY_WINDOW_START);
+  assert.equal(fullScan.payload?.historicalBackfillVersion, historyCoverageVersion("weight"));
+});
+
 test("re-opened weight history stores each reading once beside a webhook fetch and the reconcile re-read", async () => {
   const vaultRoot = await makeTempDirectory("murph-junction-weight-history-reread");
   const coreRuntime = await import("@murphai/core");

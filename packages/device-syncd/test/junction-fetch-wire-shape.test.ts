@@ -702,6 +702,7 @@ test("a coverage generation bump re-reads older summaries once, in place, and re
     }>;
   };
   const requests: string[] = [];
+  let seeding = true;
   const provider = createJunctionProvider(async (request) => {
     const url = new URL(readUrl(request));
     const resource = /^\/v2\/summary\/([a-z_]+)\//u.exec(url.pathname)?.[1];
@@ -720,7 +721,12 @@ test("a coverage generation bump re-reads older summaries once, in place, and re
       const end = url.searchParams.get("end_date")!.slice(0, 10);
       return createJsonResponse({
         [Object.keys(fixture.response({}) as object)[0]!]:
-          (resource === "workouts" ? HISTORY_WORKOUT_DAYS : HISTORY_FETCHED_DAYS)
+          (resource === "workouts"
+            ? HISTORY_WORKOUT_DAYS
+            // The re-read also fetches the activity a webhook already delivered whole.
+            : resource === "activity" && !seeding
+              ? [...HISTORY_FETCHED_DAYS, HISTORY_WEBHOOK_DAY]
+              : HISTORY_FETCHED_DAYS)
             .filter((day) => historyDate(day) >= start && historyDate(day) <= end)
             .map((day) => onHistoryDay(fixture.record, day)),
       });
@@ -783,6 +789,7 @@ test("a coverage generation bump re-reads older summaries once, in place, and re
     assert.equal(before.filter((event) => event.workout).length, HISTORY_WORKOUT_DAYS.length);
 
     requests.length = 0;
+    seeding = false;
     const repair = await runBackfill(settled, importSnapshot);
     // One job reads each summary over the connect window, then on to the
     // reconcile window in spans no longer than the backfill's own. It reads
@@ -811,6 +818,11 @@ test("a coverage generation bump re-reads older summaries once, in place, and re
       event.externalRef?.resourceType, event.externalRef?.resourceId, event.externalRef?.facet,
     ]));
     assert.equal(new Set(identities).size, identities.length, "no record is stored twice");
+    assert.deepEqual(
+      repaired.filter((event) => event.dayKey === historyDate(HISTORY_WEBHOOK_DAY)),
+      before.filter((event) => event.dayKey === historyDate(HISTORY_WEBHOOK_DAY)),
+      "a day already whole gains no event when it is fetched again",
+    );
     // Per fetched day: seven activity facts, five sleep facts and BMI.
     assert.equal(
       identities.length,
