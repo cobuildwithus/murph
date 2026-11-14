@@ -133,7 +133,9 @@ test("catalog daily sources derive recovery policy without a provider allowlist"
     assert.equal(isSourceRecoveryNoticeEligible({ ...input, status: "error", lastErrorCode: "TOKEN_REFRESH_FAILED" }), false);
   }
   assert.equal(readSourceRecoveryNoticePolicy("unknown"), null);
-  assert.equal(readSourceRecoveryNoticePolicy("apple_health")?.silentHours, 72);
+  assert.equal(readSourceRecoveryNoticePolicy("apple_health_kit")?.silentHours, 72);
+  // An alias has no policy: preferences and notices use the canonical slug only.
+  assert.equal(readSourceRecoveryNoticePolicy("apple_health"), null);
 });
 
 test("Garmin recovery notices start after five days of established delivery silence", () => {

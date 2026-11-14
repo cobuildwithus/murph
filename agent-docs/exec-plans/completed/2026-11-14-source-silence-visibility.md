@@ -115,7 +115,7 @@ All commands ran locally using synthetic data; no production services or data.
   timeouts.
 - Prepared `pnpm --dir packages/assistant-engine test`: exit 1, 6,132 passed,
   two instruction-budget failures, 846 opt-in skips. Shortened the device
-  description without raising any budget. Final instruction-budget and device
+  description without raising any budget (superseded in parent review, below). Final instruction-budget and device
   tool files passed together: exit 0, 40 tests. Final engine/runtime typecheck
   also exited 0. All three device live journeys reran against the final wording.
 - Prepared `pnpm exec vitest run --config packages/assistant-runtime/vitest.config.ts
@@ -163,6 +163,18 @@ documented prerequisite. Frog entry
 `20261114134601-thumbnail-checkpoint-stress` records the unrelated shared-host
 thumbnail stress-test timeout and successful unchanged isolated rerun; include
 that public-safe entry with this task.
+
+Parent review after the implementation commit: the device tool's existing
+sentences were restored and only the list_accounts and configure_no_data_outreach
+sentences changed, so the two murph.device ceilings were raised on purpose
+(description 1350 to 1600, declaration 3150 to 3400). The three device live
+journeys reran against that wording: each exit 0. A read-only deep review found
+that deriving policy through the catalog resolver also accepted provider aliases,
+so a preference could be saved under a slug no notice reads. The policy now
+resolves the canonical stored slug only, as the old allowlist did; a regression
+assertion covers the alias. Its other concern is accepted: until the runtime
+deploys, an old runner still describes the preference as limited to three
+providers, so the runtime deploy follows the merge directly.
 
 All observed test failures have passing focused reruns. Parent review is complete;
 close this plan and include it in the scoped commit through scripts/finish-task.

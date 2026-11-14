@@ -114,8 +114,11 @@ export function isPushPrimarySourceProvider(sourceProviderSlug: string): boolean
 export function readSourceRecoveryNoticePolicy(
   sourceProviderSlug: string,
 ): SourceRecoveryNoticePolicy | null {
-  const entry = resolveJunctionDeviceConnectRouteByProviderSlug(sourceProviderSlug);
-  if (!entry?.source.expectsDailyData) {
+  // Preferences and notices are keyed by the stored canonical slug, so an alias
+  // must not resolve here: a preference saved under one would never be read.
+  const slug = sourceProviderSlug.trim().toLowerCase();
+  const entry = resolveJunctionDeviceConnectRouteByProviderSlug(slug);
+  if (!entry?.source.expectsDailyData || entry.route.sourceProviderSlug !== slug) {
     return null;
   }
   return {
