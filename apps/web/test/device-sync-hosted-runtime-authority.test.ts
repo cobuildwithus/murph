@@ -1049,7 +1049,7 @@ describe("ackHostedDeviceSyncDirtyStateProcessed", () => {
 describe("applyHostedDeviceSyncRuntimeResult", () => {
   it("accepts full-envelope sync progress after a canonical version retry", async () => {
     const progress = {
-      junctionHistoricalBackfillStatus: "coverage_v3_complete",
+      junctionHistoricalBackfillStatus: "coverage_v4_complete",
       junctionHistoricalBackfillEmptyAttempts: 0,
       junctionHistoricalBackfillLastEmptyAt: null,
       junctionHistoricalBackfillWindowStart: "2025-01-01",
@@ -2442,7 +2442,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       junctionHistoricalBackfillEmptyAttempts: 5,
       junctionHistoricalBackfillEvidence: `e2|${windowStart}|${windowEnd}|garmin:1`,
       junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
-      junctionHistoricalBackfillStatus: "coverage_v3_exhausted",
+      junctionHistoricalBackfillStatus: "coverage_v4_exhausted",
       junctionHistoricalBackfillWindowEnd: windowEnd,
       junctionHistoricalBackfillWindowStart: windowStart,
     };
@@ -2520,7 +2520,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     const retryingMetadata = {
       junctionHistoricalBackfillEmptyAttempts: 1,
       junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
-      junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+      junctionHistoricalBackfillStatus: "coverage_v4_retrying",
       junctionHistoricalBackfillWindowEnd: windowEnd,
       junctionHistoricalBackfillWindowStart: windowStart,
     };
@@ -2552,7 +2552,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
           metadata: {
             junctionHistoricalBackfillEmptyAttempts: 5,
             junctionHistoricalBackfillLastEmptyAt: "2026-04-06T10:05:00.000Z",
-            junctionHistoricalBackfillStatus: "coverage_v3_exhausted",
+            junctionHistoricalBackfillStatus: "coverage_v4_exhausted",
             junctionHistoricalBackfillWindowEnd: windowEnd,
             junctionHistoricalBackfillWindowStart: windowStart,
           },
@@ -2587,7 +2587,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       junctionHistoricalBackfillEmptyAttempts:
         status === "exhausted" ? 5 : status === "retrying" ? 4 : 0,
       junctionHistoricalBackfillLastEmptyAt: status === "complete" ? null : lastEmptyAt,
-      junctionHistoricalBackfillStatus: `coverage_v3_${status}`,
+      junctionHistoricalBackfillStatus: `coverage_v4_${status}`,
       junctionHistoricalBackfillWindowEnd: windowEnd,
       junctionHistoricalBackfillWindowStart: windowStart,
     });
@@ -2718,7 +2718,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
       junctionHistoricalBackfillEmptyAttempts: 1,
       junctionHistoricalBackfillEvidence: `e2|${windowStart}|${windowEnd}|garmin:1`,
       junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
-      junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+      junctionHistoricalBackfillStatus: "coverage_v4_retrying",
       junctionHistoricalBackfillWindowEnd: windowEnd,
       junctionHistoricalBackfillWindowStart: windowStart,
     };
@@ -2807,7 +2807,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         metadata: {
           junctionHistoricalBackfillEmptyAttempts: emptyAttempts,
           junctionHistoricalBackfillLastEmptyAt: "2026-04-06T10:00:00.000Z",
-          junctionHistoricalBackfillStatus: `coverage_v3_${status}`,
+          junctionHistoricalBackfillStatus: `coverage_v4_${status}`,
           junctionHistoricalBackfillWindowEnd: windowEnd,
           junctionHistoricalBackfillWindowStart: windowStart,
         },
@@ -2917,7 +2917,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
     const retryingMetadata = {
       junctionHistoricalBackfillEmptyAttempts: 1,
       junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
-      junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+      junctionHistoricalBackfillStatus: "coverage_v4_retrying",
       junctionHistoricalBackfillWindowEnd: windowEnd,
       junctionHistoricalBackfillWindowStart: windowStart,
     };
@@ -2949,7 +2949,7 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
           metadata: {
             junctionHistoricalBackfillEmptyAttempts: 5,
             junctionHistoricalBackfillLastEmptyAt: "2026-04-06T10:05:00.000Z",
-            junctionHistoricalBackfillStatus: "coverage_v3_exhausted",
+            junctionHistoricalBackfillStatus: "coverage_v4_exhausted",
             junctionHistoricalBackfillWindowEnd: windowEnd,
             junctionHistoricalBackfillWindowStart: windowStart,
           },

@@ -1,12 +1,17 @@
 import assert from "node:assert/strict";
-import { rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { readdir, readFile, rm } from "node:fs/promises";
+import path from "node:path";
 import {
   ClientActivityResponse,
   ClientBodyResponse,
   ClientFacingActivity,
+  ClientFacingBody,
   ClientFacingElectrocardiogramResponse,
   ClientFacingMealResponse,
   ClientFacingProfile,
+  ClientFacingSleep,
+  ClientFacingSleepCycle,
   ClientFacingStream,
   ClientFacingWorkout,
   ClientSleepCycleResponse,
@@ -30,9 +35,12 @@ import { test } from "vitest";
 
 import { JunctionClient } from "../src/providers/junction-client.ts";
 import {
+  createAccount,
   createJob,
+  createJobFromInput,
   createJunctionJobContext,
   createJunctionProvider,
+  createStoredAccount,
   executeJunctionJob,
 } from "./junction-provider.harness.ts";
 import { createJsonResponse, makeTempDirectory, readUrl } from "./helpers.ts";
@@ -607,6 +615,242 @@ test("re-reading a day repairs records imported while fields were being dropped"
     await importSnapshot(activity);
     await importSnapshot(workout);
     assert.equal((await readLedger()).length, repaired.length, "a further re-read is a no-op");
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+// Older history is read again by one path only: the connect-window backfill a
+// coverage generation bump re-queues, which then continues to the reconcile
+// window. These days were imported once already, in the shape that dropped
+// fields: the days before the connection by its first backfill, and later
+// days by the fetch for a source that joined afterwards.
+const HISTORY_CONNECTED_AT = "2026-04-14T15:00:00.000Z";
+const HISTORY_NOW = "2026-05-20T12:00:00.000Z";
+const HISTORY_WINDOW = {
+  windowStart: "2026-04-01T00:00:00.000Z",
+  windowEnd: "2026-04-14T00:00:00.000Z",
+};
+// Day 0 is 2026-04-01. Twelve days before the connection, two fetched after it.
+const HISTORY_FETCHED_DAYS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 18, 31];
+// Delivered whole by webhook after the connection; the re-read must not touch it.
+const HISTORY_WEBHOOK_DAY = 24;
+const HISTORY_WORKOUT_DAYS = HISTORY_FETCHED_DAYS.filter((day) => day % 3 === 0);
+const HISTORY_SUMMARY_SERIALIZERS: Record<string, SdkResponseSerializer> = {
+  activity: ClientFacingActivity,
+  body: ClientFacingBody,
+  sleep: ClientFacingSleep,
+  sleep_cycle: ClientFacingSleepCycle,
+  workouts: ClientFacingWorkout,
+};
+
+function historyDate(day: number): string {
+  return new Date(Date.UTC(2026, 3, 1 + day)).toISOString().slice(0, 10);
+}
+
+/** The fixture record moved onto one history day, with ids of its own. */
+function onHistoryDay(record: Record<string, unknown>, day: number): Record<string, unknown> {
+  const suffix = String(day).padStart(2, "0");
+  return JSON.parse(
+    JSON.stringify(record)
+      .replace(/2026-04-0([23])/gu, (_match, fixtureDay: string) => historyDate(day + Number(fixtureDay) - 2))
+      .replace(/([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-8[0-9a-f]{3}-[0-9a-f]{10})[0-9a-f]{2}/gu, `$1${suffix}`)
+      .replace(/provider-workout-1/gu, `provider-workout-${suffix}`),
+  ) as Record<string, unknown>;
+}
+
+async function hashVaultTree(root: string): Promise<Map<string, string>> {
+  const hashes = new Map<string, string>();
+  for (const entry of await readdir(root, { recursive: true, withFileTypes: true })) {
+    if (!entry.isFile()) continue;
+    const file = path.join(entry.parentPath, entry.name);
+    hashes.set(path.relative(root, file), createHash("sha256").update(await readFile(file)).digest("hex"));
+  }
+  return hashes;
+}
+
+test("a coverage generation bump re-reads older summaries once, in place, and repeats as a no-op", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-history-repull");
+  const coreRuntime = await import("@murphai/core");
+  await initializeVault({ vaultRoot });
+  const importSnapshot = (snapshot: JunctionSnapshotInput) => importDeviceProviderSnapshot({
+    vaultRoot, provider: "junction", snapshot,
+  }, { corePort: coreRuntime });
+  // The pre-fix import: the same sanitized records in the SDK's parsed shape.
+  const importDroppingFields = (snapshot: JunctionSnapshotInput) => importSnapshot({
+    ...snapshot,
+    summaries: Object.fromEntries(Object.entries(snapshot.summaries ?? {}).map(([resource, records]) => [
+      resource,
+      (records as unknown[]).map((record) => JSON.parse(JSON.stringify(
+        HISTORY_SUMMARY_SERIALIZERS[resource]!.parseOrThrow(record, { ...SDK_PARSE_OPTIONS, skipValidation: true }),
+      )) as unknown),
+    ])),
+  });
+  const readLedger = async () => {
+    const shards = (await readdir(path.join(vaultRoot, "ledger/events"), { recursive: true }))
+      .filter((file) => file.endsWith(".jsonl")).sort();
+    const events = await Promise.all(shards.map((file) => readJsonlRecords({
+      vaultRoot, relativePath: path.join("ledger/events", file),
+    })));
+    return events.flat() as Array<{
+      dayKey?: string;
+      externalRef?: { facet?: string; resourceId?: string; resourceType?: string };
+      id?: string;
+      lifecycle?: { revision?: number };
+      metric?: string;
+      workout?: { metrics?: Record<string, unknown> };
+    }>;
+  };
+  const requests: string[] = [];
+  const provider = createJunctionProvider(async (request) => {
+    const url = new URL(readUrl(request));
+    const resource = /^\/v2\/summary\/([a-z_]+)\//u.exec(url.pathname)?.[1];
+    requests.push(resource
+      ? `${resource} ${url.searchParams.get("start_date")} ${url.searchParams.get("end_date")}`
+      : url.pathname);
+    if (url.pathname.includes("/user/providers/")) {
+      return createJsonResponse({ providers: [{
+        id: "synthetic-provider", name: "Garmin", slug: "garmin", status: "connected",
+        resource_availability: {},
+      }] });
+    }
+    if (resource && HISTORY_SUMMARY_SERIALIZERS[resource]) {
+      const fixture = SUMMARY_FIXTURES[resource]!;
+      const start = url.searchParams.get("start_date")!.slice(0, 10);
+      const end = url.searchParams.get("end_date")!.slice(0, 10);
+      return createJsonResponse({
+        [Object.keys(fixture.response({}) as object)[0]!]:
+          (resource === "workouts" ? HISTORY_WORKOUT_DAYS : HISTORY_FETCHED_DAYS)
+            .filter((day) => historyDate(day) >= start && historyDate(day) <= end)
+            .map((day) => onHistoryDay(fixture.record, day)),
+      });
+    }
+    if (url.pathname.startsWith("/v2/timeseries/")) {
+      return createJsonResponse({ groups: {} });
+    }
+    throw new Error(`Unexpected request: ${url.pathname}`);
+  }, {
+    summaryBackfillDays: 13,
+    summaryResources: Object.keys(HISTORY_SUMMARY_SERIALIZERS),
+    timeseriesResources: ["blood_oxygen", "hrv", "respiratory_rate", "steps", "weight", "fat"],
+  });
+  const schedule = (metadata: Record<string, unknown>) => provider.jobExecutor!.createScheduledJobs!(
+    createStoredAccount({ connectedAt: HISTORY_CONNECTED_AT, metadata }),
+    HISTORY_NOW,
+  ).jobs.filter((job) => job.kind === "backfill");
+  const runBackfill = async (
+    metadata: Record<string, unknown>,
+    sink: (snapshot: JunctionSnapshotInput) => Promise<unknown>,
+  ) => {
+    const [job] = schedule(metadata);
+    assert.ok(job, "the connect-window backfill should be due");
+    assert.deepEqual(job.payload, HISTORY_WINDOW);
+    const result = await executeJunctionJob(provider, createJunctionJobContext({
+      account: createAccount({ connectedAt: HISTORY_CONNECTED_AT, metadata }),
+      now: HISTORY_NOW,
+      vaultTimeZone: VAULT_TIME_ZONE,
+      importSnapshot: async (snapshot) => {
+        await sink(JSON.parse(JSON.stringify(snapshot)) as JunctionSnapshotInput);
+        return { imported: true };
+      },
+    }), createJobFromInput(job));
+    return result;
+  };
+  // What the last generation left behind: its terminal status and the
+  // temporal sweep marker the reconcile owns.
+  const settled = {
+    junctionHistoricalBackfillStatus: "coverage_v3_complete",
+    junctionHistoricalBackfillEmptyAttempts: 0,
+    junctionHistoricalBackfillLastEmptyAt: null,
+    junctionHistoricalBackfillWindowStart: HISTORY_WINDOW.windowStart,
+    junctionHistoricalBackfillWindowEnd: HISTORY_WINDOW.windowEnd,
+    junctionTemporalSweepV1: "the-reconcile-owned-sweep-marker",
+  };
+
+  try {
+    await runBackfill(settled, importDroppingFields);
+    const [webhookDay] = await importResource({
+      category: "summary", resource: "activity",
+      inlineRecord: onHistoryDay(SUMMARY_FIXTURES.activity!.record, HISTORY_WEBHOOK_DAY),
+    });
+    assert.ok(webhookDay);
+    await importSnapshot(webhookDay);
+    const before = await readLedger();
+    const fetchedBefore = before.filter((event) => event.dayKey !== historyDate(HISTORY_WEBHOOK_DAY));
+    for (const metric of ["resting-heart-rate", "active-calories", "hrv", "bmi"]) {
+      assert.equal(fetchedBefore.some((event) => event.metric === metric), false, metric);
+    }
+    assert.equal(before.filter((event) => event.workout).length, HISTORY_WORKOUT_DAYS.length);
+
+    requests.length = 0;
+    const repair = await runBackfill(settled, importSnapshot);
+    // One job reads each summary over the connect window, then on to the
+    // reconcile window in spans no longer than the backfill's own. It reads
+    // no timeseries and queues none: not the bounded window, not a sweep.
+    assert.deepEqual(requests, [
+      "/v2/user/providers/junction-user-1",
+      ...[
+        ["2026-04-01T00:00:00.000Z", "2026-04-14T00:00:00.000Z"],
+        ["2026-04-14T00:00:00.000Z", "2026-04-27T00:00:00.000Z"],
+        ["2026-04-27T00:00:00.000Z", "2026-05-10T00:00:00.000Z"],
+        ["2026-05-10T00:00:00.000Z", "2026-05-13T12:00:00.000Z"],
+      ].flatMap(([start, end]) => Object.keys(HISTORY_SUMMARY_SERIALIZERS).map(
+        // Sleep cycles are queried by calendar date, with an inclusive end.
+        (resource) => resource === "sleep_cycle"
+          ? `${resource} ${start!.slice(0, 10)} ${new Date(Date.parse(end!) - 1).toISOString().slice(0, 10)}`
+          : `${resource} ${start} ${end}`,
+      )),
+    ]);
+    assert.deepEqual(repair.scheduledJobs ?? [], []);
+    assert.equal(repair.metadataPatch?.junctionHistoricalBackfillStatus, "coverage_v4_complete");
+    assert.equal("junctionTemporalSweepV1" in (repair.metadataPatch ?? {}), false);
+    assert.deepEqual(schedule({ ...settled, ...repair.metadataPatch }), [], "the re-read runs once");
+
+    const repaired = await readLedger();
+    const identities = repaired.filter((event) => !event.workout).map((event) => JSON.stringify([
+      event.externalRef?.resourceType, event.externalRef?.resourceId, event.externalRef?.facet,
+    ]));
+    assert.equal(new Set(identities).size, identities.length, "no record is stored twice");
+    // Per fetched day: seven activity facts, five sleep facts and BMI.
+    assert.equal(
+      identities.length,
+      before.filter((event) => !event.workout).length + HISTORY_FETCHED_DAYS.length * 13,
+    );
+    for (const [metric, perDay] of [
+      ["active-calories", 1], ["total-calories", 1], ["walking-average-heart-rate", 1],
+      ["hrv", 1], ["bmi", 1],
+    ] as const) {
+      assert.equal(
+        repaired.filter((event) => event.metric === metric
+          && event.dayKey !== historyDate(HISTORY_WEBHOOK_DAY)).length,
+        HISTORY_FETCHED_DAYS.length * perDay,
+        metric,
+      );
+    }
+    // Each stored workout gains its heart rate as one new revision of the same event.
+    const workouts = repaired.filter((event) => event.workout);
+    assert.equal(new Set(workouts.map((event) => event.id)).size, HISTORY_WORKOUT_DAYS.length);
+    assert.deepEqual(
+      workouts.map((event) => event.lifecycle?.revision ?? 1).sort(),
+      HISTORY_WORKOUT_DAYS.flatMap(() => [1, 2]).sort(),
+    );
+    assert.equal(
+      workouts.filter((event) => event.workout?.metrics?.averageHeartRate === 141).length,
+      HISTORY_WORKOUT_DAYS.length,
+    );
+
+    // The same re-read again changes no file in the vault. A late webhook for
+    // one of its days stores that delivery's raw payload and no event.
+    const vault = await hashVaultTree(vaultRoot);
+    await runBackfill(settled, importSnapshot);
+    assert.deepEqual(await hashVaultTree(vaultRoot), vault);
+    const [lateWebhook] = await importResource({
+      category: "summary", resource: "activity",
+      inlineRecord: onHistoryDay(SUMMARY_FIXTURES.activity!.record, 5),
+    });
+    assert.ok(lateWebhook);
+    await importSnapshot(lateWebhook);
+    assert.deepEqual(await readLedger(), repaired);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

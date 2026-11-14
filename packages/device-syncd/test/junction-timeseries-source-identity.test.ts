@@ -14,10 +14,11 @@ import type { ProviderJobContext } from "../src/types.ts";
 
 type ImportedSnapshot = Parameters<ProviderJobContext["importSnapshot"]>[0];
 
-// One provider sample reaches the vault twice: once from the fetch a data
-// webhook queues, and again from the daily closed-day reconcile. Every
-// canonical id hashes the record's source instance id, so both paths must
-// stamp the same one or the re-read stores the sample under a second id.
+// One provider sample reaches the vault more than once: from the fetch a data
+// webhook queues, again from the daily closed-day reconcile, and again from a
+// backfill that retries its window. Every canonical id hashes the record's
+// source instance id, so every path must stamp the same one or the re-read
+// stores the sample under a second id.
 // Fetched per workout or recording, or from the separately named body
 // endpoints, so this window fixture does not reach them.
 const OTHER_FETCH_SHAPES = new Set<string>([
@@ -26,8 +27,9 @@ const OTHER_FETCH_SHAPES = new Set<string>([
 ]);
 
 test.each(
-  JUNCTION_KNOWN_TIMESERIES_RESOURCES.filter((resource) => !OTHER_FETCH_SHAPES.has(resource)),
-)("Junction %s gets one source instance id from the webhook and reconcile paths", async (resource) => {
+  JUNCTION_KNOWN_TIMESERIES_RESOURCES.filter((resource) => !OTHER_FETCH_SHAPES.has(resource))
+    .flatMap((resource) => (["reconcile", "backfill"] as const).map((rereadKind) => ({ resource, rereadKind }))),
+)("Junction $resource gets one source instance id from the webhook and $rereadKind paths", async ({ resource, rereadKind }) => {
   const source = createConnectionSource();
   const snapshots: ImportedSnapshot[] = [];
   const provider = createJunctionProvider(async (input) => {
@@ -67,7 +69,7 @@ test.each(
   await executeJunctionJob(provider, context, createJob("resource", {
     resource, resourceCategory: "timeseries", sourceProviderSlug: "garmin", ...window,
   }));
-  await executeJunctionJob(provider, context, createJob("reconcile", {
+  await executeJunctionJob(provider, context, createJob(rereadKind, {
     sourceProviderSlug: "garmin",
     timeseriesCursor: window.windowStart,
     timeseriesResourceCursor: resource,
@@ -75,9 +77,9 @@ test.each(
   }));
 
   assert.equal(snapshots.length, 2);
-  const [webhookIdentity, reconcileIdentity] = snapshots.map(readSnapshotSourceInstanceIds);
+  const [webhookIdentity, rereadIdentity] = snapshots.map(readSnapshotSourceInstanceIds);
   assert.equal(webhookIdentity.length, 1);
-  assert.deepEqual(reconcileIdentity, webhookIdentity);
+  assert.deepEqual(rereadIdentity, webhookIdentity);
 });
 
 function readSnapshotSourceInstanceIds(snapshot: ImportedSnapshot): string[] {

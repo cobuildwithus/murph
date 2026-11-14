@@ -3500,7 +3500,7 @@ test("Junction stale metadata backfill cannot suppress the current closed-day op
       },
       connectedAt: "2026-04-03T00:00:00.000Z",
       metadata: {
-        junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+        junctionHistoricalBackfillStatus: "coverage_v4_retrying",
         junctionHistoricalBackfillEmptyAttempts: 1,
         junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
         junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -8516,7 +8516,7 @@ test("manual reconcile preserves delayed Junction retry metadata timing", async 
       },
       connectedAt: ownerWindowEnd,
       metadata: {
-        junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+        junctionHistoricalBackfillStatus: "coverage_v4_retrying",
         junctionHistoricalBackfillEmptyAttempts: 1,
         junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
         junctionHistoricalBackfillWindowStart: ownerWindowStart,
@@ -8627,7 +8627,7 @@ test("device sync service wakes Junction retrying historical backfill at the ret
     assert.equal(processedJob?.kind, "backfill");
 
     const afterEmptyBackfill = store.getAccountById(account.id);
-    assert.equal(afterEmptyBackfill?.metadata.junctionHistoricalBackfillStatus, "coverage_v3_retrying");
+    assert.equal(afterEmptyBackfill?.metadata.junctionHistoricalBackfillStatus, "coverage_v4_retrying");
     assert.equal(afterEmptyBackfill?.metadata.junctionHistoricalBackfillEmptyAttempts, 1);
     assert.equal(afterEmptyBackfill?.metadata.junctionHistoricalBackfillLastEmptyAt, executedAt);
     assert.equal(afterEmptyBackfill?.nextReconcileAt, retryDueAt);
@@ -8804,7 +8804,7 @@ test("device sync scheduler immediately repairs legacy Junction coverage progres
 
     assert.equal(repairJob?.id, queuedBackfill.id);
     assert.equal(store.getJobById(queuedBackfill.id)?.status, "succeeded");
-    assert.equal(repairedAccount?.metadata.junctionHistoricalBackfillStatus, "coverage_v3_retrying");
+    assert.equal(repairedAccount?.metadata.junctionHistoricalBackfillStatus, "coverage_v4_retrying");
     assert.equal(repairedAccount?.metadata.junctionHistoricalBackfillEmptyAttempts, 1);
     assert.equal(repairedAccount?.metadata.junctionHistoricalBackfillLastEmptyAt, scheduledAt);
     assert.equal(repairedAccount?.nextReconcileAt, repairRetryDueAt);
@@ -8860,7 +8860,7 @@ test("device sync scheduler rematerializes dead Junction metadata retries", asyn
       },
       connectedAt: ownerWindowEnd,
       metadata: {
-        junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+        junctionHistoricalBackfillStatus: "coverage_v4_retrying",
         junctionHistoricalBackfillEmptyAttempts: 1,
         junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
         junctionHistoricalBackfillWindowStart: ownerWindowStart,
@@ -12783,7 +12783,7 @@ test("sqlite store prioritizes metadataPatch entries when capped metadata is ful
       metadataPatch: {
         junctionHistoricalBackfillEmptyAttempts: 1,
         junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:00:00.000Z",
-        junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+        junctionHistoricalBackfillStatus: "coverage_v4_retrying",
         junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
         junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
       },
@@ -12803,7 +12803,7 @@ test("sqlite store prioritizes metadataPatch entries when capped metadata is ful
     {
       junctionHistoricalBackfillEmptyAttempts: 1,
       junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:00:00.000Z",
-      junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+      junctionHistoricalBackfillStatus: "coverage_v4_retrying",
       junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
       junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
     },

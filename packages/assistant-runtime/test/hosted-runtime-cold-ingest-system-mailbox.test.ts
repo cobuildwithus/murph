@@ -50,7 +50,7 @@ test.each(["available", "unavailable"] as const)(
         return { ...snapshot, connections: snapshot.connections.map((entry) => ({
           ...entry,
           connection: { ...entry.connection, provider: "junction", externalAccountId: "synthetic-junction",
-            metadata: { junctionHistoricalBackfillStatus: "coverage_v3_complete" } },
+            metadata: { junctionHistoricalBackfillStatus: "coverage_v4_complete" } },
           sources: [{ displayName: "Garmin", firstSeenAt: "2026-03-01T00:00:00.000Z", lastDataAt: null,
             lastErrorCode: null, lastErrorMessage: null, lastSeenAt: TEST_NOW, resourceCount: 1,
             resourceAvailabilitySummary: { activity: true },

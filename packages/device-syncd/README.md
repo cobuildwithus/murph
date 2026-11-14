@@ -410,10 +410,12 @@ job's segment; a continuation resumes after the completed prefix. Blood pressure
 keeps exact per-reading completion, and note history keeps complete-fetch
 semantics. All extended timeseries completion shares one fixed-width,
 source-by-resource matrix in an existing blood-pressure or note metadata slot.
-Its existing envelope generation advances to `m2` for this rollout because the
-packed bits do not carry per-resource policy versions: pre-180-day `m1` bits are
-structurally readable but stale and writable, while future envelopes remain
-opaque. Unsupported route identities fail before history egress rather than
+The packed bits do not carry per-resource policy versions, so the envelope
+generation is what retires them. The current envelope is `m3`. Pre-180-day `m1`
+bits are structurally readable but stale and writable. An `m2` matrix is read
+without its `weight` column, because `m2` certified weight history while fetched
+weight rows were being dropped, and every other `m2` bit stands. Every write is
+`m3`, and future envelopes remain opaque. Unsupported route identities fail before history egress rather than
 advancing an unretainable checkpoint. Every date-mode
 timeseries fetch preserves one complete provider
 calendar date during both migration and normal reconcile; a provider-bearing
@@ -428,6 +430,69 @@ the live reconcile boundary after every completed segment and continues until
 no middle gap remains. An explicit timeseries backfill override still governs
 only the generic bounded timeseries policy; it does not shorten the fixed
 extended-history horizon.
+
+### Re-reading history after an importer fix
+
+History that an importer bug stored incompletely is read again by advancing a
+generation, never by a one-off job. Two generations exist, and each re-reads a
+different thing.
+
+- **Summaries.** Advancing `JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION`
+  re-queues the connect-window backfill of every connection whose stored status
+  carries an older generation, on that connection's next scheduled reconcile.
+  A window that had already settled (`complete` or `exhausted`) is re-read, not
+  re-opened: the job fetches each summary over the connect window and then on
+  to the start of the reconcile window, in spans no longer than the backfill's
+  own, because a source added or reconnected after the connection date had its
+  history fetched then. It reads no timeseries and queues no timeseries or
+  temporal jobs, it keeps the stored outcome (an exhausted window can become
+  complete, and nothing re-enters the retry ladder), and it writes the status
+  under the current generation when it finishes. A re-read that yields to the
+  foreground leaves the older status in place and is queued again by the next
+  scheduled pass. A window that was still `retrying`, or has no status, runs
+  the ordinary full backfill and restarts its ladder.
+- **Weight.** The envelope generation of the extended-history matrix, above.
+  `m3` re-opens weight for each source whose weight bit sat in an `m2` matrix;
+  the existing one-history-job-per-connection-per-interval selector queues it.
+  The scan covers the 180 days before the day it is scheduled. The per-resource
+  generation in `JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_VERSIONS` does
+  not re-read anything: it fences which in-flight job may certify a bit.
+
+`fat`, `body_mass_index`, `lean_body_mass` and `waist_circumference` timeseries
+have no extended history, so neither generation reaches their readings older
+than the reconcile window; the daily `body` summary carries weight, fat and BMI.
+
+Progress is the stored state per connection. These read-only aggregates count
+connections and name none:
+
+```sql
+-- Summaries: rows move from coverage_v<old>_* to coverage_v<current>_*.
+select coalesce(metadata_json->>'junctionHistoricalBackfillStatus', '(none)') as connect_window,
+       count(*) as connections
+from device_connection
+where provider = 'junction' and status = 'active'
+group by 1 order by 1;
+
+-- Weight: source-by-weight bits set per envelope. A bit under m2 is waiting
+-- for its re-read; the same bit under m3 has had it. An m3 prefix alone does
+-- not mean weight is done, since any completion rewrites the envelope.
+select left(matrix, 2) as envelope, sum(weight_bit) as weight_bits,
+       count(distinct id) filter (where weight_bit = 1) as connections
+from (
+  select c.id, m.matrix,
+         (get_byte(decode(substr(m.matrix, 4), 'hex'), (13 * s + 12) / 8) >> ((13 * s + 12) % 8)) & 1 as weight_bit
+  from device_connection c
+  cross join lateral (values (c.metadata_json->>'junctionBloodPressureHistoryBackfillCoverage'),
+                             (c.metadata_json->>'junctionNoteHistoryBackfillCoverage')) as m(matrix)
+  cross join generate_series(0, 63) as s
+  where c.provider = 'junction' and c.status = 'active' and m.matrix ~ '^m[23][|][0-9a-f]{208}$'
+) bits
+group by 1 order by 1;
+```
+
+The weight query hard-codes the matrix layout: 13 resource columns per source
+with `weight` in column 12. Update it with
+`JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_SLOTS`.
 
 Junction's historical-pull status is authoritative when available. A `success`
 completes its source/resource obligation even when the provider reports zero
