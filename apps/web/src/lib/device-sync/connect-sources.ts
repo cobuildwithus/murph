@@ -328,8 +328,34 @@ function lastDataAtField(source: { lastDataAt?: string | null }): { lastDataAt?:
   return source.lastDataAt === undefined ? {} : { lastDataAt: source.lastDataAt };
 }
 
+/**
+ * Sources whose logo is a bare symbol with no margin of its own. Each has a
+ * copy in `brand-logos/connect/tile/`, centred with room around it, because a
+ * logo that fills its image touches the edge of a rounded tile. The website's
+ * own cards keep the original files.
+ */
+const TILE_LOGO_SOURCE_IDS = new Set<string>([
+  "abbott-libreview",
+  "beurer",
+  "cronometer",
+  "eight-sleep",
+  "fitbit",
+  "freestyle-libre",
+  "freestyle-libre-ble",
+  "garmin",
+  "google-fit",
+  "peloton",
+  "polar",
+  "tandem-source",
+]);
+
+/** The PNG logo drawn on a white rounded tile: the app's list and a connect link's card. */
 export function connectSourcePngLogoPath(id: string): string | null {
-  return readConnectSourceUi(id)?.logo.src.replace(/\.svg$/u, ".png") ?? null;
+  const src = readConnectSourceUi(id)?.logo.src;
+  if (!src) return null;
+  return TILE_LOGO_SOURCE_IDS.has(id)
+    ? `/brand-logos/connect/tile/${id}.png`
+    : src.replace(/\.svg$/u, ".png");
 }
 
 export function listVisibleDeviceConnectSources(): ConnectSource[] {
