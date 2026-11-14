@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import sharp from 'sharp'
+import * as z from '@murphai/contracts/zod-runtime'
 import { afterEach, expect, test, vi } from 'vitest'
 import { executeGenerateImageTool } from '../src/assistant-codex/generate-image-tool.ts'
 import { executeGenerateSongTool } from '../src/assistant-codex/generate-voice-memo-tool.ts'
@@ -10,6 +11,7 @@ import { readRecapFile, saveRecapMediaFile } from '../src/assistant/recap-files.
 import { createAssistantHostedToolContext } from '../src/assistant/hosted-tool-context.ts'
 import { resolveAssistantSession } from '../src/assistant/store.ts'
 import { parseGenerateSongArguments } from '../src/assistant-codex/dynamic-tools/generate-song.ts'
+import type { AssistantHostedGroupTool } from '../src/assistant/execution-context.ts'
 
 const roots: string[] = []
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
@@ -30,7 +32,7 @@ test.each([false, true])('file image uses Sunburst with truthful accounting and 
   })
   const result = await executeGenerateImageTool({ env: { OPENAI_API_KEY: 'synthetic-key' }, fetchImpl, vaultRoot: root,
     persistGeneratedImageCapture: persist, requireHostedPrivateImageDelivery: true, providerRequestOrdinal: 1,
-    args: { output: 'file', outputFormat: 'jpeg', referenceImageRefs: withReference ? ['synthetic-reference'] : [], prompt: 'Synthetic paper theatre.', alt: null, quality: 'medium', size: '1024x1024' },
+    args: { outputFormat: 'jpeg', referenceImageRefs: withReference ? ['synthetic-reference'] : [], prompt: 'Synthetic paper theatre.', alt: null, quality: 'medium', size: '1024x1024' },
     fileRuntime: { fetchImpl, resolveReferences: async () => withReference ? [{ bytes, filename: 'reference.jpg', mediaType: 'image/jpeg',
       sourceRef: 'synthetic-reference', sha256: createHash('sha256').update(bytes).digest('hex'), sourceRefSha256: 'a'.repeat(64) }] : [], save: (data, mediaType) => saveRecapMediaFile({ vault: root, relativeRoot, bytes: data, mediaType }) } })
   expect(result.rpcSuccess).toBe(true)
@@ -50,7 +52,7 @@ test.each(['environment', 'host-only runtime'] as const)('file song uses %s cred
   const fetchImpl = vi.fn<typeof fetch>(async () => new Response(bytes))
   const save = vi.fn(async () => `${relativeRoot}/media/theme.mp3`)
   const result = await executeGenerateSongTool({ env: credentialSource === 'environment' ? { ELEVENLABS_API_KEY: 'synthetic-key' } : {},
-    args: { output: 'file', durationSeconds: 20, instrumental: false, prompt: 'An original playful song for Player A and Player B.' },
+    args: { durationSeconds: 20, instrumental: false, prompt: 'An original playful song for Player A and Player B.' },
     fileRuntime: { elevenLabsApiKey: credentialSource === 'host-only runtime' ? 'synthetic-key' : undefined, fetchImpl, resolveReferences: async () => [], save } })
   expect(result.rpcSuccess).toBe(true)
   expect(result.responseMedia).toBeUndefined()
@@ -89,7 +91,7 @@ test('recap media and trusted song timing belong only to the attempt that genera
   const material = { game: { id: 'game_synthetic', days: [] }, players: ['Leo', 'Ava'], entries: [],
     result: [{ memberId: 'leo', name: 'Leo', score: 4 }, { memberId: 'ava', name: 'Ava', score: 3 }], startedAt, settledAt, references: [] }
   await context.prepareGameRecapInputs!(material)
-  const args = { output: 'file' as const, durationSeconds: 20, instrumental: false, prompt: 'Playful piano', lyrics: ['Leo goes', 'Ava stays'] }
+  const args = { durationSeconds: 20, instrumental: false, prompt: 'Playful piano', lyrics: ['Leo goes', 'Ava stays'] }
   const bytes = await readFile(new URL('../../../fixtures/generated-audio/music.mp3', import.meta.url))
   const words = [{ word: 'Leo', start_ms: 100, end_ms: 300 }, { word: 'goes', start_ms: 400, end_ms: 600 }]
   const fetchImpl = vi.fn<typeof fetch>(async () => new Response(Buffer.concat([
@@ -107,7 +109,7 @@ test('recap media and trusted song timing belong only to the attempt that genera
   expect((await context.readGameRecapMedia!(receipt.path)).wordsTimestamps?.[0].word).toBe('Leo')
   expect((await context.readGameRecapMedia!(other)).wordsTimestamps?.[0].word).toBe('Ava')
   const imageRuntime = await context.prepareRecapMedia!({ kind: 'image', args: {
-    output: 'file', outputFormat: 'jpeg', referenceImageRefs: [], prompt: 'Synthetic paper theatre.',
+    outputFormat: 'jpeg', referenceImageRefs: [], prompt: 'Synthetic paper theatre.',
     alt: null, quality: 'medium', size: '1024x1024',
   } }, fetchImpl)
   const imageBytes = await sharp({ create: { width: 64, height: 64, channels: 3, background: 'white' } }).jpeg().toBuffer()
@@ -129,12 +131,52 @@ test('recap media and trusted song timing belong only to the attempt that genera
   await expect(context.readGameRecapMedia!(receipt.path)).rejects.toThrow('Select a file')
 })
 
+test('a scene names its references by photo path or id, and anything else is refused before any request', async () => {
+  const root = await vault()
+  const { session } = await resolveAssistantSession({ vault: root })
+  const startedAt = '2026-11-01T00:00:00Z', settledAt = '2026-11-08T00:00:00Z'
+  const referenceIds = ['a'.repeat(64), 'b'.repeat(64)]
+  const bytes = await sharp({ create: { width: 64, height: 64, channels: 3, background: 'white' } }).jpeg().toBuffer()
+  const hash = createHash('sha256').update(bytes).digest('hex')
+  const request = vi.fn<AssistantHostedGroupTool['request']>(async input => {
+    if (input.action !== 'read_game') throw new Error('Unexpected action')
+    return { action: 'read_game', result: { status: 'ok', recapGame: input.recapRead?.kind === 'reference'
+      ? { id: input.recapRead.id, bytes: bytes.toString('base64'), hash, mediaType: 'image/jpeg', byteLength: bytes.length, width: 64, height: 64 }
+      : { messages: [], next: null, through: '0', since: startedAt, until: settledAt, retainedSince: startedAt, incomplete: false } } }
+  })
+  const context = createAssistantHostedToolContext({ session, messageInput: { vault: root, prompt: '', channel: 'linq' }, executionContext: {
+    memberId: 'synthetic-member', userEnvKeys: [], groupTool: { request },
+    gameRecapScope: { gameId: 'game_synthetic', eventId: 'game-recap:game_synthetic', pairFingerprint: 'a'.repeat(32), show: true },
+  } })
+  const manifest = z.object({ files: z.object({ game: z.string() }) }).parse(await context.prepareGameRecapInputs!({ game: { id: 'game_synthetic' }, players: ['Player A', 'Player B'], entries: [],
+    result: [{ memberId: 'a', name: 'Player A', score: 4 }, { memberId: 'b', name: 'Player B', score: 3 }], startedAt, settledAt,
+    references: [{ id: referenceIds[0]!, kind: 'profile', memberId: 'a' }, { id: referenceIds[1]!, kind: 'murph' }] }))
+  const photoPath = z.object({ references: z.array(z.object({ path: z.string() })) }).parse(JSON.parse(await readFile(path.join(root, manifest.files.game), 'utf8'))).references[0]!.path
+  request.mockClear()
+  const fetchImpl = vi.fn<typeof fetch>()
+  const args = { outputFormat: 'jpeg' as const, prompt: 'Synthetic paper theatre.', alt: null, quality: 'high' as const, size: '1024x1536' as const }
+  const unknownRefs = ['skill-assets/murph-character-sheet-v1.png', 'c'.repeat(64), 'x'.repeat(200)]
+  await expect(context.prepareRecapMedia!({ kind: 'image', args: { ...args, referenceImageRefs: [photoPath, ...unknownRefs] } }, fetchImpl))
+    .rejects.toThrow(`Nothing was generated and no media request was used. referenceImageRefs takes the path of a photo listed under references in game.json. Not one of them: "skill-assets/murph-character-sheet-v1.png", "${'c'.repeat(64)}", "${'x'.repeat(120)}".`)
+  expect(request).not.toHaveBeenCalled()
+  expect(fetchImpl).not.toHaveBeenCalled()
+
+  const refs = [photoPath, referenceIds[1]!]
+  const runtime = await context.prepareRecapMedia!({ kind: 'image', args: { ...args, referenceImageRefs: refs } }, fetchImpl)
+  expect(request).not.toHaveBeenCalled()
+  expect(await runtime.resolveReferences(refs)).toEqual(referenceIds.map(id => expect.objectContaining({ sourceRef: id, bytes, sha256: hash })))
+  expect(request.mock.calls.map(([input]) => input.action === 'read_game' && input.recapRead)).toEqual(referenceIds.map(id => ({ kind: 'reference', id })))
+  expect(fetchImpl).not.toHaveBeenCalled()
+})
+
 test('explicit lyrics guard conflicting modes and propagate cancellation without saving', async () => {
-  const args = { output: 'file' as const, durationSeconds: 20, instrumental: false, prompt: 'Playful piano', lyrics: ['Leo goes'] }
+  const args = { durationSeconds: 20, instrumental: false, prompt: 'Playful piano', lyrics: ['Leo goes'] }
   expect(parseGenerateSongArguments(args).ok).toBe(true)
-  for (const override of [{ output: 'chat' }, { instrumental: true }, { durationSeconds: 121 }, { lyrics: ['two\nlines'] }, { lyrics: [] }]) {
+  for (const override of [{ output: 'file' }, { lyrics: ['two\nlines'] }, { lyrics: [] }]) {
     expect(parseGenerateSongArguments({ ...args, ...override }).ok).toBe(false)
   }
+  // Outside a recap there is no file runtime, and a song that ignored its lyrics would be a silent wrong answer.
+  expect(await executeGenerateSongTool({ args, env: { ELEVENLABS_API_KEY: 'synthetic-key' } })).toMatchObject({ rpcSuccess: false, rpcText: 'Exact lyrics are sung only in a recap show.' })
   const controller = new AbortController()
   const reason = new Error('Synthetic cancellation')
   controller.abort(reason)

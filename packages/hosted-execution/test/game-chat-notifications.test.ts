@@ -371,7 +371,11 @@ it("activates show policy only for an explicitly selected pair", () => {
   expect(show).not.toContain("a streak that survived by minutes");
   expect(show).toContain("never name a city or country from it");
   expect(show).toContain("open it with view_image and set faceY on its scene block");
-  expect(show).toContain("the story's style as prompt and its lyrics, exactly as written, as lyrics");
+  expect(show).toContain("the story's style as prompt and its lyrics, exactly as written.");
+  // The turn sets the mode and format, and the files carry the material: the guide names neither a mode nor an inline list.
+  expect(show).toContain("game.json (the game, its posts, the result and every photo you may use, under references)");
+  expect(show).toContain("as referenceImageRefs the paths of the photos you picked");
+  expect(show).not.toMatch(/output "file"|outputFormat|durationSeconds|from read_game/u);
   expect(show).toContain("so don't change the lyrics after that");
   expect(show).toContain("with no labels like [Chorus]");
   expect(show).not.toContain("Name it briefly in treatment");
