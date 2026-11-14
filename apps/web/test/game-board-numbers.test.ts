@@ -154,6 +154,11 @@ describe("pair board numbers", () => {
     expect(Object.values(boardCrowns([person("a", positive, 4), person("b", positive, 4)]))).toEqual([null, null, null, null, null]);
     expect(boardCrowns([person("a", negative), person("b", negative)])).toMatchObject({ restingHeartRate: null, inARow: null });
   });
+  it.each([[69.6, null], [69.4, "a"]] as const)("crowns only a change big enough to show: a week at %s bpm after 70", (value, holder) => {
+    const number = available([...rows(), ...rows("restingHeartRate", "oura", "2030-03-25", 7, value)]);
+    const flat = available([...rows(), ...rows("restingHeartRate", "oura", "2030-03-25", 7, 70)]);
+    expect(boardCrowns([person("a", number), person("b", flat)]).restingHeartRate).toBe(holder);
+  });
 });
 
 describe("pair board baseline", () => {

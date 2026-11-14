@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-14",
+  "order": 100,
+  "item": {
+    "id": "board-crown-needs-shown-change",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "A crown now comes with a change you can see",
+    "summary": "On your 1v1 board, the most improved crown now goes only to a change big enough to show next to your number.",
+    "details": "A change that rounds to zero, like a resting heart rate down by less than half a beat, no longer wins a crown.",
+    "relevanceTags": ["games"],
+    "sourcePullRequests": [4958]
+  }
+}

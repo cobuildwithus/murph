@@ -1,0 +1,271 @@
+import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import * as coreRuntime from "@murphai/core";
+import { test } from "vitest";
+
+import { normalizeJunctionSnapshot } from "../src/device-providers/junction.ts";
+import { importDeviceProviderSnapshot } from "../src/index.ts";
+
+// The provider can move a sleep session's start or end after it first sends
+// it. The session keeps its id, and a sleep cycle names that id, so the total
+// and stage minutes belong to the session rather than to one coverage window.
+
+type Stored = Record<string, unknown>;
+
+const SESSION_START = "2026-01-02T04:00:00.000Z";
+const FIRST_END = "2026-01-02T10:00:00.000Z";
+const REWRITTEN_END = "2026-01-02T10:20:00.000Z";
+
+function sleepSummary(end: string, overrides: Record<string, unknown> = {}) {
+  return {
+    id: "sleep-session-1",
+    source_provider: "apple_health_kit",
+    source_type: "watch",
+    time_zone: "America/New_York",
+    bedtime_start: SESSION_START,
+    bedtime_stop: end,
+    total: Math.round((Date.parse(end) - Date.parse(SESSION_START)) / 1000) - 600,
+    awake: 600,
+    light: 4 * 3600,
+    deep: 3600,
+    rem: 3600,
+    ...overrides,
+  };
+}
+
+// Apple Health reports plain "asleep" as stage -1; 2 is light sleep.
+function sleepCycle(end: string, stage: number, overrides: Record<string, unknown> = {}) {
+  return {
+    id: "sleep-cycle-1",
+    sleep_id: "sleep-session-1",
+    source_provider: "apple_health_kit",
+    source_type: "watch",
+    time_zone: "America/New_York",
+    session_start: SESSION_START,
+    session_end: end,
+    stage_start_offset_second: [0],
+    stage_end_offset_second: [(Date.parse(end) - Date.parse(SESSION_START)) / 1000],
+    stage_type: [stage],
+    ...overrides,
+  };
+}
+
+const NO_STAGE_MINUTES = { awake: null, light: null, deep: null, rem: null };
+
+async function withVault(
+  run: (vault: {
+    importSummaries: (importedAt: string, summaries: Record<string, unknown[]>) => Promise<void>;
+    readLive: () => Promise<Stored[]>;
+  }) => Promise<void>,
+): Promise<void> {
+  const vaultRoot = await mkdtemp(join(tmpdir(), "murph-junction-sleep-session-"));
+  const shardPaths = new Set<string>();
+  try {
+    await coreRuntime.initializeVault({
+      vaultRoot,
+      createdAt: "2026-01-02T00:00:00.000Z",
+      timezone: "UTC",
+    });
+    await run({
+      importSummaries: async (importedAt, summaries) => {
+        const result = await importDeviceProviderSnapshot<
+          Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>
+        >(
+          { vaultRoot, provider: "junction", snapshot: { importedAt, summaries } },
+          { corePort: coreRuntime },
+        );
+        for (const path of result.eventShardPaths) shardPaths.add(path);
+      },
+      readLive: async () => {
+        const records = (await Promise.all([...shardPaths].map((relativePath) =>
+          coreRuntime.readJsonlRecords({ vaultRoot, relativePath })
+        ))).flat() as Stored[];
+        const latest = new Map<string, Stored>();
+        for (const record of records) {
+          const existing = latest.get(String(record.id));
+          if (!existing || revision(record) >= revision(existing)) {
+            latest.set(String(record.id), record);
+          }
+        }
+        return [...latest.values()].filter((record) =>
+          (record.lifecycle as { state?: string } | undefined)?.state !== "deleted"
+        );
+      },
+    });
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+}
+
+function revision(record: Stored): number {
+  return (record.lifecycle as { revision?: number } | undefined)?.revision ?? 1;
+}
+
+function normalizerVersion(record: Stored): string | undefined {
+  return (record.dataOrigin as { normalizerVersion?: string } | undefined)?.normalizerVersion;
+}
+
+function metricRecords(records: readonly Stored[], metric: string): Stored[] {
+  return records.filter((record) => record.kind === "observation" && record.metric === metric);
+}
+
+test("a rewritten sleep end revises the cycle's total in place", async () => {
+  await withVault(async ({ importSummaries, readLive }) => {
+    await importSummaries("2026-01-02T12:00:00.000Z", {
+      sleep: [sleepSummary(FIRST_END, NO_STAGE_MINUTES)],
+    });
+    await importSummaries("2026-01-02T12:01:00.000Z", { sleep_cycle: [sleepCycle(FIRST_END, -1)] });
+    const before = metricRecords(await readLive(), "sleep-total-minutes")
+      .find((record) => normalizerVersion(record) === "junction-sleep-unspecified-total.v1");
+    assert.equal(before?.value, 360);
+
+    await importSummaries("2026-01-02T13:00:00.000Z", {
+      sleep: [sleepSummary(REWRITTEN_END, NO_STAGE_MINUTES)],
+    });
+    await importSummaries("2026-01-02T13:01:00.000Z", {
+      sleep_cycle: [sleepCycle(REWRITTEN_END, -1)],
+    });
+
+    const live = await readLive();
+    const cycleTotals = metricRecords(live, "sleep-total-minutes")
+      .filter((record) => normalizerVersion(record) === "junction-sleep-unspecified-total.v1");
+    assert.equal(cycleTotals.length, 1);
+    assert.equal(cycleTotals[0]?.id, before?.id);
+    assert.equal(cycleTotals[0]?.value, 380);
+    assert.equal(cycleTotals[0]?.occurredAt, REWRITTEN_END);
+    assert.equal(live.filter((record) => record.kind === "sleep_session").length, 1);
+  });
+});
+
+test("a rewritten sleep end revises the summary's stage minutes in place", async () => {
+  await withVault(async ({ importSummaries, readLive }) => {
+    await importSummaries("2026-01-02T12:00:00.000Z", { sleep: [sleepSummary(FIRST_END)] });
+    const before = metricRecords(await readLive(), "sleep-light-minutes");
+    assert.equal(before.length, 1);
+
+    await importSummaries("2026-01-02T13:00:00.000Z", {
+      sleep: [sleepSummary(REWRITTEN_END, { light: 4 * 3600 + 1200 })],
+    });
+
+    const live = await readLive();
+    for (const metric of [
+      "sleep-awake-minutes", "sleep-light-minutes", "sleep-deep-minutes", "sleep-rem-minutes",
+    ]) {
+      assert.equal(metricRecords(live, metric).length, 1, metric);
+    }
+    const [light] = metricRecords(live, "sleep-light-minutes");
+    assert.equal(light?.id, before[0]?.id);
+    assert.equal(light?.value, 260);
+    assert.equal(light?.occurredAt, REWRITTEN_END);
+  });
+});
+
+test("the sleep summary and its cycle share one stage owner across imports and a rewrite", async () => {
+  await withVault(async ({ importSummaries, readLive }) => {
+    await importSummaries("2026-01-02T12:00:00.000Z", { sleep: [sleepSummary(FIRST_END)] });
+    await importSummaries("2026-01-02T12:01:00.000Z", { sleep_cycle: [sleepCycle(FIRST_END, 2)] });
+    // The cycle arrives first this time, on a window the summary has not sent.
+    await importSummaries("2026-01-02T13:00:00.000Z", {
+      sleep_cycle: [sleepCycle(REWRITTEN_END, 2)],
+    });
+    await importSummaries("2026-01-02T13:01:00.000Z", { sleep: [sleepSummary(REWRITTEN_END)] });
+
+    const light = metricRecords(await readLive(), "sleep-light-minutes");
+    assert.equal(light.length, 1);
+    assert.equal(normalizerVersion(light[0]!), "junction-sleep-stage-summary.v1");
+    assert.equal(light[0]?.value, 240);
+  });
+});
+
+test("records stored under the coverage window move to the session id", async () => {
+  await withVault(async ({ importSummaries, readLive }) => {
+    // What a vault holds from before sessions were keyed on their id.
+    await importSummaries("2026-01-02T12:00:00.000Z", {
+      sleep_cycle: [sleepCycle(FIRST_END, -1, { sleep_id: undefined })],
+    });
+    const [stored] = metricRecords(await readLive(), "sleep-total-minutes");
+    assert.ok(stored);
+
+    await importSummaries("2026-01-02T13:00:00.000Z", { sleep_cycle: [sleepCycle(FIRST_END, -1)] });
+
+    const totals = metricRecords(await readLive(), "sleep-total-minutes");
+    assert.equal(totals.length, 1);
+    assert.equal(totals[0]?.id, stored.id);
+  });
+});
+
+test("a stale window copy does not block a later payload for the same session", async () => {
+  await withVault(async ({ importSummaries, readLive }) => {
+    // Stored before the change: the stale first window and the current one.
+    await importSummaries("2026-01-02T12:00:00.000Z", {
+      sleep_cycle: [sleepCycle(FIRST_END, -1, { sleep_id: undefined })],
+    });
+    await importSummaries("2026-01-02T12:30:00.000Z", {
+      sleep_cycle: [sleepCycle(REWRITTEN_END, -1, { sleep_id: undefined })],
+    });
+    await importSummaries("2026-01-02T13:00:00.000Z", {
+      sleep_cycle: [sleepCycle(REWRITTEN_END, -1)],
+    });
+
+    // An older payload delivered late names the window the stale copy holds.
+    await importSummaries("2026-01-02T13:30:00.000Z", { sleep_cycle: [sleepCycle(FIRST_END, -1)] });
+
+    const totals = metricRecords(await readLive(), "sleep-total-minutes");
+    const refs = totals.map((record) =>
+      String((record.externalRef as { resourceId?: string }).resourceId).split("-").slice(0, 2).join("-")
+    ).sort();
+    // The session's record took the late payload; the stale copy is untouched.
+    assert.deepEqual(refs, ["sleep-session", "sleep-stage"]);
+  });
+});
+
+test("a summary owns its session's stages when the cycle's window differs by seconds", () => {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-01-02T12:00:00.000Z",
+    summaries: {
+      sleep: [sleepSummary(FIRST_END)],
+      sleep_cycle: [sleepCycle("2026-01-02T10:00:30.000Z", 2)],
+    },
+  }, { defaultTimeZone: "UTC" });
+
+  const light = (payload.events ?? []).filter((event) =>
+    event.kind === "observation" && event.fields?.metric === "sleep-light-minutes"
+  );
+  assert.equal(light.length, 1);
+  assert.equal(light[0]?.dataOrigin?.normalizerVersion, "junction-sleep-stage-summary.v1");
+});
+
+test("a cycle names its session in either spelling, and falls back to its window without one", () => {
+  const totalFor = (cycle: Record<string, unknown>) => {
+    const payload = normalizeJunctionSnapshot({
+      importedAt: "2026-01-02T12:00:00.000Z",
+      summaries: { sleep_cycle: [cycle] },
+    }, { defaultTimeZone: "UTC" });
+    return (payload.events ?? []).find((event) =>
+      event.kind === "observation" && event.fields?.metric === "sleep-total-minutes"
+    );
+  };
+
+  const wire = totalFor(sleepCycle(FIRST_END, -1));
+  const sdk = totalFor(sleepCycle(FIRST_END, -1, { sleep_id: undefined, sleepId: "sleep-session-1" }));
+  const neither = totalFor(sleepCycle(FIRST_END, -1, { sleep_id: undefined }));
+
+  assert.ok(wire?.externalRef?.resourceId.startsWith("sleep-session-"));
+  assert.equal(sdk?.externalRef?.resourceId, wire?.externalRef?.resourceId);
+  assert.ok(neither?.externalRef?.resourceId.startsWith("sleep-stage-"));
+  assert.equal(neither?.legacyExternalRefs, undefined);
+  // The window ref the session supersedes is the one a record without an id uses.
+  assert.equal(wire?.legacyExternalRefs?.[0]?.resourceId, neither?.externalRef?.resourceId);
+});
+
+test("an empty sleep cycle wrapper imports nothing", () => {
+  for (const wrapper of [{ sleepCycle: null }, { sleepCycle: {} }, {}]) {
+    const payload = normalizeJunctionSnapshot({
+      importedAt: "2026-01-02T12:00:00.000Z",
+      summaries: { sleep_cycle: [wrapper] },
+    }, { defaultTimeZone: "UTC" });
+    assert.deepEqual(payload.events ?? [], []);
+  }
+});

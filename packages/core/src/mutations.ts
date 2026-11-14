@@ -2903,6 +2903,40 @@ function isJunctionSleepStageCycleFallbackObservation(record: EventRecord): bool
     record.dataOrigin?.normalizerVersion === JUNCTION_SLEEP_STAGE_CYCLE_FALLBACK_NORMALIZER_VERSION;
 }
 
+/**
+ * A sleep session's total and stage minutes were keyed on its coverage window
+ * (`sleep-stage-`) before they were keyed on the provider's session id
+ * (`sleep-session-`). The window ref moves a stored record across once. After
+ * that the session ref owns the record, and a window ref can only name a stale
+ * copy left by an earlier rewrite of the session's start or end, which must
+ * not turn the import into an ambiguous merge of two live records.
+ */
+function isSupersededJunctionSleepWindowRef(
+  legacyExternalRef: ExternalRef,
+  incomingExternalRef: ExternalRef,
+): boolean {
+  return incomingExternalRef.system === "junction" &&
+    legacyExternalRef.system === "junction" &&
+    legacyExternalRef.resourceType === incomingExternalRef.resourceType &&
+    /^junction-[a-z0-9-]+-sleep$/u.test(incomingExternalRef.resourceType) &&
+    legacyExternalRef.facet === incomingExternalRef.facet &&
+    incomingExternalRef.resourceId.startsWith("sleep-session-") &&
+    legacyExternalRef.resourceId.startsWith("sleep-stage-");
+}
+
+/** Whether an incoming event may adopt the record stored under one of its legacy refs. */
+function claimsLegacyExternalRef(
+  legacyExternalRef: ExternalRef,
+  incomingExternalRef: ExternalRef,
+  incomingRefHasOwner: boolean,
+): boolean {
+  if (eventExternalRefKey(legacyExternalRef) === eventExternalRefKey(incomingExternalRef)) {
+    return false;
+  }
+  return !incomingRefHasOwner
+    || !isSupersededJunctionSleepWindowRef(legacyExternalRef, incomingExternalRef);
+}
+
 function isJunctionSleepStageSummaryLegacyRef(
   legacyExternalRef: ExternalRef,
   incoming: EventRecord,
@@ -3400,7 +3434,13 @@ function buildLegacyExternalRefReservations(
     );
     for (const legacyExternalRef of entry.legacyExternalRefs) {
       const legacyRefKey = eventExternalRefKey(legacyExternalRef);
-      if (legacyRefKey === primaryRefKey) {
+      if (
+        !claimsLegacyExternalRef(
+          legacyExternalRef,
+          externalRef,
+          index.latestByRefKey.has(primaryRefKey),
+        )
+      ) {
         continue;
       }
 
@@ -4385,7 +4425,9 @@ function resolveDeviceEventIdentity(
       legacyExternalRef,
       refKey: eventExternalRefKey(legacyExternalRef),
     }))
-    .filter((match) => match.refKey !== refKey)
+    .filter((match) =>
+      claimsLegacyExternalRef(match.legacyExternalRef, externalRef, primaryMatch !== undefined)
+    )
     .map(({ legacyExternalRef, refKey: legacyRefKey }) => {
       const reservation = legacyReservations.get(legacyRefKey);
       return {
