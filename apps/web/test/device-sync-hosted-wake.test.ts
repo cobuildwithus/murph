@@ -1178,7 +1178,7 @@ describe("hosted device-sync wakes", () => {
     );
 
     await expect(
-      ingress.createSdkSignInSession("user-123", "junction", "connect"),
+      ingress.createSdkSignInSession("user-123", "junction", "connect", "apple_health_kit"),
     ).resolves.toMatchObject({ signInToken: "junction-sign-in-token" });
 
     expect(mocks.createSdkSignInSession).toHaveBeenCalledWith({
@@ -1352,7 +1352,7 @@ describe("hosted device-sync wakes", () => {
     );
 
     await expect(
-      ingress.createSdkSignInSession("user-123", "junction", "connect"),
+      ingress.createSdkSignInSession("user-123", "junction", "connect", "apple_health_kit"),
     ).resolves.toMatchObject({ signInToken: "junction-sign-in-token" });
 
     expect(mocks.upsertConnectionSource).toHaveBeenCalledWith(expect.objectContaining({
@@ -1365,7 +1365,7 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.syncDurableConnectionState).not.toHaveBeenCalled();
   });
 
-  it("opens a pending lifecycle without clearing coverage when explicit connect finds the source already connected", async () => {
+  it("keeps a connected source's epoch when explicit connect signs the phone back in", async () => {
     const connection = buildHostedConnection({
       id: "dsc_junction_123",
       metadata: addJunctionHistoryCoverage(
@@ -1387,28 +1387,53 @@ describe("hosted device-sync wakes", () => {
     );
 
     await expect(
-      ingress.createSdkSignInSession("user-123", "junction", "connect"),
+      ingress.createSdkSignInSession("user-123", "junction", "connect", "apple_health_kit"),
     ).resolves.toMatchObject({ signInToken: "junction-sign-in-token" });
 
+    // Closing a healthy source here dropped data already accepted for it and
+    // re-read its whole history on every sign-in.
+    expect(mocks.createSdkSignInSession).toHaveBeenCalledOnce();
+    expect(mocks.upsertConnectionSource).not.toHaveBeenCalled();
+    expect(mocks.advanceConnectionSourceStartBoundary).not.toHaveBeenCalled();
+    expect(mocks.syncDurableConnectionState).not.toHaveBeenCalled();
+  });
+
+  it("reopens only the calling platform's source on explicit connect", async () => {
+    const connection = buildHostedConnection({
+      id: "dsc_junction_123",
+      provider: "junction",
+      setupPhase: "source_confirmed",
+    });
+    const appleHealth = buildHostedConnectionSource(connection.id, "apple_health_kit", {
+      lastErrorCode: "SOURCE_USER_DISCONNECTED",
+      status: "disconnected",
+    });
+    const healthConnect = buildHostedConnectionSource(connection.id, "health_connect", {
+      lastErrorCode: "SOURCE_USER_DISCONNECTED",
+      status: "disconnected",
+    });
+    mockConnectionForAdmission(connection);
+    mocks.listMemberConnectionStatuses.mockResolvedValue([
+      toHostedConnectionStatus(connection),
+    ]);
+    mocks.listConnectionSources.mockResolvedValue([appleHealth, healthConnect]);
+    const ingress = createHostedDeviceSyncPublicIngressService(
+      new Request("https://control.example.test/api/device-sync/companion/sign-in-token"),
+    );
+
+    await expect(
+      ingress.createSdkSignInSession("user-123", "junction", "connect", "health_connect"),
+    ).resolves.toMatchObject({ signInToken: "junction-sign-in-token" });
+
+    expect(mocks.upsertConnectionSource).toHaveBeenCalledOnce();
     expect(mocks.upsertConnectionSource).toHaveBeenCalledWith(expect.objectContaining({
       connectionId: connection.id,
-      lifecycleEpoch: source.lifecycleEpoch,
-      sourceInstanceKey: source.sourceInstanceKey,
-      sourceProviderSlug: source.sourceProviderSlug,
+      lastErrorCode: null,
+      sourceInstanceKey: healthConnect.sourceInstanceKey,
+      sourceProviderSlug: "health_connect",
       status: "disconnected",
       tx: mocks.prismaTx,
     }));
-    expect(mocks.advanceConnectionSourceStartBoundary).toHaveBeenCalledWith({
-      connectionId: connection.id,
-      updatedAt: expect.any(String),
-      tx: mocks.prismaTx,
-    });
-    expect(connection.metadata).toEqual(addJunctionHistoryCoverage(
-      addJunctionHistoryCoverage({}, "apple_health_kit", "weight"),
-      "withings",
-      "weight",
-    ));
-    expect(mocks.syncDurableConnectionState).not.toHaveBeenCalled();
   });
 
   it("opens native reconnect on the established identity at semantic max epoch", async () => {
@@ -1469,7 +1494,7 @@ describe("hosted device-sync wakes", () => {
     );
 
     await expect(
-      ingress.createSdkSignInSession("user-123", "junction", "connect"),
+      ingress.createSdkSignInSession("user-123", "junction", "connect", "apple_health_kit"),
     ).resolves.toMatchObject({ signInToken: "junction-sign-in-token" });
 
     expect(mocks.upsertConnectionSource).toHaveBeenCalledWith(expect.objectContaining({
@@ -1569,7 +1594,7 @@ describe("hosted device-sync wakes", () => {
       new Request("https://control.example.test/api/device-sync/companion/sign-in-token"),
     );
 
-    const connect = ingress.createSdkSignInSession("user-123", "junction", "connect");
+    const connect = ingress.createSdkSignInSession("user-123", "junction", "connect", "apple_health_kit");
     await vi.waitFor(() => expect(mocks.createSdkSignInSession).toHaveBeenCalledOnce());
 
     source = {
@@ -1613,7 +1638,7 @@ describe("hosted device-sync wakes", () => {
       new Request("https://control.example.test/api/device-sync/companion/sign-in-token"),
     );
 
-    const connect = ingress.createSdkSignInSession("user-123", "junction", "connect");
+    const connect = ingress.createSdkSignInSession("user-123", "junction", "connect", "apple_health_kit");
     await vi.waitFor(() => expect(mocks.createSdkSignInSession).toHaveBeenCalledOnce());
     currentConnection = buildHostedConnection({
       ...establishedConnection,
@@ -1647,7 +1672,7 @@ describe("hosted device-sync wakes", () => {
       );
 
       await expect(
-        ingress.createSdkSignInSession("user-123", "junction", connectionIntent),
+        ingress.createSdkSignInSession("user-123", "junction", connectionIntent, "apple_health_kit"),
       ).resolves.toMatchObject({ signInToken: "junction-sign-in-token" });
 
       expect(mocks.resumeSdkSignInSession).toHaveBeenCalledWith({
@@ -1668,7 +1693,7 @@ describe("hosted device-sync wakes", () => {
     );
 
     await expect(
-      ingress.createSdkSignInSession("user-123", "junction", null),
+      ingress.createSdkSignInSession("user-123", "junction", null, "apple_health_kit"),
     ).resolves.toMatchObject({ signInToken: "junction-sign-in-token" });
 
     expect(mocks.createSdkSignInSession).toHaveBeenCalledWith({
@@ -1685,7 +1710,7 @@ describe("hosted device-sync wakes", () => {
     );
 
     await expect(
-      ingress.createSdkSignInSession("user-123", "junction", "resume"),
+      ingress.createSdkSignInSession("user-123", "junction", "resume", "apple_health_kit"),
     ).rejects.toMatchObject({
       code: "SDK_SIGN_IN_RECONNECT_REQUIRED",
       httpStatus: 409,
@@ -1711,7 +1736,7 @@ describe("hosted device-sync wakes", () => {
       );
 
       await expect(
-        ingress.createSdkSignInSession("user-123", "junction", connectionIntent),
+        ingress.createSdkSignInSession("user-123", "junction", connectionIntent, "apple_health_kit"),
       ).rejects.toMatchObject({
         code: "SDK_SIGN_IN_RECONNECT_REQUIRED",
         httpStatus: 409,
@@ -1740,7 +1765,7 @@ describe("hosted device-sync wakes", () => {
     );
 
     await expect(
-      ingress.createSdkSignInSession("user-123", "junction", "resume"),
+      ingress.createSdkSignInSession("user-123", "junction", "resume", "apple_health_kit"),
     ).rejects.toMatchObject({
       code: "SDK_SIGN_IN_CONNECTION_AMBIGUOUS",
       httpStatus: 409,

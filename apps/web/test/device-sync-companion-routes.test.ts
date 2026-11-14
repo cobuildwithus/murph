@@ -913,10 +913,12 @@ describe("device sync companion routes", () => {
       }));
 
       expect(response.status).toBe(200);
+      // An Android sign-in owns Health Connect and never touches Apple Health.
       expect(mocks.createSdkSignInSession).toHaveBeenCalledWith(
         "member_1",
         "junction",
         "connect",
+        "health_connect",
       );
     });
 
@@ -975,6 +977,7 @@ describe("device sync companion routes", () => {
         "member_1",
         "junction",
         "connect",
+        "apple_health_kit",
       );
       expect(mocks.assertHostedHistoricalLaunchConsentGranted).toHaveBeenCalledWith({
         memberId: "member_1",
@@ -995,6 +998,7 @@ describe("device sync companion routes", () => {
         "member_1",
         "junction",
         "resume",
+        "apple_health_kit",
       );
     });
 
@@ -1037,6 +1041,7 @@ describe("device sync companion routes", () => {
         "member_1",
         "junction",
         null,
+        "apple_health_kit",
       );
     });
 
@@ -1452,6 +1457,55 @@ describe("device sync companion routes", () => {
       });
       expect(mocks.listConnectionSources).not.toHaveBeenCalled();
       expect(mocks.listConnectionsForUser).not.toHaveBeenCalled();
+    });
+
+    it("does not count a data-less historical completion as received data", async () => {
+      mockVerifiedHostedSession();
+      mocks.listMemberConnectionStatuses.mockResolvedValue([{
+        id: "dsc_1",
+        status: "active",
+      }]);
+      mocks.listBoundedConnectionSourcesForConnections.mockResolvedValue([]);
+      mocks.listRecentConnectionStatusSignals.mockResolvedValue([
+        {
+          // The pull finished; nothing arrived with it, so no source is named.
+          createdAt: "2026-07-09T11:00:00.000Z",
+          eventType: "historical.data.sleep.created",
+          kind: "webhook_hint",
+          sourceProviderSlug: null,
+        },
+        {
+          createdAt: "2026-07-09T10:00:00.000Z",
+          eventType: "historical.data.workouts.created",
+          kind: "webhook_hint",
+          sourceProviderSlug: "apple_health_kit",
+        },
+      ]);
+
+      const withData = await statusRoute.GET(statusRequest());
+
+      expect(await withData.json()).toEqual({
+        lastDataReceivedAt: "2026-07-09T10:00:00.000Z",
+        observedAt: "2026-07-09T12:00:00.000Z",
+        resources: {
+          workouts: { lastReceivedAt: "2026-07-09T10:00:00.000Z" },
+        },
+      });
+
+      mocks.listRecentConnectionStatusSignals.mockResolvedValue([{
+        createdAt: "2026-07-09T11:00:00.000Z",
+        eventType: "historical.data.sleep.created",
+        kind: "webhook_hint",
+        sourceProviderSlug: null,
+      }]);
+
+      const completionOnly = await statusRoute.GET(statusRequest());
+
+      expect(await completionOnly.json()).toEqual({
+        lastDataReceivedAt: null,
+        observedAt: "2026-07-09T12:00:00.000Z",
+        resources: {},
+      });
     });
 
     it("uses canonical import completion time as backend-confirmed freshness", async () => {

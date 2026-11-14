@@ -310,6 +310,15 @@ that performs canonical import emits bounded source/resource normalization
 evidence for fallback coverage checks. `device-syncd` does not maintain a
 second raw-payload metric parser.
 
+Junction records reach `@murphai/importers` in one shape whether a webhook
+delivered them inline or `device-syncd` fetched them: Junction's wire
+(snake_case) field names. The official SDK builds and sends every request, but
+its parsed copy of a response (camelCase names, `Date` timestamps) never leaves
+`JunctionClient`. The one thing kept from that copy is each timestamp the SDK
+decoded, handed on as a UTC ISO string, because Junction writes instants as
+`+00:00` and local-day ownership would read that offset as the member's wall
+clock.
+
 Junction summary continuations call the canonical importer only when the prepared
 summary map contains a resource. A completed summary phase does not manufacture
 an empty provider snapshot or receipt. Explicit fetched empty collections retain
@@ -479,9 +488,17 @@ establishes only when zero provider rows exist, and rejects terminal or
 ambiguous state. Only a future visible hosted-health/Junction Reconnect action
 may send `connect` and create/reactivate the shared lane. Resume, omitted intent,
 data ingress, and retry work cannot undo an explicit disconnect.
-That explicit Apple Health connect captures the current source epoch before SDK
-token mint and opens one pending epoch afterward only if the proof remains
-current. A signed Junction source-registration event reconciles that unchanged
+That explicit connect touches only the calling platform's own source (Apple
+Health for iOS, Health Connect for Android). It captures the current source
+epoch before SDK token mint and opens one pending epoch afterward only if the
+proof remains current. A source already connected without a disconnect fence
+keeps its epoch: signing a phone back in does not close it or re-read its
+history, while disconnecting it and connecting again does. While a pending
+epoch is open, a queued job for data a webhook already accepted from that
+source fails retryably (`JUNCTION_SOURCE_ADMISSION_PENDING`) on the ordinary
+five-attempt budget, about 36 minutes, and imports once the source is
+re-admitted; a fenced source still drops its queued work. A signed Junction
+source-registration event reconciles that unchanged
 pending epoch against the live provider list and commits it connected; the same
 event target-cleans a fenced source or disconnected parent.
 Apple Health companion metadata, WHOOP overnight summaries, and their queued

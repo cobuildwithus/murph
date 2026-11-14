@@ -1,3 +1,10 @@
+Explicit companion connect reopens only the calling platform's phone health
+source and keeps a connected source's epoch; the runner holds webhook-accepted
+work for a source whose reconnect is open. [Architecture](../ARCHITECTURE.md)
+and the [device-syncd README](../packages/device-syncd/README.md) own the
+contract; the [execution record](exec-plans/completed/2026-11-14-apple-health-source-lifecycle.md)
+records the proof, deploy order and the stranded-source repair.
+
 Retired Fitbit migration successor mailbox hints use the existing retained
 device-sync owner for safe retirement. [Reliability](RELIABILITY.md) owns the
 contract; the [execution record](exec-plans/completed/2026-11-13-legacy-fitbit-mailbox-hint.md)

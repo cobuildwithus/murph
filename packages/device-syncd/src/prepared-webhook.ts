@@ -13,7 +13,23 @@ const PREPARED_WEBHOOK_MAX_SERIALIZED_BYTES = 64 * 1024;
 const PREPARED_WEBHOOK_MAX_JOBS = 100;
 const PREPARED_WEBHOOK_MAX_PAYLOAD_FIELDS = 64;
 const PREPARED_WEBHOOK_MAX_STRING_LENGTH = 32 * 1024;
+// Room the rest of one event keeps beside its largest inline string.
+const PREPARED_WEBHOOK_INLINE_STRING_RESERVED_BYTES = 16 * 1024;
 const textEncoder = new TextEncoder();
+
+/**
+ * Whether one inline job-payload string fits a prepared event.
+ *
+ * A provider asks before it builds a job around inline data. An event that
+ * fails these limits can never be admitted, so the provider must emit a
+ * smaller job that fetches the data instead.
+ */
+export function fitsPreparedDeviceSyncWebhookInlineString(value: string): boolean {
+  return value.length <= PREPARED_WEBHOOK_MAX_STRING_LENGTH
+    && textEncoder.encode(JSON.stringify(value)).byteLength
+      <= PREPARED_WEBHOOK_MAX_SERIALIZED_BYTES
+        - PREPARED_WEBHOOK_INLINE_STRING_RESERVED_BYTES;
+}
 
 /**
  * Provider-authenticated webhook meaning frozen at public ingress.
