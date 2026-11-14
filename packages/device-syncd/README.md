@@ -310,6 +310,15 @@ that performs canonical import emits bounded source/resource normalization
 evidence for fallback coverage checks. `device-syncd` does not maintain a
 second raw-payload metric parser.
 
+Junction records reach `@murphai/importers` in one shape whether a webhook
+delivered them inline or `device-syncd` fetched them: Junction's wire
+(snake_case) field names. The official SDK builds and sends every request, but
+its parsed copy of a response (camelCase names, `Date` timestamps) never leaves
+`JunctionClient`. The one thing kept from that copy is each timestamp the SDK
+decoded, handed on as a UTC ISO string, because Junction writes instants as
+`+00:00` and local-day ownership would read that offset as the member's wall
+clock.
+
 Junction summary continuations call the canonical importer only when the prepared
 summary map contains a resource. A completed summary phase does not manufacture
 an empty provider snapshot or receipt. Explicit fetched empty collections retain

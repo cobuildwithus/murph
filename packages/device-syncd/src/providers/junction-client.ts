@@ -1075,13 +1075,13 @@ export class JunctionClient {
       };
 
       try {
-        const payload = await invoke(clientOptions, {
+        const sdkPayload = await invoke(clientOptions, {
           abortSignal: requestAbort.signal,
           maxRetries: 0,
           timeoutInSeconds,
         });
         throwIfProviderRequestAborted(requestAbort.signal);
-        return payload as T;
+        return readJunctionWirePayload(observation.capturedResponse, sdkPayload) as T;
       } catch (error) {
         const providerError = unwrapJunctionSdkErrorCause(error);
         lastError = providerError;
@@ -1224,6 +1224,64 @@ function buildProviderApiError(input: {
       diagnostics: input.diagnostics,
     },
   );
+}
+
+/**
+ * Returns a fetched Junction response in the shape webhooks deliver: the wire
+ * (snake_case) keys every reader and importer knows, not the camelCase keys of
+ * the SDK's parsed copy.
+ *
+ * The parsed copy is consulted for one thing. Where the SDK decoded a
+ * timestamp, the value is that instant as a UTC ISO string. Junction writes
+ * instants as `+00:00`, which local-day ownership would read as the member's
+ * wall clock; the fetch path has always handed on the UTC form.
+ */
+function readJunctionWirePayload(
+  capture: JunctionSdkResponseCapture | null,
+  parsed: unknown,
+): unknown {
+  // A response without a body has nothing to rename.
+  if (!capture) {
+    return parsed;
+  }
+  const wire = readCapturedJunctionSdkSuccess(capture);
+  if (!wire.present) {
+    throw invalidJunctionSdkResponseError(wire.body);
+  }
+  return restoreJunctionWireKeys(wire.payload, parsed);
+}
+
+/** Walks both copies together: keys and values from the wire, timestamps from the parsed copy. */
+function restoreJunctionWireKeys(wire: unknown, parsed: unknown): unknown {
+  if (parsed instanceof Date) {
+    return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : wire;
+  }
+  if (Array.isArray(wire)) {
+    return Array.isArray(parsed)
+      ? wire.map((entry, index) => restoreJunctionWireKeys(entry, parsed[index]))
+      : wire;
+  }
+  const wireRecord = readPlainObject(wire);
+  const parsedRecord = readPlainObject(parsed);
+  if (!wireRecord || !parsedRecord) {
+    return wire;
+  }
+
+  let parsedByFoldedKey: Map<string, unknown> | undefined;
+  return Object.fromEntries(Object.entries(wireRecord).map(([key, value]) => {
+    if (Object.hasOwn(parsedRecord, key)) {
+      return [key, restoreJunctionWireKeys(value, parsedRecord[key])];
+    }
+    parsedByFoldedKey ??= new Map(Object.entries(parsedRecord).map(
+      ([parsedKey, parsedValue]) => [foldJunctionKeyCase(parsedKey), parsedValue],
+    ));
+    return [key, restoreJunctionWireKeys(value, parsedByFoldedKey.get(foldJunctionKeyCase(key)))];
+  }));
+}
+
+/** `calories_active` and `caloriesActive` fold to the same name. */
+function foldJunctionKeyCase(key: string): string {
+  return key.toLowerCase().replace(/[^a-z0-9]+/gu, "");
 }
 
 function unwrapJunctionSdkErrorCause(error: unknown): unknown {
