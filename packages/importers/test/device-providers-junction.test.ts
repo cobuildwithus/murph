@@ -13596,6 +13596,7 @@ test("Junction sleep_cycle fallback cannot overwrite prior sleep summary stage f
         summaries: {
           sleep_cycle: [{
             id: "sleep-cycle-priority-owner-1",
+            sleep_id: "sleep-summary-priority-owner-1",
             source_provider: "garmin",
             source_type: "watch",
             time_zone: "UTC",
@@ -13732,6 +13733,7 @@ test("Junction sleep stage identity ignores timezone representation drift for th
         summaries: {
           sleep_cycle: [{
             id: "sleep-cycle-timezone-drift-1",
+            sleep_id: "sleep-summary-timezone-drift-1",
             source_provider: "garmin",
             source_type: "watch",
             start: "2026-01-02T04:30:00.000Z",
