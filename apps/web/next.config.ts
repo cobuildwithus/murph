@@ -95,9 +95,10 @@ const OG_SHARE_ASSET_TRACE_INCLUDES = [
   "public/logo.svg",
 ];
 // The connect link's preview joins the Murph icon and a source's own icon,
-// both read from public/ at render time.
+// both read from public/ at render time. `tile/` holds the padded copies
+// connectSourcePngLogoPath returns for bare symbols.
 const CONNECT_LINK_OG_ICON_TRACE_INCLUDES = [
-  "public/brand-logos/connect/*.png",
+  "public/brand-logos/connect/**/*.png",
   "public/brand-logos/murph-logo-avatar-light.png",
 ];
 // The App Review game seed posts these synthetic site images as its opponent's photos.

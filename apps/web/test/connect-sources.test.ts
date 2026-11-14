@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 import { afterEach, test, vi } from "vitest";
@@ -29,6 +29,23 @@ test("every listed connect source has a name, a website logo, and a PNG logo", (
       );
     }
   }
+});
+
+test("a bare symbol's PNG logo is its padded tile copy, and the website card keeps the original", () => {
+  const tileDirectory = path.join(process.cwd(), "apps/web/public/brand-logos/connect/tile");
+  const tiles = readdirSync(tileDirectory).filter((file) => file.endsWith(".png"));
+  assert.ok(tiles.includes("fitbit.png"));
+
+  for (const file of tiles) {
+    const id = file.replace(/\.png$/u, "");
+    assert.equal(connectSourcePngLogoPath(id), `/brand-logos/connect/tile/${file}`, `${file} should be served for ${id}`);
+  }
+  assert.equal(
+    listVisibleDeviceConnectSources().find((source) => source.id === "fitbit")?.logo.src,
+    "/brand-logos/connect/fitbit.svg",
+  );
+  assert.equal(connectSourcePngLogoPath("coros"), "/brand-logos/connect/coros.png");
+  assert.equal(connectSourcePngLogoPath("not-a-source"), null);
 });
 
 test("the production admission smoke looks up connect sources by names the page still uses", () => {
