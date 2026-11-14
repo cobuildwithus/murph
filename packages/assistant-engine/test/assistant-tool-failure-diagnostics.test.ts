@@ -156,9 +156,12 @@ describe('automation branch diagnostics', () => {
     const result = await dispatch(request, { automationTool: { request: port } })
     const { lookupId: _lookupId, ...payload } = 'lookupId' in response
       ? response : { ...response, lookupId: undefined }
+    // Inspect and patch omit the preserved binding, and patches never create.
+    const { routeBinding: _routeBinding, created: _created, ...defaultsOmitted } = { created: false, routeBinding: undefined, ...payload }
     expect(result).toEqual({ rpcResult: { success: true,
       contentItems: [{ type: 'inputText', text: expect.any(String) }] } })
-    expect(JSON.parse(result.rpcResult.contentItems[0]!.text!)).toEqual(payload)
+    expect(JSON.parse(result.rpcResult.contentItems[0]!.text!))
+      .toEqual(request.action === 'inspect' || request.action === 'patch' ? defaultsOmitted : payload)
     expect(port).toHaveBeenCalledExactlyOnceWith(parseAutomation(request).request, { signal: null })
   })
 

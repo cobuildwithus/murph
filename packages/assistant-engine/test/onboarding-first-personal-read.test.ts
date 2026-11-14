@@ -216,9 +216,9 @@ describe('onboarding first personal read', () => {
       onboardingFirstReadCompletionTransition: true,
       signal: null,
     })
-    expect(result.rpcResult.contentItems[0]?.text).toContain(
-      '"routeBinding":"current_conversation"',
-    )
+    // The save binds to this conversation by default, so the binding is not repeated.
+    expect(result.rpcResult.contentItems[0]?.text).toContain('"created":true')
+    expect(result.rpcResult.contentItems[0]?.text).not.toContain('routeBinding')
   })
 
   it('rejects the fieldless action outside a trusted completion transition', async () => {

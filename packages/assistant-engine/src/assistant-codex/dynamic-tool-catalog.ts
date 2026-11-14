@@ -578,7 +578,7 @@ export const MURPH_USAGE_DIAGNOSTICS_TOOL = {
   name: 'usage_diagnostics',
   deferLoading: true,
   description:
-    `Read this member's recent AI usage: cost by model and workflow, the most expensive turns, and tool output sizes. It is read-only and covers 7 days and 10 turns unless you pass days or limit. Costs are amounts of usage allowance and say nothing about card charges. Tool sizes are in bytes and only approximate tokens and cost. The result includes rough model rates.`,
+    `Read this member's recent AI usage: cost by model and workflow, the most expensive turns, and tool output sizes. It is read-only and covers 7 days and 5 turns unless you pass days or limit. Costs are amounts of usage allowance and say nothing about card charges. Tool sizes are in bytes and only approximate tokens and cost. The result includes rough model rates.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,

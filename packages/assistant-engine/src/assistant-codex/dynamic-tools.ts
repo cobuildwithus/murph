@@ -101,6 +101,7 @@ import {
   parseHostedUsageDiagnosticsResponse,
   type HostedUsageDiagnosticsRequest,
 } from '@murphai/hosted-execution/usage-diagnostics'
+import { withUsageDiagnosticsDefaults } from './dynamic-tools/usage-diagnostics.js'
 import {
   HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME,
   HOSTED_PLAN_USAGE_DIRECT_BILLING_PLAN_CODES,
@@ -4269,7 +4270,9 @@ async function executeUsageDiagnosticsTool(
     return toolTextResult(false, 'usage diagnostics require a private conversation', 'authority_rejected')
   }
   try {
-    const result = parseHostedUsageDiagnosticsResponse(await context.usageDiagnostics.read(request))
+    const result = parseHostedUsageDiagnosticsResponse(
+      await context.usageDiagnostics.read(withUsageDiagnosticsDefaults(request)),
+    )
     return toolTextResult(true, safeToolPayloadText(result))
   } catch (error) {
     return toolTextResult(false, 'usage diagnostics could not be read', 'handler_exception', error)
@@ -4344,6 +4347,10 @@ function projectHostedPlanUsageForAssistant(input: HostedPlanUsageStatus) {
     recommendedAction,
     scheduledPlan,
     subscriptionActionQuote,
+    // The quote and recommended action carry the target plan, and the usage
+    // skill reads remainingPercent; usedPercent is always 100 minus it.
+    recommendedPlanCode: undefined,
+    usedPercent: undefined,
   }
 }
 

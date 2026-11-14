@@ -29,7 +29,6 @@ describe('member-memory maintenance boundary', () => {
     const shown = await execute(vaultRoot, { action: 'show' })
     expect(readResult(shown)).toEqual({
       document: { exists: false, records: [] },
-      memory: null,
     })
 
     const added = readResult(await execute(vaultRoot, {
@@ -39,12 +38,11 @@ describe('member-memory maintenance boundary', () => {
     }))
     const memoryId = readMemoryId(added)
     const addedUpdatedAt = readMemoryUpdatedAt(added)
+    // A write echoes only the stored id and version when it stored what was sent.
     expect(added).toEqual({
       created: true,
       memory: {
         id: memoryId,
-        section: 'Preferences',
-        text: 'Prefers concise weekly summaries.',
         updatedAt: addedUpdatedAt,
       },
     })
@@ -58,11 +56,8 @@ describe('member-memory maintenance boundary', () => {
     }))
     const updatedUpdatedAt = readMemoryUpdatedAt(updated)
     expect(updated).toEqual({
-      created: false,
       memory: {
         id: memoryId,
-        section: 'Instructions',
-        text: 'Keep weekly summaries concise.',
         updatedAt: updatedUpdatedAt,
       },
     })
@@ -80,10 +75,32 @@ describe('member-memory maintenance boundary', () => {
       memoryId,
     }))).toEqual({
       forgotten: true,
-      memory: null,
     })
     await expect(readMemoryDocument(vaultRoot)).resolves.toMatchObject({
       records: [],
+    })
+  })
+
+  it('echoes stored text only when it differs from what the write sent', async () => {
+    const vaultRoot = await makeVaultRoot()
+    const first = readResult(await execute(vaultRoot, {
+      action: 'upsert',
+      section: 'Preferences',
+      text: 'Prefers   morning\nruns.',
+    }))
+    expect(first).toEqual({
+      created: true,
+      memory: { id: readMemoryId(first), text: 'Prefers morning runs.', updatedAt: readMemoryUpdatedAt(first) },
+    })
+    const repeat = readResult(await execute(vaultRoot, {
+      action: 'upsert',
+      section: 'Preferences',
+      text: 'Prefers morning runs.',
+    }))
+    // The same section and text resolve to the existing record.
+    expect(repeat).toEqual({
+      created: false,
+      memory: { id: readMemoryId(first), updatedAt: readMemoryUpdatedAt(repeat) },
     })
   })
 
@@ -126,7 +143,6 @@ describe('member-memory maintenance boundary', () => {
           updatedAt,
         })),
       },
-      memory: null,
     })
     expect(canonicalShow.records).toHaveLength(24)
     expect(canonicalShow.records.map((record) => record.id)).toEqual(
@@ -153,8 +169,6 @@ describe('member-memory maintenance boundary', () => {
       created: true,
       memory: {
         id: addedMemoryId,
-        section: 'Preferences',
-        text: addedText,
         updatedAt: addedUpdatedAt,
       },
     })
@@ -209,11 +223,8 @@ describe('member-memory maintenance boundary', () => {
       JSON.parse(updatedTextResult) as unknown,
     )
     expect(JSON.parse(updatedTextResult)).toEqual({
-      created: false,
       memory: {
         id: updatedMemoryId,
-        section: 'Identity',
-        text: updatedText,
         updatedAt: updatedUpdatedAt,
       },
     })

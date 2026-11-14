@@ -201,10 +201,14 @@ describe('unchanged quiet, success, validation and cancellation paths', () => {
     const result = await dispatch(inputFor(args, port))
     const { lookupId: _lookup, ...payload } = 'lookupId' in response
       ? response : { ...response, lookupId: undefined }
+    // Inspect and patch omit their default route binding, patch omits created,
+    // and a batch drops the repeated action and an id-equal lookup.
+    const { routeBinding: _route, created: _created, ...defaultsOmitted } = { created: false, routeBinding: undefined, ...payload }
+    const { action: _action, ...batchRecord } = defaultsOmitted
     expect(result).toEqual({ rpcResult: { success: true, contentItems: [{ type: 'inputText', text: expect.any(String) }] } })
     expect(JSON.parse(result.rpcResult.contentItems[0]!.text!)).toEqual(args.action === 'inspect_models'
-      ? { action: 'inspect_models', results: [{ lookup: privateValue, ...payload }], requiresIndividualInspection: [] }
-      : payload)
+      ? { action: 'inspect_models', results: [batchRecord], requiresIndividualInspection: [] }
+      : args.action === 'save' || args.action === 'reconcile' ? payload : defaultsOmitted)
     expect(port).toHaveBeenCalledTimes(1)
   })
 

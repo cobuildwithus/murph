@@ -82,6 +82,32 @@ describe('automation definition inspection', () => {
   })
 })
 
+describe('host-managed full inspection', () => {
+  it.each([true, false])('omits only code-owned instructions (managed=%s)', async (managed) => {
+    const instructions = 'Code-owned routine policy. '.repeat(700)
+    const executionInspection = { status: 'available' as const, current: { phase: 'idle' as const },
+      recentRuns: [], nextStep: 'Explain.', interpretation: 'Retained.' }
+    const result = await executeAutomationDynamicTool({
+      automationTool: { async request() { return {
+        action: 'inspect', automationId: 'automation_synthetic', managed, contextReferences: [],
+        assistantTargetOverride: { model: 'gpt-6.1-sol' }, instructions, title: 'Synthetic routine',
+        executionInspection, effectiveTimeZone: 'UTC', lookupId: 'synthetic',
+        occurrenceProjection: { status: 'resolved', nextOccurrenceAt: null }, routeBinding: 'preserved',
+        schedule: { kind: 'dailyLocal', localTime: '08:00' }, status: 'active', updatedAt: '2030-01-15T10:01:00.000Z',
+      } } },
+      request: { kind: 'automation', request: { action: 'inspect', lookup: 'automation_synthetic' } },
+    })
+    const payload = JSON.parse(result.rpcResult.contentItems[0]!.text)
+    // Managed instructions are reseeded by host maintenance, so no edit flow reads them.
+    expect(payload).toMatchObject({ automationId: 'automation_synthetic', managed, contextReferences: [],
+      executionInspection, updatedAt: '2030-01-15T10:01:00.000Z',
+      ...(managed ? { instructionsOmitted: 'managed_model_preserved' } : { instructions }) })
+    expect(payload).toHaveProperty(managed ? 'instructionsOmitted' : 'instructions')
+    expect(payload).not.toHaveProperty(managed ? 'instructions' : 'instructionsOmitted')
+    expect(payload).not.toHaveProperty('routeBinding')
+  })
+})
+
 describe('automation model patch readback', () => {
   it('returns canonical model and managed ownership after a versioned patch', async () => {
     const selected = { model: 'gpt-6-luna', reasoningEffort: 'high' } as const
@@ -98,9 +124,14 @@ describe('automation model patch readback', () => {
     })
     expect(result.rpcResult.success).toBe(true)
     expect(result.automationSaveReplayed).toBeUndefined()
-    expect(JSON.parse(result.rpcResult.contentItems[0]!.text)).toMatchObject({
-      assistantTargetOverride: selected, managed: false, updatedAt: '2030-01-15T10:01:00.000Z',
+    const readback = JSON.parse(result.rpcResult.contentItems[0]!.text)
+    expect(readback).toMatchObject({
+      assistantTargetOverride: selected, updatedAt: '2030-01-15T10:01:00.000Z',
     })
+    // An ordinary record, a preserved route, and no creation are the patch defaults.
+    for (const omitted of ['managed', 'created', 'routeBinding', 'contextReferences']) {
+      expect(readback).not.toHaveProperty(omitted)
+    }
   })
 })
 

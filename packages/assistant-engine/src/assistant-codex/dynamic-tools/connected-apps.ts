@@ -210,7 +210,9 @@ export async function executeConnectedAppsDynamicTool(input: {
     // tags on the first pass, and a second pass would strip them as structure
     // and silently delete the member's content. The budget check stays here as
     // an independent guard on what enters the model's context.
-    const text = serializeHostedConnectedAppsResult(response.result)
+    const text = serializeHostedConnectedAppsResult(
+      projectConnectedAppsResultForModel(requestBody, response.result),
+    )
     if (!text) {
       return connectedAppsTextResult(
         false,
@@ -245,6 +247,21 @@ export async function executeConnectedAppsDynamicTool(input: {
       connectedAppsTextResult(false, describeConnectedAppsFailure(error), failureReason, error), error,
     )
   }
+}
+
+// A list repeats the configured toolkit catalog on every call; the reading
+// reference names the toolkits and connect rejects an unconfigured one. The
+// journal eligibility probe reads the port's full Web shape, not this text.
+function projectConnectedAppsResultForModel(
+  request: HostedConnectedAppsRequest,
+  result: unknown,
+): unknown {
+  if (request.operation !== 'manage' || request.input.action !== 'list'
+    || result === null || typeof result !== 'object' || !('toolkits' in result)) {
+    return result
+  }
+  const { toolkits: _toolkits, ...model } = result
+  return model
 }
 
 // Every connected-app failure used to read as an outage, so the assistant told

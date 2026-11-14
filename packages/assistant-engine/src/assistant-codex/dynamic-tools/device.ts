@@ -26,7 +26,9 @@ const deviceProviderSchema = z
   .max(120)
   .regex(/^[a-z0-9][a-z0-9_-]*$/u)
 
-const deviceArgumentsSchema = z.union([
+// Discriminated so an invalid call gets only its own action's issues back,
+// not every branch's.
+const deviceArgumentsSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('companion_status') }).strict(),
   z.object({
     action: z.literal('list_accounts'),
@@ -41,17 +43,19 @@ const deviceArgumentsSchema = z.union([
     accountId: z.string().trim().min(1).max(191),
     action: z.literal('reconcile'),
   }).strict(),
-  z.object({
-    action: z.literal('configure_no_data_outreach'),
-    afterDays: z.number().int().min(5).max(30),
-    mode: z.literal('after_days'),
-    sourceProvider: deviceProviderSchema,
-  }).strict(),
-  z.object({
-    action: z.literal('configure_no_data_outreach'),
-    mode: z.enum(['default', 'off']),
-    sourceProvider: deviceProviderSchema,
-  }).strict(),
+  z.discriminatedUnion('mode', [
+    z.object({
+      action: z.literal('configure_no_data_outreach'),
+      afterDays: z.number().int().min(5).max(30),
+      mode: z.literal('after_days'),
+      sourceProvider: deviceProviderSchema,
+    }).strict(),
+    z.object({
+      action: z.literal('configure_no_data_outreach'),
+      mode: z.enum(['default', 'off']),
+      sourceProvider: deviceProviderSchema,
+    }).strict(),
+  ]),
 ])
 
 export const MURPH_DEVICE_TOOL = {
@@ -482,8 +486,9 @@ function serializeDeviceToolResponse(
     : response.action === 'connect'
       ? {
           action: response.action,
+          // The Web route sets authorizationUrl to the same connectUrl that
+          // the description and skills tell the model to send.
           link: {
-            authorizationUrl: response.link.authorizationUrl,
             connectUrl: response.link.connectUrl,
             expiresAt: response.link.expiresAt,
             provider: response.link.provider,

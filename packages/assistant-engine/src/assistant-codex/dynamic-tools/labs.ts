@@ -18,6 +18,9 @@ import type {
 import { parseDynamicToolArguments } from './dynamic-tool-wrapper.js'
 
 const LABS_TOOL_RESULT_MAX_BYTES = 60_000
+// The lab-tests skill asks for at most five results per search.
+const LABS_SEARCH_DEFAULT_LIMIT = 5
+const LABS_DESCRIPTION_MAX_CHARACTERS = 240
 
 export const MURPH_LABS_TOOL = {
   namespace: 'murph',
@@ -78,7 +81,10 @@ export async function executeLabsDynamicTool(input: {
 }): Promise<MurphDynamicToolExecutionResult> {
   let failureReason: ToolFailureReason = 'handler_exception'
   try {
-    const rawResponse = await input.labsTool.request(input.request.request, {
+    const request = input.request.request
+    const rawResponse = await input.labsTool.request(request.action === 'search' && request.limit === undefined
+      ? { ...request, limit: LABS_SEARCH_DEFAULT_LIMIT }
+      : request, {
       signal: input.abortSignal ?? null,
     })
     failureReason = 'action_result_mismatch'
@@ -101,11 +107,60 @@ export async function executeLabsDynamicTool(input: {
   }
 }
 
+// Every result is discovery-only and priced in USD; the tool description says
+// so once. Omit nulls, coordinates and long catalog prose from each listing.
+function projectLabsToolResponse(response: HostedRuntimeLabsToolResponse) {
+  if (response.action === 'locations') {
+    return {
+      action: response.action,
+      checkedAt: response.checkedAt,
+      status: response.status,
+      zipCode: response.zipCode,
+      radiusMiles: response.radiusMiles,
+      homeCollectionAvailable: response.homeCollectionAvailable,
+      locations: response.locations.map((location) => ({
+        name: location.name,
+        address: {
+          line1: location.address.line1,
+          ...(location.address.line2 === null ? {} : { line2: location.address.line2 }),
+          city: location.address.city,
+          state: location.address.state,
+          postalCode: location.address.postalCode,
+        },
+        distanceMiles: location.distanceMiles,
+        ...(location.phoneNumber === null ? {} : { phoneNumber: location.phoneNumber }),
+      })),
+    }
+  }
+  return {
+    action: response.action,
+    checkedAt: response.checkedAt,
+    items: response.items.map((item) => ({
+      name: item.name,
+      kind: item.kind,
+      ...(item.description === null ? {} : { description: truncateLabsDescription(item.description) }),
+      ...(item.unit === null ? {} : { unit: item.unit }),
+      ...(item.catalogPrice === null ? {} : { catalogPriceUsd: item.catalogPrice.amount }),
+      ...(item.commonTurnaroundDays === null ? {} : { commonTurnaroundDays: item.commonTurnaroundDays }),
+      ...(item.maximumTurnaroundDays === null ? {} : { maximumTurnaroundDays: item.maximumTurnaroundDays }),
+      includedMarkers: item.includedMarkers.map((marker) => marker.name),
+      includedMarkerCount: item.includedMarkerCount,
+    })),
+  }
+}
+
+function truncateLabsDescription(description: string): string {
+  const characters = Array.from(description)
+  return characters.length <= LABS_DESCRIPTION_MAX_CHARACTERS
+    ? description
+    : `${characters.slice(0, LABS_DESCRIPTION_MAX_CHARACTERS - 1).join('').trimEnd()}…`
+}
+
 function serializeLabsToolResponse(
   response: HostedRuntimeLabsToolResponse,
 ): string | { failureReason: 'oversized_result' | 'result_serialization_failed' } {
   try {
-    const text = JSON.stringify(response) ?? 'null'
+    const text = JSON.stringify(projectLabsToolResponse(response)) ?? 'null'
     return new TextEncoder().encode(text).byteLength <= LABS_TOOL_RESULT_MAX_BYTES
       ? text
       : { failureReason: 'oversized_result' }
