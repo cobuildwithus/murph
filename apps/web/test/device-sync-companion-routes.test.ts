@@ -913,10 +913,12 @@ describe("device sync companion routes", () => {
       }));
 
       expect(response.status).toBe(200);
+      // An Android sign-in owns Health Connect and never touches Apple Health.
       expect(mocks.createSdkSignInSession).toHaveBeenCalledWith(
         "member_1",
         "junction",
         "connect",
+        "health_connect",
       );
     });
 
@@ -975,6 +977,7 @@ describe("device sync companion routes", () => {
         "member_1",
         "junction",
         "connect",
+        "apple_health_kit",
       );
       expect(mocks.assertHostedHistoricalLaunchConsentGranted).toHaveBeenCalledWith({
         memberId: "member_1",
@@ -995,6 +998,7 @@ describe("device sync companion routes", () => {
         "member_1",
         "junction",
         "resume",
+        "apple_health_kit",
       );
     });
 
@@ -1037,6 +1041,7 @@ describe("device sync companion routes", () => {
         "member_1",
         "junction",
         null,
+        "apple_health_kit",
       );
     });
 

@@ -2537,6 +2537,125 @@ test("Junction lifecycle supersession retries one webhook resource job with norm
   }
 });
 
+test("accepted Junction webhook data waits a bounded time for its source to be re-admitted", async () => {
+  let now = new Date("2030-04-03T12:00:00.000Z");
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-pending-source");
+  let importCount = 0;
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      vaultRoot,
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    importer: {
+      async importDeviceProviderSnapshot() {
+        importCount += 1;
+        return { events: [{ kind: "measurement" }] };
+      },
+    },
+    providers: [createJunctionDeviceSyncProvider({
+      apiKey: "sk_us_test_123",
+      clientUserIdSecret: "junction-client-user-id-secret",
+      environment: "sandbox",
+      region: "us",
+      summaryResources: ["activity"],
+      timeseriesResources: [],
+      fetchImpl: async (input) => {
+        throw new Error(`Unexpected Junction request: ${readUrl(input)}`);
+      },
+    })],
+  });
+
+  try {
+    const account = seedStoredAccount(store, {
+      provider: "junction",
+      externalAccountId: "junction-pending-source",
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: "2026-04-01T00:00:00.000Z",
+    });
+    const source = {
+      connectionId: account.id,
+      sourceInstanceKey: "apple_health_kit",
+      sourceProviderSlug: "apple_health_kit",
+      resourceAvailabilitySummary: { activity: true },
+      firstSeenAt: "2026-04-01T00:00:00.000Z",
+      lastSeenAt: "2030-04-03T11:59:00.000Z",
+    };
+    // An explicit reconnect has opened: disconnected with no error.
+    store.upsertConnectionSource({ ...source, status: "disconnected" });
+    const enqueue = (objectId: string) => store.enqueueJob({
+      accountId: account.id,
+      provider: "junction",
+      kind: "resource",
+      payload: {
+        eventType: "daily.data.activity.created",
+        objectId,
+        occurredAt: "2030-04-02T00:00:00.000Z",
+        resource: "activity",
+        resourceCategory: "summary",
+        sourceProviderSlug: "apple_health_kit",
+        webhookDataJson: JSON.stringify({
+          date: "2030-04-02",
+          id: objectId,
+          sourceProviderSlug: "apple_health_kit",
+          steps: 4321,
+        }),
+        windowEnd: "2030-04-03T00:00:00.000Z",
+        windowStart: "2030-04-02T00:00:00.000Z",
+      },
+      availableAt: now.toISOString(),
+    });
+    const runDue = async (jobId: string) => {
+      now = new Date(requireJob(jobId).availableAt);
+      assert.equal((await service.runWorkerOnce())?.id, jobId);
+      return requireJob(jobId);
+    };
+    const requireJob = (jobId: string) => {
+      const job = store.getJobById(jobId);
+      assert.ok(job);
+      return job;
+    };
+
+    // Held, then imported once the next data webhook re-admits the source.
+    const held = enqueue("activity-held");
+    const heldOnce = await runDue(held.id);
+    assert.equal(heldOnce.status, "queued");
+    assert.equal(heldOnce.lastErrorCode, "JUNCTION_SOURCE_ADMISSION_PENDING");
+    assert.equal(
+      heldOnce.availableAt,
+      new Date(now.getTime() + computeRetryDelayMs(1)).toISOString(),
+    );
+    assert.equal(importCount, 0);
+    store.upsertConnectionSource({ ...source, status: "connected", lastSeenAt: now.toISOString() });
+    assert.equal((await runDue(held.id)).status, "succeeded");
+    assert.equal(importCount, 1);
+
+    // A source that never returns ends the hold on the ordinary job budget.
+    store.upsertConnectionSource({ ...source, status: "disconnected", lastSeenAt: now.toISOString() });
+    const abandoned = enqueue("activity-abandoned");
+    const startedAt = now.getTime();
+    for (let attempt = 1; attempt <= abandoned.maxAttempts; attempt += 1) {
+      const job = await runDue(abandoned.id);
+      assert.equal(job.attempts, attempt);
+      assert.equal(job.status, attempt < abandoned.maxAttempts ? "queued" : "dead");
+    }
+    assert.equal(abandoned.maxAttempts, 5);
+    // 15s + 60s + 5m + 30m: well inside the webhook queue's retry horizon.
+    assert.equal(now.getTime() - startedAt, 36 * 60_000 + 15_000);
+    assert.equal(importCount, 1);
+  } finally {
+    close();
+  }
+});
+
 test.each(["resource"] as const)(
   "Junction workout-stream %s failures keep exact progress on one cumulatively retried job",
   async (jobKind: JunctionWorkoutStreamServiceJobKind) => {

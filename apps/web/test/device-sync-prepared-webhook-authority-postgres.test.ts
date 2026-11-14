@@ -1171,7 +1171,9 @@ describe.skipIf(!runPostgresProof)(
           data: {
             firstSeenAt: new Date(fixture.receivedAt.getTime() - 120_000),
             sourceInstanceKey: opaqueSourceInstanceKey,
-            status: "connected",
+            // A connected, unfenced source keeps its epoch on explicit
+            // connect, so this reconnect starts from one that stopped.
+            status: "error",
           },
           where: { id: fixture.sourceId },
         });
@@ -1236,6 +1238,32 @@ describe.skipIf(!runPostgresProof)(
           }),
         ]));
         expect(rows).toHaveLength(2);
+
+        // Signing the phone back in leaves a connected source exactly as it was.
+        const connectedSource = await fixture.prisma.deviceConnectionSource.findUniqueOrThrow({
+          where: { id: fixture.sourceId },
+        });
+        const connectedParent = await fixture.prisma.deviceConnection.findUniqueOrThrow({
+          select: { updatedAt: true },
+          where: { id: fixture.connectionId },
+        });
+        await beginHostedDeviceSyncConnectionSourceReconnect({
+          proof: await captureHostedDeviceSyncConnectionSourceReconnect({
+            connectionId: fixture.connectionId,
+            sourceProviderSlug: "apple_health_kit",
+            store: fixture.store,
+            userId: fixture.memberId,
+          }),
+          store: fixture.store,
+          userId: fixture.memberId,
+        });
+        await expect(fixture.prisma.deviceConnectionSource.findUniqueOrThrow({
+          where: { id: fixture.sourceId },
+        })).resolves.toEqual(connectedSource);
+        await expect(fixture.prisma.deviceConnection.findUniqueOrThrow({
+          select: { updatedAt: true },
+          where: { id: fixture.connectionId },
+        })).resolves.toEqual(connectedParent);
 
         await expect(disconnectHostedDeviceSyncConnectionSource({
           connectionId: fixture.connectionId,

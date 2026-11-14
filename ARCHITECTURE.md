@@ -4262,9 +4262,16 @@ metadata and WHOOP overnight summaries are admitted only when the exact source
 is absent for first use or connected without a disconnect fence, and the hosted
 runtime rereads that durable source immediately before canonical import; a
 queued job never treats its cached account snapshot as current authorization.
-An explicit Apple Health SDK connect captures the exact source epoch before
-token mint and opens a pending epoch only if that proof is still current after
-mint; an older Connect therefore cannot clear a newer Disconnect. An
+An explicit companion SDK connect touches only the calling platform's own
+source: Apple Health for iOS, Health Connect for Android. It captures the exact
+source epoch before token mint and opens a pending epoch only if that proof is
+still current after mint; an older Connect therefore cannot clear a newer
+Disconnect. A source that is already connected without a disconnect fence keeps
+its epoch, so signing a phone back in neither closes it nor re-reads its
+history; disconnecting the source and connecting again does. While a pending
+epoch is open, runtime work a webhook already accepted for that source retries
+on the ordinary bounded job budget and imports once the source is re-admitted;
+work for a fenced source is dropped. An
 authenticated source-attributed Junction event can trigger reconciliation of a
 prepared native or Link source against Junction's live provider list. Only the
 live provider read can mark it connected without inventing a timestamp. If the
