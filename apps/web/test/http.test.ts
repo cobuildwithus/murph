@@ -589,7 +589,36 @@ describe("json route helper factory", () => {
     });
   });
 
-  it("can opt into warning-level log details without changing the response", async () => {
+  it("maps an outbound fetch failure to a retryable 503 at error level", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const response = httpModule.createJsonErrorResponse(new TypeError("fetch failed"), {
+      internalMessage: "route failed unexpectedly",
+      logMessage: "route failed",
+    });
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      error: { code: "UPSTREAM_UNAVAILABLE", message: "Upstream request failed.", retryable: true },
+    });
+    expect(errorSpy).toHaveBeenCalledWith("route failed", expect.objectContaining({
+      errorResponseCode: "UPSTREAM_UNAVAILABLE", errorType: "TypeError",
+    }));
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
+
+  it("keeps domain matchers ahead of the fetch failure mapping", async () => {
+    const error = new TypeError("fetch failed");
+    const mapping = { status: 409, error: { code: "DOMAIN_CONFLICT", message: "Try the domain recovery." }, log: null };
+    const response = httpModule.createJsonErrorResponse(error, {
+      internalMessage: "route failed unexpectedly", logMessage: "route failed",
+      matchers: [value => value === error ? mapping : null],
+    });
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({ error: mapping.error });
+  });
+
+  it("keeps an ordinary TypeError at 400 with optional warning-level log details", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const helpers = httpModule.createJsonRouteHelpers({
       internalMessage: "route failed unexpectedly",

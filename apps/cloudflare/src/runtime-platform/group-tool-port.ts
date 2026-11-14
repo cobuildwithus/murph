@@ -122,7 +122,9 @@ function isHostedReplaySafeGroupToolRequest(
     || request.action === "handoff"
     || request.action === "ask_current_sender"
     || request.action === "ask_member"
-    || request.action === "record_current_sender_daily_metric";
+    || request.action === "record_current_sender_daily_metric"
+    || request.action === "write_recap"
+    || (request.action === "read_game" && request.origin.kind === "game_recap");
 }
 
 function buildHostedRuntimeGroupToolPath(): string {
