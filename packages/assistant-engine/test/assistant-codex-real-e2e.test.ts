@@ -19556,6 +19556,81 @@ describeRealCodex('real Codex official weather-alert context e2e', () => {
   )
 })
 
+describeRealCodex('real Codex source silence visibility e2e', () => {
+  it.each(['stopped delivery', 'recent connection', 'daily source preference'] as const)(
+    'source silence visibility: %s', async (scenario) => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-source-visibility-e2e-'))
+      const requests: AssistantHostedDeviceToolRequest[] = []
+      try {
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          // The empty wearable read is supplied by the scenario; this turn tests the connection owner.
+          threadConfig: { 'features.shell_tool': false },
+          codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+          codexHome: config.codexHome, env: config.env,
+          developerInstructions: buildAssistantSystemPrompt({
+            assistantCliContract: null,
+            assistantHostedDeviceConnectProviders: [{ label: 'Fitbit', provider: 'fitbit' }],
+            channel: 'linq', cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'direct',
+            currentLocalDate: '2030-03-12', currentTimeZone: 'UTC',
+            hostedRuntime: true, onboardingGuidance: false, ordinaryInboundTurn: true,
+          }),
+          dynamicTools: [MURPH_DEVICE_TOOL],
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            currentInvocationScope: () => ({ conversationScope: 'direct',
+              origin: { kind: 'accepted_input', assistantInputId: 'ain_00000000000000000000000000000027', sessionId: 'source-visibility' },
+              originSessionId: 'source-visibility' }),
+            deviceTool: { request: async (request) => {
+              requests.push(request)
+              if (request.action === 'list_accounts') return {
+                action: 'list_accounts', provider: null, sourceProvider: null,
+                accounts: [{ accountId: 'synthetic-aggregator', provider: 'junction', status: 'active',
+                  displayName: null, lastErrorCode: null, lastSyncCompletedAt: '2030-03-12T12:00:00.000Z',
+                  sources: [{ sourceProvider: 'google_health', status: 'connected',
+                    firstSeenAt: scenario === 'recent connection' ? '2030-03-12T11:30:00.000Z' : '2030-02-01T00:00:00.000Z',
+                    lastDataAt: scenario === 'recent connection' ? null : '2030-03-05T00:00:00.000Z' }],
+                }],
+              }
+              if (request.action === 'configure_no_data_outreach' && scenario === 'daily source preference') return {
+                action: 'configure_no_data_outreach', effectiveAfterDays: 12, setting: 'custom',
+                sourceProvider: request.sourceProvider, status: 'saved',
+              }
+              throw new Error('Unexpected device effect')
+            } },
+            sendVaultFile: async () => { throw new Error('Unexpected file send') }, vaultFileSendAvailable: false,
+          },
+          model: config.model, modelProvider: config.modelProvider,
+          prompt: scenario === 'daily source preference'
+            ? 'Please wait twelve days before checking in about no data from my Fitbit. Check which source it uses and save that preference.'
+            : 'It is March 12, 2030 at noon UTC. My recent wearable read for March 11 returned no records. Check my device sources and explain why there may be no recent data. Do not refresh anything.',
+          reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+        })
+        expect(requests.filter((request) => request.action === 'list_accounts')).toHaveLength(1)
+        expect(requests.filter((request) => request.action !== 'list_accounts')).toEqual(
+          scenario === 'daily source preference' ? [{ action: 'configure_no_data_outreach',
+            mode: 'after_days', afterDays: 12, sourceProvider: 'google_health' }] : [],
+        )
+        const reply = result.finalMessage
+        expect(reply).not.toMatch(/permission error|permission denied|file-permission|command not found/iu)
+        expect(reply).not.toMatch(/(?:you are|you're|source is|account is) disconnected|you need to reconnect|cause (?:is )?unknown/iu)
+        if (scenario === 'stopped delivery') expect(reply).toMatch(/March 5|Mar(?:ch)?\.? 5|stopped|hasn.t sent|no new data|last (?:data|delivery|received|update)/iu)
+        if (scenario === 'recent connection') {
+          expect(reply).toMatch(/import|backfill|history/iu)
+          expect(reply).toMatch(/may|might|could|likely|still/iu)
+        }
+        if (scenario === 'daily source preference') expect(reply).toMatch(/12|twelve/iu)
+        process.stdout.write(`[source-silence-visibility] ${JSON.stringify({ scenario, reply })}\n`)
+      } finally {
+        await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+      }
+    }, 300_000,
+  )
+})
+
 describeRealCodex('real Codex adaptive wearable no-data outreach e2e', () => {
   it.each([
     { label: 'Apple Health', sourceProvider: 'apple_health_kit' },
@@ -19691,7 +19766,7 @@ describeRealCodex('real Codex adaptive wearable no-data outreach e2e', () => {
           conversationScope: 'direct',
           kind: 'unsupported-provider',
           prompt:
-            'My Fitbit is intentionally quiet sometimes. Save a ten-day no-data check-in preference for Fitbit.',
+            'My Strava is intentionally quiet sometimes. Save a ten-day no-data check-in preference for Strava.',
           scheduled: false,
         },
         {
@@ -22249,6 +22324,48 @@ describeRealCodex('real Codex member runtime troubleshooting e2e', () => {
 })
 
 describeRealCodex('real Codex direct operator diagnostic e2e', () => {
+  it('source silence visibility diagnostic uses canonical records over stale projections', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-canonical-diagnostic-e2e-'))
+    let permissionHomePaths: string[] = []
+    const observer = vi.spyOn(clinicalExtractionCodex, 'executeCodexAppServerTurn')
+    try {
+      await initializeVault({ timezone: 'UTC', vaultRoot })
+      await importWearableArrivalFixture(vaultRoot)
+      const projectionPath = path.join(vaultRoot, '.runtime', 'projections', 'synthetic-coverage.json')
+      await mkdir(path.dirname(projectionPath), { recursive: true })
+      const staleProjection = JSON.stringify({ builtAt: '2026-07-14T00:00:00.000Z', workouts: [] })
+      await writeFile(projectionPath, staleProjection)
+      const canonicalBefore = await snapshotRealCodexCanonicalVault(vaultRoot)
+      const permissionConfig = await materializeRealCodexHostedPermissionHome(config)
+      permissionHomePaths = permissionConfig.temporaryPaths
+      const result = await executeOperatorDiagnostic({
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: permissionConfig.codexHome, env: config.env, model: config.model,
+        modelProvider: config.modelProvider, feedbackDiagnostic: true,
+        question: 'Does the vault contain any workout records for July 15, 2026? A cached coverage file in runtime projections lists no workouts. Establish whether records are actually missing. Report only the count and evidence basis, without record contents or identifiers.',
+        reasoningEffort: 'low', workspaceRoot: vaultRoot,
+        onProviderUsage: ({ usage }) => recordRealCodexProviderUsage(usage.usage),
+      })
+      expect(observer).toHaveBeenCalledTimes(1)
+      const turn = await observer.mock.results[0]!.value
+      const commands = readCapabilityRoutingActions(turn.jsonEvents)
+        .filter((action) => action.kind === 'command')
+      expect(commands.some((action) => /vault-cli/iu.test(action.command))).toBe(false)
+      expect(result.answer).toMatch(/(?:1|one) (?:canonical )?workout|workout(?:s| records?)?[^.]{0,30}(?:1|one)/iu)
+      expect(result.answer).toMatch(/canonical/iu)
+      expect(result.answer).toMatch(/stale|cache|projection/iu)
+      expect(result.answer).not.toMatch(/command not found|permission denied|no workout records|records are missing/iu)
+      expect(result.answer).not.toContain(vaultRoot)
+      expect(await snapshotRealCodexCanonicalVault(vaultRoot)).toEqual(canonicalBefore)
+      expect(await readFile(projectionPath, 'utf8')).toBe(staleProjection)
+      process.stdout.write('[source-silence-visibility diagnostic] ' + result.answer.replaceAll(/\s+/gu, ' ').trim() + '\n')
+    } finally {
+      observer.mockRestore()
+      await removeRealCodexTemporaryPaths([vaultRoot, ...permissionHomePaths, ...config.temporaryPaths])
+    }
+  }, 360_000)
+
   it('returns de-identified feedback reproduction from private synthetic evidence', async () => {
     const config = await resolveRealCodexE2eConfig()
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-feedback-diagnostic-e2e-'))

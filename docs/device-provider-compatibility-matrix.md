@@ -96,8 +96,17 @@ source that has never delivered is measured from `first_seen_at`, so a connect
 that emits its opening burst and then goes quiet is caught by the same rule.
 
 Member no-data checks have a separate policy from push-primary classification.
-Garmin and Junction WHOOP (`whoop_v2`) admit one direct Linq check after five
-days without a delivery; Apple Health admits one after three days. WHOOP stays
+Every connect-catalog source declares whether a connected member normally
+produces data daily (`expectsDailyData`). Each daily source's provider routes,
+including both Fitbit slugs, derive a five-day check with the catalog label and
+neutral `linq.device_connection_check` copy. Only Garmin (its app/device copy)
+and Apple Health (three days and its own copy) override that default. Catalog
+entries without a direct provider route do not create new source identities.
+When those devices relay through Apple Health, that delivery is checked under
+Apple Health. Health Connect remains an unavailable mobile/local flow.
+Workout apps, scales, cuffs, ECG/meters, nutrition, and glucose/insulin systems
+are not daily for this check; glucose systems retain their own gap/alert
+behavior. WHOOP stays
 pull-capable and also qualifies when its source has the explicit
 `TOKEN_REFRESH_FAILED` error. Its neutral connection-help question does not
 infer disconnection, prescribe reconnect, or claim an automatic repair. Error
@@ -110,14 +119,10 @@ These checks are only for an active member with a recent inbound and an establis
 direct thread.
 Canonical member-plus-source-provider preference state may extend that wait to
 5–30 days or disable it; missing preference state means the provider's default.
-The no-data preference response parser accepts Apple Health's three-day default
-while custom waits remain 5–30 days. Deploy the updated Cloudflare runtime and
-converge runner containers before enabling this Web policy: older consumers
-reject a three-day default response. The updated consumer accepts every existing
-Garmin/off/custom response; the independent iOS receipt refresh can ship first
-or last. After Web rollout, verify Apple Health default/reset and off replies,
-one eligible private notice, and suppression after fresh data or opt-out. Keep
-the updated runtime as the compatibility floor while Web returns three days.
+The runtime compatibility floor accepts Apple Health's three-day default while
+custom waits remain 5–30 days; runners predating that support cannot consume a
+three-day default response. The catalog expansion keeps that existing response
+contract and adds no deployment-order constraint from the current baseline.
 Only accepted input from the member's current direct conversation may change the
 preference. The existing mailbox dedupe key is scoped to source lifecycle and
 `last_data_at`, so repeated stale passes preserve one message per silence episode;
@@ -129,8 +134,20 @@ rebuilds the current episode and effective preference before claiming dispatch;
 a resumed, replaced, disconnected, deferred, or disabled source therefore ends
 as a terminal no-send. Exact automated text uses the ordinary committed
 notification transcript, so a later member reply and attended turn can see the
-check and update the preference without separate assistant memory. Providers
-without an explicit no-data-check policy remain unchanged.
+check and update the preference without separate assistant memory. Sources
+classified as not daily do not get this check.
+
+The private device tool exposes each source's provider, status, `firstSeenAt`
+and last delivery (`lastDataAt`) from the existing runtime snapshot.
+`firstSeenAt` is when the source's current lifecycle began: a reconnect that
+advances the lifecycle epoch replaces it, while a relink merged into an existing
+data-equivalent source keeps the earliest time. A recent value therefore means a
+new connection; an old value does not rule out a relink. A successful account sync does not establish source
+delivery. Old delivery explains an empty recent read without proving disconnection;
+a source first connected minutes or hours ago may still be importing history.
+No snapshot wire fields change, so this expansion supports Web-first and
+runner-first deploys from the current three-day-capable baseline. Older runners
+continue showing account summaries; newer runners read existing source fields.
 
 Recovering a dead push carrier cannot be done by pulling, because there is
 nothing to pull and a data refresh cannot make the provider push again. The only
