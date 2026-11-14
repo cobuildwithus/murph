@@ -211,24 +211,63 @@ test("a partial device total stays the day's number when nothing else reported",
   await assertSteps([whoop("2026-11-10T20:00:00Z"), nextMorning], day, 6_000);
 });
 
-test("any wearable record from after the day's end shows the day is finished", async () => {
-  const nextMorningReading = {
+test("only a steps total recorded after the day's end shows the day is finished", async () => {
+  const reading = (id: string, occurredAt: string, extra: object) => ({
     schemaVersion: "murph.event.v1",
-    id: "evt_steps_day_end_next_morning_reading",
+    id,
     kind: "observation",
-    occurredAt: "2026-11-11T11:00:00Z",
+    occurredAt,
+    source: "device",
+    title: "Reading",
+    dataOrigin: { version: 1, aggregatorProvider: "junction", sourceProviderSlug: "whoop-v2", sourceType: "watch" },
+    ...extra,
+  });
+  // A real reading from the next morning: time has passed, but it is not a steps total.
+  const nextMorningHeartRate = reading("evt_steps_day_end_next_morning_reading", "2026-11-11T11:00:00Z", {
     recordedAt: "2026-11-11T11:05:00Z",
     dayKey: "2026-11-11",
-    source: "device",
-    title: "Resting heart rate",
     metric: "resting-heart-rate",
     value: 54,
     unit: "bpm",
-    dataOrigin: { version: 1, aggregatorProvider: "junction", sourceProviderSlug: "whoop-v2", sourceType: "watch" },
+    externalRef: { system: "junction", resourceType: "junction-whoop-v2-sleep" },
+  });
+
+  await assertSteps([whoop("2026-11-10T20:00:00Z"), phoneEvening], day, 6_000, [nextMorningHeartRate]);
+  await assertSteps([whoop("2026-11-10T20:00:00Z"), phoneEvening, nextMorning], day, 11_000, [nextMorningHeartRate]);
+});
+
+test("a record stamped with a time that stands for its day does not finish a day still open", async () => {
+  // An overnight summary is stored at noon UTC on its wake date. In Auckland (UTC+13) that
+  // is an hour after the same local day ends, though the day has only begun at upload time.
+  const auckland = "Pacific/Auckland";
+  const openDay = "2026-11-14";
+  const overnightSummary = {
+    schemaVersion: "murph.event.v1",
+    id: "evt_steps_day_end_overnight_summary",
+    kind: "observation",
+    occurredAt: `${openDay}T12:00:00.000Z`,
+    recordedAt: `${openDay}T12:00:00.000Z`,
+    dayKey: openDay,
+    source: "device",
+    title: "Overnight heart rate variability",
+    metric: "hrv",
+    value: 61,
+    unit: "ms",
+    dataOrigin: {
+      version: 1, aggregatorProvider: "junction", sourceProviderSlug: "whoop-v2", sourceType: "watch",
+      timestampSemantics: "floating",
+    },
     externalRef: { system: "junction", resourceType: "junction-whoop-v2-sleep" },
   };
+  // 9 am and 3 pm local on the open day, both long before it ends at 11:00 UTC.
+  const device: StepsRecord = {
+    date: openDay, recordedAt: "2026-11-14T02:00:00Z", source: "whoop-v2", timeZone: auckland, value: 6_000,
+  };
+  const phone: StepsRecord = {
+    date: openDay, recordedAt: "2026-11-13T20:00:00Z", source: "apple-health-kit", timeZone: auckland, value: 11_000,
+  };
 
-  await assertSteps([whoop("2026-11-10T20:00:00Z"), phoneEvening], day, 11_000, [nextMorningReading]);
+  await assertSteps([device, phone], openDay, 6_000, [overnightSummary]);
 });
 
 test("a record the member logged by hand does not show the day is finished", async () => {

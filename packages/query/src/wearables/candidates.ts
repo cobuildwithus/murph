@@ -157,7 +157,7 @@ export function collectWearableDataset(
     }
 
     // A fact about the whole vault, read before a provider or date filter narrows this call.
-    stepsFreshness.noteRecord(entity);
+    stepsFreshness.noteRecord(entity, provider, externalRef);
 
     if (providerSet && !providerSet.has(publicProvider)) {
       continue;
@@ -203,7 +203,6 @@ export function collectWearableDataset(
       for (const candidate of candidates) {
         if (matchesDateFilters(candidate.date, filters)) {
           rawMetricCandidates.push(candidate);
-          stepsFreshness.noteTotal(entity, candidate);
         }
       }
       continue;
@@ -258,30 +257,38 @@ export function collectWearableDataset(
 
 /**
  * Tells a steps total that covers its whole day from one last recorded partway
- * through a day the vault has since seen finish. Both facts come from records:
- * each total's own day end, and the latest time any wearable record was recorded.
+ * through a day the vault has since seen finish. Both facts come from the steps
+ * totals themselves: each one's own day end, and the latest time any of them
+ * was recorded. Other records do not count as proof that time has passed,
+ * because some carry a time that stands for a day rather than an instant.
  */
 function trackStepsFreshness() {
   const dayEndMsByCandidateId = new Map<string, number>();
   let evidenceThroughMs = Number.NEGATIVE_INFINITY;
 
   return {
-    noteRecord(entity: CanonicalEntity): void {
-      const recordedMs = Date.parse(normalizeNullableString(entity.attributes.recordedAt) ?? entity.occurredAt ?? "");
-      if (recordedMs > evidenceThroughMs) {
-        evidenceThroughMs = recordedMs;
+    noteRecord(entity: CanonicalEntity, provider: string, externalRef: WearableExternalRef | null): void {
+      if (
+        entity.family !== "event"
+        || entity.kind !== "observation"
+        || mapScalarMetric(normalizeLowercaseString(entity.attributes.metric) ?? "", 0, null)?.metric !== "steps"
+      ) {
+        return;
       }
-    },
-    noteTotal(entity: CanonicalEntity, candidate: WearableMetricCandidate): void {
-      const dayEndMs = candidate.metric === "steps"
-        ? resolveLocalDayEndMs(
-            candidate.date,
-            normalizeNullableString(entity.attributes.timeZone),
-            candidate.dataOrigin?.timeZoneOffsetMinutes,
-          )
-        : null;
-      if (dayEndMs !== null) {
-        dayEndMsByCandidateId.set(candidate.candidateId, dayEndMs);
+
+      for (const candidate of buildObservationMetricCandidates(entity, provider, externalRef)) {
+        const recordedMs = Date.parse(candidate.recordedAt ?? "");
+        if (recordedMs > evidenceThroughMs) {
+          evidenceThroughMs = recordedMs;
+        }
+        const dayEndMs = resolveLocalDayEndMs(
+          candidate.date,
+          normalizeNullableString(entity.attributes.timeZone),
+          candidate.dataOrigin?.timeZoneOffsetMinutes,
+        );
+        if (dayEndMs !== null) {
+          dayEndMsByCandidateId.set(candidate.candidateId, dayEndMs);
+        }
       }
     },
     markPartialCounts(candidates: readonly WearableMetricCandidate[]): void {

@@ -33,15 +33,20 @@ and the day's metric point.
 
 ## Decisions
 
-1. **The vault's own records say when a day is finished, not a clock.** Steps
-   selections are computed at read time for assistant reads and at build time
-   for the day's metric point and the saved numbers. A clock would give two
-   answers for the same records. The day is finished once any wearable record
-   was recorded at or after that day's end. With no record after the day's end
-   nothing newer exists to show, and the rule stays as it was.
+1. **The vault's own steps totals say when a day is finished, not a clock.**
+   Steps selections are computed at read time for assistant reads and at build
+   time for the day's metric point and the saved numbers. A clock would give two
+   answers for the same records. The day is finished once any steps total, from
+   any source, was recorded at or after that day's end. With none, nothing newer
+   exists to show, and the rule stays as it was. Review found that "any wearable
+   record" was too wide: an overnight summary is stored at noon UTC on its wake
+   date, which in UTC+12 and beyond is after the same local day ends, so it
+   finished a day that had just begun. Steps totals carry the provider's own
+   update time, the same time the rule already trusts for the device total.
 2. **The record's own zone decides its day end.** Its IANA zone when it names
-   one, so a 23- or 25-hour day ends on time, else its UTC offset. A record with
-   neither keeps the half rule alone.
+   one, so a 23- or 25-hour day ends on time, else its UTC offset, which also
+   stands in on a date that zone's midnight is skipped or repeated. A record
+   with neither keeps the half rule alone.
 3. **Collection decides, the policy applies.** Collection sees every record
    before a provider or date filter narrows a read, and marks a total that is a
    partial count of a finished day. The mark is stored with the activity
@@ -52,7 +57,9 @@ and the day's metric point.
    written after it, so no reader meets a row it cannot parse.
 5. **Nothing is dropped.** The device's partial total stays a candidate. It is
    still that source's number in source-filtered reads and on a day with no
-   merged total.
+   merged total. One source can hold both a worn and a merged total (Apple
+   Health with an Apple Watch total); its own read and board series then follow
+   the same rule.
 
 ## Departures from the owner's rule
 

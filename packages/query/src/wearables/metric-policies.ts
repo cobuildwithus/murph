@@ -120,7 +120,7 @@ export function resolveLocalDayEndMs(
 
 /**
  * A daily total last recorded before its own day ended counts only part of that
- * day. The day is finished once the vault holds a wearable record from after it
+ * day. The day is finished once the vault holds a steps total recorded after it
  * ended; until then the day may still be open and the total keeps its standing.
  */
 export function isPartialCountOfFinishedDay(input: {
