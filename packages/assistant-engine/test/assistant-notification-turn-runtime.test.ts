@@ -4,7 +4,6 @@ import { MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION } from '../src/assistant/weekly
 import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import assert from 'node:assert/strict'
 import path from 'node:path'
-import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { extractCodexAssistantProviderUsage } from '../src/assistant/providers/helpers.js'
 import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assistant/provider-config'
@@ -4634,11 +4633,6 @@ test('failed recap regeneration completes silently using the normal turn profile
   const scope = { eventId: 'game-recap:game_synthetic:replacement', gameId: 'game_synthetic', pairFingerprint: '0123456789abcdef0123456789abcdef', show: true as const }
   const request = vi.fn().mockResolvedValueOnce({ result: { status: 'ok', recapGame: { recovered: false } } })
     .mockResolvedValueOnce({ result: { status: 'unavailable', error: 'recap_generation_retired' } })
-  // Working files from this attempt and from an earlier recap must not be saved with the room's workspace.
-  for (const leftover of ['tmp/recap/earlier-recap/refs', 'tmp/recap/this-attempt/media']) {
-    await mkdir(path.join(vault, leftover), { recursive: true })
-    await writeFile(path.join(vault, leftover, 'synthetic.jpg'), 'synthetic')
-  }
   const { deliverMessage, mocks, sendAssistantNotificationLocal } = await loadNotificationTurnHarness({
     providerResult: createProviderResult({ response: 'unused' }), turnId: 'failed-recap-replacement',
     onExecuteCodexTurnWithRecovery: async () => { throw new Error('Synthetic provider failure') },
@@ -4654,7 +4648,6 @@ test('failed recap regeneration completes silently using the normal turn profile
   expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
     profile: { promptProfile: 'conversation', threadScope: 'isolated-thread', toolProfile: 'provider-turn' },
   }))
-  expect(existsSync(path.join(vault, 'tmp/recap'))).toBe(false)
   } finally { await rm(vault, { recursive: true, force: true }) }
 })
 

@@ -1,5 +1,6 @@
 import { RECAP_SHOW_CRAFT } from '@murphai/hosted-execution/runtime-control'
-import { RECAP_WORKSPACE_ROOT, recapDirectory } from './recap-files.js'
+import { recapDirectory } from './recap-files.js'
+import { resolveRuntimePaths } from '@murphai/runtime-state/node'
 import { createHash } from 'node:crypto'
 import { constants, createReadStream } from 'node:fs'
 import { access, writeFile } from 'node:fs/promises'
@@ -12,8 +13,9 @@ import type { AssistantHostedGroupTool } from './execution-context.js'
 import { resolveAssistantStatePaths } from './store/paths.js'
 import { resolveAssistantTranscriptPath } from './store/persistence.js'
 
+/** Runtime scratch is never saved with the workspace, so a recap's photos, media and chat copy last only as long as the container. */
 export function recapTaskDirectory(vault: string, eventId: string): string {
-  return path.join(vault, RECAP_WORKSPACE_ROOT, createHash('sha256').update(eventId).digest('hex').slice(0, 32))
+  return path.join(resolveRuntimePaths(vault).tempRoot, 'recap', createHash('sha256').update(eventId).digest('hex').slice(0, 32))
 }
 
 /**

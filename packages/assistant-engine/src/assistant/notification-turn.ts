@@ -921,8 +921,6 @@ export async function sendAssistantNotificationLocal(
         return withPostTurnDeliveryExpectations(await completePreparedRecapNotification(completed, {
           firstContactDocIds, input, messageInput, resolved, sharedPlan }))
       } finally {
-        // A recap attempt's photos, media and chat copy must not be saved with the room's workspace.
-        await hostedToolContext?.discardGameRecapWorkspace?.().catch(() => {})
         await stopAssistantChannelTypingIndicator(typingIndicator, {
           providerStop: !assistantDeliveryOutcomeSupersedesTypingIndicator(
             committedDeliveryOutcomeKind,

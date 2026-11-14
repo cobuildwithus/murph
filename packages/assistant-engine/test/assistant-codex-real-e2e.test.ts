@@ -48910,7 +48910,7 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
       const media = readCapabilityRoutingActions(events).flatMap(action => action.kind === 'dynamic' && ['generate_image', 'generate_song', 'write_recap'].includes(action.tool) ? [action] : []);
       const actions = readCapabilityRoutingActions(events);
       const proof = { model: config.model, saved: providers.saved.length, providerCalls: providers.providerCalls,
-        workingFilesLeft: existsSync(path.join(vault, 'tmp/recap')),
+        workingFilesInVault: existsSync(path.join(vault, 'tmp/recap')),
         readGame: actions.flatMap(action => action.kind === 'dynamic' && action.tool === 'read_game' ? [{ bytes: Buffer.byteLength(action.output) }] : []),
         commands: actions.flatMap(action => action.kind === 'command' ? [action.command.replace(/[a-f0-9]{32,64}/gu, '<hex>').slice(0, 140)] : []).slice(0, 20),
         failedCommands: actions.flatMap(action => action.kind === 'command' && !action.ok
@@ -48926,8 +48926,8 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
       expect(proof.saved).toBe(1);
       // What read_game returns fits in what the model is shown, so nothing is cut out of it.
       for (const read of proof.readGame) expect(read.bytes).toBeLessThan(10_000 * 4);
-      // Photos, media and the chat copy are gone when the turn ends, so the room's workspace never saves them.
-      expect(proof.workingFilesLeft).toBe(false);
+      // Photos, media and the chat copy live in runtime scratch, which the room's saved workspace never includes.
+      expect(proof.workingFilesInVault).toBe(false);
     }
   }, 900_000)
 

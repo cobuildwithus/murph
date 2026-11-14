@@ -5898,10 +5898,9 @@ Every available reference photo, Murph's character sheet included, is
 materialized in the recap task directory with a vault-relative path so native
 `view_image` can inform casting and the same path can name the reference. Failed
 reference fetches omit the path without blocking the recap. The recap task
-directory holds one attempt's working files and is removed when the recap turn
-ends, along with any earlier recap's leftovers, so players' photos, generated
-media and the chat copy are never saved with the room's workspace. A resumed
-attempt reads the game again.
+directory is runtime scratch under `.runtime/tmp`, which a saved workspace never
+includes, so players' photos, generated media and the chat copy last only as
+long as the container. A resumed attempt reads the game again.
 The recap turn, never a model argument, makes media a file and fixes its format:
 the agent supplies a prompt and reference photos for each JPEG scene and a style
 and lyrics for the twenty-second song, then calls `write_recap` once. The host uploads selected bytes and Web publishes

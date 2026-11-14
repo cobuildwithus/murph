@@ -1,4 +1,4 @@
-import { readRecapFile, readRecapDraftFile, removeRecapWorkspace, saveRecapMediaFile } from './recap-files.js'
+import { readRecapFile, readRecapDraftFile, saveRecapMediaFile } from './recap-files.js'
 import type { SongWordTimestamp } from '@murphai/contracts/recap-show'
 import { resolveElevenLabsApiKey } from '@murphai/operator-config/elevenlabs-runtime'
 import type { GeneratedMediaFileRuntime } from '../assistant-codex/generated-media-file.js'
@@ -216,8 +216,6 @@ export interface AssistantHostedToolContext {
   currentGameRecapScope?(): NonNullable<AssistantHostedExecutionContext['gameRecapScope']> | null
   prepareRecapMedia?(request: { kind: 'image'; args: GenerateImageToolArgs } | { kind: 'song'; args: GenerateSongToolArgs }, fetchImpl: typeof fetch): Promise<GeneratedMediaFileRuntime>
   prepareGameRecapInputs?(material: unknown): Promise<unknown>
-  /** Remove every recap working file from the workspace, so none is saved with it. */
-  discardGameRecapWorkspace?(): Promise<void>
   readGameRecapDraft?(draftPath: string): Promise<unknown>
   readGameRecapMedia?(file: string): Promise<{ bytes: string; referenceIds: string[]; mediaType: 'image/jpeg' | 'audio/mpeg'; wordsTimestamps?: SongWordTimestamp[] }>
   currentGameMissedCheckInScope?(): NonNullable<AssistantHostedExecutionContext['gameMissedCheckInScope']> | null
@@ -678,11 +676,6 @@ export function createAssistantHostedToolContext(input: {
           return file
         },
       }
-    },
-    discardGameRecapWorkspace: async () => {
-      if (!executionContext?.gameRecapScope?.show) return
-      recapWorkspace = null
-      await removeRecapWorkspace(input.messageInput.vault)
     },
     prepareGameRecapInputs: async material => {
       const scope = executionContext?.gameRecapScope
