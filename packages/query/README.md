@@ -14,7 +14,7 @@ with a separate pending promise: a lock owner could join a reader waiting for
 that same lock. The `query-wait` timing span measures acquisition;
 `query-rebuild` measures actual rebuilding.
 
-SQLite version **39** publishes three independent section files. Their definitions
+SQLite version **40** publishes three independent section files. Their definitions
 live in `src/projection/schema.ts`; paths come from
 `QUERY_PROJECTION_SECTION_RELATIVE_PATHS` in `@murphai/runtime-state/node`.
 
@@ -190,6 +190,29 @@ provenance and raw-observation suppression.
 
 Query schema 37 rebuilds prior wearable selections and MetricPoints through
 the existing projection owner; canonical records are unchanged.
+
+### Daily steps
+
+A worn device's own daily total (source type `watch` or `ring`) is the day's
+steps when it is at least half of the merged health-store total. Below half,
+or at 0, the device came off or reported nothing and the merged total stands.
+
+A device total last recorded before its own calendar day ended is a partial
+count. Once the vault holds any wearable record from after that day's end, the
+day is finished and the partial count no longer stands in for the device: the
+merged total is the day's steps until the device reports that day again. The
+day's end comes from the record's own time zone, or its UTC offset when it
+names none; a record with neither keeps the half rule alone. While nothing has
+been recorded after the day's end, the day may still be today and the rule is
+unchanged. Collection decides this from the whole vault, before any provider
+or date filter, and stores it with the candidate
+(`partialCountOfFinishedDay`), so reads from records and from stored rows
+agree.
+
+On a day with no merged total, a worn daily total that counts passes over sums
+of a source's intraday samples, which cover part of a day. Each source's own
+number is unchanged in source-filtered reads. Query schema 40 rebuilds stored
+selections with this evidence.
 
 ### Ordinary wearable reads
 

@@ -24,6 +24,8 @@ export interface WearableMetricCandidate {
   externalRef: WearableExternalRef | null;
   metric: string;
   occurredAt: string | null;
+  /** A steps total last recorded before its own finished day ended. */
+  partialCountOfFinishedDay?: boolean;
   paths: string[];
   provider: string;
   /** Stored-reconciliation override for sanitized session timestamp evidence. */
@@ -198,6 +200,8 @@ export interface WearableActivityMetricCandidateEvidence {
     sourceProviderSlug: string | null;
     sourceType: string | null;
   };
+  /** Present only when true; see `WearableMetricCandidate`. */
+  partialCountOfFinishedDay?: true;
   provider: string;
   publicProvider: string;
   recordedAt: string | null;

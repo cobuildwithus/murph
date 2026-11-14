@@ -194,6 +194,7 @@ const storedActivityMetricCandidateEvidenceSchema:
       sourceProviderSlug: storedTokenSchema.nullable(),
       sourceType: storedTokenSchema.nullable(),
     }),
+    partialCountOfFinishedDay: z.literal(true).optional(),
     provider: storedTokenSchema,
     publicProvider: storedTokenSchema,
     recordedAt: storedTimestampSchema,
