@@ -63,11 +63,13 @@ it.each([false, true])('accepts a recap show through the production hosted Linux
   ].join('\n');
   const responses: HostedLocalAssistantProviderScriptedResponse[] = [
     buildAssistantProviderMurphToolCall('read_game', {}),
+    buildAssistantProviderShellCommandCall(`cat ${relativeRoot}/game.json ${relativeRoot}/chat.jsonl ${relativeRoot}/lore.md`),
     buildAssistantProviderShellCommandCall(command),
     buildAssistantProviderShellCommandCall(confinement),
-    buildAssistantProviderMurphToolCall('generate_image', { output: 'file', outputFormat: 'jpeg',
-      prompt: fixture.story.pages[0]!.blocks[1]!.scene!.prompt, referenceImageRefs: fixture.material.references.filter(ref => ref.kind === 'profile').map(ref => ref.id) }),
-    buildAssistantProviderMurphToolCall('generate_song', { output: 'file', durationSeconds: 20, prompt: 'Warm acoustic pop about a synthetic laundry space mission.' }),
+    // One reference by its photo path and one by its id: the recap takes either.
+    buildAssistantProviderMurphToolCall('generate_image', { prompt: fixture.story.pages[0]!.blocks[1]!.scene!.prompt,
+      referenceImageRefs: fixture.material.references.filter(ref => ref.kind === 'profile').map((ref, index) => index ? ref.id : `${relativeRoot}/refs/${ref.id}.jpg`) }),
+    buildAssistantProviderMurphToolCall('generate_song', { prompt: 'Warm acoustic pop about a synthetic laundry space mission.', lyrics: fixture.story.song!.lyrics }),
     { deriveResponse: () => draftCommand() },
     buildAssistantProviderMurphToolCall('write_recap', { draftPath }),
     'Synthetic recap submitted.',

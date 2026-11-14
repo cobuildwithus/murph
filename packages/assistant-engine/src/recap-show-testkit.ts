@@ -30,6 +30,10 @@ export async function createRecapShowLiveProviders(input: {
     photos.set(id, photos.get(hash(`synthetic-profile:${player.memberId}`))!)
     references.push({ id, kind: 'entry', memberId: player.memberId, entryId: entry.entryId })
   }
+  // Production lists Murph's character sheet last, with no local photo path.
+  const murph = hash('synthetic-murph')
+  photos.set(murph, await sharp(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="480" height="640"><rect width="480" height="640" fill="#f5f0e8"/><rect x="170" y="220" width="140" height="200" rx="30" fill="#2d3436"/><circle cx="240" cy="170" r="60" fill="#7a8c6e"/></svg>')).jpeg().toBuffer())
+  references.push({ id: murph, kind: 'murph' })
   const startedAt = new Date(Date.now() - 8 * 86_400_000).toISOString()
   const settledAt = new Date().toISOString()
   const material: RecapMaterial = { game: input.game, players: input.players.map(player => player.name), entries: input.entries,
@@ -38,6 +42,18 @@ export async function createRecapShowLiveProviders(input: {
     at: new Date(Date.now() - 86_400_000 + index * 1000).toISOString(), source: 'player', laneSeq: String(index + 1) }))
   const image = await sharp(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="768" height="1024"><rect width="768" height="1024" fill="#2d3436"/><path d="M0 0H768V250Q384 80 0 250Z" fill="#9e5743"/><rect x="100" y="780" width="568" height="80" fill="#d4c4a8"/><circle cx="260" cy="490" r="70" fill="#d4c4a8"/><circle cx="510" cy="490" r="70" fill="#7a8c6e"/><path d="M180 780V600H340V780M430 780V600H590V780" fill="#d4c4a8"/></svg>')).jpeg().toBuffer()
   const song = await readFile(new URL('../../../fixtures/generated-audio/recap-synthetic-20s.mp3', import.meta.url))
+  // Sung lyrics come back as timed words plus audio; a plain song is audio alone.
+  const songResponse = async (request: Request): Promise<Response> => {
+    if (!request.headers.get('accept')?.includes('multipart/mixed')) return new Response(song, { headers: { 'content-type': 'audio/mpeg' } })
+    const plan = z.object({ composition_plan: z.object({ chunks: z.array(z.object({ text: z.string() })).min(1) }) }).parse(await request.clone().json())
+    const words = plan.composition_plan.chunks[0]!.text.split(/\s+/u).filter(Boolean)
+    const step = 19_000 / words.length
+    const timed = words.map((word, index) => ({ word, start_ms: Math.round(500 + index * step), end_ms: Math.round(500 + (index + 0.8) * step) }))
+    return new Response(Buffer.concat([
+      Buffer.from(`--synthetic\r\nContent-Type: application/json\r\n\r\n${JSON.stringify({ words_timestamps: timed })}\r\n--synthetic\r\nContent-Type: audio/mpeg\r\n\r\n`),
+      song, Buffer.from('\r\n--synthetic--\r\n'),
+    ]), { headers: { 'content-type': 'multipart/mixed; boundary=synthetic' } })
+  }
   const assets: RecapAsset[] = []
   const saved: GameRecapStory[] = []
   const providerCalls: { kind: 'image' | 'song'; references: number }[] = []
@@ -75,10 +91,10 @@ export async function createRecapShowLiveProviders(input: {
     let references = 0
     if (request.headers.get('content-type')?.includes('multipart/form-data')) references = (await request.clone().formData()).getAll('image[]').length
     providerCalls.push({ kind, references })
-    const response = input.mediaFetch ? await input.mediaFetch(url, init) : kind === 'song' ? new Response(song, { headers: { 'content-type': 'audio/mpeg' } })
+    const response = input.mediaFetch ? await input.mediaFetch(url, init) : kind === 'song' ? await songResponse(request)
       : Response.json({ data: [{ b64_json: image.toString('base64') }], usage: { input_tokens: 100, output_tokens: 100, total_tokens: 200 } })
     if (response.ok) {
-      const bytes = kind === 'song' ? Buffer.from(await response.clone().arrayBuffer()) : Buffer.from(z.object({ data: z.array(z.object({ b64_json: z.string() })).min(1) }).parse(await response.clone().json()).data[0]!.b64_json, 'base64')
+      const bytes = kind === 'song' ? song : Buffer.from(z.object({ data: z.array(z.object({ b64_json: z.string() })).min(1) }).parse(await response.clone().json()).data[0]!.b64_json, 'base64')
       files.push({ slot: kind === 'song' ? 'song' : 'scene-0', path: `media/${hash(bytes)}.${kind === 'song' ? 'mp3' : 'jpg'}` })
     }
     return response

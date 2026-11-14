@@ -5883,6 +5883,10 @@ export function createJunctionDeviceSyncProvider(
     const calendarDayAggregate = JUNCTION_CALENDAR_DAY_AGGREGATE_RESOURCE_SET.has(
       input.resource,
     );
+    // Every canonical id hashes the record's source instance id, so a re-read
+    // must stamp the one the data-webhook fetch stamped or the same sample is
+    // stored again under a second id.
+    const accountSourceIdentity = stampsJunctionAccountSourceIdentity(input.resource);
     // Temporal-authority fetches carry complete vault-local-day authority with
     // their own conservative closure lag; the provider calendar-day closure
     // gate owns only ordinary calendar-day imports.
@@ -5956,7 +5960,7 @@ export function createJunctionDeviceSyncProvider(
     const sourceScopedHistoricalRecordsSeen = input.sourceProviderSlug
       ? hasJunctionSourceScopedAdmittedSnapshotRecords({
           listedSources: currentSources,
-          options: { projectAccountSourceIdentities: calendarDayAggregate },
+          options: { projectAccountSourceIdentities: accountSourceIdentity },
           snapshots: { [input.resource]: records },
           sourceProviderSlug: input.sourceProviderSlug,
           sourceProviders: input.sourceProviders,
@@ -5967,7 +5971,7 @@ export function createJunctionDeviceSyncProvider(
       { [input.resource]: records },
       input.sourceProviders,
       currentSources,
-      calendarDayAggregate
+      accountSourceIdentity
         ? { sourceIdentities: resolveJunctionAccountSourceIdentities(currentSources) }
         : {},
       {
@@ -10884,6 +10888,24 @@ function floorUtcDayTimestamp(timestamp: string): string {
 // accept multi-day snapshots, as accumulated precise imports do. Capped
 // windows would truncate, calendar-day resources own per-day closure, and
 // workout streams and ECG own their cursors, so those keep one day per write.
+// Calendar-day resources carry the account's source identity on every path.
+// So does the precise importer, which fetches a data webhook for every
+// resource outside the closed-day and bounded-record families; those two keep
+// the record's own identity on the webhook and reconcile paths alike.
+function stampsJunctionAccountSourceIdentity(resource: string): boolean {
+  if (JUNCTION_CALENDAR_DAY_AGGREGATE_RESOURCE_SET.has(resource)) {
+    return true;
+  }
+  const policy = resolveJunctionTimeseriesResourcePolicy(resource);
+  if (!policy || policy.maxCanonicalRecordsPerWindow !== undefined) {
+    return false;
+  }
+  if (policy.historyWindow !== "dense_timeseries") {
+    return true;
+  }
+  return policy.enabledByDefault && !JUNCTION_CLOSED_DAY_TIMESERIES_RESOURCES.has(resource);
+}
+
 function canBatchJunctionDailyTimeseriesImports(resource: string): boolean {
   const policy = resolveJunctionTimeseriesResourcePolicy(resource);
   return policy !== undefined && policy !== null

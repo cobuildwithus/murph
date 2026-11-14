@@ -307,6 +307,22 @@ export function createJsonErrorResponse(
     );
   }
 
+  if (error instanceof TypeError && error.message === "fetch failed") {
+    logJsonError("error", error, options, {
+      errorResponseCode: "UPSTREAM_UNAVAILABLE",
+    });
+    return NextResponse.json(
+      {
+        error: {
+          code: "UPSTREAM_UNAVAILABLE",
+          message: "Upstream request failed.",
+          retryable: true,
+        },
+      },
+      buildJsonResponseInit(options, 503),
+    );
+  }
+
   if (error instanceof TypeError || error instanceof RangeError || error instanceof URIError) {
     logJsonError("warn", error, options, {
       errorResponseCode: "INVALID_REQUEST",

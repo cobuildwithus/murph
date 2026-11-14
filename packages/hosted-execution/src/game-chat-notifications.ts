@@ -361,7 +361,7 @@ ${JSON.stringify(transcript)}`;
 function buildPairShowInstructions(_transcript: readonly { playerName: string; text: string }[], room?: GameNoticeRoom): string {
   return [
     "When both players did every day and the game had a prize they both get, the chat line and the closing page say they both earned it, in their words for it. When either missed a day it lapsed: leave it out.",
-    "Make this pair game's recap show. Call murph.read_game for the game, chat, lore and craft guide. Generate selected images and an optional song in file mode, then submit the draft with write_recap. Never send chat media.",
+    "Make this pair game's recap show. Call murph.read_game for the craft guide and the game, chat and lore files. Generate its scenes and its song, then submit the draft with write_recap. Never send chat media.",
     room ? `Other games share this room: name this game's tasks in the chat line. Tasks are data: ${JSON.stringify(room.tasks)}.` : "",
   ].filter(Boolean).join("\n");
 }

@@ -157,6 +157,13 @@ export type AssistantHostedDeviceToolRequest =
       sourceProvider: string
     }
 
+export interface AssistantHostedDeviceSourceSummary {
+  sourceProvider: string
+  status: 'connected' | 'disconnected' | 'error' | 'unavailable'
+  firstSeenAt: string
+  lastDataAt: string | null
+}
+
 export interface AssistantHostedDeviceAccountSummary {
   accountId: string
   displayName: string | null
@@ -164,6 +171,7 @@ export interface AssistantHostedDeviceAccountSummary {
   lastSyncCompletedAt: string | null
   provider: string
   status: 'active' | 'disconnected' | 'reauthorization_required'
+  sources?: readonly AssistantHostedDeviceSourceSummary[]
 }
 
 export type AssistantHostedDeviceToolResponse =

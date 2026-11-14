@@ -271,8 +271,9 @@ window. `comparison` contains `baseline` and `current`, each
 or one starting on `firstGameOn`, and false otherwise, when the app names
 `baseline.from` instead. `firstGameOn` itself is never clipped or inferred from
 capped history. Crowns name the unique largest positive improvement (or positive
-streak); ties and all-nonpositive values give null. They are recomputed, not
-stored holders.
+streak); ties and all-nonpositive values give null. A metric improvement that
+rounds to zero at the metric's shown precision earns no crown, because the app
+hides that change. They are recomputed, not stored holders.
 
 Steps alone use the last settled day (the viewer-local date eight hours ago,
 minus one day) as their cutoff and stale reference, so daily values, latest,

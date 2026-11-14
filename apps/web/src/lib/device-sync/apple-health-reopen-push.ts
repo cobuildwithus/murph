@@ -1,6 +1,7 @@
 import "server-only";
 
 import { formatTimeZoneDateTimeParts } from "@murphai/contracts";
+import { isSourceRecoveryNoticeEligible } from "@murphai/device-syncd/source-staleness";
 import { Prisma, type PrismaClient } from "@prisma/client";
 
 import {
@@ -217,8 +218,16 @@ function readReady(
   member: DueMember,
   now: Date,
 ): { expiresAt: Date; target: ApplePushTarget; timeSensitive: boolean } | null {
-  // "Wait N days" for Apple Health check-ins, said to Murph by text, also delays the first push.
-  if (member.waitDays !== null && now.getTime() - member.episodeStartedAt.getTime() < member.waitDays * DAY_MS) return null;
+  // One definition of a quiet source, shared with the text check-in: a source the catalog expects daily
+  // data from, connected, that has delivered before. Only the wait differs: a day here, or the member's
+  // own "wait N days" for Apple Health check-ins when that is longer.
+  if (!isSourceRecoveryNoticeEligible({
+    lastDataAt: member.episodeStartedAt.toISOString(),
+    now: now.toISOString(),
+    silentHours: Math.max(QUIET_MS / HOUR_MS, (member.waitDays ?? 0) * 24),
+    sourceProviderSlug: SOURCE_PROVIDER_SLUG,
+    status: "connected",
+  })) return null;
   const expiresAt = readSendWindowEnd(now, member.timeZone);
   const target = companionPushRouteRegistrationSchema.pick({ environment: true, token: true, topic: true })
     .safeParse({ environment: member.environment, token: member.token, topic: member.topic });

@@ -1,4 +1,4 @@
-import type { GeneratedMediaFileArgs, GeneratedMediaFileRuntime } from './generated-media-file.js'
+import type { GeneratedMediaFileRuntime } from './generated-media-file.js'
 import { AssistantWorkspaceArtifactMaterializationError } from '../assistant/execution-context.js'
 import { toolFailureDiagnostic, type ToolFailureDiagnostic } from './tool-failure-diagnostics.js'
 import { Buffer } from 'node:buffer'
@@ -53,7 +53,7 @@ import {
   type OpenAiImageSize,
 } from './openai-image-generation.js'
 
-export interface GenerateImageToolArgs extends GeneratedMediaFileArgs {
+export interface GenerateImageToolArgs {
   alt: string | null
   outputCompression?: number
   outputFormat: OpenAiImageOutputFormat
@@ -129,10 +129,8 @@ export async function executeGenerateImageTool(input: {
   ) => Promise<string | null>
   vaultRoot?: string | null
 }): Promise<GenerateImageToolResult> {
-  if (input.args.output === 'file' && !input.fileRuntime) return { rpcSuccess: false, rpcText: 'File output requires an authorized owning flow.' }
-  const { fileRuntime, model } = input.args.output === 'file'
-    ? { fileRuntime: input.fileRuntime, model: 'gpt-image-2.6-sunburst' as const }
-    : { fileRuntime: null, model: 'gpt-image-2.6-flare' as const }
+  const fileRuntime = input.fileRuntime ?? null
+  const model = fileRuntime ? 'gpt-image-2.6-sunburst' as const : 'gpt-image-2.6-flare' as const
   const apiKey = normalizeNullableString(input.env.OPENAI_API_KEY)
   if (!apiKey) return imageCredentialFailure(fileRuntime)
 

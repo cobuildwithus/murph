@@ -8847,7 +8847,13 @@ async function readHostedDeviceAccounts(
     ...(sourceProvider ? { sourceProviderSlug: sourceProvider } : {}),
   });
   return {
-    accounts: snapshot.connections.map(({ connection, localState }) => ({
+    accounts: snapshot.connections.map(({ connection, localState, sources }) => ({
+      sources: (sources ?? []).map((source) => ({
+        sourceProvider: source.sourceProviderSlug,
+        status: source.status,
+        firstSeenAt: source.firstSeenAt,
+        lastDataAt: source.lastDataAt,
+      })),
       accountId: connection.id,
       displayName: connection.displayName,
       lastErrorCode: localState.lastErrorCode,

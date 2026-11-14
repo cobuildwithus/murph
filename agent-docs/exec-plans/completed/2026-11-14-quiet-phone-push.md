@@ -249,6 +249,16 @@ runner work is added.
   cheap way to skip the many candidates that fail its Linq gates on every
   sweep. Not small; left as follow-up.
 
+- Reconciled with the catalog-wide no-data check that merged to main while this
+  PR was open. That change left the quiet predicate
+  (`isSourceRecoveryNoticeEligible`) and Apple Health's three-day text threshold
+  as they were. The push now calls that predicate for its per-member check, with
+  its own one-day wait, so there is one definition of a quiet source. The SQL
+  nomination stays as the set-based prefilter of the same facts. The three text
+  fixes sit on top of the merged materializer unchanged, and the retention
+  exemption covers every daily source's check-in, since they share the key
+  prefix.
+
 ### ReviewGPT plan review (2026-11-14, architecture preset, GPT-6 Pro)
 
 Response: `audit-packages/plan-quiet-phone-push.md` (not committed). The CLI

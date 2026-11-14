@@ -5885,17 +5885,22 @@ Media provenance and song timing stay in the per-turn host-memory map. A retry
 resumes the native thread but must regenerate media from an earlier failed
 attempt: existing files and writer-writable metadata cannot confer media
 authority. No durable media provenance receipts are written or read.
-`read_game` returns scoped game
-material, shared chat and lore directly; the host resolves reference-photo IDs.
+`read_game` writes the scoped game material, shared chat and lore to files in
+the recap task directory and returns only the craft guide and their paths. Its
+result therefore never grows with the game: Codex cuts the middle out of a tool
+result past the model's output limit, and the model cannot recover it, while a
+file can be read in parts. The host resolves reference photos named by path or ID.
 Pair recap identity references include each player's own profile photo and the
 contact photo saved by the other player, attributed only to the pictured subject.
 Contact photos follow the same current-key revocation and game-wide retirement
 as profiles; private label words and the owner are never exposed.
-Available player reference photos are materialized in the recap task directory
-with vault-relative paths so native `view_image` can inform casting. Failed
+Every available reference photo, Murph's character sheet included, is
+materialized in the recap task directory with a vault-relative path so native
+`view_image` can inform casting and the same path can name the reference. Failed
 reference fetches omit the path without blocking the recap.
-The agent generates JPEG scenes and an optional twenty-second song in file mode,
-then calls `write_recap` once. The host uploads selected bytes and Web publishes
+The recap turn, never a model argument, makes media a file and fixes its format:
+the agent supplies a prompt and reference photos for each JPEG scene and a style
+and lyrics for the twenty-second song, then calls `write_recap` once. The host uploads selected bytes and Web publishes
 through the canonical transaction, retaining the current source authorization,
 asset retirement and replay owners. One accepted story owns one chat line plus
 link with no chat media. Groups retain their existing writer rules and payload.

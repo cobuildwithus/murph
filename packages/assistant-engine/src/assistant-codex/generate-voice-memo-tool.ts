@@ -1,4 +1,4 @@
-import type { GeneratedMediaFileArgs, GeneratedMediaFileRuntime } from './generated-media-file.js'
+import type { GeneratedMediaFileRuntime } from './generated-media-file.js'
 import { toolFailureDiagnostic, type ToolFailureDiagnostic } from './tool-failure-diagnostics.js'
 import { randomUUID } from 'node:crypto'
 
@@ -35,7 +35,7 @@ export interface GenerateVoiceMemoToolArgs {
   userRequestedVoiceOptionId?: AssistantVoiceOptionId | null
 }
 
-export interface GenerateSongToolArgs extends GeneratedMediaFileArgs {
+export interface GenerateSongToolArgs {
   durationSeconds: number
   instrumental: boolean
   prompt: string
@@ -253,8 +253,8 @@ export async function executeGenerateSongTool(input: {
   recordPhaseTiming?: VoiceMemoPhaseTimingRecorder | null
   runtime?: VoiceMemoToolRuntime | null
 }): Promise<GenerateVoiceMemoToolResult> {
-  if (input.args.lyrics && input.args.output !== 'file') return { rpcSuccess: false, rpcText: 'Explicit lyrics require output=file.' }
-  if (input.args.output === 'file') return executeGenerateSongFile(input)
+  if (input.fileRuntime) return executeGenerateSongFile(input)
+  if (input.args.lyrics) return { rpcSuccess: false, rpcText: 'Exact lyrics are sung only in a recap show.' }
   const mediaConflict = rejectIfResponseMediaConflicts(
     input.currentResponseMedia ?? [],
     'song',
