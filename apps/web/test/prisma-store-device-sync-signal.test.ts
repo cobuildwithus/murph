@@ -96,9 +96,20 @@ function createSignalStore(seed: MutableSignal[] = []) {
         .map(cloneSignal);
     },
   };
+  // The source-scoped read is SQL this fake can't run; it records the query
+  // and answers with the seeded rows of the source it binds. The Postgres
+  // proof covers what the query picks.
+  const queryRawCalls: { sql: string; values: unknown[] }[] = [];
+  const $queryRaw = async (query: { sql: string; values: unknown[] }) => {
+    queryRawCalls.push({ sql: query.sql, values: query.values });
+    return [...signals.values()]
+      .filter((signal) => query.values.includes(signal.sourceProviderSlug))
+      .map(cloneSignal);
+  };
 
   const store = new PrismaDeviceSyncControlPlaneStore({
     prisma: {
+      $queryRaw,
       deviceSyncSignal,
     } as never,
     providerAccountBlindIndexKey: BLIND_INDEX_KEY,
@@ -112,6 +123,7 @@ function createSignalStore(seed: MutableSignal[] = []) {
   return {
     createCalls,
     findManyCalls,
+    queryRawCalls,
     store,
   };
 }
@@ -321,7 +333,7 @@ describe("PrismaDeviceSyncControlPlaneStore device-sync signals", () => {
       traceId: "trace_apple",
       userId: "user-123",
     };
-    const { findManyCalls, store } = createSignalStore([
+    const { findManyCalls, queryRawCalls, store } = createSignalStore([
       baseSignal,
       {
         ...baseSignal,
@@ -342,19 +354,37 @@ describe("PrismaDeviceSyncControlPlaneStore device-sync signals", () => {
 
     expect(signals).toHaveLength(1);
     expect(signals[0]).toMatchObject({
+      createdAt: "2026-03-26T12:00:00.000Z",
+      occurredAt: "2026-03-26T12:01:00.000Z",
       sourceProviderSlug: "health_connect",
       traceId: "trace_android",
     });
-    expect(findManyCalls).toEqual([
-      expect.objectContaining({
-        where: {
-          connectionId: { in: ["dsc_123"] },
-          kind: { in: ["webhook_hint", "canonical_import"] },
-          sourceProviderSlug: "health_connect",
-          userId: "user-123",
-        },
-      }),
+    expect(findManyCalls).toEqual([]);
+    expect(queryRawCalls).toHaveLength(1);
+    expect(queryRawCalls[0]?.sql).toMatch(/SELECT DISTINCT ON \(connection_id, kind, event_type\)/u);
+    expect(queryRawCalls[0]?.values).toEqual([
+      "user-123", "health_connect", "dsc_123", "webhook_hint", "canonical_import", 300,
     ]);
+  });
+
+  it("reads every source's receipts newest-first when no source is named", async () => {
+    const { findManyCalls, queryRawCalls, store } = createSignalStore();
+
+    await store.listRecentConnectionStatusSignals({
+      connectionIds: ["dsc_123"],
+      userId: "user-123",
+    });
+
+    expect(queryRawCalls).toEqual([]);
+    expect(findManyCalls).toEqual([{
+      orderBy: { id: "desc" },
+      take: 300,
+      where: {
+        connectionId: { in: ["dsc_123"] },
+        kind: { in: ["webhook_hint", "canonical_import"] },
+        userId: "user-123",
+      },
+    }]);
   });
 });
 

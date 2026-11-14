@@ -173,6 +173,24 @@ function createSourceStore(
     values: readonly unknown[];
   }) => {
     const sql = query.strings.join("?");
+    if (sql.includes("FROM device_sync_signal")) {
+      // One source's receipts: the latest of each event type per connection,
+      // bound as member, source, then its connections and receipt kinds.
+      const latest = new Map<string, MutableSignalRecord>();
+      for (const signal of signals) {
+        if (signal.userId !== query.values[0] || signal.sourceProviderSlug !== query.values[1]
+          || !query.values.includes(signal.connectionId) || !query.values.includes(signal.kind)
+          || signal.eventType === null) {
+          continue;
+        }
+        const key = `${signal.connectionId}:${signal.kind}:${signal.eventType}`;
+        const kept = latest.get(key);
+        if (!kept || signal.id > kept.id) {
+          latest.set(key, signal);
+        }
+      }
+      return [...latest.values()].map((signal) => ({ ...signal }));
+    }
     const connectionId = requireString(query.values[0]);
     const sourceProviderSlug = requireString(query.values[1]);
     const sourceInstanceKey = sql.includes('"source_instance_key" =')
