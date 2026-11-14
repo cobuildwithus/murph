@@ -36,7 +36,6 @@ import type { HostedDeviceSyncControlPlaneContext } from "./control-plane-contex
 import { createHostedDeviceSyncControlPlaneContext } from "./control-plane-context";
 import {
   assertCompanionHrvRmssdObservationFresh,
-  COMPANION_APPLE_HEALTH_SOURCE_PROVIDER,
   COMPANION_DEVICE_SYNC_STATUS_CONNECTION_LIMIT,
   resolveCompanionHrvRmssdConnection,
   type CompanionConnectionIntent,
@@ -281,11 +280,15 @@ export class HostedDeviceSyncPublicIngressService {
     return this.handleConnectionCallback(provider, options);
   }
 
-  /** Companion SDK sign-in. Only an explicit connect may change lifecycle state. */
+  /**
+   * Companion SDK sign-in. Only an explicit connect may change lifecycle
+   * state, and only for the calling platform's own phone health source.
+   */
   async createSdkSignInSession(
     userId: string,
     provider: string,
     connectionIntent: CompanionConnectionIntent | null,
+    sourceProviderSlug: string,
   ): Promise<SdkSignInSessionResult> {
     const providerConnections = await this.context.store.listMemberConnectionStatuses({
       limit: COMPANION_DEVICE_SYNC_STATUS_CONNECTION_LIMIT,
@@ -310,7 +313,7 @@ export class HostedDeviceSyncPublicIngressService {
       const capturedReconnectProof = establishedConnection
         ? await captureHostedDeviceSyncConnectionSourceReconnect({
             connectionId: establishedConnection.id,
-            sourceProviderSlug: COMPANION_APPLE_HEALTH_SOURCE_PROVIDER,
+            sourceProviderSlug,
             store: this.context.store,
             userId,
           })
@@ -333,7 +336,7 @@ export class HostedDeviceSyncPublicIngressService {
       const reconnectProof = capturedReconnectProof
         ?? await captureHostedDeviceSyncConnectionSourceReconnect({
           connectionId: session.account.id,
-          sourceProviderSlug: COMPANION_APPLE_HEALTH_SOURCE_PROVIDER,
+          sourceProviderSlug,
           store: this.context.store,
           userId,
         });

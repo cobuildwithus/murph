@@ -58,6 +58,7 @@ import {
   type JunctionReconcileProof,
 } from "../junction-reconcile-proof.ts";
 import { deviceSyncError, isDeviceSyncError, type DeviceSyncError } from "../errors.ts";
+import { fitsPreparedDeviceSyncWebhookInlineString } from "../prepared-webhook.ts";
 import type { JunctionDeviceSyncJobPayloads } from "../config/provider-manifests.ts";
 import { JunctionTimeseriesProgressError } from "../junction-timeseries-progress.ts";
 import {
@@ -2797,7 +2798,11 @@ export function createJunctionDeviceSyncProvider(
         )
       )
     ) {
-      return {};
+      return settleJunctionWorkForUnadmittedSource({
+        acceptedByWebhook: isJunctionWebhookAcceptedJob(job),
+        sourceProviderSlug,
+        sources: context.account.sources,
+      });
     }
     const inventory = createJobInventoryLoader(context, job, passInventories);
 
@@ -3201,7 +3206,11 @@ export function createJunctionDeviceSyncProvider(
         directInput.sourceProviderSlug,
       )
     ) {
-      return {};
+      return settleJunctionWorkForUnadmittedSource({
+        acceptedByWebhook: true,
+        sourceProviderSlug: directInput.sourceProviderSlug,
+        sources: context.account.sources,
+      });
     }
     // This lookup uses the stable provider-config authority, not the
     // replaceable per-connection credential epoch. It resolves source
@@ -12538,7 +12547,9 @@ function buildJunctionWebhookDataJobJsons(input: {
     ...record,
     sourceProviderSlug: input.sourceProviderSlug ?? undefined,
   });
-  return [serializeJunctionWebhookDataJobRecord(withSource)];
+  const json = serializeJunctionWebhookDataJobRecord(withSource);
+  // A record too large to carry inline is fetched for its window instead.
+  return fitsPreparedDeviceSyncWebhookInlineString(json) ? [json] : [];
 }
 
 function resolveJunctionWebhookDataSourceProviderSlug(input: {
@@ -13681,6 +13692,53 @@ function isJunctionSourceProjectionFenced(
   );
   return sourceState !== null
     && isDeviceSyncSourceDisconnectFenced(sourceState.lifecycleSource);
+}
+
+/** A job a data webhook queued: Web already accepted its data. */
+function isJunctionWebhookAcceptedJob(job: DeviceSyncJobRecord): boolean {
+  const eventType = normalizeString(job.payload.eventType);
+  return typeof eventType === "string" && isJunctionDataEvent(eventType);
+}
+
+/**
+ * Settles a job whose source is not admitted for import.
+ *
+ * A source disconnected with no error has a reconnect open, and its next data
+ * webhook re-admits it. Work a webhook accepted before the source closed
+ * retries on the ordinary bounded job budget, so it imports once the source is
+ * back and is dropped only if the source never returns. Everything else,
+ * including all work for a fenced source, completes without importing.
+ */
+function settleJunctionWorkForUnadmittedSource(input: {
+  acceptedByWebhook: boolean;
+  sourceProviderSlug: string | null | undefined;
+  sources: readonly JunctionImportAdmissionSource[] | undefined;
+}): ProviderJobResult {
+  const sources = input.sources ?? [];
+  const normalizedSourceProviderSlug = canonicalizeJunctionProviderSlug(
+    input.sourceProviderSlug,
+  );
+  const accountSourceIdentity = normalizedSourceProviderSlug
+    ? resolveJunctionAccountSourceIdentity(sources, normalizedSourceProviderSlug)
+    : null;
+  const lifecycleSource = accountSourceIdentity
+    ? resolveJunctionAccountSourceState(
+        sources,
+        accountSourceIdentity.sourceProviderSlug,
+      )?.lifecycleSource
+    : null;
+  if (
+    input.acceptedByWebhook
+    && lifecycleSource?.status === "disconnected"
+    && (lifecycleSource.lastErrorCode ?? null) === null
+  ) {
+    throw deviceSyncError({
+      code: "JUNCTION_SOURCE_ADMISSION_PENDING",
+      message: "Junction source reconnect has not been admitted yet. Retry shortly.",
+      retryable: true,
+    });
+  }
+  return {};
 }
 
 function hasJunctionSourceListing(

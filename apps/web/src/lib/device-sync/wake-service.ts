@@ -426,6 +426,13 @@ export async function beginHostedDeviceSyncConnectionSourceReconnect(input: {
     ) {
       connectionChangedDuringDisconnectError();
     }
+    // The member is signing the phone back in, not reconnecting a source that
+    // stopped. Closing a healthy source would drop data already accepted for
+    // it and re-read its whole history; it keeps its epoch and the history
+    // coverage recorded for it. Disconnecting it first still opens a new one.
+    if (source?.status === "connected" && !isHostedSourceDisconnectFenced(source)) {
+      return;
+    }
     const sourceInstanceKey = source?.sourceInstanceKey
       ?? buildJunctionProviderSourceInstanceKey({
         connectionId: expectedConnection.id,

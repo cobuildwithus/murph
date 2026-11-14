@@ -488,9 +488,17 @@ establishes only when zero provider rows exist, and rejects terminal or
 ambiguous state. Only a future visible hosted-health/Junction Reconnect action
 may send `connect` and create/reactivate the shared lane. Resume, omitted intent,
 data ingress, and retry work cannot undo an explicit disconnect.
-That explicit Apple Health connect captures the current source epoch before SDK
-token mint and opens one pending epoch afterward only if the proof remains
-current. A signed Junction source-registration event reconciles that unchanged
+That explicit connect touches only the calling platform's own source (Apple
+Health for iOS, Health Connect for Android). It captures the current source
+epoch before SDK token mint and opens one pending epoch afterward only if the
+proof remains current. A source already connected without a disconnect fence
+keeps its epoch: signing a phone back in does not close it or re-read its
+history, while disconnecting it and connecting again does. While a pending
+epoch is open, a queued job for data a webhook already accepted from that
+source fails retryably (`JUNCTION_SOURCE_ADMISSION_PENDING`) on the ordinary
+five-attempt budget, about 36 minutes, and imports once the source is
+re-admitted; a fenced source still drops its queued work. A signed Junction
+source-registration event reconciles that unchanged
 pending epoch against the live provider list and commits it connected; the same
 event target-cleans a fenced source or disconnected parent.
 Apple Health companion metadata, WHOOP overnight summaries, and their queued
