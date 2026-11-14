@@ -689,6 +689,15 @@ export async function readCompanionDeviceSyncStatus(input: {
         }
       }
 
+      // A historical completion says a pull finished, not that data arrived,
+      // so it names no data source. The scoped read never matches such a row.
+      if (
+        signal.eventType?.startsWith("historical.data.")
+        && !signal.sourceProviderSlug
+      ) {
+        continue;
+      }
+
       const resource = signal.eventType
         ? readJunctionWebhookResourceName(signal.eventType)
         : null;
