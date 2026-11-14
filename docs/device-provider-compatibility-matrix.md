@@ -104,9 +104,9 @@ and Apple Health (three days and its own copy) override that default. Catalog
 entries without a direct provider route do not create new source identities.
 When those devices relay through Apple Health, that delivery is checked under
 Apple Health. Health Connect remains an unavailable mobile/local flow.
-Workout apps, scales,
-cuffs, ECG/meters, nutrition, and glucose/insulin systems are not daily for this
-check; glucose systems retain their own gap/alert behavior. WHOOP stays
+Workout apps, scales, cuffs, ECG/meters, nutrition, and glucose/insulin systems
+are not daily for this check; glucose systems retain their own gap/alert
+behavior. WHOOP stays
 pull-capable and also qualifies when its source has the explicit
 `TOKEN_REFRESH_FAILED` error. Its neutral connection-help question does not
 infer disconnection, prescribe reconnect, or claim an automatic repair. Error
@@ -138,8 +138,11 @@ check and update the preference without separate assistant memory. Sources
 classified as not daily do not get this check.
 
 The private device tool exposes each source's provider, status, `firstSeenAt`
-(first connection, not latest relink) and last delivery (`lastDataAt`) from the
-existing runtime snapshot. A successful account sync does not establish source
+and last delivery (`lastDataAt`) from the existing runtime snapshot.
+`firstSeenAt` is when the source's current lifecycle began: a reconnect that
+advances the lifecycle epoch replaces it, while a relink merged into an existing
+data-equivalent source keeps the earliest time. A recent value therefore means a
+new connection; an old value does not rule out a relink. A successful account sync does not establish source
 delivery. Old delivery explains an empty recent read without proving disconnection;
 a source first connected minutes or hours ago may still be importing history.
 No snapshot wire fields change, so this expansion supports Web-first and

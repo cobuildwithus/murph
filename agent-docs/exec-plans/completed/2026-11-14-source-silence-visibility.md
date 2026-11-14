@@ -74,7 +74,8 @@ daily. Both Fitbit provider routes are daily. Seven daily entries lack direct
 routes: Zepp/Amazfit, Xiaomi/Mi Fitness, RingConn, COROS, Suunto, Huawei Health and
 Health Connect. They acquire no invented provider identities; Apple Health relay
 coverage follows the existing Apple Health source. Health Connect stays unavailable.
-The exposed firstSeenAt is first connection, not the latest relink timestamp.
+The exposed firstSeenAt is when the source's current lifecycle began: an epoch-advancing
+reconnect replaces it; a relink merged into a data-equivalent source keeps the earliest.
 
 Diagnostic cause confirmed: the diagnostic read profile omits /app, where the
 runner installs the CLI, while wearable reads call readFreshWearableSummaryRows,

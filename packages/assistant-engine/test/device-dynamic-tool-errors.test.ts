@@ -108,9 +108,9 @@ describe('hosted device dynamic tool recovery', () => {
       sourceProvider: 'fitbit', status: 'connected', firstSeenAt: '2030-01-01T00:00:00.000Z',
       lastDataAt: '2030-01-02T00:00:00.000Z',
     }] }])
-    expect(MURPH_DEVICE_TOOL.description).toContain('server validates eligibility')
+    expect(MURPH_DEVICE_TOOL.description).toContain('Pass a sourceProvider from list_accounts')
     expect(MURPH_DEVICE_TOOL.description).not.toContain('garmin, apple_health_kit, or whoop_v2')
-    expect(MURPH_DEVICE_TOOL.description).toContain('history is still importing')
+    expect(MURPH_DEVICE_TOOL.description).toContain('history may still be importing')
     expect(MURPH_DEVICE_TOOL.description).toContain('Missing data does not show that a source is disconnected')
   })
 
