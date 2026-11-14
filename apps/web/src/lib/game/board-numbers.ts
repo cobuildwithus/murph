@@ -135,9 +135,11 @@ export function boardCrowns(people: readonly BoardPerson[]): PairBoard["crowns"]
       .filter(person => person.value > 0).sort((a, b) => b.value - a.value);
     return ranked[0] && ranked[0].value !== ranked[1]?.value ? ranked[0].memberId : null;
   };
+  // A crown needs a change its row can show: the app hides one that rounds to zero.
   const metricWinner = (metric: BoardMetric) => winner(person => {
     const number = person.numbers[metric];
-    return number.state === "available" ? number.comparison?.improvement ?? null : null;
+    const improvement = number.state === "available" ? number.comparison?.improvement ?? null : null;
+    return improvement !== null && improvement * 10 ** POLICY[metric].precision > 0.5 ? improvement : null;
   });
   return { restingHeartRate: metricWinner("restingHeartRate"), sleep: metricWinner("sleep"),
     steps: metricWinner("steps"), vo2Max: metricWinner("vo2Max"), inARow: winner(person => person.inARow) };
