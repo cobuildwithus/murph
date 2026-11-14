@@ -789,6 +789,16 @@ and authority exclusions separately. Pull frequency is unchanged by this feature
   per-resource job fan-out, or another retry store. The exact-window job,
   scalar connection metadata, and provider-owned bounded ladder are the one
   recovery path.
+- Every import path for one timeseries resource must stamp the same source
+  instance id, because every canonical id hashes it. A reconcile or backfill
+  that stamps a different one than the data-webhook fetch stores each sample
+  twice. `packages/device-syncd/test/junction-timeseries-source-identity.test.ts`
+  runs every resource through both paths.
+- A sleep session's total and stage minutes are owned by the provider's session
+  id, which a sleep cycle names as `sleep_id`. The coverage window is the key
+  only for a record that carries no session id. A superseded window ref moves a
+  stored record across once; once the session owns a record, a window ref names
+  at most a stale copy and must not merge two live records.
 
 ## Related docs
 
