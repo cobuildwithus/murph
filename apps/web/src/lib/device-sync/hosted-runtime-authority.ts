@@ -338,6 +338,9 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
     input.trustedUserId,
   );
   const appliedAt = parsed.occurredAt ?? new Date().toISOString();
+  // Silence is measured on wall time. A delayed or replayed wake's `occurredAt`
+  // is in the past and would hide a stall that has since become real.
+  const stallCheckedAt = new Date().toISOString();
 
   for (const update of parsed.updates) {
     if (update.seed !== undefined) {
@@ -577,7 +580,7 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
           noticeCandidates: resolveHostedRuntimeSourceDeliveryStallNoticeCandidates({
             connectionId: update.connectionId,
             currentSources: sources,
-            now: appliedAt,
+            now: stallCheckedAt,
             sourceUpdates: sourceUpdates.toApply,
           }),
         };
@@ -588,7 +591,7 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
   }
   scheduleHostedSourceDeliveryStallNotices({
     candidates: noticeCandidates,
-    now: appliedAt,
+    now: stallCheckedAt,
     userId: input.trustedUserId,
   });
 

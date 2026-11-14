@@ -6505,6 +6505,18 @@ installation deletion. Legacy wearable-only registrations remain unenrolled. A c
 keeps game enrollment only when its installation and complete push target are
 unchanged; replacing the address clears the old session binding under the same
 member lock.
+Both registration routes accept an optional `reopenReminders` boolean, the
+phone's "Reopen reminders" switch, stored as nullable
+`companion_push_route.reopen_reminders`. A build that predates the field sends
+nothing, which reads as on: the game route stores null, and the companion route
+keeps the stored value only for an unchanged address. The Apple Health reopen
+push (`apps/web/src/lib/device-sync/apple-health-reopen-push.ts`,
+`docs/device-provider-compatibility-matrix.md`) is the one reader. It needs no
+game session, because its copy is generic and a member whose session expired
+is who needs to reopen the app; it marks the push Time Sensitive only for a
+route that reported the switch, since only those builds are known to hold the
+entitlement. Web must deploy before an app that sends the field: the
+registration schemas are strict, so an older Web rejects it.
 Companion installation-scoped deletion still owns sign-out. Native
 uses the existing notification delegate; the alert's structural game id selects
 an authenticated game after refresh. No entry content leaves the game reader.

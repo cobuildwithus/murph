@@ -1035,6 +1035,22 @@ Confirmed reproduction: settle earlier rematch with both per-seat flags false (r
 
 Load proof: saving 1,000 live games has the same operation/query count as one game, at most 12 SQL statements, one pool acquisition, and at most two preference facts per seat (2,000 total after repeated saves). The added save work is one set-based insert; activation adds one bounded two-key fact read. The separate player-lock query was removed as redundant. Added work has no provider/crypto calls or per-game loop, and imposes no new product cap. Insert facts before player updates: their game foreign-key lock coordinates with activation's existing game FOR UPDATE lock; reversing this order could deadlock.
 
+### B30 — Apple Health reopen push
+
+Sources: `apps/web/src/lib/device-sync/apple-health-reopen-push.ts`; `AppleHealthReopenPush`, `CompanionPushRoute`, `DeviceConnectionSource.lastDataAt`, `HostedMember.companionLastContactAt`; the 15-minute Vercel cron `/api/internal/device-sync/apple-health-reopen-push/cron`.
+States: per member, the silence episode (newest `lastDataAt` across connected `apple_health_kit` sources on active connections) and its schedule step (days 1, 2, 3, 10, 17, 24); per step unclaimed/claimed/terminal outcome (`sent`, `failed`, `unregistered`, `superseded`).
+Invariant: one push per member, episode and step, and one per member per 24 hours, including failed and superseded attempts. The receipt's primary key is the claim, taken under the member row lock. Nomination, the locked recheck and the last look before Apple run the same statement. Never-delivered sources are out of scope. Evaluation only observes: it changes no source status.
+
+| From | Event / guard | To / effect |
+| --- | --- | --- |
+| Delivering | 24 hours with no delivery and no app contact | Episode due at step 1 |
+| Due step | Alerts allowed, switch not off, daytime in the member's zone (17:00 to 19:00 UTC when unknown), not suspended, hosted access, health consent not revoked, text check-ins not stopped | Durable claim before the external send |
+| Claimed | Route address, episode, step and every gate unchanged at the last look | One APNs attempt; outcome recorded |
+| Claimed | Data arrived, app made contact, switch turned off, address replaced or window closed | `superseded`; the claim still consumes the step |
+| Claimed | Apple reports the token gone | `unregistered`; that exact token is forgotten |
+| Any step | New delivery | New episode; the schedule starts over after 24 hours of silence |
+| Step for day 24 terminal | Continued silence | Nothing further until data arrives |
+
 ## Native iOS machines
 
 Sources in this section are relative to `cobuildwithus/murph-ios`; shortened

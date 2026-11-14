@@ -746,6 +746,45 @@ describe.skipIf(!runPostgresProof)(
       }
     });
 
+    it("keeps a wearable no-data check-in's identity after pruning, without its content", async () => {
+      const cleanup = requirePrisma(cleanupClient);
+      const suffix = randomUUID();
+      const memberId = `retention-stall-member-${suffix}`;
+      const now = new Date("2026-08-11T12:00:00.000Z");
+      const old = new Date("2026-07-01T12:00:00.000Z");
+      const stallKey = `assistant.notification.requested:device-delivery-stalled:v1:dcs_${suffix}:${"a".repeat(32)}`;
+      const row = (id: string, dedupeKey: string, laneSeq: number, consumedAt: Date | null) => ({
+        consumedAt, createdAt: old, dedupeKey, id: `${id}-${suffix}`, kind: "assistant.notification.requested",
+        lane: "system", laneSeq: BigInt(laneSeq), occurredAt: old, payloadInlineCiphertext: "encrypted-retention-proof",
+        payloadSchema: "retention.proof.v1", updatedAt: old, userId: memberId,
+      });
+
+      await cleanup.hostedMember.create({ data: { id: memberId } });
+      try {
+        await cleanup.hostedMailboxItem.createMany({ data: [
+          row("stall-consumed", stallKey, 1, old),
+          // Expired before it was ever sent: still one check-in for that episode.
+          row("stall-unsent", `${stallKey.slice(0, -1)}b`, 2, null),
+          row("other-notice", `assistant.notification.requested:another-family:${suffix}`, 3, old),
+        ] });
+
+        // The first pass retires content; the next prunes ordinary rows.
+        await retireExpiredMailboxContent({ now, prisma: cleanup });
+        await retireExpiredMailboxContent({ now, prisma: cleanup });
+
+        await expect(cleanup.hostedMailboxItem.findMany({
+          orderBy: { laneSeq: "asc" },
+          select: { contentRetiredAt: true, dedupeKey: true, payloadInlineCiphertext: true },
+          where: { userId: memberId },
+        })).resolves.toEqual([
+          { contentRetiredAt: now, dedupeKey: stallKey, payloadInlineCiphertext: null },
+          { contentRetiredAt: now, dedupeKey: `${stallKey.slice(0, -1)}b`, payloadInlineCiphertext: null },
+        ]);
+      } finally {
+        await cleanup.hostedMember.deleteMany({ where: { id: memberId } });
+      }
+    });
+
     it("does not wait behind a locked Linq provider event", async () => {
       const cleanup = requirePrisma(cleanupClient);
       const locker = requirePrisma(lockClient);
