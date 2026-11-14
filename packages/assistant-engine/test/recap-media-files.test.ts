@@ -157,6 +157,8 @@ test('a scene names its references by photo path or id, and anything else is ref
   const args = { outputFormat: 'jpeg' as const, prompt: 'Synthetic paper theatre.', alt: null, quality: 'high' as const, size: '1024x1536' as const }
   const unknownRefs = ['skill-assets/murph-character-sheet-v1.png', 'c'.repeat(64), 'x'.repeat(200)]
   await expect(context.prepareRecapMedia!({ kind: 'image', args: { ...args, referenceImageRefs: [photoPath, ...unknownRefs] } }, fetchImpl))
+    .rejects.toMatchObject({ shapes: ['skill_asset', 'unlisted_reference', 'other'] })
+  await expect(context.prepareRecapMedia!({ kind: 'image', args: { ...args, referenceImageRefs: [photoPath, ...unknownRefs] } }, fetchImpl))
     .rejects.toThrow(`Nothing was generated and no media request was used. referenceImageRefs takes the path of a photo listed under references in game.json. Not one of them: "skill-assets/murph-character-sheet-v1.png", "${'c'.repeat(64)}", "${'x'.repeat(120)}".`)
   expect(request).not.toHaveBeenCalled()
   expect(fetchImpl).not.toHaveBeenCalled()

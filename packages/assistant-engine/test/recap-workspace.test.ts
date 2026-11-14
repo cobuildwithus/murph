@@ -45,6 +45,8 @@ describe('recap workspace material', () => {
         } } }
       } } })
     const manifest = z.object({ directory: z.string(), files: z.object({ game: z.string() }) }).parse(exported.manifest)
+    // Runtime scratch: a saved workspace never includes it, so these files are not kept after the recap.
+    expect(manifest.directory).toMatch(/^\.runtime\/tmp\/recap\/[a-f0-9]{32}$/u)
     const game = z.object({ references: z.array(z.object({ id: z.string(), kind: z.string(), path: z.string().optional() })) })
       .parse(JSON.parse(await readFile(path.join(vault, manifest.files.game), 'utf8')))
     const readable = game.references.filter(reference => reference.path)

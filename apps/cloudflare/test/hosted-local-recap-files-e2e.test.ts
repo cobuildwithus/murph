@@ -44,7 +44,7 @@ it.each([false, true])('accepts a recap show through the production hosted Linux
   const home = await mkdtemp(path.join(tmpdir(), 'recap-linux-codex-'));
   const eventId = 'game-recap:synthetic-linux';
   const gameId = 'synthetic-linux';
-  const relativeRoot = `tmp/recap/${createHash('sha256').update(eventId).digest('hex').slice(0, 32)}`;
+  const relativeRoot = `.runtime/tmp/recap/${createHash('sha256').update(eventId).digest('hex').slice(0, 32)}`;
   const command = `printf NORMAL_GROUP_WORKSPACE_OK; pwd`;
   const fixture = await createHostedRecapFixture(gameId, mediaFails);
   const draftPath = `${relativeRoot}/drafts/show.json`;

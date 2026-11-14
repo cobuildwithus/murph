@@ -1,5 +1,6 @@
 import { RECAP_SHOW_CRAFT } from '@murphai/hosted-execution/runtime-control'
 import { recapDirectory } from './recap-files.js'
+import { resolveRuntimePaths } from '@murphai/runtime-state/node'
 import { createHash } from 'node:crypto'
 import { constants, createReadStream } from 'node:fs'
 import { access, writeFile } from 'node:fs/promises'
@@ -12,8 +13,9 @@ import type { AssistantHostedGroupTool } from './execution-context.js'
 import { resolveAssistantStatePaths } from './store/paths.js'
 import { resolveAssistantTranscriptPath } from './store/persistence.js'
 
+/** Runtime scratch is never saved with the workspace, so a recap's photos, media and chat copy last only as long as the container. */
 export function recapTaskDirectory(vault: string, eventId: string): string {
-  return path.join(vault, 'tmp/recap', createHash('sha256').update(eventId).digest('hex').slice(0, 32))
+  return path.join(resolveRuntimePaths(vault).tempRoot, 'recap', createHash('sha256').update(eventId).digest('hex').slice(0, 32))
 }
 
 /**
@@ -78,6 +80,19 @@ export async function materializeRecapWorkspace(input: {
 export function recapReferenceId(material: RecapMaterial, ref: string): string | null {
   const id = path.basename(ref, '.jpg')
   return material.references.some(reference => reference.id === id) ? id : null
+}
+
+/** The model named something that is not one of this recap's references. Carries what each looked like, never the value. */
+export class RecapReferenceRefusal extends Error {
+  readonly shapes: string[]
+  constructor(material: RecapMaterial, refs: readonly string[]) {
+    super(`Nothing was generated and no media request was used. referenceImageRefs takes the path of a photo listed under references in game.json. Not one of them: ${refs.map(ref => JSON.stringify(ref.slice(0, 120))).join(', ')}.`)
+    this.shapes = refs.map(ref => ref.startsWith('skill-assets/') ? 'skill_asset'
+      : ref.startsWith('raw/') ? 'vault_path'
+      : material.entries.some(entry => entry.entryId === ref) ? 'entry_id'
+      : /^[a-f0-9]{64}$/u.test(path.basename(ref, '.jpg')) ? 'unlisted_reference'
+      : 'other')
+  }
 }
 
 const referenceBytesSchema = z.object({

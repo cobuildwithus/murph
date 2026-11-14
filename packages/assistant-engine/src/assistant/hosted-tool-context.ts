@@ -4,7 +4,7 @@ import { resolveElevenLabsApiKey } from '@murphai/operator-config/elevenlabs-run
 import type { GeneratedMediaFileRuntime } from '../assistant-codex/generated-media-file.js'
 import type { GenerateImageToolArgs } from '../assistant-codex/generate-image-tool.js'
 import type { GenerateSongToolArgs } from '../assistant-codex/generate-voice-memo-tool.js'
-import { fetchRecapReference, materializeRecapWorkspace, recapReferenceId } from './recap-workspace.js'
+import { fetchRecapReference, materializeRecapWorkspace, recapReferenceId, RecapReferenceRefusal } from './recap-workspace.js'
 import type { ConversationPollTool } from "@murphai/hosted-execution/conversation-polls";
 import { createHash } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
@@ -659,7 +659,7 @@ export function createAssistantHostedToolContext(input: {
       if (!scope?.show || !workspace || !tool) throw new Error('Read recap material first.')
       const refs = request.kind === 'image' ? request.args.referenceImageRefs ?? [] : []
       const unknown = refs.filter(ref => !recapReferenceId(workspace.material, ref))
-      if (unknown.length) throw new Error(`Nothing was generated and no media request was used. referenceImageRefs takes the path of a photo listed under references in game.json. Not one of them: ${unknown.map(ref => JSON.stringify(ref.slice(0, 120))).join(', ')}.`)
+      if (unknown.length) throw new RecapReferenceRefusal(workspace.material, unknown)
       const referenceIds = refs.map(ref => recapReferenceId(workspace.material, ref)!)
       return {
         elevenLabsApiKey: resolveElevenLabsApiKey(input.messageInput.turnEnvironment?.env ?? process.env) ?? undefined,
