@@ -55,7 +55,8 @@ it("returns the resolver's phone-startable list and shared relay copy without co
       ...(row.path === "apple_health_relay" ? [] : ["sourceProviderSlug"])].sort());
     expect(row.id).toBeTruthy();
     expect(row.name).toBeTruthy();
-    expect(row.logoPath).toMatch(/^\/brand-logos\/connect\/.+\.png$/u);
+    // The app's own guard (murph-ios MurphCompanion/Core/APIClient.swift, fetchConnectLogo): no subfolders.
+    expect(row.logoPath).toMatch(/^\/brand-logos\/connect\/[A-Za-z0-9._-]+\.png$/u);
     expect(existsSync(path.join(process.cwd(), "apps/web/public", row.logoPath))).toBe(true);
     expect(["apple_health", "apple_health_relay", "web"]).toContain(row.path);
     const source = resolveConnectSources().find(source => source.id === row.id)!;
