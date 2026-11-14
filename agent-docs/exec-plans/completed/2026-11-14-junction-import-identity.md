@@ -76,6 +76,10 @@ Updated: 2026-11-14
 - Two existing sleep tests gained `sleep_id` on their cycle fixtures: sharing
   one owner across separate imports now follows the session id, which every
   real cycle carries.
+- A timeseries total dropped as a candidate is named in the dataset's metric
+  suppression evidence. Losing candidates are what suppress their raw
+  observations as metric points, so dropping one silently would have let the
+  partial totals reach goal and experiment aggregates (final review, round 1).
 - Skipping an all-null activity update at admission was built and then left
   out. It is an import-vs-skip gate on the webhook path, which the ingestion
   invariants forbid; that exception is the owner's decision.

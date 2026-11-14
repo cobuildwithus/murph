@@ -5,7 +5,11 @@ import path from "node:path";
 
 import { test } from "vitest";
 
-import { rebuildQueryProjection, summarizeWearableActivityRuntime } from "../src/index.ts";
+import {
+  listMetricPoints,
+  rebuildQueryProjection,
+  summarizeWearableActivityRuntime,
+} from "../src/index.ts";
 import { dropJunctionTimeseriesTotalsBesideActivitySummary } from "../src/wearables/candidates.ts";
 import type { WearableMetricCandidate } from "../src/wearables/types.ts";
 
@@ -49,7 +53,7 @@ function candidate(
 }
 
 const kept = (...candidates: WearableMetricCandidate[]) =>
-  dropJunctionTimeseriesTotalsBesideActivitySummary(candidates).map((entry) => entry.value);
+  dropJunctionTimeseriesTotalsBesideActivitySummary(candidates).candidates.map((entry) => entry.value);
 
 test("a source's timeseries day total is dropped beside its own activity summary", () => {
   assert.deepEqual(kept(
@@ -57,6 +61,23 @@ test("a source's timeseries day total is dropped beside its own activity summary
     candidate("apple-health-kit", "steps", 4_100),
     candidate("apple-health-kit", "steps", 900),
   ), [7_700]);
+});
+
+test("a dropped total's raw record is named for metric-point suppression", () => {
+  const watch = candidate("apple-health-kit", "steps", 4_100);
+  const floors = candidate("apple-health-kit", "floors-climbed", 2, { metric: "floorsClimbed" });
+  const { suppressionEvidence } = dropJunctionTimeseriesTotalsBesideActivitySummary([
+    candidate("apple-health-kit", "activity", 7_700),
+    candidate("apple-health-kit", "activity", 9, { metric: "floorsClimbed" }),
+    watch,
+    floors,
+    candidate("whoop-v2", "steps", 3_000),
+  ]);
+
+  assert.deepEqual(suppressionEvidence, [
+    { date, metricKey: "steps", recordIds: watch.recordIds },
+    { date, metricKey: "floors-climbed", recordIds: floors.recordIds },
+  ]);
 });
 
 test("the timeseries day total stands in when the source sent no activity summary", () => {
@@ -88,16 +109,17 @@ test("records that are not that source's steps, distance or floors timeseries st
   ), [7_700, 5, 6, 7, 8]);
 });
 
-test("the stored summary counts one steps candidate when a source has both", async () => {
+test("the stored projection keeps one steps candidate and one steps point when a source has both", async () => {
   const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-query-junction-timeseries-total-"));
   const eventLedgerPath = path.join(vaultRoot, "ledger/events/2026/2026-05.jsonl");
-  const record = (id: string, resource: string, sourceType: string, value: number) => ({
+  const fallbackDate = "2026-05-04";
+  const record = (id: string, resource: string, sourceType: string, value: number, day = date) => ({
     schemaVersion: "murph.event.v1",
     id,
     kind: "observation",
-    occurredAt: `${date}T22:00:00Z`,
-    recordedAt: `${date}T22:05:00Z`,
-    dayKey: date,
+    occurredAt: `${day}T22:00:00Z`,
+    recordedAt: `${day}T22:05:00Z`,
+    dayKey: day,
     source: "device",
     title: "Junction steps",
     metric: "daily-steps",
@@ -124,6 +146,8 @@ test("the stored summary counts one steps candidate when a source has both", asy
       record("evt_timeseries_total_summary", "activity", "multiple_sources", 7_700),
       record("evt_timeseries_total_watch", "steps", "watch", 4_100),
       record("evt_timeseries_total_phone", "steps", "phone", 900),
+      // A day the source sent no activity summary for.
+      record("evt_timeseries_total_fallback", "steps", "watch", 3_300, fallbackDate),
     ].map((entry) => JSON.stringify(entry)).join("\n").concat("\n"));
     await rebuildQueryProjection(vaultRoot);
 
@@ -131,6 +155,15 @@ test("the stored summary counts one steps candidate when a source has both", asy
 
     assert.equal(summary?.steps.selection.value, 7_700);
     assert.equal(summary?.steps.confidence.candidateCount, 1);
+
+    // Goals and experiments aggregate metric points, so the partial totals
+    // must not surface there as extra points for the day.
+    const points = await listMetricPoints(vaultRoot, { metricKey: "steps" });
+    const valuesOn = (day: string) => points
+      .filter((point) => point.effectiveDate.slice(0, 10) === day)
+      .map((point) => point.value);
+    assert.deepEqual(valuesOn(date), [7_700]);
+    assert.deepEqual(valuesOn(fallbackDate), [3_300]);
   } finally {
     await rm(vaultRoot, { recursive: true, force: true });
   }

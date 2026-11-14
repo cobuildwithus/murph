@@ -223,8 +223,9 @@ export function collectWearableDataset(
   const filteredSleepWindows = dedupedSleepWindows.filter((candidate) => matchesDateFilters(candidate.date, filters));
   const sleepStageAggregates = buildSleepStageAggregateCandidates(sleepStageCandidates, dedupedSleepWindows)
     .filter((candidate) => matchesDateFilters(candidate.date, filters));
+  const timeseriesTotals = dropJunctionTimeseriesTotalsBesideActivitySummary(rawMetricCandidates);
   const sanitizedMetricCandidates = sanitizeWearableMetricCandidates(
-    dropJunctionTimeseriesTotalsBesideActivitySummary(rawMetricCandidates),
+    timeseriesTotals.candidates,
     dedupedSleepWindows,
   );
   const metricCandidates = [
@@ -236,7 +237,10 @@ export function collectWearableDataset(
     activitySessionCandidates: activitySessions,
     activitySessionAggregates: buildActivitySessionAggregates(activitySessions),
     activitySessionDayRollups: buildActivitySessionDayRollups(activitySessions),
-    metricSuppressionEvidence: sanitizedMetricCandidates.suppressionEvidence,
+    metricSuppressionEvidence: [
+      ...sanitizedMetricCandidates.suppressionEvidence,
+      ...timeseriesTotals.suppressionEvidence,
+    ],
     metricCandidates,
     provenanceDiagnostics: [...provenanceDiagnostics.values()].sort(compareWearableProvenanceDiagnostics),
     rawMetricCandidates,
@@ -245,18 +249,29 @@ export function collectWearableDataset(
   };
 }
 
-// The timeseries whose day sum is a quantity the activity summary also reports.
+// The timeseries whose day sum is a quantity the activity summary also
+// reports, with the metric point key each one is stored under.
 const JUNCTION_ACTIVITY_TIMESERIES_RESOURCES = ["steps", "distance", "floors-climbed"] as const;
+const JUNCTION_ACTIVITY_TIMESERIES_SUPPRESSION_KEYS = new Map<WearableMetricKey, string>([
+  ["steps", "steps"],
+  ["distanceKm", "distance-km"],
+  ["floorsClimbed", "floors-climbed"],
+]);
 
 /**
  * A day total summed from one source's own timeseries stands in for a day that
  * source sent no activity summary for. Beside that summary it is a partial
  * copy of the same quantity (one device's samples, over a UTC day), not a
- * second opinion, so it is not a candidate.
+ * second opinion, so it is not a candidate. Its raw observation is suppressed
+ * as a metric point the same way a losing candidate's is, so goals and
+ * experiments still see one point for the day.
  */
 export function dropJunctionTimeseriesTotalsBesideActivitySummary(
   candidates: readonly WearableMetricCandidate[],
-): WearableMetricCandidate[] {
+): {
+  candidates: WearableMetricCandidate[];
+  suppressionEvidence: WearableMetricSuppressionEvidence[];
+} {
   // Junction names a record's resource type `junction-<source>-<resource>`.
   const describe = (candidate: WearableMetricCandidate) => {
     const source = normalizeWearableOriginSourceSlug(candidate.dataOrigin?.sourceProviderSlug);
@@ -281,15 +296,25 @@ export function dropJunctionTimeseriesTotalsBesideActivitySummary(
       summarized.add(described.key);
     }
   }
-  if (summarized.size === 0) {
-    return [...candidates];
-  }
-  return candidates.filter((candidate) => {
+  const kept: WearableMetricCandidate[] = [];
+  const suppressionEvidence: WearableMetricSuppressionEvidence[] = [];
+  for (const candidate of candidates) {
     const described = describe(candidate);
-    return !described
+    const metricKey = JUNCTION_ACTIVITY_TIMESERIES_SUPPRESSION_KEYS.get(
+      candidate.metric as WearableMetricKey,
+    );
+    if (
+      !described
+      || !metricKey
       || !summarized.has(described.key)
-      || !(JUNCTION_ACTIVITY_TIMESERIES_RESOURCES as readonly string[]).includes(described.resource);
-  });
+      || !(JUNCTION_ACTIVITY_TIMESERIES_RESOURCES as readonly string[]).includes(described.resource)
+    ) {
+      kept.push(candidate);
+      continue;
+    }
+    suppressionEvidence.push({ date: candidate.date, metricKey, recordIds: candidate.recordIds });
+  }
+  return { candidates: kept, suppressionEvidence };
 }
 
 function sanitizeWearableMetricCandidates(
