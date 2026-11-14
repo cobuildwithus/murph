@@ -37,12 +37,12 @@ Seven days of processing summaries show fresh starts throwing at
 
 ## Success criteria
 
-- A default-mode start whose readiness rejects (not a deadline) retires its
-  exact target, releases the owner after confirmed stop, and re-admits within
-  the same command.
+- A default-mode start that made its own claim and whose readiness rejects
+  (not a deadline) retires its exact target, releases the owner after
+  confirmed stop, and re-admits within the same command.
 - An unproven stop keeps ownership pinned, as before.
-- Readiness deadlines, busy results, failed preparation, failed launch and
-  every background start behave as before.
+- Readiness deadlines, busy results, failed preparation, failed launch,
+  supplied claimed snapshots and every background start behave as before.
 - Focused tests cover all of the above.
 
 ## Scope
@@ -70,7 +70,13 @@ Seven days of processing summaries show fresh starts throwing at
    Mitigation: a deadline (command budget or RPC timeout) keeps the existing
    path. A rejection ended the readiness call, and no invocation was launched
    because launch follows readiness.
-3. Risk: repeated failed starts spend start budget and standby slots.
+3. Risk: a supplied claimed snapshot can reach two commands. One could launch
+   while the other's readiness rejects, and retirement would then stop accepted
+   work. Found by the pre-landing deep review.
+   Mitigation: recover in place only for a claim the command made itself. The
+   claim transaction returns `claimed` to exactly one caller. Current Web
+   supplies only `existing` snapshots, so this excludes no production start.
+4. Risk: repeated failed starts spend start budget and standby slots.
    Mitigation: the existing three-admission bound per command and the Web
    start budget both still apply.
 
@@ -105,7 +111,7 @@ adds coordinator state and belongs in its own reviewed change.
 ## Verification
 
 - `pnpm exec vitest run --config apps/cloudflare/vitest.node.workspace.ts --no-coverage apps/cloudflare/test/runtime-processing-postgres.test.ts apps/cloudflare/test/runtime-processing-summary.test.ts apps/cloudflare/test/index.test.ts`:
-  272 passed.
+  273 passed.
 - `pnpm --dir apps/cloudflare typecheck`: passed.
 - `pnpm complexity:diff`: passed, no change in debt.
 - After the runtime deploy: processing summaries with

@@ -299,15 +299,17 @@ async function startClaimedRuntime(ctx: ProcessingContext, initialOwner: HostedR
   if (!container.ensureReadyForProcessing || !container.startSupervisedInvocation) throw new Error("Native runtime supervision is unavailable.");
   const readiness = ctx.step("container_readiness", () => container.ensureReadyForProcessing!({ userId: ctx.input.userId, orchestrationAttemptId: ctx.input.orchestrationAttemptId,
     timeoutMs: readRuntimeProcessingCommandStepTimeoutMs({ budget: ctx.budget, stepTimeoutMs: 15_000 }) }), 15_000);
+  // Recover in place only when a rejection is this command's own failure. Foreground
+  // priority rejects a background start's readiness on purpose, and a supplied claim
+  // can reach a second command that launches meanwhile.
+  const ownsStart = ctx.mode === "default" && ctx.input.admission?.owner?.attemptId !== owner.attemptId;
   const [ready, prepared] = await Promise.all([
-    // Foreground priority rejects a background start's readiness on purpose, and a
-    // deadline leaves readiness in flight. Both keep the existing recovery.
-    ctx.mode !== "default" ? readiness
+    // A deadline leaves readiness in flight and keeps the existing recovery.
+    !ownsStart ? readiness
       : readiness.catch((error: unknown) => { if (isProcessingTimeout(error)) throw error; return null; }),
     ctx.step("prepare_invocation", () => prepare(ownerToken(owner), binding)),
   ]);
-  // Nothing preempts a foreground claim, so its readiness failed on its own and
-  // nothing has launched. Prove the exact target stopped now and re-admit, rather
+  // Nothing has launched. Prove the exact target stopped now and re-admit, rather
   // than leave the owner to its startup deadline.
   if (!ready) return retireRuntime(ctx, owner);
   if (ready.kind !== "ready") return retryProcessing(ctx, "container_not_ready");
