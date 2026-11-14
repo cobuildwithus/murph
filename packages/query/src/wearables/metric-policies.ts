@@ -1,3 +1,11 @@
+import {
+  addDaysToIsoDate,
+  formatTimeZoneDateTimeParts,
+  isStrictIsoDate,
+  normalizeIanaTimeZone,
+  resolveFloatingIsoTimestampInTimeZone,
+} from "@murphai/contracts";
+
 import { normalizeWearableOriginSourceSlug } from "./origin.ts";
 import { isActivitySummaryResource } from "./provider-policy.ts";
 import { compareIsoDesc, normalizeLowercaseString } from "./shared.ts";
@@ -16,8 +24,10 @@ export function scoreMetricPolicy(
   candidates: readonly WearableMetricCandidate[],
 ): number {
   if (metric === "steps") {
-    const dailyTotal = selectDailyStepsTotal(candidates);
-    return !dailyTotal || dailyTotal.candidateId === candidate.candidateId ? 0 : PASSED_OVER_STEPS_PENALTY;
+    const dailyTotals = selectDailyStepsTotals(candidates);
+    return !dailyTotals || dailyTotals.some((total) => total.candidateId === candidate.candidateId)
+      ? 0
+      : PASSED_OVER_STEPS_PENALTY;
   }
 
   if (!isWhoopDayStrainCycleCandidate(metric, candidate)) {
@@ -36,23 +46,93 @@ export function scoreMetricPolicy(
 }
 
 /**
+ * The candidates still in the running for a day's steps; null leaves all in.
+ *
  * A merged total combines every app writing to a health store, so it can count
  * a device twice or miss a walk without the phone. A worn device's own daily
  * total is the day's count, unless it is so far below the merged total that the
- * device came off. Days without both keep the standard ranking.
+ * device came off or reported nothing, or it is a partial count of a finished
+ * day. Without a merged total to weigh it against, a worn total that counts
+ * still passes over sums of a source's samples, which cover part of a day.
  */
-function selectDailyStepsTotal(candidates: readonly WearableMetricCandidate[]): WearableMetricCandidate | null {
+function selectDailyStepsTotals(
+  candidates: readonly WearableMetricCandidate[],
+): readonly WearableMetricCandidate[] | null {
   const dailyTotals = candidates.filter((candidate) => isActivitySummaryResource(candidate.externalRef?.resourceType));
-  const highest = (sourceTypes: ReadonlySet<string>) => dailyTotals
-    .filter((candidate) => sourceTypes.has(normalizeWearableOriginSourceSlug(candidate.dataOrigin?.sourceType) ?? ""))
-    .sort((left, right) => right.value - left.value)[0];
-  const worn = highest(WORN_SOURCE_TYPES);
-  const merged = highest(MERGED_SOURCE_TYPES);
-  if (!worn || worn.value <= 0 || !merged) {
+  const withSourceType = (sourceTypes: ReadonlySet<string>) => dailyTotals
+    .filter((candidate) => sourceTypes.has(normalizeWearableOriginSourceSlug(candidate.dataOrigin?.sourceType) ?? ""));
+  const highest = (totals: readonly WearableMetricCandidate[]) =>
+    [...totals].sort((left, right) => right.value - left.value)[0];
+  const wornTotals = withSourceType(WORN_SOURCE_TYPES);
+  if (wornTotals.length === 0) {
     return null;
   }
 
-  return worn.value >= merged.value * MINIMUM_WORN_SHARE_OF_MERGED_STEPS ? worn : merged;
+  const worn = highest(wornTotals.filter((candidate) => !candidate.partialCountOfFinishedDay));
+  const merged = highest(withSourceType(MERGED_SOURCE_TYPES));
+  if (merged) {
+    return [worn && worn.value >= merged.value * MINIMUM_WORN_SHARE_OF_MERGED_STEPS ? worn : merged];
+  }
+
+  return worn && worn.value > 0 ? dailyTotals : null;
+}
+
+/**
+ * When a record's own calendar day ends. The record's time zone decides, so a
+ * day that gains or loses an hour ends on time; its UTC offset is the fallback.
+ * Null when neither gives one instant, and the record then keeps its standing.
+ */
+export function resolveLocalDayEndMs(
+  date: string,
+  timeZone: string | null | undefined,
+  timeZoneOffsetMinutes: number | null | undefined,
+): number | null {
+  if (!isStrictIsoDate(date)) {
+    return null;
+  }
+
+  const nextDate = addDaysToIsoDate(date, 1);
+  const nextDateUtcMs = Date.parse(`${nextDate}T00:00:00.000Z`);
+  if (!Number.isFinite(nextDateUtcMs)) {
+    return null;
+  }
+
+  const offsetEndMs = typeof timeZoneOffsetMinutes === "number" && Number.isFinite(timeZoneOffsetMinutes)
+    ? nextDateUtcMs - timeZoneOffsetMinutes * 60_000
+    : null;
+  const zone = normalizeIanaTimeZone(timeZone);
+  if (!zone) {
+    return offsetEndMs;
+  }
+
+  // The record's offset is its zone's offset at that midnight on all but the
+  // days the clocks change, and one lookup confirms it without a search.
+  if (offsetEndMs !== null) {
+    const local = formatTimeZoneDateTimeParts(offsetEndMs, zone);
+    if (local.dayKey === nextDate && local.hour === 0 && local.minute === 0 && local.second === 0) {
+      return offsetEndMs;
+    }
+  }
+
+  const zoned = resolveFloatingIsoTimestampInTimeZone(`${nextDate}T00:00:00`, zone);
+  return zoned ? Date.parse(zoned.timestamp) : offsetEndMs;
+}
+
+/**
+ * A daily total last recorded before its own day ended counts only part of that
+ * day. The day is finished once the vault holds a steps total recorded after it
+ * ended; until then the day may still be open and the total keeps its standing.
+ */
+export function isPartialCountOfFinishedDay(input: {
+  dayEndMs: number | null;
+  evidenceThroughMs: number;
+  recordedAt: string | null;
+}): boolean {
+  const recordedMs = input.recordedAt ? Date.parse(input.recordedAt) : Number.NaN;
+  return input.dayEndMs !== null
+    && Number.isFinite(recordedMs)
+    && recordedMs < input.dayEndMs
+    && input.dayEndMs <= input.evidenceThroughMs;
 }
 
 function collectSameDayWhoopDayStrainCycleCandidates(
