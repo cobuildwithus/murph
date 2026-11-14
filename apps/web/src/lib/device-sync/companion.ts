@@ -565,8 +565,10 @@ export interface CompanionDeviceSyncStatusResponse {
  *   first receipt, so the app can render honest "waiting for first data"
  *   states per resource.
  *
- * Receipt evidence is bounded to the most recent status signals. No health
- * values are ever included - timestamps and resource names only.
+ * Scoped to one source, receipt evidence is each event type's latest signal,
+ * so a quiet kind keeps its time beside busy ones; unscoped, it is bounded to
+ * the most recent status signals. No health values are ever included -
+ * timestamps and resource names only.
  */
 export async function readCompanionDeviceSyncStatus(input: {
   memberId: string;

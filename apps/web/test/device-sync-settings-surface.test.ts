@@ -112,6 +112,7 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
         {
           connectionId: "dspc_example",
           firstSeenAt: "2026-04-01T08:00:00.000Z",
+          lastDataAt: "2026-04-03T07:30:00.000Z",
           lastSeenAt: "2026-04-03T08:00:00.000Z",
           resourceCount: 3,
           sourceProviderSlug: "dexcom_v3",
@@ -130,6 +131,8 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
     expect(source?.displayName).toBeNull();
     expect(source?.upstreamSources).toEqual([
       {
+        // Every source says when its data last arrived, not only Fitbit's.
+        lastDataAt: "2026-04-03T07:30:00.000Z",
         providerLabel: "Dexcom",
         resourceCount: 3,
         sourceProviderSlug: "dexcom_v3",
@@ -503,6 +506,7 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
         connectProvider: "junction",
         connectSourceId: "garmin",
         connectTarget: "garmin",
+        lastDataAt: null,
         providerLabel: "Garmin",
         recoveryKind: "connection_reset",
         resourceCount: 3,
@@ -572,6 +576,7 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
         connectProvider: "junction",
         connectSourceId: "garmin",
         connectTarget: "garmin",
+        lastDataAt: null,
         providerLabel: "Garmin",
         resourceCount: 2,
         sourceProviderSlug: "garmin",
@@ -581,6 +586,7 @@ describe("buildHostedDeviceSyncSettingsSources", () => {
         connectProvider: "junction",
         connectSourceId: "whoop",
         connectTarget: "whoop",
+        lastDataAt: null,
         providerLabel: "WHOOP",
         requiresReconnect: true,
         resourceCount: 3,

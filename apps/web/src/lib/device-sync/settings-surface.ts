@@ -713,10 +713,12 @@ function toSettingsUpstreamSource(
     ...(includeMigrationTimeline
       ? {
           firstSeenAt: source.firstSeenAt,
-          lastDataAt: source.lastDataAt ?? null,
           lastSeenAt: source.lastSeenAt,
         }
       : {}),
+    // Every source says when its data last arrived: the app's wearable list
+    // and drawer show it as when that wearable last synced.
+    lastDataAt: source.lastDataAt ?? null,
     ...(source.lastErrorCode ? { lastErrorCode: source.lastErrorCode } : {}),
     providerLabel: formatHostedDeviceSyncSourceLabel(source.sourceProviderSlug),
     ...(source.recoveryKind ? { recoveryKind: source.recoveryKind } : {}),
