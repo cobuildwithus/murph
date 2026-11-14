@@ -6,11 +6,17 @@ import { afterEach, test, vi } from "vitest";
 
 import {
   connectSourcePngLogoPath,
+  listConnectSourceIds,
   listVisibleDeviceConnectSources,
   resolveConnectSources,
 } from "../src/lib/device-sync/connect-sources";
 
 afterEach(() => vi.unstubAllEnvs());
+
+// The only logo paths the iOS app fetches: murph-ios MurphCompanion/Core/APIClient.swift,
+// fetchConnectLogo. It refuses anything else and leaves the tile blank, so a
+// subfolder or another extension here breaks app builds already installed.
+const APP_CONNECT_LOGO_PATH = /^\/brand-logos\/connect\/[A-Za-z0-9._-]+\.png$/u;
 
 test("every listed connect source has a name, a website logo, and a PNG logo", () => {
   vi.stubEnv("MURPH_ANDROID_APP_ENABLED", "1");
@@ -21,7 +27,7 @@ test("every listed connect source has a name, a website logo, and a PNG logo", (
     assert.ok(source.name.trim(), `${source.id} needs a name`);
     const pngPath = connectSourcePngLogoPath(source.id);
     assert.ok(pngPath, `${source.id} needs a PNG logo`);
-    assert.match(pngPath, /^\/brand-logos\/connect\/.+\.png$/u);
+    assert.match(pngPath, APP_CONNECT_LOGO_PATH);
     for (const logoPath of [source.logo.src, pngPath]) {
       assert.ok(
         existsSync(path.join(process.cwd(), "apps/web/public", logoPath)),
@@ -32,13 +38,13 @@ test("every listed connect source has a name, a website logo, and a PNG logo", (
 });
 
 test("a bare symbol's PNG logo is its padded tile copy, and the website card keeps the original", () => {
-  const tileDirectory = path.join(process.cwd(), "apps/web/public/brand-logos/connect/tile");
-  const tiles = readdirSync(tileDirectory).filter((file) => file.endsWith(".png"));
-  assert.ok(tiles.includes("fitbit.png"));
+  const logoDirectory = path.join(process.cwd(), "apps/web/public/brand-logos/connect");
+  const tiles = readdirSync(logoDirectory).filter((file) => file.endsWith("-tile.png"));
+  assert.ok(tiles.includes("fitbit-tile.png"));
 
   for (const file of tiles) {
-    const id = file.replace(/\.png$/u, "");
-    assert.equal(connectSourcePngLogoPath(id), `/brand-logos/connect/tile/${file}`, `${file} should be served for ${id}`);
+    const id = file.replace(/-tile\.png$/u, "");
+    assert.equal(connectSourcePngLogoPath(id), `/brand-logos/connect/${file}`, `${file} should be served for ${id}`);
   }
   assert.equal(
     listVisibleDeviceConnectSources().find((source) => source.id === "fitbit")?.logo.src,
@@ -46,6 +52,26 @@ test("a bare symbol's PNG logo is its padded tile copy, and the website card kee
   );
   assert.equal(connectSourcePngLogoPath("coros"), "/brand-logos/connect/coros.png");
   assert.equal(connectSourcePngLogoPath("not-a-source"), null);
+});
+
+test("every source's PNG logo is a path the app will fetch, and the file is there", () => {
+  vi.stubEnv("MURPH_ANDROID_APP_ENABLED", "1");
+  const ids = new Set([
+    ...listConnectSourceIds(),
+    ...listVisibleDeviceConnectSources().map((source) => source.id),
+    ...resolveConnectSources().map((source) => source.id),
+  ]);
+  assert.ok(ids.has("fitbit") && ids.has("apple-health") && ids.has("coros"));
+
+  for (const id of ids) {
+    const pngPath = connectSourcePngLogoPath(id);
+    assert.ok(pngPath, `${id} needs a PNG logo`);
+    assert.match(pngPath, APP_CONNECT_LOGO_PATH, `the app would refuse ${id}'s logo path ${pngPath}`);
+    assert.ok(
+      existsSync(path.join(process.cwd(), "apps/web/public", pngPath)),
+      `${pngPath} should exist under apps/web/public`,
+    );
+  }
 });
 
 test("the production admission smoke looks up connect sources by names the page still uses", () => {
