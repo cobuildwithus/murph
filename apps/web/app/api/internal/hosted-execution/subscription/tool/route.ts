@@ -1,4 +1,4 @@
-import { ZodError } from "zod";
+import { ZodError } from "@murphai/contracts/zod-runtime";
 import { RequestInputError } from "@murphai/hosted-execution/request-input";
 import {
   parseHostedSubscriptionControlRequest,

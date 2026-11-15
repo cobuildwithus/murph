@@ -1,6 +1,6 @@
 import "server-only";
 
-import { ZodError } from "zod";
+import { ZodError } from "@murphai/contracts/zod-runtime";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 
 import {
