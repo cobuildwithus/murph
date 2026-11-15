@@ -22,6 +22,53 @@ const GROUP_SENDER_PHONE = "+15551234567";
 const PRIVATE_RECOVERY_KEY = /^visible-secondary-private:[0-9a-f]{32}$/u;
 const PRIVATE_RECOVERY_SEED = /^linq-group-private-recovery-seed:[0-9a-f]{32}$/u;
 
+const PRIVATE_RECOVERY_FAILURES = [
+  ...[401, 403, 408, 409, 429, 500, 503].map((status) => ({
+    label: `HTTP ${status}`,
+    error: hostedOnboardingError({
+      code: "LINQ_SEND_FAILED",
+      details: { status },
+      httpStatus: 502,
+      message: "Synthetic provider failure.",
+      retryable: status >= 429,
+    }),
+  })),
+  {
+    label: "configuration error",
+    error: hostedOnboardingError({
+      code: "HOSTED_ONBOARDING_CONFIG_MISSING",
+      details: { status: 404 },
+      httpStatus: 500,
+      message: "Synthetic configuration failure.",
+      retryable: false,
+    }),
+  },
+  {
+    label: "native error",
+    error: new Error("Synthetic network failure."),
+  },
+  ...[undefined, "404"].map((status) => ({
+    label: `invalid provider status ${status}`,
+    error: hostedOnboardingError({
+      code: "LINQ_SEND_FAILED",
+      details: { status },
+      httpStatus: 404,
+      message: "Synthetic failure without a numeric provider status.",
+      retryable: false,
+    }),
+  })),
+  {
+    label: "retryable rejection",
+    error: hostedOnboardingError({
+      code: "LINQ_SEND_FAILED",
+      details: { status: 404 },
+      httpStatus: 502,
+      message: "Synthetic retryable rejection.",
+      retryable: true,
+    }),
+  },
+];
+
 const GROUP_SENDER_CONTACT = requireTestLinqParticipantContact({
   kind: "phone",
   value: GROUP_SENDER_PHONE,
@@ -300,20 +347,14 @@ describe("Linq group-chat visible access recovery", () => {
     }
   });
 
-  it("retries private recovery with the same provider key after room completion", async () => {
+  it.each(PRIVATE_RECOVERY_FAILURES)("retries $label with the same provider key after room completion", async ({ error }) => {
     const event = buildGroupLinqEvent(
       "evt_group_setup_private_retry",
       GROUP_SENDER_PHONE,
       "2026-07-27T12:00:00.000Z",
     );
-    const retryableError = hostedOnboardingError({
-      code: "LINQ_SEND_FAILED",
-      httpStatus: 502,
-      message: "Linq outbound reply failed with HTTP 503.",
-      retryable: true,
-    });
     const sendHostedLinqChatMessage = vi.fn()
-      .mockRejectedValueOnce(retryableError)
+      .mockRejectedValueOnce(error)
       .mockResolvedValueOnce({
         chatId: "chat_private_member",
         messageId: "msg_private_retry",
@@ -350,7 +391,7 @@ describe("Linq group-chat visible access recovery", () => {
     await expect(withHostedVisibleSecondaryLinqOutcomes(
       handler,
       dependencies,
-    )(input)).rejects.toBe(retryableError);
+    )(input)).rejects.toBe(error);
     await expect(withHostedVisibleSecondaryLinqOutcomes(
       handler,
       dependencies,
@@ -359,6 +400,9 @@ describe("Linq group-chat visible access recovery", () => {
       reason: "sent-group-setup",
     });
 
+    expect(handler).toHaveBeenCalledTimes(2);
+    expect(sendHostedLinqChatMessage.mock.calls.map(([sendInput]) => sendInput.chatId))
+      .toEqual(["chat_private_member", "chat_private_member"]);
     const providerKeys = sendHostedLinqChatMessage.mock.calls.map(
       ([sendInput]) => sendInput.idempotencyKey,
     );
@@ -1163,15 +1207,9 @@ describe("Linq group-chat visible access recovery", () => {
     }));
   });
 
-  it("preserves webhook retry ownership for a retryable private-route failure", async () => {
+  it.each(PRIVATE_RECOVERY_FAILURES)("propagates $label without a room fallback", async ({ error }) => {
     const event = buildGroupLinqEvent("evt_retryable_private_route");
-    const retryableError = hostedOnboardingError({
-      code: "LINQ_SEND_FAILED",
-      httpStatus: 502,
-      message: "Linq outbound reply failed with HTTP 503.",
-      retryable: true,
-    });
-    const sendHostedLinqChatMessage = vi.fn().mockRejectedValue(retryableError);
+    const sendHostedLinqChatMessage = vi.fn().mockRejectedValue(error);
     const readHostedMemberRoutingState = vi.fn()
       .mockResolvedValueOnce({
         linqChatId: "chat_private_member",
@@ -1209,7 +1247,7 @@ describe("Linq group-chat visible access recovery", () => {
       rawBody: JSON.stringify(event),
       signature: "signature",
       timestamp: "timestamp",
-    })).rejects.toBe(retryableError);
+    })).rejects.toBe(error);
 
     expect(sendHostedLinqChatMessage).toHaveBeenCalledOnce();
     expect(sendHostedLinqChatMessage).toHaveBeenCalledWith(expect.objectContaining({
@@ -1219,13 +1257,74 @@ describe("Linq group-chat visible access recovery", () => {
     }));
   });
 
-  it("falls back to the neutral group reply after a definite private-route rejection", async () => {
+  it.each([
+    ...[400, 404, 410, 415, 422].map((status) => ({
+      label: `HTTP ${status}`,
+      error: hostedOnboardingError({
+        code: "LINQ_SEND_FAILED",
+        details: { status },
+        httpStatus: 502,
+        message: "Synthetic roster rejection.",
+        retryable: false,
+      }),
+      gone: status === 404 || status === 410,
+    })),
+    ...PRIVATE_RECOVERY_FAILURES.map((failure) => ({ ...failure, gone: false })),
+  ])("treats only a missing roster as not attested: $label", async ({ error, gone }) => {
+    const event = buildGroupLinqEvent("evt_private_roster_failure");
+    const sendHostedLinqChatMessage = vi.fn().mockResolvedValue({
+      chatId: "chat_group_visible",
+      messageId: "msg_group_fallback",
+    });
+    const getHostedLinqChatSummary = vi.fn().mockRejectedValue(error);
+    const resolveHostedRecognizedInboundAccess = vi.fn();
+    const dependencies = buildLinqDependencies({
+      event,
+      getHostedLinqChatSummary,
+      readHostedMemberRoutingState: vi.fn(async () => ({
+        linqChatId: "chat_private_member",
+        linqRecipientPhone: "+15550000000",
+      }) as never),
+      resolveHostedRecognizedInboundAccess,
+      sendHostedLinqChatMessage,
+    });
+    const handler: HostedOnboardingLinqWebhookHandler = async () => ({
+      ignored: true,
+      ok: true,
+      reason: "group-chat",
+    });
+    const result = withHostedVisibleSecondaryLinqOutcomes(handler, dependencies)({
+      rawBody: JSON.stringify(event),
+      signature: "signature",
+      timestamp: "timestamp",
+    });
+
+    if (gone) {
+      await expect(result).resolves.toMatchObject({
+        ignored: false,
+        reason: "visible-secondary-reply:group-chat",
+      });
+      expect(sendHostedLinqChatMessage).toHaveBeenCalledOnce();
+      expect(sendHostedLinqChatMessage).toHaveBeenCalledWith(expect.objectContaining({
+        chatId: "chat_group_visible",
+        idempotencyKey: "visible-secondary:evt_private_roster_failure",
+      }));
+    } else {
+      await expect(result).rejects.toBe(error);
+      expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    }
+    expect(getHostedLinqChatSummary).toHaveBeenCalledOnce();
+    expect(resolveHostedRecognizedInboundAccess).not.toHaveBeenCalled();
+  });
+
+  it.each([400, 404, 410, 415, 422])("falls back to the neutral group reply after HTTP %i", async (status) => {
     const event = buildGroupLinqEvent("evt_stale_private_route");
     const sendHostedLinqChatMessage = vi.fn()
       .mockRejectedValueOnce(hostedOnboardingError({
         code: "LINQ_SEND_FAILED",
         httpStatus: 502,
-        message: "Linq outbound reply failed with HTTP 404.",
+        message: `Linq outbound reply failed with HTTP ${status}.`,
+        details: { status },
         retryable: false,
       }))
       .mockResolvedValueOnce({
