@@ -36,6 +36,7 @@
     "node": ">=24.22.1"
   },
   "dependencies": {
+    "@murphai/contracts": "workspace:*",
     "@murphai/device-syncd": "workspace:*",
     "@murphai/hosted-execution": "workspace:*",
     "@murphai/runtime-state": "workspace:*"

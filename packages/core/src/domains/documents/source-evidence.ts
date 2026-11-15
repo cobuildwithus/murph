@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { listAuditShardPaths } from "../../audit-storage.ts";
 import type {
   AuditRecord,
@@ -134,10 +135,10 @@ function normalizeInboxDocumentDefaultPromotionCorrelation(
   const eventId = assertContractId(input.eventId, ID_PREFIXES.event, "eventId");
   const { attachmentId, captureId } = input;
   if (captureId.length > 255 || !INBOX_CAPTURE_ID_REGEX.test(captureId)) {
-    throw new TypeError("captureId must be a bounded inbox capture ID");
+    throw new ContractValidationError("captureId must be a bounded inbox capture ID");
   }
   if (attachmentId.length > 255 || !INBOX_ATTACHMENT_ID_REGEX.test(attachmentId)) {
-    throw new TypeError("attachmentId must be a bounded inbox attachment ID");
+    throw new ContractValidationError("attachmentId must be a bounded inbox attachment ID");
   }
   return { attachmentId, captureId, documentId, eventId };
 }
@@ -260,7 +261,7 @@ export async function inspectInboxDocumentDefaultPromotion({
     correlation.eventId,
   ];
   if (new Set(targetIds).size !== targetIds.length) {
-    throw new TypeError("Inbox document promotion correlation targets must be distinct");
+    throw new ContractValidationError("Inbox document promotion correlation targets must be distinct");
   }
   const existingCorrelations = auditRecords
     .map(parseInboxDocumentDefaultPromotionAuditRecord)
@@ -332,7 +333,7 @@ async function inspectExactSourceAuditEvidence(input: {
       let eventId: string;
       try {
         if (targetIds.length !== 3 || targetIds[0] !== targetId) {
-          throw new TypeError("source receipt audit must retain exactly one owner");
+          throw new ContractValidationError("source receipt audit must retain exactly one owner");
         }
         documentId = assertContractId(targetIds[1], ID_PREFIXES.document, "documentId");
         eventId = assertContractId(targetIds[2], ID_PREFIXES.event, "eventId");

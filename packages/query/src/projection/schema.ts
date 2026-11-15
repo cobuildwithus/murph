@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { existsSync, renameSync, rmSync } from "node:fs";
 import path from "node:path";
 
@@ -57,7 +58,7 @@ interface QueryProjectionCountRow {
 
 export function expectString(value: unknown, field: string): string {
   if (typeof value !== "string") {
-    throw new TypeError(`Expected ${field} to be a string.`);
+    throw new ContractValidationError(`Expected ${field} to be a string.`);
   }
   return value;
 }
@@ -71,7 +72,7 @@ export function expectNullableString(value: unknown, field: string): string | nu
 
 export function expectNumber(value: unknown, field: string): number {
   if (typeof value !== "number") {
-    throw new TypeError(`Expected ${field} to be a number.`);
+    throw new ContractValidationError(`Expected ${field} to be a number.`);
   }
   return value;
 }
@@ -83,7 +84,7 @@ export function expectEnumString<TValue extends string>(
 ): TValue {
   const parsed = expectString(value, field);
   if (!allowedValues.includes(parsed as TValue)) {
-    throw new TypeError(`Expected ${field} to be one of: ${allowedValues.join(", ")}.`);
+    throw new ContractValidationError(`Expected ${field} to be one of: ${allowedValues.join(", ")}.`);
   }
   return parsed as TValue;
 }

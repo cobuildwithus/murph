@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { matchCloudflareHostedControlUserRoutePath } from "@murphai/cloudflare-hosted-control/routes";
 import { createHostedMediaStore } from "../../bundle-store.ts";
 import { json, jsonError, readRequestBodyText } from "../../json.ts";
@@ -53,12 +54,12 @@ export const mealThumbnailRoutes: readonly DeclarativeRoute<WorkerRouteContext>[
 }];
 
 function parsePhotos(value: unknown): Array<{ mediaId: string; sha256: string; byteSize: number }> {
-  if (!value || typeof value !== "object" || !("photos" in value) || !Array.isArray(value.photos) || value.photos.length > 5000) throw new TypeError("Invalid photos.");
+  if (!value || typeof value !== "object" || !("photos" in value) || !Array.isArray(value.photos) || value.photos.length > 5000) throw new ContractValidationError("Invalid photos.");
   return value.photos.map((item: unknown) => {
     if (!item || typeof item !== "object" || !("mediaId" in item) || !("sha256" in item) || !("byteSize" in item)
       || typeof item.mediaId !== "string" || !/^[a-f0-9]{64}$/u.test(item.mediaId)
       || typeof item.sha256 !== "string" || !/^[a-f0-9]{64}$/u.test(item.sha256)
-      || typeof item.byteSize !== "number" || !Number.isSafeInteger(item.byteSize) || item.byteSize < 1 || item.byteSize > 1024 * 1024) throw new TypeError("Invalid photo.");
+      || typeof item.byteSize !== "number" || !Number.isSafeInteger(item.byteSize) || item.byteSize < 1 || item.byteSize > 1024 * 1024) throw new ContractValidationError("Invalid photo.");
     return { mediaId: item.mediaId, sha256: item.sha256, byteSize: item.byteSize };
   });
 }

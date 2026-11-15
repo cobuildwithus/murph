@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
@@ -220,7 +221,7 @@ function requireClaimId(value: unknown): string {
 function toUnixSeconds(value: Date): number {
   const timestamp = value.getTime();
   if (!Number.isFinite(timestamp)) {
-    throw new TypeError("Murph contact-card handoff time is invalid.");
+    throw new ContractValidationError("Murph contact-card handoff time is invalid.");
   }
 
   return Math.floor(timestamp / 1_000);

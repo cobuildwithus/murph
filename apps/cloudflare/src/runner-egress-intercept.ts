@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { parseHostedRuntimeUsageRecordResponse } from "@murphai/hosted-execution/parsers";
 import { HOSTED_RUNTIME_DATA_API_PATHS } from "@murphai/hosted-execution/routes";
 import { readNativeRuntimeProviderAuthority, readNativeRuntimeProviderContainer, type RuntimeProviderCaller } from "./runtime-provider-authorization.ts";
@@ -979,7 +980,7 @@ function readHostedTranscribeResponsePayload(
   output: unknown,
 ): HostedTranscribeResponsePayload {
   if (!output || typeof output !== "object" || Array.isArray(output)) {
-    throw new TypeError("Workers AI transcription output must be an object.");
+    throw new ContractValidationError("Workers AI transcription output must be an object.");
   }
 
   const record = output as Record<string, unknown>;

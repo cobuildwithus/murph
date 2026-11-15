@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 export const HOSTED_EMAIL_THREAD_TARGET_SCHEMA = "murph.hosted-email-thread-target.v1";
 export const HOSTED_EMAIL_THREAD_TARGET_PREFIX = "hostedmail:";
 export const HOSTED_EMAIL_THREAD_TARGET_MAX_LENGTH = 8_192;
@@ -189,7 +190,7 @@ function readHostedEmailThreadTargetList(value: unknown): string[] | null | unde
     return null;
   }
   if (!Array.isArray(value)) {
-    throw new TypeError("Hosted email thread target lists must be arrays.");
+    throw new ContractValidationError("Hosted email thread target lists must be arrays.");
   }
 
   return value.filter((entry): entry is string => typeof entry === "string");

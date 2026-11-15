@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { activeHostedPersonAccessSql } from "../../hosted-onboarding/member-access-projections";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
@@ -811,10 +812,10 @@ export class PrismaHostedConnectionStore {
     const provider = normalizeNullableString(input.provider);
     const userId = normalizeNullableString(input.userId);
     if (!provider || !userId) {
-      throw new TypeError("Hosted device-sync member connection status query requires member and provider ids.");
+      throw new ContractValidationError("Hosted device-sync member connection status query requires member and provider ids.");
     }
     if (!Number.isSafeInteger(input.limit) || input.limit < 1) {
-      throw new TypeError("Hosted device-sync member connection status query requires a positive safe limit.");
+      throw new ContractValidationError("Hosted device-sync member connection status query requires a positive safe limit.");
     }
 
     const records = await this.prisma.deviceConnection.findMany({

@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   assertHostedRuntimeProcessingTimeoutMs,
   DEFAULT_HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS,
@@ -124,7 +125,7 @@ export function readHostedRuntimeEnsureProcessingTimeouts(
     || ensureRuntimeProcessingStartToCloseTimeoutMs
       > MAX_HOSTED_RUNTIME_PROCESSING_START_TO_CLOSE_TIMEOUT_MS
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS plus Temporal reporting slack must be less than or equal to 3600000.",
     );
   }
@@ -200,12 +201,12 @@ function readTemporalTlsConfig(
     || serverNameOverride !== null;
 
   if (tlsEnabled === false && (hasApiKey || hasTlsMaterial)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${readTemporalTlsEnabledKey(source)} cannot be false when Temporal credentials or TLS material are configured.`,
     );
   }
   if ((clientCert === null) !== (clientKey === null)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "TEMPORAL_CLIENT_CERT and TEMPORAL_CLIENT_KEY must be configured together.",
     );
   }
@@ -252,7 +253,7 @@ function readOptionalBooleanEnv(
   if (["0", "false", "no"].includes(normalized)) {
     return false;
   }
-  throw new TypeError(`${entry.key} must be true or false.`);
+  throw new ContractValidationError(`${entry.key} must be true or false.`);
 }
 
 function readOptionalPemBuffer(input: {
@@ -266,7 +267,7 @@ function readOptionalPemBuffer(input: {
   const hostedPem = readOptionalEnv(input.source, input.hostedPemKey);
   const hostedBase64 = readOptionalEnv(input.source, input.hostedBase64Key);
   if (hostedPem !== null && hostedBase64 !== null) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${input.label}_PEM and ${input.label}_BASE64 are mutually exclusive.`,
     );
   }
@@ -280,7 +281,7 @@ function readOptionalPemBuffer(input: {
   const legacyPem = readOptionalEnv(input.source, input.legacyPemKey);
   const legacyBase64 = readOptionalEnv(input.source, input.legacyBase64Key);
   if (legacyPem !== null && legacyBase64 !== null) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${input.label}_PEM and ${input.label}_BASE64 are mutually exclusive.`,
     );
   }
@@ -302,11 +303,11 @@ function parsePositiveInteger(
     return fallback;
   }
   if (!/^[0-9]+$/u.test(value)) {
-    throw new TypeError(`${label} must be a positive integer.`);
+    throw new ContractValidationError(`${label} must be a positive integer.`);
   }
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed) || parsed <= 0) {
-    throw new TypeError(`${label} must be a positive integer.`);
+    throw new ContractValidationError(`${label} must be a positive integer.`);
   }
   return parsed;
 }
@@ -319,7 +320,7 @@ function parseBoundedPositiveInteger(
 ): number {
   const parsed = parsePositiveInteger(value, fallback, label);
   if (parsed > max) {
-    throw new TypeError(`${label} must be less than or equal to ${max}.`);
+    throw new ContractValidationError(`${label} must be less than or equal to ${max}.`);
   }
   return parsed;
 }

@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { parseHostedSecureBoxEnvelope } from "@murphai/runtime-state";
 
 import type { R2BucketLike } from "./bundle-store.ts";
@@ -68,11 +69,11 @@ export function requireHostedGameMediaEnvelope(value: string): string {
   try {
     parsed = JSON.parse(value);
   } catch {
-    throw new TypeError("Hosted game media must be a sealed envelope.");
+    throw new ContractValidationError("Hosted game media must be a sealed envelope.");
   }
   const envelope = parseHostedSecureBoxEnvelope(parsed, "Hosted game media envelope");
   if (envelope.lane !== GAME_MEDIA_LANE || envelope.scope !== GAME_MEDIA_SCOPE) {
-    throw new TypeError("Hosted game media must be sealed for the weekly game.");
+    throw new ContractValidationError("Hosted game media must be sealed for the weekly game.");
   }
   return JSON.stringify(envelope);
 }

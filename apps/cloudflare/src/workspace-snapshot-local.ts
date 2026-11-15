@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { spawn } from "node:child_process";
 import { createCipheriv, createDecipheriv, createHash, type DecipherGCM, type Hash } from "node:crypto";
 import { createReadStream, createWriteStream, type Stats } from "node:fs";
@@ -929,7 +930,7 @@ function assertHostedWorkspaceSnapshotRelativePathSafe(
 function decodeHostedWorkspaceSnapshotIv(value: string): Buffer {
   const iv = Buffer.from(value, "base64url");
   if (iv.byteLength !== 12) {
-    throw new TypeError("Hosted workspace snapshot ivBase64 must decode to 12 bytes.");
+    throw new ContractValidationError("Hosted workspace snapshot ivBase64 must decode to 12 bytes.");
   }
   return iv;
 }

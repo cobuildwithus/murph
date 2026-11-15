@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   assistantResponseCardMatchesConversationAudience,
   assistantResponseCardSchema,
@@ -553,7 +554,7 @@ export function sameHostedAssistantDeliveryFailure(
 
 function requireObject(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object.`);
+    throw new ContractValidationError(`${label} must be an object.`);
   }
 
   return value as Record<string, unknown>;
@@ -561,7 +562,7 @@ function requireObject(value: unknown, label: string): Record<string, unknown> {
 
 function requireString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.length === 0) {
-    throw new TypeError(`${label} must be a non-empty string.`);
+    throw new ContractValidationError(`${label} must be a non-empty string.`);
   }
 
   return value;
@@ -569,7 +570,7 @@ function requireString(value: unknown, label: string): string {
 
 function requireStringValue(value: unknown, label: string): string {
   if (typeof value !== "string") {
-    throw new TypeError(`${label} must be a string.`);
+    throw new ContractValidationError(`${label} must be a string.`);
   }
 
   return value;
@@ -581,10 +582,10 @@ function requireHttpsUrl(value: unknown, label: string): string {
   try {
     parsed = new URL(url);
   } catch {
-    throw new TypeError(`${label} must be a valid HTTPS URL.`);
+    throw new ContractValidationError(`${label} must be a valid HTTPS URL.`);
   }
   if (parsed.protocol !== "https:") {
-    throw new TypeError(`${label} must use HTTPS.`);
+    throw new ContractValidationError(`${label} must use HTTPS.`);
   }
 
   return parsed.toString();
@@ -599,7 +600,7 @@ function requireHostedAssistantDeliveryEffectId(
 
 function requireNonNegativeInteger(value: unknown, label: string): number {
   if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
-    throw new TypeError(`${label} must be a non-negative integer.`);
+    throw new ContractValidationError(`${label} must be a non-negative integer.`);
   }
 
   return value;
@@ -616,7 +617,7 @@ function requirePositiveIntegerAtMost(
     value < 1 ||
     value > max
   ) {
-    throw new TypeError(`${label} must be a positive integer no larger than ${max}.`);
+    throw new ContractValidationError(`${label} must be a positive integer no larger than ${max}.`);
   }
 
   return value;
@@ -632,7 +633,7 @@ function requireHostedAssistantDeliveryKind(
     return kind;
   }
 
-  throw new TypeError(`Unsupported hosted assistant delivery kind: ${kind}`);
+  throw new ContractValidationError(`Unsupported hosted assistant delivery kind: ${kind}`);
 }
 
 function requireHostedAssistantDeliveryRecordState(
@@ -645,7 +646,7 @@ function requireHostedAssistantDeliveryRecordState(
     return state;
   }
 
-  throw new TypeError(`Unsupported hosted assistant delivery record state: ${state}`);
+  throw new ContractValidationError(`Unsupported hosted assistant delivery record state: ${state}`);
 }
 
 function parseHostedAssistantDeliveryPhase(
@@ -658,7 +659,7 @@ function parseHostedAssistantDeliveryPhase(
     return phase as HostedAssistantDeliveryPhase;
   }
 
-  throw new TypeError(`Unsupported hosted assistant delivery phase: ${phase}`);
+  throw new ContractValidationError(`Unsupported hosted assistant delivery phase: ${phase}`);
 }
 
 export function isHostedAssistantDeliveryKind(
@@ -687,7 +688,7 @@ function parseHostedAssistantDeliveryPayload(
     `${label}.media`,
   );
   if (card !== null && media.length > 0) {
-    throw new TypeError(`${label} cannot combine card and media.`);
+    throw new ContractValidationError(`${label} cannot combine card and media.`);
   }
   const threadIsDirect = requireNullableBoolean(
     record.threadIsDirect ?? null,
@@ -703,7 +704,7 @@ function parseHostedAssistantDeliveryPayload(
       channel,
       threadIsDirect,
     })) {
-      throw new TypeError(
+      throw new ContractValidationError(
         `${label}.card requires an authenticated Linq group conversation.`,
       );
     }
@@ -712,10 +713,10 @@ function parseHostedAssistantDeliveryPayload(
     channel,
     threadIsDirect,
   })) {
-    throw new TypeError(`${label}.card requires a private direct conversation.`);
+    throw new ContractValidationError(`${label}.card requires a private direct conversation.`);
   }
   if (record.newsletterAuthorizationProof !== undefined) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label}.newsletterAuthorizationProof belongs to a retired runner wire contract.`,
     );
   }
@@ -793,7 +794,7 @@ function parseHostedAssistantResponseCard(
   }
   const parsed = assistantResponseCardSchema.safeParse(value);
   if (!parsed.success) {
-    throw new TypeError(`${label} must be a valid assistant response card.`);
+    throw new ContractValidationError(`${label} must be a valid assistant response card.`);
   }
   return parsed.data;
 }
@@ -807,7 +808,7 @@ function requireNullableGroupEmailAuthorizationProof(
   }
   const proof = requireString(value, label);
   if (!/^[0-9a-f]{64}$/u.test(proof)) {
-    throw new TypeError(`${label} must be a SHA-256 hex digest.`);
+    throw new ContractValidationError(`${label} must be a SHA-256 hex digest.`);
   }
   return proof;
 }
@@ -817,10 +818,10 @@ function parseHostedAssistantDeliveryAnsweredMailboxItemIds(
   label: string,
 ): string[] {
   if (!Array.isArray(value)) {
-    throw new TypeError(`${label} must be an array.`);
+    throw new ContractValidationError(`${label} must be an array.`);
   }
   if (value.length > HOSTED_ASSISTANT_DELIVERY_ANSWERED_MAILBOX_ITEM_ID_LIMIT) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} must contain at most ${HOSTED_ASSISTANT_DELIVERY_ANSWERED_MAILBOX_ITEM_ID_LIMIT} entries.`,
     );
   }
@@ -828,7 +829,7 @@ function parseHostedAssistantDeliveryAnsweredMailboxItemIds(
   return value.map((entry, index) => {
     const itemId = requireString(entry, `${label}[${index}]`).trim();
     if (!itemId) {
-      throw new TypeError(`${label}[${index}] must be a non-empty string.`);
+      throw new ContractValidationError(`${label}[${index}] must be a non-empty string.`);
     }
     return itemId;
   });
@@ -839,11 +840,11 @@ function parseHostedAssistantDeliveryMediaList(
   label: string,
 ): HostedAssistantDeliveryMedia[] {
   if (!Array.isArray(value)) {
-    throw new TypeError(`${label} must be an array.`);
+    throw new ContractValidationError(`${label} must be an array.`);
   }
 
   if (value.length > 40) {
-    throw new TypeError(`${label} must contain at most 40 entries.`);
+    throw new ContractValidationError(`${label} must contain at most 40 entries.`);
   }
 
   return value.map((entry, index) =>
@@ -875,7 +876,7 @@ function parseHostedAssistantDeliveryMedia(
     return parseHostedAssistantDeliveryVaultFileMedia(record, label);
   }
 
-  throw new TypeError(
+  throw new ContractValidationError(
     `${label}.kind must be image, vault_image, voice_memo, or vault_file.`,
   );
 }
@@ -894,11 +895,11 @@ function parseHostedAssistantDeliveryVaultImageMedia(
   );
   const ref = requireBoundedTrimmedString(record.ref, `${label}.ref`, 1_024);
   if (!isNormalizedAssistantVaultFileRef(ref)) {
-    throw new TypeError(`${label}.ref must be a normalized supported vault-relative path.`);
+    throw new ContractValidationError(`${label}.ref must be a normalized supported vault-relative path.`);
   }
   const sha256 = requireString(record.sha256, `${label}.sha256`);
   if (!/^[0-9a-f]{64}$/u.test(sha256)) {
-    throw new TypeError(`${label}.sha256 must be a lowercase SHA-256 hex digest.`);
+    throw new ContractValidationError(`${label}.sha256 must be a lowercase SHA-256 hex digest.`);
   }
   const contentType = requireString(record.contentType, `${label}.contentType`);
   if (
@@ -906,7 +907,7 @@ function parseHostedAssistantDeliveryVaultImageMedia(
     contentType !== "image/png" &&
     contentType !== "image/webp"
   ) {
-    throw new TypeError(`${label}.contentType must be a supported image MIME type.`);
+    throw new ContractValidationError(`${label}.contentType must be a supported image MIME type.`);
   }
   const filename = requireBoundedTrimmedString(
     record.filename,
@@ -914,7 +915,7 @@ function parseHostedAssistantDeliveryVaultImageMedia(
     255,
   );
   if (/[\\/\u0000-\u001F\u007F]/u.test(filename)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label}.filename must not contain path separators or control characters.`,
     );
   }
@@ -963,17 +964,17 @@ function parseHostedAssistantDeliveryVaultFileMedia(
     `${label}.approvalId`,
   );
   if ((approvalGeneration === null) !== (approvalId === null)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label}.approvalId and ${label}.approvalGeneration must be present together.`,
     );
   }
   const ref = requireBoundedTrimmedString(record.ref, `${label}.ref`, 1_024);
   if (!isNormalizedAssistantVaultFileRef(ref)) {
-    throw new TypeError(`${label}.ref must be a normalized supported vault-relative path.`);
+    throw new ContractValidationError(`${label}.ref must be a normalized supported vault-relative path.`);
   }
   const sha256 = requireString(record.sha256, `${label}.sha256`);
   if (!/^[0-9a-f]{64}$/u.test(sha256)) {
-    throw new TypeError(`${label}.sha256 must be a lowercase SHA-256 hex digest.`);
+    throw new ContractValidationError(`${label}.sha256 must be a lowercase SHA-256 hex digest.`);
   }
   const contentType = requireBoundedTrimmedString(
     record.contentType,
@@ -981,7 +982,7 @@ function parseHostedAssistantDeliveryVaultFileMedia(
     200,
   );
   if (!/^[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*\/[A-Za-z0-9][A-Za-z0-9!#$&^_.+-]*$/u.test(contentType)) {
-    throw new TypeError(`${label}.contentType must be a MIME type.`);
+    throw new ContractValidationError(`${label}.contentType must be a MIME type.`);
   }
   const filename = requireBoundedTrimmedString(
     record.filename,
@@ -989,7 +990,7 @@ function parseHostedAssistantDeliveryVaultFileMedia(
     255,
   );
   if (/[\\/\u0000-\u001F\u007F]/u.test(filename)) {
-    throw new TypeError(`${label}.filename must not contain path separators or control characters.`);
+    throw new ContractValidationError(`${label}.filename must not contain path separators or control characters.`);
   }
   return {
     approvalGeneration,
@@ -1016,7 +1017,7 @@ function requireNullableHostedActionApprovalId(
   }
   const approvalId = requireString(value, label);
   if (!/^haa_[A-Za-z0-9_-]{32}$/u.test(approvalId)) {
-    throw new TypeError(`${label} must be a hosted action approval id.`);
+    throw new ContractValidationError(`${label} must be a hosted action approval id.`);
   }
   return approvalId;
 }
@@ -1027,7 +1028,7 @@ function requireNullableSha256Hex(value: unknown, label: string): string | null 
   }
   const hash = requireString(value, label);
   if (!/^[0-9a-f]{64}$/u.test(hash)) {
-    throw new TypeError(`${label} must be a lowercase SHA-256 hex digest.`);
+    throw new ContractValidationError(`${label} must be a lowercase SHA-256 hex digest.`);
   }
   return hash;
 }
@@ -1090,7 +1091,7 @@ function parseHostedAssistantDeliveryVoiceMemoTransport(
     };
   }
 
-  throw new TypeError(`${label}.kind must be linq_attachment or telegram_generation.`);
+  throw new ContractValidationError(`${label}.kind must be linq_attachment or telegram_generation.`);
 }
 
 function parseHostedAssistantDeliveryVoiceMemoGeneration(
@@ -1106,7 +1107,7 @@ function parseHostedAssistantDeliveryVoiceMemoGeneration(
       label,
     );
     if (record.outputFormat !== "mp3_44100_128") {
-      throw new TypeError(`${label}.outputFormat must be mp3_44100_128.`);
+      throw new ContractValidationError(`${label}.outputFormat must be mp3_44100_128.`);
     }
     return {
       kind,
@@ -1132,10 +1133,10 @@ function parseHostedAssistantDeliveryVoiceMemoGeneration(
       label,
     );
     if (record.modelId !== "music_v2") {
-      throw new TypeError(`${label}.modelId must be music_v2.`);
+      throw new ContractValidationError(`${label}.modelId must be music_v2.`);
     }
     if (record.outputFormat !== "mp3_48000_192") {
-      throw new TypeError(`${label}.outputFormat must be mp3_48000_192.`);
+      throw new ContractValidationError(`${label}.outputFormat must be mp3_48000_192.`);
     }
     return {
       durationMs: requireIntegerInRange(
@@ -1155,7 +1156,7 @@ function parseHostedAssistantDeliveryVoiceMemoGeneration(
     };
   }
 
-  throw new TypeError(`${label}.kind must be elevenlabs_speech or elevenlabs_music.`);
+  throw new ContractValidationError(`${label}.kind must be elevenlabs_speech or elevenlabs_music.`);
 }
 
 function requireExactObjectKeys(
@@ -1178,7 +1179,7 @@ function requireExactObjectKeys(
   if (unknown.length > 0) {
     parts.push(`unsupported fields: ${unknown.join(", ")}`);
   }
-  throw new TypeError(`${label} has ${parts.join("; ")}.`);
+  throw new ContractValidationError(`${label} has ${parts.join("; ")}.`);
 }
 
 function requireBoundedTrimmedString(
@@ -1188,7 +1189,7 @@ function requireBoundedTrimmedString(
 ): string {
   const normalized = requireString(value, label).trim();
   if (!normalized || normalized.length > maxLength) {
-    throw new TypeError(`${label} must contain 1 to ${maxLength} characters.`);
+    throw new ContractValidationError(`${label} must contain 1 to ${maxLength} characters.`);
   }
   return normalized;
 }
@@ -1200,7 +1201,7 @@ function requireIntegerInRange(
   maximum: number,
 ): number {
   if (!Number.isSafeInteger(value) || (value as number) < minimum || (value as number) > maximum) {
-    throw new TypeError(`${label} must be an integer from ${minimum} to ${maximum}.`);
+    throw new ContractValidationError(`${label} must be an integer from ${minimum} to ${maximum}.`);
   }
   return value as number;
 }
@@ -1315,7 +1316,7 @@ function requireHostedAssistantReactionChannel(
 ): "linq" | "telegram" {
   const channel = requireString(value, label);
   if (channel !== "telegram" && channel !== "linq") {
-    throw new TypeError(`${label} must be linq or telegram for reactions.`);
+    throw new ContractValidationError(`${label} must be linq or telegram for reactions.`);
   }
 
   return channel;
@@ -1351,7 +1352,7 @@ function requireNullableNonNegativeInteger(value: unknown, label: string): numbe
 
 function requireBoolean(value: unknown, label: string): boolean {
   if (typeof value !== "boolean") {
-    throw new TypeError(`${label} must be a boolean.`);
+    throw new ContractValidationError(`${label} must be a boolean.`);
   }
 
   return value;
@@ -1359,7 +1360,7 @@ function requireBoolean(value: unknown, label: string): boolean {
 
 function requireTrue(value: unknown, label: string): true {
   if (value !== true) {
-    throw new TypeError(`${label} must be true when present.`);
+    throw new ContractValidationError(`${label} must be true when present.`);
   }
 
   return true;
@@ -1383,7 +1384,7 @@ function requireHostedAssistantBindingDeliveryKind(
     return bindingKind as HostedAssistantBindingDeliveryKind;
   }
 
-  throw new TypeError(
+  throw new ContractValidationError(
     `Unsupported hosted assistant binding delivery kind: ${bindingKind}`,
   );
 }
@@ -1409,7 +1410,7 @@ function requireHostedAssistantDeliveryTargetKind(
     return targetKind as HostedAssistantDeliveryTargetKind;
   }
 
-  throw new TypeError(
+  throw new ContractValidationError(
     `Unsupported hosted assistant delivery target kind: ${targetKind}`,
   );
 }
@@ -1423,7 +1424,7 @@ function requireHostedAssistantMessageReaction(
     return reaction;
   }
 
-  throw new TypeError(`${label} is not a supported assistant reaction.`);
+  throw new ContractValidationError(`${label} is not a supported assistant reaction.`);
 }
 
 function requireNullableHostedAssistantDeliveryTargetKind(

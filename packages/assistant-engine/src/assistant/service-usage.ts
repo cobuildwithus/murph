@@ -1,3 +1,4 @@
+import { ContractValidationError } from '@murphai/contracts/validation-error'
 import {
   ASSISTANT_USAGE_SCHEMA,
   createAssistantUsageId,
@@ -174,7 +175,7 @@ function normalizeAssistantUsageOccurredAt(value: string | undefined): string {
   }
   const parsed = new Date(value)
   if (!Number.isFinite(parsed.getTime())) {
-    throw new TypeError('Assistant usage occurrence timestamp is invalid.')
+    throw new ContractValidationError('Assistant usage occurrence timestamp is invalid.')
   }
   return parsed.toISOString()
 }

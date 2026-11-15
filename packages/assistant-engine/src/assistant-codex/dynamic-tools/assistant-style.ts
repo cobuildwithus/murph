@@ -1,3 +1,4 @@
+import { ContractValidationError } from '@murphai/contracts/validation-error'
 import type { MurphDynamicToolExecutionResult } from '../dynamic-tools.js'
 import { toolTextResult as assistantStyleTextResult } from '../tool-failure-diagnostics.js'
 import * as z from '@murphai/contracts/zod-runtime'
@@ -172,7 +173,7 @@ export async function executeAssistantStyleDynamicTool(input: {
           : authority,
       )
       if (response.action !== HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION) {
-        throw new TypeError('Assistant style request returned the wrong response action.')
+        throw new ContractValidationError('Assistant style request returned the wrong response action.')
       }
       if (
         !haveSameKeys(personality, response.result.outcomes)

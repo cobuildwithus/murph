@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   type EffectiveProtocolSnapshot,
   type CommonsProtocolRef,
@@ -51,7 +52,7 @@ export function isProtocolEntity(entity: CanonicalEntity): boolean {
 
 export function summarizeProtocol(entity: CanonicalEntity): ProtocolSummary {
   if (!isProtocolEntity(entity)) {
-    throw new TypeError(`Expected protocol entity, received "${entity.family}".`);
+    throw new ContractValidationError(`Expected protocol entity, received "${entity.family}".`);
   }
   const frontmatter = readProtocolFrontmatter(entity.attributes);
 
@@ -105,7 +106,7 @@ export function readProtocolFrontmatter(
 ): ProtocolFrontmatter {
   const parsed = protocolFrontmatterSchema.safeParse(attributes);
   if (!parsed.success) {
-    throw new TypeError("Protocol frontmatter is invalid.");
+    throw new ContractValidationError("Protocol frontmatter is invalid.");
   }
   return parsed.data;
 }

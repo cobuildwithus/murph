@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { hostedWorkspaceSnapshotObjectKey } from "@murphai/hosted-execution/storage-paths";
 import { Prisma, type PrismaClient, type HostedRuntimeSnapshotUpload } from "@prisma/client";
 import { HOSTED_RUNTIME_ORPHAN_GRACE_MS, type HostedRuntimeSnapshotCommand, type HostedRuntimeSnapshotResponse } from "@murphai/hosted-execution/runtime-resources";
@@ -18,12 +19,12 @@ export async function executeHostedRuntimeSnapshotCommand(input: {
   const command = input.command;
   const supplied = command.operation === "snapshot_create" ? command.session
     : "expectedSession" in command ? command.expectedSession : null;
-  if (supplied && supplied.userId !== input.userId) throw new TypeError("Runtime snapshot member mismatch.");
+  if (supplied && supplied.userId !== input.userId) throw new ContractValidationError("Runtime snapshot member mismatch.");
   if (supplied && (supplied.encryption.aad.userId !== supplied.userId
     || supplied.encryption.aad.snapshotId !== supplied.snapshotId
-    || supplied.encryption.aad.objectKey !== supplied.objectKey)) throw new TypeError("Runtime snapshot encryption identity mismatch.");
+    || supplied.encryption.aad.objectKey !== supplied.objectKey)) throw new ContractValidationError("Runtime snapshot encryption identity mismatch.");
   if (supplied && supplied.objectKey !== await hostedWorkspaceSnapshotObjectKey({ userId: input.userId, snapshotId: supplied.snapshotId })) {
-    throw new TypeError("Runtime snapshot namespace mismatch.");
+    throw new ContractValidationError("Runtime snapshot namespace mismatch.");
   }
   const identity = supplied
     ? { attemptId: supplied.attemptId, generation: supplied.leaseGeneration, userId: input.userId }
@@ -83,7 +84,7 @@ async function createSnapshotSessionTx(tx: Prisma.TransactionClient, userId: str
     || !/^(0|[1-9][0-9]*)$/u.test(session.expectedWorkspaceVersion)
     || session.workspaceVersion !== session.expectedWorkspaceVersion
     || BigInt(session.workspaceVersion) > 9_223_372_036_854_775_807n) {
-    throw new TypeError("Runtime snapshot session version or expiry is invalid.");
+    throw new ContractValidationError("Runtime snapshot session version or expiry is invalid.");
   }
   if (current?.snapshotId === session.snapshotId) {
     return { cutover: "postgres", applied: sameSession(projectSession(current), session), session: projectSession(current) };

@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { publishPostgresRuntimePrivateMedia } from "../runtime-private-media.ts";
 import { json, jsonError, methodNotAllowed, readJsonObject, unauthorized } from "../json.ts";
 import {
@@ -94,13 +95,13 @@ export async function handleRunnerPrivateImageUrlPublishRequest(input: {
 function decodeBase64Image(value: string): Uint8Array {
   const normalized = value.trim();
   if (!/^[A-Za-z0-9+/]*={0,2}$/u.test(normalized) || normalized.length === 0) {
-    throw new TypeError("Private image bytes must be base64.");
+    throw new ContractValidationError("Private image bytes must be base64.");
   }
   let binary: string;
   try {
     binary = atob(normalized);
   } catch {
-    throw new TypeError("Private image bytes must be base64.");
+    throw new ContractValidationError("Private image bytes must be base64.");
   }
   const bytes = new Uint8Array(binary.length);
   for (let index = 0; index < binary.length; index += 1) {
@@ -120,7 +121,7 @@ function assertPrivateImageBytes(input: {
     throw new RangeError("Private image size is invalid.");
   }
   if (!privateImageBytesMatchContentType(input.bytes, input.contentType)) {
-    throw new TypeError("Private image content type is invalid.");
+    throw new ContractValidationError("Private image content type is invalid.");
   }
 }
 

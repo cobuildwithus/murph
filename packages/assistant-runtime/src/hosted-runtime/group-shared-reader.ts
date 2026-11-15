@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { setTimeout as delay } from "node:timers/promises";
 import { createHash } from "node:crypto";
 import { lstat } from "node:fs/promises";
@@ -688,7 +689,7 @@ function parseHostedGroupParticipantDisplayNameCacheState(
     || value.entries.length
       > HOSTED_GROUP_PARTICIPANT_DISPLAY_NAME_CACHE_MAX_ENTRIES
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted group participant display-name cache must contain bounded entries.",
     );
   }
@@ -697,7 +698,7 @@ function parseHostedGroupParticipantDisplayNameCacheState(
   const entries = value.entries.map((entry) => {
     const parsed = parseHostedGroupParticipantDisplayNameCacheEntry(entry);
     if (seenKeys.has(parsed.key)) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "Hosted group participant display-name cache keys must be unique.",
       );
     }
@@ -718,7 +719,7 @@ function parseHostedGroupParticipantDisplayNameCacheEntry(
     || !Number.isSafeInteger(value.expiresAtMs)
     || value.expiresAtMs <= 0
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted group participant display-name cache entry is invalid.",
     );
   }
@@ -758,7 +759,7 @@ function parseHostedGroupParticipantDisplayNameCacheEntry(
     };
   }
 
-  throw new TypeError(
+  throw new ContractValidationError(
     "Hosted group participant display-name cache entry kind is invalid.",
   );
 }

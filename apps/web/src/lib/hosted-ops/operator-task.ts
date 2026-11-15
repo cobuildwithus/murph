@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { sanitizeHostedProductFeedbackSummary } from "@murphai/hosted-execution/runtime-control";
 import "server-only";
 
@@ -337,7 +338,7 @@ export async function tryHandleHostedOperatorDiagnosticControl(input: {
     };
   }
   if (!input.request.result) {
-    throw new TypeError("Operator diagnostic completion requires a result.");
+    throw new ContractValidationError("Operator diagnostic completion requires a result.");
   }
   const resultEncrypted = await encryptOperatorTaskResult({
     memberId: task.memberId,

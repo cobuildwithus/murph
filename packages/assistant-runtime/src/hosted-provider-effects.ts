@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   sendLinqMessage,
   sendLinqVoiceMemoMessage,
@@ -284,7 +285,7 @@ export async function sendHostedProviderLinqChatAction(
     return;
   }
 
-  throw new TypeError("Hosted provider Linq chat action must be typing or typing_stop.");
+  throw new ContractValidationError("Hosted provider Linq chat action must be typing or typing_stop.");
 }
 
 export async function markHostedProviderLinqRead(
@@ -322,7 +323,7 @@ export async function deleteHostedProviderLinqMessages(
 
 function assertTypingAction(action: string): asserts action is "typing" {
   if (action !== "typing") {
-    throw new TypeError("Hosted provider chat action must be typing.");
+    throw new ContractValidationError("Hosted provider chat action must be typing.");
   }
 }
 

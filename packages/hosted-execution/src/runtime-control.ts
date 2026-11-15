@@ -3,6 +3,7 @@ export { GAME_MISSED_ROOM_MAX_GAMES, gameGroupMissedCheckInPolicySchema, type Ho
 export { gameEveningCheckInPolicySchema, gamePrivateEveningCheckInPolicySchema, gamePrivateKickoffPolicySchema,
   buildGamePrivateEveningInstructions, buildGamePrivateKickoffInstructions,
   type HostedGameEveningCheckInPolicy, type HostedGamePrivateEveningCheckInPolicy, type HostedGamePrivateKickoffPolicy } from "./game-group-missed.ts";
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type { HostedGameChatBootstrapRequest, HostedGameChatBootstrapResponse } from "./game-bootstrap-control.ts";
 export { hostedGameChatBootstrapRequestSchema, hostedGameChatBootstrapResponseSchema } from "./game-bootstrap-control.ts";
 export type { HostedGameChatBootstrapRequest, HostedGameChatBootstrapResponse, HostedGameChatBootstrapResult } from "./game-bootstrap-control.ts";
@@ -533,7 +534,7 @@ function requireHostedMailboxPayloadAadString(value: string, label: string): str
   const normalized = value.trim();
 
   if (!normalized) {
-    throw new TypeError(`Hosted mailbox payload AAD ${label} must be a non-empty string.`);
+    throw new ContractValidationError(`Hosted mailbox payload AAD ${label} must be a non-empty string.`);
   }
 
   return normalized;
@@ -2892,7 +2893,7 @@ export function mergeHostedRuntimeLatencyPhaseBreakdownJson(input: {
   phases: readonly HostedRuntimeLatencyPhaseBreakdownPhase[];
 }): HostedRuntimeLatencyPhaseBreakdownJsonMergeResult {
   if (!isHostedRuntimeLatencyPhaseBreakdownRecord(input.incoming)) {
-    throw new TypeError("Hosted runtime latency phaseBreakdown must be an object.");
+    throw new ContractValidationError("Hosted runtime latency phaseBreakdown must be an object.");
   }
   assertHostedRuntimeLatencyPhaseBreakdownLeavesSafe(input.incoming);
 
@@ -2940,7 +2941,7 @@ export function mergeHostedRuntimeLatencyPhaseBreakdownJson(input: {
         continue;
       }
       if (!isHostedRuntimeLatencyPhaseBreakdownLeafSafe(phase, leafKey, leaf)) {
-        throw new TypeError(
+        throw new ContractValidationError(
           `Hosted runtime latency phaseBreakdown ${phase}.${leafKey} must match the latency schema type.`,
         );
       }
@@ -3023,27 +3024,27 @@ function assertHostedRuntimeLatencyPhaseBreakdownLeavesSafe(
   for (const [key, entry] of Object.entries(value)) {
     if (key === "schemaVersion") {
       if (!isSafeHostedRuntimeLatencyPhaseBreakdownNumber(entry)) {
-        throw new TypeError("Hosted runtime latency phaseBreakdown schemaVersion must be a non-negative safe integer.");
+        throw new ContractValidationError("Hosted runtime latency phaseBreakdown schemaVersion must be a non-negative safe integer.");
       }
       continue;
     }
     if (!isHostedRuntimeLatencyPhaseBreakdownRecord(entry)) {
-      throw new TypeError(`Hosted runtime latency phaseBreakdown ${key} must be an object.`);
+      throw new ContractValidationError(`Hosted runtime latency phaseBreakdown ${key} must be an object.`);
     }
     if (!HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PHASE_KEY_SET.has(key)) {
-      throw new TypeError(`Hosted runtime latency phaseBreakdown ${key} is not allowed.`);
+      throw new ContractValidationError(`Hosted runtime latency phaseBreakdown ${key} is not allowed.`);
     }
 
     const phase = key as HostedRuntimeLatencyPhaseBreakdownPhase;
     const allowedLeafKeys = HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEY_SETS[phase];
     for (const [leafKey, leaf] of Object.entries(entry)) {
       if (!allowedLeafKeys.has(leafKey)) {
-        throw new TypeError(
+        throw new ContractValidationError(
           `Hosted runtime latency phaseBreakdown ${key}.${leafKey} is not allowed.`,
         );
       }
       if (!isHostedRuntimeLatencyPhaseBreakdownLeafSafe(phase, leafKey, leaf)) {
-        throw new TypeError(
+        throw new ContractValidationError(
           `Hosted runtime latency phaseBreakdown ${key}.${leafKey} must match the latency schema type.`,
         );
       }
@@ -3052,7 +3053,7 @@ function assertHostedRuntimeLatencyPhaseBreakdownLeavesSafe(
       key === "orchestration"
       && !isHostedRuntimeDirectEnsureOutcomeConsistent(entry)
     ) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "Hosted runtime latency phaseBreakdown orchestration direct ensure outcome is inconsistent.",
       );
     }
@@ -3672,7 +3673,7 @@ function readHostedRuntimeRetryableMailboxBlockedCount(value: unknown): bigint {
   if (typeof rawCount === "string" && /^[0-9]+$/u.test(rawCount)) {
     return BigInt(rawCount);
   }
-  throw new TypeError(
+  throw new ContractValidationError(
     "Hosted runtime retryable mailbox blocked count must be a non-negative integer.",
   );
 }

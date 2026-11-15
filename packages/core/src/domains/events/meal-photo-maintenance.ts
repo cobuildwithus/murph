@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -33,9 +34,9 @@ export interface MealPhotoMaintenanceResult {
 /** Bounded, idempotent backfill and retention under the canonical write owner. */
 export async function runMealPhotoMaintenance(input: MealPhotoMaintenanceInput): Promise<MealPhotoMaintenanceResult> {
   const now = input.now ?? new Date();
-  if (!Number.isFinite(now.getTime())) throw new TypeError("Meal photo maintenance requires a valid time.");
+  if (!Number.isFinite(now.getTime())) throw new ContractValidationError("Meal photo maintenance requires a valid time.");
   const limit = input.maxMeals ?? 10;
-  if (!Number.isInteger(limit) || limit < 0 || limit > 100) throw new TypeError("Meal photo batch must be between zero and 100.");
+  if (!Number.isInteger(limit) || limit < 0 || limit > 100) throw new ContractValidationError("Meal photo batch must be between zero and 100.");
   return withCanonicalWriteLock(input.vaultRoot, async () => {
     const result: MealPhotoMaintenanceResult = { thumbnailCount: 0, retiredPhotoCount: 0, blockedMealCount: 0, hasMore: false, nextEligibleAt: null };
     const meals = await latestMeals(input);

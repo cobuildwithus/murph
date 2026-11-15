@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { pairRecapShowCapability } from "./access";
 import "server-only";
 import { recordGameRecapWitnessTx } from "./recap-witness";
@@ -821,7 +822,7 @@ async function enqueueGameLifecycle(input: {
       : input.kind === "missed"
       ? (() => {
           const match = /^game-missed:[^:]+:([^:]+):(\d{4}-\d{2}-\d{2})$/u.exec(input.eventId);
-          if (!match) throw new TypeError("Invalid missed-game event authority.");
+          if (!match) throw new ContractValidationError("Invalid missed-game event authority.");
           return { kind: "game_missed_check_in" as const, gameId: input.gameId, eventId: input.eventId,
             memberId: match[1], firstMissedDate: match[2], pairFingerprint: gamePairLoreFingerprint(input.players) };
         })()

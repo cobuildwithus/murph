@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { buildHostedRuntimeReplicaBatchProtocolProbe, parseHostedRuntimeReplicaPutCommand } from "../runtime-resources.ts";
 import {
   HOSTED_RUNTIME_LOG_EVENT_CODES,
@@ -20,7 +21,7 @@ export function parseHostedExternalThreadRouteAuthorityResponse(
     || (assistantAskFallbackRequired !== undefined && typeof assistantAskFallbackRequired !== "boolean")
     || (threadIsDirect !== undefined && typeof threadIsDirect !== "boolean")
   ) {
-    throw new TypeError("Hosted external thread route authority response is invalid.");
+    throw new ContractValidationError("Hosted external thread route authority response is invalid.");
   }
   if (threadIsDirect === undefined && assistantAskFallbackRequired === undefined) return;
   return {

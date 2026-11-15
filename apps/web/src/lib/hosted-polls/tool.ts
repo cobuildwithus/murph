@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { requireHostedRuntimeCallbackTx, type HostedRuntimeIdentity } from "../hosted-execution/runtime-owner";
 import "server-only";
 import { createHash } from "node:crypto";
@@ -47,7 +48,7 @@ export async function handleHostedConversationPollTool(input: {
   const result = await readPollResult(row);
   if (!result) return { status: "unknown", polls: [] };
   if (action.action === "close") {
-    if (route.channel !== "telegram") throw new TypeError("iMessage does not support closing polls.");
+    if (route.channel !== "telegram") throw new ContractValidationError("iMessage does not support closing polls.");
     if (result.snapshot.closed) return { status: "closed", polls: [result.snapshot] };
     await authorizePollConversation(input);
     const closed = await callTelegramPoll({ action: "close", target: route.target, pollRef: row.id, messageId: result.messageId });
@@ -66,7 +67,7 @@ export async function handleHostedConversationPollTool(input: {
 async function voteInPoll(input: Parameters<typeof handleHostedConversationPollTool>[0], route: PollRoute, poll: { pollRef: string; question: string; messageId: string }): Promise<ConversationPollResponse> {
   const action = input.request.request;
   if (action.action !== "vote") throw new TypeError("Expected poll vote.");
-  if (route.channel !== "linq") throw new TypeError("Telegram bots cannot vote. State a pick in text without changing the tally.");
+  if (route.channel !== "linq") throw new ContractValidationError("Telegram bots cannot vote. State a pick in text without changing the tally.");
   const fresh = await callLinqPoll({ action: "read", chatId: route.target, ...poll });
   const optionId = fresh.optionIds[action.optionIndex];
   if (!optionId) throw new TypeError("Poll option is unavailable. Read the current poll before voting.");
@@ -79,7 +80,7 @@ async function voteInPoll(input: Parameters<typeof handleHostedConversationPollT
 async function createPoll(input: { memberId: string; runtimeIdentity: HostedRuntimeIdentity | null; request: ConversationPollRequest }, route: PollRoute): Promise<ConversationPollResponse> {
   const action = input.request.request;
   if (action.action !== "create") throw new TypeError("Expected poll creation.");
-  if (route.channel === "linq" && action.anonymous === true) throw new TypeError("iMessage polls cannot be anonymous.");
+  if (route.channel === "linq" && action.anonymous === true) throw new ContractValidationError("iMessage polls cannot be anonymous.");
   const prisma = getPrisma();
   // One logical creation per accepted input or scheduled occurrence, including retries.
   const identity = "assistantInputId" in input.request
@@ -89,7 +90,7 @@ async function createPoll(input: { memberId: string; runtimeIdentity: HostedRunt
   const definition = { schema: "murph.conversation-poll.v1" as const, target: route.target, question: action.question, options: action.options, anonymous: route.channel === "telegram" ? action.anonymous ?? true : false };
   const encrypted = await encryptPoll({ id, memberId: input.memberId }, "definition", definition);
   const conversationKey = createHostedExternalThreadIdentityLookupKey({ channel: route.channel, threadId: route.target });
-  if (!conversationKey) throw new TypeError("Invalid poll conversation.");
+  if (!conversationKey) throw new ContractValidationError("Invalid poll conversation.");
   const row = await prisma.$transaction(async (tx) => {
     await requireHostedRuntimeCallbackTx(tx, input.memberId, input.runtimeIdentity);
     await requireHostedRuntimeActiveAccessForUpdateTx(input.memberId, { prisma: tx });

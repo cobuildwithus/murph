@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT,
@@ -69,7 +70,7 @@ export async function fetchCompleteHostedDeviceSyncRuntimeSnapshot(input: {
       ? HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT
       : requestedPageLimit;
     if (page.connections.length > admittedPageLimit) {
-      throw new TypeError(
+      throw new ContractValidationError(
         isLegacyFirstPage
           ? `Hosted device-sync connection authority exceeds the ${HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_HYDRATION_LIMIT}-connection hydration bound.`
           : `Hosted device-sync snapshot page exceeds the ${HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PAGE_LIMIT}-connection page bound.`,

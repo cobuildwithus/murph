@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
 import {
@@ -149,7 +150,7 @@ function buildHostedLinqLineAccountLookup(
   for (const line of lines) {
     const recipientPhone = normalizePhoneNumber(line.phoneNumber);
     if (!recipientPhone) {
-      throw new TypeError("Hosted Linq planning load requires valid line phones.");
+      throw new ContractValidationError("Hosted Linq planning load requires valid line phones.");
     }
     recipientPhones.add(recipientPhone);
 

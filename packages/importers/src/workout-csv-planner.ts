@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createHash } from "node:crypto";
 
 import {
@@ -525,7 +526,7 @@ function canonicalSourceTimestampIdentity(
   if (!rawTimestamp) return undefined;
   const canonicalSourceTimestamp = normalizeWorkoutTimestamp(normalizedDate, normalizedTime, "UTC");
   if (!canonicalSourceTimestamp) {
-    throw new TypeError("Workout source timestamp cannot be normalized safely.");
+    throw new ContractValidationError("Workout source timestamp cannot be normalized safely.");
   }
   return `${sourceTimestampDomain(rawTimestamp)}:${canonicalSourceTimestamp}`;
 }
@@ -533,7 +534,7 @@ function canonicalSourceTimestampIdentity(
 function stableWorkoutSessionKey(rawDate: string | undefined, rawStartTime: string | undefined): string {
   const canonicalSourceTimestamp = canonicalSourceTimestampIdentity(rawDate, rawStartTime);
   if (!canonicalSourceTimestamp) {
-    throw new TypeError("Workout source timestamp cannot be normalized safely.");
+    throw new ContractValidationError("Workout source timestamp cannot be normalized safely.");
   }
   return createHash("sha256")
     .update(canonicalSourceTimestamp)
@@ -545,7 +546,7 @@ function stableWorkoutEndTimeKey(rawDate: string | undefined, rawEndTime: string
   const sourceDate = /^\d{4}-\d{2}-\d{2}/u.exec(rawDate ?? "")?.[0] ?? rawDate;
   const canonicalSourceTimestamp = canonicalSourceTimestampIdentity(sourceDate, rawEndTime);
   if (!canonicalSourceTimestamp) {
-    throw new TypeError("Workout source end timestamp cannot be normalized safely.");
+    throw new ContractValidationError("Workout source end timestamp cannot be normalized safely.");
   }
   return createHash("sha256")
     .update(canonicalSourceTimestamp)
@@ -947,10 +948,10 @@ function buildSessions(input: {
 export function planWorkoutCsvImport(input: WorkoutCsvPlannerInput): WorkoutCsvImportPlan {
   const byteSize = new TextEncoder().encode(input.text).byteLength;
   if (byteSize === 0) {
-    throw new TypeError("Workout CSV is empty.");
+    throw new ContractValidationError("Workout CSV is empty.");
   }
   if (byteSize > MAX_FILE_BYTES) {
-    throw new TypeError(`Workout CSV exceeds the ${MAX_FILE_BYTES}-byte limit.`);
+    throw new ContractValidationError(`Workout CSV exceeds the ${MAX_FILE_BYTES}-byte limit.`);
   }
 
   const timeZone = normalizeIanaTimeZone(input.timeZone);
@@ -959,21 +960,21 @@ export function planWorkoutCsvImport(input: WorkoutCsvPlannerInput): WorkoutCsvI
   }
   const delimiter = input.delimiter ?? DEFAULT_DELIMITER;
   if (delimiter.length !== 1) {
-    throw new TypeError("Workout CSV delimiter must be one character.");
+    throw new ContractValidationError("Workout CSV delimiter must be one character.");
   }
 
   const parsedRows = parseDelimitedRows(input.text, delimiter);
   const headerRow = parsedRows[0];
   if (!headerRow) {
-    throw new TypeError("Workout CSV must include a header row.");
+    throw new ContractValidationError("Workout CSV must include a header row.");
   }
   const headers = headerRow.map((header) => header.replace(/^\uFEFF/u, "").trim());
   const normalizedHeaders = headers.map(normalizeHeaderName);
   if (headers.length === 0 || normalizedHeaders.some((header) => header.length === 0)) {
-    throw new TypeError("Workout CSV header cells must be non-empty.");
+    throw new ContractValidationError("Workout CSV header cells must be non-empty.");
   }
   if (new Set(normalizedHeaders).size !== normalizedHeaders.length) {
-    throw new TypeError("Workout CSV headers must be unique.");
+    throw new ContractValidationError("Workout CSV headers must be unique.");
   }
 
   const inferredSource = detectSource(headers);
@@ -981,7 +982,7 @@ export function planWorkoutCsvImport(input: WorkoutCsvPlannerInput): WorkoutCsvI
   const explicitDialect = explicitSource;
   const unambiguousSource = inferredSource;
   if (explicitDialect && unambiguousSource && explicitDialect !== unambiguousSource) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Workout CSV source ${explicitDialect} conflicts with unambiguous ${unambiguousSource} headers.`,
     );
   }
@@ -989,7 +990,7 @@ export function planWorkoutCsvImport(input: WorkoutCsvPlannerInput): WorkoutCsvI
   const source = explicitSource ?? normalizeSource(detectedSource ?? undefined);
   const normalized = normalizeRows(headers, parsedRows.slice(1), detectedSource);
   if (normalized.rows.length + normalized.skippedRowCount > MAX_DATA_ROWS) {
-    throw new TypeError(`Workout CSV exceeds the ${MAX_DATA_ROWS}-row limit.`);
+    throw new ContractValidationError(`Workout CSV exceeds the ${MAX_DATA_ROWS}-row limit.`);
   }
 
   const built = buildSessions({
@@ -1004,7 +1005,7 @@ export function planWorkoutCsvImport(input: WorkoutCsvPlannerInput): WorkoutCsvI
   });
   const skippedRowCount = normalized.skippedRowCount + built.skippedRowCount;
   if (built.sessions.length > MAX_WORKOUTS) {
-    throw new TypeError(`Workout CSV exceeds the ${MAX_WORKOUTS}-workout limit.`);
+    throw new ContractValidationError(`Workout CSV exceeds the ${MAX_WORKOUTS}-workout limit.`);
   }
 
   const warnings = toWarnings({

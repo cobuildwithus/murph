@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { performance } from "node:perf_hooks";
 
 import { isStrictIsoDate, isWritableIsoDateTime } from "@murphai/contracts";
@@ -142,7 +143,7 @@ export async function prepareDeviceProviderSnapshotImport(
   }
 
   if (!adapter) {
-    throw new TypeError(`device provider "${request.provider}" is not registered`);
+    throw new ContractValidationError(`device provider "${request.provider}" is not registered`);
   }
 
   const snapshot = adapter.parseSnapshot

@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createHash } from "node:crypto";
 import { emitHostedExecutionStructuredLog } from "@murphai/hosted-execution";
 import { parseHostedRuntimeManagedSnapshotUpload, type HostedRuntimeManagedSnapshotUpload } from "@murphai/hosted-execution/runtime-resources";
@@ -65,7 +66,7 @@ export async function completeManagedSnapshotUpload(input: {
 }): Promise<void> {
   const receipt = parseHostedRuntimeManagedSnapshotUpload(input.receipt);
   if (!input.bucket.resumeMultipartUpload) throw new Error("Managed snapshot uploads are unavailable.");
-  if (!input.etag || input.etag.length > 1024 || /[\r\n]/u.test(input.etag)) throw new TypeError("Managed snapshot part ETag is invalid.");
+  if (!input.etag || input.etag.length > 1024 || /[\r\n]/u.test(input.etag)) throw new ContractValidationError("Managed snapshot part ETag is invalid.");
   const upload = input.bucket.resumeMultipartUpload(receipt.objectKey, receipt.uploadId);
   const timing = { completeElapsedMs: 0, verifyElapsedMs: 0, settleElapsedMs: 0, outcome: "failed" };
   const startedAt = Date.now();

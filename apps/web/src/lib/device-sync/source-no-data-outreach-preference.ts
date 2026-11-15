@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
 import {
@@ -28,7 +29,7 @@ export async function configureHostedSourceNoDataOutreach(input: {
 }): Promise<HostedExecutionDeviceSyncNoDataOutreachResponse> {
   const sourceProviderSlug = input.request.sourceProviderSlug.trim().toLowerCase();
   if (!readSourceRecoveryNoticePolicy(sourceProviderSlug)) {
-    throw new TypeError("No-data outreach is unavailable for this source provider.");
+    throw new ContractValidationError("No-data outreach is unavailable for this source provider.");
   }
   const prisma = getPrisma();
   return prisma.$transaction(async (tx) => {

@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { isHostedRetiredAssistantNotificationProfile } from "@murphai/hosted-execution/contracts";
 import { GAME_RECAP_GENERATION_RETIRED, gameGroupMissedCheckInPolicySchema, parseGameRecapEventId } from "@murphai/hosted-execution/runtime-control";
 import { buildHostedGameChatBootstrapPolicy, isHostedGameBootstrapUnavailable } from "./game-chat-bootstrap.ts";
@@ -785,7 +786,7 @@ function requireMemberActivationSignupWelcome(
   wake: HostedExecutionMemberActivatedWake,
 ): NonNullable<HostedExecutionMemberActivatedWake["signupWelcome"]> {
   if (!wake.signupWelcome) {
-    throw new TypeError("Hosted member activation wake has no signup welcome payload.");
+    throw new ContractValidationError("Hosted member activation wake has no signup welcome payload.");
   }
 
   return wake.signupWelcome;
@@ -860,7 +861,7 @@ function buildAssistantNotificationInput(
 ): AssistantNotificationInput {
   const notificationPromptProfile = wake.notification.notificationPromptProfile;
   if (isHostedRetiredAssistantNotificationProfile(notificationPromptProfile)) {
-    throw new TypeError("Retired notification profiles cannot enter active execution.");
+    throw new ContractValidationError("Retired notification profiles cannot enter active execution.");
   }
   const privateAssistantAskCompletion =
     wake.notification.privateAssistantAskCompletion ?? null;
@@ -1150,13 +1151,13 @@ function requireHostedGroupContextHandoffNotification(
     || route.delivery.kind !== "thread"
     || route.threadIsDirect !== false
   ) {
-    throw Object.assign(new TypeError(
+    throw Object.assign(new ContractValidationError(
       "Hosted group context handoff notification proof is invalid.",
     ), { retryable: false });
   }
   const occurredAtMs = Date.parse(wake.occurredAt);
   if (!Number.isFinite(occurredAtMs)) {
-    throw Object.assign(new TypeError(
+    throw Object.assign(new ContractValidationError(
       "Hosted group context handoff occurrence time is invalid.",
     ), { retryable: false });
   }
@@ -1201,7 +1202,7 @@ function requireHostedOperatorMessageNotification(
     || !operatorTask.taskId.startsWith("opt_")
     || Date.parse(operatorTask.expiresAt) <= Date.parse(wake.occurredAt)
   ) {
-    throw new TypeError("Hosted operator message notification proof is invalid.");
+    throw new ContractValidationError("Hosted operator message notification proof is invalid.");
   }
   return operatorTask;
 }
@@ -1287,7 +1288,7 @@ function requireHostedPrivateAssistantAskCompletionNotification(
     )
     || wake.notification.responsePolicy?.kind !== "require_send_exact_text"
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted private Assistant Ask completion notification proof is invalid.",
     );
   }

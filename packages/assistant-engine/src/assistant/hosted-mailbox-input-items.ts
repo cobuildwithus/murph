@@ -1,3 +1,4 @@
+import { ContractValidationError } from '@murphai/contracts/validation-error'
 import type { Dirent } from 'node:fs'
 import { chmod, lstat, readdir, readFile, unlink } from 'node:fs/promises'
 import path from 'node:path'
@@ -212,7 +213,7 @@ async function openHostedMailboxInputDatabase(
       })
       await chmod(databasePath, 0o600)
     } else if (readSqliteRuntimeUserVersion(database) !== 1) {
-      throw new TypeError('Unsupported hosted mailbox input database version.')
+      throw new ContractValidationError('Unsupported hosted mailbox input database version.')
     }
     return database
   } catch (error) {
@@ -225,7 +226,7 @@ function parseHostedMailboxInputRow(
   row: Record<string, unknown>,
   inputId: string,
 ): HostedMailboxAssistantInputItem {
-  if (typeof row.item_json !== 'string') throw new TypeError('Invalid hosted mailbox input row.')
+  if (typeof row.item_json !== 'string') throw new ContractValidationError('Invalid hosted mailbox input row.')
   const item = normalizeHostedMailboxAssistantInputItem(JSON.parse(row.item_json))
   if (item.inputId !== inputId) throw new TypeError('Hosted mailbox input row identity mismatch.')
   return item
@@ -403,7 +404,7 @@ function normalizeHostedMailboxAssistantInputItem(
   value: unknown,
 ): HostedMailboxAssistantInputItem {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new TypeError('hosted mailbox assistant input item must be an object.')
+    throw new ContractValidationError('hosted mailbox assistant input item must be an object.')
   }
   const record = value as {
     groupParticipantAdded?: unknown
@@ -416,12 +417,12 @@ function normalizeHostedMailboxAssistantInputItem(
     record.groupParticipantAdded !== undefined &&
     record.groupParticipantAdded !== true
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       'groupParticipantAdded must be true when present.',
     )
   }
   if (record.usageRunningLow !== undefined && record.usageRunningLow !== true) {
-    throw new TypeError('usageRunningLow must be true when present.')
+    throw new ContractValidationError('usageRunningLow must be true when present.')
   }
   const groupReactionContext = typeof record.groupReactionContext === 'string'
     ? normalizeNullableString(record.groupReactionContext)
@@ -433,7 +434,7 @@ function normalizeHostedMailboxAssistantInputItem(
       groupReactionContext.length >
         HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_MAX_CHARS)
   ) {
-    throw new TypeError('groupReactionContext must be a bounded string when present.')
+    throw new ContractValidationError('groupReactionContext must be a bounded string when present.')
   }
   return {
     ...(record.groupParticipantAdded === true
@@ -451,19 +452,19 @@ function normalizeHostedMailboxAssistantInputItem(
 
 function normalizeAssistantInputEventId(value: unknown, fieldName: string): string {
   if (typeof value !== 'string') {
-    throw new TypeError(`${fieldName} must be an assistant input event id.`)
+    throw new ContractValidationError(`${fieldName} must be an assistant input event id.`)
   }
   const normalized = value.trim()
   if (ASSISTANT_INPUT_EVENT_ID_PATTERN.test(normalized)) {
     return normalized
   }
 
-  throw new TypeError(`${fieldName} must be an assistant input event id.`)
+  throw new ContractValidationError(`${fieldName} must be an assistant input event id.`)
 }
 
 function normalizeHostedMailboxItemId(value: unknown, fieldName: string): string {
   if (typeof value !== 'string') {
-    throw new TypeError(`${fieldName} must be a bounded opaque token.`)
+    throw new ContractValidationError(`${fieldName} must be a bounded opaque token.`)
   }
   const normalized = normalizeNullableString(value)
   if (
@@ -473,5 +474,5 @@ function normalizeHostedMailboxItemId(value: unknown, fieldName: string): string
     return normalized
   }
 
-  throw new TypeError(`${fieldName} must be a bounded opaque token.`)
+  throw new ContractValidationError(`${fieldName} must be a bounded opaque token.`)
 }

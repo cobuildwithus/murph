@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 const HOSTED_STORAGE_CONTEXT_SALT = new TextEncoder().encode(
   "murph.cloudflare.hosted.storage.v1",
 );
@@ -101,15 +102,15 @@ export function parseHostedCipherEnvelope(
   const scope = requireString(record.scope, `${label}.scope`);
 
   if (algorithm !== "AES-GCM") {
-    throw new TypeError(`${label}.algorithm must be AES-GCM.`);
+    throw new ContractValidationError(`${label}.algorithm must be AES-GCM.`);
   }
 
   if (schema !== HOSTED_CIPHER_ENVELOPE_SCHEMA) {
-    throw new TypeError(`${label}.schema must be ${HOSTED_CIPHER_ENVELOPE_SCHEMA}.`);
+    throw new ContractValidationError(`${label}.schema must be ${HOSTED_CIPHER_ENVELOPE_SCHEMA}.`);
   }
 
   if (!isHostedCipherEnvelopeScope(scope)) {
-    throw new TypeError(`${label}.scope must be a supported hosted storage scope.`);
+    throw new ContractValidationError(`${label}.scope must be a supported hosted storage scope.`);
   }
 
   return {
@@ -226,7 +227,7 @@ function resolveHostedCipherKey(input: {
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object.`);
+    throw new ContractValidationError(`${label} must be an object.`);
   }
 
   return value as Record<string, unknown>;
@@ -234,7 +235,7 @@ function requireRecord(value: unknown, label: string): Record<string, unknown> {
 
 function requireString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.length === 0) {
-    throw new TypeError(`${label} must be a non-empty string.`);
+    throw new ContractValidationError(`${label} must be a non-empty string.`);
   }
 
   return value;
@@ -243,7 +244,7 @@ function requireString(value: unknown, label: string): string {
 function requireHostedCipherKeyId(value: unknown, label: string): string {
   const keyId = requireString(value, label);
   if (!HOSTED_CIPHER_KEY_ID_PATTERN.test(keyId)) {
-    throw new TypeError(`${label} must be a 1-256 character portable identifier.`);
+    throw new ContractValidationError(`${label} must be a 1-256 character portable identifier.`);
   }
   return keyId;
 }

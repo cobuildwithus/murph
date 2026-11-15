@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type { HostedRuntimePlatform } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   buildHostedVaultShareProjectionScopeKey,
@@ -145,7 +146,7 @@ export function createHostedWebVaultSharePort(input: {
 
 function readHostedVaultShareDeliverContinuation(value: unknown): string | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("Hosted vault share delivery response must be an object.");
+    throw new ContractValidationError("Hosted vault share delivery response must be an object.");
   }
   const continuation = (value as Record<string, unknown>)[
     HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_FIELD
@@ -154,7 +155,7 @@ function readHostedVaultShareDeliverContinuation(value: unknown): string | null 
     return null;
   }
   if (!isHostedRuntimeVaultShareDeliverContinuation(continuation)) {
-    throw new TypeError("Hosted vault-share delivery continuation is invalid.");
+    throw new ContractValidationError("Hosted vault-share delivery continuation is invalid.");
   }
   return continuation;
 }

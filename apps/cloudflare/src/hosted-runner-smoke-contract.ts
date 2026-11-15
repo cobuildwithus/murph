@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 export const HOSTED_RUNNER_SMOKE_RESULT_SCHEMA = "murph.cloudflare-hosted-runner-smoke.v4";
 export const HOSTED_RUNNER_SMOKE_CLI_SURFACE_HOT_PATH_PROOF_COUNT = 5;
 export const HOSTED_RUNNER_SMOKE_CLI_VAULT_COMMAND_PROOF_COUNT = 12;
@@ -132,7 +133,7 @@ export function parseHostedRunnerSmokeResult(value: unknown): HostedRunnerSmokeR
   assertOnlyKnownKeys(record, "Hosted runner smoke result", HOSTED_RUNNER_SMOKE_RESULT_KEYS);
 
   if (record.schema !== HOSTED_RUNNER_SMOKE_RESULT_SCHEMA) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Hosted runner smoke result.schema must be ${HOSTED_RUNNER_SMOKE_RESULT_SCHEMA}.`,
     );
   }
@@ -388,7 +389,7 @@ const assistantCliSurfaceHotPathProofs: readonly {
 
 function readObjectRecord(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object.`);
+    throw new ContractValidationError(`${label} must be an object.`);
   }
 
   return value as Record<string, unknown>;
@@ -400,13 +401,13 @@ function assertOnlyKnownKeys(
   knownKeys: ReadonlySet<string>,
 ): void {
   if (Object.keys(record).some((key) => !knownKeys.has(key))) {
-    throw new TypeError(`${label} must not include unexpected fields.`);
+    throw new ContractValidationError(`${label} must not include unexpected fields.`);
   }
 }
 
 function readFiniteNumber(value: unknown, label: string): number {
   if (typeof value !== "number" || !Number.isFinite(value)) {
-    throw new TypeError(`${label} must be a finite number.`);
+    throw new ContractValidationError(`${label} must be a finite number.`);
   }
 
   return value;
@@ -415,7 +416,7 @@ function readFiniteNumber(value: unknown, label: string): number {
 function readPositiveFiniteNumber(value: unknown, label: string): number {
   const parsed = readFiniteNumber(value, label);
   if (parsed <= 0) {
-    throw new TypeError(`${label} must be a positive finite number.`);
+    throw new ContractValidationError(`${label} must be a positive finite number.`);
   }
 
   return parsed;
@@ -424,7 +425,7 @@ function readPositiveFiniteNumber(value: unknown, label: string): number {
 function readMinimumFiniteNumber(value: unknown, label: string, minimum: number): number {
   const parsed = readFiniteNumber(value, label);
   if (parsed < minimum) {
-    throw new TypeError(`${label} must be at least ${minimum}.`);
+    throw new ContractValidationError(`${label} must be at least ${minimum}.`);
   }
 
   return parsed;
@@ -433,7 +434,7 @@ function readMinimumFiniteNumber(value: unknown, label: string, minimum: number)
 function readExactInteger(value: unknown, label: string, expected: number): number {
   const parsed = readFiniteNumber(value, label);
   if (!Number.isInteger(parsed) || parsed !== expected) {
-    throw new TypeError(`${label} must be the integer ${expected}.`);
+    throw new ContractValidationError(`${label} must be the integer ${expected}.`);
   }
 
   return parsed;
@@ -441,7 +442,7 @@ function readExactInteger(value: unknown, label: string, expected: number): numb
 
 function readBoolean(value: unknown, label: string): boolean {
   if (typeof value !== "boolean") {
-    throw new TypeError(`${label} must be a boolean.`);
+    throw new ContractValidationError(`${label} must be a boolean.`);
   }
 
   return value;
@@ -450,7 +451,7 @@ function readBoolean(value: unknown, label: string): boolean {
 function readTrue(value: unknown, label: string): true {
   const parsed = readBoolean(value, label);
   if (!parsed) {
-    throw new TypeError(`${label} must be true.`);
+    throw new ContractValidationError(`${label} must be true.`);
   }
 
   return true;
@@ -458,11 +459,11 @@ function readTrue(value: unknown, label: string): true {
 
 function readNonEmptyStringArray(value: unknown, label: string): string[] {
   if (!Array.isArray(value)) {
-    throw new TypeError(`${label} must be an array.`);
+    throw new ContractValidationError(`${label} must be an array.`);
   }
 
   if (value.length === 0) {
-    throw new TypeError(`${label} must be a non-empty array.`);
+    throw new ContractValidationError(`${label} must be a non-empty array.`);
   }
 
   return value.map((entry, index) =>
@@ -472,12 +473,12 @@ function readNonEmptyStringArray(value: unknown, label: string): string[] {
 
 function readNonEmptyString(value: unknown, label: string): string {
   if (typeof value !== "string") {
-    throw new TypeError(`${label} must be a string.`);
+    throw new ContractValidationError(`${label} must be a string.`);
   }
 
   const normalized = value.trim();
   if (normalized.length === 0) {
-    throw new TypeError(`${label} must be a non-empty string.`);
+    throw new ContractValidationError(`${label} must be a non-empty string.`);
   }
 
   return normalized;
@@ -486,7 +487,7 @@ function readNonEmptyString(value: unknown, label: string): string {
 function readPython3VersionString(value: unknown, label: string): string {
   const normalized = readNonEmptyString(value, label);
   if (!/^Python\s+3\./u.test(normalized)) {
-    throw new TypeError(`${label} must be a Python 3 version string.`);
+    throw new ContractValidationError(`${label} must be a Python 3 version string.`);
   }
 
   return normalized;
@@ -495,7 +496,7 @@ function readPython3VersionString(value: unknown, label: string): string {
 function readRipgrepVersionString(value: unknown, label: string): string {
   const normalized = readNonEmptyString(value, label);
   if (!/^ripgrep\s+\d/u.test(normalized)) {
-    throw new TypeError(`${label} must be a ripgrep version string.`);
+    throw new ContractValidationError(`${label} must be a ripgrep version string.`);
   }
 
   return normalized;
@@ -504,7 +505,7 @@ function readRipgrepVersionString(value: unknown, label: string): string {
 function readSha256HexString(value: unknown, label: string): string {
   const normalized = readNonEmptyString(value, label);
   if (!/^[a-f0-9]{64}$/u.test(normalized)) {
-    throw new TypeError(`${label} must be a SHA-256 hex string.`);
+    throw new ContractValidationError(`${label} must be a SHA-256 hex string.`);
   }
 
   return normalized;

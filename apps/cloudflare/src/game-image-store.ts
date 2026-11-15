@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { requireR2DeletionCapabilities } from "./user-runner/r2-delete.ts";
 import type { R2BucketLike } from "./bundle-store.ts";
 import { hostedGameMediaObjectKey, hostedGameMediaUserPrefix, requireHostedGameMediaId } from "./storage-paths.ts";
@@ -159,7 +160,7 @@ function parsePointer(value: unknown): Pointer {
   if (typeof value !== "object" || value === null || !("schema" in value) || value.schema !== "murph.game-image.v1"
     || !("imageId" in value) || typeof value.imageId !== "string" || !isImageId(value.imageId)
     || !("byteLength" in value) || typeof value.byteLength !== "number" || !Number.isSafeInteger(value.byteLength)
-    || value.byteLength <= 0 || value.byteLength > 4 * 1024 * 1024) throw new TypeError("Game image index is invalid.");
+    || value.byteLength <= 0 || value.byteLength > 4 * 1024 * 1024) throw new ContractValidationError("Game image index is invalid.");
   return { schema: value.schema, imageId: value.imageId, byteLength: value.byteLength };
 }
 

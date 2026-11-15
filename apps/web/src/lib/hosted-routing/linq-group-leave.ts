@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
 import type { Prisma, PrismaClient } from "@prisma/client";
@@ -30,7 +31,7 @@ function codec(threadIdentityLookupKey: string) {
 
 export function prepareHostedLinqGroupLeave(chatId: string, reason: HostedLinqGroupLeaveReason) {
   const threadIdentityLookupKey = createHostedExternalThreadIdentityLookupKey({ channel: "linq", threadId: chatId });
-  if (!threadIdentityLookupKey) throw new TypeError("Group leave requires a thread identity.");
+  if (!threadIdentityLookupKey) throw new ContractValidationError("Group leave requires a thread identity.");
   return { chatId, reason, threadIdentityLookupKey,
     chatIdEncrypted: encryptHostedContactPhoneEnvelope({ codec: codec(threadIdentityLookupKey), phoneNumber: chatId }) };
 }

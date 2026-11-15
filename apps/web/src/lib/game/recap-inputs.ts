@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
@@ -26,7 +27,7 @@ export function pairGamesWhere(memberIds: readonly string[]): Prisma.GameWhereIn
 export async function readRecapSourceReferences(material: Material, eventId: string): Promise<RecapSourceReference[]> {
   if (!material.validation.show || material.validation.group) return [];
   const gameId = material.game.id;
-  if (typeof gameId !== "string") throw new TypeError("Recap game identity is missing.");
+  if (typeof gameId !== "string") throw new ContractValidationError("Recap game identity is missing.");
   const db = getPrisma();
   const memberIds = material.validation.playerNamesByMemberId.map(player => player.memberId);
   const entryIds = material.entries.filter(entry => entry.kind === "photo").map(entry => entry.entryId);

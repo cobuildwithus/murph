@@ -1,3 +1,4 @@
+import { ContractValidationError } from '@murphai/contracts/validation-error';
 import { createHash } from 'node:crypto'
 
 import {
@@ -109,7 +110,7 @@ function isLifecycleSeedDesiredAt(
   }
   const activeUntil = Date.parse(seed.activeUntil)
   if (Number.isNaN(activeUntil)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Experiment lifecycle seed ${seed.automationId} has an invalid active-until date.`,
     )
   }
@@ -880,7 +881,7 @@ async function runPlanOwnedRegimenSupportAuthorityPrecondition(input: {
     }
   }
   if (typeof data.status !== 'string') {
-    throw new TypeError('Plan-owned support regimen has no readable canonical status.')
+    throw new ContractValidationError('Plan-owned support regimen has no readable canonical status.')
   }
   if (data.status !== 'active') {
     return {

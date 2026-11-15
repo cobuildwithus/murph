@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   ASSISTANT_USAGE_SCHEMA,
   createAssistantUsageId,
@@ -131,12 +132,12 @@ export function matchHostedLobPhysicalNoteUsageRecord(
 
 function requireNonNegativeSafeInteger(value: number, label: string): void {
   if (!Number.isSafeInteger(value) || value < 0) {
-    throw new TypeError(`${label} must be a non-negative safe integer.`);
+    throw new ContractValidationError(`${label} must be a non-negative safe integer.`);
   }
 }
 
 function requireNonEmptyString(value: string, label: string): string {
   const normalized = value.trim();
-  if (!normalized) throw new TypeError(`${label} is required.`);
+  if (!normalized) throw new ContractValidationError(`${label} is required.`);
   return normalized;
 }

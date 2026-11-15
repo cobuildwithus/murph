@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   parseHostedUserRecipientPrivateKeyJwk,
   parseHostedUserRecipientPublicKeyJwk,
@@ -137,10 +138,10 @@ export function parseHostedBrowserSessionKeyEnvelope(
   const purpose = requireString(record.purpose, `${label}.purpose`);
 
   if (schema !== HOSTED_BROWSER_SESSION_KEY_ENVELOPE_SCHEMA) {
-    throw new TypeError(`${label}.schema must be ${HOSTED_BROWSER_SESSION_KEY_ENVELOPE_SCHEMA}.`);
+    throw new ContractValidationError(`${label}.schema must be ${HOSTED_BROWSER_SESSION_KEY_ENVELOPE_SCHEMA}.`);
   }
   if (purpose !== "browser-vault-replica") {
-    throw new TypeError(`${label}.purpose must be browser-vault-replica.`);
+    throw new ContractValidationError(`${label}.purpose must be browser-vault-replica.`);
   }
 
   return {
@@ -163,7 +164,7 @@ function parseHostedBrowserSessionWrappedKeyRecipient(
   const kind = requireString(record.kind, `${label}.kind`);
 
   if (kind !== HOSTED_BROWSER_SESSION_KEY_RECIPIENT_KIND) {
-    throw new TypeError(`${label}.kind must be browser-session.`);
+    throw new ContractValidationError(`${label}.kind must be browser-session.`);
   }
 
   return {
@@ -242,7 +243,7 @@ function requireSessionKeyBytes(value: Uint8Array, label: string): Uint8Array {
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object.`);
+    throw new ContractValidationError(`${label} must be an object.`);
   }
 
   return value as Record<string, unknown>;
@@ -250,7 +251,7 @@ function requireRecord(value: unknown, label: string): Record<string, unknown> {
 
 function requireString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.length === 0) {
-    throw new TypeError(`${label} must be a non-empty string.`);
+    throw new ContractValidationError(`${label} must be a non-empty string.`);
   }
 
   return value;
@@ -258,7 +259,7 @@ function requireString(value: unknown, label: string): string {
 
 function readArray(value: unknown, label: string): unknown[] {
   if (!Array.isArray(value)) {
-    throw new TypeError(`${label} must be an array.`);
+    throw new ContractValidationError(`${label} must be an array.`);
   }
 
   return value.slice();

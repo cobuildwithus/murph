@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { Buffer } from "node:buffer";
 
 import { Prisma, PrismaClient } from "@prisma/client";
@@ -1808,7 +1809,7 @@ function readCompanionHrvDirtyResourceAdmissionId(
       sha256Hex(serializeCompanionHrvRmssdObservation(observation))
       !== admissionId
     ) {
-      throw new TypeError("Companion HRV admission identity did not match its observation.");
+      throw new ContractValidationError("Companion HRV admission identity did not match its observation.");
     }
     return admissionId;
   } catch {

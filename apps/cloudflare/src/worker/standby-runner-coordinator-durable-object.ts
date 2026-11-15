@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { hostedRunnerReleaseImageMatches, readHostedRunnerDeployment, readHostedRunnerBankFromName } from "../hosted-runner-release.ts";
 import { DurableObject } from "cloudflare:workers";
 import {
@@ -96,10 +97,10 @@ export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
   claimReadyStandby(input: HostedStandbyClaimRequest): HostedStandbyClaimResult {
     requireReleaseAndRegion(input);
     if (!isHostedStandbyClaimId(input.claimId)) {
-      throw new TypeError("Hosted standby claim id is invalid.");
+      throw new ContractValidationError("Hosted standby claim id is invalid.");
     }
     if (!Number.isSafeInteger(input.deadlineAtEpochMs) || input.deadlineAtEpochMs <= 0) {
-      throw new TypeError("Hosted standby claim deadline is invalid.");
+      throw new ContractValidationError("Hosted standby claim deadline is invalid.");
     }
     const startedAtMs = Date.now();
     let replayed = false;
@@ -689,9 +690,9 @@ async function withRpcDeadline<T>(
 
 function requireReleaseAndRegion(input: { releaseId: string; region: string }): void {
   if (!/^[A-Za-z0-9_-]{1,128}$/u.test(input.releaseId)) {
-    throw new TypeError("Hosted standby release id is invalid.");
+    throw new ContractValidationError("Hosted standby release id is invalid.");
   }
   if (input.region !== HOSTED_RUNNER_REGION && input.region !== HOSTED_STANDBY_REGION) {
-    throw new TypeError("Hosted standby region is invalid.");
+    throw new ContractValidationError("Hosted standby region is invalid.");
   }
 }

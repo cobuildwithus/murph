@@ -105,55 +105,78 @@ changed otherwise; the last stage has to migrate each on purpose:
 
 Each stage is safe to stop at.
 
-1. **Signals, no behavior change.** Add `ContractValidationError`,
-   `RequestInputError`, `parseInput` and the shared classifier. The three
-   mappers recognize `RequestInputError` first and keep native inference. Web's
-   mapper logs one bounded field when native inference decided the answer.
-   `assertContract` and the hosted-execution parser assertions throw
-   `ContractValidationError`.
-2. **Runner callbacks to Web, prepared.** Inventory the family. Its reachable
-   validators throw `ContractValidationError`; its routes use `parseInput`; the
-   body reader and JSON decoder throw explicit rejections. Native inference
-   still on.
-3. **Runner callbacks to Web, flipped.** Native inference off for the family.
-   Gates: rejection parity for malformed JSON, shape, nested fields, path and
-   query; injected `TypeError`, `RangeError` and `ReferenceError` inside and
-   after the parser are 500; replay tests cover a failure after commit; both
-   deploy orders.
-4. **By owner:** Worker local catches (recap, game media), container request
-   decoding, control-client response parsing, mailbox handoff retry rule,
-   remaining Web families.
-5. **Provider webhooks, one at a time** (payments, device data, phone,
-   messaging), each with its own duplicate, partial-success and lost-response
+1. **Signals, no behavior change.** `ContractValidationError`,
+   `RequestInputError`, `parseInput`; the three mappers recognize
+   `RequestInputError` and keep native inference. Done (#4972).
+2. **Sweep, no behavior change.** Every `new TypeError(` in `apps/web/src`,
+   `apps/cloudflare/src` and `packages/*/src` is classified. A throw that
+   rejects a value for what it is becomes `ContractValidationError`; a throw
+   about configuration, crypto, I/O, stored-state conflicts or invariants
+   stays a `TypeError`. The diff is the constructor rename, one import per
+   file and dependency wiring, and is checked mechanically.
+3. **One signal for an oversized body.** `RequestBodyTooLargeError` at the
+   byte-limit branch of each reader; consumers test that class (#4977).
+4. **Narrow the mappers.** Each mapper answers 400 for a
+   `ContractValidationError` or an explicit request rejection, and a server
+   error for a bare `TypeError`, `RangeError` or `URIError`. JSON and path
+   decoding failures are raised explicitly at the exact call. This is where
+   bugs, failed fetches, configuration and crypto failures stop being the
+   caller's fault. Gate: with native inference off, the Web, Cloudflare and
+   package suites name every path that still depends on it; each is either a
+   missed validator (convert it) or a server fault that a test pinned as 400
+   (change the test on purpose and say so). Runner callbacks and member
+   routes first; provider webhooks one at a time with their own recovery
    proof.
-6. **Delete:** native inference in all three mappers, the `fetch failed`
-   string match, the request-size message-prefix match, route-local ladders
-   that only reconstruct input or size meaning, the `TypeError` base of
-   `ContractValidationError`, and the shadow log field.
+5. **Mark the boundaries.** Routes read caller input through `parseInput`,
+   deep input validation in services becomes a domain rejection or moves to
+   the parse step, and the mappers stop answering 400 for a bare
+   `ContractValidationError`. This is where a corrupt stored record or a bad
+   upstream response stops being the caller's fault.
+6. **Local type checks, by meaning.** The control client's response parser,
+   Worker local catches, container request decoding, and the remaining
+   `instanceof TypeError` / `RangeError` decisions.
+7. **Delete:** native inference, the `fetch failed` string match, the
+   `TypeError` and `RangeError` bases and the name device on the explicit
+   errors, the Worker rethrow wrappers that exist only because its mapper
+   infers from types, and the shadow log field.
 
 ## Progress
 
-- Stage 1: implemented in this PR.
-- Independent of the stages, in their own PRs: the mailbox handoff retry rule
-  and the Worker media catches (both listed under stage 4).
+- Stage 1: merged (#4972).
+- Stage 2: this PR. 2,243 sites converted, about 1,000 left as server faults.
+- Stage 3: #4977.
+- Merged alongside, from stage 6: the mailbox handoff retry rule (#4974) and
+  the Worker media catches (#4976).
 
-## Scope of this PR (stage 1)
+Validators deliberately not converted because a consumer tells a subclass
+from a plain `TypeError` by prototype identity; each needs its consumer
+changed before stage 4 reaches it:
 
-- In scope: the two new modules and their package exports, the three mappers,
-  `packages/contracts/src/validate.ts`,
-  `packages/hosted-execution/src/parsers/assertions.ts`, tests, and
-  `ARCHITECTURE.md` or `agent-docs/RELIABILITY.md` where the rule is stated.
-- Out of scope: any status, body, header or retry change on any route.
+- `apps/web/src/lib/better-auth` record, record-query, record-crypto and
+  adapter validators (17 sites): the auth session logger checks the error's
+  immediate prototype.
+- `apps/cloudflare/src/runtime-platform/connected-apps-port.ts` (1 site): a
+  test pins `TypeError.prototype`.
 
-## Success criteria (stage 1)
+Also not converted: the six query validators in
+`apps/web/src/lib/changelog.ts`. The changelog guard treats any change to
+that file as a change to changelog content, so they move with the public
+changelog route's boundary work.
 
-- A `RequestInputError` is answered 400 by all three mappers with today's
-  body for that surface.
-- `parseInput` converts a `ContractValidationError` and rethrows a plain
-  `TypeError`, `RangeError` and `ReferenceError` unchanged.
-- Every existing test passes unchanged; no route's response differs.
-- The new modules import nothing from Node, Next, Cloudflare, schema barrels or
-  logging, and are listed in their packages' exports.
-- Both new subpaths are in every source alias list their neighbours are in
-  (`tsconfig.base.json`, `apps/web/tsconfig.json`). A missing alias loads the
-  class twice in one build and `instanceof` fails.
+## Scope of this PR (stage 2)
+
+- In scope: the constructor rename at validation sites in `apps/web/src`,
+  `apps/cloudflare/src` and `packages/*/src`, the import each file needs, and
+  the `@murphai/contracts` dependency for `runtime-state`, `parsers`,
+  `messaging-ingress` and `cloudflare-hosted-control`.
+- Out of scope: route files under `apps/web/app`, any `RangeError` or
+  `URIError` throw, every catch and `instanceof` check, and any status, body,
+  header, log or retry change.
+
+## Success criteria (stage 2)
+
+- Every removed line of the diff differs from an added line only by
+  `new TypeError(` becoming `new ContractValidationError(`.
+- Every existing test passes with its expectations untouched, apart from one
+  parity test that compared error constructors against a copy of the old
+  parser and now compares error names.

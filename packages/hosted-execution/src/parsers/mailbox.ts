@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   HOSTED_MAILBOX_FETCH_CURSOR_MODES,
   HOSTED_MAILBOX_KINDS,
@@ -195,7 +196,7 @@ function parseHostedMailboxConversationUsageStatus(
     return value;
   }
 
-  throw new TypeError(
+  throw new ContractValidationError(
     "Hosted mailbox fetch response conversationUsageStatus must be low or null.",
   );
 }

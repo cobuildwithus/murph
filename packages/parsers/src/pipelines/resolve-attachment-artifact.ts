@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type { ParserArtifactRef } from "../contracts/artifact.js";
 import type { ParserRuntimeStore } from "../contracts/runtime.js";
 import { normalizeRelativePath, resolveVaultRelativePath } from "../shared.js";
@@ -45,7 +46,7 @@ export async function resolveAttachmentArtifact(input: {
 function normalizeRawInboxAttachmentPath(storedPath: string, attachmentId: string): string {
   const normalized = normalizeRelativePath(storedPath);
   if (!normalized.startsWith(`${RAW_INBOX_ROOT}/`)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Unknown inbox attachment: ${attachmentId} (stored path must stay within raw/inbox).`,
     );
   }

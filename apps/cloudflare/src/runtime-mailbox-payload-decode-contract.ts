@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type {
   HostedExecutionWake,
 } from "@murphai/hosted-execution/contracts";
@@ -87,12 +88,12 @@ export function parseHostedMailboxPayloadDecodeResponse(
     };
   }
 
-  throw new TypeError("Hosted mailbox payload decode response.status is invalid.");
+  throw new ContractValidationError("Hosted mailbox payload decode response.status is invalid.");
 }
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object.`);
+    throw new ContractValidationError(`${label} must be an object.`);
   }
 
   return value as Record<string, unknown>;
@@ -100,7 +101,7 @@ function requireRecord(value: unknown, label: string): Record<string, unknown> {
 
 function readString(value: unknown, field: string): string {
   if (typeof value !== "string" || value.length === 0) {
-    throw new TypeError(`Hosted mailbox payload decode ${field} must be a non-empty string.`);
+    throw new ContractValidationError(`Hosted mailbox payload decode ${field} must be a non-empty string.`);
   }
 
   return value;
@@ -119,14 +120,14 @@ function readPayloadSource(value: unknown): "inline" | "sidecar" {
     return value;
   }
 
-  throw new TypeError(
+  throw new ContractValidationError(
     "Hosted mailbox payload decode payloadSource must be inline or sidecar.",
   );
 }
 
 function readBoolean(value: unknown, field: string): boolean {
   if (typeof value !== "boolean") {
-    throw new TypeError(`Hosted mailbox payload decode ${field} must be a boolean.`);
+    throw new ContractValidationError(`Hosted mailbox payload decode ${field} must be a boolean.`);
   }
 
   return value;

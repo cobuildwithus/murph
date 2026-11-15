@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   HOSTED_GEMINI_VIDEO_ANALYSIS_API_BASE_URL,
   HOSTED_GEMINI_VIDEO_ANALYSIS_FPS_BY_SAMPLING_MODE,
@@ -116,7 +117,7 @@ export function parseHostedGeminiVideoAnalysisRequestBody(
     ["text"],
   );
   if (systemPart.text !== HOSTED_GEMINI_VIDEO_ANALYSIS_SYSTEM_INSTRUCTION) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Gemini video-analysis system instruction is not allowed.",
     );
   }
@@ -127,7 +128,7 @@ export function parseHostedGeminiVideoAnalysisRequestBody(
     "role",
   ]);
   if (content.role !== "user") {
-    throw new TypeError("Gemini video-analysis content role must be user.");
+    throw new ContractValidationError("Gemini video-analysis content role must be user.");
   }
   const parts = exactArray(content.parts, "Gemini video-analysis parts", 2);
   const videoPart = exactRecord(parts[0], "Gemini video-analysis video part", [
@@ -146,7 +147,7 @@ export function parseHostedGeminiVideoAnalysisRequestBody(
     64,
   ).toLowerCase();
   if (!supportedMimeTypes.has(mimeType)) {
-    throw new TypeError("Gemini video-analysis MIME type is unsupported.");
+    throw new ContractValidationError("Gemini video-analysis MIME type is unsupported.");
   }
   const videoMetadata = exactRecord(
     videoPart.videoMetadata,
@@ -157,7 +158,7 @@ export function parseHostedGeminiVideoAnalysisRequestBody(
     typeof videoMetadata.fps !== "number"
     || !supportedFps.has(videoMetadata.fps)
   ) {
-    throw new TypeError("Gemini video-analysis FPS is not allowed.");
+    throw new ContractValidationError("Gemini video-analysis FPS is not allowed.");
   }
   const fps = videoMetadata.fps;
 
@@ -174,7 +175,7 @@ export function parseHostedGeminiVideoAnalysisRequestBody(
 
   const rawGenerationConfig = readRecord(body.generationConfig);
   if (!rawGenerationConfig) {
-    throw new TypeError("Gemini video-analysis generation config must be an object.");
+    throw new ContractValidationError("Gemini video-analysis generation config must be an object.");
   }
   const legacyProfile = Object.prototype.hasOwnProperty.call(
     rawGenerationConfig,
@@ -201,12 +202,12 @@ export function parseHostedGeminiVideoAnalysisRequestBody(
       || thinkingConfig.thinkingLevel
         !== LEGACY_GEMINI_VIDEO_ANALYSIS_THINKING_LEVEL
     ) {
-      throw new TypeError("Gemini video-analysis legacy profile is not allowed.");
+      throw new ContractValidationError("Gemini video-analysis legacy profile is not allowed.");
     }
   } else if (
     thinkingConfig.thinkingLevel !== HOSTED_GEMINI_VIDEO_ANALYSIS_THINKING_LEVEL
   ) {
-    throw new TypeError("Gemini video-analysis thinking level is not allowed.");
+    throw new ContractValidationError("Gemini video-analysis thinking level is not allowed.");
   }
 
   const normalizedGenerationConfig: HostedGeminiVideoAnalysisGenerationConfig =
@@ -273,14 +274,14 @@ export function readHostedGeminiVideoAnalysisUsageMetadata(
 
 function readBase64VideoData(value: unknown): string {
   if (typeof value !== "string" || value.length === 0) {
-    throw new TypeError("Gemini video-analysis data must be a base64 string.");
+    throw new ContractValidationError("Gemini video-analysis data must be a base64 string.");
   }
   if (
     value.length > MAX_BASE64_CHARS
     || value.length % 4 !== 0
     || !/^[A-Za-z0-9+/]+={0,2}$/u.test(value)
   ) {
-    throw new TypeError("Gemini video-analysis data is invalid or too large.");
+    throw new ContractValidationError("Gemini video-analysis data is invalid or too large.");
   }
 
   const padding = value.endsWith("==") ? 2 : value.endsWith("=") ? 1 : 0;
@@ -300,7 +301,7 @@ function exactRecord(
   allowedKeys: readonly string[],
 ): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object.`);
+    throw new ContractValidationError(`${label} must be an object.`);
   }
   const record = value as Record<string, unknown>;
   const allowed = new Set(allowedKeys);
@@ -310,7 +311,7 @@ function exactRecord(
     || keys.some((key) => !allowed.has(key))
     || allowedKeys.some((key) => !(key in record))
   ) {
-    throw new TypeError(`${label} has an unsupported shape.`);
+    throw new ContractValidationError(`${label} has an unsupported shape.`);
   }
   return record;
 }
@@ -323,18 +324,18 @@ function readRecord(value: unknown): Record<string, unknown> | null {
 
 function exactArray(value: unknown, label: string, length: number): unknown[] {
   if (!Array.isArray(value) || value.length !== length) {
-    throw new TypeError(`${label} must contain exactly ${length} item(s).`);
+    throw new ContractValidationError(`${label} must contain exactly ${length} item(s).`);
   }
   return value;
 }
 
 function boundedText(value: unknown, label: string, maxLength: number): string {
   if (typeof value !== "string") {
-    throw new TypeError(`${label} must be text.`);
+    throw new ContractValidationError(`${label} must be text.`);
   }
   const text = value.trim();
   if (!text || text.length > maxLength) {
-    throw new TypeError(`${label} is empty or too long.`);
+    throw new ContractValidationError(`${label} is empty or too long.`);
   }
   return text;
 }

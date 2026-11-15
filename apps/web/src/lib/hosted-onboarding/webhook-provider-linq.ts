@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { leaveHostedLinqGroupTx, prepareHostedLinqGroupLeave, assertHostedLinqGroupNotLeft } from "../hosted-routing/linq-group-leave";
 import { applyHostedLinqGroupMoveIngressTx, type PreparedHostedLinqGroupMoveIngress } from "../hosted-routing/linq-group-line-move-ingress";
 import { replaceHostedLinqGroupLineMoveRouteTx } from "../hosted-routing/thread-container-service";
@@ -4611,7 +4612,7 @@ function sanitizeHostedOnboardingPlannerLogValue(
 function requireHostedLinqSourceMessageLookupKey(messageId: string): string {
   const lookupKey = createHostedLinqMessageLookupKey(messageId);
   if (!lookupKey) {
-    throw new TypeError("Hosted Linq message id must produce a source lookup key.");
+    throw new ContractValidationError("Hosted Linq message id must produce a source lookup key.");
   }
   return lookupKey;
 }

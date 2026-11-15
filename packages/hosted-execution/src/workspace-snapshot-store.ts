@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   HOSTED_WORKSPACE_SNAPSHOT_ENCRYPTION_SCHEME,
   HOSTED_WORKSPACE_SNAPSHOT_REF_SCHEMA,
@@ -91,12 +92,12 @@ export function parseHostedWorkspaceSnapshotUploadSession(
   const record = requireObject(value, label);
   const schema = requireString(record.schema, `${label}.schema`);
   if (schema !== HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_SCHEMA) {
-    throw new TypeError(`${label}.schema must be ${HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_SCHEMA}.`);
+    throw new ContractValidationError(`${label}.schema must be ${HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_SCHEMA}.`);
   }
   const encryption = requireObject(record.encryption, `${label}.encryption`);
   const scheme = requireString(encryption.scheme, `${label}.encryption.scheme`);
   if (scheme !== HOSTED_WORKSPACE_SNAPSHOT_ENCRYPTION_SCHEME) {
-    throw new TypeError(`${label}.encryption.scheme must be ${HOSTED_WORKSPACE_SNAPSHOT_ENCRYPTION_SCHEME}.`);
+    throw new ContractValidationError(`${label}.encryption.scheme must be ${HOSTED_WORKSPACE_SNAPSHOT_ENCRYPTION_SCHEME}.`);
   }
 
   let replacedSnapshotRef: NonNullable<HostedExecutionSnapshotRef> | null = null;
@@ -106,7 +107,7 @@ export function parseHostedWorkspaceSnapshotUploadSession(
       `${label}.replacedSnapshotRef`,
     );
     if (parsedReplacedSnapshotRef === null) {
-      throw new TypeError(`${label}.replacedSnapshotRef must be a hosted execution snapshot ref.`);
+      throw new ContractValidationError(`${label}.replacedSnapshotRef must be a hosted execution snapshot ref.`);
     }
     replacedSnapshotRef = parsedReplacedSnapshotRef;
   }
@@ -129,7 +130,7 @@ export function parseHostedWorkspaceSnapshotUploadSession(
         `${label}.checkpointHandoffHeartbeatAt`,
       );
   if ((r2PutExpiresAt === null) !== (r2PutDrainUntil === null)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label}.r2PutExpiresAt and ${label}.r2PutDrainUntil must be recorded together.`,
     );
   }
@@ -138,7 +139,7 @@ export function parseHostedWorkspaceSnapshotUploadSession(
     && r2PutDrainUntil !== null
     && Date.parse(r2PutDrainUntil) < Date.parse(r2PutExpiresAt)
   ) {
-    throw new TypeError(`${label}.r2PutDrainUntil must not precede the PUT expiry.`);
+    throw new ContractValidationError(`${label}.r2PutDrainUntil must not precede the PUT expiry.`);
   }
 
   return {
@@ -178,7 +179,7 @@ export function parseHostedWorkspaceSnapshotOrphanCandidate(
   const record = requireObject(value, label);
   const schema = requireString(record.schema, `${label}.schema`);
   if (schema !== HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA) {
-    throw new TypeError(`${label}.schema must be ${HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA}.`);
+    throw new ContractValidationError(`${label}.schema must be ${HOSTED_WORKSPACE_SNAPSHOT_ORPHAN_CANDIDATE_SCHEMA}.`);
   }
 
   const kind = record.kind === undefined
@@ -200,7 +201,7 @@ export function parseHostedWorkspaceSnapshotOrphanCandidate(
       `${label}.snapshotRef`,
     );
     if (!snapshotRef || isHostedWorkspaceSnapshotV2Ref(snapshotRef)) {
-      throw new TypeError(`${label}.snapshotRef must be a legacy hosted execution snapshot ref.`);
+      throw new ContractValidationError(`${label}.snapshotRef must be a legacy hosted execution snapshot ref.`);
     }
     return {
       createdAt: requireIsoString(record.createdAt, `${label}.createdAt`),
@@ -211,7 +212,7 @@ export function parseHostedWorkspaceSnapshotOrphanCandidate(
       userId: requireString(record.userId, `${label}.userId`),
     };
   }
-  throw new TypeError(`${label}.kind must be workspace_snapshot_v2 or legacy_workspace_snapshot.`);
+  throw new ContractValidationError(`${label}.kind must be workspace_snapshot_v2 or legacy_workspace_snapshot.`);
 }
 
 export function buildHostedWorkspaceSnapshotRefFromUploadSession(input: {
@@ -233,7 +234,7 @@ export function buildHostedWorkspaceSnapshotRefFromUploadSession(input: {
 
 export function encodeHostedWorkspaceSnapshotSha256Base64(sha256Hex: string): string {
   if (!/^[a-f0-9]{64}$/u.test(sha256Hex)) {
-    throw new TypeError("Hosted workspace snapshot SHA-256 digest must be lowercase hex.");
+    throw new ContractValidationError("Hosted workspace snapshot SHA-256 digest must be lowercase hex.");
   }
   return btoa(String.fromCharCode(...hexToBytes(sha256Hex)));
 }
@@ -266,10 +267,10 @@ function parseHostedWorkspaceSnapshotAad(
   const purpose = requireString(record.purpose, `${label}.purpose`);
   const schema = requireString(record.schema, `${label}.schema`);
   if (purpose !== HOSTED_WORKSPACE_SNAPSHOT_V2_AAD_PURPOSE) {
-    throw new TypeError(`${label}.purpose must be ${HOSTED_WORKSPACE_SNAPSHOT_V2_AAD_PURPOSE}.`);
+    throw new ContractValidationError(`${label}.purpose must be ${HOSTED_WORKSPACE_SNAPSHOT_V2_AAD_PURPOSE}.`);
   }
   if (schema !== HOSTED_WORKSPACE_SNAPSHOT_REF_SCHEMA) {
-    throw new TypeError(`${label}.schema must be ${HOSTED_WORKSPACE_SNAPSHOT_REF_SCHEMA}.`);
+    throw new ContractValidationError(`${label}.schema must be ${HOSTED_WORKSPACE_SNAPSHOT_REF_SCHEMA}.`);
   }
 
   return {
@@ -283,14 +284,14 @@ function parseHostedWorkspaceSnapshotAad(
 
 function requireObject(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object.`);
+    throw new ContractValidationError(`${label} must be an object.`);
   }
   return value as Record<string, unknown>;
 }
 
 function requireString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.trim().length === 0) {
-    throw new TypeError(`${label} must be a non-empty string.`);
+    throw new ContractValidationError(`${label} must be a non-empty string.`);
   }
   return value.trim();
 }
@@ -299,7 +300,7 @@ function requireIsoString(value: unknown, label: string): string {
   const text = requireString(value, label);
   const timestamp = Date.parse(text);
   if (!Number.isFinite(timestamp) || new Date(timestamp).toISOString() !== text) {
-    throw new TypeError(`${label} must be a canonical ISO timestamp.`);
+    throw new ContractValidationError(`${label} must be a canonical ISO timestamp.`);
   }
   return text;
 }
@@ -325,7 +326,7 @@ function decodeBase64(value: string): Uint8Array {
     bytes[index] = binary.charCodeAt(index);
   }
   if (bytes.byteLength !== 32) {
-    throw new TypeError("Hosted workspace snapshot SHA-256 checksum must decode to 32 bytes.");
+    throw new ContractValidationError("Hosted workspace snapshot SHA-256 checksum must decode to 32 bytes.");
   }
   return bytes;
 }

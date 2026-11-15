@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 export interface OverviewWeeklyStat {
   currentWeekAvg: number | null;
   deltaPercent: number | null;
@@ -154,7 +155,7 @@ function resolveOverviewReferenceDate(referenceDate: Date | string): Date {
   const parsed = new Date(referenceDate);
 
   if (Number.isNaN(parsed.valueOf())) {
-    throw new TypeError("Overview weekly stats referenceDate must be a valid datetime.");
+    throw new ContractValidationError("Overview weekly stats referenceDate must be a valid datetime.");
   }
 
   return parsed;

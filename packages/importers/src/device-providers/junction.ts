@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 
@@ -1199,7 +1200,7 @@ function parseJunctionCompanionHrvRmssdSnapshotEntry(
     .update(serializeCompanionHrvRmssdObservation(observation))
     .digest("hex");
   if (admissionId !== expectedAdmissionId) {
-    throw new TypeError("Companion HRV admission identity did not match its observation.");
+    throw new ContractValidationError("Companion HRV admission identity did not match its observation.");
   }
 
   return { admissionId, observation };

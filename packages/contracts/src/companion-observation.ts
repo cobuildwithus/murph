@@ -1,3 +1,4 @@
+import { ContractValidationError } from "./validation-error.ts";
 import * as z from "./zod-runtime.ts";
 
 export const COMPANION_HRV_RMSSD_SCHEMA =
@@ -52,7 +53,7 @@ export function parseCompanionHrvRmssdAdmissionId(
   value: unknown,
 ): CompanionHrvRmssdAdmissionId {
   if (typeof value !== "string" || !COMPANION_ADMISSION_ID_PATTERN.test(value)) {
-    throw new TypeError("Companion HRV admission identity must be a lowercase SHA-256 digest.");
+    throw new ContractValidationError("Companion HRV admission identity must be a lowercase SHA-256 digest.");
   }
 
   return value;
@@ -76,7 +77,7 @@ export function parseSerializedCompanionHrvRmssdObservation(
   value: unknown,
 ): CompanionHrvRmssdObservation {
   if (typeof value !== "string") {
-    throw new TypeError("Companion HRV observation payload must be a JSON string.");
+    throw new ContractValidationError("Companion HRV observation payload must be a JSON string.");
   }
   assertCompanionHrvRmssdSerializedSize(value);
   return parseCompanionHrvRmssdObservation(JSON.parse(value));
@@ -90,6 +91,6 @@ function assertCompanionHrvRmssdObservationSize(
 
 function assertCompanionHrvRmssdSerializedSize(value: string): void {
   if (new TextEncoder().encode(value).byteLength > MAXIMUM_SERIALIZED_BYTES) {
-    throw new TypeError("Companion HRV observation exceeded the hosted job payload limit.");
+    throw new ContractValidationError("Companion HRV observation exceeded the hosted job payload limit.");
   }
 }

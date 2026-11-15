@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { isShortOrTentativeSleepSession } from "@murphai/contracts";
 
 import type {
@@ -40,7 +41,7 @@ export function parseHostedGroupSharedFreshnessRequirements(
 ): HostedRuntimeGroupSharedFreshnessRequirement[] {
   const parsed = readHostedGroupSharedFreshness(value, scopes);
   if (typeof parsed === "string") {
-    throw new TypeError(FRESHNESS_REJECTION_MESSAGES[parsed]);
+    throw new ContractValidationError(FRESHNESS_REJECTION_MESSAGES[parsed]);
   }
   return parsed;
 }
