@@ -206,3 +206,13 @@ removed: a `tsx` import of `packages/hosted-execution/src/runtime-control.ts`
 resolves with the path entry and fails without it; both state-cardinality
 suites pass (7 tests); the source-resolution suite passes (20 tests). The gap
 is recorded in the friction log.
+
+### CLI import surface
+
+The second exact-head CI run failed one shard: the scoped CLI probe
+`condition list --format json` resolved 324 modules against a ceiling of 323.
+The added module is `contracts/dist/elevenlabs-music.js`, two zero-import
+constants, reached through the delivery contract that probe already loads.
+Reproduced locally at 324; the ceiling is raised to the measured count with its
+note, as the two previous single-module additions were. Every other shard on
+that head passed.
