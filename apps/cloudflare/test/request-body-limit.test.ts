@@ -106,6 +106,18 @@ describe("Worker body-limit response parity", () => {
     await expect(response.json()).resolves.toEqual({ error: "Invalid request." });
   });
 
+  it("keeps 413 when a recap envelope within the wire limit normalizes past it", async () => {
+    const c = context(0, "streamed");
+    c.request.headers.set("x-murph-recap-hash", "a".repeat(64));
+    // Invalid UTF-8 decodes to longer replacement characters, so the sealed text can outgrow the bytes read.
+    vi.spyOn(gameMediaStore, "requireHostedGameMediaEnvelope").mockReturnValueOnce("x".repeat(3 * 1024 * 1024 + 1));
+    const put = vi.spyOn(c.env.BUNDLES, "put");
+    const response = await recapMediaRoutes[0]!.handle(c, { userId });
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toEqual({ error: "Recap asset is too large." });
+    expect(put).not.toHaveBeenCalled();
+  });
+
   it("accepts exactly the byte limit", async () => {
     const request = new Request("https://example.test/body", { method: "POST", body: "é".repeat(4) });
     expect(await readRequestBodyBytes(request, { limitBytes: 8 })).toEqual(new TextEncoder().encode("é".repeat(4)));
