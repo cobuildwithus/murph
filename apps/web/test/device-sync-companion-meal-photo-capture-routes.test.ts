@@ -84,7 +84,8 @@ vi.mock("@/src/lib/hosted-routing/member-direct-route", () => ({
     mocks.readCurrentHostedMemberDirectRoute,
 }));
 
-vi.mock("@/src/lib/legal/consent", () => ({
+vi.mock("@/src/lib/legal/consent", async original => ({
+  ...await original<typeof import("@/src/lib/legal/consent")>(),
   assertHostedHistoricalLaunchConsentGranted:
     mocks.assertHostedHistoricalLaunchConsentGranted,
 }));
@@ -145,6 +146,21 @@ const ENROLLMENT_REQUEST = {
 };
 
 describe("meal photo companion routes", () => {
+  it.each([false, true])("rejects normalized year overflow before first upload and replay (manual: %s)", async manual => {
+    const actual = await vi.importActual<typeof import("@/src/lib/device-sync/meal-photo-capture")>("@/src/lib/device-sync/meal-photo-capture");
+    mocks.readAndValidateMealPhotoUpload.mockImplementation(actual.readAndValidateMealPhotoUpload);
+    mocks.readAndValidateManualMealPhotoUpload.mockImplementation(actual.readAndValidateManualMealPhotoUpload);
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const response = await (manual ? manualPhotosRoute : photosRoute).POST(new Request("https://example.test/photos", {
+        method: "POST", body: requestBody(Buffer.from("/9j/wAALCAACAAMBAREA/9oACAEBAAA/AAD/2Q==", "base64")),
+        headers: { "content-type": "image/jpeg", "idempotency-key": manual ? "11111111-1111-4111-8111-111111111111" : "a".repeat(64), "x-murph-meal-capture-schema": "1", "x-murph-captured-at": "9999-12-31T23:59:59-01:00" },
+      }));
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: { code: "INVALID_REQUEST", message: "Invalid request." } });
+    }
+    expect(mocks.stageMealPhoto).not.toHaveBeenCalled();
+  });
+
   beforeAll(async () => {
     enrollmentRoute = await import(
       "../app/api/device-sync/companion/meal-photo-capture/enrollment/route"

@@ -1,4 +1,4 @@
-import { ContractValidationError } from "@murphai/contracts/validation-error";
+import { RequestInputError } from "@murphai/hosted-execution/request-input";
 import { createHash } from "node:crypto";
 import { hostedBrowserVaultReplicaUserPrefix, hostedWorkspaceSnapshotObjectKey } from "@murphai/hosted-execution/storage-paths";
 import { parseHostedRuntimeResourcePurge, type HostedRuntimeResourcePurge } from "@murphai/hosted-execution/runtime-resource-purge";
@@ -71,13 +71,13 @@ export async function recordHostedRuntimeOrphan(input: { prisma: PrismaClient; u
   if (resource.kind === "legacy_snapshot") candidates = snapshotOrphanCandidates(resource.snapshotRef);
   else if (resource.kind === "snapshot") {
     const snapshotId = /\/workspace-snapshots\/([A-Za-z0-9][A-Za-z0-9._-]{0,127})\.snapshot\.enc$/u.exec(resource.objectKey)?.[1];
-    if (!snapshotId || resource.objectKey !== await hostedWorkspaceSnapshotObjectKey({ userId: input.userId, snapshotId })) throw new ContractValidationError("Snapshot orphan namespace mismatch.");
+    if (!snapshotId || resource.objectKey !== await hostedWorkspaceSnapshotObjectKey({ userId: input.userId, snapshotId })) throw new RequestInputError("Snapshot orphan namespace mismatch.");
     candidates = [{ kind: "snapshot", resourceId: snapshotId, objectKey: resource.objectKey, snapshotRef: Prisma.DbNull }];
   } else if (resource.kind === "replica") {
     const prefix = await hostedBrowserVaultReplicaUserPrefix({ userId: input.userId });
-    if (!resource.objectKey.startsWith(prefix) || resource.objectKey.slice(prefix.length).includes("/")) throw new ContractValidationError("Replica orphan namespace mismatch.");
+    if (!resource.objectKey.startsWith(prefix) || resource.objectKey.slice(prefix.length).includes("/")) throw new RequestInputError("Replica orphan namespace mismatch.");
     candidates = [{ kind: "replica", resourceId: resource.objectKey, objectKey: resource.objectKey, snapshotRef: Prisma.DbNull }];
-  } else throw new ContractValidationError("Media retirement has its own metadata owner.");
+  } else throw new RequestInputError("Media retirement has its own metadata owner.");
   await input.prisma.$transaction(async tx => {
     await lockHostedMemberRow(tx, input.userId);
     await lockHostedRuntimeOwnerRowTx(tx, input.userId);

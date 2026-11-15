@@ -58,6 +58,24 @@ describe("hosted device webhook Queue consumer", () => {
     expect(response.status).toBe(202);
   });
 
+  it("rejects a short payload IV as malformed before queue persistence", async () => {
+    const envelope = await createEnvelope(0);
+    envelope.encryptedPayload.iv = "AA==";
+    const send = vi.fn(async () => createQueueSendResponse());
+    const env = createWorkerEnv();
+    const response = await deviceWebhookEnqueueRoutes[0]!.handle({
+      env: { ...env, DEVICE_WEBHOOK_QUEUE: createQueueBinding(send) },
+      environment: readHostedExecutionEnvironment(asWorkerStringEnvironment(env)),
+      request: new Request("https://runner.example.test/internal/device-webhooks/enqueue", {
+        body: JSON.stringify(envelope), method: "POST",
+      }),
+      url: new URL("https://runner.example.test/internal/device-webhooks/enqueue"),
+    }, {});
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ code: "invalid_request", error: "Malformed device webhook envelope." });
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it("returns a retryable service failure when Queue.send rejects", async () => {
     const envelope = await createEnvelope(0);
     const route = deviceWebhookEnqueueRoutes[0]!;

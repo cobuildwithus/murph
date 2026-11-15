@@ -54,7 +54,7 @@ import {
   buildWorkerRouteLogDetails,
 } from "../route-utils/log-details.ts";
 import {
-  parseJsonValue,
+  parseJsonInput,
   requireJsonRecord,
 } from "../route-utils/json-body.ts";
 import {
@@ -87,7 +87,7 @@ export async function handleBrowserVaultSessionRoute(
   const userId = decodeRouteParam(encodedUserId);
   let body;
   try {
-    body = parseInput(parseJsonValue(await readCachedRequestText(context)), parseBrowserVaultSessionRequest);
+    body = parseInput(parseJsonInput(await readCachedRequestText(context)), parseBrowserVaultSessionRequest);
   } catch (error) {
     emitHostedExecutionStructuredLog({
       component: "worker",

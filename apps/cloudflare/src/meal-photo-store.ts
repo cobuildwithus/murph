@@ -182,7 +182,7 @@ export function requireHostedMealPhotoBytes(value: Uint8Array): Uint8Array {
     throw new ContractValidationError("Hosted meal photo bytes must be a Uint8Array.");
   }
   if (value.byteLength === 0 || value.byteLength > HOSTED_MEAL_PHOTO_MAX_BYTES) {
-    throw new RangeError(
+    throw new ContractValidationError(
       `Hosted meal photo must contain between 1 and ${HOSTED_MEAL_PHOTO_MAX_BYTES} bytes.`,
     );
   }

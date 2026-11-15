@@ -392,6 +392,13 @@ function heartRateZonesDeliveryBody(): HostedVaultShareDeliverRequest {
 }
 
 describe("vault-share deliver route", () => {
+  it("rejects group-email records without a supported data contract", async () => {
+    const response = await deliverRoute.POST(buildRequest({ ...VALID_BODY, projectionKind: "group-email.v0", records: [{ recordKey: "synthetic", occurredAt: "2026-11-14T00:00:00.000Z", data: {} }] }));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: { code: "INVALID_REQUEST", message: "Invalid request." } });
+    expect(mocks.findActiveHostedVaultShares).not.toHaveBeenCalled();
+  });
+
   it("forwards an age group only on a ranking delivery", async () => {
     const scope = hostedVaultShareProjectionKindToScope("resting-heart-rate-days.v0");
     const share = { ...ACTIVE_SHARE, projectionKind: scope.projectionKind, projectionScope: scope,
@@ -655,6 +662,18 @@ describe("vault-share deliver route", () => {
       share: workoutShare,
       sourceWorkspaceVersion: VALID_BODY.sourceWorkspaceVersion,
     });
+  });
+
+  it.each(["sleepType", "sleepState"])("rejects malformed %s before reading or writing shares", async (field) => {
+    const body = sourceAwareSleepDeliveryBody(1);
+    const response = await deliverRoute.POST(buildRequest({
+      ...body,
+      records: body.records.map((record) => ({ ...record, data: { ...record.data, [field]: 123 } })),
+    }));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: { code: "INVALID_REQUEST", message: "Invalid request." } });
+    expect(mocks.findActiveHostedVaultShares).not.toHaveBeenCalled();
+    expect(mocks.replaceHostedVaultShareProjectionSnapshot).not.toHaveBeenCalled();
   });
 
   it("preserves source-recorded sleep times through the deliver route", async ({ onTestFinished }) => {

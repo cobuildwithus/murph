@@ -52,14 +52,16 @@ describe("request body limit response parity", () => {
   });
   afterEach(() => vi.restoreAllMocks());
 
-  describe.each(routes)("$name", ({ handle, limit, code, message }) => {
+  describe.each(routes)("$name", ({ name, handle, limit, code, message }) => {
     it.each(["Invalid array length", "Request body exceeded 8 bytes."])("does not mislabel an unrelated RangeError: %s", async message => {
       const request = oversizedRequest(0, "streamed");
       Object.defineProperty(request, "body", { value: new ReadableStream({ start(controller) { controller.error(new RangeError(message)); } }) });
       const response = await handle(request);
-      expect(response.status).toBe(400);
+      expect(response.status).toBe(name === "Linq" ? 400 : 500);
       expect(Object.fromEntries(response.headers)).toEqual({ "cache-control": "no-store", "content-type": "application/json" });
-      await expect(response.json()).resolves.toEqual({ error: { code: "INVALID_REQUEST", message: "Invalid request." } });
+      await expect(response.json()).resolves.toEqual({ error: name === "Linq"
+        ? { code: "INVALID_REQUEST", message: "Invalid request." }
+        : { code: "INTERNAL_ERROR", message: "Internal error." } });
     });
     it.each(modes)("preserves the complete response for %s overflow", async (mode) => {
       await expectResponse(await handle(oversizedRequest(limit, mode)), {
@@ -84,8 +86,8 @@ describe("request body limit response parity", () => {
 
   it("does not use the old message prefix to classify a native RangeError", async () => {
     const response = createJsonErrorResponse(new RangeError("Request body exceeded 8 bytes."), { internalMessage: "test", logMessage: "test" });
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toEqual({ error: { code: "INVALID_REQUEST", message: "Invalid request." } });
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({ error: { code: "INTERNAL_ERROR", message: "Internal error." } });
   });
 
   it.each(modes)("preserves the global Web response for %s overflow", async (mode) => {

@@ -68,9 +68,9 @@ export function parseHostedWorkspaceSnapshotV2Ref(
   };
 }
 
-function parseHostedWorkspaceSnapshotV2Archive(
+export function parseHostedWorkspaceSnapshotV2Archive(
   value: unknown,
-  label: string,
+  label = "Hosted workspace snapshot archive",
 ): HostedWorkspaceSnapshotV2ArchiveMetadata {
   const record = requireObject(value, label);
   const format = requireString(record.format, `${label}.format`);

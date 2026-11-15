@@ -1,3 +1,4 @@
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import "server-only";
 
 import { currentGameTalkRequest, readCurrentGameTalk } from "./talk";
@@ -236,7 +237,8 @@ function isSkippedBootstrapReservation(row: {
 
 async function freezeBootstrapMessage(input: ControlInput, phones: string[]): Promise<FrozenReceipt | null> {
   if (input.request.operation !== "send" || !input.request.text?.trim()) throw new TypeError("Game chat bootstrap requires its generated message.");
-  validateHostedLinqChatFirstMessage(input.request.text);
+  const text = input.request.text;
+  parseInput(text, () => validateHostedLinqChatFirstMessage(text));
   const prisma = getPrisma();
   const key = input.request.eventId;
   const lookupKey = createHostedLinqDeliveryIdempotencyLookupKey(key);

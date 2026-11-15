@@ -1,4 +1,4 @@
-import { ContractValidationError } from "@murphai/contracts/validation-error";
+import { RequestInputError } from "@murphai/hosted-execution/request-input";
 import { readJsonObject } from "./http";
 
 export async function requireHostedInviteCodeFromRequest(
@@ -11,7 +11,7 @@ export async function requireHostedInviteCodeFromRequest(
   const inviteCode = typeof body.inviteCode === "string" ? body.inviteCode : null;
 
   if (!inviteCode) {
-    throw new ContractValidationError("inviteCode is required.");
+    throw new RequestInputError("inviteCode is required.");
   }
 
   return {

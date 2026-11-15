@@ -1,3 +1,4 @@
+import { parseHostedRuntimeLogEntry } from "@murphai/hosted-execution/parsers";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 import type { HostedRuntimeLogEntry, HostedRuntimeRedactedJson } from "@murphai/hosted-execution/runtime-control";
 
@@ -79,14 +80,14 @@ export function parseCompanionSyncDiagnostic(value: unknown, now = new Date()): 
       };
     }),
   };
-  return {
+  return parseHostedRuntimeLogEntry({
     at: now.toISOString(),
     component: "device-sync",
     phase: "fetch",
     eventCode: COMPANION_SYNC_DIAGNOSTIC_EVENT,
     level: "info",
     redactedJson,
-  };
+  });
 }
 
 function object(value: unknown, allowed: readonly string[]): Record<string, unknown> {

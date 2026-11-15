@@ -83,7 +83,7 @@ export function parsePreparedDeviceSyncWebhook(
   const jobs = requireArray(record.jobs, "Prepared device webhook jobs")
     .map(parsePreparedJob);
   if (jobs.length > PREPARED_WEBHOOK_MAX_JOBS) {
-    throw new RangeError("Prepared device webhook has too many jobs.");
+    throw new ContractValidationError("Prepared device webhook has too many jobs.");
   }
 
   const prepared: PreparedDeviceSyncWebhookV1 = {
@@ -165,7 +165,7 @@ export function parsePreparedDeviceSyncWebhook(
     textEncoder.encode(JSON.stringify(prepared)).byteLength
       > PREPARED_WEBHOOK_MAX_SERIALIZED_BYTES
   ) {
-    throw new RangeError("Prepared device webhook is too large.");
+    throw new ContractValidationError("Prepared device webhook is too large.");
   }
   return prepared;
 }
@@ -208,7 +208,7 @@ function parsePreparedJobPayload(
   const record = requireRecord(value, label);
   const entries = Object.entries(record);
   if (entries.length > PREPARED_WEBHOOK_MAX_PAYLOAD_FIELDS) {
-    throw new RangeError(`${label} has too many fields.`);
+    throw new ContractValidationError(`${label} has too many fields.`);
   }
   return Object.fromEntries(entries.map(([key, fieldValue]) => [
     requireString(key, `${label} field name`),

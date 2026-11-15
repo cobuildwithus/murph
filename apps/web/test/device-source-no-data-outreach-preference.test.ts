@@ -27,6 +27,7 @@ import {
 import {
   readHostedSourceNoDataOutreachPolicy,
 } from "@/src/lib/device-sync/source-no-data-outreach-policy";
+import { jsonError } from "@/src/lib/device-sync/settings-http";
 
 const ASSISTANT_INPUT_ID = "ain_00000000000000000000000000000001";
 
@@ -105,6 +106,39 @@ beforeEach(() => {
 });
 
 describe("hosted source no-data outreach policy", () => {
+  it("keeps unknown sources and missing input authority as explicit rejections", async () => {
+    const store = createPreferenceStore();
+    mocks.getPrisma.mockReturnValue(store.prisma);
+    const request = {
+      assistantInputId: ASSISTANT_INPUT_ID,
+      mode: "off" as const,
+      sourceProviderSlug: "unknown",
+    };
+    const invalidSource = await configureHostedSourceNoDataOutreach({
+      memberId: "member_opaque", request,
+    }).catch(jsonError);
+    expect(invalidSource).toBeInstanceOf(Response);
+    if (!(invalidSource instanceof Response)) throw new Error("Expected rejection response.");
+    expect(invalidSource.status).toBe(400);
+    expect(await invalidSource.json()).toEqual({ error: { code: "INVALID_REQUEST", message: "Invalid request." } });
+    expect(store.prisma.$transaction).not.toHaveBeenCalled();
+
+    mocks.readInputAuthority.mockResolvedValue(null);
+    const invalidAuthority = await configureHostedSourceNoDataOutreach({
+      memberId: "member_opaque", request: { ...request, sourceProviderSlug: "garmin" },
+    }).catch(jsonError);
+    expect(invalidAuthority).toBeInstanceOf(Response);
+    if (!(invalidAuthority instanceof Response)) throw new Error("Expected rejection response.");
+    expect(invalidAuthority.status).toBe(400);
+    expect(await invalidAuthority.json()).toEqual({ error: {
+      code: "INVALID_REQUEST",
+      message: "No-data outreach can only be changed from current private member input.",
+      retryable: false,
+    } });
+    expect(mocks.requireActiveAccess).toHaveBeenCalledTimes(1);
+    expect(store.preference.upsert).not.toHaveBeenCalled();
+  });
+
   it("resolves missing, custom, and disabled canonical preference state", async () => {
     const defaultStore = createPreferenceStore();
     await expect(readHostedSourceNoDataOutreachPolicy({

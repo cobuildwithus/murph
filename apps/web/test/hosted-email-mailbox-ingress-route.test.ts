@@ -38,6 +38,27 @@ vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({
 }));
 
 describe("hosted email mailbox ingress route", () => {
+  it.each([{ eventId: "evt_synthetic", identityId: "" }, { eventId: " ", identityId: null }])("rejects blank mailbox identity material: %j", async fields => {
+    mocks.readOptionalJsonObject.mockResolvedValue({ ...fields, occurredAt: "2026-11-14T12:00:00.000Z", rawMessageKey: "raw_synthetic" });
+    const { POST } = await import("../app/api/internal/hosted-mailbox/email-ingress/route");
+    const response = await POST(new Request("https://example.test", { method: "POST" }));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: { code: "INVALID_REQUEST", message: "Invalid request." } });
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("rejects a group email whose resolved identity is blank before appending", async () => {
+    mocks.readOptionalJsonObject.mockResolvedValue({
+      eventId: "event_synthetic", occurredAt: "2026-11-14T00:00:00.000Z", identityId: null, rawMessageKey: " ",
+      threadTarget: serializeHostedEmailThreadTarget({ targetKind: "group", groupId: "group_synthetic", references: [] }),
+    });
+    const { POST } = await import("../app/api/internal/hosted-mailbox/email-ingress/route");
+    const response = await POST(new Request("https://example.test", { method: "POST" }));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: { code: "INVALID_REQUEST", message: "Invalid request." } });
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_123");

@@ -147,52 +147,47 @@ Each stage is safe to stop at.
 ## Progress
 
 - Stage 1: merged (#4972).
-- Stage 2: merged (#4978). 2,243 sites converted, about 1,000 left as server
-  faults; audit corrections follow in their own PR.
-- Stage 4: this PR.
+- Stage 2: merged (#4978), with audit corrections and the auth validators in
+  #4982.
 - Stage 3: merged (#4977).
-- Merged alongside, from stage 6: the mailbox handoff retry rule (#4974) and
-  the Worker media catches (#4976).
+- Stage 4: merged (#4979).
+- Stage 5: this PR.
+- Merged alongside, from stage 6: the mailbox handoff retry rule (#4974), the
+  Worker media catches (#4976) and the control client's explicit
+  malformed-response error (#4980).
 
-Validators deliberately not converted because a consumer tells a subclass
-from a plain `TypeError` by prototype identity; each needs its consumer
-changed before stage 4 reaches it:
+Still to do after this PR:
 
-- `apps/web/src/lib/better-auth` record, record-query, record-crypto and
-  adapter validators (17 sites): the auth session logger checks the error's
-  immediate prototype.
-- `apps/cloudflare/src/runtime-platform/connected-apps-port.ts` (1 site): a
-  test pins `TypeError.prototype`.
+- **Provider webhooks, one at a time.** The Linq, Telegram, Stripe, Retell and
+  device-data webhook routes are wrapped in
+  `withLegacyWebhookErrorInference`, and the Worker's device webhook enqueue
+  handler keeps its responses with an explicit local decision. Each keeps
+  exactly what it answers on main until it is migrated with its own
+  duplicate, partial-success and lost-response proof, because a provider
+  retries on 5xx.
+- **Remaining local type checks** that make their own decision from an
+  error's type (retry, upstream invalid, fallback), by meaning.
+- **Delete:** the webhook wrapper as each provider migrates, the `TypeError`
+  and `RangeError` bases and the name device on the explicit errors, and the
+  `fetch failed` matches that remain for their own local purposes.
+- The six changelog query validators in `apps/web/src/lib/changelog.ts`,
+  which the changelog guard prevents editing in a code-only PR.
 
-Also not converted: the six query validators in
-`apps/web/src/lib/changelog.ts`. The changelog guard treats any change to
-that file as a change to changelog content, so they move with the public
-changelog route's boundary work.
+## Scope of this PR (stage 5)
 
-## Scope of this PR (stage 4)
+- In scope: the three mappers' final shape; explicit JSON, object-shape and
+  path rejections in the shared readers; service entry points that validate
+  caller input; schema `.parse` calls on caller input; state-dependent
+  refusals as domain errors; local catches in the runner's outbound handlers;
+  log severity following classification; tests that pinned a server fault as
+  a 4xx.
+- Out of scope: what any provider webhook receives.
 
-- In scope: route files under `apps/web/app`, Worker route handlers and
-  route utilities, and the container's request decoding.
-- Out of scope: the three mappers, shared readers and service code under
-  `apps/web/src`, provider webhook routes, and any status, body, header or
-  retry change.
+## Success criteria (stage 5)
 
-Left for stage 5, found while marking:
-
-- Routes that hand the raw payload to a service that validates it inside;
-  the entry points are listed in the PR.
-- Five runner-callback routes (phone calls, physical notes) validate with a
-  schema `.parse` whose error no mapper recognizes, so malformed input is a
-  500 today.
-- `runtime-control.ts` in the Worker throws the same error for a mismatched
-  owner whether the admission came from the request or from stored state.
-- `device-webhook-enqueue.ts` answers 400 for keyring and persistence
-  failures as well as for bad input, and a test pins that.
-- Catch-all parse adapters that already produce a domain rejection but also
-  catch parser bugs.
-
-## Success criteria (stage 4)
-
-- Every existing response expectation passes untouched. The one changed
-  expectation outside logs is a test-only Worker route that now lets an
-  unrelated `RangeError` reach the outer mapper.
+- A mapper answers 4xx only for an explicit request rejection, an explicit
+  body-limit error or a recognized domain error.
+- Every response this PR changes is listed in the PR, in three groups:
+  malformed input that was a server failure, server faults that were a 4xx,
+  and other.
+- The provider webhook tests pass unchanged.

@@ -48,4 +48,11 @@ describe("companion push route", () => {
     expect(m.remove).toHaveBeenCalledExactlyOnceWith("member-bound", installationId);
     expect(m.active).not.toHaveBeenCalled();
   });
+  it.each([POST, DELETE])("rejects malformed push-route JSON %#", async handler => {
+    const response = await handler(new Request("https://example.test/push-route", { method: "POST", body: "{" }));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: { code: "INVALID_JSON", message: "Invalid JSON." } });
+    expect(m.register).not.toHaveBeenCalled();
+    expect(m.remove).not.toHaveBeenCalled();
+  });
 });

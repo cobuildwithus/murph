@@ -1,3 +1,4 @@
+import { deviceWebhookEnqueueRoutes } from "../src/worker/route-handlers/device-webhook-enqueue.ts";
 import { RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import * as gameMediaStore from "../src/game-media-store.ts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -79,16 +80,14 @@ describe("Worker body-limit response parity", () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
   });
   afterEach(() => vi.restoreAllMocks());
-  describe.each(routes)("$name", ({ name, handle, limit, error }) => {
+  describe.each(routes)("$name", ({ handle, limit, error }) => {
     it.each(["Invalid array length", "Request body exceeded 8 bytes."])("does not mislabel an unrelated RangeError: %s", async message => {
       const c = context(0, "streamed");
       Object.defineProperty(c.request, "body", { value: new ReadableStream({ start(controller) { controller.error(new RangeError(message)); } }) });
-      const response = name === "web control"
-        ? await handle(c)
-        : await Promise.resolve(handle(c)).catch(error => mapWorkerRouteError(c.request, error));
-      expect(response?.status).toBe(400);
+      const response = await Promise.resolve(handle(c)).catch(error => mapWorkerRouteError(c.request, error));
+      expect(response?.status).toBe(500);
       expect(Object.fromEntries(response!.headers)).toEqual({ "content-type": "application/json; charset=utf-8" });
-      await expect(response!.json()).resolves.toEqual({ error: "Invalid request." });
+      await expect(response!.json()).resolves.toEqual({ error: "Internal error." });
     });
     it.each(modes)("keeps the response for %s overflow", async mode => {
       const response = await handle(context(limit, mode));
@@ -97,13 +96,26 @@ describe("Worker body-limit response parity", () => {
       await expect(response!.json()).resolves.toEqual({ error });
     });
   });
+  it.each([
+    [new RangeError("Synthetic stream failure."), { code: "invalid_request", error: "Malformed device webhook envelope." }],
+    [new TypeError("Synthetic stream failure."), { error: "Invalid request." }],
+    [new URIError("Synthetic stream failure."), { error: "Invalid request." }],
+    [new SyntaxError("Synthetic stream failure."), { error: "Invalid JSON." }],
+  ] as const)("preserves provider-webhook stream failure responses until its own migration: %s", async (failure, body) => {
+    const c = context(0, "streamed");
+    Object.defineProperty(c.request, "body", { value: new ReadableStream({ start(controller) { controller.error(failure); } }) });
+    const response = await deviceWebhookEnqueueRoutes[0]!.handle(c, {});
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual(body);
+  });
+
   it("does not label a parser RangeError as game media size", async () => {
     const c = context(0, "streamed");
     const parse = vi.spyOn(gameMediaStore, "requireHostedGameMediaEnvelope").mockImplementationOnce(() => { throw new RangeError("Invalid array length"); });
     const response = await Promise.resolve(gameMediaRoutes[0]!.handle(c, { userId })).catch(error => mapWorkerRouteError(c.request, error));
     expect(parse).toHaveBeenCalledOnce();
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toEqual({ error: "Invalid request." });
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({ error: "Internal error." });
   });
 
   it("keeps 413 when a recap envelope within the wire limit normalizes past it", async () => {

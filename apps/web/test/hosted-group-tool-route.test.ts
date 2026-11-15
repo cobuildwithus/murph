@@ -606,6 +606,15 @@ describe("hosted group tool route", () => {
     },
   );
 
+  it.each(["leave_group", "game_chat_bootstrap", "read_game"])("rejects malformed %s schema input before effects", async (action) => {
+    const response = await route.POST(new Request(`https://web.example.test${HOSTED_RUNTIME_GROUP_TOOL_PATH}`, {
+      method: "POST", body: JSON.stringify({ action }), headers: { "content-type": "application/json" },
+    }));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: { code: "INVALID_REQUEST", message: "Invalid request." } });
+    expect(mocks.handleTool).not.toHaveBeenCalled();
+  });
+
   it("rejects an unmarked legacy group request before admission", async () => {
     const request = new Request(
       `https://join.example.test${HOSTED_RUNTIME_GROUP_TOOL_PATH}`,

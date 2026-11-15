@@ -18,7 +18,7 @@ export const POST = withJsonError(async (request: Request) => {
     throw new RequestInputError("inviteCode is required.");
   }
 
-  if (!sessionId) {
+  if (!sessionId || /[\uD800-\uDFFF]/u.test(sessionId)) {
     throw new RequestInputError("sessionId is required.");
   }
 

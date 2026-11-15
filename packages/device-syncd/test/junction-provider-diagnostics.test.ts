@@ -1,3 +1,4 @@
+import { parseJunctionDiagnosticRequestedTimestamp } from "../src/providers/junction-config.ts";
 import {
   assertConnectBackfillRetryWake,
   assertJunctionWindowQuery,
@@ -591,6 +592,16 @@ test("Junction REST diagnostic matrix compares metadata, introspection, and data
     /junction-user-1|provider-garmin-1|source-device-1|device-row-1|garmin|Garmin|Fenix|97/u,
   );
 });
+
+for (const windowEnd of ["-271821-04-20T00:00:00.000Z", "+275760-09-13T00:00:00.000Z"]) {
+  test(`Junction diagnostic rejects overflowing caller window ${windowEnd}`, async () => {
+    const fetch = vi.fn(async () => { throw new Error("Unexpected provider call"); });
+    const provider = createJunctionProvider(fetch, { summaryResources: ["activity"], timeseriesResources: [] });
+    assert.ok(provider.diagnostics?.diagnoseBackfill);
+    await assert.rejects(() => provider.diagnostics!.diagnoseBackfill!({ account: createAccount(), now: "2026-04-03T00:00:00.000Z", windowEnd }), { code: "JUNCTION_DIAGNOSTIC_WINDOW_INVALID", httpStatus: 400 });
+    assert.equal(fetch.mock.calls.length, 0);
+  });
+}
 
 test("Junction backfill diagnostic rejects malformed requested windows without provider calls", async () => {
   const provider = createJunctionProvider(async () => {
@@ -2954,3 +2965,16 @@ test("Junction refresh preserves its outcome when the following source status re
   assert.equal((result.result.selectedSource as Record<string, unknown>).status, "unknown");
   assert.equal(typeof (result.result.selectedSource as Record<string, unknown>).errorCode, "string");
 });
+
+for (const value of ["-271821-04-20T00:00:00.000Z", "+275760-09-13T00:00:00.000Z", "0000-12-31T23:59:59.999Z", "9999-01-01T00:00:00.000Z"]) {
+  test(`diagnostic timestamp rejects unusable range ${value}`, () => {
+    assert.throws(() => parseJunctionDiagnosticRequestedTimestamp(value, "windowEnd"), { code: "JUNCTION_DIAGNOSTIC_WINDOW_INVALID", httpStatus: 400 });
+    assert.throws(() => parseJunctionDiagnosticRequestedTimestamp(value, "windowStart"), { code: "JUNCTION_DIAGNOSTIC_WINDOW_INVALID", httpStatus: 400 });
+  });
+}
+for (const value of ["0001-01-01T00:00:00.000Z", "9998-12-31T23:59:59.999Z"]) {
+  test(`diagnostic timestamp accepts usable bound ${value}`, () => {
+    assert.equal(parseJunctionDiagnosticRequestedTimestamp(value, "windowEnd"), value);
+    assert.equal(parseJunctionDiagnosticRequestedTimestamp(value, "windowStart"), value);
+  });
+}

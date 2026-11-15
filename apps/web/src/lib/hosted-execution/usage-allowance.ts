@@ -1,3 +1,5 @@
+import { parseInput } from "@murphai/hosted-execution/request-input";
+import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   HostedBillingStatus,
@@ -1192,7 +1194,7 @@ export async function settleHostedAiUsageForAllowanceTx(input: {
     };
   }
 
-  const pricingDecision = resolveHostedAiUsageAllowancePricingDecision(input.record);
+  const pricingDecision = parseInput(input.record, () => resolveHostedAiUsageAllowancePricingDecision(input.record));
   if (
     period.planResetAt
     && at.getTime() < period.planResetAt.getTime()
@@ -1382,7 +1384,7 @@ async function markHostedAiUsageAllowanceDeniedTx(input: {
   tx: Prisma.TransactionClient;
 }): Promise<void> {
   const tokenPricingBasis =
-    validateHostedAiUsageAllowanceDeniedTokenPricingBasis(input.record);
+    parseInput(input.record, () => validateHostedAiUsageAllowanceDeniedTokenPricingBasis(input.record));
 
   await input.tx.hostedAiUsage.updateMany({
     where: {
@@ -4067,7 +4069,7 @@ export async function isVerifiedOperatorTaskUsage(input: {
     || !["diagnostic", "member_message"].includes(task.kind)
     || !["running", "completed", "failed"].includes(task.status)
     || occurredAt < task.createdAt || occurredAt > task.expiresAt) {
-    throw new TypeError("Operator-funded usage does not match an authorized task.");
+    throw hostedOnboardingError({ code: "INVALID_REQUEST", httpStatus: 400, message: "Invalid request." });
   }
   return true;
 }

@@ -1,3 +1,4 @@
+import { jsonError } from "@/src/lib/hosted-onboarding/http";
 import { HostedBillingStatus } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -147,6 +148,23 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
     mocks.getHostedInviteStatus.mockResolvedValue(createStatus({
       stage: "active",
     }));
+  });
+
+  it("keeps a Stripe URIError as a server failure", async () => {
+    const failure = new URIError("Synthetic SDK failure.");
+    mocks.stripe.checkout.sessions.retrieve.mockRejectedValueOnce(failure);
+    const error = await reconcileHostedBillingCheckoutSuccess({
+      inviteCode: "synthetic-invite", member: createMemberSnapshot().core,
+      sessionId: "cs_synthetic", prisma: {} as never,
+    }).catch(error => error);
+    const response = jsonError(error);
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({ error: {
+      code: "INTERNAL_ERROR",
+      message: "Internal error.",
+    } });
+    expect(mocks.requireHostedInviteForAuthentication).toHaveBeenCalledOnce();
+    expect(mocks.stripe.checkout.sessions.retrieve).toHaveBeenCalledTimes(1);
   });
 
   it.each(checkoutSubscriptionStatuses)(

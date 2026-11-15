@@ -120,25 +120,39 @@ export async function createHostedDataKeyEnvelopeWithDomainRoot(input: {
   };
 }
 
-export async function unwrapHostedDataKeyWithDomainRoot(input: {
+export function decodeHostedDataKeyEnvelopeWrap(input: {
   envelope: HostedDataKeyEnvelopeV1;
-  rootKey: Uint8Array;
   rootKeyId: string;
-}): Promise<Uint8Array> {
+}) {
   const envelope = parseHostedDataKeyEnvelope(input.envelope);
-  const rootKeyId = requireNonEmptyString(
-    input.rootKeyId,
-    "Hosted data-key unwrap rootKeyId",
-  );
+  const rootKeyId = requireNonEmptyString(input.rootKeyId, "Hosted data-key unwrap rootKeyId");
   const wrap = envelope.wraps.find(
     (entry) => entry.kind === "domain-root" && entry.rootKeyId === rootKeyId,
   );
   if (!wrap) {
-    throw new Error(
-      `Hosted data-key envelope is missing domain-root wrap ${rootKeyId}.`,
-    );
+    throw new Error(`Hosted data-key envelope is missing domain-root wrap ${rootKeyId}.`);
   }
+  try {
+    return {
+      envelope,
+      wrap,
+      iv: decodeFixedBase64(wrap.iv, HOSTED_DATA_KEY_IV_BYTES, "Hosted data-key wrap IV"),
+      ciphertext: decodeBase64(wrap.ciphertext),
+    };
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "InvalidCharacterError") {
+      throw new ContractValidationError("Hosted data-key encoding must be valid base64.");
+    }
+    throw error;
+  }
+}
 
+export async function unwrapHostedDataKeyWithDomainRoot(input: {
+  decoded: ReturnType<typeof decodeHostedDataKeyEnvelopeWrap>;
+  rootKey: Uint8Array;
+}): Promise<Uint8Array> {
+  const { envelope, wrap, iv, ciphertext } = input.decoded;
+  const rootKeyId = wrap.rootKeyId;
   const wrapContext = {
     alg: envelope.alg,
     dataKeyId: envelope.dataKeyId,
@@ -153,17 +167,11 @@ export async function unwrapHostedDataKeyWithDomainRoot(input: {
     await crypto.subtle.decrypt(
       {
         additionalData: toArrayBuffer(buildHostedDataKeyRootWrapAad(wrapContext)),
-        iv: toArrayBuffer(
-          decodeFixedBase64(
-            wrap.iv,
-            HOSTED_DATA_KEY_IV_BYTES,
-            "Hosted data-key wrap IV",
-          ),
-        ),
+        iv: toArrayBuffer(iv),
         name: "AES-GCM",
       },
       wrapKey,
-      toArrayBuffer(decodeBase64(wrap.ciphertext)),
+      toArrayBuffer(ciphertext),
     ),
   );
 
@@ -452,7 +460,7 @@ function decodeFixedBase64(
 ): Uint8Array {
   const decoded = decodeBase64(value);
   if (decoded.byteLength !== expectedBytes) {
-    throw new TypeError(`${label} must decode to ${expectedBytes} bytes.`);
+    throw new ContractValidationError(`${label} must decode to ${expectedBytes} bytes.`);
   }
   return decoded;
 }

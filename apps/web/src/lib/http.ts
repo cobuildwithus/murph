@@ -1,4 +1,5 @@
-import { isRequestInputError, RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
+import { ContractValidationError } from "@murphai/contracts/validation-error";
+import { isRequestInputError, RequestBodyTooLargeError, RequestInputError } from "@murphai/hosted-execution/request-input";
 import { Buffer } from "node:buffer";
 
 import { NextResponse } from "next/server";
@@ -112,17 +113,32 @@ interface JsonRouteLogContext {
   requestMethod?: string;
 }
 
-export class InvalidRouteParamEncodingError extends TypeError {
+export class InvalidRouteParamEncodingError extends RequestInputError {
   constructor(key: string) {
     super(`Route parameter ${key} contained an invalid encoding.`);
     this.name = "InvalidRouteParamEncodingError";
   }
 }
 
-export class InvalidJsonObjectBodyError extends TypeError {
+export class InvalidJsonObjectBodyError extends RequestInputError {
   constructor() {
     super("Request body must be a JSON object.");
     this.name = "InvalidJsonObjectBodyError";
+  }
+}
+
+export class InvalidJsonBodyError extends RequestInputError {
+  override name = "InvalidJsonBodyError";
+}
+
+export function parseRequestJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      throw new InvalidJsonBodyError("Request body is not valid JSON.", { cause: error });
+    }
+    throw error;
   }
 }
 
@@ -134,7 +150,7 @@ export async function readJsonObject(
   request: Request,
   options: JsonBodyReadOptions = {},
 ): Promise<Record<string, unknown>> {
-  return requireJsonObject(JSON.parse(await readRequestBodyText(request, options)));
+  return requireJsonObject(parseRequestJson(await readRequestBodyText(request, options)));
 }
 
 export async function readOptionalJsonObject(
@@ -147,7 +163,7 @@ export async function readOptionalJsonObject(
     return {};
   }
 
-  return requireJsonObject(JSON.parse(text));
+  return requireJsonObject(parseRequestJson(text));
 }
 
 async function readRequestBodyText(
@@ -225,10 +241,12 @@ export async function resolveDecodedRouteParam<
   key: TKey,
 ): Promise<string> {
   const resolvedParams = await resolveRouteParams(params);
+  const value = resolvedParams[key];
 
   try {
-    return decodeURIComponent(resolvedParams[key]);
-  } catch {
+    return decodeURIComponent(value);
+  } catch (error) {
+    if (!(error instanceof URIError)) throw error;
     throw new InvalidRouteParamEncodingError(key);
   }
 }
@@ -279,26 +297,11 @@ export function createJsonErrorResponse(
   }
 
   if (isRequestInputError(error)) {
-    logJsonError("warn", error, options, {
-      errorResponseCode: "INVALID_REQUEST",
-    });
+    const invalidJson = error instanceof InvalidJsonBodyError;
+    const code = invalidJson ? "INVALID_JSON" : "INVALID_REQUEST";
+    logJsonError("warn", error, options, { errorResponseCode: code });
     return NextResponse.json(
-      { error: { code: "INVALID_REQUEST", message: "Invalid request." } },
-      buildJsonResponseInit(options, 400),
-    );
-  }
-
-  if (error instanceof SyntaxError) {
-    logJsonError("warn", error, options, {
-      errorResponseCode: "INVALID_JSON",
-    });
-    return NextResponse.json(
-      {
-        error: {
-          code: "INVALID_JSON",
-          message: "Invalid JSON.",
-        },
-      },
+      { error: { code, message: invalidJson ? "Invalid JSON." : "Invalid request." } },
       buildJsonResponseInit(options, 400),
     );
   }
@@ -318,40 +321,9 @@ export function createJsonErrorResponse(
     );
   }
 
-  if (error instanceof TypeError && error.message === "fetch failed") {
-    logJsonError("error", error, options, {
-      errorResponseCode: "UPSTREAM_UNAVAILABLE",
-    });
-    return NextResponse.json(
-      {
-        error: {
-          code: "UPSTREAM_UNAVAILABLE",
-          message: "Upstream request failed.",
-          retryable: true,
-        },
-      },
-      buildJsonResponseInit(options, 503),
-    );
-  }
-
-  if (error instanceof TypeError || error instanceof RangeError || error instanceof URIError) {
-    logJsonError("warn", error, options, {
-      errorResponseCode: "INVALID_REQUEST",
-      nativeErrorInference: true,
-    });
-    return NextResponse.json(
-      {
-        error: {
-          code: "INVALID_REQUEST",
-          message: "Invalid request.",
-        },
-      },
-      buildJsonResponseInit(options, 400),
-    );
-  }
-
   logJsonError("error", error, options, {
     errorResponseCode: "INTERNAL_ERROR",
+    ...(error instanceof ContractValidationError ? { unmarkedContractValidationError: true } : {}),
   });
   return NextResponse.json(
     {
@@ -362,6 +334,43 @@ export function createJsonErrorResponse(
     },
     buildJsonResponseInit(options, 500),
   );
+}
+
+// Temporary compatibility for 2026-11-14-explicit-request-rejection.md.
+// Delete route by route after each provider has its own retry/recovery proof.
+export function withLegacyWebhookErrorInference<TArgs extends unknown[]>(
+  handler: (...args: TArgs) => Promise<Response>,
+): (...args: TArgs) => Promise<Response> {
+  return async (...args) => {
+    try {
+      return await handler(...args);
+    } catch (error) {
+      if (error instanceof RequestBodyTooLargeError) throw error;
+      if (error instanceof SyntaxError) {
+        throw new InvalidJsonBodyError("Request body is not valid JSON.", { cause: error });
+      }
+      if (error instanceof TypeError && error.message === "fetch failed") {
+        return createJsonErrorResponse(error, {
+          defaultHeaders: { "Cache-Control": "no-store" },
+          internalMessage: "Provider webhook route failed unexpectedly.",
+          logMessage: "Provider webhook route failed.",
+          routeContext: describeJsonRouteLogContext(args),
+          matchers: [() => ({
+            status: 503,
+            error: {
+              code: "UPSTREAM_UNAVAILABLE",
+              message: "Upstream request failed.",
+              retryable: true,
+            },
+          })],
+        });
+      }
+      if (error instanceof TypeError || error instanceof RangeError || error instanceof URIError) {
+        throw new RequestInputError(error.message, { cause: error });
+      }
+      throw error;
+    }
+  };
 }
 
 export function createJsonRouteHelpers(

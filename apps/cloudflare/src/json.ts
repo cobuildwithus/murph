@@ -1,5 +1,16 @@
 import { ContractValidationError } from "@murphai/contracts/validation-error";
-import { RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
+import { parseInput, RequestInputError, RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
+export class InvalidJsonInputError extends RequestInputError {}
+
+export function parseJsonInput(value: string): unknown {
+  try {
+    return JSON.parse(value);
+  } catch (error) {
+    if (error instanceof SyntaxError) throw new InvalidJsonInputError(error.message, { cause: error });
+    throw error;
+  }
+}
+
 export function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     headers: {
@@ -33,7 +44,7 @@ export async function readJsonObject(
   request: Request,
   options: JsonBodyReadOptions = {},
 ): Promise<Record<string, unknown>> {
-  return requireJsonObject(JSON.parse(await readRequestBodyText(request, options)));
+  return parseInput(parseJsonInput(await readRequestBodyText(request, options)), requireJsonObject);
 }
 
 export async function readOptionalJsonObject(
@@ -46,7 +57,7 @@ export async function readOptionalJsonObject(
     return {};
   }
 
-  return requireJsonObject(JSON.parse(payload));
+  return parseInput(parseJsonInput(payload), requireJsonObject);
 }
 
 export async function readRequestBodyText(

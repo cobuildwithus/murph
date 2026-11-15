@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { optionalEnv } from "./provider-config-helpers.ts";
 import {
   readConfiguredDeviceSyncProviderConfigs,
@@ -90,7 +91,7 @@ function requireSerializableDeviceSyncRuntimeConfigRecord(
 
   for (const key of Object.keys(record)) {
     if (!supportedKeys.has(key)) {
-      throw new TypeError(`${label}.${key} is not supported in serialized runtime config.`);
+      throw new ContractValidationError(`${label}.${key} is not supported in serialized runtime config.`);
     }
   }
 

@@ -1,3 +1,5 @@
+import { isHostedStandbyClaimId } from "@murphai/hosted-execution/runtime-owner";
+export { isHostedStandbyClaimId } from "@murphai/hosted-execution/runtime-owner";
 import { readHostedRunnerActiveReleaseId, readHostedRunnerBankFromName, readHostedRunnerDeployment } from "./hosted-runner-release.ts";
 import type {
   HostedExecutionContainerStubLike,
@@ -293,10 +295,6 @@ export function createHostedStandbyClaimId(): string {
   return `standby-claim-${crypto.randomUUID()}`;
 }
 
-export function isHostedStandbyClaimId(value: unknown): value is string {
-  return typeof value === "string"
-    && /^standby-claim-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(value);
-}
 
 export function isHostedStandbySlotName(value: unknown): boolean {
   return typeof value === "string"

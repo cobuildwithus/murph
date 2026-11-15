@@ -1,4 +1,4 @@
-import { ContractValidationError } from "@murphai/contracts/validation-error";
+import { RequestInputError } from "@murphai/hosted-execution/request-input";
 import type { Prisma } from '@prisma/client';
 import type { HostedGameToolRequest } from '@murphai/hosted-execution/runtime-control';
 import { RECAP_VIDEO_PART_MAX_BYTES, recapAssetSchema, recapVideoPartSchema, recapScorePageCount, recapFirstSungWordMs, type SongWordTimestamp } from '@murphai/contracts/recap-show';
@@ -99,34 +99,34 @@ export async function retireRecapMedia(input: Identity): Promise<void> {
 export async function inspectRecapMedia(bytes: Uint8Array, storageKey: string, durationMs?: number, score: ScoreMetadata = {}): Promise<RecapMediaMetadata> {
   requireHostedRecapMediaId(storageKey);
   const image = storageKey.endsWith(".jpg"), part = storageKey.endsWith(".mp4");
-  if (!bytes.length || bytes.length > (part ? RECAP_VIDEO_PART_MAX_BYTES : 2 * 1024 * 1024)) throw new RangeError("Recap asset size is invalid.");
+  if (!bytes.length || bytes.length > (part ? RECAP_VIDEO_PART_MAX_BYTES : 2 * 1024 * 1024)) throw new RequestInputError("Recap asset size is invalid.");
   const metadata = { hash: createHash("sha256").update(bytes).digest("hex"), bytes: bytes.length };
   // A part is an opaque slice; the whole file is measured once, at acceptance.
   if (part) return { ...metadata, mediaType: "video/mp4" };
   if (image) {
-    if (score.songStartMs !== undefined) throw new ContractValidationError("A score origin requires audio.");
+    if (score.songStartMs !== undefined) throw new RequestInputError("A score origin requires audio.");
     const decoded = sharp(bytes, { limitInputPixels: 4_194_304, failOn: "warning" });
     const info = await decoded.metadata();
-    if (info.format !== "jpeg" || !info.width || !info.height || info.width > 2048 || info.height > 2048) throw new ContractValidationError("Recap image must be a bounded JPEG.");
+    if (info.format !== "jpeg" || !info.width || !info.height || info.width > 2048 || info.height > 2048) throw new RequestInputError("Recap image must be a bounded JPEG.");
     await decoded.raw().toBuffer();
     return { ...metadata, mediaType: "image/jpeg", width: info.width, height: info.height };
   }
   const mp3 = bytes[0] === 0xff && (bytes[1]! & 0xe0) === 0xe0 || bytes[0] === 0x49 && bytes[1] === 0x44 && bytes[2] === 0x33;
-  if (!mp3 || score.songStartMs === undefined && durationMs !== 20_000) throw new ContractValidationError("Recap song must be a twenty-second MP3 or a score.");
+  if (!mp3 || score.songStartMs === undefined && durationMs !== 20_000) throw new RequestInputError("Recap song must be a twenty-second MP3 or a score.");
   const decoded = await inspectGeneratedMp3Audio(bytes);
   return { ...metadata, mediaType: "audio/mpeg", ...inspectRecapSong(bytes, decoded.durationMs, score) };
 }
 
 function inspectRecapSong(bytes: Uint8Array, durationMs: number, score: ScoreMetadata) {
   if (score.songStartMs === undefined) {
-    if (Math.abs(durationMs - 20_000) > 500) throw new ContractValidationError("Recap song duration is outside its twenty-second recipe.");
+    if (Math.abs(durationMs - 20_000) > 500) throw new RequestInputError("Recap song duration is outside its twenty-second recipe.");
     return { durationMs };
   }
   const count = recapScorePageCount(durationMs);
   const frames = inspectMp3Frames(bytes);
   const firstWord = count === undefined ? undefined : recapFirstSungWordMs(score.wordsTimestamps ?? [], count * 5000);
   if (firstWord === undefined || firstWord >= durationMs || score.songStartMs > firstWord
-    || !frames.frames.some(frame => frame.timeMs === score.songStartMs)) throw new ContractValidationError("Recap score duration, timings or frame origin are invalid.");
+    || !frames.frames.some(frame => frame.timeMs === score.songStartMs)) throw new RequestInputError("Recap score duration, timings or frame origin are invalid.");
   return { durationMs, songStartMs: score.songStartMs };
 }
 
@@ -171,7 +171,7 @@ type RecapUploadInput<MediaType extends RecapMediaType> = {
 async function stageRecapUpload(input: RecapUploadInput<RecapMediaType>) {
   const part = input.file.mediaType === 'video/mp4';
   const bytes = Buffer.from(input.file.bytes, 'base64');
-  if (part && (!bytes.length || bytes.length > RECAP_VIDEO_PART_MAX_BYTES)) throw new RangeError('Recap asset size is invalid.');
+  if (part && (!bytes.length || bytes.length > RECAP_VIDEO_PART_MAX_BYTES)) throw new RequestInputError('Recap asset size is invalid.');
   const generationId = recapGenerationId(input.eventId);
   const hash = createHash('sha256').update(bytes).digest('hex');
   const storageKey = recapMediaStorageKey(generationId, hash, input.file.mediaType);

@@ -1,3 +1,4 @@
+import { parseInput, RequestInputError, RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import { readMailboxWebTiming, readMailboxVercelRegions } from "./mailbox-timing.ts";
 import {
   parseHostedExecutionWake,
@@ -16,7 +17,7 @@ import {
   createHostedMailboxEncryptionEnvironmentFromIngressRootResolver,
   decryptHostedMailboxPayloadCiphertext,
 } from "../hosted-mailbox-encryption.ts";
-import { json, jsonError, methodNotAllowed, readJsonObject, unauthorized } from "../json.ts";
+import { json, jsonError, methodNotAllowed, parseJsonInput, readJsonObject, requireJsonObject, unauthorized } from "../json.ts";
 import {
   parseHostedMailboxPayloadDecodeRequest,
   type HostedMailboxPayloadDecodeRequest,
@@ -39,7 +40,10 @@ export function addRunnerMailboxCryptoContextRequest(input: {
   userId: string;
 }): string | undefined {
   if (!input.mailboxFetch || !input.body) return input.body;
-  const request = JSON.parse(input.body);
+  const payload = parseJsonInput(input.body);
+  // Preserve the existing upstream rejection envelope for arrays.
+  if (Array.isArray(payload)) return JSON.stringify(payload);
+  const request = parseInput(payload, requireJsonObject);
   // Recompute the opt-in at the Worker boundary; a warm envelope needs no read.
   request.includeIngressCryptoContext = request.decodeInlinePayloads === true
     && !hasCachedHostedUserCryptoContextEnvelope({ ...input, domain: "ingress" });
@@ -72,10 +76,11 @@ export async function handleRunnerMailboxPayloadDecodeRequest(input: {
 
   let request;
   try {
-    request = parseHostedMailboxPayloadDecodeRequest(await readJsonObject(input.request, {
+    request = parseInput(await readJsonObject(input.request, {
       limitBytes: MAILBOX_PAYLOAD_DECODE_BODY_LIMIT_BYTES,
-    }));
-  } catch {
+    }), parseHostedMailboxPayloadDecodeRequest);
+  } catch (error) {
+    if (!(error instanceof RequestInputError || error instanceof RequestBodyTooLargeError)) throw error;
     return jsonError("Bad request.", 400);
   }
 

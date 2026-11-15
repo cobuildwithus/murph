@@ -82,8 +82,7 @@ async function stageGameMedia(context: WorkerRouteContext, store: HostedGameMedi
     if (error instanceof RequestInputError) return jsonError("Game media must be sealed.", 400);
     throw error;
   }
-  try { return json({ stored: true, ...(await store.write(mediaId, envelope)) }); }
-  catch (error) { throw new Error("Game media staging failed.", { cause: error }); }
+  return json({ stored: true, ...(await store.write(mediaId, envelope)) });
 }
 
 async function readGameMedia(_context: WorkerRouteContext, store: HostedGameMediaStore, mediaId: string) {

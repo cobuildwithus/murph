@@ -1188,42 +1188,15 @@ function normalizeOptionalStringArray(value: unknown, label: string): string[] {
   return normalizedValues;
 }
 
-function normalizeOptionalJsonRecord(
-  value: unknown,
-  label: string,
-): Record<string, unknown> | null {
-  if (value === null || value === undefined) {
-    return null;
-  }
-
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new ContractValidationError(`${label} must be a JSON object when provided.`);
-  }
-
-  const serialized = JSON.stringify(value);
-
-  if (serialized === undefined) {
-    throw new ContractValidationError(`${label} must be JSON-serializable when provided.`);
-  }
-
-  const normalized: unknown = JSON.parse(serialized);
-
-  if (!normalized || typeof normalized !== "object" || Array.isArray(normalized)) {
-    throw new ContractValidationError(`${label} must be a JSON object when provided.`);
-  }
-
-  return normalized as Record<string, unknown>;
-}
-
 function normalizeOptionalRawUsageJsonRecord(
   value: unknown,
   label: string,
 ): Record<string, unknown> | null {
-  const record = normalizeOptionalJsonRecord(value, label);
-
-  if (record === null) {
-    return null;
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new ContractValidationError(`${label} must be a JSON object when provided.`);
   }
+  const record = value;
 
   const normalized: Record<string, unknown> = {};
 

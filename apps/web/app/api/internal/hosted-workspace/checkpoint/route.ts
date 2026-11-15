@@ -1,5 +1,8 @@
+import { hostedWorkspaceSnapshotObjectKey } from "@murphai/hosted-execution/storage-paths";
+import { HostedWorkspaceProgressError } from "@/src/lib/hosted-workspace/store";
 import { parseInput, RequestInputError } from "@murphai/hosted-execution/request-input";
 import {
+  isHostedWorkspaceSnapshotV2Ref,
   parseHostedWorkspaceCheckpointRequest,
   parseHostedWorkspaceCheckpointResponse,
 } from "@murphai/hosted-execution/parsers";
@@ -40,6 +43,10 @@ export const POST = withJsonError((request: Request) => runWithTiming(request, a
       leaseGeneration: body.leaseGeneration,
       workspaceVersion: body.expectedWorkspaceVersion,
     });
+    if (body.snapshotRef && isHostedWorkspaceSnapshotV2Ref(body.snapshotRef)
+      && body.snapshotRef.objectKey !== await hostedWorkspaceSnapshotObjectKey({ userId, snapshotId: body.snapshotRef.snapshotId })) {
+      throw new RequestInputError("Runtime snapshot namespace mismatch.");
+    }
     failureStage = "publication";
     const result = await checkpointHostedRuntimeWorkspace({
       runtimeAuthority,
@@ -107,13 +114,16 @@ export const POST = withJsonError((request: Request) => runWithTiming(request, a
     }));
   } catch (error) {
     reportCheckpointFailure(failureStage, error);
+    if (error instanceof HostedWorkspaceProgressError) {
+      throw new RequestInputError("Invalid request.", { cause: error });
+    }
     throw error;
   }
 }));
 
 function reportCheckpointFailure(stage: CheckpointFailureStage, error: unknown): void {
   try {
-    const code = stage === "publication" && error instanceof TypeError && "code" in error
+    const code = stage === "publication" && error instanceof Error && "code" in error
       ? error.code : undefined;
     console.warn("Hosted workspace checkpoint failed.", {
       errorClass: error instanceof RequestInputError ? "request_input"

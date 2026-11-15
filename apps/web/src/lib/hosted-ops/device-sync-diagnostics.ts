@@ -1,3 +1,6 @@
+import { isDeviceSyncError } from "@murphai/device-syncd/errors";
+import { RequestInputError } from "@murphai/hosted-execution/request-input";
+import { parseJunctionDiagnosticRequestedTimestamp } from "@murphai/device-syncd/providers/junction-config";
 import "server-only";
 
 import {
@@ -33,7 +36,15 @@ export async function runHostedOpsJunctionDiagnostic(
   const memberId = normalizeRequiredMemberId(input.memberId);
   const connectionId = normalizeOptionalConnectionId(input.connectionId);
   const sourceProvider = normalizeRequiredSourceProvider(input.sourceProvider);
-  const window = resolveOpsDiagnosticWindow(input);
+  let window: HostedOpsJunctionDiagnosticResult["window"];
+  try {
+    window = resolveOpsDiagnosticWindow(input);
+  } catch (error) {
+    if (isDeviceSyncError(error) && error.code === "JUNCTION_DIAGNOSTIC_WINDOW_INVALID") {
+      throw new RequestInputError("Invalid request.", { cause: error });
+    }
+    throw error;
+  }
   const controlPlane = createHostedDeviceSyncDiagnosticControlPlane(input.request);
   const fullDiagnostic = await runHostedDeviceSyncBackfillDiagnostic({
     connectionId,
@@ -331,8 +342,10 @@ function resolveOpsDiagnosticWindow(
   );
   const windowEnd = normalizeOptionalIso(input.windowEnd, "HOSTED_OPS_JUNCTION_DIAGNOSTIC_WINDOW_END_INVALID")
     ?? new Date().toISOString();
+  parseJunctionDiagnosticRequestedTimestamp(windowEnd, "windowEnd");
   const windowStart = normalizeOptionalIso(input.windowStart, "HOSTED_OPS_JUNCTION_DIAGNOSTIC_WINDOW_START_INVALID")
-    ?? new Date(new Date(windowEnd).getTime() - (lookbackDays * DAY_MS)).toISOString();
+    ?? new Date(new Date(windowEnd).getTime() - lookbackDays * DAY_MS).toISOString();
+  parseJunctionDiagnosticRequestedTimestamp(windowStart, "windowStart");
 
   if (new Date(windowStart).getTime() >= new Date(windowEnd).getTime()) {
     throw hostedOnboardingError({

@@ -18,7 +18,7 @@ export const POST = withJsonError(async (request: Request) => {
   const body = parseInput(payload, parseHostedRuntimeUsageRecordRequest);
 
   const usage = body.usage;
-  const authority = parseInput(request, () => readHostedRuntimeCallbackAuthority(request));
+  const authority = readHostedRuntimeCallbackAuthority(request);
   const result = await recordHostedAiUsageRecordsAndSendLimitNotices({
     runtimeIdentity: authority ? { ...authority, userId } : null,
     accountAllowance: true,

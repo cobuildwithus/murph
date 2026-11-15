@@ -61,6 +61,11 @@ export interface HostedRuntimeOwnerResponse {
   retryAt?: string;
 }
 
+export function isHostedStandbyClaimId(value: unknown): value is string {
+  return typeof value === "string"
+    && /^standby-claim-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(value);
+}
+
 export function parseHostedRuntimeOwnerCommand(value: unknown): HostedRuntimeOwnerCommand {
   const r = requireObject(value, "Runtime ownership command");
   const operation = requireString(r.operation, "Runtime ownership operation");

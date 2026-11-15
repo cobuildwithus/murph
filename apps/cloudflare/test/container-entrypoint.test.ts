@@ -2336,9 +2336,9 @@ describe("startHostedContainerEntrypoint", () => {
     expect((smokeErrorMessage as string).length).toBeLessThanOrEqual(512);
   });
 
-  it("runs the managed-container direct R2 presigned PUT smoke through the container network", async () => {
+  it.each([4096, "4096", [4096], true])("runs the managed-container direct R2 presigned PUT smoke with byteLength %j", async (byteLength) => {
     const runDirectR2PresignedPutSmoke = vi.fn(async () => ({
-      byteLength: 4096,
+      byteLength: Number(byteLength),
       durationMs: 12,
       ok: true,
       payloadSha256: "a".repeat(64),
@@ -2360,7 +2360,7 @@ describe("startHostedContainerEntrypoint", () => {
 
     const response = await sendHostedContainerJsonRequest({
       body: JSON.stringify({
-        byteLength: 4096,
+        byteLength,
         presignedPutUrl:
           "https://example-account.r2.cloudflarestorage.com/test-bucket/snapshot.enc?X-Amz-Signature=test",
       }),
@@ -2371,7 +2371,7 @@ describe("startHostedContainerEntrypoint", () => {
     expect(response.status).toBe(200);
     expect(response.json).toEqual({
       directR2PresignedPut: {
-        byteLength: 4096,
+        byteLength: Number(byteLength),
         durationMs: 12,
         ok: true,
         payloadSha256: "a".repeat(64),
@@ -2381,11 +2381,52 @@ describe("startHostedContainerEntrypoint", () => {
       ok: true,
     });
     expect(runDirectR2PresignedPutSmoke).toHaveBeenCalledWith({
-      byteLength: 4096,
+      byteLength: Number(byteLength),
       presignedPutUrl:
         "https://example-account.r2.cloudflarestorage.com/test-bucket/snapshot.enc?X-Amz-Signature=test",
       signal: expect.any(AbortSignal),
     });
+  });
+
+  it.each([
+    ["invalid URL", { presignedPutUrl: "not-a-url" }],
+    ["unsupported URL protocol", { presignedPutUrl: "ftp://example.test/object" }],
+    ["object byte length", { byteLength: { valueOf: 1, toString: 1 } }],
+    ["null byte length", { byteLength: null }],
+    ["non-numeric byte length", { byteLength: "invalid" }],
+    ["zero byte length", { byteLength: 0 }],
+    ["fractional byte length", { byteLength: 1.5 }],
+    ["excessive byte length", { byteLength: Number.MAX_SAFE_INTEGER }],
+    ["oversized CA certificate", { tlsCaCertificatePem: "x".repeat(8193) }],
+  ])("rejects direct R2 smoke %s before network work", async (_label, fields) => {
+    const runDirectR2PresignedPutSmoke = vi.fn();
+    const server = await startHostedContainerEntrypoint({
+      port: 0,
+      runtime: { runDirectR2PresignedPutSmoke },
+    });
+    servers.push(server);
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const response = await sendHostedContainerJsonRequest({
+      body: JSON.stringify({ presignedPutUrl: "https://example.test/object", ...fields }),
+      path: "/internal/direct-r2-presigned-put-smoke",
+      port: address.port,
+    });
+
+    expect(response.status).toBe(400);
+    expect(response.json).toMatchObject({
+      code: "type_error",
+      error: "Invalid request.",
+      errorName: "TypeError",
+    });
+    expect(runDirectR2PresignedPutSmoke).not.toHaveBeenCalled();
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(expect.objectContaining({
+      level: "warn",
+      message: "Hosted container entrypoint rejected the direct R2 presigned PUT smoke request body.",
+    }));
   });
 
   it("rejects the removed legacy internal run alias", async () => {
@@ -2480,7 +2521,12 @@ describe("startHostedContainerEntrypoint", () => {
     );
   });
 
-  it("returns a stable invalid JSON error for malformed invocation requests", async () => {
+  it.each([
+    "/internal/workspace-invocation",
+    "/internal/runtime-wake",
+    "/internal/workspace-invocation/abort",
+    "/internal/direct-r2-presigned-put-smoke",
+  ])("returns a stable invalid JSON error for malformed requests to %s", async (requestPath) => {
     const server = await startHostedContainerEntrypoint({
       port: 0,
     });
@@ -2491,7 +2537,7 @@ describe("startHostedContainerEntrypoint", () => {
       throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
     }
 
-    const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
+    const response = await fetch(`http://127.0.0.1:${address.port}${requestPath}`, {
       body: "{]",
       headers: {
         "content-type": "application/json; charset=utf-8",
@@ -2508,6 +2554,10 @@ describe("startHostedContainerEntrypoint", () => {
       error: "Invalid JSON.",
       errorName: "SyntaxError",
     });
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(expect.objectContaining({
+      level: "warn",
+      message: expect.stringContaining("rejected"),
+    }));
   });
 
   it("rejects oversized invocation requests before parsing JSON", async () => {
@@ -3028,6 +3078,52 @@ describe("startHostedContainerEntrypoint", () => {
     }
   });
 
+  it.each([
+    [new ContractValidationError("Parser bug."), "type_error"],
+    [new TypeError("Parser bug."), "type_error"],
+    [new RangeError("Parser bug."), "range_error"],
+    [new URIError("Parser bug."), "uri_error"],
+    [new SyntaxError("Parser bug."), "syntax_error"],
+  ])("reports a decoder %s as a server fault", async (error, code) => {
+    const runWorkspaceInvocation = vi.fn();
+    const server = await startHostedContainerEntrypoint({
+      port: 0,
+      runtime: {
+        parseRunnerJobInput: () => {
+          if (error instanceof ContractValidationError) return Object.defineProperty({}, "request", { get() { throw error; } }) as never;
+          throw error;
+        },
+        runWorkspaceInvocation,
+      },
+    });
+    servers.push(server);
+    const address = server.address();
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const response = await sendHostedContainerJsonRequest({
+      body: JSON.stringify({ hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION, job: {} }),
+      path: "/internal/workspace-invocation",
+      port: address.port,
+    });
+
+    expect(response.status).toBe(500);
+    expect(response.json).toMatchObject({
+      code,
+      details: { errorDetail: "Parser bug." },
+      error: "Internal error.",
+      errorName: error.name,
+    });
+    expect(runWorkspaceInvocation).not.toHaveBeenCalled();
+    expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(expect.objectContaining({
+      error,
+      level: "error",
+      message: "Hosted container entrypoint rejected the request body.",
+      ...(error instanceof ContractValidationError ? { details: { unmarkedContractValidationError: true } } : {}),
+    }));
+  });
+
   it("answers explicit request rejection through the existing decode envelope", async () => {
     const parseRunnerJobInput = vi.fn((value: unknown) => parseInput(value, () => {
       throw new ContractValidationError("Invalid shape.");
@@ -3053,7 +3149,7 @@ describe("startHostedContainerEntrypoint", () => {
     });
 
     expect(response.status).toBe(400);
-    // The same envelope a native validator failure gets today.
+    // Preserve the validator diagnostics after boundary translation.
     await expect(response.json()).resolves.toMatchObject({
       code: "type_error",
       details: { errorDetail: "Invalid shape." },

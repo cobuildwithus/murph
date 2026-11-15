@@ -52,7 +52,7 @@ export const POST = withJsonError(async (request: Request) => {
   const { payload, userId: memberId } = await requireHostedCloudflareCallbackJsonRequest(request, {
     maxBodyBytes: HOSTED_WEB_REQUEST_MAX_BYTES,
   });
-  const runtimeAuthority = parseInput(request.url, () => readHostedExecutionRuntimeAuthority(new URL(request.url), request.headers));
+  const runtimeAuthority = readHostedExecutionRuntimeAuthority(new URL(request.url), request.headers);
   const currentSenderWire = readHostedCurrentSenderWire(payload);
   const privateMediaDeliveryOrigin = readHostedExecutionControlOrigin();
   const body = parseInput(currentSenderWire.payload, (value) =>

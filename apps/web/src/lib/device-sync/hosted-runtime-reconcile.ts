@@ -1,3 +1,5 @@
+import { parseRequestJson } from "../http";
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 import {
   parseHostedExecutionDeviceSyncReconcileRequest,
@@ -12,8 +14,9 @@ export async function requestHostedDeviceSyncReconcile(input: {
   request: Request;
   trustedUserId: string;
 }): Promise<HostedExecutionDeviceSyncReconcileResponse> {
-  const parsed = parseHostedExecutionDeviceSyncReconcileRequest(
-    await input.request.json(),
+  const parsed = parseInput(
+    parseRequestJson(await input.request.text()),
+    parseHostedExecutionDeviceSyncReconcileRequest,
   );
   return queueHostedDeviceSyncManualReconcile({
     connectionId: parsed.connectionId,

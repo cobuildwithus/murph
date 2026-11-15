@@ -13,6 +13,7 @@ import {
 import { Prisma } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { createJsonErrorResponse, InvalidJsonBodyError } from "../../src/lib/http";
 import { HostedOnboardingError } from "../../src/lib/hosted-onboarding/errors";
 import {
   requireHostedCloudflareCallbackJsonRequest,
@@ -395,6 +396,60 @@ describe("requireHostedCloudflareCallbackRequest", () => {
     });
   });
 
+  it.each(["configuration", "nonce store", "runtime authority"] as const)(
+    "keeps %s failures ahead of malformed JSON and classifies them as server failures",
+    async (stage) => {
+      const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        const fault = new TypeError("Synthetic server fault.");
+        const url = new URL("https://example.test/callback");
+        if (stage === "runtime authority") {
+          addHostedExecutionRuntimeAuthority(url, {
+            attemptId: "rt_synthetic", generation: "1", workspaceVersion: "1",
+          });
+          runtimeAdmission.check.mockRejectedValueOnce(fault);
+        }
+        const request = await createSignedCallbackRequest({
+          body: "{", nonce: "synthetic_nonce_0000000000000001", path: url.pathname,
+          search: url.search, privateJwkJson: currentPrivateJwkJson, userId: "member_synthetic",
+        });
+        const nonceStore = new MemoryNonceStore();
+        const consume = vi.spyOn(nonceStore, "consumeHostedCallbackRequestNonce");
+        if (stage === "configuration") delete process.env.HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_JWK;
+        if (stage === "nonce store") consume.mockRejectedValueOnce(fault);
+        const error = await requireHostedCloudflareCallbackJsonRequest(request, {
+          maxBodyBytes: 1024, nonceStore, nowMs: FIXED_NOW_MS,
+        }).catch((cause: unknown) => cause);
+        expect(error).toBeInstanceOf(TypeError);
+        if (stage !== "configuration") expect(error).toBe(fault);
+        expect(consume).toHaveBeenCalledTimes(stage === "configuration" ? 0 : 1);
+        expect(nonceStore.entries.size).toBe(stage === "runtime authority" ? 1 : 0);
+        const response = createJsonErrorResponse(error, {
+          internalMessage: "callback failed", logMessage: "callback failed",
+        });
+        expect(response.status).toBe(500);
+        await expect(response.json()).resolves.toEqual({
+          error: { code: "INTERNAL_ERROR", message: "Internal error." },
+        });
+      } finally {
+        errorLog.mockRestore();
+      }
+    },
+  );
+
+  it("rejects an invalid signature before decoding malformed JSON or consuming its nonce", async () => {
+    const request = await createSignedCallbackRequest({
+      body: "{", nonce: "synthetic_nonce_0000000000000002", path: "/callback",
+      privateJwkJson: currentPrivateJwkJson, userId: "member_synthetic",
+    });
+    request.headers.set(HOSTED_EXECUTION_SIGNATURE_HEADER, "invalid");
+    const nonceStore = new MemoryNonceStore();
+    await expect(requireHostedCloudflareCallbackJsonRequest(request, {
+      maxBodyBytes: 1024, nonceStore, nowMs: FIXED_NOW_MS,
+    })).rejects.toMatchObject({ code: "HOSTED_CLOUDFLARE_CALLBACK_UNAUTHORIZED", httpStatus: 401 });
+    expect(nonceStore.entries.size).toBe(0);
+  });
+
   it("consumes the authenticated nonce before malformed JSON is rejected", async () => {
     const nonceStore = new MemoryNonceStore();
     const input = {
@@ -414,7 +469,7 @@ describe("requireHostedCloudflareCallbackRequest", () => {
           nowMs: FIXED_NOW_MS,
         },
       ),
-    ).rejects.toBeInstanceOf(SyntaxError);
+    ).rejects.toBeInstanceOf(InvalidJsonBodyError);
 
     await expect(
       requireHostedCloudflareCallbackJsonRequest(

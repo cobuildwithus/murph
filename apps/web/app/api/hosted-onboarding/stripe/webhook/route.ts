@@ -1,3 +1,4 @@
+import { withLegacyWebhookErrorInference } from "@/src/lib/http";
 import {
   jsonOk,
   readHostedOnboardingRawBodyText,
@@ -7,7 +8,7 @@ import { handleHostedStripeWebhook } from "@/src/lib/hosted-onboarding/webhook-s
 
 const HOSTED_STRIPE_WEBHOOK_MAX_BODY_BYTES = 1024 * 1024;
 
-export const POST = withJsonError(async (request: Request) => {
+export const POST = withJsonError(withLegacyWebhookErrorInference(async (request: Request) => {
   const rawBody = await readHostedOnboardingRawBodyText(request, {
     limitBytes: HOSTED_STRIPE_WEBHOOK_MAX_BODY_BYTES,
     tooLargeErrorCode: "STRIPE_WEBHOOK_BODY_TOO_LARGE",
@@ -20,4 +21,4 @@ export const POST = withJsonError(async (request: Request) => {
       signature: request.headers.get("stripe-signature"),
     }),
   );
-});
+}));

@@ -1,3 +1,4 @@
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
@@ -70,7 +71,7 @@ export async function findActiveHostedVaultSharePage(input: {
   sourceWorkspaceVersion: string;
 }): Promise<ActiveHostedVaultSharePage> {
   const prisma = input.prisma ?? getPrisma();
-  const continuation = parseHostedVaultShareDeliveryContinuation(input.continuation);
+  const continuation = parseInput(input.continuation, parseHostedVaultShareDeliveryContinuation);
   const projectionScopeKey = buildHostedVaultShareProjectionScopeKey(
     input.projectionScope,
   );

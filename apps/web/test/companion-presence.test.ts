@@ -8,6 +8,16 @@ vi.mock("@/src/lib/hosted-execution/runtime-owner", () => ({ requireHostedRuntim
 import { recordCompanionHeartbeat, readRuntimeCompanionPresence } from "@/src/lib/companion/presence";
 
 describe("companion contact evidence", () => {
+  it("rejects a sponsored thread target after runtime and access checks", async () => {
+    const tx = { $queryRaw: vi.fn().mockResolvedValue([]), hostedThreadContainer: { findUnique: vi.fn().mockResolvedValue({ memberId: "hbm_room_synthetic" }) } };
+    m.prisma.mockReturnValue({ $transaction: async (run: (tx: unknown) => Promise<unknown>) => run(tx) });
+    await expect(readRuntimeCompanionPresence("hbm_room_synthetic", { userId: "hbm_room_synthetic", attemptId: "run_synthetic", generation: "1" }))
+      .rejects.toMatchObject({ code: "INVALID_REQUEST", httpStatus: 400, message: "Companion access requires a private member conversation." });
+    expect(m.runtime).toHaveBeenCalled();
+    expect(m.access).toHaveBeenCalled();
+    expect(m.consent).not.toHaveBeenCalled();
+  });
+
   beforeEach(() => vi.resetAllMocks());
   it("keeps missing, expired, future and background contact separate from foreground evidence", () => {
     const now = new Date("2026-10-01T12:00:00.000Z");

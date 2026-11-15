@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { Buffer } from "node:buffer";
 import assert from "node:assert/strict";
 
@@ -11,6 +12,7 @@ import {
   HOSTED_DOMAIN_ROOT_KEY_ENVELOPE_SCHEMA,
   openHostedSecureBox,
   parseHostedDomainRootKeyEnvelope,
+  parseHostedSecureBoxEnvelope,
   sealHostedSecureBox,
   serializeAdditionalAuthenticatedData,
   verifyHostedDomainRootEnvelopeSignatureWithPublicKey,
@@ -18,6 +20,19 @@ import {
   unwrapHostedDomainRootKeyWithP256Ecdh,
   type HostedDomainRootKeyEnvelopeBodyV1,
 } from "../src/hosted-domain-crypto.ts";
+
+test("secure-box parsing owns IV length for both caller and stored envelopes", async () => {
+  const envelope = {
+    alg: "AES-256-GCM-HKDF-SHA256" as const, schema: "murph.hosted-secure-box.v1" as const,
+    domain: "device" as const, lane: "clinical-records-page-cursor" as const,
+    rootKeyId: "root_synthetic", scope: "cursor_synthetic", ciphertext: "AA==", iv: "AA==",
+  };
+  expect(() => parseHostedSecureBoxEnvelope(envelope)).toThrow(ContractValidationError);
+  expect(() => parseHostedSecureBoxEnvelope({ ...envelope, iv: "not base64!" })).toThrow(ContractValidationError);
+  expect(() => parseHostedSecureBoxEnvelope({ ...envelope, iv: Buffer.alloc(12).toString("base64") })).not.toThrow();
+  await expect(openHostedSecureBox({ envelope, aad: new Uint8Array(), expectedDomain: "device", expectedLane: "clinical-records-page-cursor", rootKey: new Uint8Array(32) }))
+    .rejects.toThrow(ContractValidationError);
+});
 
 test("hosted domain roots sign, verify, wrap, and unwrap by Cloudflare recipient", async () => {
   const recipient = await generateP256EcdhKeyPair();

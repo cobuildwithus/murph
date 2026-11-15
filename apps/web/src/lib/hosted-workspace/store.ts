@@ -1,3 +1,4 @@
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEYS,
@@ -234,10 +235,7 @@ export async function checkpointHostedWorkspaceTx(input: {
       || input.nextDefaultProcessingWakeAt === undefined
       || input.nextDefaultProcessingWakeAt === null
       ? null
-      : requireDate(
-          input.nextDefaultProcessingWakeAt,
-          "Hosted workspace nextDefaultProcessingWakeAt",
-        );
+      : parseInput(input.nextDefaultProcessingWakeAt, (value) => requireDate(value, "Hosted workspace nextDefaultProcessingWakeAt"));
   const requestedNextDefaultProcessingWakeReason =
     progressProjectionKeyCount === 0
       ? null
@@ -266,7 +264,7 @@ export async function checkpointHostedWorkspaceTx(input: {
     workspaceAssignments.push(Prisma.sql`next_wake_at = ${
       input.nextWakeAt === undefined || input.nextWakeAt === null
         ? null
-        : requireDate(input.nextWakeAt, "Hosted workspace nextWakeAt")
+        : parseInput(input.nextWakeAt, (value) => requireDate(value, "Hosted workspace nextWakeAt"))
     }::timestamp`);
   }
   if ("nextWakeReason" in input) {
@@ -285,7 +283,7 @@ export async function checkpointHostedWorkspaceTx(input: {
     workspaceAssignments.push(Prisma.sql`inbox_media_retention_wake_at = ${
       input.inboxMediaRetentionWakeAt === undefined || input.inboxMediaRetentionWakeAt === null
         ? null
-        : requireDate(input.inboxMediaRetentionWakeAt, "Hosted workspace inboxMediaRetentionWakeAt")
+        : parseInput(input.inboxMediaRetentionWakeAt, (value) => requireDate(value, "Hosted workspace inboxMediaRetentionWakeAt"))
     }::timestamp`);
   }
   if ("redactedStatusJson" in input) {
@@ -835,6 +833,18 @@ export function projectHostedWorkspace(record: HostedWorkspaceRow): HostedWorksp
   };
 }
 
+export class HostedWorkspaceProgressError extends Error {
+  readonly httpStatus = 400;
+  readonly code: string;
+
+  constructor(current: bigint | null, requested: bigint) {
+    super("Hosted workspace systemMailboxProgressGeneration must stay equal or advance by one.");
+    this.code = current === null ? "HOSTED_WORKSPACE_PROGRESS_INVALID_INITIAL"
+      : requested < current ? "HOSTED_WORKSPACE_PROGRESS_REGRESSED"
+      : "HOSTED_WORKSPACE_PROGRESS_SKIPPED_INCREMENT";
+  }
+}
+
 function assertHostedSystemMailboxProgressGenerationTransition(input: {
   current: bigint | null;
   requested: bigint;
@@ -843,13 +853,7 @@ function assertHostedSystemMailboxProgressGenerationTransition(input: {
     ? input.requested === 0n || input.requested === 1n
     : input.requested === input.current || input.requested === input.current + 1n;
   if (!transitionAllowed) {
-    throw Object.assign(new TypeError(
-      "Hosted workspace systemMailboxProgressGeneration must stay equal or advance by one.",
-    ), {
-      code: input.current === null ? "HOSTED_WORKSPACE_PROGRESS_INVALID_INITIAL"
-        : input.requested < input.current ? "HOSTED_WORKSPACE_PROGRESS_REGRESSED"
-        : "HOSTED_WORKSPACE_PROGRESS_SKIPPED_INCREMENT",
-    });
+    throw new HostedWorkspaceProgressError(input.current, input.requested);
   }
 }
 
@@ -932,8 +936,8 @@ function requireNonEmptyString(value: string, label: string): string {
   return normalized;
 }
 
-function requireDate(value: Date | string, label: string): Date {
-  const date = value instanceof Date ? value : new Date(value);
+function requireDate(value: unknown, label: string): Date {
+  const date = value instanceof Date ? value : new Date(typeof value === "string" ? value : NaN);
 
   if (Number.isNaN(date.getTime())) {
     throw new ContractValidationError(`${label} must be a valid ISO-8601 timestamp.`);

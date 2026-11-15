@@ -1,8 +1,9 @@
+import { assertContract } from "@murphai/contracts";
 import { parseInput, RequestInputError } from "@murphai/hosted-execution/request-input";
 import {
   HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,
   parseHostedRuntimeAssistantPersonalizationToolAuthority,
-  parseHostedRuntimeAssistantPersonalizationToolRequest,
+  hostedRuntimeAssistantPersonalizationToolRequestSchema,
   type HostedRuntimeAssistantPersonalizationToolAuthority,
 } from "@murphai/hosted-execution/assistant-personalization";
 import { after } from "next/server";
@@ -29,7 +30,7 @@ export const POST = withJsonError(async (request: Request) => {
       "Direct-vault assistant preference sequence resolution is retired.",
     );
   }
-  const body = parseInput(payload, parseHostedRuntimeAssistantPersonalizationToolRequest);
+  const body = parseInput(payload, (value) => assertContract(hostedRuntimeAssistantPersonalizationToolRequestSchema, value, "Internal request"));
   if (
     (
       body.action === "update"

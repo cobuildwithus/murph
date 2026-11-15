@@ -1,5 +1,6 @@
 import type { DeviceSyncWebhookPreflightResponse } from "@murphai/device-syncd/types";
 
+import { withLegacyWebhookErrorInference } from "@/src/lib/http";
 import { jsonOk, resolveDecodedRouteParam, withJsonError } from "@/src/lib/device-sync/http";
 import { createHostedDeviceSyncPublicIngressService } from "@/src/lib/device-sync/public-ingress-service";
 import {
@@ -7,7 +8,7 @@ import {
   prepareHostedDeviceWebhookQueueTransport,
 } from "@/src/lib/device-sync/webhook-queue";
 
-export const GET = withJsonError(async (
+export const GET = withJsonError(withLegacyWebhookErrorInference(async (
   request: Request,
   context: { params: Promise<{ provider: string }> },
 ) => {
@@ -23,9 +24,9 @@ export const GET = withJsonError(async (
     ok: true,
     provider: decodedProvider,
   }, 200);
-});
+}));
 
-export const POST = withJsonError(async (
+export const POST = withJsonError(withLegacyWebhookErrorInference(async (
   request: Request,
   context: { params: Promise<{ provider: string }> },
 ) => {
@@ -68,7 +69,7 @@ export const POST = withJsonError(async (
 
   const result = await publicIngress.handleWebhook(provider, rawBody);
   return jsonOk(result, result.orphaned ? 202 : 200);
-});
+}));
 
 function createWebhookPreflightResponse(preflight: DeviceSyncWebhookPreflightResponse): Response {
   const headers = new Headers({

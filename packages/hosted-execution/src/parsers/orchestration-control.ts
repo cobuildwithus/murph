@@ -4,7 +4,7 @@ import {
   readHostedMailboxWakeHighWater,
   type HostedMailboxLaneLag,
 } from "../runtime-control.ts";
-import { parseHostedRuntimeOwnerResponse } from "../runtime-owner.ts";
+import { isHostedStandbyClaimId, parseHostedRuntimeOwnerResponse } from "../runtime-owner.ts";
 import {
   HOSTED_RUNTIME_ENSURE_PROCESSING_RESPONSE_KINDS,
   HOSTED_RUNTIME_PROCESSING_ACCEPTED_ACTIONS,
@@ -325,6 +325,12 @@ function parseRuntimeProcessingAdmission(value: unknown, processingMode: string)
   const admission = parseHostedRuntimeOwnerResponse(value);
   if (!admission.owner || admission.owner.phase === "idle") {
     throw new ContractValidationError("Runtime admission requires a non-idle Postgres owner.");
+  }
+  if (admission.status === "existing" && !isHostedStandbyClaimId(admission.owner.allocationId)) {
+    throw new ContractValidationError("Existing runtime admission allocationId must be a standby claim id.");
+  }
+  if (Date.parse(admission.owner.startedAt ?? "") > 8.64e15 - 30_000) {
+    throw new ContractValidationError("Runtime admission startedAt exceeds the retry timestamp range.");
   }
   if (admission.status === "existing") return admission;
   if (admission.status === "claimed" && admission.owner.phase === "starting"

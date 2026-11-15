@@ -1,3 +1,4 @@
+import { RequestInputError } from "@murphai/hosted-execution/request-input";
 import { observeRuntimeProcessingFence, type RuntimeProcessingDiagnostics } from "./user-runner/diagnostics.ts";
 import type { HostedRuntimeEnsureProcessingResponse } from "@murphai/hosted-execution/orchestration-control";
 import { emitHostedExecutionStructuredLog } from "@murphai/hosted-execution";
@@ -107,7 +108,10 @@ async function ensureRuntimeProcessing(context: ReturnType<typeof createProcessi
         Number.isFinite(retryAt) ? retryAt : Date.now() + HOSTED_RUNTIME_START_BUDGET_INTERVAL_MS);
     }
     if (!owner || (claim.status !== "claimed" && claim.status !== "existing")) return retryProcessing(ctx, "claim_blocked");
-    if (owner.userId !== ctx.input.userId) throw new TypeError("Runtime admission belongs to a different member.");
+    if (owner.userId !== ctx.input.userId) {
+      const message = "Runtime admission belongs to a different member.";
+      throw claim === ctx.input.admission ? new RequestInputError(message) : new TypeError(message);
+    }
     if (owner.generation === previousGeneration) return retryProcessing(ctx, "claim_blocked");
     previousGeneration = owner.generation;
     if (owner.attemptId && owner.processingMode) observeRuntimeProcessingFence(diagnostics, {

@@ -1,5 +1,8 @@
+import { parseRequestJson } from "../http";
+import { parseInput, RequestInputError } from "@murphai/hosted-execution/request-input";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { Prisma } from "@prisma/client";
+import { deviceSyncError } from "@murphai/device-syncd/errors";
 
 import {
   isDeviceSyncDisconnectInProgress,
@@ -115,9 +118,9 @@ export async function readHostedDeviceSyncRuntimeState(input: {
   request: Request;
   trustedUserId: string;
 }): Promise<HostedRuntimeSnapshotWireResponse> {
-  const parsed = parseHostedExecutionDeviceSyncRuntimeSnapshotRequest(
-    await input.request.json(),
-    input.trustedUserId,
+  const trustedUserId = input.trustedUserId;
+  const parsed = parseInput(parseRequestJson(await input.request.text()), (value) =>
+    parseHostedExecutionDeviceSyncRuntimeSnapshotRequest(value, trustedUserId),
   );
   const controlPlane = createHostedDeviceSyncControlPlane(input.request);
   const providerKeys = expandCanonicalHostedSourceProviderSlugFilter(
@@ -334,9 +337,9 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
   request: Request;
   trustedUserId: string;
 }): Promise<HostedExecutionDeviceSyncRuntimeApplyResponse> {
-  const parsed = parseHostedExecutionDeviceSyncRuntimeApplyRequest(
-    await input.request.json(),
-    input.trustedUserId,
+  const trustedUserId = input.trustedUserId;
+  const parsed = parseInput(parseRequestJson(await input.request.text()), (value) =>
+    parseHostedExecutionDeviceSyncRuntimeApplyRequest(value, trustedUserId),
   );
   const appliedAt = parsed.occurredAt ?? new Date().toISOString();
   // Silence is measured on wall time. A delayed or replayed wake's `occurredAt`
@@ -345,7 +348,7 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
 
   for (const update of parsed.updates) {
     if (update.seed !== undefined) {
-      throw new ContractValidationError("Hosted device-sync runtime callbacks must not seed Cloudflare-owned state.");
+      throw new RequestInputError("Hosted device-sync runtime callbacks must not seed Cloudflare-owned state.");
     }
   }
 
@@ -873,9 +876,9 @@ export async function readHostedDeviceSyncPendingDirtyState(input: {
   request: Request;
   trustedUserId: string;
 }): Promise<HostedExecutionDeviceSyncDirtyPendingResponse> {
-  const parsed = parseHostedExecutionDeviceSyncDirtyPendingRequest(
-    await input.request.json(),
-    input.trustedUserId,
+  const trustedUserId = input.trustedUserId;
+  const parsed = parseInput(parseRequestJson(await input.request.text()), (value) =>
+    parseHostedExecutionDeviceSyncDirtyPendingRequest(value, trustedUserId),
   );
   const controlPlane = createHostedDeviceSyncControlPlane(input.request);
   const pending = await controlPlane.store.listPendingDirtyConnectionsForUser({
@@ -899,9 +902,9 @@ export async function ackHostedDeviceSyncDirtyStateProcessed(input: {
   request: Request;
   trustedUserId: string;
 }): Promise<HostedExecutionDeviceSyncDirtyAckResponse> {
-  const parsed = parseHostedExecutionDeviceSyncDirtyAckRequest(
-    await input.request.json(),
-    input.trustedUserId,
+  const trustedUserId = input.trustedUserId;
+  const parsed = parseInput(parseRequestJson(await input.request.text()), (value) =>
+    parseHostedExecutionDeviceSyncDirtyAckRequest(value, trustedUserId),
   );
   const controlPlane = createHostedDeviceSyncControlPlane(input.request);
   const dirty = await controlPlane.store.markDirtyConnectionProcessed({
@@ -1732,14 +1735,18 @@ function validateHostedRuntimeCredentialMutation(input: {
   switch (input.credential.kind) {
     case "oauth_tokens":
       if (policy && policy.kind !== "oauth_tokens") {
-        throw new TypeError(
-          `Hosted device-sync runtime credential update for ${input.provider} must match the configured ${policy.kind} credential policy.`,
-        );
+        throw deviceSyncError({
+          code: "INVALID_REQUEST",
+          httpStatus: 400,
+          message: `Hosted device-sync runtime credential update for ${input.provider} must match the configured ${policy.kind} credential policy.`,
+        });
       }
       if (!policy && input.baseline.credential.kind !== "oauth_tokens") {
-        throw new TypeError(
-          "Hosted device-sync runtime cannot replace non-token credentials with OAuth tokens without a manifest policy.",
-        );
+        throw deviceSyncError({
+          code: "INVALID_REQUEST",
+          httpStatus: 400,
+          message: "Hosted device-sync runtime cannot replace non-token credentials with OAuth tokens without a manifest policy.",
+        });
       }
       return;
     case "provider_config": {
@@ -1750,9 +1757,11 @@ function validateHostedRuntimeCredentialMutation(input: {
 
       if (policy) {
         if (policy.kind !== "provider_config" || policy.providerConfigKey !== providerConfigKey) {
-          throw new TypeError(
-            `Hosted provider-config device-sync credential for ${input.provider} does not match the configured provider profile.`,
-          );
+          throw deviceSyncError({
+            code: "INVALID_REQUEST",
+            httpStatus: 400,
+            message: `Hosted provider-config device-sync credential for ${input.provider} does not match the configured provider profile.`,
+          });
         }
         return;
       }
@@ -1761,22 +1770,28 @@ function validateHostedRuntimeCredentialMutation(input: {
         input.baseline.credential.kind !== "provider_config"
         || input.baseline.credential.providerConfigKey !== providerConfigKey
       ) {
-        throw new TypeError(
-          "Hosted device-sync runtime cannot replace account credentials with a provider-config profile without a matching manifest policy.",
-        );
+        throw deviceSyncError({
+          code: "INVALID_REQUEST",
+          httpStatus: 400,
+          message: "Hosted device-sync runtime cannot replace account credentials with a provider-config profile without a matching manifest policy.",
+        });
       }
       return;
     }
     case "none":
       if (policy && policy.kind !== "none") {
-        throw new TypeError(
-          `Hosted device-sync runtime credential update for ${input.provider} must match the configured ${policy.kind} credential policy.`,
-        );
+        throw deviceSyncError({
+          code: "INVALID_REQUEST",
+          httpStatus: 400,
+          message: `Hosted device-sync runtime credential update for ${input.provider} must match the configured ${policy.kind} credential policy.`,
+        });
       }
       if (!policy && input.baseline.credential.kind !== "none") {
-        throw new TypeError(
-          "Hosted device-sync runtime cannot replace account credentials with none without a manifest policy.",
-        );
+        throw deviceSyncError({
+          code: "INVALID_REQUEST",
+          httpStatus: 400,
+          message: "Hosted device-sync runtime cannot replace account credentials with none without a manifest policy.",
+        });
       }
       return;
   }

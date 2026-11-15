@@ -1,3 +1,4 @@
+import { withLegacyWebhookErrorInference } from "@/src/lib/http";
 import { handleHostedTelegramPollWebhook } from "@/src/lib/hosted-polls/telegram-webhook";
 import { after } from "next/server";
 
@@ -19,7 +20,7 @@ const handleHostedOnboardingTelegramWebhookWithVisibleOutcomes =
     handleHostedOnboardingTelegramWebhookWithVisibleAccess,
   );
 
-export const POST = withJsonError(async (request: Request) => {
+export const POST = withJsonError(withLegacyWebhookErrorInference(async (request: Request) => {
   const routeStartedAtMs = Date.now();
   const secretToken = request.headers.get("x-telegram-bot-api-secret-token");
   assertHostedTelegramWebhookSecret(secretToken);
@@ -46,7 +47,7 @@ export const POST = withJsonError(async (request: Request) => {
     }),
     202,
   );
-});
+}));
 
 function scheduleAfterResponseOrFireAndForget(task: () => Promise<void>): void {
   try {

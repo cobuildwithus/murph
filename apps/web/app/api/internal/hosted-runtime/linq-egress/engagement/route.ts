@@ -1,3 +1,4 @@
+import { RequestInputError } from "@murphai/hosted-execution/request-input";
 import { readGameProposalDeliveryPlayers } from "@/src/lib/game/chat-delivery";
 import { assertGameProposalDeliveryCurrentTx, readGameRematchDeliveryRevision } from "@/src/lib/game/chat-delivery-authority";
 import { readPrivateEveningDeliveryAuthority } from "@/src/lib/game/private-notification";
@@ -630,6 +631,7 @@ function parseAnsweredMailboxItemIds(value: unknown): string[] {
         retryable: false,
       });
     }
+    if ([...itemId].length > 256) throw new RequestInputError("Answered mailbox item id is too long.");
     if (seen.has(itemId)) {
       continue;
     }

@@ -7,7 +7,7 @@ import {
 import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
-import { jsonOk, readRawBodyBuffer } from "@/src/lib/http";
+import { parseRequestJson, jsonOk, readRawBodyBuffer } from "@/src/lib/http";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { withJsonError } from "@/src/lib/hosted-onboarding/http";
 import {
@@ -30,7 +30,7 @@ export const POST = withJsonError(async (request: Request) => {
     payloadText,
   });
   const body = parseInput(
-    payloadText.trim() ? JSON.parse(payloadText) : {},
+    payloadText.trim() ? parseRequestJson(payloadText) : {},
     parseHostedEmailReplyAliasRegistrationCallbackRequest,
   );
   const aliasKey = normalizeHostedEmailReplyAliasLookupKey(body.aliasKey);

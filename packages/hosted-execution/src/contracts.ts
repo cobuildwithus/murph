@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type { HostedGameEveningCheckInPolicy, HostedGameGroupMissedCheckInPolicy, HostedGamePrivateEveningCheckInPolicy, HostedGamePrivateKickoffPolicy } from "./game-group-missed.ts";
 import type {
   HostedDataKeyEnvelopeV1,
@@ -1172,7 +1173,7 @@ export function assertHostedRuntimeProcessingTimeoutMs(
     !Number.isSafeInteger(value)
     || value < MIN_HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} must be greater than ${HOSTED_RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS}.`,
     );
   }

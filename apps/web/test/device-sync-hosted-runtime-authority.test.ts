@@ -4018,7 +4018,11 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
         observedConnectedAt: "2026-04-06T09:00:00.000Z",
         observedTokenVersion: null,
       },
-    ])).rejects.toThrow(/credential.*oauth_tokens|provider-config.*profile/u);
+    ])).rejects.toMatchObject({
+      code: "INVALID_REQUEST",
+      httpStatus: 400,
+      message: expect.stringMatching(/credential.*oauth_tokens|provider-config.*profile/u),
+    });
     expect(harness.persistStoredConnectionTokenBundle).not.toHaveBeenCalled();
     expect(harness.updateConnectionRecord).not.toHaveBeenCalled();
   });
@@ -4100,7 +4104,11 @@ describe("applyHostedDeviceSyncRuntimeResult", () => {
           kind: "oauth_tokens",
         },
       },
-    ])).rejects.toThrow(/credential update for junction must match/u);
+    ])).rejects.toMatchObject({
+      code: "INVALID_REQUEST",
+      httpStatus: 400,
+      message: expect.stringMatching(/credential update for junction must match/u),
+    });
     expect(harness.persistStoredConnectionTokenBundle).not.toHaveBeenCalled();
   });
 

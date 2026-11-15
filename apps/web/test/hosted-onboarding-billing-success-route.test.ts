@@ -134,6 +134,28 @@ describe("hosted onboarding billing success route", () => {
       .toBeLessThan(mocks.reconcileHostedBillingCheckoutSuccess.mock.invocationCallOrder[0] ?? 0);
   });
 
+  it.each([
+    {},
+    { inviteCode: 12, sessionId: "session_opaque" },
+    { inviteCode: "invite_opaque" },
+    { inviteCode: "invite_opaque", sessionId: [] },
+    { inviteCode: "invite_opaque", sessionId: "\ud800" },
+    { inviteCode: "invite_opaque", sessionId: "\udfff" },
+  ])("rejects malformed checkout identifiers before reconciliation %#", async (body) => {
+    const response = await billingSuccessRoute.POST(
+      new Request("https://example.test/api/hosted-onboarding/billing/success", {
+        body: JSON.stringify(body),
+        method: "POST",
+      }),
+    );
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: { code: "INVALID_REQUEST", message: "Invalid request." },
+    });
+    expect(mocks.reconcileHostedBillingCheckoutSuccess).not.toHaveBeenCalled();
+    expect(mocks.assertHostedMemberNotSuspended).toHaveBeenCalledTimes(1);
+  });
+
   it("blocks suspended members before reconciling the checkout session", async () => {
     const suspendedAt = new Date("2026-05-03T00:00:00.000Z");
     mocks.requireHostedAppSessionFromRequest.mockResolvedValueOnce({

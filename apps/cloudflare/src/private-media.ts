@@ -526,7 +526,7 @@ function requireHostedPrivateMediaCapabilitySecret(value: string): string {
   return normalized;
 }
 
-function requireHostedPrivateMediaUserId(value: unknown): string {
+export function requireHostedPrivateMediaUserId(value: unknown): string {
   if (typeof value !== "string") {
     throw new ContractValidationError("Hosted private media userId is invalid.");
   }

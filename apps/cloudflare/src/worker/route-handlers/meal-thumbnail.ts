@@ -5,7 +5,7 @@ import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { matchCloudflareHostedControlUserRoutePath } from "@murphai/cloudflare-hosted-control/routes";
 import { createHostedMediaStore } from "../../bundle-store.ts";
 import { json, jsonError, readRequestBodyText } from "../../json.ts";
-import { createHostedMealThumbnailDelivery, matchHostedPrivateMediaCapabilityPath, readHostedPrivateMedia, readHostedPrivateMediaCapabilitySecret, readHostedPrivateMediaDeliveryOrigin } from "../../private-media.ts";
+import { createHostedMealThumbnailDelivery, requireHostedPrivateMediaUserId, matchHostedPrivateMediaCapabilityPath, readHostedPrivateMedia, readHostedPrivateMediaCapabilitySecret, readHostedPrivateMediaDeliveryOrigin } from "../../private-media.ts";
 import { resolveHostedExecutionUserCryptoContext, type WorkerRouteContext } from "../../worker-routes/shared.ts";
 import { requireBoundInternalRouteUser } from "../auth.ts";
 import type { DeclarativeRoute } from "../routes.ts";
@@ -28,6 +28,7 @@ export const mealThumbnailRoutes: readonly DeclarativeRoute<WorkerRouteContext>[
       throw error;
     }
     const userId = decodeRouteParam(params.userId!);
+    if (photos.length > 0) parseInput(userId, requireHostedPrivateMediaUserId);
     const deliveryOrigin = readHostedPrivateMediaDeliveryOrigin(context.env);
     return json(await Promise.all(photos.map(photo => createHostedMealThumbnailDelivery({
       ...photo, userId, capabilitySecret: secret, deliveryOrigin,
