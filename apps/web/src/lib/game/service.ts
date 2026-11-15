@@ -1,12 +1,15 @@
+import { gameAreaCode } from "./area-code";
+import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
 import { isBothWinOfferDue, mergeStakeSlots } from "./rules";
 import { buildRecapFallback, gameResultCorrectionLine } from './recap-fallback';
-import { gameRecapEnvelopeSchema, type GameRecapEnvelope, type RecapAsset } from '@murphai/contracts/recap-show';
-import { recapGenerationId, readRecapMedia } from './recap-media';
+import { gameRecapEnvelopeSchema, recapStorageObjects, type GameRecapEnvelope, type RecapAsset, type RecapVideoIdentity } from '@murphai/contracts/recap-show';
+import { recapGenerationId, readRecapGenerationObject } from './recap-media';
+import { recapPosterField, selectRecapVideo } from './recap-video';
 import { retainRecapAssetTx } from './recap-retirement';
 import { recapReferencesCurrent } from './recap-asset-access';
 import { recapPostedAt } from "./time";
 import { isPairRecapShowEnabled, isRecapMediaVisible } from "./access";
-import { presentGameRecap, storedGameRecapSchema, readGameRecapStory } from "@murphai/contracts/recap-show";
+import { presentGameRecap, storedGameRecapSchema } from "@murphai/contracts/recap-show";
 import { retireGameRecapAssetsTx } from "./recap-retirement";
 import "server-only";
 import { after } from "next/server";
@@ -2883,7 +2886,9 @@ export async function readGameRecapMaterial(gameId: string, containerMemberId: s
     validation: { earnedBothWinPrize: terms.stakes.filter(stake => stake.kind === "both_get" && scores.every(score => score.misses === 0)).map(stake => stake.item)[0], group: row.maxPlayers === 10, show: isPairRecapShowEnabled(row.maxPlayers), startedAt: row.startedAt ?? row.createdAt, settledAt: row.settledAt,
       playerNamesByMemberId: recapPlayers.map((player) => ({ memberId: player.memberId, name: names.get(player.memberId) ?? "" })),
       result: scores.filter(score => score.eligible !== false).map((score) => ({ memberId: score.memberId, name: names.get(score.memberId) ?? "", score: score.score })) },
-    game: { id: row.id, ...(isPairRecapShowEnabled(row.maxPlayers) ? { recapShow: true } : {}), ...(row.maxPlayers === 10 ? { maxPlayers: 10 } : {}), players: recapPlayers.map((player) => ({ memberId: player.memberId, name: names.get(player.memberId) ?? "", task: terms.tasks.find((task) => task.seat === player.seat)?.text ?? "" })),
+    game: { id: row.id, ...(isPairRecapShowEnabled(row.maxPlayers) ? { recapShow: true } : {}),
+      ...recapPosterField(row.maxPlayers, { result, terms: state.game.terms, words, tickets: row.tickets }),
+      ...(row.maxPlayers === 10 ? { maxPlayers: 10 } : {}), players: recapPlayers.map((player) => ({ memberId: player.memberId, name: names.get(player.memberId) ?? "", task: terms.tasks.find((task) => task.seat === player.seat)?.text ?? "" })),
       lengthDays: row.lengthDays, schedule: terms.schedule, stakes: terms.stakes, score: scores.map((score) => ({ name: names.get(score.memberId) ?? "", score: score.score })), days: postsByDay },
   };
 }
@@ -2894,7 +2899,7 @@ async function readRecapDoubters(db: Db, gameId: string, names: ReadonlyMap<stri
   return new Map(cases.map(item => [item.entryId, names.get(item.actor)]));
 }
 
-export async function sealGameRecap(input: {
+type SealGameRecapInput = {
   beforeMutationTx: (tx: Prisma.TransactionClient) => Promise<void>;
   containerMemberId: string;
   eventId: string;
@@ -2902,7 +2907,17 @@ export async function sealGameRecap(input: {
   playerMemberIds: readonly string[];
   recap: HostedGameRecap | null;
   assets?: RecapAsset[];
-}): Promise<HostedGameRecap | null> {
+  /** A candidate only, as the request carried it: it is validated, measured and checked here, and left off when it fails. */
+  video?: { draft: unknown; material: GameRecapMaterial };
+};
+
+export async function sealGameRecap(input: SealGameRecapInput): Promise<HostedGameRecap | null> {
+  return (await acceptGameRecap(input))?.recap ?? null;
+}
+
+/** The stored recap after this call, whoever wrote it: the first acceptance wins, and
+ * a retry or replay gets that story and that video's identity, never its own draft's. */
+export async function acceptGameRecap(input: SealGameRecapInput): Promise<{ recap: HostedGameRecap; video: RecapVideoIdentity | null } | null> {
   const prisma = getPrisma();
   const row = await prisma.game.findFirst({ where: { id: input.gameId, chatContainerMemberId: input.containerMemberId, status: "settled" } });
   if (!row || row.maxPlayers !== 10 && !sameGamePlayers(input.playerMemberIds, input.playerMemberIds)) return null;
@@ -2934,22 +2949,26 @@ export async function sealGameRecap(input: {
   });
   if (!stored) return null;
   const [plain] = await openGameTexts([{ ...gameTarget(row, "recap"), value: stored }]);
-  return readGameRecapStory(JSON.parse(plain ?? "null"));
+  const accepted = storedGameRecapSchema.parse(JSON.parse(plain ?? "null"));
+  const video = "version" in accepted ? accepted.video : undefined;
+  return { recap: "version" in accepted ? accepted.story : accepted,
+    video: "version" in accepted && video ? { generationId: accepted.generationId, hash: video.hash, byteLength: video.byteLength } : null };
 }
 
-async function selectedRecapEnvelope(row: Game, input: Parameters<typeof sealGameRecap>[0]) {
-  const generation = input.recap && input.assets ? gameRecapEnvelopeSchema.parse({ version: 1,
-    generationId: recapGenerationId(input.eventId), story: input.recap, assets: input.assets, acceptedAt: new Date().toISOString(),
-    preview: { token: randomBytes(32).toString('base64url'), expiresAt: new Date(Date.now() + 30 * 86400_000).toISOString() } }) : null;
-  for (const asset of generation?.assets ?? []) {
-    if (asset.storageKey !== `recap/${generation!.generationId}/${asset.hash}.${asset.mediaType === 'image/jpeg' ? 'jpg' : 'mp3'}`) throw new Error('Wrong recap media identity.');
-    const stored = await readRecapMedia({ storageKey: asset.storageKey, ownerMemberId: row.wordsOwnerMemberId });
-    if (!stored || stored.hash !== asset.hash) throw new Error('Selected media is unavailable.');
+async function selectedRecapEnvelope(row: Game, input: SealGameRecapInput) {
+  if (!input.recap || !input.assets) return null;
+  const generationId = recapGenerationId(input.eventId), ownerMemberId = row.wordsOwnerMemberId;
+  const video = input.video && await selectRecapVideo({ ...input.video, gameId: row.id, eventId: input.eventId, generationId, ownerMemberId, assets: input.assets });
+  const generation = gameRecapEnvelopeSchema.parse({ version: 1,
+    generationId, story: input.recap, assets: input.assets, ...(video ? { video } : {}), acceptedAt: new Date().toISOString(),
+    preview: { token: randomBytes(32).toString('base64url'), expiresAt: new Date(Date.now() + 30 * 86400_000).toISOString() } });
+  for (const asset of generation.assets) {
+    if (!await readRecapGenerationObject({ generationId, ownerMemberId, object: asset })) throw new Error('Selected media is unavailable.');
   }
   return generation;
 }
 
-async function acceptGameRecapTx(tx: Prisma.TransactionClient, input: Parameters<typeof sealGameRecap>[0], current: Game, recapEncrypted: string | null, regenerationId?: string, generation?: GameRecapEnvelope | null): Promise<string | null> {
+async function acceptGameRecapTx(tx: Prisma.TransactionClient, input: SealGameRecapInput, current: Game, recapEncrypted: string | null, regenerationId?: string, generation?: GameRecapEnvelope | null): Promise<string | null> {
   const acceptedKey = `${input.eventId}:accepted`;
   if (regenerationId) {
     const requested = await tx.gameEvent.findUnique({ where: { commandKey: input.eventId }, select: { gameId: true, type: true } });
@@ -2968,9 +2987,11 @@ async function acceptGameRecapTx(tx: Prisma.TransactionClient, input: Parameters
     if (changed.count !== 1) return null;
   }
   if (generation) {
+    // The video's own sources were checked when it was selected and are checked again on every read and
+    // send, so a source that changes in between leaves a video nobody can open, never a recap that fails.
     if (!await recapReferencesCurrent(tx, input.gameId, generation.assets)) throw new Error('A selected source was revoked.');
-    for (const asset of generation.assets) if (!await retainRecapAssetTx(tx, { gameId: input.gameId,
-      generationId: generation.generationId, ownerMemberId: current.wordsOwnerMemberId, storageKey: asset.storageKey, now: new Date() })) throw new Error('Selected media was retired.');
+    for (const object of recapStorageObjects(generation)) if (!await retainRecapAssetTx(tx, { gameId: input.gameId,
+      generationId: generation.generationId, ownerMemberId: current.wordsOwnerMemberId, storageKey: object.storageKey, now: new Date() })) throw new Error('Selected media was retired.');
   }
   return recapEncrypted;
 }
@@ -3273,7 +3294,7 @@ async function readHomeProfile(memberId: string, auth?: HostedNativeMemberAuth):
 
 export async function readHome(memberId: string, multiplayer = false, auth?: HostedNativeMemberAuth): Promise<GameHomeView> {
   const prisma = getPrisma();
-  const [profile, seats, addressed, tickets, usualEntry] = await Promise.all([
+  const [profile, seats, addressed, tickets, usualEntry, identity] = await Promise.all([
     readHomeProfile(memberId, auth),
     // Apply active-game priority before the bounded history window, so new
     // invitations and completed games cannot displace an older live game.
@@ -3299,6 +3320,9 @@ export async function readHome(memberId: string, multiplayer = false, auth?: Hos
     }),
     prisma.gameEntry.findFirst({ where: { memberId, attempt: { gt: 0 }, withdrawnAt: null },
       orderBy: [{ receivedAt: "desc" }, { id: "desc" }], select: { kind: true } }),
+    // Only for the optional area-code hint: an identity that can't be read
+    // leaves it unknown instead of failing home.
+    readHostedMemberIdentity({ memberId, prisma }).catch(() => null),
   ]);
   const current = await loadCurrent([...new Set([...seats.map((seat) => seat.gameId), ...addressed.map((game) => game.id)])], true, memberId);
   const visible = current.games.filter((game) => canView(game, memberId));
@@ -3323,12 +3347,13 @@ export async function readHome(memberId: string, multiplayer = false, auth?: Hos
     return ticketView(toTicketRow(ticket, ticket.game.players), input.words, memberId, input.now,
       input.state.game.terms, input.hiddenMemberIds, input);
   });
+  const areaCode = gameAreaCode(identity);
   return {
     blocked,
     games: views,
     canStartGames: isGameEnabled(),
     ...(multiplayer ? { canStartGroups: areGameGroupsEnabled() } : {}),
-    me: { usualKind: usualEntry ? toEntryKind(usualEntry.kind) : null, avatarUrl: profile?.photoKey ? gameMediaUrl(profile.photoKey) : null, firstName: profile?.firstName ?? null, memberId, timeZone: profile?.timeZone ?? null },
+    me: { ...(areaCode ? { areaCode } : {}), usualKind: usualEntry ? toEntryKind(usualEntry.kind) : null, avatarUrl: profile?.photoKey ? gameMediaUrl(profile.photoKey) : null, firstName: profile?.firstName ?? null, memberId, timeZone: profile?.timeZone ?? null },
     wallet: {
       // Expired tickets stay where they were, marked expired.
       held: wallet.filter((ticket) => ticket.status !== "redeemed" && ticket.youHold),

@@ -699,6 +699,24 @@ export const assistantInputCursorSchema = z
   })
   .strict()
 
+/**
+ * A recap video the outbox may attach beside its message: the identity Web
+ * accepted for the recap, plus whatever the delivery owner records with it.
+ * Only the host writes it; nothing does yet. This release reads it, keeps it
+ * across rewrites and sends the text alone. Extra keys pass through and a
+ * value that is not one is dropped, so an intent written by a newer release is
+ * never quarantined and an optional video never costs the message.
+ * The three fields are `recapVideoIdentitySchema`'s, restated here so this
+ * widely loaded module does not pull in the recap contracts.
+ */
+export const assistantOutboxRecapVideoSchema = z
+  .object({
+    generationId: z.string().min(1).max(128),
+    hash: z.string().regex(/^[a-f0-9]{64}$/u),
+    byteLength: z.number().int().positive().max(8_000_000),
+  })
+  .passthrough()
+
 export const assistantOutboxIntentSchema = z
   .object({
     schema: z.literal('murph.assistant-outbox-intent.v1'),
@@ -780,6 +798,7 @@ export const assistantOutboxIntentSchema = z
       .max(ASSISTANT_ANSWERED_MAILBOX_ITEM_ID_LIMIT)
       .default([]),
     preparedDispatchToken: z.string().min(1).nullable().default(null),
+    recapVideo: assistantOutboxRecapVideoSchema.optional().catch(undefined),
     lastError: assistantDeliveryErrorSchema.nullable(),
   })
   .strict()

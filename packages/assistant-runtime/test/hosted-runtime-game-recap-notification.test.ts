@@ -59,6 +59,27 @@ describe("hosted game recap notification", () => {
       expect(input.executionContext?.hosted?.gameRecapScope?.show).toBe(show ? true : undefined);
     }
   });
+  it("runs a recap wake that asks for a video exactly as one that does not, and hands the request to the turn", async () => {
+    const inputs: AssistantNotificationInput[] = [];
+    for (const video of [false, true]) {
+      const wake = recapWake();
+      if (wake.notification.responsePolicy?.kind !== "require_game_recap") throw new Error("Expected recap policy");
+      wake.notification.responsePolicy.show = true;
+      if (video) wake.notification.responsePolicy.video = true;
+      mocks.sendAssistantNotification.mockResolvedValue({ decision: { kind: "skip", privateSummary: "Synthetic recap." }, deliveryOutcome: null, response: "", session: { sessionId: "synthetic" } });
+      await executeHostedAssistantNotificationWake({ executionContext: { hosted: { memberId: wake.userId, userEnvKeys: [] } },
+        groupToolPort: { request: async () => ({ action: "read_game", result: { status: "ok", recapGame: {} } }) }, vaultRoot: "/synthetic-vault", wake });
+      inputs.push(mocks.sendAssistantNotification.mock.lastCall?.[0] as AssistantNotificationInput);
+    }
+    const [plain, asked] = inputs;
+    expect(plain!.executionContext?.hosted?.gameRecapScope).toEqual({ gameId: GAME_ID, eventId: EVENT_ID, pairFingerprint: PAIR_FINGERPRINT, show: true });
+    expect(asked!.executionContext?.hosted?.gameRecapScope).toEqual({ gameId: GAME_ID, eventId: EVENT_ID, pairFingerprint: PAIR_FINGERPRINT, show: true, video: true });
+    // Nothing else about the turn differs: same model, tier, instructions and delivery.
+    const rest = (input: AssistantNotificationInput) => JSON.stringify({ ...input, responsePolicy: undefined, executionContext: undefined, wake: undefined }, (key, value) => typeof value === "function" ? "fn" : value);
+    expect(rest(asked!)).toBe(rest(plain!));
+    expect(asked!.assistantTargetOverride).toEqual(plain!.assistantTargetOverride);
+    expect(asked!.serviceTier).toBe(plain!.serviceTier);
+  });
   it("binds group missed-day scope to the room with writable lore and no group control port", async () => {
     const wake = recapWake();
     const policy = { kind: "game_group_missed_check_in" as const, roomId: wake.userId, eventId: `game-missed:${wake.userId}:group:2030-03-04`,
