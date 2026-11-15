@@ -94,6 +94,8 @@ test("compactRecord removes undefined values and toIsoTimestamp rejects invalid 
   assert.equal(toIsoTimestamp("2026-04-08T00:00:00.000Z"), "2026-04-08T00:00:00.000Z");
   assert.equal(toIsoTimestamp("2026-04-08T00:00:00+00:00"), "2026-04-08T00:00:00.000Z");
   assert.equal(toIsoTimestamp("2026-04-08T05:00:00-05:00"), "2026-04-08T10:00:00.000Z");
+  assert.throws(() => toIsoTimestamp("+275760-09-13T00:00:00.000Z"), /Invalid ISO timestamp/u);
+  assert.equal(toIsoTimestamp("9999-12-31T23:59:59.000Z"), "9999-12-31T23:59:59.000Z");
   assert.throws(
     () => toIsoTimestamp("not-a-date"),
     /Invalid ISO timestamp: not-a-date \(missing time zone\)/u,

@@ -65,6 +65,10 @@ import {
   readHostedRuntimeReconciliationFactsWithVisibleAccess,
 } from "@/src/lib/hosted-orchestration/visible-runtime-reconciliation";
 
+const recognizedAccess = await vi.importActual<typeof import("@/src/lib/hosted-onboarding/recognized-inbound-access")>(
+  "@/src/lib/hosted-onboarding/recognized-inbound-access",
+);
+
 describe("visible runtime access reconciliation", () => {
   const hostedMemberFindUnique = vi.fn();
   const prisma = {
@@ -100,6 +104,23 @@ describe("visible runtime access reconciliation", () => {
     mocks.isHostedTelegramConversationMessageWake.mockImplementation(
       (wake: { channel?: string }) => wake.channel === "telegram",
     );
+  });
+
+  it.each(["linq", "telegram"])("silently blocks queued %s work after suspension", async (channel) => {
+    const facts = blockedFacts("user_not_active");
+    mocks.readHostedRuntimeReconciliationFacts.mockResolvedValue(facts);
+    hostedMemberFindUnique.mockResolvedValue({ id: "member_123", suspendedAt: new Date(), threadContainer: null });
+    mocks.readHostedMailboxWakeByItemId.mockResolvedValue({
+      channel,
+      eventId: "event_queued",
+      message: { linqMessage: { threadIsDirect: true }, telegramMessage: { threadIsDirect: true } },
+    });
+    mocks.resolveHostedRecognizedInboundAccess.mockImplementationOnce(recognizedAccess.resolveHostedRecognizedInboundAccess);
+    await expect(readHostedRuntimeReconciliationFactsWithVisibleAccess({ userId: "member_123" })).resolves.toEqual(facts);
+    expect(mocks.resolveHostedRecognizedInboundAccess).toHaveBeenCalledOnce();
+    expect(mocks.buildFallbackSignupLinkResponse).not.toHaveBeenCalled();
+    expect(mocks.drainHostedLinqSideEffectsDirect).not.toHaveBeenCalled();
+    expect(mocks.sendHostedTelegramAccessNotice).not.toHaveBeenCalled();
   });
 
   it("delivers an inactive-billing notice on the pending Telegram thread", async () => {

@@ -57,11 +57,9 @@ describe("request body limit response parity", () => {
       const request = oversizedRequest(0, "streamed");
       Object.defineProperty(request, "body", { value: new ReadableStream({ start(controller) { controller.error(new RangeError(message)); } }) });
       const response = await handle(request);
-      expect(response.status).toBe(name === "Linq" ? 400 : 500);
+      expect(response.status).toBe(500);
       expect(Object.fromEntries(response.headers)).toEqual({ "cache-control": "no-store", "content-type": "application/json" });
-      await expect(response.json()).resolves.toEqual({ error: name === "Linq"
-        ? { code: "INVALID_REQUEST", message: "Invalid request." }
-        : { code: "INTERNAL_ERROR", message: "Internal error." } });
+      await expect(response.json()).resolves.toEqual({ error: { code: "INTERNAL_ERROR", message: "Internal error." } });
     });
     it.each(modes)("preserves the complete response for %s overflow", async (mode) => {
       await expectResponse(await handle(oversizedRequest(limit, mode)), {

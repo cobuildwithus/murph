@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
+import { parseInput } from "@murphai/hosted-execution/request-input";
 
 import { withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
-import { readRawBodyBuffer, withLegacyWebhookErrorInference } from "@/src/lib/http";
+import { parseRequestJson, readRawBodyBuffer } from "@/src/lib/http";
 import {
   consultPhoneCall,
   getHostedPhoneCallForConsultation,
@@ -16,7 +17,7 @@ import { verifyRetellSignature } from "@/src/lib/phone-calls/retell-signature";
 
 const RETELL_ASK_MURPH_MAX_BODY_BYTES = 2 * 1024 * 1024;
 
-export const POST = withJsonError(withLegacyWebhookErrorInference(async (request: Request) => {
+export const POST = withJsonError(async (request: Request) => {
   const rawBody = (await readRawBodyBuffer(request, {
     limitBytes: RETELL_ASK_MURPH_MAX_BODY_BYTES,
   })).toString("utf8");
@@ -26,7 +27,7 @@ export const POST = withJsonError(withLegacyWebhookErrorInference(async (request
     signature: request.headers.get("x-retell-signature"),
   });
 
-  const payload = retellAskMurphPayloadSchema.parse(JSON.parse(rawBody));
+  const payload = parseInput(parseRequestJson(rawBody), retellAskMurphPayloadSchema.parse);
   const storageMode = payload.call.data_storage_setting?.trim().toLowerCase() || null;
   if (storageMode !== null && !hasRetellBasicAttributesOnlyStorage(payload.call)) {
     throw hostedOnboardingError({
@@ -68,4 +69,4 @@ export const POST = withJsonError(withLegacyWebhookErrorInference(async (request
   });
 
   return NextResponse.json(advice);
-}));
+});

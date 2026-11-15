@@ -1,3 +1,4 @@
+import { jsonError } from "@/src/lib/hosted-onboarding/http";
 import { createHash } from "node:crypto";
 
 import type { PrismaClient } from "@prisma/client";
@@ -416,9 +417,21 @@ describe("hosted group disclosure grant lifecycle", () => {
     stored.permissionTextEncrypted = encodeDefaultHostedSecureBoxTestValue(
       "Different persisted text",
     );
-    await expect(bindPermission(changedText)).rejects.toThrow(
-      "already bound to another disclosure request",
-    );
+    stored.permissionDigest = digestHostedGroupDisclosurePermissionText({
+      groupId: "group_1", permissionText: "Different persisted text",
+    });
+    await expect(bindPermission(changedText)).rejects.toMatchObject({
+      httpStatus: 409, code: "HOSTED_GROUP_DISCLOSURE_PERMISSION_REQUEST_CONFLICT",
+      message: "This group turn is already bound to another disclosure request.",
+    });
+  });
+
+  it("reports a corrupt stored permission digest as a server failure on replay", async () => {
+    const harness = buildDisclosureStoreHarness();
+    const stored = await bindPermission(harness);
+    stored.permissionDigest = "corrupt";
+    const response = await bindPermission(harness).then(() => { throw new Error("Expected failure"); }, jsonError);
+    expect(response.status).toBe(500);
   });
 
   it("binds exact message consent and rotates the grant generation after revocation", async () => {
@@ -861,7 +874,7 @@ describe("hosted group disclosure grant lifecycle", () => {
       membershipId: "membership_1",
       permissionDigest: permission.permissionDigest,
       tx: harness.tx,
-    })).resolves.toBeNull();
+    })).rejects.toThrow("Stored group disclosure permission digest is invalid.");
     await expect(readActiveHostedGroupDisclosureGrantsForGroup({
       groupId: "group_1",
       prisma: harness.tx,

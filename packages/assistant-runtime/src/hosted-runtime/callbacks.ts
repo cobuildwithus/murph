@@ -138,7 +138,7 @@ import {
   buildHostedTelegramVoiceMemoChannelEnv,
 } from "./channel-activity.ts";
 import { uploadLinqAttachment } from "@murphai/operator-config/linq-runtime";
-import { guardHostedRecapVideoFetch, resolveHostedRecapVideoAttachment } from "./recap-video-attachment.ts";
+import { guardHostedRecapVideoFetch, RECAP_VIDEO_LINQ_ATTACHMENT, resolveHostedRecapVideoAttachment } from "./recap-video-attachment.ts";
 import {
   looksLikeHostedProviderRedactedLinqTarget,
   sendHostedProviderLinqMessage,
@@ -6423,7 +6423,7 @@ async function prepareHostedLinqRecapVideoAttachment(input: {
     // Loaded only for a recap that carries a video.
     fileFor: async (identity) => (await import("@murphai/assistant-engine/recap-video-render")).recapVideoHandoffPath(identity),
     isCurrent: async ({ generationId, hash }) => hostedRecapVideoMayGo(await input.check({ generationId, hash })),
-    upload: async (bytes) => (await uploadLinqAttachment({ bytes, contentType: "video/mp4", filename: "recap.mp4" }, {
+    upload: async (bytes) => (await uploadLinqAttachment({ bytes, ...RECAP_VIDEO_LINQ_ATTACHMENT }, {
       env: input.linqEnv,
       fetchImplementation: createHostedProviderFetchBoundary({
         assertProviderEntryLive: async () => {

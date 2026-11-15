@@ -1,5 +1,6 @@
 import "server-only";
 import * as z from "@murphai/contracts/zod-runtime";
+import { RequestInputError } from "@murphai/hosted-execution/request-input";
 import type { HostedLinqWebhookEvent } from "../hosted-onboarding/linq-webhook";
 import { createHostedLinqMessageLookupKeyReadCandidates } from "../hosted-onboarding/contact-privacy";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
@@ -13,7 +14,9 @@ const voteEvent = z.object({ message_id: z.string().uuid(), chat: z.object({ id:
 // The caller verifies Linq's webhook signature before reaching this boundary.
 export async function handleHostedLinqPollWebhook(event: HostedLinqWebhookEvent): Promise<boolean> {
   if (event.event_type !== "poll.vote.added" && event.event_type !== "poll.vote.removed") return false;
-  const data = voteEvent.parse(event.data);
+  const parsed = voteEvent.safeParse(event.data);
+  if (!parsed.success) throw new RequestInputError("Invalid Linq poll vote payload.");
+  const data = parsed.data;
   const prisma = getPrisma();
   const where = { channel: "linq", providerPollKey: { in: createHostedLinqMessageLookupKeyReadCandidates(data.message_id) } };
   let row = await prisma.hostedConversationPoll.findFirst({ where });
@@ -25,7 +28,8 @@ export async function handleHostedLinqPollWebhook(event: HostedLinqWebhookEvent)
   if (!row) return true;
   const definition = await readPollDefinition(row);
   const previous = await readPollResult(row);
-  if (definition.target !== data.chat.id || previous?.messageId !== data.message_id) throw new TypeError("Poll event binding mismatch.");
+  if (definition.target !== data.chat.id) throw new RequestInputError("Poll event binding mismatch.");
+  if (previous?.messageId !== data.message_id) throw new TypeError("Stored poll message binding mismatch.");
   if (row.resultNotifiedAt) { await recoverPollResultWake(row); return true; }
   // Fetch current truth rather than replaying potentially reordered vote deltas.
   const fresh = await callLinqPoll({ action: "read", chatId: definition.target, messageId: previous.messageId, pollRef: row.id, question: definition.question });

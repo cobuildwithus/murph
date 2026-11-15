@@ -5,7 +5,7 @@ import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { handleHostedOnboardingLinqWebhook } from "@/src/lib/hosted-onboarding/webhook-service";
 import { withHostedVisibleSecondaryLinqOutcomes } from "@/src/lib/hosted-onboarding/visible-secondary-webhooks";
-import { readRawBodyBuffer, withLegacyWebhookErrorInference } from "@/src/lib/http";
+import { readRawBodyBuffer } from "@/src/lib/http";
 import {
   deriveHostedLinqDirectMailboxPreparationReason,
   deriveHostedOnboardingTimingErrorName,
@@ -24,7 +24,7 @@ const handleHostedOnboardingLinqWebhookWithVisibleSecondaryOutcomes =
 const routeModuleLoadedAtMs = Date.now();
 let routeModuleRequestOrdinal = 0;
 
-export const POST = withJsonError(withLegacyWebhookErrorInference(async (request: Request) => {
+export const POST = withJsonError(async (request: Request) => {
   const routeStartedAtMs = Date.now();
   routeModuleRequestOrdinal += 1;
   const signature = request.headers.get("x-webhook-signature");
@@ -91,7 +91,7 @@ export const POST = withJsonError(withLegacyWebhookErrorInference(async (request
     });
     throw error;
   }
-}));
+});
 
 function scheduleAfterResponseOrFireAndForget(task: () => Promise<void>): void {
   try {

@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   type LinqMessageEditedEvent,
   type LinqMessageReceivedPartsInspection,
@@ -51,7 +52,7 @@ export function requireHostedLinqMessageReceivedEvent(
   try {
     return parseLinqMessageReceivedEvent(event);
   } catch (error) {
-    if (error instanceof TypeError) {
+    if (error instanceof ContractValidationError || isLinqWebhookPayloadError(error)) {
       if (error.message.startsWith("Invalid ISO timestamp:")) {
         const timestampField = readHostedLinqInvalidTimestampField(event);
         throw hostedOnboardingError({
@@ -84,7 +85,7 @@ export function requireHostedLinqMessageEditedEvent(
   try {
     return parseLinqMessageEditedEvent(event);
   } catch (error) {
-    if (error instanceof TypeError) {
+    if (error instanceof ContractValidationError || isLinqWebhookPayloadError(error)) {
       throw hostedOnboardingError({
         code: "LINQ_PAYLOAD_INVALID",
         message: error.message,
@@ -101,7 +102,7 @@ export function requireHostedLinqParticipantChangedEvent(
   try {
     return parseLinqParticipantChangedEvent(event);
   } catch (error) {
-    if (error instanceof TypeError) {
+    if (error instanceof ContractValidationError || isLinqWebhookPayloadError(error)) {
       throw hostedOnboardingError({
         code: "LINQ_PAYLOAD_INVALID",
         message: error.message,
@@ -118,7 +119,7 @@ export function requireHostedLinqTypingIndicatorStartedEvent(
   try {
     return parseLinqTypingIndicatorStartedEvent(event);
   } catch (error) {
-    if (error instanceof TypeError) {
+    if (error instanceof ContractValidationError || isLinqWebhookPayloadError(error)) {
       throw hostedOnboardingError({
         code: "LINQ_PAYLOAD_INVALID",
         message: error.message,

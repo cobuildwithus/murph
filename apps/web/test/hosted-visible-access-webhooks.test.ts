@@ -106,58 +106,15 @@ describe("visible access webhook recovery", () => {
     });
   });
 
-  it("replies generically to a recognized suspended Telegram member", async () => {
-    mocks.handleHostedOnboardingTelegramWebhook.mockResolvedValue({
-      ignored: true,
-      ok: true,
-      reason: "suspended-member",
-    });
-    const update = { update_id: 322 };
-    mocks.parseHostedTelegramWebhookUpdate.mockReturnValue(update);
-    mocks.summarizeHostedTelegramWebhook.mockResolvedValue({
-      isDirect: true,
-      occurredAt: "2026-07-25T12:00:00.000Z",
-      senderTelegramUserId: "456",
-    });
-    mocks.buildHostedTelegramMessagePayload.mockReturnValue({
-      messageId: "8",
-      threadId: "456",
-    });
-    mocks.resolveHostedMemberRoutingByTelegramUserId.mockResolvedValue({
-      lookup: {
-        core: {
-          id: "member_suspended",
-          suspendedAt: new Date("2026-07-25T11:00:00.000Z"),
-        },
-      },
-      status: "found",
-    });
-    mocks.resolveHostedRecognizedInboundAccess.mockResolvedValue({
-      kind: "access_notice",
-      message: "Check account settings or contact support.",
-      noticeCode: "billing_inactive",
-      responseReason: "sent-account-unavailable-notice",
-    });
-    mocks.sendHostedTelegramAccessNotice.mockResolvedValue({ status: "sent" });
-
+  it("keeps suspended Telegram members silent before visible recovery", async () => {
+    const response = { ignored: true, ok: true, reason: "suspended-member" };
+    mocks.handleHostedOnboardingTelegramWebhook.mockResolvedValue(response);
     await expect(handleHostedOnboardingTelegramWebhookWithVisibleAccess({
-      prisma,
-      rawBody: "{}",
-      secretToken: null,
-    })).resolves.toEqual({
-      ignored: false,
-      ok: true,
-      reason: "sent-account-unavailable-notice",
-    });
-
-    expect(mocks.sendHostedTelegramAccessNotice).toHaveBeenCalledWith(
-      expect.objectContaining({
-        authorizedTelegramUserId: "456",
-        memberId: "member_suspended",
-        message: "Check account settings or contact support.",
-        target: "456",
-      }),
-    );
+      prisma, rawBody: "{}", secretToken: null,
+    })).resolves.toEqual(response);
+    expect(mocks.resolveHostedRecognizedInboundAccess).not.toHaveBeenCalled();
+    expect(mocks.resolveHostedMemberRoutingByTelegramUserId).not.toHaveBeenCalled();
+    expect(mocks.sendHostedTelegramAccessNotice).not.toHaveBeenCalled();
   });
 
   it("privately recovers an inactive Telegram group sender without exposing billing in the room", async () => {

@@ -47,6 +47,22 @@ describe("hosted onboarding Stripe webhook route", () => {
     });
   });
 
+  // Stripe resends any non-2xx; a fault on our side must read as ours, not as
+  // Stripe's malformed request.
+  it("answers a configuration fault while handling an event as a server error", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      mocks.handleHostedStripeWebhook.mockRejectedValueOnce(new TypeError("Synthetic configuration fault."));
+      const response = await hostedOnboardingStripeRoute.POST(new Request("https://join.example.test/api/hosted-onboarding/stripe/webhook", {
+        method: "POST", body: "{}", headers: { "stripe-signature": "sig_123" },
+      }));
+      expect(response.status).toBe(500);
+      await expect(response.json()).resolves.toMatchObject({ error: { code: "INTERNAL_ERROR" } });
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
   it("rejects oversized Stripe webhook bodies before calling the service", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {

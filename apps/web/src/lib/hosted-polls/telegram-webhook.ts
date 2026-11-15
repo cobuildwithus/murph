@@ -1,8 +1,10 @@
-import { ContractValidationError } from "@murphai/contracts/validation-error";
+import { assertContract } from "@murphai/contracts";
+import { parseInput, RequestInputError } from "@murphai/hosted-execution/request-input";
 import "server-only";
 import type { HostedConversationPoll } from "@prisma/client";
 import * as z from "@murphai/contracts/zod-runtime";
 import { getPrisma } from "../prisma";
+import { parseRequestJson } from "../http";
 import { createHostedTelegramPollLookupKeyReadCandidates } from "../hosted-onboarding/contact-privacy";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { telegramPollSchema, telegramPollSnapshot } from "./provider";
@@ -27,18 +29,18 @@ async function findTelegramPoll(pollId: string) {
 
 // Called only after Telegram's webhook secret has been verified.
 export async function handleHostedTelegramPollWebhook(rawBody: string): Promise<{ ok: true; ignored?: true } | null> {
-  const raw: unknown = JSON.parse(rawBody);
+  const raw = parseRequestJson(rawBody);
   if (typeof raw !== "object" || raw === null || (!("poll" in raw) && !("poll_answer" in raw))) return null;
-  const updateId = z.object({ update_id: z.number().int().nonnegative().safe() }).parse(raw).update_id;
-  const answer = "poll_answer" in raw ? telegramPollAnswerSchema.parse(raw.poll_answer) : null;
-  const poll = "poll" in raw ? telegramPollSchema.parse(raw.poll) : null;
+  const updateId = parseInput(raw, (value) => assertContract(z.object({ update_id: z.number().int().nonnegative().safe() }), value)).update_id;
+  const answer = "poll_answer" in raw ? parseInput(raw.poll_answer, (value) => assertContract(telegramPollAnswerSchema, value)) : null;
+  const poll = "poll" in raw ? parseInput(raw.poll, (value) => assertContract(telegramPollSchema, value)) : null;
   const row = await findTelegramPoll(answer ? answer.poll_id : poll!.id);
   if (!row) return { ok: true, ignored: true };
   const previous = await readPollResult(row);
   if (!previous || previous.providerPollId !== (answer ? answer.poll_id : poll!.id)) throw new TypeError("Poll update binding mismatch.");
   if (answer) {
     if (previous.snapshot.anonymous) return { ok: true, ignored: true };
-    if (answer.option_ids.some((index) => index >= previous.snapshot.options.length)) throw new ContractValidationError("Poll answer option is out of range.");
+    if (answer.option_ids.some((index) => index >= previous.snapshot.options.length)) throw new RequestInputError("Poll answer option is out of range.");
     // Answer delivery is independent of tally delivery, including after close.
     await recordTelegramPollAnswer(row, answer, updateId);
     return { ok: true as const };

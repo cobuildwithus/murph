@@ -215,6 +215,18 @@ export function OpsUsageStudy() {
       id="ops-usage-dashboard"
       inert
     >
+      <div className="scroll-mt-24" id="ops-member-suspension">
+        <StudyFrame title="Member suspension and restoration">
+          <MemberUsageClient
+            dashboard={{
+              ...DESIGN_OPS_USAGE_DASHBOARD,
+              rows: DESIGN_OPS_USAGE_DASHBOARD.rows.map((row, index) =>
+                index === 1 ? { ...row, suspended: true } : row),
+            }}
+            operatorMemberId={null}
+          />
+        </StudyFrame>
+      </div>
       <StudyFrame title="Search loading">
         <MemberUsageClient
           dashboard={DESIGN_OPS_USAGE_DASHBOARD}
