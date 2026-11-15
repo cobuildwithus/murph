@@ -1949,6 +1949,13 @@ export function createJunctionDeviceSyncProvider(
         context.now,
       );
     }
+    const settledReread = await rereadSettledConnectBackfill(
+      context,
+      job,
+      window,
+      sourceProviders,
+      skippedOptionalResources,
+    );
     const historicalProviderRecordsSeen = sourceProviderSlug !== null
       && (
         job.payload.historicalProviderRecordsSeen === true
@@ -2031,6 +2038,7 @@ export function createJunctionDeviceSyncProvider(
       ? isConnectHistoricalBackfill
         ? buildHistoricalBackfillFollowUp({
             coverageComplete: historicalSummaryCoverage.complete,
+            settledReread,
             terminalFailure:
               historicalSummaryCoverage.pendingProviderSlugs.length > 0
               && historicalSummaryCoverage.pendingProviderSlugs.every((providerSlug) =>
@@ -2110,11 +2118,7 @@ export function createJunctionDeviceSyncProvider(
         );
       }
     }
-    const temporalResources = context.vaultTimeZone
-      ? timeseriesResources.filter((resource) =>
-          JUNCTION_TEMPORAL_AUTHORITY_RESOURCES.has(resource)
-        )
-      : [];
+    const temporalResources = selectTemporalSweepResources(context, settledReread);
     const temporalRecoveryWindows = context.vaultTimeZone
       ? buildLatestAuthoritativeDailyWindows({
           horizonDays: temporalReconcileDays,
@@ -2170,10 +2174,11 @@ export function createJunctionDeviceSyncProvider(
     const shouldScheduleTimeseries = timeseriesResources.length > 0
       && (
         job.kind === "backfill"
-        || shouldImportClosedTimeseriesForReconcile(
-          context.account.lastSyncCompletedAt,
-          window.windowEnd,
-        )
+          ? settledReread === null
+          : shouldImportClosedTimeseriesForReconcile(
+              context.account.lastSyncCompletedAt,
+              window.windowEnd,
+            )
       );
     const historicalProofStillCurrent = !historicalProofAuthorization
       || await isJunctionHistoricalProofAuthorizationCurrent(
@@ -2235,6 +2240,85 @@ export function createJunctionDeviceSyncProvider(
       ),
       skippedOptionalResources,
     );
+  }
+
+  /** A settled re-read queues no timeseries work, so it sweeps nothing. */
+  function selectTemporalSweepResources(
+    context: ProviderJobContext,
+    settledReread: JunctionSettledBackfillReread | null,
+  ): string[] {
+    return context.vaultTimeZone && settledReread === null
+      ? timeseriesResources.filter((resource) =>
+          JUNCTION_TEMPORAL_AUTHORITY_RESOURCES.has(resource)
+        )
+      : [];
+  }
+
+  /**
+   * A coverage generation bump re-queues a connect window that had already
+   * settled. That run re-reads summaries, the records such a bump repairs, and
+   * leaves the bounded timeseries window to the jobs its first run queued. A
+   * source added or reconnected after the connection date had its history
+   * fetched then, and a day no webhook delivered was only ever fetched, so
+   * the re-read continues past the connect window (which the caller has just
+   * imported) to the start of the reconcile window, in spans no longer than
+   * the backfill's own. Returns null for every other job.
+   */
+  async function rereadSettledConnectBackfill(
+    context: ProviderJobContext,
+    job: DeviceSyncJobRecord,
+    window: { windowEnd: string; windowStart: string },
+    sourceProviders: readonly JunctionProviderConnection[],
+    skippedOptionalResources: JunctionSkippedOptionalResource[],
+  ): Promise<JunctionSettledBackfillReread | null> {
+    const status = job.kind === "backfill"
+      && !normalizeProviderSlug(job.payload.sourceProviderSlug)
+      && isConnectHistoricalBackfillWindow(context.account, window)
+      ? readSettledPriorHistoricalBackfillStatus(context.account.metadata, window)
+      : null;
+    if (!status) {
+      return null;
+    }
+    const rereadEnd = resolveCurrentSummaryWindow(context.now, reconcileDays).windowStart;
+    let windowStart = window.windowEnd;
+    while (Date.parse(windowStart) < Date.parse(rereadEnd)) {
+      if (context.shouldYield?.() || context.signal?.aborted) {
+        return { finished: false, status };
+      }
+      const windowEnd = minIsoTimestamp(
+        addMilliseconds(windowStart, summaryBackfillDays * TIMESERIES_CHUNK_MS),
+        rereadEnd,
+      );
+      const { snapshots } = await fetchSummarySnapshots(
+        context,
+        windowStart,
+        windowEnd,
+        skippedOptionalResources,
+      );
+      if (hasJunctionSnapshotRecords(snapshots)) {
+        const preparedImport = prepareJunctionImportSnapshotForSources(
+          snapshots,
+          sourceProviders,
+          await readJunctionImportSources(context),
+          {},
+          { allowUnlistedSources: context.connectionSourceAdmissionMode !== "listed_only" },
+        );
+        await commitPreparedJunctionCanonicalImport(
+          context,
+          preparedImport,
+          {
+            importedAt: windowEnd,
+            windowStart,
+            windowEnd,
+            summaries: preparedImport.snapshots,
+            timeseries: {},
+          },
+          context.now,
+        );
+      }
+      windowStart = windowEnd;
+    }
+    return { finished: true, status };
   }
 
   async function markJunctionHistoricalReconnectRequired(
@@ -11326,11 +11410,17 @@ function buildHistoricalBackfillFollowUp(input: {
   coverageComplete: boolean;
   metadata: Record<string, unknown>;
   now: string;
+  settledReread?: JunctionSettledBackfillReread | null;
   terminalFailure: boolean;
   windowStart: string;
   windowEnd: string;
 }): JunctionHistoricalBackfillFollowUp {
   if (!canCurrentRuntimeMutateJunctionHistoricalBackfillProgress(input.metadata)) {
+    return {};
+  }
+
+  if (input.settledReread?.finished === false) {
+    // The older status stays, so the next scheduled pass queues the re-read again.
     return {};
   }
 
@@ -11343,6 +11433,17 @@ function buildHistoricalBackfillFollowUp(input: {
         windowStart: input.windowStart,
         windowEnd: input.windowEnd,
       }),
+    };
+  }
+
+  if (input.settledReread) {
+    // A settled window stays settled: the re-read can prove an exhausted
+    // window complete, but it never restarts the retry ladder.
+    return {
+      metadataPatch: {
+        [JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.status]:
+          encodeJunctionHistoricalBackfillStatus(input.settledReread.status),
+      },
     };
   }
 
@@ -11531,6 +11632,44 @@ function readHistoricalBackfillEmptyAttempts(
   return typeof rawAttempts === "number" && Number.isInteger(rawAttempts) && rawAttempts >= 0
     ? rawAttempts
     : 0;
+}
+
+/**
+ * Unfinished progress of the current generation owns its sources' reconnect
+ * markers. So does an exhausted window of any generation, until a run of the
+ * current one re-evaluates it.
+ */
+function isHistoricalReconnectOwnedByBackfillProgress(
+  state: ReturnType<typeof readHistoricalBackfillStatus>,
+): boolean {
+  return state !== null
+    && state.status !== "complete"
+    && (
+      state.coverageVersion >= JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION
+      || state.status === "exhausted"
+    );
+}
+
+/** One summary re-read of a connect window an older coverage generation settled. */
+interface JunctionSettledBackfillReread {
+  /** False when the pass asked the re-read to stop before its last span. */
+  finished: boolean;
+  status: "complete" | "exhausted";
+}
+
+/** The terminal status an older coverage generation recorded for this window. */
+function readSettledPriorHistoricalBackfillStatus(
+  metadata: Record<string, unknown>,
+  window: { windowEnd: string; windowStart: string },
+): "complete" | "exhausted" | null {
+  const state = readHistoricalBackfillStatus(metadata);
+  return state
+    && state.status !== "retrying"
+    && state.coverageVersion < JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION
+    && normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.windowStart]) === window.windowStart
+    && normalizeString(metadata[JUNCTION_HISTORICAL_BACKFILL_METADATA_KEYS.windowEnd]) === window.windowEnd
+    ? state.status
+    : null;
 }
 
 function readHistoricalBackfillStatus(metadata: Record<string, unknown>): {
@@ -13456,11 +13595,7 @@ async function projectJunctionSources(
   const preserveHistoricalReconnect = options.preserveHistoricalReconnect ?? (
     options.preserveHistoricalReconnectProviderSlugs !== undefined
     || preserveOpaqueHistoricalReconnect
-    || (
-      historicalState !== null
-      && historicalState.coverageVersion >= JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION
-      && historicalState.status !== "complete"
-    )
+    || isHistoricalReconnectOwnedByBackfillProgress(historicalState)
   );
   const preserveHistoricalReconnectProviderSlugs =
     options.preserveHistoricalReconnectProviderSlugs === undefined

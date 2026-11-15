@@ -2190,7 +2190,7 @@ function createSnapshotDeviceSyncPort(input: {
               externalAccountId: "synthetic-whoop-account",
               id: input.connectionId,
               metadata: {
-                junctionHistoricalBackfillStatus: "coverage_v3_complete",
+                junctionHistoricalBackfillStatus: "coverage_v4_complete",
                 junctionHistoricalBackfillWindowStart: "2026-04-26T00:00:00.000Z",
                 junctionHistoricalBackfillWindowEnd: "2026-04-27T00:00:00.000Z",
               },

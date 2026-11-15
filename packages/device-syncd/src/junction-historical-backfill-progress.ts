@@ -13,7 +13,9 @@ import {
 
 export type JunctionHistoricalBackfillStatus = "complete" | "exhausted" | "retrying";
 
-export const JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION = 3;
+// Generation 4 changes no coverage rule. It re-reads the summaries every
+// settled connection fetched while fetched records were losing fields.
+export const JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION = 4;
 const JUNCTION_HISTORICAL_BACKFILL_CURRENT_STATUS_PREFIX =
   `coverage_v${JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION}_`;
 const JUNCTION_HISTORICAL_BACKFILL_EVIDENCE_ENCODING_VERSION = 2;
@@ -64,10 +66,13 @@ export const JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY =
 export const JUNCTION_NOTE_HISTORY_BACKFILL_COVERAGE_METADATA_KEY =
   "junctionNoteHistoryBackfillCoverage";
 const JUNCTION_BLOOD_PRESSURE_HISTORY_BACKFILL_COVERAGE_PREFIX = "v";
-// Packed bits do not carry their resource policy generation. Advancing the
-// existing envelope version makes every pre-180-day m1 bit stale without a new
-// metadata field, slot map, migration, or repair owner.
-const JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_ENCODING_VERSION = 2;
+// Packed bits do not carry their resource policy generation, so the envelope
+// version is what retires them, without a new metadata field, slot map,
+// migration, or repair owner. Every pre-180-day m1 bit is stale. An m2 matrix
+// certified weight while fetched weight rows were being dropped, so it is read
+// without its weight column and every other m2 bit stands.
+const JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_ENCODING_VERSION = 3;
+const JUNCTION_EXTENDED_TIMESERIES_HISTORY_STALE_WEIGHT_ENCODING_VERSION = 2;
 const JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_PREFIX =
   `m${JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_ENCODING_VERSION}|`;
 const JUNCTION_EXTENDED_TIMESERIES_HISTORY_SOURCE_CAPACITY = 64;
@@ -94,7 +99,9 @@ export const JUNCTION_SCHEDULE_TIME_EXTENDED_HISTORY_RESOURCE_VERSIONS = Object.
   ...JUNCTION_SPARSE_DAILY_TIMESERIES_HISTORY_BACKFILL_RESOURCES.map(
     (resource) => [resource, 2] as const,
   ),
-  ["weight", 2] as const,
+  // Generation 3: a weight scan that began while fetched rows were being
+  // dropped may still hold its cursor, and must not certify the re-read.
+  ["weight", 3] as const,
 ]);
 export const JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_VERSIONS = Object.freeze([
   ["blood_pressure", 2] as const,
@@ -772,10 +779,11 @@ function readJunctionExtendedTimeseriesHistoryCoverageFacts(
   const coverage = createEmptyJunctionExtendedTimeseriesHistoryCoverageMatrix();
   for (const metadataKey of JUNCTION_LEGACY_EXTENDED_TIMESERIES_HISTORY_BACKFILL_COVERAGE_METADATA_KEYS) {
     const matrix = readJunctionExtendedTimeseriesHistoryCoverageMatrix(metadata[metadataKey]);
-    if (
-      matrix?.version === JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_ENCODING_VERSION
-    ) {
-      unionJunctionExtendedTimeseriesHistoryCoverage(coverage.bytes, matrix.bytes);
+    const matrixBytes = matrix
+      ? readStandingJunctionExtendedTimeseriesHistoryCoverageBytes(matrix)
+      : null;
+    if (matrixBytes) {
+      unionJunctionExtendedTimeseriesHistoryCoverage(coverage.bytes, matrixBytes);
       continue;
     }
     const legacy = readJunctionLegacyExtendedTimeseriesHistoryCoverage(metadata[metadataKey]);
@@ -800,6 +808,38 @@ function readJunctionExtendedTimeseriesHistoryCoverageFacts(
     }
   }
   return coverage;
+}
+
+/**
+ * The bits of one stored matrix that still certify coverage. The stale weight
+ * column is dropped from each input before the union, so a current matrix
+ * beside an older one keeps the weight bits it re-earned.
+ */
+function readStandingJunctionExtendedTimeseriesHistoryCoverageBytes(
+  matrix: JunctionExtendedTimeseriesHistoryCoverageMatrix,
+): Uint8Array | null {
+  if (matrix.version === JUNCTION_EXTENDED_TIMESERIES_HISTORY_COVERAGE_ENCODING_VERSION) {
+    return matrix.bytes;
+  }
+  const weightSlot = JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_SLOT_BY_NAME.get("weight");
+  if (
+    matrix.version !== JUNCTION_EXTENDED_TIMESERIES_HISTORY_STALE_WEIGHT_ENCODING_VERSION
+    || weightSlot === undefined
+  ) {
+    return null;
+  }
+  const bytes = Uint8Array.from(matrix.bytes);
+  for (
+    let sourceSlot = 0;
+    sourceSlot < JUNCTION_EXTENDED_TIMESERIES_HISTORY_SOURCE_CAPACITY;
+    sourceSlot += 1
+  ) {
+    clearJunctionExtendedTimeseriesHistoryCoverageBit(
+      bytes,
+      sourceSlot * JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_SLOTS.length + weightSlot,
+    );
+  }
+  return bytes;
 }
 
 function createEmptyJunctionExtendedTimeseriesHistoryCoverageMatrix():

@@ -6120,7 +6120,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
               externalAccountId: "synthetic-whoop-account-closed-loop",
               id: connectionId,
               metadata: {
-                junctionHistoricalBackfillStatus: "coverage_v3_complete",
+                junctionHistoricalBackfillStatus: "coverage_v4_complete",
                 junctionHistoricalBackfillWindowStart: "2026-04-26T00:00:00.000Z",
                 junctionHistoricalBackfillWindowEnd: "2026-04-27T00:00:00.000Z",
               },

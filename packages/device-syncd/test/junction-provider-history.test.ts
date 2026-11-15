@@ -702,7 +702,7 @@ test("Junction reconcile cadence cannot schedule faster than once per minute", (
   const scheduled = executor.createScheduledJobs?.(
     createStoredAccount({
       metadata: {
-        junctionHistoricalBackfillStatus: "coverage_v4_complete",
+        junctionHistoricalBackfillStatus: "coverage_v5_complete",
       },
     }),
     "2026-04-03T12:34:56.000Z",
@@ -766,20 +766,20 @@ test("Junction scheduled pass repairs legacy coverage and honors current or futu
 
   for (const metadata of [
     {
-      junctionHistoricalBackfillStatus: "coverage_v3_complete",
-      junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
-      junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
-    },
-    {
-      junctionHistoricalBackfillStatus: "coverage_v3_exhausted",
-      junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
-      junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
-    },
-    {
       junctionHistoricalBackfillStatus: "coverage_v4_complete",
+      junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+      junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
     },
     {
-      junctionHistoricalBackfillStatus: "coverage_v4_deferred",
+      junctionHistoricalBackfillStatus: "coverage_v4_exhausted",
+      junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
+      junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
+    },
+    {
+      junctionHistoricalBackfillStatus: "coverage_v5_complete",
+    },
+    {
+      junctionHistoricalBackfillStatus: "coverage_v5_deferred",
     },
   ] as const) {
     const scheduled = executor.createScheduledJobs?.(
@@ -798,7 +798,7 @@ test("Junction scheduled pass repairs legacy coverage and honors current or futu
   const completeOtherWindow = executor.createScheduledJobs?.(
     createStoredAccount({
       metadata: {
-        junctionHistoricalBackfillStatus: "coverage_v3_complete",
+        junctionHistoricalBackfillStatus: "coverage_v4_complete",
         junctionHistoricalBackfillWindowStart: "2026-04-02T00:00:00.000Z",
         junctionHistoricalBackfillWindowEnd: "2026-04-04T00:00:00.000Z",
       },
@@ -816,7 +816,7 @@ test("Junction scheduled pass repairs legacy coverage and honors current or futu
   const retryingOtherWindow = executor.createScheduledJobs?.(
     createStoredAccount({
       metadata: {
-        junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+        junctionHistoricalBackfillStatus: "coverage_v4_retrying",
         junctionHistoricalBackfillEmptyAttempts: 1,
         junctionHistoricalBackfillLastEmptyAt: "2026-04-03T12:30:00.000Z",
         junctionHistoricalBackfillWindowStart: "2026-04-02T00:00:00.000Z",
@@ -838,7 +838,7 @@ test("Junction scheduled pass reopens progress overwritten by a legacy runner", 
   });
   const executor = requireValue(provider.jobExecutor, "Junction provider should expose a job executor.");
   const currentProgress = {
-    junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+    junctionHistoricalBackfillStatus: "coverage_v4_retrying",
     junctionHistoricalBackfillEmptyAttempts: 2,
     junctionHistoricalBackfillLastEmptyAt: "2026-04-03T12:30:00.000Z",
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",

@@ -1,6 +1,6 @@
 # Device Sync Ingestion Invariants
 
-Last verified: 2026-09-20
+Last verified: 2026-11-14
 
 ## Purpose
 
@@ -464,8 +464,11 @@ snapshot is already reconciled; it does not need an empty Web callback.
    matrix in an existing blood-pressure or note coverage slot. Its append-only
    route slots cover every configured Junction source within the 256-character
    scalar bound, and deployed blood-pressure and note values remain legacy read
-   inputs. An unrepresentable route fails before history egress instead of
-   advancing coverage. Blood pressure retains exact per-reading repair and notes
+   inputs. The packed bits carry no resource generation, so the matrix
+   envelope generation retires them: the previous envelope stays a read input
+   without its weight column, which it certified while fetched weight rows
+   were being dropped, and every other bit it holds stands. An unrepresentable
+   route fails before history egress instead of advancing coverage. Blood pressure retains exact per-reading repair and notes
    retain complete-fetch semantics. No second queue, retry store, or persisted
    lifecycle owns this history.
 
@@ -481,7 +484,17 @@ snapshot is already reconciled; it does not need an empty Web callback.
 
    The versioned scalar in connection metadata owns aggregate coverage status,
    attempt count, and the daily observation cadence across every unresolved
-   source; there is no per-source retry state or second retry store. A
+   source; there is no per-source retry state or second retry store.
+   Advancing its generation re-reads history; it does not re-open a settled
+   outcome. A connect window that reached `complete` or `exhausted` under an
+   older generation runs one summary re-read, over the connect window and on
+   to the start of the reconcile window, because a source that joined after
+   the connection date had its history fetched then. That run reads no
+   timeseries, queues no timeseries or temporal work, leaves the temporal
+   sweep marker alone, keeps the stored outcome unless current evidence proves
+   an exhausted window complete, and preserves an exhausted window's reconnect
+   markers until it finishes. A window still `retrying` under an older
+   generation restarts its ladder with the ordinary full backfill. A
    nonterminal source keeps that aggregate status `retrying` at the saturated
    daily cadence even when another source has reached a provider-specific
    recovery outcome. The durable reset-required fact belongs to the Garmin
