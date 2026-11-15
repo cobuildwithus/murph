@@ -52,23 +52,16 @@ export function readHostedGroupUsageFundingLocatorRuntimeMemberId(
     return null;
   }
 
-  try {
-    const supplied = Buffer.from(parts[2], "utf8");
-    const expected = Buffer.from(
-      buildHostedGroupUsageFundingLocatorSignature(parts[1], environment),
-      "utf8",
-    );
-    if (
-      supplied.byteLength !== expected.byteLength
-      || !timingSafeEqual(supplied, expected)
-    ) {
-      return null;
-    }
-  } catch {
-    return null;
-  }
-
-  return parts[1];
+  // Signing throws only for a missing or malformed key, which is ours.
+  const supplied = Buffer.from(parts[2], "utf8");
+  const expected = Buffer.from(
+    buildHostedGroupUsageFundingLocatorSignature(parts[1], environment),
+    "utf8",
+  );
+  return supplied.byteLength === expected.byteLength
+    && timingSafeEqual(supplied, expected)
+    ? parts[1]
+    : null;
 }
 
 export function normalizeHostedGroupUsageFundingLocator(

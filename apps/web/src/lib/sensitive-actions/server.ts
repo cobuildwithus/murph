@@ -241,7 +241,7 @@ export function buildSensitiveActionMessage(input: {
   ].join("\n");
 }
 
-function requireSensitiveActionOrigin(): string {
+export function requireSensitiveActionOrigin(): string {
   const origin = resolveHostedPublicOrigin();
   if (!origin) {
     throw hostedOnboardingError({

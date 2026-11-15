@@ -9,11 +9,10 @@ import { runWithHostedDomainRootProviderCallsDisabled } from "../hosted-crypto/d
 import { assertHostedAppSessionCurrentTx, type HostedAppSession } from "../hosted-onboarding/app-session";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { decryptHostedWebNullableString, encryptHostedWebNullableString } from "../hosted-web/encryption";
-import { resolveHostedPublicOrigin } from "../hosted-web/public-url";
 import { readApprovalPasskeyState, prepareApprovalPasskeyWrite } from "./passkey-store";
 import { requireApprovalPasskeyEnrollmentEnabled } from "./passkey-rollout";
 import { isSensitiveActionToken } from "./shared";
-import { buildSensitiveActionMessage, buildSettingsSensitiveActionBinding, consumeSensitiveActionChallengeTx, createSensitiveActionChallenge, verifySensitiveActionChallenge, type VerifiedSensitiveActionChallenge } from "./server";
+import { buildSensitiveActionMessage, buildSettingsSensitiveActionBinding, consumeSensitiveActionChallengeTx, createSensitiveActionChallenge, requireSensitiveActionOrigin, verifySensitiveActionChallenge, type VerifiedSensitiveActionChallenge } from "./server";
 import { approvalPasskeyRegistrationOptions, verifyApprovalPasskeyRegistration } from "./webauthn";
 
 const RECOVERY_FIELD = "hosted-member-approval-recovery.v1";
@@ -64,8 +63,7 @@ async function readRecoveryProof(input: Input & { key: unknown }) {
   if (!row?.recoveryHashEncrypted || state.encrypted !== row.credentialsEncrypted) throw unavailable();
   const hash = await decryptHostedWebNullableString({ field: RECOVERY_FIELD, memberId, prisma: input.prisma, value: row.recoveryHashEncrypted });
   if (!hash || !/^[a-f0-9]{64}$/u.test(hash) || !timingSafeEqual(Buffer.from(hash, "hex"), Buffer.from(digest(input.key), "hex"))) throw unavailable();
-  const origin = resolveHostedPublicOrigin();
-  if (!origin) throw new Error("Hosted approval origin is not configured.");
+  const origin = requireSensitiveActionOrigin();
   const bindingHash = digest(JSON.stringify(["murph-approval-recovery-v1", memberId, input.session.sessionId, row.recoveryHashEncrypted]));
   return { bindingHash, encrypted: row.recoveryHashEncrypted, state, origin };
 }

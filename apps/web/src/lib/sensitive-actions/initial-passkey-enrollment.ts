@@ -11,11 +11,10 @@ import { runWithFreshHostedDomainRootUnwrapCache, runWithHostedDomainRootProvide
 import { assertHostedAppSessionCurrentTx, type HostedAppSession } from "../hosted-onboarding/app-session";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { lockHostedMemberRow, HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
-import { resolveHostedPublicOrigin } from "../hosted-web/public-url";
 import { prepareApprovalPasskeyWrite } from "./passkey-store";
 import { requireApprovalPasskeyEnrollmentEnabled } from "./passkey-rollout";
 import { isSensitiveActionToken } from "./shared";
-import { buildSensitiveActionMessage, consumeSensitiveActionChallengeTx, createSensitiveActionChallengeMaterial } from "./server";
+import { buildSensitiveActionMessage, consumeSensitiveActionChallengeTx, createSensitiveActionChallengeMaterial, requireSensitiveActionOrigin } from "./server";
 import { approvalPasskeyRegistrationOptions, verifyApprovalPasskeyRegistration } from "./webauthn";
 
 export const INITIAL_APPROVAL_ENROLLMENT_KIND = "approval.passkey.initial-enrollment";
@@ -49,8 +48,7 @@ async function prepareRepair(input: Input) {
   requireFreshPrimary(input.session);
   const bound = await prepareHostedBoundLogin(input.prisma, input.session.member.id);
   requireFreshPrimary(input.session, bound.current.user.credentialsChangedAt);
-  const origin = resolveHostedPublicOrigin();
-  if (!origin) throw new Error("Hosted approval origin is not configured.");
+  const origin = requireSensitiveActionOrigin();
   const bindingHash = digest(JSON.stringify([
     "murph-initial-approval-enrollment-v1", input.session.member.id, input.session.sessionId,
     input.session.primaryAuthenticatedAt!.toISOString(), bound.fingerprint,

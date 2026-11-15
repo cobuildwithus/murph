@@ -12,11 +12,11 @@ import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   lockHostedMemberRow,
 } from "@/src/lib/hosted-onboarding/shared";
-import { resolveHostedPublicOrigin } from "@/src/lib/hosted-web/public-url";
 import {
   buildSensitiveActionMessage,
   buildSettingsSensitiveActionBinding,
   consumeSensitiveActionChallengeTx,
+  requireSensitiveActionOrigin,
   verifySensitiveActionChallenge,
 } from "./server";
 import { prepareApprovalPasskeyWrite } from "./passkey-store";
@@ -38,10 +38,10 @@ interface EnrollmentInput {
 async function verifyEnrollmentAuthorization(input: EnrollmentInput) {
   requireApprovalPasskeyEnrollmentEnabled();
   const authorization = parseSensitiveActionAuthorization(input.authorization);
-  const origin = resolveHostedPublicOrigin();
-  if (!authorization || !origin) {
+  if (!authorization) {
     throw hostedOnboardingError({ code: "SENSITIVE_ACTION_AUTHORIZATION_REQUIRED", httpStatus: 403, message: "Secure approval is required to add a passkey." });
   }
+  const origin = requireSensitiveActionOrigin();
   const proof = await verifySensitiveActionChallenge({
     authorization,
     bindingHash: buildSettingsSensitiveActionBinding({
