@@ -373,6 +373,8 @@ it("activates show policy only for an explicitly selected pair", () => {
   expect(show).toContain("open it with view_image and set faceY on its scene block");
   expect(show).toContain("the draft's path, and voice");
   expect(show).toContain("keep two for the song");
+  // The song tool makes one take; a late singer only lengthens the song's opening.
+  expect(show).not.toContain("second take");
   expect(show).not.toContain("the story's style as prompt");
   // The turn sets the mode and format, and the files carry the material: the guide names neither a mode nor an inline list.
   expect(show).toContain("game.json (the game, its posts, the result and every photo you may use, under references)");
