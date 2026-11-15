@@ -1,5 +1,6 @@
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import * as hostedParsers from "@murphai/hosted-execution/parsers";
+import * as runtimeState from "@murphai/runtime-state";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -32,6 +33,28 @@ import {
 type ObservedRequest = { init?: RequestInit; url: string };
 
 describe("createCloudflareHostedControlClient", () => {
+  it.each([{}, { deleted: false }])("owns a malformed purge acknowledgement: %j", async (body) => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(createJsonResponse(body));
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test",
+      fetchImpl,
+      getBearerToken: async () => "synthetic-token",
+    });
+
+    const result = client.purgeRuntimeResource({
+      userId: "member-synthetic",
+      resource: { kind: "snapshot", objectKey: "synthetic/snapshot" },
+    });
+    await expect(result).rejects.toBeInstanceOf(CloudflareHostedControlMalformedResponseError);
+    await expect(result).rejects.toMatchObject({
+      cause: expect.any(ContractValidationError),
+    });
+    await expect(result).rejects.toMatchObject({
+      cause: { name: "TypeError", message: "Runtime resource deletion was not acknowledged." },
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it.each([
     ["JSON decoding", () => new Response("not JSON"), SyntaxError],
     ["response validation", () => createJsonResponse({}), ContractValidationError],
@@ -1953,6 +1976,36 @@ describe("createCloudflareHostedControlClient", () => {
       await expect(missing.client.readRecapMedia({ mediaId: recapId, userId: "user_123" })).resolves.toBeNull();
       const failed = gameMediaClient(() => createJsonResponse({ stored: false }));
       await expect(failed.client.putRecapMedia({ envelope: sealed, hash, mediaId: recapId, userId: "user_123" })).rejects.toMatchObject({ cause: { message: expect.stringContaining("not confirmed") } });
+    });
+
+    it.each([
+      ["invalid JSON", "not JSON"],
+      ["invalid shape", "{}"],
+      ["invalid domain", JSON.stringify({ ...envelope, domain: "runtime" })],
+    ])("owns recap envelope failures from %s", async (label, serialized) => {
+      const { client, fetchImpl } = gameMediaClient(() => createJsonResponse({ envelope: serialized, hash: "a".repeat(64) }));
+      const result = client.readRecapMedia({
+        mediaId: `recap/${"b".repeat(32)}/${"a".repeat(64)}.jpg`,
+        userId: "member-synthetic",
+      });
+
+      await expect(result).rejects.toBeInstanceOf(CloudflareHostedControlMalformedResponseError);
+      await expect(result).rejects.toMatchObject({ cause: expect.any(ContractValidationError) });
+      if (label === "invalid JSON") {
+        await expect(result).rejects.toMatchObject({ cause: { cause: expect.any(SyntaxError) } });
+      }
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([TypeError, SyntaxError])("preserves a recap validator bug: %s", async (ErrorType) => {
+      const error = new ErrorType("Synthetic envelope validator bug.");
+      vi.spyOn(runtimeState, "parseHostedSecureBoxEnvelope").mockImplementationOnce(() => { throw error; });
+      const { client } = gameMediaClient(() => createJsonResponse({ envelope: JSON.stringify(envelope), hash: "a".repeat(64) }));
+
+      await expect(client.readRecapMedia({
+        mediaId: `recap/${"b".repeat(32)}/${"a".repeat(64)}.jpg`,
+        userId: "member-synthetic",
+      })).rejects.toBe(error);
     });
 
     it("stages a sealed envelope bound to the owner and the photo's name", async () => {

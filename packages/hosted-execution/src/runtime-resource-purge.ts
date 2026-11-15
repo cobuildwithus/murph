@@ -29,6 +29,6 @@ export function parseHostedRuntimeResourcePurge(value: unknown): HostedRuntimeRe
 }
 
 export function parseHostedRuntimeResourcePurgeResponse(value: unknown): { deleted: true } {
-  if (requireObject(value, "Runtime resource purge response").deleted !== true) throw new TypeError("Runtime resource deletion was not acknowledged.");
+  if (requireObject(value, "Runtime resource purge response").deleted !== true) throw new ContractValidationError("Runtime resource deletion was not acknowledged.");
   return { deleted: true };
 }

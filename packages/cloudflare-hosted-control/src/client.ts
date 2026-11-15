@@ -637,9 +637,21 @@ export function createCloudflareHostedControlClient(
       const userId = requireCloudflareHostedControlUserId(input.userId);
       return nullWhenNotFound(requestHostedExecutionAuthorizedJson({ baseUrl, boundUserId: userId, fetchImpl, getAuthorizationHeader,
         label: "recap media read", path: buildCloudflareHostedControlGameMediaPath("recapMediaRead", userId),
-        parse(value) { const record = requireRecord(value, "Recap storage"); return {
-          envelope: requireString(record.envelope, "Recap envelope"), hash: requireString(record.hash, "Recap hash"),
-        }; }, request: { method: "GET", headers: { "x-murph-recap-media-id": input.mediaId } }, timeoutMs: options.timeoutMs }));
+        parse(value) {
+          const record = requireRecord(value, "Recap storage");
+          const envelope = requireString(record.envelope, "Recap envelope");
+          let parsedEnvelope: unknown;
+          try {
+            parsedEnvelope = JSON.parse(envelope);
+          } catch (error) {
+            if (error instanceof SyntaxError) {
+              throw new ContractValidationError("Recap envelope must be valid JSON.", { cause: error });
+            }
+            throw error;
+          }
+          parseHostedSecureBoxEnvelope(parsedEnvelope);
+          return { envelope, hash: requireString(record.hash, "Recap hash") };
+        }, request: { method: "GET", headers: { "x-murph-recap-media-id": input.mediaId } }, timeoutMs: options.timeoutMs }));
     },
     async deleteGameMedia(input) {
       const userId = requireCloudflareHostedControlUserId(input.userId);
