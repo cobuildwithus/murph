@@ -35,7 +35,7 @@ it.each([false, true])('returns the actual strict upload receipt for a score=%s,
   if (request.action !== 'read_game' || request.recapRead?.kind !== 'upload') throw new Error('Expected upload');
   const beforeMutationTx = vi.fn(async () => {});
   const receipt = await uploadRecapMedia({ gameId: 'synthetic-game', eventId: 'synthetic-event', memberId: 'synthetic-room', beforeMutationTx,
-    material: { game: {}, players: [], entries: [], validation: { show: true, startedAt: new Date(0), settledAt: new Date(1), playerNamesByMemberId: [], result: [] } }, file: request.recapRead });
+    material: { game: {}, players: [], entries: [], validation: { show: true, startedAt: new Date(0), settledAt: new Date(1), playerNamesByMemberId: [], result: [] } }, file: { ...request.recapRead, mediaType: 'audio/mpeg' } });
   expect(beforeMutationTx).toHaveBeenCalledOnce();
   expect(recapAssetSchema.parse(receipt)).toEqual(receipt);
   expect(receipt.durationMs).toBeGreaterThan(score ? 24_500 : 19_500);

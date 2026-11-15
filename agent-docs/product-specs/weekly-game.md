@@ -694,6 +694,8 @@ resulting avatar. No private photo is shared with the subject or other players.
   The presentation payload and decoder fixtures remain compatible with iOS build
   96. MURPH_GAME_RECAP_SHOW_ENABLED remains the producer flag;
   MURPH_GAME_RECAP_MEDIA_VISIBLE=false hides generated media and cover previews.
+  MURPH_GAME_RECAP_VIDEO_ENABLED=true lets Web store one recap video with a pair
+  show; it is off, and nothing renders or sends a video yet.
   MURPH_GAME_RECAP_MEDIA_DIR is local-test storage only. No production regeneration
   is part of implementation or local proof.
 

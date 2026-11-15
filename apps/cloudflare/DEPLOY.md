@@ -115,6 +115,10 @@ reply echoes that nonce and contains executable evidence from existing owners:
   still accepts legacy authorized responses for callers that do not need an
   audience; the runtime's scheduled-delivery boolean requirement and independent
   callback reauthorization are unchanged.
+- The group tool's request and result schemas parse synthetic recap video
+  witnesses: one part upload, a write that brings a candidate, a recovery that
+  asks for the accepted identity, and a result that names it. A Web that
+  predates the recap video fails closed with `recap_video`.
 
 Worker-only releases run both checks too: retaining an image does not prove that
 it lacks the audience requirement. Without an attested contract for that retained
