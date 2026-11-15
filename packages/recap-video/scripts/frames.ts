@@ -1,5 +1,5 @@
 // Writes single frames of the synthetic fixture as PNGs, for looking at pages beside the app.
-//   pnpm --dir packages/recap-video frames <directory> <ms,ms,...> [--music=song]
+//   pnpm --dir packages/recap-video frames <directory> <ms,ms,...>
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -9,7 +9,7 @@ import { writeFixture } from "../test/fixture.js";
 const [directory, times] = process.argv.slice(2).filter(arg => !arg.startsWith("--"));
 if (!directory || !times) throw new Error("Usage: frames <directory> <ms,ms,...>");
 await mkdir(directory, { recursive: true });
-const input = await writeFixture(path.join(directory, "fixture"), process.argv.includes("--music=song") ? "song" : "score");
+const input = await writeFixture(path.join(directory, "fixture"));
 const renderer = await createRecapVideoRenderer(input);
 for (const ms of times.split(",").map(Number)) {
   const file = path.join(directory, `frame-${String(ms).padStart(5, "0")}.png`);

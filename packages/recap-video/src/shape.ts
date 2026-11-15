@@ -58,6 +58,6 @@ export function requireShape(input: RecapVideoInput): void {
     if (pages.filter(page => page.kind === kind).length > 1) refuse("A show has one song and one result.");
   }
   for (const page of pages) {
-    if (page.song) requireSong(page.song, input.soundtrack.songMs);
+    if (page.song) requireSong(page.song, input.score.songMs);
   }
 }

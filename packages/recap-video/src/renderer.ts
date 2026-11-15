@@ -2,7 +2,7 @@ import { buildPoster, buildSong } from "./closing-pages.js";
 import { buildStoryPage, type BuiltPage, type Piece } from "./pages.js";
 import {
   BOARD, COLOR, SCALE, VIDEO_HEIGHT, VIDEO_WIDTH, beginLayer, createCanvas, createLayer, createPictureLoader, onNight, registerRecapFonts, roundedRect,
-  type Canvas, type Ctx, type Layer,
+  type Canvas, type Ctx, type Layer, type Rect,
 } from "./surface.js";
 import { RECAP_VIDEO_FPS, buildRecapVideoTimeline, entryIndexAt, type RecapVideoEntryKind, type RecapVideoTimeline } from "./timeline.js";
 import type { RecapVideoInput } from "./types.js";
@@ -18,8 +18,8 @@ export interface RecapVideoFrameState {
   pageId: string;
   kind: RecapVideoEntryKind;
   localMs: number;
-  /** Each piece's opacity, zero before it arrives and one once it has. */
-  pieces: { name: string; opacity: number }[];
+  /** Each piece's opacity, zero before it arrives and one once it has, and the room it was laid out in, in points. */
+  pieces: { name: string; opacity: number; box: Rect }[];
   /** The story bars, each from empty to full. */
   bars: number[];
   /** Lyric words lit so far, on the song page. */
@@ -129,7 +129,7 @@ export async function createRecapVideoRenderer(input: RecapVideoInput): Promise<
       const { pageIndex, entry, page, localMs, lengthMs } = at(ms);
       return {
         pageIndex, pageId: entry.page.id, kind: entry.kind, localMs,
-        pieces: page.pieces.filter(piece => !piece.direct).map(piece => ({ name: piece.name, opacity: arrival(piece, localMs, lengthMs) })),
+        pieces: page.pieces.filter(piece => !piece.direct).map(piece => ({ name: piece.name, opacity: arrival(piece, localMs, lengthMs), box: piece.bounds })),
         bars: pages.map((_, bar) => bar < pageIndex ? 1 : bar === pageIndex ? Math.min(Math.max(localMs / lengthMs, 0), 1) : 0),
         ...(page.sungWords ? { sungWords: page.sungWords(localMs) } : {}),
       };

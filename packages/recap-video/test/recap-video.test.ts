@@ -4,25 +4,26 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
-import { createCanvas } from "@napi-rs/canvas";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
-  RECAP_VIDEO_MAX_BYTES, RecapVideoRefusal, buildRecapVideoTimeline, createRecapVideoRenderer, encodeRecapVideo, posterWords, videoKbpsCeiling,
+  RECAP_VIDEO_MAX_BYTES, RecapVideoRefusal, billing, buildRecapVideoTimeline, createRecapVideoRenderer, encodeRecapVideo, posterWords, starringLine, videoKbpsCeiling,
   type RecapVideoInput, type RecapVideoPage, type RecapVideoRenderer, type RecapVideoSongWord,
 } from "../src/index.js";
 import { pictureSize, registerRecapFonts, textWidth, wrapText, type TextStyle } from "../src/surface.js";
-import { FIXTURE_PAGES, writeFixture } from "./fixture.js";
+import { FIXTURE_PAGES, writeFixture, type FixtureExtras } from "./fixture.js";
 
 const run = promisify(execFile);
 const hasFfmpeg = spawnSync("ffmpeg", ["-version"]).status === 0 && spawnSync("ffprobe", ["-version"]).status === 0;
+// The runner image lane sets this: there, a missing ffmpeg is a failure, not a reason to skip the encode.
+if (process.env.RECAP_VIDEO_REQUIRE_FFMPEG && !hasFfmpeg) throw new Error("This lane proves the encode and found no ffmpeg.");
 
 const NIGHT = [0x1c, 0x19, 0x15], SIENNA = [0x8b, 0x5d, 0x3f], SLATE = [0x4f, 0x6b, 0x78], PAPER = [0xff, 0xff, 0xff];
 /** A spot low on the page that no page draws on, so it shows the page's ground. */
 const GROUND_SPOT = { x: 20, y: 1716 };
 
 let directory: string;
-let input: RecapVideoInput;
+let input: RecapVideoInput & { extras: FixtureExtras };
 let renderer: RecapVideoRenderer;
 
 beforeAll(async () => {
@@ -54,23 +55,22 @@ const opacity = (ms: number, name: string): number | undefined => renderer.frame
 const withPages = (change: (pages: RecapVideoPage[]) => RecapVideoPage[]): RecapVideoInput => ({ ...input, show: { ...input.show, pages: change(structuredClone(FIXTURE_PAGES)) } });
 
 describe("timeline", () => {
-  it("puts five-second story pages on the score's cues, the song to its last word, then the last screen to the end of the music", () => {
-    // The last word ends at 14,980 ms: the last screen takes the first frame 350 ms after it, and the video ends on a frame.
-    const posterFrom = 1360 * 1000 / 30, end = 1531 * 1000 / 30;
+  it("puts story pages on the score's cues, the song from its first sung word to its last, then the last screen to the end of the music", () => {
+    // The song's clock starts at 30,088 ms and its last word ends 14,980 ms in: the last screen takes the first frame 350 ms after that, and the video ends on a frame.
+    const posterFrom = 1363 * 1000 / 30, end = 1531 * 1000 / 30;
     expect(renderer.timeline.entries.map(entry => [entry.kind, entry.fromMs, entry.toMs])).toEqual([
       ["cover", 0, 5000], ["print", 5000, 10000], ["scene", 10000, 15000], ["print", 15000, 20000], ["scene", 20000, 25000],
-      ["superlative", 25000, 30000], ["song", 30000, posterFrom], ["poster", posterFrom, end],
+      ["superlative", 25000, 30300], ["song", 30300, posterFrom], ["poster", posterFrom, end],
     ]);
     expect(renderer.timeline.durationMs).toBe(end);
     expect(renderer.timeline.frameCount).toBe(1531);
-    expect(renderer.frameState(1359 * 1000 / 30).kind).toBe("song");
+    expect(renderer.frameState(1362 * 1000 / 30).kind).toBe("song");
     expect(renderer.frameState(posterFrom)).toMatchObject({ kind: "poster", localMs: 0 });
   });
 
-  it("keeps the same pages when the music is the song alone", async () => {
-    const song = await writeFixture(path.join(directory, "song"), "song");
-    expect(song.soundtrack.startsAtMs).toBe(30000);
-    expect(buildRecapVideoTimeline(song)).toEqual(renderer.timeline);
+  it("holds the page before the song for a singer who comes in late", () => {
+    const late = buildRecapVideoTimeline(withPages(pages => pages.map(page => page.kind === "song" ? { ...page, cueMs: 33900 } : page)));
+    expect(late.entries.slice(5, 7).map(entry => [entry.kind, entry.fromMs])).toEqual([["superlative", 25000], ["song", 33900]]);
   });
 
   it("holds the last screen five seconds when the song is sung to its end", () => {
@@ -78,14 +78,20 @@ describe("timeline", () => {
       ? { ...page, song: { ...page.song, lines: page.song.lines.map((line, index, all) => index === all.length - 1 ? { words: line.words.map(word => ({ ...word, endMs: 19900 })) } : line) } }
       : page));
     const timeline = buildRecapVideoTimeline(late), poster = timeline.entries.at(-1);
-    // 50,250 ms falls between two frames: the last screen takes the next one and holds a full 150.
-    expect(poster).toMatchObject({ kind: "poster", fromMs: 1508 * 1000 / 30, toMs: 1658 * 1000 / 30 });
-    expect(timeline.frameCount).toBe(1658);
+    // 50,338 ms falls between two frames: the last screen takes the next one and holds a full 150.
+    expect(poster).toMatchObject({ kind: "poster", fromMs: 1511 * 1000 / 30, toMs: 1661 * 1000 / 30 });
+    expect(timeline.frameCount).toBe(1661);
   });
 
-  it("refuses a recap without a song, and music whose cues do not fit", () => {
+  it("refuses a recap without a song, a show without a score, and cues that do not fit", () => {
+    const score = expect.objectContaining({ code: "invalid_soundtrack" });
     expect(() => buildRecapVideoTimeline(withPages(pages => pages.filter(page => page.kind !== "song")))).toThrowError(expect.objectContaining({ code: "missing_song" }));
-    expect(() => buildRecapVideoTimeline({ ...input, soundtrack: { ...input.soundtrack, cuesMs: [0, 5000] } })).toThrowError(expect.objectContaining({ code: "invalid_soundtrack" }));
+    // A recap from before shows had scores has a song and no cues: its story pages would play in silence, so it gets no video.
+    expect(() => buildRecapVideoTimeline(withPages(pages => pages.map(({ cueMs: _none, ...page }) => page)))).toThrowError(score);
+    expect(() => buildRecapVideoTimeline(withPages(pages => pages.map(page => page.id === "page-2" ? { ...page, cueMs: 4000 } : page)))).toThrowError(score);
+    // The song page opens inside the song: not before its clock starts, not after the music ends.
+    expect(() => buildRecapVideoTimeline(withPages(pages => pages.map(page => page.kind === "song" ? { ...page, cueMs: 29000 } : page)))).toThrowError(score);
+    expect(() => buildRecapVideoTimeline(withPages(pages => pages.map(page => page.kind === "song" ? { ...page, cueMs: 50040 } : page)))).toThrowError(score);
     expect(() => buildRecapVideoTimeline(withPages(pages => [...pages, { id: "x", kind: "filmRolls", background: "night", blocks: [] }]))).toThrowError(expect.objectContaining({ code: "unsupported_page" }));
   });
 
@@ -93,8 +99,8 @@ describe("timeline", () => {
     const refusal = expect.objectContaining({ code: "invalid_soundtrack" });
     const withWords = (change: (word: RecapVideoSongWord, at: number) => RecapVideoSongWord): RecapVideoInput => withPages(pages => pages.map(page => page.song?.lines
       ? { ...page, song: { ...page.song, lines: page.song.lines.map(line => ({ words: line.words.map(change) })) } } : page));
-    expect(() => buildRecapVideoTimeline({ ...input, soundtrack: { ...input.soundtrack, durationMs: Number.NaN } })).toThrowError(refusal);
-    expect(() => buildRecapVideoTimeline({ ...input, soundtrack: { ...input.soundtrack, songMs: Number.POSITIVE_INFINITY } })).toThrowError(refusal);
+    expect(() => buildRecapVideoTimeline({ ...input, score: { ...input.score, durationMs: Number.NaN } })).toThrowError(refusal);
+    expect(() => buildRecapVideoTimeline({ ...input, score: { ...input.score, songMs: Number.POSITIVE_INFINITY } })).toThrowError(refusal);
     // Ends before their starts would put the last screen ahead of the song.
     expect(() => buildRecapVideoTimeline(withWords(word => ({ ...word, endMs: -1000 })))).toThrowError(refusal);
     expect(() => buildRecapVideoTimeline(withWords((word, at) => at === 2 ? { ...word, startMs: 0, endMs: 10 } : word))).toThrowError(refusal);
@@ -149,7 +155,7 @@ describe("what is on screen at a time", () => {
   });
 
   it("staggers Most likely to and the last screen", () => {
-    const card = 25000, poster = 45330;
+    const card = 25000, poster = 1363 * 1000 / 30;
     expect(renderer.frameState(card + 1100).pieces.map(piece => [piece.name, piece.opacity === 1])).toEqual([
       ["face", true], ["name", true], ["lead", true], ["title", false], ["rule", false], ["line", false],
     ]);
@@ -175,13 +181,14 @@ describe("what is on screen at a time", () => {
   });
 
   it("lights the lyrics word by word, on the words' own times", () => {
-    const song = 30000, words = FIXTURE_PAGES.find(page => page.song)?.song?.lines?.flatMap(line => line.words) ?? [];
-    expect(renderer.frameState(song).sungWords).toBe(0);
+    // The song's clock starts at 30,088 ms; its page opens 212 ms later, as the first word is sung.
+    const song = 30088, words = FIXTURE_PAGES.find(page => page.song)?.song?.lines?.flatMap(line => line.words) ?? [];
+    expect(renderer.frameState(30300)).toMatchObject({ kind: "song", localMs: 0, sungWords: 1 });
     expect(renderer.frameState(song + (words[3]?.startMs ?? 0)).sungWords).toBe(4);
     expect(renderer.frameState(song + 15000).sungWords).toBe(words.length);
     const pane = { x: 60, y: 1470, width: 680, height: 278 };
     const lit = (ms: number): number => count(frame(song + ms), pane, [0xff, 0xfc, 0xf6]);
-    expect(lit(200)).toBeLessThan(lit(1200));
+    expect(lit(300)).toBeLessThan(lit(1200));
     expect(lit(1200)).toBeLessThan(lit(1900));
   });
 
@@ -192,8 +199,32 @@ describe("what is on screen at a time", () => {
     expect(untimed.frameState((song?.fromMs ?? 0) + 19000).sungWords).toBe(49);
   });
 
-  it("speaks of both players in the third person on the last screen", () => {
-    expect(posterWords(input)).toEqual({ title: "Leo wins.", owes: "Ava owes Leo" });
+  it("speaks of both players in the third person on the last screen, and to both where the app's words already do", () => {
+    const even = (everyDay: boolean): RecapVideoInput["outcome"] => ({ kind: "even", everyDay });
+    expect(posterWords(input)).toEqual({ title: "Leo wins.", line: "Ava owes Leo" });
+    expect(posterWords({ ...input, stake: { kind: "punishment", title: "Cold plunge at dawn" } })).toEqual({ title: "Leo wins." });
+    expect(posterWords({ ...input, outcome: even(true), stake: { kind: "bothWin", title: "Dinner Out Together" } })).toEqual({ title: "You both win.", line: "You both get", caption: "You both did every day." });
+    expect(posterWords({ ...input, outcome: even(false), stake: { kind: "none" } })).toEqual({ title: "Dead even.", caption: "Nobody owes anything." });
+    expect(posterWords({ ...input, outcome: even(true), stake: { kind: "none" } })).toEqual({ title: "Dead even.", caption: "You both did every day, so nobody owes anything." });
+  });
+
+  it("takes the winner's seat everywhere: on the left of the score, named last on the cover; an even game goes by name", () => {
+    expect(billing(input)).toEqual(["member-leo", "member-ava"]);
+    expect(starringLine(input)).toBe("A courtroom drama, starring Ava and Leo");
+    const avaWon: RecapVideoInput = { ...input, outcome: { kind: "won", winnerId: "member-ava", loserId: "member-leo" } };
+    expect(billing(avaWon)).toEqual(["member-ava", "member-leo"]);
+    expect(starringLine(avaWon)).toBe("A courtroom drama, starring Leo and Ava");
+    expect(posterWords(avaWon)).toEqual({ title: "Ava wins.", line: "Leo owes Ava" });
+    const tied: RecapVideoInput = { ...input, outcome: { kind: "even", everyDay: false }, stake: { kind: "none" } };
+    expect(billing(tied)).toEqual(["member-ava", "member-leo"]);
+    expect(starringLine({ ...tied, show: { ...tied.show, treatment: "" } })).toBe("Starring Leo and Ava");
+  });
+
+  it("brings a page of words alone in one block after another, as the app does", async () => {
+    const failed = await createRecapVideoRenderer({ ...input, scenes: { "page-0": input.scenes["page-0"] ?? "" } });
+    const page = 10000, at = (ms: number, name: string): number | undefined => failed.frameState(page + ms).pieces.find(piece => piece.name === name)?.opacity;
+    expect(failed.frameState(page + 4000).pieces.map(piece => piece.name)).toEqual(["setup", "next"]);
+    expect([at(600, "setup"), at(1000, "next"), at(1500, "next")]).toEqual([1, 0, 1]);
   });
 });
 
@@ -205,16 +236,50 @@ describe("refusals", () => {
     withPages(pages => pages.map(page => page.id === pageId ? { ...page, blocks: [block, ...page.blocks.slice(1)] } : page));
 
   it("refuses what it has no drawing for, instead of drawing it wrong", async () => {
-    await refuses(withBlock("page-1", { kind: "stat", statValue: "7", text: "days" }), "unsupported_block");
-    await refuses(withPages(pages => pages.map(page => page.id === "page-3" ? { ...page, blocks: [{ kind: "contactSheet", entryIds: ["entry-leo-1", "entry-leo-4", "entry-ava-4"] }] } : page)), "unsupported_block");
-    await refuses({ ...input, outcome: { kind: "even" } }, "unsupported_outcome");
-    await refuses({ ...input, stake: { kind: "punishment", title: "Cold plunge at dawn" } }, "unsupported_stake");
+    const sheet = (entryIds: string[]): RecapVideoInput => withPages(pages => pages.map(page => page.id === "page-3" ? { ...page, blocks: [{ kind: "contactSheet", entryIds }] } : page));
+    await refuses(withBlock("page-1", { kind: "filmStrip", text: "days" }), "unsupported_block");
+    await refuses(withBlock("page-1", { kind: "stat", text: "a label with no number" }), "unsupported_block");
+    await refuses(sheet(["entry-leo-1", "entry-leo-4"]), "unsupported_block");
+    // A day given back wears a tag wider than a sheet's small prints.
+    await refuses({ ...sheet(["entry-leo-1", "entry-leo-4", "entry-ava-4"]), unfinished: ["entry-leo-4"] }, "unsupported_block");
+    // A page holds one picture: the app draws the first and drops the rest.
+    await refuses(withPages(pages => pages.map(page => page.id === "page-1" ? { ...page, blocks: [{ kind: "photo", entryIds: ["entry-leo-1"] }, { kind: "photo", entryIds: ["entry-leo-4"] }] } : page)), "unsupported_page");
+  });
+
+  it("refuses a last screen whose outcome and stake do not go together", async () => {
+    await refuses({ ...input, outcome: { kind: "even", everyDay: false } }, "unsupported_stake");
+    await refuses({ ...input, outcome: { kind: "even", everyDay: false }, stake: { kind: "bothWin", title: "Dinner Out Together" } }, "unsupported_stake");
+    await refuses({ ...input, stake: { kind: "none" } }, "unsupported_stake");
+    await refuses({ ...input, stake: { kind: "bothWin", title: "Dinner Out Together" } }, "unsupported_stake");
+    await refuses({ ...input, players: { ...input.players, "member-sam": { name: "Sam" } } }, "unsupported_outcome");
+    await refuses({ ...input, outcome: { kind: "won", winnerId: "member-leo", loserId: "member-sam" } }, "unsupported_outcome");
+  });
+
+  it("refuses words the app would cut short with an ellipsis", async () => {
+    const song = (change: (song: NonNullable<RecapVideoPage["song"]>) => NonNullable<RecapVideoPage["song"]>): RecapVideoInput => withPages(pages => pages.map(page => page.song ? { ...page, song: change(page.song) } : page));
+    // A song's title past two lines at its smallest size; a treatment past one line under it.
+    await refuses(song(found => ({ ...found, title: "The Ballad of the Mat That Took the Stand Twice and Then Once More for Luck on a Thursday" })), "does_not_fit");
+    await refuses({ ...input, show: { ...input.show, treatment: "70s American high school pep rally the night before prom" } }, "does_not_fit");
+    // Beside its drawing a prize keeps to one line, down to three fifths of its size: the app cuts a longer one short.
+    expect((await createRecapVideoRenderer({ ...input, stake: { kind: "prize", title: "A Night off Dishes" } })).frameState(50000).pieces.map(piece => piece.name)).toContain("stake");
+    await refuses({ ...input, stake: { kind: "prize", title: "Pick of the Restaurant" } }, "does_not_fit");
+    await refuses(withBlock("page-1", { kind: "stat", statValue: "one hundred and four thousand", text: "steps" }), "does_not_fit");
+  });
+
+  it("shrinks long scores to share their row, as the app does", async () => {
+    const wide = await createRecapVideoRenderer({ ...input, scores: { "member-leo": 128, "member-ava": 126 } });
+    expect(wide.frameState(50000).pieces.map(piece => piece.name)).toEqual(["score", "title", "stake", "footer"]);
+    // The row is as wide as the page allows and no wider: nothing cream reaches the page's margins, and the digits sit between the faces.
+    const pixels = wide.drawFrame(50000).data(), cream = [0xff, 0xfc, 0xf6];
+    const score = wide.frameState(50000).pieces[0]?.box ?? { x: 0, y: 0, width: 0, height: 0 };
+    expect(count(pixels, { x: 0, y: Math.round(score.y * 2) + 30, width: 44, height: 170 }, cream)).toBe(0);
+    expect(count(pixels, { x: 760, y: Math.round(score.y * 2) + 30, width: 44, height: 170 }, cream)).toBe(0);
+    expect(count(pixels, { x: 230, y: Math.round(score.y * 2) + 30, width: 340, height: 170 }, cream)).toBeGreaterThan(3000);
   });
 
   it("refuses text its fonts cannot draw, and words that do not fit their page", async () => {
-    await refuses(withBlock("page-1", { kind: "headline", text: "Leo's first post was a yoga mat \u{1F9D8}" }), "unsupported_text");
+    await refuses(withBlock("page-1", { kind: "headline", text: "Leo's first post was a ヨガマット" }), "unsupported_text");
     await refuses(withBlock("page-1", { kind: "headline", text: Array.from({ length: 30 }, () => "Leo kept posting the mat").join(" ") }), "does_not_fit");
-    await refuses({ ...input, stake: { kind: "prize", title: "A very long weekend away somewhere warm" } }, "does_not_fit");
   });
 
   it("refuses a page whose picture is missing", async () => {
@@ -238,30 +303,26 @@ describe("refusals", () => {
     expect(pictureSize(await readFile(input.photos["entry-ava-4"] ?? ""))).toEqual({ width: 1024, height: 768 });
   });
 
-  it("refuses a lyric line too long for the two rows the lyrics card shows, and a score too wide for its row", async () => {
+  it("refuses a lyric line too long for the two rows the lyrics card shows", async () => {
     await refuses(withPages(pages => pages.map(page => page.song ? { ...page, song: { title: page.song.title, lyrics: [Array.from({ length: 30 }, () => "hello").join(" "), ...page.song.lyrics.slice(1)] } } : page)), "does_not_fit");
-    await refuses({ ...input, scores: { "member-leo": 999, "member-ava": 998 } }, "does_not_fit");
-  });
-
-  it("keeps a wide prize icon inside the ticket", async () => {
-    const icon = createCanvas(600, 60), paint = icon.getContext("2d");
-    paint.fillStyle = "#ff0000";
-    paint.fillRect(0, 0, 600, 60);
-    const file = path.join(directory, "wide-icon.png");
-    await writeFile(file, icon.toBuffer("image/png"));
-    const wide = await createRecapVideoRenderer({ ...input, stake: { kind: "prize", title: "Breakfast in Bed", iconPath: file } });
-    const pixels = wide.drawFrame(50000).data(), red = [0xff, 0x00, 0x00];
-    const inTicket = { x: 160, y: 1050, width: 484, height: 420 };
-    const everywhere = count(pixels, { x: 0, y: 0, width: 804, height: 1748 }, red, 60);
-    expect(everywhere).toBeGreaterThan(2000);
-    expect(count(pixels, inTicket, red, 60)).toBe(everywhere);
   });
 
   it("falls back from a failed scene to its photo, or to its words alone", async () => {
-    const failed = await createRecapVideoRenderer({ ...input, scenes: { "page-0": input.scenes["page-0"] ?? "" } });
-    // The fourth page falls back to a print of its photo; the second scene has only its words.
+    const failed = await createRecapVideoRenderer({ ...input, scenes: {} });
+    // The fourth page falls back to a print of its photo; the second scene has only its words; the cover stands its photo in over its words.
     expect(failed.frameState(22000).pieces.map(piece => piece.name)).toEqual(["setup", "picture", "payoff"]);
-    expect(failed.frameState(12000).pieces.map(piece => piece.name)).toEqual(["setup", "payoff"]);
+    expect(failed.frameState(12000).pieces.map(piece => piece.name)).toEqual(["setup", "next"]);
+    expect(failed.frameState(0).pieces).toMatchObject([{ name: "picture", opacity: 1 }, { name: "words", opacity: 1 }]);
+  });
+
+  it("prints a \"missed\" card for a post whose photo is gone, and refuses a post it was never given", async () => {
+    const missed = await createRecapVideoRenderer({ ...input, photos: { ...input.photos, "entry-leo-1": null } });
+    // The card is dark where the photo's greens were.
+    const middle = { x: 300, y: 800, width: 200, height: 200 };
+    expect(count(missed.drawFrame(8000).data(), middle, [0x2a, 0x26, 0x22], 12)).toBeGreaterThan(30_000);
+    expect(count(frame(8000), middle, [0x2a, 0x26, 0x22], 12)).toBe(0);
+    const { "entry-leo-1": _gone, ...rest } = input.photos;
+    await refuses({ ...input, photos: rest }, "missing_picture");
   });
 });
 
@@ -276,14 +337,14 @@ describe("the encoder", () => {
   const gone = (file: string): Promise<boolean> => access(file).then(() => false, () => true);
 
   it("refuses, instead of waiting, when ffmpeg cannot be started", async () => {
-    await expect(encodeRecapVideo(renderer, input.soundtrack, path.join(directory, "never.mp4"), { ffmpegPath: path.join(directory, "no-such-ffmpeg") }))
+    await expect(encodeRecapVideo(renderer, input.score, path.join(directory, "never.mp4"), { ffmpegPath: path.join(directory, "no-such-ffmpeg") }))
       .rejects.toSatisfy(error => error instanceof RecapVideoRefusal && error.code === "encoder_failed");
   });
 
   it("leaves no file behind when ffmpeg fails after starting one", async () => {
     const out = path.join(directory, "failed.mp4"), ffmpeg = await standIn("failing-ffmpeg", 3);
     const short: RecapVideoRenderer = { ...renderer, timeline: { ...renderer.timeline, frameCount: 3 }, drawFrame: ms => renderer.drawFrame(ms), frameState: ms => renderer.frameState(ms) };
-    await expect(encodeRecapVideo(short, input.soundtrack, out, { ffmpegPath: ffmpeg.file }))
+    await expect(encodeRecapVideo(short, input.score, out, { ffmpegPath: ffmpeg.file }))
       .rejects.toSatisfy(error => error instanceof RecapVideoRefusal && error.code === "encoder_failed");
     expect(await gone(out)).toBe(true);
   });
@@ -297,7 +358,7 @@ describe("the encoder", () => {
         return renderer.drawFrame(ms);
       },
     };
-    await expect(encodeRecapVideo(broken, input.soundtrack, out, { ffmpegPath: ffmpeg.file })).rejects.toThrowError("This frame cannot be drawn.");
+    await expect(encodeRecapVideo(broken, input.score, out, { ffmpegPath: ffmpeg.file })).rejects.toThrowError("This frame cannot be drawn.");
     expect(await gone(out)).toBe(true);
     // The stand-in was stopped before this returned: nothing answers at its process id.
     const pid = await ffmpeg.pid();
@@ -307,18 +368,20 @@ describe("the encoder", () => {
   it("refuses a video over its byte budget and removes it", async () => {
     const out = path.join(directory, "oversize.mp4"), ffmpeg = await standIn("large-ffmpeg", 0, 4_500_000);
     const short: RecapVideoRenderer = { ...renderer, timeline: { ...renderer.timeline, frameCount: 2 }, drawFrame: ms => renderer.drawFrame(ms), frameState: ms => renderer.frameState(ms) };
-    await expect(encodeRecapVideo(short, input.soundtrack, out, { ffmpegPath: ffmpeg.file, maxBytes: 4_000_000 }))
+    await expect(encodeRecapVideo(short, input.score, out, { ffmpegPath: ffmpeg.file, maxBytes: 4_000_000 }))
       .rejects.toSatisfy(error => error instanceof RecapVideoRefusal && error.code === "too_large");
     expect(await gone(out)).toBe(true);
   });
 });
 
 describe("fonts", () => {
-  // Advances come from the font files alone. A missing or substituted face, or a changed optical size, moves these and every line break with them.
+  // Advances come from the font files alone, at the axes the app pins its display face to (soft, wonky, optical size 36).
+  // A missing or substituted face, or a changed axis, moves these and every line break with them. The same strings set
+  // by the app's own text engine measure 189.5 and 249.0 for the first and third.
   const advances: [string, TextStyle, number][] = [
-    ["Leo wins.", { font: "display", weight: 600, size: 44, lineHeight: 53, tracking: -0.88, color: "#000" }, 192.39],
-    ["The Mat Takes the Stand", { font: "display", weight: 700, size: 30, lineHeight: 41, color: "#000" }, 367.91],
-    ["“keep your charity”", { font: "display", weight: 400, italic: true, size: 28, lineHeight: 38, color: "#000" }, 254.98],
+    ["Leo wins.", { font: "display", weight: 600, size: 44, lineHeight: 53, tracking: -0.88, color: "#000" }, 189.17],
+    ["The Mat Takes the Stand", { font: "display", weight: 700, size: 30, lineHeight: 41, color: "#000" }, 362.03],
+    ["“keep your charity”", { font: "display", weight: 400, italic: true, size: 28, lineHeight: 38, color: "#000" }, 248.55],
     ["A courtroom drama, starring Ava and Leo", { font: "sans", size: 15, lineHeight: 19.5, color: "#000" }, 289.1],
     ["Wednesday Ava missed", { font: "sansBold", size: 19, lineHeight: 25, tracking: -0.3, color: "#000" }, 214.0],
     ["WITHMURPH.AI", { font: "mono", size: 13, lineHeight: 16, tracking: 3.9, color: "#000" }, 140.4],
@@ -346,7 +409,7 @@ describe.skipIf(!hasFfmpeg)("the encoded file", () => {
 
   beforeAll(async () => {
     file = path.join(directory, "recap.mp4");
-    ({ bytes } = await encodeRecapVideo(renderer, input.soundtrack, file, { preset: "veryfast" }));
+    ({ bytes } = await encodeRecapVideo(renderer, input.score, file, { preset: "veryfast" }));
   });
 
   it("is one vertical H.264 video with sound, the length of its timeline, within its byte budget", async () => {

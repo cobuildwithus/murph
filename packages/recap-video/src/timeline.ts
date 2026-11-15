@@ -2,8 +2,6 @@ import { requireShape } from "./shape.js";
 import { RecapVideoRefusal, type RecapVideoInput, type RecapVideoPage } from "./types.js";
 
 export const RECAP_VIDEO_FPS = 30;
-/** A story page's length when the music brings no cues. */
-export const STORY_PAGE_MS = 5000;
 /** The breath between the last sung word and the last screen. */
 const AFTER_LAST_WORD_MS = 350;
 /** The picture outlasts the music by a second. */
@@ -44,13 +42,28 @@ function lastSungMs(song: NonNullable<RecapVideoPage["song"]>, songMs: number): 
   return ends.reduce((last, end) => Math.max(last, end), ends.length > 0 ? 0 : songMs);
 }
 
+/** Where the song's own clock reads zero in the score: its lyrics and scrubber count from here. */
+export const songOriginMs = (input: RecapVideoInput): number => input.score.durationMs - input.score.songMs;
+
+/** When each story page and then the song page starts, read from the pages' cues as the app reads them. */
+function cueStarts(input: RecapVideoInput, story: RecapVideoPage[], songPage: RecapVideoPage): number[] {
+  const { durationMs, songMs } = input.score;
+  const starts = [...story, songPage].map(page => page.cueMs ?? Number.NaN);
+  const ordered = starts.every((start, index) => Number.isFinite(start) && (index === 0 ? start === 0 : start > (starts[index - 1] ?? 0)));
+  const sized = Number.isFinite(durationMs) && Number.isFinite(songMs) && songMs > 0 && durationMs >= songMs;
+  // The song page opens on its first sung word: inside the song, and no earlier than the song's own clock starts.
+  if (!ordered || !sized || (starts.at(-1) ?? 0) < durationMs - songMs || (starts.at(-1) ?? 0) >= durationMs) {
+    throw new RecapVideoRefusal("invalid_soundtrack", "The show has no score whose cues fit its pages.");
+  }
+  return starts;
+}
+
 /**
- * Story pages on the music's cues, the song until its last word, then the
- * last screen through the end of the music.
+ * Story pages on the score's cues, the song from its first sung word to its
+ * last, then the last screen through the end of the music.
  */
 export function buildRecapVideoTimeline(input: RecapVideoInput): RecapVideoTimeline {
   const { pages } = input.show;
-  const { soundtrack } = input;
   requireShape(input);
   for (const page of pages) {
     if (!STORY_KINDS.has(page.kind) && page.kind !== "song" && page.kind !== "result") {
@@ -63,24 +76,16 @@ export function buildRecapVideoTimeline(input: RecapVideoInput): RecapVideoTimel
     throw new RecapVideoRefusal("unsupported_page", "A recap video opens on its cover.");
   }
   if (!songPage?.song) throw new RecapVideoRefusal("missing_song", "A recap video needs its song.");
-
-  const cues = soundtrack.cuesMs ?? story.map((_, index) => index * STORY_PAGE_MS);
-  const starts = [...cues.slice(0, story.length), soundtrack.songStartMs];
-  const ordered = starts.every((start, index) => Number.isFinite(start) && start >= 0 && (index === 0 ? start === 0 : start > (starts[index - 1] ?? 0)));
-  const musicEnd = soundtrack.startsAtMs + soundtrack.durationMs;
-  const real = [soundtrack.durationMs, soundtrack.startsAtMs, soundtrack.songStartMs, soundtrack.songMs].every(Number.isFinite);
-  if (!real || cues.length < story.length || !ordered || soundtrack.songMs <= 0 || soundtrack.durationMs <= 0 || soundtrack.startsAtMs < 0
-    || soundtrack.startsAtMs > soundtrack.songStartMs || musicEnd < soundtrack.songStartMs + soundtrack.songMs - 500) {
-    throw new RecapVideoRefusal("invalid_soundtrack", "The music's cues do not fit the recap's pages.");
-  }
+  const starts = cueStarts(input, story, songPage), songFrom = starts.at(-1) ?? 0;
 
   // The last screen starts on a frame and the video ends on one, so its hold is never a frame short.
-  const posterFrame = frameAt(soundtrack.songStartMs + Math.min(lastSungMs(songPage.song, soundtrack.songMs), soundtrack.songMs) + AFTER_LAST_WORD_MS);
-  const frameCount = Math.max(Math.floor((musicEnd + AFTER_MUSIC_MS) * RECAP_VIDEO_FPS / 1000), posterFrame + frameAt(POSTER_MIN_MS));
+  const lastWord = songOriginMs(input) + Math.min(lastSungMs(songPage.song, input.score.songMs), input.score.songMs);
+  const posterFrame = frameAt(Math.max(lastWord, songFrom) + AFTER_LAST_WORD_MS);
+  const frameCount = Math.max(Math.floor((input.score.durationMs + AFTER_MUSIC_MS) * RECAP_VIDEO_FPS / 1000), posterFrame + frameAt(POSTER_MIN_MS));
   const posterFrom = frameMs(posterFrame), durationMs = frameMs(frameCount);
   const marks: Omit<RecapVideoEntry, "toMs">[] = [
     ...story.map((page, index) => ({ kind: page.kind as RecapVideoEntryKind, page, fromMs: starts[index] ?? 0 })),
-    { kind: "song", page: songPage, fromMs: soundtrack.songStartMs },
+    { kind: "song", page: songPage, fromMs: songFrom },
     { kind: "poster", page: pages.find(page => page.kind === "result") ?? { id: "result", kind: "result", background: "night", blocks: [] }, fromMs: posterFrom },
   ];
   const entries = marks.map((mark, index) => ({ ...mark, toMs: marks[index + 1]?.fromMs ?? durationMs }));
