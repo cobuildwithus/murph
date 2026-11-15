@@ -1,3 +1,5 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
+import * as hostedParsers from "@murphai/hosted-execution/parsers";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -18,6 +20,7 @@ import { HOSTED_RUNTIME_ORCHESTRATION_LATENCY_DIAGNOSTICS_HEADER } from "@murpha
 
 import {
   CloudflareHostedControlBrowserVaultReplicaNotFoundError,
+  CloudflareHostedControlMalformedResponseError,
   type CloudflareHostedControlClientOptions,
   createCloudflareHostedControlClient,
   readCloudflareHostedControlHttpError,
@@ -29,6 +32,107 @@ import {
 type ObservedRequest = { init?: RequestInit; url: string };
 
 describe("createCloudflareHostedControlClient", () => {
+  it.each([
+    ["JSON decoding", () => new Response("not JSON"), SyntaxError],
+    ["response validation", () => createJsonResponse({}), ContractValidationError],
+  ] as const)("owns malformed successful responses from %s without replaying a mutation", async (_label, response, causeType) => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(response());
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test",
+      fetchImpl,
+      getBearerToken: async () => "synthetic-token",
+    });
+
+    const result = client.deleteUserData("member-synthetic");
+    await expect(result).rejects.toBeInstanceOf(CloudflareHostedControlMalformedResponseError);
+    await expect(result).rejects.toMatchObject({ cause: expect.any(causeType) });
+    await expect(result).rejects.not.toBeInstanceOf(TypeError);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    new TypeError("Synthetic parser bug."),
+    new ReferenceError("Synthetic parser bug."),
+    new SyntaxError("Synthetic parser bug."),
+  ])("preserves parser bugs: %s", async (error) => {
+    vi.spyOn(hostedParsers, "parseHostedRunnerStatusResponse").mockImplementationOnce(() => {
+      throw error;
+    });
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(createJsonResponse({}));
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test",
+      fetchImpl,
+      getBearerToken: async () => "synthetic-token",
+    });
+
+    await expect(client.getRunnerStatus("member-synthetic")).rejects.toBe(error);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("retains the exact validation error as the cause", async () => {
+    const cause = new ContractValidationError("Synthetic validation failure.");
+    vi.spyOn(hostedParsers, "parseHostedRunnerStatusResponse").mockImplementationOnce(() => {
+      throw cause;
+    });
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test",
+      fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(createJsonResponse({})),
+      getBearerToken: async () => "synthetic-token",
+    });
+    const error = await client.getRunnerStatus("member-synthetic").catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(CloudflareHostedControlMalformedResponseError);
+    expect((error as CloudflareHostedControlMalformedResponseError).cause).toBe(cause);
+  });
+
+  it.each([
+    new TypeError("fetch failed"),
+    new ContractValidationError("Synthetic body failure."),
+    new DOMException("Synthetic abort.", "AbortError"),
+    new DOMException("Synthetic timeout.", "TimeoutError"),
+  ])("preserves non-syntax body read failures: %s", async (error) => {
+    const response = createJsonResponse({});
+    vi.spyOn(response, "json").mockRejectedValueOnce(error);
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(response);
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test",
+      fetchImpl,
+      getBearerToken: async () => "synthetic-token",
+    });
+
+    await expect(client.getRunnerStatus("member-synthetic")).rejects.toBe(error);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([400, 503])("preserves HTTP %s even when its body is not JSON", async (status) => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(new Response("not JSON", {
+      headers: { "content-type": "application/json" },
+      status,
+    }));
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test",
+      fetchImpl,
+      getBearerToken: async () => "synthetic-token",
+    });
+
+    const error = await client.getRunnerStatus("member-synthetic").catch((cause: unknown) => cause);
+    expect(readCloudflareHostedControlHttpError(error)).toMatchObject({ status });
+    expect(error).not.toBeInstanceOf(CloudflareHostedControlMalformedResponseError);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves transport failures without replay", async () => {
+    const error = new TypeError("fetch failed");
+    const fetchImpl = vi.fn<typeof fetch>().mockRejectedValue(error);
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test",
+      fetchImpl,
+      getBearerToken: async () => "synthetic-token",
+    });
+
+    await expect(client.deleteUserData("member-synthetic")).rejects.toBe(error);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it("binds thumbnail delivery to the owner and tolerates an older Worker", async () => {
     const photo = { mediaId: "a".repeat(64), sha256: "b".repeat(64), byteSize: 123 };
     const delivery = { mediaId: photo.mediaId, url: "https://runner.example.test/private-thumbnail" };
@@ -47,6 +151,7 @@ describe("createCloudflareHostedControlClient", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.restoreAllMocks();
   });
 
   it("exposes only the narrowed execution-plane helpers", () => {
@@ -372,7 +477,10 @@ describe("createCloudflareHostedControlClient", () => {
 
     await expect(
       client.reconcileRuntimeHealthDataConsent("user_123"),
-    ).rejects.toThrow("processingAllowed did not match consentState");
+    ).rejects.toMatchObject({
+      name: "CloudflareHostedControlMalformedResponseError",
+      cause: { message: expect.stringContaining("processingAllowed did not match consentState") },
+    });
   });
 
   it("accepts an early runtime ensure-processing ack and still reports timing", async () => {
@@ -1018,9 +1126,10 @@ describe("createCloudflareHostedControlClient", () => {
       replicaRef,
       requestedMetricBuckets: ["00"],
       userId: "user_123",
-    })).rejects.toThrow(
-      "metricBuckets must match requestedMetricBuckets exactly",
-    );
+    })).rejects.toMatchObject({
+      name: "CloudflareHostedControlMalformedResponseError",
+      cause: { message: expect.stringContaining("metricBuckets must match requestedMetricBuckets exactly") },
+    });
   });
 
   it("rejects selected browser vault responses with a different logical generation", async () => {
@@ -1048,9 +1157,10 @@ describe("createCloudflareHostedControlClient", () => {
       replicaRef,
       requestedMetricBuckets: ["00"],
       userId: "user_123",
-    })).rejects.toThrow(
-      "replicaRef.generation must match the requested replicaRef.generation",
-    );
+    })).rejects.toMatchObject({
+      name: "CloudflareHostedControlMalformedResponseError",
+      cause: { message: expect.stringContaining("replicaRef.generation must match the requested replicaRef.generation") },
+    });
   });
 
   it("uses a distinct export session purpose for the fixed full replica selection", async () => {
@@ -1287,7 +1397,7 @@ describe("createCloudflareHostedControlClient", () => {
       },
       replicaRef: createReplicaRef(),
       userId: "user_123",
-    })).rejects.toThrow("Cloudflare browser vault session state must be ready.");
+    })).rejects.toMatchObject({ cause: { message: expect.stringContaining("Cloudflare browser vault session state must be ready.") } });
   });
 
   it("maps missing browser vault replica objects to a dedicated not-found error", async () => {
@@ -1516,7 +1626,10 @@ describe("createCloudflareHostedControlClient", () => {
         },
         replicaRef: createReplicaRef(),
         userId: "user_123",
-      })).rejects.toThrow(scenario.message);
+      })).rejects.toMatchObject({
+        name: "CloudflareHostedControlMalformedResponseError",
+        cause: { message: expect.stringContaining(scenario.message) },
+      });
     });
   }
 
@@ -1543,7 +1656,10 @@ describe("createCloudflareHostedControlClient", () => {
       },
       replicaRef: createReplicaRef(),
       userId: "user_123",
-    })).rejects.toThrow("Cloudflare browser vault session replicaRef must not be null.");
+    })).rejects.toMatchObject({
+      name: "CloudflareHostedControlMalformedResponseError",
+      cause: { message: expect.stringContaining("Cloudflare browser vault session replicaRef must not be null.") },
+    });
   });
 
   it("rejects ready browser vault sessions that omit replica payload fields", async () => {
@@ -1569,7 +1685,10 @@ describe("createCloudflareHostedControlClient", () => {
       },
       replicaRef: createReplicaRef(),
       userId: "user_123",
-    })).rejects.toThrow("Cloudflare browser vault session encryptedReplica must be an object.");
+    })).rejects.toMatchObject({
+      name: "CloudflareHostedControlMalformedResponseError",
+      cause: { message: expect.stringContaining("Cloudflare browser vault session encryptedReplica must be an object.") },
+    });
   });
 
   it("fetches runner status without a run record contract", async () => {
@@ -1606,9 +1725,10 @@ describe("createCloudflareHostedControlClient", () => {
       timeoutMs: 2_500,
     });
 
-    await expect(client.getRunnerStatus("user_123")).rejects.toThrow(
-      "Hosted runner status userId must match the requested userId.",
-    );
+    await expect(client.getRunnerStatus("user_123")).rejects.toMatchObject({
+      name: "CloudflareHostedControlMalformedResponseError",
+      cause: { message: expect.stringContaining("Hosted runner status userId must match the requested userId.") },
+    });
   });
 
   it("rejects runner status responses with a workspace for another user", async () => {
@@ -1621,9 +1741,10 @@ describe("createCloudflareHostedControlClient", () => {
       timeoutMs: 2_500,
     });
 
-    await expect(client.getRunnerStatus("user_123")).rejects.toThrow(
-      "Hosted runner status workspace.userId must match the requested userId.",
-    );
+    await expect(client.getRunnerStatus("user_123")).rejects.toMatchObject({
+      name: "CloudflareHostedControlMalformedResponseError",
+      cause: { message: expect.stringContaining("Hosted runner status workspace.userId must match the requested userId.") },
+    });
   });
 
   it("posts user data deletion requests and validates the bound user in the response", async () => {
@@ -1710,9 +1831,10 @@ describe("createCloudflareHostedControlClient", () => {
       timeoutMs: 2_500,
     });
 
-    await expect(client.deleteUserData("user_123")).rejects.toThrow(
-      "Cloudflare user-data deletion result userId must match the requested userId.",
-    );
+    await expect(client.deleteUserData("user_123")).rejects.toMatchObject({
+      name: "CloudflareHostedControlMalformedResponseError",
+      cause: { message: expect.stringContaining("Cloudflare user-data deletion result userId must match the requested userId.") },
+    });
   });
 
   it("rejects malformed user data deletion counts", async () => {
@@ -1731,9 +1853,10 @@ describe("createCloudflareHostedControlClient", () => {
       timeoutMs: 2_500,
     });
 
-    await expect(client.deleteUserData("user_123")).rejects.toThrow(
-      "Cloudflare user-data deletion result r2.deletedObjectCount must be a non-negative integer.",
-    );
+    await expect(client.deleteUserData("user_123")).rejects.toMatchObject({
+      name: "CloudflareHostedControlMalformedResponseError",
+      cause: { message: expect.stringContaining("Cloudflare user-data deletion result r2.deletedObjectCount must be a non-negative integer.") },
+    });
   });
 
   it("rejects legacy deletion responses without full Durable Object erasure evidence", async () => {
@@ -1752,9 +1875,10 @@ describe("createCloudflareHostedControlClient", () => {
       timeoutMs: 2_500,
     });
 
-    await expect(client.deleteUserData("user_123")).rejects.toThrow(
-      "Cloudflare user-data deletion result durableObject.deleteAllCompleted must be a boolean.",
-    );
+    await expect(client.deleteUserData("user_123")).rejects.toMatchObject({
+      name: "CloudflareHostedControlMalformedResponseError",
+      cause: { message: expect.stringContaining("Cloudflare user-data deletion result durableObject.deleteAllCompleted must be a boolean.") },
+    });
   });
 
 
@@ -1796,7 +1920,7 @@ describe("createCloudflareHostedControlClient", () => {
       expect(request.headers.get("content-type")).toBe("image/jpeg");
       expect(request.headers.get("x-hosted-execution-user-id")).toBe("user_123");
       const unconfirmed = gameMediaClient(() => createJsonResponse({ stored: false }));
-      await expect(unconfirmed.client.putGameImage({ bytes, contentType: "image/jpeg", mediaId, userId: "user_123" })).rejects.toThrow("not confirmed");
+      await expect(unconfirmed.client.putGameImage({ bytes, contentType: "image/jpeg", mediaId, userId: "user_123" })).rejects.toMatchObject({ cause: { message: expect.stringContaining("not confirmed") } });
       const delivery = { url: "https://imagedelivery.net/account/id/gameavatar?sig=synthetic&exp=1", expiresAt: "2030-01-01T00:00:00Z" };
       const signed = gameMediaClient(() => createJsonResponse(delivery));
       await expect(signed.client.gameImageDelivery({ mediaId, userId: "user_123", variant: "avatar" })).resolves.toEqual(delivery);
@@ -1828,7 +1952,7 @@ describe("createCloudflareHostedControlClient", () => {
       const missing = gameMediaClient(() => createJsonResponse({}, { status: 404 }));
       await expect(missing.client.readRecapMedia({ mediaId: recapId, userId: "user_123" })).resolves.toBeNull();
       const failed = gameMediaClient(() => createJsonResponse({ stored: false }));
-      await expect(failed.client.putRecapMedia({ envelope: sealed, hash, mediaId: recapId, userId: "user_123" })).rejects.toThrow("not confirmed");
+      await expect(failed.client.putRecapMedia({ envelope: sealed, hash, mediaId: recapId, userId: "user_123" })).rejects.toMatchObject({ cause: { message: expect.stringContaining("not confirmed") } });
     });
 
     it("stages a sealed envelope bound to the owner and the photo's name", async () => {

@@ -1,3 +1,4 @@
+import { CloudflareHostedControlMalformedResponseError } from "@murphai/cloudflare-hosted-control/client";
 import {
   HOSTED_USER_RUNTIME_STATUS_QUERY_NAME,
 } from "@murphai/hosted-execution/orchestration-control";
@@ -192,7 +193,9 @@ describe("hosted orchestration status route", () => {
       signalVersion: "invalid",
     });
     mocks.getRunnerStatus.mockRejectedValue(
-      new TypeError("Hosted runner status response userId must be a non-empty string."),
+      new CloudflareHostedControlMalformedResponseError(
+        new Error("Synthetic response validation failure."),
+      ),
     );
 
     const response = await statusRoute.GET(
@@ -211,6 +214,19 @@ describe("hosted orchestration status route", () => {
         status: null,
         unavailableReason: "status_invalid",
       },
+    });
+  });
+
+  it.each([
+    new TypeError("Hosted runner status synthetic parser bug."),
+    new SyntaxError("Synthetic non-response failure."),
+    new TypeError("fetch failed"),
+  ])("does not report non-response errors as invalid status: %s", async (error) => {
+    mocks.getRunnerStatus.mockRejectedValue(error);
+    const response = await statusRoute.GET(requestForStatus(), routeContext());
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      cloudflare: { runnerStatus: null, unavailableReason: "request_failed" },
     });
   });
 
