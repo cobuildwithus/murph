@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import * as z from "@murphai/contracts/zod-runtime";
 
 import {
@@ -396,5 +397,5 @@ function parseHostedComputerRequest<T>(
     return parsed.data;
   }
 
-  throw new TypeError(`${label} is invalid.`);
+  throw new ContractValidationError(`${label} is invalid.`);
 }

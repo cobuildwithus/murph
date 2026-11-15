@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
   BROWSER_VAULT_REPLICA_SCHEMA,
@@ -56,10 +57,10 @@ export function parseHostedBrowserVaultReplicaRef(
   const replicaSchema = requireString(record.replicaSchema, `${label}.replicaSchema`);
 
   if (schema !== HOSTED_BROWSER_VAULT_REPLICA_REF_SCHEMA) {
-    throw new TypeError(`${label}.schema must be ${HOSTED_BROWSER_VAULT_REPLICA_REF_SCHEMA}.`);
+    throw new ContractValidationError(`${label}.schema must be ${HOSTED_BROWSER_VAULT_REPLICA_REF_SCHEMA}.`);
   }
   if (replicaSchema !== BROWSER_VAULT_REPLICA_SCHEMA) {
-    throw new TypeError(`${label}.replicaSchema must be ${BROWSER_VAULT_REPLICA_SCHEMA}.`);
+    throw new ContractValidationError(`${label}.replicaSchema must be ${BROWSER_VAULT_REPLICA_SCHEMA}.`);
   }
   const dataKeyEnvelope = record.dataKeyEnvelope === undefined
     ? undefined
@@ -78,7 +79,7 @@ export function parseHostedBrowserVaultReplicaRef(
         `${label}.metricBuckets`,
       );
   if ((shards === undefined) !== (metricBuckets === undefined)) {
-    throw new TypeError(`${label}.shards and ${label}.metricBuckets must be present together.`);
+    throw new ContractValidationError(`${label}.shards and ${label}.metricBuckets must be present together.`);
   }
   if (shards && metricBuckets) {
     const objectKeys = [
@@ -89,7 +90,7 @@ export function parseHostedBrowserVaultReplicaRef(
       ),
     ];
     if (new Set(objectKeys).size !== objectKeys.length) {
-      throw new TypeError(`${label} object keys must be distinct.`);
+      throw new ContractValidationError(`${label} object keys must be distinct.`);
     }
   }
 
@@ -119,7 +120,7 @@ function parseHostedBrowserVaultReplicaShardRefs(
   const record = requireObject(value, label);
   const schema = requireString(record.schema, `${label}.schema`);
   if (schema !== HOSTED_BROWSER_VAULT_REPLICA_SHARD_SET_REF_SCHEMA) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label}.schema must be ${HOSTED_BROWSER_VAULT_REPLICA_SHARD_SET_REF_SCHEMA}.`,
     );
   }
@@ -128,12 +129,12 @@ function parseHostedBrowserVaultReplicaShardRefs(
     ...HOSTED_BROWSER_VAULT_REPLICA_SHARD_KINDS,
   ]);
   if (Object.keys(record).some((kind) => !allowedKinds.has(kind))) {
-    throw new TypeError(`${label} contains an unsupported shard kind.`);
+    throw new ContractValidationError(`${label} contains an unsupported shard kind.`);
   }
 
   for (const shard of HOSTED_BROWSER_VAULT_REPLICA_SHARD_KINDS) {
     if (record[shard] === undefined) {
-      throw new TypeError(`${label}.${shard} is required when shards are present.`);
+      throw new ContractValidationError(`${label}.${shard} is required when shards are present.`);
     }
   }
   return {
@@ -154,25 +155,25 @@ function parseHostedBrowserVaultReplicaMetricBucketRefs(
   const record = requireObject(value, label);
   const schema = requireString(record.schema, `${label}.schema`);
   if (schema !== HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_SET_REF_SCHEMA) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label}.schema must be ${HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_SET_REF_SCHEMA}.`,
     );
   }
   const bucketCount = requirePositiveSafeInteger(record.bucketCount, `${label}.bucketCount`);
   if (bucketCount !== HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_COUNT) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label}.bucketCount must be ${HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_COUNT}.`,
     );
   }
   const bucketsRecord = requireObject(record.buckets, `${label}.buckets`);
   const allowedBucketIds = new Set<string>(HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS);
   if (Object.keys(bucketsRecord).some((bucketId) => !allowedBucketIds.has(bucketId))) {
-    throw new TypeError(`${label}.buckets contains an unsupported metric bucket id.`);
+    throw new ContractValidationError(`${label}.buckets contains an unsupported metric bucket id.`);
   }
   const buckets = Object.fromEntries(
     HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS.map((bucketId) => {
       if (bucketsRecord[bucketId] === undefined) {
-        throw new TypeError(`${label}.buckets.${bucketId} is required.`);
+        throw new ContractValidationError(`${label}.buckets.${bucketId} is required.`);
       }
       return [
         bucketId,
@@ -193,7 +194,7 @@ function parseHostedBrowserVaultReplicaShardRef(
   const record = requireObject(value, label);
   const contentEncoding = requireString(record.contentEncoding, `${label}.contentEncoding`);
   if (contentEncoding !== "gzip" && contentEncoding !== "identity") {
-    throw new TypeError(`${label}.contentEncoding must be gzip or identity.`);
+    throw new ContractValidationError(`${label}.contentEncoding must be gzip or identity.`);
   }
   const byteLength = requirePositiveSafeInteger(record.byteLength, `${label}.byteLength`);
   const encodedByteLength = requirePositiveSafeInteger(
@@ -201,12 +202,12 @@ function parseHostedBrowserVaultReplicaShardRef(
     `${label}.encodedByteLength`,
   );
   if (contentEncoding === "gzip" && encodedByteLength >= byteLength) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label}.encodedByteLength must be smaller than ${label}.byteLength for gzip.`,
     );
   }
   if (contentEncoding === "identity" && encodedByteLength !== byteLength) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label}.encodedByteLength must equal ${label}.byteLength for identity.`,
     );
   }
@@ -372,7 +373,7 @@ function parseFreshnessTimestampMs(value: string): number | null {
 function requirePositiveSafeInteger(value: unknown, label: string): number {
   const parsed = requireNumber(value, label);
   if (!Number.isSafeInteger(parsed) || parsed <= 0) {
-    throw new TypeError(`${label} must be a positive safe integer.`);
+    throw new ContractValidationError(`${label} must be a positive safe integer.`);
   }
   return parsed;
 }
@@ -381,7 +382,7 @@ function requireIsoTimestampString(value: unknown, label: string): string {
   const text = requireString(value, label);
   const timestamp = Date.parse(text);
   if (Number.isNaN(timestamp) || new Date(timestamp).toISOString() !== text) {
-    throw new TypeError(`${label} must be a valid ISO-8601 timestamp in canonical UTC form.`);
+    throw new ContractValidationError(`${label} must be a valid ISO-8601 timestamp in canonical UTC form.`);
   }
 
   return text;

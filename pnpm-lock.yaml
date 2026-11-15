@@ -996,7 +996,11 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
 
-  packages/runtime-state: {}
+  packages/runtime-state:
+    dependencies:
+      '@murphai/contracts':
+        specifier: workspace:*
+        version: link:../contracts
 
   packages/vault-usecases:
     dependencies:
