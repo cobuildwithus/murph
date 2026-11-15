@@ -58,6 +58,7 @@ test.each(['environment', 'host-only runtime'] as const)('file song uses %s cred
   expect(result.responseMedia).toBeUndefined()
   expect(fetchImpl).toHaveBeenCalledTimes(1)
   expect(String(fetchImpl.mock.calls[0]?.[0])).toContain('/v1/music')
+  expect(JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body))).toMatchObject({ model_id: 'music_v2_5' })
   expect(new Headers(fetchImpl.mock.calls[0]?.[1]?.headers).get('xi-api-key')).toBe('synthetic-key')
   expect(result.rpcText).not.toContain('synthetic-key')
   expect(save).toHaveBeenCalledWith(new Uint8Array(bytes), 'audio/mpeg')
@@ -101,6 +102,8 @@ test('recap media and trusted song timing belong only to the attempt that genera
   const fileRuntime = await context.prepareRecapMedia!({ kind: 'song', args }, fetchImpl)
   const result = await executeGenerateSongTool({ env: { ELEVENLABS_API_KEY: 'synthetic-key' }, args, fileRuntime })
   expect(result.rpcSuccess).toBe(true)
+  expect(String(fetchImpl.mock.calls[0]?.[0])).toContain('/v1/music/detailed')
+  expect(JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body))).toMatchObject({ model_id: 'music_v2_5', with_timestamps: true })
   const receipt = JSON.parse(result.rpcText)
   expect(Object.keys(receipt)).toEqual(['path'])
   expect(await context.readGameRecapMedia!(receipt.path)).toEqual({ bytes: bytes.toString('base64'), referenceIds: [], mediaType: 'audio/mpeg',

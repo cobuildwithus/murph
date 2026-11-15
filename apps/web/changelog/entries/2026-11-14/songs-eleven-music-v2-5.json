@@ -1,0 +1,20 @@
+{
+  "publishedOn": "2026-11-14",
+  "order": 100,
+  "item": {
+    "id": "songs-eleven-music-v2-5",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Updated song generation",
+    "summary": "New songs, including the theme song in a game recap, use Eleven Music v2.5.",
+    "details": "Songs already made stay as they are. Previously queued songs keep their original generation settings.",
+    "relevanceTags": [
+      "voice",
+      "games",
+      "recaps"
+    ],
+    "sourcePullRequests": [
+      4981
+    ]
+  }
+}

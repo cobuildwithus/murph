@@ -5,6 +5,7 @@ import {
 } from "@murphai/hosted-execution/runtime-control";
 import {
   buildHostedGeminiVideoAnalysisUsageRecord,
+  buildHostedElevenLabsMusicUsageRecord,
   buildHostedTranscriptionUsageRecord,
   buildHostedXaiSearchUsageRecord,
   parseAssistantUsageRecord,
@@ -1510,6 +1511,29 @@ describe("hosted AI usage allowance pricing", () => {
       expect(() => priceHostedAiUsageForAllowance(malformed)).toThrow(
         "pricing is missing",
       );
+    }
+  });
+
+  it.each(["music_v2", "music_v2_5"] as const)("prices %s by generated duration without changing the rate or pricing version", model => {
+    const record = buildHostedElevenLabsMusicUsageRecord({
+      memberId: "member_123", model, durationMs: 45_000,
+      occurredAt: "2026-11-14T12:00:00.000Z", providerRequestId: "synthetic-music-request",
+    });
+    for (const modelSource of ["requested", "served"] as const) {
+      const usage = modelSource === "served" ? { ...record, requestedModel: null, servedModel: model } : record;
+      expect(priceHostedAiUsageForAllowance(parseAssistantUsageRecord(usage))).toMatchObject({
+        costUsdMicros: 112_500n, counted: true,
+        pricingSnapshot: {
+          model, modelSource,
+          audio: { durationMs: "45000", usdMicrosPerGeneratedMinute: "150000" },
+        },
+        pricingVersion: "elevenlabs-music-pricing-2026-06-24",
+      });
+      for (const unsupported of ["music_v1", "unknown-model"]) {
+        expect(() => priceHostedAiUsageForAllowance({
+          ...usage, requestedModel: unsupported, servedModel: unsupported,
+        })).toThrow("pricing is missing");
+      }
     }
   });
 

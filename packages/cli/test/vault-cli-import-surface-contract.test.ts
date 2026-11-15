@@ -144,7 +144,11 @@ const scopedImportSurfaceProbes: readonly ScopedImportSurfaceProbe[] = [
     // PR #4972 measured 323 on Linux CI. The sole added module is
     // contracts/dist/validation-error.js, a zero-import error class that
     // contract validation throws. No package or transitive subtree is added.
-    maxResolvedModules: 323,
+    // PR #4981 measured 324 locally and on Linux CI. The sole added module is
+    // contracts/dist/elevenlabs-music.js, two zero-import constants naming the
+    // music models that the delivery contract already on this path validates.
+    // No package or transitive subtree is added.
+    maxResolvedModules: 324,
   },
 ]
 

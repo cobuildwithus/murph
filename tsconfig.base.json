@@ -21,6 +21,9 @@
       "@murphai/contracts/validation-error": [
         "./packages/contracts/src/validation-error.ts"
       ],
+      "@murphai/contracts/elevenlabs-music": [
+        "./packages/contracts/src/elevenlabs-music.ts"
+      ],
       "@murphai/contracts/sleep-session": [
         "./packages/contracts/src/sleep-session.ts"
       ],

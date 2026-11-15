@@ -4,6 +4,7 @@ export { gameEveningCheckInPolicySchema, gamePrivateEveningCheckInPolicySchema, 
   buildGamePrivateEveningInstructions, buildGamePrivateKickoffInstructions,
   type HostedGameEveningCheckInPolicy, type HostedGamePrivateEveningCheckInPolicy, type HostedGamePrivateKickoffPolicy } from "./game-group-missed.ts";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
+import { elevenLabsMusicModelIds } from "@murphai/contracts/elevenlabs-music";
 import type { HostedGameChatBootstrapRequest, HostedGameChatBootstrapResponse } from "./game-bootstrap-control.ts";
 export { hostedGameChatBootstrapRequestSchema, hostedGameChatBootstrapResponseSchema } from "./game-bootstrap-control.ts";
 export type { HostedGameChatBootstrapRequest, HostedGameChatBootstrapResponse, HostedGameChatBootstrapResult } from "./game-bootstrap-control.ts";
@@ -268,9 +269,7 @@ export const HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_TTS_PRICED_MODELS = [
 export type HostedAiUsageAllowanceElevenLabsTtsPricedModel =
   (typeof HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_TTS_PRICED_MODELS)[number];
 
-export const HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_MUSIC_PRICED_MODELS = [
-  "music_v2",
-] as const;
+export const HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_MUSIC_PRICED_MODELS = elevenLabsMusicModelIds;
 
 export type HostedAiUsageAllowanceElevenLabsMusicPricedModel =
   (typeof HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_MUSIC_PRICED_MODELS)[number];
