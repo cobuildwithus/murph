@@ -9,6 +9,6 @@
     "summary": "When another player posts, leaves a note on your post, or shakes on your invite, the notification now plays your iPhone's notification sound, as game reminders already do.",
     "details": "Your iPhone's settings still decide: silent mode, a Focus, or sounds turned off for Murph keep these notifications quiet. Some phones also need the next Murph app update before sounds play.",
     "relevanceTags": ["games", "notifications", "ios-app"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [4975]
   }
 }
