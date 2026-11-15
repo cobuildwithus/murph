@@ -171,4 +171,4 @@ A directory of the durable docs. Find the row for your task and read that doc;
 - Research and audits are evidence for their date, not operating policy.
 
 Repository complexity reduction and caller-proven helper retirement are tracked in
-[the simplification plan](exec-plans/active/2026-11-14-simplify-complexity.md).
+[the simplification plan](exec-plans/completed/2026-11-14-simplify-complexity.md).
