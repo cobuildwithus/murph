@@ -1,6 +1,6 @@
 import { CLOUDFLARE_HOSTED_CONTROL_GAME_MEDIA_ID_HEADER, CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS,
   matchCloudflareHostedControlUserRoutePath } from "@murphai/cloudflare-hosted-control/routes";
-import { createGameImageStore, isGameImageVariant } from "../../game-image-store.ts";
+import { createGameImageStore, GameImageInvalidError, isGameImageVariant } from "../../game-image-store.ts";
 import { json, jsonError, readRequestBodyBytes } from "../../json.ts";
 import { requireHostedGameMediaId } from "../../storage-paths.ts";
 import type { WorkerRouteContext } from "../../worker-routes/shared.ts";
@@ -31,27 +31,12 @@ async function handle(context: WorkerRouteContext, userId: string, operation: ty
   if (!context.env.GAME_IMAGES) return jsonError("Game image storage is unavailable.", 503);
   const store = createGameImageStore({ bucket: context.env.BUNDLES, images: context.env.GAME_IMAGES, userId,
     deploymentOrigin: context.env.CF_PUBLIC_BASE_URL ?? "", executionCtx: context.executionCtx });
-  if (operation === "gameImageStage") {
-    const type = context.request.headers.get("content-type");
-    if (type !== "image/jpeg" && type !== "image/heic") return jsonError("Game image type is invalid.", 400);
-    if ((type === "image/jpeg") !== mediaId.endsWith(".jpg")) return jsonError("Game image type does not match.", 400);
-    let bytes: Uint8Array;
-    try { bytes = await readRequestBodyBytes(context.request, { limitBytes: 4 * 1024 * 1024 }); }
-    catch (error) {
-      if (error instanceof RangeError) return jsonError("Game image is too large.", 413);
-      throw error;
-    }
-    if (bytes.length === 0) return jsonError("Game image is empty.", 400);
-    try { await store.upload(mediaId, bytes); }
-    catch (error) {
-      if (error instanceof TypeError) return jsonError("Game image is invalid.", 400);
-      throw new Error("Game image staging failed.");
-    }
-    return json({ stored: true });
-  }
+  if (operation === "gameImageStage") return await stageGameImage(context, store, mediaId);
   if (operation === "gameImageStat") {
-    const result = await store.stat(mediaId);
-    return result ? json(result) : jsonError("Game image not found.", 404);
+    try {
+      const result = await store.stat(mediaId);
+      return result ? json(result) : jsonError("Game image not found.", 404);
+    } catch { throw new Error("Game image stat failed."); }
   }
   const variant = context.request.headers.get("x-murph-image-variant");
   if (!isGameImageVariant(variant)) return jsonError("Game image variant is invalid.", 400);
@@ -63,3 +48,25 @@ async function handle(context: WorkerRouteContext, userId: string, operation: ty
   } catch { throw new Error("Game image delivery failed."); }
 }
 
+async function stageGameImage(
+  context: WorkerRouteContext,
+  store: ReturnType<typeof createGameImageStore>,
+  mediaId: string,
+): Promise<Response> {
+  const type = context.request.headers.get("content-type");
+  if (type !== "image/jpeg" && type !== "image/heic") return jsonError("Game image type is invalid.", 400);
+  if ((type === "image/jpeg") !== mediaId.endsWith(".jpg")) return jsonError("Game image type does not match.", 400);
+  let bytes: Uint8Array;
+  try { bytes = await readRequestBodyBytes(context.request, { limitBytes: 4 * 1024 * 1024 }); }
+  catch (error) {
+    if (error instanceof RangeError) return jsonError("Game image is too large.", 413);
+    throw error;
+  }
+  if (bytes.length === 0) return jsonError("Game image is empty.", 400);
+  try { await store.upload(mediaId, bytes); }
+  catch (error) {
+    if (error instanceof GameImageInvalidError) return jsonError("Game image is invalid.", 400);
+    throw new Error("Game image staging failed.");
+  }
+  return json({ stored: true });
+}
