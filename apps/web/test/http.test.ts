@@ -725,7 +725,7 @@ describe("json route helper factory", () => {
     expect(warn).toHaveBeenCalledExactlyOnceWith("route failed", {
       errorType: "RequestInputError",
       errorMessage: "Invalid shape.",
-      errorCauseType: "TypeError",
+      errorCauseType: "ContractValidationError",
       errorCauseMessage: "Invalid shape.",
       internalMessage: "route failed unexpectedly",
       errorResponseCode: "INVALID_REQUEST",
@@ -735,12 +735,12 @@ describe("json route helper factory", () => {
   });
 
   it.each([
-    new ContractValidationError("Invalid shape."),
-    new TypeError("Invalid shape."),
-    new RangeError("Invalid shape."),
-    new URIError("Invalid shape."),
-    new SyntaxError("Invalid shape."),
-  ])("treats an untranslated %s as a server failure", async (error) => {
+    [new ContractValidationError("Invalid shape."), "ContractValidationError"],
+    [new TypeError("Invalid shape."), "TypeError"],
+    [new RangeError("Invalid shape."), "RangeError"],
+    [new URIError("Invalid shape."), "URIError"],
+    [new SyntaxError("Invalid shape."), "SyntaxError"],
+  ] as const)("treats an untranslated %s as a server failure", async (error, errorType) => {
     const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const warnLogDetails = vi.fn();
@@ -758,7 +758,7 @@ describe("json route helper factory", () => {
       error: { code: "INTERNAL_ERROR", message: "Internal error." },
     });
     expect(errorLog).toHaveBeenCalledExactlyOnceWith("route failed", {
-      errorType: error.constructor.name,
+      errorType,
       errorMessage: "Invalid shape.",
       internalMessage: "route failed unexpectedly",
       errorResponseCode: "INTERNAL_ERROR",

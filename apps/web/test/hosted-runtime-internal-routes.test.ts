@@ -1712,7 +1712,7 @@ describe("hosted runtime internal web routes", () => {
           : { code: "INTERNAL_ERROR", message: "Internal error." },
       });
       expect(diagnostics()).toEqual([
-        [failureMessage, { schema: failureSchema, stage, errorClass: callerRejection ? "request_input" : "type_error" }],
+        [failureMessage, { schema: failureSchema, stage, errorClass: callerRejection ? "request_input" : _case === "response schema after publication" ? "validation" : "type_error" }],
       ]);
       expect(mocks.checkpointHostedWorkspace).toHaveBeenCalledTimes(
         stage === "publication" || stage === "response" ? 1 : 0,

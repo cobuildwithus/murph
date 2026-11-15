@@ -375,7 +375,7 @@ async function readLegacyHostedMailboxAssistantInputItemAtPaths(input: {
     if (
       isMissingFileError(error) ||
       error instanceof SyntaxError ||
-      error instanceof TypeError
+      error instanceof ContractValidationError || error instanceof TypeError
     ) {
       return null
     }

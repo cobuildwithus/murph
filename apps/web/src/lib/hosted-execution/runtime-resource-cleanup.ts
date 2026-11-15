@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createHash } from "node:crypto";
 import { readCloudflareHostedControlHttpError } from "@murphai/cloudflare-hosted-control/client";
 import { reconcileHostedRuntimeUploads } from "./runtime-upload-recovery";
@@ -20,6 +21,7 @@ type CleanupErrorCategory = "timeout" | "abort" | "http" | "validation" | "datab
 
 function classifyCleanupError(error: unknown, stage: CleanupFailureStage): { errorCategory: CleanupErrorCategory; httpStatus?: number } {
   if (typeof error !== "object" || error === null) return { errorCategory: "other" };
+  if (error instanceof ContractValidationError) return { errorCategory: "validation" };
   const prototype: object | null = Object.getPrototypeOf(error);
   // The public predicate reads code/status. Give it only inert own data
   // properties, preserving the prototype for its real HTTP-error check.

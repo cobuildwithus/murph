@@ -1,7 +1,8 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   readHostedMailboxAssistantInputItemDetails,
   consolidateHostedMailboxAssistantInputItemsAtPaths,
@@ -40,6 +41,36 @@ async function read(vault: string, indices: number[]) {
 }
 
 describe('hosted mailbox input metadata storage', () => {
+  it.each([
+    '{', '{}',
+    JSON.stringify({ schema: 'wrong-schema', schemaVersion: 1, value: {} }),
+    JSON.stringify({ schema: 'murph.assistant-hosted-mailbox-input-item.v1', schemaVersion: 2, value: {} }),
+  ])('ignores invalid legacy JSON/schema: %s', async (raw) => {
+    const { vaultRoot } = await createTempVaultContext('mailbox-metadata-invalid-')
+    await writeFile(await legacy(vaultRoot, 1), raw)
+    expect(await read(vaultRoot, [1])).toEqual(new Map())
+  })
+
+  it.each([[new ContractValidationError('Parser bug.'), true], [new TypeError('Parser bug.'), true], [new SyntaxError('Parser bug.'), true], [new Error('Parser bug.'), false]] as const)('preserves native fallback and explicitly handles contract failure: %s', async (error, fallback) => {
+    const { vaultRoot } = await createTempVaultContext('mailbox-metadata-parser-bug-')
+    const filePath = await legacy(vaultRoot, 1)
+    const raw = await readFile(filePath, 'utf8')
+    const original = JSON.parse
+    const parse = vi.spyOn(JSON, 'parse').mockImplementation((text, reviver) => {
+      if (text === raw) throw error
+      return original(text, reviver)
+    })
+    try {
+      if (fallback) {
+        expect(await read(vaultRoot, [1])).toEqual(new Map())
+      } else {
+        await expect(read(vaultRoot, [1])).rejects.toBe(error)
+      }
+    } finally {
+      parse.mockRestore()
+    }
+  })
+
   it('keeps repeated writes in one private database with no per-input files or SQLite sidecars', async () => {
     const { vaultRoot } = await createTempVaultContext('mailbox-metadata-files-')
     const paths = resolveAssistantStatePaths(vaultRoot)

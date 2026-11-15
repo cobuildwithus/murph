@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -43,4 +44,13 @@ describe("formatHostedExecutionSafeLogError", () => {
       errorType: "Error",
     });
   });
+});
+
+it.each([
+  [new ContractValidationError("Invalid value."), "ContractValidationError"],
+  [new TypeError("Invalid value."), "TypeError"],
+  [new Error("Invalid value."), "Error"],
+])("labels errors by meaning", (error, name) => {
+  expect(formatHostedExecutionSafeLogErrorDetails(error)).toMatchObject({ errorCode: name, errorType: name });
+  expect(formatHostedExecutionSafeLogErrorDetails(new Error("Outer", { cause: error }))).toMatchObject({ errorCauseType: name });
 });

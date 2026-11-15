@@ -1134,7 +1134,7 @@ async function readRecoverableStoredCaptureSnapshot(input: {
         })
       : null;
   } catch (error) {
-    if (error instanceof SyntaxError || error instanceof TypeError) {
+    if (error instanceof SyntaxError || error instanceof ContractValidationError || error instanceof TypeError) {
       return null;
     }
 
