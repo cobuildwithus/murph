@@ -415,9 +415,6 @@
       "@murphai/operator-config/generated-audio": [
         "../../packages/operator-config/src/generated-audio.ts"
       ],
-      "@murphai/operator-config/vault-selection": [
-        "../../packages/operator-config/src/operator-config/storage.ts"
-      ],
       "@murphai/contracts/constants": [
         "../../packages/contracts/src/constants.ts"
       ],

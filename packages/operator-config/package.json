@@ -159,7 +159,7 @@
       "import": "./dist/generated-audio.js",
       "default": "./dist/generated-audio.js"
     },
-    "./vault-selection": {
+    "./operator-config/storage": {
       "types": "./dist/operator-config/storage.d.ts",
       "import": "./dist/operator-config/storage.js",
       "default": "./dist/operator-config/storage.js"
