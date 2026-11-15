@@ -543,7 +543,7 @@ async function requireStoredHostedPhoneCallResult(input: {
   }
   throw hostedOnboardingError({
     code: "HOSTED_PHONE_CALL_FALLBACK_RESULT_INVALID",
-    httpStatus: 409,
+    httpStatus: 503,
     message: "Hosted phone-call fallback result is invalid.",
     retryable: true,
   });
@@ -1112,13 +1112,15 @@ function emptyRetellCallAnalyzedHandlingResult(): RetellCallAnalyzedHandlingResu
   };
 }
 
+// Our own stored result or delivery state is unreadable or inconsistent:
+// a retryable server failure, never the caller's conflict.
 function hostedPhoneCallResultNotificationError(
   code: string,
   message: string,
 ): Error {
   return hostedOnboardingError({
     code,
-    httpStatus: 409,
+    httpStatus: 503,
     message,
     retryable: true,
   });

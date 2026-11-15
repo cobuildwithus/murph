@@ -138,6 +138,34 @@ describe("Retell ask_murph route with real consultation", () => {
     });
   });
 
+  it("replays a provider claim after a brief read failure and a lost successful response", async () => {
+    const call = buildHostedPhoneCall({ providerCallId: null, status: "starting" });
+    mocks.findUnique.mockImplementation(async () => ({ ...call }));
+    mocks.updateMany.mockImplementation(async () => {
+      call.providerCallId = "retell_call_123";
+      call.status = "calling";
+      return { count: 1 };
+    });
+    const crypto = await import("@/src/lib/phone-calls/crypto");
+    const decrypt = vi.spyOn(crypto.hostedPhoneCallCrypto, "decryptBrief")
+      .mockRejectedValueOnce(new TypeError("Synthetic brief key unavailable."));
+    const request = () => signedRetellRequest({
+      payload: buildAskMurphPayload({ question: "What should I do?" }),
+      url: "https://example.test/api/retell/functions/ask-murph",
+    });
+    expect((await askMurphRoute.POST(request())).status).toBe(500);
+    expect(call.status).toBe("calling");
+    decrypt.mockResolvedValue({ ...VALID_BRIEF, allowTransferToUser: false });
+    const response = await askMurphRoute.POST(request());
+    expect(response.status).toBe(200);
+    const advice = await response.json();
+    expect(advice.directive).toBe("end_call");
+    const replay = await askMurphRoute.POST(request());
+    expect(replay.status).toBe(200);
+    expect(await replay.json()).toEqual(advice);
+    expect(mocks.updateMany).toHaveBeenCalledOnce();
+  });
+
   it("does not claim an unbound call when the storage field is missing", async () => {
     mocks.findUnique.mockResolvedValue(buildHostedPhoneCall({
       providerCallId: null,

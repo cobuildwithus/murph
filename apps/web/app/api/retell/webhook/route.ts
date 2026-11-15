@@ -1,5 +1,7 @@
+import { parseInput } from "@murphai/hosted-execution/request-input";
+
 import { withJsonError } from "@/src/lib/hosted-onboarding/http";
-import { readRawBodyBuffer, withLegacyWebhookErrorInference } from "@/src/lib/http";
+import { parseRequestJson, readRawBodyBuffer } from "@/src/lib/http";
 import {
   retellWebhookPayloadSchema,
 } from "@/src/lib/phone-calls/retell-payloads";
@@ -15,7 +17,7 @@ import { verifyRetellSignature } from "@/src/lib/phone-calls/retell-signature";
 
 const RETELL_WEBHOOK_MAX_BODY_BYTES = 4 * 1024 * 1024;
 
-export const POST = withJsonError(withLegacyWebhookErrorInference(async (request: Request) => {
+export const POST = withJsonError(async (request: Request) => {
   const rawBody = (await readRawBodyBuffer(request, {
     limitBytes: RETELL_WEBHOOK_MAX_BODY_BYTES,
   })).toString("utf8");
@@ -25,7 +27,7 @@ export const POST = withJsonError(withLegacyWebhookErrorInference(async (request
     signature: request.headers.get("x-retell-signature"),
   });
 
-  const payload = retellWebhookPayloadSchema.parse(JSON.parse(rawBody));
+  const payload = parseInput(parseRequestJson(rawBody), retellWebhookPayloadSchema.parse);
   switch (payload.event) {
     case "call_ended":
       await settleRetellWebhookBranches([
@@ -60,7 +62,7 @@ export const POST = withJsonError(withLegacyWebhookErrorInference(async (request
   }
 
   return new Response(null, { status: 204 });
-}));
+});
 
 async function settleRetellWebhookBranches(
   branches: ReadonlyArray<() => Promise<unknown>>,

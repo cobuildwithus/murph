@@ -2,6 +2,8 @@ import { createHmac } from "node:crypto";
 
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { ContractValidationError } from "@murphai/contracts/validation-error";
+
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
@@ -57,6 +59,62 @@ describe("Retell ask_murph route", () => {
     mocks.accountRetellPhoneCallUsage.mockResolvedValue("accounted");
     mocks.finalizePreparedRetellCallResult.mockResolvedValue(undefined);
     mocks.handleRetellCallEnded.mockResolvedValue(undefined);
+  });
+
+  describe.each(["webhook", "ask_murph"] as const)("%s explicit rejection boundary", (route) => {
+    const payload = () => ({
+      event: "call_analyzed",
+      args: { question: "What should I do?" },
+      call: {
+        call_id: "synthetic-call",
+        data_storage_setting: "basic_attributes_only",
+        metadata: { murph_phone_call_id: "synthetic-reservation" },
+      },
+    });
+    const post = (request: Request) => (route === "webhook" ? retellWebhookRoute : askMurphRoute).POST(request);
+    const request = (value: unknown = payload(), rawBody?: string) => signedRetellRequest({
+      payload: value, rawBody, url: "https://example.test/api/retell",
+    });
+
+    it("keeps malformed JSON, shape and length failures explicit", async () => {
+      for (const invalid of [null, {}, { ...payload(), call: { call_id: "x".repeat(201) } },
+        { ...payload(), event: "x".repeat(201), args: { question: "x".repeat(1501) } }]) {
+        const response = await post(request(invalid));
+        expect(response.status).toBe(400);
+        expect(await response.json()).toMatchObject({ error: { code: "INVALID_REQUEST" } });
+      }
+      const response = await post(request(null, "{"));
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ error: { code: "INVALID_JSON" } });
+      expect(mocks.finalizePreparedRetellCallResult).not.toHaveBeenCalled();
+      expect(mocks.getHostedPhoneCallForConsultation).not.toHaveBeenCalled();
+    });
+
+    it("preserves signature and size rejections and reports missing configuration as a server fault", async () => {
+      const unsigned = request();
+      unsigned.headers.delete("x-retell-signature");
+      expect((await post(unsigned)).status).toBe(401);
+      const oversized = request();
+      oversized.headers.set("content-length", String(5 * 1024 * 1024));
+      expect((await post(oversized)).status).toBe(413);
+      vi.stubEnv("RETELL_API_KEY", "");
+      expect((await post(request())).status).toBe(500);
+    });
+
+    it.each([
+      new TypeError("synthetic server fault"), new RangeError("synthetic server fault"),
+      new URIError("synthetic server fault"), new SyntaxError("synthetic stored JSON fault"),
+      new ContractValidationError("synthetic stored contract fault"), new TypeError("fetch failed"),
+    ])("reports server %s at error level and accepts replay", async (error) => {
+      const log = vi.spyOn(console, "error").mockImplementation(() => {});
+      const service = route === "webhook" ? mocks.finalizePreparedRetellCallResult : mocks.consultPhoneCall;
+      service.mockRejectedValueOnce(error);
+      const response = await post(request());
+      expect(response.status).toBe(500);
+      expect(await response.json()).toMatchObject({ error: { code: "INTERNAL_ERROR" } });
+      expect(log).toHaveBeenCalled();
+      expect((await post(request())).status).toBe(route === "webhook" ? 204 : 200);
+    });
   });
 
   it("verifies the signed raw Retell function body and returns Murph advice", async () => {
@@ -341,7 +399,7 @@ describe("Retell ask_murph route", () => {
 
   it("keeps call-ended lifecycle handling available when accounting fails", async () => {
     mocks.accountRetellPhoneCallUsage.mockRejectedValueOnce(
-      new Error("usage storage unavailable"),
+      new TypeError("usage storage unavailable"),
     );
 
     const response = await retellWebhookRoute.POST(signedRetellRequest({
@@ -362,7 +420,7 @@ describe("Retell ask_murph route", () => {
 
   it("delivers analyzed results when accounting fails and converges on replay", async () => {
     mocks.accountRetellPhoneCallUsage
-      .mockRejectedValueOnce(new Error("usage storage unavailable"))
+      .mockRejectedValueOnce(new TypeError("usage storage unavailable"))
       .mockResolvedValueOnce("accounted");
     const request = () => signedRetellRequest({
       payload: {
@@ -491,9 +549,10 @@ describe("Retell ask_murph route", () => {
 
 function signedRetellRequest(input: {
   payload: unknown;
+  rawBody?: string;
   url: string;
 }): Request {
-  const rawBody = JSON.stringify(input.payload);
+  const rawBody = input.rawBody ?? JSON.stringify(input.payload);
   const timestamp = String(Date.now());
   const digest = createHmac("sha256", "retell-api-key")
     .update(`${rawBody}${timestamp}`)

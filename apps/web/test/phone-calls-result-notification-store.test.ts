@@ -9,6 +9,7 @@ import {
 } from "@murphai/runtime-state";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import type {
   HostedAssistantNotificationDestination,
 } from "@/src/lib/hosted-routing/assistant-notification-destination";
@@ -186,6 +187,37 @@ describe("default phone-call result notification store", () => {
     }
     expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
     expect(signalRuntime).not.toHaveBeenCalled();
+  });
+
+  it.each(["result", "brief", "route"] as const)("makes stored %s failures retryable and reuses the committed result", async (phase) => {
+    const call = buildStoredAnalyzedCall();
+    const prisma = buildPrisma({ call });
+    mocks.getPrisma.mockReturnValue(prisma);
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue(null);
+    mocks.readHostedPhoneCallResult.mockResolvedValue(RESULT);
+    mocks.readHostedPhoneCallBrief.mockResolvedValue(BRIEF);
+    mocks.requireHostedAssistantNotificationDestination.mockResolvedValue(DESTINATION);
+    mocks.unwrapHostedDomainRootForWeb.mockResolvedValue({ rootKey: new Uint8Array(32) });
+    mocks.appendHostedMailboxEnvelopeTx.mockResolvedValue({ item: { id: "synthetic-mailbox", userId: MEMBER_ID } });
+    const failure = phase === "route"
+      ? hostedOnboardingError({ code: "HOSTED_ASSISTANT_NOTIFICATION_ROUTE_REQUIRED", httpStatus: 409,
+        message: "Synthetic route unavailable.", retryable: true })
+      : new TypeError("Synthetic decryption failure.");
+    const failingRead = phase === "result" ? mocks.readHostedPhoneCallResult
+      : phase === "brief" ? mocks.readHostedPhoneCallBrief : mocks.requireHostedAssistantNotificationDestination;
+    failingRead.mockRejectedValueOnce(failure);
+
+    await expect(handleRetellCallAnalyzed({ call: buildAnalyzedRetellCallPayload() }))
+      .rejects.toMatchObject({ httpStatus: phase === "route" ? 409 : 503, retryable: true });
+    expect(mocks.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    await expect(handleRetellCallAnalyzed({ call: buildAnalyzedRetellCallPayload() }))
+      .resolves.toMatchObject({ notificationMailboxItemId: "synthetic-mailbox" });
+    expect(mocks.encryptHostedPhoneCallResult).not.toHaveBeenCalled();
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledOnce();
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue({ id: "synthetic-mailbox", userId: MEMBER_ID });
+    await expect(handleRetellCallAnalyzed({ call: buildAnalyzedRetellCallPayload() }))
+      .resolves.toMatchObject({ notificationMailboxItemId: "synthetic-mailbox" });
+    expect(mocks.appendHostedMailboxEnvelopeTx).toHaveBeenCalledOnce();
   });
 
   it("finishes every preparation phase before one mailbox-only transaction", async () => {
