@@ -133,10 +133,8 @@ function createSessionAuth(input: { baseURL: string; secret: string; prisma: Pri
 
 function observedSessionErrorCategory(error: unknown) {
   // Native branding rejects plain objects and proxies without invoking getters.
+  // Compare only the immediate prototype; do not traverse an untrusted chain.
   if (!isNativeError(error)) return "unknown";
-  // Preserve the validation category after separating it from native TypeError.
-  if (error instanceof ContractValidationError) return "native_type";
-  // Keep other categories limited to known immediate prototypes.
   const prototype = Object.getPrototypeOf(error);
   const codeField = prototype === Prisma.PrismaClientKnownRequestError.prototype ? "code"
     : prototype === Prisma.PrismaClientInitializationError.prototype ? "errorCode" : null;
@@ -154,6 +152,7 @@ function observedSessionErrorCategory(error: unknown) {
   }
   switch (prototype) {
     case AuthRecordChangedError.prototype: return "auth_record_changed";
+    case ContractValidationError.prototype:
     case TypeError.prototype: return "native_type";
     case RangeError.prototype: return "native_range";
     case SyntaxError.prototype: return "native_syntax";
