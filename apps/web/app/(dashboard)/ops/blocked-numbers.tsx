@@ -4,12 +4,13 @@ import { Button } from "@/src/components/ui/button";
 import { Input } from "@/src/components/ui/input";
 import { Field, FieldLabel } from "@/src/components/ui/field";
 
-type BlockPage = { blocks: Array<{ contact: string; reason: string; createdAt: string }>; nextCursor: string | null };
-export function BlockedNumbers() {
+export type BlockPage = { blocks: Array<{ contact: string; reason: string; createdAt: string }>; nextCursor: string | null };
+/** The initial props exist for the design study; the Ops page passes none. */
+export function BlockedNumbers(input: { initialPage?: BlockPage | null; initialError?: string | null } = {}) {
   const [contact, setContact] = useState("");
-  const [page, setPage] = useState<BlockPage | null>(null);
+  const [page, setPage] = useState<BlockPage | null>(input.initialPage ?? null);
   const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(input.initialError ?? null);
   const [status, setStatus] = useState("");
   async function load(after?: string) {
     const response = await fetch(`/api/ops/linq-handle-block${after ? `?after=${encodeURIComponent(after)}` : ""}`, { cache: "no-store" });
@@ -47,6 +48,6 @@ export function BlockedNumbers() {
         <span className="min-w-0 break-all text-sm">{block.contact}</span>
         <Button variant="outline" disabled={pending} aria-label={`Unblock ${block.contact}`} onClick={() => void run("unblock", block.contact)}>Unblock</Button>
       </li>)}</ul>}
-    {page?.nextCursor && <Button variant="ghost" className="mt-3" disabled={pending} onClick={() => void run(undefined, undefined, page.nextCursor!)}>Show more</Button>}
+    {page?.nextCursor && <Button variant="outline" className="mt-3" disabled={pending} onClick={() => void run(undefined, undefined, page.nextCursor!)}>Show more</Button>}
   </section>;
 }

@@ -1,6 +1,6 @@
 # Linq group risk ledger
 
-Status: sections 1–6 implemented and locally verified; uncommitted parent handoff
+Status: completed
 Created: 2026-11-15
 Updated: 2026-11-15
 
@@ -472,6 +472,18 @@ Linq webhook, leave, block or risk modules (39 files) 1,013 passed and 25
 opt-in skipped; Web typecheck, lint, `complexity:diff`, `logs:guard`,
 `docs:drift`, `git diff --check`.
 
+### Design proof
+
+`/screenshots/ops#ops-blocked-numbers` renders the production `BlockedNumbers`
+with synthetic values in four states: before the list opens, a list with more
+to load, empty, and a failed load. Two optional initial-state props exist only
+for that study; `/ops` passes none. Captured locally through the Playwright
+smoke server at 1440px (2x) and 390px (3x): nothing inside the section
+extends past the viewport at either width. The page's existing 60px desktop
+overflow comes from another study. One change from that review: "Show more"
+was a ghost button that read as text; it is now outlined like "Show blocked
+numbers".
+
 ### Parent deployment and activation
 
 1. Commit the scoped implementation, tests, owner docs, this plan and the Frog
@@ -541,3 +553,4 @@ that was already untracked when implementation started):
 - `apps/web/test/hosted-retention-owner-split.test.ts`
 - `apps/web/test/ops-blocked-numbers.test.tsx`
 - `docs/hosted-contact-privacy-rotation.md`
+Completed: 2026-11-15
