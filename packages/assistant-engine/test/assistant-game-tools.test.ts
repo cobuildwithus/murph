@@ -696,12 +696,87 @@ it('reads a result that names the accepted recap video, or none, and completes t
       recordSavedGameRecapChatLine: record, groupTool: { request } }
     outcomes.push((await executeGameTool({ context: ctx, request: { action: 'write_recap_file', draftPath: 'drafts/show.json' } })).rpcResult)
     expect(record).toHaveBeenCalledExactlyOnceWith('Accepted line and link')
-    // This release only reads: even on a wake that asks for a video it renders nothing, uploads no part and sends no candidate.
+    // A context that cannot render (no renderer wired) makes no video even on a wake that asks for one.
     expect(request).toHaveBeenCalledExactlyOnceWith({ action: 'write_recap', origin: { kind: 'game_recap', gameId: 'synthetic', eventId: 'game-recap:synthetic' }, recap: story, assets: [] })
   }
   expect(outcomes[1]).toEqual(outcomes[0])
   expect(outcomes[2]).toEqual(outcomes[0])
   expect(outcomes[0]).toMatchObject({ success: true })
+})
+
+describe('a recap wake that asks for a video', () => {
+  const story = { pages: [{ background: 'paper' as const, blocks: [{ kind: 'headline' as const, text: 'The curtain' }] }], chatLine: 'The week ended.' }
+  const scope = { gameId: 'synthetic', eventId: 'game-recap:synthetic', pairFingerprint: 'a'.repeat(32), show: true as const }
+  const origin = { kind: 'game_recap', gameId: 'synthetic', eventId: 'game-recap:synthetic' }
+  const write = { action: 'write_recap', result: { status: 'ok', chatLine: 'Accepted line and link', recapOutcome: 'Saved.' } }
+  const part = (index: number, byteLength: number) => ({ storageKey: `recap/${'c'.repeat(32)}/${String(index).repeat(64)}.mp4`, hash: String(index).repeat(64), byteLength })
+  const setup = async (input: { video?: true; render?: 'rendered' | 'refused'; parts?: unknown[]; bytes?: number }) => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'recap-video-candidate-'))
+    const file = path.join(directory, 'recap.mp4')
+    const bytes = Buffer.alloc(input.bytes ?? 4_500_000, 1)
+    await writeFile(file, bytes)
+    const dispose = vi.fn(async () => { await rm(directory, { recursive: true, force: true }) })
+    const renderGameRecapVideo = vi.fn(async () => input.render === 'refused' ? { kind: 'refused' as const, reason: 'does_not_fit' }
+      : { kind: 'rendered' as const, file, hash: 'f'.repeat(64), byteLength: bytes.length, referenceIds: ['1'.repeat(64)], dispose })
+    const request = vi.fn()
+    for (const value of input.parts ?? []) {
+      if (value instanceof Error) request.mockRejectedValueOnce(value)
+      else request.mockResolvedValueOnce(value)
+    }
+    request.mockResolvedValueOnce(write)
+    const ctx: AssistantHostedToolContext = { ...context(), currentGameRecapScope: () => ({ ...scope, ...(input.video ? { video: true as const } : {}) }),
+      readGameRecapDraft: async () => ({ story, files: [] }), readGameRecapMedia: async () => ({ bytes: 'YWJj', mediaType: 'image/jpeg', referenceIds: [] }),
+      renderGameRecapVideo, recordSavedGameRecapChatLine: vi.fn(), groupTool: { request } }
+    const { executeGameTool } = await import('../src/assistant-codex/dynamic-tools/games.js')
+    const result = await executeGameTool({ context: ctx, request: { action: 'write_recap_file', draftPath: 'drafts/show.json' } })
+    return { result: result.rpcResult, request, renderGameRecapVideo, dispose, directory }
+  }
+  const todaysWrite = { action: 'write_recap', origin, recap: story, assets: [] }
+
+  it('stages the file as ordered parts and offers it to Web with the write', async () => {
+    const { result, request, dispose, directory } = await setup({ video: true, parts: [0, 1, 2].map(index => ({ action: 'read_game', result: { status: 'ok', recapGame: part(index, index < 2 ? 2_000_000 : 500_000) } })) })
+    expect(result).toMatchObject({ success: true })
+    expect(request.mock.calls.slice(0, 3).map(([call]) => [call.recapRead.slot, call.recapRead.mediaType, call.recapRead.referenceIds, Buffer.from(call.recapRead.bytes, 'base64').length]))
+      .toEqual([['video-0', 'video/mp4', [], 2_000_000], ['video-1', 'video/mp4', [], 2_000_000], ['video-2', 'video/mp4', [], 500_000]])
+    expect(request.mock.calls[3]?.[0]).toEqual({ ...todaysWrite, video: { hash: 'f'.repeat(64), byteLength: 4_500_000, referenceIds: ['1'.repeat(64)], parts: [part(0, 2_000_000), part(1, 2_000_000), part(2, 500_000)] } })
+    // The candidate is gone once the write has its answer.
+    expect(dispose).toHaveBeenCalled()
+    await expect(readFile(path.join(directory, 'recap.mp4'))).rejects.toThrow()
+  })
+
+  it('sends exactly today\'s write, and draws nothing, on a wake that did not ask', async () => {
+    const { result, request, renderGameRecapVideo } = await setup({})
+    expect(result).toMatchObject({ success: true })
+    expect(renderGameRecapVideo).not.toHaveBeenCalled()
+    expect(request).toHaveBeenCalledExactlyOnceWith(todaysWrite)
+  })
+
+  it.each([
+    ['the renderer refuses', { render: 'refused' as const }, 0],
+    ['Web refuses a part (the flag is off there)', { parts: [{ action: 'read_game', result: { status: 'unavailable', error: 'recap_video_unavailable' } }] }, 1],
+    ['a part comes back as something else', { parts: [{ action: 'read_game', result: { status: 'ok', recapGame: { storageKey: 'x' } } }] }, 1],
+    ['a later part fails (a seventeenth staged part)', { parts: [{ action: 'read_game', result: { status: 'ok', recapGame: part(0, 2_000_000) } }, new Error('Too many staged parts')] }, 2],
+  ])('writes the recap as today when %s', async (_name, input: { render?: 'refused'; parts?: unknown[] }, uploads) => {
+    const { result, request, dispose } = await setup({ video: true, ...input })
+    expect(result).toMatchObject({ success: true })
+    expect(request).toHaveBeenCalledTimes(uploads + 1)
+    expect(request.mock.lastCall?.[0]).toEqual(todaysWrite)
+    if (input.render !== 'refused') expect(dispose).toHaveBeenCalled()
+  })
+
+  it('throws the candidate away when the write itself fails', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'recap-video-candidate-'))
+    const file = path.join(directory, 'recap.mp4')
+    await writeFile(file, Buffer.alloc(10))
+    const dispose = vi.fn(async () => { await rm(directory, { recursive: true, force: true }) })
+    const request = vi.fn().mockResolvedValueOnce({ action: 'read_game', result: { status: 'ok', recapGame: part(0, 10) } }).mockRejectedValueOnce(new Error('Synthetic write failure'))
+    const ctx: AssistantHostedToolContext = { ...context(), currentGameRecapScope: () => ({ ...scope, video: true }),
+      readGameRecapDraft: async () => ({ story, files: [] }), readGameRecapMedia: async () => ({ bytes: 'YWJj', mediaType: 'image/jpeg', referenceIds: [] }),
+      renderGameRecapVideo: async () => ({ kind: 'rendered', file, hash: 'f'.repeat(64), byteLength: 10, referenceIds: [], dispose }), groupTool: { request } }
+    const { executeGameTool } = await import('../src/assistant-codex/dynamic-tools/games.js')
+    expect((await executeGameTool({ context: ctx, request: { action: 'write_recap_file', draftPath: 'drafts/show.json' } })).rpcResult.success).toBe(false)
+    expect(dispose).toHaveBeenCalled()
+  })
 })
 
 it('submits host-owned song timings without asking the draft to carry them', async () => {

@@ -1,4 +1,4 @@
-import { recapAssetSchema, gameRecapDraftSchema } from '@murphai/contracts/recap-show'
+import { recapAssetSchema, gameRecapDraftSchema, recapVideoDraftSchema, recapVideoPartSchema, type GameRecapEnvelope, type RecapAsset, type RecapVideoDraft } from '@murphai/contracts/recap-show'
 import * as z from '@murphai/contracts/zod-runtime'
 import { GAME_PRIZE_WORDS, hostedGameUpdateSchema, hostedGamePhotoSchema, hostedGameRecapWriterSchema, type HostedGameChatState, type HostedGameUpdate, type HostedGamePhoto, type HostedGameRecap, type HostedGameToolResponse } from '@murphai/hosted-execution/runtime-control'
 import type { AssistantHostedToolContext } from '../../assistant/hosted-tool-context.js'
@@ -487,8 +487,8 @@ function gameRefusalGuidance(payload: GameToolResult, action: 'update_game' | 'g
   return code === 'PROFILE_REQUIRED' || code === 'CONTENT_NOT_ALLOWED' ? GAME_REFUSAL_GUIDANCE[code] : ''
 }
 
-export async function executeGameTool(input: { request: GameDynamicRequest; context: AssistantHostedToolContext | null; turnState?: GameRulesTurnState | null }) {
-  if (input.request.action === 'write_recap_file') return executeRecapFileWrite({ context: input.context, draftPath: input.request.draftPath })
+export async function executeGameTool(input: { request: GameDynamicRequest; context: AssistantHostedToolContext | null; turnState?: GameRulesTurnState | null; signal?: AbortSignal }) {
+  if (input.request.action === 'write_recap_file') return executeRecapFileWrite({ context: input.context, draftPath: input.request.draftPath, signal: input.signal })
   if (input.request.action === 'my_game_reminders') {
     const scope = input.context?.currentUserActionScope?.()
     const tool = input.context?.myGameRemindersTool
@@ -529,28 +529,83 @@ async function executeScheduledGameRead(context: AssistantHostedToolContext | nu
 }
 
 
-async function executeRecapFileWrite(input: { context: AssistantHostedToolContext | null; draftPath: string }) {
+async function executeRecapFileWrite(input: { context: AssistantHostedToolContext | null; draftPath: string; signal?: AbortSignal }) {
   const context = input.context
   const scope = context?.currentGameRecapScope?.()
   const tool = context?.groupTool
   if (!scope?.show || !tool || !context?.readGameRecapDraft || !context.readGameRecapMedia) return toolTextResult(false, 'File submission requires a bound pair show.', 'authority_rejected')
+  let video: RecapVideoCandidate | null = null
   try {
     const draft = gameRecapDraftSchema.parse(await context.readGameRecapDraft(input.draftPath))
     const origin = { kind: 'game_recap' as const, gameId: scope.gameId, eventId: scope.eventId }
-    const assets = []
     // Validate every selection against the final draft before uploading any bytes.
     const selections = await Promise.all(draft.files.map(async file => ({ file, media: await context.readGameRecapMedia!(file.path, draft.story) })))
-    for (const { file, media } of selections) {
-      const uploaded = await tool.request({ action: 'read_game', origin, recapRead: { kind: 'upload', slot: file.slot, ...media } })
-      if (uploaded.result.status !== 'ok' || !('recapGame' in uploaded.result)) throw new Error('Media upload failed.')
-      assets.push(recapAssetSchema.parse(uploaded.result.recapGame))
+    const assets = await uploadRecapAssets(tool, origin, selections)
+    // Only a wake that asked for a video makes one; without it the write is exactly today's.
+    if (scope.video && context.renderGameRecapVideo) {
+      video = await prepareRecapVideoCandidate({ context, tool, origin, story: draft.story, assets, signal: input.signal,
+        media: new Map(selections.map(({ file, media }) => [file.slot, Buffer.from(media.bytes, 'base64')])) })
     }
-    const accepted = await tool.request({ action: 'write_recap', origin, recap: draft.story, assets })
+    const accepted = await tool.request({ action: 'write_recap', origin, recap: draft.story, assets, ...(video ? { video: video.draft } : {}) })
     if (accepted.action !== 'write_recap') throw new Error('Unexpected recap response.')
     await recordAcceptedRecap({ context, origin }, accepted.result, true)
     return toolTextResult(accepted.result.status === 'ok', 'recapOutcome' in accepted.result ? accepted.result.recapOutcome ?? JSON.stringify(accepted.result) : JSON.stringify(accepted.result))
   } catch (error) {
     return toolTextResult(false, error instanceof Error ? error.message : 'Recap submission failed.', 'handler_exception', error)
+  } finally {
+    await video?.dispose()
+  }
+}
+
+async function uploadRecapAssets(tool: NonNullable<AssistantHostedToolContext['groupTool']>, origin: { kind: 'game_recap'; gameId: string; eventId: string },
+  selections: readonly { file: { slot: string }; media: Awaited<ReturnType<NonNullable<AssistantHostedToolContext['readGameRecapMedia']>>> }[]): Promise<RecapAsset[]> {
+  const assets: RecapAsset[] = []
+  for (const { file, media } of selections) {
+    const uploaded = await tool.request({ action: 'read_game', origin, recapRead: { kind: 'upload', slot: file.slot, ...media } })
+    if (uploaded.result.status !== 'ok' || !('recapGame' in uploaded.result)) throw new Error('Media upload failed.')
+    assets.push(recapAssetSchema.parse(uploaded.result.recapGame))
+  }
+  return assets
+}
+
+type RecapVideoCandidate = { draft: RecapVideoDraft; file: string; dispose(): Promise<void> }
+
+/**
+ * Render the show and stage its parts, or null for "no video": a refusal, a timeout, an upload Web
+ * refuses (the flag off answers `recap_video_unavailable`) or one that fails all leave the recap as it
+ * is today. The candidate has no authority of its own: Web's first acceptance decides the video.
+ */
+async function prepareRecapVideoCandidate(input: {
+  context: AssistantHostedToolContext; tool: NonNullable<AssistantHostedToolContext['groupTool']>
+  origin: { kind: 'game_recap'; gameId: string; eventId: string }
+  story: GameRecapEnvelope['story']; assets: readonly RecapAsset[]; media: ReadonlyMap<string, Buffer>; signal?: AbortSignal
+}): Promise<RecapVideoCandidate | null> {
+  const rendered = await input.context.renderGameRecapVideo!({ story: input.story, assets: input.assets, media: input.media, signal: input.signal })
+  if (rendered.kind !== 'rendered') return null
+  try {
+    const { readFile } = await import('node:fs/promises')
+    const { recapVideoParts } = await import('../../assistant/recap-video-render.js')
+    const parts = []
+    for (const [index, bytes] of recapVideoParts(await readFile(rendered.file)).entries()) {
+      const uploaded = await input.tool.request({ action: 'read_game', origin: input.origin,
+        recapRead: { kind: 'upload', slot: `video-${index}`, mediaType: 'video/mp4', referenceIds: [], bytes: bytes.toString('base64') } })
+      const part = uploaded.result.status === 'ok' && 'recapGame' in uploaded.result ? recapVideoPartSchema.safeParse(uploaded.result.recapGame).data : undefined
+      if (!part) {
+        await rendered.dispose()
+        return null
+      }
+      parts.push(part)
+    }
+    const draft = recapVideoDraftSchema.safeParse({ hash: rendered.hash, byteLength: rendered.byteLength, referenceIds: rendered.referenceIds, parts }).data
+    if (!draft) {
+      await rendered.dispose()
+      return null
+    }
+    return { draft, file: rendered.file, dispose: rendered.dispose }
+  } catch (error) {
+    await rendered.dispose()
+    if (input.signal?.aborted) throw error
+    return null
   }
 }
 

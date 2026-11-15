@@ -65,6 +65,25 @@ describe('recap workspace material', () => {
     expect(exported.material.references).toEqual(references)
     expect(JSON.stringify(exported.manifest)).not.toContain(vault)
   })
+  it('gives the model the same game file with the video on or off: the poster stays with the host', async () => {
+    const transcript = { action: 'read_game' as const, result: { status: 'ok' as const, recapGame: {
+      messages: [], next: null, through: '0', since: startedAt, until: settledAt, retainedSince: startedAt, incomplete: false } } }
+    const files: { game: string; manifest: unknown; material: unknown }[] = []
+    const poster = { outcome: { kind: 'won', winnerMemberId: 'player-a', loserMemberId: 'player-b' },
+      stake: { kind: 'prize', title: 'Synthetic lunch', owedByMemberId: 'player-b', owedToMemberId: 'player-a' } }
+    for (const game of [material.game, { ...material.game, poster }]) {
+      const vault = await mkdtemp(path.join(os.tmpdir(), 'recap-poster-')); roots.push(vault)
+      const exported = await materializeRecapWorkspace({ vault, eventId: 'game-recap:game_synthetic', gameId: 'game_synthetic', sessionId,
+        material: { ...material, game }, lore: '', tool: { request: async () => transcript } })
+      const manifest = z.object({ files: z.object({ game: z.string() }) }).parse(exported.manifest)
+      files.push({ game: await readFile(path.join(vault, manifest.files.game), 'utf8'), manifest: exported.manifest, material: exported.material })
+    }
+    expect(files[1]!.game).toBe(files[0]!.game)
+    expect(files[1]!.game).not.toContain('poster')
+    expect(files[1]!.manifest).toEqual(files[0]!.manifest)
+    // The host still holds it, to draw the last screen.
+    expect(files[1]!.material).toMatchObject({ game: { poster } })
+  })
   it('exports over 100 ordered player messages and committed Murph replies with coverage gaps', async () => {
     const vault = await mkdtemp(path.join(os.tmpdir(), 'recap-inputs-')); roots.push(vault)
     const transcript = resolveAssistantTranscriptPath(resolveAssistantStatePaths(vault), sessionId)

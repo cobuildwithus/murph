@@ -8,3 +8,5 @@ export {
   type RecapVideoBackground, type RecapVideoBlock, type RecapVideoInput, type RecapVideoOutcome, type RecapVideoPage, type RecapVideoPlayer,
   type RecapVideoRefusalCode, type RecapVideoScore, type RecapVideoSongWord, type RecapVideoStake,
 } from "./types.js";
+// Types only: the child entry (`child.js`, beside this file) runs a render when started as a process and must never be imported.
+export type { RecapVideoChildRequest, RecapVideoChildResult } from "./child.js";

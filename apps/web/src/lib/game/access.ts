@@ -64,6 +64,8 @@ export function isPairRecapVideoEnabled(maxPlayers: number, env: GameEnv = proce
   return isPairRecapShowEnabled(maxPlayers, env) && env.MURPH_GAME_RECAP_VIDEO_ENABLED === "true";
 }
 
-export function pairRecapShowCapability(maxPlayers: number): { show?: true } {
-  return isPairRecapShowEnabled(maxPlayers) ? { show: true } : {};
+/** What a pair recap wake asks the runner for: the show, and with the video flag on, the show as one video too. */
+export function pairRecapShowCapability(maxPlayers: number, env: GameEnv = process.env): { show?: true; video?: true } {
+  if (!isPairRecapShowEnabled(maxPlayers, env)) return {};
+  return isPairRecapVideoEnabled(maxPlayers, env) ? { show: true, video: true } : { show: true };
 }

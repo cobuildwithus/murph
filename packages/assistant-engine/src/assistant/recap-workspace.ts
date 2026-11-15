@@ -69,11 +69,19 @@ export async function materializeRecapWorkspace(input: {
     } catch { references.push(reference) /* An unavailable photo must not prevent the recap. */ }
   }
   const manifest = { directory: relativeRoot, instructions: RECAP_SHOW_CRAFT, files: {
-    game: await write('game.json', JSON.stringify({ ...material, references }, null, 1)),
+    game: await write('game.json', JSON.stringify({ ...material, game: modelVisibleGame(material.game), references }, null, 1)),
     chat: await write('chat.jsonl', chat.map(message => `${JSON.stringify(message)}\n`).join('')),
     lore: await write('lore.md', input.lore),
   }, coverage: { retainedSince, throughConversationLaneSeq: through, incomplete: incomplete || replies.incomplete } }
   return { root, material, chat, manifest }
+}
+
+/** The game as the model reads it. `poster` holds the last screen's facts for the recap
+ * video: only the host draws them, so the model's input is the same with the video on or off. */
+function modelVisibleGame(game: unknown): unknown {
+  if (!game || typeof game !== 'object' || Array.isArray(game) || !('poster' in game)) return game
+  const { poster: _poster, ...visible } = game as Record<string, unknown>
+  return visible
 }
 
 /** A reference is named by its ID. The path of its photo, refs/<id>.jpg, names it too. */

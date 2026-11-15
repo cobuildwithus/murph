@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { inspectRecapMedia } from "@/src/lib/game/recap-media";
 import { inspectRecapVideo, recapPoster } from "@/src/lib/game/recap-video";
-import { isPairRecapVideoEnabled } from "@/src/lib/game/access";
+import { isPairRecapVideoEnabled, pairRecapShowCapability } from "@/src/lib/game/access";
 
 const file = await readFile(new URL("../../../fixtures/recap-video/synthetic.mp4", import.meta.url));
 const at = (bytes: Buffer, type: string, from = 0) => {
@@ -69,6 +69,15 @@ describe("recap video measurement", () => {
     expect(isPairRecapVideoEnabled(2, { MURPH_GAME_RECAP_VIDEO_ENABLED: "true" })).toBe(false);
     expect(isPairRecapVideoEnabled(2, { ...on, MURPH_GAME_RECAP_VIDEO_ENABLED: "1" })).toBe(false);
   });
+
+  it("asks the runner for a video on a pair recap wake only with its flag on", () => {
+    const show = { MURPH_GAME_RECAP_SHOW_ENABLED: "true" };
+    expect(pairRecapShowCapability(2, { ...show, MURPH_GAME_RECAP_VIDEO_ENABLED: "true" })).toEqual({ show: true, video: true });
+    // Flag off: the wake is exactly today's.
+    expect(pairRecapShowCapability(2, show)).toEqual({ show: true });
+    expect(pairRecapShowCapability(2, { MURPH_GAME_RECAP_VIDEO_ENABLED: "true" })).toEqual({});
+    expect(pairRecapShowCapability(10, { ...show, MURPH_GAME_RECAP_VIDEO_ENABLED: "true" })).toEqual({});
+  });
 });
 
 describe("recap poster facts", () => {
@@ -90,10 +99,10 @@ describe("recap poster facts", () => {
   });
 
   it("calls a tie and a game nobody missed even, with the prize both earned when there is one", () => {
-    expect(recapPoster({ result: scores([6, 1], [6, 1]), terms: terms({ key: "prize", kind: "prize" }), words, tickets: [] })).toEqual({ outcome: { kind: "even" }, stake: { kind: "none" } });
-    expect(recapPoster({ result: scores([7, 0], [7, 0]), terms: terms({ key: "prize", kind: "prize" }), words, tickets: [] })).toEqual({ outcome: { kind: "even" }, stake: { kind: "none" } });
+    expect(recapPoster({ result: scores([6, 1], [6, 1]), terms: terms({ key: "prize", kind: "prize" }), words, tickets: [] })).toEqual({ outcome: { kind: "even", everyDay: false }, stake: { kind: "none" } });
+    expect(recapPoster({ result: scores([7, 0], [7, 0]), terms: terms({ key: "prize", kind: "prize" }), words, tickets: [] })).toEqual({ outcome: { kind: "even", everyDay: true }, stake: { kind: "none" } });
     expect(recapPoster({ result: scores([7, 0], [7, 0]), terms: terms({ key: "prize", kind: "prize" }, { key: "both", kind: "both_get" }), words, tickets: [owes("both", 1, 0), owes("both", 0, 1)] }))
-      .toEqual({ outcome: { kind: "even" }, stake: { kind: "both_win", title: "dinner out together" } });
+      .toEqual({ outcome: { kind: "even", everyDay: true }, stake: { kind: "both_win", title: "dinner out together" } });
   });
 
   it("never guesses at a stake the last screen has no single drawing for", () => {

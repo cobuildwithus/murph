@@ -5961,8 +5961,9 @@ media switch and the generation. Retirement is by game and generation, so
 regeneration, a post removed for everyone and account deletion retire parts
 with no code of their own. `MURPH_GAME_RECAP_VIDEO_ENABLED=true` (pair shows
 only) lets Web stage parts, accept a candidate and add `game.poster` to the
-recap material; stored videos stay readable while it is off. Nothing renders,
-uploads or sends a video yet. The envelope reader is the Web rollback floor
+recap material; stored videos stay readable while it is off. With it on, Web
+also writes `video: true` on a pair recap wake, regenerations included. The
+envelope reader is the Web rollback floor
 once a video is stored: the previous release refuses an envelope with `video`.
 Live Web protocol admission carries a `recapVideo` witness, so a runtime is not
 activated against a Web that cannot read these requests.
@@ -5978,6 +5979,25 @@ Tool results may name the accepted video. A runtime before this release refuses
 a wake with `video` and quarantines an intent with `recapVideo`, so this release
 is the runtime's rollback floor once Web queues such a wake or a later release
 stores such an intent.
+
+On a wake that asks, the file variant of `write_recap` renders the show after
+its scenes and song upload and before the write. The host presents the draft
+with `presentGameRecap`, as the app's payload is made, and writes the verified
+scene and score bytes, the photos fetched again by reference, and the result's
+names, scores and `game.poster` into a host-only temporary directory outside
+the vault. The model's `game.json` never carries `poster`, so its input is the
+same with the flag on or off. The installed renderer's own `child.js` runs as a
+separate Node process in a new process group, with a 512 MB heap, an
+environment of `PATH`, `HOME` and `LANG` only, and a 180 s timeout; a timeout or
+a cancelled turn kills the whole group (the drawing process and ffmpeg), and the
+child kills its group itself when the runner's pipe closes or its own deadline
+passes. One render runs per runner at a time; a second recap meanwhile makes no
+video. The file goes up as `video-N` parts of at most 2,000,000 bytes and rides
+the write as a candidate. Every refusal, timeout, crash, oversized file, part
+Web refuses (`recap_video_unavailable` while the flag is off) or failed upload is
+"no video": the write is then byte-for-byte today's, and the candidate and the
+temporary directory are removed whatever the write returns. Web's first
+acceptance decides the stored video; this step does not send one.
 Accepted media uses private generation URLs; a thirty-day opaque cover capability
 exposes only a composed cover. Failed scenes retain their text, failed songs are
 omitted, and exhausted generation uses a validated three-page plain fallback.
