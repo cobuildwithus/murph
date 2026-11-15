@@ -4,6 +4,7 @@ import "server-only";
 import { Prisma, type PrismaClient } from "@prisma/client";
 
 import {
+  type HostedAiUsageGateDecisionWithSource,
   type HostedAiUsageGateSnapshot,
   readHostedAiUsageGate,
   readHostedAiUsageGateSnapshots,
@@ -29,6 +30,7 @@ import {
   HOSTED_STARTER_USAGE_GRANT_USD_MICROS,
 } from "../hosted-onboarding/starter-usage";
 import { getPrisma } from "../prisma";
+import { hostedOpsFreeIdleMemberSql } from "./free-idle-member-usage";
 import {
   isHostedOpsUsageResetAllOperationId,
 } from "./member-usage-contract";
@@ -961,6 +963,22 @@ export async function resetHostedOpsMemberUsage(
   );
 }
 
+async function shouldSkipHostedOpsUsageResetAll(
+  memberId: string,
+  gate: HostedAiUsageGateDecisionWithSource,
+  tx: Prisma.TransactionClient,
+): Promise<boolean> {
+  if (!gate.allowed && gate.reason !== "ai_usage_limit_exceeded") return true;
+  const [row] = await tx.$queryRaw<[{ freeIdle: boolean }]>(Prisma.sql`
+    SELECT EXISTS (
+      SELECT 1 FROM "hosted_member" AS "member"
+      WHERE "member"."id" = ${memberId}
+        AND ${hostedOpsFreeIdleMemberSql(Prisma.sql`"member"`)}
+    ) AS "freeIdle"
+  `);
+  return row.freeIdle;
+}
+
 async function resetHostedOpsMemberUsageTransaction(
   input: HostedOpsMemberUsageResetTransactionInput,
   prisma: PrismaClient,
@@ -1046,9 +1064,7 @@ async function resetHostedOpsMemberUsageTransaction(
       member.remainingStarterCreditUsdMicros < HOSTED_STARTER_USAGE_GRANT_USD_MICROS
         ? HOSTED_STARTER_USAGE_GRANT_USD_MICROS - member.remainingStarterCreditUsdMicros
         : 0n;
-    const resettableDecision = canonicalGate.allowed
-      || canonicalGate.reason === "ai_usage_limit_exceeded";
-    if (input.operationId && !resettableDecision) {
+    if (input.operationId && await shouldSkipHostedOpsUsageResetAll(input.memberId, canonicalGate, tx)) {
       const result = createHostedOpsMemberUsageResetAllNoopResult({
         memberId: input.memberId,
         now: input.now,
