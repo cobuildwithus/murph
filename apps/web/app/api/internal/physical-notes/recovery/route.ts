@@ -1,3 +1,4 @@
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import {
   hostedPhysicalNoteRecoveryRequestSchema,
 } from "@murphai/hosted-execution/physical-notes";
@@ -19,8 +20,9 @@ export const POST = withJsonError(async (request: Request) => {
     maxBodyBytes: HOSTED_PHYSICAL_NOTE_RECOVERY_MAX_BODY_BYTES,
     payloadText: rawBody,
   });
-  const payload = hostedPhysicalNoteRecoveryRequestSchema.parse(
+  const payload = parseInput(
     JSON.parse(rawBody),
+    (value) => hostedPhysicalNoteRecoveryRequestSchema.parse(value),
   );
   const result = await recoverHostedPhysicalNote({
     ...payload,

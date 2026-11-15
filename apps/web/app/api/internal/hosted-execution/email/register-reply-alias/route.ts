@@ -1,4 +1,4 @@
-import { RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
+import { parseInput, RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import {
   normalizeHostedEmailReplyAliasLookupKey,
   parseHostedEmailReplyAliasRegistrationCallbackRequest,
@@ -29,8 +29,9 @@ export const POST = withJsonError(async (request: Request) => {
     maxBodyBytes: HOSTED_EMAIL_REPLY_ALIAS_REGISTRATION_MAX_BODY_BYTES,
     payloadText,
   });
-  const body = parseHostedEmailReplyAliasRegistrationCallbackRequest(
+  const body = parseInput(
     payloadText.trim() ? JSON.parse(payloadText) : {},
+    parseHostedEmailReplyAliasRegistrationCallbackRequest,
   );
   const aliasKey = normalizeHostedEmailReplyAliasLookupKey(body.aliasKey);
   if (body.aliasKey !== null && !aliasKey) {

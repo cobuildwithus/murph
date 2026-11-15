@@ -1,3 +1,4 @@
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import {
   parseHostedRuntimeFamilyPlanToolRequest,
 } from "@murphai/hosted-execution/parsers";
@@ -16,7 +17,7 @@ export const POST = withJsonError(async (request: Request) => {
   const { payload, userId: memberId } = await requireHostedCloudflareCallbackJsonRequest(request, {
     maxBodyBytes: BODY_LIMIT_BYTES,
   });
-  const body = parseHostedRuntimeFamilyPlanToolRequest(payload);
+  const body = parseInput(payload, parseHostedRuntimeFamilyPlanToolRequest);
 
   return jsonOk(await handleHostedRuntimeFamilyPlanTool({
     memberId,

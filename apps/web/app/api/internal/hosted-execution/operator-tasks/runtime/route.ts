@@ -1,3 +1,4 @@
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import {
   parseHostedOperatorTaskControlRequest,
 } from "@murphai/hosted-execution";
@@ -20,8 +21,9 @@ export const POST = withJsonError(async (request: Request) => {
   );
   return jsonOk(await handleHostedOperatorMessageControl({
     boundRuntimeMemberId,
-    request: parseHostedOperatorTaskControlRequest(
+    request: parseInput(
       await readOptionalJsonObject(request),
+      parseHostedOperatorTaskControlRequest,
     ),
   }));
 });

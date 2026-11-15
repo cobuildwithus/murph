@@ -1,4 +1,4 @@
-import { RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
+import { parseInput, RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import {
   HOSTED_EMAIL_PUBLIC_BOOTSTRAP_CALLBACK_USER_ID,
   parseHostedEmailPublicBootstrapCallbackRequest,
@@ -30,8 +30,9 @@ export const POST = withJsonError(async (request: Request) => {
     });
   }
 
-  const body = parseHostedEmailPublicBootstrapCallbackRequest(
+  const body = parseInput(
     payloadText.trim() ? JSON.parse(payloadText) : {},
+    parseHostedEmailPublicBootstrapCallbackRequest,
   );
   try {
     await sendHostedEmailPublicBootstrapChallenge({

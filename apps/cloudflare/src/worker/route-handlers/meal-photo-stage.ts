@@ -1,4 +1,5 @@
-import { RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
+import { ContractValidationError } from "@murphai/contracts/validation-error";
+import { parseInput, RequestInputError, RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import {
   CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_CAPTURE_ID_HEADER,
   CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_KEY_HEADER,
@@ -76,10 +77,11 @@ export async function handleMealPhotoDeleteRoute(
   const userId = decodeRouteParam(encodedUserId);
   let mealPhotoKey: string;
   try {
-    mealPhotoKey = requireHostedMealPhotoKey(
+    mealPhotoKey = parseInput(context.request.headers, () => requireHostedMealPhotoKey(
       context.request.headers.get(CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_KEY_HEADER) ?? "",
-    );
-  } catch {
+    ));
+  } catch (error) {
+    if (!(error instanceof RequestInputError)) throw error;
     return jsonError("Meal photo key is invalid.", 400);
   }
 
@@ -107,17 +109,18 @@ export async function handleMealPhotoStageRoute(
   let captureId: string;
   let sha256: string;
   try {
-    captureId = requireHostedMealPhotoCaptureId(
+    captureId = parseInput(context.request.headers, () => requireHostedMealPhotoCaptureId(
       context.request.headers.get(
         CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_CAPTURE_ID_HEADER,
       ) ?? "",
-    );
-    sha256 = requireHostedMealPhotoSha256(
+    ));
+    sha256 = parseInput(context.request.headers, () => requireHostedMealPhotoSha256(
       context.request.headers.get(
         CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_SHA256_HEADER,
       ) ?? "",
-    );
-  } catch {
+    ));
+  } catch (error) {
+    if (!(error instanceof RequestInputError)) throw error;
     return jsonError("Meal photo request metadata is invalid.", 400);
   }
 
@@ -137,7 +140,7 @@ export async function handleMealPhotoStageRoute(
   try {
     stageInput = await requireHostedMealPhotoStageInput({ bytes, captureId, sha256 });
   } catch (error) {
-    if (error instanceof TypeError || error instanceof RangeError) {
+    if (error instanceof ContractValidationError || error instanceof RangeError) {
       return jsonError("Meal photo payload is invalid.", 400);
     }
     throw error;

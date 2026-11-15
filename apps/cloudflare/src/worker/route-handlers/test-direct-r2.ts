@@ -1,9 +1,9 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import {
   json,
   jsonError,
   notFound,
-  readOptionalJsonObject,
 } from "../../json.ts";
 import type {
   WorkerRouteContext,
@@ -16,6 +16,7 @@ import type {
 } from "../routes.ts";
 import {
   INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
+  readOptionalJsonInput,
   normalizeNonEmptyString,
 } from "../route-utils/json-body.ts";
 import {
@@ -103,7 +104,8 @@ export async function handleTestDirectR2LocatorMarkerRoute(
       snapshotId,
       userId,
     });
-  } catch {
+  } catch (error) {
+    if (!(error instanceof ContractValidationError)) throw error;
     return json({ error: "snapshotId is invalid." }, 400);
   }
   if (objectKey !== expectedObjectKey) {
@@ -176,7 +178,7 @@ async function readTestDirectR2Body(
   request: Request,
 ): Promise<Record<string, unknown> | Response> {
   try {
-    return await readOptionalJsonObject(request, {
+    return await readOptionalJsonInput(request, {
       limitBytes: INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
     });
   } catch (error) {

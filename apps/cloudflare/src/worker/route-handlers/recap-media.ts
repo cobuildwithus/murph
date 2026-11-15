@@ -1,4 +1,4 @@
-import { RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
+import { parseInput, RequestInputError, RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import { CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS, matchCloudflareHostedControlUserRoutePath } from "@murphai/cloudflare-hosted-control/routes";
 import { requireHostedRecapMediaId } from "../../storage-paths.ts";
 import { createRecapMediaStore, requireRecapMediaEnvelope } from "../../recap-media-store.ts";
@@ -15,8 +15,11 @@ export const recapMediaRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] =
   methods: [CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS[routeName].method], name: routeName, wrongMethodResponse: "method-not-allowed",
   async handle(context, params) {
     let mediaId: string;
-    try { mediaId = requireHostedRecapMediaId(context.request.headers.get("x-murph-recap-media-id") ?? ""); }
-    catch { return jsonError("Invalid recap identity.", 400); }
+    try { mediaId = parseInput(context.request.headers, () => requireHostedRecapMediaId(context.request.headers.get("x-murph-recap-media-id") ?? "")); }
+    catch (error) {
+      if (error instanceof RequestInputError) return jsonError("Invalid recap identity.", 400);
+      throw error;
+    }
     const store = createRecapMediaStore({ bucket: context.env.BUNDLES, userId: decodeRouteParam(params.userId) });
     if (routeName === "recapMediaRead") {
       try {
@@ -27,11 +30,10 @@ export const recapMediaRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] =
     const hash = context.request.headers.get("x-murph-recap-hash") ?? "";
     let envelope: string;
     try {
-      envelope = requireRecapMediaEnvelope(
-        await readRequestBodyText(context.request, { limitBytes: 3 * 1024 * 1024 }), hash,
-      );
+      const body = await readRequestBodyText(context.request, { limitBytes: 3 * 1024 * 1024 });
+      envelope = parseInput(body, () => requireRecapMediaEnvelope(body, hash));
     } catch (error) {
-      if (error instanceof TypeError) return jsonError("Invalid sealed recap asset.", 400);
+      if (error instanceof RequestInputError) return jsonError("Invalid sealed recap asset.", 400);
       if (error instanceof RequestBodyTooLargeError) return jsonError("Recap asset is too large.", 413);
       throw error;
     }

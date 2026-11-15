@@ -1,4 +1,4 @@
-import { RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
+import { parseInput, RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import { Buffer } from "node:buffer";
 
 import {
@@ -27,7 +27,7 @@ export const POST = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(boundedRequest, {
     maxBodyBytes: HOSTED_EMAIL_INGRESS_CALLBACK_MAX_BODY_BYTES,
   });
-  const body = parseHostedEmailIngressWakeAppendRequest(await readOptionalJsonObject(boundedRequest));
+  const body = parseInput(await readOptionalJsonObject(boundedRequest), parseHostedEmailIngressWakeAppendRequest);
   const envelope = buildHostedExecutionEmailConversationMessageWake({
     ...(body.assistantStyleSettingsAuthorized === undefined
       ? {}

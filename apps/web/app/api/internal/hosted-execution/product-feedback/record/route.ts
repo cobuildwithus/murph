@@ -1,3 +1,4 @@
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import {
   parseHostedRuntimeProductFeedbackRecordRequest,
 } from "@murphai/hosted-execution/parsers";
@@ -19,7 +20,7 @@ export const POST = withJsonError(async (request: Request) => {
       maxBodyBytes: BODY_LIMIT_BYTES,
     },
   );
-  const body = parseHostedRuntimeProductFeedbackRecordRequest(payload);
+  const body = parseInput(payload, parseHostedRuntimeProductFeedbackRecordRequest);
 
   return jsonOk(await recordHostedProductFeedback({
     feedback: body.feedback,
