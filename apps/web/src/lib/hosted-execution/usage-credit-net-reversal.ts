@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type { Prisma } from "@prisma/client";
 
 import { generateHostedRandomPrefixedId } from "../primitives";
@@ -87,7 +88,7 @@ async function reconcileHostedUsageCreditNetReversalTx(input: {
     readableCandidates: input.sourceReferenceLookupKeyCandidates ?? [],
   });
   if (input.targetNetReversalUsdMicros < 0n) {
-    throw new TypeError("Hosted usage-credit net reversal target cannot be negative.");
+    throw new ContractValidationError("Hosted usage-credit net reversal target cannot be negative.");
   }
 
   const locked = await lockHostedUsageCreditReversiblePurchaseTx({
@@ -402,7 +403,7 @@ function normalizeHostedUsageCreditSourceLookupKeys(input: {
 }): string[] {
   const keys = [...new Set([input.current, ...input.readableCandidates])];
   if (keys.some((value) => !value.trim())) {
-    throw new TypeError("Hosted usage-credit reversal requires source lookup keys.");
+    throw new ContractValidationError("Hosted usage-credit reversal requires source lookup keys.");
   }
   return keys;
 }

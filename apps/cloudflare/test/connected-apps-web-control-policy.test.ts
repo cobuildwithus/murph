@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { HOSTED_CONNECTED_APPS_PATH } from "@murphai/hosted-execution/connected-apps";
@@ -93,9 +94,8 @@ describe("connected-app web-control policy", () => {
       return;
     }
 
-    expect(result).toBeInstanceOf(TypeError);
-    if (!(result instanceof TypeError)) throw new Error("Expected the port's TypeError");
-    expect(Object.getPrototypeOf(result)).toBe(TypeError.prototype);
+    expect(result).toBeInstanceOf(ContractValidationError);
+    if (!(result instanceof ContractValidationError)) throw new Error("Expected a response validation error");
     expect(result.name).toBe("TypeError");
     expect(result.message).toBe("Hosted connected apps returned an invalid response.");
     expect(Reflect.ownKeys(result).sort()).toEqual(["code", "message", "stack"]);

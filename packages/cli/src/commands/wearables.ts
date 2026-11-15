@@ -1,7 +1,5 @@
 import { Cli, z } from 'incur'
-import {
-  isStrictIsoDate,
-} from '@murphai/contracts'
+import { isStrictIsoDate } from '@murphai/contracts/time'
 import {
   normalizeWearableQueryProviderSlug,
   resolveWearableCanonicalMetricKey,

@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { DEFAULT_TIMEZONE, loadVault } from "@murphai/core";
 import type { SampleStream } from "@murphai/contracts";
 
@@ -283,7 +284,7 @@ export async function prepareCsvSampleImport(
   };
   const delimiter = request.delimiter ?? ",";
   if (typeof delimiter !== "string" || delimiter.length !== 1) {
-    throw new TypeError("delimiter must be a single character");
+    throw new ContractValidationError("delimiter must be a single character");
   }
   const vaultRoot = normalizeOptionalString(request.vaultRoot, "vaultRoot");
   const rawArtifact = await inspectFileAsset(request.filePath);
@@ -307,7 +308,7 @@ export async function prepareCsvSampleImport(
   const tsColumn = resolveTimestampColumnName(header, config.tsColumn);
   const rawMetadataColumns = request.metadataColumns ?? [];
   if (!Array.isArray(rawMetadataColumns)) {
-    throw new TypeError("metadataColumns must be an array of strings when provided");
+    throw new ContractValidationError("metadataColumns must be an array of strings when provided");
   }
   const metadataColumns = rawMetadataColumns.map((column) => normalizeRequiredString(column, "metadataColumns"));
   const plannedImports = resolvePlannedImports(config, header, recognizedSampleColumns);
@@ -557,7 +558,7 @@ function normalizeNumberList(value: unknown, label: string): number[] | undefine
   }
 
   if (!Array.isArray(value)) {
-    throw new TypeError(`${label} must be an array of numbers when provided`);
+    throw new ContractValidationError(`${label} must be an array of numbers when provided`);
   }
 
   return value.map((entry, index) => normalizeFiniteNumber(entry, `${label}[${index}]`));
@@ -574,7 +575,7 @@ function normalizeOptionalFiniteNumber(value: unknown, label: string): number | 
 function normalizeFiniteNumber(value: unknown, label: string): number {
   const numeric = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(numeric)) {
-    throw new TypeError(`${label} must be a finite number`);
+    throw new ContractValidationError(`${label} must be a finite number`);
   }
 
   return numeric;

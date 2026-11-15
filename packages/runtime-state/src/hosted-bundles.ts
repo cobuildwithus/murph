@@ -202,6 +202,9 @@ function shouldIncludeWorkspaceSnapshotVaultRelativePath(relativePath: string): 
     !isDotGitRelativePath(normalizedRelativePath)
     && !isEnvironmentRelativePath(normalizedRelativePath)
     && !isExportPackRelativePath(normalizedRelativePath)
+    // Recap working files were written here until 2026-11-14 and are now runtime scratch.
+    // This drops the copies already saved; remove it once rooms have saved again.
+    && !hasWorkspaceSnapshotPathPrefix(normalizedRelativePath, "tmp/recap")
     && (
       localStateDescriptor === null
       || localStateDescriptor.portability === "portable"

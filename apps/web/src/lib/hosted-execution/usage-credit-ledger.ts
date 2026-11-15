@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 type HostedUsageCreditReadClient = PrismaClient | Prisma.TransactionClient;
@@ -109,7 +110,7 @@ export async function applyHostedUsageCreditProjectionDeltaTx(input: {
   tx: Prisma.TransactionClient;
 }): Promise<LockedHostedUsageCreditBeneficiary> {
   if (input.deltaUsdMicros === 0n) {
-    throw new TypeError("Hosted usage-credit ledger entry amount cannot be zero.");
+    throw new ContractValidationError("Hosted usage-credit ledger entry amount cannot be zero.");
   }
   const nextBalanceUsdMicros =
     input.locked.balanceUsdMicros + input.deltaUsdMicros;
@@ -192,7 +193,7 @@ function normalizeHostedUsageCreditProjection(input: {
 
 export function assertHostedUsageCreditDate(value: Date): void {
   if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
-    throw new TypeError("Hosted usage-credit timestamp is invalid.");
+    throw new ContractValidationError("Hosted usage-credit timestamp is invalid.");
   }
 }
 

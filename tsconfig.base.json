@@ -18,6 +18,12 @@
       "@murphai/contracts": [
         "./packages/contracts/src/index.ts"
       ],
+      "@murphai/contracts/validation-error": [
+        "./packages/contracts/src/validation-error.ts"
+      ],
+      "@murphai/contracts/elevenlabs-music": [
+        "./packages/contracts/src/elevenlabs-music.ts"
+      ],
       "@murphai/contracts/sleep-session": [
         "./packages/contracts/src/sleep-session.ts"
       ],
@@ -128,6 +134,9 @@
       ],
       "@murphai/hosted-execution/usage-diagnostics": [
         "./packages/hosted-execution/src/usage-diagnostics.ts"
+      ],
+      "@murphai/hosted-execution/request-input": [
+        "./packages/hosted-execution/src/request-input.ts"
       ],
       "@murphai/hosted-execution/plan-usage": [
         "./packages/hosted-execution/src/plan-usage.ts"
@@ -485,6 +494,30 @@
       ],
       "@murphai/contracts/recap-validation": [
         "./packages/contracts/src/recap-validation.ts"
+      ],
+      "@murphai/contracts/constants": [
+        "./packages/contracts/src/constants.ts"
+      ],
+      "@murphai/contracts/zod": [
+        "./packages/contracts/src/zod.ts"
+      ],
+      "@murphai/contracts/time": [
+        "./packages/contracts/src/time.ts"
+      ],
+      "@murphai/contracts/shares": [
+        "./packages/contracts/src/shares.ts"
+      ],
+      "@murphai/contracts/health-entities": [
+        "./packages/contracts/src/health-entities.ts"
+      ],
+      "@murphai/vault-usecases/json-input": [
+        "./packages/vault-usecases/src/json-input.ts"
+      ],
+      "@murphai/vault-usecases/option-utils": [
+        "./packages/vault-usecases/src/option-utils.ts"
+      ],
+      "@murphai/vault-usecases/health-cli-descriptors": [
+        "./packages/vault-usecases/src/health-cli-descriptors.ts"
       ]
     },
     "types": [

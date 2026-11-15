@@ -1,3 +1,4 @@
+import { RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 
 import { createHostedDeviceSyncAgentSessionContext } from "@/src/lib/device-sync/agent-session-service";
@@ -30,7 +31,7 @@ async function readAgentPairRequestBody(request: Request): Promise<Record<string
       limitBytes: HOSTED_DEVICE_SYNC_AGENT_PAIR_BODY_LIMIT_BYTES,
     });
   } catch (error) {
-    if (error instanceof RangeError) {
+    if (error instanceof RequestBodyTooLargeError) {
       throw deviceSyncError({
         code: "AGENT_PAIR_BODY_TOO_LARGE",
         message: "Hosted device-sync agent pair request body is too large.",

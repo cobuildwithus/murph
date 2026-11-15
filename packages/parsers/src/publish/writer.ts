@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
@@ -209,18 +210,18 @@ export function parseParserAttemptDirectoryPath(relativePath: string): ParserAtt
     segments[3] !== "attachments" ||
     segments[5] !== "attempts"
   ) {
-    throw new TypeError("Parser attempt path has an unsupported shape.");
+    throw new ContractValidationError("Parser attempt path has an unsupported shape.");
   }
 
   const captureId = normalizeParserArtifactId(segments[2], "captureId");
   const attachmentId = normalizeParserArtifactId(segments[4], "attachmentId");
   const attemptSegment = segments[6];
   if (!/^[0-9]{4,}$/u.test(attemptSegment)) {
-    throw new TypeError("Parser attempt path has an invalid attempt number.");
+    throw new ContractValidationError("Parser attempt path has an invalid attempt number.");
   }
   const attempt = Number(attemptSegment);
   if (!Number.isSafeInteger(attempt) || attempt < 1) {
-    throw new TypeError("Parser attempt path has an invalid attempt number.");
+    throw new ContractValidationError("Parser attempt path has an invalid attempt number.");
   }
 
   return {
@@ -237,12 +238,12 @@ export function parseParserAttemptDirectoryPath(relativePath: string): ParserAtt
 function parseParserResultPath(relativePath: string): ParserAttemptPathIdentity {
   const normalized = normalizePublishedParserPath(relativePath);
   if (path.posix.basename(normalized) !== PARSER_RESULT_FILE_NAME) {
-    throw new TypeError("Parser result path must end in result.json.");
+    throw new ContractValidationError("Parser result path must end in result.json.");
   }
 
   const identity = parseParserAttemptDirectoryPath(path.posix.dirname(normalized));
   if (identity.resultPath !== normalized) {
-    throw new TypeError("Parser result path has an unsupported shape.");
+    throw new ContractValidationError("Parser result path has an unsupported shape.");
   }
   return identity;
 }
@@ -283,7 +284,7 @@ function normalizePublishedParserPath(relativePath: string): string {
     normalized !== PARSER_DERIVED_INBOX_ROOT &&
     !normalized.startsWith(`${PARSER_DERIVED_INBOX_ROOT}/`)
   ) {
-    throw new TypeError("Published parser results must stay within derived/inbox.");
+    throw new ContractValidationError("Published parser results must stay within derived/inbox.");
   }
 
   return normalized;

@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA,
   type HostedExecutionTelegramAttachment,
@@ -124,7 +125,7 @@ function parseHostedTelegramSenderDisplayName(
     && Array.from(displayName).length
       > HOSTED_TELEGRAM_SENDER_DISPLAY_NAME_MAX_CODE_POINTS
   ) {
-    throw new TypeError(`${label} is too long.`);
+    throw new ContractValidationError(`${label} is too long.`);
   }
   return displayName;
 }
@@ -190,7 +191,7 @@ function parseHostedExecutionTelegramAttachmentKind(
     return kind;
   }
 
-  throw new TypeError(`${label} must be a supported hosted Telegram attachment kind.`);
+  throw new ContractValidationError(`${label} must be a supported hosted Telegram attachment kind.`);
 }
 
 function parseHostedExecutionTelegramMessageSchema(
@@ -202,7 +203,7 @@ function parseHostedExecutionTelegramMessageSchema(
     return schema;
   }
 
-  throw new TypeError("Hosted execution Telegram message telegramMessage.schema is unsupported.");
+  throw new ContractValidationError("Hosted execution Telegram message telegramMessage.schema is unsupported.");
 }
 
 function normalizeHostedTelegramReplyContextPreview(

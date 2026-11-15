@@ -16,7 +16,8 @@ export interface ApplePushTarget {
 }
 
 // Background pushes need no permission and show nothing, but Apple requires
-// low priority and throttles them. Alerts are immediate but visible.
+// low priority and throttles them. Alerts are immediate, visible, and always
+// play the default sound, so no alert kind can arrive silently by omission.
 export type ApplePushMessage =
   | { kind: "background" }
   | { kind: "alert"; body: string; title?: string };
@@ -24,7 +25,10 @@ export type ApplePushMessage =
 export type ApplePushResult = "sent" | "unregistered" | "failed";
 
 export interface ApplePushRequest {
-  sound?: "default";
+  /** Alerts only. Groups this alert with others, local or remote, on the same thread. */
+  threadId?: string;
+  /** Alerts only. The app needs the Time Sensitive entitlement, so send it only to a build known to hold it. */
+  interruptionLevel?: "time-sensitive";
   collapseId: string;
   data: Record<string, string>;
   expiresAt: Date;
@@ -77,13 +81,7 @@ export async function sendApplePush(
   const alert = message.kind === "alert";
   try {
     const response = await (dependencies.transport ?? http2Transport)({
-      body: JSON.stringify({
-        ...request.data,
-        aps: message.kind === "alert"
-          ? { alert: message.title ? { body: message.body, title: message.title } : { body: message.body }, "content-available": 1,
-            ...(request.sound ? { sound: request.sound } : {}) }
-          : { "content-available": 1 },
-      }),
+      body: JSON.stringify({ ...request.data, aps: buildAps(request) }),
       headers: {
         authorization: `bearer ${providerToken(credentials, now)}`,
         "apns-collapse-id": request.collapseId.slice(0, 64),
@@ -106,6 +104,18 @@ export async function sendApplePush(
   } catch {
     return "failed";
   }
+}
+
+function buildAps(request: ApplePushRequest): Record<string, unknown> {
+  const { message } = request;
+  if (message.kind !== "alert") return { "content-available": 1 };
+  return {
+    alert: message.title ? { body: message.body, title: message.title } : { body: message.body },
+    "content-available": 1,
+    sound: "default",
+    ...(request.threadId ? { "thread-id": request.threadId } : {}),
+    ...(request.interruptionLevel ? { "interruption-level": request.interruptionLevel } : {}),
+  };
 }
 
 function providerToken(credentials: ApplePushCredentials, now: number): string {

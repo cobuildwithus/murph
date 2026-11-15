@@ -1,3 +1,4 @@
+import { RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import { assertHostedNativeMemberAuthCurrentTx, type HostedNativeMemberAuth } from "../better-auth/native-auth";
 import "server-only";
 
@@ -992,7 +993,7 @@ export async function assertMealPhotoCaptureRequestHasNoBody(request: Request): 
   try {
     body = await readRawBodyBuffer(request, { limitBytes: 1 });
   } catch (error) {
-    if (error instanceof RangeError) {
+    if (error instanceof RequestBodyTooLargeError) {
       throw mealPhotoCaptureRequestInvalid(
         "Scoped meal-photo authority changes do not accept a request body.",
       );
@@ -1073,7 +1074,7 @@ async function readAndValidateMealPhotoUploadWithCaptureId(input: {
       limitBytes: MEAL_PHOTO_CAPTURE_MAX_JPEG_BYTES,
     });
   } catch (error) {
-    if (error instanceof RangeError) {
+    if (error instanceof RequestBodyTooLargeError) {
       throw hostedOnboardingError({
         code: "MEAL_PHOTO_BODY_TOO_LARGE",
         httpStatus: 413,

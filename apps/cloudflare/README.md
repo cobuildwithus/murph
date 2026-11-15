@@ -221,6 +221,9 @@ Full Codex and CLI validation stays in deployment smoke. Its health receipt rema
 compatible with preceding Workers that still request a per-slot preflight; their
 legacy readiness query is ignored and runs the full smoke. Global eligibility
 imposes no ENAM health requirement.
+The coordinator checks every preparation and reproof's reported image pair against
+its own environment for that slot's release; a mismatch uses the existing drain
+and refill path, even if the slot's older Worker still considers the image ready.
 Periodic health rechecks leave ready slots claimable, including a target of one.
 They observe the existing process directly without the binding lifecycle lock or
 SDK auto-start. The coordinator advances the existing check deadline and applies

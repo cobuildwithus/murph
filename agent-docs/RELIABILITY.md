@@ -3301,6 +3301,30 @@ Current product admission, delivery and native runtime safety rules remain.
   drain through exact-source private admission. The undeployed dual URL marker
   and destination dialect are rejected. Caller cancellation, exhausted
   deadlines, authority failures, and other `4xx` responses do not replay.
+- Cloudflare also exact-replays one game-recap group-tool request (`write_recap`,
+  and `read_game` with a `game_recap` origin: material, transcript, reference,
+  upload, recover) under the same deadline and failure rule. Each is safe to
+  send twice: the save and the fallback first return an already-sealed recap,
+  and an upload reuses its content-addressed key. This is the recap's only
+  transport retry; Web's save path and the tool handlers add none.
+- Request boundaries can translate neutral `ContractValidationError` failures through
+  `parseInput` into `RequestInputError`. Web, Worker and container request-decode
+  mappers recognize that explicit rejection as 400 using their existing envelopes.
+  Stage 1 of the explicit-request-rejection plan retains native error inference
+  and the neutral error's temporary `TypeError` base; Web marks native-inferred
+  invalid requests with `nativeErrorInference: true` in its existing warning.
+  Parser bugs pass through unchanged, and retry policy stays with each owner.
+- Bounded Web, Worker and container request readers throw `RequestBodyTooLargeError`
+  from `@murphai/hosted-execution/request-input` at the byte-limit branch.
+  Size adapters recognize that class, never a message prefix or an arbitrary
+  `RangeError`, and retain each endpoint's status, envelope and headers.
+  Body-prohibited endpoints keep their existing 400 contracts. The signal's
+  temporary `RangeError` base preserves unmigrated native 400 inference until
+  stage 6 of the explicit-request-rejection plan removes that compatibility.
+- Hosted Web JSON routes answer a failed outbound fetch (Node's `TypeError`
+  whose message is exactly `fetch failed`) with a retryable `503
+  UPSTREAM_UNAVAILABLE`, never `400 INVALID_REQUEST`, so a caller's existing
+  `5xx` replay rule applies to a network failure behind the route.
 - Assistant Ask request and completion appends first signal the existing Temporal
   workflow, then may issue the shared payloadless, no-retry direct
   `ensure-processing` latency hint. Temporal acceptance failure starts no direct

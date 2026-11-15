@@ -115,6 +115,22 @@ describe("meal photo capture validation", () => {
     });
   });
 
+  it.each([assertMealPhotoCaptureRequestHasNoBody, readAndValidateMealPhotoUpload])("preserves unrelated body-reader RangeErrors: %s", async read => {
+    const error = new RangeError("Invalid array length");
+    const request = createUploadRequest(Buffer.from([0]));
+    Object.defineProperty(request, "body", { value: new ReadableStream({ start(controller) { controller.error(error); } }) });
+    await expect(read(request)).rejects.toBe(error);
+  });
+
+  it.each(["declared", "streamed", "under-reported"])("keeps body-prohibited errors distinct for %s overflow", async mode => {
+    const headers: HeadersInit = mode === "streamed" ? {} : { "content-length": mode === "declared" ? "2" : "0" };
+    const request = new Request("https://example.test/enrollment", { method: "PUT", body: "xx", headers });
+    await expect(assertMealPhotoCaptureRequestHasNoBody(request)).rejects.toMatchObject({
+      code: "MEAL_PHOTO_CAPTURE_REQUEST_INVALID", httpStatus: 400,
+      message: "Scoped meal-photo authority changes do not accept a request body.", retryable: false,
+    });
+  });
+
   it("accepts a bounded metadata-free JPEG and derives server-owned facts", async () => {
     const jpeg = createMinimalJpeg({ height: 2, width: 3 });
     const upload = await readAndValidateMealPhotoUpload(createUploadRequest(jpeg));

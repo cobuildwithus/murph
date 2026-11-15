@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   type HostedPhoneCall,
   type Prisma,
@@ -136,7 +137,7 @@ function readRetellCombinedCostUsdMicros(call: RetellCallPayload): number | null
   }
   const combinedCostUsdMicros = Math.round(combinedCostCents * USD_MICROS_PER_CENT);
   if (!Number.isSafeInteger(combinedCostUsdMicros) || combinedCostUsdMicros < 0) {
-    throw new TypeError("Retell combined call cost exceeds the supported range.");
+    throw new ContractValidationError("Retell combined call cost exceeds the supported range.");
   }
   return combinedCostUsdMicros;
 }

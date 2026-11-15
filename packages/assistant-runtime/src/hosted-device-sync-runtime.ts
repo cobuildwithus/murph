@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createHash } from "node:crypto";
 
 import {
@@ -1942,7 +1943,7 @@ function buildHostedDirtyPayloadDedupeKey(payload: Record<string, unknown>): str
         .update(serializeCompanionHrvRmssdObservation(observation))
         .digest("hex");
       if (admissionId !== expectedAdmissionId) {
-        throw new TypeError("Companion HRV admission identity did not match its observation.");
+        throw new ContractValidationError("Companion HRV admission identity did not match its observation.");
       }
       return `companion-admission-${admissionId}`;
     } catch {

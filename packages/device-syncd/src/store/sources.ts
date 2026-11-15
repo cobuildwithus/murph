@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type { DatabaseSync } from "node:sqlite";
 
 import { withImmediateTransaction } from "@murphai/runtime-state/node";
@@ -116,7 +117,7 @@ function hasOwnInputProperty<T extends object>(
 
 function expectString(value: unknown, field: string): string {
   if (typeof value !== "string") {
-    throw new TypeError(`Expected ${field} to be a string.`);
+    throw new ContractValidationError(`Expected ${field} to be a string.`);
   }
 
   return value;
@@ -132,7 +133,7 @@ function expectNullableString(value: unknown, field: string): string | null {
 
 function expectPositiveInteger(value: unknown, field: string): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
-    throw new TypeError(`Expected ${field} to be a positive integer.`);
+    throw new ContractValidationError(`Expected ${field} to be a positive integer.`);
   }
   return value;
 }
@@ -154,7 +155,7 @@ function expectDeviceConnectionSourceStatus(
     return value;
   }
 
-  throw new TypeError(`Expected ${field} to be a supported device connection source status.`);
+  throw new ContractValidationError(`Expected ${field} to be a supported device connection source status.`);
 }
 
 function normalizeRequiredBoundedString(
@@ -163,16 +164,16 @@ function normalizeRequiredBoundedString(
   maxLength: number,
 ): string {
   if (typeof value !== "string") {
-    throw new TypeError(`${field} must be a string.`);
+    throw new ContractValidationError(`${field} must be a string.`);
   }
 
   const normalized = value.trim();
   if (!normalized) {
-    throw new TypeError(`${field} must not be empty.`);
+    throw new ContractValidationError(`${field} must not be empty.`);
   }
 
   if (normalized.length > maxLength) {
-    throw new TypeError(`${field} must be ${maxLength} characters or fewer.`);
+    throw new ContractValidationError(`${field} must be ${maxLength} characters or fewer.`);
   }
 
   return normalized;
@@ -186,7 +187,7 @@ function normalizeRequiredSourceSlug(
   const normalized = normalizeRequiredBoundedString(value, field, maxLength);
 
   if (!SAFE_SOURCE_SLUG_PATTERN.test(normalized)) {
-    throw new TypeError(`${field} must be a stable opaque lowercase slug.`);
+    throw new ContractValidationError(`${field} must be a stable opaque lowercase slug.`);
   }
 
   return normalized;
@@ -202,7 +203,7 @@ function normalizeNullableBoundedString(
   }
 
   if (typeof value !== "string") {
-    throw new TypeError(`${field} must be a string or null.`);
+    throw new ContractValidationError(`${field} must be a string or null.`);
   }
 
   const normalized = value.trim();
@@ -211,7 +212,7 @@ function normalizeNullableBoundedString(
   }
 
   if (normalized.length > maxLength) {
-    throw new TypeError(`${field} must be ${maxLength} characters or fewer.`);
+    throw new ContractValidationError(`${field} must be ${maxLength} characters or fewer.`);
   }
 
   return normalized;
@@ -309,20 +310,20 @@ function parseStoredSourceAvailabilitySummary(
   try {
     parsed = JSON.parse(value);
   } catch (error) {
-    throw new TypeError("device_connection_source.resource_availability_summary_json is not valid JSON.", {
+    throw new ContractValidationError("device_connection_source.resource_availability_summary_json is not valid JSON.", {
       cause: error,
     });
   }
 
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new TypeError("device_connection_source.resource_availability_summary_json must be a JSON object.");
+    throw new ContractValidationError("device_connection_source.resource_availability_summary_json must be a JSON object.");
   }
 
   const summary: DeviceConnectionSourceResourceAvailabilitySummary = {};
 
   for (const [key, rawValue] of Object.entries(parsed)) {
     if (Object.keys(summary).length >= SOURCE_AVAILABILITY_MAX_ENTRIES) {
-      throw new TypeError("device_connection_source.resource_availability_summary_json has too many entries.");
+      throw new ContractValidationError("device_connection_source.resource_availability_summary_json has too many entries.");
     }
 
     const normalizedKey = key.trim();
@@ -331,12 +332,12 @@ function parseStoredSourceAvailabilitySummary(
       || normalizedKey.length > SOURCE_AVAILABILITY_KEY_MAX_LENGTH
       || isBlockedAvailabilityKey(normalizedKey)
     ) {
-      throw new TypeError("device_connection_source.resource_availability_summary_json contains a blocked key.");
+      throw new ContractValidationError("device_connection_source.resource_availability_summary_json contains a blocked key.");
     }
 
     const value = normalizeSourceAvailabilitySummaryValue(rawValue);
     if (value === undefined) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "device_connection_source.resource_availability_summary_json must contain only scalar values.",
       );
     }

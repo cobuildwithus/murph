@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import path from "node:path";
 
 import {
@@ -1166,7 +1167,7 @@ export function parseHostedPendingAssistantInputState(
     `${HOSTED_PENDING_ASSISTANT_INPUT_STATE_LABEL} value`,
   );
   if (!("inputIds" in state)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "hosted pending assistant input state must contain inputIds.",
     );
   }
@@ -1411,7 +1412,7 @@ function parseHostedPendingAssistantImageCompletionHint(value: unknown): {
     `${HOSTED_PENDING_ASSISTANT_IMAGE_COMPLETION_HINT_LABEL} value`,
   );
   if (!("hasImageCompletionCandidate" in hint)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "hosted pending assistant image completion hint must contain hasImageCompletionCandidate.",
     );
   }
@@ -1685,14 +1686,14 @@ function mergeHostedPendingAssistantInputBackfill(input: {
 
 function parseHostedPendingAssistantInputIds(value: unknown): string[] {
   if (!Array.isArray(value)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "hosted pending assistant input state inputIds must be an array.",
     );
   }
 
   const inputIds = value.map(parseHostedPendingAssistantInputId);
   if (new Set(inputIds).size !== inputIds.length) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "hosted pending assistant input state inputIds must not contain duplicates.",
     );
   }
@@ -1701,7 +1702,7 @@ function parseHostedPendingAssistantInputIds(value: unknown): string[] {
 
 function parseHostedPendingAssistantInputId(value: unknown): string {
   if (typeof value !== "string" || value.trim() === "") {
-    throw new TypeError(
+    throw new ContractValidationError(
       "hosted pending assistant input id must be a non-empty string.",
     );
   }
@@ -1718,13 +1719,13 @@ function parseHostedPendingAssistantInputNullableId(
   try {
     return parseHostedPendingAssistantInputId(value);
   } catch {
-    throw new TypeError(`${label} must be null or a non-empty string.`);
+    throw new ContractValidationError(`${label} must be null or a non-empty string.`);
   }
 }
 
 function parseHostedPendingAssistantInputBoolean(value: unknown, label: string): boolean {
   if (typeof value !== "boolean") {
-    throw new TypeError(`${label} must be a boolean.`);
+    throw new ContractValidationError(`${label} must be a boolean.`);
   }
   return value;
 }
@@ -1738,7 +1739,7 @@ function assertPlainObject(
     || value === null
     || Array.isArray(value)
   ) {
-    throw new TypeError(`${label} must be an object.`);
+    throw new ContractValidationError(`${label} must be an object.`);
   }
   return value as Record<string, unknown>;
 }
@@ -1750,7 +1751,7 @@ function assertObjectKeys(
 ): void {
   for (const key of Object.keys(value)) {
     if (!allowedKeys.has(key)) {
-      throw new TypeError(`${label} contains unsupported key: ${key}.`);
+      throw new ContractValidationError(`${label} contains unsupported key: ${key}.`);
     }
   }
 }

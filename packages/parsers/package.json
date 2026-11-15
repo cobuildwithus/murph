@@ -31,6 +31,7 @@
     "test:coverage": "pnpm exec vitest run --config vitest.config.ts --coverage"
   },
   "dependencies": {
+    "@murphai/contracts": "workspace:*",
     "@murphai/core": "workspace:*",
     "@murphai/runtime-state": "workspace:*",
     "zxing-wasm": "3.1.6"

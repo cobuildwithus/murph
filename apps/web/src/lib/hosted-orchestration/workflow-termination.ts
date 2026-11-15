@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
 import {
@@ -221,7 +222,7 @@ function normalizeHostedRuntimeWorkflowTerminationTimeoutMs(
     return HOSTED_RUNTIME_WORKFLOW_TERMINATION_TIMEOUT_MS;
   }
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
-    throw new TypeError("Hosted runtime workflow termination timeout is invalid.");
+    throw new ContractValidationError("Hosted runtime workflow termination timeout is invalid.");
   }
   return timeoutMs;
 }

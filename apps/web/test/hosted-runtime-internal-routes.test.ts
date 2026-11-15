@@ -1566,7 +1566,7 @@ describe("hosted runtime internal web routes", () => {
       // A later successful request must not inherit or overwrite either observation.
       expect((await workspaceCheckpointRoute.POST(checkpointRequest())).status).toBe(200);
       expect(diagnostics()).toEqual([
-        [failureMessage, { schema: failureSchema, stage: "request_schema", errorClass: "type_error" }],
+        [failureMessage, { schema: failureSchema, stage: "request_schema", errorClass: "request_input" }],
         [failureMessage, { schema: failureSchema, stage: "publication", errorClass: "type_error" }],
       ]);
     });

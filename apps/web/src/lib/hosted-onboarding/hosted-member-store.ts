@@ -3,6 +3,7 @@
  * identity, routing, billing, and email-authorization store slices without
  * flattening them back into one wide row.
  */
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   HostedBillingStatus,
   type HostedMember,
@@ -764,7 +765,7 @@ export async function upsertHostedMemberEmailAuthorization(
     && input.directPublicSender === undefined
     && input.stripeCheckoutEmail === undefined
   ) {
-    throw new TypeError("Hosted member email authorization updates require at least one fact.");
+    throw new ContractValidationError("Hosted member email authorization updates require at least one fact.");
   }
 
   const preparedRoot = input.preparedControlRoot
@@ -826,7 +827,7 @@ export async function prepareHostedMemberStripeCheckoutEmail(input: {
   prisma: PrismaClient;
 }): Promise<PreparedHostedMemberStripeCheckoutEmail> {
   if (!createHostedEmailLookupKey(input.address)) {
-    throw new TypeError("Hosted Stripe checkout email must be a valid email address.");
+    throw new ContractValidationError("Hosted Stripe checkout email must be a valid email address.");
   }
   const addressEncrypted = await encryptHostedWebNullableString({
     field: HOSTED_MEMBER_EMAIL_AUTH_STRIPE_CHECKOUT_EMAIL_FIELD,
@@ -1338,7 +1339,7 @@ export async function updateHostedMemberCoreState(input: {
   };
 
   if (Object.keys(data).length === 0) {
-    throw new TypeError("Hosted member core state updates require at least one field.");
+    throw new ContractValidationError("Hosted member core state updates require at least one field.");
   }
 
   return input.prisma.hostedMember.update({
@@ -1604,11 +1605,11 @@ async function buildHostedMemberEmailFactColumns(input: {
   const lookupKey = createHostedEmailLookupKey(input.address);
 
   if (!lookupKey) {
-    throw new TypeError(`${input.label} must be a valid email address.`);
+    throw new ContractValidationError(`${input.label} must be a valid email address.`);
   }
 
   if (!input.occurredAt) {
-    throw new TypeError(`${input.label} must include a timestamp.`);
+    throw new ContractValidationError(`${input.label} must include a timestamp.`);
   }
 
   return {

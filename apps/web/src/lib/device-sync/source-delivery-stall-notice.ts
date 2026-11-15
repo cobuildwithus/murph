@@ -24,6 +24,7 @@ import { signalHostedMailboxAppendRuntime } from "../hosted-orchestration/signal
 import { resolveHostedAssistantNotificationDestination } from "../hosted-routing/assistant-notification-destination";
 import { getPrisma } from "../prisma";
 import {
+  buildHostedSourceDeliveryStallMailboxDedupeKey,
   buildHostedSourceDeliveryStallNoticeKey,
   type HostedSourceDeliveryStallNoticeCandidate,
 } from "./source-delivery-stall-episode";
@@ -79,20 +80,27 @@ export async function materializeHostedSourceDeliveryStallNotice(input: {
     return;
   }
   const notificationKey = buildHostedSourceDeliveryStallNoticeKey(input.candidate);
-  const messageKey = input.candidate.sourceProviderSlug === "apple_health_kit"
-    ? "linq.apple_health_delivery_stalled"
-    : input.candidate.sourceProviderSlug === "whoop_v2"
-    ? "linq.device_connection_check"
-    : "linq.device_delivery_stalled";
-  const dedupeKey = `assistant.notification.requested:${notificationKey}`;
+  const dedupeKey = buildHostedSourceDeliveryStallMailboxDedupeKey(input.candidate);
   const existing = await readHostedMailboxItemByDedupeKey({
     dedupeKey,
     prisma,
     userId: input.userId,
   });
-  if (existing && existing.consumedAt !== null) {
+  // One check-in per episode. Retention removes the row's content after 30
+  // days and keeps its identity, so an old episode still answers here.
+  if (existing && (existing.consumedAt !== null || isContentRetired(existing))) {
     return;
   }
+  const checkIn = renderUserFacingMessage({
+    context: {
+      companionAppName: policy.companionAppName ?? "",
+      deviceDisplayName: policy.deviceDisplayName ?? "",
+      providerDisplayName: policy.providerDisplayName,
+    },
+    key: policy.messageKey,
+    seed: notificationKey,
+  }).text;
+  const text = `${checkIn} If this gap is expected, tell me to wait 5–30 days or stop these check-ins.`;
   const appended = await runWithPreparedHostedMailboxItemAppendCrypto({
     append: (prepared) => prisma.$transaction(async (tx) => {
       // Serialize first materialization and retries on the existing episode
@@ -174,18 +182,8 @@ export async function materializeHostedSourceDeliveryStallNotice(input: {
       if (alreadyQueued) {
         // The stored payload is immutable: rebuilding it with this attempt's
         // timestamp, copy, or route would produce a false dedupe conflict.
-        return { item: alreadyQueued };
+        return readDeliverableQueuedNotice(alreadyQueued);
       }
-      const checkIn = renderUserFacingMessage({
-        context: {
-          companionAppName: policy.companionAppName,
-          deviceDisplayName: policy.deviceDisplayName,
-          providerDisplayName: policy.providerDisplayName,
-        },
-        key: messageKey,
-        seed: notificationKey,
-      }).text;
-      const text = `${checkIn} If this gap is expected, tell me to wait 5–30 days or stop these check-ins.`;
       return appendHostedMailboxEnvelopeWithPreparedCryptoTx({
         envelope: buildHostedExecutionAssistantNotificationRequestedWake({
           eventId: dedupeKey,
@@ -216,6 +214,18 @@ export async function materializeHostedSourceDeliveryStallNotice(input: {
       prisma,
     });
   }
+}
+
+// Retention clears both payload fields when it retires a row's content.
+function isContentRetired(item: HostedMailboxItemRecord): boolean {
+  return item.payloadInlineCiphertext == null && item.payloadRef == null;
+}
+
+// A retired row has no payload left to deliver, so it is not signaled again.
+function readDeliverableQueuedNotice(
+  item: HostedMailboxItemRecord,
+): { item: HostedMailboxItemRecord } | null {
+  return isContentRetired(item) ? null : { item };
 }
 
 async function signalHostedSourceDeliveryStallNoticeBestEffort(input: {

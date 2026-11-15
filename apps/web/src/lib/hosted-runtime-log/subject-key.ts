@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createHash } from "node:crypto";
 
 /**
@@ -18,7 +19,7 @@ export function hostedRuntimeLogLockKey(subjectKey: string): string {
     "Hosted runtime log subject key",
   );
   if (!/^[0-9a-f]{64}$/u.test(boundedSubjectKey)) {
-    throw new TypeError("Hosted runtime log subject key must be a SHA-256 hex digest.");
+    throw new ContractValidationError("Hosted runtime log subject key must be a SHA-256 hex digest.");
   }
   return BigInt.asIntN(64, BigInt(`0x${boundedSubjectKey.slice(0, 16)}`))
     .toString();
@@ -26,11 +27,11 @@ export function hostedRuntimeLogLockKey(subjectKey: string): string {
 
 function requireBoundedOpaqueString(value: string, label: string): string {
   if (typeof value !== "string") {
-    throw new TypeError(`${label} must be a string.`);
+    throw new ContractValidationError(`${label} must be a string.`);
   }
   const normalized = value.trim();
   if (normalized.length === 0 || normalized.length > 1_024) {
-    throw new TypeError(`${label} must be a non-empty bounded string.`);
+    throw new ContractValidationError(`${label} must be a non-empty bounded string.`);
   }
   return normalized;
 }

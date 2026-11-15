@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createHash } from "node:crypto";
 
 import {
@@ -31,7 +32,7 @@ function requireHostedStableObservabilityIdentifier(kind: string, value: string)
     ? normalized
     : createHostedStableObservabilityIdentifier(kind, normalized);
   if (!lookupKey) {
-    throw new TypeError(`Hosted Linq observability ${kind} lookup key requires a value.`);
+    throw new ContractValidationError(`Hosted Linq observability ${kind} lookup key requires a value.`);
   }
   return lookupKey;
 }

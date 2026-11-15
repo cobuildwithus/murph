@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { handleGameChatBootstrapControl } from "../game/chat-bootstrap";
 import { handleGameChatTool } from "../game/chat-tool";
 import type { HostedRuntimeIdentity } from "../hosted-execution/runtime-owner";
@@ -250,7 +251,7 @@ export function buildHostedGroupJoinOfferProviderIdempotencyKey(input: {
     buildHostedVaultShareProjectionScopeKey,
   );
   if (projectionScopeKeys.length !== input.projectionScopes.length) {
-    throw new TypeError("Hosted group join-offer idempotency input is invalid.");
+    throw new ContractValidationError("Hosted group join-offer idempotency input is invalid.");
   }
   const digest = sha256Hex(JSON.stringify({
     groupId: input.groupId,

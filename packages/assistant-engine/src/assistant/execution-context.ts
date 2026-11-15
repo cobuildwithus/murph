@@ -157,6 +157,13 @@ export type AssistantHostedDeviceToolRequest =
       sourceProvider: string
     }
 
+export interface AssistantHostedDeviceSourceSummary {
+  sourceProvider: string
+  status: 'connected' | 'disconnected' | 'error' | 'unavailable'
+  firstSeenAt: string
+  lastDataAt: string | null
+}
+
 export interface AssistantHostedDeviceAccountSummary {
   accountId: string
   displayName: string | null
@@ -164,6 +171,7 @@ export interface AssistantHostedDeviceAccountSummary {
   lastSyncCompletedAt: string | null
   provider: string
   status: 'active' | 'disconnected' | 'reauthorization_required'
+  sources?: readonly AssistantHostedDeviceSourceSummary[]
 }
 
 export type AssistantHostedDeviceToolResponse =
@@ -606,7 +614,7 @@ export type AssistantWorkspaceArtifactMaterializer = (
 ) => Promise<AssistantWorkspaceArtifactMaterializationResult>
 
 export interface AssistantHostedExecutionContext {
-  gameRecapScope?: { gameId: string; eventId: string; pairFingerprint: string; loreAccess?: 'read'; show?: true } | null
+  gameRecapScope?: { gameId: string; eventId: string; pairFingerprint: string; loreAccess?: 'read'; show?: true; video?: true } | null
   gameMissedCheckInScope?: HostedGameGroupMissedCheckInPolicy | { gameId: string; eventId: string; memberId: string; firstMissedDate: string; pairFingerprint: string } | null
   actionApprovalPort?: AssistantHostedActionApprovalPort | null
   assertTurnCommitAuthority?(input: {
@@ -717,7 +725,7 @@ function normalizeAssistantGameRecapScope(scope: AssistantHostedExecutionContext
   const gameId = normalizeNullableString(scope?.gameId)
   const eventId = normalizeNullableString(scope?.eventId)
   const pairFingerprint = normalizeNullableString(scope?.pairFingerprint)
-  return gameId && eventId && pairFingerprint ? { gameId, eventId, pairFingerprint, ...(scope?.loreAccess === 'read' ? { loreAccess: 'read' as const } : {}), ...(scope?.show === true ? { show: true as const } : {}) } : null
+  return gameId && eventId && pairFingerprint ? { gameId, eventId, pairFingerprint, ...(scope?.loreAccess === 'read' ? { loreAccess: 'read' as const } : {}), ...(scope?.show === true ? { show: true as const } : {}), ...(scope?.show === true && scope.video === true ? { video: true as const } : {}) } : null
 }
 
 function normalizeAssistantGameMissedCheckInScope(scope: AssistantHostedExecutionContext['gameMissedCheckInScope']): NonNullable<AssistantHostedExecutionContext['gameMissedCheckInScope']> | null {

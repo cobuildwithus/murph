@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
 import { Prisma, type PrismaClient } from "@prisma/client";
@@ -354,7 +355,7 @@ export async function readHostedOpsMemberUsage(
     ? normalizeHostedOpsMemberUsageCursor(input.before)
     : null;
   if (after && before) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted ops usage pagination cannot specify both after and before cursors.",
     );
   }
@@ -743,7 +744,7 @@ export async function readHostedOpsMemberUsageResetAllBatch(
     input.afterMemberId,
   );
   if (afterMemberId && !HOSTED_OPS_MEMBER_ID_PATTERN.test(afterMemberId)) {
-    throw new TypeError("Hosted ops reset-everyone cursor is invalid.");
+    throw new ContractValidationError("Hosted ops reset-everyone cursor is invalid.");
   }
   const candidates = await prisma.hostedMember.findMany({
     ...(afterMemberId
@@ -770,10 +771,10 @@ export async function readHostedOpsMemberUsageResetAllWakeBatch(
     input.afterMemberId,
   );
   if (afterMemberId && !HOSTED_OPS_MEMBER_ID_PATTERN.test(afterMemberId)) {
-    throw new TypeError("Hosted ops reset-everyone wake cursor is invalid.");
+    throw new ContractValidationError("Hosted ops reset-everyone wake cursor is invalid.");
   }
   if (!isHostedOpsUsageResetAllOperationId(input.operationId)) {
-    throw new TypeError("Hosted ops reset-everyone operation ID is invalid.");
+    throw new ContractValidationError("Hosted ops reset-everyone operation ID is invalid.");
   }
   const candidates = await prisma.hostedOpsUsageResetReceipt.findMany({
     orderBy: { memberId: "asc" },
@@ -809,10 +810,10 @@ export async function resetHostedOpsMemberUsageForResetAll(
   const now = input.now ?? new Date();
   assertValidDate(now, "Hosted ops reset-everyone timestamp is invalid.");
   if (!HOSTED_OPS_MEMBER_ID_PATTERN.test(input.memberId)) {
-    throw new TypeError("Hosted ops reset-everyone member ID is invalid.");
+    throw new ContractValidationError("Hosted ops reset-everyone member ID is invalid.");
   }
   if (!isHostedOpsUsageResetAllOperationId(input.operationId)) {
-    throw new TypeError("Hosted ops reset-everyone operation ID is invalid.");
+    throw new ContractValidationError("Hosted ops reset-everyone operation ID is invalid.");
   }
 
   for (
@@ -943,7 +944,7 @@ export async function resetHostedOpsMemberUsage(
     "Hosted ops usage reset expected update timestamp is invalid.",
   );
   if (input.expectedUsageCreditLedgerVersion < 0n) {
-    throw new TypeError("Hosted ops usage reset ledger version is invalid.");
+    throw new ContractValidationError("Hosted ops usage reset ledger version is invalid.");
   }
 
   return toHostedOpsMemberUsageResetResult(
@@ -1438,7 +1439,7 @@ function normalizeHostedOpsMemberUsageCursor(
   }
   const normalized = value.trim();
   if (normalized.length === 0) {
-    throw new TypeError("Hosted ops usage pagination cursor is invalid.");
+    throw new ContractValidationError("Hosted ops usage pagination cursor is invalid.");
   }
   return normalized;
 }
@@ -1464,14 +1465,14 @@ function normalizeHostedOpsMemberUsageSummary(
 function normalizeHostedOpsMemberUsageCount(value: string): number {
   const normalized = parseHostedOpsMemberUsageSummaryBigInt(value);
   if (normalized > BigInt(Number.MAX_SAFE_INTEGER)) {
-    throw new TypeError("Hosted ops usage summary count exceeds safe range.");
+    throw new ContractValidationError("Hosted ops usage summary count exceeds safe range.");
   }
   return Number(normalized);
 }
 
 function parseHostedOpsMemberUsageSummaryBigInt(value: string): bigint {
   if (!/^(?:0|[1-9]\d*)$/.test(value)) {
-    throw new TypeError("Hosted ops usage summary value is invalid.");
+    throw new ContractValidationError("Hosted ops usage summary value is invalid.");
   }
   return BigInt(value);
 }
@@ -1507,6 +1508,6 @@ function isHostedUsageNoticeDispatchInFlight(input: {
 
 function assertValidDate(value: Date, message: string): void {
   if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
-    throw new TypeError(message);
+    throw new ContractValidationError(message);
   }
 }

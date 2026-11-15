@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
 import { createHash, randomUUID } from "node:crypto";
@@ -141,7 +142,7 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
 
   const artworkExpiresAt = new Date(input.artwork.expiresAt);
   if (artworkExpiresAt.getTime() <= Date.now() + 60_000) {
-    throw new TypeError("Physical-note artwork URL expires too soon.");
+    throw new ContractValidationError("Physical-note artwork URL expires too soon.");
   }
   await reassertActionOrigin();
   input.signal?.throwIfAborted();

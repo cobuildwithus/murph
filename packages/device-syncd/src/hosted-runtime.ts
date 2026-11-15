@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { COMPANION_HRV_RMSSD_RESOURCE } from "@murphai/contracts";
 import type { JunctionRequestTimeoutDiagnosticDetails } from "./types.ts";
 import { readSafeJunctionRequestTimeoutDiagnostics } from "./junction-request-timeout-diagnostics.ts";
@@ -859,7 +860,7 @@ export function parseHostedExecutionDeviceSyncFitbitMigrationCutoverResponse(
     ["connectionId", "status"],
   );
   if (record.status !== "complete" && record.status !== "pending") {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted Fitbit migration cutover response status must be complete or pending.",
     );
   }
@@ -961,7 +962,7 @@ export function parseHostedExecutionDeviceSyncNoDataOutreachRequest(
     "Hosted device-sync no-data outreach request assistantInputId",
   );
   if (!/^ain_[0-9a-f]{32}$/u.test(assistantInputId)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted device-sync no-data outreach request assistantInputId is invalid.",
     );
   }
@@ -983,14 +984,14 @@ export function parseHostedExecutionDeviceSyncNoDataOutreachRequest(
       "Hosted device-sync no-data outreach request afterDays",
     );
     if (afterDays < 5 || afterDays > 30) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "Hosted device-sync no-data outreach request afterDays must be between 5 and 30.",
       );
     }
     return { ...common, afterDays, mode };
   }
   if (mode !== "default" && mode !== "off") {
-    throw new TypeError("Hosted device-sync no-data outreach request mode is invalid.");
+    throw new ContractValidationError("Hosted device-sync no-data outreach request mode is invalid.");
   }
   assertSupportedFields(
     record,
@@ -1010,17 +1011,17 @@ export function parseHostedExecutionDeviceSyncNoDataOutreachResponse(
     ["action", "effectiveAfterDays", "setting", "sourceProviderSlug", "status"],
   );
   if (record.action !== "configure_no_data_outreach") {
-    throw new TypeError("Hosted device-sync no-data outreach response action is invalid.");
+    throw new ContractValidationError("Hosted device-sync no-data outreach response action is invalid.");
   }
   if (
     record.setting !== "custom"
     && record.setting !== "default"
     && record.setting !== "off"
   ) {
-    throw new TypeError("Hosted device-sync no-data outreach response setting is invalid.");
+    throw new ContractValidationError("Hosted device-sync no-data outreach response setting is invalid.");
   }
   if (record.status !== "saved" && record.status !== "unchanged") {
-    throw new TypeError("Hosted device-sync no-data outreach response status is invalid.");
+    throw new ContractValidationError("Hosted device-sync no-data outreach response status is invalid.");
   }
   const effectiveAfterDays = record.effectiveAfterDays === null
     ? null
@@ -1266,7 +1267,7 @@ function parseHostedExecutionDeviceSyncStagedDirtyAcks(
   );
 
   if (payloadIdCount > HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_PAYLOAD_ID_LIMIT) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} processedDirtyPayloadIds must include no more than `
         + `${HOSTED_EXECUTION_DEVICE_SYNC_STAGED_DIRTY_ACK_PAYLOAD_ID_LIMIT} total entries.`,
     );
@@ -1279,7 +1280,7 @@ function requireBoundedArray(value: unknown, label: string, limit: number): unkn
   const array = requireArray(value, label);
 
   if (array.length > limit) {
-    throw new TypeError(`${label} must include no more than ${limit} entries.`);
+    throw new ContractValidationError(`${label} must include no more than ${limit} entries.`);
   }
 
   return array;
@@ -1364,7 +1365,7 @@ export function parseHostedExecutionDeviceSyncDirtyPendingResponse(
     ).map((entry, index) => {
       const parsed = parseHostedExecutionDeviceSyncDirtyStateResponse(entry);
       if (!parsed) {
-        throw new TypeError(
+        throw new ContractValidationError(
           `Hosted device-sync dirty pending response items[${index}] must not be null.`,
         );
       }
@@ -1412,12 +1413,12 @@ export function parseHostedExecutionDeviceSyncDirtyAckRequest(
     const completedIds = new Set<string>();
     for (const completedImport of completedImports) {
       if (!processedIds.has(completedImport.dirtyPayloadId)) {
-        throw new TypeError(
+        throw new ContractValidationError(
           "Hosted device-sync dirty ack request completedImports must reference processed dirty payload ids.",
         );
       }
       if (completedIds.has(completedImport.dirtyPayloadId)) {
-        throw new TypeError(
+        throw new ContractValidationError(
           "Hosted device-sync dirty ack request completedImports must not repeat a dirty payload id.",
         );
       }
@@ -1466,7 +1467,7 @@ export function parseHostedExecutionDeviceSyncCompletedImport(
 function requireDeviceSyncImportReceiptKey(value: unknown, label: string): string {
   const key = requireString(value, label);
   if (!/^[a-z0-9][a-z0-9_-]{0,127}$/u.test(key)) {
-    throw new TypeError(`${label} must be a normalized device-sync key.`);
+    throw new ContractValidationError(`${label} must be a normalized device-sync key.`);
   }
   return key;
 }
@@ -1556,7 +1557,7 @@ export function parseHostedExecutionDeviceSyncWakeHint(
     if (typeof record.junctionReconcileProof !== "string"
       || record.junctionReconcileProof.trim().length === 0
       || record.junctionReconcileProof.length > 256) {
-      throw new TypeError("Hosted execution device-sync.wake hint junctionReconcileProof must be a nonempty string of at most 256 characters.");
+      throw new ContractValidationError("Hosted execution device-sync.wake hint junctionReconcileProof must be a nonempty string of at most 256 characters.");
     }
     next.junctionReconcileProof = record.junctionReconcileProof;
   }
@@ -1564,7 +1565,7 @@ export function parseHostedExecutionDeviceSyncWakeHint(
   if (record.junctionTemporalSweepKey !== undefined) {
     if (typeof record.junctionTemporalSweepKey !== "string"
       || !/^[a-f0-9]{64}$/u.test(record.junctionTemporalSweepKey)) {
-      throw new TypeError("Hosted execution device-sync.wake hint junctionTemporalSweepKey must be a SHA-256 hash.");
+      throw new ContractValidationError("Hosted execution device-sync.wake hint junctionTemporalSweepKey must be a SHA-256 hash.");
     }
     next.junctionTemporalSweepKey = record.junctionTemporalSweepKey;
   }
@@ -1649,7 +1650,7 @@ function parseHostedExecutionDeviceSyncJobHint(
 
   if (record.attempts !== undefined) {
     if (typeof record.attempts !== "number" || !Number.isSafeInteger(record.attempts) || record.attempts < 0) {
-      throw new TypeError(`Hosted execution device-sync.wake hint jobs[${index}].attempts must be a non-negative safe integer.`);
+      throw new ContractValidationError(`Hosted execution device-sync.wake hint jobs[${index}].attempts must be a non-negative safe integer.`);
     }
     next.attempts = record.attempts;
   }
@@ -1685,7 +1686,7 @@ function parseHostedExecutionDeviceSyncJobHintPayload(
 
   for (const [field, rawValue] of Object.entries(record)) {
     if (!Object.hasOwn(HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS, field)) {
-      throw new TypeError(`${label}.${field} is not supported.`);
+      throw new ContractValidationError(`${label}.${field} is not supported.`);
     }
     const kind = HOSTED_EXECUTION_DEVICE_SYNC_HINT_PAYLOAD_FIELD_KINDS[field];
 
@@ -1793,7 +1794,7 @@ function parseHostedExecutionDeviceSyncRuntimeApplyEntry(
   const rawWriteUpdate = record.writeUpdate;
 
   if (status !== "created" && status !== "missing" && status !== "updated") {
-    throw new TypeError(`Hosted device-sync runtime apply response updates[${index}].status is invalid.`);
+    throw new ContractValidationError(`Hosted device-sync runtime apply response updates[${index}].status is invalid.`);
   }
 
   if (
@@ -1803,7 +1804,7 @@ function parseHostedExecutionDeviceSyncRuntimeApplyEntry(
     && tokenUpdate !== "skipped_version_mismatch"
     && tokenUpdate !== "unchanged"
   ) {
-    throw new TypeError(`Hosted device-sync runtime apply response updates[${index}].tokenUpdate is invalid.`);
+    throw new ContractValidationError(`Hosted device-sync runtime apply response updates[${index}].tokenUpdate is invalid.`);
   }
 
   const connection = record.connection === null
@@ -1904,7 +1905,7 @@ function readNullableHostedDeviceSyncDurationMs(
   ) {
     return value;
   }
-  throw new TypeError(`${label} must be a nonnegative integer or null.`);
+  throw new ContractValidationError(`${label} must be a nonnegative integer or null.`);
 }
 
 function readNullableHostedDeviceSyncEventToProviderSendBucket(
@@ -1918,7 +1919,7 @@ function readNullableHostedDeviceSyncEventToProviderSendBucket(
   if (isHostedDeviceSyncEventToProviderSendBucket(normalized)) {
     return normalized;
   }
-  throw new TypeError(`${label} is invalid.`);
+  throw new ContractValidationError(`${label} is invalid.`);
 }
 
 function readHostedExecutionDeviceSyncDirtyPayload(
@@ -1940,7 +1941,7 @@ function readHostedExecutionDeviceSyncDirtyPayload(
       payload[key] = entry;
       continue;
     }
-    throw new TypeError(`${label}.${key} must be a string, number, or boolean.`);
+    throw new ContractValidationError(`${label}.${key} must be a string, number, or boolean.`);
   }
 
   return Object.keys(payload).length > 0 ? payload : undefined;
@@ -1975,7 +1976,7 @@ function parseHostedExecutionDeviceSyncRuntimeWriteUpdate(
     && writeUpdate !== "skipped_version_mismatch"
     && writeUpdate !== "unchanged"
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Hosted device-sync runtime apply response updates[${index}].writeUpdate is invalid.`,
     );
   }
@@ -1991,7 +1992,7 @@ function parseHostedExecutionDeviceSyncRuntimeConnection(
   const status = requireString(record.status, `${label}.status`);
 
   if (status !== "active" && status !== "reauthorization_required" && status !== "disconnected") {
-    throw new TypeError(`${label}.status is invalid.`);
+    throw new ContractValidationError(`${label}.status is invalid.`);
   }
 
   return {
@@ -2054,11 +2055,11 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionSource(
     && status !== "error"
     && status !== "disconnected"
   ) {
-    throw new TypeError(`${label}.status is invalid.`);
+    throw new ContractValidationError(`${label}.status is invalid.`);
   }
 
   if (!Number.isInteger(resourceCount) || resourceCount < 0) {
-    throw new TypeError(`${label}.resourceCount must be a non-negative integer.`);
+    throw new ContractValidationError(`${label}.resourceCount must be a non-negative integer.`);
   }
 
   return {
@@ -2228,7 +2229,7 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionSourceUpdate(
     && status !== "error"
     && status !== "disconnected"
   ) {
-    throw new TypeError(`${label}.status is invalid.`);
+    throw new ContractValidationError(`${label}.status is invalid.`);
   }
 
   const resourceAvailabilitySummary = record.resourceAvailabilitySummary === undefined
@@ -2289,7 +2290,7 @@ function parseHostedExecutionDeviceSyncRuntimeSourceAvailabilitySummary(
 
   for (const [key, rawValue] of Object.entries(record)) {
     if (!isHostedExecutionDeviceSyncRuntimeSourceSummaryKey(key)) {
-      throw new TypeError(`${label} contains an invalid resource key.`);
+      throw new ContractValidationError(`${label} contains an invalid resource key.`);
     }
 
     if (
@@ -2298,11 +2299,11 @@ function parseHostedExecutionDeviceSyncRuntimeSourceAvailabilitySummary(
       && typeof rawValue !== "boolean"
       && rawValue !== null
     ) {
-      throw new TypeError(`${label}.${key} must be a primitive resource availability value.`);
+      throw new ContractValidationError(`${label}.${key} must be a primitive resource availability value.`);
     }
 
     if (typeof rawValue === "string" && rawValue.length > 256) {
-      throw new TypeError(`${label}.${key} is too long.`);
+      throw new ContractValidationError(`${label}.${key} is too long.`);
     }
 
     summary[key] = rawValue;
@@ -2326,7 +2327,7 @@ function parseHostedExecutionDeviceSyncRuntimeFailureDiagnostic(
   const code = sanitizeHostedRuntimeErrorCode(requireString(record.code, `${label}.code`));
 
   if (!code) {
-    throw new TypeError(`${label}.code must be a non-empty diagnostic code.`);
+    throw new ContractValidationError(`${label}.code must be a non-empty diagnostic code.`);
   }
 
   return {
@@ -2513,7 +2514,7 @@ function assertHostedExecutionDeviceSyncRuntimeMutationFences(input: {
   seed: HostedExecutionDeviceSyncRuntimeConnectionSeed | undefined;
 }): void {
   if ((input.connection || input.localState) && input.observedUpdatedAt === undefined) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Hosted device-sync runtime apply request updates[${input.index}].observedUpdatedAt is required when connection or localState mutations are present.`,
     );
   }
@@ -2522,7 +2523,7 @@ function assertHostedExecutionDeviceSyncRuntimeMutationFences(input: {
     || hostedRuntimeSeedRequiresTokenFence(input.seed);
 
   if (tokenMutationRequiresFence && input.observedTokenVersion === undefined) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Hosted device-sync runtime apply request updates[${input.index}].observedTokenVersion is required when credential mutations are present.`,
     );
   }
@@ -2601,7 +2602,7 @@ function parseHostedExecutionDeviceSyncRuntimeConnectionStateUpdate(
     );
 
     if (status !== "active" && status !== "reauthorization_required" && status !== "disconnected") {
-      throw new TypeError(
+      throw new ContractValidationError(
         `Hosted device-sync runtime apply request updates[${index}].connection.status is invalid.`,
       );
     }
@@ -2665,11 +2666,11 @@ function parseHostedExecutionDeviceSyncRuntimeCredentialSnapshotFields(
   label: string,
 ): Pick<HostedExecutionDeviceSyncRuntimeConnectionSnapshot, "credential"> {
   if (record.tokenBundle !== undefined) {
-    throw new TypeError(`${label}.tokenBundle is not supported.`);
+    throw new ContractValidationError(`${label}.tokenBundle is not supported.`);
   }
 
   if (record.credential === undefined) {
-    throw new TypeError(`${label}.credential is required.`);
+    throw new ContractValidationError(`${label}.credential is required.`);
   }
 
   return {
@@ -2737,7 +2738,7 @@ function parseHostedExecutionDeviceSyncRuntimeCredentialSnapshot(
         kind,
       };
     default:
-      throw new TypeError(`${label}.kind is invalid.`);
+      throw new ContractValidationError(`${label}.kind is invalid.`);
   }
 }
 
@@ -2763,7 +2764,7 @@ function parseHostedExecutionDeviceSyncRuntimeCredentialUpdate(
 }
 
 function rejectNullHostedExecutionCredentialTokenBundle(label: string): never {
-  throw new TypeError(`${label} must be an object.`);
+  throw new ContractValidationError(`${label} must be an object.`);
 }
 
 function requireHostedExecutionWritableCredentialSnapshot(
@@ -2771,7 +2772,7 @@ function requireHostedExecutionWritableCredentialSnapshot(
   label: string,
 ): HostedExecutionDeviceSyncRuntimeWritableCredentialSnapshot {
   if (credential.kind === "oauth_tokens_redacted") {
-    throw new TypeError(`${label}.kind is not supported for credential mutations.`);
+    throw new ContractValidationError(`${label}.kind is not supported for credential mutations.`);
   }
 
   return credential;
@@ -2786,7 +2787,7 @@ function assertSupportedFields(
 
   for (const field of Object.keys(record)) {
     if (!allowed.has(field)) {
-      throw new TypeError(`${label}.${field} is not supported.`);
+      throw new ContractValidationError(`${label}.${field} is not supported.`);
     }
   }
 }
@@ -2897,7 +2898,7 @@ function assertUniqueHostedExecutionDeviceSyncRuntimeApplyConnectionIds(
 
   for (const update of updates) {
     if (seen.has(update.connectionId)) {
-      throw new TypeError(
+      throw new ContractValidationError(
         `Hosted device-sync runtime apply request updates contain duplicate connectionId ${update.connectionId}.`,
       );
     }
@@ -2912,7 +2913,7 @@ function resolveHostedDeviceSyncRuntimeRequestUserId(
 ): string {
   if (trustedUserId) {
     if (value !== undefined && value !== trustedUserId) {
-      throw new TypeError("userId must match the authenticated hosted execution user.");
+      throw new ContractValidationError("userId must match the authenticated hosted execution user.");
     }
 
     return trustedUserId;
@@ -2923,7 +2924,7 @@ function resolveHostedDeviceSyncRuntimeRequestUserId(
 
 function requireObject(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object.`);
+    throw new ContractValidationError(`${label} must be an object.`);
   }
 
   return value as Record<string, unknown>;
@@ -2931,7 +2932,7 @@ function requireObject(value: unknown, label: string): Record<string, unknown> {
 
 function requireArray(value: unknown, label: string): unknown[] {
   if (!Array.isArray(value)) {
-    throw new TypeError(`${label} must be an array.`);
+    throw new ContractValidationError(`${label} must be an array.`);
   }
 
   return value;
@@ -2948,7 +2949,7 @@ function requireStringArray(value: unknown, label: string): string[] {
 
 function requireString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.trim().length === 0) {
-    throw new TypeError(`${label} must be a non-empty string.`);
+    throw new ContractValidationError(`${label} must be a non-empty string.`);
   }
 
   return value;
@@ -2959,11 +2960,11 @@ function requireBigIntString(value: unknown, label: string): string {
   try {
     const parsed = BigInt(raw);
     if (parsed < 0n) {
-      throw new TypeError(`${label} must be a non-negative integer string.`);
+      throw new ContractValidationError(`${label} must be a non-negative integer string.`);
     }
     return raw;
   } catch {
-    throw new TypeError(`${label} must be a non-negative integer string.`);
+    throw new ContractValidationError(`${label} must be a non-negative integer string.`);
   }
 }
 
@@ -2975,7 +2976,7 @@ function readNullableStringValue(value: unknown, label: string): string | null {
   }
 
   if (typeof value !== "string") {
-    throw new TypeError(`${label} must be a string or null.`);
+    throw new ContractValidationError(`${label} must be a string or null.`);
   }
 
   return value;
@@ -3168,7 +3169,7 @@ export function sanitizeHostedRuntimeDiagnosticText(value: string | null): strin
 
 function requireNumber(value: unknown, label: string): number {
   if (typeof value !== "number" || !Number.isFinite(value)) {
-    throw new TypeError(`${label} must be a finite number.`);
+    throw new ContractValidationError(`${label} must be a finite number.`);
   }
 
   return value;
@@ -3176,7 +3177,7 @@ function requireNumber(value: unknown, label: string): number {
 
 function requirePositiveInteger(value: unknown, label: string): number {
   if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
-    throw new TypeError(`${label} must be a positive integer.`);
+    throw new ContractValidationError(`${label} must be a positive integer.`);
   }
 
   return value;
@@ -3192,7 +3193,7 @@ function readNullablePositiveInteger(value: unknown, label: string): number | nu
 
 function requireBoolean(value: unknown, label: string): boolean {
   if (typeof value !== "boolean") {
-    throw new TypeError(`${label} must be a boolean.`);
+    throw new ContractValidationError(`${label} must be a boolean.`);
   }
 
   return value;
@@ -3224,7 +3225,7 @@ function readNullableHostedExecutionDeviceSyncRuntimeSetupPhase(
     return phase;
   }
 
-  throw new TypeError(`${label} is invalid.`);
+  throw new ContractValidationError(`${label} is invalid.`);
 }
 
 function readNullableHostedExecutionDeviceSyncRuntimeConnectionStatus(
@@ -3240,19 +3241,19 @@ function readNullableHostedExecutionDeviceSyncRuntimeConnectionStatus(
     return status;
   }
 
-  throw new TypeError(`${label} is invalid.`);
+  throw new ContractValidationError(`${label} is invalid.`);
 }
 
 function requireIsoTimestamp(value: unknown, label: string): string {
   const parsed = requireString(value, label);
 
   if (!ISO_8601_TIMESTAMP_PATTERN.test(parsed)) {
-    throw new TypeError(`${label} must be an ISO timestamp.`);
+    throw new ContractValidationError(`${label} must be an ISO timestamp.`);
   }
 
   const timestamp = Date.parse(parsed);
   if (!Number.isFinite(timestamp)) {
-    throw new TypeError(`${label} must be an ISO timestamp.`);
+    throw new ContractValidationError(`${label} must be an ISO timestamp.`);
   }
 
   return new Date(timestamp).toISOString();

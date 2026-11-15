@@ -1,3 +1,4 @@
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import {
   parseHostedRuntimeAssistantConfigurationControlRequest,
 } from "@murphai/hosted-execution/assistant-model";
@@ -16,7 +17,7 @@ export const POST = withJsonError(async (request: Request) => {
   const { payload, userId: memberId } = await requireHostedCloudflareCallbackJsonRequest(request, {
     maxBodyBytes: BODY_LIMIT_BYTES,
   });
-  const body = parseHostedRuntimeAssistantConfigurationControlRequest(payload);
+  const body = parseInput(payload, parseHostedRuntimeAssistantConfigurationControlRequest);
 
   return jsonOk(await handleHostedRuntimeAssistantConfigurationTool({
     memberId,

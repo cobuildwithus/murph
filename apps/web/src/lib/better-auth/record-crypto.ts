@@ -1,4 +1,5 @@
 import "server-only";
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createCipheriv, createDecipheriv, createHmac, hkdfSync, randomBytes } from "node:crypto";
 import type { HostedAuthRecord, Prisma, PrismaClient } from "@prisma/client";
 import { decryptHostedWebNullableString, encryptHostedWebNullableString } from "../hosted-web/encryption";
@@ -54,7 +55,7 @@ function sealVerification(plaintext: string, columns: Columns): string {
 
 function openVerification(encrypted: string, columns: Columns): string {
   const parts = encrypted.split(".");
-  if (parts.length !== 4 || parts[0] !== "v1") throw new TypeError("Invalid verification envelope.");
+  if (parts.length !== 4 || parts[0] !== "v1") throw new ContractValidationError("Invalid verification envelope.");
   const key = storageKey("verification");
   try {
     const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(parts[1], "base64url"));

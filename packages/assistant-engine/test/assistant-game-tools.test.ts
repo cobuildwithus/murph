@@ -5,7 +5,7 @@ import { normalizeAssistantExecutionContext } from '../src/assistant/execution-c
 import { describe, expect, it, vi } from 'vitest'
 import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { executeMurphDynamicToolRequest, resolveMurphDynamicTools } from '../src/assistant-codex/dynamic-tools.js'
-import { GAME_GROUP_CHAT_GUIDANCE, GAME_SETUP_CHAT_GUIDANCE, GAME_SHARED_SETUP_GUIDANCE, GAME_SHARED_CHOICE_POLL_GUIDANCE, GAME_PAIR_CHAT_GUIDANCE, GAME_GROUP_MODE_GUIDANCE, GAME_REMINDER_GUIDANCE, GAME_READ_FACTS_GUIDANCE, GAME_PLAY_AGAIN_GUIDANCE, GAME_PAIR_AGREE_GUIDANCE, GAME_GROUP_JOIN_GUIDANCE, GAME_DAY_CORRECTION_GUIDANCE, GAME_UPDATE_RESULT_GUIDANCE, GAME_DAY_OUTCOME_GUIDANCE, GAME_REMINDER_OUTCOME_GUIDANCE, GAME_PHOTO_OUTCOME_GUIDANCE, GAME_REFUSAL_GUIDANCE, MURPH_READ_GAME_TOOL, MURPH_READ_GAME_RECAP_TOOL, MURPH_UPDATE_GAME_TOOL, MURPH_GAME_PHOTO_TOOL, MURPH_WRITE_RECAP_TOOL, MURPH_GAME_LORE_TOOL, GAME_SELECTION_GUIDANCE, GAME_RULES_REPEAT_POINTER } from '../src/assistant-codex/dynamic-tools/games.js'
+import { GAME_GROUP_CHAT_GUIDANCE, GAME_SETUP_CHAT_GUIDANCE, GAME_SHARED_SETUP_GUIDANCE, GAME_SHARED_CHOICE_POLL_GUIDANCE, GAME_PAIR_CHAT_GUIDANCE, GAME_GROUP_MODE_GUIDANCE, GAME_REMINDER_GUIDANCE, GAME_READ_FACTS_GUIDANCE, GAME_PLAY_AGAIN_GUIDANCE, GAME_PAIR_AGREE_GUIDANCE, GAME_GROUP_JOIN_GUIDANCE, GAME_DAY_CORRECTION_GUIDANCE, GAME_UPDATE_RESULT_GUIDANCE, GAME_DAY_OUTCOME_GUIDANCE, GAME_RESULT_CORRECTED_GUIDANCE, GAME_REMINDER_OUTCOME_GUIDANCE, GAME_PHOTO_OUTCOME_GUIDANCE, GAME_REFUSAL_GUIDANCE, MURPH_READ_GAME_TOOL, MURPH_READ_GAME_RECAP_TOOL, MURPH_UPDATE_GAME_TOOL, MURPH_GAME_PHOTO_TOOL, MURPH_WRITE_RECAP_TOOL, MURPH_GAME_LORE_TOOL, GAME_SELECTION_GUIDANCE, GAME_RULES_REPEAT_POINTER } from '../src/assistant-codex/dynamic-tools/games.js'
 import { resolveAssistantGameHostDynamicTools } from '../src/assistant/codex-turn/planning.js'
 import { MURPH_FINISH_WITHOUT_REPLY_TOOL } from '../src/assistant-codex/dynamic-tool-catalog.js'
 import { createAssistantHostedToolContext, type AssistantHostedToolContext } from '../src/assistant/hosted-tool-context.js'
@@ -68,6 +68,9 @@ describe('game dynamic tools', () => {
   it.each([
     { label: 'no game', games: [], carries: ['poll'] },
     { label: 'finished pair game', games: [{ status: 'settled', terms: { stakes: [{ kind: 'both_get', item: 'Dinner out together' }] } }], carries: ['poll', 'again'] },
+    // The app sends a finished pair game's days only while its players can still correct them.
+    { label: 'finished pair game that still lists its days', games: [{ status: 'settled', progress: chatProgress(null, ['posted', 'missed', 'posted']) }], carries: ['poll', 'again', 'day'] },
+    { label: 'finished group game that lists days', games: [{ status: 'settled', maxPlayers: 10, progress: chatProgress(null, ['posted', 'missed', 'posted']) }], carries: ['poll', 'again'] },
     { label: 'waiting pair game', games: [{ status: 'negotiating' }], carries: ['poll', 'pairAgree', 'pair', 'reminder'] },
     { label: 'live pair game', games: [{ status: 'live' }], carries: ['pair', 'day', 'reminder'] },
     { label: 'invited group game', games: [{ status: 'invited', maxPlayers: 10 }], carries: ['poll', 'groupJoin', 'group', 'reminder'] },
@@ -94,6 +97,10 @@ describe('game dynamic tools', () => {
     { label: 'a no', args: { ...approval, operation: 'decline' }, result: { status: 'ok', state: { games: [chatGame()] } }, says: GAME_UPDATE_RESULT_GUIDANCE.declined },
     { label: 'a cancelled game', args: { operation: 'cancel_game', gameId: 'game_synthetic' }, result: { status: 'ok', state: { games: [] } }, says: GAME_UPDATE_RESULT_GUIDANCE.ended },
     { label: 'a day marked not done', args: { operation: 'mark_incomplete', gameId: 'game_synthetic', date: '2030-03-04' }, result: { status: 'ok', dayOutcome: { date: '2030-03-04', status: 'marked_incomplete' } }, says: GAME_DAY_OUTCOME_GUIDANCE.marked_incomplete },
+    { label: 'a counted day that changed a finished game\'s result', args: { operation: 'mark_complete', gameId: 'game_synthetic', date: '2030-03-05', text: 'Read a chapter' },
+      result: { status: 'ok', dayOutcome: { date: '2030-03-05', status: 'credited' }, chatLine: 'Maya\'s check-in for Tuesday, March 5 now counts. That changes the result. The game ended in a 6–6 tie.' }, says: GAME_RESULT_CORRECTED_GUIDANCE },
+    { label: 'a counted day in a finished game that left the result alone', args: { operation: 'mark_complete', gameId: 'game_synthetic', date: '2030-03-05', text: 'Read a chapter' },
+      result: { status: 'ok', state: { games: [chatGame({ status: 'settled' })] }, dayOutcome: { date: '2030-03-05', status: 'credited' } }, says: GAME_DAY_OUTCOME_GUIDANCE.credited },
     { label: 'a reminder that cannot arrive', args: { operation: 'set_reminder', minutes: 1080 }, result: { status: 'ok', reaches: 'none' }, says: GAME_REMINDER_OUTCOME_GUIDANCE.none },
     { label: 'a missing first name', args: approval, result: { status: 'rejected', error: 'PROFILE_REQUIRED: player_sam needs a first name and time zone in the Murph app.' }, says: GAME_REFUSAL_GUIDANCE.PROFILE_REQUIRED },
     { label: 'a yes with no returned state', args: approval, result: { status: 'ok' }, says: '' },
@@ -222,13 +229,17 @@ describe('game dynamic tools', () => {
     { statuses: ['live', 'settled'] as const, guided: false },
     { statuses: ['live', 'live'] as const, guided: true },
     { statuses: ['live', 'negotiating'] as const, guided: true },
-  ])('adds selection guidance only when several games are active: $statuses', async ({ statuses, guided }) => {
+    // A finished game that still lists its days can take a day correction, so a date can mean either game.
+    { statuses: ['live', 'settled'] as const, guided: true, correctable: true },
+    { statuses: ['settled', 'settled'] as const, guided: true, correctable: true },
+  ])('adds selection guidance only when a message could mean several games: $statuses', async ({ statuses, guided, ...finished }) => {
     const games = statuses.map((status, index) => ({
       id: `game_synthetic_${index}`, status, lengthDays: 7, startsOn: null,
       terms: { n: 1, fromDay: 0, tasks: [{ seat: 0, text: index ? 'Read' : 'Walk' }], schedule: { days: [0, 1] }, stakes: [] },
       players: [], pendingChange: null, changeControls: { canStartNow: false, canEdit: true, canEditSchedule: true, canEditStartDate: false, editableFromDay: 1 },
+      ...('correctable' in finished && status === 'settled' ? { progress: chatProgress(null, ['posted', 'missed']) } : {}),
     }))
-    const response = { action: 'read_game' as const, result: { status: 'ok' as const, state: { games } } }
+    const response = hostedGameToolResponseSchema.parse({ action: 'read_game', result: { status: 'ok', state: { games } } })
     const request = parse('read_game', {})!
     const result = await executeMurphDynamicToolRequest({ request, hostedToolContext: { ...context(), groupTool: { request: async () => response } }, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
     const text = result.rpcResult.contentItems[0]?.text
@@ -253,7 +264,7 @@ describe('game dynamic tools', () => {
     const update = await execute(approval)
     expect(update.rpcResult.contentItems[0]?.text).not.toContain(GAME_SETUP_CHAT_GUIDANCE)
   })
-  it('shows an open game whole with its started days, and a finished game without days, asks or controls', async () => {
+  it('shows an open game whole with its started days, and a finished game without asks or controls, with days only while it still lists them', async () => {
     const pendingChange = { id: 'proposal_synthetic', proposedByMemberId: 'player_maya', expectedTermsVersion: 1, change: { kind: 'edit', lengthDays: 10 }, effectiveFromDay: 3, deliveryStatus: 'sent', startsOn: null }
     // Day 3 is a day off ahead of today and day 4 has not started; neither is shown.
     const live = chatGame({ id: 'game_live', terms: { stakes: [{ kind: 'prize', item: 'Pick dinner', key: 'stake_live' }] }, pendingChange })
@@ -266,6 +277,8 @@ describe('game dynamic tools', () => {
     const response = hostedGameToolResponseSchema.parse({ action: 'read_game', result: { status: 'ok', loreGuidance: 'Keep the lore.', loreFingerprint: 'a'.repeat(32), state: { players, photoCheckIn, games: [
       { ...live, progress: chatProgress(2, ['posted', 'missed', 'due', 'off', 'upcoming']) },
       { ...settled, pendingChange: null, changeControls: closed, progress: chatProgress(null, ['posted', 'missed', 'posted']) },
+      { ...settled, id: 'game_final', pendingChange: null, changeControls: closed },
+      { ...settled, id: 'game_group_done', maxPlayers: 10, pendingChange: null, changeControls: closed, progress: chatProgress(null, ['posted', 'missed', 'posted']) },
     ] } } })
     const output = await executeMurphDynamicToolRequest({ request: parse('read_game', { messageRef: inputId })!, hostedToolContext: { ...context(), groupTool: { request: async () => response } }, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
     const text = output.rpcResult.contentItems[0]?.text
@@ -273,8 +286,17 @@ describe('game dynamic tools', () => {
     const days = { '2030-03-04': 'posted', '2030-03-05': 'missed', '2030-03-06': 'due' }
     expect(splitResult(text).shown).toEqual({ action: 'read_game', result: { status: 'ok', state: { players, photoCheckIn, games: [
       { ...live, terms: { ...live.terms, stakes: [{ kind: 'prize', item: 'Pick dinner' }] }, progress: { players: ['player_maya', 'player_sam'].map(memberId => ({ memberId, score: 1, target: 7, currentDayIndex: 2, currentEntryId: null, attemptsRemaining: 2, days })) } },
-      { ...settled, terms: { ...settled.terms, stakes: [{ kind: 'dare', item: 'Sing' }] } },
+      // Still correctable: every day of the finished game, so a player's "count Tuesday" has a date and a game to land on.
+      { ...settled, terms: { ...settled.terms, stakes: [{ kind: 'dare', item: 'Sing' }] }, progress: { players: ['player_maya', 'player_sam'].map(memberId => ({ memberId, score: 1, target: 7, currentDayIndex: null, currentEntryId: null, attemptsRemaining: 0,
+        days: { '2030-03-04': 'posted', '2030-03-05': 'missed', '2030-03-06': 'posted' } })) } },
+      { ...settled, id: 'game_final', terms: { ...settled.terms, stakes: [{ kind: 'dare', item: 'Sing' }] } },
+      { ...settled, id: 'game_group_done', maxPlayers: 10, terms: { ...settled.terms, stakes: [{ kind: 'dare', item: 'Sing' }] } },
     ] } } })
+    expect(splitResult(text).guidance.split(GAME_DAY_CORRECTION_GUIDANCE)).toHaveLength(2)
+    expect(GAME_DAY_CORRECTION_GUIDANCE).toContain('a finished one that still lists its days')
+    expect(GAME_DAY_CORRECTION_GUIDANCE).toContain('for 7 days after it ends')
+    // One open game and one finished game that still lists its days: a date can mean either, so the several-games rule is sent.
+    expect(splitResult(text).guidance.split(GAME_SELECTION_GUIDANCE)).toHaveLength(2)
   })
   it('shows a write only the game it acted on, without its days or the several-games rule', async () => {
     const pendingChange = { id: 'proposal_group', proposedByMemberId: 'player_maya', expectedTermsVersion: 3, change: { kind: 'call_off' }, effectiveFromDay: 3,
@@ -661,19 +683,40 @@ it('can correct an unaccepted draft after an upload error', async () => {
   expect(request.mock.calls[1]?.[0]).toMatchObject({ action: 'write_recap', recap: draft.story, assets: [] })
 })
 
+it('reads a result that names the accepted recap video, or none, and completes the write exactly as without one', async () => {
+  const { executeGameTool } = await import('../src/assistant-codex/dynamic-tools/games.js')
+  const story = { pages: [{ background: 'paper' as const, blocks: [{ kind: 'headline' as const, text: 'The curtain' }] }], chatLine: 'The week ended.' }
+  const outcomes: unknown[] = []
+  for (const recapVideo of [undefined, null, { generationId: 'a'.repeat(32), hash: 'b'.repeat(64), byteLength: 5_200_000 }]) {
+    // The runtime's own result reader takes the field; a runtime that predates it would refuse the whole result.
+    const result = parseHostedRuntimeGroupToolResponse({ action: 'write_recap', result: { status: 'ok', chatLine: 'Accepted line and link', recapOutcome: 'Saved.', ...(recapVideo === undefined ? {} : { recapVideo }) } })
+    const record = vi.fn(), request = vi.fn().mockResolvedValue(result)
+    const ctx: AssistantHostedToolContext = { ...context(), currentGameRecapScope: () => ({ gameId: 'synthetic', eventId: 'game-recap:synthetic', pairFingerprint: 'a'.repeat(32), show: true, video: true }),
+      readGameRecapDraft: async () => ({ story, files: [] }), readGameRecapMedia: async () => ({ bytes: 'YWJj', mediaType: 'image/jpeg', referenceIds: [] }),
+      recordSavedGameRecapChatLine: record, groupTool: { request } }
+    outcomes.push((await executeGameTool({ context: ctx, request: { action: 'write_recap_file', draftPath: 'drafts/show.json' } })).rpcResult)
+    expect(record).toHaveBeenCalledExactlyOnceWith('Accepted line and link')
+    // This release only reads: even on a wake that asks for a video it renders nothing, uploads no part and sends no candidate.
+    expect(request).toHaveBeenCalledExactlyOnceWith({ action: 'write_recap', origin: { kind: 'game_recap', gameId: 'synthetic', eventId: 'game-recap:synthetic' }, recap: story, assets: [] })
+  }
+  expect(outcomes[1]).toEqual(outcomes[0])
+  expect(outcomes[2]).toEqual(outcomes[0])
+  expect(outcomes[0]).toMatchObject({ success: true })
+})
+
 it('submits host-owned song timings without asking the draft to carry them', async () => {
   const { executeGameTool } = await import('../src/assistant-codex/dynamic-tools/games.js')
   const story = { pages: [{ background: 'paper' as const, blocks: [{ kind: 'headline' as const, text: 'The train' }] }], chatLine: 'The train arrived.',
     song: { title: 'Train', style: 'Folk', lyrics: ['Leo goes', 'Ava stays'] } }
-  const wordsTimestamps = [{ word: 'Leo', startMs: 100, endMs: 300 }]
-  const asset = { slot: 'song', kind: 'song', recipeId: 'synthetic', storageKey: 'synthetic', references: [], hash: 'a'.repeat(64), mediaType: 'audio/mpeg', byteLength: 3, durationMs: 20_000, wordsTimestamps }
+  const wordsTimestamps = [{ word: 'Leo', startMs: 5000, endMs: 5300 }], songStartMs = 4800
+  const asset = { slot: 'song', kind: 'song', recipeId: 'synthetic', storageKey: 'synthetic', references: [], hash: 'a'.repeat(64), mediaType: 'audio/mpeg', byteLength: 3, durationMs: 25_000, songStartMs, wordsTimestamps }
   const request = vi.fn().mockResolvedValueOnce({ action: 'read_game', result: { status: 'ok', recapGame: asset } })
     .mockResolvedValueOnce({ action: 'write_recap', result: { status: 'ok', chatLine: 'Accepted line and link', recapOutcome: 'Saved.' } })
   const ctx: AssistantHostedToolContext = { ...context(), currentGameRecapScope: () => ({ gameId: 'synthetic', eventId: 'game-recap:synthetic', pairFingerprint: 'a'.repeat(32), show: true }),
     readGameRecapDraft: async () => ({ story, files: [{ slot: 'song', path: 'media/song.mp3' }] }),
-    readGameRecapMedia: async () => ({ bytes: 'YWJj', mediaType: 'audio/mpeg', referenceIds: [], wordsTimestamps }), groupTool: { request } }
+    readGameRecapMedia: async () => ({ bytes: 'YWJj', mediaType: 'audio/mpeg', referenceIds: [], wordsTimestamps, songStartMs }), groupTool: { request } }
   expect((await executeGameTool({ context: ctx, request: { action: 'write_recap_file', draftPath: 'drafts/show.json' } })).rpcResult.success).toBe(true)
-  expect(request.mock.calls[0]?.[0]).toMatchObject({ action: 'read_game', recapRead: { kind: 'upload', slot: 'song', wordsTimestamps } })
+  expect(request.mock.calls[0]?.[0]).toMatchObject({ action: 'read_game', recapRead: { kind: 'upload', slot: 'song', wordsTimestamps, songStartMs } })
   expect(request.mock.calls[1]?.[0]).toMatchObject({ action: 'write_recap', recap: story, assets: [asset] })
 })
 

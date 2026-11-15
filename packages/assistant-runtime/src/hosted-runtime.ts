@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { getHostedSystemMailboxModelFreeRouteActions } from "./hosted-runtime/mailbox-routing.ts";
 import { createHostedMealMediaBudget, createHostedMealMediaMaintenance, needsHostedMealMediaCheckpoint, withHostedMealMediaRetry, mergeHostedMealMediaRetry, type HostedMealMediaBudget } from "./hosted-runtime/meal-media-maintenance.ts";
 import { existsSync } from "node:fs";
@@ -9292,7 +9293,7 @@ function assertHostedWorkspaceRuntimeBudgetSupported(maxRuntimeMs: number | null
     return;
   }
 
-  throw new TypeError("Hosted workspace runtime job budget.maxRuntimeMs is not supported yet.");
+  throw new ContractValidationError("Hosted workspace runtime job budget.maxRuntimeMs is not supported yet.");
 }
 
 function createAbortGuardedClinicalDocumentFetcher(

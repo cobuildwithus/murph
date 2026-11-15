@@ -1,3 +1,4 @@
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import {
   parseHostedPlanUsageToolRequest,
 } from "@murphai/hosted-execution/plan-usage";
@@ -16,7 +17,7 @@ export const POST = withJsonError(async (request: Request) => {
   const { payload, userId: memberId } = await requireHostedCloudflareCallbackJsonRequest(request, {
     maxBodyBytes: BODY_LIMIT_BYTES,
   });
-  const toolRequest = parseHostedPlanUsageToolRequest(payload);
+  const toolRequest = parseInput(payload, parseHostedPlanUsageToolRequest);
 
   return jsonOk(await readHostedPersonalAiUsageStatus({
     includeScheduledPlan: true,

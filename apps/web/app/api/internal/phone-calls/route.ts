@@ -1,3 +1,4 @@
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import { hostedPhoneCallStartRequestSchema } from "@murphai/hosted-execution/phone-calls";
 
 import {
@@ -19,7 +20,7 @@ export const POST = withJsonError(async (request: Request) => {
     maxBodyBytes: HOSTED_PHONE_CALL_START_MAX_BODY_BYTES,
     payloadText: rawBody,
   });
-  const payload = hostedPhoneCallStartRequestSchema.parse(JSON.parse(rawBody));
+  const payload = parseInput(JSON.parse(rawBody), (value) => hostedPhoneCallStartRequestSchema.parse(value));
   const response = await createHostedPhoneCall({
     brief: payload.brief,
     ...(payload.groupRequester

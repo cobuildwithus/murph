@@ -701,6 +701,7 @@ function projectedActivityMetricCandidates(
     },
     metric: candidate.metric,
     occurredAt: candidate.occurredAt,
+    ...(candidate.partialCountOfFinishedDay ? { partialCountOfFinishedDay: true } : {}),
     paths: [],
     provider: candidate.provider,
     recordedAt: candidate.recordedAt,

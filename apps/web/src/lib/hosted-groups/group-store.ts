@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 import { createHash } from "node:crypto";
 import { HOSTED_GROUP_BOARD_SCOPES } from "./board-scopes";
@@ -1377,7 +1378,7 @@ function parseHostedGroupSharedReadProjectionScopes(
   projectionScopes: readonly HostedVaultShareSelectableProjectionScope[],
 ): HostedVaultShareSelectableProjectionScope[] {
   if (projectionScopes.length > 3) {
-    throw new TypeError("Hosted group shared read projection scope count is invalid.");
+    throw new ContractValidationError("Hosted group shared read projection scope count is invalid.");
   }
   const seen = new Set<string>();
   return projectionScopes.map((value) => {
@@ -1387,7 +1388,7 @@ function parseHostedGroupSharedReadProjectionScopes(
     );
     const key = buildHostedVaultShareProjectionScopeKey(scope);
     if (!HOSTED_GROUP_SHARED_READ_SELECTABLE_SCOPE_KEYS.has(key) || seen.has(key)) {
-      throw new TypeError("Hosted group shared read projection scope is invalid.");
+      throw new ContractValidationError("Hosted group shared read projection scope is invalid.");
     }
     seen.add(key);
     return scope;
@@ -1407,7 +1408,7 @@ function projectHostedGroupSourceAwareSleepRecordsToLegacy(
       || !("unit" in record.data)
       || !("value" in record.data)
     ) {
-      throw new TypeError("Source-aware sleep fallback record is invalid.");
+      throw new ContractValidationError("Source-aware sleep fallback record is invalid.");
     }
     const parsed = parseHostedVaultShareDeliveryRecord({
       data: {
@@ -1498,7 +1499,7 @@ function buildHostedGroupSharedDeviceSyncSources(
     for (const source of sourceRows) {
       const label = source.label.trim();
       if (!label || label.toLocaleLowerCase("en-US") === "junction") {
-        throw new TypeError("Hosted group shared device source label is invalid.");
+        throw new ContractValidationError("Hosted group shared device source label is invalid.");
       }
       const key = label.toLocaleLowerCase("en-US");
       const candidate: HostedVaultShareDeviceSyncSource = {
@@ -1522,7 +1523,7 @@ function buildHostedGroupSharedDeviceSyncSources(
     left.label.localeCompare(right.label, "en-US")
   );
   if (sources.length > HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_MAX_SOURCES) {
-    throw new TypeError("Hosted group shared device source count exceeds the limit.");
+    throw new ContractValidationError("Hosted group shared device source count exceeds the limit.");
   }
   return sources;
 }

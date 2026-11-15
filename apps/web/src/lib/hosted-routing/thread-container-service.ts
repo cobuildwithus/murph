@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
 import {
@@ -341,7 +342,7 @@ export async function prepareHostedThreadContainerDeliveryRoute(input: {
     input.containerMemberId,
   );
   if (!containerMemberId) {
-    throw new TypeError("Hosted thread delivery-route preparation requires a container member id.");
+    throw new ContractValidationError("Hosted thread delivery-route preparation requires a container member id.");
   }
   const controlDomain = getHostedCryptoDomainForLane(
     "hosted-member-private-field",
@@ -420,7 +421,7 @@ export async function refreshHostedThreadContainerDeliveryRouteTx(input: {
       threadId,
     });
   if (!threadId || !threadIdentityLookupKey || threadIdentityLookupKeys.length === 0) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted thread delivery route refresh requires a non-empty thread identity.",
     );
   }
@@ -668,7 +669,7 @@ export async function ensureHostedThreadContainerRouteTx(input: {
     threadId: input.threadId,
   });
   if (!threadLookupKey) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted thread route requires an account lookup key, supported channel, and non-empty thread id.",
     );
   }
@@ -677,7 +678,7 @@ export async function ensureHostedThreadContainerRouteTx(input: {
     threadId: input.threadId,
   });
   if (!threadIdentityLookupKey) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted thread route requires a supported channel and non-empty thread id.",
     );
   }
@@ -1127,7 +1128,7 @@ async function acquireHostedThreadContainerRouteWriteLockTx(input: {
 }): Promise<void> {
   const threadId = normalizeHostedOpaqueInput(input.threadId);
   if (!threadId) {
-    throw new TypeError("Hosted thread route lock requires a non-empty thread id.");
+    throw new ContractValidationError("Hosted thread route lock requires a non-empty thread id.");
   }
 
   await input.prisma.$executeRaw`
@@ -1188,7 +1189,7 @@ function normalizeHostedThreadContainerMemberId(value: string | null | undefined
 function normalizeHostedThreadContainerUsageLimit(value: bigint | null | undefined): bigint {
   const limit = value ?? HOSTED_THREAD_CONTAINER_DEFAULT_MONTHLY_USAGE_LIMIT_USD_MICROS;
   if (limit <= 0n) {
-    throw new TypeError("Hosted thread container monthly usage limit must be positive.");
+    throw new ContractValidationError("Hosted thread container monthly usage limit must be positive.");
   }
   return limit;
 }

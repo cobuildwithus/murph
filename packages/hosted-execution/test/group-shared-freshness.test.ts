@@ -65,7 +65,7 @@ function outcome(parse: () => unknown) {
     return { ok: true, value: parse() };
   } catch (error) {
     return error instanceof Error
-      ? { ok: false, type: error.constructor, message: error.message }
+      ? { ok: false, type: error.name, message: error.message }
       : { ok: false, type: null, message: null };
   }
 }

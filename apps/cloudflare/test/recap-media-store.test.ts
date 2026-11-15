@@ -36,7 +36,7 @@ describe("recap sealed storage", () => {
       expect([...bucket.objects.values()]).toEqual(['{"version":1,"retired":true}']);
     }
   });
-  it.each(['jpg', 'mp3'])('tombstones content-hash %s keys through the real purge path before and after upload', async extension => {
+  it.each(['jpg', 'mp3', 'mp4'])('tombstones content-hash %s keys through the real purge path before and after upload', async extension => {
     const mediaId = `recap/${'b'.repeat(32)}/${'c'.repeat(64)}.${extension}`;
     const userId = 'synthetic-surviving-owner';
     for (const uploadFirst of [false, true]) {
@@ -50,6 +50,16 @@ describe("recap sealed storage", () => {
       await expect(store.write(mediaId, envelope, 'c'.repeat(64))).rejects.toThrow('retired');
       await expect(store.write(mediaId, envelope, 'd'.repeat(64))).rejects.toThrow('retired');
       await expect(purgeHostedRuntimeResource({ source: { BUNDLES: bucket }, userId: 'synthetic-other-owner', resource: { kind: 'game_recap', objectKey } })).rejects.toThrow();
+    }
+  });
+  it("stores a recap video part under its content hash and refuses every other video key", async () => {
+    const bucket = new ConditionalBucket();
+    const store = createRecapMediaStore({ bucket, userId: "synthetic-owner" });
+    const part = `recap/${"a".repeat(32)}/${"e".repeat(64)}.mp4`;
+    expect(await store.write(part, envelope, "e".repeat(64))).toMatchObject({ stored: true, created: true });
+    expect(await store.read(part)).toEqual({ envelope, hash: "e".repeat(64) });
+    for (const key of [`recap/${"a".repeat(32)}/video-0.mp4`, `recap/${"a".repeat(32)}/video.mp4`, `recap/${"a".repeat(32)}/${"e".repeat(64)}.mov`, `recap/${"a".repeat(32)}/${"e".repeat(63)}.mp4`]) {
+      await expect(store.write(key, envelope, "e".repeat(64))).rejects.toThrow();
     }
   });
   it("rejects plaintext, upload-family keys, oversized data and cross-owner retirement", async () => {

@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   Prisma,
   type PrismaClient,
@@ -474,7 +475,7 @@ function dedupeHostedAiUsageRecords(
     const existing = recordsByUsageId.get(record.usageId);
 
     if (existing && !sameAssistantUsageRecord(existing, record)) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "Hosted AI usage recording contains conflicting records for one usage id.",
       );
     }
@@ -491,7 +492,7 @@ function parseHostedAiUsageRecords(
   try {
     return usage.map((entry) => parseAssistantUsageRecord(entry));
   } catch {
-    throw new TypeError("Hosted AI usage recording contains an invalid usage record.");
+    throw new ContractValidationError("Hosted AI usage recording contains an invalid usage record.");
   }
 }
 
@@ -746,7 +747,7 @@ function normalizeHostedAiUsageJsonValue(
 
   if (typeof value === "number") {
     if (!Number.isFinite(value)) {
-      throw new TypeError(`Hosted AI usage ${label} must be a finite JSON number.`);
+      throw new ContractValidationError(`Hosted AI usage ${label} must be a finite JSON number.`);
     }
 
     return value;
@@ -766,14 +767,14 @@ function normalizeHostedAiUsageJsonValue(
     return normalizeHostedAiUsageJsonObject(value as Record<string, unknown>, label);
   }
 
-  throw new TypeError(`Hosted AI usage ${label} must be JSON-serializable.`);
+  throw new ContractValidationError(`Hosted AI usage ${label} must be JSON-serializable.`);
 }
 
 function normalizeHostedAiUsageDate(value: Date | string, label: string): Date {
   const date = value instanceof Date ? value : new Date(value);
 
   if (!Number.isFinite(date.getTime())) {
-    throw new TypeError(`Hosted AI usage ${label} must be a valid date.`);
+    throw new ContractValidationError(`Hosted AI usage ${label} must be a valid date.`);
   }
 
   return date;
@@ -784,13 +785,13 @@ function requireHostedAiUsageMemberId(
   trustedUserId: string | null,
 ): string {
   if (!record.memberId) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted AI usage is missing memberId and cannot be recorded into the hosted usage ledger.",
     );
   }
 
   if (trustedUserId && record.memberId !== trustedUserId) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted AI usage memberId does not match the authenticated hosted execution user.",
     );
   }

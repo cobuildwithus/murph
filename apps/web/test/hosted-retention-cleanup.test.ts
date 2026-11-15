@@ -212,6 +212,9 @@ describe("hosted retention cleanup", () => {
       now,
       now,
       new Date(now.getTime() - HOSTED_MAILBOX_STRUCTURAL_RETENTION_MS),
+      // A wearable no-data check-in keeps its retired row: its dedupe key is the episode's only record.
+      "assistant.notification.requested",
+      "assistant.notification.requested:device-delivery-stalled:v1:",
       HOSTED_RETENTION_BATCH_SIZE,
     ]);
 

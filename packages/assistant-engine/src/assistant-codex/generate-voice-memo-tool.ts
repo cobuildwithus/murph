@@ -1,4 +1,3 @@
-import type { GeneratedMediaFileArgs, GeneratedMediaFileRuntime } from './generated-media-file.js'
 import { toolFailureDiagnostic, type ToolFailureDiagnostic } from './tool-failure-diagnostics.js'
 import { randomUUID } from 'node:crypto'
 
@@ -17,7 +16,6 @@ import {
   type AssistantVoiceMemoGeneration,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
-  generateElevenLabsMusic,
   resolveElevenLabsApiKey,
   resolveElevenLabsModelId,
   resolveElevenLabsVoiceId,
@@ -35,11 +33,10 @@ export interface GenerateVoiceMemoToolArgs {
   userRequestedVoiceOptionId?: AssistantVoiceOptionId | null
 }
 
-export interface GenerateSongToolArgs extends GeneratedMediaFileArgs {
+export interface GenerateSongToolArgs {
   durationSeconds: number
   instrumental: boolean
   prompt: string
-  lyrics?: string[]
 }
 
 export interface GenerateVoiceMemoToolResult {
@@ -248,13 +245,10 @@ export async function executeGenerateSongTool(input: {
   abortSignal?: AbortSignal | null
   args: GenerateSongToolArgs
   env?: NodeJS.ProcessEnv
-  fileRuntime?: GeneratedMediaFileRuntime | null
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
   recordPhaseTiming?: VoiceMemoPhaseTimingRecorder | null
   runtime?: VoiceMemoToolRuntime | null
 }): Promise<GenerateVoiceMemoToolResult> {
-  if (input.args.lyrics && input.args.output !== 'file') return { rpcSuccess: false, rpcText: 'Explicit lyrics require output=file.' }
-  if (input.args.output === 'file') return executeGenerateSongFile(input)
   const mediaConflict = rejectIfResponseMediaConflicts(
     input.currentResponseMedia ?? [],
     'song',
@@ -287,27 +281,6 @@ export async function executeGenerateSongTool(input: {
     runtime,
     signal: input.abortSignal ?? null,
   })
-}
-
-async function executeGenerateSongFile(input: Parameters<typeof executeGenerateSongTool>[0]): Promise<GenerateVoiceMemoToolResult> {
-  const runtime = input.fileRuntime
-  const apiKey = runtime?.elevenLabsApiKey ?? resolveElevenLabsApiKey(input.env ?? {})
-  if (!runtime || !apiKey) return unavailableVoiceMemoResult('song')
-  try {
-    const result = await generateElevenLabsMusic({ apiKey, durationMs: input.args.durationSeconds * 1000,
-      forceInstrumental: input.args.instrumental, modelId: assistantVoiceMemoMusicModelId,
-      outputFormat: assistantVoiceMemoMusicOutputFormat, prompt: input.args.prompt, lyrics: input.args.lyrics,
-      fetchImplementation: async (url, init) => runtime.fetchImpl(url, init),
-      ...(input.abortSignal ? { signal: input.abortSignal } : {}) })
-    input.abortSignal?.throwIfAborted()
-    const file = result.wordsTimestamps
-      ? await runtime.save(result.bytes, 'audio/mpeg', result.wordsTimestamps)
-      : await runtime.save(result.bytes, 'audio/mpeg')
-    return { rpcSuccess: true, rpcText: JSON.stringify({ path: file }) }
-  } catch (error) {
-    if (input.abortSignal?.aborted) throw input.abortSignal.reason ?? error
-    return { rpcSuccess: false, rpcText: error instanceof Error ? error.message : 'Song generation failed.', failureDiagnostic: toolFailureDiagnostic('handler_exception', error) }
-  }
 }
 
 async function executeGeneratedVoiceMemo(input: {

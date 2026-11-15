@@ -1,3 +1,4 @@
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import {
   parseHostedRuntimeAssistantAskControlRequest,
 } from "@murphai/hosted-execution/parsers";
@@ -41,8 +42,9 @@ export const POST = withJsonError(async (request: Request) => {
     maxBodyBytes: HOSTED_RUNTIME_ASSISTANT_ASK_CONTROL_BODY_MAX_BYTES,
     payloadText,
   });
-  const requestBody = parseHostedRuntimeAssistantAskControlRequest(
+  const requestBody = parseInput(
     payloadText.trim() ? JSON.parse(payloadText) : {},
+    parseHostedRuntimeAssistantAskControlRequest,
   );
   const result = await tryHandleHostedOperatorDiagnosticControl({
     boundRuntimeMemberId,

@@ -524,16 +524,6 @@ export async function listMetricPointsByPublicSource(
   return mod.listMetricPointsByPublicSourceRuntime(vaultRoot, input);
 }
 
-export async function selectMetric(input: {
-  biomarkerKey?: string;
-  metricKey?: string;
-  now?: string;
-  vaultRoot: string;
-}): Promise<import("@murphai/health-metrics").MetricSelection> {
-  const mod = await import("./query-projection.ts");
-  return mod.selectMetricRuntime(input);
-}
-
 export async function listMetricTargets(
   vaultRoot: string,
 ): Promise<QueryMetricTarget[]> {

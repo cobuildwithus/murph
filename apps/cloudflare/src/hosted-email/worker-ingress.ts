@@ -1,3 +1,4 @@
+import { RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import {
   emitHostedExecutionStructuredLog,
   HOSTED_EMAIL_PROMPT_SELF_ADDRESS_MAX_CHARS,
@@ -177,7 +178,7 @@ export async function handleHostedEmailIngress(
       rawSize: typeof message.rawSize === "number" ? message.rawSize : null,
     });
   } catch (error) {
-    if (error instanceof RangeError) {
+    if (error instanceof RequestBodyTooLargeError) {
       emitHostedExecutionStructuredLog({
         component: "hosted.email",
         details: buildHostedEmailIngressLogDetails({

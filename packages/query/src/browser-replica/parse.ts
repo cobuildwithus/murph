@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type { CanonicalRecordClass } from "../canonical-entities.ts";
 import type { OverviewWeeklySampleSummary } from "../overview.ts";
 import type { TimelineEntry } from "../timeline.ts";
@@ -62,7 +63,7 @@ export function parseBrowserVaultReplica(value: unknown, label = "Browser vault 
   const record = requireRecord(value, label);
   const schema = requireString(record.schema, `${label}.schema`);
   if (schema !== BROWSER_VAULT_REPLICA_SCHEMA) {
-    throw new TypeError(`${label}.schema must be ${BROWSER_VAULT_REPLICA_SCHEMA}.`);
+    throw new ContractValidationError(`${label}.schema must be ${BROWSER_VAULT_REPLICA_SCHEMA}.`);
   }
   const generatedAt = requireIsoDateTime(record.generatedAt, `${label}.generatedAt`);
   const metricRows = requireArray(record.metricRows, `${label}.metricRows`).map((entry, index) =>
@@ -171,7 +172,7 @@ function parseJournalWeekSummary(value: unknown, label: string): JournalWeekSumm
   const record = requireRecord(value, label);
   const activityMinutes = requireFiniteNumber(record.activityMinutes, `${label}.activityMinutes`);
   if (activityMinutes < 0) {
-    throw new TypeError(`${label}.activityMinutes must be non-negative.`);
+    throw new ContractValidationError(`${label}.activityMinutes must be non-negative.`);
   }
   return {
     activityMinutes,
@@ -227,7 +228,7 @@ function parseJournalEventMetrics(
     `${label}.activityMinutes`,
   );
   if (activityMinutes < 0) {
-    throw new TypeError(`${label}.activityMinutes must be non-negative.`);
+    throw new ContractValidationError(`${label}.activityMinutes must be non-negative.`);
   }
   return {
     activityMinutes,
@@ -347,7 +348,7 @@ export async function parseBrowserVaultMetricBucketShard(
   );
   const bucketId = requireBrowserVaultMetricBucketId(record.bucketId, `${label}.bucketId`);
   if (expectedBucketId !== undefined && bucketId !== expectedBucketId) {
-    throw new TypeError(`${label}.bucketId must be ${expectedBucketId}.`);
+    throw new ContractValidationError(`${label}.bucketId must be ${expectedBucketId}.`);
   }
   const series = requireArray(record.series, `${label}.series`).map((entry, index) => {
     const seriesRecord = requireRecord(entry, `${label}.series[${index}]`);
@@ -365,7 +366,7 @@ export async function parseBrowserVaultMetricBucketShard(
   for (const entry of series) {
     const actualBucketId = await getBrowserVaultMetricBucketId(entry.metricKey);
     if (actualBucketId !== bucketId) {
-      throw new TypeError(`${label} contains a metric key assigned to bucket ${actualBucketId}.`);
+      throw new ContractValidationError(`${label} contains a metric key assigned to bucket ${actualBucketId}.`);
     }
   }
   return markBrowserVaultMetricBucketShardVerified({
@@ -458,7 +459,7 @@ function parsePolicy(value: unknown, label: string): BrowserVaultReplicaPolicy {
   const record = requireRecord(value, label);
   const id = requireString(record.id, `${label}.id`);
   if (id !== BROWSER_VAULT_REPLICA_POLICY_ID) {
-    throw new TypeError(`${label}.id must be ${BROWSER_VAULT_REPLICA_POLICY_ID}.`);
+    throw new ContractValidationError(`${label}.id must be ${BROWSER_VAULT_REPLICA_POLICY_ID}.`);
   }
   return {
     bodyPreviewChars: requireNonNegativeInteger(record.bodyPreviewChars, `${label}.bodyPreviewChars`),
@@ -507,20 +508,20 @@ function parseLabResultRow(value: unknown, label: string): BrowserVaultLabResult
   const record = requireRecord(value, label);
   const rowSchema = requireString(record.rowSchema, `${label}.rowSchema`);
   if (rowSchema !== BROWSER_VAULT_LAB_RESULT_ROW_SCHEMA) {
-    throw new TypeError(`${label}.rowSchema must be ${BROWSER_VAULT_LAB_RESULT_ROW_SCHEMA}.`);
+    throw new ContractValidationError(`${label}.rowSchema must be ${BROWSER_VAULT_LAB_RESULT_ROW_SCHEMA}.`);
   }
   const valueNumber = readNullableFiniteNumber(record.value);
   const textValue = readNullableString(record.textValue);
   if (valueNumber === null && textValue === null) {
-    throw new TypeError(`${label} must include a numeric value or textValue.`);
+    throw new ContractValidationError(`${label} must include a numeric value or textValue.`);
   }
   const normalizedValue = readNullableFiniteNumber(record.normalizedValue);
   const normalizedUnit = readNullableString(record.normalizedUnit);
   if ((normalizedValue === null) !== (normalizedUnit === null)) {
-    throw new TypeError(`${label} normalizedValue and normalizedUnit must be provided together.`);
+    throw new ContractValidationError(`${label} normalizedValue and normalizedUnit must be provided together.`);
   }
   if (normalizedValue !== null && valueNumber === null) {
-    throw new TypeError(`${label}.normalizedValue requires a numeric value.`);
+    throw new ContractValidationError(`${label}.normalizedValue requires a numeric value.`);
   }
 
   return {
@@ -551,14 +552,14 @@ function readNullableLabSpecimenKind(
 ): BrowserVaultLabSpecimenKind | null {
   if (value === null || value === undefined) return null;
   if (value === "plasma" || value === "serum" || value === "whole_blood") return value;
-  throw new TypeError(`${label} must be plasma, serum, whole_blood, or null.`);
+  throw new ContractValidationError(`${label} must be plasma, serum, whole_blood, or null.`);
 }
 
 function parseMetricRow(value: unknown, label: string): BrowserVaultMetricRow {
   const record = requireRecord(value, label);
   const rowSchema = requireString(record.rowSchema, `${label}.rowSchema`);
   if (rowSchema !== BROWSER_VAULT_METRIC_ROW_SCHEMA) {
-    throw new TypeError(`${label}.rowSchema must be ${BROWSER_VAULT_METRIC_ROW_SCHEMA}.`);
+    throw new ContractValidationError(`${label}.rowSchema must be ${BROWSER_VAULT_METRIC_ROW_SCHEMA}.`);
   }
   return {
     biomarkerKey: readNullableString(record.biomarkerKey),
@@ -600,7 +601,7 @@ function parseMetricSelectionRow(value: unknown, label: string): BrowserVaultMet
   const record = requireRecord(value, label);
   const selectionSchema = requireString(record.selectionSchema, `${label}.selectionSchema`);
   if (selectionSchema !== "murph.browser-vault.metric-selection.v1") {
-    throw new TypeError(`${label}.selectionSchema must be murph.browser-vault.metric-selection.v1.`);
+    throw new ContractValidationError(`${label}.selectionSchema must be murph.browser-vault.metric-selection.v1.`);
   }
   return {
     biomarkerKey: readNullableString(record.biomarkerKey),
@@ -709,18 +710,18 @@ function parseAssistantSummary(value: unknown, label: string): BrowserVaultAssis
 }
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new TypeError(`${label} must be an object.`);
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new ContractValidationError(`${label} must be an object.`);
   return value as Record<string, unknown>;
 }
 function requireArray(value: unknown, label: string): unknown[] {
-  if (!Array.isArray(value)) throw new TypeError(`${label} must be an array.`);
+  if (!Array.isArray(value)) throw new ContractValidationError(`${label} must be an array.`);
   return value.slice();
 }
 function readOptionalArray(value: unknown, label: string): unknown[] {
   return value === undefined ? [] : requireArray(value, label);
 }
 function requireString(value: unknown, label: string): string {
-  if (typeof value !== "string" || value.length === 0) throw new TypeError(`${label} must be a non-empty string.`);
+  if (typeof value !== "string" || value.length === 0) throw new ContractValidationError(`${label} must be a non-empty string.`);
   return value;
 }
 function requireExpectedSchema<TSchema extends string>(
@@ -729,18 +730,18 @@ function requireExpectedSchema<TSchema extends string>(
   label: string,
 ): TSchema {
   const schema = requireString(value, label);
-  if (schema !== expected) throw new TypeError(`${label} must be ${expected}.`);
+  if (schema !== expected) throw new ContractValidationError(`${label} must be ${expected}.`);
   return expected;
 }
 function requireStringArray(value: unknown, label: string): string[] {
   return requireArray(value, label).map((entry, index) => requireString(entry, `${label}[${index}]`));
 }
 function requireFiniteNumber(value: unknown, label: string): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) throw new TypeError(`${label} must be a finite number.`);
+  if (typeof value !== "number" || !Number.isFinite(value)) throw new ContractValidationError(`${label} must be a finite number.`);
   return value;
 }
 function requireBoolean(value: unknown, label: string): boolean {
-  if (typeof value !== "boolean") throw new TypeError(`${label} must be a boolean.`);
+  if (typeof value !== "boolean") throw new ContractValidationError(`${label} must be a boolean.`);
   return value;
 }
 function readNullableFiniteNumber(value: unknown): number | null {
@@ -748,12 +749,12 @@ function readNullableFiniteNumber(value: unknown): number | null {
 }
 function requireNonNegativeInteger(value: unknown, label: string): number {
   const parsed = requireFiniteNumber(value, label);
-  if (!Number.isInteger(parsed) || parsed < 0) throw new TypeError(`${label} must be a non-negative integer.`);
+  if (!Number.isInteger(parsed) || parsed < 0) throw new ContractValidationError(`${label} must be a non-negative integer.`);
   return parsed;
 }
 function requirePositiveSafeInteger(value: unknown, label: string): number {
   const parsed = requireFiniteNumber(value, label);
-  if (!Number.isSafeInteger(parsed) || parsed <= 0) throw new TypeError(`${label} must be a positive safe integer.`);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) throw new ContractValidationError(`${label} must be a positive safe integer.`);
   return parsed;
 }
 function readNullableNonNegativeInteger(value: unknown, label: string): number | null {
@@ -761,39 +762,39 @@ function readNullableNonNegativeInteger(value: unknown, label: string): number |
 }
 function readNullableString(value: unknown): string | null {
   if (value === null || value === undefined) return null;
-  if (typeof value !== "string") throw new TypeError("Expected nullable string.");
+  if (typeof value !== "string") throw new ContractValidationError("Expected nullable string.");
   return value;
 }
 function requireIsoDateTime(value: unknown, label: string): string {
   const text = requireString(value, label);
-  if (Number.isNaN(Date.parse(text))) throw new TypeError(`${label} must be an ISO timestamp.`);
+  if (Number.isNaN(Date.parse(text))) throw new ContractValidationError(`${label} must be an ISO timestamp.`);
   return text;
 }
 function requireRecordClass(value: unknown, label: string): CanonicalRecordClass {
   const text = requireString(value, label);
   if (text === "bank" || text === "ledger" || text === "sample" || text === "snapshot") return text;
-  throw new TypeError(`${label} must be a canonical record class.`);
+  throw new ContractValidationError(`${label} must be a canonical record class.`);
 }
 function requireConfidenceLevel(value: unknown, label: string) {
   const text = requireString(value, label);
   if (text === "none" || text === "low" || text === "medium" || text === "high") return text;
-  throw new TypeError(`${label} must be a metric confidence level.`);
+  throw new ContractValidationError(`${label} must be a metric confidence level.`);
 }
 function requireMetricGrain(value: unknown, label: string) {
   const text = requireString(value, label);
   if (text === "instant" || text === "event" || text === "day" || text === "week" || text === "month" || text === "window") return text;
-  throw new TypeError(`${label} must be a metric grain.`);
+  throw new ContractValidationError(`${label} must be a metric grain.`);
 }
 function requireMetricStatistic(value: unknown, label: string) {
   const text = requireString(value, label);
   if (text === "value" || text === "latest" || text === "mean" || text === "median" || text === "min" || text === "max" || text === "sum" || text === "count") return text;
-  throw new TypeError(`${label} must be a metric statistic.`);
+  throw new ContractValidationError(`${label} must be a metric statistic.`);
 }
 function readNullableMetricComparator(value: unknown, label: string) {
   if (value === null || value === undefined) return null;
   const text = requireString(value, label);
   if (text === "<" || text === "<=" || text === ">" || text === ">=") return text;
-  throw new TypeError(`${label} must be a metric comparator.`);
+  throw new ContractValidationError(`${label} must be a metric comparator.`);
 }
 function readNullableReferenceRange(
   value: unknown,
@@ -805,7 +806,7 @@ function readNullableReferenceRange(
   const high = readNullableFiniteNumber(record.high);
   const text = readNullableString(record.text);
   if (low === null && high === null && text === null) {
-    throw new TypeError(`${label} must include low, high, or text.`);
+    throw new ContractValidationError(`${label} must include low, high, or text.`);
   }
   return {
     ...(low !== null ? { low } : {}),
@@ -816,23 +817,23 @@ function readNullableReferenceRange(
 function requireMetricSelectionStatus(value: unknown, label: string) {
   const text = requireString(value, label);
   if (text === "insufficient_data" || text === "no_data" || text === "ready" || text === "stale" || text === "unsupported") return text;
-  throw new TypeError(`${label} must be a metric selection status.`);
+  throw new ContractValidationError(`${label} must be a metric selection status.`);
 }
 function requireMetricGoalStatus(value: unknown, label: string) {
   const text = requireString(value, label);
   if (text === "behind" || text === "met" || text === "no_data" || text === "not_met" || text === "stale" || text === "unsupported") return text;
-  throw new TypeError(`${label} must be a metric goal status.`);
+  throw new ContractValidationError(`${label} must be a metric goal status.`);
 }
 function parseMetricSelectionWarning(value: unknown, label: string): BrowserVaultMetricSelectionRow["warnings"][number] {
   const record = requireRecord(value, label);
   const code = requireString(record.code, `${label}.code`);
   if (code !== "COMPARATOR_VALUE" && code !== "LOW_SAMPLE_COUNT" && code !== "MIXED_SOURCES" && code !== "SOURCE_STALE" && code !== "UNIT_NOT_NORMALIZED" && code !== "METHOD_CHANGED") {
-    throw new TypeError(`${label}.code is not a supported metric selection warning code.`);
+    throw new ContractValidationError(`${label}.code is not a supported metric selection warning code.`);
   }
   return { code, message: requireString(record.message, `${label}.message`) };
 }
 function requireTimelineEntryType(value: unknown, label: string): TimelineEntry["entryType"] {
   const text = requireString(value, label);
   if (text === "assessment" || text === "event" || text === "journal" || text === "sample_summary") return text;
-  throw new TypeError(`${label} must be a timeline entry type.`);
+  throw new ContractValidationError(`${label} must be a timeline entry type.`);
 }

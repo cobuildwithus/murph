@@ -1,3 +1,4 @@
+import { parseInput, RequestInputError, RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import {
   sendHostedProviderTelegramMessage,
 } from "@murphai/assistant-runtime/hosted-provider-effects";
@@ -38,7 +39,7 @@ import {
 } from "../route-utils/log-details.ts";
 import {
   INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
-  parseJsonValue,
+  parseJsonInput,
 } from "../route-utils/json-body.ts";
 import {
   decodeRouteParam,
@@ -69,12 +70,14 @@ async function handleTelegramUsageLimitNoticeRoute(
   const userId = decodeRouteParam(encodedUserId);
   let providerRequest: CloudflareHostedControlTelegramUsageLimitNoticeRequest;
   try {
-    providerRequest = parseCloudflareHostedControlTelegramUsageLimitNoticeRequest(
-      parseJsonValue(await readCachedRequestText(context, {
+    providerRequest = parseInput(
+      parseJsonInput(await readCachedRequestText(context, {
         limitBytes: INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
       })),
+      parseCloudflareHostedControlTelegramUsageLimitNoticeRequest,
     );
   } catch (error) {
+    if (!(error instanceof RequestInputError || error instanceof RequestBodyTooLargeError)) throw error;
     emitHostedExecutionStructuredLog({
       component: "worker",
       details: buildWorkerRouteLogDetails({

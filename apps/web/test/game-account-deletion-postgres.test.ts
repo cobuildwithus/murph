@@ -202,7 +202,8 @@ describe.skipIf(!runPostgresProof)("weekly game when a player deletes their acco
     await words(ava, gameId, "Ava day one");
     await getPrisma().game.update({ where: { id: gameId }, data: { recapEncrypted: "synthetic-must-clear" } });
     const recapEventId = `synthetic-recap:${gameId}`;
-    const storageKeys = ['jpg', 'mp3'].map((extension, index) => `recap/${recapGenerationId(recapEventId)}/${String(index + 1).repeat(64)}.${extension}`);
+    // A scene, the song and one part of the recap video: every stored kind leaves with the recap.
+    const storageKeys = ['jpg', 'mp3', 'mp4'].map((extension, index) => `recap/${recapGenerationId(recapEventId)}/${String(index + 1).repeat(64)}.${extension}`);
     await getPrisma().$transaction(tx => registerRecapAssetsTx(tx, { gameId, generationId: recapGenerationId(recapEventId), ownerMemberId: leo,
       storageKeys, acceptedAt: new Date(), recoveryUntil: new Date(Date.now() + 600_000) }));
     const [gone, stays] = leaver === "creator" ? [leo, ava] : [ava, leo];
@@ -213,14 +214,14 @@ describe.skipIf(!runPostgresProof)("weekly game when a player deletes their acco
     expect(view).toMatchObject({ status: "void", result: null, tickets: [], settlesAt: null });
     expect((await getPrisma().game.findUniqueOrThrow({ where: { id: gameId } })).recapEncrypted).toBeNull();
     const receipts = await getPrisma().gameRecapAsset.findMany({ where: { resourceId: { startsWith: `${gameId}|` } } });
-    expect(receipts).toHaveLength(2);
+    expect(receipts).toHaveLength(3);
     for (const receipt of receipts) {
       expect(receipt.retiredAt).not.toBeNull();
       expect(receipt.userId).toBe(leo);
       expect(storageKeys.some(key => receipt.objectKey.endsWith(`${key}.json.enc`))).toBe(true);
     }
     const claimed = await claimHostedRuntimeResourceCleanup({ prisma: getPrisma(), now: new Date() });
-    expect(claimed.orphans.filter(row => row.kind === 'game_recap' && row.resourceId.startsWith(`${gameId}|`))).toHaveLength(2);
+    expect(claimed.orphans.filter(row => row.kind === 'game_recap' && row.resourceId.startsWith(`${gameId}|`))).toHaveLength(3);
     await getPrisma().gameRecapAsset.deleteMany({ where: { userId: leo } });
     const left = view.players.find((player) => player.left);
     // The name the remaining player knew them by: Leo's own label for Ava, or Leo's own name.

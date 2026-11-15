@@ -1,4 +1,4 @@
-import { recapAssetSchema, songWordTimestampsSchema } from "@murphai/contracts/recap-show";
+import { recapAssetSchema, recapVideoIdentitySchema, songWordTimestampsSchema } from "@murphai/contracts/recap-show";
 import * as z from "@murphai/contracts/zod-runtime";
 
 // A new value of the existing error field: this generation is durably finished and must end without sending.
@@ -60,9 +60,13 @@ export const hostedGameToolRequestSchema = z.discriminatedUnion("action", [
     everyDay: z.boolean().optional(), text: z.boolean().optional(), push: z.boolean().optional() }).strict(),
   z.object({ action: z.literal("read_game"), origin: z.union([acceptedInputOrigin, gameRecapOrigin, automationOccurrenceOrigin]), includePlayers: z.literal(true).optional(),
     recapRead: z.discriminatedUnion("kind", [
-      z.object({ kind: z.literal("recover"), failed: z.literal(true).optional() }).strict(),
-      z.object({ kind: z.literal("upload"), slot: z.string().regex(/^(scene-[0-6]|song)$/u), mediaType: z.enum(["image/jpeg", "audio/mpeg"]), referenceIds: z.array(z.string().regex(/^[a-f0-9]{64}$/u)).max(16), bytes: z.string().max(2_800_000), wordsTimestamps: songWordTimestampsSchema.optional() }).strict()
-        .refine(file => !file.wordsTimestamps || file.slot === "song" && file.mediaType === "audio/mpeg", "Word timings require a song file."),
+      // `video` asks for the accepted video's identity. Only a runtime that reads `recapVideo` sends it.
+      z.object({ kind: z.literal("recover"), failed: z.literal(true).optional(), video: z.literal(true).optional() }).strict(),
+      // A `video-<index>` slot carries one opaque part of the recap video; its sources are declared once, with the write.
+      z.object({ kind: z.literal("upload"), slot: z.string().regex(/^(scene-[0-6]|song|video-[0-3])$/u), mediaType: z.enum(["image/jpeg", "audio/mpeg", "video/mp4"]), referenceIds: z.array(z.string().regex(/^[a-f0-9]{64}$/u)).max(16), bytes: z.string().max(2_800_000), wordsTimestamps: songWordTimestampsSchema.optional(), songStartMs: z.number().nonnegative().optional() }).strict()
+        .refine(file => (!file.wordsTimestamps && file.songStartMs === undefined || file.slot === "song" && file.mediaType === "audio/mpeg")
+          && (file.songStartMs === undefined || !!file.wordsTimestamps), "Word timings and score origins require a song file.")
+        .refine(file => file.slot.startsWith("video-") === (file.mediaType === "video/mp4") && (file.mediaType !== "video/mp4" || file.referenceIds.length === 0), "A video part is an MP4 slice without sources of its own."),
       z.object({ kind: z.literal("transcript"), after: z.string().regex(/^\d{1,20}$/u).optional() }).strict(),
       z.object({ kind: z.literal("reference"), id: z.string().regex(/^[a-f0-9]{64}$/u) }).strict(),
     ]).optional() }).strict(),
@@ -70,9 +74,39 @@ export const hostedGameToolRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("update_game"), origin: acceptedInputOrigin, update: hostedGameUpdateSchema }).strict(),
   z.object({ action: z.literal("write_recap"), origin: gameRecapOrigin, recap: z.union([recapShowStorySchema, gameRecapWriterSchema]),
     assets: z.array(recapAssetSchema).max(5).optional(),
+    // A candidate recap video (`recapVideoDraftSchema`), present only from a runtime that reads `recapVideo`
+    // in the result. Left unparsed here: the video is optional, so a candidate Web cannot read costs
+    // the video where it is selected, never the recap this request carries.
+    video: z.unknown().optional(),
     priorChatLines: z.array(z.string().max(160)).max(100).optional() }).strict(),
 ]);
 export type HostedGameToolRequest = z.infer<typeof hostedGameToolRequestSchema>;
+
+/** Synthetic score wire evidence, parsed by Web's actual upload and receipt schemas. */
+export function buildRecapScoreProtocolProbe() {
+  const wordsTimestamps = [{ word: "Synthetic", startMs: 45_000, endMs: 45_300 }];
+  return {
+    upload: { action: "read_game", origin: { kind: "game_recap", gameId: "synthetic-game", eventId: "synthetic-event" },
+      recapRead: { kind: "upload", slot: "song", mediaType: "audio/mpeg", referenceIds: [], bytes: "", songStartMs: 44_784, wordsTimestamps } },
+    asset: { slot: "song", kind: "song", recipeId: "synthetic-score", storageKey: "recap/synthetic/song.mp3",
+      references: [], hash: "a".repeat(64), mediaType: "audio/mpeg", byteLength: 1_560_000,
+      durationMs: 65_000, songStartMs: 44_784, wordsTimestamps },
+  };
+}
+
+/** Synthetic recap video wire evidence: the part upload, the write that brings a candidate and the recovery
+ * that asks for the accepted identity, parsed by Web's actual request schema, and the result that names it. */
+export function buildRecapVideoProtocolProbe() {
+  const origin = { kind: "game_recap", gameId: "synthetic-game", eventId: "synthetic-event" };
+  const generationId = "0".repeat(32), hash = "a".repeat(64);
+  return {
+    part: { action: "read_game", origin, recapRead: { kind: "upload", slot: "video-0", mediaType: "video/mp4", referenceIds: [], bytes: "" } },
+    write: { action: "write_recap", origin, recap: { pages: [], chatLine: "Synthetic." }, assets: [],
+      video: { hash, byteLength: 1, referenceIds: [], parts: [{ storageKey: `recap/${generationId}/${hash}.mp4`, hash, byteLength: 1 }] } },
+    recover: { action: "read_game", origin, recapRead: { kind: "recover", video: true } },
+    result: { action: "write_recap", result: { status: "ok", recapVideo: { generationId, hash, byteLength: 1 } } },
+  };
+}
 const terms = z.object({
   defaultTask: z.string().max(500).optional(),
   n: z.number().int().min(1), fromDay: z.number().int().min(0),
@@ -114,6 +148,7 @@ export const hostedGameChatStateSchema = z.object({
   startsOn: date.nullable(), lengthDays: z.number().int().min(1).max(365),
   players: z.array(z.object({ memberId: ref, seat: z.number().int(), firstName: z.string().max(200), dayOne: date.nullable(), timeZone: z.string().max(100) }).strict()).max(10),
   pendingChange: pending.nullable(),
+  // A settled game carries its days only while its players can still correct them.
   progress: progress.optional(), result: result.nullable().optional(),
   changeControls: z.object({ canStartNow: z.boolean(), canEdit: z.boolean(), canEditSchedule: z.boolean(), canEditStartDate: z.boolean(), canEditTasks: z.boolean().optional(), canEditStakes: z.boolean().optional(), editableFromDay: z.number().int().nullable() }).strict(),
 }).strict()).max(10), photoCheckIn: z.object({ introductionAvailable: z.boolean(), hasPendingOffer: z.boolean() }).strict().optional() }).strict();
@@ -129,12 +164,16 @@ export const hostedGameToolResponseSchema = z.object({
     recapGame: z.unknown().optional(),
     recapOutcome: z.string().optional(),
     recap: z.union([recapShowStorySchema, hostedGameRecapSchema]).optional(),
+    // The video Web accepted for this recap, or null for none. Returned only when the request asked,
+    // so a runtime that predates the field never receives it. First acceptance wins on every retry.
+    recapVideo: recapVideoIdentitySchema.nullable().optional(),
     reaches: z.enum(["push", "text", "none"]).optional(),
     reminders: z.object({ minutes: z.number().int(), push: z.boolean(), text: z.boolean(), canText: z.boolean(),
       games: z.array(z.object({ id: gameId, task: z.string(), schedule: hostedGameScheduleSchema,
         today: z.enum(["posted", "open", "off", "upcoming"]), otherFirstNames: z.array(z.string()),
         on: z.boolean(), everyDay: z.boolean() }).strict()).max(20) }).strict().optional(),
-    // Exact server-authored delivery text; recap.chatLine and lore stay bare.
+    // Exact server-authored delivery text; recap.chatLine and lore stay bare. A day correction
+    // that changes a finished game's outcome also returns its one line here.
     chatLine: z.string().max(2048).optional(),
     loreGuidance: z.string().optional(),
     loreFingerprint: z.string().optional(),

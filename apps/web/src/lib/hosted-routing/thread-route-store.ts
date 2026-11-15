@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
 import { Prisma } from "@prisma/client";
@@ -579,7 +580,7 @@ function requireHostedLinqGroupReactionContextText(value: unknown): string {
     !normalized
     || normalized.length > HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_ITEM_MAX_CHARS
   ) {
-    throw new TypeError("Hosted Linq group reaction context text is invalid.");
+    throw new ContractValidationError("Hosted Linq group reaction context text is invalid.");
   }
   return normalized;
 }
@@ -587,7 +588,7 @@ function requireHostedLinqGroupReactionContextText(value: unknown): string {
 function parseHostedLinqGroupReactionContextItems(value: unknown): string[] {
   const serialized = typeof value === "string" ? value.trim() : "";
   if (!serialized) {
-    throw new TypeError("Hosted Linq group reaction context is invalid.");
+    throw new ContractValidationError("Hosted Linq group reaction context is invalid.");
   }
   if (!serialized.startsWith("[")) {
     return [requireHostedLinqGroupReactionContextText(serialized)];
@@ -599,7 +600,7 @@ function parseHostedLinqGroupReactionContextItems(value: unknown): string[] {
     || parsed.length === 0
     || parsed.length > HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_MAX_ITEMS
   ) {
-    throw new TypeError("Hosted Linq group reaction context is invalid.");
+    throw new ContractValidationError("Hosted Linq group reaction context is invalid.");
   }
   return parsed.map((item: unknown) =>
     requireHostedLinqGroupReactionContextText(item));

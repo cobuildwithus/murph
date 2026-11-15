@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createHash } from "node:crypto";
 import { chmod, mkdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
@@ -699,7 +700,7 @@ function prepareClinicalFhirSnapshot(input: ClinicalFhirSnapshotImportInput): {
   }>;
 } {
   if (input.pages.length > CLINICAL_RAW_MANIFEST_MAX_RESOURCE_FILES) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Clinical FHIR snapshot exceeds ${CLINICAL_RAW_MANIFEST_MAX_RESOURCE_FILES} raw page files.`,
     );
   }
@@ -715,13 +716,13 @@ function prepareClinicalFhirSnapshot(input: ClinicalFhirSnapshotImportInput): {
     const sliceId = page.sliceId;
     const byteSize = Buffer.byteLength(page.content, "utf8");
     if (byteSize > CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES) {
-      throw new TypeError(
+      throw new ContractValidationError(
         `Clinical FHIR raw page exceeds ${CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES} bytes.`,
       );
     }
     totalBytes += byteSize;
     if (totalBytes > CLINICAL_RAW_RESOURCE_FILES_MAX_TOTAL_BYTES) {
-      throw new TypeError(
+      throw new ContractValidationError(
         `Clinical FHIR raw pages exceed ${CLINICAL_RAW_RESOURCE_FILES_MAX_TOTAL_BYTES} total bytes.`,
       );
     }
@@ -794,7 +795,7 @@ async function prepareClinicalDocumentRawContents(
     const file = files.get(attachment.relativePath);
     const bytes = file ? decodeClinicalDocumentBase64(file.contentBase64) : null;
     if (!bytes || bytes.length !== attachment.byteLength || hashClinicalDocumentBytes(bytes) !== attachment.sha256) {
-      throw new ClinicalFhirSnapshotRejectedError(new TypeError("Clinical document bytes do not match the manifest."));
+      throw new ClinicalFhirSnapshotRejectedError(new ContractValidationError("Clinical document bytes do not match the manifest."));
     }
     const rawRef = clinicalRawPathSchema.parse(`${path.posix.dirname(manifestPath)}/${attachment.relativePath}`);
     // Replays still validate the original provider bytes above. Retention receipts
@@ -817,7 +818,7 @@ async function readPreviousClinicalBatch(input: ClinicalFhirSnapshotImportInput)
   if (!input.batch?.previous) return undefined;
   const previous = input.batch.previous;
   const expectedPath = `raw/clinical/fhir/${input.connectionId}/${input.batch.runId}-batch-${input.batch.index - 1}/manifest.json`;
-  if (previous.manifestPath !== expectedPath) throw new ClinicalFhirSnapshotRejectedError(new TypeError("Clinical batch predecessor path is invalid."));
+  if (previous.manifestPath !== expectedPath) throw new ClinicalFhirSnapshotRejectedError(new ContractValidationError("Clinical batch predecessor path is invalid."));
   const manifestContent = await readFile(path.join(input.vaultRoot, clinicalRawPathSchema.parse(previous.manifestPath)), "utf8");
   if (createHash("sha256").update(manifestContent, "utf8").digest("hex") !== previous.sha256) throw new ClinicalFhirSnapshotRejectedError(new TypeError("Clinical batch predecessor digest is invalid."));
   const manifest = clinicalRawManifestSchema.parse(JSON.parse(manifestContent));
@@ -832,9 +833,9 @@ async function prepareClinicalDocumentExtraction(input: ClinicalFhirSnapshotImpo
   for (const attachment of input.attachments ?? []) {
     input.signal?.throwIfAborted();
     const evidence = input.documentAttachments?.find((document) => document.status === "downloaded" && document.relativePath === attachment.relativePath);
-    if (!evidence || evidence.status !== "downloaded") throw new ClinicalFhirSnapshotRejectedError(new TypeError("Clinical document has no bound evidence."));
+    if (!evidence || evidence.status !== "downloaded") throw new ClinicalFhirSnapshotRejectedError(new ContractValidationError("Clinical document has no bound evidence."));
     const bytes = decodeClinicalDocumentBase64(attachment.contentBase64);
-    if (!bytes || hashClinicalDocumentBytes(bytes) !== evidence.sha256 || bytes.length !== evidence.byteLength) throw new ClinicalFhirSnapshotRejectedError(new TypeError("Clinical document integrity validation failed."));
+    if (!bytes || hashClinicalDocumentBytes(bytes) !== evidence.sha256 || bytes.length !== evidence.byteLength) throw new ClinicalFhirSnapshotRejectedError(new ContractValidationError("Clinical document integrity validation failed."));
     const extractedText = attachment.extractedText ?? await extractClinicalDocumentText({ bytes, mediaType: evidence.mediaType, signal: input.signal, vaultRoot: input.vaultRoot });
     files.push({ ...attachment, ...(extractedText ? { extractedText } : {}) });
   }

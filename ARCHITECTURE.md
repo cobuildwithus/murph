@@ -5885,17 +5885,28 @@ Media provenance and song timing stay in the per-turn host-memory map. A retry
 resumes the native thread but must regenerate media from an earlier failed
 attempt: existing files and writer-writable metadata cannot confer media
 authority. No durable media provenance receipts are written or read.
-`read_game` returns scoped game
-material, shared chat and lore directly; the host resolves reference-photo IDs.
+`read_game` writes the scoped game material, shared chat and lore to files in
+the recap task directory and returns only the craft guide and their paths. Its
+result therefore never grows with the game: Codex cuts the middle out of a tool
+result past the model's output limit, and the model cannot recover it, while a
+file can be read in parts. The host resolves reference photos named by path or ID.
 Pair recap identity references include each player's own profile photo and the
 contact photo saved by the other player, attributed only to the pictured subject.
 Contact photos follow the same current-key revocation and game-wide retirement
 as profiles; private label words and the owner are never exposed.
-Available player reference photos are materialized in the recap task directory
-with vault-relative paths so native `view_image` can inform casting. Failed
-reference fetches omit the path without blocking the recap.
-The agent generates JPEG scenes and an optional twenty-second song in file mode,
-then calls `write_recap` once. The host uploads selected bytes and Web publishes
+Every available reference photo, Murph's character sheet included, is
+materialized in the recap task directory with a vault-relative path so native
+`view_image` can inform casting and the same path can name the reference. Failed
+reference fetches omit the path without blocking the recap. The recap task
+directory is runtime scratch under `.runtime/tmp`, which a saved workspace never
+includes, so players' photos, generated media and the chat copy last only as
+long as the container. A resumed attempt reads the game again.
+The recap turn, never a model argument, makes media a file and fixes its format:
+the agent supplies a prompt and reference photos for each JPEG scene and a
+draft path plus singer description for the continuous score, then calls
+`write_recap` once. The host derives five-second page cues and a twenty-second
+sung chunk from that draft. One song asset serves the full score and a
+frame-aligned song slice; the native contract owns their clocks. The host uploads selected bytes and Web publishes
 through the canonical transaction, retaining the current source authorization,
 asset retirement and replay owners. One accepted story owns one chat line plus
 link with no chat media. Groups retain their existing writer rules and payload.
@@ -5926,6 +5937,47 @@ permanent retirement tombstones prevent late uploads from restoring access.
 A refreshed fallback selection derives a fresh cover key from its frozen deadline
 and content, retaining the current cover atomically with acceptance; expired
 receipts and tombstones remain terminal across mailbox retries.
+
+A pair show's envelope may also hold one recap `video`: a single MP4 stored as
+up to four sealed parts of at most 2,000,000 bytes on the same receipts, keys
+(`recap/<generation>/<sha256>.mp4`) and tombstones as scenes and the song. Only
+the whole file has a hash, a length, a duration, a frame size and one
+deduplicated source list, which includes every source of the scenes it shows;
+parts are not assets and the limit of five assets is unchanged. A write brings a
+candidate. Web joins the staged parts outside the transaction, checks the
+declared hash, walks the MP4's boxes for its duration and frame size, resolves
+the declared sources itself, and leaves a candidate that fails any test off the
+accepted recap. The request carries the candidate unparsed, so one Web cannot
+read costs the video and never the recap. The video's own sources are checked
+when it is selected and again on every read; the accepting transaction rechecks
+only the assets' sources, so a source that changes in between leaves a video
+nobody can open, not a failed recap. The first acceptance decides the video: a retried or replayed
+write gets the stored recap, and write and recovery results name the accepted
+video (generation, hash, length) or `null` only to a runtime that asked, so an
+older runtime never sees the field. `recapStorageObjects` lists a recap's
+stored objects for receipt retention and serving; a part is served as
+`video-<index>` through the asset route under its parent video's sources, the
+media switch and the generation. Retirement is by game and generation, so
+regeneration, a post removed for everyone and account deletion retire parts
+with no code of their own. `MURPH_GAME_RECAP_VIDEO_ENABLED=true` (pair shows
+only) lets Web stage parts, accept a candidate and add `game.poster` to the
+recap material; stored videos stay readable while it is off. Nothing renders,
+uploads or sends a video yet. The envelope reader is the Web rollback floor
+once a video is stored: the previous release refuses an envelope with `video`.
+Live Web protocol admission carries a `recapVideo` witness, so a runtime is not
+activated against a Web that cannot read these requests.
+
+The runtime reads the same feature before anything writes it. A recap wake's
+response policy may carry `video: true`, for a pair show only; the parser, the
+saved pending state and the recap scope accept it, and the turn runs unchanged.
+A stored outbox intent may carry `recapVideo`: the accepted identity plus
+whatever the delivery owner records beside it. The intent reader keeps extra
+keys, drops a value that is not an identity instead of quarantining the intent,
+keeps the field across ownership-checked rewrites and sends the text alone.
+Tool results may name the accepted video. A runtime before this release refuses
+a wake with `video` and quarantines an intent with `recapVideo`, so this release
+is the runtime's rollback floor once Web queues such a wake or a later release
+stores such an intent.
 Accepted media uses private generation URLs; a thirty-day opaque cover capability
 exposes only a composed cover. Failed scenes retain their text, failed songs are
 omitted, and exhausted generation uses a validated three-page plain fallback.
@@ -6174,6 +6226,43 @@ refused before any words are asked for. Murph is offered only
 that predate it. Deploy Web before the runtime: an older Web rejects the new
 operation, and only the new operation returns the new receipt status. Rollback
 is safe because the entry is ordinary data.
+
+Both day corrections stay open on a settled pair game for
+`GAME_SETTLED_OPEN_MS` (7 days) after `settledAt`, the same window its game
+chat stays admitted (`GAME_CHAT_SETTLED_ACCESS_MS` is that constant); after it
+the refusal is `GAME_NOT_LIVE` with the plain reason, and a group game keeps
+its refusal from the moment it ends. `decideDayCompletion` applies the live
+rules unchanged, except that a finished game has no open day and its days are
+the ones that had started when it ended (`settledGameEnd`), so a date after an
+early finish is refused. A pair game that has ended by its clock but is still
+stored as live is settled first, inside the same lock, by `settleLoaded`, so
+the correction never depends on a read having come first. `setDayCompletion`
+then settles the result again from the same `decideSettle`: it replaces
+`game.result` and calls `settleTicketsTx`, the one ticket writer first
+settlement also uses. That writer matches tickets by stake and by who owes
+whom, counting duplicates; it keeps a ticket that is still owed (a done one
+before an open one), issues one that is newly owed, and removes an open ticket
+that is no longer owed. A ticket already marked done is never touched, and
+`redeem` answers a ticket that is gone under the lock with `TICKET_NOT_HELD`.
+`status` and `settledAt` do not change, so chat admission, billing, the recap
+reservation and rematches are untouched, and nothing is announced or pushed.
+The correction is refused when the stored result no longer equals what the
+current posts decide (`storedResultStands`: an Ops takedown or a deleted
+account since the end), so one player's correction cannot move the other's
+score. One `result_corrected` event records the day, the scores before and
+after, the ids of tickets added and the id, stake, seats and created time of
+each ticket removed; the existing day event records who and when. When the
+outcome changes, the `update_game` response carries the exact line to say in
+the existing optional `chatLine`, with "The recap was made before this
+change." appended once a recap exists: the recap is left as made. Web sends a
+settled game's `progress` to the runtime only while the write would accept a
+correction (inside the window and with a stored result that still stands), as
+the days stood when the game ended. The runtime shows those days, sends the
+day-correction rule for exactly those games, and counts each toward the
+several-games rule so a date that fits two games gets a question. No schema or
+contract field is new, so Web and the runtime deploy in either order: an older
+runtime confirms the day without the result line, and an older Web refuses
+with "This game has ended."
 
 `runGameCommand` is the single write path, for the routes now and Murph's tools
 later. It validates the command (`command.ts`), checks uploads, seals words,
@@ -6505,6 +6594,18 @@ installation deletion. Legacy wearable-only registrations remain unenrolled. A c
 keeps game enrollment only when its installation and complete push target are
 unchanged; replacing the address clears the old session binding under the same
 member lock.
+Both registration routes accept an optional `reopenReminders` boolean, the
+phone's "Reopen reminders" switch, stored as nullable
+`companion_push_route.reopen_reminders`. A build that predates the field sends
+nothing, which reads as on: the game route stores null, and the companion route
+keeps the stored value only for an unchanged address. The Apple Health reopen
+push (`apps/web/src/lib/device-sync/apple-health-reopen-push.ts`,
+`docs/device-provider-compatibility-matrix.md`) is the one reader. It needs no
+game session, because its copy is generic and a member whose session expired
+is who needs to reopen the app; it marks the push Time Sensitive only for a
+route that reported the switch, since only those builds are known to hold the
+entitlement. Web must deploy before an app that sends the field: the
+registration schemas are strict, so an older Web rejects it.
 Companion installation-scoped deletion still owns sign-out. Native
 uses the existing notification delegate; the alert's structural game id selects
 an authenticated game after refresh. No entry content leaves the game reader.

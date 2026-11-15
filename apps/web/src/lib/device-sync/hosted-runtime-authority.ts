@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { Prisma } from "@prisma/client";
 
 import {
@@ -338,10 +339,13 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
     input.trustedUserId,
   );
   const appliedAt = parsed.occurredAt ?? new Date().toISOString();
+  // Silence is measured on wall time. A delayed or replayed wake's `occurredAt`
+  // is in the past and would hide a stall that has since become real.
+  const stallCheckedAt = new Date().toISOString();
 
   for (const update of parsed.updates) {
     if (update.seed !== undefined) {
-      throw new TypeError("Hosted device-sync runtime callbacks must not seed Cloudflare-owned state.");
+      throw new ContractValidationError("Hosted device-sync runtime callbacks must not seed Cloudflare-owned state.");
     }
   }
 
@@ -577,7 +581,7 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
           noticeCandidates: resolveHostedRuntimeSourceDeliveryStallNoticeCandidates({
             connectionId: update.connectionId,
             currentSources: sources,
-            now: appliedAt,
+            now: stallCheckedAt,
             sourceUpdates: sourceUpdates.toApply,
           }),
         };
@@ -588,7 +592,7 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
   }
   scheduleHostedSourceDeliveryStallNotices({
     candidates: noticeCandidates,
-    now: appliedAt,
+    now: stallCheckedAt,
     userId: input.trustedUserId,
   });
 
@@ -1741,7 +1745,7 @@ function validateHostedRuntimeCredentialMutation(input: {
     case "provider_config": {
       const providerConfigKey = input.credential.providerConfigKey.trim();
       if (!providerConfigKey) {
-        throw new TypeError("Hosted provider-config device-sync credential is missing providerConfigKey.");
+        throw new ContractValidationError("Hosted provider-config device-sync credential is missing providerConfigKey.");
       }
 
       if (policy) {
@@ -1787,7 +1791,7 @@ async function persistHostedRuntimeCredentialSnapshot(input: {
   tx: HostedPrismaTransactionClient;
 }): Promise<HostedConnectionRecord> {
   if (input.credential.kind === "provider_config" && !input.credential.providerConfigKey.trim()) {
-    throw new TypeError("Hosted provider-config device-sync credential is missing providerConfigKey.");
+    throw new ContractValidationError("Hosted provider-config device-sync credential is missing providerConfigKey.");
   }
 
   const credentialMetadataJson = sanitizeHostedExecutionDeviceSyncRuntimeCredentialMetadata(

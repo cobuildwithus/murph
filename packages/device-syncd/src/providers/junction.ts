@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createHmac, createHash, timingSafeEqual } from "node:crypto";
 import { performance } from "node:perf_hooks";
 
@@ -3059,7 +3060,7 @@ export function createJunctionDeviceSyncProvider(
         .update(serializeCompanionHrvRmssdObservation(observation))
         .digest("hex");
       if (admissionId !== expectedAdmissionId) {
-        throw new TypeError("Companion HRV admission identity did not match its observation.");
+        throw new ContractValidationError("Companion HRV admission identity did not match its observation.");
       }
     } catch {
       throw deviceSyncError({
@@ -7228,7 +7229,7 @@ function selectJunctionElectrocardiogramRecordingCandidates(
     || !Number.isFinite(windowEndMs)
     || windowEndMs <= windowStartMs
   ) {
-    throw new TypeError("Junction ECG collection window was invalid.");
+    throw new ContractValidationError("Junction ECG collection window was invalid.");
   }
 
   const selected = new Map<string, JunctionElectrocardiogramRecordingCandidate>();

@@ -1,0 +1,317 @@
+{
+  "pages": [],
+  "chatLine": "Player A won 4 to 3. The mat has entered evidence.",
+  "scoreLine": "Player B owes Player A breakfast.",
+  "show": {
+    "version": 1,
+    "generationId": "game-recap:synthetic-game",
+    "treatment": "Courtroom drama",
+    "acceptedAt": "2026-11-10T12:00:00Z",
+    "pages": [
+      {
+        "id": "page-0",
+        "kind": "cover",
+        "background": "night",
+        "blocks": [
+          {
+            "kind": "headline",
+            "text": "The Mat Takes the Stand"
+          },
+          {
+            "kind": "kicker",
+            "text": "Breakfast is awarded"
+          }
+        ],
+        "imageIndex": 1,
+        "media": {
+          "status": "ready",
+          "url": "/api/game/v1/games/synthetic-game/recap-assets/scene-0?generation=game-recap%3Asynthetic-game",
+          "mediaType": "image/jpeg",
+          "width": 1024,
+          "height": 1536
+        },
+        "fallback": {
+          "kind": "photo",
+          "entryIds": [
+            "synthetic-photo-a"
+          ]
+        },
+        "cueMs": 0
+      },
+      {
+        "id": "page-1",
+        "kind": "print",
+        "background": "paper",
+        "blocks": [
+          {
+            "kind": "headline",
+            "text": "The evidence arrived"
+          },
+          {
+            "kind": "photo",
+            "style": "print",
+            "entryIds": [
+              "synthetic-photo-a"
+            ]
+          },
+          {
+            "kind": "headline",
+            "text": "The mat had receipts"
+          }
+        ],
+        "cueMs": 5000
+      },
+      {
+        "id": "page-2",
+        "kind": "scene",
+        "background": "slate",
+        "blocks": [
+          {
+            "kind": "headline",
+            "text": "A witness appears"
+          },
+          {
+            "kind": "headline",
+            "text": "The clipboard knows"
+          }
+        ],
+        "imageIndex": 1,
+        "media": {
+          "status": "ready",
+          "url": "/api/game/v1/games/synthetic-game/recap-assets/scene-2?generation=game-recap%3Asynthetic-game",
+          "mediaType": "image/jpeg",
+          "width": 1024,
+          "height": 1536
+        },
+        "fallback": {
+          "kind": "text",
+          "entryIds": []
+        },
+        "cueMs": 10000
+      },
+      {
+        "id": "page-3",
+        "kind": "text",
+        "background": "sage",
+        "blocks": [
+          {
+            "kind": "quote",
+            "quote": {
+              "who": "Player B",
+              "text": "The mat knows"
+            }
+          }
+        ],
+        "cueMs": 15000
+      },
+      {
+        "id": "page-4",
+        "kind": "print",
+        "background": "paper",
+        "blocks": [
+          {
+            "kind": "headline",
+            "text": "Both sides rested"
+          },
+          {
+            "kind": "photoPair",
+            "style": "print",
+            "entryIds": [
+              "synthetic-photo-a",
+              "synthetic-photo-b"
+            ]
+          }
+        ],
+        "cueMs": 20000
+      },
+      {
+        "id": "page-5",
+        "kind": "print",
+        "background": "sienna",
+        "blocks": [
+          {
+            "kind": "stat",
+            "statValue": "4",
+            "text": "posts in evidence"
+          },
+          {
+            "kind": "contactSheet",
+            "style": "print",
+            "entryIds": [
+              "synthetic-photo-a",
+              "synthetic-photo-b",
+              "synthetic-photo-c"
+            ]
+          }
+        ],
+        "cueMs": 25000
+      },
+      {
+        "id": "card-synthetic-player-a",
+        "kind": "superlative",
+        "background": "paper",
+        "blocks": [],
+        "card": {
+          "memberId": "synthetic-player-a",
+          "title": "Subpoena the mat",
+          "line": "Player A kept the evidence coming."
+        },
+        "cueMs": 30000
+      },
+      {
+        "id": "song",
+        "kind": "song",
+        "background": "night",
+        "blocks": [],
+        "media": {
+          "status": "ready",
+          "url": "/api/game/v1/games/synthetic-game/recap-assets/song?generation=game-recap%3Asynthetic-game",
+          "mediaType": "audio/mpeg",
+          "durationMs": 19920
+        },
+        "song": {
+          "title": "The Mat Knows",
+          "lyrics": [
+            "The mat knows the score",
+            "The shoes wait by the door",
+            "Breakfast comes with proof",
+            "The clipboard holds the truth"
+          ],
+          "lines": [
+            {
+              "words": [
+                {
+                  "text": "The",
+                  "startMs": 212,
+                  "endMs": 612
+                },
+                {
+                  "text": "mat",
+                  "startMs": 712,
+                  "endMs": 1112
+                },
+                {
+                  "text": "knows",
+                  "startMs": 1212,
+                  "endMs": 1612
+                },
+                {
+                  "text": "the",
+                  "startMs": 1712,
+                  "endMs": 2112
+                },
+                {
+                  "text": "score",
+                  "startMs": 2212,
+                  "endMs": 2612
+                }
+              ]
+            },
+            {
+              "words": [
+                {
+                  "text": "The",
+                  "startMs": 2712,
+                  "endMs": 3112
+                },
+                {
+                  "text": "shoes",
+                  "startMs": 3212,
+                  "endMs": 3612
+                },
+                {
+                  "text": "wait",
+                  "startMs": 3712,
+                  "endMs": 4112
+                },
+                {
+                  "text": "by",
+                  "startMs": 4212,
+                  "endMs": 4612
+                },
+                {
+                  "text": "the",
+                  "startMs": 4712,
+                  "endMs": 5112
+                },
+                {
+                  "text": "door",
+                  "startMs": 5212,
+                  "endMs": 5612
+                }
+              ]
+            },
+            {
+              "words": [
+                {
+                  "text": "Breakfast",
+                  "startMs": 5712,
+                  "endMs": 6112
+                },
+                {
+                  "text": "comes",
+                  "startMs": 6212,
+                  "endMs": 6612
+                },
+                {
+                  "text": "with",
+                  "startMs": 6712,
+                  "endMs": 7112
+                },
+                {
+                  "text": "proof",
+                  "startMs": 7212,
+                  "endMs": 7612
+                }
+              ]
+            },
+            {
+              "words": [
+                {
+                  "text": "The",
+                  "startMs": 7712,
+                  "endMs": 8112
+                },
+                {
+                  "text": "clipboard",
+                  "startMs": 8212,
+                  "endMs": 8612
+                },
+                {
+                  "text": "holds",
+                  "startMs": 8712,
+                  "endMs": 9112
+                },
+                {
+                  "text": "the",
+                  "startMs": 9212,
+                  "endMs": 9612
+                },
+                {
+                  "text": "truth",
+                  "startMs": 9712,
+                  "endMs": 10112
+                }
+              ]
+            }
+          ]
+        },
+        "cueMs": 35300
+      },
+      {
+        "id": "result",
+        "kind": "result",
+        "background": "paper",
+        "blocks": []
+      }
+    ],
+    "score": {
+      "media": {
+        "status": "ready",
+        "url": "/api/game/v1/games/synthetic-game/recap-assets/score?generation=game-recap%3Asynthetic-game",
+        "mediaType": "audio/mpeg",
+        "durationMs": 55008
+      }
+    }
+  }
+}

@@ -2810,6 +2810,12 @@ Notes:
   generated local artifacts that must stay out of commits and raw source bundles.
 - Hosted internal cron paths accept only Vercel cron bearer auth via
   `CRON_SECRET`.
+- `/api/internal/device-sync/apple-health-reopen-push/cron` runs every 15
+  minutes and sends the "Open Murph" push to members whose phone stopped
+  delivering Apple Health data. It reads Web-owned facts only, sends through the
+  existing Apple push sender, and does not signal Temporal or wake Cloudflare.
+  Count sends with `SELECT outcome, count(*) FROM apple_health_reopen_push
+  WHERE created_at > now() - interval '1 day' GROUP BY outcome`.
 - `/api/internal/hosted-runtime/latency-alert/cron` scans existing Web-owned
   latency and durable mailbox-progress facts every five minutes. It does not
   signal Temporal, wake Cloudflare, or participate in message processing.
@@ -2910,6 +2916,7 @@ Internal hosted maintenance and Cloudflare callback routes:
 - `GET /api/internal/hosted-onboarding/stripe/cron`
 - `GET /api/internal/hosted-growth/usage-referral/cron`
 - `GET /api/internal/hosted-runtime/latency-alert/cron`
+- `GET /api/internal/device-sync/apple-health-reopen-push/cron`
 
 The signed device-sync reconcile request includes only `connectionId`. Web
 places the request on the existing manual-reconcile wake and carries no

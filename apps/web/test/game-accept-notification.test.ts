@@ -5,6 +5,7 @@ vi.mock("next/server", () => ({ after: m.after }));
 vi.mock("@/src/lib/apple-push/send", async original => ({ ...await original<typeof import("@/src/lib/apple-push/send")>(), sendApplePush: m.send }));
 vi.mock("@/src/lib/companion/push-route", async original => ({ ...await original<typeof import("@/src/lib/companion/push-route")>(), forgetCompanionPushRoute: m.forget }));
 vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({ companionPushRoute: { findFirst: m.route }, game: { findUnique: m.game }, gameBlock: { findFirst: m.block } }) }));
+import { applePushWireAps } from "./support/apple-push-wire";
 import { prepareGameAcceptNotification, deliverGameAcceptNotification, sendGameAcceptNotificationAfterResponse } from "@/src/lib/game/accept-notification";
 
 const target = { token: "ab".repeat(32), environment: "development", topic: "ai.withmurph.app.dev" };
@@ -51,6 +52,7 @@ describe("pair invite acceptance push", () => {
       data: { gameId: "game-a", notification: "game_accepted" }, expiresAt: new Date(expiry), target,
       message: { kind: "alert", title: "They shook on it.", body: `Your game starts ${word}.` },
     }));
+    expect(await applePushWireAps(m.send.mock.calls[0]![0])).toMatchObject({ sound: "default" });
   });
 
   it("uses alerts without the reminders switch", async () => {

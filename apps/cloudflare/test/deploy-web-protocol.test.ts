@@ -5,6 +5,8 @@ import { assertHostedRuntimeWebProtocolAdmission, parseHostedRuntimeLogRequest }
 import { HOSTED_RUNTIME_LOG_EVENT_CODES, HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_MAX_BYTES } from "@murphai/hosted-execution/runtime-control";
 import { buildRuntimeProcessingSummaryEntry } from "../src/user-runner/diagnostics";
 import { syntheticHostedWebProtocolAdmission } from "./helpers/hosted-web-protocol";
+import { buildRecapVideoProtocolProbe } from "@murphai/hosted-execution/runtime-control";
+import { assertPreScoreWebProtocolAdmission } from "./helpers/pre-score-web-admission";
 import { assertHostedWebProtocolAdmission, HOSTED_WEB_PROTOCOL_PROBE_TIMEOUT_MS } from "../scripts/deploy-web-protocol";
 
 let source: Record<string, string>;
@@ -76,6 +78,38 @@ it("accepts reader supersets, but not missing audience or emitted log codes", ()
   // Web-only producer codes still require the Web reader to deploy first.
   const preSampleReader = { ...evidence, runtimeLogEventCodes: evidence.runtimeLogEventCodes.filter(code => code !== "mailbox.progress_alert_sampled") };
   expect(() => assertHostedRuntimeWebProtocolAdmission(preSampleReader, evidence.nonce)).toThrow("runtime_log_event:mailbox.progress_alert_sampled");
+});
+
+it('requires the score upload and receipt witnesses before runtime activation', () => {
+  const evidence = syntheticHostedWebProtocolAdmission('synthetic-nonce');
+  expect(() => assertHostedRuntimeWebProtocolAdmission(evidence, evidence.nonce)).not.toThrow();
+  for (const recapScore of [undefined, {}, { ...evidence.recapScore, asset: {} }, { ...evidence.recapScore, upload: {} }]) {
+    expect(() => assertHostedRuntimeWebProtocolAdmission({ ...evidence, recapScore }, evidence.nonce)).toThrow('recap_score');
+  }
+});
+
+it('requires the recap video part, candidate, identity request and result witnesses before runtime activation', () => {
+  const evidence = syntheticHostedWebProtocolAdmission('synthetic-nonce');
+  expect(() => assertHostedRuntimeWebProtocolAdmission(evidence, evidence.nonce)).not.toThrow();
+  const probe = buildRecapVideoProtocolProbe();
+  const { video: _candidate, ...withoutCandidate } = probe.write;
+  for (const recapVideo of [undefined, {}, { ...probe, part: {} }, { ...probe, write: withoutCandidate },
+    { ...probe, recover: { ...probe.recover, recapRead: { kind: 'recover' } } },
+    { ...probe, result: { action: 'write_recap', result: { status: 'ok' } } }]) {
+    expect(() => assertHostedRuntimeWebProtocolAdmission({ ...evidence, recapVideo }, evidence.nonce)).toThrow('recap_video');
+  }
+  // A Web that predates the video answers without the witness; the runtime it admits is the one already deployed.
+  const { recapVideo: _unsupported, ...oldResponse } = evidence;
+  expect(() => assertPreScoreWebProtocolAdmission(oldResponse, evidence.nonce)).not.toThrow();
+  expect(() => assertPreScoreWebProtocolAdmission(evidence, evidence.nonce)).not.toThrow();
+});
+
+it('keeps the extended Web response readable by the deployed pre-score runtime', () => {
+  const evidence = syntheticHostedWebProtocolAdmission('synthetic-nonce');
+  expect(() => assertPreScoreWebProtocolAdmission(evidence, evidence.nonce)).not.toThrow();
+  const { recapScore: _unsupported, ...oldResponse } = evidence;
+  expect(() => assertPreScoreWebProtocolAdmission(oldResponse, evidence.nonce)).not.toThrow();
+  expect(() => assertPreScoreWebProtocolAdmission({ ...evidence, schemaVersion: 2 }, evidence.nonce)).toThrow('version_or_nonce');
 });
 
 it.each([

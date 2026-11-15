@@ -12,7 +12,7 @@ import { localDateSchema } from '@murphai/operator-config/vault-cli-contracts'
 import {
   inputFileOptionSchema,
   normalizeInputFileOption,
-} from '@murphai/vault-usecases'
+} from '@murphai/vault-usecases/json-input'
 import type {
   CommandContext,
   EntityLookupInput as ShowCommandContext,

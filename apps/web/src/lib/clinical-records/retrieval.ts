@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
 import { renewClinicalAccess, CLEAR_CLINICAL_PERSISTENT_ACCESS, clinicalCredentialsAfterCheck } from "./persistent-access";
@@ -795,7 +796,7 @@ async function loadRunnableClinicalRun(input: {
     if (
       record.retrievalProtocol !== "query-slices-v2"
     ) {
-      throw new TypeError("Stored Clinical Records retrieval protocol is unsupported.");
+      throw new ContractValidationError("Stored Clinical Records retrieval protocol is unsupported.");
     }
     retrievalPlan = clinicalFhirRetrievalPlanSchema.parse(record.retrievalPlanJson);
     sourceSystem = clinicalSourceSystemSchema.parse(record.connection.sourceSystem);
@@ -840,7 +841,7 @@ function parsePageCursor(
   expectedSlice: ClinicalFhirRetrievalSlice,
 ): ValidatedFhirPageUrl {
   const parsed: unknown = JSON.parse(plaintext);
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new TypeError("Invalid cursor.");
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new ContractValidationError("Invalid cursor.");
   const record = parsed as Record<string, unknown>;
   if (
       Object.keys(record).sort().join(",")
@@ -850,12 +851,12 @@ function parsePageCursor(
       || record.queryScopeId !== expectedSlice.queryScopeId
       || record.resourceType !== expectedSlice.resourceType
       || record.sliceId !== expectedSlice.sliceId
-    ) throw new TypeError("Invalid cursor.");
+    ) throw new ContractValidationError("Invalid cursor.");
   if (
     typeof record.url !== "string"
     || hasSurroundingAsciiWhitespace(record.url)
     || record.url.length > FHIR_NEXT_URL_MAX_CHARS
-  ) throw new TypeError("Invalid cursor.");
+  ) throw new ContractValidationError("Invalid cursor.");
   return { raw: record.url, url: new URL(record.url) };
 }
 
@@ -905,7 +906,7 @@ function assertFhirPageUrlAllowed(input: {
     || input.candidate.password
     || input.candidate.hash
     || !pathAllowed
-  ) throw new TypeError("FHIR page URL escaped the configured endpoint.");
+  ) throw new ContractValidationError("FHIR page URL escaped the configured endpoint.");
 }
 
 async function requireCurrentAccessToken(input: {

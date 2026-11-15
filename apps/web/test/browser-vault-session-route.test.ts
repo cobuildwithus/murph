@@ -2,6 +2,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 
 import {
   CloudflareHostedControlBrowserVaultReplicaNotFoundError,
+  CloudflareHostedControlMalformedResponseError,
 } from "@murphai/cloudflare-hosted-control/client";
 import { BROWSER_VAULT_REPLICA_CURRENT_GENERATION } from "@murphai/contracts";
 import { generateHostedUserRecipientKeyPair } from "@murphai/runtime-state";
@@ -2138,7 +2139,7 @@ describe("browser vault session route", () => {
     });
   });
 
-  it("returns a 502 when hosted execution control returns an invalid browser vault session", async () => {
+  it.each(["interactive", "legacy export", "bucketed export"] as const)("returns a 502 for an invalid upstream %s session without consuming export approval", async (kind) => {
     const browser = await generateHostedUserRecipientKeyPair();
     mocks.readHostedWorkspace.mockResolvedValue({
       browserVaultReplicaRef: createReplicaRef(),
@@ -2153,19 +2154,29 @@ describe("browser vault session route", () => {
       version: "1",
     });
     const createBrowserVaultSession = vi.fn().mockRejectedValue(
-      new TypeError("Cloudflare browser vault session state must be ready."),
+      new CloudflareHostedControlMalformedResponseError(
+        new Error("Synthetic response validation failure."),
+      ),
     );
 
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
       createBrowserVaultSession,
+      createBrowserVaultExportSession: createBrowserVaultSession,
     });
 
-    const response = await browserVaultSessionRoute.POST(
+    const route = kind === "interactive" ? browserVaultSessionRoute : settingsVaultExportSessionRoute;
+    const response = await route.POST(
       createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
         browserPublicKeyJwk: browser.publicKeyJwk,
+        ...(kind === "bucketed export" ? {
+          requestedMetricBuckets: TEST_BROWSER_VAULT_METRIC_BUCKET_IDS,
+          requestedShards: ["core", "labs", "metricsIndex"],
+        } : {}),
       }),
     );
 
+    expect(createBrowserVaultSession).toHaveBeenCalledTimes(1);
+    expect(mocks.consumeSensitiveActionChallenge).not.toHaveBeenCalled();
     expect(response.status).toBe(502);
     await expect(response.json()).resolves.toMatchObject({
       error: {
@@ -2174,6 +2185,47 @@ describe("browser vault session route", () => {
         retryable: false,
       },
     });
+  });
+
+  it.each(["interactive", "legacy export", "bucketed export"] as const)("does not label a client bug as an invalid upstream %s session", async (kind) => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    mocks.readHostedWorkspace.mockResolvedValue({
+      browserVaultReplicaRef: createReplicaRef(),
+      createdAt: "2026-04-20T08:00:00.000Z",
+      checkpointedAt: "2026-04-20T08:00:00.000Z",
+      redactedStatusJson: {},
+      nextWakeAt: null,
+      nextWakeReason: null,
+      snapshotRef: createSnapshotRef("a"),
+      updatedAt: "2026-04-20T08:00:00.000Z",
+      userId: "member_123",
+      version: "1",
+    });
+    const createBrowserVaultSession = vi.fn().mockRejectedValue(
+      new TypeError("Synthetic client bug."),
+    );
+
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      createBrowserVaultSession,
+      createBrowserVaultExportSession: createBrowserVaultSession,
+    });
+
+    const route = kind === "interactive" ? browserVaultSessionRoute : settingsVaultExportSessionRoute;
+    const response = await route.POST(
+      createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
+        browserPublicKeyJwk: browser.publicKeyJwk,
+        ...(kind === "bucketed export" ? {
+          requestedMetricBuckets: TEST_BROWSER_VAULT_METRIC_BUCKET_IDS,
+          requestedShards: ["core", "labs", "metricsIndex"],
+        } : {}),
+      }),
+    );
+
+    expect(createBrowserVaultSession).toHaveBeenCalledTimes(1);
+    expect(mocks.consumeSensitiveActionChallenge).not.toHaveBeenCalled();
+    expect(response.status).not.toBe(502);
+    const body = await response.json();
+    expect(body.error.code).not.toBe("HOSTED_EXECUTION_CONTROL_INVALID_RESPONSE");
   });
 
   it("returns empty when hosted execution control cannot find the referenced replica", async () => {

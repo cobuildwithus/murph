@@ -1,4 +1,5 @@
 import {
+  CloudflareHostedControlMalformedResponseError,
   isCloudflareHostedControlBrowserVaultReplicaNotFoundError,
 } from "@murphai/cloudflare-hosted-control/client";
 import {
@@ -227,28 +228,21 @@ export function createBrowserVaultSessionRoute() {
       });
     }
 
+    let session: Awaited<ReturnType<typeof client.createBrowserVaultSession>>;
     try {
-      return jsonOk(
-        {
-          ...(await client.createBrowserVaultSession({
-            browserPublicKeyJwk,
-            replicaRef,
-            ...(missingRequestedShards === undefined
-              || missingRequestedShards.length === 0
-              ? {}
-              : { requestedShards: missingRequestedShards }),
-            ...(missingRequestedMetricBuckets === undefined
-              || missingRequestedMetricBuckets.length === 0
-              ? {}
-              : { requestedMetricBuckets: missingRequestedMetricBuckets }),
-            userId: auth.member.id,
-          })),
-          deviceSyncImportPending,
-          freshness,
-          refreshPending: freshnessAssessment.shouldRefresh,
-          workspaceVersion,
-        },
-      );
+      session = await client.createBrowserVaultSession({
+        browserPublicKeyJwk,
+        replicaRef,
+        ...(missingRequestedShards === undefined
+          || missingRequestedShards.length === 0
+          ? {}
+          : { requestedShards: missingRequestedShards }),
+        ...(missingRequestedMetricBuckets === undefined
+          || missingRequestedMetricBuckets.length === 0
+          ? {}
+          : { requestedMetricBuckets: missingRequestedMetricBuckets }),
+        userId: auth.member.id,
+      });
     } catch (error) {
       if (isCloudflareHostedControlBrowserVaultReplicaNotFoundError(error)) {
         if (!refreshObservationOnly) {
@@ -275,7 +269,7 @@ export function createBrowserVaultSessionRoute() {
         });
       }
 
-      if (error instanceof TypeError) {
+      if (error instanceof CloudflareHostedControlMalformedResponseError) {
         throw hostedOnboardingError({
           code: "HOSTED_EXECUTION_CONTROL_INVALID_RESPONSE",
           message: "Hosted execution control plane returned an invalid browser vault session.",
@@ -285,6 +279,14 @@ export function createBrowserVaultSessionRoute() {
 
       throw error;
     }
+
+    return jsonOk({
+      ...session,
+      deviceSyncImportPending,
+      freshness,
+      refreshPending: freshnessAssessment.shouldRefresh,
+      workspaceVersion,
+    });
   });
 }
 

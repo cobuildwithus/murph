@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type { Prisma } from "@prisma/client";
 
 import { generateHostedRandomPrefixedId } from "../primitives";
@@ -57,7 +58,7 @@ export async function appendHostedUsageCreditGrantTx(input: {
   }
   const semanticSourceKey = input.semanticSourceKey.trim();
   if (!semanticSourceKey) {
-    throw new TypeError("Hosted usage-credit grant requires a semantic source key.");
+    throw new ContractValidationError("Hosted usage-credit grant requires a semantic source key.");
   }
 
   const existing = await input.tx.hostedUsageCreditEntry.findUnique({

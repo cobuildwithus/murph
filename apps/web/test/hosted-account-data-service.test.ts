@@ -388,6 +388,7 @@ const HOSTED_ACCOUNT_DELETION_RAW_COUNT_KEYS = [
   "prisma.device_browser_assertion_nonce",
   "prisma.hosted_web_internal_request_nonce",
   "prisma.companion_push_route",
+  "prisma.apple_health_reopen_push",
 
   "prisma.hosted_member",
 ] as const;

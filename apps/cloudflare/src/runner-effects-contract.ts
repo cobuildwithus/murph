@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type {
   HostedRuntimeProviderFileResponse,
   HostedRuntimeTelegramDownloadFileRequest,
@@ -92,7 +93,7 @@ export function parseHostedRunnerPrivateImageUrlPublishRequest(
     && contentType !== "image/png"
     && contentType !== "image/webp"
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runner private image URL publish contentType is unsupported.",
     );
   }
@@ -189,7 +190,7 @@ function parseTelegramFile(value: unknown): HostedRuntimeTelegramFile {
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object.`);
+    throw new ContractValidationError(`${label} must be an object.`);
   }
 
   return value as Record<string, unknown>;
@@ -197,11 +198,11 @@ function requireRecord(value: unknown, label: string): Record<string, unknown> {
 
 function readRequiredString(value: unknown, label: string): string {
   if (typeof value !== "string") {
-    throw new TypeError(`Hosted runner provider effect ${label} must be a string.`);
+    throw new ContractValidationError(`Hosted runner provider effect ${label} must be a string.`);
   }
   const normalized = value.trim();
   if (normalized.length === 0) {
-    throw new TypeError(`Hosted runner provider effect ${label} must be a non-empty string.`);
+    throw new ContractValidationError(`Hosted runner provider effect ${label} must be a non-empty string.`);
   }
   return normalized;
 }

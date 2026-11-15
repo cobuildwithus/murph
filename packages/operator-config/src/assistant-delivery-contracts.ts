@@ -1,5 +1,6 @@
 import { isIP } from 'node:net'
 import * as z from '@murphai/contracts/zod-runtime'
+import { elevenLabsMusicModelId, elevenLabsMusicModelIds } from '@murphai/contracts/elevenlabs-music'
 import {
   isAssistantGeneratedDeliveryRef,
   isNormalizedAssistantVaultFileRef,
@@ -26,7 +27,7 @@ export const assistantMessageReactionValues = [
 export const assistantVaultImageMaxBytes = 10 * 1024 * 1024
 export const assistantVaultFileMaxBytes = 100 * 1024 * 1024
 export const assistantVoiceMemoSpeechOutputFormat = 'mp3_44100_128' as const
-export const assistantVoiceMemoMusicModelId = 'music_v2' as const
+export const assistantVoiceMemoMusicModelId = elevenLabsMusicModelId
 export const assistantVoiceMemoMusicOutputFormat = 'mp3_48000_192' as const
 
 export const assistantBindingDeliverySchema = z.object({
@@ -123,7 +124,7 @@ export const assistantVoiceMemoGenerationSchema = z.discriminatedUnion('kind', [
       durationMs: z.number().int().min(3_000).max(300_000),
       forceInstrumental: z.boolean(),
       kind: z.literal('elevenlabs_music'),
-      modelId: z.literal(assistantVoiceMemoMusicModelId),
+      modelId: z.enum(elevenLabsMusicModelIds),
       outputFormat: z.literal(assistantVoiceMemoMusicOutputFormat),
       prompt: z.string().trim().min(1).max(4100),
     })

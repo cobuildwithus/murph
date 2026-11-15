@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { readHostedExecutionRuntimeAuthority } from "@murphai/hosted-execution/auth";
 
 const HOSTED_RUNTIME_ATTEMPT_ID_HEADER = "x-hosted-runtime-attempt-id";
@@ -25,7 +26,7 @@ export function readHostedRuntimeCallbackAuthority(
     || authority.generation !== expected.leaseGeneration
     || authority.workspaceVersion !== expected.workspaceVersion
   )) {
-    throw new TypeError("Hosted runtime callback body conflicts with signed authority.");
+    throw new ContractValidationError("Hosted runtime callback body conflicts with signed authority.");
   }
   return authority;
 }

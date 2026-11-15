@@ -120,6 +120,8 @@ describe("user-facing message variants", () => {
       expect(text).toContain("Murph");
       expect(text).toContain("Check for new data");
       expect(text).not.toMatch(/force.quit|closed|quit|battery|charged|revoked|reconnect|disconnected/iu);
+      // The check can arrive months into a silence, so it states no length.
+      expect(text).not.toMatch(/\b(?:few|couple of|several|\d+)\s+(?:days?|weeks?)\b/iu);
     }
   });
   it("keeps at least 20 variants for every rotating message class", () => {

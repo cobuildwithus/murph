@@ -1551,14 +1551,14 @@ describe("hostedRunnerIntercept", () => {
     expect(upstream).toHaveBeenCalledTimes(Number(count <= 16));
   });
 
-  it.each([{ scoped: true, detailed: false }, { scoped: false, detailed: false }, { scoped: true, detailed: true }, { scoped: false, detailed: true }])('funds recap music from native scope even during ordinary settlement ($scoped, $detailed)', async ({ scoped, detailed }) => {
+  it.each([{ scoped: true, detailed: false }, { scoped: false, detailed: false }, { scoped: true, detailed: true }, { scoped: false, detailed: true }, { scoped: true, detailed: true, score: true }])('funds recap music from native scope even during ordinary settlement ($scoped, $detailed)', async ({ scoped, detailed, score }) => {
     const consume = vi.fn(async () => true);
     const upstream = vi.fn<typeof fetch>(async () => new Response('Synthetic provider failure', { status: 504 }));
     vi.stubGlobal('fetch', upstream);
     const response = await hostedRunnerIntercept(new Request(`https://api.elevenlabs.io/v1/music${detailed ? '/detailed' : ''}?output_format=mp3_48000_192`, {
       method: 'POST', headers: { 'xi-api-key': HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL, 'content-type': 'application/json', 'x-murph-recap-scope': 'forged' },
-      body: JSON.stringify(detailed ? { model_id: 'music_v2', with_timestamps: true, composition_plan: { chunks: [{ text: 'Leo goes', duration_ms: 20_000, positive_styles: ['Playful piano'], negative_styles: [] }] } }
-        : { prompt: 'Synthetic chorus', music_length_ms: 20_000, model_id: 'music_v2', force_instrumental: false }),
+      body: JSON.stringify(detailed ? { model_id: 'music_v2_5', with_timestamps: true, composition_plan: { chunks: score ? [{ text: '[Intro]', duration_ms: 5000, positive_styles: ['Piano', 'instrumental'], negative_styles: ['vocals'], context_adherence: 'high' }, { text: '[Chorus]\nLeo goes', duration_ms: 20_000, positive_styles: ['Piano'], negative_styles: ['instrumental intro'], context_adherence: 'high' }] : [{ text: 'Leo goes', duration_ms: 20_000, positive_styles: ['Playful piano'], negative_styles: [] }] } }
+        : { prompt: 'Synthetic chorus', music_length_ms: 20_000, model_id: 'music_v2_5', force_instrumental: false }),
     }), createInterceptEnv({ ELEVENLABS_API_KEY: 'synthetic-key', recapMediaScoped: scoped, consumeRecapMediaRequest: consume,
       settlementPending: true, providerContext: async () => ({ owns: true, userId: 'member_123', attemptId: 'attempt_1', leaseGeneration: '7', workspaceVersion: '4', platformAiUsageAllowed: false }) }),
     { className: 'RunnerContainer', containerId: 'synthetic-container' });
@@ -2036,7 +2036,20 @@ describe("hostedRunnerIntercept", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("injects ElevenLabs music credentials and records successful music usage", async () => {
+  it.each([
+    { modelId: "music_v2", detailed: false, score: false }, { modelId: "music_v2_5", detailed: false, score: false },
+    { modelId: "music_v2", detailed: true, score: false }, { modelId: "music_v2_5", detailed: true, score: false },
+    { modelId: "music_v2_5", detailed: true, score: true },
+  ])("forwards $modelId music and records its usage (detailed=$detailed, score=$score)", async ({ modelId, detailed, score }) => {
+    const durationMs = score ? 65_000 : 45_000;
+    const consumeRecapMediaRequest = vi.fn(async () => true);
+    const url = `https://api.elevenlabs.io/v1/music${detailed ? "/detailed" : ""}?output_format=mp3_48000_192`;
+    const body = detailed ? { model_id: modelId, with_timestamps: true, composition_plan: { chunks: score ? [
+      ...Array.from({ length: 9 }, () => ({ text: '[Theme]', duration_ms: 5000, positive_styles: ['Piano', 'instrumental'], negative_styles: ['vocals'], context_adherence: 'high' })),
+      { text: '[Chorus]\nSynthetic chorus', duration_ms: 20_000, positive_styles: ['Piano', 'Baritone'], negative_styles: ['instrumental intro'], context_adherence: 'high' },
+    ] : [{
+      text: "Synthetic chorus", duration_ms: 45_000, positive_styles: ["Upbeat lo-fi piano motif"], negative_styles: [],
+    }] } } : { force_instrumental: true, model_id: modelId, music_length_ms: 45_000, prompt: "Upbeat lo-fi piano motif" };
     vi.useFakeTimers();
     vi.setSystemTime(new Date(PROVIDER_REQUEST_STARTED_AT));
     const fetchMock = vi.fn<typeof fetch>(async (input) => {
@@ -2061,35 +2074,24 @@ describe("hostedRunnerIntercept", () => {
 
     const response = await hostedRunnerIntercept(
       createElevenLabsRequest({
-        url: "https://api.elevenlabs.io/v1/music?output_format=mp3_48000_192",
-        body: {
-          force_instrumental: true,
-          model_id: "music_v2",
-          music_length_ms: 45_000,
-          prompt: "Upbeat lo-fi piano motif",
-        },
+        url, body,
       }),
       createInterceptEnv({
         ELEVENLABS_API_KEY: "elevenlabs-worker-secret",
         validateRuntimeWriteFence: async () => true,
+        recapMediaScoped: score, consumeRecapMediaRequest,
       }),
       waitUntilContext,
     );
 
     expect(response.status).toBe(200);
+    expect(consumeRecapMediaRequest).toHaveBeenCalledTimes(score ? 1 : 0);
     const forwarded = findFetchCall(fetchMock, "api.elevenlabs.io")?.[0];
     expect(forwarded).toBeInstanceOf(Request);
     const forwardedRequest = forwarded as Request;
-    expect(forwardedRequest.url).toBe(
-      "https://api.elevenlabs.io/v1/music?output_format=mp3_48000_192",
-    );
+    expect(forwardedRequest.url).toBe(url);
     expect(forwardedRequest.headers.get("xi-api-key")).toBe("elevenlabs-worker-secret");
-    expect(await forwardedRequest.clone().json()).toEqual({
-      force_instrumental: true,
-      model_id: "music_v2",
-      music_length_ms: 45_000,
-      prompt: "Upbeat lo-fi piano motif",
-    });
+    expect(await forwardedRequest.clone().json()).toEqual(body);
 
     await Promise.all(waitUntilPromises);
     const usageCall = findFetchCall(fetchMock, "web.example.test");
@@ -2107,8 +2109,8 @@ describe("hostedRunnerIntercept", () => {
       provider: "elevenlabs",
       providerName: "ElevenLabs",
       providerRequestId: "elevenlabs-music-req-123",
-      rawUsageJson: { durationMs: 45_000 },
-      requestedModel: "music_v2",
+      rawUsageJson: { durationMs },
+      requestedModel: modelId,
       surface: "hosted-runner",
       triggerKind: "generate-song",
       usageExtractionSourcePath: "elevenlabs.music.compose",

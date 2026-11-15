@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
-import { createGameImageStore, deleteGameImagesForUser, type GameImagesBinding } from "../src/game-image-store.ts";
+import { createGameImageStore, deleteGameImagesForUser, GameImageInvalidError, type GameImagesBinding } from "../src/game-image-store.ts";
 import { assertPrivateGameImageVariants } from "../scripts/deploy-game-images.ts";
 import { gameImageRoutes } from "../src/worker/route-handlers/game-images.ts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
@@ -50,6 +50,17 @@ function provider() {
 }
 
 describe("private game Images", () => {
+  it("identifies a mismatched content key before inspection or storage", async () => {
+    const bucket = new IndexBucket(), p = provider();
+    const store = createGameImageStore({ deploymentOrigin, bucket, images: p.images, userId: "synthetic-owner" });
+    const uploading = store.upload(mediaId, new Uint8Array([1]));
+    await expect(uploading).rejects.toBeInstanceOf(GameImageInvalidError);
+    await expect(uploading).rejects.toThrow("Game image content key does not match.");
+    expect(p.info).not.toHaveBeenCalled();
+    expect(p.upload).not.toHaveBeenCalled();
+    expect(bucket.objects.size).toBe(0);
+  });
+
   it.each([
     ["invalid image", Object.assign(new Error("synthetic private provider detail"), { code: 9412 }), "content is invalid"],
     ["inspection outage", new Error("synthetic private provider detail"), "inspection failed"],
@@ -57,7 +68,10 @@ describe("private game Images", () => {
     const bucket = new IndexBucket(), p = provider();
     p.info.mockRejectedValueOnce(error);
     const store = createGameImageStore({ deploymentOrigin, bucket, images: p.images, userId: "member_leo" });
-    await expect(store.upload(mediaId, bytes)).rejects.toThrow(message);
+    const uploading = store.upload(mediaId, bytes);
+    await expect(uploading).rejects.toThrow(message);
+    if (_label === "invalid image") await expect(uploading).rejects.toBeInstanceOf(GameImageInvalidError);
+    else await expect(uploading).rejects.not.toBeInstanceOf(GameImageInvalidError);
     expect(p.upload).not.toHaveBeenCalled();
     expect(bucket.objects.size).toBe(0);
     await expect(deleteGameImagesForUser(p.images, "member_leo", bucket, deploymentOrigin)).resolves.toBeUndefined();
@@ -74,8 +88,9 @@ describe("private game Images", () => {
   ])("rejects unsupported or oversized raster metadata before admitting uploads: %j", async (info) => {
     const bucket = new IndexBucket(), p = provider();
     p.info.mockResolvedValueOnce(info);
-    await expect(createGameImageStore({ deploymentOrigin, bucket, images: p.images, userId: "member_leo" }).upload(mediaId, bytes))
-      .rejects.toThrow("content is invalid");
+    const uploading = createGameImageStore({ deploymentOrigin, bucket, images: p.images, userId: "member_leo" }).upload(mediaId, bytes);
+    await expect(uploading).rejects.toThrow("content is invalid");
+    await expect(uploading).rejects.toBeInstanceOf(GameImageInvalidError);
     expect(p.upload).not.toHaveBeenCalled();
     expect(bucket.objects.size).toBe(0);
   });

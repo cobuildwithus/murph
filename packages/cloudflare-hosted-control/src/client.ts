@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { parseHostedRuntimeResourcePurge, parseHostedRuntimeResourcePurgeResponse, type HostedRuntimeResourcePurge } from "@murphai/hosted-execution/runtime-resource-purge";
 import {
   parseHostedCipherEnvelope,
@@ -346,6 +347,13 @@ export class CloudflareHostedControlBrowserVaultReplicaNotFoundError extends Err
   }
 }
 
+export class CloudflareHostedControlMalformedResponseError extends Error {
+  constructor(cause: unknown) {
+    super("Hosted execution control plane returned a malformed response.", { cause });
+    this.name = "CloudflareHostedControlMalformedResponseError";
+  }
+}
+
 export function isCloudflareHostedControlBrowserVaultReplicaNotFoundError(
   error: unknown,
 ): error is CloudflareHostedControlBrowserVaultReplicaNotFoundError {
@@ -390,7 +398,7 @@ export function createCloudflareHostedControlClient(
       "Cloudflare browser vault session request replicaRef",
     );
     if (!replicaRef) {
-      throw new TypeError("Cloudflare browser vault session request replicaRef must not be null.");
+      throw new ContractValidationError("Cloudflare browser vault session request replicaRef must not be null.");
     }
 
     const requestedMetricBuckets = input.requestedMetricBuckets === undefined
@@ -472,8 +480,8 @@ export function createCloudflareHostedControlClient(
       return session;
     }
     if (!isCloudflareHostedControlCompleteBrowserVaultExportSession(session)) {
-      throw new TypeError(
-        "Cloudflare browser vault export session must include every fixed child.",
+      throw new CloudflareHostedControlMalformedResponseError(
+        new ContractValidationError("Cloudflare browser vault export session must include every fixed child."),
       );
     }
     return session;
@@ -568,7 +576,7 @@ export function createCloudflareHostedControlClient(
         baseUrl, boundUserId: userId, fetchImpl, getAuthorizationHeader,
         label: "game image staging",
         parse: (value) => {
-          if (requireRecord(value, "Game image stage").stored !== true) throw new TypeError("Game image storage was not confirmed.");
+          if (requireRecord(value, "Game image stage").stored !== true) throw new ContractValidationError("Game image storage was not confirmed.");
           return true;
         },
         path: buildCloudflareHostedControlGameMediaPath("gameImageStage", userId),
@@ -585,7 +593,7 @@ export function createCloudflareHostedControlClient(
         path: buildCloudflareHostedControlMealThumbnailDeliveryPath(userId),
         request: { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ photos: input.photos }) },
         parse: (value) => {
-          if (!Array.isArray(value) || value.length !== input.photos.length) throw new TypeError("Meal thumbnail delivery is invalid.");
+          if (!Array.isArray(value) || value.length !== input.photos.length) throw new ContractValidationError("Meal thumbnail delivery is invalid.");
           return value.map(item => {
             const row = requireRecord(item, "Meal thumbnail delivery");
             return { mediaId: requireString(row.mediaId, "Meal thumbnail id"), url: requireString(row.url, "Meal thumbnail URL") };
@@ -600,7 +608,7 @@ export function createCloudflareHostedControlClient(
         label: "game image delivery",
         parse: (value) => {
           const record = requireRecord(value, "Game image delivery");
-          if (typeof record.url !== "string" || typeof record.expiresAt !== "string") throw new TypeError("Game image delivery is invalid.");
+          if (typeof record.url !== "string" || typeof record.expiresAt !== "string") throw new ContractValidationError("Game image delivery is invalid.");
           return { url: record.url, expiresAt: record.expiresAt };
         },
         path: buildCloudflareHostedControlGameMediaPath("gameImageDelivery", userId),
@@ -622,16 +630,28 @@ export function createCloudflareHostedControlClient(
       const userId = requireCloudflareHostedControlUserId(input.userId);
       await requestHostedExecutionAuthorizedJson({ baseUrl, boundUserId: userId, fetchImpl, getAuthorizationHeader,
         label: "recap media staging", path: buildCloudflareHostedControlGameMediaPath("recapMediaStage", userId),
-        parse: value => { if (requireRecord(value, "Recap storage").stored !== true) throw new TypeError("Recap storage was not confirmed."); },
+        parse: value => { if (requireRecord(value, "Recap storage").stored !== true) throw new ContractValidationError("Recap storage was not confirmed."); },
         request: { method: "POST", headers: { "content-type": "application/json", "x-murph-recap-media-id": input.mediaId, "x-murph-recap-hash": input.hash }, body: input.envelope }, timeoutMs: options.timeoutMs });
     },
     async readRecapMedia(input) {
       const userId = requireCloudflareHostedControlUserId(input.userId);
       return nullWhenNotFound(requestHostedExecutionAuthorizedJson({ baseUrl, boundUserId: userId, fetchImpl, getAuthorizationHeader,
         label: "recap media read", path: buildCloudflareHostedControlGameMediaPath("recapMediaRead", userId),
-        parse(value) { const record = requireRecord(value, "Recap storage"); return {
-          envelope: requireString(record.envelope, "Recap envelope"), hash: requireString(record.hash, "Recap hash"),
-        }; }, request: { method: "GET", headers: { "x-murph-recap-media-id": input.mediaId } }, timeoutMs: options.timeoutMs }));
+        parse(value) {
+          const record = requireRecord(value, "Recap storage");
+          const envelope = requireString(record.envelope, "Recap envelope");
+          let parsedEnvelope: unknown;
+          try {
+            parsedEnvelope = JSON.parse(envelope);
+          } catch (error) {
+            if (error instanceof SyntaxError) {
+              throw new ContractValidationError("Recap envelope must be valid JSON.", { cause: error });
+            }
+            throw error;
+          }
+          parseHostedSecureBoxEnvelope(parsedEnvelope);
+          return { envelope, hash: requireString(record.hash, "Recap hash") };
+        }, request: { method: "GET", headers: { "x-murph-recap-media-id": input.mediaId } }, timeoutMs: options.timeoutMs }));
     },
     async deleteGameMedia(input) {
       const userId = requireCloudflareHostedControlUserId(input.userId);
@@ -807,7 +827,7 @@ export function createCloudflareHostedControlClient(
       const sha256 = requireSha256(input.sha256, "Cloudflare meal-photo sha256");
       const actualSha256 = await sha256Hex(bytes);
       if (actualSha256 !== sha256) {
-        throw new TypeError("Cloudflare meal-photo sha256 must match bytes.");
+        throw new ContractValidationError("Cloudflare meal-photo sha256 must match bytes.");
       }
 
       return await requestHostedExecutionAuthorizedJson({
@@ -841,7 +861,7 @@ function parseDeviceWebhookEnqueueResponse(
 ): { accepted: true; transportId: string } {
   const record = requireRecord(value, "Device webhook enqueue response");
   if (record.accepted !== true) {
-    throw new TypeError("Device webhook enqueue response accepted must be true.");
+    throw new ContractValidationError("Device webhook enqueue response accepted must be true.");
   }
   const transportId = requireString(
     record.transportId,
@@ -881,7 +901,7 @@ function parseCloudflareHostedControlMealPhotoStageResult(
     "the uploaded sha256",
   );
   if (!HOSTED_MEAL_PHOTO_KEY_PATTERN.test(mealPhotoKey)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Cloudflare meal-photo stage result mealPhotoKey must be a 40-character lowercase hexadecimal string.",
     );
   }
@@ -892,7 +912,7 @@ function parseCloudflareHostedControlMealPhotoStageResult(
 function parseCloudflareHostedControlMealPhotoDeleteResult(value: unknown): void {
   const record = requireRecord(value, "Cloudflare meal-photo delete result");
   if (record.deleted !== true) {
-    throw new TypeError("Cloudflare meal-photo delete result deleted must be true.");
+    throw new ContractValidationError("Cloudflare meal-photo delete result deleted must be true.");
   }
 }
 
@@ -900,14 +920,14 @@ const GAME_MEDIA_ID_PATTERN = /^[a-f0-9]{64}\.(?:heic|jpg)$/u;
 
 function gameMediaHeaders(mediaId: string): Record<string, string> {
   if (typeof mediaId !== "string" || !GAME_MEDIA_ID_PATTERN.test(mediaId)) {
-    throw new TypeError("Cloudflare game media id must be <sha256>.<jpg|heic>.");
+    throw new ContractValidationError("Cloudflare game media id must be <sha256>.<jpg|heic>.");
   }
   return { [CLOUDFLARE_HOSTED_CONTROL_GAME_MEDIA_ID_HEADER]: mediaId };
 }
 
 function requireDeleted(value: unknown, label: string): void {
   if (requireRecord(value, label).deleted !== true) {
-    throw new TypeError(`${label} deleted must be true.`);
+    throw new ContractValidationError(`${label} deleted must be true.`);
   }
 }
 
@@ -967,7 +987,7 @@ function parseCloudflareHostedControlBrowserVaultSession(
   const state = requireString(record.state, "Cloudflare browser vault session state");
 
   if (state !== "ready") {
-    throw new TypeError("Cloudflare browser vault session state must be ready.");
+    throw new ContractValidationError("Cloudflare browser vault session state must be ready.");
   }
 
   const replicaRef = parseHostedBrowserVaultReplicaRef(
@@ -976,14 +996,14 @@ function parseCloudflareHostedControlBrowserVaultSession(
   );
 
   if (!replicaRef) {
-    throw new TypeError("Cloudflare browser vault session replicaRef must not be null.");
+    throw new ContractValidationError("Cloudflare browser vault session replicaRef must not be null.");
   }
 
   const hasMetricBuckets = record.metricBuckets !== undefined;
   const hasShards = record.shards !== undefined;
   if (hasMetricBuckets || hasShards) {
     if (record.encryptedReplica !== undefined || record.replicaAad !== undefined) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "Cloudflare browser vault selected session must not include the legacy replica payload.",
       );
     }
@@ -993,7 +1013,7 @@ function parseCloudflareHostedControlBrowserVaultSession(
       "Cloudflare browser vault session replicaRef",
     );
     if (!expected.requestedMetricBuckets && !expected.requestedShards) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "Cloudflare browser vault selected session requires an explicit selection.",
       );
     }
@@ -1008,7 +1028,7 @@ function parseCloudflareHostedControlBrowserVaultSession(
           { ...expected, requestedMetricBuckets: expected.requestedMetricBuckets },
         );
     if (expected.requestedMetricBuckets === undefined && hasMetricBuckets) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "Cloudflare browser vault session metricBuckets require requestedMetricBuckets.",
       );
     }
@@ -1019,7 +1039,7 @@ function parseCloudflareHostedControlBrowserVaultSession(
           { ...expected, requestedShards: expected.requestedShards },
         );
     if (expected.requestedShards === undefined && hasShards) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "Cloudflare browser vault session shards require requestedShards.",
       );
     }
@@ -1122,7 +1142,7 @@ function parseCloudflareHostedControlBrowserVaultSession(
   );
 
   if (replicaKeyEnvelope.recipients.length === 0) {
-    throw new TypeError("Cloudflare browser vault session replicaKeyEnvelope.recipients must not be empty.");
+    throw new ContractValidationError("Cloudflare browser vault session replicaKeyEnvelope.recipients must not be empty.");
   }
 
   for (const [index, recipient] of replicaKeyEnvelope.recipients.entries()) {
@@ -1179,7 +1199,7 @@ function parseCloudflareHostedControlBrowserVaultShards(
       ),
     ))
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Cloudflare browser vault session shards must match requestedShards exactly.",
     );
   }
@@ -1317,7 +1337,7 @@ function parseCloudflareHostedControlBrowserVaultShardAad(
     `${label}.shard`,
   );
   if (shard !== expectedShard) {
-    throw new TypeError(`${label}.shard must match its response key.`);
+    throw new ContractValidationError(`${label}.shard must match its response key.`);
   }
   const shardSchema = requireCloudflareHostedControlBrowserVaultShardSchema(
     record.shardSchema,
@@ -1337,7 +1357,7 @@ function parseCloudflareHostedControlBrowserVaultShardAad(
     `${label}.shardSetRefSchema`,
   );
   if (shardSetRefSchema !== HOSTED_BROWSER_VAULT_REPLICA_SHARD_SET_REF_SCHEMA) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label}.shardSetRefSchema must be ${HOSTED_BROWSER_VAULT_REPLICA_SHARD_SET_REF_SCHEMA}.`,
     );
   }
@@ -1372,7 +1392,7 @@ function parseCloudflareHostedControlBrowserVaultMetricBuckets(
       ),
     ))
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Cloudflare browser vault session metricBuckets must match requestedMetricBuckets exactly.",
     );
   }
@@ -1458,14 +1478,14 @@ function parseCloudflareHostedControlBrowserVaultMetricBucketAad(
     `${label}.metricBucketId`,
   );
   if (metricBucketId !== expectedBucketId) {
-    throw new TypeError(`${label}.metricBucketId must match its response key.`);
+    throw new ContractValidationError(`${label}.metricBucketId must match its response key.`);
   }
   const metricBucketCount = requirePositiveSafeInteger(
     record.metricBucketCount,
     `${label}.metricBucketCount`,
   );
   if (metricBucketCount !== HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_COUNT) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label}.metricBucketCount must be ${HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_COUNT}.`,
     );
   }
@@ -1474,7 +1494,7 @@ function parseCloudflareHostedControlBrowserVaultMetricBucketAad(
     `${label}.metricBucketSchema`,
   );
   if (metricBucketSchema !== "murph.browser-vault-replica.metric-bucket.v1") {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label}.metricBucketSchema must be murph.browser-vault-replica.metric-bucket.v1.`,
     );
   }
@@ -1486,7 +1506,7 @@ function parseCloudflareHostedControlBrowserVaultMetricBucketAad(
     metricBucketSetRefSchema
     !== HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_SET_REF_SCHEMA
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label}.metricBucketSetRefSchema must be ${HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_SET_REF_SCHEMA}.`,
     );
   }
@@ -1516,13 +1536,13 @@ function parseCloudflareHostedControlBrowserVaultEncodedAadFields(
   );
   const contentEncoding = requireString(record.contentEncoding, `${label}.contentEncoding`);
   if (contentEncoding !== "gzip" && contentEncoding !== "identity") {
-    throw new TypeError(`${label}.contentEncoding must be gzip or identity.`);
+    throw new ContractValidationError(`${label}.contentEncoding must be gzip or identity.`);
   }
   if (
     (contentEncoding === "identity" && encodedByteLength !== byteLength)
     || (contentEncoding === "gzip" && encodedByteLength >= byteLength)
   ) {
-    throw new TypeError(`${label} encoding lengths are invalid.`);
+    throw new ContractValidationError(`${label} encoding lengths are invalid.`);
   }
   return { byteLength, contentEncoding, encodedByteLength };
 }
@@ -1634,7 +1654,7 @@ function parseCloudflareHostedControlBrowserVaultReplicaKeyEnvelope(
     "the requested replica storage key id",
   );
   if (envelope.recipients.length === 0) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Cloudflare browser vault session replicaKeyEnvelope.recipients must not be empty.",
     );
   }
@@ -1658,10 +1678,10 @@ function parseCloudflareHostedControlBrowserVaultReplicaAad(
   const schema = requireString(record.schema, `${label}.schema`);
 
   if (purpose !== "browser-vault-replica") {
-    throw new TypeError(`${label}.purpose must be browser-vault-replica.`);
+    throw new ContractValidationError(`${label}.purpose must be browser-vault-replica.`);
   }
   if (schema !== "murph.browser-vault-replica") {
-    throw new TypeError(`${label}.schema must be murph.browser-vault-replica.`);
+    throw new ContractValidationError(`${label}.schema must be murph.browser-vault-replica.`);
   }
 
   return {
@@ -1693,7 +1713,7 @@ function parseCloudflareHostedControlUserDataDeletionResult(
   const record = requireRecord(value, "Cloudflare user-data deletion result");
 
   if (record.ok !== true) {
-    throw new TypeError("Cloudflare user-data deletion result ok must be true.");
+    throw new ContractValidationError("Cloudflare user-data deletion result ok must be true.");
   }
 
   const userId = requireString(record.userId, "Cloudflare user-data deletion result userId");
@@ -1775,7 +1795,7 @@ function parseCloudflareHostedControlRuntimeHealthDataConsentResult(
     && rawConsentState !== "revoked"
     && rawConsentState !== "missing"
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Cloudflare runtime health-data consent result consentState is invalid.",
     );
   }
@@ -1784,7 +1804,7 @@ function parseCloudflareHostedControlRuntimeHealthDataConsentResult(
     "Cloudflare runtime health-data consent result processingAllowed",
   );
   if (processingAllowed !== (rawConsentState !== "revoked")) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Cloudflare runtime health-data consent result processingAllowed did not match consentState.",
     );
   }
@@ -1890,7 +1910,7 @@ function parseCloudflareHostedControlTelegramUsageLimitNoticeResponse(
   }
 
   if (status !== "sent") {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Cloudflare Telegram usage-limit notice response status must be sent or failed.",
     );
   }
@@ -1906,7 +1926,7 @@ function readOptionalPositiveIntegerField<Key extends string>(
     return {};
   }
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Cloudflare Telegram usage-limit notice response ${key} must be a positive integer.`,
     );
   }
@@ -1996,7 +2016,7 @@ function parseCloudflareHostedControlBrowserVaultRequestedMetricBuckets(
   label: string,
 ): CloudflareHostedControlBrowserVaultMetricBucketId[] {
   if (!Array.isArray(value) || value.length === 0) {
-    throw new TypeError(`${label} must be a non-empty array.`);
+    throw new ContractValidationError(`${label} must be a non-empty array.`);
   }
   const bucketIds = value.map((entry, index) =>
     requireCloudflareHostedControlBrowserVaultMetricBucketId(
@@ -2004,10 +2024,10 @@ function parseCloudflareHostedControlBrowserVaultRequestedMetricBuckets(
       `${label}[${index}]`,
     ));
   if (new Set(bucketIds).size !== bucketIds.length) {
-    throw new TypeError(`${label} must not contain duplicates.`);
+    throw new ContractValidationError(`${label} must not contain duplicates.`);
   }
   if (bucketIds.length === HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_COUNT) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} must not request all ${HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_COUNT} buckets from the interactive session route.`,
     );
   }
@@ -2020,7 +2040,7 @@ function requireCloudflareHostedControlBrowserVaultMetricBucketId(
 ): CloudflareHostedControlBrowserVaultMetricBucketId {
   const bucketId = requireString(value, label);
   if (!(HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS as readonly string[]).includes(bucketId)) {
-    throw new TypeError(`${label} must be a browser vault metric bucket id from 00 through 1f.`);
+    throw new ContractValidationError(`${label} must be a browser vault metric bucket id from 00 through 1f.`);
   }
   return bucketId as CloudflareHostedControlBrowserVaultMetricBucketId;
 }
@@ -2030,7 +2050,7 @@ function parseCloudflareHostedControlBrowserVaultRequestedShards(
   label: string,
 ): CloudflareHostedControlBrowserVaultShardKind[] {
   if (!Array.isArray(value) || value.length === 0) {
-    throw new TypeError(`${label} must be a non-empty array.`);
+    throw new ContractValidationError(`${label} must be a non-empty array.`);
   }
   const shards = value.map((entry, index) =>
     requireCloudflareHostedControlBrowserVaultShardKind(
@@ -2038,7 +2058,7 @@ function parseCloudflareHostedControlBrowserVaultRequestedShards(
       `${label}[${index}]`,
     ));
   if (new Set(shards).size !== shards.length) {
-    throw new TypeError(`${label} must not contain duplicates.`);
+    throw new ContractValidationError(`${label} must not contain duplicates.`);
   }
   return shards;
 }
@@ -2049,7 +2069,7 @@ function requireCloudflareHostedControlBrowserVaultShardKind(
 ): CloudflareHostedControlBrowserVaultShardKind {
   const shard = requireString(value, label);
   if (!(HOSTED_BROWSER_VAULT_REPLICA_SHARD_KINDS as readonly string[]).includes(shard)) {
-    throw new TypeError(`${label} must be core, labs, or metricsIndex.`);
+    throw new ContractValidationError(`${label} must be core, labs, or metricsIndex.`);
   }
   return shard as CloudflareHostedControlBrowserVaultShardKind;
 }
@@ -2064,7 +2084,7 @@ function requireCloudflareHostedControlBrowserVaultShardSchema(
     ? "murph.browser-vault-replica.metrics-index.v1"
     : `murph.browser-vault-replica.${shard}.v1`;
   if (schema !== expected) {
-    throw new TypeError(`${label} must be ${expected}.`);
+    throw new ContractValidationError(`${label} must be ${expected}.`);
   }
   return schema as CloudflareHostedControlBrowserVaultShardSchema;
 }
@@ -2090,7 +2110,7 @@ function assertMatchingNumber(
   expectedLabel: string,
 ): void {
   if (actual !== expected) {
-    throw new TypeError(`${label} must match ${expectedLabel}.`);
+    throw new ContractValidationError(`${label} must match ${expectedLabel}.`);
   }
 }
 
@@ -2101,7 +2121,7 @@ function assertMatchingString(
   expectedLabel: string,
 ): void {
   if (actual !== expected) {
-    throw new TypeError(`${label} must match ${expectedLabel}.`);
+    throw new ContractValidationError(`${label} must match ${expectedLabel}.`);
   }
 }
 
@@ -2112,7 +2132,7 @@ function assertMatchingOptionalNumber(
   expectedLabel: string,
 ): void {
   if ((actual ?? null) !== (expected ?? null)) {
-    throw new TypeError(`${label} must match ${expectedLabel}.`);
+    throw new ContractValidationError(`${label} must match ${expectedLabel}.`);
   }
 }
 
@@ -2123,7 +2143,7 @@ function assertMatchingOptionalString(
   expectedLabel: string,
 ): void {
   if ((actual ?? null) !== (expected ?? null)) {
-    throw new TypeError(`${label} must match ${expectedLabel}.`);
+    throw new ContractValidationError(`${label} must match ${expectedLabel}.`);
   }
 }
 
@@ -2134,7 +2154,7 @@ function assertMatchingOptionalJson(
   expectedLabel: string,
 ): void {
   if (canonicalJson(actual ?? null) !== canonicalJson(expected ?? null)) {
-    throw new TypeError(`${label} must match ${expectedLabel}.`);
+    throw new ContractValidationError(`${label} must match ${expectedLabel}.`);
   }
 }
 
@@ -2169,7 +2189,7 @@ function requireHostedBrowserVaultReplicaRuntimeRootKeyId(
   replicaRef: HostedBrowserVaultReplicaRef,
 ): string {
   if (!replicaRef.runtimeRootKeyId) {
-    throw new TypeError("Cloudflare browser vault session requested replicaRef.runtimeRootKeyId is required.");
+    throw new ContractValidationError("Cloudflare browser vault session requested replicaRef.runtimeRootKeyId is required.");
   }
   return replicaRef.runtimeRootKeyId;
 }
@@ -2307,7 +2327,7 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
     });
   }
 
-  const parsed = input.parse(await response.json());
+  const parsed = await readHostedExecutionJsonResponse(response, input.parse);
   if (
     tokenAcquireStartedAtEpochMs !== null
     && tokenAcquiredAtEpochMs !== null
@@ -2343,6 +2363,30 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
   }
 
   return parsed;
+}
+
+async function readHostedExecutionJsonResponse<TResponse>(
+  response: Response,
+  parse: (value: unknown) => TResponse,
+): Promise<TResponse> {
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      throw new CloudflareHostedControlMalformedResponseError(error);
+    }
+    throw error;
+  }
+
+  try {
+    return parse(body);
+  } catch (error) {
+    if (error instanceof ContractValidationError) {
+      throw new CloudflareHostedControlMalformedResponseError(error);
+    }
+    throw error;
+  }
 }
 
 function readRuntimeEnsureProcessingStepLatencyHeader(
@@ -2437,7 +2481,7 @@ async function readHostedExecutionStructuredErrorCode(response: Response): Promi
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object.`);
+    throw new ContractValidationError(`${label} must be an object.`);
   }
 
   return value as Record<string, unknown>;
@@ -2445,7 +2489,7 @@ function requireRecord(value: unknown, label: string): Record<string, unknown> {
 
 function requireString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.length === 0) {
-    throw new TypeError(`${label} must be a non-empty string.`);
+    throw new ContractValidationError(`${label} must be a non-empty string.`);
   }
 
   return value;
@@ -2457,7 +2501,7 @@ function requirePositiveSafeInteger(value: unknown, label: string): number {
     || !Number.isSafeInteger(value)
     || value <= 0
   ) {
-    throw new TypeError(`${label} must be a positive safe integer.`);
+    throw new ContractValidationError(`${label} must be a positive safe integer.`);
   }
   return value;
 }
@@ -2465,7 +2509,7 @@ function requirePositiveSafeInteger(value: unknown, label: string): number {
 function requireMealPhotoCaptureId(value: unknown): string {
   const captureId = requireString(value, "Cloudflare meal-photo captureId").trim();
   if (!HOSTED_MEAL_PHOTO_CAPTURE_ID_PATTERN.test(captureId)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Cloudflare meal-photo captureId must be a 64-character lowercase hexadecimal string.",
     );
   }
@@ -2475,7 +2519,7 @@ function requireMealPhotoCaptureId(value: unknown): string {
 function requireMealPhotoKey(value: unknown): string {
   const mealPhotoKey = requireString(value, "Cloudflare meal-photo key");
   if (!HOSTED_MEAL_PHOTO_KEY_PATTERN.test(mealPhotoKey)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Cloudflare meal-photo key must be a 40-character lowercase hexadecimal string.",
     );
   }
@@ -2485,14 +2529,14 @@ function requireMealPhotoKey(value: unknown): string {
 function requireSha256(value: unknown, label: string): string {
   const sha256 = requireString(value, label);
   if (!HOSTED_SHA256_PATTERN.test(sha256)) {
-    throw new TypeError(`${label} must be a 64-character lowercase hexadecimal string.`);
+    throw new ContractValidationError(`${label} must be a 64-character lowercase hexadecimal string.`);
   }
   return sha256;
 }
 
 function copyUint8Array(value: unknown, label: string): Uint8Array {
   if (!(value instanceof Uint8Array)) {
-    throw new TypeError(`${label} must be a Uint8Array.`);
+    throw new ContractValidationError(`${label} must be a Uint8Array.`);
   }
   return Uint8Array.from(value);
 }
@@ -2519,7 +2563,7 @@ function normalizeOptionalString(value: string | null | undefined): string | nul
 
 function requireBoolean(value: unknown, label: string): boolean {
   if (typeof value !== "boolean") {
-    throw new TypeError(`${label} must be a boolean.`);
+    throw new ContractValidationError(`${label} must be a boolean.`);
   }
 
   return value;
@@ -2527,7 +2571,7 @@ function requireBoolean(value: unknown, label: string): boolean {
 
 function requireNumber(value: unknown, label: string): number {
   if (typeof value !== "number" || !Number.isFinite(value)) {
-    throw new TypeError(`${label} must be a finite number.`);
+    throw new ContractValidationError(`${label} must be a finite number.`);
   }
 
   return value;
@@ -2536,7 +2580,7 @@ function requireNumber(value: unknown, label: string): number {
 function requireNonNegativeInteger(value: unknown, label: string): number {
   const numberValue = requireNumber(value, label);
   if (!Number.isInteger(numberValue) || numberValue < 0) {
-    throw new TypeError(`${label} must be a non-negative integer.`);
+    throw new ContractValidationError(`${label} must be a non-negative integer.`);
   }
 
   return numberValue;

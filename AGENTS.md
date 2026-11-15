@@ -83,13 +83,11 @@ immutable historical evidence, never current operating instructions.
 - Use the routing doc for worktrees and plan lifecycle; create task checkouts only
   with `scripts/create-worktree`. Preserve open-PR worktrees and retire completed
   ones through `scripts/retire-worktree` from another checkout.
-- Follow the routing doc's § Developer Friction Logging and
-  `.agents/skills/frog/SKILL.md`; commit each created entry with the task.
+- When repository tooling, docs or conventions force a workaround, log it with
+  Frog (`.agents/skills/frog/SKILL.md`) and commit the entry with the task.
 - The completion workflow owns candidate review, PR evidence, and final gates.
-  Start required ReviewGPT on the stable pushed head concurrently with CI.
-  Keep one completion owner in the original session/thread, preferring `--wait`
-  or paced polling. Reserve detached wake for deliberate handoffs; follow the
-  review loop's waiting and finding-disposition policies.
+  `agent-docs/operations/pr-reviewgpt-loop.md` owns how a ReviewGPT round is
+  started, waited on and resolved.
 - ReviewGPT is scarce: running it on every PR capped both accounts for days in
   November 2026. Run it for changes to risky behavior or core architecture,
   listed in `agent-docs/operations/completion-workflow.md` § Final ReviewGPT

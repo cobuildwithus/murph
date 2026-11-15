@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { HOSTED_RUNTIME_POLL_TOOL_PATH } from "@murphai/hosted-execution/routes";
 import {
   HOSTED_CONNECTED_APPS_PATH,
@@ -444,7 +445,7 @@ export function createHostedRunnerDeviceSyncConnectLinkRoute(
 ): HostedRunnerWebControlRoute {
   const route = readHostedRunnerWebControlRoute(pathAndSearch);
   if (!HOSTED_DEVICE_SYNC_CONNECT_LINK_PATH.test(route.pathname)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runtime device-sync connect-link route is invalid.",
     );
   }
@@ -574,7 +575,7 @@ export function readHostedRunnerWebControlRoute(path: string): {
   const base = new URL("https://hosted-runtime.invalid/");
   const url = new URL(path, base);
   if (url.origin !== base.origin) {
-    throw new TypeError("Hosted runtime web-control route must be relative.");
+    throw new ContractValidationError("Hosted runtime web-control route must be relative.");
   }
 
   return {

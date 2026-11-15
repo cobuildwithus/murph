@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
 import { prepareClinicalPersistentAccess } from "./persistent-access";
@@ -548,10 +549,10 @@ function normalizeAuthorizationCode(value: string): string {
 
 function parseStoredStringArray(value: Prisma.JsonValue, label: string): string[] {
   if (!Array.isArray(value) || value.length === 0 || value.length > 64) {
-    throw new TypeError(`Stored Clinical Records ${label} are invalid.`);
+    throw new ContractValidationError(`Stored Clinical Records ${label} are invalid.`);
   }
   const strings = value.filter((item): item is string => typeof item === "string" && item.length > 0 && item.length <= 120);
-  if (strings.length !== value.length) throw new TypeError(`Stored Clinical Records ${label} are invalid.`);
+  if (strings.length !== value.length) throw new ContractValidationError(`Stored Clinical Records ${label} are invalid.`);
   return strings;
 }
 

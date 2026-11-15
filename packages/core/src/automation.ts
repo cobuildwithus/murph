@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { normalizeStoredAssistantModel } from "@murphai/contracts";
 import { isDeepStrictEqual } from "node:util";
 
@@ -605,7 +606,7 @@ function normalizeAutomationAssistantTargetOverride(
     object.reasoningEffort,
   );
   if (!stored && model === "gpt-5.6-sol") {
-    throw new TypeError("assistantTargetOverride.model is retired; use gpt-6.1-sol.");
+    throw new ContractValidationError("assistantTargetOverride.model is retired; use gpt-6.1-sol.");
   }
   const target: AutomationAssistantTargetOverride = {
     ...(model ? { model: normalizeStoredAssistantModel(model) ?? model } : {}),

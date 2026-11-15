@@ -1792,6 +1792,21 @@ describe("parseHostedExecutionDeviceSyncRuntimeApplyRequest", () => {
     expect(parsed.connections[0]?.sources?.[0]?.lastDataAt).toBeNull();
     expect(parsed.connections[0]?.sources?.[0]?.lifecycleEpoch).toBeUndefined();
 
+    // Web-first: the unchanged reader ignores extra fields and retains the
+    // source facts already present on the wire before tool visibility shipped.
+    const currentSource = { ...legacySource, lastDataAt: "2026-07-01T07:59:00.000Z" };
+    const current = parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(buildSnapshot(currentSource));
+    expect(parseHostedExecutionDeviceSyncRuntimeSnapshotResponse({
+      ...buildSnapshot({ ...currentSource, futureSourceField: true }),
+      futureSnapshotField: true,
+    })).toEqual(current);
+    // Runner-first also tolerates older Web snapshots with no source list.
+    const withoutSources = buildSnapshot(legacySource);
+    const { sources: _sources, ...connectionWithoutSources } = withoutSources.connections[0]!;
+    expect(parseHostedExecutionDeviceSyncRuntimeSnapshotResponse({
+      ...withoutSources, connections: [connectionWithoutSources],
+    }).connections[0]?.sources ?? []).toEqual([]);
+
     // A present-but-malformed value is still a contract violation.
     expect(() =>
       parseHostedExecutionDeviceSyncRuntimeSnapshotResponse(

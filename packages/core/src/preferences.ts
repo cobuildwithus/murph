@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   assistantPersonaIdSchema,
   assistantPersonalityScoreSchema,
@@ -134,7 +135,7 @@ function normalizeAssistantPreferencesForWrite(
   preferences: AssistantPreferencesUpdate,
 ): AssistantPreferencesUpdate {
   if (!isPlainRecord(preferences)) {
-    throw new TypeError("Assistant preferences must be an object.");
+    throw new ContractValidationError("Assistant preferences must be an object.");
   }
   for (const key of Object.keys(preferences)) {
     if (
@@ -143,7 +144,7 @@ function normalizeAssistantPreferencesForWrite(
       && key !== "voice"
       && key !== "personality"
     ) {
-      throw new TypeError(`Unknown assistant preference: ${key}.`);
+      throw new ContractValidationError(`Unknown assistant preference: ${key}.`);
     }
   }
 
@@ -161,13 +162,13 @@ function normalizeAssistantPreferencesForWrite(
   }
   if (preferences.personality !== undefined) {
     if (!isPlainRecord(preferences.personality)) {
-      throw new TypeError("Assistant personality preferences must be an object.");
+      throw new ContractValidationError("Assistant personality preferences must be an object.");
     }
 
     const personality: AssistantPersonalityPreferencesUpdate = {};
     for (const key of Object.keys(preferences.personality)) {
       if (!isAssistantPersonalitySettingId(key)) {
-        throw new TypeError(`Unknown assistant personality preference: ${key}.`);
+        throw new ContractValidationError(`Unknown assistant personality preference: ${key}.`);
       }
     }
     for (const settingId of assistantPersonalitySettingIds) {
@@ -373,14 +374,14 @@ export async function updateWorkoutCapturePreferences(input: {
   document: PreferencesDocumentSnapshot;
 }> {
   if (!isPlainRecord(input.preferences)) {
-    throw new TypeError("Workout capture preferences must be an object.");
+    throw new ContractValidationError("Workout capture preferences must be an object.");
   }
   for (const key of Object.keys(input.preferences)) {
     if (
       key !== "defaultDurationMinutes"
       && key !== "legacyMemoryMigrationVersion"
     ) {
-      throw new TypeError(`Unknown workout capture preference: ${key}.`);
+      throw new ContractValidationError(`Unknown workout capture preference: ${key}.`);
     }
   }
 
@@ -618,7 +619,7 @@ export async function updateAssistantPreferences(input: {
     const requestedPreferences = normalizeAssistantPreferencesForWrite(input.preferences);
     const requestedFields = resolveAssistantPreferenceFieldIds(requestedPreferences);
     if (requestedFields.length === 0) {
-      throw new TypeError("At least one assistant preference is required.");
+      throw new ContractValidationError("At least one assistant preference is required.");
     }
 
     const current = await readPreferencesDocument(input.vaultRoot);

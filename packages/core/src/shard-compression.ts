@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   constants,
   createGunzip,
@@ -23,7 +24,7 @@ export function isShardCompression(kind: string): kind is ShardCompression {
 export function shardCompressionFromPath(relativePath: string): ShardCompression {
   if (relativePath.endsWith(".gz")) return "gzip";
   if (relativePath.endsWith(".br")) return "brotli";
-  throw new TypeError("Expected a gzip or Brotli shard path.");
+  throw new ContractValidationError("Expected a gzip or Brotli shard path.");
 }
 
 export function compressShard(bytes: Uint8Array | string, kind: ShardCompression): Buffer {

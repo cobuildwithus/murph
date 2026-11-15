@@ -1,6 +1,7 @@
 /**
  * Owns hosted member messaging-routing lookup and binding surfaces.
  */
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { Prisma } from "@prisma/client";
 import { normalizeHostedEmailReplyAliasLookupKey } from "@murphai/hosted-execution/hosted-email";
 
@@ -180,7 +181,7 @@ export async function resolveHostedMemberReplyAliasRegistrationTx(input: {
     input.fallbackLookupKey,
   );
   if (!fallbackLookupKey) {
-    throw new TypeError("Hosted member reply alias fallback key is invalid.");
+    throw new ContractValidationError("Hosted member reply alias fallback key is invalid.");
   }
   const fallbackGeneration = requireHostedMemberReplyAliasGeneration(
     input.fallbackGeneration,
@@ -240,11 +241,11 @@ export async function upsertHostedMemberReplyAliasLookupKeyTx(input: {
     input.replyAliasLookupKey,
   );
   if (input.replyAliasLookupKey !== null && !lookupKey) {
-    throw new TypeError("Hosted member reply alias lookup key must be current-format lowercase hex.");
+    throw new ContractValidationError("Hosted member reply alias lookup key must be current-format lowercase hex.");
   }
   const generation = input.replyAliasGeneration ?? 0;
   if (!Number.isSafeInteger(generation) || generation < 0 || generation > 2_147_483_647) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted member reply alias generation must be a non-negative 32-bit integer.",
     );
   }
@@ -323,7 +324,7 @@ export async function lookupHostedMemberRoutingByPendingLinqParticipantContact(i
     scopedToGroup
     && (input.linqChatId === undefined || input.recipientPhone === undefined)
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Pending Linq group contact lookup requires both chat and recipient line.",
     );
   }
@@ -389,7 +390,7 @@ export async function lookupHostedMemberCoreByPendingLinqParticipantContact(inpu
     scopedToGroup
     && (input.linqChatId === undefined || input.recipientPhone === undefined)
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Pending Linq group contact lookup requires both chat and recipient line.",
     );
   }

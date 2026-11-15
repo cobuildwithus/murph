@@ -182,6 +182,7 @@ import {
   scoreGroupChallengeJson,
 } from '../assistant/group-challenge-scorecard-schema.js'
 import type { AssistantRuntimeIssueInput } from '../assistant/issue-reporting.js'
+import { RecapReferenceRefusal } from '../assistant/recap-workspace.js'
 import {
   createAssistantHostedDeviceActivityRequestKey,
   createAssistantHostedScheduledRequestKey,
@@ -321,6 +322,7 @@ import {
   MURPH_GENERATE_SONG_TOOL,
   parseGenerateSongArguments,
 } from './dynamic-tools/generate-song.js'
+import { executeGenerateRecapSongFile } from './recap-song.js'
 import {
   executeAskGrokDynamicTool,
   MURPH_ASK_GROK_TOOL,
@@ -475,7 +477,6 @@ const sendProgressUpdateArgumentsSchema = z
 
 const generateImageArgumentsSchema = z
   .object({
-    output: z.enum(['chat', 'file']).optional(),
     alt: z.string().trim().min(1).max(500).nullable().default(null),
     outputFormat: z.enum(['webp', 'png', 'jpeg']).default('webp'),
     prompt: z.string().trim().min(1).max(4000),
@@ -1496,7 +1497,7 @@ export type MurphDynamicToolRequest =
     }
   | {
       kind: 'generate-song'
-      args: GenerateSongToolArgs
+      args: GenerateSongToolArgs | import('./dynamic-tools/generate-song.js').GenerateRecapSongToolArgs
     }
   | {
       kind: 'conversation-attachments'
@@ -7726,8 +7727,7 @@ function parseGenerateImageArguments(
   }
   const { message_ref: messageRef, ...args } = parsed.args
   return {
-    args: { ...args, quality: args.quality ?? (args.output === 'file' ? 'high' : 'medium'),
-      size: args.size ?? (args.output === 'file' ? '1024x1536' : '1024x1024') },
+    args: { ...args, quality: args.quality ?? 'medium', size: args.size ?? '1024x1024' },
     ...(messageRef ? { messageRef } : {}),
     ok: true,
   }
@@ -8844,43 +8844,56 @@ function readAnalyzeVideoDynamicToolRequest(value: unknown): MurphDynamicToolReq
     : { kind: 'invalid-tool-arguments', errorCode: 'invalid_analyze_video_arguments', validationDigest: parsed.validationDigest }
 }
 
+/** In a recap show the turn, not the model, decides that media is a file and what kind. */
 async function maybeExecuteRecapImage(input: ExecuteMurphDynamicToolRequestInput,
   request: Extract<MurphDynamicToolRequest, { kind: 'generate-image' }>): Promise<MurphDynamicToolExecutionResult | null> {
-  if (request.args.output === 'file') {
-    try {
-      const fileRuntime = await input.hostedToolContext?.prepareRecapMedia?.({ kind: 'image', args: request.args }, input.fetchImpl)
-      if (!fileRuntime) return toolTextResult(false, 'File output requires an authorized recap.', 'authority_rejected')
-      const result = await executeGenerateImageTool({ args: request.args, fileRuntime,
-        abortSignal: input.abortSignal, env: input.env, fetchImpl: input.fetchImpl,
-        providerRequestOrdinal: input.nextUsageOrdinal() })
-      return { ...toolTextResult(result.rpcSuccess, result.rpcText), ...toolFailureMetadata(result), usageDraft: result.usageDraft ?? null }
-    } catch (error) { return recapMediaToolFailure(error) }
-  }
-  if (input.hostedToolContext?.currentGameRecapScope?.()?.show) return toolTextResult(false, 'Recap media requires output=file.', 'authority_rejected')
-  return null
+  const prepare = recapMediaPreparer(input)
+  if (!prepare) return null
+  try {
+    const args = { ...request.args, outputFormat: 'jpeg' as const, quality: 'high' as const, size: '1024x1536' as const }
+    const result = await executeGenerateImageTool({ args, fileRuntime: await prepare({ kind: 'image', args }, input.fetchImpl),
+      abortSignal: input.abortSignal, env: input.env, fetchImpl: input.fetchImpl,
+      providerRequestOrdinal: input.nextUsageOrdinal() })
+    return { ...toolTextResult(result.rpcSuccess, result.rpcText), ...toolFailureMetadata(result), usageDraft: result.usageDraft ?? null }
+  } catch (error) { return recapMediaToolFailure(error) }
 }
 
 async function executeSongToolRequest(input: ExecuteMurphDynamicToolRequestInput & { request: Extract<MurphDynamicToolRequest, { kind: 'generate-song' }> }): Promise<MurphDynamicToolExecutionResult> {
-      if (input.request.args.output === 'file') {
-        try {
-          const fileRuntime = await input.hostedToolContext?.prepareRecapMedia?.({ kind: 'song', args: input.request.args }, input.fetchImpl)
-          if (!fileRuntime) return toolTextResult(false, 'File output requires an authorized recap.', 'authority_rejected')
-          return await executeGenerateSongDynamicTool({ args: input.request.args, env: input.env, fileRuntime, abortSignal: input.abortSignal })
-        } catch (error) { return recapMediaToolFailure(error) }
-      }
-      if (input.hostedToolContext?.currentGameRecapScope?.()?.show) return toolTextResult(false, 'Recap media requires output=file.', 'authority_rejected')
-      if (input.currentResponseCard !== null && input.currentResponseCard !== undefined) {
-        return toolTextResult(false, 'song generation cannot be combined with a response card', 'conflict')
-      }
-      return await executeGenerateSongDynamicTool({
-        abortSignal: input.abortSignal ?? null,
-        args: input.request.args,
-        currentResponseMedia: input.currentResponseMedia ?? [],
-        recordPhaseTiming: input.voiceMemoPhaseTimingRecorder ?? null,
-        voiceMemoRuntime: input.voiceMemoRuntime ?? null,
-      })
+  const prepare = recapMediaPreparer(input)
+  if (prepare) {
+    try {
+      const args = input.request.args
+      if (!('draftPath' in args) || !input.hostedToolContext?.readGameRecapDraft) return toolTextResult(false, 'Use the draft path and voice to generate recap music.', 'invalid_input')
+      const result = await executeGenerateRecapSongFile({ draft: await input.hostedToolContext.readGameRecapDraft(args.draftPath), voice: args.voice,
+        env: input.env, abortSignal: input.abortSignal, fileRuntime: await prepare({ kind: 'song', args }, input.fetchImpl) })
+      return { ...toolTextResult(result.rpcSuccess, result.rpcText), ...toolFailureMetadata(result) }
+    } catch (error) {
+      if (input.abortSignal?.aborted) throw input.abortSignal.reason ?? error
+      return recapMediaToolFailure(error)
+    }
+  }
+  if ('draftPath' in input.request.args) return toolTextResult(false, 'Draft music is available only in a recap show.', 'authority_rejected')
+  if (input.currentResponseCard !== null && input.currentResponseCard !== undefined) {
+    return toolTextResult(false, 'song generation cannot be combined with a response card', 'conflict')
+  }
+  return await executeGenerateSongDynamicTool({
+    abortSignal: input.abortSignal ?? null,
+    args: input.request.args,
+    currentResponseMedia: input.currentResponseMedia ?? [],
+    recordPhaseTiming: input.voiceMemoPhaseTimingRecorder ?? null,
+    voiceMemoRuntime: input.voiceMemoRuntime ?? null,
+  })
 }
 
-function recapMediaToolFailure(error: unknown) {
+function recapMediaPreparer(input: ExecuteMurphDynamicToolRequestInput) {
+  const context = input.hostedToolContext
+  return context?.currentGameRecapScope?.()?.show ? context.prepareRecapMedia : undefined
+}
+
+function recapMediaToolFailure(error: unknown): MurphDynamicToolExecutionResult {
+  // A reference the recap does not have is the model's input, not a backend failure.
+  if (error instanceof RecapReferenceRefusal) {
+    return { ...toolTextResult(false, error.message), failureDiagnostic: { ...toolFailureDiagnostic('invalid_input'), recapRefusedReferences: error.shapes } }
+  }
   return toolTextResult(false, error instanceof Error ? error.message : 'Media generation failed.', 'handler_exception', error)
 }

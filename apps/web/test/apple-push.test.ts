@@ -45,21 +45,34 @@ describe("Apple push sender", () => {
     const call = send.mock.calls[0]![0];
     expect(call.origin).toBe("https://api.sandbox.push.apple.com");
     expect(call.headers).toMatchObject({ "apns-priority": "10", "apns-push-type": "alert", "apns-topic": "ai.withmurph.app.dev" });
-    expect(JSON.parse(call.body).aps).toEqual({ alert: { body: "Your game has an update", title: "Murph" }, "content-available": 1 });
+    expect(JSON.parse(call.body).aps).toEqual({ alert: { body: "Your game has an update", title: "Murph" }, "content-available": 1, sound: "default" });
   });
 
   it("omits the alert title when the message has none", async () => {
     const send = transport();
     const alert: ApplePushRequest = { ...request, message: { body: "New note on your post.", kind: "alert" } };
     expect(await sendApplePush(alert, { credentials, transport: send })).toBe("sent");
-    expect(JSON.parse(send.mock.calls[0]![0].body).aps).toEqual({ alert: { body: "New note on your post." }, "content-available": 1 });
+    expect(JSON.parse(send.mock.calls[0]![0].body).aps).toEqual({ alert: { body: "New note on your post." }, "content-available": 1, sound: "default" });
   });
 
-  it("adds sound only when requested on an alert", async () => {
+  it("plays the default sound on every alert without being asked, and never on a background wake", async () => {
     const send = transport();
-    await sendApplePush({ ...request, sound: "default", message: { kind: "alert", title: "Walk", body: "Still time today." } }, { credentials, transport: send });
+    await sendApplePush({ ...request, message: { kind: "alert", title: "Walk", body: "Still time today." } }, { credentials, transport: send });
     expect(JSON.parse(send.mock.calls[0]![0].body).aps.sound).toBe("default");
-    await sendApplePush({ ...request, sound: "default" }, { credentials, transport: send });
+    await sendApplePush(request, { credentials, transport: send });
+    expect(send.mock.calls[1]![0].headers).toMatchObject({ "apns-priority": "5", "apns-push-type": "background" });
+    expect(JSON.parse(send.mock.calls[1]![0].body).aps).toEqual({ "content-available": 1 });
+  });
+
+  it("adds a thread and interruption level only when requested on an alert", async () => {
+    const send = transport();
+    const options = { threadId: "murph.sync-interruption-reminder", interruptionLevel: "time-sensitive" } as const;
+    await sendApplePush({ ...request, ...options, message: { kind: "alert", title: "Open Murph", body: "Reopen Murph." } }, { credentials, transport: send });
+    expect(JSON.parse(send.mock.calls[0]![0].body).aps).toEqual({
+      alert: { body: "Reopen Murph.", title: "Open Murph" }, "content-available": 1, sound: "default",
+      "thread-id": "murph.sync-interruption-reminder", "interruption-level": "time-sensitive",
+    });
+    await sendApplePush({ ...request, ...options }, { credentials, transport: send });
     expect(JSON.parse(send.mock.calls[1]![0].body).aps).toEqual({ "content-available": 1 });
   });
 

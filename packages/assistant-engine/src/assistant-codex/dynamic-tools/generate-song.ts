@@ -1,4 +1,3 @@
-import type { GeneratedMediaFileRuntime } from '../generated-media-file.js'
 import * as z from '@murphai/contracts/zod-runtime'
 
 import type {
@@ -30,18 +29,11 @@ export const MURPH_GENERATE_SONG_TOOL = {
     'Describe a real artist, song, show, or franchise as generic musical traits, and never pass the name or copied lyrics.',
     'The result is a text receipt and the audio is already attached, so an error while displaying the receipt does not undo the attachment and is no reason to generate again.',
     'When the user asked only for the song, leave the final text empty unless the owning flow needs text with it.',
-    'In an authorized recap, output=file writes the song to an MP3 file and returns its path; nothing is attached. Use durationSeconds=20, put the exact lines to sing in lyrics and only the sound in prompt.',
   ].join(' '),
   inputSchema: {
     type: 'object',
     additionalProperties: false,
     properties: {
-      lyrics: {
-        type: 'array', minItems: 1, maxItems: 20,
-        items: { type: 'string', minLength: 1, maxLength: 200 },
-        description: 'The exact lines to sing, in order, one per item, with no labels like [Chorus]. Only with output=file and vocals.',
-      },
-      output: { type: 'string', enum: ['chat', 'file'] },
       prompt: {
         type: 'string',
         minLength: 1,
@@ -64,23 +56,24 @@ export const MURPH_GENERATE_SONG_TOOL = {
 
 const generateSongArgumentsSchema = z
   .object({
-    output: z.enum(['chat', 'file']).optional(),
     durationSeconds: z.number().int().min(3).max(300).default(30),
     instrumental: z.boolean().default(false),
     prompt: z.string().trim().min(1).max(4100),
-    lyrics: z.array(z.string().trim().min(1).max(200).refine(line => !/[\r\n]/u.test(line), 'Each lyrics item must be one line.')).min(1).max(20).optional(),
   })
   .strict()
-  .refine(args => !args.lyrics || args.output === 'file' && !args.instrumental && args.durationSeconds <= 120,
-    'Explicit lyrics require output=file, instrumental=false and durationSeconds at most 120.')
+
+const generateRecapSongArgumentsSchema = z.object({
+  draftPath: z.string().min(1).max(512), voice: z.string().trim().min(1).max(220),
+}).strict()
+export type GenerateRecapSongToolArgs = z.infer<typeof generateRecapSongArgumentsSchema>
 
 export function parseGenerateSongArguments(
   value: unknown,
 ):
-  | { ok: true; args: GenerateSongToolArgs }
+  | { ok: true; args: GenerateSongToolArgs | GenerateRecapSongToolArgs }
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
   return parseDynamicToolArguments({
-    schema: generateSongArgumentsSchema,
+    schema: z.union([generateSongArgumentsSchema, generateRecapSongArgumentsSchema]),
     toolName: 'murph.generate_song',
     value,
   })
@@ -90,7 +83,6 @@ export async function executeGenerateSongDynamicTool(input: {
   abortSignal?: AbortSignal | null
   args: GenerateSongToolArgs
   env?: NodeJS.ProcessEnv
-  fileRuntime?: GeneratedMediaFileRuntime | null
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
   recordPhaseTiming?: VoiceMemoPhaseTimingRecorder | null
   voiceMemoRuntime?: VoiceMemoToolRuntime | null
@@ -100,7 +92,6 @@ export async function executeGenerateSongDynamicTool(input: {
       abortSignal: input.abortSignal ?? null,
       args: input.args,
       env: input.env,
-      fileRuntime: input.fileRuntime,
       currentResponseMedia: input.currentResponseMedia ?? [],
       recordPhaseTiming: input.recordPhaseTiming ?? null,
       runtime: input.voiceMemoRuntime ?? null,

@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
 import { createHash } from "node:crypto";
@@ -1946,7 +1947,7 @@ function buildSponsorshipDigest(
 
 function requireValidDate(value: Date): Date {
   if (!(value instanceof Date) || !Number.isFinite(value.getTime())) {
-    throw new TypeError("Hosted group sponsorship date is invalid.");
+    throw new ContractValidationError("Hosted group sponsorship date is invalid.");
   }
   return value;
 }

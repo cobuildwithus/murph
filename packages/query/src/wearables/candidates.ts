@@ -22,6 +22,7 @@ import {
   dedupeExactMetricCandidates,
   dedupeSleepWindowCandidates,
 } from "./dedupe.ts";
+import { isPartialCountOfFinishedDay, resolveLocalDayEndMs } from "./metric-policies.ts";
 import {
   inferJunctionWearableDataOriginFromExternalRef,
   normalizeWearableOriginSourceSlug,
@@ -108,6 +109,7 @@ export function collectWearableDataset(
   const provenanceDiagnostics = new Map<string, WearableProvenanceDiagnostic>();
   const sleepStageCandidates: WearableMetricCandidate[] = [];
   const sleepWindows: WearableSleepWindowCandidate[] = [];
+  const stepsFreshness = trackStepsFreshness();
   const providerSet = filters.providers
     ? new Set(
         filters.providers
@@ -153,6 +155,9 @@ export function collectWearableDataset(
       }
       continue;
     }
+
+    // A fact about the whole vault, read before a provider or date filter narrows this call.
+    stepsFreshness.noteRecord(entity, provider, externalRef);
 
     if (providerSet && !providerSet.has(publicProvider)) {
       continue;
@@ -232,6 +237,7 @@ export function collectWearableDataset(
     ...dedupeExactMetricCandidates(sanitizedMetricCandidates.candidates).candidates,
     ...dedupeExactMetricCandidates(sleepStageAggregates).candidates,
   ].sort(compareMetricCandidateByDateDesc);
+  stepsFreshness.markPartialCounts(metricCandidates);
 
   return {
     activitySessionCandidates: activitySessions,
@@ -246,6 +252,56 @@ export function collectWearableDataset(
     rawMetricCandidates,
     sleepWindows: filteredSleepWindows,
     workoutFeatures: collectJunctionWorkoutFeatures(vault.events, filters),
+  };
+}
+
+/**
+ * Tells a steps total that covers its whole day from one last recorded partway
+ * through a day the vault has since seen finish. Both facts come from the steps
+ * totals themselves: each one's own day end, and the latest time any of them
+ * was recorded. Other records do not count as proof that time has passed,
+ * because some carry a time that stands for a day rather than an instant.
+ */
+function trackStepsFreshness() {
+  const dayEndMsByCandidateId = new Map<string, number>();
+  let evidenceThroughMs = Number.NEGATIVE_INFINITY;
+
+  return {
+    noteRecord(entity: CanonicalEntity, provider: string, externalRef: WearableExternalRef | null): void {
+      if (
+        entity.family !== "event"
+        || entity.kind !== "observation"
+        || mapScalarMetric(normalizeLowercaseString(entity.attributes.metric) ?? "", 0, null)?.metric !== "steps"
+      ) {
+        return;
+      }
+
+      for (const candidate of buildObservationMetricCandidates(entity, provider, externalRef)) {
+        const recordedMs = Date.parse(candidate.recordedAt ?? "");
+        if (recordedMs > evidenceThroughMs) {
+          evidenceThroughMs = recordedMs;
+        }
+        const dayEndMs = resolveLocalDayEndMs(
+          candidate.date,
+          normalizeNullableString(entity.attributes.timeZone),
+          candidate.dataOrigin?.timeZoneOffsetMinutes,
+        );
+        if (dayEndMs !== null) {
+          dayEndMsByCandidateId.set(candidate.candidateId, dayEndMs);
+        }
+      }
+    },
+    markPartialCounts(candidates: readonly WearableMetricCandidate[]): void {
+      for (const candidate of candidates) {
+        if (isPartialCountOfFinishedDay({
+          dayEndMs: dayEndMsByCandidateId.get(candidate.candidateId) ?? null,
+          evidenceThroughMs,
+          recordedAt: candidate.recordedAt,
+        })) {
+          candidate.partialCountOfFinishedDay = true;
+        }
+      }
+    },
   };
 }
 

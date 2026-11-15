@@ -1,6 +1,4 @@
-import { MURPH_GENERATE_SONG_TOOL } from '../../assistant-codex/dynamic-tools/generate-song.js'
-import { MURPH_GENERATE_IMAGE_TOOL } from '../../assistant-codex/dynamic-tool-catalog.js'
-import { MURPH_WRITE_RECAP_FILE_TOOL } from '../../assistant-codex/dynamic-tools/games.js'
+import { MURPH_GENERATE_IMAGE_RECAP_TOOL, MURPH_GENERATE_SONG_RECAP_TOOL, MURPH_WRITE_RECAP_FILE_TOOL } from '../../assistant-codex/dynamic-tools/games.js'
 import { GAME_PHOTO_CHAT_GUIDANCE, GAME_RESIDENT_GROUP_POINTER, GAME_PRIVATE_REMINDER_DIRECT_GUIDANCE, MURPH_GAME_LORE_TOOL, MURPH_READ_GAME_RECAP_TOOL, MURPH_WRITE_RECAP_TOOL } from "../../assistant-codex/dynamic-tools/games.js"
 import { resolveUsageOptimizerFeedbackScope } from '../weekly-usage-optimizer.js'
 import { supportsCodexTurnDeveloperInstructions } from '../../assistant-codex/config.js'
@@ -1992,6 +1990,6 @@ function recapShowTools(dynamicTools: ReturnType<typeof resolveMurphDynamicTools
   if (!context?.currentGameRecapScope?.()?.show) return dynamicTools;
   return [
     ...dynamicTools.filter(tool => !['read_game', 'write_recap', 'game_lore', 'generate_image', 'generate_song'].includes(tool.name)),
-    MURPH_READ_GAME_RECAP_TOOL, MURPH_WRITE_RECAP_FILE_TOOL, MURPH_GAME_LORE_TOOL, MURPH_GENERATE_IMAGE_TOOL, MURPH_GENERATE_SONG_TOOL,
+    MURPH_READ_GAME_RECAP_TOOL, MURPH_WRITE_RECAP_FILE_TOOL, MURPH_GAME_LORE_TOOL, MURPH_GENERATE_IMAGE_RECAP_TOOL, MURPH_GENERATE_SONG_RECAP_TOOL,
   ];
 }

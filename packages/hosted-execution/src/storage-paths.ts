@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { HOSTED_BROWSER_VAULT_REPLICA_SHARD_KINDS, HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS, type HostedBrowserVaultReplicaShardKind, type HostedBrowserVaultReplicaMetricBucketId } from "./contracts.ts";
 import { createHash } from "node:crypto";
 
@@ -189,14 +190,14 @@ export async function hostedGameMediaUserPrefix(input: {
 export function requireHostedGameMediaId(value: string): string {
   const normalized = requireStoragePathString(value, "Hosted game media id");
   if (!HOSTED_GAME_MEDIA_ID_PATTERN.test(normalized)) {
-    throw new TypeError("Hosted game media id is invalid.");
+    throw new ContractValidationError("Hosted game media id is invalid.");
   }
   return normalized;
 }
 
-/** Immutable generation and content identities, including historical slot keys. */
+/** Immutable generation and content identities, including historical slot keys. An `.mp4` is one part of a recap video. */
 export function requireHostedRecapMediaId(value: string): string {
-  if (!/^recap\/[a-f0-9]{32}\/(?:scene-[0-6]\.jpg|song\.mp3|[a-f0-9]{64}\.(?:jpg|mp3))$/u.test(value)) throw new TypeError("Recap media identity is invalid.");
+  if (!/^recap\/[a-f0-9]{32}\/(?:scene-[0-6]\.jpg|song\.mp3|[a-f0-9]{64}\.(?:jpg|mp3|mp4))$/u.test(value)) throw new ContractValidationError("Recap media identity is invalid.");
   return value;
 }
 
@@ -290,7 +291,7 @@ function resolveHostedStorageNamespaceId(input: { storageNamespaceId?: string | 
   if (typeof input.storageNamespaceId === "string" && input.storageNamespaceId.trim().length > 0) {
     const normalized = input.storageNamespaceId.trim();
     if (!HOSTED_STORAGE_NAMESPACE_PATTERN.test(normalized)) {
-      throw new TypeError("Hosted storage namespace id is invalid.");
+      throw new ContractValidationError("Hosted storage namespace id is invalid.");
     }
     return normalized;
   }
@@ -318,7 +319,7 @@ function digestHex(...parts: string[]): string {
 function requireStoragePathString(value: string, label: string): string {
   const normalized = value.trim();
   if (!normalized) {
-    throw new TypeError(`${label} must be a non-empty string.`);
+    throw new ContractValidationError(`${label} must be a non-empty string.`);
   }
   return normalized;
 }
@@ -326,7 +327,7 @@ function requireStoragePathString(value: string, label: string): string {
 function requireHostedWorkspaceSnapshotId(value: string): string {
   const normalized = requireStoragePathString(value, "Hosted workspace snapshot id");
   if (!HOSTED_WORKSPACE_SNAPSHOT_ID_PATTERN.test(normalized)) {
-    throw new TypeError("Hosted workspace snapshot id is invalid.");
+    throw new ContractValidationError("Hosted workspace snapshot id is invalid.");
   }
   return normalized;
 }
@@ -334,7 +335,7 @@ function requireHostedWorkspaceSnapshotId(value: string): string {
 function requireHostedMealPhotoKey(value: string): string {
   const normalized = requireStoragePathString(value, "Hosted meal photo key");
   if (!HOSTED_MEAL_PHOTO_KEY_PATTERN.test(normalized)) {
-    throw new TypeError("Hosted meal photo key is invalid.");
+    throw new ContractValidationError("Hosted meal photo key is invalid.");
   }
   return normalized;
 }
@@ -342,7 +343,7 @@ function requireHostedMealPhotoKey(value: string): string {
 function requireHostedMediaId(value: string): string {
   const normalized = requireStoragePathString(value, "Hosted media id");
   if (!HOSTED_MEDIA_ID_PATTERN.test(normalized)) {
-    throw new TypeError("Hosted media id is invalid.");
+    throw new ContractValidationError("Hosted media id is invalid.");
   }
   return normalized;
 }
@@ -353,7 +354,7 @@ function requireHostedPrivateMediaSha256(value: string): string {
     "Hosted private media sha256",
   );
   if (!/^[a-f0-9]{64}$/u.test(normalized)) {
-    throw new TypeError("Hosted private media sha256 is invalid.");
+    throw new ContractValidationError("Hosted private media sha256 is invalid.");
   }
   return normalized;
 }
@@ -374,7 +375,7 @@ export function browserVaultReplicaShardObjectKey(
   shard: HostedBrowserVaultReplicaShardKind,
 ): string {
   if (!objectKey.endsWith(".json")) {
-    throw new TypeError("Hosted browser vault replica object key must end in .json.");
+    throw new ContractValidationError("Hosted browser vault replica object key must end in .json.");
   }
   const suffix = shard === "metricsIndex" ? "metrics-index" : shard;
   return `${objectKey.slice(0, -".json".length)}.${suffix}.json`;
@@ -385,7 +386,7 @@ export function browserVaultReplicaMetricBucketObjectKey(
   bucketId: HostedBrowserVaultReplicaMetricBucketId,
 ): string {
   if (!objectKey.endsWith(".json")) {
-    throw new TypeError("Hosted browser vault replica object key must end in .json.");
+    throw new ContractValidationError("Hosted browser vault replica object key must end in .json.");
   }
   return `${objectKey.slice(0, -".json".length)}.metric-bucket-${bucketId}.json`;
 }

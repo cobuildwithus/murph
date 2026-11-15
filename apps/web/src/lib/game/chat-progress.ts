@@ -6,11 +6,15 @@ const CHAT_DAY_WINDOW = 14;
 
 type Progress = NonNullable<HostedGameChatState["games"][number]["progress"]>;
 
-/** Shared metadata only. Never expose media, entry words or private app labels. */
-export function gameChatProgress(state: RuleState, now: Date): Progress {
+/**
+ * Shared metadata only. Never expose media, entry words or private app labels.
+ * `asOf` is the game's clock at its end for a finished game, so its days stop
+ * where the game did; `checkedAt` stays the time of this read.
+ */
+export function gameChatProgress(state: RuleState, now: Date, asOf: Date = now): Progress {
   const entries = indexGameEntries(state.entries);
   return { checkedAt: now.toISOString(), players: state.players.filter(player => state.game.seats !== 10 || !player.leftAt).map((player) => {
-    const today = dayIndexAt(player, now);
+    const today = dayIndexAt(player, asOf);
     const current = state.game.status === "live" && today !== null && today >= 0 && today < state.game.lengthDays ? today : null;
     const schedule = currentTerms(state.game.terms).schedule;
     const endDay = Math.min(state.game.lengthDays, Math.max(CHAT_DAY_WINDOW, (today ?? -1) + 1));

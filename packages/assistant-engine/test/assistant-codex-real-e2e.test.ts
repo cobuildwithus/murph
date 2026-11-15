@@ -19556,6 +19556,81 @@ describeRealCodex('real Codex official weather-alert context e2e', () => {
   )
 })
 
+describeRealCodex('real Codex source silence visibility e2e', () => {
+  it.each(['stopped delivery', 'recent connection', 'daily source preference'] as const)(
+    'source silence visibility: %s', async (scenario) => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-source-visibility-e2e-'))
+      const requests: AssistantHostedDeviceToolRequest[] = []
+      try {
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          // The empty wearable read is supplied by the scenario; this turn tests the connection owner.
+          threadConfig: { 'features.shell_tool': false },
+          codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+          codexHome: config.codexHome, env: config.env,
+          developerInstructions: buildAssistantSystemPrompt({
+            assistantCliContract: null,
+            assistantHostedDeviceConnectProviders: [{ label: 'Fitbit', provider: 'fitbit' }],
+            channel: 'linq', cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'direct',
+            currentLocalDate: '2030-03-12', currentTimeZone: 'UTC',
+            hostedRuntime: true, onboardingGuidance: false, ordinaryInboundTurn: true,
+          }),
+          dynamicTools: [MURPH_DEVICE_TOOL],
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            currentInvocationScope: () => ({ conversationScope: 'direct',
+              origin: { kind: 'accepted_input', assistantInputId: 'ain_00000000000000000000000000000027', sessionId: 'source-visibility' },
+              originSessionId: 'source-visibility' }),
+            deviceTool: { request: async (request) => {
+              requests.push(request)
+              if (request.action === 'list_accounts') return {
+                action: 'list_accounts', provider: null, sourceProvider: null,
+                accounts: [{ accountId: 'synthetic-aggregator', provider: 'junction', status: 'active',
+                  displayName: null, lastErrorCode: null, lastSyncCompletedAt: '2030-03-12T12:00:00.000Z',
+                  sources: [{ sourceProvider: 'google_health', status: 'connected',
+                    firstSeenAt: scenario === 'recent connection' ? '2030-03-12T11:30:00.000Z' : '2030-02-01T00:00:00.000Z',
+                    lastDataAt: scenario === 'recent connection' ? null : '2030-03-05T00:00:00.000Z' }],
+                }],
+              }
+              if (request.action === 'configure_no_data_outreach' && scenario === 'daily source preference') return {
+                action: 'configure_no_data_outreach', effectiveAfterDays: 12, setting: 'custom',
+                sourceProvider: request.sourceProvider, status: 'saved',
+              }
+              throw new Error('Unexpected device effect')
+            } },
+            sendVaultFile: async () => { throw new Error('Unexpected file send') }, vaultFileSendAvailable: false,
+          },
+          model: config.model, modelProvider: config.modelProvider,
+          prompt: scenario === 'daily source preference'
+            ? 'Please wait twelve days before checking in about no data from my Fitbit. Check which source it uses and save that preference.'
+            : 'It is March 12, 2030 at noon UTC. My recent wearable read for March 11 returned no records. Check my device sources and explain why there may be no recent data. Do not refresh anything.',
+          reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+        })
+        expect(requests.filter((request) => request.action === 'list_accounts')).toHaveLength(1)
+        expect(requests.filter((request) => request.action !== 'list_accounts')).toEqual(
+          scenario === 'daily source preference' ? [{ action: 'configure_no_data_outreach',
+            mode: 'after_days', afterDays: 12, sourceProvider: 'google_health' }] : [],
+        )
+        const reply = result.finalMessage
+        expect(reply).not.toMatch(/permission error|permission denied|file-permission|command not found/iu)
+        expect(reply).not.toMatch(/(?:you are|you're|source is|account is) disconnected|you need to reconnect|cause (?:is )?unknown/iu)
+        if (scenario === 'stopped delivery') expect(reply).toMatch(/March 5|Mar(?:ch)?\.? 5|stopped|hasn.t sent|no new data|last (?:data|delivery|received|update)/iu)
+        if (scenario === 'recent connection') {
+          expect(reply).toMatch(/import|backfill|history/iu)
+          expect(reply).toMatch(/may|might|could|likely|still/iu)
+        }
+        if (scenario === 'daily source preference') expect(reply).toMatch(/12|twelve/iu)
+        process.stdout.write(`[source-silence-visibility] ${JSON.stringify({ scenario, reply })}\n`)
+      } finally {
+        await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+      }
+    }, 300_000,
+  )
+})
+
 describeRealCodex('real Codex adaptive wearable no-data outreach e2e', () => {
   it.each([
     { label: 'Apple Health', sourceProvider: 'apple_health_kit' },
@@ -19691,7 +19766,7 @@ describeRealCodex('real Codex adaptive wearable no-data outreach e2e', () => {
           conversationScope: 'direct',
           kind: 'unsupported-provider',
           prompt:
-            'My Fitbit is intentionally quiet sometimes. Save a ten-day no-data check-in preference for Fitbit.',
+            'My Strava is intentionally quiet sometimes. Save a ten-day no-data check-in preference for Strava.',
           scheduled: false,
         },
         {
@@ -20394,6 +20469,53 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
           providerOperations,
         })}\n`,
       )
+    } finally {
+      await removeRealCodexTemporaryPath(workingDirectory)
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 720_000)
+})
+
+// A tool result past the model's output limit is shown with its middle cut out.
+// The claim: the model still answers from every record, not only the ones it was shown.
+describeRealCodex('real Codex oversized tool result e2e', () => {
+  it('answers from every record of a connected-app result larger than the model is shown', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-oversized-result-e2e-'))
+    // Opaque codes: none can be guessed from its neighbours, and each must be paired with its own order.
+    const codes = Array.from({ length: 24 }, (_, index) => `PICKUP-${createHash('sha256').update(`synthetic-order-${index}`).digest('hex').slice(0, 6).toUpperCase()}`)
+    const filler = 'Thank you for shopping at Synthetic Depot. Your order is being prepared by our team and will be ready soon. '
+    const messages = codes.map((code, index) => ({ id: `mail_synthetic_${index + 1}`, subject: `Order ${index + 1} is ready`,
+      from: 'orders@synthetic-depot.example', body: `${filler.repeat(13)}Your pickup code is ${code}. ${filler.repeat(13)}` }))
+    const executes: unknown[] = []
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        allowFinishWithoutReply: false, approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined, codexHome: config.codexHome,
+        abortSignal: AbortSignal.timeout(600_000),
+        dynamicTools: [MURPH_CONNECTED_APPS_MANAGE_TOOL, MURPH_CONNECTED_APPS_SEARCH_TOOL, MURPH_CONNECTED_APPS_EXECUTE_TOOL],
+        env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot() },
+        hostedToolContext: {
+          computerToolsAvailable: false,
+          connectedApps: { request: async request => {
+            if (request.operation === 'manage') return { result: { accounts: [{ alias: 'Personal', id: 'gmail_synthetic', status: 'ACTIVE', toolkit: 'gmail' }] } }
+            if (request.operation === 'search') return { result: { success: true, tool_schemas: { GMAIL_FETCH_EMAILS: {
+              description: 'Fetch emails matching a query, with their full bodies.',
+              input_schema: { type: 'object', additionalProperties: false, properties: { query: { type: 'string' }, max_results: { type: 'integer' } }, required: ['query'] } } } } }
+            if (request.operation !== 'execute') throw new Error('Unexpected provider operation.')
+            executes.push(request.input.arguments)
+            return { result: { messages } }
+          } },
+          currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+          sendVaultFile: async () => { throw new Error('Unexpected file send.') }, vaultFileSendAvailable: false,
+        },
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: 'I have 24 order emails from Synthetic Depot in my Gmail. Read them and list the pickup code from every one, numbered by order.',
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const missing = codes.flatMap((code, index) => new RegExp(`(^|\\D)${index + 1}\\D[^\\n]*${code}`, 'mu').test(result.finalMessage) ? [] : [index + 1])
+      process.stdout.write(`[oversized-result-proof] ${JSON.stringify({ model: config.model, resultBytes: Buffer.byteLength(JSON.stringify({ messages })), executes: executes.length, missing })}\n`)
+      expect(missing).toEqual([])
     } finally {
       await removeRealCodexTemporaryPath(workingDirectory)
       await removeRealCodexTemporaryPaths(config.temporaryPaths)
@@ -22249,6 +22371,48 @@ describeRealCodex('real Codex member runtime troubleshooting e2e', () => {
 })
 
 describeRealCodex('real Codex direct operator diagnostic e2e', () => {
+  it('source silence visibility diagnostic uses canonical records over stale projections', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-canonical-diagnostic-e2e-'))
+    let permissionHomePaths: string[] = []
+    const observer = vi.spyOn(clinicalExtractionCodex, 'executeCodexAppServerTurn')
+    try {
+      await initializeVault({ timezone: 'UTC', vaultRoot })
+      await importWearableArrivalFixture(vaultRoot)
+      const projectionPath = path.join(vaultRoot, '.runtime', 'projections', 'synthetic-coverage.json')
+      await mkdir(path.dirname(projectionPath), { recursive: true })
+      const staleProjection = JSON.stringify({ builtAt: '2026-07-14T00:00:00.000Z', workouts: [] })
+      await writeFile(projectionPath, staleProjection)
+      const canonicalBefore = await snapshotRealCodexCanonicalVault(vaultRoot)
+      const permissionConfig = await materializeRealCodexHostedPermissionHome(config)
+      permissionHomePaths = permissionConfig.temporaryPaths
+      const result = await executeOperatorDiagnostic({
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: permissionConfig.codexHome, env: config.env, model: config.model,
+        modelProvider: config.modelProvider, feedbackDiagnostic: true,
+        question: 'Does the vault contain any workout records for July 15, 2026? A cached coverage file in runtime projections lists no workouts. Establish whether records are actually missing. Report only the count and evidence basis, without record contents or identifiers.',
+        reasoningEffort: 'low', workspaceRoot: vaultRoot,
+        onProviderUsage: ({ usage }) => recordRealCodexProviderUsage(usage.usage),
+      })
+      expect(observer).toHaveBeenCalledTimes(1)
+      const turn = await observer.mock.results[0]!.value
+      const commands = readCapabilityRoutingActions(turn.jsonEvents)
+        .filter((action) => action.kind === 'command')
+      expect(commands.some((action) => /vault-cli/iu.test(action.command))).toBe(false)
+      expect(result.answer).toMatch(/(?:1|one) (?:canonical )?workout|workout(?:s| records?)?[^.]{0,30}(?:1|one)/iu)
+      expect(result.answer).toMatch(/canonical/iu)
+      expect(result.answer).toMatch(/stale|cache|projection/iu)
+      expect(result.answer).not.toMatch(/command not found|permission denied|no workout records|records are missing/iu)
+      expect(result.answer).not.toContain(vaultRoot)
+      expect(await snapshotRealCodexCanonicalVault(vaultRoot)).toEqual(canonicalBefore)
+      expect(await readFile(projectionPath, 'utf8')).toBe(staleProjection)
+      process.stdout.write('[source-silence-visibility diagnostic] ' + result.answer.replaceAll(/\s+/gu, ' ').trim() + '\n')
+    } finally {
+      observer.mockRestore()
+      await removeRealCodexTemporaryPaths([vaultRoot, ...permissionHomePaths, ...config.temporaryPaths])
+    }
+  }, 360_000)
+
   it('returns de-identified feedback reproduction from private synthetic evidence', async () => {
     const config = await resolveRealCodexE2eConfig()
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-feedback-diagnostic-e2e-'))
@@ -48684,6 +48848,100 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
       throw error;
     } finally { await removeRealCodexTemporaryPaths([vault, ...permissionHome.temporaryPaths, ...config.temporaryPaths]); }
   }, 600_000)
+  // Production instructions and tools, a real model, synthetic Web and media.
+  // The claim is about the tool surface: nothing the model sends for a scene is refused.
+  it('pair recap show scene requests are accepted on the first try', async () => {
+    const config = await resolveRealCodexE2eConfig();
+    const permissionHome = await materializeRealCodexHostedPermissionHome(config);
+    const vault = await mkdtemp(path.join(tmpdir(), 'murph-recap-scenes-'));
+    const { buildGameRecapInstructions } = await import('@murphai/hosted-execution/runtime-control');
+    const { createRecapShowLiveProviders } = await import('../src/recap-show-testkit.ts');
+    const gameId = 'synthetic-scenes', eventId = `game-recap:${gameId}`, pairFingerprint = '0123456789abcdef0123456789abcdef';
+    const players = [{ memberId: 'synthetic-a', name: 'Player A' }, { memberId: 'synthetic-b', name: 'Player B' }];
+    const posts: [string, string, string][] = [
+      ['Player A', 'mon', 'Twenty push-ups before coffee'], ['Player B', 'mon', 'Twenty push-ups, counted by the dog'],
+      ['Player A', 'tue', 'Push-ups on the purple mat'], ['Player B', 'tue', 'Did them in the hallway at 11:58pm'],
+      ['Player A', 'wed', 'Push-ups next to the laundry basket'],
+      ['Player A', 'thu', 'Twenty more, the basket is still full'], ['Player B', 'thu', 'Back at it, hallway again'],
+      ['Player A', 'fri', 'Last set, mat retired with honors'],
+    ];
+    const entries = posts.map(([playerName, day, text]) => ({ entryId: `synthetic-${day}-${playerName.slice(-1).toLowerCase()}`, playerName, kind: 'photo', text, visibleToBoth: true }));
+    const chat = [
+      { playerName: 'Player B', text: 'I am not missing a single day this week, write that down.' },
+      { playerName: 'Player A', text: 'Written down.' },
+      { playerName: 'Player B', text: 'Wednesday does not count, the hallway was being painted.' },
+      { playerName: 'Player A', text: 'The laundry basket saw everything.' },
+      // A real week of chat is long. Keep the tool result past Codex's output limit.
+      ...Array.from({ length: Number(process.env.MURPH_RECAP_JOURNEY_CHAT_LINES ?? 110) }, (_, index) => ({ playerName: index % 2 ? 'Player A' : 'Player B',
+        text: [`Did you post yet or are you stalling again, it is nearly ${7 + index % 5} already`, 'Posted. Check the app before you start making accusations',
+          `That does not look like twenty to me, I counted maybe ${11 + index % 8}`, 'Count again with your glasses on, the dog is my witness',
+          'Fine. Tomorrow I am going first and you will see how it is done'][index % 5]! })),
+    ];
+    const providers = await createRecapShowLiveProviders({
+      // A real game record is large: every post carries its time, place and numbers.
+      game: { id: gameId, maxPlayers: 2, recapShow: true, task: 'Twenty push-ups a day, with a photo', prize: 'Loser folds the winner’s laundry', lengthDays: 5,
+        days: ['mon', 'tue', 'wed', 'thu', 'fri'].map((day, dayIndex) => ({ day, posts: posts.filter(post => post[1] === day).map(([player, , text], postIndex) => ({
+          player, text, postedAt: `2026-11-0${2 + dayIndex}T${postIndex ? '23:58' : '07:12'}:00-05:00`, incomplete: false, proveIt: null,
+          data: { reps: 20, durationSeconds: 61 + dayIndex * 7 + postIndex, place: postIndex ? 'hallway' : 'bedroom',
+            heartRate: Array.from({ length: 24 }, (_, second) => ({ second: second * 3, beatsPerMinute: 92 + (second * 7 + dayIndex * 5 + postIndex * 11) % 41 })) } })) })) },
+      players, entries, chat, result: players.map((player, index) => ({ ...player, score: index ? 3 : 5 })),
+    });
+    const events: unknown[] = [];
+    try {
+      await initializeVault({ timezone: 'UTC', vaultRoot: vault });
+      await mkdir(path.join(vault, 'games'), { recursive: true });
+      await writeFile(path.join(vault, `games/lore-${pairFingerprint}.md`), '# Synthetic pair lore\nThe laundry basket is a running bit.\n');
+      const target = createAssistantModelTarget({ approvalPolicy: 'never', codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND), codexHome: permissionHome.codexHome,
+        model: config.model, modelProvider: config.modelProvider, provider: 'codex-cli', reasoningEffort: 'low', sandbox: 'workspace-write' });
+      if (!target) throw new Error('Expected real Codex target.');
+      await sendAssistantNotificationLocal({ channel: 'linq', deliveryTarget: 'synthetic-game-room', threadId: 'synthetic-game-room', threadIsDirect: false,
+        deliveryDispatchMode: 'queue-only', deliveryIdempotencyKey: eventId, deliveryDedupeToken: eventId,
+        executionContext: { hosted: { defaultTarget: target, memberId: 'synthetic-room', userEnvKeys: [],
+          gameRecapScope: { gameId, eventId, pairFingerprint, show: true },
+          groupTool: { request: providers.control }, providerFetch: providers.providerFetch } },
+        instructions: buildGameRecapInstructions([], undefined, false, true),
+        responsePolicy: { kind: 'require_game_recap', gameId, eventId, pairFingerprint, show: true },
+        onTraceEvent: event => events.push(event.rawEvent),
+        turnEnvironment: { currentWorkingDirectory: vault, env: { ...config.env, OPENAI_API_KEY: 'synthetic', ELEVENLABS_API_KEY: 'synthetic' } },
+        turnTrigger: 'manual-deliver', vault, workingDirectory: vault,
+      });
+    } finally {
+      const ids = new Set(providers.material.references.map(reference => reference.id));
+      const media = readCapabilityRoutingActions(events).flatMap(action => action.kind === 'dynamic' && ['generate_image', 'generate_song', 'write_recap'].includes(action.tool) ? [action] : []);
+      const actions = readCapabilityRoutingActions(events);
+      const deliveries = await listAssistantOutboxIntents(vault);
+      const proof = { model: config.model, saved: providers.saved.length, providerCalls: providers.providerCalls,
+        replies: deliveries.map(delivery => ({ text: delivery.message, mediaCount: delivery.media?.length ?? 0 })),
+        workingFilesInVault: existsSync(path.join(vault, 'tmp/recap')),
+        readGame: actions.flatMap(action => action.kind === 'dynamic' && action.tool === 'read_game' ? [{ bytes: Buffer.byteLength(action.output) }] : []),
+        commands: actions.flatMap(action => action.kind === 'command' ? [action.command.replace(/[a-f0-9]{32,64}/gu, '<hex>').slice(0, 140)] : []).slice(0, 20),
+        failedCommands: actions.flatMap(action => action.kind === 'command' && !action.ok
+          ? [{ command: action.command.replace(/[a-f0-9]{32,64}/gu, '<hex>').slice(0, 400), output: action.output.replace(/[a-f0-9]{32,64}/gu, '<hex>').slice(-300) }] : []),
+        calls: media.map(call => ({ tool: call.tool, success: call.success, output: call.success ? '' : call.output.slice(0, 300),
+          keys: Object.keys(call.argumentsValue).sort(),
+          ...(call.tool === 'generate_image' ? { references: (Array.isArray(call.argumentsValue.referenceImageRefs) ? call.argumentsValue.referenceImageRefs : []).map(ref =>
+            typeof ref !== 'string' ? typeof ref : ids.has(ref) ? 'id' : ids.has(path.basename(ref, '.jpg')) ? 'path' : ref.slice(0, 60)) } : {}) })) };
+      process.stdout.write(`[recap scene proof] ${JSON.stringify(proof).replace(/\/Users\/[^/\s"]+/gu, '<HOME_DIR>')}\n`);
+      await removeRealCodexTemporaryPaths([vault, ...permissionHome.temporaryPaths, ...config.temporaryPaths]);
+      expect(proof.calls.filter(call => call.tool !== 'write_recap' && !call.success)).toEqual([]);
+      expect(proof.calls.some(call => call.tool === 'generate_image')).toBe(true);
+      expect(proof.saved).toBe(1);
+      const songCalls = media.filter(call => call.tool === 'generate_song');
+      expect(songCalls).toHaveLength(1);
+      expect(Object.keys(songCalls[0]!.argumentsValue).sort()).toEqual(['draftPath', 'voice']);
+      const song = providers.assets.find(asset => asset.slot === 'song');
+      expect(song?.songStartMs).toBeGreaterThan(0);
+      expect(song?.durationMs).toBeGreaterThan(20_000);
+      expect(song?.wordsTimestamps?.length).toBeGreaterThan(0);
+      expect(media.at(-1)?.tool).toBe('write_recap');
+      expect(providers.providerCalls.filter(call => call.kind === 'song')).toHaveLength(1);
+      expect(proof.replies).toEqual([{ text: `${providers.saved[0]!.chatLine}\nWatch the recap: https://recaps.murph.test/recap/synthetic-game`, mediaCount: 0 }]);
+      // What read_game returns fits in what the model is shown, so nothing is cut out of it.
+      for (const read of proof.readGame) expect(read.bytes).toBeLessThan(10_000 * 4);
+      // Photos, media and the chat copy live in runtime scratch, which the room's saved workspace never includes.
+      expect(proof.workingFilesInVault).toBe(false);
+    }
+  }, 900_000)
 
 })
 
@@ -49448,6 +49706,122 @@ describeRealCodex('real Codex game incomplete day e2e', () => {
       expect(reply.trim().split('\n')).toHaveLength(1)
       expect(reply).not.toMatch(/score|streak|point|day [0-9]|dayIndex|game_synthetic/iu)
       if (outcome !== 'other_player') expect(reply).not.toMatch(/Sam/iu)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+})
+
+describeRealCodex('real Codex finished game day correction e2e', () => {
+  const corrected = "Maya's check-in for Tuesday, March 5 now counts. That changes the result. The game ended in a 6–6 tie."
+  it.each([
+    { name: 'finished game counts a missed day and says the result changed', message: 'Murph, the game is over but I never posted last Tuesday, March 5. I did read my chapter. Count it, and make my post say: Finished chapter nine on the train',
+      rematch: false, listsDays: true, outcome: 'changed' as const },
+    { name: 'finished game beside a live rematch counts the day in the finished game', message: 'Murph, I never posted on Tuesday March 5 in our last game, but I did read. Count it, and make my post say: Finished chapter nine on the train',
+      rematch: true, listsDays: true, outcome: 'same' as const },
+    { name: 'finished game past its seven days says the result is final', message: 'Murph, I never posted on Tuesday March 5 in our last game, but I did read. Count it, and make my post say: Finished chapter nine on the train',
+      rematch: false, listsDays: false, outcome: 'final' as const },
+    // A second game that is still live also has March 5 unposted, so the date alone cannot pick a game.
+    { name: 'finished game and a live game on the same date asks which game', message: 'Murph, I never posted on Tuesday March 5 but I did it. Count that day for me.',
+      rematch: false, overlapping: true, listsDays: true, outcome: 'ask' as const },
+  ])('$name', async (scenario) => {
+    const { outcome } = scenario
+    const occurredAt = '2030-03-13T16:00:00.000Z'
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-game-finished-e2e-'))
+    const { MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL } = await import('../src/assistant-codex/dynamic-tools/games.js')
+    const inputId = 'ain_' + 'c'.repeat(32)
+    const calls: Array<import('@murphai/hosted-execution/runtime-control').HostedRuntimeGroupToolRequest> = []
+    const players = [{ memberId: 'player_maya', seat: 0, firstName: 'Maya', dayOne: '2030-03-04', timeZone: 'America/New_York' }, { memberId: 'player_sam', seat: 1, firstName: 'Sam', dayOne: '2030-03-04', timeZone: 'America/New_York' }]
+    const terms = { n: 1, fromDay: 0, checkInKind: 'any' as const, tasks: [{ seat: 0, text: 'Read a chapter' }, { seat: 1, text: 'Walk' }], schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, stakes: [{ kind: 'prize' as const, item: 'Pick movie night' }] }
+    const closed = { canStartNow: false, canEdit: false, canEditSchedule: false, canEditStartDate: false, editableFromDay: null }
+    const days = (memberId: string, missed: number) => ({ memberId, score: 6, target: 7, currentDayIndex: null, currentEntryId: null, attemptsRemaining: 0,
+      days: Array.from({ length: 7 }, (_, dayIndex) => ({ dayIndex, date: `2030-03-${String(4 + dayIndex).padStart(2, '0')}`, status: dayIndex === missed ? 'missed' as const : 'posted' as const })) })
+    // Sam won 6 to 5 with Maya's March 5 and March 8 missing. The app lists a finished game's days only while they can be corrected.
+    const finished = (maya: number) => ({ id: 'game_done', status: 'settled' as const, lengthDays: 7, startsOn: '2030-03-04', terms, players, pendingChange: null, changeControls: closed,
+      ...(scenario.listsDays ? { progress: { checkedAt: occurredAt, players: [{ ...days('player_maya', 1), score: maya }, days('player_sam', 5)] } } : {}),
+      result: { scores: [{ memberId: 'player_maya', seat: 0, score: maya, misses: 7 - maya }, { memberId: 'player_sam', seat: 1, score: 6, misses: 1 }],
+        tickets: maya === 6 ? [] : [{ owedByMemberId: 'player_maya', owedToMemberId: 'player_sam', what: 'Pick movie night', status: 'open' as const, count: 1 }] } })
+    const rematch = { id: 'game_live', status: 'live' as const, lengthDays: 7, startsOn: '2030-03-12', terms,
+      players: players.map(player => ({ ...player, dayOne: '2030-03-12' })), pendingChange: null,
+      changeControls: { canStartNow: false, canEdit: true, canEditSchedule: true, canEditStartDate: false, canEditTasks: false, canEditStakes: true, editableFromDay: 2 },
+      progress: { checkedAt: occurredAt, players: ['player_maya', 'player_sam'].map(memberId => ({ memberId, score: 1, target: 7, currentDayIndex: 1, currentEntryId: null, attemptsRemaining: 2,
+        days: [{ dayIndex: 0, date: '2030-03-12', status: 'posted' as const }, { dayIndex: 1, date: '2030-03-13', status: 'due' as const }] })) } }
+    const plank = { ...rematch, id: 'game_plank', lengthDays: 14, startsOn: '2030-03-04', players, terms: { ...terms, tasks: [{ seat: 0, text: 'Plank for a minute' }, { seat: 1, text: 'Plank for a minute' }] },
+      progress: { checkedAt: occurredAt, players: ['player_maya', 'player_sam'].map(memberId => ({ memberId, score: 8, target: 14, currentDayIndex: 9, currentEntryId: null, attemptsRemaining: 2,
+        days: Array.from({ length: 10 }, (_, dayIndex) => ({ dayIndex, date: `2030-03-${String(4 + dayIndex).padStart(2, '0')}`, status: dayIndex === 9 ? 'due' as const : dayIndex === 1 && memberId === 'player_maya' ? 'missed' as const : 'posted' as const })) })) } }
+    const games = (maya: number) => [...(scenario.rematch ? [rematch] : []), ...('overlapping' in scenario ? [plank] : []), finished(maya)]
+    const promptResult = buildAssistantAutoReplyPrompt([{
+      actorIsSelf: false, attachmentDescriptors: [],
+      attachmentEvidence: { attachments: [], optionalInboxCaptureId: null, reasonCode: null, source: 'manual', status: 'available', updatedAt: occurredAt },
+      conversation: { accountId: null, actorId: 'player_maya', actorIsSelf: false, source: 'linq', threadId: 'synthetic-game-chat', threadIsDirect: false },
+      inputId, occurredAt, receivedAt: occurredAt, projection: null, replyTarget: null, source: 'linq',
+      sourceMetadata: null, telegramMetadata: null, text: scenario.message,
+      linqSpeakerLabel: { displayName: 'Maya', source: 'profile-name' },
+    }], { timeZone: 'America/New_York' })
+    if (promptResult.kind !== 'ready') throw new Error('Expected a ready synthetic group prompt.')
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined, codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({ assistantDynamicContextPrompts: [GAME_RESIDENT_GROUP_POINTER],
+          assistantCliContract: null, channel: 'linq',
+          cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group',
+          currentLocalDate: '2030-03-13', currentInstant: occurredAt, currentTimeZone: 'America/New_York',
+          hostedRuntime: true, onboardingGuidance: false, turnTrigger: null,
+        }),
+        dynamicTools: [MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL], env: config.env,
+        hostedToolContext: {
+          computerToolsAvailable: false, vaultFileSendAvailable: false,
+          groupTool: { request: async (request) => {
+            calls.push(request)
+            if (request.action === 'read_game') return { action: 'read_game', result: { status: 'ok', state: { games: games(5) } } }
+            if (request.action !== 'update_game') throw new Error('No other game action is authorized for this journey.')
+            expect(request.origin.assistantInputId).toBe(inputId)
+            // The app decides: a game past its seven days refuses with the plain reason, whatever Murph tried.
+            if (outcome === 'final') return { action: 'update_game', result: { status: 'rejected', error: 'GAME_NOT_LIVE: This game ended more than 7 days ago, so its result is final.' } }
+            const { text, ...update } = request.update as typeof request.update & { text?: string }
+            expect(update).toEqual({ operation: 'mark_complete', gameId: 'game_done', date: '2030-03-05' })
+            expect(text?.replace(/[.!]$/u, '')).toBe('Finished chapter nine on the train')
+            return { action: 'update_game', result: { status: 'ok', state: { games: games(6) }, dayOutcome: { date: '2030-03-05', status: 'credited' as const },
+              ...(outcome === 'changed' ? { chatLine: corrected } : {}) } }
+          } },
+          currentUserActionScope: () => ({ conversationId: 'synthetic-game-chat', inboundMailboxItemIds: [], recipientKey: 'synthetic-game-recipient', acceptedInputIds: [inputId], originSessionId: 'synthetic-game-session', conversationScope: 'group' }),
+          currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [], sendVaultFile: async () => { throw new Error('No file send authorized.') },
+        },
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: promptResult.prompt,
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const reply = result.finalMessage ?? ''
+      const writes = calls.filter(call => call.action === 'update_game')
+      process.stdout.write(`[game-finished] ${JSON.stringify({ scenario: scenario.name, outcome, reply, actions: calls.map((call) => call.action) })}\n`)
+      expect(calls[0]?.action).toBe('read_game')
+      expect(reply).not.toMatch(/game_done|game_live|game_plank|dayIndex|\u2014/u)
+      if (outcome === 'ask') {
+        // Two games fit the date, so Murph asks once which one, by task, and changes nothing.
+        expect(writes).toHaveLength(0)
+        expect(reply.match(/\?/gu)).toHaveLength(1)
+        expect(reply).toMatch(/read|chapter/iu)
+        expect(reply).toMatch(/plank/iu)
+        expect(reply).not.toMatch(/now counts|is counted|counted it/iu)
+      } else if (outcome === 'final') {
+        // Nothing is counted and nobody is told it was: the result stands, in plain words.
+        expect(writes.length).toBeLessThanOrEqual(1)
+        expect(reply).toMatch(/final|7 days|seven days|ended|can[’']?t|cannot|no longer/iu)
+        expect(reply).not.toMatch(/now counts|is counted|counted it|I(?:[’']ve| have) counted/iu)
+      } else {
+        expect(writes).toHaveLength(1)
+        expect(calls.length).toBeLessThanOrEqual(3)
+        expect(reply.trim().split('\n')).toHaveLength(1)
+        // The changed result is the app's exact line. An unchanged one gets the usual one-line confirmation, with no result talk.
+        if (outcome === 'changed') expect(reply.trim()).toBe(corrected)
+        else {
+          expect(reply).toMatch(/March 5|Mar(?:ch)?\.? 5|5 March|Tuesday/iu)
+          expect(reply).toMatch(/count|posted|done|complete/iu)
+          expect(reply).not.toMatch(/tie|won|wins|score|6|result|Sam|\?/iu)
+        }
+      }
     } finally {
       await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
     }

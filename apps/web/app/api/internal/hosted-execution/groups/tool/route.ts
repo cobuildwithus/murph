@@ -1,3 +1,4 @@
+import { parseInput, RequestInputError } from "@murphai/hosted-execution/request-input";
 import { readHostedExecutionRuntimeAuthority } from "@murphai/hosted-execution/auth";
 import {
   parseHostedRuntimeGroupToolRequest,
@@ -51,11 +52,12 @@ export const POST = withJsonError(async (request: Request) => {
   const { payload, userId: memberId } = await requireHostedCloudflareCallbackJsonRequest(request, {
     maxBodyBytes: HOSTED_WEB_REQUEST_MAX_BYTES,
   });
-  const runtimeAuthority = readHostedExecutionRuntimeAuthority(new URL(request.url), request.headers);
+  const runtimeAuthority = parseInput(request.url, () => readHostedExecutionRuntimeAuthority(new URL(request.url), request.headers));
   const currentSenderWire = readHostedCurrentSenderWire(payload);
-  const body = parseHostedRuntimeGroupToolRequest(currentSenderWire.payload, {
-    privateMediaDeliveryOrigin: readHostedExecutionControlOrigin(),
-  });
+  const privateMediaDeliveryOrigin = readHostedExecutionControlOrigin();
+  const body = parseInput(currentSenderWire.payload, (value) =>
+    parseHostedRuntimeGroupToolRequest(value, { privateMediaDeliveryOrigin }),
+  );
   const supportedProjectionScopeKeys =
     readHostedVaultShareSupportedProjectionScopeKeysFromRequest(request);
   const membershipInventoryProtocol = new URL(request.url).searchParams.get(
@@ -172,7 +174,7 @@ function readHostedCurrentSenderWire(
       ) !== HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE
       || readHostedCurrentSenderWireAction(payload) !== "ask_current_sender"
     ) {
-      throw new TypeError("Hosted current-sender protocol is invalid.");
+      throw new RequestInputError("Hosted current-sender protocol is invalid.");
     }
     return {
       compatibility: null,
@@ -185,7 +187,7 @@ function readHostedCurrentSenderWire(
 
   const action = readHostedCurrentSenderWireAction(payload);
   if (action === "ask_current_sender") {
-    throw new TypeError("Hosted current-sender group protocol marker is required.");
+    throw new RequestInputError("Hosted current-sender group protocol marker is required.");
   }
   if (action === "message_current_sender") {
     assertHostedCurrentSenderLegacyWireShape(payload);
@@ -203,7 +205,7 @@ function assertHostedCurrentSenderLegacyWireShape(payload: unknown): void {
     || payload === null
     || Object.keys(payload).some((key) => key !== "action" && key !== "origin")
   ) {
-    throw new TypeError("Hosted current-sender legacy protocol is invalid.");
+    throw new RequestInputError("Hosted current-sender legacy protocol is invalid.");
   }
 }
 
