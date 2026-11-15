@@ -80,13 +80,7 @@ export function createHostedMealPhotoStore(input: {
       });
     },
     async stageMealPhoto(stageInput) {
-      const bytes = requireHostedMealPhotoBytes(stageInput.bytes);
-      const captureId = requireHostedMealPhotoCaptureId(stageInput.captureId);
-      const sha256 = requireHostedMealPhotoSha256(stageInput.sha256);
-      const actualSha256 = await sha256Hex(bytes);
-      if (actualSha256 !== sha256) {
-        throw new TypeError("Hosted meal photo sha256 must match the JPEG bytes.");
-      }
+      const { bytes, captureId, sha256 } = await requireHostedMealPhotoStageInput(stageInput);
       const mealPhotoKey = await deriveHostedMealPhotoKey({
         attemptId: crypto.randomUUID(),
         captureId,
@@ -119,6 +113,21 @@ export function createHostedMealPhotoStore(input: {
       userId,
     });
   }
+}
+
+export async function requireHostedMealPhotoStageInput(input: {
+  bytes: Uint8Array;
+  captureId: string;
+  sha256: string;
+}): Promise<{ bytes: Uint8Array; captureId: string; sha256: string }> {
+  const bytes = requireHostedMealPhotoBytes(input.bytes);
+  const captureId = requireHostedMealPhotoCaptureId(input.captureId);
+  const sha256 = requireHostedMealPhotoSha256(input.sha256);
+  const actualSha256 = await sha256Hex(bytes);
+  if (actualSha256 !== sha256) {
+    throw new TypeError("Hosted meal photo sha256 must match the JPEG bytes.");
+  }
+  return { bytes, captureId, sha256 };
 }
 
 export async function deleteHostedMealPhotoObject(input: {

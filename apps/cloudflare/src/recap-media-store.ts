@@ -22,9 +22,7 @@ export function createRecapMediaStore(input: { bucket: R2BucketLike; userId: str
       return stored && !("retired" in stored) ? { envelope: stored.envelope, hash: stored.hash } : null;
     },
     async write(mediaId: string, envelope: string, hash: string) {
-      if (!/^[a-f0-9]{64}$/u.test(hash)) throw new TypeError("Recap content hash is invalid.");
-      const sealed = requireHostedGameMediaEnvelope(envelope);
-      if (new TextEncoder().encode(sealed).length > 3 * 1024 * 1024) throw new RangeError("Recap envelope is too large.");
+      const sealed = requireRecapMediaEnvelope(envelope, hash);
       const objectKey = key(mediaId);
       const created = await input.bucket.put(objectKey, JSON.stringify({ version: 1, hash, envelope: sealed }), {
         onlyIf: { etagDoesNotMatch: "*" }, httpMetadata: { contentType: "application/json" },
@@ -55,4 +53,11 @@ function parseStored(text: string): Stored {
   if (!("hash" in value) || typeof value.hash !== "string" || !/^[a-f0-9]{64}$/u.test(value.hash)
     || !("envelope" in value) || typeof value.envelope !== "string") throw new TypeError("Invalid recap storage record.");
   return { version: 1, hash: value.hash, envelope: requireHostedGameMediaEnvelope(value.envelope) };
+}
+
+export function requireRecapMediaEnvelope(envelope: string, hash: string): string {
+  if (!/^[a-f0-9]{64}$/u.test(hash)) throw new TypeError("Recap content hash is invalid.");
+  const sealed = requireHostedGameMediaEnvelope(envelope);
+  if (new TextEncoder().encode(sealed).length > 3 * 1024 * 1024) throw new RangeError("Recap envelope is too large.");
+  return sealed;
 }

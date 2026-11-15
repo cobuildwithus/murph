@@ -19,6 +19,7 @@ import {
   requireHostedMealPhotoCaptureId,
   requireHostedMealPhotoKey,
   requireHostedMealPhotoSha256,
+  requireHostedMealPhotoStageInput,
 } from "../../meal-photo-store.ts";
 import {
   resolveHostedExecutionUserCryptoContext,
@@ -131,16 +132,19 @@ export async function handleMealPhotoStageRoute(
     throw error;
   }
 
-  const store = await createMealPhotoStore(context, userId);
-
+  let stageInput: Awaited<ReturnType<typeof requireHostedMealPhotoStageInput>>;
   try {
-    return json(await store.stageMealPhoto({ bytes, captureId, sha256 }));
+    stageInput = await requireHostedMealPhotoStageInput({ bytes, captureId, sha256 });
   } catch (error) {
     if (error instanceof TypeError || error instanceof RangeError) {
       return jsonError("Meal photo payload is invalid.", 400);
     }
     throw error;
   }
+  try {
+    const store = await createMealPhotoStore(context, userId);
+    return json(await store.stageMealPhoto(stageInput));
+  } catch (error) { throw new Error("Meal photo staging failed.", { cause: error }); }
 }
 
 async function createMealPhotoStore(context: WorkerRouteContext, userId: string) {
