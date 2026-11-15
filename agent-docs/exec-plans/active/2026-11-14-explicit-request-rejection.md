@@ -143,7 +143,7 @@ Each stage is safe to stop at.
 ## Progress
 
 - Stage 1: merged (#4972).
-- Stage 2: this PR. 2,249 sites converted, about 1,000 left as server faults.
+- Stage 2: this PR. 2,243 sites converted, about 1,000 left as server faults.
 - Stage 3: #4977.
 - Merged alongside, from stage 6: the mailbox handoff retry rule (#4974) and
   the Worker media catches (#4976).
@@ -157,6 +157,11 @@ changed before stage 4 reaches it:
   immediate prototype.
 - `apps/cloudflare/src/runtime-platform/connected-apps-port.ts` (1 site): a
   test pins `TypeError.prototype`.
+
+Also not converted: the six query validators in
+`apps/web/src/lib/changelog.ts`. The changelog guard treats any change to
+that file as a change to changelog content, so they move with the public
+changelog route's boundary work.
 
 ## Scope of this PR (stage 2)
 
