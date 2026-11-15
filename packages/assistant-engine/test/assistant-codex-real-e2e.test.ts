@@ -48853,8 +48853,9 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
   // A fictional, sparse week. Its best material is a running bit told in plain lines that are funny
   // only together, among ordinary talk, app chatter and Murph's own notices, as real chats are.
   // A remake is the same game made again: the lore then lists what the earlier take used.
+  // A next game's lore lists a bit and a world an earlier game's show used; neither comes back.
   // It prints the show so the writing can be read; humour is judged by reading it.
-  it.each(['first show', 'remake'] as const)('pair recap show writes the week from what the players said: %s', async take => {
+  it.each(['first show', 'remake', 'next game'] as const)('pair recap show writes the week from what the players said: %s', async take => {
     const startedAt = Date.now()
     const config = await resolveRealCodexE2eConfig()
     const permissionHome = await materializeRealCodexHostedPermissionHome(config)
@@ -48923,6 +48924,7 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
       chat: [...chat, ...banter].sort((a, b) => a[0] - b[0] || a[1].localeCompare(b[1]))
         .map(([day, time, who, text]) => ({ playerName: who, text, at: new Date(at(day, time)).toISOString(), source: who === 'Murph' ? 'assistant' as const : 'player' as const })),
     })
+    const earlierGame = { treatment: 'a 1920s silent railway melodrama', bit: 'the human alarm clock' }
     const earlier = { treatment: 'a 1920s silent-film clock caper', title: 'Ten minutes. Eventually.',
       chatLine: 'Iris wins 4–3, Mateo: Thursday’s missing stretch turned Friday’s early start into dinner duty. Iris is thinking pasta; you’re cooking.' }
     // Which comedy skill the writer reads: the managed one only when the run points the skills root at it.
@@ -48934,7 +48936,10 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
       await initializeVault({ timezone: 'UTC', vaultRoot: vault })
       await mkdir(path.join(vault, 'games'), { recursive: true })
       // The remake's lore is what an earlier take of this game wrote after its show.
-      await writeFile(path.join(vault, `games/lore-${pairFingerprint}.md`), take === 'first show' ? '# Synthetic pair lore\nTheir first game together.\n' : [
+      await writeFile(path.join(vault, `games/lore-${pairFingerprint}.md`), take === 'first show' ? '# Synthetic pair lore\nTheir first game together.\n' : take === 'next game' ? [
+        '# Pair lore', `2026-10-16, their first game: 20 squats a day, Mateo won 5–4. Used treatment: ${earlierGame.treatment}.`,
+        `Used bits: calling Iris ${earlierGame.bit} for posting before 7am; Mateo's squats "counted by the dog".`,
+        'Used chat line: Mateo wins 5–4: Iris, the dog has been told about Tuesday.', ''].join('\n') : [
         '# Pair lore', 'First game together. Iris won stretching 4–3. Mateo owes dinner; Iris said “im thinking pasta”.', `Used treatment: ${earlier.treatment}.`,
         'Used moments: three Tuesday starts with no post; Wednesday 11:57 stretching questioned as Monday’s; four Iris posts before 7:12am; Thursday miss then Friday “actually now” one minute before posting; “cereal probably” versus cooking dinner.',
         `Used title: ${earlier.title}`, `Used chat line: ${earlier.chatLine}`, ''].join('\n'))
@@ -48977,6 +48982,12 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
     for (const quote of quotes) {
       expect(said.has(`${quote.who}: ${quote.text}`), `${quote.who}: ${quote.text}`).toBe(true)
       expect(quote.text).not.toMatch(appChatter)
+    }
+    // A bit and a world an earlier game's show used stay spent.
+    if (take === 'next game') {
+      const story = providers.saved[0]!
+      expect(story.treatment?.toLowerCase()).not.toBe(earlierGame.treatment)
+      expect(JSON.stringify({ pages: story.pages, superlatives: story.superlatives, song: story.song, chatLine: story.chatLine })).not.toMatch(/alarm clock/iu)
     }
     // A remake retells the week in a new world, under a new title, with a new chat line.
     if (take === 'remake') {

@@ -360,8 +360,8 @@ it("activates show policy only for an explicitly selected pair", () => {
   expect(show).toContain("never describe a face, body, hair, age or skin");
   expect(show).toContain("whole image visible");
   expect(show).toContain("Never reuse a treatment the lore lists for this pair");
-  // A remake of the same game reads the earlier take's lore; its own week stays usable.
-  expect(show).toContain("This game's moments and the players' own words stay yours to tell even when the lore lists them as used; tell them in new lines.");
+  // Bits an earlier game's show used stay spent; a remake of the same game reads the earlier take's lore, and its own week stays usable.
+  expect(show).toContain("Use the lore's running bits and callbacks to earlier games, and never repeat a bit a show of an earlier game already used. What happened in this game and what the players said in it stay yours to tell even when the lore lists them as used, including by an earlier show of this same game; tell them in new lines.");
   expect(show).not.toContain("never reuse a bit listed as already used");
   expect(show).toContain("Leave the prize off it");
   expect(show).toContain("Leo asked Ava to prove her abs on Thursday");
