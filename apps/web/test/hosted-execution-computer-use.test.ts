@@ -191,10 +191,37 @@ describe("ComputerUseService", () => {
     expect(store.handoff).toBeNull();
   });
 
-  it("preserves the managed-login refusal for a browser without a login domain", async () => {
+  it.each([
+    null,
+    {},
+    { title: "Page" },
+    { url: null },
+    { url: 123 },
+    { url: "" },
+    { url: "not a url" },
+  ])("rejects malformed managed-login observations: %j", async (result) => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const store = new FakeComputerUseStore({ run: createRunRecord({ updatedAt: now }) });
-    const kernel = createFakeKernel({ executeResult: { title: null, url: "about:blank", visibleText: "" } });
+    const kernel = createFakeKernel();
+    vi.spyOn(kernel, "executePlaywright").mockResolvedValue({ result });
+    const service = new ComputerUseService({ kernel, now: () => now, store });
+    const response = await withJsonError(async () => {
+      await service.pauseForUser({ handoffPurpose: "managed_login", memberId: "member_123",
+        reason: "login_needed", runId: "hcr_run123", suggestedReply: null });
+      return Response.json({ ok: true });
+    })();
+    expect(response.status).toBe(502);
+    expect(await response.json()).toMatchObject({
+      error: { code: "HOSTED_COMPUTER_ACTION_STATE_INVALID", retryable: true },
+    });
+    expect(store.run).toMatchObject({ kernelSessionId: "kernel-session-1", status: "running" });
+    expect(store.handoff).toBeNull();
+  });
+
+  it.each(["about:blank", "file:///tmp/login.html"])("preserves the managed-login refusal for unsupported URL %s", async (url) => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const store = new FakeComputerUseStore({ run: createRunRecord({ updatedAt: now }) });
+    const kernel = createFakeKernel({ executeResult: { title: null, url, visibleText: "" } });
     const service = new ComputerUseService({ kernel, now: () => now, store });
     const response = await withJsonError(async () => {
       await service.pauseForUser({ handoffPurpose: "managed_login", memberId: "member_123",
@@ -1042,7 +1069,9 @@ describe("ComputerUseService", () => {
     const kernel = createFakeKernel({
       executeResults: [
         {
-          navigated: true,
+          title: "Dentist portal",
+          url: "https://dentist.example.test/book",
+          visibleText: "Choose an appointment",
         },
         {
           title: "Dentist portal",

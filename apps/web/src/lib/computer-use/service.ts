@@ -4030,12 +4030,12 @@ function readBrowserStateResult(value: unknown): {
   url: string | null;
   visibleText: string;
 } {
-  const partial = readOptionalBrowserStateResult(value);
+  const state = readRequiredBrowserActionStateResult(value);
   const visibleText = readVisibleText(value);
 
   return {
-    title: partial?.title ?? null,
-    url: partial?.url ?? null,
+    title: state.title,
+    url: state.url,
     visibleText,
   };
 }
