@@ -1,3 +1,5 @@
+import * as threadDeliveryRoute from "../src/lib/hosted-routing/thread-delivery-route";
+import { jsonError } from "@/src/lib/hosted-onboarding/http";
 import {
   createHostedAssistantConversationIdentifierBlind,
   hashHostedAssistantConversationIdentifier,
@@ -16,6 +18,7 @@ import {
   isHostedThreadContainerNotificationDestination,
   requireHostedAssistantNotificationDestination,
   resolveHostedAssistantNotificationDestination,
+  readHostedThreadContainerLinqRouteAuthorities,
 } from "../src/lib/hosted-routing/assistant-notification-destination";
 import {
   buildHostedThreadDeliveryRoute,
@@ -486,6 +489,7 @@ describe("hosted assistant notification destination", () => {
       prisma,
     })).rejects.toMatchObject({
       code: "HOSTED_THREAD_NOTIFICATION_ROUTE_REQUIRED",
+      httpStatus: 409,
     });
     expect(destinationMocks.readHostedMemberAssistantNotificationState).not.toHaveBeenCalled();
   });
@@ -533,9 +537,7 @@ describe("hosted assistant notification destination", () => {
     await expect(resolveHostedAssistantNotificationDestination({
       memberId: "container-member",
       prisma,
-    })).rejects.toMatchObject({
-      code: "HOSTED_THREAD_NOTIFICATION_ROUTE_INVALID",
-    });
+    })).rejects.toThrow();
   });
 
   it("fails closed on corrupt or lookup-mismatched encrypted material", async () => {
@@ -552,9 +554,7 @@ describe("hosted assistant notification destination", () => {
     await expect(resolveHostedAssistantNotificationDestination({
       memberId: "container-member",
       prisma: corruptPrisma,
-    })).rejects.toMatchObject({
-      code: "HOSTED_THREAD_NOTIFICATION_ROUTE_INVALID",
-    });
+    })).rejects.toThrow();
 
     const mismatched = await buildRouteRow({
       accountLookupKey: "account",
@@ -572,12 +572,44 @@ describe("hosted assistant notification destination", () => {
         })!,
       }],
     });
-    await expect(resolveHostedAssistantNotificationDestination({
+    const mismatch = await resolveHostedAssistantNotificationDestination({
       memberId: "container-member",
       prisma: mismatchedPrisma,
-    })).rejects.toMatchObject({
-      code: "HOSTED_THREAD_NOTIFICATION_ROUTE_MISMATCH",
-    });
+    }).catch(jsonError);
+    expect((mismatch as Response).status).toBe(500);
+    await expect((mismatch as Response).json()).resolves.toMatchObject({ error: { code: "INTERNAL_ERROR" } });
+  });
+
+  it.each(["linq", "unsupported"])("answers 500 for corrupt stored %s route material", async channel => {
+    const prisma = createPrisma({ containerMemberId: "container-member", rows: [{
+      channel, containerMemberId: "container-member", deliveryRouteEncrypted: "corrupt",
+      threadIdentityLookupKey: "identity", threadLookupKey: "authority",
+    }] });
+    const response = await resolveHostedAssistantNotificationDestination({ memberId: "container-member", prisma }).catch(jsonError);
+    expect(response).toBeInstanceOf(Response);
+    expect((response as Response).status).toBe(500);
+  });
+
+  // The batch read stays per member: one route that cannot be opened is
+  // unavailable for that member, and each caller decides what that means.
+  it("propagates a secure-box dependency failure from a direct route open", async () => {
+    const row = await buildRouteRow({ accountLookupKey: "synthetic-account", channel: "linq", containerMemberId: "container-member", threadId: "synthetic-thread" });
+    const prisma = createPrisma({ containerMemberId: "container-member", rows: [row] });
+    const failure = new Error("Synthetic KMS unavailable");
+    const open = vi.spyOn(threadDeliveryRoute, "openHostedThreadDeliveryRoute").mockRejectedValue(failure);
+    try {
+      await expect(resolveHostedAssistantNotificationDestination({ memberId: "container-member", prisma })).rejects.toBe(failure);
+      const batch = await readHostedThreadContainerLinqRouteAuthorities({ containerMemberIds: ["container-member"], prisma });
+      expect(batch.unavailableContainerMemberIds.has("container-member")).toBe(true);
+      expect(jsonError(failure).status).toBe(500);
+    } finally { open.mockRestore(); }
+  });
+
+  it("propagates database failures from route reads", async () => {
+    const prisma = createPrisma({ containerMemberId: "container-member", rows: [] });
+    const failure = new Error("Synthetic database unavailable");
+    vi.mocked(prisma.hostedThreadRoute.findMany).mockRejectedValueOnce(failure);
+    await expect(resolveHostedAssistantNotificationDestination({ memberId: "container-member", prisma })).rejects.toBe(failure);
   });
 
   it("rejects a caller-supplied inconsistent conversation shape", () => {

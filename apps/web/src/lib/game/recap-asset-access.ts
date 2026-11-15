@@ -1,6 +1,6 @@
 import "server-only";
 import type { Prisma } from "@prisma/client";
-import { recapStorageObjects, storedGameRecapEnvelopeSchema, type GameRecapEnvelope } from "@murphai/contracts/recap-show";
+import { recapStorageObjects, storedGameRecapSchema, type GameRecapEnvelope } from "@murphai/contracts/recap-show";
 import { getPrisma } from "../prisma";
 import { openGameTexts } from "./crypto";
 import { isRecapMediaVisible } from "./access";
@@ -42,8 +42,10 @@ export async function readRecapEnvelope(gameId: string) {
   const row = await getPrisma().game.findUnique({ where: { id: gameId }, select: { id: true, wordsOwnerMemberId: true, recapEncrypted: true, maxPlayers: true, chatContainerMemberId: true } });
   if (!row?.recapEncrypted || row.maxPlayers !== 2) return null;
   const [plain] = await openGameTexts([{ memberId: row.wordsOwnerMemberId, table: "game", rowId: row.id, field: "recap", value: row.recapEncrypted }]);
-  const parsed = storedGameRecapEnvelopeSchema.safeParse(JSON.parse(plain ?? "null"));
-  return parsed.success ? { row, envelope: parsed.data } : null;
+  // A failed generation stores a bare fallback story on purpose; only an
+  // envelope carries media. Anything matching neither shape is corrupt.
+  const stored = storedGameRecapSchema.parse(JSON.parse(plain ?? "null"));
+  return "version" in stored ? { row, envelope: stored } : null;
 }
 
 /** The stored recap, only while media may be shown and only as the generation the caller names. */
@@ -64,10 +66,12 @@ export async function readAuthorizedRecapAsset(input: { gameId: string; generati
   const songStartMs = current.envelope.assets.find(asset => asset.slot === slot)?.songStartMs;
   if (input.slot === "score" && songStartMs === undefined) return null;
   const stored = await readRecapMedia({ storageKey: object.storageKey, ownerMemberId: current.row.wordsOwnerMemberId });
-  if (!stored || stored.hash !== object.hash) return null;
+  if (!stored) return null;
+  if (stored.hash !== object.hash) throw new Error("Stored recap asset integrity mismatch.");
   if (input.slot === "song" && songStartMs !== undefined) {
     const cut = inspectMp3Frames(stored.bytes).frames.find(frame => frame.timeMs === songStartMs);
-    return cut ? { bytes: stored.bytes.subarray(cut.byteOffset), contentType: object.mediaType } : null;
+    if (!cut) throw new Error("Stored recap song frame is missing.");
+    return { bytes: stored.bytes.subarray(cut.byteOffset), contentType: object.mediaType };
   }
   // A part is a slice of a file, not a playable one.
   return { bytes: stored.bytes, contentType: object.mediaType === "video/mp4" ? "application/octet-stream" : object.mediaType };

@@ -65,10 +65,17 @@ export function parsePendingGameChange(value: unknown): StoredGamePendingChange 
     || (value.startsOn !== null && typeof value.startsOn !== "string")) {
     throw new Error("Stored game change is malformed.");
   }
+  let change: GameChange;
+  try {
+    change = parseGameChange(value.change, value.v === 2 && typeof value.termsWordsEncrypted === "string");
+  } catch (cause) {
+    if (!(cause instanceof GameRuleError)) throw cause;
+    throw new Error("Stored game change is malformed.", { cause });
+  }
   return {
     id: value.id, proposedByMemberId: value.proposedByMemberId,
     expectedTermsVersion: Number(value.expectedTermsVersion), effectiveFromDay: Number(value.effectiveFromDay),
-    change: parseGameChange(value.change, value.v === 2 && typeof value.termsWordsEncrypted === "string"), startsOn: value.startsOn,
+    change, startsOn: value.startsOn,
     ...(typeof value.termsWordsEncrypted === "string" ? { termsWordsEncrypted: value.termsWordsEncrypted } : {}),
     ...(value.tasksChanged === true ? { tasksChanged: true as const } : {}),
     ...(Array.isArray(value.stakes) ? { stakes: value.stakes.map(parseStoredStake) } : {}),

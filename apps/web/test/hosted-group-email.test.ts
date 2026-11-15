@@ -329,19 +329,10 @@ describe("hosted group email authorization", () => {
       mocks.getPrisma.mockReturnValue(prisma);
 
       const result = operation === "prepare"
-        ? await prepareHostedGroupEmail({
-            runtimeMemberId: "group_runtime_member",
-          })
-        : await readHostedGroupEmailRecipients({
-            expectedGroupEmailAuthorizationProof: "stale-proof",
-            groupId: "hgrp_123",
-            runtimeMemberId: "group_runtime_member",
-          });
-
-      expect(result).toEqual({
-        status: "unavailable",
-        unavailableReason: "authorization_snapshot_invalid",
-      });
+        ? prepareHostedGroupEmail({ runtimeMemberId: "group_runtime_member" })
+        : readHostedGroupEmailRecipients({ expectedGroupEmailAuthorizationProof: "stale-proof",
+            groupId: "hgrp_123", runtimeMemberId: "group_runtime_member" });
+      await expect(result).rejects.toThrow("Stored group email authorization grants are invalid.");
     },
   );
 
@@ -358,10 +349,7 @@ describe("hosted group email authorization", () => {
 
     await expect(prepareHostedGroupEmail({
       runtimeMemberId: "group_runtime_member",
-    })).resolves.toEqual({
-      status: "unavailable",
-      unavailableReason: "authorization_snapshot_invalid",
-    });
+    })).rejects.toThrow("Stored group email authorization grants are invalid.");
   });
 
   it("excludes inactive granted members from group email preparation and email recipients", async () => {
