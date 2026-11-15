@@ -444,7 +444,7 @@ function parseHostedPrivateMediaCapabilityPayload(
   value: unknown,
 ): HostedPrivateMediaCapabilityPayload {
   if (!isObjectRecord(value)) {
-    throw new ContractValidationError("Hosted private media capability payload is invalid.");
+    throw new TypeError("Hosted private media capability payload is invalid.");
   }
   const keys = Object.keys(value);
   if (
@@ -466,7 +466,7 @@ function parseHostedPrivateMediaCapabilityPayload(
     || typeof value.sha256 !== "string"
     || !HOSTED_PRIVATE_MEDIA_SHA256_PATTERN.test(value.sha256)
   ) {
-    throw new ContractValidationError("Hosted private media capability payload is invalid.");
+    throw new TypeError("Hosted private media capability payload is invalid.");
   }
   return {
     contentType: value.contentType,

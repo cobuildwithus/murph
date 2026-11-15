@@ -59,6 +59,11 @@
       "import": "./dist/recap-show.js",
       "default": "./dist/recap-show.js"
     },
+    "./elevenlabs-music": {
+      "types": "./dist/elevenlabs-music.d.ts",
+      "import": "./dist/elevenlabs-music.js",
+      "default": "./dist/elevenlabs-music.js"
+    },
     "./recap-validation": {
       "types": "./dist/recap-validation.d.ts",
       "import": "./dist/recap-validation.js",

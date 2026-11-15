@@ -213,7 +213,7 @@ async function openHostedMailboxInputDatabase(
       })
       await chmod(databasePath, 0o600)
     } else if (readSqliteRuntimeUserVersion(database) !== 1) {
-      throw new ContractValidationError('Unsupported hosted mailbox input database version.')
+      throw new TypeError('Unsupported hosted mailbox input database version.')
     }
     return database
   } catch (error) {
@@ -226,7 +226,7 @@ function parseHostedMailboxInputRow(
   row: Record<string, unknown>,
   inputId: string,
 ): HostedMailboxAssistantInputItem {
-  if (typeof row.item_json !== 'string') throw new ContractValidationError('Invalid hosted mailbox input row.')
+  if (typeof row.item_json !== 'string') throw new TypeError('Invalid hosted mailbox input row.')
   const item = normalizeHostedMailboxAssistantInputItem(JSON.parse(row.item_json))
   if (item.inputId !== inputId) throw new TypeError('Hosted mailbox input row identity mismatch.')
   return item

@@ -208,12 +208,12 @@ async function recoverClinicalExtractionDates(
     })
     input.abortSignal?.throwIfAborted()
     correctionSignal.throwIfAborted()
-    if (Buffer.byteLength(response, 'utf8') > MAX_OUTPUT_BYTES) throw new ContractValidationError('Clinical date correction exceeds supported bounds.')
+    if (Buffer.byteLength(response, 'utf8') > MAX_OUTPUT_BYTES) throw new TypeError('Clinical date correction exceeds supported bounds.')
     const { corrections } = dateCorrectionsSchema.parse(JSON.parse(response))
     const allowed = new Set(invalid.map(({ recordIndex }) => recordIndex))
     const byIndex = new Map(corrections.map((correction) => [correction.recordIndex, correction]))
     if (byIndex.size !== corrections.length || corrections.some(({ recordIndex }) => !allowed.has(recordIndex))) {
-      throw new ContractValidationError('Clinical date correction references an invalid record.')
+      throw new TypeError('Clinical date correction references an invalid record.')
     }
     records = output.records.map((record, recordIndex) => {
       const correction = byIndex.get(recordIndex)
@@ -285,7 +285,7 @@ function validateClinicalResourceAssignment(input: ClinicalDocumentExtractionInp
   const resourceText = clinicalFhirResourceExtractionText(selected)
   if (Buffer.byteLength(resourceText, 'utf8') > MAX_EXTRACTED_TEXT_BYTES
     || createHash('sha256').update(originalText).digest('hex') !== resource.sha256
-    || (input.extractedText !== undefined && input.extractedText !== resourceText)) throw new ContractValidationError('Clinical resource assignment integrity mismatch.')
+    || (input.extractedText !== undefined && input.extractedText !== resourceText)) throw new TypeError('Clinical resource assignment integrity mismatch.')
   return resourceText
 }
 
@@ -324,23 +324,23 @@ function parseClinicalExtractionResponse(
   pageNumbers: ReadonlySet<number>,
 ): ClinicalDocumentExtractionOutput {
   if (Buffer.byteLength(finalMessage, 'utf8') > MAX_OUTPUT_BYTES) {
-    throw new ContractValidationError('Clinical extraction output exceeds supported bounds.')
+    throw new TypeError('Clinical extraction output exceeds supported bounds.')
   }
   let output: unknown
   try {
     output = JSON.parse(finalMessage)
   } catch {
-    throw new ContractValidationError('Clinical extraction output is invalid.')
+    throw new TypeError('Clinical extraction output is invalid.')
   }
   let parsed: ClinicalDocumentExtractionOutput
   try {
     parsed = parseClinicalDocumentExtractionOutput(family, output)
   } catch {
-    throw new ContractValidationError('Clinical extraction output is invalid.')
+    throw new TypeError('Clinical extraction output is invalid.')
   }
   if (pageNumbers.size > 0
     && parsed.records.some((record) => record.page === undefined || !pageNumbers.has(record.page))) {
-    throw new ContractValidationError('Clinical extraction output is invalid.')
+    throw new TypeError('Clinical extraction output is invalid.')
   }
   return parsed
 }

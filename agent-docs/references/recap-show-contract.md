@@ -41,7 +41,7 @@ matched neighbors (audio start/end at the edges). Times are non-decreasing integ
 milliseconds from the start of the audio, bounded by its measured duration.
 Historical songs without timings omit `lines`; existing fields remain unchanged.
 
-Explicit `generate_song` lyrics use the existing music_v2 composition plan with
+Explicit `generate_song` lyrics use the music_v2_5 composition plan with
 timestamps. The host keeps the provider timestamps with the generated audio hash,
 then uploads and stores them on the encrypted song asset. Editable draft files
 still select only `{slot,path}`. New authoring caps `treatment` at 40 characters;

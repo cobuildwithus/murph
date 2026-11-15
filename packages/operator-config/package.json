@@ -171,7 +171,7 @@
     "test:coverage": "pnpm exec vitest run --config vitest.config.ts --coverage"
   },
   "dependencies": {
-    "@elevenlabs/elevenlabs-js": "2.62.0",
+    "@elevenlabs/elevenlabs-js": "2.78.0",
     "@linqapp/sdk": "0.34.0",
     "@murphai/contracts": "workspace:*",
     "@murphai/device-syncd": "workspace:*",

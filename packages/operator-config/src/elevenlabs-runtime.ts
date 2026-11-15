@@ -1,5 +1,6 @@
 import type { ElevenLabsClient } from '@elevenlabs/elevenlabs-js'
 import type { SongWordTimestamp } from '@murphai/contracts/recap-show'
+import { elevenLabsMusicModelIds } from '@murphai/contracts/elevenlabs-music'
 
 import type {
   AssistantVoiceMemoGeneration,
@@ -138,7 +139,7 @@ export async function generateElevenLabsMusic(input: {
   durationMs: number
   fetchImplementation?: ElevenLabsFetch
   forceInstrumental: boolean
-  modelId: typeof ELEVENLABS_MUSIC_MODEL_ID
+  modelId: (typeof elevenLabsMusicModelIds)[number]
   outputFormat: typeof ELEVENLABS_MUSIC_OUTPUT_FORMAT
   prompt: string
   lyrics?: string[]
@@ -159,9 +160,9 @@ export async function generateElevenLabsMusic(input: {
       'ElevenLabs music duration must be an integer between 3000ms and 300000ms.',
     )
   }
-  if (input.modelId !== ELEVENLABS_MUSIC_MODEL_ID) {
+  if (!elevenLabsMusicModelIds.includes(input.modelId)) {
     throw createElevenLabsInvalidInputError(
-      `ElevenLabs music model must be ${ELEVENLABS_MUSIC_MODEL_ID}.`,
+      `ElevenLabs music model must be one of ${elevenLabsMusicModelIds.join(', ')}.`,
     )
   }
   if (input.outputFormat !== ELEVENLABS_MUSIC_OUTPUT_FORMAT) {
@@ -185,7 +186,7 @@ export async function generateElevenLabsMusic(input: {
         const [{ alignSongLyrics, songWordTimestampsSchema }, z] = await Promise.all([
           import('@murphai/contracts/recap-show'), import('@murphai/contracts/zod-runtime'),
         ])
-        // SDK 2.62's client getter declares a stream, but its music wrapper
+        // SDK 2.78.0's client getter still declares a stream, but its music wrapper
         // actually returns parsed multipart metadata and audio. Validate it.
         const response: unknown = await client.music.composeDetailed({
           compositionPlan: { chunks: [{ text: lyrics.join('\n'), durationMs: input.durationMs, positiveStyles: [prompt], negativeStyles: [] }] },

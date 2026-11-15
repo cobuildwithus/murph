@@ -189,7 +189,7 @@ export function parseHostedRuntimeReconciliationFactsWorkspace(
     progressProjectionKeyCount !== 0
     && progressProjectionKeyCount !== progressProjectionKeys.length
   ) {
-    throw new ContractValidationError(
+    throw new TypeError(
       "Hosted runtime reconciliation facts workspace system progress projection must include generation, wake, and reason together.",
     );
   }
@@ -324,12 +324,12 @@ export function parseHostedRuntimeEnsureProcessingRequest(
 function parseRuntimeProcessingAdmission(value: unknown, processingMode: string) {
   const admission = parseHostedRuntimeOwnerResponse(value);
   if (!admission.owner || admission.owner.phase === "idle") {
-    throw new TypeError("Runtime admission requires a non-idle Postgres owner.");
+    throw new ContractValidationError("Runtime admission requires a non-idle Postgres owner.");
   }
   if (admission.status === "existing") return admission;
   if (admission.status === "claimed" && admission.owner.phase === "starting"
     && admission.owner.processingMode === processingMode) return admission;
-  throw new TypeError("Runtime admission must be existing or a new claim matching the requested mode.");
+  throw new ContractValidationError("Runtime admission must be existing or a new claim matching the requested mode.");
 }
 
 export function parseHostedRuntimeEnsureProcessingResponse(

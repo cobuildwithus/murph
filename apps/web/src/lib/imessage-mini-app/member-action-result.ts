@@ -1,4 +1,3 @@
-import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   IMESSAGE_APP_CARD_URL_MAX_LENGTH,
   IMESSAGE_APP_CARD_URL_PREFIX,
@@ -17,7 +16,7 @@ export function projectIMessageMemberActionStatus(
   }
   const { result, ...outcome } = status;
   const presentation = parseWorkoutSessionAppCardEnvelopeV4(result.card);
-  if (!presentation) throw new ContractValidationError("Invalid stored workout card.");
+  if (!presentation) throw new TypeError("Invalid stored workout card.");
   // Installed readers accept completed V4 summaries, but only active V6 editors.
   const envelope = presentation.workout.state === "completed"
     ? buildWorkoutSessionAppCardEnvelopeV4(presentation)

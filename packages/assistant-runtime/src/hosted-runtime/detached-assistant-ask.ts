@@ -1,4 +1,3 @@
-import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { resolveHostedOperatorModelProvider } from "./codex-runtime-env.ts";
 import { HOSTED_ASSISTANT_GPT_61_SOL_MODEL } from "@murphai/hosted-execution/assistant-model";
 import {
@@ -364,7 +363,7 @@ async function runOneHostedDetachedAssistantAsk(input: {
       { signal: input.abortSignal },
     );
     if (prepared.action !== "prepare") {
-      throw new ContractValidationError("Detached assistant ask prepare returned the wrong action.");
+      throw new TypeError("Detached assistant ask prepare returned the wrong action.");
     }
     if (prepared.status === "already_completed") {
       await removeHostedDetachedAssistantAsk({ claimed, input });
@@ -446,7 +445,7 @@ async function runOneHostedDetachedAssistantAsk(input: {
       });
     } else if (claimed.wake.ask.target.kind !== "joined_group") {
       if (prepared.disclosure === undefined) {
-        throw new ContractValidationError(
+        throw new TypeError(
           "Reviewed personal ask prepare omitted its disclosure context.",
         );
       }
@@ -471,7 +470,7 @@ async function runOneHostedDetachedAssistantAsk(input: {
       });
     } else {
       if (prepared.disclosure !== undefined) {
-        throw new ContractValidationError(
+        throw new TypeError(
           "Joined group ask prepare returned unexpected disclosure context.",
         );
       }
@@ -494,7 +493,7 @@ async function runOneHostedDetachedAssistantAsk(input: {
       { signal: input.abortSignal },
     );
     if (completed.action !== "complete") {
-      throw new ContractValidationError("Detached assistant ask completion returned the wrong action.");
+      throw new TypeError("Detached assistant ask completion returned the wrong action.");
     }
     if (completed.status === "terminal") {
       outcome = completed.terminalReason;

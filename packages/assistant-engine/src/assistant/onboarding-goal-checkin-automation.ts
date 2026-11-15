@@ -1,4 +1,3 @@
-import { ContractValidationError } from '@murphai/contracts/validation-error'
 import { createHash } from 'node:crypto'
 
 import {
@@ -103,7 +102,7 @@ export function buildOnboardingGoalCheckinSeed(
 
   const now = input.now ?? new Date()
   if (!Number.isFinite(now.getTime())) {
-    throw new ContractValidationError('Onboarding goal check-in received an invalid current date.')
+    throw new TypeError('Onboarding goal check-in received an invalid current date.')
   }
   if (!isValidIanaTimeZone(input.timeZone)) {
     throw new TypeError('Onboarding goal check-in received an invalid vault timezone.')
@@ -312,7 +311,7 @@ function resolveOnboardingGoalCheckinLocalTime(
 ): OnboardingGoalCheckinLocalTime {
   const normalizedStableKey = stableKey.trim()
   if (!normalizedStableKey) {
-    throw new ContractValidationError(
+    throw new TypeError(
       'Onboarding goal check-in received an invalid stable schedule key.',
     )
   }

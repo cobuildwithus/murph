@@ -1,4 +1,3 @@
-import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { assertCanonicalWritePort } from "./core-port.ts";
 import type { SampleImportPayload } from "./core-port.ts";
 import {
@@ -183,7 +182,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function normalizeWriteResult(value: unknown): CsvSampleImportWriteResult {
   if (!value || typeof value !== "object") {
-    throw new ContractValidationError("sample CSV import returned an invalid core result");
+    throw new TypeError("sample CSV import returned an invalid core result");
   }
 
   const candidate = value as Partial<CsvSampleImportWriteResult>;
@@ -195,7 +194,7 @@ function normalizeWriteResult(value: unknown): CsvSampleImportWriteResult {
     !Array.isArray(candidate.records) ||
     !Array.isArray(candidate.shardPaths)
   ) {
-    throw new ContractValidationError("sample CSV import returned an invalid core result");
+    throw new TypeError("sample CSV import returned an invalid core result");
   }
 
   return {
@@ -204,14 +203,14 @@ function normalizeWriteResult(value: unknown): CsvSampleImportWriteResult {
     manifestPath: candidate.manifestPath,
     records: candidate.records.map((record) => {
       if (!record || typeof record !== "object" || typeof record.id !== "string") {
-        throw new ContractValidationError("sample CSV import returned a malformed record list");
+        throw new TypeError("sample CSV import returned a malformed record list");
       }
 
       return { id: record.id };
     }),
     shardPaths: candidate.shardPaths.map((entry) => {
       if (typeof entry !== "string") {
-        throw new ContractValidationError("sample CSV import returned malformed shard paths");
+        throw new TypeError("sample CSV import returned malformed shard paths");
       }
 
       return entry;

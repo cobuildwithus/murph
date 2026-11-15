@@ -1,4 +1,5 @@
 import {
+  isHostedAiUsageAllowanceElevenLabsMusicPricedModelId,
   normalizeHostedAiUsageAllowanceElevenLabsMusicModelId,
   normalizeHostedAiUsageAllowanceElevenLabsTtsModelId,
   type HostedAiUsageAllowanceElevenLabsMusicPricedModel,
@@ -208,14 +209,16 @@ function parseHostedElevenLabsMusicRequestBody(
 }
 
 function parseHostedElevenLabsDetailedMusicRequestBody(record: Record<string, unknown>): HostedElevenLabsMusicRequestBody | null {
+  const modelId = record.model_id;
   if (!hasExactKeys(record, ["composition_plan", "model_id", "with_timestamps"])
-    || record.model_id !== "music_v2" || record.with_timestamps !== true) return null;
+    || typeof modelId !== "string" || !isHostedAiUsageAllowanceElevenLabsMusicPricedModelId(modelId)
+    || record.with_timestamps !== true) return null;
   const plan = asRecord(record.composition_plan);
   if (!plan || !hasExactKeys(plan, ["chunks"]) || !Array.isArray(plan.chunks) || plan.chunks.length !== 1) return null;
   const chunk = parseDetailedMusicChunk(plan.chunks[0]);
   if (!chunk) return null;
-  return { kind: "music", modelId: "music_v2", durationMs: chunk.duration_ms, upstreamBody: JSON.stringify({
-    model_id: "music_v2", with_timestamps: true, composition_plan: { chunks: [chunk] },
+  return { kind: "music", modelId, durationMs: chunk.duration_ms, upstreamBody: JSON.stringify({
+    model_id: modelId, with_timestamps: true, composition_plan: { chunks: [chunk] },
   }) };
 }
 

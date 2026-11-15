@@ -1389,13 +1389,13 @@ function outcomeConflictError() {
 
 function parseStoredStringArray(value: Prisma.JsonValue, label: string): string[] {
   if (!Array.isArray(value) || value.length === 0 || value.length > 64) {
-    throw new ContractValidationError(`Stored Clinical Records ${label} are invalid.`);
+    throw new TypeError(`Stored Clinical Records ${label} are invalid.`);
   }
   const strings = value.filter((item): item is string =>
     typeof item === "string" && item.length > 0 && item.length <= 200
   );
   if (strings.length !== value.length || new Set(strings).size !== strings.length) {
-    throw new ContractValidationError(`Stored Clinical Records ${label} are invalid.`);
+    throw new TypeError(`Stored Clinical Records ${label} are invalid.`);
   }
   return strings;
 }

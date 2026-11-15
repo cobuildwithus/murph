@@ -8152,7 +8152,7 @@ export function parseHostedRuntimeHealthDataAdmissionResponse(
     "Hosted runtime health-data admission response processingAllowed",
   );
   if (processingAllowed && consentState === "revoked") {
-    throw new ContractValidationError(
+    throw new TypeError(
       "Hosted runtime health-data admission response cannot allow processing after consent revocation.",
     );
   }

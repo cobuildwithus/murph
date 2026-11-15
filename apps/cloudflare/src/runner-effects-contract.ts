@@ -115,7 +115,7 @@ export function parseHostedRunnerPrivateImageUrlPublishResponse(
   try {
     url = new URL(urlString);
   } catch {
-    throw new ContractValidationError("Hosted private image URL publish response URL is invalid.");
+    throw new TypeError("Hosted private image URL publish response URL is invalid.");
   }
   if (
     !Number.isFinite(expiresAtMs)
@@ -125,7 +125,7 @@ export function parseHostedRunnerPrivateImageUrlPublishResponse(
     )
     || Number(url.searchParams.get("exp")) * 1_000 !== expiresAtMs
   ) {
-    throw new ContractValidationError(
+    throw new TypeError(
       "Hosted private image URL publish response is invalid.",
     );
   }
@@ -216,7 +216,7 @@ function readOptionalString(value: unknown, label: string): string | null {
 
 function readNonNegativeInteger(value: unknown, label: string): number {
   if (!Number.isSafeInteger(value) || (value as number) < 0) {
-    throw new ContractValidationError(`Hosted runner provider effect ${label} must be a non-negative integer.`);
+    throw new TypeError(`Hosted runner provider effect ${label} must be a non-negative integer.`);
   }
   return value as number;
 }

@@ -1,4 +1,3 @@
-import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type {
   HostedRuntimeEffectsPort,
   HostedRuntimeLinqRecentInboundEngagementResult,
@@ -322,7 +321,7 @@ export function createCloudflareEffectsPort(input: {
               transport: webControlTransport,
             });
             if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-              throw new ContractValidationError(
+              throw new TypeError(
                 "Hosted email recipient authority response is invalid.",
               );
             }
@@ -333,7 +332,7 @@ export function createCloudflareEffectsPort(input: {
               return null;
             }
             if (typeof deliveryTarget !== "string" || deliveryTarget.trim().length === 0) {
-              throw new ContractValidationError(
+              throw new TypeError(
                 "Hosted email recipient authority response is invalid.",
               );
             }
@@ -356,7 +355,7 @@ export function createCloudflareEffectsPort(input: {
               transport: webControlTransport,
             });
             if (!payload || typeof payload !== "object" || !("route" in payload)) {
-              throw new ContractValidationError("Hosted member notification route response is invalid.");
+              throw new TypeError("Hosted member notification route response is invalid.");
             }
             return payload.route === null ? null
               : parseHostedExecutionAssistantNotificationRoute(payload.route, description);
@@ -430,7 +429,7 @@ export function createCloudflareEffectsPort(input: {
             });
             const recordedAt = readOptionalStringField(payload, "recordedAt");
             if (!recordedAt || !Number.isFinite(Date.parse(recordedAt))) {
-              throw new ContractValidationError(
+              throw new TypeError(
                 "Hosted outbound message-volume receipt response is invalid.",
               );
             }
@@ -550,12 +549,12 @@ function readOptionalHostedEmailDeliverySummary(
     return null;
   }
   if (!delivery || typeof delivery !== "object" || Array.isArray(delivery)) {
-    throw new ContractValidationError("Hosted email send delivery must be an object.");
+    throw new TypeError("Hosted email send delivery must be an object.");
   }
   const record = delivery as Record<string, unknown>;
   const status = record.status;
   if (status !== "failed" && status !== "partial_failure" && status !== "sent") {
-    throw new ContractValidationError("Hosted email send delivery status is invalid.");
+    throw new TypeError("Hosted email send delivery status is invalid.");
   }
   return {
     failedCount: readHostedEmailDeliveryCount(record.failedCount, "failedCount"),
@@ -574,23 +573,23 @@ function readOptionalHostedEmailFanoutMemberIds(payload: unknown): string[] | nu
     return null;
   }
   if (!Array.isArray(value)) {
-    throw new ContractValidationError("Hosted email fanout recipient member ids must be an array.");
+    throw new TypeError("Hosted email fanout recipient member ids must be an array.");
   }
   const memberIds = value.map((entry) => {
     if (typeof entry !== "string" || entry.trim().length === 0) {
-      throw new ContractValidationError("Hosted email fanout recipient member ids must be non-empty strings.");
+      throw new TypeError("Hosted email fanout recipient member ids must be non-empty strings.");
     }
     return entry.trim();
   });
   if (new Set(memberIds).size !== memberIds.length) {
-    throw new ContractValidationError("Hosted email fanout recipient member ids must be unique.");
+    throw new TypeError("Hosted email fanout recipient member ids must be unique.");
   }
   return memberIds;
 }
 
 function readHostedEmailDeliveryCount(value: unknown, field: string): number {
   if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
-    throw new ContractValidationError(`Hosted email send delivery ${field} must be a non-negative integer.`);
+    throw new TypeError(`Hosted email send delivery ${field} must be a non-negative integer.`);
   }
   return value;
 }

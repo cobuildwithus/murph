@@ -872,7 +872,7 @@ function toNullablePrismaJson(
   const serialized = JSON.stringify(value);
 
   if (serialized === undefined) {
-    throw new ContractValidationError("Hosted workspace JSON value must be serializable.");
+    throw new TypeError("Hosted workspace JSON value must be serializable.");
   }
 
   return JSON.parse(serialized) as Prisma.InputJsonValue;

@@ -749,7 +749,7 @@ function assertHostedBrowserVaultReplicaDataKeyEnvelopeMatchesRef(input: {
     throw new ContractValidationError("Hosted browser vault replica dataKeyEnvelope.resource.purpose must be browser-vault-replica.");
   }
   if (input.userId && envelope.resource.userId !== input.userId) {
-    throw new TypeError("Hosted browser vault replica dataKeyEnvelope.resource.userId must match userId.");
+    throw new ContractValidationError("Hosted browser vault replica dataKeyEnvelope.resource.userId must match userId.");
   }
 }
 

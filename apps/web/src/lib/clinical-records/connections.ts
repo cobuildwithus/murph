@@ -1,4 +1,3 @@
-import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
 import { CLEAR_CLINICAL_PERSISTENT_ACCESS } from "./persistent-access";
@@ -154,13 +153,13 @@ function requireKnownStatus<Status extends string>(
   label: string,
 ): Status {
   const match = allowed.find((candidate) => candidate === value);
-  if (!match) throw new ContractValidationError(`Stored Clinical Records ${label} status is invalid.`);
+  if (!match) throw new TypeError(`Stored Clinical Records ${label} status is invalid.`);
   return match;
 }
 
 function requireEpicSourceSystem(value: string): "epic-fhir" {
   if (value !== "epic-fhir") {
-    throw new ContractValidationError("Stored Clinical Records source system is invalid.");
+    throw new TypeError("Stored Clinical Records source system is invalid.");
   }
   return value;
 }

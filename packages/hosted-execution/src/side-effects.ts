@@ -1,5 +1,9 @@
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
+  isHostedAiUsageAllowanceElevenLabsMusicPricedModelId,
+  type HostedAiUsageAllowanceElevenLabsMusicPricedModel,
+} from "./runtime-control.ts";
+import {
   assistantResponseCardMatchesConversationAudience,
   assistantResponseCardSchema,
   type AssistantResponseCard,
@@ -86,7 +90,7 @@ export type HostedAssistantDeliveryVoiceMemoGeneration =
       durationMs: number;
       forceInstrumental: boolean;
       kind: "elevenlabs_music";
-      modelId: "music_v2";
+      modelId: HostedAiUsageAllowanceElevenLabsMusicPricedModel;
       outputFormat: "mp3_48000_192";
       prompt: string;
     };
@@ -1132,8 +1136,8 @@ function parseHostedAssistantDeliveryVoiceMemoGeneration(
       },
       label,
     );
-    if (record.modelId !== "music_v2") {
-      throw new ContractValidationError(`${label}.modelId must be music_v2.`);
+    if (typeof record.modelId !== "string" || !isHostedAiUsageAllowanceElevenLabsMusicPricedModelId(record.modelId)) {
+      throw new ContractValidationError(`${label}.modelId must be a supported ElevenLabs music model.`);
     }
     if (record.outputFormat !== "mp3_48000_192") {
       throw new ContractValidationError(`${label}.outputFormat must be mp3_48000_192.`);
@@ -1150,7 +1154,7 @@ function parseHostedAssistantDeliveryVoiceMemoGeneration(
         `${label}.forceInstrumental`,
       ),
       kind,
-      modelId: "music_v2",
+      modelId: record.modelId,
       outputFormat: "mp3_48000_192",
       prompt: requireBoundedTrimmedString(record.prompt, `${label}.prompt`, 4_100),
     };

@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type { Prisma } from "@prisma/client";
 import type { CleanedWhere } from "better-auth/adapters";
 import { authLookupKey } from "./record-crypto";
@@ -14,13 +15,13 @@ export const AUTH_RECORD_LIMIT = 100;
 // flags. Unsupported library operations fail closed as a contract change.
 export function authRecordSelector(model: AuthModel, where: CleanedWhere[]): Prisma.HostedAuthRecordWhereInput {
   if (!where.length || where.some((clause) => clause.connector === "OR")) {
-    throw new TypeError("Authentication queries require a bounded AND selector.");
+    throw new ContractValidationError("Authentication queries require a bounded AND selector.");
   }
   for (const clause of where) {
     const selector = indexedSelector(model, clause);
     if (selector) return { model, ...selector };
   }
-  throw new TypeError("Authentication query has no supported identity selector.");
+  throw new ContractValidationError("Authentication query has no supported identity selector.");
 }
 
 function indexedSelector(model: AuthModel, clause: CleanedWhere): Prisma.HostedAuthRecordWhereInput | null {
@@ -41,8 +42,8 @@ export function matchesAuthRecord(record: AuthRecord, where: CleanedWhere[]): bo
 }
 
 function matchesClause(record: AuthRecord, clause: CleanedWhere): boolean {
-  if (!Object.hasOwn(record, clause.field)) throw new TypeError("Unsupported authentication query field.");
-  if (clause.mode === "insensitive") throw new TypeError("Authentication selectors must be normalized before lookup.");
+  if (!Object.hasOwn(record, clause.field)) throw new ContractValidationError("Unsupported authentication query field.");
+  if (clause.mode === "insensitive") throw new ContractValidationError("Authentication selectors must be normalized before lookup.");
   const actual = comparable(record[clause.field]);
   const expected = comparable(clause.value);
   switch (clause.operator) {
@@ -50,26 +51,26 @@ function matchesClause(record: AuthRecord, clause: CleanedWhere): boolean {
     case "ne": return actual !== expected;
     case "in":
     case "not_in": {
-      if (!Array.isArray(clause.value)) throw new TypeError("Invalid authentication set selector.");
+      if (!Array.isArray(clause.value)) throw new ContractValidationError("Invalid authentication set selector.");
       const included = clause.value.some((value) => comparable(value) === actual);
       return clause.operator === "in" ? included : !included;
     }
     case "lt": case "lte": case "gt": case "gte":
       return compareOrder(actual, expected, clause.operator);
-    default: throw new TypeError("Unsupported authentication query operator.");
+    default: throw new ContractValidationError("Unsupported authentication query operator.");
   }
 }
 
 function comparable(value: unknown): unknown { return value instanceof Date ? value.getTime() : value; }
 function compareOrder(actual: unknown, expected: unknown, operator: string): boolean {
   if (typeof actual !== "number" || typeof expected !== "number") {
-    throw new TypeError("Only authentication dates support ordered guards.");
+    throw new ContractValidationError("Only authentication dates support ordered guards.");
   }
   switch (operator) {
     case "lt": return actual < expected;
     case "lte": return actual <= expected;
     case "gt": return actual > expected;
     case "gte": return actual >= expected;
-    default: throw new TypeError("Unsupported authentication comparison.");
+    default: throw new ContractValidationError("Unsupported authentication comparison.");
   }
 }

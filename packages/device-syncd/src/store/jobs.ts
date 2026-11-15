@@ -936,10 +936,10 @@ function decodeDeviceSyncJobFailureTransition(
   const maxAttempts = requireJobRowNumber(row, "max_attempts");
 
   if (!Number.isSafeInteger(attempts) || attempts < 1) {
-    throw new ContractValidationError("Expected device_job.attempts to be a positive safe integer.");
+    throw new TypeError("Expected device_job.attempts to be a positive safe integer.");
   }
   if (!Number.isSafeInteger(maxAttempts) || maxAttempts < attempts) {
-    throw new ContractValidationError("Expected device_job.max_attempts to cover the committed attempt count.");
+    throw new TypeError("Expected device_job.max_attempts to cover the committed attempt count.");
   }
 
   return {

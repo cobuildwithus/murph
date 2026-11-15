@@ -1,4 +1,3 @@
-import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type { HostedExecutionClinicalEnrichmentRequestedWake } from "@murphai/hosted-execution/contracts";
 import { parseHostedExecutionWake } from "@murphai/hosted-execution/parsers";
 
@@ -9,7 +8,7 @@ import {
 
 function enrichmentItemId(jobId: string): string {
   if (!/^[a-f0-9]{64}$/u.test(jobId)) {
-    throw new ContractValidationError("Hosted clinical enrichment job identity is invalid.");
+    throw new TypeError("Hosted clinical enrichment job identity is invalid.");
   }
   return `clinical-enrichment:${jobId}`;
 }

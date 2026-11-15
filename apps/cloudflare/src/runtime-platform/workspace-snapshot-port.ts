@@ -1,4 +1,3 @@
-import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { stat } from "node:fs/promises";
@@ -285,7 +284,7 @@ export function createCloudflareWorkspaceSnapshotPort(input: {
       try {
         assertHostedWorkspaceSnapshotOperationLive(request.signal);
         if (!Number.isSafeInteger(request.encryptedByteSize) || request.encryptedByteSize <= 0) {
-          throw new ContractValidationError("Hosted workspace snapshot encryptedByteSize must be a positive safe integer.");
+          throw new TypeError("Hosted workspace snapshot encryptedByteSize must be a positive safe integer.");
         }
         const timings: HostedRuntimeWorkspaceSnapshotDirectUploadTimingDetails = {};
         const source = await stat(request.sourceFilePath);
@@ -1086,7 +1085,7 @@ function parseHostedWorkspaceSnapshotStartPayload(
   boundUserId: string,
 ): HostedRuntimeWorkspaceSnapshotSessionStart {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new ContractValidationError("Hosted workspace snapshot session start response must be an object.");
+    throw new TypeError("Hosted workspace snapshot session start response must be an object.");
   }
   const record = value as Record<string, unknown>;
   const encryptionRecord = readRequiredHostedRuntimeObject(
@@ -1098,7 +1097,7 @@ function parseHostedWorkspaceSnapshotStartPayload(
     "Hosted workspace snapshot scheme",
   );
   if (scheme !== HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME) {
-    throw new ContractValidationError("Hosted workspace snapshot scheme is invalid.");
+    throw new TypeError("Hosted workspace snapshot scheme is invalid.");
   }
   const limitsRecord = readRequiredHostedRuntimeObject(
     record.limits,
@@ -1108,7 +1107,7 @@ function parseHostedWorkspaceSnapshotStartPayload(
   const objectKey = readRequiredHostedRuntimeString(record.objectKey, "Hosted workspace snapshot objectKey");
   const snapshotId = readRequiredHostedRuntimeString(record.snapshotId, "Hosted workspace snapshot snapshotId");
   if (aad.objectKey !== objectKey || aad.snapshotId !== snapshotId) {
-    throw new ContractValidationError("Hosted workspace snapshot session start response AAD does not match its object binding.");
+    throw new TypeError("Hosted workspace snapshot session start response AAD does not match its object binding.");
   }
   if (aad.userId !== boundUserId) {
     throw new TypeError("Hosted workspace snapshot session start response AAD does not match its user binding.");
@@ -1159,7 +1158,7 @@ function parseHostedWorkspaceSnapshotPresignedPutPayload(
   value: unknown,
 ): SnapshotPresignedPut {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new ContractValidationError("Hosted workspace snapshot presign response must be an object.");
+    throw new TypeError("Hosted workspace snapshot presign response must be an object.");
   }
   const record = value as Record<string, unknown>;
   return {
@@ -1316,7 +1315,7 @@ function parseHostedWorkspaceSnapshotPresignedGetPayload(
   value: unknown,
 ): { expiresAt: string; getUrl: string } {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new ContractValidationError("Hosted workspace snapshot presign response must be an object.");
+    throw new TypeError("Hosted workspace snapshot presign response must be an object.");
   }
   const record = value as Record<string, unknown>;
   return {
@@ -1359,11 +1358,11 @@ async function unwrapWorkspaceSnapshotDataKey(input: {
   });
 
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    throw new ContractValidationError("Hosted workspace snapshot data key unwrap response must be an object.");
+    throw new TypeError("Hosted workspace snapshot data key unwrap response must be an object.");
   }
   const dataKey = (payload as Record<string, unknown>).dataKey;
   if (typeof dataKey !== "string" || dataKey.length === 0) {
-    throw new ContractValidationError("Hosted workspace snapshot data key unwrap response dataKey is required.");
+    throw new TypeError("Hosted workspace snapshot data key unwrap response dataKey is required.");
   }
   const decoded = decodeHostedWorkspaceSnapshotV2DataKey(dataKey);
   decoded.fill(0);
@@ -1512,7 +1511,7 @@ function parseHostedWorkspaceSnapshotCompletePayload(
   snapshotRef: HostedWorkspaceSnapshotV2Ref;
 } {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new ContractValidationError("Hosted workspace snapshot complete response must be an object.");
+    throw new TypeError("Hosted workspace snapshot complete response must be an object.");
   }
   const record = value as Record<string, unknown>;
   return {
@@ -1526,7 +1525,7 @@ function parseHostedWorkspaceSnapshotCompletePayload(
 
 function parseHostedWorkspaceSnapshotAad(value: unknown): HostedWorkspaceSnapshotV2Aad {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new ContractValidationError("Hosted workspace snapshot AAD must be an object.");
+    throw new TypeError("Hosted workspace snapshot AAD must be an object.");
   }
   const record = value as Record<string, unknown>;
   const purpose = readRequiredHostedRuntimeString(
@@ -1538,10 +1537,10 @@ function parseHostedWorkspaceSnapshotAad(value: unknown): HostedWorkspaceSnapsho
     "Hosted workspace snapshot AAD schema",
   );
   if (purpose !== HOSTED_WORKSPACE_SNAPSHOT_V2_AAD_PURPOSE) {
-    throw new ContractValidationError("Hosted workspace snapshot AAD purpose is invalid.");
+    throw new TypeError("Hosted workspace snapshot AAD purpose is invalid.");
   }
   if (schema !== HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA) {
-    throw new ContractValidationError("Hosted workspace snapshot AAD schema is invalid.");
+    throw new TypeError("Hosted workspace snapshot AAD schema is invalid.");
   }
   return {
     objectKey: readRequiredHostedRuntimeString(record.objectKey, "Hosted workspace snapshot AAD objectKey"),

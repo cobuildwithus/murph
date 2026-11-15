@@ -1,4 +1,3 @@
-import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { companionPresenceSchema } from "@murphai/hosted-execution/companion-presence";
 import type {
   HostedRuntimeDeviceSyncMessagingReturnTarget,
@@ -282,7 +281,7 @@ function buildHostedRuntimeApplyCallbackBodies(input: {
   userId: string;
 }): HostedExecutionDeviceSyncRuntimeApplyRequest[] {
   if (!Array.isArray(input.updates)) {
-    throw new ContractValidationError("Hosted device-sync runtime apply updates must be an array.");
+    throw new TypeError("Hosted device-sync runtime apply updates must be an array.");
   }
 
   const baseBody = {

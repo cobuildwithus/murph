@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import * as z from "@murphai/contracts/zod-runtime";
 
 const text = z.string().min(1).max(2048);
@@ -30,7 +31,7 @@ export type AuthRecord = Record<string, string | boolean | Date | null | undefin
 };
 
 export function requireAuthModel(model: string): AuthModel {
-  if (!Object.hasOwn(schemas, model)) throw new TypeError("Unsupported authentication model.");
+  if (!Object.hasOwn(schemas, model)) throw new ContractValidationError("Unsupported authentication model.");
   return model as AuthModel;
 }
 
@@ -39,10 +40,10 @@ export function parseAuthRecord(model: AuthModel, value: unknown): AuthRecord {
 }
 
 export function deserializeAuthRecord(model: AuthModel, plaintext: string): AuthRecord {
-  if (plaintext.length > 16_384) throw new TypeError("Authentication record is too large.");
+  if (plaintext.length > 16_384) throw new ContractValidationError("Authentication record is too large.");
   const value: unknown = JSON.parse(plaintext);
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("Invalid authentication record.");
+    throw new ContractValidationError("Invalid authentication record.");
   }
   const record: Record<string, unknown> = { ...value };
   for (const field of ["createdAt", "updatedAt", "expiresAt", "credentialsChangedAt", "primaryAuthenticatedAt"]) {
@@ -54,6 +55,6 @@ export function deserializeAuthRecord(model: AuthModel, plaintext: string): Auth
 export function authRecordOwner(model: AuthModel, record: AuthRecord): string | null {
   if (model === "verification") return null;
   const id = model === "user" ? record.id : record.userId;
-  if (typeof id !== "string" || !id) throw new TypeError("Authentication owner is missing.");
+  if (typeof id !== "string" || !id) throw new ContractValidationError("Authentication owner is missing.");
   return id;
 }

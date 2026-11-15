@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getPrisma } from "../src/lib/prisma";
 import { authLookupKey, openAuthRecord, sealAuthRecord } from "../src/lib/better-auth/record-crypto";
@@ -46,6 +47,16 @@ describe("authentication record integrity", () => {
     await expect(openAuthRecord({ ...row, payloadEncrypted: parts.join(".") }, prisma)).rejects.toThrow();
     vi.stubEnv("HOSTED_AUTH_STORAGE_KEY", Buffer.alloc(32, 18).toString("base64url"));
     await expect(openAuthRecord(row, prisma)).rejects.toThrow();
+  });
+
+  it("distinguishes malformed envelopes from crypto failures", async () => {
+    const row = await sealAuthRecord("verification", verification, prisma);
+    await expect(openAuthRecord({ ...row, payloadEncrypted: "unsupported.envelope" }, prisma))
+      .rejects.toBeInstanceOf(ContractValidationError);
+    vi.stubEnv("HOSTED_AUTH_STORAGE_KEY", Buffer.alloc(32, 18).toString("base64url"));
+    const failure = await openAuthRecord(row, prisma).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(Error);
+    expect(failure).not.toBeInstanceOf(ContractValidationError);
   });
 
   it("refuses provider credentials, non-numeric Telegram identities, and session IP storage", () => {

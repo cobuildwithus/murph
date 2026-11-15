@@ -1,4 +1,3 @@
-import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
 import { createHash } from "node:crypto";
@@ -457,7 +456,7 @@ export function buildHostedActionApprovalBinding(input: {
   sessionId: string;
 }): string {
   if (!SHA256_HEX_PATTERN.test(input.actionHash)) {
-    throw new ContractValidationError("Hosted action approval action hash is invalid.");
+    throw new TypeError("Hosted action approval action hash is invalid.");
   }
 
   return sha256Hex([
@@ -689,7 +688,7 @@ function requireHostedActionApprovalIdentity(
     || !approval.presentationBody
     || !approval.approvalStatus
   ) {
-    throw new ContractValidationError("Hosted action approval record is invalid.");
+    throw new TypeError("Hosted action approval record is invalid.");
   }
 
   return {
@@ -718,7 +717,7 @@ function readStoredReturnContactKind(
   ) {
     return value as HostedActionApprovalReturnContactKind;
   }
-  throw new ContractValidationError("Hosted action approval returnContactKind is invalid.");
+  throw new TypeError("Hosted action approval returnContactKind is invalid.");
 }
 
 function readHostedActionApprovalStatus(
@@ -734,7 +733,7 @@ function readHostedActionApprovalStatus(
     return "denied";
   }
   if (approval.approvalStatus !== "pending") {
-    throw new ContractValidationError("Hosted action approval status is invalid.");
+    throw new TypeError("Hosted action approval status is invalid.");
   }
   return approval.expiresAt <= now ? "expired" : "pending";
 }

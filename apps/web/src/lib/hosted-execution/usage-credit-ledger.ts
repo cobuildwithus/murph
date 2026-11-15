@@ -182,7 +182,7 @@ function normalizeHostedUsageCreditProjection(input: {
   const ledgerVersion = input.ledgerVersion ?? 0n;
 
   if (balanceUsdMicros < 0n || ledgerVersion < 0n) {
-    throw new ContractValidationError("Hosted usage-credit projection cannot be negative.");
+    throw new TypeError("Hosted usage-credit projection cannot be negative.");
   }
 
   return {

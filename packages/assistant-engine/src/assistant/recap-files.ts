@@ -19,7 +19,7 @@ export async function recapDirectory(vault: string, relative: string): Promise<s
 }
 
 export async function saveRecapMediaFile(input: { vault: string; relativeRoot: string; bytes: Uint8Array; mediaType: 'image/jpeg' | 'audio/mpeg' }): Promise<string> {
-  if (!input.bytes.length || input.bytes.length > 2 * 1024 * 1024) throw new ContractValidationError('Media file exceeds 2 MiB.')
+  if (!input.bytes.length || input.bytes.length > 2 * 1024 * 1024) throw new TypeError('Media file exceeds 2 MiB.')
   const hash = createHash('sha256').update(input.bytes).digest('hex')
   const directory = await recapDirectory(input.vault, `${input.relativeRoot}/media`)
   const filename = `${hash}.${input.mediaType === 'image/jpeg' ? 'jpg' : 'mp3'}`

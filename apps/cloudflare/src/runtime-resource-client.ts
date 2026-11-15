@@ -1,4 +1,3 @@
-import { ContractValidationError } from "@murphai/contracts/validation-error";
 // These contracts already load with the Worker. Dynamic imports retain unused
 // exports from their shared graph and increase cold-start initialization.
 import { HOSTED_RUNTIME_REPLICA_PUT_PATH, HOSTED_RUNTIME_RESOURCES_PATH, parseHostedRuntimeSnapshotResponse, type HostedRuntimeReplicaPutCommand, type HostedRuntimeSnapshotCommand } from "@murphai/hosted-execution/runtime-resources";
@@ -78,7 +77,7 @@ export async function commandHostedRuntimeReplicaPut(input: {
   });
   if (!response.ok) await throwRuntimeResourceRejection(response, env.webControlTimeoutMs, "replica PUT");
   const result = JSON.parse(await readHostedWebControlPlaneResponseText({ response, description: "Hosted runtime replica PUT", maxBytes: 1024, signal: null, timeoutMs: env.webControlTimeoutMs }));
-  if (typeof result?.applied !== "boolean") throw new ContractValidationError("Hosted runtime replica PUT result is invalid.");
+  if (typeof result?.applied !== "boolean") throw new TypeError("Hosted runtime replica PUT result is invalid.");
   return result.applied;
 }
 

@@ -50,10 +50,10 @@ export async function retireRecapMediaObject(input: { bucket: R2BucketLike; user
 
 function parseStored(text: string): Stored {
   const value: unknown = JSON.parse(text);
-  if (typeof value !== "object" || value === null || !("version" in value) || value.version !== 1) throw new ContractValidationError("Invalid recap storage record.");
+  if (typeof value !== "object" || value === null || !("version" in value) || value.version !== 1) throw new TypeError("Invalid recap storage record.");
   if ("retired" in value && value.retired === true) return { version: 1, retired: true };
   if (!("hash" in value) || typeof value.hash !== "string" || !/^[a-f0-9]{64}$/u.test(value.hash)
-    || !("envelope" in value) || typeof value.envelope !== "string") throw new ContractValidationError("Invalid recap storage record.");
+    || !("envelope" in value) || typeof value.envelope !== "string") throw new TypeError("Invalid recap storage record.");
   return { version: 1, hash: value.hash, envelope: requireHostedGameMediaEnvelope(value.envelope) };
 }
 

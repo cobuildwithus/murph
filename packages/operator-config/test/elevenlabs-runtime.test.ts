@@ -69,7 +69,7 @@ test.each(['eleven_multilingual_v2', 'eleven_v3', 'eleven_v4'])(
   expect(fetchImplementation).toHaveBeenCalledOnce()
 })
 
-test('elevenlabs runtime uses the SDK music operation with the exact request shape', async () => {
+test.each(['music_v2', 'music_v2_5'] as const)('elevenlabs runtime sends %s through the SDK with the exact request shape', async modelId => {
   const audioBytes = musicAudio
   const fetchImplementation = vi.fn(async (url: string, init) => {
     assert.equal(
@@ -83,7 +83,7 @@ test('elevenlabs runtime uses the SDK music operation with the exact request sha
     assert.equal(headers.get('xi-api-key'), 'elevenlabs-key')
     assert.deepEqual(JSON.parse(String(init.body)), {
       force_instrumental: true,
-      model_id: 'music_v2',
+      model_id: modelId,
       music_length_ms: 12_000,
       prompt: 'Warm instrumental transition.',
     })
@@ -96,7 +96,7 @@ test('elevenlabs runtime uses the SDK music operation with the exact request sha
       durationMs: 12_000,
       fetchImplementation,
       forceInstrumental: true,
-      modelId: ELEVENLABS_MUSIC_MODEL_ID,
+      modelId,
       outputFormat: ELEVENLABS_MUSIC_OUTPUT_FORMAT,
       prompt: 'Warm instrumental transition.',
     }),
@@ -121,19 +121,28 @@ function detailedResponse(words: unknown = providerWords, audio: Uint8Array = mu
   ]), { headers: { 'content-type': `multipart/mixed; boundary=${boundary}` } })
 }
 
-test('explicit lyrics use the pinned SDK v2 composition plan and split multipart audio and timestamps', async () => {
+test.each(['music_v2', 'music_v2_5'] as const)('explicit lyrics preserve %s and split SDK multipart audio and timestamps', async modelId => {
   const fetchImplementation = vi.fn(async (url: string, init) => {
     expect(url).toBe('https://api.elevenlabs.io/v1/music/detailed?output_format=mp3_48000_192')
     expect(new Headers(init.headers).get('accept')).toBe('multipart/mixed')
-    expect(JSON.parse(init.body)).toEqual({ model_id: 'music_v2', with_timestamps: true,
+    expect(JSON.parse(init.body)).toEqual({ model_id: modelId, with_timestamps: true,
       composition_plan: { chunks: [{ text: 'Leo goes\nAva stays', duration_ms: 20_000, positive_styles: ['Playful piano'], negative_styles: [] }] } })
     return detailedResponse()
   })
-  expect(await generateElevenLabsMusic({ ...lyricMusicInput, fetchImplementation })).toEqual({
+  expect(await generateElevenLabsMusic({ ...lyricMusicInput, modelId, fetchImplementation })).toEqual({
     bytes: musicAudio, contentType: 'audio/mpeg', filenameExtension: 'mp3',
     wordsTimestamps: providerWords.map(word => ({ word: word.word, startMs: word.start_ms, endMs: word.end_ms })),
   })
   expect(fetchImplementation).toHaveBeenCalledTimes(1)
+})
+
+test.each(['music_v1', 'unknown-model'] as const)('unsupported music model %s fails before fetching', async modelId => {
+  const fetchImplementation = vi.fn()
+  await expect(generateElevenLabsMusic({ ...lyricMusicInput, fetchImplementation,
+    // @ts-expect-error Exercise the runtime boundary with an unsupported model.
+    modelId,
+  })).rejects.toMatchObject({ code: 'ELEVENLABS_INVALID_INPUT' })
+  expect(fetchImplementation).not.toHaveBeenCalled()
 })
 
 test.each([null, [], [{ word: 'unrelated', start_ms: 0, end_ms: 100 }], [{ word: 'Leo', start_ms: 200, end_ms: 100 }]])(

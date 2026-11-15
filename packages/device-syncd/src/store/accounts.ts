@@ -315,28 +315,28 @@ function parseCredentialMetadataJson(
 function validateStoredCredentialRow(row: StoredAccountRow): void {
   if (row.credential_kind === "oauth_tokens") {
     if (row.provider_config_key !== null || !row.access_token_encrypted) {
-      throw new ContractValidationError("Stored OAuth token credential rows require an access token and no provider config key.");
+      throw new TypeError("Stored OAuth token credential rows require an access token and no provider config key.");
     }
     return;
   }
 
   if (row.access_token_encrypted !== null) {
-    throw new ContractValidationError("Stored non-token credential rows must not contain access tokens.");
+    throw new TypeError("Stored non-token credential rows must not contain access tokens.");
   }
 
   if (row.refresh_token_encrypted !== null || row.access_token_expires_at !== null) {
-    throw new ContractValidationError("Stored non-token credential rows must not contain token bundle fields.");
+    throw new TypeError("Stored non-token credential rows must not contain token bundle fields.");
   }
 
   if (row.credential_kind === "provider_config") {
     if (!row.provider_config_key) {
-      throw new ContractValidationError("Stored provider-config credential rows require provider_config_key.");
+      throw new TypeError("Stored provider-config credential rows require provider_config_key.");
     }
     return;
   }
 
   if (row.provider_config_key !== null) {
-    throw new ContractValidationError("Stored none credential rows must not contain provider_config_key.");
+    throw new TypeError("Stored none credential rows must not contain provider_config_key.");
   }
 }
 
@@ -345,7 +345,7 @@ function buildStoredAccountCredential(row: StoredAccountRow): StoredDeviceSyncAc
 
   if (row.credential_kind === "oauth_tokens") {
     if (!row.access_token_encrypted) {
-      throw new ContractValidationError("Stored OAuth token credential rows require an access token.");
+      throw new TypeError("Stored OAuth token credential rows require an access token.");
     }
 
     return {
@@ -359,7 +359,7 @@ function buildStoredAccountCredential(row: StoredAccountRow): StoredDeviceSyncAc
 
   if (row.credential_kind === "provider_config") {
     if (!row.provider_config_key) {
-      throw new ContractValidationError("Stored provider-config credential rows require provider_config_key.");
+      throw new TypeError("Stored provider-config credential rows require provider_config_key.");
     }
 
     return {

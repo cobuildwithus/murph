@@ -35,6 +35,7 @@ describe("workspace source resolution", () => {
     { packageName: "contracts", entry: "recap-validation.ts", specifier: "@murphai/contracts/recap-validation", symbol: "withValidGameSuperlatives" },
     { packageName: "contracts", entry: "zod-runtime.ts", specifier: "@murphai/contracts/zod-runtime", symbol: "object" },
     { packageName: "contracts", entry: "validation-error.ts", specifier: "@murphai/contracts/validation-error", symbol: "ContractValidationError" },
+    { packageName: "contracts", entry: "elevenlabs-music.ts", specifier: "@murphai/contracts/elevenlabs-music", symbol: "elevenLabsMusicModelIds" },
     { packageName: "operator-config", entry: "generated-audio.ts", specifier: "@murphai/operator-config/generated-audio", symbol: "inspectGeneratedMp3Audio" },
     { packageName: "device-syncd", entry: "service.ts", specifier: "@murphai/device-syncd/service", symbol: "SqliteDeviceSyncStore" },
     { packageName: "hosted-execution", entry: "usage-diagnostics.ts", specifier: "@murphai/hosted-execution/usage-diagnostics", symbol: "parseHostedUsageDiagnosticsRequest" },

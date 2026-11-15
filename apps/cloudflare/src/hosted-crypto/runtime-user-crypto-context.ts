@@ -1,4 +1,3 @@
-import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   HOSTED_RUNTIME_CRYPTO_CONTEXT_PATH,
 } from "@murphai/hosted-execution/routes";
@@ -398,20 +397,20 @@ function parseHostedRuntimeCryptoContextResponse(
   requiredDomain: HostedWorkerRuntimeDomain,
 ): HostedRuntimeCryptoContextResponse {
   if (!value || typeof value !== "object") {
-    throw new ContractValidationError("Hosted runtime crypto context response must be an object.");
+    throw new TypeError("Hosted runtime crypto context response must be an object.");
   }
   const record = value as Partial<HostedRuntimeCryptoContextResponse>;
   if (record.schema !== "murph.hosted-runtime-crypto-context.v1") {
-    throw new ContractValidationError("Hosted runtime crypto context response schema mismatch.");
+    throw new TypeError("Hosted runtime crypto context response schema mismatch.");
   }
   if (record.userId !== expectedUserId) {
     throw new TypeError("Hosted runtime crypto context response user mismatch.");
   }
   if (!record.envelopes || typeof record.envelopes !== "object") {
-    throw new ContractValidationError("Hosted runtime crypto context response envelopes must be an object.");
+    throw new TypeError("Hosted runtime crypto context response envelopes must be an object.");
   }
   if (!(requiredDomain in record.envelopes)) {
-    throw new ContractValidationError(
+    throw new TypeError(
       `Hosted runtime crypto context response must include ${requiredDomain} envelope.`,
     );
   }
@@ -422,7 +421,7 @@ function parseHostedRuntimeCryptoContextJson(value: string): unknown {
   try {
     return JSON.parse(value) as unknown;
   } catch (error) {
-    throw new ContractValidationError(
+    throw new TypeError(
       `Hosted runtime crypto context response must be valid JSON: ${
         error instanceof Error ? error.message : String(error)
       }`,

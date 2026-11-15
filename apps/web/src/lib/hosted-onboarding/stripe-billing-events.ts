@@ -1,4 +1,3 @@
-import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   HostedBillingStatus,
   Prisma,
@@ -1688,7 +1687,7 @@ async function prepareHostedStripeCurrentEntitlementRefundProof(input: {
     }
     const amount = readHostedStripePositiveAmount(refund.amount);
     if (amount === null || !Number.isSafeInteger(succeededExposure + amount)) {
-      throw new ContractValidationError("Stripe refund exposure exceeded the supported integer range.");
+      throw new TypeError("Stripe refund exposure exceeded the supported integer range.");
     }
     succeededExposure += amount;
   }

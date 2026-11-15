@@ -1,4 +1,3 @@
-import { ContractValidationError } from "@murphai/contracts/validation-error";
 export interface VersionedJsonStateEnvelope<T> {
   schema: string;
   schemaVersion: number;
@@ -33,17 +32,17 @@ export function parseVersionedJsonStateEnvelope<T>(
     const schemaVersion = typeof value.schemaVersion === "number" ? value.schemaVersion : NaN;
 
     if (schema !== input.schema) {
-      throw new ContractValidationError(`${input.label} schema must be ${input.schema}.`);
+      throw new TypeError(`${input.label} schema must be ${input.schema}.`);
     }
 
     if (schemaVersion !== input.schemaVersion) {
-      throw new ContractValidationError(`${input.label} schemaVersion must be ${input.schemaVersion}.`);
+      throw new TypeError(`${input.label} schemaVersion must be ${input.schemaVersion}.`);
     }
 
     return input.parseValue(value.value);
   }
 
-  throw new ContractValidationError(`${input.label} must be a versioned ${input.schema} envelope.`);
+  throw new TypeError(`${input.label} must be a versioned ${input.schema} envelope.`);
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {

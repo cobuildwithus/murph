@@ -791,7 +791,7 @@ function requireHostedAiUsageMemberId(
   }
 
   if (trustedUserId && record.memberId !== trustedUserId) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted AI usage memberId does not match the authenticated hosted execution user.",
     );
   }

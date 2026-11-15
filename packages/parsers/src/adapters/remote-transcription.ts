@@ -1,4 +1,3 @@
-import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { promises as fs } from "node:fs";
 
 import type { ParsedBlock, ProviderRunResult } from "../contracts/parse.js";
@@ -151,7 +150,7 @@ async function readBoundedJsonResponse(
 ): Promise<Record<string, unknown>> {
   const bytes = await response.arrayBuffer();
   if (bytes.byteLength > maxBytes) {
-    throw new ContractValidationError(
+    throw new TypeError(
       `Remote transcription response exceeds the ${maxBytes} byte limit.`,
     );
   }
@@ -160,11 +159,11 @@ async function readBoundedJsonResponse(
   try {
     parsed = JSON.parse(new TextDecoder().decode(bytes));
   } catch {
-    throw new ContractValidationError("Remote transcription response is not valid JSON.");
+    throw new TypeError("Remote transcription response is not valid JSON.");
   }
 
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new ContractValidationError("Remote transcription response must be a JSON object.");
+    throw new TypeError("Remote transcription response must be a JSON object.");
   }
 
   return parsed as Record<string, unknown>;
