@@ -1,4 +1,4 @@
-export { buildRecapScoreProtocolProbe } from './game-tools.ts';
+export { buildRecapScoreProtocolProbe, buildRecapVideoProtocolProbe } from './game-tools.ts';
 export { RECAP_SHOW_CRAFT } from "./recap-show-craft.ts";
 export { GAME_MISSED_ROOM_MAX_GAMES, gameGroupMissedCheckInPolicySchema, type HostedGameGroupMissedCheckInPolicy } from "./game-group-missed.ts";
 export { gameEveningCheckInPolicySchema, gamePrivateEveningCheckInPolicySchema, gamePrivateKickoffPolicySchema,
@@ -3328,6 +3328,7 @@ export const HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_MAX_BYTES = 16 * 1024;
 
 export interface HostedRuntimeWebProtocolAdmission {
   recapScore: { upload: unknown; asset: unknown };
+  recapVideo: { part: unknown; write: unknown; recover: unknown; result: unknown };
   kind: typeof HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_KIND;
   schemaVersion: typeof HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_VERSION;
   nonce: string;

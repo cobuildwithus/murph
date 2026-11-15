@@ -5937,6 +5937,31 @@ permanent retirement tombstones prevent late uploads from restoring access.
 A refreshed fallback selection derives a fresh cover key from its frozen deadline
 and content, retaining the current cover atomically with acceptance; expired
 receipts and tombstones remain terminal across mailbox retries.
+
+A pair show's envelope may also hold one recap `video`: a single MP4 stored as
+up to four sealed parts of at most 2,000,000 bytes on the same receipts, keys
+(`recap/<generation>/<sha256>.mp4`) and tombstones as scenes and the song. Only
+the whole file has a hash, a length, a duration, a frame size and one
+deduplicated source list, which includes every source of the scenes it shows;
+parts are not assets and the limit of five assets is unchanged. A write brings a
+candidate. Web joins the staged parts outside the transaction, checks the
+declared hash, walks the MP4's boxes for its duration and frame size, resolves
+the declared sources itself, and leaves a candidate that fails any test off the
+accepted recap. The first acceptance decides the video: a retried or replayed
+write gets the stored recap, and write and recovery results name the accepted
+video (generation, hash, length) or `null` only to a runtime that asked, so an
+older runtime never sees the field. `recapStorageObjects` lists a recap's
+stored objects for receipt retention and serving; a part is served as
+`video-<index>` through the asset route under its parent video's sources, the
+media switch and the generation. Retirement is by game and generation, so
+regeneration, a post removed for everyone and account deletion retire parts
+with no code of their own. `MURPH_GAME_RECAP_VIDEO_ENABLED=true` (pair shows
+only) lets Web stage parts, accept a candidate and add `game.poster` to the
+recap material; stored videos stay readable while it is off. Nothing renders,
+uploads or sends a video yet. The envelope reader is the Web rollback floor
+once a video is stored: the previous release refuses an envelope with `video`.
+Live Web protocol admission carries a `recapVideo` witness, so a runtime is not
+activated against a Web that cannot read these requests.
 Accepted media uses private generation URLs; a thirty-day opaque cover capability
 exposes only a composed cover. Failed scenes retain their text, failed songs are
 omitted, and exhausted generation uses a validated three-page plain fallback.

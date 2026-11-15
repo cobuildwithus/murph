@@ -83,6 +83,8 @@ export async function createRecapShowLiveProviders(input: {
       const meta = await sharp(bytes).metadata()
       recapGame = { id: command.id, bytes: bytes.toString('base64'), hash: hash(bytes), mediaType: 'image/jpeg', byteLength: bytes.length, width: meta.width, height: meta.height }
     } else if (command.kind === 'upload') {
+      // This synthetic Web predates the recap video, as an older deployed Web would.
+      if (command.mediaType === 'video/mp4') throw new Error('The synthetic Web stores no recap video.')
       const bytes = Buffer.from(command.bytes, 'base64')
       const asset: RecapAsset = { slot: command.slot, kind: command.mediaType === 'image/jpeg' ? 'image' : 'song', recipeId: hash(bytes), hash: hash(bytes), storageKey: `recap/synthetic/${hash(bytes)}`, mediaType: command.mediaType, byteLength: bytes.length, references: [] }
       if (asset.kind === 'image') { const meta = await sharp(bytes).metadata(); asset.width = meta.width; asset.height = meta.height }

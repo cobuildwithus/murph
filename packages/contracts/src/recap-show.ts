@@ -96,16 +96,18 @@ export const gameRecapStorySchema = gameRecapWriterSchema.extend({
 });
 
 const instant = z.isoDateTime({ offset: true });
+const sha256 = z.string().regex(/^[a-f0-9]{64}$/u);
+const recapSourceSchema = z.object({
+  kind: z.enum(["profile", "contact", "entry", "murph"]),
+  memberId: ref.optional(), entryId: ref.optional(), key: z.string().min(1).max(512),
+}).strict();
 export const recapAssetSchema = z.object({
   slot: ref,
   kind: z.enum(["image", "song"]),
   recipeId: ref,
   storageKey: z.string().min(1).max(512),
-  references: z.array(z.object({
-    kind: z.enum(["profile", "contact", "entry", "murph"]),
-    memberId: ref.optional(), entryId: ref.optional(), key: z.string().min(1).max(512),
-  }).strict()).max(16),
-  hash: z.string().regex(/^[a-f0-9]{64}$/u),
+  references: z.array(recapSourceSchema).max(16),
+  hash: sha256,
   mediaType: z.enum(["image/jpeg", "audio/mpeg"]),
   byteLength: z.number().int().positive().max(2 * 1024 * 1024),
   width: z.number().int().positive().optional(), height: z.number().int().positive().optional(),
@@ -117,10 +119,49 @@ export const recapAssetSchema = z.object({
   && asset.songStartMs < asset.durationMs && recapScorePageCount(asset.durationMs) !== undefined,
 "A score requires a song, raw timings, a measured score duration and a slice origin before its end.");
 export type RecapAsset = z.infer<typeof recapAssetSchema>;
+
+/** The recap as one MP4. It is stored as ordered opaque parts on the asset rails;
+ * only the whole file has a hash, a length, media facts and source lineage. */
+export const RECAP_VIDEO_MAX_BYTES = 8_000_000;
+export const RECAP_VIDEO_PART_MAX_BYTES = 2_000_000;
+export const RECAP_VIDEO_MAX_PARTS = 4;
+export const RECAP_VIDEO_MAX_DURATION_MS = 120_000;
+/** Every source a renderable show can draw: two contact sheets alone need eighteen. */
+export const RECAP_VIDEO_MAX_REFERENCES = 64;
+export const recapVideoPartSchema = z.object({
+  storageKey: z.string().min(1).max(512), hash: sha256,
+  byteLength: z.number().int().positive().max(RECAP_VIDEO_PART_MAX_BYTES),
+}).strict();
+export type RecapVideoPart = z.infer<typeof recapVideoPartSchema>;
+const videoParts = z.array(recapVideoPartSchema).min(1).max(RECAP_VIDEO_MAX_PARTS);
+const videoBytes = z.number().int().positive().max(RECAP_VIDEO_MAX_BYTES);
+const wholeVideo = (video: { byteLength: number; parts: readonly RecapVideoPart[] }) =>
+  video.parts.reduce((sum, part) => sum + part.byteLength, 0) === video.byteLength
+  && new Set(video.parts.map(part => part.storageKey)).size === video.parts.length;
+export const recapVideoSchema = z.object({
+  hash: sha256, byteLength: videoBytes,
+  durationMs: z.number().int().positive().max(RECAP_VIDEO_MAX_DURATION_MS),
+  width: z.number().int().positive().max(2048), height: z.number().int().positive().max(2048),
+  references: z.array(recapSourceSchema).max(RECAP_VIDEO_MAX_REFERENCES),
+  parts: videoParts,
+}).strict().refine(wholeVideo, "Video parts must be distinct and add up to the whole file.");
+export type RecapVideo = z.infer<typeof recapVideoSchema>;
+/** What the host declares with a write. Web measures the file and resolves the sources itself. */
+export const recapVideoDraftSchema = z.object({
+  hash: sha256, byteLength: videoBytes,
+  referenceIds: z.array(sha256).max(RECAP_VIDEO_MAX_REFERENCES),
+  parts: videoParts,
+}).strict().refine(wholeVideo, "Video parts must be distinct and add up to the whole file.");
+export type RecapVideoDraft = z.infer<typeof recapVideoDraftSchema>;
+/** The video Web accepted for a generation. A local file may be sent only when it matches. */
+export const recapVideoIdentitySchema = z.object({ generationId: ref, hash: sha256, byteLength: videoBytes }).strict();
+export type RecapVideoIdentity = z.infer<typeof recapVideoIdentitySchema>;
+
 export const gameRecapEnvelopeSchema = z.object({
   version: z.literal(1), generationId: ref, story: recapShowWriterSchema.extend({ song: recapShowWriterSchema.shape.song.catch(undefined) }),
   acceptedAt: instant,
   assets: z.array(recapAssetSchema).max(5),
+  video: recapVideoSchema.optional(),
   preview: z.object({ token: z.string().min(32).max(128), expiresAt: instant }).strict(),
 }).strict();
 export type GameRecapEnvelope = z.infer<typeof gameRecapEnvelopeSchema>;
@@ -130,7 +171,23 @@ export const storedGameRecapEnvelopeSchema = gameRecapEnvelopeSchema.extend({
     const asset = recapAssetSchema.safeParse(value);
     return asset.success ? [asset.data] : [];
   })).catch([]),
+  // A malformed video is dropped; the recap stays readable.
+  video: recapVideoSchema.optional().catch(undefined),
 });
+
+export type RecapStorageObject = { slot: string; storageKey: string; hash: string;
+  mediaType: RecapAsset["mediaType"] | "video/mp4"; references: RecapAsset["references"] };
+/** Every stored object a recap owns: its scene and song assets, then its video's parts.
+ * Acceptance, receipt retention and serving all walk this list. A part is served
+ * under `video-<index>` and authorized by its parent video's sources. */
+export function recapStorageObjects(recap: Pick<GameRecapEnvelope, "assets" | "video">): RecapStorageObject[] {
+  const video = recap.video;
+  return [
+    ...recap.assets.map(({ slot, storageKey, hash, mediaType, references }) => ({ slot, storageKey, hash, mediaType, references })),
+    ...(video ? video.parts.map((part, index) => ({ slot: `video-${index}`, storageKey: part.storageKey, hash: part.hash,
+      mediaType: "video/mp4" as const, references: video.references })) : []),
+  ];
+}
 export const storedGameRecapSchema = z.union([storedGameRecapEnvelopeSchema, gameRecapStorySchema]);
 export function readGameRecapStory(value: unknown): GameRecapStory {
   const parsed = storedGameRecapSchema.parse(value);
@@ -166,6 +223,11 @@ export const gameRecapPresentationSchema = z.object({
     acceptedAt: instant,
     pages: z.array(recapShowPageSchema).max(11),
     score: z.object({ media: displayMedia }).strict().optional(),
+    // One file: download the parts in order and join them.
+    video: z.object({ mediaType: z.literal("video/mp4"), byteLength: videoBytes,
+      durationMs: z.number().int().positive(), width: z.number().int().positive(), height: z.number().int().positive(),
+      parts: z.array(z.object({ url: z.string().min(1), byteLength: z.number().int().positive() }).strict()).min(1).max(RECAP_VIDEO_MAX_PARTS),
+    }).strict().optional(),
   }).strict().optional(),
 }).strict();
 export type GameRecapPresentation = z.infer<typeof gameRecapPresentationSchema>;
@@ -232,5 +294,8 @@ export function presentGameRecap(input: {
       song: { title: story.song.title, lyrics: story.song.lyrics, ...(lines ? { lines } : {}) } });
   }
   pages.push({ id: "result", kind: "result", background: "paper", blocks: [] });
-  return { ...legacy, show: { version: 1, generationId: envelope.generationId, treatment: (story.treatment ?? "").replace(/[\s.,;:]+$/u, ""), acceptedAt: envelope.acceptedAt, pages, ...(score ? { score } : {}) } };
+  const video = input.mediaVisible === false ? undefined : envelope.video;
+  return { ...legacy, show: { version: 1, generationId: envelope.generationId, treatment: (story.treatment ?? "").replace(/[\s.,;:]+$/u, ""), acceptedAt: envelope.acceptedAt, pages, ...(score ? { score } : {}),
+    ...(video ? { video: { mediaType: "video/mp4" as const, byteLength: video.byteLength, durationMs: video.durationMs, width: video.width, height: video.height,
+      parts: video.parts.map((part, index) => ({ url: input.mediaUrl(`video-${index}`, envelope.generationId), byteLength: part.byteLength })) } } : {}) } };
 }

@@ -1,13 +1,14 @@
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type { Prisma } from '@prisma/client';
 import type { HostedGameToolRequest } from '@murphai/hosted-execution/runtime-control';
-import { recapAssetSchema, recapScorePageCount, recapFirstSungWordMs, type SongWordTimestamp } from '@murphai/contracts/recap-show';
+import { RECAP_VIDEO_PART_MAX_BYTES, recapAssetSchema, recapVideoPartSchema, recapScorePageCount, recapFirstSungWordMs, type SongWordTimestamp } from '@murphai/contracts/recap-show';
+import { isPairRecapVideoEnabled } from './access';
 import { getPrisma } from '../prisma';
 import { readGameChatAudience, readGameChatAuthority } from './chat-membership';
 import { readGameRecapEntryIdsTx, readLatestGameRecapEventIdTx } from './recap-witness';
-import { readRecapSourceReferences } from './recap-inputs';
+import { readRecapSourceReferences, type RecapSourceReference } from './recap-inputs';
 import { recapReferencesCurrent } from './recap-asset-access';
-import { registerRecapAssetsTx } from './recap-retirement';
+import { recapResourceId, registerRecapAssetsTx } from './recap-retirement';
 import type { readGameRecapMaterial } from './service';
 import "server-only";
 import { createHash, randomUUID } from "node:crypto";
@@ -19,8 +20,17 @@ import { hostedRecapMediaObjectKey, requireHostedRecapMediaId } from "@murphai/h
 import { readHostedExecutionControlClientIfConfigured } from "../hosted-execution/control";
 import { openGameMedia, sealGameMedia } from "./crypto";
 
-export type RecapMediaMetadata = { hash: string; bytes: number; mediaType: "image/jpeg" | "audio/mpeg"; width?: number; height?: number; durationMs?: number; songStartMs?: number };
+export type RecapMediaType = "image/jpeg" | "audio/mpeg" | "video/mp4";
+export type RecapMediaMetadata = { hash: string; bytes: number; mediaType: RecapMediaType; width?: number; height?: number; durationMs?: number; songStartMs?: number };
 type ScoreMetadata = { songStartMs?: number; wordsTimestamps?: SongWordTimestamp[] };
+const SUFFIX = { "image/jpeg": "jpg", "audio/mpeg": "mp3", "video/mp4": "mp4" } as const;
+/** A generation's renders, each of up to four parts, that may wait unaccepted at once. */
+const STAGED_VIDEO_PARTS = 16;
+
+/** The one content-addressed identity a generation's object may have. */
+export function recapMediaStorageKey(generationId: string, hash: string, mediaType: RecapMediaType): string {
+  return `recap/${generationId}/${hash}.${SUFFIX[mediaType]}`;
+}
 type Identity = { storageKey: string; ownerMemberId: string };
 
 /** Inspect and seal outside transactions. Upload retry reuses an immutable key;
@@ -62,6 +72,16 @@ export async function readRecapMedia(input: Identity): Promise<{ bytes: Uint8Arr
   return { bytes, hash: stored.hash };
 }
 
+/** A generation's own stored object, proven by its content identity. Null when the
+ * key is not that identity, the object is gone or its bytes differ. */
+export async function readRecapGenerationObject(input: { generationId: string; ownerMemberId: string;
+  object: { storageKey: string; hash: string; mediaType: RecapMediaType } }): Promise<Uint8Array | null> {
+  const { storageKey, hash, mediaType } = input.object;
+  if (storageKey !== recapMediaStorageKey(input.generationId, hash, mediaType)) return null;
+  const stored = await readRecapMedia({ storageKey, ownerMemberId: input.ownerMemberId });
+  return stored && stored.hash === hash ? stored.bytes : null;
+}
+
 /** The hosted sweeper uses the same permanent tombstone through its purge route. */
 export async function retireRecapMedia(input: Identity): Promise<void> {
   const control = hostedControl();
@@ -78,9 +98,11 @@ export async function retireRecapMedia(input: Identity): Promise<void> {
 
 export async function inspectRecapMedia(bytes: Uint8Array, storageKey: string, durationMs?: number, score: ScoreMetadata = {}): Promise<RecapMediaMetadata> {
   requireHostedRecapMediaId(storageKey);
-  const image = storageKey.endsWith(".jpg");
-  if (!bytes.length || bytes.length > 2 * 1024 * 1024) throw new RangeError("Recap asset size is invalid.");
+  const image = storageKey.endsWith(".jpg"), part = storageKey.endsWith(".mp4");
+  if (!bytes.length || bytes.length > (part ? RECAP_VIDEO_PART_MAX_BYTES : 2 * 1024 * 1024)) throw new RangeError("Recap asset size is invalid.");
   const metadata = { hash: createHash("sha256").update(bytes).digest("hex"), bytes: bytes.length };
+  // A part is an opaque slice; the whole file is measured once, at acceptance.
+  if (part) return { ...metadata, mediaType: "video/mp4" };
   if (image) {
     if (score.songStartMs !== undefined) throw new ContractValidationError("A score origin requires audio.");
     const decoded = sharp(bytes, { limitInputPixels: 4_194_304, failOn: "warning" });
@@ -125,24 +147,36 @@ function isStored(value: unknown): value is { envelope: string; hash: string } {
 
 export const recapGenerationId = (eventId: string) => createHash('sha256').update(`recap-generation:${eventId}`).digest('hex').slice(0, 32);
 
-/** The host supplies actual file bytes and its private source association. */
-export async function uploadRecapMedia(input: {
+/** The stored form of the sources a host named by id; null when any of them is no longer available. */
+export function resolveRecapSources(available: readonly RecapSourceReference[], ids: readonly string[]): Omit<RecapSourceReference, "id">[] | null {
+  const sources: Omit<RecapSourceReference, "id">[] = [];
+  for (const id of ids) {
+    const reference = available.find(value => value.id === id);
+    if (!reference) return null;
+    const { id: _id, ...source } = reference;
+    sources.push(source);
+  }
+  return sources;
+}
+
+type RecapUpload = Extract<NonNullable<Extract<HostedGameToolRequest, { action: 'read_game' }>['recapRead']>, { kind: 'upload' }>;
+type RecapUploadInput<MediaType extends RecapMediaType> = {
   gameId: string; eventId: string; memberId: string;
   material: NonNullable<Awaited<ReturnType<typeof readGameRecapMaterial>>>;
   beforeMutationTx: (tx: Prisma.TransactionClient) => Promise<void>;
-  file: Extract<NonNullable<Extract<HostedGameToolRequest, { action: 'read_game' }>['recapRead']>, { kind: 'upload' }>;
-}) {
+  file: RecapUpload & { mediaType: MediaType };
+};
+
+/** Authorize under the game lock and register the 24-hour receipt, then seal and store the bytes outside it. */
+async function stageRecapUpload(input: RecapUploadInput<RecapMediaType>) {
+  const part = input.file.mediaType === 'video/mp4';
   const bytes = Buffer.from(input.file.bytes, 'base64');
+  if (part && (!bytes.length || bytes.length > RECAP_VIDEO_PART_MAX_BYTES)) throw new RangeError('Recap asset size is invalid.');
   const generationId = recapGenerationId(input.eventId);
   const hash = createHash('sha256').update(bytes).digest('hex');
-  const storageKey = `recap/${generationId}/${hash}.${input.file.mediaType === 'image/jpeg' ? 'jpg' : 'mp3'}`;
-  const available = await readRecapSourceReferences(input.material, input.eventId);
-  const references = input.file.referenceIds.map(id => {
-    const reference = available.find(value => value.id === id);
-    if (!reference) throw new Error('A selected photo is no longer available.');
-    const { id: _id, ...source } = reference;
-    return source;
-  });
+  const storageKey = recapMediaStorageKey(generationId, hash, input.file.mediaType);
+  const references = resolveRecapSources(await readRecapSourceReferences(input.material, input.eventId), input.file.referenceIds);
+  if (!references) throw new Error('A selected photo is no longer available.');
   const audience = await readGameChatAudience(input.memberId);
   const now = new Date();
   const ownerMemberId = await getPrisma().$transaction(async tx => {
@@ -154,14 +188,30 @@ export async function uploadRecapMedia(input: {
       || await readLatestGameRecapEventIdTx(tx, game.id) !== input.eventId
       || !await readGameRecapEntryIdsTx(tx, game, input.eventId)
       || !await recapReferencesCurrent(tx, game.id, [{ references }])) throw new Error('Recap media is no longer authorized.');
+    if (part && await tx.gameRecapAsset.count({ where: { userId: game.wordsOwnerMemberId,
+      resourceId: { startsWith: `${game.id}|${generationId}|`, endsWith: '.mp4', not: recapResourceId(game.id, generationId, storageKey) } } }) >= STAGED_VIDEO_PARTS) throw new Error('Recap video parts exceed their bound.');
     await registerRecapAssetsTx(tx, { gameId: game.id, generationId, ownerMemberId: game.wordsOwnerMemberId,
       storageKeys: [storageKey], acceptedAt: now, recoveryUntil: new Date(now.getTime() + 86400_000) });
     return game.wordsOwnerMemberId;
   });
   const metadata = await putRecapMedia({ storageKey, ownerMemberId, bytes,
     ...(input.file.mediaType === 'audio/mpeg' ? { durationMs: 20_000, songStartMs: input.file.songStartMs, wordsTimestamps: input.file.wordsTimestamps } : {}) });
+  return { hash, storageKey, references, metadata };
+}
+
+/** The host supplies actual file bytes and its private source association. */
+export async function uploadRecapMedia(input: RecapUploadInput<'image/jpeg' | 'audio/mpeg'>) {
+  const { hash, storageKey, references, metadata } = await stageRecapUpload(input);
   const { bytes: byteLength, ...media } = metadata;
   return recapAssetSchema.parse({ slot: input.file.slot, kind: input.file.mediaType === 'image/jpeg' ? 'image' : 'song',
     recipeId: hash, storageKey, references, byteLength, ...media,
     ...(input.file.wordsTimestamps ? { wordsTimestamps: input.file.wordsTimestamps } : {}) });
+}
+
+/** One opaque slice of the recap video, on the same rails. Null while the producer
+ * flag is off: nothing is staged and the caller carries on without a video. */
+export async function uploadRecapVideoPart(input: RecapUploadInput<'video/mp4'>) {
+  if (!isPairRecapVideoEnabled(2)) return null;
+  const { hash, storageKey, metadata } = await stageRecapUpload(input);
+  return recapVideoPartSchema.parse({ storageKey, hash, byteLength: metadata.bytes });
 }
