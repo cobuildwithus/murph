@@ -48850,6 +48850,154 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
     }
   }, 900_000)
 
+  // A fictional, sparse week. Its best material is a running bit told in plain lines that are funny
+  // only together, among ordinary talk, app chatter and Murph's own notices, as real chats are.
+  // A remake is the same game made again: the lore then lists what the earlier take used.
+  // A next game's lore lists a bit and a world an earlier game's show used; neither comes back.
+  // It prints the show so the writing can be read; humour is judged by reading it.
+  it.each(['first show', 'remake', 'next game'] as const)('pair recap show writes the week from what the players said: %s', async take => {
+    const startedAt = Date.now()
+    const config = await resolveRealCodexE2eConfig()
+    const permissionHome = await materializeRealCodexHostedPermissionHome(config)
+    const vault = await mkdtemp(path.join(tmpdir(), 'murph-recap-humour-'))
+    const { buildGameRecapInstructions } = await import('@murphai/hosted-execution/runtime-control')
+    const { createRecapShowLiveProviders } = await import('../src/recap-show-testkit.ts')
+    const gameId = 'synthetic-stretch', eventId = `game-recap:${gameId}`, pairFingerprint = 'fedcba9876543210fedcba9876543210'
+    const players = [{ memberId: 'synthetic-iris', name: 'Iris' }, { memberId: 'synthetic-mateo', name: 'Mateo' }]
+    // The last Monday-to-Friday week that is over, on New York's clock with its own offset each day.
+    const friday = Date.now() - ((new Date().getUTCDay() + 1) % 7 + 1) * 86_400_000
+    const dates = Array.from({ length: 5 }, (_, day) => new Date(friday - (4 - day) * 86_400_000).toISOString().slice(0, 10))
+    const offset = (date: string) => new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', timeZoneName: 'longOffset' })
+      .formatToParts(new Date(`${date}T12:00:00Z`)).find(part => part.type === 'timeZoneName')!.value.replace('GMT', '')
+    const at = (day: number, time: string) => `${dates[day]}T${time}:00${offset(dates[day]!)}`
+    const posts: [string, number, string, string | null][] = [
+      ['Iris', 0, '06:50', null], ['Mateo', 0, '22:41', null], ['Iris', 1, '06:45', null], ['Mateo', 2, '23:57', 'made it'],
+      ['Iris', 3, '07:11', null], ['Iris', 4, '06:41', null], ['Mateo', 4, '08:06', null],
+    ]
+    const entries = posts.map(([playerName, day, , text]) => ({ entryId: `synthetic-${playerName.toLowerCase()}-${day}`, playerName, kind: 'photo', text, visibleToBoth: true }))
+    const evening = 'Iris is done for today. Mateo, you have until midnight.'
+    const chat: [number, string, string, string][] = [
+      [0, '08:00', 'Murph', 'Day one. Iris and Mateo, ten minutes of stretching each, with a photo, by midnight. The winner gets dinner cooked by the loser.'],
+      [0, '08:02', 'Iris', 'did mine'], [0, '12:30', 'Mateo', 'murph how do i post from my camera roll'], [0, '12:31', 'Murph', 'On the post screen, tap the photo icon, then Library.'],
+      [0, '18:02', 'Mateo', 'murph doing it now'], [0, '19:30', 'Mateo', 'ok now'], [0, '20:00', 'Murph', evening],
+      [0, '21:16', 'Mateo', 'about to start'], [0, '22:41', 'Mateo', 'done'], [0, '22:42', 'Iris', 'nice'],
+      [1, '06:46', 'Iris', 'done'], [1, '13:00', 'Mateo', 'what are you making for dinner tonight'], [1, '13:10', 'Iris', 'leftovers. you?'], [1, '13:11', 'Mateo', 'cereal probably'],
+      [1, '17:00', 'Mateo', 'murph starting in 5'], [1, '17:40', 'Mateo', 'murph 5 more min'], [1, '20:00', 'Murph', evening],
+      [1, '20:15', 'Mateo', 'starting for real'], [1, '20:16', 'Iris', 'i believe you'],
+      [2, '07:00', 'Murph', 'Mateo missed Tuesday, so Iris leads 2 to 1.'], [2, '07:05', 'Mateo', 'murph today im doing it first thing'],
+      [2, '09:30', 'Mateo', 'the app logged me out again'], [2, '09:32', 'Murph', 'Sorry about that. Signing back in keeps your posts.'],
+      [2, '15:00', 'Iris', 'first thing was 8 hours ago'], [2, '15:05', 'Mateo', 'yeah yeah'], [2, '20:00', 'Murph', 'Neither of you has posted today. You both have until midnight.'],
+      [2, '21:40', 'Iris', 'long day, im out tonight'], [2, '23:58', 'Mateo', 'murph first thing'], [2, '23:59', 'Iris', 'is that from monday'],
+      [3, '07:00', 'Murph', 'Iris missed Wednesday, so it is 2 to 2.'], [3, '07:10', 'Mateo', 'same room different day'], [3, '07:12', 'Iris', 'done'],
+      [3, '12:00', 'Mateo', 'murph doing it now'], [3, '12:01', 'Iris', 'which now'],
+      [3, '18:30', 'Mateo', 'murph can we make the next one 7 days'], [3, '18:31', 'Murph', 'Either of you can set that up when this one ends.'], [3, '20:00', 'Murph', evening],
+      [3, '23:59', 'Mateo', 'murph is it too late'],
+      [4, '06:42', 'Iris', 'done'], [4, '07:00', 'Murph', 'Mateo missed Thursday, so Iris leads 3 to 2. Last day.'],
+      [4, '08:05', 'Mateo', 'doing it now. actually now'], [4, '08:10', 'Iris', '?? its 8am'], [4, '18:00', 'Iris', 'im thinking pasta'], [4, '18:02', 'Mateo', 'noted'],
+    ]
+    // A real week's chat is mostly about other things, and its file runs past what one read shows.
+    // Each line of talk is said once, so the filler holds no pattern of its own.
+    const talk = ['did you see the match last night', 'only the second half', 'traffic was so bad today', 'my 4pm got moved to 5', 'are you coming saturday',
+      'probably, what time', 'send me that recipe', 'the noodle one?', 'my sister is visiting this weekend', 'what are you watching these days', 'rewatching the office',
+      'is it supposed to rain tomorrow', 'grabbing coffee want anything', 'oat latte', 'running late', 'the train is stuck again', 'work is slow today', 'lunch?',
+      'cant today, tomorrow?', 'have you talked to sam', 'not since tuesday', 'my laptop died in the middle of a call', 'did you book the flights', 'not yet, prices went up',
+      'the new place on 5th is good', 'the taco place?', 'yeah get the fish one', 'my landlord finally fixed the heat', 'took him long enough',
+      'what time does the game start sunday', 'i think 1', 'can you send me the photos from the party', 'sending now', 'my mom says hi', 'tell her hi back',
+      'i locked myself out again', 'the spare is under the plant', 'are we still doing trivia', 'yes, same team name', 'i finished that book', 'was the ending good',
+      'kind of rushed', 'do you have a screwdriver i can borrow', 'yeah come grab it', 'the dishwasher is making a noise', 'call the guy from last time',
+      'parking here is impossible', 'just got home', 'my cousin got engaged', 'to the guy from the wedding?']
+    const filler = ['lol', 'same', 'ok', 'yeah', 'true', 'haha', 'nice', 'ya', 'sure', 'right']
+    const banter: [number, string, string, string][] = Array.from({ length: 5 * 30 }, (_, index) => {
+      const minutes = 9 * 60 + 10 + (index % 30) * 25
+      return [Math.floor(index / 30), `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`, index % 2 ? 'Mateo' : 'Iris',
+        index % 3 ? filler[index % filler.length]! : talk[index / 3]!]
+    })
+    const providers = await createRecapShowLiveProviders({
+      game: { id: gameId, recapShow: true, players: players.map(player => ({ ...player, task: 'Ten minutes of stretching, with a photo' })), lengthDays: 5,
+        schedule: { days: [0, 1, 2, 3, 4] }, stakes: [{ kind: 'winner_gets', item: 'Dinner cooked by the loser' }], score: [{ name: 'Iris', score: 4 }, { name: 'Mateo', score: 3 }],
+        days: dates.map((date, day) => ({ dayNumber: day + 1, dates: { Iris: date, Mateo: date }, posts: Object.fromEntries(players.map(({ name }) => {
+          const post = posts.find(([who, postDay]) => who === name && postDay === day)
+          return [name, post ? { entryId: `synthetic-${name.toLowerCase()}-${day}`, postedAt: { local: at(day, post[2]), timeZone: 'America/New_York', instant: new Date(at(day, post[2])).toISOString() },
+            kind: 'photo', text: post[3], data: null, ...(name === 'Mateo' && day === 2 ? { proveIt: { by: 'Iris' } } : {}) } : 'missed']
+        })) })) },
+      players, entries, result: [{ ...players[0]!, score: 4 }, { ...players[1]!, score: 3 }], startedAt: new Date(at(0, '00:00')).toISOString(),
+      chat: [...chat, ...banter].sort((a, b) => a[0] - b[0] || a[1].localeCompare(b[1]))
+        .map(([day, time, who, text]) => ({ playerName: who, text, at: new Date(at(day, time)).toISOString(), source: who === 'Murph' ? 'assistant' as const : 'player' as const })),
+    })
+    const earlierGame = { treatment: 'a 1920s silent railway melodrama', bit: 'the human alarm clock' }
+    const earlier = { treatment: 'a 1920s silent-film clock caper', title: 'Ten minutes. Eventually.',
+      chatLine: 'Iris wins 4–3, Mateo: Thursday’s missing stretch turned Friday’s early start into dinner duty. Iris is thinking pasta; you’re cooking.' }
+    // Which comedy skill the writer reads: the managed one only when the run points the skills root at it.
+    const comedySkill = (await readFile(path.join(config.env[MURPH_ASSISTANT_SKILLS_ROOT_ENV]!, 'groupchat-comedy/SKILL.md'), 'utf8'))
+      .includes('This public fallback intentionally contains no managed') ? 'public fallback' : 'managed'
+    const events: unknown[] = []
+    let tokens: unknown = null
+    try {
+      await initializeVault({ timezone: 'UTC', vaultRoot: vault })
+      await mkdir(path.join(vault, 'games'), { recursive: true })
+      // The remake's lore is what an earlier take of this game wrote after its show.
+      await writeFile(path.join(vault, `games/lore-${pairFingerprint}.md`), take === 'first show' ? '# Synthetic pair lore\nTheir first game together.\n' : take === 'next game' ? [
+        '# Pair lore', `2026-10-16, their first game: 20 squats a day, Mateo won 5–4. Used treatment: ${earlierGame.treatment}.`,
+        `Used bits: calling Iris ${earlierGame.bit} for posting before 7am; Mateo's squats "counted by the dog".`,
+        'Used chat line: Mateo wins 5–4: Iris, the dog has been told about Tuesday.', ''].join('\n') : [
+        '# Pair lore', 'First game together. Iris won stretching 4–3. Mateo owes dinner; Iris said “im thinking pasta”.', `Used treatment: ${earlier.treatment}.`,
+        'Used moments: three Tuesday starts with no post; Wednesday 11:57 stretching questioned as Monday’s; four Iris posts before 7:12am; Thursday miss then Friday “actually now” one minute before posting; “cereal probably” versus cooking dinner.',
+        `Used title: ${earlier.title}`, `Used chat line: ${earlier.chatLine}`, ''].join('\n'))
+      const target = createAssistantModelTarget({ approvalPolicy: 'never', codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND), codexHome: permissionHome.codexHome,
+        model: config.model, modelProvider: config.modelProvider, provider: 'codex-cli', reasoningEffort: 'low', sandbox: 'workspace-write' })
+      if (!target) throw new Error('Expected real Codex target.')
+      await sendAssistantNotificationLocal({ channel: 'linq', deliveryTarget: 'synthetic-game-room', threadId: 'synthetic-game-room', threadIsDirect: false,
+        deliveryDispatchMode: 'queue-only', deliveryIdempotencyKey: eventId, deliveryDedupeToken: eventId,
+        executionContext: { hosted: { defaultTarget: target, memberId: 'synthetic-room', userEnvKeys: [],
+          gameRecapScope: { gameId, eventId, pairFingerprint, show: true },
+          groupTool: { request: providers.control }, providerFetch: providers.providerFetch } },
+        instructions: buildGameRecapInstructions([], undefined, false, true),
+        responsePolicy: { kind: 'require_game_recap', gameId, eventId, pairFingerprint, show: true },
+        onTraceEvent: event => {
+          events.push(event.rawEvent)
+          const raw = readRecord(event.rawEvent)
+          if (raw?.method === 'thread/tokenUsage/updated') tokens = readRecord(readRecord(raw.params)?.tokenUsage)?.total ?? tokens
+        },
+        // Media goes through the synthetic transport; a provider-auth run keeps its own model key.
+        turnEnvironment: { currentWorkingDirectory: vault, env: { ...config.env, OPENAI_API_KEY: config.env.OPENAI_API_KEY ?? 'synthetic', ELEVENLABS_API_KEY: 'synthetic' } },
+        turnTrigger: 'manual-deliver', vault, workingDirectory: vault,
+      })
+    } finally {
+      const story = providers.saved[0]
+      // How the writer read its files: each shell command and how much it printed.
+      const reads = readCapabilityRoutingActions(events).flatMap(action => action.kind === 'command'
+        ? [{ command: action.command.replace(/[a-f0-9]{32,64}/gu, '<hex>').slice(0, 160), bytes: Buffer.byteLength(action.output) }] : [])
+      const lore = await readFile(path.join(vault, `games/lore-${pairFingerprint}.md`), 'utf8').catch(() => null)
+      process.stdout.write(`[recap humour show] ${JSON.stringify({ take, comedySkill, model: config.model, wallTimeMs: Date.now() - startedAt, tokens, reads, lore, story: story && {
+        treatment: story.treatment, pages: story.pages, superlatives: story.superlatives, song: story.song && { title: story.song.title, lyrics: story.song.lyrics }, chatLine: story.chatLine } })
+        .replace(/\/Users\/[^/\s"]+/gu, '<HOME_DIR>')}\n`)
+      await removeRealCodexTemporaryPaths([vault, ...permissionHome.temporaryPaths, ...config.temporaryPaths])
+    }
+    expect(providers.saved).toHaveLength(1)
+    // A quote is a player's own words, copied exactly: never Murph's, never what they said about the app.
+    const said = new Set([...chat, ...banter].filter(([, , who]) => who !== 'Murph').map(([, , who, text]) => `${who}: ${text}`)
+      .concat(posts.flatMap(([who, , , text]) => text ? [`${who}: ${text}`] : [])))
+    const appChatter = /camera roll|logged me out|7 days/u
+    const quotes = providers.saved[0]!.pages.flatMap(page => page.blocks.flatMap(block => block.quote ? [block.quote] : []))
+    for (const quote of quotes) {
+      expect(said.has(`${quote.who}: ${quote.text}`), `${quote.who}: ${quote.text}`).toBe(true)
+      expect(quote.text).not.toMatch(appChatter)
+    }
+    // A bit and a world an earlier game's show used stay spent.
+    if (take === 'next game') {
+      const story = providers.saved[0]!
+      expect(story.treatment?.toLowerCase()).not.toBe(earlierGame.treatment)
+      expect(JSON.stringify({ pages: story.pages, superlatives: story.superlatives, song: story.song, chatLine: story.chatLine })).not.toMatch(/alarm clock/iu)
+    }
+    // A remake retells the week in a new world, under a new title, with a new chat line.
+    if (take === 'remake') {
+      const story = providers.saved[0]!
+      expect(story.treatment?.toLowerCase()).not.toBe(earlier.treatment)
+      expect(story.pages[0]!.blocks.find(block => block.kind === 'headline')?.text).not.toBe(earlier.title)
+      expect(story.chatLine).not.toBe(earlier.chatLine)
+    }
+  }, 900_000)
+
 })
 
 describeRealCodex('real Codex game bootstrap e2e', () => {

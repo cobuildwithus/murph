@@ -14,8 +14,8 @@ const hash = (bytes: string | Uint8Array) => createHash('sha256').update(bytes).
 export async function createRecapShowLiveProviders(input: {
   game: unknown; players: { name: string; memberId: string }[];
   entries: RecapMaterial['entries']; result: RecapMaterial['result'];
-  chat: { playerName: string; text: string }[];
-  mediaFetch?: typeof fetch;
+  chat: { playerName: string; text: string; at?: string; source?: RecapTranscriptMessage['source'] }[];
+  mediaFetch?: typeof fetch; startedAt?: string;
 }) {
   const photos = new Map<string, Buffer>()
   const references: RecapMaterial['references'] = []
@@ -35,12 +35,12 @@ export async function createRecapShowLiveProviders(input: {
   const murph = hash('synthetic-murph')
   photos.set(murph, await sharp(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="480" height="640"><rect width="480" height="640" fill="#f5f0e8"/><rect x="170" y="220" width="140" height="200" rx="30" fill="#2d3436"/><circle cx="240" cy="170" r="60" fill="#7a8c6e"/></svg>')).jpeg().toBuffer())
   references.push({ id: murph, kind: 'murph' })
-  const startedAt = new Date(Date.now() - 8 * 86_400_000).toISOString()
+  const startedAt = input.startedAt ?? new Date(Date.now() - 8 * 86_400_000).toISOString()
   const settledAt = new Date().toISOString()
   const material: RecapMaterial = { game: input.game, players: input.players.map(player => player.name), entries: input.entries,
     result: input.result, references, startedAt, settledAt }
   const chat: RecapTranscriptMessage[] = input.chat.map((message, index) => ({ ...message, id: `synthetic-message-${index}`,
-    at: new Date(Date.now() - 86_400_000 + index * 1000).toISOString(), source: 'player', laneSeq: String(index + 1) }))
+    at: message.at ?? new Date(Date.now() - 86_400_000 + index * 1000).toISOString(), source: message.source ?? 'player', laneSeq: String(index + 1) }))
   const image = await sharp(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="768" height="1024"><rect width="768" height="1024" fill="#2d3436"/><path d="M0 0H768V250Q384 80 0 250Z" fill="#9e5743"/><rect x="100" y="780" width="568" height="80" fill="#d4c4a8"/><circle cx="260" cy="490" r="70" fill="#d4c4a8"/><circle cx="510" cy="490" r="70" fill="#7a8c6e"/><path d="M180 780V600H340V780M430 780V600H590V780" fill="#d4c4a8"/></svg>')).jpeg().toBuffer()
   const song = await readFile(new URL('../../../fixtures/generated-audio/recap-synthetic-20s.mp3', import.meta.url))
   let generatedSong: Uint8Array = song
