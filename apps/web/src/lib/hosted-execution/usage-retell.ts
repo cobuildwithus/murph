@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   ASSISTANT_USAGE_SCHEMA,
   createAssistantUsageId,
@@ -24,7 +25,7 @@ export function buildHostedRetellPhoneCallUsageRecord(input: {
   const memberId = requireNonEmptyString(input.memberId, "Hosted member id");
   const providerCallId = requireNonEmptyString(input.providerCallId, "Retell call id");
   if (Number.isNaN(input.occurredAt.getTime())) {
-    throw new TypeError("Retell usage occurrence time must be valid.");
+    throw new ContractValidationError("Retell usage occurrence time must be valid.");
   }
 
   const turnId = `turn_phone_call_${phoneCallId}`;
@@ -74,14 +75,14 @@ export function buildHostedRetellPhoneCallUsageRecord(input: {
 
 function requireNonNegativeSafeInteger(value: number, label: string): void {
   if (!Number.isSafeInteger(value) || value < 0) {
-    throw new TypeError(`${label} must be a non-negative safe integer.`);
+    throw new ContractValidationError(`${label} must be a non-negative safe integer.`);
   }
 }
 
 function requireNonEmptyString(value: string, label: string): string {
   const normalized = value.trim();
   if (!normalized) {
-    throw new TypeError(`${label} is required.`);
+    throw new ContractValidationError(`${label} is required.`);
   }
   return normalized;
 }

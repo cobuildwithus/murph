@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   hostedAuthEmailDarkLogoPng,
   hostedAuthEmailLogoPng,
@@ -6,7 +7,7 @@ import {
 /** Inline-styled email with an embedded logo and a plain-text alternative. */
 export function hostedAuthCodeEmail(code: string) {
   if (!/^\d{6}$/u.test(code)) {
-    throw new TypeError("Auth email requires a six-digit code.");
+    throw new ContractValidationError("Auth email requires a six-digit code.");
   }
 
   return {

@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type { DurableObjectSqlValue } from "./user-runner/types.ts";
 
 interface InvocationSqlStorage {
@@ -65,7 +66,7 @@ export class RunnerInvocationReceiptStore {
     if (!/^[1-9][0-9]*$/u.test(identity.generation)
       || BigInt(identity.generation) > 9_223_372_036_854_775_807n
       || !/^[A-Za-z0-9._:-]{1,200}$/u.test(identity.attemptId)) {
-      throw new TypeError("Invalid native invocation identity.");
+      throw new ContractValidationError("Invalid native invocation identity.");
     }
     const current = this.read();
     if (current) {
@@ -107,7 +108,7 @@ export class RunnerInvocationReceiptStore {
   beginUsageSettlement(identity: RunnerInvocationIdentity, reportId: string): boolean {
     const current = this.read();
     if (!current || current.state !== "registered" || !matches(current, identity)) return false;
-    if (!/^[A-Za-z0-9._:-]{1,200}$/u.test(reportId)) throw new TypeError("Invalid usage settlement receipt.");
+    if (!/^[A-Za-z0-9._:-]{1,200}$/u.test(reportId)) throw new ContractValidationError("Invalid usage settlement receipt.");
     if (this.sql.exec<{ report_id: string }>("SELECT report_id FROM runner_usage_settlement WHERE report_id = ?", reportId).toArray().length) return true;
     const [count] = this.sql.exec<{ count: number }>("SELECT count(*) AS count FROM runner_usage_settlement").toArray();
     if ((count?.count ?? 0) >= 128) return false;

@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   normalizeHostedExecutionString,
 } from "@murphai/hosted-execution/env";
@@ -137,11 +138,11 @@ export async function createHostedR2PresignedPutUrl(input: {
 function normalizeHostedR2Sha256ChecksumBase64(value: string): string {
   const normalized = value.trim();
   if (!/^[A-Za-z0-9+/]+={0,2}$/u.test(normalized)) {
-    throw new TypeError("Hosted R2 SHA-256 checksum must be base64.");
+    throw new ContractValidationError("Hosted R2 SHA-256 checksum must be base64.");
   }
   const decoded = Uint8Array.from(atob(normalized), (character) => character.charCodeAt(0));
   if (decoded.byteLength !== 32) {
-    throw new TypeError("Hosted R2 SHA-256 checksum must decode to 32 bytes.");
+    throw new ContractValidationError("Hosted R2 SHA-256 checksum must decode to 32 bytes.");
   }
   return normalized;
 }
@@ -154,7 +155,7 @@ export async function createHostedR2PresignedSnapshotPartUrl(input: {
   contentType: string; encryptedByteSize: number; expiresSeconds?: number; now?: Date;
 }): Promise<{ expiresAt: string; url: string }> {
   if (!input.uploadId || input.uploadId.length > 1024 || !Number.isSafeInteger(input.encryptedByteSize) || input.encryptedByteSize <= 0) {
-    throw new TypeError("Managed snapshot part identity is invalid.");
+    throw new ContractValidationError("Managed snapshot part identity is invalid.");
   }
   const endpoint = new URL(input.environment.endpoint);
   return createHostedR2PresignedObjectUrl({
@@ -254,10 +255,10 @@ function normalizeHostedR2PresignMetadataHeaders(
         !/^[a-z0-9][a-z0-9-]*$/u.test(normalizedKey)
         || normalizedKey.startsWith("x-amz-meta-")
       ) {
-        throw new TypeError("Hosted R2 presign metadata keys must be S3 metadata names without x-amz-meta-.");
+        throw new ContractValidationError("Hosted R2 presign metadata keys must be S3 metadata names without x-amz-meta-.");
       }
       if (normalizedValue.length === 0 || /[\r\n]/u.test(normalizedValue)) {
-        throw new TypeError("Hosted R2 presign metadata values must be non-empty single-line strings.");
+        throw new ContractValidationError("Hosted R2 presign metadata values must be non-empty single-line strings.");
       }
       return [`x-amz-meta-${normalizedKey}`, normalizedValue] as [string, string];
     })
@@ -426,7 +427,7 @@ function normalizeHostedR2PresignExpiresSeconds(value: number | undefined): numb
     || expiresSeconds <= 0
     || expiresSeconds > MAX_R2_PRESIGN_EXPIRES_SECONDS
   ) {
-    throw new TypeError("Hosted R2 presign expiry must be a positive integer up to 7 days.");
+    throw new ContractValidationError("Hosted R2 presign expiry must be a positive integer up to 7 days.");
   }
   return expiresSeconds;
 }

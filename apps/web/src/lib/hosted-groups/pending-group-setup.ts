@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
 import {
@@ -1422,7 +1423,7 @@ function parseHostedPendingGroupSetupPayloadEnvelope(
   value: unknown,
 ): HostedRuntimePendingGroupSetupInput {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("Pending group setup payload must be an object.");
+    throw new ContractValidationError("Pending group setup payload must be an object.");
   }
   const record = value as Record<string, unknown>;
   if (
@@ -1432,7 +1433,7 @@ function parseHostedPendingGroupSetupPayloadEnvelope(
     || record.schemaVersion
       !== HOSTED_RUNTIME_PENDING_GROUP_SETUP_SCHEMA_VERSION
   ) {
-    throw new TypeError("Pending group setup payload version is unsupported.");
+    throw new ContractValidationError("Pending group setup payload version is unsupported.");
   }
   return parseHostedRuntimePendingGroupSetupInput(record.setup);
 }
@@ -1563,14 +1564,14 @@ function hasSameStringSet(left: readonly string[], right: readonly string[]): bo
 function requireNonEmptyString(value: string, label: string): string {
   const normalized = normalizeNullableString(value);
   if (!normalized) {
-    throw new TypeError(`${label} is required.`);
+    throw new ContractValidationError(`${label} is required.`);
   }
   return normalized;
 }
 
 function requireValidDate(value: Date, label: string): Date {
   if (Number.isNaN(value.getTime())) {
-    throw new TypeError(`${label} is invalid.`);
+    throw new ContractValidationError(`${label} is invalid.`);
   }
   return value;
 }

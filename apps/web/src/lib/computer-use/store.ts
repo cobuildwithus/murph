@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { Prisma } from "@prisma/client";
 import type {
   HostedComputerHandoff as PrismaHostedComputerHandoff,
@@ -1969,7 +1970,7 @@ function readHandoffReturnContactKind(
     case "email":
       return value;
     default:
-      throw new TypeError("Hosted computer handoff returnContactKind is invalid.");
+      throw new ContractValidationError("Hosted computer handoff returnContactKind is invalid.");
   }
 }
 
@@ -1984,7 +1985,7 @@ function readRunStatus(value: string): HostedComputerRunStatus {
     case "canceled":
       return value;
     default:
-      throw new TypeError("Stored computer run status is unsupported.");
+      throw new ContractValidationError("Stored computer run status is unsupported.");
   }
 }
 
@@ -2001,7 +2002,7 @@ function readAwaitingReason(
     case "other":
       return value;
     default:
-      throw new TypeError("Stored computer awaiting reason is unsupported.");
+      throw new ContractValidationError("Stored computer awaiting reason is unsupported.");
   }
 }
 
@@ -2015,7 +2016,7 @@ function readHandoffPurpose(value: string): HostedComputerHandoffPurpose {
     case "manual_browser_help":
       return value;
     default:
-      throw new TypeError("Stored computer handoff purpose is unsupported.");
+      throw new ContractValidationError("Stored computer handoff purpose is unsupported.");
   }
 }
 
@@ -2027,6 +2028,6 @@ function readHandoffStatus(value: string): HostedComputerHandoffStatus {
     case "expired":
       return value;
     default:
-      throw new TypeError("Stored computer handoff status is unsupported.");
+      throw new ContractValidationError("Stored computer handoff status is unsupported.");
   }
 }

@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type { CanonicalEntity } from "../canonical-entities.ts";
 import { memoryDisplayNameSchema, memoryDemographicsSchema, experimentOutcomeSchema } from "@murphai/contracts";
 import { metricPointRecordIds } from "../metrics/index.ts";
@@ -656,7 +657,7 @@ function projectSourceHealthRow(summary: WearableSourceHealthSummary): BrowserVa
 
 function requireString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.length === 0) {
-    throw new TypeError(`${label} must be a non-empty string.`);
+    throw new ContractValidationError(`${label} must be a non-empty string.`);
   }
 
   return value;
@@ -667,7 +668,7 @@ function requireIsoDateTime(value: unknown, label: string): string {
   const parsed = Date.parse(text);
 
   if (Number.isNaN(parsed)) {
-    throw new TypeError(`${label} must be an ISO timestamp.`);
+    throw new ContractValidationError(`${label} must be an ISO timestamp.`);
   }
 
   return text;
@@ -695,7 +696,7 @@ function subtractDaysFromIsoDate(value: string, days: number): string {
   const parsed = new Date(`${value}T00:00:00.000Z`);
 
   if (Number.isNaN(parsed.valueOf())) {
-    throw new TypeError("Browser vault replica generatedAt date must be a valid ISO date.");
+    throw new ContractValidationError("Browser vault replica generatedAt date must be a valid ISO date.");
   }
 
   parsed.setUTCDate(parsed.getUTCDate() - days);

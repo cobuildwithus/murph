@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_ORIGIN,
   HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_PATH_PREFIX,
@@ -118,7 +119,7 @@ export async function stageHostedPrivateMedia(input: {
     input.deliveryOrigin,
   );
   if (!privateImageBytesMatchContentType(bytes, input.contentType)) {
-    throw new TypeError("Hosted private media content type is invalid.");
+    throw new ContractValidationError("Hosted private media content type is invalid.");
   }
   const sha256 = await sha256Hex(bytes);
   const objectKey = await hostedPrivateMediaObjectKey({ sha256, userId });
@@ -414,13 +415,13 @@ async function openHostedPrivateMediaCapability(input: {
   capabilitySecret: string;
 }): Promise<HostedPrivateMediaCapabilityPayload> {
   if (!HOSTED_PRIVATE_MEDIA_TOKEN_PATTERN.test(input.capability)) {
-    throw new TypeError("Hosted private media capability is invalid.");
+    throw new ContractValidationError("Hosted private media capability is invalid.");
   }
   const [, encodedIv, encodedCiphertext] = input.capability.split(".");
   const iv = decodeBase64Url(encodedIv ?? "");
   const ciphertext = decodeBase64Url(encodedCiphertext ?? "");
   if (iv.byteLength !== AES_GCM_IV_BYTES) {
-    throw new TypeError("Hosted private media capability is invalid.");
+    throw new ContractValidationError("Hosted private media capability is invalid.");
   }
   const key = await deriveHostedPrivateMediaCapabilityKey(
     input.capabilitySecret,
@@ -443,7 +444,7 @@ function parseHostedPrivateMediaCapabilityPayload(
   value: unknown,
 ): HostedPrivateMediaCapabilityPayload {
   if (!isObjectRecord(value)) {
-    throw new TypeError("Hosted private media capability payload is invalid.");
+    throw new ContractValidationError("Hosted private media capability payload is invalid.");
   }
   const keys = Object.keys(value);
   if (
@@ -465,7 +466,7 @@ function parseHostedPrivateMediaCapabilityPayload(
     || typeof value.sha256 !== "string"
     || !HOSTED_PRIVATE_MEDIA_SHA256_PATTERN.test(value.sha256)
   ) {
-    throw new TypeError("Hosted private media capability payload is invalid.");
+    throw new ContractValidationError("Hosted private media capability payload is invalid.");
   }
   return {
     contentType: value.contentType,
@@ -527,7 +528,7 @@ function requireHostedPrivateMediaCapabilitySecret(value: string): string {
 
 function requireHostedPrivateMediaUserId(value: unknown): string {
   if (typeof value !== "string") {
-    throw new TypeError("Hosted private media userId is invalid.");
+    throw new ContractValidationError("Hosted private media userId is invalid.");
   }
   const normalized = value.trim();
   if (
@@ -535,7 +536,7 @@ function requireHostedPrivateMediaUserId(value: unknown): string {
     || normalized.length > HOSTED_PRIVATE_MEDIA_USER_ID_MAX_LENGTH
     || /[\u0000-\u001f\u007f]/u.test(normalized)
   ) {
-    throw new TypeError("Hosted private media userId is invalid.");
+    throw new ContractValidationError("Hosted private media userId is invalid.");
   }
   return normalized;
 }
@@ -557,7 +558,7 @@ function requirePositiveSafeInteger(value: unknown, label: string): number {
     || !Number.isSafeInteger(value)
     || value <= 0
   ) {
-    throw new TypeError(`${label} is invalid.`);
+    throw new ContractValidationError(`${label} is invalid.`);
   }
   return value;
 }
@@ -618,7 +619,7 @@ function encodeBase64Url(bytes: Uint8Array): string {
 
 function decodeBase64Url(value: string): Uint8Array {
   if (!/^[A-Za-z0-9_-]+$/u.test(value)) {
-    throw new TypeError("Hosted private media capability is invalid.");
+    throw new ContractValidationError("Hosted private media capability is invalid.");
   }
   const padding = (4 - (value.length % 4)) % 4;
   const normalized = value

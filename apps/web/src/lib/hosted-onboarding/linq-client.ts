@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
 import {
@@ -114,10 +115,10 @@ export async function resendHostedLinqMessage(input: {
 export function validateHostedLinqChatFirstMessage(message: string): ReturnType<typeof splitTrailingHttpsLink> {
   const split = splitTrailingHttpsLink(message);
   if (containsHttpUrlText(split.linkUrl ? split.message : message)) {
-    throw new TypeError("A new Linq chat cannot include URL text in its first message.");
+    throw new ContractValidationError("A new Linq chat cannot include URL text in its first message.");
   }
   if (split.linkUrl && !split.message.trim()) {
-    throw new TypeError("A new Linq chat with a rich link must include caller-supplied text.");
+    throw new ContractValidationError("A new Linq chat with a rich link must include caller-supplied text.");
   }
   normalizeRequiredString(split.message, "message");
   return split;
@@ -1178,7 +1179,7 @@ function normalizeHostedLinqAttachmentContentType(
     (candidate) => candidate === normalized,
   );
   if (!contentType) {
-    throw new TypeError("attachment content type is not supported by Linq.");
+    throw new ContractValidationError("attachment content type is not supported by Linq.");
   }
   return contentType;
 }
@@ -1431,7 +1432,7 @@ function normalizeRequiredString(value: unknown, label: string): string {
   const normalized = normalizeNullableString(value);
 
   if (!normalized) {
-    throw new TypeError(`${label} is required.`);
+    throw new ContractValidationError(`${label} is required.`);
   }
 
   return normalized;
@@ -1443,10 +1444,10 @@ function normalizeRequiredHttpsUrl(value: unknown, label: string): string {
   try {
     parsed = new URL(normalized);
   } catch {
-    throw new TypeError(`${label} must be an HTTPS URL.`);
+    throw new ContractValidationError(`${label} must be an HTTPS URL.`);
   }
   if (parsed.protocol !== "https:" || parsed.username || parsed.password) {
-    throw new TypeError(`${label} must be an HTTPS URL.`);
+    throw new ContractValidationError(`${label} must be an HTTPS URL.`);
   }
   return parsed.toString();
 }
@@ -1454,14 +1455,14 @@ function normalizeRequiredHttpsUrl(value: unknown, label: string): string {
 function normalizeHostedLinqGroupChatIconUrl(value: unknown): string {
   const normalized = normalizeRequiredHttpsUrl(value, "group chat icon url");
   if (normalized.length > HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH) {
-    throw new TypeError("group chat icon url must be a hosted private media URL.");
+    throw new ContractValidationError("group chat icon url must be a hosted private media URL.");
   }
   const parsed = new URL(normalized);
   if (!isHostedRuntimePrivateImageDeliveryUrl(
     parsed,
     readHostedExecutionControlOrigin() ?? undefined,
   )) {
-    throw new TypeError("group chat icon url must be a hosted private media URL.");
+    throw new ContractValidationError("group chat icon url must be a hosted private media URL.");
   }
   return normalized;
 }
@@ -1470,7 +1471,7 @@ function normalizeHostedLinqChatDisplayName(value: unknown): string {
   const normalized = normalizeRequiredString(value, "chat display name")
     .replace(/\s+/gu, " ");
   if (normalized.length > HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH) {
-    throw new TypeError("chat display name is too long.");
+    throw new ContractValidationError("chat display name is too long.");
   }
   return normalized;
 }
@@ -1481,7 +1482,7 @@ function normalizeRequiredStringList(values: readonly string[], label: string): 
     .filter((value, index, array) => array.indexOf(value) === index);
 
   if (normalizedValues.length === 0) {
-    throw new TypeError(`${label} list must contain at least one non-empty value.`);
+    throw new ContractValidationError(`${label} list must contain at least one non-empty value.`);
   }
 
   return normalizedValues;

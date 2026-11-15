@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { readHostedLinqGroupLeave } from "../hosted-routing/linq-group-leave";
 import type {
   Prisma,
@@ -1137,7 +1138,7 @@ function parseHostedAiUsageCreditLedgerVersion(value: unknown): bigint {
     return 0n;
   }
   if (typeof value !== "string" || !/^(?:0|[1-9][0-9]*)$/u.test(value)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted AI usage-limit claim ledger version must be a non-negative integer.",
     );
   }
@@ -1149,13 +1150,13 @@ function parseHostedAiUsagePlanResetAt(value: unknown): Date | null {
     return null;
   }
   if (typeof value !== "string") {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted AI usage-limit claim plan reset must be an ISO timestamp.",
     );
   }
   const parsed = new Date(value);
   if (!Number.isFinite(parsed.getTime())) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted AI usage-limit claim plan reset must be an ISO timestamp.",
     );
   }
@@ -2585,7 +2586,7 @@ function buildHostedLinqAiUsageQuotaPayload(
 
   if (isHostedRuntimeAiAccessNoticeCode(input.noticeCode)) {
     if (input.claimToken) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "Hosted Linq access notices must not include AI usage claim metadata.",
       );
     }
@@ -2611,7 +2612,7 @@ function buildHostedLinqAiUsageQuotaPayload(
   }
 
   if (!input.claimToken) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted Linq AI usage-limit notices require AI usage claim metadata.",
     );
   }

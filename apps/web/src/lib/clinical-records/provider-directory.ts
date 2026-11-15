@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type {
   ClinicalProviderFacilityContract,
   ClinicalProviderSearchResultContract,
@@ -55,7 +56,7 @@ export function buildEpicProviderDirectoryEntryId(brandIdentifier: string): stri
     .replace(/[^a-z0-9]+/gu, "-")
     .replace(/^-|-$/gu, "");
   if (!normalized || normalized.length > 95) {
-    throw new TypeError("Epic brand identifier cannot produce a valid provider id.");
+    throw new ContractValidationError("Epic brand identifier cannot produce a valid provider id.");
   }
   return `epic-${normalized}`;
 }

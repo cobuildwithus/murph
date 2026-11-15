@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { Prisma, type PrismaClient } from "@prisma/client";
 
 import {
@@ -1136,7 +1137,7 @@ export function buildHostedAiUsageGateNoticeIdempotencyKey(input: {
     ? null
     : normalizeHostedAiUsageNoticePeriodStart(input.planResetAt);
   if (input.usageCreditLedgerVersion < 0n) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted AI usage notice ledger version must be a non-negative integer.",
     );
   }
@@ -1160,7 +1161,7 @@ export function buildHostedAiUsageNoticeProviderIdempotencyKey(
 ): string {
   const normalized = deliveryId.trim();
   if (!normalized) {
-    throw new TypeError("Hosted AI usage notice delivery id is required.");
+    throw new ContractValidationError("Hosted AI usage notice delivery id is required.");
   }
   return `ai-usage-attempt:${normalized}`;
 }
@@ -1168,7 +1169,7 @@ export function buildHostedAiUsageNoticeProviderIdempotencyKey(
 function normalizeHostedAiUsageNoticePeriodStart(value: Date | string): Date {
   const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
   if (Number.isNaN(date.getTime())) {
-    throw new TypeError("Hosted AI usage notice period start must be a valid date.");
+    throw new ContractValidationError("Hosted AI usage notice period start must be a valid date.");
   }
   return date;
 }
@@ -3649,7 +3650,7 @@ function normalizeHostedLinqProviderMessageIds(
 function requireHostedLinqMessageLookupKey(messageId: string): string {
   const lookupKey = createHostedLinqMessageLookupKey(messageId);
   if (!lookupKey) {
-    throw new TypeError("Hosted Linq provider message id is required.");
+    throw new ContractValidationError("Hosted Linq provider message id is required.");
   }
   return lookupKey;
 }
@@ -3909,12 +3910,12 @@ function assertHostedLinqDeliveryGroupJoinContext(input: {
     input.groupJoinReplyOccurredAt
     && (!input.groupJoinOutreachId || !isSignup)
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted Linq group-join reply occurrence requires a related signup delivery.",
     );
   }
   if (isSignup && input.groupJoinOutreachId && !input.groupJoinReplyOccurredAt) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted Linq group-aware signup delivery requires the exact reply occurrence time.",
     );
   }
@@ -3932,7 +3933,7 @@ function normalizeNullableDate(
     return null;
   }
   if (Number.isNaN(value.getTime())) {
-    throw new TypeError(`${label} must be valid.`);
+    throw new ContractValidationError(`${label} must be valid.`);
   }
   return value;
 }

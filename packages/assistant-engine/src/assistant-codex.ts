@@ -1,3 +1,4 @@
+import { ContractValidationError } from '@murphai/contracts/validation-error';
 import { resolveDailyNutritionIntroduction } from './assistant/nutrition-card-introduction.js'
 import {
   completeDynamicToolFailureDiagnostics,
@@ -966,7 +967,7 @@ export async function executeCodexAppServerTurn(
   input: CodexAppServerTurnInput,
 ): Promise<CodexAppServerTurnResult> {
   if (input.model?.trim().toLowerCase() === 'gpt-5.6-sol') {
-    throw new TypeError('GPT-5.6 Sol is retired; use gpt-6.1-sol.')
+    throw new ContractValidationError('GPT-5.6 Sol is retired; use gpt-6.1-sol.')
   }
   const providerStartCriticalPath = stampAssistantProviderStartCriticalPath(
     input.providerStartCriticalPath,

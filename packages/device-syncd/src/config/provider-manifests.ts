@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   JUNCTION_ALLOWED_SUMMARY_RESOURCES,
   JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
@@ -221,7 +222,7 @@ export function requireConfiguredDeviceSyncProviderManifest(
   const manifest = resolveConfiguredDeviceSyncProviderManifest(provider);
 
   if (!manifest) {
-    throw new TypeError(`Unsupported device-sync provider: ${provider}`);
+    throw new ContractValidationError(`Unsupported device-sync provider: ${provider}`);
   }
 
   return manifest;

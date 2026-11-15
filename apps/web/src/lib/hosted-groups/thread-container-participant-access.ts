@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type { Prisma } from "@prisma/client";
 
 const DAY_MS = 86_400_000;
@@ -146,6 +147,6 @@ function clampHostedThreadContainerParticipantObservation(input: {
 
 function assertValidDate(value: Date): void {
   if (Number.isNaN(value.getTime())) {
-    throw new TypeError("Hosted thread-container participant observation time must be valid.");
+    throw new ContractValidationError("Hosted thread-container participant observation time must be valid.");
   }
 }

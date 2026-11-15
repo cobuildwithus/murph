@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type {
   HostedMailboxFetchResponse,
   HostedMailboxItem,
@@ -342,7 +343,7 @@ export async function fetchAndProcessHostedMailboxPrefix(input: {
     }
 
     if (itemSeq === null) {
-      throw new TypeError("Hosted mailbox routed seq must be a valid decimal string.");
+      throw new ContractValidationError("Hosted mailbox routed seq must be a valid decimal string.");
     }
 
     const retiredSkipReason = resolveRetiredMailboxSkipReason(route.action);

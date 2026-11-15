@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   isHostedStandbyClaimId,
   isSupportedHostedRunnerRelease,
@@ -47,7 +48,7 @@ export class RunnerSlotBindingStore {
   }): void {
     const identity = readHostedRunnerTargetIdentity(input.slotName);
     if (!identity || identity.releaseId !== input.releaseId || identity.region !== input.region) {
-      throw new TypeError("Hosted runner slot identity is invalid.");
+      throw new ContractValidationError("Hosted runner slot identity is invalid.");
     }
     const existing = this.select();
     if (existing) {
@@ -330,14 +331,14 @@ function assertSameSlot(
 
 function requireClaimId(value: unknown): string {
   if (!isHostedStandbyClaimId(value)) {
-    throw new TypeError("Hosted standby claim id is invalid.");
+    throw new ContractValidationError("Hosted standby claim id is invalid.");
   }
   return value;
 }
 
 export function requireRunnerSlotUserId(value: unknown): string {
   if (typeof value !== "string" || value.trim().length === 0 || value.trim() !== value || value.length > 256) {
-    throw new TypeError("Hosted standby user id is invalid.");
+    throw new ContractValidationError("Hosted standby user id is invalid.");
   }
   return value;
 }

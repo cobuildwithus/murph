@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type { Prisma, PrismaClient } from "@prisma/client";
 import {
   HOSTED_ADD_USAGE_SETTINGS_URL,
@@ -930,7 +931,7 @@ function normalizeUsageStatusDate(value: Date | string): Date {
     ? new Date(value.getTime())
     : new Date(value);
   if (!Number.isFinite(normalized.getTime())) {
-    throw new TypeError("Hosted plan usage status date is invalid.");
+    throw new ContractValidationError("Hosted plan usage status date is invalid.");
   }
   return normalized;
 }

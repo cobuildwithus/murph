@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type { HostedRuntimePlatform } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import { parseHostedRuntimeLatencyTraceBatchRequest, parseHostedRuntimeLatencyTraceBatchResponse, parseHostedRuntimeLatencyTraceResponse } from "@murphai/hosted-execution/parsers";
 import type { HostedRuntimeLatencyTraceBatchRequest, HostedRuntimeLatencyTraceResponse } from "@murphai/hosted-execution/runtime-control";
@@ -28,7 +29,7 @@ export function createHostedWebRuntimeLatencyTracePort(input: {
       const batch = parseHostedRuntimeLatencyTraceBatchRequest(request);
       const attemptId = batch.events[0]!.runtimeAttemptId;
       if (batch.events.some(event => event.runtimeAttemptId !== attemptId)) {
-        throw new TypeError("Hosted runtime latency batch attempts do not match.");
+        throw new ContractValidationError("Hosted runtime latency batch attempts do not match.");
       }
       const headers = input.workspaceCheckpointBridge
         ? await createHostedRuntimeLatencyTraceWriteFenceHeaders({

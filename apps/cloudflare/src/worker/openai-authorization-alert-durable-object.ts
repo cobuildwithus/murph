@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { DurableObject } from "cloudflare:workers";
 
 import {
@@ -648,14 +649,14 @@ function ensureOpenAiAuthorizationAlertSchema(
 
 function parseFailureReport(input: unknown): OpenAiAuthorizationFailureReport {
   if (!isObjectRecord(input)) {
-    throw new TypeError("OpenAI authorization failure report is invalid.");
+    throw new ContractValidationError("OpenAI authorization failure report is invalid.");
   }
   const keys = Reflect.ownKeys(input);
   if (
     keys.length !== 2
     || !keys.every((key) => key === "observedAtMs" || key === "status")
   ) {
-    throw new TypeError("OpenAI authorization failure report is invalid.");
+    throw new ContractValidationError("OpenAI authorization failure report is invalid.");
   }
 
   const status = input.status;
@@ -664,7 +665,7 @@ function parseFailureReport(input: unknown): OpenAiAuthorizationFailureReport {
     (status !== 401 && status !== 403)
     || !isValidTimestamp(observedAtMs)
   ) {
-    throw new TypeError("OpenAI authorization failure report is invalid.");
+    throw new ContractValidationError("OpenAI authorization failure report is invalid.");
   }
   return { observedAtMs, status };
 }

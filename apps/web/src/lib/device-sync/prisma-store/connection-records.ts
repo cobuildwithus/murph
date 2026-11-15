@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type { Prisma } from "@prisma/client";
 import type {
   DeviceAccountCredentialKind,
@@ -156,7 +157,7 @@ export function normalizeHostedDeviceSyncCredentialKind(
     return value;
   }
 
-  throw new TypeError("Hosted device-sync credential_kind is invalid.");
+  throw new ContractValidationError("Hosted device-sync credential_kind is invalid.");
 }
 
 function validateHostedConnectionCredentialRecord(
@@ -169,7 +170,7 @@ function validateHostedConnectionCredentialRecord(
     normalizeNullableString(record.accessTokenEncrypted)
     || normalizeNullableString(record.refreshTokenEncrypted)
   )) {
-    throw new TypeError("Hosted non-token credential rows must not contain token material.");
+    throw new ContractValidationError("Hosted non-token credential rows must not contain token material.");
   }
 }
 
@@ -179,7 +180,7 @@ function validateHostedRuntimeRedactedCredentialRecord(
 ): void {
   if (credentialKind === "oauth_tokens") {
     if (normalizeNullableString(record.providerConfigKey)) {
-      throw new TypeError("Hosted OAuth token credential rows must not contain providerConfigKey.");
+      throw new ContractValidationError("Hosted OAuth token credential rows must not contain providerConfigKey.");
     }
     return;
   }
@@ -189,18 +190,18 @@ function validateHostedRuntimeRedactedCredentialRecord(
     || normalizeNullableString(record.keyVersion)
     || typeof record.tokenVersion === "number"
   ) {
-    throw new TypeError("Hosted non-token credential rows must not contain token material.");
+    throw new ContractValidationError("Hosted non-token credential rows must not contain token material.");
   }
 
   if (credentialKind === "provider_config") {
     if (!normalizeNullableString(record.providerConfigKey)) {
-      throw new TypeError("Hosted provider-config credential rows require providerConfigKey.");
+      throw new ContractValidationError("Hosted provider-config credential rows require providerConfigKey.");
     }
     return;
   }
 
   if (normalizeNullableString(record.providerConfigKey)) {
-    throw new TypeError("Hosted none credential rows must not contain providerConfigKey.");
+    throw new ContractValidationError("Hosted none credential rows must not contain providerConfigKey.");
   }
 }
 

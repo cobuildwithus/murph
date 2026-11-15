@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import type { EventRecord } from "@murphai/contracts";
@@ -43,7 +44,7 @@ export async function linkUploadToMealWithSamePhoto(
   input: LinkUploadToMealWithSamePhotoInput,
 ): Promise<string | null> {
   const capturedAt = Date.parse(input.capturedAt);
-  if (!Number.isFinite(capturedAt)) throw new TypeError("A meal photo capture time is required.");
+  if (!Number.isFinite(capturedAt)) throw new ContractValidationError("A meal photo capture time is required.");
   const meals = await liveMeals(input);
   const linked = mealHoldingUpload(meals, input.uploadId);
   if (linked) return linked;

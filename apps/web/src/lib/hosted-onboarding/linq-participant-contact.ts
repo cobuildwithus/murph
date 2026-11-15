@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type { Prisma } from "@prisma/client";
 
 import {
@@ -62,7 +63,7 @@ export async function acquireHostedLinqParticipantEmailLockTx(input: {
     value: input.emailAddress,
   });
   if (!contact) {
-    throw new TypeError("Hosted Linq participant email lock requires a valid email address.");
+    throw new ContractValidationError("Hosted Linq participant email lock requires a valid email address.");
   }
   await acquireHostedLinqParticipantContactLockTx({ contact, tx: input.tx });
 }
@@ -77,7 +78,7 @@ export async function acquireHostedLinqParticipantPhoneLockTx(input: {
     value: input.phoneNumber,
   });
   if (!contact) {
-    throw new TypeError("Hosted Linq participant phone lock requires a valid phone number.");
+    throw new ContractValidationError("Hosted Linq participant phone lock requires a valid phone number.");
   }
 
   await acquireHostedLinqParticipantContactLockTx({
@@ -97,7 +98,7 @@ export function buildHostedLinqParticipantContactLockValue(
     value: contact.value,
   });
   if (!value) {
-    throw new TypeError("Hosted Linq participant contact requires a valid contact value.");
+    throw new ContractValidationError("Hosted Linq participant contact requires a valid contact value.");
   }
 
   return `${contact.kind}:${value}`;

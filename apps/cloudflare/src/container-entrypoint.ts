@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { isRequestInputError, RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import {
   createServer,
@@ -1206,7 +1207,7 @@ function parseHostedExecutionContainerInvocationEnvelope(
   value: unknown,
 ): { job: unknown } {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("Hosted container runner request must be an object.");
+    throw new ContractValidationError("Hosted container runner request must be an object.");
   }
 
   const record = value as Record<string, unknown>;
@@ -1421,7 +1422,7 @@ function parseHostedContainerDirectR2PresignedPutSmokeRequest(
   value: unknown,
 ): HostedContainerDirectR2PresignedPutSmokeRequest {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("Direct R2 presigned PUT smoke request must be an object.");
+    throw new ContractValidationError("Direct R2 presigned PUT smoke request must be an object.");
   }
 
   const record = value as Record<string, unknown>;
@@ -1429,12 +1430,12 @@ function parseHostedContainerDirectR2PresignedPutSmokeRequest(
     ? record.presignedPutUrl.trim()
     : "";
   if (!presignedPutUrl) {
-    throw new TypeError("Direct R2 presigned PUT smoke request requires presignedPutUrl.");
+    throw new ContractValidationError("Direct R2 presigned PUT smoke request requires presignedPutUrl.");
   }
 
   const parsedUrl = new URL(presignedPutUrl);
   if (parsedUrl.protocol !== "https:" && parsedUrl.protocol !== "http:") {
-    throw new TypeError("Direct R2 presigned PUT smoke URL must use HTTP or HTTPS.");
+    throw new ContractValidationError("Direct R2 presigned PUT smoke URL must use HTTP or HTTPS.");
   }
 
   const rawByteLength = Object.hasOwn(record, "byteLength")
@@ -1469,7 +1470,7 @@ function parseHostedContainerWorkspaceInvocationAbortRequest(
   value: unknown,
 ): HostedContainerWorkspaceInvocationAbortRequest {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("Workspace invocation abort request must be an object.");
+    throw new ContractValidationError("Workspace invocation abort request must be an object.");
   }
 
   const record = value as Record<string, unknown>;
@@ -1484,13 +1485,13 @@ function parseHostedContainerWorkspaceInvocationAbortRequest(
     : "";
 
   if (!attemptId) {
-    throw new TypeError("Workspace invocation abort request requires attemptId.");
+    throw new ContractValidationError("Workspace invocation abort request requires attemptId.");
   }
   if (!leaseGeneration) {
-    throw new TypeError("Workspace invocation abort request requires leaseGeneration.");
+    throw new ContractValidationError("Workspace invocation abort request requires leaseGeneration.");
   }
   if (!userId) {
-    throw new TypeError("Workspace invocation abort request requires userId.");
+    throw new ContractValidationError("Workspace invocation abort request requires userId.");
   }
 
   return {
@@ -1518,7 +1519,7 @@ function parseHostedContainerRuntimeWakeRequest(
   value: unknown,
 ): HostedContainerRuntimeWakeRequest {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("Runtime wake request must be an object.");
+    throw new ContractValidationError("Runtime wake request must be an object.");
   }
 
   const record = value as Record<string, unknown>;
@@ -1533,13 +1534,13 @@ function parseHostedContainerRuntimeWakeRequest(
     : "";
 
   if (!attemptId) {
-    throw new TypeError("Runtime wake request requires attemptId.");
+    throw new ContractValidationError("Runtime wake request requires attemptId.");
   }
   if (!leaseGeneration) {
-    throw new TypeError("Runtime wake request requires leaseGeneration.");
+    throw new ContractValidationError("Runtime wake request requires leaseGeneration.");
   }
   if (!userId) {
-    throw new TypeError("Runtime wake request requires userId.");
+    throw new ContractValidationError("Runtime wake request requires userId.");
   }
   const requestedProcessingMode = readHostedContainerRequestedProcessingMode(
     record.requestedProcessingMode,
@@ -1569,7 +1570,7 @@ function readHostedContainerRequestedProcessingMode(
   ) {
     return value;
   }
-  throw new TypeError("Runtime wake request processing mode is unsupported.");
+  throw new ContractValidationError("Runtime wake request processing mode is unsupported.");
 }
 
 function readHostedContainerRuntimeWakeOrchestration(

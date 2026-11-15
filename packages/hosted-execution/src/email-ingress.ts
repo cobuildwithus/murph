@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   requireBoolean,
   requireObject,
@@ -180,10 +181,10 @@ function parseHostedEmailIngressAttachmentSummaries(
   maxCount: number,
 ): HostedExecutionEmailAttachmentSummary[] {
   if (!Array.isArray(value)) {
-    throw new TypeError(`${label} must be an array.`);
+    throw new ContractValidationError(`${label} must be an array.`);
   }
   if (value.length > maxCount) {
-    throw new TypeError(`${label} must include at most ${maxCount} items.`);
+    throw new ContractValidationError(`${label} must include at most ${maxCount} items.`);
   }
 
   return value.map((entry, index) => {
@@ -230,7 +231,7 @@ function readBoundedOptionalStringArray(
     return undefined;
   }
   if (values.length > maxCount) {
-    throw new TypeError(`${label} must include at most ${maxCount} items.`);
+    throw new ContractValidationError(`${label} must include at most ${maxCount} items.`);
   }
   for (const [index, entry] of values.entries()) {
     assertBoundedHostedEmailPromptString(entry, `${label}[${index}]`, maxChars);
@@ -256,6 +257,6 @@ function assertBoundedHostedEmailPromptString(
   maxChars: number,
 ): void {
   if (value.length > maxChars) {
-    throw new TypeError(`${label} must be at most ${maxChars} characters.`);
+    throw new ContractValidationError(`${label} must be at most ${maxChars} characters.`);
   }
 }

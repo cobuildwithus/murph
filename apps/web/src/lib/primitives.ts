@@ -1,10 +1,11 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createHash, randomBytes } from "node:crypto";
 
 export function toIsoTimestamp(value: string | number | Date): string {
   const date = value instanceof Date ? value : new Date(value);
 
   if (Number.isNaN(date.valueOf())) {
-    throw new TypeError(`Invalid timestamp: ${String(value)}`);
+    throw new ContractValidationError(`Invalid timestamp: ${String(value)}`);
   }
 
   return date.toISOString();

@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   HostedBillingStatus,
   Prisma,
@@ -1018,7 +1019,7 @@ function readTwelveHourCacheWrites(record: AssistantUsageRecord, totalWrites: bi
       ? record.rawUsageJson.cacheWrite12hInputTokens : null,
   );
   if (tokens > totalWrites) {
-    throw new TypeError("Twelve-hour cache writes exceed total cache writes.");
+    throw new ContractValidationError("Twelve-hour cache writes exceed total cache writes.");
   }
   return {
     tokens,
@@ -2800,7 +2801,7 @@ function resolveHostedAiUsageAllowanceTokenPricingBasis(input: {
 
   if (config.requiredProviderKind === "openai") {
     if (!isHostedAiUsageOpenAiTokenPricingProviderName(input.record.providerName)) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "OpenAI token pricing adjustments require OpenAI provider evidence.",
       );
     }
@@ -2816,7 +2817,7 @@ function assertHostedAiUsageAllowanceAudioTokenPricingBasis(
   basis: AssistantUsageTokenPricingBasis,
 ): void {
   if (basis !== "standard") {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Audio-priced hosted AI usage must use standard token pricing basis.",
     );
   }
@@ -2826,7 +2827,7 @@ function assertHostedAiUsageAllowanceOpenAiImageTokenPricingBasis(
   basis: AssistantUsageTokenPricingBasis,
 ): void {
   if (basis !== "standard") {
-    throw new TypeError(
+    throw new ContractValidationError(
       "OpenAI image hosted AI usage must use standard token pricing basis.",
     );
   }
@@ -2836,7 +2837,7 @@ function assertHostedAiUsageLobPhysicalNoteTokenPricingBasis(
   basis: AssistantUsageTokenPricingBasis,
 ): void {
   if (basis !== "standard") {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Lob physical-note hosted usage must use standard token pricing basis.",
     );
   }
@@ -2847,7 +2848,7 @@ function assertHostedAiUsageAllowanceElevenLabsTokenPricingBasis(
   feature: "TTS" | "Music",
 ): void {
   if (basis !== "standard") {
-    throw new TypeError(
+    throw new ContractValidationError(
       `ElevenLabs ${feature} hosted AI usage must use standard token pricing basis.`,
     );
   }
@@ -3091,7 +3092,7 @@ function assertHostedAiUsageRetellTokenPricingBasis(
   tokenPricingBasis: AssistantUsageTokenPricingBasis,
 ): void {
   if (tokenPricingBasis !== "standard") {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Retell phone-call hosted usage must use standard token pricing basis.",
     );
   }
@@ -3147,7 +3148,7 @@ function assertHostedAiUsageXaiSearchTokenPricingBasis(
   tokenPricingBasis: AssistantUsageTokenPricingBasis,
 ): void {
   if (tokenPricingBasis !== "standard") {
-    throw new TypeError(
+    throw new ContractValidationError(
       "xAI x_search hosted usage must use standard token pricing basis.",
     );
   }
@@ -3269,7 +3270,7 @@ function assertHostedAiUsageGeminiVideoTokenPricingBasis(
   tokenPricingBasis: AssistantUsageTokenPricingBasis,
 ): void {
   if (tokenPricingBasis !== "standard") {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Gemini video-analysis hosted AI usage must use standard token pricing basis.",
     );
   }
@@ -4015,7 +4016,7 @@ function normalizeHostedAiUsageAllowanceDate(value: Date | string): Date {
 
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) {
-    throw new TypeError("Hosted AI usage allowance date is invalid.");
+    throw new ContractValidationError("Hosted AI usage allowance date is invalid.");
   }
 
   return parsed;

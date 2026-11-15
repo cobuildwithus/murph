@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { readHostedRunnerActiveReleaseId, readHostedRunnerBankFromName, readHostedRunnerDeployment } from "./hosted-runner-release.ts";
 import type {
   HostedExecutionContainerStubLike,
@@ -263,7 +264,7 @@ export function resolveHostedStandbyCoordinatorName(input: {
   region: HostedRunnerRegion;
 }): string {
   if (input.region !== HOSTED_RUNNER_REGION && input.region !== HOSTED_STANDBY_REGION) {
-    throw new TypeError("Hosted runner coordinator region is invalid.");
+    throw new ContractValidationError("Hosted runner coordinator region is invalid.");
   }
   return `standby-coordinator--v-${requireReleaseId(input.releaseId)}--r-${input.region.toLowerCase()}`;
 }
@@ -407,7 +408,7 @@ function isHostedStandbyReleaseId(value: string): boolean {
 
 function requireReleaseId(value: string): string {
   if (!isHostedStandbyReleaseId(value)) {
-    throw new TypeError("Hosted standby release id is invalid.");
+    throw new ContractValidationError("Hosted standby release id is invalid.");
   }
   return value;
 }

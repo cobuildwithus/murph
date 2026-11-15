@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import type { AssistantExecutionContext, sendAssistantNotification } from "@murphai/assistant-engine";
 import type { HostedExecutionAssistantNotificationRequestedWake } from "@murphai/hosted-execution";
@@ -26,7 +27,7 @@ export function buildHostedGameChatBootstrapPolicy(input: {
       ? { ...source, operation: "recover" }
       : { ...source, operation: "send", text });
     if (response.action !== "game_chat_bootstrap") {
-      throw new TypeError("Game bootstrap control returned an unrelated receipt.");
+      throw new ContractValidationError("Game bootstrap control returned an unrelated receipt.");
     }
     return response.result;
   };
@@ -58,12 +59,12 @@ function assertBootstrapNotificationMode(notification: HostedExecutionAssistantN
     || notification.firstContact != null || notification.operatorTask != null
     || notification.groupContextHandoff != null || notification.privateAssistantAskCompletion != null
     || notification.externalThreadRouteAuthority != null) {
-    throw new TypeError("Game bootstrap notification cannot carry another notification's authority.");
+    throw new ContractValidationError("Game bootstrap notification cannot carry another notification's authority.");
   }
 }
 
 export function assertHostedConversationalControlAction(action: string): void {
-  if (action === "game_chat_bootstrap") throw new TypeError("Game bootstrap control is unavailable to conversational tools.");
+  if (action === "game_chat_bootstrap") throw new ContractValidationError("Game bootstrap control is unavailable to conversational tools.");
 }
 
 export function isHostedGameBootstrapUnavailable(error: unknown): boolean {

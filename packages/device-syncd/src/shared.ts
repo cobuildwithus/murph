@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { DEVICE_SYNC_DB_RELATIVE_PATH } from "@murphai/runtime-state/node/runtime-paths";
@@ -8,7 +9,7 @@ export function toIsoTimestamp(value: string | number | Date): string {
   const date = value instanceof Date ? value : new Date(value);
 
   if (Number.isNaN(date.valueOf())) {
-    throw new TypeError(`Invalid timestamp: ${String(value)}`);
+    throw new ContractValidationError(`Invalid timestamp: ${String(value)}`);
   }
 
   return date.toISOString();
@@ -83,11 +84,11 @@ export function parseJsonObject(value: string, label: string): Record<string, un
   try {
     parsed = JSON.parse(value);
   } catch (error) {
-    throw new TypeError(`${label} is not valid JSON`, { cause: error });
+    throw new ContractValidationError(`${label} is not valid JSON`, { cause: error });
   }
 
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new TypeError(`${label} must be a JSON object`);
+    throw new ContractValidationError(`${label} must be a JSON object`);
   }
 
   return parsed as Record<string, unknown>;

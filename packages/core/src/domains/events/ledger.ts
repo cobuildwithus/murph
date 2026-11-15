@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { stageMealPhotoDeletion } from "./meal-photo-files.ts";
 import type { EventRecord } from "@murphai/contracts";
 import {
@@ -450,7 +451,7 @@ export async function findEventsByRawRefs(
   input: FindEventsByRawRefsInput,
 ): Promise<EventRawRefMatch[][]> {
   if (input.rawRefs.length > 100) {
-    throw new TypeError("Event raw-reference lookup is limited to 100 references.");
+    throw new ContractValidationError("Event raw-reference lookup is limited to 100 references.");
   }
   if (input.rawRefs.length === 0) {
     return [];

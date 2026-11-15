@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import OpenAI, { APIError } from "openai";
 import type { ResponseCreateParamsNonStreaming } from "openai/resources/responses/responses";
 
@@ -393,7 +394,7 @@ export async function claimHostedLinqFirstContactAdmissionBudget(input: {
     value: input.participantContact.value,
   });
   if (lookupKeyCandidates.length === 0) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted Linq first-contact admission budget requires at least one readable lookup key.",
     );
   }
@@ -403,7 +404,7 @@ export async function claimHostedLinqFirstContactAdmissionBudget(input: {
     value: input.participantContact.value,
   });
   if (!currentLookupKey) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted Linq first-contact admission budget requires a current contact lookup key.",
     );
   }
@@ -476,7 +477,7 @@ export async function resetHostedLinqFirstContactAdmissionForCanaryTx(input: {
       value: input.participantContact.value,
     });
   if (lookupKeyCandidates.length === 0) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted Linq first-contact canary reset requires at least one readable lookup key.",
     );
   }

@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { buildRuntimeProcessingSummaryEntry, recordRuntimeProcessingSummary, type RuntimeProcessingDiagnostics } from "../../user-runner/diagnostics.ts";
 import { readPostgresRunnerStatus, reconcilePostgresRuntimeConsent } from "../../runtime-user-control.ts";
 import {
@@ -309,7 +310,7 @@ export async function handleRuntimeHealthDataConsentRoute(
   });
   const body = requireJsonObject(payload.trim() ? JSON.parse(payload) : {});
   if (Object.keys(body).length > 0) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runtime health-data consent request must be empty.",
     );
   }
@@ -370,12 +371,12 @@ export function readRuntimeEnsureProcessingCommandTimeoutMs(headers: Headers): n
 
   const normalized = value.trim();
   if (!/^[0-9]+$/u.test(normalized)) {
-    throw new TypeError("Hosted runtime ensure-processing command timeout header must be a positive integer.");
+    throw new ContractValidationError("Hosted runtime ensure-processing command timeout header must be a positive integer.");
   }
 
   const parsed = Number(normalized);
   if (!Number.isSafeInteger(parsed) || parsed <= 0) {
-    throw new TypeError("Hosted runtime ensure-processing command timeout header must be a positive integer.");
+    throw new ContractValidationError("Hosted runtime ensure-processing command timeout header must be a positive integer.");
   }
   assertHostedRuntimeProcessingTimeoutMs(
     parsed,

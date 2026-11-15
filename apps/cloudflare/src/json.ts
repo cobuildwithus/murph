@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 export function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -115,7 +116,7 @@ export async function readRequestBodyBytes(
 
 export function requireJsonObject(parsed: unknown): Record<string, unknown> {
   if (!isJsonObject(parsed)) {
-    throw new TypeError("Request body must be a JSON object.");
+    throw new ContractValidationError("Request body must be a JSON object.");
   }
 
   return parsed;

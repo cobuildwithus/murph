@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEYS,
   HOSTED_WORKSPACE_CHECKPOINT_HANDLED_CONVERSATION_ITEM_MAX_IDS,
@@ -215,7 +216,7 @@ export async function checkpointHostedWorkspaceTx(input: {
     progressProjectionKeyCount !== 0
     && progressProjectionKeyCount !== progressProjectionKeys.length
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted workspace checkpoint system progress projection must include generation, wake, and reason together.",
     );
   }
@@ -249,7 +250,7 @@ export async function checkpointHostedWorkspaceTx(input: {
       || requestedNextDefaultProcessingWakeReason !== null
     )
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted workspace checkpoint disabled system progress projection must be entirely null.",
     );
   }
@@ -558,21 +559,21 @@ function normalizeCheckpointHandledConversationMailboxItemIds(
     value.length
       > HOSTED_WORKSPACE_CHECKPOINT_HANDLED_CONVERSATION_ITEM_MAX_IDS
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Hosted workspace checkpoint handled conversation mailbox item ids must contain at most ${HOSTED_WORKSPACE_CHECKPOINT_HANDLED_CONVERSATION_ITEM_MAX_IDS} entries.`,
     );
   }
   const itemIds = value.map((itemId) => {
     const normalized = normalizeNullableString(itemId);
     if (!normalized || !/^[A-Za-z0-9][A-Za-z0-9_.:+-]{0,191}$/u.test(normalized)) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "Hosted workspace checkpoint handled conversation mailbox item id must be a bounded opaque token.",
       );
     }
     return normalized;
   });
   if (new Set(itemIds).size !== itemIds.length) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted workspace checkpoint handled conversation mailbox item ids must not contain duplicates.",
     );
   }
@@ -634,7 +635,7 @@ async function publishBrowserVaultReplicaRefTx(input: {
   );
 
   if (!replicaRef) {
-    throw new TypeError("Hosted browser-vault replica publish replicaRef must not be null.");
+    throw new ContractValidationError("Hosted browser-vault replica publish replicaRef must not be null.");
   }
 
   let current = await input.tx.hostedWorkspace.findUnique({
@@ -782,7 +783,7 @@ function browserVaultReplicaRefsMatch(
 function parseBrowserVaultReplicaGeneratedAt(value: string, label: string): number {
   const timestamp = Date.parse(value);
   if (Number.isNaN(timestamp) || new Date(timestamp).toISOString() !== value) {
-    throw new TypeError(`${label} must be a valid ISO-8601 timestamp.`);
+    throw new ContractValidationError(`${label} must be a valid ISO-8601 timestamp.`);
   }
 
   return timestamp;
@@ -871,7 +872,7 @@ function toNullablePrismaJson(
   const serialized = JSON.stringify(value);
 
   if (serialized === undefined) {
-    throw new TypeError("Hosted workspace JSON value must be serializable.");
+    throw new ContractValidationError("Hosted workspace JSON value must be serializable.");
   }
 
   return JSON.parse(serialized) as Prisma.InputJsonValue;
@@ -904,7 +905,7 @@ function normalizeBigInt(
     return BigInt(value);
   }
 
-  throw new TypeError(`${label} must be a non-negative integer.`);
+  throw new ContractValidationError(`${label} must be a non-negative integer.`);
 }
 
 function requireAllowedString<const Value extends string>(
@@ -918,14 +919,14 @@ function requireAllowedString<const Value extends string>(
     return normalized as Value;
   }
 
-  throw new TypeError(`${label} is invalid: ${normalized}`);
+  throw new ContractValidationError(`${label} is invalid: ${normalized}`);
 }
 
 function requireNonEmptyString(value: string, label: string): string {
   const normalized = normalizeNullableString(value);
 
   if (!normalized) {
-    throw new TypeError(`${label} must not be blank.`);
+    throw new ContractValidationError(`${label} must not be blank.`);
   }
 
   return normalized;
@@ -935,7 +936,7 @@ function requireDate(value: Date | string, label: string): Date {
   const date = value instanceof Date ? value : new Date(value);
 
   if (Number.isNaN(date.getTime())) {
-    throw new TypeError(`${label} must be a valid ISO-8601 timestamp.`);
+    throw new ContractValidationError(`${label} must be a valid ISO-8601 timestamp.`);
   }
 
   return date;

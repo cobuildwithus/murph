@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
 import { createHmac, timingSafeEqual } from "node:crypto";
@@ -75,7 +76,7 @@ function buildHostedDeviceSyncCallbackProofToken(
   );
   const expiresAtMs = expiresAt.getTime();
   if (!Number.isSafeInteger(expiresAtMs)) {
-    throw new TypeError("Hosted device-sync callback proof expiry is invalid.");
+    throw new ContractValidationError("Hosted device-sync callback proof expiry is invalid.");
   }
 
   const authenticator = createHostedDeviceSyncCallbackProofAuthenticator(scope, {
@@ -264,7 +265,7 @@ function readCookieFromRequest(request: Request, name: string): string | null {
 function requireHostedDeviceSyncProvider(provider: string): string {
   const normalized = normalizeHostedDeviceSyncProvider(provider);
   if (!normalized) {
-    throw new TypeError("Hosted device-sync callback proof provider is invalid.");
+    throw new ContractValidationError("Hosted device-sync callback proof provider is invalid.");
   }
   return normalized;
 }
@@ -277,7 +278,7 @@ function normalizeHostedDeviceSyncProvider(provider: string): string | null {
 function requireHostedDeviceSyncState(state: string): string {
   const normalized = normalizeHostedDeviceSyncState(state);
   if (!normalized) {
-    throw new TypeError("Hosted device-sync callback proof state is invalid.");
+    throw new ContractValidationError("Hosted device-sync callback proof state is invalid.");
   }
   return normalized;
 }

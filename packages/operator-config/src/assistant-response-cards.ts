@@ -1,3 +1,4 @@
+import { ContractValidationError } from '@murphai/contracts/validation-error'
 import { Buffer } from 'node:buffer'
 
 import {
@@ -391,12 +392,12 @@ export function buildLinqIMessageAppLayout(
 ): LinqIMessageAppLayout {
   const parsed = assistantResponseCardSchema.parse(card)
   if (parsed.kind === 'exercise_routine') {
-    throw new TypeError(
+    throw new ContractValidationError(
       'Exercise routine response cards do not have a native iMessage layout.',
     )
   }
   if (parsed.kind === 'telegram_rich_content') {
-    throw new TypeError(
+    throw new ContractValidationError(
       'Telegram rich content cards do not have a native iMessage layout.',
     )
   }
@@ -442,12 +443,12 @@ export function buildLinqIMessageAppCardImageUrl(
 ): string {
   const parsed = assistantResponseCardSchema.parse(card)
   if (parsed.kind === 'exercise_routine') {
-    throw new TypeError(
+    throw new ContractValidationError(
       'Exercise routine response cards do not have a native iMessage image URL.',
     )
   }
   if (parsed.kind === 'telegram_rich_content') {
-    throw new TypeError(
+    throw new ContractValidationError(
       'Telegram rich content cards do not have a native iMessage image URL.',
     )
   }
@@ -461,13 +462,13 @@ export function buildLinqIMessageAppCardImageUrl(
           buildIdentityFreeChallengeStandingsImageCard(parsed),
         )
   if (encoded.length > IMESSAGE_APP_CARD_IMAGE_PAYLOAD_MAX_LENGTH) {
-    throw new TypeError('The encoded app card image payload is too large.')
+    throw new ContractValidationError('The encoded app card image payload is too large.')
   }
   const url = `${MURPH_PRODUCT_ORIGIN}${
     IMESSAGE_APP_CARD_IMAGE_PATH_PREFIX
   }${encoded}${IMESSAGE_APP_CARD_IMAGE_PATH_SUFFIX}`
   if (url.length >= IMESSAGE_APP_CARD_URL_MAX_LENGTH) {
-    throw new TypeError('The encoded app card image exceeds the inline size limit.')
+    throw new ContractValidationError('The encoded app card image exceeds the inline size limit.')
   }
   return url
 }
@@ -486,11 +487,11 @@ export function buildLinqIMessageAppCardUrl(
     case 'challenge_standings':
       return encodeChallengeStandingsAppCardUrl(parsed)
     case 'exercise_routine':
-      throw new TypeError(
+      throw new ContractValidationError(
         'Exercise routine response cards do not have a native iMessage app URL.',
       )
     case 'telegram_rich_content':
-      throw new TypeError(
+      throw new ContractValidationError(
         'Telegram rich content cards do not have a native iMessage app URL.',
       )
   }
@@ -501,7 +502,7 @@ export function encodeDailyNutritionAppCardUrl(
 ): string {
   const parsed = assistantResponseCardSchema.parse(card)
   if (parsed.kind !== 'daily_nutrition') {
-    throw new TypeError('Expected a daily nutrition response card.')
+    throw new ContractValidationError('Expected a daily nutrition response card.')
   }
   return encodeAppCardEnvelopeUrl(encodeDailyNutritionAppCardPayload(parsed))
 }
@@ -527,7 +528,7 @@ export function encodeWorkoutSessionAppCardUrl(
 ): string {
   const parsed = compactTableResponseCardV1Schema.parse(card)
   if (!('workout' in parsed)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       'Expected a compact table with workout session detail.',
     )
   }
@@ -566,7 +567,7 @@ export function encodeChallengeStandingsAppCardUrl(
 ): string {
   const parsed = assistantResponseCardSchema.parse(card)
   if (parsed.kind !== 'challenge_standings') {
-    throw new TypeError('Expected a challenge standings response card.')
+    throw new ContractValidationError('Expected a challenge standings response card.')
   }
   return encodeAppCardEnvelopeUrl(
     encodeChallengeStandingsAppCardPayload(parsed),
@@ -648,7 +649,7 @@ function encodeAppCardEnvelopePayload(
 function encodeAppCardEnvelopeUrl(encoded: string): string {
   const url = `${IMESSAGE_APP_CARD_URL_PREFIX}${encoded}`
   if (url.length >= IMESSAGE_APP_CARD_URL_MAX_LENGTH) {
-    throw new TypeError('The encoded app card exceeds the inline size limit.')
+    throw new ContractValidationError('The encoded app card exceeds the inline size limit.')
   }
   return url
 }
@@ -1210,7 +1211,7 @@ function renderNutritionMetric(
 function readRequiredCalorieTotal(card: DailyNutritionResponseCard): number {
   const calorieTotal = card.totals.calories.total
   if (calorieTotal === null) {
-    throw new TypeError(
+    throw new ContractValidationError(
       'A daily nutrition response card requires a calorie total.',
     )
   }

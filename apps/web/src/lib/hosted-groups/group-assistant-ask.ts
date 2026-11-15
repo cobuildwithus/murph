@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
 import { createHash } from "node:crypto";
@@ -2904,7 +2905,7 @@ function normalizeHostedAssistantAskText(input: {
   const normalized = input.value.trim();
   const codePoints = [...normalized].length;
   if (codePoints === 0 || codePoints > input.maxCodePoints) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${input.label} must contain between 1 and ${input.maxCodePoints} Unicode code points.`,
     );
   }
@@ -2921,7 +2922,7 @@ function normalizeHostedAssistantAskTimestamp(
     !Number.isFinite(timestampMs)
     || new Date(timestampMs).toISOString() !== normalized
   ) {
-    throw new TypeError(`${label} must be a canonical ISO timestamp.`);
+    throw new ContractValidationError(`${label} must be a canonical ISO timestamp.`);
   }
   return normalized;
 }

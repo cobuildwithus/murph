@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { hostedConnectedAppStartedIntentOwnerCutoff } from "../connected-apps/connect-intent-ownership";
@@ -1115,7 +1116,7 @@ export function normalizeHostedRetentionDate(value: Date | string): Date {
   const date = value instanceof Date ? value : new Date(value);
 
   if (Number.isNaN(date.getTime())) {
-    throw new TypeError("Hosted retention cleanup date must be valid.");
+    throw new ContractValidationError("Hosted retention cleanup date must be valid.");
   }
 
   return date;

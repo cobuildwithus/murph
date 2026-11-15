@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type { DatabaseSync } from "node:sqlite";
 
 import { withImmediateTransaction } from "@murphai/runtime-state/node";
@@ -128,7 +129,7 @@ export const ACCOUNT_ROW_SELECT = `
 
 function expectString(value: unknown, field: string): string {
   if (typeof value !== "string") {
-    throw new TypeError(`Expected ${field} to be a string.`);
+    throw new ContractValidationError(`Expected ${field} to be a string.`);
   }
   return value;
 }
@@ -142,7 +143,7 @@ function expectNullableString(value: unknown, field: string): string | null {
 
 function expectNumber(value: unknown, field: string): number {
   if (typeof value !== "number") {
-    throw new TypeError(`Expected ${field} to be a number.`);
+    throw new ContractValidationError(`Expected ${field} to be a number.`);
   }
   return value;
 }
@@ -162,7 +163,7 @@ function expectDeviceAccountCredentialKind(
     return value;
   }
 
-  throw new TypeError(`Expected ${field} to be a supported device account credential kind.`);
+  throw new ContractValidationError(`Expected ${field} to be a supported device account credential kind.`);
 }
 
 function expectDeviceSyncAccountStatus(
@@ -173,7 +174,7 @@ function expectDeviceSyncAccountStatus(
     return value;
   }
 
-  throw new TypeError(`Expected ${field} to be a supported device account status.`);
+  throw new ContractValidationError(`Expected ${field} to be a supported device account status.`);
 }
 
 function expectNullableDeviceSyncAccountSetupPhase(
@@ -193,7 +194,7 @@ function expectNullableDeviceSyncAccountSetupPhase(
     return value;
   }
 
-  throw new TypeError(`Expected ${field} to be a supported device account setup phase.`);
+  throw new ContractValidationError(`Expected ${field} to be a supported device account setup phase.`);
 }
 
 function normalizeMetadataKey(value: string): string {
@@ -314,28 +315,28 @@ function parseCredentialMetadataJson(
 function validateStoredCredentialRow(row: StoredAccountRow): void {
   if (row.credential_kind === "oauth_tokens") {
     if (row.provider_config_key !== null || !row.access_token_encrypted) {
-      throw new TypeError("Stored OAuth token credential rows require an access token and no provider config key.");
+      throw new ContractValidationError("Stored OAuth token credential rows require an access token and no provider config key.");
     }
     return;
   }
 
   if (row.access_token_encrypted !== null) {
-    throw new TypeError("Stored non-token credential rows must not contain access tokens.");
+    throw new ContractValidationError("Stored non-token credential rows must not contain access tokens.");
   }
 
   if (row.refresh_token_encrypted !== null || row.access_token_expires_at !== null) {
-    throw new TypeError("Stored non-token credential rows must not contain token bundle fields.");
+    throw new ContractValidationError("Stored non-token credential rows must not contain token bundle fields.");
   }
 
   if (row.credential_kind === "provider_config") {
     if (!row.provider_config_key) {
-      throw new TypeError("Stored provider-config credential rows require provider_config_key.");
+      throw new ContractValidationError("Stored provider-config credential rows require provider_config_key.");
     }
     return;
   }
 
   if (row.provider_config_key !== null) {
-    throw new TypeError("Stored none credential rows must not contain provider_config_key.");
+    throw new ContractValidationError("Stored none credential rows must not contain provider_config_key.");
   }
 }
 
@@ -344,7 +345,7 @@ function buildStoredAccountCredential(row: StoredAccountRow): StoredDeviceSyncAc
 
   if (row.credential_kind === "oauth_tokens") {
     if (!row.access_token_encrypted) {
-      throw new TypeError("Stored OAuth token credential rows require an access token.");
+      throw new ContractValidationError("Stored OAuth token credential rows require an access token.");
     }
 
     return {
@@ -358,7 +359,7 @@ function buildStoredAccountCredential(row: StoredAccountRow): StoredDeviceSyncAc
 
   if (row.credential_kind === "provider_config") {
     if (!row.provider_config_key) {
-      throw new TypeError("Stored provider-config credential rows require provider_config_key.");
+      throw new ContractValidationError("Stored provider-config credential rows require provider_config_key.");
     }
 
     return {
@@ -383,15 +384,15 @@ function parseStoredStringArray(value: string | null, field: string): string[] {
   try {
     parsed = JSON.parse(value);
   } catch {
-    throw new TypeError(`Expected ${field} to contain a valid JSON array.`);
+    throw new ContractValidationError(`Expected ${field} to contain a valid JSON array.`);
   }
 
   if (!Array.isArray(parsed)) {
-    throw new TypeError(`Expected ${field} to contain a JSON array.`);
+    throw new ContractValidationError(`Expected ${field} to contain a JSON array.`);
   }
 
   if (!parsed.every((entry) => typeof entry === "string")) {
-    throw new TypeError(`Expected ${field} to contain only strings.`);
+    throw new ContractValidationError(`Expected ${field} to contain only strings.`);
   }
 
   return parsed;

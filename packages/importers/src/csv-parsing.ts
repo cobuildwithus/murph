@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   formatTimeZoneDateTimeParts,
   normalizeStrictIsoTimestamp,
@@ -217,7 +218,7 @@ function naiveTimestampPartsToIso(parts: NaiveTimestampParts, timeZone: string):
 
 export function parseDelimitedRows(text: string, delimiter = ","): string[][] {
   if (typeof delimiter !== "string" || delimiter.length !== 1) {
-    throw new TypeError("delimiter must be a single character");
+    throw new ContractValidationError("delimiter must be a single character");
   }
 
   const rows: string[][] = [];

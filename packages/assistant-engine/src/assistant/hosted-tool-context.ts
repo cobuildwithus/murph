@@ -1,3 +1,4 @@
+import { ContractValidationError } from '@murphai/contracts/validation-error';
 import { readRecapFile, readRecapDraftFile, saveRecapMediaFile } from './recap-files.js'
 import type { SongWordTimestamp } from '@murphai/contracts/recap-show'
 import { resolveElevenLabsApiKey } from '@murphai/operator-config/elevenlabs-runtime'
@@ -407,7 +408,7 @@ export function createAssistantHostedToolContext(input: {
     }
   }
   const writeGameLore = async (content: string): Promise<void> => {
-    if (Buffer.byteLength(content, 'utf8') > 64 * 1024) throw new TypeError('Game lore is too large.')
+    if (Buffer.byteLength(content, 'utf8') > 64 * 1024) throw new ContractValidationError('Game lore is too large.')
     const target = await gameLorePath()
     await mkdir(path.dirname(target), { recursive: true })
     await writeFile(target, content, { encoding: 'utf8', mode: 0o600 })
@@ -690,7 +691,7 @@ export function createAssistantHostedToolContext(input: {
     readGameLore,
     replaceGameLore: async (content) => {
       if (executionContext?.gameRecapScope?.loreAccess === 'read') throw new TypeError('Game lore is read-only for this recap.')
-      if (Buffer.byteLength(content, 'utf8') > 64 * 1024) throw new TypeError('Game lore is too large.')
+      if (Buffer.byteLength(content, 'utf8') > 64 * 1024) throw new ContractValidationError('Game lore is too large.')
       await writeGameLore(content)
     },
     appendGameRecapChatLine: async (chatLine) => {

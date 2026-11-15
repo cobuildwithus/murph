@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { workspaceSnapshotBucket } from "../../workspace-snapshot-local-s3.ts";
 import { retireRecapMediaObject } from "../../recap-media-store.ts";
 import { abortRuntimeMultipartUpload } from "../../runtime-object-upload.ts";
@@ -42,7 +43,7 @@ export async function purgeHostedRuntimeResource(input: {
   if (resource.kind === "multipart") {
     if (!bucket.resumeMultipartUpload) throw new Error("Runtime multipart recovery is unavailable.");
     const prefixes = await Promise.all([hostedMediaUserPrefix({ userId: input.userId }), hostedPrivateMediaUserPrefix({ userId: input.userId }), hostedBrowserVaultReplicaUserPrefix({ userId: input.userId }), hostedWorkspaceSnapshotUserPrefix({ userId: input.userId })]);
-    if (!prefixes.some(prefix => resource.objectKey.startsWith(prefix) && !resource.objectKey.slice(prefix.length).includes("/"))) throw new TypeError("Multipart upload is outside the member namespace.");
+    if (!prefixes.some(prefix => resource.objectKey.startsWith(prefix) && !resource.objectKey.slice(prefix.length).includes("/"))) throw new ContractValidationError("Multipart upload is outside the member namespace.");
     await abortRuntimeMultipartUpload(bucket.resumeMultipartUpload(resource.objectKey, resource.uploadId));
     return;
   }
@@ -66,7 +67,7 @@ export async function purgeHostedRuntimeResource(input: {
     return;
   }
   const prefix = await (resource.kind === "snapshot" ? hostedWorkspaceSnapshotUserPrefix : resource.kind === "media" ? hostedMediaUserPrefix : hostedBrowserVaultReplicaUserPrefix)({ userId: input.userId });
-  if (!resource.objectKey.startsWith(prefix) || resource.objectKey.slice(prefix.length).includes("/")) throw new TypeError("Runtime resource purge is outside the member namespace.");
+  if (!resource.objectKey.startsWith(prefix) || resource.objectKey.slice(prefix.length).includes("/")) throw new ContractValidationError("Runtime resource purge is outside the member namespace.");
   const keys = resource.kind === "replica" ? [resource.objectKey, ...listHostedBrowserVaultReplicaSiblingObjectKeys(resource.objectKey)] : resource.objectKey;
   await bucket.delete(keys);
 }

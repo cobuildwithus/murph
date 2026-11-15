@@ -1,3 +1,4 @@
+import { ContractValidationError } from "./validation-error.ts";
 import * as z from "./zod-runtime.ts";
 
 import { CONTRACT_SCHEMA_VERSION, FRONTMATTER_DOC_TYPES } from "./constants.ts";
@@ -158,7 +159,7 @@ export interface AutomationSupportSeriesTag {
 export function buildAutomationSupportSeriesTag(seriesId: string): string {
   const normalized = seriesId.trim();
   if (!automationSupportSeriesIdPattern.test(normalized)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Automation support series id must be 1-200 characters using letters, numbers, colon, period, underscore, or hyphen.",
     );
   }
