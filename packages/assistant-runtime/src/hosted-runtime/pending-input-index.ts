@@ -1198,7 +1198,7 @@ export function parseHostedPendingAssistantInputState(
     handledBatchCursorInputId !== null
     && !inputIds.includes(handledBatchCursorInputId)
   ) {
-    throw new ContractValidationError(
+    throw new TypeError(
       "hosted pending assistant input handled batch cursor must reference an indexed input.",
     );
   }

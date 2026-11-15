@@ -1,4 +1,3 @@
-import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type {
   HostedEmailIngressWakeAppendRequest,
 } from "@murphai/hosted-execution";
@@ -98,7 +97,7 @@ function parseHostedEmailMailboxIngressAppendResponse(
   value: unknown,
 ): HostedEmailMailboxIngressAppendResponse {
   if (!isRecord(value)) {
-    throw new ContractValidationError("Hosted email mailbox ingress append response must be an object.");
+    throw new TypeError("Hosted email mailbox ingress append response must be an object.");
   }
 
   return {
@@ -124,7 +123,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function requireBoolean(value: unknown, label: string): boolean {
   if (typeof value !== "boolean") {
-    throw new ContractValidationError(`${label} must be a boolean.`);
+    throw new TypeError(`${label} must be a boolean.`);
   }
 
   return value;

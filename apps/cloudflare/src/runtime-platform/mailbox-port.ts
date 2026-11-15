@@ -1,4 +1,3 @@
-import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { emitHostedExecutionStructuredLog } from "@murphai/hosted-execution";
 import { HOSTED_RUNTIME_FETCH_CORRELATION_ID_HEADER } from "../runner-outbound/headers.ts";
 import type {
@@ -149,7 +148,7 @@ export function createHostedWebMailboxPort(input: {
         || (payload as Record<string, unknown>).schemaVersion !== 1
         || (payload as Record<string, unknown>).recorded !== true
       ) {
-        throw new ContractValidationError("Hosted member action outcome response is invalid.");
+        throw new TypeError("Hosted member action outcome response is invalid.");
       }
     },
   };

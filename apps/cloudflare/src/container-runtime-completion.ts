@@ -1,4 +1,3 @@
-import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   buildHostedExecutionSafeErrorDiagnostics,
   emitHostedExecutionStructuredLog,
@@ -111,7 +110,7 @@ async function readHostedContainerRuntimeCompletionReceipt(
     || !("completed" in receipt)
     || typeof receipt.completed !== "boolean"
   ) {
-    throw new ContractValidationError("Hosted container runtime completion receipt was invalid.");
+    throw new TypeError("Hosted container runtime completion receipt was invalid.");
   }
   // Boolean-only receipts remain valid during rolling deployments. Never let
   // unknown wire text suppress warnings or attach a rejection to success.

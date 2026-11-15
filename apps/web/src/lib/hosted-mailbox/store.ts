@@ -729,7 +729,7 @@ export async function appendHostedMailboxEnvelopeWithPreparedCryptoTx(input: {
     ? undefined
     : requireHostedMailboxItemId(input.itemId);
   if (itemId !== undefined && itemId !== input.envelope.eventId) {
-    throw new ContractValidationError(
+    throw new TypeError(
       "Hosted mailbox item identity must equal the envelope event id.",
     );
   }
@@ -963,7 +963,7 @@ export async function appendHostedMailboxEnvelopeWithIdentityTx(input: {
 }): Promise<AppendHostedMailboxItemResult> {
   const itemId = requireHostedMailboxItemId(input.itemId);
   if (itemId !== input.envelope.eventId) {
-    throw new ContractValidationError("Hosted mailbox item identity must equal the envelope event id.");
+    throw new TypeError("Hosted mailbox item identity must equal the envelope event id.");
   }
   return appendHostedMailboxEnvelopeInternalTx({
     ...input,
@@ -2579,7 +2579,7 @@ function normalizeHostedMailboxSourceMessageLookupKeys(
     requireNonEmptyString(value, "Hosted mailbox sourceMessageLookupKey")
   ))].sort();
   if (normalized.length > HOSTED_MAILBOX_SOURCE_MESSAGE_MAX_LOOKUP_KEYS) {
-    throw new ContractValidationError(
+    throw new TypeError(
       `Hosted mailbox source lookup accepts at most ${HOSTED_MAILBOX_SOURCE_MESSAGE_MAX_LOOKUP_KEYS} privacy versions.`,
     );
   }
@@ -2770,7 +2770,7 @@ function serializeHostedMailboxPayload(value: unknown): Pick<HostedMailboxStored
   const serialized = JSON.stringify(value);
 
   if (typeof serialized !== "string" || serialized.length === 0) {
-    throw new ContractValidationError("Hosted mailbox payload must serialize to a non-empty JSON string.");
+    throw new TypeError("Hosted mailbox payload must serialize to a non-empty JSON string.");
   }
 
   return {
@@ -2901,7 +2901,7 @@ async function encryptHostedMailboxPayloadStorage(input: {
 
 function requireHostedMailboxSerializedPayload(value: string): string {
   if (typeof value !== "string" || value.length === 0) {
-    throw new ContractValidationError("Hosted mailbox item requires serialized payload JSON for encrypted append.");
+    throw new TypeError("Hosted mailbox item requires serialized payload JSON for encrypted append.");
   }
 
   return value;

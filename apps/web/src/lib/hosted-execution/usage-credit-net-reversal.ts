@@ -419,7 +419,7 @@ function resolveHostedUsageCreditCanonicalSourceLookupKey(input: {
     return input.current;
   }
   if (!stored.trim()) {
-    throw new ContractValidationError("Hosted usage-credit reversal stored an invalid source lookup key.");
+    throw new TypeError("Hosted usage-credit reversal stored an invalid source lookup key.");
   }
   return stored;
 }

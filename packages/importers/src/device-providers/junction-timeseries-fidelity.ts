@@ -1,4 +1,3 @@
-import { ContractValidationError } from "@murphai/contracts/validation-error";
 export const JUNCTION_DENSE_FIDELITY_RESOURCES = Object.freeze([
   "glucose",
   "blood_oxygen",
@@ -278,7 +277,7 @@ export function assertJunctionTimeseriesResponseBound(
 ): void {
   const policy = JUNCTION_TIMESERIES_FIDELITY_POLICIES[resource];
   if (!Number.isSafeInteger(recordCount) || recordCount < 0) {
-    throw new ContractValidationError(`Junction ${resource} response record count must be a nonnegative integer.`);
+    throw new TypeError(`Junction ${resource} response record count must be a nonnegative integer.`);
   }
   if (recordCount > policy.maxRecordsPerResponse) {
     throw new RangeError(
@@ -447,13 +446,13 @@ function validatePointSample(
   sample: JunctionTimeseriesFidelityPoint,
 ): JunctionTimeseriesFidelityPoint {
   if (!Number.isFinite(sample.observedAtMs)) {
-    throw new ContractValidationError(`Junction ${resource} feature sample observedAtMs must be finite.`);
+    throw new TypeError(`Junction ${resource} feature sample observedAtMs must be finite.`);
   }
   if (!Number.isFinite(sample.localMinute) || sample.localMinute < 0 || sample.localMinute >= 24 * 60) {
-    throw new ContractValidationError(`Junction ${resource} feature sample localMinute must be within the local day.`);
+    throw new TypeError(`Junction ${resource} feature sample localMinute must be within the local day.`);
   }
   if (!Number.isFinite(sample.value)) {
-    throw new ContractValidationError(`Junction ${resource} feature sample value must be finite.`);
+    throw new TypeError(`Junction ${resource} feature sample value must be finite.`);
   }
   return sample;
 }

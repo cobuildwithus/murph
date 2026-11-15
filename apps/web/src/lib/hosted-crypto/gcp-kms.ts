@@ -2331,7 +2331,7 @@ function normalizeKmsCryptoKeyName(value: string, label: string): string {
 function requireKmsCryptoKeyName(value: unknown, label: string): string {
   const exact = requireExactString(value, label);
   if (!GCP_KMS_CRYPTO_KEY_NAME_PATTERN.test(exact)) {
-    throw new ContractValidationError(`${label} must be an exact CryptoKey resource name.`);
+    throw new TypeError(`${label} must be an exact CryptoKey resource name.`);
   }
   return exact;
 }
@@ -2339,7 +2339,7 @@ function requireKmsCryptoKeyName(value: unknown, label: string): string {
 function requireKmsCryptoKeyVersionName(value: unknown, label: string): string {
   const exact = requireExactString(value, label);
   if (!GCP_KMS_CRYPTO_KEY_VERSION_NAME_PATTERN.test(exact)) {
-    throw new ContractValidationError(`${label} must be an exact CryptoKeyVersion resource name.`);
+    throw new TypeError(`${label} must be an exact CryptoKeyVersion resource name.`);
   }
   return exact;
 }
@@ -2394,7 +2394,7 @@ function readOptionalEnv(source: NodeJS.ProcessEnv, key: string): string | null 
 
 function requireExactString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.length === 0 || value !== value.trim()) {
-    throw new ContractValidationError(`${label} must be a non-empty exact string without surrounding whitespace.`);
+    throw new TypeError(`${label} must be a non-empty exact string without surrounding whitespace.`);
   }
   return value;
 }
@@ -2418,7 +2418,7 @@ function requireWorkloadIdentityId(value: string, label: string): string {
 function requireOpaqueCredential(value: string, label: string): string {
   const exact = requireExactString(value, label);
   if (Buffer.byteLength(exact, "utf8") > GCP_TOKEN_MAX_BYTES || /[\u0000-\u0020\u007f]/u.test(exact)) {
-    throw new ContractValidationError(`${label} is invalid.`);
+    throw new TypeError(`${label} is invalid.`);
   }
   return exact;
 }

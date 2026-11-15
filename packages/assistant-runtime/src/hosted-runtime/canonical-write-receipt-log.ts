@@ -1,4 +1,3 @@
-import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createHash } from "node:crypto";
 
 import {
@@ -272,7 +271,7 @@ function validateHostedCanonicalWritePayloadLengths(
 ): void {
   for (const payload of payloads) {
     if (payload.bytes.byteLength !== payload.byteLength) {
-      throw new ContractValidationError(
+      throw new TypeError(
         "Hosted canonical write payload length does not match its receipt.",
       );
     }

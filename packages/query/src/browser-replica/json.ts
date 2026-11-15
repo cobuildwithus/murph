@@ -1,4 +1,3 @@
-import { ContractValidationError } from "@murphai/contracts/validation-error";
 export interface CooperativeJsonStringifyOptions {
   signal?: AbortSignal;
   sortKeys?: boolean;
@@ -76,14 +75,14 @@ export async function stringifyJsonCooperatively(
           appendJsonChunk(output, "null");
           continue;
         }
-        throw new ContractValidationError("Browser Vault replica values must be JSON serializable.");
+        throw new TypeError("Browser Vault replica values must be JSON serializable.");
       }
       appendJsonChunk(output, encoded);
       continue;
     }
 
     if (activeObjects.has(current)) {
-      throw new ContractValidationError("Browser Vault replica values must not contain cycles.");
+      throw new TypeError("Browser Vault replica values must not contain cycles.");
     }
     activeObjects.add(current);
     stack.push({ kind: "exit", value: current });

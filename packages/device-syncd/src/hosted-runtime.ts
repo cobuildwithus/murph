@@ -933,7 +933,7 @@ export function parseHostedExecutionDeviceSyncReconcileResponse(
     ["connectionId", "occurredAt", "status"],
   );
   if (record.status !== "queued") {
-    throw new ContractValidationError("Hosted device-sync reconcile response status must be queued.");
+    throw new TypeError("Hosted device-sync reconcile response status must be queued.");
   }
 
   return {
@@ -1039,7 +1039,7 @@ export function parseHostedExecutionDeviceSyncNoDataOutreachResponse(
       || effectiveAfterDays > 30
     ))
   ) {
-    throw new ContractValidationError(
+    throw new TypeError(
       "Hosted device-sync no-data outreach response setting and effectiveAfterDays are inconsistent.",
     );
   }

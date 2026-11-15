@@ -1,4 +1,3 @@
-import { ContractValidationError } from '@murphai/contracts/validation-error'
 import * as z from '@murphai/contracts/zod-runtime'
 import { hostedLeaveGroupReasonSchema } from '@murphai/hosted-execution/runtime-control'
 import type { AssistantHostedToolContext } from '../../assistant/hosted-tool-context.js'
@@ -31,7 +30,7 @@ export async function executeLeaveGroupTool(input: {
   try {
     const result = await tool.request({ action: 'leave_group', reason: input.request.reason,
       origin: { kind: 'accepted_input', assistantInputId: input.request.messageRef } })
-    if (result.action !== 'leave_group') throw new ContractValidationError('Unexpected group departure result.')
+    if (result.action !== 'leave_group') throw new TypeError('Unexpected group departure result.')
     if (result.result.status === 'unavailable') return toolTextResult(true, JSON.stringify(result))
     return { ...toolTextResult(true, JSON.stringify(result)), finalActionPatch: { kind: 'none', owner: 'leave-group' } }
   } catch (error) {

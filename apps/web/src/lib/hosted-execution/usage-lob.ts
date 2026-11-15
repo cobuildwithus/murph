@@ -138,6 +138,6 @@ function requireNonNegativeSafeInteger(value: number, label: string): void {
 
 function requireNonEmptyString(value: string, label: string): string {
   const normalized = value.trim();
-  if (!normalized) throw new ContractValidationError(`${label} is required.`);
+  if (!normalized) throw new TypeError(`${label} is required.`);
   return normalized;
 }

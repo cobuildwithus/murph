@@ -1,4 +1,3 @@
-import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type { Prisma } from "@prisma/client";
 
 import {
@@ -57,7 +56,7 @@ export async function grantHostedUsageCreditForPurchaseTx(input: {
     );
   }
   if (purchase.grantUsdMicros <= 0n) {
-    throw new ContractValidationError("Hosted usage-credit purchase grant must be positive.");
+    throw new TypeError("Hosted usage-credit purchase grant must be positive.");
   }
   if (
     purchase.paidAt !== null

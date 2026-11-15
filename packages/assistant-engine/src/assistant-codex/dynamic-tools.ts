@@ -1,4 +1,3 @@
-import { ContractValidationError } from '@murphai/contracts/validation-error';
 import { readMaterializeVaultMediaToolRequest, materializeVaultMedia } from './dynamic-tools/materialize-vault-media.js'
 import { sleepSummaryCardRequestSchema } from '@murphai/contracts'
 import { resolveTrustedSleepSummaryCard } from './dynamic-tools/sleep-summary-card.js'
@@ -4593,7 +4592,7 @@ async function executeAssistantConfigurationTool(input: {
       const result = await assistantConfigurationTool.request(input.request)
       if (result.action !== 'read') {
         failureReason = 'action_result_mismatch'
-        throw new ContractValidationError('Assistant configuration read returned an update response.')
+        throw new TypeError('Assistant configuration read returned an update response.')
       }
       return toolTextResult(true, safeToolPayloadText({
         currentTurn,
@@ -4616,7 +4615,7 @@ async function executeAssistantConfigurationTool(input: {
     })
     if (result.action !== 'update') {
       failureReason = 'action_result_mismatch'
-      throw new ContractValidationError('Assistant configuration update returned a read response.')
+      throw new TypeError('Assistant configuration update returned a read response.')
     }
     return toolTextResult(true, safeToolPayloadText({
       currentTurn,

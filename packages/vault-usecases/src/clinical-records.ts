@@ -628,27 +628,27 @@ function assertClinicalFhirRetrievalCheckpointConsistent(
     || new Set(checkpoint.seenPageUrlHashes).size
       !== checkpoint.seenPageUrlHashes.length
   ) {
-    throw new ContractValidationError("Clinical FHIR retrieval checkpoint counters are inconsistent.");
+    throw new TypeError("Clinical FHIR retrieval checkpoint counters are inconsistent.");
   }
 
   const attachmentFiles = new Map(checkpoint.attachments.map((attachment) => [attachment.relativePath, attachment]));
-  if (attachmentFiles.size !== checkpoint.attachments.length) throw new ContractValidationError("Clinical checkpoint repeats document bytes.");
+  if (attachmentFiles.size !== checkpoint.attachments.length) throw new TypeError("Clinical checkpoint repeats document bytes.");
   for (const document of checkpoint.documentAttachments) {
     if (document.status !== "downloaded") continue;
     const file = attachmentFiles.get(document.relativePath);
     const bytes = file ? decodeClinicalDocumentBase64(file.contentBase64) : null;
-    if (!bytes || bytes.length !== document.byteLength || hashClinicalDocumentBytes(bytes) !== document.sha256) throw new ContractValidationError("Clinical checkpoint document integrity is invalid.");
+    if (!bytes || bytes.length !== document.byteLength || hashClinicalDocumentBytes(bytes) !== document.sha256) throw new TypeError("Clinical checkpoint document integrity is invalid.");
   }
   let stagedBytes = 0;
   for (const page of checkpoint.pages) {
     const pageBytes = Buffer.byteLength(page.content, "utf8");
     if (pageBytes > CLINICAL_RAW_RESOURCE_FILE_MAX_BYTES) {
-      throw new ContractValidationError("Clinical FHIR retrieval checkpoint page is too large.");
+      throw new TypeError("Clinical FHIR retrieval checkpoint page is too large.");
     }
     stagedBytes += pageBytes;
   }
   if (stagedBytes > checkpoint.totalBodyBytes) {
-    throw new ContractValidationError("Clinical FHIR retrieval checkpoint byte count is inconsistent.");
+    throw new TypeError("Clinical FHIR retrieval checkpoint byte count is inconsistent.");
   }
 }
 
@@ -822,7 +822,7 @@ async function readPreviousClinicalBatch(input: ClinicalFhirSnapshotImportInput)
   const manifestContent = await readFile(path.join(input.vaultRoot, clinicalRawPathSchema.parse(previous.manifestPath)), "utf8");
   if (createHash("sha256").update(manifestContent, "utf8").digest("hex") !== previous.sha256) throw new ClinicalFhirSnapshotRejectedError(new TypeError("Clinical batch predecessor digest is invalid."));
   const manifest = clinicalRawManifestSchema.parse(JSON.parse(manifestContent));
-  if (manifest.resourceFiles.length !== 1) throw new ClinicalFhirSnapshotRejectedError(new ContractValidationError("Clinical batch predecessor page is invalid."));
+  if (manifest.resourceFiles.length !== 1) throw new ClinicalFhirSnapshotRejectedError(new TypeError("Clinical batch predecessor page is invalid."));
   const relativePath = manifest.resourceFiles[0]!.relativePath;
   const content = await readFile(path.join(input.vaultRoot, path.posix.dirname(previous.manifestPath), relativePath), "utf8");
   return { manifestPath: previous.manifestPath, manifestContent, page: { relativePath, content } };

@@ -786,7 +786,7 @@ function requireMemberActivationSignupWelcome(
   wake: HostedExecutionMemberActivatedWake,
 ): NonNullable<HostedExecutionMemberActivatedWake["signupWelcome"]> {
   if (!wake.signupWelcome) {
-    throw new ContractValidationError("Hosted member activation wake has no signup welcome payload.");
+    throw new TypeError("Hosted member activation wake has no signup welcome payload.");
   }
 
   return wake.signupWelcome;
@@ -861,7 +861,7 @@ function buildAssistantNotificationInput(
 ): AssistantNotificationInput {
   const notificationPromptProfile = wake.notification.notificationPromptProfile;
   if (isHostedRetiredAssistantNotificationProfile(notificationPromptProfile)) {
-    throw new ContractValidationError("Retired notification profiles cannot enter active execution.");
+    throw new TypeError("Retired notification profiles cannot enter active execution.");
   }
   const privateAssistantAskCompletion =
     wake.notification.privateAssistantAskCompletion ?? null;

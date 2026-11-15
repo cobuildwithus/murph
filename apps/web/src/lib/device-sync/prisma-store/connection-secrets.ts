@@ -1,4 +1,3 @@
-import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { parseSerializedHostedSecureBoxEnvelope } from "@murphai/runtime-state";
 
 import {
@@ -154,7 +153,7 @@ export async function readHostedStoredTokenBundle(
     return null;
   }
   if (!Number.isInteger(tokenVersion) || tokenVersion <= 0) {
-    throw new ContractValidationError("Hosted device-sync tokenVersion must be a positive integer.");
+    throw new TypeError("Hosted device-sync tokenVersion must be a positive integer.");
   }
 
   return {
@@ -255,7 +254,7 @@ export async function readHostedRuntimeConnectionSecretMaterial(input: {
     requireHostedRuntimeTokenVersion(record.tokenVersion);
     const accessTokenEncrypted = normalizeNullableString(record.accessTokenEncrypted);
     if (!accessTokenEncrypted) {
-      throw new ContractValidationError("Hosted device-sync runtime OAuth credential is missing its access token.");
+      throw new TypeError("Hosted device-sync runtime OAuth credential is missing its access token.");
     }
     tokenEntries.push({
       connectionId: record.id,
@@ -556,7 +555,7 @@ function normalizeHostedDeviceSyncSecretTestCodec(
 
 function requireHostedRuntimeTokenVersion(value: number | null): number {
   if (!Number.isInteger(value) || (value ?? 0) <= 0) {
-    throw new ContractValidationError("Hosted device-sync tokenVersion must be a positive integer.");
+    throw new TypeError("Hosted device-sync tokenVersion must be a positive integer.");
   }
   return value as number;
 }
@@ -566,7 +565,7 @@ function requireHostedRuntimeTokenPlaintext(
   label: string,
 ): string {
   if (value === null || value === undefined || value.length === 0) {
-    throw new ContractValidationError(`Hosted device-sync runtime OAuth credential is missing its ${label}.`);
+    throw new TypeError(`Hosted device-sync runtime OAuth credential is missing its ${label}.`);
   }
   return value;
 }

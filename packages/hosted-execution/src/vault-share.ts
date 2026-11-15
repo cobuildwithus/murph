@@ -1458,7 +1458,7 @@ function parseHostedVaultShareDeliveryRecordData(
       return parseHostedVaultShareWorkoutsDayData(value, context);
   }
 
-  throw new ContractValidationError(
+  throw new TypeError(
     `Vault share ${context.projectionKind} data parser is not implemented.`,
   );
 }
@@ -2524,7 +2524,7 @@ export function parseHostedVaultShareDeliverRequest(
     let calendarClosedThroughDate: string | undefined;
     for (const record of parsedRecords) {
       if (!("workouts" in record.data)) {
-        throw new ContractValidationError("Vault share workouts record data is invalid.");
+        throw new TypeError("Vault share workouts record data is invalid.");
       }
       if (
         calendarClosedThroughDate !== undefined

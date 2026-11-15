@@ -934,7 +934,7 @@ function normalizeLegacyInboxCaptureSnapshot(
   const storedAt = requireStringField(envelope, "storedAt", context);
 
   if (requireStringField(envelope, "captureId", context) !== captureId) {
-    throw new ContractValidationError(`Stored inbox envelope at ${relativePath} must use the deterministic captureId.`);
+    throw new TypeError(`Stored inbox envelope at ${relativePath} must use the deterministic captureId.`);
   }
 
   const storedRecord = expectRecord(envelope.stored, `${context}.stored`);
@@ -947,25 +947,25 @@ function normalizeLegacyInboxCaptureSnapshot(
   }
 
   if (requireStringField(storedRecord, "captureId", `${context}.stored`) !== captureId) {
-    throw new ContractValidationError(`Stored inbox envelope at ${relativePath} has a mismatched stored.captureId.`);
+    throw new TypeError(`Stored inbox envelope at ${relativePath} has a mismatched stored.captureId.`);
   }
 
   if (requireStringField(storedRecord, "eventId", `${context}.stored`) !== eventId) {
-    throw new ContractValidationError(`Stored inbox envelope at ${relativePath} has a mismatched stored.eventId.`);
+    throw new TypeError(`Stored inbox envelope at ${relativePath} has a mismatched stored.eventId.`);
   }
 
   if (requireStringField(storedRecord, "storedAt", `${context}.stored`) !== storedAt) {
-    throw new ContractValidationError(`Stored inbox envelope at ${relativePath} has a mismatched stored.storedAt.`);
+    throw new TypeError(`Stored inbox envelope at ${relativePath} has a mismatched stored.storedAt.`);
   }
 
   const expectedSourceDirectory = buildInboxCaptureDirectory(inbound, captureId);
   if (sourceDirectory !== expectedSourceDirectory) {
-    throw new ContractValidationError(`Stored inbox envelope at ${relativePath} has a mismatched stored.sourceDirectory.`);
+    throw new TypeError(`Stored inbox envelope at ${relativePath} has a mismatched stored.sourceDirectory.`);
   }
 
   const expectedEnvelopePath = buildInboxEnvelopePath(inbound, captureId);
   if (envelopePath !== expectedEnvelopePath) {
-    throw new ContractValidationError(`Stored inbox envelope at ${relativePath} has a mismatched stored.envelopePath.`);
+    throw new TypeError(`Stored inbox envelope at ${relativePath} has a mismatched stored.envelopePath.`);
   }
 
   const attachments = normalizeStoredAttachments(
@@ -976,7 +976,7 @@ function normalizeLegacyInboxCaptureSnapshot(
     const expectedAttachmentId = buildAttachmentId(captureId, attachment.ordinal);
 
     if (attachment.attachmentId !== expectedAttachmentId) {
-      throw new ContractValidationError(
+      throw new TypeError(
         `Stored inbox envelope at ${relativePath} has a mismatched attachmentId for ordinal ${attachment.ordinal}.`,
       );
     }
@@ -1355,14 +1355,14 @@ async function readInboxCaptureRecordText(input: {
     return projection;
   }
   if (projection === null || projection.length !== INBOX_CAPTURE_TEXT_MAX_LENGTH) {
-    throw new ContractValidationError(
+    throw new TypeError(
       `Inbox capture text content requires an ${INBOX_CAPTURE_TEXT_MAX_LENGTH}-character inline projection.`,
     );
   }
 
   const expectedPath = path.posix.join(input.record.sourceDirectory, "text.txt");
   if (input.record.textContent.storedPath !== expectedPath) {
-    throw new ContractValidationError("Inbox capture text content path does not match its source directory.");
+    throw new TypeError("Inbox capture text content path does not match its source directory.");
   }
   const bytes = await readFile(
     await resolveVaultPath(input.vaultRoot, input.record.textContent.storedPath),

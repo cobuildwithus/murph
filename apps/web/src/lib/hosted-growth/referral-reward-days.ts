@@ -1,4 +1,3 @@
-import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type {
   HostedUsageReferralPolicyCode,
 } from "@murphai/hosted-execution/runtime-control";
@@ -64,7 +63,7 @@ function assertSupportedUsageDayBasis(input: {
     );
 
   if (!isSignupBasis && !isConversationalBasis) {
-    throw new ContractValidationError("Unsupported referral reward usage-day basis.");
+    throw new TypeError("Unsupported referral reward usage-day basis.");
   }
 }
 

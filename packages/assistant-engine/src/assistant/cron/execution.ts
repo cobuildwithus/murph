@@ -1,4 +1,3 @@
-import { ContractValidationError } from '@murphai/contracts/validation-error';
 import { randomUUID } from 'node:crypto'
 import {
   parseAutomationSupportSeriesTag,
@@ -1882,7 +1881,7 @@ function resolveAssistantCronOutboxPlannedOccurrenceAt(input: {
     Date.parse(input.occurrenceAt) + input.job.source.plannedOccurrenceOffsetMs,
   )
   if (Number.isNaN(plannedOccurrenceAt.getTime())) {
-    throw new ContractValidationError('Automation planned occurrence is outside the supported date range.')
+    throw new TypeError('Automation planned occurrence is outside the supported date range.')
   }
   return plannedOccurrenceAt.toISOString()
 }

@@ -77,7 +77,7 @@ export async function recordHostedRuntimeOrphan(input: { prisma: PrismaClient; u
     const prefix = await hostedBrowserVaultReplicaUserPrefix({ userId: input.userId });
     if (!resource.objectKey.startsWith(prefix) || resource.objectKey.slice(prefix.length).includes("/")) throw new ContractValidationError("Replica orphan namespace mismatch.");
     candidates = [{ kind: "replica", resourceId: resource.objectKey, objectKey: resource.objectKey, snapshotRef: Prisma.DbNull }];
-  } else throw new TypeError("Media retirement has its own metadata owner.");
+  } else throw new ContractValidationError("Media retirement has its own metadata owner.");
   await input.prisma.$transaction(async tx => {
     await lockHostedMemberRow(tx, input.userId);
     await lockHostedRuntimeOwnerRowTx(tx, input.userId);

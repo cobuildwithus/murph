@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   HOSTED_EXECUTION_NONCE_HEADER,
   HOSTED_EXECUTION_SIGNATURE_HEADER,
@@ -80,7 +81,7 @@ export async function fetchHostedExecutionWebControlPlaneResponse(input: {
   // Runtime authority is derived from bound headers, never adopted from a
   // caller-supplied search string that the Worker is about to sign.
   if (readHostedExecutionRuntimeAuthority(targetUrl, new Headers()) !== null) {
-    throw new TypeError("Runtime authority must be derived before callback signing.");
+    throw new ContractValidationError("Runtime authority must be derived before callback signing.");
   }
   const headers = createHostedWebControlForwardHeaders(input.headers);
   if (input.boundUserId !== null) headers.set(HOSTED_EXECUTION_USER_ID_HEADER, input.boundUserId);
