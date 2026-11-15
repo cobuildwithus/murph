@@ -8,6 +8,7 @@ import { readGame } from "./service";
 import { readRecapMedia } from "./recap-media";
 import { pairGamesWhere } from "./recap-inputs";
 import { inspectMp3Frames } from "@murphai/operator-config/generated-audio";
+import { parseGameRecapEventId } from "@murphai/hosted-execution/runtime-control";
 
 /** Current roster, blocks, reports and exact source keys; a photo may come from
  * any of the pair's settled games. Used at admission, publication and delivery;
@@ -78,4 +79,17 @@ export async function readAuthorizedRecapAsset(input: { gameId: string; generati
 export async function isRecapVideoCurrent(input: { gameId: string; generationId: string; hash: string }): Promise<boolean> {
   const video = (await readVisibleRecapGeneration(input.gameId, input.generationId))?.envelope.video;
   return video?.hash === input.hash && await recapReferencesCurrent(getPrisma(), input.gameId, [video]);
+}
+
+/** The runtime's question before it uploads a recap message's video and before each send that carries it:
+ * may this accepted video still go to the recap's chat? Null when the request is not about one. The game is
+ * the delivery key's own, so a runtime can only ask about the recap it is sending. */
+export async function readRecapVideoDeliveryCurrent(idempotencyKey: string | null, value: unknown): Promise<boolean | null> {
+  if (value === undefined || value === null) return null;
+  const recap = idempotencyKey ? parseGameRecapEventId(idempotencyKey) : null;
+  const identity = typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  const { generationId, hash } = identity;
+  if (!recap || typeof generationId !== "string" || !/^[a-f0-9]{32}$/u.test(generationId)
+    || typeof hash !== "string" || !/^[a-f0-9]{64}$/u.test(hash)) return false;
+  return isRecapVideoCurrent({ gameId: recap.gameId, generationId, hash });
 }

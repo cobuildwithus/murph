@@ -718,6 +718,8 @@ export async function sendLinqMessage(
     media?: readonly AssistantResponseMedia[] | null
     message: string
     nativeReplyRequested?: true
+    /** Attachments already uploaded to Linq for this message (a recap's video). They go after the text, which stays. */
+    preparedAttachmentIds?: readonly string[] | null
     replyToMessageId?: string | null
     target: string
     targetKind?: AssistantDeliveryCandidate['kind']
@@ -870,13 +872,14 @@ export async function sendLinqMessage(
   const message = responseMedia.some((item) => item.kind === 'vault_file')
     ? ''
     : input.message
+  const preparedAttachmentIds = preparedLinqAttachmentIds(input.preparedAttachmentIds, card)
   assertLinqMessagePartsWithinLimits({
     message,
     operation: participantFromPhoneNumber ? 'create_chat' : 'send_message',
     requestAttachmentMediaPartCount: responseMedia.filter((item) =>
       item.kind === 'vault_image' || item.kind === 'vault_file'
-    ).length,
-    requestMediaPartCount: responseMedia.length,
+    ).length + preparedAttachmentIds.length,
+    requestMediaPartCount: responseMedia.length + preparedAttachmentIds.length,
     requestPublicUrlMediaPartCount:
       responseMedia.filter((item) => item.kind === 'image').length,
   })
@@ -902,10 +905,10 @@ export async function sendLinqMessage(
     })
   }
 
-  const media = await prepareLinqMessageMedia(
-    responseMedia,
-    dependencies,
-  )
+  const media = [
+    ...await prepareLinqMessageMedia(responseMedia, dependencies),
+    ...preparedAttachmentIds.map(attachmentId => ({ attachmentId })),
+  ]
 
   if (participantFromPhoneNumber) {
     const created = await createLinqChat(
@@ -970,6 +973,11 @@ export async function sendLinqMessage(
     providerThreadId: null,
     target,
   }
+}
+
+/** Attachments uploaded for this message ahead of the send. A card carries none. */
+function preparedLinqAttachmentIds(ids: readonly string[] | null | undefined, card: AssistantResponseCard | null): readonly string[] {
+  return card === null && ids ? ids : []
 }
 
 function providerRequestWasSkipped(error: unknown): boolean {

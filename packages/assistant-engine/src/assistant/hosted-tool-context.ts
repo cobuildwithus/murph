@@ -226,7 +226,8 @@ export interface AssistantHostedToolContext {
   readGameLore?(): Promise<string>
   replaceGameLore?(content: string): Promise<void>
   appendGameRecapChatLine?(chatLine: string): Promise<void>
-  recordSavedGameRecapChatLine?(chatLine: string): void
+  /** The accepted recap's line, and the accepted video with the host-owned file when this host holds its bytes. */
+  recordSavedGameRecapChatLine?(chatLine: string, video?: AssistantSavedGameRecapVideo): void
   currentProductFeedbackAcceptedInputIds?(): readonly string[]
   readonly computerToolsAvailable: boolean
   readonly pendingVaultFilesAvailable?: boolean
@@ -237,6 +238,8 @@ export interface AssistantHostedToolContext {
     retireExportPackIds?: readonly string[],
   ): Promise<AssistantHostedVaultFileSendResult>
 }
+
+export type AssistantSavedGameRecapVideo = { generationId: string; hash: string; byteLength: number; file?: string }
 
 type AssistantHostedToolDeliveryContext = {
   messageInput: AssistantMessageInput
@@ -267,7 +270,7 @@ export function createAssistantHostedToolContext(input: {
     >,
   ) => void
   recordGroupEmailPendingDeliveryIntentId?: (intentId: string) => void
-  recordSavedGameRecapChatLine?: (chatLine: string) => void
+  recordSavedGameRecapChatLine?: (chatLine: string, video?: AssistantSavedGameRecapVideo) => void
   verifyGeneratedImageDelivery?: (input: {
     contentType: AssistantVaultImageResponseMedia['contentType']
     imageRef: string

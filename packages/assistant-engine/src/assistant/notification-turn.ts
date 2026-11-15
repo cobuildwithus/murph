@@ -97,7 +97,7 @@ import {
 import {
   emitHostedAssistantContextSessionResolvedTrace,
 } from './hosted-context-diagnostics.js'
-import { createAssistantHostedToolContext } from './hosted-tool-context.js'
+import { createAssistantHostedToolContext, type AssistantSavedGameRecapVideo } from './hosted-tool-context.js'
 import {
   assistantDeliveryOutcomeSupersedesTypingIndicator,
   startAssistantChannelTypingIndicator,
@@ -450,6 +450,7 @@ export async function sendAssistantNotificationLocal(
       )
       const route = resolveAssistantTurnRoute(messageInput, defaults, resolved)
       let savedGameRecapChatLine: string | null = null
+      let savedGameRecapVideo: AssistantSavedGameRecapVideo | undefined
       const gameRecapTurn = hostedExecutionContext?.gameRecapScope != null
       const groupMissedTurn = responsePolicy.kind === 'game_group_missed_check_in'
       const textOnlyGameTurn = textOnlyGameNotification(gameRecapTurn, responsePolicy)
@@ -479,8 +480,9 @@ export async function sendAssistantNotificationLocal(
             },
             ...buildAssistantGameRecapToolContextFields({
               enabled: gameRecapTurn,
-              recordSavedChatLine: (chatLine) => {
+              recordSavedChatLine: (chatLine, video) => {
                 savedGameRecapChatLine = chatLine
+                savedGameRecapVideo = video
               },
             }),
             route,
@@ -766,6 +768,7 @@ export async function sendAssistantNotificationLocal(
             card: textOnlyGameTurn ? null : providerResult.responseCard ?? null,
             media: textOnlyGameTurn ? [] : responseMedia,
             message: responseText,
+            recapVideo: savedGameRecapVideo,
             session: savedSession,
             sharedPlan,
             turnId,
@@ -828,6 +831,7 @@ export async function sendAssistantNotificationLocal(
           card: textOnlyGameTurn ? null : providerResult.responseCard ?? null,
           media: textOnlyGameTurn ? [] : responseMedia,
           message: responseText,
+          recapVideo: savedGameRecapVideo,
           session: providerResult.session,
           sharedPlan,
           turnId,
@@ -1078,9 +1082,9 @@ function resolveAssistantNotificationHostedExecutionContext(
 
 function buildAssistantGameRecapToolContextFields(input: {
   enabled: boolean
-  recordSavedChatLine(chatLine: string): void
+  recordSavedChatLine(chatLine: string, video?: AssistantSavedGameRecapVideo): void
 }): {
-  recordSavedGameRecapChatLine?: (chatLine: string) => void
+  recordSavedGameRecapChatLine?: (chatLine: string, video?: AssistantSavedGameRecapVideo) => void
 } {
   if (!input.enabled) return {}
   return {
@@ -1130,6 +1134,7 @@ async function sendAssistantExactTextNotificationLocal(input: {
   input: AssistantNotificationInput
   messageInput: AssistantMessageInput
   privateCompletionContinuitySessionId: string | null
+  recapVideo?: AssistantSavedGameRecapVideo
   responseText: string
   session: AssistantSession
   sharedPlan: Awaited<ReturnType<typeof resolveAssistantTurnSharedPlan>>
@@ -1186,6 +1191,7 @@ async function sendAssistantExactTextNotificationLocal(input: {
       deferPrivateCompletionContinuity
         ? input.privateCompletionContinuitySessionId
         : undefined,
+    recapVideo: input.recapVideo,
     session: input.session,
     sharedPlan: input.sharedPlan,
     turnId,
@@ -1671,6 +1677,7 @@ async function deliverAssistantNotificationMessage(input: {
   media?: readonly AssistantResponseMedia[] | null
   message: string
   privateCompletionContinuitySessionId?: string | null
+  recapVideo?: AssistantSavedGameRecapVideo
   session: AssistantSession
   sharedPlan: Awaited<ReturnType<typeof resolveAssistantTurnSharedPlan>>
   turnId: string
@@ -1735,6 +1742,7 @@ async function deliverAssistantNotificationMessage(input: {
     ...deliveryFields,
     card: input.card ?? null,
     media,
+    recapVideo: input.recapVideo,
     ...(input.privateCompletionContinuitySessionId === undefined
       ? {}
       : {
@@ -2285,31 +2293,37 @@ function assertVerifiedNotificationAudience(scope: ReturnType<typeof resolveAssi
     'ASSISTANT_AUDIENCE_UNVERIFIED', 'Notification audience could not be verified as direct or group.')
 }
 
-async function completePreparedRecapNotification(prepared: { kind: 'retired' } | { kind: 'recovered'; text: string },
+async function completePreparedRecapNotification(prepared: { kind: 'retired' } | { kind: 'recovered'; text: string; video?: AssistantSavedGameRecapVideo },
   input: Omit<Parameters<typeof sendAssistantExactTextNotificationLocal>[0], 'responseText' | 'session' | 'privateCompletionContinuitySessionId'> & {
     resolved: { session: AssistantSession; privateCompletionContinuitySessionId?: string | null }
   }): Promise<AssistantNotificationResult> {
   if (prepared.kind === 'retired') return {
     decision: { kind: 'skip', privateSummary: 'Recap generation retired.' },
     deliveryOutcome: null, response: null, session: input.resolved.session }
-  return sendAssistantExactTextNotificationLocal({ ...input, responseText: prepared.text,
+  return sendAssistantExactTextNotificationLocal({ ...input, responseText: prepared.text, recapVideo: prepared.video,
     session: input.resolved.session, privateCompletionContinuitySessionId: input.resolved.privateCompletionContinuitySessionId ?? null })
 }
 
 async function prepareRecapNotification(hosted: AssistantHostedExecutionContext | null | undefined,
   context: ReturnType<typeof createAssistantHostedToolContext> | null,
-  failed = false): Promise<{ kind: 'continue' } | { kind: 'retired' } | { kind: 'recovered'; text: string }> {
+  failed = false): Promise<{ kind: 'continue' } | { kind: 'retired' } | { kind: 'recovered'; text: string; video?: AssistantSavedGameRecapVideo }> {
   const scope = hosted?.gameRecapScope
   if (!scope?.show || !hosted?.groupTool) return { kind: 'continue' }
   const origin = { kind: 'game_recap' as const, gameId: scope.gameId, eventId: scope.eventId }
-  const recovered = await hosted.groupTool.request({ action: 'read_game', origin, recapRead: { kind: 'recover', ...(failed ? { failed: true } : {}) } })
+  // A wake that asked for a video asks which one Web accepted, so a retried turn can still send it.
+  const recovered = await hosted.groupTool.request({ action: 'read_game', origin, recapRead: { kind: 'recover', ...(failed ? { failed: true } : {}), ...(scope.video ? { video: true } : {}) } })
   if (recovered.result.status !== 'ok') {
     if ('error' in recovered.result && recovered.result.error === 'recap_generation_retired') return { kind: 'retired' }
     throw new Error('Recap completion is unavailable.')
   }
   if ('chatLine' in recovered.result && recovered.result.chatLine) {
-    await recordAcceptedRecap({ context, origin: scope }, recovered.result, true)
-    return { kind: 'recovered', text: recovered.result.chatLine }
+    let video: AssistantSavedGameRecapVideo | undefined
+    const recording = context ? { ...context, recordSavedGameRecapChatLine: (_line: string, accepted?: AssistantSavedGameRecapVideo) => {
+      video = accepted
+      context.recordSavedGameRecapChatLine?.(_line, accepted)
+    } } : null
+    await recordAcceptedRecap({ context: recording, origin: scope }, recovered.result, true)
+    return { kind: 'recovered', text: recovered.result.chatLine, ...(video ? { video } : {}) }
   }
   return { kind: 'continue' }
 }

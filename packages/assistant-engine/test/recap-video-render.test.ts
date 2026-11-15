@@ -5,7 +5,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { RecapAsset } from '@murphai/contracts/recap-show'
 import type { RecapVideoChildRequest } from '@murphai/recap-video'
-import { recapVideoParts, recapVideoScratchRoot, renderRecapShowVideo } from '../src/assistant/recap-video-render.js'
+import { handOverRecapVideo, recapVideoParts, recapVideoScratchRoot, renderRecapShowVideo } from '../src/assistant/recap-video-render.js'
 
 const roots: string[] = []
 let scratchRoot = ''
@@ -213,6 +213,35 @@ describe('recap video render step', () => {
     await expect(access(stale)).rejects.toThrow()
     await expect(access(fresh)).resolves.toBeUndefined()
     if (rendered.kind === 'rendered') await rendered.dispose()
+  })
+
+  it('hands the outbox only the bytes Web accepted, where a retried turn on this runner finds them again', async () => {
+    const home = path.join(process.cwd(), `.recap-video-home-${process.pid}`)
+    roots.push(home)
+    const previous = process.env.HOSTED_HOME
+    process.env.HOSTED_HOME = home
+    try {
+      const root = recapVideoScratchRoot()!
+      const candidateDirectory = path.join(root, 'render-candidate')
+      const { mkdir } = await import('node:fs/promises')
+      await mkdir(candidateDirectory, { recursive: true })
+      const file = path.join(candidateDirectory, 'recap.mp4')
+      await writeFile(file, Buffer.alloc(10, 1))
+      const identity = { generationId: 'c'.repeat(32), hash: 'f'.repeat(64), byteLength: 10 }
+      const draft = { hash: identity.hash, byteLength: 10, referenceIds: [], parts: [{ storageKey: `recap/${identity.generationId}/${'f'.repeat(64)}.mp4`, hash: 'f'.repeat(64), byteLength: 10 }] }
+      // Web accepted an earlier render, not this one: nothing is handed over and the candidate stays where it is.
+      expect(await handOverRecapVideo({ ...identity, hash: 'e'.repeat(64) }, { draft, file })).toBeUndefined()
+      expect(await handOverRecapVideo({ ...identity, generationId: 'd'.repeat(32) }, { draft, file })).toBeUndefined()
+      await expect(access(file)).resolves.toBeUndefined()
+      const handed = await handOverRecapVideo(identity, { draft, file })
+      expect(handed).toEqual({ ...identity, file: path.join(root, `accepted-${identity.generationId}-${identity.hash}.mp4`) })
+      await expect(access(file)).rejects.toThrow()
+      // A recovery in a retried turn has no candidate and finds the same file.
+      expect(await handOverRecapVideo(identity, null)).toEqual(handed)
+      expect(await handOverRecapVideo(null, null)).toBeUndefined()
+    } finally {
+      if (previous === undefined) delete process.env.HOSTED_HOME; else process.env.HOSTED_HOME = previous
+    }
   })
 
   it('cuts the file into the parts it is stored in, in order', () => {

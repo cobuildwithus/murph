@@ -655,6 +655,8 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
               threadIsDirect,
             }),
             ...(mediaInput ? { media: mediaInput } : {}),
+            // Only the hosted sender can prepare a recap attachment; a local send is the line alone.
+            recapVideo: dependencies.linqRecapVideo,
           })
         : await sendLinqMessage(request, {
             ...(request.persistAppCardTextFallback

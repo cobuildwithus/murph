@@ -5909,7 +5909,8 @@ sung chunk from that draft. One song asset serves the full score and a
 frame-aligned song slice; the native contract owns their clocks. The host uploads selected bytes and Web publishes
 through the canonical transaction, retaining the current source authorization,
 asset retirement and replay owners. One accepted story owns one chat line plus
-link with no chat media. Groups retain their existing writer rules and payload.
+link, and with an accepted recap video that video beside the line (below).
+Groups retain their existing writer rules and payload.
 Runner-to-Web requests share one cap equal to Vercel’s request ceiling.
 The cover capability serves a no-store 1200x630 JPEG crop for link previews;
 the accepted portrait remains unchanged in the show.
@@ -6002,7 +6003,28 @@ the write as a candidate. Every refusal, timeout, crash, oversized file, part
 Web refuses (`recap_video_unavailable` while the flag is off) or failed upload is
 "no video": the write is then byte-for-byte today's, and the candidate and the
 temporary directory are removed whatever the write returns. Web's first
-acceptance decides the stored video; this step does not send one.
+acceptance decides the stored video.
+
+Delivery. When the write or a recovery names the accepted video and this
+runner holds exactly those bytes (hash, length and generation), the file moves
+to `accepted-<generation>-<hash>.mp4` beside the renders and the turn queues
+the line and link with `recapVideo` (the identity and that path) on the outbox
+intent; otherwise the intent has none and the recap goes as today. Only a
+text-only Linq intent carries it, and a replayed create keeps the stored
+intent and its decision. The outbox hands it to the hosted Linq sender, which
+makes one decision before the message's first request and saves it with the
+outbox's ownership-checked compare-and-set: Web's authority-only egress check
+says the video may still go (`recapVideoCurrent`, `isRecapVideoCurrent` for
+the delivery key's own game, read before the claim's transaction), the file is
+the accepted bytes, and Linq takes it as an attachment (an authority-only
+provider boundary, no dispatch fence), saved as `form: "attachment"` with its
+id; any failure saves `form: "line"`. The file is removed once a decision is
+saved. Every send then asks Web again: while allowed, the saved attachment
+rides the first send after the line's text and the link goes alone as today;
+once not, the decision moves to the line alone for good. A decision only ever
+moves toward the line alone. A restarted runner has no file and sends the line
+and link. The message keys are unchanged, so the video can be sent at most
+once with its message; a regeneration is a new message with its own video.
 Accepted media uses private generation URLs; a thirty-day opaque cover capability
 exposes only a composed cover. Failed scenes retain their text, failed songs are
 omitted, and exhausted generation uses a validated three-page plain fallback.

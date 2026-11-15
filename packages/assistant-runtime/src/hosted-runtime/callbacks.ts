@@ -137,6 +137,8 @@ import {
   buildHostedTelegramChannelEnv,
   buildHostedTelegramVoiceMemoChannelEnv,
 } from "./channel-activity.ts";
+import { uploadLinqAttachment } from "@murphai/operator-config/linq-runtime";
+import { resolveHostedRecapVideoAttachment } from "./recap-video-attachment.ts";
 import {
   looksLikeHostedProviderRedactedLinqTarget,
   sendHostedProviderLinqMessage,
@@ -5189,6 +5191,15 @@ function createHostedAssistantLinqSendDependency(input: {
       operation: "Hosted assistant Linq capability lookup",
       providerFetch: input.providerFetch,
     });
+    // A recap's accepted video: decided and saved before this message's first request.
+    const recapAttachmentIds = await prepareHostedLinqRecapVideoAttachment({
+      request, mediaCount: media.length, signal,
+      check: (recapVideo) => assertHostedAssistantLinqRecentInboundEngagementForDelivery({
+        ...readResolvedEngagementInput(), authorityCheckOnly: true, idempotencyKey, recapVideo,
+      }),
+      assertCanEnter: () => assertHostedDeliveryCanEnterProvider(input),
+      linqEnv: input.linqEnv, providerFetch: input.providerFetch, publicInternetFetch: input.publicInternetFetch,
+    });
     const fallbackIdempotencyKey = idempotencyKey
       ? `${idempotencyKey}:fallback`
       : null;
@@ -5235,6 +5246,8 @@ function createHostedAssistantLinqSendDependency(input: {
         media: request.media ?? null,
         message: request.message,
         ...(request.nativeReplyRequested === true ? { nativeReplyRequested: true } : {}),
+        // Exactly today's request unless a recap video goes with it.
+        ...preparedLinqAttachmentField(recapAttachmentIds),
         replyToMessageId: request.replyToMessageId ?? null,
         target: providerTarget,
         targetKind: providerTargetKind,
@@ -6366,6 +6379,52 @@ function readTrustedHostedAssistantLinqDeliveryFailureReason(
   return message ? message.slice(0, 500) : null;
 }
 
+function preparedLinqAttachmentField(ids: string[]): { preparedAttachmentIds?: string[] } {
+  return ids.length > 0 ? { preparedAttachmentIds: ids } : {};
+}
+
+/**
+ * The prepared attachment ids a recap message's first send carries: none, or its accepted video's.
+ * Web is asked before the upload and before every send; the upload goes through an authority-only
+ * provider boundary, so it claims no dispatch fence of its own.
+ */
+async function prepareHostedLinqRecapVideoAttachment(input: {
+  request: { recapVideo?: Parameters<typeof resolveHostedRecapVideoAttachment>[0]["recapVideo"]; card?: unknown };
+  mediaCount: number;
+  check(recapVideo?: { generationId: string; hash: string }): Promise<HostedRuntimeLinqRecentInboundEngagementResult>;
+  assertCanEnter(): Promise<void>;
+  linqEnv: NodeJS.ProcessEnv;
+  providerFetch: Parameters<typeof createHostedProviderFetchBoundary>[0]["providerFetch"];
+  publicInternetFetch?: typeof fetch | null;
+  signal: AbortSignal | null;
+}): Promise<string[]> {
+  // A recap is a text-only message; anything else is sent exactly as before.
+  if (!input.request.recapVideo || input.request.card != null || input.mediaCount > 0) return [];
+  const attachmentId = await resolveHostedRecapVideoAttachment({
+    recapVideo: input.request.recapVideo,
+    isCurrent: async ({ generationId, hash }) => (await input.check({ generationId, hash })).recapVideoCurrent === true,
+    upload: async (bytes) => (await uploadLinqAttachment({ bytes, contentType: "video/mp4", filename: "recap.mp4" }, {
+      env: input.linqEnv,
+      fetchImplementation: createHostedProviderFetchBoundary({
+        assertProviderEntryLive: async () => {
+          try {
+            await input.assertCanEnter();
+            await input.check();
+          } catch (error) {
+            throw markHostedDeliveryPreProvider(error);
+          }
+        },
+        operation: "Hosted recap video attachment",
+        providerFetch: input.providerFetch,
+      }),
+      ...(input.publicInternetFetch ? { publicFetchImplementation: input.publicInternetFetch } : {}),
+      ...(input.signal ? { signal: input.signal } : {}),
+    })).attachmentId,
+    signal: input.signal,
+  });
+  return attachmentId ? [attachmentId] : [];
+}
+
 async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input: {
   answeredMailboxItemIds?: readonly string[] | null;
   assistantAskCompletionExpiresAt?: string;
@@ -6380,6 +6439,7 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
   idempotencyKey: string | null;
   intentId: string | null;
   providerDispatchRetrySafe?: boolean;
+  recapVideo?: { generationId: string; hash: string };
   replyToMessageId: string | null;
   signal: AbortSignal | null;
   target: string;
@@ -6419,6 +6479,7 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
       homeRouteFallbackAllowed: input.homeRouteFallbackAllowed,
       idempotencyKey: input.idempotencyKey,
       intentId: input.intentId,
+      recapVideo: input.recapVideo,
       replyToMessageId: input.replyToMessageId,
       target: input.target,
       targetKind,

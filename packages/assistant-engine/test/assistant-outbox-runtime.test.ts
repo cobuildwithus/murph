@@ -3695,13 +3695,13 @@ describe('assistant outbox runtime', () => {
   })
 
   describe('a stored intent that carries a recap video', () => {
-    // The identity Web accepted, and beside it whatever a later delivery owner records.
+    // The identity Web accepted, and beside it the one decision the Linq sender saved.
     const recapVideo = {
       generationId: 'a'.repeat(32),
       hash: 'b'.repeat(64),
       byteLength: 5_200_000,
       form: 'attachment',
-      prepared: { attachmentId: 'synthetic-attachment' },
+      attachmentId: 'synthetic-attachment',
     }
     const recapMessage = 'The mat entered evidence.\nWatch the recap: https://recaps.murph.test/recap/synthetic-game'
     const seed = async (prefix: string) => {
@@ -3711,7 +3711,7 @@ describe('assistant outbox runtime', () => {
       return { file, seeded, vaultRoot }
     }
 
-    it('is read, kept across rewrites and sent as its text alone', async () => {
+    it('is read, kept across rewrites and handed to the Linq sender beside the unchanged message', async () => {
       const { file, seeded, vaultRoot } = await seed('assistant-outbox-recap-video-')
       // Nothing writes the field: an intent made today has none, and is stored as before.
       expect(seeded).not.toHaveProperty('recapVideo')
@@ -3730,11 +3730,13 @@ describe('assistant outbox runtime', () => {
       })
       const sent = await dispatchAssistantOutboxIntent({ force: true, intentId: seeded.intentId, vault: vaultRoot })
       expect(sent.intent.status).toBe('sent')
-      // The sender is handed the same request as for an intent without the field.
+      // The message and its media are as for an intent without the field; only the Linq sender's
+      // dependencies carry the saved decision, which it replays.
       const delivered = mockedDeliverAssistantMessageOverBinding.mock.lastCall?.[0]
       expect(delivered).toMatchObject({ message: recapMessage })
       expect(delivered?.media ?? []).toEqual([])
       expect(JSON.stringify(delivered)).not.toMatch(/recapVideo|synthetic-attachment/u)
+      expect(mockedDeliverAssistantMessageOverBinding.mock.lastCall?.[1]?.linqRecapVideo?.video).toEqual(recapVideo)
       // The ownership-checked rewrite to "sent" kept the field whole.
       await expect(readAssistantOutboxIntent(vaultRoot, seeded.intentId)).resolves.toMatchObject({ status: 'sent', recapVideo })
       expect(JSON.parse(await readFile(file, 'utf8')).recapVideo).toEqual(recapVideo)

@@ -99,6 +99,7 @@ import {
   assistantOutboxIntentMatchesDispatchOwner,
   persistAssistantOutboxIntentDeliveryPendingConfirmation,
   persistAssistantOutboxIntentLinqAppCardTextFallback,
+  persistAssistantOutboxIntentRecapVideo,
   preserveAssistantOutboxAcceptedMediaDeliveryOrder,
   resetAssistantOutboxPreparedDispatch,
   rescheduleAssistantOutboxConfirmationRetry,
@@ -316,6 +317,8 @@ export type AssistantOutboxCreateIntentInput = {
   media?: readonly AssistantResponseMedia[] | null
   message: string
   nativeReplyRequested?: AssistantOutboxIntent['nativeReplyRequested']
+  /** The accepted recap video and its host-owned file, for a recap's line and link. */
+  recapVideo?: AssistantOutboxIntent['recapVideo'] | null
   groupEmailAuthorizationProof?: string | null
   operation?: AssistantOutboxOperation | null
   privateCompletionContinuitySessionId?: string | null
@@ -565,6 +568,7 @@ export async function createAssistantOutboxIntent(
       deliveryTransportIdempotent,
       groupEmailAuthorizationProof: input.groupEmailAuthorizationProof ?? null,
       answeredMailboxItemIds,
+      ...recapVideoIntentField({ channel: persistedTarget.channel, card, media, operation, recapVideo: input.recapVideo }),
       reviewedAssistantAskCompletionExpiresAt:
         input.reviewedAssistantAskCompletionExpiresAt ?? undefined,
       ...(input.privateCompletionContinuitySessionId === undefined
@@ -1239,7 +1243,17 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
     preparedDispatchReserved = input.dispatchHooks?.prepareDispatchIntent !== undefined
 
     const dispatchDependencies = withAssistantOutboxSignal(
-      input.dependencies,
+      withAssistantOutboxRecapVideo(input.dependencies, dispatchIntent.recapVideo, async (next) => {
+        const persisted = await persistAssistantOutboxIntentRecapVideo({
+          intentPath: dispatchIntentPath,
+          next,
+          persistedAt: new Date(),
+          sending: effectiveDispatchIntent,
+          vault: input.vault,
+        })
+        effectiveDispatchIntent = persisted
+        dispatchFailureOwnerIntent = persisted
+      }),
       input.signal,
     )
     const delivered = await sendAssistantOutboxDispatchIntent({
@@ -1429,6 +1443,25 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       session: null,
     }
   }
+}
+
+/** A recap video rides only a text-only Linq message: its first send is where the video goes. A replayed
+ * create reuses the stored intent and never adds or replaces its video. */
+function recapVideoIntentField(input: {
+  channel: string | null; card: AssistantResponseCard | null; media: readonly AssistantResponseMedia[]
+  operation: AssistantOutboxOperation | null; recapVideo: AssistantOutboxIntent['recapVideo'] | null | undefined
+}): { recapVideo?: NonNullable<AssistantOutboxIntent['recapVideo']> } {
+  const textOnlyLinq = input.channel === 'linq' && input.card === null && input.media.length === 0 && !input.operation
+  return input.recapVideo && textOnlyLinq ? { recapVideo: input.recapVideo } : {}
+}
+
+/** The Linq sender's view of an intent's recap video, and how it saves its one decision. */
+function withAssistantOutboxRecapVideo(
+  dependencies: AssistantChannelDependencies | undefined,
+  video: AssistantOutboxIntent['recapVideo'],
+  persist: NonNullable<AssistantChannelDependencies['linqRecapVideo']>['persist'],
+): AssistantChannelDependencies | undefined {
+  return video ? { ...(dependencies ?? {}), linqRecapVideo: { video, persist } } : dependencies
 }
 
 export function assistantOutboxIntentIntrinsicallyRequiresTerminalConfirmation(intent: AssistantOutboxIntent): boolean {
@@ -1707,6 +1740,7 @@ export async function deliverAssistantOutboxMessage(input: {
   message: string
   nativeReplyRequested?: AssistantOutboxIntent['nativeReplyRequested']
   privateCompletionContinuitySessionId?: string | null
+  recapVideo?: AssistantOutboxIntent['recapVideo'] | null
   subject?: string | null
   replyToMessageId?: string | null
   signal?: AbortSignal
@@ -1746,6 +1780,7 @@ export async function deliverAssistantOutboxMessage(input: {
     identityId: input.identityId,
     media: input.media,
     message: input.message,
+    recapVideo: input.recapVideo,
     ...(input.privateCompletionContinuitySessionId === undefined
       ? {}
       : {

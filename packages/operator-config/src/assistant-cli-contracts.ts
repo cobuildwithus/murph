@@ -700,13 +700,13 @@ export const assistantInputCursorSchema = z
   .strict()
 
 /**
- * A recap video the outbox may attach beside its message: the identity Web
- * accepted for the recap, plus whatever the delivery owner records with it.
- * Only the host writes it; nothing does yet. This release reads it, keeps it
- * across rewrites and sends the text alone. Extra keys pass through and a
- * value that is not one is dropped, so an intent written by a newer release is
- * never quarantined and an optional video never costs the message.
- * The three fields are `recapVideoIdentitySchema`'s, restated here so this
+ * A recap video the outbox may attach to its message's first send: the identity
+ * Web accepted for the recap, the host-owned file the turn handed over (outside
+ * the vault; gone after a restart), and the one decision the sender persists
+ * before its first message request: the line with this prepared attachment, or
+ * the line alone. Only the host writes it. Any other shape is dropped, so the
+ * message is sent as its text alone and an optional video never costs it.
+ * The identity fields are `recapVideoIdentitySchema`'s, restated here so this
  * widely loaded module does not pull in the recap contracts.
  */
 export const assistantOutboxRecapVideoSchema = z
@@ -714,8 +714,16 @@ export const assistantOutboxRecapVideoSchema = z
     generationId: z.string().min(1).max(128),
     hash: z.string().regex(/^[a-f0-9]{64}$/u),
     byteLength: z.number().int().positive().max(8_000_000),
+    file: z.string().min(1).max(1024).optional(),
+    form: z.enum(['attachment', 'line']).optional(),
+    attachmentId: z.string().min(1).max(256).optional(),
   })
-  .passthrough()
+  .strict()
+  .refine(
+    (video) => (video.form === 'attachment') === (video.attachmentId !== undefined),
+    'A recap video attachment names its prepared attachment, and only then.',
+  )
+export type AssistantOutboxRecapVideo = z.infer<typeof assistantOutboxRecapVideoSchema>
 
 export const assistantOutboxIntentSchema = z
   .object({
