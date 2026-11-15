@@ -59,6 +59,10 @@ export function isPairRecapShowEnabled(maxPlayers: number, env: GameEnv = proces
 export function isRecapMediaVisible(env: GameEnv = process.env): boolean {
   return env.MURPH_GAME_RECAP_MEDIA_VISIBLE !== "false";
 }
+/** Producer only: whether a pair show may gain a new video. A stored video stays readable while this is off. */
+export function isPairRecapVideoEnabled(maxPlayers: number, env: GameEnv = process.env): boolean {
+  return isPairRecapShowEnabled(maxPlayers, env) && env.MURPH_GAME_RECAP_VIDEO_ENABLED === "true";
+}
 
 export function pairRecapShowCapability(maxPlayers: number): { show?: true } {
   return isPairRecapShowEnabled(maxPlayers) ? { show: true } : {};

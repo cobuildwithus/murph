@@ -833,7 +833,8 @@ function gameRecapHostedScope(
   }
   return {
     gameRecapScope: { gameId: policy.gameId, eventId: policy.eventId, pairFingerprint: policy.pairFingerprint,
-      ...(policy.loreAccess ? { loreAccess: policy.loreAccess } : {}), ...(policy.show ? { show: true as const } : {}) },
+      ...(policy.loreAccess ? { loreAccess: policy.loreAccess } : {}), ...(policy.show ? { show: true as const } : {}),
+      ...(policy.video ? { video: true as const } : {}) },
     groupTool: groupToolPort,
   };
 }

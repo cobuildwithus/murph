@@ -1042,6 +1042,244 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       await db.gameRecapAsset.deleteMany({ where: { resourceId: { startsWith: `${gameId}|` } } });
     }
   });
+  it("accepts one recap video in parts, serves it under the recap's own rules and retires it with the recap", async () => {
+    const a = await member("PlayerA", "UTC", true), b = await member("PlayerB", "UTC", true), stranger = await member("PlayerC", "UTC", true);
+    const room = await member("Room", "UTC", true), db = getPrisma();
+    const { gameId } = await startGame(a, b);
+    await db.game.update({ where: { id: gameId }, data: { chatContainerMemberId: room } });
+    await devStartNow(gameId, a);
+    await ok(a, await photo(a, gameId, "recap-video-print"));
+    await devSettleNow(gameId, a);
+    const eventId = gameChatLifecycleEventId(gameId, "recap");
+    await markGameChatGenerationQueuedTx(eventId, db, room);
+    const { recordGameRecapWitnessTx } = await import("@/src/lib/game/recap-witness");
+    await db.$transaction(tx => recordGameRecapWitnessTx(tx, gameId, eventId));
+    for (const player of [a, b]) await db.gameProfile.update({ where: { memberId: player }, data: { photoKey: await upload(player, "recap-video-profile") } });
+    const { createHash } = await import("node:crypto");
+    const { readFile } = await import("node:fs/promises");
+    const { recapShowWriterSchema } = await import("@murphai/contracts/recap-show");
+    const { recapGenerationId, uploadRecapMedia, uploadRecapVideoPart } = await import("@/src/lib/game/recap-media");
+    const { selectRecapVideo } = await import("@/src/lib/game/recap-video");
+    const { acceptGameRecap } = await import("@/src/lib/game/service");
+    const { readRecapSourceReferences } = await import("@/src/lib/game/recap-inputs");
+    const { readRecapEnvelope, readAuthorizedRecapAsset, isRecapVideoCurrent } = await import("@/src/lib/game/recap-asset-access");
+    const { readRecapCoverPreview } = await import("@/src/lib/game/recap-preview");
+    const { sealGameMedia } = await import("@/src/lib/game/crypto");
+    const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
+    const recap = recapShowWriterSchema.parse({ treatment: "A silent-film courtroom melodrama", chatLine: "The mat entered evidence.", pages: [{ background: "paper" as const, blocks: [{ kind: "scene" as const,
+      scene: { cast: ["PlayerA", "PlayerB"], prompt: "A synthetic paper courtroom stage with a rolled mat on a witness stand, with warm lighting and simple wooden benches." } }] }] });
+    const scope = { beforeMutationTx: async () => {}, containerMemberId: room, eventId, gameId, playerMemberIds: [a, b] };
+    const generationId = recapGenerationId(eventId);
+    vi.stubEnv("MURPH_GAME_RECAP_SHOW_ENABLED", "true");
+    vi.stubEnv("MURPH_GAME_RECAP_MEDIA_DIR", path.join(mediaDir, "recap"));
+    try {
+      // A complete synthetic MP4, cut in two the way a larger file is cut in up to four.
+      const file = await readFile(new URL("../../../fixtures/recap-video/synthetic.mp4", import.meta.url));
+      const slices = [file.subarray(0, 9_000), file.subarray(9_000)];
+      const readMaterial = async (event = eventId) => (await readGameRecapMaterial(gameId, room, [a, b], event))!;
+      let material = await readMaterial();
+      const stage = (bytes: Uint8Array, index = 0) => uploadRecapVideoPart({ memberId: room, gameId, eventId, material, beforeMutationTx: async () => {},
+        file: { kind: "upload", slot: `video-${index}`, mediaType: "video/mp4", referenceIds: [], bytes: Buffer.from(bytes).toString("base64") } });
+      const receipts = async () => new Map((await db.gameRecapAsset.findMany({ where: { resourceId: { startsWith: `${gameId}|` } } })).map(row => [row.resourceId.split("|")[2]!, row]));
+
+      // The producer flag is off: no poster facts, nothing staged.
+      expect(material.game).not.toHaveProperty("poster");
+      expect(await stage(slices[0]!)).toBeNull();
+      expect((await receipts()).size).toBe(0);
+
+      vi.stubEnv("MURPH_GAME_RECAP_VIDEO_ENABLED", "true");
+      material = await readMaterial();
+      expect(material.game.poster).toEqual({ outcome: { kind: "won", winnerMemberId: a, loserMemberId: b },
+        stake: { kind: "prize", title: "Breakfast in bed", owedByMemberId: b, owedToMemberId: a } });
+      const parts = [(await stage(slices[0]!, 0))!, (await stage(slices[1]!, 1))!];
+      expect(parts).toEqual(slices.map(slice => ({ storageKey: `recap/${generationId}/${sha256(slice)}.mp4`, hash: sha256(slice), byteLength: slice.length })));
+      expect(await stage(slices[0]!, 0)).toEqual(parts[0]);
+      const strayBytes = Buffer.from("a synthetic render nobody accepted"), stray = (await stage(strayBytes))!;
+      await expect(stage(new Uint8Array(2_000_001))).rejects.toThrow(RangeError);
+      await expect(stage(new Uint8Array(0))).rejects.toThrow(RangeError);
+      expect([...(await receipts()).values()].map(row => row.recoveryUntil !== null && row.retiredAt === null)).toEqual([true, true, true]);
+      // The largest part, sealed, still fits the store's three-mebibyte object.
+      expect(Buffer.byteLength(await sealGameMedia({ bytes: new Uint8Array(2_000_000), key: parts[0]!.storageKey, ownerMemberId: a }))).toBeLessThanOrEqual(3 * 1024 * 1024);
+
+      const available = await readRecapSourceReferences(material, eventId);
+      const profileA = available.find(ref => ref.kind === "profile" && ref.memberId === a)!, profileB = available.find(ref => ref.kind === "profile" && ref.memberId === b)!;
+      const printed = available.find(ref => ref.kind === "entry")!;
+      const sharp = (await import("sharp")).default;
+      const scene = await sharp({ create: { width: 2, height: 2, channels: 3, background: "#abcdef" } }).jpeg().toBuffer();
+      const asset = await uploadRecapMedia({ memberId: room, gameId, eventId, material, beforeMutationTx: async () => {},
+        file: { kind: "upload", slot: "scene-0", mediaType: "image/jpeg", referenceIds: [profileA.id], bytes: scene.toString("base64") } });
+      const draft = { hash: sha256(file), byteLength: file.length, referenceIds: [profileA.id, profileB.id, printed.id], parts };
+      const select = (change: Partial<typeof draft> = {}, assets = [asset]) => selectRecapVideo({ draft: { ...draft, ...change }, gameId, eventId, generationId, ownerMemberId: a, assets, material });
+      const source = (reference: typeof profileA) => ({ kind: reference.kind, memberId: reference.memberId, ...(reference.entryId ? { entryId: reference.entryId } : {}), key: reference.key });
+      const video = { hash: draft.hash, byteLength: file.length, durationMs: 2000, width: 804, height: 1748, parts,
+        // The scene's sources first, then what the video alone shows; a source named twice is one source.
+        references: [source(profileA), source(profileB), source(printed)] };
+      expect(await select()).toEqual(video);
+      // The video is made from the score too: whatever sources the song asset carries are the video's as well.
+      const score = { ...asset, slot: "song", kind: "song" as const, mediaType: "audio/mpeg" as const, references: [source(profileB), source(printed)] };
+      expect((await select({ referenceIds: [] }, [asset, score]))?.references).toEqual(video.references);
+
+      // Each of these is "no video" with its reason logged, never a failed recap.
+      const skipped = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const refused = async (run: Promise<unknown>) => {
+        skipped.mockClear();
+        expect(await run).toBeNull();
+        expect(skipped).toHaveBeenCalledExactlyOnceWith(expect.stringContaining("game.recap.video-skipped"), expect.anything());
+        return (skipped.mock.calls[0]![1] as { reason: string }).reason;
+      };
+      const refusals: [string, Partial<typeof draft>][] = [
+        ["file", { hash: "0".repeat(64) }],
+        ["file", { parts: [parts[1]!, parts[0]!] }],
+        ["file", { byteLength: slices[0]!.length, parts: [parts[0]!] }],
+        ["container", { byteLength: strayBytes.length, hash: sha256(strayBytes), parts: [stray] }],
+        ["part", { parts: [{ ...parts[0]!, storageKey: `recap/${"f".repeat(32)}/${parts[0]!.hash}.mp4` }, parts[1]!] }],
+        ["part", { parts: [{ ...parts[0]!, storageKey: `recap/${generationId}/${"9".repeat(64)}.mp4`, hash: "9".repeat(64) }, parts[1]!] }],
+        ["part", { parts: [{ ...parts[0]!, storageKey: asset.storageKey, hash: asset.hash }, parts[1]!] }],
+        ["source", { referenceIds: ["9".repeat(64)] }],
+        ["draft", { byteLength: file.length + 1 }],
+        ["draft", { parts: [parts[0]!, parts[0]!, parts[1]!] }],
+        ["draft", { parts: Array.from({ length: 5 }, () => parts[0]!) }],
+      ];
+      for (const [reason, change] of refusals) expect(await refused(select(change))).toBe(reason);
+      // The request carries the candidate unparsed, so anything at all may arrive here.
+      for (const candidate of [null, "not a candidate", { ...draft, durationMs: 2000 }, { ...draft, referenceIds: undefined }]) {
+        expect(await refused(selectRecapVideo({ draft: candidate, gameId, eventId, generationId, ownerMemberId: a, assets: [asset], material }))).toBe("draft");
+      }
+      const crowded = Array.from({ length: 5 }, (_, scene) => ({ ...asset, references: Array.from({ length: 13 }, (_, index) => ({ kind: "entry" as const, memberId: a, entryId: `synthetic-${scene}-${index}`, key: `game/${a}/${scene}-${index}.jpg` })) }));
+      expect(await refused(select({}, crowded))).toBe("sources");
+      const profile = await db.gameProfile.findUniqueOrThrow({ where: { memberId: b } });
+      await db.gameProfile.update({ where: { memberId: b }, data: { photoKey: null } });
+      expect(await refused(select())).toBe("source");
+      await db.gameProfile.update({ where: { memberId: b }, data: { photoKey: profile.photoKey } });
+      vi.stubEnv("MURPH_GAME_RECAP_VIDEO_ENABLED", "false");
+      expect(await refused(select())).toBe("disabled");
+      vi.stubEnv("MURPH_GAME_RECAP_VIDEO_ENABLED", "true");
+      // A part the store cannot give back costs the video, and the recap is still accepted (below).
+      const { hostedRecapMediaObjectKey } = await import("@murphai/hosted-execution/storage-paths");
+      const { writeFile } = await import("node:fs/promises");
+      const partFile = path.join(mediaDir, "recap", hostedRecapMediaObjectKey({ userId: a, mediaId: parts[1]!.storageKey }));
+      const intact = await readFile(partFile);
+      await writeFile(partFile, "not a stored object");
+      expect(await refused(select())).toBe("part");
+      await writeFile(partFile, intact);
+      // So does a part whose day-long receipt ran out before the write arrived.
+      const receipt = { userId_resourceId: { userId: a, resourceId: `${gameId}|${generationId}|${parts[0]!.storageKey}` } };
+      const staged = await db.gameRecapAsset.findUniqueOrThrow({ where: receipt });
+      await db.gameRecapAsset.update({ where: receipt, data: { recoveryUntil: new Date(Date.now() - 1000) } });
+      expect(await refused(select())).toBe("part");
+      await db.gameRecapAsset.update({ where: receipt, data: { recoveryUntil: staged.recoveryUntil } });
+      skipped.mockRestore();
+      expect(await select()).toEqual(video);
+
+      const read = (slot: string, memberId = b, generation = generationId) => readAuthorizedRecapAsset({ gameId, generationId: generation, slot, memberId });
+      const current = (hash = draft.hash, generation = generationId) => isRecapVideoCurrent({ gameId, generationId: generation, hash });
+      // Web's first acceptance is the only authority for which video belongs to the recap. Here a source only
+      // the video shows changes after the candidate was selected, inside the accepting transaction: the recap
+      // is still accepted, and its video stays closed until every source it shows is current again.
+      const accepted = { recap, video: { generationId, hash: draft.hash, byteLength: file.length } };
+      const sourceChangesMidAcceptance = async (tx: Prisma.TransactionClient) => { await tx.gameProfile.update({ where: { memberId: b }, data: { photoKey: null } }); };
+      expect(await acceptGameRecap({ ...scope, beforeMutationTx: sourceChangesMidAcceptance, recap, assets: [asset], video: { draft, material } })).toEqual(accepted);
+      expect(await read("video-0")).toBeNull();
+      expect(await current()).toBe(false);
+      expect((await read("scene-0"))?.bytes.length).toBe(scene.length);
+      await db.gameProfile.update({ where: { memberId: b }, data: { photoKey: profile.photoKey } });
+      const stored = (await readRecapEnvelope(gameId))!;
+      expect(stored.envelope.video).toEqual(video);
+      expect(stored.envelope.assets).toEqual([asset]);
+      const sealed = (await db.game.findUniqueOrThrow({ where: { id: gameId } })).recapEncrypted;
+      const other = { hash: sha256(strayBytes), byteLength: strayBytes.length, referenceIds: [], parts: [stray] };
+      expect(await acceptGameRecap({ ...scope, recap: { ...recap, chatLine: "Changed after acceptance" }, assets: [asset], video: { draft: other, material } })).toEqual(accepted);
+      expect(await acceptGameRecap({ ...scope, recap, assets: [asset] })).toEqual(accepted);
+      expect(await acceptGameRecap({ ...scope, recap: null })).toEqual(accepted);
+      expect(await sealGameRecap({ ...scope, recap: null })).toEqual(recap);
+      expect((await db.game.findUniqueOrThrow({ where: { id: gameId } })).recapEncrypted).toBe(sealed);
+      // The accepted parts are kept; the render nobody accepted still expires in a day.
+      const kept = await receipts();
+      for (const part of parts) expect(kept.get(part.storageKey)).toMatchObject({ recoveryUntil: null, retiredAt: null });
+      expect(kept.get(asset.storageKey)).toMatchObject({ recoveryUntil: null, retiredAt: null });
+      expect(kept.get(stray.storageKey)!.recoveryUntil).not.toBeNull();
+
+      // The app's payload: one video, its parts in order, no storage identity.
+      const shown = async (viewer = b) => (await readGame(gameId, viewer))?.recap?.show;
+      expect((await shown())?.video).toEqual({ mediaType: "video/mp4", byteLength: file.length, durationMs: 2000, width: 804, height: 1748,
+        parts: slices.map((slice, index) => ({ url: `/api/game/v1/games/${gameId}/recap-assets/video-${index}?generation=${generationId}`, byteLength: slice.length })) });
+      expect(JSON.stringify(await shown())).not.toMatch(/\.mp4|recap\/[a-f0-9]{32}/u);
+      const first = (await read("video-0"))!, second = (await read("video-1", a))!;
+      expect(Buffer.concat([first.bytes, second.bytes]).equals(file)).toBe(true);
+      expect(first.contentType).toBe("application/octet-stream");
+      expect((await read("scene-0"))).toMatchObject({ contentType: "image/jpeg" });
+      // Only the recap's own players, only this generation, only parts that exist.
+      for (const denied of [read("video-2"), read("video-0", room), read("video-0", stranger), read("video-0", b, "f".repeat(32)), read(parts[0]!.storageKey)]) expect(await denied).toBeNull();
+      expect(await current()).toBe(true);
+      expect(await current(other.hash)).toBe(false);
+      expect(await current(draft.hash, "f".repeat(32))).toBe(false);
+      // The public cover preview still serves the cover and nothing else.
+      expect(await readRecapCoverPreview(gameId, stored.envelope.preview.token)).toEqual({ bytes: new Uint8Array(scene) });
+
+      // The media switch hides the video with the other media.
+      vi.stubEnv("MURPH_GAME_RECAP_MEDIA_VISIBLE", "false");
+      expect(await read("video-0")).toBeNull();
+      expect(await current()).toBe(false);
+      expect(await shown()).not.toHaveProperty("video");
+      vi.stubEnv("MURPH_GAME_RECAP_MEDIA_VISIBLE", "true");
+      // The producer flag does not: a stored video stays readable while new ones are off.
+      vi.stubEnv("MURPH_GAME_RECAP_VIDEO_ENABLED", "false");
+      expect((await read("video-0"))?.bytes.length).toBe(slices[0]!.length);
+      expect((await shown())?.video?.parts).toHaveLength(2);
+      vi.stubEnv("MURPH_GAME_RECAP_VIDEO_ENABLED", "true");
+
+      // A source only the video shows: the video goes, the scene made from other sources stays.
+      await db.gameProfile.update({ where: { memberId: b }, data: { photoKey: null } });
+      for (const slot of ["video-0", "video-1"]) expect(await read(slot)).toBeNull();
+      expect(await current()).toBe(false);
+      expect((await read("scene-0"))?.bytes.length).toBe(scene.length);
+      await db.gameProfile.update({ where: { memberId: b }, data: { photoKey: profile.photoKey } });
+      expect(await current()).toBe(true);
+      await db.gameEntry.update({ where: { id: printed.entryId }, data: { withdrawnAt: new Date() } });
+      expect(await read("video-0")).toBeNull();
+      expect(await current()).toBe(false);
+      expect((await read("scene-0"))?.bytes.length).toBe(scene.length);
+      await db.gameEntry.update({ where: { id: printed.entryId }, data: { withdrawnAt: null } });
+      // A source of a scene the video shows: both go.
+      const own = await db.gameProfile.findUniqueOrThrow({ where: { memberId: a } });
+      await db.gameProfile.update({ where: { memberId: a }, data: { photoKey: null } });
+      for (const slot of ["video-0", "scene-0"]) expect(await read(slot)).toBeNull();
+      await db.gameProfile.update({ where: { memberId: a }, data: { photoKey: own.photoKey } });
+      expect((await read("video-1"))?.bytes.length).toBe(slices[1]!.length);
+
+      // A generation may hold sixteen staged parts; a retry of one it already holds is not another.
+      for (let index = 0; index < 13; index += 1) await stage(Buffer.from(`synthetic render ${index}`));
+      await expect(stage(Buffer.from("one synthetic render too many"))).rejects.toThrow("bound");
+      expect(await stage(slices[0]!, 0)).toEqual(parts[0]);
+
+      // A remake is a new generation. It cannot take the old generation's parts as its video,
+      // and accepting it retires every object the old generation stored.
+      const { createHostedLinqDeliveryIdempotencyLookupKey } = await import("@/src/lib/hosted-onboarding/linq-observability-identifiers");
+      const { requestGameRecapRegeneration } = await import("@/src/lib/game/recap-regeneration");
+      await db.hostedLinqDelivery.updateMany({ where: { idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(eventId)! }, data: { status: "delivered" } });
+      const regenerationId = "synthetic_remake";
+      expect((await requestGameRecapRegeneration({ gameId, regenerationId, execute: true, operatorMemberId: "system" })).outcome).toBe("reserved");
+      const remakeEventId = gameChatLifecycleEventId(gameId, "recap", undefined, regenerationId);
+      await markGameChatGenerationQueuedTx(remakeEventId, db, room);
+      await db.$transaction(tx => recordGameRecapWitnessTx(tx, gameId, remakeEventId));
+      const remake = { ...recap, chatLine: "The mat was recalled." };
+      expect(await acceptGameRecap({ ...scope, eventId: remakeEventId, recap: remake, assets: [], video: { draft, material: await readMaterial(remakeEventId) } })).toEqual({ recap: remake, video: null });
+      const retired = await receipts();
+      expect(retired.size).toBe(17);
+      for (const row of retired.values()) expect(row.retiredAt).not.toBeNull();
+      expect((await readRecapEnvelope(gameId))!.envelope).not.toHaveProperty("video");
+      expect(await shown()).not.toHaveProperty("video");
+      expect(await read("video-0")).toBeNull();
+      expect(await current()).toBe(false);
+      // A late retry of the first generation's write cannot bring its video back.
+      await acceptGameRecap({ ...scope, recap, assets: [asset], video: { draft, material } }).catch(() => null);
+      expect((await readRecapEnvelope(gameId))!.envelope).toMatchObject({ generationId: recapGenerationId(remakeEventId), story: { chatLine: remake.chatLine } });
+      expect((await readRecapEnvelope(gameId))!.envelope).not.toHaveProperty("video");
+    } finally {
+      vi.unstubAllEnvs();
+      await db.gameRecapAsset.deleteMany({ where: { resourceId: { startsWith: `${gameId}|` } } });
+    }
+  });
   it("seals an authorized recap on the settled game and exposes it to both players", async () => {
     const ava = await member("RecapAva", "UTC"), leo = await member("RecapLeo", "UTC");
     const room = `hbm_gametest_room_${randomUUID().slice(0, 8)}`;

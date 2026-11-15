@@ -8,7 +8,7 @@ import {
 } from "../runtime-control.ts";
 import { requireObject } from "./assertions.ts";
 import { parseHostedRuntimeOwnerCommand } from "../runtime-owner.ts";
-import { buildRecapScoreProtocolProbe, hostedGameToolRequestSchema } from "../game-tools.ts";
+import { buildRecapScoreProtocolProbe, buildRecapVideoProtocolProbe, hostedGameToolRequestSchema, hostedGameToolResponseSchema } from "../game-tools.ts";
 import { recapAssetSchema } from "@murphai/contracts/recap-show";
 
 // Preserve the legacy response for callers which do not need an audience.
@@ -83,6 +83,21 @@ export function assertHostedRuntimeWebProtocolAdmission(
   }
   assertRuntimeOwnerCompletionEvidence(record.runtimeOwnerCompletion);
   assertRecapScoreEvidence(record.recapScore);
+  assertRecapVideoEvidence(record.recapVideo);
+}
+
+/** Web must read a video part, a candidate and an identity request before a runtime that sends them is activated. */
+function assertRecapVideoEvidence(value: unknown): void {
+  try {
+    const video = requireObject(value, "Recap video evidence");
+    const expected = buildRecapVideoProtocolProbe();
+    for (const field of ["part", "write", "recover"] as const) {
+      if (JSON.stringify(hostedGameToolRequestSchema.parse(video[field])) !== JSON.stringify(hostedGameToolRequestSchema.parse(expected[field]))) throw new Error("Video witness mismatch.");
+    }
+    if (JSON.stringify(hostedGameToolResponseSchema.parse(video.result)) !== JSON.stringify(hostedGameToolResponseSchema.parse(expected.result))) throw new Error("Video witness mismatch.");
+  } catch {
+    throw new Error("Hosted Web protocol admission failed: recap_video.");
+  }
 }
 
 function assertRecapScoreEvidence(value: unknown): void {

@@ -7,7 +7,9 @@ their existing `pages`, `superlatives`, `scoreLine` and `chatLine` representatio
 New pair shows have empty top-level `pages` and ordered `show.pages`.
 
 Stable synthetic decoder fixtures live in `packages/contracts/fixtures/recap-show/`:
-`full-show.json`, `score-show.json`, `failed-scene-no-song.json`, and `legacy.json`. IDs, names, words and URLs are synthetic.
+`full-show.json`, `full-show-video.json`, `score-show.json`, `failed-scene-no-song.json`, and `legacy.json`. IDs, names, words and URLs are synthetic.
+`envelope.json` and `envelope-video.json` are the stored envelope without and
+with a video; they are server fixtures, never sent to a client.
 
 `show` contains `version: 1`, `generationId`, `treatment`, `acceptedAt` and `pages`. Page IDs are stable within a generation. Replace the
 complete generation when its ID changes. Ignore unknown optional fields and skip
@@ -83,6 +85,15 @@ has `url`, `mediaType` (`image/jpeg` or `audio/mpeg`) and optional `width`, `hei
 or `durationMs`. A scene's `fallback` is `photo` with one authorized entry ID, or
 `text` with none. Failure must preserve setup, payoff and the result.
 
+`show.video` is optional: the whole recap as one MP4. It has `mediaType`
+(`video/mp4`), `byteLength`, `durationMs`, `width`, `height` and one to four
+ordered `parts`, each a `url` and a `byteLength`. Download every part with the
+same bearer and join the bytes in order; the result is the file only when its
+length equals `byteLength`. A part alone is not playable and is served as
+`application/octet-stream`. The field is absent when the recap has no video or
+the media visibility switch is off, and a part answers 404 once any source the
+video shows is no longer permitted. Shipped decoders ignore the field.
+
 Media URLs are relative to the API origin, require the same bearer, and bind a
 specific generation. Fetch privately without shared caching; clear cached bytes
 on logout, access loss or generation replacement. Stale, denied and unavailable
@@ -110,6 +121,15 @@ asset reader drops a score asset and retains the readable show without music.
 Show write/replay/recovery responses omit the optional full-story echo, preserving
 old strict runner decoders; the top-level canonical chat line remains. Keep the
 compatible Web reader once new envelopes with timings or face hints are stored.
+
+A stored envelope with `video` cannot be read by a Web release that predates
+the field, so that reader stays deployed once a video is stored. Web returns the
+accepted video's identity (`recapVideo`) only to a runtime whose request asked
+for it, because older runtimes refuse unknown result fields.
+A recap wake may carry `video: true` beside `show: true`, and a stored outbox
+intent may carry `recapVideo`. A runtime that predates either refuses that wake
+and quarantines that intent, so the runtime and the Worker that decodes wakes
+ship before Web queues the first such wake.
 
 The authoring preview tool is removed. Native layout and score playback belong
 to the iOS owner; the additive contract preserves installed-client song playback.

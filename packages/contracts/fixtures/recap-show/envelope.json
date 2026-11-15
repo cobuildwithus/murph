@@ -1,0 +1,94 @@
+{
+  "version": 1,
+  "generationId": "0123456789abcdef0123456789abcdef",
+  "story": {
+    "treatment": "Courtroom drama",
+    "chatLine": "Player A won 4 to 3. The mat has entered evidence.",
+    "scoreLine": "Player B owes Player A breakfast.",
+    "pages": [
+      {
+        "background": "night",
+        "blocks": [
+          {
+            "kind": "headline",
+            "text": "The Mat Takes the Stand"
+          },
+          {
+            "kind": "scene",
+            "scene": {
+              "cast": [
+                "Player A",
+                "Player B"
+              ],
+              "prompt": "A fictional courtroom made of exercise mats, with two athletes beside a wooden desk and bright morning windows."
+            },
+            "entryIds": [
+              "synthetic-photo-a"
+            ]
+          }
+        ]
+      },
+      {
+        "background": "paper",
+        "blocks": [
+          {
+            "kind": "headline",
+            "text": "The evidence arrived"
+          },
+          {
+            "kind": "photo",
+            "entryIds": [
+              "synthetic-photo-a"
+            ]
+          }
+        ]
+      }
+    ],
+    "song": {
+      "title": "The Mat Knows",
+      "style": "Playful",
+      "lyrics": [
+        "The mat knows",
+        "The shoes wait",
+        "The door opens",
+        "The score stays"
+      ]
+    }
+  },
+  "acceptedAt": "2026-11-10T12:00:00Z",
+  "assets": [
+    {
+      "slot": "scene-0",
+      "kind": "image",
+      "recipeId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "storageKey": "recap/0123456789abcdef0123456789abcdef/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.jpg",
+      "references": [
+        {
+          "kind": "profile",
+          "memberId": "synthetic-member-a",
+          "key": "game/synthetic-member-a/profile.jpg"
+        }
+      ],
+      "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "mediaType": "image/jpeg",
+      "byteLength": 123456,
+      "width": 1024,
+      "height": 1536
+    },
+    {
+      "slot": "song",
+      "kind": "song",
+      "recipeId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "storageKey": "recap/0123456789abcdef0123456789abcdef/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.mp3",
+      "references": [],
+      "hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "mediaType": "audio/mpeg",
+      "byteLength": 480000,
+      "durationMs": 20000
+    }
+  ],
+  "preview": {
+    "token": "synthetic-preview-token-with-no-authority",
+    "expiresAt": "2026-12-10T12:00:00Z"
+  }
+}
