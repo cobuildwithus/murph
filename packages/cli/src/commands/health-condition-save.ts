@@ -3,14 +3,12 @@ import {
   CONDITION_CLINICAL_STATUSES,
   CONDITION_SEVERITIES,
   CONDITION_VERIFICATION_STATUSES,
-} from "@murphai/contracts";
+} from "@murphai/contracts/constants";
 import type { upsertCondition } from "@murphai/core";
 import { withBaseOptions } from "@murphai/operator-config/command-helpers";
 import { localDateSchema, pathSchema } from "@murphai/operator-config/vault-cli-contracts";
-import {
-  normalizeRepeatableFlagOption,
-  type VaultServices,
-} from "@murphai/vault-usecases";
+import { normalizeRepeatableFlagOption } from "@murphai/vault-usecases/option-utils";
+import type { VaultServices } from "@murphai/vault-usecases";
 import {
   createHealthEntityCrudGroup,
 } from "./health-entity-command-registry.js";

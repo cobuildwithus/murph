@@ -35,7 +35,7 @@ const mockedCliEntryModules = [
   "../src/vault-cli-shell.js",
   "../src/vault-cli-vault-context.js",
   "@murphai/assistant-engine/codex-lifecycle",
-  "@murphai/operator-config/operator-config",
+  "@murphai/operator-config/operator-config/storage",
 ] as const;
 
 function mockCliActionModules(input: {
@@ -97,7 +97,7 @@ function mockCliActionModules(input: {
     stopWarmCodexAppServer: vi.fn(async () => undefined),
     ...input.codexLifecycleModule,
   }));
-  vi.doMock("@murphai/operator-config/operator-config", () => ({
+  vi.doMock("@murphai/operator-config/operator-config/storage", () => ({
     ...input.operatorConfigModule,
   }));
 }
@@ -386,7 +386,7 @@ test("runMurphCliAction prints --version through the requested stdout without im
   vi.doMock("../src/vault-cli.js", () => {
     throw new Error("vault CLI graph should not be imported for --version");
   });
-  vi.doMock("@murphai/operator-config/operator-config", () => {
+  vi.doMock("@murphai/operator-config/operator-config/storage", () => {
     throw new Error("operator config should not be imported for --version");
   });
 

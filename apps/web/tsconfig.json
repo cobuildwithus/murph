@@ -414,6 +414,30 @@
       ],
       "@murphai/operator-config/generated-audio": [
         "../../packages/operator-config/src/generated-audio.ts"
+      ],
+      "@murphai/contracts/constants": [
+        "../../packages/contracts/src/constants.ts"
+      ],
+      "@murphai/contracts/zod": [
+        "../../packages/contracts/src/zod.ts"
+      ],
+      "@murphai/contracts/time": [
+        "../../packages/contracts/src/time.ts"
+      ],
+      "@murphai/contracts/shares": [
+        "../../packages/contracts/src/shares.ts"
+      ],
+      "@murphai/contracts/health-entities": [
+        "../../packages/contracts/src/health-entities.ts"
+      ],
+      "@murphai/vault-usecases/json-input": [
+        "../../packages/vault-usecases/src/json-input.ts"
+      ],
+      "@murphai/vault-usecases/option-utils": [
+        "../../packages/vault-usecases/src/option-utils.ts"
+      ],
+      "@murphai/vault-usecases/health-cli-descriptors": [
+        "../../packages/vault-usecases/src/health-cli-descriptors.ts"
       ]
     },
     "sourceMap": false,

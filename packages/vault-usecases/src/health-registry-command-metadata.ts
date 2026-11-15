@@ -1,7 +1,5 @@
-import {
-  getHealthEntityRegistryCommandMetadata as getSharedHealthEntityRegistryCommandMetadata,
-  type HealthEntityRegistryKind,
-} from "@murphai/contracts";
+import { getHealthEntityRegistryCommandMetadata as getSharedHealthEntityRegistryCommandMetadata } from "@murphai/contracts/health-entities";
+import type { HealthEntityRegistryKind } from "@murphai/contracts";
 
 import type {
   HealthCoreRuntimeMethodName,

@@ -28,8 +28,8 @@ import {
 import {
   inputFileOptionSchema,
   loadJsonInputObject,
-  normalizeRepeatableFlagOption,
-} from '@murphai/vault-usecases'
+} from '@murphai/vault-usecases/json-input'
+import { normalizeRepeatableFlagOption } from '@murphai/vault-usecases/option-utils'
 import {
   deleteMealRecord,
   editMealRecord,
