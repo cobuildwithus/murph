@@ -1654,7 +1654,9 @@ async function setDayCompletion(context: CommandContext, command: Extract<GameCo
     return [event, corrected.event];
   });
   if (!dayOutcome) throw new Error("Game day correction produced no outcome.");
-  const chatLine = outcomeChange ? await settledCorrectionLine(context.actor, command, outcomeChange) : undefined;
+  // The correction is committed. A line that cannot be built (names or words unreadable) must not fail it:
+  // the returned state still carries the new result.
+  const chatLine = outcomeChange ? await settledCorrectionLine(context.actor, command, outcomeChange).catch(() => undefined) : undefined;
   return { gameId: command.gameId, dayOutcome, ...(chatLine ? { chatLine } : {}) };
 }
 
