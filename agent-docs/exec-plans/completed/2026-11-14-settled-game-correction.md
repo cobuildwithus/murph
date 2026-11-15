@@ -1,6 +1,6 @@
 # Correct a settled game from the chat
 
-Status: active
+Status: completed
 Created: 2026-11-14
 Updated: 2026-11-14
 Review: reviewed once by ReviewGPT (GPT-6 Pro, architecture preset, Mountain
@@ -285,3 +285,4 @@ Confirmed on 2026-11-14:
      accepted-input plumbing into the game command and replay phrasing for a
      post-commit transport failure whose only loss is one sentence; the state
      is correct and visible. Recorded under "Failure modes".
+Completed: 2026-11-14
