@@ -580,31 +580,32 @@ async function prepareRecapVideoCandidate(input: {
   origin: { kind: 'game_recap'; gameId: string; eventId: string }
   story: GameRecapEnvelope['story']; assets: readonly RecapAsset[]; media: ReadonlyMap<string, Buffer>; signal?: AbortSignal
 }): Promise<RecapVideoCandidate | null> {
-  const rendered = await input.context.renderGameRecapVideo!({ story: input.story, assets: input.assets, media: input.media, signal: input.signal })
-  if (rendered.kind !== 'rendered') return null
+  const { RECAP_VIDEO_BUDGET_MS, recapVideoParts } = await import('../../assistant/recap-video-render.js')
+  // One deadline for all of it: photo fetches, the render and the part uploads.
+  const deadlineAt = Date.now() + RECAP_VIDEO_BUDGET_MS
+  const budget = AbortSignal.timeout(RECAP_VIDEO_BUDGET_MS)
+  const signal = input.signal ? AbortSignal.any([input.signal, budget]) : budget
+  let rendered: Awaited<ReturnType<NonNullable<AssistantHostedToolContext['renderGameRecapVideo']>>> | null = null
   try {
+    rendered = await input.context.renderGameRecapVideo!({ story: input.story, assets: input.assets, media: input.media, signal: input.signal, deadlineAt })
+    if (rendered.kind !== 'rendered') return null
     const { readFile } = await import('node:fs/promises')
-    const { recapVideoParts } = await import('../../assistant/recap-video-render.js')
     const parts = []
     for (const [index, bytes] of recapVideoParts(await readFile(rendered.file)).entries()) {
       const uploaded = await input.tool.request({ action: 'read_game', origin: input.origin,
-        recapRead: { kind: 'upload', slot: `video-${index}`, mediaType: 'video/mp4', referenceIds: [], bytes: bytes.toString('base64') } })
+        recapRead: { kind: 'upload', slot: `video-${index}`, mediaType: 'video/mp4', referenceIds: [], bytes: bytes.toString('base64') } }, { signal })
       const part = uploaded.result.status === 'ok' && 'recapGame' in uploaded.result ? recapVideoPartSchema.safeParse(uploaded.result.recapGame).data : undefined
-      if (!part) {
-        await rendered.dispose()
-        return null
-      }
+      if (!part) throw new Error('A video part was not staged.')
       parts.push(part)
     }
+    if (input.signal?.aborted) throw input.signal.reason
     const draft = recapVideoDraftSchema.safeParse({ hash: rendered.hash, byteLength: rendered.byteLength, referenceIds: rendered.referenceIds, parts }).data
-    if (!draft) {
-      await rendered.dispose()
-      return null
-    }
+    if (!draft) throw new Error('The video candidate is not one Web can read.')
     return { draft, file: rendered.file, dispose: rendered.dispose }
   } catch (error) {
-    await rendered.dispose()
-    if (input.signal?.aborted) throw error
+    if (rendered?.kind === 'rendered') await rendered.dispose()
+    // A cancelled turn stops here; every other failure, the deadline included, is the recap without a video.
+    if (input.signal?.aborted) throw input.signal.reason ?? error
     return null
   }
 }

@@ -4,7 +4,9 @@
 // new process group, so stopping the group stops ffmpeg too. It also stops
 // itself, and ffmpeg with it, when the runner goes away (its stdin closes) or
 // its own deadline passes, so nothing it starts can outlive the turn that asked.
+import { rmSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import path from "node:path";
 
 import { RecapVideoRefusal, type RecapVideoInput } from "./types.js";
 
@@ -19,6 +21,15 @@ export type RecapVideoChildResult =
   | { ok: false; code: string };
 
 function stopGroup(): never {
+  // The runner that would remove the work directory may be gone: the request, the photos and any partial video go first.
+  const requestPath = process.argv[2];
+  if (requestPath) {
+    try {
+      rmSync(path.dirname(requestPath), { recursive: true, force: true });
+    } catch {
+      // Removal is best effort; the runner's next render sweeps what is left.
+    }
+  }
   try {
     // Negative: the whole group, this process and the encoder it started.
     process.kill(-process.pid, "SIGKILL");

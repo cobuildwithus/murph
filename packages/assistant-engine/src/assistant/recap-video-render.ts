@@ -1,8 +1,8 @@
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import * as z from '@murphai/contracts/zod-runtime'
 import type { RecapMaterial } from '@murphai/contracts/recap-material'
@@ -12,8 +12,9 @@ import {
 } from '@murphai/contracts/recap-show'
 import type { RecapVideoChildRequest, RecapVideoChildResult, RecapVideoInput, RecapVideoOutcome, RecapVideoStake } from '@murphai/recap-video'
 
-/** A render that has not finished by now is "no video". Slice 2 measured 19.9 s at two CPUs and 39.4 s emulated. */
-export const RECAP_VIDEO_RENDER_TIMEOUT_MS = 180_000
+/** All the optional video work (photo fetches, the render, the part uploads) that has not finished by now is "no video".
+ * Slice 2 measured the render at 19.9 s at two CPUs and 39.4 s emulated. */
+export const RECAP_VIDEO_BUDGET_MS = 180_000
 /** The drawing process's own heap. Pictures and the encoder live outside it; slice 2 measured 271 MB for the whole process. */
 const CHILD_HEAP_MB = 512
 const CHILD_OUTPUT_MAX_CHARS = 4096
@@ -69,7 +70,7 @@ function unfinishedEntryIds(game: unknown): string[] | null {
  */
 async function buildInput(input: {
   directory: string; material: RecapMaterial; story: GameRecapEnvelope['story']; assets: readonly RecapAsset[]
-  media: ReadonlyMap<string, Buffer>; fetchReference(id: string): Promise<Buffer>
+  media: ReadonlyMap<string, Buffer>; fetchReference(id: string, signal: AbortSignal): Promise<Buffer>; signal: AbortSignal
 }): Promise<{ input: RecapVideoInput; referenceIds: string[] } | string> {
   const closing = lastScreen(input.material.game)
   if (!closing) return 'poster'
@@ -87,11 +88,13 @@ async function buildInput(input: {
     permittedPhotoIds: photoIds, mediaUrl: () => '', mediaVisible: true,
   }).show
   if (!presented?.score) return 'score'
-  const files = hostFiles(input.directory, input.fetchReference)
+  const files = hostFiles(input.directory, id => input.fetchReference(id, input.signal))
   const scenes = await writeScenes(presented.pages, input.media, files)
   if (!scenes) return 'scene'
   const photos: Record<string, string | null> = {}
-  for (const entryId of new Set(presented.pages.flatMap(page => [...page.blocks.flatMap(block => block.entryIds ?? []), ...(page.fallback?.entryIds ?? [])]))) {
+  // A scene's fallback photo is drawn, and so fetched and declared, only when the scene itself is not.
+  for (const entryId of new Set(presented.pages.flatMap(page => [...page.blocks.flatMap(block => block.entryIds ?? []),
+    ...(page.media?.status === 'ready' ? [] : page.fallback?.entryIds ?? [])]))) {
     const reference = input.material.references.find(item => item.kind === 'entry' && item.entryId === entryId)
     // A post with no photo left is drawn as the app draws it, a "missed" print. A photo that cannot be fetched is no video.
     photos[entryId] = reference ? await files.fetched(reference.id, `photo-${Object.keys(photos).length}.jpg`) : null
@@ -141,6 +144,36 @@ async function writeScenes(pages: readonly { id: string; kind: string; media?: {
   return scenes
 }
 
+const RENDER_PREFIX = 'render-'
+
+/**
+ * Where renders live: under the runner's own home, which the model's permission profile neither
+ * reads nor writes (it grants the vault and the temporary directories only). Inputs, the request
+ * and ffmpeg's output must not be reachable from the model's shell, or a planted link could make
+ * the encoder overwrite a file outside the sandbox. Null when no such place can be proven.
+ */
+export function recapVideoScratchRoot(vault?: string): string | null {
+  const home = [process.env.HOSTED_HOME, process.env.HOME, homedir()].map(value => value?.trim()).find(value => value && path.isAbsolute(value))
+  if (!home) return null
+  const root = path.join(path.resolve(home), '.murph-recap-video')
+  const inside = (parent: string) => {
+    const relative = path.relative(path.resolve(parent), root)
+    return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))
+  }
+  return inside(tmpdir()) || inside('/tmp') || (vault !== undefined && inside(vault)) ? null : root
+}
+
+/** Render directories no runner is using any more: a process that died mid-render left them. */
+async function sweepStaleRenders(root: string): Promise<void> {
+  const now = Date.now()
+  for (const name of await readdir(root).catch(() => [] as string[])) {
+    if (!name.startsWith(RENDER_PREFIX)) continue
+    const directory = path.join(root, name)
+    const modified = await stat(directory).then(info => info.mtimeMs, () => now)
+    if (now - modified > 2 * RECAP_VIDEO_BUDGET_MS) await rm(directory, { recursive: true, force: true })
+  }
+}
+
 /** The installed renderer's own child entry, beside its index, so nothing of it loads into this process. */
 function rendererChildPath(): string {
   return path.join(path.dirname(createRequire(import.meta.url).resolve('@murphai/recap-video')), 'child.js')
@@ -188,43 +221,61 @@ let rendering = false
 
 /**
  * One recap video for a show, or the reason there is none. Nothing here can fail the recap:
- * every error, refusal, timeout and oversized file is "no video", and the work directory,
- * the drawing process and ffmpeg are gone by the time this returns, except the finished file,
- * which belongs to the caller until it calls `dispose`. A cancelled turn throws its reason.
+ * every error, refusal, timeout and oversized file is "no video", and the work directory, the
+ * drawing process and ffmpeg are gone by the time this returns, except the finished file, which
+ * belongs to the caller until it calls `dispose`. Photo fetches and the render share the caller's
+ * deadline. A cancelled turn throws its reason.
  */
 export async function renderRecapShowVideo(input: {
-  material: RecapMaterial; story: GameRecapEnvelope['story']; assets: readonly RecapAsset[]
-  media: ReadonlyMap<string, Buffer>; fetchReference(id: string): Promise<Buffer>
-  signal?: AbortSignal; childPath?: string; timeoutMs?: number
+  vault: string; material: RecapMaterial; story: GameRecapEnvelope['story']; assets: readonly RecapAsset[]
+  media: ReadonlyMap<string, Buffer>; fetchReference(id: string, signal: AbortSignal): Promise<Buffer>
+  signal?: AbortSignal; deadlineAt: number; childPath?: string; scratchRoot?: string
 }): Promise<RecapVideoRender> {
   // One render per runner at a time: a second recap at once goes without a video rather than doubling the encoder's memory.
   if (rendering) return { kind: 'refused', reason: 'busy' }
   rendering = true
   let directory: string | null = null
   let kept = false
+  const budget = AbortSignal.timeout(Math.max(1, Math.floor(input.deadlineAt - Date.now()) || 1))
+  const signal = input.signal ? AbortSignal.any([input.signal, budget]) : budget
   try {
-    directory = await mkdtemp(path.join(tmpdir(), 'murph-recap-video-'))
-    const built = await buildInput({ ...input, directory }).catch(() => 'input')
-    if (typeof built === 'string') return { kind: 'refused', reason: built }
-    const outPath = path.join(directory, 'recap.mp4'), requestPath = path.join(directory, 'request.json')
-    const timeoutMs = input.timeoutMs ?? RECAP_VIDEO_RENDER_TIMEOUT_MS
-    const request: RecapVideoChildRequest = { input: built.input, outPath, deadlineMs: timeoutMs }
-    await writeFile(requestPath, JSON.stringify(request), { flag: 'wx', mode: 0o600 })
-    const result = await runChild({ childPath: input.childPath ?? rendererChildPath(), requestPath, directory, timeoutMs, signal: input.signal })
-    if (result === 'aborted') throw input.signal?.reason ?? new Error('The recap turn was cancelled.')
-    if (typeof result === 'string') return { kind: 'refused', reason: result }
-    if (!result.ok) return { kind: 'refused', reason: result.code }
-    const size = (await stat(outPath).catch(() => null))?.size ?? 0
-    if (size < 1 || size > RECAP_VIDEO_MAX_BYTES) return { kind: 'refused', reason: 'too_large' }
-    const hash = createHash('sha256').update(await readFile(outPath)).digest('hex')
+    const root = input.scratchRoot ?? recapVideoScratchRoot(input.vault)
+    if (!root) return { kind: 'refused', reason: 'scratch' }
+    await mkdir(root, { recursive: true, mode: 0o700 })
+    await sweepStaleRenders(root)
+    directory = await mkdtemp(path.join(root, RENDER_PREFIX))
+    const rendered = await renderInDirectory({ ...input, directory, fetchSignal: signal, budget })
+    if (rendered.kind === 'refused') return rendered
     kept = true
     const owned = directory
-    return { kind: 'rendered', file: outPath, hash, byteLength: size, referenceIds: built.referenceIds,
-      dispose: () => rm(owned, { recursive: true, force: true }) }
+    return { ...rendered, dispose: () => rm(owned, { recursive: true, force: true }).catch(() => {}) }
+  } catch (error) {
+    if (input.signal?.aborted) throw input.signal.reason ?? error
+    return { kind: 'refused', reason: 'error' }
   } finally {
     rendering = false
-    if (directory && !kept) await rm(directory, { recursive: true, force: true })
+    if (directory && !kept) await rm(directory, { recursive: true, force: true }).catch(() => {})
   }
+}
+
+/** Build the input, run the child and check its file, inside a render directory the caller owns. */
+async function renderInDirectory(input: Parameters<typeof renderRecapShowVideo>[0] & { directory: string; fetchSignal: AbortSignal; budget: AbortSignal }): Promise<
+  Omit<Extract<RecapVideoRender, { kind: 'rendered' }>, 'dispose'> | Extract<RecapVideoRender, { kind: 'refused' }>> {
+  const built = await buildInput({ ...input, signal: input.fetchSignal }).catch(() => 'input')
+  if (input.signal?.aborted) throw input.signal.reason
+  if (typeof built === 'string') return { kind: 'refused', reason: input.budget.aborted ? 'timeout' : built }
+  const outPath = path.join(input.directory, 'recap.mp4'), requestPath = path.join(input.directory, 'request.json')
+  const timeoutMs = Math.max(1, input.deadlineAt - Date.now())
+  const request: RecapVideoChildRequest = { input: built.input, outPath, deadlineMs: timeoutMs }
+  await writeFile(requestPath, JSON.stringify(request), { flag: 'wx', mode: 0o600 })
+  const result = await runChild({ childPath: input.childPath ?? rendererChildPath(), requestPath, directory: input.directory, timeoutMs, signal: input.signal })
+  if (result === 'aborted') throw new Error('The recap turn was cancelled.')
+  if (typeof result === 'string') return { kind: 'refused', reason: result }
+  if (!result.ok) return { kind: 'refused', reason: result.code }
+  const size = (await stat(outPath).catch(() => null))?.size ?? 0
+  if (size < 1 || size > RECAP_VIDEO_MAX_BYTES) return { kind: 'refused', reason: 'too_large' }
+  const hash = createHash('sha256').update(await readFile(outPath)).digest('hex')
+  return { kind: 'rendered', file: outPath, hash, byteLength: size, referenceIds: built.referenceIds }
 }
 
 /**

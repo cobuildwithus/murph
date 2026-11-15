@@ -111,10 +111,11 @@ const referenceBytesSchema = z.object({
 }).strict()
 
 export async function fetchRecapReference(input: {
-  eventId: string; gameId: string; material: RecapMaterial; id: string; tool: AssistantHostedGroupTool;
+  eventId: string; gameId: string; material: RecapMaterial; id: string; tool: AssistantHostedGroupTool; signal?: AbortSignal;
 }) {
   if (!input.material.references.some(reference => reference.id === input.id)) throw new Error('Use an authorized recap reference ID.')
-  const response = await input.tool.request({ action: 'read_game', origin: { kind: 'game_recap', eventId: input.eventId, gameId: input.gameId }, recapRead: { kind: 'reference', id: input.id } })
+  const request = { action: 'read_game' as const, origin: { kind: 'game_recap' as const, eventId: input.eventId, gameId: input.gameId }, recapRead: { kind: 'reference' as const, id: input.id } }
+  const response = await (input.signal ? input.tool.request(request, { signal: input.signal }) : input.tool.request(request))
   if (response.result.status !== 'ok' || !('recapGame' in response.result)) throw new Error('Recap reference is no longer available.')
   const value = referenceBytesSchema.parse(response.result.recapGame)
   const bytes = Buffer.from(value.bytes, 'base64')

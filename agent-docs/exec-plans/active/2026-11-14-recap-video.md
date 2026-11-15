@@ -661,13 +661,17 @@ the workflow, and the tests (none vacuous).
    of the runner process and the runner bundle; `@murphai/assistant-engine`
    depends on the package so the bundle installs it.
 2. The child runs in a new process group with a 512 MB heap and an
-   environment of `PATH`, `HOME` and `LANG` only. The runner kills the group on
-   timeout (180 s) and on a cancelled turn, and again after any exit; the child
-   kills its own group when the runner's pipe closes or its deadline passes, so
-   an orphaned render cannot outlive its runner.
-3. Inputs go to a fresh `mkdtemp` directory under the OS temp root, outside the
-   vault, with mode 0600 files; it is removed on every path except the
-   finished file, which the caller disposes of after the write.
+   environment of `PATH`, `HOME` and `LANG` only. One 180 s budget covers the
+   photo fetches, the render and the part uploads. The runner kills the group
+   at the deadline and on a cancelled turn, and again after any exit; the child
+   removes its own directory and kills its group when the runner's pipe closes
+   or its deadline passes, so an orphaned render cannot outlive its runner.
+3. Inputs, the request and the output go to a fresh render directory under the
+   runner's home (`.murph-recap-video/`), never under a temporary directory or
+   the vault, which the model's permission profile can write. Files are 0600;
+   the directory is removed on every path except the finished file, which the
+   caller disposes of after the write; each render sweeps directories older
+   than twice the budget.
 4. One render per runner process at a time; a second concurrent recap gets no
    video ("busy") rather than a second encoder's memory.
 5. The render runs after the scene and song uploads (Web measures the song,
@@ -681,9 +685,27 @@ the workflow, and the tests (none vacuous).
 8. With the flag off nothing changes: the wake has no `video`, the write
    request has no `video` key, and the model's input is identical because
    `poster` is removed from `game.json` (tested byte for byte).
-9. Rollback floor: this slice adds none. Web writes `video: true` only with the
-   flag on, and the runtime that reads it (#4991) ignores it; the runner sends
-   a candidate only after Web accepted its parts, which an older Web refuses.
+9. Rollback floor: this slice adds none for durable data. Web writes
+   `video: true` only with the flag on, and the runtime that reads it (#4991)
+   ignores it; the runner sends a candidate only after Web accepted its parts,
+   which an older Web refuses. One condition: with the flag on, Web puts
+   `game.poster` in the material, and only this runtime keeps it out of the
+   model's `game.json`, so turn the flag off before rolling the runtime below
+   this slice.
+10. Review (ReviewGPT round 1 and the Codex deep review, both on 6bd8ebf271).
+    Accepted and fixed with tests: the render directory was under the
+    model-writable temporary directory, so a planted link could make ffmpeg
+    overwrite a canonical file (ReviewGPT, high); a setup error before the
+    child (directory, request file, package resolution) failed the recap write
+    (Codex 1); an orphaned child left its inputs behind (Codex 2); a turn
+    cancelled during an upload could still write (Codex 3); the deadline left
+    out fetches and uploads (Codex 4); the rollback note above (Codex 5); a
+    ready scene's unused fallback photo was fetched and could cost the video
+    (Codex 6). The native permission smoke does not yet run a render beside a
+    hostile model command; the unit tests prove the directory is never under a
+    temporary directory or the vault, and the profile grants the model neither
+    the runner's home nor anything outside the vault and the temporary
+    directories.
 
 ### Owner decisions recorded after the review (no architecture change)
 

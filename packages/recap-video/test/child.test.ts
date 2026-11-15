@@ -93,6 +93,8 @@ describe("the render child", () => {
     const { signal } = await closed;
     expect(signal).toBe("SIGKILL");
     expect(groupAlive(child.pid!)).toBe(false);
+    // Nobody is left to clean up after it: the request, the inputs and the partial video are gone too.
+    await expect(access(path.dirname(requestPath))).rejects.toThrow();
   }, 120_000);
 
   it.skipIf(!hasFfmpeg)("stops itself and its encoder at its own deadline", async () => {

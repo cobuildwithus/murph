@@ -764,6 +764,36 @@ describe('a recap wake that asks for a video', () => {
     if (input.render !== 'refused') expect(dispose).toHaveBeenCalled()
   })
 
+  it('writes the recap as today when the render step itself throws', async () => {
+    const request = vi.fn().mockResolvedValueOnce(write)
+    const ctx: AssistantHostedToolContext = { ...context(), currentGameRecapScope: () => ({ ...scope, video: true }),
+      readGameRecapDraft: async () => ({ story, files: [] }), readGameRecapMedia: async () => ({ bytes: 'YWJj', mediaType: 'image/jpeg', referenceIds: [] }),
+      renderGameRecapVideo: async () => { throw new Error('Synthetic setup failure') }, groupTool: { request } }
+    const { executeGameTool } = await import('../src/assistant-codex/dynamic-tools/games.js')
+    expect((await executeGameTool({ context: ctx, request: { action: 'write_recap_file', draftPath: 'drafts/show.json' } })).rpcResult.success).toBe(true)
+    expect(request).toHaveBeenCalledExactlyOnceWith(todaysWrite)
+  })
+
+  it('writes nothing when the turn is cancelled while a part uploads', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'recap-video-candidate-'))
+    const file = path.join(directory, 'recap.mp4')
+    await writeFile(file, Buffer.alloc(10))
+    const dispose = vi.fn(async () => { await rm(directory, { recursive: true, force: true }) })
+    const controller = new AbortController()
+    const request = vi.fn(async (_call: unknown, options?: { signal?: AbortSignal | null }) => {
+      controller.abort(new Error('Synthetic cancel'))
+      expect(options?.signal?.aborted).toBe(true)
+      return { action: 'read_game' as const, result: { status: 'ok' as const, recapGame: part(0, 10) } }
+    })
+    const ctx: AssistantHostedToolContext = { ...context(), currentGameRecapScope: () => ({ ...scope, video: true }),
+      readGameRecapDraft: async () => ({ story, files: [] }), readGameRecapMedia: async () => ({ bytes: 'YWJj', mediaType: 'image/jpeg', referenceIds: [] }),
+      renderGameRecapVideo: async () => ({ kind: 'rendered', file, hash: 'f'.repeat(64), byteLength: 10, referenceIds: [], dispose }), groupTool: { request } }
+    const { executeGameTool } = await import('../src/assistant-codex/dynamic-tools/games.js')
+    expect((await executeGameTool({ context: ctx, request: { action: 'write_recap_file', draftPath: 'drafts/show.json' }, signal: controller.signal })).rpcResult.success).toBe(false)
+    expect(request).toHaveBeenCalledTimes(1)
+    expect(dispose).toHaveBeenCalled()
+  })
+
   it('throws the candidate away when the write itself fails', async () => {
     const directory = await mkdtemp(path.join(tmpdir(), 'recap-video-candidate-'))
     const file = path.join(directory, 'recap.mp4')

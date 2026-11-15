@@ -5984,15 +5984,20 @@ On a wake that asks, the file variant of `write_recap` renders the show after
 its scenes and song upload and before the write. The host presents the draft
 with `presentGameRecap`, as the app's payload is made, and writes the verified
 scene and score bytes, the photos fetched again by reference, and the result's
-names, scores and `game.poster` into a host-only temporary directory outside
-the vault. The model's `game.json` never carries `poster`, so its input is the
-same with the flag on or off. The installed renderer's own `child.js` runs as a
-separate Node process in a new process group, with a 512 MB heap, an
-environment of `PATH`, `HOME` and `LANG` only, and a 180 s timeout; a timeout or
-a cancelled turn kills the whole group (the drawing process and ffmpeg), and the
-child kills its group itself when the runner's pipe closes or its own deadline
-passes. One render runs per runner at a time; a second recap meanwhile makes no
-video. The file goes up as `video-N` parts of at most 2,000,000 bytes and rides
+names, scores and `game.poster` into a render directory under the runner's
+own home (`.murph-recap-video/`), never under a temporary directory or the
+vault: the model's permission profile writes both of those, and a link planted
+there could make ffmpeg overwrite a file outside the sandbox. The model's
+`game.json` never carries `poster`, so its input is the same with the flag on
+or off. The installed renderer's own `child.js` runs as a separate Node process
+in a new process group, with a 512 MB heap and an environment of `PATH`, `HOME`
+and `LANG` only. One 180 s budget covers the photo fetches, the render and the
+part uploads; when it runs out the recap is written without a video. A
+cancelled turn kills the whole group (the drawing process and ffmpeg) and
+writes nothing; the child removes its directory and kills its group itself when
+the runner's pipe closes or its own deadline passes, and each render sweeps
+render directories a dead runner left. One render runs per runner at a time; a
+second recap meanwhile makes no video. The file goes up as `video-N` parts of at most 2,000,000 bytes and rides
 the write as a candidate. Every refusal, timeout, crash, oversized file, part
 Web refuses (`recap_video_unavailable` while the flag is off) or failed upload is
 "no video": the write is then byte-for-byte today's, and the candidate and the

@@ -5,10 +5,11 @@ import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { RecapAsset } from '@murphai/contracts/recap-show'
 import type { RecapVideoChildRequest } from '@murphai/recap-video'
-import { recapVideoParts, renderRecapShowVideo } from '../src/assistant/recap-video-render.js'
+import { recapVideoParts, recapVideoScratchRoot, renderRecapShowVideo } from '../src/assistant/recap-video-render.js'
 
 const roots: string[] = []
-afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
+let scratchRoot = ''
+afterEach(async () => { scratchRoot = ''; await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
 
 const ENTRY_REF = '1'.repeat(64), PROFILE_REF = '2'.repeat(64)
 const poster = { outcome: { kind: 'won', winnerMemberId: 'player-a', loserMemberId: 'player-b' },
@@ -46,11 +47,14 @@ ${body}\n`)
   return { childPath, seen }
 }
 
-const render = (childPath: string, extra: Partial<Parameters<typeof renderRecapShowVideo>[0]> = {}) => renderRecapShowVideo({
-  material: material(), story, assets, media, childPath, timeoutMs: 20_000,
-  fetchReference: async id => Buffer.from(`photo ${id.slice(0, 4)}`), ...extra,
-})
-const workDirectories = async () => (await readdir(os.tmpdir())).filter(name => name.startsWith('murph-recap-video-'))
+const render = async (childPath: string, extra: Partial<Parameters<typeof renderRecapShowVideo>[0]> & { timeoutMs?: number } = {}) => {
+  scratchRoot ||= await mkdtemp(path.join(os.tmpdir(), 'recap-video-scratch-'))
+  if (!roots.includes(scratchRoot)) roots.push(scratchRoot)
+  const { timeoutMs, ...rest } = extra
+  return renderRecapShowVideo({ vault: '/synthetic/vault', scratchRoot, material: material(), story, assets, media, childPath, deadlineAt: Date.now() + (timeoutMs ?? 20_000),
+    fetchReference: async id => Buffer.from(`photo ${id.slice(0, 4)}`), ...rest })
+}
+const workDirectories = async () => scratchRoot ? (await readdir(scratchRoot).catch(() => [])).filter(name => name.startsWith('render-')) : []
 const groupAlive = (pid: number) => { try { process.kill(-pid, 0); return true } catch { return false } }
 
 describe('recap video render step', () => {
@@ -160,6 +164,55 @@ describe('recap video render step', () => {
     expect(second).toEqual({ kind: 'refused', reason: 'busy' })
     expect(first.kind).toBe('rendered')
     if (first.kind === 'rendered') await first.dispose()
+  })
+
+  it('keeps renders where the model cannot reach them: never under a temporary directory or the vault', () => {
+    const home = process.env.HOME, hosted = process.env.HOSTED_HOME
+    try {
+      delete process.env.HOSTED_HOME
+      process.env.HOME = '/synthetic/runner-home'
+      expect(recapVideoScratchRoot('/synthetic/vault')).toBe('/synthetic/runner-home/.murph-recap-video')
+      expect(recapVideoScratchRoot('/synthetic/runner-home')).toBeNull()
+      process.env.HOSTED_HOME = path.join(os.tmpdir(), 'home')
+      expect(recapVideoScratchRoot('/synthetic/vault')).toBeNull()
+      process.env.HOSTED_HOME = '/tmp/home'
+      expect(recapVideoScratchRoot('/synthetic/vault')).toBeNull()
+    } finally {
+      if (home === undefined) delete process.env.HOME; else process.env.HOME = home
+      if (hosted === undefined) delete process.env.HOSTED_HOME; else process.env.HOSTED_HOME = hosted
+    }
+  })
+
+  it('turns a failure to set up into no video, never a failed recap', async () => {
+    const { childPath, seen } = await fakeChild(`say({ ok: true })`)
+    const file = path.join(await mkdtemp(path.join(os.tmpdir(), 'recap-video-blocked-')), 'not-a-directory')
+    roots.push(path.dirname(file))
+    await writeFile(file, 'x')
+    await expect(render(childPath, { scratchRoot: path.join(file, 'scratch') })).resolves.toEqual({ kind: 'refused', reason: 'error' })
+    await expect(render(childPath, { childPath: path.join(file, 'missing-child.js') })).resolves.toMatchObject({ kind: 'refused' })
+    await expect(access(seen)).rejects.toThrow()
+  })
+
+  it('counts the photo fetches against the same deadline as the render', async () => {
+    const { childPath, seen } = await fakeChild(`say({ ok: true })`)
+    const slow = (_id: string, signal: AbortSignal) => new Promise<Buffer>((_resolve, reject) => signal.addEventListener('abort', () => reject(signal.reason)))
+    await expect(render(childPath, { timeoutMs: 300, fetchReference: slow })).resolves.toEqual({ kind: 'refused', reason: 'timeout' })
+    await expect(access(seen)).rejects.toThrow()
+    expect(await workDirectories()).toEqual([])
+  })
+
+  it('removes what a dead runner left behind before the next render', async () => {
+    const { childPath } = await fakeChild(`writeFileSync(request.outPath, 'x'); say({ ok: true, bytes: 1, frames: 1, drawMs: 1, encoder: null })`)
+    scratchRoot = await mkdtemp(path.join(os.tmpdir(), 'recap-video-scratch-')); roots.push(scratchRoot)
+    const stale = path.join(scratchRoot, 'render-stale'), fresh = path.join(scratchRoot, 'render-fresh')
+    for (const directory of [stale, fresh]) await writeFile(directory, 'x')
+    const { utimes } = await import('node:fs/promises')
+    await utimes(stale, new Date(Date.now() - 3_600_000), new Date(Date.now() - 3_600_000))
+    const rendered = await render(childPath)
+    expect(rendered.kind).toBe('rendered')
+    await expect(access(stale)).rejects.toThrow()
+    await expect(access(fresh)).resolves.toBeUndefined()
+    if (rendered.kind === 'rendered') await rendered.dispose()
   })
 
   it('cuts the file into the parts it is stored in, in order', () => {
