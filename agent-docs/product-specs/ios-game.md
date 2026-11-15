@@ -105,6 +105,17 @@ can take it back with
 no new view field. An open day, a day off and a photo or heart-rate game are
 refused, and nobody can count a day for someone else.
 
+A two-player game keeps taking both corrections for 7 days after it ends, in
+the same chat and under the same rules. The result, the won/lost/tied record
+and the prize follow the corrected days: a prize that is no longer owed leaves
+the Prizes wallet, a newly owed one appears, and a prize already marked done
+stays as it was. The app needs no change, because Home, past games, records
+and the wallet already show the server's result and tickets, and the day rows
+change with them. The recap is left as made: its score and prize pages follow
+the new result, while Murph's written pages and song may still name the old
+winner. Murph says so in the one chat line that reports a changed result. After
+7 days the result is final. Group games do not have this window.
+
 Authenticated group invite previews include optional `canTalk`; absence means
 unavailable. Submit the existing `/invites/:token/negotiate` request with
 `{proposalId, termsVersion, timeZone, note}` and reuse its ID on retry. Success

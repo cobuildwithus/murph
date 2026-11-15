@@ -483,4 +483,10 @@ it("uses accepted speaker authority for day corrections and returns only the sha
   const result = await handleGameChatTool({ ...read, request: { action: "update_game", origin, update: { gameId: "game_synthetic", operation: "mark_incomplete", date: "2030-04-01" } } });
   expect(m.run).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ actorMemberId: actor, chatContainerMemberId: group, update: { operation: "mark_incomplete", gameId: "game_synthetic", date: "2030-04-01" } }));
   expect(result).toEqual({ action: "update_game", result: { status: "ok", state: { games: [] }, dayOutcome } });
+  // A correction that changed a finished game's outcome also returns the one line that says so, and nothing private.
+  const chatLine = "Alex's check-in for Monday, April 1 no longer counts. That changes the result. Sam won 6–5.";
+  m.run.mockResolvedValue({ ok: true, game: { private: "never shared" }, dayOutcome, chatLine });
+  const changed = await handleGameChatTool({ ...read, request: { action: "update_game", origin, update: { gameId: "game_synthetic", operation: "mark_incomplete", date: "2030-04-01" } } });
+  expect(changed).toEqual({ action: "update_game", result: { status: "ok", state: { games: [] }, dayOutcome, chatLine } });
+  expect(hostedGameToolResponseSchema.parse(changed)).toEqual(changed);
 });

@@ -45,6 +45,7 @@ export async function handleGameChatTool(input: Input): Promise<HostedGameToolRe
   catch { return { action: input.request.action, result: { status: "unavailable", error: "Use the game’s exact group chat with Murph, or start in the app." } }; }
   if (!supportsGameChatRoster(input, playerMemberIds) || !playerMemberIds.includes(actor)) return { action: input.request.action, result: { status: "unavailable", error: "game_player_unavailable" } };
   let dayOutcome: Extract<Awaited<ReturnType<typeof runGameCommand>>, { ok: true }>["dayOutcome"];
+  let chatLine: string | undefined;
   let photoResult: Awaited<ReturnType<typeof handleGameChatPhoto>> | null = null;
   if (input.request.action === "game_photo") {
     const photo = input.request.photo;
@@ -78,13 +79,16 @@ export async function handleGameChatTool(input: Input): Promise<HostedGameToolRe
     if (!result.ok) return { action: input.request.action, result: { status: "rejected", error: `${result.error.code}: ${result.error.message}`.slice(0, 128) } };
     if (update.operation === "set_reminder") return { action: "update_game", result: { status: "ok", reaches: result.reaches ?? "none" } };
     dayOutcome = result.dayOutcome;
+    chatLine = result.chatLine;
   }
   if (input.request.action !== "read_game") {
     const refreshed = await refreshGameChatAudience(input, playerMemberIds);
     if (!refreshed) throw new TypeError("Game chat participants changed.");
     input = refreshed;
   }
-  return gameChatToolResponse(input, playerMemberIds, actor, dayOutcome, photoResult);
+  const response = await gameChatToolResponse(input, playerMemberIds, actor, dayOutcome, photoResult);
+  // A day correction that changed a finished game's outcome carries the one line that says so.
+  return chatLine ? { ...response, result: { ...response.result, chatLine } } : response;
 }
 
 /** Preserve the fresh complete handle proof through the post-mutation projection. */
