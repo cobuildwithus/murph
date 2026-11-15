@@ -3,7 +3,13 @@ import { createHash } from 'node:crypto'
 import { constants } from 'node:fs'
 import { lstat, mkdir, open, realpath } from 'node:fs/promises'
 import path from 'node:path'
-import { gameRecapDraftSchema } from '@murphai/contracts/recap-show'
+import { gameRecapDraftSchema, recapMusicPageKinds, type GameRecapStory } from '@murphai/contracts/recap-show'
+
+export const RECAP_SCORE_MISMATCH = 'The song was made for different pages, lyrics or style. Generate it again from this draft, or remove it from files and submit without a song.'
+
+export function recapScoreSignature(story: GameRecapStory): string {
+  return createHash('sha256').update(JSON.stringify([recapMusicPageKinds(story), story.song?.style, story.song?.lyrics])).digest('hex')
+}
 
 /** Refuse symlinks, including intermediate components, before trusted file IO. */
 export async function recapDirectory(vault: string, relative: string): Promise<string> {

@@ -5902,8 +5902,11 @@ directory is runtime scratch under `.runtime/tmp`, which a saved workspace never
 includes, so players' photos, generated media and the chat copy last only as
 long as the container. A resumed attempt reads the game again.
 The recap turn, never a model argument, makes media a file and fixes its format:
-the agent supplies a prompt and reference photos for each JPEG scene and a style
-and lyrics for the twenty-second song, then calls `write_recap` once. The host uploads selected bytes and Web publishes
+the agent supplies a prompt and reference photos for each JPEG scene and a
+draft path plus singer description for the continuous score, then calls
+`write_recap` once. The host derives five-second page cues and a twenty-second
+sung chunk from that draft. One song asset serves the full score and a
+frame-aligned song slice; the native contract owns their clocks. The host uploads selected bytes and Web publishes
 through the canonical transaction, retaining the current source authorization,
 asset retirement and replay owners. One accepted story owns one chat line plus
 link with no chat media. Groups retain their existing writer rules and payload.
@@ -5934,6 +5937,47 @@ permanent retirement tombstones prevent late uploads from restoring access.
 A refreshed fallback selection derives a fresh cover key from its frozen deadline
 and content, retaining the current cover atomically with acceptance; expired
 receipts and tombstones remain terminal across mailbox retries.
+
+A pair show's envelope may also hold one recap `video`: a single MP4 stored as
+up to four sealed parts of at most 2,000,000 bytes on the same receipts, keys
+(`recap/<generation>/<sha256>.mp4`) and tombstones as scenes and the song. Only
+the whole file has a hash, a length, a duration, a frame size and one
+deduplicated source list, which includes every source of the scenes it shows;
+parts are not assets and the limit of five assets is unchanged. A write brings a
+candidate. Web joins the staged parts outside the transaction, checks the
+declared hash, walks the MP4's boxes for its duration and frame size, resolves
+the declared sources itself, and leaves a candidate that fails any test off the
+accepted recap. The request carries the candidate unparsed, so one Web cannot
+read costs the video and never the recap. The video's own sources are checked
+when it is selected and again on every read; the accepting transaction rechecks
+only the assets' sources, so a source that changes in between leaves a video
+nobody can open, not a failed recap. The first acceptance decides the video: a retried or replayed
+write gets the stored recap, and write and recovery results name the accepted
+video (generation, hash, length) or `null` only to a runtime that asked, so an
+older runtime never sees the field. `recapStorageObjects` lists a recap's
+stored objects for receipt retention and serving; a part is served as
+`video-<index>` through the asset route under its parent video's sources, the
+media switch and the generation. Retirement is by game and generation, so
+regeneration, a post removed for everyone and account deletion retire parts
+with no code of their own. `MURPH_GAME_RECAP_VIDEO_ENABLED=true` (pair shows
+only) lets Web stage parts, accept a candidate and add `game.poster` to the
+recap material; stored videos stay readable while it is off. Nothing renders,
+uploads or sends a video yet. The envelope reader is the Web rollback floor
+once a video is stored: the previous release refuses an envelope with `video`.
+Live Web protocol admission carries a `recapVideo` witness, so a runtime is not
+activated against a Web that cannot read these requests.
+
+The runtime reads the same feature before anything writes it. A recap wake's
+response policy may carry `video: true`, for a pair show only; the parser, the
+saved pending state and the recap scope accept it, and the turn runs unchanged.
+A stored outbox intent may carry `recapVideo`: the accepted identity plus
+whatever the delivery owner records beside it. The intent reader keeps extra
+keys, drops a value that is not an identity instead of quarantining the intent,
+keeps the field across ownership-checked rewrites and sends the text alone.
+Tool results may name the accepted video. A runtime before this release refuses
+a wake with `video` and quarantines an intent with `recapVideo`, so this release
+is the runtime's rollback floor once Web queues such a wake or a later release
+stores such an intent.
 Accepted media uses private generation URLs; a thirty-day opaque cover capability
 exposes only a composed cover. Failed scenes retain their text, failed songs are
 omitted, and exhausted generation uses a validated three-page plain fallback.

@@ -214,12 +214,32 @@ function parseHostedElevenLabsDetailedMusicRequestBody(record: Record<string, un
     || typeof modelId !== "string" || !isHostedAiUsageAllowanceElevenLabsMusicPricedModelId(modelId)
     || record.with_timestamps !== true) return null;
   const plan = asRecord(record.composition_plan);
-  if (!plan || !hasExactKeys(plan, ["chunks"]) || !Array.isArray(plan.chunks) || plan.chunks.length !== 1) return null;
-  const chunk = parseDetailedMusicChunk(plan.chunks[0]);
-  if (!chunk) return null;
-  return { kind: "music", modelId, durationMs: chunk.duration_ms, upstreamBody: JSON.stringify({
-    model_id: modelId, with_timestamps: true, composition_plan: { chunks: [chunk] },
+  if (!plan || !hasExactKeys(plan, ["chunks"]) || !Array.isArray(plan.chunks) || !plan.chunks.length || plan.chunks.length > 10) return null;
+  const values = plan.chunks;
+  const chunks = values.length === 1 ? [parseDetailedMusicChunk(values[0])]
+    : values.map((value, index) => parseScoreMusicChunk(value, index === values.length - 1));
+  if (chunks.some(chunk => !chunk)) return null;
+  const valid = chunks.filter((chunk): chunk is NonNullable<typeof chunk> => chunk !== null);
+  return { kind: "music", modelId, durationMs: valid.reduce((sum, chunk) => sum + chunk.duration_ms, 0), upstreamBody: JSON.stringify({
+    model_id: modelId, with_timestamps: true, composition_plan: { chunks: valid },
   }) };
+}
+
+function parseScoreMusicChunk(value: unknown, sung: boolean) {
+  const chunk = asRecord(value);
+  if (!chunk || !hasExactKeys(chunk, ["text", "duration_ms", "positive_styles", "negative_styles", "context_adherence"])
+    || chunk.context_adherence !== "high" || chunk.duration_ms !== (sung ? 20_000 : 5000)
+    || typeof chunk.text !== "string" || !chunk.text.trim() || chunk.text.length > 4120
+    || chunk.text.split("\n").length > 21 || chunk.text.split("\n").some(line => !line.trim() || line.length > 200 || line.includes("\r"))) return null;
+  const positive = boundedStyles(chunk.positive_styles), negative = boundedStyles(chunk.negative_styles);
+  if (!positive || !negative) return null;
+  return { text: chunk.text, duration_ms: sung ? 20_000 : 5000, positive_styles: positive, negative_styles: negative, context_adherence: "high" };
+}
+
+function boundedStyles(value: unknown): string[] | null {
+  if (!Array.isArray(value) || !value.length || value.length > 12) return null;
+  const styles = value.map(style => normalizeHostedElevenLabsString(style, 2000));
+  return styles.every((style): style is string => style !== null) ? styles : null;
 }
 
 function parseDetailedMusicChunk(value: unknown) {

@@ -78,7 +78,7 @@ describe("Junction extended-history coverage reset", () => {
     }
     const future = {
       ...current,
-      [matrixKey]: matrixValue.replace(/^m2\|/u, "m3|"),
+      [matrixKey]: matrixValue.replace(/^m3\|/u, "m4|"),
     };
     const malformed = { [matrixKey]: "not-a-coverage-matrix" };
 
@@ -94,43 +94,42 @@ describe("Junction extended-history coverage reset", () => {
       resource: "weight",
       version: historyCoverageVersion("weight"),
     })).toBeNull();
-    expect(future[matrixKey]).toBe(matrixValue.replace(/^m2\|/u, "m3|"));
+    expect(future[matrixKey]).toBe(matrixValue.replace(/^m3\|/u, "m4|"));
     expect(malformed[matrixKey]).toBe("not-a-coverage-matrix");
   });
 });
 
 describe("Junction historical backfill progress versions", () => {
-  it("writes coverage v3 while continuing to read legacy v2 progress", () => {
-    expect(JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION).toBe(3);
-    expect(encodeJunctionHistoricalBackfillStatus("complete")).toBe("coverage_v3_complete");
+  it("writes coverage v4 while continuing to read older progress", () => {
+    expect(JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION).toBe(4);
+    expect(encodeJunctionHistoricalBackfillStatus("complete")).toBe("coverage_v4_complete");
     expect(readJunctionHistoricalBackfillStatus("coverage_v2_retrying")).toEqual({
       coverageVersion: 2,
       status: "retrying",
     });
-    expect(canCurrentRuntimeMutateJunctionHistoricalBackfillProgress({
-      junctionHistoricalBackfillStatus: "coverage_v2_complete",
-    })).toBe(true);
-    expect(canCurrentRuntimeMutateJunctionHistoricalBackfillProgress({
-      junctionHistoricalBackfillStatus: "coverage_v3_complete",
-    })).toBe(true);
+    for (const status of ["coverage_v2_complete", "coverage_v3_complete", "coverage_v4_complete"]) {
+      expect(canCurrentRuntimeMutateJunctionHistoricalBackfillProgress({
+        junctionHistoricalBackfillStatus: status,
+      })).toBe(true);
+    }
   });
 
   it("leaves future coverage versions opaque and immutable", () => {
     expect(canCurrentRuntimeMutateJunctionHistoricalBackfillProgress({
-      junctionHistoricalBackfillStatus: "coverage_v4_deferred",
+      junctionHistoricalBackfillStatus: "coverage_v5_deferred",
     })).toBe(false);
 
     const opaqueEvidence = "e3|opaque-future-evidence";
     const result = mergeHostedJunctionHistoricalBackfillMetadata({
       hostedMetadata: {
         junctionHistoricalBackfillEvidence: opaqueEvidence,
-        junctionHistoricalBackfillStatus: "coverage_v4_deferred",
+        junctionHistoricalBackfillStatus: "coverage_v5_deferred",
       },
       localConnectionStateUnpublished: true,
       localMetadata: {
         junctionHistoricalBackfillEvidence:
           `e2|${WINDOW_START}|${WINDOW_END}|garmin:1`,
-        junctionHistoricalBackfillStatus: "coverage_v3_complete",
+        junctionHistoricalBackfillStatus: "coverage_v4_complete",
         junctionHistoricalBackfillWindowStart: WINDOW_START,
         junctionHistoricalBackfillWindowEnd: WINDOW_END,
       },
@@ -139,24 +138,24 @@ describe("Junction historical backfill progress versions", () => {
     expect(result).toEqual({
       metadata: {
         junctionHistoricalBackfillEvidence: opaqueEvidence,
-        junctionHistoricalBackfillStatus: "coverage_v4_deferred",
+        junctionHistoricalBackfillStatus: "coverage_v5_deferred",
       },
       preservedLocalProgress: false,
     });
 
     expect(mergeHostedJunctionHistoricalBackfillMetadata({
       hostedMetadata: {
-        junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+        junctionHistoricalBackfillStatus: "coverage_v4_retrying",
       },
       localConnectionStateUnpublished: true,
       localMetadata: {
         junctionHistoricalBackfillEvidence: opaqueEvidence,
-        junctionHistoricalBackfillStatus: "coverage_v4_deferred",
+        junctionHistoricalBackfillStatus: "coverage_v5_deferred",
       },
     })).toEqual({
       metadata: {
         junctionHistoricalBackfillEvidence: opaqueEvidence,
-        junctionHistoricalBackfillStatus: "coverage_v4_deferred",
+        junctionHistoricalBackfillStatus: "coverage_v5_deferred",
       },
       preservedLocalProgress: true,
     });
@@ -208,7 +207,7 @@ describe("Junction extended timeseries history coverage", () => {
     if (typeof encoded !== "string") {
       throw new TypeError("Expected encoded Junction extended-history coverage.");
     }
-    expect(encoded.startsWith("m2|")).toBe(true);
+    expect(encoded.startsWith("m3|")).toBe(true);
     expect(encoded).toHaveLength(211);
     expect(encoded.length).toBeLessThanOrEqual(DEVICE_SYNC_METADATA_MAX_STRING_LENGTH);
     expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
@@ -224,7 +223,7 @@ describe("Junction extended timeseries history coverage", () => {
       historyCoverageVersion("caffeine"),
     )).toBe(false);
     expect(canCurrentRuntimeMutateJunctionExtendedTimeseriesHistoryBackfillCoverage(
-      { junctionBloodPressureHistoryBackfillCoverage: `m3|${"0".repeat(192)}` },
+      { junctionBloodPressureHistoryBackfillCoverage: `m4|${"0".repeat(192)}` },
       "caffeine",
       historyCoverageVersion("caffeine"),
     )).toBe(false);
@@ -257,7 +256,7 @@ describe("Junction extended timeseries history coverage", () => {
     )).toBe(true);
   });
 
-  it("reopens every current resource when coverage uses the prior packed generation", () => {
+  it("reopens every current resource when coverage uses the pre-180-day packed generation", () => {
     expect(JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_VERSIONS).toEqual([
       ["blood_pressure", 2],
       ["note", 3],
@@ -271,7 +270,7 @@ describe("Junction extended timeseries history coverage", () => {
       ["sleep_breathing_disturbance", 2],
       ["vo2_max", 2],
       ["water", 2],
-      ["weight", 2],
+      ["weight", 3],
     ]);
 
     let current: Record<string, unknown> = {};
@@ -285,7 +284,7 @@ describe("Junction extended timeseries history coverage", () => {
       throw new TypeError("Expected current packed Junction history coverage.");
     }
     const prior = {
-      [matrixKey]: currentValue.replace(/^m2\|/u, "m1|"),
+      [matrixKey]: currentValue.replace(/^m3\|/u, "m1|"),
     };
 
     for (const [resource, version] of JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_VERSIONS) {
@@ -303,7 +302,7 @@ describe("Junction extended timeseries history coverage", () => {
     }
 
     const currentCaffeine = addCoverage(prior, "garmin", "caffeine");
-    expect(String(currentCaffeine[matrixKey]).startsWith("m2|")).toBe(true);
+    expect(String(currentCaffeine[matrixKey]).startsWith("m3|")).toBe(true);
     expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
       currentCaffeine,
       "garmin",
@@ -316,6 +315,68 @@ describe("Junction extended timeseries history coverage", () => {
       "water",
       historyCoverageVersion("water"),
     )).toBe(false);
+  });
+
+  it("reads the prior packed generation without its weight column", () => {
+    let current: Record<string, unknown> = {};
+    for (const [providerSlug, resource] of [
+      ["withings", "weight"], ["withings", "blood_pressure"], ["garmin", "weight"], ["garmin", "vo2_max"],
+    ] as const) {
+      current = addCoverage(current, providerSlug, resource);
+    }
+    const prior = toPriorMatrixGeneration(current);
+
+    // Weight was certified while fetched weight rows were being dropped.
+    for (const [providerSlug, resource, covered] of [
+      ["withings", "weight", false], ["garmin", "weight", false],
+      ["withings", "blood_pressure", true], ["garmin", "vo2_max", true],
+    ] as const) {
+      expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+        prior, providerSlug, resource, historyCoverageVersion(resource),
+      ), `${providerSlug} ${resource}`).toBe(covered);
+      expect(canCurrentRuntimeMutateJunctionExtendedTimeseriesHistoryBackfillCoverage(
+        prior, resource, historyCoverageVersion(resource),
+      )).toBe(true);
+    }
+
+    // Re-reading one source's weight writes the current generation and keeps
+    // every bit that still stands.
+    const reread = addCoverage(prior, "withings", "weight");
+    expect(Object.values(reread).every((value) => String(value).startsWith("m3|"))).toBe(true);
+    for (const [providerSlug, resource, covered] of [
+      ["withings", "weight", true], ["garmin", "weight", false],
+      ["withings", "blood_pressure", true], ["garmin", "vo2_max", true],
+    ] as const) {
+      expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+        reread, providerSlug, resource, historyCoverageVersion(resource),
+      ), `${providerSlug} ${resource}`).toBe(covered);
+    }
+  });
+
+  it("keeps a re-read weight bit when the other side still holds the prior generation", () => {
+    const hosted = toPriorMatrixGeneration(
+      addCoverage(addCoverage({}, "withings", "weight"), "withings", "blood_pressure"),
+    );
+    const reread = addCoverage(hosted, "withings", "weight");
+
+    for (const [hostedMetadata, localMetadata, weightCovered] of [
+      // The runner re-read weight; Web still holds what the last generation wrote.
+      [hosted, reread, true],
+      // Web already holds the re-read; a stale local copy cannot retire it.
+      [reread, hosted, true],
+      // Neither side has re-read it.
+      [hosted, hosted, false],
+    ] as const) {
+      const merged = mergeHostedJunctionHistoricalBackfillMetadata({
+        hostedMetadata, localConnectionStateUnpublished: true, localMetadata,
+      }).metadata;
+      expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+        merged, "withings", "weight", historyCoverageVersion("weight"),
+      )).toBe(weightCovered);
+      expect(hasJunctionExtendedTimeseriesHistoryBackfillCoverage(
+        merged, "withings", "blood_pressure", historyCoverageVersion("blood_pressure"),
+      )).toBe(true);
+    }
   });
 
   it("unions unpublished local resource bits without losing hosted coverage", () => {
@@ -434,7 +495,7 @@ describe("Junction extended timeseries history coverage", () => {
 
   it("updates a full legacy metadata envelope without evicting another owner", () => {
     const existing = {
-      junctionHistoricalBackfillStatus: "coverage_v3_complete",
+      junctionHistoricalBackfillStatus: "coverage_v4_complete",
       junctionHistoricalBackfillEmptyAttempts: 0,
       junctionHistoricalBackfillLastEmptyAt: null,
       junctionHistoricalBackfillWindowStart: WINDOW_START,
@@ -544,6 +605,14 @@ function requireCoverageUpdate(
     throw new TypeError("Expected representable Junction extended-history coverage.");
   }
   return update;
+}
+
+/** The same bits as the last envelope generation stored them. */
+function toPriorMatrixGeneration(metadata: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(metadata).map(([key, value]) => [
+    key,
+    typeof value === "string" ? value.replace(/^m3\|/u, "m2|") : value,
+  ]));
 }
 
 function historyCoverageVersion(resource: string): number {

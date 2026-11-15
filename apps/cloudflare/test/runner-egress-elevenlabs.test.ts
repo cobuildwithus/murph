@@ -8,6 +8,23 @@ const parse = (value: unknown, pathnameSuffix = '/v1/music/detailed') => parseHo
   body: new TextEncoder().encode(JSON.stringify(value)).buffer, contentType: 'application/json', pathnameSuffix,
 });
 
+const instrumental = { text: '[Intro]', duration_ms: 5000, positive_styles: ['Piano', '96 BPM', '4/4', 'instrumental'], negative_styles: ['vocals', 'lyrics', 'singing', 'spoken word'], context_adherence: 'high' };
+const sung = { text: '[Chorus]\nHello friend', duration_ms: 20_000, positive_styles: ['Piano', 'Warm voice'], negative_styles: ['instrumental intro'], context_adherence: 'high' };
+it.each([1, 4, 9])('accepts %s instrumental chunks plus the sung chunk and records their total duration', count => {
+  const body = { ...request, composition_plan: { chunks: [...Array.from({ length: count }, () => instrumental), sung] } };
+  const result = parse(body);
+  expect(result).toMatchObject({ kind: "music", durationMs: count * 5000 + 20_000 });
+  expect(JSON.parse(result!.upstreamBody)).toEqual(body);
+});
+it('refuses malformed scores without loosening the legacy shape', () => {
+  const withChunks = (chunks: unknown[]) => ({ ...request, composition_plan: { chunks } });
+  for (const chunks of [[], Array(11).fill(instrumental), [sung, instrumental], [instrumental, instrumental],
+    [{ ...instrumental, duration_ms: 5001 }, sung], [{ ...instrumental, context_adherence: 'low' }, sung],
+    [{ ...instrumental, extra: true }, sung], [{ ...instrumental, positive_styles: Array(13).fill('a') }, sung],
+    [instrumental, { ...sung, text: 'x'.repeat(201) }], [instrumental, { ...sung, negative_styles: [''] }],
+  ]) expect(parse(withChunks(chunks))).toBeNull();
+});
+
 it('admits only the bounded detailed song endpoint and derives usage duration from its one chunk', () => {
   const url = new URL('https://api.elevenlabs.io/v1/music/detailed?output_format=mp3_48000_192');
   expect(isAllowedElevenLabsRequest(new Request(url, { method: 'POST' }), url, url.pathname)).toBe(true);

@@ -271,6 +271,8 @@ export type HostedExecutionAssistantNotificationResponsePolicy =
       pairFingerprint: string;
       loreAccess?: "read";
       show?: true;
+      /** Web asks for the show as one video too. Durable in queued wakes and saved pending state. */
+      video?: true;
     }
   | {
       kind: "game_missed_check_in";

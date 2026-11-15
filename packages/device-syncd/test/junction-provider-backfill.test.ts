@@ -1164,7 +1164,7 @@ test("Junction empty historical backfill records progress and stores the retry w
 
   assert.equal(importedSnapshots.length, 0);
   assert.deepEqual(result.metadataPatch, {
-    junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+    junctionHistoricalBackfillStatus: "coverage_v4_retrying",
     junctionHistoricalBackfillEmptyAttempts: 1,
     junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -1238,7 +1238,7 @@ test("Junction due historical backfill retry does not make ordinary reconcile ow
     account: createAccount({
       connectedAt: "2026-04-03T00:00:00.000Z",
       metadata: {
-        junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+        junctionHistoricalBackfillStatus: "coverage_v4_retrying",
         junctionHistoricalBackfillEmptyAttempts: 1,
         junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
         junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -1298,7 +1298,7 @@ test("Junction materialized due historical backfill retry advances normal reconc
     account: createAccount({
       connectedAt: "2026-04-03T00:00:00.000Z",
       metadata: {
-        junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+        junctionHistoricalBackfillStatus: "coverage_v4_retrying",
         junctionHistoricalBackfillEmptyAttempts: 1,
         junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
         junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -1317,7 +1317,7 @@ test("Junction materialized due historical backfill retry advances normal reconc
     }),
   );
 
-  assert.equal(result.metadataPatch?.junctionHistoricalBackfillStatus, "coverage_v3_complete");
+  assert.equal(result.metadataPatch?.junctionHistoricalBackfillStatus, "coverage_v4_complete");
   assert.equal(result.nextReconcileAt, "2026-04-04T01:15:00.000Z");
 });
 
@@ -1326,7 +1326,7 @@ test("Junction exact-window backfill preserves a pending metadata retry before i
     reconcileIntervalMs: 60 * 60_000,
   });
   const metadata = {
-    junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+    junctionHistoricalBackfillStatus: "coverage_v4_retrying",
     junctionHistoricalBackfillEmptyAttempts: 1,
     junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -1359,7 +1359,7 @@ test("Junction retrying historical backfill without attempts uses the first retr
   const executor = requireValue(provider.jobExecutor, "Junction provider should expose a job executor.");
   const retryingAccount = createStoredAccount({
     metadata: {
-      junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+      junctionHistoricalBackfillStatus: "coverage_v4_retrying",
       junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
       junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
       junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
@@ -1890,7 +1890,7 @@ test("Junction useful daily history completes when an available sparse body reso
   );
 
   assert.deepEqual(result.metadataPatch, {
-    junctionHistoricalBackfillStatus: "coverage_v3_complete",
+    junctionHistoricalBackfillStatus: "coverage_v4_complete",
     junctionHistoricalBackfillEmptyAttempts: 0,
     junctionHistoricalBackfillLastEmptyAt: null,
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -1953,7 +1953,7 @@ test("Junction connected sources with only sparse resources have no completion o
   );
 
   assert.deepEqual(result.metadataPatch, {
-    junctionHistoricalBackfillStatus: "coverage_v3_complete",
+    junctionHistoricalBackfillStatus: "coverage_v4_complete",
     junctionHistoricalBackfillEmptyAttempts: 0,
     junctionHistoricalBackfillLastEmptyAt: null,
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -2015,7 +2015,7 @@ test("Junction partial activity history does not complete advertised sleep histo
   );
 
   assert.deepEqual(result.metadataPatch, {
-    junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+    junctionHistoricalBackfillStatus: "coverage_v4_retrying",
     junctionHistoricalBackfillEmptyAttempts: 1,
     junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -2093,7 +2093,7 @@ test("Junction historical coverage does not let one source satisfy another sourc
     }),
   );
 
-  assert.equal(result.metadataPatch?.junctionHistoricalBackfillStatus, "coverage_v3_retrying");
+  assert.equal(result.metadataPatch?.junctionHistoricalBackfillStatus, "coverage_v4_retrying");
   assert.equal(result.metadataPatch?.junctionHistoricalBackfillEmptyAttempts, 1);
   assertConnectBackfillRetryWake(result, "2026-04-04T00:15:00.000Z");
   assert.equal(importedSnapshots.length, 1);
@@ -2128,7 +2128,7 @@ test("Junction Apple Health success completes a 180-day Murph window even with z
   );
 
   assert.deepEqual(result.metadataPatch, {
-    junctionHistoricalBackfillStatus: "coverage_v3_complete",
+    junctionHistoricalBackfillStatus: "coverage_v4_complete",
     junctionHistoricalBackfillEmptyAttempts: 0,
     junctionHistoricalBackfillLastEmptyAt: null,
     junctionHistoricalBackfillWindowStart: "2025-10-05T00:00:00.000Z",
@@ -2156,7 +2156,7 @@ test("Junction Apple Health not_pulled resources create no historical obligation
     }),
   );
 
-  assert.equal(result.metadataPatch?.junctionHistoricalBackfillStatus, "coverage_v3_complete");
+  assert.equal(result.metadataPatch?.junctionHistoricalBackfillStatus, "coverage_v4_complete");
 });
 
 for (const testCase of [
@@ -2191,7 +2191,7 @@ for (const testCase of [
       createJunctionJobContext({
         account: createAccount({
           metadata: {
-            junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+            junctionHistoricalBackfillStatus: "coverage_v4_retrying",
             junctionHistoricalBackfillEmptyAttempts: 4,
             junctionHistoricalBackfillLastEmptyAt: "2026-04-02T00:00:00.000Z",
             junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -2209,7 +2209,7 @@ for (const testCase of [
       }),
     );
 
-    assert.equal(result.metadataPatch?.junctionHistoricalBackfillStatus, "coverage_v3_retrying");
+    assert.equal(result.metadataPatch?.junctionHistoricalBackfillStatus, "coverage_v4_retrying");
     assert.equal(result.metadataPatch?.junctionHistoricalBackfillEmptyAttempts, 4);
     assertConnectBackfillRetryWake(result, "2026-04-04T00:00:00.000Z");
     assert.equal(
@@ -2242,7 +2242,7 @@ test("Junction Oura historical failure stays retrying and never asks for a share
     createJunctionJobContext({
       account: createAccount({
         metadata: {
-          junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+          junctionHistoricalBackfillStatus: "coverage_v4_retrying",
           junctionHistoricalBackfillEmptyAttempts: 4,
           junctionHistoricalBackfillLastEmptyAt: "2026-04-02T00:00:00.000Z",
           junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -2260,7 +2260,7 @@ test("Junction Oura historical failure stays retrying and never asks for a share
     }),
   );
 
-  assert.equal(result.metadataPatch?.junctionHistoricalBackfillStatus, "coverage_v3_retrying");
+  assert.equal(result.metadataPatch?.junctionHistoricalBackfillStatus, "coverage_v4_retrying");
   assert.equal(result.metadataPatch?.junctionHistoricalBackfillEmptyAttempts, 4);
   assertConnectBackfillRetryWake(result, "2026-04-04T00:00:00.000Z");
   assert.equal(
@@ -2315,7 +2315,7 @@ test("Junction introspection failure falls back to canonical summaries without f
     }),
   );
 
-  assert.equal(result.metadataPatch?.junctionHistoricalBackfillStatus, "coverage_v3_complete");
+  assert.equal(result.metadataPatch?.junctionHistoricalBackfillStatus, "coverage_v4_complete");
   assert.equal(importedSnapshots.length, 1);
   assert.deepEqual(warnings, [
     "Junction historical-pull introspection was unavailable; using canonical import evidence.",

@@ -694,6 +694,8 @@ resulting avatar. No private photo is shared with the subject or other players.
   The presentation payload and decoder fixtures remain compatible with iOS build
   96. MURPH_GAME_RECAP_SHOW_ENABLED remains the producer flag;
   MURPH_GAME_RECAP_MEDIA_VISIBLE=false hides generated media and cover previews.
+  MURPH_GAME_RECAP_VIDEO_ENABLED=true lets Web store one recap video with a pair
+  show; it is off, and nothing renders or sends a video yet.
   MURPH_GAME_RECAP_MEDIA_DIR is local-test storage only. No production regeneration
   is part of implementation or local proof.
 
@@ -1046,6 +1048,44 @@ Deploy the additive migration, then the complete Web backend, then the native
 client. Once a reply or reply report exists, this Web release is the rollback
 floor. Disable new replies with a forward fix that preserves reads, playback,
 delete and report review. Privacy Policy/version changes ship separately.
+
+## Typed-word game ideas
+
+Ordinary game-creation suggestions stay in the native app's bundled bank.
+Typing in More ideas can call `POST /api/game/v1/ideas` for fresh task, prize or
+dare suggestions. It requires game member auth and a valid request of at most
+16 KiB. The request carries step, optional category, relationship kind, apart,
+up to six direction labels, required trimmed words (1-120 characters), optional
+chosen task (up to 120 characters for stakes), and up to 24 skipped texts.
+Labels are at most 30 characters and skipped texts at most 40 characters.
+It returns `{ ok: true, ideas: [{ text, schedule }] }`, zero to nine ideas,
+with private/no-store caching. Schedules are `every_day`, `weekdays` or
+`three_days`; stakes always use `every_day`.
+
+OpenAI receives those fields only. Neither the app nor the server attaches
+names, numbers, private relationship labels or member identifiers. Typed words
+can contain anything a member writes, including personal details; the task and
+skipped texts can also contain member-authored text. This optional action sends
+creation context before a stake is agreed. The route does not save that context
+or its suggestions. Writing uses `store: false` and shares the existing
+`OPENAI_API_KEY`; `HOSTED_GAME_IDEAS=off` disables provider work, default on.
+
+The app keeps bank ideas while waiting and on any failure, including missing
+route, rate limit, offline, malformed response and server error. The server
+returns empty ideas on provider error, malformed output or its shared eight-
+second deadline. Auth, input and rate-limit errors keep their normal statuses.
+One budget of 30 requests per member per 10 minutes covers all steps. At most
+two writes and two checks occur, outside database transactions. The live check
+copies the rule text in `murph-ios/scripts/game-ideas/build.mjs`; update both.
+Manual-entry acceptance remains unchanged, including ordinary alcohol-related
+wording. Suggestions have stricter rules and are checked after cleanup.
+
+`GET /api/game/v1/home` adds optional caller-only `me.areaCode`, three digits
+from the caller's verified NANP phone. Missing means unknown. It is never the
+other player's phone or area code. Native distance inference can compare this
+hint with a locally picked contact and fall back to near when either is absent.
+Old clients ignore the new field. No migration or coordinated deployment is
+needed; new clients retain bank ideas when talking to an older server.
 
 ## Prove it
 

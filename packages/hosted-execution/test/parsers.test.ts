@@ -4560,5 +4560,36 @@ describe("game recap lore response policy", () => {
   });
   it("still rejects unknown recap keys", () => {
     expect(() => parseHostedExecutionEvent(event({ ...policy, lorePath: "arbitrary" }))).toThrow();
+    expect(() => parseHostedExecutionEvent(event({ ...policy, show: true, videos: true }))).toThrow();
+  });
+  it("reads a recap wake with and without the video request, and nothing between", () => {
+    // Every wake queued before the field existed: unchanged, and never given the field.
+    for (const queued of [policy, { ...policy, show: true }, { ...policy, loreAccess: "read" }]) {
+      const parsed = parseHostedExecutionEvent(event(queued));
+      expect(parsed).toMatchObject(event(queued));
+      expect(parsed).not.toHaveProperty("notification.responsePolicy.video");
+    }
+    const asked = { ...policy, show: true, video: true };
+    expect(parseHostedExecutionEvent(event(asked))).toHaveProperty("notification.responsePolicy", asked);
+    // What was read is what is written back to saved pending state.
+    expect(parseHostedExecutionEvent(JSON.parse(JSON.stringify(parseHostedExecutionEvent(event(asked)))))).toHaveProperty("notification.responsePolicy", asked);
+    for (const video of [false, null, "true", 1, {}]) expect(() => parseHostedExecutionEvent(event({ ...policy, show: true, video }))).toThrow(/video/u);
+    // Only a pair show can become a video.
+    expect(() => parseHostedExecutionEvent(event({ ...policy, video: true }))).toThrow(/video requires a show/u);
+    expect(() => parseHostedExecutionEvent(event({ ...policy, loreAccess: "read", video: true }))).toThrow(/video requires a show/u);
+  });
+  it.skipIf(process.env.MURPH_VERIFY_RECAP_SKEW !== "1")("is the runner's rollback floor: the previous release refuses a wake that asks for a video", async () => {
+    const { execFileSync } = await import("node:child_process");
+    const { randomUUID } = await import("node:crypto");
+    const { rm, writeFile } = await import("node:fs/promises");
+    const { fileURLToPath } = await import("node:url");
+    const root = fileURLToPath(new URL("../../../", import.meta.url));
+    const old = new URL(`../src/.recap-video-wake-skew-${randomUUID()}.ts`, import.meta.url);
+    await writeFile(old, execFileSync("git", ["show", "8e03afa98451f0b7ae0de30531dd8be715f12199:packages/hosted-execution/src/parsers.ts"], { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 }), { flag: "wx" });
+    try {
+      const base = await import(old.href) as typeof import("../src/parsers.ts");
+      expect(base.parseHostedExecutionEvent(event({ ...policy, show: true }))).toEqual(parseHostedExecutionEvent(event({ ...policy, show: true })));
+      expect(() => base.parseHostedExecutionEvent(event({ ...policy, show: true, video: true }))).toThrow(/unsupported field "video"/u);
+    } finally { await rm(old, { force: true }); }
   });
 });

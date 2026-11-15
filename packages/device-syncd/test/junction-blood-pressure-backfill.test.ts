@@ -1,8 +1,10 @@
 import { seedStoredAccount } from "./store-test-helpers.ts";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { rm } from "node:fs/promises";
+import { readdir, rm } from "node:fs/promises";
 import path from "node:path";
+import { initializeVault, readJsonlRecords } from "@murphai/core";
+import { importDeviceProviderSnapshot } from "@murphai/importers";
 import { junctionProviderAdapter } from "@murphai/importers/device-providers/junction";
 import { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR } from "@murphai/importers/device-providers/provider-descriptors";
 import { test } from "vitest";
@@ -680,7 +682,17 @@ function toPriorExtendedHistoryCoverage(
 ): Record<string, unknown> {
   return Object.fromEntries(Object.entries(metadata).map(([key, value]) => [
     key,
-    typeof value === "string" ? value.replace(/^m2\|/u, "m1|") : value,
+    typeof value === "string" ? value.replace(/^m3\|/u, "m1|") : value,
+  ]));
+}
+
+/** The same bits as the last envelope generation stored them. */
+function toLastExtendedHistoryCoverage(
+  metadata: Record<string, unknown>,
+): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(metadata).map(([key, value]) => [
+    key,
+    typeof value === "string" ? value.replace(/^m3\|/u, "m2|") : value,
   ]));
 }
 
@@ -1597,7 +1609,7 @@ test("a stale job leaves newer extended-history coverage untouched without egres
     createJobContext({
       account: createAccount({
         metadata: {
-          junctionBloodPressureHistoryBackfillCoverage: `m3|${"0".repeat(192)}`,
+          junctionBloodPressureHistoryBackfillCoverage: `m4|${"0".repeat(192)}`,
         },
         sources,
       }),
@@ -6141,6 +6153,170 @@ test("prior coverage reopens all 13 resources at the fixed 180-day generation", 
       assert.equal(job.payload?.windowStart, EXTENDED_HISTORY_WINDOW_START);
       assert.equal(job.payload?.windowEnd, BACKFILL_WINDOW_END);
     }
+  }
+});
+
+test("the last matrix generation re-opens weight history and nothing else", () => {
+  const resources = ["blood_pressure", "vo2_max", "weight"];
+  const provider = createProvider({ requests: [], timeseriesResources: resources });
+  const availability = Object.fromEntries(resources.map((resource) => [resource, true]));
+  const sources = [createSourceSummary("omron", "2026-01-01T00:00:00.000Z", "connected", availability)];
+  const covered = resources.reduce(
+    (metadata, resource) => addHistoryCoverage(metadata, "omron", resource),
+    {} as Record<string, unknown>,
+  );
+  const scheduledHistory = (metadata: Record<string, unknown>) =>
+    requireValue(requireValue(provider.jobExecutor).createScheduledJobs)(
+      createStoredAccount({ metadata, sources }), NOW,
+    ).jobs.filter((job) => job.payload?.historicalBackfill === true);
+
+  assert.deepEqual(scheduledHistory(covered), []);
+  const [weight, ...others] = scheduledHistory(toLastExtendedHistoryCoverage(covered));
+  assert.deepEqual(others, []);
+  assert.equal(weight?.payload?.resource, "weight");
+  assert.equal(weight?.payload?.sourceProviderSlug, "omron");
+  assert.equal(weight?.payload?.historicalBackfillVersion, historyCoverageVersion("weight"));
+  assert.equal(weight?.payload?.historicalWindowStart, EXTENDED_HISTORY_WINDOW_START);
+});
+
+test("a weight scan retained from the last generation cannot certify the re-read", async () => {
+  const requests: TimeseriesRequest[] = [];
+  const provider = createProvider({
+    requests, timeseriesResources: ["weight"],
+    historicalPullState: { resource: "weight", status: "success" },
+    providerState: { resourceAvailability: { weight: true }, status: "connected" },
+  });
+  const executor = requireValue(provider.jobExecutor);
+  const sources = [createSourceSummary("omron", "2026-01-01T00:00:00.000Z", "connected", { weight: true })];
+  const metadata = toLastExtendedHistoryCoverage(addHistoryCoverage({}, "omron", "weight"));
+  const current = findResourceJob(
+    requireValue(executor.createScheduledJobs)(createStoredAccount({ metadata, sources }), NOW).jobs,
+    "weight",
+  );
+  // The weight generation that was live while fetched rows were being dropped.
+  const lastGeneration = 2;
+  const lastGenerationKey = scheduleTimeHistoryDedupeKey({
+    providerSlug: "omron", resource: "weight", sourceLifecycleEpoch: 1, version: lastGeneration,
+  });
+  // A scan that read its first chunks while fetched rows were being dropped,
+  // then held its cursor through retries: only the suffix is left to read.
+  const retained = toJobRecord({
+    ...current,
+    dedupeKey: lastGenerationKey,
+    payload: {
+      ...current.payload,
+      historicalBackfillVersion: lastGeneration,
+      windowStart: "2026-05-12T00:00:00.000Z",
+    },
+  }, 1);
+
+  const finished = await executeImmediateResourceContinuations({
+    context: createJobContext({ account: createAccount({ metadata, sources }) }),
+    job: retained, provider, resource: "weight",
+  });
+
+  assert.ok(requests.length > 0, "the retained scan still reads its suffix");
+  assert.ok(requests.every((request) => request.start! >= "2026-05-12"), "and never its prefix");
+  assertHistoryCoverage({ ...metadata, ...finished.result.metadataPatch }, "omron", "weight", false);
+  // The full scan is still queued beside it, under its own identity.
+  const rescheduled = requireValue(executor.createScheduledJobs)(
+    createStoredAccount({ metadata: { ...metadata, ...finished.result.metadataPatch }, sources }),
+    NOW,
+    { findActiveDedupeKeys: (keys) => new Set(keys.filter((key) => key === lastGenerationKey)) },
+  );
+  const fullScan = findResourceJob(rescheduled.jobs, "weight");
+  assert.notEqual(fullScan.dedupeKey, lastGenerationKey);
+  assert.equal(fullScan.payload?.windowStart, EXTENDED_HISTORY_WINDOW_START);
+  assert.equal(fullScan.payload?.historicalBackfillVersion, historyCoverageVersion("weight"));
+});
+
+test("re-opened weight history stores each reading once beside a webhook fetch and the reconcile re-read", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-weight-history-reread");
+  const coreRuntime = await import("@murphai/core");
+  await initializeVault({ vaultRoot });
+  const readWeights = async () => {
+    const shards = (await readdir(path.join(vaultRoot, "ledger/events"), { recursive: true }))
+      .filter((file) => file.endsWith(".jsonl")).sort();
+    const events = (await Promise.all(shards.map((file) => readJsonlRecords({
+      vaultRoot, relativePath: path.join("ledger/events", file),
+    })))).flat() as Array<{
+      measurements?: Array<{ metric?: string; value?: number }>;
+      occurredAt?: string;
+    }>;
+    return events.flatMap((event) => (event.measurements ?? [])
+      .filter((measurement) => measurement.metric === "weight")
+      .map((measurement) => `${event.occurredAt} ${measurement.value}`)).sort();
+  };
+  const requests: TimeseriesRequest[] = [];
+  const provider = createProvider({
+    requests, timeseriesResources: ["weight"],
+    historicalPullState: { resource: "weight", status: "success" },
+    providerState: { resourceAvailability: { weight: true }, status: "connected" },
+    timeseriesRecords: { weight: [
+      { id: "weight-1", timestamp: "2026-01-20T07:00:00.000Z", value: 81.4, unit: "kg" },
+      { id: "weight-2", timestamp: "2026-05-02T07:00:00.000Z", value: 80.6, unit: "kg" },
+      { id: "weight-3", timestamp: "2026-06-09T07:00:00.000Z", value: 80.1, unit: "kg" },
+    ] },
+  });
+  const executor = requireValue(provider.jobExecutor);
+  const sources = [createSourceSummary("omron", "2026-01-01T00:00:00.000Z", "connected", { weight: true })];
+  // The last generation certified this source's weight history while every
+  // fetched row was being dropped, so the vault holds none of it.
+  const metadata = toLastExtendedHistoryCoverage(addHistoryCoverage({}, "omron", "weight"));
+  const context = createJobContext({
+    account: createAccount({ metadata, sources }),
+    importSnapshot: async (snapshot) => {
+      await importDeviceProviderSnapshot(
+        { vaultRoot, provider: "junction", snapshot }, { corePort: coreRuntime },
+      );
+      return importWithRealJunctionNormalizer(snapshot);
+    },
+  });
+
+  try {
+    const root = findResourceJob(
+      requireValue(executor.createScheduledJobs)(createStoredAccount({ metadata, sources }), NOW).jobs,
+      "weight",
+    );
+    const history = await executeImmediateResourceContinuations({
+      context, job: toJobRecord(root, 1), provider, resource: "weight",
+    });
+    const coverage = { ...metadata, ...history.result.metadataPatch };
+    assertHistoryCoverage(coverage, "omron", "weight");
+    assert.equal(Object.values(coverage).every((value) => String(value).startsWith("m3|")), true);
+    assert.equal(
+      requireValue(executor.createScheduledJobs)(createStoredAccount({ metadata: coverage, sources }), NOW)
+        .jobs.some((job) => job.payload?.historicalBackfill === true),
+      false,
+      "the re-read runs once",
+    );
+    const stored = await readWeights();
+    assert.deepEqual(stored, [
+      "2026-01-20T07:00:00.000Z 81.4", "2026-05-02T07:00:00.000Z 80.6", "2026-06-09T07:00:00.000Z 80.1",
+    ]);
+
+    // The newest reading also arrives by the fetch its data webhook queues and
+    // by the daily reconcile re-read; neither stores it again.
+    await executor.executeJob(context, toJobRecord({
+      kind: "resource",
+      payload: {
+        eventType: "daily.data.weight.created", occurredAt: "2026-06-09T07:05:00.000Z",
+        resource: "weight", resourceCategory: "timeseries", sourceProviderSlug: "omron",
+        windowStart: "2026-06-09T00:00:00.000Z", windowEnd: "2026-06-10T00:00:00.000Z",
+      },
+    }, 50));
+    const reconcile = await executor.executeJob(context, toJobRecord({
+      kind: "reconcile",
+      payload: {
+        timeseriesCursor: "2026-06-04T00:00:00.000Z", timeseriesResourceCursor: "weight",
+        windowStart: "2026-06-04T00:00:00.000Z", windowEnd: "2026-06-11T00:00:00.000Z",
+      },
+    }, 51));
+    await executeImmediateFullTimeseriesContinuations({ context, initialResult: reconcile, provider });
+    assert.ok(requests.length > 8, "the webhook fetch and the reconcile both read weight");
+    assert.deepEqual(await readWeights(), stored);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
   }
 });
 

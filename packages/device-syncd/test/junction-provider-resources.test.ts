@@ -2635,7 +2635,7 @@ test("Junction direct-Link body data stays in the bounded history owner", async 
     );
     assert.equal(
       connectResult.metadataPatch?.junctionHistoricalBackfillStatus,
-      "coverage_v3_complete",
+      "coverage_v4_complete",
     );
     assert.equal(
       connectResult.metadataPatch?.junctionExtendedTimeseriesHistoryBackfillCoverage,
@@ -2659,7 +2659,7 @@ test("Junction direct-Link body data stays in the bounded history owner", async 
       createStoredAccount({
         metadata: {
           ...terminalMetadata,
-          junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+          junctionHistoricalBackfillStatus: "coverage_v4_retrying",
         },
         nextReconcileAt: now,
         sources: [sourceSummary],

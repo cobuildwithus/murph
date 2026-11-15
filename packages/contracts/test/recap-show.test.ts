@@ -1,6 +1,10 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { gameRecapDraftSchema, gameRecapPresentationSchema, gameRecapWriterSchema, storedGameRecapEnvelopeSchema, presentGameRecap, type GameRecapEnvelope } from "../src/recap-show.js";
+import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { rm, writeFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import { gameRecapDraftSchema, gameRecapEnvelopeSchema, gameRecapPresentationSchema, gameRecapWriterSchema, recapStorageObjects, recapVideoDraftSchema, storedGameRecapEnvelopeSchema, storedGameRecapSchema, presentGameRecap, type GameRecapEnvelope } from "../src/recap-show.js";
 
 const story = { treatment: "Courtroom drama", chatLine: "Player A won. The mat was present.", pages: [
   { background: "paper" as const, blocks: [{ kind: "headline" as const, text: "The mat takes the stand" },
@@ -13,7 +17,7 @@ const envelope: GameRecapEnvelope = { version: 1, generationId: "game-recap:synt
 };
 const input = { stored: envelope, permittedPhotoIds: new Set(["photo-one"]), mediaUrl: () => "/synthetic-media" };
 describe("recap presentation compatibility", () => {
-  it.each(["legacy", "full-show", "failed-scene-no-song"])("decodes the stable %s fixture", name => {
+  it.each(["legacy", "full-show", "full-show-video", "failed-scene-no-song", "score-show"])("decodes the stable %s fixture", name => {
     const value = JSON.parse(readFileSync(new URL(`../fixtures/recap-show/${name}.json`, import.meta.url), "utf8"));
     expect(gameRecapPresentationSchema.parse(value)).toEqual(value);
   });
@@ -85,6 +89,27 @@ describe("recap presentation compatibility", () => {
     ] });
     expect(JSON.stringify(view)).not.toMatch(/wordsTimestamps|private-song|LEO/);
   });
+  it('projects score clocks and omits them entirely for legacy, hidden or invalid media', () => {
+    const asset = { slot: 'song', kind: 'song', recipeId: 'synthetic', storageKey: 'private-song', references: [],
+      hash: 'b'.repeat(64), mediaType: 'audio/mpeg', byteLength: 400_000, durationMs: 25_008, songStartMs: 4800,
+      wordsTimestamps: [{ word: 'Hello', startMs: 5000, endMs: 5300 }] } satisfies GameRecapEnvelope['assets'][number];
+    const stored: GameRecapEnvelope = { ...envelope, story: { ...story, song: { ...story.song, lyrics: ['Hello'] } }, assets: [asset] };
+    const view = gameRecapPresentationSchema.parse(presentGameRecap({ ...input, stored, mediaUrl: slot => `/synthetic/${slot}` }));
+    expect(view.show?.score).toEqual({ media: { status: 'ready', url: '/synthetic/score', mediaType: 'audio/mpeg', durationMs: 25_008 } });
+    expect(view.show?.pages.map(page => page.cueMs)).toEqual([0, 5000, undefined]);
+    expect(view.show?.pages[1]?.media).toMatchObject({ url: '/synthetic/song', durationMs: 20_208 });
+    expect(view.show?.pages[1]?.song?.lines?.[0]?.words).toEqual([{ text: 'Hello', startMs: 200, endMs: 500 }]);
+    expect(JSON.stringify(view)).not.toMatch(/songStartMs|wordsTimestamps|private-song/);
+    const { songStartMs: _origin, ...legacy } = asset;
+    for (const fallback of [
+      presentGameRecap({ ...input, stored, mediaVisible: false }),
+      presentGameRecap({ ...input, stored: storedGameRecapEnvelopeSchema.parse({ ...stored, assets: [{ ...asset, songStartMs: -1 }] }) }),
+      presentGameRecap({ ...input, stored: { ...stored, assets: [{ ...legacy, durationMs: 20_000 }] } }),
+    ]) {
+      expect(fallback.show).not.toHaveProperty('score');
+      expect(fallback.show?.pages.every(page => !('cueMs' in page))).toBe(true);
+    }
+  });
   it("accepts only bounded face positions and keeps timing facts out of editable file selections", () => {
     const withFace = (faceY: number) => ({ story: { ...story, pages: [{ background: 'paper', blocks: [{ kind: 'scene', scene: { ...story.pages[0].blocks[1]!.scene, faceY } }] }] }, files: [] });
     for (const y of [0, 0.25, 1]) expect(gameRecapDraftSchema.safeParse(withFace(y)).success).toBe(true);
@@ -114,3 +139,100 @@ describe("recap presentation compatibility", () => {
     expect(view.show?.pages[0].media?.status).toBe("failed");
   });
 });
+
+describe("recap video in the stored envelope", () => {
+  const fixture = (name: string): unknown => JSON.parse(readFileSync(new URL(`../fixtures/recap-show/${name}.json`, import.meta.url), "utf8"));
+  const plain = fixture("envelope") as GameRecapEnvelope, withVideo = fixture("envelope-video") as GameRecapEnvelope & { video: NonNullable<GameRecapEnvelope["video"]> };
+  const present = (stored: GameRecapEnvelope, mediaVisible?: boolean) => presentGameRecap({ stored, mediaVisible,
+    permittedPhotoIds: new Set(["synthetic-photo-a"]), mediaUrl: (slot, generation) => `/media/${slot}?generation=${generation}` });
+  // What ran one release earlier: the same strict envelope, without the `video` key.
+  const previousRelease = storedGameRecapEnvelopeSchema.omit({ video: true });
+
+  it("reads an envelope without a video exactly as before", () => {
+    const stored = storedGameRecapEnvelopeSchema.parse(plain);
+    expect(stored).toEqual(plain);
+    expect(stored).not.toHaveProperty("video");
+    expect(stored).toEqual(previousRelease.parse(plain));
+    expect(gameRecapEnvelopeSchema.parse(plain)).toEqual(plain);
+    const view = present(stored);
+    expect(Object.keys(view.show!)).toEqual(["version", "generationId", "treatment", "acceptedAt", "pages"]);
+    expect(view).toEqual(present(previousRelease.parse(plain)));
+    expect(recapStorageObjects(stored).map(object => object.slot)).toEqual(["scene-0", "song"]);
+  });
+
+  it("reads one video with its ordered parts and leaves the assets and their limit alone", () => {
+    const stored = storedGameRecapEnvelopeSchema.parse(withVideo);
+    expect(stored).toEqual(withVideo);
+    expect(gameRecapEnvelopeSchema.parse(withVideo)).toEqual(withVideo);
+    expect(stored.assets).toEqual(plain.assets);
+    expect(recapStorageObjects(stored)).toEqual([
+      ...plain.assets.map(({ slot, storageKey, hash, mediaType, references }) => ({ slot, storageKey, hash, mediaType, references })),
+      ...withVideo.video.parts.map((part, index) => ({ slot: `video-${index}`, storageKey: part.storageKey, hash: part.hash, mediaType: "video/mp4", references: withVideo.video.references })),
+    ]);
+    const sixth = { ...withVideo, assets: Array.from({ length: 6 }, () => withVideo.assets[0]) };
+    expect(gameRecapEnvelopeSchema.safeParse(sixth).success).toBe(false);
+    expect(storedGameRecapEnvelopeSchema.parse(sixth).assets).toEqual([]);
+  });
+
+  it("is the rollback floor: the previous release cannot read an envelope that has a video", () => {
+    expect(previousRelease.safeParse(withVideo).success).toBe(false);
+    // The union's story branch is strict too, so the older reader has no fallback either.
+    expect(gameRecapWriterSchema.safeParse(withVideo).success).toBe(false);
+    expect(storedGameRecapSchema.parse(withVideo)).toEqual(withVideo);
+  });
+
+  it.skipIf(process.env.MURPH_VERIFY_RECAP_SKEW !== "1")("matches the real previous release on both envelope formats", async () => {
+    const root = fileURLToPath(new URL("../../../", import.meta.url));
+    const old = new URL(`../src/.recap-video-skew-${randomUUID()}.ts`, import.meta.url);
+    await writeFile(old, execFileSync("git", ["show", "fa02b3ce62e03f5c7469d46bcf677f0faad41dcb:packages/contracts/src/recap-show.ts"], { cwd: root, encoding: "utf8" }), { flag: "wx" });
+    try {
+      const base = await import(old.href) as typeof import("../src/recap-show.js");
+      expect(base.storedGameRecapSchema.parse(plain)).toEqual(storedGameRecapSchema.parse(plain));
+      expect(base.presentGameRecap({ stored: base.storedGameRecapEnvelopeSchema.parse(plain), permittedPhotoIds: new Set(["synthetic-photo-a"]), mediaUrl: (slot, generation) => `/media/${slot}?generation=${generation}` }))
+        .toEqual(present(storedGameRecapEnvelopeSchema.parse(plain)));
+      expect(base.storedGameRecapSchema.safeParse(withVideo).success).toBe(false);
+    } finally { await rm(old, { force: true }); }
+  });
+
+  it("presents the video as ordered part links without storage identity, and hides it with the media switch", () => {
+    const view = gameRecapPresentationSchema.parse(present(storedGameRecapEnvelopeSchema.parse(withVideo)));
+    expect(view.show?.video).toEqual({ mediaType: "video/mp4", byteLength: 5_200_000, durationMs: 51_033, width: 804, height: 1748,
+      parts: [2_000_000, 2_000_000, 1_200_000].map((byteLength, index) => ({ url: `/media/video-${index}?generation=${withVideo.generationId}`, byteLength })) });
+    expect(JSON.stringify(view)).not.toMatch(/storageKey|\.mp4|references|synthetic-member|[a-f0-9]{64}/u);
+    expect({ ...view, show: { ...view.show, video: undefined } }).toEqual(present(storedGameRecapEnvelopeSchema.parse(plain)));
+    const hidden = present(storedGameRecapEnvelopeSchema.parse(withVideo), false);
+    expect(hidden.show).not.toHaveProperty("video");
+    expect(hidden).toEqual(present(storedGameRecapEnvelopeSchema.parse(plain), false));
+  });
+
+  const part = withVideo.video.parts[0]!;
+  it.each([
+    ["parts that do not add up to the file", { byteLength: 5_200_001 }],
+    ["a file over eight megabytes", { byteLength: 8_000_001, parts: [...withVideo.video.parts, { ...part, storageKey: "recap/other.mp4", byteLength: 2_000_000 }, { ...part, storageKey: "recap/last.mp4", byteLength: 800_001 }] }],
+    ["a fifth part", { byteLength: 5, parts: Array.from({ length: 5 }, (_, index) => ({ ...part, storageKey: `recap/part-${index}.mp4`, byteLength: 1 })) }],
+    ["no parts", { parts: [] }],
+    ["a part over two megabytes", { byteLength: 2_000_001, parts: [{ ...part, byteLength: 2_000_001 }] }],
+    ["the same part twice", { byteLength: 4_000_000, parts: [part, part] }],
+    ["a part with media facts of its own", { parts: withVideo.video.parts.map(value => ({ ...value, durationMs: 1 })) }],
+    ["a duration over two minutes", { durationMs: 120_001 }],
+    ["a frame over the bound", { height: 2049 }],
+    ["more sources than the bound", { references: Array.from({ length: 65 }, (_, index) => ({ kind: "entry", memberId: "synthetic-member-a", entryId: `entry-${index}`, key: `game/synthetic-member-a/${index}.jpg` })) }],
+    ["a hash that is not one", { hash: "not-a-hash" }],
+    ["an unknown field", { url: "https://media.invalid/file.mp4" }],
+  ])("refuses %s on a write and drops only the video on a stored read", (_name, change) => {
+    const changed = { ...withVideo, video: { ...withVideo.video, ...change } };
+    expect(gameRecapEnvelopeSchema.safeParse(changed).success).toBe(false);
+    const stored = storedGameRecapEnvelopeSchema.parse(changed);
+    expect(stored).toEqual(plain);
+    expect(present(stored)).toEqual(present(storedGameRecapEnvelopeSchema.parse(plain)));
+  });
+
+  it("bounds what a host may declare with a write", () => {
+    const draft = { hash: withVideo.video.hash, byteLength: withVideo.video.byteLength, referenceIds: ["a".repeat(64)], parts: withVideo.video.parts };
+    expect(recapVideoDraftSchema.parse(draft)).toEqual(draft);
+    for (const change of [{ durationMs: 51_033 }, { references: [] }, { byteLength: 1 }, { parts: [] }, { referenceIds: Array.from({ length: 65 }, () => "a".repeat(64)) }, { referenceIds: ["game/key.jpg"] }]) {
+      expect(recapVideoDraftSchema.safeParse({ ...draft, ...change }).success).toBe(false);
+    }
+  });
+});
+

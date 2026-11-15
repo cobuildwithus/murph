@@ -32,4 +32,26 @@ describe.skipIf(!enabled)("recap retirement receipts", () => {
     for (const orphan of retired) expect(await acknowledgeHostedRuntimeOrphanPurge({ prisma: db, orphan, now: recoveryUntil })).toBe(true);
     expect(await db.gameRecapAsset.count({ where: { userId: ownerMemberId, retiredAt: { not: null }, purgedAt: { not: null } } })).toBe(2);
   });
+  it("keeps an accepted video's parts, expires the parts of a render nobody accepted, and retires both with the game", async () => {
+    const db = getPrisma();
+    const gameId = `synthetic_game_${randomUUID()}`, generationId = "b".repeat(32);
+    const part = (char: string) => `recap/${generationId}/${char.repeat(64)}.mp4`;
+    const accepted = [part("1"), part("2")], abandoned = [part("3"), part("4")];
+    const acceptedAt = new Date("2026-01-01T00:00:00Z"), recoveryUntil = new Date("2026-01-02T00:00:00Z");
+    const mine = async (now: Date) => (await claimHostedRuntimeResourceCleanup({ prisma: db, now })).orphans.filter(row => row.userId === ownerMemberId && row.resourceId.startsWith(`${gameId}|`));
+    await db.$transaction(async tx => {
+      // Each part is uploaded, and receipted, on its own.
+      for (const storageKey of [...accepted, ...abandoned]) await registerRecapAssetsTx(tx, { gameId, generationId, ownerMemberId, storageKeys: [storageKey], acceptedAt, recoveryUntil });
+      for (const storageKey of accepted) expect(await retainRecapAssetTx(tx, { gameId, generationId, ownerMemberId, storageKey, now: acceptedAt })).toBe(true);
+    });
+    const expired = await mine(recoveryUntil);
+    expect(expired.map(row => row.resourceId).sort()).toEqual(abandoned.map(key => `${gameId}|${generationId}|${key}`));
+    // A regeneration keeps only its own generation; a takedown or an account deletion keeps none.
+    await db.$transaction(tx => retireGameRecapAssetsTx(tx, gameId, ownerMemberId, recoveryUntil, "c".repeat(32)));
+    const retired = await mine(recoveryUntil);
+    expect(retired).toHaveLength(4);
+    for (const orphan of retired) expect(await acknowledgeHostedRuntimeOrphanPurge({ prisma: db, orphan, now: recoveryUntil })).toBe(true);
+    expect(await db.gameRecapAsset.count({ where: { userId: ownerMemberId, resourceId: { startsWith: `${gameId}|` }, retiredAt: { not: null }, purgedAt: { not: null } } })).toBe(4);
+    await db.$transaction(async tx => expect(await retainRecapAssetTx(tx, { gameId, generationId, ownerMemberId, storageKey: accepted[0]!, now: acceptedAt })).toBe(false));
+  });
 });

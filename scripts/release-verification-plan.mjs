@@ -44,6 +44,7 @@ export const PACKAGE_COVERAGE_PLAN = Object.freeze([
   { dir: "packages/inboxd", shard: "platform-b2" },
   { dir: "packages/messaging-ingress", shard: "platform-b1" },
   { dir: "packages/operator-config", shard: "platform-a" },
+  { dir: "packages/recap-video", shard: "platform-a" },
   { dir: "packages/parsers", shard: "platform-b2" },
   { dir: "packages/query", shard: "platform-b2" },
   { dir: "packages/runtime-state", shard: "platform-b2" },

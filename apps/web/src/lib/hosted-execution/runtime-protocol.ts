@@ -1,3 +1,5 @@
+import { buildRecapScoreProtocolProbe, buildRecapVideoProtocolProbe, hostedGameToolRequestSchema, hostedGameToolResponseSchema } from '@murphai/hosted-execution/runtime-control';
+import { recapAssetSchema } from '@murphai/contracts/recap-show';
 import { buildHostedRuntimeReplicaBatchProtocolProbe, parseHostedRuntimeReplicaPutCommand } from "@murphai/hosted-execution/runtime-resources";
 import { parseHostedRuntimeLatencyTraceBatchRequest, parseHostedRuntimeLogRequest } from "@murphai/hosted-execution/parsers";
 import {
@@ -23,7 +25,13 @@ export function buildHostedThreadRouteAuthorityResponse(
 
 export function buildHostedRuntimeWebProtocolAdmission(nonce: string): HostedRuntimeWebProtocolAdmission {
   const replica = buildHostedRuntimeReplicaBatchProtocolProbe();
+  const score = buildRecapScoreProtocolProbe();
+  const video = buildRecapVideoProtocolProbe();
   return {
+    recapScore: { upload: hostedGameToolRequestSchema.parse(score.upload), asset: recapAssetSchema.parse(score.asset) },
+    // The same schemas the group tool route and its results use; no game, member or storage is touched.
+    recapVideo: { part: hostedGameToolRequestSchema.parse(video.part), write: hostedGameToolRequestSchema.parse(video.write),
+      recover: hostedGameToolRequestSchema.parse(video.recover), result: hostedGameToolResponseSchema.parse(video.result) },
     runtimeReplicaBatch: { admission: parseHostedRuntimeReplicaPutCommand(replica.admission), settlement: parseHostedRuntimeReplicaPutCommand(replica.settlement) },
     kind: HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_KIND,
     schemaVersion: HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_VERSION,

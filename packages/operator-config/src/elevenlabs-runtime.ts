@@ -134,6 +134,14 @@ export async function generateElevenLabsSpeech(input: {
   })
 }
 
+export type ElevenLabsMusicChunk = {
+  text: string
+  durationMs: number
+  positiveStyles: string[]
+  negativeStyles: string[]
+  contextAdherence: 'high'
+}
+
 export async function generateElevenLabsMusic(input: {
   apiKey: string
   durationMs: number
@@ -142,7 +150,7 @@ export async function generateElevenLabsMusic(input: {
   modelId: (typeof elevenLabsMusicModelIds)[number]
   outputFormat: typeof ELEVENLABS_MUSIC_OUTPUT_FORMAT
   prompt: string
-  lyrics?: string[]
+  chunks?: ElevenLabsMusicChunk[]
   signal?: AbortSignal
 }): Promise<GenerateElevenLabsAudioResult> {
   const prompt = normalizeRequiredElevenLabsString(input.prompt, 'music prompt')
@@ -171,30 +179,29 @@ export async function generateElevenLabsMusic(input: {
     )
   }
 
-  const lyrics = input.lyrics
-  if (lyrics && (input.forceInstrumental || input.durationMs > 120_000 || lyrics.length < 1 || lyrics.length > 20
-    || lyrics.some(line => !line.trim() || line.length > 200 || /[\r\n]/u.test(line)))) {
-    throw createElevenLabsInvalidInputError('Explicit lyrics require vocals, 1–20 non-empty lines of at most 200 characters, and at most 120 seconds.')
-  }
   let wordsTimestamps: SongWordTimestamp[] | undefined
   const result = await requestElevenLabsAudio({
     apiKey: input.apiKey,
     fetchImplementation: input.fetchImplementation,
     operation: 'music',
     request: async (client, requestOptions) => {
-      if (lyrics) {
-        const [{ alignSongLyrics, songWordTimestampsSchema }, z] = await Promise.all([
+      if (input.chunks) {
+        const [{ songWordTimestampsSchema }, z] = await Promise.all([
           import('@murphai/contracts/recap-show'), import('@murphai/contracts/zod-runtime'),
         ])
         // SDK 2.78.0's client getter still declares a stream, but its music wrapper
         // actually returns parsed multipart metadata and audio. Validate it.
         const response: unknown = await client.music.composeDetailed({
-          compositionPlan: { chunks: [{ text: lyrics.join('\n'), durationMs: input.durationMs, positiveStyles: [prompt], negativeStyles: [] }] },
+          compositionPlan: { chunks: input.chunks },
           modelId: input.modelId, outputFormat: input.outputFormat, withTimestamps: true,
         }, { ...requestOptions, headers: { accept: 'multipart/mixed' } })
+        // Provider directions can have empty or reversed intervals. Ignore those
+        // before applying the stored word-timing invariant; never interpolate here.
+        const timedWords = z.array(z.object(songWordTimestampsSchema.element.shape).strict()).max(2000)
+          .transform(words => words.filter(word => word.endMs > word.startMs)).pipe(songWordTimestampsSchema)
         const parsed = z.object({ audio: z.custom<Uint8Array>(value => value instanceof Uint8Array),
-          json: z.object({ wordsTimestamps: songWordTimestampsSchema }) }).safeParse(response)
-        if (!parsed.success || !alignSongLyrics(lyrics, parsed.data.json.wordsTimestamps, input.durationMs)) {
+          json: z.object({ wordsTimestamps: timedWords }) }).safeParse(response)
+        if (!parsed.success) {
           throw new VaultCliError('ELEVENLABS_INVALID_AUDIO', 'Generated song has no usable lyric timings.',
             { failureStage: 'response_body', provider: 'elevenlabs', retryable: false })
         }

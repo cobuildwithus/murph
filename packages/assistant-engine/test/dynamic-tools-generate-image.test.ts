@@ -337,6 +337,7 @@ describe('murph.generate_image dynamic tool schema', () => {
       currentHostedDeliveryContext: () => null,
       currentHostedMailboxItemIds: () => [],
       currentGameRecapScope: () => ({ gameId: 'game_synthetic', eventId: 'game-recap:game_synthetic', pairFingerprint: 'a'.repeat(32), show: true }),
+      readGameRecapDraft: async () => ({}),
       prepareRecapMedia: async (request) => { prepared.push(request); throw new Error('Synthetic recap refusal.') },
       sendVaultFile: async () => ({ filename: 'unused', status: 'denied' as const }),
       vaultFileSendAvailable: false,
@@ -345,11 +346,11 @@ describe('murph.generate_image dynamic tool schema', () => {
       deliveryContextOrdinal: 0, env: {}, fetchImpl: fetch, hostedToolContext, nextUsageOrdinal: () => 1, progressDelivery: null, request })
     const results = [
       await run({ kind: 'generate-image', args: { alt: null, outputFormat: 'webp', prompt: 'A synthetic stage.', quality: 'low', referenceImageRefs: [], size: '1024x1024' } }),
-      await run({ kind: 'generate-song', args: { durationSeconds: 180, instrumental: true, prompt: 'Playful piano', lyrics: ['Leo goes'] } }),
+      await run({ kind: 'generate-song', args: { draftPath: 'draft.json', voice: 'Warm baritone' } }),
     ]
     expect(prepared).toEqual([
       { kind: 'image', args: expect.objectContaining({ outputFormat: 'jpeg', quality: 'high', size: '1024x1536' }) },
-      { kind: 'song', args: expect.objectContaining({ durationSeconds: 20, instrumental: false, lyrics: ['Leo goes'] }) },
+      { kind: 'song', args: expect.objectContaining({ draftPath: 'draft.json', voice: 'Warm baritone' }) },
     ])
     for (const result of results) {
       expect(result.rpcResult).toEqual({ success: false, contentItems: [{ type: 'inputText', text: 'Synthetic recap refusal.' }] })

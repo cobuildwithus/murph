@@ -1842,7 +1842,7 @@ test("Junction polling updates source projection and imports bounded summary/tim
   assert.equal(typeof result.metadataPatch?.junctionTemporalSweepV1, "string");
   assert.deepEqual(result.metadataPatch, {
     junctionTemporalSweepV1: result.metadataPatch?.junctionTemporalSweepV1,
-    junctionHistoricalBackfillStatus: "coverage_v3_complete",
+    junctionHistoricalBackfillStatus: "coverage_v4_complete",
     junctionHistoricalBackfillEmptyAttempts: 0,
     junctionHistoricalBackfillLastEmptyAt: null,
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
