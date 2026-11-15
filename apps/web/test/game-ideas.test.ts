@@ -42,6 +42,10 @@ describe("typed game ideas", () => {
     const task = gameIdeasCheck(INPUT, TASKS.slice(0, 1));
     expect(task.questions.map(q => q.name)).toEqual(["r0", "f0"]);
     expect(task.input).not.toContain(INPUT.words);
+    expect(task.input).not.toContain("different cities");
+    const apart = gameIdeasCheck({ ...INPUT, apart: true }, TASKS.slice(0, 1));
+    expect(apart.input).toContain("They live in different cities");
+    expect(apart.questions[0].instructions).toContain("needs them in the same place");
     expect(gameIdeasBrief(ctx)).toContain('"Loser has to ___"');
     expect(gameIdeasBrief(ctx)).toContain("They are coworkers:");
     expect(gameIdeasBrief(ctx)).toContain("They live in different cities");
@@ -74,10 +78,10 @@ describe("typed game ideas", () => {
   it.each(["Beer", "Wine", "Cash", "Gift card", "Casino", "$20", "Vodka", "Rum", "Lottery", "Gambling", "Ｂｅｅｒ", "Money", "Poker"])("rejects banned suggestion %s", text => {
     for (const step of ["task", "prize", "dare"] as const) expect(cleanGameIdea(text, step)).toBeNull();
   });
-  it.each(["Coffee for a week", "Dinner every night", "A month of coffee", "Cook dinner", "Dinner on you", "Winner's dinner", "Loser's treat", "Your meal"])("rejects prize wording %s", text => {
+  it.each(["Coffee for a week", "Coffee for a day", "Chores for the day", "Dinner every night", "A month of coffee", "Cook dinner", "Dinner on you", "Winner's dinner", "Loser's treat", "Your meal"])("rejects prize wording %s", text => {
     expect(cleanGameIdea(text, "prize")).toBeNull();
   });
-  it.each(["No phone", "10,000 steps", "Bed by 11", "Cold shower", "Walk your dog"])("rejects unseen task %s", text => {
+  it.each(["No phone", "10,000 steps", "Bed by 11", "Cold shower", "Walk your dog", "Screen-free day", "Pushup max"])("rejects unseen task %s", text => {
     expect(cleanGameIdea(text, "task")).toBeNull();
   });
   it("uses the bank's distinct character limits", () => {

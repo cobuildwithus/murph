@@ -15,8 +15,8 @@ export const PRIZE_CHORE = /^(Pick|Take|Clean|Carry|Cook|Plan|Next) |\bon you$|w
 // task is something you do and can show: nothing you avoid, no counts a
 // photo can't see, no bedtimes or wake times, never "your" (it reads as the
 // other person's).
-export const TASK_UNSEEN = /^No |Lights out|steps|glasses of water|Cold shower|\byour |\b(bed by|in bed|up by|up at|wake|alarm|of sleep|sleep \d)/i;
-export const PRIZE_STRETCH = /\b(for a (week|month|year)|all (week|month|weekend|season|winter|summer)|a (week|month|weekend|winter|year) (of|off)|for (two|three|\d+) (days|weeks|months)|every (day|morning|night|week)|each (day|week)|daily|weekly|monthly|for life|until|twice)\b/i;
+export const TASK_UNSEEN = /^No |Lights out|steps|glasses of water|Cold shower|\byour |\b(bed by|in bed|up by|up at|wake|alarm|of sleep|sleep \d)|-free day|\bmax$/i;
+export const PRIZE_STRETCH = /\b(for a (week|month|year)|all (week|month|weekend|season|winter|summer)|a (week|month|weekend|winter|year) (of|off)|for (two|three|\d+) (days|weeks|months)|every (day|morning|night|week)|each (day|week)|daily|weekly|monthly|for life|until|twice|for a day|for the day)\b/i;
 
 export const WHO = {
   partner: 'They are a couple: romantic and at-home ideas are great.',

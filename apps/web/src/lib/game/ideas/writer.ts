@@ -52,8 +52,9 @@ function parseIdeas(payload: unknown): GameIdea[] {
 }
 
 const TASK_SITUATION = "Ideas for a daily task two people will each do and prove with a photo for a week in a health challenge app.";
-const realTask = (text: string) =>
-  `Is "${text}" a real, recognizable thing people actually do as a daily habit (exercise, rest, sleep, eating well, keeping a home, or a good daily habit)? Answer no for gimmicks, jokes, jargon, props used for their own sake, and trivial or made-up activities.`;
+const TASK_APART = "They live in different cities, so each does it on their own; anything they would have to do together in person does not fit.";
+const realTask = (text: string, apart: boolean) =>
+  `Is "${text}" a real, recognizable thing people actually do as a daily habit (exercise, rest, sleep, eating well, keeping a home, or a good daily habit)? Answer no for gimmicks, jokes, jargon, props used for their own sake, and trivial or made-up activities${apart ? ", and for anything that needs them in the same place" : ""}.`;
 
 /** One Decisions call, as the lab tuned it: is each idea good for this pair
  * (the offline build's calibrated input and question), is a dare not a favor
@@ -62,9 +63,11 @@ export function gameIdeasCheck(ctx: GameIdeasInput, ideas: GameIdea[]) {
   const fits = gameIdeasFits(ctx);
   return {
     model: GAME_IDEAS_MODEL,
-    input: ctx.step === "task" ? TASK_SITUATION : stakeInput(ctx.relationship, isGameIdeasApart(ctx) ? "far" : "near"),
+    input: ctx.step === "task"
+      ? `${TASK_SITUATION}${isGameIdeasApart(ctx) ? ` ${TASK_APART}` : ""}`
+      : stakeInput(ctx.relationship, isGameIdeasApart(ctx) ? "far" : "near"),
     questions: ideas.flatMap((idea, index) => [
-      { type: "predicate", name: `r${index}`, instructions: ctx.step === "task" ? realTask(idea.text) : stakeQuestion(ctx.step, idea.text) },
+      { type: "predicate", name: `r${index}`, instructions: ctx.step === "task" ? realTask(idea.text, isGameIdeasApart(ctx)) : stakeQuestion(ctx.step, idea.text) },
       ...(ctx.step === "dare" ? [{ type: "predicate", name: `d${index}`, instructions: dareQuestion(idea.text) }] : []),
       { type: "predicate", name: `f${index}`, instructions: `Could "${idea.text}" be ${fits.join(" and ")}?` },
     ]),
