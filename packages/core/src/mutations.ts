@@ -1102,16 +1102,6 @@ async function resolveExplicitEventLifecycle(input: {
   return buildEventSpineLifecycle(eventSpineRevision(latestMatchedEvent.record) + 1);
 }
 
-function prepareEventLedgerEntry<K extends EventKind>({
-  recordId,
-  ...input
-}: BuildEventRecordInput<K>): PreparedJsonlEntry<EventRecordByKind<K>> {
-  return prepareStoredEventLedgerEntry(
-    buildNormalizedEventSeed(input),
-    recordId ?? generateRecordId(ID_PREFIXES.event),
-  );
-}
-
 async function stageJsonlRecord(
   batch: WriteBatch,
   relativePath: string,

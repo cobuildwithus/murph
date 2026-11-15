@@ -846,6 +846,8 @@ test.sequential(
       '390',
       '--nutrition-protein-grams',
       '15',
+      '--nutrition-fiber-grams',
+      '0',
       '--nutrition-source',
       'estimated',
       '--nutrition-confidence',
@@ -863,7 +865,7 @@ test.sequential(
         proteinGrams: 15,
         carbsGrams: 51,
         fatGrams: 22,
-        fiberGrams: 8,
+        fiberGrams: 0,
       },
       provenance: {
         source: 'estimated',

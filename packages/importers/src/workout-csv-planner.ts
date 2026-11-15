@@ -338,82 +338,48 @@ function parseDistanceValue(value: string | undefined): {
 function parseSetDurationSeconds(value: string | undefined): number | undefined {
   const normalized = normalizeOptionalText(value)?.toLowerCase();
   if (!normalized) return undefined;
-  if (/^\d+(?:\.\d+)?$/u.test(normalized)) {
-    const seconds = Number(normalized);
-    return seconds > 0 ? Math.round(seconds) : undefined;
-  }
-
-  const colonParts = normalized.split(":");
-  if (
-    (colonParts.length === 2 || colonParts.length === 3)
-    && colonParts.every((part) => /^\d+(?:\.\d+)?$/u.test(part.trim()))
-  ) {
-    const values = colonParts.map(Number);
-    const seconds = values.length === 2
-      ? (values[0] ?? 0) * 60 + (values[1] ?? 0)
-      : (values[0] ?? 0) * 3600 + (values[1] ?? 0) * 60 + (values[2] ?? 0);
-    return seconds > 0 ? Math.round(seconds) : undefined;
-  }
-
-  let seconds = 0;
-  let matchedLength = 0;
-  for (const match of normalized.matchAll(/(\d+(?:\.\d+)?)\s*(hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)/gu)) {
-    const amount = Number(match[1]);
-    const unit = match[2] ?? "";
-    if (!Number.isFinite(amount)) return undefined;
-    seconds += amount * (/^(?:hours?|hrs?|h)$/u.test(unit) ? 3600 : /^(?:minutes?|mins?|m)$/u.test(unit) ? 60 : 1);
-    matchedLength += match[0].replace(/\s/gu, "").length;
-  }
-  return seconds > 0 && matchedLength === normalized.replace(/\s/gu, "").length
-    ? Math.round(seconds)
-    : undefined;
+  const seconds = /^\d+(?:\.\d+)?$/u.test(normalized)
+    ? Number(normalized)
+    : parseExplicitDurationSeconds(normalized);
+  return seconds !== undefined && seconds > 0 ? Math.round(seconds) : undefined;
 }
 
 function parseDurationMinutes(value: string | undefined): number | undefined {
   const normalized = normalizeOptionalText(value)?.toLowerCase();
-  if (!normalized) {
-    return undefined;
-  }
-
+  if (!normalized) return undefined;
   if (/^\d+(?:\.\d+)?$/u.test(normalized)) {
     const minutes = Number(normalized);
     return minutes > 0 && minutes <= 24 * 60 ? Math.max(1, Math.round(minutes)) : undefined;
   }
 
+  const seconds = parseExplicitDurationSeconds(normalized);
+  return seconds !== undefined && seconds > 0 && seconds <= 24 * 60 * 60
+    ? Math.max(1, Math.round(seconds / 60))
+    : undefined;
+}
+
+function parseExplicitDurationSeconds(normalized: string): number | undefined {
   const colonParts = normalized.split(":");
   if (
     (colonParts.length === 2 || colonParts.length === 3)
     && colonParts.every((part) => /^\d+(?:\.\d+)?$/u.test(part.trim()))
   ) {
     const values = colonParts.map(Number);
-    const seconds = values.length === 2
+    return values.length === 2
       ? (values[0] ?? 0) * 60 + (values[1] ?? 0)
       : (values[0] ?? 0) * 3600 + (values[1] ?? 0) * 60 + (values[2] ?? 0);
-    return seconds > 0 && seconds <= 24 * 60 * 60
-      ? Math.max(1, Math.round(seconds / 60))
-      : undefined;
   }
 
   let seconds = 0;
   let matchedLength = 0;
   for (const match of normalized.matchAll(/(\d+(?:\.\d+)?)\s*(hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)/gu)) {
     const amount = Number(match[1]);
-    if (!Number.isFinite(amount)) {
-      return undefined;
-    }
+    if (!Number.isFinite(amount)) return undefined;
     const unit = match[2] ?? "";
     seconds += amount * (/^(?:hours?|hrs?|h)$/u.test(unit) ? 3600 : /^(?:minutes?|mins?|m)$/u.test(unit) ? 60 : 1);
     matchedLength += match[0].replace(/\s/gu, "").length;
   }
-
-  if (
-    matchedLength !== normalized.replace(/\s/gu, "").length
-    || seconds <= 0
-    || seconds > 24 * 60 * 60
-  ) {
-    return undefined;
-  }
-  return Math.max(1, Math.round(seconds / 60));
+  return matchedLength === normalized.replace(/\s/gu, "").length ? seconds : undefined;
 }
 
 function normalizeWorkoutTimestamp(
@@ -771,12 +737,11 @@ function buildSessions(input: {
     const title = valueAt(row, workoutNameIndex);
     const rawDate = valueAt(row, dateIndex);
     const rawStartTime = valueAt(row, startTimeIndex);
-    const rawTimestamp = [rawDate, rawStartTime].filter(Boolean).join(" ");
     const exerciseName = valueAt(row, exerciseNameIndex);
     const occurredAt = normalizeWorkoutTimestamp(rawDate, rawStartTime, input.timeZone);
     const rawSetOrder = valueAt(row, setOrderIndex);
 
-    if (!title || !rawTimestamp || !occurredAt || !exerciseName) {
+    if (!title || !occurredAt || !exerciseName) {
       skippedRowCount += 1;
       incrementReason(input.skipReasons, "missing or invalid workout identity fields");
       continue;

@@ -18,13 +18,6 @@ const MAX_MATCH_VALUE_LENGTH = 32
 const US_POSTAL_CODE_PATTERN = /^\d{5}(?:-\d{4})?$/u
 const US_POSTAL_CODE_SEARCH_PATTERN = /\b(\d{5}(?:-\d{4})?)\b/u
 const US_STATE_CODE_PATTERN = /^[A-Z]{2}$/u
-const US_STATE_CODES = new Set([
-  'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'DC', 'FL', 'GA',
-  'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD', 'MA',
-  'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ', 'NM', 'NY',
-  'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC', 'SD', 'TN', 'TX',
-  'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY',
-])
 const US_STATE_NAMES_TO_CODES = new Map([
   ['alabama', 'AL'], ['alaska', 'AK'], ['arizona', 'AZ'], ['arkansas', 'AR'],
   ['california', 'CA'], ['colorado', 'CO'], ['connecticut', 'CT'],
@@ -43,6 +36,7 @@ const US_STATE_NAMES_TO_CODES = new Map([
   ['virginia', 'VA'], ['washington', 'WA'], ['west virginia', 'WV'],
   ['wisconsin', 'WI'], ['wyoming', 'WY'],
 ] as const)
+const US_STATE_CODES = new Set<string>(US_STATE_NAMES_TO_CODES.values())
 const SECONDARY_ADDRESS_PREFIX_PATTERN =
   /^(?:#|apt\b|apartment\b|bldg\b|building\b|fl\b|floor\b|ste\b|suite\b|unit\b)/iu
 const SECONDARY_ADDRESS_COMPONENT_PATTERN =
@@ -306,33 +300,37 @@ function buildCandidate(
   explicitMailingHints: ExplicitMailingHints,
 ): ResolvedAddressCandidate | null {
   const properties = feature.properties
-  const context = properties?.context
-  const featureType = normalizeLowercase(properties?.feature_type)
+  if (!properties) return null
+
+  const context = properties.context ?? {}
+  const address = context.address ?? {}
+  const secondaryAddress = context.secondary_address ?? {}
+  const featureType = normalizeLowercase(properties.feature_type)
   const addressLine1 =
     normalizeBoundedString(
-      context?.address?.name,
+      address.name,
       MAX_ADDRESS_LINE_LENGTH,
     ) ??
     joinBoundedStrings(
-      context?.address?.address_number,
-      context?.address?.street_name,
+      address.address_number,
+      address.street_name,
       MAX_ADDRESS_LINE_LENGTH,
     ) ??
     (featureType === 'address'
-      ? normalizeBoundedString(properties?.name, MAX_ADDRESS_LINE_LENGTH)
+      ? normalizeBoundedString(properties.name, MAX_ADDRESS_LINE_LENGTH)
       : null)
   const addressLine2 =
     normalizeBoundedString(
-      context?.secondary_address?.name,
+      secondaryAddress.name,
       MAX_ADDRESS_LINE_LENGTH,
     ) ??
     (featureType === 'secondary_address'
       ? joinBoundedStrings(
-          context?.secondary_address?.designator,
-          context?.secondary_address?.identifier,
+          secondaryAddress.designator,
+          secondaryAddress.identifier,
           MAX_ADDRESS_LINE_LENGTH,
         ) ?? normalizeBoundedString(
-          properties?.name,
+          properties.name,
           MAX_ADDRESS_LINE_LENGTH,
         )
       : null)
@@ -340,26 +338,26 @@ function buildCandidate(
     addressLine1,
     ...(addressLine2 ? { addressLine2 } : {}),
     city:
-      normalizeBoundedString(context?.place?.name, MAX_CITY_LENGTH) ??
-      normalizeBoundedString(context?.locality?.name, MAX_CITY_LENGTH),
-    state: normalizeUsStateCode(context?.region?.region_code),
-    postalCode: normalizePostalCode(context?.postcode?.name),
+      normalizeBoundedString(context.place?.name, MAX_CITY_LENGTH) ??
+      normalizeBoundedString(context.locality?.name, MAX_CITY_LENGTH),
+    state: normalizeUsStateCode(context.region?.region_code),
+    postalCode: normalizePostalCode(context.postcode?.name),
   } satisfies MapboxAddressCandidate
 
   if (!Object.values(candidate).some(isPresent)) {
     return null
   }
 
-  const match = properties?.match_code
+  const match = properties.match_code ?? {}
   const completeForUsMail = Boolean(
     candidate.addressLine1 &&
       candidate.city &&
       candidate.state &&
       candidate.postalCode &&
-      normalizeUppercase(context?.country?.country_code) === 'US',
+      normalizeUppercase(context.country?.country_code) === 'US',
   )
   const secondaryAddressIsExact = candidate.addressLine2
-    ? normalizeLowercase(match?.secondary_address) === 'matched'
+    ? normalizeLowercase(match.secondary_address) === 'matched'
     : featureType !== 'secondary_address'
   const suppliedMailingHintsMatch = mailingHintsMatchCandidate(
     explicitMailingHints,
@@ -367,13 +365,13 @@ function buildCandidate(
     match,
   )
   const countryDidNotConflict =
-    normalizeLowercase(match?.country) !== 'unmatched'
+    normalizeLowercase(match.country) !== 'unmatched'
   const safeToAutofill = Boolean(
     completeForUsMail &&
       (featureType === 'address' || featureType === 'secondary_address') &&
-      ['exact', 'high'].includes(normalizeLowercase(match?.confidence) ?? '') &&
-      normalizeLowercase(match?.address_number) === 'matched' &&
-      normalizeLowercase(match?.street) === 'matched' &&
+      ['exact', 'high'].includes(normalizeLowercase(match.confidence) ?? '') &&
+      normalizeLowercase(match.address_number) === 'matched' &&
+      normalizeLowercase(match.street) === 'matched' &&
       secondaryAddressIsExact &&
       suppliedMailingHintsMatch &&
       countryDidNotConflict,
@@ -460,13 +458,13 @@ function findTrailingState(
 function mailingHintsMatchCandidate(
   hints: ExplicitMailingHints,
   candidate: MapboxAddressCandidate,
-  match: NonNullable<ProviderAddressFeature['properties']>['match_code'],
+  match: NonNullable<NonNullable<ProviderAddressFeature['properties']>['match_code']>,
 ): boolean {
   if (
     hints.postalCode &&
     (
       candidate.postalCode !== hints.postalCode ||
-      normalizeLowercase(match?.postcode) === 'unmatched'
+      normalizeLowercase(match.postcode) === 'unmatched'
     )
   ) {
     return false
@@ -475,7 +473,7 @@ function mailingHintsMatchCandidate(
     hints.state &&
     (
       candidate.state !== hints.state ||
-      normalizeLowercase(match?.region) === 'unmatched'
+      normalizeLowercase(match.region) === 'unmatched'
     )
   ) {
     return false
@@ -484,7 +482,7 @@ function mailingHintsMatchCandidate(
     hints.city &&
     (
       normalizeComparableText(candidate.city) !== hints.city ||
-      normalizeLowercase(match?.place) === 'unmatched'
+      normalizeLowercase(match.place) === 'unmatched'
     )
   ) {
     return false
@@ -492,16 +490,16 @@ function mailingHintsMatchCandidate(
   if (hints.localityPrefix) {
     const addressLine1 = normalizeComparableText(candidate.addressLine1)
     const city = normalizeComparableText(candidate.city)
-    if (!addressLine1 || hints.localityPrefix !== addressLine1) {
-      if (
+    if (
+      hints.localityPrefix !== addressLine1 &&
+      (
         !addressLine1 ||
         !city ||
-        !hints.localityPrefix.startsWith(`${addressLine1} `) ||
-        hints.localityPrefix.slice(addressLine1.length + 1) !== city ||
-        normalizeLowercase(match?.place) === 'unmatched'
-      ) {
-        return false
-      }
+        hints.localityPrefix !== `${addressLine1} ${city}` ||
+        normalizeLowercase(match.place) === 'unmatched'
+      )
+    ) {
+      return false
     }
   }
 
@@ -511,7 +509,7 @@ function mailingHintsMatchCandidate(
   if (hints.secondaryAddress) {
     if (
       candidateSecondaryAddress !== hints.secondaryAddress ||
-      normalizeLowercase(match?.secondary_address) !== 'matched'
+      normalizeLowercase(match.secondary_address) !== 'matched'
     ) {
       return false
     }

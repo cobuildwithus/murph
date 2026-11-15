@@ -107,6 +107,45 @@ function dependencies(fetchImpl: typeof fetch) {
 }
 
 describe('resolveMapboxAddress', () => {
+  it.each([
+    { label: 'properties', feature: {}, candidates: [] },
+    { label: 'context and name', feature: { properties: {} }, candidates: [] },
+    {
+      label: 'context for a primary address',
+      feature: { properties: { feature_type: 'address', name: '42 Example Lane' } },
+      candidates: [{ addressLine1: '42 Example Lane', city: null, state: null, postalCode: null }],
+    },
+    {
+      label: 'context for a secondary address',
+      feature: { properties: { feature_type: 'secondary_address', name: 'Unit 4' } },
+      candidates: [{ addressLine1: null, addressLine2: 'Unit 4', city: null, state: null, postalCode: null }],
+    },
+  ])('preserves partial candidates when $label is missing', async ({ feature, candidates }) => {
+    const result = await resolveMapboxAddress(
+      { query: '42 Example Lane' },
+      dependencies(vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ features: [feature] }))),
+    )
+    expect(result.candidates).toEqual(candidates)
+    expect(result.recommendedCandidate).toBeNull()
+  })
+
+  it('keeps a complete candidate without recommending it when match evidence is missing', async () => {
+    const { properties } = addressFeature({
+      city: 'Sampleton', postalCode: '30303', state: 'GA', streetAddress: '42 Example Lane',
+    })
+    const { match_code: _matchCode, ...withoutMatch } = properties
+    const result = await resolveMapboxAddress(
+      { query: '42 Example Lane' },
+      dependencies(vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({
+        features: [{ properties: withoutMatch }],
+      }))),
+    )
+    expect(result.candidates).toEqual([{
+      addressLine1: '42 Example Lane', city: 'Sampleton', state: 'GA', postalCode: '30303',
+    }])
+    expect(result.recommendedCandidate).toBeNull()
+  })
+
   it('fills omitted city, state, and ZIP from one strong street-only result', async () => {
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
       jsonResponse({
