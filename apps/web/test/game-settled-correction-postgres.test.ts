@@ -163,7 +163,10 @@ describe.skipIf(!enabled)("day corrections after a pair game settles, against Po
 
   it("refuses with a plain reason once the game ended more than 7 days ago", async () => {
     const f = await settledGame([[2], []]), db = getPrisma();
-    const chatDays = async () => (await readGameChatState(f.room, [f.a, f.b])).games.find(game => game.id === f.gameId)?.progress?.players.map(player => player.days.map(day => day.status));
+    const chatDays = async () => {
+      const players = (await readGameChatState(f.room, [f.a, f.b])).games.find(game => game.id === f.gameId)?.progress?.players;
+      return players && [f.a, f.b].map(memberId => players.find(player => player.memberId === memberId)?.days.map(day => day.status));
+    };
     // Murph is sent a finished game's days only while they can still be corrected.
     expect(await chatDays()).toEqual([["posted", "posted", "missed", "posted", "posted", "posted", "posted"], Array.from({ length: DAYS }, () => "posted")]);
     await f.endedAgo(GAME_SETTLED_OPEN_MS + 60_000);
