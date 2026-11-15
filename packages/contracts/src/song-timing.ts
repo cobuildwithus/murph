@@ -28,10 +28,10 @@ function orderedMatchLengths(lyricKeys: readonly string[], sungKeys: readonly st
   return lengths;
 }
 
-/** Times each unmatched lyric word evenly between the anchors around it, the audio's start and end at the edges. */
-function fillBetweenAnchors(words: readonly string[], anchors: readonly Anchor[], duration: number): SongLine["words"] {
+/** Times each unmatched lyric word evenly between the anchors around it, the start of the singing and the audio's end at the edges. */
+function fillBetweenAnchors(words: readonly string[], anchors: readonly Anchor[], duration: number, singingFrom: number): SongLine["words"] {
   const timed: SongLine["words"] = [];
-  let previousIndex = -1, previousEnd = 0;
+  let previousIndex = -1, previousEnd = singingFrom;
   for (const anchor of [...anchors, { index: words.length, startMs: duration, endMs: duration }]) {
     const missing = anchor.index - previousIndex - 1;
     const gap = anchor.startMs - previousEnd;
@@ -48,8 +48,9 @@ function fillBetweenAnchors(words: readonly string[], anchors: readonly Anchor[]
 }
 
 /** Align in order without allowing a sung extra or repeated word to steal later anchors.
- * Fewer than half the lyric words heard means the song did not sing these lyrics. */
-export function alignSongLyrics(lyrics: readonly string[], timestamps: readonly SongWordTimestamp[], durationMs: number): SongLine[] | undefined {
+ * Fewer than half the lyric words heard means the song did not sing these lyrics.
+ * Unheard opening words are placed no earlier than `singingFromMs`, where the singing starts. */
+export function alignSongLyrics(lyrics: readonly string[], timestamps: readonly SongWordTimestamp[], durationMs: number, singingFromMs = 0): SongLine[] | undefined {
   const lines = lyrics.map(wordsOf);
   const words = lines.flat();
   if (!words.length || words.length > 5000 || !timestamps.length || timestamps.length > 2000 || !Number.isFinite(durationMs) || durationMs <= 0) return undefined;
@@ -71,7 +72,7 @@ export function alignSongLyrics(lyrics: readonly string[], timestamps: readonly 
     } else if (lengths[i]![j + 1]! >= lengths[i + 1]![j]!) j++;
     else i++;
   }
-  const timed = fillBetweenAnchors(words, anchors, duration);
+  const timed = fillBetweenAnchors(words, anchors, duration, clamp(singingFromMs));
   let offset = 0;
   return lines.map(line => {
     const lineWords = timed.slice(offset, offset + line.length);

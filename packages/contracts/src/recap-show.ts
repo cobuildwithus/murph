@@ -68,7 +68,9 @@ export function recapSongLines(lyrics: readonly string[], asset: Pick<RecapAsset
   const start = asset.songStartMs ?? 0;
   const words = asset.songStartMs === undefined ? asset.wordsTimestamps : recapSungWords(asset.wordsTimestamps, sungStartMs)
     .map(word => ({ ...word, startMs: word.startMs - start, endMs: word.endMs - start }));
-  return alignSongLyrics(lyrics, words, asset.durationMs - start);
+  // A score's song can open on the band: an opening lyric word its timings missed waits for the first sung word.
+  return alignSongLyrics(lyrics, words, asset.durationMs - start,
+    asset.songStartMs === undefined ? 0 : Math.min(...words.map(word => word.startMs)));
 }
 
 /** When the song page opens in its score; undefined for a song without one. It opens on the planned start of the

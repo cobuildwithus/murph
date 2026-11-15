@@ -42,7 +42,8 @@ There is exactly one entry per lyric line. Its words retain that line's spelling
 and punctuation, split on whitespace; joining `text` with spaces reproduces the
 line with collapsed whitespace. Case and punctuation normalization aligns sung
 words in order, skips sung extras, and interpolates missing lyric words between
-matched neighbors (audio start/end at the edges). Times are non-decreasing integer
+matched neighbors (audio start/end at the edges; in a score, the first sung word
+instead of the audio's start). Times are non-decreasing integer
 milliseconds from the start of the audio, bounded by its measured duration.
 Historical songs without timings omit `lines`; existing fields remain unchanged.
 
