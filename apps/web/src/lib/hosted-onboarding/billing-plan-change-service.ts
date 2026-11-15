@@ -420,7 +420,7 @@ function assertHostedStripeSubscriptionMatchesCustomer(input: {
   }
   throw hostedOnboardingError({
     code: "HOSTED_BILLING_STRIPE_CUSTOMER_MISMATCH",
-    httpStatus: 409,
+    httpStatus: 500,
     message: "Your subscription does not match your billing account.",
   });
 }
@@ -505,7 +505,7 @@ function buildHostedBillingPlanChangeAlreadyScheduledError(): Error {
 function buildHostedBillingSubscriptionItemsUnsupportedError(): Error {
   return hostedOnboardingError({
     code: "HOSTED_BILLING_SUBSCRIPTION_ITEMS_UNSUPPORTED",
-    httpStatus: 409,
+    httpStatus: 500,
     message:
       "Your subscription needs a billing cleanup before this plan change. Contact support.",
   });

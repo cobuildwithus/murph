@@ -173,6 +173,7 @@ import {
 } from "./family-plan-capacity";
 import {
   buildHostedStripeAlertCorrelationCause,
+  describeHostedStripeError,
   describeHostedStripeErrorDetails,
   isHostedStripeProviderError,
   logHostedStripeFailure,
@@ -1298,7 +1299,7 @@ export async function abandonHostedFamilyDraftForOwner(input: {
           throw buildHostedFamilyDraftBillingMayCompleteError();
         }
       } else if (session.status !== "expired") {
-        throw buildHostedFamilyDraftRecoveryRequiredError();
+        throw new Error("Stripe returned an unsupported Family checkout status.");
       }
     }
     candidate.checkoutRetiredByProvider = true;
@@ -2712,7 +2713,7 @@ async function createOrResumeHostedFamilyBillingCheckout(
       throw buildHostedFamilyDraftRecoveryRequiredError();
     }
     const seatCount = requiredCheckoutAttemptId
-      ? normalizeHostedFamilySeatCount(currentBillingRef?.checkoutSeatCount)
+      ? parseHostedFamilySeatCount(currentBillingRef?.checkoutSeatCount)
       : requestedSeatCount;
     if (seatCount === null) {
       throw new TypeError("Family checkout seat count was not resolved.");
@@ -2769,15 +2770,11 @@ async function createOrResumeHostedFamilyBillingCheckout(
     const checkoutAttemptId =
       currentAttemptId ?? generateHostedFamilyCheckoutAttemptId();
     if (currentAttemptId) {
-      const checkoutCreatedAt = currentBillingRef?.checkoutCreatedAt;
-      const attemptAgeMs = checkoutCreatedAt
-        ? now.getTime() - checkoutCreatedAt.getTime()
-        : Number.NaN;
-      if (
-        !Number.isFinite(attemptAgeMs)
-        || attemptAgeMs < 0
-        || attemptAgeMs >= HOSTED_FAMILY_CHECKOUT_CLAIM_MAX_AGE_MS
-      ) {
+      const checkoutCreatedAt = currentBillingRef?.checkoutCreatedAt ?? null;
+      if (!hostedFamilyCheckoutClaimIsWithinSafeReplayWindow({
+        checkoutCreatedAt,
+        now,
+      })) {
         throw buildHostedFamilyCheckoutRecoveryRequiredError();
       }
     } else {
@@ -2975,7 +2972,7 @@ async function resumeHostedFamilyBillingCheckout(input: {
     if (!session.url) {
       throw hostedOnboardingError({
         code: "HOSTED_FAMILY_CHECKOUT_SESSION_UNAVAILABLE",
-        httpStatus: 409,
+        httpStatus: 502,
         message:
           "Family checkout is open but Stripe did not return its URL. Try again or contact support.",
         retryable: true,
@@ -3079,12 +3076,7 @@ async function resumeHostedFamilyBillingCheckout(input: {
     };
   }
 
-  throw hostedOnboardingError({
-    code: "HOSTED_FAMILY_BILLING_SYNCING",
-    httpStatus: 409,
-    message: "Family checkout is unavailable and still syncing. Try again shortly.",
-    retryable: true,
-  });
+  throw new Error("Stripe returned an unsupported Family checkout status.");
 }
 
 async function revalidateHostedFamilyCheckoutClaimTx(input: {
@@ -3506,7 +3498,7 @@ function assertHostedFamilyDirectPaidSubscriptionMatchesCustomer(input: {
 
   throw hostedOnboardingError({
     code: "HOSTED_FAMILY_DIRECT_PAID_STRIPE_CUSTOMER_MISMATCH",
-    httpStatus: 409,
+    httpStatus: 500,
     message: "Your subscription could not be matched to this hosted account.",
   });
 }
@@ -3538,7 +3530,7 @@ function assertHostedFamilyDirectPaidSubscriptionCanUpgrade(input: {
 function buildHostedFamilyDirectPaidSubscriptionItemsUnsupportedError(): Error {
   return hostedOnboardingError({
     code: "HOSTED_FAMILY_DIRECT_PAID_SUBSCRIPTION_ITEMS_UNSUPPORTED",
-    httpStatus: 409,
+    httpStatus: 500,
     message: "Your subscription items are not ready for this Family plan change.",
   });
 }
@@ -3902,7 +3894,7 @@ async function performHostedFamilyStripeCapacitiesUpdateUnderOwnerLock(input: {
   if (!stripeState) {
     throw hostedOnboardingError({
       code: "HOSTED_FAMILY_SUBSCRIPTION_INVALID",
-      httpStatus: 409,
+      httpStatus: 500,
       message: "Family billing contains an unsupported subscription item.",
     });
   }
@@ -4241,9 +4233,15 @@ export async function resolveHostedFamilyCheckoutRedirectUrl(input: {
         operationName: "checkout.sessions.retrieve.family-redirect",
       });
     }
+    const missing = isStripeResourceMissingError(error);
+    const providerError = describeHostedStripeError(error);
+    if (!missing && !["StripeConnectionError", "StripeAPIError", "StripeRateLimitError"]
+      .includes(providerError.type ?? "")) {
+      throw error;
+    }
     throw hostedOnboardingError({
       code: "HOSTED_FAMILY_CHECKOUT_SESSION_UNAVAILABLE",
-      httpStatus: 409,
+      httpStatus: missing ? 409 : 502,
       message: "Family checkout could not be checked. Try again shortly.",
       retryable: true,
     });
@@ -4279,7 +4277,7 @@ export async function resolveHostedFamilyCheckoutRedirectUrl(input: {
     }
     throw hostedOnboardingError({
       code: "HOSTED_FAMILY_CHECKOUT_SESSION_UNAVAILABLE",
-      httpStatus: 409,
+      httpStatus: 502,
       message: "Family checkout is open but its URL is unavailable. Try again shortly.",
       retryable: true,
     });
@@ -4307,12 +4305,7 @@ export async function resolveHostedFamilyCheckoutRedirectUrl(input: {
     });
   }
 
-  throw hostedOnboardingError({
-    code: "HOSTED_FAMILY_CHECKOUT_SESSION_UNAVAILABLE",
-    httpStatus: 409,
-    message: "Family checkout is still syncing. Try again shortly.",
-    retryable: true,
-  });
+  throw new Error("Stripe returned an unsupported Family checkout status.");
 }
 
 async function readHostedFamilyCheckoutRedirectAttemptId(input: {
@@ -7164,7 +7157,7 @@ async function prepareHostedFamilyDraftAbandonmentCandidate(input: {
       || createHostedStripeCheckoutSessionLookupKey(stripeCheckoutSessionId)
         !== stripeCheckoutSessionLookupKey
     ) {
-      throw buildHostedFamilyDraftRecoveryRequiredError();
+      throw new Error("Stored Family checkout session does not match its lookup key.");
     }
   }
 
