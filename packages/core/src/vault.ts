@@ -622,24 +622,6 @@ async function validateIntegrationIngestValidationFamily(
   }
 }
 
-export async function validateJsonlRecordAgainstVault(input: {
-  familyId: VaultFamilyId;
-  index: number;
-  record: UnknownRecord;
-  relativePath: string;
-  vaultRoot: string;
-}): Promise<ValidationIssue[]> {
-  const postValidateRecord = resolveJsonlFamilyPostValidator(input.vaultRoot, input.familyId);
-  if (!postValidateRecord) {
-    return [];
-  }
-
-  return postValidateRecord(input.record, {
-    relativePath: input.relativePath,
-    index: input.index,
-  });
-}
-
 function resolveJsonlFamilyPostValidator(
   vaultRoot: string,
   familyId: VaultFamilyId,

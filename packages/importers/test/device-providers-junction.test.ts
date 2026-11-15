@@ -42,8 +42,25 @@ import {
   type DeviceProviderSnapshotImportInput,
   type WearableRawIngestReceipt,
 } from "../src/index.ts";
+import { normalizeJunctionSleepStageValue } from "../src/device-providers/junction-resources.ts";
 import { buildJunctionTemporalFeatures } from "../src/device-providers/junction-timeseries-features.ts";
 import { assertJunctionTimeseriesOutputBounds } from "../src/device-providers/junction-timeseries-fidelity.ts";
+
+test("Junction sleep stages preserve numeric codes, text aliases, and unknown input rejection", () => {
+  for (const [input, expected] of [
+    [1, "deep"], [2, "light"], [3, "rem"], [4, "awake"],
+    ["1", "deep"], ["2", "light"], ["3", "rem"], ["4", "awake"],
+    ["  Slow-Wave Sleep  ", "deep"], ["CORE SLEEP", "light"],
+    ["rapid eye movement", "rem"], ["wakefulness", "awake"],
+    ["sleeping", "asleep_unspecified"],
+    ["+1", null], ["-1", null], ["  +4  ", null], [1.5, null],
+    [0, null], [5, null], [Infinity, null], [NaN, null],
+    [null, null], [undefined, null], [true, null], [{ stage: 1 }, null],
+    ["unknown", null], ["constructor", null], ["__proto__", null],
+  ]) {
+    assert.equal(normalizeJunctionSleepStageValue(input), expected);
+  }
+});
 
 type StoredJsonlRecord = Awaited<ReturnType<typeof coreRuntime.readJsonlRecords>>[number];
 

@@ -1197,18 +1197,6 @@ async function readIntegrationIngestEntriesFromSources(
   return entries;
 }
 
-async function readIntegrationIngestEntriesByIdFromPaths(
-  vaultRoot: string,
-  paths: readonly string[],
-  ids: ReadonlySet<string>,
-): Promise<StoredIntegrationIngestEntry[]> {
-  return readIntegrationIngestEntriesByIdFromSources(
-    vaultRoot,
-    await listIntegrationIngestRowSourcesForLogicalPaths(vaultRoot, paths),
-    ids,
-  );
-}
-
 async function readIntegrationIngestEntriesByIdFromSources(
   vaultRoot: string,
   sources: readonly IntegrationIngestRowSource[],

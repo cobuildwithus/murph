@@ -264,28 +264,21 @@ function buildMealNutritionFromOptions(
   const totals: NonNullable<MealNutrition['totals']> = {
     ...(payloadNutrition?.totals ?? {}),
   }
-  if (options.nutritionCalories !== undefined) {
-    totals.calories = options.nutritionCalories
-  }
-  if (options.nutritionProteinGrams !== undefined) {
-    totals.proteinGrams = options.nutritionProteinGrams
-  }
-  if (options.nutritionCarbsGrams !== undefined) {
-    totals.carbsGrams = options.nutritionCarbsGrams
-  }
-  if (options.nutritionFatGrams !== undefined) {
-    totals.fatGrams = options.nutritionFatGrams
-  }
-  if (options.nutritionFiberGrams !== undefined) {
-    totals.fiberGrams = options.nutritionFiberGrams
+  for (const [key, value] of [
+    ['calories', options.nutritionCalories],
+    ['proteinGrams', options.nutritionProteinGrams],
+    ['carbsGrams', options.nutritionCarbsGrams],
+    ['fatGrams', options.nutritionFatGrams],
+    ['fiberGrams', options.nutritionFiberGrams],
+  ] as const) {
+    if (value !== undefined) totals[key] = value
   }
 
-  const provenanceSource =
-    options.nutritionSource ?? payloadNutrition?.provenance?.source
-  const provenanceConfidence =
-    options.nutritionConfidence ?? payloadNutrition?.provenance?.confidence
-  const provenanceSourceDetail =
-    options.nutritionSourceDetail ?? payloadNutrition?.provenance?.sourceDetail
+  const payloadProvenance: Partial<NonNullable<MealNutrition['provenance']>> =
+    payloadNutrition?.provenance ?? {}
+  const provenanceSource = options.nutritionSource ?? payloadProvenance.source
+  const provenanceConfidence = options.nutritionConfidence ?? payloadProvenance.confidence
+  const provenanceSourceDetail = options.nutritionSourceDetail ?? payloadProvenance.sourceDetail
   const typedProvenanceProvided =
     options.nutritionSource !== undefined ||
     options.nutritionConfidence !== undefined ||

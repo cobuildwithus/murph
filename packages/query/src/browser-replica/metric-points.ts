@@ -142,30 +142,6 @@ function dedupeEquivalentMetricRows(
   return [...byEquivalentValue.values()];
 }
 
-export function browserMetricRowToSeriesPoint(row: BrowserVaultMetricRow): MetricSeriesPoint {
-  return {
-    biomarkerKey: row.biomarkerKey,
-    comparator: row.comparator,
-    confidence: row.confidence,
-    context: row.context,
-    date: row.date,
-    grain: row.grain,
-    id: row.id,
-    metricKey: row.metricKey,
-    observedAt: row.observedAt,
-    pointIds: row.pointIds,
-    recordIds: row.recordIds,
-    sourceFamily: normalizeMetricSourceFamily(row.sourceFamily),
-    sourceKind: row.sourceKind,
-    sourceKinds: row.sourceKind ? [row.sourceKind] : [],
-    sourceLabel: row.sourceLabel,
-    statistic: row.statistic,
-    unit: row.unit,
-    value: row.value,
-    valueLabel: row.valueLabel,
-  };
-}
-
 function toBrowserVaultMetricSelectionRow(
   selection: MetricSelection,
   requestedMetric: BrowserVaultRequestedMetric,
@@ -226,15 +202,4 @@ function normalizeRequestedMetrics(
 
 function resolveMetricKey(value: string): string {
   return resolveMetricDefinition(value)?.key ?? normalizeMetricKey(value);
-}
-
-function normalizeMetricSourceFamily(value: string | null): MetricSeriesPoint["sourceFamily"] {
-  switch (value) {
-    case "derived":
-    case "event":
-    case "sample":
-      return value;
-    default:
-      return null;
-  }
 }
