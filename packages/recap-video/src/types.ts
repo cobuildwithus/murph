@@ -54,15 +54,17 @@ export type RecapVideoStake =
 
 /**
  * The show's score: one piece of music, the band under every story page and
- * then the song. Pages turn on their `cueMs`, and the song page's cue is its
- * first sung word, so a singer who comes in late holds the page before it.
+ * then the song. Pages turn on their `cueMs`. The song page's cue is the
+ * planned start of the singing, so a singer who comes in late lengthens the
+ * song's own opening, not the page before it; a score stored before songs
+ * started by then has its first sung word as the cue.
  * A recap with only a song, from before shows had scores, gets no video.
  */
 export interface RecapVideoScore {
   path: string;
   /** The whole piece's length. */
   durationMs: number;
-  /** The song's own length. Its lyrics and its scrubber count from `durationMs - songMs`, a little before the first sung word. */
+  /** The song's own length. Its lyrics and its scrubber count from `durationMs - songMs`, at or before the song page's cue. */
   songMs: number;
 }
 

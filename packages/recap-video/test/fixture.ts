@@ -32,7 +32,8 @@ function timedLines(): { words: RecapVideoSongWord[] }[] {
 /**
  * The score: five seconds of band under each of the six story pages, then the
  * song. The song's clock starts at 30,088 ms and its singer comes in 212 ms
- * later, which is where the song page opens.
+ * later, which is where the song page opens: a score stored before songs were
+ * started by the planned start. A score made now opens its song on 30,000 ms.
  */
 export const FIXTURE_SCORE = { durationMs: 50040, songMs: 19952, songCueMs: 30300 } as const;
 

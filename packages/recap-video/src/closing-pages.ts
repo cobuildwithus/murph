@@ -48,7 +48,7 @@ export async function buildSong(page: RecapVideoPage, input: RecapVideoInput, lo
   const coverPath = coverId ? input.scenes[coverId] : undefined;
   const cover = coverPath ? await load(coverPath, "the cover") : null;
   const tint = songTint(cover);
-  // The song's clock is already running when its page opens on the first sung word.
+  // The song's clock may already be running when its page opens on its cue.
   const songMs = input.score.songMs, lead = (page.cueMs ?? 0) - songOriginMs(input);
 
   const infoWidth = BOARD.width - 56, top = BOARD.top + 48;
