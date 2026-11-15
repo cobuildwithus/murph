@@ -60,29 +60,30 @@ export async function encodeRecapVideo(renderer: RecapVideoRenderer, soundtrack:
   ffmpeg.stderr.setEncoding("utf8").on("data", (chunk: string) => {
     stderr = (stderr + chunk).slice(-8192);
   });
-  // ffmpeg quitting early surfaces as its exit code, not as a broken pipe here.
+  // ffmpeg quitting early, or never starting, surfaces as its exit code, not as a broken pipe or a wait that never ends.
   ffmpeg.stdin.on("error", () => {});
-  const closed = new Promise<number | null>((resolve, reject) => {
-    ffmpeg.on("error", reject);
-    ffmpeg.on("close", resolve);
+  let ended = false;
+  const closed = new Promise<number | null>(resolve => {
+    const finish = (code: number | null): void => {
+      ended = true;
+      resolve(code);
+    };
+    ffmpeg.on("error", () => finish(null));
+    ffmpeg.on("close", finish);
   });
   let drawMs = 0;
   try {
-    for (let frame = 0; frame < frameCount && ffmpeg.exitCode === null; frame++) {
+    for (let frame = 0; frame < frameCount && !ended; frame++) {
       const started = performance.now();
       const pixels = renderer.drawFrame(frame * 1000 / renderer.fps).data();
       drawMs += performance.now() - started;
-      if (!ffmpeg.stdin.write(pixels)) await new Promise<void>(resolve => ffmpeg.stdin.once("drain", resolve));
+      if (!ffmpeg.stdin.write(pixels)) await Promise.race([new Promise<void>(resolve => ffmpeg.stdin.once("drain", resolve)), closed]);
     }
   } finally {
     ffmpeg.stdin.end();
   }
-  let code: number | null;
-  try {
-    code = await closed;
-  } catch {
-    throw new RecapVideoRefusal("encoder_failed", "ffmpeg could not be started.");
-  }
+  const code = await closed;
+  if (code === null) throw new RecapVideoRefusal("encoder_failed", "ffmpeg could not be started, or was stopped.");
   if (code !== 0) throw new RecapVideoRefusal("encoder_failed", `ffmpeg exited ${code}: ${stderr.trim().split("\n").at(-1) ?? ""}`);
   const bytes = (await stat(outPath)).size;
   if (bytes > maxBytes) throw new RecapVideoRefusal("too_large", `The video came out at ${bytes} bytes, over its ${maxBytes} byte budget.`);

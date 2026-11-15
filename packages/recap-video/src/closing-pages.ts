@@ -1,6 +1,6 @@
 import { artPiece, face, FULL, mono, withArticle, type BuiltPage, type Piece } from "./pages.js";
 import {
-  BOARD, COLOR, applyText, baselineIn, createCanvas, drawCover, drawLines, grow, loadPicture, onNight, roundedRect, setShadow, textWidth, wrapText,
+  BOARD, COLOR, applyText, baselineIn, createCanvas, drawCover, drawLines, grow, loadPicture, onNight, requireDrawable, roundedRect, setShadow, textWidth, wrapText,
   type Ctx, type Image, type Rect, type TextStyle,
 } from "./surface.js";
 import { lyricWordStarts } from "./timeline.js";
@@ -80,7 +80,9 @@ export async function buildSong(page: RecapVideoPage, input: RecapVideoInput): P
     lineStarts.push(starts[index]?.[0] ?? songMs);
     let x = 0;
     texts.forEach((text, at) => {
-      const width = wrapText(text, lyricStyle, pane.width).length === 1 ? textWidth(text, lyricStyle) : 0;
+      requireDrawable(text, lyricStyle);
+      const width = textWidth(text, lyricStyle);
+      if (width > pane.width) throw new RecapVideoRefusal("does_not_fit", "A lyric word is wider than the lyrics card.");
       if (x > 0 && x + width > pane.width) {
         x = 0;
         y += lyricStyle.lineHeight;

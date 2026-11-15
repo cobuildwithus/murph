@@ -195,6 +195,13 @@ describe("refusals", () => {
   });
 });
 
+describe("the encoder", () => {
+  it("refuses, instead of waiting, when ffmpeg cannot be started", async () => {
+    await expect(encodeRecapVideo(renderer, input.soundtrack, path.join(directory, "never.mp4"), { ffmpegPath: path.join(directory, "no-such-ffmpeg") }))
+      .rejects.toSatisfy(error => error instanceof RecapVideoRefusal && error.code === "encoder_failed");
+  });
+});
+
 describe("fonts", () => {
   // Advances come from the font files alone. A missing or substituted face, or a changed optical size, moves these and every line break with them.
   const advances: [string, TextStyle, number][] = [
