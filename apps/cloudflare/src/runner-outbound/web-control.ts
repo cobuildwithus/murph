@@ -1,3 +1,4 @@
+import { RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import { boundUsageRequestCliTiming } from "../usage-record-body.ts";
 import { readNativeRuntimeProviderContainer, type RuntimeProviderCaller } from "../runtime-provider-authorization.ts";
 import { beginHostedRuntimeUsageSettlement } from "../runtime-usage-settlement.ts";
@@ -175,10 +176,7 @@ export async function handleRunnerWebControlRequest(input: {
       userId: input.userId,
     });
   } catch (error) {
-    if (error instanceof RangeError) {
-      return jsonError("Request body too large.", 413);
-    }
-    throw error;
+    return mapRunnerWebControlBodyReadError(error);
   }
   const checkpointRequest = isCheckpointRequest
     ? parseHostedWorkspaceCheckpointRequest(JSON.parse(body ?? "{}"))
@@ -452,6 +450,14 @@ function forceHostedRunnerRuntimeSnapshotCredentialMaterial(body: string): strin
         ? payload.includeCredentialMaterial
         : true,
   });
+}
+
+function mapRunnerWebControlBodyReadError(error: unknown): Response {
+  if (error instanceof RequestBodyTooLargeError) return jsonError("Request body too large.", 413);
+  // Keep native inference until this family flips in the explicit-request-rejection
+  // plan. Runner outbound has no surrounding native-error-to-400 mapper.
+  if (error instanceof RangeError) return jsonError("Invalid request.", 400);
+  throw error;
 }
 
 async function readOptionalHostedRunnerWebControlBody(request: Request): Promise<string | undefined> {

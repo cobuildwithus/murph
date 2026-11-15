@@ -1,3 +1,4 @@
+import { RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import {
   HOSTED_EMAIL_PUBLIC_BOOTSTRAP_CALLBACK_USER_ID,
   parseHostedEmailPublicBootstrapCallbackRequest,
@@ -55,7 +56,7 @@ async function readHostedEmailPublicBootstrapPayloadText(
       limitBytes: HOSTED_EMAIL_PUBLIC_BOOTSTRAP_MAX_BODY_BYTES,
     })).toString("utf8");
   } catch (error) {
-    if (error instanceof RangeError) {
+    if (error instanceof RequestBodyTooLargeError) {
       throw hostedOnboardingError({
         code: "HOSTED_EMAIL_PUBLIC_BOOTSTRAP_BODY_TOO_LARGE",
         message: "Hosted email public bootstrap body is too large.",

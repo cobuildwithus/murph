@@ -1,3 +1,4 @@
+import { RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import {
   CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_CAPTURE_ID_HEADER,
   CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_KEY_HEADER,
@@ -126,7 +127,7 @@ export async function handleMealPhotoStageRoute(
       limitBytes: HOSTED_MEAL_PHOTO_MAX_BYTES,
     });
   } catch (error) {
-    if (error instanceof RangeError) {
+    if (error instanceof RequestBodyTooLargeError) {
       return jsonError("Meal photo exceeds the 4 MiB limit.", 413);
     }
     throw error;

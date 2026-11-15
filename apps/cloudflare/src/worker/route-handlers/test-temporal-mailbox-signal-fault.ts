@@ -1,3 +1,4 @@
+import { RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import {
   json,
   jsonError,
@@ -139,10 +140,10 @@ async function readTemporalMailboxSignalFaultBody(
     });
   } catch (error) {
     return jsonError(
-      error instanceof RangeError
+      error instanceof RequestBodyTooLargeError
         ? "Request body too large."
         : "Request body must be a JSON object.",
-      error instanceof RangeError ? 413 : 400,
+      error instanceof RequestBodyTooLargeError ? 413 : 400,
     );
   }
 }

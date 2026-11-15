@@ -1,4 +1,4 @@
-import { isRequestInputError } from "@murphai/hosted-execution/request-input";
+import { isRequestInputError, RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import { Buffer } from "node:buffer";
 
 import { NextResponse } from "next/server";
@@ -171,7 +171,7 @@ export async function readRawBodyBuffer(
     const parsedContentLength = Number.parseInt(declaredContentLength, 10);
 
     if (Number.isFinite(parsedContentLength) && parsedContentLength > limitBytes) {
-      throw new RangeError(`Request body exceeded ${limitBytes} bytes.`);
+      throw new RequestBodyTooLargeError(limitBytes);
     }
   }
 
@@ -199,7 +199,7 @@ export async function readRawBodyBuffer(
 
       if (totalBytes > limitBytes) {
         await reader.cancel();
-        throw new RangeError(`Request body exceeded ${limitBytes} bytes.`);
+        throw new RequestBodyTooLargeError(limitBytes);
       }
 
       chunks.push(Buffer.from(value));
@@ -303,7 +303,7 @@ export function createJsonErrorResponse(
     );
   }
 
-  if (isRequestBodyTooLargeError(error)) {
+  if (error instanceof RequestBodyTooLargeError) {
     logJsonError("warn", error, options, {
       errorResponseCode: "REQUEST_BODY_TOO_LARGE",
     });
@@ -362,10 +362,6 @@ export function createJsonErrorResponse(
     },
     buildJsonResponseInit(options, 500),
   );
-}
-
-function isRequestBodyTooLargeError(error: unknown): error is RangeError {
-  return error instanceof RangeError && error.message.startsWith("Request body exceeded ");
 }
 
 export function createJsonRouteHelpers(

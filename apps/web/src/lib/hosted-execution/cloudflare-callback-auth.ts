@@ -1,3 +1,4 @@
+import { RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
 } from "@murphai/hosted-execution/contracts";
@@ -207,7 +208,7 @@ async function readHostedCloudflareCallbackPayload(
 ): Promise<string> {
   if (input.payloadText !== undefined) {
     if (new TextEncoder().encode(input.payloadText).byteLength > input.maxBodyBytes) {
-      throw new RangeError(`Request body exceeded ${input.maxBodyBytes} bytes.`);
+      throw new RequestBodyTooLargeError(input.maxBodyBytes);
     }
 
     return input.payloadText;

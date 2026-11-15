@@ -1,9 +1,18 @@
 import { describe, expect, it } from "vitest";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
-import { isRequestInputError, parseInput, RequestInputError } from "../src/request-input.ts";
+import { isRequestInputError, parseInput, RequestInputError, RequestBodyTooLargeError } from "../src/request-input.ts";
 import { requireString } from "../src/parsers/assertions.ts";
 
 describe("request input boundary", () => {
+  it("identifies a body limit without inspecting its message", () => {
+    const error = new RequestBodyTooLargeError(8);
+    expect(error.message).toBe("Request body exceeded 8 bytes.");
+    expect(error).toBeInstanceOf(RangeError);
+    expect(error).toBeInstanceOf(RequestBodyTooLargeError);
+    expect(new RangeError(error.message)).not.toBeInstanceOf(RequestBodyTooLargeError);
+    expect(() => parseInput(null, () => { throw error; })).toThrow(error);
+  });
+
   it("returns the parser result unchanged and invokes it once", () => {
     const value = { ok: true };
     let calls = 0;

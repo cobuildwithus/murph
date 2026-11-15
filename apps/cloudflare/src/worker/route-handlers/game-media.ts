@@ -1,3 +1,4 @@
+import { RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import {
   CLOUDFLARE_HOSTED_CONTROL_GAME_MEDIA_ID_HEADER,
   CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS,
@@ -77,7 +78,7 @@ async function stageGameMedia(context: WorkerRouteContext, store: HostedGameMedi
       await readRequestBodyText(context.request, { limitBytes: HOSTED_GAME_MEDIA_MAX_ENVELOPE_BYTES }),
     );
   } catch (error) {
-    if (error instanceof RangeError) return jsonError("Game media is too large.", 413);
+    if (error instanceof RequestBodyTooLargeError) return jsonError("Game media is too large.", 413);
     if (error instanceof TypeError) return jsonError("Game media must be sealed.", 400);
     throw error;
   }

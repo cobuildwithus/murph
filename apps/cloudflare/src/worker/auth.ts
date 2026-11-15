@@ -30,9 +30,7 @@ import {
   HOSTED_EXECUTION_USER_ID_HEADER,
   readHostedExecutionBoundUserIdHeader,
 } from "./route-utils/bound-user-header.ts";
-import {
-  isRequestBodyTooLargeError,
-} from "./route-utils/json-body.ts";
+import { RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import {
   decodeRouteParam,
 } from "./route-utils/route-params.ts";
@@ -76,7 +74,7 @@ export async function authorizeRoute(
           limitBytes: options.signatureBodyLimitBytes,
         });
       } catch (error) {
-        if (isRequestBodyTooLargeError(error)) {
+        if (error instanceof RequestBodyTooLargeError) {
           return jsonError("Request body too large.", 413);
         }
 

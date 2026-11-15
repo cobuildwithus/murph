@@ -1,3 +1,4 @@
+import { RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import type { R2BucketLike } from "./bundle-store.ts";
 import { requireHostedGameMediaEnvelope } from "./game-media-store.ts";
 import { hostedRecapMediaObjectKey, hostedRecapMediaUserPrefix, requireHostedRecapMediaId } from "./storage-paths.ts";
@@ -58,6 +59,6 @@ function parseStored(text: string): Stored {
 export function requireRecapMediaEnvelope(envelope: string, hash: string): string {
   if (!/^[a-f0-9]{64}$/u.test(hash)) throw new TypeError("Recap content hash is invalid.");
   const sealed = requireHostedGameMediaEnvelope(envelope);
-  if (new TextEncoder().encode(sealed).length > 3 * 1024 * 1024) throw new RangeError("Recap envelope is too large.");
+  if (new TextEncoder().encode(sealed).length > 3 * 1024 * 1024) throw new RequestBodyTooLargeError(3 * 1024 * 1024, "Recap envelope is too large.");
   return sealed;
 }
