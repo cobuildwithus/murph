@@ -3113,7 +3113,7 @@ describe("startHostedContainerEntrypoint", () => {
       code,
       details: { errorDetail: "Parser bug." },
       error: "Internal error.",
-      errorName: error instanceof ContractValidationError ? "ContractValidationError" : error.name,
+      errorName: error instanceof ContractValidationError ? "ContractValidationError" : (error as Error).name,
     });
     expect(runWorkspaceInvocation).not.toHaveBeenCalled();
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(expect.objectContaining({
