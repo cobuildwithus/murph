@@ -1476,13 +1476,16 @@ describe.skipIf(!runPostgresConcurrencyProof)(
             throw new RangeError("Synthetic post-commit failure");
           })()).rejects.toThrow("Synthetic post-commit failure");
           const stored = await fixture.observer.hostedMailboxItem.findMany({ where: { dedupeKey: event.event_id } });
-          const daily = await fixture.observer.hostedLinqDailyState.findMany({ where: { memberId: fixture.ownerMemberId } });
+          // Direct and group admissions count against different members; read both.
+          const dailyWhere = { memberId: { in: [fixture.ownerMemberId, fixture.containerMemberId] } };
+          const daily = await fixture.observer.hostedLinqDailyState.findMany({ where: dailyWhere, orderBy: { memberId: "asc" } });
           expect(stored).toHaveLength(1);
+          expect(daily.reduce((sum, row) => sum + row.inboundCount, 0)).toBe(1);
           // The successful retry response can also be lost: replay it again.
           for (let delivery = 0; delivery < 2; delivery += 1) {
             await expect(admit()).resolves.toMatchObject({ response: { ok: true, duplicate: true } });
             expect(await fixture.observer.hostedMailboxItem.findMany({ where: { dedupeKey: event.event_id } })).toEqual(stored);
-            expect(await fixture.observer.hostedLinqDailyState.findMany({ where: { memberId: fixture.ownerMemberId } })).toEqual(daily);
+            expect(await fixture.observer.hostedLinqDailyState.findMany({ where: dailyWhere, orderBy: { memberId: "asc" } })).toEqual(daily);
           }
         } finally {
           if (directRoute) await fixture.observer.hostedLinqLine.deleteMany({ where: { phoneNumberLookupKey: directRoute.recipientPhoneLookupKey } });
