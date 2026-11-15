@@ -141,7 +141,10 @@ const scopedImportSurfaceProbes: readonly ScopedImportSurfaceProbe[] = [
     // contracts/dist/companion-meals.js, shared by the member-action schema and
     // public contracts entrypoint. Isolating that module restores 321; no new
     // package or transitive subtree is loaded. Admit only the measured count.
-    maxResolvedModules: 322,
+    // PR #4972 measured 323 on Linux CI. The sole added module is
+    // contracts/dist/validation-error.js, a zero-import error class that
+    // contract validation throws. No package or transitive subtree is added.
+    maxResolvedModules: 323,
   },
 ]
 
