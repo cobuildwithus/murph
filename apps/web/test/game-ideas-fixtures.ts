@@ -11,8 +11,14 @@ export function written(ideas: unknown = TASKS, status = "completed") {
     output: [{ type: "message", role: "assistant", content: [{ type: "output_text", text: JSON.stringify({ ideas }) }] }],
   });
 }
-export function checked(probabilities: number[] = [1, 1, 1, 1]) {
-  return Response.json({ answers: probabilities.map((probability, index) => ({ name: `q${index}`, type: "predicate", probability })) });
+/** Decisions answers: each idea's good-for-the-pair probability, its dare
+ * (not a favor) probability on dare checks, and its fit (default 1). */
+export function checked(probabilities: number[] = [1, 1, 1, 1], options: { dare?: boolean; fits?: number[] } = {}) {
+  return Response.json({ answers: probabilities.flatMap((probability, index) => [
+    { name: `r${index}`, type: "predicate", probability },
+    ...(options.dare ? [{ name: `d${index}`, type: "predicate", probability: 1 }] : []),
+    { name: `f${index}`, type: "predicate", probability: options.fits?.[index] ?? 1 },
+  ]) });
 }
 
 /** Delayed real SDK fetch responses honor abort, with one idea forcing the retry. */

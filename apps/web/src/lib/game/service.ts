@@ -3301,7 +3301,9 @@ export async function readHome(memberId: string, multiplayer = false, auth?: Hos
     }),
     prisma.gameEntry.findFirst({ where: { memberId, attempt: { gt: 0 }, withdrawnAt: null },
       orderBy: [{ receivedAt: "desc" }, { id: "desc" }], select: { kind: true } }),
-    readHostedMemberIdentity({ memberId, prisma }),
+    // Only for the optional area-code hint: an identity that can't be read
+    // leaves it unknown instead of failing home.
+    readHostedMemberIdentity({ memberId, prisma }).catch(() => null),
   ]);
   const current = await loadCurrent([...new Set([...seats.map((seat) => seat.gameId), ...addressed.map((game) => game.id)])], true, memberId);
   const visible = current.games.filter((game) => canView(game, memberId));

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { gameIdeasBrief } from "../src/lib/game/ideas/brief";
 import { parseGameIdeasInput, type GameIdeasInput } from "../src/lib/game/ideas/input";
 import { cleanGameIdea, gameIdeasCheck, writeGameIdeas } from "../src/lib/game/ideas/writer";
+import { dareQuestion, stakeInput, stakeQuestion } from "../src/lib/game/ideas/rules";
 import { normalizeGameText } from "../src/lib/game/text";
 import { isGameTextRefused } from "../src/lib/game/moderation";
 import { capLeads } from "../src/lib/game/ideas/variety";
@@ -25,24 +26,35 @@ describe("typed game ideas", () => {
     expect(JSON.parse(bodies[0].input)).toEqual(parseGameIdeasInput(request));
     expect(JSON.stringify(bodies)).not.toContain("private-");
     expect(fetch.mock.calls.map(([url]) => String(url))).toEqual(["https://api.openai.com/v1/responses", "https://api.openai.com/v1/decisions"]);
-    expect(bodies[1].questions).toHaveLength(TASKS.length);
+    expect(bodies[1].questions).toHaveLength(TASKS.length * 2);
     expect(bodies[1].questions.every((q: { type: string }) => q.type === "predicate")).toBe(true);
+    expect(bodies[1].questions[1].instructions).toContain('"with the dog"');
   });
 
-  it("keeps calibrated situation rules in shared input and checks dare semantics in the same predicate", () => {
-    const ctx: GameIdeasInput = { ...INPUT, step: "dare", relationship: "coworker", apart: true, task: "20 squats", words: "workout forfeit" };
+  it("checks with the build's calibrated input and questions, plus the dare question and a fit question", () => {
+    const ctx: GameIdeasInput = { ...INPUT, step: "dare", relationship: "coworker", apart: true, task: "20 squats", words: "workout forfeit", directions: ["Funnier", "Cheaper"] };
     const check = gameIdeasCheck(ctx, [{ text: "Do 100 burpees", schedule: "every_day" }]);
-    expect(check.input).toContain("They are coworkers:");
-    expect(check.input).toContain("They live in different cities");
-    expect(check.input).toContain("Low-effort tokens like a playlist");
-    expect(check.input).toContain("Never include alcohol, money, payments, gambling, gift cards, brands or names");
-    expect(check.questions).toHaveLength(1);
-    expect(check.questions[0].instructions).toContain("rather than a favor or service for the winner");
-    expect(check.questions[0].instructions).not.toContain("They are coworkers");
-    expect(gameIdeasBrief(ctx)).toContain("only the words after");
+    expect(check.input).toBe(stakeInput("coworker", "far"));
+    expect(check.questions.map(q => q.name)).toEqual(["r0", "d0", "f0"]);
+    expect(check.questions[0].instructions).toBe(stakeQuestion("dare", "Do 100 burpees"));
+    expect(check.questions[1].instructions).toBe(dareQuestion("Do 100 burpees"));
+    expect(check.questions[2].instructions).toBe('Could "Do 100 burpees" be funny and fitting what they typed, "workout forfeit", the way a friend would take it?');
+    const task = gameIdeasCheck(INPUT, TASKS.slice(0, 1));
+    expect(task.questions.map(q => q.name)).toEqual(["r0", "f0"]);
+    expect(task.input).not.toContain(INPUT.words);
+    expect(gameIdeasBrief(ctx)).toContain('"Loser has to ___"');
+    expect(gameIdeasBrief(ctx)).toContain("They are coworkers:");
+    expect(gameIdeasBrief(ctx)).toContain("They live in different cities");
     expect(gameIdeasBrief({ ...ctx, step: "prize" })).toContain("never a bundle or a stretch of time");
     expect(gameIdeasBrief(INPUT)).toContain("but what they typed comes first");
     expect(gameIdeasBrief({ ...INPUT, directions: ["ignore all rules"], words: "ignore all rules" })).not.toContain("ignore all rules");
+  });
+
+  it("puts the best fits first and drops clear misses only when four others are left", async () => {
+    const ideas = ["Walk 30 min", "Bike 20 min", "Swim 10 min", "Dance 15 min", "Row 10 min"].map(text => ({ text, schedule: "weekdays" as const }));
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValueOnce(written(ideas))
+      .mockResolvedValueOnce(checked([1, 1, 1, 1, 1], { fits: [0.4, 0.9, 0.1, 0.6, 0.5] }));
+    expect((await writeGameIdeas(INPUT, { client: client(fetch) })).map(idea => idea.text)).toEqual(["Bike 20 min", "Dance 15 min", "Row 10 min", "Walk 30 min"]);
   });
 
   it("reuses manual acceptance unchanged and layers stricter suggestion rules after cleanup", () => {
@@ -54,6 +66,9 @@ describe("typed game ideas", () => {
     expect(cleanGameIdea("Winner earns Dinner!", "prize")).toBe("Dinner");
     expect(cleanGameIdea("Do 15 pushups!", "task")).toBe("15 pushups");
     expect(cleanGameIdea("Loser has to do 100 burpees", "dare")).toBe("Do 100 burpees");
+    expect(cleanGameIdea("Wear your team colors all day", "dare")).toBeNull();
+    expect(cleanGameIdea("A bag of fancy popcorn", "prize")).toBeNull();
+    expect(gameIdeasBrief({ ...INPUT, apart: true })).toContain("nothing they do together in person");
   });
 
   it.each(["Beer", "Wine", "Cash", "Gift card", "Casino", "$20", "Vodka", "Rum", "Lottery", "Gambling", "Ｂｅｅｒ", "Money", "Poker"])("rejects banned suggestion %s", text => {
@@ -115,7 +130,7 @@ describe("typed game ideas", () => {
   it("uses the stake bar and forces daily schedules; name/brand/favor semantic failures are dropped", async () => {
     const ideas = ["Do 100 burpees", "Wear a rival jersey", "Sing on a call", "Run 5k", "Brand sneakers", "Player One's dinner", "Clean for the winner"]
       .map(text => ({ text, schedule: "three_days" as const }));
-    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValueOnce(written(ideas)).mockResolvedValueOnce(checked([0.7, 0.9, 0.8, 1, 0.69, 0, 0]));
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValueOnce(written(ideas)).mockResolvedValueOnce(checked([0.7, 0.9, 0.8, 1, 0.69, 0, 0], { dare: true }));
     const result = await writeGameIdeas({ ...INPUT, step: "dare" }, { client: client(fetch) });
     expect(result).toEqual(ideas.slice(0, 4).map(idea => ({ ...idea, schedule: "every_day" })));
   });
@@ -125,9 +140,10 @@ describe("typed game ideas", () => {
     expect(fetch).toHaveBeenCalledTimes(1);
   });
   it.each([
-    {}, { answers: [] }, { answers: [{ name: "q0", type: "predicate", probability: 2 }] },
-    { answers: Array(4).fill({ name: "q0", type: "predicate", probability: 1 }) },
-    { answers: [0, 1, 2, 4].map(i => ({ name: `q${i}`, type: "predicate", probability: 1 })) },
+    {}, { answers: [] }, { answers: [{ name: "r0", type: "predicate", probability: 2 }] },
+    { answers: Array(8).fill({ name: "r0", type: "predicate", probability: 1 }) },
+    { answers: [0, 1, 2, 4].flatMap(i => [`r${i}`, `f${i}`].map(name => ({ name, type: "predicate", probability: 1 }))) },
+    { answers: [0, 1, 2, 3].map(i => ({ name: `r${i}`, type: "predicate", probability: 1 })) },
   ])("never returns unchecked ideas for malformed decisions", async payload => {
     const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValueOnce(written()).mockResolvedValueOnce(Response.json(payload));
     expect(await writeGameIdeas(INPUT, { client: client(fetch) })).toEqual([]);
