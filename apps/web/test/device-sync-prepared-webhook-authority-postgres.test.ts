@@ -43,6 +43,7 @@ import { readHostedMailboxWakeByItemId } from "@/src/lib/hosted-mailbox/store";
 import { runHostedPreferenceHandoffSweeper } from "@/src/lib/hosted-orchestration/preference-handoff-sweeper";
 import { revokeHostedConsentScope } from "@/src/lib/legal/consent";
 import { createPrismaClient } from "@/src/lib/prisma";
+import { jsonError } from "@/src/lib/device-sync/http";
 
 const runtimeMocks = vi.hoisted(() => ({
   signalHostedDeviceSyncMailboxRuntime: vi.fn(async () => ({
@@ -551,6 +552,73 @@ function addHistoryCoverage(
 describe.skipIf(!runPostgresProof)(
   "prepared device-webhook authority revalidation (real PostgreSQL)",
   () => {
+    it.each(["before_commit", "after_commit"] as const)(
+      "redelivers a server failure %s without duplicating durable webhook effects",
+      async (failurePoint) => {
+        const fixture = await createFixture({ sourceLastErrorCode: null, sourceProviderSlug: "garmin" });
+        const registry = createJunctionRegistry(async () => {
+          throw new Error("An established source must not fetch provider state.");
+        });
+        vi.spyOn(console, "error").mockImplementation(() => {});
+        try {
+          await fixture.prisma.deviceConnectionSource.update({
+            where: { id: fixture.sourceId }, data: { status: "connected" },
+          });
+          const prepared = await prepareDailyData({ fixture, registry, sourceProviderSlug: "garmin" });
+          const service = createIngressService({ headers: new Headers(), registry, store: fixture.store });
+          const failure = new TypeError("Synthetic admission failure.");
+          if (failurePoint === "before_commit") {
+            // Signal insertion follows dirty payload/receipt/trace writes in
+            // the same transaction. All of those writes must roll back.
+            vi.spyOn(fixture.store, "createSignal").mockRejectedValueOnce(failure);
+          } else {
+            const lock = fixture.store.withHealthDataAdmissionLock.bind(fixture.store);
+            let failed = false;
+            vi.spyOn(fixture.store, "withHealthDataAdmissionLock").mockImplementation(async (...args) => {
+              const result = await lock(...args);
+              const trace = await fixture.observer.deviceWebhookTrace.findUnique({
+                where: { provider_traceId: { provider: "junction", traceId: prepared.traceId } },
+              });
+              if (!failed && trace?.status === "processed") {
+                failed = true;
+                throw failure;
+              }
+              return result;
+            });
+          }
+          await expect(service.handlePreparedWebhook(prepared)).rejects.toBe(failure);
+          expect(jsonError(failure).status).toBe(500);
+          const where = { connectionId: fixture.connectionId };
+          if (failurePoint === "before_commit") {
+            expect(await fixture.prisma.deviceSyncDirtyConnection.count({ where })).toBe(0);
+            expect(await fixture.prisma.deviceSyncDirtyPayload.count({ where })).toBe(0);
+            expect(await fixture.prisma.deviceSyncSignal.count({ where })).toBe(0);
+            expect(await fixture.prisma.hostedMailboxItem.count({ where: { userId: fixture.memberId } })).toBe(0);
+          }
+          const replay = createIngressService({ headers: new Headers(), registry, store: fixture.store });
+          await expect(replay.handlePreparedWebhook(prepared)).resolves.toMatchObject({
+            accepted: true, duplicate: failurePoint === "after_commit",
+          });
+          const dirty = await fixture.prisma.deviceSyncDirtyConnection.findUniqueOrThrow({ where });
+          expect(dirty.dirtyRevision).toBe(1n);
+          expect(dirty.eventCount).toBe(1n);
+          expect(await fixture.prisma.deviceSyncDirtyPayload.count({ where })).toBe(1);
+          expect(await fixture.prisma.deviceSyncSignal.count({ where })).toBe(1);
+          const mailboxCount = await fixture.prisma.hostedMailboxItem.count({ where: { userId: fixture.memberId } });
+          // A second resend models a lost successful HTTP response. It must
+          // observe the processed trace even through a fresh service instance.
+          await expect(replay.handlePreparedWebhook(prepared)).resolves.toMatchObject({ duplicate: true });
+          expect(await fixture.prisma.deviceSyncDirtyConnection.findUniqueOrThrow({ where })).toEqual(dirty);
+          expect(await fixture.prisma.deviceSyncDirtyPayload.count({ where })).toBe(1);
+          expect(await fixture.prisma.deviceSyncSignal.count({ where })).toBe(1);
+          expect(await fixture.prisma.hostedMailboxItem.count({ where: { userId: fixture.memberId } })).toBe(mailboxCount);
+        } finally {
+          vi.restoreAllMocks();
+          await cleanupFixture(fixture);
+        }
+      },
+    );
+
     it("acknowledges an empty signed Junction webhook and its batch redelivery without runtime work", async () => {
       const fixture = await createFixture({
         setupPhase: "pending_link",

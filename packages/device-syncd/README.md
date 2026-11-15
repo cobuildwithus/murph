@@ -258,6 +258,17 @@ The shared ingress owns:
 - provider-owned webhook preflight plus webhook parsing
 - webhook dedupe and account lookup hooks
 
+Hosted webhook HTTP errors use explicit request rejections. Junction signature
+and payload refusals retain their domain status; configuration, stored-state,
+crypto and unexpected failures are server errors. Junction retries every
+non-2xx response ([retry policy](https://docs.junction.com/webhooks/retry-policy)).
+Prepared-event trace identity, rather than the Queue transport ID, owns
+duplicate admission. The Worker rejects malformed envelopes and incompatible
+visible metadata explicitly; unavailable keys and ambiguous crypto failures
+remain server errors so a deployment or key configuration fault cannot discard
+an event. GET uses the registered provider's preflight, if any; the current
+Junction-only registry has no subscription verification challenge.
+
 When a provider's verified webhook envelope includes a signed send timestamp,
 the provider parser exposes it as `providerSentAt`. This is distinct from the
 provider event's `occurredAt` and the shared ingress receipt time. Generic

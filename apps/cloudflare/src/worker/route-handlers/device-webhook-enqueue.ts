@@ -1,4 +1,4 @@
-import { parseInput, RequestInputError } from "@murphai/hosted-execution/request-input";
+import { parseInput, RequestInputError, RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import {
   CLOUDFLARE_HOSTED_CONTROL_DEVICE_WEBHOOK_ENQUEUE_PATH,
   createDeviceWebhookTransportPrivateKeyringFromJson,
@@ -43,13 +43,9 @@ async function handleDeviceWebhookEnqueueRoute(
       parseDeviceWebhookQueueEnvelope,
     );
   } catch (error) {
-    // Preserve provider-webhook responses until the provider-webhook stage of
-    // 2026-11-14-explicit-request-rejection reviews retry and recovery behavior.
-    if (error instanceof RequestInputError || error instanceof RangeError) {
+    if (error instanceof RequestInputError || error instanceof RequestBodyTooLargeError) {
       return json({ code: "invalid_request", error: "Malformed device webhook envelope." }, 400);
     }
-    if (error instanceof SyntaxError) return json({ error: "Invalid JSON." }, 400);
-    if (error instanceof TypeError || error instanceof URIError) return json({ error: "Invalid request." }, 400);
     throw error;
   }
   if (!context.env.DEVICE_WEBHOOK_QUEUE) {
@@ -71,12 +67,14 @@ async function handleDeviceWebhookEnqueueRoute(
       }),
     });
   } catch (error) {
-    // The provider-webhook stage must separate input/auth failures from server
-    // keyring and persistence failures before changing this final 400.
+    const code = readDeviceWebhookQueuePersistenceFailureCode(error);
+    if (code !== "transport_context_mismatch" && code !== "transport_metadata_invalid") {
+      // Decrypt failures cannot distinguish bad ciphertext from unavailable or
+      // inconsistent server keys. Preserve the event for retry in either case.
+      throw error;
+    }
     return json({
-      code:
-        readDeviceWebhookQueuePersistenceFailureCode(error)
-        ?? "persistence_failure_unclassified",
+      code,
       error: "Unauthenticated device webhook envelope.",
     }, 400);
   }
