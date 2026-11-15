@@ -6776,7 +6776,7 @@ describe('assistant cron runtime orchestration', () => {
     expect(await processDueAssistantCronJobsLocal({ executionContext, limit: 1, onEvent, vault: vaultRoot }))
       .toEqual({ failed: 0, processed: 1, succeeded: 0 })
     expect(cronMocks.canSkipManagedJournalConnectedContext).toHaveBeenCalledExactlyOnceWith({
-      automationId, connectedApps, preparedAdmission: 'empty', signal: expect.any(AbortSignal), vaultRoot,
+      automationId, preparedAdmission: 'empty', signal: expect.any(AbortSignal), vaultRoot,
     })
     expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
     expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({

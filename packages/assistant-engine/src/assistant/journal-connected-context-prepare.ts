@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import * as z from '@murphai/contracts/zod-runtime'
 import { findEventsByExternalRefs } from '@murphai/core'
 import { serializeHostedConnectedAppsResult, type HostedConnectedAppsRequest } from '@murphai/hosted-execution/connected-apps'
 import {
@@ -6,13 +7,32 @@ import {
   normalizeConnectedCalendarEvent, normalizeConnectedReadItems, parseConnectedRead, readConnectedCalendarWindow, readRecord,
   type CalendarProvider, type ConnectedCalendar, type Coverage,
 } from './connected-calendar-read.js'
-import { connectedAppAccountSchema, connectedAppsInventorySchema } from './journal-connected-context-eligibility.js'
 import {
   emptyConnectedContextPolicy, readConnectedContextPolicyState, readConnectedContextSources, reconcileConnectedContextAccounts, type ConnectedContextPolicy,
 } from './journal-connected-context-ledger.js'
 import { readJournalMail } from './journal-mail-match.js'
 import type { AssistantConnectedAppsPort } from './connected-apps-port.js'
 import type { AssistantRuntimeIssueInput } from './issue-reporting.js'
+
+// The web manage/list handler returns this inventory and requests only ACTIVE
+// accounts from Composio. Entries validate one by one so a malformed entry
+// leaves the rest readable and the inventory visibly incomplete.
+const connectedAppAccountSchema = z.object({
+  alias: z.string().nullable(),
+  connectedAt: z.string().nullable(),
+  id: z.string().trim().min(1),
+  status: z.literal('ACTIVE'),
+  toolkit: z.string().trim().min(1),
+  toolkitConfigured: z.boolean(),
+  toolkitLabel: z.string(),
+  wordId: z.string().nullable(),
+}).strict()
+const connectedAppsInventorySchema = z.object({
+  result: z.object({
+    accounts: z.array(z.unknown()),
+    toolkits: z.array(z.object({ label: z.string(), slug: z.string().trim().min(1) }).strict()),
+  }).strict(),
+}).strict()
 
 export interface PreparedJournalContext {
   instructions: string

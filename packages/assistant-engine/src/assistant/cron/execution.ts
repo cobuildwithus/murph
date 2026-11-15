@@ -2136,7 +2136,6 @@ async function runAssistantCronAutomationPreconditions(input: {
     && await canSkipManagedJournalConnectedContext({
       preparedAdmission: input.preparedJournal?.admission,
       automationId: input.source.automationId,
-      connectedApps: input.executionContext?.hosted?.connectedApps,
       signal: input.signal,
       vaultRoot: input.vault,
     })) {
