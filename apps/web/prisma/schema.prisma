@@ -2218,8 +2218,58 @@ model HostedLinqGroupLeave {
   chatIdEncrypted         String   @map("chat_id_encrypted")
   leftAt                  DateTime @default(now()) @map("left_at")
   reason                  String   @db.VarChar(32)
+  providerLeaveAttempts Int @default(0) @map("provider_leave_attempts")
+  providerLeaveLastAttemptAt DateTime? @map("provider_leave_last_attempt_at")
+  providerRemovedAt DateTime? @map("provider_removed_at")
+  providerLeaveTerminalCode String? @map("provider_leave_terminal_code") @db.VarChar(32)
+  sightings HostedLinqGroupSighting[]
 
   @@map("hosted_linq_group_leave")
+}
+
+// Global blinded evidence. Linkage is limited to one contact-key epoch.
+model HostedLinqGroupSighting {
+  chatLookupKey String @id @map("chat_lookup_key")
+  lineLookupKey String? @map("line_lookup_key")
+  firstObservedAt DateTime @map("first_observed_at")
+  lastObservedAt DateTime @map("last_observed_at")
+  providerChatCreatedAt DateTime? @map("provider_chat_created_at")
+  service String? @db.VarChar(16)
+  rosterHandleCount Int? @map("roster_handle_count")
+  rosterComplete Boolean @default(false) @map("roster_complete")
+  rosterObservedAt DateTime? @map("roster_observed_at")
+  leaveMarkerKey String? @map("leave_marker_key")
+  leaveMarker HostedLinqGroupLeave? @relation(fields: [leaveMarkerKey], references: [threadIdentityLookupKey], onDelete: SetNull, onUpdate: Cascade)
+  handles HostedLinqGroupHandle[]
+
+  @@index([leaveMarkerKey])
+  @@index([lastObservedAt])
+  @@map("hosted_linq_group_sighting")
+}
+
+model HostedLinqGroupHandle {
+  chatLookupKey String @map("chat_lookup_key")
+  handleLookupKey String @map("handle_lookup_key")
+  firstSeenAt DateTime @map("first_seen_at")
+  lastSeenAt DateTime @map("last_seen_at")
+  firstSeenVia String @map("first_seen_via") @db.VarChar(24)
+  firstSentAt DateTime? @map("first_sent_at")
+  sighting HostedLinqGroupSighting @relation(fields: [chatLookupKey], references: [chatLookupKey], onDelete: Cascade, onUpdate: Cascade)
+
+  @@id([chatLookupKey, handleLookupKey])
+  @@index([handleLookupKey, chatLookupKey])
+  @@index([lastSeenAt])
+  @@map("hosted_linq_group_handle")
+}
+
+model HostedLinqHandleBlock {
+  contactLookupKey String @id @map("contact_lookup_key")
+  contactKind String @map("contact_kind") @db.VarChar(8)
+  contactEncrypted String @map("contact_encrypted")
+  reason String @db.VarChar(16)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("hosted_linq_handle_block")
 }
 
 model HostedLinqGroupLineMove {

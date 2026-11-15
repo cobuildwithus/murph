@@ -161,6 +161,24 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Global blinded roster evidence is not member-owned authority, is omitted from user exports, and expires no later than 14 days after its latest observation.",
   },
   {
+    slug: "prisma.hosted_linq_group_sighting",
+    label: "Global Linq group sightings",
+    deletion: "documented-retention",
+    note: "Independently retained global blinded evidence, omitted from member exports. Expires after 90 days without observation once no handle rows remain; prior-key evidence is deleted on rotation.",
+  },
+  {
+    slug: "prisma.hosted_linq_group_handle",
+    label: "Global Linq group handle evidence",
+    deletion: "documented-retention",
+    note: "Independently retained global blinded evidence, omitted from member exports. Each handle expires 90 days after its own last observation; prior-key evidence is deleted on rotation.",
+  },
+  {
+    slug: "prisma.hosted_linq_handle_block",
+    label: "Global Linq handle blocks",
+    deletion: "documented-retention",
+    note: "Independently retained global ingress policy, omitted from member exports. Blocks do not expire; protected contacts rotate before key retirement and are removed only by an operator.",
+  },
+  {
     slug: "prisma.hosted_address_book_projection",
     label: "Optional address-book projection state",
     deletion: "live-delete",

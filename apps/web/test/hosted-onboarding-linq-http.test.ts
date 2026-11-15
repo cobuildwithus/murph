@@ -217,6 +217,7 @@ describe("getHostedLinqChatSummary", () => {
       timeoutMs: 1_500,
     })).resolves.toEqual({
       displayName: "Weekend Warriors",
+      createdAt: new Date("2026-07-10T00:00:00.000Z"),
       service: "iMessage",
       handleCount: 1,
       handles: [
@@ -274,6 +275,7 @@ describe("getHostedLinqChatSummary", () => {
       timeoutMs: 1_500,
     })).resolves.toEqual({
       displayName: null,
+      createdAt: null,
       service: null,
       handleCount: 0,
       handles: [],
@@ -352,6 +354,7 @@ describe("readHostedLinqExplicitGroupDisplayName", () => {
   it("keeps a real group title", () => {
     expect(readHostedLinqExplicitGroupDisplayName(linqRoster({
       displayName: "Weekend Warriors",
+      createdAt: new Date("2026-07-10T00:00:00.000Z"),
       service: "iMessage",
       handles,
       isGroup: true,
@@ -382,6 +385,7 @@ describe("readHostedLinqExplicitGroupDisplayName", () => {
   it("rejects provider titles when the roster was not parsed completely", () => {
     expect(readHostedLinqExplicitGroupDisplayName(linqRoster({
       displayName: "Weekend Warriors",
+      createdAt: new Date("2026-07-10T00:00:00.000Z"),
       service: "iMessage",
       handles,
       handlesComplete: false,

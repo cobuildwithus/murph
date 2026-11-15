@@ -369,6 +369,7 @@ type UsageLedgerRecord = {
 
 type UsageResetPrismaFixture = {
   hostedLinqGroupLeave: { findFirst: ReturnType<typeof vi.fn> };
+  hostedLinqHandleBlock: { findFirst: ReturnType<typeof vi.fn> };
   $executeRaw: MockedFunction;
   $queryRaw: MockedFunction;
   $transaction: MockedFunction;
@@ -726,6 +727,7 @@ function createUsageResetPrismaFixture(input: {
 
   const prisma: UsageResetPrismaFixture = {
     hostedLinqGroupLeave: { findFirst: vi.fn().mockResolvedValue(null) },
+    hostedLinqHandleBlock: { findFirst: vi.fn().mockResolvedValue(null) },
     $executeRaw: vi.fn(async () => 0),
     $queryRaw: vi.fn(async (
       query: readonly string[] | { strings?: readonly string[] },

@@ -648,6 +648,7 @@ export type HostedLinqChatRosterObservation = {
 };
 
 export type HostedLinqChatSummary = HostedLinqChatRosterObservation & {
+  createdAt?: Date | null;
   displayName?: string | null;
   service?: string | null;
   isGroup: boolean | null;
@@ -747,6 +748,7 @@ export async function getHostedLinqChatSummary(input: {
 function summarizeHostedLinqChat(payload: unknown, observedAt: Date): HostedLinqChatSummary {
   const canonical = readHostedLinqCanonicalChat(payload);
   const displayName = normalizeNullableString(canonical?.display_name);
+  const createdAtMs = Date.parse(canonical?.created_at ?? "");
   const handles: Chat["handles"] = canonical?.handles ?? [];
   const isGroup: Chat["is_group"] | null = canonical?.is_group ?? null;
 
@@ -755,6 +757,7 @@ function summarizeHostedLinqChat(payload: unknown, observedAt: Date): HostedLinq
     .filter((handle): handle is HostedLinqChatHandleSummary => handle !== null);
   return {
     displayName,
+    createdAt: Number.isFinite(createdAtMs) ? new Date(createdAtMs) : null,
     service: canonical?.service ?? null,
     handleCount: handles.length,
     handles: parsedHandles,
@@ -888,7 +891,7 @@ function parseHostedLinqReactionTargetPart(value: unknown): string {
 
 function readHostedLinqCanonicalChat(
   value: unknown,
-): (Pick<Chat, "display_name" | "handles" | "is_group"> & { service: string | null }) | null {
+): (Pick<Chat, "display_name" | "handles" | "is_group"> & { service: string | null; created_at: string | null }) | null {
   if (!value || typeof value !== "object") {
     return null;
   }
@@ -899,6 +902,7 @@ function readHostedLinqCanonicalChat(
   }
 
   return {
+    created_at: normalizeNullableString(record.created_at),
     display_name: normalizeNullableString(record.display_name),
     handles: record.handles,
     is_group: record.is_group,

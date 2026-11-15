@@ -1,5 +1,8 @@
+import { observeHostedLinqGroupRiskWebhook, recordHostedLinqGroupRosterEvidenceAfterCommit } from "./linq-group-risk-webhook";
+import { hasHostedLinqBlockedHandle } from "../hosted-routing/linq-handle-block";
+import { readHostedLinqSenderBlockWebhookResponse } from "./linq-sender-block";
 import { readHostedLinqGroupLeftWebhookResponse, scheduleHostedLinqGroupLeaveAfterCommit } from "./linq-group-leave-webhook";
-import { readHostedLinqGroupLeave } from "../hosted-routing/linq-group-leave";
+import { readHostedLinqGroupLeave, type HostedLinqGroupRosterRejection } from "../hosted-routing/linq-group-leave";
 import { prepareHostedLinqGroupMoveIngress, type PreparedHostedLinqGroupMoveIngress } from "../hosted-routing/linq-group-line-move-ingress";
 import { prepareGameChatInvite } from "../game/chat-membership";
 import { queueHostedLinqHomeContactCardAfterDelivery } from "./linq-contact-card-delivery";
@@ -332,6 +335,7 @@ async function handleHostedOnboardingLinqWebhookInternal(input: {
     eventId = event.event_id;
     eventType = event.event_type;
     eventWebhookVersion = event.webhook_version ?? null;
+    await observeHostedLinqGroupRiskWebhook({ event, prisma: input.prisma, signal: input.signal });
     const earlyResponse = await handleHostedLinqEarlyWebhook(event, input.prisma);
     messagePartsInspection = inspectHostedLinqMessageReceivedParts(event);
     let affirmativeReaction = false;
@@ -596,8 +600,8 @@ async function handleHostedOnboardingLinqWebhookInternal(input: {
                 preparedGameInvite: preparation.preparedGameInvite,
                 pendingGroupParticipantMemberIds:
                   planningResolution.pendingGroupParticipantMemberIds ?? null,
-                pendingGroupRosterOversized:
-                  planningResolution.pendingGroupRosterOversized,
+                pendingGroupRosterRejection:
+                  planningResolution.pendingGroupRosterRejection,
                 pendingGroupRosterUnavailable:
                   (planningResolution.pendingGroupRosterUnavailable ?? false)
                   || (planningResolution.requestLocalGroupRoster?.observation.handlesComplete === false
@@ -671,8 +675,8 @@ async function handleHostedOnboardingLinqWebhookInternal(input: {
               event: planningEvent,
               participantMemberIds:
                 planningResolution.pendingGroupParticipantMemberIds ?? [],
-              pendingGroupRosterOversized:
-                planningResolution.pendingGroupRosterOversized,
+              pendingGroupRosterRejection:
+                planningResolution.pendingGroupRosterRejection,
               pendingGroupRosterUnavailable:
                 planningResolution.pendingGroupRosterUnavailable ?? false,
               prisma,
@@ -953,6 +957,9 @@ async function handleHostedOnboardingLinqWebhookInternal(input: {
       reconciles: plan.postCommitGroupRosterReconciles ?? [],
       requestLocalRoster: planningResolution.requestLocalGroupRoster,
       scheduleAfterResponse: input.scheduleAfterResponse,
+    });
+    await recordHostedLinqGroupRosterEvidenceAfterCommit({
+      event, requestLocalRoster: planningResolution.requestLocalGroupRoster, scheduleAfterResponse: input.scheduleAfterResponse,
     });
     await reconcileHostedUsageReferralRewardsAfterCommitBestEffort({
       prisma,
@@ -1462,11 +1469,11 @@ interface HostedLinqPlanningEventResolution {
   event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
   initialGroupDisplayName?: string;
   pendingGroupParticipantMemberIds?: readonly string[];
-  pendingGroupRosterOversized?: boolean;
+  pendingGroupRosterRejection?: HostedLinqGroupRosterRejection;
   pendingGroupRosterUnavailable?: boolean;
   requestLocalGroupRoster?: {
     chatId: string;
-    observation: HostedLinqChatRosterObservation;
+    observation: HostedLinqChatSummary;
   };
   /** The route the resolver already read, reused so warming costs no query. */
   threadRoute: HostedThreadRouteSnapshot | null;
@@ -1596,13 +1603,13 @@ async function resolveHostedLinqPlanningEvent(input: {
 }
 
 function readHostedLinqPendingGroupRosterFlags(
-  roster: { oversized: boolean; unavailable: boolean } | null,
+  roster: { rejection: HostedLinqGroupRosterRejection | null; unavailable: boolean } | null,
 ): Pick<
   HostedLinqPlanningEventResolution,
-  "pendingGroupRosterOversized" | "pendingGroupRosterUnavailable"
+  "pendingGroupRosterRejection" | "pendingGroupRosterUnavailable"
 > {
   return {
-    ...(roster?.oversized === true ? { pendingGroupRosterOversized: true } : {}),
+    ...(roster?.rejection ? { pendingGroupRosterRejection: roster.rejection } : {}),
     ...(roster?.unavailable === true ? { pendingGroupRosterUnavailable: true } : {}),
   };
 }
@@ -1613,9 +1620,9 @@ async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
   prisma: PrismaClient;
   signal?: AbortSignal;
 }): Promise<{
-  observation: HostedLinqChatRosterObservation | null;
+  observation: HostedLinqChatSummary | null;
   initialGroupDisplayName: string | null;
-  oversized: boolean;
+  rejection: HostedLinqGroupRosterRejection | null;
   participantMemberIds: string[] | null;
   unavailable: boolean;
 }> {
@@ -1631,7 +1638,7 @@ async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
       return {
         observation: null,
         initialGroupDisplayName: null,
-        oversized: false,
+        rejection: null,
         participantMemberIds: null,
         unavailable: false,
       };
@@ -1644,7 +1651,7 @@ async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
       return {
         observation: summary,
         initialGroupDisplayName,
-        oversized: false,
+        rejection: null,
         participantMemberIds: null,
         unavailable: true,
       };
@@ -1666,7 +1673,17 @@ async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
       return {
         observation: summary,
         initialGroupDisplayName,
-        oversized: true,
+        rejection: "oversized",
+        participantMemberIds: null,
+        unavailable: false,
+      };
+    }
+    if (await hasHostedLinqBlockedHandle(participantHandles, input.prisma)) {
+      logHostedLinqPendingGroupRoster("blocked_roster");
+      return {
+        observation: summary,
+        initialGroupDisplayName,
+        rejection: "blocked_participant",
         participantMemberIds: null,
         unavailable: false,
       };
@@ -1683,7 +1700,7 @@ async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
     return {
       observation: summary,
       initialGroupDisplayName,
-      oversized: false,
+      rejection: null,
       participantMemberIds: memberIds,
       unavailable: false,
     };
@@ -1695,7 +1712,7 @@ async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
     return {
       observation: null,
       initialGroupDisplayName: null,
-      oversized: false,
+      rejection: null,
       participantMemberIds: null,
       unavailable: true,
     };
@@ -1704,6 +1721,7 @@ async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
 
 function logHostedLinqPendingGroupRoster(
   outcome:
+    | "blocked_roster"
     | "empty_roster"
     | "oversized_roster"
     | "provider_not_group"
@@ -2509,7 +2527,7 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
   directPreparationMemberId?: string;
   event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
   participantMemberIds: readonly string[];
-  pendingGroupRosterOversized?: boolean;
+  pendingGroupRosterRejection?: HostedLinqGroupRosterRejection;
   pendingGroupRosterUnavailable: boolean;
   prisma: PrismaClient;
   reusableDirectCryptoDomainRoots?: {
@@ -2568,7 +2586,7 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
     const admission = await prepareHostedLinqThreadContainerAdmission({
       event: input.event,
       participantMemberIds: input.participantMemberIds,
-      pendingGroupRosterOversized: input.pendingGroupRosterOversized,
+      pendingGroupRosterRejection: input.pendingGroupRosterRejection,
       pendingGroupRosterUnavailable: input.pendingGroupRosterUnavailable,
       prisma: input.prisma,
     });
@@ -3445,7 +3463,7 @@ export async function runHostedOnboardingWebhookTransaction<TResult>(
 }
 
 async function handleHostedLinqEarlyWebhook(event: HostedLinqWebhookEvent, prisma?: PrismaClient): Promise<HostedOnboardingLinqWebhookResponse | null> {
-  return await readHostedLinqGroupLeftWebhookResponse(event, prisma) ?? await handleHostedLinqNonMessageWebhook(event);
+  return await readHostedLinqSenderBlockWebhookResponse(event, prisma) ?? await readHostedLinqGroupLeftWebhookResponse(event, prisma) ?? await handleHostedLinqNonMessageWebhook(event);
 }
 
 async function handleHostedLinqNonMessageWebhook(event: HostedLinqWebhookEvent): Promise<HostedOnboardingLinqWebhookResponse | null> {
