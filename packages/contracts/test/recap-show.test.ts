@@ -13,7 +13,7 @@ const envelope: GameRecapEnvelope = { version: 1, generationId: "game-recap:synt
 };
 const input = { stored: envelope, permittedPhotoIds: new Set(["photo-one"]), mediaUrl: () => "/synthetic-media" };
 describe("recap presentation compatibility", () => {
-  it.each(["legacy", "full-show", "failed-scene-no-song"])("decodes the stable %s fixture", name => {
+  it.each(["legacy", "full-show", "failed-scene-no-song", "score-show"])("decodes the stable %s fixture", name => {
     const value = JSON.parse(readFileSync(new URL(`../fixtures/recap-show/${name}.json`, import.meta.url), "utf8"));
     expect(gameRecapPresentationSchema.parse(value)).toEqual(value);
   });
@@ -84,6 +84,27 @@ describe("recap presentation compatibility", () => {
       { words: [{ text: 'Ava', startMs: 900, endMs: 1200 }, { text: 'stays.', startMs: 1500, endMs: 1800 }] },
     ] });
     expect(JSON.stringify(view)).not.toMatch(/wordsTimestamps|private-song|LEO/);
+  });
+  it('projects score clocks and omits them entirely for legacy, hidden or invalid media', () => {
+    const asset = { slot: 'song', kind: 'song', recipeId: 'synthetic', storageKey: 'private-song', references: [],
+      hash: 'b'.repeat(64), mediaType: 'audio/mpeg', byteLength: 400_000, durationMs: 25_008, songStartMs: 4800,
+      wordsTimestamps: [{ word: 'Hello', startMs: 5000, endMs: 5300 }] } satisfies GameRecapEnvelope['assets'][number];
+    const stored: GameRecapEnvelope = { ...envelope, story: { ...story, song: { ...story.song, lyrics: ['Hello'] } }, assets: [asset] };
+    const view = gameRecapPresentationSchema.parse(presentGameRecap({ ...input, stored, mediaUrl: slot => `/synthetic/${slot}` }));
+    expect(view.show?.score).toEqual({ media: { status: 'ready', url: '/synthetic/score', mediaType: 'audio/mpeg', durationMs: 25_008 } });
+    expect(view.show?.pages.map(page => page.cueMs)).toEqual([0, 5000, undefined]);
+    expect(view.show?.pages[1]?.media).toMatchObject({ url: '/synthetic/song', durationMs: 20_208 });
+    expect(view.show?.pages[1]?.song?.lines?.[0]?.words).toEqual([{ text: 'Hello', startMs: 200, endMs: 500 }]);
+    expect(JSON.stringify(view)).not.toMatch(/songStartMs|wordsTimestamps|private-song/);
+    const { songStartMs: _origin, ...legacy } = asset;
+    for (const fallback of [
+      presentGameRecap({ ...input, stored, mediaVisible: false }),
+      presentGameRecap({ ...input, stored: storedGameRecapEnvelopeSchema.parse({ ...stored, assets: [{ ...asset, songStartMs: -1 }] }) }),
+      presentGameRecap({ ...input, stored: { ...stored, assets: [{ ...legacy, durationMs: 20_000 }] } }),
+    ]) {
+      expect(fallback.show).not.toHaveProperty('score');
+      expect(fallback.show?.pages.every(page => !('cueMs' in page))).toBe(true);
+    }
   });
   it("accepts only bounded face positions and keeps timing facts out of editable file selections", () => {
     const withFace = (faceY: number) => ({ story: { ...story, pages: [{ background: 'paper', blocks: [{ kind: 'scene', scene: { ...story.pages[0].blocks[1]!.scene, faceY } }] }] }, files: [] });

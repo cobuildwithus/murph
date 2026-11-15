@@ -3,7 +3,7 @@ import { retireGameRecapGenerationTx } from './recap-witness';
 import { buildRecapFallback } from './recap-fallback';
 import { readRecapTranscriptPage } from "./recap-transcript";
 import { readRecapSourceReferences, readRecapReferenceBytes, publicRecapReferences } from "./recap-inputs";
-import { alignSongLyrics, gameRecapWriterSchema, recapShowWriterSchema } from "@murphai/contracts/recap-show";
+import { recapMusicPageKinds, recapSongLines, recapScorePageCount, gameRecapWriterSchema, recapShowWriterSchema } from "@murphai/contracts/recap-show";
 import "server-only";
 
 import { isGameMemberSet } from "./roster";
@@ -275,7 +275,7 @@ async function handleAuthorizedRecapRead(input: RecapToolInput & { request: Extr
   }
   return readRecapForWriter({ material, request: input.request, containerMemberId: input.memberId, playerMemberIds: players, beforeMutationTx: authorizeMutation });
 }
-function recapShowWriteError(request: Extract<HostedGameToolRequest, { action: 'write_recap' }>, material: RecapToolContext['material'], players: string[]): string | null {
+export function recapShowWriteError(request: Extract<HostedGameToolRequest, { action: 'write_recap' }>, material: Pick<RecapToolContext['material'], 'entries'>, players: string[]): string | null {
   const parsed = recapShowWriterSchema.safeParse(request.recap);
   const ids = new Set(material.entries.filter(entry => entry.kind === 'photo' && entry.visibleToBoth).map(entry => entry.entryId));
   const invalidPhoto = request.recap.pages.some(page => page.blocks.some(block => (block.entryIds ?? []).some(id => !ids.has(id))));
@@ -284,8 +284,10 @@ function recapShowWriteError(request: Extract<HostedGameToolRequest, { action: '
   const invalidSlot = new Set(assets.map(asset => asset.slot)).size !== assets.length || assets.some(asset => asset.slot === 'song'
     ? asset.kind !== 'song' || !request.recap.song
     : asset.kind !== 'image' || !/^scene-[0-6]$/u.test(asset.slot) || !request.recap.pages[Number(asset.slot.slice(6))]?.blocks.some(block => block.kind === 'scene'));
+  const musicPages = recapMusicPageKinds(request.recap).length;
+  if (assets.some(asset => asset.songStartMs !== undefined && recapScorePageCount(asset.durationMs ?? 0) !== musicPages)) return 'The song was made for different pages, lyrics or style. Generate it again from this draft, or remove it from files and submit without a song.';
   const invalidTiming = assets.some(asset => asset.wordsTimestamps && (asset.slot !== 'song' || !asset.durationMs || !request.recap.song
-    || !alignSongLyrics(request.recap.song.lyrics, asset.wordsTimestamps, asset.durationMs)));
+    || !recapSongLines(request.recap.song.lyrics, asset, musicPages * 5000)));
   if (invalidTiming) return 'Song timings must match the final lyrics and belong to a song with a measured duration.';
   if (!parsed.success || invalidPhoto || invalidCard || invalidSlot) return !parsed.success ? parsed.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`).join('; ')
       : 'Use this game’s visible photo IDs and player IDs, and select one image per scene slot or the song slot.';

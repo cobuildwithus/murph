@@ -1,3 +1,4 @@
+import { inspectMp3Frames, inspectGeneratedMp3Audio } from '@murphai/operator-config/generated-audio'
 import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import sharp from 'sharp'
@@ -42,16 +43,22 @@ export async function createRecapShowLiveProviders(input: {
     at: new Date(Date.now() - 86_400_000 + index * 1000).toISOString(), source: 'player', laneSeq: String(index + 1) }))
   const image = await sharp(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="768" height="1024"><rect width="768" height="1024" fill="#2d3436"/><path d="M0 0H768V250Q384 80 0 250Z" fill="#9e5743"/><rect x="100" y="780" width="568" height="80" fill="#d4c4a8"/><circle cx="260" cy="490" r="70" fill="#d4c4a8"/><circle cx="510" cy="490" r="70" fill="#7a8c6e"/><path d="M180 780V600H340V780M430 780V600H590V780" fill="#d4c4a8"/></svg>')).jpeg().toBuffer()
   const song = await readFile(new URL('../../../fixtures/generated-audio/recap-synthetic-20s.mp3', import.meta.url))
+  let generatedSong: Uint8Array = song
   // Sung lyrics come back as timed words plus audio; a plain song is audio alone.
   const songResponse = async (request: Request): Promise<Response> => {
     if (!request.headers.get('accept')?.includes('multipart/mixed')) return new Response(song, { headers: { 'content-type': 'audio/mpeg' } })
-    const plan = z.object({ composition_plan: z.object({ chunks: z.array(z.object({ text: z.string() })).min(1) }) }).parse(await request.clone().json())
-    const words = plan.composition_plan.chunks[0]!.text.split(/\s+/u).filter(Boolean)
+    const plan = z.object({ composition_plan: z.object({ chunks: z.array(z.object({ text: z.string(), duration_ms: z.number() })).min(1) }) }).parse(await request.clone().json())
+    const chunks = plan.composition_plan.chunks
+    const durationMs = chunks.reduce((sum, chunk) => sum + chunk.duration_ms, 0)
+    const sungStart = durationMs - chunks[chunks.length - 1]!.duration_ms
+    const words = chunks[chunks.length - 1]!.text.replace(/\[[^\]]*\]/gu, '').split(/\s+/u).filter(Boolean)
+    const audio = syntheticRecapAudio(song, durationMs)
+    generatedSong = audio
     const step = 19_000 / words.length
-    const timed = words.map((word, index) => ({ word, start_ms: Math.round(500 + index * step), end_ms: Math.round(500 + (index + 0.8) * step) }))
+    const timed = words.map((word, index) => ({ word, start_ms: Math.round(sungStart + 500 + index * step), end_ms: Math.round(sungStart + 500 + (index + 0.8) * step) }))
     return new Response(Buffer.concat([
       Buffer.from(`--synthetic\r\nContent-Type: application/json\r\n\r\n${JSON.stringify({ words_timestamps: timed })}\r\n--synthetic\r\nContent-Type: audio/mpeg\r\n\r\n`),
-      song, Buffer.from('\r\n--synthetic--\r\n'),
+      audio, Buffer.from('\r\n--synthetic--\r\n'),
     ]), { headers: { 'content-type': 'multipart/mixed; boundary=synthetic' } })
   }
   const assets: RecapAsset[] = []
@@ -79,7 +86,11 @@ export async function createRecapShowLiveProviders(input: {
       const bytes = Buffer.from(command.bytes, 'base64')
       const asset: RecapAsset = { slot: command.slot, kind: command.mediaType === 'image/jpeg' ? 'image' : 'song', recipeId: hash(bytes), hash: hash(bytes), storageKey: `recap/synthetic/${hash(bytes)}`, mediaType: command.mediaType, byteLength: bytes.length, references: [] }
       if (asset.kind === 'image') { const meta = await sharp(bytes).metadata(); asset.width = meta.width; asset.height = meta.height }
-      else asset.durationMs = 20_000
+      else {
+        asset.durationMs = (await inspectGeneratedMp3Audio(bytes)).durationMs
+        if (command.songStartMs !== undefined) asset.songStartMs = command.songStartMs
+        if (command.wordsTimestamps) asset.wordsTimestamps = command.wordsTimestamps
+      }
       assets.push(asset)
       recapGame = asset
     } else throw new Error('Unexpected synthetic control.')
@@ -94,7 +105,7 @@ export async function createRecapShowLiveProviders(input: {
     const response = input.mediaFetch ? await input.mediaFetch(url, init) : kind === 'song' ? await songResponse(request)
       : Response.json({ data: [{ b64_json: image.toString('base64') }], usage: { input_tokens: 100, output_tokens: 100, total_tokens: 200 } })
     if (response.ok) {
-      const bytes = kind === 'song' ? song : Buffer.from(z.object({ data: z.array(z.object({ b64_json: z.string() })).min(1) }).parse(await response.clone().json()).data[0]!.b64_json, 'base64')
+      const bytes = kind === 'song' ? generatedSong : Buffer.from(z.object({ data: z.array(z.object({ b64_json: z.string() })).min(1) }).parse(await response.clone().json()).data[0]!.b64_json, 'base64')
       files.push({ slot: kind === 'song' ? 'song' : 'scene-0', path: `media/${hash(bytes)}.${kind === 'song' ? 'mp3' : 'jpg'}` })
     }
     return response
@@ -104,3 +115,11 @@ export async function createRecapShowLiveProviders(input: {
 
 export { materializeRecapWorkspace } from './assistant/recap-workspace.js'
 export { executeGenerateSongTool } from './assistant-codex/generate-voice-memo-tool.js'
+
+/** Build requested-length synthetic audio from fixture frames, omitting its Info frame. */
+export function syntheticRecapAudio(fixture: Uint8Array, durationMs: number): Buffer {
+  const stream = inspectMp3Frames(fixture)
+  const frames = stream.frames.slice(1).map((frame, index) => fixture.subarray(frame.byteOffset, stream.frames[index + 2]?.byteOffset ?? stream.endOffset))
+  const count = Math.round(durationMs / stream.frames[1]!.timeMs)
+  return Buffer.concat(Array.from({ length: count }, (_, index) => frames[index % frames.length]!))
+}
