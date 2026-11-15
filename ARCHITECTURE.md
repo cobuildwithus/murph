@@ -5226,7 +5226,16 @@ append-only receipt keyed by that UUID and member ID; the receipt freezes every
 stable outcome so replay cannot clear included usage that accrued after the
 first reset or append another Starter grant after the first was consumed.
 The same member-locked serializable owner resolves the live gate and exact
-period existence before choosing that outcome. A valid included allowance with
+period existence before choosing that outcome. Reset-all also checks the shared
+`hostedOpsFreeIdleMemberSql` predicate inside that transaction: free,
+unsuspended people with no game, device, meal-photo enrollment, group membership
+or thread participation receive a skipped receipt with no runtime recheck.
+The same predicate owns the free-idle usage list; spend, ranking and its top-20
+limit remain list-only. Deliberate single-member resets keep their existing
+eligibility. The check adds one SQL read per fresh transaction attempt (at most
+20 per 10-member batch with the existing single retry), with one transaction at
+a time and no external work inside it.
+A valid included allowance with
 no materialized zero-usage period records a skipped receipt and advances the
 walk without manufacturing a period; canonical accounting that wins the lock
 first instead leaves a real period for the reset to observe and clear.
