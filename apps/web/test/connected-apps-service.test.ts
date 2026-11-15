@@ -538,6 +538,22 @@ describe("connected-app service", () => {
     });
   });
 
+  it.each([401, 403, 429, 503])("keeps upstream weather HTTP %s failures on the server side", async status => {
+    vi.stubEnv("OPENWEATHER_API_KEY", "synthetic-weather-key");
+    installPrismaHarness();
+    await expect(executeHostedConnectedAppsRequest({
+      fetchImpl: vi.fn(async () => new Response("", { status })),
+      memberId: "member_synthetic",
+      request: { operation: "execute", input: {
+        toolSlug: "MURPH_OPENWEATHER_GET_NATIONAL_ALERTS", arguments: { lat: 0, lon: 0 },
+      } },
+    })).rejects.toMatchObject({
+      code: "CONNECTED_APPS_PROVIDER_UNAVAILABLE",
+      httpStatus: status === 401 || status === 403 ? 502 : 503,
+      retryable: status !== 401 && status !== 403,
+    });
+  });
+
   it("binds connect intents to the member and keeps provider-link attempts visible", async () => {
     const harness = installPrismaHarness();
     const claim = await createConnectClaim("hbm_member");

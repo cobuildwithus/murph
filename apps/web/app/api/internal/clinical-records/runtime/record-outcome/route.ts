@@ -1,3 +1,5 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
+import { RequestInputError } from "@murphai/hosted-execution/request-input";
 import {
   HOSTED_CLINICAL_RECORDS_RECORD_OUTCOME_REQUEST_MAX_BYTES,
   parseHostedClinicalRecordsRecordOutcomeRequest,
@@ -31,7 +33,8 @@ export const POST = withClinicalJsonError(async (request: Request) => {
         limitBytes: HOSTED_CLINICAL_RECORDS_RECORD_OUTCOME_REQUEST_MAX_BYTES,
       }),
     );
-  } catch {
+  } catch (error) {
+    if (!(error instanceof ContractValidationError) && !(error instanceof RequestInputError)) throw error;
     throw invalidRequestError();
   }
   await recordClinicalRetrievalOutcome({ memberId, request: parsed });

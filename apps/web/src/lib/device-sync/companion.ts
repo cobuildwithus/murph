@@ -1,5 +1,8 @@
 import "server-only";
 
+import { ZodError } from "zod";
+import { ContractValidationError } from "@murphai/contracts/validation-error";
+
 import {
   normalizeIanaTimeZone,
   parseCompanionHrvRmssdObservation,
@@ -304,7 +307,8 @@ export function parseCompanionHrvRmssdObservationRequestBody(
 ): CompanionHrvRmssdObservation {
   try {
     return parseCompanionHrvRmssdObservation(body);
-  } catch {
+  } catch (error) {
+    if (!(error instanceof ContractValidationError) && !(error instanceof ZodError)) throw error;
     throw companionRequestInvalid("HRV observation payload is invalid.");
   }
 }

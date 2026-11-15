@@ -1,3 +1,4 @@
+import * as requestParsers from "@murphai/hosted-execution/parsers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -58,6 +59,18 @@ describe("hosted runtime thread route authority route", () => {
     mocks.assertHostedGroupCurrentSenderPrivateCompletionDeliveryAuthorityTx
       .mockResolvedValue(undefined);
     mocks.handoffHostedMailboxWake.mockResolvedValue(undefined);
+  });
+
+  it("reports unexpected parser faults as server failures", async () => {
+    const parser = vi.spyOn(requestParsers, "parseHostedExecutionPrivateAssistantAskCompletionDeliveryAuthority")
+      .mockImplementationOnce(() => { throw new TypeError("Parser invariant failed."); });
+    try {
+      const response = await POST(new Request("https://example.test/api/internal/hosted-runtime/thread-route/authority", { method: "POST", body: JSON.stringify({ privateAssistantAskCompletion: {} }) }));
+      expect(response.status).toBe(500);
+      expect(parser).toHaveBeenCalledOnce();
+    } finally {
+      parser.mockRestore();
+    }
   });
 
   it("hands off the persisted group fallback when private authority is lost", async () => {

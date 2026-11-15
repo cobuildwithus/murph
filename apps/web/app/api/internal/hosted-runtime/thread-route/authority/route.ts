@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { parseInput } from "@murphai/hosted-execution/request-input";
 import {
   parseHostedExecutionPrivateAssistantAskCompletionDeliveryAuthority,
@@ -143,7 +144,8 @@ function parsePrivateAssistantAskCompletionAuthority(
       responseTextDigest: input.responseTextDigest,
       route,
     });
-  } catch {
+  } catch (error) {
+    if (!(error instanceof ContractValidationError)) throw error;
     throwInvalidAssistantAskCompletionAuthority();
   }
 }

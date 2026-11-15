@@ -1,6 +1,6 @@
 import "server-only";
 
-import { companionDemographicsRequestSchema, validateMemoryDemographicsPatch } from "@murphai/contracts";
+import { companionDemographicsRequestSchema } from "@murphai/contracts";
 import { assessBrowserVaultReplicaFreshness } from "@murphai/hosted-execution";
 import { parseHostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/parsers";
 import { generateHostedUserRecipientKeyPair } from "@murphai/runtime-state";
@@ -57,15 +57,14 @@ export async function queueCompanionDemographics(request: Request) {
     throw demographicsError("DEMOGRAPHICS_INVALID_REQUEST", 400, "Supply a stable action identity, timestamp and demographic fields.");
   }
   const { actionId, requestedAt, ...fields } = parsed.data;
-  let patch;
-  try { patch = validateMemoryDemographicsPatch(fields); } catch {
+  if (fields.birthYear != null && fields.birthYear > new Date().getUTCFullYear()) {
     throw demographicsError("DEMOGRAPHICS_INVALID_REQUEST", 400, "The demographic fields are invalid.");
   }
   await requireDemographicsConsumer(auth.member.id, request.signal);
   try {
     return await submitCompanionMemberAction({
       auth, prisma,
-      request: { actionId, requestedAt, schemaVersion: 1, action: { kind: "demographics.set", version: 1, patch } },
+      request: { actionId, requestedAt, schemaVersion: 1, action: { kind: "demographics.set", version: 1, patch: fields } },
     });
   } catch (error) {
     if (isHostedOnboardingError(error) && [401, 403, 409].includes(error.httpStatus)) throw error;

@@ -928,7 +928,7 @@ function mapConnectedAppsError(error: unknown): unknown {
         ...(error.status === null ? {} : { statusCode: error.status }),
         type: error.type,
       },
-      httpStatus: error.retryable ? 503 : 400,
+      httpStatus: error.type === "openweather_invalid_arguments" ? 400 : error.retryable ? 503 : 502,
       message: error.retryable
         ? "Connected apps are temporarily unavailable."
         : "The connected-app request could not be completed.",

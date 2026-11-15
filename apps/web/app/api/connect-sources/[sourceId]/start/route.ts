@@ -58,7 +58,13 @@ async function readHostedConnectSourceTargetSelector(
     return null;
   }
 
-  const body = await request.clone().json().catch(() => null);
+  const text = await request.clone().text();
+  let body: unknown;
+  try {
+    body = JSON.parse(text);
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+  }
   if (!isRecord(body)) {
     throw deviceSyncError({
       code: "HOSTED_DEVICE_CONNECT_SOURCE_SELECTOR_INVALID",

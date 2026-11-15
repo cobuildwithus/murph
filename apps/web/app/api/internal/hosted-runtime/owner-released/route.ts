@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   parseHostedRuntimeOwnerReleaseSearch,
 } from "@murphai/hosted-execution/routes";
@@ -24,7 +25,8 @@ function readOwnerRelease(request: Request): {
 } {
   try {
     return parseHostedRuntimeOwnerReleaseSearch(new URL(request.url).search);
-  } catch {
+  } catch (error) {
+    if (!(error instanceof ContractValidationError)) throw error;
     throw invalidOwnerReleaseQuery();
   }
 }
