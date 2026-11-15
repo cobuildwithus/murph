@@ -360,6 +360,9 @@ it("activates show policy only for an explicitly selected pair", () => {
   expect(show).toContain("never describe a face, body, hair, age or skin");
   expect(show).toContain("whole image visible");
   expect(show).toContain("Never reuse a treatment the lore lists for this pair");
+  // A remake of the same game reads the earlier take's lore; its own week stays usable.
+  expect(show).toContain("This game's moments and the players' own words stay yours to tell even when the lore lists them as used; only your own earlier wording is spent.");
+  expect(show).not.toContain("never reuse a bit listed as already used");
   expect(show).toContain("Leave the prize off it");
   expect(show).toContain("Leo asked Ava to prove her abs on Thursday");
   expect(show).toContain("read $MURPH_ASSISTANT_SKILLS_ROOT/groupchat-comedy/SKILL.md");

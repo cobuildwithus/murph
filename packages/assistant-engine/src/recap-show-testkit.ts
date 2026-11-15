@@ -14,7 +14,7 @@ const hash = (bytes: string | Uint8Array) => createHash('sha256').update(bytes).
 export async function createRecapShowLiveProviders(input: {
   game: unknown; players: { name: string; memberId: string }[];
   entries: RecapMaterial['entries']; result: RecapMaterial['result'];
-  chat: { playerName: string; text: string }[];
+  chat: { playerName: string; text: string; at?: string; source?: RecapTranscriptMessage['source'] }[];
   mediaFetch?: typeof fetch;
 }) {
   const photos = new Map<string, Buffer>()
@@ -40,7 +40,7 @@ export async function createRecapShowLiveProviders(input: {
   const material: RecapMaterial = { game: input.game, players: input.players.map(player => player.name), entries: input.entries,
     result: input.result, references, startedAt, settledAt }
   const chat: RecapTranscriptMessage[] = input.chat.map((message, index) => ({ ...message, id: `synthetic-message-${index}`,
-    at: new Date(Date.now() - 86_400_000 + index * 1000).toISOString(), source: 'player', laneSeq: String(index + 1) }))
+    at: message.at ?? new Date(Date.now() - 86_400_000 + index * 1000).toISOString(), source: message.source ?? 'player', laneSeq: String(index + 1) }))
   const image = await sharp(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="768" height="1024"><rect width="768" height="1024" fill="#2d3436"/><path d="M0 0H768V250Q384 80 0 250Z" fill="#9e5743"/><rect x="100" y="780" width="568" height="80" fill="#d4c4a8"/><circle cx="260" cy="490" r="70" fill="#d4c4a8"/><circle cx="510" cy="490" r="70" fill="#7a8c6e"/><path d="M180 780V600H340V780M430 780V600H590V780" fill="#d4c4a8"/></svg>')).jpeg().toBuffer()
   const song = await readFile(new URL('../../../fixtures/generated-audio/recap-synthetic-20s.mp3', import.meta.url))
   let generatedSong: Uint8Array = song
@@ -76,7 +76,11 @@ export async function createRecapShowLiveProviders(input: {
     let recapGame: unknown
     if (!command) recapGame = { ...(typeof input.game === 'object' ? input.game : {}), material }
     else if (command.kind === 'recover') recapGame = { recovered: false }
-    else if (command.kind === 'transcript') recapGame = { messages: chat, next: null, through: String(chat.length), since: startedAt, until: settledAt, retainedSince: startedAt, incomplete: false }
+    else if (command.kind === 'transcript') {
+      // Production pages a long chat 200 messages at a time.
+      const from = Number(command.after ?? 0), next = from + 200 < chat.length ? String(from + 200) : null
+      recapGame = { messages: chat.slice(from, from + 200), next, through: String(chat.length), since: startedAt, until: settledAt, retainedSince: startedAt, incomplete: false }
+    }
     else if (command.kind === 'reference') {
       const bytes = photos.get(command.id)
       if (!bytes) throw new Error('Unknown synthetic photo.')
