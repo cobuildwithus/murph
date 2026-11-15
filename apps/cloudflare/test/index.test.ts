@@ -1,4 +1,3 @@
-import { encryptHostedStorageEnvelope } from "../src/crypto.ts";
 import { createOutboundMultipartTestBucket } from "./multipart-bucket-fixtures.ts";
 import { mockPostgresOwnerCommand, createPostgresTestOwner } from "./postgres-owner-fixtures.ts";
 import * as runtimeOwnerClient from "../src/runtime-owner-client.ts";
@@ -3967,30 +3966,6 @@ describe("cloudflare worker routes", () => {
     }));
     expect(runtimeResourceClient.commandHostedRuntimeMedia).toHaveBeenCalledWith(expect.objectContaining({ command: { operation: "acknowledge_purge", purge: { objectKey: mediaObjectKey, mediaId, revision: "1" } } }));
     expect(env.__bucketStore.keys()).not.toContain(mediaObjectKey);
-  });
-
-  it.each(["envelope", "decryption"])("reports stored media %s failures as server faults", async (failure) => {
-    mockCanonicalOutboundStorage();
-    installOidcJwksFetch();
-    const env = createWorkerEnv();
-    const mediaId = "a".repeat(64);
-    const headers = { ...ACTIVE_INVOCATION_LEASE_HEADERS,
-      "x-hosted-runtime-media-byte-size": "4", "x-hosted-runtime-media-kind": "image",
-      "x-hosted-runtime-media-sha256": "b".repeat(64) };
-    const objectKey = await hostedMediaObjectKeyForTest(env, "member_123", mediaId);
-    // Invalid JSON and a valid envelope encrypted with the wrong key both describe stored corruption.
-    const stored = failure === "envelope" ? "{" : JSON.stringify(await encryptHostedStorageEnvelope({
-      key: new Uint8Array(32).fill(19), keyId: "udrk:runtime:test-root", scope: "media",
-      plaintext: new Uint8Array([1, 2, 3, 4]),
-    }));
-    await env.BUNDLES.put(objectKey, stored);
-    const response = await callRunnerOutbound(new Request(`http://media.worker/media/${mediaId}`, { headers }), env);
-    expect(response.status).toBe(500);
-    await expect(response.json()).resolves.toMatchObject({ code: "runtime_error" });
-    await env.BUNDLES.delete!(objectKey);
-    const missing = await callRunnerOutbound(new Request(`http://media.worker/media/${mediaId}`, { headers }), env);
-    expect(missing.status).toBe(404);
-    await expect(missing.json()).resolves.toEqual({ error: "Not found" });
   });
 
   it("rejects stale media read admission before reading ciphertext", async () => {

@@ -133,6 +133,22 @@ describe("hosted private media", () => {
     },
   );
 
+  it.each([undefined, "too-short"])("answers 503 for a valid link when the server capability secret is %s", async (secret) => {
+    const bucket = createPrivateMediaBucket();
+    const staged = await stageHostedPrivateMedia({
+      bucket: bucket.api, bytes: JPEG_BYTES, capabilitySecret: CAPABILITY_SECRET,
+      contentType: "image/jpeg", deliveryOrigin: HOSTED_PRIVATE_MEDIA_DELIVERY_ORIGIN, userId: USER_ID,
+    });
+    const url = new URL(staged.url);
+    const response = await handleDeclarativeRoute(privateMediaRoutes, {
+      env: { BUNDLES: bucket.api, ...(secret === undefined ? {} : { HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET: secret }) },
+      request: new Request(url), url,
+    });
+    // The server's own configuration is missing; the link is not.
+    expect(response?.status).toBe(503);
+    await expect(response?.json()).resolves.toEqual({ error: "Private media delivery is unavailable." });
+  });
+
   it("caps a late retry at the existing object's R2 lifecycle boundary", async () => {
     const nowMs = Date.parse("2026-07-27T12:00:00.000Z");
     const lateRetryMs = nowMs

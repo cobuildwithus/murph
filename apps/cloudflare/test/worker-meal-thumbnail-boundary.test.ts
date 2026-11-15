@@ -96,3 +96,14 @@ it.each(["crypto-context", "runtime-read", "stored-content"])("reports meal thum
   expect(await refusal.text()).toBe("");
   expect(resolveCrypto).not.toHaveBeenCalled();
 });
+
+it("answers 503 for a thumbnail read when the server capability secret is missing", async () => {
+  const c = context("member_synthetic");
+  const url = new URL(`https://runner.example.test/private-media/${"c".repeat(43)}/meal-thumbnail.jpg?exp=${Math.floor(Date.now() / 1000) + 60}`);
+  const read = mealThumbnailRoutes.find(route => route.name === "meal-thumbnail-read")!;
+  const env = { ...c.env };
+  delete (env as Record<string, unknown>).HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET;
+  const response = await read.handle({ ...c, env, request: new Request(url), url }, { capability: "c".repeat(43) });
+  expect(response.status).toBe(503);
+  expect(await response.json()).toEqual({ error: "Private media delivery is unavailable." });
+});

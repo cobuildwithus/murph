@@ -6,6 +6,7 @@ import type { ManagedSnapshotPresignDiagnostics } from "./managed-snapshot-uploa
 import { commandHostedRuntimeSnapshot, recordHostedRuntimeOrphan, HostedRuntimeResourceRejectedError } from "./runtime-resource-client.ts";
 import { executeRunnerMediaCommand, createRuntimeMediaWriteBucket } from "./runtime-media.ts";
 import { createHostedArtifactStore, createHostedMediaStore } from "./bundle-store.ts";
+import { HostedEncryptedR2PayloadUnreadableError } from "./crypto.ts";
 import { deleteLegacyHostedBundle } from "./bundle-gc.ts";
 import type {
   HostedExecutionBundleRef,
@@ -625,6 +626,15 @@ async function handleRunnerMediaRequest(input: {
       message: "Hosted runner media request failed.",
       phase: "wake.running",
     });
+    if (
+      input.request.method === "GET"
+      && error instanceof HostedEncryptedR2PayloadUnreadableError
+    ) {
+      emitCompleted({
+        mediaReadable: false,
+      }, 422);
+      return jsonError("Media is unreadable.", 422);
+    }
     throw error;
   }
 }
@@ -1138,6 +1148,15 @@ async function handleRunnerArtifactRequest(input: {
     if (recoveryDetails.artifactR2Code !== undefined && error instanceof RunnerRuntimeWriteFenceError) {
       emitCompleted({ artifactAuthorized: false }, 401);
       return unauthorized();
+    }
+    if (
+      input.request.method === "GET"
+      && error instanceof HostedEncryptedR2PayloadUnreadableError
+    ) {
+      emitCompleted({
+        artifactReadable: false,
+      }, 422);
+      return jsonError("Artifact is unreadable.", 422);
     }
     throw error;
   }
@@ -2002,7 +2021,7 @@ async function handleRunnerWorkspaceSnapshotDataKeyRequest(input: {
       phase: "wake.running",
       userId: null,
     });
-    throw new Error("Hosted workspace snapshot root key is unavailable.");
+    return notFound();
   }
   let dataKey: Uint8Array | null = null;
   const unwrapStartedAt = Date.now();
