@@ -253,6 +253,7 @@ describe("release verification executable lanes", () => {
           "packages/importers",
           "packages/inbox-services",
           "packages/operator-config",
+          "packages/recap-video",
         ],
         "platform-b1": [
           "packages/core",
