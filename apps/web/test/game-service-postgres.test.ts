@@ -1062,7 +1062,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     const { selectRecapVideo } = await import("@/src/lib/game/recap-video");
     const { acceptGameRecap } = await import("@/src/lib/game/service");
     const { readRecapSourceReferences } = await import("@/src/lib/game/recap-inputs");
-    const { readRecapEnvelope, readAuthorizedRecapAsset, isRecapVideoCurrent } = await import("@/src/lib/game/recap-asset-access");
+    const { readRecapEnvelope, readAuthorizedRecapAsset, isRecapVideoCurrent, readRecapVideoDeliveryCurrent } = await import("@/src/lib/game/recap-asset-access");
     const { readRecapCoverPreview } = await import("@/src/lib/game/recap-preview");
     const { sealGameMedia } = await import("@/src/lib/game/crypto");
     const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
@@ -1182,7 +1182,16 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       expect(await read("video-0")).toBeNull();
       expect(await current()).toBe(false);
       expect((await read("scene-0"))?.bytes.length).toBe(scene.length);
+      // The runtime asks the same question before it uploads the video to Linq and before each send that carries it.
+      const asked = (key: string, value: unknown) => readRecapVideoDeliveryCurrent(key, value);
+      expect(await asked(`game-recap:${gameId}`, { generationId, hash: draft.hash })).toBe(false);
       await db.gameProfile.update({ where: { memberId: b }, data: { photoKey: profile.photoKey } });
+      expect(await asked(`game-recap:${gameId}`, { generationId, hash: draft.hash })).toBe(true);
+      expect(await asked(`game-recap:${gameId}`, { generationId, hash: "0".repeat(64) })).toBe(false);
+      expect(await asked(`game-recap:${gameId}:${"r".repeat(8)}`, { generationId, hash: draft.hash })).toBe(true);
+      expect(await asked(`game-recap:other-game`, { generationId, hash: draft.hash })).toBe(false);
+      expect(await asked(`game-talk:${gameId}:x`, { generationId, hash: draft.hash })).toBe(false);
+      expect(await asked(`game-recap:${gameId}`, undefined)).toBeNull();
       const stored = (await readRecapEnvelope(gameId))!;
       expect(stored.envelope.video).toEqual(video);
       expect(stored.envelope.assets).toEqual([asset]);

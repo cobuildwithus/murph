@@ -338,6 +338,7 @@ async function sendHostedProviderLinqMessageDirect(
     media: request.media ?? null,
     message: request.message,
     ...(request.nativeReplyRequested === true ? { nativeReplyRequested: true } : {}),
+    ...(request.preparedAttachmentIds?.length ? { preparedAttachmentIds: request.preparedAttachmentIds } : {}),
     replyToMessageId: request.replyToMessageId ?? null,
     target: request.target,
     ...(request.targetKind === null || request.targetKind === undefined

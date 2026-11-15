@@ -696,7 +696,10 @@ resulting avatar. No private photo is shared with the subject or other players.
   MURPH_GAME_RECAP_MEDIA_VISIBLE=false hides generated media and cover previews.
   MURPH_GAME_RECAP_VIDEO_ENABLED=true lets Web store one recap video with a pair
   show; it is off. With it on, the recap turn renders the show as one video
-  and stores it with the recap; nothing sends it in chat yet.
+  and stores it with the recap, and Murph's recap message in the pair's chat
+  carries it beside the line, real photos included, while the link still goes
+  alone. A video that cannot be made, stored or sent leaves the message as it
+  was. A sent copy cannot be recalled, like any message.
   MURPH_GAME_RECAP_MEDIA_DIR is local-test storage only. No production regeneration
   is part of implementation or local proof.
 

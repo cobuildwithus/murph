@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
@@ -8,7 +8,7 @@ import * as z from '@murphai/contracts/zod-runtime'
 import type { RecapMaterial } from '@murphai/contracts/recap-material'
 import {
   RECAP_VIDEO_MAX_BYTES, RECAP_VIDEO_PART_MAX_BYTES, presentGameRecap,
-  type GameRecapEnvelope, type RecapAsset,
+  type GameRecapEnvelope, type RecapAsset, type RecapVideoDraft, type RecapVideoIdentity,
 } from '@murphai/contracts/recap-show'
 import type { RecapVideoChildRequest, RecapVideoChildResult, RecapVideoInput, RecapVideoOutcome, RecapVideoStake } from '@murphai/recap-video'
 
@@ -301,6 +301,53 @@ export async function probeRecapVideoRenderer(): Promise<string> {
     return typeof result === 'string' ? result : result.ok ? 'rendered' : result.code
   } finally {
     await rm(directory, { recursive: true, force: true })
+  }
+}
+
+const HANDOFF_PREFIX = 'accepted-'
+const HANDOFF_MAX_AGE_MS = 24 * 60 * 60 * 1000
+
+/**
+ * The accepted video for delivery: Web's identity, with the file only when this host holds those
+ * exact bytes. A candidate whose hash, length and generation equal the identity is moved beside
+ * the renders, named by the identity (so a retried turn on this runner finds it); otherwise a file
+ * an earlier attempt moved there is used. It stays out of the model's reach, like the renders, and
+ * the sender checks the bytes again before it uploads them. Files older than a day that no outbox
+ * took are removed here.
+ */
+export async function handOverRecapVideo(identity: RecapVideoIdentity | null, candidate: { draft: RecapVideoDraft; file: string } | null): Promise<(RecapVideoIdentity & { file: string }) | undefined> {
+  if (!identity) return undefined
+  const target = await recapVideoHandoffPath(identity)
+  const root = target && path.dirname(target)
+  const accepted = { generationId: identity.generationId, hash: identity.hash, byteLength: identity.byteLength }
+  if (!root || !target) return undefined
+  const matches = candidate && candidate.draft.hash === identity.hash && candidate.draft.byteLength === identity.byteLength
+    && candidate.draft.parts.every(part => part.storageKey.startsWith(`recap/${identity.generationId}/`))
+  if (matches && path.dirname(path.dirname(candidate.file)) === root) await rename(candidate.file, target)
+  await sweepHandoffs(root, target)
+  // Without the accepted bytes here there is nothing to send: the recap goes as its line and link.
+  const held = await stat(target).then(file => file.isFile() && file.size === identity.byteLength, () => false)
+  return held ? { ...accepted, file: target } : undefined
+}
+
+/**
+ * The one place an accepted video's file can be: derived from the identity, inside the runner's own
+ * directory. The outbox intent names only the identity, because the model's shell can edit it; a
+ * path read from it could make the host read or delete any file. Null for an identity of any other shape.
+ */
+export async function recapVideoHandoffPath(identity: { generationId: string; hash: string }): Promise<string | null> {
+  const root = recapVideoScratchRoot()
+  if (!root || !/^[a-f0-9]{32}$/u.test(identity.generationId) || !/^[a-f0-9]{64}$/u.test(identity.hash)) return null
+  return path.join(root, `${HANDOFF_PREFIX}${identity.generationId}-${identity.hash}.mp4`)
+}
+
+async function sweepHandoffs(root: string, keep: string): Promise<void> {
+  const now = Date.now()
+  for (const name of await readdir(root).catch(() => [] as string[])) {
+    const file = path.join(root, name)
+    if (!name.startsWith(HANDOFF_PREFIX) || file === keep) continue
+    const modified = await stat(file).then(info => info.mtimeMs, () => now)
+    if (now - modified > HANDOFF_MAX_AGE_MS) await rm(file, { force: true })
   }
 }
 

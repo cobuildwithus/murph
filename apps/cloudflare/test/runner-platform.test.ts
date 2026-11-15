@@ -7533,6 +7533,31 @@ describe("buildHostedExecutionRuntimePlatform", () => {
     [true, true],
     ["true", undefined],
     [false, undefined],
+    [undefined, undefined],
+  ] as const)("asks about a recap message's video and lets it go only on Web's exact yes (%s)", async (answer, expected) => {
+    const bodies: unknown[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      bodies.push(await request.json());
+      return new Response(JSON.stringify({ ok: true, ...(answer === undefined ? {} : { recapVideoCurrent: answer }),
+        resolvedRoute: { conversationThreadId: null, directRecipientPhoneNumber: null, fromPhoneNumber: "+15550002", target: "chat_123", targetKind: "thread", threadIsDirect: false } }),
+      { headers: { "content-type": "application/json" }, status: 200 });
+    });
+    const environment = readHostedExecutionEnvironment(createHostedExecutionTestEnv({ HOSTED_WEB_BASE_URL: "https://web.example.test" }));
+    const platform = buildTestHostedExecutionRuntimePlatform({ boundUserId: "member_123", fetchImpl: fetchMock as typeof fetch,
+      webCallbackSigning: environment.webCallbackSigning, webControlBaseUrl: "https://web.example.test" });
+    const recapVideo = { generationId: "a".repeat(32), hash: "b".repeat(64) };
+    const result = await platform.effectsPort.assertLinqRecentInboundEngagement!({
+      authorityCheckOnly: true, idempotencyKey: "game-recap:synthetic-game", recapVideo, target: "chat_123", targetKind: "thread",
+    });
+    expect(bodies[0]).toMatchObject({ authorityCheckOnly: true, recapVideo });
+    expect(result && result.recapVideoCurrent).toBe(expected);
+  });
+
+  it.each([
+    [true, true],
+    ["true", undefined],
+    [false, undefined],
   ] as const)("forwards the progress purpose and keeps only a literal true suppression flag (%s)", async (flag, expected) => {
     const bodies: unknown[] = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

@@ -379,6 +379,8 @@ export interface HostedRuntimeLinqSendRequest {
   media?: readonly AssistantResponseMedia[] | null;
   message: string;
   nativeReplyRequested?: true;
+  /** Attachments already uploaded to Linq for this message (a recap's video). */
+  preparedAttachmentIds?: readonly string[] | null;
   replyToMessageId?: string | null;
   target: string;
   targetKind?: HostedRuntimeProviderTargetKind | null;
@@ -411,6 +413,8 @@ export interface HostedRuntimeLinqRecentInboundEngagementRequest {
   idempotencyKey?: string | null;
   intentId?: string | null;
   expectedResolvedRoute?: HostedExecutionResolvedLinqDeliveryRoute | null;
+  /** A recap message's accepted video: Web answers whether it may still be sent (`recapVideoCurrent`). */
+  recapVideo?: { generationId: string; hash: string } | null;
   replyToMessageId?: string | null;
   target: string | null;
   targetKind?: HostedRuntimeProviderTargetKind | null;
@@ -428,6 +432,8 @@ export interface HostedRuntimeLinqRecentInboundEngagementResult {
   /** Advisory confirmed coverage; never delivery authority. */
   ackCovered?: boolean;
   providerDispatchClaimed?: boolean | null;
+  /** True only when Web checked the request's recap video and it may still be sent. */
+  recapVideoCurrent?: boolean;
   resolvedRoute?: HostedExecutionResolvedLinqDeliveryRoute | null;
 }
 

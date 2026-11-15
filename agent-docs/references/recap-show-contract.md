@@ -29,7 +29,10 @@ Every page has `id`, `kind`, `background` and `blocks`. Backgrounds are `night`,
   “Most likely to…” above the title. A pair has zero to two such pages.
 - `song`: `song.title`, `song.lyrics` and ready audio media. It precedes the result
   and is omitted when generation fails. One playback owner stops on dismissal,
-  background, interruptions or access loss. No song or scene is attached to chat.
+  background, interruptions or access loss. No song or scene file is attached to
+  chat; with the video on, the recap message's first send carries the whole
+  recap as one video (`show.video`'s file), real photos included, beside the
+  line, and the link still goes alone.
 - `result`: render the surrounding game response's canonical result and prize.
   `scoreLine` is optional copy, never a second score owner.
 

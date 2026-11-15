@@ -10,3 +10,4 @@ export {
   startLinqTypingIndicator,
   startTelegramTypingIndicator,
 } from "./assistant/channels/runtime.js";
+export type { AssistantLinqRecapVideo } from "./assistant/channels/types.js";

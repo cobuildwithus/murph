@@ -311,8 +311,19 @@ async function executeTrustedGameRecapWrite(input: {
   return toolTextResult(true, output)
 }
 
-export async function recordAcceptedRecap(input: { context: AssistantHostedToolContext | null; origin: { gameId: string; eventId: string } }, payload: HostedGameToolResponse['result'], show: boolean): Promise<void> {
-  if (payload.status === 'ok' && 'chatLine' in payload && typeof payload.chatLine === 'string') input.context?.recordSavedGameRecapChatLine?.(payload.chatLine)
+/**
+ * The one place an accepted recap is recorded for delivery: its chat line and, when Web accepted a
+ * video for it, that identity with the host-owned file whose bytes Web accepted. A rendered file is
+ * handed over only when its hash, length and generation equal the identity Web returned; a recovery
+ * finds a file handed over by an earlier attempt of this turn by the same identity, or none.
+ */
+export async function recordAcceptedRecap(input: { context: AssistantHostedToolContext | null; origin: { gameId: string; eventId: string } }, payload: HostedGameToolResponse['result'], show: boolean,
+  candidate?: { draft: RecapVideoDraft; file: string } | null): Promise<void> {
+  if (payload.status === 'ok' && 'chatLine' in payload && typeof payload.chatLine === 'string') {
+    // Without a video the call is exactly today's.
+    const video = await acceptedRecapVideo(input.context, payload, candidate)
+    input.context?.recordSavedGameRecapChatLine?.(payload.chatLine, ...video)
+  }
   if (payload.status === 'ok' && 'recap' in payload && payload.recap) {
     try {
       if (!show && input.context?.currentGameRecapScope?.()?.loreAccess === 'read') await input.context.appendGameRecapChatLine?.(payload.recap.chatLine)
@@ -320,6 +331,15 @@ export async function recordAcceptedRecap(input: { context: AssistantHostedToolC
       // Lore is optional; canonical acceptance owns the delivery.
     }
   }
+}
+
+async function acceptedRecapVideo(context: AssistantHostedToolContext | null, payload: HostedGameToolResponse['result'],
+  candidate?: { draft: RecapVideoDraft; file: string } | null): Promise<[] | [NonNullable<Awaited<ReturnType<typeof import('../../assistant/recap-video-render.js').handOverRecapVideo>>>]> {
+  const accepted = 'recapVideo' in payload ? payload.recapVideo : undefined
+  if (!accepted || !context?.currentGameRecapScope?.()?.video) return []
+  const { handOverRecapVideo } = await import('../../assistant/recap-video-render.js')
+  const video = await handOverRecapVideo(accepted, candidate ?? null).catch(() => undefined)
+  return video ? [video] : []
 }
 
 async function executeGameLoreTool(input: {
@@ -548,7 +568,7 @@ async function executeRecapFileWrite(input: { context: AssistantHostedToolContex
     }
     const accepted = await tool.request({ action: 'write_recap', origin, recap: draft.story, assets, ...(video ? { video: video.draft } : {}) })
     if (accepted.action !== 'write_recap') throw new Error('Unexpected recap response.')
-    await recordAcceptedRecap({ context, origin }, accepted.result, true)
+    await recordAcceptedRecap({ context, origin }, accepted.result, true, video)
     return toolTextResult(accepted.result.status === 'ok', 'recapOutcome' in accepted.result ? accepted.result.recapOutcome ?? JSON.stringify(accepted.result) : JSON.stringify(accepted.result))
   } catch (error) {
     return toolTextResult(false, error instanceof Error ? error.message : 'Recap submission failed.', 'handler_exception', error)

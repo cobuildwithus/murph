@@ -708,6 +708,55 @@ the workflow, and the tests (none vacuous).
     the runner's home nor anything outside the vault and the temporary
     directories.
 
+### Slice 6 choices: delivery (2026-11-15)
+
+1. The turn records the accepted video only when this runner holds Web's
+   exact bytes; the candidate moves to a path named by the identity under the
+   runner's home, so a retried turn on the same runner finds it through the
+   recovery's identity. A recovery anywhere else sends the line and link.
+2. The outbox intent's `recapVideo` is bounded (identity, file path, `form`,
+   `attachmentId`; strict, dropped when malformed), set only on a text-only
+   Linq intent, and never added or replaced by a replayed create.
+3. The decision is the hosted Linq sender's, persisted through the outbox like
+   the app-card text fallback, before the message's first request: line with
+   the prepared attachment, or line alone. It only moves toward the line alone.
+   The attachment is uploaded through an authority-only provider boundary, so
+   no dispatch fence is claimed for it.
+4. Eligibility, one shared check (`isRecapVideoCurrent` through
+   `readRecapVideoDeliveryCurrent`, bound to the delivery key's game), runs
+   before the upload and before every send, through the existing egress
+   engagement route as an authority-only call carrying `recapVideo`. It runs
+   outside the claim's transaction, as the plan requires, and immediately
+   before the claim rather than inside it: the claim runs as the message's
+   request leaves, when its body (with the attachment) is already built. The
+   window between the check and the claim is one Web round trip. The claim's
+   own recap witness check still suppresses a retired generation entirely.
+5. A video Web no longer allows is dropped for good even after an ambiguous
+   attempt, so a retry never newly delivers it; Linq's idempotency key returns
+   the earlier message if it had been accepted.
+6. The model's tool description still says the host sends the line and link
+   "with no chat media". Changing it would change every recap turn's input for
+   a flag that is off; the model cannot attach or affect the video.
+7. Rollback floor: the outbox reader of #4991 reads every intent this slice
+   writes (it accepts the bounded shape) and sends its text alone. A runtime
+   below #4991 quarantines such an intent, so #4991 stays the floor.
+8. Review (ReviewGPT round 1 and the Codex deep review, both on 7b7ad7b299).
+   Accepted and fixed with tests: the intent named the file, and the model's
+   shell can edit an intent, so the host could be made to read or delete any
+   file (both, high): the intent now carries the identity only and the sender
+   derives the path; eligibility could go stale during the upload and during
+   the client's own retries (both, high): Web is asked again after the upload
+   and before each request that carries the attachment; Linq refusing the
+   message with its attachment terminalized the recap (Codex, high): the
+   decision becomes the line alone and the attempt is retried; an
+   authority-only answer's delivery block was ignored before the upload
+   (Codex, medium). Rejected: keeping a saved attachment after an ambiguous
+   attempt once Web says no (Codex, medium). Choice 5 above is deliberate:
+   Linq replays an accepted key's original response, so dropping the video
+   cannot send it twice, and never newly delivering a withdrawn photo
+   outranks the stored form matching an attempt Linq may have taken; the
+   delivery record holds Linq's message ids either way.
+
 ### Owner decisions recorded after the review (no architecture change)
 
 - Scope: carry the feature through every slice to merge-ready.
