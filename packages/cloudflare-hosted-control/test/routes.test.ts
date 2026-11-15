@@ -204,6 +204,7 @@ describe("cloudflare hosted control routes", () => {
     ).rejects.toThrow();
     await expect(import("@murphai/cloudflare-hosted-control/client")).resolves.toMatchObject({
       createCloudflareHostedControlClient: expect.any(Function),
+      CloudflareHostedControlMalformedResponseError: expect.any(Function),
     });
     expect(Object.keys(routesModule).sort()).toEqual([
       "CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE",

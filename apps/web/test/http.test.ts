@@ -1,4 +1,5 @@
 import { ContractValidationError } from "@murphai/contracts/validation-error";
+import { createCloudflareHostedControlClient } from "@murphai/cloudflare-hosted-control/client";
 import { parseInput } from "@murphai/hosted-execution/request-input";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -31,6 +32,32 @@ describe("json route helper factory", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it("maps malformed Worker JSON through the real control client to 500", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(new Response("not JSON", { status: 200 }));
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test",
+      fetchImpl,
+      getBearerToken: async () => "synthetic-token",
+    });
+    const helpers = httpModule.createJsonRouteHelpers({
+      internalMessage: "route failed unexpectedly",
+      logMessage: "route failed",
+    });
+    const handler = helpers.withJsonError(async () => {
+      return helpers.jsonOk(await client.getRunnerStatus("member-synthetic"));
+    });
+
+    const response = await handler();
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      error: { code: "INTERNAL_ERROR", message: "Internal error." },
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
   it("merges default headers into jsonOk responses", async () => {

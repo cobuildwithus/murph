@@ -1,6 +1,8 @@
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
+import { CloudflareHostedControlMalformedResponseError } from "@murphai/cloudflare-hosted-control/client";
+
 import {
   HOSTED_RUNTIME_CURRENT_WAIT_REASONS,
   HOSTED_RUNTIME_ENSURE_PROCESSING_RESPONSE_KINDS,
@@ -251,7 +253,9 @@ async function readHostedRunnerStatusIfAvailable(
   } catch (error) {
     return {
       runnerStatus: null,
-      unavailableReason: readCloudflareRunnerStatusUnavailableReason(error),
+      unavailableReason: error instanceof CloudflareHostedControlMalformedResponseError
+        ? "status_invalid"
+        : "request_failed",
     };
   }
 }
@@ -260,23 +264,6 @@ function readTemporalWorkflowQueryUnavailableReason(
   error: unknown,
 ): HostedTemporalStatusUnavailableReason {
   return isNotFoundErrorLike(error) ? "not_found" : "query_failed";
-}
-
-function readCloudflareRunnerStatusUnavailableReason(
-  error: unknown,
-): HostedCloudflareStatusUnavailableReason {
-  if (error instanceof SyntaxError) {
-    return "status_invalid";
-  }
-
-  if (
-    error instanceof TypeError
-    && error.message.startsWith("Hosted runner status")
-  ) {
-    return "status_invalid";
-  }
-
-  return "request_failed";
 }
 
 function isNotFoundErrorLike(error: unknown): boolean {

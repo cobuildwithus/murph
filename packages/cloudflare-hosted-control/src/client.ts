@@ -347,6 +347,13 @@ export class CloudflareHostedControlBrowserVaultReplicaNotFoundError extends Err
   }
 }
 
+export class CloudflareHostedControlMalformedResponseError extends Error {
+  constructor(cause: unknown) {
+    super("Hosted execution control plane returned a malformed response.", { cause });
+    this.name = "CloudflareHostedControlMalformedResponseError";
+  }
+}
+
 export function isCloudflareHostedControlBrowserVaultReplicaNotFoundError(
   error: unknown,
 ): error is CloudflareHostedControlBrowserVaultReplicaNotFoundError {
@@ -473,8 +480,8 @@ export function createCloudflareHostedControlClient(
       return session;
     }
     if (!isCloudflareHostedControlCompleteBrowserVaultExportSession(session)) {
-      throw new ContractValidationError(
-        "Cloudflare browser vault export session must include every fixed child.",
+      throw new CloudflareHostedControlMalformedResponseError(
+        new ContractValidationError("Cloudflare browser vault export session must include every fixed child."),
       );
     }
     return session;
@@ -569,7 +576,7 @@ export function createCloudflareHostedControlClient(
         baseUrl, boundUserId: userId, fetchImpl, getAuthorizationHeader,
         label: "game image staging",
         parse: (value) => {
-          if (requireRecord(value, "Game image stage").stored !== true) throw new TypeError("Game image storage was not confirmed.");
+          if (requireRecord(value, "Game image stage").stored !== true) throw new ContractValidationError("Game image storage was not confirmed.");
           return true;
         },
         path: buildCloudflareHostedControlGameMediaPath("gameImageStage", userId),
@@ -623,16 +630,28 @@ export function createCloudflareHostedControlClient(
       const userId = requireCloudflareHostedControlUserId(input.userId);
       await requestHostedExecutionAuthorizedJson({ baseUrl, boundUserId: userId, fetchImpl, getAuthorizationHeader,
         label: "recap media staging", path: buildCloudflareHostedControlGameMediaPath("recapMediaStage", userId),
-        parse: value => { if (requireRecord(value, "Recap storage").stored !== true) throw new TypeError("Recap storage was not confirmed."); },
+        parse: value => { if (requireRecord(value, "Recap storage").stored !== true) throw new ContractValidationError("Recap storage was not confirmed."); },
         request: { method: "POST", headers: { "content-type": "application/json", "x-murph-recap-media-id": input.mediaId, "x-murph-recap-hash": input.hash }, body: input.envelope }, timeoutMs: options.timeoutMs });
     },
     async readRecapMedia(input) {
       const userId = requireCloudflareHostedControlUserId(input.userId);
       return nullWhenNotFound(requestHostedExecutionAuthorizedJson({ baseUrl, boundUserId: userId, fetchImpl, getAuthorizationHeader,
         label: "recap media read", path: buildCloudflareHostedControlGameMediaPath("recapMediaRead", userId),
-        parse(value) { const record = requireRecord(value, "Recap storage"); return {
-          envelope: requireString(record.envelope, "Recap envelope"), hash: requireString(record.hash, "Recap hash"),
-        }; }, request: { method: "GET", headers: { "x-murph-recap-media-id": input.mediaId } }, timeoutMs: options.timeoutMs }));
+        parse(value) {
+          const record = requireRecord(value, "Recap storage");
+          const envelope = requireString(record.envelope, "Recap envelope");
+          let parsedEnvelope: unknown;
+          try {
+            parsedEnvelope = JSON.parse(envelope);
+          } catch (error) {
+            if (error instanceof SyntaxError) {
+              throw new ContractValidationError("Recap envelope must be valid JSON.", { cause: error });
+            }
+            throw error;
+          }
+          parseHostedSecureBoxEnvelope(parsedEnvelope);
+          return { envelope, hash: requireString(record.hash, "Recap hash") };
+        }, request: { method: "GET", headers: { "x-murph-recap-media-id": input.mediaId } }, timeoutMs: options.timeoutMs }));
     },
     async deleteGameMedia(input) {
       const userId = requireCloudflareHostedControlUserId(input.userId);
@@ -842,7 +861,7 @@ function parseDeviceWebhookEnqueueResponse(
 ): { accepted: true; transportId: string } {
   const record = requireRecord(value, "Device webhook enqueue response");
   if (record.accepted !== true) {
-    throw new TypeError("Device webhook enqueue response accepted must be true.");
+    throw new ContractValidationError("Device webhook enqueue response accepted must be true.");
   }
   const transportId = requireString(
     record.transportId,
@@ -893,7 +912,7 @@ function parseCloudflareHostedControlMealPhotoStageResult(
 function parseCloudflareHostedControlMealPhotoDeleteResult(value: unknown): void {
   const record = requireRecord(value, "Cloudflare meal-photo delete result");
   if (record.deleted !== true) {
-    throw new TypeError("Cloudflare meal-photo delete result deleted must be true.");
+    throw new ContractValidationError("Cloudflare meal-photo delete result deleted must be true.");
   }
 }
 
@@ -908,7 +927,7 @@ function gameMediaHeaders(mediaId: string): Record<string, string> {
 
 function requireDeleted(value: unknown, label: string): void {
   if (requireRecord(value, label).deleted !== true) {
-    throw new TypeError(`${label} deleted must be true.`);
+    throw new ContractValidationError(`${label} deleted must be true.`);
   }
 }
 
@@ -968,7 +987,7 @@ function parseCloudflareHostedControlBrowserVaultSession(
   const state = requireString(record.state, "Cloudflare browser vault session state");
 
   if (state !== "ready") {
-    throw new TypeError("Cloudflare browser vault session state must be ready.");
+    throw new ContractValidationError("Cloudflare browser vault session state must be ready.");
   }
 
   const replicaRef = parseHostedBrowserVaultReplicaRef(
@@ -994,7 +1013,7 @@ function parseCloudflareHostedControlBrowserVaultSession(
       "Cloudflare browser vault session replicaRef",
     );
     if (!expected.requestedMetricBuckets && !expected.requestedShards) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "Cloudflare browser vault selected session requires an explicit selection.",
       );
     }
@@ -1694,7 +1713,7 @@ function parseCloudflareHostedControlUserDataDeletionResult(
   const record = requireRecord(value, "Cloudflare user-data deletion result");
 
   if (record.ok !== true) {
-    throw new TypeError("Cloudflare user-data deletion result ok must be true.");
+    throw new ContractValidationError("Cloudflare user-data deletion result ok must be true.");
   }
 
   const userId = requireString(record.userId, "Cloudflare user-data deletion result userId");
@@ -2308,7 +2327,7 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
     });
   }
 
-  const parsed = input.parse(await response.json());
+  const parsed = await readHostedExecutionJsonResponse(response, input.parse);
   if (
     tokenAcquireStartedAtEpochMs !== null
     && tokenAcquiredAtEpochMs !== null
@@ -2344,6 +2363,30 @@ async function requestHostedExecutionAuthorizedJson<TResponse>(input: {
   }
 
   return parsed;
+}
+
+async function readHostedExecutionJsonResponse<TResponse>(
+  response: Response,
+  parse: (value: unknown) => TResponse,
+): Promise<TResponse> {
+  let body: unknown;
+  try {
+    body = await response.json();
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      throw new CloudflareHostedControlMalformedResponseError(error);
+    }
+    throw error;
+  }
+
+  try {
+    return parse(body);
+  } catch (error) {
+    if (error instanceof ContractValidationError) {
+      throw new CloudflareHostedControlMalformedResponseError(error);
+    }
+    throw error;
+  }
 }
 
 function readRuntimeEnsureProcessingStepLatencyHeader(

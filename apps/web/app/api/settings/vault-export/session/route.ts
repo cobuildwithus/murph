@@ -1,3 +1,4 @@
+import { CloudflareHostedControlMalformedResponseError } from "@murphai/cloudflare-hosted-control/client";
 import { parseInput } from "@murphai/hosted-execution/request-input";
 import {
   assessBrowserVaultReplicaFreshness,
@@ -162,12 +163,12 @@ export const POST = withJsonError(async (request: Request) => {
   let session:
     | Awaited<ReturnType<typeof client.createBrowserVaultExportSession>>
     | Awaited<ReturnType<typeof client.createBrowserVaultSession>>;
+  const sessionInput = {
+    browserPublicKeyJwk,
+    replicaRef,
+    userId: auth.member.id,
+  };
   try {
-    const sessionInput = {
-      browserPublicKeyJwk,
-      replicaRef,
-      userId: auth.member.id,
-    };
     session = acceptsBucketedReplica
       ? await client.createBrowserVaultExportSession(sessionInput)
       : await client.createBrowserVaultSession(sessionInput);
@@ -180,7 +181,7 @@ export const POST = withJsonError(async (request: Request) => {
       throw browserVaultSessionNotFreshError();
     }
 
-    if (error instanceof TypeError) {
+    if (error instanceof CloudflareHostedControlMalformedResponseError) {
       throw hostedOnboardingError({
         code: "HOSTED_EXECUTION_CONTROL_INVALID_RESPONSE",
         httpStatus: 502,
