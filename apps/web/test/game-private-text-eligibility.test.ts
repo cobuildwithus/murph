@@ -1,3 +1,4 @@
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 
@@ -50,9 +51,15 @@ describe("private game text eligibility", () => {
     expect(await canTextGameReminders(memberId)).toBe(false);
     m.destination.mockResolvedValueOnce({ conversationShape: "direct-member", route: { ...route, threadIsDirect: false } });
     expect(await canTextGameReminders(memberId)).toBe(false);
-    m.assertRoute.mockRejectedValueOnce(new Error("No deliverable thread"));
+    m.assertRoute.mockRejectedValueOnce(hostedOnboardingError({ code: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED", httpStatus: 403, message: "No deliverable thread" }));
     expect(await canTextGameReminders(memberId)).toBe(false);
   });
+  it("propagates a failed destination lookup during the live authority check", async () => {
+    const failure = new Error("Synthetic route lookup unavailable");
+    m.assertRoute.mockRejectedValueOnce(failure);
+    await expect(canTextGameReminders("synthetic-member")).rejects.toBe(failure);
+  });
+
 });
 
 const databaseEnabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";

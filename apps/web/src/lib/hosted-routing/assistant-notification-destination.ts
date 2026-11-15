@@ -435,31 +435,15 @@ async function resolveHostedThreadContainerNotificationDestination(input: {
 
   const row = rows[0]!;
   if (!isHostedThreadDeliveryRouteChannel(row.channel)) {
-    throw hostedOnboardingError({
-      code: "HOSTED_THREAD_NOTIFICATION_ROUTE_INVALID",
-      httpStatus: 409,
-      message: "Hosted thread delivery route material is unavailable or invalid.",
-      retryable: true,
-    });
+    throw new Error("Stored thread delivery route channel is invalid.");
   }
-  let deliveryRoute: HostedThreadDeliveryRouteV1;
-  try {
-    deliveryRoute = await openHostedThreadDeliveryRoute({
-      channel: row.channel,
-      containerMemberId: input.containerMemberId,
-      encrypted: row.deliveryRouteEncrypted,
-      prisma: input.prisma,
-      signal: input.signal,
-    });
-  } catch (cause) {
-    throw hostedOnboardingError({
-      cause,
-      code: "HOSTED_THREAD_NOTIFICATION_ROUTE_INVALID",
-      httpStatus: 409,
-      message: "Hosted thread delivery route material is unavailable or invalid.",
-      retryable: true,
-    });
-  }
+  const deliveryRoute = await openHostedThreadDeliveryRoute({
+    channel: row.channel,
+    containerMemberId: input.containerMemberId,
+    encrypted: row.deliveryRouteEncrypted,
+    prisma: input.prisma,
+    signal: input.signal,
+  });
 
   assertHostedThreadDeliveryRouteMatchesRow({
     containerMemberId: input.containerMemberId,
@@ -566,11 +550,6 @@ function assertHostedThreadDeliveryRouteMatchesRow(input: {
     || !identityLookupKeys.includes(input.row.threadIdentityLookupKey)
     || !authorityLookupKeys.includes(input.row.threadLookupKey)
   ) {
-    throw hostedOnboardingError({
-      code: "HOSTED_THREAD_NOTIFICATION_ROUTE_MISMATCH",
-      httpStatus: 409,
-      message: "Hosted thread delivery route material does not match route authority.",
-      retryable: true,
-    });
+    throw new Error("Stored thread delivery route material does not match route authority.");
   }
 }

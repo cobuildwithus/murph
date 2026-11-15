@@ -1,3 +1,4 @@
+import { isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { gameAreaCode } from "./area-code";
 import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
 import { isBothWinOfferDue, mergeStakeSlots } from "./rules";
@@ -218,7 +219,10 @@ export async function canTextGameReminders(memberId: string, db: Db = getPrisma(
       channel: destination.route.channel, containerMemberId: memberId, threadId: destination.route.delivery.target,
     }, prisma: db, requireThreadDelivery: true });
     return true;
-  } catch { return false; }
+  } catch (error) {
+    if (isHostedOnboardingError(error) && error.code === "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED") return false;
+    throw error;
+  }
 }
 
 // ------------------------------------------------------------------- writes

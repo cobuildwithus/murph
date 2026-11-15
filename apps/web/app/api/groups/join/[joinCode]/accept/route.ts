@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
   buildHostedVaultShareProjectionScopeKey,
@@ -111,7 +112,8 @@ function parseSelectedVaultShareProjectionScopes(value: unknown): HostedVaultSha
         entry,
         "Selected group permission",
       );
-    } catch {
+    } catch (error) {
+      if (!(error instanceof ContractValidationError)) throw error;
       throw hostedOnboardingError({
         code: "HOSTED_GROUP_SELECTED_PERMISSION_UNSUPPORTED",
         httpStatus: 400,

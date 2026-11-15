@@ -1,3 +1,4 @@
+import * as vaultShare from "@murphai/hosted-execution/vault-share";
 import { beforeEach, expect, test, vi } from "vitest";
 
 import {
@@ -392,3 +393,24 @@ test.each(["", "   ", 42, false])(
     expect(mocks.acceptHostedGroupJoinCodeTx).not.toHaveBeenCalled();
   },
 );
+
+test("does not blame selected permissions for an unexpected parser failure", async () => {
+  const parser = vi.spyOn(vaultShare, "parseHostedVaultShareProjectionScope").mockImplementationOnce(() => { throw new Error("Synthetic parser fault"); });
+  try {
+    const response = await route.POST(new Request("https://murph.example/api/groups/join/synthetic/accept", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ expectedMembershipId: null, selectedVaultShareProjectionScopes: [{}] }),
+    }), { params: Promise.resolve({ joinCode: "synthetic" }) });
+    expect(response.status).toBe(500);
+    expect(mocks.acceptHostedGroupJoinCodeTx).not.toHaveBeenCalled();
+  } finally { parser.mockRestore(); }
+});
+
+test("keeps malformed selected permissions as an explicit 400", async () => {
+  const response = await route.POST(new Request("https://murph.example/api/groups/join/synthetic/accept", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ expectedMembershipId: null, selectedVaultShareProjectionScopes: [{}] }),
+  }), { params: Promise.resolve({ joinCode: "synthetic" }) });
+  expect(response.status).toBe(400);
+  expect(await response.json()).toMatchObject({ error: { code: "HOSTED_GROUP_SELECTED_PERMISSION_UNSUPPORTED" } });
+});

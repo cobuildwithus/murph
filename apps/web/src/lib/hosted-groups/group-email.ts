@@ -394,10 +394,7 @@ async function readHostedGroupEmailParticipantEmailFacts(input: {
         grant.projectionScopeKey !== HOSTED_GROUP_EMAIL_AUTHORIZATION_KEY
       )
     ) {
-      return {
-        status: "unavailable",
-        unavailableReason: "authorization_snapshot_invalid",
-      };
+      throw new Error("Stored group email authorization grants are invalid.");
     }
     if (
       member.vaultSharesGranted.filter((grant) =>

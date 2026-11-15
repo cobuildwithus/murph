@@ -899,7 +899,7 @@ async function openHostedGroupDisclosurePermissionText(input: {
   permissionTextEncrypted: string;
   prisma: HostedGroupDisclosureReadClient;
   runtimeMemberId: string;
-}): Promise<string | null> {
+}): Promise<string> {
   const permissionText = await openHostedUserSecureBoxString({
     aad: buildHostedGroupDisclosurePermissionTextAad(input.permissionId),
     lane: "hosted-member-private-field",
@@ -916,7 +916,7 @@ async function openHostedGroupDisclosurePermissionText(input: {
       permissionText,
     })
   ) {
-    return null;
+    throw new Error("Stored group disclosure permission digest is invalid.");
   }
   return permissionText;
 }
