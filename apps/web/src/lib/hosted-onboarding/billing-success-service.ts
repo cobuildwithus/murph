@@ -1,4 +1,3 @@
-import { RequestInputError } from "@murphai/hosted-execution/request-input";
 import { type PrismaClient } from "@prisma/client";
 import type Stripe from "stripe";
 
@@ -47,7 +46,6 @@ export async function reconcileHostedBillingCheckoutSuccess(input: {
   }
 
   const stripe = requireHostedStripeApi();
-  if (/[\uD800-\uDFFF]/u.test(input.sessionId)) throw new RequestInputError("Checkout session id is invalid.");
   const session = await withHostedStripeFailureLog(
     "checkout.sessions.retrieve.billing-success",
     () => stripe.checkout.sessions.retrieve(input.sessionId, {

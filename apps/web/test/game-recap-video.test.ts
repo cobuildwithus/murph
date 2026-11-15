@@ -1,7 +1,7 @@
 import { RequestInputError } from "@murphai/hosted-execution/request-input";
 import { readFile } from "node:fs/promises";
-import { describe, expect, it } from "vitest";
-import { inspectRecapMedia } from "@/src/lib/game/recap-media";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { inspectRecapMedia, uploadRecapVideoPart } from "@/src/lib/game/recap-media";
 import { inspectRecapVideo, recapPoster } from "@/src/lib/game/recap-video";
 import { isPairRecapVideoEnabled } from "@/src/lib/game/access";
 
@@ -60,6 +60,20 @@ describe("recap video measurement", () => {
     await expect(inspectRecapMedia(new Uint8Array(0), part)).rejects.toThrow(RequestInputError);
     await expect(inspectRecapMedia(new Uint8Array(8), `recap/${"a".repeat(32)}/video-0.mp4`)).rejects.toThrow();
     await expect(inspectRecapMedia(file, `recap/${"a".repeat(32)}/${"b".repeat(64)}.jpg`)).rejects.toThrow();
+  });
+
+  afterEach(() => vi.unstubAllEnvs());
+
+  it.each([0, 2_000_001])("rejects a %i-byte video part at staging before reading authority or registering receipts", async length => {
+    vi.stubEnv("MURPH_GAME_RECAP_SHOW_ENABLED", "true");
+    vi.stubEnv("MURPH_GAME_RECAP_VIDEO_ENABLED", "true");
+    const beforeMutationTx = vi.fn();
+    await expect(uploadRecapVideoPart({
+      memberId: "member_synthetic", gameId: "game_synthetic", eventId: "event_synthetic", beforeMutationTx,
+      material: { game: {}, players: [], entries: [], validation: { show: true, startedAt: new Date(0), settledAt: new Date(1), playerNamesByMemberId: [], result: [] } },
+      file: { kind: "upload", slot: "video-0", mediaType: "video/mp4", referenceIds: [], bytes: Buffer.alloc(length).toString("base64") },
+    })).rejects.toThrow(RequestInputError);
+    expect(beforeMutationTx).not.toHaveBeenCalled();
   });
 
   it("is produced only for a pair show with its own flag on", () => {

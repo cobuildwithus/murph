@@ -150,21 +150,21 @@ describe("reconcileHostedBillingCheckoutSuccess", () => {
     }));
   });
 
-  it.each([false, true])("distinguishes an unencodable session id from a Stripe URIError: %s", async dependencyFails => {
+  it("keeps a Stripe URIError as a server failure", async () => {
     const failure = new URIError("Synthetic SDK failure.");
-    if (dependencyFails) mocks.stripe.checkout.sessions.retrieve.mockRejectedValueOnce(failure);
+    mocks.stripe.checkout.sessions.retrieve.mockRejectedValueOnce(failure);
     const error = await reconcileHostedBillingCheckoutSuccess({
       inviteCode: "synthetic-invite", member: createMemberSnapshot().core,
-      sessionId: dependencyFails ? "cs_synthetic" : "\ud800", prisma: {} as never,
+      sessionId: "cs_synthetic", prisma: {} as never,
     }).catch(error => error);
     const response = jsonError(error);
-    expect(response.status).toBe(dependencyFails ? 500 : 400);
+    expect(response.status).toBe(500);
     expect(await response.json()).toMatchObject({ error: {
-      code: dependencyFails ? "INTERNAL_ERROR" : "INVALID_REQUEST",
-      message: dependencyFails ? "Internal error." : "Invalid request.",
+      code: "INTERNAL_ERROR",
+      message: "Internal error.",
     } });
     expect(mocks.requireHostedInviteForAuthentication).toHaveBeenCalledOnce();
-    expect(mocks.stripe.checkout.sessions.retrieve).toHaveBeenCalledTimes(dependencyFails ? 1 : 0);
+    expect(mocks.stripe.checkout.sessions.retrieve).toHaveBeenCalledTimes(1);
   });
 
   it.each(checkoutSubscriptionStatuses)(

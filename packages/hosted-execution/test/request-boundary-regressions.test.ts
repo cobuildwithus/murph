@@ -1,3 +1,4 @@
+import { serializeHostedEmailThreadTarget } from "@murphai/runtime-state";
 import { describe, expect, it } from "vitest";
 import { parseInput, RequestInputError } from "../src/request-input.ts";
 import { parseHostedEmailIngressWakeAppendRequest } from "../src/email-ingress.ts";
@@ -23,6 +24,17 @@ describe("request-only value constraints", () => {
     const request = { eventId: "evt_synthetic", identityId: null, occurredAt: "2026-11-14T00:00:00.000Z", rawMessageKey: "raw_synthetic" };
     expect(() => parseInput({ ...request, [field]: " " }, parseHostedEmailIngressWakeAppendRequest)).toThrow(RequestInputError);
     expect(() => parseInput({ ...request, [field]: "x" }, parseHostedEmailIngressWakeAppendRequest)).not.toThrow();
+  });
+  it.each([
+    { rawMessageKey: " ", threadKey: null, references: [], rejected: true },
+    { rawMessageKey: "raw_synthetic", threadKey: null, references: [], rejected: false },
+    { rawMessageKey: " ", threadKey: "thread_synthetic", references: [], rejected: false },
+    { rawMessageKey: " ", threadKey: null, references: ["<root@example.test>"], rejected: false },
+  ])("validates the resolved group email identity: %j", ({ rawMessageKey, threadKey, references, rejected }) => {
+    const request = { eventId: "event_synthetic", identityId: null, occurredAt: "2026-11-14T00:00:00.000Z", rawMessageKey, threadKey,
+      threadTarget: serializeHostedEmailThreadTarget({ targetKind: "group", groupId: "group_synthetic", references }) };
+    const parse = () => parseInput(request, parseHostedEmailIngressWakeAppendRequest);
+    if (rejected) expect(parse).toThrow(RequestInputError); else expect(parse).not.toThrow();
   });
   it.each([8.64e15 - 30_000, 8.64e15 - 29_999])("bounds admission retry arithmetic: %i", timestamp => {
     const request = { orchestrationAttemptId: "orchestration_synthetic", admission: { cutover: "postgres", status: "existing", owner: {

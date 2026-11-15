@@ -1,12 +1,11 @@
+import { parseHostedRuntimeOwnerIdentity } from "@murphai/hosted-execution/runtime-owner";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
-import { ContractValidationError } from "@murphai/contracts/validation-error";
-import { parseInput, RequestInputError } from "@murphai/hosted-execution/request-input";
-import { hostedWorkspaceSnapshotObjectKey, requireHostedWorkspaceSnapshotId } from "@murphai/hosted-execution/storage-paths";
+import { RequestInputError } from "@murphai/hosted-execution/request-input";
+import { hostedWorkspaceSnapshotObjectKey } from "@murphai/hosted-execution/storage-paths";
 import { Prisma, type PrismaClient, type HostedRuntimeSnapshotUpload } from "@prisma/client";
-import { HOSTED_RUNTIME_ORPHAN_GRACE_MS, type HostedRuntimeSnapshotCommand, type HostedRuntimeSnapshotResponse } from "@murphai/hosted-execution/runtime-resources";
+import { HOSTED_RUNTIME_ORPHAN_GRACE_MS, assertHostedRuntimeReplacedSnapshotIdentity, type HostedRuntimeSnapshotCommand, type HostedRuntimeSnapshotResponse } from "@murphai/hosted-execution/runtime-resources";
 import { HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_SCHEMA, parseHostedWorkspaceSnapshotUploadSession, type HostedWorkspaceSnapshotUploadSession } from "@murphai/hosted-execution/workspace-snapshot-store";
 import { isHostedWorkspaceSnapshotV2Ref } from "@murphai/hosted-execution/parsers";
-import { parseHostedRuntimeOwnerIdentity } from "@murphai/hosted-execution/runtime-owner";
 import { recordRuntimeOrphansTx, snapshotOrphanCandidates } from "./runtime-orphans";
 import { requireHostedRuntimeOwnerTx } from "./runtime-owner";
 import { manageSnapshotUploadTx, settleManagedSnapshotUploadTx } from "./runtime-snapshot-managed";
@@ -25,7 +24,7 @@ export async function executeHostedRuntimeSnapshotCommand(input: {
   if (supplied && (supplied.encryption.aad.userId !== supplied.userId
     || supplied.encryption.aad.snapshotId !== supplied.snapshotId
     || supplied.encryption.aad.objectKey !== supplied.objectKey)) throw hostedOnboardingError({ code: "INVALID_REQUEST", httpStatus: 400, message: "Runtime snapshot encryption identity mismatch." });
-  if (supplied && supplied.objectKey !== await hostedWorkspaceSnapshotObjectKey({ userId: input.userId, snapshotId: parseInput(supplied.snapshotId, () => requireHostedWorkspaceSnapshotId(supplied.snapshotId)) })) {
+  if (supplied && supplied.objectKey !== await hostedWorkspaceSnapshotObjectKey({ userId: input.userId, snapshotId: supplied.snapshotId })) {
     throw hostedOnboardingError({ code: "INVALID_REQUEST", httpStatus: 400, message: "Runtime snapshot namespace mismatch." });
   }
   const replacedSnapshotRef = command.operation === "snapshot_record_replaced"
@@ -37,7 +36,7 @@ export async function executeHostedRuntimeSnapshotCommand(input: {
   const identity = supplied
     ? { attemptId: supplied.attemptId, generation: supplied.leaseGeneration, userId: input.userId }
     : { ...command, userId: input.userId };
-  const runtimeIdentity = { userId: input.userId, ...parseInput(identity, parseHostedRuntimeOwnerIdentity) };
+  const runtimeIdentity = { userId: input.userId, ...parseHostedRuntimeOwnerIdentity(identity) };
   return input.prisma.$transaction(async (tx) => {
     const cutover = "postgres" as const;
     if (command.operation === "snapshot_managed_settled") return settleManagedSnapshotUploadTx({ tx, userId: input.userId, command, now });
@@ -73,8 +72,6 @@ export async function executeHostedRuntimeSnapshotCommand(input: {
       case "snapshot_record_replaced": {
         const row = await tx.hostedRuntimeSnapshotUpload.update({ where: { userId: input.userId }, data: { replacedSnapshotRef: jsonObject(command.replacedSnapshotRef) } });
         const session = projectSession(row);
-        const replacement = { userId: input.userId, replacedSnapshotRef: command.replacedSnapshotRef };
-        parseInput(replacement, () => assertReplacedSnapshotIdentity(replacement));
         await recordSessionOrphansTx(tx, session, now);
         return { cutover, applied: true, session: projectSession(row) };
       }
@@ -115,7 +112,6 @@ async function createSnapshotSessionTx(tx: Prisma.TransactionClient, userId: str
   };
   const row = await tx.hostedRuntimeSnapshotUpload.upsert({ where: { userId }, create: { userId, ...data }, update: data });
   const created = projectSession(row);
-  parseInput(session, () => assertReplacedSnapshotIdentity(session));
   await recordSessionOrphansTx(tx, created, now);
   return { cutover: "postgres", applied: true, session: projectSession(row) };
 
@@ -164,20 +160,12 @@ function sameSession(left: HostedWorkspaceSnapshotUploadSession, right: HostedWo
 
 async function recordSessionOrphansTx(tx: Prisma.TransactionClient, session: HostedWorkspaceSnapshotUploadSession, now: Date) {
   await recordRuntimeOrphansTx(tx, session.userId, [{ kind: "snapshot", resourceId: session.snapshotId, objectKey: session.objectKey, snapshotRef: Prisma.DbNull }], now);
-  assertReplacedSnapshotIdentity(session);
+  assertHostedRuntimeReplacedSnapshotIdentity(session);
   const ref = session.replacedSnapshotRef;
   if (!ref) return;
   await recordRuntimeOrphansTx(tx, session.userId, snapshotOrphanCandidates(ref), now);
 }
 
-function assertReplacedSnapshotIdentity(session: Pick<HostedWorkspaceSnapshotUploadSession, "userId" | "replacedSnapshotRef">): void {
-  const ref = session.replacedSnapshotRef;
-  if (!ref) return;
-  if (isHostedWorkspaceSnapshotV2Ref(ref) && (ref.userId !== session.userId || ref.encryption.aad.userId !== session.userId
-    || ref.encryption.aad.snapshotId !== ref.snapshotId || ref.encryption.aad.objectKey !== ref.objectKey)) {
-    throw new ContractValidationError("Replaced snapshot encryption identity mismatch.");
-  }
-}
 
 function jsonObject(value: object): Prisma.InputJsonObject {
   // Parsed protocol objects contain JSON fields only; round-trip removes

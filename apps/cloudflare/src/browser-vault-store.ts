@@ -5,7 +5,7 @@ export { listHostedBrowserVaultReplicaSiblingObjectKeys } from "./storage-paths.
 import { BROWSER_VAULT_REPLICA_SCHEMA } from "@murphai/contracts/browser-vault";
 import {
   buildHostedStorageAad as buildRuntimeHostedStorageAad,
-  assertHostedDataKeyEnvelopeEncoding,
+  decodeHostedDataKeyEnvelopeWrap,
   createHostedDataKeyEnvelopeWithDomainRoot,
   deriveHostedStorageKey,
   parseHostedCipherEnvelope,
@@ -712,11 +712,10 @@ async function deriveBrowserVaultReplicaKey(
       input,
       envelope.rootKeyId,
     );
-    parseInput(envelope, () => assertHostedDataKeyEnvelopeEncoding(envelope));
+    const decoded = parseInput(envelope, () => decodeHostedDataKeyEnvelopeWrap({ envelope, rootKeyId: envelope.rootKeyId }));
     return unwrapHostedDataKeyWithDomainRoot({
-      envelope,
+      decoded,
       rootKey,
-      rootKeyId: envelope.rootKeyId,
     });
   }
 

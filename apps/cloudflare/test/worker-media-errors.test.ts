@@ -16,9 +16,11 @@ const bytes = new Uint8Array([255, 216, 255, 224, 1, 2, 255, 217]);
 const mediaId = `${createHash("sha256").update(bytes).digest("hex")}.jpg`;
 const recapId = `recap/${"a".repeat(32)}/scene-0.jpg`;
 const envelope = JSON.stringify({
-  alg: "AES-256-GCM-HKDF-SHA256", ciphertext: "c3ludGhldGlj", domain: "control", iv: "c3ludGhldGlj",
+  alg: "AES-256-GCM-HKDF-SHA256", ciphertext: "c3ludGhldGlj", domain: "control", iv: "AAAAAAAAAAAAAAAA",
   lane: "hosted-member-private-field", rootKeyId: "root-synthetic", schema: "murph.hosted-secure-box.v1", scope: "weekly-game",
 });
+
+const shortIvEnvelope = envelope.replace("AAAAAAAAAAAAAAAA", "AA==");
 
 class ImageBucket extends MemoryEncryptedR2Bucket {
   async list({ prefix = "", limit = 1000 }: { prefix?: string; limit?: number }) {
@@ -88,6 +90,7 @@ describe("media input rejection boundaries", () => {
     ["invalid hash", envelope, { "x-murph-recap-hash": "invalid" }, 400, "Invalid sealed recap asset."],
     ["malformed JSON", "{", {}, 400, "Invalid sealed recap asset."],
     ["malformed envelope", "{}", {}, 400, "Invalid sealed recap asset."],
+    ["short IV", shortIvEnvelope, {}, 400, "Invalid sealed recap asset."],
     ["wrong scope", envelope.replace("weekly-game", "other"), {}, 400, "Invalid sealed recap asset."],
     ["oversized declared body", envelope, { "content-length": String(3 * 1024 * 1024 + 1) }, 413, "Recap asset is too large."],
     ["oversized streamed body", " ".repeat(3 * 1024 * 1024 + 1), {}, 413, "Recap asset is too large."],
@@ -136,6 +139,7 @@ describe("media input rejection boundaries", () => {
   it.each([
     ["bad identity", envelope, { "x-murph-game-media-id": "invalid" }, 400, "Game media id is invalid."],
     ["bad envelope", "{}", {}, 400, "Game media must be sealed."],
+    ["short IV", shortIvEnvelope, {}, 400, "Game media must be sealed."],
     ["oversized", envelope, { "content-length": String(6 * 1024 * 1024 + 1) }, 413, "Game media is too large."],
   ] as const)("preserves sealed game rejection: %s", async (_label, body, headers, status, message) => {
     await expectError(await call(sealedGame, context({ body, headers })), status, message);
@@ -151,7 +155,8 @@ describe("media storage failures stay retryable", () => {
     }
   });
 
-  it.each(["{}", "{", JSON.stringify({ version: 1, hash: "a".repeat(64), envelope: "{}" })])(
+  it.each(["{}", "{", JSON.stringify({ version: 1, hash: "a".repeat(64), envelope: "{}" }),
+    JSON.stringify({ version: 1, hash: "a".repeat(64), envelope: shortIvEnvelope })])(
     "maps invalid stored recap data to 500: %s", async stored => {
       const bucket = new ImageBucket();
       vi.spyOn(bucket, "get").mockResolvedValue({ arrayBuffer: async () => new TextEncoder().encode(stored).buffer });

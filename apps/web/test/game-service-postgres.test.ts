@@ -1,3 +1,5 @@
+import { RequestInputError } from "@murphai/hosted-execution/request-input";
+import { jsonError } from "@/src/lib/hosted-onboarding/http";
 import { cleanupGameFixtures } from "./support/game-fixture-cleanup";
 import { randomBytes, randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -1095,8 +1097,13 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       expect(parts).toEqual(slices.map(slice => ({ storageKey: `recap/${generationId}/${sha256(slice)}.mp4`, hash: sha256(slice), byteLength: slice.length })));
       expect(await stage(slices[0]!, 0)).toEqual(parts[0]);
       const strayBytes = Buffer.from("a synthetic render nobody accepted"), stray = (await stage(strayBytes))!;
-      await expect(stage(new Uint8Array(2_000_001))).rejects.toThrow(RangeError);
-      await expect(stage(new Uint8Array(0))).rejects.toThrow(RangeError);
+      for (const length of [2_000_001, 0]) {
+        const error = await stage(new Uint8Array(length)).catch(error => error);
+        expect(error).toBeInstanceOf(RequestInputError);
+        const response = jsonError(error);
+        expect(response.status).toBe(400);
+        expect(await response.json()).toEqual({ error: { code: "INVALID_REQUEST", message: "Invalid request." } });
+      }
       expect([...(await receipts()).values()].map(row => row.recoveryUntil !== null && row.retiredAt === null)).toEqual([true, true, true]);
       // The largest part, sealed, still fits the store's three-mebibyte object.
       expect(Buffer.byteLength(await sealGameMedia({ bytes: new Uint8Array(2_000_000), key: parts[0]!.storageKey, ownerMemberId: a }))).toBeLessThanOrEqual(3 * 1024 * 1024);

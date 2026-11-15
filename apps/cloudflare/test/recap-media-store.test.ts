@@ -12,7 +12,7 @@ class ConditionalBucket extends MemoryEncryptedR2Bucket {
   }
 }
 const id = `recap/${"a".repeat(32)}/scene-0.jpg`;
-const envelope = JSON.stringify({ alg: "AES-256-GCM-HKDF-SHA256", ciphertext: "c3ludGhldGlj", domain: "control", iv: "c3ludGhldGlj",
+const envelope = JSON.stringify({ alg: "AES-256-GCM-HKDF-SHA256", ciphertext: "c3ludGhldGlj", domain: "control", iv: "AAAAAAAAAAAAAAAA",
   lane: "hosted-member-private-field", rootKeyId: "root-synthetic", schema: "murph.hosted-secure-box.v1", scope: "weekly-game" });
 
 describe("recap sealed storage", () => {

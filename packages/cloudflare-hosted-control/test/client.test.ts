@@ -1911,7 +1911,7 @@ describe("createCloudflareHostedControlClient", () => {
       alg: "AES-256-GCM-HKDF-SHA256",
       ciphertext: "c2VhbGVk",
       domain: "control",
-      iv: "aXY=",
+      iv: "AAAAAAAAAAAAAAAA",
       lane: "hosted-member-private-field",
       rootKeyId: "root-synthetic",
       schema: "murph.hosted-secure-box.v1",

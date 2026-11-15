@@ -1,3 +1,5 @@
+import { isHostedWorkspaceSnapshotV2Ref } from "./parsers/cursor.ts";
+import { browserVaultReplicaShardObjectKey, requireHostedWorkspaceSnapshotId } from "./storage-paths.ts";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { parseHostedWorkspaceSnapshotUploadSession, type HostedWorkspaceSnapshotUploadSession } from "./workspace-snapshot-store.ts";
 import { parseHostedRuntimeOwnerIdentity, type HostedRuntimeOwnerIdentity } from "./runtime-owner.ts";
@@ -83,7 +85,7 @@ export function parseHostedRuntimeSnapshotCommand(value: unknown): HostedRuntime
   const record = requireObject(value, "Runtime snapshot command");
   const operation = requireString(record.operation, "Runtime resource operation");
   if (operation === "snapshot_managed_admit") {
-    return { operation, expectedSession: parseHostedWorkspaceSnapshotUploadSession(record.expectedSession),
+    return { operation, expectedSession: parseSnapshotCommandSession(record.expectedSession),
       uploadId: boundedUploadString(record.uploadId), ...parseManagedSnapshotBytes(record), ...parseManagedSnapshotMd5(record) };
   }
   if (operation === "snapshot_managed_read") return { operation, snapshotId: snapshotIdentity(record.snapshotId), ...parseHostedRuntimeOwnerIdentity(record) };
@@ -91,16 +93,16 @@ export function parseHostedRuntimeSnapshotCommand(value: unknown): HostedRuntime
     if (typeof record.verified !== "boolean") throw new ContractValidationError("Snapshot verification outcome is invalid.");
     return { operation, snapshotId: snapshotIdentity(record.snapshotId), uploadId: boundedUploadString(record.uploadId), verified: record.verified, ...parseHostedRuntimeOwnerIdentity(record) };
   }
-  if (operation === "snapshot_create") return { operation, session: parseHostedWorkspaceSnapshotUploadSession(record.session) };
+  if (operation === "snapshot_create") return { operation, session: parseSnapshotCommandSession(record.session) };
   if (operation === "snapshot_admit_put" || operation === "snapshot_record_replaced") {
-    const expectedSession = parseHostedWorkspaceSnapshotUploadSession(record.expectedSession);
+    const expectedSession = parseSnapshotCommandSession(record.expectedSession);
     if (operation === "snapshot_admit_put") {
       const expiresAt = canonicalDate(record.expiresAt);
       const drainUntil = canonicalDate(record.drainUntil);
       if (Date.parse(drainUntil) < Date.parse(expiresAt)) throw new ContractValidationError("Snapshot PUT drain precedes expiry.");
       return { operation, expectedSession, expiresAt, drainUntil };
     }
-    const updated = parseHostedWorkspaceSnapshotUploadSession({ ...expectedSession, replacedSnapshotRef: record.replacedSnapshotRef });
+    const updated = parseSnapshotCommandSession({ ...expectedSession, replacedSnapshotRef: record.replacedSnapshotRef });
     if (!updated.replacedSnapshotRef) throw new ContractValidationError("Replaced snapshot reference is required.");
     return { operation, expectedSession, replacedSnapshotRef: updated.replacedSnapshotRef };
   }
@@ -112,6 +114,24 @@ export function parseHostedRuntimeSnapshotCommand(value: unknown): HostedRuntime
   if (!/^[A-Za-z0-9._:-]{1,200}$/u.test(snapshotId)) throw new ContractValidationError("Snapshot identity is invalid.");
   return { operation, snapshotId, attemptId: identity.attemptId, generation: identity.generation };
 }
+
+function parseSnapshotCommandSession(value: unknown): HostedWorkspaceSnapshotUploadSession {
+  const session = parseHostedWorkspaceSnapshotUploadSession(value);
+  requireHostedWorkspaceSnapshotId(session.snapshotId);
+  parseHostedRuntimeOwnerIdentity({ attemptId: session.attemptId, generation: session.leaseGeneration });
+  assertHostedRuntimeReplacedSnapshotIdentity(session);
+  return session;
+}
+
+export function assertHostedRuntimeReplacedSnapshotIdentity(session: Pick<HostedWorkspaceSnapshotUploadSession, "userId" | "replacedSnapshotRef">): void {
+  const ref = session.replacedSnapshotRef;
+  if (!ref) return;
+  if (isHostedWorkspaceSnapshotV2Ref(ref) && (ref.userId !== session.userId || ref.encryption.aad.userId !== session.userId
+    || ref.encryption.aad.snapshotId !== ref.snapshotId || ref.encryption.aad.objectKey !== ref.objectKey)) {
+    throw new ContractValidationError("Replaced snapshot encryption identity mismatch.");
+  }
+}
+
 
 export function parseHostedRuntimeSnapshotResponse(value: unknown): HostedRuntimeSnapshotResponse {
   const record = requireObject(value, "Runtime snapshot response");
@@ -173,13 +193,18 @@ export function parseHostedRuntimeReplicaPutCommand(value: unknown): HostedRunti
     });
     requireUniqueReplicaValues(uploads.map(upload => upload.writeId));
     requireUniqueReplicaValues(uploads.map(upload => upload.objectKey));
-    return { operation: "admit_batch", objectKey: boundedUploadString(record.objectKey), uploads, ...parseHostedRuntimeOwnerIdentity(record) };
+    return { operation: "admit_batch", objectKey: replicaRootObjectKey(boundedUploadString(record.objectKey)), uploads, ...parseHostedRuntimeOwnerIdentity(record) };
   }
   const writeId = replicaWriteIdentity(record.writeId);
   if (record.operation === "release") return { operation: "release", writeId };
   if (record.operation !== "admit") throw new ContractValidationError("Replica PUT operation is invalid.");
   return { operation: "admit", writeId, ...(record.multipart === undefined ? {} : { multipart: replicaMultipart(record.multipart) }),
-    objectKey: requireString(record.objectKey, "Replica object key"), ...parseHostedRuntimeOwnerIdentity(record) };
+    objectKey: record.multipart === undefined ? requireString(record.objectKey, "Replica object key") : replicaRootObjectKey(requireString(record.objectKey, "Replica object key")), ...parseHostedRuntimeOwnerIdentity(record) };
+}
+
+function replicaRootObjectKey(objectKey: string): string {
+  browserVaultReplicaShardObjectKey(objectKey, "metricsIndex");
+  return objectKey;
 }
 
 export function buildHostedRuntimeReplicaBatchProtocolProbe() {
@@ -187,7 +212,7 @@ export function buildHostedRuntimeReplicaBatchProtocolProbe() {
     writeId: `probe-write-${index}`, objectKey: `probe-object-${index}`, uploadId: `probe-upload-${index}`,
   }));
   return {
-    admission: { operation: "admit_batch", objectKey: "probe-root", attemptId: "probe-attempt", generation: "1", uploads },
+    admission: { operation: "admit_batch", objectKey: "probe-root.json", attemptId: "probe-attempt", generation: "1", uploads },
     settlement: { operation: "release_batch", writeIds: uploads.map(upload => upload.writeId) },
   };
 }

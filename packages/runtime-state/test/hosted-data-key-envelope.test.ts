@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 
 import {
   createHostedDataKeyEnvelopeWithDomainRoot,
+  decodeHostedDataKeyEnvelopeWrap,
   parseHostedDataKeyEnvelope,
   unwrapHostedDataKeyWithDomainRoot,
 } from "../src/hosted-data-key-envelope.ts";
@@ -25,13 +26,15 @@ test("hosted data-key envelope round-trips through its primary domain-root wrap"
     rootKeyId: "udrk:runtime:v1",
   });
 
-  const unwrapped = await unwrapHostedDataKeyWithDomainRoot({
-    envelope,
-    rootKey: ROOT_KEY_V1,
-    rootKeyId: "udrk:runtime:v1",
-  });
-
-  assert.deepEqual(unwrapped, dataKey);
+  const decode = vi.spyOn(globalThis, "atob");
+  try {
+    const decoded = decodeHostedDataKeyEnvelopeWrap({ envelope, rootKeyId: "udrk:runtime:v1" });
+    const unwrapped = await unwrapHostedDataKeyWithDomainRoot({ decoded, rootKey: ROOT_KEY_V1 });
+    assert.deepEqual(unwrapped, dataKey);
+    expect(decode.mock.calls).toEqual([[envelope.wraps[0]!.iv], [envelope.wraps[0]!.ciphertext]]);
+  } finally {
+    decode.mockRestore();
+  }
   assert.equal(envelope.rootKeyId, "udrk:runtime:v1");
   assert.equal(envelope.wraps.length, 1);
 });
@@ -59,17 +62,12 @@ test("hosted data-key envelope can decrypt with a non-primary domain-root wrap",
   });
 
   const unwrapped = await unwrapHostedDataKeyWithDomainRoot({
-    envelope: multiWrapEnvelope,
+    decoded: decodeHostedDataKeyEnvelopeWrap({ envelope: multiWrapEnvelope, rootKeyId: "udrk:runtime:v2" }),
     rootKey: ROOT_KEY_V2,
-    rootKeyId: "udrk:runtime:v2",
   });
 
   assert.deepEqual(unwrapped, primary.dataKey);
-  await expect(
-    unwrapHostedDataKeyWithDomainRoot({
-      envelope: multiWrapEnvelope,
-      rootKey: ROOT_KEY_V2,
-      rootKeyId: "udrk:runtime:missing",
-    }),
-  ).rejects.toThrow(/missing domain-root wrap udrk:runtime:missing/u);
+  expect(() =>
+    decodeHostedDataKeyEnvelopeWrap({ envelope: multiWrapEnvelope, rootKeyId: "udrk:runtime:missing" }),
+  ).toThrow(/missing domain-root wrap udrk:runtime:missing/u);
 });

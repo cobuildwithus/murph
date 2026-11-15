@@ -48,7 +48,11 @@ let recordOutcomeRoute: RecordOutcomeRoute;
 let fetchDocumentRoute: typeof import("../app/api/internal/clinical-records/runtime/fetch-document/route");
 
 describe("Clinical Records internal runtime routes", () => {
-  it.each([" ", "bogus", "{}"]) ("rejects malformed caller cursors before retrieval: %s", async cursor => {
+  it.each([" ", "bogus", "{}", JSON.stringify({
+    alg: "AES-256-GCM-HKDF-SHA256", schema: "murph.hosted-secure-box.v1",
+    domain: "device", lane: "clinical-records-page-cursor", rootKeyId: "root_synthetic",
+    scope: "cursor_synthetic", ciphertext: "AA==", iv: "AA==",
+  })]) ("rejects malformed caller cursors before retrieval: %s", async cursor => {
     const response = await fetchPageRoute.POST(jsonRequest("/api/internal/clinical-records/runtime/fetch-page", {
       cursor, generation: 1, requestId: "request_example", runId: "run_example",
       resourceType: "Observation", queryFingerprint: "d66cc398ce9224292aee420a8b5268ea4f17adbe4b3c0d3378a26fc9fe707d91",

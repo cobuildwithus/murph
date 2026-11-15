@@ -4,7 +4,7 @@ import {
   readHostedMailboxWakeHighWater,
   type HostedMailboxLaneLag,
 } from "../runtime-control.ts";
-import { parseHostedRuntimeOwnerResponse } from "../runtime-owner.ts";
+import { isHostedStandbyClaimId, parseHostedRuntimeOwnerResponse } from "../runtime-owner.ts";
 import {
   HOSTED_RUNTIME_ENSURE_PROCESSING_RESPONSE_KINDS,
   HOSTED_RUNTIME_PROCESSING_ACCEPTED_ACTIONS,
@@ -326,7 +326,7 @@ function parseRuntimeProcessingAdmission(value: unknown, processingMode: string)
   if (!admission.owner || admission.owner.phase === "idle") {
     throw new ContractValidationError("Runtime admission requires a non-idle Postgres owner.");
   }
-  if (admission.status === "existing" && !/^standby-claim-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(admission.owner.allocationId ?? "")) {
+  if (admission.status === "existing" && !isHostedStandbyClaimId(admission.owner.allocationId)) {
     throw new ContractValidationError("Existing runtime admission allocationId must be a standby claim id.");
   }
   if (Date.parse(admission.owner.startedAt ?? "") > 8.64e15 - 30_000) {

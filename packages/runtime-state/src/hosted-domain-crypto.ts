@@ -464,11 +464,7 @@ export async function openHostedSecureBox(input: {
       {
         additionalData: toArrayBuffer(input.aad),
         iv: toArrayBuffer(
-          decodeFixedBase64(
-            envelope.iv,
-            HOSTED_SECURE_BOX_IV_BYTES,
-            "Hosted secure-box IV",
-          ),
+          decodeBase64(envelope.iv),
         ),
         name: "AES-GCM",
       },
@@ -505,6 +501,7 @@ export function parseHostedSecureBoxEnvelope(
     schema: requireLiteral(record.schema, HOSTED_SECURE_BOX_ENVELOPE_SCHEMA, `${label}.schema`),
     scope: requireNonEmptyString(record.scope, `${label}.scope`),
   };
+  decodeFixedBase64(envelope.iv, HOSTED_SECURE_BOX_IV_BYTES, "Hosted secure-box IV");
   const expectedDomain = getHostedCryptoDomainForLane(envelope.lane);
   if (expectedDomain !== envelope.domain) {
     throw new ContractValidationError(`${label}.lane belongs to ${expectedDomain}, not ${envelope.domain}.`);
@@ -1242,6 +1239,9 @@ function decodeBase64(value: string): Uint8Array {
 }
 
 function decodeFixedBase64(value: string, expectedBytes: number, label: string): Uint8Array {
+  if (value.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/u.test(value)) {
+    throw new ContractValidationError(`${label} must be base64.`);
+  }
   const decoded = decodeBase64(value);
   if (decoded.byteLength !== expectedBytes) {
     throw new ContractValidationError(`${label} must decode to ${expectedBytes} bytes.`);

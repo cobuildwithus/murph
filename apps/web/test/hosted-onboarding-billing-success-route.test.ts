@@ -139,6 +139,8 @@ describe("hosted onboarding billing success route", () => {
     { inviteCode: 12, sessionId: "session_opaque" },
     { inviteCode: "invite_opaque" },
     { inviteCode: "invite_opaque", sessionId: [] },
+    { inviteCode: "invite_opaque", sessionId: "\ud800" },
+    { inviteCode: "invite_opaque", sessionId: "\udfff" },
   ])("rejects malformed checkout identifiers before reconciliation %#", async (body) => {
     const response = await billingSuccessRoute.POST(
       new Request("https://example.test/api/hosted-onboarding/billing/success", {

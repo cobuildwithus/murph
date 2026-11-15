@@ -1,3 +1,5 @@
+import { parseInput, RequestInputError } from "@murphai/hosted-execution/request-input";
+import { parseHostedRuntimeSnapshotCommand, parseHostedRuntimeReplicaPutCommand } from "@murphai/hosted-execution/runtime-resources";
 import { createJsonErrorResponse } from "@/src/lib/http";
 import { runWithPrismaOperationTimings, type PrismaOperationTiming } from "@/src/lib/prisma-operation-timing";
 import { reconcileHostedRuntimeUploads } from "@/src/lib/hosted-execution/runtime-upload-recovery";
@@ -1190,7 +1192,8 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     session.snapshotId = "bad:id";
     session.encryption.aad.snapshotId = "bad:id";
     const command = operation === "snapshot_create" ? { operation, session } : { operation, expectedSession: session, expiresAt: session.expiresAt, drainUntil: session.expiresAt };
-    const error = await executeHostedRuntimeSnapshotCommand({ prisma: first, userId, command }).catch(error => error);
+    const error = await Promise.resolve().then(() => executeHostedRuntimeSnapshotCommand({ prisma: first, userId, command: parseInput(command, parseHostedRuntimeSnapshotCommand) })).catch(error => error);
+    expect(error).toBeInstanceOf(RequestInputError);
     const response = createJsonErrorResponse(error, { internalMessage: "Snapshot failed.", logMessage: "Snapshot failed." });
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: { code: "INVALID_REQUEST", message: "Invalid request." } });
@@ -1204,7 +1207,8 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     const upload = { objectKey, writeId: "synthetic-write", uploadId: "synthetic-upload" };
     const command = operation === "admit_batch" ? { operation, ...runtime, objectKey, uploads: [upload] }
       : { operation, ...runtime, objectKey, writeId: upload.writeId, multipart: upload };
-    const error = await executeHostedRuntimeReplicaPutCommand({ prisma: first, userId, command }).catch(error => error);
+    const error = await Promise.resolve().then(() => executeHostedRuntimeReplicaPutCommand({ prisma: first, userId, command: parseInput(command, parseHostedRuntimeReplicaPutCommand) })).catch(error => error);
+    expect(error).toBeInstanceOf(RequestInputError);
     const response = createJsonErrorResponse(error, { internalMessage: "Replica failed.", logMessage: "Replica failed." });
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: { code: "INVALID_REQUEST", message: "Invalid request." } });
@@ -1254,7 +1258,7 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
       : operation === "snapshot_record_replaced"
         ? { operation, expectedSession: session, replacedSnapshotRef }
         : { operation: "snapshot_delete" as const, ...runtime, snapshotId: session.snapshotId };
-    const error = await executeHostedRuntimeSnapshotCommand({ prisma: first, userId, command })
+    const error = await Promise.resolve().then(() => executeHostedRuntimeSnapshotCommand({ prisma: first, userId, command: parseInput(command, parseHostedRuntimeSnapshotCommand) }))
       .then(() => { throw new Error("Expected snapshot rejection."); }, error => error);
     const response = createJsonErrorResponse(error, { internalMessage: "snapshot failed", logMessage: "snapshot failed" });
     expect(response.status).toBe(operation === "stored" ? 500 : 400);
