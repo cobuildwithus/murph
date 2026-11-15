@@ -1,6 +1,7 @@
 "use client";
 
 import { RotateCcwIcon } from "lucide-react";
+import { MemberSuspensionAction } from "./member-suspension-action";
 import { useRouter } from "next/navigation";
 import {
   type FormEvent,
@@ -1057,6 +1058,7 @@ function MemberUsageClientSurface({
           ) : (
             dashboard.rows.map((row) => (
               <UsageCompactRow
+                suspensionDisabled={isResetting || globalResetActive || searchNavigationPending}
                 disabled={
                   isResetting
                   || globalResetActive
@@ -1115,6 +1117,7 @@ function MemberUsageClientSurface({
               ) : (
                 dashboard.rows.map((row) => (
                   <UsageRow
+                    suspensionDisabled={isResetting || globalResetActive || searchNavigationPending}
                     disabled={
                       isResetting
                       || globalResetActive
@@ -1998,6 +2001,7 @@ function readEmptyUsageMessage(
 
 interface UsageRowControlInput {
   disabled: boolean;
+  suspensionDisabled: boolean;
   onSelect: () => void;
   recovery: UsageRowRecovery;
   row: HostedOpsMemberUsageRow;
@@ -2055,7 +2059,7 @@ function UsageCompactRow(input: UsageRowControlInput) {
           />
         </dl>
       </div>
-      <UsageActionButton {...input} className="w-full md:w-auto" />
+      <UsageActions {...input} />
     </article>
   );
 }
@@ -2112,10 +2116,26 @@ function UsageRow(input: UsageRowControlInput) {
             row={input.row}
             runtimeRecheckAvailable={input.recovery.runtimeRecheckAvailable}
           />
-          <UsageActionButton {...input} />
+          <UsageActions {...input} />
         </div>
       </TableCell>
     </TableRow>
+  );
+}
+
+function UsageActions(input: UsageRowControlInput) {
+  return (
+    <div className="flex flex-wrap items-start gap-2">
+      <UsageActionButton {...input} />
+      {input.row.memberKind === "member" ? (
+        <MemberSuspensionAction
+          disabled={input.suspensionDisabled}
+          key={`${input.row.memberId}:${input.row.suspended}`}
+          memberId={input.row.memberId}
+          suspended={input.row.suspended}
+        />
+      ) : null}
+    </div>
   );
 }
 
