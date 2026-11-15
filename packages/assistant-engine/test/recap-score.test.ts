@@ -97,24 +97,32 @@ const takeAudio = (marker: number) => {
   const frame = Buffer.alloc(576); frame.set([0xff, 0xfb, 0xb4, 0]); frame[100] = marker
   return Buffer.concat(Array.from({ length: Math.round((planned + 20_000) / 24) }, () => frame))
 }
-type Take = number | 'denied' | 'failed' | 'malformed' | 'cancel'
+// A refused, failed or malformed response; valid MP3 that is too short; or valid MP3 whose words all come before the song.
+type Take = number | 'denied' | 'failed' | 'malformed' | 'short' | 'unsung' | 'cancel'
 
-async function generate(takes: readonly Take[]) {
+async function generate(takes: readonly Take[], { abortFirst = false } = {}) {
   const controller = new AbortController(), reason = new Error('Synthetic cancellation')
-  let calls = 0
-  const fetchImpl = vi.fn<typeof fetch>(async () => {
+  if (abortFirst) controller.abort(reason)
+  let calls = 0, requestAborted = false
+  const fetchImpl = vi.fn<typeof fetch>(async (_url, init) => {
     const take = takes[calls++]
     if (take === undefined) throw new Error('Unexpected take')
-    if (take === 'cancel') { controller.abort(reason); throw reason }
+    // The request itself must see the cancellation: it rejects only when its own signal aborts.
+    if (take === 'cancel') return await new Promise<Response>((_, reject) => {
+      init?.signal?.addEventListener('abort', () => { requestAborted = true; reject(init.signal!.reason) }, { once: true })
+      controller.abort(reason)
+    })
     if (take === 'denied') return new Response('Recap media request limit reached.', { status: 429 })
     if (take === 'failed') throw new Error('Synthetic transport failure')
     if (take === 'malformed') return response(new Uint8Array([1, 2]), planned)
+    if (take === 'short') return response(takeAudio(calls).subarray(0, 576 * Math.round(50_000 / 24)), planned)
+    if (take === 'unsung') return response(takeAudio(calls), planned - 10_000)
     return response(takeAudio(calls), planned + take)
   })
   const save = vi.fn<import('../src/assistant-codex/generated-media-file.ts').GeneratedMediaFileRuntime['save']>(async () => 'song.mp3')
   const result = executeGenerateRecapSongFile({ draft: { story, files: [] }, voice: 'Warm voice', abortSignal: controller.signal,
     fileRuntime: { elevenLabsApiKey: 'synthetic', fetchImpl, save, resolveReferences: async () => [] } })
-  return { result, reason, fetchImpl, save,
+  return { result, reason, fetchImpl, save, requestAborted: () => requestAborted,
     /** Which take was saved, counting from 1, and how late its singer is. */
     kept: () => ({ take: Buffer.from(save.mock.calls[0]![0])[100], lateMs: save.mock.calls[0]![2]![1]!.startMs - planned }) }
 }
@@ -129,6 +137,8 @@ test.each<[string, Take[], number, number]>([
   ['a refused retake leaves the valid first take and ends the retakes', [5000, 'denied'], 1, 5000],
   ['a failed retake leaves the valid first take', [5000, 'failed'], 1, 5000],
   ['a malformed retake leaves the valid first take', [5000, 'malformed'], 1, 5000],
+  ['a retake of the wrong length leaves the valid first take', [5000, 'short'], 1, 5000],
+  ['a retake with no sung word after the planned start leaves the valid first take', [5000, 'unsung'], 1, 5000],
   ['a failed second retake leaves the earliest valid take', [5000, 2500, 'failed'], 2, 2500],
 ])('%s', async (_, takes, keptTake, lateMs) => {
   const run = await generate(takes)
@@ -136,8 +146,9 @@ test.each<[string, Take[], number, number]>([
   expect(run.fetchImpl).toHaveBeenCalledTimes(takes.length)
   expect(run.save).toHaveBeenCalledTimes(1)
   expect(run.kept()).toEqual({ take: keptTake, lateMs })
-  // The saved file, its timings and its song start are all from the kept take.
-  expect(run.save.mock.calls[0]![3]!.songStartMs).toBeLessThanOrEqual(Math.min(planned + lateMs - 200, planned))
+  // The saved file, its timings and its song start are all from the kept take: the 24 ms frame at or before
+  // 200 ms ahead of its first word, and never after the planned start.
+  expect(run.save.mock.calls[0]![3]!.songStartMs).toBe(Math.floor(Math.min(planned + lateMs - 200, planned) / 24) * 24)
 })
 
 test('a song call makes at most three music requests', async () => {
@@ -162,6 +173,14 @@ test.each<[string, Take[]]>([
 ])('cancellation during %s propagates and saves nothing', async (_, takes) => {
   const run = await generate(takes)
   await expect(run.result).rejects.toBe(run.reason)
+  expect(run.requestAborted()).toBe(true)
   expect(run.save).not.toHaveBeenCalled()
   expect(run.fetchImpl).toHaveBeenCalledTimes(takes.length)
+})
+
+test('a song call that is already cancelled makes no request', async () => {
+  const run = await generate([0], { abortFirst: true })
+  await expect(run.result).rejects.toBe(run.reason)
+  expect(run.fetchImpl).not.toHaveBeenCalled()
+  expect(run.save).not.toHaveBeenCalled()
 })

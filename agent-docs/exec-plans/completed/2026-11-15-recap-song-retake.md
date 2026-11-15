@@ -114,7 +114,8 @@ above was tried.
 3. Risk: deploy skew between the Worker counter and the runner. Mitigation:
    the Worker (with the counter) rolls before the runner. A new runner against
    an old counter of six can retake once after four scenes; the second retake
-   is refused and the earlier take kept. An old runner never uses the seventh.
+   is refused and the earlier take kept. An old runner does not need the
+   seventh, though a writer that makes extra tool calls can still spend it.
 
 ## Tasks
 
@@ -133,6 +134,28 @@ above was tried.
   within its budget; retakes only improve a valid take.
 - Seven, not eight: one more forward than today is enough for three takes
   after four scenes and keeps the worst case closest to today's.
+
+## Review
+
+Local Codex deep review (gpt-6-astra, xhigh, read-only) on `84f1b47806`: no
+Critical, High or Medium findings. Four Low findings, all accepted:
+
+1. The malformed retake failed MP3 parsing before any recap check. Added valid
+   MP3 retakes of the wrong length and with no sung word after the planned
+   start; the earlier take stands in both.
+2. The cancellation tests aborted the caller's controller and threw, so they
+   would pass if the request lost its signal. The mock request now rejects only
+   when its own signal aborts, and an already-cancelled call makes no request.
+   Removing the signal from the take makes all three cancellation tests fail.
+3. The kept take's cut was checked only from above. It is now checked against
+   the exact 24 ms frame.
+4. This plan said an old runner never uses the seventh forward; repeated
+   writer tool calls can. Corrected above.
+
+Two notes on code this change does not touch, left as they are: the length
+check reads MP3 frame timing rather than decoded samples, and cancellation
+during the final save is not checked after the save returns. Both predate
+this change.
 
 ## Verification
 
