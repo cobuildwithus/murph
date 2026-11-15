@@ -22,6 +22,7 @@ vi.mock("@/src/lib/game/crypto", () => ({
 }));
 vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({
   $transaction: mocks.transaction,
+  hostedMemberIdentity: { findUnique: async () => null },
   gameProfile: { findUnique: mocks.find, createMany: mocks.create, upsert: mocks.upsert, updateManyAndReturn: mocks.update },
   game: { findMany: mocks.games }, gameTicket: { findMany: async () => [] },
   gameEntry: { findFirst: async () => null }, gameBlock: { findMany: async () => [] },

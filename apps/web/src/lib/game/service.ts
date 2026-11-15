@@ -1,3 +1,5 @@
+import { gameAreaCode } from "./area-code";
+import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
 import { isBothWinOfferDue, mergeStakeSlots } from "./rules";
 import { buildRecapFallback, gameResultCorrectionLine } from './recap-fallback';
 import { gameRecapEnvelopeSchema, recapStorageObjects, type GameRecapEnvelope, type RecapAsset, type RecapVideoIdentity } from '@murphai/contracts/recap-show';
@@ -3292,7 +3294,7 @@ async function readHomeProfile(memberId: string, auth?: HostedNativeMemberAuth):
 
 export async function readHome(memberId: string, multiplayer = false, auth?: HostedNativeMemberAuth): Promise<GameHomeView> {
   const prisma = getPrisma();
-  const [profile, seats, addressed, tickets, usualEntry] = await Promise.all([
+  const [profile, seats, addressed, tickets, usualEntry, identity] = await Promise.all([
     readHomeProfile(memberId, auth),
     // Apply active-game priority before the bounded history window, so new
     // invitations and completed games cannot displace an older live game.
@@ -3318,6 +3320,9 @@ export async function readHome(memberId: string, multiplayer = false, auth?: Hos
     }),
     prisma.gameEntry.findFirst({ where: { memberId, attempt: { gt: 0 }, withdrawnAt: null },
       orderBy: [{ receivedAt: "desc" }, { id: "desc" }], select: { kind: true } }),
+    // Only for the optional area-code hint: an identity that can't be read
+    // leaves it unknown instead of failing home.
+    readHostedMemberIdentity({ memberId, prisma }).catch(() => null),
   ]);
   const current = await loadCurrent([...new Set([...seats.map((seat) => seat.gameId), ...addressed.map((game) => game.id)])], true, memberId);
   const visible = current.games.filter((game) => canView(game, memberId));
@@ -3342,12 +3347,13 @@ export async function readHome(memberId: string, multiplayer = false, auth?: Hos
     return ticketView(toTicketRow(ticket, ticket.game.players), input.words, memberId, input.now,
       input.state.game.terms, input.hiddenMemberIds, input);
   });
+  const areaCode = gameAreaCode(identity);
   return {
     blocked,
     games: views,
     canStartGames: isGameEnabled(),
     ...(multiplayer ? { canStartGroups: areGameGroupsEnabled() } : {}),
-    me: { usualKind: usualEntry ? toEntryKind(usualEntry.kind) : null, avatarUrl: profile?.photoKey ? gameMediaUrl(profile.photoKey) : null, firstName: profile?.firstName ?? null, memberId, timeZone: profile?.timeZone ?? null },
+    me: { ...(areaCode ? { areaCode } : {}), usualKind: usualEntry ? toEntryKind(usualEntry.kind) : null, avatarUrl: profile?.photoKey ? gameMediaUrl(profile.photoKey) : null, firstName: profile?.firstName ?? null, memberId, timeZone: profile?.timeZone ?? null },
     wallet: {
       // Expired tickets stay where they were, marked expired.
       held: wallet.filter((ticket) => ticket.status !== "redeemed" && ticket.youHold),

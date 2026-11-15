@@ -2,6 +2,11 @@ import { Prisma } from "@prisma/client";
 
 type GameEnv = Readonly<Record<string, string | undefined>>;
 
+/** Optional typed-word suggestions use the existing OpenAI key; default on. */
+export function areGameIdeasEnabled(env: GameEnv = process.env): boolean {
+  return env.HOSTED_GAME_IDEAS !== "off";
+}
+
 /** The global switch as a Prisma filter on `game`. */
 export function gameOnWhere(env: GameEnv = process.env): Prisma.GameWhereInput {
   return isGameEnabled(env) ? {} : { id: { in: [] } };

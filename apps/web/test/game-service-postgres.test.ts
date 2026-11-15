@@ -284,6 +284,28 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     await rm(mediaDir, { force: true, recursive: true });
   });
 
+  it("projects only the caller's verified area code in Home", async () => {
+    const self = await member("Player One", "UTC");
+    const other = await member("Player Two", "UTC");
+    expect((await readHome(self)).me).not.toHaveProperty("areaCode");
+    const phone = "+12125550182";
+    await getPrisma().$transaction(tx => upsertHostedMemberIdentity({
+      ...buildHostedMemberPhoneIdentityFields(phone), memberId: self, prisma: tx,
+      phoneNumberVerifiedAt: new Date(), signupPhoneNumber: null,
+    }));
+    const home = await readHome(self);
+    expect(home.me.areaCode).toBe("212");
+    expect(JSON.stringify(home)).not.toContain(phone);
+    expect((await readHome(other)).me).not.toHaveProperty("areaCode");
+    await getPrisma().hostedMemberIdentity.update({ where: { memberId: self }, data: { phoneNumberVerifiedAt: null } });
+    expect((await readHome(self)).me).not.toHaveProperty("areaCode");
+    await getPrisma().$transaction(tx => upsertHostedMemberIdentity({
+      ...buildHostedMemberPhoneIdentityFields("+442079460182"), memberId: self, prisma: tx,
+      phoneNumberVerifiedAt: new Date(), signupPhoneNumber: null,
+    }));
+    expect((await readHome(self)).me).not.toHaveProperty("areaCode");
+  });
+
   describe("invite recovery after install", () => {
     let phoneOrdinal = 0;
     beforeEach(() => {
