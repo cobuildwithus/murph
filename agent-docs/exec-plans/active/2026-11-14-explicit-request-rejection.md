@@ -87,8 +87,19 @@ Rejected:
 - Waiting one or two weeks on shadow logs before choosing.
 
 Adopted as a migration device, deleted in the last stage:
-`ContractValidationError extends TypeError`, so every existing consumer behaves
-the same until its family flips.
+`ContractValidationError extends TypeError` and reports the name `TypeError`
+from the instance, the prototype and the constructor, so every existing
+consumer behaves the same until its family flips. A pre-landing review of
+stage 1 found three consumers that tell errors apart by name and would have
+changed otherwise; the last stage has to migrate each on purpose:
+
+- `classifyCleanupError` in Web's runtime resource cleanup reads the
+  prototype's own `name` to call a parse-stage failure "validation".
+- Web's `describeLoggedErrorType` and hosted-execution logging read
+  `constructor.name` for the logged error type.
+- `deriveHostedExecutionErrorCode` and `readHostedExecutionSafeErrorName` read
+  `error.name`; the container puts both on the wire and the Worker reads the
+  code. A translated rejection therefore reports its cause's diagnostics.
 
 ## Stages
 

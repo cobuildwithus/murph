@@ -1,4 +1,5 @@
-import { RequestInputError } from "@murphai/hosted-execution/request-input";
+import { ContractValidationError } from "@murphai/contracts/validation-error";
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/server", () => {
@@ -623,7 +624,13 @@ describe("json route helper factory", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
     const logDetails = vi.fn();
-    const response = httpModule.createJsonErrorResponse(new RequestInputError("Invalid shape."), {
+    let rejection: unknown;
+    try {
+      parseInput(null, () => { throw new ContractValidationError("Invalid shape."); });
+    } catch (error) {
+      rejection = error;
+    }
+    const response = httpModule.createJsonErrorResponse(rejection, {
       defaultHeaders: { "Cache-Control": "no-store" },
       headers: { "x-test": "present" },
       internalMessage: "route failed unexpectedly",
@@ -639,11 +646,29 @@ describe("json route helper factory", () => {
     expect(warn).toHaveBeenCalledExactlyOnceWith("route failed", {
       errorType: "RequestInputError",
       errorMessage: "Invalid shape.",
+      errorCauseType: "TypeError",
+      errorCauseMessage: "Invalid shape.",
       internalMessage: "route failed unexpectedly",
       errorResponseCode: "INVALID_REQUEST",
     });
     expect(errorLog).not.toHaveBeenCalled();
     expect(logDetails).not.toHaveBeenCalled();
+  });
+
+  it("logs an untranslated validator failure exactly as the TypeError it replaces", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const response = httpModule.createJsonErrorResponse(new ContractValidationError("Invalid shape."), {
+      internalMessage: "route failed unexpectedly",
+      logMessage: "route failed",
+    });
+    expect(response.status).toBe(400);
+    expect(warn).toHaveBeenCalledExactlyOnceWith("route failed", {
+      errorType: "TypeError",
+      errorMessage: "Invalid shape.",
+      internalMessage: "route failed unexpectedly",
+      errorResponseCode: "INVALID_REQUEST",
+      nativeErrorInference: true,
+    });
   });
 
   it("keeps an ordinary TypeError at 400 with optional warning-level log details", async () => {

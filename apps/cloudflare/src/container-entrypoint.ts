@@ -1945,6 +1945,12 @@ function classifyRequestDecodeError(error: unknown): {
     };
   }
 
+  if (isRequestInputError(error)) {
+    // A translated rejection reports the validator's failure, as it did before translation.
+    const invalid = classifyRequestDecodeError(error.cause);
+    return { payload: { ...invalid.payload, error: "Invalid request." }, statusCode: 400 };
+  }
+
   const details = buildHostedExecutionSafeErrorDetails(error);
   const errorName = readHostedExecutionSafeErrorName(error);
 
@@ -1960,7 +1966,7 @@ function classifyRequestDecodeError(error: unknown): {
     };
   }
 
-  if (isRequestInputError(error) || error instanceof TypeError || error instanceof RangeError || error instanceof URIError) {
+  if (error instanceof TypeError || error instanceof RangeError || error instanceof URIError) {
     return {
       payload: {
         code: deriveHostedExecutionErrorCode(error),

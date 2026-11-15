@@ -246,6 +246,10 @@ describe("contract validation helpers", () => {
     expect(parse).toThrow(ContractValidationError);
     expect(parse).toThrow(TypeError);
     expect(parse).toThrowError(expect.objectContaining({ name: "TypeError" }));
+    // Existing consumers also read the name off the constructor and the prototype.
+    const error = new ContractValidationError("payload");
+    expect(error.constructor.name).toBe("TypeError");
+    expect(Object.getOwnPropertyDescriptor(Object.getPrototypeOf(error), "name")?.value).toBe("TypeError");
   });
 
   it("returns flattened issues for invalid values", () => {

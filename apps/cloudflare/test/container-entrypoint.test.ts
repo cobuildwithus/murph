@@ -1,4 +1,5 @@
-import { RequestInputError } from "@murphai/hosted-execution/request-input";
+import { ContractValidationError } from "@murphai/contracts/validation-error";
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import { readFileSync } from "node:fs";
 import {
   request as httpRequest,
@@ -3028,7 +3029,9 @@ describe("startHostedContainerEntrypoint", () => {
   });
 
   it("answers explicit request rejection through the existing decode envelope", async () => {
-    const parseRunnerJobInput = vi.fn(() => { throw new RequestInputError("Invalid shape."); });
+    const parseRunnerJobInput = vi.fn((value: unknown) => parseInput(value, () => {
+      throw new ContractValidationError("Invalid shape.");
+    }));
     const runWorkspaceInvocation = vi.fn();
     const server = await startHostedContainerEntrypoint({
       port: 0,
@@ -3050,9 +3053,12 @@ describe("startHostedContainerEntrypoint", () => {
     });
 
     expect(response.status).toBe(400);
+    // The same envelope a native validator failure gets today.
     await expect(response.json()).resolves.toMatchObject({
+      code: "type_error",
       details: { errorDetail: "Invalid shape." },
       error: "Invalid request.",
+      errorName: "TypeError",
     });
     expect(parseRunnerJobInput).toHaveBeenCalledTimes(1);
     expect(runWorkspaceInvocation).not.toHaveBeenCalled();
