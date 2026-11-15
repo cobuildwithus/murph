@@ -588,6 +588,7 @@ function describeJsonRouteLogContext(args: readonly unknown[]): JsonRouteLogCont
 }
 
 function describeLoggedErrorType(error: unknown): string {
+  if (error instanceof ContractValidationError) return "ContractValidationError";
   if (error instanceof Error) {
     const constructorName = error.constructor?.name;
 

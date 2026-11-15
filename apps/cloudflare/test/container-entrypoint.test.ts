@@ -2418,9 +2418,9 @@ describe("startHostedContainerEntrypoint", () => {
 
     expect(response.status).toBe(400);
     expect(response.json).toMatchObject({
-      code: "type_error",
+      code: _label === "invalid URL" || _label === "object byte length" ? "type_error" : "runtime_error",
       error: "Invalid request.",
-      errorName: "TypeError",
+      errorName: _label === "invalid URL" || _label === "object byte length" ? "TypeError" : "ContractValidationError",
     });
     expect(runDirectR2PresignedPutSmoke).not.toHaveBeenCalled();
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(expect.objectContaining({
@@ -2815,14 +2815,14 @@ describe("startHostedContainerEntrypoint", () => {
 
       expect(response.status).toBe(400);
       await expect(response.json()).resolves.toMatchObject({
-        code: "type_error",
+        code: "runtime_error",
         details: {
           errorDetail: expect.stringContaining(
             "workspaceSnapshotPathHashSecret must be a 64-character lowercase hexadecimal derived diagnostics key",
           ),
         },
         error: "Invalid request.",
-        errorName: "TypeError",
+        errorName: "ContractValidationError",
       });
       expect(runHostedWorkspaceInvocation).not.toHaveBeenCalled();
     } finally {
@@ -3079,7 +3079,7 @@ describe("startHostedContainerEntrypoint", () => {
   });
 
   it.each([
-    [new ContractValidationError("Parser bug."), "type_error"],
+    [new ContractValidationError("Parser bug."), "runtime_error"],
     [new TypeError("Parser bug."), "type_error"],
     [new RangeError("Parser bug."), "range_error"],
     [new URIError("Parser bug."), "uri_error"],
@@ -3113,7 +3113,7 @@ describe("startHostedContainerEntrypoint", () => {
       code,
       details: { errorDetail: "Parser bug." },
       error: "Internal error.",
-      errorName: error.name,
+      errorName: error instanceof ContractValidationError ? "ContractValidationError" : error.name,
     });
     expect(runWorkspaceInvocation).not.toHaveBeenCalled();
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(expect.objectContaining({
@@ -3151,10 +3151,10 @@ describe("startHostedContainerEntrypoint", () => {
     expect(response.status).toBe(400);
     // Preserve the validator diagnostics after boundary translation.
     await expect(response.json()).resolves.toMatchObject({
-      code: "type_error",
+      code: "runtime_error",
       details: { errorDetail: "Invalid shape." },
       error: "Invalid request.",
-      errorName: "TypeError",
+      errorName: "ContractValidationError",
     });
     expect(parseRunnerJobInput).toHaveBeenCalledTimes(1);
     expect(runWorkspaceInvocation).not.toHaveBeenCalled();
@@ -3181,12 +3181,12 @@ describe("startHostedContainerEntrypoint", () => {
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toMatchObject({
-      code: "type_error",
+      code: "runtime_error",
       details: {
         errorDetail: "Hosted container runner request must be an object.",
       },
       error: "Invalid request.",
-      errorName: "TypeError",
+      errorName: "ContractValidationError",
     });
   });
 
@@ -3249,12 +3249,12 @@ describe("startHostedContainerEntrypoint", () => {
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toMatchObject({
-      code: "type_error",
+      code: "runtime_error",
       details: {
         errorDetail: expect.stringContaining("config.userEnv.OPENAI_API_KEY must be a string"),
       },
       error: "Invalid request.",
-      errorName: "TypeError",
+      errorName: "ContractValidationError",
     });
   });
 

@@ -8966,6 +8966,35 @@ describe("RunnerContainer", () => {
     expectRunnerContainerStructuredLogsToOmitInvalidRequestDetails();
   });
 
+  it.each([
+    ["runtime_error", "ContractValidationError"],
+    ["type_error", "TypeError"],
+  ])("preserves validation wire diagnostics for %s", async (code, errorName) => {
+    const { container } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify(createRunnerHealthResult()), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        return Response.json({ code, error: "Invalid request.", errorName }, { status: 400 });
+      }),
+    });
+
+    const thrown = await container.invoke({
+      job: createRunnerInvocationJob("evt_invalid_request_diagnostics"),
+      timeoutMs: 10_000,
+      userId: "member_123",
+    }).catch((error: unknown) => error);
+
+    expect(thrown).toMatchObject({ code, name: errorName, status: 400, statusCode: 400 });
+    expect(deriveHostedExecutionErrorCode(thrown)).toBe("invalid_request");
+  });
+
   it("omits raw body previews from non-json runner failure responses", async () => {
     const hiddenBody = "hidden non-json runner body with provider text and OPENAI_API_KEY=placeholder";
     const { container } = createContainerDouble({

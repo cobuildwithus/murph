@@ -11,3 +11,8 @@ Object.defineProperty(ContractValidationError.prototype, "name", {
   value: "TypeError",
   writable: true,
 });
+
+/** Semantic diagnostic name, independent of the temporary built-in name device. */
+export function getErrorName(error: Error): string {
+  return error instanceof ContractValidationError ? "ContractValidationError" : error.name;
+}

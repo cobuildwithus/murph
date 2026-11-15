@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 
-import { startHostedDeviceSyncConnection } from "@/src/lib/device-sync/hosted-connect-start";
+import { resolveHostedConnectSourceTarget, startHostedDeviceSyncConnection } from "@/src/lib/device-sync/hosted-connect-start";
 
 vi.mock("server-only", () => ({}));
 
@@ -12,14 +13,25 @@ const mocks = vi.hoisted(() => ({
   getPrisma: vi.fn(),
   isDeviceConnectSourceAvailableForConnection: vi.fn(),
   prepareConnectionStart: vi.fn(),
+  readConfiguredDeviceSyncConnectTargetConfigs: vi.fn(),
   requireActiveHostedAppSessionFromRequest: vi.fn(),
   startConnection: vi.fn(),
 }));
 
 vi.mock("@murphai/device-syncd/connect-config", () => ({
+  readConfiguredDeviceSyncConnectTargetConfigs: mocks.readConfiguredDeviceSyncConnectTargetConfigs,
   isDeviceConnectSourceAvailableForConnection:
     mocks.isDeviceConnectSourceAvailableForConnection,
 }));
+
+it.each([new ContractValidationError("Invalid configuration."), new TypeError("Invalid configuration."), new RangeError("Invalid configuration.")])(
+  "preserves native configuration failures and explicitly maps contract failures: %s", (error) => {
+    mocks.readConfiguredDeviceSyncConnectTargetConfigs.mockImplementationOnce(() => { throw error; });
+    expect(() => resolveHostedConnectSourceTarget("oura", null)).toThrow(expect.objectContaining({
+      code: "HOSTED_DEVICE_CONNECT_SOURCE_CONFIGURATION_UNAVAILABLE", httpStatus: 503, retryable: true,
+    }));
+  },
+);
 
 vi.mock("@/src/lib/device-sync/public-ingress-service", () => ({
   createHostedDeviceSyncPublicIngressService:

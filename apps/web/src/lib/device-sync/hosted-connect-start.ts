@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
 import {
@@ -189,7 +190,7 @@ function readHostedConnectSourceTargetConfigs() {
   try {
     return readConfiguredDeviceSyncConnectTargetConfigs(process.env);
   } catch (error) {
-    if (error instanceof TypeError || error instanceof RangeError) {
+    if (error instanceof ContractValidationError || error instanceof TypeError || error instanceof RangeError) {
       throw deviceSyncError({
         cause: {
           errorObservabilityClass: "configuration",
