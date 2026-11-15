@@ -93,8 +93,9 @@ async function ensureRuntimeProcessing(context: ReturnType<typeof createProcessi
   const ctx = { ...context, namespace: context.namespace };
   let claim = await readRuntimeAdmission(ctx);
   let previousGeneration: string | undefined;
-  // One completed owner, one expired retained target, then its fresh successor.
-  // Contention beyond these bounded transitions belongs to the existing retry owner.
+  // One completed owner, one expired retained target or failed readiness, then its
+  // fresh successor. Contention beyond these bounded transitions belongs to the
+  // existing retry owner.
   for (let admission = 0; admission < 3; admission += 1) {
     const owner = claim.owner;
     if (claim.blockedReason === "admission") {
@@ -296,11 +297,21 @@ async function startClaimedRuntime(ctx: ProcessingContext, initialOwner: HostedR
     || binding.slotName !== owner.runnerContainerName) throw new Error("Hosted runtime target binding mismatch.");
   const container = ctx.namespace.getByName(binding.slotName);
   if (!container.ensureReadyForProcessing || !container.startSupervisedInvocation) throw new Error("Native runtime supervision is unavailable.");
+  const readiness = ctx.step("container_readiness", () => container.ensureReadyForProcessing!({ userId: ctx.input.userId, orchestrationAttemptId: ctx.input.orchestrationAttemptId,
+    timeoutMs: readRuntimeProcessingCommandStepTimeoutMs({ budget: ctx.budget, stepTimeoutMs: 15_000 }) }), 15_000);
+  // Recover in place only when a rejection is this command's own failure. Foreground
+  // priority rejects a background start's readiness on purpose, and a supplied claim
+  // can reach a second command that launches meanwhile.
+  const ownsStart = ctx.mode === "default" && ctx.input.admission?.owner?.attemptId !== owner.attemptId;
   const [ready, prepared] = await Promise.all([
-    ctx.step("container_readiness", () => container.ensureReadyForProcessing!({ userId: ctx.input.userId, orchestrationAttemptId: ctx.input.orchestrationAttemptId,
-      timeoutMs: readRuntimeProcessingCommandStepTimeoutMs({ budget: ctx.budget, stepTimeoutMs: 15_000 }) }), 15_000),
+    // A deadline leaves readiness in flight and keeps the existing recovery.
+    !ownsStart ? readiness
+      : readiness.catch((error: unknown) => { if (isProcessingTimeout(error)) throw error; return null; }),
     ctx.step("prepare_invocation", () => prepare(ownerToken(owner), binding)),
   ]);
+  // Nothing has launched. Prove the exact target stopped now and re-admit, rather
+  // than leave the owner to its startup deadline.
+  if (!ready) return retireRuntime(ctx, owner);
   if (ready.kind !== "ready") return retryProcessing(ctx, "container_not_ready");
   // The slot submits `prepare_launch` itself, immediately before its receipt.
   await ctx.step("start_invocation", () => container.startSupervisedInvocation!({ userId: ctx.input.userId, job: prepared.job,
