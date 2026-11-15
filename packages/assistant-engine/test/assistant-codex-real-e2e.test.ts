@@ -48863,9 +48863,12 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
     const { createRecapShowLiveProviders } = await import('../src/recap-show-testkit.ts')
     const gameId = 'synthetic-stretch', eventId = `game-recap:${gameId}`, pairFingerprint = 'fedcba9876543210fedcba9876543210'
     const players = [{ memberId: 'synthetic-iris', name: 'Iris' }, { memberId: 'synthetic-mateo', name: 'Mateo' }]
-    // Five weekdays that ended two days ago, in New York time.
-    const dates = Array.from({ length: 5 }, (_, day) => new Date(Date.now() - (6 - day) * 86_400_000).toISOString().slice(0, 10))
-    const at = (day: number, time: string) => `${dates[day]}T${time}:00-05:00`
+    // The last Monday-to-Friday week that is over, on New York's clock with its own offset each day.
+    const friday = Date.now() - ((new Date().getUTCDay() + 1) % 7 + 1) * 86_400_000
+    const dates = Array.from({ length: 5 }, (_, day) => new Date(friday - (4 - day) * 86_400_000).toISOString().slice(0, 10))
+    const offset = (date: string) => new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', timeZoneName: 'longOffset' })
+      .formatToParts(new Date(`${date}T12:00:00Z`)).find(part => part.type === 'timeZoneName')!.value.replace('GMT', '')
+    const at = (day: number, time: string) => `${dates[day]}T${time}:00${offset(dates[day]!)}`
     const posts: [string, number, string, string | null][] = [
       ['Iris', 0, '06:50', null], ['Mateo', 0, '22:41', null], ['Iris', 1, '06:45', null], ['Mateo', 2, '23:57', 'made it'],
       ['Iris', 3, '07:11', null], ['Iris', 4, '06:41', null], ['Mateo', 4, '08:06', null],
@@ -48916,10 +48919,15 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
           return [name, post ? { entryId: `synthetic-${name.toLowerCase()}-${day}`, postedAt: { local: at(day, post[2]), timeZone: 'America/New_York', instant: new Date(at(day, post[2])).toISOString() },
             kind: 'photo', text: post[3], data: null, ...(name === 'Mateo' && day === 2 ? { proveIt: { by: 'Iris' } } : {}) } : 'missed']
         })) })) },
-      players, entries, result: [{ ...players[0]!, score: 4 }, { ...players[1]!, score: 3 }],
+      players, entries, result: [{ ...players[0]!, score: 4 }, { ...players[1]!, score: 3 }], startedAt: new Date(at(0, '00:00')).toISOString(),
       chat: [...chat, ...banter].sort((a, b) => a[0] - b[0] || a[1].localeCompare(b[1]))
         .map(([day, time, who, text]) => ({ playerName: who, text, at: new Date(at(day, time)).toISOString(), source: who === 'Murph' ? 'assistant' as const : 'player' as const })),
     })
+    const earlier = { treatment: 'a 1920s silent-film clock caper', title: 'Ten minutes. Eventually.',
+      chatLine: 'Iris wins 4–3, Mateo: Thursday’s missing stretch turned Friday’s early start into dinner duty. Iris is thinking pasta; you’re cooking.' }
+    // Which comedy skill the writer reads: the managed one only when the run points the skills root at it.
+    const comedySkill = (await readFile(path.join(config.env[MURPH_ASSISTANT_SKILLS_ROOT_ENV]!, 'groupchat-comedy/SKILL.md'), 'utf8'))
+      .includes('This public fallback intentionally contains no managed') ? 'public fallback' : 'managed'
     const events: unknown[] = []
     let tokens: unknown = null
     try {
@@ -48927,9 +48935,9 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
       await mkdir(path.join(vault, 'games'), { recursive: true })
       // The remake's lore is what an earlier take of this game wrote after its show.
       await writeFile(path.join(vault, `games/lore-${pairFingerprint}.md`), take === 'first show' ? '# Synthetic pair lore\nTheir first game together.\n' : [
-        '# Pair lore', 'First game together. Iris won stretching 4–3. Mateo owes dinner; Iris said “im thinking pasta”.', 'Used treatment: a 1920s silent-film clock caper.',
+        '# Pair lore', 'First game together. Iris won stretching 4–3. Mateo owes dinner; Iris said “im thinking pasta”.', `Used treatment: ${earlier.treatment}.`,
         'Used moments: three Tuesday starts with no post; Wednesday 11:57 stretching questioned as Monday’s; four Iris posts before 7:12am; Thursday miss then Friday “actually now” one minute before posting; “cereal probably” versus cooking dinner.',
-        'Used title: Ten minutes. Eventually.', 'Used chat line: Iris wins 4–3, Mateo: Thursday’s missing stretch turned Friday’s early start into dinner duty. Iris is thinking pasta; you’re cooking.', ''].join('\n'))
+        `Used title: ${earlier.title}`, `Used chat line: ${earlier.chatLine}`, ''].join('\n'))
       const target = createAssistantModelTarget({ approvalPolicy: 'never', codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND), codexHome: permissionHome.codexHome,
         model: config.model, modelProvider: config.modelProvider, provider: 'codex-cli', reasoningEffort: 'low', sandbox: 'workspace-write' })
       if (!target) throw new Error('Expected real Codex target.')
@@ -48945,7 +48953,8 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
           const raw = readRecord(event.rawEvent)
           if (raw?.method === 'thread/tokenUsage/updated') tokens = readRecord(readRecord(raw.params)?.tokenUsage)?.total ?? tokens
         },
-        turnEnvironment: { currentWorkingDirectory: vault, env: { ...config.env, OPENAI_API_KEY: 'synthetic', ELEVENLABS_API_KEY: 'synthetic' } },
+        // Media goes through the synthetic transport; a provider-auth run keeps its own model key.
+        turnEnvironment: { currentWorkingDirectory: vault, env: { ...config.env, OPENAI_API_KEY: config.env.OPENAI_API_KEY ?? 'synthetic', ELEVENLABS_API_KEY: 'synthetic' } },
         turnTrigger: 'manual-deliver', vault, workingDirectory: vault,
       })
     } finally {
@@ -48954,8 +48963,9 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
       const reads = readCapabilityRoutingActions(events).flatMap(action => action.kind === 'command'
         ? [{ command: action.command.replace(/[a-f0-9]{32,64}/gu, '<hex>').slice(0, 160), bytes: Buffer.byteLength(action.output) }] : [])
       const lore = await readFile(path.join(vault, `games/lore-${pairFingerprint}.md`), 'utf8').catch(() => null)
-      process.stdout.write(`[recap humour show] ${JSON.stringify({ take, model: config.model, wallTimeMs: Date.now() - startedAt, tokens, reads, lore, story: story && {
-        treatment: story.treatment, pages: story.pages, superlatives: story.superlatives, song: story.song && { title: story.song.title, lyrics: story.song.lyrics }, chatLine: story.chatLine } })}\n`)
+      process.stdout.write(`[recap humour show] ${JSON.stringify({ take, comedySkill, model: config.model, wallTimeMs: Date.now() - startedAt, tokens, reads, lore, story: story && {
+        treatment: story.treatment, pages: story.pages, superlatives: story.superlatives, song: story.song && { title: story.song.title, lyrics: story.song.lyrics }, chatLine: story.chatLine } })
+        .replace(/\/Users\/[^/\s"]+/gu, '<HOME_DIR>')}\n`)
       await removeRealCodexTemporaryPaths([vault, ...permissionHome.temporaryPaths, ...config.temporaryPaths])
     }
     expect(providers.saved).toHaveLength(1)
@@ -48967,6 +48977,13 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
     for (const quote of quotes) {
       expect(said.has(`${quote.who}: ${quote.text}`), `${quote.who}: ${quote.text}`).toBe(true)
       expect(quote.text).not.toMatch(appChatter)
+    }
+    // A remake retells the week in a new world, under a new title, with a new chat line.
+    if (take === 'remake') {
+      const story = providers.saved[0]!
+      expect(story.treatment?.toLowerCase()).not.toBe(earlier.treatment)
+      expect(story.pages[0]!.blocks.find(block => block.kind === 'headline')?.text).not.toBe(earlier.title)
+      expect(story.chatLine).not.toBe(earlier.chatLine)
     }
   }, 900_000)
 

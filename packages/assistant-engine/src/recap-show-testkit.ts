@@ -15,7 +15,7 @@ export async function createRecapShowLiveProviders(input: {
   game: unknown; players: { name: string; memberId: string }[];
   entries: RecapMaterial['entries']; result: RecapMaterial['result'];
   chat: { playerName: string; text: string; at?: string; source?: RecapTranscriptMessage['source'] }[];
-  mediaFetch?: typeof fetch;
+  mediaFetch?: typeof fetch; startedAt?: string;
 }) {
   const photos = new Map<string, Buffer>()
   const references: RecapMaterial['references'] = []
@@ -35,7 +35,7 @@ export async function createRecapShowLiveProviders(input: {
   const murph = hash('synthetic-murph')
   photos.set(murph, await sharp(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="480" height="640"><rect width="480" height="640" fill="#f5f0e8"/><rect x="170" y="220" width="140" height="200" rx="30" fill="#2d3436"/><circle cx="240" cy="170" r="60" fill="#7a8c6e"/></svg>')).jpeg().toBuffer())
   references.push({ id: murph, kind: 'murph' })
-  const startedAt = new Date(Date.now() - 8 * 86_400_000).toISOString()
+  const startedAt = input.startedAt ?? new Date(Date.now() - 8 * 86_400_000).toISOString()
   const settledAt = new Date().toISOString()
   const material: RecapMaterial = { game: input.game, players: input.players.map(player => player.name), entries: input.entries,
     result: input.result, references, startedAt, settledAt }
@@ -76,11 +76,7 @@ export async function createRecapShowLiveProviders(input: {
     let recapGame: unknown
     if (!command) recapGame = { ...(typeof input.game === 'object' ? input.game : {}), material }
     else if (command.kind === 'recover') recapGame = { recovered: false }
-    else if (command.kind === 'transcript') {
-      // Production pages a long chat 200 messages at a time.
-      const from = Number(command.after ?? 0), next = from + 200 < chat.length ? String(from + 200) : null
-      recapGame = { messages: chat.slice(from, from + 200), next, through: String(chat.length), since: startedAt, until: settledAt, retainedSince: startedAt, incomplete: false }
-    }
+    else if (command.kind === 'transcript') recapGame = { messages: chat, next: null, through: String(chat.length), since: startedAt, until: settledAt, retainedSince: startedAt, incomplete: false }
     else if (command.kind === 'reference') {
       const bytes = photos.get(command.id)
       if (!bytes) throw new Error('Unknown synthetic photo.')
