@@ -243,6 +243,14 @@ function retirementAttemptAtEpochMs(since: string | null): number {
   return since ? Date.parse(since) + 30_000 : 0;
 }
 
+// A finished run's container normally proves stopped about a second after
+// completion, so recheck quickly at first. One that stays up keeps the normal
+// pace, which bounds retries before the retirement deadline.
+function completionSettleRetryAtEpochMs(completedAt: string | null): number | undefined {
+  const completedAtMs = completedAt ? Date.parse(completedAt) : Number.NaN;
+  return Date.now() < completedAtMs + 5_000 ? Date.now() + 500 : undefined;
+}
+
 async function reconcileCompletedRuntime(ctx: ProcessingContext, owner: HostedRuntimeOwnerSnapshot, runnerContainerName: string): Promise<HostedRuntimeEnsureProcessingResponse | null> {
   const identity = requireIdentity(owner);
   const live = await readRuntimeFenceLivenessBestEffort({ commandBudget: ctx.budget,
@@ -252,7 +260,8 @@ async function reconcileCompletedRuntime(ctx: ProcessingContext, owner: HostedRu
     // Active, mismatched or unknown liveness settles nothing. A completed attempt has no
     // outcome left to preserve, so past the window a confirmed stop is the way through.
     return retirementAttemptAtEpochMs(owner.completedAt ?? owner.startedAt) > Date.now()
-      ? retryProcessing(ctx, "completion_unconfirmed") : retireRuntime(ctx, owner);
+      ? retryProcessing(ctx, "completion_unconfirmed", completionSettleRetryAtEpochMs(owner.completedAt))
+      : retireRuntime(ctx, owner);
   }
   await ctx.step("complete_invocation", () => recordHostedRuntimeOwnerCompletion({
     source: ctx.source, userId: ctx.input.userId, ...identity,

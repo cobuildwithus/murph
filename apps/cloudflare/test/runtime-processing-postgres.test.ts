@@ -1130,6 +1130,20 @@ describe("completed demand recovery deadline", () => {
     expect(h.container.ensureProcessing).not.toHaveBeenCalled();
   });
 
+  it.each([
+    { age: 1_000, phase: "retiring", delayMs: 500 },
+    { age: 4_999, phase: "retiring", delayMs: 500 },
+    { age: 5_000, phase: "retiring", delayMs: 3_000 },
+    { age: 1_000, phase: "active", delayMs: 3_000 },
+  ] as const)("rechecks an unsettled completion after $delayMs ms at age $age ($phase)", async ({ age, phase, delayMs }) => {
+    const h = await completedHarness({ age, phase });
+    const diagnostics: RuntimeProcessingDiagnostics = { stage: "admission", details: {} };
+    expect(await ensurePostgresRuntimeProcessing(h.source, request, diagnostics))
+      .toEqual({ kind: "retry_later", retryAt: new Date(Date.now() + delayMs).toISOString() });
+    expect(diagnostics.details.runtimeProcessingRetryReason).toBe("completion_unconfirmed");
+    expect(h.container.retireStandbySlot).not.toHaveBeenCalled();
+  });
+
   it.each(["active", "unknown", "mismatch"] as const)("retires warm completion past the deadline with %s liveness before fresh admission", async fence => {
     const h = await completedHarness({ age: 40_000, fence });
     expect(await ensurePostgresRuntimeProcessing(h.source, request)).toMatchObject({ kind: "runtime_processing_accepted", runtimeAttemptId: "attempt-b" });
