@@ -508,7 +508,7 @@ describe("upgradeHostedBillingPlan", () => {
       targetPlanCode: "launch_edge_monthly",
     })).rejects.toMatchObject({
       code: "HOSTED_BILLING_STRIPE_CUSTOMER_MISMATCH",
-      httpStatus: 409,
+      httpStatus: 500,
     });
   });
 

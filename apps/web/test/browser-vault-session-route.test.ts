@@ -713,6 +713,36 @@ describe("browser vault session route", () => {
     expect(mocks.signalHostedBrowserVaultRefreshRuntime).not.toHaveBeenCalled();
   });
 
+  it.each(["granted", "revoked"])(
+    "reports workspace read failures as server errors with %s consent",
+    async (consent) => {
+      const browser = await generateHostedUserRecipientKeyPair();
+      mocks.readHostedHealthDataConsentState.mockResolvedValue(consent);
+      const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        for (const failure of [new Error("Database unavailable"), new TypeError("Decrypt failed")]) {
+          mocks.readHostedWorkspace.mockRejectedValueOnce(failure);
+          const response = await settingsVaultExportSessionRoute.POST(
+            createJsonPostRequest("https://join.example.test/api/settings/vault-export/session", {
+              authorization: {
+                signature: `0x${"11".repeat(65)}`,
+                token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
+              },
+              browserPublicKeyJwk: browser.publicKeyJwk,
+            }),
+          );
+          expect(response.status).toBe(500);
+          await expect(response.json()).resolves.toMatchObject({ error: { code: "INTERNAL_ERROR" } });
+        }
+        expect(errorLog).toHaveBeenCalledTimes(2);
+        expect(mocks.consumeSensitiveActionChallenge).not.toHaveBeenCalled();
+        expect(mocks.signalHostedBrowserVaultRefreshRuntime).not.toHaveBeenCalled();
+      } finally {
+        errorLog.mockRestore();
+      }
+    },
+  );
+
   it("refuses Settings vault export sessions without consuming the challenge when the replica is missing", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
     const createBrowserVaultSession = vi.fn();

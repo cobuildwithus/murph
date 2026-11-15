@@ -420,7 +420,7 @@ function assertHostedStripeSubscriptionMatchesCustomer(input: {
   }
   throw hostedOnboardingError({
     code: "HOSTED_BILLING_STRIPE_CUSTOMER_MISMATCH",
-    httpStatus: 409,
+    httpStatus: 500,
     message: "Your subscription does not match your billing account.",
   });
 }

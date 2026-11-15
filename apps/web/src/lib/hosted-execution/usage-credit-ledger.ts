@@ -3,6 +3,17 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 
 type HostedUsageCreditReadClient = PrismaClient | Prisma.TransactionClient;
 
+/**
+ * The ledger owner row is gone. That is a server fault for internal callers;
+ * checkout admission alone turns it into its eligibility refusal.
+ */
+export class HostedUsageCreditBeneficiaryMissingError extends Error {
+  constructor() {
+    super("Hosted usage-credit beneficiary does not exist.");
+    this.name = "HostedUsageCreditBeneficiaryMissingError";
+  }
+}
+
 export interface HostedUsageCreditProjection {
   balanceUsdMicros: bigint;
   ledgerVersion: bigint;
@@ -69,7 +80,7 @@ export async function lockHostedUsageCreditBeneficiaryTx(input: {
   const row = rows[0];
 
   if (!row) {
-    throw new TypeError("Hosted usage-credit beneficiary does not exist.");
+    throw new HostedUsageCreditBeneficiaryMissingError();
   }
 
   return {

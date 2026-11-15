@@ -4,7 +4,8 @@ const nextServerMocks = vi.hoisted(() => ({
   after: vi.fn<(task: () => Promise<void>) => void>(),
 }));
 
-vi.mock("next/server", () => ({
+vi.mock("next/server", async (importOriginal) => ({
+  ...await importOriginal<typeof import("next/server")>(),
   after: nextServerMocks.after,
 }));
 
@@ -212,6 +213,8 @@ import {
   HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_CODE,
   HOSTED_USAGE_CREDIT_CAPACITY_CONFLICT_MESSAGE,
 } from "@/src/lib/hosted-onboarding/usage-credit-capacity-conflict";
+
+import { withJsonError } from "@/src/lib/hosted-onboarding/http";
 
 const NOW = new Date("2026-07-16T17:00:00.000Z");
 const GROUP_REFILL_RECOVERY_NOW = new Date("2026-08-01T12:00:00.000Z");
@@ -551,6 +554,46 @@ describe("parseHostedGroupSponsorshipCheckoutRequest", () => {
 });
 
 describe("createHostedUsageCreditCheckout", () => {
+  it.each(["missing", "database", "type_error"])(
+    "distinguishes a missing beneficiary from a %s lock result",
+    async (result) => {
+      const fake = createFakePrisma();
+      if (result === "missing") {
+        fake.prisma.$queryRaw.mockResolvedValueOnce([]);
+      } else {
+        fake.prisma.$queryRaw.mockRejectedValueOnce(result === "database"
+          ? new Error("Database unavailable")
+          : new TypeError("Hosted usage-credit beneficiary does not exist."));
+      }
+      const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+      const warnLog = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        const response = await withJsonError(async () => {
+          await createHostedUsageCreditCheckout({
+            clientRequestKey: CLIENT_REQUEST_KEY,
+            memberId: MEMBER_ID,
+            now: NOW,
+            offerCode: "usage_10_usd",
+            prisma: fake.prisma as never,
+          });
+          return new Response();
+        })();
+        expect(response.status).toBe(result === "missing" ? 403 : 500);
+        await expect(response.json()).resolves.toMatchObject({ error: {
+          code: result === "missing" ? "HOSTED_USAGE_CREDIT_NOT_ELIGIBLE" : "INTERNAL_ERROR",
+          message: result === "missing"
+            ? "Usage credit is available for active paid Pulse or Edge plans."
+            : "Internal error.",
+        } });
+        expect(fake.purchases.size).toBe(0);
+        expect(mocks.stripeCheckoutCreate).not.toHaveBeenCalled();
+      } finally {
+        errorLog.mockRestore();
+        warnLog.mockRestore();
+      }
+    },
+  );
+
   it("admits a new Family checkout with 31 combined occupied slots under owner-first locking", async () => {
     const usageCreditEvents: string[] = [];
     const fake = createFakePrisma({

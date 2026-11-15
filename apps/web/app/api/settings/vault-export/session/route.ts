@@ -108,16 +108,7 @@ export const POST = withJsonError(async (request: Request) => {
   // newest retained replica even when newer source changes are still being
   // processed. Active members also request a refresh; withdrawn members never
   // restart processing.
-  let workspace: Awaited<ReturnType<typeof readHostedWorkspace>>;
-  try {
-    workspace = await readHostedWorkspace({ userId: auth.member.id });
-  } catch {
-    if (healthDataProcessingRevoked) {
-      throw browserVaultRetainedReplicaUnavailableError();
-    }
-    scheduleBrowserVaultRefreshAfterResponse({ userId: auth.member.id });
-    throw browserVaultSessionNotFreshError();
-  }
+  const workspace = await readHostedWorkspace({ userId: auth.member.id });
 
   let deviceSyncImportPending = true;
   try {
