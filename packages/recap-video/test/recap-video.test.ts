@@ -176,6 +176,14 @@ describe("what is on screen at a time", () => {
     expect(renderer.frameState(poster + 3000).pieces.every(piece => piece.opacity === 1)).toBe(true);
   });
 
+  it("fades the cover into the night with no light line at its foot", () => {
+    // 874 x 0.555 is 485.07 points: drawn at that height, the partly covered pixel row under the fade let the picture through.
+    for (const [ms, foot] of [[2500, Math.floor(874 * 0.69) * 2], [1363 * 1000 / 30 + 3000, Math.floor(874 * 0.555) * 2]] as const) {
+      const pixels = frame(ms);
+      for (let y = foot - 3; y <= foot + 3; y++) expect(count(pixels, { x: 8, y, width: 40, height: 1 }, NIGHT, 3), `row ${y} at ${ms} ms`).toBe(40);
+    }
+  });
+
   it("fills one story bar per page as the page plays", () => {
     expect(renderer.frameState(12500).bars).toEqual([1, 1, 0.5, 0, 0, 0, 0, 0]);
     // The third bar is half cream, half the dim track.
@@ -452,8 +460,9 @@ describe.skipIf(!hasFfmpeg)("the encoded file", () => {
 
   it("turns its pages on the timeline's frames and shows what the renderer drew", async () => {
     // The frames either side of two page turns, and one mid-page frame to compare with the renderer's own.
+    // `-fps_mode passthrough` (ffmpeg 5.1 and later) keeps only the selected frames; `-vsync` is gone from ffmpeg 7.
     const wanted = [299, 300, 749, 750, 400];
-    const { stdout } = await run("ffmpeg", ["-v", "error", "-i", file, "-vf", `select='${wanted.map(index => `eq(n\\,${index})`).join("+")}'`, "-vsync", "0", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"],
+    const { stdout } = await run("ffmpeg", ["-v", "error", "-i", file, "-vf", `select='${wanted.map(index => `eq(n\\,${index})`).join("+")}'`, "-fps_mode", "passthrough", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"],
       { encoding: "buffer", maxBuffer: 64 * 1024 * 1024 });
     const size = 804 * 1748 * 3;
     expect(stdout.length).toBe(size * wanted.length);

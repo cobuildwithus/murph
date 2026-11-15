@@ -231,7 +231,9 @@ function scenePiece(image: Image, box: Rect): Piece {
 
 /** The cover's scene across the top of the screen, fading into the night where the words sit. */
 function artPiece(image: Image, share: number, fade: number, anchor: "middle" | "top"): Piece {
-  const box: Rect = { x: 0, y: 0, width: BOARD.width, height: BOARD.height * share };
+  // Whole points, so its foot is a whole pixel: a fractional foot is a partly covered row where the
+  // clip blends both the picture and its fade, which leaves a faint light line above the words.
+  const box: Rect = { x: 0, y: 0, width: BOARD.width, height: Math.floor(BOARD.height * share) };
   return {
     name: "art", arriveAt: null, direct: true, bounds: box,
     paint: (ctx, time) => {
