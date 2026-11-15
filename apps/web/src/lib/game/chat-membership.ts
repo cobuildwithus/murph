@@ -4,6 +4,7 @@ import { reconcileHostedThreadContainerParticipants } from "../hosted-groups/thr
 import type { Prisma } from "@prisma/client";
 import { lockHostedThreadRouteByThreadIdentityTx, assertHostedThreadRouteEgressAuthority, readHostedThreadRouteByThreadIdentity } from "../hosted-routing/thread-route-store";
 import { readHostedPublicOrigin } from "../hosted-web/public-url";
+import { isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { logHostedOnboardingWarning } from "../hosted-onboarding/logging";
 import { sha256Hex } from "../primitives";
 import { getPrisma } from "../prisma";
@@ -232,6 +233,14 @@ function normalizeChatHandle(value: string): string | null {
 /** This room is proven unsendable, so nothing may be sent. The fixed reason is safe to log. */
 export class GameChatAudienceError extends Error {
   constructor(readonly reason: "blocked" | "route_removed" | "route_unavailable" | "participants_changed" | "line_unavailable" | "identity_ambiguous", message: string) { super(message); }
+}
+
+const AMBIGUOUS_IDENTITY_CODES = ["HOSTED_MEMBER_IDENTITY_LOOKUP_AMBIGUOUS", "HOSTED_MEMBER_VERIFIED_EMAIL_LOOKUP_AMBIGUOUS"];
+
+/** Why reading a room's audience proved it unsendable, or null for a failure that proves nothing about it. */
+export function readGameChatAudienceRefusal(error: unknown): GameChatAudienceError["reason"] | null {
+  if (error instanceof GameChatAudienceError) return error.reason;
+  return isHostedOnboardingError(error) && AMBIGUOUS_IDENTITY_CODES.includes(error.code) ? "identity_ambiguous" : null;
 }
 
 /** Provider roster and rotating keyed handles are preparation, never transaction work. */

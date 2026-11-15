@@ -5,13 +5,12 @@ import { formatTimeZoneDateTimeParts, normalizeIanaTimeZone, resolveFloatingIsoT
 import { GAME_MISSED_ROOM_MAX_GAMES, GAME_ROOM_FAR_APART_HOURS, gameEveningCheckInPolicySchema, gameZoneSpreadHours, type HostedGameEveningCheckInPolicy } from "@murphai/hosted-execution/runtime-control";
 import { buildHostedLinqDeliveryId } from "../hosted-onboarding/linq-delivery-store";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboarding/linq-observability-identifiers";
-import { isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { logHostedOnboardingWarning } from "../hosted-onboarding/logging";
 import { readHostedMailboxWakeByDedupeKey } from "../hosted-mailbox/store";
 import { getPrisma } from "../prisma";
 import { isGameEnabled } from "./access";
 import { lockGamePair } from "./blocks";
-import { GameChatAudienceError, readGameChatAuthority, readGameChatAudience, type GameChatAudience } from "./chat-membership";
+import { readGameChatAudienceRefusal, readGameChatAuthority, readGameChatAudience, type GameChatAudience } from "./chat-membership";
 import { visitGameMissedCheckInPages } from "./missed-check-in";
 import { reminderOpenDay } from "./reminders";
 import { currentTerms, eligibleFromDay, isScheduledDay, remainingPlayers, type RuleState } from "./rules";
@@ -113,8 +112,7 @@ function hasDueCandidate(games: Games, now: Date): boolean {
 }
 
 function skipUnprovableRoom(error: unknown): null {
-  const reason = error instanceof GameChatAudienceError ? error.reason
-    : isHostedOnboardingError(error) && ["HOSTED_MEMBER_IDENTITY_LOOKUP_AMBIGUOUS", "HOSTED_MEMBER_VERIFIED_EMAIL_LOOKUP_AMBIGUOUS"].includes(error.code) ? "identity_ambiguous" : null;
+  const reason = readGameChatAudienceRefusal(error);
   // A live bound room cannot lose its route through normal group-leave cleanup.
   if (reason === "route_removed") throw new Error("Game chat route is unavailable.", { cause: error });
   if (!reason) throw error;

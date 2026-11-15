@@ -30,6 +30,10 @@ describe("first board enrollment audience errors", () => {
   it.each([
     { label: "removed route", error: new GameChatAudienceError("route_removed", "Game chat route is unavailable."), status: 404, code: "GAME_NOT_FOUND" },
     { label: "changed audience", error: new GameChatAudienceError("participants_changed", "The game's chat participants have changed."), status: 404, code: "GAME_NOT_FOUND" },
+    ...["HOSTED_MEMBER_IDENTITY_LOOKUP_AMBIGUOUS", "HOSTED_MEMBER_VERIFIED_EMAIL_LOOKUP_AMBIGUOUS"].map(code => ({
+      label: `ambiguous identity (${code})`, error: hostedOnboardingError({ code, httpStatus: 500, message: "Synthetic ambiguous identity." }),
+      status: 404, code: "GAME_NOT_FOUND",
+    })),
     { label: "failed audience read", error: new Error("Synthetic audience read failed."), status: 500, code: "INTERNAL_ERROR" },
     { label: "unusable sending line", error: new GameChatAudienceError("line_unavailable", "Game chat sending line is unavailable."), status: 500, code: "INTERNAL_ERROR" },
     { label: "provider failure", error: hostedOnboardingError({ code: "LINQ_SEND_FAILED", httpStatus: 502, message: "Synthetic provider failure.", retryable: true }), status: 502, code: "LINQ_SEND_FAILED" },
