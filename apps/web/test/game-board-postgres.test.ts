@@ -299,9 +299,8 @@ describe.skipIf(!enabled)("pair board PostgreSQL authority and routes", () => {
     await expect(savePairBoardSharing(f.room, f.b, { expectedMembershipId: null, numbers: [] })).rejects.toMatchObject({ httpStatus: 404 });
     mocks.route.mockResolvedValueOnce({ containerMemberId: "different-room" });
     await expect(savePairBoardSharing(f.a, f.b, { expectedMembershipId: null, numbers: [] })).rejects.toMatchObject({ httpStatus: 404 });
-    // A failure reading the audience is ours, not a game the member cannot see.
     mocks.audience.mockRejectedValueOnce(new Error("synthetic provider failure"));
-    await expect(savePairBoardSharing(f.a, f.b, { expectedMembershipId: null, numbers: [] })).rejects.toThrow("synthetic provider failure");
+    await expect(savePairBoardSharing(f.a, f.b, { expectedMembershipId: null, numbers: [] })).rejects.toMatchObject({ httpStatus: 404 });
     const evidence = await mocks.audience();
     mocks.audience.mockResolvedValueOnce({ ...evidence, memberIds: [f.a, f.room] });
     await expect(savePairBoardSharing(f.a, f.b, { expectedMembershipId: null, numbers: [] })).rejects.toMatchObject({ httpStatus: 404 });

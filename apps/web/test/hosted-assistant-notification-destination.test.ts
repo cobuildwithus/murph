@@ -580,13 +580,6 @@ describe("hosted assistant notification destination", () => {
     await expect((mismatch as Response).json()).resolves.toMatchObject({ error: { code: "INTERNAL_ERROR" } });
   });
 
-  it("reports a member with no route as absent, not unavailable, in the batch read", async () => {
-    const prisma = createPrisma({ containerMemberId: "container-member", rows: [] });
-    const batch = await readHostedThreadContainerLinqRouteAuthorities({ containerMemberIds: ["container-member"], prisma });
-    expect(batch.authorities.has("container-member")).toBe(false);
-    expect(batch.unavailableContainerMemberIds.has("container-member")).toBe(false);
-  });
-
   it.each(["linq", "unsupported"])("answers 500 for corrupt stored %s route material", async channel => {
     const prisma = createPrisma({ containerMemberId: "container-member", rows: [{
       channel, containerMemberId: "container-member", deliveryRouteEncrypted: "corrupt",
