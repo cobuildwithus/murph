@@ -330,9 +330,9 @@ describe.skipIf(!runPostgresConcurrencyProof)(
 
         const firstResult = await firstTransaction;
         expect(firstResult.result).toEqual({ recordedIds: [usageId] });
-        await expect(replayTransaction).rejects.toThrow(
-          "Hosted AI usage already exists with different immutable fields: occurredAt.",
-        );
+        await expect(replayTransaction).rejects.toMatchObject({
+          code: "INVALID_REQUEST", httpStatus: 400, message: "Invalid request.",
+        });
         await expect(observer.hostedAiUsage.findMany({
           select: {
             occurredAt: true,

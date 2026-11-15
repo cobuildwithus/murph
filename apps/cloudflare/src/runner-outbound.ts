@@ -1,5 +1,4 @@
-import { RequestInputError, RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
-import { ContractValidationError } from "@murphai/contracts/validation-error";
+import { parseInput, RequestInputError, RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import type { RuntimeProviderCaller } from "./runtime-provider-authorization.ts";
 import { createRuntimeReplicaWriteBucket } from "./runtime-replica-upload.ts";
 import { presignManagedSnapshot, completeManagedSnapshotForSession, ManagedSnapshotCompletionRejectedError } from "./managed-snapshot-control.ts";
@@ -48,6 +47,7 @@ import {
   parseHostedWorkspaceCheckpointRequest,
   parseHostedWorkspaceCheckpointResponse,
   parseHostedWorkspaceReadResponse,
+  parseHostedWorkspaceSnapshotV2Archive,
   parseHostedWorkspaceSnapshotV2Ref,
   readHostedExecutionSnapshotBaseRef,
   readHostedExecutionSnapshotDeltaRef,
@@ -1263,7 +1263,7 @@ async function handleRunnerWorkspaceSnapshotStartRequest(input: {
           ? undefined
           : body.replacedSnapshotRef === null
             ? null
-            : parseHostedWorkspaceSnapshotV2Ref(body.replacedSnapshotRef);
+            : parseInput(body.replacedSnapshotRef, parseHostedWorkspaceSnapshotV2Ref);
         if (replacedSnapshotRef && !await isHostedWorkspaceSnapshotV2RefOwnedByUser({
           snapshotRef: replacedSnapshotRef,
           userId: input.userId,
@@ -2288,10 +2288,10 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
   ) {
     return jsonError("Hosted workspace snapshot upload session is stale.", 409);
   }
-  const checkpointRequestWithoutSnapshotRef = parseHostedWorkspaceCheckpointRequest({
+  const checkpointRequestWithoutSnapshotRef = parseInput({
     ...readWorkspaceSnapshotCompleteCheckpointRequest(body.checkpointRequest),
     snapshotRef: null,
-  });
+  }, parseHostedWorkspaceCheckpointRequest);
 
   if (Date.parse(session.expiresAt) <= Date.now()) {
     const alreadyCurrentResponse = await completeExpiredCurrentWorkspaceSnapshotUploadSession({
@@ -2329,7 +2329,7 @@ async function handleRunnerWorkspaceSnapshotCompleteRequest(input: {
 
   const snapshotRef = parseHostedWorkspaceSnapshotV2Ref(
     buildHostedWorkspaceSnapshotRefFromUploadSession({
-      archive: body.archive,
+      archive: parseInput(body.archive, parseHostedWorkspaceSnapshotV2Archive),
       createdAt: session.createdAt,
       session,
     }),
@@ -3156,7 +3156,7 @@ function readWorkspaceSnapshotCompleteCheckpointRequest(
   value: unknown,
 ): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new ContractValidationError("Hosted workspace snapshot complete checkpointRequest must be an object.");
+    throw new RequestInputError("Hosted workspace snapshot complete checkpointRequest must be an object.");
   }
   return value as Record<string, unknown>;
 }
@@ -3235,16 +3235,16 @@ async function readCurrentHostedWorkspace(input: {
 
 function readWorkspaceSnapshotAad(value: unknown, label: string): HostedWorkspaceSnapshotV2Aad {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new ContractValidationError(`${label} must be an object.`);
+    throw new RequestInputError(`${label} must be an object.`);
   }
   const record = value as Record<string, unknown>;
   const purpose = requireSnapshotDataKeyString(record.purpose, `${label}.purpose`);
   const schema = requireSnapshotDataKeyString(record.schema, `${label}.schema`);
   if (purpose !== HOSTED_WORKSPACE_SNAPSHOT_V2_AAD_PURPOSE) {
-    throw new ContractValidationError(`${label}.purpose must be ${HOSTED_WORKSPACE_SNAPSHOT_V2_AAD_PURPOSE}.`);
+    throw new RequestInputError(`${label}.purpose must be ${HOSTED_WORKSPACE_SNAPSHOT_V2_AAD_PURPOSE}.`);
   }
   if (schema !== HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA) {
-    throw new ContractValidationError(`${label}.schema must be ${HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA}.`);
+    throw new RequestInputError(`${label}.schema must be ${HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA}.`);
   }
 
   return {
@@ -3258,14 +3258,14 @@ function readWorkspaceSnapshotAad(value: unknown, label: string): HostedWorkspac
 
 function requireSnapshotDataKeyString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.trim().length === 0) {
-    throw new ContractValidationError(`Hosted workspace snapshot ${label} must be a non-empty string.`);
+    throw new RequestInputError(`Hosted workspace snapshot ${label} must be a non-empty string.`);
   }
   return value.trim();
 }
 
 function requireSnapshotPositiveSafeInteger(value: unknown, label: string): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
-    throw new ContractValidationError(`Hosted workspace snapshot ${label} must be a positive safe integer.`);
+    throw new RequestInputError(`Hosted workspace snapshot ${label} must be a positive safe integer.`);
   }
   return value;
 }
@@ -3273,14 +3273,14 @@ function requireSnapshotPositiveSafeInteger(value: unknown, label: string): numb
 function requireSnapshotMd5Hex(value: unknown, label: string): string {
   const text = requireSnapshotDataKeyString(value, label).toLowerCase();
   if (!/^[0-9a-f]{32}$/u.test(text)) {
-    throw new ContractValidationError(`Hosted workspace snapshot ${label} must be a lowercase md5 hex digest.`);
+    throw new RequestInputError(`Hosted workspace snapshot ${label} must be a lowercase md5 hex digest.`);
   }
   return text;
 }
 function requireSnapshotSha256Hex(value: unknown, label: string): string {
   const text = requireSnapshotDataKeyString(value, label).toLowerCase();
   if (!/^[0-9a-f]{64}$/u.test(text)) {
-    throw new ContractValidationError(`Hosted workspace snapshot ${label} must be a lowercase sha256 hex digest.`);
+    throw new RequestInputError(`Hosted workspace snapshot ${label} must be a lowercase sha256 hex digest.`);
   }
   return text;
 }
@@ -3300,12 +3300,12 @@ async function handleRunnerBrowserVaultReplicaWriteRequest(input: {
     limitBytes: HOSTED_BROWSER_VAULT_REPLICA_MAX_BYTES + 1024 * 1024,
   });
   if (!Object.hasOwn(body, "replica")) {
-    throw new ContractValidationError("Hosted browser-vault replica write request.replica is required.");
+    throw new RequestInputError("Hosted browser-vault replica write request.replica is required.");
   }
-  const replacedReplicaRef = parseHostedBrowserVaultReplicaRef(
-    body.replacedReplicaRef,
+  const replacedReplicaRef = parseInput(body.replacedReplicaRef, value => parseHostedBrowserVaultReplicaRef(
+    value,
     "Hosted browser-vault replica write request.replacedReplicaRef",
-  );
+  ));
 
   const crypto = await resolveRunnerOutboundUserCryptoContext({
     bucket: input.bucket,

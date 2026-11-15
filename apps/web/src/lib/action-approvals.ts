@@ -1,4 +1,5 @@
 import "server-only";
+import { parseInput } from "@murphai/hosted-execution/request-input";
 
 import { createHash } from "node:crypto";
 
@@ -175,7 +176,7 @@ export async function consumeHostedActionApproval(input: {
   prisma: HostedActionApprovalWriteStore;
   request: HostedActionApprovalConsumeRequest | unknown;
 }): Promise<HostedActionApprovalResult> {
-  const consumeRequest = parseHostedActionApprovalConsumeRequest(input.request);
+  const consumeRequest = parseInput(input.request, parseHostedActionApprovalConsumeRequest);
   const prepared = prepareHostedActionApprovalRequest({
     memberId: input.memberId,
     now: input.now,
@@ -537,7 +538,7 @@ function prepareHostedActionApprovalRequest(input: {
   now?: Date;
   request: HostedActionApprovalRequest | unknown;
 }): PreparedHostedActionApprovalRequest {
-  const request = parseHostedActionApprovalRequest(input.request);
+  const request = parseInput(input.request, parseHostedActionApprovalRequest);
   const now = input.now ?? new Date();
   const approvalId = buildHostedActionApprovalId({
     actionId: request.actionId,

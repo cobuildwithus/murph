@@ -1,6 +1,8 @@
+import { hostedWorkspaceSnapshotObjectKey } from "@murphai/hosted-execution/storage-paths";
 import { HostedWorkspaceProgressError } from "@/src/lib/hosted-workspace/store";
 import { parseInput, RequestInputError } from "@murphai/hosted-execution/request-input";
 import {
+  isHostedWorkspaceSnapshotV2Ref,
   parseHostedWorkspaceCheckpointRequest,
   parseHostedWorkspaceCheckpointResponse,
 } from "@murphai/hosted-execution/parsers";
@@ -41,6 +43,10 @@ export const POST = withJsonError((request: Request) => runWithTiming(request, a
       leaseGeneration: body.leaseGeneration,
       workspaceVersion: body.expectedWorkspaceVersion,
     });
+    if (body.snapshotRef && isHostedWorkspaceSnapshotV2Ref(body.snapshotRef)
+      && body.snapshotRef.objectKey !== await hostedWorkspaceSnapshotObjectKey({ userId, snapshotId: body.snapshotRef.snapshotId })) {
+      throw new RequestInputError("Runtime snapshot namespace mismatch.");
+    }
     failureStage = "publication";
     const result = await checkpointHostedRuntimeWorkspace({
       runtimeAuthority,

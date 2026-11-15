@@ -172,6 +172,7 @@ export {
   readHostedExecutionSnapshotHotRef,
 } from "./parsers/cursor.ts";
 export {
+  parseHostedWorkspaceSnapshotV2Archive,
   parseHostedWorkspaceSnapshotV2Ref,
 } from "./parsers/workspace-snapshot-v2.ts";
 export {

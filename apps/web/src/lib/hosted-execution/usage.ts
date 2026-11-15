@@ -12,6 +12,7 @@ import type {
   HostedRuntimeUsageNoticeDeliveryTarget,
 } from "@murphai/hosted-execution/runtime-control";
 
+import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { getPrisma } from "../prisma";
 import { lockHostedMemberRow } from "../hosted-onboarding/shared";
 import {
@@ -658,9 +659,7 @@ function assertStoredHostedAiUsageMatchesRecord(input: {
   ].filter((field): field is string => field !== null);
 
   if (mismatchedFields.length > 0) {
-    throw new TypeError(
-      `Hosted AI usage already exists with different immutable fields: ${mismatchedFields.join(", ")}.`,
-    );
+    throw hostedOnboardingError({ code: "INVALID_REQUEST", httpStatus: 400, message: "Invalid request." });
   }
 }
 

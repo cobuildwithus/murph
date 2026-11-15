@@ -1,3 +1,4 @@
+import { RequestInputError } from "@murphai/hosted-execution/request-input";
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { inspectRecapMedia } from "@/src/lib/game/recap-media";
@@ -55,8 +56,8 @@ describe("recap video measurement", () => {
   it("bounds a stored part by size alone and leaves the other kinds as they were", async () => {
     const part = `recap/${"a".repeat(32)}/${"b".repeat(64)}.mp4`;
     expect(await inspectRecapMedia(new Uint8Array(2_000_000), part)).toMatchObject({ bytes: 2_000_000, mediaType: "video/mp4" });
-    await expect(inspectRecapMedia(new Uint8Array(2_000_001), part)).rejects.toThrow(RangeError);
-    await expect(inspectRecapMedia(new Uint8Array(0), part)).rejects.toThrow(RangeError);
+    await expect(inspectRecapMedia(new Uint8Array(2_000_001), part)).rejects.toThrow(RequestInputError);
+    await expect(inspectRecapMedia(new Uint8Array(0), part)).rejects.toThrow(RequestInputError);
     await expect(inspectRecapMedia(new Uint8Array(8), `recap/${"a".repeat(32)}/video-0.mp4`)).rejects.toThrow();
     await expect(inspectRecapMedia(file, `recap/${"a".repeat(32)}/${"b".repeat(64)}.jpg`)).rejects.toThrow();
   });

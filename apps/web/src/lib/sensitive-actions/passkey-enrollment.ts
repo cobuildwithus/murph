@@ -22,6 +22,7 @@ import {
 import { prepareApprovalPasskeyWrite } from "./passkey-store";
 import { parseSensitiveActionAuthorization } from "./shared";
 import {
+  MAX_APPROVAL_PASSKEYS,
   approvalPasskeyRegistrationOptions,
   verifyApprovalPasskeyRegistration,
 } from "./webauthn";
@@ -95,6 +96,9 @@ export async function registerApprovalPasskey(input: EnrollmentInput & {
   });
   if (verified.state.credentials.some(({ id }) => id === credential.id)) {
     throw hostedOnboardingError({ code: "SENSITIVE_ACTION_REGISTRATION_DUPLICATE", httpStatus: 409, message: "This passkey is already registered." });
+  }
+  if (verified.state.credentials.length >= MAX_APPROVAL_PASSKEYS) {
+    throw hostedOnboardingError({ code: "SENSITIVE_ACTION_PASSKEY_LIMIT", httpStatus: 409, message: "This account already has eight approval passkeys." });
   }
   const prepared = await prepareApprovalPasskeyWrite({
     credentials: [...verified.state.credentials, credential],

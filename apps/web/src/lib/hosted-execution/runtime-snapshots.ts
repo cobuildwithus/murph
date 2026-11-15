@@ -1,7 +1,7 @@
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
-import { parseInput } from "@murphai/hosted-execution/request-input";
-import { hostedWorkspaceSnapshotObjectKey } from "@murphai/hosted-execution/storage-paths";
+import { parseInput, RequestInputError } from "@murphai/hosted-execution/request-input";
+import { hostedWorkspaceSnapshotObjectKey, requireHostedWorkspaceSnapshotId } from "@murphai/hosted-execution/storage-paths";
 import { Prisma, type PrismaClient, type HostedRuntimeSnapshotUpload } from "@prisma/client";
 import { HOSTED_RUNTIME_ORPHAN_GRACE_MS, type HostedRuntimeSnapshotCommand, type HostedRuntimeSnapshotResponse } from "@murphai/hosted-execution/runtime-resources";
 import { HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_SESSION_SCHEMA, parseHostedWorkspaceSnapshotUploadSession, type HostedWorkspaceSnapshotUploadSession } from "@murphai/hosted-execution/workspace-snapshot-store";
@@ -25,8 +25,14 @@ export async function executeHostedRuntimeSnapshotCommand(input: {
   if (supplied && (supplied.encryption.aad.userId !== supplied.userId
     || supplied.encryption.aad.snapshotId !== supplied.snapshotId
     || supplied.encryption.aad.objectKey !== supplied.objectKey)) throw hostedOnboardingError({ code: "INVALID_REQUEST", httpStatus: 400, message: "Runtime snapshot encryption identity mismatch." });
-  if (supplied && supplied.objectKey !== await hostedWorkspaceSnapshotObjectKey({ userId: input.userId, snapshotId: supplied.snapshotId })) {
+  if (supplied && supplied.objectKey !== await hostedWorkspaceSnapshotObjectKey({ userId: input.userId, snapshotId: parseInput(supplied.snapshotId, () => requireHostedWorkspaceSnapshotId(supplied.snapshotId)) })) {
     throw hostedOnboardingError({ code: "INVALID_REQUEST", httpStatus: 400, message: "Runtime snapshot namespace mismatch." });
+  }
+  const replacedSnapshotRef = command.operation === "snapshot_record_replaced"
+    ? command.replacedSnapshotRef : supplied?.replacedSnapshotRef;
+  if (replacedSnapshotRef && isHostedWorkspaceSnapshotV2Ref(replacedSnapshotRef)
+    && replacedSnapshotRef.objectKey !== await hostedWorkspaceSnapshotObjectKey({ userId: input.userId, snapshotId: replacedSnapshotRef.snapshotId })) {
+    throw new RequestInputError("Runtime snapshot namespace mismatch.");
   }
   const identity = supplied
     ? { attemptId: supplied.attemptId, generation: supplied.leaseGeneration, userId: input.userId }

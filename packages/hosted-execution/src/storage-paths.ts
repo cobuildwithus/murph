@@ -324,7 +324,7 @@ function requireStoragePathString(value: string, label: string): string {
   return normalized;
 }
 
-function requireHostedWorkspaceSnapshotId(value: string): string {
+export function requireHostedWorkspaceSnapshotId(value: string): string {
   const normalized = requireStoragePathString(value, "Hosted workspace snapshot id");
   if (!HOSTED_WORKSPACE_SNAPSHOT_ID_PATTERN.test(normalized)) {
     throw new ContractValidationError("Hosted workspace snapshot id is invalid.");

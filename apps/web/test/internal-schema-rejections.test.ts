@@ -95,12 +95,12 @@ describe("internal schema rejection boundaries", () => {
       originAssistantInputId: `ain_${"a".repeat(32)}`, requestKey: "request_test",
       recipient: { addressLine1: "address_test", city: "city_test", name: "recipient_test", postalCode: "00000", state: "CA" },
     }],
-  ] as const)("preserves the generic %s envelope only for explicit request domain refusals", async (_label, post, payload) => {
+  ] as const)("preserves the %s domain refusal status, code and message", async (_label, post, payload) => {
     mocks.effect.mockRejectedValueOnce(hostedOnboardingError({ code: "INVALID_REQUEST", httpStatus: 400, message: "Synthetic state refusal." }));
     const rejected = await post(request(payload));
     expect(mocks.effect).toHaveBeenCalledOnce();
     expect(rejected.status).toBe(400);
-    expect(await rejected.json()).toEqual({ error: { code: "INVALID_REQUEST", message: "Invalid request." } });
+    expect(await rejected.json()).toEqual({ error: { code: "INVALID_REQUEST", message: "Synthetic state refusal.", retryable: false } });
 
     mocks.effect.mockRejectedValueOnce(hostedOnboardingError({ code: "INVALID_REQUEST", httpStatus: 503, message: "Synthetic upstream refusal." }));
     expect((await post(request(payload))).status).toBe(503);
@@ -114,12 +114,12 @@ describe("internal schema rejection boundaries", () => {
   it.each([
     [applyDeviceResult, {}, deviceSyncError],
     [configureOutreach, { assistantInputId: `ain_${"a".repeat(32)}`, mode: "default", sourceProviderSlug: "garmin" }, hostedOnboardingError],
-  ] as const)("preserves the generic device state-refusal envelope %#", async (post, payload, domainError) => {
+  ] as const)("preserves the device domain refusal status, code and message %#", async (post, payload, domainError) => {
     mocks.effect.mockRejectedValueOnce(domainError({ code: "INVALID_REQUEST", httpStatus: 400, message: "Synthetic policy refusal." }));
     const response = await post(request(payload));
     expect(mocks.effect).toHaveBeenCalledOnce();
     expect(response.status).toBe(400);
-    expect(await response.json()).toEqual({ error: { code: "INVALID_REQUEST", message: "Invalid request." } });
+    expect(await response.json()).toEqual({ error: { code: "INVALID_REQUEST", message: "Synthetic policy refusal.", retryable: false } });
     mocks.effect.mockRejectedValueOnce(domainError({ code: "INVALID_REQUEST", httpStatus: 503, message: "Synthetic unavailable authority." }));
     expect((await post(request(payload))).status).toBe(503);
   });

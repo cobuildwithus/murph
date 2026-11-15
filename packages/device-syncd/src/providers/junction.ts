@@ -1,3 +1,4 @@
+import { parseJunctionDiagnosticRequestedTimestamp } from "./junction-config.ts";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createHmac, createHash, timingSafeEqual } from "node:crypto";
 import { performance } from "node:perf_hooks";
@@ -8908,28 +8909,6 @@ function resolveDiagnosticBackfillWindow(
     windowStart: Date.parse(boundedWindowStart) > Date.parse(windowEnd) ? windowEnd : boundedWindowStart,
     windowEnd,
   };
-}
-
-function parseJunctionDiagnosticRequestedTimestamp(
-  value: string | null | undefined,
-  field: "windowEnd" | "windowStart",
-): string | null {
-  const normalized = normalizeString(value);
-  if (!normalized) {
-    return null;
-  }
-
-  const timestamp = parseJunctionDiagnosticTimestamp(normalized);
-  if (timestamp) {
-    return timestamp;
-  }
-
-  throw deviceSyncError({
-    code: "JUNCTION_DIAGNOSTIC_WINDOW_INVALID",
-    message: `Junction diagnostic ${field} must be a valid ISO timestamp.`,
-    httpStatus: 400,
-    retryable: false,
-  });
 }
 
 function parseJunctionDiagnosticStoredTimestamp(value: string | null | undefined): string | null {

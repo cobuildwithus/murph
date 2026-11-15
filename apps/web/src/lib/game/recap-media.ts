@@ -171,7 +171,7 @@ type RecapUploadInput<MediaType extends RecapMediaType> = {
 async function stageRecapUpload(input: RecapUploadInput<RecapMediaType>) {
   const part = input.file.mediaType === 'video/mp4';
   const bytes = Buffer.from(input.file.bytes, 'base64');
-  if (part && (!bytes.length || bytes.length > RECAP_VIDEO_PART_MAX_BYTES)) throw new RangeError('Recap asset size is invalid.');
+  if (part && (!bytes.length || bytes.length > RECAP_VIDEO_PART_MAX_BYTES)) throw new RequestInputError('Recap asset size is invalid.');
   const generationId = recapGenerationId(input.eventId);
   const hash = createHash('sha256').update(bytes).digest('hex');
   const storageKey = recapMediaStorageKey(generationId, hash, input.file.mediaType);

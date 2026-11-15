@@ -1219,11 +1219,11 @@ function normalizeOptionalRawUsageJsonRecord(
   value: unknown,
   label: string,
 ): Record<string, unknown> | null {
-  const record = normalizeOptionalJsonRecord(value, label);
-
-  if (record === null) {
-    return null;
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new ContractValidationError(`${label} must be a JSON object when provided.`);
   }
+  const record = value;
 
   const normalized: Record<string, unknown> = {};
 

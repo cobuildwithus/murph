@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import * as observability from "@murphai/hosted-execution";
+import { describe, expect, it, vi } from "vitest";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { RequestInputError, RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import { parseJsonInput, readJsonObject, readOptionalJsonObject } from "../src/json.ts";
-import { classifyPublicRouteError } from "../src/worker/errors.ts";
+import { classifyPublicRouteError, mapWorkerRouteError } from "../src/worker/errors.ts";
 
 describe("public route errors", () => {
   it("preserves explicit input rejections", () => {
@@ -34,4 +35,13 @@ describe("public route errors", () => {
       expect(classifyPublicRouteError(error)).toEqual({ error: message, status: 400 });
     }
   });
+});
+
+it.each([new ContractValidationError("Synthetic validation failure."), new TypeError("Synthetic bug.")])("logs unmarked validation distinctly: %s", error => {
+  const log = vi.spyOn(observability, "emitHostedExecutionStructuredLog");
+  try {
+    expect(mapWorkerRouteError(new Request("https://example.test/input"), error).status).toBe(500);
+    const serialized = JSON.stringify(log.mock.calls);
+    expect(serialized.includes('"unmarkedContractValidationError":true')).toBe(error instanceof ContractValidationError);
+  } finally { log.mockRestore(); }
 });

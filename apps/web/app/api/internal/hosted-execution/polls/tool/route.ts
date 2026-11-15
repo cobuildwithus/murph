@@ -1,4 +1,3 @@
-import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { RequestInputError } from "@murphai/hosted-execution/request-input";
 import { readHostedExecutionRuntimeAuthority } from "@murphai/hosted-execution/auth";
 import { conversationPollRequestSchema } from "@murphai/hosted-execution/conversation-polls";
@@ -15,11 +14,5 @@ export const POST = withJsonError(async (request: Request) => {
     memberId: userId,
     runtimeIdentity: authority ? { ...authority, userId } : null,
     request: parsed.data,
-  }).catch((error: unknown) => {
-    // Preserve the callback's generic envelope for these explicit domain refusals.
-    if (isHostedOnboardingError(error) && error.httpStatus === 400 && error.code === "INVALID_REQUEST") {
-      throw new RequestInputError(error.message, { cause: error });
-    }
-    throw error;
   }));
 });

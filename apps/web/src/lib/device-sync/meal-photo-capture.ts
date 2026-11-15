@@ -1,4 +1,4 @@
-import { RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
+import { RequestInputError, RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import { assertHostedNativeMemberAuthCurrentTx, type HostedNativeMemberAuth } from "../better-auth/native-auth";
 import "server-only";
 
@@ -1209,7 +1209,11 @@ function parseCapturedAt(value: string | null): string {
   ) {
     throw mealPhotoCaptureUploadInvalid("Meal photo capture time is invalid.");
   }
-  return new Date(capturedAt).toISOString();
+  const normalized = new Date(capturedAt).toISOString();
+  if (!/^\d{4}-/u.test(normalized)) {
+    throw new RequestInputError("Meal photo capture time is out of range.");
+  }
+  return normalized;
 }
 
 function validateJpegStructure(bytes: Buffer): { height: number; width: number } {

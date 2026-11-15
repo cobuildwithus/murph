@@ -1,4 +1,4 @@
-import { parseInput } from "@murphai/hosted-execution/request-input";
+import { parseInput, RequestInputError } from "@murphai/hosted-execution/request-input";
 import {
   parseHostedRuntimeLogRequest,
   parseHostedRuntimeLogResponse,
@@ -33,6 +33,7 @@ export const POST = withJsonError(async (request: Request) => {
     return jsonOk(parseHostedRuntimeLogResponse({ loggedCount: 0 }));
   }
   const body = parseInput(await readOptionalJsonObject(request), parseHostedRuntimeLogRequest);
+  if (body.entries.length > 0 && userId.trim().length > 1024) throw new RequestInputError("Runtime log member id is too long.");
 
   const loggedCount = await writeHostedRuntimeLogs({
     entries: body.entries,

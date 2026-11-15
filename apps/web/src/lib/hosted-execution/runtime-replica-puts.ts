@@ -1,4 +1,4 @@
-import { RequestInputError } from "@murphai/hosted-execution/request-input";
+import { parseInput, RequestInputError } from "@murphai/hosted-execution/request-input";
 import { HOSTED_RUNTIME_ORPHAN_GRACE_MS } from "@murphai/hosted-execution/runtime-resources";
 import type { PrismaClient } from "@prisma/client";
 import { Prisma } from "@prisma/client";
@@ -10,14 +10,14 @@ import { recordRuntimeOrphansTx, requireRuntimeResourcesPublishableTx } from "./
 export async function executeHostedRuntimeReplicaPutCommand(input: {
   prisma: PrismaClient; userId: string; command: HostedRuntimeReplicaPutCommand; now?: Date;
 }): Promise<{ applied: boolean }> {
-  const command = parseHostedRuntimeReplicaPutCommand(input.command);
+  const command = parseInput(input.command, parseHostedRuntimeReplicaPutCommand);
   const now = input.now ?? new Date();
   if (command.operation === "admit" || command.operation === "admit_batch") {
     const prefix = await hostedBrowserVaultReplicaUserPrefix({ userId: input.userId });
     if (!command.objectKey.startsWith(prefix) || command.objectKey.slice(prefix.length).includes("/")) throw new RequestInputError("Replica PUT namespace mismatch.");
     const uploads = command.operation === "admit_batch" ? command.uploads : command.multipart ? [command.multipart] : [];
     const allowedKeys = uploads.length === 0 ? new Set<string>()
-      : new Set([command.objectKey, ...listHostedBrowserVaultReplicaSiblingObjectKeys(command.objectKey)]);
+      : new Set([command.objectKey, ...parseInput(command.objectKey, () => listHostedBrowserVaultReplicaSiblingObjectKeys(command.objectKey))]);
     if (uploads.some(upload => !allowedKeys.has(upload.objectKey))) throw new RequestInputError("Replica upload is outside its root resource.");
   }
   return input.prisma.$transaction(async tx => {

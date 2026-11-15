@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { isRequestInputError, RequestBodyTooLargeError, RequestInputError } from "@murphai/hosted-execution/request-input";
 import { Buffer } from "node:buffer";
 
@@ -135,7 +136,7 @@ export function parseRequestJson(text: string): unknown {
     return JSON.parse(text);
   } catch (error) {
     if (error instanceof SyntaxError) {
-      throw new InvalidJsonBodyError(error.message, { cause: error });
+      throw new InvalidJsonBodyError("Request body is not valid JSON.", { cause: error });
     }
     throw error;
   }
@@ -322,6 +323,7 @@ export function createJsonErrorResponse(
 
   logJsonError("error", error, options, {
     errorResponseCode: "INTERNAL_ERROR",
+    ...(error instanceof ContractValidationError ? { unmarkedContractValidationError: true } : {}),
   });
   return NextResponse.json(
     {
@@ -345,7 +347,7 @@ export function withLegacyWebhookErrorInference<TArgs extends unknown[]>(
     } catch (error) {
       if (error instanceof RequestBodyTooLargeError) throw error;
       if (error instanceof SyntaxError) {
-        throw new InvalidJsonBodyError(error.message, { cause: error });
+        throw new InvalidJsonBodyError("Request body is not valid JSON.", { cause: error });
       }
       if (error instanceof TypeError && error.message === "fetch failed") {
         return createJsonErrorResponse(error, {

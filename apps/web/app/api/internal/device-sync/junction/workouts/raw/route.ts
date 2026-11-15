@@ -1,3 +1,4 @@
+import { parseInput, RequestInputError } from "@murphai/hosted-execution/request-input";
 import { deviceSyncError, isDeviceSyncError } from "@murphai/device-syncd/errors";
 import type { PublicDeviceSyncAccount } from "@murphai/device-syncd/types";
 
@@ -44,7 +45,8 @@ export const GET = withJsonError(async (request: Request): Promise<Response> => 
     });
   }
 
-  const { JunctionClient } = await import("@murphai/device-syncd/providers/junction-client");
+  const { JunctionClient, optionalJunctionSdkProviderTransport } = await import("@murphai/device-syncd/providers/junction-client");
+  parseInput(sourceProviderSlug, optionalJunctionSdkProviderTransport);
   const records = await new JunctionClient(config).listSummary({
     resource: "workouts",
     sourceProviderSlug,
@@ -176,6 +178,7 @@ function resolveDiagnosticWindow(searchParams: URLSearchParams): { start: string
   const days = clampLookbackDays(searchParams.get("days"));
   const start = explicitStart ?? new Date(end.getTime() - days * 24 * 60 * 60 * 1000);
 
+  if (!Number.isFinite(start.getTime())) throw new RequestInputError("Diagnostic window start is out of range.");
   if (start.getTime() > end.getTime()) {
     throw deviceSyncError({
       code: "JUNCTION_DIAGNOSTIC_INVALID_WINDOW",

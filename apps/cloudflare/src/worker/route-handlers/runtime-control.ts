@@ -1,3 +1,4 @@
+import { requireRunnerSlotUserId } from "../../runner-slot-binding.ts";
 import { parseJsonInput } from "../route-utils/json-body.ts";
 import { parseInput, RequestInputError } from "@murphai/hosted-execution/request-input";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
@@ -173,6 +174,7 @@ export async function handleRuntimeEnsureProcessingRoute(
     cloudflareRouteReceivedAtEpochMs,
   };
   try {
+    parseInput(userId, requireRunnerSlotUserId);
     const payload = await readCachedRequestText(context, {
       limitBytes: INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
     });

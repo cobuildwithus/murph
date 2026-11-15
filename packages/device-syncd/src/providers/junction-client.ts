@@ -1627,7 +1627,7 @@ function normalizeRequiredProviderSlug(value: unknown): string {
   return provider;
 }
 
-function optionalJunctionSdkProviderTransport(
+export function optionalJunctionSdkProviderTransport(
   value: unknown,
 ): JunctionSdkProviderTransport | undefined {
   const normalized = normalizeJunctionProviderSlug(value);

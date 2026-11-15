@@ -1,3 +1,4 @@
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 const m = vi.hoisted(() => ({ bearer: vi.fn(), callback: vi.fn(), record: vi.fn(), read: vi.fn() }));
 vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({}) }));
@@ -30,6 +31,17 @@ describe("companion presence route authority", () => {
     m.bearer.mockRejectedValue(new Error("synthetic auth failure"));
     expect((await heartbeat(request({ state: "foreground" }))).status).toBeGreaterThanOrEqual(400);
     expect(m.record).not.toHaveBeenCalled();
+  });
+  it("returns the domain reason when companion access requires a private conversation", async () => {
+    m.read.mockRejectedValueOnce(hostedOnboardingError({
+      code: "INVALID_REQUEST", httpStatus: 400,
+      message: "Companion access requires a private member conversation.",
+    }));
+    const response = await presence(request({}));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: {
+      code: "INVALID_REQUEST", message: "Companion access requires a private member conversation.", retryable: false,
+    } });
   });
   it("rejects malformed heartbeat JSON after authentication", async () => {
     const response = await heartbeat(new Request("https://example.test/heartbeat", { method: "POST", body: "{" }));

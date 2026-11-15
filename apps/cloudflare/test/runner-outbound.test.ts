@@ -4888,7 +4888,7 @@ describe("handleRunnerOutboundRequest", () => {
         "member_123",
       );
       if (kind === "malformed") {
-        expect((await response).status).toBe(500);
+        expect((await response).status).toBe(400);
       } else {
         expect((await response).status).toBe(kind === "stale_version" ? 409 : 403);
       }

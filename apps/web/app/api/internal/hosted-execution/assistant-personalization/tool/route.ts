@@ -1,4 +1,3 @@
-import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { assertContract } from "@murphai/contracts";
 import { parseInput, RequestInputError } from "@murphai/hosted-execution/request-input";
 import {
@@ -49,12 +48,6 @@ export const POST = withJsonError(async (request: Request) => {
     ...(authority ?? {}),
     request: body,
     scheduleMailboxWake: scheduleMailboxWakeAfterResponse,
-  }).catch((error: unknown) => {
-    // Preserve the callback's generic envelope for these explicit domain refusals.
-    if (isHostedOnboardingError(error) && error.httpStatus === 400 && error.code === "INVALID_REQUEST") {
-      throw new RequestInputError(error.message, { cause: error });
-    }
-    throw error;
   }));
 });
 

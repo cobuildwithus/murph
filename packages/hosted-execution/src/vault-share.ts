@@ -1459,7 +1459,7 @@ function parseHostedVaultShareDeliveryRecordData(
       return parseHostedVaultShareWorkoutsDayData(value, context);
   }
 
-  throw new TypeError(
+  throw new ContractValidationError(
     `Vault share ${context.projectionKind} data parser is not implemented.`,
   );
 }

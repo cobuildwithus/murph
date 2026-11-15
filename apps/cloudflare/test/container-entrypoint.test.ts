@@ -3079,6 +3079,7 @@ describe("startHostedContainerEntrypoint", () => {
   });
 
   it.each([
+    [new ContractValidationError("Parser bug."), "type_error"],
     [new TypeError("Parser bug."), "type_error"],
     [new RangeError("Parser bug."), "range_error"],
     [new URIError("Parser bug."), "uri_error"],
@@ -3088,7 +3089,10 @@ describe("startHostedContainerEntrypoint", () => {
     const server = await startHostedContainerEntrypoint({
       port: 0,
       runtime: {
-        parseRunnerJobInput: () => { throw error; },
+        parseRunnerJobInput: () => {
+          if (error instanceof ContractValidationError) return Object.defineProperty({}, "request", { get() { throw error; } }) as never;
+          throw error;
+        },
         runWorkspaceInvocation,
       },
     });
@@ -3116,6 +3120,7 @@ describe("startHostedContainerEntrypoint", () => {
       error,
       level: "error",
       message: "Hosted container entrypoint rejected the request body.",
+      ...(error instanceof ContractValidationError ? { details: { unmarkedContractValidationError: true } } : {}),
     }));
   });
 

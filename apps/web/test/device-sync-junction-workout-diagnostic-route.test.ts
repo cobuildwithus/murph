@@ -24,7 +24,8 @@ vi.mock("@murphai/device-syncd/providers/junction-config", async (importOriginal
   readConfiguredJunctionDeviceSyncProviderConfig: mocks.readConfiguredJunctionDeviceSyncProviderConfig,
 }));
 
-vi.mock("@murphai/device-syncd/providers/junction-client", () => ({
+vi.mock("@murphai/device-syncd/providers/junction-client", async importOriginal => ({
+  ...await importOriginal<typeof import("@murphai/device-syncd/providers/junction-client")>(),
   JunctionClient: mocks.JunctionClient,
 }));
 
@@ -35,6 +36,28 @@ type JunctionWorkoutDiagnosticRouteModule = typeof import(
 let route: JunctionWorkoutDiagnosticRouteModule;
 
 describe("Junction raw workout diagnostic route", () => {
+  it("keeps the supported Google Health provider alias", async () => {
+    vi.stubEnv("MURPH_ENABLE_JUNCTION_RAW_WORKOUT_DIAGNOSTIC", "1");
+    const response = await route.GET(new Request("http://localhost/api/internal/device-sync/junction/workouts/raw?sourceProviderSlug=google_health"));
+    expect(response.status).toBe(200);
+    expect(mocks.listSummary).toHaveBeenCalledWith(expect.objectContaining({ sourceProviderSlug: "google_health" }));
+  });
+  it.each([14 * 86_400_000, 14 * 86_400_000 - 1])("bounds the derived diagnostic start: %i", offset => {
+    vi.stubEnv("MURPH_ENABLE_JUNCTION_RAW_WORKOUT_DIAGNOSTIC", "1");
+    const end = encodeURIComponent(new Date(-8.64e15 + offset).toISOString());
+    return route.GET(new Request(`http://localhost/api/internal/device-sync/junction/workouts/raw?end=${end}`)).then(response => {
+      expect(response.status).toBe(offset === 14 * 86_400_000 ? 200 : 400);
+    });
+  });
+
+  it.each(["sourceProviderSlug=provider_example", "end=-271821-04-20T00%3A00%3A00.000Z"])("rejects unusable caller parameters: %s", async query => {
+    vi.stubEnv("MURPH_ENABLE_JUNCTION_RAW_WORKOUT_DIAGNOSTIC", "1");
+    const response = await route.GET(new Request(`http://localhost/api/internal/device-sync/junction/workouts/raw?${query}`));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: { code: "INVALID_REQUEST", message: "Invalid request." } });
+    expect(mocks.listSummary).not.toHaveBeenCalled();
+  });
+
   beforeAll(async () => {
     route = await import("../app/api/internal/device-sync/junction/workouts/raw/route");
   });

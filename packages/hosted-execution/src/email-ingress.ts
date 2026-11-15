@@ -9,7 +9,7 @@ import {
   readOptionalStringArray,
 } from "./parsers/assertions.ts";
 import type { HostedExecutionEmailAttachmentSummary } from "./contracts.ts";
-import { HOSTED_EMAIL_THREAD_TARGET_MAX_LENGTH } from "@murphai/runtime-state";
+import { HOSTED_EMAIL_THREAD_TARGET_MAX_LENGTH, parseHostedEmailThreadTarget } from "@murphai/runtime-state";
 
 const HOSTED_EMAIL_PROMPT_ADDRESS_MAX_COUNT = 8;
 const HOSTED_EMAIL_PROMPT_ATTACHMENT_MAX_COUNT = 12;
@@ -48,7 +48,7 @@ export function parseHostedEmailIngressWakeAppendRequest(
 ): HostedEmailIngressWakeAppendRequest {
   const record = requireObject(value, "Hosted email ingress wake append request");
 
-  return {
+  const request: HostedEmailIngressWakeAppendRequest = {
     ...(record.assistantStyleSettingsAuthorized === undefined
       ? {}
       : {
@@ -173,6 +173,12 @@ export function parseHostedEmailIngressWakeAppendRequest(
           ),
         }),
   };
+  const identity = [request.identityId, request.selfAddress, request.threadKey, request.threadTarget, request.rawMessageKey].find(value => value !== null && value !== undefined)!;
+  const groupTarget = parseHostedEmailThreadTarget(request.threadTarget)?.targetKind === "group";
+  if (!request.eventId.trim() || (!groupTarget && !identity.trim())) {
+    throw new ContractValidationError("Hosted email ingress event and conversation identity must not be blank.");
+  }
+  return request;
 }
 
 function parseHostedEmailIngressAttachmentSummaries(

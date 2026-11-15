@@ -1,5 +1,3 @@
-import { RequestInputError } from "@murphai/hosted-execution/request-input";
-import { isDeviceSyncError } from "@murphai/device-syncd/errors";
 import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_BODY_LIMIT_BYTES,
 } from "@murphai/device-syncd/hosted-runtime";
@@ -30,15 +28,8 @@ export const POST = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request, {
     maxBodyBytes: HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_BODY_LIMIT_BYTES,
   });
-  try {
-    return jsonOk(await applyHostedDeviceSyncRuntimeResult({
-      request,
-      trustedUserId: userId,
-    }));
-  } catch (error) {
-    if (isDeviceSyncError(error) && error.code === "INVALID_REQUEST" && error.httpStatus === 400) {
-      throw new RequestInputError(error.message, { cause: error });
-    }
-    throw error;
-  }
+  return jsonOk(await applyHostedDeviceSyncRuntimeResult({
+    request,
+    trustedUserId: userId,
+  }));
 });

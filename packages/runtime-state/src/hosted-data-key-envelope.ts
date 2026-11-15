@@ -120,6 +120,21 @@ export async function createHostedDataKeyEnvelopeWithDomainRoot(input: {
   };
 }
 
+export function assertHostedDataKeyEnvelopeEncoding(envelope: HostedDataKeyEnvelopeV1): void {
+  const wrap = envelope.wraps.find((entry) => entry.rootKeyId === envelope.rootKeyId);
+  if (wrap) {
+    try {
+      decodeFixedBase64(wrap.iv, HOSTED_DATA_KEY_IV_BYTES, "Hosted data-key wrap IV");
+      decodeBase64(wrap.ciphertext);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "InvalidCharacterError") {
+        throw new ContractValidationError("Hosted data-key encoding must be valid base64.");
+      }
+      throw error;
+    }
+  }
+}
+
 export async function unwrapHostedDataKeyWithDomainRoot(input: {
   envelope: HostedDataKeyEnvelopeV1;
   rootKey: Uint8Array;
@@ -452,7 +467,7 @@ function decodeFixedBase64(
 ): Uint8Array {
   const decoded = decodeBase64(value);
   if (decoded.byteLength !== expectedBytes) {
-    throw new TypeError(`${label} must decode to ${expectedBytes} bytes.`);
+    throw new ContractValidationError(`${label} must decode to ${expectedBytes} bytes.`);
   }
   return decoded;
 }

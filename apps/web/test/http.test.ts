@@ -762,6 +762,7 @@ describe("json route helper factory", () => {
       errorMessage: "Invalid shape.",
       internalMessage: "route failed unexpectedly",
       errorResponseCode: "INTERNAL_ERROR",
+      ...(error instanceof ContractValidationError ? { unmarkedContractValidationError: true } : {}),
     });
     expect(warn).not.toHaveBeenCalled();
     expect(warnLogDetails).not.toHaveBeenCalled();

@@ -1,3 +1,5 @@
+import { jsonError } from "@/src/lib/hosted-onboarding/http";
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -91,6 +93,17 @@ describe("hosted iMessage contact tool", () => {
     });
     mocks.acquireHostedMemberHomeLinqRouteLockTx.mockResolvedValue(undefined);
     mocks.upsertHostedMemberHomeLinqRecipientPhoneTx.mockResolvedValue(undefined);
+  });
+
+  it.each(["missing", "wrong-kind", "storage"])("keeps %s authority distinct from stored-data failure", async kind => {
+    if (kind === "storage") mocks.readHostedMailboxConversationWakeByAssistantInputId.mockRejectedValueOnce(new ContractValidationError("Synthetic stored wake failure."));
+    else mocks.readHostedMailboxConversationWakeByAssistantInputId.mockResolvedValueOnce(kind === "missing" ? null : { kind: "runtime.wake" });
+    const error = await handleHostedRuntimeIMessageContactTool({ memberId: "synthetic-member", request: { assistantInputId: `ain_${"0".repeat(32)}` } }).catch(error => error);
+    const response = jsonError(error);
+    expect(response.status).toBe(kind === "storage" ? 500 : 400);
+    expect(await response.json()).toMatchObject({ error: { code: kind === "storage" ? "INTERNAL_ERROR" : "INVALID_REQUEST" } });
+    expect(mocks.requireHostedRuntimeActiveAccessForUpdateTx).toHaveBeenCalledOnce();
+    expect(mocks.readHostedMemberIdentity).not.toHaveBeenCalled();
   });
 
   it("returns an existing assigned number without reading or consuming the pool", async () => {
@@ -412,7 +425,7 @@ describe("hosted iMessage contact tool", () => {
       memberId: "member_telegram",
       request: { assistantInputId: ASSISTANT_INPUT_ID },
     })).rejects.toThrow(
-      "iMessage contact assignment requires current direct Telegram input.",
+      "Invalid request.",
     );
 
     expect(mocks.acquireHostedMemberHomeLinqRouteLockTx).not.toHaveBeenCalled();

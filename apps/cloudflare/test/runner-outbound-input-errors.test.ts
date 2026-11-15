@@ -41,8 +41,6 @@ const routes = [
     parser: () => vi.spyOn(effectParsers, "parseHostedRunnerTelegramGetFileRequest") },
   { name: "mailbox decode", handle: handleRunnerMailboxPayloadDecodeRequest,
     parser: () => vi.spyOn(mailboxParsers, "parseHostedMailboxPayloadDecodeRequest") },
-  { name: "email send", handle: handleRunnerResultsRequest,
-    parser: () => vi.spyOn(emailParsers, "parseHostedEmailSendRequest") },
 ];
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
@@ -80,7 +78,9 @@ it("propagates a native base64 decoder bug instead of rejecting the image", asyn
 it("does not blame an email caller for server configuration failure", async () => {
   const failure = new TypeError("Synthetic configuration failure.");
   vi.spyOn(emailTransport, "readHostedEmailConfig").mockImplementationOnce(() => { throw failure; });
-  await expect(handleRunnerResultsRequest(input("{}"))).rejects.toBe(failure);
+  const response = await handleRunnerResultsRequest(input("{}"));
+  expect(response.status).toBe(503);
+  expect(await response.json()).toEqual({ code: "ASSISTANT_EMAIL_PROVIDER_ENTRY_FAILED", deliveryMayHaveSucceeded: false, error: "Hosted email delivery failed before provider entry.", retryable: true });
 });
 
 it.each([
@@ -146,4 +146,59 @@ it("preserves the upstream mailbox-array rejection envelope", async () => {
   expect(await response.json()).toEqual(body);
   expect(response.headers.get("cache-control")).toBe("no-store");
   expect(fetch).toHaveBeenCalledOnce();
+});
+
+it.each(["{", "[]", "{}"])("preserves explicit email input rejection: %s", async body => {
+  const response = await handleRunnerResultsRequest(input(body));
+  expect(response.status).toBe(400);
+  expect(await response.json()).toMatchObject({ code: "ASSISTANT_EMAIL_REQUEST_INVALID", deliveryMayHaveSucceeded: false, retryable: false });
+});
+
+it.each(["body", "parser", "provider"])("preserves email delivery evidence at %s", async phase => {
+  const context = input("{}");
+  const failure = new TypeError("Synthetic failure.");
+  const send = vi.spyOn(emailTransport, "sendHostedEmailMessage");
+  if (phase === "body") {
+    vi.spyOn(context.request, "arrayBuffer").mockRejectedValueOnce(failure);
+    Object.defineProperty(context.request, "body", { value: new ReadableStream({ start(controller) { controller.error(failure); } }) });
+  }
+  else if (phase === "parser") vi.spyOn(emailParsers, "parseHostedEmailSendRequest").mockImplementationOnce(() => { throw failure; });
+  else {
+    vi.spyOn(emailParsers, "parseHostedEmailSendRequest").mockReturnValueOnce({} as never);
+    send.mockRejectedValueOnce(failure);
+    await expect(handleRunnerResultsRequest(context)).rejects.toBe(failure);
+    return;
+  }
+  const response = await handleRunnerResultsRequest(context);
+  expect(response.status).toBe(503);
+  expect(await response.json()).toMatchObject({ code: "ASSISTANT_EMAIL_PROVIDER_ENTRY_FAILED", deliveryMayHaveSucceeded: false, retryable: true });
+  expect(send).not.toHaveBeenCalled();
+});
+
+it.each(["{}", '{"reason":7}', '{"reason":"idle_shutdown","expectedWorkspaceVersion":7}'])("rejects malformed snapshot fields: %s", async body => {
+  const context = input(body);
+  const request = new Request(`${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.workspaceSnapshotStore}/workspace-snapshots/start`, { method: "POST", body,
+    headers: { [HOSTED_RUNTIME_ATTEMPT_ID_HEADER]: "attempt_test", [HOSTED_RUNTIME_LEASE_GENERATION_HEADER]: "1", [HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER]: "0" } });
+  const response = await handleRunnerOutboundRequest(request, context.env, context.userId);
+  expect(response.status).toBe(400);
+  expect(await response.json()).toEqual({ error: "Invalid request." });
+});
+it("rejects malformed runner result path encoding", async () => {
+  const context = input("");
+  const request = new Request("https://results.worker/messages/%E0%A4%A");
+  const response = await handleRunnerOutboundRequest(request, context.env, context.userId);
+  expect(response.status).toBe(400);
+});
+
+it.each([
+  { encryptedByteSize: 0 }, { encryptedObjectSha256: "invalid" }, { encryptedMd5: "invalid" },
+])("rejects invalid snapshot PUT metadata before session lookup: %j", async invalid => {
+  const body = JSON.stringify({ snapshotId: "snapshot_test", objectKey: "synthetic", encryptedByteSize: 1, encryptedObjectSha256: "a".repeat(64), ...invalid });
+  const context = input(body);
+  const request = new Request(`${CLOUDFLARE_HOSTED_RUNTIME_BASE_URLS.workspaceSnapshotStore}/workspace-snapshots/snapshot_test/presign-put`, {
+    method: "POST", body, headers: { [HOSTED_RUNTIME_ATTEMPT_ID_HEADER]: "attempt_test", [HOSTED_RUNTIME_LEASE_GENERATION_HEADER]: "1", [HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER]: "0" },
+  });
+  const response = await handleRunnerOutboundRequest(request, context.env, context.userId);
+  expect(response.status).toBe(400);
+  expect(await response.json()).toEqual({ error: "Invalid request." });
 });

@@ -234,11 +234,20 @@ async function handleRunnerEmailSendRequest(input: {
       }, 401);
     }
 
+    let config: ReturnType<typeof readHostedEmailConfig>;
+    let request: ReturnType<typeof parseHostedEmailSendRequest>;
+    try {
+      config = readHostedEmailConfig(asWorkerStringEnvironment(input.env));
+      request = parseInput(await readJsonObject(input.request), parseHostedEmailSendRequest);
+    } catch (error) {
+      if (error instanceof RequestInputError || error instanceof HostedEmailSendValidationError) throw error;
+      throw new HostedEmailPreProviderError(error);
+    }
     const payload = await sendHostedEmailMessage({
-      config: readHostedEmailConfig(asWorkerStringEnvironment(input.env)),
+      config,
       emailBinding: input.env.HOSTED_EMAIL,
       fetchImpl: fetch,
-      request: parseInput(await readJsonObject(input.request), parseHostedEmailSendRequest),
+      request,
       userId: input.userId,
       webCallbackSigning: input.environment.webCallbackSigning,
       ...(input.environment.hostedWebAllowHttpHosts

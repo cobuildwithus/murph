@@ -1,3 +1,5 @@
+import { parseInput, RequestInputError } from "@murphai/hosted-execution/request-input";
+import { parseHostedSecureBoxEnvelope } from "@murphai/runtime-state";
 import {
   hostedClinicalRecordsFetchPageRequestSchema,
 } from "@murphai/hosted-execution/clinical-records";
@@ -8,7 +10,7 @@ import { fetchClinicalRetrievalPage } from "@/src/lib/clinical-records/retrieval
 import { requireClinicalRecordsRuntimeWriteFence } from "@/src/lib/clinical-records/runtime-write-fence";
 import { requireHostedCloudflareCallbackRequest } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import { requireHostedRuntimeActiveAccess } from "@/src/lib/hosted-mailbox/runtime-access";
-import { readJsonObject } from "@/src/lib/http";
+import { readJsonObject, parseRequestJson } from "@/src/lib/http";
 
 const BODY_LIMIT_BYTES = 8 * 1_024;
 
@@ -29,6 +31,10 @@ export const POST = withClinicalJsonError(async (request: Request) => {
     await readJsonObject(request, { limitBytes: BODY_LIMIT_BYTES }),
   );
   if (!parsed.success) throw invalidRequestError();
+  if (parsed.data.cursor) {
+    if (!parsed.data.cursor.trim()) throw new RequestInputError("Clinical page cursor must not be blank.");
+    parseInput(parseRequestJson(parsed.data.cursor), parseHostedSecureBoxEnvelope);
+  }
   const result = await fetchClinicalRetrievalPage({ memberId, request: parsed.data });
   return Response.json(result, { headers: { "Cache-Control": "no-store" } });
 });

@@ -492,6 +492,7 @@ export async function startHostedContainerEntrypoint(input: {
         component: "container",
         error,
         level: classified.level,
+        details: { unmarkedContractValidationError: error instanceof ContractValidationError },
         message: "Hosted container entrypoint rejected the runtime wake request body.",
         phase: "failed",
       });
@@ -664,6 +665,7 @@ export async function startHostedContainerEntrypoint(input: {
             component: "container",
             error,
             level: classified.level,
+            details: { unmarkedContractValidationError: error instanceof ContractValidationError },
             message: "Hosted container entrypoint rejected the workspace invocation abort request body.",
             phase: "failed",
           });
@@ -816,6 +818,7 @@ export async function startHostedContainerEntrypoint(input: {
             component: "container",
             error,
             level: classified.level,
+            details: { unmarkedContractValidationError: error instanceof ContractValidationError },
             message: "Hosted container entrypoint rejected the direct R2 presigned PUT smoke request body.",
             phase: "failed",
           });
@@ -861,6 +864,7 @@ export async function startHostedContainerEntrypoint(input: {
           component: "container",
           error,
           level: classified.level,
+          details: { unmarkedContractValidationError: error instanceof ContractValidationError },
           message: "Hosted container entrypoint rejected the request body.",
           phase: "failed",
         });

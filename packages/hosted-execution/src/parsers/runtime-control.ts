@@ -504,6 +504,22 @@ export function parseHostedRuntimeUsageRecordRequest(
     "Hosted runtime usage record request",
   );
 
+  const usage = parseAssistantUsageRecord(record.usage);
+  const raw = usage.rawUsageJson;
+  if (usage.provider === "elevenlabs" && usage.usageExtractionSourcePath === "elevenlabs.text_to_speech"
+    && !(typeof raw?.characterCount === "number" && raw.characterCount > 0)) {
+    throw new ContractValidationError("Text-to-speech usage requires a positive character count.");
+  }
+  if (usage.provider === "workers-ai" && usage.featureKey === "audio-transcription"
+    && usage.usageExtractionSourcePath === "workers-ai.transcribe"
+    && !(typeof raw?.audioBytes === "number" && raw.audioBytes > 0)) {
+    throw new ContractValidationError("Transcription usage requires a positive audio byte count.");
+  }
+  if (usage.provider === "elevenlabs" && usage.featureKey === "music-generation"
+    && usage.usageExtractionSourcePath === "elevenlabs.music.compose"
+    && typeof raw?.durationMs !== "number") {
+    throw new ContractValidationError("Music usage requires a duration.");
+  }
   return {
     ...(record.noticeDeliveryTarget === undefined
       ? {}
@@ -515,7 +531,7 @@ export function parseHostedRuntimeUsageRecordRequest(
                   record.noticeDeliveryTarget,
                 ),
         }),
-    usage: parseAssistantUsageRecord(record.usage),
+    usage,
   };
 }
 
@@ -6207,7 +6223,17 @@ export function parseHostedRuntimeIssueExportRequest(
     issues: requireArray(
       record.issues,
       "Hosted runtime issue export request issues",
-    ).map((entry) => parseAssistantRuntimeIssueRecord(entry)),
+    ).map((entry) => {
+      const issue = requireObject(entry, "Hosted runtime issue");
+      const pending: { value: unknown; depth: number }[] = [{ value: issue.details, depth: 0 }];
+      while (pending.length > 0) {
+        const item = pending.pop()!;
+        if (item.value === null || typeof item.value !== "object") continue;
+        if (item.depth > 128) throw new ContractValidationError("Runtime issue details exceed the maximum nesting depth.");
+        for (const child of Object.values(item.value)) pending.push({ value: child, depth: item.depth + 1 });
+      }
+      return parseAssistantRuntimeIssueRecord(issue);
+    }),
   };
 }
 

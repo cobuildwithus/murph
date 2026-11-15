@@ -1,5 +1,4 @@
-import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
-import { parseInput, RequestInputError } from "@murphai/hosted-execution/request-input";
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import {
   parseHostedExecutionDeviceSyncNoDataOutreachRequest,
 } from "@murphai/device-syncd/hosted-runtime";
@@ -18,15 +17,8 @@ export const POST = withJsonError(async (request: Request) => {
   const { payload, userId } = await requireHostedCloudflareCallbackJsonRequest(request, {
     maxBodyBytes: BODY_LIMIT_BYTES,
   });
-  try {
-    return jsonOk(await configureHostedSourceNoDataOutreach({
-      memberId: userId,
-      request: parseInput(payload, parseHostedExecutionDeviceSyncNoDataOutreachRequest),
-    }));
-  } catch (error) {
-    if (isHostedOnboardingError(error) && error.code === "INVALID_REQUEST" && error.httpStatus === 400) {
-      throw new RequestInputError(error.message, { cause: error });
-    }
-    throw error;
-  }
+  return jsonOk(await configureHostedSourceNoDataOutreach({
+    memberId: userId,
+    request: parseInput(payload, parseHostedExecutionDeviceSyncNoDataOutreachRequest),
+  }));
 });

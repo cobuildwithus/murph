@@ -1,9 +1,11 @@
 import { ContractValidationError } from "@murphai/contracts/validation-error";
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import { listHostedBrowserVaultReplicaSiblingObjectKeys, browserVaultReplicaShardObjectKey, browserVaultReplicaMetricBucketObjectKey } from "./storage-paths.ts";
 export { listHostedBrowserVaultReplicaSiblingObjectKeys } from "./storage-paths.ts";
 import { BROWSER_VAULT_REPLICA_SCHEMA } from "@murphai/contracts/browser-vault";
 import {
   buildHostedStorageAad as buildRuntimeHostedStorageAad,
+  assertHostedDataKeyEnvelopeEncoding,
   createHostedDataKeyEnvelopeWithDomainRoot,
   deriveHostedStorageKey,
   parseHostedCipherEnvelope,
@@ -700,19 +702,21 @@ async function deriveBrowserVaultReplicaKey(
   },
   ref: HostedBrowserVaultReplicaRef,
 ): Promise<Uint8Array> {
-  if (ref.dataKeyEnvelope) {
-    assertHostedBrowserVaultReplicaDataKeyEnvelopeMatchesRef({
+  const envelope = ref.dataKeyEnvelope;
+  if (envelope) {
+    parseInput(ref, () => assertHostedBrowserVaultReplicaDataKeyEnvelopeMatchesRef({
       ref,
       userId: input.userId ?? undefined,
-    });
+    }));
     const rootKey = await resolveBrowserVaultReplicaRootKeyById(
       input,
-      ref.dataKeyEnvelope.rootKeyId,
+      envelope.rootKeyId,
     );
+    parseInput(envelope, () => assertHostedDataKeyEnvelopeEncoding(envelope));
     return unwrapHostedDataKeyWithDomainRoot({
-      envelope: ref.dataKeyEnvelope,
+      envelope,
       rootKey,
-      rootKeyId: ref.dataKeyEnvelope.rootKeyId,
+      rootKeyId: envelope.rootKeyId,
     });
   }
 

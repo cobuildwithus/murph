@@ -1,3 +1,4 @@
+import { withJsonError } from "../src/lib/hosted-onboarding/http";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { HostedGameChatBootstrapRequest } from "@murphai/hosted-execution/runtime-control";
 
@@ -34,6 +35,15 @@ const game = (container: string | null = "room") => ({ id: gameId, status: "live
 const call = (operation: "recover" | "send", text?: string) => handleGameChatBootstrapControl({ memberId: "room", runtimeIdentity: null, request: { action: "game_chat_bootstrap", gameId, eventId, operation, ...(text ? { text } : {}) } as HostedGameChatBootstrapRequest });
 
 describe("generated game chat bootstrap", () => {
+  it.each(["Please visit https://example.test now.", "https://example.test"])("rejects first-message link placement before freezing: %s", async text => {
+    const response = await withJsonError(async () => { await call("send", text); return Response.json({}); })();
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: { code: "INVALID_REQUEST", message: "Invalid request." } });
+    expect(m.saveReceipt).not.toHaveBeenCalled();
+    expect(m.create).not.toHaveBeenCalled();
+    expect(m.runtime).toHaveBeenCalled();
+  });
+
   beforeEach(() => {
     vi.resetAllMocks(); m.sequence.length = 0; m.frozen = null; m.attached = false; m.skipped = false;
     m.prepareMailbox.mockResolvedValue({}); m.enqueue.mockResolvedValue({ mailboxItemId: "new_kickoff" }); m.pendingMailbox.mockResolvedValue(null); m.mailbox.mockResolvedValue(null);

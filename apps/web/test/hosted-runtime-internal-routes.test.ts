@@ -2339,6 +2339,33 @@ describe("hosted runtime internal web routes", () => {
     });
   });
 
+  it.each([1024, 1025])("bounds signed log member ids at admission: %i", async length => {
+    mocks.requireHostedCloudflareCallbackRequest.mockResolvedValueOnce("x".repeat(length));
+    mocks.recordHostedRuntimeLogs.mockResolvedValue(1);
+    const response = await runtimeLogRoute.POST(jsonRequest("/api/internal/hosted-runtime/log", {
+      entries: [{ at: FIXED_NOW, component: "mailbox", eventCode: "mailbox.imported", level: "info", phase: "import" }],
+    }));
+    expect(response.status).toBe(length === 1025 ? 400 : 200);
+    if (length === 1025) {
+      expect(await response.json()).toEqual({ error: { code: "INVALID_REQUEST", message: "Invalid request." } });
+      expect(mocks.recordHostedRuntimeLogs).not.toHaveBeenCalled();
+    }
+  });
+
+  it("rejects a checkpoint snapshot outside its signed member namespace", async () => {
+    const objectKey = "users/bbbb/workspace-snapshots/snap_synthetic.snapshot.enc";
+    const response = await workspaceCheckpointRoute.POST(jsonRequest("/api/internal/hosted-workspace/checkpoint", {
+      attemptId: "run_synthetic", leaseGeneration: "1", expectedWorkspaceVersion: "7", reason: "idle_shutdown",
+      snapshotRef: { schema: "murph.hosted-workspace-snapshot.v2", userId: "member_routes_1", snapshotId: "snap_synthetic",
+        objectKey, createdAt: FIXED_NOW, upload: "direct-r2-presigned-put",
+        encryption: { scheme: "murph.hosted-workspace-snapshot-single-object.v1", aad: { schema: "murph.hosted-workspace-snapshot.v2", purpose: "workspace-snapshot", userId: "member_routes_1", snapshotId: "snap_synthetic", objectKey }, ivBase64: "AAAAAAAAAAAAAAAA", rootKeyId: "root_synthetic", wrappedDataKey: "wrapped_synthetic" },
+        archive: { compression: "zstd", format: "tar", encryptedByteSize: 128, encryptedObjectSha256: "a".repeat(64), plaintextArchiveSha256: "b".repeat(64), fileCount: 2, totalPlainBytes: 256 } },
+    }));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: { code: "INVALID_REQUEST", message: "Invalid request." } });
+    expect(mocks.checkpointHostedWorkspace).not.toHaveBeenCalled();
+  });
+
   it("acknowledges stale runtime telemetry without persistence or a runtime signal", async () => {
     mocks.requireHostedCloudflareCallbackRequest.mockRejectedValueOnce(hostedOnboardingError({
       code: "HOSTED_RUNTIME_OWNER_STALE",

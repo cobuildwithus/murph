@@ -20235,3 +20235,48 @@ it.each(["telegram", "linq"] as const)("recovers interrupted %s file delivery wi
     }
   }
 });
+
+it.each(["preparation", "exhausted", "ambiguous"] as const)("settles email %s through the real outbox dispatcher", async scenario => {
+  const actual = await vi.importActual<typeof import("@murphai/assistant-engine/assistant-outbox")>("@murphai/assistant-engine/assistant-outbox");
+  mocks.dispatchAssistantOutboxIntent.mockImplementation(actual.dispatchAssistantOutboxIntent);
+  mocks.readAssistantOutboxIntentMirrorState.mockImplementation(actual.readAssistantOutboxIntentMirrorState);
+  mocks.readAssistantOutboxIntent.mockImplementation(actual.readAssistantOutboxIntent);
+  mocks.saveAssistantOutboxIntentIfUnchanged.mockImplementation(actual.saveAssistantOutboxIntentIfUnchanged);
+  mocks.beginAssistantOutboxIntentMirrorPreparedDispatch.mockImplementation(actual.beginAssistantOutboxIntentMirrorPreparedDispatch);
+  mocks.resetAssistantOutboxPreparedDispatchById.mockImplementation(actual.resetAssistantOutboxPreparedDispatchById);
+  mocks.shouldDispatchAssistantOutboxIntent.mockImplementation(actual.shouldDispatchAssistantOutboxIntent);
+  const root = await mkdtemp(path.join(tmpdir(), "email-preparation-proof-"));
+  try {
+    await initializeVault({ vaultRoot: root, timezone: "UTC" });
+    const target = "synthetic-recipient";
+    const intent = await actual.createAssistantOutboxIntent({ vault: root, channel: "email", explicitTarget: target,
+      threadIsDirect: true, message: "Synthetic message.", sessionId: "synthetic-session", turnId: "synthetic-turn" });
+    const effect = buildHostedAssistantDeliveryEffect({ effectId: intent.intentId, dedupeKey: intent.dedupeKey,
+      payload: createPayload({ channel: "email", explicitTarget: target, bindingDeliveryKind: null, bindingDeliveryTarget: null,
+        threadId: null, threadIsDirect: true, message: intent.message, sessionId: intent.sessionId, turnId: intent.turnId }) });
+    await actual.saveAssistantOutboxIntent(root, { ...intent, dedupeKey: effect.fingerprint,
+      ...(scenario === "exhausted" ? { attemptCount: 47 } : {}) });
+    // This is the existing pre-provider HTTP envelope, after effects-port decoding.
+    // The no-evidence control models a lost response after provider entry.
+    const failure = scenario === "ambiguous" ? new Error("Synthetic lost response.")
+      : Object.assign(new Error("Hosted email delivery failed before provider entry."), {
+          code: "ASSISTANT_EMAIL_PROVIDER_ENTRY_FAILED", deliveryMayHaveSucceeded: false, retryable: true,
+        });
+    const sendEmail = vi.fn(async () => { throw failure; });
+    const effectsPort = createHostedRuntimeEffectsPortStub({ sendEmail,
+      resolveCurrentVerifiedEmailRecipient: vi.fn(async () => target) });
+    const prepared = await prepareHostedAssistantDeliveryEffectsForDispatch({
+      assistantDeliveryEffects: [effect], selectedNonIdempotentEffectIds: [effect.effectId], vaultRoot: root,
+    });
+    expect(prepared.preparedDispatches).toHaveLength(1);
+    await drainHostedPreparedAssistantDeliveries({ assistantDeliveryEffects: [effect], effectsPort,
+      vaultRoot: root, wake: HOSTED_WAKE.wake, ...prepared, allowPreparedSending: true });
+    expect(sendEmail).toHaveBeenCalledOnce();
+    const settled = await actual.readAssistantOutboxIntent(root, intent.intentId);
+    expect(settled?.status).toBe(scenario === "ambiguous" ? "abandoned" : scenario === "exhausted" ? "failed" : "retryable");
+    expect(settled?.delivery).toBeNull();
+    if (scenario !== "ambiguous") {
+      expect(settled?.lastError?.code).not.toBe("ASSISTANT_DELIVERY_AMBIGUOUS");
+    }
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
