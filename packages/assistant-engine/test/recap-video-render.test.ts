@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { readdirSync, readFileSync } from 'node:fs'
 import { access, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -55,7 +56,19 @@ const render = async (childPath: string, extra: Partial<Parameters<typeof render
     fetchReference: async id => Buffer.from(`photo ${id.slice(0, 4)}`), ...rest })
 }
 const workDirectories = async () => scratchRoot ? (await readdir(scratchRoot).catch(() => [])).filter(name => name.startsWith('render-')) : []
-const groupAlive = (pid: number) => { try { process.kill(-pid, 0); return true } catch { return false } }
+/** Whether anything in the group still runs. An orphaned process the test environment's PID 1 never
+ * reaps lingers as a zombie (the runner image's tini reaps it), so zombies count as stopped. */
+const running = (pid: number, group: boolean) => {
+  try { process.kill(group ? -pid : pid, 0) } catch { return false }
+  if (process.platform !== 'linux') return true
+  return readdirSync('/proc').filter(name => /^\d+$/u.test(name)).some(name => {
+    try {
+      const stat = readFileSync(`/proc/${name}/stat`, 'utf8'), fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ')
+      return (group ? Number(fields[2]) === pid : Number(name) === pid) && fields[0] !== 'Z'
+    } catch { return false }
+  })
+}
+const groupAlive = (pid: number) => running(pid, true)
 
 describe('recap video render step', () => {
   it('draws the show as the app presents it, from trusted inputs only, and hands back one checked file', async () => {
@@ -140,7 +153,7 @@ describe('recap video render step', () => {
     expect(Date.now() - started).toBeLessThan(10_000)
     const [child, encoder] = await pids()
     expect(groupAlive(child)).toBe(false)
-    expect(() => process.kill(encoder, 0)).toThrow()
+    expect(running(encoder, false)).toBe(false)
     expect(await workDirectories()).toEqual(before)
   })
 
@@ -154,7 +167,7 @@ describe('recap video render step', () => {
     await expect(pending).rejects.toThrow('Synthetic cancel')
     const [child, encoder] = await pids()
     expect(groupAlive(child)).toBe(false)
-    expect(() => process.kill(encoder, 0)).toThrow()
+    expect(running(encoder, false)).toBe(false)
     expect(await workDirectories()).toEqual(before)
   })
 
