@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { guardHostedRecapVideoFetch, resolveHostedRecapVideoAttachment } from "../src/hosted-runtime/recap-video-attachment.ts";
+import { guardHostedRecapVideoFetch, RECAP_VIDEO_LINQ_ATTACHMENT, resolveHostedRecapVideoAttachment } from "../src/hosted-runtime/recap-video-attachment.ts";
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
@@ -136,5 +136,11 @@ describe("each request that carries the recap attachment", () => {
     expect(chooseLine).not.toHaveBeenCalled();
     const plain = guard({ ids: [] });
     expect(plain.fetch).toBe(plain.fetchImplementation);
+  });
+});
+
+describe("the recap video's Linq label", () => {
+  it("is a QuickTime movie, which Messages passes through instead of shrinking", () => {
+    expect(RECAP_VIDEO_LINQ_ATTACHMENT).toEqual({ contentType: "video/quicktime", filename: "recap.mov" });
   });
 });
