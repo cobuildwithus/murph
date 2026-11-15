@@ -24,6 +24,8 @@ export interface RecapVideoPage {
   imageIndex?: number;
   fallback?: { kind: "photo" | "text"; entryIds: string[] };
   card?: { memberId: string; title: string; line: string };
+  /** When this page's music starts in the score. Every page but the result has one. */
+  cueMs?: number;
   song?: { title: string; lyrics: string[]; lines?: { words: RecapVideoSongWord[] }[] };
 }
 
@@ -33,47 +35,51 @@ export interface RecapVideoPlayer {
   avatarPath?: string;
 }
 
-/** Who won, in the third person: both players receive the same file. */
+/** Who won. `everyDay`: an even game in which neither player missed a day. */
 export type RecapVideoOutcome =
   | { kind: "won"; winnerId: string; loserId: string }
-  | { kind: "even" };
+  | { kind: "even"; everyDay: boolean };
 
+/**
+ * What the game was played for, as its last screen shows it: the loser owes
+ * the winner a prize or does a punishment; an even game where both did every
+ * day can earn both a prize; any other even game owes nothing. A prize's
+ * ticket carries the app's drawing for it, chosen from its title.
+ */
 export type RecapVideoStake =
-  | { kind: "prize"; title: string; iconPath?: string }
+  | { kind: "prize"; title: string }
   | { kind: "punishment"; title: string }
-  | { kind: "bothWin"; title: string; iconPath?: string }
+  | { kind: "bothWin"; title: string }
   | { kind: "none" };
 
 /**
- * The music and where the pages turn on it. A score runs under the whole
- * video; a lone song starts when its page does and the story plays silent.
+ * The show's score: one piece of music, the band under every story page and
+ * then the song. Pages turn on their `cueMs`, and the song page's cue is its
+ * first sung word, so a singer who comes in late holds the page before it.
+ * A recap with only a song, from before shows had scores, gets no video.
  */
-export interface RecapVideoSoundtrack {
+export interface RecapVideoScore {
   path: string;
-  /** The audio file's own length. */
+  /** The whole piece's length. */
   durationMs: number;
-  /** When the file starts in the video. A score starts at zero. */
-  startsAtMs: number;
-  /** When the song page starts in the video. */
-  songStartMs: number;
-  /** The sung song's length, for its scrubber. */
+  /** The song's own length. Its lyrics and its scrubber count from `durationMs - songMs`, a little before the first sung word. */
   songMs: number;
-  /** When each story page starts. Without cues every page gets five seconds. */
-  cuesMs?: number[];
 }
 
 export interface RecapVideoInput {
   show: { treatment: string; pages: RecapVideoPage[] };
-  /** By member id, in the order the cover names them. */
+  /** The game's two players, by member id. */
   players: Record<string, RecapVideoPlayer>;
   scores: Record<string, number>;
   outcome: RecapVideoOutcome;
   stake: RecapVideoStake;
   /** Generated pictures by page id. */
   scenes: Record<string, string>;
-  /** Real photos by entry id. */
-  photos: Record<string, string>;
-  soundtrack: RecapVideoSoundtrack;
+  /** Real photos by entry id. Null: the post is in the game but its photo is gone, and its place is a "missed" print. */
+  photos: Record<string, string | null>;
+  /** Entries whose player gave the day back: their prints carry the app's "Didn't finish" tag. */
+  unfinished?: string[];
+  score: RecapVideoScore;
 }
 
 export type RecapVideoRefusalCode =

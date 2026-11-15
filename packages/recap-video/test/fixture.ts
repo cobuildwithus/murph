@@ -19,8 +19,8 @@ const LYRICS = [
   "Seven days for Leo, six on Ava's side,",
   "Breakfast goes to Leo, served with pride.",
 ];
-/** When each line starts and ends in the song, as a provider's word timings would place it. */
-const LINE_SPANS: [number, number][] = [[20, 2060], [2560, 4440], [5000, 7060], [7480, 9560], [10000, 12120], [12500, 14980]];
+/** When each line starts and ends on the song's own clock, as a provider's word timings would place it. */
+const LINE_SPANS: [number, number][] = [[212, 2060], [2560, 4440], [5000, 7060], [7480, 9560], [10000, 12120], [12500, 14980]];
 
 function timedLines(): { words: RecapVideoSongWord[] }[] {
   return LYRICS.map((line, index) => {
@@ -29,7 +29,23 @@ function timedLines(): { words: RecapVideoSongWord[] }[] {
   });
 }
 
-export const FIXTURE_PAGES: RecapVideoPage[] = [
+/**
+ * The score: five seconds of band under each of the six story pages, then the
+ * song. The song's clock starts at 30,088 ms and its singer comes in 212 ms
+ * later, which is where the song page opens.
+ */
+export const FIXTURE_SCORE = { durationMs: 50040, songMs: 19952, songCueMs: 30300 } as const;
+
+/** A show's pages with the cues its score gives them: five seconds a story page, then the song on its first sung word. */
+export function withCues(pages: RecapVideoPage[], songCueMs: number): RecapVideoPage[] {
+  let story = 0;
+  return pages.map(page => {
+    const { cueMs: _old, ...rest } = page;
+    return page.kind === "result" ? rest : { ...rest, cueMs: page.kind === "song" ? songCueMs : story++ * 5000 };
+  });
+}
+
+export const FIXTURE_PAGES: RecapVideoPage[] = withCues([
   { id: "page-0", kind: "cover", background: "night", imageIndex: 1, blocks: [{ kind: "headline", text: "The Mat Takes the Stand" }], fallback: { kind: "photo", entryIds: ["entry-leo-1"] } },
   { id: "page-1", kind: "print", background: "night", blocks: [
     { kind: "headline", text: "Leo's first post was a yoga mat." }, { kind: "photo", entryIds: ["entry-leo-1"] }, { kind: "headline", text: "Ava wanted a person on it." },
@@ -46,7 +62,7 @@ export const FIXTURE_PAGES: RecapVideoPage[] = [
   { id: "card-member-leo", kind: "superlative", background: "paper", blocks: [], card: { memberId: "member-leo", title: "bring a lawyer to yoga", line: "Leo answered one doubt with three more photos of the same mat." } },
   { id: "song", kind: "song", background: "night", blocks: [], song: { title: "The Mat Takes the Stand", lyrics: LYRICS, lines: timedLines() } },
   { id: "result", kind: "result", background: "paper", blocks: [] },
-];
+], FIXTURE_SCORE.songCueMs);
 
 /** A made-up picture: bands of color with a few shapes, so a drift or a crop shows. */
 function picture(width: number, height: number, hue: number): Buffer {
@@ -87,23 +103,26 @@ function tone(durationMs: number): Buffer {
   return wav;
 }
 
-export type FixtureMusic = "score" | "song";
+/** A file a shape may want beyond the usual show's: a second face. */
+export interface FixtureExtras { leoFace: string }
 
-/**
- * Writes the fixture's pictures and music under `directory` and returns the
- * renderer's input. `score` is one fifty-second piece with a cue per story
- * page; `song` is the twenty-second song alone, as production has today.
- */
-export async function writeFixture(directory: string, music: FixtureMusic = "score"): Promise<RecapVideoInput> {
+export { picture as fixturePicture, tone as fixtureTone };
+
+/** Writes the fixture's pictures and its score under `directory` and returns the renderer's input. */
+export async function writeFixture(directory: string): Promise<RecapVideoInput & { extras: FixtureExtras }> {
   await mkdir(directory, { recursive: true });
   const save = async (name: string, bytes: Buffer): Promise<string> => {
     const file = path.join(directory, name);
     await writeFile(file, bytes);
     return file;
   };
-  const story = FIXTURE_PAGES.filter(page => page.kind !== "song" && page.kind !== "result");
-  const songStartMs = story.length * 5000;
+  // Nine posts in all, tall and wide, for sheets and stand-ins.
+  const more: Record<string, string> = {};
+  for (const [index, id] of ["entry-leo-2", "entry-leo-3", "entry-leo-5", "entry-ava-1", "entry-ava-2", "entry-ava-3"].entries()) {
+    more[id] = await save(`${id}.jpg`, index % 3 === 2 ? picture(1024, 768, 30 + index * 50) : picture(768, 1024, 30 + index * 50));
+  }
   return {
+    extras: { leoFace: await save("leo-face.jpg", picture(400, 400, 120)) },
     show: { treatment: "Courtroom drama", pages: FIXTURE_PAGES },
     players: { "member-ava": { name: "Ava", avatarPath: await save("ava-face.jpg", picture(400, 400, 300)) }, "member-leo": { name: "Leo" } },
     scores: { "member-leo": 7, "member-ava": 6 },
@@ -118,9 +137,8 @@ export async function writeFixture(directory: string, music: FixtureMusic = "sco
       "entry-leo-1": await save("leo-1.jpg", picture(768, 1024, 150)),
       "entry-leo-4": await save("leo-4.jpg", picture(768, 1024, 40)),
       "entry-ava-4": await save("ava-4.jpg", picture(1024, 768, 260)),
+      ...more,
     },
-    soundtrack: music === "score"
-      ? { path: await save("score.wav", tone(50040)), durationMs: 50040, startsAtMs: 0, songStartMs, songMs: 20000, cuesMs: story.map((_, index) => index * 5000) }
-      : { path: await save("song.wav", tone(20040)), durationMs: 20040, startsAtMs: songStartMs, songStartMs, songMs: 20000 },
+    score: { path: await save("score.wav", tone(FIXTURE_SCORE.durationMs)), durationMs: FIXTURE_SCORE.durationMs, songMs: FIXTURE_SCORE.songMs },
   };
 }

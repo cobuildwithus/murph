@@ -2,7 +2,7 @@
 
 Status: active
 Created: 2026-11-14
-Updated: 2026-11-14
+Updated: 2026-11-15
 
 ## Goal
 
@@ -27,6 +27,13 @@ correct video is sent exactly as it is today.
   footer is the address alone in the cover's label style, 64 pt above the
   bottom. Its prize ticket is 280 pt wide in its slot. It draws every stake the
   app's last screen does: prize, punishment slip, both-win prize, even game.
+- A prize's ticket carries the app's own drawing for it. The owner approved
+  bringing the app's prize drawings and their catalog into this repository.
+- Emoji are drawn with Noto Color Emoji, not refused.
+- The punishment slip's typeface was left to this build: Zilla Slab Medium
+  (see Decisions).
+- No video with silent story pages. A recap that has only a song, from before
+  shows had scores, gets no video.
 - The message keeps its link and gains the video. It does not replace the link.
 - The cover is the title and the "starring" line. No label above the title:
   the recap's writer is told to leave the prize off the cover.
@@ -54,8 +61,15 @@ correct video is sent exactly as it is today.
   acceptance; there is no later write and no polling.
 - Size ceilings on that path: 2,800,000 base64 characters per upload, 4.5 MiB
   per Web request (the platform's limit), 3 MiB per staged object, 2 MiB per
-  asset in the contract, 1 MiB for a song. The envelope allows five assets and
+  asset in the contract, audio included. The envelope allows five assets and
   drops all of them when it sees a sixth.
+- Music (since #4989): a show's music is one piece, five seconds of band under
+  each story page and then the sung song. It is stored once as the `song`
+  asset; Web serves it whole as the `score` slot and from the song's start as
+  the `song` slot. The show carries `score` and a `cueMs` on every page but
+  the result; the song page's cue is its first sung word, so a late singer
+  holds the page before it. Shows from before have a twenty-second song and
+  no cues.
 - Serving: `GET /api/game/v1/games/:id/recap-assets/:slot?generation=` checks
   the bearer, the generation and that every source the asset was made from is
   still permitted, then returns the whole decrypted object.
@@ -87,16 +101,21 @@ boundaries.
   drift computed from local time by the reference's own formulas.
 - Frames are drawn with a Skia canvas (`@napi-rs/canvas`, prebuilt, no install
   script) and piped as raw RGBA to ffmpeg, which only encodes and muxes. Layout
-  values, colours and fonts are copied from the reference, which copied them
-  from the app. The four font files are the app's own (all SIL OFL) and are
+  values, colours and fonts follow the app's source; where the reference page
+  and the app differ, the app wins (see Decisions). Seven font files are
   registered from the package under private family names, so a system font can
-  never satisfy them.
+  never satisfy them: the app's own four, Zilla Slab Medium for the punishment
+  slip, and Noto Color Emoji and Noto Sans for emoji and for Greek, Cyrillic
+  and other Latin letters. All are SIL OFL, with their licence texts beside
+  them.
 - It runs as a child process with a hard timeout. A crash, a timeout or an
   oversized result is "no video", never a failed recap.
-- It fails closed. Unknown page or block kinds, a stake it has no drawing for,
-  a character none of its fonts cover, text that does not fit after the app's
-  own shrink and wrap rules, a missing image the page has no fallback for: each
-  is a typed refusal before any frame is encoded.
+- It fails closed. Unknown page or block kinds, an outcome and stake that do
+  not go together, a character none of its fonts cover or an alphabet it
+  cannot set correctly, text that does not fit after the app's own shrink and
+  wrap rules (where the app would cut it short with an ellipsis), a missing
+  image the page has no fallback for, a show without a score: each is a typed
+  refusal before any frame is encoded.
 - Encoding is constant quality under a byte budget: a VBV ceiling computed from
   the duration keeps the file under 8,000,000 bytes; a file over that is a
   refusal.
@@ -116,18 +135,22 @@ Rejected alternatives:
   display face is variable), and it still needs a compositor.
 
 The cost of the choice is one native dependency (about 35 MB in the image,
-external to the runner bundle like `sharp`).
+external to the runner bundle like `sharp`) and about 12 MB of fonts and
+drawings in the package (Noto Color Emoji is 10.6 MB of that).
 
 ### 2. Where each input comes from
 
 | Input | Source at `write_recap` time |
 | --- | --- |
 | Pages | `presentGameRecap` run on the draft story, the same function the app's payload comes from |
-| Scene JPEGs, song MP3 | The files `readGameRecapMedia` already returns, hash-checked against what the tools generated |
-| Word timings | The in-memory generation receipt, aligned with `alignSongLyrics` |
+| Scene JPEGs | The files `readGameRecapMedia` already returns, hash-checked against what the tools generated |
+| Music | The score: the stored `song` asset whole, its length, and the song's own length (`T` and `T - C` in the recap contract). Page turns come from the pages' `cueMs` |
+| Word timings | The song page's `lines`, on the song's own clock, as presented |
 | Real photos, profile photos | Fetched again by reference id into a host-only directory; the task directory's copies are model-writable and are not trusted |
 | Names, scores | `material.result` |
-| Outcome and stake | New `game.poster` inside the material's untyped `game` object, built by Web from the same owner the app's last screen reads: outcome (won or even), stake kind, title, icon key, who owes whom, both-win. The runner never derives a winner |
+| Outcome and stake | New `game.poster` inside the material's untyped `game` object, built by Web from the same owner the app's last screen reads: outcome (won, or even and whether both did every day), stake kind (prize, punishment, both-win, none) and title, who owes whom. The runner never derives a winner |
+| Prize drawing | Chosen by the renderer from the prize's title with the app's own rule, from the app's catalog and drawings copied into the package. Web sends no icon: the server stores only the prize's words |
+| Days given back | Entry ids whose player marked the post incomplete: their prints carry the app's "Didn't finish" tag |
 
 `game.poster` rides in the untyped `game` field because the material schema is
 strict: a new top-level field would make an old runner reject the material.
@@ -149,10 +172,12 @@ tombstoned by the existing recap media path under
 - Upload checks a part's size and identity. Acceptance assembles the parts
   within the byte budget and validates the complete MP4 once (contiguity,
   declared hash, box walk), outside the database transaction.
-- One helper enumerates storage objects across scene and song assets and video
-  parts. Acceptance verification, receipt retention and lookup use it, so
-  there is one lifecycle loop. A part is served through the existing asset
-  route and authorized through its parent video's source union.
+- One helper, `recapStorageObjects`, enumerates storage objects across scene
+  and song assets and video parts. Acceptance verification, receipt retention
+  and lookup use it, so there is one lifecycle loop. The slots are `scene-N`,
+  `song`, `score` (the same stored file as `song`, served whole) and
+  `video-N`. A part is served through the existing asset route and authorized
+  through its parent video's source union.
 - The stored reader stays tolerant: malformed `video` metadata is dropped and
   the recap stays readable, as optional media already behaves.
 - The app's payload gains optional `show.video` with the part URLs in order;
@@ -219,30 +244,26 @@ the line.
 
 ### 6. Music
 
-The approved sample plays a 50 s score: 5 s of instrumental under each story
-page, landing on the 20 s song. That score is not in the product. Its state:
-an experiment kit outside the repository, with the owner's pick ("one piece")
-and measurements; the model switch it needs (Eleven Music v2.5) merged as
-#4981; no branch, plan or PR for the score itself. Shipping it needs its own
-plan: the Worker's music egress allows one chunk and Web requires exactly a
-20 s song, the app must keep a 20 s song for its song page, the singer's entry
-has to be checked and retried (three of nine measured takes came in 2.5 to
-5.6 s late), and the app needs cue times to play it.
+The approved sample plays one piece of music: five seconds of instrumental
+under each story page, landing on the song. That score is in the product
+since #4989 (2026-11-15), so the video's soundtrack is the show's score and
+its page timing is the show's own:
 
-The renderer therefore takes a soundtrack, not a song:
-`{ file, cuesMs, songStartMs, songMs }`.
-
-- With a score: the score's file and cues. This is the approved video.
-- Without a score: 5 s per story page in silence, then the song. Pictures and
-  timing are identical; the first 30 s or so have no sound.
+- The renderer takes the score's file, its whole length and the song's own
+  length, and reads each page's start from its `cueMs`. Nothing assumes a
+  five-second grid or a song at thirty seconds.
+- The song page opens on its cue, the first sung word. The song's own clock
+  (lyrics and scrubber) starts a little earlier, at the whole length less the
+  song's length, as in the app's player. A singer who comes in late holds the
+  last story page longer.
+- A show without a score (a twenty-second song from before #4989, or a song
+  whose score could not be had) gets no video: its story pages would play in
+  silence, which the owner has rejected. The renderer refuses it, and the
+  render step should not start for it.
 - Without a song: no video.
 
-Order: slices 1 to 6 land with the song-only soundtrack and the flag off. The
-score lands under its own plan and only adds a second soundtrack producer; no
-video code changes. Whether the song-only video may be switched on before the
-score exists is the owner's call (open question 1). The default in this plan
-is no: the flag stays off until the score ships or the owner accepts a
-song-only sample.
+The flag no longer waits on the score. It waits on the gate in section 10 and
+on the delivery slice.
 
 ### 7. Deploy skew and rollback floors
 
@@ -263,9 +284,12 @@ once written, so each has a rollback floor that the flag cannot undo:
 - Upload: an older Web or Worker rejects the new slot, type or key suffix. The
   runner treats that as "no stored video".
 - App: `show.video` is optional and the shipped decoder ignores unknown fields.
-- Order: contracts and Web readers, Worker, runner readers, then the writers
-  (Web results and material, runner render and delivery), then the flag, then
-  the app's Share.
+- Protocol admission: the storage slice (#4990) adds a `recapVideo` witness
+  to Web's protocol admission that the Worker deploy asserts. A runtime built
+  from a main that includes #4990 therefore needs that Web live first.
+- Order: contracts and Web readers (with the `recapVideo` witness), Worker,
+  runner readers, then the writers (Web results and material, runner render
+  and delivery), then the flag, then the app's Share.
 
 ### 8. Privacy and deletion
 
@@ -284,17 +308,32 @@ once written, so each has a rollback floor that the flag cannot undo:
 
 ### 9. Cost and time
 
-- Measured so far (prototype, Apple M4 Max, 1,531 frames at 804x1748): 2.6 ms
-  per frame to draw; 5 to 15 s wall for draw plus encode depending on the x264
-  preset; under 0.5 GB for the encoder and about 0.12 GB for the drawing
-  process. Slice 1's script reports the real renderer's numbers.
-- Unmeasured: the 2 vCPU container. Working guess 40 to 120 s. Measurement, in
-  order: slice 1's script on a Linux x86-64 CI runner pinned to two cores;
-  the same script inside the built runner image in slice 4; a trace of the
-  first production run. The child's timeout is 180 s.
-- Money: no provider call. One to two minutes of a container that is already
-  running, and up to 8 MB of sealed storage per recap for as long as the recap
-  is kept.
+Measured with the package's own script (`pnpm --dir packages/recap-video
+measure`) on the synthetic show: 1,531 frames at 804x1748, a 51.0 s video,
+x264 `medium`.
+
+| Where | Wall | Drawing process | ffmpeg | File |
+| --- | ---: | --- | --- | ---: |
+| Linux container at 2 CPUs and 6 GiB, the runner base's recipe (Node 24.22.1 on Debian bookworm, ffmpeg 5.1.9), arm64, on an Apple M4 Max | 19.9 s | 6.7 CPU-s, 271 MB peak | 32.9 CPU-s, 777 MB peak | 3.06 MB |
+| The same container, x264 `veryfast` | 15.9 s | 6.6 CPU-s, 271 MB peak | 25.0 CPU-s, 574 MB peak | 2.58 MB |
+| The hosted runner's real base image (linux/amd64) at 2 CPUs and 6 GiB, emulated on the same Mac | 39.4 s | 13.8 CPU-s, 339 MB peak | 64.8 CPU-s, 957 MB peak | 3.06 MB |
+| macOS, 16 threads, Apple M4 Max | 5.0 s | 5.4 CPU-s, 343 MB peak | 17.9 CPU-s, 767 MB peak | 3.05 MB |
+
+- The two-CPU arm64 number is the nearest measurement to production that
+  this machine can make: the same operating system, Node and ffmpeg builds as
+  the runner, limited to the runner's CPUs and memory, on a different
+  processor family. The emulated amd64 run proves the image, not its speed.
+- Unmeasured: production's x86-64 vCPUs. The first measurement there is the
+  runner image smoke in slice 5, then a trace of the first production run.
+  The child's timeout stays 180 s.
+- Peak memory is ffmpeg's (x264 lookahead at this frame size), not the
+  drawing process's: under 1 GiB in every run, inside the container's 6 GiB
+  beside the runner's own processes. The emulated run also passed the
+  package's 93 tests, encode included, as the image's own user with no
+  network.
+- Money: no provider call. Well under a minute of a container that is already
+  running, and up to 8 MB of sealed storage per recap for as long as the
+  recap is kept.
 
 ### 10. The visual gate (before the flag is ever on)
 
@@ -303,18 +342,30 @@ once written, so each has a rollback floor that the flag cannot undo:
    story layout, "Most likely to", the song mid-lyric and the last screen. The
    only accepted differences are the agreed ones: nothing tappable, third
    person, the address footer, the larger ticket.
+   Done in slice 2 for every page kind and every stake (contact sheets written
+   outside the repository, with a list of what each frame was compared with).
 2. Every shape the contract and the app's decoder allow, one frame each: zero,
    one and two cards; a story page without a picture; a failed scene falling
    back to its photo and to words alone; a pair; a contact sheet; a stat; a
    kicker; a quote over 70 characters; long titles, names, prizes and dares;
    lyrics with and without word timings; a profile photo and an initial; each
    background; a missed-day print; no song; each of the four stakes.
+   Done in slice 2: `packages/recap-video/test/shapes.ts` lists them.
 3. A CI check on synthetic fixtures that renders those frames and compares
    their structure, plus a contact sheet written outside the repository for
    the owner's review before the delivery slice merges.
+   Done in slice 2: `test/shapes.test.ts` draws every shape and compares each
+   page's laid-out pieces with what was recorded when the frames were checked
+   by eye; `test/contract.test.ts` draws the recap contract's own show with a
+   score; `pnpm --dir packages/recap-video proof <directory>` writes the frames
+   and sheets.
 4. Fonts on Linux: a test that fails when any bundled family is missing or
    measures differently from recorded advances, run in CI and in the image
    smoke, so a silent fallback cannot change a line break.
+   Done in slice 2 for CI: the advances test runs in the package lane, and
+   `.github/workflows/recap-video-runner-image.yml` runs the whole suite,
+   encode included, inside the pinned runner base image. The runner bundle's
+   own smoke gains it in slice 5, when the bundle gains the package.
 
 ### 11. Regeneration and the first production run
 
@@ -335,9 +386,10 @@ gate has passed. This plan records no member, game or chat identifier.
 
 1. Renderer core: the package, a synthetic fixture in the writer's shape, the
    structure test, the measurement script. Not wired to anything.
-2. Renderer completeness: every contract shape, the four stakes, the
-   fail-closed refusals, the Linux font check, the CI frame check and the
-   proof sheet.
+2. Renderer completeness: every contract shape, the four stakes, the app's
+   prize drawings, emoji, the score as the soundtrack, the fail-closed
+   refusals, the Linux font check, the CI frame check, the runner image lane
+   and the proof sheets.
 3. Storage and readers on Web: the `video` envelope field and its tolerant
    reader, part upload, whole-file acceptance, the shared object enumerator,
    presentation and serving, the accepted identity in write and recover
@@ -362,8 +414,10 @@ send belong to the owner's session.
 
 1. Risk: a page that looks wrong reaches a real chat.
    Mitigation: the gate in section 10; fail-closed refusals; the flag.
-2. Risk: text the bundled fonts cannot draw (emoji, non-Latin names or quotes).
-   Mitigation: refusal in the first version; see open question 3.
+2. Risk: text the bundled fonts cannot draw. Emoji, Greek and Cyrillic are
+   drawn. Mitigation for the rest (Arabic, Hebrew, Chinese, Japanese, Korean,
+   Thai, the Indic scripts): refusal, because lines are broken at spaces and
+   set left to right.
 3. Risk: the container is slower than guessed and the turn runs long.
    Mitigation: hard timeout, measured in slices 1 and 4 before the flag.
 4. Risk: a Web rollback below the envelope reader after videos are stored.
@@ -372,27 +426,52 @@ send belong to the owner's session.
    file. Mitigation: verified in slice 5 against the egress path before the
    flag; the text-only degrade covers a failure.
 6. Risk: the punishment slip's typeface (an Apple system font) is not ours to
-   ship. Mitigation: open question 2; punishment games refuse until settled.
+   ship. Mitigation: an open face at the size where its words are as wide as
+   the app's, so dares break onto the same lines (see Decisions).
+7. Risk: the copy of the app's prize catalog and drawings drifts from the
+   app's. Mitigation: the copy is made only by
+   `packages/recap-video/scripts/sync-stake-art.ts` from an app checkout, it
+   records the app commit and a digest of every drawing, and a test pins the
+   port's answers to the app's own code's answers for the catalog and several
+   hundred other prizes. Nothing yet fails in the app's repository when its
+   catalog changes: until a check there exists, whoever changes the app's
+   catalog reruns the sync here.
 
 ## Open questions for the owner
 
-1. May the song-only video (silent story pages, then the song) be switched on
-   before the score ships, or does the video wait for the score?
-2. The punishment slip's typeface: bundle an open look-alike (first candidate
-   Cutive, SIL OFL) checked against the app's slip, or license the original
-   for server use?
-3. Emoji and non-Latin text: refuse the video, or bundle an open fallback
-   (Noto) that will not match the phone's own emoji?
-4. Minimum hold of the last screen when the song's last word lands near the
+1. Minimum hold of the last screen when the song's last word lands near the
    end of the music (the sample holds 5.7 s; a song sung to its last second
    would leave under 2 s). This plan holds it at least 5 s by letting the
    picture outlast the music.
+2. Whose seat the video takes. The app is drawn from the viewer's seat: the
+   viewer's face is left of the score, the other player is named first on the
+   cover ("starring Ava and Leo" on Leo's phone), and the viewer's initial is
+   on sage, the other's on sienna. Both players receive one file, so the
+   video needs one rule. Built: the winner's seat (winner left of the score
+   and on sage, named last on the cover), which is what the approved sample
+   showed; an even game goes by name. The alternative is alphabetical
+   everywhere. Say if the built rule is wrong.
+3. Long prizes on the ticket. Beside its drawing the app gives a prize one
+   line and shrinks it to three fifths of its size; a longer prize is cut
+   short with an ellipsis on the phone ("Pick of the Restaur..."; seen by
+   running the app's ticket layout on a Mac, not on a phone). The video
+   refuses those games rather than draw an ellipsis. Options: keep refusing;
+   drop the drawing for long prizes so the words get two lines; or fix the
+   app's ticket first and follow it.
+4. Contact sheets with a short last row. The app sets four, five, seven or
+   eight posts with the last row's prints much larger than the rows above
+   (again from the app's layout code run on a Mac). The video draws what the
+   app draws. Say if the app should change; the video follows it.
+
+Settled since the first version of this plan: the song-only video (no video
+without a score), the slip's typeface, and emoji.
 
 ## Verification
 
-- Slice 1: `pnpm --dir packages/recap-video typecheck`, `pnpm --dir
-  packages/recap-video test`, and the measurement script's printed time and
-  peak memory.
+- Slices 1 and 2: `pnpm --dir packages/recap-video typecheck`, `pnpm --dir
+  packages/recap-video test`, the measurement script's printed time and peak
+  memory, `pnpm --dir packages/recap-video proof <directory>` for the frames
+  and contact sheets, and the runner image lane for the encode.
 - Later slices: the focused package, Web, Worker and Postgres suites their
   changes touch, the hosted-local recap files journey, and the gate above.
 
@@ -484,6 +563,92 @@ test; four rejected with evidence.
 The review found nothing in determinism, the workspace wiring or the native
 dependency (exact pin, lockfile integrity for the Linux x64 and arm64 gnu and
 musl builds, no install script, supply-chain settings unchanged).
+
+### Slice 2 findings and choices (2026-11-15)
+
+Checked against the app's source, its screenshots, and the app's own layout
+code run under SwiftUI on a Mac where a screenshot did not exist:
+
+1. The display face. The reference page drew Fraunces at the font file's
+   default axes; the app pins optical size 36, SOFT 100 and WONK 1. The
+   renderer now pins the same. Advances moved about 1.5 percent and agree
+   with the app's text engine to half a point ("Leo wins." 189.2 against
+   189.5). The line breaks of the approved pages did not change.
+2. Italics. The app slants its upright face by a fifth. The canvas's own
+   synthetic italic slants by a quarter, so the renderer slants the text
+   itself and leaves emoji beside it upright.
+3. Line heights. The app's text is 37 pt to a line at 30 pt with 5 pt between
+   lines; the reference used 41 pt boxes. Headlines, quotes, the card's line,
+   the score and the last screen's title now use the app's numbers.
+4. Avatars. The app's initial is DM Sans Bold at three eighths of the circle
+   on the player's color; the reference drew it lighter and larger on sage for
+   both players.
+5. The ticket. The prize is offered half the print's height, which is one
+   line, and the drawing takes what is left; the kicker is at 0.8 opacity.
+   The line under the prize names both players in the video, so it may shrink
+   to three quarters before the ticket is refused: this is the video's own
+   rule, since the app's line names one.
+6. Words alone. On a page without a picture each block follows the one before
+   by 0.9 s, as in the app.
+7. Even games keep the app's words ("You both win.", "Dead even.", "Nobody
+   owes anything."): they are already true for both players.
+8. Punishment slip typeface: Zilla Slab Medium at 1.106 times the app's
+   sizes. Five open faces were compared with American Typewriter on 35 dares
+   and 4 names. At that size its words are within one percent of the app's
+   widths with the smallest spread of the five, all 35 dares break onto the
+   same lines (two- and three-line dares checked against the app's own text
+   engine), its weight is the closest, and its licence is SIL OFL 1.1 with no
+   reserved name. Its letters stand 0.95 as tall as the app's. Cutive matched
+   breaks only 16 percent smaller and is thinner; Special Elite is worn where
+   the app's slip is clean; Kameron is lighter; Arvo is squarer.
+9. Emoji and other alphabets: Noto Color Emoji and Noto Sans are bundled.
+   Drawn: emoji (sequences and skin tones included), Latin with its accents,
+   Greek, Cyrillic. Refused: Arabic and Hebrew (right to left), Chinese,
+   Japanese, Korean and Thai (no spaces to break lines at), the Indic scripts,
+   and direction-control characters.
+10. Prize drawings: the server stores only a prize's words, so the renderer
+    picks the drawing from the title with the app's rule, ported and pinned
+    by a parity test (see risk 7).
+11. Still refused, on purpose: a page with two pictures (the app draws the
+    first and drops the second); a cover with anything but its title and
+    label; a contact sheet holding a day given back (its tag is wider than
+    the small prints); a prize too long for one line at three fifths size
+    beside its drawing; a song title past two lines at four fifths size; a
+    treatment too long for one line under the song's title; a dare past three
+    ruled lines; a stat too long for one line at two fifths size.
+12. Not established: the app's ticket can print "x2" when a week is worth
+    more than one ticket. The video's input has no count. Slice 3's
+    `game.poster` must say whether a live game can produce one, and a count
+    above one must be a refusal until it is drawn.
+
+### Codex deep review of slice 2 (2026-11-15, read-only, before landing)
+
+Seven findings on the slice 2 diff. Six accepted and fixed with a test; one
+rejected with evidence.
+
+1. High, accepted. A dare short enough for one line skipped the check that
+   its letters can be drawn. Every dare is checked now.
+2. Medium, accepted. On a very narrow photo the "Didn't finish" tag hung off
+   the print. A photo too small for its tag is refused.
+3. Medium, accepted. A stake's title had no length limit before the drawing
+   picker read it. It has the limit every other text has.
+4. Medium, rejected. The review asked for equal cues to be accepted because
+   the app's player accepts them. The contract gives every page its own cue
+   (`5000 * index`, then the first sung word), and two pages on one cue would
+   leave one of them no frame at all: a page silently left out. Refused.
+5. Medium, accepted. A stake with no words drew a ticket with no prize. It is
+   refused.
+6. Medium, accepted. The marks that join emoji were allowed anywhere, so a
+   block holding only one drew nothing. They are drawn only after an emoji;
+   elsewhere the text is refused (this also refuses keycap emoji such as a
+   digit in a box, which no bundled face sets correctly).
+7. Low, accepted. An emoji inside a word left the whole word upright in an
+   italic line. Only the emoji stands upright now.
+
+Clean by the review: the song's clock and the last screen's timing against
+the contract fixture, the shrink loop, the score row, ticket and slip
+arithmetic, contact sheet rows, the drawing picker, the catalog's contents,
+the workflow, and the tests (none vacuous).
 
 ### Owner decisions recorded after the review (no architecture change)
 

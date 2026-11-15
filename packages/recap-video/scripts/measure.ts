@@ -1,5 +1,5 @@
 // Renders the synthetic fixture and prints what it cost.
-//   pnpm --dir packages/recap-video measure [out.mp4] [--music=song] [--preset=veryfast]
+//   pnpm --dir packages/recap-video measure [out.mp4] [--preset=veryfast]
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -14,10 +14,10 @@ const kept = args.find(arg => !arg.startsWith("--"));
 const out = kept ?? path.join(directory, "recap.mp4");
 try {
   const started = performance.now();
-  const input = await writeFixture(directory, flag("music") === "song" ? "song" : "score");
+  const input = await writeFixture(directory);
   const renderer = await createRecapVideoRenderer(input);
   const laidOut = performance.now();
-  const result = await encodeRecapVideo(renderer, input.soundtrack, out, { preset: flag("preset") });
+  const result = await encodeRecapVideo(renderer, input.score, out, { preset: flag("preset") });
   const finished = performance.now(), usage = process.resourceUsage();
   // Node reports its peak resident size in kilobytes.
   const peak = usage.maxRSS * 1024;

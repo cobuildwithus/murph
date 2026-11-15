@@ -50,14 +50,16 @@ function requirePage(page: RecapVideoPage): void {
  */
 export function requireShape(input: RecapVideoInput): void {
   const { pages } = input.show;
-  if (pages.length > MAX_PAGES || tooLong(input.show.treatment) || Object.values(input.players).some(player => tooLong(player.name))) {
+  const title = input.stake.kind === "none" ? undefined : input.stake.title;
+  if (pages.length > MAX_PAGES || tooLong(input.show.treatment) || tooLong(title) || Object.values(input.players).some(player => tooLong(player.name))) {
     refuse("The show is larger than a recap can be.");
   }
+  if (title !== undefined && title.trim() === "") throw new RecapVideoRefusal("unsupported_stake", "The game's stake has no words.");
   pages.forEach(requirePage);
   for (const kind of ["song", "result"]) {
     if (pages.filter(page => page.kind === kind).length > 1) refuse("A show has one song and one result.");
   }
   for (const page of pages) {
-    if (page.song) requireSong(page.song, input.soundtrack.songMs);
+    if (page.song) requireSong(page.song, input.score.songMs);
   }
 }

@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { rm, stat } from "node:fs/promises";
 
 import type { RecapVideoRenderer } from "./renderer.js";
-import { RecapVideoRefusal, type RecapVideoSoundtrack } from "./types.js";
+import { RecapVideoRefusal, type RecapVideoScore } from "./types.js";
 
 /** Four stored parts of two megabytes each. A larger file is refused. */
 export const RECAP_VIDEO_MAX_BYTES = 8_000_000;
@@ -31,10 +31,10 @@ export function videoKbpsCeiling(durationMs: number, maxBytes: number): number {
 
 /**
  * Draws every frame in order and pipes it to ffmpeg, which only encodes and
- * adds the music. The picture is constant quality under a ceiling sized to the
+ * adds the score. The picture is constant quality under a ceiling sized to the
  * byte budget.
  */
-export async function encodeRecapVideo(renderer: RecapVideoRenderer, soundtrack: RecapVideoSoundtrack, outPath: string, options: RecapVideoEncodeOptions = {}): Promise<RecapVideoEncodeResult> {
+export async function encodeRecapVideo(renderer: RecapVideoRenderer, score: RecapVideoScore, outPath: string, options: RecapVideoEncodeOptions = {}): Promise<RecapVideoEncodeResult> {
   const maxBytes = options.maxBytes ?? RECAP_VIDEO_MAX_BYTES;
   const { durationMs, frameCount } = renderer.timeline;
   const ceiling = videoKbpsCeiling(durationMs, maxBytes);
@@ -43,10 +43,10 @@ export async function encodeRecapVideo(renderer: RecapVideoRenderer, soundtrack:
     // Info level, without the running progress line, so ffmpeg reports its own time and memory when it ends.
     "-v", "info", "-nostats", "-benchmark", "-y",
     "-f", "rawvideo", "-pix_fmt", "rgba", "-s", `${renderer.width}x${renderer.height}`, "-r", String(renderer.fps), "-i", "pipe:0",
-    "-i", soundtrack.path,
+    "-i", score.path,
     "-map", "0:v", "-map", "1:a",
-    // A lone song waits in silence for its page; the picture may outlast the music.
-    "-af", `adelay=${Math.round(soundtrack.startsAtMs)}:all=1,apad`,
+    // The picture outlasts the music by a second, or more for the last screen's hold.
+    "-af", "apad",
     "-vf", "scale=in_range=full:out_range=tv:out_color_matrix=bt709,format=yuv420p",
     "-t", (frameCount / renderer.fps).toFixed(3),
     "-c:v", "libx264", "-profile:v", "high", "-preset", options.preset ?? "medium", "-crf", "21",

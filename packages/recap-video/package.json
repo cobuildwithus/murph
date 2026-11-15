@@ -23,7 +23,8 @@
     "test": "pnpm exec vitest run --config vitest.config.ts --no-coverage",
     "test:coverage": "pnpm exec vitest run --config vitest.config.ts --coverage",
     "measure": "pnpm --dir ../.. exec tsx packages/recap-video/scripts/measure.ts",
-    "frames": "pnpm --dir ../.. exec tsx packages/recap-video/scripts/frames.ts"
+    "frames": "pnpm --dir ../.. exec tsx packages/recap-video/scripts/frames.ts",
+    "proof": "pnpm --dir ../.. exec tsx packages/recap-video/scripts/proof.ts"
   },
   "dependencies": {
     "@napi-rs/canvas": "1.1.0"

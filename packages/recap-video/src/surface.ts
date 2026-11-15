@@ -23,17 +23,27 @@ export const onNight = (alpha: number): string => `rgba(255,252,246,${alpha})`;
 
 export interface Rect { x: number; y: number; width: number; height: number }
 
-// MARK: Fonts. The app's own files under private names, so no system font can stand in for one.
+// MARK: Fonts. The app's own four files, and three it has no need of on a phone, all under private names so no system font can stand in for one.
 
-export type FontKey = "display" | "sans" | "sansBold" | "mono";
-const FONTS: Record<FontKey, { file: string; family: string }> = {
+/**
+ * `typed` fills in the punishment slip. The app types it in American
+ * Typewriter, which is Apple's and not ours to ship; Zilla Slab Medium stands
+ * in for it (see `TYPED_SCALE` in `stakes.ts`).
+ */
+export type FontKey = "display" | "sans" | "sansBold" | "mono" | "typed";
+/** What a phone draws from its own fonts: emoji, and letters the app's faces lack. */
+type BorrowedKey = "letters" | "emoji";
+const FONTS: Record<FontKey | BorrowedKey, { file: string; family: string }> = {
   display: { file: "FrauncesGame.ttf", family: "Murph Recap Display" },
   sans: { file: "DMSans-500.ttf", family: "Murph Recap Sans" },
   sansBold: { file: "DMSans-700.ttf", family: "Murph Recap Sans Bold" },
   mono: { file: "DMMono-500.ttf", family: "Murph Recap Mono" },
+  typed: { file: "ZillaSlab-Medium.ttf", family: "Murph Recap Typed" },
+  letters: { file: "NotoSans-Regular.ttf", family: "Murph Recap Letters" },
+  emoji: { file: "NotoColorEmoji.ttf", family: "Murph Recap Emoji" },
 };
 const fontPath = (file: string): string => fileURLToPath(new URL(`../assets/fonts/${file}`, import.meta.url));
-const coverage = new Map<FontKey, Set<number>>();
+const coverage = new Map<FontKey | BorrowedKey, Set<number>>();
 
 /** The code points a font file can draw, from its `cmap`. */
 function readCoverage(file: string): Set<number> {
@@ -72,7 +82,7 @@ function readCoverage(file: string): Set<number> {
 let registered = false;
 export function registerRecapFonts(): void {
   if (registered) return;
-  for (const [key, font] of Object.entries(FONTS) as [FontKey, { file: string; family: string }][]) {
+  for (const [key, font] of Object.entries(FONTS) as [FontKey | BorrowedKey, { file: string; family: string }][]) {
     const path = fontPath(font.file);
     if (!GlobalFonts.registerFromPath(path, font.family) || !GlobalFonts.has(font.family)) {
       throw new Error(`Recap video font ${font.file} could not be registered.`);
@@ -80,6 +90,25 @@ export function registerRecapFonts(): void {
     coverage.set(key, readCoverage(path));
   }
   registered = true;
+}
+
+/**
+ * What the borrowed text face may draw: Latin, Greek and Cyrillic letters and
+ * their marks, punctuation and common signs. Lines are broken at spaces and
+ * set left to right, so alphabets that need more than that (Arabic, Hebrew,
+ * Chinese, Japanese, Korean, Thai, the Indic scripts) are refused.
+ */
+const LETTER_RANGES: [number, number][] = [[0xa1, 0x52f], [0x1e00, 0x1fff], [0x2010, 0x2027], [0x2030, 0x205e], [0x20a0, 0x20bf], [0x2100, 0x214f], [0x2190, 0x22ff]];
+/** What joins emoji into one picture. */
+const EMOJI_JOINERS = new Set([0x200d, 0xfe0f]);
+
+/** Whether a letter is drawn by the style's own face, not a borrowed one. */
+const ownLetter = (letter: string, font: FontKey): boolean => coverage.get(font)?.has(letter.codePointAt(0) ?? 0) ?? false;
+const emojiLetter = (code: number): boolean => coverage.get("emoji")?.has(code) ?? false;
+
+function drawable(code: number, font: FontKey): boolean {
+  if (coverage.get(font)?.has(code) || emojiLetter(code)) return true;
+  return LETTER_RANGES.some(([from, to]) => code >= from && code <= to) && (coverage.get("letters")?.has(code) ?? false);
 }
 
 // MARK: Text
@@ -90,20 +119,25 @@ export interface TextStyle {
   /** The display face is variable; the others are drawn at their file's weight. */
   weight?: number;
   italic?: boolean;
+  /** From one line's top to the next. */
   lineHeight: number;
+  /** How much of `lineHeight` is space the app adds between lines: none of it sits above the first line or under the last. */
+  spacing?: number;
   /** Letter spacing in points. */
   tracking?: number;
   color: string;
 }
 
-const FILE_WEIGHT: Record<FontKey, number> = { display: 700, sans: 500, sansBold: 700, mono: 500 };
+const FILE_WEIGHT: Record<FontKey, number> = { display: 700, sans: 500, sansBold: 700, mono: 500, typed: 500 };
+const BORROWED = [FONTS.letters.family, FONTS.emoji.family].map(name => `"${name}"`).join(", ");
 
 export function applyText(ctx: Ctx, style: TextStyle): void {
   const weight = style.font === "display" ? style.weight ?? 700 : FILE_WEIGHT[style.font];
-  ctx.font = `${style.italic ? "italic " : ""}${weight} ${style.size}px "${FONTS[style.font].family}"`;
+  // No italic is asked of the canvas: the display face has none, and `drawLines` slants it the way the app does.
+  ctx.font = `${weight} ${style.size}px "${FONTS[style.font].family}", ${BORROWED}`;
   ctx.letterSpacing = `${style.tracking ?? 0}px`;
-  // Optical size is pinned to the file's default, as the app draws this face; left alone, the canvas would follow the font size.
-  ctx.fontVariationSettings = style.font === "display" ? `'wght' ${weight}, 'opsz' 9` : "normal";
+  // The display face at the axes the app pins it to: soft, wonky, optical size 36. Left alone, the canvas would follow the font size.
+  ctx.fontVariationSettings = style.font === "display" ? `'wght' ${weight}, 'opsz' 36, 'SOFT' 100, 'WONK' 1` : "normal";
   ctx.textBaseline = "alphabetic";
   ctx.textAlign = "left";
   ctx.fillStyle = style.color;
@@ -123,17 +157,38 @@ export function textWidth(text: string, style: TextStyle): number {
   return ctx.measureText(text).width;
 }
 
-/** Refuses text the bundled fonts cannot draw: an emoji or another script would come out as boxes. */
+/** Refuses text the bundled fonts cannot draw, or cannot set correctly: it would come out as boxes, or in the wrong order. */
 export function requireDrawable(text: string, style: TextStyle): void {
   registerRecapFonts();
-  const covered = coverage.get(style.font);
+  // A joiner belongs to the emoji before it. On its own, or after a letter, it would be an invisible mark the page was asked to show.
+  let afterEmoji = false;
   for (const letter of text) {
     const code = letter.codePointAt(0) ?? 0;
-    if (code <= 0x20 || code === 0xa0) continue;
-    if (!covered?.has(code)) {
+    if (code <= 0x20 || code === 0xa0) {
+      afterEmoji = false;
+      continue;
+    }
+    const joins: boolean = EMOJI_JOINERS.has(code) && afterEmoji;
+    if (!joins && (EMOJI_JOINERS.has(code) || !drawable(code, style.font))) {
       throw new RecapVideoRefusal("unsupported_text", `The recap's fonts cannot draw U+${code.toString(16).toUpperCase().padStart(4, "0")}.`);
     }
+    afterEmoji = joins || (emojiLetter(code) && !ownLetter(letter, style.font));
   }
+}
+
+/**
+ * A line as the runs an italic style draws: the style's own letters lean, and
+ * an emoji or a borrowed letter stands upright, even inside a word.
+ */
+export function slantRuns(line: string, font: FontKey): { text: string; leans: boolean }[] {
+  const runs: { text: string; leans: boolean }[] = [];
+  for (const letter of line) {
+    const space = letter.trim() === "", last = runs.at(-1);
+    // A space stays with the run before it, so a run never starts with one that its measure would lose.
+    if (last && (space || last.leans === ownLetter(letter, font))) last.text += letter;
+    else runs.push({ text: letter, leans: space || ownLetter(letter, font) });
+  }
+  return runs;
 }
 
 export interface WrapOptions {
@@ -143,9 +198,8 @@ export interface WrapOptions {
   keepHyphens?: boolean;
 }
 
-/** Breaks text into lines no wider than `maxWidth`. A single unit wider than that is a refusal. */
-export function wrapText(text: string, style: TextStyle, maxWidth: number, options: WrapOptions = {}): string[] {
-  requireDrawable(text, style);
+/** Breaks text into lines no wider than `maxWidth`, or null when a single unit is wider than that. */
+function breakText(text: string, style: TextStyle, maxWidth: number, options: WrapOptions): string[] | null {
   // A unit is what cannot be broken; `glue` is what joins it to the unit before it on a line.
   const units: { text: string; glue: string }[] = [];
   for (const word of text.split(/\s+/u).filter(Boolean)) {
@@ -159,9 +213,7 @@ export function wrapText(text: string, style: TextStyle, maxWidth: number, optio
     if (line && textWidth(join([...line, unit]), style) <= maxWidth) line.push(unit);
     else lines.push([unit]);
   }
-  for (const line of lines) {
-    if (textWidth(join(line), style) > maxWidth) throw new RecapVideoRefusal("does_not_fit", "A word is wider than its page.");
-  }
+  if (lines.some(line => textWidth(join(line), style) > maxWidth)) return null;
   if (options.pretty && lines.length > 1) {
     const last = lines.at(-1) ?? [], before = lines.at(-2) ?? [];
     const moved = before.at(-1);
@@ -172,6 +224,39 @@ export function wrapText(text: string, style: TextStyle, maxWidth: number, optio
     }
   }
   return lines.map(join);
+}
+
+/** Breaks text into lines no wider than `maxWidth`. A single unit wider than that is a refusal. */
+export function wrapText(text: string, style: TextStyle, maxWidth: number, options: WrapOptions = {}): string[] {
+  requireDrawable(text, style);
+  const lines = breakText(text, style, maxWidth, options);
+  if (!lines) throw new RecapVideoRefusal("does_not_fit", "A word is wider than its page.");
+  return lines;
+}
+
+/** A style at a share of its size, its leading and spacing with it, as the app shrinks text. */
+export const scaleStyle = (style: TextStyle, scale: number): TextStyle =>
+  ({ ...style, size: style.size * scale, lineHeight: style.lineHeight * scale, ...(style.tracking === undefined ? {} : { tracking: style.tracking * scale }) });
+
+export interface FitLimits {
+  maxLines: number;
+  /** The smallest share of its size the app lets this text shrink to. */
+  least: number;
+  maxHeight?: number;
+}
+
+/**
+ * Sets text the way the app's shrinking text is set: at its own size when it
+ * takes `maxLines` or fewer, else at the largest smaller size that does. Text
+ * the app would cut short with an ellipsis is a refusal.
+ */
+export function fitText(text: string, style: TextStyle, maxWidth: number, limits: FitLimits, options: WrapOptions = {}): { style: TextStyle; lines: string[] } {
+  requireDrawable(text, style);
+  for (let scale = 1; scale >= limits.least - 1e-9; scale -= 0.005) {
+    const sized = scale === 1 ? style : scaleStyle(style, scale), lines = breakText(text, sized, maxWidth, options);
+    if (lines && lines.length <= limits.maxLines && lines.length * sized.lineHeight <= (limits.maxHeight ?? Infinity)) return { style: sized, lines };
+  }
+  throw new RecapVideoRefusal("does_not_fit", "Words are too long for their place, even at their smallest size.");
 }
 
 export interface TextMetrics { ascent: number; descent: number }
@@ -193,8 +278,16 @@ export function fontMetrics(style: TextStyle): TextMetrics {
 /** Where a line's baseline sits in a line box that starts at `top`. */
 export function baselineIn(top: number, style: TextStyle): number {
   const { ascent, descent } = fontMetrics(style);
-  return top + (style.lineHeight - (ascent + descent)) / 2 + ascent;
+  return top + (style.lineHeight - (style.spacing ?? 0) - (ascent + descent)) / 2 + ascent;
 }
+
+/** The display face's own line height at a size, as the app's text takes it when it sets none. */
+export const displayLine = (size: number): number => Math.round(size * 1.2265);
+/** How tall a block of lines is: the space between lines does not follow the last one. */
+export const blockHeight = (lines: number, style: TextStyle): number => lines === 0 ? 0 : lines * style.lineHeight - (style.spacing ?? 0);
+
+/** The app slants its upright display face by a fifth for italics. */
+const SLANT = 0.2;
 
 export type Align = "left" | "center";
 
@@ -202,8 +295,20 @@ export type Align = "left" | "center";
 export function drawLines(ctx: Ctx, lines: string[], style: TextStyle, x: number, top: number, width: number, align: Align = "center"): void {
   applyText(ctx, style);
   lines.forEach((line, index) => {
-    const offset = align === "center" ? (width - ctx.measureText(line).width) / 2 : 0;
-    ctx.fillText(line, x + offset, baselineIn(top + index * style.lineHeight, style));
+    const offset = align === "center" ? (width - ctx.measureText(line).width) / 2 : 0, baseline = baselineIn(top + index * style.lineHeight, style);
+    if (!style.italic) {
+      ctx.fillText(line, x + offset, baseline);
+      return;
+    }
+    // Only the display face's own letters lean: an emoji or a borrowed letter beside them stands upright, as on the phone.
+    let left = x + offset;
+    for (const run of slantRuns(line, style.font)) {
+      ctx.save();
+      if (run.leans) ctx.transform(1, 0, -SLANT, 1, SLANT * baseline, 0);
+      ctx.fillText(run.text, left, baseline);
+      ctx.restore();
+      left += ctx.measureText(run.text).width;
+    }
   });
 }
 
