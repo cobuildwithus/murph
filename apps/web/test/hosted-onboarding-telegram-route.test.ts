@@ -1,4 +1,5 @@
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
@@ -51,9 +52,13 @@ vi.mock("@/src/lib/prisma", () => ({
 type HostedOnboardingTelegramRouteModule = typeof import("../app/api/hosted-onboarding/telegram/webhook/route");
 
 let hostedOnboardingTelegramRoute: HostedOnboardingTelegramRouteModule;
+let reactionHandler: typeof import("@/src/lib/hosted-onboarding/telegram-group-reactions").handleHostedTelegramGroupReactionWebhook;
 
 describe("hosted onboarding Telegram webhook route", () => {
   beforeAll(async () => {
+    reactionHandler = (await vi.importActual<typeof import("@/src/lib/hosted-onboarding/telegram-group-reactions")>(
+      "@/src/lib/hosted-onboarding/telegram-group-reactions",
+    )).handleHostedTelegramGroupReactionWebhook;
     hostedOnboardingTelegramRoute = await import("../app/api/hosted-onboarding/telegram/webhook/route");
   });
 
@@ -64,8 +69,60 @@ describe("hosted onboarding Telegram webhook route", () => {
     mocks.handleHostedOnboardingTelegramWebhook.mockResolvedValue({
       ok: true,
     });
-    mocks.handleHostedTelegramGroupReactionWebhook.mockResolvedValue(null);
+    mocks.handleHostedTelegramGroupReactionWebhook.mockImplementation(reactionHandler);
     mocks.sendHostedTelegramTextMessage.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
+
+  it("returns a server error for invalid local configuration before reading the body", async () => {
+    vi.stubEnv("HOSTED_ONBOARDING_INVITE_TTL_HOURS", "0");
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const response = await hostedOnboardingTelegramRoute.POST(telegramRequest("{"));
+    expect(response.status).toBe(500);
+    expect(mocks.handleHostedTelegramGroupReactionWebhook).not.toHaveBeenCalled();
+    expect(mocks.handleHostedOnboardingTelegramWebhook).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["invalid JSON", "{", "INVALID_JSON"],
+    ["non-object", "[]", "INVALID_REQUEST"],
+    ["missing update id", "{}", "INVALID_REQUEST"],
+    ["malformed message", JSON.stringify({ update_id: 1, message: { chat: false } }), "INVALID_REQUEST"],
+    ["malformed callback", JSON.stringify({ update_id: 1, callback_query: { id: "" } }), "INVALID_REQUEST"],
+    ["malformed poll", JSON.stringify({ update_id: 1, poll: {} }), "INVALID_REQUEST"],
+    ["malformed answer", JSON.stringify({ update_id: 1, poll_answer: {} }), "INVALID_REQUEST"],
+  ])("explicitly rejects %s at the payload boundary", async (_name, body, code) => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const response = await hostedOnboardingTelegramRoute.POST(telegramRequest(body));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: { code } });
+    expect(mocks.handleHostedOnboardingTelegramWebhook).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    new TypeError("Synthetic service fault"),
+    new RangeError("Synthetic configuration fault"),
+    new URIError("Synthetic stored route fault"),
+    new SyntaxError("Synthetic stored JSON fault"),
+    new ContractValidationError("Synthetic stored contract fault"),
+    new TypeError("fetch failed"),
+  ])("returns and logs a server error for $name from the message service", async (error) => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mocks.handleHostedOnboardingTelegramWebhook.mockRejectedValueOnce(error);
+    const response = await hostedOnboardingTelegramRoute.POST(telegramRequest(JSON.stringify({ update_id: 1 })));
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({ error: { code: "INTERNAL_ERROR", message: "Internal error." } });
+    expect(log).toHaveBeenCalled();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("keeps an invalid reaction deliberately ignored", async () => {
+    const response = await hostedOnboardingTelegramRoute.POST(telegramRequest(JSON.stringify({ update_id: 1, message_reaction: {} })));
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual({ ignored: true, ok: true, reason: "invalid-telegram-group-reaction-update" });
+    expect(mocks.handleHostedOnboardingTelegramWebhook).not.toHaveBeenCalled();
   });
 
   it("does not expose a public GET health handler", () => {
@@ -73,7 +130,7 @@ describe("hosted onboarding Telegram webhook route", () => {
   });
 
   it("forwards ordinary updates into the hosted Telegram message service", async () => {
-    const rawBody = JSON.stringify({ ok: true });
+    const rawBody = JSON.stringify({ update_id: 1 });
     const request = new Request("https://join.example.test/api/hosted-onboarding/telegram/webhook", {
       method: "POST",
       body: rawBody,
@@ -321,7 +378,7 @@ describe("hosted onboarding Telegram webhook route", () => {
     const response = await hostedOnboardingTelegramRoute.POST(
       new Request("https://join.example.test/api/hosted-onboarding/telegram/webhook", {
         method: "POST",
-        body: JSON.stringify({ ok: true }),
+        body: JSON.stringify({ update_id: 1 }),
         headers: {
           "x-telegram-bot-api-secret-token": "telegram-secret",
         },
@@ -339,3 +396,11 @@ describe("hosted onboarding Telegram webhook route", () => {
     });
   });
 });
+
+function telegramRequest(body: string): Request {
+  return new Request("https://join.example.test/api/hosted-onboarding/telegram/webhook", {
+    body,
+    headers: { "x-telegram-bot-api-secret-token": "telegram-secret" },
+    method: "POST",
+  });
+}

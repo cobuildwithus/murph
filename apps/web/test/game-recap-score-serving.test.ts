@@ -1,3 +1,4 @@
+import { GET as getRecapAsset } from "../app/api/game/v1/games/[id]/recap-assets/[slot]/route";
 import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -7,6 +8,7 @@ import { inspectGeneratedMp3Audio, inspectMp3Frames } from '@murphai/operator-co
 import { hostedRecapMediaObjectKey } from '@murphai/hosted-execution/storage-paths';
 import { gameRecapEnvelopeSchema, presentGameRecap } from '@murphai/contracts/recap-show';
 
+vi.mock("@/src/lib/game/http/auth", () => ({ requireGameMember: async () => "synthetic-viewer" }));
 const state = vi.hoisted(() => ({ envelope: '', allowed: true, revoked: false }));
 vi.mock('@/src/lib/game/service', () => ({ readGame: async () => state.allowed ? { recap: { show: {} } } : null }));
 vi.mock('@/src/lib/game/access', () => ({ isRecapMediaVisible: () => true }));
@@ -55,6 +57,28 @@ it('validates, stores once and serves authorized full and sliced views after ful
     state.allowed = false; expect(await readAuthorizedRecapAsset({ ...input, slot })).toBeNull(); state.allowed = true;
     state.revoked = true; expect(await readAuthorizedRecapAsset({ ...input, slot })).toBeNull(); state.revoked = false;
   }
+  const requestAsset = () => getRecapAsset(new Request(`https://example.test/recap?generation=${generationId}`), {
+    params: Promise.resolve({ id: input.gameId, slot: "song" }),
+  });
+  state.allowed = false;
+  const refused = await requestAsset();
+  expect(refused.status).toBe(404);
+  expect(await refused.json()).toMatchObject({ error: { code: "GAME_NOT_FOUND" } });
+  state.allowed = true;
+  for (const corruptEnvelope of [
+    {},
+    { ...envelope, assets: [{ ...envelope.assets[0], hash: "b".repeat(64) }] },
+    { ...envelope, assets: [{ ...envelope.assets[0], songStartMs: cut.timeMs + 1 }] },
+  ]) {
+    state.envelope = JSON.stringify(corruptEnvelope);
+    const response = await requestAsset();
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({ error: { code: "INTERNAL_ERROR" } });
+  }
+  // A failed generation stores a bare fallback story on purpose: it has no media.
+  state.envelope = JSON.stringify(envelope.story);
+  expect((await requestAsset()).status).toBe(404);
+  state.envelope = JSON.stringify(envelope);
   // A modification before C must still invalidate the legacy slice.
   const file = path.join(root, hostedRecapMediaObjectKey({ userId: ownerMemberId, mediaId: storageKey }));
   const stored = JSON.parse(await readFile(file, 'utf8'));

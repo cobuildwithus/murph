@@ -63,6 +63,35 @@ const partialCases = (
 describe.skipIf(!runPostgresProof)(
   "Hosted Linq rich-link partial ordering with PostgreSQL",
   () => {
+    it("rolls back partial provider-event ingestion and recognizes committed redelivery", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 2 });
+      const eventId = `synthetic-redelivery-${randomUUID()}`;
+      const eventKey = createHostedLinqProviderEventLookupKey(eventId);
+      const event = parseHostedLinqProviderEvent({ event: {
+        api_version: "v3", event_id: eventId, event_type: "chat.group_icon_updated",
+        created_at: "2026-11-14T12:00:00Z", data: {},
+      } });
+      if (!event) throw new Error("Expected a provider event.");
+      const ingest = () => prisma.$transaction(tx => ingestHostedLinqProviderEventTx({ event, prisma: tx }));
+      try {
+        await expect(prisma.$transaction(async tx => {
+          await ingestHostedLinqProviderEventTx({ event, prisma: tx });
+          throw new TypeError("Synthetic failure after provider receipt");
+        })).rejects.toThrow("Synthetic failure after provider receipt");
+        expect(await prisma.hostedLinqProviderEvent.count({ where: { eventId: eventKey } })).toBe(0);
+        await expect(ingest()).resolves.toMatchObject({ duplicate: false });
+        const stored = await prisma.hostedLinqProviderEvent.findUniqueOrThrow({ where: { eventId: eventKey } });
+        // Both a post-commit failure and a lost 2xx retry the committed event.
+        for (let delivery = 0; delivery < 2; delivery += 1) {
+          await expect(ingest()).resolves.toMatchObject({ duplicate: true });
+          expect(await prisma.hostedLinqProviderEvent.findUniqueOrThrow({ where: { eventId: eventKey } })).toEqual(stored);
+        }
+      } finally {
+        await prisma.hostedLinqProviderEvent.deleteMany({ where: { eventId: eventKey } });
+        await prisma.$disconnect();
+      }
+    });
+
     it.each(["rich-link", "sleep-note"])("consumes the exact answered mailbox row only after the %s pair recovers", async (pair) => {
       const prisma = createPrismaClient({ databaseUrl, poolMax: 4 });
       const suffix = randomUUID();

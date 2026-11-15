@@ -1,6 +1,8 @@
+import { jsonError } from "@/src/lib/hosted-onboarding/http";
+import { withGameRuleErrors } from "@/src/lib/game/http/errors";
 import { describe, expect, it } from "vitest";
 import { gameChangeMajority, normalizeGroupGameChange, gameChangeCancellationNeedsNotice, decideApprovedGameChange, decideGameChange, firstUnstartedGameDay, gameChangeControls, isGameChangeExpired, parsePendingGameChange, pendingGameChangeView } from "@/src/lib/game/changes";
-import { parseGameCommand } from "@/src/lib/game/command";
+import { parseGameChange, parseGameCommand } from "@/src/lib/game/command";
 import { decideNewTerms, scorePlayer, settleDueAt, type RuleState, type TermWords } from "@/src/lib/game/rules";
 import { dayStartInstant } from "@/src/lib/game/time";
 import type { GamePendingChange, GameTermsInput } from "@/src/lib/game/contract";
@@ -424,4 +426,13 @@ describe("group change rules", () => {
     expect(parseGameCommand({ ...command, proposalId: "proposal_group" })).toMatchObject({ proposalId: "proposal_group" });
     expect(() => parseGameCommand({ ...command, proposalId: "short" })).toThrow();
   });
+});
+
+it("treats a corrupt stored change as a server failure while rejecting the same caller input", async () => {
+  const stored = await withGameRuleErrors(async () => parsePendingGameChange({ v: 1, ...pending(), change: {} })).catch(jsonError);
+  expect(stored).toBeInstanceOf(Response);
+  expect((stored as Response).status).toBe(500);
+  const request = await withGameRuleErrors(async () => parseGameChange({})).catch(jsonError);
+  expect((request as Response).status).toBe(400);
+  expect(await (request as Response).json()).toMatchObject({ error: { code: "INVALID_REQUEST", message: "Choose a game change." } });
 });
