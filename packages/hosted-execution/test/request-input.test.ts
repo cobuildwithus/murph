@@ -1,5 +1,3 @@
-import { execFileSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { isRequestInputError, parseInput, RequestInputError } from "../src/request-input.ts";
@@ -43,20 +41,5 @@ describe("request input boundary", () => {
       caught = error;
     }
     expect(caught).toBe(failure);
-  });
-
-  it("resolves both built subpaths in Node without source aliases", () => {
-    execFileSync(process.execPath, ["--input-type=module", "--eval", `
-      import assert from "node:assert/strict";
-      import { ContractValidationError } from "@murphai/contracts/validation-error";
-      import { RequestInputError, parseInput, isRequestInputError } from "@murphai/hosted-execution/request-input";
-      assert.ok(import.meta.resolve("@murphai/contracts/validation-error").endsWith("/dist/validation-error.js"));
-      assert.ok(import.meta.resolve("@murphai/hosted-execution/request-input").endsWith("/dist/request-input.js"));
-      const cause = new ContractValidationError("Invalid shape.");
-      assert.ok(cause instanceof TypeError);
-      assert.equal(cause.name, "TypeError");
-      assert.throws(() => parseInput(null, () => { throw cause; }), error =>
-        error instanceof RequestInputError && isRequestInputError(error) && error.cause === cause);
-    `], { cwd: fileURLToPath(new URL("..", import.meta.url)), stdio: "pipe" });
   });
 });

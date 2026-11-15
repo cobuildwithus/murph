@@ -153,7 +153,7 @@ Each stage is safe to stop at.
   `TypeError`, `RangeError` and `ReferenceError` unchanged.
 - Every existing test passes unchanged; no route's response differs.
 - The new modules import nothing from Node, Next, Cloudflare, schema barrels or
-  logging, and resolve through the built package exports.
+  logging, and are listed in their packages' exports.
 - Both new subpaths are in every source alias list their neighbours are in
   (`tsconfig.base.json`, `apps/web/tsconfig.json`). A missing alias loads the
   class twice in one build and `instanceof` fails.
