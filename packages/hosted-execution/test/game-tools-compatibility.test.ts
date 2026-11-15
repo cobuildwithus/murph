@@ -60,6 +60,37 @@ it.skipIf(process.env.MURPH_VERIFY_GAME_SKEW !== "1")("old runners reject revisi
     expect(legacy.parseHostedExecutionEvent(legacyPair)).toEqual(parseHostedExecutionEvent(legacyPair));
   } finally { await rm(target, { force: true }); }
 });
+// What Web returns after a day correction changes a finished game's outcome: an existing receipt status, the
+// existing optional chatLine, and a settled game that lists its days only while they can still be corrected.
+const settledCorrection = (progress?: object) => ({ action: "update_game", result: { status: "ok", dayOutcome: { date: "2030-04-03", status: "credited" },
+  chatLine: "Alex's check-in for Wednesday, April 3 now counts. That changes the result. The game ended in a 6–6 tie.",
+  state: { games: [{ ...game, status: "settled", ...(progress ? { progress } : {}),
+    result: { scores: [{ memberId: "player_first", seat: 0, score: 6, misses: 1 }, { memberId: "player_second", seat: 1, score: 6, misses: 1 }], tickets: [] } }] } } });
+const settledDays = { checkedAt: "2030-04-09T12:00:00Z", players: [{ memberId: "player_first", score: 6, target: 7, currentDayIndex: null, currentEntryId: null, attemptsRemaining: 0,
+  days: [{ dayIndex: 2, date: "2030-04-03", status: "posted" }] }] };
+
+it("reads a finished game's day correction with no new field", () => {
+  for (const payload of [settledCorrection(settledDays), settledCorrection()]) {
+    expect(hostedGameToolResponseSchema.parse(payload)).toEqual(payload);
+    expect(parseHostedRuntimeGroupToolResponse(payload)).toEqual(payload);
+  }
+});
+
+it.skipIf(process.env.MURPH_VERIFY_GAME_SKEW !== "1")("the runner deployed before this change reads a finished game's day correction", async () => {
+  const root = fileURLToPath(new URL("../../../", import.meta.url));
+  const suffix = randomUUID();
+  const oldTools = new URL(`../src/.settled-correction-skew-${suffix}.ts`, import.meta.url);
+  // The public main commit the hosted runner was built from when this change was written.
+  await writeFile(oldTools, execFileSync("git", ["show", "ebf25597213aca48a42f216018f6dfc6d5b2ab32:packages/hosted-execution/src/game-tools.ts"], { cwd: root, encoding: "utf8" }), { flag: "wx" });
+  try {
+    const old = await import(oldTools.href) as typeof import("../src/game-tools.ts");
+    for (const payload of [settledCorrection(settledDays), settledCorrection()]) expect(old.hostedGameToolResponseSchema.parse(payload)).toEqual(payload);
+    // And new Web still reads what that runner sends for the same request.
+    const request = { action: "update_game", origin, update: { operation: "mark_complete", gameId: game.id, date: "2030-04-03", text: "Read a chapter" } };
+    expect(old.hostedGameToolRequestSchema.parse(request)).toEqual(hostedGameToolRequestSchema.parse(request));
+  } finally { await rm(oldTools, { force: true }); }
+});
+
 const game = {
   id: "game_synthetic", status: "live", lengthDays: 7, startsOn: "2030-04-01",
   terms: { n: 1, fromDay: 0, tasks: [{ seat: 0, text: "Walk" }, { seat: 1, text: "Read" }], schedule: { days: [0, 1, 2, 3, 4] }, stakes: [{ kind: "winner_gets", item: "Choose the next game" }] },

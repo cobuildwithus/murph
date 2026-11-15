@@ -1,8 +1,8 @@
 import {
   eventSourceSchema,
-  isValidIanaTimeZone,
   mealNutritionSchema,
-} from '@murphai/contracts'
+} from '@murphai/contracts/zod'
+import { isValidIanaTimeZone } from '@murphai/contracts/time'
 import { ALL_QUERY_ENTITY_FAMILIES } from '@murphai/query/entity-families'
 import * as z from '@murphai/contracts/zod-runtime'
 import { isoTimestampSchema, pathSchema } from './primitive-schemas.js'

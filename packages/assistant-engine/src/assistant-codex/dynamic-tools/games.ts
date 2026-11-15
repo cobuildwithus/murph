@@ -40,11 +40,10 @@ export const MURPH_GENERATE_IMAGE_RECAP_TOOL = {
 } as const
 export const MURPH_GENERATE_SONG_RECAP_TOOL = {
   namespace: 'murph', name: 'generate_song',
-  description: 'Generate the show\'s twenty-second theme song. Returns the path of the song for the draft\'s files.',
-  inputSchema: { type: 'object', additionalProperties: false, required: ['prompt', 'lyrics'], properties: {
-    prompt: { type: 'string', minLength: 1, maxLength: 4100, description: 'The sound only: genre, tempo, instruments, the kind of voice.' },
-    lyrics: { type: 'array', minItems: 1, maxItems: 20, items: { type: 'string', minLength: 1, maxLength: 200 },
-      description: 'The exact lines to sing, in order, one per item, with no labels like [Chorus].' },
+  description: "Generate the show's music from the draft: the band under each page, then the sung theme song. Returns the path of the song for the draft's files.",
+  inputSchema: { type: 'object', additionalProperties: false, required: ['draftPath', 'voice'], properties: {
+    draftPath: { type: 'string', minLength: 1, maxLength: 512, description: "The draft's path." },
+    voice: { type: 'string', minLength: 1, maxLength: 220, description: 'The singer, in a few words: the kind of voice and how it sings.' },
   } },
 } as const
 export const MURPH_WRITE_RECAP_TOOL = {
@@ -96,8 +95,8 @@ export const GAME_GROUP_MODE_GUIDANCE = [
   'Ending early: only the starter can call cancel_game, and only before any check-in and before a post is due, even if the game is already live. Otherwise a live game ends early only when a player clearly asks to stop the whole game; a joke, a missed day or venting is not that request. A remaining player calls propose with kind call_off, every remaining player must say yes (yesNeeded counts everyone left), and one no closes the ask.',
   'Prove it: only the challenged player can concede their own day. Do not judge the evidence or ask the group for a verdict.',
 ].join('\n')
-/** Added while a game is live: how a player corrects one of their own days. */
-export const GAME_DAY_CORRECTION_GUIDANCE = "Correcting a day: when a player says they did not finish a day, call update_game mark_incomplete with that date. When a player says they did a day, or asks you to count it, call mark_complete with that date. Take their word: do not ask for proof, do not put it to the other players, and do not offer this unasked. The post for a counted day is the player's own words, so leave text out unless they give the words for the post (for example \"make my post say: ...\") or are answering your question about what it should say; then pass their words exactly as written. Both calls act only on the speaker's own days in a live game in this chat, and need gameId and date but no proposalId and nobody's approval. Work out the date from the message's Occurred at time, converted to the speaker's timeZone: before 3 AM, today is the previous calendar date and yesterday is the day before that; from 3 AM on, today is that calendar date. Do not use the current time. If there is no timestamp, or the message covers a range of times, ask once which day. A refusal names its rule: an open day is still theirs to post, and a day off, or a game that requires a photo or heart rate, cannot be counted this way."
+/** Added while a game is live, or finished and still listing its days: how a player corrects one of their own days. */
+export const GAME_DAY_CORRECTION_GUIDANCE = "Correcting a day: when a player says they did not finish a day, call update_game mark_incomplete with that date. When a player says they did a day, or asks you to count it, call mark_complete with that date. Take their word: do not ask for proof, do not put it to the other players, and do not offer this unasked. The post for a counted day is the player's own words, so leave text out unless they give the words for the post (for example \"make my post say: ...\") or are answering your question about what it should say; then pass their words exactly as written. Both calls act only on the speaker's own days, in a live game in this chat or a finished one that still lists its days, and need gameId and date but no proposalId and nobody's approval. A finished game lists its days for 7 days after it ends; after that its result is final. While it lists them it is one of the games a day correction can apply to. Work out the date from the message's Occurred at time, converted to the speaker's timeZone: before 3 AM, today is the previous calendar date and yesterday is the day before that; from 3 AM on, today is that calendar date. Do not use the current time. If there is no timestamp, or the message covers a range of times, ask once which day. A refusal names its rule: an open day is still theirs to post, and a day off, or a game that requires a photo or heart rate, cannot be counted this way."
 /** Added while a game is waiting or live. */
 export const GAME_REMINDER_GUIDANCE = "Reminders: when a player asks for a reminder for their own game, call update_game set_reminder with minutes after midnight in their local time. It is never a new room automation, and an older scheduled room reminder is left to finish on its own. Leave on out for a change of time; pass on together with gameId only when they ask to switch one game's reminders on or off. Ask which task only when several games could fit. A reminder belongs to the player who asked: never set another player's reminder from someone else's words or a group vote."
 /** What a read carries when the room's only games are group games that people are still joining. */
@@ -117,6 +116,8 @@ export const GAME_UPDATE_RESULT_GUIDANCE = {
   declined: 'The ask is declined and the terms stay as they were. Say so in a few words.',
 } as const
 const GAME_DAY_REPLY_GUIDANCE = ' Reply in one plain line that names the date or weekday, with no day number, score change or remark about another player.'
+/** A day correction that changed a finished game's outcome returns the one line to send. */
+export const GAME_RESULT_CORRECTED_GUIDANCE = 'This day is in a finished game, and the change altered its result. Reply with the chatLine text exactly as written and nothing else.'
 /** What a counted or uncounted day came back as. */
 export const GAME_DAY_OUTCOME_GUIDANCE = {
   marked_incomplete: 'The day is now marked not done.' + GAME_DAY_REPLY_GUIDANCE,
@@ -381,12 +382,15 @@ function gameResultForModel(response: GameToolResponse, request: OrdinaryGameReq
   return { ...response, result: { ...result, state } }
 }
 
-/** Stake keys are app bookkeeping. A finished game has no days, asks or controls left to act on. */
+/**
+ * Stake keys are app bookkeeping. A finished game has no asks or controls left to act on, and
+ * it keeps its days only while the app still sends them: that is how long they can be corrected.
+ */
 function gameForModel(game: ChatGame, withDays: boolean) {
   const terms = { ...game.terms, stakes: game.terms.stakes.map(({ key: _key, ...stake }) => stake) }
   if (!OPEN_GAME_STATUSES.includes(game.status)) {
-    const { progress: _progress, changeControls: _changeControls, pendingChange: _pendingChange, ...finished } = game
-    return { ...finished, terms }
+    const { progress, changeControls: _changeControls, pendingChange: _pendingChange, ...finished } = game
+    return { ...finished, terms, ...(withDays && isCorrectableFinishedGame(game) && progress ? { progress: progressForModel(progress) } : {}) }
   }
   const { progress, ...open } = game
   return { ...open, terms, ...(withDays && progress ? { progress: progressForModel(progress) } : {}) }
@@ -408,7 +412,9 @@ function gameResultGuidance(payload: GameToolResult, request: OrdinaryGameReques
   if (request.action === 'read_game') {
     if (payload.status !== 'ok') return ''
     const open = games.filter(game => OPEN_GAME_STATUSES.includes(game.status))
-    return '\n' + unsentGameRules([...(open.length > 1 ? [GAME_SELECTION_GUIDANCE] : []), ...gameReadGuidance(games, open)], turnState).join('\n')
+    // A finished game whose days can still be corrected is one more game a message can mean.
+    const actable = open.length + games.filter(isCorrectableFinishedGame).length
+    return '\n' + unsentGameRules([...(actable > 1 ? [GAME_SELECTION_GUIDANCE] : []), ...gameReadGuidance(games, open)], turnState).join('\n')
   }
   const said = payload.status !== 'ok' ? gameRefusalGuidance(payload, request.action)
     : request.action === 'game_photo' ? ('photoOutcome' in payload && payload.photoOutcome ? GAME_PHOTO_OUTCOME_GUIDANCE[payload.photoOutcome] : '')
@@ -425,7 +431,12 @@ function unsentGameRules(rules: readonly string[], turnState: GameRulesTurnState
   return unsent.length < rules.length ? [GAME_RULES_REPEAT_POINTER, ...unsent] : unsent
 }
 
-type GameRuleFacts = { status: string; maxPlayers?: number | null; pendingInviteeCount?: number | null }
+type GameRuleFacts = { status: string; maxPlayers?: number | null; pendingInviteeCount?: number | null; progress?: unknown }
+
+/** A finished pair game whose days the app still sends: its players can still correct their own days. */
+function isCorrectableFinishedGame(game: GameRuleFacts): boolean {
+  return game.status === 'settled' && game.maxPlayers !== 10 && game.progress != null
+}
 
 /** The rules for what the room holds right now. `open` is the subset of `games` still in play. */
 function gameReadGuidance(games: readonly GameRuleFacts[], open: readonly GameRuleFacts[]): string[] {
@@ -439,13 +450,13 @@ function gameReadGuidance(games: readonly GameRuleFacts[], open: readonly GameRu
     ...(pair.length ? [GAME_PAIR_CHAT_GUIDANCE] : []),
     ...(group.some(game => game.status === 'invited' || (game.pendingInviteeCount ?? 0) > 0) ? [GAME_GROUP_JOIN_GUIDANCE] : []),
     ...(group.length ? [GAME_GROUP_MODE_GUIDANCE] : []),
-    ...(live ? [GAME_DAY_CORRECTION_GUIDANCE] : []),
+    ...(live || games.some(isCorrectableFinishedGame) ? [GAME_DAY_CORRECTION_GUIDANCE] : []),
     ...(open.length ? [GAME_REMINDER_GUIDANCE] : [])]
 }
 
 /** What to say after a successful update, worked out from the operation and the state it returned. */
 function gameUpdateGuidance(payload: GameToolResult, update: HostedGameUpdate, games: readonly { id: string; status: string; pendingChange?: unknown }[]): string {
-  if ('dayOutcome' in payload && payload.dayOutcome) return GAME_DAY_OUTCOME_GUIDANCE[payload.dayOutcome.status]
+  if ('dayOutcome' in payload && payload.dayOutcome) return 'chatLine' in payload && payload.chatLine ? GAME_RESULT_CORRECTED_GUIDANCE : GAME_DAY_OUTCOME_GUIDANCE[payload.dayOutcome.status]
   if (update.operation === 'set_reminder') return 'reaches' in payload && payload.reaches ? GAME_REMINDER_OUTCOME_GUIDANCE[payload.reaches] : ''
   if (update.operation === 'create') return GAME_UPDATE_RESULT_GUIDANCE.created
   if (update.operation === 'cancel_game') return GAME_UPDATE_RESULT_GUIDANCE.ended
@@ -527,8 +538,9 @@ async function executeRecapFileWrite(input: { context: AssistantHostedToolContex
     const draft = gameRecapDraftSchema.parse(await context.readGameRecapDraft(input.draftPath))
     const origin = { kind: 'game_recap' as const, gameId: scope.gameId, eventId: scope.eventId }
     const assets = []
-    for (const file of draft.files) {
-      const media = await context.readGameRecapMedia(file.path)
+    // Validate every selection against the final draft before uploading any bytes.
+    const selections = await Promise.all(draft.files.map(async file => ({ file, media: await context.readGameRecapMedia!(file.path, draft.story) })))
+    for (const { file, media } of selections) {
       const uploaded = await tool.request({ action: 'read_game', origin, recapRead: { kind: 'upload', slot: file.slot, ...media } })
       if (uploaded.result.status !== 'ok' || !('recapGame' in uploaded.result)) throw new Error('Media upload failed.')
       assets.push(recapAssetSchema.parse(uploaded.result.recapGame))

@@ -22,6 +22,9 @@ import {
   GameRuleError,
   isGameDue,
   isGameDecided,
+  isSettledGameCorrectable,
+  settledGameEnd,
+  GAME_SETTLED_OPEN_MS,
   canChallengeGame,
   decideChallenge,
   gameChallengeStatus,
@@ -860,6 +863,105 @@ describe("a missed day counted on the player's word", () => {
     expect(scorePlayer(state, player, 2)).toMatchObject({ score: 3, misses: 0 });
     expect(playerStreak(state, player, now)).toBe(3);
     expect(count(state, 1, now).outcome.status).toBe("already_complete");
+  });
+});
+
+describe("a finished pair game's days can still be corrected for 7 days", () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  const entry = (memberId: string, dayIndex: number): RuleState["entries"][number] => ({ attempt: 1, dayIndex, id: `entry_${memberId}_${dayIndex}`, kind: "words",
+    mediaKeys: [], memberId, receivedAt: new Date("2026-10-20T12:00:00Z"), blurHash: null, withdrawnAt: null });
+  /** Every day through `lastDay` is posted except the listed misses; the game then ended at `endedAt`. */
+  function settled(options: { schedule?: GameSchedule; lastDay?: number; missed?: [number[], number[]]; endedAt?: (state: RuleState) => Date } = {}): RuleState {
+    const state = live(invited(options.schedule), NYC);
+    state.game.terms.versions[0] = { ...state.game.terms.versions[0], checkInKind: "any" };
+    const [leo, ava] = options.missed ?? [[2], []];
+    for (let day = 0; day <= (options.lastDay ?? 6); day += 1) {
+      if (!leo.includes(day)) state.entries.push(entry(LEO, day));
+      if (!ava.includes(day)) state.entries.push(entry(AVA, day));
+    }
+    // By default it settled on the morning after its last day.
+    return { ...state, game: { ...state.game, status: "settled", settledAt: (options.endedAt ?? ((game) => at(game, LEO, 7, 9)))(state) } };
+  }
+  const correct = (state: RuleState, dayIndex: number, after: number, input: { memberId?: string; incomplete?: boolean; hasWords?: boolean } = {}) => {
+    const now = new Date(state.game.settledAt!.getTime() + after);
+    return decideDayCompletion(state, { memberId: input.memberId ?? LEO, date: addDays(playerFor(state, LEO)!.dayOne!, dayIndex),
+      incomplete: input.incomplete ?? false, credit: input.incomplete ? undefined : true, hasWords: input.hasWords ?? true, now, clock: now });
+  };
+
+  it("counts or uncounts the speaker's own day exactly as a live game would", () => {
+    const state = settled();
+    expect(correct(state, 2, DAY)).toMatchObject({ dayIndex: 2, changed: true, outcome: { status: "credited" } });
+    expect(correct(state, 2, DAY, { hasWords: false })).toMatchObject({ changed: false, outcome: { status: "words_needed" } });
+    expect(correct(state, 3, DAY, { incomplete: true })).toMatchObject({ dayIndex: 3, changed: true, outcome: { status: "marked_incomplete" } });
+    expect(correct(state, 3, DAY)).toMatchObject({ changed: false, outcome: { status: "already_complete" } });
+    // The last day is closed too: a finished game has no open day left to post on.
+    expect(correct(settled({ missed: [[6], []] }), 6, 60_000)).toMatchObject({ changed: true, outcome: { status: "credited" } });
+    // The live refusals still apply.
+    expect(() => correct(state, 7, DAY)).toThrow("already started");
+    expect(() => correct(state, -1, DAY)).toThrow("already started");
+    state.game.terms.versions[0].checkInKind = "photo";
+    expect(() => correct(state, 2, DAY)).toThrow("requires a photo check-in");
+    expect(codeOf(() => correct(state, 2, DAY, { memberId: "hbm_stranger" }))).toBe("NOT_A_PLAYER");
+  });
+
+  it("is final once 7 days have passed since it ended", () => {
+    const state = settled();
+    expect(isSettledGameCorrectable(state, new Date(state.game.settledAt!.getTime() + GAME_SETTLED_OPEN_MS - 1))).toBe(true);
+    expect(correct(state, 2, GAME_SETTLED_OPEN_MS - 1).outcome.status).toBe("credited");
+    for (const incomplete of [false, true]) {
+      expect(codeOf(() => correct(state, incomplete ? 3 : 2, GAME_SETTLED_OPEN_MS, { incomplete }))).toBe("GAME_NOT_LIVE");
+      expect(() => correct(state, incomplete ? 3 : 2, GAME_SETTLED_OPEN_MS, { incomplete })).toThrow("This game ended more than 7 days ago, so its result is final.");
+    }
+    expect(isSettledGameCorrectable(state, new Date(state.game.settledAt!.getTime() + GAME_SETTLED_OPEN_MS))).toBe(false);
+  });
+
+  it("stays closed for a group game, a changed roster and a game that is not settled", () => {
+    const group = settled();
+    group.game.seats = 10;
+    expect(codeOf(() => correct(group, 2, DAY))).toBe("GAME_NOT_LIVE");
+    expect(isSettledGameCorrectable(group, group.game.settledAt!)).toBe(false);
+    const departed = settled();
+    departed.players[1].leftAt = departed.game.settledAt;
+    expect(() => correct(departed, 2, DAY)).toThrow("This game has ended.");
+    expect(isSettledGameCorrectable(departed, departed.game.settledAt!)).toBe(false);
+    expect(codeOf(() => correct(departed, 2, DAY, { memberId: AVA }))).toBe("NOT_A_PLAYER");
+    const liveGame = settled();
+    liveGame.game.status = "live";
+    expect(isSettledGameCorrectable(liveGame, liveGame.game.settledAt!)).toBe(false);
+    const voided = settled();
+    voided.game.status = "void";
+    expect(codeOf(() => correct(voided, 2, DAY))).toBe("GAME_NOT_LIVE");
+  });
+
+  it("treats only the days that had started when the game ended as its days", () => {
+    // Any 3 of 7 days: Leo reached 3 on the third day, Ava on the fourth, and the game ended that evening.
+    const early = settled({ schedule: { count: 3 }, lastDay: 3, missed: [[3], [0]], endedAt: (state) => at(state, LEO, 3, 20) });
+    expect(isGameDecided({ ...early, game: { ...early.game, status: "live" } })).toBe(true);
+    // Days before the end are closed, and so is the day it ended on.
+    expect(correct(early, 0, 3 * DAY, { memberId: AVA }).outcome.status).toBe("credited");
+    expect(correct(early, 3, 3 * DAY).outcome.status).toBe("credited");
+    // The calendar ran on for three more days; none of them is a day of this game.
+    for (const day of [4, 5, 6]) expect(() => correct(early, day, 6 * DAY)).toThrow("already started");
+  });
+
+  it("lists a finished game's days for Murph as they stood when it ended", () => {
+    const early = settled({ schedule: { count: 3 }, lastDay: 3, missed: [[3], [0]], endedAt: (state) => at(state, LEO, 3, 20) });
+    const read = new Date(early.game.settledAt!.getTime() + 3 * DAY);
+    const statuses = (asOf?: Date) => gameChatProgress(early, read, asOf).players[0].days.map(day => day.status);
+    // Read three days later, the calendar days after the end are not days anyone missed.
+    expect(statuses(settledGameEnd(early, read, read))).toEqual(["posted", "posted", "posted", "not_posted", "upcoming", "upcoming", "upcoming"]);
+    expect(statuses()).toEqual(["posted", "posted", "posted", "not_posted", "not_posted", "not_posted", "not_posted"]);
+    expect(gameChatProgress(early, read, settledGameEnd(early, read, read)).checkedAt).toBe(read.toISOString());
+  });
+
+  it("follows the game's own clock when it differs from the database clock", () => {
+    // Dev time travel: the game's clock runs 30 days ahead, so its week is over while the real clock is still on day 2.
+    const state = settled({ endedAt: (game) => at(game, LEO, 1, 9) });
+    const clock = new Date(state.game.settledAt!.getTime() + DAY);
+    const input = { memberId: LEO, date: addDays(playerFor(state, LEO)!.dayOne!, 2), incomplete: false, credit: true as const, hasWords: true };
+    expect(decideDayCompletion(state, { ...input, clock, now: new Date(clock.getTime() + 30 * DAY) }).outcome.status).toBe("credited");
+    // Without the shift the same game ended on its second day, so day 3 never started.
+    expect(() => decideDayCompletion(state, { ...input, clock, now: clock })).toThrow("already started");
   });
 });
 

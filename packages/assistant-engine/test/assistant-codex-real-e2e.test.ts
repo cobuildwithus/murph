@@ -48909,7 +48909,9 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
       const ids = new Set(providers.material.references.map(reference => reference.id));
       const media = readCapabilityRoutingActions(events).flatMap(action => action.kind === 'dynamic' && ['generate_image', 'generate_song', 'write_recap'].includes(action.tool) ? [action] : []);
       const actions = readCapabilityRoutingActions(events);
+      const deliveries = await listAssistantOutboxIntents(vault);
       const proof = { model: config.model, saved: providers.saved.length, providerCalls: providers.providerCalls,
+        replies: deliveries.map(delivery => ({ text: delivery.message, mediaCount: delivery.media?.length ?? 0 })),
         workingFilesInVault: existsSync(path.join(vault, 'tmp/recap')),
         readGame: actions.flatMap(action => action.kind === 'dynamic' && action.tool === 'read_game' ? [{ bytes: Buffer.byteLength(action.output) }] : []),
         commands: actions.flatMap(action => action.kind === 'command' ? [action.command.replace(/[a-f0-9]{32,64}/gu, '<hex>').slice(0, 140)] : []).slice(0, 20),
@@ -48924,6 +48926,16 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
       expect(proof.calls.filter(call => call.tool !== 'write_recap' && !call.success)).toEqual([]);
       expect(proof.calls.some(call => call.tool === 'generate_image')).toBe(true);
       expect(proof.saved).toBe(1);
+      const songCalls = media.filter(call => call.tool === 'generate_song');
+      expect(songCalls).toHaveLength(1);
+      expect(Object.keys(songCalls[0]!.argumentsValue).sort()).toEqual(['draftPath', 'voice']);
+      const song = providers.assets.find(asset => asset.slot === 'song');
+      expect(song?.songStartMs).toBeGreaterThan(0);
+      expect(song?.durationMs).toBeGreaterThan(20_000);
+      expect(song?.wordsTimestamps?.length).toBeGreaterThan(0);
+      expect(media.at(-1)?.tool).toBe('write_recap');
+      expect(providers.providerCalls.filter(call => call.kind === 'song')).toHaveLength(1);
+      expect(proof.replies).toEqual([{ text: `${providers.saved[0]!.chatLine}\nWatch the recap: https://recaps.murph.test/recap/synthetic-game`, mediaCount: 0 }]);
       // What read_game returns fits in what the model is shown, so nothing is cut out of it.
       for (const read of proof.readGame) expect(read.bytes).toBeLessThan(10_000 * 4);
       // Photos, media and the chat copy live in runtime scratch, which the room's saved workspace never includes.
@@ -49694,6 +49706,122 @@ describeRealCodex('real Codex game incomplete day e2e', () => {
       expect(reply.trim().split('\n')).toHaveLength(1)
       expect(reply).not.toMatch(/score|streak|point|day [0-9]|dayIndex|game_synthetic/iu)
       if (outcome !== 'other_player') expect(reply).not.toMatch(/Sam/iu)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+})
+
+describeRealCodex('real Codex finished game day correction e2e', () => {
+  const corrected = "Maya's check-in for Tuesday, March 5 now counts. That changes the result. The game ended in a 6–6 tie."
+  it.each([
+    { name: 'finished game counts a missed day and says the result changed', message: 'Murph, the game is over but I never posted last Tuesday, March 5. I did read my chapter. Count it, and make my post say: Finished chapter nine on the train',
+      rematch: false, listsDays: true, outcome: 'changed' as const },
+    { name: 'finished game beside a live rematch counts the day in the finished game', message: 'Murph, I never posted on Tuesday March 5 in our last game, but I did read. Count it, and make my post say: Finished chapter nine on the train',
+      rematch: true, listsDays: true, outcome: 'same' as const },
+    { name: 'finished game past its seven days says the result is final', message: 'Murph, I never posted on Tuesday March 5 in our last game, but I did read. Count it, and make my post say: Finished chapter nine on the train',
+      rematch: false, listsDays: false, outcome: 'final' as const },
+    // A second game that is still live also has March 5 unposted, so the date alone cannot pick a game.
+    { name: 'finished game and a live game on the same date asks which game', message: 'Murph, I never posted on Tuesday March 5 but I did it. Count that day for me.',
+      rematch: false, overlapping: true, listsDays: true, outcome: 'ask' as const },
+  ])('$name', async (scenario) => {
+    const { outcome } = scenario
+    const occurredAt = '2030-03-13T16:00:00.000Z'
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-game-finished-e2e-'))
+    const { MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL } = await import('../src/assistant-codex/dynamic-tools/games.js')
+    const inputId = 'ain_' + 'c'.repeat(32)
+    const calls: Array<import('@murphai/hosted-execution/runtime-control').HostedRuntimeGroupToolRequest> = []
+    const players = [{ memberId: 'player_maya', seat: 0, firstName: 'Maya', dayOne: '2030-03-04', timeZone: 'America/New_York' }, { memberId: 'player_sam', seat: 1, firstName: 'Sam', dayOne: '2030-03-04', timeZone: 'America/New_York' }]
+    const terms = { n: 1, fromDay: 0, checkInKind: 'any' as const, tasks: [{ seat: 0, text: 'Read a chapter' }, { seat: 1, text: 'Walk' }], schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, stakes: [{ kind: 'prize' as const, item: 'Pick movie night' }] }
+    const closed = { canStartNow: false, canEdit: false, canEditSchedule: false, canEditStartDate: false, editableFromDay: null }
+    const days = (memberId: string, missed: number) => ({ memberId, score: 6, target: 7, currentDayIndex: null, currentEntryId: null, attemptsRemaining: 0,
+      days: Array.from({ length: 7 }, (_, dayIndex) => ({ dayIndex, date: `2030-03-${String(4 + dayIndex).padStart(2, '0')}`, status: dayIndex === missed ? 'missed' as const : 'posted' as const })) })
+    // Sam won 6 to 5 with Maya's March 5 and March 8 missing. The app lists a finished game's days only while they can be corrected.
+    const finished = (maya: number) => ({ id: 'game_done', status: 'settled' as const, lengthDays: 7, startsOn: '2030-03-04', terms, players, pendingChange: null, changeControls: closed,
+      ...(scenario.listsDays ? { progress: { checkedAt: occurredAt, players: [{ ...days('player_maya', 1), score: maya }, days('player_sam', 5)] } } : {}),
+      result: { scores: [{ memberId: 'player_maya', seat: 0, score: maya, misses: 7 - maya }, { memberId: 'player_sam', seat: 1, score: 6, misses: 1 }],
+        tickets: maya === 6 ? [] : [{ owedByMemberId: 'player_maya', owedToMemberId: 'player_sam', what: 'Pick movie night', status: 'open' as const, count: 1 }] } })
+    const rematch = { id: 'game_live', status: 'live' as const, lengthDays: 7, startsOn: '2030-03-12', terms,
+      players: players.map(player => ({ ...player, dayOne: '2030-03-12' })), pendingChange: null,
+      changeControls: { canStartNow: false, canEdit: true, canEditSchedule: true, canEditStartDate: false, canEditTasks: false, canEditStakes: true, editableFromDay: 2 },
+      progress: { checkedAt: occurredAt, players: ['player_maya', 'player_sam'].map(memberId => ({ memberId, score: 1, target: 7, currentDayIndex: 1, currentEntryId: null, attemptsRemaining: 2,
+        days: [{ dayIndex: 0, date: '2030-03-12', status: 'posted' as const }, { dayIndex: 1, date: '2030-03-13', status: 'due' as const }] })) } }
+    const plank = { ...rematch, id: 'game_plank', lengthDays: 14, startsOn: '2030-03-04', players, terms: { ...terms, tasks: [{ seat: 0, text: 'Plank for a minute' }, { seat: 1, text: 'Plank for a minute' }] },
+      progress: { checkedAt: occurredAt, players: ['player_maya', 'player_sam'].map(memberId => ({ memberId, score: 8, target: 14, currentDayIndex: 9, currentEntryId: null, attemptsRemaining: 2,
+        days: Array.from({ length: 10 }, (_, dayIndex) => ({ dayIndex, date: `2030-03-${String(4 + dayIndex).padStart(2, '0')}`, status: dayIndex === 9 ? 'due' as const : dayIndex === 1 && memberId === 'player_maya' ? 'missed' as const : 'posted' as const })) })) } }
+    const games = (maya: number) => [...(scenario.rematch ? [rematch] : []), ...('overlapping' in scenario ? [plank] : []), finished(maya)]
+    const promptResult = buildAssistantAutoReplyPrompt([{
+      actorIsSelf: false, attachmentDescriptors: [],
+      attachmentEvidence: { attachments: [], optionalInboxCaptureId: null, reasonCode: null, source: 'manual', status: 'available', updatedAt: occurredAt },
+      conversation: { accountId: null, actorId: 'player_maya', actorIsSelf: false, source: 'linq', threadId: 'synthetic-game-chat', threadIsDirect: false },
+      inputId, occurredAt, receivedAt: occurredAt, projection: null, replyTarget: null, source: 'linq',
+      sourceMetadata: null, telegramMetadata: null, text: scenario.message,
+      linqSpeakerLabel: { displayName: 'Maya', source: 'profile-name' },
+    }], { timeZone: 'America/New_York' })
+    if (promptResult.kind !== 'ready') throw new Error('Expected a ready synthetic group prompt.')
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined, codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({ assistantDynamicContextPrompts: [GAME_RESIDENT_GROUP_POINTER],
+          assistantCliContract: null, channel: 'linq',
+          cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group',
+          currentLocalDate: '2030-03-13', currentInstant: occurredAt, currentTimeZone: 'America/New_York',
+          hostedRuntime: true, onboardingGuidance: false, turnTrigger: null,
+        }),
+        dynamicTools: [MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL], env: config.env,
+        hostedToolContext: {
+          computerToolsAvailable: false, vaultFileSendAvailable: false,
+          groupTool: { request: async (request) => {
+            calls.push(request)
+            if (request.action === 'read_game') return { action: 'read_game', result: { status: 'ok', state: { games: games(5) } } }
+            if (request.action !== 'update_game') throw new Error('No other game action is authorized for this journey.')
+            expect(request.origin.assistantInputId).toBe(inputId)
+            // The app decides: a game past its seven days refuses with the plain reason, whatever Murph tried.
+            if (outcome === 'final') return { action: 'update_game', result: { status: 'rejected', error: 'GAME_NOT_LIVE: This game ended more than 7 days ago, so its result is final.' } }
+            const { text, ...update } = request.update as typeof request.update & { text?: string }
+            expect(update).toEqual({ operation: 'mark_complete', gameId: 'game_done', date: '2030-03-05' })
+            expect(text?.replace(/[.!]$/u, '')).toBe('Finished chapter nine on the train')
+            return { action: 'update_game', result: { status: 'ok', state: { games: games(6) }, dayOutcome: { date: '2030-03-05', status: 'credited' as const },
+              ...(outcome === 'changed' ? { chatLine: corrected } : {}) } }
+          } },
+          currentUserActionScope: () => ({ conversationId: 'synthetic-game-chat', inboundMailboxItemIds: [], recipientKey: 'synthetic-game-recipient', acceptedInputIds: [inputId], originSessionId: 'synthetic-game-session', conversationScope: 'group' }),
+          currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [], sendVaultFile: async () => { throw new Error('No file send authorized.') },
+        },
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: promptResult.prompt,
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const reply = result.finalMessage ?? ''
+      const writes = calls.filter(call => call.action === 'update_game')
+      process.stdout.write(`[game-finished] ${JSON.stringify({ scenario: scenario.name, outcome, reply, actions: calls.map((call) => call.action) })}\n`)
+      expect(calls[0]?.action).toBe('read_game')
+      expect(reply).not.toMatch(/game_done|game_live|game_plank|dayIndex|\u2014/u)
+      if (outcome === 'ask') {
+        // Two games fit the date, so Murph asks once which one, by task, and changes nothing.
+        expect(writes).toHaveLength(0)
+        expect(reply.match(/\?/gu)).toHaveLength(1)
+        expect(reply).toMatch(/read|chapter/iu)
+        expect(reply).toMatch(/plank/iu)
+        expect(reply).not.toMatch(/now counts|is counted|counted it/iu)
+      } else if (outcome === 'final') {
+        // Nothing is counted and nobody is told it was: the result stands, in plain words.
+        expect(writes.length).toBeLessThanOrEqual(1)
+        expect(reply).toMatch(/final|7 days|seven days|ended|can[’']?t|cannot|no longer/iu)
+        expect(reply).not.toMatch(/now counts|is counted|counted it|I(?:[’']ve| have) counted/iu)
+      } else {
+        expect(writes).toHaveLength(1)
+        expect(calls.length).toBeLessThanOrEqual(3)
+        expect(reply.trim().split('\n')).toHaveLength(1)
+        // The changed result is the app's exact line. An unchanged one gets the usual one-line confirmation, with no result talk.
+        if (outcome === 'changed') expect(reply.trim()).toBe(corrected)
+        else {
+          expect(reply).toMatch(/March 5|Mar(?:ch)?\.? 5|5 March|Tuesday/iu)
+          expect(reply).toMatch(/count|posted|done|complete/iu)
+          expect(reply).not.toMatch(/tie|won|wins|score|6|result|Sam|\?/iu)
+        }
+      }
     } finally {
       await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
     }

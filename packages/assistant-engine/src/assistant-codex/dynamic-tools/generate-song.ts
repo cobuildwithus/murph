@@ -1,4 +1,3 @@
-import type { GeneratedMediaFileRuntime } from '../generated-media-file.js'
 import * as z from '@murphai/contracts/zod-runtime'
 
 import type {
@@ -60,17 +59,21 @@ const generateSongArgumentsSchema = z
     durationSeconds: z.number().int().min(3).max(300).default(30),
     instrumental: z.boolean().default(false),
     prompt: z.string().trim().min(1).max(4100),
-    lyrics: z.array(z.string().trim().min(1).max(200).refine(line => !/[\r\n]/u.test(line), 'Each lyrics item must be one line.')).min(1).max(20).optional(),
   })
   .strict()
+
+const generateRecapSongArgumentsSchema = z.object({
+  draftPath: z.string().min(1).max(512), voice: z.string().trim().min(1).max(220),
+}).strict()
+export type GenerateRecapSongToolArgs = z.infer<typeof generateRecapSongArgumentsSchema>
 
 export function parseGenerateSongArguments(
   value: unknown,
 ):
-  | { ok: true; args: GenerateSongToolArgs }
+  | { ok: true; args: GenerateSongToolArgs | GenerateRecapSongToolArgs }
   | { ok: false; validationDigest: SafeToolCallValidationDigest } {
   return parseDynamicToolArguments({
-    schema: generateSongArgumentsSchema,
+    schema: z.union([generateSongArgumentsSchema, generateRecapSongArgumentsSchema]),
     toolName: 'murph.generate_song',
     value,
   })
@@ -80,7 +83,6 @@ export async function executeGenerateSongDynamicTool(input: {
   abortSignal?: AbortSignal | null
   args: GenerateSongToolArgs
   env?: NodeJS.ProcessEnv
-  fileRuntime?: GeneratedMediaFileRuntime | null
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
   recordPhaseTiming?: VoiceMemoPhaseTimingRecorder | null
   voiceMemoRuntime?: VoiceMemoToolRuntime | null
@@ -90,7 +92,6 @@ export async function executeGenerateSongDynamicTool(input: {
       abortSignal: input.abortSignal ?? null,
       args: input.args,
       env: input.env,
-      fileRuntime: input.fileRuntime,
       currentResponseMedia: input.currentResponseMedia ?? [],
       recordPhaseTiming: input.recordPhaseTiming ?? null,
       runtime: input.voiceMemoRuntime ?? null,

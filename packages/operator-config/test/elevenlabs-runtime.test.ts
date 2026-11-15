@@ -16,9 +16,17 @@ import {
   resolveElevenLabsVoiceId,
 } from '../src/elevenlabs-runtime.ts'
 import { VaultCliError } from '../src/vault-cli-errors.ts'
+import { inspectMp3Frames } from '../src/generated-audio.ts'
 
 const speechAudio = new Uint8Array(readFileSync(new URL('../../../fixtures/generated-audio/speech.mp3', import.meta.url)))
-const musicAudio = new Uint8Array(readFileSync(new URL('../../../fixtures/generated-audio/music.mp3', import.meta.url)))
+const musicAudio = syntheticMusic(12_000)
+
+function syntheticMusic(durationMs: number) {
+  const fixture = readFileSync(new URL('../../../fixtures/generated-audio/recap-synthetic-20s.mp3', import.meta.url))
+  const stream = inspectMp3Frames(fixture)
+  const frames = stream.frames.slice(1).map((frame, i) => fixture.subarray(frame.byteOffset, stream.frames[i + 2]?.byteOffset ?? stream.endOffset))
+  return new Uint8Array(Buffer.concat(Array.from({ length: Math.round(durationMs / stream.frames[1]!.timeMs) }, (_, i) => frames[i % frames.length]!)))
+}
 
 afterEach(() => {
   vi.restoreAllMocks()
@@ -108,12 +116,14 @@ test.each(['music_v2', 'music_v2_5'] as const)('elevenlabs runtime sends %s thro
   expect(fetchImplementation).toHaveBeenCalledOnce()
 })
 
-const lyricMusicInput = { apiKey: 'synthetic-key', durationMs: 20_000, forceInstrumental: false,
+const lyricMusicInput = { apiKey: 'synthetic-key', durationMs: 25_000, forceInstrumental: false,
   modelId: ELEVENLABS_MUSIC_MODEL_ID, outputFormat: ELEVENLABS_MUSIC_OUTPUT_FORMAT,
-  prompt: 'Playful piano', lyrics: ['Leo goes', 'Ava stays'] }
-const providerWords = [{ word: 'Leo', start_ms: 100, end_ms: 300 }, { word: 'goes', start_ms: 400, end_ms: 600 },
-  { word: 'Ava', start_ms: 900, end_ms: 1100 }, { word: 'stays', start_ms: 1200, end_ms: 1400 }]
-function detailedResponse(words: unknown = providerWords, audio: Uint8Array = musicAudio): Response {
+  prompt: 'Playful piano', chunks: [{ text: '[Intro]', durationMs: 5000, positiveStyles: ['Playful piano', 'instrumental'], negativeStyles: ['vocals'], contextAdherence: 'high' as const },
+    { text: '[Chorus]\nLeo goes\nAva stays', durationMs: 20_000, positiveStyles: ['Playful piano'], negativeStyles: ['instrumental intro'], contextAdherence: 'high' as const }] }
+const scoreAudio = syntheticMusic(lyricMusicInput.durationMs)
+const providerWords = [{ word: 'Leo', start_ms: 5100, end_ms: 5300 }, { word: 'goes', start_ms: 5400, end_ms: 5600 },
+  { word: 'Ava', start_ms: 5900, end_ms: 6100 }, { word: 'stays', start_ms: 6200, end_ms: 6400 }]
+function detailedResponse(words: unknown = providerWords, audio: Uint8Array = scoreAudio): Response {
   const boundary = 'synthetic-music-boundary'
   return new Response(Buffer.concat([
     Buffer.from(`--${boundary}\r\nContent-Type: application/json\r\n\r\n${JSON.stringify({ words_timestamps: words })}\r\n--${boundary}\r\nContent-Type: audio/mpeg\r\nContent-Disposition: attachment; filename="song.mp3"\r\n\r\n`),
@@ -126,14 +136,21 @@ test.each(['music_v2', 'music_v2_5'] as const)('explicit lyrics preserve %s and 
     expect(url).toBe('https://api.elevenlabs.io/v1/music/detailed?output_format=mp3_48000_192')
     expect(new Headers(init.headers).get('accept')).toBe('multipart/mixed')
     expect(JSON.parse(init.body)).toEqual({ model_id: modelId, with_timestamps: true,
-      composition_plan: { chunks: [{ text: 'Leo goes\nAva stays', duration_ms: 20_000, positive_styles: ['Playful piano'], negative_styles: [] }] } })
+      composition_plan: { chunks: lyricMusicInput.chunks.map(chunk => ({ text: chunk.text, duration_ms: chunk.durationMs, positive_styles: chunk.positiveStyles, negative_styles: chunk.negativeStyles, context_adherence: chunk.contextAdherence })) } })
     return detailedResponse()
   })
   expect(await generateElevenLabsMusic({ ...lyricMusicInput, modelId, fetchImplementation })).toEqual({
-    bytes: musicAudio, contentType: 'audio/mpeg', filenameExtension: 'mp3',
+    bytes: scoreAudio, contentType: 'audio/mpeg', filenameExtension: 'mp3',
     wordsTimestamps: providerWords.map(word => ({ word: word.word, startMs: word.start_ms, endMs: word.end_ms })),
   })
   expect(fetchImplementation).toHaveBeenCalledTimes(1)
+})
+
+test('ignores provider direction words with empty or reversed intervals before validating stored timings', async () => {
+  const result = await generateElevenLabsMusic({ ...lyricMusicInput, fetchImplementation: async () => detailedResponse([
+    { word: 'direction', start_ms: 0, end_ms: 0 }, { word: 'pickup', start_ms: 50, end_ms: 10 }, ...providerWords,
+  ]) })
+  expect(result.wordsTimestamps).toEqual(providerWords.map(word => ({ word: word.word, startMs: word.start_ms, endMs: word.end_ms })))
 })
 
 test.each(['music_v1', 'unknown-model'] as const)('unsupported music model %s fails before fetching', async modelId => {
@@ -145,7 +162,7 @@ test.each(['music_v1', 'unknown-model'] as const)('unsupported music model %s fa
   expect(fetchImplementation).not.toHaveBeenCalled()
 })
 
-test.each([null, [], [{ word: 'unrelated', start_ms: 0, end_ms: 100 }], [{ word: 'Leo', start_ms: 200, end_ms: 100 }]])(
+test.each([null, [], [{ word: 'Leo', start_ms: 200, end_ms: 100 }]])(
   'explicit lyric songs reject missing or unusable timing metadata: %j', async words => {
     const fetchImplementation = vi.fn(async () => detailedResponse(words))
     await expect(generateElevenLabsMusic({ ...lyricMusicInput, fetchImplementation })).rejects.toMatchObject({
@@ -187,13 +204,6 @@ test('detailed SDK wrapping preserves bounded HTTP diagnostics', async () => {
   })
   expect(fetchImplementation).toHaveBeenCalledTimes(1)
 })
-
-test.each([{ forceInstrumental: true }, { durationMs: 121_000 }, { lyrics: [] }, { lyrics: ['x'.repeat(201)] }, { lyrics: ['Leo\nAva'] }])(
-  'explicit lyric constraints fail before provider generation: %j', async invalid => {
-    const fetchImplementation = vi.fn()
-    await expect(generateElevenLabsMusic({ ...lyricMusicInput, ...invalid, fetchImplementation })).rejects.toMatchObject({ code: 'ELEVENLABS_INVALID_INPUT' })
-    expect(fetchImplementation).not.toHaveBeenCalled()
-  })
 
 test.each([
   ['empty', new Uint8Array()],

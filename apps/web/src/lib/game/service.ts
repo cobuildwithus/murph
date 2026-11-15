@@ -1,5 +1,5 @@
 import { isBothWinOfferDue, mergeStakeSlots } from "./rules";
-import { buildRecapFallback } from './recap-fallback';
+import { buildRecapFallback, gameResultCorrectionLine } from './recap-fallback';
 import { gameRecapEnvelopeSchema, type GameRecapEnvelope, type RecapAsset } from '@murphai/contracts/recap-show';
 import { recapGenerationId, readRecapMedia } from './recap-media';
 import { retainRecapAssetTx } from './recap-retirement';
@@ -25,7 +25,7 @@ import { assertBrowserVaultMemberAuthority } from "../browser-vault/authority";
 import { submitMemberAction } from "../member-actions/submit";
 import { adoptVaultGameProfile } from "./vault-profile";
 
-import { Prisma, type Game, type GameEntry, type GameProfile, type GameReport } from "@prisma/client";
+import { Prisma, type Game, type GameEntry, type GameProfile, type GameReport, type GameTicket } from "@prisma/client";
 
 import { toPrismaJsonObject } from "../device-sync/prisma-store/prisma-json";
 import { isUniqueViolation } from "../device-sync/prisma-store/prisma-errors";
@@ -90,6 +90,8 @@ import {
   gameChallengeStatus,
   type RuleChallenge,
   decideSettle,
+  outcomeFor,
+  type SettleDecision,
   decideStartNow,
   decideWithdraw,
   GAME_ERROR_STATUS,
@@ -99,6 +101,8 @@ import {
   gameOffDayMessage,
   isGameDue,
   isGameDecided,
+  isSettledGameCorrectable,
+  settledGameEnd,
   isGameInviteExpired,
   isTicketExpired,
   GAME_MAX_OPEN_PER_PAIR,
@@ -134,6 +138,7 @@ import {
   buildGameView,
   GAME_HISTORY_PREVIEW_LIMIT,
   gameMediaUrl,
+  stakeItem,
   termsView,
   ticketView,
   visibleEntryIds,
@@ -160,7 +165,9 @@ interface LoadedGame {
   state: RuleState;
 }
 export type GameCommandResult =
-  | { ok: true; game: CreateGameView | null; profile?: GameProfileView; reminders?: GameReminders; reaches?: "push" | "text" | "none"; dayOutcome?: GameDayOutcome }
+  | { ok: true; game: CreateGameView | null; profile?: GameProfileView; reminders?: GameReminders; reaches?: "push" | "text" | "none"; dayOutcome?: GameDayOutcome;
+    /** Set only when a day correction changed a finished game's outcome: the one line that says so. */
+    chatLine?: string }
   | { ok: false; error: GameError; status: number };
 
 export const GAME_RECAP_UI_WAIT_MS = 10 * 60 * 1000;
@@ -249,11 +256,11 @@ export async function runGameCommand(input: {
     // A recap receipt is the viewer's own; it touches no game state, so it skips the game write path.
     const applied = command.type === "watchRecap" ? await watchRecap({ actor, beforeMutationTx: input.beforeMutationTx }, command.gameId)
       : await runCommand({ chatAudience, actor, now: input.now, chatContainerMemberId: input.chatContainerMemberId, chatPlayerMemberIds: input.chatPlayerMemberIds, beforeMutationTx: input.beforeMutationTx, postGuard: input.postGuard }, command);
-    const { gameId, dayOutcome, composer } = typeof applied === "object" && applied !== null ? applied : { gameId: applied };
+    const { gameId, dayOutcome, composer, chatLine } = typeof applied === "object" && applied !== null ? applied : { gameId: applied };
     await deliverAppGameEffectsAfterResponse(command, gameId, input.chatContainerMemberId);
     await activatePrivateAfterGameCommand(command, gameId, input.now ?? new Date());
     const game = gameId && !input.chatContainerMemberId ? await readGame(gameId, actor, input.multiplayer) : null;
-    return { game: game && composer ? { ...game, composer } : game, ok: true, ...(dayOutcome ? { dayOutcome } : {}) };
+    return { game: game && composer ? { ...game, composer } : game, ok: true, ...(dayOutcome ? { dayOutcome } : {}), ...(chatLine ? { chatLine } : {}) };
   } catch (error) {
     if (error instanceof GameRuleError) {
       return { error: error.error, ok: false, status: GAME_ERROR_STATUS[error.error.code] };
@@ -510,7 +517,7 @@ interface CommandContext {
 }
 
 /** Applies one command; returns the game to show back, if any. */
-async function runCommand(context: CommandContext, command: Exclude<GameCommand, { type: "setProfile" | "setReminders" | "watchRecap" }>): Promise<string | null | { gameId: string; dayOutcome?: GameDayOutcome; composer?: { murphPhoneNumber: string } }> {
+async function runCommand(context: CommandContext, command: Exclude<GameCommand, { type: "setProfile" | "setReminders" | "watchRecap" }>): Promise<string | null | { gameId: string; dayOutcome?: GameDayOutcome; chatLine?: string; composer?: { murphPhoneNumber: string } }> {
   switch (command.type) {
     case "replyToPost": return replyToPost(context, command);
     case "deleteReply": return deleteReply(context, command);
@@ -569,7 +576,7 @@ interface LockedStep {
   clock: Date;
 }
 
-type GameEventType = "reply_accepted" | "talk_requested" | "recap_watched" | "challenged" | "left" | "terms_edited" | "day_marked_incomplete" | "day_restored" | "day_credited" | "cancelled" | "blocked" | "removed" | "negotiation_joined" | "created" | "joined" | "started" | "posted" | "withdrew" | "settled" | "redeemed" | "expired" | "time_shifted" | "change_proposed" | "change_voted" | "change_applied" | "change_declined" | "change_cancelled" | "change_expired";
+type GameEventType = "reply_accepted" | "talk_requested" | "recap_watched" | "challenged" | "left" | "terms_edited" | "day_marked_incomplete" | "day_restored" | "day_credited" | "result_corrected" | "cancelled" | "blocked" | "removed" | "negotiation_joined" | "created" | "joined" | "started" | "posted" | "withdrew" | "settled" | "redeemed" | "expired" | "time_shifted" | "change_proposed" | "change_voted" | "change_applied" | "change_declined" | "change_cancelled" | "change_expired";
 /** History holds metadata and sealed words, never plaintext. */
 interface GameEventDraft {
   createdAt?: Date;
@@ -1606,30 +1613,89 @@ async function challenge(context: CommandContext, command: Extract<GameCommand, 
   return command.gameId;
 }
 
-async function setDayCompletion(context: CommandContext, command: Extract<GameCommand, { type: "setDayCompletion" }>): Promise<{ gameId: string; dayOutcome: GameDayOutcome }> {
+async function setDayCompletion(context: CommandContext, command: Extract<GameCommand, { type: "setDayCompletion" }>): Promise<{ gameId: string; dayOutcome: GameDayOutcome; chatLine?: string }> {
   let dayOutcome: GameDayOutcome | undefined;
+  let outcomeChange: { result: StoredResult; row: Game } | undefined;
   // A counted day is a words post saying what its player told Murph; the line is sealed before the game lock.
   const creditEntryId = randomUUID();
   const creditText = command.text ? await seal({ memberId: context.actor, rowId: creditEntryId, table: "game_entry", field: "text" }, command.text) : null;
-  await runLocked(command.gameId, context, async ({ clock, loaded, now, tx }) => {
-    if (!context.chatContainerMemberId || loaded.row.chatContainerMemberId !== context.chatContainerMemberId) reject("NOT_A_PLAYER", "Use the group chat bound to this game.");
-    const decision = decideDayCompletion(loaded.state, { memberId: context.actor, date: command.date, incomplete: command.incomplete, credit: command.credit, hasWords: creditText !== null, now });
+  await runLocked(command.gameId, context, async (locked) => {
+    const { clock, now, tx } = locked;
+    if (!context.chatContainerMemberId || locked.loaded.row.chatContainerMemberId !== context.chatContainerMemberId) reject("NOT_A_PLAYER", "Use the group chat bound to this game.");
+    // A pair game that has ended but is still stored as live is settled here first, so the finished game takes the correction.
+    const loaded = locked.loaded.row.status === "live" && locked.loaded.row.maxPlayers === 2 && await settleLoaded(locked, context.actor)
+      ? (await loadGames(tx, [command.gameId]))[0] : locked.loaded;
+    const decision = decideDayCompletion(loaded.state, { memberId: context.actor, date: command.date, incomplete: command.incomplete, credit: command.credit, hasWords: creditText !== null, now, clock });
     dayOutcome = decision.outcome;
     if (!decision.changed) return [];
+    const settledResult = loaded.row.status === "settled" ? parseStoredResult(loaded.row.result) : null;
+    if (settledResult && !storedResultStands(loaded.state, settledResult)) reject("GAME_NOT_LIVE", "This game's result can't be changed anymore.");
+    const mine = (entry: GameEntry) => entry.memberId === context.actor && entry.dayIndex === decision.dayIndex && entry.attempt > 0;
+    let entries: GameEntry[];
+    let event: GameEventDraft;
     if (decision.outcome.status === "credited") {
       // No push: the request and Murph's answer are already in the game's own chat.
       const created = await tx.gameEntry.create({ data: { id: creditEntryId, gameId: command.gameId, memberId: context.actor, dayIndex: decision.dayIndex,
         attempt: 1, kind: "words", mediaKeys: [], textEncrypted: creditText, receivedAt: clock } });
-      await reserveBothWinOfferTx({ clock, loaded, now, tx }, toRuleState(loaded.row, [...loaded.entries, created]));
-      return [{ type: "day_credited", payload: { dayIndex: decision.dayIndex, entryId: creditEntryId } }];
+      entries = [...loaded.entries, created];
+      event = { type: "day_credited", payload: { dayIndex: decision.dayIndex, entryId: creditEntryId } };
+    } else {
+      await tx.gameEntry.updateMany({ where: { gameId: command.gameId, memberId: context.actor, dayIndex: decision.dayIndex, attempt: { gt: 0 } }, data: { incomplete: command.incomplete ? true : null } });
+      entries = loaded.entries.map(entry => mine(entry) ? { ...entry, incomplete: command.incomplete ? true : null } : entry);
+      event = { type: command.incomplete ? "day_marked_incomplete" : "day_restored", payload: { dayIndex: decision.dayIndex } };
     }
-    await tx.gameEntry.updateMany({ where: { gameId: command.gameId, memberId: context.actor, dayIndex: decision.dayIndex, attempt: { gt: 0 } }, data: { incomplete: command.incomplete ? true : null } });
-    if (!command.incomplete) await reserveBothWinOfferTx({ clock, loaded, now, tx }, toRuleState(loaded.row,
-      loaded.entries.map(entry => entry.memberId === context.actor && entry.dayIndex === decision.dayIndex && entry.attempt > 0 ? { ...entry, incomplete: null } : entry)));
-    return [{ type: command.incomplete ? "day_marked_incomplete" : "day_restored", payload: { dayIndex: decision.dayIndex } }];
+    const state = toRuleState(loaded.row, entries);
+    if (!settledResult) {
+      if (!command.incomplete) await reserveBothWinOfferTx({ clock, loaded, now, tx }, state);
+      return [event];
+    }
+    const corrected = await correctSettledResultTx({ clock, loaded, now, tx }, state, settledResult, decision.dayIndex);
+    if (corrected.outcomeChanged) outcomeChange = { result: corrected.result, row: loaded.row };
+    return [event, corrected.event];
   });
   if (!dayOutcome) throw new Error("Game day correction produced no outcome.");
-  return { gameId: command.gameId, dayOutcome };
+  // The correction is committed. A line that cannot be built (names or words unreadable) must not fail it:
+  // the returned state still carries the new result.
+  const chatLine = outcomeChange ? await settledCorrectionLine(context.actor, command, outcomeChange).catch(() => undefined) : undefined;
+  return { gameId: command.gameId, dayOutcome, ...(chatLine ? { chatLine } : {}) };
+}
+
+/**
+ * A finished game's result is decided again from its posts when a day is
+ * corrected, so it must still be what those posts decide. After an Ops takedown
+ * or a deleted account it is not, and a correction would move the other
+ * player's score: the write refuses and Murph is not shown the days.
+ */
+function storedResultStands(state: RuleState, stored: StoredResult): boolean {
+  const flat = (result: StoredResult) => JSON.stringify(result.scores.map(({ seat, memberId, score, misses }) => [seat, memberId, score, misses]).sort());
+  return flat(stored) === flat(decideSettle(state).result);
+}
+
+/**
+ * A day changed after the end. Settles the result again from the same decision
+ * as the first time; the game stays the same finished game, so its status and
+ * end time, and everything that keys on them, do not move.
+ */
+async function correctSettledResultTx({ loaded: { row }, now, tx }: LockedStep, state: RuleState, before: StoredResult, dayIndex: number): Promise<{ event: GameEventDraft; result: StoredResult; outcomeChanged: boolean }> {
+  const decision = decideSettle(state);
+  const tickets = await settleTicketsTx(tx, row, decision.tickets, now);
+  await tx.game.update({ where: { id: row.id }, data: { result: toPrismaJsonObject(decision.result) } });
+  const scores = (result: StoredResult) => result.scores.map(({ score, seat }) => ({ score, seat }));
+  return { result: decision.result,
+    outcomeChanged: decision.result.scores.some(score => outcomeFor(decision.result, score.memberId) !== outcomeFor(before, score.memberId)),
+    event: { type: "result_corrected", payload: { dayIndex, before: scores(before), after: scores(decision.result), ticketsAdded: tickets.added,
+      ticketsRemoved: tickets.removed.map(ticket => ({ id: ticket.id, stakeKey: ticket.stakeKey, owedBySeats: ticket.owedBySeats, owedToSeats: ticket.owedToSeats, createdAt: ticket.createdAt.toISOString() })) } } };
+}
+
+/** The one line that tells the chat a finished game's outcome changed. Names are the players' own Game profiles. */
+async function settledCorrectionLine(actor: string, command: { date: string; incomplete: boolean }, { result, row }: { result: StoredResult; row: Game }): Promise<string> {
+  const names = new Map((await readGameChatProfiles(result.scores.map(score => score.memberId))).map(player => [player.memberId, player.firstName ?? "Player"]));
+  const bothWin = currentTerms(parseStoredTerms(row.terms)).stakes.find(stake => stake.kind === "both_get");
+  const [words] = bothWin && result.scores.every(score => score.misses === 0)
+    ? await openGameTexts([{ ...gameTarget(row, "terms_words"), value: row.termsWordsEncrypted }]) : [null];
+  return gameResultCorrectionLine({ name: names.get(actor) ?? "Player", date: command.date, counts: !command.incomplete,
+    result: result.scores.map(score => ({ name: names.get(score.memberId) ?? "Player", score: score.score })),
+    earnedBothWinPrize: words && bothWin ? stakeItem(parseTermWords(words), bothWin.key) : undefined, recapMade: row.recapEncrypted !== null });
 }
 
 async function withdraw(context: CommandContext, command: Extract<GameCommand, { type: "withdraw" }>): Promise<string> {
@@ -1650,7 +1716,9 @@ async function redeem(context: CommandContext, command: Extract<GameCommand, { t
   const ticket = await getPrisma().gameTicket.findUnique({ select: { gameId: true }, where: { id: ticketId } });
   if (!ticket) reject("TICKET_NOT_HELD", "That prize isn't yours to mark done.");
   await runLocked(ticket.gameId, context, async ({ clock, now, tx, loaded }) => {
-    const current = await tx.gameTicket.findUniqueOrThrow({ where: { id: ticketId } });
+    // A day correction on the finished game can remove an open ticket that is no longer owed.
+    const current = await tx.gameTicket.findUnique({ where: { id: ticketId } });
+    if (!current) reject("TICKET_NOT_HELD", "That prize isn't yours to mark done.");
     const holder = loaded.row.players.find(player => player.memberId === actor);
     const group = loaded.row.maxPlayers === 10;
     const authorized = group ? canRedeemGroupTicket(current, loaded.row.players, loaded.row.result ? parseStoredResult(loaded.row.result) : null, actor)
@@ -2043,14 +2111,35 @@ async function settleLoaded({ loaded: { row, state }, tx, clock, now }: LockedSt
     return true;
   }
   const decision = decideSettle(state);
-  const tickets = decision.tickets.map(ticket => ({ ...ticket, gameId, id: generateHostedRandomPrefixedId("gtk"),
-    ...(row.devClockOffsetMs === null ? {} : { createdAt: now }) }));
-  await tx.gameTicket.createMany({ data: tickets });
+  const tickets = await settleTicketsTx(tx, row, decision.tickets, now);
   await endGame(tx, gameId, { result: toPrismaJsonObject(decision.result), settledAt: clock, status: "settled" });
   if (row.chatContainerMemberId) await reserveGameChatLifecycleTx({ gameId, kind: "recap", now: clock, tx });
   const scores = decision.result.scores.map(({ score, seat }) => ({ score, seat }));
-  await writeEvents(tx, gameId, actor, [{ payload: { scores, ticketIds: tickets.map(ticket => ticket.id) }, type: "settled" }]);
+  await writeEvents(tx, gameId, actor, [{ payload: { scores, ticketIds: tickets.added }, type: "settled" }]);
   return true;
+}
+
+/**
+ * Makes a game's tickets match a settle decision, under the game lock.
+ * Settlement starts with none, so it issues them all. A later day correction
+ * keeps every ticket that is still owed (a done one before an open one, so a
+ * prize already given is not issued twice), issues what is missing, and removes
+ * an open ticket that is no longer owed; the caller keeps its content in the
+ * correction's event. A ticket already marked done is history and always stays.
+ * Tickets are matched by stake and by who owes whom, counting duplicates.
+ */
+async function settleTicketsTx(tx: Tx, row: Pick<Game, "id" | "devClockOffsetMs">, owed: SettleDecision["tickets"], now: Date): Promise<{ added: string[]; removed: GameTicket[] }> {
+  const key = (ticket: SettleDecision["tickets"][number]) => JSON.stringify([ticket.stakeKey, ticket.owedBySeats, ticket.owedToSeats]);
+  const unmatched = await tx.gameTicket.findMany({ where: { gameId: row.id }, orderBy: [{ status: "desc" }, { createdAt: "asc" }, { id: "asc" }] });
+  const missing = owed.filter(ticket => {
+    const index = unmatched.findIndex(existing => key(existing) === key(ticket));
+    if (index >= 0) unmatched.splice(index, 1);
+    return index < 0;
+  }).map(ticket => ({ ...ticket, gameId: row.id, id: generateHostedRandomPrefixedId("gtk"), ...(row.devClockOffsetMs === null ? {} : { createdAt: now }) }));
+  const removed = unmatched.filter(ticket => ticket.status === "open");
+  if (removed.length) await tx.gameTicket.deleteMany({ where: { id: { in: removed.map(ticket => ticket.id) }, status: "open" } });
+  if (missing.length) await tx.gameTicket.createMany({ data: missing });
+  return { added: missing.map(ticket => ticket.id), removed };
 }
 
 // --------------------------------------------------------------------- dev
@@ -2607,7 +2696,10 @@ export async function readGameChatState(containerMemberId: string, playerMemberI
     // Chat exposes unjoined invitees only as a count, never their task overrides.
     if (row.maxPlayers === 10) terms.tasks = terms.tasks.filter(task => row.players.some(player => player.seat === task.seat && !player.leftAt));
     return { ...(row.maxPlayers === 10 ? { maxPlayers: 10 as const, pendingInviteeCount: row.invitees.filter(invitee => !row.players.some(player => player.seat === invitee.seat)).length } : {}), id: row.id, status: state.game.status, terms: { ...terms, ...(checkInKind === "any" ? {} : { checkInKind }) },
-      progress: gameChatProgress(state, gameNow(clock, row)),
+      // A finished game carries its days only while its players can still correct them, as they stood when it ended.
+      ...(row.status !== "settled" ? { progress: gameChatProgress(state, gameNow(clock, row)) }
+        : result && isSettledGameCorrectable(state, clock) && storedResultStands(state, result)
+          ? { progress: gameChatProgress(state, gameNow(clock, row), settledGameEnd(state, clock, gameNow(clock, row))) } : {}),
       result: result ? { scores: result.scores.filter(score => row.maxPlayers !== 10 || players.some(player => player.memberId === score.memberId)), tickets: [...ticketGroups.values()] } : null,
       startsOn: gameDayOne(calendarPlayers(state)) ?? fromDbDate(row.startsOn), lengthDays: row.lengthDays,
       players: players.map((player) => ({ memberId: player.memberId, seat: player.seat, firstName: gameNames.get(player.memberId) ?? "", dayOne: fromDbDate(player.dayOne), timeZone: player.timeZone })),

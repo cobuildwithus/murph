@@ -5902,8 +5902,11 @@ directory is runtime scratch under `.runtime/tmp`, which a saved workspace never
 includes, so players' photos, generated media and the chat copy last only as
 long as the container. A resumed attempt reads the game again.
 The recap turn, never a model argument, makes media a file and fixes its format:
-the agent supplies a prompt and reference photos for each JPEG scene and a style
-and lyrics for the twenty-second song, then calls `write_recap` once. The host uploads selected bytes and Web publishes
+the agent supplies a prompt and reference photos for each JPEG scene and a
+draft path plus singer description for the continuous score, then calls
+`write_recap` once. The host derives five-second page cues and a twenty-second
+sung chunk from that draft. One song asset serves the full score and a
+frame-aligned song slice; the native contract owns their clocks. The host uploads selected bytes and Web publishes
 through the canonical transaction, retaining the current source authorization,
 asset retirement and replay owners. One accepted story owns one chat line plus
 link with no chat media. Groups retain their existing writer rules and payload.
@@ -6182,6 +6185,43 @@ refused before any words are asked for. Murph is offered only
 that predate it. Deploy Web before the runtime: an older Web rejects the new
 operation, and only the new operation returns the new receipt status. Rollback
 is safe because the entry is ordinary data.
+
+Both day corrections stay open on a settled pair game for
+`GAME_SETTLED_OPEN_MS` (7 days) after `settledAt`, the same window its game
+chat stays admitted (`GAME_CHAT_SETTLED_ACCESS_MS` is that constant); after it
+the refusal is `GAME_NOT_LIVE` with the plain reason, and a group game keeps
+its refusal from the moment it ends. `decideDayCompletion` applies the live
+rules unchanged, except that a finished game has no open day and its days are
+the ones that had started when it ended (`settledGameEnd`), so a date after an
+early finish is refused. A pair game that has ended by its clock but is still
+stored as live is settled first, inside the same lock, by `settleLoaded`, so
+the correction never depends on a read having come first. `setDayCompletion`
+then settles the result again from the same `decideSettle`: it replaces
+`game.result` and calls `settleTicketsTx`, the one ticket writer first
+settlement also uses. That writer matches tickets by stake and by who owes
+whom, counting duplicates; it keeps a ticket that is still owed (a done one
+before an open one), issues one that is newly owed, and removes an open ticket
+that is no longer owed. A ticket already marked done is never touched, and
+`redeem` answers a ticket that is gone under the lock with `TICKET_NOT_HELD`.
+`status` and `settledAt` do not change, so chat admission, billing, the recap
+reservation and rematches are untouched, and nothing is announced or pushed.
+The correction is refused when the stored result no longer equals what the
+current posts decide (`storedResultStands`: an Ops takedown or a deleted
+account since the end), so one player's correction cannot move the other's
+score. One `result_corrected` event records the day, the scores before and
+after, the ids of tickets added and the id, stake, seats and created time of
+each ticket removed; the existing day event records who and when. When the
+outcome changes, the `update_game` response carries the exact line to say in
+the existing optional `chatLine`, with "The recap was made before this
+change." appended once a recap exists: the recap is left as made. Web sends a
+settled game's `progress` to the runtime only while the write would accept a
+correction (inside the window and with a stored result that still stands), as
+the days stood when the game ended. The runtime shows those days, sends the
+day-correction rule for exactly those games, and counts each toward the
+several-games rule so a date that fits two games gets a question. No schema or
+contract field is new, so Web and the runtime deploy in either order: an older
+runtime confirms the day without the result line, and an older Web refuses
+with "This game has ended."
 
 `runGameCommand` is the single write path, for the routes now and Murph's tools
 later. It validates the command (`command.ts`), checks uploads, seals words,

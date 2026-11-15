@@ -49,9 +49,9 @@ it.each([false, true])('accepts a recap show through the production hosted Linux
   const fixture = await createHostedRecapFixture(gameId, mediaFails);
   const draftPath = `${relativeRoot}/drafts/show.json`;
   const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
-  const draftCommand = () => {
+  const draftCommand = (final: boolean) => {
     const story = structuredClone(fixture.story);
-    if (mediaFails) delete story.song;
+    if (mediaFails && final) delete story.song;
     const draft = { story, files: fixture.files.map(file => ({ ...file, path: `${relativeRoot}/${file.path}` })) };
     return buildAssistantProviderShellCommandCall(`printf '%s' ${quote(JSON.stringify(draft))} > ${draftPath}`);
   };
@@ -69,8 +69,9 @@ it.each([false, true])('accepts a recap show through the production hosted Linux
     // One reference by its photo path and one by its id: the recap takes either.
     buildAssistantProviderMurphToolCall('generate_image', { prompt: fixture.story.pages[0]!.blocks[1]!.scene!.prompt,
       referenceImageRefs: fixture.material.references.filter(ref => ref.kind === 'profile').map((ref, index) => index ? ref.id : `${relativeRoot}/refs/${ref.id}.jpg`) }),
-    buildAssistantProviderMurphToolCall('generate_song', { prompt: 'Warm acoustic pop about a synthetic laundry space mission.', lyrics: fixture.story.song!.lyrics }),
-    { deriveResponse: () => draftCommand() },
+    { deriveResponse: () => draftCommand(false) },
+    buildAssistantProviderMurphToolCall('generate_song', { draftPath, voice: 'Warm baritone' }),
+    { deriveResponse: () => draftCommand(true) },
     buildAssistantProviderMurphToolCall('write_recap', { draftPath }),
     'Synthetic recap submitted.',
   ];

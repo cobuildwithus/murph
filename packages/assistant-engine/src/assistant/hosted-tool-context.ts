@@ -1,10 +1,10 @@
 import { ContractValidationError } from '@murphai/contracts/validation-error';
-import { readRecapFile, readRecapDraftFile, saveRecapMediaFile } from './recap-files.js'
-import type { SongWordTimestamp } from '@murphai/contracts/recap-show'
+import { readRecapFile, readRecapDraftFile, saveRecapMediaFile, recapScoreSignature, RECAP_SCORE_MISMATCH } from './recap-files.js'
+import type { SongWordTimestamp, GameRecapStory } from '@murphai/contracts/recap-show'
 import { resolveElevenLabsApiKey } from '@murphai/operator-config/elevenlabs-runtime'
 import type { GeneratedMediaFileRuntime } from '../assistant-codex/generated-media-file.js'
 import type { GenerateImageToolArgs } from '../assistant-codex/generate-image-tool.js'
-import type { GenerateSongToolArgs } from '../assistant-codex/generate-voice-memo-tool.js'
+import type { GenerateRecapSongToolArgs } from '../assistant-codex/dynamic-tools/generate-song.js'
 import { fetchRecapReference, materializeRecapWorkspace, recapReferenceId, RecapReferenceRefusal } from './recap-workspace.js'
 import type { ConversationPollTool } from "@murphai/hosted-execution/conversation-polls";
 import { createHash } from 'node:crypto'
@@ -215,10 +215,10 @@ export interface AssistantHostedToolContext {
   currentDeviceActivityOccurrence?(): AssistantDeviceActivityOccurrence | null
   currentUserActionScope?(): AssistantHostedUserActionScope | null
   currentGameRecapScope?(): NonNullable<AssistantHostedExecutionContext['gameRecapScope']> | null
-  prepareRecapMedia?(request: { kind: 'image'; args: GenerateImageToolArgs } | { kind: 'song'; args: GenerateSongToolArgs }, fetchImpl: typeof fetch): Promise<GeneratedMediaFileRuntime>
+  prepareRecapMedia?(request: { kind: 'image'; args: GenerateImageToolArgs } | { kind: 'song'; args: GenerateRecapSongToolArgs }, fetchImpl: typeof fetch): Promise<GeneratedMediaFileRuntime>
   prepareGameRecapInputs?(material: unknown): Promise<unknown>
   readGameRecapDraft?(draftPath: string): Promise<unknown>
-  readGameRecapMedia?(file: string): Promise<{ bytes: string; referenceIds: string[]; mediaType: 'image/jpeg' | 'audio/mpeg'; wordsTimestamps?: SongWordTimestamp[] }>
+  readGameRecapMedia?(file: string, story?: GameRecapStory): Promise<{ bytes: string; referenceIds: string[]; mediaType: 'image/jpeg' | 'audio/mpeg'; wordsTimestamps?: SongWordTimestamp[]; songStartMs?: number }>
   currentGameMissedCheckInScope?(): NonNullable<AssistantHostedExecutionContext['gameMissedCheckInScope']> | null
   prepareGameLore?(): Promise<string | null>
   readGameLore?(): Promise<string>
@@ -280,7 +280,7 @@ export function createAssistantHostedToolContext(input: {
   session: AssistantSession
 }): AssistantHostedToolContext {
   const executionContext = input.executionContext ?? null
-  const recapSources = new Map<string, { referenceIds: string[]; mediaType: 'image/jpeg' | 'audio/mpeg'; wordsTimestamps?: SongWordTimestamp[] }>()
+  const recapSources = new Map<string, { referenceIds: string[]; mediaType: 'image/jpeg' | 'audio/mpeg'; wordsTimestamps?: SongWordTimestamp[]; songStartMs?: number; signature?: string }>()
   let recapWorkspace: Awaited<ReturnType<typeof materializeRecapWorkspace>> | null = null
   let ordinaryGameLore: Promise<{ fingerprint: string; guidance: string } | null> | null = null
   const route = input.route ?? null
@@ -646,12 +646,14 @@ export function createAssistantHostedToolContext(input: {
       if (!executionContext?.gameRecapScope?.show || !recapWorkspace) throw new Error('Read recap material first.')
       return readRecapDraftFile({ vault: input.messageInput.vault, relativeRoot: path.relative(input.messageInput.vault, recapWorkspace.root), draftPath })
     },
-    readGameRecapMedia: async file => {
+    readGameRecapMedia: async (file, story) => {
       if (!executionContext?.gameRecapScope?.show || !recapWorkspace) throw new Error('Read recap material first.')
       const bytes = await readRecapFile({ vault: input.messageInput.vault, relativeRoot: path.relative(input.messageInput.vault, recapWorkspace.root), file, maxBytes: 2 * 1024 * 1024 })
       const source = recapSources.get(createHash('sha256').update(bytes).digest('hex'))
       if (!source) throw new Error('Select a file returned by generate_image or generate_song.')
-      return { bytes: bytes.toString('base64'), ...source }
+      if (story && source.mediaType === 'audio/mpeg' && source.signature !== recapScoreSignature(story)) throw new Error(RECAP_SCORE_MISMATCH)
+      const { signature: _signature, ...media } = source
+      return { bytes: bytes.toString('base64'), ...media }
     },
     prepareRecapMedia: async (request, fetchImpl) => {
       const scope = executionContext?.gameRecapScope
@@ -670,10 +672,10 @@ export function createAssistantHostedToolContext(input: {
           return { bytes: ref.bytes, filename: `${id}.jpg`, mediaType: 'image/jpeg' as const,
             sha256: ref.hash, sourceRef: id, sourceRefSha256: createHash('sha256').update(id).digest('hex') }
         })),
-        save: async (bytes, mediaType, wordsTimestamps) => {
+        save: async (bytes, mediaType, wordsTimestamps, score) => {
           const file = await saveRecapMediaFile({ vault: input.messageInput.vault, relativeRoot: path.relative(input.messageInput.vault, workspace.root), bytes, mediaType })
           recapSources.set(createHash('sha256').update(bytes).digest('hex'), { referenceIds, mediaType,
-            ...(wordsTimestamps ? { wordsTimestamps } : {}) })
+            ...(wordsTimestamps ? { wordsTimestamps } : {}), ...score })
           return file
         },
       }

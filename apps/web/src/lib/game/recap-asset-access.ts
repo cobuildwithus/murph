@@ -7,6 +7,7 @@ import { isRecapMediaVisible } from "./access";
 import { readGame } from "./service";
 import { readRecapMedia } from "./recap-media";
 import { pairGamesWhere } from "./recap-inputs";
+import { inspectMp3Frames } from "@murphai/operator-config/generated-audio";
 
 /** Current roster, blocks, reports and exact source keys; a photo may come from
  * any of the pair's settled games. Used at admission, publication and delivery;
@@ -48,9 +49,15 @@ export async function readAuthorizedRecapAsset(input: { gameId: string; generati
   if (!isRecapMediaVisible() || !(await readGame(input.gameId, input.memberId, false))?.recap?.show) return null;
   const current = await readRecapEnvelope(input.gameId);
   if (!current || current.envelope.generationId !== input.generationId) return null;
-  const asset = current.envelope.assets.find(item => item.slot === input.slot);
+  const asset = current.envelope.assets.find(item => item.slot === (input.slot === "score" ? "song" : input.slot));
   if (!asset || !await recapReferencesCurrent(getPrisma(), input.gameId, [asset])) return null;
+  if (input.slot === "score" && asset.songStartMs === undefined) return null;
   const stored = await readRecapMedia({ storageKey: asset.storageKey, ownerMemberId: current.row.wordsOwnerMemberId });
   if (!stored || stored.hash !== asset.hash) return null;
-  return { bytes: stored.bytes, contentType: asset.mediaType! };
+  if (input.slot === "song" && asset.songStartMs !== undefined) {
+    const cut = inspectMp3Frames(stored.bytes).frames.find(frame => frame.timeMs === asset.songStartMs);
+    if (!cut) return null;
+    return { bytes: stored.bytes.subarray(cut.byteOffset), contentType: asset.mediaType };
+  }
+  return { bytes: stored.bytes, contentType: asset.mediaType };
 }

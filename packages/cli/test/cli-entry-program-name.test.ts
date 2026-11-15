@@ -18,7 +18,7 @@ vi.mock('../src/vault-cli.js', () => ({
   createVaultCliWithOptions,
 }))
 
-vi.mock('@murphai/operator-config/operator-config', () => ({
+vi.mock('@murphai/operator-config/operator-config/storage', () => ({
   expandConfiguredVaultPath: vi.fn((vault: string) => vault),
   resolveDefaultVault,
   resolveOperatorHomeDirectory,

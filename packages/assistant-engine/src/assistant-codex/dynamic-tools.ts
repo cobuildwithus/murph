@@ -322,6 +322,7 @@ import {
   MURPH_GENERATE_SONG_TOOL,
   parseGenerateSongArguments,
 } from './dynamic-tools/generate-song.js'
+import { executeGenerateRecapSongFile } from './recap-song.js'
 import {
   executeAskGrokDynamicTool,
   MURPH_ASK_GROK_TOOL,
@@ -1496,7 +1497,7 @@ export type MurphDynamicToolRequest =
     }
   | {
       kind: 'generate-song'
-      args: GenerateSongToolArgs
+      args: GenerateSongToolArgs | import('./dynamic-tools/generate-song.js').GenerateRecapSongToolArgs
     }
   | {
       kind: 'conversation-attachments'
@@ -8861,11 +8862,17 @@ async function executeSongToolRequest(input: ExecuteMurphDynamicToolRequestInput
   const prepare = recapMediaPreparer(input)
   if (prepare) {
     try {
-      const args = { ...input.request.args, durationSeconds: 20, instrumental: false }
-      return await executeGenerateSongDynamicTool({ args, env: input.env, abortSignal: input.abortSignal,
-        fileRuntime: await prepare({ kind: 'song', args }, input.fetchImpl) })
-    } catch (error) { return recapMediaToolFailure(error) }
+      const args = input.request.args
+      if (!('draftPath' in args) || !input.hostedToolContext?.readGameRecapDraft) return toolTextResult(false, 'Use the draft path and voice to generate recap music.', 'invalid_input')
+      const result = await executeGenerateRecapSongFile({ draft: await input.hostedToolContext.readGameRecapDraft(args.draftPath), voice: args.voice,
+        env: input.env, abortSignal: input.abortSignal, fileRuntime: await prepare({ kind: 'song', args }, input.fetchImpl) })
+      return { ...toolTextResult(result.rpcSuccess, result.rpcText), ...toolFailureMetadata(result) }
+    } catch (error) {
+      if (input.abortSignal?.aborted) throw input.abortSignal.reason ?? error
+      return recapMediaToolFailure(error)
+    }
   }
+  if ('draftPath' in input.request.args) return toolTextResult(false, 'Draft music is available only in a recap show.', 'authority_rejected')
   if (input.currentResponseCard !== null && input.currentResponseCard !== undefined) {
     return toolTextResult(false, 'song generation cannot be combined with a response card', 'conflict')
   }

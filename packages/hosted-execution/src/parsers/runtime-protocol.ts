@@ -8,6 +8,8 @@ import {
 } from "../runtime-control.ts";
 import { requireObject } from "./assertions.ts";
 import { parseHostedRuntimeOwnerCommand } from "../runtime-owner.ts";
+import { buildRecapScoreProtocolProbe, hostedGameToolRequestSchema } from "../game-tools.ts";
+import { recapAssetSchema } from "@murphai/contracts/recap-show";
 
 // Preserve the legacy response for callers which do not need an audience.
 // Scheduled delivery still independently requires the live owner's boolean.
@@ -80,6 +82,18 @@ export function assertHostedRuntimeWebProtocolAdmission(
     throw new Error("Hosted Web protocol admission failed: thread_route_audience.");
   }
   assertRuntimeOwnerCompletionEvidence(record.runtimeOwnerCompletion);
+  assertRecapScoreEvidence(record.recapScore);
+}
+
+function assertRecapScoreEvidence(value: unknown): void {
+  try {
+    const score = requireObject(value, "Recap score evidence");
+    const expected = buildRecapScoreProtocolProbe();
+    if (JSON.stringify(hostedGameToolRequestSchema.parse(score.upload)) !== JSON.stringify(hostedGameToolRequestSchema.parse(expected.upload))
+      || JSON.stringify(recapAssetSchema.parse(score.asset)) !== JSON.stringify(recapAssetSchema.parse(expected.asset))) throw new Error("Score witness mismatch.");
+  } catch {
+    throw new Error("Hosted Web protocol admission failed: recap_score.");
+  }
 }
 
 function assertRuntimeOwnerCompletionEvidence(value: unknown): void {

@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-14",
+  "order": 300,
+  "item": {
+    "id": "finished-game-day-correction",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "A finished game can still be corrected for 7 days",
+    "summary": "For 7 days after a two-player game ends, you can tell Murph in the game's group chat that you did a day you never posted, and the result, your record and the prize follow.",
+    "details": "It works on your own days only, the same as during the game, and Murph says in the chat when the result changes. A recap already made keeps the result it was written from. After 7 days the result is final.",
+    "relevanceTags": ["games", "group-chat"],
+    "sourcePullRequests": [4983]
+  }
+}

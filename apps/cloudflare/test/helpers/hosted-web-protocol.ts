@@ -1,3 +1,4 @@
+import { buildRecapScoreProtocolProbe } from '@murphai/hosted-execution/runtime-control';
 import { buildHostedRuntimeReplicaBatchProtocolProbe } from "@murphai/hosted-execution/runtime-resources";
 import {
   HOSTED_RUNTIME_LOG_EVENT_CODES,
@@ -12,6 +13,7 @@ import {
 // the real log parser and authority response owner.
 export function syntheticHostedWebProtocolAdmission(nonce: string): HostedRuntimeWebProtocolAdmission {
   return {
+    recapScore: buildRecapScoreProtocolProbe(),
     runtimeReplicaBatch: buildHostedRuntimeReplicaBatchProtocolProbe(),
     kind: HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_KIND,
     schemaVersion: HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_VERSION,

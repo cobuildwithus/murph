@@ -29,6 +29,14 @@ describe("workspace source resolution", () => {
   });
 
   it.each([
+    { packageName: "vault-usecases", entry: "health-cli-descriptors.ts", specifier: "@murphai/vault-usecases/health-cli-descriptors", symbol: "healthListResultSchema" },
+    { packageName: "vault-usecases", entry: "option-utils.ts", specifier: "@murphai/vault-usecases/option-utils", symbol: "normalizeRepeatableFlagOption" },
+    { packageName: "vault-usecases", entry: "json-input.ts", specifier: "@murphai/vault-usecases/json-input", symbol: "inputFileOptionSchema" },
+    { packageName: "contracts", entry: "health-entities.ts", specifier: "@murphai/contracts/health-entities", symbol: "healthEntityDefinitions" },
+    { packageName: "contracts", entry: "shares.ts", specifier: "@murphai/contracts/shares", symbol: "foodUpsertPayloadSchema" },
+    { packageName: "contracts", entry: "time.ts", specifier: "@murphai/contracts/time", symbol: "toLocalDayKey" },
+    { packageName: "contracts", entry: "zod.ts", specifier: "@murphai/contracts/zod", symbol: "jsonObjectSchema" },
+    { packageName: "contracts", entry: "constants.ts", specifier: "@murphai/contracts/constants", symbol: "CONDITION_CLINICAL_STATUSES" },
     { packageName: "core", entry: "event-read.ts", specifier: "@murphai/core/event-read", symbol: "readEvent" },
     { packageName: "contracts", entry: "recap-show.ts", specifier: "@murphai/contracts/recap-show", symbol: "gameRecapDraftSchema" },
     { packageName: "contracts", entry: "recap-material.ts", specifier: "@murphai/contracts/recap-material", symbol: "recapMaterialSchema" },
@@ -206,6 +214,9 @@ describe("workspace source resolution", () => {
     );
     expect(resolveAliasReplacement(aliases, "@murphai/hosted-execution/usage-diagnostics")).toBe(
       path.join(repoRoot, "packages/hosted-execution/src/usage-diagnostics.ts"),
+    );
+    expect(resolveAliasReplacement(aliases, "@murphai/operator-config/operator-config/storage")).toBe(
+      path.join(repoRoot, "packages/operator-config/src/operator-config/storage.ts"),
     );
     expect(resolveAliasReplacement(aliases, "@murphai/vault-usecases/testing")).toBe(
       path.join(repoRoot, "packages/vault-usecases/src/testing.ts"),

@@ -133,7 +133,7 @@ async function runMurphCliActionInternal(
   }
 
   const { resolveDefaultVault, resolveOperatorHomeDirectory } = await import(
-    '@murphai/operator-config/operator-config'
+    '@murphai/operator-config/operator-config/storage'
   )
   const { vaultOverride } = plannedInvocation
   const defaultVault = vaultOverride.vault ?? await resolveDefaultVault(resolveOperatorHomeDirectory())

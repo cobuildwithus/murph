@@ -7,5 +7,5 @@ export interface GeneratedMediaFileRuntime {
   elevenLabsApiKey?: string
   fetchImpl: typeof fetch
   resolveReferences(refs: readonly string[]): Promise<ResolvedGenerateImageReference[]>
-  save(bytes: Uint8Array, mediaType: 'image/jpeg' | 'audio/mpeg', wordsTimestamps?: SongWordTimestamp[]): Promise<string>
+  save(bytes: Uint8Array, mediaType: 'image/jpeg' | 'audio/mpeg', wordsTimestamps?: SongWordTimestamp[], score?: { songStartMs: number; signature: string }): Promise<string>
 }
