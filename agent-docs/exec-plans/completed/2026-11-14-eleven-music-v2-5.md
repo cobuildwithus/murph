@@ -192,3 +192,17 @@ Deployment: Web must price `music_v2_5` before a runner emits it, so Web
 admission passes before the Cloudflare runtime deploy. Every boundary accepts
 both models, so a mixed Worker and runner pair is safe in either direction.
 Completed: 2026-11-14
+
+### Source path map
+
+The first exact-head CI run failed in the lanes that run from source without a
+build: the runner bundle assembly under `tsx`, and unbuilt-package Vitest
+lanes, could not resolve `@murphai/contracts/elevenlabs-music`. Local checks
+had passed because a built workspace resolves the entrypoint from `dist`. The
+entrypoint is now registered in `tsconfig.base.json`, `apps/web/tsconfig.json`
+and `scripts/workspace-source-resolution.test.ts`, as the previous new
+entrypoint was. Proof with `packages/contracts/dist/elevenlabs-music.js`
+removed: a `tsx` import of `packages/hosted-execution/src/runtime-control.ts`
+resolves with the path entry and fails without it; both state-cardinality
+suites pass (7 tests); the source-resolution suite passes (20 tests). The gap
+is recorded in the friction log.
