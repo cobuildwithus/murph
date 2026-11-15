@@ -48909,7 +48909,9 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
       const ids = new Set(providers.material.references.map(reference => reference.id));
       const media = readCapabilityRoutingActions(events).flatMap(action => action.kind === 'dynamic' && ['generate_image', 'generate_song', 'write_recap'].includes(action.tool) ? [action] : []);
       const actions = readCapabilityRoutingActions(events);
+      const deliveries = await listAssistantOutboxIntents(vault);
       const proof = { model: config.model, saved: providers.saved.length, providerCalls: providers.providerCalls,
+        replies: deliveries.map(delivery => ({ text: delivery.message, mediaCount: delivery.media?.length ?? 0 })),
         workingFilesInVault: existsSync(path.join(vault, 'tmp/recap')),
         readGame: actions.flatMap(action => action.kind === 'dynamic' && action.tool === 'read_game' ? [{ bytes: Buffer.byteLength(action.output) }] : []),
         commands: actions.flatMap(action => action.kind === 'command' ? [action.command.replace(/[a-f0-9]{32,64}/gu, '<hex>').slice(0, 140)] : []).slice(0, 20),
@@ -48924,6 +48926,16 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
       expect(proof.calls.filter(call => call.tool !== 'write_recap' && !call.success)).toEqual([]);
       expect(proof.calls.some(call => call.tool === 'generate_image')).toBe(true);
       expect(proof.saved).toBe(1);
+      const songCalls = media.filter(call => call.tool === 'generate_song');
+      expect(songCalls).toHaveLength(1);
+      expect(Object.keys(songCalls[0]!.argumentsValue).sort()).toEqual(['draftPath', 'voice']);
+      const song = providers.assets.find(asset => asset.slot === 'song');
+      expect(song?.songStartMs).toBeGreaterThan(0);
+      expect(song?.durationMs).toBeGreaterThan(20_000);
+      expect(song?.wordsTimestamps?.length).toBeGreaterThan(0);
+      expect(media.at(-1)?.tool).toBe('write_recap');
+      expect(providers.providerCalls.filter(call => call.kind === 'song')).toHaveLength(1);
+      expect(proof.replies).toEqual([{ text: `${providers.saved[0]!.chatLine}\nWatch the recap: https://recaps.murph.test/recap/synthetic-game`, mediaCount: 0 }]);
       // What read_game returns fits in what the model is shown, so nothing is cut out of it.
       for (const read of proof.readGame) expect(read.bytes).toBeLessThan(10_000 * 4);
       // Photos, media and the chat copy live in runtime scratch, which the room's saved workspace never includes.

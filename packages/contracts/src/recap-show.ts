@@ -40,6 +40,37 @@ export const gameRecapWriterSchema = z.object({
 }).strict();
 export type GameRecapStory = z.infer<typeof gameRecapWriterSchema>;
 
+/** The ordered pages the band plays under, before the sung part and result. */
+export function recapMusicPageKinds(story: Pick<GameRecapStory, "pages" | "superlatives">): Array<"cover" | "scene" | "print" | "text" | "superlative"> {
+  return [...story.pages.map((page, index) => index === 0 ? "cover" as const
+    : page.blocks.some(block => block.kind === "scene") ? "scene" as const
+    : page.blocks.some(block => ["photo", "photoPair", "contactSheet"].includes(block.kind)) ? "print" as const : "text" as const),
+  ...(story.superlatives ?? []).map(() => "superlative" as const)];
+}
+
+/** Raw provider words only: directions with zero duration are not singing. */
+export function recapSungWords(timestamps: readonly import("./song-timing.ts").SongWordTimestamp[], sungStartMs: number) {
+  return timestamps.filter(word => word.endMs > word.startMs && word.startMs >= sungStartMs);
+}
+
+export function recapFirstSungWordMs(timestamps: readonly import("./song-timing.ts").SongWordTimestamp[], sungStartMs: number): number | undefined {
+  const words = recapSungWords(timestamps, sungStartMs);
+  return words.length ? Math.min(...words.map(word => word.startMs)) : undefined;
+}
+
+export function recapScorePageCount(durationMs: number): number | undefined {
+  const count = Math.round((durationMs - 20_000) / 5000);
+  return count >= 1 && count <= 9 && Math.abs(durationMs - (count * 5000 + 20_000)) <= 500 ? count : undefined;
+}
+
+export function recapSongLines(lyrics: readonly string[], asset: Pick<RecapAsset, "wordsTimestamps" | "durationMs" | "songStartMs">, sungStartMs: number) {
+  if (!asset.wordsTimestamps || !asset.durationMs) return undefined;
+  const start = asset.songStartMs ?? 0;
+  const words = asset.songStartMs === undefined ? asset.wordsTimestamps : recapSungWords(asset.wordsTimestamps, sungStartMs)
+    .map(word => ({ ...word, startMs: word.startMs - start, endMs: word.endMs - start }));
+  return alignSongLyrics(lyrics, words, asset.durationMs - start);
+}
+
 /** Local selections carry paths; the host owns hashes, bytes and source lineage. */
 export const recapShowStorySchema = gameRecapWriterSchema.extend({
   treatment: z.string().trim().min(1).optional(),
@@ -79,8 +110,12 @@ export const recapAssetSchema = z.object({
   byteLength: z.number().int().positive().max(2 * 1024 * 1024),
   width: z.number().int().positive().optional(), height: z.number().int().positive().optional(),
   durationMs: z.number().int().positive().optional(),
+  songStartMs: z.number().nonnegative().optional(),
   wordsTimestamps: songWordTimestampsSchema.optional(),
-}).strict();
+}).strict().refine(asset => asset.songStartMs === undefined || asset.slot === "song" && asset.kind === "song"
+  && asset.mediaType === "audio/mpeg" && !!asset.wordsTimestamps && !!asset.durationMs
+  && asset.songStartMs < asset.durationMs && recapScorePageCount(asset.durationMs) !== undefined,
+"A score requires a song, raw timings, a measured score duration and a slice origin before its end.");
 export type RecapAsset = z.infer<typeof recapAssetSchema>;
 export const gameRecapEnvelopeSchema = z.object({
   version: z.literal(1), generationId: ref, story: recapShowWriterSchema.extend({ song: recapShowWriterSchema.shape.song.catch(undefined) }),
@@ -119,6 +154,7 @@ export const recapShowPageSchema = z.object({
   // Insert the generated image at this zero-based position among blocks.
   imageIndex: z.number().int().min(0).max(3).optional(),
   media: displayMedia.optional(),
+  cueMs: z.number().nonnegative().optional(),
   fallback: z.object({ kind: z.enum(["photo", "text"]), entryIds: z.array(ref).max(1) }).strict().optional(),
   card: z.object({ memberId: ref, title: z.string(), line: z.string() }).strict().optional(),
   song: z.object({ title: z.string(), lyrics: z.array(z.string()), lines: songLinesSchema.optional() }).strict().optional(),
@@ -129,6 +165,7 @@ export const gameRecapPresentationSchema = z.object({
   show: z.object({ version: z.literal(1), generationId: ref, treatment: z.string(),
     acceptedAt: instant,
     pages: z.array(recapShowPageSchema).max(11),
+    score: z.object({ media: displayMedia }).strict().optional(),
   }).strict().optional(),
 }).strict();
 export type GameRecapPresentation = z.infer<typeof gameRecapPresentationSchema>;
@@ -155,17 +192,19 @@ export function presentGameRecap(input: {
     ...(!envelope && story.superlatives ? { superlatives: story.superlatives } : {}),
   };
   if (!envelope) return legacy;
+  const musicKinds = recapMusicPageKinds(story);
   const media = (slot: string): z.infer<typeof displayMedia> => {
-    const asset = envelope.assets.find(item => item.slot === slot);
+    const asset = envelope.assets.find(item => item.slot === (slot === "score" ? "song" : slot));
     if (input.mediaVisible === false || !asset) return { status: "failed" };
     return { status: "ready", url: input.mediaUrl(slot, envelope.generationId), mediaType: asset.mediaType,
-      ...(asset.width ? { width: asset.width } : {}), ...(asset.height ? { height: asset.height } : {}), ...(asset.durationMs ? { durationMs: asset.durationMs } : {}) };
+      ...(asset.width ? { width: asset.width } : {}), ...(asset.height ? { height: asset.height } : {}),
+      ...(asset.durationMs ? { durationMs: asset.durationMs - (slot === "song" ? asset.songStartMs ?? 0 : 0) } : {}) };
   };
   const pages: RecapShowPage[] = story.pages.map((page, index) => {
     const sceneIndex = page.blocks.findIndex(block => block.kind === "scene");
     const scene = page.blocks[sceneIndex];
     const ids = (scene?.entryIds ?? []).filter(id => input.permittedPhotoIds.has(id)).slice(0, 1);
-    return { id: `page-${index}`, kind: index === 0 ? "cover" : scene ? "scene" : page.blocks.some(block => ["photo", "photoPair", "contactSheet"].includes(block.kind)) ? "print" : "text",
+    return { id: `page-${index}`, kind: musicKinds[index]!,
       background: page.background,
       blocks: page.blocks.flatMap(block => {
         if (block.kind === "scene") return [];
@@ -177,13 +216,21 @@ export function presentGameRecap(input: {
   });
   for (const card of story.superlatives ?? []) pages.push({ id: `card-${card.memberId}`, kind: "superlative", background: "paper", blocks: [], card });
   const songMedia = media("song");
+  let score: { media: z.infer<typeof displayMedia> } | undefined;
   if (story.song && songMedia.status === "ready") {
-    const asset = envelope.assets.find(item => item.slot === "song");
-    const lines = asset?.wordsTimestamps && asset.durationMs
-      ? alignSongLyrics(story.song.lyrics, asset.wordsTimestamps, asset.durationMs) : undefined;
+    const asset = envelope.assets.find(item => item.slot === "song")!;
+    const sungStartMs = musicKinds.length * 5000;
+    const lines = recapSongLines(story.song.lyrics, asset, sungStartMs);
+    const firstWordMs = asset.songStartMs !== undefined
+      ? recapFirstSungWordMs(asset.wordsTimestamps!, sungStartMs) : undefined;
+    if (firstWordMs !== undefined) {
+      score = { media: media("score") };
+      pages.forEach((page, index) => { page.cueMs = index * 5000; });
+    }
     pages.push({ id: "song", kind: "song", background: "night", blocks: [], media: songMedia,
+      ...(firstWordMs === undefined ? {} : { cueMs: firstWordMs }),
       song: { title: story.song.title, lyrics: story.song.lyrics, ...(lines ? { lines } : {}) } });
   }
   pages.push({ id: "result", kind: "result", background: "paper", blocks: [] });
-  return { ...legacy, show: { version: 1, generationId: envelope.generationId, treatment: (story.treatment ?? "").replace(/[\s.,;:]+$/u, ""), acceptedAt: envelope.acceptedAt, pages } };
+  return { ...legacy, show: { version: 1, generationId: envelope.generationId, treatment: (story.treatment ?? "").replace(/[\s.,;:]+$/u, ""), acceptedAt: envelope.acceptedAt, pages, ...(score ? { score } : {}) } };
 }

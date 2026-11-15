@@ -40,11 +40,10 @@ export const MURPH_GENERATE_IMAGE_RECAP_TOOL = {
 } as const
 export const MURPH_GENERATE_SONG_RECAP_TOOL = {
   namespace: 'murph', name: 'generate_song',
-  description: 'Generate the show\'s twenty-second theme song. Returns the path of the song for the draft\'s files.',
-  inputSchema: { type: 'object', additionalProperties: false, required: ['prompt', 'lyrics'], properties: {
-    prompt: { type: 'string', minLength: 1, maxLength: 4100, description: 'The sound only: genre, tempo, instruments, the kind of voice.' },
-    lyrics: { type: 'array', minItems: 1, maxItems: 20, items: { type: 'string', minLength: 1, maxLength: 200 },
-      description: 'The exact lines to sing, in order, one per item, with no labels like [Chorus].' },
+  description: "Generate the show's music from the draft: the band under each page, then the sung theme song. Returns the path of the song for the draft's files.",
+  inputSchema: { type: 'object', additionalProperties: false, required: ['draftPath', 'voice'], properties: {
+    draftPath: { type: 'string', minLength: 1, maxLength: 512, description: "The draft's path." },
+    voice: { type: 'string', minLength: 1, maxLength: 220, description: 'The singer, in a few words: the kind of voice and how it sings.' },
   } },
 } as const
 export const MURPH_WRITE_RECAP_TOOL = {
@@ -539,8 +538,9 @@ async function executeRecapFileWrite(input: { context: AssistantHostedToolContex
     const draft = gameRecapDraftSchema.parse(await context.readGameRecapDraft(input.draftPath))
     const origin = { kind: 'game_recap' as const, gameId: scope.gameId, eventId: scope.eventId }
     const assets = []
-    for (const file of draft.files) {
-      const media = await context.readGameRecapMedia(file.path)
+    // Validate every selection against the final draft before uploading any bytes.
+    const selections = await Promise.all(draft.files.map(async file => ({ file, media: await context.readGameRecapMedia!(file.path, draft.story) })))
+    for (const { file, media } of selections) {
       const uploaded = await tool.request({ action: 'read_game', origin, recapRead: { kind: 'upload', slot: file.slot, ...media } })
       if (uploaded.result.status !== 'ok' || !('recapGame' in uploaded.result)) throw new Error('Media upload failed.')
       assets.push(recapAssetSchema.parse(uploaded.result.recapGame))

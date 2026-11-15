@@ -1347,7 +1347,7 @@ async function maybeHandleElevenLabsRequest(input: {
   }
 
   if (authorization.recapMediaScoped) {
-    if (providerRequest.kind !== 'music' || providerRequest.durationMs !== 20_000) return new Response('Recap music uses a twenty-second song.', { status: 400 });
+    if (providerRequest.kind !== 'music' || !(providerRequest.durationMs === 20_000 || providerRequest.durationMs >= 25_000 && providerRequest.durationMs <= 65_000 && providerRequest.durationMs % 5000 === 0)) return new Response('Recap music uses a twenty-second song or a score.', { status: 400 });
     const consumed = await consumeRecapMediaRequest(input.env, authorization);
     if (consumed instanceof Response) return consumed;
     authorization.platformAiUsageAllowed = true;

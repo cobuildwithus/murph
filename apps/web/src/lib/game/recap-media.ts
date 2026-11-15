@@ -1,7 +1,7 @@
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type { Prisma } from '@prisma/client';
 import type { HostedGameToolRequest } from '@murphai/hosted-execution/runtime-control';
-import { recapAssetSchema } from '@murphai/contracts/recap-show';
+import { recapAssetSchema, recapScorePageCount, recapFirstSungWordMs, type SongWordTimestamp } from '@murphai/contracts/recap-show';
 import { getPrisma } from '../prisma';
 import { readGameChatAudience, readGameChatAuthority } from './chat-membership';
 import { readGameRecapEntryIdsTx, readLatestGameRecapEventIdTx } from './recap-witness';
@@ -14,19 +14,20 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
-import { inspectGeneratedMp3Audio } from "@murphai/operator-config/generated-audio";
+import { inspectGeneratedMp3Audio, inspectMp3Frames } from "@murphai/operator-config/generated-audio";
 import { hostedRecapMediaObjectKey, requireHostedRecapMediaId } from "@murphai/hosted-execution/storage-paths";
 import { readHostedExecutionControlClientIfConfigured } from "../hosted-execution/control";
 import { openGameMedia, sealGameMedia } from "./crypto";
 
-export type RecapMediaMetadata = { hash: string; bytes: number; mediaType: "image/jpeg" | "audio/mpeg"; width?: number; height?: number; durationMs?: number };
+export type RecapMediaMetadata = { hash: string; bytes: number; mediaType: "image/jpeg" | "audio/mpeg"; width?: number; height?: number; durationMs?: number; songStartMs?: number };
+type ScoreMetadata = { songStartMs?: number; wordsTimestamps?: SongWordTimestamp[] };
 type Identity = { storageKey: string; ownerMemberId: string };
 
 /** Inspect and seal outside transactions. Upload retry reuses an immutable key;
  * a different ciphertext nonce is fine only when its plaintext hash is identical. */
-export async function putRecapMedia(input: Identity & { bytes: Uint8Array; durationMs?: number }): Promise<RecapMediaMetadata> {
+export async function putRecapMedia(input: Identity & ScoreMetadata & { bytes: Uint8Array; durationMs?: number }): Promise<RecapMediaMetadata> {
   requireHostedRecapMediaId(input.storageKey);
-  const metadata = await inspectRecapMedia(input.bytes, input.storageKey, input.durationMs);
+  const metadata = await inspectRecapMedia(input.bytes, input.storageKey, input.durationMs, input);
   const envelope = await sealGameMedia({ bytes: input.bytes, key: input.storageKey, ownerMemberId: input.ownerMemberId });
   const control = hostedControl();
   if (control) await control.putRecapMedia({ envelope, hash: metadata.hash, mediaId: input.storageKey, userId: input.ownerMemberId });
@@ -75,12 +76,13 @@ export async function retireRecapMedia(input: Identity): Promise<void> {
   await rename(temporary, file);
 }
 
-export async function inspectRecapMedia(bytes: Uint8Array, storageKey: string, durationMs?: number): Promise<RecapMediaMetadata> {
+export async function inspectRecapMedia(bytes: Uint8Array, storageKey: string, durationMs?: number, score: ScoreMetadata = {}): Promise<RecapMediaMetadata> {
   requireHostedRecapMediaId(storageKey);
   const image = storageKey.endsWith(".jpg");
-  if (!bytes.length || bytes.length > (image ? 2 : 1) * 1024 * 1024) throw new RangeError("Recap asset size is invalid.");
+  if (!bytes.length || bytes.length > 2 * 1024 * 1024) throw new RangeError("Recap asset size is invalid.");
   const metadata = { hash: createHash("sha256").update(bytes).digest("hex"), bytes: bytes.length };
   if (image) {
+    if (score.songStartMs !== undefined) throw new ContractValidationError("A score origin requires audio.");
     const decoded = sharp(bytes, { limitInputPixels: 4_194_304, failOn: "warning" });
     const info = await decoded.metadata();
     if (info.format !== "jpeg" || !info.width || !info.height || info.width > 2048 || info.height > 2048) throw new ContractValidationError("Recap image must be a bounded JPEG.");
@@ -88,10 +90,22 @@ export async function inspectRecapMedia(bytes: Uint8Array, storageKey: string, d
     return { ...metadata, mediaType: "image/jpeg", width: info.width, height: info.height };
   }
   const mp3 = bytes[0] === 0xff && (bytes[1]! & 0xe0) === 0xe0 || bytes[0] === 0x49 && bytes[1] === 0x44 && bytes[2] === 0x33;
-  if (!mp3 || durationMs !== 20_000) throw new ContractValidationError("Recap song must be a twenty-second MP3.");
+  if (!mp3 || score.songStartMs === undefined && durationMs !== 20_000) throw new ContractValidationError("Recap song must be a twenty-second MP3 or a score.");
   const decoded = await inspectGeneratedMp3Audio(bytes);
-  if (Math.abs(decoded.durationMs - 20_000) > 500) throw new ContractValidationError("Recap song duration is outside its twenty-second recipe.");
-  return { ...metadata, mediaType: "audio/mpeg", durationMs: decoded.durationMs };
+  return { ...metadata, mediaType: "audio/mpeg", ...inspectRecapSong(bytes, decoded.durationMs, score) };
+}
+
+function inspectRecapSong(bytes: Uint8Array, durationMs: number, score: ScoreMetadata) {
+  if (score.songStartMs === undefined) {
+    if (Math.abs(durationMs - 20_000) > 500) throw new ContractValidationError("Recap song duration is outside its twenty-second recipe.");
+    return { durationMs };
+  }
+  const count = recapScorePageCount(durationMs);
+  const frames = inspectMp3Frames(bytes);
+  const firstWord = count === undefined ? undefined : recapFirstSungWordMs(score.wordsTimestamps ?? [], count * 5000);
+  if (firstWord === undefined || firstWord >= durationMs || score.songStartMs > firstWord
+    || !frames.frames.some(frame => frame.timeMs === score.songStartMs)) throw new ContractValidationError("Recap score duration, timings or frame origin are invalid.");
+  return { durationMs, songStartMs: score.songStartMs };
 }
 
 function hostedControl() {
@@ -145,7 +159,7 @@ export async function uploadRecapMedia(input: {
     return game.wordsOwnerMemberId;
   });
   const metadata = await putRecapMedia({ storageKey, ownerMemberId, bytes,
-    ...(input.file.mediaType === 'audio/mpeg' ? { durationMs: 20_000 } : {}) });
+    ...(input.file.mediaType === 'audio/mpeg' ? { durationMs: 20_000, songStartMs: input.file.songStartMs, wordsTimestamps: input.file.wordsTimestamps } : {}) });
   const { bytes: byteLength, ...media } = metadata;
   return recapAssetSchema.parse({ slot: input.file.slot, kind: input.file.mediaType === 'image/jpeg' ? 'image' : 'song',
     recipeId: hash, storageKey, references, byteLength, ...media,

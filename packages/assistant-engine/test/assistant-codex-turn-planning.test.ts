@@ -297,7 +297,7 @@ describe('assistant Codex turn planning', () => {
     const media = plan.dynamicTools.filter(tool => tool.name === 'generate_image' || tool.name === 'generate_song')
     expect(media).toEqual([MURPH_GENERATE_IMAGE_RECAP_TOOL, MURPH_GENERATE_SONG_RECAP_TOOL])
     expect(Object.keys(MURPH_GENERATE_IMAGE_RECAP_TOOL.inputSchema.properties)).toEqual(['prompt', 'referenceImageRefs'])
-    expect(Object.keys(MURPH_GENERATE_SONG_RECAP_TOOL.inputSchema.properties)).toEqual(['prompt', 'lyrics'])
+    expect(Object.keys(MURPH_GENERATE_SONG_RECAP_TOOL.inputSchema.properties)).toEqual(['draftPath', 'voice'])
     // Nothing here may point the model at a reference or a mode the recap does not take.
     expect(JSON.stringify(media)).not.toMatch(/skill-assets|raw\/|output|chat|chart|deferLoading/u)
   })

@@ -5902,8 +5902,11 @@ directory is runtime scratch under `.runtime/tmp`, which a saved workspace never
 includes, so players' photos, generated media and the chat copy last only as
 long as the container. A resumed attempt reads the game again.
 The recap turn, never a model argument, makes media a file and fixes its format:
-the agent supplies a prompt and reference photos for each JPEG scene and a style
-and lyrics for the twenty-second song, then calls `write_recap` once. The host uploads selected bytes and Web publishes
+the agent supplies a prompt and reference photos for each JPEG scene and a
+draft path plus singer description for the continuous score, then calls
+`write_recap` once. The host derives five-second page cues and a twenty-second
+sung chunk from that draft. One song asset serves the full score and a
+frame-aligned song slice; the native contract owns their clocks. The host uploads selected bytes and Web publishes
 through the canonical transaction, retaining the current source authorization,
 asset retirement and replay owners. One accepted story owns one chat line plus
 link with no chat media. Groups retain their existing writer rules and payload.

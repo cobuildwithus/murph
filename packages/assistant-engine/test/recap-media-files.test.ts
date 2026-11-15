@@ -6,7 +6,10 @@ import sharp from 'sharp'
 import * as z from '@murphai/contracts/zod-runtime'
 import { afterEach, expect, test, vi } from 'vitest'
 import { executeGenerateImageTool } from '../src/assistant-codex/generate-image-tool.ts'
-import { executeGenerateSongTool } from '../src/assistant-codex/generate-voice-memo-tool.ts'
+import { executeGenerateRecapSongFile } from '../src/assistant-codex/recap-song.ts'
+import { executeGameTool } from '../src/assistant-codex/dynamic-tools/games.ts'
+import { syntheticRecapAudio } from '../src/recap-show-testkit.ts'
+import { gameRecapDraftSchema } from '@murphai/contracts/recap-show'
 import { readRecapFile, saveRecapMediaFile } from '../src/assistant/recap-files.ts'
 import { createAssistantHostedToolContext } from '../src/assistant/hosted-tool-context.ts'
 import { resolveAssistantSession } from '../src/assistant/store.ts'
@@ -47,23 +50,6 @@ test.each([false, true])('file image uses Sunburst with truthful accounting and 
   expect(result.rpcText).not.toContain(root)
 })
 
-test.each(['environment', 'host-only runtime'] as const)('file song uses %s credentials without a voice-memo channel or chat attachment', async credentialSource => {
-  const bytes = await readFile(new URL('../../../fixtures/generated-audio/music.mp3', import.meta.url))
-  const fetchImpl = vi.fn<typeof fetch>(async () => new Response(bytes))
-  const save = vi.fn(async () => `${relativeRoot}/media/theme.mp3`)
-  const result = await executeGenerateSongTool({ env: credentialSource === 'environment' ? { ELEVENLABS_API_KEY: 'synthetic-key' } : {},
-    args: { durationSeconds: 20, instrumental: false, prompt: 'An original playful song for Player A and Player B.' },
-    fileRuntime: { elevenLabsApiKey: credentialSource === 'host-only runtime' ? 'synthetic-key' : undefined, fetchImpl, resolveReferences: async () => [], save } })
-  expect(result.rpcSuccess).toBe(true)
-  expect(result.responseMedia).toBeUndefined()
-  expect(fetchImpl).toHaveBeenCalledTimes(1)
-  expect(String(fetchImpl.mock.calls[0]?.[0])).toContain('/v1/music')
-  expect(JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body))).toMatchObject({ model_id: 'music_v2_5' })
-  expect(new Headers(fetchImpl.mock.calls[0]?.[1]?.headers).get('xi-api-key')).toBe('synthetic-key')
-  expect(result.rpcText).not.toContain('synthetic-key')
-  expect(save).toHaveBeenCalledWith(new Uint8Array(bytes), 'audio/mpeg')
-})
-
 test('candidate files reject traversal, symlinks, oversized bytes and tampering', async () => {
   const root = await vault()
   const bytes = await sharp({ create: { width: 64, height: 64, channels: 3, background: 'white' } }).jpeg().toBuffer()
@@ -92,22 +78,27 @@ test('recap media and trusted song timing belong only to the attempt that genera
   const material = { game: { id: 'game_synthetic', days: [] }, players: ['Leo', 'Ava'], entries: [],
     result: [{ memberId: 'leo', name: 'Leo', score: 4 }, { memberId: 'ava', name: 'Ava', score: 3 }], startedAt, settledAt, references: [] }
   await context.prepareGameRecapInputs!(material)
-  const args = { durationSeconds: 20, instrumental: false, prompt: 'Playful piano', lyrics: ['Leo goes', 'Ava stays'] }
-  const bytes = await readFile(new URL('../../../fixtures/generated-audio/music.mp3', import.meta.url))
-  const words = [{ word: 'Leo', start_ms: 100, end_ms: 300 }, { word: 'goes', start_ms: 400, end_ms: 600 }]
+  const args = { draftPath: 'draft.json', voice: 'Warm baritone' }
+  const draft = { story: { chatLine: 'Synthetic show.', pages: [{ background: 'paper', blocks: [{ kind: 'headline', text: 'Hello' }] }], song: { title: 'Hello', style: 'Playful piano', lyrics: ['Leo goes', 'Ava stays'] } }, files: [] }
+  const bytes = syntheticRecapAudio(await readFile(new URL('../../../fixtures/generated-audio/recap-synthetic-20s.mp3', import.meta.url)), 25_000)
+  const words = [{ word: 'Leo', start_ms: 5100, end_ms: 5300 }, { word: 'goes', start_ms: 5400, end_ms: 5600 }]
   const fetchImpl = vi.fn<typeof fetch>(async () => new Response(Buffer.concat([
     Buffer.from(`--synthetic\r\nContent-Type: application/json\r\n\r\n${JSON.stringify({ words_timestamps: words })}\r\n--synthetic\r\nContent-Type: audio/mpeg\r\n\r\n`),
     bytes, Buffer.from('\r\n--synthetic--\r\n'),
   ]), { headers: { 'content-type': 'multipart/mixed; boundary=synthetic' } }))
   const fileRuntime = await context.prepareRecapMedia!({ kind: 'song', args }, fetchImpl)
-  const result = await executeGenerateSongTool({ env: { ELEVENLABS_API_KEY: 'synthetic-key' }, args, fileRuntime })
+  const result = await executeGenerateRecapSongFile({ env: { ELEVENLABS_API_KEY: 'synthetic-key' }, draft, voice: args.voice, fileRuntime })
   expect(result.rpcSuccess).toBe(true)
   expect(String(fetchImpl.mock.calls[0]?.[0])).toContain('/v1/music/detailed')
   expect(JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body))).toMatchObject({ model_id: 'music_v2_5', with_timestamps: true })
   const receipt = JSON.parse(result.rpcText)
   expect(Object.keys(receipt)).toEqual(['path'])
   expect(await context.readGameRecapMedia!(receipt.path)).toEqual({ bytes: bytes.toString('base64'), referenceIds: [], mediaType: 'audio/mpeg',
-    wordsTimestamps: [{ word: 'Leo', startMs: 100, endMs: 300 }, { word: 'goes', startMs: 400, endMs: 600 }] })
+    songStartMs: expect.any(Number), wordsTimestamps: [{ word: 'Leo', startMs: 5100, endMs: 5300 }, { word: 'goes', startMs: 5400, endMs: 5600 }] })
+  const boundStory = gameRecapDraftSchema.parse(draft).story
+  await expect(context.readGameRecapMedia!(receipt.path, boundStory)).resolves.not.toHaveProperty('signature')
+  await expect(context.readGameRecapMedia!(receipt.path, { ...boundStory, chatLine: 'Changed chat' })).resolves.toBeDefined()
+  await expect(context.readGameRecapMedia!(receipt.path, { ...boundStory, pages: [...boundStory.pages, ...boundStory.pages] })).rejects.toThrow('The song was made for different pages, lyrics or style.')
   const other = await fileRuntime.save(new Uint8Array([1, 2, 3]), 'audio/mpeg', [{ word: 'Ava', startMs: 900, endMs: 1100 }])
   expect((await context.readGameRecapMedia!(receipt.path)).wordsTimestamps?.[0].word).toBe('Leo')
   expect((await context.readGameRecapMedia!(other)).wordsTimestamps?.[0].word).toBe('Ava')
@@ -118,6 +109,16 @@ test('recap media and trusted song timing belong only to the attempt that genera
   const imageBytes = await sharp({ create: { width: 64, height: 64, channels: 3, background: 'white' } }).jpeg().toBuffer()
   const imageFile = await imageRuntime.save(imageBytes, 'image/jpeg')
   expect(await context.readGameRecapMedia!(imageFile)).toEqual({ bytes: imageBytes.toString('base64'), referenceIds: [], mediaType: 'image/jpeg' })
+  const upload = vi.fn<AssistantHostedGroupTool['request']>()
+  const rejected = await executeGameTool({ request: { action: 'write_recap_file', draftPath: 'draft.json' }, context: {
+    ...context, groupTool: { request: upload }, readGameRecapDraft: async () => ({ ...draft,
+      story: { ...boundStory, song: { ...boundStory.song!, style: 'Changed band' } },
+      files: [{ slot: 'scene-0', path: imageFile }, { slot: 'song', path: receipt.path }],
+    }),
+  } })
+  expect(rejected.rpcResult.success).toBe(false)
+  expect(JSON.stringify(rejected)).toContain('The song was made for different pages, lyrics or style. Generate it again from this draft, or remove it from files and submit without a song.')
+  expect(upload).not.toHaveBeenCalled()
   const retry = createContext()
   await retry.prepareGameRecapInputs!(material)
   // A resumed native thread can remember file paths, but cannot carry media authority.
@@ -126,7 +127,7 @@ test('recap media and trusted song timing belong only to the attempt that genera
   await expect(retry.readGameRecapMedia!(imageFile)).rejects.toThrow('Select a file')
   expect(fetchImpl).toHaveBeenCalledTimes(1)
   const retryRuntime = await retry.prepareRecapMedia!({ kind: 'song', args }, fetchImpl)
-  const regenerated = await executeGenerateSongTool({ env: { ELEVENLABS_API_KEY: 'synthetic-key' }, args, fileRuntime: retryRuntime })
+  const regenerated = await executeGenerateRecapSongFile({ env: { ELEVENLABS_API_KEY: 'synthetic-key' }, draft, voice: args.voice, fileRuntime: retryRuntime })
   expect(regenerated.rpcSuccess).toBe(true)
   expect(fetchImpl).toHaveBeenCalledTimes(2)
   expect(await retry.readGameRecapMedia!(JSON.parse(regenerated.rpcText).path)).toEqual(await context.readGameRecapMedia!(receipt.path))
@@ -174,20 +175,10 @@ test('a scene names its references by photo path or id, and anything else is ref
   expect(fetchImpl).not.toHaveBeenCalled()
 })
 
-test('explicit lyrics guard conflicting modes and propagate cancellation without saving', async () => {
-  const args = { durationSeconds: 20, instrumental: false, prompt: 'Playful piano', lyrics: ['Leo goes'] }
+test('recap song arguments reject the old single-song shape and host-owned metadata', () => {
+  const args = { draftPath: 'draft.json', voice: 'Warm baritone' }
   expect(parseGenerateSongArguments(args).ok).toBe(true)
-  for (const override of [{ output: 'file' }, { lyrics: ['two\nlines'] }, { lyrics: [] }]) {
-    expect(parseGenerateSongArguments({ ...args, ...override }).ok).toBe(false)
+  for (const extra of [{ lyrics: ['Leo'] }, { songStartMs: 0 }, { durationSeconds: 20 }, { voice: '' }]) {
+    expect(parseGenerateSongArguments({ ...args, ...extra }).ok).toBe(false)
   }
-  // Outside a recap there is no file runtime, and a song that ignored its lyrics would be a silent wrong answer.
-  expect(await executeGenerateSongTool({ args, env: { ELEVENLABS_API_KEY: 'synthetic-key' } })).toMatchObject({ rpcSuccess: false, rpcText: 'Exact lyrics are sung only in a recap show.' })
-  const controller = new AbortController()
-  const reason = new Error('Synthetic cancellation')
-  controller.abort(reason)
-  const save = vi.fn(), fetchImpl = vi.fn<typeof fetch>()
-  await expect(executeGenerateSongTool({ args, env: { ELEVENLABS_API_KEY: 'synthetic-key' }, abortSignal: controller.signal,
-    fileRuntime: { fetchImpl, save, resolveReferences: async () => [] } })).rejects.toBe(reason)
-  expect(save).not.toHaveBeenCalled()
-  expect(fetchImpl).not.toHaveBeenCalled()
 })
