@@ -4367,7 +4367,7 @@ async function executeCurrentConversationTool(
   switch (request.kind) {
     case 'usage-diagnostics': return executeUsageDiagnosticsTool(hostedToolContext, request.request)
     case 'leave-group': return executeLeaveGroupTool({ request: request.request, context: hostedToolContext })
-    case 'game': return executeGameTool({ request: request.request, context: hostedToolContext, turnState: input.groupSharedReadTurnState ?? null })
+    case 'game': return executeGameTool({ request: request.request, context: hostedToolContext, turnState: input.groupSharedReadTurnState ?? null, signal: input.abortSignal ?? undefined })
     case 'poll': return executeConversationPollTool({ request: request.request, context: hostedToolContext })
     case 'plan-usage': return executePlanUsageTool({ request: request.request, hostedToolContext })
     case 'imessage-contact': return executeIMessageContactTool({ hostedToolContext })

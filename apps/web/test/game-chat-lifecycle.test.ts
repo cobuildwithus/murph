@@ -197,6 +197,23 @@ describe("durable game chat lifecycle", () => {
     expect(notification.instructions).toContain("The bounded room transcript.");
     expect(m.discover).not.toHaveBeenCalled(); expect(m.bootstrap).not.toHaveBeenCalled();
   });
+  it.each([undefined, "synthetic_request"])("asks the runner for the show as a video only with the video flag on; regeneration=%s", async (regenerationId) => {
+    const eventId = `game-recap:game${regenerationId ? `:${regenerationId}` : ""}`;
+    vi.stubEnv("MURPH_GAME_RECAP_SHOW_ENABLED", "true");
+    try {
+      for (const [flag, expected] of [[undefined, { show: true }], ["true", { show: true, video: true }]] as const) {
+        if (flag) vi.stubEnv("MURPH_GAME_RECAP_VIDEO_ENABLED", flag);
+        m.prepare.mockClear();
+        m.game.mockResolvedValue({ ...game, maxPlayers: 2, status: "settled" });
+        m.receipts.mockResolvedValue([{ ...receipt, template: "game_recap", sourceRef: `game${regenerationId ? `:${regenerationId}` : ""}`, idempotencyKey: `hash:${eventId}` }]);
+        await drainGameChatLifecycle({ now });
+        const policy = m.prepare.mock.calls[0][0].envelope.notification.responsePolicy;
+        expect(policy).toEqual({ kind: "require_game_recap", gameId: "game", eventId, pairFingerprint: gamePairLoreFingerprint(players), ...expected });
+      }
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
   it("queues group recaps with the original-audience key and read-only lore, failing closed without it", async () => {
     const audienceKey = "synthetic-original-audience";
     const groupGame = { ...game, maxPlayers: 10, audienceKey, status: "settled", settledAt: now,

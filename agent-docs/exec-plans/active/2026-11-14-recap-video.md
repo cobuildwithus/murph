@@ -148,9 +148,9 @@ drawings in the package (Noto Color Emoji is 10.6 MB of that).
 | Word timings | The song page's `lines`, on the song's own clock, as presented |
 | Real photos, profile photos | Fetched again by reference id into a host-only directory; the task directory's copies are model-writable and are not trusted |
 | Names, scores | `material.result` |
-| Outcome and stake | New `game.poster` inside the material's untyped `game` object, built by Web from the same owner the app's last screen reads: outcome (won, or even and whether both did every day), stake kind (prize, punishment, both-win, none) and title, who owes whom. The runner never derives a winner |
+| Outcome and stake | New `game.poster` inside the material's untyped `game` object, built by Web from the same owner the app's last screen reads: outcome (won, or even with `everyDay`), stake (`prize`, `dare`, `both_win`, `none`, or `other` for a shape the last screen has no single drawing for, such as two tickets of one prize) with its title and who owes whom. The runner maps `dare` to the renderer's punishment and refuses `other`, a missing poster and a ticket owed other than loser to winner. The runner never derives a winner. The model's `game.json` never carries `poster` |
 | Prize drawing | Chosen by the renderer from the prize's title with the app's own rule, from the app's catalog and drawings copied into the package. Web sends no icon: the server stores only the prize's words |
-| Days given back | Entry ids whose player marked the post incomplete: their prints carry the app's "Didn't finish" tag |
+| Days given back | Entry ids whose player marked the post incomplete, read from the material's own `game.days` posts (`incomplete: true`): their prints carry the app's "Didn't finish" tag |
 
 `game.poster` rides in the untyped `game` field because the material schema is
 strict: a new top-level field would make an old runner reject the material.
@@ -204,7 +204,10 @@ acceptance without looking at the new draft. So the write and recover results
 gain the accepted generation and the accepted video's identity (whole-file
 hash and length), or an explicit "no video". The runner's rendered file is a
 disposable candidate with no authority of its own: it may be sent only when
-its hash and length equal the identity Web returned.
+its hash and length equal the identity Web returned. Web returns the identity
+only to a request that asked for it (a write that brings a candidate, or a
+recovery with `video: true`), because older runtimes refuse unknown result
+fields.
 
 The step runs only when the wake's response policy carries `video: true`, which
 Web sets from `MURPH_GAME_RECAP_VIDEO_ENABLED` for pair shows.
@@ -317,6 +320,7 @@ x264 `medium`.
 | Linux container at 2 CPUs and 6 GiB, the runner base's recipe (Node 24.22.1 on Debian bookworm, ffmpeg 5.1.9), arm64, on an Apple M4 Max | 19.9 s | 6.7 CPU-s, 271 MB peak | 32.9 CPU-s, 777 MB peak | 3.06 MB |
 | The same container, x264 `veryfast` | 15.9 s | 6.6 CPU-s, 271 MB peak | 25.0 CPU-s, 574 MB peak | 2.58 MB |
 | The hosted runner's real base image (linux/amd64) at 2 CPUs and 6 GiB, emulated on the same Mac | 39.4 s | 13.8 CPU-s, 339 MB peak | 64.8 CPU-s, 957 MB peak | 3.06 MB |
+| The real child (`child.js`) in the runner base image at 2 CPUs and 6 GiB on a GitHub-hosted x86-64 runner (the runner-image lane on PR #4994) | 44.7 s | not reported | 555 MB peak | 3.18 MB |
 | macOS, 16 threads, Apple M4 Max | 5.0 s | 5.4 CPU-s, 343 MB peak | 17.9 CPU-s, 767 MB peak | 3.05 MB |
 
 - The two-CPU arm64 number is the nearest measurement to production that
@@ -649,6 +653,60 @@ Clean by the review: the song's clock and the last screen's timing against
 the contract fixture, the shrink loop, the score row, ticket and slip
 arithmetic, contact sheet rows, the drawing picker, the catalog's contents,
 the workflow, and the tests (none vacuous).
+
+### Slice 5 choices: render in generation (2026-11-15)
+
+1. The child is the renderer package's own `child.js` (request file in, one
+   JSON line out). The runner resolves it beside the installed package's index
+   and never imports the renderer, so `@napi-rs/canvas` and the fonts stay out
+   of the runner process and the runner bundle; `@murphai/assistant-engine`
+   depends on the package so the bundle installs it.
+2. The child runs in a new process group with a 512 MB heap and an
+   environment of `PATH`, `HOME` and `LANG` only. One 180 s budget covers the
+   photo fetches, the render and the part uploads. The runner kills the group
+   at the deadline and on a cancelled turn, and again after any exit; the child
+   removes its own directory and kills its group when the runner's pipe closes
+   or its deadline passes, so an orphaned render cannot outlive its runner.
+3. Inputs, the request and the output go to a fresh render directory under the
+   runner's home (`.murph-recap-video/`), never under a temporary directory or
+   the vault, which the model's permission profile can write. Files are 0600;
+   the directory is removed on every path except the finished file, which the
+   caller disposes of after the write; each render sweeps directories older
+   than twice the budget.
+4. One render per runner process at a time; a second concurrent recap gets no
+   video ("busy") rather than a second encoder's memory.
+5. The render runs after the scene and song uploads (Web measures the song,
+   and `presentGameRecap` needs the assets) and before the write. A write the
+   model must correct renders again; accepted, since refusals are rare and the
+   step is bounded.
+6. A post whose photo is no longer in the material is drawn as the app draws
+   it, a "missed" print; a photo that cannot be fetched again is no video.
+7. Slice 2's finding 12 (a ticket worth more than one): Web's poster gives two
+   tickets of one prize as `other`, so the runner refuses it.
+8. With the flag off nothing changes: the wake has no `video`, the write
+   request has no `video` key, and the model's input is identical because
+   `poster` is removed from `game.json` (tested byte for byte).
+9. Rollback floor: this slice adds none for durable data. Web writes
+   `video: true` only with the flag on, and the runtime that reads it (#4991)
+   ignores it; the runner sends a candidate only after Web accepted its parts,
+   which an older Web refuses. One condition: with the flag on, Web puts
+   `game.poster` in the material, and only this runtime keeps it out of the
+   model's `game.json`, so turn the flag off before rolling the runtime below
+   this slice.
+10. Review (ReviewGPT round 1 and the Codex deep review, both on 6bd8ebf271).
+    Accepted and fixed with tests: the render directory was under the
+    model-writable temporary directory, so a planted link could make ffmpeg
+    overwrite a canonical file (ReviewGPT, high); a setup error before the
+    child (directory, request file, package resolution) failed the recap write
+    (Codex 1); an orphaned child left its inputs behind (Codex 2); a turn
+    cancelled during an upload could still write (Codex 3); the deadline left
+    out fetches and uploads (Codex 4); the rollback note above (Codex 5); a
+    ready scene's unused fallback photo was fetched and could cost the video
+    (Codex 6). The native permission smoke does not yet run a render beside a
+    hostile model command; the unit tests prove the directory is never under a
+    temporary directory or the vault, and the profile grants the model neither
+    the runner's home nor anything outside the vault and the temporary
+    directories.
 
 ### Owner decisions recorded after the review (no architecture change)
 

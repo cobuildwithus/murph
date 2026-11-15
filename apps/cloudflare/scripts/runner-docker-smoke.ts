@@ -118,6 +118,16 @@ async function main(): Promise<void> {
     console.log(`pythonVersion=${result.pythonVersion}`);
     console.log(`ripgrepCommandDiscovered=${result.ripgrepCommandDiscovered}`);
     console.log(`ripgrepVersion=${result.ripgrepVersion}`);
+
+    // The recap video renderer as a recap starts it: the installed package, its native canvas
+    // and its own fonts, in this image. It must measure the probe's headline and refuse it.
+    const recapVideo = (await runDockerCommand([
+      "run", "--rm", "--platform", "linux/amd64", "--network", "none", "--entrypoint", "node", IMAGE_TAG,
+      "--input-type=module", "-e",
+      "const { probeRecapVideoRenderer } = await import('@murphai/assistant-engine/recap-video-render'); process.stdout.write(await probeRecapVideoRenderer())",
+    ], "")).trim();
+    if (recapVideo !== "does_not_fit") throw new Error(`Recap video renderer probe answered ${JSON.stringify(recapVideo)}.`);
+    console.log(`recapVideoRendererProbe=${recapVideo}`);
   } finally {
     await rm(SMOKE_BUNDLE_DIR, { force: true, recursive: true });
     await removeHostedRunnerFinalImageBestEffort();
