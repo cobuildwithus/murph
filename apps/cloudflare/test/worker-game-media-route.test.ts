@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { describe, expect, it } from "vitest";
 
 import { readHostedExecutionEnvironment } from "../src/env.ts";
@@ -48,8 +49,8 @@ describe("hosted game media store", () => {
   });
 
   it("refuses plaintext and envelopes sealed for anything but the game", () => {
-    expect(() => requireHostedGameMediaEnvelope("\xff\xd8\xff plain jpeg")).toThrow(TypeError);
-    expect(() => requireHostedGameMediaEnvelope(JSON.stringify({ photo: "plain" }))).toThrow(TypeError);
+    expect(() => requireHostedGameMediaEnvelope("\xff\xd8\xff plain jpeg")).toThrow(ContractValidationError);
+    expect(() => requireHostedGameMediaEnvelope(JSON.stringify({ photo: "plain" }))).toThrow(ContractValidationError);
     expect(() => requireHostedGameMediaEnvelope(JSON.stringify({ ...ENVELOPE, scope: "other" }))).toThrow(
       "Hosted game media must be sealed for the weekly game.",
     );

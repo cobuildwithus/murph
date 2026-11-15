@@ -775,14 +775,14 @@ test.each([
   for (const value of [null, "", "invalid", true, [], {}, Number.NaN, Infinity, -Infinity, minimum - 1, maximum * 2]) {
     assert.throws(
       () => resolveJunctionBoundedFeatureRecords("workout_stream", [featureWith(value)]),
-      { name: "TypeError", message: "Junction workout_stream feature was invalid." },
+      { name: "ContractValidationError", message: "Junction workout_stream feature was invalid." },
     );
   }
   const explicitUndefined = featureWith(undefined);
   explicitUndefined[field] = undefined;
   assert.throws(
     () => resolveJunctionBoundedFeatureRecords("workout_stream", [explicitUndefined]),
-    { name: "TypeError", message: "Junction workout_stream feature was invalid." },
+    { name: "ContractValidationError", message: "Junction workout_stream feature was invalid." },
   );
 });
 
@@ -804,7 +804,7 @@ test.each([
       () => resolveJunctionBoundedFeatureRecords("workout_stream", [workoutFeature({
         [average]: averageValue, [maximum]: maximumValue,
       })]),
-      { name: "TypeError", message: "Junction workout_stream feature was invalid." },
+      { name: "ContractValidationError", message: "Junction workout_stream feature was invalid." },
     );
   }
 });
@@ -818,7 +818,7 @@ test.each([
   for (const value of [undefined, null, "", "invalid", true, Number.NaN, Infinity, -Infinity]) {
     assert.throws(
       () => resolveJunctionBoundedFeatureRecords("electrocardiogram_voltage", [ecgFeature({ [field]: value })]),
-      { name: "TypeError", message: "Junction electrocardiogram_voltage feature was invalid." },
+      { name: "ContractValidationError", message: "Junction electrocardiogram_voltage feature was invalid." },
     );
   }
 });
@@ -839,7 +839,7 @@ test("ECG range, ordering, and lead constraints preserve inclusive boundaries", 
   ]) {
     assert.throws(
       () => resolveJunctionBoundedFeatureRecords("electrocardiogram_voltage", [ecgFeature(overrides)]),
-      { name: "TypeError", message: "Junction electrocardiogram_voltage feature was invalid." },
+      { name: "ContractValidationError", message: "Junction electrocardiogram_voltage feature was invalid." },
     );
   }
 });
@@ -848,21 +848,21 @@ test("bounded feature errors precede split errors and then stable identity confl
   const conflicting = workoutFeature({ workoutId: "different-workout", splits: [{}] });
   assert.throws(
     () => resolveJunctionBoundedFeatureRecords("workout_stream", [{ ...conflicting, averagePower: -1 }]),
-    { name: "TypeError", message: "Junction workout_stream feature was invalid." },
+    { name: "ContractValidationError", message: "Junction workout_stream feature was invalid." },
   );
   assert.throws(
     () => resolveJunctionBoundedFeatureRecords("workout_stream", [conflicting]),
-    { name: "TypeError", message: "Junction workout split 1 was invalid." },
+    { name: "ContractValidationError", message: "Junction workout split 1 was invalid." },
   );
   assert.throws(
     () => resolveJunctionBoundedFeatureRecords("workout_stream", [{ ...conflicting, splits: [] }]),
-    { name: "TypeError", message: "Junction feature contained conflicting stable identifiers." },
+    { name: "ContractValidationError", message: "Junction feature contained conflicting stable identifiers." },
   );
   assert.throws(
     () => resolveJunctionBoundedFeatureRecords("electrocardiogram_voltage", [ecgFeature({
       recordingId: "different-recording", voltageMean: 1,
     })]),
-    { name: "TypeError", message: "Junction electrocardiogram_voltage feature was invalid." },
+    { name: "ContractValidationError", message: "Junction electrocardiogram_voltage feature was invalid." },
   );
 });
 
@@ -874,7 +874,7 @@ test("workout duration stays required with an inclusive zero lower bound", () =>
   for (const durationSeconds of [undefined, null, "", Number.NaN, Infinity, -Infinity, -1]) {
     assert.throws(
       () => resolveJunctionBoundedFeatureRecords("workout_stream", [workoutFeature({ durationSeconds })]),
-      { name: "TypeError", message: "Junction workout_stream feature was invalid." },
+      { name: "ContractValidationError", message: "Junction workout_stream feature was invalid." },
     );
   }
 });

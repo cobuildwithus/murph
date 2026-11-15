@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import assert from "node:assert/strict";
 
 import {
@@ -784,7 +785,7 @@ test("parseTelegramWebhookUpdate rejects malformed callback identities", () => {
   for (const payload of cases) {
     assert.throws(
       () => parseTelegramWebhookUpdate(JSON.stringify(payload)),
-      TypeError,
+      ContractValidationError,
       `expected rejection for ${JSON.stringify(payload)}`,
     );
   }

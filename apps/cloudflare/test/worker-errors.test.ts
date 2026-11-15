@@ -41,7 +41,7 @@ it.each([new ContractValidationError("Synthetic validation failure."), new TypeE
   const log = vi.spyOn(observability, "emitHostedExecutionStructuredLog");
   try {
     expect(mapWorkerRouteError(new Request("https://example.test/input"), error).status).toBe(500);
-    const serialized = JSON.stringify(log.mock.calls);
-    expect(serialized.includes('"unmarkedContractValidationError":true')).toBe(error instanceof ContractValidationError);
+    expect(log).toHaveBeenCalledWith(expect.objectContaining({ error, level: "error" }));
+    expect(observability.readHostedExecutionSafeErrorName(error)).toBe(error.name);
   } finally { log.mockRestore(); }
 });

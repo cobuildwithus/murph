@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -64,16 +65,16 @@ describe("manifest-owned hosted hint transport contract", () => {
         expect(() => parseHostedExecutionDeviceSyncWakeHint(JSON.parse(JSON.stringify({
           jobs: [{ kind, payload: { ...shaped, [field]: value } }],
         }))), `${provider} ${kind} ${field} must reject ${JSON.stringify(value)}`)
-          .toThrow(TypeError);
+          .toThrow(ContractValidationError);
       }
       if (spec.kind === "number") {
         for (const value of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
           // Nonfinite values are invalid before serialization, and JSON turns
           // them into null, which the transport reader must also reject.
           const hint = { jobs: [{ kind, payload: { ...shaped, [field]: value } }] };
-          expect(() => parseHostedExecutionDeviceSyncWakeHint(hint)).toThrow(TypeError);
+          expect(() => parseHostedExecutionDeviceSyncWakeHint(hint)).toThrow(ContractValidationError);
           expect(() => parseHostedExecutionDeviceSyncWakeHint(JSON.parse(JSON.stringify(hint))))
-            .toThrow(TypeError);
+            .toThrow(ContractValidationError);
         }
       }
     }
@@ -84,7 +85,7 @@ describe("manifest-owned hosted hint transport contract", () => {
     (field) => {
       const hint = { jobs: [{ kind: "resource", payload: { [field]: "synthetic-value" } }] };
       expect(() => parseHostedExecutionDeviceSyncWakeHint(JSON.parse(JSON.stringify(hint))))
-        .toThrow(TypeError);
+        .toThrow(ContractValidationError);
     },
   );
 

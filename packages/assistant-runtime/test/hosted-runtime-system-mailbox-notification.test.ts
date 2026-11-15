@@ -1684,7 +1684,7 @@ describe("hosted system mailbox notification execution context", () => {
         signal: null,
         wake,
       })).rejects.toMatchObject({
-        name: "TypeError",
+        name: "ContractValidationError",
         retryable: false,
         message: failure === "invalid occurrence time"
           ? "Hosted group context handoff occurrence time is invalid."

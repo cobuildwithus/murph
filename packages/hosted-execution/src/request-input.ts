@@ -4,10 +4,7 @@ export class RequestInputError extends Error {
   override name = "RequestInputError";
 }
 
-// Plan 2026-11-14-explicit-request-rejection.md retains RangeError for native
-// 400 inference in unmigrated consumers (including runner outbound parsers).
-// Remove this base in stage 6 once those consumers recognize explicit rejections.
-export class RequestBodyTooLargeError extends RangeError {
+export class RequestBodyTooLargeError extends Error {
   constructor(limitBytes: number, message = `Request body exceeded ${limitBytes} bytes.`) {
     super(message);
   }

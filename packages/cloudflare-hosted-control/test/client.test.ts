@@ -50,7 +50,7 @@ describe("createCloudflareHostedControlClient", () => {
       cause: expect.any(ContractValidationError),
     });
     await expect(result).rejects.toMatchObject({
-      cause: { name: "TypeError", message: "Runtime resource deletion was not acknowledged." },
+      cause: { name: "ContractValidationError", message: "Runtime resource deletion was not acknowledged." },
     });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
   });

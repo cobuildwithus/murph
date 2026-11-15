@@ -7,7 +7,8 @@ describe("request input boundary", () => {
   it("identifies a body limit without inspecting its message", () => {
     const error = new RequestBodyTooLargeError(8);
     expect(error.message).toBe("Request body exceeded 8 bytes.");
-    expect(error).toBeInstanceOf(RangeError);
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(RangeError);
     expect(error).toBeInstanceOf(RequestBodyTooLargeError);
     expect(new RangeError(error.message)).not.toBeInstanceOf(RequestBodyTooLargeError);
     expect(() => parseInput(null, () => { throw error; })).toThrow(error);

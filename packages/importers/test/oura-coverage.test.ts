@@ -156,7 +156,7 @@ test.each(["dailyActivity", "dailySleep", "dailyReadiness", "dailySpO2"])(
     assert.throws(() => normalizeOuraSnapshot({
       importedAt: "2026-03-16T10:00:00.000Z",
       [collection]: [{ timestamp: "invalid", day: "2026-03-15" }],
-    }), { name: "TypeError", message: "timestamp must be a valid timestamp" });
+    }), { name: "ContractValidationError", message: "timestamp must be a valid timestamp" });
   },
 );
 

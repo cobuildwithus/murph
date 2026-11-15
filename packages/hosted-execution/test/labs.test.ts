@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -101,7 +102,7 @@ describe("hosted Labs contract", () => {
       parseHostedRuntimeLabsToolRequest({ action: "search", query: privateInput, limit: 21 });
       throw new Error("Expected the invalid Labs request to throw.");
     } catch (error) {
-      expect(error).toBeInstanceOf(TypeError);
+      expect(error).toBeInstanceOf(ContractValidationError);
       expect(error instanceof Error ? error.message : "").toBe(
         "Hosted Labs tool request is invalid.",
       );
@@ -220,7 +221,7 @@ describe("hosted Labs contract", () => {
       });
       throw new Error("Expected the invalid Labs response to throw.");
     } catch (error) {
-      expect(error).toBeInstanceOf(TypeError);
+      expect(error).toBeInstanceOf(ContractValidationError);
       expect(error instanceof Error ? error.message : "").toBe(
         "Hosted Labs tool response is invalid.",
       );

@@ -3113,14 +3113,13 @@ describe("startHostedContainerEntrypoint", () => {
       code,
       details: { errorDetail: "Parser bug." },
       error: "Internal error.",
-      errorName: error instanceof ContractValidationError ? "ContractValidationError" : (error as Error).name,
+      errorName: (error as Error).name,
     });
     expect(runWorkspaceInvocation).not.toHaveBeenCalled();
     expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(expect.objectContaining({
       error,
       level: "error",
       message: "Hosted container entrypoint rejected the request body.",
-      ...(error instanceof ContractValidationError ? { details: { unmarkedContractValidationError: true } } : {}),
     }));
   });
 

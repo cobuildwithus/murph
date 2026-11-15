@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { isAssistantOutboxRetryableError } from "@murphai/assistant-engine/assistant-outbox";
 import { createHostedWebActionApprovalPort } from "../src/runtime-platform/action-approval-port.ts";
 import { HostedCanonicalWriteOutcomeUnknownError } from "@murphai/core";
@@ -7009,7 +7010,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         const getReader = vi.spyOn(response.body!, "getReader");
         const effect = createAuthorityEffect(() => response);
         const result = effect.assertAuthority(authority);
-        await expect(result).rejects.toBeInstanceOf(TypeError);
+        await expect(result).rejects.toBeInstanceOf(ContractValidationError);
         expect(parser).toHaveBeenCalledTimes(1);
         expect(parser.mock.results[0]?.type).toBe("throw");
         await expect(result).rejects.toBe(parser.mock.results[0]?.value);
@@ -7067,7 +7068,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           headers: { "content-length": "4096" },
         }));
         const result = effect.assertAuthority(authority);
-        await expect(result).rejects.toBeInstanceOf(TypeError);
+        await expect(result).rejects.toBeInstanceOf(ContractValidationError);
         expect(parser).toHaveBeenCalledTimes(1);
         expect(parser).toHaveBeenCalledWith(null);
         await expect(result).rejects.toBe(parser.mock.results[0]?.value);
@@ -7179,7 +7180,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
       try {
         const effect = createAuthorityEffect(() => Response.json({ authorized: false }));
         const result = effect.assertAuthority(authority);
-        await expect(result).rejects.toBeInstanceOf(TypeError);
+        await expect(result).rejects.toBeInstanceOf(ContractValidationError);
         expect(parser).toHaveBeenCalledTimes(1);
         expect(parser.mock.results[0]?.type).toBe("throw");
         await expect(result).rejects.toBe(parser.mock.results[0]?.value);

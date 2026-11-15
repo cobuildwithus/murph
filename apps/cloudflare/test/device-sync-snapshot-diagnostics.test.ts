@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { postHostedDeviceSyncSnapshotForTest } from "#hosted-web-testing";
 import {
@@ -249,7 +250,7 @@ describe("device-sync snapshot producer/decoder diagnostics", () => {
     if (shape === "empty") {
       await expect(result).rejects.toMatchObject({ code: "HOSTED_WEB_CONTROL_INCOMPLETE_SNAPSHOT_RESPONSE" });
     } else {
-      await expect(result).rejects.toBeInstanceOf(TypeError);
+      await expect(result).rejects.toBeInstanceOf(ContractValidationError);
       await expect(result).rejects.toThrow("Hosted device-sync runtime snapshot response must be an object.");
     }
     const attempts = shape === "empty" ? 2 : 1;

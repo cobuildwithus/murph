@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
@@ -115,10 +116,10 @@ describe("hosted ops growth sponsorship metrics", () => {
     )).resolves.toEqual({ available: false });
     expect(errorSpy).toHaveBeenCalledWith(
       "Failed to read hosted growth sponsorship metrics.",
-      expect.any(TypeError),
+      expect.any(ContractValidationError),
     );
     const loggedError = errorSpy.mock.calls[0]?.[1];
-    expect(loggedError).toBeInstanceOf(TypeError);
+    expect(loggedError).toBeInstanceOf(ContractValidationError);
     expect((loggedError as Error).message).toContain(
       "activeMonthlyCapUsdCents",
     );

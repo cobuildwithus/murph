@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
@@ -5477,7 +5478,7 @@ test("companion WHOOP overnight RMSSD replay keeps its phone-owned night across 
           { corePort: coreRuntime },
         ),
         (error: unknown) =>
-          error instanceof TypeError
+          error instanceof ContractValidationError
           && /admission identity did not match/u.test(error.message),
       );
     }

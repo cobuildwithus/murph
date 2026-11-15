@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
@@ -235,7 +236,7 @@ describe("Hosted Linq group setup", () => {
     expect(() => buildHostedLinqGroupSetupEffectId({
       chatId: "chat_group_123",
       occurredAt: "not-a-time",
-    })).toThrow(TypeError);
+    })).toThrow(ContractValidationError);
   });
 });
 

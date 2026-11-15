@@ -1,3 +1,4 @@
+import { RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import { expectedManagedSnapshotEtag } from "../src/managed-snapshot-upload.ts";
 import { createHostedRuntimeGroupToolPort } from "../src/runtime-platform/group-tool-port.ts";
 import { createOutboundMultipartTestBucket } from "./multipart-bucket-fixtures.ts";
@@ -1651,7 +1652,7 @@ describe("handleRunnerOutboundRequest", () => {
       })).toBe(true);
       if (status === 413) {
         expect(Buffer.byteLength(finalBody)).toBe(16_385);
-        await expect(readHostedUsageRecordRequestForTest(request)).rejects.toThrow(RangeError);
+        await expect(readHostedUsageRecordRequestForTest(request)).rejects.toThrow(RequestBodyTooLargeError);
         return Response.json({ error: { message: "Request body exceeded 16384 bytes" } }, { status: 413 });
       }
       expect(Buffer.byteLength(finalBody)).toBeLessThanOrEqual(16_384);

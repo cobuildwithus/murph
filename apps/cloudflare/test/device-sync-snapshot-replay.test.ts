@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createServer } from "node:http";
 import { brotliCompressSync, gzipSync } from "node:zlib";
 
@@ -187,7 +188,7 @@ describe("device-sync snapshot single exact replay", () => {
   it.each([null, [], 42, true, "synthetic scalar", {}, { ...snapshot, connections: null }].map((body) => ({ body })))(
     "leaves complete valid-JSON schema rejection outside replay (case %#)", async ({ body }) => {
       const fetchImpl = vi.fn<typeof fetch>(async () => response(JSON.stringify(body), "9007199254740991"));
-      await expect(port(fetchImpl).fetchSnapshot()).rejects.toBeInstanceOf(TypeError);
+      await expect(port(fetchImpl).fetchSnapshot()).rejects.toBeInstanceOf(ContractValidationError);
       expect(fetchImpl).toHaveBeenCalledTimes(1);
     },
   );
