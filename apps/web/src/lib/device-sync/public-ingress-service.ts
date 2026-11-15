@@ -1,3 +1,4 @@
+import { RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import { createHostedDeviceSyncRegistry } from "./providers";
 import {
   createDeviceSyncPublicIngress,
@@ -485,7 +486,7 @@ export class HostedDeviceSyncPublicIngressService {
         limitBytes: DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES,
       });
     } catch (error) {
-      if (error instanceof RangeError) {
+      if (error instanceof RequestBodyTooLargeError) {
         throw deviceSyncError({
           code: "PAYLOAD_TOO_LARGE",
           message: error.message,

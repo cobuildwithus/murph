@@ -1,3 +1,4 @@
+import { RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import { commandHostedRuntimeOwner } from "../runtime-owner-client.ts";
 import { createHostedRunnerContainerNamespaceRouter } from "../standby-runner-contract.ts";
 import type {
@@ -46,7 +47,7 @@ export async function handleRunnerRuntimeCompletionRequest(input: {
     });
     result = parseHostedWorkspaceInvocationResult(body.result);
   } catch (error) {
-    return error instanceof RangeError
+    return error instanceof RequestBodyTooLargeError
       ? jsonError("Request body too large.", 413)
       : jsonError("Invalid request.", 400);
   }

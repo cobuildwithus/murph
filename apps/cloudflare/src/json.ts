@@ -1,3 +1,4 @@
+import { RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 export function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     headers: {
@@ -66,7 +67,7 @@ export async function readRequestBodyBytes(
   if (declaredContentLength) {
     const parsedContentLength = Number.parseInt(declaredContentLength, 10);
     if (Number.isFinite(parsedContentLength) && parsedContentLength > options.limitBytes) {
-      throw new RangeError(`Request body exceeded ${options.limitBytes} bytes.`);
+      throw new RequestBodyTooLargeError(options.limitBytes);
     }
   }
 
@@ -93,7 +94,7 @@ export async function readRequestBodyBytes(
       totalBytes += value.byteLength;
       if (totalBytes > options.limitBytes) {
         await reader.cancel();
-        throw new RangeError(`Request body exceeded ${options.limitBytes} bytes.`);
+        throw new RequestBodyTooLargeError(options.limitBytes);
       }
 
       chunks.push(value);

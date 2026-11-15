@@ -18,7 +18,3 @@ export function normalizeNonEmptyString(value: unknown): string | null {
   const normalized = typeof value === "string" ? value.trim() : "";
   return normalized.length > 0 ? normalized : null;
 }
-
-export function isRequestBodyTooLargeError(error: unknown): error is RangeError {
-  return error instanceof RangeError && error.message.startsWith("Request body exceeded ");
-}

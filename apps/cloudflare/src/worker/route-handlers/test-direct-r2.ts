@@ -1,3 +1,4 @@
+import { RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import {
   json,
   jsonError,
@@ -179,7 +180,7 @@ async function readTestDirectR2Body(
       limitBytes: INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
     });
   } catch (error) {
-    if (error instanceof RangeError) {
+    if (error instanceof RequestBodyTooLargeError) {
       return jsonError("Request body too large.", 413);
     }
     throw error;

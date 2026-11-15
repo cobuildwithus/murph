@@ -1,3 +1,4 @@
+import { RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import {
   normalizeHostedEmailReplyAliasLookupKey,
   parseHostedEmailReplyAliasRegistrationCallbackRequest,
@@ -91,7 +92,7 @@ async function readReplyAliasRegistrationPayloadText(request: Request): Promise<
       limitBytes: HOSTED_EMAIL_REPLY_ALIAS_REGISTRATION_MAX_BODY_BYTES,
     })).toString("utf8");
   } catch (error) {
-    if (error instanceof RangeError) {
+    if (error instanceof RequestBodyTooLargeError) {
       throw hostedOnboardingError({
         code: "HOSTED_EMAIL_REPLY_ALIAS_BODY_TOO_LARGE",
         message: "Hosted email reply alias registration body is too large.",

@@ -3314,6 +3314,13 @@ Current product admission, delivery and native runtime safety rules remain.
   and the neutral error's temporary `TypeError` base; Web marks native-inferred
   invalid requests with `nativeErrorInference: true` in its existing warning.
   Parser bugs pass through unchanged, and retry policy stays with each owner.
+- Bounded Web, Worker and container request readers throw `RequestBodyTooLargeError`
+  from `@murphai/hosted-execution/request-input` at the byte-limit branch.
+  Size adapters recognize that class, never a message prefix or an arbitrary
+  `RangeError`, and retain each endpoint's status, envelope and headers.
+  Body-prohibited endpoints keep their existing 400 contracts. The signal's
+  temporary `RangeError` base preserves unmigrated native 400 inference until
+  stage 6 of the explicit-request-rejection plan removes that compatibility.
 - Hosted Web JSON routes answer a failed outbound fetch (Node's `TypeError`
   whose message is exactly `fetch failed`) with a retryable `503
   UPSTREAM_UNAVAILABLE`, never `400 INVALID_REQUEST`, so a caller's existing

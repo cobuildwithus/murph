@@ -1,3 +1,4 @@
+import { RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import { CLOUDFLARE_HOSTED_CONTROL_GAME_MEDIA_ID_HEADER, CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS,
   matchCloudflareHostedControlUserRoutePath } from "@murphai/cloudflare-hosted-control/routes";
 import { createGameImageStore, GameImageInvalidError, isGameImageVariant } from "../../game-image-store.ts";
@@ -59,7 +60,7 @@ async function stageGameImage(
   let bytes: Uint8Array;
   try { bytes = await readRequestBodyBytes(context.request, { limitBytes: 4 * 1024 * 1024 }); }
   catch (error) {
-    if (error instanceof RangeError) return jsonError("Game image is too large.", 413);
+    if (error instanceof RequestBodyTooLargeError) return jsonError("Game image is too large.", 413);
     throw error;
   }
   if (bytes.length === 0) return jsonError("Game image is empty.", 400);

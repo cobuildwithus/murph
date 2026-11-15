@@ -1,3 +1,4 @@
+import { RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import { CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS, matchCloudflareHostedControlUserRoutePath } from "@murphai/cloudflare-hosted-control/routes";
 import { requireHostedRecapMediaId } from "../../storage-paths.ts";
 import { createRecapMediaStore, requireRecapMediaEnvelope } from "../../recap-media-store.ts";
@@ -31,7 +32,7 @@ export const recapMediaRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] =
       );
     } catch (error) {
       if (error instanceof TypeError) return jsonError("Invalid sealed recap asset.", 400);
-      if (error instanceof RangeError) return jsonError("Recap asset is too large.", 413);
+      if (error instanceof RequestBodyTooLargeError) return jsonError("Recap asset is too large.", 413);
       throw error;
     }
     try { return json(await store.write(mediaId, envelope, hash)); }

@@ -1,4 +1,4 @@
-import { isRequestInputError } from "@murphai/hosted-execution/request-input";
+import { isRequestInputError, RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import {
   createServer,
   type IncomingMessage,
@@ -287,13 +287,6 @@ type HostedAbortRequestLike = HostedAbortEmitterLike;
 type HostedAbortResponseLike = HostedAbortEmitterLike & {
   writableEnded: boolean;
 };
-
-class HostedContainerRequestBodyTooLargeError extends RangeError {
-  constructor(limitBytes: number) {
-    super(`Hosted container runner request body exceeds ${limitBytes} bytes.`);
-    this.name = "HostedContainerRequestBodyTooLargeError";
-  }
-}
 
 class HostedContainerArchitectureVersionMismatchError extends Error {
   readonly actualVersion: string | null;
@@ -1346,7 +1339,7 @@ async function readHostedContainerInvocationRequestBody(
     declaredLength !== null
     && declaredLength > limitBytes
   ) {
-    throw new HostedContainerRequestBodyTooLargeError(limitBytes);
+    throw new RequestBodyTooLargeError(limitBytes);
   }
 
   const chunks: Buffer[] = [];
@@ -1357,7 +1350,7 @@ async function readHostedContainerInvocationRequestBody(
     totalBytes += buffer.byteLength;
 
     if (totalBytes > limitBytes) {
-      throw new HostedContainerRequestBodyTooLargeError(limitBytes);
+      throw new RequestBodyTooLargeError(limitBytes);
     }
 
     chunks.push(buffer);
@@ -1935,7 +1928,7 @@ function classifyRequestDecodeError(error: unknown): {
     };
   }
 
-  if (error instanceof HostedContainerRequestBodyTooLargeError) {
+  if (error instanceof RequestBodyTooLargeError) {
     return {
       payload: {
         code: "request_body_too_large",
