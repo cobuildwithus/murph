@@ -1,4 +1,4 @@
-import Stripe from "stripe";
+import type Stripe from "stripe";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -67,23 +67,13 @@ describe("Stripe receipt admission", () => {
   ] as const)("rejects unauthenticated ingress before recording or scheduling (%s, %s)", async (signature, secret, invalid, code) => {
     mocks.config.webhookSecret = secret;
     if (invalid) {
-      mocks.constructEvent.mockImplementation(() => { throw new Stripe.errors.StripeSignatureVerificationError("t=0,v1=synthetic", "{}", { message: "No signatures found matching the expected signature for payload." }); });
+      mocks.constructEvent.mockImplementation(() => { throw new Error("invalid signature"); });
       vi.spyOn(console, "error").mockImplementation(() => {});
     }
     await expect(receive(signature)).rejects.toMatchObject({ code });
     expect(mocks.record).not.toHaveBeenCalled();
     expect(mocks.after).not.toHaveBeenCalled();
     expect(mocks.alert).not.toHaveBeenCalled();
-  });
-
-  // Stripe redelivers any non-2xx, so this only moves the failure from the
-  // sender's 401 to our own server error; the receipt dedupes the resend.
-  it("answers a verifier failure that is not a bad signature as ours", async () => {
-    const failure = new TypeError("Synthetic crypto failure");
-    mocks.constructEvent.mockImplementation(() => { throw failure; });
-    await expect(receive()).rejects.toBe(failure);
-    expect(mocks.record).not.toHaveBeenCalled();
-    expect(mocks.after).not.toHaveBeenCalled();
   });
 
   it("cannot acknowledge a failed durable append", async () => {

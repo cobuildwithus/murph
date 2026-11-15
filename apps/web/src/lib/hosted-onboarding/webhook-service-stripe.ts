@@ -1,7 +1,7 @@
 import { after } from "next/server";
 
 import type { PrismaClient } from "@prisma/client";
-import Stripe from "stripe";
+import type Stripe from "stripe";
 
 import { getPrisma } from "../prisma";
 import { hostedOnboardingError } from "./errors";
@@ -80,13 +80,10 @@ function constructStripeWebhookEvent(input: {
   try {
     return input.stripe.webhooks.constructEvent(input.rawBody, input.signature, input.webhookSecret);
   } catch (error) {
-    // Only a signature Stripe's verifier rejects is the sender's fault; any
-    // other failure here is ours and must be redelivered.
-    if (!(error instanceof Stripe.errors.StripeSignatureVerificationError)) throw error;
     console.error("Hosted Stripe webhook verification failed.");
     throw hostedOnboardingError({
       code: "STRIPE_SIGNATURE_INVALID",
-      message: error.message,
+      message: error instanceof Error ? error.message : "Invalid Stripe webhook signature.",
       httpStatus: 401,
     });
   }

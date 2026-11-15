@@ -1,4 +1,4 @@
-import Stripe from "stripe";
+import type Stripe from "stripe";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -181,7 +181,7 @@ describe("hosted Stripe alert integration", () => {
 
   it("does not let an invalid signature trigger email", async () => {
     mocks.constructEvent.mockImplementationOnce(() => {
-      throw new Stripe.errors.StripeSignatureVerificationError("t=0,v1=synthetic", "{}", { message: "No signatures found matching the expected signature for payload." });
+      throw new Error("invalid signature");
     });
     vi.spyOn(console, "error").mockImplementation(() => {});
 
