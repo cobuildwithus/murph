@@ -4585,7 +4585,7 @@ describe("game recap lore response policy", () => {
     const { fileURLToPath } = await import("node:url");
     const root = fileURLToPath(new URL("../../../", import.meta.url));
     const old = new URL(`../src/.recap-video-wake-skew-${randomUUID()}.ts`, import.meta.url);
-    await writeFile(old, execFileSync("git", ["show", "04a207dc3a9f90ff3a25d37929d1e4b11d4c097b:packages/hosted-execution/src/parsers.ts"], { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 }), { flag: "wx" });
+    await writeFile(old, execFileSync("git", ["show", "8e03afa98451f0b7ae0de30531dd8be715f12199:packages/hosted-execution/src/parsers.ts"], { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 }), { flag: "wx" });
     try {
       const base = await import(old.href) as typeof import("../src/parsers.ts");
       expect(base.parseHostedExecutionEvent(event({ ...policy, show: true }))).toEqual(parseHostedExecutionEvent(event({ ...policy, show: true })));

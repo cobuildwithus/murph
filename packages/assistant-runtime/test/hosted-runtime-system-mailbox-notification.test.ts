@@ -321,6 +321,23 @@ describe("game recap generation retirement", () => {
     } finally { await workspace.cleanup(); }
   });
 
+  it.each([false, true])("carries a recap wake through saved pending state whole: video=%s", async video => {
+    const workspace = await createHostedRuntimeWorkspace("recap-video-wake-");
+    const responsePolicy = { kind: "require_game_recap" as const, gameId: "synthetic_game", eventId, pairFingerprint: "synthetic-pair", show: true as const, ...(video ? { video: true as const } : {}) };
+    // The real builder, the real enqueue (which parses before it writes) and the real reload.
+    const queued = buildHostedExecutionAssistantNotificationRequestedWake({ eventId, memberId: "member_123", occurredAt: FIXED_NOW,
+      notification: { instructions: "Write the synthetic recap.", responsePolicy,
+        route: { channel: "linq", delivery: { kind: "thread", target: "synthetic-chat" }, actorId: null, identityId: null, threadId: null, threadIsDirect: false } } });
+    try {
+      await enqueueHostedSystemMailboxItem({ item: createResolvedNotificationItem({ dedupeKey: eventId }), wake: queued, vaultRoot: workspace.vaultRoot });
+      const [saved] = (await readHostedSystemMailboxState(workspace.vaultRoot)).pending;
+      assert.ok(saved);
+      if (saved.wake.kind !== "assistant.notification.requested") throw new Error("Expected the recap wake");
+      expect(saved.wake.notification.responsePolicy).toEqual(responsePolicy);
+      expect("video" in (saved.wake.notification.responsePolicy ?? {})).toBe(video);
+    } finally { await workspace.cleanup(); }
+  });
+
   it("durably re-wakes the same recap at the capacity backoff without consuming it", async () => {
     const workspace = await createHostedRuntimeWorkspace("recap-capacity-");
     const notification = wake();
