@@ -1,3 +1,5 @@
+import { ZodError } from "@murphai/contracts/zod-runtime";
+import { RequestInputError } from "@murphai/hosted-execution/request-input";
 import {
   parseHostedPhoneCallResultDeliveryOutcomeRequest,
 } from "@murphai/hosted-execution/phone-calls";
@@ -21,9 +23,12 @@ export const POST = withJsonError(async (request: Request) => {
   let body;
   try {
     body = parseHostedPhoneCallResultDeliveryOutcomeRequest(
-      await readOptionalJsonObject(request),
+      await readOptionalJsonObject(request, {
+        limitBytes: HOSTED_PHONE_CALL_RESULT_DELIVERY_BODY_LIMIT_BYTES,
+      }),
     );
   } catch (error) {
+    if (!(error instanceof ZodError) && !(error instanceof RequestInputError)) throw error;
     throw hostedOnboardingError({
       cause: error,
       code: "HOSTED_PHONE_CALL_RESULT_DELIVERY_REQUEST_INVALID",

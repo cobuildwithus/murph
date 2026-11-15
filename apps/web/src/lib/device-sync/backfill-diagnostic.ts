@@ -127,7 +127,7 @@ export async function runHostedDeviceSyncBackfillDiagnostic(
     throw deviceSyncError({
       code: "DEVICE_SYNC_DIAGNOSTIC_PROVIDER_UNAVAILABLE",
       message: "The selected device-sync provider is not available in this runtime.",
-      httpStatus: 400,
+      httpStatus: 500,
       retryable: false,
     });
   }

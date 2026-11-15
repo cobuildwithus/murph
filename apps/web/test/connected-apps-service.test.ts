@@ -462,7 +462,7 @@ describe("connected-app service", () => {
           : "Connected apps are temporarily unavailable.",
         retryable: !directWrite,
       };
-      const status = directWrite ? 400 : 503;
+      const status = directWrite ? 502 : 503;
       expect(error).toMatchObject({ ...expectedError, httpStatus: status });
       expect(console.error).not.toHaveBeenCalled();
       expect(console.warn).not.toHaveBeenCalled();
@@ -471,9 +471,9 @@ describe("connected-app service", () => {
       expect(await response.json()).toEqual({ error: expectedError });
       expect(error.cause).toBe(cause);
       expect(transport.cause).toBe(transportCause);
-      const log = vi.mocked(directWrite ? console.warn : console.error);
+      const log = vi.mocked(console.error);
       expect(log).toHaveBeenCalledTimes(1);
-      expect(directWrite ? console.error : console.warn).not.toHaveBeenCalled();
+      expect(console.warn).not.toHaveBeenCalled();
       expect(log).toHaveBeenCalledWith("Hosted onboarding route failed.", expect.objectContaining({
         errorCauseType: "ComposioConnectedAppsRequestError",
         errorCauseMessage: causeMessage,
@@ -536,6 +536,49 @@ describe("connected-app service", () => {
       }));
       expect(JSON.stringify(log.mock.calls)).not.toMatch(/Transport diagnostic|private-/);
     });
+  });
+
+  it.each([401, 403, 429, 503])("keeps upstream weather HTTP %s failures on the server side", async status => {
+    vi.stubEnv("OPENWEATHER_API_KEY", "synthetic-weather-key");
+    installPrismaHarness();
+    await expect(executeHostedConnectedAppsRequest({
+      fetchImpl: vi.fn(async () => new Response("", { status })),
+      memberId: "member_synthetic",
+      request: { operation: "execute", input: {
+        toolSlug: "MURPH_OPENWEATHER_GET_NATIONAL_ALERTS", arguments: { lat: 0, lon: 0 },
+      } },
+    })).rejects.toMatchObject({
+      code: "CONNECTED_APPS_PROVIDER_UNAVAILABLE",
+      httpStatus: status === 401 || status === 403 ? 502 : 503,
+      retryable: status !== 401 && status !== 403,
+    });
+  });
+
+  it.each([
+    { status: 401, httpStatus: 502 },
+    { status: 400, httpStatus: 400 },
+    { status: 403, httpStatus: 400 },
+    { status: 404, httpStatus: 400 },
+    { status: 422, httpStatus: 400 },
+  ])("maps Composio tool HTTP $status to $httpStatus", async ({ status, httpStatus }) => {
+    installPrismaHarness();
+    const fetchImpl = vi.fn(async () => jsonResponse({
+      error: { message: status === 401 ? "Invalid API key" : "Invalid tool arguments" },
+    }, status));
+    const response = await executeHostedConnectedAppsRequest({
+      fetchImpl,
+      memberId: "member_synthetic",
+      request: { operation: "execute", input: {
+        toolSlug: "COMPOSIO_SEARCH_GOOGLE_MAPS", arguments: { query: "pharmacy" },
+      } },
+    }).then(jsonOk, jsonError);
+    expect(response.status).toBe(httpStatus);
+    expect(await response.json()).toMatchObject({ error: {
+      code: "CONNECTED_APPS_PROVIDER_UNAVAILABLE",
+      details: { statusCode: status, type: "composio_http_error" },
+      retryable: false,
+    } });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
   it("binds connect intents to the member and keeps provider-link attempts visible", async () => {
@@ -1897,7 +1940,7 @@ describe("connected-app service", () => {
       expect(error).toMatchObject({
         code: "CONNECTED_APPS_PROVIDER_UNAVAILABLE",
         details: expectedDetails,
-        httpStatus: 400,
+        httpStatus: 502,
         retryable: false,
       });
       expect(error.cause).toBeInstanceOf(Error);

@@ -917,7 +917,7 @@ function mapConnectedAppsError(error: unknown): unknown {
         ...(error.status === null ? {} : { statusCode: error.status }),
         type: error.type,
       },
-      httpStatus: error.retryable ? 503 : 400,
+      httpStatus: connectedAppsProviderHttpStatus(error, error.retryable),
       message: error.retryable
         ? "Connected apps are temporarily unavailable."
         : "The connected-app request could not be completed.",
@@ -941,12 +941,25 @@ function mapConnectedAppsError(error: unknown): unknown {
     cause: error,
     code: "CONNECTED_APPS_PROVIDER_UNAVAILABLE",
     details: buildConnectedAppsProviderErrorDetails(error),
-    httpStatus: retryable ? 503 : 400,
+    httpStatus: connectedAppsProviderHttpStatus(error, retryable),
     message: retryable
       ? "Connected apps are temporarily unavailable."
       : "The connected-app request could not be completed.",
     retryable,
   });
+}
+
+function connectedAppsProviderHttpStatus(
+  error: OpenWeatherAlertsRequestError | ComposioConnectedAppsRequestError,
+  retryable: boolean,
+): number {
+  if (error instanceof ComposioConnectedAppsRequestError) {
+    if (retryable) return 503;
+    // A provider 4xx rejects the request, except 401, which rejects our key.
+    const status = error.status ?? 0;
+    return status >= 400 && status < 500 && status !== 401 ? 400 : 502;
+  }
+  return error.type === "openweather_invalid_arguments" ? 400 : retryable ? 503 : 502;
 }
 
 function isRetryableComposioFailure(

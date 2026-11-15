@@ -1,3 +1,4 @@
+import * as requestParsers from "@murphai/hosted-execution/clinical-records";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
@@ -99,6 +100,32 @@ describe("Clinical Records internal runtime routes", () => {
       status: "unavailable",
     });
     mocks.recordClinicalRetrievalOutcome.mockResolvedValue(undefined);
+  });
+
+  it.each(["stream", "limit"])("keeps outcome %s failures distinct from invalid input", async kind => {
+    const request = jsonRequest("/api/internal/clinical-records/runtime/record-outcome", {}, runtimeWriteFenceHeaders());
+    if (kind === "stream") {
+      vi.spyOn(request, "body", "get").mockReturnValue(new ReadableStream({
+        start(controller) { controller.error(new TypeError("Body stream failed.")); },
+      }));
+    } else {
+      request.headers.set("content-length", String(requestParsers.HOSTED_CLINICAL_RECORDS_RECORD_OUTCOME_REQUEST_MAX_BYTES + 1));
+    }
+    const response = await recordOutcomeRoute.POST(request);
+    expect(response.status).toBe(kind === "stream" ? 500 : 413);
+    expect(mocks.recordClinicalRetrievalOutcome).not.toHaveBeenCalled();
+  });
+
+  it("reports unexpected parser faults as server failures", async () => {
+    const parser = vi.spyOn(requestParsers, "parseHostedClinicalRecordsRecordOutcomeRequest")
+      .mockImplementationOnce(() => { throw new TypeError("Parser invariant failed."); });
+    try {
+      const response = await recordOutcomeRoute.POST(jsonRequest("/api/internal/clinical-records/runtime/record-outcome", {}, runtimeWriteFenceHeaders()));
+      expect(response.status).toBe(500);
+      expect(parser).toHaveBeenCalledOnce();
+    } finally {
+      parser.mockRestore();
+    }
   });
 
   it("requires a signed active runtime fence and permits only a bound document ticket", async () => {
@@ -284,6 +311,7 @@ describe("Clinical Records internal runtime routes", () => {
     expect(pageResponse.status).toBe(200);
     expect(outcomeResponse.status).toBe(200);
     expect(invalidOutcomeResponse.status).toBe(400);
+    expect(await invalidOutcomeResponse.json()).toMatchObject({ error: { code: "CLINICAL_RECORD_RUNTIME_REQUEST_INVALID" } });
     expect(mocks.fetchClinicalRetrievalPage).toHaveBeenCalledWith({
       memberId: "member_clinical_1",
       request: page,

@@ -496,6 +496,44 @@ describe("device sync settings routes", () => {
     vi.unstubAllEnvs();
   });
 
+  it.each(["stream", "json", "shape"])("classifies connect selector %s failures", async kind => {
+    const request = new Request("https://example.test/api/connect-sources/oura/start", {
+      method: "POST", headers: { "content-type": "application/json" },
+      body: kind === "json" ? "{" : "[]",
+    });
+    if (kind === "stream") {
+      const clone = request.clone();
+      vi.spyOn(clone, "text").mockRejectedValue(new TypeError("Body stream failed."));
+      vi.spyOn(request, "clone").mockReturnValue(clone);
+    }
+    const response = await connectSourceStartRoute.POST(request, { params: Promise.resolve({ sourceId: "oura" }) });
+    expect(response.status).toBe(kind === "stream" ? 500 : 400);
+    if (kind !== "stream") expect(await response.json()).toMatchObject({ error: {
+      code: "HOSTED_DEVICE_CONNECT_SOURCE_SELECTOR_INVALID",
+      message: "Hosted device connect source selector is invalid.",
+    } });
+    expect(mocks.startConnection).not.toHaveBeenCalled();
+  });
+
+  it.each(["registry", "diagnostic", "rest"])("distinguishes missing %s diagnostics support", async kind => {
+    const connection = { ...buildDeviceConnectionRecord({ provider: "junction", status: "active" }),
+      id: "dsc_synthetic", provider: "junction", status: "active", externalAccountId: "synthetic-provider" };
+    mocks.listConnectionsForUser.mockResolvedValue([connection]);
+    mocks.getStoredConnectionAccountForUser.mockResolvedValue(connection);
+    const provider = mocks.registryGet();
+    mocks.registryGet.mockReturnValue(kind === "registry" ? undefined : {
+      ...provider, diagnostics: kind === "diagnostic" ? {} : { diagnoseBackfill: mocks.diagnoseBackfill },
+    });
+    const response = await settingsDeviceSyncDiagnoseBackfillRoute.GET(new Request(
+      "https://example.test/api/settings/device-sync/diagnose-backfill?provider=junction"
+        + (kind === "rest" ? "&restProbe=providers" : ""),
+    ));
+    expect(response.status).toBe(kind === "registry" ? 500 : 400);
+    expect(await response.json()).toMatchObject({ error: { code: kind === "registry"
+      ? "DEVICE_SYNC_DIAGNOSTIC_PROVIDER_UNAVAILABLE" : kind === "diagnostic"
+        ? "DEVICE_SYNC_DIAGNOSTIC_UNAVAILABLE" : "DEVICE_SYNC_REST_DIAGNOSTIC_UNAVAILABLE" } });
+  });
+
   it("lists calm settings sources for the authenticated hosted member", async () => {
     const response = await settingsDeviceSyncRoute.GET(
       new Request("https://join.example.test/api/settings/device-sync"),

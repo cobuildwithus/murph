@@ -1,3 +1,4 @@
+import { withJsonError } from "@/src/lib/hosted-onboarding/http";
 const usageGate = vi.hoisted(() => vi.fn(async () => ({ allowed: true })));
 vi.mock("@/src/lib/hosted-execution/usage-allowance", async original => ({
   ...await original<typeof import("@/src/lib/hosted-execution/usage-allowance")>(), readHostedAiUsageGate: usageGate,
@@ -168,6 +169,70 @@ describe("ComputerUseService", () => {
     });
   });
 
+  it("preserves retryable Kernel evaluation errors during managed-login pause", async () => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const store = new FakeComputerUseStore({ run: createRunRecord({ updatedAt: now }) });
+    const upstream = computerUseError({
+      code: "HOSTED_COMPUTER_EVAL_FAILED", httpStatus: 502,
+      message: "Kernel evaluation failed.", retryable: true,
+    });
+    const kernel = createFakeKernel({
+      onExecutePlaywright: () => { throw upstream; },
+    });
+    const service = new ComputerUseService({ kernel, now: () => now, store });
+    const response = await withJsonError(async () => {
+      await service.pauseForUser({ handoffPurpose: "managed_login", memberId: "member_123",
+        reason: "login_needed", runId: "hcr_run123", suggestedReply: null });
+      return Response.json({ ok: true });
+    })();
+    expect(response.status).toBe(502);
+    expect(await response.json()).toMatchObject({ error: { code: "HOSTED_COMPUTER_EVAL_FAILED", retryable: true } });
+    expect(store.run?.kernelSessionId).toBe("kernel-session-1");
+    expect(store.handoff).toBeNull();
+  });
+
+  it.each([
+    null,
+    {},
+    { title: "Page" },
+    { url: null },
+    { url: 123 },
+    { url: "" },
+    { url: "not a url" },
+  ])("rejects malformed managed-login observations: %j", async (result) => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const store = new FakeComputerUseStore({ run: createRunRecord({ updatedAt: now }) });
+    const kernel = createFakeKernel();
+    vi.spyOn(kernel, "executePlaywright").mockResolvedValue({ result });
+    const service = new ComputerUseService({ kernel, now: () => now, store });
+    const response = await withJsonError(async () => {
+      await service.pauseForUser({ handoffPurpose: "managed_login", memberId: "member_123",
+        reason: "login_needed", runId: "hcr_run123", suggestedReply: null });
+      return Response.json({ ok: true });
+    })();
+    expect(response.status).toBe(502);
+    expect(await response.json()).toMatchObject({
+      error: { code: "HOSTED_COMPUTER_ACTION_STATE_INVALID", retryable: true },
+    });
+    expect(store.run).toMatchObject({ kernelSessionId: "kernel-session-1", status: "running" });
+    expect(store.handoff).toBeNull();
+  });
+
+  it.each(["about:blank", "file:///tmp/login.html"])("preserves the managed-login refusal for unsupported URL %s", async (url) => {
+    const now = new Date("2026-06-17T12:00:00.000Z");
+    const store = new FakeComputerUseStore({ run: createRunRecord({ updatedAt: now }) });
+    const kernel = createFakeKernel({ executeResult: { title: null, url, visibleText: "" } });
+    const service = new ComputerUseService({ kernel, now: () => now, store });
+    const response = await withJsonError(async () => {
+      await service.pauseForUser({ handoffPurpose: "managed_login", memberId: "member_123",
+        reason: "login_needed", runId: "hcr_run123", suggestedReply: null });
+      return Response.json({ ok: true });
+    })();
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: { code: "HOSTED_COMPUTER_MANAGED_LOGIN_UNAVAILABLE" } });
+    expect(store.handoff).toBeNull();
+  });
+
   it("does not create a managed-login handoff when the fresh browser domain cannot be persisted", async () => {
     const now = new Date("2026-06-17T12:00:00.000Z");
     const run = createRunRecord({
@@ -194,16 +259,15 @@ describe("ComputerUseService", () => {
       store,
     });
 
-    await expect(service.pauseForUser({
+    const failure = await service.pauseForUser({
       handoffPurpose: "managed_login",
       memberId: "member_123",
       reason: "login_needed",
       runId: "hcr_run123",
       suggestedReply: "done",
-    })).rejects.toMatchObject({
-      code: "HOSTED_COMPUTER_MANAGED_LOGIN_UNAVAILABLE",
-      retryable: true,
-    });
+    }).catch(error => error);
+    expect(failure).toBeInstanceOf(Error);
+    expect((await withJsonError(async () => { throw failure; })()).status).toBe(500);
     expect(store.handoff).toBeNull();
     expect(store.run).toMatchObject({
       lastUrl: "https://old.example/account",
@@ -837,6 +901,7 @@ describe("ComputerUseService", () => {
       suggestedReply: "done",
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_RUN_NOT_RUNNING",
+      httpStatus: 409,
     });
     expect(store.handoff).toBeNull();
     expect(store.run).toMatchObject({
@@ -1004,7 +1069,9 @@ describe("ComputerUseService", () => {
     const kernel = createFakeKernel({
       executeResults: [
         {
-          navigated: true,
+          title: "Dentist portal",
+          url: "https://dentist.example.test/book",
+          visibleText: "Choose an appointment",
         },
         {
           title: "Dentist portal",
@@ -4111,13 +4178,13 @@ describe("ComputerUseService", () => {
       store,
     });
 
-    await expect(service.finishRun({
+    const failure = await service.finishRun({
       memberId: "member_123",
       outcome: "completed",
       runId: "hcr_run123",
-    })).rejects.toMatchObject({
-      code: "HOSTED_COMPUTER_BROWSER_DELETE_FAILED",
-    });
+    }).catch(error => error);
+    expect(failure).toBeInstanceOf(Error);
+    expect((await withJsonError(async () => { throw failure; })()).status).toBe(500);
     expect(store.run).toMatchObject({
       kernelLiveViewUrlEncrypted: "encrypted-live-view",
       kernelSessionId: "kernel-session-1",
@@ -4238,6 +4305,7 @@ describe("ComputerUseService", () => {
       runId: "hcr_run123",
     })).rejects.toMatchObject({
       code: "HOSTED_COMPUTER_BROWSER_DELETE_FAILED",
+      httpStatus: 409,
     });
     expect(store.handoff).toMatchObject({ status: "open" });
     expect(store.run).toMatchObject({ status: "cleanup_pending" });
@@ -5906,9 +5974,7 @@ describe("ComputerUseService", () => {
       memberId: "member_123",
       outcome: "failed",
       runId: "hcr_run123",
-    })).rejects.toMatchObject({
-      code: "HOSTED_COMPUTER_BROWSER_DELETE_FAILED",
-    });
+    })).rejects.toThrow("deleteBrowser failed");
     expect(store.run).toMatchObject({
       kernelSessionId: expect.stringMatching(/^murph-browser-hcr_run123-/u),
       status: "failed",

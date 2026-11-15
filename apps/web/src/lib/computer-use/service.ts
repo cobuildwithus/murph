@@ -2457,30 +2457,17 @@ export class ComputerUseService {
     run: ComputerRunRecord,
     store: ComputerUseStore,
   ): Promise<void> {
-    let state: {
-      title: string | null;
-      url: string | null;
-      visibleText: string;
-    };
-    try {
-      state = await this.readBrowserState(run);
-    } catch {
-      throw managedLoginUnavailableError();
-    }
+    const state = await this.readBrowserState(run);
     const lastUrl = sanitizeComputerDisplayUrl(state.url);
     if (!readManagedLoginDomainFromUrl(lastUrl)) {
       throw managedLoginUnavailableError();
     }
-    try {
-      await store.updateRunBrowserState({
-        expectedKernelSessionId: run.kernelSessionId,
-        lastTitle: state.title,
-        lastUrl,
-        runId: run.id,
-      });
-    } catch {
-      throw managedLoginUnavailableError();
-    }
+    await store.updateRunBrowserState({
+      expectedKernelSessionId: run.kernelSessionId,
+      lastTitle: state.title,
+      lastUrl,
+      runId: run.id,
+    });
   }
 
   private async resumeAwaitingRunById(input: {
@@ -3353,11 +3340,7 @@ export class ComputerUseService {
       return;
     }
 
-    try {
-      await this.requireKernel().deleteBrowserByIdOrName(run.kernelSessionId);
-    } catch {
-      throw browserCleanupFailedError();
-    }
+    await this.requireKernel().deleteBrowserByIdOrName(run.kernelSessionId);
     await store.clearTerminalRunBrowser({
       expectedKernelSessionId: run.kernelSessionId,
       now,
@@ -4047,12 +4030,12 @@ function readBrowserStateResult(value: unknown): {
   url: string | null;
   visibleText: string;
 } {
-  const partial = readOptionalBrowserStateResult(value);
+  const state = readRequiredBrowserActionStateResult(value);
   const visibleText = readVisibleText(value);
 
   return {
-    title: partial?.title ?? null,
-    url: partial?.url ?? null,
+    title: state.title,
+    url: state.url,
     visibleText,
   };
 }

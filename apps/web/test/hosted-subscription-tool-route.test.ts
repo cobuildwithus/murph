@@ -1,3 +1,4 @@
+import * as requestParsers from "@murphai/hosted-execution/subscription";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -41,6 +42,18 @@ describe("hosted subscription tool route", () => {
       },
       status: "no_action_required",
     });
+  });
+
+  it("reports unexpected parser faults as server failures", async () => {
+    const parser = vi.spyOn(requestParsers, "parseHostedSubscriptionControlRequest")
+      .mockImplementationOnce(() => { throw new TypeError("Parser invariant failed."); });
+    try {
+      const response = await route.POST(new Request("https://example.test/api/internal/hosted-execution/subscription/tool", { method: "POST", body: "{}" }));
+      expect(response.status).toBe(500);
+      expect(parser).toHaveBeenCalledOnce();
+    } finally {
+      parser.mockRestore();
+    }
   });
 
   it("authenticates the exact payload and derives the member from the signed callback", async () => {
@@ -135,6 +148,7 @@ describe("hosted subscription tool route", () => {
     ));
 
     expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: { code: "HOSTED_SUBSCRIPTION_REQUEST_INVALID" } });
     expect(mocks.handleTool).not.toHaveBeenCalled();
   });
 });

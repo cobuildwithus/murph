@@ -692,15 +692,10 @@ async function resolveHostedPhoneCallBlockerForNewRequest(input: {
     continuationArmed = reconciled.status === "failed";
   }
 
-  let current: HostedPhoneCall;
-  try {
-    current = await waitForAbortableOperation(input.signal, () =>
-      input.store.hostedPhoneCall.findUniqueOrThrow({
-        where: { id: input.call.id },
-      }));
-  } catch {
-    throwHostedPhoneCallStartPending();
-  }
+  const current = await waitForAbortableOperation(input.signal, () =>
+    input.store.hostedPhoneCall.findUniqueOrThrow({
+      where: { id: input.call.id },
+    }));
   if (!isHostedPhoneCallNewRequestBlocker(current)) {
     return;
   }

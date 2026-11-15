@@ -1,3 +1,4 @@
+import * as requestParsers from "@murphai/hosted-execution/routes";
 import {
   parseHostedBrowserVaultReplicaPublishResponse,
   parseHostedMailboxFetchResponse,
@@ -205,6 +206,18 @@ describe("hosted runtime internal web routes", () => {
     expect(mocks.recordHostedIngressAssistantMilestone).toHaveBeenCalledOnce();
   });
 
+  it("reports unexpected parser faults as server failures", async () => {
+    const parser = vi.spyOn(requestParsers, "parseHostedRuntimeOwnerReleaseSearch")
+      .mockImplementationOnce(() => { throw new TypeError("Parser invariant failed."); });
+    try {
+      const response = await runtimeOwnerReleasedRoute.POST(new Request("https://example.test/api/internal/hosted-runtime/owner-released", { method: "POST" }));
+      expect(response.status).toBe(500);
+      expect(parser).toHaveBeenCalledOnce();
+    } finally {
+      parser.mockRestore();
+    }
+  });
+
   it("records milestone batches serially with per-event results and immediate typing alerts", async () => {
     const ok = { matchedCount: 1, recorded: true, unmatchedCount: 0 };
     let releaseFirst!: () => void;
@@ -407,6 +420,7 @@ describe("hosted runtime internal web routes", () => {
     const response = await runtimeOwnerReleasedRoute.POST(request);
 
     expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: { code: "HOSTED_RUNTIME_OWNER_RELEASE_QUERY_INVALID" } });
     expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledWith(
       request,
       { maxBodyBytes: 0 },

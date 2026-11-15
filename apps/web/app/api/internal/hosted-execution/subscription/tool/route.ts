@@ -1,3 +1,5 @@
+import { ZodError } from "@murphai/contracts/zod-runtime";
+import { RequestInputError } from "@murphai/hosted-execution/request-input";
 import {
   parseHostedSubscriptionControlRequest,
 } from "@murphai/hosted-execution/subscription";
@@ -35,7 +37,8 @@ function parseSubscriptionControlRequest(payloadText: string) {
     return parseHostedSubscriptionControlRequest(
       payloadText.trim() ? parseRequestJson(payloadText) : {},
     );
-  } catch {
+  } catch (error) {
+    if (!(error instanceof ZodError) && !(error instanceof RequestInputError)) throw error;
     throw hostedOnboardingError({
       code: "HOSTED_SUBSCRIPTION_REQUEST_INVALID",
       httpStatus: 400,

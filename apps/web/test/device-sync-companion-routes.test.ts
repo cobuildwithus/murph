@@ -1,3 +1,4 @@
+import * as requestParsers from "@murphai/contracts";
 import { readFile } from "node:fs/promises";
 
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -1091,6 +1092,18 @@ describe("device sync companion routes", () => {
 
     afterEach(() => {
       vi.useRealTimers();
+    });
+
+    it("reports unexpected parser faults as server failures", async () => {
+      const parser = vi.spyOn(requestParsers, "parseCompanionHrvRmssdObservation")
+        .mockImplementationOnce(() => { throw new TypeError("Parser invariant failed."); });
+      try {
+        const response = await hrvRmssdRoute.POST(hrvRmssdRequest(validHrvObservation));
+        expect(response.status).toBe(500);
+        expect(parser).toHaveBeenCalledOnce();
+      } finally {
+        parser.mockRestore();
+      }
     });
 
     it("requires bearer auth before accepting an observation", async () => {
