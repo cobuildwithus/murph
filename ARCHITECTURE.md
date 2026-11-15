@@ -5966,6 +5966,18 @@ uploads or sends a video yet. The envelope reader is the Web rollback floor
 once a video is stored: the previous release refuses an envelope with `video`.
 Live Web protocol admission carries a `recapVideo` witness, so a runtime is not
 activated against a Web that cannot read these requests.
+
+The runtime reads the same feature before anything writes it. A recap wake's
+response policy may carry `video: true`, for a pair show only; the parser, the
+saved pending state and the recap scope accept it, and the turn runs unchanged.
+A stored outbox intent may carry `recapVideo`: the accepted identity plus
+whatever the delivery owner records beside it. The intent reader keeps extra
+keys, drops a value that is not an identity instead of quarantining the intent,
+keeps the field across ownership-checked rewrites and sends the text alone.
+Tool results may name the accepted video. A runtime before this release refuses
+a wake with `video` and quarantines an intent with `recapVideo`, so this release
+is the runtime's rollback floor once Web queues such a wake or a later release
+stores such an intent.
 Accepted media uses private generation URLs; a thirty-day opaque cover capability
 exposes only a composed cover. Failed scenes retain their text, failed songs are
 omitted, and exhausted generation uses a validated three-page plain fallback.

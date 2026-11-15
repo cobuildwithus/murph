@@ -1741,11 +1741,14 @@ function parseHostedExecutionAssistantNotificationDeliveryDispatchMode(
 function parseGameRecapResponsePolicy(record: Record<string, unknown>, label: string) {
       assertExactHostedExecutionKeys(
         record,
-        ["eventId", "gameId", "kind", "pairFingerprint", "loreAccess", "show"],
+        ["eventId", "gameId", "kind", "pairFingerprint", "loreAccess", "show", "video"],
         label,
       );
       if (record.show !== undefined && record.show !== true) throw new ContractValidationError(`${label}.show must be true.`);
       if (record.show && record.loreAccess === "read") throw new ContractValidationError(`${label}.show is pair-only.`);
+      // The show may also become one video. A runtime that reads this and makes none carries on unchanged.
+      if (record.video !== undefined && record.video !== true) throw new ContractValidationError(`${label}.video must be true.`);
+      if (record.video && !record.show) throw new ContractValidationError(`${label}.video requires a show.`);
       if (record.loreAccess !== undefined && record.loreAccess !== "read") {
         throw new ContractValidationError(`${label}.loreAccess must be read.`);
       }
@@ -1753,6 +1756,7 @@ function parseGameRecapResponsePolicy(record: Record<string, unknown>, label: st
         kind: "require_game_recap" as const,
         ...(record.loreAccess === "read" ? { loreAccess: "read" as const } : {}),
         ...(record.show === true ? { show: true as const } : {}),
+        ...(record.video === true ? { video: true as const } : {}),
         eventId: requireString(record.eventId, `${label}.eventId`),
         gameId: requireString(record.gameId, `${label}.gameId`),
         pairFingerprint: requireString(

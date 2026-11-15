@@ -126,6 +126,10 @@ A stored envelope with `video` cannot be read by a Web release that predates
 the field, so that reader stays deployed once a video is stored. Web returns the
 accepted video's identity (`recapVideo`) only to a runtime whose request asked
 for it, because older runtimes refuse unknown result fields.
+A recap wake may carry `video: true` beside `show: true`, and a stored outbox
+intent may carry `recapVideo`. A runtime that predates either refuses that wake
+and quarantines that intent, so the runtime and the Worker that decodes wakes
+ship before Web queues the first such wake.
 
 The authoring preview tool is removed. Native layout and score playback belong
 to the iOS owner; the additive contract preserves installed-client song playback.
