@@ -961,7 +961,7 @@ function buildHostedStripeSubscriptionStateUnsupportedError(reason: string) {
 function buildHostedStripeSubscriptionItemsUnsupportedError() {
   return hostedOnboardingError({
     code: "HOSTED_BILLING_STRIPE_SUBSCRIPTION_ITEMS_UNSUPPORTED",
-    httpStatus: 409,
+    httpStatus: 500,
     message: "Your subscription items are not ready for this plan change.",
   });
 }

@@ -7751,6 +7751,54 @@ describe("hosted Family plan", () => {
     expect(tx.hostedAccountGroupBillingRef.updateMany).not.toHaveBeenCalled();
   });
 
+  it("reports an unsupported Family checkout resume status as a server error without writes", async () => {
+    const sessionId = "cs_test_resumeUnsupported123";
+    const { group, prisma, tx } = createCheckoutFixture(HostedBillingStatus.not_started, {
+      checkoutAttemptId: "hbfca_current",
+      checkoutSeatCount: 2,
+      stripeCheckoutSessionIdEncrypted: `encrypted:${sessionId}`,
+      stripeSubscriptionIdEncrypted: null,
+    });
+    const create = vi.fn();
+    const expire = vi.fn();
+    const retrieve = vi.fn().mockResolvedValue({
+      ...makeFamilyStripeCheckoutSession({
+        checkoutAttemptId: "hbfca_current",
+        sessionId,
+        subscriptionId: null,
+      }),
+      status: null,
+    });
+    runtimeMocks.requireHostedStripeApi.mockReturnValue({
+      checkout: { sessions: { create, expire, retrieve } },
+    });
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const response = await withJsonError(async () => {
+        await createHostedFamilyBillingCheckout({
+          groupId: group.id,
+          ownerMemberId: group.ownerMemberId,
+          prisma: prisma as never,
+          seatCount: 2,
+        });
+        return new Response();
+      })();
+
+      expect(response.status).toBe(500);
+      await expect(response.json()).resolves.toMatchObject({ error: { code: "INTERNAL_ERROR" } });
+      expect(retrieve).toHaveBeenCalledWith(sessionId);
+      expect(create).not.toHaveBeenCalled();
+      expect(expire).not.toHaveBeenCalled();
+      expect(tx.hostedAccountGroupBillingRef.update).not.toHaveBeenCalled();
+      expect(tx.hostedAccountGroupBillingRef.updateMany).not.toHaveBeenCalled();
+      expect(tx.hostedAccountGroupBillingRef.upsert).not.toHaveBeenCalled();
+      expect(tx.hostedAccountGroup.update).not.toHaveBeenCalled();
+      expect(tx.hostedAccountGroup.deleteMany).not.toHaveBeenCalled();
+    } finally {
+      errorLog.mockRestore();
+    }
+  });
+
   it("reuses a pending Family checkout attempt for duplicate checkout starts", async () => {
     const { prisma } = createCheckoutFixture(
       HostedBillingStatus.not_started,
@@ -9037,6 +9085,50 @@ describe("hosted Family plan", () => {
     })).resolves.toBe(checkoutUrl);
 
     expect(nextServerMocks.after).not.toHaveBeenCalled();
+  });
+
+  it("reports an unsupported Family checkout redirect status as a server error without writes", async () => {
+    const sessionId = "cs_test_redirectUnsupported123";
+    const { prisma, tx } = createCheckoutFixture(HostedBillingStatus.not_started, {
+      checkoutAttemptId: "hbfca_current",
+      checkoutSeatCount: 2,
+      stripeCheckoutSessionIdEncrypted: `encrypted:${sessionId}`,
+      stripeSubscriptionIdEncrypted: null,
+    });
+    const create = vi.fn();
+    const expire = vi.fn();
+    const retrieve = vi.fn().mockResolvedValue({
+      ...makeFamilyStripeCheckoutSession({
+        checkoutAttemptId: "hbfca_current",
+        sessionId,
+        subscriptionId: null,
+      }),
+      status: null,
+    });
+    runtimeMocks.requireHostedStripeApi.mockReturnValue({
+      checkout: { sessions: { create, expire, retrieve } },
+    });
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const response = await withJsonError(async () => {
+        await resolveHostedFamilyCheckoutRedirectUrl({ prisma: prisma as never, sessionId });
+        return new Response();
+      })();
+
+      expect(response.status).toBe(500);
+      await expect(response.json()).resolves.toMatchObject({ error: { code: "INTERNAL_ERROR" } });
+      expect(retrieve).toHaveBeenCalledWith(sessionId);
+      expect(create).not.toHaveBeenCalled();
+      expect(expire).not.toHaveBeenCalled();
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(tx.hostedAccountGroupBillingRef.update).not.toHaveBeenCalled();
+      expect(tx.hostedAccountGroupBillingRef.updateMany).not.toHaveBeenCalled();
+      expect(tx.hostedAccountGroupBillingRef.upsert).not.toHaveBeenCalled();
+      expect(tx.hostedAccountGroup.update).not.toHaveBeenCalled();
+      expect(tx.hostedAccountGroup.deleteMany).not.toHaveBeenCalled();
+    } finally {
+      errorLog.mockRestore();
+    }
   });
 
   it("routes a completed URL-less Family Session to verified success without clearing it", async () => {

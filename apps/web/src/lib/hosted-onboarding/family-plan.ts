@@ -3076,12 +3076,7 @@ async function resumeHostedFamilyBillingCheckout(input: {
     };
   }
 
-  throw hostedOnboardingError({
-    code: "HOSTED_FAMILY_BILLING_SYNCING",
-    httpStatus: 409,
-    message: "Family checkout is unavailable and still syncing. Try again shortly.",
-    retryable: true,
-  });
+  throw new Error("Stripe returned an unsupported Family checkout status.");
 }
 
 async function revalidateHostedFamilyCheckoutClaimTx(input: {
@@ -4310,12 +4305,7 @@ export async function resolveHostedFamilyCheckoutRedirectUrl(input: {
     });
   }
 
-  throw hostedOnboardingError({
-    code: "HOSTED_FAMILY_CHECKOUT_SESSION_UNAVAILABLE",
-    httpStatus: 409,
-    message: "Family checkout is still syncing. Try again shortly.",
-    retryable: true,
-  });
+  throw new Error("Stripe returned an unsupported Family checkout status.");
 }
 
 async function readHostedFamilyCheckoutRedirectAttemptId(input: {
