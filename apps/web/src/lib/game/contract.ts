@@ -527,7 +527,9 @@ export interface GameView {
 
 export interface GameHomeView {
   canStartGroups?: boolean;
-  me: { memberId: string; firstName: string | null; timeZone: string | null; avatarUrl: string | null; usualKind?: GameEntryKind | null };
+  me: { memberId: string; firstName: string | null; timeZone: string | null; avatarUrl: string | null; usualKind?: GameEntryKind | null;
+    /** Caller-only verified NANP area-code hint. Missing means unknown. */
+    areaCode?: string };
   /** Whether the global game switch is on. Older apps ignore it. */
   canStartGames: boolean;
   /**

@@ -26,6 +26,33 @@ signed delivery reach the other player's app (`authorizeLockedPreviewReads`:
 the media rules minus post-to-unlock), which keeps it hidden until its own post
 is in; the media route itself stays post-to-unlock.
 
+## Typed-word game ideas
+
+`POST /api/game/v1/ideas` is an optional authenticated native game action.
+OpenAI receives only words, step, category, relationship kind, apart, direction
+labels, the chosen task and skipped idea texts. The app and server never attach
+names, phone numbers, private relationship labels or member identifiers.
+Typed words can contain anything a member writes, including personal details;
+the same is true of their task text. This is not an anonymity guarantee.
+Requests and suggestions are not persisted or logged by this route. Responses
+writing uses `store: false`; the check uses the same OpenAI provider boundary.
+The caller's member id is used only by the existing blinded, encrypted auth
+rate limiter: `game-ideas`, 30 attempts per 600 seconds across steps.
+
+`HOSTED_GAME_IDEAS=off` skips provider work; unset means on. It reuses
+`OPENAI_API_KEY` and adds no required configuration or production setting.
+The existing global game switch and game auth still apply. All provider work
+shares one eight-second deadline, with no SDK retries and at most one new write
+when fewer than four ideas survive. Provider errors, malformed results and
+timeouts return an empty list, so native clients can keep their bank ideas.
+Manual game text acceptance is unchanged; generated suggestions add stricter
+alcohol, money, gambling, name, brand and stake rules.
+
+Game Home's optional `me.areaCode` is derived from only the authenticated
+caller's verified `+1` phone in `HostedMemberIdentityState`. It exposes three
+NANP digits, never the full phone or an opponent's identity, and is omitted for
+unknown, unverified or non-NANP phones. No phone is sent to the ideas provider.
+
 ## Non-Negotiable Rules
 
 The Postgres-only runtime authority boundary is owned by

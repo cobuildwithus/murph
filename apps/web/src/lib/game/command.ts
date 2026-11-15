@@ -1,3 +1,4 @@
+import { normalizeGameText as words } from "./text";
 import { isStrictIsoDate, normalizeIanaTimeZone } from "@murphai/contracts";
 
 import {
@@ -161,7 +162,6 @@ function recipient(value: unknown): GameInviteRecipient {
   return { kind: oneOf(input.kind, "recipient.kind", ["phone", "email"] as const), value: string(input.value, "recipient.value", 320) };
 }
 
-const WORDS_MAX = 200;
 const POST_TEXT_MAX = 2000;
 const MEDIA_KEYS_MAX = 4;
 const CAPTURE_AGE_MAX_MS = 7 * 24 * 60 * 60 * 1000;
@@ -321,20 +321,6 @@ function string(value: unknown, field: string, max: number): string {
   if (typeof value !== "string") reject("INVALID_REQUEST", `${field} must be a string.`);
   if (value.length > max) reject("INVALID_REQUEST", `${field} is too long.`);
   return value;
-}
-
-/** People's words: trimmed, 1 to 200 characters. */
-/**
- * People's words: invisible format and control characters dropped (a
- * zero-width space can't make a name), trimmed, 1 to 200 characters. The
- * zero-width joiner stays inside emoji sequences.
- */
-function words(value: unknown, field: string): string {
-  const cleaned = string(value, field, WORDS_MAX * 2).replace(INVISIBLE, (char) => (char === ZWJ ? char : "")).trim();
-  if (!cleaned.replaceAll(ZWJ, "").trim() || cleaned.length > WORDS_MAX) {
-    reject("INVALID_REQUEST", `${field} must be 1 to ${WORDS_MAX} characters.`);
-  }
-  return cleaned;
 }
 
 function transcript(value: unknown): string {
