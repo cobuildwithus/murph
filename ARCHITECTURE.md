@@ -6008,8 +6008,10 @@ acceptance decides the stored video.
 Delivery. When the write or a recovery names the accepted video and this
 runner holds exactly those bytes (hash, length and generation), the file moves
 to `accepted-<generation>-<hash>.mp4` beside the renders and the turn queues
-the line and link with `recapVideo` (the identity and that path) on the outbox
-intent; otherwise the intent has none and the recap goes as today. Only a
+the line and link with `recapVideo` (the identity only) on the outbox intent;
+otherwise the intent has none and the recap goes as today. The intent never
+names a file: the model's shell can edit an intent, so the sender derives the
+one possible path from a well-formed identity inside the runner's directory. Only a
 text-only Linq intent carries it, and a replayed create keeps the stored
 intent and its decision. The outbox hands it to the hosted Linq sender, which
 makes one decision before the message's first request and saves it with the
@@ -6018,10 +6020,16 @@ says the video may still go (`recapVideoCurrent`, `isRecapVideoCurrent` for
 the delivery key's own game, read before the claim's transaction), the file is
 the accepted bytes, and Linq takes it as an attachment (an authority-only
 provider boundary, no dispatch fence), saved as `form: "attachment"` with its
-id; any failure saves `form: "line"`. The file is removed once a decision is
-saved. Every send then asks Web again: while allowed, the saved attachment
-rides the first send after the line's text and the link goes alone as today;
-once not, the decision moves to the line alone for good. A decision only ever
+id, then asks Web once more now the upload is done; any failure saves
+`form: "line"`. An answer that carries a delivery block counts as "no". The
+file is removed once a decision is saved. Every send asks Web again, and so
+does each request whose body carries the attachment (the client's own retries
+included): when the video may no longer go the request does not leave and the
+outbox's next attempt sends the line alone; when Linq refuses that request
+outright (400, 413, 415, 422) the decision becomes the line alone and the
+attempt fails as retryable, so the line and link still go once. While allowed,
+the saved attachment rides the first send after the line's text and the link
+goes alone as today; once not, the decision moves to the line alone for good. A decision only ever
 moves toward the line alone. A restarted runner has no file and sends the line
 and link. The message keys are unchanged, so the video can be sent at most
 once with its message; a regeneration is a new message with its own video.

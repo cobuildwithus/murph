@@ -740,6 +740,22 @@ the workflow, and the tests (none vacuous).
 7. Rollback floor: the outbox reader of #4991 reads every intent this slice
    writes (it accepts the bounded shape) and sends its text alone. A runtime
    below #4991 quarantines such an intent, so #4991 stays the floor.
+8. Review (ReviewGPT round 1 and the Codex deep review, both on 7b7ad7b299).
+   Accepted and fixed with tests: the intent named the file, and the model's
+   shell can edit an intent, so the host could be made to read or delete any
+   file (both, high): the intent now carries the identity only and the sender
+   derives the path; eligibility could go stale during the upload and during
+   the client's own retries (both, high): Web is asked again after the upload
+   and before each request that carries the attachment; Linq refusing the
+   message with its attachment terminalized the recap (Codex, high): the
+   decision becomes the line alone and the attempt is retried; an
+   authority-only answer's delivery block was ignored before the upload
+   (Codex, medium). Rejected: keeping a saved attachment after an ambiguous
+   attempt once Web says no (Codex, medium). Choice 5 above is deliberate:
+   Linq replays an accepted key's original response, so dropping the video
+   cannot send it twice, and never newly delivering a withdrawn photo
+   outranks the stored form matching an attempt Linq may have taken; the
+   delivery record holds Linq's message ids either way.
 
 ### Owner decisions recorded after the review (no architecture change)
 

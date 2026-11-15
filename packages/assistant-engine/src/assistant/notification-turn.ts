@@ -1080,6 +1080,11 @@ function resolveAssistantNotificationHostedExecutionContext(
   return executionContext?.hosted ?? null
 }
 
+/** The outbox keeps the accepted identity only; the sender finds the host's file from it. */
+function outboxRecapVideo(video: AssistantSavedGameRecapVideo | undefined) {
+  return video ? { generationId: video.generationId, hash: video.hash, byteLength: video.byteLength } : undefined
+}
+
 function buildAssistantGameRecapToolContextFields(input: {
   enabled: boolean
   recordSavedChatLine(chatLine: string, video?: AssistantSavedGameRecapVideo): void
@@ -1191,7 +1196,7 @@ async function sendAssistantExactTextNotificationLocal(input: {
       deferPrivateCompletionContinuity
         ? input.privateCompletionContinuitySessionId
         : undefined,
-    recapVideo: input.recapVideo,
+    recapVideo: outboxRecapVideo(input.recapVideo),
     session: input.session,
     sharedPlan: input.sharedPlan,
     turnId,
@@ -1742,7 +1747,7 @@ async function deliverAssistantNotificationMessage(input: {
     ...deliveryFields,
     card: input.card ?? null,
     media,
-    recapVideo: input.recapVideo,
+    recapVideo: outboxRecapVideo(input.recapVideo),
     ...(input.privateCompletionContinuitySessionId === undefined
       ? {}
       : {

@@ -701,11 +701,12 @@ export const assistantInputCursorSchema = z
 
 /**
  * A recap video the outbox may attach to its message's first send: the identity
- * Web accepted for the recap, the host-owned file the turn handed over (outside
- * the vault; gone after a restart), and the one decision the sender persists
- * before its first message request: the line with this prepared attachment, or
- * the line alone. Only the host writes it. Any other shape is dropped, so the
- * message is sent as its text alone and an optional video never costs it.
+ * Web accepted for the recap, and the one decision the sender persists before its
+ * first message request: the line with this prepared attachment, or the line
+ * alone. It names no file: the sender derives the host's own path from the
+ * identity, since the model's shell can edit an intent. Any other shape is
+ * dropped, so the message is sent as its text alone and an optional video never
+ * costs it.
  * The identity fields are `recapVideoIdentitySchema`'s, restated here so this
  * widely loaded module does not pull in the recap contracts.
  */
@@ -714,7 +715,6 @@ export const assistantOutboxRecapVideoSchema = z
     generationId: z.string().min(1).max(128),
     hash: z.string().regex(/^[a-f0-9]{64}$/u),
     byteLength: z.number().int().positive().max(8_000_000),
-    file: z.string().min(1).max(1024).optional(),
     form: z.enum(['attachment', 'line']).optional(),
     attachmentId: z.string().min(1).max(256).optional(),
   })

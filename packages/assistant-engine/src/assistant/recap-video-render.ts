@@ -317,10 +317,10 @@ const HANDOFF_MAX_AGE_MS = 24 * 60 * 60 * 1000
  */
 export async function handOverRecapVideo(identity: RecapVideoIdentity | null, candidate: { draft: RecapVideoDraft; file: string } | null): Promise<(RecapVideoIdentity & { file: string }) | undefined> {
   if (!identity) return undefined
-  const root = recapVideoScratchRoot()
+  const target = await recapVideoHandoffPath(identity)
+  const root = target && path.dirname(target)
   const accepted = { generationId: identity.generationId, hash: identity.hash, byteLength: identity.byteLength }
-  if (!root) return undefined
-  const target = path.join(root, `${HANDOFF_PREFIX}${identity.generationId}-${identity.hash}.mp4`)
+  if (!root || !target) return undefined
   const matches = candidate && candidate.draft.hash === identity.hash && candidate.draft.byteLength === identity.byteLength
     && candidate.draft.parts.every(part => part.storageKey.startsWith(`recap/${identity.generationId}/`))
   if (matches && path.dirname(path.dirname(candidate.file)) === root) await rename(candidate.file, target)
@@ -328,6 +328,17 @@ export async function handOverRecapVideo(identity: RecapVideoIdentity | null, ca
   // Without the accepted bytes here there is nothing to send: the recap goes as its line and link.
   const held = await stat(target).then(file => file.isFile() && file.size === identity.byteLength, () => false)
   return held ? { ...accepted, file: target } : undefined
+}
+
+/**
+ * The one place an accepted video's file can be: derived from the identity, inside the runner's own
+ * directory. The outbox intent names only the identity, because the model's shell can edit it; a
+ * path read from it could make the host read or delete any file. Null for an identity of any other shape.
+ */
+export async function recapVideoHandoffPath(identity: { generationId: string; hash: string }): Promise<string | null> {
+  const root = recapVideoScratchRoot()
+  if (!root || !/^[a-f0-9]{32}$/u.test(identity.generationId) || !/^[a-f0-9]{64}$/u.test(identity.hash)) return null
+  return path.join(root, `${HANDOFF_PREFIX}${identity.generationId}-${identity.hash}.mp4`)
 }
 
 async function sweepHandoffs(root: string, keep: string): Promise<void> {

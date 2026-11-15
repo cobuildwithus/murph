@@ -196,7 +196,7 @@ export async function persistAssistantOutboxIntentRecapVideo(input: {
         'The recap message\'s outbox owner changed before its video decision was saved.', { retryable: true })
     }
     const previous = current.recapVideo
-    const { file: _file, ...next } = input.next
+    const next = input.next
     const allowed = previous !== undefined && previous.generationId === next.generationId && previous.hash === next.hash
       && previous.byteLength === next.byteLength && next.form !== undefined
       && (previous.form === undefined || next.form === 'line' || previous.attachmentId === next.attachmentId)

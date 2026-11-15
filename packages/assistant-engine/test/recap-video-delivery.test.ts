@@ -11,7 +11,7 @@ const roots: string[] = []
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
 
 const identity = { generationId: 'a'.repeat(32), hash: 'b'.repeat(64), byteLength: 3_100_000 }
-const handed = { ...identity, file: '/synthetic/runner-home/.murph-recap-video/accepted.mp4' }
+const handed = identity
 const line = 'Leo took the week, seven to six.\nWatch the recap: https://www.withmurph.ai/recap/synthetic'
 
 async function vault() {
@@ -25,12 +25,12 @@ const create = (root: string, extra: Partial<Parameters<typeof createAssistantOu
 })
 
 describe('the recap video an outbox intent carries', () => {
-  it('is bounded: the identity, the handed-over file and one decision, nothing else', () => {
-    for (const valid of [identity, handed, { ...identity, form: 'line' }, { ...identity, form: 'attachment', attachmentId: 'att-1' }]) {
+  it('is bounded: the identity and one decision, never a file path the model could edit', () => {
+    for (const valid of [identity, { ...identity, form: 'line' }, { ...identity, form: 'attachment', attachmentId: 'att-1' }]) {
       expect(assistantOutboxRecapVideoSchema.safeParse(valid).success).toBe(true)
     }
     for (const invalid of [{ ...identity, form: 'attachment' }, { ...identity, attachmentId: 'att-1' }, { ...identity, prepared: { attachmentId: 'x' } },
-      { ...identity, file: 'f'.repeat(1025) }, { ...identity, form: 'video' }]) {
+      { ...identity, file: '/synthetic/vault/bank/automations/a.md' }, { ...identity, form: 'video' }]) {
       expect(assistantOutboxRecapVideoSchema.safeParse(invalid).success).toBe(false)
     }
   })

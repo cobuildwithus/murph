@@ -138,7 +138,7 @@ import {
   buildHostedTelegramVoiceMemoChannelEnv,
 } from "./channel-activity.ts";
 import { uploadLinqAttachment } from "@murphai/operator-config/linq-runtime";
-import { resolveHostedRecapVideoAttachment } from "./recap-video-attachment.ts";
+import { guardHostedRecapVideoFetch, resolveHostedRecapVideoAttachment } from "./recap-video-attachment.ts";
 import {
   looksLikeHostedProviderRedactedLinqTarget,
   sendHostedProviderLinqMessage,
@@ -5212,7 +5212,16 @@ function createHostedAssistantLinqSendDependency(input: {
               createMessageFetchBoundary(fallbackIdempotencyKey),
           }),
       env: input.linqEnv,
-      fetchImplementation: createMessageFetchBoundary(idempotencyKey),
+      fetchImplementation: guardHostedRecapVideoFetch({
+        fetchImplementation: createMessageFetchBoundary(idempotencyKey),
+        attachmentIds: recapAttachmentIds,
+        isCurrent: async () => hostedRecapVideoMayGo(await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
+          ...readResolvedEngagementInput(), authorityCheckOnly: true, idempotencyKey,
+          recapVideo: request.recapVideo ? { generationId: request.recapVideo.video.generationId, hash: request.recapVideo.video.hash } : undefined,
+        })),
+        chooseLine: async () => { if (request.recapVideo) await request.recapVideo.persist({ ...hostedRecapVideoIdentity(request.recapVideo.video), form: "line" }); },
+        markPreProvider: markHostedDeliveryPreProvider,
+      }),
       ...(signal ? { signal } : {}),
     }, "Hosted assistant Linq delivery");
     const buildDeliveryOutcome = (outcome: Omit<
@@ -6379,6 +6388,15 @@ function readTrustedHostedAssistantLinqDeliveryFailureReason(
   return message ? message.slice(0, 500) : null;
 }
 
+function hostedRecapVideoIdentity(video: { generationId: string; hash: string; byteLength: number }) {
+  return { generationId: video.generationId, hash: video.hash, byteLength: video.byteLength };
+}
+
+/** Web allows this video with the message: its exact yes, and no delivery block on the chat. */
+function hostedRecapVideoMayGo(answer: HostedRuntimeLinqRecentInboundEngagementResult): boolean {
+  return answer.recapVideoCurrent === true && !answer.deliveryBlockCode;
+}
+
 function preparedLinqAttachmentField(ids: string[]): { preparedAttachmentIds?: string[] } {
   return ids.length > 0 ? { preparedAttachmentIds: ids } : {};
 }
@@ -6402,14 +6420,20 @@ async function prepareHostedLinqRecapVideoAttachment(input: {
   if (!input.request.recapVideo || input.request.card != null || input.mediaCount > 0) return [];
   const attachmentId = await resolveHostedRecapVideoAttachment({
     recapVideo: input.request.recapVideo,
-    isCurrent: async ({ generationId, hash }) => (await input.check({ generationId, hash })).recapVideoCurrent === true,
+    // Loaded only for a recap that carries a video.
+    fileFor: async (identity) => (await import("@murphai/assistant-engine/recap-video-render")).recapVideoHandoffPath(identity),
+    isCurrent: async ({ generationId, hash }) => hostedRecapVideoMayGo(await input.check({ generationId, hash })),
     upload: async (bytes) => (await uploadLinqAttachment({ bytes, contentType: "video/mp4", filename: "recap.mp4" }, {
       env: input.linqEnv,
       fetchImplementation: createHostedProviderFetchBoundary({
         assertProviderEntryLive: async () => {
           try {
             await input.assertCanEnter();
-            await input.check();
+            // An authority-only answer reports a delivery block instead of throwing it: honor it before any bytes leave.
+            const answer = await input.check();
+            if (answer.deliveryBlockCode) {
+              throw new VaultCliError("ASSISTANT_RECAP_VIDEO_DELIVERY_BLOCKED", "Delivery to this chat is blocked.", { retryable: true });
+            }
           } catch (error) {
             throw markHostedDeliveryPreProvider(error);
           }
