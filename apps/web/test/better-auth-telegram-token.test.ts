@@ -76,6 +76,6 @@ describe("verified Telegram login identity", () => {
     ["a timeout", (_url, { signal }) => new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason)))],
   ])("answers %s from Telegram's key service as a retryable outage, not a bad token", async (_case, fetch) => {
     await expect(verifyHostedTelegramIdToken({ token: await token(), nonce, clientId: "123456789" }, remoteKeys(fetch)))
-      .rejects.toMatchObject({ code: "AUTH_TELEGRAM_INVALID", httpStatus: 503, retryable: true, details: { code: "telegram_verification_unavailable" } });
+      .rejects.toMatchObject({ code: "AUTH_VERIFICATION_UNAVAILABLE", httpStatus: 503, retryable: true, details: { code: "telegram_verification_unavailable" } });
   });
 });

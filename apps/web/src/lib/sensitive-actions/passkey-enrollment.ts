@@ -24,7 +24,6 @@ import { parseSensitiveActionAuthorization } from "./shared";
 import {
   MAX_APPROVAL_PASSKEYS,
   approvalPasskeyRegistrationOptions,
-  isApprovalPasskeyServerFault,
   verifyApprovalPasskeyRegistration,
 } from "./webauthn";
 
@@ -92,8 +91,7 @@ export async function registerApprovalPasskey(input: EnrollmentInput & {
     message: verified.message,
     origin: verified.origin,
     response: input.response,
-  }).catch((error: unknown) => {
-    if (isApprovalPasskeyServerFault(error)) throw error;
+  }).catch(() => {
     throw hostedOnboardingError({ code: "SENSITIVE_ACTION_REGISTRATION_INVALID", httpStatus: 403, message: "Your passkey could not be verified. Please try again." });
   });
   if (verified.state.credentials.some(({ id }) => id === credential.id)) {

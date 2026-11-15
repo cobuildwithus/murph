@@ -38,11 +38,11 @@ export async function verifyHostedTelegramIdToken(input: {
 
 function verificationFailure(error: unknown) {
   // A failed key-set request (a network error is not a JOSE error) is an outage,
-  // not a bad token. The code and message stay the ones clients already show;
-  // the status and retryable flag say it may be retried.
+  // not a bad token, so it uses the provider-outage code the SMS verifier
+  // already answers with. The message is unchanged.
   if (!(error instanceof errors.JOSEError) || keySetFailures.has(error.code)) {
     return hostedOnboardingError({
-      cause: error, code: "AUTH_TELEGRAM_INVALID", httpStatus: 503, retryable: true,
+      cause: error, code: "AUTH_VERIFICATION_UNAVAILABLE", httpStatus: 503, retryable: true,
       message: "Telegram sign-in could not be verified. Try again.", details: { code: "telegram_verification_unavailable" },
     });
   }

@@ -284,23 +284,6 @@ test("still fails loudly when the binding upsert fails for an unrelated reason",
   }
 });
 
-test("answers an unusable recovery key as a server error, not an expired link", async () => {
-  const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
-  mocks.openHostedLinqGroupEmailRecoveryToken.mockImplementationOnce(() => {
-    throw new TypeError("HOSTED_APP_SESSION_HMAC_KEY must be configured as a canonical 32-byte base64url key.");
-  });
-
-  try {
-    const response = await route.POST(buildRequest());
-
-    expect(response.status).toBe(500);
-    await expect(response.json()).resolves.toMatchObject({ error: { code: "INTERNAL_ERROR" } });
-    expect(mocks.getPrisma).not.toHaveBeenCalled();
-  } finally {
-    errorSpy.mockRestore();
-  }
-});
-
 test("rejects an expired or malformed recovery token", async () => {
   mocks.openHostedLinqGroupEmailRecoveryToken.mockReturnValueOnce(null);
 

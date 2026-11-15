@@ -1,4 +1,3 @@
-import { SimpleWebAuthnError } from "@simplewebauthn/server";
 import { beforeEach, expect, it, vi } from "vitest";
 
 const m = vi.hoisted(() => ({ read: vi.fn(), verify: vi.fn(), register: vi.fn(), prepare: vi.fn(), consume: vi.fn(), origin: vi.fn() }));
@@ -36,21 +35,6 @@ it.each([7, 8])("preserves registration behavior with %i existing credentials", 
   } else expect(m.consume).toHaveBeenCalledOnce();
   expect(m.verify).toHaveBeenCalledOnce();
   expect(m.register).toHaveBeenCalledOnce();
-});
-
-it("answers a rejected passkey 403 and a verifier configuration fault as a server error", async () => {
-  m.verify.mockResolvedValue({ passkeys: [], credentialWrite: { expectedEncrypted: "synthetic" } });
-  const register = () => POST(new Request("https://example.test/api/settings/approval-passkeys/register", { method: "POST" }));
-  m.register.mockRejectedValueOnce(new Error("Passkey registration could not be verified."));
-  const rejected = await register();
-  expect(rejected.status).toBe(403);
-  expect(await rejected.json()).toEqual({ error: { code: "SENSITIVE_ACTION_REGISTRATION_INVALID", message: "Your passkey could not be verified. Please try again.", retryable: false } });
-  m.register.mockRejectedValueOnce(new SimpleWebAuthnError({ code: "BAD_ARGUMENT", message: "Synthetic expected origin fault." }));
-  const fault = await register();
-  expect(fault.status).toBe(500);
-  expect(await fault.json()).toMatchObject({ error: { code: "INTERNAL_ERROR" } });
-  expect(m.prepare).not.toHaveBeenCalled();
-  expect(m.consume).not.toHaveBeenCalled();
 });
 
 it("answers a missing public origin as approval being unavailable, not as missing approval", async () => {

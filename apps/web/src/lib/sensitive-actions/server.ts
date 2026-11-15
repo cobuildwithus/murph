@@ -23,7 +23,7 @@ import {
   readApprovalPasskeyState,
   type PreparedApprovalPasskeyWrite,
 } from "./passkey-store";
-import { isApprovalPasskeyServerFault, verifyApprovalPasskeyAssertion, type ApprovalPasskey } from "./webauthn";
+import { verifyApprovalPasskeyAssertion, type ApprovalPasskey } from "./webauthn";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS, lockHostedMemberRow } from "../hosted-onboarding/shared";
 import { assertHostedAppSessionCurrentTx } from "../hosted-onboarding/app-session";
 
@@ -150,7 +150,7 @@ export async function verifySensitiveActionChallenge(input: {
     }),
     origin: requireSensitiveActionOrigin(),
     response: authorization.assertion,
-  }).catch((error: unknown) => { throw isApprovalPasskeyServerFault(error) ? error : sensitiveActionInvalidSignature(); });
+  }).catch(() => { throw sensitiveActionInvalidSignature(); });
   return {
     bindingHash: challenge.bindingHash,
     expiresAt: challenge.expiresAt,
