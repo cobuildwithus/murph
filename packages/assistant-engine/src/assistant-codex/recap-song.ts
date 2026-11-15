@@ -31,6 +31,10 @@ export function buildRecapScorePlan(story: GameRecapStory, voice: string): Eleve
   negativeStyles: ['instrumental intro', 'long intro', 'instrumental break'], durationMs: 20_000, contextAdherence: 'high' }]
 }
 
+// Music requests one song call may make; the recap's media allowance (seven) holds them after four scenes.
+const RECAP_SONG_TAKES = 3
+const RECAP_LATE_SINGER_MS = 1000
+
 export async function executeGenerateRecapSongFile(input: {
   draft: unknown; voice: string; fileRuntime: GeneratedMediaFileRuntime; env?: NodeJS.ProcessEnv; abortSignal?: AbortSignal | null
 }): Promise<GenerateVoiceMemoToolResult> {
@@ -42,22 +46,38 @@ export async function executeGenerateRecapSongFile(input: {
     const runtime = input.fileRuntime
     const apiKey = runtime.elevenLabsApiKey ?? resolveElevenLabsApiKey(input.env ?? {})
     if (!apiKey) throw new Error('Song generation is unavailable.')
-    const result = await generateElevenLabsMusic({ apiKey, chunks, durationMs, forceInstrumental: false,
-      modelId: ELEVENLABS_MUSIC_MODEL_ID, outputFormat: ELEVENLABS_MUSIC_OUTPUT_FORMAT, prompt: story.song!.style,
-      fetchImplementation: (url, init) => runtime.fetchImpl(url, init), signal: input.abortSignal ?? undefined })
-    const stream = inspectMp3Frames(result.bytes)
-    const firstWordMs = recapFirstSungWordMs(result.wordsTimestamps ?? [], sungStartMs)
-    // The song starts 200 ms before its first word, and never after the planned start: a singer who comes in
-    // late lengthens the song's own opening, never the page before it, so one take is always enough.
-    const cut = firstWordMs === undefined ? undefined
-      : [...stream.frames].reverse().find(frame => frame.timeMs <= Math.min(firstWordMs - 200, sungStartMs))
-    if (Math.abs(stream.durationMs - durationMs) > 500 || firstWordMs === undefined || firstWordMs >= stream.durationMs || !cut
-      || !recapSongLines(story.song!.lyrics, { ...result, durationMs: stream.durationMs, songStartMs: cut.timeMs }, sungStartMs)) {
-      throw new Error('Generated music has no usable sung part or does not fit these pages.')
+    const take = async () => {
+      const result = await generateElevenLabsMusic({ apiKey, chunks, durationMs, forceInstrumental: false,
+        modelId: ELEVENLABS_MUSIC_MODEL_ID, outputFormat: ELEVENLABS_MUSIC_OUTPUT_FORMAT, prompt: story.song!.style,
+        fetchImplementation: (url, init) => runtime.fetchImpl(url, init), signal: input.abortSignal ?? undefined })
+      const stream = inspectMp3Frames(result.bytes)
+      const firstWordMs = recapFirstSungWordMs(result.wordsTimestamps ?? [], sungStartMs)
+      // The song starts 200 ms before its first word, and never after the planned start: a singer who comes in
+      // late lengthens the song's own opening, never the page before it.
+      const cut = firstWordMs === undefined ? undefined
+        : [...stream.frames].reverse().find(frame => frame.timeMs <= Math.min(firstWordMs - 200, sungStartMs))
+      if (Math.abs(stream.durationMs - durationMs) > 500 || firstWordMs === undefined || firstWordMs >= stream.durationMs || !cut
+        || !recapSongLines(story.song!.lyrics, { ...result, durationMs: stream.durationMs, songStartMs: cut.timeMs }, sungStartMs)) {
+        throw new Error('Generated music has no usable sung part or does not fit these pages.')
+      }
+      return { ...result, firstWordMs, songStartMs: cut.timeMs }
+    }
+    // A late singer's song page opens on the band alone, so a singer more than a second late gets another take,
+    // at most three in all, and the earliest singer is kept. A refused or failed retake ends the retakes and
+    // leaves the earlier take.
+    let selected = await take()
+    for (let takes = 1; takes < RECAP_SONG_TAKES && selected.firstWordMs - sungStartMs > RECAP_LATE_SINGER_MS; takes++) {
+      try {
+        const next = await take()
+        if (next.firstWordMs < selected.firstWordMs) selected = next
+      } catch (error) {
+        if (input.abortSignal?.aborted) throw input.abortSignal.reason ?? error
+        break
+      }
     }
     input.abortSignal?.throwIfAborted()
-    const file = await runtime.save(result.bytes, 'audio/mpeg', result.wordsTimestamps,
-      { songStartMs: cut.timeMs, signature: recapScoreSignature(story) })
+    const file = await runtime.save(selected.bytes, 'audio/mpeg', selected.wordsTimestamps,
+      { songStartMs: selected.songStartMs, signature: recapScoreSignature(story) })
     return { rpcSuccess: true, rpcText: JSON.stringify({ path: file }) }
   } catch (error) {
     if (input.abortSignal?.aborted) throw input.abortSignal.reason ?? error

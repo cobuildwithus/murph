@@ -682,7 +682,7 @@ resulting avatar. No private photo is shared with the subject or other players.
 
   Recap media funding comes from authenticated Web game authority, installed in
   the current native invocation. Model arguments and request headers cannot grant
-  it. One in-memory egress counter allows six total forwarded media requests;
+  it. One in-memory egress counter allows seven total forwarded media requests;
   forwarded failures consume the count, and a container restart may reset it.
   Bounded recap image/song requests bypass ordinary subscription/allowance vetoes.
   There are no reservations, per-kind limits, pricing estimates or recap deadlines.

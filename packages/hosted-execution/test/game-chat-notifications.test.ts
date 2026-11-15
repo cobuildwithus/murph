@@ -372,9 +372,9 @@ it("activates show policy only for an explicitly selected pair", () => {
   expect(show).toContain("never name a city or country from it");
   expect(show).toContain("open it with view_image and set faceY on its scene block");
   expect(show).toContain("the draft's path, and voice");
-  expect(show).toContain("keep two for the song");
-  // The song tool makes one take; a late singer only lengthens the song's opening.
-  expect(show).not.toContain("second take");
+  // The Worker allows seven media requests: four scenes and up to three takes of the song, which retakes a late singer.
+  expect(show).toContain("There are seven media requests in total: keep three for the song, which may make up to three takes on its own, and use at most four for scenes.");
+  expect(show).not.toContain("six media requests");
   expect(show).not.toContain("the story's style as prompt");
   // The turn sets the mode and format, and the files carry the material: the guide names neither a mode nor an inline list.
   expect(show).toContain("game.json (the game, its posts, the result and every photo you may use, under references)");

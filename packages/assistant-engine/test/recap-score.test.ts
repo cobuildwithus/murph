@@ -63,8 +63,8 @@ test.each([1, 3])('cuts on and off the 24 ms grid for %s pages, opens the song o
     const save = vi.fn<import('../src/assistant-codex/generated-media-file.ts').GeneratedMediaFileRuntime['save']>(async () => 'song.mp3')
     const fetchImpl = vi.fn<typeof fetch>(async () => response(audio, first))
     expect(await executeGenerateRecapSongFile({ draft, voice: 'Warm voice', fileRuntime: { elevenLabsApiKey: 'synthetic', fetchImpl, save, resolveReferences: async () => [] } })).toMatchObject({ rpcSuccess: true })
-    // A late singer costs no second take.
-    expect(fetchImpl).toHaveBeenCalledTimes(1)
+    // A singer more than a second late is retaken twice; these takes are all equally late, so the first is kept.
+    expect(fetchImpl).toHaveBeenCalledTimes(delay > 1000 ? 3 : 1)
     const [bytes, , words, score] = save.mock.calls[0]!
     expect(Buffer.from(bytes).equals(audio)).toBe(true)
     const cut = inspectMp3Frames(audio).frames.find(f => f.timeMs === score!.songStartMs)!
@@ -90,12 +90,78 @@ test.each([1, 3])('cuts on and off the 24 ms grid for %s pages, opens the song o
   }
 })
 
-test('cancellation during the take propagates and saves nothing', async () => {
+// The full story has seven music pages, so the singing is planned to start at 35 s.
+const planned = 35_000
+// Each take's audio carries its own marker byte, so the saved file names the take that was kept.
+const takeAudio = (marker: number) => {
+  const frame = Buffer.alloc(576); frame.set([0xff, 0xfb, 0xb4, 0]); frame[100] = marker
+  return Buffer.concat(Array.from({ length: Math.round((planned + 20_000) / 24) }, () => frame))
+}
+type Take = number | 'denied' | 'failed' | 'malformed' | 'cancel'
+
+async function generate(takes: readonly Take[]) {
   const controller = new AbortController(), reason = new Error('Synthetic cancellation')
-  const fetchImpl = vi.fn<typeof fetch>(async () => { controller.abort(reason); throw reason })
+  let calls = 0
+  const fetchImpl = vi.fn<typeof fetch>(async () => {
+    const take = takes[calls++]
+    if (take === undefined) throw new Error('Unexpected take')
+    if (take === 'cancel') { controller.abort(reason); throw reason }
+    if (take === 'denied') return new Response('Recap media request limit reached.', { status: 429 })
+    if (take === 'failed') throw new Error('Synthetic transport failure')
+    if (take === 'malformed') return response(new Uint8Array([1, 2]), planned)
+    return response(takeAudio(calls), planned + take)
+  })
   const save = vi.fn<import('../src/assistant-codex/generated-media-file.ts').GeneratedMediaFileRuntime['save']>(async () => 'song.mp3')
-  await expect(executeGenerateRecapSongFile({ draft: { story, files: [] }, voice: 'Warm voice', abortSignal: controller.signal,
-    fileRuntime: { elevenLabsApiKey: 'synthetic', fetchImpl, save, resolveReferences: async () => [] } })).rejects.toBe(reason)
-  expect(save).not.toHaveBeenCalled()
-  expect(fetchImpl).toHaveBeenCalledTimes(1)
+  const result = executeGenerateRecapSongFile({ draft: { story, files: [] }, voice: 'Warm voice', abortSignal: controller.signal,
+    fileRuntime: { elevenLabsApiKey: 'synthetic', fetchImpl, save, resolveReferences: async () => [] } })
+  return { result, reason, fetchImpl, save,
+    /** Which take was saved, counting from 1, and how late its singer is. */
+    kept: () => ({ take: Buffer.from(save.mock.calls[0]![0])[100], lateMs: save.mock.calls[0]![2]![1]!.startMs - planned }) }
+}
+
+test.each<[string, Take[], number, number]>([
+  ['an on-time singer is kept with no retake', [0], 1, 0],
+  ['a singer exactly a second late is still on time', [1000], 1, 1000],
+  ['a late first take is retaken and the on-time retake kept', [5000, 300], 2, 300],
+  ['a retake that is only earlier is retaken again', [5000, 2500, 0], 3, 0],
+  ['when every take is late the earliest singer is kept', [5000, 2500, 4960], 2, 2500],
+  ['a later retake never replaces an earlier take', [2500, 5000, 5600], 1, 2500],
+  ['a refused retake leaves the valid first take and ends the retakes', [5000, 'denied'], 1, 5000],
+  ['a failed retake leaves the valid first take', [5000, 'failed'], 1, 5000],
+  ['a malformed retake leaves the valid first take', [5000, 'malformed'], 1, 5000],
+  ['a failed second retake leaves the earliest valid take', [5000, 2500, 'failed'], 2, 2500],
+])('%s', async (_, takes, keptTake, lateMs) => {
+  const run = await generate(takes)
+  expect(await run.result).toMatchObject({ rpcSuccess: true })
+  expect(run.fetchImpl).toHaveBeenCalledTimes(takes.length)
+  expect(run.save).toHaveBeenCalledTimes(1)
+  expect(run.kept()).toEqual({ take: keptTake, lateMs })
+  // The saved file, its timings and its song start are all from the kept take.
+  expect(run.save.mock.calls[0]![3]!.songStartMs).toBeLessThanOrEqual(Math.min(planned + lateMs - 200, planned))
+})
+
+test('a song call makes at most three music requests', async () => {
+  // The recap's seven media requests hold four scenes and these three takes.
+  const run = await generate([5600, 5600, 5600])
+  expect(await run.result).toMatchObject({ rpcSuccess: true })
+  expect(run.fetchImpl).toHaveBeenCalledTimes(3)
+  expect(run.kept()).toEqual({ take: 1, lateMs: 5600 })
+})
+
+test('a first take that fails is not retaken here: the writer decides', async () => {
+  const run = await generate(['failed'])
+  expect(await run.result).toMatchObject({ rpcSuccess: false })
+  expect(run.fetchImpl).toHaveBeenCalledTimes(1)
+  expect(run.save).not.toHaveBeenCalled()
+})
+
+test.each<[string, Take[]]>([
+  ['the first take', ['cancel']],
+  ['a retake', [5000, 'cancel']],
+  ['the last retake', [5000, 2500, 'cancel']],
+])('cancellation during %s propagates and saves nothing', async (_, takes) => {
+  const run = await generate(takes)
+  await expect(run.result).rejects.toBe(run.reason)
+  expect(run.save).not.toHaveBeenCalled()
+  expect(run.fetchImpl).toHaveBeenCalledTimes(takes.length)
 })

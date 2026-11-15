@@ -48,7 +48,7 @@ describe("native supervised invocation", () => {
     vi.mocked(recordHostedRuntimeOwnerCompletion).mockResolvedValue(false);
   });
 
-  it('counts six media forwards in memory and scopes the allowance to the current invocation', async () => {
+  it('counts seven media forwards in memory and scopes the allowance to the current invocation', async () => {
     const { create, sql } = harness();
     const receipts = new RunnerInvocationReceiptStore(sql);
     receipts.register({ attemptId: 'attempt-a', generation: '1' });
@@ -61,7 +61,8 @@ describe("native supervised invocation", () => {
     await container.setRecapMediaScope({ ...identity, eventId: 'game-recap:synthetic' });
     expect((await container.readProviderAuthority())?.recapMediaScoped).toBe(true);
     const results = await Promise.all(Array.from({ length: 9 }, () => container.consumeRecapMediaRequest(identity)));
-    expect(results.filter(Boolean)).toHaveLength(6);
+    // Four scenes and three takes of the song.
+    expect(results.filter(Boolean)).toHaveLength(7);
     await container.setRecapMediaScope({ ...identity, eventId: 'game-recap:synthetic' });
     expect(await container.consumeRecapMediaRequest(identity)).toBe(false);
     await container.setRecapMediaScope({ ...identity, eventId: null });

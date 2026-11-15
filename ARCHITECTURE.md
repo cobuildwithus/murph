@@ -6018,7 +6018,7 @@ The [native contract](agent-docs/references/recap-show-contract.md) owns decoder
 fixtures; the iOS presentation is unchanged.
 
 An authenticated material response sets a tiny native in-memory recap scope.
-The existing egress boundary counts up to six forwarded media requests in that
+The existing egress boundary counts up to seven forwarded media requests in that
 scope and skips ordinary subscription/allowance vetoes for that media. Neither
 model arguments nor request headers can grant scope. Container restart may reset
 the count. Ordinary Responses, websocket upgrades and Live add no recap calls.
