@@ -12,11 +12,11 @@ import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   lockHostedMemberRow,
 } from "@/src/lib/hosted-onboarding/shared";
-import { resolveHostedPublicOrigin } from "@/src/lib/hosted-web/public-url";
 import {
   buildSensitiveActionMessage,
   buildSettingsSensitiveActionBinding,
   consumeSensitiveActionChallengeTx,
+  requireSensitiveActionOrigin,
   verifySensitiveActionChallenge,
 } from "./server";
 import { prepareApprovalPasskeyWrite } from "./passkey-store";
@@ -24,6 +24,7 @@ import { parseSensitiveActionAuthorization } from "./shared";
 import {
   MAX_APPROVAL_PASSKEYS,
   approvalPasskeyRegistrationOptions,
+  isApprovalPasskeyServerFault,
   verifyApprovalPasskeyRegistration,
 } from "./webauthn";
 
@@ -38,10 +39,10 @@ interface EnrollmentInput {
 async function verifyEnrollmentAuthorization(input: EnrollmentInput) {
   requireApprovalPasskeyEnrollmentEnabled();
   const authorization = parseSensitiveActionAuthorization(input.authorization);
-  const origin = resolveHostedPublicOrigin();
-  if (!authorization || !origin) {
+  if (!authorization) {
     throw hostedOnboardingError({ code: "SENSITIVE_ACTION_AUTHORIZATION_REQUIRED", httpStatus: 403, message: "Secure approval is required to add a passkey." });
   }
+  const origin = requireSensitiveActionOrigin();
   const proof = await verifySensitiveActionChallenge({
     authorization,
     bindingHash: buildSettingsSensitiveActionBinding({
@@ -91,7 +92,8 @@ export async function registerApprovalPasskey(input: EnrollmentInput & {
     message: verified.message,
     origin: verified.origin,
     response: input.response,
-  }).catch(() => {
+  }).catch((error: unknown) => {
+    if (isApprovalPasskeyServerFault(error)) throw error;
     throw hostedOnboardingError({ code: "SENSITIVE_ACTION_REGISTRATION_INVALID", httpStatus: 403, message: "Your passkey could not be verified. Please try again." });
   });
   if (verified.state.credentials.some(({ id }) => id === credential.id)) {

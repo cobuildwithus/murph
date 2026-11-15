@@ -77,11 +77,19 @@ describe("auth request admission", () => {
   });
   it("uses only the platform-owned address on hosted production requests", async () => {
     vi.stubEnv("NODE_ENV", "production"); vi.stubEnv("VERCEL", "1");
-    await expect(admit(request(undefined, { "x-forwarded-for": "198.51.100.2" }))).rejects.toMatchObject({ code: "AUTH_REQUEST_INVALID" });
     await admit(request(undefined, { "x-vercel-forwarded-for": "198.51.100.2", "x-forwarded-for": "203.0.113.4" }));
     expect(mocks.consume.mock.calls[0]?.[0]).toBe("send:ip:198.51.100.2");
+  });
+  // Vercel's ingress sets the address on every request, so only our deployment
+  // can lack it. That is a server fault, never the caller's invalid request.
+  it("treats a production deployment without the ingress address as a server fault", async () => {
+    vi.stubEnv("NODE_ENV", "production"); vi.stubEnv("VERCEL", "1");
+    const missing = admit(request(undefined, { "x-forwarded-for": "198.51.100.2" }));
+    await expect(missing).rejects.toThrow("The Vercel ingress did not supply the client address.");
+    await expect(missing).rejects.not.toMatchObject({ code: "AUTH_REQUEST_INVALID" });
     vi.stubEnv("VERCEL", "");
-    await expect(admit(request())).rejects.toMatchObject({ code: "AUTH_REQUEST_INVALID" });
+    await expect(admit(request())).rejects.toThrow("Production sign-in must run behind the Vercel ingress.");
+    expect(mocks.consume).not.toHaveBeenCalled();
   });
 });
 

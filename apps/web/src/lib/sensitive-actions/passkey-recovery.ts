@@ -14,7 +14,7 @@ import { readApprovalPasskeyState, prepareApprovalPasskeyWrite } from "./passkey
 import { requireApprovalPasskeyEnrollmentEnabled } from "./passkey-rollout";
 import { isSensitiveActionToken } from "./shared";
 import { buildSensitiveActionMessage, buildSettingsSensitiveActionBinding, consumeSensitiveActionChallengeTx, createSensitiveActionChallenge, verifySensitiveActionChallenge, type VerifiedSensitiveActionChallenge } from "./server";
-import { approvalPasskeyRegistrationOptions, verifyApprovalPasskeyRegistration } from "./webauthn";
+import { approvalPasskeyRegistrationOptions, isApprovalPasskeyServerFault, verifyApprovalPasskeyRegistration } from "./webauthn";
 
 const RECOVERY_FIELD = "hosted-member-approval-recovery.v1";
 const RECOVERY_KIND = "approval.passkey.recover";
@@ -87,7 +87,8 @@ export async function recoverApprovalPasskey(input: Input & { key: unknown; toke
   if (!challenge || challenge.memberId !== memberId || challenge.kind !== RECOVERY_KIND
     || challenge.bindingHash !== proof.bindingHash || challenge.expiresAt <= new Date()) throw unavailable();
   const message = buildSensitiveActionMessage({ bindingHash: proof.bindingHash, kind: RECOVERY_KIND, expiresAt: challenge.expiresAt, origin: proof.origin, token: input.token });
-  const credential = await verifyApprovalPasskeyRegistration({ message, origin: proof.origin, response: input.response }).catch(() => { throw unavailable(); });
+  const credential = await verifyApprovalPasskeyRegistration({ message, origin: proof.origin, response: input.response })
+    .catch((error: unknown) => { throw isApprovalPasskeyServerFault(error) ? error : unavailable(); });
   if (proof.state.credentials.some(({ id }) => id === credential.id)) throw unavailable();
   const credentialWrite = await prepareApprovalPasskeyWrite({ credentials: [credential], prisma, state: proof.state });
   const accepted: VerifiedSensitiveActionChallenge = { ...challenge, kind: RECOVERY_KIND, credentialWrite, passkeys: [credential] };

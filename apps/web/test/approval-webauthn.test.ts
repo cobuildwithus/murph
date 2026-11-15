@@ -6,6 +6,7 @@ import {
   approvalPasskeyAuthenticationOptions,
   approvalWebAuthnChallenge,
   approvalPasskeyRegistrationOptions,
+  isApprovalPasskeyServerFault,
   parseApprovalPasskeys,
   verifyApprovalPasskeyAssertion,
   verifyApprovalPasskeyRegistration,
@@ -69,6 +70,25 @@ describe("WebAuthn action approval cryptographic boundary", () => {
       .resolves.toEqual([fixture.credential]);
     // The composed service must consume the bound challenge once even when
     // the authenticator intentionally reports a zero signature counter.
+  });
+
+  it("tells a verifier fault on our side apart from a rejected response", async () => {
+    const fixture = authenticator();
+    const failure = (pending: Promise<unknown>) => pending.then(() => null, (error: unknown) => error);
+    // An expected origin the verifier cannot use is our configuration.
+    for (const fault of await Promise.all([
+      failure(verifyApprovalPasskeyAssertion({ credentials: [fixture.credential], response: fixture.assertion(), message, origin: `${origin}/` })),
+      failure(verifyApprovalPasskeyRegistration({ response: fixture.registration(true), message, origin: `${origin}/` })),
+    ])) expect(isApprovalPasskeyServerFault(fault)).toBe(true);
+    for (const rejected of await Promise.all([
+      failure(verifyApprovalPasskeyAssertion({ credentials: [fixture.credential], response: fixture.assertion({ customOrigin: "https://untrusted.example" }), message, origin })),
+      failure(verifyApprovalPasskeyAssertion({ credentials: [{ ...fixture.credential, publicKey: authenticator().credential.publicKey }], response: fixture.assertion(), message, origin })),
+      failure(verifyApprovalPasskeyAssertion({ credentials: [], response: fixture.assertion(), message, origin })),
+      failure(verifyApprovalPasskeyRegistration({ response: fixture.registration(false), message, origin })),
+    ])) {
+      expect(rejected).toBeInstanceOf(Error);
+      expect(isApprovalPasskeyServerFault(rejected)).toBe(false);
+    }
   });
 
   it("bounds persisted credentials and rejects duplicate or malformed state", () => {

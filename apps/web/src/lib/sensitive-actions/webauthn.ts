@@ -7,11 +7,22 @@ import {
   generateRegistrationOptions,
   verifyAuthenticationResponse,
   verifyRegistrationResponse,
+  SimpleWebAuthnError,
   type AuthenticationResponseJSON,
   type RegistrationResponseJSON,
 } from "@simplewebauthn/server";
 
 export const MAX_APPROVAL_PASSKEYS = 8;
+
+/**
+ * The verifier raises these for our side: an expected origin or RP ID it cannot
+ * use (configuration) and a key algorithm this runtime lacks. Everything else
+ * it throws is about the response the caller sent.
+ */
+export function isApprovalPasskeyServerFault(error: unknown): boolean {
+  return error instanceof SimpleWebAuthnError
+    && (error.code === "BAD_ARGUMENT" || error.code === "RUNTIME_NO_PQC_SUPPORT");
+}
 
 export interface ApprovalPasskey {
   id: string;

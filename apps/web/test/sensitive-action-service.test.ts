@@ -277,6 +277,35 @@ describe("sensitive action challenges", () => {
     expect(prisma.__rows.size).toBe(1);
   });
 
+  it("does not answer an approval origin configuration fault as a bad signature", async () => {
+    mocks.resolveHostedPublicOrigin.mockReturnValue("https://www.withmurph.ai/");
+    const prisma = createPrismaFake();
+    const bindingHash = buildSettingsSensitiveActionBinding({
+      kind: "vault.export",
+      memberId: "member_123",
+      sessionId: "session_123",
+    });
+    const challenge = await createSensitiveActionChallenge({
+      bindingHash,
+      kind: "vault.export",
+      memberId: "member_123",
+      now,
+      prisma,
+    });
+    const assertion = account.assertion({ customMessage: challenge.message });
+
+    await expect(verifyAndConsumeSensitiveActionChallenge({
+      authorization: { method: "passkey", assertion, token: challenge.token },
+      bindingHash,
+      kind: "vault.export",
+      memberId: "member_123",
+      now,
+      prisma,
+    })).rejects.toMatchObject({ name: "SimpleWebAuthnError", code: "BAD_ARGUMENT" });
+
+    expect(prisma.__rows.size).toBe(1);
+  });
+
   it("fails closed when no approval passkey is enrolled", async () => {
     const prisma = createPrismaFake();
     mocks.readApprovalPasskeyState.mockResolvedValueOnce({ credentials: [], encrypted: null, memberId: "member_123" });

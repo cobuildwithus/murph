@@ -301,13 +301,11 @@ export function openHostedLinqGroupEmailRecoveryToken(input: {
       + HOSTED_LINQ_GROUP_EMAIL_RECOVERY_TAG_BYTES,
   );
 
+  // A missing or malformed key is our configuration, not the caller's token.
+  const key = deriveHostedLinqGroupEmailRecoveryEncryptionKey();
   let payload: unknown;
   try {
-    const decipher = createDecipheriv(
-      "aes-256-gcm",
-      deriveHostedLinqGroupEmailRecoveryEncryptionKey(),
-      iv,
-    );
+    const decipher = createDecipheriv("aes-256-gcm", key, iv);
     decipher.setAAD(
       Buffer.from(HOSTED_LINQ_GROUP_EMAIL_RECOVERY_TOKEN_DOMAIN),
     );

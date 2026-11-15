@@ -16,7 +16,7 @@ import { prepareApprovalPasskeyWrite } from "./passkey-store";
 import { requireApprovalPasskeyEnrollmentEnabled } from "./passkey-rollout";
 import { isSensitiveActionToken } from "./shared";
 import { buildSensitiveActionMessage, consumeSensitiveActionChallengeTx, createSensitiveActionChallengeMaterial } from "./server";
-import { approvalPasskeyRegistrationOptions, verifyApprovalPasskeyRegistration } from "./webauthn";
+import { approvalPasskeyRegistrationOptions, isApprovalPasskeyServerFault, verifyApprovalPasskeyRegistration } from "./webauthn";
 
 export const INITIAL_APPROVAL_ENROLLMENT_KIND = "approval.passkey.initial-enrollment";
 type Input = { prisma: PrismaClient; request: Request; session: HostedAppSession };
@@ -103,8 +103,8 @@ export async function registerInitialApprovalEnrollment(input: Input & { token: 
     const message = buildSensitiveActionMessage({ bindingHash: prepared.bindingHash, kind: INITIAL_APPROVAL_ENROLLMENT_KIND,
       expiresAt: challenge.expiresAt, origin: prepared.origin, token: input.token });
     const credential = await verifyApprovalPasskeyRegistration({ message, origin: prepared.origin, response: input.response })
-      .catch(() => { throw hostedOnboardingError({ code: "SENSITIVE_ACTION_REGISTRATION_INVALID", httpStatus: 403,
-        message: "Your passkey could not be verified. Please try again." }); });
+      .catch((error: unknown) => { throw isApprovalPasskeyServerFault(error) ? error : hostedOnboardingError({
+        code: "SENSITIVE_ACTION_REGISTRATION_INVALID", httpStatus: 403, message: "Your passkey could not be verified. Please try again." }); });
     const memberId = input.session.member.id;
     const credentialWrite = await prepareApprovalPasskeyWrite({ credentials: [credential], prisma: input.prisma,
       state: { memberId, credentials: [], encrypted: null } });

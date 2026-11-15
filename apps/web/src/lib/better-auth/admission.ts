@@ -56,14 +56,15 @@ function requireOtpContact(body: { kind: "email" | "phone"; value: string }): Ho
 }
 
 export function hostedAuthRequestIp(request: Request): string {
-  // This header is owned by Vercel's ingress. Arbitrary forwarded headers are
-  // not a trusted identity on a standalone development server.
+  // This header is owned by Vercel's ingress, which sets it on every request, so
+  // only our deployment can lack it. Arbitrary forwarded headers are not a
+  // trusted identity on a standalone development server.
   if (process.env.VERCEL !== "1") {
-    if (process.env.NODE_ENV === "production") throw invalidRequest();
+    if (process.env.NODE_ENV === "production") throw new Error("Production sign-in must run behind the Vercel ingress.");
     return "127.0.0.1";
   }
   const value = request.headers.get("x-vercel-forwarded-for")?.trim() ?? "";
-  if (!isIP(value)) throw invalidRequest();
+  if (!isIP(value)) throw new Error("The Vercel ingress did not supply the client address.");
   return value.toLowerCase();
 }
 
