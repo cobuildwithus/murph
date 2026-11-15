@@ -1,3 +1,7 @@
+// Full authenticated observation/block behavior is covered by the risk PostgreSQL suite.
+vi.mock("@/src/lib/hosted-onboarding/linq-group-risk-webhook", () => ({ observeHostedLinqGroupRiskWebhook: vi.fn(), recordHostedLinqGroupRosterEvidenceAfterCommit: vi.fn() }));
+vi.mock("@/src/lib/hosted-onboarding/linq-sender-block", () => ({ readHostedLinqSenderBlockWebhookResponse: vi.fn().mockResolvedValue(null) }));
+vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({ hostedLinqGroupLeave: { updateMany: async () => ({ count: 1 }) } }) }));
 import { createHmac } from "node:crypto";
 import { APIConnectionTimeoutError, APIError } from "@linqapp/sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

@@ -5,7 +5,7 @@ import { createHostedExternalThreadIdentityLookupKey, createHostedExternalThread
 
 const mocks = vi.hoisted(() => ({ prisma: { $transaction: vi.fn(), $queryRaw: vi.fn(), $executeRaw: vi.fn(),
   hostedThreadContainer: { findUnique: vi.fn() }, hostedThreadRoute: { findFirst: vi.fn(), findMany: vi.fn(), deleteMany: vi.fn() },
-  hostedLinqGroupLeave: { findFirst: vi.fn(), createMany: vi.fn() }, game: { findFirst: vi.fn() }, hostedLinqGroupLineMove: { findFirst: vi.fn() } },
+  hostedLinqGroupSighting: { updateMany: vi.fn() }, hostedLinqGroupLeave: { findFirst: vi.fn(), createMany: vi.fn(), updateMany: vi.fn() }, game: { findFirst: vi.fn() }, hostedLinqGroupLineMove: { findFirst: vi.fn() } },
   source: vi.fn(), callback: vi.fn(), access: vi.fn(), provider: vi.fn() }));
 vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => mocks.prisma }));
 vi.mock("@/src/lib/hosted-mailbox/store", () => ({ readHostedMailboxConversationWakeByAssistantInputId: mocks.source }));
@@ -36,6 +36,8 @@ describe("accepted-input group departure", () => {
     mocks.prisma.hostedThreadRoute.deleteMany.mockResolvedValue({ count: 1 });
     mocks.prisma.hostedLinqGroupLeave.findFirst.mockImplementation(async () => left ? { threadIdentityLookupKey: expected.threadIdentityLookupKey } : null);
     mocks.prisma.hostedLinqGroupLeave.createMany.mockImplementation(async () => { left = true; return { count: 1 }; });
+    mocks.prisma.hostedLinqGroupLeave.updateMany.mockResolvedValue({ count: 1 });
+    mocks.prisma.hostedLinqGroupSighting.updateMany.mockResolvedValue({ count: 0 });
     mocks.prisma.game.findFirst.mockResolvedValue(null);
     mocks.prisma.hostedLinqGroupLineMove.findFirst.mockResolvedValue(null);
     mocks.provider.mockImplementation(async () => { expect(transactionOpen).toBe(false); expect(left).toBe(true); });

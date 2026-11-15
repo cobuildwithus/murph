@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   cleanupExpiredRuns: vi.fn(),
+  sweepHostedLinqGroupLeaves: vi.fn(),
   redriveHostedHealthDataConsentStops: vi.fn(),
   redriveHostedHealthDataConsentCleanups: vi.fn(),
   runHostedRuntimeResourceCleanup: vi.fn(),
@@ -9,6 +10,8 @@ const mocks = vi.hoisted(() => ({
   deleteExpiredHostedCallbackRequestNonces: vi.fn(),
   drainHostedAccountDeletionCleanupBatch: vi.fn(),
 }));
+
+vi.mock("@/src/lib/hosted-routing/linq-group-leave", () => ({ sweepHostedLinqGroupLeaves: mocks.sweepHostedLinqGroupLeaves }));
 
 vi.mock("@/src/lib/hosted-privacy/health-data-consent-withdrawal", () => ({
   redriveHostedHealthDataConsentStops: mocks.redriveHostedHealthDataConsentStops,
@@ -52,6 +55,7 @@ describe("hosted retention owner split", () => {
   const request = new Request("https://app.example.test/api/internal/hosted-execution/retention/external/cron");
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.sweepHostedLinqGroupLeaves.mockResolvedValue(2);
     mocks.redriveHostedHealthDataConsentStops.mockResolvedValue({ configured: true, reconciled: 2, failed: 1 });
     mocks.redriveHostedHealthDataConsentCleanups.mockResolvedValue({ selected: 3 });
     mocks.runHostedRuntimeResourceCleanup.mockResolvedValue({ configured: true, deleted: 2, failed: 0 });
@@ -127,6 +131,7 @@ describe("hosted retention owner split", () => {
       prisma: prisma as never,
       request,
     })).resolves.toEqual({
+      linqGroupLeaveAttempts: 2,
       healthDataConsentStopRedrive: { configured: true, reconciled: 2, failed: 1 },
       healthDataConsentCleanupRedrive: { selected: 3 },
       accountDeletionCleanup: {

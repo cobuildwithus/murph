@@ -1,3 +1,4 @@
+import { expireHostedLinqGroupRiskBatch } from "../hosted-routing/linq-group-risk-ledger";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type { Prisma, PrismaClient } from "@prisma/client";
 
@@ -60,6 +61,7 @@ type HostedRuntimeRecheckSignal = (input: {
 
 export interface HostedControlPlaneRetentionCleanupResult {
   compactedLinqProviderEventDiagnostics: number;
+  expiredLinqGroupRisk: { handles: number; sightings: number };
   expiredAssistantRuntimeIssuesDeleted: number;
   expiredAuthRecordsDeleted: number;
   expiredClinicalRecordConnectIntentsDeleted: number;
@@ -139,6 +141,7 @@ export async function runHostedControlPlaneRetentionCleanup(input: {
     now,
     prisma,
   });
+  const expiredLinqGroupRisk = await expireHostedLinqGroupRiskBatch({ now, prisma });
   const compactedLinqProviderEventDiagnostics = await compactOldLinqProviderEventDiagnostics({
     now,
     prisma,
@@ -146,6 +149,7 @@ export async function runHostedControlPlaneRetentionCleanup(input: {
   const expiredRuntimePutDrainsDeleted = await deleteExpiredRuntimePutDrains({ now, prisma });
 
   return {
+    expiredLinqGroupRisk,
     compactedLinqProviderEventDiagnostics,
     expiredAssistantRuntimeIssuesDeleted,
     expiredAuthRecordsDeleted,

@@ -34,7 +34,7 @@ export async function leaveHostedLinqGroup(input: { containerRef: string; prisma
   const prepared = prepareHostedLinqGroupLeave(route.threadId, "operator_cleanup");
   const result = await prisma.$transaction(tx => leaveHostedLinqGroupTx({ expected, prepared, prisma: tx }));
   return { local: result.status, ...(result.status === "unavailable" ? { reason: result.reason } : {}),
-    provider: result.status === "left" ? await requestHostedLinqGroupLeaveAfterCommit(result.postCommitLinqGroupLeave) : "not_attempted" };
+    provider: result.status === "left" ? await requestHostedLinqGroupLeaveAfterCommit(result.postCommitLinqGroupLeave, prisma) : "not_attempted" };
 }
 
 /**

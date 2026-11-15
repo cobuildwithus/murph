@@ -1,3 +1,6 @@
+// This lane exercises unblocked planning; real risk ingress has separate PostgreSQL proof.
+vi.mock("@/src/lib/hosted-onboarding/linq-sender-block", () => ({ readHostedLinqSenderBlockWebhookResponse: vi.fn(async () => null) }));
+vi.mock("@/src/lib/hosted-onboarding/linq-group-risk-webhook", () => ({ observeHostedLinqGroupRiskWebhook: vi.fn(async () => undefined), recordHostedLinqGroupRosterEvidenceAfterCommit: vi.fn(async () => undefined) }));
 import { linqRoster } from "./support/linq-roster";
 import { HostedBillingStatus, Prisma } from "@prisma/client";
 import {
@@ -656,6 +659,7 @@ function createAcceptedEditSourceInputId(
 function groupLeaveFixture() {
   const keys = new Set<string>();
   return {
+    updateMany: vi.fn().mockResolvedValue({ count: 1 }),
     findFirst: vi.fn(async ({ where }: { where: { threadIdentityLookupKey: { in: string[] } } }) => {
       const key = where.threadIdentityLookupKey.in.find(key => keys.has(key));
       return key ? { threadIdentityLookupKey: key } : null;
@@ -1146,6 +1150,8 @@ function createPrisma(input: {
     }
   });
   const prisma = {
+    hostedLinqGroupSighting: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
+    hostedLinqHandleBlock: { findFirst: vi.fn().mockResolvedValue(null) },
     hostedLinqGroupLeave: groupLeaveFixture(),
     $executeRaw: vi.fn().mockResolvedValue(0),
     $queryRaw: vi.fn().mockImplementation(async (query: Prisma.Sql | TemplateStringsArray) => ("sql" in query ? query.sql : query.join("")).includes("complete_roster_observed_at") ? [{ completeRosterObservedAt: null }] : []),
@@ -1571,6 +1577,8 @@ function createStatefulThreadRoutePrisma() {
     upsert: vi.fn().mockResolvedValue({}),
   };
   const prisma = {
+    hostedLinqGroupSighting: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
+    hostedLinqHandleBlock: { findFirst: vi.fn().mockResolvedValue(null) },
     hostedLinqGroupLeave: groupLeaveFixture(),
     $executeRaw: executeRaw,
     $queryRaw: vi.fn().mockImplementation(async (query: Prisma.Sql | TemplateStringsArray) => ("sql" in query ? query.sql : query.join("")).includes("complete_roster_observed_at") ? [{ completeRosterObservedAt: null }] : []),
@@ -4708,7 +4716,7 @@ describe("Linq explicit external-thread routing", () => {
 
     const plan = await planHostedOnboardingLinqWebhook({
       event: buildLinqMessageReceivedEvent({}),
-      pendingGroupRosterOversized: true,
+      pendingGroupRosterRejection: "oversized",
       prisma: prisma as never,
     });
 
@@ -8610,12 +8618,15 @@ describe("Linq group chat auto-provision", () => {
   });
 
   it.each([
-    { count: 32, outcome: "not_needed", failure: null },
-    { count: 33, outcome: "accepted", failure: null },
-    { count: 33, outcome: "unconfirmed", failure: hostedOnboardingError({ code: "LINQ_GROUP_LEAVE_UNCONFIRMED", httpStatus: 409, retryable: false, message: "synthetic conflict" }) },
-    { count: 33, outcome: "timeout", failure: hostedOnboardingError({ code: "LINQ_GROUP_LEAVE_UNCONFIRMED", httpStatus: 504, retryable: false, message: "synthetic timeout" }) },
-  ])("enforces the setup cap at $count with provider outcome $outcome", async ({ count, failure }) => {
+    { count: 32, outcome: "not_needed", failure: null, blocked: false },
+    { count: 33, outcome: "accepted", failure: null, blocked: false },
+    { count: 33, outcome: "unconfirmed", failure: hostedOnboardingError({ code: "LINQ_GROUP_LEAVE_UNCONFIRMED", httpStatus: 409, retryable: false, message: "synthetic conflict" }), blocked: false },
+    { count: 33, outcome: "timeout", failure: hostedOnboardingError({ code: "LINQ_GROUP_LEAVE_UNCONFIRMED", httpStatus: 504, retryable: false, message: "synthetic timeout" }), blocked: false },
+    { count: 3, outcome: "blocked participant", failure: null, blocked: true },
+  ])("enforces the setup cap at $count with provider outcome $outcome", async ({ count, failure, blocked }) => {
     const prisma = createStatefulThreadRoutePrisma();
+    // A small roster with a blocked handle is rejected exactly like an oversized one.
+    if (blocked) prisma.hostedLinqHandleBlock.findFirst.mockResolvedValue({ contactLookupKey: "synthetic-blocked" });
     let transactionOpen = false;
     prisma.$transaction.mockImplementation(async (callback: (tx: unknown) => Promise<unknown>) => {
       transactionOpen = true;
@@ -8690,8 +8701,11 @@ describe("Linq group chat auto-provision", () => {
     expect(response).toMatchObject({
       ignored: true,
       ok: true,
-      reason: "group-roster-oversized",
+      reason: blocked ? "group-roster-blocked" : "group-roster-oversized",
     });
+    expect(prisma.hostedLinqGroupLeave.createMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ reason: blocked ? "blocked_participant" : "oversized" }),
+    }));
     expect(
       preparedThreadMocks.ensureHostedPreparedLinqThreadContainerRouteTx,
     ).not.toHaveBeenCalled();
