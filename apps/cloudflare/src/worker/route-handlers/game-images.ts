@@ -1,4 +1,4 @@
-import { RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
+import { parseInput, RequestInputError, RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import { CLOUDFLARE_HOSTED_CONTROL_GAME_MEDIA_ID_HEADER, CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS,
   matchCloudflareHostedControlUserRoutePath } from "@murphai/cloudflare-hosted-control/routes";
 import { createGameImageStore, GameImageInvalidError, isGameImageVariant } from "../../game-image-store.ts";
@@ -27,8 +27,11 @@ export const gameImageRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = 
 
 async function handle(context: WorkerRouteContext, userId: string, operation: typeof NAMES[number]): Promise<Response> {
   let mediaId: string;
-  try { mediaId = requireHostedGameMediaId(context.request.headers.get(CLOUDFLARE_HOSTED_CONTROL_GAME_MEDIA_ID_HEADER) ?? ""); }
-  catch { return jsonError("Game image id is invalid.", 400); }
+  try { mediaId = parseInput(context.request.headers, () => requireHostedGameMediaId(context.request.headers.get(CLOUDFLARE_HOSTED_CONTROL_GAME_MEDIA_ID_HEADER) ?? "")); }
+  catch (error) {
+    if (error instanceof RequestInputError) return jsonError("Game image id is invalid.", 400);
+    throw error;
+  }
   if (!context.env.GAME_IMAGES) return jsonError("Game image storage is unavailable.", 503);
   const store = createGameImageStore({ bucket: context.env.BUNDLES, images: context.env.GAME_IMAGES, userId,
     deploymentOrigin: context.env.CF_PUBLIC_BASE_URL ?? "", executionCtx: context.executionCtx });

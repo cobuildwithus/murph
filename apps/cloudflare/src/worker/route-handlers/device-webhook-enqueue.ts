@@ -1,3 +1,4 @@
+import { parseInput, RequestInputError } from "@murphai/hosted-execution/request-input";
 import {
   CLOUDFLARE_HOSTED_CONTROL_DEVICE_WEBHOOK_ENQUEUE_PATH,
   createDeviceWebhookTransportPrivateKeyringFromJson,
@@ -14,7 +15,7 @@ import {
 } from "../../worker-routes/shared.ts";
 import type { DeclarativeRoute } from "../routes.ts";
 import { matchExactPath } from "../routes.ts";
-import { parseJsonValue } from "../route-utils/json-body.ts";
+import { parseJsonInput } from "../route-utils/json-body.ts";
 
 export const deviceWebhookEnqueueRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   {
@@ -35,12 +36,14 @@ async function handleDeviceWebhookEnqueueRoute(
 ): Promise<Response> {
   let envelope;
   try {
-    envelope = parseDeviceWebhookQueueEnvelope(
-      parseJsonValue(await readCachedRequestText(context, {
+    envelope = parseInput(
+      parseJsonInput(await readCachedRequestText(context, {
         limitBytes: DEVICE_WEBHOOK_QUEUE_MAX_ENVELOPE_BYTES,
       })),
+      parseDeviceWebhookQueueEnvelope,
     );
-  } catch {
+  } catch (error) {
+    if (!(error instanceof RequestInputError || error instanceof RangeError)) throw error;
     return json({ code: "invalid_request", error: "Malformed device webhook envelope." }, 400);
   }
   if (!context.env.DEVICE_WEBHOOK_QUEUE) {

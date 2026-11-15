@@ -116,22 +116,26 @@ Each stage is safe to stop at.
    file and dependency wiring, and is checked mechanically.
 3. **One signal for an oversized body.** `RequestBodyTooLargeError` at the
    byte-limit branch of each reader; consumers test that class (#4977).
-4. **Narrow the mappers.** Each mapper answers 400 for a
-   `ContractValidationError` or an explicit request rejection, and a server
-   error for a bare `TypeError`, `RangeError` or `URIError`. JSON and path
-   decoding failures are raised explicitly at the exact call. This is where
-   bugs, failed fetches, configuration and crypto failures stop being the
-   caller's fault. Gate: with native inference off, the Web, Cloudflare and
-   package suites name every path that still depends on it; each is either a
-   missed validator (convert it) or a server fault that a test pinned as 400
-   (change the test on purpose and say so). Runner callbacks and member
-   routes first; provider webhooks one at a time with their own recovery
-   proof.
-5. **Mark the boundaries.** Routes read caller input through `parseInput`,
-   deep input validation in services becomes a domain rejection or moves to
-   the parse step, and the mappers stop answering 400 for a bare
-   `ContractValidationError`. This is where a corrupt stored record or a bad
-   upstream response stops being the caller's fault.
+4. **Mark the boundaries.** Routes and Worker handlers read caller input
+   through `parseInput` or throw `RequestInputError` for a caller value they
+   reject themselves; the container decoder does the same. Most routes
+   already reject with an explicit domain error and need nothing. Still
+   behavior-neutral: a `RequestInputError` and a native `TypeError` are both
+   400 today.
+5. **Flip the mappers to explicit only.** Each mapper answers 4xx for a
+   `RequestInputError`, a `RequestBodyTooLargeError` or a recognized domain
+   error, and a server error for everything else, including a bare
+   `ContractValidationError`. There is no intermediate stage in which a bare
+   validation error is a 400: four independent audits of stage 2 found that
+   many validators are shared between request input, stored data and service
+   responses, so the label on a throw cannot say whose fault a failure is.
+   JSON and path decoding failures are raised explicitly at the exact call;
+   schema `.parse` calls on caller input go through `assertContract`. Gate:
+   with the flip applied, the Web, Cloudflare and package suites name every
+   path that still depends on inference; each is a boundary to mark, a
+   service entry point that validates caller input (mark it there), or a
+   server fault that a test pinned as 400 (change the test on purpose and say
+   so). Provider webhooks flip one at a time with their own recovery proof.
 6. **Local type checks, by meaning.** The control client's response parser,
    Worker local catches, container request decoding, and the remaining
    `instanceof TypeError` / `RangeError` decisions.
@@ -143,8 +147,10 @@ Each stage is safe to stop at.
 ## Progress
 
 - Stage 1: merged (#4972).
-- Stage 2: this PR. 2,243 sites converted, about 1,000 left as server faults.
-- Stage 3: #4977.
+- Stage 2: merged (#4978). 2,243 sites converted, about 1,000 left as server
+  faults; audit corrections follow in their own PR.
+- Stage 4: this PR.
+- Stage 3: merged (#4977).
 - Merged alongside, from stage 6: the mailbox handoff retry rule (#4974) and
   the Worker media catches (#4976).
 
@@ -163,20 +169,30 @@ Also not converted: the six query validators in
 that file as a change to changelog content, so they move with the public
 changelog route's boundary work.
 
-## Scope of this PR (stage 2)
+## Scope of this PR (stage 4)
 
-- In scope: the constructor rename at validation sites in `apps/web/src`,
-  `apps/cloudflare/src` and `packages/*/src`, the import each file needs, and
-  the `@murphai/contracts` dependency for `runtime-state`, `parsers`,
-  `messaging-ingress` and `cloudflare-hosted-control`.
-- Out of scope: route files under `apps/web/app`, any `RangeError` or
-  `URIError` throw, every catch and `instanceof` check, and any status, body,
-  header, log or retry change.
+- In scope: route files under `apps/web/app`, Worker route handlers and
+  route utilities, and the container's request decoding.
+- Out of scope: the three mappers, shared readers and service code under
+  `apps/web/src`, provider webhook routes, and any status, body, header or
+  retry change.
 
-## Success criteria (stage 2)
+Left for stage 5, found while marking:
 
-- Every removed line of the diff differs from an added line only by
-  `new TypeError(` becoming `new ContractValidationError(`.
-- Every existing test passes with its expectations untouched, apart from one
-  parity test that compared error constructors against a copy of the old
-  parser and now compares error names.
+- Routes that hand the raw payload to a service that validates it inside;
+  the entry points are listed in the PR.
+- Five runner-callback routes (phone calls, physical notes) validate with a
+  schema `.parse` whose error no mapper recognizes, so malformed input is a
+  500 today.
+- `runtime-control.ts` in the Worker throws the same error for a mismatched
+  owner whether the admission came from the request or from stored state.
+- `device-webhook-enqueue.ts` answers 400 for keyring and persistence
+  failures as well as for bad input, and a test pins that.
+- Catch-all parse adapters that already produce a domain rejection but also
+  catch parser bugs.
+
+## Success criteria (stage 4)
+
+- Every existing response expectation passes untouched. The one changed
+  expectation outside logs is a test-only Worker route that now lets an
+  unrelated `RangeError` reach the outer mapper.

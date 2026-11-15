@@ -1,3 +1,4 @@
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import {
   assessBrowserVaultReplicaFreshness,
 } from "@murphai/hosted-execution";
@@ -59,9 +60,12 @@ export const POST = withJsonError(async (request: Request) => {
     tooLargeErrorCode: "BROWSER_VAULT_SESSION_BODY_TOO_LARGE",
     tooLargeErrorMessage: "Browser vault session request body is too large.",
   });
-  const browserPublicKeyJwk = parseHostedUserRecipientPublicKeyJwk(
+  const browserPublicKeyJwk = parseInput(
     body.browserPublicKeyJwk,
-    "Settings vault export browserPublicKeyJwk",
+    (value) => parseHostedUserRecipientPublicKeyJwk(
+      value,
+      "Settings vault export browserPublicKeyJwk",
+    ),
   );
   const acceptsBucketedReplica = readSettingsVaultExportBucketCapability({
     requestedMetricBuckets: body.requestedMetricBuckets,

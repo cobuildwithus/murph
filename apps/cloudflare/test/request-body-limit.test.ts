@@ -88,7 +88,7 @@ describe("Worker body-limit response parity", () => {
         : await Promise.resolve(handle(c)).catch(error => mapWorkerRouteError(c.request, error));
       expect(response?.status).toBe(400);
       expect(Object.fromEntries(response!.headers)).toEqual({ "content-type": "application/json; charset=utf-8" });
-      await expect(response!.json()).resolves.toEqual({ error: name === "Temporal fault" ? "Request body must be a JSON object." : "Invalid request." });
+      await expect(response!.json()).resolves.toEqual({ error: "Invalid request." });
     });
     it.each(modes)("keeps the response for %s overflow", async mode => {
       const response = await handle(context(limit, mode));

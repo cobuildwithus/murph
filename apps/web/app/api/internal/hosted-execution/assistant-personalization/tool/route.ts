@@ -1,3 +1,4 @@
+import { parseInput, RequestInputError } from "@murphai/hosted-execution/request-input";
 import {
   HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,
   parseHostedRuntimeAssistantPersonalizationToolAuthority,
@@ -24,11 +25,11 @@ export const POST = withJsonError(async (request: Request) => {
   });
   const authority = readAssistantUpdateAuthority(request);
   if (isAssistantPreferenceCausalSeqRequest(payload)) {
-    throw new TypeError(
+    throw new RequestInputError(
       "Direct-vault assistant preference sequence resolution is retired.",
     );
   }
-  const body = parseHostedRuntimeAssistantPersonalizationToolRequest(payload);
+  const body = parseInput(payload, parseHostedRuntimeAssistantPersonalizationToolRequest);
   if (
     (
       body.action === "update"
@@ -36,7 +37,7 @@ export const POST = withJsonError(async (request: Request) => {
     )
     && authority === null
   ) {
-    throw new TypeError(
+    throw new RequestInputError(
       "Assistant personalization update requires accepted-input or scheduled-occurrence authority.",
     );
   }
@@ -78,10 +79,10 @@ function readAssistantUpdateAuthority(request: Request):
     && occurrenceAt === null
   ) {
     return {
-      authority: parseHostedRuntimeAssistantPersonalizationToolAuthority({
+      authority: parseInput({
         assistantInputId,
         ...(toolCallId ? { toolCallId } : {}),
-      }),
+      }, parseHostedRuntimeAssistantPersonalizationToolAuthority),
     };
   }
   if (
@@ -90,14 +91,14 @@ function readAssistantUpdateAuthority(request: Request):
     && occurrenceAt !== null
   ) {
     return {
-      authority: parseHostedRuntimeAssistantPersonalizationToolAuthority({
+      authority: parseInput({
         automationId,
         occurrenceAt,
         ...(toolCallId ? { toolCallId } : {}),
-      }),
+      }, parseHostedRuntimeAssistantPersonalizationToolAuthority),
     };
   }
-  throw new TypeError(
+  throw new RequestInputError(
     "Hosted assistant personalization action authority is invalid.",
   );
 }

@@ -1,5 +1,5 @@
 import { ContractValidationError } from "@murphai/contracts/validation-error";
-import { isRequestInputError, RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
+import { isRequestInputError, parseInput, RequestInputError, RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import {
   createServer,
   type IncomingMessage,
@@ -654,8 +654,9 @@ export async function startHostedContainerEntrypoint(input: {
       if (isWorkspaceInvocationAbortRequest) {
         let abortRequest: HostedContainerWorkspaceInvocationAbortRequest;
         try {
-          abortRequest = parseHostedContainerWorkspaceInvocationAbortRequest(
+          abortRequest = parseInput(
             JSON.parse(await readHostedContainerInvocationRequestBody(request)),
+            parseHostedContainerWorkspaceInvocationAbortRequest,
           );
         } catch (error) {
           emitHostedExecutionStructuredLog({
@@ -805,8 +806,9 @@ export async function startHostedContainerEntrypoint(input: {
         claimedRunnerSlot = true;
         let smokeRequest: HostedContainerDirectR2PresignedPutSmokeRequest;
         try {
-          smokeRequest = parseHostedContainerDirectR2PresignedPutSmokeRequest(
+          smokeRequest = parseInput(
             JSON.parse(await readHostedContainerInvocationRequestBody(request)),
+            parseHostedContainerDirectR2PresignedPutSmokeRequest,
           );
         } catch (error) {
           emitHostedExecutionStructuredLog({
@@ -850,8 +852,8 @@ export async function startHostedContainerEntrypoint(input: {
 
       try {
         const requestBody: unknown = JSON.parse(await readHostedContainerInvocationRequestBody(request));
-        const requestEnvelope = parseHostedExecutionContainerInvocationEnvelope(requestBody);
-        job = runtime.parseRunnerJobInput(requestEnvelope.job);
+        const requestEnvelope = parseInput(requestBody, parseHostedExecutionContainerInvocationEnvelope);
+        job = parseInput(requestEnvelope.job, runtime.parseRunnerJobInput);
         requestDiagnostics.workspaceAttemptId = job.request.attemptId;
       } catch (error) {
         emitHostedExecutionStructuredLog({
@@ -1433,7 +1435,13 @@ function parseHostedContainerDirectR2PresignedPutSmokeRequest(
     throw new ContractValidationError("Direct R2 presigned PUT smoke request requires presignedPutUrl.");
   }
 
-  const parsedUrl = new URL(presignedPutUrl);
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(presignedPutUrl);
+  } catch (error) {
+    if (error instanceof TypeError) throw new RequestInputError(error.message, { cause: error });
+    throw error;
+  }
   if (parsedUrl.protocol !== "https:" && parsedUrl.protocol !== "http:") {
     throw new ContractValidationError("Direct R2 presigned PUT smoke URL must use HTTP or HTTPS.");
   }
@@ -1512,7 +1520,7 @@ async function readHostedContainerRuntimeWakeRequest(
     return null;
   }
 
-  return parseHostedContainerRuntimeWakeRequest(JSON.parse(body));
+  return parseInput(JSON.parse(body), parseHostedContainerRuntimeWakeRequest);
 }
 
 function parseHostedContainerRuntimeWakeRequest(

@@ -1,3 +1,4 @@
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   emitHostedExecutionStructuredLog,
@@ -86,7 +87,7 @@ export async function handleBrowserVaultSessionRoute(
   const userId = decodeRouteParam(encodedUserId);
   let body;
   try {
-    body = parseBrowserVaultSessionRequest(parseJsonValue(await readCachedRequestText(context)));
+    body = parseInput(parseJsonValue(await readCachedRequestText(context)), parseBrowserVaultSessionRequest);
   } catch (error) {
     emitHostedExecutionStructuredLog({
       component: "worker",

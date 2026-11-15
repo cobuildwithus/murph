@@ -1,3 +1,4 @@
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import {
   hostedPhoneCallStatusRequestSchema,
 } from "@murphai/hosted-execution/phone-calls";
@@ -15,7 +16,7 @@ export const POST = withJsonError(async (request: Request) => {
     await requireHostedCloudflareCallbackJsonRequest(request, {
       maxBodyBytes: HOSTED_PHONE_CALL_STATUS_MAX_BODY_BYTES,
     });
-  const parsed = hostedPhoneCallStatusRequestSchema.parse(payload);
+  const parsed = parseInput(payload, (value) => hostedPhoneCallStatusRequestSchema.parse(value));
   const response = await readHostedPhoneCallStatus({
     memberId,
     ...(parsed.phoneCallId ? { phoneCallId: parsed.phoneCallId } : {}),

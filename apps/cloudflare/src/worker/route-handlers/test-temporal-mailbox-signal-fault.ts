@@ -1,9 +1,10 @@
-import { RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
+import { parseInput, RequestInputError, RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import {
   json,
   jsonError,
   notFound,
-  readOptionalJsonObject,
+  readRequestBodyText,
+  requireJsonObject,
 } from "../../json.ts";
 import type {
   WorkerRouteContext,
@@ -21,6 +22,7 @@ import type {
 } from "../routes.ts";
 import {
   INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
+  parseJsonInput,
   normalizeNonEmptyString,
 } from "../route-utils/json-body.ts";
 import {
@@ -135,10 +137,12 @@ async function readTemporalMailboxSignalFaultBody(
   request: Request,
 ): Promise<Record<string, unknown> | Response> {
   try {
-    return await readOptionalJsonObject(request, {
+    const payload = await readRequestBodyText(request, {
       limitBytes: INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
     });
+    return parseInput(payload.trim() ? parseJsonInput(payload) : {}, requireJsonObject);
   } catch (error) {
+    if (!(error instanceof RequestInputError || error instanceof RequestBodyTooLargeError)) throw error;
     return jsonError(
       error instanceof RequestBodyTooLargeError
         ? "Request body too large."

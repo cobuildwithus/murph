@@ -1,3 +1,6 @@
+import { parseInput, RequestInputError, RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
+import { decodeRouteParam } from "../route-utils/route-params.ts";
+import { parseJsonInput } from "../route-utils/json-body.ts";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { matchCloudflareHostedControlUserRoutePath } from "@murphai/cloudflare-hosted-control/routes";
 import { createHostedMediaStore } from "../../bundle-store.ts";
@@ -17,9 +20,14 @@ export const mealThumbnailRoutes: readonly DeclarativeRoute<WorkerRouteContext>[
     if (!secret) return jsonError("Private media delivery is unavailable.", 503);
     let photos: Array<{ mediaId: string; sha256: string; byteSize: number }>;
     try {
-      photos = parsePhotos(JSON.parse(await readRequestBodyText(context.request, { limitBytes: 2 * 1024 * 1024 })));
-    } catch { return jsonError("Meal thumbnail request is invalid.", 400); }
-    const userId = decodeURIComponent(params.userId!);
+      photos = parseInput(parseJsonInput(await readRequestBodyText(context.request, { limitBytes: 2 * 1024 * 1024 })), parsePhotos);
+    } catch (error) {
+      if (error instanceof RequestInputError || error instanceof RequestBodyTooLargeError) {
+        return jsonError("Meal thumbnail request is invalid.", 400);
+      }
+      throw error;
+    }
+    const userId = decodeRouteParam(params.userId!);
     const deliveryOrigin = readHostedPrivateMediaDeliveryOrigin(context.env);
     return json(await Promise.all(photos.map(photo => createHostedMealThumbnailDelivery({
       ...photo, userId, capabilitySecret: secret, deliveryOrigin,

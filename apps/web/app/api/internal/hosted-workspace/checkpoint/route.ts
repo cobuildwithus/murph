@@ -1,3 +1,4 @@
+import { parseInput, RequestInputError } from "@murphai/hosted-execution/request-input";
 import {
   parseHostedWorkspaceCheckpointRequest,
   parseHostedWorkspaceCheckpointResponse,
@@ -32,7 +33,7 @@ export const POST = withJsonError((request: Request) => runWithTiming(request, a
   try {
     const requestBody = await readOptionalJsonObject(request);
     failureStage = "request_schema";
-    const body = parseHostedWorkspaceCheckpointRequest(requestBody);
+    const body = parseInput(requestBody, parseHostedWorkspaceCheckpointRequest);
     failureStage = "runtime_authority";
     const runtimeAuthority = readHostedRuntimeCallbackAuthority(request, {
       attemptId: body.attemptId,
@@ -115,7 +116,8 @@ function reportCheckpointFailure(stage: CheckpointFailureStage, error: unknown):
     const code = stage === "publication" && error instanceof TypeError && "code" in error
       ? error.code : undefined;
     console.warn("Hosted workspace checkpoint failed.", {
-      errorClass: error instanceof TypeError ? "type_error"
+      errorClass: error instanceof RequestInputError ? "request_input"
+        : error instanceof TypeError ? "type_error"
         : error instanceof RangeError ? "range_error"
         : error instanceof Error ? "error" : "non_error",
       ...(code === "HOSTED_WORKSPACE_PROGRESS_REGRESSED"
