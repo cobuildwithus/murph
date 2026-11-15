@@ -9,6 +9,7 @@ import { type ConversationPollAction } from '@murphai/hosted-execution/conversat
 import { readConversationPollDynamicToolRequest, executeConversationPollTool } from './dynamic-tools/conversation-polls.js'
 import { nutritionCardAttachmentGuidance } from '../assistant/nutrition-card-introduction.js'
 import { parseDynamicToolArguments } from './dynamic-tools/dynamic-tool-wrapper.js'
+import { readJournalSourceToolRequest } from './dynamic-tools/journal-source-read.js'
 import {
   completeDynamicToolFailureDiagnostics,
   isAlreadyActiveVaultFileSendError,
@@ -1459,6 +1460,7 @@ type MurphGroupToolRequest =
     }
 
 export type MurphDynamicToolRequest =
+  | { kind: 'journal-source-read'; locator: string }
   | {
       kind: 'invalid-tool-arguments'
       errorCode: string
@@ -1738,6 +1740,7 @@ export function readMurphDynamicToolRequest(
   }
 
   for (const readRequest of [
+    readJournalSourceToolRequest,
     readMaterializeVaultMediaToolRequest,
     readConversationPollDynamicToolRequest,
     readLeaveGroupDynamicToolRequest,
@@ -3677,15 +3680,8 @@ async function dispatchMurphDynamicToolRequest(
   input: ExecuteMurphDynamicToolRequestInput,
 ): Promise<MurphDynamicToolExecutionResult> {
   const hostedContext = input.hostedToolContext ?? null
-  const hostedImageCompletionEffectScope =
-    input.hostedToolContext?.currentHostedImageCompletionEffectScope?.() ?? null
-  if (
-    hostedImageCompletionEffectScope !== null &&
-    !isHostedImageCompletionToolRequestAllowed({
-      request: input.request,
-      scope: hostedImageCompletionEffectScope,
-    })
-  ) {
+  const { hostedImageCompletionEffectScope, rejected } = hostedImageCompletionToolAuthority(input)
+  if (rejected) {
     return toolTextResult(
       false,
       'this hosted image completion carries no authority for that tool action',
@@ -3960,6 +3956,8 @@ async function dispatchMurphDynamicToolRequest(
         askGrokTurnState: input.askGrokTurnState,
       })
     }
+    case 'journal-source-read':
+      return await executeJournalSourceRead(input, input.request)
     case 'connected-apps-manage':
     case 'connected-apps-search':
     case 'connected-apps-execute': {
@@ -8896,4 +8894,16 @@ function recapMediaToolFailure(error: unknown): MurphDynamicToolExecutionResult 
     return { ...toolTextResult(false, error.message), failureDiagnostic: { ...toolFailureDiagnostic('invalid_input'), recapRefusedReferences: error.shapes } }
   }
   return toolTextResult(false, error instanceof Error ? error.message : 'Media generation failed.', 'handler_exception', error)
+}
+
+async function executeJournalSourceRead(input: ExecuteMurphDynamicToolRequestInput, request: Extract<MurphDynamicToolRequest, { kind: 'journal-source-read' }>) {
+  const readSource = input.hostedToolContext?.preparedJournal?.readSource
+  if (!readSource) return toolTextResult(false, 'prepared Journal source reads are unavailable', 'unavailable')
+  return toolTextResult(true, JSON.stringify(await readSource(request.locator, input.abortSignal)))
+}
+
+function hostedImageCompletionToolAuthority(input: ExecuteMurphDynamicToolRequestInput) {
+  const scope = input.hostedToolContext?.currentHostedImageCompletionEffectScope?.() ?? null
+  return { hostedImageCompletionEffectScope: scope,
+    rejected: scope !== null && !isHostedImageCompletionToolRequestAllowed({ request: input.request, scope }) }
 }

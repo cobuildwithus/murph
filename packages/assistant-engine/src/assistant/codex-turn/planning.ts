@@ -1365,7 +1365,7 @@ export async function resolveAssistantRouteTurnPlan(
         progressUpdatesAvailable: input.progressDelivery != null,
         progressUpdateMode:
           conversationScope === 'group' ? 'group' : 'direct',
-        connectedAppsAvailable: input.hostedToolContext?.connectedApps != null,
+        ...connectedToolAvailability(input.hostedToolContext),
         connectedAppsManageAvailable: privateInteractiveAudience,
         productFeedbackAvailable:
           productFeedbackAuthorized &&
@@ -1992,4 +1992,11 @@ function recapShowTools(dynamicTools: ReturnType<typeof resolveMurphDynamicTools
     ...dynamicTools.filter(tool => !['read_game', 'write_recap', 'game_lore', 'generate_image', 'generate_song'].includes(tool.name)),
     MURPH_READ_GAME_RECAP_TOOL, MURPH_WRITE_RECAP_FILE_TOOL, MURPH_GAME_LORE_TOOL, MURPH_GENERATE_IMAGE_RECAP_TOOL, MURPH_GENERATE_SONG_RECAP_TOOL,
   ];
+}
+
+function connectedToolAvailability(context: AssistantHostedToolContext | null | undefined) {
+  return {
+    connectedAppsAvailable: context?.connectedApps != null && !context.preparedJournal,
+    journalSourceReadAvailable: context?.preparedJournal != null,
+  }
 }

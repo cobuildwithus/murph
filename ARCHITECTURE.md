@@ -298,6 +298,41 @@ already concise records remain unchanged. This policy uses the existing memory
 format and tool, with no schema migration or second profile store.
 
 The morning Journal connected-context automation writes canonical Journal plans.
+Before inference, the engine prepares Gmail, Outlook and visible calendar
+metadata on a pinned read lane, within one 60-second deadline and 40 requests.
+Canonical authority, delivery, managed-owner and occurrence-expiry gates run
+before acquisition; an expired occurrence cannot consume its first backfill.
+Mail query tiers are greedily packed once into stable batches of at most 1,800
+characters, including date bounds and exclusions. Each batch gets two pages of
+25 results per partition; merged message IDs are ordered newest first, and any
+batch cap or exhausted shared request budget produces incomplete coverage.
+It reconciles `activeAccounts` after acquisition from a complete inventory:
+retain previously active accounts that are still listed, add new Gmail/Outlook
+accounts only after complete or partial mail acquisition (calendar-only accounts
+use their calendar result), and remove disconnected accounts. Malformed account
+entries leave valid neighbors readable but mark inventory partial and suppress
+account reconciliation for that run.
+A failed initial read therefore retries the 90-day backfill. Reconciliation uses guarded
+Knowledge writes that preserve controls and source mappings. Malformed provider
+items are skipped with partial coverage; malformed Sources entries do not
+discard successful reads. Reconciliation or alias lookup failure retains the
+prepared candidates and reports an aggregate issue. Controls are re-read before
+the digest: unreadable controls or global opt-out clear candidates and fail account
+coverage with `controls_changed`; scoped opt-outs remove affected candidates and
+locators. The digest carries current controls. An initial global opt-out
+prevents even account listing. Explicit cancellation tombstones may omit event
+times in both windows and exact reads; missing times on other events are malformed.
+Non-owned calendar events require the member's
+participation; provider calendar-owner flags alone do not establish it.
+The fenced, untrusted digest is at most 48 KiB and carries coverage and read
+times. Overflow removes the lowest-priority item from the candidate kind using
+more bytes, retaining a share of both mail and calendar evidence. Failed or
+capped coverage cannot establish absence. The prepared turn
+has no generic connected-app tools; `murph.journal_source_read` confirms exact
+eligible calendar sources or opens only mail matched during this run, with
+current opt-out checks and at most 20 reads. Existing plan identities are
+preserved through exact aliases. There is no seen-state, diff gate or fallback
+provider browse. Reminder review continues when acquisition fails.
 Connected plans alone do not authorize attendance or logistics check-ins. New
 follow-ups require an explicit member request or a concrete health purpose;
 scheduled execution applies this rule to legacy instructions too. Morning
@@ -430,7 +465,8 @@ pass deterministically scans active private automations that explicitly store
 `skip-when-busy`, `calendar-only`, and one exact Google Calendar or Outlook
 account binding; exact-time automations are ineligible. When the stored snapshot
 is missing or reaches its 23-hour refresh deadline,
-host code derives the exact account and current seven-day provider request,
+host code derives the exact account and current seven-day provider request
+through the calendar read adapter shared with Journal preparation,
 caps the result, reduces it to normalized busy timestamps, rereads the
 automation, and performs a version-fenced suffix replacement. Complete empty
 reads persist an empty snapshot so the same canonical `generatedAt` field also
@@ -884,6 +920,15 @@ persisted audience. This adds no fan-out, scheduler, policy engine, result
 table, or second service.
 
 ## Hosted Connected Apps
+
+Engine-owned `read` is a separate allowlisted operation on the same signed
+boundary, unavailable in model-facing schemas. Web verifies active member
+ownership and toolkit, forces provider identity arguments and pins Gmail
+`20261105_00`, Google Calendar `20261111_00` and Outlook `20261112_00`.
+Direct JSON-string data is decoded before the ordinary result compaction and
+413 budget checks, then returned in `{data: ...}`. Deploy this Web contract
+before the runtime; `CONNECTED_APPS_REQUEST_INVALID` reports old Web coverage
+failure without changing acquisition paths.
 
 Connected apps expose exactly three assistant tools: account management, semantic tool search, and execution. `apps/web` owns the Composio API key, durable per-member Tool Router session id, short-lived member-bound connect intents, account verification, server-owned built-in service tool allowlist, server-held OpenWeather authority, server-owned fixed-write allowlist for primary-calendar creation and bounded Gmail/Outlook email sending, and branded OAuth completion UX. The hosted runner reaches that authority only through the existing signed `web-control.worker` boundary; Composio credentials, session ids, OAuth state, OpenWeather credentials, and connected-account provider tokens never enter Codex env or prompts. Composio owns provider schemas and raw execution results for its tools. Murph applies a session-level read-only/non-destructive policy, explicit multi-account selection for connected-account tools, and accountless execution only for server-allowlisted built-in service tools. The existing current-weather tools use direct custom-auth execution through Composio. One fixed web-owned One Call read accepts only bounded latitude and longitude, requests only official national alerts, and returns a small normalized alert projection. It adds no scheduler, state, cache, or user-defined weather threshold. The direct and scheduled alert guidance must not deploy until One Call 3 is active for the exact production key and a signed Web-control smoke read returns a normalized success, including a valid empty alert list. Deploy Web first when activation and assistant deployment cannot happen together. Primary-calendar creation and bounded Gmail/Outlook email sends share one exact server-owned direct-execute policy table. Every route pins its toolkit and provider version, requires agent approval plus an active owned account from that toolkit, rejects missing, blank, unsupported, or server-owned model arguments before egress, and forces provider-owned fields such as the primary calendar, sender, and Outlook Sent-copy behavior. Email sends additionally require current accepted user input in a private direct turn at the assistant runtime boundary; scheduled, group, maintenance, system-notification, and output-only turns fail closed before provider egress. Failed or ambiguous writes are non-retryable; ambiguous email outcomes are reconciled only against a narrow recent Sent-mail window matching the primary recipient, subject, and substantive body, and uncertain results remain unknown.
 
@@ -2730,10 +2775,11 @@ read failures use existing cron retry handling. Explicit manual runs bypass
 this automatic suppression. No additional persisted queue or marker is used.
 
 The scheduled morning Journal connected-context pass uses the same precondition
-path when the active/paused non-maintenance reminder inventory is empty and either
-global capture is opted out, or an absent/empty-account ledger plus the live
-connected-apps list proves no supported active accounts; stale accounts and any
-uncertain read keep the model turn eligible. Manual runs bypass this check.
+path when the active/paused non-maintenance reminder inventory is empty and
+preparation proves capture is globally opted out or no eligible accounts remain.
+Stale accounts and uncertain reads keep the model turn eligible. The admission
+check reuses preparation's result; it never repeats the account list. Manual
+runs bypass idle suppression and still use prepared acquisition.
 
 ### Clinical Records retrieval
 

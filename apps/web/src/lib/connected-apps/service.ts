@@ -1,6 +1,7 @@
 import "server-only";
 
 import { reconcileHostedConnectedAppsDiscovery } from "./discovery";
+import { getHostedConnectedAppsReadPolicy, wrapHostedConnectedAppsReadResult } from "./read-policy";
 
 import { createHash, randomBytes } from "node:crypto";
 
@@ -146,6 +147,8 @@ async function runHostedConnectedAppsRequest(input: {
 
   try {
     switch (input.request.operation) {
+      case "read":
+        return await executeConnectedAppsRead({ client, config, memberId: input.memberId, input: input.request.input });
       case "manage":
         return await executeConnectedAppsManagement({
           client,
@@ -154,22 +157,8 @@ async function runHostedConnectedAppsRequest(input: {
           memberId: input.memberId,
           prisma,
         });
-      case "search": {
-        const toolkits = input.request.input.toolkits?.map((toolkit) =>
-          assertHostedConnectedAppsSearchToolkit(config, toolkit)
-        );
-        const sessionId = await ensureHostedConnectedAppsSession({
-          client,
-          config,
-          memberId: input.memberId,
-          prisma,
-        });
-        return reconcileHostedConnectedAppsDiscovery(await client.search({
-          query: input.request.input.query,
-          sessionId,
-          ...(toolkits ? { toolkits } : {}),
-        }));
-      }
+      case "search":
+        return await searchConnectedApps({ client, config, prisma, memberId: input.memberId, input: input.request.input });
       case "execute": {
         const {
           account: selector,
@@ -986,4 +975,51 @@ function buildConnectedAppsProviderErrorDetails(
     details.type = error.type;
   }
   return Object.keys(details).length > 0 ? details : undefined;
+}
+
+async function executeConnectedAppsRead(input: {
+  client: ReturnType<typeof createComposioConnectedAppsClient>;
+  config: ReturnType<typeof readHostedConnectedAppsConfig>;
+  memberId: string;
+  input: Extract<HostedConnectedAppsRequest, { operation: "read" }>["input"];
+}): Promise<unknown> {
+  const { client, config } = input;
+  const { account: selector, toolSlug, arguments: args } = input.input;
+  const policy = getHostedConnectedAppsReadPolicy(toolSlug);
+  if (!policy) {
+    throw hostedOnboardingError({ code: "CONNECTED_APPS_READ_NOT_ALLOWED", httpStatus: 400, message: "That engine read is not supported." });
+  }
+  assertHostedConnectedAppToolkit(config, policy.toolkit);
+  const account = await resolveOwnedConnectedAccount({ client, memberId: input.memberId, selector, scope: "configured", toolkit: policy.toolkit });
+  if (account.toolkit.slug.trim().toLowerCase() !== policy.toolkit) {
+    throw hostedOnboardingError({ code: "CONNECTED_APPS_TOOLKIT_MISMATCH", httpStatus: 400, message: "Choose an account that matches the read." });
+  }
+  return wrapHostedConnectedAppsReadResult(await client.executeDirect({
+    account: account.id, arguments: { ...args, ...policy.forcedArguments },
+    toolSlug, userId: input.memberId, version: policy.version,
+  }));
+}
+
+async function searchConnectedApps(input: {
+  client: ReturnType<typeof createComposioConnectedAppsClient>;
+  config: ReturnType<typeof readHostedConnectedAppsConfig>;
+  memberId: string;
+  prisma: PrismaClient;
+  input: Extract<HostedConnectedAppsRequest, { operation: "search" }>["input"];
+}): Promise<unknown> {
+  const { client, config, prisma } = input;
+  const toolkits = input.input.toolkits?.map((toolkit) =>
+    assertHostedConnectedAppsSearchToolkit(config, toolkit)
+  );
+  const sessionId = await ensureHostedConnectedAppsSession({
+    client,
+    config,
+    memberId: input.memberId,
+    prisma,
+  });
+  return reconcileHostedConnectedAppsDiscovery(await client.search({
+    query: input.input.query,
+    sessionId,
+    ...(toolkits ? { toolkits } : {}),
+  }));
 }

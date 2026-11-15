@@ -9,27 +9,32 @@ import {
 
 // The web manage/list handler returns this complete inventory and requests only
 // ACTIVE accounts from Composio. Any other status or contract drift fails open.
-const connectedAppsListSchema = z.object({
+export const connectedAppAccountSchema = z.object({
+  alias: z.string().nullable(),
+  connectedAt: z.string().nullable(),
+  id: z.string().trim().min(1),
+  status: z.literal('ACTIVE'),
+  toolkit: z.string().trim().min(1),
+  toolkitConfigured: z.boolean(),
+  toolkitLabel: z.string(),
+  wordId: z.string().nullable(),
+}).strict()
+export const connectedAppsInventorySchema = z.object({
   result: z.object({
-    accounts: z.array(z.object({
-      alias: z.string().nullable(),
-      connectedAt: z.string().nullable(),
-      id: z.string().trim().min(1),
-      status: z.literal('ACTIVE'),
-      toolkit: z.string().trim().min(1),
-      toolkitConfigured: z.boolean(),
-      toolkitLabel: z.string(),
-      wordId: z.string().nullable(),
-    }).strict()),
+    accounts: z.array(z.unknown()),
     toolkits: z.array(z.object({ label: z.string(), slug: z.string().trim().min(1) }).strict()),
   }).strict(),
 }).strict()
+export const connectedAppsListSchema = connectedAppsInventorySchema.extend({
+  result: connectedAppsInventorySchema.shape.result.extend({ accounts: z.array(connectedAppAccountSchema) }),
+})
 
 export async function canSkipManagedJournalConnectedContext(input: {
   automationId: string
   connectedApps?: AssistantConnectedAppsPort | null
   signal?: AbortSignal | null
   vaultRoot: string
+  preparedAdmission?: 'run' | 'empty'
 }): Promise<boolean> {
   if (input.automationId !== MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID) return false
   input.signal?.throwIfAborted()
@@ -42,6 +47,7 @@ export async function canSkipManagedJournalConnectedContext(input: {
     })
     input.signal?.throwIfAborted()
     if (reminders.items.length !== 0) return false
+    if (input.preparedAdmission) return input.preparedAdmission === 'empty'
     const ledger = await readConnectedContextPolicyState(input.vaultRoot)
     input.signal?.throwIfAborted()
     if (ledger.kind === 'unreadable') return false

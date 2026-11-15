@@ -1,3 +1,5 @@
+import { prepareJournalConnectedContext } from '../src/assistant/journal-connected-context-prepare.js'
+import { MURPH_JOURNAL_SOURCE_READ_TOOL } from '../src/assistant-codex/dynamic-tools/journal-source-read.js'
 import * as z from '@murphai/contracts/zod-runtime'
 import { notificationHistoryIntent } from './notification-history-fixtures.ts'
 import { HOSTED_MEDIA_REFS_SCHEMA, resolveHostedMediaReferenceCataloguePath } from '@murphai/runtime-state/node'
@@ -5956,6 +5958,16 @@ describe('onboarding policy read detection', () => {
 })
 
 describe('real Codex live fixture contracts', () => {
+  it('counts only host calendar window reads in the prepared Journal fixture', () => {
+    const windows = [1, 2].map(pass => ({ operation: 'read', input: { toolSlug: 'GOOGLECALENDAR_EVENTS_LIST', arguments: { pass } } }))
+    expect(journalCalendarWindowRequests([
+      { operation: 'manage', input: { action: 'list' } }, windows[0]!,
+      { operation: 'execute', input: { toolSlug: 'GOOGLECALENDAR_EVENTS_LIST' } },
+      { operation: 'read', input: { toolSlug: 'GOOGLECALENDAR_EVENTS_GET' } },
+      { operation: 'read', input: { toolSlug: 'OUTLOOK_GET_CALENDAR_VIEW' } }, windows[1]!,
+    ])).toEqual(windows)
+  })
+
   it('accepts an invitation question while rejecting an offer to write one', () => {
     assertConcreteInvitationReply('Would you like to meet us at the gallery this Saturday at 2 PM? Admission is $12, and we will stay indoors.')
     expect(() => assertConcreteInvitationReply('Would you like me to write this invite: Join us at the gallery on Saturday at 2 PM for $12?')).toThrow()
@@ -6008,7 +6020,8 @@ describe('real Codex live fixture contracts', () => {
       await materializeJournalConnectedContextVaultCli({ binDirectory, vaultRoot: root })
       const cli = (args: string[]) => execFileAsync(path.join(binDirectory, 'vault-cli'), args, { timeout: 60_000 })
       const ledger = JSON.parse((await cli(['knowledge', 'show', 'journal-connected-context', '--format', 'json'])).stdout)
-      expect(JSON.stringify(ledger)).toContain('calendar_old')
+      expect(ledger.page.body).toContain('"activeAccounts":[]')
+      expect(ledger.page.body).toContain('"legacy":{"marker":"baseline"}')
       await cli(['event', 'note', 'add', '--help'])
       expect((await readVaultRawTolerant(root)).events).toEqual([])
       await expect(cli(['nonexistent-journal-command'])).rejects.toThrow()
@@ -20032,10 +20045,9 @@ describeRealCodex('real Codex adaptive wearable no-data outreach e2e', () => {
 
 describeRealCodex('real Codex Journal GPT-6 Luna xhigh connected account eligibility e2e', () => {
   it.each([
-    { name: 'reads a newly connected mailbox silently on its first pass', accountId: 'gmail_new', toolkit: 'gmail', optedOut: false, ledgerText: '# Journal connected context' },
-    { name: 'reads an undated baseline calendar silently in the same pass', accountId: 'calendar_old', toolkit: 'googlecalendar', optedOut: false, ledgerText: '# Journal connected context\n\n- account: calendar_old\n  toolkit: googlecalendar\n  state: baseline' },
-    { name: 'respects a global opt-out without reading provider content', accountId: 'calendar_ready', toolkit: 'googlecalendar', optedOut: true,
-      ledgerText: '# Journal connected context\n\nGlobal opt-out: all automatic Journal capture is disabled.\n\n- account: calendar_ready\n  toolkit: googlecalendar\n  state: notice-sent' },
+    { name: 'reads a newly connected mailbox silently on its first pass', accountId: 'gmail_new', toolkit: 'gmail', optedOut: false },
+    { name: 'reads an undated baseline calendar silently in the same pass', accountId: 'calendar_old', toolkit: 'googlecalendar', optedOut: false },
+    { name: 'respects a global opt-out without reading provider content', accountId: 'calendar_ready', toolkit: 'googlecalendar', optedOut: true },
   ])('$name', async (scenario) => {
     const config = await resolveRealCodexE2eConfig()
     const automation = MURPH_MANAGED_AUTOMATIONS.find(
@@ -20054,7 +20066,7 @@ describeRealCodex('real Codex Journal GPT-6 Luna xhigh connected account eligibi
       await materializeJournalConnectedContextVaultCli({
         binDirectory,
         vaultRoot: workingDirectory,
-        ledgerText: scenario.ledgerText,
+        ledgerText: JSON.stringify({ version: 1, optOuts: { global: scenario.optedOut, accounts: [], providers: [], categories: [], calendars: [] }, activeAccounts: [], legacy: { marker: 'baseline' } }),
       })
       if (scenario.optedOut) {
         await upsertEvent({ vaultRoot: workingDirectory, payload: {
@@ -20064,6 +20076,8 @@ describeRealCodex('real Codex Journal GPT-6 Luna xhigh connected account eligibi
         } })
       }
       const connectedAppRequests: Array<{ operation: string, input: Record<string, unknown> }> = []
+      const preparedJournal = await prepareJournalE2eContext({ vaultRoot: workingDirectory, now: '2026-08-31T06:00:00Z',
+        accounts: [{ id: scenario.accountId, toolkit: scenario.toolkit }], requests: connectedAppRequests })
       const result = await executeRealCodexAppServerTurn({
         allowFinishWithoutReply: false,
         approvalPolicy: 'never',
@@ -20082,9 +20096,7 @@ describeRealCodex('real Codex Journal GPT-6 Luna xhigh connected account eligibi
           scheduledOccurrenceAt: '2026-08-31T06:00:00.000Z',
         }),
         dynamicTools: [
-          MURPH_CONNECTED_APPS_MANAGE_TOOL,
-          MURPH_CONNECTED_APPS_SEARCH_TOOL,
-          MURPH_CONNECTED_APPS_EXECUTE_TOOL,
+          MURPH_JOURNAL_SOURCE_READ_TOOL,
         ],
         env: {
           ...config.env,
@@ -20093,39 +20105,7 @@ describeRealCodex('real Codex Journal GPT-6 Luna xhigh connected account eligibi
         },
         hostedToolContext: {
           computerToolsAvailable: false,
-          connectedApps: {
-            request: async (request) => {
-              connectedAppRequests.push({ operation: request.operation, input: request.input })
-              if (request.operation !== 'manage') {
-                if (scenario.optedOut) throw new Error('An opted-out run must not read provider content.')
-                if (request.operation === 'search') return { result: { success: true, tool_schemas: {
-                  [scenario.toolkit === 'gmail' ? 'GMAIL_SEARCH_EMAILS' : 'GOOGLECALENDAR_LIST_EVENTS']: {
-                    input_schema: { type: 'object', additionalProperties: false,
-                      properties: scenario.toolkit === 'gmail'
-                        ? { query: { type: 'string' } }
-                        : { timeMin: { type: 'string' }, timeMax: { type: 'string' } },
-                      required: scenario.toolkit === 'gmail' ? ['query'] : ['timeMin', 'timeMax'],
-                    },
-                  },
-                } } }
-                if (request.operation === 'execute') return { result: scenario.toolkit === 'gmail' ? { messages: [] } : { items: [] } }
-                throw new Error('Unexpected provider operation.')
-              }
-              return {
-                result: {
-                  accounts: [
-                    {
-                      alias: 'Personal',
-                      connectedAt: scenario.accountId === 'calendar_old' ? null : '2026-08-31T05:30:00.000Z',
-                      id: scenario.accountId,
-                      status: 'ACTIVE',
-                      toolkit: scenario.toolkit,
-                    },
-                  ],
-                },
-              }
-            },
-          },
+          preparedJournal,
           currentHostedDeliveryContext: () => null,
           currentHostedMailboxItemIds: () => [],
           sendVaultFile: async () => {
@@ -20136,7 +20116,7 @@ describeRealCodex('real Codex Journal GPT-6 Luna xhigh connected account eligibi
         model: config.model,
         modelProvider: config.modelProvider,
         prompt: [
-          automation.instructions,
+          automation.instructions, preparedJournal.instructions,
           'Scheduled occurrence context:',
           '- Current local date: 2026-08-31.',
           '- Current local time: 08:00 Europe/Warsaw.',
@@ -20155,9 +20135,10 @@ describeRealCodex('real Codex Journal GPT-6 Luna xhigh connected account eligibi
         expect(connectedAppRequests).toEqual([])
         expect((await readConnectedContextPolicy(workingDirectory))?.optOuts.global).toBe(true)
       } else {
-        expect(connectedAppRequests.map(request => request.operation)).toEqual(expect.arrayContaining(['manage', 'search', 'execute']))
-        expect(connectedAppRequests.filter(request => request.operation === 'execute').every(request => request.input.account === scenario.accountId)).toBe(true)
+        expect(connectedAppRequests.map(request => request.operation)).toEqual(expect.arrayContaining(['manage', 'read']))
+        expect(connectedAppRequests.filter(request => request.operation === 'read').every(request => request.input.account === scenario.accountId)).toBe(true)
       }
+      expect(connectedAppRequests.some(request => ['search', 'execute'].includes(request.operation))).toBe(false)
       const upcoming = await refreshJournalTestContext(workingDirectory, '2026-08-31T06:00:00Z')
       expect(upcoming.entries).toEqual([])
       process.stdout.write(
@@ -20199,13 +20180,7 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
         binDirectory,
         commandLogPath,
         vaultRoot: workingDirectory,
-        ledgerText: [
-          '# Journal connected context',
-          '',
-          '- account: calendar_ready',
-          '  toolkit: googlecalendar',
-          '  state: notice-sent',
-        ].join('\n'),
+        ledgerText: null,
       })
       if (partialSave) {
         const saved = await upsertEvent({ vaultRoot: workingDirectory, payload: {
@@ -20225,7 +20200,31 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
         operation: string
       }> = []
       const automationRequests: AssistantHostedAutomationToolRequest[] = []
-      const runTurn = (retry: boolean) => executeRealCodexAppServerTurn({
+      const runTurn = async (retry: boolean) => {
+      const preparedJournal = await prepareJournalE2eContext({ vaultRoot: workingDirectory, now: '2026-08-31T06:00:00Z',
+        accounts: [{ id: 'calendar_ready', toolkit: 'googlecalendar' }], requests: connectedAppRequests, calendarItems: [
+                      {
+                        end: { dateTime: '2026-08-31T19:00:00+02:00' },
+                        id: 'calendar_evt_tennis',
+                        organizer: { self: true },
+                        attendees: [{ self: true, responseStatus: 'accepted' }],
+                        start: { dateTime: '2026-08-31T18:00:00+02:00' },
+                        summary: 'Tennis training',
+                      },
+                      {
+                        end: { dateTime: '2026-09-01T10:00:00+02:00' },
+                        id: 'calendar_evt_dentist',
+                        start: { dateTime: '2026-09-01T09:00:00+02:00' },
+                        summary: 'Dentist appointment',
+                      },
+                      {
+                        end: { dateTime: '2026-08-31T21:00:00+02:00' },
+                        id: 'calendar_evt_dinner',
+                        start: { dateTime: '2026-08-31T20:00:00+02:00' },
+                        summary: 'Dinner with Alex',
+                      },
+                    ] })
+      return executeRealCodexAppServerTurn({
         allowFinishWithoutReply: false,
         approvalPolicy: 'never',
         baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
@@ -20245,9 +20244,7 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
         }),
         dynamicTools: [
           MURPH_AUTOMATION_TOOL,
-          MURPH_CONNECTED_APPS_MANAGE_TOOL,
-          MURPH_CONNECTED_APPS_SEARCH_TOOL,
-          MURPH_CONNECTED_APPS_EXECUTE_TOOL,
+          MURPH_JOURNAL_SOURCE_READ_TOOL,
         ],
         env: {
           ...config.env,
@@ -20289,76 +20286,7 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
             },
           },
           computerToolsAvailable: false,
-          connectedApps: {
-            request: async (request) => {
-              connectedAppRequests.push({
-                input: request.input,
-                operation: request.operation,
-              })
-              if (request.operation === 'manage') {
-                return {
-                  result: {
-                    accounts: [{
-                      alias: 'Personal',
-                      connectedAt: '2026-08-30T06:30:00.000Z',
-                      id: 'calendar_ready',
-                      status: 'ACTIVE',
-                      toolkit: 'googlecalendar',
-                    }],
-                  },
-                }
-              }
-              if (request.operation === 'search') {
-                return {
-                  result: {
-                    success: true,
-                    tool_schemas: {
-                      GOOGLECALENDAR_LIST_EVENTS: {
-                        input_schema: {
-                          additionalProperties: false,
-                          properties: {
-                            timeMax: { type: 'string' },
-                            timeMin: { type: 'string' },
-                          },
-                          required: ['timeMin', 'timeMax'],
-                          type: 'object',
-                        },
-                      },
-                    },
-                  },
-                }
-              }
-              if (request.operation === 'execute') {
-                return {
-                  result: {
-                    items: [
-                      {
-                        end: { dateTime: '2026-08-31T19:00:00+02:00' },
-                        id: 'calendar_evt_tennis',
-                        organizer: { self: true },
-                        attendees: [{ self: true, responseStatus: 'accepted' }],
-                        start: { dateTime: '2026-08-31T18:00:00+02:00' },
-                        summary: 'Tennis training',
-                      },
-                      {
-                        end: { dateTime: '2026-09-01T10:00:00+02:00' },
-                        id: 'calendar_evt_dentist',
-                        start: { dateTime: '2026-09-01T09:00:00+02:00' },
-                        summary: 'Dentist appointment',
-                      },
-                      {
-                        end: { dateTime: '2026-08-31T21:00:00+02:00' },
-                        id: 'calendar_evt_dinner',
-                        start: { dateTime: '2026-08-31T20:00:00+02:00' },
-                        summary: 'Dinner with Alex',
-                      },
-                    ],
-                  },
-                }
-              }
-              throw new Error('Unexpected connected-app operation.')
-            },
-          },
+          preparedJournal,
           currentHostedDeliveryContext: () => null,
           currentHostedMailboxItemIds: () => [],
           sendVaultFile: async () => {
@@ -20370,7 +20298,7 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
         modelProvider: config.modelProvider,
         prompt: [
           automation.instructions,
-          buildMurphManagedJournalCalendarWindowInstructions(automation.automationId, '2026-08-31T06:00:00.000Z'),
+          preparedJournal.instructions,
           'Scheduled occurrence context:',
           '- Current local date: 2026-08-31.',
           retry ? '- Retry the same morning occurrence; preserve its existing effects.' : '- Current local time: 08:00 Europe/Warsaw.',
@@ -20384,6 +20312,7 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
         sandbox: 'workspace-write',
         workingDirectory,
       })
+      }
 
       const result = await runTurn(false)
       process.stdout.write(`[journal-calendar-decision] ${JSON.stringify({ finalMessage: result.finalMessage, automationWrites: automationRequests.length })}\n`)
@@ -20392,10 +20321,11 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
         (request) => request.operation,
       )
       expect(providerOperations).toContain('manage')
-      expect(providerOperations).toContain('search')
-      expect(providerOperations).toContain('execute')
+      expect(providerOperations).not.toContain('search')
+      expect(providerOperations).not.toContain('execute')
+      expect(providerOperations).toContain('read')
       const executeRequest = connectedAppRequests.find(
-        (request) => request.operation === 'execute',
+        (request) => request.operation === 'read',
       )
       expect(executeRequest?.input.account).toBe('calendar_ready')
       const vaultCommands = (await readFile(commandLogPath, 'utf8'))
@@ -20404,6 +20334,7 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
       const journalWrites = vaultCommands.filter((command) =>
         command.includes('event note add') && !isRecordedVaultHelpCommand(command)
       )
+      if (!partialSave) expect(journalWrites[0]).toContain('googlecalendar:calendar_ready:primary:calendar_evt_tennis')
       const savedNotes = (await readVaultRawTolerant(workingDirectory)).events.filter(event => event.kind === 'note')
       process.stdout.write(`[journal-capture-diagnostic] ${JSON.stringify({ commands: vaultCommands, reply: result.finalMessage })}\n`)
       expect(savedNotes).toMatchObject([{ kind: 'note', attributes: { noteType: 'journal-plan' }, tags: expect.arrayContaining(['planned']) }])
@@ -20454,10 +20385,10 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
       expect(repeatedNotes.map(event => event.entityId)).toEqual(savedNotes.map(event => event.entityId))
       expect((await listAutomations({ vaultRoot: workingDirectory })).items).toHaveLength(requestedReview ? 1 : 0)
       expect(automationRequests).toHaveLength(requestedReview ? 1 : 0)
-      const executedWindows = connectedAppRequests.filter(request => request.operation === 'execute')
-      process.stdout.write(`[journal-calendar-windows] ${JSON.stringify(executedWindows.map(request => request.input.arguments))}\n`)
-      expect(executedWindows).toHaveLength(2)
-      for (const request of executedWindows) {
+      const readWindows = journalCalendarWindowRequests(connectedAppRequests)
+      process.stdout.write(`[journal-calendar-windows] ${JSON.stringify(readWindows.map(request => request.input.arguments))}\n`)
+      expect(readWindows).toHaveLength(2)
+      for (const request of readWindows) {
         expect(request.input.account).toBe('calendar_ready')
         const args = readRecord(request.input.arguments)
         expect(Date.parse(String(args?.timeMax)) - Date.parse(String(args?.timeMin))).toBe(14 * 24 * 60 * 60 * 1_000)
@@ -20559,6 +20490,20 @@ describeRealCodex('real Codex lodging destination evidence e2e', () => {
           ].join('\n') })
         }
         const memoryBefore = await readMemoryDocument(workingDirectory)
+        const preparedJournal = await prepareJournalE2eContext({ vaultRoot: workingDirectory, now: '2026-11-01T07:00:00Z',
+          accounts: [{ id: 'gmail_lodging', toolkit: 'gmail' }], requests,
+          mailItems: [{ id: 'mail_lodging_synthetic', subject: 'Confirmed lodging: November 10–12',
+            snippet: 'Palm Bay Hideaway. Your stay is confirmed. Open the reservation for details.',
+                body: [
+                  'Reservation confirmed. Listing name: Palm Bay Hideaway.',
+                  'Check-in date: 2026-11-10. Checkout date: 2026-11-12.',
+                  'Booking calendar timezone: Europe/Lisbon. Check-in and checkout clock times are not supplied.',
+                  ...(scenario !== 'unknown destination'
+                    ? ['Property address: 41 Example Lane, Porto, Portugal.']
+                    : ['Property address and destination details are not supplied in this confirmation.']),
+                  'Provider corporate office: Miami, Florida, USA. Booking reference SYNTH-782.',
+                ].join('\n'),
+          }] })
         const result = await executeRealCodexAppServerTurn({
           allowFinishWithoutReply: false,
           approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
@@ -20569,8 +20514,8 @@ describeRealCodex('real Codex lodging destination evidence e2e', () => {
             currentLocalDate: '2026-11-01', currentTimeZone: 'Europe/Warsaw',
             hostedAutomationAvailable: true, scheduledOccurrenceAt: '2026-11-01T07:00:00Z',
           }),
-          dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_CONNECTED_APPS_MANAGE_TOOL,
-            MURPH_CONNECTED_APPS_SEARCH_TOOL, MURPH_CONNECTED_APPS_EXECUTE_TOOL],
+          dynamicTools: [MURPH_AUTOMATION_TOOL,
+          MURPH_JOURNAL_SOURCE_READ_TOOL,],
           env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot(),
             PATH: `${binDirectory}:${config.env.PATH ?? ''}` },
           hostedToolContext: {
@@ -20579,42 +20524,12 @@ describeRealCodex('real Codex lodging destination evidence e2e', () => {
               throw new Error('Date-only lodging must not create a timed follow-up.')
             } },
             computerToolsAvailable: false,
-            connectedApps: { request: async request => {
-              requests.push({ operation: request.operation, input: request.input })
-              if (request.operation === 'manage') return { result: { accounts: [{
-                alias: 'Personal', id: 'gmail_lodging', status: 'ACTIVE', toolkit: 'gmail',
-              }] } }
-              if (request.operation === 'search') return { result: { success: true, tool_schemas: {
-                GMAIL_SEARCH_EMAILS: { input_schema: { type: 'object', additionalProperties: false,
-                  properties: { query: { type: 'string' } }, required: ['query'] } },
-                GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID: { input_schema: { type: 'object', additionalProperties: false,
-                  properties: { message_id: { type: 'string' } }, required: ['message_id'] } },
-              } } }
-              if (request.operation !== 'execute') throw new Error('Unexpected provider operation.')
-              expect(request.input.account).toBe('gmail_lodging')
-              if (request.input.toolSlug === 'GMAIL_SEARCH_EMAILS') return { result: { messages: [{
-                id: 'mail_lodging_synthetic', subject: 'Confirmed lodging: November 10–12',
-                snippet: 'Palm Bay Hideaway. Your stay is confirmed. Open the reservation for details.',
-              }] } }
-              expect(request.input.toolSlug).toBe('GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID')
-              expect(request.input.arguments).toEqual({ message_id: 'mail_lodging_synthetic' })
-              return { result: { id: 'mail_lodging_synthetic', subject: 'Confirmed lodging: November 10–12',
-                body: [
-                  'Reservation confirmed. Listing name: Palm Bay Hideaway.',
-                  'Check-in date: 2026-11-10. Checkout date: 2026-11-12.',
-                  'Booking calendar timezone: Europe/Lisbon. Check-in and checkout clock times are not supplied.',
-                  ...(scenario !== 'unknown destination'
-                    ? ['Property address: 41 Example Lane, Porto, Portugal.']
-                    : ['Property address and destination details are not supplied in this confirmation.']),
-                  'Provider corporate office: Miami, Florida, USA. Booking reference SYNTH-782.',
-                ].join('\n'),
-              } }
-            } },
-            currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+            preparedJournal,
+          currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
             sendVaultFile: async () => { throw new Error('Unexpected file send.') }, vaultFileSendAvailable: false,
           },
           model: config.model, modelProvider: config.modelProvider,
-          prompt: [automation.instructions, 'Scheduled occurrence context:',
+          prompt: [automation.instructions, preparedJournal.instructions, 'Scheduled occurrence context:',
             '- Current local date: 2026-11-01.', '- Current local time: 08:00 Europe/Warsaw.',
             '- Complete the normal scheduled decision.'].join('\n\n'),
           reasoningEffort: resolveMurphManagedAutomationSeed(automation.automationId)?.assistantTargetOverride?.reasoningEffort ?? 'low',
@@ -20622,9 +20537,10 @@ describeRealCodex('real Codex lodging destination evidence e2e', () => {
         })
         const decision = parseAssistantNotificationDecision(result.finalMessage)
         expect(decision.kind, result.finalMessage).toBe('skip')
-        const fullReads = requests.filter(request => request.operation === 'execute'
+        const fullReads = requests.filter(request => request.operation === 'read'
           && request.input.toolSlug === 'GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID')
         expect(fullReads).toHaveLength(1)
+        expect(requests.some(request => ['search', 'execute'].includes(request.operation))).toBe(false)
         expect(automationRequests).toHaveLength(0)
         const vault = await readVaultRawTolerant(workingDirectory)
         const notes = vault.events.filter(event => event.kind === 'note')
@@ -20655,6 +20571,7 @@ describeRealCodex('real Codex lodging destination evidence e2e', () => {
         expect(localDate(trip.endsAt)).toBe('2026-11-12')
         const commands = (await readFile(commandLogPath, 'utf8')).split('\n').filter(Boolean)
         expect(commands.filter(command => command.includes('event note add') && !isRecordedVaultHelpCommand(command))).toHaveLength(existingEventId ? 0 : 1)
+        if (!existingEventId) expect(commands.find(command => command.includes('event note add') && !isRecordedVaultHelpCommand(command))).toContain('gmail:gmail_lodging:mail:mail_lodging_synthetic')
         expect(commands.filter(command => command.includes('event edit') && !isRecordedVaultHelpCommand(command))).toHaveLength(existingEventId ? 1 : 0)
         expect(commands.some(command => /memory (?:upsert|append|add)|habitat (?:upsert|add)/u.test(command))).toBe(false)
         expect((await getKnowledgePage({ vault: workingDirectory, slug: 'journal-connected-context' })).page.body).toContain('mail_lodging_synthetic')
@@ -20686,13 +20603,7 @@ describeRealCodex('real Codex Journal connected email travel capture e2e', () =>
         binDirectory,
         commandLogPath,
         vaultRoot: workingDirectory,
-        ledgerText: [
-          '# Journal connected context',
-          '',
-          '- account: gmail_ready',
-          '  toolkit: gmail',
-          '  state: notice-sent',
-        ].join('\n'),
+        ledgerText: null,
       })
       const seeded: Array<Awaited<ReturnType<typeof upsertAutomation>>['record']> = []
       for (const [title, instructions] of [
@@ -20713,7 +20624,26 @@ describeRealCodex('real Codex Journal connected email travel capture e2e', () =>
         operation: string
       }> = []
       const automationRequests: AssistantHostedAutomationToolRequest[] = []
-      const runTurn = () => executeRealCodexAppServerTurn({
+      const runTurn = async () => {
+      const preparedJournal = await prepareJournalE2eContext({ vaultRoot: workingDirectory, now: '2026-08-31T06:00:00Z',
+        accounts: [{ id: 'gmail_ready', toolkit: 'gmail' }], requests: connectedAppRequests, mailItems: [
+                      {
+                        id: 'mail_flight_out',
+                        snippet: 'Warsaw to Lisbon, 12 Sep, arrive 13:00. Booking code ZX9Q. Price PLN 1200.',
+                        subject: 'Flight confirmation to Lisbon',
+                      },
+                      {
+                        id: 'mail_hotel',
+                        snippet: 'Lisbon stay 12-15 Sep at 18 Rua Example. Confirmation HTL-4431.',
+                        subject: 'Hotel confirmation Lisbon',
+                      },
+                      {
+                        id: 'mail_flight_back',
+                        snippet: 'Lisbon to Warsaw, 15 Sep, depart 18:00.',
+                        subject: 'Return flight confirmation',
+                      },
+                    ] })
+      return executeRealCodexAppServerTurn({
         allowFinishWithoutReply: false,
         approvalPolicy: 'never',
         baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
@@ -20733,9 +20663,7 @@ describeRealCodex('real Codex Journal connected email travel capture e2e', () =>
         }),
         dynamicTools: [
           MURPH_AUTOMATION_TOOL,
-          MURPH_CONNECTED_APPS_MANAGE_TOOL,
-          MURPH_CONNECTED_APPS_SEARCH_TOOL,
-          MURPH_CONNECTED_APPS_EXECUTE_TOOL,
+          MURPH_JOURNAL_SOURCE_READ_TOOL,
         ],
         env: {
           ...config.env,
@@ -20799,68 +20727,7 @@ describeRealCodex('real Codex Journal connected email travel capture e2e', () =>
             },
           },
           computerToolsAvailable: false,
-          connectedApps: {
-            request: async (request) => {
-              connectedAppRequests.push({
-                input: request.input,
-                operation: request.operation,
-              })
-              if (request.operation === 'manage') {
-                return {
-                  result: {
-                    accounts: [{
-                      alias: 'Personal',
-                      connectedAt: '2026-08-30T06:30:00.000Z',
-                      id: 'gmail_ready',
-                      status: 'ACTIVE',
-                      toolkit: 'gmail',
-                    }],
-                  },
-                }
-              }
-              if (request.operation === 'search') {
-                return {
-                  result: {
-                    success: true,
-                    tool_schemas: {
-                      GMAIL_SEARCH_EMAILS: {
-                        input_schema: {
-                          additionalProperties: false,
-                          properties: { query: { type: 'string' } },
-                          required: ['query'],
-                          type: 'object',
-                        },
-                      },
-                    },
-                  },
-                }
-              }
-              if (request.operation === 'execute') {
-                return {
-                  result: {
-                    messages: [
-                      {
-                        id: 'mail_flight_out',
-                        snippet: 'Warsaw to Lisbon, 12 Sep, arrive 13:00. Booking code ZX9Q. Price PLN 1200.',
-                        subject: 'Flight confirmation to Lisbon',
-                      },
-                      {
-                        id: 'mail_hotel',
-                        snippet: 'Lisbon stay 12-15 Sep at 18 Rua Example. Confirmation HTL-4431.',
-                        subject: 'Hotel confirmation Lisbon',
-                      },
-                      {
-                        id: 'mail_flight_back',
-                        snippet: 'Lisbon to Warsaw, 15 Sep, depart 18:00.',
-                        subject: 'Return flight confirmation',
-                      },
-                    ],
-                  },
-                }
-              }
-              throw new Error('Unexpected connected-app operation.')
-            },
-          },
+          preparedJournal,
           currentHostedDeliveryContext: () => null,
           currentHostedMailboxItemIds: () => [],
           sendVaultFile: async () => {
@@ -20871,7 +20738,7 @@ describeRealCodex('real Codex Journal connected email travel capture e2e', () =>
         model: config.model,
         modelProvider: config.modelProvider,
         prompt: [
-          automation.instructions,
+          automation.instructions, preparedJournal.instructions,
           'Scheduled occurrence context:',
           '- Current local date: 2026-08-31.',
           '- Current local time: 08:00 Europe/Warsaw.',
@@ -20882,6 +20749,7 @@ describeRealCodex('real Codex Journal connected email travel capture e2e', () =>
         sandbox: 'workspace-write',
         workingDirectory,
       })
+      }
 
       const result = await runTurn()
       expect(parseAssistantNotificationDecision(result.finalMessage).kind, result.finalMessage).toBe('skip')
@@ -20889,10 +20757,11 @@ describeRealCodex('real Codex Journal connected email travel capture e2e', () =>
         (request) => request.operation,
       )
       expect(providerOperations).toContain('manage')
-      expect(providerOperations).toContain('search')
-      expect(providerOperations).toContain('execute')
+      expect(providerOperations).not.toContain('search')
+      expect(providerOperations).not.toContain('execute')
+      expect(providerOperations).toContain('read')
       const executeRequests = connectedAppRequests.filter(
-        (request) => request.operation === 'execute',
+        (request) => request.operation === 'read',
       )
       expect(executeRequests.every((request) =>
         request.input.account === 'gmail_ready'
@@ -20923,6 +20792,7 @@ describeRealCodex('real Codex Journal connected email travel capture e2e', () =>
       expect(upcomingText).not.toMatch(/ZX9Q|HTL-4431|1200|Rua Example/iu)
       expect(await readAssistantContextSnapshotPrompt({ vaultRoot: workingDirectory, now: new Date('2026-08-31T06:00:00Z') })).toContain('Lisbon')
       expect(journalWrites).toHaveLength(1)
+      expect(journalWrites[0]).toMatch(/gmail:gmail_ready:mail:mail_(?:flight_out|hotel|flight_back)/u)
       expect((await listAutomations({ vaultRoot: workingDirectory })).items.length).toBeLessThanOrEqual(4)
       expect(automationRequests.filter(request => request.action === 'patch')).toHaveLength(1)
       const repaired = await showAutomation({ vaultRoot: workingDirectory, automationId: seeded[0]!.automationId })
@@ -24820,7 +24690,7 @@ describeRealCodex('real Codex morning reminder reconciliation e2e', () => {
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-reminder-reconciliation-e2e-'))
     const now = new Date('2026-11-12T07:00:00Z')
     const requests: AssistantHostedAutomationToolRequest[] = []
-    const providerOperations: string[] = []
+    const connectedRequests: Array<{ operation: string; input: Record<string, unknown> }> = []
     const inspected = new Map<string, string>()
     try {
       const binDirectory = path.join(workingDirectory, 'bin')
@@ -24877,7 +24747,9 @@ describeRealCodex('real Codex morning reminder reconciliation e2e', () => {
         })).record)
       }
       expect((await listAutomations({ vaultRoot: workingDirectory })).items).toHaveLength(12 + maintenanceRecords.length)
-      const runTurn = async () => executeRealCodexAppServerTurn({
+      const runTurn = async () => {
+        const preparedJournal = await prepareJournalE2eContext({ vaultRoot: workingDirectory, now: now.toISOString(), accounts: [], requests: connectedRequests })
+        return await executeRealCodexAppServerTurn({
         approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         abortSignal: AbortSignal.timeout(600_000),
         onProgress: event => {
@@ -24888,16 +24760,12 @@ describeRealCodex('real Codex morning reminder reconciliation e2e', () => {
         fixtureBinDirectory: binDirectory,
         env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot(), PATH: `${binDirectory}:${config.env.PATH ?? ''}` },
         developerInstructions: buildWeeklyHealthInsightDeveloperInstructions({ currentLocalDate: '2026-11-12', currentTimeZone: 'Europe/Warsaw', scheduledOccurrenceAt: now.toISOString(), hostedAutomationAvailable: true }),
-        dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_CONNECTED_APPS_MANAGE_TOOL, MURPH_CONNECTED_APPS_SEARCH_TOOL, MURPH_CONNECTED_APPS_EXECUTE_TOOL],
+        dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_JOURNAL_SOURCE_READ_TOOL],
         hostedToolContext: {
           computerToolsAvailable: false, currentHostedDeliveryContext: () => null,
           currentHostedMailboxItemIds: () => [], vaultFileSendAvailable: false,
           sendVaultFile: async () => { throw new Error('No file sends in this synthetic journey.') },
-          connectedApps: { request: async request => {
-            providerOperations.push(request.operation)
-            if (request.operation !== 'manage') throw new Error('There are no connected accounts to read.')
-            return { result: { accounts: [], toolkits: [] } }
-          } },
+          preparedJournal,
           automationTool: { request: async request => {
             requests.push(request)
             if (request.action !== 'inspect' && request.action !== 'patch') throw new Error('Existing reminder repair must not create new automations.')
@@ -24931,20 +24799,19 @@ describeRealCodex('real Codex morning reminder reconciliation e2e', () => {
           } },
         },
         prompt: resolveAssistantProviderPrompt({
-          dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_CONNECTED_APPS_MANAGE_TOOL, MURPH_CONNECTED_APPS_SEARCH_TOOL, MURPH_CONNECTED_APPS_EXECUTE_TOOL],
+          dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_JOURNAL_SOURCE_READ_TOOL],
           providerConfig: normalizeAssistantProviderConfig({ provider: 'codex-cli' }), workingDirectory,
           turnContextPrompt: await readAssistantCurrentStatePrompt({ vaultRoot: workingDirectory }),
-          prompt: seed.instructions,
+          prompt: [seed.instructions, preparedJournal.instructions].join('\n\n'),
         }),
         reasoningEffort: resolveMurphManagedAutomationSeed(seed.automationId)?.assistantTargetOverride?.reasoningEffort ?? 'high',
         sandbox: 'workspace-write', workingDirectory,
-      })
+        })
+      }
       const first = await runTurn()
-      // The pass reads the narrow reading reference, never the whole connected-apps skill.
+      // Prepared reminder review has no generic provider authority.
       const skillReadCommands = readCapabilityRoutingActions(first.jsonEvents)
         .flatMap(action => action.kind === 'command' ? [action] : [])
-      expect(skillReadCommands.some(action => action.ok
-        && action.command.includes('connected-apps/references/reading.md'))).toBe(true)
       expect(skillReadCommands.some(action => action.command.includes('connected-apps/SKILL.md')
         || action.output.includes('name: connected-apps'))).toBe(false)
       expect(parseAssistantNotificationDecision(first.finalMessage).kind).toBe('skip')
@@ -24989,7 +24856,8 @@ describeRealCodex('real Codex morning reminder reconciliation e2e', () => {
         expect(record?.route).toEqual(records[index]?.route)
         expect(record?.assistantTargetOverride).toEqual(records[index]?.assistantTargetOverride)
       }
-      expect(providerOperations.every(operation => operation === 'manage')).toBe(true)
+      expect(connectedRequests.map(request => request.operation)).toEqual(['manage'])
+      expect(readCapabilityRoutingActions(first.jsonEvents).filter(action => action.kind === 'dynamic' && action.tool.startsWith('connected_apps_'))).toEqual([])
       expect((await readEvent({ vaultRoot: workingDirectory, eventId: session.eventId })).event).toEqual(session.event)
       expect((await readEvent({ vaultRoot: workingDirectory, eventId: collection.eventId })).event).toEqual(collection.event)
       process.stdout.write(`[morning-reminder-reconciliation] ${JSON.stringify({ pass: 'first', decision: first.finalMessage, repairs: 4, preserved: 7 })}\n`)
@@ -43415,6 +43283,45 @@ async function materializeHealthCommonsKnowledgeVaultCli(input: {
   await chmod(executablePath, 0o700)
 }
 
+function journalCalendarWindowRequests(requests: Array<{ operation: string; input: Record<string, unknown> }>) {
+  return requests.filter(request => request.operation === 'read' && request.input.toolSlug === 'GOOGLECALENDAR_EVENTS_LIST')
+}
+
+async function prepareJournalE2eContext(input: {
+  vaultRoot: string
+  now: string
+  accounts: Array<{ id: string; toolkit: string }>
+  requests: Array<{ operation: string; input: Record<string, unknown> }>
+  calendarItems?: Array<Record<string, unknown>>
+  mailItems?: Array<Record<string, unknown>>
+}) {
+  const prepared = await prepareJournalConnectedContext({
+    vaultRoot: input.vaultRoot, now: new Date(input.now), connectedApps: { request: async request => {
+      input.requests.push({ operation: request.operation, input: request.input })
+      if (request.operation === 'manage') return { result: { toolkits: [], accounts: input.accounts.map(account => ({
+        ...account, alias: null, connectedAt: null, status: 'ACTIVE', toolkitConfigured: true, toolkitLabel: account.toolkit, wordId: null,
+      })) } }
+      if (request.operation !== 'read') throw new Error('Prepared runs cannot search or execute connected apps.')
+      const args = request.input.arguments
+      switch (request.input.toolSlug) {
+        case 'GOOGLECALENDAR_LIST_CALENDARS': return { result: { data: { items: [{ id: 'primary', primary: true, accessRole: 'owner' }] } } }
+        case 'GOOGLECALENDAR_EVENTS_LIST': return { result: { data: { items: input.calendarItems ?? [] } } }
+        case 'GOOGLECALENDAR_EVENTS_GET': return { result: { data: input.calendarItems?.find(item => item.id === args.event_id) ?? {} } }
+        case 'GMAIL_FETCH_EMAILS': return { result: { data: { messages: (input.mailItems ?? []).map(item => ({
+          messageId: item.id, subject: item.subject, snippet: item.snippet, sender: 'Travel <travel@example.test>', messageTimestamp: input.now,
+        })) } } }
+        case 'GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID': {
+          const item = input.mailItems?.find(item => item.id === args.message_id)
+          return { result: { data: item ? { ...item, body: item.body ?? item.snippet } : {} } }
+        }
+        default: throw new Error('Unexpected prepared read tool.')
+      }
+    } },
+  })
+  expect(prepared.issues).toEqual([])
+  return prepared
+}
+
 async function materializeJournalConnectedContextVaultCli(input: {
   binDirectory: string
   commandLogPath?: string
@@ -43425,7 +43332,7 @@ async function materializeJournalConnectedContextVaultCli(input: {
   if (input.ledgerText !== null) {
     await upsertKnowledgePage({
       vault: input.vaultRoot, slug: 'journal-connected-context', title: 'Journal connected context',
-      body: input.ledgerText ?? '# Journal connected context\n\n- account: calendar_old\n  toolkit: googlecalendar\n  state: baseline',
+      body: input.ledgerText ?? JSON.stringify({ version: 1, optOuts: { global: false, accounts: [], providers: [], categories: [] }, activeAccounts: [], legacy: { marker: 'baseline' } }),
     })
   }
   await materializeRealWorkoutVaultCli({

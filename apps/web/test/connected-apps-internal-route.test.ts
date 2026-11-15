@@ -228,7 +228,7 @@ describe("internal connected-apps route", () => {
     expect(mocks.executeHostedConnectedAppsRequest).not.toHaveBeenCalled();
   });
 
-  it("rejects account-backed execution from a synthetic group container before provider work", async () => {
+  it.each(["execute", "read"])("rejects account-backed %s from a synthetic group container before provider work", async (operation) => {
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_group");
     const prisma = createPrisma({
       accountGroupMemberships: [],
@@ -248,7 +248,7 @@ describe("internal connected-apps route", () => {
             arguments: { query: "newer_than:7d" },
             toolSlug: "GMAIL_FETCH_EMAILS",
           },
-          operation: "execute",
+          operation,
         }),
         method: "POST",
       },

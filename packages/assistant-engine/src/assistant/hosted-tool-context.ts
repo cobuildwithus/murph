@@ -150,6 +150,7 @@ export interface AssistantHostedToolContext {
   readonly automationTool?: AssistantHostedAutomationTool | null
   readonly assistantConfigurationTool?: AssistantHostedAssistantConfigurationTool | null
   readonly connectedApps?: AssistantConnectedAppsPort | null
+  readonly preparedJournal?: import('./journal-connected-context-prepare.js').PreparedJournalContext | null
   readonly clinicalRecordsConnectLinkTool?: AssistantHostedClinicalRecordsConnectLinkTool | null
   readonly familyPlanTool?: AssistantHostedFamilyPlanTool | null
   readonly deviceTool?: AssistantHostedDeviceTool | null
@@ -477,7 +478,7 @@ export function createAssistantHostedToolContext(input: {
     automationTool: executionContext?.automationTool ?? null,
     assistantConfigurationTool:
       executionContext?.assistantConfigurationTool ?? null,
-    connectedApps: executionContext?.connectedApps ?? null,
+    ...connectedToolContext(executionContext),
     clinicalRecordsConnectLinkTool: clinicalRecordsConnectLinkTool
       ? {
           createConnectLink: (options) => {
@@ -932,4 +933,8 @@ function readPollTool(context: AssistantHostedExecutionContext | null): Conversa
 
 function readMyGameRemindersTool(context: AssistantHostedExecutionContext | null): AssistantHostedGroupTool | null {
   return context?.myGameRemindersTool ?? null
+}
+
+function connectedToolContext(context: AssistantHostedExecutionContext | null) {
+  return { connectedApps: context?.connectedApps ?? null, preparedJournal: context?.preparedJournal ?? null }
 }

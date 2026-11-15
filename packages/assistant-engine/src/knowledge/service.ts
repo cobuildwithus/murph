@@ -65,7 +65,7 @@ const KNOWLEDGE_PROBLEM_SEVERITY_ORDER: Record<KnowledgeLintProblem['severity'],
 export interface KnowledgeUpsertInput {
   body: string
   clearLibrarySlugs?: boolean | null
-  expectedMarkdown?: string
+  expectedMarkdown?: string | null
   librarySlugs?: string[] | null
   vault: string
   title?: string | null
@@ -182,7 +182,10 @@ export async function upsertKnowledgePage(
     run: async () => {
       const { graph } = await readDerivedKnowledgeGraphWithIssues(input.vault)
       const existingPage = requireUniqueKnowledgePageBySlug(graph, slug, 'upsert')
-      if (input.expectedMarkdown !== undefined) {
+      if (input.expectedMarkdown === null && existingPage) {
+        throw new VaultCliError('knowledge_page_conflict', 'Knowledge page was created before the guarded update.')
+      }
+      if (typeof input.expectedMarkdown === 'string') {
         if (!existingPage) {
           throw new VaultCliError(
             'knowledge_page_conflict',

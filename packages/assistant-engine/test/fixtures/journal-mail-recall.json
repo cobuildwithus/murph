@@ -1,0 +1,1009 @@
+{
+  "positive": [
+    {
+      "category": "air",
+      "subject": "Your flight to Madrid is confirmed"
+    },
+    {
+      "category": "air",
+      "subject": "Flight booking reference for tomorrow"
+    },
+    {
+      "category": "air",
+      "subject": "Your updated flight itinerary"
+    },
+    {
+      "category": "air",
+      "subject": "Boarding pass ready for your journey"
+    },
+    {
+      "category": "air",
+      "subject": "Check-in is open for your outbound flight"
+    },
+    {
+      "category": "air",
+      "subject": "Your return flight has changed"
+    },
+    {
+      "category": "air",
+      "subject": "Schedule change: please review your trip"
+    },
+    {
+      "category": "air",
+      "subject": "Your flight was cancelled"
+    },
+    {
+      "category": "air",
+      "subject": "Cancellation confirmation for your flight"
+    },
+    {
+      "category": "air",
+      "subject": "Your e-ticket receipt"
+    },
+    {
+      "category": "air",
+      "subject": "Tickets for your connecting flight"
+    },
+    {
+      "category": "air",
+      "subject": "Your trip is booked"
+    },
+    {
+      "category": "air",
+      "subject": "Travel confirmation for the whole family",
+      "body": "Your booking reference is FAMILY-SYNTHETIC. The itinerary covers both flights."
+    },
+    {
+      "category": "air",
+      "subject": "A new departure time for your flight"
+    },
+    {
+      "category": "air",
+      "subject": "Arrival information for your connection",
+      "body": "Your boarding pass covers the connecting service."
+    },
+    {
+      "category": "air",
+      "subject": "Your airport transfer is confirmed",
+      "body": "Booking confirmation: the driver will meet you at the arrivals hall."
+    },
+    {
+      "category": "air",
+      "subject": "Shuttle reservation for the airport"
+    },
+    {
+      "category": "air",
+      "subject": "Your private transfer booking"
+    },
+    {
+      "category": "air",
+      "subject": "Helicopter tour tickets"
+    },
+    {
+      "category": "air",
+      "subject": "Seaplane flight confirmation"
+    },
+    {
+      "category": "lodging",
+      "subject": "Your hotel reservation is confirmed"
+    },
+    {
+      "category": "lodging",
+      "subject": "Hotel booking amendment"
+    },
+    {
+      "category": "lodging",
+      "subject": "Your upcoming stay in Lisbon",
+      "sender": "Lisbon Hotel <reservations@hilton.com>"
+    },
+    {
+      "category": "lodging",
+      "subject": "Check-in instructions for your apartment"
+    },
+    {
+      "category": "lodging",
+      "subject": "Your accommodation details",
+      "body": "Booking reference CABIN-SYNTHETIC. Check-in starts at 15:00."
+    },
+    {
+      "category": "lodging",
+      "subject": "Cabin reservation confirmation"
+    },
+    {
+      "category": "lodging",
+      "subject": "Your campsite booking"
+    },
+    {
+      "category": "lodging",
+      "subject": "Camping registration received"
+    },
+    {
+      "category": "lodging",
+      "subject": "Your hostel stay is confirmed",
+      "body": "Booking confirmation for your shared room."
+    },
+    {
+      "category": "lodging",
+      "subject": "Guesthouse booking receipt"
+    },
+    {
+      "category": "lodging",
+      "subject": "Your vacation rental is booked"
+    },
+    {
+      "category": "lodging",
+      "subject": "Your rental check-in guide"
+    },
+    {
+      "category": "lodging",
+      "subject": "An update to your hotel reservation"
+    },
+    {
+      "category": "lodging",
+      "subject": "Hotel reservation cancelled"
+    },
+    {
+      "category": "lodging",
+      "subject": "Your stay has been extended",
+      "body": "Reservation number STAY-SYNTHETIC now covers an additional night."
+    },
+    {
+      "category": "lodging",
+      "subject": "Early departure confirmation",
+      "body": "Your hotel booking reference is HOTEL-SYNTHETIC."
+    },
+    {
+      "category": "lodging",
+      "subject": "Your retreat accommodation",
+      "body": "Reservation confirmation for the retreat lodge."
+    },
+    {
+      "category": "lodging",
+      "subject": "Your cruise cabin reservation"
+    },
+    {
+      "category": "lodging",
+      "subject": "Your resort confirmation",
+      "sender": "Resort Desk <updates@mail.marriott.com>"
+    },
+    {
+      "category": "lodging",
+      "subject": "Your lodge stay starts soon",
+      "body": "Your booking reference is LODGE-SYNTHETIC."
+    },
+    {
+      "category": "rail",
+      "subject": "Train tickets for your journey"
+    },
+    {
+      "category": "rail",
+      "subject": "Your rail itinerary"
+    },
+    {
+      "category": "rail",
+      "subject": "Rail reservation confirmed"
+    },
+    {
+      "category": "rail",
+      "subject": "Your train departure has changed"
+    },
+    {
+      "category": "rail",
+      "subject": "Your return train ticket"
+    },
+    {
+      "category": "rail",
+      "subject": "Rail ticket cancellation"
+    },
+    {
+      "category": "rail",
+      "subject": "Your sleeper train booking"
+    },
+    {
+      "category": "rail",
+      "subject": "Euro rail pass confirmation"
+    },
+    {
+      "category": "bus",
+      "subject": "Your bus ticket is ready"
+    },
+    {
+      "category": "bus",
+      "subject": "Bus reservation receipt"
+    },
+    {
+      "category": "bus",
+      "subject": "Your bus departure has moved"
+    },
+    {
+      "category": "bus",
+      "subject": "Coach ticket confirmation",
+      "body": "Your e-ticket covers the coach from the city to the coast."
+    },
+    {
+      "category": "ferry",
+      "subject": "Your ferry booking"
+    },
+    {
+      "category": "ferry",
+      "subject": "Ferry check-in instructions"
+    },
+    {
+      "category": "ferry",
+      "subject": "Ferry schedule change"
+    },
+    {
+      "category": "cruise",
+      "subject": "Your cruise itinerary"
+    },
+    {
+      "category": "cruise",
+      "subject": "Cruise reservation confirmed"
+    },
+    {
+      "category": "cruise",
+      "subject": "Your sailing ticket",
+      "body": "Your booking reference is FERRY-SYNTHETIC."
+    },
+    {
+      "category": "cruise",
+      "subject": "Your shuttle booking"
+    },
+    {
+      "category": "cruise",
+      "subject": "Your transport reservation"
+    },
+    {
+      "category": "rental",
+      "subject": "Your car rental confirmation"
+    },
+    {
+      "category": "rental",
+      "subject": "Rental pickup instructions"
+    },
+    {
+      "category": "rental",
+      "subject": "Your rental reservation has changed"
+    },
+    {
+      "category": "rental",
+      "subject": "Car rental cancellation"
+    },
+    {
+      "category": "rental",
+      "subject": "Your van booking"
+    },
+    {
+      "category": "rental",
+      "subject": "Campervan rental confirmation"
+    },
+    {
+      "category": "rental",
+      "subject": "Motorhome rental details"
+    },
+    {
+      "category": "rental",
+      "subject": "Your bicycle rental"
+    },
+    {
+      "category": "rental",
+      "subject": "Scooter rental receipt"
+    },
+    {
+      "category": "rental",
+      "subject": "Your airport parking reservation"
+    },
+    {
+      "category": "rental",
+      "subject": "Your parking booking is confirmed"
+    },
+    {
+      "category": "rental",
+      "subject": "Rental return time changed"
+    },
+    {
+      "category": "rental",
+      "subject": "Your motorcycle rental booking"
+    },
+    {
+      "category": "rental",
+      "subject": "Your boat rental confirmation"
+    },
+    {
+      "category": "rental",
+      "subject": "Your snowmobile tour reservation"
+    },
+    {
+      "category": "tickets",
+      "subject": "Your concert tickets"
+    },
+    {
+      "category": "tickets",
+      "subject": "Your festival booking"
+    },
+    {
+      "category": "tickets",
+      "subject": "Your theatre ticket confirmation",
+      "body": "Your e-ticket covers two seats at the evening performance."
+    },
+    {
+      "category": "tickets",
+      "subject": "Museum entry confirmed",
+      "body": "Booking confirmation for the 14:30 museum visit."
+    },
+    {
+      "category": "tickets",
+      "subject": "Your timed entry tickets"
+    },
+    {
+      "category": "tickets",
+      "subject": "Your stadium tickets are ready"
+    },
+    {
+      "category": "tickets",
+      "subject": "Match ticket confirmation",
+      "body": "Your e-ticket admits you to the match."
+    },
+    {
+      "category": "tickets",
+      "subject": "Your exhibition reservation"
+    },
+    {
+      "category": "activity",
+      "subject": "Your event registration"
+    },
+    {
+      "category": "activity",
+      "subject": "Your cinema booking"
+    },
+    {
+      "category": "activity",
+      "subject": "Your dinner reservation"
+    },
+    {
+      "category": "activity",
+      "subject": "Restaurant booking confirmation"
+    },
+    {
+      "category": "activity",
+      "subject": "Your tasting tour is confirmed",
+      "body": "Booking confirmation: the winery tour starts at noon."
+    },
+    {
+      "category": "activity",
+      "subject": "Your guided tour tickets"
+    },
+    {
+      "category": "activity",
+      "subject": "Your walking tour reservation"
+    },
+    {
+      "category": "activity",
+      "subject": "Your attraction booking"
+    },
+    {
+      "category": "activity",
+      "subject": "Your safari reservation"
+    },
+    {
+      "category": "activity",
+      "subject": "Your ski pass confirmation",
+      "body": "Booking reference SKI-SYNTHETIC covers the three-day lift pass."
+    },
+    {
+      "category": "activity",
+      "subject": "Lift ticket collection details",
+      "body": "Reservation number LIFT-SYNTHETIC. Collect your lift pass at the base station."
+    },
+    {
+      "category": "activity",
+      "subject": "Your amusement park tickets"
+    },
+    {
+      "category": "race",
+      "subject": "Marathon registration confirmation"
+    },
+    {
+      "category": "race",
+      "subject": "You're in: city half marathon"
+    },
+    {
+      "category": "race",
+      "subject": "Your race entry is confirmed"
+    },
+    {
+      "category": "race",
+      "subject": "Your bib collection information",
+      "body": "Your bib number is 1234. Packet pickup opens Friday."
+    },
+    {
+      "category": "race",
+      "subject": "Triathlon registration received"
+    },
+    {
+      "category": "race",
+      "subject": "Your cycling race booking"
+    },
+    {
+      "category": "race",
+      "subject": "Trail race confirmation"
+    },
+    {
+      "category": "race",
+      "subject": "Your tournament registration"
+    },
+    {
+      "category": "race",
+      "subject": "Your tennis tournament entry",
+      "body": "Registration confirmed for the weekend tennis tournament."
+    },
+    {
+      "category": "race",
+      "subject": "Your open-water swim registration"
+    },
+    {
+      "category": "race",
+      "subject": "Your obstacle race ticket"
+    },
+    {
+      "category": "race",
+      "subject": "Your ultramarathon registration"
+    },
+    {
+      "category": "race",
+      "subject": "Race schedule change"
+    },
+    {
+      "category": "race",
+      "subject": "Your race has been postponed"
+    },
+    {
+      "category": "race",
+      "subject": "Tournament cancellation notice",
+      "body": "Your booking reference is TENNIS-SYNTHETIC. The tournament has been cancelled."
+    },
+    {
+      "category": "event-registration",
+      "subject": "Your camp registration"
+    },
+    {
+      "category": "event-registration",
+      "subject": "Training camp confirmation",
+      "body": "Registration confirmed for the cycling training camp."
+    },
+    {
+      "category": "event-registration",
+      "subject": "Your wellness retreat booking"
+    },
+    {
+      "category": "event-registration",
+      "subject": "Retreat schedule change"
+    },
+    {
+      "category": "event-registration",
+      "subject": "Your yoga retreat reservation"
+    },
+    {
+      "category": "event-registration",
+      "subject": "Your class registration is confirmed"
+    },
+    {
+      "category": "event-registration",
+      "subject": "You've registered for pottery",
+      "body": "Registration confirmed for the Saturday pottery session."
+    },
+    {
+      "category": "event-registration",
+      "subject": "Workshop confirmation and directions",
+      "body": "Registration confirmed for the bookbinding workshop."
+    },
+    {
+      "category": "event-registration",
+      "subject": "Your cooking class booking"
+    },
+    {
+      "category": "event-registration",
+      "subject": "Course registration receipt"
+    },
+    {
+      "category": "event-registration",
+      "subject": "Your language course is booked"
+    },
+    {
+      "category": "event-registration",
+      "subject": "Your swimming lesson confirmation",
+      "body": "Booking confirmation for your private swimming lesson."
+    },
+    {
+      "category": "event-registration",
+      "subject": "Tennis class registration"
+    },
+    {
+      "category": "event-registration",
+      "subject": "Your dance workshop ticket",
+      "body": "Your e-ticket is ready for the dance workshop."
+    },
+    {
+      "category": "event-registration",
+      "subject": "Your climbing course reservation"
+    },
+    {
+      "category": "event-registration",
+      "subject": "Your guided kayaking session confirmation",
+      "body": "Booking confirmation for a guided kayaking session on Saturday."
+    },
+    {
+      "category": "event-registration",
+      "subject": "Your sauna booking"
+    },
+    {
+      "category": "event-registration",
+      "subject": "Your recovery session is confirmed",
+      "body": "Booking reference SAUNA-SYNTHETIC for your reserved sauna session."
+    },
+    {
+      "category": "event-registration",
+      "subject": "Your registration has been cancelled"
+    },
+    {
+      "category": "event-registration",
+      "subject": "Your class has been rescheduled",
+      "body": "Your booking reference is COOKING-SYNTHETIC. The cooking class now starts at 18:00."
+    },
+    {
+      "category": "event-registration",
+      "subject": "Your workshop has been postponed",
+      "body": "Registration confirmed previously for the printmaking workshop; it has moved to Sunday."
+    },
+    {
+      "category": "event-registration",
+      "subject": "Your camp entry details",
+      "body": "Registration confirmed for the outdoor skills camp."
+    },
+    {
+      "category": "event-registration",
+      "subject": "Your retreat departure instructions",
+      "body": "Your itinerary includes the bus to the retreat lodge."
+    },
+    {
+      "category": "event-registration",
+      "subject": "Your training session booking"
+    },
+    {
+      "category": "event-registration",
+      "subject": "Your outdoor course confirmation",
+      "body": "Registration confirmed for the guided navigation course."
+    },
+    {
+      "category": "non-English",
+      "subject": "Votre réservation est confirmée"
+    },
+    {
+      "category": "non-English",
+      "subject": "Votre billet de train"
+    },
+    {
+      "category": "non-English",
+      "subject": "Confirmation de votre vol",
+      "body": "Votre carte d'embarquement sera disponible demain."
+    },
+    {
+      "category": "non-English",
+      "subject": "Votre voyage approche"
+    },
+    {
+      "category": "non-English",
+      "subject": "Annulation de votre réservation"
+    },
+    {
+      "category": "non-English",
+      "subject": "Votre inscription au marathon"
+    },
+    {
+      "category": "non-English",
+      "subject": "Détails de votre hébergement"
+    },
+    {
+      "category": "non-English",
+      "subject": "Reserva de hotel confirmada"
+    },
+    {
+      "category": "non-English",
+      "subject": "Confirmación de tu vuelo"
+    },
+    {
+      "category": "non-English",
+      "subject": "Tu boleto está listo"
+    },
+    {
+      "category": "non-English",
+      "subject": "Billete de tren para mañana"
+    },
+    {
+      "category": "non-English",
+      "subject": "Cancelación de la reserva"
+    },
+    {
+      "category": "non-English",
+      "subject": "Inscripción a la carrera"
+    },
+    {
+      "category": "non-English",
+      "subject": "Detalles de tu alojamiento"
+    },
+    {
+      "category": "non-English",
+      "subject": "Ihre Buchung ist bestätigt"
+    },
+    {
+      "category": "non-English",
+      "subject": "Bestätigung Ihrer Reise"
+    },
+    {
+      "category": "non-English",
+      "subject": "Ihr Flug wurde geändert"
+    },
+    {
+      "category": "non-English",
+      "subject": "Ihre Fahrkarte ist bereit"
+    },
+    {
+      "category": "non-English",
+      "subject": "Stornierung Ihrer Buchung"
+    },
+    {
+      "category": "non-English",
+      "subject": "Anmeldung zum Lauf"
+    },
+    {
+      "category": "non-English",
+      "subject": "Informationen zur Unterkunft"
+    },
+    {
+      "category": "non-English",
+      "subject": "La tua prenotazione è confermata"
+    },
+    {
+      "category": "non-English",
+      "subject": "Conferma del volo"
+    },
+    {
+      "category": "non-English",
+      "subject": "Il tuo biglietto del treno"
+    },
+    {
+      "category": "non-English",
+      "subject": "Annullamento della prenotazione"
+    },
+    {
+      "category": "non-English",
+      "subject": "Iscrizione alla gara"
+    },
+    {
+      "category": "non-English",
+      "subject": "Confirmação da reserva"
+    },
+    {
+      "category": "non-English",
+      "subject": "Sua passagem está pronta"
+    },
+    {
+      "category": "non-English",
+      "subject": "Alteração do voo"
+    },
+    {
+      "category": "non-English",
+      "subject": "Cancelamento da viagem"
+    },
+    {
+      "category": "non-English",
+      "subject": "Inscrição na corrida"
+    },
+    {
+      "category": "non-English",
+      "subject": "Bevestiging van uw boeking"
+    },
+    {
+      "category": "non-English",
+      "subject": "Uw vlucht is gewijzigd"
+    },
+    {
+      "category": "non-English",
+      "subject": "Annulering van uw reservering"
+    },
+    {
+      "category": "non-English",
+      "subject": "ホテルの予約確認"
+    },
+    {
+      "category": "non-English",
+      "subject": "航空券のご案内"
+    },
+    {
+      "category": "non-English",
+      "subject": "搭乗手続きのお知らせ"
+    },
+    {
+      "category": "non-English",
+      "subject": "旅程の変更"
+    },
+    {
+      "category": "non-English",
+      "subject": "乗車券のお知らせ"
+    },
+    {
+      "category": "non-English",
+      "subject": "予約のキャンセル"
+    },
+    {
+      "category": "non-English",
+      "subject": "酒店预订确认"
+    },
+    {
+      "category": "non-English",
+      "subject": "您的机票已确认"
+    },
+    {
+      "category": "non-English",
+      "subject": "行程变更通知"
+    },
+    {
+      "category": "non-English",
+      "subject": "活动报名成功"
+    },
+    {
+      "category": "non-English",
+      "subject": "预订已取消"
+    },
+    {
+      "category": "non-English",
+      "subject": "호텔 예약 확인"
+    },
+    {
+      "category": "non-English",
+      "subject": "항공권 안내"
+    },
+    {
+      "category": "non-English",
+      "subject": "تأكيد حجز الفندق"
+    },
+    {
+      "category": "non-English",
+      "subject": "تذكرة رحلتك"
+    },
+    {
+      "category": "non-English",
+      "subject": "Подтверждение бронирование"
+    },
+    {
+      "category": "non-English",
+      "subject": "Ваш билет готов"
+    },
+    {
+      "category": "non-English",
+      "subject": "Изменился рейс"
+    },
+    {
+      "category": "non-English",
+      "subject": "Ваша регистрация подтверждена"
+    },
+    {
+      "category": "non-English",
+      "subject": "आपकी बुकिंग की पुष्टि"
+    },
+    {
+      "category": "non-English",
+      "subject": "आपका टिकट तैयार है"
+    },
+    {
+      "category": "changes",
+      "subject": "Schedule change for Friday",
+      "body": "Your flight will depart one hour later."
+    },
+    {
+      "category": "cancellations",
+      "subject": "Booking cancelled: coastal tour",
+      "body": "Your refund will be processed this week."
+    },
+    {
+      "category": "forwards",
+      "subject": "For next month",
+      "body": "Forwarded message: your booking confirmation for the ferry crossing."
+    },
+    {
+      "category": "forwards",
+      "subject": "Your documents",
+      "body": "Your boarding pass is attached."
+    },
+    {
+      "category": "forwards",
+      "subject": "Details",
+      "body": "Votre confirmation de réservation est jointe."
+    },
+    {
+      "category": "forwards",
+      "subject": "Welcome",
+      "body": "Registration confirmed for the mountain navigation event."
+    },
+    {
+      "category": "non-English",
+      "subject": "Unterlagen",
+      "body": "Ihre Buchungsbestätigung ist beigefügt."
+    },
+    {
+      "category": "non-English",
+      "subject": "Documenti",
+      "body": "Conferma prenotazione per il soggiorno."
+    },
+    {
+      "category": "non-English",
+      "subject": "Documentos",
+      "body": "Confirmação de reserva para duas noites."
+    },
+    {
+      "category": "non-English",
+      "subject": "Details",
+      "body": "Uw reserveringsbevestiging is bijgevoegd."
+    },
+    {
+      "category": "non-English",
+      "subject": "ご案内",
+      "body": "ホテルの予約確認です。"
+    },
+    {
+      "category": "non-English",
+      "subject": "您的文件",
+      "body": "请查看登机牌。"
+    },
+    {
+      "category": "non-English",
+      "subject": "안내",
+      "body": "예약 확인 문서를 확인하세요."
+    },
+    {
+      "category": "tickets",
+      "subject": "Your purchase details",
+      "sender": "Box Office <orders@ticketmaster.com>"
+    },
+    {
+      "category": "race",
+      "subject": "You are on the list",
+      "sender": "Race Desk <updates@runsignup.com>"
+    },
+    {
+      "category": "activity",
+      "subject": "Saturday details",
+      "body": "Your tee time is 08:30."
+    }
+  ],
+  "negative": [
+    {
+      "subject": "Your password was reset"
+    },
+    {
+      "subject": "Weekly engineering digest"
+    },
+    {
+      "subject": "Your bank statement is available"
+    },
+    {
+      "subject": "Security alert for your account"
+    },
+    {
+      "subject": "Please review the quarterly report"
+    },
+    {
+      "subject": "The new product catalog"
+    },
+    {
+      "subject": "Your grocery delivery has arrived"
+    },
+    {
+      "subject": "A message from your colleague"
+    },
+    {
+      "subject": "Photos from yesterday"
+    },
+    {
+      "subject": "Newsletter: autumn reading"
+    },
+    {
+      "subject": "Invoice for web hosting"
+    },
+    {
+      "subject": "Verify your email address"
+    },
+    {
+      "subject": "A new sign-in was detected"
+    },
+    {
+      "subject": "Your subscription renews tomorrow"
+    },
+    {
+      "subject": "New features in your dashboard"
+    },
+    {
+      "subject": "Your package is out for delivery"
+    },
+    {
+      "subject": "Reminder to update your profile"
+    },
+    {
+      "subject": "Monthly electricity bill"
+    },
+    {
+      "subject": "Your receipt for coffee"
+    },
+    {
+      "subject": "The document is ready for review"
+    },
+    {
+      "subject": "Order confirmation",
+      "body": "Your order is confirmed. A receipt is attached."
+    },
+    {
+      "subject": "Shipping confirmation",
+      "body": "Your package will arrive tomorrow."
+    },
+    {
+      "subject": "Bank transfer confirmed",
+      "body": "The transfer was confirmed. Your receipt is available."
+    },
+    {
+      "subject": "Medical appointment confirmation",
+      "body": "Your appointment with the clinic is confirmed for Monday."
+    },
+    {
+      "subject": "Dental appointment confirmation",
+      "body": "Your dental appointment is confirmed."
+    },
+    {
+      "subject": "Support ticket received",
+      "body": "Your support ticket is in the queue."
+    },
+    {
+      "subject": "Open support tickets",
+      "body": "A summary of support tickets awaiting your reply."
+    },
+    {
+      "subject": "A new course for you",
+      "body": "Learn at your own pace in our new course."
+    },
+    {
+      "subject": "Class offers this week",
+      "body": "Try a class or workshop. Stay curious and transfer your skills."
+    },
+    {
+      "subject": "Weekly newsletter",
+      "body": "Explore the city with a tour, try a workshop, or join a camp."
+    },
+    {
+      "subject": "Your payment receipt",
+      "body": "Payment confirmed. This confirmation is your receipt."
+    },
+    {
+      "subject": "Your order has arrived",
+      "body": "Thank you for your entry in our giveaway."
+    },
+    {
+      "subject": "Account confirmation",
+      "body": "Click to confirm your account registration."
+    },
+    {
+      "subject": "Team update",
+      "body": "We confirmed the workshop and course departure from the old curriculum."
+    },
+    {
+      "subject": "A normal newsletter",
+      "sender": "News <news@not-ticketmaster.com>"
+    },
+    {
+      "subject": "Limited hotel deals",
+      "body": "Save on hotel reservations this week.",
+      "promotions": true,
+      "providers": [
+        "gmail"
+      ]
+    }
+  ]
+}
