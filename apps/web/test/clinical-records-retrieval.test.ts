@@ -1,3 +1,6 @@
+import * as clinicalErrors from "@/src/lib/clinical-records/errors";
+import * as clinicalDocuments from "@/src/lib/clinical-records/documents";
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -200,6 +203,19 @@ describe("Clinical Records retrieval control plane", () => {
         retryable: label === "interrupted stream" });
     expect(fetchImpl.mock.calls.filter(([url]) => String(url).includes("/Binary/"))).toHaveLength(binaryFetched ? 1 : 0);
     expect(harness.state.run.pageCount).toBe(1);
+  });
+
+  it.each([
+    [new ContractValidationError("Invalid ticket."), "document-ticket-invalid", false],
+    [new DOMException("Invalid ticket.", "OperationError"), "document-ticket-invalid", false],
+    [new TypeError("Invalid ticket."), "document-ticket-invalid", false],
+    [new Error("Invalid ticket."), "document-ticket-temporarily-unavailable", true],
+  ])("classifies ticket failures by meaning", async (error, errorCode, retryable) => {
+    const harness = createHarness(["DocumentReference"]);
+    harness.state.run.grantedScopesJson = ["patient/DocumentReference.read", "patient/Binary.read"];
+    mocks.openClinicalDocumentTicket.mockRejectedValueOnce(error);
+    await expect(fetchClinicalRetrievalDocument({ memberId: MEMBER_ID, fetchImpl: vi.fn(),
+      request: { runId: RUN_ID, generation: 1, ticket: "opaque-ticket" } })).resolves.toEqual({ status: "unavailable", errorCode, retryable });
   });
 
   it("retains document recovery through a transient key service failure", async () => {
@@ -555,6 +571,58 @@ describe("Clinical Records retrieval control plane", () => {
     })).rejects.toThrow("Transient cursor decryption failure.");
     expect(fetchImpl).not.toHaveBeenCalled();
   });
+
+  it.each([new ContractValidationError("Invalid page."), new TypeError("Invalid page.")])(
+    "preserves native and contract page failure handling: %s", async error => {
+      createHarness(["Observation"]);
+      mocks.sealClinicalPageCursor.mockRejectedValueOnce(error);
+      await expect(fetchClinicalRetrievalPage({ memberId: MEMBER_ID,
+        fetchImpl: vi.fn().mockResolvedValue(fhirResponse({ resourceType: "Bundle", entry: [],
+          link: [{ relation: "next", url: "https://fhir.example.test/FHIR/R4/Observation?page=2" }] })),
+        request: pageRequest({ requestId: "invalid-page", resourceType: "Observation" }),
+      })).resolves.toEqual({ status: "unavailable", errorCode: "provider-response-invalid", retryable: false });
+    },
+  );
+
+  it.each([new ContractValidationError("Invalid metadata."), new TypeError("Invalid metadata.")])(
+    "translates native and contract sanitizer failures: %s", async error => {
+      createHarness(["Observation"]);
+      const response = fhirResponse({ resourceType: "Bundle", entry: [] });
+      const get = vi.spyOn(response.headers, "get").mockImplementation(() => { throw error; });
+      const translate = vi.spyOn(clinicalErrors, "clinicalRecordsError");
+      try {
+        await expect(fetchClinicalRetrievalPage({ memberId: MEMBER_ID,
+          fetchImpl: vi.fn().mockResolvedValue(response),
+          request: pageRequest({ requestId: "invalid-metadata", resourceType: "Observation" }),
+        })).resolves.toEqual({ status: "unavailable", errorCode: "provider-response-invalid", retryable: false });
+        expect(translate).toHaveBeenCalledWith(expect.objectContaining({
+          cause: error, code: "CLINICAL_RECORD_FHIR_RESPONSE_INVALID", httpStatus: 502,
+        }));
+      } finally { get.mockRestore(); translate.mockRestore(); }
+    },
+  );
+
+  it.each([new ContractValidationError("Invalid document."), new TypeError("Invalid document."), new SyntaxError("Invalid document.")])(
+    "preserves native and contract document failure handling: %s", async error => {
+      const harness = createHarness(["DocumentReference"]);
+      harness.state.run.grantedScopesJson = ["patient/DocumentReference.read", "patient/Binary.read"];
+      const fetchImpl = vi.fn().mockResolvedValue(fhirResponse({ resourceType: "Bundle", entry: [{ resource: {
+        resourceType: "DocumentReference", id: "note-1", status: "current",
+        meta: { lastUpdated: "2026-09-10T12:00:00Z" }, subject: { reference: "Patient/patient-1" },
+        content: [{ attachment: { url: "Binary/document-1", contentType: "text/plain", size: 13 } }],
+      } }] }));
+      const page = await fetchClinicalRetrievalPage({ memberId: MEMBER_ID, fetchImpl,
+        request: pageRequest({ requestId: "document-page", resourceType: "DocumentReference" }) });
+      if (page.status !== "page" || !page.documents?.[0]?.ticket) throw new Error("Expected document ticket.");
+      const read = vi.spyOn(clinicalDocuments, "readClinicalDocumentResponse").mockRejectedValueOnce(error);
+      try {
+        await expect(fetchClinicalRetrievalDocument({ memberId: MEMBER_ID, fetchImpl,
+          request: { runId: RUN_ID, generation: 1, ticket: page.documents[0].ticket },
+        })).resolves.toEqual({ status: "unavailable", errorCode: "document-response-invalid", retryable: false });
+        expect(read).toHaveBeenCalledOnce();
+      } finally { read.mockRestore(); }
+    },
+  );
 
   it("lets transient cursor encryption failures remain retryable", async () => {
     const harness = createHarness(["Patient", "Observation"]);

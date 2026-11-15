@@ -1,5 +1,5 @@
 import { ContractValidationError } from "@murphai/contracts/validation-error";
-import { leaveHostedLinqGroupTx, prepareHostedLinqGroupLeave, assertHostedLinqGroupNotLeft } from "../hosted-routing/linq-group-leave";
+import { leaveHostedLinqGroupTx, prepareHostedLinqGroupLeave, assertHostedLinqGroupNotLeft, type HostedLinqGroupRosterRejection } from "../hosted-routing/linq-group-leave";
 import { applyHostedLinqGroupMoveIngressTx, type PreparedHostedLinqGroupMoveIngress } from "../hosted-routing/linq-group-line-move-ingress";
 import { replaceHostedLinqGroupLineMoveRouteTx } from "../hosted-routing/thread-container-service";
 import { associateGameChatInviteTx, type prepareGameChatInvite } from "../game/chat-membership";
@@ -379,10 +379,10 @@ export async function resolveHostedLinqDirectPreparationMemberId(input: {
 // Container preparation needs a usable roster: an unreadable one retries,
 // and one above the setup cap is never admitted.
 function hasHostedLinqGroupAdmissionRoster(input: {
-  pendingGroupRosterOversized?: boolean;
+  pendingGroupRosterRejection?: HostedLinqGroupRosterRejection;
   pendingGroupRosterUnavailable?: boolean;
 }): boolean {
-  return input.pendingGroupRosterOversized !== true
+  return input.pendingGroupRosterRejection === undefined
     && input.pendingGroupRosterUnavailable !== true;
 }
 
@@ -394,7 +394,7 @@ function hasHostedLinqGroupAdmissionRoster(input: {
 export async function prepareHostedLinqThreadContainerAdmission(input: {
   event: HostedLinqWebhookEvent;
   participantMemberIds: readonly string[];
-  pendingGroupRosterOversized?: boolean;
+  pendingGroupRosterRejection?: HostedLinqGroupRosterRejection;
   pendingGroupRosterUnavailable?: boolean;
   prisma: PrismaClient;
 }): Promise<{
@@ -574,7 +574,7 @@ export async function prepareHostedLinqThreadContainerAdmission(input: {
 export async function shouldPrepareHostedLinqThreadContainerCrypto(input: {
   event: HostedLinqWebhookEvent;
   participantMemberIds: readonly string[];
-  pendingGroupRosterOversized?: boolean;
+  pendingGroupRosterRejection?: HostedLinqGroupRosterRejection;
   pendingGroupRosterUnavailable?: boolean;
   prisma: PrismaClient;
 }): Promise<boolean> {
@@ -1338,7 +1338,7 @@ type HostedOnboardingLinqWebhookPlannerInput = {
   initialGroupDisplayName?: string | null;
   instantStartAllowed?: boolean;
   pendingGroupParticipantMemberIds?: readonly string[] | null;
-  pendingGroupRosterOversized?: boolean;
+  pendingGroupRosterRejection?: HostedLinqGroupRosterRejection;
   pendingGroupRosterUnavailable?: boolean;
   preparedPendingGroupSetup?: HostedPreparedPendingGroupSetupPackage;
   directMailboxPreparationFailure?: unknown;
@@ -1473,7 +1473,7 @@ export async function planHostedOnboardingLinqWebhook(
       preparedPendingGroupSetup: input.preparedPendingGroupSetup,
       preparedThreadContainerCreation: input.preparedThreadContainerCreation,
       preparedThreadDeliveryRoute: input.preparedThreadDeliveryRoute,
-      rosterOversized: input.pendingGroupRosterOversized,
+      rosterRejection: input.pendingGroupRosterRejection,
       rosterUnavailable: input.pendingGroupRosterUnavailable ?? false,
       prisma: input.prisma,
       requireFirstContactAdmission: input.requireFirstContactAdmission,
@@ -3825,6 +3825,7 @@ type HostedLinqNewGroupAdmissionIgnoreReason =
   | "blocked-first-contact-content"
   | "contentless-first-contact"
   | "empty-message-parts"
+  | "group-roster-blocked"
   | "group-roster-oversized"
   | "local-inbound-not-allowlisted"
   | "own-message"
@@ -3843,7 +3844,8 @@ type HostedLinqNewGroupAdmissionIgnoreReason =
   | "suspended-member";
 
 /**
- * Murph never starts a group above the setup cap, whoever messages. Big mixed
+ * Murph never starts a group above the setup cap or one with a blocked
+ * participant, whoever messages. Big mixed
  * iMessage/RCS rooms reappear under a new chat id on each roster change, so a
  * setup notice, private nudge or bound assistant would repeat in every copy.
  * The distinct response reason also keeps private recovery out.
@@ -3851,14 +3853,16 @@ type HostedLinqNewGroupAdmissionIgnoreReason =
 async function planHostedLinqUnboundGroupChatWebhook(
   input: Parameters<typeof planHostedLinqGroupChatWebhook>[0],
 ): Promise<HostedOnboardingLinqDirectPlan> {
-  if (input.rosterOversized !== true) return planHostedLinqGroupChatWebhook(input);
+  const rejection = input.rosterRejection;
+  if (rejection === undefined) return planHostedLinqGroupChatWebhook(input);
+  const reason = rejection === "oversized" ? "group-roster-oversized" : "group-roster-blocked";
   const plan = buildHostedLinqIgnoredPlan(input.event, input.context, {
-    existingMemberMatch: "none", reason: "group-roster-oversized", routeStage: "new-group-admission-ignored",
-  }, "group-roster-oversized");
+    existingMemberMatch: "none", reason, routeStage: "new-group-admission-ignored",
+  }, reason);
   const line = await readHostedLinqIncomingLineState({ phoneNumberLookupKeys: input.threadRouteAccountLookupKeys, prisma: input.prisma });
   if (!("phoneNumberLookupKey" in line)) return plan;
   const result = await leaveHostedLinqGroupTx({ expected: null, prisma: input.prisma,
-    prepared: prepareHostedLinqGroupLeave(input.context.summary.chatId, "oversized") });
+    prepared: prepareHostedLinqGroupLeave(input.context.summary.chatId, rejection) });
   return result.status === "left" ? { ...plan, postCommitLinqGroupLeave: result.postCommitLinqGroupLeave } : plan;
 }
 
@@ -3884,7 +3888,7 @@ async function planHostedLinqGroupChatWebhook(input: {
   preparedPendingGroupSetup?: HostedPreparedPendingGroupSetupPackage;
   preparedThreadContainerCreation?: PreparedHostedThreadContainerCreation;
   preparedThreadDeliveryRoute?: PreparedHostedThreadContainerDeliveryRoute;
-  rosterOversized?: boolean;
+  rosterRejection?: HostedLinqGroupRosterRejection;
   rosterUnavailable: boolean;
   prisma: Prisma.TransactionClient;
   requireFirstContactAdmission?: boolean;

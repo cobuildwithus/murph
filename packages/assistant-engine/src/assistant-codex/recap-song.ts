@@ -42,32 +42,22 @@ export async function executeGenerateRecapSongFile(input: {
     const runtime = input.fileRuntime
     const apiKey = runtime.elevenLabsApiKey ?? resolveElevenLabsApiKey(input.env ?? {})
     if (!apiKey) throw new Error('Song generation is unavailable.')
-    const take = async () => {
-      const result = await generateElevenLabsMusic({ apiKey, chunks, durationMs, forceInstrumental: false,
-        modelId: ELEVENLABS_MUSIC_MODEL_ID, outputFormat: ELEVENLABS_MUSIC_OUTPUT_FORMAT, prompt: story.song!.style,
-        fetchImplementation: (url, init) => runtime.fetchImpl(url, init), signal: input.abortSignal ?? undefined })
-      const stream = inspectMp3Frames(result.bytes)
-      const firstWordMs = recapFirstSungWordMs(result.wordsTimestamps ?? [], sungStartMs)
-      const cut = firstWordMs === undefined ? undefined : [...stream.frames].reverse().find(frame => frame.timeMs <= firstWordMs - 200)
-      if (Math.abs(stream.durationMs - durationMs) > 500 || firstWordMs === undefined || firstWordMs >= stream.durationMs || !cut
-        || !recapSongLines(story.song!.lyrics, { ...result, durationMs: stream.durationMs, songStartMs: cut.timeMs }, sungStartMs)) {
-        throw new Error('Generated music has no usable sung part or does not fit these pages.')
-      }
-      return { ...result, firstWordMs, songStartMs: cut.timeMs }
-    }
-    let selected = await take()
-    if (selected.firstWordMs - sungStartMs > 2500) {
-      try {
-        const second = await take()
-        if (second.firstWordMs < selected.firstWordMs) selected = second
-      } catch (error) {
-        if (input.abortSignal?.aborted) throw input.abortSignal.reason ?? error
-        // The first valid take remains authoritative if the improvement fails.
-      }
+    const result = await generateElevenLabsMusic({ apiKey, chunks, durationMs, forceInstrumental: false,
+      modelId: ELEVENLABS_MUSIC_MODEL_ID, outputFormat: ELEVENLABS_MUSIC_OUTPUT_FORMAT, prompt: story.song!.style,
+      fetchImplementation: (url, init) => runtime.fetchImpl(url, init), signal: input.abortSignal ?? undefined })
+    const stream = inspectMp3Frames(result.bytes)
+    const firstWordMs = recapFirstSungWordMs(result.wordsTimestamps ?? [], sungStartMs)
+    // The song starts 200 ms before its first word, and never after the planned start: a singer who comes in
+    // late lengthens the song's own opening, never the page before it, so one take is always enough.
+    const cut = firstWordMs === undefined ? undefined
+      : [...stream.frames].reverse().find(frame => frame.timeMs <= Math.min(firstWordMs - 200, sungStartMs))
+    if (Math.abs(stream.durationMs - durationMs) > 500 || firstWordMs === undefined || firstWordMs >= stream.durationMs || !cut
+      || !recapSongLines(story.song!.lyrics, { ...result, durationMs: stream.durationMs, songStartMs: cut.timeMs }, sungStartMs)) {
+      throw new Error('Generated music has no usable sung part or does not fit these pages.')
     }
     input.abortSignal?.throwIfAborted()
-    const file = await runtime.save(selected.bytes, 'audio/mpeg', selected.wordsTimestamps,
-      { songStartMs: selected.songStartMs, signature: recapScoreSignature(story) })
+    const file = await runtime.save(result.bytes, 'audio/mpeg', result.wordsTimestamps,
+      { songStartMs: cut.timeMs, signature: recapScoreSignature(story) })
     return { rpcSuccess: true, rpcText: JSON.stringify({ path: file }) }
   } catch (error) {
     if (input.abortSignal?.aborted) throw input.abortSignal.reason ?? error

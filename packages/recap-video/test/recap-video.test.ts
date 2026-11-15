@@ -68,9 +68,19 @@ describe("timeline", () => {
     expect(renderer.frameState(posterFrom)).toMatchObject({ kind: "poster", localMs: 0 });
   });
 
-  it("holds the page before the song for a singer who comes in late", () => {
-    const late = buildRecapVideoTimeline(withPages(pages => pages.map(page => page.kind === "song" ? { ...page, cueMs: 33900 } : page)));
-    expect(late.entries.slice(5, 7).map(entry => [entry.kind, entry.fromMs])).toEqual([["superlative", 25000], ["song", 33900]]);
+  it.each([["on time", 0], ["five seconds late", 5000]])("opens the song on the planned start for a singer %s, and lights its first word as it is sung", async (_singer, delay) => {
+    // The score as it is made now: the song page's cue is the planned start, 30,000 ms, and the song's clock starts
+    // 200 ms before the first word, never after the planned start. A late singer's band plays on under the song page.
+    const first = 30000 + delay, origin = Math.min(first - 200, 30000), shift = first - origin - 212;
+    const timed = withPages(pages => pages.map(page => page.song?.lines ? { ...page, cueMs: 30000, song: { ...page.song,
+      lines: page.song.lines.map(line => ({ words: line.words.map(word => ({ ...word, startMs: word.startMs + shift, endMs: word.endMs + shift })) })) } } : page));
+    const scored = await createRecapVideoRenderer({ ...timed, score: { ...timed.score, songMs: timed.score.durationMs - origin } });
+    // The card before the song keeps its five seconds.
+    expect(scored.timeline.entries.slice(5, 7).map(entry => [entry.kind, entry.fromMs])).toEqual([["superlative", 25000], ["song", 30000]]);
+    expect(scored.timeline.entries[5]?.toMs).toBe(30000);
+    expect(scored.frameState(30000)).toMatchObject({ kind: "song", localMs: 0 });
+    if (delay > 0) expect(scored.frameState(first - 1).sungWords).toBe(0);
+    expect(scored.frameState(first).sungWords).toBe(1);
   });
 
   it("holds the last screen five seconds when the song is sung to its end", () => {

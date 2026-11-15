@@ -11,6 +11,7 @@ import {
 } from "../hosted-privacy/account-deletion-cleanup";
 import { runHostedRuntimeResourceCleanup } from "../hosted-execution/runtime-resource-cleanup";
 import { redriveHostedHealthDataConsentCleanups, redriveHostedHealthDataConsentStops } from "../hosted-privacy/health-data-consent-withdrawal";
+import { sweepHostedLinqGroupLeaves } from "../hosted-routing/linq-group-leave";
 import { normalizeHostedRetentionDate } from "./cleanup";
 
 export interface HostedExternalRetentionCleanupResult {
@@ -19,6 +20,7 @@ export interface HostedExternalRetentionCleanupResult {
   accountDeletionCleanup: HostedAccountDeletionCleanupBatchResult;
   runtimeResourceCleanup: Awaited<ReturnType<typeof runHostedRuntimeResourceCleanup>>;
   expiredComputerRunsCleanedUp: number;
+  linqGroupLeaveAttempts: number;
 }
 
 export async function runHostedExternalRetentionCleanup(input: {
@@ -29,6 +31,7 @@ export async function runHostedExternalRetentionCleanup(input: {
   const prisma = input.prisma ?? getPrisma();
   const healthDataConsentStopRedrive = await redriveHostedHealthDataConsentStops({ prisma });
   const now = normalizeHostedRetentionDate(input.now ?? new Date());
+  const linqGroupLeaveAttempts = await sweepHostedLinqGroupLeaves({ prisma, now });
   const accountDeletionCleanup = await drainHostedAccountDeletionCleanupBatch({
     now,
     prisma,
@@ -42,6 +45,7 @@ export async function runHostedExternalRetentionCleanup(input: {
   const healthDataConsentCleanupRedrive = await redriveHostedHealthDataConsentCleanups({ now, prisma, request: input.request });
 
   return {
+    linqGroupLeaveAttempts,
     healthDataConsentStopRedrive,
     healthDataConsentCleanupRedrive,
     runtimeResourceCleanup,

@@ -167,7 +167,7 @@
           "status": "ready",
           "url": "/api/game/v1/games/synthetic-game/recap-assets/song?generation=game-recap%3Asynthetic-game",
           "mediaType": "audio/mpeg",
-          "durationMs": 19920
+          "durationMs": 20016
         },
         "song": {
           "title": "The Mat Knows",
@@ -182,28 +182,28 @@
               "words": [
                 {
                   "text": "The",
-                  "startMs": 212,
-                  "endMs": 612
+                  "startMs": 308,
+                  "endMs": 708
                 },
                 {
                   "text": "mat",
-                  "startMs": 712,
-                  "endMs": 1112
+                  "startMs": 808,
+                  "endMs": 1208
                 },
                 {
                   "text": "knows",
-                  "startMs": 1212,
-                  "endMs": 1612
+                  "startMs": 1308,
+                  "endMs": 1708
                 },
                 {
                   "text": "the",
-                  "startMs": 1712,
-                  "endMs": 2112
+                  "startMs": 1808,
+                  "endMs": 2208
                 },
                 {
                   "text": "score",
-                  "startMs": 2212,
-                  "endMs": 2612
+                  "startMs": 2308,
+                  "endMs": 2708
                 }
               ]
             },
@@ -211,33 +211,33 @@
               "words": [
                 {
                   "text": "The",
-                  "startMs": 2712,
-                  "endMs": 3112
+                  "startMs": 2808,
+                  "endMs": 3208
                 },
                 {
                   "text": "shoes",
-                  "startMs": 3212,
-                  "endMs": 3612
+                  "startMs": 3308,
+                  "endMs": 3708
                 },
                 {
                   "text": "wait",
-                  "startMs": 3712,
-                  "endMs": 4112
+                  "startMs": 3808,
+                  "endMs": 4208
                 },
                 {
                   "text": "by",
-                  "startMs": 4212,
-                  "endMs": 4612
+                  "startMs": 4308,
+                  "endMs": 4708
                 },
                 {
                   "text": "the",
-                  "startMs": 4712,
-                  "endMs": 5112
+                  "startMs": 4808,
+                  "endMs": 5208
                 },
                 {
                   "text": "door",
-                  "startMs": 5212,
-                  "endMs": 5612
+                  "startMs": 5308,
+                  "endMs": 5708
                 }
               ]
             },
@@ -245,23 +245,23 @@
               "words": [
                 {
                   "text": "Breakfast",
-                  "startMs": 5712,
-                  "endMs": 6112
+                  "startMs": 5808,
+                  "endMs": 6208
                 },
                 {
                   "text": "comes",
-                  "startMs": 6212,
-                  "endMs": 6612
+                  "startMs": 6308,
+                  "endMs": 6708
                 },
                 {
                   "text": "with",
-                  "startMs": 6712,
-                  "endMs": 7112
+                  "startMs": 6808,
+                  "endMs": 7208
                 },
                 {
                   "text": "proof",
-                  "startMs": 7212,
-                  "endMs": 7612
+                  "startMs": 7308,
+                  "endMs": 7708
                 }
               ]
             },
@@ -269,34 +269,34 @@
               "words": [
                 {
                   "text": "The",
-                  "startMs": 7712,
-                  "endMs": 8112
+                  "startMs": 7808,
+                  "endMs": 8208
                 },
                 {
                   "text": "clipboard",
-                  "startMs": 8212,
-                  "endMs": 8612
+                  "startMs": 8308,
+                  "endMs": 8708
                 },
                 {
                   "text": "holds",
-                  "startMs": 8712,
-                  "endMs": 9112
+                  "startMs": 8808,
+                  "endMs": 9208
                 },
                 {
                   "text": "the",
-                  "startMs": 9212,
-                  "endMs": 9612
+                  "startMs": 9308,
+                  "endMs": 9708
                 },
                 {
                   "text": "truth",
-                  "startMs": 9712,
-                  "endMs": 10112
+                  "startMs": 9808,
+                  "endMs": 10208
                 }
               ]
             }
           ]
         },
-        "cueMs": 35300
+        "cueMs": 35000
       },
       {
         "id": "result",

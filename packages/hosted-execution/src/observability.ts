@@ -1,3 +1,5 @@
+import { getErrorName } from "@murphai/contracts/validation-error";
+
 export const HOSTED_EXECUTION_LOG_PHASES = [
   "wake.running",
   "container.starting",
@@ -32,6 +34,7 @@ export type HostedExecutionErrorCode =
   | "uri_error";
 
 const HOSTED_EXECUTION_SAFE_ERROR_NAMES = new Set([
+  "ContractValidationError",
   "AbortError",
   "Error",
   "EvalError",
@@ -304,7 +307,7 @@ export function normalizeHostedExecutionOperatorMessage(message: string): string
 }
 
 export function deriveHostedExecutionErrorCode(error: unknown): HostedExecutionErrorCode {
-  const name = error instanceof Error ? error.name : "";
+  const name = error instanceof Error ? getErrorName(error) : "";
   const message = normalizeHostedExecutionErrorMessage(error).toLowerCase();
   const status = readHostedExecutionNumericErrorProperty(
     error,
@@ -811,7 +814,7 @@ export function readHostedExecutionSafeErrorName(error: unknown): string | null 
     return null;
   }
 
-  const name = error.name.trim();
+  const name = getErrorName(error).trim();
   return HOSTED_EXECUTION_SAFE_ERROR_NAMES.has(name) ? name : null;
 }
 

@@ -55,6 +55,7 @@ import { GroupMemberPlanStudy } from "./group-member-plan-study";
 import { GrowthScorecardStudy } from "./growth-scorecard-study";
 import { HealthDataConsentWithdrawalFlowStudy } from "./health-data-consent-study";
 import { JoinInviteStudy } from "./join-invite-study";
+import { OpsBlockedNumbersStudy } from "./ops-blocked-numbers-study";
 import { OpsUsageStudy } from "./ops-usage-study";
 import { OpsGameReportsStudy } from "./ops-game-reports-study";
 import { OpsOperatorTaskStudy } from "./ops-operator-task-study";
@@ -715,6 +716,12 @@ export function SectionsContent({
 
           <StudySection title="Ops usage, free idle members, and recovery">
             <OpsUsageStudy />
+          </StudySection>
+
+          <Separator />
+
+          <StudySection id="ops-blocked-numbers" title="Blocked numbers">
+            <OpsBlockedNumbersStudy />
           </StudySection>
 
           <Separator />

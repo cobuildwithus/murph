@@ -5017,11 +5017,47 @@ deletion; contact-privacy rotation re-derives and reseals it before prior-key
 retirement. Chat ownership precedes the route row lock, game/move checks,
 marker insertion and exact route deletion in one transaction. The removed-line
 repair action keeps its separate policy. Only the winning insert returns an
-ephemeral provider target: one three-second post-commit attempt, no retry or
-durable pending work. Provider acceptance or failure never changes local success.
+ephemeral provider target. Every local-departure caller and the external
+retention owner use the same atomic marker claim, reserving at most five
+three-second attempts, at least one hour apart. A null attempt time is eligible.
+A queued response never proves removal; provider code 2013 or a self-removal
+webhook records that evidence, and code 2015 terminates attempts as
+`fewer_than_four`. The next eligible tick after the fifth reservation claims
+one bounded roster read, classifying `verified_still_active` or `unconfirmed`.
+Interrupted claims count toward the limit. Provider work stays outside database
+transactions, and rotation-safe completion never overwrites removal evidence.
+The external retention tick examines at most ten eligible markers.
 
-Authenticated webhook ingress checks the marker before all fan-out, including
-poll votes, and returns `group-left` without recovery. Database failure retries.
+Authenticated webhook ingress records eligible group sightings before its
+marker fence, then applies the sender block before model, edit, reaction or
+mailbox work. A marked room records only the sender/participant event and never
+fetches a roster, polls, joins, wakes or requests departure again. It returns
+`group-left`; a blocked sender returns `sender-blocked`. A sender-block read
+failure retries the webhook. Evidence writes are fail-open: they log a bounded
+code and never stop message handling.
+`HostedLinqGroupSighting` and `HostedLinqGroupHandle` retain only blinded,
+idempotent min/max evidence, without message text, inviter attribution or
+counters. Sightings link to departure markers with an update-cascading,
+delete-null foreign key; deleting evidence cannot revoke departure.
+Each handle expires 90 days after its own last sighting, and empty sightings
+expire 90 days after their last observation. Linkage is within one contact-key
+epoch; rotation deletes prior-key evidence. The database-only retention owner
+removes at most 1,000 expired handles and 1,000 empty sightings per tick.
+
+`HostedLinqHandleBlock` owns non-member handle ingress policy, separate from
+member suspension. Current-plus-prior reads and contact-lock-serialized writes,
+removal and rotation preserve dormant blocks. Only this table retains an
+authenticated purpose-separated contact envelope; ordinary Ops responses omit
+it. Blocks and departure markers do not expire or belong to an account export
+or deletion. The Ops landing page uses the same operator and mutation-origin
+authority as group departure for block, unblock and bounded list requests.
+Admission checks blocks on the roster it already reads for every unbound group
+message, right after the size cap, and shares that rejection path
+(`pendingGroupRosterRejection`: `oversized` | `blocked_participant`). Only an
+unbound room on a managed line is left; bound rooms and their games remain
+intact. The early observer never reads a provider roster. Roster evidence is
+that admission roster, written after commit and ordered by its own
+observation time.
 Ordinary message/edit admission and route creation, refresh and move adoption
 recheck under chat ownership. Game bootstrap attachment rechecks after its
 existing binding demotion takes chat ownership, immediately before it creates

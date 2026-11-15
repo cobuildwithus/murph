@@ -1166,10 +1166,7 @@ export class JunctionClient {
           throw invalidJunctionSdkResponseError(legacyPayload.body);
         }
 
-        if (
-          error instanceof TypeError
-          || (error instanceof Error && error.name === "JsonError")
-        ) {
+        if (isJunctionSdkRequestConstructionError(error)) {
           throw deviceSyncError({
             code: "JUNCTION_SDK_REQUEST_INVALID",
             message: `Junction SDK could not construct ${options.endpointKind}.`,
@@ -2447,4 +2444,11 @@ function parseRetryAfterMs(value: string): number | null {
   }
 
   return Math.max(parsed - Date.now(), 0);
+}
+
+// The request could not be built: an unsupported resource our builders reject,
+// or a TypeError or JsonError the SDK raises before sending anything.
+function isJunctionSdkRequestConstructionError(error: unknown): boolean {
+  return error instanceof ContractValidationError || error instanceof TypeError
+    || (error instanceof Error && error.name === "JsonError");
 }

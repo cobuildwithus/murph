@@ -51,7 +51,7 @@ function cueStarts(input: RecapVideoInput, story: RecapVideoPage[], songPage: Re
   const starts = [...story, songPage].map(page => page.cueMs ?? Number.NaN);
   const ordered = starts.every((start, index) => Number.isFinite(start) && (index === 0 ? start === 0 : start > (starts[index - 1] ?? 0)));
   const sized = Number.isFinite(durationMs) && Number.isFinite(songMs) && songMs > 0 && durationMs >= songMs;
-  // The song page opens on its first sung word: inside the song, and no earlier than the song's own clock starts.
+  // The song page opens inside the song: no earlier than the song's own clock starts, and before the music ends.
   if (!ordered || !sized || (starts.at(-1) ?? 0) < durationMs - songMs || (starts.at(-1) ?? 0) >= durationMs) {
     throw new RecapVideoRefusal("invalid_soundtrack", "The show has no score whose cues fit its pages.");
   }
@@ -59,8 +59,8 @@ function cueStarts(input: RecapVideoInput, story: RecapVideoPage[], songPage: Re
 }
 
 /**
- * Story pages on the score's cues, the song from its first sung word to its
- * last, then the last screen through the end of the music.
+ * Story pages on the score's cues, the song from its cue to its last sung
+ * word, then the last screen through the end of the music.
  */
 export function buildRecapVideoTimeline(input: RecapVideoInput): RecapVideoTimeline {
   const { pages } = input.show;

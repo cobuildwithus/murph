@@ -1,3 +1,6 @@
+// This lane exercises unblocked planning; real risk ingress has separate PostgreSQL proof.
+vi.mock("@/src/lib/hosted-onboarding/linq-sender-block", () => ({ readHostedLinqSenderBlockWebhookResponse: vi.fn(async () => null) }));
+vi.mock("@/src/lib/hosted-onboarding/linq-group-risk-webhook", () => ({ observeHostedLinqGroupRiskWebhook: vi.fn(async () => undefined), recordHostedLinqGroupRosterEvidenceAfterCommit: vi.fn(async () => undefined) }));
 import type { HostedLinqChatSummary } from "@/src/lib/hosted-onboarding/linq-client";
 import { linqRoster } from "./support/linq-roster";
 import {
@@ -804,6 +807,7 @@ type HostedAccountGroupMembershipFixture = {
 };
 
 type PrismaFixtureBase = {
+  hostedLinqGroupSighting?: { updateMany: MockedFunction };
   hostedLinqGroupLeave?: { findFirst: MockedFunction; createMany: MockedFunction };
   $executeRaw?: MockedFunction;
   $queryRaw?: MockedFunction;
@@ -14085,6 +14089,7 @@ function asPrismaTransactionClient<T extends PrismaFixtureBase>(
   const hostedMember = prisma.hostedMember;
   const hostedMemberEmailAuthorization = prisma.hostedMemberEmailAuthorization;
 
+  prisma.hostedLinqGroupSighting ??= { updateMany: vi.fn().mockResolvedValue({ count: 0 }) };
   prisma.hostedLinqGroupLeave ??= { findFirst: vi.fn().mockResolvedValue(null), createMany: vi.fn().mockResolvedValue({ count: 1 }) };
   prisma.hostedLinqGroupLineMove ??= {
     findMany: vi.fn().mockResolvedValue([]),

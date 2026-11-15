@@ -1,3 +1,4 @@
+vi.mock("@/src/lib/hosted-routing/linq-group-risk-ledger", () => ({ expireHostedLinqGroupRiskBatch: vi.fn(async () => ({ handles: 0, sightings: 0 })) }));
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as hostedRuntimeSignals from "@/src/lib/hosted-orchestration/signal-runtime";
@@ -135,6 +136,7 @@ describe("hosted retention cleanup", () => {
       prisma: prisma as never,
     })).resolves.toEqual({
       compactedLinqProviderEventDiagnostics: 5,
+      expiredLinqGroupRisk: { handles: 0, sightings: 0 },
       expiredAssistantRuntimeIssuesDeleted: 2,
       expiredAuthRecordsDeleted: 2,
       expiredClinicalRecordConnectIntentsDeleted: 5,

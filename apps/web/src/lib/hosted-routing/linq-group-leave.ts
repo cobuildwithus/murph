@@ -2,16 +2,19 @@ import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
 import type { Prisma, PrismaClient } from "@prisma/client";
-import { createHostedExternalThreadIdentityLookupKey, createHostedExternalThreadIdentityLookupKeyReadCandidates } from "../hosted-onboarding/contact-privacy";
+import { createHostedLinqChatLookupKeyReadCandidates, createHostedExternalThreadIdentityLookupKey, createHostedExternalThreadIdentityLookupKeyReadCandidates } from "../hosted-onboarding/contact-privacy";
 import { decryptHostedContactPhoneEnvelope, encryptHostedContactPhoneEnvelope } from "../hosted-onboarding/contact-phone-envelope";
 import { readHostedContactPrivacyKeyring } from "../hosted-onboarding/env";
 import { hostedOnboardingError, isHostedOnboardingError } from "../hosted-onboarding/errors";
-import { leaveHostedLinqChat } from "../hosted-onboarding/linq-client";
+import { getHostedLinqChatSummary, leaveHostedLinqChat } from "../hosted-onboarding/linq-client";
+import { getPrisma } from "../prisma";
 import type { HostedOnboardingReadClient } from "../hosted-onboarding/shared";
 import { acquireHostedLinqChatOwnershipLockTx } from "./linq-chat-ownership-lock";
 import { deleteExactHostedLinqThreadRouteTx, lockHostedThreadRouteByThreadIdentityTx, type HostedLinqExactThreadRoute } from "./thread-route-store";
 
-export type HostedLinqGroupLeaveReason = "oversized" | "operator_cleanup" | "assistant";
+export type HostedLinqGroupLeaveReason = "oversized" | "operator_cleanup" | "assistant" | "blocked_participant";
+/** A roster Murph never admits; the room is left with this marker reason. */
+export type HostedLinqGroupRosterRejection = Extract<HostedLinqGroupLeaveReason, "oversized" | "blocked_participant">;
 export type HostedLinqGroupLeaveTarget = { chatId: string };
 export type HostedLinqGroupLeaveResult =
   | { status: "left"; postCommitLinqGroupLeave: HostedLinqGroupLeaveTarget }
@@ -82,6 +85,8 @@ export async function leaveHostedLinqGroupTx(input: {
     threadIdentityLookupKey: prepared.threadIdentityLookupKey, chatIdEncrypted: prepared.chatIdEncrypted, reason: prepared.reason,
   }, skipDuplicates: true });
   if (!inserted.count) return { status: "already_left" };
+  await prisma.hostedLinqGroupSighting.updateMany({ where: { chatLookupKey: { in: createHostedLinqChatLookupKeyReadCandidates(prepared.chatId) } },
+    data: { leaveMarkerKey: prepared.threadIdentityLookupKey } });
   if (expected && !await deleteExactHostedLinqThreadRouteTx({ expected, prisma })) {
     // Throw, rather than return unavailable: the marker must roll back too.
     throw hostedOnboardingError({ code: "HOSTED_LINQ_GROUP_LEAVE_ROUTE_CHANGED", httpStatus: 409,
@@ -103,20 +108,89 @@ async function readLeaveConflict(input: {
   return null;
 }
 
-export type HostedLinqGroupLeaveProviderOutcome = "accepted" | "unconfirmed" | "rejected" | "failed";
+export type HostedLinqGroupLeaveProviderOutcome = "accepted" | "unconfirmed" | "rejected" | "failed" | "not_attempted" | "removed" | "fewer_than_four" | "verified_still_active";
+const PROVIDER_LEAVE_RETRY_MS = 60 * 60 * 1000;
+const PROVIDER_LEAVE_MAX_ATTEMPTS = 5;
 
-/** One request-local attempt. Acceptance is not evidence of provider removal. */
-export async function requestHostedLinqGroupLeaveAfterCommit(target: HostedLinqGroupLeaveTarget): Promise<HostedLinqGroupLeaveProviderOutcome> {
+/** Reservations, including interrupted requests, consume the bounded attempt budget. */
+export async function requestHostedLinqGroupLeaveAfterCommit(
+  target: HostedLinqGroupLeaveTarget,
+  prisma: PrismaClient = getPrisma(),
+  now = new Date(),
+): Promise<HostedLinqGroupLeaveProviderOutcome> {
   let outcome: HostedLinqGroupLeaveProviderOutcome;
   try {
-    await leaveHostedLinqChat(target);
-    outcome = "accepted";
-  } catch (error) {
-    outcome = isHostedOnboardingError(error) && error.code === "LINQ_GROUP_LEAVE_UNCONFIRMED" ? "unconfirmed"
-      : isHostedOnboardingError(error) && error.code === "LINQ_GROUP_LEAVE_REJECTED" ? "rejected" : "failed";
+    const eligible = { threadIdentityLookupKey: { in: identityKeys(target.chatId) }, providerRemovedAt: null, providerLeaveTerminalCode: null,
+      OR: [{ providerLeaveLastAttemptAt: null }, { providerLeaveLastAttemptAt: { lte: new Date(now.getTime() - PROVIDER_LEAVE_RETRY_MS) } }] };
+    const claimed = await prisma.hostedLinqGroupLeave.updateMany({
+      where: { ...eligible, providerLeaveAttempts: { lt: PROVIDER_LEAVE_MAX_ATTEMPTS } },
+      data: { providerLeaveAttempts: { increment: 1 }, providerLeaveLastAttemptAt: now },
+    });
+    if (!claimed.count) return await verifyExhaustedLeave(target, prisma, eligible);
+    outcome = await dispatchClaimedLeave(target, prisma, now);
+  } catch {
+    // The marker is already durable. A later sweep owns recovery after a DB failure.
+    outcome = "failed";
   }
   console.info("Hosted Linq group departure provider outcome.", { code: outcome });
   return outcome;
+}
+
+async function dispatchClaimedLeave(target: HostedLinqGroupLeaveTarget, prisma: PrismaClient, now: Date): Promise<HostedLinqGroupLeaveProviderOutcome> {
+  try {
+    await leaveHostedLinqChat(target);
+    return "accepted";
+  } catch (error) {
+    const details = isHostedOnboardingError(error) ? error.details : undefined;
+    const code = details?.status === 409 ? details.providerErrorCode : null;
+    if (code === 2013 || code === 2015) {
+      await prisma.hostedLinqGroupLeave.updateMany({
+        where: { threadIdentityLookupKey: { in: identityKeys(target.chatId) }, providerRemovedAt: null },
+        data: code === 2013 ? { providerRemovedAt: now } : { providerLeaveTerminalCode: "fewer_than_four" },
+      });
+      return code === 2013 ? "removed" : "fewer_than_four";
+    }
+    return isHostedOnboardingError(error) && error.code === "LINQ_GROUP_LEAVE_UNCONFIRMED" ? "unconfirmed"
+      : isHostedOnboardingError(error) && error.code === "LINQ_GROUP_LEAVE_REJECTED" ? "rejected" : "failed";
+  }
+}
+
+async function verifyExhaustedLeave(target: HostedLinqGroupLeaveTarget, prisma: PrismaClient, eligible: Prisma.HostedLinqGroupLeaveWhereInput): Promise<HostedLinqGroupLeaveProviderOutcome> {
+  // Claim the sole bounded diagnostic read on the next eligible tick, allowing
+  // the final queued request time to settle. A crash leaves truthful uncertainty.
+  const claimed = await prisma.hostedLinqGroupLeave.updateMany({
+    where: { ...eligible, providerLeaveAttempts: { gte: PROVIDER_LEAVE_MAX_ATTEMPTS } },
+    data: { providerLeaveTerminalCode: "unconfirmed" },
+  });
+  if (!claimed.count) return "not_attempted";
+  try {
+    const roster = await getHostedLinqChatSummary({ chatId: target.chatId, timeoutMs: 3_000 });
+    if (roster.handles.some(handle => handle.isMe && handle.status?.trim().toLowerCase() === "active")) {
+      await prisma.hostedLinqGroupLeave.updateMany({ where: { threadIdentityLookupKey: { in: identityKeys(target.chatId) },
+        providerRemovedAt: null, providerLeaveTerminalCode: "unconfirmed" }, data: { providerLeaveTerminalCode: "verified_still_active" } });
+      return "verified_still_active";
+    }
+  } catch { /* Lack of a successful read is still unconfirmed, never absence. */ }
+  return "unconfirmed";
+}
+
+/** Provider-capable retention calls this once per tick; no unbounded fanout. */
+export async function sweepHostedLinqGroupLeaves(input: { prisma: PrismaClient; now: Date }): Promise<number> {
+  const { prisma, now } = input;
+  const rows = await prisma.hostedLinqGroupLeave.findMany({ where: {
+    providerRemovedAt: null, providerLeaveTerminalCode: null,
+    OR: [{ providerLeaveLastAttemptAt: null }, { providerLeaveLastAttemptAt: { lte: new Date(now.getTime() - PROVIDER_LEAVE_RETRY_MS) } }],
+  }, orderBy: [{ providerLeaveLastAttemptAt: { sort: "asc", nulls: "first" } }, { threadIdentityLookupKey: "asc" }],
+    take: 10, select: { threadIdentityLookupKey: true, chatIdEncrypted: true } });
+  let attempted = 0;
+  for (const row of rows) {
+    try {
+      const chatId = decryptHostedContactPhoneEnvelope({ codec: codec(row.threadIdentityLookupKey), encrypted: row.chatIdEncrypted });
+      if (!identityKeys(chatId).includes(row.threadIdentityLookupKey)) throw new TypeError("Invalid departure identity.");
+      if (await requestHostedLinqGroupLeaveAfterCommit({ chatId }, prisma, now) !== "not_attempted") attempted++;
+    } catch { console.warn("Hosted Linq group departure sweep failed.", { code: "marker_unavailable" }); }
+  }
+  return attempted;
 }
 
 /** Bounded rotation seam; repeat while the prior key is configured, before retiring it. */

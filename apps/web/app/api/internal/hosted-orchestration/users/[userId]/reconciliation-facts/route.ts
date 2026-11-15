@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { parseInput } from "@murphai/hosted-execution/request-input";
 import {
   parseHostedRuntimeReconciliationFactsRequest,
@@ -152,7 +153,7 @@ function classifyHostedRuntimeReconciliationFailure(
   if (isHostedOnboardingError(error)) {
     return "hosted_onboarding";
   }
-  if (error instanceof TypeError) {
+  if (error instanceof TypeError && !(error instanceof ContractValidationError)) {
     return "type_error";
   }
   if (error instanceof Error) {

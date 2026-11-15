@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
@@ -52,6 +53,18 @@ describe("device sync internal connect-link route", () => {
     vi.restoreAllMocks();
     vi.unstubAllEnvs();
   });
+
+  it.each([new TypeError("Setup failed."), new ContractValidationError("Setup failed."), new RangeError("Setup failed.")])(
+    "preserves native setup failures and explicitly maps contract failures", async error => {
+      mocks.requireHostedCloudflareCallbackRequest.mockRejectedValueOnce(error);
+      const response = await internalDeviceSyncConnectLinkRoute.POST(
+        new Request("https://example.test/connect", { method: "POST" }),
+        { params: Promise.resolve({ connectTarget: "whoop" }) },
+      );
+      expect(response.status).toBe(503);
+      expect(await response.json()).toMatchObject({ error: { code: "HOSTED_DEVICE_CONNECT_LINK_UNAVAILABLE", retryable: true } });
+    },
+  );
 
   it("creates a hosted device connect link for the verified Cloudflare callback principal", async () => {
     const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});

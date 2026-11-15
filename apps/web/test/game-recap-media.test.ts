@@ -20,6 +20,10 @@ it.each([1, 4, 9])('validates a score with %s pages using decoded duration and r
   const result = await inspectRecapMedia(audio, key, undefined, { songStartMs, wordsTimestamps });
   expect(result).toMatchObject({ mediaType: 'audio/mpeg', songStartMs, bytes: audio.length });
   expect(Math.abs(result.durationMs! - (pages * 5000 + 20_000))).toBeLessThan(500);
+  // A singer five seconds late: the song starts by the planned start, seconds before its first word.
+  const planned = [...inspectMp3Frames(audio).frames].reverse().find(f => f.timeMs <= first)!.timeMs;
+  expect(await inspectRecapMedia(audio, key, undefined, { songStartMs: planned,
+    wordsTimestamps: [{ word: 'Hello', startMs: first + 5000, endMs: first + 5300 }] })).toMatchObject({ mediaType: 'audio/mpeg', songStartMs: planned });
   await expect(inspectRecapMedia(audio, key, undefined, { songStartMs: songStartMs + 1, wordsTimestamps })).rejects.toThrow();
   const afterFirstWord = inspectMp3Frames(audio).frames.find(frame => frame.timeMs > first)!.timeMs;
   await expect(inspectRecapMedia(audio, key, undefined, { songStartMs: afterFirstWord, wordsTimestamps })).rejects.toThrow();

@@ -52,23 +52,25 @@ afterAll(async () => {
 });
 
 describe("the contract's show with a score", () => {
-  it("turns its pages on the score's cues and holds the last story page for a late singer", () => {
+  it("turns its pages on the score's cues and opens the song on time for a late singer", () => {
     const { pages } = input.show, starts = renderer.timeline.entries.map(entry => entry.fromMs);
-    // T = 55,008 and the song is 19,920 long, so the song's clock starts at 35,088. Its singer comes in at 35,300.
-    expect(input.score).toMatchObject({ durationMs: 55008, songMs: 19920 });
-    expect(pages.filter(page => page.cueMs !== undefined).map(page => page.cueMs)).toEqual([0, 5000, 10000, 15000, 20000, 25000, 30000, 35300]);
-    expect(starts.slice(0, 8)).toEqual([0, 5000, 10000, 15000, 20000, 25000, 30000, 35300]);
+    // T = 55,008 and the song is 20,016 long, so the song's clock starts at 34,992, by the planned start at 35,000. Its singer comes in 300 ms late, at 35,300.
+    expect(input.score).toMatchObject({ durationMs: 55008, songMs: 20016 });
+    expect(pages.filter(page => page.cueMs !== undefined).map(page => page.cueMs)).toEqual([0, 5000, 10000, 15000, 20000, 25000, 30000, 35000]);
+    expect(starts.slice(0, 8)).toEqual([0, 5000, 10000, 15000, 20000, 25000, 30000, 35000]);
     expect(renderer.timeline.entries.map(entry => entry.kind)).toEqual(["cover", "print", "scene", "text", "print", "print", "superlative", "song", "poster"]);
-    // The card before the song holds 5.3 s. The last sung word ends 10,112 ms into the song: the last screen follows 350 ms later, on a frame.
-    expect(renderer.timeline.entries[6]).toMatchObject({ kind: "superlative", fromMs: 30000, toMs: 35300 });
-    expect(renderer.timeline.entries.at(-1)?.fromMs).toBe(Math.ceil((35088 + 10112 + 350) * 30 / 1000) * 1000 / 30);
+    // The card before the song keeps its 5 s. The last sung word ends 10,208 ms into the song: the last screen follows 350 ms later, on a frame.
+    expect(renderer.timeline.entries[6]).toMatchObject({ kind: "superlative", fromMs: 30000, toMs: 35000 });
+    expect(renderer.timeline.entries.at(-1)?.fromMs).toBe(Math.ceil((34992 + 10208 + 350) * 30 / 1000) * 1000 / 30);
     expect(renderer.timeline.frameCount).toBe(Math.floor(56008 * 30 / 1000));
   });
 
   it("lights each word on the song's own clock", () => {
-    // The page opens as "The" is sung, 212 ms into the song; nothing is lit a frame earlier because the page is not up.
-    expect(renderer.frameState(35300)).toMatchObject({ kind: "song", localMs: 0, sungWords: 1 });
-    expect(renderer.frameState(35088 + 9712).sungWords).toBe(20);
+    // The page opens 8 ms into the song with nothing lit; "The" lights as it is sung, 308 ms into the song.
+    expect(renderer.frameState(35000)).toMatchObject({ kind: "song", localMs: 0, sungWords: 0 });
+    expect(renderer.frameState(35299).sungWords).toBe(0);
+    expect(renderer.frameState(35300).sungWords).toBe(1);
+    expect(renderer.frameState(34992 + 9808).sungWords).toBe(20);
   });
 
   it("draws every one of its pages", () => {

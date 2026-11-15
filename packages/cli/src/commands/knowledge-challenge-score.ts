@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { z } from 'incur'
 
 import {
@@ -60,7 +61,7 @@ export function createKnowledgeChallengeScoreCommandDefinition() {
       try {
         return scoreGroupChallenge(parsed.data)
       } catch (error) {
-        if (!(error instanceof TypeError)) {
+        if (!(error instanceof ContractValidationError) && !(error instanceof TypeError)) {
           throw error
         }
         throw new VaultCliError(

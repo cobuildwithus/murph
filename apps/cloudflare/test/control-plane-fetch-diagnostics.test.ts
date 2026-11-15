@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { describe, expect, it, vi } from "vitest";
 
 import { deriveHostedExecutionErrorCode } from "@murphai/hosted-execution";
@@ -6,6 +7,9 @@ import {
   HostedRuntimeControlPlaneFetchError,
   readHostedRuntimeControlPlaneFetchFailureDiagnostics,
   shouldRetryHostedRuntimeReplaySafeRead,
+  shouldPreserveHostedRuntimeFetchError,
+  isRetryableHostedRuntimeReplaySafeReadTransportError,
+  isRetryableHostedWebControlReadError,
 } from "../src/runtime-platform/control-plane-fetch.ts";
 import { buildHostedRuntimeSafeErrorMetadata } from "../src/runtime-platform/diagnostics.ts";
 
@@ -241,4 +245,31 @@ describe("hosted fetch network diagnostics", () => {
     });
     expect(shouldRetryHostedRuntimeReplaySafeRead({ attempt: 1, error: failure })).toBe(false);
   });
+});
+
+it.each([
+  [new ContractValidationError("fetch failed"), "unknown", false],
+  [new TypeError("Invalid shape."), "fetch_failed", true],
+  [new Error("Invalid shape."), "unknown", false],
+  [new Error("network setting is invalid"), "network", true],
+  [new ContractValidationError("Network connection lost"), "unknown", false],
+  [new TypeError("socket closed"), "network", true],
+  [new TypeError("fetch failed"), "fetch_failed", true],
+])("preserves native fetch classification and excludes contract failures", (cause, kind, retry) => {
+  const error = createFailure(cause);
+  expect(readHostedRuntimeControlPlaneFetchFailureDiagnostics(error)?.fetchCauseKind).toBe(kind);
+  expect(shouldRetryHostedRuntimeReplaySafeRead({ error, attempt: 1 })).toBe(retry);
+});
+
+it.each(["fetch failed", "upstream fetch failed", "network setting is invalid", "socket failure", "connection reset", "request failed"])("preserves native read retry rules for %s", message => {
+  const native = new TypeError(message);
+  const validation = new ContractValidationError(message);
+  expect(isRetryableHostedRuntimeReplaySafeReadTransportError(native)).toBe(message !== "request failed");
+  expect(isRetryableHostedWebControlReadError(native)).toBe(true);
+  expect(isRetryableHostedRuntimeReplaySafeReadTransportError(validation)).toBe(false);
+  expect(isRetryableHostedWebControlReadError(validation)).toBe(false);
+  expect(shouldPreserveHostedRuntimeFetchError(native)).toBe(false);
+  expect(shouldPreserveHostedRuntimeFetchError(validation)).toBe(true);
+  expect(readHostedRuntimeControlPlaneFetchFailureDiagnostics(createFailure(native))?.fetchCauseName).toBe("TypeError");
+  expect(readHostedRuntimeControlPlaneFetchFailureDiagnostics(createFailure(validation))?.fetchCauseName).toBeUndefined();
 });

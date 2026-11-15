@@ -7,6 +7,14 @@ import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 type Identity = { generationId: string; hash: string; byteLength: number };
 
 /**
+ * How the recap video is labeled for Linq. Messages re-encodes any MP4 attachment to fit 960
+ * points (an 804 x 1748 recap arrived as 440 x 960 HEVC), but passes a QuickTime movie through
+ * byte for byte, at any size. Measured through Linq on 2026-11-15: the same accepted bytes,
+ * labeled `video/quicktime` and named `.mov`, arrived unchanged. The bytes stay the accepted MP4.
+ */
+export const RECAP_VIDEO_LINQ_ATTACHMENT = { contentType: "video/quicktime", filename: "recap.mov" } as const;
+
+/**
  * The attachment a recap message's first send carries, or null for the line alone.
  *
  * The decision is made once, before the first message request, and saved before that request

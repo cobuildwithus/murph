@@ -78,7 +78,11 @@ correct video is sent exactly as it is today.
   recap turn is forced text-only (`textOnlyGameNotification`). The Linq sender
   splits a trailing link off and sends it as a second message under the
   `:link` identity, so the link gets its preview card. Web sends nothing.
-  `video/mp4` is an allowed attachment type.
+  `video/mp4` is an allowed attachment type. Measured on 2026-11-15 through
+  Linq: Messages re-encodes an MP4 attachment to fit 960 points (the 804 x 1748
+  recap arrived as 440 x 960 HEVC) but passes a QuickTime movie through byte
+  for byte at any size, so the accepted MP4 bytes are uploaded as
+  `video/quicktime` named `recap.mov` (`RECAP_VIDEO_LINQ_ATTACHMENT`).
 - Regeneration (`scripts/ops-game-recap`) queues a new generation, retires the
   other generations' assets at acceptance and sends a new message.
 - A first-time failure seals a plain story without an envelope.
