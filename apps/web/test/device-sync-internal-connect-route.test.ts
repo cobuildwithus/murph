@@ -1,4 +1,5 @@
 import { ContractValidationError } from "@murphai/contracts/validation-error";
+import { RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
@@ -65,6 +66,18 @@ describe("device sync internal connect-link route", () => {
       expect(await response.json()).toMatchObject({ error: { code: "HOSTED_DEVICE_CONNECT_LINK_UNAVAILABLE", retryable: true } });
     },
   );
+
+  // A body over the callback limit will not shrink on retry, so it is a final
+  // 413 rather than the retryable setup failure.
+  it("answers an oversized callback body with a final 413", async () => {
+    mocks.requireHostedCloudflareCallbackRequest.mockRejectedValueOnce(new RequestBodyTooLargeError(4096));
+    const response = await internalDeviceSyncConnectLinkRoute.POST(
+      new Request("https://example.test/connect", { method: "POST" }),
+      { params: Promise.resolve({ connectTarget: "whoop" }) },
+    );
+    expect(response.status).toBe(413);
+    expect(await response.json()).toMatchObject({ error: { code: "REQUEST_BODY_TOO_LARGE" } });
+  });
 
   it("creates a hosted device connect link for the verified Cloudflare callback principal", async () => {
     const infoSpy = vi.spyOn(console, "info").mockImplementation(() => {});

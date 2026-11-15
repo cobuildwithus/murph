@@ -1,4 +1,3 @@
-import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { isRequestInputError, RequestBodyTooLargeError, RequestInputError } from "@murphai/hosted-execution/request-input";
 import { Buffer } from "node:buffer";
 
@@ -323,7 +322,6 @@ export function createJsonErrorResponse(
 
   logJsonError("error", error, options, {
     errorResponseCode: "INTERNAL_ERROR",
-    ...(error instanceof ContractValidationError ? { unmarkedContractValidationError: true } : {}),
   });
   return NextResponse.json(
     {
@@ -334,43 +332,6 @@ export function createJsonErrorResponse(
     },
     buildJsonResponseInit(options, 500),
   );
-}
-
-// Temporary compatibility for 2026-11-14-explicit-request-rejection.md.
-// Delete route by route after each provider has its own retry/recovery proof.
-export function withLegacyWebhookErrorInference<TArgs extends unknown[]>(
-  handler: (...args: TArgs) => Promise<Response>,
-): (...args: TArgs) => Promise<Response> {
-  return async (...args) => {
-    try {
-      return await handler(...args);
-    } catch (error) {
-      if (error instanceof RequestBodyTooLargeError) throw error;
-      if (error instanceof SyntaxError) {
-        throw new InvalidJsonBodyError("Request body is not valid JSON.", { cause: error });
-      }
-      if (error instanceof TypeError && error.message === "fetch failed") {
-        return createJsonErrorResponse(error, {
-          defaultHeaders: { "Cache-Control": "no-store" },
-          internalMessage: "Provider webhook route failed unexpectedly.",
-          logMessage: "Provider webhook route failed.",
-          routeContext: describeJsonRouteLogContext(args),
-          matchers: [() => ({
-            status: 503,
-            error: {
-              code: "UPSTREAM_UNAVAILABLE",
-              message: "Upstream request failed.",
-              retryable: true,
-            },
-          })],
-        });
-      }
-      if (error instanceof TypeError || error instanceof RangeError || error instanceof URIError) {
-        throw new RequestInputError(error.message, { cause: error });
-      }
-      throw error;
-    }
-  };
 }
 
 export function createJsonRouteHelpers(
@@ -588,7 +549,6 @@ function describeJsonRouteLogContext(args: readonly unknown[]): JsonRouteLogCont
 }
 
 function describeLoggedErrorType(error: unknown): string {
-  if (error instanceof ContractValidationError) return "ContractValidationError";
   if (error instanceof Error) {
     const constructorName = error.constructor?.name;
 

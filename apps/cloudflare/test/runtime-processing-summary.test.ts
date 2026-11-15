@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { RequestInputError } from "@murphai/hosted-execution/request-input";
 import * as executionLogging from "@murphai/hosted-execution";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -94,7 +95,7 @@ describe("Postgres processing summaries", () => {
     const entry = buildRuntimeProcessingSummaryEntry({
       stage: "fresh_start", details: { [key]: value },
     }, undefined, Date.now());
-    expect(() => parseHostedRuntimeLogRequest({ entries: [entry] })).toThrow(TypeError);
+    expect(() => parseHostedRuntimeLogRequest({ entries: [entry] })).toThrow(ContractValidationError);
   });
 
   it("does not schedule a summary callback for a successful warm wake", async () => {

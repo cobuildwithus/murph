@@ -89,29 +89,6 @@ describe("json route helper factory", () => {
     await expect(httpModule.resolveDecodedRouteParam(params, "key")).rejects.toBe(fault);
   });
 
-  it.each([
-    [new TypeError("failure"), 400, { code: "INVALID_REQUEST", message: "Invalid request." }],
-    [new ContractValidationError("failure"), 400, { code: "INVALID_REQUEST", message: "Invalid request." }],
-    [new RangeError("failure"), 400, { code: "INVALID_REQUEST", message: "Invalid request." }],
-    [new URIError("failure"), 400, { code: "INVALID_REQUEST", message: "Invalid request." }],
-    [new SyntaxError("failure"), 400, { code: "INVALID_JSON", message: "Invalid JSON." }],
-    [new TypeError("fetch failed"), 503, { code: "UPSTREAM_UNAVAILABLE", message: "Upstream request failed.", retryable: true }],
-    [new RequestBodyTooLargeError(8), 413, { code: "REQUEST_BODY_TOO_LARGE", message: "Request body too large." }],
-    [new Error("failure"), 500, { code: "INTERNAL_ERROR", message: "Internal error." }],
-  ])("preserves the temporary webhook response for %s", async (error, status, body) => {
-    vi.spyOn(console, "warn").mockImplementation(() => {});
-    vi.spyOn(console, "error").mockImplementation(() => {});
-    const helpers = httpModule.createJsonRouteHelpers({
-      defaultHeaders: { "Cache-Control": "no-store" },
-      internalMessage: "route failed unexpectedly", logMessage: "route failed",
-    });
-    const handler = helpers.withJsonError(httpModule.withLegacyWebhookErrorInference(async () => { throw error; }));
-    const response = await handler();
-    expect(response.status).toBe(status);
-    expect(response.headers.get("Cache-Control")).toBe("no-store");
-    await expect(response.json()).resolves.toEqual({ error: body });
-  });
-
   it("merges default headers into jsonOk responses", async () => {
     const helpers = httpModule.createJsonRouteHelpers({
       defaultHeaders: {
@@ -762,7 +739,6 @@ describe("json route helper factory", () => {
       errorMessage: "Invalid shape.",
       internalMessage: "route failed unexpectedly",
       errorResponseCode: "INTERNAL_ERROR",
-      ...(error instanceof ContractValidationError ? { unmarkedContractValidationError: true } : {}),
     });
     expect(warn).not.toHaveBeenCalled();
     expect(warnLogDetails).not.toHaveBeenCalled();

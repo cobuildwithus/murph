@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import assert from "node:assert/strict";
 import { describe, expect, it, vi } from "vitest";
 
@@ -22,7 +23,7 @@ import {
 describe("hosted primitive helpers", () => {
   it("keeps hosted timestamp validation local while preserving the shared behavior", () => {
     assert.equal(toIsoTimestamp("2026-03-26T12:00:00Z"), "2026-03-26T12:00:00.000Z");
-    expect(() => toIsoTimestamp("not-a-date")).toThrowError(new TypeError("Invalid timestamp: not-a-date"));
+    expect(() => toIsoTimestamp("not-a-date")).toThrowError(new ContractValidationError("Invalid timestamp: not-a-date"));
   });
 
   it("keeps hosted nullable string normalization distinct from device-syncd optional normalization", () => {

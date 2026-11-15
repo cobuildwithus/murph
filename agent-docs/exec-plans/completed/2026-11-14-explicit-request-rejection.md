@@ -1,8 +1,8 @@
 # A thrown error is the caller's fault only when a request boundary says so
 
-Status: active
+Status: completed
 Created: 2026-11-14
-Updated: 2026-11-14
+Updated: 2026-11-15
 
 ## Goal
 
@@ -146,48 +146,28 @@ Each stage is safe to stop at.
 
 ## Progress
 
+Done.
+
 - Stage 1: merged (#4972).
 - Stage 2: merged (#4978), with audit corrections and the auth validators in
   #4982.
 - Stage 3: merged (#4977).
 - Stage 4: merged (#4979).
-- Stage 5: this PR.
-- Merged alongside, from stage 6: the mailbox handoff retry rule (#4974), the
-  Worker media catches (#4976) and the control client's explicit
-  malformed-response error (#4980).
-
-Still to do after this PR:
-
-- **Provider webhooks, one at a time.** The Linq, Telegram, Stripe, Retell and
-  device-data webhook routes are wrapped in
-  `withLegacyWebhookErrorInference`, and the Worker's device webhook enqueue
-  handler keeps its responses with an explicit local decision. Each keeps
-  exactly what it answers on main until it is migrated with its own
-  duplicate, partial-success and lost-response proof, because a provider
-  retries on 5xx.
-- **Remaining local type checks** that make their own decision from an
-  error's type (retry, upstream invalid, fallback), by meaning.
-- **Delete:** the webhook wrapper as each provider migrates, the `TypeError`
-  and `RangeError` bases and the name device on the explicit errors, and the
-  `fetch failed` matches that remain for their own local purposes.
-- The six changelog query validators in `apps/web/src/lib/changelog.ts`,
-  which the changelog guard prevents editing in a code-only PR.
-
-## Scope of this PR (stage 5)
-
-- In scope: the three mappers' final shape; explicit JSON, object-shape and
-  path rejections in the shared readers; service entry points that validate
-  caller input; schema `.parse` calls on caller input; state-dependent
-  refusals as domain errors; local catches in the runner's outbound handlers;
-  log severity following classification; tests that pinned a server fault as
-  a 4xx.
-- Out of scope: what any provider webhook receives.
-
-## Success criteria (stage 5)
-
-- A mapper answers 4xx only for an explicit request rejection, an explicit
-  body-limit error or a recognized domain error.
-- Every response this PR changes is listed in the PR, in three groups:
-  malformed input that was a server failure, server faults that were a 4xx,
-  and other.
-- The provider webhook tests pass unchanged.
+- Stage 5: merged (#4988). Follow-ups made local code that still answered a
+  4xx for our own failure answer a server error: #4997, #4998, #5000, #5002,
+  #5003, #5014 and #5015.
+- Stage 6: the mailbox handoff retry rule (#4974), the Worker media catches
+  (#4976), the control client's malformed-response error (#4980), the provider
+  webhooks one at a time with their redelivery proof (Stripe #5004, Retell
+  #5005, Telegram #5006, Linq #5007, device data #5008), and every remaining
+  decision on the native bases made explicit (#5010).
+- Stage 7: deleted the legacy webhook wrapper and its `fetch failed` match, the
+  `TypeError` and `RangeError` bases and the name device on
+  `ContractValidationError` and `RequestBodyTooLargeError`, and the
+  `unmarkedContractValidationError` shadow log field. A validation error now
+  reports its own name in logs and on the runner's wire.
+- The six changelog query validators in `apps/web/src/lib/changelog.ts` needed
+  no change. The changelog API route validates every query value at its
+  boundary before calling the query, so those checks guard values that were
+  already validated, and a native error and a 500 there is correct.
+Completed: 2026-11-15

@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -77,7 +78,7 @@ describe("group tool dispatch wire contracts", () => {
     "unknown_action",
   ])("retains the shared unsupported-status diagnostic for %s", (action) => {
     expect(() => parseHostedRuntimeGroupToolResponse({ action, result: { status: "unknown_status" } }))
-      .toThrow(new TypeError("Hosted runtime group tool response action/status is not supported."));
+      .toThrow(new ContractValidationError("Hosted runtime group tool response action/status is not supported."));
   });
 
   it.each([
@@ -86,7 +87,7 @@ describe("group tool dispatch wire contracts", () => {
     ["arm_usage_referral", "Hosted runtime group tool arm_usage_referral response result status is not supported."],
   ])("retains the action-specific unsupported-status diagnostic for %s", (action, message) => {
     expect(() => parseHostedRuntimeGroupToolResponse({ action, result: { status: "unknown_status" } }))
-      .toThrow(new TypeError(message));
+      .toThrow(new ContractValidationError(message));
   });
 
   it("normalizes the legacy sender response without admitting its extra fields", () => {
@@ -113,7 +114,7 @@ describe("group tool dispatch wire contracts", () => {
 
   it("rejects unknown request actions at the public boundary", () => {
     expect(() => parseHostedRuntimeGroupToolRequest({ action: "unknown_action" }))
-      .toThrow(new TypeError("Hosted runtime group tool action is not supported."));
+      .toThrow(new ContractValidationError("Hosted runtime group tool action is not supported."));
   });
 });
 

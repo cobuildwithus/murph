@@ -1,4 +1,3 @@
-import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { isRequestInputError, RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import {
   emitHostedExecutionStructuredLog,
@@ -17,10 +16,7 @@ export function mapWorkerRouteError(request: Request, error: unknown): Response 
   const classified = classifyPublicRouteError(error);
   emitHostedExecutionStructuredLog({
     component: "worker",
-    details: {
-      ...buildWorkerRouteLogDetails({ reason: "route-handler-threw" }, request),
-      ...(classified.status >= 500 && error instanceof ContractValidationError ? { unmarkedContractValidationError: true } : {}),
-    },
+    details: buildWorkerRouteLogDetails({ reason: "route-handler-threw" }, request),
     error,
     level: classified.status >= 500 ? "error" : "warn",
     message: "Hosted worker route failed.",

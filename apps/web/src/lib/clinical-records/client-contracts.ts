@@ -329,7 +329,7 @@ function requireCount(value: unknown): number {
   return value;
 }
 
-function invalidContract(): TypeError {
+function invalidContract(): ContractValidationError {
   return new ContractValidationError("Clinical Records response did not match the client contract.");
 }
 

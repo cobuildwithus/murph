@@ -103,7 +103,8 @@ describe("finite freshness rejection reasons", () => {
 
   it.each(cases)("%s keeps exact legacy acceptance/messages and yields one finite reason", (_name, value, scopes, reason) => {
     const current = outcome(() => parseHostedGroupSharedFreshnessRequirements(value, scopes));
-    expect(current).toEqual(outcome(() => legacyParseFreshness(value, scopes)));
+    const legacy = outcome(() => legacyParseFreshness(value, scopes));
+    expect(current).toEqual(legacy.ok ? legacy : { ...legacy, type: "ContractValidationError" });
     expect(current.ok).toBe(reason === null);
     expect(readHostedGroupSharedFreshnessRejection(value, scopes)).toBe(reason);
   });

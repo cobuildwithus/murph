@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { describe, expect, it } from "vitest";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -1180,25 +1181,25 @@ describe("hosted execution coverage gaps", () => {
         profileKey: "appointments",
         startUrl: "https://example.test/start",
       }),
-    ).toThrow(TypeError);
+    ).toThrow(ContractValidationError);
     expect(() =>
       parseHostedComputerOpenRunRequest({
         legacyProfileKey: "appointments",
         startUrl: "https://example.test/start",
       }),
-    ).toThrow(TypeError);
+    ).toThrow(ContractValidationError);
     expect(() =>
       parseHostedComputerOpenRunRequest({
         memberScopedProfileRequired: true,
         startUrl: "https://example.test/start",
       }),
-    ).toThrow(TypeError);
+    ).toThrow(ContractValidationError);
     expect(() =>
       parseHostedComputerOpenRunRequest({
         resumeRunId: "hcr_paused_run",
         startUrl: "https://example.test/start",
       }),
-    ).toThrow(TypeError);
+    ).toThrow(ContractValidationError);
     expect(
       parseHostedComputerOpenRunRequest({
         goal: "Runner goal.",
