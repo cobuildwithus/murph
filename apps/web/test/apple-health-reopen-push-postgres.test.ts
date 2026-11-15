@@ -16,6 +16,7 @@ vi.mock("@/src/lib/hosted-onboarding/member-access", async original => {
 import type { ApplePushRequest } from "@/src/lib/apple-push/send";
 import { sendDueAppleHealthReopenPushes } from "@/src/lib/device-sync/apple-health-reopen-push";
 import { getPrisma } from "@/src/lib/prisma";
+import { applePushWireAps } from "./support/apple-push-wire";
 
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
 if (enabled && !/^postgres(?:ql)?:\/\/[^/]*@(?:127\.0\.0\.1|localhost):\d+\/murph_test(?:_[a-z0-9_]+)?$/u.test(process.env.DATABASE_URL ?? "")) {
@@ -95,13 +96,18 @@ describe.skipIf(!enabled)("Apple Health reopen push PostgreSQL", () => {
     const { id } = await member();
     expect(await sweep()).toMatchObject({ configured: true, claimed: 1, sent: 1 });
     expect(sent()).toEqual([{
-      collapseId: "murph.sync-interruption-reminder", threadId: "murph.sync-interruption-reminder", sound: "default",
+      collapseId: "murph.sync-interruption-reminder", threadId: "murph.sync-interruption-reminder",
       data: { notification: "reopen_reminder" },
       message: { kind: "alert", title: "Open Murph", body: "Reopen Murph so your data can stay up to date." },
       target: { environment: "production", token: "ab".repeat(32), topic: "ai.withmurph.app" },
       // The window closes at 9pm in the member's zone, and the push dies with it.
       expiresAt: new Date("2026-11-10T21:00:00.000Z"),
     }]);
+    // No interruption level unless the build reported the entitlement; the sound is the sender's own.
+    expect(await applePushWireAps(sent()[0]!)).toEqual({
+      alert: { title: "Open Murph", body: "Reopen Murph so your data can stay up to date." },
+      "content-available": 1, sound: "default", "thread-id": "murph.sync-interruption-reminder",
+    });
     expect(await rows(id)).toMatchObject([{ step: 1, outcome: "sent", episodeStartedAt: new Date(now.getTime() - 25 * HOUR) }]);
     expect(await sweep(new Date(now.getTime() + 15 * 60_000))).toMatchObject({ claimed: 0, sent: 0 });
     expect(m.send).toHaveBeenCalledOnce();

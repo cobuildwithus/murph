@@ -108,7 +108,7 @@ async function sendReminder(member: Awaited<ReturnType<typeof readOpenGames>>[nu
     gameId: member.open[0]!.row.id, actor: "system", type: "reminder_notification", commandKey, payload: { ...payload, outcome: "claimed" },
   }] });
   if (!claimed.count) return;
-  const request: ApplePushRequest = { target, collapseId: sha256Hex(commandKey), expiresAt: window.expiresAt, sound: "default",
+  const request: ApplePushRequest = { target, collapseId: sha256Hex(commandKey), expiresAt: window.expiresAt,
     data: { gameId: member.open[0]!.row.id, notification: "game_reminder" }, message: { kind: "alert", title: "", body: "Still time today." } };
   // The recheck also rebuilds the words and target, so a game closed since the claim can't be named.
   const outcome = await deliverGamePush({ memberId, sessionId, request, requireGameReminders: true }, async () => {
