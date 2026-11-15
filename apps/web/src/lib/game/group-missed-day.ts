@@ -2,13 +2,12 @@ import "server-only";
 
 import { Prisma } from "@prisma/client";
 import { GAME_MISSED_ROOM_MAX_GAMES, gameGroupMissedCheckInPolicySchema, type HostedGameGroupMissedCheckInPolicy } from "@murphai/hosted-execution/runtime-control";
-import { isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { logHostedOnboardingWarning } from "../hosted-onboarding/logging";
 import { getPrisma } from "../prisma";
 import { readHostedMailboxWakeByDedupeKey } from "../hosted-mailbox/store";
 import { isGameEnabled } from "./access";
 import { gameGroupLoreFingerprint } from "./audience";
-import { GameChatAudienceError, readGameChatAuthority, readGameChatAudience, type GameChatAudience } from "./chat-membership";
+import { readGameChatAudienceRefusal, readGameChatAuthority, readGameChatAudience, type GameChatAudience } from "./chat-membership";
 import { gameGroupMissedDayEventId, reserveGameMissedDayTx } from "./chat-lifecycle-receipt";
 import { gameMissedCheckInHorizons, gameMissedCheckInRuns, isMissedCheckInDueNow } from "./missed-check-in";
 import { currentTerms, remainingPlayers } from "./rules";
@@ -51,12 +50,12 @@ function freezeBatch(games: Games, firstMissedDate: string, now: Date): HostedGa
   })).sort((a, b) => a.gameId.localeCompare(b.gameId));
 }
 
-const AMBIGUOUS_IDENTITY_CODES = ["HOSTED_MEMBER_IDENTITY_LOOKUP_AMBIGUOUS", "HOSTED_MEMBER_VERIFIED_EMAIL_LOOKUP_AMBIGUOUS"];
 
 /** A room proven unsendable gets no check-in and waits for its next shard. Outages, defects and unreadable responses still stop the sweep. */
 function skipUnprovableRoom(error: unknown): null {
-  const reason = error instanceof GameChatAudienceError ? error.reason
-    : isHostedOnboardingError(error) && AMBIGUOUS_IDENTITY_CODES.includes(error.code) ? "identity_ambiguous" : null;
+  const reason = readGameChatAudienceRefusal(error);
+  // A live bound room cannot lose its route through normal group-leave cleanup.
+  if (reason === "route_removed") throw new Error("Game chat route is unavailable.", { cause: error });
   if (!reason) throw error;
   logHostedOnboardingWarning("game.missed-day.room-skipped", { reason });
   return null;

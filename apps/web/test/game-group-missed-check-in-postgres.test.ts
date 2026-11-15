@@ -328,6 +328,20 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     expect(await reserveGameEveningCheckIn(f.roomId, [id], eveningAt)).toBe(1);
   });
 
+  it("stops the evening pass on a bound live room with no route row", async () => {
+    vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");
+    const f = await fixture(), id = await f.addGame();
+    proof.realRoutes.add(f.roomId);
+    await db.hostedThreadRoute.deleteMany({ where: { containerMemberId: f.roomId } });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const failure = await reserveGameEveningCheckIn(f.roomId, [id], eveningAt).catch(error => error);
+    expect(failure).toBeInstanceOf(Error);
+    expect(failure).not.toBeInstanceOf(GameChatAudienceError);
+    expect(failure.message).toBe("Game chat route is unavailable.");
+    expect(await db.hostedLinqDelivery.count({ where: { payloadOwnerMemberId: f.roomId } })).toBe(0);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
   it("combines pair and group games in one mixed-room evening witness", async () => {
     vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");
     const f = await fixture(2), pair = await f.addGame(2), group = await f.addGame(10);

@@ -590,6 +590,18 @@ describe("hosted assistant notification destination", () => {
     expect((response as Response).status).toBe(500);
   });
 
+  it("separates missing routes from corrupt and duplicate routes in a batch", async () => {
+    const row = await buildRouteRow({ accountLookupKey: "synthetic-account", channel: "linq", containerMemberId: "duplicate", threadId: "synthetic-thread" });
+    const prisma = createPrisma({ containerMemberId: "missing", rows: [
+      row, row, { ...row, containerMemberId: "unreadable", deliveryRouteEncrypted: "corrupt" },
+    ] });
+    const batch = await readHostedThreadContainerLinqRouteAuthorities({ containerMemberIds: ["missing", "unreadable", "duplicate"], prisma });
+    expect(batch.missingContainerMemberIds).toEqual(new Set(["missing"]));
+    expect(batch.unavailableContainerMemberIds).toEqual(new Set(["unreadable", "duplicate"]));
+    expect(batch.authorities.size).toBe(0);
+    expect(batch.nonLinqContainerMemberIds.size).toBe(0);
+  });
+
   // The batch read stays per member: one route that cannot be opened is
   // unavailable for that member, and each caller decides what that means.
   it("propagates a secure-box dependency failure from a direct route open", async () => {
@@ -601,6 +613,7 @@ describe("hosted assistant notification destination", () => {
       await expect(resolveHostedAssistantNotificationDestination({ memberId: "container-member", prisma })).rejects.toBe(failure);
       const batch = await readHostedThreadContainerLinqRouteAuthorities({ containerMemberIds: ["container-member"], prisma });
       expect(batch.unavailableContainerMemberIds.has("container-member")).toBe(true);
+      expect(batch.missingContainerMemberIds.size).toBe(0);
       expect(jsonError(failure).status).toBe(500);
     } finally { open.mockRestore(); }
   });

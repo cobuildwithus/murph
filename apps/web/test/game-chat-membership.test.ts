@@ -13,7 +13,7 @@ vi.mock("../src/lib/hosted-routing/assistant-notification-destination", () => ({
 vi.mock("../src/lib/hosted-onboarding/linq-client", () => ({ getHostedLinqChatSummary: m.chat }));
 vi.mock("../src/lib/hosted-onboarding/linq-line-store", () => ({ readHostedLinqIncomingLineState: async () => ({ kind: "assignable" }) }));
 
-import { addressedGameRematchWhere, gamePairWhere, readGameChatAudience, readGameChatAuthority, gameChatContextCurrent, readGameChatCandidateIds, requireExactGameChat } from "../src/lib/game/chat-membership";
+import { GameChatAudienceError, exactChat, addressedGameRematchWhere, gamePairWhere, readGameChatAudience, readGameChatAuthority, gameChatContextCurrent, readGameChatCandidateIds, requireExactGameChat } from "../src/lib/game/chat-membership";
 
 const players = ["player-a", "player-b"];
 const phones = ["+15555550101", "+15555550102"];
@@ -127,6 +127,22 @@ describe("current game room authority through the provider reader", () => {
       status: "live", previousGameId: null, createdBy: members[0], invitees: [],
       players: members.map((memberId, seat) => ({ memberId, seat, leftAt: null })) };
   }
+  it.each(["missing", "unreadable", "non-linq"])("classifies a %s route without reading the provider", async kind => {
+    m.route.mockResolvedValue({ authorities: new Map(),
+      missingContainerMemberIds: new Set(kind === "missing" ? ["room"] : []),
+      unavailableContainerMemberIds: new Set(kind === "unreadable" ? ["room"] : []),
+      nonLinqContainerMemberIds: new Set(kind === "non-linq" ? ["room"] : []),
+    });
+    const failure = await readGameChatAudience("room").catch(error => error);
+    expect(failure).toBeInstanceOf(Error);
+    if (kind === "unreadable") expect(failure).not.toBeInstanceOf(GameChatAudienceError);
+    else {
+      expect(failure).toBeInstanceOf(GameChatAudienceError);
+      expect(failure.reason).toBe(kind === "missing" ? "route_removed" : "route_unavailable");
+    }
+    expect(await exactChat("room", phones)).toBeNull();
+    expect(m.chat).not.toHaveBeenCalled();
+  });
   it.each([false, true])("admits bound pairs and ten-player games with bystanders (registered: %s)", async registered => {
     for (const [size, extras] of [[2, 1], [2, 9], [10, 1]]) {
       const game = room(size, extras, registered);

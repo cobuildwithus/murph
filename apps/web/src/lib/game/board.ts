@@ -12,7 +12,7 @@ import { lockHostedGroupRow, readHostedGroupBoardData, saveHostedGroupBoardShari
 import { finishHostedGroupJoin } from "../hosted-groups/join-post-commit";
 import { gameOnWhere } from "./access";
 import { areGamePlayersBlocked, lockGamePair } from "./blocks";
-import { gameChatContextCurrent, readGameChatAudience } from "./chat-membership";
+import { gameChatContextCurrent, readGameChatAudience, readGameChatAudienceRefusal } from "./chat-membership";
 import { verifiedGameContactKeys } from "./audience";
 import { gameNotFound } from "./http/errors";
 import { BOARD_METRICS, boardCrowns, boardNumber, type BoardMetric, type BoardPerson, type PairBoard } from "./board-numbers";
@@ -115,7 +115,11 @@ export async function savePairBoardSharing(viewerId: string, otherId: string, in
   // Only first enrollment needs provider audience evidence. Existing members
   // retain the same self-service sharing authority as the join page.
   const audience = input.expectedMembershipId === null
-    ? await readGameChatAudience(binding.runtimeMemberId).catch(() => { throw gameNotFound(); }) : null;
+    ? await readGameChatAudience(binding.runtimeMemberId).catch((error: unknown) => {
+      const refusal = readGameChatAudienceRefusal(error);
+      if (refusal && refusal !== "line_unavailable") throw gameNotFound();
+      throw error;
+    }) : null;
   let result;
   try {
     result = await db.$transaction(async tx => {
