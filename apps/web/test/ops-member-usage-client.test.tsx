@@ -128,6 +128,56 @@ afterEach(async () => {
 });
 
 describe("MemberUsageClient", () => {
+  test("suspends and restores a searched person with inline confirmation and no container action", async () => {
+    const dashboard = makeDashboard();
+    dashboard.rows.push({ ...dashboard.rows[0]!, memberId: "hbm_person", memberKind: "member", containerOwnerMemberId: null });
+    dashboard.search = { ...dashboard.search, kind: "phone_last_four", query: "0101", resultCount: 2 };
+    const rendered = await renderClientComponent(createElement(MemberUsageClient, { dashboard }));
+    cleanupRender = rendered.cleanup;
+    const confirm = vi.fn(() => { throw new Error("Native confirmation is forbidden."); });
+    rendered.window.confirm = confirm;
+    expect(rendered.container.querySelector('button[aria-label="Suspend for hbm_container"]')).toBeNull();
+    expect(getButtonByAriaLabel(rendered.container, "Suspend for hbm_person").disabled).toBe(false);
+    await clickButton(rendered.window, getButtonByAriaLabel(rendered.container, "Suspend for hbm_person"));
+    expect(rendered.container.textContent).toContain("Murph stops replying to them. They are not told.");
+    expect(fetchMock).not.toHaveBeenCalled();
+    await clickButton(rendered.window, getButton(rendered.container, "Cancel"));
+    expect(fetchMock).not.toHaveBeenCalled();
+    await clickButton(rendered.window, getButtonByAriaLabel(rendered.container, "Suspend for hbm_person"));
+    fetchMock.mockResolvedValueOnce(Response.json({ suspended: true, runtimeRecheckStatus: "accepted" }));
+    await clickButton(rendered.window, getButtonByAriaLabel(rendered.container, "Confirm Suspend for hbm_person"));
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/ops/member-suspension", expect.objectContaining({
+      method: "POST", body: JSON.stringify({ memberId: "hbm_person", operation: "suspend" }),
+    }));
+    expect(routerRefresh).toHaveBeenCalledOnce();
+    await clickButton(rendered.window, getButtonByAriaLabel(rendered.container, "Restore for hbm_person"));
+    expect(rendered.container.textContent).toContain("Murph can reply again. They are not told.");
+    fetchMock.mockResolvedValueOnce(Response.json({ suspended: false, runtimeRecheckStatus: "accepted" }));
+    await clickButton(rendered.window, getButtonByAriaLabel(rendered.container, "Confirm Restore for hbm_person"));
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/ops/member-suspension", expect.objectContaining({
+      body: JSON.stringify({ memberId: "hbm_person", operation: "restore" }),
+    }));
+    expect(routerRefresh).toHaveBeenCalledTimes(2);
+    expect(confirm).not.toHaveBeenCalled();
+
+  });
+
+  test("keeps the same suspension retry after a committed change with a failed runtime recheck", async () => {
+    const dashboard = makeDashboard();
+    dashboard.rows[0] = { ...dashboard.rows[0]!, memberId: "hbm_person", memberKind: "member" };
+    const rendered = await renderClientComponent(createElement(MemberUsageClient, { dashboard }));
+    cleanupRender = rendered.cleanup;
+    await clickButton(rendered.window, getButtonByAriaLabel(rendered.container, "Suspend for hbm_person"));
+    fetchMock.mockResolvedValueOnce(Response.json({ suspended: true, runtimeRecheckStatus: "pending" }, { status: 202 }));
+    await clickButton(rendered.window, getButtonByAriaLabel(rendered.container, "Confirm Suspend for hbm_person"));
+    expect(rendered.container.textContent).toContain("Change saved. Runtime recheck is pending. Try again.");
+    expect(routerRefresh).not.toHaveBeenCalled();
+    fetchMock.mockResolvedValueOnce(Response.json({ suspended: true, runtimeRecheckStatus: "accepted" }));
+    await clickButton(rendered.window, getButtonByAriaLabel(rendered.container, "Confirm Suspend for hbm_person"));
+    expect(fetchMock.mock.calls.map((call) => JSON.parse(String(call[1]?.body)).operation)).toEqual(["suspend", "suspend"]);
+    expect(routerRefresh).toHaveBeenCalledOnce();
+  });
+
   test("renders mutation controls fail-closed before tab-session restoration", () => {
     const markup = renderToStaticMarkup(
       createElement(MemberUsageClient, { dashboard: makeDashboard() }),

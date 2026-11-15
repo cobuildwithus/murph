@@ -28,10 +28,7 @@ export async function handleHostedOnboardingTelegramWebhookWithVisibleAccess(
   input: Parameters<typeof handleHostedOnboardingTelegramWebhook>[0],
 ): Promise<HostedOnboardingTelegramWebhookResponse> {
   const response = await handleHostedOnboardingTelegramWebhook(input);
-  if (
-    response.reason !== "inactive-member"
-    && response.reason !== "suspended-member"
-  ) {
+  if (response.reason !== "inactive-member") {
     return response;
   }
 

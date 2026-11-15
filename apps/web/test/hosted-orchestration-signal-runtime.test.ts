@@ -345,7 +345,8 @@ describe("hosted runtime Temporal signaling", () => {
     );
   });
 
-  it("signals runtime rechecks only after active access without upserting workspace", async () => {
+  it("signals runtime rechecks after access loss without upserting workspace", async () => {
+    mocks.hostedMemberFindUnique.mockResolvedValue({ suspendedAt: new Date() });
     const abortSignal = new AbortController().signal;
     await signalHostedRuntimeRecheckRuntime({
       abortSignal,
@@ -353,7 +354,7 @@ describe("hosted runtime Temporal signaling", () => {
       userId: "member_123",
     });
 
-    expectHostedRuntimeActiveAccessRead(mocks.hostedMemberFindUnique, "member_123");
+    expect(mocks.hostedMemberFindUnique).not.toHaveBeenCalled();
     expect(mocks.ensureHostedWorkspace).not.toHaveBeenCalled();
     expect(mocks.signalWithStart).toHaveBeenCalledWith(
       HOSTED_USER_RUNTIME_WORKFLOW_TYPE,
@@ -422,7 +423,7 @@ describe("hosted runtime Temporal signaling", () => {
     );
   });
 
-  it("does not signal runtime rechecks when a thread-container owner is inactive", async () => {
+  it("lets reconciliation observe an inactive thread-container owner", async () => {
     mocks.hostedMemberFindUnique.mockResolvedValue(buildActiveMemberRecord({
       threadContainer: {
         owner: {
@@ -436,11 +437,11 @@ describe("hosted runtime Temporal signaling", () => {
     await expect(signalHostedRuntimeRecheckRuntime({
       client: buildClient(),
       userId: "member_123",
-    })).rejects.toThrow("Hosted runtime user is not active.");
+    })).resolves.toMatchObject({ signalAccepted: true });
 
-    expectHostedRuntimeActiveAccessRead(mocks.hostedMemberFindUnique, "member_123");
+    expect(mocks.hostedMemberFindUnique).not.toHaveBeenCalled();
     expect(mocks.ensureHostedWorkspace).not.toHaveBeenCalled();
-    expect(mocks.signalWithStart).not.toHaveBeenCalled();
+    expect(mocks.signalWithStart).toHaveBeenCalledOnce();
   });
 
   it("signals retention rechecks for inactive workspaces without granting active runtime access", async () => {

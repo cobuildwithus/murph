@@ -5177,6 +5177,16 @@ path for already-consented historical or interrupted states; authentication
 proof is not activation authority and do not replace the
 consent-owned continuation.
 
+Ops usage person rows can suspend or restore the canonical member through the
+Ops-authenticated, same-origin `POST /api/ops/member-suspension`. Both operations
+are idempotent; suspension preserves its original timestamp on retry, and group
+containers are excluded. Identity routing retains suspended people so Linq,
+Telegram and email cannot reinterpret them as first contacts. Suspended inbound
+and queued-message recovery are silent, including signup-link and access-notice
+fallbacks. After committing either operation, Ops requests the existing bounded
+runtime recheck; a failed handoff stays retryable in the row. This hint must reach
+inactive runtimes too: fresh access and usage gates retain execution authority.
+
 Operator recovery is not acquisition: an exhausted canonical
 Starter member may receive one fresh policy-sized grant from `/ops/usage` under
 the same beneficiary ledger lock. Each reset is keyed to the displayed ledger

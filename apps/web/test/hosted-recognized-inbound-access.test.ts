@@ -128,7 +128,7 @@ describe("recognized inbound access", () => {
     });
   });
 
-  it("answers a suspended recognized account without exposing why it was suspended", async () => {
+  it("silently rejects a suspended recognized account without an invite or notice", async () => {
     const resolution = await resolveHostedRecognizedInboundAccess({
       allowSignupFallback: true,
       inviteChannel: "web",
@@ -140,13 +140,7 @@ describe("recognized inbound access", () => {
       prisma: {} as never,
     });
 
-    expect(resolution).toMatchObject({
-      kind: "access_notice",
-      noticeCode: "billing_inactive",
-      responseReason: "sent-account-unavailable-notice",
-    });
-    expect(resolution.kind === "access_notice" ? resolution.message : "")
-      .not.toMatch(/refund|dispute|suspend/iu);
+    expect(resolution).toEqual({ kind: "silent" });
     expect(mocks.readHostedRuntimeAiAccessDecision).not.toHaveBeenCalled();
     expect(mocks.issueHostedInvite).not.toHaveBeenCalled();
   });
