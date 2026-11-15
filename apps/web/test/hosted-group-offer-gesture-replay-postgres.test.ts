@@ -140,6 +140,23 @@ beforeEach(() => {
 });
 
 describe.skipIf(!runPostgres)("group offer gesture PostgreSQL replay boundaries", () => {
+  it.each(["join", "disclosure"] as const)("Telegram %s rolls back a server fault after the grant and spends redelivery once", async (kind) => {
+    await withFixture({ kind }, async (f) => {
+      const before = { memberships: await f.memberships(), shares: await f.shares(), grants: await f.grants() };
+      await expect(acceptHostedGroupOfferAffirmation({
+        ...f.affirmation(kind),
+        onAcceptedTx: async () => { throw new TypeError("Synthetic post-grant failure"); },
+      })).rejects.toThrow("Synthetic post-grant failure");
+      expect(await f.receipts()).toHaveLength(0);
+      expect({ memberships: await f.memberships(), shares: await f.shares(), grants: await f.grants() }).toEqual(before);
+      expect(await acceptHostedGroupOfferAffirmation(f.affirmation(kind))).toEqual({ status: "accepted", kind });
+      const accepted = { memberships: await f.memberships(), shares: await f.shares(), grants: await f.grants() };
+      // The provider did not observe the committed response.
+      expect(await acceptHostedGroupOfferAffirmation(f.affirmation(kind))).toEqual({ status: "replayed" });
+      expect(await f.receipts()).toHaveLength(1);
+      expect({ memberships: await f.memberships(), shares: await f.shares(), grants: await f.grants() }).toEqual(accepted);
+    });
+  });
   it.each([false, true])("Telegram join replay stays spent after leave (fresh rejoin: %s)", async (rejoin) => {
     await withFixture({}, async (f) => {
       const callback = f.callback("join", "original");
