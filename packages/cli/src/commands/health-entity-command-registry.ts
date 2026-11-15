@@ -10,15 +10,17 @@ import {
   healthEntityDescriptorByCommandName,
   healthListResultSchema,
   healthShowResultSchema,
-  type HealthCoreScaffoldServiceMethodName,
-  type HealthCoreServiceMethods,
-  type HealthCoreUpsertServiceMethodName,
-  type HealthCommandDescriptorEntry,
-  type HealthEntityEnvelope,
-  type HealthListEnvelope,
-  type HealthQueryListServiceMethodName,
-  type HealthQueryServiceMethods,
-  type HealthQueryShowServiceMethodName,
+} from "@murphai/vault-usecases/health-cli-descriptors";
+import type {
+  HealthCoreScaffoldServiceMethodName,
+  HealthCoreServiceMethods,
+  HealthCoreUpsertServiceMethodName,
+  HealthCommandDescriptorEntry,
+  HealthEntityEnvelope,
+  HealthListEnvelope,
+  HealthQueryListServiceMethodName,
+  HealthQueryServiceMethods,
+  HealthQueryShowServiceMethodName,
 } from "@murphai/vault-usecases";
 import { pathSchema } from "@murphai/operator-config/vault-cli-contracts";
 import type { VaultServices } from "@murphai/vault-usecases";

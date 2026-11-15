@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import type { JsonObject } from '@murphai/contracts'
 import * as z from '@murphai/contracts/zod-runtime'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
-import { toVaultCliFilesystemError } from './usecases/vault-usecase-helpers.js'
+import { toVaultCliFilesystemError } from './runtime-errors.js'
 
 export const inputFileOptionSchema = z
   .string()

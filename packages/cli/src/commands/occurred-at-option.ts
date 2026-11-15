@@ -2,7 +2,7 @@ import {
   isStrictIsoDate,
   normalizeIanaTimeZone,
   resolveLocalDateAtNoon,
-} from '@murphai/contracts'
+} from '@murphai/contracts/time'
 import {
   isoTimestampSchema,
   localDateSchema,

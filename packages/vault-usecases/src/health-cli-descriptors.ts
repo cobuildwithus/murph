@@ -1,11 +1,13 @@
 import {
   bloodTestImportPayloadSchema,
-  conditionImportPayloadSchema,
-  healthEntityDefinitions,
   immunizationImportPayloadSchema,
-  type JsonObject,
-  type HealthEntityDefinition,
-  type HealthEntityKind,
+} from "@murphai/contracts/zod";
+import { conditionImportPayloadSchema } from "@murphai/contracts/shares";
+import { healthEntityDefinitions } from "@murphai/contracts/health-entities";
+import type {
+  JsonObject,
+  HealthEntityDefinition,
+  HealthEntityKind,
 } from "@murphai/contracts";
 import * as z from "@murphai/contracts/zod-runtime";
 import type {
