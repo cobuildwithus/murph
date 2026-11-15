@@ -166,6 +166,9 @@
       "@murphai/hosted-execution/usage-diagnostics": [
         "../../packages/hosted-execution/src/usage-diagnostics.ts"
       ],
+      "@murphai/hosted-execution/request-input": [
+        "../../packages/hosted-execution/src/request-input.ts"
+      ],
       "@murphai/hosted-execution/plan-usage": [
         "../../packages/hosted-execution/src/plan-usage.ts"
       ],
@@ -399,6 +402,9 @@
       ],
       "@murphai/contracts/recap-material": [
         "../../packages/contracts/src/recap-material.ts"
+      ],
+      "@murphai/contracts/validation-error": [
+        "../../packages/contracts/src/validation-error.ts"
       ],
       "@murphai/contracts/recap-validation": [
         "../../packages/contracts/src/recap-validation.ts"

@@ -1,3 +1,4 @@
+import { isRequestInputError } from "@murphai/hosted-execution/request-input";
 import {
   createServer,
   type IncomingMessage,
@@ -1942,6 +1943,12 @@ function classifyRequestDecodeError(error: unknown): {
       },
       statusCode: 413,
     };
+  }
+
+  if (isRequestInputError(error)) {
+    // A translated rejection reports the validator's failure, as it did before translation.
+    const invalid = classifyRequestDecodeError(error.cause);
+    return { payload: { ...invalid.payload, error: "Invalid request." }, statusCode: 400 };
   }
 
   const details = buildHostedExecutionSafeErrorDetails(error);

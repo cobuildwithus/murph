@@ -1,3 +1,5 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/server", () => {
@@ -618,6 +620,57 @@ describe("json route helper factory", () => {
     await expect(response.json()).resolves.toEqual({ error: mapping.error });
   });
 
+  it("maps explicit input rejection to the existing response and warning", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    const logDetails = vi.fn();
+    let rejection: unknown;
+    try {
+      parseInput(null, () => { throw new ContractValidationError("Invalid shape."); });
+    } catch (error) {
+      rejection = error;
+    }
+    const response = httpModule.createJsonErrorResponse(rejection, {
+      defaultHeaders: { "Cache-Control": "no-store" },
+      headers: { "x-test": "present" },
+      internalMessage: "route failed unexpectedly",
+      logMessage: "route failed",
+      logDetails,
+    });
+    expect(response.status).toBe(400);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(response.headers.get("x-test")).toBe("present");
+    await expect(response.json()).resolves.toEqual({
+      error: { code: "INVALID_REQUEST", message: "Invalid request." },
+    });
+    expect(warn).toHaveBeenCalledExactlyOnceWith("route failed", {
+      errorType: "RequestInputError",
+      errorMessage: "Invalid shape.",
+      errorCauseType: "TypeError",
+      errorCauseMessage: "Invalid shape.",
+      internalMessage: "route failed unexpectedly",
+      errorResponseCode: "INVALID_REQUEST",
+    });
+    expect(errorLog).not.toHaveBeenCalled();
+    expect(logDetails).not.toHaveBeenCalled();
+  });
+
+  it("logs an untranslated validator failure exactly as the TypeError it replaces", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const response = httpModule.createJsonErrorResponse(new ContractValidationError("Invalid shape."), {
+      internalMessage: "route failed unexpectedly",
+      logMessage: "route failed",
+    });
+    expect(response.status).toBe(400);
+    expect(warn).toHaveBeenCalledExactlyOnceWith("route failed", {
+      errorType: "TypeError",
+      errorMessage: "Invalid shape.",
+      internalMessage: "route failed unexpectedly",
+      errorResponseCode: "INVALID_REQUEST",
+      nativeErrorInference: true,
+    });
+  });
+
   it("keeps an ordinary TypeError at 400 with optional warning-level log details", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const helpers = httpModule.createJsonRouteHelpers({
@@ -644,6 +697,7 @@ describe("json route helper factory", () => {
       errorHint: "request body must be an object",
       errorMessage: "body shape wrong",
       errorResponseCode: "INVALID_REQUEST",
+      nativeErrorInference: true,
       errorType: "TypeError",
       internalMessage: "route failed unexpectedly",
     });
@@ -679,6 +733,7 @@ describe("json route helper factory", () => {
       errorMessage:
         "Invalid callback state for <redacted-url> from <redacted-path> while emailing <redacted-email>",
       errorResponseCode: "INVALID_REQUEST",
+      nativeErrorInference: true,
       errorStatusCode: 400,
       errorType: "TypeError",
       internalMessage: "route failed unexpectedly",

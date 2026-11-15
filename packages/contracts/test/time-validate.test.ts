@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
@@ -240,6 +241,17 @@ describe("time helpers", () => {
 });
 
 describe("contract validation helpers", () => {
+  it("preserves TypeError compatibility while signaling neutral validation", () => {
+    const parse = () => assertContract(z.string(), null, "payload");
+    expect(parse).toThrow(ContractValidationError);
+    expect(parse).toThrow(TypeError);
+    expect(parse).toThrowError(expect.objectContaining({ name: "TypeError" }));
+    // Existing consumers also read the name off the constructor and the prototype.
+    const error = new ContractValidationError("payload");
+    expect(error.constructor.name).toBe("TypeError");
+    expect(Object.getOwnPropertyDescriptor(Object.getPrototypeOf(error), "name")?.value).toBe("TypeError");
+  });
+
   it("returns flattened issues for invalid values", () => {
     const result = safeParseContract(
       z.object({

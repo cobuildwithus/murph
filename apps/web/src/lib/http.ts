@@ -1,3 +1,4 @@
+import { isRequestInputError } from "@murphai/hosted-execution/request-input";
 import { Buffer } from "node:buffer";
 
 import { NextResponse } from "next/server";
@@ -277,6 +278,16 @@ export function createJsonErrorResponse(
     );
   }
 
+  if (isRequestInputError(error)) {
+    logJsonError("warn", error, options, {
+      errorResponseCode: "INVALID_REQUEST",
+    });
+    return NextResponse.json(
+      { error: { code: "INVALID_REQUEST", message: "Invalid request." } },
+      buildJsonResponseInit(options, 400),
+    );
+  }
+
   if (error instanceof SyntaxError) {
     logJsonError("warn", error, options, {
       errorResponseCode: "INVALID_JSON",
@@ -326,6 +337,7 @@ export function createJsonErrorResponse(
   if (error instanceof TypeError || error instanceof RangeError || error instanceof URIError) {
     logJsonError("warn", error, options, {
       errorResponseCode: "INVALID_REQUEST",
+      nativeErrorInference: true,
     });
     return NextResponse.json(
       {

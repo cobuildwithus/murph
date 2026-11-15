@@ -18,6 +18,9 @@
       "@murphai/contracts": [
         "./packages/contracts/src/index.ts"
       ],
+      "@murphai/contracts/validation-error": [
+        "./packages/contracts/src/validation-error.ts"
+      ],
       "@murphai/contracts/sleep-session": [
         "./packages/contracts/src/sleep-session.ts"
       ],
@@ -128,6 +131,9 @@
       ],
       "@murphai/hosted-execution/usage-diagnostics": [
         "./packages/hosted-execution/src/usage-diagnostics.ts"
+      ],
+      "@murphai/hosted-execution/request-input": [
+        "./packages/hosted-execution/src/request-input.ts"
       ],
       "@murphai/hosted-execution/plan-usage": [
         "./packages/hosted-execution/src/plan-usage.ts"

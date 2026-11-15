@@ -3307,6 +3307,13 @@ Current product admission, delivery and native runtime safety rules remain.
   send twice: the save and the fallback first return an already-sealed recap,
   and an upload reuses its content-addressed key. This is the recap's only
   transport retry; Web's save path and the tool handlers add none.
+- Request boundaries can translate neutral `ContractValidationError` failures through
+  `parseInput` into `RequestInputError`. Web, Worker and container request-decode
+  mappers recognize that explicit rejection as 400 using their existing envelopes.
+  Stage 1 of the explicit-request-rejection plan retains native error inference
+  and the neutral error's temporary `TypeError` base; Web marks native-inferred
+  invalid requests with `nativeErrorInference: true` in its existing warning.
+  Parser bugs pass through unchanged, and retry policy stays with each owner.
 - Hosted Web JSON routes answer a failed outbound fetch (Node's `TypeError`
   whose message is exactly `fetch failed`) with a retryable `503
   UPSTREAM_UNAVAILABLE`, never `400 INVALID_REQUEST`, so a caller's existing
