@@ -1,4 +1,4 @@
-import { readHostedRunnerDeployment, readHostedRunnerBankFromName } from "../hosted-runner-release.ts";
+import { hostedRunnerReleaseImageMatches, readHostedRunnerDeployment, readHostedRunnerBankFromName } from "../hosted-runner-release.ts";
 import { DurableObject } from "cloudflare:workers";
 import {
   deriveHostedExecutionErrorCode,
@@ -326,7 +326,10 @@ export class StandbyRunnerCoordinatorDurableObject extends DurableObject {
         },
       );
       if (proof.slotName !== slotName || proof.releaseId !== releaseId
-        || proof.region !== HOSTED_RUNNER_REGION || proof.prepared !== true) {
+        || proof.region !== HOSTED_RUNNER_REGION || proof.prepared !== true
+        || !proof.runnerImage || !hostedRunnerReleaseImageMatches(
+          this.environment, releaseId, proof.runnerImage.bundleFingerprint, proof.runnerImage.sourceFingerprint,
+        )) {
         throw new Error("Hosted standby preparation proof is invalid.");
       }
       if (kind === "reproof" && !this.store.isInventoryPhase(slotName, "ready")) return true;
