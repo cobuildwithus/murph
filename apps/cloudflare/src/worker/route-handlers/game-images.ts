@@ -36,7 +36,7 @@ async function handle(context: WorkerRouteContext, userId: string, operation: ty
     try {
       const result = await store.stat(mediaId);
       return result ? json(result) : jsonError("Game image not found.", 404);
-    } catch { throw new Error("Game image stat failed."); }
+    } catch (error) { throw new Error("Game image stat failed.", { cause: error }); }
   }
   const variant = context.request.headers.get("x-murph-image-variant");
   if (!isGameImageVariant(variant)) return jsonError("Game image variant is invalid.", 400);
