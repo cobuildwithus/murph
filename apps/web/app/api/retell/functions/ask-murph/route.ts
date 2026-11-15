@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
-import { readRawBodyBuffer } from "@/src/lib/http";
+import { readRawBodyBuffer, withLegacyWebhookErrorInference } from "@/src/lib/http";
 import {
   consultPhoneCall,
   getHostedPhoneCallForConsultation,
@@ -16,7 +16,7 @@ import { verifyRetellSignature } from "@/src/lib/phone-calls/retell-signature";
 
 const RETELL_ASK_MURPH_MAX_BODY_BYTES = 2 * 1024 * 1024;
 
-export const POST = withJsonError(async (request: Request) => {
+export const POST = withJsonError(withLegacyWebhookErrorInference(async (request: Request) => {
   const rawBody = (await readRawBodyBuffer(request, {
     limitBytes: RETELL_ASK_MURPH_MAX_BODY_BYTES,
   })).toString("utf8");
@@ -68,4 +68,4 @@ export const POST = withJsonError(async (request: Request) => {
   });
 
   return NextResponse.json(advice);
-});
+}));

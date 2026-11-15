@@ -1,3 +1,4 @@
+import { parseInput, RequestInputError } from "@murphai/hosted-execution/request-input";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   Prisma,
@@ -150,6 +151,7 @@ export async function recordHostedRetellPhoneCallUsageTx(input: {
 }): Promise<void> {
   const record = buildHostedRetellPhoneCallUsageRecord(input);
   await persistHostedAiUsageRecordTx({
+    create: buildHostedAiUsageCreateData(record, input.memberId),
     memberId: input.memberId,
     record,
     tx: input.tx,
@@ -169,18 +171,18 @@ async function recordHostedAiUsageRecordsForAccounting(input: {
   usage: readonly unknown[];
 }): Promise<RecordHostedAiUsageAccountingResult> {
   const prisma = input.prisma ?? getPrisma();
-  const records = dedupeHostedAiUsageRecords(parseHostedAiUsageRecords(input.usage));
+  const records = parseInput(input.usage, () => dedupeHostedAiUsageRecords(parseHostedAiUsageRecords(input.usage)));
   const recordedIds: string[] = [];
   const limitNoticeCandidates: HostedAiUsageLimitNoticeCandidate[] = [];
   let platformAiUsageAllowedAfter: boolean | null = null;
 
   for (const record of records) {
-    const memberId = requireHostedAiUsageMemberId(record, input.trustedUserId ?? null);
+    const memberId = parseInput(record, () => requireHostedAiUsageMemberId(record, input.trustedUserId ?? null));
     const settlement = await runHostedAiUsageRecordTransaction(prisma, async (tx) => {
       let allowanceBeneficiaryMemberId: string | null = null;
       if (input.runtimeIdentity !== undefined) {
         if (input.runtimeIdentity !== null && input.runtimeIdentity.userId !== memberId) {
-          throw new TypeError("Hosted runtime usage member does not match its authority.");
+          throw new RequestInputError("Hosted runtime usage member does not match its authority.");
         }
         if (input.runtimeIdentity) {
           const [funding, recordedFunding] = await Promise.all([
@@ -202,6 +204,7 @@ async function recordHostedAiUsageRecordsForAccounting(input: {
         allowanceBeneficiaryMemberId = owner?.allowanceBeneficiaryMemberId ?? null;
       }
       const recordedBeneficiary = await persistHostedAiUsageRecordTx({
+        create: parseInput(record, () => buildHostedAiUsageCreateData(record, memberId)),
         allowanceBeneficiaryMemberId,
         memberId,
         record,
@@ -423,6 +426,7 @@ function logHostedAiUsageLimitNoticeDelivery(
 
 async function persistHostedAiUsageRecordTx(input: {
   allowanceBeneficiaryMemberId?: string | null;
+  create: Prisma.HostedAiUsageUncheckedCreateInput;
   memberId: string;
   record: AssistantUsageRecord;
   tx: Prisma.TransactionClient;
@@ -431,7 +435,7 @@ async function persistHostedAiUsageRecordTx(input: {
     where: {
       id: input.record.usageId,
     },
-    create: { ...buildHostedAiUsageCreateData(input.record, input.memberId), allowanceBeneficiaryMemberId: input.allowanceBeneficiaryMemberId ?? null },
+    create: { ...input.create, allowanceBeneficiaryMemberId: input.allowanceBeneficiaryMemberId ?? null },
     // Keep this identity-only branch non-empty so Prisma delegates the upsert
     // to PostgreSQL. Exact concurrent replays then serialize on the usage id
     // without changing any immutable usage data.
@@ -491,8 +495,9 @@ function parseHostedAiUsageRecords(
 ): AssistantUsageRecord[] {
   try {
     return usage.map((entry) => parseAssistantUsageRecord(entry));
-  } catch {
-    throw new ContractValidationError("Hosted AI usage recording contains an invalid usage record.");
+  } catch (error) {
+    if (!(error instanceof ContractValidationError)) throw error;
+    throw new ContractValidationError("Hosted AI usage recording contains an invalid usage record.", { cause: error });
   }
 }
 
@@ -791,7 +796,7 @@ function requireHostedAiUsageMemberId(
   }
 
   if (trustedUserId && record.memberId !== trustedUserId) {
-    throw new ContractValidationError(
+    throw new RequestInputError(
       "Hosted AI usage memberId does not match the authenticated hosted execution user.",
     );
   }

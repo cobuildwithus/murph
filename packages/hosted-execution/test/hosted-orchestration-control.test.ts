@@ -1,3 +1,5 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
+import { parseInput, RequestInputError } from "../src/request-input.ts";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -460,7 +462,10 @@ describe("hosted orchestration control contracts", () => {
       { ...admission, status: "blocked" },
       { ...admission, status: "claimed" },
       { ...admission, status: "claimed", owner: { ...admission.owner, phase: "starting", processingMode: "system_mailbox" } },
-    ]) expect(() => parse(invalid)).toThrow();
+    ]) {
+      expect(() => parse(invalid)).toThrow(ContractValidationError);
+      expect(() => parseInput(invalid, parse)).toThrow(RequestInputError);
+    }
   });
 
   it("parses ensure-processing request and response variants", () => {

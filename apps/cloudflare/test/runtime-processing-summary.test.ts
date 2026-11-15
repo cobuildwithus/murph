@@ -1,3 +1,5 @@
+import { RequestInputError } from "@murphai/hosted-execution/request-input";
+import * as executionLogging from "@murphai/hosted-execution";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { HostedRuntimeEnsureProcessingResponse } from "@murphai/hosted-execution/orchestration-control";
 import { parseHostedRuntimeLogRequest } from "@murphai/hosted-execution/parsers";
@@ -31,6 +33,23 @@ function harness() {
 
 describe("Postgres processing summaries", () => {
   beforeEach(() => { vi.clearAllMocks(); });
+
+  it.each([
+    [new RequestInputError("Synthetic rejection."), 400, "warn"],
+    [new TypeError("Synthetic server failure."), 500, "error"],
+  ] as const)("logs the classified orchestration failure at %s severity", async (failure, status, level) => {
+    const { context, pending } = harness();
+    const log = vi.spyOn(executionLogging, "emitHostedExecutionStructuredLog");
+    vi.mocked(ensurePostgresRuntimeProcessing).mockRejectedValueOnce(failure);
+    try {
+      const response = await handleRuntimeEnsureProcessingRoute(context, "synthetic-owner");
+      expect(response.status).toBe(status);
+      expect(log).toHaveBeenCalledWith(expect.objectContaining({
+        error: failure, level, message: "Hosted worker direct runtime ensure-processing failed.",
+      }));
+      await Promise.all(pending);
+    } finally { log.mockRestore(); }
+  });
 
   it("keeps one detached operation summary stable while telemetry is pending", async () => {
     const { context, pending } = harness();

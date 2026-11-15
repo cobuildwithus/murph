@@ -1,3 +1,4 @@
+import { RequestInputError } from "@murphai/hosted-execution/request-input";
 import { describe, expect, it, vi } from 'vitest'
 
 import { importHostedAssistantRuntimeIssues } from '@/src/lib/hosted-execution/runtime-issues'
@@ -14,6 +15,13 @@ const TEST_FINGERPRINT = 'abcdef123456abcdef123456'
 const TEST_ISSUE_ID = 'ari_0123456789abcdef_abcdef123456abcdef123456'
 
 describe('importHostedAssistantRuntimeIssues', () => {
+  it("rejects malformed issue records before persistence", async () => {
+    const createMany = vi.fn();
+    prismaMocks.getPrisma.mockReturnValue({ hostedAssistantRuntimeIssue: { createMany } });
+    await expect(importHostedAssistantRuntimeIssues({ issues: [null] })).rejects.toBeInstanceOf(RequestInputError);
+    expect(createMany).not.toHaveBeenCalled();
+  });
+
   it('stores anonymized issue rows with retention metadata and no member relation', async () => {
     const createMany = vi.fn<
       (input: {

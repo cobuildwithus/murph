@@ -487,14 +487,14 @@ export async function startHostedContainerEntrypoint(input: {
     try {
       wakeRequest = await readHostedContainerRuntimeWakeRequest(request);
     } catch (error) {
+      const classified = classifyRequestDecodeError(error);
       emitHostedExecutionStructuredLog({
         component: "container",
         error,
-        level: "warn",
+        level: classified.level,
         message: "Hosted container entrypoint rejected the runtime wake request body.",
         phase: "failed",
       });
-      const classified = classifyRequestDecodeError(error);
       writeJsonResponse(response, classified.statusCode, classified.payload);
       return;
     }
@@ -655,18 +655,18 @@ export async function startHostedContainerEntrypoint(input: {
         let abortRequest: HostedContainerWorkspaceInvocationAbortRequest;
         try {
           abortRequest = parseInput(
-            JSON.parse(await readHostedContainerInvocationRequestBody(request)),
+            parseHostedContainerRequestJson(await readHostedContainerInvocationRequestBody(request)),
             parseHostedContainerWorkspaceInvocationAbortRequest,
           );
         } catch (error) {
+          const classified = classifyRequestDecodeError(error);
           emitHostedExecutionStructuredLog({
             component: "container",
             error,
-            level: "warn",
+            level: classified.level,
             message: "Hosted container entrypoint rejected the workspace invocation abort request body.",
             phase: "failed",
           });
-          const classified = classifyRequestDecodeError(error);
           writeJsonResponse(response, classified.statusCode, classified.payload);
           return;
         }
@@ -807,18 +807,18 @@ export async function startHostedContainerEntrypoint(input: {
         let smokeRequest: HostedContainerDirectR2PresignedPutSmokeRequest;
         try {
           smokeRequest = parseInput(
-            JSON.parse(await readHostedContainerInvocationRequestBody(request)),
+            parseHostedContainerRequestJson(await readHostedContainerInvocationRequestBody(request)),
             parseHostedContainerDirectR2PresignedPutSmokeRequest,
           );
         } catch (error) {
+          const classified = classifyRequestDecodeError(error);
           emitHostedExecutionStructuredLog({
             component: "container",
             error,
-            level: "warn",
+            level: classified.level,
             message: "Hosted container entrypoint rejected the direct R2 presigned PUT smoke request body.",
             phase: "failed",
           });
-          const classified = classifyRequestDecodeError(error);
           writeJsonResponse(response, classified.statusCode, classified.payload);
           return;
         }
@@ -851,19 +851,19 @@ export async function startHostedContainerEntrypoint(input: {
       claimedRunnerSlot = true;
 
       try {
-        const requestBody: unknown = JSON.parse(await readHostedContainerInvocationRequestBody(request));
+        const requestBody: unknown = parseHostedContainerRequestJson(await readHostedContainerInvocationRequestBody(request));
         const requestEnvelope = parseInput(requestBody, parseHostedExecutionContainerInvocationEnvelope);
         job = parseInput(requestEnvelope.job, runtime.parseRunnerJobInput);
         requestDiagnostics.workspaceAttemptId = job.request.attemptId;
       } catch (error) {
+        const classified = classifyRequestDecodeError(error);
         emitHostedExecutionStructuredLog({
           component: "container",
           error,
-          level: "warn",
+          level: classified.level,
           message: "Hosted container entrypoint rejected the request body.",
           phase: "failed",
         });
-        const classified = classifyRequestDecodeError(error);
         writeJsonResponse(response, classified.statusCode, classified.payload);
         return;
       }
@@ -1332,6 +1332,19 @@ async function startHostedContainerEntrypointCli(): Promise<void> {
   }
 }
 
+class InvalidJsonRequestError extends RequestInputError {}
+
+function parseHostedContainerRequestJson(body: string): unknown {
+  try {
+    return JSON.parse(body);
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      throw new InvalidJsonRequestError("Invalid JSON.", { cause: error });
+    }
+    throw error;
+  }
+}
+
 async function readHostedContainerInvocationRequestBody(
   request: IncomingMessage,
   limitBytes = HOSTED_CONTAINER_RUN_REQUEST_BODY_LIMIT_BYTES,
@@ -1449,22 +1462,26 @@ function parseHostedContainerDirectR2PresignedPutSmokeRequest(
   const rawByteLength = Object.hasOwn(record, "byteLength")
     ? record.byteLength
     : HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_DEFAULT_BYTES;
-  const byteLength = typeof rawByteLength === "number"
-    ? rawByteLength
-    : Number(rawByteLength);
+  let byteLength: number;
+  try {
+    byteLength = Number(rawByteLength);
+  } catch (error) {
+    if (error instanceof TypeError) throw new RequestInputError(error.message, { cause: error });
+    throw error;
+  }
   if (
     !Number.isSafeInteger(byteLength)
     || byteLength <= 0
     || byteLength > HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_MAX_BYTES
   ) {
-    throw new RangeError("Direct R2 presigned PUT smoke byteLength is outside the supported range.");
+    throw new ContractValidationError("Direct R2 presigned PUT smoke byteLength is outside the supported range.");
   }
 
   const tlsCaCertificatePem = typeof record.tlsCaCertificatePem === "string"
     ? record.tlsCaCertificatePem.trim()
     : "";
   if (tlsCaCertificatePem && tlsCaCertificatePem.length > 8 * 1024) {
-    throw new RangeError("Direct R2 presigned PUT smoke CA certificate is too large.");
+    throw new ContractValidationError("Direct R2 presigned PUT smoke CA certificate is too large.");
   }
 
   return {
@@ -1520,7 +1537,7 @@ async function readHostedContainerRuntimeWakeRequest(
     return null;
   }
 
-  return parseInput(JSON.parse(body), parseHostedContainerRuntimeWakeRequest);
+  return parseInput(parseHostedContainerRequestJson(body), parseHostedContainerRuntimeWakeRequest);
 }
 
 function parseHostedContainerRuntimeWakeRequest(
@@ -1922,11 +1939,13 @@ function hasNonEmptyHostedContainerString(value: unknown): boolean {
 }
 
 function classifyRequestDecodeError(error: unknown): {
+  level: "warn" | "error";
   payload: Record<string, unknown>;
   statusCode: number;
 } {
   if (error instanceof HostedContainerArchitectureVersionMismatchError) {
     return {
+      level: "warn",
       payload: {
         actualVersion: error.actualVersion,
         code: "runtime_architecture_mismatch",
@@ -1939,6 +1958,7 @@ function classifyRequestDecodeError(error: unknown): {
 
   if (error instanceof RequestBodyTooLargeError) {
     return {
+      level: "warn",
       payload: {
         code: "request_body_too_large",
         error: "Request body too large.",
@@ -1947,46 +1967,30 @@ function classifyRequestDecodeError(error: unknown): {
     };
   }
 
-  if (isRequestInputError(error)) {
-    // A translated rejection reports the validator's failure, as it did before translation.
-    const invalid = classifyRequestDecodeError(error.cause);
-    return { payload: { ...invalid.payload, error: "Invalid request." }, statusCode: 400 };
-  }
+  const rejection = isRequestInputError(error);
+  const diagnosticError = rejection ? error.cause ?? error : error;
+  const details = buildHostedExecutionSafeErrorDetails(diagnosticError);
+  const errorName = readHostedExecutionSafeErrorName(diagnosticError);
+  const diagnostics = {
+    code: deriveHostedExecutionErrorCode(diagnosticError),
+    ...(details ? { details } : {}),
+    ...(errorName ? { errorName } : {}),
+  };
 
-  const details = buildHostedExecutionSafeErrorDetails(error);
-  const errorName = readHostedExecutionSafeErrorName(error);
-
-  if (error instanceof SyntaxError) {
+  if (rejection) {
     return {
+      level: "warn",
       payload: {
-        code: deriveHostedExecutionErrorCode(error),
-        ...(details ? { details } : {}),
-        error: "Invalid JSON.",
-        ...(errorName ? { errorName } : {}),
-      },
-      statusCode: 400,
-    };
-  }
-
-  if (error instanceof TypeError || error instanceof RangeError || error instanceof URIError) {
-    return {
-      payload: {
-        code: deriveHostedExecutionErrorCode(error),
-        ...(details ? { details } : {}),
-        error: "Invalid request.",
-        ...(errorName ? { errorName } : {}),
+        ...diagnostics,
+        error: error instanceof InvalidJsonRequestError ? "Invalid JSON." : "Invalid request.",
       },
       statusCode: 400,
     };
   }
 
   return {
-    payload: {
-      code: deriveHostedExecutionErrorCode(error),
-      ...(details ? { details } : {}),
-      error: "Internal error.",
-      ...(errorName ? { errorName } : {}),
-    },
+    level: "error",
+    payload: { ...diagnostics, error: "Internal error." },
     statusCode: 500,
   };
 }

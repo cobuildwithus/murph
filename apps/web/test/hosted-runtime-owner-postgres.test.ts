@@ -1,3 +1,4 @@
+import { createJsonErrorResponse } from "@/src/lib/http";
 import { runWithPrismaOperationTimings, type PrismaOperationTiming } from "@/src/lib/prisma-operation-timing";
 import { reconcileHostedRuntimeUploads } from "@/src/lib/hosted-execution/runtime-upload-recovery";
 const uploadRecovery = vi.hoisted(() => ({ purge: vi.fn(), ensure: vi.fn() }));
@@ -1159,6 +1160,46 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
       ...command, settledRunnerContainerName: null,
     } })).toMatchObject({ status: "stale" });
     expect(await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).toEqual(successor);
+  });
+
+  it.each(["snapshot_create", "snapshot_record_replaced", "stored"] as const)("distinguishes %s replaced-snapshot identity from stored corruption", async (operation) => {
+    const userId = await member();
+    const runtime = identity((await claim(userId)).owner);
+    const session = await snapshotSession(runtime);
+    const foreign = await snapshotSession({ ...runtime, userId: "synthetic_other_member" });
+    const replacedSnapshotRef = {
+      schema: HOSTED_WORKSPACE_SNAPSHOT_REF_SCHEMA,
+      userId: foreign.userId, snapshotId: foreign.snapshotId, objectKey: foreign.objectKey,
+      createdAt: foreign.createdAt,
+      encryption: { ...foreign.encryption, aad: { ...foreign.encryption.aad }, ivBase64: Buffer.alloc(12).toString("base64url") },
+      upload: "direct-r2-presigned-put" as const,
+      archive: { compression: "zstd" as const, format: "tar" as const,
+        encryptedByteSize: 128, encryptedObjectSha256: "a".repeat(64),
+        plaintextArchiveSha256: "b".repeat(64), fileCount: 5, totalPlainBytes: 256 },
+    };
+    if (operation !== "snapshot_create") {
+      await executeHostedRuntimeSnapshotCommand({ prisma: first, userId,
+        command: { operation: "snapshot_create", session } });
+    }
+    if (operation === "stored") {
+      await observer.hostedRuntimeSnapshotUpload.update({ where: { userId }, data: { replacedSnapshotRef } });
+    }
+    const before = await observer.hostedRuntimeSnapshotUpload.findUnique({ where: { userId } });
+    const orphansBefore = await observer.hostedRuntimeOrphan.count({ where: { userId } });
+    const command = operation === "snapshot_create"
+      ? { operation, session: { ...session, replacedSnapshotRef } }
+      : operation === "snapshot_record_replaced"
+        ? { operation, expectedSession: session, replacedSnapshotRef }
+        : { operation: "snapshot_delete" as const, ...runtime, snapshotId: session.snapshotId };
+    const error = await executeHostedRuntimeSnapshotCommand({ prisma: first, userId, command })
+      .then(() => { throw new Error("Expected snapshot rejection."); }, error => error);
+    const response = createJsonErrorResponse(error, { internalMessage: "snapshot failed", logMessage: "snapshot failed" });
+    expect(response.status).toBe(operation === "stored" ? 500 : 400);
+    expect(await response.json()).toEqual({ error: operation === "stored"
+      ? { code: "INTERNAL_ERROR", message: "Internal error." }
+      : { code: "INVALID_REQUEST", message: "Invalid request." } });
+    expect(await observer.hostedRuntimeSnapshotUpload.findUnique({ where: { userId } })).toEqual(before);
+    expect(await observer.hostedRuntimeOrphan.count({ where: { userId } })).toBe(orphansBefore);
   });
 
   it("keeps an upload capability drain and orphan obligation after session and member deletion", async () => {

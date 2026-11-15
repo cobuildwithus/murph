@@ -1,3 +1,4 @@
+import { assertContract } from "@murphai/contracts";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { sleepSessionTypeSchema, sleepSessionStateSchema } from "@murphai/contracts/sleep-session";
 import {
@@ -1812,8 +1813,8 @@ export function parseHostedVaultShareSleepClassification(
   context: Record<string, unknown> | undefined,
   metricKey: string,
 ): Pick<HostedVaultShareDailyMetricData, "sleepType" | "sleepState"> {
-  const sleepType = sleepSessionTypeSchema.optional().parse(context?.sleepType);
-  const sleepState = sleepSessionStateSchema.optional().parse(context?.sleepState);
+  const sleepType = assertContract(sleepSessionTypeSchema.optional(), context?.sleepType, "Vault-share sleepType");
+  const sleepState = assertContract(sleepSessionStateSchema.optional(), context?.sleepState, "Vault-share sleepState");
   const sleepMetric = ["total-sleep-minutes", "deep-sleep-minutes", "rem-sleep-minutes"].includes(metricKey);
   if (!sleepMetric && (sleepType !== undefined || sleepState !== undefined)) {
     throw new ContractValidationError(`Vault share ${metricKey} does not accept sleep classification.`);

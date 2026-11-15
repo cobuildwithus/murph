@@ -1,3 +1,4 @@
+import { assertContract } from "@murphai/contracts";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { hostedLeaveGroupRequestSchema, hostedLeaveGroupResponseSchema } from "../leave-group.ts";
 import { hostedGameChatBootstrapRequestSchema, hostedGameChatBootstrapResponseSchema } from "../game-bootstrap-control.ts";
@@ -938,9 +939,9 @@ export function parseHostedRuntimeGroupToolRequest(
     record.action,
     "Hosted runtime group tool request action",
   );
-  if (action === "leave_group") return hostedLeaveGroupRequestSchema.parse(record);
-  if (action === "game_chat_bootstrap") return hostedGameChatBootstrapRequestSchema.parse(record);
-  if (["read_game", "update_game", "game_photo", "write_recap", "my_game_reminders"].includes(action)) return hostedGameToolRequestSchema.parse(record);
+  if (action === "leave_group") return assertContract(hostedLeaveGroupRequestSchema, record, "Hosted runtime group tool request");
+  if (action === "game_chat_bootstrap") return assertContract(hostedGameChatBootstrapRequestSchema, record, "Hosted runtime group tool request");
+  if (["read_game", "update_game", "game_photo", "write_recap", "my_game_reminders"].includes(action)) return assertContract(hostedGameToolRequestSchema, record, "Hosted runtime group tool request");
   const parsed =
     parseHostedRuntimeGroupConsultationRequest(record, action) ??
     parseHostedRuntimeGroupJournalRequest(record, action) ??

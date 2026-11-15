@@ -1,3 +1,5 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
+import { RequestInputError } from "@murphai/hosted-execution/request-input";
 import {
   parseHostedComputerActRequest,
   parseHostedComputerFinishRunRequest,
@@ -86,7 +88,8 @@ function parseComputerJsonPayload(payloadText: string): unknown {
 
   try {
     return JSON.parse(payloadText);
-  } catch {
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
     throw computerUseError({
       code: "HOSTED_COMPUTER_INVALID_JSON",
       httpStatus: 400,
@@ -101,7 +104,8 @@ function parseComputerRequestBody<TBody>(
 ): TBody {
   try {
     return parse(payload);
-  } catch {
+  } catch (error) {
+    if (!(error instanceof ContractValidationError || error instanceof RequestInputError)) throw error;
     throw computerUseError({
       code: "HOSTED_COMPUTER_INVALID_REQUEST",
       httpStatus: 400,

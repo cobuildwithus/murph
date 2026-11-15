@@ -421,7 +421,7 @@ export function parseDeviceWebhookAdmissionBatch(
     "Device webhook admission batch entries",
   ).map(parseDeviceWebhookQueuePayload);
   if (entries.length === 0 || entries.length > DEVICE_WEBHOOK_ADMISSION_MAX_BATCH_SIZE) {
-    throw new RangeError(
+    throw new ContractValidationError(
       `Device webhook admission batch must contain between 1 and ${DEVICE_WEBHOOK_ADMISSION_MAX_BATCH_SIZE} entries.`,
     );
   }

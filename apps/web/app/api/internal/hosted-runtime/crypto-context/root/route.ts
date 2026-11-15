@@ -1,3 +1,4 @@
+import { parseRequestJson } from "@/src/lib/http";
 import { RequestInputError } from "@murphai/hosted-execution/request-input";
 import { requireHostedCloudflareCallbackRequest } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import {
@@ -15,7 +16,7 @@ export const POST = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request, {
     maxBodyBytes: HOSTED_RUNTIME_CRYPTO_ROOT_CALLBACK_BODY_LIMIT_BYTES,
   });
-  const body = parseHostedRuntimeCryptoRootRequest(await request.json());
+  const body = parseHostedRuntimeCryptoRootRequest(parseRequestJson(await request.text()));
   const prisma = getPrisma();
   const workspace = await prisma.hostedWorkspace.findUnique({
     select: { userId: true },

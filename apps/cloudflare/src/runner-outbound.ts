@@ -1,3 +1,4 @@
+import { RequestInputError, RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type { RuntimeProviderCaller } from "./runtime-provider-authorization.ts";
 import { createRuntimeReplicaWriteBucket } from "./runtime-replica-upload.ts";
@@ -308,6 +309,8 @@ function runnerOutboundFailureResponse(
   error: unknown,
   snapshotPresign?: ManagedSnapshotPresignDiagnostics & { runtimeAttemptId: string },
 ): Response {
+  if (error instanceof RequestInputError) return jsonError("Invalid request.", 400);
+  if (error instanceof RequestBodyTooLargeError) return jsonError("Request body too large.", 413);
   if (error instanceof HostedRuntimeResourceRejectedError) {
     return json({ code: error.code, error: error.message }, error.status);
   }

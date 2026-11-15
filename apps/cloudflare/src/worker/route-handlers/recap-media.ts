@@ -22,10 +22,8 @@ export const recapMediaRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] =
     }
     const store = createRecapMediaStore({ bucket: context.env.BUNDLES, userId: decodeRouteParam(params.userId) });
     if (routeName === "recapMediaRead") {
-      try {
-        const result = await store.read(mediaId);
-        return result ? new Response(JSON.stringify(result), { headers: { "content-type": "application/json", "cache-control": "private, no-store" } }) : jsonError("Recap media not found.", 404);
-      } catch (error) { throw new Error("Recap media read failed.", { cause: error }); }
+      const result = await store.read(mediaId);
+      return result ? new Response(JSON.stringify(result), { headers: { "content-type": "application/json", "cache-control": "private, no-store" } }) : jsonError("Recap media not found.", 404);
     }
     const hash = context.request.headers.get("x-murph-recap-hash") ?? "";
     let envelope: string;
@@ -37,7 +35,6 @@ export const recapMediaRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] =
       if (error instanceof RequestBodyTooLargeError) return jsonError("Recap asset is too large.", 413);
       throw error;
     }
-    try { return json(await store.write(mediaId, envelope, hash)); }
-    catch (error) { throw new Error("Recap media staging failed.", { cause: error }); }
+    return json(await store.write(mediaId, envelope, hash));
   },
 }));

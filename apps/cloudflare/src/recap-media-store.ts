@@ -1,4 +1,4 @@
-import { RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
+import { parseInput, RequestInputError, RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type { R2BucketLike } from "./bundle-store.ts";
 import { requireHostedGameMediaEnvelope } from "./game-media-store.ts";
@@ -42,9 +42,9 @@ export async function retireRecapMediaObject(input: { bucket: R2BucketLike; user
   const prefix = hostedRecapMediaUserPrefix(input);
   const suffix = ".json.enc";
   if (!input.objectKey.startsWith(prefix) || !input.objectKey.endsWith(suffix)) {
-    throw new ContractValidationError("Recap retirement is outside its owner namespace.");
+    throw new RequestInputError("Recap retirement is outside its owner namespace.");
   }
-  requireHostedRecapMediaId(input.objectKey.slice(prefix.length, -suffix.length));
+  parseInput(input.objectKey, () => requireHostedRecapMediaId(input.objectKey.slice(prefix.length, -suffix.length)));
   await input.bucket.put(input.objectKey, tombstone, { httpMetadata: { contentType: "application/json" } });
 }
 

@@ -581,7 +581,7 @@ describe("device sync settings routes", () => {
   });
 
   it("does not mark settings sources configured when authoritative provider config is invalid", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     vi.stubEnv("JUNCTION_RECONCILE_DAYS", "soon");
 
     try {
@@ -589,17 +589,17 @@ describe("device sync settings routes", () => {
         new Request("https://join.example.test/api/settings/device-sync"),
       );
 
-      expect(response.status).toBe(400);
+      expect(response.status).toBe(500);
       expect(response.headers.get("Cache-Control")).toBe("no-store");
       expect(mocks.createHostedDeviceSyncControlPlane).not.toHaveBeenCalled();
       await expect(response.json()).resolves.toEqual({
         error: {
-          code: "INVALID_REQUEST",
-          message: "Invalid request.",
+          code: "INTERNAL_ERROR",
+          message: "Internal error.",
         },
       });
     } finally {
-      warn.mockRestore();
+      error.mockRestore();
     }
   });
 

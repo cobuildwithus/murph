@@ -2,7 +2,7 @@ import {
   validateCompanionAuthDiagnosticRequestBody,
 } from "@/src/lib/device-sync/companion";
 import { jsonOk, withJsonError } from "@/src/lib/device-sync/settings-http";
-import { readOptionalJsonObject } from "@/src/lib/http";
+import { InvalidJsonBodyError, readOptionalJsonObject } from "@/src/lib/http";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 
 const COMPANION_AUTH_DIAGNOSTIC_BODY_LIMIT_BYTES = 8 * 1024;
@@ -40,7 +40,7 @@ async function readAuthDiagnosticBody(request: Request): Promise<Record<string, 
       limitBytes: COMPANION_AUTH_DIAGNOSTIC_BODY_LIMIT_BYTES,
     });
   } catch (error) {
-    if (error instanceof SyntaxError) {
+    if (error instanceof InvalidJsonBodyError) {
       throw deviceSyncError({
         code: "COMPANION_REQUEST_INVALID",
         message: "Auth diagnostic body must be valid JSON.",

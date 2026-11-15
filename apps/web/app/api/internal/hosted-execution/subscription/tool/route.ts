@@ -8,7 +8,7 @@ import {
 import {
   handleHostedSubscriptionTool,
 } from "@/src/lib/hosted-execution/subscription-tool";
-import { readRawBodyBuffer } from "@/src/lib/http";
+import { parseRequestJson, readRawBodyBuffer } from "@/src/lib/http";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 
@@ -33,7 +33,7 @@ export const POST = withJsonError(async (request: Request) => {
 function parseSubscriptionControlRequest(payloadText: string) {
   try {
     return parseHostedSubscriptionControlRequest(
-      payloadText.trim() ? JSON.parse(payloadText) : {},
+      payloadText.trim() ? parseRequestJson(payloadText) : {},
     );
   } catch {
     throw hostedOnboardingError({

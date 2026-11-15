@@ -1,5 +1,5 @@
 import { withJsonError } from "@/src/lib/hosted-onboarding/http";
-import { readRawBodyBuffer } from "@/src/lib/http";
+import { readRawBodyBuffer, withLegacyWebhookErrorInference } from "@/src/lib/http";
 import {
   retellWebhookPayloadSchema,
 } from "@/src/lib/phone-calls/retell-payloads";
@@ -15,7 +15,7 @@ import { verifyRetellSignature } from "@/src/lib/phone-calls/retell-signature";
 
 const RETELL_WEBHOOK_MAX_BODY_BYTES = 4 * 1024 * 1024;
 
-export const POST = withJsonError(async (request: Request) => {
+export const POST = withJsonError(withLegacyWebhookErrorInference(async (request: Request) => {
   const rawBody = (await readRawBodyBuffer(request, {
     limitBytes: RETELL_WEBHOOK_MAX_BODY_BYTES,
   })).toString("utf8");
@@ -60,7 +60,7 @@ export const POST = withJsonError(async (request: Request) => {
   }
 
   return new Response(null, { status: 204 });
-});
+}));
 
 async function settleRetellWebhookBranches(
   branches: ReadonlyArray<() => Promise<unknown>>,

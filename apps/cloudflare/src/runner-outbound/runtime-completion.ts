@@ -1,4 +1,4 @@
-import { RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
+import { parseInput, RequestInputError, RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import { commandHostedRuntimeOwner } from "../runtime-owner-client.ts";
 import { createHostedRunnerContainerNamespaceRouter } from "../standby-runner-contract.ts";
 import type {
@@ -45,11 +45,11 @@ export async function handleRunnerRuntimeCompletionRequest(input: {
     const body = await readJsonObject(input.request, {
       limitBytes: HOSTED_RUNTIME_COMPLETION_BODY_LIMIT_BYTES,
     });
-    result = parseHostedWorkspaceInvocationResult(body.result);
+    result = parseInput(body.result, parseHostedWorkspaceInvocationResult);
   } catch (error) {
-    return error instanceof RequestBodyTooLargeError
-      ? jsonError("Request body too large.", 413)
-      : jsonError("Invalid request.", 400);
+    if (error instanceof RequestBodyTooLargeError) return jsonError("Request body too large.", 413);
+    if (error instanceof RequestInputError) return jsonError("Invalid request.", 400);
+    throw error;
   }
 
   const state = await commandHostedRuntimeOwner({ source: input.env, userId: input.userId, command: { operation: "reconcile" } });

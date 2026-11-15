@@ -4150,6 +4150,18 @@ describe("cloudflare worker routes", () => {
     expect(serializedWarnLogs).not.toContain("/internal/users/member_123/status");
   });
 
+  it("rejects an authenticated malformed path before reading runtime state", async () => {
+    const env = createWorkerEnv();
+    const ensure = vi.spyOn(runtimeProcessing, "ensurePostgresRuntimeProcessing");
+    const response = await worker.fetch(await signControlRequest(new Request(
+      "https://runner.example.test/internal/users/%E0%A4%A/runtime/ensure-processing",
+      { method: "POST", body: "{}", headers: { "content-type": "application/json" } },
+    )), env);
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "Invalid request." });
+    expect(ensure).not.toHaveBeenCalled();
+  });
+
   it("keeps malformed encoded route params behind existing auth and hidden-method boundaries", async () => {
     const controlResponse = await worker.fetch(
       new Request("https://runner.example.test/internal/users/%E0%A4%A/status", {

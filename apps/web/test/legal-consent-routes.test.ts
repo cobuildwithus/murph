@@ -212,6 +212,30 @@ describe("legal consent routes", () => {
     await expect(response.json()).resolves.toEqual(currentStatus);
   });
 
+  it.each([null, "", 12])("rejects a malformed optional invite before recording consent %#", async (inviteCode) => {
+    const response = await consentAcceptRoute.POST(
+      new Request("https://example.test/api/legal/consent/accept", {
+        body: JSON.stringify({
+          acceptedDocumentVersions: {
+            "health-ai-safety-disclosure": "2026-11-12",
+            "privacy-policy": "2026-11-12",
+            "terms-of-service": "2026-11-12",
+          },
+          inviteCode,
+          scope: "launch.legal",
+          source: "hosted onboarding",
+        }),
+        method: "POST",
+      }),
+    );
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: { code: "INVALID_REQUEST", message: "Invalid request." },
+    });
+    expect(mocks.recordHostedLaunchRequiredConsent).not.toHaveBeenCalled();
+    expect(mocks.continueHostedJoinInviteAfterLaunchConsent).not.toHaveBeenCalled();
+  });
+
   it("waits for every launch scope before continuing invited Starter enrollment", async () => {
     const partialStatus = {
       ...currentStatus,

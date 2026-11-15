@@ -1,3 +1,4 @@
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { Buffer } from "node:buffer";
 import { randomUUID } from "node:crypto";
@@ -2807,7 +2808,7 @@ function normalizeHostedMailboxAppendInput(
   );
   const kind = requireHostedMailboxWritableKind(input.kind);
   const occurredAt = new Date(
-    requireDate(input.occurredAt, "Hosted mailbox occurredAt").getTime(),
+    parseInput(input.occurredAt, () => requireDate(input.occurredAt, "Hosted mailbox occurredAt")).getTime(),
   );
   const expiresAt = input.expiresAt === undefined || input.expiresAt === null
     ? null

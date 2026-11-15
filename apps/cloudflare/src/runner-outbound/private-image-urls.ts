@@ -1,3 +1,4 @@
+import { parseInput, RequestInputError, RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { publishPostgresRuntimePrivateMedia } from "../runtime-private-media.ts";
 import { json, jsonError, methodNotAllowed, readJsonObject, unauthorized } from "../json.ts";
@@ -36,16 +37,15 @@ export async function handleRunnerPrivateImageUrlPublishRequest(input: {
 
   let request;
   try {
-    request = parseHostedRunnerPrivateImageUrlPublishRequest(
+    request = parseInput(
       await readJsonObject(input.request, {
         limitBytes: PRIVATE_IMAGE_PUBLISH_BODY_LIMIT_BYTES,
       }),
+      parseHostedRunnerPrivateImageUrlPublishRequest,
     );
   } catch (error) {
     if (
-      error instanceof SyntaxError
-      || error instanceof TypeError
-      || error instanceof RangeError
+      error instanceof RequestInputError || error instanceof RequestBodyTooLargeError
     ) {
       return jsonError("Malformed private image URL publish request.", 400);
     }
@@ -54,13 +54,10 @@ export async function handleRunnerPrivateImageUrlPublishRequest(input: {
 
   let bytes: Uint8Array;
   try {
-    bytes = decodeBase64Image(request.bytesBase64);
-    assertPrivateImageBytes({
-      bytes,
-      contentType: request.contentType,
-    });
+    bytes = parseInput(request.bytesBase64, () => decodeBase64Image(request.bytesBase64));
+    parseInput(bytes, () => assertPrivateImageBytes({ bytes, contentType: request.contentType }));
   } catch (error) {
-    if (error instanceof TypeError || error instanceof RangeError) {
+    if (error instanceof RequestInputError) {
       return jsonError("Malformed private image URL publish request.", 400);
     }
     throw error;
@@ -100,7 +97,8 @@ function decodeBase64Image(value: string): Uint8Array {
   let binary: string;
   try {
     binary = atob(normalized);
-  } catch {
+  } catch (error) {
+    if (!(error instanceof DOMException && error.name === "InvalidCharacterError")) throw error;
     throw new ContractValidationError("Private image bytes must be base64.");
   }
   const bytes = new Uint8Array(binary.length);
@@ -118,7 +116,7 @@ function assertPrivateImageBytes(input: {
     input.bytes.byteLength === 0
     || input.bytes.byteLength > PRIVATE_IMAGE_FILE_LIMIT_BYTES
   ) {
-    throw new RangeError("Private image size is invalid.");
+    throw new ContractValidationError("Private image size is invalid.");
   }
   if (!privateImageBytesMatchContentType(input.bytes, input.contentType)) {
     throw new ContractValidationError("Private image content type is invalid.");

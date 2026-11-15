@@ -1,3 +1,4 @@
+import { parseInput, RequestInputError, RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import {
   downloadHostedProviderTelegramFile,
   getHostedProviderTelegramFile,
@@ -60,9 +61,7 @@ export async function handleRunnerProviderEffectsRequest(input: {
     });
   } catch (error) {
     if (
-      error instanceof SyntaxError
-      || error instanceof TypeError
-      || error instanceof RangeError
+      error instanceof RequestInputError || error instanceof RequestBodyTooLargeError
     ) {
       emitProviderEffectRequestRejectedLog({
         bodyKeys: null,
@@ -77,12 +76,10 @@ export async function handleRunnerProviderEffectsRequest(input: {
 
   let execute: ProviderEffectExecution | null;
   try {
-    execute = planProviderEffectExecution(input.pathname, body);
+    execute = parseInput(body, () => planProviderEffectExecution(input.pathname, body));
   } catch (error) {
     if (
-      error instanceof SyntaxError
-      || error instanceof TypeError
-      || error instanceof RangeError
+      error instanceof RequestInputError
     ) {
       emitProviderEffectRequestRejectedLog({
         bodyKeys: readSafeProviderEffectBodyKeys(body),
@@ -157,12 +154,13 @@ function emitProviderEffectRequestRejectedLog(input: {
   pathname: string;
   stage: "body_read" | "contract_parse" | "effect";
 }): void {
+  const diagnosticError = input.error instanceof RequestInputError ? input.error.cause ?? input.error : input.error;
   emitHostedExecutionStructuredLog({
     component: "runner",
     details: {
       ...(input.bodyKeys === null ? {} : { bodyKeys: input.bodyKeys }),
-      errorCode: deriveHostedExecutionErrorCode(input.error),
-      errorName: readHostedExecutionSafeErrorName(input.error) ?? "unknown",
+      errorCode: deriveHostedExecutionErrorCode(diagnosticError),
+      errorName: readHostedExecutionSafeErrorName(diagnosticError) ?? "unknown",
       path: input.pathname,
       stage: input.stage,
     },

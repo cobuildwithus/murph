@@ -63,12 +63,13 @@ export function createHostedGameMediaStore(input: {
   };
 }
 
-/** A weekly game secure-box envelope, normalized; anything else throws TypeError. */
+/** A weekly game secure-box envelope, normalized; invalid values throw ContractValidationError. */
 export function requireHostedGameMediaEnvelope(value: string): string {
   let parsed: unknown;
   try {
     parsed = JSON.parse(value);
-  } catch {
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
     throw new ContractValidationError("Hosted game media must be a sealed envelope.");
   }
   const envelope = parseHostedSecureBoxEnvelope(parsed, "Hosted game media envelope");

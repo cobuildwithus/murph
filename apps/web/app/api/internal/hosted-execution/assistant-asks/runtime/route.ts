@@ -20,7 +20,7 @@ import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import {
   handoffHostedMailboxWake,
 } from "@/src/lib/hosted-orchestration/mailbox-wake";
-import { readRawBodyBuffer } from "@/src/lib/http";
+import { parseRequestJson, readRawBodyBuffer } from "@/src/lib/http";
 
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
@@ -43,7 +43,7 @@ export const POST = withJsonError(async (request: Request) => {
     payloadText,
   });
   const requestBody = parseInput(
-    payloadText.trim() ? JSON.parse(payloadText) : {},
+    payloadText.trim() ? parseRequestJson(payloadText) : {},
     parseHostedRuntimeAssistantAskControlRequest,
   );
   const result = await tryHandleHostedOperatorDiagnosticControl({

@@ -1,6 +1,6 @@
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createCloudflareHostedControlClient } from "@murphai/cloudflare-hosted-control/client";
-import { parseInput } from "@murphai/hosted-execution/request-input";
+import { parseInput, RequestInputError, RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/server", () => {
@@ -58,6 +58,58 @@ describe("json route helper factory", () => {
       error: { code: "INTERNAL_ERROR", message: "Internal error." },
     });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["readJsonObject", "readOptionalJsonObject"] as const)(
+    "%s rejects malformed JSON explicitly and preserves stream failures",
+    async (reader) => {
+      const request = () => new Request("https://example.test/body", { method: "POST", body: "{" });
+      await expect(httpModule[reader](request())).rejects.toBeInstanceOf(httpModule.InvalidJsonBodyError);
+      const streamFailure = new SyntaxError("stream failure");
+      const broken = request();
+      Object.defineProperty(broken, "body", { value: new ReadableStream({
+        start(controller) { controller.error(streamFailure); },
+      }) });
+      await expect(httpModule[reader](broken)).rejects.toBe(streamFailure);
+    },
+  );
+
+  it("retains object-shape rejection and optional whitespace semantics", async () => {
+    const request = (body: string) => new Request("https://example.test/body", { method: "POST", body });
+    await expect(httpModule.readOptionalJsonObject(request("  \n"))).resolves.toEqual({});
+    await expect(httpModule.readJsonObject(request("[]"))).rejects.toBeInstanceOf(httpModule.InvalidJsonObjectBodyError);
+    expect(httpModule.parseRequestJson("[1]")).toEqual([1]);
+  });
+
+  it("preserves path-rejection identity without hiding parameter access bugs", async () => {
+    await expect(httpModule.resolveDecodedRouteParam({ key: "%" }, "key"))
+      .rejects.toBeInstanceOf(httpModule.InvalidRouteParamEncodingError);
+    const fault = new TypeError("parameter access failed");
+    const params = { get key(): string { throw fault; } };
+    await expect(httpModule.resolveDecodedRouteParam(params, "key")).rejects.toBe(fault);
+  });
+
+  it.each([
+    [new TypeError("failure"), 400, { code: "INVALID_REQUEST", message: "Invalid request." }],
+    [new ContractValidationError("failure"), 400, { code: "INVALID_REQUEST", message: "Invalid request." }],
+    [new RangeError("failure"), 400, { code: "INVALID_REQUEST", message: "Invalid request." }],
+    [new URIError("failure"), 400, { code: "INVALID_REQUEST", message: "Invalid request." }],
+    [new SyntaxError("failure"), 400, { code: "INVALID_JSON", message: "Invalid JSON." }],
+    [new TypeError("fetch failed"), 503, { code: "UPSTREAM_UNAVAILABLE", message: "Upstream request failed.", retryable: true }],
+    [new RequestBodyTooLargeError(8), 413, { code: "REQUEST_BODY_TOO_LARGE", message: "Request body too large." }],
+    [new Error("failure"), 500, { code: "INTERNAL_ERROR", message: "Internal error." }],
+  ])("preserves the temporary webhook response for %s", async (error, status, body) => {
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const helpers = httpModule.createJsonRouteHelpers({
+      defaultHeaders: { "Cache-Control": "no-store" },
+      internalMessage: "route failed unexpectedly", logMessage: "route failed",
+    });
+    const handler = helpers.withJsonError(httpModule.withLegacyWebhookErrorInference(async () => { throw error; }));
+    const response = await handler();
+    expect(response.status).toBe(status);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    await expect(response.json()).resolves.toEqual({ error: body });
   });
 
   it("merges default headers into jsonOk responses", async () => {
@@ -601,7 +653,7 @@ describe("json route helper factory", () => {
       }),
     });
 
-    const response = helpers.jsonError(new SyntaxError("bad json"));
+    const response = helpers.jsonError(new httpModule.InvalidJsonBodyError("bad json"));
 
     expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
@@ -613,12 +665,12 @@ describe("json route helper factory", () => {
     expect(warnSpy).toHaveBeenCalledWith("route failed", {
       errorMessage: "bad json",
       errorResponseCode: "INVALID_JSON",
-      errorType: "SyntaxError",
+      errorType: "InvalidJsonBodyError",
       internalMessage: "route failed unexpectedly",
     });
   });
 
-  it("maps an outbound fetch failure to a retryable 503 at error level", async () => {
+  it("maps an outbound fetch failure to a 500 at error level", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const response = httpModule.createJsonErrorResponse(new TypeError("fetch failed"), {
@@ -626,17 +678,17 @@ describe("json route helper factory", () => {
       logMessage: "route failed",
     });
 
-    expect(response.status).toBe(503);
+    expect(response.status).toBe(500);
     await expect(response.json()).resolves.toEqual({
-      error: { code: "UPSTREAM_UNAVAILABLE", message: "Upstream request failed.", retryable: true },
+      error: { code: "INTERNAL_ERROR", message: "Internal error." },
     });
     expect(errorSpy).toHaveBeenCalledWith("route failed", expect.objectContaining({
-      errorResponseCode: "UPSTREAM_UNAVAILABLE", errorType: "TypeError",
+      errorResponseCode: "INTERNAL_ERROR", errorType: "TypeError",
     }));
     expect(warnSpy).not.toHaveBeenCalled();
   });
 
-  it("keeps domain matchers ahead of the fetch failure mapping", async () => {
+  it("keeps domain matchers ahead of the server error fallback", async () => {
     const error = new TypeError("fetch failed");
     const mapping = { status: 409, error: { code: "DOMAIN_CONFLICT", message: "Try the domain recovery." }, log: null };
     const response = httpModule.createJsonErrorResponse(error, {
@@ -682,56 +734,55 @@ describe("json route helper factory", () => {
     expect(logDetails).not.toHaveBeenCalled();
   });
 
-  it("logs an untranslated validator failure exactly as the TypeError it replaces", async () => {
+  it.each([
+    new ContractValidationError("Invalid shape."),
+    new TypeError("Invalid shape."),
+    new RangeError("Invalid shape."),
+    new URIError("Invalid shape."),
+    new SyntaxError("Invalid shape."),
+  ])("treats an untranslated %s as a server failure", async (error) => {
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const response = httpModule.createJsonErrorResponse(new ContractValidationError("Invalid shape."), {
+    const warnLogDetails = vi.fn();
+    const response = httpModule.createJsonErrorResponse(error, {
+      defaultHeaders: { "Cache-Control": "no-store" },
+      headers: { "x-test": "present" },
       internalMessage: "route failed unexpectedly",
       logMessage: "route failed",
+      warnLogDetails,
     });
-    expect(response.status).toBe(400);
-    expect(warn).toHaveBeenCalledExactlyOnceWith("route failed", {
-      errorType: "TypeError",
+    expect(response.status).toBe(500);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(response.headers.get("x-test")).toBe("present");
+    await expect(response.json()).resolves.toEqual({
+      error: { code: "INTERNAL_ERROR", message: "Internal error." },
+    });
+    expect(errorLog).toHaveBeenCalledExactlyOnceWith("route failed", {
+      errorType: error.constructor.name,
       errorMessage: "Invalid shape.",
       internalMessage: "route failed unexpectedly",
-      errorResponseCode: "INVALID_REQUEST",
-      nativeErrorInference: true,
+      errorResponseCode: "INTERNAL_ERROR",
     });
+    expect(warn).not.toHaveBeenCalled();
+    expect(warnLogDetails).not.toHaveBeenCalled();
   });
 
-  it("keeps an ordinary TypeError at 400 with optional warning-level log details", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+  it("includes optional warning details only for explicit request rejection", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const helpers = httpModule.createJsonRouteHelpers({
       internalMessage: "route failed unexpectedly",
       logMessage: "route failed",
-      warnLogDetails: (error) =>
-        error instanceof TypeError
-          ? {
-              errorHint: "request body must be an object",
-            }
-          : null,
+      warnLogDetails: () => ({ errorHint: "request body must be an object" }),
     });
-
-    const response = helpers.jsonError(new TypeError("body shape wrong"));
-
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toEqual({
-      error: {
-        code: "INVALID_REQUEST",
-        message: "Invalid request.",
-      },
-    });
-    expect(warnSpy).toHaveBeenCalledWith("route failed", {
+    expect(helpers.jsonError(new RequestInputError("body shape wrong")).status).toBe(400);
+    expect(warn).toHaveBeenCalledWith("route failed", expect.objectContaining({
       errorHint: "request body must be an object",
-      errorMessage: "body shape wrong",
       errorResponseCode: "INVALID_REQUEST",
-      nativeErrorInference: true,
-      errorType: "TypeError",
-      internalMessage: "route failed unexpectedly",
-    });
+    }));
   });
 
   it("summarizes unexpected errors with sanitized shared fields before route-specific extras", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const helpers = httpModule.createJsonRouteHelpers({
       internalMessage: "route failed unexpectedly",
       logMessage: "route failed",
@@ -746,21 +797,20 @@ describe("json route helper factory", () => {
 
     const response = helpers.jsonError(error);
 
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(500);
     await expect(response.json()).resolves.toEqual({
       error: {
-        code: "INVALID_REQUEST",
-        message: "Invalid request.",
+        code: "INTERNAL_ERROR",
+        message: "Internal error.",
       },
     });
-    expect(warnSpy).toHaveBeenCalledWith("route failed", {
+    expect(errorSpy).toHaveBeenCalledWith("route failed", {
       errorCauseMessage: "Bearer <redacted-secret>",
       errorCauseType: "Error",
       errorCode: "E_STATE_BAD",
       errorMessage:
         "Invalid callback state for <redacted-url> from <redacted-path> while emailing <redacted-email>",
-      errorResponseCode: "INVALID_REQUEST",
-      nativeErrorInference: true,
+      errorResponseCode: "INTERNAL_ERROR",
       errorStatusCode: 400,
       errorType: "TypeError",
       internalMessage: "route failed unexpectedly",

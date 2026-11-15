@@ -37,19 +37,15 @@ async function handle(context: WorkerRouteContext, userId: string, operation: ty
     deploymentOrigin: context.env.CF_PUBLIC_BASE_URL ?? "", executionCtx: context.executionCtx });
   if (operation === "gameImageStage") return await stageGameImage(context, store, mediaId);
   if (operation === "gameImageStat") {
-    try {
-      const result = await store.stat(mediaId);
-      return result ? json(result) : jsonError("Game image not found.", 404);
-    } catch (error) { throw new Error("Game image stat failed.", { cause: error }); }
+    const result = await store.stat(mediaId);
+    return result ? json(result) : jsonError("Game image not found.", 404);
   }
   const variant = context.request.headers.get("x-murph-image-variant");
   if (!isGameImageVariant(variant)) return jsonError("Game image variant is invalid.", 400);
-  try {
-    const result = await store.delivery(mediaId, variant);
-    return result ? new Response(JSON.stringify(result), { headers: {
-      "cache-control": "private, no-store", "content-type": "application/json", "referrer-policy": "no-referrer",
-    } }) : jsonError("Game image not found.", 404);
-  } catch { throw new Error("Game image delivery failed."); }
+  const result = await store.delivery(mediaId, variant);
+  return result ? new Response(JSON.stringify(result), { headers: {
+    "cache-control": "private, no-store", "content-type": "application/json", "referrer-policy": "no-referrer",
+  } }) : jsonError("Game image not found.", 404);
 }
 
 async function stageGameImage(
@@ -70,7 +66,7 @@ async function stageGameImage(
   try { await store.upload(mediaId, bytes); }
   catch (error) {
     if (error instanceof GameImageInvalidError) return jsonError("Game image is invalid.", 400);
-    throw new Error("Game image staging failed.");
+    throw error;
   }
   return json({ stored: true });
 }

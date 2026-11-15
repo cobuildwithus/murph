@@ -1,3 +1,4 @@
+import { HostedWorkspaceProgressError } from "@/src/lib/hosted-workspace/store";
 import { parseInput, RequestInputError } from "@murphai/hosted-execution/request-input";
 import {
   parseHostedWorkspaceCheckpointRequest,
@@ -107,13 +108,16 @@ export const POST = withJsonError((request: Request) => runWithTiming(request, a
     }));
   } catch (error) {
     reportCheckpointFailure(failureStage, error);
+    if (error instanceof HostedWorkspaceProgressError) {
+      throw new RequestInputError("Invalid request.", { cause: error });
+    }
     throw error;
   }
 }));
 
 function reportCheckpointFailure(stage: CheckpointFailureStage, error: unknown): void {
   try {
-    const code = stage === "publication" && error instanceof TypeError && "code" in error
+    const code = stage === "publication" && error instanceof Error && "code" in error
       ? error.code : undefined;
     console.warn("Hosted workspace checkpoint failed.", {
       errorClass: error instanceof RequestInputError ? "request_input"

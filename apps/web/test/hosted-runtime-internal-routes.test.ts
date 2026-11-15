@@ -114,7 +114,8 @@ vi.mock("@/src/lib/hosted-orchestration/runtime-usage-decision", async (importOr
   resolveHostedRuntimeAiUsageGate: mocks.resolveHostedRuntimeAiUsageGate,
 }));
 
-vi.mock("@/src/lib/hosted-workspace/store", () => ({
+vi.mock("@/src/lib/hosted-workspace/store", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/src/lib/hosted-workspace/store")>(),
   checkpointHostedWorkspace: mocks.checkpointHostedWorkspace,
   publishLatestBrowserVaultReplicaRef: mocks.publishLatestBrowserVaultReplicaRef,
   readHostedWorkspace: mocks.readHostedWorkspace,
@@ -1542,7 +1543,7 @@ describe("hosted runtime internal web routes", () => {
       });
     });
 
-    it("distinguishes independent schema and publication failures with identical HTTP 400 responses", async () => {
+    it("distinguishes caller schema rejection from a server publication failure", async () => {
       const malformed = await workspaceCheckpointRoute.POST(checkpointRequest({
         reason: UNSAFE_SENTINEL,
       }));
@@ -1551,7 +1552,7 @@ describe("hosted runtime internal web routes", () => {
       const publication = await workspaceCheckpointRoute.POST(checkpointRequest());
 
       expect(malformed.status).toBe(400);
-      expect(publication.status).toBe(malformed.status);
+      expect(publication.status).toBe(500);
       expect([...malformed.headers]).toEqual([
         ["cache-control", "no-store"],
         ["content-type", "application/json"],
@@ -1560,7 +1561,9 @@ describe("hosted runtime internal web routes", () => {
       expect(await malformed.clone().json()).toEqual({
         error: { code: "INVALID_REQUEST", message: "Invalid request." },
       });
-      expect(await publication.text()).toBe(await malformed.text());
+      expect(await publication.json()).toEqual({
+        error: { code: "INTERNAL_ERROR", message: "Internal error." },
+      });
       expect(mocks.checkpointHostedWorkspace).toHaveBeenCalledOnce();
       expect(mocks.after).not.toHaveBeenCalled();
       // A later successful request must not inherit or overwrite either observation.
@@ -1627,7 +1630,7 @@ describe("hosted runtime internal web routes", () => {
         });
         expect(diagnostics()).toEqual([
           [failureMessage, {
-            schema: failureSchema, stage: "publication", errorClass: "type_error", errorCode,
+            schema: failureSchema, stage: "publication", errorClass: "error", errorCode,
           }],
         ]);
       } else {
@@ -1687,12 +1690,15 @@ describe("hosted runtime internal web routes", () => {
       }],
     ] as const)("observes %s at %s", async (_case, stage, request) => {
       const response = await workspaceCheckpointRoute.POST(request());
-      expect(response.status).toBe(400);
+      const callerRejection = stage === "request_body" || stage === "runtime_authority";
+      expect(response.status).toBe(callerRejection ? 400 : 500);
       expect(await response.json()).toEqual({
-        error: { code: "INVALID_REQUEST", message: "Invalid request." },
+        error: callerRejection
+          ? { code: "INVALID_REQUEST", message: "Invalid request." }
+          : { code: "INTERNAL_ERROR", message: "Internal error." },
       });
       expect(diagnostics()).toEqual([
-        [failureMessage, { schema: failureSchema, stage, errorClass: "type_error" }],
+        [failureMessage, { schema: failureSchema, stage, errorClass: callerRejection ? "request_input" : "type_error" }],
       ]);
       expect(mocks.checkpointHostedWorkspace).toHaveBeenCalledTimes(
         stage === "publication" || stage === "response" ? 1 : 0,
@@ -1709,14 +1715,14 @@ describe("hosted runtime internal web routes", () => {
       expect(response.status).toBe(400);
       expect(await response.json()).toEqual({ error: { code: "INVALID_JSON", message: "Invalid JSON." } });
       expect(diagnostics()).toEqual([
-        [failureMessage, { schema: failureSchema, stage: "request_body", errorClass: "error" }],
+        [failureMessage, { schema: failureSchema, stage: "request_body", errorClass: "request_input" }],
       ]);
       expect(mocks.checkpointHostedWorkspace).not.toHaveBeenCalled();
     });
 
     it.each([
-      ["type_error", new TypeError(UNSAFE_SENTINEL), 400],
-      ["range_error", new RangeError(UNSAFE_SENTINEL), 400],
+      ["type_error", new TypeError(UNSAFE_SENTINEL), 500],
+      ["range_error", new RangeError(UNSAFE_SENTINEL), 500],
       ["error", new Error(UNSAFE_SENTINEL), 500],
       ["non_error", { message: UNSAFE_SENTINEL }, 500],
     ] as const)("logs only the %s error class", async (errorClass, error, status) => {
@@ -1780,9 +1786,9 @@ describe("hosted runtime internal web routes", () => {
         new TypeError(UNSAFE_SENTINEL), code ? { code } : {},
       ));
       const response = await workspaceCheckpointRoute.POST(checkpointRequest());
-      expect(response.status).toBe(400);
+      expect(response.status).toBe(500);
       expect(await response.json()).toEqual({
-        error: { code: "INVALID_REQUEST", message: "Invalid request." },
+        error: { code: "INTERNAL_ERROR", message: "Internal error." },
       });
       expect(diagnostics()).toEqual([
         [failureMessage, {

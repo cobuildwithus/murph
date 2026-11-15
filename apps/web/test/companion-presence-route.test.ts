@@ -31,4 +31,11 @@ describe("companion presence route authority", () => {
     expect((await heartbeat(request({ state: "foreground" }))).status).toBeGreaterThanOrEqual(400);
     expect(m.record).not.toHaveBeenCalled();
   });
+  it("rejects malformed heartbeat JSON after authentication", async () => {
+    const response = await heartbeat(new Request("https://example.test/heartbeat", { method: "POST", body: "{" }));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: { code: "INVALID_JSON", message: "Invalid JSON." } });
+    expect(m.bearer).toHaveBeenCalledOnce();
+    expect(m.record).not.toHaveBeenCalled();
+  });
 });

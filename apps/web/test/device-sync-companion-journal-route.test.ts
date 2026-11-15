@@ -1,4 +1,5 @@
 import { beforeEach, expect, it, vi } from "vitest";
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 vi.mock("server-only", () => ({}));
@@ -66,4 +67,19 @@ it("stops before workspace access when authentication fails", async () => {
   expect((await GET(request())).status).toBe(401);
   expect(mocks.authority).not.toHaveBeenCalled();
   expect(mocks.workspace).not.toHaveBeenCalled();
+});
+
+it("reports a corrupt stored replica ref as a server error", async () => {
+  mocks.workspace.mockResolvedValue({ browserVaultReplicaRef: {} });
+  const response = await GET(request());
+  expect(response.status).toBe(500);
+  expect(await response.json()).toEqual({ error: { code: "INTERNAL_ERROR", message: "Internal error." } });
+  expect(mocks.control).not.toHaveBeenCalled();
+});
+
+it("reports rejected decrypted replica data as a server error", async () => {
+  mocks.decode.mockRejectedValue(new ContractValidationError("Invalid stored Journal projection."));
+  const response = await GET(request());
+  expect(response.status).toBe(500);
+  expect(await response.json()).toEqual({ error: { code: "INTERNAL_ERROR", message: "Internal error." } });
 });

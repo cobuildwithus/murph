@@ -1,4 +1,4 @@
-import { ContractValidationError } from "@murphai/contracts/validation-error";
+import { RequestInputError } from "@murphai/hosted-execution/request-input";
 import type { Prisma } from '@prisma/client';
 import type { HostedGameToolRequest } from '@murphai/hosted-execution/runtime-control';
 import { recapAssetSchema } from '@murphai/contracts/recap-show';
@@ -78,19 +78,19 @@ export async function retireRecapMedia(input: Identity): Promise<void> {
 export async function inspectRecapMedia(bytes: Uint8Array, storageKey: string, durationMs?: number): Promise<RecapMediaMetadata> {
   requireHostedRecapMediaId(storageKey);
   const image = storageKey.endsWith(".jpg");
-  if (!bytes.length || bytes.length > (image ? 2 : 1) * 1024 * 1024) throw new RangeError("Recap asset size is invalid.");
+  if (!bytes.length || bytes.length > (image ? 2 : 1) * 1024 * 1024) throw new RequestInputError("Recap asset size is invalid.");
   const metadata = { hash: createHash("sha256").update(bytes).digest("hex"), bytes: bytes.length };
   if (image) {
     const decoded = sharp(bytes, { limitInputPixels: 4_194_304, failOn: "warning" });
     const info = await decoded.metadata();
-    if (info.format !== "jpeg" || !info.width || !info.height || info.width > 2048 || info.height > 2048) throw new ContractValidationError("Recap image must be a bounded JPEG.");
+    if (info.format !== "jpeg" || !info.width || !info.height || info.width > 2048 || info.height > 2048) throw new RequestInputError("Recap image must be a bounded JPEG.");
     await decoded.raw().toBuffer();
     return { ...metadata, mediaType: "image/jpeg", width: info.width, height: info.height };
   }
   const mp3 = bytes[0] === 0xff && (bytes[1]! & 0xe0) === 0xe0 || bytes[0] === 0x49 && bytes[1] === 0x44 && bytes[2] === 0x33;
-  if (!mp3 || durationMs !== 20_000) throw new ContractValidationError("Recap song must be a twenty-second MP3.");
+  if (!mp3 || durationMs !== 20_000) throw new RequestInputError("Recap song must be a twenty-second MP3.");
   const decoded = await inspectGeneratedMp3Audio(bytes);
-  if (Math.abs(decoded.durationMs - 20_000) > 500) throw new ContractValidationError("Recap song duration is outside its twenty-second recipe.");
+  if (Math.abs(decoded.durationMs - 20_000) > 500) throw new RequestInputError("Recap song duration is outside its twenty-second recipe.");
   return { ...metadata, mediaType: "audio/mpeg", durationMs: decoded.durationMs };
 }
 

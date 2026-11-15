@@ -144,7 +144,7 @@ describe("reconciliation facts route timing", () => {
     });
   });
 
-  it("closes the failing canonical stage and preserves existing failure classification", async () => {
+  it("closes the failing canonical stage and reports a server failure", async () => {
     mocks.readFacts.mockImplementation(async (_request, reportStage) => {
       elapsedMs += 30;
       reportStage?.("canonical_mailbox");
@@ -154,7 +154,7 @@ describe("reconciliation facts route timing", () => {
 
     const response = await requestFacts();
 
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(500);
     expect(console.error).toHaveBeenCalledWith(
       "Hosted runtime reconciliation facts failed.",
       {

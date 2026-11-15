@@ -140,15 +140,13 @@ export async function handleMealPhotoStageRoute(
   try {
     stageInput = await requireHostedMealPhotoStageInput({ bytes, captureId, sha256 });
   } catch (error) {
-    if (error instanceof ContractValidationError || error instanceof RangeError) {
+    if (error instanceof ContractValidationError) {
       return jsonError("Meal photo payload is invalid.", 400);
     }
     throw error;
   }
-  try {
-    const store = await createMealPhotoStore(context, userId);
-    return json(await store.stageMealPhoto(stageInput));
-  } catch (error) { throw new Error("Meal photo staging failed.", { cause: error }); }
+  const store = await createMealPhotoStore(context, userId);
+  return json(await store.stageMealPhoto(stageInput));
 }
 
 async function createMealPhotoStore(context: WorkerRouteContext, userId: string) {

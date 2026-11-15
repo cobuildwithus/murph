@@ -1,4 +1,4 @@
-import { ContractValidationError } from "@murphai/contracts/validation-error";
+import { RequestInputError } from "@murphai/hosted-execution/request-input";
 import "server-only";
 
 import {
@@ -19,6 +19,7 @@ import {
   readHostedMailboxConversationWakeByAssistantInputId,
 } from "../hosted-mailbox/store";
 import { requireHostedRuntimeActiveAccessForUpdateTx } from "../hosted-mailbox/runtime-access";
+import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
 import { getPrisma } from "../prisma";
 import { readHostedSourceNoDataOutreachPolicy } from "./source-no-data-outreach-policy";
@@ -29,7 +30,7 @@ export async function configureHostedSourceNoDataOutreach(input: {
 }): Promise<HostedExecutionDeviceSyncNoDataOutreachResponse> {
   const sourceProviderSlug = input.request.sourceProviderSlug.trim().toLowerCase();
   if (!readSourceRecoveryNoticePolicy(sourceProviderSlug)) {
-    throw new ContractValidationError("No-data outreach is unavailable for this source provider.");
+    throw new RequestInputError("No-data outreach is unavailable for this source provider.");
   }
   const prisma = getPrisma();
   return prisma.$transaction(async (tx) => {
@@ -46,7 +47,11 @@ export async function configureHostedSourceNoDataOutreach(input: {
       prisma: tx,
     });
     if (!authority || !wake || !isDirectMemberConversationWake(wake)) {
-      throw new TypeError("No-data outreach can only be changed from current private member input.");
+      throw hostedOnboardingError({
+        code: "INVALID_REQUEST",
+        httpStatus: 400,
+        message: "No-data outreach can only be changed from current private member input.",
+      });
     }
     let changed = false;
     if (input.request.mode === "default") {

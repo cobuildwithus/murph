@@ -1,3 +1,4 @@
+import { parseJsonInput } from "../route-utils/json-body.ts";
 import { parseInput, RequestInputError } from "@murphai/hosted-execution/request-input";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { buildRuntimeProcessingSummaryEntry, recordRuntimeProcessingSummary, type RuntimeProcessingDiagnostics } from "../../user-runner/diagnostics.ts";
@@ -175,7 +176,7 @@ export async function handleRuntimeEnsureProcessingRoute(
     const payload = await readCachedRequestText(context, {
       limitBytes: INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
     });
-    ensureRequest = parseInput(payload.trim() ? JSON.parse(payload) : {}, value =>
+    ensureRequest = parseInput(payload.trim() ? parseJsonInput(payload) : {}, value =>
       parseHostedRuntimeEnsureProcessingRequest(requireJsonObject(value)),
     );
     commandTimeoutMs = parseInput(context.request.headers, () =>
@@ -250,6 +251,7 @@ export async function handleRuntimeEnsureProcessingRoute(
         );
         return response;
       } catch (error) {
+        const classified = classifyPublicRouteError(error);
         emitHostedExecutionStructuredLog({
           component: "worker",
           details: {
@@ -260,12 +262,11 @@ export async function handleRuntimeEnsureProcessingRoute(
             orchestrationAttemptId: ensureRequest.orchestrationAttemptId,
           },
           error,
-          level: "error",
+          level: classified.status >= 500 ? "error" : "warn",
           message: "Hosted worker direct runtime ensure-processing failed.",
           phase: "failed",
           userId,
         });
-        const classified = classifyPublicRouteError(error);
         return json({
           code: "runtime_ensure_processing_failed",
           error: classified.error,
@@ -273,6 +274,7 @@ export async function handleRuntimeEnsureProcessingRoute(
       }
     }
   } catch (error) {
+    const classified = classifyPublicRouteError(error);
     emitHostedExecutionStructuredLog({
       component: "worker",
       details: buildWorkerRouteLogDetails({
@@ -280,12 +282,11 @@ export async function handleRuntimeEnsureProcessingRoute(
         routeName: "runtime-ensure-processing",
       }, context.request, userId),
       error,
-      level: "warn",
+      level: classified.status >= 500 ? "error" : "warn",
       message: "Hosted worker runtime ensure-processing route rejected an invalid request.",
       phase: "failed",
       userId,
     });
-    const classified = classifyPublicRouteError(error);
     return json({
       code: "invalid_request",
       error: classified.error,
@@ -310,7 +311,7 @@ export async function handleRuntimeHealthDataConsentRoute(
   const payload = await readCachedRequestText(context, {
     limitBytes: INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
   });
-  const body = parseInput(payload.trim() ? JSON.parse(payload) : {}, requireJsonObject);
+  const body = parseInput(payload.trim() ? parseJsonInput(payload) : {}, requireJsonObject);
   if (Object.keys(body).length > 0) {
     throw new RequestInputError(
       "Hosted runtime health-data consent request must be empty.",

@@ -178,6 +178,39 @@ describe("browser vault session route", () => {
     });
   });
 
+  it.each(["browserPublicKeyJwk", "knownReplicaRef"])("rejects malformed request %s before reading stored data", async (field) => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    const response = await browserVaultSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
+        browserPublicKeyJwk: browser.publicKeyJwk,
+        [field]: {},
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({
+      error: { code: "INVALID_REQUEST", message: "Invalid request." },
+    });
+    expect(mocks.readHostedWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("reports a malformed stored replica ref as a server failure", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    mocks.readHostedWorkspace.mockResolvedValue({ browserVaultReplicaRef: {} });
+    const response = await browserVaultSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
+        browserPublicKeyJwk: browser.publicKeyJwk,
+      }),
+    );
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({
+      error: { code: "INTERNAL_ERROR", message: "Internal error." },
+    });
+    expect(mocks.readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
+  });
+
   it("returns an empty session when the workspace does not publish a replica ref", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
     const createBrowserVaultSession = vi.fn();
@@ -2223,9 +2256,9 @@ describe("browser vault session route", () => {
 
     expect(createBrowserVaultSession).toHaveBeenCalledTimes(1);
     expect(mocks.consumeSensitiveActionChallenge).not.toHaveBeenCalled();
-    expect(response.status).not.toBe(502);
+    expect(response.status).toBe(500);
     const body = await response.json();
-    expect(body.error.code).not.toBe("HOSTED_EXECUTION_CONTROL_INVALID_RESPONSE");
+    expect(body.error.code).toBe("INTERNAL_ERROR");
   });
 
   it("returns empty when hosted execution control cannot find the referenced replica", async () => {

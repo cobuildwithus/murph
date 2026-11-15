@@ -1,3 +1,4 @@
+import { assertContract } from "@murphai/contracts";
 import { parseInput } from "@murphai/hosted-execution/request-input";
 import {
   hostedPhysicalNoteRecoveryRequestSchema,
@@ -7,7 +8,7 @@ import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
-import { readRawBodyBuffer } from "@/src/lib/http";
+import { parseRequestJson, readRawBodyBuffer } from "@/src/lib/http";
 import { recoverHostedPhysicalNote } from "@/src/lib/physical-notes/service";
 
 const HOSTED_PHYSICAL_NOTE_RECOVERY_MAX_BODY_BYTES = 32 * 1024;
@@ -21,8 +22,8 @@ export const POST = withJsonError(async (request: Request) => {
     payloadText: rawBody,
   });
   const payload = parseInput(
-    JSON.parse(rawBody),
-    (value) => hostedPhysicalNoteRecoveryRequestSchema.parse(value),
+    parseRequestJson(rawBody),
+    (value) => assertContract(hostedPhysicalNoteRecoveryRequestSchema, value, "Internal request"),
   );
   const result = await recoverHostedPhysicalNote({
     ...payload,

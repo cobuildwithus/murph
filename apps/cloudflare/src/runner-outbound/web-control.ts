@@ -1,10 +1,11 @@
-import { RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
+import { parseInput, RequestInputError, RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import { boundUsageRequestCliTiming } from "../usage-record-body.ts";
 import { readNativeRuntimeProviderContainer, type RuntimeProviderCaller } from "../runtime-provider-authorization.ts";
 import { beginHostedRuntimeUsageSettlement } from "../runtime-usage-settlement.ts";
 import { type readHostedExecutionEnvironment } from "../env.ts";
 import {
   jsonError,
+  parseJsonInput,
   methodNotAllowed,
   notFound,
   readRequestBodyText,
@@ -158,29 +159,30 @@ export async function handleRunnerWebControlRequest(input: {
   }
 
   let body: string | undefined;
+  let checkpointRequest: ReturnType<typeof parseHostedWorkspaceCheckpointRequest> | null;
   try {
     body = input.request.method === "POST"
       ? await readOptionalHostedRunnerWebControlBody(input.request)
       : undefined;
-    body = augmentHostedRunnerWebControlBody({
-      body,
-      env: input.env,
-      includeDeviceSyncCredentialMaterial: isDeviceSyncRuntimeSnapshotRequest,
-      path: input.url.pathname,
-      userId: input.userId,
-    });
     body = addRunnerMailboxCryptoContextRequest({
       body,
       environment: input.environment,
       mailboxFetch: policy.operation === "mailbox_fetch",
       userId: input.userId,
     });
+    checkpointRequest = isCheckpointRequest
+      ? parseInput(parseJsonInput(body ?? "{}"), parseHostedWorkspaceCheckpointRequest)
+      : null;
   } catch (error) {
     return mapRunnerWebControlBodyReadError(error);
   }
-  const checkpointRequest = isCheckpointRequest
-    ? parseHostedWorkspaceCheckpointRequest(JSON.parse(body ?? "{}"))
-    : null;
+  body = augmentHostedRunnerWebControlBody({
+    body,
+    env: input.env,
+    includeDeviceSyncCredentialMaterial: isDeviceSyncRuntimeSnapshotRequest,
+    path: input.url.pathname,
+    userId: input.userId,
+  });
   if (
     checkpointRequest
     && (
@@ -317,7 +319,9 @@ async function forwardWithRuntimeUsageSettlement(input: {
   body: string | undefined; usageRecord: boolean; forward: () => Promise<Response>;
 }): Promise<Response> {
   if (!input.usageRecord) return input.forward();
-  const payload: unknown = JSON.parse(input.body ?? "{}");
+  let payload: unknown;
+  try { payload = parseJsonInput(input.body ?? "{}"); }
+  catch (error) { return mapRunnerWebControlBodyReadError(error); }
   if (!isHostedRunnerRecord(payload) || typeof payload.usage.usageId !== "string") return jsonError("Usage identity is required.", 400);
   const receipt = await beginHostedRuntimeUsageSettlement({ caller: input.caller, env: input.env, userId: input.userId,
     authority: input.writeAuthority, reportId: payload.usage.usageId });
@@ -454,9 +458,7 @@ function forceHostedRunnerRuntimeSnapshotCredentialMaterial(body: string): strin
 
 function mapRunnerWebControlBodyReadError(error: unknown): Response {
   if (error instanceof RequestBodyTooLargeError) return jsonError("Request body too large.", 413);
-  // Keep native inference until this family flips in the explicit-request-rejection
-  // plan. Runner outbound has no surrounding native-error-to-400 mapper.
-  if (error instanceof RangeError) return jsonError("Invalid request.", 400);
+  if (error instanceof RequestInputError) return jsonError("Invalid request.", 400);
   throw error;
 }
 

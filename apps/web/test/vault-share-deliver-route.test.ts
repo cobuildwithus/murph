@@ -657,6 +657,18 @@ describe("vault-share deliver route", () => {
     });
   });
 
+  it.each(["sleepType", "sleepState"])("rejects malformed %s before reading or writing shares", async (field) => {
+    const body = sourceAwareSleepDeliveryBody(1);
+    const response = await deliverRoute.POST(buildRequest({
+      ...body,
+      records: body.records.map((record) => ({ ...record, data: { ...record.data, [field]: 123 } })),
+    }));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: { code: "INVALID_REQUEST", message: "Invalid request." } });
+    expect(mocks.findActiveHostedVaultShares).not.toHaveBeenCalled();
+    expect(mocks.replaceHostedVaultShareProjectionSnapshot).not.toHaveBeenCalled();
+  });
+
   it("preserves source-recorded sleep times through the deliver route", async ({ onTestFinished }) => {
     // Keep this fixed-date fixture inside the route's history window.
     const clock = vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-07-25T12:00:00.000Z"));

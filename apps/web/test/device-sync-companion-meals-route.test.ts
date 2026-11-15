@@ -133,8 +133,8 @@ it("does not describe an unrelated stream RangeError as a prohibited body", asyn
     method: "DELETE", duplex: "half",
     body: new ReadableStream({ start(controller) { controller.error(new RangeError("Invalid array length")); } }),
   }), context());
-  expect(response.status).toBe(400);
-  expect(await response.json()).toEqual({ error: { code: "INVALID_REQUEST", message: "Invalid request." } });
+  expect(response.status).toBe(500);
+  expect(await response.json()).toEqual({ error: { code: "INTERNAL_ERROR", message: "Internal error." } });
   expect(mocks.submit).not.toHaveBeenCalled();
 });
 

@@ -1,3 +1,5 @@
+import { RequestInputError } from "@murphai/hosted-execution/request-input";
+import { classifyPublicRouteError } from "../src/worker/errors.ts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildRuntimeProcessingSummaryEntry, type RuntimeProcessingDiagnostics } from "../src/user-runner/diagnostics.ts";
 import type { HostedRuntimeEnsureProcessingResponse } from "@murphai/hosted-execution/orchestration-control";
@@ -64,6 +66,22 @@ function harness() {
 }
 
 describe("Postgres runtime orchestration", () => {
+  it.each(["request", "canonical"] as const)("classifies a mismatched %s admission by its source", async sourceKind => {
+    const { source, container } = harness();
+    const admission = response(owner({ userId: "synthetic-other" }));
+    if (sourceKind === "canonical") vi.mocked(commandHostedRuntimeOwner).mockResolvedValueOnce(admission);
+    const error = await ensurePostgresRuntimeProcessing(source, {
+      ...request, ...(sourceKind === "request" ? { admission } : {}),
+    }).then(() => { throw new Error("Expected rejection."); }, error => error);
+    expect(error).toBeInstanceOf(sourceKind === "request" ? RequestInputError : TypeError);
+    expect(classifyPublicRouteError(error)).toEqual(sourceKind === "request"
+      ? { status: 400, error: "Invalid request." }
+      : { status: 500, error: "Internal error." });
+    expect(commandHostedRuntimeOwner).toHaveBeenCalledTimes(sourceKind === "request" ? 0 : 1);
+    expect(container.ensureProcessing).not.toHaveBeenCalled();
+    expect(container.startSupervisedInvocation).not.toHaveBeenCalled();
+  });
+
   it("wakes a retained small target without selecting the primary namespace", async () => {
     const h = harness();
     const retainedTarget = `runner-small--v-release_1--${"1".repeat(32)}`;

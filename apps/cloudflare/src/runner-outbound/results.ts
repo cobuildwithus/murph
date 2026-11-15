@@ -1,3 +1,4 @@
+import { parseInput, RequestInputError } from "@murphai/hosted-execution/request-input";
 import { parseHostedEmailSendRequest } from "@murphai/assistant-runtime/hosted-email";
 import {
   HOSTED_EXECUTION_RUNNER_EMAIL_SEND_PATH,
@@ -237,7 +238,7 @@ async function handleRunnerEmailSendRequest(input: {
       config: readHostedEmailConfig(asWorkerStringEnvironment(input.env)),
       emailBinding: input.env.HOSTED_EMAIL,
       fetchImpl: fetch,
-      request: parseHostedEmailSendRequest(await readJsonObject(input.request)),
+      request: parseInput(await readJsonObject(input.request), parseHostedEmailSendRequest),
       userId: input.userId,
       webCallbackSigning: input.environment.webCallbackSigning,
       ...(input.environment.hostedWebAllowHttpHosts
@@ -255,8 +256,7 @@ async function handleRunnerEmailSendRequest(input: {
   } catch (error) {
     if (
       error instanceof HostedEmailSendValidationError
-      || error instanceof SyntaxError
-      || error instanceof TypeError
+      || error instanceof RequestInputError
     ) {
       return json({
         code: "ASSISTANT_EMAIL_REQUEST_INVALID",

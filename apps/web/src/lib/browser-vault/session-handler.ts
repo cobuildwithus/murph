@@ -15,6 +15,7 @@ import {
 import {
   parseHostedBrowserVaultReplicaRef,
 } from "@murphai/hosted-execution/parsers";
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import { parseHostedUserRecipientPublicKeyJwk } from "@murphai/runtime-state";
 import { after } from "next/server";
 
@@ -55,13 +56,17 @@ export function createBrowserVaultSessionRoute() {
       tooLargeErrorCode: "BROWSER_VAULT_SESSION_BODY_TOO_LARGE",
       tooLargeErrorMessage: "Browser vault session request body is too large.",
     });
-    const browserPublicKeyJwk = parseHostedUserRecipientPublicKeyJwk(
-      body.browserPublicKeyJwk,
-      "Browser vault session request browserPublicKeyJwk",
+    const browserPublicKeyJwk = parseInput(body.browserPublicKeyJwk, (value) =>
+      parseHostedUserRecipientPublicKeyJwk(
+        value,
+        "Browser vault session request browserPublicKeyJwk",
+      ),
     );
-    const knownReplicaRef = parseHostedBrowserVaultReplicaRef(
-      body.knownReplicaRef ?? null,
-      "Browser vault session request knownReplicaRef",
+    const knownReplicaRef = parseInput(body.knownReplicaRef ?? null, (value) =>
+      parseHostedBrowserVaultReplicaRef(
+        value,
+        "Browser vault session request knownReplicaRef",
+      ),
     );
     const requestedShards = readOptionalBrowserVaultShards(
       body.requestedShards,

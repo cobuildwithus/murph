@@ -1,3 +1,4 @@
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   HOSTED_MAILBOX_KINDS,
@@ -228,7 +229,7 @@ export async function fetchHostedRuntimeMailboxProjection(input: {
   );
   const retainedAt = new Date(fetchedAt.getTime() - HOSTED_MAILBOX_RETENTION_MS);
   const seenLanes = new Set<HostedMailboxLane>();
-  const lanes = input.lanes.map((cursor, ordinal) => {
+  const lanes = parseInput(input.lanes, () => input.lanes.map((cursor, ordinal) => {
     const lane = requireHostedMailboxLane(cursor.lane);
     if (seenLanes.has(lane)) {
       throw new ContractValidationError(`Hosted mailbox lane ${JSON.stringify(lane)} was requested more than once.`);
@@ -243,7 +244,7 @@ export async function fetchHostedRuntimeMailboxProjection(input: {
       lane,
       ordinal,
     };
-  });
+  }));
 
   if (lanes.length === 0) {
     return {
