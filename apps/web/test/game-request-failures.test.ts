@@ -44,9 +44,10 @@ afterEach(() => vi.unstubAllEnvs());
 
 it.each([
   { error: new GameChatAudienceError("participants_changed", "Audience changed"), status: 404, code: "GAME_NOT_FOUND" },
+  { error: new GameChatAudienceError("line_unavailable", "Sending line unavailable"), status: 500, code: "INTERNAL_ERROR" },
   { error: new Error("Synthetic database unavailable"), status: 500, code: "INTERNAL_ERROR" },
   { error: hostedOnboardingError({ code: "LINQ_SEND_FAILED", httpStatus: 502, message: "Provider unavailable", retryable: true }), status: 502, code: "LINQ_SEND_FAILED" },
-])("board sharing preserves refusal and provider classifications: $status", async ({ error, status, code }) => {
+])("board sharing answers $error.message with $status", async ({ error, status, code }) => {
   mocks.audience.mockRejectedValue(error);
   const response = await saveBoard(new Request("https://example.test/board/sharing", {
     method: "PUT", headers: { "content-type": "application/json" },

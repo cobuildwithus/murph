@@ -75,6 +75,9 @@ it('validates, stores once and serves authorized full and sliced views after ful
     expect(response.status).toBe(500);
     expect(await response.json()).toMatchObject({ error: { code: "INTERNAL_ERROR" } });
   }
+  // A failed generation stores a bare fallback story on purpose: it has no media.
+  state.envelope = JSON.stringify(envelope.story);
+  expect((await requestAsset()).status).toBe(404);
   state.envelope = JSON.stringify(envelope);
   // A modification before C must still invalidate the legacy slice.
   const file = path.join(root, hostedRecapMediaObjectKey({ userId: ownerMemberId, mediaId: storageKey }));

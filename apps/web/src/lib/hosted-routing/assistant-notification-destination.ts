@@ -92,6 +92,8 @@ export async function readHostedThreadContainerLinqRouteAuthorities(input: {
   const unavailableContainerMemberIds = new Set<string>();
   const candidates = containerMemberIds.flatMap((containerMemberId) => {
     const ownedRows = rowsByContainer.get(containerMemberId) ?? [];
+    // No row is a member without a route. Unavailable means we could not tell.
+    if (ownedRows.length === 0) return [];
     if (ownedRows.length !== 1) {
       unavailableContainerMemberIds.add(containerMemberId);
       return [];

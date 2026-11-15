@@ -1,6 +1,6 @@
 import "server-only";
 import type { Prisma } from "@prisma/client";
-import { recapStorageObjects, storedGameRecapEnvelopeSchema, type GameRecapEnvelope } from "@murphai/contracts/recap-show";
+import { recapStorageObjects, storedGameRecapSchema, type GameRecapEnvelope } from "@murphai/contracts/recap-show";
 import { getPrisma } from "../prisma";
 import { openGameTexts } from "./crypto";
 import { isRecapMediaVisible } from "./access";
@@ -42,8 +42,10 @@ export async function readRecapEnvelope(gameId: string) {
   const row = await getPrisma().game.findUnique({ where: { id: gameId }, select: { id: true, wordsOwnerMemberId: true, recapEncrypted: true, maxPlayers: true, chatContainerMemberId: true } });
   if (!row?.recapEncrypted || row.maxPlayers !== 2) return null;
   const [plain] = await openGameTexts([{ memberId: row.wordsOwnerMemberId, table: "game", rowId: row.id, field: "recap", value: row.recapEncrypted }]);
-  const envelope = storedGameRecapEnvelopeSchema.parse(JSON.parse(plain ?? "null"));
-  return { row, envelope };
+  // A failed generation stores a bare fallback story on purpose; only an
+  // envelope carries media. Anything matching neither shape is corrupt.
+  const stored = storedGameRecapSchema.parse(JSON.parse(plain ?? "null"));
+  return "version" in stored ? { row, envelope: stored } : null;
 }
 
 /** The stored recap, only while media may be shown and only as the generation the caller names. */

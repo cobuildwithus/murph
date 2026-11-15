@@ -116,7 +116,7 @@ export async function savePairBoardSharing(viewerId: string, otherId: string, in
   // retain the same self-service sharing authority as the join page.
   const audience = input.expectedMembershipId === null
     ? await readGameChatAudience(binding.runtimeMemberId).catch(error => {
-      if (error instanceof GameChatAudienceError) throw gameNotFound();
+      if (error instanceof GameChatAudienceError && error.reason !== "line_unavailable") throw gameNotFound();
       throw error;
     }) : null;
   let result;

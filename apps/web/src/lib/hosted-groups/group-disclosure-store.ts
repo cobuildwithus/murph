@@ -425,9 +425,6 @@ export async function acceptHostedGroupDisclosurePermissionReactionTx(input: {
     prisma: input.tx,
     runtimeMemberId: groupRuntimeMemberId,
   });
-  if (!permissionText) {
-    return { kind: "not_found" };
-  }
 
   // Spent before the no-op check below: a tap that changes nothing is still an
   // accepted decision, and its redelivery must not grant after a revocation.
@@ -659,9 +656,6 @@ export async function readHostedGroupDisclosureGrantAuthorityTx(input: {
     prisma: input.tx,
     runtimeMemberId: groupRuntimeMemberId,
   });
-  if (!permissionText) {
-    return null;
-  }
 
   return {
     grantId: grant.id,
