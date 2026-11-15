@@ -244,7 +244,7 @@ export function withHostedVisibleSecondaryLinqOutcomes(
           ? response
           : buildVisibleSecondaryResponse(response, reason);
       } catch (error) {
-        if (!isHostedOnboardingError(error) || error.retryable) {
+        if (![400, 404, 410, 415, 422].includes(readHostedLinqPermanentRejectionStatus(error))) {
           throw error;
         }
         // A provider-confirmed permanent rejection means the private message
@@ -271,6 +271,13 @@ export function withHostedVisibleSecondaryLinqOutcomes(
       signal: input.signal,
     });
   };
+}
+
+// The provider status of a Linq request Linq refused for good; 0 for anything
+// else, including our own credential or configuration faults.
+function readHostedLinqPermanentRejectionStatus(error: unknown): number {
+  if (!isHostedOnboardingError(error) || error.code !== "LINQ_SEND_FAILED" || error.retryable) return 0;
+  return typeof error.details?.status === "number" ? error.details.status : 0;
 }
 
 async function readVisibleSecondarySender(input: {
@@ -700,7 +707,7 @@ async function isHostedLinqPrivateRecoveryChatAttested(input: {
   try {
     const privateChat = await readChatSummary({
       chatId: input.chatId,
-      ...(input.signal ? { signal: input.signal } : {}),
+      signal: input.signal,
     });
     const expectedParticipantValue =
       normalizeHostedLinqParticipantContactValue(participantContact);
@@ -723,7 +730,10 @@ async function isHostedLinqPrivateRecoveryChatAttested(input: {
         (handle) => handle === expectedParticipantValue,
       )
     );
-  } catch {
+  } catch (error) {
+    if (![404, 410].includes(readHostedLinqPermanentRejectionStatus(error))) {
+      throw error;
+    }
     return false;
   }
 }
