@@ -1,7 +1,7 @@
 import "server-only";
 import { createHash } from "node:crypto";
 import { RECAP_VIDEO_MAX_DURATION_MS, RECAP_VIDEO_MAX_REFERENCES, recapVideoDraftSchema, recapVideoSchema,
-  type RecapAsset, type RecapVideo, type RecapVideoDraft } from "@murphai/contracts/recap-show";
+  type RecapAsset, type RecapVideo } from "@murphai/contracts/recap-show";
 import { logHostedOnboardingWarning } from "../hosted-onboarding/logging";
 import { getPrisma } from "../prisma";
 import { isPairRecapVideoEnabled } from "./access";
@@ -133,11 +133,12 @@ export function inspectRecapVideo(input: Uint8Array): { durationMs: number; widt
  * The video a write may attach, or null for "no video". Runs before the
  * accepting transaction and outside it: every part must be this generation's
  * own stored object, the joined parts must be the declared file and a real MP4,
- * and every source it shows must be a current one. A video that fails any test,
- * or whose parts cannot be read, is left off; the recap is accepted without it.
+ * and every source it shows must be a current one. A candidate that is not a
+ * well-formed draft, fails any test or has a part that cannot be read is left
+ * off; the recap is accepted without it.
  */
 export async function selectRecapVideo(input: {
-  draft: RecapVideoDraft; gameId: string; eventId: string; generationId: string; ownerMemberId: string;
+  draft: unknown; gameId: string; eventId: string; generationId: string; ownerMemberId: string;
   assets: readonly RecapAsset[]; material: GameRecapMaterial;
 }): Promise<RecapVideo | null> {
   const selected = await measureRecapVideo(input);

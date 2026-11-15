@@ -1,4 +1,4 @@
-import { recapAssetSchema, recapVideoDraftSchema, recapVideoIdentitySchema, songWordTimestampsSchema } from "@murphai/contracts/recap-show";
+import { recapAssetSchema, recapVideoIdentitySchema, songWordTimestampsSchema } from "@murphai/contracts/recap-show";
 import * as z from "@murphai/contracts/zod-runtime";
 
 // A new value of the existing error field: this generation is durably finished and must end without sending.
@@ -74,8 +74,10 @@ export const hostedGameToolRequestSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("update_game"), origin: acceptedInputOrigin, update: hostedGameUpdateSchema }).strict(),
   z.object({ action: z.literal("write_recap"), origin: gameRecapOrigin, recap: z.union([recapShowStorySchema, gameRecapWriterSchema]),
     assets: z.array(recapAssetSchema).max(5).optional(),
-    // Present only from a runtime that reads `recapVideo` in the result.
-    video: recapVideoDraftSchema.optional(),
+    // A candidate recap video (`recapVideoDraftSchema`), present only from a runtime that reads `recapVideo`
+    // in the result. Left unparsed here: the video is optional, so a candidate Web cannot read costs
+    // the video where it is selected, never the recap this request carries.
+    video: z.unknown().optional(),
     priorChatLines: z.array(z.string().max(160)).max(100).optional() }).strict(),
 ]);
 export type HostedGameToolRequest = z.infer<typeof hostedGameToolRequestSchema>;

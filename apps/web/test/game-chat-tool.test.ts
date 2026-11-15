@@ -462,6 +462,12 @@ describe("game chat tool authority", () => {
       // Nothing accepted: no identity, even when asked.
       m.sealRecap.mockReset(); m.sealRecap.mockResolvedValue(null);
       expect((await recover(true)).result).toEqual({ status: "ok", recapGame: { recovered: false } });
+      // A candidate Web cannot read still reaches the writer, which drops it; asking is what earns the answer.
+      m.sealRecap.mockReset(); m.sealRecap.mockResolvedValueOnce(null).mockResolvedValueOnce(story);
+      const malformed = hostedGameToolRequestSchema.parse({ ...write, video: { ...draft("d"), durationMs: 1 } });
+      expect((await handleGameChatTool({ memberId: group, runtimeIdentity: null, request: malformed })).result).toMatchObject({ status: "ok", recapVideo: null });
+      expect(m.sealRecap.mock.calls[1][0]).toMatchObject({ recap: story, video: { draft: { ...draft("d"), durationMs: 1 } } });
+      m.sealRecap.mockReset(); m.sealRecap.mockResolvedValue(null);
       // A plain recap never takes a candidate to the writer.
       m.recapMaterial.mockResolvedValue({ ...material, validation: { ...material.validation, show: undefined } });
       await handleGameChatTool({ memberId: group, runtimeIdentity: null, request: { ...write, assets: undefined, video: draft("d") } });

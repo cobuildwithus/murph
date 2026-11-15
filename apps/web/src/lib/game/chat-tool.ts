@@ -307,7 +307,7 @@ async function handleAuthorizedRecapWrite(input: RecapToolInput & { request: Ext
   const accepted = async (saved: NonNullable<Awaited<ReturnType<typeof acceptGameRecap>>>): Promise<HostedGameToolResponse> => ({ action: "write_recap", result: {
     status: "ok", recapOutcome: gameRecapToolResult([]), ...(!material.validation.show ? { recap: saved.recap } : {}),
     chatLine: material.validation.show ? await acceptedGameRecapMessage(gameId, saved.recap.chatLine) : gameRecapMessage(gameId, saved.recap.chatLine),
-    ...(input.request.video ? { recapVideo: saved.video } : {}) } });
+    ...(input.request.video !== undefined ? { recapVideo: saved.video } : {}) } });
   const replay = await acceptGameRecap({ beforeMutationTx: authorizeMutation, containerMemberId: input.memberId,
     eventId, gameId, playerMemberIds: players, recap: null });
   if (replay) return accepted(replay);
@@ -324,7 +324,7 @@ async function handleAuthorizedRecapWrite(input: RecapToolInput & { request: Ext
   }
   if (!await refreshGameChatAudience({ ...input, audience }, players)) return { action: "write_recap", result: { status: "unavailable", error: "recap_authority_unavailable" } };
   const saved = await acceptGameRecap({ beforeMutationTx: authorizeMutation, containerMemberId: input.memberId, eventId, gameId, playerMemberIds: players, assets: material.validation.show ? input.request.assets ?? [] : undefined, recap: material.validation.show ? input.request.recap : withValidGameSuperlatives(input.request.recap, material.validation.result.map(player => player.memberId), material.validation.group),
-    ...(material.validation.show && input.request.video ? { video: { draft: input.request.video, material } } : {}) });
+    ...(material.validation.show && input.request.video !== undefined ? { video: { draft: input.request.video, material } } : {}) });
   return saved ? accepted(saved) : unavailable();
 }
 

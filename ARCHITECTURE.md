@@ -5947,7 +5947,11 @@ parts are not assets and the limit of five assets is unchanged. A write brings a
 candidate. Web joins the staged parts outside the transaction, checks the
 declared hash, walks the MP4's boxes for its duration and frame size, resolves
 the declared sources itself, and leaves a candidate that fails any test off the
-accepted recap. The first acceptance decides the video: a retried or replayed
+accepted recap. The request carries the candidate unparsed, so one Web cannot
+read costs the video and never the recap. The video's own sources are checked
+when it is selected and again on every read; the accepting transaction rechecks
+only the assets' sources, so a source that changes in between leaves a video
+nobody can open, not a failed recap. The first acceptance decides the video: a retried or replayed
 write gets the stored recap, and write and recovery results name the accepted
 video (generation, hash, length) or `null` only to a runtime that asked, so an
 older runtime never sees the field. `recapStorageObjects` lists a recap's

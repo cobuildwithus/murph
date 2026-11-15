@@ -1,6 +1,6 @@
 import { isBothWinOfferDue, mergeStakeSlots } from "./rules";
 import { buildRecapFallback, gameResultCorrectionLine } from './recap-fallback';
-import { gameRecapEnvelopeSchema, recapStorageObjects, type GameRecapEnvelope, type RecapAsset, type RecapVideoDraft, type RecapVideoIdentity } from '@murphai/contracts/recap-show';
+import { gameRecapEnvelopeSchema, recapStorageObjects, type GameRecapEnvelope, type RecapAsset, type RecapVideoIdentity } from '@murphai/contracts/recap-show';
 import { recapGenerationId, readRecapGenerationObject } from './recap-media';
 import { recapPosterField, selectRecapVideo } from './recap-video';
 import { retainRecapAssetTx } from './recap-retirement';
@@ -2905,8 +2905,8 @@ type SealGameRecapInput = {
   playerMemberIds: readonly string[];
   recap: HostedGameRecap | null;
   assets?: RecapAsset[];
-  /** A candidate only: it is measured and checked here, and left off when it fails. */
-  video?: { draft: RecapVideoDraft; material: GameRecapMaterial };
+  /** A candidate only, as the request carried it: it is validated, measured and checked here, and left off when it fails. */
+  video?: { draft: unknown; material: GameRecapMaterial };
 };
 
 export async function sealGameRecap(input: SealGameRecapInput): Promise<HostedGameRecap | null> {
@@ -2985,7 +2985,9 @@ async function acceptGameRecapTx(tx: Prisma.TransactionClient, input: SealGameRe
     if (changed.count !== 1) return null;
   }
   if (generation) {
-    if (!await recapReferencesCurrent(tx, input.gameId, [...generation.assets, ...(generation.video ? [generation.video] : [])])) throw new Error('A selected source was revoked.');
+    // The video's own sources were checked when it was selected and are checked again on every read and
+    // send, so a source that changes in between leaves a video nobody can open, never a recap that fails.
+    if (!await recapReferencesCurrent(tx, input.gameId, generation.assets)) throw new Error('A selected source was revoked.');
     for (const object of recapStorageObjects(generation)) if (!await retainRecapAssetTx(tx, { gameId: input.gameId,
       generationId: generation.generationId, ownerMemberId: current.wordsOwnerMemberId, storageKey: object.storageKey, now: new Date() })) throw new Error('Selected media was retired.');
   }

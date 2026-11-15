@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parseHostedRuntimeGroupToolRequest, parseHostedRuntimeGroupToolResponse } from "../src/parsers/runtime-control.ts";
 import { hostedGameToolRequestSchema, hostedGameToolResponseSchema } from "../src/game-tools.ts";
+import { recapVideoDraftSchema } from "@murphai/contracts/recap-show";
 import { parseHostedExecutionEvent } from "../src/parsers.ts";
 import { buildGamePrivateEveningInstructions, buildGamePrivateKickoffInstructions } from "../src/runtime-control.ts";
 
@@ -281,8 +282,13 @@ describe("recap video tool contract", () => {
 
   it("carries a video candidate with a write and the accepted identity, or none, in a result", () => {
     expect(hostedGameToolRequestSchema.parse({ ...write, video })).toEqual({ ...write, video });
-    expect(hostedGameToolRequestSchema.safeParse({ ...write, video: { ...video, durationMs: 51_033 } }).success).toBe(false);
-    expect(hostedGameToolRequestSchema.safeParse({ ...write, video: { ...video, byteLength: 3_000_001 } }).success).toBe(false);
+    expect(recapVideoDraftSchema.parse(video)).toEqual(video);
+    // The candidate is optional: one Web cannot read is left for selection to drop, and the recap's write still parses.
+    for (const candidate of [{ ...video, durationMs: 51_033 }, { ...video, byteLength: 3_000_001 }, { ...video, parts: [] }, null, "not a candidate"]) {
+      expect(recapVideoDraftSchema.safeParse(candidate).success).toBe(false);
+      expect(hostedGameToolRequestSchema.parse({ ...write, video: candidate })).toEqual({ ...write, video: candidate });
+    }
+    expect(hostedGameToolRequestSchema.safeParse({ ...write, videos: video }).success).toBe(false);
     const recover = { action: "read_game", origin: recapOrigin, recapRead: { kind: "recover", video: true } };
     expect(hostedGameToolRequestSchema.parse(recover)).toEqual(recover);
     expect(hostedGameToolRequestSchema.safeParse({ ...recover, recapRead: { kind: "recover", video: false } }).success).toBe(false);

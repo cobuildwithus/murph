@@ -1093,6 +1093,9 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
         // The scene's sources first, then what the video alone shows; a source named twice is one source.
         references: [source(profileA), source(profileB), source(printed)] };
       expect(await select()).toEqual(video);
+      // The video is made from the score too: whatever sources the song asset carries are the video's as well.
+      const score = { ...asset, slot: "song", kind: "song" as const, mediaType: "audio/mpeg" as const, references: [source(profileB), source(printed)] };
+      expect((await select({ referenceIds: [] }, [asset, score]))?.references).toEqual(video.references);
 
       // Each of these is "no video" with its reason logged, never a failed recap.
       const skipped = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -1116,6 +1119,10 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
         ["draft", { parts: Array.from({ length: 5 }, () => parts[0]!) }],
       ];
       for (const [reason, change] of refusals) expect(await refused(select(change))).toBe(reason);
+      // The request carries the candidate unparsed, so anything at all may arrive here.
+      for (const candidate of [null, "not a candidate", { ...draft, durationMs: 2000 }, { ...draft, referenceIds: undefined }]) {
+        expect(await refused(selectRecapVideo({ draft: candidate, gameId, eventId, generationId, ownerMemberId: a, assets: [asset], material }))).toBe("draft");
+      }
       const crowded = Array.from({ length: 5 }, (_, scene) => ({ ...asset, references: Array.from({ length: 13 }, (_, index) => ({ kind: "entry" as const, memberId: a, entryId: `synthetic-${scene}-${index}`, key: `game/${a}/${scene}-${index}.jpg` })) }));
       expect(await refused(select({}, crowded))).toBe("sources");
       const profile = await db.gameProfile.findUniqueOrThrow({ where: { memberId: b } });
@@ -1142,9 +1149,18 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       skipped.mockRestore();
       expect(await select()).toEqual(video);
 
-      // Web's first acceptance is the only authority for which video belongs to the recap.
+      const read = (slot: string, memberId = b, generation = generationId) => readAuthorizedRecapAsset({ gameId, generationId: generation, slot, memberId });
+      const current = (hash = draft.hash, generation = generationId) => isRecapVideoCurrent({ gameId, generationId: generation, hash });
+      // Web's first acceptance is the only authority for which video belongs to the recap. Here a source only
+      // the video shows changes after the candidate was selected, inside the accepting transaction: the recap
+      // is still accepted, and its video stays closed until every source it shows is current again.
       const accepted = { recap, video: { generationId, hash: draft.hash, byteLength: file.length } };
-      expect(await acceptGameRecap({ ...scope, recap, assets: [asset], video: { draft, material } })).toEqual(accepted);
+      const sourceChangesMidAcceptance = async (tx: Prisma.TransactionClient) => { await tx.gameProfile.update({ where: { memberId: b }, data: { photoKey: null } }); };
+      expect(await acceptGameRecap({ ...scope, beforeMutationTx: sourceChangesMidAcceptance, recap, assets: [asset], video: { draft, material } })).toEqual(accepted);
+      expect(await read("video-0")).toBeNull();
+      expect(await current()).toBe(false);
+      expect((await read("scene-0"))?.bytes.length).toBe(scene.length);
+      await db.gameProfile.update({ where: { memberId: b }, data: { photoKey: profile.photoKey } });
       const stored = (await readRecapEnvelope(gameId))!;
       expect(stored.envelope.video).toEqual(video);
       expect(stored.envelope.assets).toEqual([asset]);
@@ -1166,8 +1182,6 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       expect((await shown())?.video).toEqual({ mediaType: "video/mp4", byteLength: file.length, durationMs: 2000, width: 804, height: 1748,
         parts: slices.map((slice, index) => ({ url: `/api/game/v1/games/${gameId}/recap-assets/video-${index}?generation=${generationId}`, byteLength: slice.length })) });
       expect(JSON.stringify(await shown())).not.toMatch(/\.mp4|recap\/[a-f0-9]{32}/u);
-      const read = (slot: string, memberId = b, generation = generationId) => readAuthorizedRecapAsset({ gameId, generationId: generation, slot, memberId });
-      const current = (hash = draft.hash, generation = generationId) => isRecapVideoCurrent({ gameId, generationId: generation, hash });
       const first = (await read("video-0"))!, second = (await read("video-1", a))!;
       expect(Buffer.concat([first.bytes, second.bytes]).equals(file)).toBe(true);
       expect(first.contentType).toBe("application/octet-stream");
