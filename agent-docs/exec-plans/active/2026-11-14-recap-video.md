@@ -320,6 +320,7 @@ x264 `medium`.
 | Linux container at 2 CPUs and 6 GiB, the runner base's recipe (Node 24.22.1 on Debian bookworm, ffmpeg 5.1.9), arm64, on an Apple M4 Max | 19.9 s | 6.7 CPU-s, 271 MB peak | 32.9 CPU-s, 777 MB peak | 3.06 MB |
 | The same container, x264 `veryfast` | 15.9 s | 6.6 CPU-s, 271 MB peak | 25.0 CPU-s, 574 MB peak | 2.58 MB |
 | The hosted runner's real base image (linux/amd64) at 2 CPUs and 6 GiB, emulated on the same Mac | 39.4 s | 13.8 CPU-s, 339 MB peak | 64.8 CPU-s, 957 MB peak | 3.06 MB |
+| The real child (`child.js`) in the runner base image at 2 CPUs and 6 GiB on a GitHub-hosted x86-64 runner (the runner-image lane on PR #4994) | 44.7 s | not reported | 555 MB peak | 3.18 MB |
 | macOS, 16 threads, Apple M4 Max | 5.0 s | 5.4 CPU-s, 343 MB peak | 17.9 CPU-s, 767 MB peak | 3.05 MB |
 
 - The two-CPU arm64 number is the nearest measurement to production that

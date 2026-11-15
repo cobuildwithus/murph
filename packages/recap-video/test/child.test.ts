@@ -1,4 +1,5 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { readdirSync, readFileSync } from "node:fs";
 import { access, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -39,13 +40,25 @@ function start(requestPath: string): { child: ChildProcess; closed: Promise<{ co
   return { child, closed };
 }
 
+/** Whether anything in the group still runs. A killed process whose parent is gone waits as a zombie for
+ * PID 1 to reap it; in the runner image tini does, but under a bare `docker run` this test is PID 1 and
+ * never will, so zombies count as stopped. */
 const groupAlive = (pid: number): boolean => {
   try {
     process.kill(-pid, 0);
-    return true;
   } catch {
     return false;
   }
+  if (process.platform !== "linux") return true;
+  return readdirSync("/proc").filter(name => /^\d+$/u.test(name)).some(name => {
+    try {
+      const stat = readFileSync(`/proc/${name}/stat`, "utf8");
+      const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+      return Number(fields[2]) === pid && fields[0] !== "Z";
+    } catch {
+      return false;
+    }
+  });
 };
 
 async function waitFor(file: string, ms: number): Promise<void> {
