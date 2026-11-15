@@ -303,7 +303,7 @@ export async function activateHostedGroupSponsorshipAuthorizationForPurchaseTx(
     purchase.groupSponsorshipChargeOrdinal === null ||
     purchase.groupSponsorshipPeriodStartedAt === null
   ) {
-    throw new ContractValidationError(
+    throw new TypeError(
       "Hosted group sponsorship purchase association is incomplete.",
     );
   }
@@ -1091,7 +1091,7 @@ function rebindHostedGroupSponsorshipRefillReturnUrl(input: {
   try {
     url = new URL(input.value);
   } catch {
-    throw new ContractValidationError(
+    throw new TypeError(
       "Hosted group sponsorship refill has an invalid return URL.",
     );
   }
@@ -1099,7 +1099,7 @@ function rebindHostedGroupSponsorshipRefillReturnUrl(input: {
     url.searchParams.get("usageCheckout") !== input.outcome ||
     !url.searchParams.has("usagePurchase")
   ) {
-    throw new ContractValidationError(
+    throw new TypeError(
       "Hosted group sponsorship refill has an invalid return URL.",
     );
   }
@@ -1635,7 +1635,7 @@ export function addHostedGroupSponsorshipCalendarMonth(input: {
 }): Date {
   const date = requireValidDate(input.date);
   if (!Number.isInteger(input.anchorDay) || input.anchorDay < 1 || input.anchorDay > 31) {
-    throw new ContractValidationError("Hosted group sponsorship anchor day is invalid.");
+    throw new TypeError("Hosted group sponsorship anchor day is invalid.");
   }
   const nextMonthStart = new Date(Date.UTC(
     date.getUTCFullYear(),

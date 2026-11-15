@@ -1,4 +1,3 @@
-import { ContractValidationError } from '@murphai/contracts/validation-error'
 import { assistantInputMediaExpiresAt } from './input-media-retention.js'
 import { createHash } from 'node:crypto'
 import { readdir, readFile } from 'node:fs/promises'
@@ -1162,7 +1161,7 @@ function parseAssistantInputEventRecord(
     )
   }
   if (record.cursor.inputId !== record.inputId) {
-    throw new ContractValidationError(
+    throw new TypeError(
       'assistant input event record cursor inputId must match its inputId.',
     )
   }

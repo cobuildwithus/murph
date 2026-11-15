@@ -647,7 +647,7 @@ export async function prepareHostedMemberStripeCheckoutSession(input: {
   const stripeCheckoutSessionLookupKey =
     createHostedStripeCheckoutSessionLookupKey(input.sessionId);
   if (!stripeCheckoutSessionLookupKey) {
-    throw new ContractValidationError("Stripe Checkout Session ID is invalid.");
+    throw new TypeError("Stripe Checkout Session ID is invalid.");
   }
   const { stripeCheckoutSessionIdEncrypted } =
     await buildHostedMemberBillingCheckoutSessionPrivateColumn({
@@ -836,7 +836,7 @@ export async function acceptHostedMemberStripeCheckoutCompletionTx(input: {
     || customerLookupKeys.length === 0
     || subscriptionLookupKeys.length === 0
   ) {
-    throw new ContractValidationError("Completed Stripe Checkout identifiers are invalid.");
+    throw new TypeError("Completed Stripe Checkout identifiers are invalid.");
   }
 
   const currentRecord = await input.tx.hostedMemberBillingRef.findUnique({

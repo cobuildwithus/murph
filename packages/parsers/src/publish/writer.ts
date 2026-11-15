@@ -262,7 +262,7 @@ function assertParserResultIdentity(
 
 function normalizeAttempt(value: number): number {
   if (!Number.isSafeInteger(value) || value < 1) {
-    throw new ContractValidationError("Parser attempt must be a positive integer.");
+    throw new TypeError("Parser attempt must be a positive integer.");
   }
   return value;
 }
@@ -272,7 +272,7 @@ function normalizeParserResultReadMaxBytes(value: number | undefined): number {
     return PARSER_RESULT_MAX_BYTES;
   }
   if (!Number.isSafeInteger(value) || value < 1) {
-    throw new ContractValidationError("Parser result read limit must be a positive integer.");
+    throw new TypeError("Parser result read limit must be a positive integer.");
   }
   return Math.min(value, PARSER_RESULT_MAX_BYTES);
 }

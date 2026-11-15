@@ -1353,7 +1353,7 @@ async function recordPaidPhysicalNoteUsageTx(input: {
   }
   const cost = Number(input.note.providerCostUsdMicros);
   if (!Number.isSafeInteger(cost) || cost < 0) {
-    throw new ContractValidationError("Physical-note provider cost is invalid.");
+    throw new TypeError("Physical-note provider cost is invalid.");
   }
   await recordHostedAiUsageRecords({
     accountAllowance: true,

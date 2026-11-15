@@ -310,7 +310,7 @@ function requireHostedRuntimeSnapshotExternalAccountCiphertexts(
       record.status === "active"
       && !normalizeNullableString(record.externalAccountIdEncrypted)
     ) {
-      throw new ContractValidationError(
+      throw new TypeError(
         "Hosted active device-sync connection is missing its external account identity.",
       );
     }
@@ -1587,7 +1587,7 @@ function buildHostedRuntimeCredentialSnapshot(input: {
 
   if (input.record.credentialKind === "provider_config") {
     if (!input.record.providerConfigKey) {
-      throw new ContractValidationError("Hosted provider-config device-sync credential is missing providerConfigKey.");
+      throw new TypeError("Hosted provider-config device-sync credential is missing providerConfigKey.");
     }
 
     const credentialMetadata = sanitizeHostedExecutionDeviceSyncRuntimeCredentialMetadata(

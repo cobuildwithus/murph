@@ -1,4 +1,3 @@
-import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { promisify } from "node:util";
 import { zstdCompress, zstdDecompress } from "node:zlib";
 
@@ -288,7 +287,7 @@ function parseHostedDeviceSyncDirtyPayloadEnvelope(
   value: unknown,
 ): HostedDeviceSyncDirtyPayloadEnvelopeV1 {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new ContractValidationError("Hosted device-sync dirty payload envelope must be an object.");
+    throw new TypeError("Hosted device-sync dirty payload envelope must be an object.");
   }
 
   const record = value as Record<string, unknown>;
@@ -298,7 +297,7 @@ function parseHostedDeviceSyncDirtyPayloadEnvelope(
     || record.encoding !== "base64url"
     || typeof record.data !== "string"
   ) {
-    throw new ContractValidationError("Hosted device-sync dirty payload envelope is invalid.");
+    throw new TypeError("Hosted device-sync dirty payload envelope is invalid.");
   }
 
   return {

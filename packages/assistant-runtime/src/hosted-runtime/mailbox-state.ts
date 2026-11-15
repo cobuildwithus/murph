@@ -172,7 +172,7 @@ export function recordHostedMailboxImportStatus(
     !Number.isSafeInteger(maxRecentStatuses)
     || maxRecentStatuses < 0
   ) {
-    throw new ContractValidationError(
+    throw new TypeError(
       "hosted mailbox import status maxRecentStatuses must be a non-negative safe integer.",
     );
   }

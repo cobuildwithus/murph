@@ -1,4 +1,3 @@
-import { ContractValidationError } from '@murphai/contracts/validation-error';
 import { createHash } from 'node:crypto'
 import {
   formatTimeZoneDateTimeParts,
@@ -89,7 +88,7 @@ export function resolveMurphOnboardingFollowupSchedule(
 ): MurphOnboardingFollowupAutomationSchedule {
   const normalizedStableKey = stableKey.trim()
   if (normalizedStableKey.length === 0) {
-    throw new ContractValidationError('Onboarding follow-up schedule requires a stable key.')
+    throw new TypeError('Onboarding follow-up schedule requires a stable key.')
   }
 
   const baseTime = parseDailyTime(
@@ -125,7 +124,7 @@ export function resolveMurphOnboardingFollowupActiveUntil(input: {
 }): string {
   const scheduledAt = new Date(input.scheduledAt)
   if (!Number.isFinite(scheduledAt.getTime())) {
-    throw new ContractValidationError('Onboarding follow-up active window requires a valid occurrence.')
+    throw new TypeError('Onboarding follow-up active window requires a valid occurrence.')
   }
 
   const cutoffSchedule = {

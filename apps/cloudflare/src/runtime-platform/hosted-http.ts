@@ -1,4 +1,3 @@
-import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { emitHostedExecutionStructuredLog } from "@murphai/hosted-execution";
 
 import { parseHostedRunnerProviderEffectErrorResponse } from "../runner-effects-contract.ts";
@@ -339,7 +338,7 @@ export function assertHostedOk(response: Response, description: string): void {
 
 export function readOptionalStringField(value: unknown, field: string): string | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new ContractValidationError("Hosted runtime response must be an object.");
+    throw new TypeError("Hosted runtime response must be an object.");
   }
 
   const entry = (value as Record<string, unknown>)[field];
@@ -348,7 +347,7 @@ export function readOptionalStringField(value: unknown, field: string): string |
   }
 
   if (typeof entry !== "string") {
-    throw new ContractValidationError(`Hosted runtime response.${field} must be a string.`);
+    throw new TypeError(`Hosted runtime response.${field} must be a string.`);
   }
 
   return entry;
@@ -356,33 +355,33 @@ export function readOptionalStringField(value: unknown, field: string): string |
 
 export function readRequiredHostedRuntimeString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.length === 0) {
-    throw new ContractValidationError(`${label} must be a non-empty string.`);
+    throw new TypeError(`${label} must be a non-empty string.`);
   }
   return value;
 }
 
 export function readRequiredHostedRuntimeObject(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new ContractValidationError(`${label} must be an object.`);
+    throw new TypeError(`${label} must be an object.`);
   }
   return value as Record<string, unknown>;
 }
 
 export function readRequiredHostedRuntimePositiveInteger(value: unknown, label: string): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
-    throw new ContractValidationError(`${label} must be a positive safe integer.`);
+    throw new TypeError(`${label} must be a positive safe integer.`);
   }
   return value;
 }
 
 export function readRequiredField(value: unknown, field: string): unknown {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new ContractValidationError("Hosted runtime response must be an object.");
+    throw new TypeError("Hosted runtime response must be an object.");
   }
 
   const entry = (value as Record<string, unknown>)[field];
   if (entry === undefined) {
-    throw new ContractValidationError(`Hosted runtime response.${field} is required.`);
+    throw new TypeError(`Hosted runtime response.${field} is required.`);
   }
 
   return entry;

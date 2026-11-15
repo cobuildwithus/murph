@@ -1,4 +1,3 @@
-import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type { HostedWorkspaceArtifactMaterializer } from "./models.ts";
 import type { HostedWorkspaceState } from "@murphai/hosted-execution/runtime-control";
 import { parseHostedExecutionResolvedLinqDeliveryRoute } from "@murphai/hosted-execution/routes";
@@ -4579,7 +4578,7 @@ async function persistHostedEmailGroupFanoutIntents(input: {
 }): Promise<void> {
   const threadTarget = parseHostedEmailThreadTarget(input.fanoutTarget);
   if (!threadTarget || threadTarget.targetKind !== "group" || !threadTarget.groupId) {
-    throw new ContractValidationError("Hosted email group fanout requires a serialized group thread target.");
+    throw new TypeError("Hosted email group fanout requires a serialized group thread target.");
   }
 
   const payload = input.assistantDeliveryEffect.payload;
@@ -6179,7 +6178,7 @@ function queueHostedAssistantMessageVolumeReceiptWrite(input: {
         return;
       }
       if (!Number.isFinite(Date.parse(result.receipt.recordedAt))) {
-        throw new ContractValidationError(
+        throw new TypeError(
           "Hosted outbound message-volume receipt response is invalid.",
         );
       }

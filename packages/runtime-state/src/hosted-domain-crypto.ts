@@ -363,7 +363,7 @@ export function buildHostedSecureBoxAad(fields: HostedSecureBoxAadFields): Uint8
   const lane = requireHostedCryptoLane(fields.lane, "Hosted secure-box AAD lane");
   const expectedDomain = getHostedCryptoDomainForLane(lane);
   if (expectedDomain !== domain) {
-    throw new ContractValidationError(
+    throw new TypeError(
       `Hosted secure-box AAD lane ${lane} belongs to ${expectedDomain}, not ${domain}.`,
     );
   }
@@ -400,7 +400,7 @@ export async function sealHostedSecureBox(input: {
   const lane = requireHostedCryptoLane(input.lane, "Hosted secure-box lane");
   const expectedDomain = getHostedCryptoDomainForLane(lane);
   if (expectedDomain !== domain) {
-    throw new ContractValidationError(`Hosted crypto lane ${lane} belongs to ${expectedDomain}, not ${domain}.`);
+    throw new TypeError(`Hosted crypto lane ${lane} belongs to ${expectedDomain}, not ${domain}.`);
   }
   const scope = requireNonEmptyString(input.scope, "Hosted secure-box scope");
   const key = await deriveHostedSecureBoxKey({
@@ -1073,7 +1073,7 @@ function normalizeP256PrivateJwk(jwk: JsonWebKey, label: string): JsonWebKey {
     || jwk.x.length === 0
     || jwk.y.length === 0
   ) {
-    throw new ContractValidationError(`${label} must be a private P-256 EC JWK with d, x, and y.`);
+    throw new TypeError(`${label} must be a private P-256 EC JWK with d, x, and y.`);
   }
   return {
     crv: "P-256",

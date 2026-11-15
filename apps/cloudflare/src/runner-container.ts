@@ -4968,7 +4968,7 @@ async function readRunnerContainerMetadataJsonObject(
     });
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new ContractValidationError("Runner container metadata response body must be a JSON object.");
+    throw new TypeError("Runner container metadata response body must be a JSON object.");
   }
   return parsed as Record<string, unknown>;
 }

@@ -1,4 +1,3 @@
-import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type { Prisma } from "@prisma/client";
 import { readGameRecapEntryIdsTx, readLatestGameRecapEventIdTx } from "./recap-witness";
 import "server-only";
@@ -33,7 +32,7 @@ export async function readRecapTranscriptPage(input: {
     if (prior) {
       const value = prior.payload;
       if (value && typeof value === "object" && !Array.isArray(value) && typeof value.through === "string" && /^\d+$/u.test(value.through)) return value.through;
-      throw new ContractValidationError("Invalid recap transcript watermark.");
+      throw new TypeError("Invalid recap transcript watermark.");
     }
     const last = await tx.hostedMailboxItem.findFirst({
       where: { userId: input.containerMemberId, lane: "conversation", kind: "conversation.message", occurredAt: { lte: input.until } },

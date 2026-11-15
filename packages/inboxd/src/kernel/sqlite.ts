@@ -1,4 +1,3 @@
-import { ContractValidationError } from "@murphai/contracts/validation-error";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 import {
@@ -1375,12 +1374,12 @@ function assertCanonicalAttachmentRows(database: DatabaseSync): void {
       : "<unknown>";
 
   if (typeof row.attachment_id !== "string" || row.attachment_id.length === 0) {
-    throw new ContractValidationError(
+    throw new TypeError(
       `Inbox runtime requires canonical attachment metadata; capture_attachment row for capture "${captureId}" ordinal ${ordinal} is missing "attachment_id".`,
     );
   }
 
-  throw new ContractValidationError(
+  throw new TypeError(
     `Inbox runtime requires canonical attachment metadata; capture_attachment row for capture "${captureId}" has invalid "ordinal" value ${ordinal}.`,
   );
 }
@@ -1393,7 +1392,7 @@ function normalizeRuntimeAttachments(
   return normalizeStoredAttachments(captureId, attachments, context).map((attachment) => {
     const expectedAttachmentId = buildAttachmentId(captureId, attachment.ordinal);
     if (attachment.attachmentId !== expectedAttachmentId) {
-      throw new ContractValidationError(
+      throw new TypeError(
         `Inbox runtime requires attachment ids derived from capture "${captureId}"; expected "${expectedAttachmentId}" for ordinal ${attachment.ordinal}.`,
       );
     }

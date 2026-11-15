@@ -412,7 +412,7 @@ export async function parseBrowserVaultReplicaShards(
   })));
   for (const { bucket, bucketId } of parsedBuckets) metricBuckets[bucketId] = bucket;
   if (!hasAllBrowserVaultMetricBuckets(metricBuckets)) {
-    throw new ContractValidationError(`${label}.metricBuckets must contain all fixed metric buckets.`);
+    throw new TypeError(`${label}.metricBuckets must contain all fixed metric buckets.`);
   }
   return {
     core: parseBrowserVaultCoreShard(record.core, `${label}.core`),

@@ -1,4 +1,3 @@
-import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { type HostedBillingStatus, Prisma, type PrismaClient } from "@prisma/client";
 
 import { sanitizeHostedRuntimeErrorCode } from "@murphai/device-syncd/hosted-runtime";
@@ -2462,7 +2461,7 @@ function mergeHostedAccountDeletionOwnerCounts(
   for (const [key, value] of Object.entries(row)) {
     const count = typeof value === "bigint" ? Number(value) : value;
     if (!Number.isSafeInteger(count) || count < 0) {
-      throw new ContractValidationError(`Hosted account deletion returned an invalid count for ${key}.`);
+      throw new TypeError(`Hosted account deletion returned an invalid count for ${key}.`);
     }
     counts[key] = count;
   }

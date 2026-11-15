@@ -282,7 +282,7 @@ export async function upsertHostedMemberReplyAliasLookupKeyTx(input: {
 
 function requireHostedMemberReplyAliasGeneration(value: number): number {
   if (!Number.isSafeInteger(value) || value < 0 || value > 2_147_483_647) {
-    throw new ContractValidationError("Hosted member reply alias generation is invalid.");
+    throw new TypeError("Hosted member reply alias generation is invalid.");
   }
   return value;
 }

@@ -1,4 +1,3 @@
-import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   companionMealsProjectionSchema,
   mealPhotoThumbnailSchema,
@@ -22,7 +21,7 @@ export function buildCompanionMealsProjection(vault: VaultReadModel): CompanionM
   const days = new Map<string, CompanionMealDay>();
   for (const record of selectMealNutritionRecords(vault, {})) {
     const eatenAt = record.occurredAt;
-    if (!eatenAt) throw new ContractValidationError("Canonical meal occurrence is missing.");
+    if (!eatenAt) throw new TypeError("Canonical meal occurrence is missing.");
     const attributes = record.attributes;
     const nutrition = asRecord(attributes.nutrition);
     const totals = asRecord(nutrition?.totals);

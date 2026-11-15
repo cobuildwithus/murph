@@ -54,7 +54,7 @@ export async function appendHostedUsageCreditGrantTx(input: {
 }): Promise<HostedUsageCreditGrantAppendResult> {
   assertHostedUsageCreditDate(input.effectiveAt);
   if (input.grantUsdMicros <= 0n) {
-    throw new ContractValidationError("Hosted usage-credit grant must be positive.");
+    throw new TypeError("Hosted usage-credit grant must be positive.");
   }
   const semanticSourceKey = input.semanticSourceKey.trim();
   if (!semanticSourceKey) {

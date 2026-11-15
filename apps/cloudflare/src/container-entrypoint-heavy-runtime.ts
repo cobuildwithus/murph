@@ -1,4 +1,3 @@
-import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createHash } from "node:crypto";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
@@ -957,7 +956,7 @@ function readHostedContainerCodexShellEnvironmentProbe(stdout: string): {
 
 function readHostedContainerCodexRpcMessage(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new ContractValidationError("Hosted Codex shell smoke RPC message must be an object.");
+    throw new TypeError("Hosted Codex shell smoke RPC message must be an object.");
   }
   return value as Record<string, unknown>;
 }
@@ -970,13 +969,13 @@ function readHostedContainerCodexCommandExecResult(
   const stdout = record.stdout;
   const stderr = record.stderr;
   if (typeof exitCode !== "number" || !Number.isSafeInteger(exitCode)) {
-    throw new ContractValidationError("Hosted Codex command result.exitCode must be an integer.");
+    throw new TypeError("Hosted Codex command result.exitCode must be an integer.");
   }
   if (typeof stdout !== "string") {
-    throw new ContractValidationError("Hosted Codex command result.stdout must be a string.");
+    throw new TypeError("Hosted Codex command result.stdout must be a string.");
   }
   if (typeof stderr !== "string") {
-    throw new ContractValidationError("Hosted Codex command result.stderr must be a string.");
+    throw new TypeError("Hosted Codex command result.stderr must be a string.");
   }
   return {
     exitCode,
@@ -1000,14 +999,14 @@ function readHostedContainerJsonObject(
 
 function readHostedContainerRecord(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new ContractValidationError(`${label} must be an object.`);
+    throw new TypeError(`${label} must be an object.`);
   }
   return value as Record<string, unknown>;
 }
 
 function readHostedContainerPositiveNumber(value: unknown, label: string): number {
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
-    throw new ContractValidationError(`${label} must be a positive number.`);
+    throw new TypeError(`${label} must be a positive number.`);
   }
   return value;
 }

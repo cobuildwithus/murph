@@ -27,7 +27,7 @@ export function buildHostedGameChatBootstrapPolicy(input: {
       ? { ...source, operation: "recover" }
       : { ...source, operation: "send", text });
     if (response.action !== "game_chat_bootstrap") {
-      throw new ContractValidationError("Game bootstrap control returned an unrelated receipt.");
+      throw new TypeError("Game bootstrap control returned an unrelated receipt.");
     }
     return response.result;
   };

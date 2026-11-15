@@ -1,4 +1,3 @@
-import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createHash, randomBytes } from "node:crypto";
 
 import {
@@ -161,5 +160,5 @@ function requireConfiguredDeviceSyncProviderKey(value: string): ConfiguredDevice
     }
   }
 
-  throw new ContractValidationError("Stored device connect intent provider is not supported.");
+  throw new TypeError("Stored device connect intent provider is not supported.");
 }

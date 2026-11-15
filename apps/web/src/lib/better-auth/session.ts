@@ -1,4 +1,5 @@
 import "server-only";
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { isNativeError } from "node:util/types";
 import { Prisma, type HostedAuthRecord, type PrismaClient } from "@prisma/client";
@@ -132,8 +133,10 @@ function createSessionAuth(input: { baseURL: string; secret: string; prisma: Pri
 
 function observedSessionErrorCategory(error: unknown) {
   // Native branding rejects plain objects and proxies without invoking getters.
-  // Compare only the immediate prototype; do not traverse an untrusted chain.
   if (!isNativeError(error)) return "unknown";
+  // Preserve the validation category after separating it from native TypeError.
+  if (error instanceof ContractValidationError) return "native_type";
+  // Keep other categories limited to known immediate prototypes.
   const prototype = Object.getPrototypeOf(error);
   const codeField = prototype === Prisma.PrismaClientKnownRequestError.prototype ? "code"
     : prototype === Prisma.PrismaClientInitializationError.prototype ? "errorCode" : null;

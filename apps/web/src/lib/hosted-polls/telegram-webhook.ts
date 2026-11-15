@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 import type { HostedConversationPoll } from "@prisma/client";
 import * as z from "@murphai/contracts/zod-runtime";
@@ -37,7 +38,7 @@ export async function handleHostedTelegramPollWebhook(rawBody: string): Promise<
   if (!previous || previous.providerPollId !== (answer ? answer.poll_id : poll!.id)) throw new TypeError("Poll update binding mismatch.");
   if (answer) {
     if (previous.snapshot.anonymous) return { ok: true, ignored: true };
-    if (answer.option_ids.some((index) => index >= previous.snapshot.options.length)) throw new TypeError("Poll answer option is out of range.");
+    if (answer.option_ids.some((index) => index >= previous.snapshot.options.length)) throw new ContractValidationError("Poll answer option is out of range.");
     // Answer delivery is independent of tally delivery, including after close.
     await recordTelegramPollAnswer(row, answer, updateId);
     return { ok: true as const };

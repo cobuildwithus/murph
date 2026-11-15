@@ -88,7 +88,7 @@ export function parseHostedMailboxPayloadDecodeResponse(
     };
   }
 
-  throw new ContractValidationError("Hosted mailbox payload decode response.status is invalid.");
+  throw new TypeError("Hosted mailbox payload decode response.status is invalid.");
 }
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {
@@ -127,7 +127,7 @@ function readPayloadSource(value: unknown): "inline" | "sidecar" {
 
 function readBoolean(value: unknown, field: string): boolean {
   if (typeof value !== "boolean") {
-    throw new ContractValidationError(`Hosted mailbox payload decode ${field} must be a boolean.`);
+    throw new TypeError(`Hosted mailbox payload decode ${field} must be a boolean.`);
   }
 
   return value;

@@ -1426,7 +1426,7 @@ function buildHostedUsageNoticeLookupKey(input: {
 function normalizeNonNegativeBigInt(value: bigint | null): bigint {
   const normalized = value ?? 0n;
   if (normalized < 0n) {
-    throw new ContractValidationError("Hosted usage projection cannot be negative.");
+    throw new TypeError("Hosted usage projection cannot be negative.");
   }
   return normalized;
 }
