@@ -16,7 +16,8 @@ export interface ApplePushTarget {
 }
 
 // Background pushes need no permission and show nothing, but Apple requires
-// low priority and throttles them. Alerts are immediate but visible.
+// low priority and throttles them. Alerts are immediate, visible, and always
+// play the default sound, so no alert kind can arrive silently by omission.
 export type ApplePushMessage =
   | { kind: "background" }
   | { kind: "alert"; body: string; title?: string };
@@ -24,7 +25,6 @@ export type ApplePushMessage =
 export type ApplePushResult = "sent" | "unregistered" | "failed";
 
 export interface ApplePushRequest {
-  sound?: "default";
   /** Alerts only. Groups this alert with others, local or remote, on the same thread. */
   threadId?: string;
   /** Alerts only. The app needs the Time Sensitive entitlement, so send it only to a build known to hold it. */
@@ -112,7 +112,7 @@ function buildAps(request: ApplePushRequest): Record<string, unknown> {
   return {
     alert: message.title ? { body: message.body, title: message.title } : { body: message.body },
     "content-available": 1,
-    ...(request.sound ? { sound: request.sound } : {}),
+    sound: "default",
     ...(request.threadId ? { "thread-id": request.threadId } : {}),
     ...(request.interruptionLevel ? { "interruption-level": request.interruptionLevel } : {}),
   };

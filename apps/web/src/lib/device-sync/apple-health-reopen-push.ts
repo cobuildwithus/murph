@@ -199,7 +199,6 @@ async function deliver(prisma: PrismaClient, claim: Claim, now: Date): Promise<A
     data: { notification: "reopen_reminder" },
     expiresAt: ready.expiresAt,
     message: { kind: "alert", title: APPLE_HEALTH_REOPEN_PUSH_TITLE, body: APPLE_HEALTH_REOPEN_PUSH_BODY },
-    sound: "default",
     target: ready.target,
     threadId: APPLE_HEALTH_REOPEN_NOTIFICATION_ID,
     ...(ready.timeSensitive ? { interruptionLevel: "time-sensitive" as const } : {}),
