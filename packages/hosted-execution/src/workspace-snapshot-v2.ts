@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createHash } from "node:crypto";
 
 export const HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA =
@@ -139,7 +140,7 @@ export function encodeHostedWorkspaceSnapshotV2DataKey(dataKey: Uint8Array): str
 export function decodeHostedWorkspaceSnapshotV2DataKey(value: string): Uint8Array {
   const bytes = decodeBase64Url(value);
   if (bytes.byteLength !== 32) {
-    throw new TypeError("Hosted workspace snapshot data key must be 32 bytes.");
+    throw new ContractValidationError("Hosted workspace snapshot data key must be 32 bytes.");
   }
   return bytes;
 }
@@ -229,16 +230,16 @@ function parseHostedWorkspaceSnapshotV2DataKeyWrap(
   const text = new TextDecoder().decode(decodeBase64Url(value));
   const parsed: unknown = JSON.parse(text);
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new TypeError("Hosted workspace snapshot data key wrap must be an object.");
+    throw new ContractValidationError("Hosted workspace snapshot data key wrap must be an object.");
   }
   const record = parsed as Record<string, unknown>;
   if (record.schema !== HOSTED_WORKSPACE_SNAPSHOT_V2_DATA_KEY_WRAP_SCHEMA) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Hosted workspace snapshot data key wrap schema must be ${HOSTED_WORKSPACE_SNAPSHOT_V2_DATA_KEY_WRAP_SCHEMA}.`,
     );
   }
   if (record.alg !== "AES-256-GCM-HKDF-SHA256") {
-    throw new TypeError("Hosted workspace snapshot data key wrap alg must be AES-256-GCM-HKDF-SHA256.");
+    throw new ContractValidationError("Hosted workspace snapshot data key wrap alg must be AES-256-GCM-HKDF-SHA256.");
   }
 
   return {
@@ -277,7 +278,7 @@ async function importWorkspaceSnapshotWrapKey(
 
 function requireString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.length === 0) {
-    throw new TypeError(`${label} must be a non-empty string.`);
+    throw new ContractValidationError(`${label} must be a non-empty string.`);
   }
   return value;
 }

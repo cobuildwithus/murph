@@ -312,6 +312,7 @@ describe("device sync callback redirect helpers", () => {
         "Expected a shorter callback state value. request_body={\"apiKey\":\"<redacted-secret>\"}",
       errorResponseCode: "INVALID_REQUEST",
       errorType: "RangeError",
+      nativeErrorInference: true,
       internalMessage: "Hosted device-sync route failed unexpectedly.",
     });
     expect(warnSpy.mock.calls[0]?.[1]).not.toBe(invalidJsonError);

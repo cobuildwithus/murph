@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type { DatabaseSync } from "node:sqlite";
 
 import type { AttachmentParseJobRecord } from "../../contracts/derived.ts";
@@ -248,7 +249,7 @@ export function hydrateCaptureRow(
 
 function expectString(value: unknown, label: string): string {
   if (typeof value !== "string") {
-    throw new TypeError(`Expected ${label} to be a string.`);
+    throw new ContractValidationError(`Expected ${label} to be a string.`);
   }
 
   return value;
@@ -268,7 +269,7 @@ function expectNullableString(value: unknown, label: string): string | null {
 
 function expectNumber(value: unknown, label: string): number {
   if (typeof value !== "number") {
-    throw new TypeError(`Expected ${label} to be a number.`);
+    throw new ContractValidationError(`Expected ${label} to be a number.`);
   }
 
   return value;

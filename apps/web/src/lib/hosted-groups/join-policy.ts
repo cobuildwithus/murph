@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 import { hostedVaultShareRetainedHistoryDays, sharesCompanionContact } from "@murphai/hosted-execution/vault-share";
 
@@ -434,7 +435,7 @@ function baseHostedVaultShareProjectionScopeDisplay(
     };
   }
   if (!isHostedVaultShareSelectableProjectionKind(projectionScope.projectionKind)) {
-    throw new TypeError("Vault-share projection scope is not selectable.");
+    throw new ContractValidationError("Vault-share projection scope is not selectable.");
   }
   return HOSTED_VAULT_SHARE_PROJECTION_DISPLAY[projectionScope.projectionKind];
 }

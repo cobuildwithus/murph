@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
 import { getPrisma } from "@/src/lib/prisma";
@@ -47,7 +48,7 @@ export async function readHostedGrowthSponsorshipMetrics(
   prisma: HostedGrowthSponsorshipQueryClient = getPrisma(),
 ): Promise<HostedGrowthSponsorshipMetrics> {
   if (Number.isNaN(now.getTime())) {
-    throw new TypeError("Hosted growth sponsorship metrics require a valid date.");
+    throw new ContractValidationError("Hosted growth sponsorship metrics require a valid date.");
   }
 
   // Keep the existing ops dashboard usable with partial test clients and during
@@ -228,7 +229,7 @@ export async function readHostedGrowthSponsorshipMetrics(
 function toSafeNonNegativeNumber(value: bigint, field: string): number {
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed) || parsed < 0) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Hosted growth sponsorship metric ${field} is outside the safe range.`,
     );
   }

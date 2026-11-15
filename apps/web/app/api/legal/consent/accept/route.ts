@@ -1,3 +1,5 @@
+import { RequestInputError } from "@murphai/hosted-execution/request-input";
+
 import {
   HOSTED_HEALTH_DATA_CONSENT_SCOPE,
   type HostedConsentLaunchScope,
@@ -31,7 +33,7 @@ function readOptionalStarterInviteCode(body: Record<string, unknown>): string | 
     return null;
   }
   if (typeof body.inviteCode !== "string" || !body.inviteCode) {
-    throw new TypeError("inviteCode must be a non-empty string when provided.");
+    throw new RequestInputError("inviteCode must be a non-empty string when provided.");
   }
   return body.inviteCode;
 }

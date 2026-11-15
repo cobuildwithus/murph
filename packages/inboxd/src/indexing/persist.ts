@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { readFile, realpath, stat } from "node:fs/promises";
@@ -922,7 +923,7 @@ function normalizeLegacyInboxCaptureSnapshot(
   const envelope = expectRecord(value, context);
 
   if (envelope.schema !== "murph.inbox-envelope.v1") {
-    throw new TypeError(`Expected canonical "schema" in ${context}.`);
+    throw new ContractValidationError(`Expected canonical "schema" in ${context}.`);
   }
 
   const inbound = buildSanitizedInboundCapture(
@@ -933,7 +934,7 @@ function normalizeLegacyInboxCaptureSnapshot(
   const storedAt = requireStringField(envelope, "storedAt", context);
 
   if (requireStringField(envelope, "captureId", context) !== captureId) {
-    throw new TypeError(`Stored inbox envelope at ${relativePath} must use the deterministic captureId.`);
+    throw new ContractValidationError(`Stored inbox envelope at ${relativePath} must use the deterministic captureId.`);
   }
 
   const storedRecord = expectRecord(envelope.stored, `${context}.stored`);
@@ -942,29 +943,29 @@ function normalizeLegacyInboxCaptureSnapshot(
   const attachmentsValue = storedRecord.attachments;
 
   if (!Array.isArray(attachmentsValue)) {
-    throw new TypeError(`Expected canonical "attachments" array in ${context}.stored.`);
+    throw new ContractValidationError(`Expected canonical "attachments" array in ${context}.stored.`);
   }
 
   if (requireStringField(storedRecord, "captureId", `${context}.stored`) !== captureId) {
-    throw new TypeError(`Stored inbox envelope at ${relativePath} has a mismatched stored.captureId.`);
+    throw new ContractValidationError(`Stored inbox envelope at ${relativePath} has a mismatched stored.captureId.`);
   }
 
   if (requireStringField(storedRecord, "eventId", `${context}.stored`) !== eventId) {
-    throw new TypeError(`Stored inbox envelope at ${relativePath} has a mismatched stored.eventId.`);
+    throw new ContractValidationError(`Stored inbox envelope at ${relativePath} has a mismatched stored.eventId.`);
   }
 
   if (requireStringField(storedRecord, "storedAt", `${context}.stored`) !== storedAt) {
-    throw new TypeError(`Stored inbox envelope at ${relativePath} has a mismatched stored.storedAt.`);
+    throw new ContractValidationError(`Stored inbox envelope at ${relativePath} has a mismatched stored.storedAt.`);
   }
 
   const expectedSourceDirectory = buildInboxCaptureDirectory(inbound, captureId);
   if (sourceDirectory !== expectedSourceDirectory) {
-    throw new TypeError(`Stored inbox envelope at ${relativePath} has a mismatched stored.sourceDirectory.`);
+    throw new ContractValidationError(`Stored inbox envelope at ${relativePath} has a mismatched stored.sourceDirectory.`);
   }
 
   const expectedEnvelopePath = buildInboxEnvelopePath(inbound, captureId);
   if (envelopePath !== expectedEnvelopePath) {
-    throw new TypeError(`Stored inbox envelope at ${relativePath} has a mismatched stored.envelopePath.`);
+    throw new ContractValidationError(`Stored inbox envelope at ${relativePath} has a mismatched stored.envelopePath.`);
   }
 
   const attachments = normalizeStoredAttachments(
@@ -975,7 +976,7 @@ function normalizeLegacyInboxCaptureSnapshot(
     const expectedAttachmentId = buildAttachmentId(captureId, attachment.ordinal);
 
     if (attachment.attachmentId !== expectedAttachmentId) {
-      throw new TypeError(
+      throw new ContractValidationError(
         `Stored inbox envelope at ${relativePath} has a mismatched attachmentId for ordinal ${attachment.ordinal}.`,
       );
     }
@@ -1354,14 +1355,14 @@ async function readInboxCaptureRecordText(input: {
     return projection;
   }
   if (projection === null || projection.length !== INBOX_CAPTURE_TEXT_MAX_LENGTH) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Inbox capture text content requires an ${INBOX_CAPTURE_TEXT_MAX_LENGTH}-character inline projection.`,
     );
   }
 
   const expectedPath = path.posix.join(input.record.sourceDirectory, "text.txt");
   if (input.record.textContent.storedPath !== expectedPath) {
-    throw new TypeError("Inbox capture text content path does not match its source directory.");
+    throw new ContractValidationError("Inbox capture text content path does not match its source directory.");
   }
   const bytes = await readFile(
     await resolveVaultPath(input.vaultRoot, input.record.textContent.storedPath),
@@ -1503,7 +1504,7 @@ function normalizeStoredCaptureInboundInput(value: unknown, context: string): In
   const attachmentsValue = input.attachments;
 
   if (!Array.isArray(attachmentsValue)) {
-    throw new TypeError(`Expected canonical "attachments" array in ${context}.`);
+    throw new ContractValidationError(`Expected canonical "attachments" array in ${context}.`);
   }
 
   return {
@@ -1538,7 +1539,7 @@ function normalizeStoredCaptureInboundAttachment(
   const kind = requireStringField(attachment, "kind", context);
 
   if (!isInboundAttachmentKind(kind)) {
-    throw new TypeError(`Unsupported canonical attachment kind "${kind}" in ${context}.`);
+    throw new ContractValidationError(`Unsupported canonical attachment kind "${kind}" in ${context}.`);
   }
 
   return {
@@ -1553,7 +1554,7 @@ function normalizeStoredCaptureInboundAttachment(
 
 function expectRecord(value: unknown, context: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`Expected object in ${context}.`);
+    throw new ContractValidationError(`Expected object in ${context}.`);
   }
 
   return value as Record<string, unknown>;
@@ -1575,7 +1576,7 @@ function requireStringField(
   const fieldValue = value[field];
 
   if (typeof fieldValue !== "string" || fieldValue.trim().length === 0) {
-    throw new TypeError(`Expected canonical "${field}" string in ${context}.`);
+    throw new ContractValidationError(`Expected canonical "${field}" string in ${context}.`);
   }
 
   return fieldValue;
@@ -1589,7 +1590,7 @@ function requireBooleanField(
   const fieldValue = value[field];
 
   if (typeof fieldValue !== "boolean") {
-    throw new TypeError(`Expected canonical "${field}" boolean in ${context}.`);
+    throw new ContractValidationError(`Expected canonical "${field}" boolean in ${context}.`);
   }
 
   return fieldValue;
@@ -1607,7 +1608,7 @@ function readOptionalBooleanField(
   }
 
   if (typeof fieldValue !== "boolean") {
-    throw new TypeError(`Expected canonical "${field}" boolean in ${context}.`);
+    throw new ContractValidationError(`Expected canonical "${field}" boolean in ${context}.`);
   }
 
   return fieldValue;
@@ -1629,7 +1630,7 @@ function readOptionalNullableStringField(
   }
 
   if (typeof fieldValue !== "string") {
-    throw new TypeError(`Expected canonical "${field}" string in ${context}.`);
+    throw new ContractValidationError(`Expected canonical "${field}" string in ${context}.`);
   }
 
   return fieldValue;
@@ -1651,7 +1652,7 @@ function readOptionalNullableNumberField(
   }
 
   if (typeof fieldValue !== "number" || !Number.isFinite(fieldValue)) {
-    throw new TypeError(`Expected canonical "${field}" number in ${context}.`);
+    throw new ContractValidationError(`Expected canonical "${field}" number in ${context}.`);
   }
 
   return fieldValue;

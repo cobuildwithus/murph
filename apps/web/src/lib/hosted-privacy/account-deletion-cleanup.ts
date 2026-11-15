@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { randomBytes } from "node:crypto";
 
 import type {
@@ -104,7 +105,7 @@ export async function prepareHostedAccountDeletionCleanup(input: {
   const id = `hbadc_${randomBytes(18).toString("base64url")}`;
   const runtimeMemberIds = uniqueIdentifiers(input.runtimeMemberIds, "runtime member");
   if (runtimeMemberIds.length === 0) {
-    throw new TypeError("Hosted account deletion cleanup requires a runtime member.");
+    throw new ContractValidationError("Hosted account deletion cleanup requires a runtime member.");
   }
   const stripeCustomerIds = uniqueIdentifiers(input.stripeCustomerIds, "Stripe customer");
   const stripeSubscriptionIds = uniqueIdentifiers(
@@ -358,7 +359,7 @@ async function runCleanupTargets(input: {
     || cleanup.temporalNextRuntimeIndex < 0
     || cleanup.temporalNextRuntimeIndex > payload.runtimeMemberIds.length
   ) {
-    throw new TypeError("Hosted Temporal cleanup cursor is invalid.");
+    throw new ContractValidationError("Hosted Temporal cleanup cursor is invalid.");
   }
   return Promise.all([
     cleanup.cloudflareCompletedAt
@@ -485,14 +486,14 @@ async function decryptCleanupPayload(
 
 function parseCleanupPayload(value: unknown): CleanupPayload {
   if (!isRecord(value) || value.schema !== CLEANUP_SCHEMA) {
-    throw new TypeError("Hosted account deletion cleanup payload is invalid.");
+    throw new ContractValidationError("Hosted account deletion cleanup payload is invalid.");
   }
   if (!Array.isArray(value.runtimeMemberIds) || !Array.isArray(value.stripeCustomerIds)) {
-    throw new TypeError("Hosted account deletion cleanup identifiers are invalid.");
+    throw new ContractValidationError("Hosted account deletion cleanup identifiers are invalid.");
   }
   const runtimeMemberIds = uniqueIdentifiers(value.runtimeMemberIds, "runtime member");
   if (runtimeMemberIds.length === 0) {
-    throw new TypeError("Hosted account deletion cleanup runtime members are invalid.");
+    throw new ContractValidationError("Hosted account deletion cleanup runtime members are invalid.");
   }
 
   return {
@@ -844,11 +845,11 @@ function cleanupAad(input: { environment: string; id: string }): string {
 
 function uniqueIdentifiers(values: readonly unknown[], label: string): string[] {
   if (values.length > CLEANUP_IDENTIFIER_LIMIT) {
-    throw new TypeError(`Hosted account deletion cleanup has too many ${label} identifiers.`);
+    throw new ContractValidationError(`Hosted account deletion cleanup has too many ${label} identifiers.`);
   }
   return [...new Set(values.map((value) => {
     if (typeof value !== "string" || value.trim().length === 0 || value.length > 512) {
-      throw new TypeError(`Hosted account deletion cleanup ${label} identifier is invalid.`);
+      throw new ContractValidationError(`Hosted account deletion cleanup ${label} identifier is invalid.`);
     }
     return value.trim();
   }))];
@@ -890,14 +891,14 @@ function sumNullableNumbers(values: readonly (number | null)[]): number | null {
 
 function assertValidDate(value: Date): void {
   if (Number.isNaN(value.getTime())) {
-    throw new TypeError("Hosted account deletion cleanup time must be valid.");
+    throw new ContractValidationError("Hosted account deletion cleanup time must be valid.");
   }
 }
 
 function normalizeAttemptTimeoutMs(value: number | undefined): number {
   const timeoutMs = value ?? HOSTED_ACCOUNT_DELETION_RETRY_ATTEMPT_TIMEOUT_MS;
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
-    throw new TypeError("Hosted account deletion cleanup timeout must be a positive integer.");
+    throw new ContractValidationError("Hosted account deletion cleanup timeout must be a positive integer.");
   }
   return timeoutMs;
 }

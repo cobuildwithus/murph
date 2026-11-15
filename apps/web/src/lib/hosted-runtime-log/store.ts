@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
 import { randomUUID } from "node:crypto";
@@ -169,7 +170,7 @@ export async function listHostedRuntimeLogs(input: {
     filters.push(`AND event_code = $${values.length}`);
   }
   if (input.from) {
-    if (!Number.isFinite(input.from.getTime())) throw new TypeError("Invalid runtime log window.");
+    if (!Number.isFinite(input.from.getTime())) throw new ContractValidationError("Invalid runtime log window.");
     values.push(input.from);
     filters.push(`AND at >= $${values.length}`);
   }
@@ -565,7 +566,7 @@ function normalizeHostedRuntimeLogLimit(value: number): number {
 
 function normalizePositiveInteger(value: number, label: string): number {
   if (!Number.isSafeInteger(value) || value < 1) {
-    throw new TypeError(`${label} must be a positive integer.`);
+    throw new ContractValidationError(`${label} must be a positive integer.`);
   }
   return value;
 }
@@ -580,11 +581,11 @@ function requireHostedRuntimeLogAttemptId(value: string): string {
 
 function requireOpaqueString(value: string, label: string): string {
   if (typeof value !== "string") {
-    throw new TypeError(`${label} must be a string.`);
+    throw new ContractValidationError(`${label} must be a string.`);
   }
   const normalized = value.trim();
   if (normalized.length === 0 || normalized.length > 1_024) {
-    throw new TypeError(`${label} must be a non-empty bounded string.`);
+    throw new ContractValidationError(`${label} must be a non-empty bounded string.`);
   }
   return normalized;
 }
@@ -597,14 +598,14 @@ function normalizeBigIntString(value: bigint | number | string): string {
   try {
     return BigInt(value).toString();
   } catch {
-    throw new TypeError("Hosted runtime log bigint field must be an integer.");
+    throw new ContractValidationError("Hosted runtime log bigint field must be an integer.");
   }
 }
 
 function requireDate(value: Date | string, label: string): Date {
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) {
-    throw new TypeError(`${label} must be a valid date.`);
+    throw new ContractValidationError(`${label} must be a valid date.`);
   }
   return date;
 }

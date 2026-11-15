@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
 import {
@@ -62,7 +63,7 @@ export function buildHostedThreadDeliveryRoute(input: {
     requireHostedThreadDeliveryRouteString(input.accountLookupKey)
     !== HOSTED_TELEGRAM_THREAD_ACCOUNT_LOOKUP_KEY
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted Telegram thread routes require the canonical account lookup key.",
     );
   }
@@ -86,7 +87,7 @@ export function serializeHostedThreadDeliveryRouteV1(
 ): string {
   const serialized = JSON.stringify(value);
   if (serialized.length > HOSTED_THREAD_DELIVERY_ROUTE_VALUE_MAX_CHARS) {
-    throw new TypeError("Hosted thread delivery route is too large.");
+    throw new ContractValidationError("Hosted thread delivery route is too large.");
   }
   return serialized;
 }
@@ -98,22 +99,22 @@ export function parseHostedThreadDeliveryRouteV1(
     value.length === 0
     || value.length > HOSTED_THREAD_DELIVERY_ROUTE_VALUE_MAX_CHARS
   ) {
-    throw new TypeError("Hosted thread delivery route is invalid.");
+    throw new ContractValidationError("Hosted thread delivery route is invalid.");
   }
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(value);
   } catch {
-    throw new TypeError("Hosted thread delivery route is invalid.");
+    throw new ContractValidationError("Hosted thread delivery route is invalid.");
   }
 
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new TypeError("Hosted thread delivery route is invalid.");
+    throw new ContractValidationError("Hosted thread delivery route is invalid.");
   }
   const record = parsed as Record<string, unknown>;
   if (record.schema !== HOSTED_THREAD_DELIVERY_ROUTE_SCHEMA) {
-    throw new TypeError("Hosted thread delivery route schema is invalid.");
+    throw new ContractValidationError("Hosted thread delivery route schema is invalid.");
   }
 
   const channel = record.channel;
@@ -147,7 +148,7 @@ export function parseHostedThreadDeliveryRouteV1(
     };
   }
 
-  throw new TypeError("Hosted thread delivery route channel is invalid.");
+  throw new ContractValidationError("Hosted thread delivery route channel is invalid.");
 }
 
 export async function sealHostedThreadDeliveryRoute(input: {
@@ -226,7 +227,7 @@ function assertExactHostedThreadDeliveryRouteKeys(
     actualKeys.length !== normalizedExpectedKeys.length
     || actualKeys.some((key, index) => key !== normalizedExpectedKeys[index])
   ) {
-    throw new TypeError("Hosted thread delivery route fields are invalid.");
+    throw new ContractValidationError("Hosted thread delivery route fields are invalid.");
   }
 }
 
@@ -236,7 +237,7 @@ function requireHostedThreadDeliveryRouteString(value: unknown): string {
     normalized.length === 0
     || normalized.length > HOSTED_THREAD_DELIVERY_ROUTE_PART_MAX_CHARS
   ) {
-    throw new TypeError("Hosted thread delivery route value is invalid.");
+    throw new ContractValidationError("Hosted thread delivery route value is invalid.");
   }
   return normalized;
 }

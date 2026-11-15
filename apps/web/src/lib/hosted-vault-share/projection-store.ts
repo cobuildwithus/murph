@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
 import { createHash } from "node:crypto";
@@ -339,7 +340,7 @@ function parseHostedVaultShareDeliveryContinuation(value: unknown): string | nul
     return null;
   }
   if (!isHostedRuntimeVaultShareDeliverContinuation(value)) {
-    throw new TypeError("Hosted vault-share delivery continuation is invalid.");
+    throw new ContractValidationError("Hosted vault-share delivery continuation is invalid.");
   }
   return value;
 }

@@ -1,3 +1,4 @@
+import { isRequestInputError } from "@murphai/hosted-execution/request-input";
 import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
@@ -31,7 +32,7 @@ export function classifyPublicRouteError(error: unknown): { error: string; statu
   if (error instanceof SyntaxError) {
     return { error: "Invalid JSON.", status: 400 };
   }
-  if (error instanceof TypeError || error instanceof RangeError || error instanceof URIError) {
+  if (isRequestInputError(error) || error instanceof TypeError || error instanceof RangeError || error instanceof URIError) {
     return { error: "Invalid request.", status: 400 };
   }
   return { error: "Internal error.", status: 500 };

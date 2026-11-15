@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
 import {
@@ -163,7 +164,7 @@ export async function getHostedTelegramGroupTitle(input: {
 }): Promise<string | null> {
   const target = parseTelegramThreadTarget(input.threadId);
   if (!target) {
-    throw new TypeError("Hosted Telegram group read requires a valid thread id.");
+    throw new ContractValidationError("Hosted Telegram group read requires a valid thread id.");
   }
 
   const payload = await callHostedTelegramApi({
@@ -202,7 +203,7 @@ export async function sendHostedTelegramTextMessage(input: {
   const chatId = normalizeNullableString(input.target.chatId);
   const message = normalizeNullableString(input.message);
   if (!chatId || !message) {
-    throw new TypeError("Hosted Telegram text delivery requires a target and message.");
+    throw new ContractValidationError("Hosted Telegram text delivery requires a target and message.");
   }
 
   const replyToMessageId = typeof input.replyToMessageId === "number"

@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { isVaultError, normalizeOpaquePathSegment } from "@murphai/core";
 
 export type ParserArtifactKind = "audio" | "document" | "image" | "other" | "video";
@@ -33,7 +34,7 @@ export function normalizeParserArtifactId(
     return normalizeOpaquePathSegment(value, label);
   } catch (error) {
     if (error instanceof Error && isVaultError(error)) {
-      throw new TypeError(error.message);
+      throw new ContractValidationError(error.message);
     }
 
     throw error;

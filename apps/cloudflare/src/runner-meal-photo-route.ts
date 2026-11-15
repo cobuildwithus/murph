@@ -1,10 +1,11 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 const HOSTED_MEAL_PHOTO_KEY_PATTERN = /^[a-f0-9]{40}$/u;
 
 export const HOSTED_EXECUTION_RUNNER_MEAL_PHOTO_PATH_PREFIX = "/meal-photos";
 
 export function buildHostedExecutionRunnerMealPhotoPath(mealPhotoKey: string): string {
   if (!HOSTED_MEAL_PHOTO_KEY_PATTERN.test(mealPhotoKey)) {
-    throw new TypeError("Hosted meal photo key is invalid.");
+    throw new ContractValidationError("Hosted meal photo key is invalid.");
   }
   return `${HOSTED_EXECUTION_RUNNER_MEAL_PHOTO_PATH_PREFIX}/${mealPhotoKey}`;
 }

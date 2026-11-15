@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { workspaceSnapshotBucket } from "./workspace-snapshot-local-s3.ts";
 import type { HostedWorkspaceSnapshotUploadSession } from "@murphai/hosted-execution/workspace-snapshot-store";
 import { HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE } from "@murphai/hosted-execution/workspace-snapshot-store";
@@ -66,7 +67,7 @@ export async function completeManagedSnapshotForSession(input: {
 function parseManagedPart(part: unknown): { uploadId: string; etag: string } {
   if (!part || typeof part !== "object" || !("uploadId" in part) || !("etag" in part)
     || typeof part.uploadId !== "string" || !part.uploadId || part.uploadId.length > 1024
-    || typeof part.etag !== "string" || !part.etag || part.etag.length > 1024) throw new TypeError("Managed snapshot part is invalid.");
+    || typeof part.etag !== "string" || !part.etag || part.etag.length > 1024) throw new ContractValidationError("Managed snapshot part is invalid.");
   return { uploadId: part.uploadId, etag: part.etag };
 }
 

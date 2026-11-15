@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { Prisma } from "@prisma/client";
 
 import {
@@ -309,7 +310,7 @@ function requireHostedRuntimeSnapshotExternalAccountCiphertexts(
       record.status === "active"
       && !normalizeNullableString(record.externalAccountIdEncrypted)
     ) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "Hosted active device-sync connection is missing its external account identity.",
       );
     }
@@ -344,7 +345,7 @@ export async function applyHostedDeviceSyncRuntimeResult(input: {
 
   for (const update of parsed.updates) {
     if (update.seed !== undefined) {
-      throw new TypeError("Hosted device-sync runtime callbacks must not seed Cloudflare-owned state.");
+      throw new ContractValidationError("Hosted device-sync runtime callbacks must not seed Cloudflare-owned state.");
     }
   }
 
@@ -1586,7 +1587,7 @@ function buildHostedRuntimeCredentialSnapshot(input: {
 
   if (input.record.credentialKind === "provider_config") {
     if (!input.record.providerConfigKey) {
-      throw new TypeError("Hosted provider-config device-sync credential is missing providerConfigKey.");
+      throw new ContractValidationError("Hosted provider-config device-sync credential is missing providerConfigKey.");
     }
 
     const credentialMetadata = sanitizeHostedExecutionDeviceSyncRuntimeCredentialMetadata(
@@ -1744,7 +1745,7 @@ function validateHostedRuntimeCredentialMutation(input: {
     case "provider_config": {
       const providerConfigKey = input.credential.providerConfigKey.trim();
       if (!providerConfigKey) {
-        throw new TypeError("Hosted provider-config device-sync credential is missing providerConfigKey.");
+        throw new ContractValidationError("Hosted provider-config device-sync credential is missing providerConfigKey.");
       }
 
       if (policy) {
@@ -1790,7 +1791,7 @@ async function persistHostedRuntimeCredentialSnapshot(input: {
   tx: HostedPrismaTransactionClient;
 }): Promise<HostedConnectionRecord> {
   if (input.credential.kind === "provider_config" && !input.credential.providerConfigKey.trim()) {
-    throw new TypeError("Hosted provider-config device-sync credential is missing providerConfigKey.");
+    throw new ContractValidationError("Hosted provider-config device-sync credential is missing providerConfigKey.");
   }
 
   const credentialMetadataJson = sanitizeHostedExecutionDeviceSyncRuntimeCredentialMetadata(

@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { extractIsoDatePrefix, type WorkoutSessionMetrics } from "@murphai/contracts";
 
 import { stripEmptyObject, stripUndefined } from "../shared.ts";
@@ -37,7 +38,7 @@ export interface StravaSnapshotInput {
 
 function parseStravaSnapshot(snapshot: unknown): StravaSnapshotInput {
   if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) {
-    throw new TypeError("Strava snapshot must be an object.");
+    throw new ContractValidationError("Strava snapshot must be an object.");
   }
 
   assertOptionalObjectCollection((snapshot as StravaSnapshotInput).activities, "activities");
@@ -62,12 +63,12 @@ function assertOptionalObjectCollection(value: unknown, fieldName: string): void
     return;
   }
   if (!Array.isArray(value)) {
-    throw new TypeError(`Strava snapshot ${fieldName} must be an array.`);
+    throw new ContractValidationError(`Strava snapshot ${fieldName} must be an array.`);
   }
 
   value.forEach((entry, index) => {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
-      throw new TypeError(`Strava snapshot ${fieldName}[${index}] must be an object.`);
+      throw new ContractValidationError(`Strava snapshot ${fieldName}[${index}] must be an object.`);
     }
   });
 }

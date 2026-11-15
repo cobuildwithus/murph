@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import path from "node:path";
 import { promises as fs } from "node:fs";
 
@@ -153,7 +154,7 @@ export async function listCanonicalExperimentDocumentPathsInterruptible(input: {
   shouldYield?: (() => boolean) | null;
 }): Promise<CanonicalExperimentDocumentPathPage> {
   if (!Number.isSafeInteger(input.maxDocuments) || input.maxDocuments <= 0) {
-    throw new TypeError("Experiment document limits must be positive safe integers.");
+    throw new ContractValidationError("Experiment document limits must be positive safe integers.");
   }
 
   if (input.shouldYield?.() === true) {

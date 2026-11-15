@@ -25,6 +25,7 @@ import { deliverGamePush } from "@/src/lib/game/push-delivery";
 import { readGameReminders, readHome, runGameCommand } from "@/src/lib/game/service";
 import { GET, PUT } from "../app/api/game/v1/me/reminders/route";
 import { gameHttpError } from "@/src/lib/game/http/errors";
+import { applePushWireAps } from "./support/apple-push-wire";
 import { cleanupGameFixtures } from "./support/game-fixture-cleanup";
 
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
@@ -120,7 +121,8 @@ describe.skipIf(!enabled)("game reminders PostgreSQL", () => {
     const push = m.send.mock.calls[0]![0] as ApplePushRequest;
     expect(push.message).toMatchObject({ body: "Still time today." });
     expect(push.message.kind === "alert" && push.message.title?.split(", ").sort()).toEqual(["Read", "Walk"]);
-    expect(push).toMatchObject({ sound: "default", expiresAt: new Date("2026-11-06T19:30:00Z"), data: { notification: "game_reminder" } });
+    expect(await applePushWireAps(push)).toMatchObject({ sound: "default" });
+    expect(push).toMatchObject({ expiresAt: new Date("2026-11-06T19:30:00Z"), data: { notification: "game_reminder" } });
     const receipts = await claims();
     expect(receipts).toHaveLength(1);
     expect(receipts[0]!.payload).toEqual({ v: 1, recipientMemberId: owner, day: "2026-11-06", outcome: "sent" });

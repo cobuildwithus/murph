@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { metricSourcePriority } from "@murphai/health-metrics";
 
 import {
@@ -309,7 +310,7 @@ function createMetricsQueryAccess(
   function matchingMetricRows(filters: BrowserVaultMetricFilters): BrowserVaultMetricRow[] {
     if (requireMetricLoaded) {
       if (!filters.metricKey) {
-        throw new TypeError("A metricKey is required when querying partially loaded browser vault metrics.");
+        throw new ContractValidationError("A metricKey is required when querying partially loaded browser vault metrics.");
       }
       requireMetricLoaded(filters.metricKey);
     }

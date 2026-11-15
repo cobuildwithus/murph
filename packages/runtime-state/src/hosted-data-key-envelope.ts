@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   getHostedCryptoDomainForLane,
   isHostedCryptoDomain,
@@ -201,7 +202,7 @@ export function parseHostedDataKeyEnvelope(
     ),
   };
   if (!envelope.wraps.some((wrap) => wrap.rootKeyId === rootKeyId)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label}.wraps must include a domain-root wrap for rootKeyId.`,
     );
   }
@@ -322,7 +323,7 @@ function assertDataKeyLaneDomain(input: {
 }): void {
   const expectedDomain = getHostedCryptoDomainForLane(input.lane);
   if (expectedDomain !== input.domain) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Hosted data-key lane ${input.lane} belongs to ${expectedDomain}, not ${input.domain}.`,
     );
   }
@@ -335,7 +336,7 @@ function requireHostedDataKeyDomain(
   if (typeof value === "string" && isHostedCryptoDomain(value)) {
     return value;
   }
-  throw new TypeError(`${label} must be a hosted crypto domain.`);
+  throw new ContractValidationError(`${label} must be a hosted crypto domain.`);
 }
 
 function requireHostedDataKeyLane(
@@ -345,7 +346,7 @@ function requireHostedDataKeyLane(
   if (typeof value === "string" && isHostedCryptoLane(value)) {
     return value;
   }
-  throw new TypeError(`${label} must be a hosted crypto lane.`);
+  throw new ContractValidationError(`${label} must be a hosted crypto lane.`);
 }
 
 function requireDataKeyBytes(value: Uint8Array, label: string): Uint8Array {
@@ -367,21 +368,21 @@ function requireDataKeyRootKeyBytes(
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object.`);
+    throw new ContractValidationError(`${label} must be an object.`);
   }
   return value as Record<string, unknown>;
 }
 
 function requireArray(value: unknown, label: string): unknown[] {
   if (!Array.isArray(value)) {
-    throw new TypeError(`${label} must be an array.`);
+    throw new ContractValidationError(`${label} must be an array.`);
   }
   return value.slice();
 }
 
 function requireNonEmptyString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.trim().length === 0) {
-    throw new TypeError(`${label} must be a non-empty string.`);
+    throw new ContractValidationError(`${label} must be a non-empty string.`);
   }
   return value.trim();
 }
@@ -392,7 +393,7 @@ function requireLiteral<TLiteral extends string>(
   label: string,
 ): TLiteral {
   if (value !== literal) {
-    throw new TypeError(`${label} must be ${literal}.`);
+    throw new ContractValidationError(`${label} must be ${literal}.`);
   }
   return literal;
 }

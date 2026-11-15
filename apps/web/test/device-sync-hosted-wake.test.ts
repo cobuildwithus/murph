@@ -8185,6 +8185,14 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.signalHostedDeviceSyncMailboxRuntime).toHaveBeenCalledTimes(2);
   });
 
+  it("preserves an unrelated RangeError from the webhook body reader", async () => {
+    const error = new RangeError("Invalid array length");
+    const request = new Request("https://control.example.test/api/device-sync/webhooks/oura", { method: "POST" });
+    Object.defineProperty(request, "body", { value: new ReadableStream({ start(controller) { controller.error(error); } }) });
+    const controlPlane = createHostedDeviceSyncPublicIngressService(request);
+    await expect(controlPlane.readWebhookRawBody()).rejects.toBe(error);
+  });
+
   it("rejects hosted webhook bodies above the shared device-sync limit before ingress parsing", async () => {
     const controlPlane = createHostedDeviceSyncPublicIngressService(
       new Request("https://control.example.test/api/device-sync/webhooks/oura", {

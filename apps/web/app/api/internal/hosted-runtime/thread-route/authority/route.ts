@@ -1,3 +1,4 @@
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import {
   parseHostedExecutionPrivateAssistantAskCompletionDeliveryAuthority,
   parseHostedExecutionExternalThreadRouteAuthority,
@@ -74,8 +75,9 @@ export const POST = withJsonError(async (request: Request) => {
     }
     return jsonOk({ authorized: true });
   }
-  const authority = parseHostedExecutionExternalThreadRouteAuthority(
+  const authority = parseInput(
     assistantAskCompletion ? body.authority : body,
+    parseHostedExecutionExternalThreadRouteAuthority,
   );
   if (authority.containerMemberId !== memberId) {
     throw hostedOnboardingError({

@@ -51,6 +51,7 @@ import {
   uniqueStrings,
 } from "./wearables/shared.ts";
 import {
+  emptyMetricSelection,
   resolveMetric,
   resolveSleepWindowSelection,
   withMetricFallback,
@@ -1286,7 +1287,7 @@ export function buildWearableSummaryBundle(
 interface WearableMetricObservation {
   date: string;
   notes: string[];
-  resolved: WearableResolvedMetric;
+  resolved: WearableResolvedMetric & { selection: WearableMetricSelection & { value: number } };
   summaryKind: WearableMetricSummaryKind;
 }
 
@@ -1425,6 +1426,12 @@ function isWearableResolvedMetric(value: unknown): value is WearableResolvedMetr
   return typeof value === "object" && value !== null && "metric" in value && "selection" in value && "confidence" in value;
 }
 
+function hasWearableMetricValue(
+  metric: WearableResolvedMetric,
+): metric is WearableMetricObservation["resolved"] {
+  return metric.selection.value !== null;
+}
+
 function listWearableMetricObservations(
   bundle: WearableSummaryBundle,
   metric: WearableMetricKey,
@@ -1442,7 +1449,7 @@ function listWearableMetricObservations(
   return summaries.flatMap((summary) => {
     const resolved = Reflect.get(summary, metric);
 
-    if (!isWearableResolvedMetric(resolved) || resolved.selection.value === null) {
+    if (!isWearableResolvedMetric(resolved) || !hasWearableMetricValue(resolved)) {
       return [];
     }
 
@@ -1463,18 +1470,14 @@ function buildWearableMetricWindowStats(
     return emptyWearableMetricWindow();
   }
 
-  const values = observations
-    .map((observation) => observation.resolved.selection.value)
-    .filter((value): value is number => value !== null);
+  const values = observations.map((observation) => observation.resolved.selection.value);
 
   return {
-    average: values.length > 0
-      ? Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(4))
-      : null,
+    average: Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(4)),
     count: values.length,
     from: observations.at(-1)?.date ?? null,
-    max: values.length > 0 ? Math.max(...values) : null,
-    min: values.length > 0 ? Math.min(...values) : null,
+    max: Math.max(...values),
+    min: Math.min(...values),
     to: observations[0]?.date ?? null,
   };
 }
@@ -1490,7 +1493,7 @@ function buildWearableMetricTrendPoint(
     recordedAt: observation.resolved.selection.recordedAt,
     recordIds: [...observation.resolved.selection.recordIds],
     unit: observation.resolved.selection.unit,
-    value: observation.resolved.selection.value ?? 0,
+    value: observation.resolved.selection.value,
   };
 }
 
@@ -1515,11 +1518,10 @@ function summarizeWearableMetricFromBundle(
   const recentObservations = observations.slice(0, windowDays);
   const priorObservations = observations.slice(windowDays, windowDays * 2);
   const latestObservation = observations[0] ?? null;
+  const selection = latestObservation?.resolved.selection ?? emptyMetricSelection();
   const recentWindow = buildWearableMetricWindowStats(recentObservations);
   const priorWindow = buildWearableMetricWindowStats(priorObservations);
-  const values = observations
-    .map((observation) => observation.resolved.selection.value)
-    .filter((value): value is number => value !== null);
+  const values = observations.map((observation) => observation.resolved.selection.value);
   const delta =
     recentWindow.average !== null && priorWindow.average !== null
       ? Number((recentWindow.average - priorWindow.average).toFixed(4))
@@ -1546,18 +1548,18 @@ function summarizeWearableMetricFromBundle(
     metric: resolvedRequest.metric,
     min: values.length > 0 ? Math.min(...values) : null,
     notes,
-    paths: [...(latestObservation?.resolved.selection.paths ?? [])],
+    paths: [...selection.paths],
     percentChange,
     priorWindow,
-    provider: latestObservation?.resolved.selection.provider ?? null,
+    provider: selection.provider,
     recentWindow,
-    recordedAt: latestObservation?.resolved.selection.recordedAt ?? null,
-    recordIds: [...(latestObservation?.resolved.selection.recordIds ?? [])],
+    recordedAt: selection.recordedAt,
+    recordIds: [...selection.recordIds],
     requestedMetric: resolvedRequest.requestedMetric,
     resolvedAlias: resolvedRequest.resolvedAlias,
     summaryKind: resolvedRequest.summaryKind,
-    unit: latestObservation?.resolved.selection.unit ?? null,
-    value: latestObservation?.resolved.selection.value ?? null,
+    unit: selection.unit,
+    value: selection.value,
     windowDays,
   };
 }

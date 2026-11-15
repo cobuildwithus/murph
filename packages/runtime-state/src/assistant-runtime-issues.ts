@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createHash, randomUUID } from "node:crypto";
 import { readdir, readFile, rm } from "node:fs/promises";
 import path from "node:path";
@@ -280,7 +281,7 @@ function normalizeIssueSchema(value: unknown): typeof ASSISTANT_RUNTIME_ISSUE_SC
   const schema = normalizeRequiredString(value, "schema");
 
   if (schema !== ASSISTANT_RUNTIME_ISSUE_SCHEMA) {
-    throw new TypeError(`assistant runtime issue record schema must be ${ASSISTANT_RUNTIME_ISSUE_SCHEMA}.`);
+    throw new ContractValidationError(`assistant runtime issue record schema must be ${ASSISTANT_RUNTIME_ISSUE_SCHEMA}.`);
   }
 
   return ASSISTANT_RUNTIME_ISSUE_SCHEMA;
@@ -290,7 +291,7 @@ function normalizeFingerprint(value: unknown): string {
   const fingerprint = normalizeRequiredString(value, "fingerprint");
 
   if (!ASSISTANT_RUNTIME_ISSUE_FINGERPRINT_PATTERN.test(fingerprint)) {
-    throw new TypeError("fingerprint must be a 24-character hexadecimal string.");
+    throw new ContractValidationError("fingerprint must be a 24-character hexadecimal string.");
   }
 
   return fingerprint;
@@ -300,7 +301,7 @@ function normalizeIssueId(value: unknown): string {
   const issueId = normalizeRequiredString(value, "issueId");
 
   if (!ASSISTANT_RUNTIME_ISSUE_ID_PATTERN.test(issueId)) {
-    throw new TypeError("issueId must match the assistant runtime issue id format.");
+    throw new ContractValidationError("issueId must match the assistant runtime issue id format.");
   }
 
   return issueId;
@@ -311,7 +312,7 @@ function normalizeEnvironment(value: unknown): AssistantRuntimeIssueEnvironment 
   if (normalized === "hosted" || normalized === "local") {
     return normalized;
   }
-  throw new TypeError("environment must be 'hosted' or 'local'.");
+  throw new ContractValidationError("environment must be 'hosted' or 'local'.");
 }
 
 function normalizePhase(value: unknown): AssistantRuntimeIssuePhase {
@@ -327,7 +328,7 @@ function normalizePhase(value: unknown): AssistantRuntimeIssuePhase {
   ) {
     return normalized;
   }
-  throw new TypeError("phase is not a supported assistant runtime issue phase.");
+  throw new ContractValidationError("phase is not a supported assistant runtime issue phase.");
 }
 
 function normalizeSeverity(value: unknown): AssistantRuntimeIssueSeverity {
@@ -335,7 +336,7 @@ function normalizeSeverity(value: unknown): AssistantRuntimeIssueSeverity {
   if (normalized === "info" || normalized === "warning" || normalized === "error") {
     return normalized;
   }
-  throw new TypeError("severity must be 'info', 'warning', or 'error'.");
+  throw new ContractValidationError("severity must be 'info', 'warning', or 'error'.");
 }
 
 function normalizeIssueKind(value: unknown): AssistantRuntimeIssueKind {
@@ -351,7 +352,7 @@ function normalizeIssueKind(value: unknown): AssistantRuntimeIssueKind {
   ) {
     return normalized;
   }
-  throw new TypeError("issueKind is not a supported assistant runtime issue kind.");
+  throw new ContractValidationError("issueKind is not a supported assistant runtime issue kind.");
 }
 
 function sanitizeRequiredField(
@@ -542,7 +543,7 @@ function requireJsonObject(value: unknown, label: string): Record<string, unknow
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be a JSON object.`);
+    throw new ContractValidationError(`${label} must be a JSON object.`);
   }
 
   return value as Record<string, unknown>;
@@ -553,7 +554,7 @@ function normalizeIsoTimestamp(value: unknown, label: string): string {
   const date = new Date(normalized);
 
   if (Number.isNaN(date.getTime())) {
-    throw new TypeError(`${label} must be an ISO timestamp.`);
+    throw new ContractValidationError(`${label} must be an ISO timestamp.`);
   }
 
   return date.toISOString();
@@ -563,7 +564,7 @@ function normalizeRequiredString(value: unknown, label: string): string {
   const normalized = normalizeOptionalString(value, label);
 
   if (!normalized) {
-    throw new TypeError(`${label} must be a non-empty string.`);
+    throw new ContractValidationError(`${label} must be a non-empty string.`);
   }
 
   return normalized;
@@ -575,7 +576,7 @@ function normalizeOptionalString(value: unknown, label: string): string | null {
   }
 
   if (typeof value !== "string") {
-    throw new TypeError(`${label} must be a string when provided.`);
+    throw new ContractValidationError(`${label} must be a string when provided.`);
   }
 
   const normalized = value.trim();

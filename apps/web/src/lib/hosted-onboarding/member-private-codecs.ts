@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type {
   HostedMemberBillingRef,
   HostedMemberIdentity,
@@ -346,7 +347,7 @@ function buildHostedMemberRoutingTelegramPrivateValue(input: {
     : normalizeHostedTelegramDirectThreadTarget(rawTelegramThreadId);
 
   if (rawTelegramThreadId !== null && telegramThreadId === null) {
-    throw new TypeError("Hosted Telegram routing requires a valid Telegram thread target.");
+    throw new ContractValidationError("Hosted Telegram routing requires a valid Telegram thread target.");
   }
 
   if (telegramUserId === null && telegramThreadId === null) {

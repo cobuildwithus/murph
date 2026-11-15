@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 
@@ -22,7 +23,7 @@ export function buildICalendar(
   const startsAt = parseCalendarEventDateTime(event.startsAt);
   const endsAt = parseCalendarEventDateTime(event.endsAt);
   if (startsAt === null || endsAt === null || endsAt.instant <= startsAt.instant) {
-    throw new TypeError("Expected a valid calendar event interval.");
+    throw new ContractValidationError("Expected a valid calendar event interval.");
   }
 
   const uid = createHash("sha256")
@@ -83,7 +84,7 @@ export function presentCalendarEvent(
 function requireCalendarDateTime(value: string) {
   const parsed = parseCalendarEventDateTime(value);
   if (parsed === null) {
-    throw new TypeError("Expected a valid calendar event date-time.");
+    throw new ContractValidationError("Expected a valid calendar event date-time.");
   }
   return parsed;
 }

@@ -1,3 +1,4 @@
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import {
   parseHostedEmailGroupRecipientsCallbackRequest,
 } from "@murphai/hosted-execution/hosted-email";
@@ -21,7 +22,7 @@ export const POST = withJsonError(async (request: Request) => {
   const { payload, userId: memberId } = await requireHostedCloudflareCallbackJsonRequest(request, {
     maxBodyBytes: BODY_LIMIT_BYTES,
   });
-  const body = parseHostedEmailGroupRecipientsCallbackRequest(payload);
+  const body = parseInput(payload, parseHostedEmailGroupRecipientsCallbackRequest);
   const resolved = await readHostedGroupEmailRecipients({
     ...(body.expectedGroupEmailAuthorizationProof
       ? {

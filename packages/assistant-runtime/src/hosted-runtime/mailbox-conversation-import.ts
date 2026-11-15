@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createHash } from "node:crypto";
 import path from "node:path";
 
@@ -1730,7 +1731,7 @@ function createHostedConversationAssistantInputText(
     readHostedExecutionConversationMessageText(wake.message) ?? "",
   );
   if (wake.message.channel === "voice") {
-    if (!authoredText) throw new TypeError("Voice input requires normalized speech text.");
+    if (!authoredText) throw new ContractValidationError("Voice input requires normalized speech text.");
     return authoredText;
   }
   if (isHostedLinqConversationMessageWake(wake)) {

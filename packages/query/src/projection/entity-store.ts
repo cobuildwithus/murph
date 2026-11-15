@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type { CanonicalEntity } from "../canonical-entities.ts";
 import { compareCanonicalEntities } from "../canonical-entities.ts";
 import type { QueryRecordData } from "../query-record-data.ts";
@@ -137,7 +138,7 @@ function queryStoredCanonicalEntities(
   if (filters.automaticMealPhotoCloseoutAt !== undefined) {
     const occurrenceTime = Date.parse(filters.automaticMealPhotoCloseoutAt);
     if (!Number.isFinite(occurrenceTime)) {
-      throw new TypeError("Automatic meal closeout requires a valid occurrence timestamp.");
+      throw new ContractValidationError("Automatic meal closeout requires a valid occurrence timestamp.");
     }
     const occurrenceAt = new Date(occurrenceTime).toISOString();
     const retryEvidence = "julianday(COALESCE(json_extract(entity_json, '$.attributes.photoReviewedAt'), CASE WHEN json_extract(entity_json, '$.attributes.photoCapturedAt') IS NULL THEN json_extract(entity_json, '$.attributes.recordedAt') END)) >= julianday(?)";

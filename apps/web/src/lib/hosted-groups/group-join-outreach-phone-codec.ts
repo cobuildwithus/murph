@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   decryptHostedContactPhoneEnvelope,
   encryptHostedContactPhoneEnvelope,
@@ -63,7 +64,7 @@ function normalizeRequiredString(
 ): string {
   const normalized = normalizeNullableString(value);
   if (!normalized) {
-    throw new TypeError(`Hosted group join outreach ${field} is required.`);
+    throw new ContractValidationError(`Hosted group join outreach ${field} is required.`);
   }
   return normalized;
 }

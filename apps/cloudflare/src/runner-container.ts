@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { HOSTED_EXECUTION_DEFAULT_RUNNER_IDLE_TTL_MS } from "@murphai/hosted-execution/contracts";
 import type { HostedRuntimeOwnerCommand } from "@murphai/hosted-execution/runtime-owner";
 import type { HostedWorkspaceInvocationResult } from "@murphai/hosted-execution/runtime-control";
@@ -4738,7 +4739,7 @@ function assertRunnerContainerEnsureProcessingUserIds(
   input: RunnerContainerEnsureProcessingInput,
 ): void {
   if (input.activeRuntime && input.activeRuntime.userId !== input.userId) {
-    throw new TypeError("Hosted runner container ensureProcessing activeRuntime userId must match input userId.");
+    throw new ContractValidationError("Hosted runner container ensureProcessing activeRuntime userId must match input userId.");
   }
 
   if (!input.invoke) {
@@ -4746,12 +4747,12 @@ function assertRunnerContainerEnsureProcessingUserIds(
   }
 
   if (input.invoke.userId !== input.userId) {
-    throw new TypeError("Hosted runner container ensureProcessing invoke userId must match input userId.");
+    throw new ContractValidationError("Hosted runner container ensureProcessing invoke userId must match input userId.");
   }
 
   const jobUserId = readHostedExecutionRunnerJobUserId(input.invoke.job);
   if (jobUserId !== input.userId) {
-    throw new TypeError("Hosted runner container ensureProcessing job userId must match input userId.");
+    throw new ContractValidationError("Hosted runner container ensureProcessing job userId must match input userId.");
   }
 }
 
@@ -4794,7 +4795,7 @@ function parseHostedExecutionContainerInvokeInput(
   const jobUserId = readHostedExecutionRunnerJobUserId(job);
 
   if (userId !== jobUserId) {
-    throw new TypeError("Hosted runner container invoke userId must match workspace job userId.");
+    throw new ContractValidationError("Hosted runner container invoke userId must match workspace job userId.");
   }
 
   return {
@@ -4807,7 +4808,7 @@ function parseHostedExecutionContainerInvokeInput(
 
 function requireString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.length === 0) {
-    throw new TypeError(`${label} must be a non-empty string.`);
+    throw new ContractValidationError(`${label} must be a non-empty string.`);
   }
 
   return value;
@@ -4819,7 +4820,7 @@ function readTimeoutMs(value: unknown, fallback: number): number {
   }
 
   if (typeof value !== "number" || !Number.isFinite(value) || value < 1) {
-    throw new TypeError("timeoutMs must be a positive number.");
+    throw new ContractValidationError("timeoutMs must be a positive number.");
   }
 
   return Math.trunc(value);
@@ -4967,7 +4968,7 @@ async function readRunnerContainerMetadataJsonObject(
     });
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new TypeError("Runner container metadata response body must be a JSON object.");
+    throw new ContractValidationError("Runner container metadata response body must be a JSON object.");
   }
   return parsed as Record<string, unknown>;
 }
@@ -5480,7 +5481,7 @@ function readHostedExecutionErrorNameForCode(code: string | null): string | null
 
 function requireRunnerSlotTimeout(value: number): number {
   if (!Number.isSafeInteger(value) || value <= 0 || value > 120_000) {
-    throw new TypeError("Hosted standby readiness timeout is invalid.");
+    throw new ContractValidationError("Hosted standby readiness timeout is invalid.");
   }
   return value;
 }

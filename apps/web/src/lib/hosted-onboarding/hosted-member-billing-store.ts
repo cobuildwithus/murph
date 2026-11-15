@@ -1,6 +1,7 @@
 /**
  * Owns hosted member Stripe billing-reference lookup and write surfaces.
  */
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   type HostedMember,
   type HostedMemberBillingRef,
@@ -646,7 +647,7 @@ export async function prepareHostedMemberStripeCheckoutSession(input: {
   const stripeCheckoutSessionLookupKey =
     createHostedStripeCheckoutSessionLookupKey(input.sessionId);
   if (!stripeCheckoutSessionLookupKey) {
-    throw new TypeError("Stripe Checkout Session ID is invalid.");
+    throw new ContractValidationError("Stripe Checkout Session ID is invalid.");
   }
   const { stripeCheckoutSessionIdEncrypted } =
     await buildHostedMemberBillingCheckoutSessionPrivateColumn({
@@ -835,7 +836,7 @@ export async function acceptHostedMemberStripeCheckoutCompletionTx(input: {
     || customerLookupKeys.length === 0
     || subscriptionLookupKeys.length === 0
   ) {
-    throw new TypeError("Completed Stripe Checkout identifiers are invalid.");
+    throw new ContractValidationError("Completed Stripe Checkout identifiers are invalid.");
   }
 
   const currentRecord = await input.tx.hostedMemberBillingRef.findUnique({
@@ -1079,7 +1080,7 @@ export async function prepareHostedMemberStripeCheckoutCompletion(input: {
   const stripeSubscriptionLookupKey =
     createHostedStripeSubscriptionLookupKey(input.stripeSubscriptionId);
   if (!stripeCustomerLookupKey || !stripeSubscriptionLookupKey) {
-    throw new TypeError("Completed Stripe Checkout identifiers are invalid.");
+    throw new ContractValidationError("Completed Stripe Checkout identifiers are invalid.");
   }
   const {
     stripeCustomerIdEncrypted,

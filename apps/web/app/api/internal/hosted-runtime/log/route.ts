@@ -1,3 +1,4 @@
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import {
   parseHostedRuntimeLogRequest,
   parseHostedRuntimeLogResponse,
@@ -31,7 +32,7 @@ export const POST = withJsonError(async (request: Request) => {
     // retirement. Discard it before persistence.
     return jsonOk(parseHostedRuntimeLogResponse({ loggedCount: 0 }));
   }
-  const body = parseHostedRuntimeLogRequest(await readOptionalJsonObject(request));
+  const body = parseInput(await readOptionalJsonObject(request), parseHostedRuntimeLogRequest);
 
   const loggedCount = await writeHostedRuntimeLogs({
     entries: body.entries,

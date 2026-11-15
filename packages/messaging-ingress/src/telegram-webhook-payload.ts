@@ -5,6 +5,7 @@
  * behavior.
  */
 
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { timingSafeEqual } from "node:crypto";
 
 import {
@@ -88,13 +89,13 @@ export function parseTelegramWebhookUpdate(rawBody: string): TelegramUpdateLike 
   try {
     payload = JSON.parse(rawBody);
   } catch (error) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Telegram webhook payload must be valid JSON: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
 
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    throw new TypeError("Telegram webhook payload must be a JSON object.");
+    throw new ContractValidationError("Telegram webhook payload must be a JSON object.");
   }
 
   const record = payload as Record<string, unknown>;
@@ -124,7 +125,7 @@ function validateOptionalTelegramCallbackQuery(
   const id = readOptionalTelegramString(record.id, `${label}.id`);
 
   if (!id) {
-    throw new TypeError(`${label}.id must be a non-empty string.`);
+    throw new ContractValidationError(`${label}.id must be a non-empty string.`);
   }
 
   return {
@@ -379,7 +380,7 @@ function summarizeTelegramPreviewText(text: string): string {
 
 function requireTelegramRecord(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be a JSON object.`);
+    throw new ContractValidationError(`${label} must be a JSON object.`);
   }
 
   return value as Record<string, unknown>;
@@ -389,7 +390,7 @@ function requireTelegramString(value: unknown, label: string): string {
   const normalized = readOptionalTelegramString(value, label);
 
   if (!normalized) {
-    throw new TypeError(`${label} must be a non-empty string.`);
+    throw new ContractValidationError(`${label} must be a non-empty string.`);
   }
 
   return normalized;
@@ -399,7 +400,7 @@ function requireTelegramInteger(value: unknown, label: string): number {
   const normalized = readOptionalTelegramInteger(value, label);
 
   if (normalized === null) {
-    throw new TypeError(`${label} must be an integer.`);
+    throw new ContractValidationError(`${label} must be an integer.`);
   }
 
   return normalized;
@@ -411,7 +412,7 @@ function readOptionalTelegramString(value: unknown, label: string): string | nul
   }
 
   if (typeof value !== "string") {
-    throw new TypeError(`${label} must be a string.`);
+    throw new ContractValidationError(`${label} must be a string.`);
   }
 
   return value;
@@ -423,7 +424,7 @@ function readOptionalTelegramBoolean(value: unknown, label: string): boolean | n
   }
 
   if (typeof value !== "boolean") {
-    throw new TypeError(`${label} must be a boolean.`);
+    throw new ContractValidationError(`${label} must be a boolean.`);
   }
 
   return value;
@@ -435,7 +436,7 @@ function readOptionalTelegramInteger(value: unknown, label: string): number | nu
   }
 
   if (!Number.isInteger(value)) {
-    throw new TypeError(`${label} must be an integer.`);
+    throw new ContractValidationError(`${label} must be an integer.`);
   }
 
   return value as number;
@@ -447,7 +448,7 @@ function readOptionalTelegramNumber(value: unknown, label: string): number | nul
   }
 
   if (typeof value !== "number" || Number.isNaN(value)) {
-    throw new TypeError(`${label} must be a finite number.`);
+    throw new ContractValidationError(`${label} must be a finite number.`);
   }
 
   return value;
@@ -506,7 +507,7 @@ function validateTelegramChat(value: unknown, label: string): TelegramChat {
     (typeof id !== "number" || !Number.isFinite(id))
     && typeof id !== "string"
   ) {
-    throw new TypeError(`${label}.id must be a string or finite number.`);
+    throw new ContractValidationError(`${label}.id must be a string or finite number.`);
   }
 
   return {
@@ -533,7 +534,7 @@ function requireTelegramUser(value: unknown, label: string): TelegramUser {
   const user = validateOptionalTelegramUser(value, label);
 
   if (!user) {
-    throw new TypeError(`${label} must be an object.`);
+    throw new ContractValidationError(`${label} must be an object.`);
   }
 
   return user;
@@ -598,14 +599,14 @@ function validateOptionalTelegramPhotoSizes(
   }
 
   if (!Array.isArray(value)) {
-    throw new TypeError(`${label} must be an array.`);
+    throw new ContractValidationError(`${label} must be an array.`);
   }
 
   return value.map((entry, index) => {
     const base = validateOptionalTelegramFileBase(entry, `${label}[${index}]`);
 
     if (!base) {
-      throw new TypeError(`${label}[${index}] must be a JSON object.`);
+      throw new ContractValidationError(`${label}[${index}] must be a JSON object.`);
     }
 
     const record = base as Record<string, unknown>;
@@ -704,7 +705,7 @@ function validateOptionalTelegramPoll(value: unknown, label: string): TelegramPo
   const options = record.options;
 
   if (options !== undefined && options !== null && !Array.isArray(options)) {
-    throw new TypeError(`${label}.options must be an array.`);
+    throw new ContractValidationError(`${label}.options must be an array.`);
   }
 
   return {

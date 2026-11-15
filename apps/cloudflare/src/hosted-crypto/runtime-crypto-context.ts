@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   buildHostedDomainRootWrapContext,
   createHostedAuthorityVerifyKeyring,
@@ -229,13 +230,13 @@ function assertEnvelopeMatches(input: {
 
 function assertHostedRuntimeCryptoContext(value: HostedRuntimeCryptoContextResponse): void {
   if (value.schema !== "murph.hosted-runtime-crypto-context.v1") {
-    throw new TypeError("Hosted runtime crypto context schema mismatch.");
+    throw new ContractValidationError("Hosted runtime crypto context schema mismatch.");
   }
   if (!value.userId) {
-    throw new TypeError("Hosted runtime crypto context userId is required.");
+    throw new ContractValidationError("Hosted runtime crypto context userId is required.");
   }
   if (!value.envelopes || typeof value.envelopes !== "object") {
-    throw new TypeError("Hosted runtime crypto context envelopes must be an object.");
+    throw new ContractValidationError("Hosted runtime crypto context envelopes must be an object.");
   }
 }
 
@@ -244,7 +245,7 @@ function assertHostedRuntimeCryptoRootContext(
   expected: { domain: "ingress" | "runtime"; rootKeyId: string; userId: string },
 ): void {
   if (value.schema !== "murph.hosted-runtime-crypto-root.v1") {
-    throw new TypeError("Hosted runtime crypto root schema mismatch.");
+    throw new ContractValidationError("Hosted runtime crypto root schema mismatch.");
   }
   if (value.userId !== expected.userId) {
     throw new TypeError("Hosted runtime crypto root userId mismatch.");
@@ -256,7 +257,7 @@ function assertHostedRuntimeCryptoRootContext(
     throw new TypeError("Hosted runtime crypto root rootKeyId mismatch.");
   }
   if (!value.envelope) {
-    throw new TypeError("Hosted runtime crypto root envelope is required.");
+    throw new ContractValidationError("Hosted runtime crypto root envelope is required.");
   }
 }
 
@@ -267,7 +268,7 @@ function requireHostedRuntimeCryptoContextEnvelope(
   assertHostedRuntimeCryptoContext(value);
   const envelope = value.envelopes[domain];
   if (!envelope) {
-    throw new TypeError(`Hosted runtime crypto context must include ${domain} envelope.`);
+    throw new ContractValidationError(`Hosted runtime crypto context must include ${domain} envelope.`);
   }
   return envelope;
 }

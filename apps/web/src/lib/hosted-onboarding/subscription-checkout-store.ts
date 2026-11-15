@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   Prisma,
   type PrismaClient,
@@ -25,7 +26,7 @@ export async function prepareHostedMemberSubscriptionCheckout(input: {
     input.stripeCheckoutSessionId,
   );
   if (!lookupKey) {
-    throw new TypeError("Stripe Checkout session id is required.");
+    throw new ContractValidationError("Stripe Checkout session id is required.");
   }
   const encryptedSessionId = await encryptHostedWebNullableString({
     field: HOSTED_MEMBER_SUBSCRIPTION_CHECKOUT_SESSION_FIELD,

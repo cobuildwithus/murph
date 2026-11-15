@@ -195,6 +195,10 @@
     "./usage-diagnostics": {
       "types": "./dist/usage-diagnostics.d.ts",
       "default": "./dist/usage-diagnostics.js"
+    },
+    "./request-input": {
+      "types": "./dist/request-input.d.ts",
+      "default": "./dist/request-input.js"
     }
   },
   "files": [

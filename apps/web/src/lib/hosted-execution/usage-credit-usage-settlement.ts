@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type { Prisma } from "@prisma/client";
 
 import { generateHostedRandomPrefixedId } from "../primitives";
@@ -48,10 +49,10 @@ export async function settleHostedUsageCreditForUsageTx(input: {
 }): Promise<HostedUsageCreditSettlementResult> {
   assertHostedUsageCreditDate(input.effectiveAt);
   if (input.debitUsdMicros < 0n) {
-    throw new TypeError("Hosted usage-credit debit cannot be negative.");
+    throw new ContractValidationError("Hosted usage-credit debit cannot be negative.");
   }
   if (!input.sourceUsageId) {
-    throw new TypeError("Hosted usage-credit debit requires a source usage id.");
+    throw new ContractValidationError("Hosted usage-credit debit requires a source usage id.");
   }
 
   const projection = await lockHostedUsageCreditBeneficiaryTx({

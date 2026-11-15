@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { Prisma, type PrismaClient } from "@prisma/client";
 
 import type { ParsedHostedLinqProviderEvent } from "./linq-provider-events";
@@ -163,7 +164,7 @@ async function upsertHostedLinqLineForPhoneInTransaction(input: {
   const lookupKeyReadCandidates = createHostedPhoneLookupKeyReadCandidates(normalizedPhoneNumber);
 
   if (!normalizedPhoneNumber || !lookupKey || lookupKeyReadCandidates.length === 0) {
-    throw new TypeError("Hosted Linq line upsert requires a valid phone number.");
+    throw new ContractValidationError("Hosted Linq line upsert requires a valid phone number.");
   }
 
   const providerStatus = normalizeNullableString(input.providerStatus);

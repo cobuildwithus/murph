@@ -34,9 +34,11 @@ describe("workspace source resolution", () => {
     { packageName: "contracts", entry: "recap-material.ts", specifier: "@murphai/contracts/recap-material", symbol: "recapMaterialSchema" },
     { packageName: "contracts", entry: "recap-validation.ts", specifier: "@murphai/contracts/recap-validation", symbol: "withValidGameSuperlatives" },
     { packageName: "contracts", entry: "zod-runtime.ts", specifier: "@murphai/contracts/zod-runtime", symbol: "object" },
+    { packageName: "contracts", entry: "validation-error.ts", specifier: "@murphai/contracts/validation-error", symbol: "ContractValidationError" },
     { packageName: "operator-config", entry: "generated-audio.ts", specifier: "@murphai/operator-config/generated-audio", symbol: "inspectGeneratedMp3Audio" },
     { packageName: "device-syncd", entry: "service.ts", specifier: "@murphai/device-syncd/service", symbol: "SqliteDeviceSyncStore" },
     { packageName: "hosted-execution", entry: "usage-diagnostics.ts", specifier: "@murphai/hosted-execution/usage-diagnostics", symbol: "parseHostedUsageDiagnosticsRequest" },
+    { packageName: "hosted-execution", entry: "request-input.ts", specifier: "@murphai/hosted-execution/request-input", symbol: "parseInput" },
     { packageName: "importers", entry: "clinical-records/index.ts", specifier: "@murphai/importers/clinical-records", symbol: "readClinicalAttachmentText" },
   ])("resolves $specifier through Web source when package dist is absent", ({ packageName, entry, specifier, symbol }) => {
     const fixtureRoot = fs.mkdtempSync(path.join(tmpdir(), "murph-web-source-"));

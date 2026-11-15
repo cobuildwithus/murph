@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error"
 export const GROUP_CHALLENGE_SCORECARD_MAX_COMPONENTS = 5 as const
 
 const STABLE_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u
@@ -172,7 +173,7 @@ function validateScorecard(
     scorecard.components.length < 1
     || scorecard.components.length > GROUP_CHALLENGE_SCORECARD_MAX_COMPONENTS
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Group challenge scorecards require 1-${GROUP_CHALLENGE_SCORECARD_MAX_COMPONENTS} components.`,
     )
   }
@@ -181,7 +182,7 @@ function validateScorecard(
   return scorecard.components.map((component) => {
     assertStableId(component.id, 'component id')
     if (seenIds.has(component.id)) {
-      throw new TypeError(`Duplicate group challenge component id: ${component.id}.`)
+      throw new ContractValidationError(`Duplicate group challenge component id: ${component.id}.`)
     }
     seenIds.add(component.id)
     assertBoundedText(component.label, 'component label')
@@ -200,7 +201,7 @@ function scoreParticipants(input: {
   participants: readonly GroupChallengeParticipantObservation[]
 }): GroupChallengeParticipantScore[] {
   if (input.participants.length === 0) {
-    throw new TypeError('Group challenges require at least one participant.')
+    throw new ContractValidationError('Group challenges require at least one participant.')
   }
   const componentById = new Map(
     input.components.map((component) => [component.id, component] as const),
@@ -210,7 +211,7 @@ function scoreParticipants(input: {
   return input.participants.map((participant) => {
     assertOpaqueId(participant.participantId, 'participant id')
     if (seenParticipantIds.has(participant.participantId)) {
-      throw new TypeError(
+      throw new ContractValidationError(
         `Duplicate group challenge participant id: ${participant.participantId}.`,
       )
     }
@@ -222,12 +223,12 @@ function scoreParticipants(input: {
     >()
     for (const observation of participant.components) {
       if (!componentById.has(observation.componentId)) {
-        throw new TypeError(
+        throw new ContractValidationError(
           `Unknown group challenge component observation: ${observation.componentId}.`,
         )
       }
       if (observationByComponentId.has(observation.componentId)) {
-        throw new TypeError(
+        throw new ContractValidationError(
           `Duplicate group challenge component observation: ${observation.componentId}.`,
         )
       }
@@ -237,7 +238,7 @@ function scoreParticipants(input: {
     const componentScores = input.components.map((component) => {
       const observation = observationByComponentId.get(component.id)
       if (!observation) {
-        throw new TypeError(
+        throw new ContractValidationError(
           `Participant ${participant.participantId} is missing an explicit observation for component ${component.id}.`,
         )
       }
@@ -364,7 +365,7 @@ function buildTeamEntries(input: {
   participantScores: readonly GroupChallengeParticipantScore[]
 }): GroupChallengeTeamScoreboardEntry[] {
   if (input.format.teams.length < 2) {
-    throw new TypeError('Team challenges require at least two teams.')
+    throw new ContractValidationError('Team challenges require at least two teams.')
   }
   const participantById = new Map(
     input.participantScores.map((participant) => [participant.participantId, participant] as const),
@@ -375,23 +376,23 @@ function buildTeamEntries(input: {
   const entries = input.format.teams.map((team) => {
     assertStableId(team.id, 'team id')
     if (seenTeamIds.has(team.id)) {
-      throw new TypeError(`Duplicate group challenge team id: ${team.id}.`)
+      throw new ContractValidationError(`Duplicate group challenge team id: ${team.id}.`)
     }
     seenTeamIds.add(team.id)
     assertBoundedText(team.name, 'team name')
     if (team.participantIds.length === 0) {
-      throw new TypeError(`Group challenge team ${team.id} has no participants.`)
+      throw new ContractValidationError(`Group challenge team ${team.id} has no participants.`)
     }
 
     const teamParticipants = team.participantIds.map((participantId) => {
       if (assignedParticipantIds.has(participantId)) {
-        throw new TypeError(
+        throw new ContractValidationError(
           `Participant ${participantId} belongs to more than one challenge team.`,
         )
       }
       const participant = participantById.get(participantId)
       if (!participant) {
-        throw new TypeError(
+        throw new ContractValidationError(
           `Challenge team ${team.id} references unknown participant ${participantId}.`,
         )
       }
@@ -403,7 +404,7 @@ function buildTeamEntries(input: {
       team.captainParticipantId !== undefined
       && !team.participantIds.includes(team.captainParticipantId)
     ) {
-      throw new TypeError(
+      throw new ContractValidationError(
         `Challenge team ${team.id} captain must belong to that team.`,
       )
     }
@@ -446,7 +447,7 @@ function buildTeamEntries(input: {
     const unassigned = [...participantById.keys()].filter(
       (participantId) => !assignedParticipantIds.has(participantId),
     )
-    throw new TypeError(
+    throw new ContractValidationError(
       `Team challenge participants must belong to exactly one team; unassigned: ${unassigned.join(', ')}.`,
     )
   }
@@ -543,7 +544,7 @@ function compareSafeIntegersDescending(left: number, right: number): number {
 
 function assertStableId(value: string, label: string): void {
   if (value.length > MAX_STABLE_ID_LENGTH || !STABLE_ID_PATTERN.test(value)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} must be 1-${MAX_STABLE_ID_LENGTH} characters in lowercase kebab-case.`,
     )
   }
@@ -551,25 +552,25 @@ function assertStableId(value: string, label: string): void {
 
 function assertOpaqueId(value: string, label: string): void {
   if (value.trim() !== value || value.length < 1 || value.length > 200) {
-    throw new TypeError(`${label} must be 1-200 trimmed characters.`)
+    throw new ContractValidationError(`${label} must be 1-200 trimmed characters.`)
   }
 }
 
 function assertBoundedText(value: string, label: string): void {
   if (value.trim() !== value || value.length < 1 || value.length > MAX_TEXT_LENGTH) {
-    throw new TypeError(`${label} must be 1-${MAX_TEXT_LENGTH} trimmed characters.`)
+    throw new ContractValidationError(`${label} must be 1-${MAX_TEXT_LENGTH} trimmed characters.`)
   }
 }
 
 function assertPositiveSafeInteger(value: number, label: string): void {
   if (!Number.isSafeInteger(value) || value <= 0) {
-    throw new TypeError(`${label} must be a positive safe integer.`)
+    throw new ContractValidationError(`${label} must be a positive safe integer.`)
   }
 }
 
 function assertNonNegativeSafeInteger(value: number, label: string): void {
   if (!Number.isSafeInteger(value) || value < 0) {
-    throw new TypeError(`${label} must be a non-negative safe integer.`)
+    throw new ContractValidationError(`${label} must be a non-negative safe integer.`)
   }
 }
 
@@ -595,7 +596,7 @@ function minBigInt(left: bigint, right: bigint): bigint {
 
 function bigIntToSafeInteger(value: bigint, label: string): number {
   if (value > BigInt(Number.MAX_SAFE_INTEGER)) {
-    throw new TypeError(`${label} exceeds the maximum safe integer.`)
+    throw new ContractValidationError(`${label} exceeds the maximum safe integer.`)
   }
   return Number(value)
 }

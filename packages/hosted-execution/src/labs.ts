@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import * as z from "@murphai/contracts/zod-runtime";
 
 export const HOSTED_RUNTIME_LABS_OFFERING_KINDS = [
@@ -193,7 +194,7 @@ export function parseHostedRuntimeLabsToolRequest(
 ): HostedRuntimeLabsToolRequest {
   const parsed = hostedRuntimeLabsToolRequestSchema.safeParse(value);
   if (!parsed.success) {
-    throw new TypeError("Hosted Labs tool request is invalid.");
+    throw new ContractValidationError("Hosted Labs tool request is invalid.");
   }
   return parsed.data;
 }
@@ -203,7 +204,7 @@ export function parseHostedRuntimeLabsToolResponse(
 ): HostedRuntimeLabsToolResponse {
   const parsed = hostedRuntimeLabsToolResponseSchema.safeParse(value);
   if (!parsed.success) {
-    throw new TypeError("Hosted Labs tool response is invalid.");
+    throw new ContractValidationError("Hosted Labs tool response is invalid.");
   }
   return parsed.data;
 }

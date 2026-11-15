@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createCipheriv, createDecipheriv, createHmac, randomBytes } from "node:crypto";
 
 import { readHostedContactPrivacyKeyring } from "./env";
@@ -108,11 +109,11 @@ function parseHostedContactPhoneEnvelope(input: {
 }): HostedContactPhoneEnvelope {
   const parsed = JSON.parse(input.value) as unknown;
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new TypeError(`${input.codec.label} envelope must be an object.`);
+    throw new ContractValidationError(`${input.codec.label} envelope must be an object.`);
   }
   const record = parsed as Record<string, unknown>;
   if (record.schema !== input.codec.schema) {
-    throw new TypeError(`${input.codec.label} envelope schema is invalid.`);
+    throw new ContractValidationError(`${input.codec.label} envelope schema is invalid.`);
   }
 
   return {
@@ -130,7 +131,7 @@ function requireEnvelopeString(
   codec: HostedContactPhoneEnvelopeCodec,
 ): string {
   if (typeof value !== "string" || value.trim().length === 0) {
-    throw new TypeError(`${codec.label} envelope ${field} is required.`);
+    throw new ContractValidationError(`${codec.label} envelope ${field} is required.`);
   }
   return value;
 }

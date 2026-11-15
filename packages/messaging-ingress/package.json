@@ -34,6 +34,9 @@
     "verify:package-boundary": "pnpm build && MURPH_MESSAGING_INGRESS_TEST_BUILT_DIST=1 pnpm exec vitest run --config vitest.config.ts test/package-boundary.test.ts --no-coverage",
     "verify:package-boundary:prepared": "MURPH_MESSAGING_INGRESS_TEST_BUILT_DIST=1 pnpm exec vitest run --config vitest.config.ts test/package-boundary.test.ts --no-coverage"
   },
+  "dependencies": {
+    "@murphai/contracts": "workspace:*"
+  },
   "engines": {
     "node": ">=24.22.1"
   }

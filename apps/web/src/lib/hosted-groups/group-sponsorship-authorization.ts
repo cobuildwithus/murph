@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
 import { createHash } from "node:crypto";
@@ -302,7 +303,7 @@ export async function activateHostedGroupSponsorshipAuthorizationForPurchaseTx(
     purchase.groupSponsorshipChargeOrdinal === null ||
     purchase.groupSponsorshipPeriodStartedAt === null
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted group sponsorship purchase association is incomplete.",
     );
   }
@@ -1090,7 +1091,7 @@ function rebindHostedGroupSponsorshipRefillReturnUrl(input: {
   try {
     url = new URL(input.value);
   } catch {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted group sponsorship refill has an invalid return URL.",
     );
   }
@@ -1098,7 +1099,7 @@ function rebindHostedGroupSponsorshipRefillReturnUrl(input: {
     url.searchParams.get("usageCheckout") !== input.outcome ||
     !url.searchParams.has("usagePurchase")
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted group sponsorship refill has an invalid return URL.",
     );
   }
@@ -1634,7 +1635,7 @@ export function addHostedGroupSponsorshipCalendarMonth(input: {
 }): Date {
   const date = requireValidDate(input.date);
   if (!Number.isInteger(input.anchorDay) || input.anchorDay < 1 || input.anchorDay > 31) {
-    throw new TypeError("Hosted group sponsorship anchor day is invalid.");
+    throw new ContractValidationError("Hosted group sponsorship anchor day is invalid.");
   }
   const nextMonthStart = new Date(Date.UTC(
     date.getUTCFullYear(),
@@ -1946,7 +1947,7 @@ function buildSponsorshipDigest(
 
 function requireValidDate(value: Date): Date {
   if (!(value instanceof Date) || !Number.isFinite(value.getTime())) {
-    throw new TypeError("Hosted group sponsorship date is invalid.");
+    throw new ContractValidationError("Hosted group sponsorship date is invalid.");
   }
   return value;
 }

@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createCipheriv, createDecipheriv, createHash, hkdfSync, randomBytes } from "node:crypto";
 
 const ENCRYPTED_SECRET_PREFIX = "mdss";
@@ -81,7 +82,7 @@ export function createSecretCodec(secret: string): SecretCodec {
       const structuredPayload = parseStructuredSecretPayload(payload);
 
       if (!structuredPayload) {
-        throw new TypeError("Encrypted payload is invalid.");
+        throw new ContractValidationError("Encrypted payload is invalid.");
       }
 
       const decipher = createDecipheriv(
@@ -160,7 +161,7 @@ function parseStructuredSecretPayload(payload: string): {
   const parts = payload.split(":");
 
   if (parts.length !== 5) {
-    throw new TypeError("Encrypted payload is invalid.");
+    throw new ContractValidationError("Encrypted payload is invalid.");
   }
 
   const [prefix, version, ivText, authTagText, ciphertextText] = parts;
@@ -172,14 +173,14 @@ function parseStructuredSecretPayload(payload: string): {
     || !authTagText
     || ciphertextText === undefined
   ) {
-    throw new TypeError("Encrypted payload is invalid.");
+    throw new ContractValidationError("Encrypted payload is invalid.");
   }
 
   const iv = decodeStrictBase64UrlSegment(ivText, "Encrypted payload IV");
   const authTag = decodeStrictBase64UrlSegment(authTagText, "Encrypted payload auth tag");
 
   if (iv.byteLength !== GCM_IV_BYTES || authTag.byteLength !== GCM_AUTH_TAG_BYTES) {
-    throw new TypeError("Encrypted payload is invalid.");
+    throw new ContractValidationError("Encrypted payload is invalid.");
   }
 
   return {
@@ -191,13 +192,13 @@ function parseStructuredSecretPayload(payload: string): {
 
 function decodeStrictBase64UrlSegment(value: string, label: string): Buffer {
   if (!BASE64URL_CANONICAL_PATTERN.test(value) || value.length % 4 === 1) {
-    throw new TypeError(`${label} is invalid.`);
+    throw new ContractValidationError(`${label} is invalid.`);
   }
 
   const decoded = Buffer.from(value, "base64url");
 
   if (decoded.toString("base64url") !== value) {
-    throw new TypeError(`${label} is invalid.`);
+    throw new ContractValidationError(`${label} is invalid.`);
   }
 
   return decoded;

@@ -1,3 +1,4 @@
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import { requireHostedCloudflareCallbackJsonRequest } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import { readHostedRuntimeCallbackAuthority } from "@/src/lib/hosted-execution/runtime-write-fence";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
@@ -9,7 +10,7 @@ export const POST = withJsonError(async (request: Request) => {
   const authenticated = await requireHostedCloudflareCallbackJsonRequest(request, {
     maxBodyBytes: 1024,
   });
-  if (!readHostedRuntimeCallbackAuthority(request)) {
+  if (!parseInput(request, () => readHostedRuntimeCallbackAuthority(request))) {
     throw hostedOnboardingError({
       code: "HOSTED_NOTIFICATION_RUNTIME_REQUIRED",
       httpStatus: 403,

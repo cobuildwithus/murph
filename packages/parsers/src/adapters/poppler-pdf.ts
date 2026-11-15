@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { promises as fs } from "node:fs";
 
 import type { ParseRequest, ProviderRunResult } from "../contracts/parse.js";
@@ -224,7 +225,7 @@ function normalizePositiveInteger(value: number | undefined, fallback: number): 
 async function assertPdfInputWithinLimit(inputPath: string, maxInputBytes: number): Promise<void> {
   const stats = await fs.stat(inputPath);
   if (stats.size > maxInputBytes) {
-    throw new TypeError(`PDF input exceeds parser limit of ${maxInputBytes} bytes.`);
+    throw new ContractValidationError(`PDF input exceeds parser limit of ${maxInputBytes} bytes.`);
   }
 }
 

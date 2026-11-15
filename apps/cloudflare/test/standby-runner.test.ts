@@ -779,7 +779,8 @@ describe("RunnerContainer slot lifecycle", () => {
 
 describe("StandbyRunnerCoordinatorDurableObject", () => {
   it("keeps transition inventory claimable and refillable through promotion with exact claim replay", async () => {
-    const h = createCoordinatorHarness({ target: "2" });
+    const h = createCoordinatorHarness({ target: "2", runnerImage: () => CANDIDATE_IMAGE });
+    Object.assign(h.environment, TRANSITION_ENV);
     h.ensure();
     await h.flush();
     const claimId = createHostedStandbyClaimId();
@@ -788,7 +789,6 @@ describe("StandbyRunnerCoordinatorDurableObject", () => {
     await h.flush();
     const prepared = prepareCount(h);
     const readyBefore = h.coordinator.readStandbyCoordinatorState().readySlotNames;
-    Object.assign(h.environment, TRANSITION_ENV);
     h.ensure();
     await h.flush();
     expect(h.coordinator.readStandbyCoordinatorState().readySlotNames).toEqual(readyBefore);
@@ -850,9 +850,9 @@ describe("StandbyRunnerCoordinatorDurableObject", () => {
   });
 
   it("warms a candidate without making it claimable, then reuses that inventory on promotion", async () => {
-    const h = createCoordinatorHarness({ target: "2" });
     const active = { bank: "primary", id: RELEASE_ID, bundleFingerprint: "a".repeat(64), sourceFingerprint: "b".repeat(64) };
     const candidate = { bank: "next", id: "next-candidate", bundleFingerprint: "c".repeat(64), sourceFingerprint: "d".repeat(64) };
+    const h = createCoordinatorHarness({ target: "2", runnerImage: () => candidate });
     const nextGet = vi.fn(h.runnerGet);
     h.environment.NEXT_RUNNER_CONTAINER = { getByName: nextGet };
     h.environment.HOSTED_EXECUTION_RUNNER_DEPLOYMENT = JSON.stringify({ active, candidate, previous: null });
@@ -869,6 +869,73 @@ describe("StandbyRunnerCoordinatorDurableObject", () => {
     // Promotion consumes the already-ready slot; it does not await a new startup.
     expect(prepareCount(h)).toBe(preparedCount);
     await h.flush();
+  });
+
+  it("drains an old image reproof after promotion and refills in the same pass", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(CLAIMED_AT_MS);
+    let oldSlot: string | null = null;
+    const h = createCoordinatorHarness({ target: "1", runnerImage: (name) =>
+      oldSlot === null || name === oldSlot ? ACTIVE_IMAGE : CANDIDATE_IMAGE });
+    Object.assign(h.environment, TRANSITION_ENV);
+    h.ensure();
+    await h.flush();
+    oldSlot = h.coordinator.readStandbyCoordinatorState().readySlotNames[0]!;
+    // The coordinator resets onto the promoted Worker; the slot still reports
+    // its old image as prepared under the transition Worker's expectations.
+    const promoted = new StandbyRunnerCoordinatorDurableObject(h.state, {
+      ...h.environment,
+      HOSTED_EXECUTION_RUNNER_DEPLOYMENT: JSON.stringify({ active: CANDIDATE_IMAGE, candidate: null, previous: null }),
+    });
+    vi.setSystemTime(CLAIMED_AT_MS + 60_000);
+    await promoted.alarm();
+    await h.flush();
+    const state = promoted.readStandbyCoordinatorState();
+    expect((await h.slots.get(oldSlot)!.readStandbySlotBinding()).state).toBe("retired");
+    expect(state.readySlotNames).toHaveLength(1);
+    expect(state.readySlotNames).not.toContain(oldSlot);
+    expect(state.provisioningSlotNames).toEqual([]);
+    expect(prepareCount(h)).toBe(3);
+    expect(standbyPoints(h, "prepare").map(({ detail, outcome }) => [detail, outcome]))
+      .toEqual([["refill", "ready"], ["reproof", "failed"], ["refill", "ready"]]);
+  });
+
+  it.each([
+    { label: "old image", image: ACTIVE_IMAGE },
+    { label: "mixed image pair", image: { ...CANDIDATE_IMAGE, sourceFingerprint: ACTIVE_IMAGE.sourceFingerprint } },
+  ])("drains a refill reporting an unadmitted $label", async ({ image }) => {
+    const h = createCoordinatorHarness({ target: "1", runnerImage: () => image });
+    h.environment.HOSTED_EXECUTION_RUNNER_DEPLOYMENT = JSON.stringify({ active: CANDIDATE_IMAGE, candidate: null, previous: null });
+    h.ensure();
+    await h.flush();
+    expect(prepareCount(h)).toBe(1);
+    expect(h.coordinator.readStandbyCoordinatorState().readySlotNames).toEqual([]);
+    for (const slot of h.slots.values()) {
+      expect((await slot.readStandbySlotBinding()).state).toBe("retired");
+    }
+    expect(standbyPoints(h, "prepare").map(({ detail, outcome }) => [detail, outcome]))
+      .toEqual([["refill", "failed"]]);
+  });
+
+  it.each([
+    { label: "steady state", image: CANDIDATE_IMAGE, active: CANDIDATE_IMAGE, candidate: null },
+    { label: "transition active", image: ACTIVE_IMAGE, active: ACTIVE_IMAGE, candidate: CANDIDATE_IMAGE },
+    { label: "transition candidate", image: CANDIDATE_IMAGE, active: ACTIVE_IMAGE, candidate: CANDIDATE_IMAGE },
+  ])("keeps an admitted $label image ready through reproof", async ({ image, active, candidate }) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(CLAIMED_AT_MS);
+    const h = createCoordinatorHarness({ target: "1", runnerImage: () => image });
+    h.environment.HOSTED_EXECUTION_RUNNER_DEPLOYMENT = JSON.stringify({ active, candidate, previous: null });
+    h.ensure();
+    await h.flush();
+    const ready = h.coordinator.readStandbyCoordinatorState().readySlotNames;
+    expect(ready).toHaveLength(1);
+    vi.setSystemTime(CLAIMED_AT_MS + 60_000);
+    await h.coordinator.alarm();
+    await h.flush();
+    expect(h.coordinator.readStandbyCoordinatorState().readySlotNames).toEqual(ready);
+    expect(prepareCount(h)).toBe(2);
+    expect(h.slots.get(ready[0]!)!.retireStandbySlot).not.toHaveBeenCalled();
   });
 
   it("strictly bounds the configured target and defaults absent or blank values", () => {
@@ -1968,6 +2035,7 @@ function createCoordinatorHarness(input: {
   mode?: "off" | "shadow" | "allocate";
   target?: string;
   prepare?: (input: Parameters<HostedStandbyRunnerContainerStubLike["prepareStandbySlot"]>[0]) => Promise<void>;
+  runnerImage?: (slotName: string) => { bundleFingerprint: string; sourceFingerprint: string };
 } = {}) {
   const pending: Promise<unknown>[] = [];
   const db = input.db ?? new DatabaseSync(":memory:");
@@ -1978,7 +2046,7 @@ function createCoordinatorHarness(input: {
   const runnerGet = vi.fn((name: string, _options?: { locationHint?: string }) => {
     let slot = slots.get(name);
     if (!slot) {
-      slot = createCoordinatorSlot(name, input.prepare);
+      slot = createCoordinatorSlot(name, input.prepare, input.runnerImage);
       slots.set(name, slot);
     }
     return slot;
@@ -1997,6 +2065,8 @@ function createCoordinatorHarness(input: {
     STANDBY_RUNNER_CONTAINER: { getByName: typeof legacyGet };
   } = {
     CF_VERSION_METADATA: { id: RELEASE_ID },
+    HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT: BUNDLE_FINGERPRINT,
+    HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT: SOURCE_FINGERPRINT,
     HOSTED_STANDBY_ANALYTICS: analytics,
     HOSTED_EXECUTION_STANDBY_MODE: input.mode ?? "allocate",
     HOSTED_EXECUTION_STANDBY_TARGET: input.target,
@@ -2019,6 +2089,7 @@ function createCoordinatorHarness(input: {
 function createCoordinatorSlot(
   slotName: string,
   prepare?: (input: Parameters<HostedStandbyRunnerContainerStubLike["prepareStandbySlot"]>[0]) => Promise<void>,
+  runnerImage?: (slotName: string) => { bundleFingerprint: string; sourceFingerprint: string },
 ) {
   const base = createSlotStub(slotName);
   return {
@@ -2027,7 +2098,8 @@ function createCoordinatorSlot(
       if ((await base.readStandbySlotBinding()).state !== "unbound") throw new Error("Slot is terminal or bound.");
       await prepare?.(input);
       if ((await base.readStandbySlotBinding()).state !== "unbound") throw new Error("Slot became terminal or bound.");
-      return base.prepareStandbySlot(input);
+      return { ...await base.prepareStandbySlot(input), runnerImage: runnerImage?.(slotName)
+        ?? { bundleFingerprint: BUNDLE_FINGERPRINT, sourceFingerprint: SOURCE_FINGERPRINT } };
     }),
     readStandbySlotCoordinatorState: vi.fn(base.readStandbySlotCoordinatorState),
     retireStandbySlot: vi.fn<HostedStandbyRunnerContainerStubLike["retireStandbySlot"]>(async (input) => {

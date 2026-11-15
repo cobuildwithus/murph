@@ -1,3 +1,6 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
+import { createCloudflareHostedControlClient } from "@murphai/cloudflare-hosted-control/client";
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/server", () => {
@@ -29,6 +32,32 @@ describe("json route helper factory", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it("maps malformed Worker JSON through the real control client to 500", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(new Response("not JSON", { status: 200 }));
+    const client = createCloudflareHostedControlClient({
+      baseUrl: "https://runner.example.test",
+      fetchImpl,
+      getBearerToken: async () => "synthetic-token",
+    });
+    const helpers = httpModule.createJsonRouteHelpers({
+      internalMessage: "route failed unexpectedly",
+      logMessage: "route failed",
+    });
+    const handler = helpers.withJsonError(async () => {
+      return helpers.jsonOk(await client.getRunnerStatus("member-synthetic"));
+    });
+
+    const response = await handler();
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      error: { code: "INTERNAL_ERROR", message: "Internal error." },
+    });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
   });
 
   it("merges default headers into jsonOk responses", async () => {
@@ -618,6 +647,57 @@ describe("json route helper factory", () => {
     await expect(response.json()).resolves.toEqual({ error: mapping.error });
   });
 
+  it("maps explicit input rejection to the existing response and warning", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    const logDetails = vi.fn();
+    let rejection: unknown;
+    try {
+      parseInput(null, () => { throw new ContractValidationError("Invalid shape."); });
+    } catch (error) {
+      rejection = error;
+    }
+    const response = httpModule.createJsonErrorResponse(rejection, {
+      defaultHeaders: { "Cache-Control": "no-store" },
+      headers: { "x-test": "present" },
+      internalMessage: "route failed unexpectedly",
+      logMessage: "route failed",
+      logDetails,
+    });
+    expect(response.status).toBe(400);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(response.headers.get("x-test")).toBe("present");
+    await expect(response.json()).resolves.toEqual({
+      error: { code: "INVALID_REQUEST", message: "Invalid request." },
+    });
+    expect(warn).toHaveBeenCalledExactlyOnceWith("route failed", {
+      errorType: "RequestInputError",
+      errorMessage: "Invalid shape.",
+      errorCauseType: "TypeError",
+      errorCauseMessage: "Invalid shape.",
+      internalMessage: "route failed unexpectedly",
+      errorResponseCode: "INVALID_REQUEST",
+    });
+    expect(errorLog).not.toHaveBeenCalled();
+    expect(logDetails).not.toHaveBeenCalled();
+  });
+
+  it("logs an untranslated validator failure exactly as the TypeError it replaces", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const response = httpModule.createJsonErrorResponse(new ContractValidationError("Invalid shape."), {
+      internalMessage: "route failed unexpectedly",
+      logMessage: "route failed",
+    });
+    expect(response.status).toBe(400);
+    expect(warn).toHaveBeenCalledExactlyOnceWith("route failed", {
+      errorType: "TypeError",
+      errorMessage: "Invalid shape.",
+      internalMessage: "route failed unexpectedly",
+      errorResponseCode: "INVALID_REQUEST",
+      nativeErrorInference: true,
+    });
+  });
+
   it("keeps an ordinary TypeError at 400 with optional warning-level log details", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const helpers = httpModule.createJsonRouteHelpers({
@@ -644,6 +724,7 @@ describe("json route helper factory", () => {
       errorHint: "request body must be an object",
       errorMessage: "body shape wrong",
       errorResponseCode: "INVALID_REQUEST",
+      nativeErrorInference: true,
       errorType: "TypeError",
       internalMessage: "route failed unexpectedly",
     });
@@ -679,6 +760,7 @@ describe("json route helper factory", () => {
       errorMessage:
         "Invalid callback state for <redacted-url> from <redacted-path> while emailing <redacted-email>",
       errorResponseCode: "INVALID_REQUEST",
+      nativeErrorInference: true,
       errorStatusCode: 400,
       errorType: "TypeError",
       internalMessage: "route failed unexpectedly",

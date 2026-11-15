@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
@@ -125,12 +126,12 @@ export async function verifyApprovalPasskeyAssertion(input: {
 export function parseApprovalPasskeys(value: string): ApprovalPasskey[] {
   const parsed: unknown = JSON.parse(value);
   if (!Array.isArray(parsed) || parsed.length === 0 || parsed.length > MAX_APPROVAL_PASSKEYS) {
-    throw new TypeError("Approval credentials are invalid.");
+    throw new ContractValidationError("Approval credentials are invalid.");
   }
   const ids = new Set<string>();
   return parsed.map((entry: unknown) => {
     if (!entry || typeof entry !== "object") {
-      throw new TypeError("Approval credential is invalid.");
+      throw new ContractValidationError("Approval credential is invalid.");
     }
     const id: unknown = Reflect.get(entry, "id");
     const publicKey: unknown = Reflect.get(entry, "publicKey");
@@ -144,7 +145,7 @@ export function parseApprovalPasskeys(value: string): ApprovalPasskey[] {
       || counter > 0xffff_ffff
       || ids.has(id)
     ) {
-      throw new TypeError("Approval credential is invalid.");
+      throw new ContractValidationError("Approval credential is invalid.");
     }
     ids.add(id);
     return { id, publicKey, counter };

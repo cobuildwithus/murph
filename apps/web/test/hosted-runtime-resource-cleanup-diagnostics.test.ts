@@ -299,6 +299,17 @@ describe("runtime resource cleanup diagnostics", () => {
     expect(f.orphanTable.updateMany.mock.calls).toEqual([[requeue(row)]]);
   });
 
+  it.each([{}, { deleted: false }])("requeues a malformed purge acknowledgement without changing diagnostics: %j", async body => {
+    const row = orphan();
+    const f = fixture([row]);
+    f.fetchImpl.mockResolvedValueOnce(Response.json(body));
+
+    await expect(f.run()).resolves.toEqual({ configured: true, deleted: 0, failed: 1 });
+    expectDiagnostic({ resourceKind: "snapshot", stage: "purge", errorCategory: "other" });
+    expect(f.fetchImpl).toHaveBeenCalledTimes(1);
+    expect(f.orphanTable.updateMany.mock.calls).toEqual([[requeue(row)]]);
+  });
+
   it.each([403, 500])("recognizes real control HTTP %s without its private code/body", async status => {
     const row = orphan();
     const f = fixture([row]);

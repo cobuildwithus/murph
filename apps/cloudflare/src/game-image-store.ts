@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { requireR2DeletionCapabilities } from "./user-runner/r2-delete.ts";
 import type { R2BucketLike } from "./bundle-store.ts";
 import { hostedGameMediaObjectKey, hostedGameMediaUserPrefix, requireHostedGameMediaId } from "./storage-paths.ts";
@@ -19,6 +20,13 @@ export interface GameImagesBinding {
       images: Array<{ id: string; creator?: string }>; listComplete: boolean;
     }>;
   };
+}
+
+export class GameImageInvalidError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "GameImageInvalidError";
+  }
 }
 
 export const GAME_IMAGE_DELIVERY_SECONDS = 300;
@@ -58,7 +66,7 @@ export function createGameImageStore(input: {
       if (bytes.length === 0 || bytes.length > 4 * 1024 * 1024) throw new RangeError("Game image size is invalid.");
       const hash = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new Uint8Array(bytes))),
         (byte) => byte.toString(16).padStart(2, "0")).join("");
-      if (hash !== mediaId.split(".")[0]) throw new TypeError("Game image content key does not match.");
+      if (hash !== mediaId.split(".")[0]) throw new GameImageInvalidError("Game image content key does not match.");
       // Inspect while looking for a stored copy, which returns without needing
       // the answer. Inspect before durable upload admission: invalid input and
       // inspection outages cannot leave a receipt that blocks account cleanup.
@@ -131,7 +139,7 @@ async function requireValidImage(images: GameImagesBinding, bytes: Uint8Array, m
   try { info = await images.info(new Blob([new Uint8Array(bytes)]).stream()); }
   catch (error) {
     if (typeof error === "object" && error !== null && "code" in error && error.code === 9412) {
-      throw new TypeError("Game image content is invalid.");
+      throw new GameImageInvalidError("Game image content is invalid.");
     }
     throw new Error("Game image inspection failed.");
   }
@@ -141,7 +149,7 @@ async function requireValidImage(images: GameImagesBinding, bytes: Uint8Array, m
   if (!formats.includes(info.format) || typeof info.width !== "number" || typeof info.height !== "number"
     || !Number.isSafeInteger(info.width) || !Number.isSafeInteger(info.height)
     || info.width <= 0 || info.height <= 0 || info.width > 12_000 || info.height > 12_000
-    || info.width * info.height > 100_000_000) throw new TypeError("Game image content is invalid.");
+    || info.width * info.height > 100_000_000) throw new GameImageInvalidError("Game image content is invalid.");
 }
 
 function isImageId(value: string): boolean {
@@ -152,7 +160,7 @@ function parsePointer(value: unknown): Pointer {
   if (typeof value !== "object" || value === null || !("schema" in value) || value.schema !== "murph.game-image.v1"
     || !("imageId" in value) || typeof value.imageId !== "string" || !isImageId(value.imageId)
     || !("byteLength" in value) || typeof value.byteLength !== "number" || !Number.isSafeInteger(value.byteLength)
-    || value.byteLength <= 0 || value.byteLength > 4 * 1024 * 1024) throw new TypeError("Game image index is invalid.");
+    || value.byteLength <= 0 || value.byteLength > 4 * 1024 * 1024) throw new ContractValidationError("Game image index is invalid.");
   return { schema: value.schema, imageId: value.imageId, byteLength: value.byteLength };
 }
 

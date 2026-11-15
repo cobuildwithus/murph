@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { normalizeMetricKey, resolveMetricDefinition } from "@murphai/health-metrics";
 import {
   BROWSER_VAULT_METRIC_BUCKET_COUNT,
@@ -22,7 +23,7 @@ export function requireBrowserVaultMetricBucketId(
   label = "Browser vault metric bucket id",
 ): BrowserVaultMetricBucketId {
   if (!isBrowserVaultMetricBucketId(value)) {
-    throw new TypeError(`${label} must be a lowercase hexadecimal bucket id from 00 through 1f.`);
+    throw new ContractValidationError(`${label} must be a lowercase hexadecimal bucket id from 00 through 1f.`);
   }
   return value;
 }

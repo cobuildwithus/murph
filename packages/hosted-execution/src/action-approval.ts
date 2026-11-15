@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   requireObject,
   requireString,
@@ -193,7 +194,7 @@ export function parseHostedActionApprovalRequest(
   );
 
   if (!SHA256_HEX_PATTERN.test(actionFingerprint)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted action approval request actionFingerprint must be a lowercase SHA-256 hex digest.",
     );
   }
@@ -322,7 +323,7 @@ export function parseHostedActionApprovalResult(
       );
       return { approvalId, status };
     default:
-      throw new TypeError(
+      throw new ContractValidationError(
         "Hosted action approval result status must be pending, approved, denied, or expired.",
       );
   }
@@ -338,11 +339,11 @@ export function parseHostedActionApprovalObservation(
   );
   const cycle = parseHostedActionApprovalCycleOwnerKey(envelope.cycleOwnerKey);
   if (!cycle) {
-    throw new TypeError("Hosted action approval observation cycleOwnerKey is invalid.");
+    throw new ContractValidationError("Hosted action approval observation cycleOwnerKey is invalid.");
   }
   const result = parseHostedActionApprovalResult(envelope.result);
   if (result.approvalId !== cycle.approvalId) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted action approval observation cycle owner does not match approvalId.",
     );
   }
@@ -377,7 +378,7 @@ export function parseHostedActionApprovalConsumeRequest(
 
 function requireApprovalId(value: unknown): string {
   if (!isHostedActionApprovalId(value)) {
-    throw new TypeError("Hosted action approval result approvalId is invalid.");
+    throw new ContractValidationError("Hosted action approval result approvalId is invalid.");
   }
   return value;
 }
@@ -385,7 +386,7 @@ function requireApprovalId(value: unknown): string {
 function requireSha256Hex(value: unknown, label: string): string {
   const text = requireString(value, label);
   if (!SHA256_HEX_PATTERN.test(text)) {
-    throw new TypeError(`${label} must be a lowercase SHA-256 hex digest.`);
+    throw new ContractValidationError(`${label} must be a lowercase SHA-256 hex digest.`);
   }
   return text;
 }
@@ -397,10 +398,10 @@ function requireBoundedString(
 ): string {
   const text = requireString(value, label);
   if (text.length > maxLength) {
-    throw new TypeError(`${label} must be at most ${maxLength} characters.`);
+    throw new ContractValidationError(`${label} must be at most ${maxLength} characters.`);
   }
   if (text.trim() !== text || /[\u0000-\u001F\u007F]/u.test(text)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} must not contain surrounding whitespace or control characters.`,
     );
   }
@@ -418,12 +419,12 @@ function requireExactObject(
   const unexpected = Object.keys(record).filter((key) => !allowed.has(key));
 
   if (unexpected.length > 0) {
-    throw new TypeError(`${label} contains unsupported fields.`);
+    throw new ContractValidationError(`${label} contains unsupported fields.`);
   }
 
   for (const key of keys) {
     if (!Object.prototype.hasOwnProperty.call(record, key)) {
-      throw new TypeError(`${label} must include ${key}.`);
+      throw new ContractValidationError(`${label} must include ${key}.`);
     }
   }
 
@@ -435,11 +436,11 @@ function requireHttpUrl(value: string): void {
   try {
     url = new URL(value);
   } catch {
-    throw new TypeError("Hosted action approval result approvalUrl must be a URL.");
+    throw new ContractValidationError("Hosted action approval result approvalUrl must be a URL.");
   }
 
   if (url.protocol !== "https:" && url.protocol !== "http:") {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted action approval result approvalUrl must use http or https.",
     );
   }
@@ -448,7 +449,7 @@ function requireHttpUrl(value: string): void {
 function requireIsoDateTime(value: string): void {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime()) || parsed.toISOString() !== value) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted action approval result expiresAt must be a canonical ISO-8601 timestamp.",
     );
   }

@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createHash } from "node:crypto";
 
 import {
@@ -338,82 +339,48 @@ function parseDistanceValue(value: string | undefined): {
 function parseSetDurationSeconds(value: string | undefined): number | undefined {
   const normalized = normalizeOptionalText(value)?.toLowerCase();
   if (!normalized) return undefined;
-  if (/^\d+(?:\.\d+)?$/u.test(normalized)) {
-    const seconds = Number(normalized);
-    return seconds > 0 ? Math.round(seconds) : undefined;
-  }
-
-  const colonParts = normalized.split(":");
-  if (
-    (colonParts.length === 2 || colonParts.length === 3)
-    && colonParts.every((part) => /^\d+(?:\.\d+)?$/u.test(part.trim()))
-  ) {
-    const values = colonParts.map(Number);
-    const seconds = values.length === 2
-      ? (values[0] ?? 0) * 60 + (values[1] ?? 0)
-      : (values[0] ?? 0) * 3600 + (values[1] ?? 0) * 60 + (values[2] ?? 0);
-    return seconds > 0 ? Math.round(seconds) : undefined;
-  }
-
-  let seconds = 0;
-  let matchedLength = 0;
-  for (const match of normalized.matchAll(/(\d+(?:\.\d+)?)\s*(hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)/gu)) {
-    const amount = Number(match[1]);
-    const unit = match[2] ?? "";
-    if (!Number.isFinite(amount)) return undefined;
-    seconds += amount * (/^(?:hours?|hrs?|h)$/u.test(unit) ? 3600 : /^(?:minutes?|mins?|m)$/u.test(unit) ? 60 : 1);
-    matchedLength += match[0].replace(/\s/gu, "").length;
-  }
-  return seconds > 0 && matchedLength === normalized.replace(/\s/gu, "").length
-    ? Math.round(seconds)
-    : undefined;
+  const seconds = /^\d+(?:\.\d+)?$/u.test(normalized)
+    ? Number(normalized)
+    : parseExplicitDurationSeconds(normalized);
+  return seconds !== undefined && seconds > 0 ? Math.round(seconds) : undefined;
 }
 
 function parseDurationMinutes(value: string | undefined): number | undefined {
   const normalized = normalizeOptionalText(value)?.toLowerCase();
-  if (!normalized) {
-    return undefined;
-  }
-
+  if (!normalized) return undefined;
   if (/^\d+(?:\.\d+)?$/u.test(normalized)) {
     const minutes = Number(normalized);
     return minutes > 0 && minutes <= 24 * 60 ? Math.max(1, Math.round(minutes)) : undefined;
   }
 
+  const seconds = parseExplicitDurationSeconds(normalized);
+  return seconds !== undefined && seconds > 0 && seconds <= 24 * 60 * 60
+    ? Math.max(1, Math.round(seconds / 60))
+    : undefined;
+}
+
+function parseExplicitDurationSeconds(normalized: string): number | undefined {
   const colonParts = normalized.split(":");
   if (
     (colonParts.length === 2 || colonParts.length === 3)
     && colonParts.every((part) => /^\d+(?:\.\d+)?$/u.test(part.trim()))
   ) {
     const values = colonParts.map(Number);
-    const seconds = values.length === 2
+    return values.length === 2
       ? (values[0] ?? 0) * 60 + (values[1] ?? 0)
       : (values[0] ?? 0) * 3600 + (values[1] ?? 0) * 60 + (values[2] ?? 0);
-    return seconds > 0 && seconds <= 24 * 60 * 60
-      ? Math.max(1, Math.round(seconds / 60))
-      : undefined;
   }
 
   let seconds = 0;
   let matchedLength = 0;
   for (const match of normalized.matchAll(/(\d+(?:\.\d+)?)\s*(hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)/gu)) {
     const amount = Number(match[1]);
-    if (!Number.isFinite(amount)) {
-      return undefined;
-    }
+    if (!Number.isFinite(amount)) return undefined;
     const unit = match[2] ?? "";
     seconds += amount * (/^(?:hours?|hrs?|h)$/u.test(unit) ? 3600 : /^(?:minutes?|mins?|m)$/u.test(unit) ? 60 : 1);
     matchedLength += match[0].replace(/\s/gu, "").length;
   }
-
-  if (
-    matchedLength !== normalized.replace(/\s/gu, "").length
-    || seconds <= 0
-    || seconds > 24 * 60 * 60
-  ) {
-    return undefined;
-  }
-  return Math.max(1, Math.round(seconds / 60));
+  return matchedLength === normalized.replace(/\s/gu, "").length ? seconds : undefined;
 }
 
 function normalizeWorkoutTimestamp(
@@ -559,7 +526,7 @@ function canonicalSourceTimestampIdentity(
   if (!rawTimestamp) return undefined;
   const canonicalSourceTimestamp = normalizeWorkoutTimestamp(normalizedDate, normalizedTime, "UTC");
   if (!canonicalSourceTimestamp) {
-    throw new TypeError("Workout source timestamp cannot be normalized safely.");
+    throw new ContractValidationError("Workout source timestamp cannot be normalized safely.");
   }
   return `${sourceTimestampDomain(rawTimestamp)}:${canonicalSourceTimestamp}`;
 }
@@ -567,7 +534,7 @@ function canonicalSourceTimestampIdentity(
 function stableWorkoutSessionKey(rawDate: string | undefined, rawStartTime: string | undefined): string {
   const canonicalSourceTimestamp = canonicalSourceTimestampIdentity(rawDate, rawStartTime);
   if (!canonicalSourceTimestamp) {
-    throw new TypeError("Workout source timestamp cannot be normalized safely.");
+    throw new ContractValidationError("Workout source timestamp cannot be normalized safely.");
   }
   return createHash("sha256")
     .update(canonicalSourceTimestamp)
@@ -579,7 +546,7 @@ function stableWorkoutEndTimeKey(rawDate: string | undefined, rawEndTime: string
   const sourceDate = /^\d{4}-\d{2}-\d{2}/u.exec(rawDate ?? "")?.[0] ?? rawDate;
   const canonicalSourceTimestamp = canonicalSourceTimestampIdentity(sourceDate, rawEndTime);
   if (!canonicalSourceTimestamp) {
-    throw new TypeError("Workout source end timestamp cannot be normalized safely.");
+    throw new ContractValidationError("Workout source end timestamp cannot be normalized safely.");
   }
   return createHash("sha256")
     .update(canonicalSourceTimestamp)
@@ -771,12 +738,11 @@ function buildSessions(input: {
     const title = valueAt(row, workoutNameIndex);
     const rawDate = valueAt(row, dateIndex);
     const rawStartTime = valueAt(row, startTimeIndex);
-    const rawTimestamp = [rawDate, rawStartTime].filter(Boolean).join(" ");
     const exerciseName = valueAt(row, exerciseNameIndex);
     const occurredAt = normalizeWorkoutTimestamp(rawDate, rawStartTime, input.timeZone);
     const rawSetOrder = valueAt(row, setOrderIndex);
 
-    if (!title || !rawTimestamp || !occurredAt || !exerciseName) {
+    if (!title || !occurredAt || !exerciseName) {
       skippedRowCount += 1;
       incrementReason(input.skipReasons, "missing or invalid workout identity fields");
       continue;
@@ -982,10 +948,10 @@ function buildSessions(input: {
 export function planWorkoutCsvImport(input: WorkoutCsvPlannerInput): WorkoutCsvImportPlan {
   const byteSize = new TextEncoder().encode(input.text).byteLength;
   if (byteSize === 0) {
-    throw new TypeError("Workout CSV is empty.");
+    throw new ContractValidationError("Workout CSV is empty.");
   }
   if (byteSize > MAX_FILE_BYTES) {
-    throw new TypeError(`Workout CSV exceeds the ${MAX_FILE_BYTES}-byte limit.`);
+    throw new ContractValidationError(`Workout CSV exceeds the ${MAX_FILE_BYTES}-byte limit.`);
   }
 
   const timeZone = normalizeIanaTimeZone(input.timeZone);
@@ -994,21 +960,21 @@ export function planWorkoutCsvImport(input: WorkoutCsvPlannerInput): WorkoutCsvI
   }
   const delimiter = input.delimiter ?? DEFAULT_DELIMITER;
   if (delimiter.length !== 1) {
-    throw new TypeError("Workout CSV delimiter must be one character.");
+    throw new ContractValidationError("Workout CSV delimiter must be one character.");
   }
 
   const parsedRows = parseDelimitedRows(input.text, delimiter);
   const headerRow = parsedRows[0];
   if (!headerRow) {
-    throw new TypeError("Workout CSV must include a header row.");
+    throw new ContractValidationError("Workout CSV must include a header row.");
   }
   const headers = headerRow.map((header) => header.replace(/^\uFEFF/u, "").trim());
   const normalizedHeaders = headers.map(normalizeHeaderName);
   if (headers.length === 0 || normalizedHeaders.some((header) => header.length === 0)) {
-    throw new TypeError("Workout CSV header cells must be non-empty.");
+    throw new ContractValidationError("Workout CSV header cells must be non-empty.");
   }
   if (new Set(normalizedHeaders).size !== normalizedHeaders.length) {
-    throw new TypeError("Workout CSV headers must be unique.");
+    throw new ContractValidationError("Workout CSV headers must be unique.");
   }
 
   const inferredSource = detectSource(headers);
@@ -1016,7 +982,7 @@ export function planWorkoutCsvImport(input: WorkoutCsvPlannerInput): WorkoutCsvI
   const explicitDialect = explicitSource;
   const unambiguousSource = inferredSource;
   if (explicitDialect && unambiguousSource && explicitDialect !== unambiguousSource) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Workout CSV source ${explicitDialect} conflicts with unambiguous ${unambiguousSource} headers.`,
     );
   }
@@ -1024,7 +990,7 @@ export function planWorkoutCsvImport(input: WorkoutCsvPlannerInput): WorkoutCsvI
   const source = explicitSource ?? normalizeSource(detectedSource ?? undefined);
   const normalized = normalizeRows(headers, parsedRows.slice(1), detectedSource);
   if (normalized.rows.length + normalized.skippedRowCount > MAX_DATA_ROWS) {
-    throw new TypeError(`Workout CSV exceeds the ${MAX_DATA_ROWS}-row limit.`);
+    throw new ContractValidationError(`Workout CSV exceeds the ${MAX_DATA_ROWS}-row limit.`);
   }
 
   const built = buildSessions({
@@ -1039,7 +1005,7 @@ export function planWorkoutCsvImport(input: WorkoutCsvPlannerInput): WorkoutCsvI
   });
   const skippedRowCount = normalized.skippedRowCount + built.skippedRowCount;
   if (built.sessions.length > MAX_WORKOUTS) {
-    throw new TypeError(`Workout CSV exceeds the ${MAX_WORKOUTS}-workout limit.`);
+    throw new ContractValidationError(`Workout CSV exceeds the ${MAX_WORKOUTS}-workout limit.`);
   }
 
   const warnings = toWarnings({

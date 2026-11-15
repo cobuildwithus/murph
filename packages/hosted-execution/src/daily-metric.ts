@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { isStrictIsoDate } from "@murphai/contracts";
 import {
   normalizeMetricValue,
@@ -37,21 +38,21 @@ export function parseHostedExecutionDailyMetricReportedPayload(
 
   const date = requireString(record.date, `${label} date`);
   if (!isStrictIsoDate(date)) {
-    throw new TypeError(`${label} date is invalid.`);
+    throw new ContractValidationError(`${label} date is invalid.`);
   }
   const metric = requireString(record.metric, `${label} metric`);
   const metricSpecs = MEMBER_REPORTED_DAILY_METRIC_SPECS.filter(
     (spec) => spec.metricKey === metric,
   );
   if (metricSpecs.length === 0) {
-    throw new TypeError(`${label} metric is invalid.`);
+    throw new ContractValidationError(`${label} metric is invalid.`);
   }
   const unit = requireString(record.unit, `${label} unit`);
   if (
     unit.length > HOSTED_EXECUTION_DAILY_METRIC_MAX_UNIT_LENGTH
     || !/^[A-Za-z0-9._/%-]+$/u.test(unit)
   ) {
-    throw new TypeError(`${label} unit is invalid.`);
+    throw new ContractValidationError(`${label} unit is invalid.`);
   }
   const metricValue = requireNumber(record.value, `${label} value`);
   const definition = resolveMetricDefinition(metric);
@@ -70,13 +71,13 @@ export function parseHostedExecutionDailyMetricReportedPayload(
     || !unitsEquivalent(unit, definition.canonicalUnit)
     || !unitsEquivalent(canonicalUnit, definition.canonicalUnit)
   ) {
-    throw new TypeError(`${label} unit is incompatible with the metric.`);
+    throw new ContractValidationError(`${label} unit is incompatible with the metric.`);
   }
   if (metricSpecs.some(
     (spec) => canonicalValue < spec.minValue
       || canonicalValue > spec.maxValue
   )) {
-    throw new TypeError(`${label} value is outside the metric's supported range.`);
+    throw new ContractValidationError(`${label} value is outside the metric's supported range.`);
   }
 
   return {
@@ -94,7 +95,7 @@ function assertExactDailyMetricKeys(
   const allowed = new Set(["date", "metric", "unit", "value"]);
   for (const key of Object.keys(record)) {
     if (!allowed.has(key)) {
-      throw new TypeError(`${label} contains unsupported field ${JSON.stringify(key)}.`);
+      throw new ContractValidationError(`${label} contains unsupported field ${JSON.stringify(key)}.`);
     }
   }
 }

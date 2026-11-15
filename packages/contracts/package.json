@@ -68,6 +68,11 @@
       "types": "./dist/recap-material.d.ts",
       "import": "./dist/recap-material.js",
       "default": "./dist/recap-material.js"
+    },
+    "./validation-error": {
+      "types": "./dist/validation-error.d.ts",
+      "import": "./dist/validation-error.js",
+      "default": "./dist/validation-error.js"
     }
   },
   "scripts": {

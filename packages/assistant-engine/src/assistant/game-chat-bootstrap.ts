@@ -1,3 +1,4 @@
+import { ContractValidationError } from '@murphai/contracts/validation-error'
 import { listAssistantTranscriptTailEntries } from './store.js'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { AssistantDeliveryOutcome } from './service-contracts.js'
@@ -116,7 +117,7 @@ export async function deliverAssistantGameBootstrapMessage(input: {
   vault: string
 }): Promise<AssistantDeliveryOutcome> {
   if ((input.media?.length ?? 0) > 0 || input.card || input.followUpRequest) {
-    throw new TypeError('Game bootstrap supports one text announcement only.')
+    throw new ContractValidationError('Game bootstrap supports one text announcement only.')
   }
   const receipt = await input.bootstrap.send(input.message)
   if (receipt.status === 'unavailable') {

@@ -1,3 +1,5 @@
+import { CloudflareHostedControlMalformedResponseError } from "@murphai/cloudflare-hosted-control/client";
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import {
   assessBrowserVaultReplicaFreshness,
 } from "@murphai/hosted-execution";
@@ -59,9 +61,12 @@ export const POST = withJsonError(async (request: Request) => {
     tooLargeErrorCode: "BROWSER_VAULT_SESSION_BODY_TOO_LARGE",
     tooLargeErrorMessage: "Browser vault session request body is too large.",
   });
-  const browserPublicKeyJwk = parseHostedUserRecipientPublicKeyJwk(
+  const browserPublicKeyJwk = parseInput(
     body.browserPublicKeyJwk,
-    "Settings vault export browserPublicKeyJwk",
+    (value) => parseHostedUserRecipientPublicKeyJwk(
+      value,
+      "Settings vault export browserPublicKeyJwk",
+    ),
   );
   const acceptsBucketedReplica = readSettingsVaultExportBucketCapability({
     requestedMetricBuckets: body.requestedMetricBuckets,
@@ -158,12 +163,12 @@ export const POST = withJsonError(async (request: Request) => {
   let session:
     | Awaited<ReturnType<typeof client.createBrowserVaultExportSession>>
     | Awaited<ReturnType<typeof client.createBrowserVaultSession>>;
+  const sessionInput = {
+    browserPublicKeyJwk,
+    replicaRef,
+    userId: auth.member.id,
+  };
   try {
-    const sessionInput = {
-      browserPublicKeyJwk,
-      replicaRef,
-      userId: auth.member.id,
-    };
     session = acceptsBucketedReplica
       ? await client.createBrowserVaultExportSession(sessionInput)
       : await client.createBrowserVaultSession(sessionInput);
@@ -176,7 +181,7 @@ export const POST = withJsonError(async (request: Request) => {
       throw browserVaultSessionNotFreshError();
     }
 
-    if (error instanceof TypeError) {
+    if (error instanceof CloudflareHostedControlMalformedResponseError) {
       throw hostedOnboardingError({
         code: "HOSTED_EXECUTION_CONTROL_INVALID_RESPONSE",
         httpStatus: 502,

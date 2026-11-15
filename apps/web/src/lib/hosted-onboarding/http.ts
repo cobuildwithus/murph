@@ -1,3 +1,4 @@
+import { RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import { Prisma } from "@prisma/client";
 
 import {
@@ -140,7 +141,7 @@ function mapHostedOnboardingBodyReadError(
   error: unknown,
   options: HostedOnboardingBoundedBodyOptions,
 ): unknown {
-  if (!(error instanceof RangeError)) {
+  if (!(error instanceof RequestBodyTooLargeError)) {
     return error;
   }
 

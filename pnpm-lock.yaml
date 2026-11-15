@@ -710,6 +710,9 @@ importers:
 
   packages/cloudflare-hosted-control:
     dependencies:
+      '@murphai/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@murphai/device-syncd':
         specifier: workspace:*
         version: link:../device-syncd
@@ -929,7 +932,11 @@ importers:
         specifier: 0.35.5
         version: 0.35.5(@types/node@25.6.2)
 
-  packages/messaging-ingress: {}
+  packages/messaging-ingress:
+    dependencies:
+      '@murphai/contracts':
+        specifier: workspace:*
+        version: link:../contracts
 
   packages/operator-config:
     dependencies:
@@ -967,6 +974,9 @@ importers:
 
   packages/parsers:
     dependencies:
+      '@murphai/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@murphai/core':
         specifier: workspace:*
         version: link:../core
@@ -996,7 +1006,11 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
 
-  packages/runtime-state: {}
+  packages/runtime-state:
+    dependencies:
+      '@murphai/contracts':
+        specifier: workspace:*
+        version: link:../contracts
 
   packages/vault-usecases:
     dependencies:

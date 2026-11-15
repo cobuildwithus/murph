@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { listHostedBrowserVaultReplicaSiblingObjectKeys, browserVaultReplicaShardObjectKey, browserVaultReplicaMetricBucketObjectKey } from "./storage-paths.ts";
 export { listHostedBrowserVaultReplicaSiblingObjectKeys } from "./storage-paths.ts";
 import { BROWSER_VAULT_REPLICA_SCHEMA } from "@murphai/contracts/browser-vault";
@@ -167,7 +168,7 @@ export function createBrowserVaultReplicaShardAadFields(input: {
   const shardSet = input.ref.shards;
   const shardRef = shardSet?.[input.shard];
   if (!shardSet || !shardRef) {
-    throw new TypeError(`Hosted browser vault replica ref is missing shards.${input.shard}.`);
+    throw new ContractValidationError(`Hosted browser vault replica ref is missing shards.${input.shard}.`);
   }
   const base = createBrowserVaultReplicaAadFields({
     ref: input.ref,
@@ -195,7 +196,7 @@ export function createBrowserVaultReplicaMetricBucketAadFields(input: {
   const bucketSet = input.ref.metricBuckets;
   const bucketRef = bucketSet?.buckets[input.bucketId];
   if (!bucketSet || !bucketRef) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Hosted browser vault replica ref is missing metricBuckets.buckets.${input.bucketId}.`,
     );
   }
@@ -522,7 +523,7 @@ export function parseHostedBrowserVaultReplicaOrphanCandidate(
 ): HostedBrowserVaultReplicaOrphanCandidate {
   const record = requireRecord(value, label);
   if (record.schema !== HOSTED_BROWSER_VAULT_REPLICA_ORPHAN_CANDIDATE_SCHEMA) {
-    throw new TypeError(`${label} schema is invalid.`);
+    throw new ContractValidationError(`${label} schema is invalid.`);
   }
   return {
     createdAt: requireIsoTimestampString(record.createdAt, `${label} createdAt`),
@@ -733,19 +734,19 @@ function assertHostedBrowserVaultReplicaDataKeyEnvelopeMatchesRef(input: {
   }
 
   if (envelope.domain !== "runtime") {
-    throw new TypeError("Hosted browser vault replica dataKeyEnvelope.domain must be runtime.");
+    throw new ContractValidationError("Hosted browser vault replica dataKeyEnvelope.domain must be runtime.");
   }
   if (envelope.lane !== "browser-vault-replica") {
-    throw new TypeError("Hosted browser vault replica dataKeyEnvelope.lane must be browser-vault-replica.");
+    throw new ContractValidationError("Hosted browser vault replica dataKeyEnvelope.lane must be browser-vault-replica.");
   }
   if (envelope.rootKeyId !== requireBrowserVaultReplicaRuntimeRootKeyId(input.ref)) {
-    throw new TypeError("Hosted browser vault replica dataKeyEnvelope.rootKeyId must match runtimeRootKeyId.");
+    throw new ContractValidationError("Hosted browser vault replica dataKeyEnvelope.rootKeyId must match runtimeRootKeyId.");
   }
   if (envelope.resource.objectKey !== input.ref.objectKey) {
-    throw new TypeError("Hosted browser vault replica dataKeyEnvelope.resource.objectKey must match objectKey.");
+    throw new ContractValidationError("Hosted browser vault replica dataKeyEnvelope.resource.objectKey must match objectKey.");
   }
   if (envelope.resource.purpose !== "browser-vault-replica") {
-    throw new TypeError("Hosted browser vault replica dataKeyEnvelope.resource.purpose must be browser-vault-replica.");
+    throw new ContractValidationError("Hosted browser vault replica dataKeyEnvelope.resource.purpose must be browser-vault-replica.");
   }
   if (input.userId && envelope.resource.userId !== input.userId) {
     throw new TypeError("Hosted browser vault replica dataKeyEnvelope.resource.userId must match userId.");
@@ -755,7 +756,7 @@ function assertHostedBrowserVaultReplicaDataKeyEnvelopeMatchesRef(input: {
 function requireBrowserVaultReplicaRootKeyId(value: string): string {
   const normalized = value.trim();
   if (!normalized) {
-    throw new TypeError("Hosted browser vault replica rootKeyId must be a non-empty string.");
+    throw new ContractValidationError("Hosted browser vault replica rootKeyId must be a non-empty string.");
   }
   return normalized;
 }
@@ -784,7 +785,7 @@ function parseBrowserVaultReplicaStorageInput(value: unknown): {
   const schema = requireString(record.schema, "Browser vault replica schema");
 
   if (schema !== BROWSER_VAULT_REPLICA_SCHEMA) {
-    throw new TypeError(`Browser vault replica schema must be ${BROWSER_VAULT_REPLICA_SCHEMA}.`);
+    throw new ContractValidationError(`Browser vault replica schema must be ${BROWSER_VAULT_REPLICA_SCHEMA}.`);
   }
 
   const source = requireRecord(record.source, "Browser vault replica source");
@@ -803,14 +804,14 @@ function parseBrowserVaultReplicaStorageInput(value: unknown): {
 
 function requirePositiveSafeInteger(value: unknown, label: string): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
-    throw new TypeError(`${label} must be a positive safe integer.`);
+    throw new ContractValidationError(`${label} must be a positive safe integer.`);
   }
   return value;
 }
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object.`);
+    throw new ContractValidationError(`${label} must be an object.`);
   }
 
   return value as Record<string, unknown>;
@@ -818,7 +819,7 @@ function requireRecord(value: unknown, label: string): Record<string, unknown> {
 
 function requireString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.length === 0) {
-    throw new TypeError(`${label} must be a non-empty string.`);
+    throw new ContractValidationError(`${label} must be a non-empty string.`);
   }
 
   return value;
@@ -828,7 +829,7 @@ function requireIsoTimestampString(value: unknown, label: string): string {
   const text = requireString(value, label);
   const timestamp = Date.parse(text);
   if (Number.isNaN(timestamp) || new Date(timestamp).toISOString() !== text) {
-    throw new TypeError(`${label} must be a valid ISO-8601 timestamp.`);
+    throw new ContractValidationError(`${label} must be a valid ISO-8601 timestamp.`);
   }
 
   return text;

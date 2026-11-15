@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { normalizeWearableQueryProviderSlug } from "@murphai/health-metrics";
 import { formatProviderName } from "./wearables/provider-policy.ts";
 import { readJournalTiming, type JournalTiming } from "@murphai/contracts/journal-presentation";
@@ -1497,7 +1498,7 @@ function journalEventSortMinute(
 function resolveDate(value: Date | string | undefined): string {
   const date = value instanceof Date ? value : new Date(value ?? Date.now());
   if (Number.isNaN(date.valueOf()))
-    throw new TypeError("Journal asOf must be a valid date.");
+    throw new ContractValidationError("Journal asOf must be a valid date.");
   return date.toISOString().slice(0, 10);
 }
 

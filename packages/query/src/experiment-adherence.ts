@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   activityTextMatchesKind,
   experimentAdherenceTargetSchema,
@@ -1604,7 +1605,7 @@ function resolveAsOf(value: Date | string, timeZone: string): Date {
 
   const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
   if (Number.isNaN(date.getTime())) {
-    throw new TypeError("asOf must be a valid date or timestamp.");
+    throw new ContractValidationError("asOf must be a valid date or timestamp.");
   }
   return date;
 }
@@ -1619,7 +1620,7 @@ function parseIsoLocalDate(value: string): { day: number; month: number; year: n
 
 function parseLocalTime(value: string): { hour: number; minute: number } {
   if (!LOCAL_TIME_PATTERN.test(value)) {
-    throw new TypeError("localTime must use HH:MM format.");
+    throw new ContractValidationError("localTime must use HH:MM format.");
   }
 
   return {

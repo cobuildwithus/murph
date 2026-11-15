@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   buildHostedStorageAad,
   decryptHostedStoragePayload,
@@ -223,14 +224,14 @@ type BrowserVaultExportSession = BrowserVaultExportSessionMetadata & (
 function parseBrowserVaultExportSession(value: unknown): BrowserVaultExportSession {
   const record = requireRecord(value, "Browser vault export response");
   if (record.state !== "ready") {
-    throw new TypeError("Browser vault export response.state must be ready.");
+    throw new ContractValidationError("Browser vault export response.state must be ready.");
   }
   const replicaRef = parseHostedBrowserVaultReplicaRef(
     record.replicaRef,
     "Browser vault export response.replicaRef",
   );
   if (!replicaRef) {
-    throw new TypeError("Browser vault export response.replicaRef must not be null.");
+    throw new ContractValidationError("Browser vault export response.replicaRef must not be null.");
   }
   const shared = {
     deviceSyncImportPending: readOptionalBoolean(
@@ -257,17 +258,17 @@ function parseBrowserVaultExportSession(value: unknown): BrowserVaultExportSessi
 
   if (record.shards !== undefined || record.metricBuckets !== undefined) {
     if (record.shards === undefined || record.metricBuckets === undefined) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "Browser vault export response requires fixed shards and metric buckets together.",
       );
     }
     if (record.encryptedReplica !== undefined && record.encryptedReplica !== null) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "Browser vault bucketed export response.encryptedReplica must be null or omitted.",
       );
     }
     if (record.replicaAad !== undefined && record.replicaAad !== null) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "Browser vault bucketed export response.replicaAad must be null or omitted.",
       );
     }
@@ -308,7 +309,7 @@ function parseEncryptedShards(
       const entry = requireRecord(record[shard], label);
       const shardAad = parseShardAad(entry.shardAad, `${label}.shardAad`);
       if (shardAad.shard !== shard) {
-        throw new TypeError(`${label}.shardAad.shard must be ${shard}.`);
+        throw new ContractValidationError(`${label}.shardAad.shard must be ${shard}.`);
       }
       return [
         shard,
@@ -341,7 +342,7 @@ function parseEncryptedMetricBuckets(
         `${label}.metricBucketAad`,
       );
       if (metricBucketAad.metricBucketId !== bucketId) {
-        throw new TypeError(
+        throw new ContractValidationError(
           `${label}.metricBucketAad.metricBucketId must be ${bucketId}.`,
         );
       }
@@ -371,16 +372,16 @@ function parseReplicaAad(
   const purpose = requireString(record.purpose, `${label}.purpose`);
   const schema = requireString(record.schema, `${label}.schema`);
   if (purpose !== "browser-vault-replica") {
-    throw new TypeError(`${label}.purpose must be browser-vault-replica.`);
+    throw new ContractValidationError(`${label}.purpose must be browser-vault-replica.`);
   }
   if (schema !== "murph.browser-vault-replica") {
-    throw new TypeError(`${label}.schema must be murph.browser-vault-replica.`);
+    throw new ContractValidationError(`${label}.schema must be murph.browser-vault-replica.`);
   }
   const generatedAt = record.generatedAt === undefined
     ? undefined
     : requireIsoTimestamp(record.generatedAt, `${label}.generatedAt`);
   if (requireGeneratedAt && generatedAt === undefined) {
-    throw new TypeError(`${label}.generatedAt is required.`);
+    throw new ContractValidationError(`${label}.generatedAt is required.`);
   }
   return {
     ...(record.dataKeyId === undefined
@@ -424,14 +425,14 @@ function parseShardAad(
   const shardSchema = requireString(record.shardSchema, `${label}.shardSchema`);
   const expectedSchema = getQueryShardSchema(shard);
   if (shardSchema !== expectedSchema) {
-    throw new TypeError(`${label}.shardSchema must be ${expectedSchema}.`);
+    throw new ContractValidationError(`${label}.shardSchema must be ${expectedSchema}.`);
   }
   const shardSetRefSchema = requireString(
     record.shardSetRefSchema,
     `${label}.shardSetRefSchema`,
   );
   if (shardSetRefSchema !== HOSTED_BROWSER_VAULT_REPLICA_SHARD_SET_REF_SCHEMA) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label}.shardSetRefSchema must be ${HOSTED_BROWSER_VAULT_REPLICA_SHARD_SET_REF_SCHEMA}.`,
     );
   }
@@ -455,7 +456,7 @@ function parseMetricBucketAad(
     `${label}.metricBucketCount`,
   );
   if (metricBucketCount !== HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_COUNT) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label}.metricBucketCount must be ${HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_COUNT}.`,
     );
   }
@@ -468,7 +469,7 @@ function parseMetricBucketAad(
     `${label}.metricBucketSchema`,
   );
   if (metricBucketSchema !== BROWSER_VAULT_METRIC_BUCKET_SHARD_SCHEMA) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label}.metricBucketSchema must be ${BROWSER_VAULT_METRIC_BUCKET_SHARD_SCHEMA}.`,
     );
   }
@@ -480,7 +481,7 @@ function parseMetricBucketAad(
     metricBucketSetRefSchema
     !== HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_SET_REF_SCHEMA
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label}.metricBucketSetRefSchema must be ${HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_SET_REF_SCHEMA}.`,
     );
   }
@@ -514,7 +515,7 @@ function parseEncodedChildFields(
     (contentEncoding === "identity" && encodedByteLength !== byteLength)
     || (contentEncoding === "gzip" && encodedByteLength >= byteLength)
   ) {
-    throw new TypeError(`${label} has invalid encoded and decoded byte lengths.`);
+    throw new ContractValidationError(`${label} has invalid encoded and decoded byte lengths.`);
   }
   return { byteLength, contentEncoding, encodedByteLength };
 }
@@ -996,7 +997,7 @@ function assertNotAborted(signal: AbortSignal | undefined): void {
 function parseFreshness(value: unknown): "fresh" | "stale" {
   if (value === undefined) return "fresh";
   if (value !== "fresh" && value !== "stale") {
-    throw new TypeError("Browser vault export response.freshness is invalid.");
+    throw new ContractValidationError("Browser vault export response.freshness is invalid.");
   }
   return value;
 }
@@ -1008,7 +1009,7 @@ function readOptionalBoolean(
 ): boolean {
   if (value === undefined) return fallback;
   if (typeof value !== "boolean") {
-    throw new TypeError(`${label} must be a boolean.`);
+    throw new ContractValidationError(`${label} must be a boolean.`);
   }
   return value;
 }
@@ -1023,7 +1024,7 @@ function readOptionalNullableString(
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object.`);
+    throw new ContractValidationError(`${label} must be an object.`);
   }
   return value as Record<string, unknown>;
 }
@@ -1040,21 +1041,21 @@ function requireExactRecord(
     || Object.keys(record).some((key) => !expected.has(key))
     || keys.some((key) => record[key] === undefined)
   ) {
-    throw new TypeError(`${label} must contain exactly the complete export set.`);
+    throw new ContractValidationError(`${label} must contain exactly the complete export set.`);
   }
   return record;
 }
 
 function requireString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.length === 0) {
-    throw new TypeError(`${label} must be a non-empty string.`);
+    throw new ContractValidationError(`${label} must be a non-empty string.`);
   }
   return value;
 }
 
 function requirePositiveSafeInteger(value: unknown, label: string): number {
   if (!Number.isSafeInteger(value) || (value as number) <= 0) {
-    throw new TypeError(`${label} must be a positive safe integer.`);
+    throw new ContractValidationError(`${label} must be a positive safe integer.`);
   }
   return value as number;
 }
@@ -1063,7 +1064,7 @@ function requireIsoTimestamp(value: unknown, label: string): string {
   const timestamp = requireString(value, label);
   const parsed = Date.parse(timestamp);
   if (!Number.isFinite(parsed) || new Date(parsed).toISOString() !== timestamp) {
-    throw new TypeError(`${label} must be a canonical ISO-8601 timestamp.`);
+    throw new ContractValidationError(`${label} must be a canonical ISO-8601 timestamp.`);
   }
   return timestamp;
 }
@@ -1073,7 +1074,7 @@ function requireContentEncoding(
   label: string,
 ): HostedBrowserVaultReplicaContentEncoding {
   if (value !== "gzip" && value !== "identity") {
-    throw new TypeError(`${label} must be gzip or identity.`);
+    throw new ContractValidationError(`${label} must be gzip or identity.`);
   }
   return value;
 }
@@ -1087,7 +1088,7 @@ function requireHostedShardKind(
       value as HostedBrowserVaultReplicaShardKind,
     )
   ) {
-    throw new TypeError(`${label} is unsupported.`);
+    throw new ContractValidationError(`${label} is unsupported.`);
   }
   return value as HostedBrowserVaultReplicaShardKind;
 }
@@ -1101,7 +1102,7 @@ function requireMetricBucketId(
       value as HostedBrowserVaultReplicaMetricBucketId,
     )
   ) {
-    throw new TypeError(`${label} is unsupported.`);
+    throw new ContractValidationError(`${label} is unsupported.`);
   }
   return value as HostedBrowserVaultReplicaMetricBucketId;
 }

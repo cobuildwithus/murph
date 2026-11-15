@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   existsSync,
 } from "node:fs";
@@ -2960,7 +2961,7 @@ function mergeGeneratedImageRetentionWakeIntoWorkspace(input: {
   }
   const candidateMs = Date.parse(input.retentionWakeAt);
   if (!Number.isFinite(candidateMs)) {
-    throw new TypeError("Generated-image retention wake must be a valid timestamp.");
+    throw new ContractValidationError("Generated-image retention wake must be a valid timestamp.");
   }
   const currentWakeAt = input.workspace.inboxMediaRetentionWakeAt ?? null;
   if (
