@@ -621,6 +621,35 @@ code run under SwiftUI on a Mac where a screenshot did not exist:
     `game.poster` must say whether a live game can produce one, and a count
     above one must be a refusal until it is drawn.
 
+### Codex deep review of slice 2 (2026-11-15, read-only, before landing)
+
+Seven findings on the slice 2 diff. Six accepted and fixed with a test; one
+rejected with evidence.
+
+1. High, accepted. A dare short enough for one line skipped the check that
+   its letters can be drawn. Every dare is checked now.
+2. Medium, accepted. On a very narrow photo the "Didn't finish" tag hung off
+   the print. A photo too small for its tag is refused.
+3. Medium, accepted. A stake's title had no length limit before the drawing
+   picker read it. It has the limit every other text has.
+4. Medium, rejected. The review asked for equal cues to be accepted because
+   the app's player accepts them. The contract gives every page its own cue
+   (`5000 * index`, then the first sung word), and two pages on one cue would
+   leave one of them no frame at all: a page silently left out. Refused.
+5. Medium, accepted. A stake with no words drew a ticket with no prize. It is
+   refused.
+6. Medium, accepted. The marks that join emoji were allowed anywhere, so a
+   block holding only one drew nothing. They are drawn only after an emoji;
+   elsewhere the text is refused (this also refuses keycap emoji such as a
+   digit in a box, which no bundled face sets correctly).
+7. Low, accepted. An emoji inside a word left the whole word upright in an
+   italic line. Only the emoji stands upright now.
+
+Clean by the review: the song's clock and the last screen's timing against
+the contract fixture, the shrink loop, the score row, ticket and slip
+arithmetic, contact sheet rows, the drawing picker, the catalog's contents,
+the workflow, and the tests (none vacuous).
+
 ### Owner decisions recorded after the review (no architecture change)
 
 - Scope: carry the feature through every slice to merge-ready.

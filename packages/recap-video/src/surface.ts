@@ -104,9 +104,10 @@ const EMOJI_JOINERS = new Set([0x200d, 0xfe0f]);
 
 /** Whether a letter is drawn by the style's own face, not a borrowed one. */
 const ownLetter = (letter: string, font: FontKey): boolean => coverage.get(font)?.has(letter.codePointAt(0) ?? 0) ?? false;
+const emojiLetter = (code: number): boolean => coverage.get("emoji")?.has(code) ?? false;
 
 function drawable(code: number, font: FontKey): boolean {
-  if (coverage.get(font)?.has(code) || coverage.get("emoji")?.has(code) || EMOJI_JOINERS.has(code)) return true;
+  if (coverage.get(font)?.has(code) || emojiLetter(code)) return true;
   return LETTER_RANGES.some(([from, to]) => code >= from && code <= to) && (coverage.get("letters")?.has(code) ?? false);
 }
 
@@ -159,13 +160,35 @@ export function textWidth(text: string, style: TextStyle): number {
 /** Refuses text the bundled fonts cannot draw, or cannot set correctly: it would come out as boxes, or in the wrong order. */
 export function requireDrawable(text: string, style: TextStyle): void {
   registerRecapFonts();
+  // A joiner belongs to the emoji before it. On its own, or after a letter, it would be an invisible mark the page was asked to show.
+  let afterEmoji = false;
   for (const letter of text) {
     const code = letter.codePointAt(0) ?? 0;
-    if (code <= 0x20 || code === 0xa0) continue;
-    if (!drawable(code, style.font)) {
+    if (code <= 0x20 || code === 0xa0) {
+      afterEmoji = false;
+      continue;
+    }
+    const joins: boolean = EMOJI_JOINERS.has(code) && afterEmoji;
+    if (!joins && (EMOJI_JOINERS.has(code) || !drawable(code, style.font))) {
       throw new RecapVideoRefusal("unsupported_text", `The recap's fonts cannot draw U+${code.toString(16).toUpperCase().padStart(4, "0")}.`);
     }
+    afterEmoji = joins || (emojiLetter(code) && !ownLetter(letter, style.font));
   }
+}
+
+/**
+ * A line as the runs an italic style draws: the style's own letters lean, and
+ * an emoji or a borrowed letter stands upright, even inside a word.
+ */
+export function slantRuns(line: string, font: FontKey): { text: string; leans: boolean }[] {
+  const runs: { text: string; leans: boolean }[] = [];
+  for (const letter of line) {
+    const space = letter.trim() === "", last = runs.at(-1);
+    // A space stays with the run before it, so a run never starts with one that its measure would lose.
+    if (last && (space || last.leans === ownLetter(letter, font))) last.text += letter;
+    else runs.push({ text: letter, leans: space || ownLetter(letter, font) });
+  }
+  return runs;
 }
 
 export interface WrapOptions {
@@ -279,13 +302,12 @@ export function drawLines(ctx: Ctx, lines: string[], style: TextStyle, x: number
     }
     // Only the display face's own letters lean: an emoji or a borrowed letter beside them stands upright, as on the phone.
     let left = x + offset;
-    for (const run of line.match(/(\s+)|([^\s]+)/gu) ?? []) {
-      const leans = [...run].every(letter => letter.trim() === "" || ownLetter(letter, style.font));
+    for (const run of slantRuns(line, style.font)) {
       ctx.save();
-      if (leans) ctx.transform(1, 0, -SLANT, 1, SLANT * baseline, 0);
-      ctx.fillText(run, left, baseline);
+      if (run.leans) ctx.transform(1, 0, -SLANT, 1, SLANT * baseline, 0);
+      ctx.fillText(run.text, left, baseline);
       ctx.restore();
-      left += ctx.measureText(run).width;
+      left += ctx.measureText(run.text).width;
     }
   });
 }

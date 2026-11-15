@@ -5,6 +5,7 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { RecapVideoRefusal, createRecapVideoRenderer, type RecapVideoInput } from "../src/index.js";
+import { slantRuns } from "../src/surface.js";
 import { writeFixture, type FixtureExtras } from "./fixture.js";
 import { SHAPES } from "./shapes.js";
 
@@ -64,6 +65,17 @@ describe("what the borrowed faces draw", () => {
     let red = 0;
     for (let at = 0; at < pixels.length; at += 4) if ((pixels[at] ?? 0) > 200 && (pixels[at + 1] ?? 0) < 90 && (pixels[at + 2] ?? 0) < 90) red++;
     expect(red).toBeGreaterThan(1500);
+  });
+
+  it("leans only the display face's own letters in italics, even inside a word", () => {
+    expect(slantRuns("“nice\u{1F602}” day", "display")).toEqual([{ text: "“nice", leans: true }, { text: "\u{1F602}", leans: false }, { text: "” day", leans: true }]);
+    expect(slantRuns("Лео said so \u{1F64F}\u{1F3FD} twice", "display").map(run => run.leans)).toEqual([false, true, false, true]);
+  });
+
+  it("refuses a joiner with no emoji to join, and a dare of any length in an alphabet it cannot set", async () => {
+    // On its own, or after a letter, the mark that joins emoji would be a block with nothing to see.
+    for (const text of ["\u{200D}", "\u{FE0F}", "Leo\u{FE0F} posted", "5\u{FE0F}\u{20E3} days"]) await refuses(headline(text), "unsupported_text");
+    await refuses({ ...base, stake: { kind: "punishment", title: "ヨガ" } }, "unsupported_text");
   });
 
   it("refuses alphabets it cannot set correctly, whatever its faces cover", async () => {

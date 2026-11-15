@@ -5,7 +5,7 @@ import { loadImage } from "@napi-rs/canvas";
 import { mono } from "./pages.js";
 import { stakeArtFile } from "./stake-art.js";
 import {
-  BOARD, COLOR, applyText, baselineIn, displayLine, drawLines, fitText, grow, roundedRect, setShadow, textWidth,
+  BOARD, COLOR, applyText, baselineIn, displayLine, drawLines, fitText, grow, requireDrawable, roundedRect, setShadow, textWidth,
   type Ctx, type Image, type Rect, type TextStyle,
 } from "./surface.js";
 import { RecapVideoRefusal } from "./types.js";
@@ -181,6 +181,7 @@ function paintStamp(ctx: Ctx, right: number, top: number): void {
 /** The dare on its line: one line at full size, or smaller on up to three ruled lines, as the app sets it. */
 function dareLines(dare: string, width: number): { style: TextStyle; lines: string[]; ruled: boolean } {
   const big = typed(27, 33);
+  requireDrawable(dare, big);
   if (textWidth(dare, big) <= width) return { style: big, lines: [dare], ruled: false };
   return { ...fitText(dare, typed(21, 30.5), width, { maxLines: 3, least: 0.7 }), ruled: true };
 }

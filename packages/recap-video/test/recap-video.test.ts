@@ -11,7 +11,7 @@ import {
   type RecapVideoInput, type RecapVideoPage, type RecapVideoRenderer, type RecapVideoSongWord,
 } from "../src/index.js";
 import { pictureSize, registerRecapFonts, textWidth, wrapText, type TextStyle } from "../src/surface.js";
-import { FIXTURE_PAGES, writeFixture, type FixtureExtras } from "./fixture.js";
+import { FIXTURE_PAGES, fixturePicture, writeFixture, type FixtureExtras } from "./fixture.js";
 
 const run = promisify(execFile);
 const hasFfmpeg = spawnSync("ffmpeg", ["-version"]).status === 0 && spawnSync("ffprobe", ["-version"]).status === 0;
@@ -253,6 +253,23 @@ describe("refusals", () => {
     await refuses({ ...input, stake: { kind: "bothWin", title: "Dinner Out Together" } }, "unsupported_stake");
     await refuses({ ...input, players: { ...input.players, "member-sam": { name: "Sam" } } }, "unsupported_outcome");
     await refuses({ ...input, outcome: { kind: "won", winnerId: "member-leo", loserId: "member-sam" } }, "unsupported_outcome");
+  });
+
+  it("refuses a stake with no words or far too many, before anything is done with them", async () => {
+    for (const kind of ["prize", "punishment"] as const) {
+      await refuses({ ...input, stake: { kind, title: "   " } }, "unsupported_stake");
+      await refuses({ ...input, stake: { kind, title: "coffee ".repeat(400) } }, "unsupported_page");
+    }
+  });
+
+  it("refuses a day given back whose photo is too narrow for its tag", async () => {
+    const sliver = path.join(directory, "sliver.jpg");
+    await writeFile(sliver, fixturePicture(60, 1024, 10));
+    const narrow: RecapVideoInput = { ...input, photos: { ...input.photos, "entry-ava-4": sliver } };
+    // The same pair draws without the tag, and with the tag on the photo that has room for it.
+    expect((await createRecapVideoRenderer(narrow)).frameState(18000).pieces.map(piece => piece.name)).toEqual(["setup", "picture", "second picture", "payoff"]);
+    expect((await createRecapVideoRenderer({ ...narrow, unfinished: ["entry-leo-4"] })).frameState(18000).pieces).toHaveLength(4);
+    await refuses({ ...narrow, unfinished: ["entry-ava-4"] }, "does_not_fit");
   });
 
   it("refuses words the app would cut short with an ellipsis", async () => {

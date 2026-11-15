@@ -160,9 +160,14 @@ interface Border { side: number; foot: number }
 const LARGE: Border = { side: 10, foot: 34 }, SMALL: Border = { side: 7, foot: 22 }, TINY: Border = { side: 4, foot: 12 };
 const shapeOf = (shot: Shot): number => shot.image ? shot.image.width / Math.max(shot.image.height, 1) : 3 / 4;
 
+const UNFINISHED_TAG = mono(10, 0, onNight(0.88), 13);
+const unfinishedTagWidth = (): number => textWidth("Didn't finish", UNFINISHED_TAG) + 15;
+
 /** The largest print of a shot, border and all, that keeps the whole photo inside `maxWidth` by `maxHeight`. */
 function printSize(shot: Shot, border: Border, maxWidth: number, maxHeight: number): { width: number; height: number } {
   const shape = shapeOf(shot), width = Math.min(maxWidth - border.side * 2, (maxHeight - border.side - border.foot) * shape);
+  // A day given back wears its tag inside the photo, eight points in: a photo too narrow for it is refused, not drawn with the tag hanging off.
+  if (shot.unfinished && (width < unfinishedTagWidth() + 16 || width / shape < 21 + 16)) throw new RecapVideoRefusal("does_not_fit", "A photo is too small for its tag.");
   return { width: width + border.side * 2, height: width / shape + border.side + border.foot };
 }
 
@@ -190,7 +195,7 @@ function paintPrint(ctx: Ctx, shot: Shot, box: Rect, border: Border, tilt: numbe
   }
   if (shot.unfinished) {
     // The app's tag on a day its player gave back, in the photo's bottom corner.
-    const style = mono(10, 0, onNight(0.88), 13), wide = textWidth("Didn't finish", style) + 15, tag: Rect = { x: picture.x + picture.width - 8 - wide, y: picture.y + picture.height - 8 - 21, width: wide, height: 21 };
+    const style = UNFINISHED_TAG, wide = unfinishedTagWidth(), tag: Rect = { x: picture.x + picture.width - 8 - wide, y: picture.y + picture.height - 8 - 21, width: wide, height: 21 };
     ctx.fillStyle = "rgba(28,25,21,0.58)";
     roundedRect(ctx, tag, 10.5);
     ctx.fill();
