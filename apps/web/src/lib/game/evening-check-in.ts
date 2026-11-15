@@ -115,6 +115,8 @@ function hasDueCandidate(games: Games, now: Date): boolean {
 function skipUnprovableRoom(error: unknown): null {
   const reason = error instanceof GameChatAudienceError ? error.reason
     : isHostedOnboardingError(error) && ["HOSTED_MEMBER_IDENTITY_LOOKUP_AMBIGUOUS", "HOSTED_MEMBER_VERIFIED_EMAIL_LOOKUP_AMBIGUOUS"].includes(error.code) ? "identity_ambiguous" : null;
+  // A live bound room cannot lose its route through normal group-leave cleanup.
+  if (reason === "route_removed") throw new Error("Game chat route is unavailable.", { cause: error });
   if (!reason) throw error;
   logHostedOnboardingWarning("game.evening.room-skipped", { reason });
   return null;

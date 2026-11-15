@@ -231,7 +231,7 @@ function normalizeChatHandle(value: string): string | null {
 
 /** This room is proven unsendable, so nothing may be sent. The fixed reason is safe to log. */
 export class GameChatAudienceError extends Error {
-  constructor(readonly reason: "blocked" | "route_unavailable" | "participants_changed" | "line_unavailable" | "identity_ambiguous", message: string) { super(message); }
+  constructor(readonly reason: "blocked" | "route_removed" | "route_unavailable" | "participants_changed" | "line_unavailable" | "identity_ambiguous", message: string) { super(message); }
 }
 
 /** Provider roster and rotating keyed handles are preparation, never transaction work. */
@@ -240,8 +240,10 @@ export async function readGameChatAudience(containerMemberId: string) {
   const routes = await readHostedThreadContainerLinqRouteAuthorities({ containerMemberIds: [containerMemberId], prisma });
   const route = routes.authorities.get(containerMemberId);
   // "Unavailable" includes a failed open (database or KMS), which proves nothing about the room.
-  if (!route) throw routes.unavailableContainerMemberIds.has(containerMemberId)
-    ? new Error("Game chat route is unavailable.") : new GameChatAudienceError("route_unavailable", "Game chat route is unavailable.");
+  if (!route) {
+    if (routes.unavailableContainerMemberIds.has(containerMemberId)) throw new Error("Game chat route is unavailable.");
+    throw new GameChatAudienceError(routes.missingContainerMemberIds.has(containerMemberId) ? "route_removed" : "route_unavailable", "Game chat route is unavailable.");
+  }
   return { ...await readGameChatHandleAudience(route.threadId, containerMemberId, route.channel === "linq" ? route.accountLookupKey ?? undefined : undefined), route };
 }
 

@@ -53,6 +53,7 @@ export interface HostedAssistantNotificationBoundDestination {
 export interface HostedThreadContainerLinqRouteAuthorities {
   authorities: ReadonlyMap<string, HostedExecutionExternalThreadRouteAuthority>;
   nonLinqContainerMemberIds: ReadonlySet<string>;
+  missingContainerMemberIds: ReadonlySet<string>;
   unavailableContainerMemberIds: ReadonlySet<string>;
 }
 
@@ -89,11 +90,13 @@ export async function readHostedThreadContainerLinqRouteAuthorities(input: {
 
   const authorities = new Map<string, HostedExecutionExternalThreadRouteAuthority>();
   const nonLinqContainerMemberIds = new Set<string>();
+  const missingContainerMemberIds = new Set<string>();
   const unavailableContainerMemberIds = new Set<string>();
   const candidates = containerMemberIds.flatMap((containerMemberId) => {
     const ownedRows = rowsByContainer.get(containerMemberId) ?? [];
     if (ownedRows.length !== 1) {
-      unavailableContainerMemberIds.add(containerMemberId);
+      const unavailable = ownedRows.length === 0 ? missingContainerMemberIds : unavailableContainerMemberIds;
+      unavailable.add(containerMemberId);
       return [];
     }
     const row = ownedRows[0]!;
@@ -147,6 +150,7 @@ export async function readHostedThreadContainerLinqRouteAuthorities(input: {
   return {
     authorities,
     nonLinqContainerMemberIds,
+    missingContainerMemberIds,
     unavailableContainerMemberIds,
   };
 }

@@ -348,7 +348,7 @@ describe.skipIf(!enabled)("game v1 local API smoke", () => {
     if (unbound) await db.gameInvitee.update({ where: { gameId_seat: { gameId, seat: 1 } }, data: { memberId: null } });
     const routes = await import("@/src/lib/hosted-routing/assistant-notification-destination");
     const linq = await import("@/src/lib/hosted-onboarding/linq-client");
-    const route = vi.spyOn(routes, "readHostedThreadContainerLinqRouteAuthorities").mockResolvedValue({ nonLinqContainerMemberIds: new Set(), unavailableContainerMemberIds: new Set(), authorities: new Map([[room,
+    const route = vi.spyOn(routes, "readHostedThreadContainerLinqRouteAuthorities").mockResolvedValue({ nonLinqContainerMemberIds: new Set(), missingContainerMemberIds: new Set(), unavailableContainerMemberIds: new Set(), authorities: new Map([[room,
       { channel: "linq", threadId: room, containerMemberId: room, accountLookupKey: "synthetic-line" }]]) });
     const summary = vi.spyOn(linq, "getHostedLinqChatSummary").mockResolvedValue(linqRoster({ isGroup: true, handlesComplete: true,
       handles: [{ handle: "+15555550100", isMe: true, status: "active" }, ...people.map(id => ({ handle: `${id}@example.test`, isMe: false, status: "active" }))] }));

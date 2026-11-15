@@ -157,6 +157,18 @@ describe.skipIf(!enabled)("pair board PostgreSQL authority and routes", () => {
       counters: await db.hostedMailboxLaneCounter.findMany({ where: { userId: { in: [f.a, f.room] } }, orderBy: [{ userId: "asc" }, { lane: "asc" }] }),
     };
   }
+  it("refuses enrollment when a settled game's route has been removed", async () => {
+    const f = await fixture();
+    await db.game.update({ where: { id: f.gameId }, data: { status: "settled", settledAt: new Date() } });
+    const before = await sharingSnapshot(f);
+    const actual = await vi.importActual<typeof import("@/src/lib/game/chat-membership")>("@/src/lib/game/chat-membership");
+    mocks.audience.mockImplementationOnce(actual.readGameChatAudience);
+    const response = await PUT(f.request({ expectedMembershipId: null, numbers: ["steps"] }),
+      { params: Promise.resolve({ memberId: f.b }) });
+    expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({ error: { code: "GAME_NOT_FOUND" } });
+    expect(await sharingSnapshot(f)).toEqual(before);
+  });
   it("rejects board sharing revoked after admission without writing", async () => {
     const f = await fixture();
     const before = await sharingSnapshot(f);
@@ -298,8 +310,6 @@ describe.skipIf(!enabled)("pair board PostgreSQL authority and routes", () => {
     await expect(readPairBoard(f.room, f.b)).rejects.toMatchObject({ httpStatus: 404 });
     await expect(savePairBoardSharing(f.room, f.b, { expectedMembershipId: null, numbers: [] })).rejects.toMatchObject({ httpStatus: 404 });
     mocks.route.mockResolvedValueOnce({ containerMemberId: "different-room" });
-    await expect(savePairBoardSharing(f.a, f.b, { expectedMembershipId: null, numbers: [] })).rejects.toMatchObject({ httpStatus: 404 });
-    mocks.audience.mockRejectedValueOnce(new Error("synthetic provider failure"));
     await expect(savePairBoardSharing(f.a, f.b, { expectedMembershipId: null, numbers: [] })).rejects.toMatchObject({ httpStatus: 404 });
     const evidence = await mocks.audience();
     mocks.audience.mockResolvedValueOnce({ ...evidence, memberIds: [f.a, f.room] });

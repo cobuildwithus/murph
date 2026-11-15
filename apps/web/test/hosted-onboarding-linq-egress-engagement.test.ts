@@ -2279,7 +2279,7 @@ describe("hosted Linq egress authority", () => {
     });
     vi.spyOn(await import("@/src/lib/hosted-routing/assistant-notification-destination"), "readHostedThreadContainerLinqRouteAuthorities").mockResolvedValue({
       authorities: new Map([["member-1", { channel: "linq", accountLookupKey: lineKey, containerMemberId: "member-1", threadId: "chat-after" }]]),
-      nonLinqContainerMemberIds: new Set(), unavailableContainerMemberIds: new Set(),
+      nonLinqContainerMemberIds: new Set(), missingContainerMemberIds: new Set(), unavailableContainerMemberIds: new Set(),
     });
     mocks.gameCurrentOverride = async () => true;
     mocks.getPrisma.mockReturnValue(prisma);

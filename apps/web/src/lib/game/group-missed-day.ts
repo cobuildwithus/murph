@@ -57,6 +57,8 @@ const AMBIGUOUS_IDENTITY_CODES = ["HOSTED_MEMBER_IDENTITY_LOOKUP_AMBIGUOUS", "HO
 function skipUnprovableRoom(error: unknown): null {
   const reason = error instanceof GameChatAudienceError ? error.reason
     : isHostedOnboardingError(error) && AMBIGUOUS_IDENTITY_CODES.includes(error.code) ? "identity_ambiguous" : null;
+  // A live bound room cannot lose its route through normal group-leave cleanup.
+  if (reason === "route_removed") throw new Error("Game chat route is unavailable.", { cause: error });
   if (!reason) throw error;
   logHostedOnboardingWarning("game.missed-day.room-skipped", { reason });
   return null;
