@@ -1,10 +1,28 @@
 import type { ReactNode } from "react";
 
 import {
+  FreeIdleMemberUsage,
   MemberUsageClient,
   type MemberUsageClientDesignState,
 } from "../(dashboard)/ops/usage/member-usage-client";
 import type { HostedOpsMemberUsageDashboard } from "@/src/lib/hosted-ops/member-usage";
+import type { HostedOpsFreeIdleMemberUsageRow } from "@/src/lib/hosted-ops/free-idle-member-usage";
+
+const DESIGN_FREE_IDLE_MEMBERS: HostedOpsFreeIdleMemberUsageRow[] = [{
+  memberId: "hbm_design_free_01",
+  maskedPhoneNumberHint: "*** 0101",
+  createdAt: "2026-10-01T12:00:00.000Z",
+  allTimeUsageUsdMicros: "10940000",
+  freeCreditRemainingUsdMicros: "0",
+  messagesLast7Days: 18,
+}, {
+  memberId: "hbm_design_free_02",
+  maskedPhoneNumberHint: null,
+  createdAt: "2026-10-15T12:00:00.000Z",
+  allTimeUsageUsdMicros: "4250000",
+  freeCreditRemainingUsdMicros: "250000",
+  messagesLast7Days: 0,
+}];
 
 const DESIGN_OPS_USAGE_DASHBOARD: HostedOpsMemberUsageDashboard = {
   capturedAt: "2026-07-22T18:00:00.000Z",
@@ -215,9 +233,16 @@ export function OpsUsageStudy() {
       id="ops-usage-dashboard"
       inert
     >
+      <div className="scroll-mt-24" id="ops-free-idle-members">
+        <FreeIdleMemberUsage disabled={false} rows={DESIGN_FREE_IDLE_MEMBERS} />
+      </div>
+      <div className="scroll-mt-24" id="ops-free-idle-members-empty">
+        <FreeIdleMemberUsage disabled={false} rows={[]} />
+      </div>
       <div className="scroll-mt-24" id="ops-member-suspension">
         <StudyFrame title="Member suspension and restoration">
           <MemberUsageClient
+            freeIdleMembers={DESIGN_FREE_IDLE_MEMBERS}
             dashboard={{
               ...DESIGN_OPS_USAGE_DASHBOARD,
               rows: DESIGN_OPS_USAGE_DASHBOARD.rows.map((row, index) =>
@@ -229,6 +254,7 @@ export function OpsUsageStudy() {
       </div>
       <StudyFrame title="Search loading">
         <MemberUsageClient
+          freeIdleMembers={DESIGN_FREE_IDLE_MEMBERS}
           dashboard={DESIGN_OPS_USAGE_DASHBOARD}
           designState="search_loading"
           operatorMemberId={null}
@@ -236,24 +262,28 @@ export function OpsUsageStudy() {
       </StudyFrame>
       <StudyFrame title="Capped search">
         <MemberUsageClient
+          freeIdleMembers={DESIGN_FREE_IDLE_MEMBERS}
           dashboard={DESIGN_OPS_USAGE_SEARCH_DASHBOARD}
           operatorMemberId={null}
         />
       </StudyFrame>
       <StudyFrame title="Empty search">
         <MemberUsageClient
+          freeIdleMembers={DESIGN_FREE_IDLE_MEMBERS}
           dashboard={DESIGN_OPS_USAGE_EMPTY_SEARCH_DASHBOARD}
           operatorMemberId={null}
         />
       </StudyFrame>
       <StudyFrame title="Invalid search">
         <MemberUsageClient
+          freeIdleMembers={DESIGN_FREE_IDLE_MEMBERS}
           dashboard={DESIGN_OPS_USAGE_ERROR_SEARCH_DASHBOARD}
           operatorMemberId={null}
         />
       </StudyFrame>
       <StudyFrame title="Stale row error and recovery">
         <MemberUsageClient
+          freeIdleMembers={DESIGN_FREE_IDLE_MEMBERS}
           dashboard={DESIGN_OPS_USAGE_DASHBOARD}
           designState="row_stale_error"
           operatorMemberId={null}
@@ -262,6 +292,7 @@ export function OpsUsageStudy() {
       {RESET_STATES.map(({ state, title }) => (
         <StudyFrame key={state} title={title}>
           <MemberUsageClient
+            freeIdleMembers={DESIGN_FREE_IDLE_MEMBERS}
             dashboard={DESIGN_OPS_USAGE_RESET_DASHBOARD}
             designResetAllInline
             designState={state}
@@ -279,6 +310,7 @@ export function OpsUsageDialogStudy(input: {
   return (
     <div inert>
       <MemberUsageClient
+        freeIdleMembers={DESIGN_FREE_IDLE_MEMBERS}
         dashboard={DESIGN_OPS_USAGE_RESET_DASHBOARD}
         designResetAllDialogInert
         designState={OPS_USAGE_DIALOG_DESIGN_STATES[input.state]}

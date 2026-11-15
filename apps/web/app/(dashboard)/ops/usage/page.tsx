@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 
 import { requireHostedOpsPageAccess } from "@/src/lib/hosted-ops/access";
 import { readHostedOpsMemberUsage } from "@/src/lib/hosted-ops/member-usage";
+import { readHostedOpsFreeIdleMemberUsage } from "@/src/lib/hosted-ops/free-idle-member-usage";
 import { getHostedDashboardPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 
 import { MemberUsageClient } from "./member-usage-client";
@@ -33,10 +34,15 @@ export default async function HostedOpsUsagePage({
   const after = readFirstSearchParam(resolvedSearchParams.after);
   const before = readFirstSearchParam(resolvedSearchParams.before);
   const search = readFirstSearchParam(resolvedSearchParams.q);
+  const [dashboard, freeIdleMembers] = await Promise.all([
+    readHostedOpsMemberUsage({ after, before, search }),
+    readHostedOpsFreeIdleMemberUsage(),
+  ]);
 
   return (
     <MemberUsageClient
-      dashboard={await readHostedOpsMemberUsage({ after, before, search })}
+      dashboard={dashboard}
+      freeIdleMembers={freeIdleMembers}
       operatorMemberId={operatorSession.member.id}
     />
   );

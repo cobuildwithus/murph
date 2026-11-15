@@ -713,7 +713,7 @@ export function SectionsContent({
 
           <Separator />
 
-          <StudySection title="Ops usage search and recovery">
+          <StudySection title="Ops usage, free idle members, and recovery">
             <OpsUsageStudy />
           </StudySection>
 

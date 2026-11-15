@@ -43,6 +43,7 @@ import type {
   HostedOpsMemberUsageResetResponse,
   HostedOpsMemberUsageRow,
 } from "@/src/lib/hosted-ops/member-usage";
+import type { HostedOpsFreeIdleMemberUsageRow } from "@/src/lib/hosted-ops/free-idle-member-usage";
 import {
   HOSTED_OPS_USAGE_RESET_ALL_CONFIRMATION,
   type HostedOpsMemberUsageResetAllBatchResponse,
@@ -137,6 +138,7 @@ class UsageResetRequestError extends Error {
 
 interface MemberUsageClientProps {
   dashboard: HostedOpsMemberUsageDashboard;
+  freeIdleMembers: HostedOpsFreeIdleMemberUsageRow[];
   designResetAllDialogInert?: boolean;
   designResetAllInline?: boolean;
   designState?: MemberUsageClientDesignState;
@@ -154,6 +156,7 @@ export function MemberUsageClient(props: MemberUsageClientProps) {
 
 function MemberUsageClientSurface({
   dashboard,
+  freeIdleMembers,
   designResetAllDialogInert = false,
   designResetAllInline = false,
   designState,
@@ -221,6 +224,7 @@ function MemberUsageClientSurface({
     || resetAllState.phase === "confirming"
     || resetAllState.phase === "paused"
     || resetAllState.phase === "running";
+  const usageActionsDisabled = isResetting || globalResetActive || searchNavigationPending;
   const contactSearchRequiresExactLookup =
     (
       dashboard.search.kind === "email"
@@ -759,9 +763,7 @@ function MemberUsageClientSurface({
   async function resetUsage(row: HostedOpsMemberUsageRow): Promise<void> {
     if (
       !row.currentPeriod
-      || isResetting
-      || globalResetActive
-      || searchNavigationPending
+      || usageActionsDisabled
       || contactSearchRequiresExactLookup
     ) {
       return;
@@ -1058,11 +1060,9 @@ function MemberUsageClientSurface({
           ) : (
             dashboard.rows.map((row) => (
               <UsageCompactRow
-                suspensionDisabled={isResetting || globalResetActive || searchNavigationPending}
+                suspensionDisabled={usageActionsDisabled}
                 disabled={
-                  isResetting
-                  || globalResetActive
-                  || searchNavigationPending
+                  usageActionsDisabled
                   || contactSearchRequiresExactLookup
                 }
                 key={row.memberId}
@@ -1117,11 +1117,9 @@ function MemberUsageClientSurface({
               ) : (
                 dashboard.rows.map((row) => (
                   <UsageRow
-                    suspensionDisabled={isResetting || globalResetActive || searchNavigationPending}
+                    suspensionDisabled={usageActionsDisabled}
                     disabled={
-                      isResetting
-                      || globalResetActive
-                      || searchNavigationPending
+                      usageActionsDisabled
                       || contactSearchRequiresExactLookup
                     }
                     key={row.memberId}
@@ -1176,6 +1174,11 @@ function MemberUsageClientSurface({
           </nav>
         ) : null}
       </section>
+
+      <FreeIdleMemberUsage
+        disabled={usageActionsDisabled}
+        rows={freeIdleMembers}
+      />
 
       <Dialog
         onOpenChange={(open) => {
@@ -1238,9 +1241,7 @@ function MemberUsageClientSurface({
           <DialogFooter>
             <Button
               disabled={
-                isResetting
-                || globalResetActive
-                || searchNavigationPending
+                usageActionsDisabled
               }
               onClick={() => {
                 setSelectedMemberId(null);
@@ -1259,9 +1260,7 @@ function MemberUsageClientSurface({
                   selectedRow.currentPeriod.updatedAt === null
                   && !selectedRuntimeRecheck
                 )
-                || isResetting
-                || globalResetActive
-                || searchNavigationPending
+                || usageActionsDisabled
                 || contactSearchRequiresExactLookup
               }
               onClick={() => {
@@ -2005,6 +2004,73 @@ interface UsageRowControlInput {
   onSelect: () => void;
   recovery: UsageRowRecovery;
   row: HostedOpsMemberUsageRow;
+}
+
+export function FreeIdleMemberUsage({ rows, disabled }: {
+  rows: HostedOpsFreeIdleMemberUsageRow[];
+  disabled: boolean;
+}) {
+  return (
+    <section aria-label="Free, no games, devices or groups" className="min-w-0">
+      <h2 className="font-serif text-2xl font-semibold tracking-tight">
+        Free, no games, devices or groups
+      </h2>
+      {rows.length === 0 ? (
+        <p className="mt-5 text-sm text-muted-foreground">No one right now.</p>
+      ) : (
+        <>
+          <div className="mt-5 grid gap-3 xl:hidden">
+            {rows.map((row) => (
+              <article key={row.memberId} className="grid gap-4 rounded-xl border border-border/70 bg-card/90 p-4 md:grid-cols-[minmax(12rem,1fr)_minmax(20rem,2fr)_auto] md:items-center">
+                <div className="min-w-0">
+                  <p className="break-all font-mono text-xs">{row.memberId}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{row.maskedPhoneNumberHint ?? "—"}</p>
+                </div>
+                <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs sm:grid-cols-4">
+                  <UsageCompactMetric label="Joined" value={formatDate(row.createdAt)} />
+                  <UsageCompactMetric label="All-time AI" value={formatUsdMicros(row.allTimeUsageUsdMicros)} />
+                  <UsageCompactMetric label="Free credit left" value={formatUsdMicros(row.freeCreditRemainingUsdMicros)} />
+                  <UsageCompactMetric label="Inbound, 7 days" value={formatInteger(row.messagesLast7Days)} />
+                </dl>
+                <MemberSuspensionAction disabled={disabled} memberId={row.memberId} suspended={false} />
+              </article>
+            ))}
+          </div>
+          <div className="mt-5 hidden overflow-hidden rounded-xl border border-border/70 bg-card/90 xl:block">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Member</TableHead>
+                  <TableHead>Joined</TableHead>
+                  <TableHead className="text-right">All-time AI</TableHead>
+                  <TableHead className="text-right">Free credit left</TableHead>
+                  <TableHead className="text-right">Inbound, 7 days</TableHead>
+                  <TableHead>Action</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.map((row) => (
+                  <TableRow key={row.memberId}>
+                    <TableCell>
+                      <div className="flex max-w-64 flex-col gap-1">
+                        <span className="truncate font-mono text-xs" title={row.memberId}>{row.memberId}</span>
+                        <span className="text-xs text-muted-foreground">{row.maskedPhoneNumberHint ?? "—"}</span>
+                      </div>
+                    </TableCell>
+                    <TableCell className="font-mono text-xs">{formatDate(row.createdAt)}</TableCell>
+                    <TableCell className="text-right font-serif font-semibold tabular-nums">{formatUsdMicros(row.allTimeUsageUsdMicros)}</TableCell>
+                    <TableCell className="text-right font-serif font-semibold tabular-nums">{formatUsdMicros(row.freeCreditRemainingUsdMicros)}</TableCell>
+                    <TableCell className="text-right font-mono text-xs tabular-nums">{formatInteger(row.messagesLast7Days)}</TableCell>
+                    <TableCell><MemberSuspensionAction disabled={disabled} memberId={row.memberId} suspended={false} /></TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </>
+      )}
+    </section>
+  );
 }
 
 function UsageCompactRow(input: UsageRowControlInput) {
