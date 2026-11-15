@@ -1,3 +1,4 @@
+import { ContractValidationError, getErrorName } from "@murphai/contracts/validation-error";
 import {
   normalizeHostedExecutionErrorMessage,
   normalizeHostedExecutionOperatorMessage,
@@ -46,7 +47,7 @@ export function formatHostedExecutionSafeLogErrorDetails(
 
 export function describeHostedExecutionSafeLogErrorCode(error: unknown): string {
   if (error instanceof Error) {
-    return normalizeHostedExecutionSafeLogCode(error.name) ?? "UnknownError";
+    return normalizeHostedExecutionSafeLogCode(getErrorName(error)) ?? "UnknownError";
   }
 
   return normalizeHostedExecutionSafeLogCode(describeHostedExecutionSafeLogErrorType(error))
@@ -54,6 +55,7 @@ export function describeHostedExecutionSafeLogErrorCode(error: unknown): string 
 }
 
 function describeHostedExecutionSafeLogErrorType(error: unknown): string {
+  if (error instanceof ContractValidationError) return "ContractValidationError";
   if (error instanceof Error) {
     const constructorName = error.constructor?.name;
     return normalizeHostedExecutionSafeLogCode(constructorName)

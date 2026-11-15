@@ -166,7 +166,7 @@ describe("telegram provider effect contract", () => {
     expect(readProviderEffectFailureLogs()).toEqual([
       expect.objectContaining({
         bodyKeys: "file_id",
-        errorName: "TypeError",
+        errorName: "ContractValidationError",
         path: "/telegram/files/get",
         stage: "contract_parse",
       }),

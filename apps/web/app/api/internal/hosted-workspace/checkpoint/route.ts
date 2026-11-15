@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { hostedWorkspaceSnapshotObjectKey } from "@murphai/hosted-execution/storage-paths";
 import { HostedWorkspaceProgressError } from "@/src/lib/hosted-workspace/store";
 import { parseInput, RequestInputError } from "@murphai/hosted-execution/request-input";
@@ -127,6 +128,7 @@ function reportCheckpointFailure(stage: CheckpointFailureStage, error: unknown):
       ? error.code : undefined;
     console.warn("Hosted workspace checkpoint failed.", {
       errorClass: error instanceof RequestInputError ? "request_input"
+        : error instanceof ContractValidationError ? "validation"
         : error instanceof TypeError ? "type_error"
         : error instanceof RangeError ? "range_error"
         : error instanceof Error ? "error" : "non_error",

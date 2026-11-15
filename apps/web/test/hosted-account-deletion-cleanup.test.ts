@@ -202,7 +202,7 @@ describe("hosted account deletion cleanup", () => {
     expect(mocks.getHostedOnboardingStripe).not.toHaveBeenCalled();
     expect(store.row).toMatchObject({
       attemptCount: 1,
-      lastErrorCode: "TypeError",
+      lastErrorCode: "ContractValidationError",
       leaseToken: null,
     });
     expect(store.row?.nextAttemptAt.getTime()).toBeGreaterThan(now.getTime());

@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 import {
   configuredDeviceSyncProviderKeys,
@@ -230,7 +231,7 @@ function remapHostedDeviceConnectBackendSetupError(
   error: unknown,
   phase: HostedDeviceConnectLinkSetupPhase,
 ): never {
-  if (error instanceof TypeError || error instanceof RangeError) {
+  if (error instanceof ContractValidationError || error instanceof TypeError || error instanceof RangeError) {
     throw deviceSyncError({
       ...HOSTED_ASSISTANT_DEVICE_CONNECT_UNAVAILABLE_ERROR,
       cause: new HostedDeviceConnectLinkBackendSetupError(phase, error),

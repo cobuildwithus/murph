@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { emitHostedExecutionStructuredLog } from "@murphai/hosted-execution";
 import {
   HostedRuntimeArtifactReadError,
@@ -541,6 +542,7 @@ function isRetryableHostedArtifactUploadTransportError(error: unknown): boolean 
   }
 
   const cause = error instanceof HostedRuntimeControlPlaneFetchError ? error.cause : null;
+  if (cause instanceof ContractValidationError) return false;
   // A binding PUT rejection belongs to the Worker's R2 retry owner, even when
   // its service prose mentions a network failure.
   if (cause instanceof Error && cause.message.startsWith("put: ")) {
@@ -560,7 +562,7 @@ function isRetryableHostedArtifactUploadTransportError(error: unknown): boolean 
     return false;
   }
 
-  // Diagnostics intentionally classify every TypeError as fetch_failed. A write
+  // Diagnostics intentionally classify every native TypeError as fetch_failed. A write
   // replay needs positive transport evidence, not a deterministic TypeError.
   return diagnostics.fetchCauseKind === "cloudflare_rpc_destroy"
     || diagnostics.fetchCauseKind === "network"

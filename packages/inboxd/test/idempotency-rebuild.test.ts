@@ -6,6 +6,8 @@ import path from "node:path";
 import { promises as fs } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
 import { test, vi } from "vitest";
+import { ContractValidationError } from "@murphai/contracts/validation-error";
+import * as core from "@murphai/core";
 
 import {
   initializeVault,
@@ -829,6 +831,31 @@ test("processCapture reuses a staged capture record when retry occurredAt drifts
   assert.equal((await readJsonlRecordsIfPresent(vaultRoot, "ledger/inbox-captures/2026/2026-04.jsonl")).length, 0);
 
   pipeline.close();
+});
+
+test.each([
+  [new ContractValidationError("Staged capture invalid."), true],
+  [new TypeError("Staged capture reader failed."), true],
+  [new Error("Staged capture reader failed."), false],
+] as const)("recoverable capture fallback handles contract and native validation: %s", async (error, fallback) => {
+  const vaultRoot = await makeTempDirectory("murph-inbox-staged-error");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-12T12:00:00.000Z" });
+  const inbound = createCapture({ attachments: [] });
+  const captureId = createDeterministicInboxCaptureId(inbound);
+  await persistInterruptedInboxCapture({
+    vaultRoot, captureId, eventId: "evt_00000000000000000000000000", input: inbound,
+    storedAt: "2026-03-13T11:00:00.000Z",
+  });
+  await removeInboxCaptureLedgerForOccurredAt(vaultRoot, inbound.occurredAt);
+  const read = vi.spyOn(core, "readStoredWriteOperationJsonlAppendPayload").mockRejectedValueOnce(error);
+  try {
+    const result = findStoredCaptureSnapshot({ vaultRoot, inbound, captureId });
+    if (fallback) assert.equal(await result, null);
+    else await assert.rejects(result, (caught) => caught === error);
+    assert.equal(read.mock.calls.length, 1);
+  } finally {
+    read.mockRestore();
+  }
 });
 
 test("processCapture ignores a malformed unrelated staged record while reusing matching staged evidence", async () => {
