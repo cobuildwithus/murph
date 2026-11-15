@@ -580,6 +580,12 @@ resulting avatar. No private photo is shared with the subject or other players.
   pair or group check-in collector, including mixed rooms and count schedules.
   Due pairs get no check-ins while awaiting morning. Unbound games still settle
   on a foreground read.
+  A settled pair is not frozen at once: for 7 days each player can still count
+  or uncount their own days through Murph in the game's chat, and the result,
+  record and prize are settled again from the same rules. The game stays
+  settled with the same end time, the recap is left as made, and nothing is
+  re-announced beyond Murph's reply. After 7 days, and for every group game,
+  the result is final.
 - **Missed-day host check-ins.** Around 9am in a player's frozen game time zone,
   after a scheduled day has closed without a post, Murph may address that player
   with one short line in the pair's already-bound group. Consecutive missed days

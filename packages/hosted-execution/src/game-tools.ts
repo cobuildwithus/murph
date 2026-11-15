@@ -114,6 +114,7 @@ export const hostedGameChatStateSchema = z.object({
   startsOn: date.nullable(), lengthDays: z.number().int().min(1).max(365),
   players: z.array(z.object({ memberId: ref, seat: z.number().int(), firstName: z.string().max(200), dayOne: date.nullable(), timeZone: z.string().max(100) }).strict()).max(10),
   pendingChange: pending.nullable(),
+  // A settled game carries its days only while its players can still correct them.
   progress: progress.optional(), result: result.nullable().optional(),
   changeControls: z.object({ canStartNow: z.boolean(), canEdit: z.boolean(), canEditSchedule: z.boolean(), canEditStartDate: z.boolean(), canEditTasks: z.boolean().optional(), canEditStakes: z.boolean().optional(), editableFromDay: z.number().int().nullable() }).strict(),
 }).strict()).max(10), photoCheckIn: z.object({ introductionAvailable: z.boolean(), hasPendingOffer: z.boolean() }).strict().optional() }).strict();
@@ -134,7 +135,8 @@ export const hostedGameToolResponseSchema = z.object({
       games: z.array(z.object({ id: gameId, task: z.string(), schedule: hostedGameScheduleSchema,
         today: z.enum(["posted", "open", "off", "upcoming"]), otherFirstNames: z.array(z.string()),
         on: z.boolean(), everyDay: z.boolean() }).strict()).max(20) }).strict().optional(),
-    // Exact server-authored delivery text; recap.chatLine and lore stay bare.
+    // Exact server-authored delivery text; recap.chatLine and lore stay bare. A day correction
+    // that changes a finished game's outcome also returns its one line here.
     chatLine: z.string().max(2048).optional(),
     loreGuidance: z.string().optional(),
     loreFingerprint: z.string().optional(),

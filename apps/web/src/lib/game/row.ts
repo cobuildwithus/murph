@@ -40,6 +40,7 @@ export function toRuleStateGame(row: Game & Pick<GameRow, "invitees">, terms: Ru
     invitees: row.invitees,
     lengthDays: row.lengthDays,
     seats: row.maxPlayers,
+    settledAt: row.settledAt,
     startsOn: fromDbDate(row.startsOn),
     status: toStatus(row.status),
     terms,

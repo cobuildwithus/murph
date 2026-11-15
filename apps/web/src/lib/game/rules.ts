@@ -101,6 +101,8 @@ export interface RuleGame {
   admittedSeats?: readonly number[];
   /** The challenger's picked Day 1 (YYYY-MM-DD), if any. */
   startsOn: string | null;
+  /** When the result was frozen, on the database clock. */
+  settledAt?: Date | null;
 }
 
 export interface RuleState {
@@ -164,6 +166,8 @@ export function isTicketExpired(ticket: { status: string; createdAt: Date }, now
 }
 export const GAME_POSTS_PER_DAY = 2;
 export const GAME_MAX_OPEN_PER_PAIR = 10;
+/** After a pair game ends its chat stays open, and its players can still correct their own days, for this long. Then the result is final. */
+export const GAME_SETTLED_OPEN_MS = 7 * 24 * 60 * 60 * 1000;
 
 export const GAME_INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -325,15 +329,17 @@ export function completedEntry(entries: RuleEntries, memberId: string, dayIndex:
   return entry && !entry.incomplete ? entry : null;
 }
 
-export function decideDayCompletion(state: RuleState, input: { memberId: string; date: string; incomplete: boolean; credit?: boolean; hasWords?: boolean; now: Date }): { dayIndex: number; changed: boolean; outcome: GameDayOutcome } {
-  const player = requireLivePlayer(state, input.memberId);
-  if (isGameDue(state, input.now)) reject("GAME_NOT_LIVE", "This game has ended.");
-  const dayIndex = daysBetween(player.dayOne!, input.date);
-  const today = dayIndexAt(player, input.now)!;
+/**
+ * A player's correction of one of their own days. `clock` is the database clock
+ * and `now` the game's: they differ only under dev time travel.
+ */
+export function decideDayCompletion(state: RuleState, input: { memberId: string; date: string; incomplete: boolean; credit?: boolean; hasWords?: boolean; now: Date; clock?: Date }): { dayIndex: number; changed: boolean; outcome: GameDayOutcome } {
+  const { player, dayOne, today, closedBefore } = dayCorrectionCalendar(state, input);
+  const dayIndex = daysBetween(dayOne, input.date);
   if (dayIndex < eligibleFromDay(state, player) || dayIndex >= state.game.lengthDays || dayIndex > today) reject("INVALID_REQUEST", "Choose a game day that has already started.");
   const entry = liveEntry(state.entries, input.memberId, dayIndex);
   if (!entry && input.credit && !input.incomplete) {
-    assertCreditableDay(state, player, dayIndex, today);
+    assertCreditableDay(state, player, dayIndex, closedBefore);
     // The post is the player's own words: until they give them, the day is only known to be countable.
     return { dayIndex, changed: input.hasWords === true, outcome: { date: input.date, status: input.hasWords ? "credited" : "words_needed" } };
   }
@@ -341,6 +347,48 @@ export function decideDayCompletion(state: RuleState, input: { memberId: string;
     ? entry.incomplete ? "already_incomplete" : "marked_incomplete"
     : entry.incomplete ? "restored" : "already_complete";
   return { dayIndex, changed: status === "marked_incomplete" || status === "restored", outcome: { date: input.date, status } };
+}
+
+/**
+ * Who may correct a day, and which days exist to correct. A live game runs to
+ * the player's current day, and that day is still open. A finished pair game
+ * runs to the day it ended on, and every one of its days is closed.
+ */
+function dayCorrectionCalendar(state: RuleState, input: { memberId: string; now: Date; clock?: Date }): { player: RulePlayer; dayOne: string; today: number; closedBefore: number } {
+  const settled = state.game.status === "settled";
+  const player = settled ? playerFor(state, input.memberId) : requireLivePlayer(state, input.memberId);
+  if (!player || player.leftAt) reject("NOT_A_PLAYER", "You're not in this game.");
+  const ended = settled ? settledCorrectionCutoff(state, input.clock ?? input.now, input.now) : null;
+  if (isGameDue(state, input.now) || !player.dayOne) reject("GAME_NOT_LIVE", "This game has ended.");
+  const today = dayIndexAt(player, ended ?? input.now)!;
+  return { player, dayOne: player.dayOne, today, closedBefore: ended ? today + 1 : today };
+}
+
+/** Why a finished game's days can no longer be corrected, or null while its two players still can. */
+function settledCorrectionRefusal(state: RuleState, clock: Date): string | null {
+  const { seats, settledAt } = state.game;
+  if (seats !== 2 || !settledAt || !isPairRoster(remainingPlayers(state))) return "This game has ended.";
+  return clock.getTime() - settledAt.getTime() < GAME_SETTLED_OPEN_MS ? null : "This game ended more than 7 days ago, so its result is final.";
+}
+
+/** A finished pair game still takes its players' own day corrections while its chat stays open. */
+export function isSettledGameCorrectable(state: RuleState, clock: Date): boolean {
+  return state.game.status === "settled" && settledCorrectionRefusal(state, clock) === null;
+}
+
+/**
+ * The game's own clock at the moment a settled game ended. A finished game's
+ * days are the ones that had started by then: a pair that finishes early ends
+ * before its last calendar day.
+ */
+export function settledGameEnd(state: RuleState, clock: Date, now: Date): Date {
+  return new Date(now.getTime() - Math.max(0, clock.getTime() - (state.game.settledAt ?? clock).getTime()));
+}
+
+function settledCorrectionCutoff(state: RuleState, clock: Date, now: Date): Date {
+  const refusal = settledCorrectionRefusal(state, clock);
+  if (refusal) reject("GAME_NOT_LIVE", refusal);
+  return settledGameEnd(state, clock, now);
 }
 
 /**

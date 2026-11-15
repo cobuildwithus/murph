@@ -685,6 +685,27 @@ describe.skipIf(!enabled)("group lifecycle PostgreSQL", () => {
     expect(await db.gameEvent.count({ where: { gameId: game.id, type: "settled" } })).toBe(1);
   });
 
+  it("keeps a settled group game's days closed: correcting a finished game is for pairs only", async () => {
+    const [a, b, c] = await Promise.all([person(), person(), person()]);
+    const game = await create(a, [b, c]); await ok(b.id, join(game.token)); await ok(c.id, join(game.token));
+    await entry(game.id, a.id, 0); await entry(game.id, b.id, 0);
+    const context = await groupContext(game.id, [a, b, c]);
+    const settled = await settle(game.id, a.id);
+    expect(settled.status).toBe("settled");
+    const soonAfter = new Date(settled.settledAt!.getTime() + 60_000);
+    // Inside the pair window, in the game's own chat, by its own players: counting and uncounting are both still refused.
+    for (const [actor, change] of [[c.id, { incomplete: false, credit: true as const, text: "Walked, forgot to post" }], [a.id, { incomplete: true }]] as const) {
+      expect(await runGameCommand({ ...context, actorMemberId: actor, now: soonAfter, command: { type: "setDayCompletion", gameId: game.id, date: "2030-03-09", ...change } }))
+        .toMatchObject({ ok: false, error: { code: "GAME_NOT_LIVE", message: "This game has ended." } });
+    }
+    const after = await gameRow(game.id);
+    expect(after.result).toEqual(settled.result);
+    expect(after.tickets).toEqual(settled.tickets);
+    expect(await db.gameEntry.count({ where: { gameId: game.id } })).toBe(2);
+    expect(await db.gameEntry.count({ where: { gameId: game.id, incomplete: true } })).toBe(0);
+    expect(await db.gameEvent.count({ where: { gameId: game.id, type: "result_corrected" } })).toBe(0);
+  });
+
   it("scrubs an unjoined group's invitation when that account deletes during play", async () => {
     const [a, b, invited] = await Promise.all([person(), person(), person()]);
     const game = await create(a, [b, invited]); await ok(b.id, join(game.token));
