@@ -4399,7 +4399,7 @@ describe("handleRunnerOutboundRequest", () => {
     expect(serializedLogs).not.toContain("a".repeat(64));
   });
 
-  it("reports a persistently unreadable encrypted artifact as terminal", async () => {
+  it.each(["envelope", "decryption"])("reports stored artifact %s failures as server faults", async (failure) => {
     const fixture = await createHostedRuntimeCryptoContextFixture();
     const baseEnv = createRunnerOutboundEnv(fixture.env);
     const envelope = await encryptHostedStorageEnvelope({
@@ -4410,7 +4410,7 @@ describe("handleRunnerOutboundRequest", () => {
     });
     const malformedEnvelope = new TextEncoder().encode(JSON.stringify({
       ...envelope,
-      keyId: `${envelope.keyId}\0bad`,
+      keyId: failure === "envelope" ? `${envelope.keyId}\0bad` : envelope.keyId,
     }));
     const env = createRunnerOutboundEnv({
       ...fixture.env,
@@ -4438,19 +4438,19 @@ describe("handleRunnerOutboundRequest", () => {
       "member_123",
     );
 
-    expect(response.status).toBe(422);
-    await expect(response.json()).resolves.toEqual({
-      error: "Artifact is unreadable.",
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toMatchObject({
+      code: "runtime_error",
+      error: "Hosted execution runtime failed.",
     });
     expect(hostedExecutionMocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
       expect.objectContaining({
         component: "runner",
         details: expect.objectContaining({
-          artifactReadable: false,
           operation: "artifact_fetch",
-          responseStatus: 422,
         }),
-        message: "Hosted runner artifact request completed.",
+        level: "error",
+        message: "Hosted runner outbound request failed.",
       }),
     );
   });
@@ -6101,7 +6101,11 @@ describe("handleRunnerOutboundRequest", () => {
       "member_123",
     );
 
-    expect(response.status).toBe(404);
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toMatchObject({ code: "runtime_error" });
+    expect(hostedExecutionMocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+      expect.objectContaining({ level: "error", message: "Hosted runner outbound request failed." }),
+    );
     const diagnosticLog = hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls
       .map(([input]) => input)
       .find((input) =>
@@ -6175,7 +6179,7 @@ describe("handleRunnerOutboundRequest", () => {
       "member_123",
     );
 
-    expect(responseWithoutFingerprint.status).toBe(404);
+    expect(responseWithoutFingerprint.status).toBe(500);
     const noFingerprintDiagnostic = hostedExecutionMocks.emitHostedExecutionStructuredLog.mock.calls
       .map(([input]) => input)
       .find((input) =>
