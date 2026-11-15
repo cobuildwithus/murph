@@ -2,6 +2,8 @@ import {
   deviceSyncError,
 } from "@murphai/device-syncd/errors";
 import { Prisma } from "@prisma/client";
+import { ContractValidationError } from "@murphai/contracts/validation-error";
+import { RequestInputError } from "@murphai/hosted-execution/request-input";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createJsonPostRequest, createRouteContext } from "./route-test-helpers";
@@ -213,6 +215,43 @@ describe("hosted device-sync agent and webhook routes", () => {
     await expect(response.json()).resolves.toEqual({
       ok: true,
     });
+  });
+
+  it.each([
+    new TypeError("synthetic configuration failure"),
+    new RangeError("synthetic invariant failure"),
+    new URIError("synthetic stored URI failure"),
+    new SyntaxError("synthetic stored JSON failure"),
+    new ContractValidationError("synthetic generated event failure"),
+    new TypeError("fetch failed"),
+  ])("answers server failures from GET and POST with 500: %s", async (error) => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      mocks.resolveWebhookPreflight.mockRejectedValueOnce(error);
+      const get = await webhookRoute.GET(
+        new Request("https://example.test/api/device-sync/webhooks/junction"),
+        createRouteContext({ provider: "junction" }),
+      );
+      mocks.handleWebhook.mockRejectedValueOnce(error);
+      const post = await webhookRoute.POST(
+        createJsonPostRequest("https://example.test/api/device-sync/webhooks/junction", {}),
+        createRouteContext({ provider: "junction" }),
+      );
+      expect(get.status).toBe(500);
+      expect(post.status).toBe(500);
+      expect(logged).toHaveBeenCalledTimes(2);
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
+  it("keeps explicit webhook input rejections at 400", async () => {
+    mocks.handleWebhook.mockRejectedValueOnce(new RequestInputError("Invalid provider input."));
+    const response = await webhookRoute.POST(
+      createJsonPostRequest("https://example.test/api/device-sync/webhooks/junction", {}),
+      createRouteContext({ provider: "junction" }),
+    );
+    expect(response.status).toBe(400);
   });
 
   it("durably enqueues a verified provider-gated webhook without synchronous admission", async () => {

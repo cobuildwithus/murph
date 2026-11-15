@@ -97,16 +97,17 @@ describe("Worker body-limit response parity", () => {
     });
   });
   it.each([
-    [new RangeError("Synthetic stream failure."), { code: "invalid_request", error: "Malformed device webhook envelope." }],
-    [new TypeError("Synthetic stream failure."), { error: "Invalid request." }],
-    [new URIError("Synthetic stream failure."), { error: "Invalid request." }],
-    [new SyntaxError("Synthetic stream failure."), { error: "Invalid JSON." }],
-  ] as const)("preserves provider-webhook stream failure responses until its own migration: %s", async (failure, body) => {
+    new RangeError("Synthetic stream failure."),
+    new TypeError("Synthetic stream failure."),
+    new URIError("Synthetic stream failure."),
+    new SyntaxError("Synthetic stream failure."),
+  ])("answers a device webhook stream failure as a server error: %s", async (failure) => {
     const c = context(0, "streamed");
     Object.defineProperty(c.request, "body", { value: new ReadableStream({ start(controller) { controller.error(failure); } }) });
-    const response = await deviceWebhookEnqueueRoutes[0]!.handle(c, {});
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toEqual(body);
+    const response = await Promise.resolve(deviceWebhookEnqueueRoutes[0]!.handle(c, {}))
+      .catch(error => mapWorkerRouteError(c.request, error));
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({ error: "Internal error." });
   });
 
   it("does not label a parser RangeError as game media size", async () => {
