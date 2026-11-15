@@ -417,6 +417,15 @@ test("parseLinqWebhookEvent surfaces payload errors through the exported type gu
   );
 });
 
+// An over-long handle would otherwise fail deep in our own code as a server
+// error, so Linq would resend a payload that can never succeed.
+test("parseLinqMessageReceivedEvent rejects a sender handle longer than any address", () => {
+  const event = buildV2026MessageReceivedWebhook({
+    data: { sender_handle: { handle: `${"a".repeat(320)}@example.test`, id: "handle_long", service: "iMessage" } },
+  });
+  assert.throws(() => parseLinqMessageReceivedEvent(event), /at most 320 characters/u);
+});
+
 test("parseLinqMessageReceivedEvent exposes summaries and minimizers", () => {
   const event = parseLinqMessageReceivedEvent({
     ...buildV2026MessageReceivedWebhook({

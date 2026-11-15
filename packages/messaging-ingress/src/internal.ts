@@ -133,7 +133,9 @@ export function toIsoTimestamp(value: Date | string | number): string {
 
   const date = value instanceof Date ? value : new Date(value);
 
-  if (Number.isNaN(date.valueOf())) {
+  // Past year 9999 the ISO form changes shape and date arithmetic can leave the
+  // representable range, so no such provider time is accepted.
+  if (Number.isNaN(date.valueOf()) || date.getUTCFullYear() > 9999) {
     throw new ContractValidationError(`Invalid ISO timestamp: ${String(value)}`);
   }
 

@@ -197,6 +197,7 @@ const DEFAULT_LINQ_WEBHOOK_TIMESTAMP_TOLERANCE_MS = 5 * 60_000;
 const LINQ_WEBHOOK_SIGNATURE_HEX_PATTERN = /^[a-f0-9]{64}$/iu;
 const LINQ_WEBHOOK_TIMESTAMP_TIMEZONE_PATTERN = /(?:[zZ]|[+-]\d\d(?::?\d\d)?)$/u;
 const LINQ_MESSAGE_EDITED_MAX_TEXT_CHARS = 10_000;
+const LINQ_CHAT_HANDLE_MAX_CHARS = 320;
 
 export class LinqWebhookVerificationError extends Error {
   constructor(message: string) {
@@ -1189,9 +1190,14 @@ function parseOptionalChatHandle(value: unknown): LinqChatHandle | null {
   }
 
   const record = toLinqObjectRecord(value, "Linq chat handle");
+  const handle = normalizeRequiredString(record.handle, "Linq chat handle.handle");
+  // A phone number or email address; nothing valid is longer.
+  if (handle.length > LINQ_CHAT_HANDLE_MAX_CHARS) {
+    throw new ContractValidationError(`Linq chat handle.handle must be at most ${LINQ_CHAT_HANDLE_MAX_CHARS} characters.`);
+  }
   return {
     id: normalizeNullableString(record.id) ?? undefined,
-    handle: normalizeRequiredString(record.handle, "Linq chat handle.handle"),
+    handle,
     is_me: typeof record.is_me === "boolean" ? record.is_me : undefined,
     joined_at: normalizeOptionalTimestamp(record.joined_at, "Linq chat handle.joined_at") ?? undefined,
     left_at: normalizeOptionalTimestamp(record.left_at, "Linq chat handle.left_at") ?? undefined,

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { RequestInputError } from "@murphai/hosted-execution/request-input";
 const m = vi.hoisted(() => ({ find: vi.fn(), update: vi.fn(), definition: vi.fn(), result: vi.fn(), encrypt: vi.fn(), provider: vi.fn(), notify: vi.fn(), recover: vi.fn() }));
 vi.mock("../src/lib/prisma", () => ({ getPrisma: () => ({ hostedConversationPoll: { findFirst: m.find, updateMany: m.update } }) }));
 vi.mock("../src/lib/hosted-onboarding/contact-privacy", () => ({ createHostedLinqMessageLookupKeyReadCandidates: (id: string) => ["blinded:" + id] }));
@@ -33,8 +34,31 @@ describe("signed Linq poll vote handler", () => {
   });
   it("rejects wrong-chat events before provider work", async () => {
     m.definition.mockResolvedValue({ target: "other-chat" });
-    await expect(handleHostedLinqPollWebhook(event)).rejects.toThrow("binding mismatch");
+    await expect(handleHostedLinqPollWebhook(event)).rejects.toBeInstanceOf(RequestInputError);
     expect(m.provider).not.toHaveBeenCalled();
+  });
+  it("rejects malformed vote payloads before storage", async () => {
+    await expect(handleHostedLinqPollWebhook({ ...event, data: null })).rejects.toBeInstanceOf(RequestInputError);
+    expect(m.find).not.toHaveBeenCalled();
+  });
+  it("keeps corrupt stored poll bindings as server faults", async () => {
+    m.result.mockResolvedValue(null);
+    await expect(handleHostedLinqPollWebhook(event)).rejects.toBeInstanceOf(TypeError);
+    expect(m.provider).not.toHaveBeenCalled();
+  });
+  it("refreshes a committed snapshot after notification failure without applying vote deltas twice", async () => {
+    m.notify.mockRejectedValueOnce(new TypeError("Synthetic notification failure"));
+    await expect(handleHostedLinqPollWebhook(event)).rejects.toThrow("Synthetic notification failure");
+    expect(m.update).toHaveBeenCalledTimes(1);
+    m.find.mockResolvedValue({ ...row, resultEncrypted: "fresh" });
+    await expect(handleHostedLinqPollWebhook(event)).resolves.toBe(true);
+    expect(m.encrypt.mock.calls.map(call => call[2].snapshot)).toEqual([
+      { totalVoters: 3 }, { totalVoters: 3 },
+    ]);
+    m.find.mockResolvedValue({ ...row, resultEncrypted: "fresh", resultNotifiedAt: new Date() });
+    await expect(handleHostedLinqPollWebhook(event)).resolves.toBe(true);
+    expect(m.notify).toHaveBeenCalledTimes(2);
+    expect(m.recover).toHaveBeenCalledTimes(1);
   });
   it("retries pending creation and rechecks binding after a race", async () => {
     m.find.mockResolvedValueOnce(null).mockResolvedValueOnce({ id: row.id });
