@@ -1,7 +1,7 @@
 import { artPiece, face, FULL, mono, withArticle, type BuiltPage, type Piece } from "./pages.js";
 import {
-  BOARD, COLOR, applyText, baselineIn, createCanvas, drawCover, drawLines, grow, loadPicture, onNight, requireDrawable, roundedRect, setShadow, textWidth, wrapText,
-  type Ctx, type Image, type Rect, type TextStyle,
+  BOARD, COLOR, applyText, baselineIn, createCanvas, drawCover, drawLines, grow, onNight, requireDrawable, roundedRect, setShadow, textWidth, wrapText,
+  type Ctx, type Image, type PictureLoader, type Rect, type TextStyle,
 } from "./surface.js";
 import { lyricWordStarts } from "./timeline.js";
 import { RecapVideoRefusal, type RecapVideoInput, type RecapVideoPage } from "./types.js";
@@ -40,12 +40,12 @@ export function songTint(cover: Image | null): { card: string; ink: string } {
 
 // MARK: The theme song, like a song in a music app, without its buttons.
 
-export async function buildSong(page: RecapVideoPage, input: RecapVideoInput): Promise<BuiltPage> {
+export async function buildSong(page: RecapVideoPage, input: RecapVideoInput, load: PictureLoader): Promise<BuiltPage> {
   const song = page.song;
   if (!song) throw new RecapVideoRefusal("missing_song", "The song page has no song.");
   const coverId = input.show.pages.find(other => other.kind === "cover")?.id;
   const coverPath = coverId ? input.scenes[coverId] : undefined;
-  const cover = coverPath ? await loadPicture(coverPath, "the cover") : null;
+  const cover = coverPath ? await load(coverPath, "the cover") : null;
   const tint = songTint(cover);
   const songMs = input.soundtrack.songMs;
 
@@ -78,7 +78,7 @@ export async function buildSong(page: RecapVideoPage, input: RecapVideoInput): P
     const texts = timed && timed.length === starts[index]?.length ? timed : line.split(/\s+/u).filter(Boolean);
     lineTops.push(y);
     lineStarts.push(starts[index]?.[0] ?? songMs);
-    let x = 0;
+    let x = 0, rows = 1;
     texts.forEach((text, at) => {
       requireDrawable(text, lyricStyle);
       const width = textWidth(text, lyricStyle);
@@ -86,6 +86,8 @@ export async function buildSong(page: RecapVideoPage, input: RecapVideoInput): P
       if (x > 0 && x + width > pane.width) {
         x = 0;
         y += lyricStyle.lineHeight;
+        // The card shows the line being sung on two rows, as the app does. A longer one would run out of sight.
+        if (++rows > 2) throw new RecapVideoRefusal("does_not_fit", "A lyric line is too long for the lyrics card.");
       }
       placed.push({ text, x, y, startMs: starts[index]?.[at] ?? songMs });
       x += width + space;
@@ -167,9 +169,9 @@ export async function buildSong(page: RecapVideoPage, input: RecapVideoInput): P
 interface Stake { height: number; bounds: (top: number) => Rect; paint(ctx: Ctx, top: number): void }
 
 /** The prize, as the winner's gold ticket. */
-async function ticket(title: string, owes: string, iconPath: string | undefined): Promise<Stake> {
+async function ticket(title: string, owes: string, iconPath: string | undefined, load: PictureLoader): Promise<Stake> {
   const width = 256, height = 170, pad = 20, tilt = -3;
-  const icon = iconPath ? await loadPicture(iconPath, "the prize's icon") : null;
+  const icon = iconPath ? await load(iconPath, "the prize's icon") : null;
   const label = mono(11, 0.24, COLOR.ticketInk, 14), small = mono(11, 0.2, COLOR.ticketInk, 14);
   const prize: TextStyle = { font: "display", weight: 600, size: 26, lineHeight: 32, color: COLOR.ticketInk };
   const good = "GOOD FOR ONE", star = 5, starGap = textWidth("  ", label);
@@ -234,8 +236,9 @@ async function ticket(title: string, owes: string, iconPath: string | undefined)
       ctx.fillText(good, lineLeft + star + starGap, baselineIn(row, label));
       row += 14 + 4;
       if (icon) {
-        const iconWidth = 46 * icon.width / icon.height;
-        ctx.drawImage(icon, x + (width - iconWidth) / 2, row, iconWidth, 46);
+        // Whole inside its row, as the app fits a prize's drawing: a wide one is shorter, never wider than its place.
+        const fit = Math.min(46 / icon.height, 104 / icon.width), iconWidth = icon.width * fit, iconHeight = icon.height * fit;
+        ctx.drawImage(icon, x + (width - iconWidth) / 2, row + (46 - iconHeight) / 2, iconWidth, iconHeight);
         row += 46 + 4;
       }
       drawLines(ctx, [title], prize, x, row, width);
@@ -257,23 +260,23 @@ export function posterWords(input: RecapVideoInput): { title: string; owes: stri
   return { title: `${winner.name} wins.`, owes: `${loser.name} owes ${winner.name}` };
 }
 
-export async function buildPoster(_page: RecapVideoPage, input: RecapVideoInput): Promise<BuiltPage> {
+export async function buildPoster(_page: RecapVideoPage, input: RecapVideoInput, load: PictureLoader): Promise<BuiltPage> {
   const { outcome, stake } = input, said = posterWords(input);
   if (outcome.kind !== "won" || stake.kind !== "prize") throw new RecapVideoRefusal("unsupported_stake", "No drawing yet for this last screen.");
   const pieces: Piece[] = [];
   const coverId = input.show.pages.find(other => other.kind === "cover")?.id;
   const coverPath = coverId ? input.scenes[coverId] : undefined;
-  if (coverPath) pieces.push(artPiece(await loadPicture(coverPath, "the cover"), 0.555, 222, "top"));
+  if (coverPath) pieces.push(artPiece(await load(coverPath, "the cover"), 0.555, 222, "top"));
 
   const width = BOARD.width - 48;
   const digits: TextStyle = { font: "display", weight: 600, size: 80, lineHeight: 96, tracking: -2.4, color: COLOR.onNight };
   const titleStyle: TextStyle = { font: "display", weight: 600, size: 44, lineHeight: 53, tracking: -0.88, color: COLOR.onNight };
   const scores = [String(input.scores[outcome.winnerId] ?? ""), String(input.scores[outcome.loserId] ?? "")] as const;
   if (scores.some(score => !/^\d{1,3}$/u.test(score))) throw new RecapVideoRefusal("unsupported_outcome", "The result has no score to show.");
-  const faces = [await face(input, outcome.winnerId), await face(input, outcome.loserId)] as const;
+  const faces = [await face(input, outcome.winnerId, load), await face(input, outcome.loserId, load)] as const;
   const title = wrapText(said.title, titleStyle, width);
   if (title.length !== 1) throw new RecapVideoRefusal("does_not_fit", "The winner's name is too long for the last screen.");
-  const prize = await ticket(stake.title, said.owes, stake.iconPath);
+  const prize = await ticket(stake.title, said.owes, stake.iconPath, load);
   const mark = mono(13, 0.3, COLOR.tan, 16), markTop = BOARD.height - 64 - 16;
   const height = 96 + 20 + 53 + 16 + prize.height;
   // The score sits on the cover's foot, and rises when the stake needs the room.
@@ -283,6 +286,7 @@ export async function buildPoster(_page: RecapVideoPage, input: RecapVideoInput)
 
   const numbersWidth = textWidth(scores[0], digits) + 10 + 16 + 10 + textWidth(scores[1], digits);
   const rowWidth = 64 + 18 + numbersWidth + 18 + 64, rowLeft = (BOARD.width - rowWidth) / 2;
+  if (rowWidth > width) throw new RecapVideoRefusal("does_not_fit", "The score is too wide for the last screen.");
   pieces.push({
     name: "score", arriveAt: 0.03, bounds: grow({ x: 24, y: top, width, height: 96 }, 10),
     paint: ctx => {

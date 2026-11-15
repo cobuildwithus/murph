@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { readFile, stat } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 import { createCanvas, GlobalFonts, loadImage, type Canvas, type Image, type SKRSContext2D } from "@napi-rs/canvas";
@@ -280,13 +281,66 @@ export function drawCover(ctx: Ctx, image: Image, rect: Rect, options: { zoom?: 
   ctx.drawImage(image, middleX + (x - middleX) * zoom, middleY + (y - middleY) * zoom, width * zoom, height * zoom);
 }
 
-export async function loadPicture(path: string | undefined, what: string): Promise<Image> {
-  if (!path) throw new RecapVideoRefusal("missing_picture", `The recap has no file for ${what}.`);
-  try {
-    return await loadImage(path);
-  } catch {
-    throw new RecapVideoRefusal("missing_picture", `The file for ${what} could not be read as a picture.`);
+/** A picture's file and sides are at most this large, and a show's pictures this many pixels in all: about half a gigabyte decoded. */
+const MAX_PICTURE_BYTES = 16_000_000, MAX_PICTURE_SIDE = 4096, MAX_SHOW_PIXELS = 120_000_000;
+
+/** A JPEG's or a PNG's size, read from its header without decoding it. */
+export function pictureSize(bytes: Buffer): { width: number; height: number } | null {
+  if (bytes.length >= 24 && bytes.readUInt32BE(0) === 0x89504e47 && bytes.readUInt32BE(4) === 0x0d0a1a0a) {
+    return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
   }
+  if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return null;
+  let at = 2;
+  while (at + 9 <= bytes.length && bytes[at] === 0xff) {
+    const marker = bytes[at + 1] ?? 0;
+    if (marker === 0xff) {
+      at++;
+    } else if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd9)) {
+      at += 2;
+    } else if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+      // A start of frame carries the size; the three markers left out are tables.
+      return { width: bytes.readUInt16BE(at + 7), height: bytes.readUInt16BE(at + 5) };
+    } else {
+      at += 2 + bytes.readUInt16BE(at + 2);
+    }
+  }
+  return null;
+}
+
+export type PictureLoader = (path: string | undefined, what: string) => Promise<Image>;
+
+/**
+ * Loads one show's pictures, each file once. A picture is measured from its
+ * header before it is decoded, so a small file that unpacks into gigabytes
+ * is refused without being unpacked.
+ */
+export function createPictureLoader(): PictureLoader {
+  const loaded = new Map<string, Promise<Image>>();
+  let pixels = 0;
+  const load = async (path: string, what: string): Promise<Image> => {
+    const bytes = await stat(path).then(file => file.size <= MAX_PICTURE_BYTES ? readFile(path) : null, () => null);
+    if (!bytes) throw new RecapVideoRefusal("missing_picture", `The file for ${what} could not be read.`);
+    const size = pictureSize(bytes);
+    if (!size || size.width < 1 || size.height < 1 || size.width > MAX_PICTURE_SIDE || size.height > MAX_PICTURE_SIDE) {
+      throw new RecapVideoRefusal("unsupported_picture", `The file for ${what} is not a JPEG or PNG of a size a recap uses.`);
+    }
+    pixels += size.width * size.height;
+    if (pixels > MAX_SHOW_PIXELS) throw new RecapVideoRefusal("unsupported_picture", "The show's pictures are larger than a recap's are.");
+    try {
+      return await loadImage(bytes);
+    } catch {
+      throw new RecapVideoRefusal("missing_picture", `The file for ${what} could not be read as a picture.`);
+    }
+  };
+  return async (path, what) => {
+    if (!path) throw new RecapVideoRefusal("missing_picture", `The recap has no file for ${what}.`);
+    let picture = loaded.get(path);
+    if (!picture) {
+      picture = load(path, what);
+      loaded.set(path, picture);
+    }
+    return picture;
+  };
 }
 
 export { createCanvas };

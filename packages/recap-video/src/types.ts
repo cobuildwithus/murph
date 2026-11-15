@@ -84,6 +84,7 @@ export type RecapVideoRefusalCode =
   | "unsupported_text"
   | "does_not_fit"
   | "missing_picture"
+  | "unsupported_picture"
   | "missing_song"
   | "invalid_soundtrack"
   | "too_large"

@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { stat } from "node:fs/promises";
+import { rm, stat } from "node:fs/promises";
 
 import type { RecapVideoRenderer } from "./renderer.js";
 import { RecapVideoRefusal, type RecapVideoSoundtrack } from "./types.js";
@@ -71,7 +71,7 @@ export async function encodeRecapVideo(renderer: RecapVideoRenderer, soundtrack:
     ffmpeg.on("error", () => finish(null));
     ffmpeg.on("close", finish);
   });
-  let drawMs = 0;
+  let drawMs = 0, finished = false;
   try {
     for (let frame = 0; frame < frameCount && !ended; frame++) {
       const started = performance.now();
@@ -79,18 +79,26 @@ export async function encodeRecapVideo(renderer: RecapVideoRenderer, soundtrack:
       drawMs += performance.now() - started;
       if (!ffmpeg.stdin.write(pixels)) await Promise.race([new Promise<void>(resolve => ffmpeg.stdin.once("drain", resolve)), closed]);
     }
-  } finally {
     ffmpeg.stdin.end();
+    const code = await closed;
+    if (code === null) throw new RecapVideoRefusal("encoder_failed", "ffmpeg could not be started, or was stopped.");
+    if (code !== 0) throw new RecapVideoRefusal("encoder_failed", `ffmpeg exited ${code}: ${stderr.trim().split("\n").at(-1) ?? ""}`);
+    const bytes = (await stat(outPath)).size;
+    if (bytes > maxBytes) throw new RecapVideoRefusal("too_large", `The video came out at ${bytes} bytes, over its ${maxBytes} byte budget.`);
+    const times = /utime=([\d.]+)s stime=([\d.]+)s/u.exec(stderr), rss = /maxrss=(\d+)\s*(?:kB|KiB)/u.exec(stderr);
+    finished = true;
+    return {
+      bytes, frames: frameCount, drawMs,
+      // macOS counts peak memory in bytes where Linux counts kilobytes, and ffmpeg prints either as kilobytes.
+      encoder: times && rss ? { userSeconds: Number(times[1]), systemSeconds: Number(times[2]), maxRssBytes: Number(rss[1]) * (process.platform === "darwin" ? 1 : 1024) } : null,
+    };
+  } finally {
+    if (!finished) {
+      // However it went wrong, ffmpeg is gone and nothing of the file is left by the time this returns.
+      ffmpeg.stdin.destroy();
+      if (!ended) ffmpeg.kill("SIGKILL");
+      await closed;
+      await rm(outPath, { force: true });
+    }
   }
-  const code = await closed;
-  if (code === null) throw new RecapVideoRefusal("encoder_failed", "ffmpeg could not be started, or was stopped.");
-  if (code !== 0) throw new RecapVideoRefusal("encoder_failed", `ffmpeg exited ${code}: ${stderr.trim().split("\n").at(-1) ?? ""}`);
-  const bytes = (await stat(outPath)).size;
-  if (bytes > maxBytes) throw new RecapVideoRefusal("too_large", `The video came out at ${bytes} bytes, over its ${maxBytes} byte budget.`);
-  const times = /utime=([\d.]+)s stime=([\d.]+)s/u.exec(stderr), rss = /maxrss=(\d+)\s*(?:kB|KiB)/u.exec(stderr);
-  return {
-    bytes, frames: frameCount, drawMs,
-    // macOS counts peak memory in bytes where Linux counts kilobytes, and ffmpeg prints either as kilobytes.
-    encoder: times && rss ? { userSeconds: Number(times[1]), systemSeconds: Number(times[2]), maxRssBytes: Number(rss[1]) * (process.platform === "darwin" ? 1 : 1024) } : null,
-  };
 }

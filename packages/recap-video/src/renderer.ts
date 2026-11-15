@@ -1,7 +1,7 @@
 import { buildPoster, buildSong } from "./closing-pages.js";
 import { buildStoryPage, type BuiltPage, type Piece } from "./pages.js";
 import {
-  BOARD, COLOR, SCALE, VIDEO_HEIGHT, VIDEO_WIDTH, beginLayer, createCanvas, createLayer, onNight, registerRecapFonts, roundedRect,
+  BOARD, COLOR, SCALE, VIDEO_HEIGHT, VIDEO_WIDTH, beginLayer, createCanvas, createLayer, createPictureLoader, onNight, registerRecapFonts, roundedRect,
   type Canvas, type Ctx, type Layer,
 } from "./surface.js";
 import { RECAP_VIDEO_FPS, buildRecapVideoTimeline, entryIndexAt, type RecapVideoEntryKind, type RecapVideoTimeline } from "./timeline.js";
@@ -67,9 +67,9 @@ function paintBars(ctx: Ctx, count: number, index: number, part: number, light: 
 export async function createRecapVideoRenderer(input: RecapVideoInput): Promise<RecapVideoRenderer> {
   registerRecapFonts();
   const timeline = buildRecapVideoTimeline(input);
-  const pages: BuiltPage[] = [];
+  const pages: BuiltPage[] = [], load = createPictureLoader();
   for (const entry of timeline.entries) {
-    pages.push(entry.kind === "song" ? await buildSong(entry.page, input) : entry.kind === "poster" ? await buildPoster(entry.page, input) : await buildStoryPage(entry, input));
+    pages.push(entry.kind === "song" ? await buildSong(entry.page, input, load) : entry.kind === "poster" ? await buildPoster(entry.page, input, load) : await buildStoryPage(entry, input, load));
   }
   const canvas = createCanvas(VIDEO_WIDTH, VIDEO_HEIGHT), ctx = canvas.getContext("2d");
   // One page's layers at a time: frames come in order, and a page's layers are not needed once it has passed.

@@ -1,6 +1,6 @@
 import {
-  BOARD, COLOR, castShadow, drawCover, drawLines, grow, loadPicture, onNight, requireDrawable, roundedRect, setShadow, textWidth, wrapText,
-  type Ctx, type Image, type Rect, type Shadow, type TextStyle,
+  BOARD, COLOR, castShadow, drawCover, drawLines, grow, onNight, requireDrawable, roundedRect, setShadow, textWidth, wrapText,
+  type Ctx, type Image, type PictureLoader, type Rect, type Shadow, type TextStyle,
 } from "./surface.js";
 import type { RecapVideoEntry } from "./timeline.js";
 import { RecapVideoRefusal, type RecapVideoBlock, type RecapVideoInput, type RecapVideoPage } from "./types.js";
@@ -171,10 +171,10 @@ function artPiece(image: Image, share: number, fade: number, anchor: "middle" | 
 
 // MARK: Cover
 
-async function buildCover(page: RecapVideoPage, input: RecapVideoInput): Promise<BuiltPage> {
+async function buildCover(page: RecapVideoPage, input: RecapVideoInput, load: PictureLoader): Promise<BuiltPage> {
   const pieces: Piece[] = [];
   const scene = input.scenes[page.id];
-  if (scene) pieces.push(artPiece(await loadPicture(scene, "the cover"), 0.69, 162, "middle"));
+  if (scene) pieces.push(artPiece(await load(scene, "the cover"), 0.69, 162, "middle"));
   const width = BOARD.width - 48, gap = 14;
   const title = page.blocks.find(block => block.kind === "headline")?.text;
   if (!title) throw new RecapVideoRefusal("unsupported_page", "The cover has no title.");
@@ -213,8 +213,8 @@ type StoryItem =
   | { kind: "photo"; image: Image }
   | { kind: "pair"; images: [Image, Image] };
 
-async function storyItems(page: RecapVideoPage, input: RecapVideoInput): Promise<StoryItem[]> {
-  const photo = (id: string | undefined): Promise<Image> => loadPicture(id ? input.photos[id] : undefined, "a photo");
+async function storyItems(page: RecapVideoPage, input: RecapVideoInput, load: PictureLoader): Promise<StoryItem[]> {
+  const photo = (id: string | undefined): Promise<Image> => load(id ? input.photos[id] : undefined, "a photo");
   const items: StoryItem[] = [];
   for (const block of page.blocks) {
     if (block.kind === "photo") items.push({ kind: "photo", image: await photo(block.entryIds?.[0]) });
@@ -225,17 +225,17 @@ async function storyItems(page: RecapVideoPage, input: RecapVideoInput): Promise
     const at = Math.min(Math.max(page.imageIndex ?? 0, 0), items.length);
     const scene = input.scenes[page.id];
     // A scene that failed falls back to its photo, or to its words alone.
-    if (scene) items.splice(at, 0, { kind: "scene", image: await loadPicture(scene, "a scene") });
+    if (scene) items.splice(at, 0, { kind: "scene", image: await load(scene, "a scene") });
     else if (page.fallback?.kind === "photo") items.splice(at, 0, { kind: "photo", image: await photo(page.fallback.entryIds[0]) });
   }
   if (items.filter(item => item.kind !== "words").length > 1) throw new RecapVideoRefusal("unsupported_page", "A page holds one picture.");
   return items;
 }
 
-async function buildStory(page: RecapVideoPage, input: RecapVideoInput): Promise<BuiltPage> {
+async function buildStory(page: RecapVideoPage, input: RecapVideoInput, load: PictureLoader): Promise<BuiltPage> {
   const column: Rect = { x: 24, y: BOARD.top + 48, width: BOARD.width - 48, height: BOARD.height - BOARD.top - 48 - BOARD.bottom - 26 };
   const gap = 22, ink = inkFor(page.background);
-  const items = await storyItems(page, input);
+  const items = await storyItems(page, input, load);
   if (items.length === 0) throw new RecapVideoRefusal("unsupported_page", "A page has nothing to show.");
   const made = items.map(item => item.kind === "words" ? words(item.block, ink, column.width) : null);
   // A picture takes the room the words leave.
@@ -291,10 +291,10 @@ async function buildStory(page: RecapVideoPage, input: RecapVideoInput): Promise
 // MARK: Faces
 
 /** A profile photo filling its circle from the middle, or the player's initial on sage. */
-async function face(input: RecapVideoInput, memberId: string): Promise<(ctx: Ctx, x: number, y: number, size: number) => void> {
+async function face(input: RecapVideoInput, memberId: string, load: PictureLoader): Promise<(ctx: Ctx, x: number, y: number, size: number) => void> {
   const player = input.players[memberId];
   if (!player) throw new RecapVideoRefusal("unsupported_page", "A page names a player the game does not have.");
-  const photo = player.avatarPath ? await loadPicture(player.avatarPath, "a profile photo") : null;
+  const photo = player.avatarPath ? await load(player.avatarPath, "a profile photo") : null;
   const initial = [...player.name.trim()][0]?.toUpperCase() ?? "";
   if (!photo) requireDrawable(initial, { font: "sans", size: 10, lineHeight: 10, color: COLOR.onNight });
   return (ctx, x, y, size) => {
@@ -316,11 +316,11 @@ async function face(input: RecapVideoInput, memberId: string): Promise<(ctx: Ctx
 
 // MARK: Most likely to
 
-async function buildLikely(page: RecapVideoPage, input: RecapVideoInput): Promise<BuiltPage> {
+async function buildLikely(page: RecapVideoPage, input: RecapVideoInput, load: PictureLoader): Promise<BuiltPage> {
   const card = page.card;
   if (!card) throw new RecapVideoRefusal("unsupported_page", "A Most likely to page has no card.");
   const column: Rect = { x: 30, y: BOARD.top + 40, width: BOARD.width - 60, height: BOARD.height - BOARD.top - 40 - BOARD.bottom - 26 };
-  const gap = 18, drawFace = await face(input, card.memberId);
+  const gap = 18, drawFace = await face(input, card.memberId, load);
   const nameStyle = mono(13, 0.3, COLOR.muted);
   const leadStyle: TextStyle = { font: "display", weight: 400, italic: true, size: 24, lineHeight: 31.2, color: COLOR.muted };
   const titleStyle: TextStyle = { font: "display", weight: 700, size: 42, lineHeight: 46, tracking: -0.42, color: COLOR.ink };
@@ -361,10 +361,10 @@ async function buildLikely(page: RecapVideoPage, input: RecapVideoInput): Promis
   return { ground: COLOR.ground, light: true, pieces };
 }
 
-export async function buildStoryPage(entry: RecapVideoEntry, input: RecapVideoInput): Promise<BuiltPage> {
-  if (entry.kind === "cover") return buildCover(entry.page, input);
-  if (entry.kind === "superlative") return buildLikely(entry.page, input);
-  return buildStory(entry.page, input);
+export async function buildStoryPage(entry: RecapVideoEntry, input: RecapVideoInput, load: PictureLoader): Promise<BuiltPage> {
+  if (entry.kind === "cover") return buildCover(entry.page, input, load);
+  if (entry.kind === "superlative") return buildLikely(entry.page, input, load);
+  return buildStory(entry.page, input, load);
 }
 
 export { artPiece, face, FULL, mono };

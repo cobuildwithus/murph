@@ -10,7 +10,8 @@ import { writeFixture } from "../test/fixture.js";
 const args = process.argv.slice(2);
 const flag = (name: string): string | undefined => args.find(arg => arg.startsWith(`--${name}=`))?.split("=")[1];
 const directory = await mkdtemp(path.join(os.tmpdir(), "recap-video-measure-"));
-const out = args.find(arg => !arg.startsWith("--")) ?? path.join(directory, "recap.mp4");
+const kept = args.find(arg => !arg.startsWith("--"));
+const out = kept ?? path.join(directory, "recap.mp4");
 try {
   const started = performance.now();
   const input = await writeFixture(directory, flag("music") === "song" ? "song" : "score");
@@ -30,8 +31,9 @@ try {
     drawSeconds: Number((result.drawMs / 1000).toFixed(2)),
     drawProcess: { cpuSeconds: Number(((usage.userCPUTime + usage.systemCPUTime) / 1e6).toFixed(2)), peakMegabytes: Math.round(peak / 1e6) },
     encoder: result.encoder && { cpuSeconds: Number((result.encoder.userSeconds + result.encoder.systemSeconds).toFixed(2)), peakMegabytes: Math.round(result.encoder.maxRssBytes / 1e6) },
-    out: args.some(arg => !arg.startsWith("--")) ? out : "(removed)",
+    out: kept ?? "(removed)",
   }, null, 2));
 } finally {
-  if (!args.some(arg => !arg.startsWith("--"))) await rm(directory, { recursive: true, force: true });
+  // The fixture's pictures and music go either way; a video asked for by name is somewhere else.
+  await rm(directory, { recursive: true, force: true });
 }

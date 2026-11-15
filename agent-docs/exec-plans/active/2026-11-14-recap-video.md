@@ -431,6 +431,60 @@ delivery before slices 3 to 6. Six findings, each checked against the code.
 The review did not see the renderer, the iOS source or the reference kit;
 visual parity and container timing stay with the gate and the measurements.
 
+### Codex deep review of slice 1 (2026-11-15, read-only, before landing)
+
+Fifteen findings on the renderer package, each checked against the code, the
+approved reference page and the iOS source. Eleven accepted and fixed with a
+test; four rejected with evidence.
+
+1. High, accepted. A lyric line long enough to wrap past the lyrics card was
+   clipped for the whole song. The card shows the line being sung on two rows,
+   as the app does; a longer line is refused.
+2. High, accepted. Pictures were decoded with no bound. A picture's size is
+   now read from its header first: only a JPEG or PNG of at most 4,096 pixels
+   a side is decoded, a show's pictures are capped at 120 megapixels in all,
+   and each file is decoded once (the cover was decoded three times).
+3. High, accepted. A cover with a second headline, a quote or a stat, and a
+   card, song or result page with blocks, dropped that content silently. Each
+   is now a refusal, as is a second song or result page.
+4. Medium, accepted. Word timings and the soundtrack's numbers were trusted.
+   Times that are not finite, not in order, or end before they start are
+   refused.
+5. Medium, accepted in the smallest form. The app draws the timed words'
+   text, and the server builds those from the lyrics, so they cannot differ
+   on the product path. The renderer now refuses a show where they do, in
+   the same check as finding 4.
+6. Medium, accepted in part. Accepted: the last screen starts on a frame and
+   the video ends on one, so its five-second minimum is 150 frames, not 149.
+   Rejected: dropping the second the picture outlasts the music. The approved
+   sample has it (51.03 s for a 50.04 s score).
+7. Medium, accepted. A frame that failed to draw returned while ffmpeg was
+   still running, and a failed or oversized encode left its file. Every
+   failure now stops ffmpeg, waits for it and removes the file.
+8. Medium, accepted. Page, block, text and lyric counts are checked against
+   the recap contract's own maxima before any layout or decoding.
+9. Medium, accepted. A score too wide for its row is refused. (Slice 2 adds
+   the app's shrink rule for two-digit scores.)
+10. Medium, rejected. The review read the reference page, which gives the
+    setup beat to the first block only. The app is the authority:
+    `GameRecapShowStory` gives every block before the picture the setup beat
+    and every block after it the payoff beat, which is what the renderer does.
+11. Medium, rejected. A label on the cover is drawn because the app draws
+    one when a show has it. The owner's ruling is about what real recaps
+    contain (the writer gives none), not a request to hide one.
+12. Medium, accepted. A wide prize icon is fitted inside its place on the
+    ticket instead of being sized by height alone.
+13. Low, rejected. The ticket is 256 pt wide inside a 280 pt slot, as the
+    app's `GameBigTicket` is (12 pt of padding each side inside
+    `frame(maxWidth: 280)`); the app's screenshot measures the same.
+14. Low, accepted. The fonts' OFL texts ship beside the font files.
+15. Low, accepted. The measurement script removes its fixture files whether
+    or not the video is kept.
+
+The review found nothing in determinism, the workspace wiring or the native
+dependency (exact pin, lockfile integrity for the Linux x64 and arm64 gnu and
+musl builds, no install script, supply-chain settings unchanged).
+
 ### Owner decisions recorded after the review (no architecture change)
 
 - Scope: carry the feature through every slice to merge-ready.
