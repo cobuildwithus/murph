@@ -15,7 +15,8 @@ import { stakeItem } from "./views";
 
 /** The last screen's facts, in the third person: who won and what is owed. */
 export type RecapPoster = {
-  outcome: { kind: "won"; winnerMemberId: string; loserMemberId: string } | { kind: "even" };
+  // `everyDay`: neither player missed a day, which the last screen of an even game says.
+  outcome: { kind: "won"; winnerMemberId: string; loserMemberId: string } | { kind: "even"; everyDay: boolean };
   stake: { kind: "prize" | "dare"; title: string; owedByMemberId: string; owedToMemberId: string }
     | { kind: "both_win"; title: string } | { kind: "none" }
     // Owed in a shape the last screen has no single drawing for, such as one item per missed day.
@@ -39,7 +40,8 @@ export function recapPoster(input: RecapPosterInput): RecapPoster {
   const scores = input.result.scores;
   const winner = scores.find(score => outcomeFor(input.result, score.memberId) === "won");
   const loser = winner && scores.find(score => score.memberId !== winner.memberId);
-  const outcome: RecapPoster["outcome"] = winner && loser ? { kind: "won", winnerMemberId: winner.memberId, loserMemberId: loser.memberId } : { kind: "even" };
+  const outcome: RecapPoster["outcome"] = winner && loser ? { kind: "won", winnerMemberId: winner.memberId, loserMemberId: loser.memberId }
+    : { kind: "even", everyDay: scores.every(score => score.misses === 0) };
   const kindOf = (key: string) => input.terms.versions.flatMap(version => version.stakes).find(stake => stake.key === key)?.kind;
   const member = (seats: readonly number[]) => seats.length === 1 ? scores.find(score => score.seat === seats[0])?.memberId : undefined;
   const [first, second] = input.tickets;

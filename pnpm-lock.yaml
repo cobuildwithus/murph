@@ -509,6 +509,9 @@ importers:
       '@murphai/query':
         specifier: workspace:*
         version: link:../query
+      '@murphai/recap-video':
+        specifier: workspace:*
+        version: link:../recap-video
       '@murphai/runtime-state':
         specifier: workspace:*
         version: link:../runtime-state

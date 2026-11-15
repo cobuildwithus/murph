@@ -1,6 +1,6 @@
 import { ContractValidationError } from '@murphai/contracts/validation-error';
 import { readRecapFile, readRecapDraftFile, saveRecapMediaFile, recapScoreSignature, RECAP_SCORE_MISMATCH } from './recap-files.js'
-import type { SongWordTimestamp, GameRecapStory } from '@murphai/contracts/recap-show'
+import type { SongWordTimestamp, GameRecapStory, GameRecapEnvelope, RecapAsset } from '@murphai/contracts/recap-show'
 import { resolveElevenLabsApiKey } from '@murphai/operator-config/elevenlabs-runtime'
 import type { GeneratedMediaFileRuntime } from '../assistant-codex/generated-media-file.js'
 import type { GenerateImageToolArgs } from '../assistant-codex/generate-image-tool.js'
@@ -219,6 +219,8 @@ export interface AssistantHostedToolContext {
   prepareGameRecapInputs?(material: unknown): Promise<unknown>
   readGameRecapDraft?(draftPath: string): Promise<unknown>
   readGameRecapMedia?(file: string, story?: GameRecapStory): Promise<{ bytes: string; referenceIds: string[]; mediaType: 'image/jpeg' | 'audio/mpeg'; wordsTimestamps?: SongWordTimestamp[]; songStartMs?: number }>
+  /** The show as one video, for a wake that asked for one. `media` holds the verified files by slot. Never fails the recap. */
+  renderGameRecapVideo?(input: { story: GameRecapEnvelope['story']; assets: readonly RecapAsset[]; media: ReadonlyMap<string, Buffer>; signal?: AbortSignal; deadlineAt: number }): Promise<import('./recap-video-render.js').RecapVideoRender>
   currentGameMissedCheckInScope?(): NonNullable<AssistantHostedExecutionContext['gameMissedCheckInScope']> | null
   prepareGameLore?(): Promise<string | null>
   readGameLore?(): Promise<string>
@@ -654,6 +656,16 @@ export function createAssistantHostedToolContext(input: {
       if (story && source.mediaType === 'audio/mpeg' && source.signature !== recapScoreSignature(story)) throw new Error(RECAP_SCORE_MISMATCH)
       const { signature: _signature, ...media } = source
       return { bytes: bytes.toString('base64'), ...media }
+    },
+    renderGameRecapVideo: async ({ story, assets, media, signal, deadlineAt }) => {
+      const scope = executionContext?.gameRecapScope
+      const workspace = recapWorkspace
+      const tool = executionContext?.groupTool
+      if (!scope?.show || !scope.video || !workspace || !tool) return { kind: 'refused', reason: 'scope' }
+      // Loaded only for a recap that makes a video, so nothing of it joins the runner's startup.
+      const { renderRecapShowVideo } = await import('./recap-video-render.js')
+      return renderRecapShowVideo({ vault: input.messageInput.vault, material: workspace.material, story, assets, media, signal, deadlineAt,
+        fetchReference: async (id, fetchSignal) => (await fetchRecapReference({ ...scope, material: workspace.material, id, tool, signal: fetchSignal })).bytes })
     },
     prepareRecapMedia: async (request, fetchImpl) => {
       const scope = executionContext?.gameRecapScope

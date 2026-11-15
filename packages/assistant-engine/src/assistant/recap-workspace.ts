@@ -69,11 +69,19 @@ export async function materializeRecapWorkspace(input: {
     } catch { references.push(reference) /* An unavailable photo must not prevent the recap. */ }
   }
   const manifest = { directory: relativeRoot, instructions: RECAP_SHOW_CRAFT, files: {
-    game: await write('game.json', JSON.stringify({ ...material, references }, null, 1)),
+    game: await write('game.json', JSON.stringify({ ...material, game: modelVisibleGame(material.game), references }, null, 1)),
     chat: await write('chat.jsonl', chat.map(message => `${JSON.stringify(message)}\n`).join('')),
     lore: await write('lore.md', input.lore),
   }, coverage: { retainedSince, throughConversationLaneSeq: through, incomplete: incomplete || replies.incomplete } }
   return { root, material, chat, manifest }
+}
+
+/** The game as the model reads it. `poster` holds the last screen's facts for the recap
+ * video: only the host draws them, so the model's input is the same with the video on or off. */
+function modelVisibleGame(game: unknown): unknown {
+  if (!game || typeof game !== 'object' || Array.isArray(game) || !('poster' in game)) return game
+  const { poster: _poster, ...visible } = game as Record<string, unknown>
+  return visible
 }
 
 /** A reference is named by its ID. The path of its photo, refs/<id>.jpg, names it too. */
@@ -103,10 +111,11 @@ const referenceBytesSchema = z.object({
 }).strict()
 
 export async function fetchRecapReference(input: {
-  eventId: string; gameId: string; material: RecapMaterial; id: string; tool: AssistantHostedGroupTool;
+  eventId: string; gameId: string; material: RecapMaterial; id: string; tool: AssistantHostedGroupTool; signal?: AbortSignal;
 }) {
   if (!input.material.references.some(reference => reference.id === input.id)) throw new Error('Use an authorized recap reference ID.')
-  const response = await input.tool.request({ action: 'read_game', origin: { kind: 'game_recap', eventId: input.eventId, gameId: input.gameId }, recapRead: { kind: 'reference', id: input.id } })
+  const request = { action: 'read_game' as const, origin: { kind: 'game_recap' as const, eventId: input.eventId, gameId: input.gameId }, recapRead: { kind: 'reference' as const, id: input.id } }
+  const response = await (input.signal ? input.tool.request(request, { signal: input.signal }) : input.tool.request(request))
   if (response.result.status !== 'ok' || !('recapGame' in response.result)) throw new Error('Recap reference is no longer available.')
   const value = referenceBytesSchema.parse(response.result.recapGame)
   const bytes = Buffer.from(value.bytes, 'base64')
