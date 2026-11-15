@@ -114,6 +114,8 @@ const DEFAULT_RUNNER_ABORT_WORKSPACE_INVOCATION_TIMEOUT_MS = 1_000;
 const DEFAULT_RUNNER_ACTIVE_LIVENESS_TIMEOUT_MS = 1_000;
 const DEFAULT_RUNNER_RUNTIME_WAKE_TIMEOUT_MS = 5_000;
 const RUNNER_RECENT_READINESS_PROOF_MAX_AGE_MS = 5_000;
+// Media forwards one recap may make: four scenes and up to three takes of its song.
+const RECAP_MEDIA_REQUESTS = 7;
 const RUNNER_READINESS_ABORT_SETTLEMENT_TIMEOUT_MS = 5_000;
 export const RUNNER_CONTAINER_STARTUP_FAILURE_ELAPSED_MAX_MS = 60_000;
 const RUNNER_METADATA_RESPONSE_BODY_MAX_BYTES = 64 * 1024;
@@ -1098,7 +1100,7 @@ export class RunnerContainer extends Container {
     const invocation = this.requireInvocationReceiptStore().readProviderInvocation();
     const scope = this.recapMedia;
     if (!invocation || !scope?.active || invocation.attemptId !== input.attemptId || invocation.generation !== input.generation
-      || scope.attemptId !== input.attemptId || scope.generation !== input.generation || scope.count >= 6) return false;
+      || scope.attemptId !== input.attemptId || scope.generation !== input.generation || scope.count >= RECAP_MEDIA_REQUESTS) return false;
     scope.count += 1;
     return true;
   }

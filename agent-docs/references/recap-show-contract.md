@@ -72,8 +72,11 @@ after S) keeps `cueMs = F`. The result has no cue.
 
 The stored `song` asset alone gains optional `songStartMs: number`, **C**, the
 latest frame boundary at or before both `F - 200` and S. It may precede the sung
-chunk by up to 200 ms and one frame, and is never after the song page's cue. A
-late singer costs no second take. This field is not exposed on the show. The
+chunk by up to 200 ms and one frame, and is never after the song page's cue.
+Because a late singer's song page opens on the band, the host makes another
+take while F is more than 1 s after S, at most three takes in all, and keeps
+the earliest valid singer; a refused or failed retake ends the retakes and
+never replaces an earlier take. This field is not exposed on the show. The
 `score` URL slot serves the full stored MP3; the `song` slot serves its bytes
 from C, after the same authorization and
 full-file integrity check. Scene slots remain `scene-0` through `scene-6`.

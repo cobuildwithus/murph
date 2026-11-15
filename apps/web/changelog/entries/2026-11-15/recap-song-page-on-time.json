@@ -6,14 +6,15 @@
     "kind": "improvement",
     "priority": 2,
     "title": "A recap's last page no longer waits for the singer",
-    "summary": "In a game recap, the theme song's page now opens on time, so every page of the story keeps its five seconds. If the singer comes in late, the extra music plays on the song's page and its lyrics light up as they're sung.",
-    "details": "Recaps made before this update keep their song as it was made.",
+    "summary": "In a game recap, the theme song's page now opens on time, so every page of the story keeps its five seconds, and the singing starts as the song's page opens. When the singer comes in late, Murph makes the music again, up to two more times, and keeps the one where the singing starts soonest.",
+    "details": "If the singer is late every time, the extra music plays on the song's page and its lyrics light up as they're sung. Recaps made before this update keep their song as it was made.",
     "relevanceTags": [
       "games",
       "recaps"
     ],
     "sourcePullRequests": [
-      5012
+      5012,
+      5022
     ]
   }
 }
