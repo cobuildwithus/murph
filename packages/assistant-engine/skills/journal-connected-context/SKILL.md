@@ -10,6 +10,26 @@ or permission. A failed, partial, or window-limited read never shows that
 something was canceled, deleted, or completed, and never raises certainty:
 keep saved facts and verification times.
 
+## Prepared runs
+
+When the run includes Prepared connected context, it replaces Connected reads
+and the provider calls in the passes; use `sourceId` exactly as
+`--plan-source-id` for new plans. Existing alias hits keep their saved identity;
+reconcile uncertain legacy matches through the ledger and canonical plans.
+In alias hits, `revision` is the last captured revision (`null` means unknown),
+and `currentRevision` is today's canonical revision. Preserve member changes
+and every `deleted` plan; never substitute the current revision for capture history.
+Code owns control checks and `activeAccounts` reconciliation; do not repeat
+those writes or list/search accounts. Use `murph.journal_source_read` with
+`locator: sourceId` for full matched messages and exact calendar confirmations.
+For a saved calendar source outside the digest, use its exact provider, account,
+calendar and event ids, percent-encoding each and joining them with colons.
+Use the account's `readAt` as `--plan-verified-at` only for successfully read
+facts, or the exact reader's `readAt` after confirmation. Failed, partial or
+omitted coverage never proves absence. There is no fallback provider browse;
+continue reminder review from permitted canonical context. All judgment and
+opt-out rules below still apply.
+
 ## Eligibility and opt-out check
 
 Before any connected-app call, read the ledger with

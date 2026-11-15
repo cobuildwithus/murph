@@ -13,6 +13,7 @@ import type {
 import {
   AVAILABILITY_CONFLICT_BLOCK_END,
   AVAILABILITY_CONFLICT_BLOCK_START,
+  initializeVault,
   readMemoryDocument,
   shouldSkipAutomationOccurrenceForAvailability,
   splitAutomationAvailabilityConflictBlock,
@@ -37,7 +38,7 @@ import {
 import {
   executeMemberMemoryDynamicTool,
 } from '../src/assistant-codex/dynamic-tools/member-memory.js'
-import { getKnowledgePage } from '../src/knowledge/service.js'
+import { getKnowledgePage, upsertKnowledgePage } from '../src/knowledge/service.js'
 import * as assistantDiagnostics from '../src/assistant/diagnostics.js'
 import {
   resolveAssistantConversationPolicy,
@@ -110,7 +111,8 @@ vi.mock('../src/assistant/automatic-meal-closeout-eligibility.js', () => ({
   canSkipManagedAutomaticMealCloseout: cronMocks.canSkipManagedAutomaticMealCloseout,
 }))
 
-vi.mock('../src/assistant/journal-connected-context-eligibility.js', () => ({
+vi.mock('../src/assistant/journal-connected-context-eligibility.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/assistant/journal-connected-context-eligibility.js')>()),
   canSkipManagedJournalConnectedContext: cronMocks.canSkipManagedJournalConnectedContext,
 }))
 
@@ -155,7 +157,8 @@ vi.mock('@murphai/query', async (importOriginal) => {
   }
 })
 
-vi.mock('@murphai/vault-usecases/runtime', () => ({
+vi.mock('@murphai/vault-usecases/runtime', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@murphai/vault-usecases/runtime')>()),
   loadImporterRuntime: cronMocks.loadImporterRuntime,
   loadRuntimeModule: cronMocks.loadRuntimeModule,
 }))
@@ -6755,6 +6758,7 @@ describe('assistant cron runtime orchestration', () => {
     const occurrenceAt = '2026-04-08T08:00:00.000Z'
     vi.setSystemTime(new Date(occurrenceAt))
     const { vaultRoot } = await createRuntimeContext('assistant-cron-idle-journal-')
+    await initializeVault({ vaultRoot, timezone: 'UTC' })
     const automationId = MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID
     addManagedBackgroundAutomation(vaultRoot, automationId)
     // A member-edited slug cannot bypass the immutable-id gate.
@@ -6772,7 +6776,7 @@ describe('assistant cron runtime orchestration', () => {
     expect(await processDueAssistantCronJobsLocal({ executionContext, limit: 1, onEvent, vault: vaultRoot }))
       .toEqual({ failed: 0, processed: 1, succeeded: 0 })
     expect(cronMocks.canSkipManagedJournalConnectedContext).toHaveBeenCalledExactlyOnceWith({
-      automationId, connectedApps, signal: expect.any(AbortSignal), vaultRoot,
+      automationId, preparedAdmission: 'empty', signal: expect.any(AbortSignal), vaultRoot,
     })
     expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
     expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
@@ -6806,6 +6810,89 @@ describe('assistant cron runtime orchestration', () => {
     await runAssistantCronJobNow({ job: automationId, vault: vaultRoot })
     expect(cronMocks.canSkipManagedJournalConnectedContext).not.toHaveBeenCalled()
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledTimes(1)
+  })
+
+  it('prepares the morning Journal before model entry and removes generic connected-app authority', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T08:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext('assistant-cron-prepared-journal-')
+    await initializeVault({ vaultRoot, timezone: 'UTC' })
+    addManagedBackgroundAutomation(vaultRoot, MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID)
+    const connectedApps = { request: vi.fn(async (request: { operation: string }) => request.operation === 'manage'
+      ? { result: { accounts: [{ id: 'synthetic-mail', toolkit: 'gmail', status: 'ACTIVE', alias: null, connectedAt: null,
+          toolkitConfigured: true, toolkitLabel: 'Gmail', wordId: null }], toolkits: [] } }
+      : { result: { data: { messages: [] } } }) }
+    const executionContext: AssistantExecutionContext = { hosted: {
+      connectedApps, memberId: 'member-synthetic', userEnvKeys: [],
+      resolveScheduledExternalThreadRoute: async ({ target }) => ({ channel: 'telegram', containerMemberId: 'member-synthetic', threadId: target, threadIsDirect: true }),
+    } }
+    await processDueAssistantCronJobsLocal({ executionContext, limit: 1, vault: vaultRoot })
+    const notification = cronMocks.sendAssistantMessageLocal.mock.calls.at(-1)?.[0]
+    expect(notification).toBeDefined()
+    expect(notification?.executionContext?.hosted?.connectedApps).toBeNull()
+    expect(notification?.executionContext?.hosted?.preparedJournal?.readSource).toBeTypeOf('function')
+    expect(JSON.stringify(notification?.prompt ?? notification?.instructions)).toContain('Prepared connected context')
+    expect(JSON.stringify(notification?.prompt ?? notification?.instructions)).not.toContain('Journal calendar read window')
+    // Two fixed query batches in each of the three initial 30-day partitions.
+    expect(connectedApps.request.mock.calls.map(([request]) => request.operation)).toEqual(['manage', ...Array.from({ length: 6 }, () => 'read')])
+  })
+
+  it('expires a first morning Journal occurrence without acquiring or changing active accounts', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T15:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext('assistant-cron-expired-journal-')
+    await initializeVault({ vaultRoot, timezone: 'UTC' })
+    const automationId = MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID
+    addManagedBackgroundAutomation(vaultRoot, automationId)
+    await upsertKnowledgePage({ vault: vaultRoot, slug: 'journal-connected-context', body: JSON.stringify({
+      version: 1, optOuts: { global: false, accounts: [], providers: [], categories: [] }, activeAccounts: [],
+    }) })
+    const before = (await getKnowledgePage({ vault: vaultRoot, slug: 'journal-connected-context' })).page.body
+    const connectedApps = { request: vi.fn(async (request: { operation: string }) => request.operation === 'manage'
+      ? { result: { accounts: [{ id: 'new-mail', toolkit: 'gmail', status: 'ACTIVE', alias: null, connectedAt: null,
+          toolkitConfigured: true, toolkitLabel: 'Gmail', wordId: null }], toolkits: [] } }
+      : { result: { data: { messages: [] } } }) }
+    const result = await processDueAssistantCronJobsLocal({ vault: vaultRoot, limit: 1, executionContext: { hosted: {
+      connectedApps, memberId: 'member-synthetic', userEnvKeys: [],
+      resolveScheduledExternalThreadRoute: async ({ target }) => ({ channel: 'telegram', containerMemberId: 'member-synthetic', threadId: target, threadIsDirect: true }),
+    } } })
+    expect(result).toEqual({ failed: 0, processed: 1, succeeded: 0 })
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+    expect(connectedApps.request).not.toHaveBeenCalled()
+    expect((await getKnowledgePage({ vault: vaultRoot, slug: 'journal-connected-context' })).page.body).toBe(before)
+    expect((await getAssistantCronJob(vaultRoot, automationId)).state.lastError).toContain('expired before delivery')
+  })
+
+  it.each(['global-opt-out', 'failed-account'] as const)('continues morning reminder review with %s', async mode => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-04-08T08:00:00.000Z'))
+    const { vaultRoot } = await createRuntimeContext('assistant-cron-journal-coverage-')
+    await initializeVault({ vaultRoot, timezone: 'UTC' })
+    addManagedBackgroundAutomation(vaultRoot, MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID)
+    if (mode === 'global-opt-out') await upsertKnowledgePage({ vault: vaultRoot, slug: 'journal-connected-context', body: JSON.stringify({
+      version: 1, optOuts: { global: true, accounts: [], providers: [], categories: [] }, activeAccounts: [],
+    }) })
+    const request = vi.fn(async (request: import('@murphai/hosted-execution/connected-apps').HostedConnectedAppsRequest) => {
+      if (request.operation === 'manage') return { result: { accounts: ['failed', 'healthy'].map(id => ({
+        id, toolkit: 'gmail', status: 'ACTIVE', alias: null, connectedAt: null, toolkitConfigured: true, toolkitLabel: 'Gmail', wordId: null,
+      })), toolkits: [] } }
+      if (request.operation !== 'read' || request.input.account === 'failed') throw new Error('Synthetic read failure')
+      return { result: { data: { messages: [] } } }
+    })
+    await processDueAssistantCronJobsLocal({ vault: vaultRoot, limit: 1, executionContext: { hosted: {
+      connectedApps: { request }, memberId: 'member-synthetic', userEnvKeys: [],
+      resolveScheduledExternalThreadRoute: async ({ target }) => ({ channel: 'telegram', containerMemberId: 'member-synthetic', threadId: target, threadIsDirect: true }),
+    } } })
+    expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
+    const prepared = cronMocks.sendAssistantMessageLocal.mock.calls[0]?.[0]?.executionContext?.hosted?.preparedJournal
+    if (mode === 'global-opt-out') {
+      expect(request).not.toHaveBeenCalled()
+      expect(prepared?.issues).toEqual([])
+    } else {
+      expect(prepared?.instructions).toContain('"accountId":"failed","provider":"gmail","coverage":"failed"')
+      expect(prepared?.instructions).toContain('"accountId":"healthy","provider":"gmail","coverage":"complete"')
+      expect(prepared?.issues).toEqual([expect.objectContaining({ details: { failureReason: 'read_failed' } })])
+    }
   })
 
   it('retries automatic meal closeout read failures without model entry or losing the occurrence', async () => {
@@ -7049,12 +7136,14 @@ describe('assistant cron runtime orchestration', () => {
     const { vaultRoot } = await createRuntimeContext(
       'assistant-cron-runtime-journal-eligibility-',
     )
+    await initializeVault({ vaultRoot, timezone: 'UTC' })
     addManagedBackgroundAutomation(vaultRoot, automationId)
     await expect(getKnowledgePage({ vault: vaultRoot, slug: 'journal-connected-context' }))
       .rejects.toMatchObject({ code: 'knowledge_page_not_found' })
-    const request = vi.fn(async () => ({
+    const request = vi.fn(async (request: { operation: string }) => request.operation === 'read' ? { result: { data: { items: [] } } } : ({
       result: {
-        accounts: hasAccount ? [{ id: 'account-new', toolkit: { slug: 'googlecalendar' } }] : [],
+        accounts: hasAccount ? [{ id: 'account-new', toolkit: 'googlecalendar', status: 'ACTIVE', alias: null,
+          connectedAt: null, toolkitConfigured: true, toolkitLabel: 'Google Calendar', wordId: null }] : [],
         toolkits: [],
       },
     }))
@@ -7076,11 +7165,11 @@ describe('assistant cron runtime orchestration', () => {
 
     // Without an idle proof, the skill still owns reminder repair and capture.
     expect(cronMocks.canSkipManagedJournalConnectedContext).toHaveBeenCalled()
-    expect(request).not.toHaveBeenCalled()
+    expect(request).toHaveBeenCalledTimes(hasAccount ? 2 : 1)
     expect(summary).toEqual({ failed: 0, processed: 1, succeeded: 1 })
     expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({
-        instructions: expect.stringContaining('timeMax: 2026-04-22T08:00:00.000Z'),
+        instructions: expect.stringContaining('Prepared connected context'),
         scheduledInvocationAuthority: { automationId, occurrenceAt },
         serviceTier: 'flex',
       }),

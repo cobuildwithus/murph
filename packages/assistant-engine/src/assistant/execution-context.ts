@@ -635,6 +635,7 @@ export interface AssistantHostedExecutionContext {
   assistantConfigurationTool?: AssistantHostedAssistantConfigurationTool | null
   channelTypingDependencies?: AssistantChannelTypingDependencies
   connectedApps?: AssistantConnectedAppsPort | null
+  preparedJournal?: import('./journal-connected-context-prepare.js').PreparedJournalContext | null
   clinicalRecordsConnectLinkTool?: AssistantHostedClinicalRecordsConnectLinkTool | null
   defaultTarget?: AssistantModelTarget | null
   deviceConnectProviders?: readonly AssistantHostedDeviceConnectProvider[]
@@ -834,6 +835,7 @@ export function normalizeAssistantExecutionContext(
         : {}),
       ...optionalHostedField('assistantConfigurationTool', assistantConfigurationTool),
       ...optionalHostedField('connectedApps', connectedApps),
+      ...optionalHostedField('preparedJournal', hosted.preparedJournal),
       ...optionalHostedField('clinicalRecordsConnectLinkTool', clinicalRecordsConnectLinkTool),
       ...(hosted.imageGenerationLauncher
         ? { imageGenerationLauncher: hosted.imageGenerationLauncher }

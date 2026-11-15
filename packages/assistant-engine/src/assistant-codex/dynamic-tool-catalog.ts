@@ -9,6 +9,7 @@ export { MURPH_POLL_TOOL } from './dynamic-tools/conversation-polls.js'
 import { MURPH_CONVERSATION_ATTACHMENTS_TOOL } from './dynamic-tools/conversation-attachments.js'
 export { MURPH_CONVERSATION_ATTACHMENTS_TOOL } from './dynamic-tools/conversation-attachments.js'
 import * as z from '@murphai/contracts/zod-runtime'
+import { MURPH_JOURNAL_SOURCE_READ_TOOL } from './dynamic-tools/journal-source-read.js'
 import {
   HOSTED_EXECUTION_MEMBER_REPORTED_DAILY_METRIC_KEYS,
 } from '@murphai/hosted-execution'
@@ -1849,6 +1850,7 @@ const MURPH_COMPUTER_DYNAMIC_TOOLS = [
 ] as const
 
 export const MURPH_DYNAMIC_TOOLS = [
+  MURPH_JOURNAL_SOURCE_READ_TOOL,
   ...MURPH_BASE_DYNAMIC_TOOLS,
   ...MURPH_COMPUTER_DYNAMIC_TOOLS,
   ...MURPH_CONNECTED_APPS_DYNAMIC_TOOLS,
@@ -1873,6 +1875,7 @@ export type MurphDynamicTool =
   | typeof MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL
 
 export interface MurphDynamicToolAvailability {
+  journalSourceReadAvailable?: boolean | null
   assistantStyleSettingsAvailable?: boolean | null
   assistantConfigurationAvailable?: boolean | null
   allowFinishWithoutReply?: boolean | null
@@ -2002,6 +2005,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     ),
     [MURPH_CONNECTED_APPS_MANAGE_TOOL, defaultOff((a) =>
       a.connectedAppsAvailable && a.connectedAppsManageAvailable !== false)],
+    [MURPH_JOURNAL_SOURCE_READ_TOOL, defaultOff((a) => a.journalSourceReadAvailable)],
     [MURPH_CONNECTED_APPS_SEARCH_TOOL, defaultOff((a) => a.connectedAppsAvailable)],
     [MURPH_CONNECTED_APPS_EXECUTE_TOOL, defaultOff((a) => a.connectedAppsAvailable)],
     [MURPH_CREATE_CLINICAL_RECORDS_CONNECT_LINK_TOOL, defaultOff((a) =>

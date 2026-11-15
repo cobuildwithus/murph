@@ -122,6 +122,14 @@ export const hostedConnectedAppsExecuteInputSchema = z
   .strict();
 
 export const hostedConnectedAppsRequestSchema = z.discriminatedUnion("operation", [
+  z.object({
+    operation: z.literal("read"),
+    input: z.object({
+      account: hostedConnectedAppsAccountSelectorSchema,
+      toolSlug: hostedConnectedAppsToolSlugSchema,
+      arguments: z.record(z.string(), z.unknown()).default({}),
+    }).strict(),
+  }).strict(),
   z
     .object({
       input: hostedConnectedAppsManageInputSchema,
@@ -147,6 +155,10 @@ export const hostedConnectedAppsResponseSchema = z
     result: z.unknown(),
   })
   .strict();
+
+// Only the engine-owned read lane uses this envelope. Direct Composio data is
+// decoded before compaction and wrapped exactly once by Web.
+export const hostedConnectedAppsReadResultSchema = z.object({ data: z.unknown() }).strict();
 
 // Walks the provider result and removes what costs tokens without carrying
 // meaning: HTML markup, encoded MIME bodies and attachments, and mail transport
