@@ -826,6 +826,7 @@ describe("hosted execution coverage gaps", () => {
       "./phone-calls",
       "./physical-notes",
       "./plan-usage",
+      "./request-input",
       "./return-contact",
       "./routes",
       "./runtime-control",

@@ -1,3 +1,4 @@
+import { isRequestInputError } from "@murphai/hosted-execution/request-input";
 import {
   createServer,
   type IncomingMessage,
@@ -1959,7 +1960,7 @@ function classifyRequestDecodeError(error: unknown): {
     };
   }
 
-  if (error instanceof TypeError || error instanceof RangeError || error instanceof URIError) {
+  if (isRequestInputError(error) || error instanceof TypeError || error instanceof RangeError || error instanceof URIError) {
     return {
       payload: {
         code: deriveHostedExecutionErrorCode(error),

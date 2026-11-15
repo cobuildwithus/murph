@@ -1,6 +1,8 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
+
 export function requireObject(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object.`);
+    throw new ContractValidationError(`${label} must be an object.`);
   }
 
   return value as Record<string, unknown>;
@@ -14,7 +16,7 @@ export function rejectLegacyAliases(
   // Greenfield hard-cut guard: these keys are rejected, not translated.
   for (const [legacyKey, activeContract] of Object.entries(removedAliases)) {
     if (Object.prototype.hasOwnProperty.call(record, legacyKey)) {
-      throw new TypeError(
+      throw new ContractValidationError(
         `${label} must not include legacy ${legacyKey}; use ${activeContract}.`,
       );
     }
@@ -23,7 +25,7 @@ export function rejectLegacyAliases(
 
 export function requireString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.length === 0) {
-    throw new TypeError(`${label} must be a non-empty string.`);
+    throw new ContractValidationError(`${label} must be a non-empty string.`);
   }
 
   return value;
@@ -31,7 +33,7 @@ export function requireString(value: unknown, label: string): string {
 
 export function requireNumber(value: unknown, label: string): number {
   if (typeof value !== "number" || !Number.isFinite(value)) {
-    throw new TypeError(`${label} must be a finite number.`);
+    throw new ContractValidationError(`${label} must be a finite number.`);
   }
 
   return value;
@@ -39,7 +41,7 @@ export function requireNumber(value: unknown, label: string): number {
 
 export function requireBoolean(value: unknown, label: string): boolean {
   if (typeof value !== "boolean") {
-    throw new TypeError(`${label} must be a boolean.`);
+    throw new ContractValidationError(`${label} must be a boolean.`);
   }
 
   return value;
@@ -59,7 +61,7 @@ export function readNullableStringValue(value: unknown, label: string): string |
   }
 
   if (typeof value !== "string") {
-    throw new TypeError(`${label} must be a string or null.`);
+    throw new ContractValidationError(`${label} must be a string or null.`);
   }
 
   return value;
@@ -86,7 +88,7 @@ export function readOptionalNullableString(
 
 export function requireArray(value: unknown, label: string): unknown[] {
   if (!Array.isArray(value)) {
-    throw new TypeError(`${label} must be an array.`);
+    throw new ContractValidationError(`${label} must be an array.`);
   }
 
   return value;
@@ -118,7 +120,7 @@ export function requireBigIntString(value: unknown, label: string): string {
   try {
     BigInt(text);
   } catch {
-    throw new TypeError(`${label} must be a base-10 integer string.`);
+    throw new ContractValidationError(`${label} must be a base-10 integer string.`);
   }
 
   return text;
@@ -131,7 +133,7 @@ export function assertAllowedObjectKeys(
 ): void {
   for (const key of Object.keys(record)) {
     if (!allowedKeys.has(key)) {
-      throw new TypeError(`${label}.${key} is not allowed.`);
+      throw new ContractValidationError(`${label}.${key} is not allowed.`);
     }
   }
 }
@@ -147,14 +149,14 @@ export function parseAllowedString<T extends string>(
     return text as T;
   }
 
-  throw new TypeError(`${label} is not supported.`);
+  throw new ContractValidationError(`${label} is not supported.`);
 }
 
 export function requireNonNegativeInteger(value: unknown, label: string): number {
   const parsed = requireNumber(value, label);
 
   if (!Number.isSafeInteger(parsed) || parsed < 0) {
-    throw new TypeError(`${label} must be a non-negative integer.`);
+    throw new ContractValidationError(`${label} must be a non-negative integer.`);
   }
 
   return parsed;
@@ -164,7 +166,7 @@ export function requireNonNegativeBigIntString(value: unknown, label: string): s
   const text = requireString(value, label);
 
   if (!/^[0-9]+$/u.test(text)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} must be a non-negative base-10 integer string.`,
     );
   }
@@ -176,7 +178,7 @@ export function requirePositiveInteger(value: unknown, label: string): number {
   const parsed = requireNonNegativeInteger(value, label);
 
   if (parsed === 0) {
-    throw new TypeError(`${label} must be a positive integer.`);
+    throw new ContractValidationError(`${label} must be a positive integer.`);
   }
 
   return parsed;

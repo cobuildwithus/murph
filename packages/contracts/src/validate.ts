@@ -1,3 +1,4 @@
+import { ContractValidationError } from "./validation-error.ts";
 import { ZodError, type ZodType } from "./zod-runtime.ts";
 
 export type ContractSchema<TOutput = unknown> = ZodType<TOutput>;
@@ -68,7 +69,7 @@ export function assertContract<TOutput>(
   const result = safeParseContract(schema, value);
 
   if (!result.success) {
-    throw new TypeError(`${label} failed validation:\n${result.errors.join("\n")}`);
+    throw new ContractValidationError(`${label} failed validation:\n${result.errors.join("\n")}`);
   }
 
   return result.data;

@@ -1,3 +1,4 @@
+import { RequestInputError } from "@murphai/hosted-execution/request-input";
 import { readFileSync } from "node:fs";
 import {
   request as httpRequest,
@@ -3024,6 +3025,37 @@ describe("startHostedContainerEntrypoint", () => {
     } finally {
       runnerSpy.mockRestore();
     }
+  });
+
+  it("answers explicit request rejection through the existing decode envelope", async () => {
+    const parseRunnerJobInput = vi.fn(() => { throw new RequestInputError("Invalid shape."); });
+    const runWorkspaceInvocation = vi.fn();
+    const server = await startHostedContainerEntrypoint({
+      port: 0,
+      runtime: { parseRunnerJobInput, runWorkspaceInvocation },
+    });
+    servers.push(server);
+    const address = server.address();
+
+    if (!address || typeof address === "string") {
+      throw new Error("Expected the hosted container entrypoint to expose a TCP port.");
+    }
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/internal/workspace-invocation`, {
+      body: JSON.stringify({ hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION, job: {} }),
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+      },
+      method: "POST",
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      details: { errorDetail: "Invalid shape." },
+      error: "Invalid request.",
+    });
+    expect(parseRunnerJobInput).toHaveBeenCalledTimes(1);
+    expect(runWorkspaceInvocation).not.toHaveBeenCalled();
   });
 
   it("returns a stable invalid request error when the run body is not an object", async () => {
