@@ -1,3 +1,4 @@
+import { jsonError } from "../../json.ts";
 import {
   hostedPrivateMediaExtensionForContentType,
   matchHostedPrivateMediaCapabilityPath,
@@ -25,9 +26,8 @@ export const privateMediaRoutes: readonly DeclarativeRoute<{
         context.env,
       );
       const expiresAtUnixSeconds = readCapabilityExpiry(context.url);
-      if (!capabilitySecret || expiresAtUnixSeconds === null) {
-        return privateMediaNotFound();
-      }
+      if (!capabilitySecret) return jsonError("Private media delivery is unavailable.", 503);
+      if (expiresAtUnixSeconds === null) return privateMediaNotFound();
       const media = await readHostedPrivateMedia({
         bucket: context.env.BUNDLES,
         capability: params.capability ?? "",

@@ -43,9 +43,10 @@ export const mealThumbnailRoutes: readonly DeclarativeRoute<WorkerRouteContext>[
   methods: ["GET", "HEAD"], name: "meal-thumbnail-read", wrongMethodResponse: "not-found",
   async handle(context, params) {
     const secret = readHostedPrivateMediaCapabilitySecret(context.env);
+    if (!secret) return jsonError("Private media delivery is unavailable.", 503);
     const entries = [...context.url.searchParams.entries()];
     const exp = entries.length === 1 && entries[0]?.[0] === "exp" && /^[1-9][0-9]*$/u.test(entries[0][1]) ? Number(entries[0][1]) : NaN;
-    const media = secret && Number.isSafeInteger(exp) ? await readHostedPrivateMedia({
+    const media = Number.isSafeInteger(exp) ? await readHostedPrivateMedia({
       bucket: context.env.BUNDLES, capability: params.capability!, capabilitySecret: secret, expiresAtUnixSeconds: exp, runtimeMediaOnly: true,
       async readRuntimeMedia(descriptor) {
         const crypto = await resolveHostedExecutionUserCryptoContext({ bucket: context.env.BUNDLES, domain: "runtime", environment: context.environment, userId: descriptor.userId });
