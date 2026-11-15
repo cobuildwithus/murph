@@ -13,7 +13,7 @@ export function BlockedNumbers(input: { initialPage?: BlockPage | null; initialE
   const [error, setError] = useState<string | null>(input.initialError ?? null);
   const [status, setStatus] = useState("");
   async function load(after?: string) {
-    const response = await fetch(`/api/ops/linq-handle-block${after ? `?after=${encodeURIComponent(after)}` : ""}`, { cache: "no-store" });
+    const response = await fetch(`/api/ops/blocked-numbers${after ? `?after=${encodeURIComponent(after)}` : ""}`, { cache: "no-store" });
     if (!response.ok) throw new Error("Could not load blocked numbers. Try again.");
     const next: BlockPage = await response.json();
     setPage(prior => ({ ...next, blocks: after ? [...(prior?.blocks ?? []), ...next.blocks] : next.blocks }));
@@ -22,7 +22,7 @@ export function BlockedNumbers(input: { initialPage?: BlockPage | null; initialE
     setPending(true); setError(null); setStatus("");
     try {
       if (operation) {
-        const response = await fetch("/api/ops/linq-handle-block", { method: "POST", headers: { "Content-Type": "application/json" },
+        const response = await fetch("/api/ops/blocked-numbers", { method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ operation, contact: value }) });
         if (!response.ok) throw new Error(response.status === 400 ? "Enter a valid phone number or email address." : "Could not update blocked numbers. Try again.");
         if (operation === "block") setContact("");

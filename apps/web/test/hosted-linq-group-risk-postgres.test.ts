@@ -8,7 +8,7 @@ import { expireHostedLinqGroupRiskBatch, observeHostedLinqGroupRiskTx } from "@/
 import { syntheticPhone } from "./support/roster-postgres";
 
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
-if (enabled && !/^postgres(?:ql)?:\/\/[^/]*@(?:127\.0\.0\.1|localhost):\d+\/murph_test_linq_group_risk$/u.test(process.env.DATABASE_URL ?? "")) throw new Error("Risk proof requires its isolated local test database.");
+if (enabled && !/^postgres(?:ql)?:\/\/[^/]*@(?:127\.0\.0\.1|localhost):\d+\/murph_test(?:_[a-z0-9_]+)?$/u.test(process.env.DATABASE_URL ?? "")) throw new Error("Risk proof requires its isolated local test database.");
 function keys(overlap = false, retired = false) {
   vi.stubEnv("HOSTED_CONTACT_PRIVACY_KEYS", overlap ? `v2:${Buffer.alloc(32, 8).toString("base64")}${retired ? "" : `,v1:${Buffer.alloc(32, 7).toString("base64")}`}` : `v1:${Buffer.alloc(32, 7).toString("base64")}`);
   vi.stubEnv("HOSTED_CONTACT_PRIVACY_CURRENT_KEY_VERSION", overlap ? "v2" : "v1");

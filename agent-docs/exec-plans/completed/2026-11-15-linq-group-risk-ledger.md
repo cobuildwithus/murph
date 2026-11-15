@@ -371,7 +371,7 @@ MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm --dir apps/web test -- hosted-linq-group-
 `unit-1`: 1; 363 passed, 291 failed. Existing planner fixtures did not provide the new ingress delegates. Isolated the two early helpers in those unblocked-planning lanes; the new PostgreSQL lane exercises the real authenticated ingress. Added marker/sighting delegates to departure fixtures.
 
 ```sh
-pnpm --dir apps/web test -- hosted-ops-linq-handle-block-route.test.ts ops-blocked-numbers.test.ts hosted-retention-cleanup.test.ts hosted-retention-owner-split.test.ts hosted-retention-cron-route.test.ts hosted-linq-group-leave-webhook.test.ts hosted-linq-group-leave-tool.test.ts hosted-ops-linq-group-line-move-route.test.ts hosted-onboarding-linq-dispatch.test.ts hosted-onboarding-linq-thread-route.test.ts hosted-onboarding-webhook-idempotency.test.ts hosted-onboarding-linq-home-route-recovery-service.test.ts hosted-onboarding-linq-read-receipt-authority.test.ts hosted-onboarding-linq-mailbox-root-prewarm.test.ts hosted-onboarding-linq-webhook-auth.test.ts production-migration-guard.test.ts --no-file-parallelism
+pnpm --dir apps/web test -- hosted-ops-blocked-numbers-route.test.ts ops-blocked-numbers.test.ts hosted-retention-cleanup.test.ts hosted-retention-owner-split.test.ts hosted-retention-cron-route.test.ts hosted-linq-group-leave-webhook.test.ts hosted-linq-group-leave-tool.test.ts hosted-ops-linq-group-line-move-route.test.ts hosted-onboarding-linq-dispatch.test.ts hosted-onboarding-linq-thread-route.test.ts hosted-onboarding-webhook-idempotency.test.ts hosted-onboarding-linq-home-route-recovery-service.test.ts hosted-onboarding-linq-read-receipt-authority.test.ts hosted-onboarding-linq-mailbox-root-prewarm.test.ts hosted-onboarding-linq-webhook-auth.test.ts production-migration-guard.test.ts --no-file-parallelism
 ```
 
 `unit-2`: 1; 490 passed, 3 failed. Added the missing attempt-claim updateMany result to the remaining thread-route departure fixture.
@@ -383,7 +383,7 @@ pnpm --dir apps/web test -- hosted-onboarding-linq-dispatch.test.ts hosted-onboa
 `unit-final`: 1; 921 passed, 3 failed across 19 files. Eighteen files passed, including production-migration-guard, Ops authorization, retention, transport and account-data coverage. Three HTTP expectations lacked the new canonical createdAt field; updated them.
 
 ```sh
-pnpm --dir apps/web test -- hosted-ops-linq-handle-block-route.test.ts ops-blocked-numbers.test.ts hosted-retention-cleanup.test.ts hosted-retention-owner-split.test.ts hosted-retention-cron-route.test.ts hosted-linq-group-leave-webhook.test.ts hosted-linq-group-leave-tool.test.ts hosted-ops-linq-group-line-move-route.test.ts hosted-onboarding-linq-dispatch.test.ts hosted-onboarding-linq-thread-route.test.ts hosted-onboarding-webhook-idempotency.test.ts hosted-onboarding-linq-home-route-recovery-service.test.ts hosted-onboarding-linq-read-receipt-authority.test.ts hosted-onboarding-linq-mailbox-root-prewarm.test.ts hosted-onboarding-linq-webhook-auth.test.ts production-migration-guard.test.ts hosted-onboarding-linq-http.test.ts hosted-onboarding-linq-transport.test.ts hosted-account-data-service.test.ts --no-file-parallelism
+pnpm --dir apps/web test -- hosted-ops-blocked-numbers-route.test.ts ops-blocked-numbers.test.ts hosted-retention-cleanup.test.ts hosted-retention-owner-split.test.ts hosted-retention-cron-route.test.ts hosted-linq-group-leave-webhook.test.ts hosted-linq-group-leave-tool.test.ts hosted-ops-linq-group-line-move-route.test.ts hosted-onboarding-linq-dispatch.test.ts hosted-onboarding-linq-thread-route.test.ts hosted-onboarding-webhook-idempotency.test.ts hosted-onboarding-linq-home-route-recovery-service.test.ts hosted-onboarding-linq-read-receipt-authority.test.ts hosted-onboarding-linq-mailbox-root-prewarm.test.ts hosted-onboarding-linq-webhook-auth.test.ts production-migration-guard.test.ts hosted-onboarding-linq-http.test.ts hosted-onboarding-linq-transport.test.ts hosted-account-data-service.test.ts --no-file-parallelism
 ```
 
 `unit-fixes`: 1; 77 passed, 1 failed. All 75 HTTP tests passed. The newly added third UI test exposed the existing happy-dom controlled-input adapter requirement; used the same test-only adapter as ops-member-email-client.test.tsx.
@@ -520,7 +520,7 @@ that was already untracked when implementation started):
 - `agent-docs/index.md`
 - `apps/web/app/(dashboard)/ops/blocked-numbers.tsx`
 - `apps/web/app/(dashboard)/ops/page.tsx`
-- `apps/web/app/api/ops/linq-handle-block/route.ts`
+- `apps/web/app/api/ops/blocked-numbers/route.ts`
 - `apps/web/prisma/migrations/20261115190000_linq_group_risk_ledger/migration.sql`
 - `apps/web/prisma/schema.prisma`
 - `apps/web/scripts/run-prisma-migrate-deploy.ts`
@@ -548,7 +548,7 @@ that was already untracked when implementation started):
 - `apps/web/test/hosted-onboarding-linq-read-receipt-authority.test.ts`
 - `apps/web/test/hosted-onboarding-linq-thread-route.test.ts`
 - `apps/web/test/hosted-onboarding-webhook-idempotency.test.ts`
-- `apps/web/test/hosted-ops-linq-handle-block-route.test.ts`
+- `apps/web/test/hosted-ops-blocked-numbers-route.test.ts`
 - `apps/web/test/hosted-retention-cleanup.test.ts`
 - `apps/web/test/hosted-retention-owner-split.test.ts`
 - `apps/web/test/ops-blocked-numbers.test.tsx`

@@ -6,7 +6,7 @@ import { prepareHostedLinqGroupLeave, requestHostedLinqGroupLeaveAfterCommit, ro
 import { observeHostedLinqGroupRiskTx } from "@/src/lib/hosted-routing/linq-group-risk-ledger";
 const provider = vi.hoisted(() => ({ leave: vi.fn(), read: vi.fn() }));
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
-if (enabled && !/^postgres(?:ql)?:\/\/[^/]*@(?:127\.0\.0\.1|localhost):\d+\/murph_test_linq_group_risk$/u.test(process.env.DATABASE_URL ?? "")) throw new Error("Attempt proof requires its isolated local test database.");
+if (enabled && !/^postgres(?:ql)?:\/\/[^/]*@(?:127\.0\.0\.1|localhost):\d+\/murph_test(?:_[a-z0-9_]+)?$/u.test(process.env.DATABASE_URL ?? "")) throw new Error("Attempt proof requires its isolated local test database.");
 describe.skipIf(!enabled)("marker-owned provider attempts", () => {
   const prisma = getPrisma();
   let chatId: string;

@@ -16,7 +16,7 @@ vi.mock("@/src/lib/hosted-onboarding/webhook-service-wake", () => ({ maybeHandof
 vi.mock("@/src/lib/hosted-polls/linq-webhook", () => ({ handleHostedLinqPollWebhook: effects.poll }));
 vi.mock("@/src/lib/hosted-groups/join-offer-reaction", async original => ({ ...await original<typeof import("@/src/lib/hosted-groups/join-offer-reaction")>(), handleHostedGroupJoinOfferReaction: effects.reaction }));
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
-if (enabled && !/^postgres(?:ql)?:\/\/[^/]*@(?:127\.0\.0\.1|localhost):\d+\/murph_test_linq_group_risk$/u.test(process.env.DATABASE_URL ?? "")) throw new Error("Webhook proof requires its isolated local test database.");
+if (enabled && !/^postgres(?:ql)?:\/\/[^/]*@(?:127\.0\.0\.1|localhost):\d+\/murph_test(?:_[a-z0-9_]+)?$/u.test(process.env.DATABASE_URL ?? "")) throw new Error("Webhook proof requires its isolated local test database.");
 describe.skipIf(!enabled)("authenticated risk ingress", () => {
   const prisma = getPrisma();
   let chatId: string, line: string, sender: string;
