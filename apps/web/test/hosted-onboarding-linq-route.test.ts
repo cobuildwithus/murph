@@ -1,6 +1,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 
 const mocks = vi.hoisted(() => ({
   after: vi.fn(),
@@ -105,6 +106,27 @@ describe("hosted onboarding Linq webhook route", () => {
 
   it("does not expose a public GET health handler", () => {
     expect(hostedOnboardingLinqRoute).not.toHaveProperty("GET");
+  });
+
+  it.each([
+    new TypeError("Synthetic storage failure"),
+    new RangeError("Synthetic configuration failure"),
+    new URIError("Synthetic internal decoding failure"),
+    new SyntaxError("Synthetic stored JSON failure"),
+    new ContractValidationError("Synthetic stored contract failure"),
+    new TypeError("fetch failed"),
+  ])("returns 500 and logs server faults at error level: $message", async (fault) => {
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const warnLog = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    mocks.handleHostedOnboardingLinqWebhook.mockRejectedValueOnce(fault);
+    const response = await hostedOnboardingLinqRoute.POST(new Request(
+      "https://join.example.test/api/hosted-onboarding/linq/webhook",
+      { method: "POST", body: "{}" },
+    ));
+    expect(response.status).toBe(500);
+    expect(errorLog).toHaveBeenCalled();
+    expect(warnLog).not.toHaveBeenCalled();
+    expect(await response.text()).not.toContain(fault.message);
   });
 
   it("does not bind durable Linq webhook handling to the public request abort signal", async () => {

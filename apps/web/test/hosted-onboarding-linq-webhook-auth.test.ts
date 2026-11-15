@@ -3,6 +3,7 @@ import { createHmac } from "node:crypto";
 import { afterEach, beforeEach, describe as baseDescribe, expect, it, vi } from "vitest";
 
 vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
+  requireHostedOnboardingPublicBaseUrl: () => "https://join.example.test",
   getHostedOnboardingEnvironment: () => ({
     contactPrivacyKeyring: {
       currentVersion: "v1",
@@ -31,6 +32,7 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
 }));
 
 import { handleHostedOnboardingLinqWebhook } from "@/src/lib/hosted-onboarding/webhook-service";
+import { POST } from "../app/api/hosted-onboarding/linq/webhook/route";
 
 const describe = baseDescribe.sequential;
 
@@ -42,6 +44,44 @@ describe("handleHostedOnboardingLinqWebhook auth", () => {
   beforeEach(() => {
     delete process.env.LINQ_WEBHOOK_SECRET;
     delete process.env.LINQ_WEBHOOK_TIMESTAMP_TOLERANCE_MS;
+  });
+
+  it.each([
+    ["invalid JSON", "{"],
+    ["invalid envelope", "{}"],
+    ["invalid message", JSON.stringify({
+      api_version: "v3", event_id: "synthetic-event", event_type: "message.received",
+      created_at: "2026-11-14T12:00:00Z", data: null,
+    })],
+    ["invalid poll vote", JSON.stringify({
+      api_version: "v3", event_id: "synthetic-event", event_type: "poll.vote.added",
+      created_at: "2026-11-14T12:00:00Z", data: null,
+    })],
+  ])("keeps signed %s at 400 through the public route", async (_label, rawBody) => {
+    process.env.LINQ_WEBHOOK_SECRET = "synthetic-secret";
+    const timestamp = String(Math.floor(Date.now() / 1000));
+    const response = await POST(new Request("https://join.example.test/api/hosted-onboarding/linq/webhook", {
+      method: "POST", body: rawBody,
+      headers: {
+        "x-webhook-timestamp": timestamp,
+        "x-webhook-signature": signLinqWebhook("synthetic-secret", rawBody, timestamp),
+      },
+    }));
+    expect(response.status).toBe(400);
+  });
+
+  it("returns 500 for invalid server timestamp tolerance after signature verification", async () => {
+    process.env.LINQ_WEBHOOK_SECRET = "synthetic-secret";
+    process.env.LINQ_WEBHOOK_TIMESTAMP_TOLERANCE_MS = "-1";
+    const timestamp = String(Math.floor(Date.now() / 1000));
+    const response = await POST(new Request("https://join.example.test/api/hosted-onboarding/linq/webhook", {
+      method: "POST", body: "{}",
+      headers: {
+        "x-webhook-timestamp": timestamp,
+        "x-webhook-signature": signLinqWebhook("synthetic-secret", "{}", timestamp),
+      },
+    }));
+    expect(response.status).toBe(500);
   });
 
   it("fails closed when LINQ_WEBHOOK_SECRET is unset", async () => {

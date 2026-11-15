@@ -1,3 +1,4 @@
+import { RequestInputError } from "@murphai/hosted-execution/request-input";
 import { readHostedLinqGroupLeftWebhookResponse, scheduleHostedLinqGroupLeaveAfterCommit } from "./linq-group-leave-webhook";
 import { readHostedLinqGroupLeave } from "../hosted-routing/linq-group-leave";
 import { prepareHostedLinqGroupMoveIngress, type PreparedHostedLinqGroupMoveIngress } from "../hosted-routing/linq-group-line-move-ingress";
@@ -2539,7 +2540,7 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
   if (preparedGroupLineMove && preparedGroupLineMove.action !== "continue") return { preparedGroupLineMove };
   if (threadRoute) {
     if (!accountLookupKey) {
-      throw new TypeError(
+      throw new RequestInputError(
         "Hosted Linq thread crypto preparation requires a recipient account lookup key.",
       );
     }
