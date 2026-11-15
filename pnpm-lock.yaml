@@ -115,8 +115,8 @@ importers:
         specifier: 0.5.157
         version: 0.5.157(patch_hash=fc9ed40b0390818a0e9ff74e6ad6b4b746b9cc8289fca7b95bfb97dbc1e74e0f)(@cfworker/json-schema@4.1.6)(typescript@7.0.2)
       '@elevenlabs/elevenlabs-js':
-        specifier: 2.62.0
-        version: 2.62.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
+        specifier: 2.78.0
+        version: 2.78.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
       '@murphai/health-metrics':
         specifier: workspace:*
         version: link:packages/health-metrics
@@ -592,8 +592,8 @@ importers:
         specifier: ^4.1.6
         version: 4.1.6
       '@elevenlabs/elevenlabs-js':
-        specifier: 2.62.0
-        version: 2.62.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
+        specifier: 2.78.0
+        version: 2.78.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
       '@junction-api/sdk':
         specifier: 1.2.0
         version: 1.2.0
@@ -941,8 +941,8 @@ importers:
   packages/operator-config:
     dependencies:
       '@elevenlabs/elevenlabs-js':
-        specifier: 2.62.0
-        version: 2.62.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
+        specifier: 2.78.0
+        version: 2.78.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
       '@linqapp/sdk':
         specifier: 0.34.0
         version: 0.34.0
@@ -1560,8 +1560,8 @@ packages:
   '@electric-sql/pglite@0.4.3':
     resolution: {integrity: sha512-ichuWTgtd4mOM1G4SpyGJa5trT03lWbMypDV0fUXUCXg5hiHqVAz/bZyV68NqmkLB7WcYmj1RMJVSp8HV/v/ZQ==}
 
-  '@elevenlabs/elevenlabs-js@2.62.0':
-    resolution: {integrity: sha512-OK/9uuSUf5gq0+7WgBhhLQ3PEFxxmH7BUHfctUxaiWLRyI9EMBBhSUiVID3Lj1TjxfNUL6CahLTSm8v2M+uomQ==}
+  '@elevenlabs/elevenlabs-js@2.78.0':
+    resolution: {integrity: sha512-cLaLfwcATwcFaEuKNmrjj2DZSk1rkKvGPdyukA9ohYl46BioarkLKjslzmvIYY6y/ryE5O3iQ8FXX9/lavEf+A==}
     engines: {node: '>=18.0.0'}
 
   '@emnapi/core@2.0.0-beta.2':
@@ -9083,11 +9083,11 @@ snapshots:
 
   '@electric-sql/pglite@0.4.3': {}
 
-  '@elevenlabs/elevenlabs-js@2.62.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)':
+  '@elevenlabs/elevenlabs-js@2.78.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)':
     dependencies:
       command-exists: 1.2.9
       node-fetch: 2.7.0
-      ws: 8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
+      ws: 8.22.2(bufferutil@4.1.0)(utf-8-validate@6.0.6)
     transitivePeerDependencies:
       - bufferutil
       - encoding

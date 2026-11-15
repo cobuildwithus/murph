@@ -53,7 +53,7 @@
   },
   "dependencies": {
     "@cfworker/json-schema": "^4.1.6",
-    "@elevenlabs/elevenlabs-js": "2.62.0",
+    "@elevenlabs/elevenlabs-js": "2.78.0",
     "@junction-api/sdk": "1.2.0",
     "@linqapp/sdk": "0.34.0",
     "@modelcontextprotocol/server": "2.0.0-alpha.4",

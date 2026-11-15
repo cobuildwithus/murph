@@ -420,17 +420,19 @@ test("hosted ElevenLabs TTS usage records carry character cost basis and dedupe 
   );
 });
 
-test("hosted ElevenLabs music usage retains the provider request start", () => {
+test.each(["music_v2", "music_v2_5"] as const)("hosted ElevenLabs %s usage retains the provider request start and model", (model) => {
   const record = buildHostedElevenLabsMusicUsageRecord({
     durationMs: 45_000,
     memberId: "member_123",
-    model: "music_v2",
+    model,
     occurredAt: PROVIDER_REQUEST_STARTED_AT,
     providerRequestId: "music_request_123",
   });
 
   assert.equal(record.occurredAt, PROVIDER_REQUEST_STARTED_AT);
   assert.equal(record.providerRequestId, "music_request_123");
+  assert.equal(record.requestedModel, model);
+  assert.deepEqual(parseAssistantUsageRecord({ ...record }), record);
   assert.deepEqual(record.rawUsageJson, { durationMs: 45_000 });
 });
 
