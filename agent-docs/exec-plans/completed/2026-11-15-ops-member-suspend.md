@@ -57,7 +57,7 @@ and silently denies new assistant work and member messaging through existing acc
 - Journeys: person active/suspended, container, cancel, pending, failure/retry,
   phone/desktop; no member notification on either operation.
 - Proof: real component interaction tests plus rendered synthetic catalog evidence.
-- Verdict: Ready. Replayed cancel, suspend, saved-change recheck retry, restore,
+- Verdict: Ready. Replayed cancel, suspend, failed-save retry, restore,
   contact search and container exclusion. Inspected the real production controls
   at 390px and 1440px; fixed inherited desktop no-wrap clipping. Synthetic catalog
   interaction responses were intercepted; this was not a live Ops-auth browser test.
@@ -93,10 +93,10 @@ and silently denies new assistant work and member messaging through existing acc
   suspension into a notice. It now returns the ignored response immediately.
 - Email already rejected suspended alias/public routes and bootstrap; regression
   evidence preserves that behavior and its retained identity.
-- Warm runtime passes can retain staged inputs, so Ops sends the existing
-  `runtime_recheck_requested` after commit, including when access is inactive.
-  Signal delivery and canonical denial are tested; no live Temporal/Cloudflare
-  runtime was used. Already-started provider work cannot be recalled by this hint.
+- No runtime signal on suspend or restore. New inbound is refused at ingress; work
+  admitted before the change is re-read against current access when the runtime next
+  reconciles (queued-work test). An earlier draft removed the active-access guard from
+  the shared recheck signal; that was reverted because it changed six other callers.
 - No prompt, tools, schema or model policy changed. Silence is deterministic
   before provider admission, so the proof asserts zero provider calls instead of
   running a real-model journey that would violate the scenario's required boundary.

@@ -34,9 +34,6 @@ export function MemberSuspensionAction(props: {
         || Reflect.get(result, "suspended") !== !suspended) {
         throw new Error("Could not confirm the change. Try again.");
       }
-      if (Reflect.get(result, "runtimeRecheckStatus") !== "accepted") {
-        throw new Error("Change saved. Runtime recheck is pending. Try again.");
-      }
       setSaved(!suspended);
       setConfirming(false);
       router.refresh();

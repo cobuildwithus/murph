@@ -5183,9 +5183,8 @@ are idempotent; suspension preserves its original timestamp on retry, and group
 containers are excluded. Identity routing retains suspended people so Linq,
 Telegram and email cannot reinterpret them as first contacts. Suspended inbound
 and queued-message recovery are silent, including signup-link and access-notice
-fallbacks. After committing either operation, Ops requests the existing bounded
-runtime recheck; a failed handoff stays retryable in the row. This hint must reach
-inactive runtimes too: fresh access and usage gates retain execution authority.
+fallbacks. No runtime signal is sent: queued work is re-read against current
+access when the runtime next reconciles.
 
 Operator recovery is not acquisition: an exhausted canonical
 Starter member may receive one fresh policy-sized grant from `/ops/usage` under

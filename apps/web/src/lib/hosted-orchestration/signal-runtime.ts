@@ -235,8 +235,12 @@ export async function signalHostedRuntimeRecheckRuntime(
   input: SignalHostedRuntimeControlInput,
 ): Promise<HostedRuntimeSignalResult> {
   const prisma = input.prisma ?? getPrisma();
-  // Access loss also needs reconciliation. This hint grants no execution
-  // authority; the workflow reads current access before admitting work.
+  await requireHostedRuntimeActiveAccess(input.userId, {
+    code: "HOSTED_RUNTIME_USER_INACTIVE",
+    message: "Hosted runtime user is not active.",
+    prisma,
+  });
+
   return signalHostedUserRuntimeWorkflow({
     abortSignal: input.abortSignal,
     client: input.client,

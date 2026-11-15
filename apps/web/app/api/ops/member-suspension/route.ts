@@ -1,6 +1,4 @@
 import { requireHostedOpsRequestAccess } from "@/src/lib/hosted-ops/access";
-import { signalHostedRuntimeRecheckRuntime } from "@/src/lib/hosted-orchestration/signal-runtime";
-import { createHostedPostCommitDeadline, waitForHostedPostCommitOperation } from "@/src/lib/hosted-onboarding/bounded-post-commit";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonOk, readHostedOnboardingJsonObject, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { getPrisma } from "@/src/lib/prisma";
@@ -39,15 +37,7 @@ export const POST = withJsonError(async (request: Request) => {
     });
   }
 
-  // Repeating the operation retries this hint without changing its timestamp.
-  // Reconciliation retains authority over already queued or warm work.
-  try {
-    await waitForHostedPostCommitOperation({
-      deadlineMs: createHostedPostCommitDeadline(undefined),
-      operation: (abortSignal) => signalHostedRuntimeRecheckRuntime({ userId: memberId, abortSignal }),
-    });
-    return jsonOk({ suspended, runtimeRecheckStatus: "accepted" });
-  } catch {
-    return jsonOk({ suspended, runtimeRecheckStatus: "pending" }, 202);
-  }
+  // New inbound is refused at ingress. Work admitted before the change is
+  // re-read against current access when the runtime next reconciles.
+  return jsonOk({ suspended });
 });

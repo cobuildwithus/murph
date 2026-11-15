@@ -144,7 +144,7 @@ describe("MemberUsageClient", () => {
     await clickButton(rendered.window, getButton(rendered.container, "Cancel"));
     expect(fetchMock).not.toHaveBeenCalled();
     await clickButton(rendered.window, getButtonByAriaLabel(rendered.container, "Suspend for hbm_person"));
-    fetchMock.mockResolvedValueOnce(Response.json({ suspended: true, runtimeRecheckStatus: "accepted" }));
+    fetchMock.mockResolvedValueOnce(Response.json({ suspended: true }));
     await clickButton(rendered.window, getButtonByAriaLabel(rendered.container, "Confirm Suspend for hbm_person"));
     expect(fetchMock).toHaveBeenLastCalledWith("/api/ops/member-suspension", expect.objectContaining({
       method: "POST", body: JSON.stringify({ memberId: "hbm_person", operation: "suspend" }),
@@ -152,7 +152,7 @@ describe("MemberUsageClient", () => {
     expect(routerRefresh).toHaveBeenCalledOnce();
     await clickButton(rendered.window, getButtonByAriaLabel(rendered.container, "Restore for hbm_person"));
     expect(rendered.container.textContent).toContain("Murph can reply again. They are not told.");
-    fetchMock.mockResolvedValueOnce(Response.json({ suspended: false, runtimeRecheckStatus: "accepted" }));
+    fetchMock.mockResolvedValueOnce(Response.json({ suspended: false }));
     await clickButton(rendered.window, getButtonByAriaLabel(rendered.container, "Confirm Restore for hbm_person"));
     expect(fetchMock).toHaveBeenLastCalledWith("/api/ops/member-suspension", expect.objectContaining({
       body: JSON.stringify({ memberId: "hbm_person", operation: "restore" }),
@@ -162,17 +162,17 @@ describe("MemberUsageClient", () => {
 
   });
 
-  test("keeps the same suspension retry after a committed change with a failed runtime recheck", async () => {
+  test("keeps the same suspension retryable after a failed save", async () => {
     const dashboard = makeDashboard();
     dashboard.rows[0] = { ...dashboard.rows[0]!, memberId: "hbm_person", memberKind: "member" };
     const rendered = await renderClientComponent(createElement(MemberUsageClient, { dashboard }));
     cleanupRender = rendered.cleanup;
     await clickButton(rendered.window, getButtonByAriaLabel(rendered.container, "Suspend for hbm_person"));
-    fetchMock.mockResolvedValueOnce(Response.json({ suspended: true, runtimeRecheckStatus: "pending" }, { status: 202 }));
+    fetchMock.mockResolvedValueOnce(Response.json({ error: "unavailable" }, { status: 503 }));
     await clickButton(rendered.window, getButtonByAriaLabel(rendered.container, "Confirm Suspend for hbm_person"));
-    expect(rendered.container.textContent).toContain("Change saved. Runtime recheck is pending. Try again.");
+    expect(rendered.container.textContent).toContain("Could not save. Try again.");
     expect(routerRefresh).not.toHaveBeenCalled();
-    fetchMock.mockResolvedValueOnce(Response.json({ suspended: true, runtimeRecheckStatus: "accepted" }));
+    fetchMock.mockResolvedValueOnce(Response.json({ suspended: true }));
     await clickButton(rendered.window, getButtonByAriaLabel(rendered.container, "Confirm Suspend for hbm_person"));
     expect(fetchMock.mock.calls.map((call) => JSON.parse(String(call[1]?.body)).operation)).toEqual(["suspend", "suspend"]);
     expect(routerRefresh).toHaveBeenCalledOnce();
