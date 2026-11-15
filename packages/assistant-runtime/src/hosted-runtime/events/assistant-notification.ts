@@ -1139,6 +1139,8 @@ function requireHostedGroupContextHandoffNotification(
     || wake.notification.deliveryIdempotencyKey !== wake.eventId
     || wake.notification.deliveryDispatchMode !== "queue-only"
     || wake.notification.firstContact != null
+    || wake.notification.operatorTask != null
+    || wake.notification.gameChatBootstrap != null
     || wake.notification.privateAssistantAskCompletion != null
     || wake.notification.responsePolicy?.kind !== "require_send"
     || authority == null
@@ -1148,15 +1150,15 @@ function requireHostedGroupContextHandoffNotification(
     || route.delivery.kind !== "thread"
     || route.threadIsDirect !== false
   ) {
-    throw new TypeError(
+    throw Object.assign(new TypeError(
       "Hosted group context handoff notification proof is invalid.",
-    );
+    ), { retryable: false });
   }
   const occurredAtMs = Date.parse(wake.occurredAt);
   if (!Number.isFinite(occurredAtMs)) {
-    throw new TypeError(
+    throw Object.assign(new TypeError(
       "Hosted group context handoff occurrence time is invalid.",
-    );
+    ), { retryable: false });
   }
   return occurredAtMs + HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_TTL_MS;
 }

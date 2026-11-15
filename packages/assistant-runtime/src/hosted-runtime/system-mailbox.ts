@@ -771,7 +771,6 @@ function shouldStopHostedGroupContextHandoffRetry(input: {
     return false;
   }
   return input.item.attemptCount >= HOSTED_GROUP_CONTEXT_HANDOFF_MAX_ATTEMPTS
-    || input.error instanceof TypeError
     || readHostedSystemMailboxErrorRetryable(input.error) === false;
 }
 
