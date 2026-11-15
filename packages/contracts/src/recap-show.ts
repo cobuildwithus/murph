@@ -71,6 +71,16 @@ export function recapSongLines(lyrics: readonly string[], asset: Pick<RecapAsset
   return alignSongLyrics(lyrics, words, asset.durationMs - start);
 }
 
+/** When the song page opens in its score; undefined for a song without one. It opens on the planned start of the
+ * singing, so a singer who comes in late lengthens the song's own opening and never the page before it. A score
+ * stored before songs were cut by then opens, as it always did, on its first sung word, after its own clock starts. */
+function recapSongCueMs({ songStartMs, wordsTimestamps }: RecapAsset, sungStartMs: number): number | undefined {
+  if (songStartMs === undefined || !wordsTimestamps) return undefined;
+  const firstWordMs = recapFirstSungWordMs(wordsTimestamps, sungStartMs);
+  if (firstWordMs === undefined) return undefined;
+  return songStartMs <= sungStartMs ? sungStartMs : firstWordMs;
+}
+
 /** Local selections carry paths; the host owns hashes, bytes and source lineage. */
 export const recapShowStorySchema = gameRecapWriterSchema.extend({
   treatment: z.string().trim().min(1).optional(),
@@ -283,14 +293,13 @@ export function presentGameRecap(input: {
     const asset = envelope.assets.find(item => item.slot === "song")!;
     const sungStartMs = musicKinds.length * 5000;
     const lines = recapSongLines(story.song.lyrics, asset, sungStartMs);
-    const firstWordMs = asset.songStartMs !== undefined
-      ? recapFirstSungWordMs(asset.wordsTimestamps!, sungStartMs) : undefined;
-    if (firstWordMs !== undefined) {
+    const cueMs = recapSongCueMs(asset, sungStartMs);
+    if (cueMs !== undefined) {
       score = { media: media("score") };
       pages.forEach((page, index) => { page.cueMs = index * 5000; });
     }
     pages.push({ id: "song", kind: "song", background: "night", blocks: [], media: songMedia,
-      ...(firstWordMs === undefined ? {} : { cueMs: firstWordMs }),
+      ...(cueMs === undefined ? {} : { cueMs }),
       song: { title: story.song.title, lyrics: story.song.lyrics, ...(lines ? { lines } : {}) } });
   }
   pages.push({ id: "result", kind: "result", background: "paper", blocks: [] });

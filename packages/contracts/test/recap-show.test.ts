@@ -100,6 +100,17 @@ describe("recap presentation compatibility", () => {
     expect(view.show?.pages[1]?.media).toMatchObject({ url: '/synthetic/song', durationMs: 20_208 });
     expect(view.show?.pages[1]?.song?.lines?.[0]?.words).toEqual([{ text: 'Hello', startMs: 200, endMs: 500 }]);
     expect(JSON.stringify(view)).not.toMatch(/songStartMs|wordsTimestamps|private-song/);
+    // A singer five seconds late: the song starts on the planned start, so the cover keeps its five seconds and the
+    // song page opens on time, its band playing on until the first word lights five seconds in.
+    const late = { ...asset, songStartMs: 5000, wordsTimestamps: [{ word: 'Hello', startMs: 10_000, endMs: 10_300 }] };
+    const planned = gameRecapPresentationSchema.parse(presentGameRecap({ ...input, stored: { ...stored, assets: [late] }, mediaUrl: slot => `/synthetic/${slot}` }));
+    expect(planned.show?.pages.map(page => page.cueMs)).toEqual([0, 5000, undefined]);
+    expect(planned.show?.pages[1]?.media).toMatchObject({ url: '/synthetic/song', durationMs: 20_008 });
+    expect(planned.show?.pages[1]?.song?.lines?.[0]?.words).toEqual([{ text: 'Hello', startMs: 5000, endMs: 5300 }]);
+    // The same singer in a score stored before songs started by then keeps its page on the first sung word.
+    const older = gameRecapPresentationSchema.parse(presentGameRecap({ ...input, stored: { ...stored, assets: [{ ...late, songStartMs: 9792 }] }, mediaUrl: slot => `/synthetic/${slot}` }));
+    expect(older.show?.pages.map(page => page.cueMs)).toEqual([0, 10_000, undefined]);
+    expect(older.show?.pages[1]?.song?.lines?.[0]?.words).toEqual([{ text: 'Hello', startMs: 208, endMs: 508 }]);
     const { songStartMs: _origin, ...legacy } = asset;
     for (const fallback of [
       presentGameRecap({ ...input, stored, mediaVisible: false }),

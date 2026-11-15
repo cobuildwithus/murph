@@ -61,14 +61,20 @@ transport, stored reads and accepted replay retain historical longer treatments.
 A score adds optional `show.score: { media }` and `show.pages[].cueMs: number`.
 All times are milliseconds. The score media has the same ready-media shape and
 its `durationMs` is the full measured duration **T**. Authored pages and cards
-have `cueMs = 5000 * index`; the song page has `cueMs = F`, the first raw word
-with positive duration at or after the sung chunk begins. The result has no cue.
-Zero-length provider direction words and words before the sung chunk are ignored.
+have `cueMs = 5000 * index`. The song page has `cueMs = S`, where
+`S = 5000 * music pages` is where the sung chunk begins, so every story page
+keeps its five seconds and a singer who comes in late lengthens the song's own
+opening instead. **F** is the first raw word with positive duration at or after
+S; zero-length provider direction words and words before S are ignored, and a
+score without F has no cues. A score stored before songs started by S (its C is
+after S) keeps `cueMs = F`. The result has no cue.
 
-The stored `song` asset alone gains optional `songStartMs: number`, **C**, a
-frame boundary at or before `F - 200`. It may precede the sung chunk. This field
-is not exposed on the show. The `score` URL slot serves the full stored MP3;
-the `song` slot serves its bytes from C, after the same authorization and
+The stored `song` asset alone gains optional `songStartMs: number`, **C**, the
+latest frame boundary at or before both `F - 200` and S. It may precede the sung
+chunk by up to 200 ms and one frame, and is never after the song page's cue. A
+late singer costs no second take. This field is not exposed on the show. The
+`score` URL slot serves the full stored MP3; the `song` slot serves its bytes
+from C, after the same authorization and
 full-file integrity check. Scene slots remain `scene-0` through `scene-6`.
 There is no extra stored asset or editable `score` slot. Song media duration is
 `T - C` and its lyric `lines` remain relative to C, so existing clients keep
@@ -77,8 +83,8 @@ playing the song and highlighting lyrics as before.
 A client playing the score uses `cueMs` for page turns and tap-to-seek, and
 lights lyrics using `scoreMs - (score.media.durationMs - song.media.durationMs)`.
 It fetches only the `score` audio. For example, `score-show.json` has T=55008,
-C=35088 and F=35300: song duration is 19920, song cue is 35300, and its first
-word begins at 212 on the song clock. Time fields are JSON numbers; frame-derived
+S=35000, F=35300 and C=34992: song duration is 20016, song cue is 35000, and its
+first word begins at 308 on the song clock. Time fields are JSON numbers; frame-derived
 values may be fractional milliseconds, while aligned lyric words use integer
 milliseconds. Without ready score media, use the existing song-only behavior.
 Historical songs without `songStartMs` have no score or cues and are unchanged.

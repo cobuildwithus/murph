@@ -25,7 +25,7 @@ vi.mock('@/src/lib/prisma', () => ({ getPrisma: () => ({
 const roots: string[] = [];
 afterEach(async () => { vi.unstubAllEnvs(); state.allowed = true; state.revoked = false; await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 
-it('validates, stores once and serves authorized full and sliced views after full-file integrity, with matching lyric clocks', async () => {
+it.each([['on time', 5000], ['five seconds late', 10_000]])('validates, stores once and serves authorized full and sliced views after full-file integrity, with matching lyric clocks, for a singer %s', async (_singer, first) => {
   const root = await mkdtemp(path.join(tmpdir(), 'synthetic-score-')); roots.push(root);
   vi.stubEnv('MURPH_GAME_RECAP_MEDIA_DIR', root); vi.stubEnv('VERCEL_ENV', 'test');
   const { putRecapMedia } = await import('@/src/lib/game/recap-media');
@@ -34,10 +34,11 @@ it('validates, stores once and serves authorized full and sliced views after ful
   const stream = inspectMp3Frames(fixture);
   const frames = stream.frames.slice(1).map((f, i) => fixture.subarray(f.byteOffset, stream.frames[i + 2]?.byteOffset ?? stream.endOffset));
   const bytes = Buffer.concat(Array.from({ length: Math.round(25_000 / stream.frames[1]!.timeMs) }, (_, i) => frames[i % frames.length]!));
-  const cut = [...inspectMp3Frames(bytes).frames].reverse().find(f => f.timeMs <= 4800)!;
+  // The producer's cut: 200 ms before the first word, and never after the planned start at 5 s.
+  const cut = [...inspectMp3Frames(bytes).frames].reverse().find(f => f.timeMs <= Math.min(first - 200, 5000))!;
   const hash = createHash('sha256').update(bytes).digest('hex'), generationId = 'a'.repeat(32);
   const storageKey = `recap/${generationId}/${hash}.mp3`, ownerMemberId = 'synthetic-owner';
-  const wordsTimestamps = [{ word: 'Hello', startMs: 5000, endMs: 5300 }];
+  const wordsTimestamps = [{ word: 'Hello', startMs: first, endMs: first + 300 }];
   const metadata = await putRecapMedia({ storageKey, ownerMemberId, bytes, songStartMs: cut.timeMs, wordsTimestamps });
   const envelope = gameRecapEnvelopeSchema.parse({ version: 1, generationId, acceptedAt: '2026-11-14T00:00:00Z',
     story: { chatLine: 'Synthetic show.', pages: [{ background: 'paper', blocks: [{ kind: 'headline', text: 'Hello' }] }], song: { title: 'Hello', style: 'Piano', lyrics: ['Hello'] } },
@@ -50,8 +51,9 @@ it('validates, stores once and serves authorized full and sliced views after ful
   expect(Buffer.from(song.bytes).equals(bytes.subarray(cut.byteOffset))).toBe(true);
   expect((await inspectGeneratedMp3Audio(song.bytes)).durationMs).toBeCloseTo(metadata.durationMs! - cut.timeMs, -2);
   const view = presentGameRecap({ stored: envelope, permittedPhotoIds: new Set(), mediaUrl: slot => `/synthetic/${slot}` });
-  expect(view.show!.pages[1]!.cueMs).toBe(5000);
-  expect(view.show!.pages[1]!.song!.lines![0]!.words[0]!.startMs).toBe(Math.round(5000 - cut.timeMs));
+  // The song page opens on the planned start either way; its first word lights when it is sung, on the sliced song's clock.
+  expect(view.show!.pages.map(page => page.cueMs)).toEqual([0, 5000, undefined]);
+  expect(view.show!.pages[1]!.song!.lines![0]!.words[0]!.startMs).toBe(Math.round(first - cut.timeMs));
   for (const slot of ['song', 'score']) {
     expect(await readAuthorizedRecapAsset({ ...input, slot, generationId: 'stale' })).toBeNull();
     state.allowed = false; expect(await readAuthorizedRecapAsset({ ...input, slot })).toBeNull(); state.allowed = true;
