@@ -198,7 +198,7 @@ function requireTrimmedString(value: unknown, label: string, maxLength: number):
     throw new ContractValidationError(`${label} is required.`);
   }
   if (text.length > maxLength) {
-    throw new RangeError(`${label} exceeds ${maxLength} characters.`);
+    throw new ContractValidationError(`${label} exceeds ${maxLength} characters.`);
   }
   return text;
 }
