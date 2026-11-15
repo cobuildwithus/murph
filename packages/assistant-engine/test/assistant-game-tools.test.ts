@@ -683,6 +683,27 @@ it('can correct an unaccepted draft after an upload error', async () => {
   expect(request.mock.calls[1]?.[0]).toMatchObject({ action: 'write_recap', recap: draft.story, assets: [] })
 })
 
+it('reads a result that names the accepted recap video, or none, and completes the write exactly as without one', async () => {
+  const { executeGameTool } = await import('../src/assistant-codex/dynamic-tools/games.js')
+  const story = { pages: [{ background: 'paper' as const, blocks: [{ kind: 'headline' as const, text: 'The curtain' }] }], chatLine: 'The week ended.' }
+  const outcomes: unknown[] = []
+  for (const recapVideo of [undefined, null, { generationId: 'a'.repeat(32), hash: 'b'.repeat(64), byteLength: 5_200_000 }]) {
+    // The runtime's own result reader takes the field; a runtime that predates it would refuse the whole result.
+    const result = parseHostedRuntimeGroupToolResponse({ action: 'write_recap', result: { status: 'ok', chatLine: 'Accepted line and link', recapOutcome: 'Saved.', ...(recapVideo === undefined ? {} : { recapVideo }) } })
+    const record = vi.fn(), request = vi.fn().mockResolvedValue(result)
+    const ctx: AssistantHostedToolContext = { ...context(), currentGameRecapScope: () => ({ gameId: 'synthetic', eventId: 'game-recap:synthetic', pairFingerprint: 'a'.repeat(32), show: true, video: true }),
+      readGameRecapDraft: async () => ({ story, files: [] }), readGameRecapMedia: async () => ({ bytes: 'YWJj', mediaType: 'image/jpeg', referenceIds: [] }),
+      recordSavedGameRecapChatLine: record, groupTool: { request } }
+    outcomes.push((await executeGameTool({ context: ctx, request: { action: 'write_recap_file', draftPath: 'drafts/show.json' } })).rpcResult)
+    expect(record).toHaveBeenCalledExactlyOnceWith('Accepted line and link')
+    // This release only reads: even on a wake that asks for a video it renders nothing, uploads no part and sends no candidate.
+    expect(request).toHaveBeenCalledExactlyOnceWith({ action: 'write_recap', origin: { kind: 'game_recap', gameId: 'synthetic', eventId: 'game-recap:synthetic' }, recap: story, assets: [] })
+  }
+  expect(outcomes[1]).toEqual(outcomes[0])
+  expect(outcomes[2]).toEqual(outcomes[0])
+  expect(outcomes[0]).toMatchObject({ success: true })
+})
+
 it('submits host-owned song timings without asking the draft to carry them', async () => {
   const { executeGameTool } = await import('../src/assistant-codex/dynamic-tools/games.js')
   const story = { pages: [{ background: 'paper' as const, blocks: [{ kind: 'headline' as const, text: 'The train' }] }], chatLine: 'The train arrived.',
