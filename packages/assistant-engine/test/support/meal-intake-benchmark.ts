@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { appendFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
@@ -253,7 +253,7 @@ export async function runMealIntakeBenchmarkCase(input: {
       VAULT: vault,
     }
     const codexCommand = path.join(bin, 'codex-real')
-    await writeFile(codexCommand, canonicalCodexLauncher(env, undefined, config.providerConfig), { mode: 0o700 })
+    await writeFile(codexCommand, canonicalCodexLauncher({ ...env, CODEX_HOME: config.codexHome ?? config.env.CODEX_HOME ?? path.join(homedir(), '.codex') }, undefined, config.providerConfig), { mode: 0o700 })
     const now = new Date()
     const localDate = formatLocalDate(now)
     await seedEstablishedMember({ bin, env, now, vault })

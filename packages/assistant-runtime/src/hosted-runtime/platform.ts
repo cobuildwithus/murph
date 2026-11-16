@@ -1,3 +1,4 @@
+import type { HostedCustomConnectionsPort } from "@murphai/hosted-execution";
 import type { CompanionPresence } from "@murphai/hosted-execution/companion-presence";
 import type { ConversationPollTool } from "@murphai/hosted-execution/conversation-polls";
 import type {
@@ -895,6 +896,7 @@ export interface HostedRuntimePlatform {
   mediaStore?: HostedRuntimeMediaStore | null;
   browserVaultReplicaPort?: HostedRuntimeBrowserVaultReplicaPort | null;
   clinicalRecordsPort?: HostedRuntimeClinicalRecordsPort | null;
+  customConnections?: HostedCustomConnectionsPort | null
   connectedApps?: AssistantConnectedAppsPort | null;
   deviceSyncPort?: HostedRuntimeDeviceSyncPort | null;
   effectsPort: HostedRuntimeEffectsPort;

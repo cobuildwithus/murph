@@ -1,3 +1,5 @@
+import { resolveCodexAttemptCapabilities, type CodexAttemptCapabilities } from './codex-attempt-capabilities.js'
+import { buildCustomConnectionsThreadConfig } from './custom-connections.js'
 import type { AskGrokTurnState } from '../assistant-codex/ask-grok-tool.js'
 import { relative } from 'node:path'
 import { resolveUsageOptimizerFeedbackScope } from './weekly-usage-optimizer.js'
@@ -52,9 +54,6 @@ import {
   recordAssistantRuntimeIssueInputsBestEffort,
   type AssistantRuntimeIssueInput,
 } from './issue-reporting.js'
-import {
-  MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID,
-} from './onboarding-goal-checkin-automation.js'
 import type { CodexThreadIdentity } from './codex-thread-route.js'
 import { maybeThrowInjectedAssistantFault } from './fault-injection.js'
 import {
@@ -90,10 +89,6 @@ import {
   createAssistantProductFeedbackRecorder,
   type AssistantProgressDelivery,
 } from './turn-progress.js'
-import {
-  MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
-  MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
-} from './managed-automations.js'
 import type {
   AssistantHostedToolContext,
 } from './hosted-tool-context.js'
@@ -663,91 +658,6 @@ async function executeAssistantCodexAttempt(
   }
 }
 
-function resolveCodexAttemptCapabilities(
-  attemptPlan: AssistantCodexAttemptPlan,
-  executionPlan: AssistantCodexTurnExecutionPlan,
-) {
-  const outputOnlyTurn =
-    executionPlan.profile.toolProfile === 'output-only-turn'
-  const gameHostTurn =
-    executionPlan.profile.toolProfile === 'game-host-turn'
-  // Process isolation (one-shot member-read process, read-only sandbox, no
-  // resume) covers both follow-up evaluations and the onboarding check-in.
-  // Only follow-up evaluations also lose Murph tools; the onboarding check-in
-  // keeps the planned tools and their host-side context like any private run.
-  const readOnlyAutomationTurn = isReadOnlyScheduledTurn(
-    executionPlan.input, attemptPlan.routePlan.followUpInvocation,
-  )
-  const followUpEvaluationTurn =
-    attemptPlan.routePlan.followUpInvocation === true
-  const onboardingGoalCheckinTurn = readOnlyAutomationTurn && !followUpEvaluationTurn
-  const nativeCapabilitiesRestrictedTurn = [
-    outputOnlyTurn,
-    gameHostTurn,
-  ].includes(true)
-  const systemNotificationTurn =
-    executionPlan.profile.promptProfile === 'system-notification'
-  const automationId =
-    executionPlan.input.scheduledInvocationAuthority?.automationId
-  const groupRoomModelMaintenanceTurn =
-    executionPlan.profile.toolProfile === 'maintenance-turn' &&
-    executionPlan.input.maintenanceProfile === 'group-room-model' &&
-    automationId === MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID
-  const memberMemoryMaintenanceTurn =
-    executionPlan.profile.toolProfile === 'maintenance-turn' &&
-    executionPlan.input.maintenanceProfile === 'member-memory' &&
-    automationId === MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID
-  const toolOnlyMaintenanceTurn =
-    groupRoomModelMaintenanceTurn || memberMemoryMaintenanceTurn
-  const restrictedOneShotTurn = [
-    toolOnlyMaintenanceTurn,
-    readOnlyAutomationTurn,
-    gameHostTurn,
-  ].includes(true)
-  const audience = executionPlan.sharedPlan.conversationPolicy.audience
-  const groupConversation =
-    resolveAssistantConversationScope(audience) === 'group'
-  const groupEmailTurn =
-    audience.threadIsDirect === false &&
-    normalizeNullableString(audience.channel)?.toLowerCase() === 'email'
-  const hostedCapabilitiesRestricted =
-    nativeCapabilitiesRestrictedTurn || restrictedOneShotTurn
-  const hostedToolContextRestricted =
-    hostedCapabilitiesRestricted && !gameHostTurn && !onboardingGoalCheckinTurn
-  const toolsRestricted = outputOnlyTurn || followUpEvaluationTurn
-  // The onboarding check-in keeps its tools but not open web access: its
-  // policy limits it to the conversation and targeted vault reads.
-  const publicInternetRestricted =
-    toolsRestricted || toolOnlyMaintenanceTurn || readOnlyAutomationTurn
-  const ordinaryHostedWorkspaceTurn =
-    Boolean(executionPlan.executionContext?.hosted) &&
-    !hostedCapabilitiesRestricted &&
-    !groupEmailTurn
-  const hostedLocalTestProviderTurn =
-    attemptPlan.route.providerOptions.modelProvider ===
-      HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID
-  return {
-    outputOnlyTurn,
-    gameHostTurn,
-    readOnlyAutomationTurn,
-    nativeCapabilitiesRestrictedTurn,
-    systemNotificationTurn,
-    groupRoomModelMaintenanceTurn,
-    memberMemoryMaintenanceTurn,
-    toolOnlyMaintenanceTurn,
-    restrictedOneShotTurn,
-    groupConversation,
-    groupEmailTurn,
-    ordinaryHostedWorkspaceTurn,
-    hostedLocalTestProviderTurn,
-    hostedCapabilitiesRestricted,
-    hostedToolContextRestricted,
-    toolsRestricted,
-    publicInternetRestricted,
-  }
-}
-
-type CodexAttemptCapabilities = ReturnType<typeof resolveCodexAttemptCapabilities>
 
 function resolveCodexAttemptEnvironments(capabilities: CodexAttemptCapabilities, attemptPlan: AssistantCodexAttemptPlan) {
   return capabilities.hostedCapabilitiesRestricted ? [] : attemptPlan.routePlan.environments
@@ -764,6 +674,18 @@ function resolveCodexAttemptThreadConfig(capabilities: CodexAttemptCapabilities)
     return ASSISTANT_READ_ONLY_AUTOMATION_THREAD_CONFIG
   }
   return capabilities.groupEmailTurn ? ASSISTANT_GROUP_EMAIL_THREAD_CONFIG : null
+}
+
+function resolveCodexAttemptMountConfig(
+  capabilities: CodexAttemptCapabilities,
+  attemptPlan: AssistantCodexAttemptPlan,
+  executionPlan: AssistantCodexTurnExecutionPlan,
+): AssistantProviderTurnInput['turn']['codexThreadConfig'] {
+  const restrictedConfig = resolveCodexAttemptThreadConfig(capabilities)
+  const mounts = executionPlan.executionContext?.hosted && capabilities.customConnectionsEligible
+    ? buildCustomConnectionsThreadConfig(attemptPlan.routePlan.customConnections ?? [])
+    : null
+  return mounts ? { ...restrictedConfig, ...mounts } : restrictedConfig
 }
 
 function resolveCodexAttemptPermissions(
@@ -847,7 +769,7 @@ function buildCodexAttemptProviderInput(
         ),
       authorizeAcceptedMessageTarget:
         executionPlan.authorizeAcceptedMessageTarget ?? null,
-      codexThreadConfig: resolveCodexAttemptThreadConfig(capabilities),
+      codexThreadConfig: resolveCodexAttemptMountConfig(capabilities, attemptPlan, executionPlan),
       conversationHistoryMessages:
         attemptPlan.routePlan.conversationHistoryMessages,
       developerInstructions: attemptPlan.routePlan.developerInstructions,
@@ -1208,10 +1130,4 @@ function hasAssistantRichUserMessageContent(
   userMessageContent: readonly AssistantUserMessageContentPart[],
 ): boolean {
   return userMessageContent.some((part) => part.type !== 'text')
-}
-
-function isReadOnlyScheduledTurn(input: {
-  scheduledInvocationAuthority?: { automationId: string } | null
-}, followUpInvocation?: boolean): boolean {
-  return followUpInvocation === true || input.scheduledInvocationAuthority?.automationId === MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID
 }

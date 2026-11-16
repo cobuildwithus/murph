@@ -680,7 +680,7 @@ async function runHostedCodexConfigShellEnvironmentPolicySmoke(input: {
   await chmod(codexHome, 0o700);
 
   const codexConfigPath = path.join(codexHome, "config.toml");
-  await writeFile(codexConfigPath, buildHostedRunnerSmokeCodexConfigToml(), { mode: 0o600 });
+  await writeFile(codexConfigPath, buildHostedRunnerSmokeCodexConfigToml(codexHome), { mode: 0o600 });
   await chmod(codexConfigPath, 0o600);
 
   const config = await readFile(codexConfigPath, "utf8");
@@ -758,7 +758,7 @@ async function runHostedCodexConfigShellEnvironmentPolicySmoke(input: {
   };
 }
 
-function buildHostedRunnerSmokeCodexConfigToml(): string {
+function buildHostedRunnerSmokeCodexConfigToml(codexHome: string): string {
   const modelCatalogJson = readHostedCodexModelCatalogJsonPath();
 
   return [
@@ -775,7 +775,7 @@ function buildHostedRunnerSmokeCodexConfigToml(): string {
     // exercises the same PATH semantics as production turns.
     "allow_login_shell = false",
     "",
-    ...buildMurphHostedPermissionProfileTomlLines(),
+    ...buildMurphHostedPermissionProfileTomlLines(codexHome),
     "[skills]",
     "include_instructions = false",
     "",

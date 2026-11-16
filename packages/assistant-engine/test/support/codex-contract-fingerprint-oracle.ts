@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto'
 // by thread/start or the original pre-adapter catalog to model a persisted
 // pre-fix thread. No dependency on the production adapter/fingerprint builder.
 export function fingerprintThreadDeclarations(input: {
+  customConnections?: unknown
   baseInstructions?: string | null
   developerInstructions?: string | null
   dynamicTools: unknown

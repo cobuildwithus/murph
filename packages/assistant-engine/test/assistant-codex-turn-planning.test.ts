@@ -2325,6 +2325,67 @@ describe('assistant Codex turn planning', () => {
     },
   )
 
+  it('resumes an origin/main-shaped hosted fingerprint with a model catalog and empty manifest', async () => {
+    mockOrdinaryPromptContext()
+    const route = createRoute()
+    const executionContext = { hosted: { memberId: 'synthetic-member', userEnvKeys: [], customConnections: { readManifest: async () => [] } } }
+    vi.stubEnv('MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON', '/synthetic/hosted-models.json')
+    const fresh = await planTurn({ executionContext, route })
+    expect(fresh.cliEnv.MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON).toBe('/synthetic/hosted-models.json')
+    const start = buildCodexThreadStartParams({ approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+      developerInstructions: fresh.developerInstructions, dynamicTools: fresh.dynamicTools,
+      prompt: 'Synthetic compatibility proof', workingDirectory: '/vaults/test' })
+    // Production before custom connections hashes emitted declarations and the route,
+    // without a customConnections key or the legacy developer-instructions fields.
+    const stored = fingerprintThreadDeclarations({ dynamicTools: start.dynamicTools, routeFingerprint: route.routeFingerprint })
+    expect(fresh.assistantContractFingerprint).toBe(stored)
+    const resumed = await planTurn({ executionContext, route, session: createSession({ resumeState: {
+      assistantContractFingerprint: stored, routeFingerprint: route.routeFingerprint, threadId: 'thread-before-connections',
+    } }) })
+    expect(resumed.resume?.codexThreadId).toBe('thread-before-connections')
+    const mounted = await planTurn({ route, executionContext: { hosted: { ...executionContext.hosted,
+      customConnections: { readManifest: async () => [{ id: 'cc_notes', slug: 'notes', generation: 1, catalog: 'a'.repeat(43) }] },
+    } }, session: createSession({ resumeState: { assistantContractFingerprint: stored,
+      routeFingerprint: route.routeFingerprint, threadId: 'thread-before-connections' } }) })
+    expect(mounted.resume).toBeNull()
+  })
+
+  it('reads custom manifests only for eligible plans and rotates every changed immutable mount', async () => {
+    mockOrdinaryPromptContext()
+    const entry = { id: 'cc_notes', slug: 'notes', generation: 3, catalog: 'a'.repeat(43) }
+    const readManifest = vi.fn(async () => [entry])
+    const executionContext = { hosted: { memberId: 'synthetic-member', userEnvKeys: [], customConnections: { readManifest } } }
+    const first = await planTurn({ executionContext })
+    expect(first.customConnections).toEqual([entry])
+    expect(readManifest).toHaveBeenCalledTimes(1)
+    const session = createSession({ resumeState: {
+      assistantContractFingerprint: first.assistantContractFingerprint,
+      routeFingerprint: createRoute().routeFingerprint, threadId: 'thread-with-notes',
+    } })
+    expect((await planTurn({ executionContext, session })).resume?.codexThreadId).toBe('thread-with-notes')
+    for (const manifest of [[], [{ ...entry, catalog: 'b'.repeat(43) }], [{ ...entry, generation: 4 }], [entry, { ...entry, id: 'cc_more', slug: 'more' }]]) {
+      readManifest.mockResolvedValueOnce(manifest)
+      const changed = await planTurn({ executionContext, session })
+      expect(changed.resume).toBeNull()
+      expect(changed.planningDiagnostics?.threadRotationReason).toBe('contract_mismatch')
+    }
+    const legacy = buildAssistantCodexContractFingerprint({
+      developerInstructions: first.developerInstructions, dynamicTools: first.dynamicTools, routeFingerprint: createRoute().routeFingerprint,
+    })
+    const legacySession = createSession({ resumeState: { assistantContractFingerprint: legacy, routeFingerprint: createRoute().routeFingerprint, threadId: 'legacy-thread' } })
+    expect((await planTurn({ executionContext, session: legacySession })).resume).toBeNull()
+    readManifest.mockResolvedValueOnce([])
+    expect((await planTurn({ executionContext, session: legacySession })).resume?.codexThreadId).toBe('legacy-thread')
+    readManifest.mockClear()
+    for (const toolProfile of ['output-only-turn', 'game-host-turn'] as const) {
+      const restricted = await planTurn({ executionContext, profile: { promptProfile: 'conversation', toolProfile, threadScope: 'isolated-thread' } })
+      expect(restricted.customConnections).toEqual([])
+    }
+    const group = await planTurn({ executionContext, sharedPlan: createSharedPlan({}, { channel: 'linq', threadIsDirect: false }) })
+    expect(group.customConnections).toEqual([])
+    expect(readManifest).not.toHaveBeenCalled()
+  })
+
   it('keeps the assistant contract fingerprint stable across repeated identical plans', async () => {
     mockOrdinaryPromptContext()
     const route = createRoute()

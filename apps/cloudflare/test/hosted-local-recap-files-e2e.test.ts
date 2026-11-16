@@ -95,6 +95,7 @@ it.each([false, true])('accepts a recap show through the production hosted Linux
     await writeFile(path.join(home, 'config.toml'), [
       `model_catalog_json = "/usr/local/share/murph/codex-model-catalog.openai-flex.json"`,
       buildHostedCodexConfigToml({
+        codexHome: home,
         exposeSpawnAgentModelOverrides: false, model: 'gpt-6.1-sol', reasoningEffort: 'low',
         provider: { id: 'hosted-openai', name: 'Synthetic loopback', baseUrl: `http://127.0.0.1:${address.port}/v1`, envKey: 'OPENAI_API_KEY', wireApi: 'responses', supportsWebSockets: false },
       }),

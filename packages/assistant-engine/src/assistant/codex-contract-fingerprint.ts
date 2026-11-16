@@ -1,3 +1,4 @@
+import type { HostedCustomConnectionManifestEntry } from "@murphai/hosted-execution"
 import { createHash } from 'node:crypto'
 
 import type { AssistantProviderDynamicTool } from './providers/types.js'
@@ -7,6 +8,7 @@ import { MURPH_CODEX_BASE_INSTRUCTIONS } from './codex-base-instructions.js'
 import { normalizeNullableString } from './shared.js'
 
 export function buildAssistantCodexContractFingerprint(input: {
+  customConnections?: readonly HostedCustomConnectionManifestEntry[]
   developerInstructions?: string | null
   dynamicTools: readonly AssistantProviderDynamicTool[]
   routeFingerprint: string
@@ -23,6 +25,7 @@ export function buildAssistantCodexContractFingerprint(input: {
       // thread/resume cannot replace tools. Hash exactly the declarations sent at
       // thread/start so an old unsupplemented thread bootstraps once, then resumes.
       dynamicTools: input.dynamicTools.map(withCodexToolInputContract),
+      ...(input.customConnections?.length ? { customConnections: [...input.customConnections].sort((a, b) => a.slug.localeCompare(b.slug)) } : {}),
       routeFingerprint: input.routeFingerprint,
     }))
     .digest('hex')

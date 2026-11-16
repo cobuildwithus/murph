@@ -154,7 +154,7 @@ import {
   showWorkoutRecord,
   startLiveWorkout,
 } from '@murphai/vault-usecases/workouts'
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { getKnowledgePage, upsertKnowledgePage } from '../src/knowledge/service.ts'
 import {
   markAssistantContextSnapshotDirty,
@@ -45994,7 +45994,7 @@ async function materializeRealCodexHostedPermissionHome(
     await writeFile(
       path.join(codexHome, 'config.toml'),
       [
-        buildRealCodexHostedPermissionConfigToml(config).trimEnd(),
+        buildRealCodexHostedPermissionConfigToml(config, codexHome).trimEnd(),
         ...(options?.trustedProjectRoot
           ? [
               '',
@@ -46030,6 +46030,7 @@ async function materializeRealCodexHostedPermissionHome(
 
 function buildRealCodexHostedPermissionConfigToml(
   config: RealCodexE2eConfig,
+  codexHome = config.codexHome ?? path.join(homedir(), '.codex'),
 ): string {
   const providerApiKeyEnv = config.providerApiKeyEnv
   let baseConfig: string
@@ -46060,7 +46061,7 @@ function buildRealCodexHostedPermissionConfigToml(
   return [
     baseConfig.trimEnd(),
     '',
-    ...buildMurphHostedPermissionProfileTomlLines(),
+    ...buildMurphHostedPermissionProfileTomlLines(codexHome),
   ].join('\n')
 }
 
@@ -47502,6 +47503,55 @@ describeRealCodex('bounded reaction routing journeys', () => {
       await removeRealCodexTemporaryPaths(config.temporaryPaths)
     }
   }, 600_000)
+})
+
+describeRealCodex('custom connection native tool journey', () => {
+  it('custom connections live reads approved Notes through a native MCP mount', async () => {
+    const { startCustomConnectionsGateway } = await import('./support/custom-connections-gateway.js')
+    const gateway = await startCustomConnectionsGateway()
+    onTestFinished(() => gateway.close())
+    const entry = { id: 'cc_notes', slug: 'notes', generation: 3, catalog: 'a'.repeat(43) }
+    gateway.state.connection = entry
+    const config = await resolveRealCodexE2eConfig()
+    onTestFinished(() => removeRealCodexTemporaryPaths(config.temporaryPaths))
+    const catalogRoot = await mkdtemp(path.join(tmpdir(), 'murph-connections-catalog-'))
+    onTestFinished(() => removeRealCodexTemporaryPaths([catalogRoot]))
+    const codexCommand = normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+      ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../node_modules/.bin/codex')
+    config.env[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV] = await writeHostedOpenAiMixedModeModelCatalogJson({ codexCommand, directory: catalogRoot })
+    const fixture = await createCanonicalLiveFixture(config, 'linq', { capabilities: 'production-hosted' })
+    const nativeExecute = clinicalExtractionCodex.executeCodexAppServerTurn
+    let observedMount = false
+    const observer = vi.spyOn(clinicalExtractionCodex, 'executeCodexAppServerTurn').mockImplementation(async input => {
+      const mounts = input.threadConfig?.mcp_servers as Record<string, { url: string }> | undefined
+      expect(mounts?.notes?.url).toBe(`http://connections.worker/v1/cc_notes/3/${entry.catalog}/mcp`)
+      observedMount = true
+      // Preserve the production-built config, changing only virtual-host routing for the local fake Web.
+      return nativeExecute({ ...input, threadConfig: { ...input.threadConfig, mcp_servers: {
+        ...mounts, notes: { ...mounts!.notes, url: mounts!.notes!.url.replace('http://connections.worker', gateway.origin) },
+      } } })
+    })
+    const readManifest = vi.fn(async () => [entry])
+    try {
+      const before = await listCanonicalWriteEvidence(fixture.vault)
+      const result = await fixture.message('Check my Notes connection and tell me what my saved note says to bring. Do not change anything or contact anyone.', {
+        executionContext: { hosted: { memberId: 'synthetic-member', userEnvKeys: [], customConnections: { readManifest } } },
+      })
+      expect(observedMount).toBe(true)
+      expect(readManifest).toHaveBeenCalledTimes(1)
+      expect(gateway.state.calls).toHaveLength(1)
+      expect(gateway.state.calls[0]?.query).toEqual(expect.any(String))
+      expect(result.response).toMatch(/blue notebook/iu)
+      expect(result.response).toMatch(/pencil/iu)
+      expect(result.response).not.toMatch(/MCP|gateway|token|I(?:'ve| have) (?:saved|updated|sent)/iu)
+      expect(result.response.length).toBeLessThan(600)
+      expect(await listCanonicalWriteEvidence(fixture.vault)).toEqual(before)
+      process.stdout.write(`[custom-connections-live] ${JSON.stringify({ calls: gateway.state.calls.length, reply: result.response })}\n`)
+    } finally {
+      observer.mockRestore()
+      await fixture.close()
+    }
+  }, 240_000)
 })
 
 describeRealCodex('production reaction routing turn journey', () => {

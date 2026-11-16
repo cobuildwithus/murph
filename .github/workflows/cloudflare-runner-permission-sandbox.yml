@@ -138,15 +138,21 @@ jobs:
           image=$(node --input-type=module -e 'import { hostedLocalRunnerBaseImageTag } from "./apps/cloudflare/scripts/runner-base-image-contract.ts"; process.stdout.write(hostedLocalRunnerBaseImageTag)')
           container=$(docker create "$image")
           trap 'docker rm "$container" >/dev/null' EXIT
-          mkdir -p "$RUNNER_TEMP/murph-codex"
-          docker cp "$container:/usr/local/lib/murph-codex/." "$RUNNER_TEMP/murph-codex/"
-          echo "MURPH_TEST_CODEX_COMMAND=$RUNNER_TEMP/murph-codex/bin/codex" >> "$GITHUB_ENV"
+          # Same path as the image: Codex re-runs itself inside its sandbox, which only sees platform paths.
+          sudo mkdir -p /usr/local/lib/murph-codex
+          sudo docker cp "$container:/usr/local/lib/murph-codex/." /usr/local/lib/murph-codex/
+          echo "MURPH_TEST_CODEX_COMMAND=/usr/local/lib/murph-codex/bin/codex" >> "$GITHUB_ENV"
 
       - name: Prove deployed Codex provider compatibility
         run: |
           pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts test/assistant-codex-websocket-stall.test.ts --no-coverage
           pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts test/assistant-codex-scripted-runtime.test.ts --no-coverage -t 'preempts an unfinished SSE answer|explicitly disables instant steering|steered reply has no text|keeps reply requests opted in|keeps in-turn compaction on default retention'
           pnpm exec vitest run --config apps/cloudflare/vitest.config.ts apps/cloudflare/test/codex-openai-egress-conformance.test.ts --no-coverage
+
+      - name: Prove custom connection sandbox boundaries
+        env:
+          MURPH_REQUIRE_NATIVE_SANDBOX: "1"
+        run: pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts test/custom-connections-native.test.ts --no-coverage
 
       - name: Prove native Codex permission confinement
         run: pnpm --dir apps/cloudflare runner:docker:smoke:prepared-base

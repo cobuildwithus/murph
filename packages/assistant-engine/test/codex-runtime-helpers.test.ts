@@ -890,7 +890,7 @@ describe('Codex assistant registry helpers', () => {
           durationMs: 900,
           failedCalls: 0,
           kind: 'mcp_tool',
-          label: 't_generate',
+          label: 'mcp_tool',
           outputBytesMax: 40,
           outputBytesTotal: 40,
         },
@@ -1233,7 +1233,7 @@ describe('Codex assistant registry helpers', () => {
         toolEvent('item_2', 'tenant_two_private', 'search'),
         toolEvent('item_3', 'safe_namespace', 'member.private'),
         mcpEvent('item_4', 'member_acme_private', 'generate'),
-        mcpEvent('item_5', 'tenant_two_private', 'generate'),
+        mcpEvent('item_5', 'tenant_two_private', 'remote_chosen_name'),
       ],
       turnId: 'turn_tool_identity',
     })
@@ -1252,7 +1252,7 @@ describe('Codex assistant registry helpers', () => {
       expect.objectContaining({
         calls: 2,
         kind: 'mcp_tool',
-        label: 't_generate',
+        label: 'mcp_tool',
       }),
     ]))
     const persisted = parseAssistantUsageRecord({
@@ -1274,6 +1274,8 @@ describe('Codex assistant registry helpers', () => {
     expect(serialized).not.toContain('tenant_two_private')
     expect(serialized).not.toContain('safe_namespace')
     expect(serialized).not.toContain('member.private')
+    expect(serialized).not.toContain('remote_chosen_name')
+    expect(serialized).not.toContain('generate')
   })
 
   it('counts every canonical structural failure signal without reading error text', () => {

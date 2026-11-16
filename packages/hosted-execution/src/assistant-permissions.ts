@@ -111,7 +111,7 @@ export function buildMurphMemberReadPermissionProfileTomlLines(): readonly strin
   ];
 }
 
-export function buildMurphMemberWorkspacePermissionProfileTomlLines(): readonly string[] {
+export function buildMurphMemberWorkspacePermissionProfileTomlLines(codexHome: string): readonly string[] {
   return [
     "# Ordinary hosted member turns may mutate the vault except canonical automations.",
     `[permissions.${MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE}.filesystem]`,
@@ -119,6 +119,8 @@ export function buildMurphMemberWorkspacePermissionProfileTomlLines(): readonly 
     '"/app" = "read"',
     '":tmpdir" = "write"',
     '":slash_tmp" = "write"',
+    // A specific deny carves the host-owned config out of writable temp roots.
+    `${JSON.stringify(codexHome)} = "deny"`,
     "glob_scan_max_depth = 64",
     "",
     `[permissions.${MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE}.filesystem.":workspace_roots"]`,
@@ -131,13 +133,13 @@ export function buildMurphMemberWorkspacePermissionProfileTomlLines(): readonly 
   ];
 }
 
-export function buildMurphHostedPermissionProfileTomlLines(): readonly string[] {
+export function buildMurphHostedPermissionProfileTomlLines(codexHome: string): readonly string[] {
   return [
     ...buildMurphGameHostPermissionProfileTomlLines(),
     ...buildMurphGroupReadPermissionProfileTomlLines(),
     ...buildMurphOperatorDiagnosticReadPermissionProfileTomlLines(),
     ...buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines(),
     ...buildMurphMemberReadPermissionProfileTomlLines(),
-    ...buildMurphMemberWorkspacePermissionProfileTomlLines(),
+    ...buildMurphMemberWorkspacePermissionProfileTomlLines(codexHome),
   ];
 }

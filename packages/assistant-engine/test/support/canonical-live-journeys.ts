@@ -104,7 +104,7 @@ export async function createCanonicalLiveFixture(config: CanonicalLiveConfig, ch
   await symlink(process.execPath, path.join(bin, 'node'))
   await writeFile(path.join(bin, 'vault-cli'), CLI_WRAPPER, { mode: 0o700 })
   const codexCommand = path.join(bin, 'codex-real')
-  await writeFile(codexCommand, canonicalCodexLauncher(env, undefined, config.providerConfig), { mode: 0o700 })
+  await writeFile(codexCommand, canonicalCodexLauncher({ ...env, CODEX_HOME: config.codexHome ?? config.env.CODEX_HOME ?? path.join(homedir(), '.codex') }, undefined, config.providerConfig), { mode: 0o700 })
   await writeFile(env.MURPH_CANONICAL_JOURNEY_COMMANDS!, '')
   // Bind the original authentication home explicitly while isolating operator
   // config and the first production CLI PATH entry. Auth is never copied.

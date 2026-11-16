@@ -2,6 +2,7 @@ export const CLOUDFLARE_HOSTED_RUNTIME_HOSTS = {
   artifactStore: "artifacts.worker",
   browserVaultReplicaStore: "browser-vault.worker",
   effectsPort: "results.worker",
+  customConnections: "connections.worker",
   mediaStore: "media.worker",
   runnerControl: "runner-control.worker",
   webControlPlane: "web-control.worker",

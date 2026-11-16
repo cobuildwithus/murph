@@ -441,6 +441,47 @@ function createProviderAttemptResult(): AssistantProviderTurnAttemptResult {
 }
 
 describe('Codex provider routing', () => {
+  it.each([
+    { kind: 'private chat', channel: 'linq', direct: true, tool: 'provider-turn', eligible: true },
+    { kind: 'private email', channel: 'email', direct: true, tool: 'provider-turn', eligible: true },
+    { kind: 'scheduled personal', channel: 'telegram', direct: true, tool: 'provider-turn', eligible: true, automation: 'auto_personal' },
+    { kind: 'synthetic group', channel: 'linq', direct: false, tool: 'provider-turn', eligible: false },
+    { kind: 'group email', channel: 'email', direct: false, tool: 'provider-turn', eligible: false },
+    { kind: 'output only', channel: 'linq', direct: true, tool: 'output-only-turn', eligible: false },
+    { kind: 'game host', channel: 'linq', direct: false, tool: 'game-host-turn', eligible: false },
+    { kind: 'follow-up evaluation', channel: 'linq', direct: true, tool: 'provider-turn', eligible: false, followUp: true },
+    { kind: 'onboarding check-in', channel: 'linq', direct: true, tool: 'provider-turn', eligible: false, automation: MURPH_ONBOARDING_GOAL_CHECKIN_AUTOMATION_ID },
+    { kind: 'member maintenance', channel: 'linq', direct: true, tool: 'maintenance-turn', eligible: false, automation: MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID, maintenance: 'member-memory' },
+    { kind: 'room maintenance', channel: 'linq', direct: false, tool: 'maintenance-turn', eligible: false, automation: MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID, maintenance: 'group-room-model' },
+  ] as const)('aligns custom mounts with hosted permissions: $kind', async scenario => {
+    const route = createRoute(), session = createAssistantSession({ providerOptions: route.providerOptions })
+    const input = { prompt: 'Read synthetic notes.', vault: '/synthetic-vault',
+      ...(scenario.automation ? { scheduledInvocationAuthority: { automationId: scenario.automation, occurrenceAt: '2026-11-15T12:00:00Z' } } : {}),
+      ...('maintenance' in scenario ? { maintenanceProfile: scenario.maintenance } : {}),
+    }
+    const sharedPlan = createSharedPlan()
+    sharedPlan.conversationPolicy.audience = { ...sharedPlan.conversationPolicy.audience, channel: scenario.channel, threadIsDirect: scenario.direct }
+    const executionPlan = createExecutionPlan({ input, route, turnId: 'turn-test', sharedPlan,
+      executionContext: { hosted: { memberId: 'synthetic-member', userEnvKeys: [] } },
+      profile: { promptProfile: 'conversation', toolProfile: scenario.tool, threadScope: 'session-thread' },
+    })
+    const entry = { id: 'cc_notes', slug: 'notes', generation: 3, catalog: 'a'.repeat(43) }
+    providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue(executionPlan)
+    providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue(createAttemptPlan({ route, session, routePlan: {
+      // Deliberately inject stale mounts into a restricted attempt to prove they are not mounted.
+      customConnections: [entry], followUpInvocation: 'followUp' in scenario,
+    } }))
+    providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(createProviderAttemptResult())
+    await executeCodexTurnWithRecovery({ input, plan: sharedPlan, resolvedSession: session, route, turnCreatedAt: '2026-11-15T12:00:00Z', turnId: 'turn-test' })
+    const provider = providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]![0]
+    expect(Object.keys(provider.codexThreadConfig?.mcp_servers ?? {})).toEqual(scenario.eligible ? ['notes'] : [])
+    if (scenario.direct) expect(provider.permissions === MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE).toBe(scenario.eligible)
+    if (scenario.eligible) expect(provider.codexThreadConfig).toEqual({ mcp_servers: { notes: {
+      url: `http://connections.worker/v1/cc_notes/3/${entry.catalog}/mcp`, required: false,
+      default_tools_approval_mode: 'approve', startup_timeout_sec: 10, tool_timeout_sec: 35,
+    } } })
+  })
+
   it('uses the ordinary hosted workspace profile for recap turns', async () => {
     const route = createRoute(), session = createAssistantSession({ providerOptions: route.providerOptions })
     const input = { prompt: 'Build the synthetic recap.', vault: '/vaults/test' }
@@ -475,7 +516,7 @@ describe('Codex provider routing', () => {
     const provider = providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
     expect(provider.environments).toEqual([{ PRIVATE_ENVIRONMENT: 'must-not-pass' }])
     expect(provider.permissions).toBe(MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE)
-    expect(provider.codexThreadConfig).toBeNull()
+    expect(provider.codexThreadConfig).toEqual(null)
     expect(provider.promptCacheRetention).toBeNull()
     expect(provider.workingDirectory).toBe('/vaults/test')
     expect(provider.runtimeWorkspaceRoots).toEqual(['/vaults/test'])
@@ -910,7 +951,7 @@ describe('Codex provider routing', () => {
       approvalPolicy: null,
       sandbox: 'danger-full-access',
     })
-    expect(completionProviderInput?.codexThreadConfig).toBeNull()
+    expect(completionProviderInput?.codexThreadConfig).toEqual(null)
     expect(completionProviderInput).not.toHaveProperty('codexConfigOverrides')
     expect(completionProviderInput?.activeTurnSteering).toBe(activeTurnSteering)
     expect(completionProviderInput?.environments).toEqual([
@@ -951,7 +992,7 @@ describe('Codex provider routing', () => {
       approvalPolicy: null,
       sandbox: 'danger-full-access',
     })
-    expect(foregroundProviderInput?.codexThreadConfig).toBeNull()
+    expect(foregroundProviderInput?.codexThreadConfig).toEqual(null)
     expect(foregroundProviderInput?.activeTurnSteering).toBe(activeTurnSteering)
     expect(foregroundProviderInput).not.toHaveProperty('codexConfigOverrides')
     expect(foregroundProviderInput?.environments).toEqual([
