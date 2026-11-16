@@ -138,9 +138,10 @@ jobs:
           image=$(node --input-type=module -e 'import { hostedLocalRunnerBaseImageTag } from "./apps/cloudflare/scripts/runner-base-image-contract.ts"; process.stdout.write(hostedLocalRunnerBaseImageTag)')
           container=$(docker create "$image")
           trap 'docker rm "$container" >/dev/null' EXIT
-          mkdir -p "$RUNNER_TEMP/murph-codex"
-          docker cp "$container:/usr/local/lib/murph-codex/." "$RUNNER_TEMP/murph-codex/"
-          echo "MURPH_TEST_CODEX_COMMAND=$RUNNER_TEMP/murph-codex/bin/codex" >> "$GITHUB_ENV"
+          # Same path as the image: Codex re-runs itself inside its sandbox, which only sees platform paths.
+          sudo mkdir -p /usr/local/lib/murph-codex
+          sudo docker cp "$container:/usr/local/lib/murph-codex/." /usr/local/lib/murph-codex/
+          echo "MURPH_TEST_CODEX_COMMAND=/usr/local/lib/murph-codex/bin/codex" >> "$GITHUB_ENV"
 
       - name: Prove deployed Codex provider compatibility
         run: |
