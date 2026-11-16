@@ -12,9 +12,6 @@ import type { RouteLeg } from './state';
 
 export { routeLegs, routeView } from './route-progress';
 
-// The Murph map style (~/startup1/progress-paper/maps/murph-style.json, uploaded to Mapbox).
-export const MURPH_MAP_STYLE = 'willhay/cmwjia13801te01s11zv63owc';
-
 /** The reader resolves firstRouteId through the checked bank and calls this only when legs are absent. */
 export async function setFirstRoute(memberId: string, measureId: string, route: Omit<RouteLeg, 'startTotal'>, beforeMutationTx: BeforeProgressMutation) {
   return patchMeasureState(memberId, measureId, previous => ({

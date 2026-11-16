@@ -65,12 +65,15 @@ export async function resolveRoute(from: string, to: string) {
   return { from, to, distanceM: meters, polyline, towns, straightLine };
 }
 
-export async function renderRouteMap(input: { polyline: string; progress: number; size: MapQuery['size']; style: string }): Promise<Response> {
+/** The style's source is `mapbox-style.json`, uploaded by hand to the Mapbox account named in `MAPBOX_STYLE_ID`. */
+export async function renderRouteMap(input: { polyline: string; progress: number; size: MapQuery['size'] }): Promise<Response> {
+  const style = process.env.MAPBOX_STYLE_ID;
+  if (!style) throw unavailable();
   const { width, height } = MAP_SIZES[input.size];
   const points = decodePolyline(input.polyline), bbox = routeBbox(points, width, height);
   const cut = cutPolyline(points, input.progress);
   const path = (color: string, coordinates: Coordinate[]) => `path-4+${color}-1(${encodeURIComponent(encodePolyline(coordinates.length === 1 ? [coordinates[0]!, coordinates[0]!] : coordinates))})`;
   const overlays = [path('CDBEA7', cut.remaining), path('5A6E32', cut.walked)].join(',');
-  const response = await mapboxRequest(`/styles/v1/${input.style}/static/${overlays}/[${bbox.join(',')}]/${width}x${height}.png`, { padding: '0' });
+  const response = await mapboxRequest(`/styles/v1/${style}/static/${overlays}/[${bbox.join(',')}]/${width}x${height}.png`, { padding: '0' });
   return new Response(response.body, { headers: { 'Content-Type': 'image/png', 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' } });
 }

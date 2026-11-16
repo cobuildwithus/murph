@@ -10,7 +10,6 @@ vi.mock('@/src/lib/prisma', () => ({ getPrisma: () => ({
 import { GET } from '../app/api/game/v1/progress/map/route';
 import { encodePolyline } from '../src/lib/game/progress/route-geometry';
 import { routeLegs } from '../src/lib/game/progress/route-progress';
-import { MURPH_MAP_STYLE } from '../src/lib/game/progress/routes';
 import { hostedOnboardingError } from '../src/lib/hosted-onboarding/errors';
 const leg = { from: 'London', to: 'Paris', distanceM: 1000, startTotal: 0, straightLine: false, towns: [], polyline: encodePolyline([[0, 50], [2, 49]]) };
 const snapshot = () => ({ incomplete: false, states: new Map([['walk.meters', { legs: [leg] }]]), awards: [],
@@ -28,7 +27,7 @@ describe('Progress map HTTP contract', () => {
     expect(response.headers.get('Cache-Control')).toBe('private, no-store');
     expect([...new Uint8Array(await response.arrayBuffer())]).toEqual([137, 80, 78, 71]);
     expect(mocks.series).toHaveBeenCalledWith('owner', expect.any(Date));
-    expect(mocks.render).toHaveBeenCalledWith({ polyline: leg.polyline, progress: 0.5, size, style: MURPH_MAP_STYLE });
+    expect(mocks.render).toHaveBeenCalledWith({ polyline: leg.polyline, progress: 0.5, size });
     expect(mocks.current.mock.invocationCallOrder[0]).toBeLessThan(mocks.render.mock.invocationCallOrder[0]!);
     expect(mocks.resolve).not.toHaveBeenCalled();
   });

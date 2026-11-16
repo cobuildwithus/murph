@@ -5,7 +5,7 @@ import { decodePolyline, encodePolyline, routeBbox } from '../src/lib/game/progr
 const polyline = encodePolyline([[-117.16, 32.72], [-118.24, 34.05], [-122.42, 37.77]]);
 const feature = (name: string, coordinates: [number, number]) => ({ features: [{ properties: { name }, geometry: { coordinates } }] });
 const mockFetch = vi.fn();
-beforeEach(() => { vi.stubGlobal('fetch', mockFetch); vi.stubEnv('MAPBOX_ACCESS_TOKEN', 'synthetic-token'); });
+beforeEach(() => { vi.stubGlobal('fetch', mockFetch); vi.stubEnv('MAPBOX_ACCESS_TOKEN', 'synthetic-token'); vi.stubEnv('MAPBOX_STYLE_ID', 'synthetic/style'); });
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.resetAllMocks(); });
 function respond(code: string, status = 200) {
   mockFetch.mockImplementation(async (url: URL) => {
@@ -39,6 +39,11 @@ describe('Progress Mapbox boundary', () => {
     await expect(resolveRoute('Start', 'End')).rejects.toMatchObject({ httpStatus: 503, retryable: true });
     expect(mockFetch).toHaveBeenCalledTimes(3);
   });
+  it('needs the style id', async () => {
+    vi.stubEnv('MAPBOX_STYLE_ID', '');
+    await expect(renderRouteMap({ polyline, progress: 0, size: 'card' })).rejects.toMatchObject({ message: 'The map could not load. Try again.' });
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
   it('does not expose provider text, request URLs or transport credentials', async () => {
     mockFetch.mockRejectedValue(new Error('private body and synthetic-token'));
     await expect(resolveRoute('Start', 'End')).rejects.toMatchObject({ message: 'The map could not load. Try again.', cause: undefined });
@@ -50,10 +55,10 @@ describe('Progress Mapbox boundary', () => {
     { size: 'drawer', width: 708, height: 640, progress: 0.5 },
   ] as const)('streams a private $size PNG with both overlays at $progress', async ({ size, width, height, progress }) => {
     mockFetch.mockResolvedValue(new Response(new Uint8Array([137, 80, 78, 71]), { headers: { 'Content-Type': 'image/png' } }));
-    const response = await renderRouteMap({ polyline, progress, size, style: 'synthetic/style' });
+    const response = await renderRouteMap({ polyline, progress, size });
     const url = mockFetch.mock.calls[0]![0] as URL;
     expect(url.pathname).toContain('path-4+CDBEA7-1'); expect(url.pathname).toContain('path-4+5A6E32-1');
-    expect(url.pathname).toContain(`/${width}x${height}.png`);
+    expect(url.pathname).toContain(`/styles/v1/synthetic/style/static/`); expect(url.pathname).toContain(`/${width}x${height}.png`);
     const bbox = routeBbox(decodePolyline(polyline), width, height);
     expect(url.pathname).toContain(`[${bbox.join(',')}]`); expect(url.searchParams.get('padding')).toBe('0');
     expect(response.headers.get('cache-control')).toBe('private, no-store');

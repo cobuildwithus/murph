@@ -3,7 +3,7 @@ import { gameNotFound } from '@/src/lib/game/http/errors';
 import { parseMapQuery } from '@/src/lib/game/progress/contract';
 import { progressEffect, withProgressJsonError } from '@/src/lib/game/progress/http';
 import { renderRouteMap, resolveRoute } from '@/src/lib/game/progress/mapbox';
-import { MURPH_MAP_STYLE, routeView } from '@/src/lib/game/progress/routes';
+import { routeView } from '@/src/lib/game/progress/routes';
 import { cumulativePoints, readGameSeries } from '@/src/lib/game/progress/series';
 import { runWithHostedDomainRootUnwrapCache } from '@/src/lib/hosted-crypto/domain-root-unwrap-cache';
 import { hostedOnboardingError } from '@/src/lib/hosted-onboarding/errors';
@@ -28,6 +28,6 @@ export const GET = withProgressJsonError(async (request: Request) => runWithHost
       progress = routeView(measure.id, state, cumulativePoints(measure.amounts), snapshot.awards)!.progress;
     }
     await getPrisma().$transaction(tx => assertGameMemberAuthCurrentTx(auth, tx));
-    return renderRouteMap({ polyline, progress, size: query.size, style: MURPH_MAP_STYLE });
+    return renderRouteMap({ polyline, progress, size: query.size });
   });
 }));
