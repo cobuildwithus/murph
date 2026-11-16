@@ -1,9 +1,10 @@
 import "server-only";
 import { addDaysToIsoDate, toLocalDayKey } from "@murphai/contracts";
+import { HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_SPECS } from "@murphai/hosted-execution/vault-share";
 import type { HostedNativeMemberAuth } from "../../better-auth/native-auth";
 import type { ClientUnits } from "../../companion/client-info";
 import { assertBrowserVaultMemberAuthority } from "../../browser-vault/authority";
-import { readCompanionHealthSeries } from "../../device-sync/companion-numbers";
+import { COMPANION_HEALTH_METRICS, readCompanionHealthSeries } from "../../device-sync/companion-numbers";
 import { getPrisma } from "../../prisma";
 import { hostedOnboardingError, isHostedOnboardingError } from "../../hosted-onboarding/errors";
 import { assertGameMemberAuthCurrentTx } from "../http/auth";
@@ -118,12 +119,19 @@ async function freezeAndScoreMetric(input: {
   memberId: string; id: HealthMetric["id"]; daily: RawHealthPoint[]; joinedOn: string; profile: AgeProfile;
   state: MeasureState; beforeMutationTx: BeforeProgressMutation;
 }) {
-  const { memberId, id, daily, joinedOn, profile, beforeMutationTx } = input;
+  const { memberId, id, joinedOn, profile, beforeMutationTx } = input;
+  const { minValue, maxValue } = HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_SPECS
+    .find(spec => spec.metricKey === COMPANION_HEALTH_METRICS[id].key)!;
+  const scale = id === "sleep" ? 60 : 1;
+  // Reuse the reporting owner's bounds for live readings and frozen baselines.
+  const inRange = (value: number) => value >= minValue * scale && value <= maxValue * scale;
+  const daily = input.daily.filter(point => inRange(point.value));
   let state = input.state;
   const proposed = state.baseline?.value ?? healthBaseline(id, daily, joinedOn);
   if (!state.baseline && proposed !== null) state = await patchMeasureState(memberId, id,
     { baseline: { value: proposed, from: addDaysToIsoDate(joinedOn, -28), to: addDaysToIsoDate(joinedOn, -1) } }, beforeMutationTx);
-  const baseline = state.baseline?.value ?? null;
+  const savedBaseline = state.baseline?.value ?? null;
+  const baseline = savedBaseline !== null && inRange(savedBaseline) ? savedBaseline : null;
   const model: HealthMetricInput = { id, daily, baseline, ...HEALTH[id], wins: [] };
   if (baseline === null) return { model, state, candidates: [] };
   const byDate = new Map(daily.map(point => [point.date, point]));

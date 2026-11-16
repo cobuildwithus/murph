@@ -6201,6 +6201,13 @@ below the line and held under the same coverage rule. Award comparisons use the
 join-date age bracket, so changing brackets does not issue an award. Sleep has
 no age wins. VO2 retains the existing median statistic; the other metrics use
 the mean.
+`freezeAndScoreMetric` applies the existing group-report daily metric projection
+ranges to readings before baseline/statistic calculation and to any frozen
+baseline before scoring. Sleep scales those canonical-minute ranges to seconds.
+Out-of-range values are omitted, never clamped; an invalid frozen baseline stays
+stored but cannot issue new wins. Existing earned awards are unchanged. These
+shared ranges bound held-step enumeration to 230 HR, 1,000 Steps, 96 Sleep and
+100 VO2 levels per metric, independent of imported numeric magnitude.
 The current headline uses the current fourteen-day window, not an older
 complete window. Sleep converts canonical minutes to seconds once. All sums
 and scoring inputs remain inside the 365-day replica window.
