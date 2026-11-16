@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-11-15
+Last verified: 2026-11-16
 
 ## Private weekly game images
 
@@ -60,10 +60,54 @@ containers (group chats) never get them. Settings uses the existing browser
 session and mutation-origin checks; the manifest and MCP gateway require the
 signed Worker callback and a present, current runtime write fence. Synthetic
 thread containers, inactive members, foreign connections, off connections and
-stale generation/catalog URLs are refused. Only explicitly approved tools with
-`readOnlyHint: true` appear in the stored catalog or execute; changed approved
-definitions are suspended until reviewed. An annotation is the service's claim,
-not a guarantee about its behavior. Tool content remains untrusted.
+stale generation/catalog URLs are refused. Only tools the member turned on are
+served; changed approved definitions are suspended until reviewed. A tool with
+`readOnlyHint: true` runs when Murph calls it; every other tool runs only after
+the member confirms that exact call (below). The annotation is the service's
+claim, not a guarantee about its behavior, so confirmation protects every tool
+not marked read-only. Tool content remains untrusted. Eligibility is derived
+from the stored definition each time, never stored as a reason: a definition
+over 24 KiB stays `not_allowed`, and a write that older Web locked as
+`not_allowed` reads as off, never on. Older Web never approves or serves a write
+and relocks one on refresh, so deploy skew fails closed.
+
+Murph asks first. The gateway never sends a write upstream. For an approved
+write it records the exact request (arguments at most 16 KiB, secure-box
+encrypted and bound to the request id and field) and returns a normal tool
+result with `https://www.withmurph.ai/settings/connections/confirm/<id>`
+(128 random bits); the link grants nothing without the member's session. One
+identity covers lookup and insert: member, connection id, generation, tool,
+approved definition digest and canonical arguments (sorted keys, array order
+and JSON types kept), stored only as a keyed lookup value under its own purpose
+in the contact-privacy owner, with every read candidate checked. Admission runs
+in one short transaction under the member-row lock: reuse a waiting, unexpired
+request (same link) or one decided within the last hour (done, declined or
+unknown, each answered as such), else admit a new one while fewer than 20
+unexpired requests wait. Failed and expired requests are never reused; a new
+call needs a new confirmation. Sealing runs before the lock. The model-facing
+declaration of an approved write keeps its name and input schema, leads with
+Murph's line about confirmation, and drops the remote output schema and
+annotations; the stored remote definition and its digest still govern approval,
+and the catalog token is the digest of exactly what the gateway serves.
+
+Confirm and decline use the full Settings mutation contract: browser session,
+mutation origin, and `assertHostedAppSessionCurrentTx` in the transaction that
+consumes the request. The POST carries only the decision; another member's id is
+not found, and Web reads the tool and arguments from the stored row, which the
+page renders completely. A confirmation commits `waiting → unknown` with its
+decision time before any outbound work, and dispatch requires that acknowledged
+claim. Write mode then lets sign-in, refresh and setup run, rechecks that the
+connection is on with the same generation and approved digest immediately before
+the call, and lets exactly one `tools/call` POST leave; a second is refused before
+it is sent, and a 401 to the call is its answer, never a cue to refresh and
+resend. Anything after that POST leaves (401, 403, connection loss, a broken
+stream, an invalid or oversized result, a token echo, or a valid result with
+`isError: true`) stays `unknown`; only a failure proven before the call becomes
+`failed`, and a lost process leaves the request `unknown`. Nothing returns a
+consumed request to waiting or sends it again, and there is no stored running or
+expired state (expiry is `expiresAt`). Results are capped and encrypted like
+arguments. `lastUsedAt` is best effort. Retention deletes requests after 30
+days; they cascade with the connection and the member.
 
 Web alone owns resource URLs, discovery, OAuth registration and credentials.
 Every remote request uses HTTPS, one validated DNS resolution pinned into the
