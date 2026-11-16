@@ -1,6 +1,6 @@
 # Progress friends and medals fixes
 
-Status: active
+Status: completed
 Created: 2026-11-16
 Updated: 2026-11-16
 
@@ -69,8 +69,16 @@ added. No new persisted field, table, endpoint, registry or configuration flag.
 - Standalone migration on the isolated empty local test DB: exit 0, zero rows.
 - Complexity guard: exit 0 after moving pill selection to its own pure helper.
 - Changelog generation and archive tests: exit 0 (4 tests).
-- Diff selector and exact-head CI pending. Candidate source review complete; no
-  private identifiers or unrelated changes in authored output.
+- Final cancellation/totals and changelog checks: 47 tests, exit 0.
+- Remote diff selector: stopped with exit 1 after the SSH port remained closed
+  for more than four minutes. No worker resource profile or test result exists.
+- Local `pnpm test:diff <all changed paths>`: exit 0 in 864.9 seconds. Includes
+  policy guards, affected typecheck, 16,112 web tests passing (2,825 skipped),
+  lint, development smoke and production build. Focused PostgreSQL proof above
+  covers this lane's database tests excluded from the ordinary web suite.
+- Exact-head CI runs when PR #5100 becomes ready. Candidate source review and
+  merge-tree check pass; no private identifiers or unrelated authored changes.
 
 No production data or credentials were persisted, no production mutation was
 performed, and no ReviewGPT run or merge was started.
+Completed: 2026-11-16
