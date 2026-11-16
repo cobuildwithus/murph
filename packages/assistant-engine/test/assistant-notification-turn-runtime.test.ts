@@ -5024,6 +5024,7 @@ test('sendAssistantNotificationLocal keeps a queued model reply when the termina
     transcripts: { append: vi.fn(async () => undefined) },
     sessions: { save: vi.fn(async (session: AssistantSession) => session), resolve: vi.fn(async () => ({ session: providerSession })) },
     outbox: {
+      createIntent: vi.fn(async () => ({ intentId: 'intent-bootstrap' })),
       deliverMessage,
     },
 
@@ -6460,6 +6461,7 @@ async function loadNotificationTurnHarness(input: {
       transcripts: { append: vi.fn(async () => undefined) },
       sessions: { save: vi.fn(async (session: AssistantSession) => session), resolve: vi.fn(async () => ({ session: input.providerResult.session })) },
       outbox: {
+        createIntent: vi.fn(async () => ({ intentId: 'intent-bootstrap' })),
         deliverMessage,
       },
 
@@ -6724,7 +6726,11 @@ describe('game bootstrap notification delivery', () => {
     expect(send).toHaveBeenCalledOnce()
     expect(harness.mocks.executeCodexTurnWithRecovery).toHaveBeenCalledOnce()
     expect(harness.deliverMessage).not.toHaveBeenCalled()
-    expect(result.deliveryOutcome).toMatchObject({ kind: 'sent', intentId: null, delivery: { target: 'provider-chat', providerThreadId: 'provider-chat', sentAt: receipt.acceptedAt } })
+    expect(result.deliveryOutcome).toMatchObject({ kind: 'sent', intentId: 'intent-bootstrap', delivery: { target: 'provider-chat', providerThreadId: 'provider-chat', sentAt: receipt.acceptedAt } })
+    const createdIntents = harness.mocks.createAssistantRuntimeStateService.mock.results.flatMap(result => result.value.outbox.createIntent.mock.calls)
+    expect(createdIntents).toEqual([[expect.objectContaining({
+      turnId: 'turn-bootstrap', message, initialState: { status: 'sent', delivery: expect.objectContaining({ providerMessageId: receipt.providerMessageId }) },
+    })]])
     expect(harness.mocks.persistAssistantTurnAndSession).toHaveBeenCalledOnce()
   })
 

@@ -1,0 +1,59 @@
+{
+  "pills": [
+    {
+      "id": "pushups.reps",
+      "label": "Pushups",
+      "icon": "pushups"
+    },
+    {
+      "id": "pullups.reps",
+      "label": "Pull-ups",
+      "icon": "pullups"
+    },
+    {
+      "id": "steps",
+      "label": "Steps",
+      "icon": "steps"
+    },
+    {
+      "id": "sleep",
+      "label": "Sleep",
+      "icon": "sleep"
+    }
+  ],
+  "pill": "pushups.reps",
+  "range": "month",
+  "rows": [
+    {
+      "memberId": "member-0-ava",
+      "firstName": "Ava",
+      "avatarUrl": null,
+      "me": true,
+      "rank": null,
+      "total": {
+        "value": 0,
+        "text": "0",
+        "unit": "reps"
+      },
+      "private": false,
+      "invited": false,
+      "joinedOn": "2026-10-21"
+    },
+    {
+      "memberId": "member-1-leo",
+      "firstName": "Leo",
+      "avatarUrl": null,
+      "me": false,
+      "rank": null,
+      "total": null,
+      "private": false,
+      "invited": true,
+      "joinedOn": null
+    }
+  ],
+  "chart": [],
+  "next": null,
+  "shareAsk": false,
+  "shareAudience": [],
+  "departureNotice": null
+}

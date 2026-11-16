@@ -103,6 +103,12 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     "emailPublicBootstrapAttempts HostedEmailPublicBootstrapAttempt[]",
     'firstSignInMethod String? @map("first_sign_in_method")',
     "gameProfile GameProfile?",
+    // Progress content is sealed in member-owned tables; these are cascade relations only.
+    'progressAwards GameProgressAward[] @relation("ProgressAwardOwner")',
+    'progressAwardsAbout GameProgressAward[] @relation("ProgressAwardSubject")',
+    "progressMeasures GameProgressMeasure[]",
+    "progressPics GameProgressPic[]",
+    "progressTaskMeasures GameProgressTaskMeasure[]",
     'gameInvitations GameInvitee[] @relation("GameInviteeMember")',
     'chatHostedGames Game[] @relation("GameChatContainer")',
     'groupCurrentSenderClarificationsAsRuntime HostedGroupCurrentSenderClarification[] @relation("HostedGroupCurrentSenderClarificationRuntime")',

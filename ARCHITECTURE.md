@@ -5964,6 +5964,210 @@ core `setMemoryDisplayName`; its locked `changed` result selects `applied` or
 without a model turn or a new dispatch event. Deploy this consumer before the
 Web producer; keep it while accepted actions can remain queued or restored.
 
+## Progress contract and storage
+
+`apps/web/src/lib/game/progress/contract.ts` owns the additive Progress wire
+types and request parsers. Routes parse once; persistence accepts typed input.
+The response schemas also decode the synthetic board fixtures; stored sealed
+JSON is authenticated and decoded without revalidation. The games reader and
+four BE1 routes compose these primitives; health/friends and media/maps retain
+their separate lane owners.
+
+Progress persists only awards, measure choices, picture ownership and task
+inference. The following classification covers every column of exactly
+`GameProgressAward`, `GameProgressMeasure`, `GameProgressPic` and
+`GameProgressTaskMeasure`; it is not an audit of other game tables.
+
+| Table | Encrypted content | Keyed lookup | Approved operational metadata |
+| --- | --- | --- | --- |
+| `game_progress_award` | `data_encrypted`: candidate key, kind, measure, subject, crossing day and numeric/content facts | `lookup`: member-bound award identity | `member_id`: owner FK; `subject_member_id`: nullable friend FK; `earned_on`: local calendar date for ordering; `created_at`: insertion order; `seen_at`: drawer acknowledgement |
+| `game_progress_measure` | `state_encrypted`: goal, latest checked found goal, frozen route legs/geometry/towns, per-day amount, frozen baseline | `lookup`: member-bound measure identity | `member_id`: owner FK; `updated_at`: mutation time |
+| `game_progress_pic` | `meta_encrypted`: measure identity | None | `id`: client UUID; `member_id`: owner FK; `storage_key`: random exclusive Progress object identity; `taken_at`: capture ordering; `retired_at`: permanent retirement time |
+| `game_progress_task_measure` | `measure_encrypted`: inferred name, quantity and unit | `lookup`: member-bound normalized task text plus check-in kind | `member_id`: owner FK; `created_at`: insertion time |
+
+Every owner FK cascades from `HostedMember`. Award subjects also cascade, so
+deleting a friend removes awards about that friend without deleting unrelated
+awards. Task inference cannot arrive after its owner is deleted. Pictures have
+a unique random storage key, never a shared content hash; BE3 owns sealed bytes,
+retirement and account-deletion object cleanup. These rows live in Postgres,
+outside workspace snapshots, for the member's lifetime. Retired picture rows
+remain until account deletion. There is no backfill or expiry sweep.
+
+`crypto.ts` reuses secure-box's member-private-field lane with `game-progress`
+scope/purpose, owner key, table, row and field AAD. Batch sealing unwraps one
+owner root; batch opening uses the existing root batch reader. The keyed lookup
+uses `createHostedOpaqueIdentifier` and JSON-framed owner/value parts under
+separate Progress award, measure and task purposes. No content is logged.
+
+The games award envelope seals facts, not rendered text: `data.value`, `unit`,
+`noun`, `rung`, `page` and `evaluator`; route awards also seal `from`, `to`,
+`distanceM` and `startTotal`. A rung seals its earned threshold `at` and either
+`target.{kind,id}` for the bank or `target.found` for the complete checked found
+definition. All are private content: even public landmark text identifies an
+owner's accomplishment when attached to an award. Reader units never enter
+settlement or award identity. The evaluator version is evidence, never part of
+its key. Health/friend award content remains with its lane owner.
+The inference envelope contains only `{quantity, unit, name}`; task words stay
+in their existing sealed game owner. The keyed cache input is NFKC-normalized,
+trimmed, whitespace-collapsed, lowercase text plus check-in kind. Member identity
+is included by the keyed lookup owner. The internal goal is `{rungId}`, `{route}`
+or `{found}`; the public pick still accepts only a bank/found id or two route
+places. The latest lookup occupies one `found` slot. Every found field (`id`,
+`kind`, `name`, `short`, `tagline`, `at`, `where`, `blurb`, `sourceUrl`) is sealed
+private content in cache, selected goal and earned award. Heights normalize once
+to feet; durations use seconds. The found id hashes kind, normalized name and
+location, canonical value and cited URL; prose and reader units are excluded.
+It remains inside the existing member-keyed state/award owners. `perDay` stays
+sealed; no plaintext activity identity or amount is added.
+
+The request parser admits integer `perDay` values from 1 through 10,000.
+The inference provider boundary caps positive quantities at 10,000 while
+preserving fractional units. Typed rep counts already have a safe-integer
+bound; the route-summary boundary also caps `distanceM` at
+`Number.MAX_SAFE_INTEGER`, preserving fractional and long-distance posts.
+These bounds keep totals finite across the admitted 10,000 entries. Reducers
+do not validate the same input again.
+
+`patchMeasureState` is the sole writer of `state_encrypted`: one exact read,
+open and shallow field merge, then seal outside the transaction. Its short
+transaction rechecks caller authority and writes only against the observed
+ciphertext; first creation uses the composite unique key. A loser throws
+`GAME_PROGRESS_STATE_CONFLICT` (503, retryable); it does not retry. Patches replace
+whole fields, including the legs array. A computed patch runs against that same
+observed state, so route rollover cannot overwrite a newer legs array from a
+separate caller read. Found picks check the requested id and measure kind in
+this transform and copy the complete definition into the goal. Replacing the
+lookup slot cannot change an already selected goal or earned award. BE2 must only propose a baseline while
+it is absent and include current health authority in the transaction callback.
+
+All three mutation helpers require `beforeMutationTx`: route owners pass the
+existing native-session assertion, plus current health/share authority when
+applicable. It runs after crypto preparation and inside the committing
+transaction, with no external work. This required callback is the refinement
+of the locked plan's abbreviated persistence signatures.
+
+`settleAwards` reads the profile timezone once, seals the candidate batch, then
+performs one `createMany` with `skipDuplicates` in one transaction. Its only
+later mutation is `seen_at`; a corrected total cannot revoke or rewrite an
+award. Awards strictly older than seven member-local calendar days at insertion
+start seen. `readAwards` opens a single owner-scoped ordered result, newest by
+`(earned_on, created_at, lookup)` descending. View owners filter health awards
+under live authority before choosing one gold medal. Moment ids resolve to
+award ids at the view owner; `markAwardsSeen` updates only those owner-bound,
+unseen rows and preserves the first acknowledgement time.
+
+The input readers in BE1/BE2 own the plan's limit-plus-one admission (500 games,
+10,000 entries); an incomplete input settles nothing. Persistence adds no
+per-item queries or transactions. Award reads deliberately have no pagination
+or materialized totals, per the locked plan. The award sort index serves the
+Medals page, the subject index serves cascading deletion, the picture index
+serves owner/live/capture-order reads, and measure/task reads use composite keys.
+
+`series.ts` loads at most 501 games and 10,001 own entries, admits 500/10,000,
+and opens admitted task words and typed reps/route payloads in one batch. It
+loads task classifications and measure state in two owner-scoped batch reads.
+Typed entries emit their own measure immediately; untyped entries use the day's
+terms revision and the seat override or group default. Retakes contribute once;
+withdrawn, incomplete and excuse entries contribute nothing. Unresolved entries
+are pending days and produce no measure awards. A per-day choice applies to all
+completed history while previously earned day medals remain stored.
+
+`streak.ts` owns the shared board/Progress calendar: each game's frozen clock,
+join, departure, settlement and end bound its obligations. Void games end at
+their canonical cancellation event or the latest player's departure that
+voided a two-player group. Event times receive the game's dev-clock offset;
+player departure times already use that clock. The terminal day's completed
+post remains history; an unfulfilled terminal day ends with the game or
+membership. Earlier misses and stored awards remain. All
+obligations on a date must succeed, and dates without obligations neither add
+nor break a run. Current, best and month strings come from these same dates.
+
+`achievements.ts` holds the three pure games evaluators used by `registry.ts`.
+Round and ladder candidates use the first cumulative crossing date; all rungs
+crossed together are inserted. Each new best streak length is an award.
+The reader preserves measures with saved ladder or route awards even when their final
+contribution is removed; their total becomes zero and their goals stay editable.
+`view.ts` takes passed rungs from stored awards, filters health-derived awards
+under current Postgres browser-vault authority, then chooses gold and moments.
+Moments group unseen awards by earned date; the seen route resolves their ids
+to owner-bound rows. The four routes return private, non-cacheable responses.
+
+`format.ts` owns the exported number and amount formatters for all lanes.
+Progress handlers read `X-Murph-Client-Units` once with `clientUnits` and pass
+`us`, `uk` or `metric` explicitly to text builders; missing/unknown means `us`.
+Distance is miles for US/UK and kilometers for metric; height is feet for US
+and meters for UK/metric. Metric bank prose uses `blurb_metric` where present;
+UK retains imperial prose. Award renderers resolve bank references by `(kind,id)`
+or use the complete stored found definition. The same one-mile award therefore
+reads `1.6 km` to a metric reader without earning a different award.
+Hero totals use full digits; smaller labels compact from 10,000, with one
+decimal below 100,000. Signed friend gaps can compact from 1,000. Distances use
+whole numbers from ten displayed units and one decimal below. Projections include an
+explicit nullable `on` date; without a live game or recent pace they retain
+the next round number with a dateless label. Route-map projections stay null.
+Moment `title` and nullable `line` are response-only words derived from the
+shown awards; shelf titles and details remain the medal's own. Grouped
+moments describe an earned day, without inventing a post or time of day.
+
+An ordinary complete games read uses ten domain queries including a nonempty
+settlement (profile twice, games, entries, task cache, measure state, award insert,
+award reads before and after settlement and live picture metadata), plus existing batched crypto and native/health
+authority owners. There are no per-game or per-entry database calls and at most
+one domain transaction/pooled connection at a time. First distance reads resolve
+one default route for all missing legs (11 provider requests total), then add
+two domain queries per new route through sequential state CAS writes. Native
+authority runs inside each short write transaction. Incomplete reads skip
+settlement and inference. Crypto and provider work stay outside transactions;
+each write rechecks current native-session authority inside its transaction.
+
+Uncached untyped phrases are deduplicated and classified sequentially in
+`after()`, with one Responses and one Decisions call sharing an eight-second
+deadline per phrase, no retries, then one sealed cache batch insert. The source
+caps bound distinct credited phrases by 10,000. Provider failure leaves the
+phrase uncached; interrupted background work can remain pending on a later read.
+The classifier uses the existing ideas model/client configuration. The live
+synthetic eval runs with `pnpm exec tsx --tsconfig apps/web/tsconfig.json
+apps/web/scripts/progress-inference-eval.ts` and an already-provisioned key.
+
+`bank.ts` exposes only checked entries, including the supplied 70 height rungs
+and separate 30-rung plank/sleep ladders. `ladderUse` is public bank metadata
+needed by the two time screens, not member persistence. `Rung.short` and
+`Rung.tagline` are required, single-line, number-free strings up to 40 characters.
+Found rungs have no drawing; their medal uses the explicit `{generic:true}` face.
+Typing searches only the bank. `GET /progress/goals?measure=...&q=...&find=1`
+admits one explicit lookup through the existing persisted auth rate limiter:
+20 calls per member per 24-hour window, across measures. Its selector is keyed
+and its counter stays in the existing sealed auth owner; no Progress preference
+or table is added. Exhaustion returns 429 without a provider call.
+The lookup uses `gpt-6.1-sol`, low reasoning, required `web_search`, strict JSON,
+`store:false`, a 30-second deadline and no retry. Input contains only kind,
+search words and eligible bank ids/names. A found source must occur in an
+`output_text` URL citation, with a height in 1–400,000,000 meters or duration in
+1–31,536,000 seconds. Closest ids must be eligible. Invalid semantic evidence
+returns no found goal; malformed/provider failures return 503 without provider
+content. `Goals.note` and suggestions are response-only. A successful found
+write rechecks native-session authority inside `patchMeasureState`, outside
+the provider catch, preserving authority and conflict errors. Goals and per-day
+choices use `patchMeasureState`. Distance goals call `setRouteGoal` with the
+complete canonical series, stored awards and current mutation authority. Typed
+and checked two-place bank routes use the same resolver; other long bank entries
+are excluded. No new table, endpoint, flag or preference is introduced.
+
+Fixtures cover new, established, year-long, mixed-unit, no-game, gap, privacy,
+tie and moment states. They are presentation examples, not expected engine
+outputs: mock historical amounts sometimes differ from the checked bank and
+the approved health step sizes. Friend avatars use the existing nullable
+`avatarUrl` wire field; fixtures use initials rather than real photos. The wire
+adds `incomplete` from the plan, health dates for its independent chart,
+friend invite/join metadata for rows 02/05/07, and exact sharing recipients for
+row 16 and decision D8. Row 16 also needs `departureNotice`; its fixture contains
+the drawn footer, but BE2 must resolve the surviving source after account deletion.
+Streak obligations serve row 11; route completion history
+and `goalPicked` serve rows 09/15. Health medal faces and age-chart amounts serve
+rows 02/06 without requiring the client to parse labels or calculate health
+results. No endpoint, table, flag or registry is added beyond the plan. Deploy
+the additive migration before any Progress caller.
+
 ## Weekly Game
 
 Recap media retirement receipts live in the additive, FK-free `game_recap_asset`
@@ -6497,6 +6701,82 @@ hash and preserves conditional pointer creation and account-deletion fencing.
 Web clears decrypted bytes after upload and retains the encrypted source for
 retries and rollback. No new Worker route or crypto authority is needed. Local
 stacks keep plain files on disk.
+
+Progress pictures have a separate owner-only Web route and random
+`progress/<random-id>.jpg` identity. Web seals JPEG bytes under the member's
+control key with `game-progress` scope and table/key/field AAD before the
+Worker stores them. They never use game photo, avatar or recap keys. The
+member-bound `progress-pics/{stage,read}` control routes share recap's
+conditional-create storage primitive. Progress validates uploads once at the
+Worker route and decodes its own typed records directly. Recap retains its
+existing envelope normalization, stored-record validation and error responses;
+the shared primitive does not change that shipped contract.
+`game_progress_pic` purge replaces the
+same object with a permanent content-free tombstone outside account-prefix
+removal; neither a delayed upload nor legacy recovery can replace it.
+
+Picture reads require the requesting owner's live row both before retrieval
+and after decryption. Deletion retires the row before awaiting the Worker
+purge and reports failure if that purge fails. Account deletion, after its
+existing suspension fence, reads at most 10,001 picture rows per member and
+rejects an incomplete collection before any purge. An admitted collection has
+at most 10,000 serial object retirements and one bulk row deletion, all outside
+database transactions; failures preserve the rows and block account deletion.
+There is no pagination recovery or automatic retry. Upload admission
+rechecks native auth under the member lock before registering the random key,
+so account cleanup also fences uploads still in flight. Live picture lists read
+10,001 rows; more than 10,000 marks the input incomplete and yields no truncated
+pins or award evidence.
+
+The JPEG upload route admits at most 2 MiB and 2048 pixels per dimension before
+storage effects. It reuses the five-query game-series reader and reads the
+profile timezone alongside it (at most two pooled connections), then registers
+ownership with two domain queries in one transaction and performs one final
+liveness read. Crypto and the single Worker stage request remain outside the
+transaction; existing auth/root-key readers retain their own query bounds.
+Pins use the cumulative value on or before the capture's member-local day;
+they persist no health total. The games view admits the complete picture list
+before route initialization or award settlement and attaches pins by measure.
+
+For this object store, `version`, the plaintext-byte integrity `hash`, random
+object identity and `retired` marker are approved operational metadata.
+`envelope` is encrypted content; the owner namespace is keyed. The picture's
+exercise association is sealed in `meta_encrypted`; no health amount or image
+content is stored in operational metadata. Route endpoints, geometry, towns,
+distance and starting total are private content inside the existing sealed
+measure state. Route award data seals those endpoints, distance, starting total,
+and the medal's face, title, detail and destination page. Mapbox receives only
+requested places or sampled coordinates,
+never a member identity, health total or provider token in a client response.
+Route award identity includes the retained leg's position and frozen route
+facts. Replacing an unfinished route cannot inherit another goal's award, and
+repeating a completed route after a correction cannot reuse the prior leg's key.
+
+Progress maps resolve two permanent geocodes, one simplified driving route and
+eight sequential place reverse-geocodes for road routes. Only the provider's explicit NoRoute
+permits a great circle, with no reverse-geocodes or towns; all other provider failures return retryable 503 with
+no retry or raw provider diagnostics. Maps use the constant Murph style,
+explicit Mercator bounds and two path overlays. Map requests require `size=card`
+(708 by 405 pixels, the 354pt 7:4 card at 2x rounded to a pixel) or `size=drawer`
+(708 by 640 pixels, the 354 by 320pt drawer at 2x). Free dimensions are rejected.
+`Route.map` links the card; `Route.towns` and `Route.drawerTowns` carry coordinates
+for their respective viewports. The drawer changes only the map query's size.
+Clients display the PNG without cropping. `Goals.route` adds the same town shape
+for its card preview, with null crossing dates, and `detail` from the current
+measure total and remaining route distance. Ocean previews explain the straight
+line and have no towns. These fields are private response-only content, never
+persisted. All route amounts use `format.ts`. Maps stream private PNGs;
+no map object or cache is persisted. Keep Mapbox attribution visible.
+The map handler reads frozen game legs and canonical points, preserves awarded
+finishes after corrections, and rechecks native authority in a short database-only
+transaction before the image fetch. Preview requests resolve the two requested
+places without state writes. The fixed style identifier in `routes.ts` must name
+the uploaded Murph style before rollout; the draft placeholder is not deployable.
+
+Deploy the compatible Worker before Web emits Progress storage requests or
+purges, after the shared Progress migration. Existing recap producers remain
+compatible. Once picture retirement has been used, do not roll back to a Worker
+that cannot honor the new resource kind. There are no warm-runner changes.
 
 History keeps `mediaUrls` as stable cache identities and adds optional
 `delivery: { url, expiresAt }` to the previews in each person's or group's latest

@@ -7954,7 +7954,8 @@ describe("hosted device-sync wakes", () => {
     expect(preparationCaches[1]).not.toBe(preparationCaches[0]);
     expect(mocks.completeWebhookTrace).toHaveBeenCalledTimes(2);
     expect(mocks.appendHostedMailboxEnvelope).toHaveBeenCalledTimes(1);
-    expect(warn).toHaveBeenCalledWith("Hosted device-sync prepared write changed before commit.", {
+    expect(warn).not.toHaveBeenCalled();
+    expect(info).toHaveBeenCalledWith("Hosted device-sync prepared write changed before commit.", {
       eventCode: "device_sync.prepared_write_drift", operation: "webhook",
       attempt: 1, maxAttempts: 2, exhausted: false, reason: "domain_root_changed",
     });
@@ -7992,6 +7993,7 @@ describe("hosted device-sync wakes", () => {
     expect(mocks.completeWebhookTrace).toHaveBeenCalledTimes(2);
     expect(mocks.createSignal).not.toHaveBeenCalled();
     expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith("Hosted device-sync prepared write changed before commit.", {
       eventCode: "device_sync.prepared_write_drift", operation: "webhook",
       attempt: 2, maxAttempts: 2, exhausted: true, reason: "domain_root_changed",

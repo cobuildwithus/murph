@@ -175,13 +175,16 @@ export function buildRuntimeProcessingSummaryEntry(
   enteredAtEpochMs: number,
 ): HostedRuntimeLogRequest["entries"][number] {
   const retryAtEpochMs = result?.kind === "retry_later" ? Date.parse(result.retryAt) : NaN;
+  const waitingForStartup = result?.kind === "retry_later"
+    && diagnostics.details.runtimeProcessingRetryReason === "starting_fence_preserved"
+    && !diagnostics.details.runtimeProcessingLastObservedFailedOperation;
   return {
     at: new Date().toISOString(),
     ...(diagnostics.attemptId ? { attemptId: diagnostics.attemptId } : {}),
     ...(diagnostics.leaseGeneration ? { leaseGeneration: diagnostics.leaseGeneration } : {}),
     component: "runner" as const,
     eventCode: "runner.processing_finished" as const,
-    level: result?.kind === "runtime_processing_accepted" ? "info" as const : "warn" as const,
+    level: result?.kind === "runtime_processing_accepted" || waitingForStartup ? "info" as const : "warn" as const,
     phase: "invoke" as const,
     redactedJson: {
       ...diagnostics.details,

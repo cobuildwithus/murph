@@ -1,0 +1,42 @@
+{
+  "tiles": [],
+  "match": null,
+  "suggestions": [
+    {
+      "id": "london-edinburgh",
+      "name": "London to Edinburgh",
+      "drawing": null,
+      "at": 648565.632,
+      "atText": "403 mi",
+      "blurb": "",
+      "where": null,
+      "on": null,
+      "toGo": null,
+      "short": "London to Edinburgh",
+      "tagline": "A journey north between capitals"
+    },
+    {
+      "id": "new-york-boston",
+      "name": "New York to Boston",
+      "drawing": null,
+      "at": 344399.61600000004,
+      "atText": "214 mi",
+      "blurb": "",
+      "where": null,
+      "on": null,
+      "toGo": null,
+      "short": "New York to Boston",
+      "tagline": "A journey between harbor cities"
+    }
+  ],
+  "route": {
+    "from": "London",
+    "to": "New York",
+    "distanceText": "3,459 miles",
+    "straightLine": true,
+    "map": "/api/game/v1/progress/map?from=London&to=New+York&size=card",
+    "detail": "As the crow flies. No road crosses the ocean, so Murph counts the straight line.",
+    "towns": []
+  },
+  "note": null
+}

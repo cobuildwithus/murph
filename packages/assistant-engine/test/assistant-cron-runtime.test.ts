@@ -5322,6 +5322,44 @@ describe('assistant cron runtime orchestration', () => {
     )
   })
 
+  it('skips group room-model maintenance when the web refuses its left Linq group', async () => {
+    const { vaultRoot } = await createRuntimeContext(
+      'assistant-cron-runtime-group-room-model-left-linq-',
+    )
+    addGroupRoomModelConsolidationAutomation(vaultRoot)
+    const automation = getVaultAutomationStore(vaultRoot).at(-1)!
+    automation.route = {
+      ...automation.route,
+      channel: 'linq',
+      deliveryTarget: 'left-linq-group',
+      threadId: 'left-linq-group',
+    }
+    const resolveScheduledLinqRoute = vi.fn().mockRejectedValueOnce(Object.assign(
+      new Error('Hosted Linq egress authority assertion failed with HTTP 403.'),
+      { code: 'HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH', retryable: false, status: 403 },
+    ))
+
+    const result = await runAssistantCronJobNow({
+      executionContext: {
+        hosted: {
+          memberId: 'member-group-runtime',
+          resolveScheduledLinqRoute,
+          userEnvKeys: [],
+        },
+      },
+      job: MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
+      vault: vaultRoot,
+    })
+
+    expect(result.run).toMatchObject({
+      outcome: 'skipped_gate',
+      reason: 'managed_owner_scope_mismatch',
+      status: 'skipped',
+    })
+    expect(resolveScheduledLinqRoute).toHaveBeenCalledOnce()
+    expect(cronMocks.sendAssistantMessageLocal).not.toHaveBeenCalled()
+  })
+
   it('does not claim overnight memory consolidation from local due scans', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-09T03:10:00.000Z'))
@@ -6891,7 +6929,7 @@ describe('assistant cron runtime orchestration', () => {
     } else {
       expect(prepared?.instructions).toContain('"accountId":"failed","provider":"gmail","coverage":"failed"')
       expect(prepared?.instructions).toContain('"accountId":"healthy","provider":"gmail","coverage":"complete"')
-      expect(prepared?.issues).toEqual([expect.objectContaining({ details: { failureReason: 'read_failed' } })])
+      expect(prepared?.issues).toEqual([expect.objectContaining({ details: { failureReason: 'read_failed', failureStage: 'mail', toolkit: 'gmail' } })])
     }
   })
 

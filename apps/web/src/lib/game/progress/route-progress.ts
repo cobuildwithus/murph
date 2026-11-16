@@ -1,0 +1,53 @@
+import type { ClientUnits } from '../../companion/client-info';
+import type { Day, MapQuery, Route } from './contract';
+import type { Candidate } from './registry';
+import type { MeasureState, RouteLeg } from './state';
+import type { StoredAward } from './awards';
+import { cutPolyline, decodePolyline, MAP_SIZES, routeBbox, townPosition } from './route-geometry';
+import { formatAmount } from './format';
+export const routeMeters = (measureId: string, amount: number) => measureId === 'steps' || measureId.endsWith('.steps') ? amount / 2000 * 1609.344 : amount;
+type Points = readonly [Day, number][];
+const crossingDay = (points: Points, at: number) => points.find(point => point[1] >= at)?.[0] ?? null;
+export const routeAwardKey = (measureId: string, leg: RouteLeg, index: number) => `route:${JSON.stringify([measureId, index, leg.from, leg.to, leg.distanceM, leg.startTotal])}`;
+
+/** Completed legs survive corrections; changing a goal only replaces the unfinished leg. */
+export function replaceRouteLeg(measureId: string, legs: readonly RouteLeg[], next: Omit<RouteLeg, 'startTotal'>, total: number, earned: ReadonlySet<string>): RouteLeg[] {
+  const finished = legs.filter((leg, i) => i < legs.length - 1 || earned.has(routeAwardKey(measureId, leg, i)) || total >= leg.startTotal + leg.distanceM);
+  return [...finished, { ...next, startTotal: finished.length ? total : 0 }];
+}
+
+export function routeLegs(ctx: { measureId: string; legs: readonly RouteLeg[]; points: Points }): Candidate[] {
+  const points: [Day, number][] = ctx.points.map(([day, amount]) => [day, routeMeters(ctx.measureId, amount)]);
+  return ctx.legs.flatMap((leg, index) => {
+    const on = crossingDay(points, leg.startTotal + leg.distanceM);
+    return on ? [{ key: routeAwardKey(ctx.measureId, leg, index), kind: 'route', measureId: ctx.measureId, subjectMemberId: null, on,
+      data: { from: leg.from, to: leg.to, distanceM: leg.distanceM, startTotal: leg.startTotal, page: 'totals' } }] : [];
+  });
+}
+
+/** Map labels share the renderer's viewport. Preview towns have no earned crossing dates. */
+export function routeTowns(leg: RouteLeg, meters: Points, size: MapQuery['size'], units: ClientUnits): Route['towns'] {
+  const { width, height } = MAP_SIZES[size];
+  const geometry = decodePolyline(leg.polyline), bbox = routeBbox(geometry, width, height);
+  return leg.towns.map(town => ({ name: town.name, atText: `${units === 'metric' ? 'km' : 'mile'} ${formatAmount(town.atM, 'meters', 'compact', units).text.split(' ')[0]}`,
+    ...townPosition(cutPolyline(geometry, town.atM / leg.distanceM).walked.at(-1)!, bbox),
+    passedOn: crossingDay(meters, leg.startTotal + town.atM) }));
+}
+
+/** Label coordinates belong to the linked card PNG; display that image without cropping. */
+export function routeView(measureId: string, state: MeasureState, points: Points, awards: readonly StoredAward[], units: ClientUnits): Route | null {
+  const legs = state.legs ?? [], leg = legs.at(-1);
+  if (!leg) return null;
+  const completions = awards.filter(award => award.kind === 'route' && award.measureId === measureId);
+  const earnedOn = completions.find(award => award.key === routeAwardKey(measureId, leg, legs.length - 1))?.on ?? null;
+  const meters: [Day, number][] = points.map(([day, amount]) => [day, routeMeters(measureId, amount)]);
+  const total = meters.at(-1)?.[1] ?? 0;
+  const walked = earnedOn ? leg.distanceM : Math.min(leg.distanceM, Math.max(0, total - leg.startTotal));
+  const map = `/api/game/v1/progress/map?${new URLSearchParams({ measure: measureId, size: 'card' })}`;
+  return { name: `${leg.from} to ${leg.to}`, distanceText: formatAmount(leg.distanceM, 'meters', 'compact', units).text,
+    walkedText: formatAmount(walked, 'meters', 'compact', units).text,
+    progress: walked / leg.distanceM, straightLine: leg.straightLine,
+    finishedOn: earnedOn, map, goalPicked: state.goal !== undefined,
+    completed: completions.map(award => ({ name: `${award.data.from} to ${award.data.to}`, finishedOn: award.on })),
+    towns: routeTowns(leg, meters, 'card', units), drawerTowns: routeTowns(leg, meters, 'drawer', units) };
+}

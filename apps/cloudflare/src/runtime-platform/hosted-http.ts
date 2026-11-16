@@ -54,7 +54,9 @@ export async function fetchHostedResponse(input: {
         responseOrigin: input.redactedResponseOrigin ?? input.url.origin,
         ...buildHostedRuntimeSafeErrorMetadata(wrappedError),
       },
-      level: "warn",
+      level: callerSignal?.aborted && error === callerSignal.reason
+        ? "info"
+        : "warn",
       message: "Hosted runtime upstream request failed.",
       phase: "outbox",
       userId: null,

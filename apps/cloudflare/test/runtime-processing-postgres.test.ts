@@ -17,7 +17,7 @@ import { RuntimeInvocationPreparation } from "../src/runtime-invocation-preparat
 import type { WorkerActiveRuntimeUserFenceResult } from "../src/worker-contracts.ts";
 
 vi.mock("../src/runtime-owner-client.ts", () => ({ commandHostedRuntimeOwner: vi.fn() }));
-vi.mock("../src/runtime-owner-completion.ts", () => ({ recordHostedRuntimeOwnerCompletion: vi.fn(async () => true) }));
+vi.mock("../src/runtime-owner-completion.ts", () => ({ recordHostedRuntimeOwnerCompletion: vi.fn(async () => ({ completed: true })) }));
 vi.mock("../src/runtime-invocation-preparation.ts", () => ({
   RuntimeInvocationPreparation: class {
     constructor(private readonly input: ConstructorParameters<typeof RuntimeInvocationPreparation>[0]) {}
@@ -318,7 +318,7 @@ describe("Postgres runtime orchestration", () => {
     const successor = owner({ attemptId: "attempt-b", generation: "2", phase: status === "claimed" ? "starting" : "active" });
     container.readSupervisedInvocation.mockResolvedValue({ attemptId: "attempt-a", generation: "1", state: "completed" });
     // Another completion caller may already have released the old generation.
-    vi.mocked(recordHostedRuntimeOwnerCompletion).mockResolvedValueOnce(false);
+    vi.mocked(recordHostedRuntimeOwnerCompletion).mockResolvedValueOnce({ completed: false });
     vi.mocked(commandHostedRuntimeOwner)
       .mockResolvedValueOnce(response(completed))
       .mockImplementation(async ({ command }) => command.operation === "claim"
@@ -484,7 +484,7 @@ describe("Postgres runtime orchestration", () => {
     const { source, container } = harness();
     const completed = owner({ processingMode: "system_mailbox", phase: "retiring", completedAt: new Date().toISOString() });
     container.readSupervisedInvocation.mockResolvedValue({ attemptId: "attempt-a", generation: "1", state: "completed" });
-    vi.mocked(recordHostedRuntimeOwnerCompletion).mockResolvedValueOnce(false);
+    vi.mocked(recordHostedRuntimeOwnerCompletion).mockResolvedValueOnce({ completed: false });
     vi.mocked(commandHostedRuntimeOwner).mockResolvedValueOnce(response(completed))
       .mockResolvedValue(state === "blocked" ? response(null, "blocked")
         : response(state === "foreign" ? { ...completed, userId: "other-member", generation: "2" } : completed));
@@ -533,7 +533,7 @@ describe("Postgres runtime orchestration", () => {
     const { source, container } = harness();
     vi.mocked(commandHostedRuntimeOwner).mockResolvedValue(response(owner({ phase: "retiring", completedAt: new Date().toISOString() })));
     container.readSupervisedInvocation.mockResolvedValue({ attemptId: "attempt-a", generation: "1", state: "completed" });
-    let complete!: (value: boolean) => void;
+    let complete!: (value: { completed: true }) => void;
     vi.mocked(recordHostedRuntimeOwnerCompletion).mockImplementationOnce(() => new Promise(resolve => { complete = resolve; }));
     const diagnostics: RuntimeProcessingDiagnostics = { stage: "admission", details: {} };
     const result = ensurePostgresRuntimeProcessing(source, { ...request, commandTimeoutMs: 2_000 }, diagnostics);
@@ -541,7 +541,7 @@ describe("Postgres runtime orchestration", () => {
     expect(await result).toMatchObject({ kind: "retry_later" });
     expect(diagnostics.details.runtimeProcessingRetryReason).toBe("command_budget_exhausted");
     expect(diagnostics.details.runtimeProcessingLastObservedFailedOperation).toBe("complete_invocation");
-    complete(true);
+    complete({ completed: true });
     await vi.advanceTimersByTimeAsync(0);
     expect(commandHostedRuntimeOwner).toHaveBeenCalledOnce();
     expect(container.startSupervisedInvocation).not.toHaveBeenCalled();
@@ -946,7 +946,7 @@ describe("Postgres runtime orchestration", () => {
     container.ensureProcessing.mockResolvedValue({ kind: "start-required", reason: "no-active-child" });
     container.readSupervisedInvocation.mockResolvedValue({ attemptId: "attempt-a", generation: "1", state: "completed" });
     vi.mocked(commandHostedRuntimeOwner).mockResolvedValue(response(owner()));
-    vi.mocked(recordHostedRuntimeOwnerCompletion).mockResolvedValueOnce(false);
+    vi.mocked(recordHostedRuntimeOwnerCompletion).mockResolvedValueOnce({ completed: false });
     expect(await ensurePostgresRuntimeProcessing(source, request)).toMatchObject({ kind: "retry_later" });
     expect(commandHostedRuntimeOwner).toHaveBeenCalledTimes(2);
     expect(recordHostedRuntimeOwnerCompletion).toHaveBeenCalledOnce();

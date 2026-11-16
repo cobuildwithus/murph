@@ -1,0 +1,19 @@
+{
+  "tiles": [],
+  "match": {
+    "id": "half-dome",
+    "name": "Half Dome",
+    "drawing": "half-dome",
+    "at": 8846,
+    "atText": "8,846 ft",
+    "blurb": "Yosemite's granite dome, sliced flat on one side, with cables to help hikers up.",
+    "where": "Yosemite National Park, California, USA",
+    "on": null,
+    "toGo": "7,446 to go",
+    "short": "Half Dome",
+    "tagline": "A rounded summit with a sheer face"
+  },
+  "suggestions": [],
+  "route": null,
+  "note": null
+}

@@ -45,7 +45,7 @@ describe("native supervised invocation", () => {
       platformAiUsageAllowed: true, startedAt: null, acceptedAt: null, completedAt: null,
       failureCount: 0, lastErrorCode: null,
     } });
-    vi.mocked(recordHostedRuntimeOwnerCompletion).mockResolvedValue(false);
+    vi.mocked(recordHostedRuntimeOwnerCompletion).mockResolvedValue({ completed: false });
   });
 
   it('counts seven media forwards in memory and scopes the allowance to the current invocation', async () => {

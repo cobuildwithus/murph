@@ -298,6 +298,13 @@ receipt and either a settled native invocation or an inactive runtime fence
 proved during reconciliation. Successful release retains the member's
 warm target. Failed or ambiguous retirement requires exact native stop proof
 before clearing its assignment. Bound slots never return to shared inventory.
+Rejected completion commands return the already-locked owner snapshot. The
+callback uses that snapshot to classify a released, completed generation or a
+newer generation as obsolete, including when release races its routing read.
+Only those proven obsolete callbacks log at info; unknown or cold-retirement
+rejections remain warnings. The receipt remains `completed: false` and grants
+no cleanup or delivery authority. Older Web responses omit the snapshot and
+retain the warning; either deployment order is compatible.
 Without a completed native invocation receipt, idle cleanup first checks native
 status, active jobs, and the trusted conversation receipt deadline. Those local
 vetoes need no owner callback; a future receipt deadline schedules cleanup directly
@@ -642,6 +649,9 @@ The request-local Postgres ensure path emits the same detached
 outcome, elapsed time, observed fence and a finite retry reason. Telemetry cannot
 delay the control response or change its result; orchestration correlation uses
 the existing domain-separated hash rather than retaining the raw attempt ID.
+Waiting for an existing starting fence logs at info when the command observed
+no failed operation. Failed steps, uncertain wakes and other retry reasons
+retain warning summaries; the retry timing and ownership rules are unchanged.
 
 Runtime log uploads still authenticate the signed callback, consume its nonce,
 and check runtime ownership. When that admission rejects a stale owner with

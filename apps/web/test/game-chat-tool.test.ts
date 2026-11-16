@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-const m = vi.hoisted(() => ({ audience: vi.fn(), groupAuthority: vi.fn(), exact: vi.fn(), runtime: vi.fn(), access: vi.fn(), wake: vi.fn(), route: vi.fn(), sender: vi.fn(), game: vi.fn(), loreRows: vi.fn(), run: vi.fn(), read: vi.fn(), profiles: vi.fn(), players: vi.fn(), photo: vi.fn(), recapMaterial: vi.fn(), acceptedVideo: { value: null as null | { generationId: string; hash: string; byteLength: number } }, sealRecap: vi.fn(), mailbox: vi.fn(), decodeMailbox: vi.fn() }));
+const m = vi.hoisted(() => ({ audience: vi.fn(), groupAuthority: vi.fn(), exact: vi.fn(), runtime: vi.fn(), access: vi.fn(), wake: vi.fn(), route: vi.fn(), sender: vi.fn(), game: vi.fn(), loreRows: vi.fn(), run: vi.fn(), read: vi.fn(), profiles: vi.fn(), players: vi.fn(), photo: vi.fn(), recapMaterial: vi.fn(), acceptedVideo: { value: null as null | { generationId: string; hash: string; byteLength: number } }, sealRecap: vi.fn(), mailbox: vi.fn(), decodeMailbox: vi.fn(), participant: vi.fn() }));
 vi.mock("../src/lib/prisma", () => ({ getPrisma: () => ({ hostedLinqDelivery: { findFirst: async () => null }, game: { findFirst: m.game, findMany: m.loreRows }, $transaction: (fn: (tx: object) => unknown) => fn({ game: { findFirst: m.game } }), hostedMailboxItem: { findMany: m.mailbox } }) }));
 vi.mock("../src/lib/hosted-execution/runtime-owner", () => ({ requireHostedRuntimeCallbackTx: m.runtime }));
 vi.mock("../src/lib/hosted-mailbox/runtime-access", () => ({ requireHostedRuntimeActiveAccessForUpdateTx: m.access }));
@@ -29,6 +29,8 @@ vi.mock("../src/lib/game/service", () => ({
 }));
 vi.mock("../src/lib/game/chat-photo", () => ({ handleGameChatPhoto: m.photo }));
 vi.mock("../src/lib/game/recap-asset-access", () => ({ readRecapEnvelope: async () => null }));
+vi.mock("../src/lib/hosted-groups/participant-member", () => ({ lookupHostedGroupParticipantMemberByHandle: m.participant }));
+import { buildHostedExecutionLinqConversationMessageWake } from "@murphai/hosted-execution";
 import { hostedGameToolRequestSchema, hostedGameToolResponseSchema } from "@murphai/hosted-execution/runtime-control";
 import { gameGroupLoreFingerprint, gamePairLoreFingerprint } from "../src/lib/game/audience";
 import { handleGameChatTool } from "../src/lib/game/chat-tool";
@@ -38,10 +40,10 @@ const origin = { kind: "accepted_input" as const, assistantInputId: "ain_" + "a"
 const read = { memberId: group, runtimeIdentity: null, request: { action: "read_game" as const, origin } };
 const update = { ...read, request: { action: "update_game" as const, origin, update: { operation: "approve" as const, gameId: "game_synthetic", proposalId: "proposal_synthetic" } } };
 function wake(overrides: object = {}) {
-  return { userId: group, message: { channel: "linq", linqMessage: { isFromMe: false, threadIsDirect: false, chatId: "chat_synthetic" }, routeAuthority: { channel: "linq", containerMemberId: group, threadId: "chat_synthetic" }, ...overrides } };
+  return { userId: group, occurredAt: new Date().toISOString(), message: { channel: "linq", linqMessage: { isFromMe: false, threadIsDirect: false, chatId: "chat_synthetic" }, routeAuthority: { channel: "linq", containerMemberId: group, threadId: "chat_synthetic" }, ...overrides } };
 }
 describe("game chat tool authority", () => {
-  afterEach(() => vi.unstubAllEnvs());
+  afterEach(() => { vi.unstubAllEnvs(); vi.useRealTimers(); });
   beforeEach(() => {
     vi.resetAllMocks(); vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", "https://recaps.murph.test"); m.players.mockResolvedValue([actor, "other_synthetic"]); m.exact.mockResolvedValue([actor, "other_synthetic"]); m.wake.mockResolvedValue(wake()); m.sender.mockResolvedValue(actor); m.game.mockResolvedValue({ id: "game_synthetic", invitees: [], players: [{ memberId: actor }, { memberId: "other_synthetic" }] }); m.read.mockResolvedValue({ games: [] }); m.mailbox.mockResolvedValue([]); m.decodeMailbox.mockResolvedValue([]);
     m.loreRows.mockResolvedValue([{ id: "game_synthetic", maxPlayers: 2, audienceKey: null }]);
@@ -200,6 +202,65 @@ describe("game chat tool authority", () => {
     m.game.mockResolvedValue(null);
     expect((await handleGameChatTool(update)).result.status).toBe("unavailable");
     expect(m.run).not.toHaveBeenCalled();
+  });
+  it.each(["like", "heart"])("approves as the synthetic Linq %s reactor through the real sender resolver", async reaction => {
+    const { resolveHostedGroupMessageSenderMemberId } = await vi.importActual<typeof import("../src/lib/hosted-groups/group-message-sender")>("../src/lib/hosted-groups/group-message-sender");
+    m.sender.mockImplementation(resolveHostedGroupMessageSenderMemberId);
+    m.participant.mockResolvedValue({ core: { id: "other_synthetic" } });
+    const reactionWake = buildHostedExecutionLinqConversationMessageWake({
+      eventId: "event_reaction", senderMemberId: actor, contactKind: "email", contactLookupKey: "hclk_synthetic", occurredAt: new Date().toISOString(), userId: group,
+      routeAuthority: { channel: "linq", containerMemberId: group, threadId: "chat_synthetic" },
+      linqMessage: { affirmativeReaction: true, reactionEligible: false, chatId: "chat_synthetic", from: "sam@example.test", isFromMe: false, threadIsDirect: false,
+        messageId: "event_reaction", parts: [{ type: "text", value: `Reacted with a ${reaction} reaction.` }],
+        replyToMessageId: "murph_waiting_ask", service: "imessage" },
+    });
+    m.wake.mockResolvedValue(reactionWake);
+    m.run.mockImplementationOnce(async input => {
+      await input.beforeMutationTx({ game: { findFirst: m.game } });
+      return { ok: true, game: null };
+    });
+    expect((await handleGameChatTool(update)).result.status).toBe("ok");
+    expect(m.participant).toHaveBeenCalledTimes(2);
+    expect(m.participant).toHaveBeenLastCalledWith(expect.objectContaining({ handle: "sam@example.test" }));
+    expect(m.run).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ actorMemberId: "other_synthetic", update: update.request.update }));
+    expect(m.read).toHaveBeenCalledExactlyOnceWith(group, [actor, "other_synthetic"], "other_synthetic", false);
+  });
+  it.each([24 * 60 * 60 * 1000 - 1, 24 * 60 * 60 * 1000])("approves for the earlier message's sender at age %i, not the current speaker", async age => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date("2030-04-02T12:00:00.000Z"));
+    const earlierRef = "ain_" + "b".repeat(32);
+    const earlierWake = { ...wake({ senderMemberId: "other_synthetic" }), occurredAt: new Date(Date.now() - age).toISOString() };
+    m.wake.mockImplementation(async ({ assistantInputId }) => assistantInputId === earlierRef ? earlierWake : wake({ senderMemberId: actor }));
+    m.sender.mockImplementation(async ({ wake }) => wake.message.senderMemberId);
+    m.run.mockImplementationOnce(async input => {
+      await input.beforeMutationTx({ game: { findFirst: m.game } });
+      return { ok: true, game: null };
+    });
+    const request = { ...update.request, origin: { ...origin, assistantInputId: earlierRef } };
+    expect((await handleGameChatTool({ ...read, request })).result.status).toBe("ok");
+    expect(m.run).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ actorMemberId: "other_synthetic", update: request.update }));
+    expect(m.sender).toHaveBeenCalledTimes(2);
+    expect(m.sender).toHaveBeenLastCalledWith(expect.objectContaining({ wake: earlierWake }));
+    expect(m.read).toHaveBeenCalledExactlyOnceWith(group, [actor, "other_synthetic"], "other_synthetic", false);
+  });
+  it.each(["read_game", "update_game", "game_photo"] as const)("refuses a message over 24 hours old for %s", async action => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date("2030-04-02T12:00:00.000Z"));
+    m.wake.mockResolvedValue({ ...wake(), occurredAt: "2030-04-01T11:59:59.999Z" });
+    const request = action === "read_game" ? read.request : action === "update_game" ? update.request
+      : { action, origin, photo: { operation: "save" as const, gameId: "game_synthetic" } };
+    expect((await handleGameChatTool({ ...read, request })).result).toEqual({ status: "rejected",
+      error: "INVALID_REQUEST: Use that player's own message in this chat from the last 24 hours, or ask them to say it again." });
+    expect(m.run).not.toHaveBeenCalled(); expect(m.read).not.toHaveBeenCalled(); expect(m.photo).not.toHaveBeenCalled();
+  });
+  it("rechecks the age inside the mutation transaction and explains expiry", async () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date("2030-04-02T12:00:00.000Z"));
+    m.wake.mockResolvedValue({ ...wake(), occurredAt: "2030-04-01T12:00:00.000Z" });
+    m.run.mockImplementationOnce(async input => {
+      vi.setSystemTime(new Date("2030-04-02T12:00:00.001Z"));
+      await input.beforeMutationTx({ game: { findFirst: m.game } });
+      throw new Error("Expired input must not reach the mutation");
+    });
+    expect((await handleGameChatTool(update)).result).toMatchObject({ status: "rejected", error: expect.stringContaining("last 24 hours") });
+    expect(m.read).not.toHaveBeenCalled();
   });
   it("rechecks the runtime and actor inside the game mutation transaction", async () => {
     await handleGameChatTool(update);

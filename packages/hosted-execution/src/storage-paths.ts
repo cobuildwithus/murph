@@ -210,6 +210,20 @@ export function hostedRecapMediaObjectKey(input: { userId: string; mediaId: stri
   return `${hostedRecapMediaUserPrefix(input)}${requireHostedRecapMediaId(input.mediaId)}.json.enc`;
 }
 
+/** Progress keys are random and never share the game-photo or recap namespace. */
+export function requireHostedProgressPicId(value: string): string {
+  if (!/^progress\/[a-f0-9]{32}\.jpg$/u.test(value)) throw new ContractValidationError("Progress picture identity is invalid.");
+  return value;
+}
+
+export function hostedProgressPicUserPrefix(input: { userId: string }): string {
+  return `hosted-progress-pics/${resolveHostedStorageNamespaceId(input)}/`;
+}
+
+export function hostedProgressPicObjectKey(input: { userId: string; mediaId: string }): string {
+  return `${hostedProgressPicUserPrefix(input)}${requireHostedProgressPicId(input.mediaId)}.json.enc`;
+}
+
 // Retired capture cleanup only. Remove with its R2 lifecycle rule after both
 // production and preview buckets are verified empty under this prefix.
 export async function hostedEnvironmentVoiceUserPrefix(input: {

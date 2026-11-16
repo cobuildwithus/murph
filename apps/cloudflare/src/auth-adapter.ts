@@ -1,5 +1,6 @@
 import {
   createRemoteJWKSet,
+  errors,
   jwtVerify,
   type JWTPayload,
 } from "jose";
@@ -43,6 +44,14 @@ export interface HostedExecutionVercelOidcClaims extends JWTPayload {
   project?: string;
   project_id?: string;
 }
+
+// A rejection carries jose's stable error code (plus the failed claim) and,
+// for a signed token that failed a claim check, its age, so a rejected
+// hand-off shows whether the token was stale, mis-scoped or unverifiable.
+// Never the token, its claims or the error message.
+export type HostedExecutionVercelOidcVerification =
+  | { claims: HostedExecutionVercelOidcClaims }
+  | { failure: string; issuedSecondsAgo?: number };
 
 export function readBearerAuthorizationToken(value: string | null): string | null {
   const normalized = normalizeOptionalString(value);
@@ -124,11 +133,11 @@ export async function verifyHostedExecutionVercelOidcBearerToken(input: {
   clockToleranceSeconds?: number;
   token: string;
   validation: HostedExecutionVercelOidcValidationEnvironment;
-}): Promise<HostedExecutionVercelOidcClaims | null> {
+}): Promise<HostedExecutionVercelOidcVerification> {
   const token = normalizeOptionalString(input.token);
 
   if (!token) {
-    return null;
+    return { failure: "missing_token" };
   }
 
   try {
@@ -146,21 +155,40 @@ export async function verifyHostedExecutionVercelOidcBearerToken(input: {
       },
     );
 
-    return verified.payload as HostedExecutionVercelOidcClaims;
-  } catch {
-    return null;
+    return { claims: verified.payload as HostedExecutionVercelOidcClaims };
+  } catch (error) {
+    return describeHostedExecutionVercelOidcFailure(error);
   }
+}
+
+function describeHostedExecutionVercelOidcFailure(
+  error: unknown,
+): HostedExecutionVercelOidcVerification {
+  if (
+    error instanceof errors.JWTExpired
+    || error instanceof errors.JWTClaimValidationFailed
+  ) {
+    const issuedAt = error.payload.iat;
+    return {
+      failure: `${error.code}:${error.claim}`,
+      ...(typeof issuedAt === "number"
+        ? { issuedSecondsAgo: Math.floor(Date.now() / 1000) - issuedAt }
+        : {}),
+    };
+  }
+  if (error instanceof errors.JOSEError) return { failure: error.code };
+  return { failure: error instanceof Error ? error.name : "unknown" };
 }
 
 export async function verifyHostedExecutionVercelOidcRequest(input: {
   clockToleranceSeconds?: number;
   request: Request;
   validation: HostedExecutionVercelOidcValidationEnvironment;
-}): Promise<HostedExecutionVercelOidcClaims | null> {
+}): Promise<HostedExecutionVercelOidcVerification> {
   const token = readBearerAuthorizationToken(input.request.headers.get("authorization"));
 
   if (!token) {
-    return null;
+    return { failure: "missing_token" };
   }
 
   return verifyHostedExecutionVercelOidcBearerToken({

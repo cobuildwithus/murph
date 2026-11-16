@@ -1,9 +1,9 @@
 import { parseInput, RequestInputError, RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import { commandHostedRuntimeOwner } from "../runtime-owner-client.ts";
 import { createHostedRunnerContainerNamespaceRouter } from "../standby-runner-contract.ts";
-import type {
-  HostedRuntimeCompletionReceipt,
-  HostedRuntimeCompletionReceiptReason,
+import {
+  obsoleteRuntimeCompletionReason,
+  type HostedRuntimeCompletionReceipt,
 } from "../runtime-completion-receipt.ts";
 import {
   parseHostedWorkspaceInvocationResult,
@@ -55,21 +55,7 @@ export async function handleRunnerRuntimeCompletionRequest(input: {
   const state = await commandHostedRuntimeOwner({ source: input.env, userId: input.userId, command: { operation: "reconcile" } });
   const owner = state.owner;
   if (owner?.attemptId !== authority.attemptId || owner.generation !== authority.generation || !owner.runnerContainerName) {
-    let reason: HostedRuntimeCompletionReceiptReason = "owner_unconfirmed";
-    if (owner) {
-      // Release clears the attempt, but warm reuse can retain the target.
-      // Idle alone is not completion evidence; a newer generation proves only
-      // supersession, never completion or delivery of this result.
-      if (owner.generation === authority.generation && owner.phase === "idle"
-        && owner.attemptId === null && owner.completedAt) {
-        reason = "already_completed";
-      } else if (/^[0-9]{1,19}$/u.test(authority.generation)
-        && BigInt(owner.generation) > BigInt(authority.generation)) {
-        // Headers have only presence validation here. Keep malformed values
-        // on the existing false path rather than throwing during diagnostics.
-        reason = "superseded";
-      }
-    }
+    const reason = obsoleteRuntimeCompletionReason(owner, authority.generation) ?? "owner_unconfirmed";
     return json({ completed: false, reason } satisfies HostedRuntimeCompletionReceipt);
   }
   const container = createHostedRunnerContainerNamespaceRouter(input.env)?.getByName(owner.runnerContainerName);

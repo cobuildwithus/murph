@@ -12,6 +12,8 @@ export const CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_SHA256_HEADER =
 export const CLOUDFLARE_HOSTED_CONTROL_GAME_MEDIA_ID_HEADER =
   "x-murph-game-media-id";
 export const CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS = {
+  progressPicStage: { method: "POST", suffix: "progress-pics/stage" },
+  progressPicRead: { method: "GET", suffix: "progress-pics/read" },
   recapMediaStage: { method: "POST", suffix: "recap-media/stage" },
   recapMediaRead: { method: "GET", suffix: "recap-media/read" },
   browserVaultSession: {
@@ -119,7 +121,7 @@ export function buildCloudflareHostedControlMealPhotoDeletePath(userId: string):
 }
 
 export function buildCloudflareHostedControlGameMediaPath(
-  routeName: "gameMediaDelete" | "gameMediaRead" | "gameMediaStage" | "gameMediaStat" | "gameImageStage" | "gameImageDelivery" | "gameImageStat" | "recapMediaRead" | "recapMediaStage",
+  routeName: "gameMediaDelete" | "gameMediaRead" | "gameMediaStage" | "gameMediaStat" | "gameImageStage" | "gameImageDelivery" | "gameImageStat" | "recapMediaRead" | "recapMediaStage" | "progressPicRead" | "progressPicStage",
   userId: string,
 ): string {
   return buildCloudflareHostedControlUserRoutePath(routeName, userId);

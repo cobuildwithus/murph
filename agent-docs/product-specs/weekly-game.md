@@ -1256,6 +1256,33 @@ Native clients render and capture artifacts; there is no server map or dare bank
 
 ## Changes agreed in chat
 
+During a live group turn, game reads, updates and photo actor refs may use a
+player's own message from this same chat received at most 24 hours ago. Web
+resolves the sender and rechecks the cutoff before mutation. The words must
+clearly request or agree to exactly the action: a request made before another
+player proposes that identical change counts as the first player's yes.
+Another player's report of what someone said never supplies consent. Expired
+refs require that player to say it again. Photo source, day and offer rules
+still apply.
+
+In Linq iMessage, a like or heart from the player being asked on Murph's exact
+waiting ask or an invitation they can accept counts as their yes. The runtime
+attests the target as a sent Murph message, and Web derives the actor from the
+reaction's own synthetic message. The asker, other people, unrelated targets,
+negative reactions and question reactions do not approve. Telegram group
+reactions remain context only and cannot trigger this path.
+The first message that creates a game chat records its accepted Web delivery
+receipt as a terminal outbox entry, so it supports the same reaction attestation
+without queuing another send.
+
+Several requested fields travel together in one pair proposal or group terms
+edit. An addition to the asker's own waiting ask cancels it and replaces it with
+one ask containing the earlier and new changes; the latest requested value wins
+for an overlapping field. Another player's counteroffer declines the old ask
+and proposes that player's new request. Combined edits validate atomically: a
+locked task rejects the entire edit, even with an otherwise allowed schedule.
+Murph explains the named rule and proposes the requested fields still allowed.
+
 Before Day 1, either player can propose Start now. Until anyone checks in
 (any post, words or excuse), either player can propose a different start date,
 even after Day 1 has begun, from the latest player's today to 60 days out. That

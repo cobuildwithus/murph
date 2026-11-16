@@ -1,0 +1,37 @@
+{
+  "tiles": [],
+  "match": null,
+  "suggestions": [
+    {
+      "id": "boston-new-york",
+      "name": "Boston to New York",
+      "drawing": null,
+      "at": 344399.61600000004,
+      "atText": "214 mi",
+      "blurb": "",
+      "where": null,
+      "on": null,
+      "toGo": null,
+      "short": "Boston to New York",
+      "tagline": "A journey between harbor cities"
+    }
+  ],
+  "route": {
+    "from": "San Diego",
+    "to": "San Francisco",
+    "distanceText": "501 miles",
+    "straightLine": false,
+    "map": "/api/game/v1/progress/map?from=San+Diego&to=San+Francisco&size=card",
+    "detail": "By road. You're 116 in, so 385 to go.",
+    "towns": [
+      {
+        "name": "Los Angeles",
+        "atText": "mile 118",
+        "x": 0.55,
+        "y": 0.75,
+        "passedOn": null
+      }
+    ]
+  },
+  "note": null
+}

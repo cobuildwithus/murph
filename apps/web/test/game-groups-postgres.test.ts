@@ -139,7 +139,7 @@ async function parkOtherLifecycleReceipts(receiptId: string) {
   await db.hostedLinqDelivery.updateMany({ where: { source: "game_lifecycle", id: { not: receiptId }, status: { in: ["awaiting_generation", "generation_queued"] } },
     data: { retryAfterAt: new Date("9999-01-01T00:00:00Z") } });
 }
-afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
+afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); vi.useRealTimers(); });
 afterAll(async () => {
   if (!enabled) return;
   // Delete the large synthetic entry fixture in one set before roster cascades.
@@ -1026,12 +1026,14 @@ describe.skipIf(!enabled)("exact group chat and composer persistence", () => {
     const { handleGameChatTool } = await import("@/src/lib/game/chat-tool");
     const input = { memberId: room, multiplayer: true, runtimeIdentity: null };
     const origin = { kind: "accepted_input" as const, assistantInputId: "ain_synthetic_open_room" };
-    chatProof.sender = people[0].id; chatProof.wake = leaverChatWake(room);
+    // Mailbox age uses the application clock; game time still uses PostgreSQL's clock.
+    vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date("2030-03-09T12:00:00Z"));
+    await db.game.update({ where: { id: gameId }, data: { devClockOffsetMs: BigInt(new Date("2030-03-09T12:00:01Z").getTime() - vi.getRealSystemTime()) } });
+    chatProof.sender = people[0].id; chatProof.wake = { ...leaverChatWake(room), occurredAt: new Date().toISOString() };
     const read = await handleGameChatTool({ ...input, request: { action: "read_game", origin, includePlayers: true } });
     expect(read).toMatchObject({ result: { status: "ok", state: { games: [{ id: gameId }], players: expect.any(Array) } } });
     expect(read.result).not.toHaveProperty("loreFingerprint");
     expect(read.result.state?.players?.map(p => p.memberId).sort()).toEqual([...players].sort());
-    await db.game.update({ where: { id: gameId }, data: { devClockOffsetMs: BigInt(new Date("2030-03-09T12:00:01Z").getTime() - Date.now()) } });
     const download = vi.spyOn(await import("@/src/lib/game/chat-photo-media"), "downloadGameChatPhoto").mockResolvedValue({ bytes: new Uint8Array([255, 216, 255]), contentType: "image/jpeg" });
     const { mediaKeyPrefixFor } = await import("@/src/lib/game/access");
     vi.spyOn(await import("@/src/lib/game/media"), "putGameMedia").mockResolvedValue(`${mediaKeyPrefixFor(people[0].id)}${"a".repeat(64)}.jpg`);
@@ -1045,7 +1047,7 @@ describe.skipIf(!enabled)("exact group chat and composer persistence", () => {
     expect(download).toHaveBeenCalledOnce();
     expect(await db.gameEntry.count({ where: { gameId, memberId: people[0].id, kind: "photo" } })).toBe(1);
     chatProof.sender = people[1].id;
-    await db.game.update({ where: { id: gameId }, data: { devClockOffsetMs: BigInt(new Date("2030-03-10T12:00:00Z").getTime() - Date.now()) } });
+    await db.game.update({ where: { id: gameId }, data: { devClockOffsetMs: BigInt(new Date("2030-03-10T12:00:00Z").getTime() - vi.getRealSystemTime()) } });
     chatProof.rooms.set(room, people.map(p => p.email));
     const service = await import("@/src/lib/game/service");
     const applyUpdate = service.runGameChatUpdate;
@@ -1152,7 +1154,7 @@ describe.skipIf(!enabled)("exact group chat and composer persistence", () => {
     expect(await readGameChatAuthority(await gameRow(game.id), room, audience)).not.toBeNull();
     expect(await readGameChatFundingRooms({ memberIds: [room], now: new Date(), prisma: db })).toEqual(new Map([[room, room]]));
     const { handleGameChatTool } = await import("@/src/lib/game/chat-tool");
-    chatProof.sender = people[0].id; chatProof.wake = leaverChatWake(room);
+    chatProof.sender = people[0].id; chatProof.wake = { ...leaverChatWake(room), occurredAt: new Date().toISOString() };
     expect(await handleGameChatTool({ memberId: room, multiplayer: true, runtimeIdentity: null, request: { action: "read_game",
       origin: { kind: "accepted_input", assistantInputId: "ain_synthetic_large_room" } } })).toMatchObject({ result: { status: "ok", state: { games: [{ id: game.id, players: expect.any(Array) }] } } });
     expect(await readGameChatAuthority({ ...await gameRow(game.id), chatContainerMemberId: null }, room, audience)).toBeNull();
@@ -1405,7 +1407,7 @@ describe.skipIf(!enabled)("exact group chat and composer persistence", () => {
     const { handleGameChatTool } = await import("@/src/lib/game/chat-tool");
     chatProof.sender = people[0].id;
     const input = { memberId: room, multiplayer: true, runtimeIdentity: null, request: { action: "read_game" as const, includePlayers: true as const, origin: { kind: "accepted_input" as const, assistantInputId: "ain_synthetic_composer" } } };
-    const setWake = (room: string) => { chatProof.wake = { kind: "conversation.message", userId: room, message: { channel: "linq", linqMessage: { isFromMe: false, threadIsDirect: false, chatId: room,
+    const setWake = (room: string) => { chatProof.wake = { kind: "conversation.message", occurredAt: new Date().toISOString(), userId: room, message: { channel: "linq", linqMessage: { isFromMe: false, threadIsDirect: false, chatId: room,
       parts: [{ type: "text", value: `https://www.withmurph.ai/g/${first!.inviteToken}` }] }, routeAuthority: { channel: "linq", containerMemberId: room, threadId: room } } }; };
     setWake(room);
     expect((await handleGameChatTool(input)).result.status).toBe("ok");
@@ -1981,7 +1983,7 @@ describe.skipIf(!enabled)("group chat after departure", () => {
     expect(shared.progress?.players.map(p => p.memberId).sort()).toEqual(g.members.slice(0, 2).sort());
     expect(shared.terms.tasks).toHaveLength(2);
     expect(await requestGameRecapRegeneration({ gameId: g.game.id, regenerationId: "live_game", operatorMemberId: "system", execute: false })).toMatchObject({ outcome: "not_settled" });
-    chatProof.sender = g.people[2].id; chatProof.wake = leaverChatWake(g.room);
+    chatProof.sender = g.people[2].id; chatProof.wake = { ...leaverChatWake(g.room), occurredAt: new Date().toISOString() };
     expect(await handleGameChatTool({ memberId: g.room, multiplayer: true, runtimeIdentity: null,
       request: { action: "read_game", origin: { kind: "accepted_input", assistantInputId: "ain_synthetic_leaver_read" } } }))
       .toMatchObject({ result: { status: "ok", state: { games: [{ id: g.game.id, players: shared.players }] } } });

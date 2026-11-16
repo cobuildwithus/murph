@@ -1692,7 +1692,7 @@ async function deliverAssistantNotificationMessage(input: {
       bootstrap: input.gameChatBootstrap, card: input.card, media: input.media,
       followUpRequest: input.followUpRequest, message: input.message,
       memberId: input.input.executionContext?.hosted?.memberId,
-      session: input.session, vault: input.input.vault,
+      session: input.session, turnId: input.turnId, vault: input.input.vault,
     })
   }
   const state = createAssistantRuntimeStateService(input.input.vault)

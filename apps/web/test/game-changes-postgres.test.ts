@@ -12,6 +12,9 @@ import { readGame, readGameChatState, readHome, runGameCommand } from "@/src/lib
 import { addDays, gameLocalDate, weekdayOf } from "@/src/lib/game/time";
 import { parseStoredTerms, scorePlayer, settleDueAt, type RuleState } from "@/src/lib/game/rules";
 import type { GameCommand, GameSchedule, Weekday } from "@/src/lib/game/contract";
+import { readProgress } from "../src/lib/game/progress/view";
+import type { Progress } from "../src/lib/game/progress/contract";
+import { upsertHostedMemberEmailAuthorization } from "../src/lib/hosted-onboarding/hosted-member-store";
 const delivery = vi.hoisted(() => vi.fn(async () => {}));
 const response = vi.hoisted(() => ({ tasks: null as Array<() => Promise<void>> | null }));
 vi.mock("next/server", async original => ({
@@ -22,6 +25,10 @@ vi.mock("next/server", async original => ({
   },
 }));
 vi.mock("@/src/lib/game/chat-delivery", () => ({ deliverGameChangeProposal: delivery }));
+vi.mock("@/src/lib/hosted-onboarding/linq-line-store", async original => ({
+  ...await original<typeof import("../src/lib/hosted-onboarding/linq-line-store")>(),
+  listHostedLinqHealthyProactiveLines: async () => [{ phoneNumber: "+15555550100" }],
+}));
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
 if (enabled && !/^postgres(?:ql)?:\/\/[^/]*@(?:127\.0\.0\.1|localhost):\d+\/murph_test_/u.test(process.env.DATABASE_URL ?? "")) throw new Error("Game changes proof needs an isolated local test database.");
 const members: string[] = [];
@@ -45,6 +52,52 @@ async function setup(schedule: GameSchedule = { days: [0,1,2,3,4] }, startsOn?: 
   return {a,b,room,gameId};
 }
 const fence = async () => {};
+
+async function continuingProgress(a: string, b: string, endedGameId: string) {
+  const db = getPrisma(), gameId = randomUUID();
+  const created = await run(a, { type: "createGame", gameId, inviteeFirstName: "Leo", terms: {
+    tasks: [{ seat: 0, text: "Walk" }, { seat: 1, text: "Read" }], schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, stakes: [{ kind: "prize", item: "Lunch" }],
+  } });
+  if (!created.ok || !created.game?.inviteToken) throw new Error("Continuing game creation failed.");
+  expect(await run(b, { type: "join", token: created.game.inviteToken, termsVersion: 1, timeZone: "UTC" })).toMatchObject({ ok: true });
+  const dayOne = addDays(gameLocalDate(new Date(), "UTC"), -2);
+  await db.gamePlayer.updateMany({ where: { gameId: { in: [gameId, endedGameId] } },
+    data: { dayOne: new Date(dayOne), joinedAt: new Date(dayOne), timeZone: "UTC" } });
+  await db.gameProfile.update({ where: { memberId: a }, data: { timeZone: "UTC", createdAt: new Date(dayOne) } });
+  await db.gameEntry.createMany({ data: [gameId, endedGameId].flatMap(id => [0, 1].map(dayIndex => ({
+    id: randomUUID(), gameId: id, memberId: a, dayIndex, attempt: 1, kind: "words", receivedAt: new Date(`${addDays(dayOne, dayIndex)}T12:00:00Z`),
+  }))) });
+  return { dayOne, gameId };
+}
+
+async function progressAt(memberId: string, now: Date): Promise<Progress> {
+  vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(now); response.tasks = [];
+  try { return await readProgress(memberId, "us", fence); }
+  finally { response.tasks = null; vi.useRealTimers(); }
+}
+
+async function proveContinuingProgress(memberId: string, endedGameId: string, continuing: { dayOne: string; gameId: string }, before: Progress) {
+  const db = getPrisma();
+  const cancelled = await progressAt(memberId, new Date());
+  expect(cancelled.streak.current).toBe(2);
+  expect(cancelled.streak.obligations.map(item => item.id)).toEqual([continuing.gameId]);
+  expect(cancelled.measures.reduce((sum, measure) => sum + measure.total.value, 0)).toBe(4);
+  expect(cancelled.streak.months.flatMap(month => [...month.days]).filter(day => day === "d")).toHaveLength(2);
+  for (const dayIndex of [2, 3, 4]) {
+    const now = new Date(`${addDays(continuing.dayOne, dayIndex)}T18:00:00Z`);
+    await db.gameEntry.create({ data: { id: randomUUID(), gameId: continuing.gameId, memberId, dayIndex, attempt: 1, kind: "words", receivedAt: now } });
+    const view = await progressAt(memberId, now);
+    expect(view.streak.current).toBe(dayIndex + 1);
+    expect(view.streak.obligations).toEqual([expect.objectContaining({ id: continuing.gameId, done: true })]);
+    expect(view.streak.best?.count).toBe(dayIndex + 1);
+    expect(view.medals).toEqual(expect.arrayContaining(before.medals.map(medal => ({ ...medal, gold: expect.any(Boolean) }))));
+    expect(view.medals).toContainEqual(expect.objectContaining({ kind: "streak", face: { streak: dayIndex + 1 }, earnedOn: addDays(continuing.dayOne, dayIndex) }));
+  }
+  const awards = await db.gameProgressAward.count({ where: { memberId } });
+  await progressAt(memberId, new Date(`${addDays(continuing.dayOne, 4)}T18:00:00Z`));
+  expect(await db.gameProgressAward.count({ where: { memberId } })).toBe(awards);
+  expect(await db.gameEntry.count({ where: { gameId: endedGameId, memberId } })).toBe(2);
+}
 
 describe.skipIf(!enabled)("weekly game change serialization against PostgreSQL", () => {
   afterAll(async () => { await cleanupGameFixtures(getPrisma(), members);
@@ -472,7 +525,9 @@ describe.skipIf(!enabled)("weekly game change serialization against PostgreSQL",
       .toMatchObject({ok:false,error:{code:"INVITE_USED",message:"This game has already started."}});
   });
   it("calls off a live game only when the other player agrees in chat, keeping its terms and announcing it once", async () => {
-    const {a,b,room,gameId} = await setup(); const db = getPrisma(); const chat = {chatContainerMemberId:room,beforeMutationTx:fence};
+    const {a,b,room,gameId} = await setup({ days: [0, 1, 2, 3, 4, 5, 6] }); const db = getPrisma(); const chat = {chatContainerMemberId:room,beforeMutationTx:fence};
+    const continuing = await continuingProgress(a, b, gameId);
+    const progressBefore = await progressAt(a, new Date());
     const before = await db.game.findUniqueOrThrow({where:{id:gameId}});
     const proposalId = randomUUID(); const callOff = {kind:"call_off" as const};
     const ask = {type:"proposeChange" as const,gameId,proposalId,expectedTermsVersion:1,change:callOff};
@@ -498,6 +553,43 @@ describe.skipIf(!enabled)("weekly game change serialization against PostgreSQL",
       .toEqual([{template:"game_cancelled",status:"awaiting_generation"}]);
     for (const player of [a,b]) expect((await readHome(player)).games.some((game) => game.id === gameId)).toBe(false);
     expect(await run(a,{...ask,proposalId:randomUUID()},chat)).toMatchObject({ok:false});
+    await proveContinuingProgress(a, gameId, continuing, progressBefore);
+  });
+  it("ends obligations for the surviving member when a two-player group is voided by departure", async () => {
+    const a = `game_a_${randomUUID()}`, b = `game_b_${randomUUID()}`, gameId = randomUUID();
+    members.push(a, b);
+    const db = getPrisma();
+    await db.hostedMember.createMany({ data: [a, b].map(id => ({ id })) });
+    for (const [id, firstName] of [[a, "Ava"], [b, "Leo"]]) {
+      await db.$transaction(tx => upsertHostedMemberEmailAuthorization({ memberId: id, prisma: tx, verifiedEmail: { address: `${id}@example.test`, verifiedAt: new Date() } }));
+      await run(id, { type: "setProfile", firstName, timeZone: "UTC" });
+    }
+    const created = await runGameCommand({ actorMemberId: a, multiplayer: true, command: { type: "createGame", gameId, maxPlayers: 10, groupWord: "Crew",
+      invitees: [{ seat: 1, firstName: "Leo", recipient: { kind: "email", value: `${b}@example.test` } }], terms: {
+      defaultTask: "Walk", tasks: [], schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, stakes: [{ kind: "prize", item: "Lunch" }],
+    } } });
+    if (!created.ok) throw new Error(`Group creation failed: ${created.error.code}`);
+    if (!created.game?.inviteToken) throw new Error("Group invitation missing.");
+    expect(await runGameCommand({ actorMemberId: b, multiplayer: true, command: { type: "join", token: created.game.inviteToken, timeZone: "UTC", termsVersion: 1 } })).toMatchObject({ ok: true });
+    const continuing = await continuingProgress(a, b, gameId);
+    const before = await progressAt(a, new Date());
+    expect(await runGameCommand({ actorMemberId: b, multiplayer: true, command: { type: "leave", gameId } })).toMatchObject({ ok: true });
+    expect(await db.game.findUniqueOrThrow({ where: { id: gameId } })).toMatchObject({ status: "void", settledAt: null });
+    expect(await db.gamePlayer.findUniqueOrThrow({ where: { gameId_memberId: { gameId, memberId: a } } })).toMatchObject({ leftAt: null });
+    await proveContinuingProgress(a, gameId, continuing, before);
+  });
+  it("ends obligations when a block voids a live pair game, and unblocking changes nothing", async () => {
+    const {a,b,gameId} = await setup({ days: [0, 1, 2, 3, 4, 5, 6] }); const db = getPrisma();
+    const c = `game_c_${randomUUID()}`; members.push(c);
+    await db.hostedMember.create({ data: { id: c, billingStatus: "not_started" } });
+    await run(c, { type: "setProfile", firstName: "Sam", timeZone: "UTC" });
+    const continuing = await continuingProgress(a, c, gameId);
+    const before = await progressAt(a, new Date());
+    expect(await run(a, { type: "block", memberId: b })).toMatchObject({ ok: true });
+    expect(await db.game.findUniqueOrThrow({ where: { id: gameId } })).toMatchObject({ status: "void", settledAt: null });
+    await proveContinuingProgress(a, gameId, continuing, before);
+    expect(await run(a, { type: "unblock", memberId: b })).toMatchObject({ ok: true });
+    expect((await progressAt(a, new Date(`${addDays(continuing.dayOne, 4)}T18:00:00Z`))).streak.current).toBe(5);
   });
   it("asks again for a call-off the other player declined, and refuses one before the game is live", async () => {
     const {a,b,room,gameId} = await setup(); const db = getPrisma(); const chat = {chatContainerMemberId:room,beforeMutationTx:fence};

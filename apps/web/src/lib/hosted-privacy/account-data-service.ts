@@ -104,6 +104,7 @@ import {
   type PreparedHostedAccountDeletionCleanup,
 } from "./account-deletion-cleanup";
 import { sha256Hex } from "../primitives";
+import { deleteProgressPicsForAccount } from "../game/progress/pics";
 import { applyGameAccountDeletionTx, prepareGameAccountDeletion } from "../game/account-deletion";
 
 export type {
@@ -1069,6 +1070,8 @@ async function deleteHostedAccountDataInternal(input: {
       prisma: input.prisma,
     });
   }
+
+  await deleteProgressPicsForAccount(deletionMemberIds, input.prisma);
 
   const preparedHostedGroupIds = await listHostedAccountDeletionTargetGroupIds({
     memberIds: deletionMemberIds,

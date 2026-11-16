@@ -6,6 +6,13 @@ export interface CompanionClientInfo {
   deviceModel: string | null;
 }
 
+export type ClientUnits = "us" | "uk" | "metric";
+
+export function clientUnits(request: Request): ClientUnits {
+  const units = request.headers.get("X-Murph-Client-Units");
+  return units === "uk" || units === "metric" ? units : "us";
+}
+
 const VERSION = /^\d{1,4}(\.\d{1,4}){0,3}(-[A-Za-z0-9.-]{1,24})?$/;
 const BUILD = /^\d{1,10}$/;
 const OS_VERSION = /^\d{1,4}(\.\d{1,4}){0,3}$/;

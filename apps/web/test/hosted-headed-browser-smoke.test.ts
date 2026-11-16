@@ -505,7 +505,8 @@ describe("hosted headed browser boundary", () => {
           "Authorization surface: childFrames=1 mainActions=1",
           "mainEnabledActions=0 mainOtherActions=2 childActions=1",
           "childEnabledActions=1 childOtherActions=1",
-          "mainUncheckedCheckboxes=0 childUncheckedCheckboxes=1.",
+          "mainUncheckedCheckboxes=0 childUncheckedCheckboxes=1",
+          "mainActionWords=other|other|other.",
         ].join(" "));
         expect(complex.failure?.message).not.toContain("synthetic-private-marker");
         expect(complex.failure?.message).not.toContain("id.whoop.com");

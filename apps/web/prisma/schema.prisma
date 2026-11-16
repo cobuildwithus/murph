@@ -713,6 +713,11 @@ model HostedMember {
   computerHandoffs               HostedComputerHandoff[]
   conversationPolls              HostedConversationPoll[]
   gameProfile                    GameProfile?
+  progressAwards                 GameProgressAward[] @relation("ProgressAwardOwner")
+  progressAwardsAbout            GameProgressAward[] @relation("ProgressAwardSubject")
+  progressMeasures               GameProgressMeasure[]
+  progressPics                   GameProgressPic[]
+  progressTaskMeasures           GameProgressTaskMeasure[]
   phoneCalls                     HostedPhoneCall[]
   physicalNotes                  HostedPhysicalNote[]
   physicalNoteRecoveries         HostedPhysicalNoteRecovery[]
@@ -3162,4 +3167,57 @@ model HostedMcpPendingAuthorization {
 
   @@index([expiresAt])
   @@map("hosted_mcp_pending_authorization")
+}
+
+// Progress content is sealed; lookup keys reveal neither a task nor a measure.
+model GameProgressAward {
+  memberId        String       @map("member_id")
+  lookup          String
+  subjectMemberId String?      @map("subject_member_id")
+  earnedOn        DateTime     @db.Date @map("earned_on")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  dataEncrypted   String       @map("data_encrypted")
+  seenAt          DateTime?    @map("seen_at")
+  member          HostedMember @relation("ProgressAwardOwner", fields: [memberId], references: [id], onDelete: Cascade)
+  subject         HostedMember? @relation("ProgressAwardSubject", fields: [subjectMemberId], references: [id], onDelete: Cascade)
+
+  @@id([memberId, lookup])
+  @@index([memberId, earnedOn(sort: Desc), createdAt(sort: Desc), lookup(sort: Desc)])
+  @@index([subjectMemberId])
+  @@map("game_progress_award")
+}
+
+model GameProgressMeasure {
+  memberId       String       @map("member_id")
+  lookup         String
+  stateEncrypted String       @map("state_encrypted")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+  member         HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@id([memberId, lookup])
+  @@map("game_progress_measure")
+}
+
+model GameProgressPic {
+  id            String       @id @db.Uuid
+  memberId      String       @map("member_id")
+  storageKey    String       @unique @map("storage_key")
+  takenAt       DateTime     @map("taken_at")
+  metaEncrypted String       @map("meta_encrypted")
+  retiredAt     DateTime?    @map("retired_at")
+  member        HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([memberId, retiredAt, takenAt])
+  @@map("game_progress_pic")
+}
+
+model GameProgressTaskMeasure {
+  memberId         String       @map("member_id")
+  lookup           String
+  measureEncrypted String       @map("measure_encrypted")
+  createdAt        DateTime     @default(now()) @map("created_at")
+  member           HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@id([memberId, lookup])
+  @@map("game_progress_task_measure")
 }

@@ -1,0 +1,395 @@
+{
+  "pills": [
+    {
+      "id": "pushups.reps",
+      "label": "Pushups",
+      "icon": "pushups"
+    },
+    {
+      "id": "pullups.reps",
+      "label": "Pull-ups",
+      "icon": "pullups"
+    },
+    {
+      "id": "steps",
+      "label": "Steps",
+      "icon": "steps"
+    },
+    {
+      "id": "sleep",
+      "label": "Sleep",
+      "icon": "sleep"
+    }
+  ],
+  "pill": "pushups.reps",
+  "range": "month",
+  "rows": [
+    {
+      "memberId": "member-0-maya",
+      "firstName": "Maya",
+      "avatarUrl": null,
+      "me": false,
+      "rank": 1,
+      "total": {
+        "value": 1240,
+        "text": "1,240",
+        "unit": "reps"
+      },
+      "private": false,
+      "invited": false,
+      "joinedOn": "2026-10-21"
+    },
+    {
+      "memberId": "member-1-sam",
+      "firstName": "Sam",
+      "avatarUrl": null,
+      "me": false,
+      "rank": 2,
+      "total": {
+        "value": 1180,
+        "text": "1,180",
+        "unit": "reps"
+      },
+      "private": false,
+      "invited": false,
+      "joinedOn": "2026-10-21"
+    },
+    {
+      "memberId": "member-2-priya",
+      "firstName": "Priya",
+      "avatarUrl": null,
+      "me": false,
+      "rank": 3,
+      "total": {
+        "value": 1050,
+        "text": "1,050",
+        "unit": "reps"
+      },
+      "private": false,
+      "invited": false,
+      "joinedOn": "2026-11-09"
+    },
+    {
+      "memberId": "member-3-leo",
+      "firstName": "Leo",
+      "avatarUrl": null,
+      "me": false,
+      "rank": 4,
+      "total": {
+        "value": 980,
+        "text": "980",
+        "unit": "reps"
+      },
+      "private": false,
+      "invited": false,
+      "joinedOn": "2026-10-21"
+    },
+    {
+      "memberId": "member-4-jordan",
+      "firstName": "Jordan",
+      "avatarUrl": null,
+      "me": false,
+      "rank": 5,
+      "total": {
+        "value": 930,
+        "text": "930",
+        "unit": "reps"
+      },
+      "private": false,
+      "invited": false,
+      "joinedOn": "2026-10-21"
+    },
+    {
+      "memberId": "member-5-sam",
+      "firstName": "Sam",
+      "avatarUrl": null,
+      "me": false,
+      "rank": 6,
+      "total": {
+        "value": 880,
+        "text": "880",
+        "unit": "reps"
+      },
+      "private": false,
+      "invited": false,
+      "joinedOn": "2026-10-21"
+    },
+    {
+      "memberId": "member-6-jordan",
+      "firstName": "Jordan",
+      "avatarUrl": null,
+      "me": false,
+      "rank": 7,
+      "total": {
+        "value": 760,
+        "text": "760",
+        "unit": "reps"
+      },
+      "private": false,
+      "invited": false,
+      "joinedOn": "2026-10-21"
+    },
+    {
+      "memberId": "member-7-ava",
+      "firstName": "Ava",
+      "avatarUrl": null,
+      "me": true,
+      "rank": 8,
+      "total": {
+        "value": 720,
+        "text": "720",
+        "unit": "reps"
+      },
+      "private": false,
+      "invited": false,
+      "joinedOn": "2026-10-21"
+    },
+    {
+      "memberId": "member-8-leo",
+      "firstName": "Leo",
+      "avatarUrl": null,
+      "me": false,
+      "rank": 9,
+      "total": {
+        "value": 680,
+        "text": "680",
+        "unit": "reps"
+      },
+      "private": false,
+      "invited": false,
+      "joinedOn": "2026-10-21"
+    },
+    {
+      "memberId": "member-9-maya",
+      "firstName": "Maya",
+      "avatarUrl": null,
+      "me": false,
+      "rank": 10,
+      "total": {
+        "value": 620,
+        "text": "620",
+        "unit": "reps"
+      },
+      "private": false,
+      "invited": false,
+      "joinedOn": "2026-10-21"
+    },
+    {
+      "memberId": "member-10-sam",
+      "firstName": "Sam",
+      "avatarUrl": null,
+      "me": false,
+      "rank": 11,
+      "total": {
+        "value": 580,
+        "text": "580",
+        "unit": "reps"
+      },
+      "private": false,
+      "invited": false,
+      "joinedOn": "2026-10-21"
+    },
+    {
+      "memberId": "member-11-priya",
+      "firstName": "Priya",
+      "avatarUrl": null,
+      "me": false,
+      "rank": 12,
+      "total": {
+        "value": 510,
+        "text": "510",
+        "unit": "reps"
+      },
+      "private": false,
+      "invited": false,
+      "joinedOn": "2026-11-09"
+    },
+    {
+      "memberId": "member-12-jordan",
+      "firstName": "Jordan",
+      "avatarUrl": null,
+      "me": false,
+      "rank": 13,
+      "total": {
+        "value": 430,
+        "text": "430",
+        "unit": "reps"
+      },
+      "private": false,
+      "invited": false,
+      "joinedOn": "2026-10-21"
+    },
+    {
+      "memberId": "member-13-leo",
+      "firstName": "Leo",
+      "avatarUrl": null,
+      "me": false,
+      "rank": 14,
+      "total": {
+        "value": 320,
+        "text": "320",
+        "unit": "reps"
+      },
+      "private": false,
+      "invited": false,
+      "joinedOn": "2026-10-21"
+    }
+  ],
+  "chart": [
+    {
+      "memberId": "member-0-maya",
+      "points": [
+        [
+          "2026-11-01",
+          0.0
+        ],
+        [
+          "2026-11-02",
+          177.143
+        ],
+        [
+          "2026-11-04",
+          354.286
+        ],
+        [
+          "2026-11-06",
+          531.429
+        ],
+        [
+          "2026-11-08",
+          708.571
+        ],
+        [
+          "2026-11-10",
+          885.714
+        ],
+        [
+          "2026-11-12",
+          1062.857
+        ],
+        [
+          "2026-11-14",
+          1240.0
+        ]
+      ]
+    },
+    {
+      "memberId": "member-1-sam",
+      "points": [
+        [
+          "2026-11-01",
+          0.0
+        ],
+        [
+          "2026-11-02",
+          168.571
+        ],
+        [
+          "2026-11-04",
+          337.143
+        ],
+        [
+          "2026-11-06",
+          505.714
+        ],
+        [
+          "2026-11-08",
+          674.286
+        ],
+        [
+          "2026-11-10",
+          842.857
+        ],
+        [
+          "2026-11-12",
+          1011.429
+        ],
+        [
+          "2026-11-14",
+          1180.0
+        ]
+      ]
+    },
+    {
+      "memberId": "member-2-priya",
+      "points": [
+        [
+          "2026-11-01",
+          0.0
+        ],
+        [
+          "2026-11-02",
+          150.0
+        ],
+        [
+          "2026-11-04",
+          300.0
+        ],
+        [
+          "2026-11-06",
+          450.0
+        ],
+        [
+          "2026-11-08",
+          600.0
+        ],
+        [
+          "2026-11-10",
+          750.0
+        ],
+        [
+          "2026-11-12",
+          900.0
+        ],
+        [
+          "2026-11-14",
+          1050.0
+        ]
+      ]
+    },
+    {
+      "memberId": "member-7-ava",
+      "points": [
+        [
+          "2026-11-01",
+          0.0
+        ],
+        [
+          "2026-11-02",
+          102.857
+        ],
+        [
+          "2026-11-04",
+          205.714
+        ],
+        [
+          "2026-11-06",
+          308.571
+        ],
+        [
+          "2026-11-08",
+          411.429
+        ],
+        [
+          "2026-11-10",
+          514.286
+        ],
+        [
+          "2026-11-12",
+          617.143
+        ],
+        [
+          "2026-11-14",
+          720.0
+        ]
+      ]
+    }
+  ],
+  "next": {
+    "memberId": "member-6-jordan",
+    "text": "40 to pass Jordan"
+  },
+  "shareAsk": false,
+  "shareAudience": [],
+  "departureNotice": null
+}

@@ -36,6 +36,33 @@ describe("Postgres processing summaries", () => {
   beforeEach(() => { vi.clearAllMocks(); });
 
   it.each([
+    ["starting_fence_preserved", undefined, "info"],
+    ["starting_fence_preserved", "read_invocation", "warn"],
+    ["command_budget_exhausted", "container_readiness", "warn"],
+    ["wake_unconfirmed", undefined, "warn"],
+  ] as const)("classifies %s with failed operation %s as %s", (reason, failedOperation, level) => {
+    const diagnostics: RuntimeProcessingDiagnostics = {
+      stage: "liveness",
+      details: {
+        runtimeProcessingRetryReason: reason,
+        ...(failedOperation ? { runtimeProcessingLastObservedFailedOperation: failedOperation } : {}),
+      },
+    };
+    const result: HostedRuntimeEnsureProcessingResponse = {
+      kind: "retry_later", retryAt: new Date(Date.now() + 3_000).toISOString(),
+    };
+    const entry = buildRuntimeProcessingSummaryEntry(diagnostics, result, Date.now());
+    expect(entry.level).toBe(level);
+    expect(entry.redactedJson).toMatchObject({
+      runtimeProcessingOutcome: "retry_later", runtimeProcessingRetryReason: reason,
+      runtimeProcessingRetryAtEpochMs: Date.parse(result.retryAt),
+    });
+    expect(parseHostedRuntimeLogRequest({ entries: [entry] }).entries[0]).toEqual(entry);
+    // A previous retry reason cannot hide a later thrown failure.
+    expect(buildRuntimeProcessingSummaryEntry(diagnostics, undefined, Date.now()).level).toBe("warn");
+  });
+
+  it.each([
     [new RequestInputError("Synthetic rejection."), 400, "warn"],
     [new TypeError("Synthetic server failure."), 500, "error"],
   ] as const)("logs the classified orchestration failure at %s severity", async (failure, status, level) => {

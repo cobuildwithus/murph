@@ -26,11 +26,23 @@ import { gameRecapToolResult, validateGameRecap, withValidGameSuperlatives, type
 import { addressedGameRematchWhere, gameChatPlayerIds, gamePairWhere, readGameChatPlayerIds, readGameChatAudience, readGameChatAuthority, type GameChatAudience, hasGameChatRestriction, requireExactGameChat, sameGamePlayers } from "./chat-membership";
 import { isGameEnabled } from "./access";
 import { gameGroupLoreFingerprint, gamePairLoreFingerprint } from "./audience";
+import { GameRuleError, reject } from "./rules";
+
+const GAME_CHAT_MESSAGE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 type Input = { audience?: GameChatAudience; multiplayer?: boolean; memberId: string; runtimeIdentity: HostedRuntimeIdentity | null; request: HostedGameToolRequest; playerMemberIds?: readonly string[] };
 
 /** The signed runtime selects only a game and accepted Message ref, never an actor. */
 export async function handleGameChatTool(input: Input): Promise<HostedGameToolResponse> {
+  try {
+    return await handleGameChatRequest(input);
+  } catch (error) {
+    if (error instanceof GameRuleError) return { action: input.request.action, result: { status: "rejected", error: `${error.error.code}: ${error.message}` } };
+    throw error;
+  }
+}
+
+async function handleGameChatRequest(input: Input): Promise<HostedGameToolResponse> {
   if (!isGameEnabled()) return { action: input.request.action, result: { status: "unavailable", error: "GAME_DISABLED: Games are unavailable right now." } };
   if (input.request.origin.kind !== "accepted_input") return handleNonPlayerOriginGameTool(input);
   const prisma = getPrisma();
@@ -176,10 +188,15 @@ export async function authorizeGameChatActorTx(input: Input, tx: Prisma.Transact
   if (input.request.origin.kind !== "accepted_input") return null;
   await requireHostedRuntimeCallbackTx(tx, input.memberId, input.runtimeIdentity);
   await requireHostedRuntimeActiveAccessForUpdateTx(input.memberId, { prisma: tx });
+  const now = new Date();
   const wake = await readHostedMailboxConversationWakeByAssistantInputId({
-    assistantInputId: input.request.origin.assistantInputId, availableAt: new Date(), memberId: input.memberId, prisma: tx,
+    assistantInputId: input.request.origin.assistantInputId, availableAt: now, memberId: input.memberId, prisma: tx,
   });
   if (!wake || wake.userId !== input.memberId) return null;
+  const receivedAt = Date.parse(wake.occurredAt);
+  if (!Number.isFinite(receivedAt) || receivedAt > now.getTime() || now.getTime() - receivedAt > GAME_CHAT_MESSAGE_MAX_AGE_MS) {
+    reject("INVALID_REQUEST", "Use that player's own message in this chat from the last 24 hours, or ask them to say it again.");
+  }
   const route = readGameIncomingRoute(wake, input.memberId);
   if (!route) return null;
   await lockHostedThreadRouteByThreadIdentityTx({ authority: route, prisma: tx });

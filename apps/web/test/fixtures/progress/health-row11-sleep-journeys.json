@@ -1,0 +1,411 @@
+{
+  "joinedOn": "2026-10-21",
+  "today": "2026-11-14",
+  "state": "ok",
+  "savedAt": "2026-11-14T12:00:00Z",
+  "winCount": 0,
+  "metrics": [
+    {
+      "id": "sleep",
+      "label": "Sleep",
+      "unit": "seconds",
+      "access": "ok",
+      "direction": "worse",
+      "headline": "Down 10 min",
+      "daily": [
+        [
+          "2026-09-23",
+          25500.0
+        ],
+        [
+          "2026-09-24",
+          25500.0
+        ],
+        [
+          "2026-09-25",
+          25500.0
+        ],
+        [
+          "2026-09-26",
+          25500.0
+        ],
+        [
+          "2026-09-27",
+          25500.0
+        ],
+        [
+          "2026-09-28",
+          25500.0
+        ],
+        [
+          "2026-09-29",
+          25500.0
+        ],
+        [
+          "2026-09-30",
+          25500.0
+        ],
+        [
+          "2026-10-01",
+          25500.0
+        ],
+        [
+          "2026-10-02",
+          25500.0
+        ],
+        [
+          "2026-10-03",
+          25500.0
+        ],
+        [
+          "2026-10-04",
+          25500.0
+        ],
+        [
+          "2026-10-05",
+          25500.0
+        ],
+        [
+          "2026-10-06",
+          25500.0
+        ],
+        [
+          "2026-10-07",
+          25500.0
+        ],
+        [
+          "2026-10-08",
+          25500.0
+        ],
+        [
+          "2026-10-09",
+          25500.0
+        ],
+        [
+          "2026-10-10",
+          25500.0
+        ],
+        [
+          "2026-10-11",
+          25500.0
+        ],
+        [
+          "2026-10-12",
+          25500.0
+        ],
+        [
+          "2026-10-13",
+          25500.0
+        ],
+        [
+          "2026-10-14",
+          25500.0
+        ],
+        [
+          "2026-10-15",
+          25500.0
+        ],
+        [
+          "2026-10-16",
+          25500.0
+        ],
+        [
+          "2026-10-17",
+          25500.0
+        ],
+        [
+          "2026-10-18",
+          25500.0
+        ],
+        [
+          "2026-10-19",
+          25500.0
+        ],
+        [
+          "2026-10-20",
+          25500.0
+        ],
+        [
+          "2026-10-21",
+          25500.0
+        ],
+        [
+          "2026-10-22",
+          25475.0
+        ],
+        [
+          "2026-10-23",
+          25450.0
+        ],
+        [
+          "2026-10-24",
+          25425.0
+        ],
+        [
+          "2026-10-25",
+          25400.0
+        ],
+        [
+          "2026-10-26",
+          25375.0
+        ],
+        [
+          "2026-10-27",
+          25350.0
+        ],
+        [
+          "2026-10-28",
+          25325.0
+        ],
+        [
+          "2026-10-29",
+          25300.0
+        ],
+        [
+          "2026-10-30",
+          25275.0
+        ],
+        [
+          "2026-10-31",
+          25250.0
+        ],
+        [
+          "2026-11-01",
+          25225.0
+        ],
+        [
+          "2026-11-02",
+          25200.0
+        ],
+        [
+          "2026-11-03",
+          25175.0
+        ],
+        [
+          "2026-11-04",
+          25150.0
+        ],
+        [
+          "2026-11-05",
+          25125.0
+        ],
+        [
+          "2026-11-06",
+          25100.0
+        ],
+        [
+          "2026-11-07",
+          25075.0
+        ],
+        [
+          "2026-11-08",
+          25050.0
+        ],
+        [
+          "2026-11-09",
+          25025.0
+        ],
+        [
+          "2026-11-10",
+          25000.0
+        ],
+        [
+          "2026-11-11",
+          24975.0
+        ],
+        [
+          "2026-11-12",
+          24950.0
+        ],
+        [
+          "2026-11-13",
+          24925.0
+        ],
+        [
+          "2026-11-14",
+          24900.0
+        ]
+      ],
+      "baseline": {
+        "value": 25500,
+        "text": "7h 05",
+        "unit": "seconds"
+      },
+      "wins": [],
+      "next": {
+        "title": "Next win",
+        "detail": "Back to 7h 05 a night"
+      },
+      "age": null
+    }
+  ],
+  "recs": [],
+  "sums": [
+    {
+      "id": "sleep",
+      "label": "Sleep",
+      "noun": "of sleep since joining",
+      "icon": "sleep",
+      "format": "duration",
+      "source": "wearable",
+      "pending": false,
+      "gameOn": false,
+      "needsPerDay": false,
+      "total": {
+        "value": 864000,
+        "text": "10 days",
+        "unit": "seconds"
+      },
+      "today": null,
+      "points": [
+        [
+          "2026-10-21",
+          0.0
+        ],
+        [
+          "2026-10-22",
+          66461.538
+        ],
+        [
+          "2026-10-24",
+          132923.077
+        ],
+        [
+          "2026-10-26",
+          199384.615
+        ],
+        [
+          "2026-10-28",
+          265846.154
+        ],
+        [
+          "2026-10-30",
+          332307.692
+        ],
+        [
+          "2026-11-01",
+          398769.231
+        ],
+        [
+          "2026-11-02",
+          465230.769
+        ],
+        [
+          "2026-11-04",
+          531692.308
+        ],
+        [
+          "2026-11-06",
+          598153.846
+        ],
+        [
+          "2026-11-08",
+          664615.385
+        ],
+        [
+          "2026-11-10",
+          731076.923
+        ],
+        [
+          "2026-11-12",
+          797538.462
+        ],
+        [
+          "2026-11-14",
+          864000.0
+        ]
+      ],
+      "projection": {
+        "value": 1036800,
+        "label": "12 days by Nov 21",
+        "on": "2026-11-21"
+      },
+      "ladder": {
+        "kind": "time",
+        "passed": [
+          {
+            "id": "godwit",
+            "name": "A godwit's nonstop flight",
+            "drawing": "godwit",
+            "at": 777600,
+            "atText": "9 days",
+            "blurb": "A shorebird flew this long without landing once, New Zealand to China.",
+            "where": null,
+            "on": "2026-11-12",
+            "toGo": null,
+            "short": "A godwit's nonstop flight",
+            "tagline": "A long flight without landing"
+          },
+          {
+            "id": "apollo11-mission",
+            "name": "Apollo 11",
+            "drawing": "apollo11-mission",
+            "at": 703115,
+            "atText": "8 days 3 hr",
+            "blurb": "The whole first Moon landing trip, launch to splashdown, 1969.",
+            "where": null,
+            "on": "2026-11-09",
+            "toGo": null,
+            "short": "The first Moon landing mission",
+            "tagline": "To the Moon and safely home"
+          },
+          {
+            "id": "pony-express",
+            "name": "Pony Express",
+            "drawing": "pony-express",
+            "at": 666000,
+            "atText": "7 days 17 hr",
+            "blurb": "The fastest horseback mail relay across the American West, 1860.",
+            "where": null,
+            "on": "2026-11-08",
+            "toGo": null,
+            "short": "Pony Express",
+            "tagline": "Mail carried from rider to rider"
+          },
+          {
+            "id": "trans-siberian",
+            "name": "Trans-Siberian",
+            "drawing": "trans-siberian",
+            "at": 532800,
+            "atText": "6 days 4 hr",
+            "blurb": "The train ride across Russia, from Moscow to the Pacific coast.",
+            "where": null,
+            "on": "2026-11-03",
+            "toGo": null,
+            "short": "Trans-Siberian",
+            "tagline": "A train journey toward the Pacific"
+          },
+          {
+            "id": "serum-run",
+            "name": "The serum run to Nome",
+            "drawing": "serum-run",
+            "at": 459000.0,
+            "atText": "5 days 8 hr",
+            "blurb": "Dog sled teams raced medicine 674 miles to a sick Alaska town, 1925.",
+            "where": null,
+            "on": "2026-10-31",
+            "toGo": null,
+            "short": "The serum run to Nome",
+            "tagline": "A relay carrying medicine through snow"
+          }
+        ],
+        "next": {
+          "id": "stay-awake",
+          "name": "Staying-awake record",
+          "drawing": "stay-awake",
+          "at": 951840.0,
+          "atText": "11 days",
+          "blurb": "The record for staying awake, set by a 17-year-old in 1964.",
+          "where": null,
+          "on": null,
+          "toGo": "22 h to go",
+          "short": "Staying-awake record",
+          "tagline": "A remarkable stretch without sleep"
+        },
+        "goalPicked": false
+      },
+      "route": null,
+      "pics": []
+    }
+  ]
+}
