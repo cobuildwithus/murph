@@ -27,6 +27,7 @@ import {
   createHostedLinqChat,
   getHostedLinqChatSummary,
   getHostedLinqReactionTargetMessage,
+  isHostedLinqIdempotencyKeyReuseFailure,
   readHostedLinqExplicitGroupDisplayName,
   readHostedLinqFailedMessage,
   resendHostedLinqMessage,
@@ -88,6 +89,32 @@ describe("terminal retry provider boundary", () => {
     );
     expect(readJsonRequestBody(fetchMock.mock.calls[1]?.[1])).toEqual({ message });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("tags a text send whose key Linq already accepted with different text", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => createJsonResponse({
+      error: "Conflicting Linq idempotency-key reuse.",
+    }, 409)));
+    const failure = await sendHostedLinqChatMessage({
+      chatId: "reuse-chat",
+      idempotencyKey: "daily-recovery:synthetic",
+      message: "Finish setup here today.",
+    }).catch((error: unknown) => error);
+    expect(isHostedLinqIdempotencyKeyReuseFailure(failure)).toBe(true);
+    expect(failure).toMatchObject({ retryable: false, details: { status: 409 } });
+  });
+
+  it("does not tag an unrelated text send conflict as key reuse", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => createJsonResponse({
+      error: "Chat is being updated.",
+    }, 409)));
+    const failure = await sendHostedLinqChatMessage({
+      chatId: "conflict-chat",
+      idempotencyKey: "daily-recovery:synthetic",
+      message: "Finish setup here today.",
+    }).catch((error: unknown) => error);
+    expect(isHostedLinqIdempotencyKeyReuseFailure(failure)).toBe(false);
+    expect(failure).toMatchObject({ retryable: false, details: { status: 409 } });
   });
 
   it("does not let SDK retries multiply the single resend on a server error", async () => {

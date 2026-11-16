@@ -103,7 +103,6 @@ const REQUIRED_HOSTED_CRYPTO_WORKER_VARS = {
 } as const;
 const REQUIRED_R2_PRESIGN_WORKER_SECRETS = {
   HOSTED_DATABASE_ALERT_LINQ_CHAT_ID: "chat-test",
-  HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID: "chat-secondary-test",
   HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN: "metrics-token-test",
   HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN_ID: "metrics-token-id-test",
   HOSTED_R2_PRESIGN_ACCESS_KEY_ID: "r2-access-fixture",
@@ -1040,6 +1039,20 @@ describe("hosted deploy automation helpers", () => {
         ...REQUIRED_HOSTED_CRYPTO_WORKER_VARS,
       }),
     ).toThrowError(/CF_CONTAINER_INSTANCE_TYPE\.disk_mb must be a positive number\./u);
+  });
+
+  it("never syncs the retired secondary operator chat, even when CI still sets it", () => {
+    expect(buildHostedWorkerSecretsPayload({
+      ...REQUIRED_PRIVATE_IMAGE_WORKER_SECRET,
+      ...REQUIRED_R2_PRESIGN_WORKER_SECRETS,
+      HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private-jwk",
+      HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID: "chat-secondary-test",
+      HOSTED_LOG_FINGERPRINT_SECRET: "log-fingerprint-secret",
+      HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET: "egress-signing-secret",
+      HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: "callback-private-jwk",
+      MURPH_DATA_API_KEY: "murph-data-key",
+      OPENAI_API_KEY: "openai-key",
+    })).not.toHaveProperty("HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID");
   });
 
   it("renders required and optional worker secrets from CI secrets", () => {
