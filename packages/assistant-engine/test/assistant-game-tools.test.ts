@@ -93,6 +93,8 @@ describe('game dynamic tools', () => {
     const request = parse('read_game', { messageRef: inputId })!
     const result = await executeMurphDynamicToolRequest({ request, hostedToolContext: { ...context(), groupTool: { request: async () => parseHostedRuntimeGroupToolResponse({ action: 'read_game', result: { status: 'ok', state: { games: [chatGame({ status: 'negotiating' }), chatGame({ id: 'game_group', maxPlayers: 10, pendingInviteeCount: 1 })] } } }) } }, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
     const guidance = result.rpcResult.contentItems[0]?.text ?? ''
+    expect(GAME_UPDATE_RESULT_GUIDANCE.created).toContain('last 24 hours')
+    expect(GAME_UPDATE_RESULT_GUIDANCE.created).not.toContain('message in this turn')
     expect(guidance).toContain('last 24 hours')
     expect(guidance).toContain('even though it came before the ask')
     expect(guidance).toContain("Another player's account")

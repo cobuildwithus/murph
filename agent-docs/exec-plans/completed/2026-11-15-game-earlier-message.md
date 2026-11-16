@@ -1,6 +1,6 @@
 # Allow recent player messages for game actions
 
-Status: active
+Status: completed
 Created: 2026-11-15
 Updated: 2026-11-15
 
@@ -50,7 +50,7 @@ or merge is authorized by this task.
 ## Evidence
 
 Hydration install, incremental build and Prisma generation passed (exit 0).
-Focused engine tests: 105 passed; Web game-chat tests: 53 passed; PostgreSQL
+Focused engine game/budget tests: 117 passed; Web game-chat tests: 53 passed; PostgreSQL
 room/composer/departure tests: 40 passed; changelog tests: 4 passed (all exit 0).
 Engine and Web typechecks, complexity (zero new debt) and docs drift passed
 (exit 0). Initial quoting, fixture typing and fixture clock failures were
@@ -62,6 +62,24 @@ approve once with that ref; hearsay and different words cause no write.
 Reply review: Ready, short truthful confirmation or the missing consent step.
 The harness now carries earlier refs and pending app proposals explicitly.
 
-Diff-scoped verification and complete base/head initial-input measurements
-are still running. The first commit is intermediate; PR metadata and plan
-closure will be included before marking the candidate ready.
+The first diff-scoped run exited 1: 6295 engine tests passed, but the photo
+tool declaration exceeded its byte ceiling by 28. Shortened repeated wording
+without raising the ceiling; the focused budget/game check passed. The full
+diff-scoped rerun is pending at candidate closure; PR evidence records its
+final exit code alongside required CI and ReviewGPT. One live repeat caught
+an overly narrow reply assertion; accepting the ordinary word "approve"
+fixed the assertion, with exact action/ref checks unchanged and all three
+journeys passing again.
+
+Complete native GPT-6.1 Sol input capture at base ded03923a737 and candidate:
+individual 123509 -> 123509 bytes; group 159172 -> 159479 (+307, +0.193%).
+Registered group tools grow 77 bytes; after-read input grows 653 bytes for a
+group game and 669 for mixed games. Three measurement fixtures passed (exit 0).
+No exact model tokenizer is configured, so token counts are unavailable.
+
+Candidate review found no additional current-turn gate, ref-based command key,
+new database call, private identifier, schema or wire-format change. PR #5040
+contains the public-safe evidence and changelog source linkage. Implementation
+is complete; ReviewGPT and exact-head CI run concurrently after Ready. The PR
+must remain unmerged and the checkout retained.
+Completed: 2026-11-15

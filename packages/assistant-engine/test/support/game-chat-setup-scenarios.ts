@@ -51,7 +51,7 @@ export const GAME_CHAT_SETUP_SCENARIOS: GameSetupScenario[] = [
     pendingChange: { id: 'proposal_task_change', proposedByMemberId: 'player_ava', expectedTermsVersion: 1,
       change: { kind: 'edit' as const, tasks: [{ seat: 0 as const, text: 'Walk twenty minutes' }, { seat: 1 as const, text: 'Stretch ten minutes' }] },
       effectiveFromDay: 0, origin: 'app' as const, deliveryStatus: 'sent' as const, startsOn: null },
-    ...(evidence === 'own request' ? { operation: 'approve' as const, actionMessageRef: 'ain_' + 'b'.repeat(32), reply: [/changed|updated|set|done|agreed|counts/i], forbidden: /\?|need.*(?:yes|reply)|before.*ask/i }
+    ...(evidence === 'own request' ? { operation: 'approve' as const, actionMessageRef: 'ain_' + 'b'.repeat(32), reply: [/approve|changed|updated|set|done|agreed|counts/i], forbidden: /\?|need.*(?:yes|reply)|before.*ask/i }
       : { reply: [/Sam/i, /agree|yes|confirm|stretch|said|message/i], forbidden: /(?:I.ve |I have )?(?:approved|changed|updated)|now (?:set|counts)/i }),
   })),
 
