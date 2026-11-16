@@ -877,6 +877,15 @@ resulting avatar. No private photo is shared with the subject or other players.
   holder redeems it after sending it through Messages, and after its use-by
   date it shows as expired and can't be redeemed. In dev time travel, issuance
   and expiry both use the game's shifted clock, including long games.
+  An open, unexpired pair ticket held by the viewer includes optional
+  `owedByPhone` for addressing Messages to the owing player. It is their current
+  verified E.164 phone from the hosted identity store, and is absent for a
+  departed or hidden/blocked player, a group ticket, an owed or redeemed ticket,
+  or an unverified/missing phone. It never contains the viewer's own number.
+  View hydration loads distinct eligible owing members in one identity query,
+  skips that query for an empty set, and opens only their phone fields through
+  the existing batch identity codec, once per member. Phones stay in the
+  request-local view map and response, never logs or telemetry.
   Players read a ticket as a prize: the app and Murph's game texts say who
   owes whom ("Ava owes you breakfast in bed") and never ticket, bet, wager,
   winnings or cash in, and Murph's texts also avoid stake. `ticket` stays the

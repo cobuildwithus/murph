@@ -18,6 +18,7 @@ import { hostedOnboardingError } from "./errors";
 import {
   buildHostedMemberIdentityPrivateColumns,
   HOSTED_MEMBER_LINQ_PARTICIPANT_CONTACT_FIELD,
+  readHostedMemberIdentityPhoneNumberBatch,
   readHostedMemberIdentityPrivateState,
 } from "./member-private-codecs";
 import {
@@ -301,6 +302,25 @@ export async function readHostedMemberIdentity(input: {
   });
 
   return identityRecord ? await projectHostedMemberIdentityState(identityRecord, input.prisma) : null;
+}
+
+/** Request-local verified phones. Callers must authorize the member set; never log values. */
+export async function readHostedMemberVerifiedPhoneNumbers(input: {
+  memberIds: readonly string[];
+  prisma: HostedOnboardingReadClient;
+}): Promise<ReadonlyMap<string, string>> {
+  const phones = new Map<string, string>();
+  if (input.memberIds.length === 0) return phones;
+  const identities = await input.prisma.hostedMemberIdentity.findMany({
+    where: { memberId: { in: [...new Set(input.memberIds)] }, phoneNumberVerifiedAt: { not: null } },
+    select: { memberId: true, phoneNumberEncrypted: true },
+  });
+  const values = await readHostedMemberIdentityPhoneNumberBatch(identities, input.prisma);
+  identities.forEach((identity, index) => {
+    const phoneNumber = values[index];
+    if (phoneNumber) phones.set(identity.memberId, phoneNumber);
+  });
+  return phones;
 }
 
 /**
