@@ -60,6 +60,8 @@
     "@junction-api/sdk": "1.2.0",
     "@linqapp/sdk": "0.34.0",
     "@lob/lob-typescript-sdk": "1.4.2",
+    "@modelcontextprotocol/client": "2.4.0",
+    "@modelcontextprotocol/server": "2.4.0",
     "@murphai/clinical-records": "workspace:*",
     "@murphai/cloudflare-hosted-control": "workspace:*",
     "@murphai/contracts": "workspace:*",
