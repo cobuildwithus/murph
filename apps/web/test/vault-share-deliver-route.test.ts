@@ -238,7 +238,9 @@ async function expectDeferredDelivery(
       retryable: true,
     },
   }));
-  expect(console.warn).toHaveBeenCalledExactlyOnceWith(
+  expect(console.error).not.toHaveBeenCalled();
+  expect(console.warn).not.toHaveBeenCalled();
+  expect(console.info).toHaveBeenCalledExactlyOnceWith(
     "Hosted vault-share delivery deferred.",
     {
       schema: "murph.hosted-vault-share-delivery-deferred.v1",
@@ -419,6 +421,8 @@ describe("vault-share deliver route", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
     mocks.isHostedRuntimeInactiveAccessError.mockReturnValue(false);
     mocks.requireHostedRuntimeMembersActiveAccessForUpdateTx.mockResolvedValue(undefined);
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_grantor");
@@ -842,7 +846,7 @@ describe("vault-share deliver route", () => {
 
 	it.each([false, true])("retries when a destination becomes inactive during replacement (logger throws: %s)", async (loggerThrows) => {
 		if (loggerThrows) {
-			vi.mocked(console.warn).mockImplementation(() => {
+			vi.mocked(console.info).mockImplementation(() => {
 				throw new Error("synthetic private logger failure");
 			});
 		}
@@ -903,7 +907,7 @@ describe("vault-share deliver route", () => {
       share,
       sourceWorkspaceVersion: body.sourceWorkspaceVersion,
     });
-    expect(JSON.stringify(vi.mocked(console.warn).mock.calls)).not.toContain("synthetic-private");
+    expect(JSON.stringify(vi.mocked(console.info).mock.calls)).not.toContain("synthetic-private");
   });
 
   it.each([
@@ -1004,7 +1008,7 @@ describe("vault-share deliver route", () => {
         retryable: false,
       },
     });
-    expect(console.warn).not.toHaveBeenCalledWith(
+    expect(console.info).not.toHaveBeenCalledWith(
       "Hosted vault-share delivery deferred.",
       expect.anything(),
     );
