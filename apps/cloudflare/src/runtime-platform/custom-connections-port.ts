@@ -1,4 +1,4 @@
-import { hostedCustomConnectionsManifestSchema, type HostedCustomConnectionsPort } from "@murphai/hosted-execution";
+import { emitHostedExecutionStructuredLog, hostedCustomConnectionsManifestSchema, type HostedCustomConnectionsPort } from "@murphai/hosted-execution";
 import {
   fetchHostedWebControlPlaneJson,
   HostedWebControlPlaneResponseError,
@@ -6,7 +6,14 @@ import {
   type HostedWebControlTransport,
 } from "./web-control-transport.ts";
 
-/** The platform is invocation-local; even concurrent eligible plans share this read. */
+// The read sits before the first eligible reply of a wake, so it gets a short bound.
+const CUSTOM_CONNECTIONS_MANIFEST_TIMEOUT_MS = 3_000;
+
+/**
+ * The platform is invocation-local; even concurrent eligible plans share this
+ * read. Mounts only add tools, so any failure means none this wake rather than
+ * a failed reply.
+ */
 export function createHostedWebCustomConnectionsPort(input: {
   boundUserId: string;
   fetchImpl: typeof fetch;
@@ -18,6 +25,7 @@ export function createHostedWebCustomConnectionsPort(input: {
     try {
       const response = await fetchHostedWebControlPlaneJson({
         ...input,
+        timeoutMs: Math.min(input.timeoutMs, CUSTOM_CONNECTIONS_MANIFEST_TIMEOUT_MS),
         description: "Hosted custom connections",
         route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.customConnectionsManifest,
         sensitiveResponseBody: { maxBytes: 64 * 1024 },
@@ -27,7 +35,15 @@ export function createHostedWebCustomConnectionsPort(input: {
       return parsed.data.connections.sort((a, b) => a.slug.localeCompare(b.slug));
     } catch (error) {
       if (error instanceof HostedWebControlPlaneResponseError && error.status === 404) return [];
-      throw new Error("Custom connections manifest unavailable.");
+      emitHostedExecutionStructuredLog({
+        component: "hosted.runtime.custom-connections",
+        details: { status: error instanceof HostedWebControlPlaneResponseError ? error.status : null },
+        level: "warn",
+        message: "Hosted custom connections manifest unavailable; mounting none this wake.",
+        phase: "wake.running",
+        userId: null,
+      });
+      return [];
     }
   }
   return { readManifest: () => manifest ??= read() };

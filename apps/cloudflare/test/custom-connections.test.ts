@@ -147,7 +147,15 @@ describe("wake-local manifest", () => {
   it("treats old-Web 404 as empty", async () => {
     expect(await port(async () => new Response("Not found", { status: 404 })).readManifest()).toEqual([]);
   });
-  it.each([{ connections: [{ ...entry, url: "https://notes.example.com" }] }, { connections: [entry, entry] }, { connections: [{ ...entry, slug: "unsafe.name" }] }])("rejects malformed manifests without reflecting data", async body => {
-    await expect(port(async () => Response.json(body)).readManifest()).rejects.toThrow("Custom connections manifest unavailable.");
+  it.each([{ connections: [{ ...entry, url: "https://notes.example.com" }] }, { connections: [entry, entry] }, { connections: [{ ...entry, slug: "unsafe.name" }] }])("mounts nothing for a malformed manifest", async body => {
+    expect(await port(async () => Response.json(body)).readManifest()).toEqual([]);
+  });
+  it("mounts nothing, rather than failing the reply, when Web errors or is slow", async () => {
+    expect(await port(async () => new Response("unavailable", { status: 503 })).readManifest()).toEqual([]);
+    expect(await port(async () => { throw new TypeError("network"); }).readManifest()).toEqual([]);
+    const slow = port((async (_input: RequestInfo | URL, init?: RequestInit) => await new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+    })) as typeof fetch);
+    expect(await slow.readManifest()).toEqual([]);
   });
 });
