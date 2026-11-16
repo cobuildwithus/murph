@@ -84,19 +84,42 @@ in one short transaction under the member-row lock: reuse a waiting, unexpired
 request (same link) or one decided within the last hour (done, declined or
 unknown, each answered as such), else admit a new one while fewer than 20
 unexpired requests wait. Failed and expired requests are never reused; a new
-call needs a new confirmation. Sealing runs before the lock. The model-facing
-declaration of an approved write keeps its name and input schema, leads with
-Murph's line about confirmation, and drops the remote output schema and
-annotations; the stored remote definition and its digest still govern approval,
-and the catalog token is the digest of exactly what the gateway serves.
+call needs a new confirmation. Sealing runs before the lock. Before anything is
+stored, the arguments are checked against the tool's declared input schema,
+reduced to its declared names, types and required inputs (no patterns or
+references, through the MCP SDK's non-compiling validator): an undeclared
+top-level input, a type mismatch or a missing required input is refused with an
+error naming it, and nothing is requested. The model-facing declaration of an
+approved write keeps its name and input schema, leads with Murph's line about
+confirmation, labels the server's own text as `Description from <server>:`, and
+drops the remote output schema and annotations; the stored remote definition and
+its digest still govern approval, and the catalog token is the digest of exactly
+what the gateway serves.
 
 Confirm and decline use the full Settings mutation contract: browser session,
 mutation origin, and `assertHostedAppSessionCurrentTx` in the transaction that
-consumes the request. The POST carries only the decision; another member's id is
-not found, and Web reads the tool and arguments from the stored row, which the
-page renders completely. A confirmation commits `waiting → unknown` with its
-decision time before any outbound work, and dispatch requires that acknowledged
-claim. Write mode then lets sign-in, refresh and setup run, rechecks that the
+consumes the request. A session alone never confirms, since a model that can
+read the member's mail could sign in with an emailed code: confirming also needs
+the member's approval passkey, the same step-up action approvals use. A
+`custom-connection.action.confirm` challenge, issued under the same contract and
+never outliving the request, binds the member, browser session, request id,
+connection, generation, tool, approved digest and lookup key; the assertion is
+verified before the transaction, and the challenge is consumed (single use, with
+the passkey counter write) in the transaction that claims the request. The
+passkey prompt accepts that challenge only for one of the member's waiting
+requests in that session. Members without a passkey get the action approval
+card's enrollment path; enrollment there needs a fresh primary sign-in, so a
+member who never added a passkey remains exposed to someone who can complete
+that sign-in, as with action approvals. Declining needs no passkey. The POST
+carries only the decision and, to confirm, the signature; another member's id is
+not found, and Web reads the tool and arguments from the stored row. The page
+renders the stored inputs completely, in the tool's declared order, before Do it
+and Don't: text as text, yes/no, numbers and empty values each marked, runs of
+blank lines folded into a visible line, and bidi, zero-width and other invisible
+characters shown as escaped code points. When the same change was confirmed
+before (done or unknown), the page says it may already have happened. A
+confirmation commits `waiting → unknown` with its decision time before any
+outbound work, and dispatch requires that acknowledged claim. Write mode then lets sign-in, refresh and setup run, rechecks that the
 connection is on with the same generation and approved digest immediately before
 the call, and lets exactly one `tools/call` POST leave; a second is refused before
 it is sent, and a 401 to the call is its answer, never a cue to refresh and
