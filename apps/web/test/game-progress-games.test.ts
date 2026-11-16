@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { gameSeries, cumulativePoints } from "../src/lib/game/progress/series";
 import { bestRun, calendarMonths, currentRun, gameDays, obligationDays, pairBoardStreak } from "../src/lib/game/progress/streak";
-import { BANK, ladder, search } from "../src/lib/game/progress/bank";
-import { measureLadder, projection, roundValues } from "../src/lib/game/progress/goals";
+import { BANK, ladder, search, rungEntry } from "../src/lib/game/progress/bank";
+import { measureLadder, projection, roundValues, rungFor } from "../src/lib/game/progress/goals";
 import { formatAmount, formatNumber } from "../src/lib/game/progress/format";
 import { ACHIEVEMENTS } from "../src/lib/game/progress/registry";
-import { achievementContext, measureView, momentsView, visibleAwards } from "../src/lib/game/progress/view";
+import { achievementContext, measureView, momentsView, visibleAwards, medalView } from "../src/lib/game/progress/view";
 import type { StoredAward } from "../src/lib/game/progress/awards";
 import { game, memberId, post, task } from "./support/progress-games";
 
@@ -153,18 +153,18 @@ describe("checked ladders and permanent crossings", () => {
     expect(awards.filter(award => award.kind === "landmark").length).toBeGreaterThan(5);
     expect(awards.filter(award => award.kind === "total").map(award => award.data.value)).toEqual([100, 200, 500, 1000]);
     const corrected = { ...series, amounts: [{ measureId: series.id, date: "2026-11-02", amount: 20 }] };
-    const next = measureLadder(corrected, {}, awards)!;
+    const next = measureLadder(corrected, {}, awards, "us")!;
     expect(next.passed).toHaveLength(awards.filter(award => award.kind === "landmark").length);
     expect(next.next!.at).toBeGreaterThan(Math.max(...next.passed.map(rung => rung.at)));
-    expect(momentsView(awards, [measureView(corrected, {}, awards, "2026-11-05")])).toMatchObject([{ kind: "bigDay", medalIds: awards.map(award => award.id) }]);
+    expect(momentsView(awards, [measureView(corrected, {}, awards, "2026-11-05", "us")], "us")).toMatchObject([{ kind: "bigDay", medalIds: awards.map(award => award.id) }]);
   });
   it("uses two feet per pull-up, a selected nondefault rung and no ladder for days", () => {
     const source = game("pullups", task("380 pullups", { quantity: 380, unit: "reps", name: "pullups" })); post(source, 0, "photo", null);
     const [series] = gameSeries([source], memberId, new Map());
     const context = achievementContext([series], new Map([[series.id, { goal: { rungId: "half-dome" } }]]), []);
-    expect(context.measures[0].rungs.find(rung => rung.id === "golden-gate-bridge-towers")?.at).toBe(373);
-    expect(measureLadder(series, { goal: { rungId: "half-dome" } }, [])).toMatchObject({ goalPicked: true, next: { id: "half-dome" } });
-    expect(measureLadder({ ...series, unit: "days" }, {}, [])).toBeNull();
+    expect(context.measures[0].rungs.find(rung => rungEntry(rung).id === "golden-gate-bridge-towers")?.at).toBe(373);
+    expect(measureLadder(series, { goal: { rungId: "half-dome" } }, [], "us")).toMatchObject({ goalPicked: true, next: { id: "half-dome" } });
+    expect(measureLadder({ ...series, unit: "days" }, {}, [], "us")).toBeNull();
   });
   it.each([["reps", 1400, 2000], ["seconds", 13800, 18000], ["days", 23, 50]] as const)("uses the locked 1/2/5 rounds in %s", (unit, total, expected) => {
     expect(roundValues(total, unit).at(-1)).toBe(expected);
@@ -172,16 +172,16 @@ describe("checked ladders and permanent crossings", () => {
   it("projects fourteen calendar days and keeps a dateless next round with no game or no rate", () => {
     const source = game("rate", reps); post(source, 0, "photo", null);
     const [series] = gameSeries([source], memberId, new Map());
-    expect(projection(series, "2026-11-05")).toEqual({ value: 100, label: "100 by Nov 26", on: "2026-11-26" });
-    expect(projection({ ...series, gameOn: false }, "2026-11-05")).toEqual({ value: 100, label: "100 next", on: null });
-    expect(projection(series, "2026-12-05")).toEqual({ value: 100, label: "100 next", on: null });
+    expect(projection(series, "2026-11-05", "us")).toEqual({ value: 100, label: "100 by Nov 26", on: "2026-11-26" });
+    expect(projection({ ...series, gameOn: false }, "2026-11-05", "us")).toEqual({ value: 100, label: "100 next", on: null });
+    expect(projection(series, "2026-12-05", "us")).toEqual({ value: 100, label: "100 next", on: null });
   });
   it("removes all health-derived awards and their moments after authority loss", () => {
     const awards: StoredAward[] = stored(["health", "healthAge", "total"].map((kind, i) => ({ key: kind, kind,
-      measureId: i === 2 ? "pushups.reps" : "restingHeartRate", subjectMemberId: null, on: "2026-11-05", data: {} })));
+      measureId: i === 2 ? "pushups.reps" : "restingHeartRate", subjectMemberId: null, on: "2026-11-05", data: { value: 1000, unit: "reps", noun: "pushups", page: "totals" } })));
     const visible = visibleAwards(awards, false);
     expect(visible.map(award => award.kind)).toEqual(["total"]);
-    expect(momentsView(visible, [])[0].medalIds).toEqual(["total"]);
+    expect(momentsView(visible, [], "us")[0].medalIds).toEqual(["total"]);
   });
 });
 
@@ -197,7 +197,7 @@ describe("shared Progress numbers", () => {
     [3, "compact", "3 mi"], [8.4, "compact", "8.4 mi"], [10.4, "compact", "10 mi"], [116.4, "compact", "116 mi"],
     [10000, "compact", "10k mi"], [31240, "compact", "31.2k mi"], [31240, "full", "31,240 mi"],
   ] as const)("formats %s miles as %s", (miles, style, expected) => {
-    expect(formatAmount(miles * 1609.344, "meters", style).text).toBe(expected);
+    expect(formatAmount(miles * 1609.344, "meters", style, "us").text).toBe(expected);
   });
   it("uses full hero digits and compact projections, goals and medals", () => {
     const source = game("large", task("3124 pushups", { quantity: 3124, unit: "reps", name: "pushups" }));
@@ -205,24 +205,23 @@ describe("shared Progress numbers", () => {
     const [series] = gameSeries([source], memberId, new Map());
     series.amounts[0].amount = 31240;
     const context = achievementContext([series], new Map([[series.id, { goal: { rungId: "half-dome" } }]]), []);
-    expect(context.measures[0].rounds.at(-1)).toMatchObject({ face: { number: "20k" }, title: "20k" });
-    expect(measureView(series, {}, [], "2026-11-05")).toMatchObject({ total: { text: "31,240" }, projection: { label: expect.stringMatching(/^50k by /u) } });
-    expect(context.measures[0].rungs.find(rung => rung.id === "mount-everest")?.atText).toBe("29k ft");
+    const awards = stored(ACHIEVEMENTS.flatMap(evaluate => evaluate(context)));
+    expect(medalView(awards.find(award => award.key === "total:pushups.reps:20000")!, false, "us")).toMatchObject({ face: { number: "20k" }, title: "20k" });
+    expect(measureView(series, {}, [], "2026-11-05", "us")).toMatchObject({ total: { text: "31,240" }, projection: { label: expect.stringMatching(/^50k by /u) } });
+    expect(rungFor(context.measures[0].rungs.find(rung => rungEntry(rung).id === "mount-everest")!, 0, null, "us").atText).toBe("29k ft");
   });
 });
 
 describe("moment words", () => {
   it.each([
-    ["landmark", "goal", "One World Trade Center", "1,776 pushups", "New York's tallest tower.", "One World Trade Center", "New York's tallest tower."],
-    ["time", "held", "Women's plank record", "4 hr 30 min", "The longest plank ever held by a woman.", "Women's plank record", "The longest plank ever held by a woman."],
-    ["route", "route", "San Francisco", "501 miles from San Diego, arrived today", null, "San Francisco", "501 miles from San Diego, arrived today"],
-    ["health", "medal", "Heart rate", "down 3 bpm", null, "Heart rate down 3 bpm", "Your best since you joined. It's your newest medal, so it's the gold one on Prizes."],
-    ["streak", "medal", "12 days", "your best run", null, "12 days in a row", "Your best run yet."],
-    ["total", "medal", "20k", "pushups", null, "20k pushups", null],
-  ])("writes %s drawer copy without changing shelf words", (kind, momentKind, title, detail, blurb, expectedTitle, line) => {
-    const awards = stored([{ key: "one", kind: kind!, measureId: "pushups.reps", subjectMemberId: null, on: "2026-11-05",
-      data: { title, detail, rung: { blurb } } }]);
-    expect(momentsView(awards, [])[0]).toMatchObject({ kind: momentKind, title: expectedTitle, line });
-    expect(awards[0].data).toMatchObject({ title, detail });
+    ["landmark", "goal", { rung: { at: 1776, target: { kind: "height", id: "one-world-trade-center" } }, noun: "pushups" }, "One World Trade Center", BANK.find(entry => entry.id === "one-world-trade-center")!.blurb],
+    ["time", "held", { rung: { at: 10800, target: { kind: "time", id: "concorde" } }, noun: "planked" }, "Concorde", BANK.find(entry => entry.id === "concorde" && entry.kind === "time")!.blurb],
+    ["route", "route", { from: "San Diego", to: "San Francisco", distanceM: 501 * 1609.344 }, "San Francisco", "501 mi from San Diego"],
+    ["health", "medal", { title: "Heart rate", detail: "down 3 bpm", face: { delta: { icon: "heart", text: "3" } } }, "Heart rate down 3 bpm", "Your best since you joined. It's your newest medal, so it's the gold one on Prizes."],
+    ["streak", "medal", { value: 12 }, "12 days in a row", "Your best run yet."],
+    ["total", "medal", { value: 20000, unit: "reps", noun: "pushups" }, "20k pushups", null],
+  ] as const)("renders %s drawer copy from earned facts", (kind, momentKind, data, title, line) => {
+    const awards = stored([{ key: "one", kind, measureId: "pushups.reps", subjectMemberId: null, on: "2026-11-05", data: { ...data, page: "totals" } }]);
+    expect(momentsView(awards, [], "us")[0]).toMatchObject({ kind: momentKind, title, line });
   });
 });

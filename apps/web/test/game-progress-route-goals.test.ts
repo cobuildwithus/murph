@@ -21,7 +21,7 @@ describe('Progress route goal mutation', () => {
     { unit: 'meters', total: 116 * 1609.344 }, { unit: 'steps', total: 116 * 2000 },
   ] as const)('converts the $unit total once for a route preview', async ({ unit, total }) => {
     mocks.resolve.mockResolvedValue({ ...next, distanceM: 501 * 1609.344, polyline: encodePolyline([[0, 50], [2, 49]]) });
-    const result = await readRouteGoals('London to Paris', unit, total);
+    const result = await readRouteGoals('London to Paris', unit, total, 'us');
     expect(result.route).toMatchObject({ distanceText: '501 miles', detail: "By road. You're 116 in, so 385 to go." });
     expect(mocks.write).not.toHaveBeenCalled();
   });
@@ -30,15 +30,15 @@ describe('Progress route goal mutation', () => {
     const first = await setFirstRoute('owner', 'walk.meters', next, mocks.authorize);
     expect(first).toEqual({ legs: [{ ...next, startTotal: 0 }] });
     // A manual goal saved while Mapbox was resolving wins over the automatic choice.
-    mocks.find.mockResolvedValue({ stateEncrypted: JSON.stringify({ goal: { from: 'A', to: 'B' }, legs: [leg] }) });
+    mocks.find.mockResolvedValue({ stateEncrypted: JSON.stringify({ goal: { route: { from: 'A', to: 'B' } }, legs: [leg] }) });
     expect(await setFirstRoute('owner', 'walk.meters', next, mocks.authorize))
-      .toEqual({ goal: { from: 'A', to: 'B' }, legs: [leg] });
+      .toEqual({ goal: { route: { from: 'A', to: 'B' } }, legs: [leg] });
   });
   it('rolls over the state observed after Mapbox, preserving completed legs and other fields', async () => {
     const previous = JSON.stringify({ legs: [leg], baseline: { value: 10, from: '2026-10-01', to: '2026-10-28' } });
     mocks.resolve.mockImplementation(async () => { mocks.find.mockResolvedValue({ stateEncrypted: previous }); return next; });
     const result = await setRouteGoal('owner', 'walk.meters', 'B', 'C', context());
-    expect(result).toEqual({ goal: { from: 'B', to: 'C' }, baseline: { value: 10, from: '2026-10-01', to: '2026-10-28' },
+    expect(result).toEqual({ goal: { route: { from: 'B', to: 'C' } }, baseline: { value: 10, from: '2026-10-01', to: '2026-10-28' },
       legs: [leg, { ...next, startTotal: 120 }] });
     expect(mocks.write).toHaveBeenCalledWith({ where: { memberId: 'owner', lookup: 'lookup', stateEncrypted: previous }, data: { stateEncrypted: 'sealed-next' } });
     expect(mocks.resolve.mock.invocationCallOrder[0]).toBeLessThan(mocks.authorize.mock.invocationCallOrder[0]!);

@@ -4,7 +4,8 @@ import type { Prisma } from "@prisma/client";
 import type { TermWords } from "../src/lib/game/rules";
 
 const mocks = vi.hoisted(() => ({ games: vi.fn(), entries: vi.fn(), tasks: vi.fn(), states: vi.fn(), awards: vi.fn(),
-  createAwards: vi.fn(), updateSeen: vi.fn(), patch: vi.fn(), after: vi.fn(), auth: vi.fn(), current: vi.fn(), health: vi.fn(), transaction: vi.fn(), suggest: vi.fn(), pictures: vi.fn(), resolveRoute: vi.fn() }));
+  createAwards: vi.fn(), updateSeen: vi.fn(), patch: vi.fn(), after: vi.fn(), auth: vi.fn(), current: vi.fn(), health: vi.fn(), transaction: vi.fn(), suggest: vi.fn(), pictures: vi.fn(), resolveRoute: vi.fn(), consume: vi.fn() }));
+vi.mock("@/src/lib/better-auth/rate-limit", () => ({ hostedAuthRateLimitStorage: () => ({ consume: mocks.consume }) }));
 vi.mock("next/server", async original => ({ ...await original<typeof import("next/server")>(), after: mocks.after }));
 vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({
   game: { findMany: mocks.games }, gameEntry: { findMany: mocks.entries },
@@ -63,6 +64,7 @@ beforeEach(() => {
   vi.resetAllMocks();
   vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date("2026-11-05T12:00:00Z"));
   awards = [];
+  mocks.consume.mockResolvedValue({ allowed: true });
   mocks.auth.mockResolvedValue({ member: { id: memberId } }); mocks.current.mockResolvedValue(undefined); mocks.health.mockResolvedValue(undefined);
   mocks.games.mockResolvedValue([gameRow()]); mocks.entries.mockResolvedValue([entryRow()]); mocks.tasks.mockResolvedValue([]); mocks.states.mockResolvedValue([]);
   mocks.pictures.mockResolvedValue([]);
@@ -308,20 +310,54 @@ describe("Progress HTTP contracts", () => {
     const response = await goals(request("/goals?measure=planks.seconds"));
     expect(goalsSchema.parse(await response.json()).tiles.map(tile => tile.id)).toEqual(ladder("time", "plank").filter(entry => entry.at > 600).slice(0, 6).map(entry => entry.id));
   });
-  it("uses one bank-id-only Responses call for an unmatched goal and rejects invented ids", async () => {
-    mocks.suggest.mockResolvedValue({ status: "completed", output_text: JSON.stringify({ ids: ["half-dome"], note: "A real mountain to climb." }) });
+  it("keeps typing bank-only, including a miss", async () => {
     const response = await goals(request("/goals?measure=pushups.reps&q=Mount%20Doom"));
-    expect(goalsSchema.parse(await response.json())).toMatchObject({ suggestions: [{ id: "half-dome" }], note: "A real mountain to climb." });
-    expect(mocks.suggest).toHaveBeenCalledTimes(1);
-    expect(mocks.suggest.mock.calls[0][0].text.format.schema.properties.ids).toMatchObject({ maxItems: 4, items: { enum: expect.arrayContaining(["half-dome"]) } });
-    expect(mocks.suggest.mock.calls[0][1]).toMatchObject({ maxRetries: 0, timeout: 8000 });
-    mocks.suggest.mockResolvedValue({ status: "completed", output_text: JSON.stringify({ ids: ["mount-doom"], note: null }) });
-    expect((await goals(request("/goals?measure=pushups.reps&q=Mount%20Doom"))).status).toBe(503);
+    expect(goalsSchema.parse(await response.json())).toMatchObject({ match: null, suggestions: [], note: null });
+    expect(mocks.suggest).not.toHaveBeenCalled(); expect(mocks.consume).not.toHaveBeenCalled();
   });
-  it("omits the unmatched-goal note when the single call has no suggestions", async () => {
-    mocks.suggest.mockResolvedValue({ status: "completed", output_text: JSON.stringify({ ids: [], note: "No close match." }) });
-    expect(goalsSchema.parse(await (await goals(request("/goals?measure=pushups.reps&q=Mount%20Doom"))).json()))
-      .toMatchObject({ match: null, suggestions: [], note: null });
+  it("uses required web search only for an explicit lookup", async () => {
+    mocks.suggest.mockResolvedValue({ status: "completed", output: [], output_text: JSON.stringify({ found: null, closest: ["half-dome"], note: "A real mountain to climb." }) });
+    const response = await goals(request("/goals?measure=pushups.reps&q=Mount%20Doom&find=1"));
+    expect(goalsSchema.parse(await response.json())).toMatchObject({ match: null, suggestions: [{ id: "half-dome" }], note: "A real mountain to climb." });
     expect(mocks.suggest).toHaveBeenCalledTimes(1);
+    expect(mocks.suggest.mock.calls[0][0]).toMatchObject({ model: "gpt-6.1-sol", reasoning: { effort: "low" }, tools: [{ type: "web_search" }], tool_choice: "required", store: false, text: { format: { type: "json_schema", strict: true } } });
+    const input = JSON.parse(mocks.suggest.mock.calls[0][0].input);
+    expect(Object.keys(input).sort()).toEqual(["bank", "kind", "words"]);
+    expect(input).toMatchObject({ kind: "height", words: "Mount Doom", bank: expect.arrayContaining([{ id: "half-dome", name: "Half Dome" }]) });
+    expect(mocks.suggest.mock.calls[0][1]).toMatchObject({ maxRetries: 0, timeout: 30000 });
+    expect(mocks.consume).toHaveBeenCalledExactlyOnceWith(`progress-goal-lookup:member:${memberId}`, { max: 20, window: 86400 });
+  });
+  it("preserves the budget's 429 with zero provider calls", async () => {
+    mocks.consume.mockResolvedValue({ allowed: false });
+    const response = await goals(request("/goals?measure=pushups.reps&q=Hill&find=1"));
+    expect(response.status).toBe(429);
+    expect(await response.json()).toMatchObject({ error: { code: "AUTH_RATE_LIMITED", retryable: true } });
+    expect(mocks.suggest).not.toHaveBeenCalled(); expect(mocks.patch).not.toHaveBeenCalled();
+  });
+  it.each([new Error("provider unavailable"), new SyntaxError("invalid JSON")])("returns the single provider 503 without a retry", async error => {
+    mocks.suggest.mockRejectedValue(error);
+    const response = await goals(request("/goals?measure=pushups.reps&q=Hill&find=1"));
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ error: { code: "GAME_PROGRESS_GOALS_UNAVAILABLE", retryable: true } });
+    expect(mocks.suggest).toHaveBeenCalledTimes(1); expect(mocks.patch).not.toHaveBeenCalled();
+  });
+  it.each(["find=1", "q=Hill&find=true", "q=Hill&find=0"])("rejects malformed lookup query %s before provider work", async query => {
+    expect((await goals(request(`/goals?measure=pushups.reps&${query}`))).status).toBe(400);
+    expect(mocks.suggest).not.toHaveBeenCalled(); expect(mocks.consume).not.toHaveBeenCalled();
+  });
+  it.each(["us", "uk", "metric"])("uses the %s reader's units in route previews, totals, route medals and PUT", async units => {
+    mocks.entries.mockResolvedValue([{ ...routeEntry(), payloadEncrypted: JSON.stringify({ activity: "walk", distanceM: 1609.344, durationSec: 600 }) }]);
+    await savedRoute({ legs: [{ ...routeLeg, distanceM: 1609.344 }] });
+    mocks.resolveRoute.mockResolvedValue({ ...routeLeg, distanceM: 1609.344, towns: [{ name: "Town", atM: 1609.344 }] });
+    const header = { "X-Murph-Client-Units": units };
+    const preview = goalsSchema.parse(await (await goals(new Request(request("/goals?measure=walk.meters&q=London%20to%20Paris"), { headers: header }))).json());
+    const distance = units === "metric" ? "1.6 km" : "1 mi";
+    expect(preview.route).toMatchObject({ distanceText: units === "metric" ? distance : "1 miles", towns: [{ atText: units === "metric" ? "km 1.6" : "mile 1" }] });
+    const view = progressSchema.parse(await (await GET(new Request(request(), { headers: header }))).json());
+    expect(view.measures[0]).toMatchObject({ total: { text: distance }, route: { distanceText: distance, walkedText: distance } });
+    expect(view.medals.find(medal => medal.kind === "route")!.detail).toBe(`${distance} from London`);
+    expect(view.medals.find(medal => medal.kind === "total")!.face).toEqual({ number: distance });
+    const put = await PUT(new Request(request("/measures/walk.meters", { goal: { from: "London", to: "Paris" } }), { headers: header }), { params: Promise.resolve({ id: "walk.meters" }) });
+    expect(put.status).toBe(200); expect((await put.json()).measure.total.text).toBe(distance);
   });
 });

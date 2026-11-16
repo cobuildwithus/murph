@@ -11,7 +11,9 @@
       "blurb": "",
       "where": null,
       "on": null,
-      "toGo": null
+      "toGo": null,
+      "short": "London to Edinburgh",
+      "tagline": "A journey north between capitals"
     },
     {
       "id": "new-york-boston",
@@ -22,7 +24,9 @@
       "blurb": "",
       "where": null,
       "on": null,
-      "toGo": null
+      "toGo": null,
+      "short": "New York to Boston",
+      "tagline": "A journey between harbor cities"
     }
   ],
   "route": {

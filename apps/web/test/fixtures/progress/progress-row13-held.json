@@ -94,7 +94,9 @@
             "blurb": "The longest plank ever held by a woman, set in 2024 at age 58.",
             "where": null,
             "on": "2026-11-20",
-            "toGo": null
+            "toGo": null,
+            "short": "Women's plank record",
+            "tagline": "A remarkable hold from start to finish"
           },
           {
             "id": "whale-dive",
@@ -105,7 +107,9 @@
             "blurb": "The longest dive by any mammal: a deep-diving whale, tracked in 2020.",
             "where": null,
             "on": "2026-11-14",
-            "toGo": null
+            "toGo": null,
+            "short": "A whale's longest dive",
+            "tagline": "A long journey beneath the waves"
           },
           {
             "id": "concorde",
@@ -116,7 +120,9 @@
             "blurb": "Fastest jet, New York to London",
             "where": null,
             "on": "2026-11-10",
-            "toGo": null
+            "toGo": null,
+            "short": "Concorde",
+            "tagline": "Across the Atlantic at record speed"
           },
           {
             "id": "moonwalk",
@@ -127,7 +133,9 @@
             "blurb": "First walk on the Moon, 1969",
             "where": null,
             "on": "2026-11-08",
-            "toGo": null
+            "toGo": null,
+            "short": "The first moonwalk",
+            "tagline": "The first walk on another world"
           },
           {
             "id": "marathon",
@@ -138,7 +146,9 @@
             "blurb": "Fastest 26.2 miles ever run",
             "where": null,
             "on": "2026-11-03",
-            "toGo": null
+            "toGo": null,
+            "short": "The marathon world record",
+            "tagline": "A new mark for the marathon"
           },
           {
             "id": "gagarin",
@@ -149,7 +159,9 @@
             "blurb": "First person in space, 1961",
             "where": null,
             "on": "2026-11-02",
-            "toGo": null
+            "toGo": null,
+            "short": "Yuri Gagarin's flight",
+            "tagline": "The first person in space"
           },
           {
             "id": "iss-lap",
@@ -160,7 +172,9 @@
             "blurb": "How long the space station takes to circle the whole Earth once.",
             "where": null,
             "on": "2026-11-01",
-            "toGo": null
+            "toGo": null,
+            "short": "Space station lap",
+            "tagline": "Once around Earth from orbit"
           }
         ],
         "next": {
@@ -172,7 +186,9 @@
           "blurb": "The first American to circle the Earth, three times around, 1962.",
           "where": null,
           "on": null,
-          "toGo": "15 min to go"
+          "toGo": "15 min to go",
+          "short": "John Glenn's orbit",
+          "tagline": "An early journey around the Earth"
         },
         "goalPicked": false
       },
@@ -233,7 +249,9 @@
         "blurb": "The first American to circle the Earth, three times around, 1962.",
         "where": null,
         "on": null,
-        "toGo": "15 min to go"
+        "toGo": "15 min to go",
+        "short": "John Glenn's orbit",
+        "tagline": "An early journey around the Earth"
       },
       "title": "Women's plank record",
       "line": "The longest plank ever held by a woman, set in 2024 at age 58."

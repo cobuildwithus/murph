@@ -94,7 +94,9 @@
             "blurb": "St. Louis's shiny steel arch, the tallest arch in the world, finished in 1965.",
             "where": "St. Louis, Missouri, USA",
             "on": "2026-11-14",
-            "toGo": null
+            "toGo": null,
+            "short": "Gateway Arch",
+            "tagline": "A silver curve above the river"
           },
           {
             "id": "space-needle",
@@ -105,7 +107,9 @@
             "blurb": "Seattle's flying-saucer-topped tower, built for the 1962 World's Fair.",
             "where": "Seattle, USA",
             "on": "2026-11-12",
-            "toGo": null
+            "toGo": null,
+            "short": "Space Needle",
+            "tagline": "A view high above the city"
           },
           {
             "id": "washington-monument",
@@ -116,7 +120,9 @@
             "blurb": "Washington, D.C.'s marble obelisk, the world's tallest structure until the Eiffel Tower.",
             "where": "Washington, D.C., USA",
             "on": "2026-11-08",
-            "toGo": null
+            "toGo": null,
+            "short": "Washington Monument",
+            "tagline": "A stone needle above the capital"
           },
           {
             "id": "great-pyramid-of-giza",
@@ -127,7 +133,9 @@
             "blurb": "The oldest of the Seven Wonders and the only one still standing, about 4,500 years old.",
             "where": "Giza, Egypt",
             "on": "2026-11-03",
-            "toGo": null
+            "toGo": null,
+            "short": "Great Pyramid of Giza",
+            "tagline": "An ancient summit made of stone"
           },
           {
             "id": "statue-of-liberty",
@@ -138,7 +146,9 @@
             "blurb": "The copper statue France gave the US, holding her torch in New York Harbor since 1886.",
             "where": "New York City, USA",
             "on": "2026-10-26",
-            "toGo": null
+            "toGo": null,
+            "short": "Statue of Liberty",
+            "tagline": "A torch above the harbor"
           }
         ],
         "next": {
@@ -150,7 +160,9 @@
           "blurb": "The towers of San Francisco's orange suspension bridge, opened in 1937.",
           "where": "San Francisco, USA",
           "on": null,
-          "toGo": "106 to go"
+          "toGo": "106 to go",
+          "short": "Golden Gate towers",
+          "tagline": "Orange towers above the bay"
         },
         "goalPicked": false
       },
