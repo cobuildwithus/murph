@@ -4528,11 +4528,18 @@ function resolveDeviceEventIdentity(
       refKey: reservedRefKey,
       indexedMatch: reservation.indexedMatch,
     }));
-  const matchedEntries = [
+  // A window record handed to a session's first event (selectSleepWindowOwners)
+  // only stands in for a new record; it never joins a record the event reaches.
+  const isWindowHandoff = (match: { indexedMatch: IndexedEventExternalRefMatch }) =>
+    isSupersededJunctionSleepWindowRef(match.indexedMatch.indexedExternalRef, externalRef);
+  const directMatches = [
     ...(primaryMatch ? [{ refKey, indexedMatch: primaryMatch }] : []),
     ...legacyMatchedEntries,
-    ...implicitReservedEntries,
+    ...implicitReservedEntries.filter((match) => !isWindowHandoff(match)),
   ];
+  const matchedEntries = directMatches.length > 0
+    ? directMatches
+    : implicitReservedEntries.filter(isWindowHandoff);
   const selectedPrimaryMatch = matchedEntries.find((match) => match.refKey === refKey);
   const latest = selectedPrimaryMatch?.indexedMatch.record ?? matchedEntries[0]?.indexedMatch.record;
   let associationSafe = true;

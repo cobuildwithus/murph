@@ -409,6 +409,49 @@ test("a session whose copies name two stored windows moves one, and the other ke
   });
 });
 
+// A summary without a start keys its stages on the generic summary ref, which a
+// complete copy of the same session also names. Whether that record is stored
+// or written earlier in the import, the session keeps it rather than also
+// taking the stored window record.
+const PARTIAL_A = sleepSummary(REWRITTEN_END, { ...GOOGLE_HEALTH, id: "gh-sleep-a", bedtime_start: undefined });
+for (const partialInBatch of [false, true]) {
+  test(`a session's first copy keeps the summary record it already reaches (partial ${partialInBatch ? "in the import" : "stored"})`, async () => {
+    await withVault(async ({ editNote, importSummaries, readLive }) => {
+      await importSummaries("2026-01-02T12:00:00.000Z", {
+        sleep: [sleepSummary(FIRST_END, { ...GOOGLE_HEALTH, id: undefined })],
+      });
+      const [storedWindow] = metricRecords(await readLive(), "sleep-deep-minutes");
+      assert.ok(storedWindow);
+      await editNote(storedWindow, "Woke up twice");
+      if (!partialInBatch) {
+        await importSummaries("2026-01-02T12:30:00.000Z", { sleep: [PARTIAL_A] });
+      }
+      const summaryRecord = metricRecords(await readLive(), "sleep-deep-minutes")
+        .find((record) => record.id !== storedWindow.id);
+      const batch = [
+        ...(partialInBatch ? [PARTIAL_A] : []),
+        sleepSummary(REWRITTEN_END, { ...GOOGLE_HEALTH, id: "gh-sleep-a" }),
+        SESSION_A,
+      ];
+
+      await importSummaries("2026-01-02T13:00:00.000Z", { sleep: batch });
+
+      const live = await readLive();
+      const deep = metricRecords(live, "sleep-deep-minutes");
+      assert.equal(deep.length, 2);
+      const kept = deep.find((record) => record.id === storedWindow.id);
+      assert.equal(kept?.note, "Woke up twice");
+      assert.equal(kept?.externalRef, undefined);
+      if (summaryRecord) {
+        assert.ok(deep.some((record) => record.id === summaryRecord.id));
+      }
+
+      await importSummaries("2026-01-02T14:00:00.000Z", { sleep: batch });
+      assert.deepEqual(await readLive(), live);
+    });
+  });
+}
+
 test("a stored window record the member deleted stays deleted, and each session imports anew", async () => {
   await withVault(async ({ deleteRecord, importSummaries, readLive }) => {
     await importSummaries("2026-01-02T12:00:00.000Z", { sleep: BEFORE_SESSION_REFS });
