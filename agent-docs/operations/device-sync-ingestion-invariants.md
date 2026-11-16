@@ -813,8 +813,9 @@ and authority exclusions separately. Pull frequency is unchanged by this feature
   stored record across once, to one session: when an import holds several
   sessions for one window, the session whose values the record holds takes it
   (the first when none or several do) and the others start their own. The
-  session's first event in the import takes it, even when that copy names a
-  rewritten window, and a session takes one window record at most. A record
+  window a session claims first moves through the session's first event in the
+  import, even when that copy names a rewritten window. Any other window the
+  session owns stays a stale copy, and no other session takes it. A record
   the member deleted stays deleted, and each session imports as a new record.
   Once the session owns a record, a window ref names at most a stale copy and
   must not merge two live records.

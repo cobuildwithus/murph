@@ -3400,12 +3400,14 @@ function holdsLegacyProviderContent({ entry, indexedMatch }: LegacyExternalRefRe
 
 /**
  * Which event holds each shared sleep window record (see
- * isSupersededJunctionSleepWindowRef): the session of the first claim whose
- * values the record holds, else of the first claim, through that session's
- * first event in the import. That event writes the session's record, even when
- * it names another window, so no later copy of the session leaves the stored
- * record beside it. A session takes one window record; another one its copies
- * name is a stale copy from an earlier rewrite, not a record to merge into it.
+ * isSupersededJunctionSleepWindowRef). The session of the first claim whose
+ * values the record holds owns it, else the session of the first claim, and
+ * that session's first claim in the import holds it. The window a session
+ * claims first moves through the session's first event instead, even when that
+ * event names another window: it writes the session's record, so no later copy
+ * leaves the stored record beside it. Any other window the session owns stays
+ * with its claim, which keeps other sessions off it and leaves it a stale copy
+ * once the session has its record.
  */
 function selectSleepWindowOwners(
   claimsByRefKey: ReadonlyMap<string, readonly LegacyExternalRefReservation[]>,
@@ -3415,21 +3417,30 @@ function selectSleepWindowOwners(
   if (claimsByRefKey.size === 0) {
     return owners;
   }
-  const firstEntryByRefKey = new Map<string, PreparedDeviceEventEntry>();
-  for (const entry of entries) {
-    const refKey = entry.record.externalRef && eventExternalRefKey(entry.record.externalRef);
-    if (refKey && !firstEntryByRefKey.has(refKey)) {
-      firstEntryByRefKey.set(refKey, entry);
+  const sessionOf = (entry: PreparedDeviceEventEntry | undefined) =>
+    entry?.record.externalRef && eventExternalRefKey(entry.record.externalRef);
+  const windowByHolder = new Map<PreparedDeviceEventEntry, { refKey: string } & LegacyExternalRefReservation>();
+  for (const [refKey, claims] of claimsByRefKey) {
+    const session = sessionOf((claims.find(holdsLegacyProviderContent) ?? claims[0])?.entry);
+    const holder = claims.find((claim) => sessionOf(claim.entry) === session);
+    if (holder) {
+      owners.set(refKey, holder);
+      windowByHolder.set(holder.entry, { ...holder, refKey });
     }
   }
-  const holders = new Set<PreparedDeviceEventEntry>();
-  for (const [refKey, claims] of claimsByRefKey) {
-    const claim = claims.find(holdsLegacyProviderContent) ?? claims[0];
-    const session = claim?.entry.record.externalRef;
-    const entry = session && firstEntryByRefKey.get(eventExternalRefKey(session));
-    if (claim && entry && !holders.has(entry)) {
-      holders.add(entry);
-      owners.set(refKey, { entry, indexedMatch: claim.indexedMatch });
+  const firstEntryBySession = new Map<string, PreparedDeviceEventEntry>();
+  const movedSessions = new Set<string>();
+  for (const entry of entries) {
+    const session = sessionOf(entry);
+    if (!session) {
+      continue;
+    }
+    const first = firstEntryBySession.get(session) ?? entry;
+    firstEntryBySession.set(session, first);
+    const window = windowByHolder.get(entry);
+    if (window && !movedSessions.has(session)) {
+      movedSessions.add(session);
+      owners.set(window.refKey, { entry: first, indexedMatch: window.indexedMatch });
     }
   }
   return owners;

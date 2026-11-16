@@ -363,23 +363,49 @@ for (const reread of [
   });
 }
 
-test("a session whose copies name two stored windows moves one and leaves the other", async () => {
-  await withVault(async ({ importSummaries, readLive }) => {
+test("a session whose copies name two stored windows moves one, and the other keeps its note", async () => {
+  await withVault(async ({ editNote, importSummaries, readLive }) => {
     // Before session refs, a rewritten end left a second window record.
     await importSummaries("2026-01-02T12:00:00.000Z", {
       sleep: [sleepSummary(FIRST_END, { ...GOOGLE_HEALTH, id: undefined })],
     });
+    const [firstWindow] = metricRecords(await readLive(), "sleep-deep-minutes");
+    assert.ok(firstWindow);
+    await editNote(firstWindow, "Woke up twice");
     await importSummaries("2026-01-02T12:30:00.000Z", {
       sleep: [sleepSummary(REWRITTEN_END, { ...GOOGLE_HEALTH, id: undefined })],
     });
+    const rewrittenWindow = metricRecords(await readLive(), "sleep-deep-minutes")
+      .find((record) => record.id !== firstWindow.id);
+    assert.ok(rewrittenWindow);
 
-    await importSummaries("2026-01-02T13:00:00.000Z", {
-      sleep: [sleepSummary(REWRITTEN_END, { ...GOOGLE_HEALTH, id: "gh-sleep-a" }), SESSION_A],
-    });
+    // Session a holds the first window's values but names the rewritten one first.
+    const batch = [SESSION_B, sleepSummary(REWRITTEN_END, { ...GOOGLE_HEALTH, id: "gh-sleep-a" }), SESSION_A];
+    await importSummaries("2026-01-02T13:00:00.000Z", { sleep: batch });
 
-    // The session takes the record its first copy names; the other stays a stale copy.
-    const deep = metricRecords(await readLive(), "sleep-deep-minutes");
-    assert.deepEqual(deep.map(refPrefix).sort(), ["sleep-session", "sleep-stage"]);
+    // Session a takes the window its first copy names. The first window stays
+    // as the member left it, and session b, which it doesn't hold, starts its own.
+    const live = await readLive();
+    const roleOf = (record: Stored) =>
+      record.id === firstWindow.id ? "first window" : record.id === rewrittenWindow.id ? "rewritten window" : "new";
+    assert.deepEqual(
+      metricRecords(live, "sleep-deep-minutes")
+        .map((record) => [
+          roleOf(record),
+          record.externalRef ? refPrefix(record) : "member edit",
+          record.value,
+          record.note ?? null,
+        ])
+        .sort(),
+      [
+        ["first window", "member edit", 60, "Woke up twice"],
+        ["new", "sleep-session", 50, null],
+        ["rewritten window", "sleep-session", 60, null],
+      ],
+    );
+
+    await importSummaries("2026-01-02T14:00:00.000Z", { sleep: batch });
+    assert.deepEqual(await readLive(), live);
   });
 });
 
