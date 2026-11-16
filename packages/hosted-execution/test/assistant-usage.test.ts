@@ -9,6 +9,7 @@ import {
   ASSISTANT_TURN_PROFILE_MAX_TOOLS,
   ASSISTANT_USAGE_SCHEMA,
   buildAssistantMaintenanceUsageRecord,
+  buildAssistantTurnProfileToolIdentityLabel,
   buildHostedElevenLabsMusicUsageRecord,
   buildHostedElevenLabsTtsUsageRecord,
   buildHostedGeminiVideoAnalysisUsageRecord,
@@ -1372,4 +1373,11 @@ test("optional finite CLI failures survive both profile versions and malformed d
     }
     assert.deepEqual(parseAssistantUsageRecord(baseline), baseline);
   }
+});
+
+test("remote MCP names always use a constant usage label while dynamic labels remain intact", () => {
+  for (const tool of [null, "read_notes", "remote_chosen_identity", "private.value", "x".repeat(500)]) {
+    assert.equal(buildAssistantTurnProfileToolIdentityLabel({ kind: "mcp_tool", tool }), "mcp_tool");
+  }
+  assert.equal(buildAssistantTurnProfileToolIdentityLabel({ kind: "dynamic_tool", tool: "read_notes" }), "t_read_notes");
 });

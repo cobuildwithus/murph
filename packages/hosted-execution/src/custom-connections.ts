@@ -8,11 +8,11 @@ export const hostedCustomConnectionManifestEntrySchema = z.object({
   slug: z.string().regex(/^[a-z][a-z0-9_-]{0,63}$/u),
   generation: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
   catalog: z.string().regex(/^[A-Za-z0-9_-]{43}$/u),
-}).strict();
+}).strip();
 
 export const hostedCustomConnectionsManifestSchema = z.object({
   connections: z.array(hostedCustomConnectionManifestEntrySchema).max(100),
-}).strict().refine(({ connections }) =>
+}).strip().refine(({ connections }) =>
   new Set(connections.map(entry => entry.id)).size === connections.length
   && new Set(connections.map(entry => entry.slug)).size === connections.length,
 );

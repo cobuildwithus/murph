@@ -25,7 +25,7 @@ export function buildAssistantCodexContractFingerprint(input: {
       // thread/resume cannot replace tools. Hash exactly the declarations sent at
       // thread/start so an old unsupplemented thread bootstraps once, then resumes.
       dynamicTools: input.dynamicTools.map(withCodexToolInputContract),
-      ...(input.customConnections !== undefined ? { customConnections: [...input.customConnections].sort((a, b) => a.slug.localeCompare(b.slug)) } : {}),
+      ...(input.customConnections?.length ? { customConnections: [...input.customConnections].sort((a, b) => a.slug.localeCompare(b.slug)) } : {}),
       routeFingerprint: input.routeFingerprint,
     }))
     .digest('hex')

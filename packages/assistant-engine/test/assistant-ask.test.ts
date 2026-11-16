@@ -102,7 +102,7 @@ describe('executeReadOnlyAssistantAsk', () => {
     })
     expect(askMocks.executeTurn).toHaveBeenCalledTimes(1)
     const turnInput = askMocks.executeTurn.mock.calls[0]?.[0]
-    expect(turnInput.threadConfig.mcp_servers).toEqual({})
+    expect(turnInput.threadConfig).not.toHaveProperty('mcp_servers')
     expect(turnInput).toMatchObject({
       allowFinishWithoutReply: false,
       approvalPolicy: 'never',

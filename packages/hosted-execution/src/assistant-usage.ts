@@ -141,7 +141,8 @@ export function buildAssistantTurnProfileToolIdentityLabel(input: {
 }): string {
   const genericLabel = input.kind;
   if (
-    input.tool === null
+    input.kind === "mcp_tool"
+    || input.tool === null
     || !isAssistantTurnProfileIdentifierComponent(input.tool)
   ) {
     return genericLabel;

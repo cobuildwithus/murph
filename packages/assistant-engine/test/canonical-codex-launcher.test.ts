@@ -18,7 +18,7 @@ it.each(['direct', 'adapter'] as const)('executes the launcher with shared hoste
     const launcher = path.join(root, 'launcher')
     await writeFile(capture, `#!${process.execPath}\nprocess.stdout.write(JSON.stringify(process.argv.slice(2)))\n`, { mode: 0o700 })
     const syntheticRoot = "/fixture/install with 'quote'/$literal"
-    await writeFile(launcher, canonicalCodexLauncher({ PATH: '/fixture/bin', HOME: '/fixture/home' }, [syntheticRoot]), { mode: 0o700 })
+    await writeFile(launcher, canonicalCodexLauncher({ PATH: '/fixture/bin', HOME: '/fixture/home', CODEX_HOME: '/fixture/codex' }, [syntheticRoot]), { mode: 0o700 })
     const inputArgs = shape === 'adapter' ? canonicalAdapterArgs() : ['app-server']
     const { stdout } = await execFileAsync(launcher, inputArgs, {
       env: { MURPH_CANONICAL_JOURNEY_CODEX: capture }, timeout: 10_000,
@@ -50,9 +50,10 @@ it.each(['direct', 'adapter'] as const)('executes the launcher with shared hoste
     expect(permissions).toContain(`${JSON.stringify(`${syntheticRoot}/**/.env`)} = "deny"`)
     expect(permissions).toContain('"murph-member-workspace"."filesystem".":workspace_roots"."bank/automations" = "read"')
     expect(permissions).toContain('"murph-group-read"."network".enabled = false')
+    expect(permissions).toContain('"/fixture/codex" = "deny"')
     expect(permissions).not.toContain(`${JSON.stringify(syntheticRoot)} = "write"`)
     expect(overrides.find((value) => value.startsWith('shell_environment_policy='))).toBe(
-      'shell_environment_policy={inherit="all",ignore_default_excludes=false,exclude=[],include_only=["HOME","MURPH_ASSISTANT_SKILLS_ROOT","MURPH_HEALTH_COMMONS_PACKAGE_ROOT","PATH"],set={PATH="/fixture/bin"}}',
+      'shell_environment_policy={inherit="all",ignore_default_excludes=false,exclude=[],include_only=["CODEX_HOME","HOME","MURPH_ASSISTANT_SKILLS_ROOT","MURPH_HEALTH_COMMONS_PACKAGE_ROOT","PATH"],set={PATH="/fixture/bin"}}',
     )
   } finally { await rm(root, { recursive: true, force: true }) }
 })

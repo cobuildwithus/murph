@@ -45994,7 +45994,7 @@ async function materializeRealCodexHostedPermissionHome(
     await writeFile(
       path.join(codexHome, 'config.toml'),
       [
-        buildRealCodexHostedPermissionConfigToml(config).trimEnd(),
+        buildRealCodexHostedPermissionConfigToml(config, codexHome).trimEnd(),
         ...(options?.trustedProjectRoot
           ? [
               '',
@@ -46030,6 +46030,7 @@ async function materializeRealCodexHostedPermissionHome(
 
 function buildRealCodexHostedPermissionConfigToml(
   config: RealCodexE2eConfig,
+  codexHome = config.codexHome ?? path.join(homedir(), '.codex'),
 ): string {
   const providerApiKeyEnv = config.providerApiKeyEnv
   let baseConfig: string
@@ -46060,7 +46061,7 @@ function buildRealCodexHostedPermissionConfigToml(
   return [
     baseConfig.trimEnd(),
     '',
-    ...buildMurphHostedPermissionProfileTomlLines(),
+    ...buildMurphHostedPermissionProfileTomlLines(codexHome),
   ].join('\n')
 }
 

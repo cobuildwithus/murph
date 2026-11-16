@@ -16,7 +16,6 @@ import {
 } from '@murphai/operator-config/assistant/target-runtime'
 
 const EXPECTED_NATIVE_CAPABILITIES_RESTRICTED_THREAD_CONFIG = {
-  mcp_servers: {},
   'features.apps': false,
   'features.browser_use': false,
   'features.enable_mcp_apps': false,
@@ -45,7 +44,6 @@ const EXPECTED_TOOL_ONLY_MAINTENANCE_THREAD_CONFIG = {
   ...EXPECTED_RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG,
 } as const
 const EXPECTED_READ_ONLY_AUTOMATION_THREAD_CONFIG = {
-  mcp_servers: {},
   'features.apps': false,
   'features.browser_use': false,
   'features.enable_mcp_apps': false,
@@ -60,7 +58,6 @@ const EXPECTED_READ_ONLY_AUTOMATION_THREAD_CONFIG = {
   ...EXPECTED_RESTRICTED_ONE_SHOT_INSTRUCTION_CONFIG,
 } as const
 const EXPECTED_GROUP_EMAIL_THREAD_CONFIG = {
-  mcp_servers: {},
   'features.multi_agent': false,
   'features.multi_agent_v2': false,
   'features.shell_tool': false,
@@ -471,17 +468,17 @@ describe('Codex provider routing', () => {
     const entry = { id: 'cc_notes', slug: 'notes', generation: 3, catalog: 'a'.repeat(43) }
     providerTurnRunnerMocks.buildCodexTurnExecutionPlan.mockResolvedValue(executionPlan)
     providerTurnRunnerMocks.buildCodexTurnAttemptPlan.mockResolvedValue(createAttemptPlan({ route, session, routePlan: {
-      // Deliberately inject stale mounts into a restricted attempt to prove they are cleared.
+      // Deliberately inject stale mounts into a restricted attempt to prove they are not mounted.
       customConnections: [entry], followUpInvocation: 'followUp' in scenario,
     } }))
     providerMocks.executeCodexAssistantTurnAttemptFromInput.mockResolvedValue(createProviderAttemptResult())
     await executeCodexTurnWithRecovery({ input, plan: sharedPlan, resolvedSession: session, route, turnCreatedAt: '2026-11-15T12:00:00Z', turnId: 'turn-test' })
     const provider = providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]![0]
-    expect(Object.keys(provider.codexThreadConfig!.mcp_servers as object)).toEqual(scenario.eligible ? ['notes'] : [])
+    expect(Object.keys(provider.codexThreadConfig?.mcp_servers ?? {})).toEqual(scenario.eligible ? ['notes'] : [])
     if (scenario.direct) expect(provider.permissions === MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE).toBe(scenario.eligible)
     if (scenario.eligible) expect(provider.codexThreadConfig).toEqual({ mcp_servers: { notes: {
       url: `http://connections.worker/v1/cc_notes/3/${entry.catalog}/mcp`, required: false,
-      default_tools_approval_mode: 'approve', startup_timeout_sec: 10, tool_timeout_sec: 60,
+      default_tools_approval_mode: 'approve', startup_timeout_sec: 10, tool_timeout_sec: 35,
     } } })
   })
 
@@ -519,7 +516,7 @@ describe('Codex provider routing', () => {
     const provider = providerMocks.executeCodexAssistantTurnAttemptFromInput.mock.calls[0]?.[0]
     expect(provider.environments).toEqual([{ PRIVATE_ENVIRONMENT: 'must-not-pass' }])
     expect(provider.permissions).toBe(MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE)
-    expect(provider.codexThreadConfig).toEqual({ mcp_servers: {} })
+    expect(provider.codexThreadConfig).toEqual(null)
     expect(provider.promptCacheRetention).toBeNull()
     expect(provider.workingDirectory).toBe('/vaults/test')
     expect(provider.runtimeWorkspaceRoots).toEqual(['/vaults/test'])
@@ -954,7 +951,7 @@ describe('Codex provider routing', () => {
       approvalPolicy: null,
       sandbox: 'danger-full-access',
     })
-    expect(completionProviderInput?.codexThreadConfig).toEqual({ mcp_servers: {} })
+    expect(completionProviderInput?.codexThreadConfig).toEqual(null)
     expect(completionProviderInput).not.toHaveProperty('codexConfigOverrides')
     expect(completionProviderInput?.activeTurnSteering).toBe(activeTurnSteering)
     expect(completionProviderInput?.environments).toEqual([
@@ -995,7 +992,7 @@ describe('Codex provider routing', () => {
       approvalPolicy: null,
       sandbox: 'danger-full-access',
     })
-    expect(foregroundProviderInput?.codexThreadConfig).toEqual({ mcp_servers: {} })
+    expect(foregroundProviderInput?.codexThreadConfig).toEqual(null)
     expect(foregroundProviderInput?.activeTurnSteering).toBe(activeTurnSteering)
     expect(foregroundProviderInput).not.toHaveProperty('codexConfigOverrides')
     expect(foregroundProviderInput?.environments).toEqual([
@@ -1135,7 +1132,7 @@ describe('Codex provider routing', () => {
         ? EXPECTED_TOOL_ONLY_MAINTENANCE_THREAD_CONFIG
         : followUpInvocation
           ? EXPECTED_READ_ONLY_AUTOMATION_THREAD_CONFIG
-          : { mcp_servers: {} },
+          : null,
     )
     expect(providerInput).toMatchObject({
       dynamicTools: followUpInvocation ? [] : [MURPH_GROUP_ROOM_MODEL_TOOL],

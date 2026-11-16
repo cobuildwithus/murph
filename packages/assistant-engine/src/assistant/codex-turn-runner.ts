@@ -682,11 +682,10 @@ function resolveCodexAttemptMountConfig(
   executionPlan: AssistantCodexTurnExecutionPlan,
 ): AssistantProviderTurnInput['turn']['codexThreadConfig'] {
   const restrictedConfig = resolveCodexAttemptThreadConfig(capabilities)
-  if (!executionPlan.executionContext?.hosted && !restrictedConfig) return null
-  return {
-    ...restrictedConfig,
-    ...buildCustomConnectionsThreadConfig(capabilities.customConnectionsEligible ? attemptPlan.routePlan.customConnections ?? [] : []),
-  }
+  const mounts = executionPlan.executionContext?.hosted && capabilities.customConnectionsEligible
+    ? buildCustomConnectionsThreadConfig(attemptPlan.routePlan.customConnections ?? [])
+    : null
+  return mounts ? { ...restrictedConfig, ...mounts } : restrictedConfig
 }
 
 function resolveCodexAttemptPermissions(

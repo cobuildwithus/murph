@@ -79,13 +79,14 @@ describe("hosted Codex permissions", () => {
   });
 
   it("keeps ordinary hosted vault writes while making canonical automations read-only", () => {
-    expect(buildMurphMemberWorkspacePermissionProfileTomlLines()).toEqual([
+    expect(buildMurphMemberWorkspacePermissionProfileTomlLines("/tmp/synthetic-codex-home")).toEqual([
       "# Ordinary hosted member turns may mutate the vault except canonical automations.",
       "[permissions.murph-member-workspace.filesystem]",
       '":minimal" = "read"',
       '"/app" = "read"',
       '":tmpdir" = "write"',
       '":slash_tmp" = "write"',
+      '"/tmp/synthetic-codex-home" = "deny"',
       "glob_scan_max_depth = 64",
       "",
       '[permissions.murph-member-workspace.filesystem.":workspace_roots"]',
@@ -99,13 +100,13 @@ describe("hosted Codex permissions", () => {
   });
 
   it("composes every hosted permission profile from the canonical builders", () => {
-    expect(buildMurphHostedPermissionProfileTomlLines()).toEqual([
+    expect(buildMurphHostedPermissionProfileTomlLines("/tmp/synthetic-codex-home")).toEqual([
       ...buildMurphGameHostPermissionProfileTomlLines(),
       ...buildMurphGroupReadPermissionProfileTomlLines(),
       ...buildMurphOperatorDiagnosticReadPermissionProfileTomlLines(),
       ...buildMurphGroupRoomModelMaintenancePermissionProfileTomlLines(),
       ...buildMurphMemberReadPermissionProfileTomlLines(),
-      ...buildMurphMemberWorkspacePermissionProfileTomlLines(),
+      ...buildMurphMemberWorkspacePermissionProfileTomlLines("/tmp/synthetic-codex-home"),
     ]);
   });
 

@@ -1,4 +1,5 @@
 import path from 'node:path'
+import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 
 import { buildMurphHostedPermissionProfileTomlLines } from '@murphai/hosted-execution/assistant-permissions'
@@ -22,7 +23,7 @@ export function canonicalCodexLauncher(
   providerConfig?: RealCodexProviderConfig,
 ): string {
   const behavior = tomlTablesAsOverrides(buildHostedCodexBehaviorTomlLines({ exposeSpawnAgentModelOverrides: false }))
-  const permissions = buildMurphHostedPermissionProfileTomlLines().flatMap((line) => [
+  const permissions = buildMurphHostedPermissionProfileTomlLines(env.CODEX_HOME ?? path.join(homedir(), '.codex')).flatMap((line) => [
     line,
     ...(line === '"/app" = "read"' ? appReadRoots.flatMap((root) => [
       `${JSON.stringify(root)} = "read"`,

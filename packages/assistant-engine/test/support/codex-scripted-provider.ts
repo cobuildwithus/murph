@@ -118,7 +118,7 @@ export async function prepareScriptedTurnScenario(
   temporaryPaths: string[],
   options: {
     websocket?: { streamIdleTimeoutMs: number }
-    additionalTomlLines?: readonly string[]
+    additionalTomlLines?: readonly string[] | ((codexHome: string) => readonly string[])
     // The patched Codex build applies hosted prompt-cache retention only when
     // the provider key env is the platform one.
     apiKeyEnv?: string
@@ -151,6 +151,9 @@ export async function prepareScriptedTurnScenario(
     path.join(codexHome, 'config.toml'),
     buildScriptedCodexConfigToml(scriptedStub.baseUrl, {
       ...options,
+      additionalTomlLines: typeof options.additionalTomlLines === 'function'
+        ? options.additionalTomlLines(codexHome)
+        : options.additionalTomlLines,
       modelProvider,
     }),
     {

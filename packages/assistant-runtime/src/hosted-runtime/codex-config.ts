@@ -225,6 +225,7 @@ export async function prepareHostedCodexRuntimeEnvironment(
   await writeFile(
     codexConfigPath,
     buildHostedCodexConfigToml({
+      codexHome,
       chatGptAuth,
       model: normalizeHostedCodexEnvString(runtimeEnv.HOSTED_ASSISTANT_MODEL),
       exposeSpawnAgentModelOverrides:
@@ -535,6 +536,7 @@ function buildHostedCodexProviderTomlLines(input: {
 }
 
 export function buildHostedCodexConfigToml(input: {
+  codexHome: string;
   chatGptAuth?: boolean;
   exposeSpawnAgentModelOverrides: boolean;
   model: string | null;
@@ -582,7 +584,7 @@ export function buildHostedCodexConfigToml(input: {
     "project_doc_max_bytes = 0",
     "",
     ...providerConfigLines,
-    ...buildMurphHostedPermissionProfileTomlLines(),
+    ...buildMurphHostedPermissionProfileTomlLines(input.codexHome),
     ...buildHostedCodexBehaviorTomlLines(input),
     "[shell_environment_policy]",
     `inherit = ${tomlString(HOSTED_CODEX_SHELL_ENVIRONMENT_INHERITANCE)}`,

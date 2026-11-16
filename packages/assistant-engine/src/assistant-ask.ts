@@ -92,7 +92,6 @@ const OPERATOR_DIAGNOSTIC_OUTPUT_SCHEMA = {
 } as const
 
 export const READ_ONLY_ASSISTANT_ASK_THREAD_CONFIG = {
-  mcp_servers: {},
   allow_login_shell: false,
   // Model defaults may select multi-agent v2 even when feature flags are false.
   'agents.enabled': false,

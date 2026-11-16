@@ -541,7 +541,6 @@ describe('assistant Codex turn planning', () => {
       // Check the identity against the ACTUAL thread/start declarations,
       // independently of the fingerprint implementation.
       expect(plan.assistantContractFingerprint).toBe(fingerprintThreadDeclarations({
-        customConnections: [],
         dynamicTools: start.dynamicTools,
         routeFingerprint: route.routeFingerprint,
       }))
@@ -2326,6 +2325,31 @@ describe('assistant Codex turn planning', () => {
     },
   )
 
+  it('resumes an origin/main-shaped hosted fingerprint with a model catalog and empty manifest', async () => {
+    mockOrdinaryPromptContext()
+    const route = createRoute()
+    const executionContext = { hosted: { memberId: 'synthetic-member', userEnvKeys: [], customConnections: { readManifest: async () => [] } } }
+    vi.stubEnv('MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON', '/synthetic/hosted-models.json')
+    const fresh = await planTurn({ executionContext, route })
+    expect(fresh.cliEnv.MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON).toBe('/synthetic/hosted-models.json')
+    const start = buildCodexThreadStartParams({ approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+      developerInstructions: fresh.developerInstructions, dynamicTools: fresh.dynamicTools,
+      prompt: 'Synthetic compatibility proof', workingDirectory: '/vaults/test' })
+    // Production before custom connections hashes emitted declarations and the route,
+    // without a customConnections key or the legacy developer-instructions fields.
+    const stored = fingerprintThreadDeclarations({ dynamicTools: start.dynamicTools, routeFingerprint: route.routeFingerprint })
+    expect(fresh.assistantContractFingerprint).toBe(stored)
+    const resumed = await planTurn({ executionContext, route, session: createSession({ resumeState: {
+      assistantContractFingerprint: stored, routeFingerprint: route.routeFingerprint, threadId: 'thread-before-connections',
+    } }) })
+    expect(resumed.resume?.codexThreadId).toBe('thread-before-connections')
+    const mounted = await planTurn({ route, executionContext: { hosted: { ...executionContext.hosted,
+      customConnections: { readManifest: async () => [{ id: 'cc_notes', slug: 'notes', generation: 1, catalog: 'a'.repeat(43) }] },
+    } }, session: createSession({ resumeState: { assistantContractFingerprint: stored,
+      routeFingerprint: route.routeFingerprint, threadId: 'thread-before-connections' } }) })
+    expect(mounted.resume).toBeNull()
+  })
+
   it('reads custom manifests only for eligible plans and rotates every changed immutable mount', async () => {
     mockOrdinaryPromptContext()
     const entry = { id: 'cc_notes', slug: 'notes', generation: 3, catalog: 'a'.repeat(43) }
@@ -2391,7 +2415,6 @@ describe('assistant Codex turn planning', () => {
     )
     expect(first.assistantContractFingerprint).toBe(
       buildAssistantCodexContractFingerprint({
-        customConnections: [],
         dynamicTools: resolveMurphDynamicTools({
           followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
@@ -3028,7 +3051,6 @@ describe('assistant Codex turn planning', () => {
 
     expect(telegramReplyPlan.assistantContractFingerprint).toBe(
       buildAssistantCodexContractFingerprint({
-        customConnections: [],
         dynamicTools: resolveMurphDynamicTools({
           followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
@@ -3072,7 +3094,6 @@ describe('assistant Codex turn planning', () => {
 
     expect(linqReplyPlan.assistantContractFingerprint).toBe(
       buildAssistantCodexContractFingerprint({
-        customConnections: [],
         dynamicTools: resolveMurphDynamicTools({
           followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
@@ -3164,7 +3185,6 @@ describe('assistant Codex turn planning', () => {
 
     expect(linqCurrentMessageNotReactionEligiblePlan.assistantContractFingerprint).toBe(
       buildAssistantCodexContractFingerprint({
-        customConnections: [],
         dynamicTools: resolveMurphDynamicTools({
           followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
@@ -3192,7 +3212,6 @@ describe('assistant Codex turn planning', () => {
 
     expect(telegramBusinessReplyPlan.assistantContractFingerprint).toBe(
       buildAssistantCodexContractFingerprint({
-        customConnections: [],
         dynamicTools: resolveMurphDynamicTools({
           followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
@@ -3216,7 +3235,6 @@ describe('assistant Codex turn planning', () => {
 
     expect(telegramInferredBindingPlan.assistantContractFingerprint).toBe(
       buildAssistantCodexContractFingerprint({
-        customConnections: [],
         dynamicTools: resolveMurphDynamicTools({
           followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,
@@ -3282,7 +3300,6 @@ describe('assistant Codex turn planning', () => {
 
     expect(plan.assistantContractFingerprint).toBe(
       buildAssistantCodexContractFingerprint({
-        customConnections: [],
         dynamicTools: resolveMurphDynamicTools({
           followUpAttachmentAvailable: true,
           assistantStyleSettingsAvailable: true,

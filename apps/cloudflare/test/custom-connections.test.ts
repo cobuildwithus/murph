@@ -147,7 +147,11 @@ describe("wake-local manifest", () => {
   it("treats old-Web 404 as empty", async () => {
     expect(await port(async () => new Response("Not found", { status: 404 })).readManifest()).toEqual([]);
   });
-  it.each([{ connections: [{ ...entry, url: "https://notes.example.com" }] }, { connections: [entry, entry] }, { connections: [{ ...entry, slug: "unsafe.name" }] }])("mounts nothing for a malformed manifest", async body => {
+  it("strips future Web fields without disabling known mounts", async () => {
+    const body = { future: true, connections: [{ ...entry, url: "https://notes.example.com", future: { version: 2 } }] };
+    expect(await port(async () => Response.json(body)).readManifest()).toEqual([entry]);
+  });
+  it.each([{ connections: [{ ...entry, generation: 0 }] }, { connections: [entry, entry] }, { connections: [{ ...entry, slug: "unsafe.name" }] }])("mounts nothing for a malformed manifest", async body => {
     expect(await port(async () => Response.json(body)).readManifest()).toEqual([]);
   });
   it("mounts nothing, rather than failing the reply, when Web errors or is slow", async () => {

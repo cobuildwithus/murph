@@ -311,9 +311,13 @@ credentials, approval and current member/version admission.
 The invocation-local `customConnections` port lazily reads the allowlisted
 `POST /api/internal/custom-connections/manifest` once, at the first eligible
 personal ordinary hosted turn; old-Web 404 means an empty manifest. The
-manifest joins the assistant contract fingerprint, so catalog, generation and
-connection changes use the existing fresh-thread path. Restricted launches
-receive an explicit empty MCP map. Public fetch rejects internal hosts on its
+non-empty manifest joins the assistant contract fingerprint, so catalog, generation
+and connection changes use the existing fresh-thread path; empty manifests preserve
+pre-feature thread identity. Only eligible non-empty manifests add MCP mounts.
+The hosted workspace permission profile denies the resolved Codex home, carving
+host-owned config out of writable temp roots. Empty MCP maps cannot clear ambient
+Codex configuration. Unknown manifest fields are stripped for Web/runtime deploy
+skew; all known-field bounds remain enforced. Public fetch rejects internal hosts on its
 initial URL and every redirect hop. Deploy compatible Web routes first, then
 Worker/runtime; keep the feature allowlist disabled until both converge.
 
