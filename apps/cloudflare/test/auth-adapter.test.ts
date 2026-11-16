@@ -200,6 +200,26 @@ describe("cloudflare hosted execution auth adapter", () => {
     })).resolves.toEqual({ failure });
   });
 
+  it("keeps verifying with cached keys when a later key refresh would time out", async () => {
+    const validation = { ...TEST_VALIDATION, jwksUrl: "https://jwks.example.test/cached" };
+    const fetchJwks = vi.fn(async () => Response.json({ keys: [TEST_PUBLIC_JWK] }));
+    vi.stubGlobal("fetch", fetchJwks);
+    await expect(verifyHostedExecutionVercelOidcBearerToken({ token: createOidcToken(), validation }))
+      .resolves.toHaveProperty("claims");
+
+    fetchJwks.mockImplementation(async () => {
+      throw new DOMException("The operation timed out.", "TimeoutError");
+    });
+    vi.useFakeTimers({ now: Date.now() + 60 * 60 * 1000, toFake: ["Date"] });
+    try {
+      await expect(verifyHostedExecutionVercelOidcBearerToken({ token: createOidcToken(), validation }))
+        .resolves.toHaveProperty("claims");
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(fetchJwks).toHaveBeenCalledOnce();
+  });
+
   it("logs why the worker rejected an internal hand-off, without the token", async () => {
     installOidcJwksFetch();
     vi.stubEnv("MURPH_HOSTED_EXECUTION_STDIO_LOGS", "1");
