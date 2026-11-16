@@ -1025,6 +1025,16 @@ aggregates for 24 hours for known socket/DNS/connection/timeout codes versus
 unavailable; do not induce production failures or replay. Retain the field only
 while it has diagnostic value under that policy.
 
+### Internal OIDC rejections
+
+A Worker route that rejects Web's Vercel OIDC credential logs
+`reason = vercel-oidc-verification-failed` with `verificationFailure`: jose's
+stable error code, plus the failed claim for claim checks (for example
+`ERR_JWT_EXPIRED:exp`), or `missing_token`. A signed token that failed a claim
+check also logs `issuedSecondsAgo`, which separates a stale credential from
+clock skew. The token, its claims and the error message are never logged. The
+401 response is unchanged.
+
 ### Web-control preflight rejections
 
 Ordinary runtime callers select a branded route descriptor from the same
