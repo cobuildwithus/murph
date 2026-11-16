@@ -1,25 +1,21 @@
 import "server-only";
 
 import { randomBytes } from "node:crypto";
-import { isCallToolResult } from "@modelcontextprotocol/client";
+import type { JsonSchemaType } from "@modelcontextprotocol/client";
+import { CfWorkerJsonSchemaValidator } from "@modelcontextprotocol/client/validators/cf-worker";
 import * as z from "@murphai/contracts/zod-runtime";
 import type { HostedMcpActionRequest, Prisma } from "@prisma/client";
 import { createHostedCustomConnectionActionLookupKeys } from "../hosted-onboarding/contact-privacy";
 import { getPrisma } from "../prisma";
-import { approvedTool, canonical, storedToolsSchema, type StoredTool } from "./catalog";
-import { ConnectionError } from "./errors";
+import { canonical, storedToolsSchema, type StoredTool, type ToolDefinition } from "./catalog";
 import { WEB_ORIGIN } from "./oauth";
 import { openActionSecret, sealActionSecret } from "./secrets";
-import { settingsMutation, type SettingsMutation } from "./service";
-import { markConnectionUsed, readConnection, type ConnectionRow } from "./store";
-import { withConnectionClient, type ConnectionWrite } from "./upstream";
+import type { ConnectionRow } from "./store";
 
 /** A waiting request is open for an hour; a decided one answers the same call for an hour after its decision. */
-const ACTION_WINDOW_MS = 3_600_000;
-const WAITING_MAX = 20;
+export const ACTION_WINDOW_MS = 3_600_000;
+export const WAITING_MAX = 20;
 const ARGUMENTS_MAX_BYTES = 16_384;
-const RESULT_MAX_BYTES = 262_144;
-const RESULT_TEXT_MAX = 2_000;
 export const ACTION_REQUEST_ID = /^car_[0-9a-f]{32}$/u;
 
 const ACTION_FAILURES = ["off", "signed_out", "changed", "unreachable", "refused"] as const;
@@ -41,6 +37,32 @@ function stamp(date: Date): string {
 export function actionRequestUrl(id: string): string {
   return `${WEB_ORIGIN}/settings/connections/confirm/${id}`;
 }
+/** One identity for lookup and insert: a reconnect or a reapproved definition is a different action. */
+export function actionLookupKeys(input: { memberId: string; connectionId: string; generation: number; toolName: string; digest: string }, args: unknown) {
+  return createHostedCustomConnectionActionLookupKeys(canonical([input.memberId, input.connectionId, input.generation, input.toolName, input.digest, args]));
+}
+
+const JSON_TYPES = new Set(["string", "number", "integer", "boolean", "object", "array", "null"]);
+const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
+/** Only the declared names, types and required inputs of a server's schema: no patterns or references to evaluate. */
+function typedShape(schema: unknown, depth: number): Record<string, unknown> {
+  if (!isRecord(schema) || depth > 4) return {};
+  const types = [schema.type].flat().filter((type) => typeof type === "string" && JSON_TYPES.has(type));
+  const properties = isRecord(schema.properties) ? schema.properties : undefined;
+  return {
+    ...(types.length > 0 ? { type: types } : {}),
+    ...(properties ? { properties: Object.fromEntries(Object.entries(properties).map(([name, item]) => [name, typedShape(item, depth + 1)])) } : {}),
+    ...(Array.isArray(schema.required) ? { required: schema.required.filter((name) => typeof name === "string") } : {}),
+    ...(isRecord(schema.items) ? { items: typedShape(schema.items, depth + 1) } : {}),
+  };
+}
+const validator = new CfWorkerJsonSchemaValidator({ shortcircuit: true });
+/** What the member will be shown must be what the tool declares: no undeclared inputs and no mismatched types. */
+function argumentsProblem(definition: ToolDefinition, args: Record<string, unknown>): string | undefined {
+  const shape: Record<string, unknown> = { ...typedShape(definition.inputSchema, 0), additionalProperties: false };
+  const result = validator.getValidator(shape as JsonSchemaType)(args);
+  return result.valid ? undefined : result.errorMessage;
+}
 
 /**
  * The gateway's answer to an approved write: it records exactly what Murph asked for and returns the member's link.
@@ -48,10 +70,11 @@ export function actionRequestUrl(id: string): string {
  */
 export async function requestAction(row: ConnectionRow, tool: StoredTool, args: Record<string, unknown>): Promise<ToolResult> {
   if (Buffer.byteLength(canonical(args)) > ARGUMENTS_MAX_BYTES) return answer("These inputs are too large to ask the member about. Nothing was requested.", true);
+  const problem = argumentsProblem(tool.definition, args);
+  if (problem) return answer(`These inputs don't match ${tool.definition.name}'s input schema (${problem}). Nothing was requested.`, true);
   const id = `car_${randomBytes(16).toString("hex")}`;
   try {
-    // One identity for lookup and insert: a reconnect or a reapproved definition is a different action.
-    const keys = createHostedCustomConnectionActionLookupKeys(canonical([row.memberId, row.id, row.generation, tool.definition.name, tool.digest, args]));
+    const keys = actionLookupKeys({ memberId: row.memberId, connectionId: row.id, generation: row.generation, toolName: tool.definition.name, digest: tool.digest }, args);
     // Sealed before the member lock, which only ever covers database work.
     const argumentsEncrypted = await sealActionSecret(row.memberId, id, "arguments", args);
     const now = new Date();
@@ -102,92 +125,7 @@ function describeForModel(request: HostedMcpActionRequest, server: string): Tool
   return answer(`It's not known whether this happened. The member confirmed it at ${stamp(decided)}, and ${server} may or may not have done it. Ask them to check ${server} before trying again.`);
 }
 
-/** Confirm or decline from the member's signed-in page. The POST carries only the decision; the stored request is what runs. */
-export async function decideActionRequest(authority: SettingsMutation, requestId: string, decision: "confirm" | "decline"): Promise<ActionOutcome> {
-  const memberId = authority.session.member.id;
-  const request = ACTION_REQUEST_ID.test(requestId) ? await getPrisma().hostedMcpActionRequest.findFirst({ where: { id: requestId, memberId } }) : null;
-  if (!request) throw new ConnectionError("not_found", 404);
-  const now = new Date();
-  const claimed = await settingsMutation(authority, (tx) => claimActionRequestTx(tx, request.id, memberId, decision === "confirm" ? "unknown" : "declined", now));
-  if (!claimed) {
-    const current = await getPrisma().hostedMcpActionRequest.findFirst({ where: { id: request.id, memberId } });
-    if (!current) throw new ConnectionError("not_found", 404);
-    return readActionOutcome(current, new Date());
-  }
-  return decision === "confirm" ? confirmClaimedAction(request) : { status: "declined" };
-}
-/** Consumes a waiting, unexpired request. A confirmation is stored as unknown before anything is sent. */
-export async function claimActionRequestTx(tx: Prisma.TransactionClient, id: string, memberId: string, status: "unknown" | "declined", now: Date): Promise<boolean> {
-  const claimed = await tx.hostedMcpActionRequest.updateMany({
-    where: { id, memberId, status: "waiting", expiresAt: { gt: now } }, data: { status, decidedAt: now },
-  });
-  return claimed.count === 1;
-}
-
-class ActionStop extends Error {
-  constructor(readonly reason: ActionFailure) { super(reason); }
-}
-/** The connection as it is now, if the request can still run exactly as the member saw it. */
-async function currentConnection(request: HostedMcpActionRequest): Promise<ConnectionRow> {
-  const row = await readConnection(request.memberId, request.connectionId);
-  if (row.status === "needs_sign_in") throw new ActionStop("signed_out");
-  if (row.status !== "on") throw new ActionStop("off");
-  const tool = approvedTool(storedToolsSchema.parse(row.tools), request.toolName);
-  if (row.generation !== request.generation || tool?.digest !== request.digest) throw new ActionStop("changed");
-  return row;
-}
-function failureReason(error: unknown): ActionFailure {
-  if (error instanceof ActionStop) return error.reason;
-  if (!(error instanceof ConnectionError)) return "unreachable";
-  if (error.code === "needs_sign_in") return "signed_out";
-  if (error.code === "refused_by_service") return "refused";
-  return error.code === "conflict" || error.code === "not_found" ? "changed" : "unreachable";
-}
-/** Runs a claimed request once. Nothing after its tool call leaves Web proves it didn't happen, so only earlier failures are failed. */
-async function confirmClaimedAction(request: HostedMcpActionRequest): Promise<ActionOutcome> {
-  const write: ConnectionWrite = { sent: false };
-  let outcome: ActionOutcome;
-  try {
-    outcome = await sendClaimedAction(request, write);
-  } catch (error) {
-    outcome = write.sent ? { status: "unknown" } : { status: "failed", reason: failureReason(error) };
-  }
-  return settleActionRequest(request, outcome);
-}
-async function sendClaimedAction(request: HostedMcpActionRequest, write: ConnectionWrite): Promise<ActionOutcome> {
-  const args = await openActionSecret(request.memberId, request.id, "arguments", request.argumentsEncrypted) as Record<string, unknown>;
-  const connection = await currentConnection(request);
-  const result = await withConnectionClient(connection, async (client, options) => {
-    // Sign-in and setup take time in which the member can turn it off or reconnect, so check again right before it leaves.
-    await currentConnection(request);
-    return await client.callTool({ name: request.toolName, arguments: args }, options);
-  }, undefined, write);
-  await markConnectionUsed(connection);
-  return toolOutcome(result);
-}
-function toolOutcome(result: unknown): ActionOutcome {
-  if (!isCallToolResult(result) || Buffer.byteLength(JSON.stringify(result)) > RESULT_MAX_BYTES) return { status: "unknown" };
-  const text = result.content.flatMap((item) => item.type === "text" ? [item.text] : []).join("\n").trim();
-  const shown = text ? { text: [...text].slice(0, RESULT_TEXT_MAX).join("") } : {};
-  // A tool can report an error after doing part of its work, so only a clean result counts as done.
-  return { status: result.isError ? "unknown" : "done", ...shown };
-}
-/** Refines the claim. When that fails the request stays unknown, which is then what the member and Murph see. */
-async function settleActionRequest(request: HostedMcpActionRequest, outcome: ActionOutcome): Promise<ActionOutcome> {
-  const stored = "reason" in outcome ? { reason: outcome.reason } : "text" in outcome && outcome.text ? { text: outcome.text } : null;
-  if (outcome.status === "unknown" && !stored) return outcome;
-  try {
-    const resultEncrypted = stored ? await sealActionSecret(request.memberId, request.id, "result", stored) : null;
-    const saved = await getPrisma().hostedMcpActionRequest.updateMany({
-      where: { id: request.id, memberId: request.memberId, status: "unknown" }, data: { status: outcome.status, resultEncrypted },
-    });
-    return saved.count === 1 ? outcome : { status: "unknown" };
-  } catch {
-    return { status: "unknown" };
-  }
-}
-
-async function readActionOutcome(request: HostedMcpActionRequest, now: Date): Promise<ActionOutcome> {
+export async function readActionOutcome(request: HostedMcpActionRequest, now: Date): Promise<ActionOutcome> {
   if (request.status === "waiting") return { status: request.expiresAt > now ? "waiting" : "expired" };
   if (request.status === "declined") return { status: "declined" };
   const stored = request.resultEncrypted
@@ -198,13 +136,20 @@ async function readActionOutcome(request: HostedMcpActionRequest, now: Date): Pr
 
 export interface ActionRequestView {
   askedAt: string;
+  /** When the member last confirmed this same change, if that request may already have run it. */
+  confirmedBefore?: string;
   host: string;
   id: string;
-  /** The stored inputs, opened only while the member can still act on them. */
-  inputs?: Record<string, unknown>;
+  /** The stored inputs in the tool's own declared order, opened only while the member can still act on them. */
+  inputs?: { name: string; value: unknown }[];
   outcome: ActionOutcome;
   server: string;
   title: string;
+}
+function orderedInputs(args: Record<string, unknown>, definition: ToolDefinition | undefined) {
+  const declared = Object.keys(isRecord(definition?.inputSchema.properties) ? definition.inputSchema.properties : {});
+  const names = [...declared.filter((name) => Object.hasOwn(args, name)), ...Object.keys(args).filter((name) => !declared.includes(name))];
+  return names.map((name) => ({ name, value: args[name] }));
 }
 /** The confirm page's view of one of the member's requests; another member's or a malformed id reads as missing. */
 export async function readActionRequestView(memberId: string, requestId: string): Promise<ActionRequestView | null> {
@@ -214,11 +159,16 @@ export async function readActionRequestView(memberId: string, requestId: string)
   });
   if (!request) return null;
   const outcome = await readActionOutcome(request, new Date());
-  const tool = storedToolsSchema.parse(request.connection.tools).find((item) => item.definition.name === request.toolName);
-  const inputs = outcome.status === "waiting"
-    ? await openActionSecret(memberId, request.id, "arguments", request.argumentsEncrypted) as Record<string, unknown> : undefined;
-  return {
-    askedAt: request.createdAt.toISOString(), host: new URL(request.connection.serverUrl).host, id: request.id,
-    ...(inputs ? { inputs } : {}), outcome, server: request.connection.name, title: tool?.definition.title ?? request.toolName,
-  };
+  const tools = storedToolsSchema.parse(request.connection.tools).filter((item) => item.definition.name === request.toolName);
+  const definition = (tools.find((item) => item.digest === request.digest) ?? tools[0])?.definition;
+  const view = { askedAt: request.createdAt.toISOString(), host: new URL(request.connection.serverUrl).host, id: request.id,
+    outcome, server: request.connection.name, title: definition?.title ?? request.toolName };
+  if (outcome.status !== "waiting") return view;
+  const args = await openActionSecret(memberId, request.id, "arguments", request.argumentsEncrypted) as Record<string, unknown>;
+  // The same change confirmed before may have run already, so the member hears about it before confirming again.
+  const earlier = await getPrisma().hostedMcpActionRequest.findFirst({
+    where: { memberId, id: { not: request.id }, lookupKey: { in: actionLookupKeys(request, args).candidates }, status: { in: ["done", "unknown"] } },
+    orderBy: { decidedAt: "desc" }, select: { decidedAt: true },
+  });
+  return { ...view, inputs: orderedInputs(args, definition), ...(earlier?.decidedAt ? { confirmedBefore: earlier.decidedAt.toISOString() } : {}) };
 }

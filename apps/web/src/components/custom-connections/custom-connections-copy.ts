@@ -98,17 +98,19 @@ export type CustomConnectionActionOutcome =
 /** One change Murph asked to make, as the member's confirm page shows it. */
 export interface CustomConnectionActionRequest {
   askedAt: string;
+  /** When the member last confirmed this same change, if it may already have happened. */
+  confirmedBefore?: string;
   host: string;
   id: string;
-  /** Exactly what Murph will send, present while the request waits for the member. */
-  inputs?: Record<string, unknown>;
+  /** Exactly what Murph will send, in the action's declared order, present while the request waits. */
+  inputs?: { name: string; value: unknown }[];
   outcome: CustomConnectionActionOutcome;
   server: string;
   title: string;
 }
 
-export function customConnectionActionUrl(id: string): string {
-  return `${CUSTOM_CONNECTIONS_API}/requests/${encodeURIComponent(id)}`;
+export function customConnectionActionUrl(id: string, suffix = ""): string {
+  return `${CUSTOM_CONNECTIONS_API}/requests/${encodeURIComponent(id)}${suffix}`;
 }
 
 /** The line under "That didn't go through.": what stopped it and what to do next. */

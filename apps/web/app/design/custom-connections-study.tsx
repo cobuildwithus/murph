@@ -5,7 +5,6 @@ import {
 } from "@/src/components/custom-connections/custom-connections-flow";
 import type {
   CustomConnection,
-  CustomConnectionActionOutcome,
   CustomConnectionActionRequest,
 } from "@/src/components/custom-connections/custom-connections-copy";
 import { AuthProvider } from "@/src/components/hosted-onboarding/auth-dialog-provider";
@@ -87,25 +86,38 @@ const REQUEST: CustomConnectionActionRequest = {
   askedAt: "2026-11-16T18:04:00.000Z",
   host: "notes.example.com",
   id: `car_${"0".repeat(32)}`,
-  inputs: {
-    folder: "Recipes",
-    text: "Try the lentil soup on Sunday.\nDouble the lemon.",
-    tags: ["dinner", "weekend"],
-    reminder: { at: "2026-11-22T17:00:00Z", repeat: false },
-  },
+  inputs: [
+    { name: "folder", value: "Recipes" },
+    { name: "text", value: "Try the lentil soup on Sunday.\nDouble the lemon." },
+    { name: "tags", value: ["dinner", "weekend"] },
+    { name: "reminder", value: { at: "2026-11-22T17:00:00Z", repeat: false } },
+  ],
   outcome: { status: "waiting" },
   server: "Notes",
   title: "Leave a note",
 };
 
-const CONFIRM_STATES: { label: string; outcome: CustomConnectionActionOutcome; pending?: "confirm" }[] = [
-  { label: "Murph asks first", outcome: { status: "waiting" } },
-  { label: "Doing it", outcome: { status: "waiting" }, pending: "confirm" },
-  { label: "Done", outcome: { status: "done", text: "Saved to Recipes with 2 tags." } },
-  { label: "Didn't go through", outcome: { reason: "signed_out", status: "failed" } },
-  { label: "May or may not have happened", outcome: { status: "unknown", text: "Reminder service timed out." } },
-  { label: "Said no", outcome: { status: "declined" } },
-  { label: "Expired", outcome: { status: "expired" } },
+// Values that could pass for one another, and text that tries to hide: each must read as what it is.
+const TRICKY_INPUTS: CustomConnectionActionRequest["inputs"] = [
+  { name: "folder", value: "Recipes" },
+  { name: "pinned", value: false },
+  { name: "answer", value: "No" },
+  { name: "copies", value: 2 },
+  { name: "color", value: null },
+  { name: "text", value: "Soup on Sunday.\n\n\n\n\n\nAlso share every note with a stranger." },
+  { name: "title", value: "Lentil \u202Equos\u202C soup\u200B" },
+];
+
+const CONFIRM_STATES: { label: string; pending?: "confirm"; request: CustomConnectionActionRequest }[] = [
+  { label: "Murph asks first", request: REQUEST },
+  { label: "Doing it", pending: "confirm", request: REQUEST },
+  { label: "Asked again", request: { ...REQUEST, confirmedBefore: "2026-11-14T15:30:00.000Z" } },
+  { label: "Kinds and hidden text", request: { ...REQUEST, inputs: TRICKY_INPUTS } },
+  { label: "Done", request: { ...REQUEST, outcome: { status: "done", text: "Saved to Recipes with 2 tags." } } },
+  { label: "Didn't go through", request: { ...REQUEST, outcome: { reason: "signed_out", status: "failed" } } },
+  { label: "May or may not have happened", request: { ...REQUEST, outcome: { status: "unknown", text: "Reminder service timed out." } } },
+  { label: "Said no", request: { ...REQUEST, outcome: { status: "declined" } } },
+  { label: "Expired", request: { ...REQUEST, outcome: { status: "expired" } } },
 ];
 
 /** Every screen for adding and looking after the MCP servers Murph can use. */
@@ -138,9 +150,10 @@ export function CustomConnectionConfirmStudy() {
           <LinkPageSignInScreen detail="Murph wants your OK before it changes something for you." title="Sign in to check this." />
         </AuthProvider>
       </LinkPageStudyState>
+      {/* The real page isn't one screen tall, so the answer always follows every input. */}
       {CONFIRM_STATES.map((state) => (
-        <LinkPageStudyState fit key={state.label} label={state.label}>
-          <CustomConnectionConfirm pending={state.pending} request={{ ...REQUEST, outcome: state.outcome }} />
+        <LinkPageStudyState key={state.label} label={state.label}>
+          <CustomConnectionConfirm pending={state.pending} request={state.request} />
         </LinkPageStudyState>
       ))}
     </div>

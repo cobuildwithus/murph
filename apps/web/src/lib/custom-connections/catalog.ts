@@ -60,13 +60,15 @@ export function approvedTool(tools: StoredTool[], name: string): StoredTool | un
 /**
  * What the gateway serves for an approved tool. Calling a write only asks the member, so its declaration keeps
  * the name and input schema, leads with what calling it does, and drops the remote output schema and execution hints.
+ * The server's own text follows under its name, so it never reads as Murph's instruction.
  */
 function servedDefinition(definition: ToolDefinition, server: string): ToolDefinition {
   if (toolKind(definition) !== "write") return definition;
   const first = `Changes things in ${server}. Calling this doesn't do it yet: it returns a link for the member to confirm on a Murph page. Send them the link and say what it will do. Calling again with the same inputs tells you whether it happened.`;
   return {
     name: definition.name, ...(definition.title === undefined ? {} : { title: definition.title }),
-    description: definition.description ? `${first}\n\n${definition.description}` : first, inputSchema: definition.inputSchema,
+    description: definition.description ? `${first}\n\nDescription from ${server}: ${definition.description}` : first,
+    inputSchema: definition.inputSchema,
   };
 }
 /** Exactly what the gateway serves; the catalog token is its digest. */

@@ -4,7 +4,8 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@prisma/client";
 import pg from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { admitActionRequestTx, claimActionRequestTx, type ActionAdmission } from "../src/lib/custom-connections/action-requests";
+import { claimActionRequestTx } from "../src/lib/custom-connections/action-confirm";
+import { admitActionRequestTx, type ActionAdmission } from "../src/lib/custom-connections/action-requests";
 
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
 const databaseUrl = process.env.DATABASE_URL ?? "";

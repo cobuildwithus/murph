@@ -1,9 +1,10 @@
 import "server-only";
 
 import * as z from "@murphai/contracts/zod-runtime";
+import { isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { readHostedOnboardingJsonObject } from "../hosted-onboarding/http";
 import { requireConnectionSession } from "./access";
-import { decideActionRequest } from "./action-requests";
+import { decideActionRequest, issueActionConfirmChallenge } from "./action-confirm";
 import { connectionErrorResponse } from "./errors";
 import { readConnection, projectConnection, connectionWhere } from "./store";
 import { getPrisma } from "../prisma";
@@ -44,13 +45,31 @@ export async function settingsConnections(request: Request, id?: string, action?
     return new Response(null, { status: 405 });
   } catch (error) { return connectionErrorResponse(error); }
 }
-/** The member's answer to one request Murph made: the full Settings mutation contract, and only the decision in the body. */
+// Confirming carries the member's passkey signature, which the request's owner requires and checks; nothing else
+// in the body can change what runs.
+const decisionSchema = z.discriminatedUnion("decision", [
+  z.object({ decision: z.literal("confirm"), authorization: z.unknown().optional() }).strict(),
+  z.object({ decision: z.literal("decline") }).strict(),
+]);
+/** The member's answer to one request Murph made, under the full Settings mutation contract. */
 export async function settingsActionRequest(request: Request, requestId: string): Promise<Response> {
   try {
     const session = await requireConnectionSession(request, true);
-    const input = z.object({ decision: z.enum(["confirm", "decline"]) }).strict().parse(await body(request));
-    return json({ outcome: await decideActionRequest({ request, session }, requestId, input.decision) });
-  } catch (error) { return connectionErrorResponse(error); }
+    const input = decisionSchema.parse(await body(request));
+    return json({ outcome: await decideActionRequest({ request, session }, requestId, input) });
+  } catch (error) { return actionErrorResponse(error); }
+}
+/** A one-use passkey challenge for confirming one request. */
+export async function settingsActionRequestChallenge(request: Request, requestId: string): Promise<Response> {
+  try {
+    const session = await requireConnectionSession(request, true);
+    return json(await issueActionConfirmChallenge({ request, session }, requestId));
+  } catch (error) { return actionErrorResponse(error); }
+}
+/** Passkey and session errors carry public messages the page shows as they are. */
+function actionErrorResponse(error: unknown): Response {
+  if (!isHostedOnboardingError(error)) return connectionErrorResponse(error);
+  return Response.json({ error: { code: error.code, message: error.message } }, { status: error.httpStatus, headers: { "Cache-Control": "no-store" } });
 }
 function json(value: unknown) { return Response.json(value, { headers: { "Cache-Control": "no-store" } }); }
 function callbackRedirect(id: string, key: string, value: string) {

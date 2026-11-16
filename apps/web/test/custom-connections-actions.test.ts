@@ -2,10 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { Server, createMcpHandler } from "@modelcontextprotocol/server";
 import type { HostedAppSession } from "../src/lib/hosted-onboarding/app-session";
+import { authenticator } from "./approval-webauthn-fixture";
 
 type Row = Record<string, unknown>;
 const mocks = vi.hoisted(() => {
-  const tables = { connections: [] as Record<string, unknown>[], requests: [] as Record<string, unknown>[] };
+  const tables = { connections: [] as Record<string, unknown>[], requests: [] as Record<string, unknown>[], challenges: [] as Record<string, unknown>[] };
   const failures = { claim: false, settle: false, resultSeal: false };
   function matches(row: Record<string, unknown>, where: Record<string, unknown> = {}): boolean {
     return Object.entries(where).every(([key, condition]) => {
@@ -29,6 +30,7 @@ const mocks = vi.hoisted(() => {
     }
   }
   const copy = <T,>(value: T): T => structuredClone(value);
+  const newestFirst = (a: Record<string, unknown>, b: Record<string, unknown>) => (b.createdAt as Date).getTime() - (a.createdAt as Date).getTime();
   const db = {
     hostedMcpConnection: {
       findFirst: async ({ where }: { where: Row }) => copy(tables.connections.find((row) => matches(row, where)) ?? null),
@@ -40,11 +42,11 @@ const mocks = vi.hoisted(() => {
     },
     hostedMcpActionRequest: {
       findFirst: async ({ where, include }: { where: Row; include?: unknown }) => {
-        const found = tables.requests.filter((row) => matches(row, where))
-          .sort((a, b) => (b.createdAt as Date).getTime() - (a.createdAt as Date).getTime())[0];
+        const found = tables.requests.filter((row) => matches(row, where)).sort(newestFirst)[0];
         if (!found) return null;
         return copy(include ? { ...found, connection: tables.connections.find((row) => row.id === found.connectionId) } : found);
       },
+      findMany: async ({ where, take }: { where: Row; take: number }) => copy(tables.requests.filter((row) => matches(row, where)).slice(0, take)),
       count: async ({ where }: { where: Row }) => tables.requests.filter((row) => matches(row, where)).length,
       create: async ({ data }: { data: Row }) => {
         const row = { status: "waiting", resultEncrypted: null, decidedAt: null, ...data };
@@ -59,16 +61,32 @@ const mocks = vi.hoisted(() => {
         return { count: hits.length };
       },
     },
+    hostedSensitiveActionChallenge: {
+      create: async ({ data }: { data: Row }) => { tables.challenges.push({ ...data }); return copy(data); },
+      findUnique: async ({ where }: { where: Row }) => copy(tables.challenges.find((row) => row.tokenHash === where.tokenHash) ?? null),
+      deleteMany: async ({ where }: { where: Row }) => {
+        const hits = tables.challenges.filter((row) => matches(row, where));
+        for (const hit of hits) tables.challenges.splice(tables.challenges.indexOf(hit), 1);
+        return { count: hits.length };
+      },
+    },
     $queryRaw: async () => [],
     $transaction: async <T,>(operation: (tx: unknown) => Promise<T>) => operation(db),
   };
-  return { db, tables, failures, fetch: vi.fn(), callback: vi.fn(), active: vi.fn(), sessionCurrent: vi.fn() };
+  return { db, tables, failures, fetch: vi.fn(), callback: vi.fn(), active: vi.fn(), sessionCurrent: vi.fn(), passkeys: vi.fn(), commitPasskeys: vi.fn() };
 });
 vi.mock("../src/lib/prisma", () => ({ getPrisma: () => mocks.db }));
 vi.mock("../src/lib/custom-connections/guarded-fetch", async (original) => ({ ...await original<typeof import("../src/lib/custom-connections/guarded-fetch")>(), guardedConnectionFetch: mocks.fetch }));
 vi.mock("../src/lib/custom-connections/access", () => ({ requireConnectionCallback: mocks.callback, connectionMemberActive: mocks.active }));
 vi.mock("../src/lib/hosted-onboarding/app-session", () => ({ assertHostedAppSessionCurrentTx: mocks.sessionCurrent }));
 vi.mock("../src/lib/hosted-onboarding/member-access", () => ({ activeHostedPersonAccessWhere: () => ({ suspendedAt: null }) }));
+vi.mock("../src/lib/hosted-web/public-url", async (original) => ({ ...await original<typeof import("../src/lib/hosted-web/public-url")>(), resolveHostedPublicOrigin: () => "https://www.withmurph.ai" }));
+// The member's stored approval passkeys; the assertion itself is checked by the real WebAuthn verifier.
+vi.mock("../src/lib/sensitive-actions/passkey-store", () => ({
+  readApprovalPasskeyState: mocks.passkeys,
+  prepareApprovalPasskeyWrite: async () => ({ memberId: "member-a", expectedEncrypted: "synthetic", nextEncrypted: "synthetic-next" }),
+  commitApprovalPasskeyWriteTx: mocks.commitPasskeys,
+}));
 vi.mock("../src/lib/custom-connections/secrets", async (original) => {
   const real = await original<typeof import("../src/lib/custom-connections/secrets")>();
   return { ...real, sealActionSecret: async (...args: Parameters<typeof real.sealActionSecret>) => {
@@ -77,18 +95,21 @@ vi.mock("../src/lib/custom-connections/secrets", async (original) => {
   } };
 });
 
-import { decideActionRequest, readActionRequestView } from "../src/lib/custom-connections/action-requests";
+import { actionConfirmBinding, actionConfirmChallengeIsCurrent, decideActionRequest, issueActionConfirmChallenge } from "../src/lib/custom-connections/action-confirm";
+import { readActionRequestView } from "../src/lib/custom-connections/action-requests";
 import { approveTools, approvedSnapshot, digest, reconcileTools, type StoredTool } from "../src/lib/custom-connections/catalog";
 import { handleConnectionMcp } from "../src/lib/custom-connections/gateway";
 import { openActionSecret, sealConnectionSecret } from "../src/lib/custom-connections/secrets";
 
 const read = { name: "list_notes", title: "Read notes", inputSchema: { type: "object" }, annotations: { readOnlyHint: true } };
 const write = { name: "add_note", title: "Leave a note", description: "Adds a note to a folder.",
-  inputSchema: { type: "object", properties: { folder: { type: "string" }, text: { type: "string" }, tags: { type: "array" } }, required: ["text"] },
+  inputSchema: { type: "object", properties: { folder: { type: "string" }, text: { type: "string" }, tags: { type: "array", items: { type: "string" } },
+    position: { description: "Where it goes; any kind of value." } }, required: ["text"] },
   outputSchema: { type: "object", properties: { noteId: { type: "string" } }, required: ["noteId"] } };
 const NOTE = { folder: "Recipes", text: "Try the lentil soup on Sunday.", tags: ["dinner", "weekend"] };
 const session = { member: { id: "member-a" }, sessionId: "browser-session", authProof: {} } as HostedAppSession;
 const authority = { request: new Request("https://www.withmurph.ai/api/settings/custom-connections/requests/car_x", { method: "POST" }), session };
+const account = authenticator();
 const sent: unknown[] = [];
 
 function approved(definitions: object[] = [read, write]): StoredTool[] {
@@ -118,6 +139,13 @@ function linkIn(result: { content: { text: string }[] }): string {
   return id;
 }
 async function requested(args: unknown = NOTE): Promise<string> { return linkIn(await callGateway(args)); }
+/** The member's Do it: a challenge for this request, signed by their approval passkey in this browser session. */
+async function signedConfirmation(id: string, as = authority, message?: string) {
+  const challenge = await issueActionConfirmChallenge(as, id);
+  return { decision: "confirm" as const, authorization: { method: "passkey", token: challenge.token, assertion: account.assertion({ customMessage: message ?? challenge.message }) } };
+}
+async function confirm(id: string) { return decideActionRequest(authority, id, await signedConfirmation(id)); }
+const decline = (id: string) => decideActionRequest(authority, id, { decision: "decline" });
 
 /** A real SDK server for the connection; every tools/call that reaches it is recorded. */
 function serve(onCall: (args: Record<string, unknown>) => unknown, options: { beforeSetup?: () => void | Promise<void>; respond?: (body: { id?: unknown; method?: string }, init?: RequestInit) => Promise<Response> | undefined } = {}) {
@@ -139,9 +167,12 @@ function serve(onCall: (args: Record<string, unknown>) => unknown, options: { be
 beforeEach(() => {
   mocks.tables.connections.splice(0, Infinity, connection());
   mocks.tables.requests.length = 0;
+  mocks.tables.challenges.length = 0;
   sent.length = 0;
   Object.assign(mocks.failures, { claim: false, settle: false, resultSeal: false });
   mocks.callback.mockResolvedValue("member-a"); mocks.active.mockResolvedValue(true); mocks.sessionCurrent.mockResolvedValue(undefined);
+  mocks.passkeys.mockResolvedValue({ credentials: [account.credential], encrypted: "synthetic", memberId: "member-a" });
+  mocks.commitPasskeys.mockResolvedValue(undefined);
 });
 afterEach(() => vi.resetAllMocks());
 
@@ -154,6 +185,7 @@ describe("Murph asks first: the gateway's request", () => {
     try {
       const listed = (await client.listTools()).tools.find((item) => item.name === "add_note");
       expect(listed?.outputSchema).toBeUndefined();
+      expect(listed?.description).toContain("\n\nDescription from Notes: Adds a note to a folder.");
       // The remote output schema requires noteId; served as is, the client would refuse this text-only answer.
       const result = await client.callTool({ name: "add_note", arguments: NOTE });
       expect(result.isError).toBeFalsy();
@@ -172,8 +204,20 @@ describe("Murph asks first: the gateway's request", () => {
     const first = await requested();
     expect(await requested({ tags: ["dinner", "weekend"], text: NOTE.text, folder: "Recipes" })).toBe(first);
     expect(await requested({ ...NOTE, tags: ["weekend", "dinner"] })).not.toBe(first);
-    expect(await requested({ ...NOTE, folder: 7 })).not.toBe(await requested({ ...NOTE, folder: "7" }));
+    expect(await requested({ ...NOTE, position: 7 })).not.toBe(await requested({ ...NOTE, position: "7" }));
     expect(mocks.tables.requests).toHaveLength(4);
+  });
+  it.each([
+    ["an input the action doesn't declare", { ...NOTE, share_with: "everyone" }, "share_with"],
+    ["text where the action declares a list", { ...NOTE, tags: "dinner" }, "tags"],
+    ["a number inside a declared list of text", { ...NOTE, tags: ["dinner", 7] }, "tags"],
+    ["a missing required input", { folder: "Recipes" }, "text"],
+  ])("refuses %s, naming it, and asks nothing", async (_case, args, named) => {
+    const refused = await callGateway(args);
+    expect(refused.isError).toBe(true);
+    expect(refused.content[0]!.text).toMatch(/^These inputs don't match add_note's input schema \(.+\)\. Nothing was requested\.$/u);
+    expect(refused.content[0]!.text).toContain(named);
+    expect(mocks.tables.requests).toEqual([]);
   });
   it("treats a reconnected account or a reapproved definition as a different action", async () => {
     const first = await requested();
@@ -227,6 +271,77 @@ describe("Murph asks first: the gateway's request", () => {
   });
 });
 
+describe("Murph asks first: the member's passkey", () => {
+  it("never runs a change on a session alone", async () => {
+    const id = await requested();
+    serve(() => ({ content: [] }));
+    for (const authorization of [undefined, null, {}, { method: "passkey", token: "sac_forged" }]) {
+      await expect(decideActionRequest(authority, id, { decision: "confirm", authorization })).rejects.toMatchObject({ code: "SENSITIVE_ACTION_AUTHORIZATION_REQUIRED" });
+    }
+    expect(mocks.tables.requests[0]).toMatchObject({ status: "waiting" });
+    expect(sent).toEqual([]);
+  });
+  it("binds the challenge to this request and this browser session, and lets it work once", async () => {
+    const first = await requested();
+    const second = await requested({ text: "Buy basil" });
+    serve(() => ({ content: [{ type: "text", text: "Saved." }] }));
+    // A challenge for one request can't run another, and one issued to another session can't run its own.
+    await expect(decideActionRequest(authority, second, await signedConfirmation(first))).rejects.toMatchObject({ code: "SENSITIVE_ACTION_UNAVAILABLE" });
+    const elsewhere = { ...authority, session: { ...session, sessionId: "another-browser" } as HostedAppSession };
+    await expect(decideActionRequest(authority, first, await signedConfirmation(first, elsewhere))).rejects.toMatchObject({ code: "SENSITIVE_ACTION_UNAVAILABLE" });
+    // A signature over anything else fails.
+    await expect(decideActionRequest(authority, first, await signedConfirmation(first, authority, "Something else entirely"))).rejects.toMatchObject({ code: "SENSITIVE_ACTION_INVALID_SIGNATURE" });
+    expect(mocks.tables.requests.map((row) => row.status)).toEqual(["waiting", "waiting"]);
+    expect(sent).toEqual([]);
+    const signed = await signedConfirmation(first);
+    expect(await decideActionRequest(authority, first, signed)).toEqual({ status: "done", text: "Saved." });
+    expect(mocks.commitPasskeys).toHaveBeenCalled();
+    // Used: even if the request were waiting again, the same signature never runs it twice.
+    Object.assign(mocks.tables.requests.find((row) => row.id === first)!, { status: "waiting", decidedAt: null });
+    await expect(decideActionRequest(authority, first, signed)).rejects.toMatchObject({ code: "SENSITIVE_ACTION_UNAVAILABLE" });
+    expect(sent).toHaveLength(1);
+  });
+  it("issues challenges only for the member's own waiting requests, never outliving them", async () => {
+    const id = await requested();
+    const other = { ...authority, session: { ...session, member: { id: "member-b" } } as HostedAppSession };
+    await expect(issueActionConfirmChallenge(other, id)).rejects.toMatchObject({ status: 404 });
+    await issueActionConfirmChallenge(authority, id);
+    const [challenge] = mocks.tables.challenges;
+    const row = mocks.tables.requests[0]!;
+    const bound = { id: String(row.id), memberId: String(row.memberId), connectionId: String(row.connectionId), generation: Number(row.generation),
+      toolName: String(row.toolName), digest: String(row.digest), lookupKey: String(row.lookupKey) };
+    expect(challenge).toMatchObject({ kind: "custom-connection.action.confirm", memberId: "member-a", bindingHash: actionConfirmBinding(bound, "browser-session") });
+    expect(actionConfirmBinding({ ...bound, digest: "another-definition" }, "browser-session")).not.toBe(challenge!.bindingHash);
+    expect((challenge!.expiresAt as Date).getTime()).toBeLessThanOrEqual((mocks.tables.requests[0]!.expiresAt as Date).getTime());
+    mocks.tables.requests[0]!.expiresAt = new Date(Date.now() + 60_000);
+    await issueActionConfirmChallenge(authority, id);
+    expect(mocks.tables.challenges[1]!.expiresAt).toEqual(mocks.tables.requests[0]!.expiresAt);
+    mocks.tables.requests[0]!.expiresAt = new Date(Date.now() - 1);
+    await expect(issueActionConfirmChallenge(authority, id)).rejects.toMatchObject({ code: "request_closed", status: 409 });
+  });
+  it("tells the passkey prompt only about this session's challenge for a waiting request", async () => {
+    const id = await requested();
+    await issueActionConfirmChallenge(authority, id);
+    const bindingHash = String(mocks.tables.challenges[0]!.bindingHash);
+    expect(await actionConfirmChallengeIsCurrent({ bindingHash, memberId: "member-a", sessionId: "browser-session" })).toBe(true);
+    expect(await actionConfirmChallengeIsCurrent({ bindingHash, memberId: "member-a", sessionId: "another-browser" })).toBe(false);
+    expect(await actionConfirmChallengeIsCurrent({ bindingHash, memberId: "member-b", sessionId: "browser-session" })).toBe(false);
+    await decline(id);
+    expect(await actionConfirmChallengeIsCurrent({ bindingHash, memberId: "member-a", sessionId: "browser-session" })).toBe(false);
+  });
+  it("sends a member without an approval passkey to set one up first", async () => {
+    const id = await requested();
+    mocks.passkeys.mockResolvedValue({ credentials: [], encrypted: null, memberId: "member-a" });
+    await expect(confirm(id)).rejects.toMatchObject({ code: "SENSITIVE_ACTION_SETUP_REQUIRED" });
+    expect(mocks.tables.requests[0]).toMatchObject({ status: "waiting" });
+  });
+  it("declines without a passkey", async () => {
+    const id = await requested();
+    expect(await decline(id)).toEqual({ status: "declined" });
+    expect(mocks.tables.challenges).toEqual([]);
+  });
+});
+
 describe("Murph asks first: the member's answer", () => {
   it("sends the stored request once, after consuming it as unknown, and keeps the server's reply encrypted", async () => {
     const id = await requested();
@@ -235,44 +350,46 @@ describe("Murph asks first: the member's answer", () => {
       expect(mocks.tables.requests[0]).toMatchObject({ status: "unknown", decidedAt: expect.any(Date) });
       return { content: [{ type: "text", text: "Saved to Recipes." }] };
     });
-    expect(await decideActionRequest(authority, id, "confirm")).toEqual({ status: "done", text: "Saved to Recipes." });
+    expect(await confirm(id)).toEqual({ status: "done", text: "Saved to Recipes." });
     expect(sent).toEqual([expect.objectContaining({ name: "add_note", arguments: NOTE })]);
     expect(mocks.tables.requests[0]).toMatchObject({ status: "done" });
     expect(String(mocks.tables.requests[0]!.resultEncrypted)).not.toContain("Saved");
     expect(stored().lastUsedAt).toBeInstanceOf(Date);
-    // Already used: the same page, another tab or a retry gets the outcome, never a second send.
-    expect(await decideActionRequest(authority, id, "confirm")).toEqual({ status: "done", text: "Saved to Recipes." });
-    expect(await decideActionRequest(authority, id, "decline")).toEqual({ status: "done", text: "Saved to Recipes." });
+    expect(mocks.tables.challenges).toEqual([]);
+    // Already used: another tab or a retry gets the outcome, never a second send, and needs no passkey to see it.
+    expect(await decideActionRequest(authority, id, { decision: "confirm", authorization: undefined })).toEqual({ status: "done", text: "Saved to Recipes." });
+    expect(await decline(id)).toEqual({ status: "done", text: "Saved to Recipes." });
     expect(sent).toHaveLength(1);
     expect((await callGateway(NOTE)).content[0]!.text).toMatch(/^Already done\./u);
   });
   it("runs exactly once when two confirmations race", async () => {
     const id = await requested();
     serve(() => ({ content: [{ type: "text", text: "Saved." }] }));
-    const outcomes = await Promise.all([decideActionRequest(authority, id, "confirm"), decideActionRequest(authority, id, "confirm")]);
+    const [one, two] = [await signedConfirmation(id), await signedConfirmation(id)];
+    const outcomes = await Promise.all([decideActionRequest(authority, id, one), decideActionRequest(authority, id, two)]);
     expect(sent).toHaveLength(1);
     // The loser reads whatever the winner has stored so far, never a second run.
     expect(outcomes.map((outcome) => outcome.status)).toContain("done");
     expect(outcomes.every((outcome) => outcome.status === "done" || outcome.status === "unknown")).toBe(true);
   });
   it.each([
-    ["declined", "decline", { status: "declined" }],
-    ["expired", "confirm", { status: "expired" }],
-  ] as const)("sends nothing for a %s request", async (kind, decision, expected) => {
+    ["declined", { status: "declined" }],
+    ["expired", { status: "expired" }],
+  ] as const)("sends nothing for a %s request", async (kind, expected) => {
     const id = await requested();
     serve(() => ({ content: [] }));
-    if (kind === "declined") expect(await decideActionRequest(authority, id, "decline")).toEqual({ status: "declined" });
+    if (kind === "declined") expect(await decline(id)).toEqual({ status: "declined" });
     else mocks.tables.requests[0]!.expiresAt = new Date(Date.now() - 1);
-    expect(await decideActionRequest(authority, id, decision)).toEqual(expected);
-    expect(await decideActionRequest(authority, id, "confirm")).toEqual(expected);
+    expect(await decline(id)).toEqual(expected);
+    expect(await decideActionRequest(authority, id, { decision: "confirm", authorization: undefined })).toEqual(expected);
     expect(sent).toEqual([]);
   });
   it("treats another member's request, or a made-up id, as not found", async () => {
     const id = await requested();
     serve(() => ({ content: [] }));
     const other = { ...authority, session: { ...session, member: { id: "member-b" } } as HostedAppSession };
-    await expect(decideActionRequest(other, id, "confirm")).rejects.toMatchObject({ code: "not_found", status: 404 });
-    await expect(decideActionRequest(authority, "car_x", "confirm")).rejects.toMatchObject({ status: 404 });
+    await expect(decideActionRequest(other, id, { decision: "decline" })).rejects.toMatchObject({ code: "not_found", status: 404 });
+    await expect(decideActionRequest(authority, "car_x", { decision: "decline" })).rejects.toMatchObject({ status: 404 });
     expect(await readActionRequestView("member-b", id)).toBeNull();
     expect(mocks.tables.requests[0]).toMatchObject({ status: "waiting" });
     expect(sent).toEqual([]);
@@ -280,16 +397,18 @@ describe("Murph asks first: the member's answer", () => {
   it("needs the browser session to be current in the transaction that consumes the request", async () => {
     const id = await requested();
     serve(() => ({ content: [] }));
+    const signed = await signedConfirmation(id);
     mocks.sessionCurrent.mockRejectedValue(new Error("session revoked"));
-    await expect(decideActionRequest(authority, id, "confirm")).rejects.toThrow("session revoked");
+    await expect(decideActionRequest(authority, id, signed)).rejects.toThrow("session revoked");
     expect(mocks.tables.requests[0]).toMatchObject({ status: "waiting" });
     expect(sent).toEqual([]);
   });
   it("never sends when the claim's commit can't be confirmed", async () => {
     const id = await requested();
     serve(() => ({ content: [] }));
+    const signed = await signedConfirmation(id);
     mocks.failures.claim = true;
-    await expect(decideActionRequest(authority, id, "confirm")).rejects.toThrow();
+    await expect(decideActionRequest(authority, id, signed)).rejects.toThrow();
     expect(sent).toEqual([]);
   });
   it.each([
@@ -300,8 +419,9 @@ describe("Murph asks first: the member's answer", () => {
   ] as const)("fails without sending when the member %s since Murph asked", async (_case, change, reason) => {
     const id = await requested();
     serve(() => ({ content: [] }));
+    const signed = await signedConfirmation(id);
     setConnection(change);
-    expect(await decideActionRequest(authority, id, "confirm")).toEqual({ status: "failed", reason });
+    expect(await decideActionRequest(authority, id, signed)).toEqual({ status: "failed", reason });
     expect(sent).toEqual([]);
     expect(mocks.tables.requests[0]).toMatchObject({ status: "failed" });
     expect(await readActionRequestView("member-a", id)).toMatchObject({ outcome: { status: "failed", reason } });
@@ -316,14 +436,14 @@ describe("Murph asks first: the member's answer", () => {
   ])("sends nothing when %s during slow setup", async (_case, change) => {
     const id = await requested();
     serve(() => ({ content: [] }), { beforeSetup: async () => { await new Promise((resolve) => setTimeout(resolve, 20)); change(); } });
-    expect(await decideActionRequest(authority, id, "confirm")).toEqual({ status: "failed", reason: "changed" });
+    expect(await confirm(id)).toEqual({ status: "failed", reason: "changed" });
     expect(mocks.fetch).toHaveBeenCalled();
     expect(sent).toEqual([]);
   });
   it("fails without sending when the server can't be reached for setup", async () => {
     const id = await requested();
     mocks.fetch.mockRejectedValue(new Error("connect ECONNREFUSED"));
-    expect(await decideActionRequest(authority, id, "confirm")).toEqual({ status: "failed", reason: "unreachable" });
+    expect(await confirm(id)).toEqual({ status: "failed", reason: "unreachable" });
     expect(sent).toEqual([]);
   });
 });
@@ -342,10 +462,10 @@ describe("Murph asks first: after the call leaves Web", () => {
   it.each(cases)("reads %s as unknown after exactly one send", async (_case, respond) => {
     const id = await requested();
     serve(() => ({ content: [] }), { respond });
-    expect(await decideActionRequest(authority, id, "confirm")).toEqual({ status: "unknown" });
+    expect(await confirm(id)).toEqual({ status: "unknown" });
     expect(sent).toHaveLength(1);
     expect(mocks.tables.requests[0]).toMatchObject({ status: "unknown" });
-    expect(await decideActionRequest(authority, id, "confirm")).toEqual({ status: "unknown" });
+    expect(await decideActionRequest(authority, id, { decision: "confirm", authorization: undefined })).toEqual({ status: "unknown" });
     expect((await callGateway(NOTE)).content[0]!.text).toMatch(/^It's not known whether this happened\./u);
     expect(sent).toHaveLength(1);
     expect(mocks.tables.requests).toHaveLength(1);
@@ -353,7 +473,7 @@ describe("Murph asks first: after the call leaves Web", () => {
   it("reads a server error result as unknown, with the server's own words", async () => {
     const id = await requested();
     serve(() => ({ isError: true, content: [{ type: "text", text: "Folder is full; saved part of the note." }] }));
-    expect(await decideActionRequest(authority, id, "confirm")).toEqual({ status: "unknown", text: "Folder is full; saved part of the note." });
+    expect(await confirm(id)).toEqual({ status: "unknown", text: "Folder is full; saved part of the note." });
     expect(await readActionRequestView("member-a", id)).toMatchObject({ outcome: { status: "unknown", text: "Folder is full; saved part of the note." } });
     expect(sent).toHaveLength(1);
   });
@@ -362,7 +482,7 @@ describe("Murph asks first: after the call leaves Web", () => {
     setConnection({ auth: "oauth", credentialsEncrypted: await sealConnectionSecret("member-a", "cc_notes", 3, "credentials", credentials) });
     const id = await requested();
     serve(() => ({ content: [{ type: "text", text: "your token is synthetic-member-access" }] }));
-    expect(await decideActionRequest(authority, id, "confirm")).toEqual({ status: "unknown" });
+    expect(await confirm(id)).toEqual({ status: "unknown" });
     expect(JSON.stringify(mocks.tables.requests)).not.toContain("synthetic-member-access");
     expect(sent).toHaveLength(1);
   });
@@ -401,7 +521,7 @@ describe("Murph asks first: after the call leaves Web", () => {
     sent.length = 0;
     refuseNextCall = true;
     const id = await requested();
-    expect(await decideActionRequest(authority, id, "confirm")).toEqual({ status: "unknown" });
+    expect(await confirm(id)).toEqual({ status: "unknown" });
     expect(sent).toHaveLength(1);
     expect(refreshes).toHaveLength(1);
   });
@@ -412,9 +532,9 @@ describe("Murph asks first: after the call leaves Web", () => {
     const id = await requested();
     serve(() => ({ content: [{ type: "text", text: "Saved." }] }));
     mocks.failures[failure] = true;
-    expect(await decideActionRequest(authority, id, "confirm")).toEqual({ status: "unknown" });
+    expect(await confirm(id)).toEqual({ status: "unknown" });
     mocks.failures[failure] = false;
-    expect(await decideActionRequest(authority, id, "confirm")).toEqual({ status: "unknown" });
+    expect(await decideActionRequest(authority, id, { decision: "confirm", authorization: undefined })).toEqual({ status: "unknown" });
     expect((await callGateway(NOTE)).content[0]!.text).toMatch(/^It's not known whether this happened\./u);
     expect(sent).toHaveLength(1);
   });
@@ -423,7 +543,7 @@ describe("Murph asks first: after the call leaves Web", () => {
     serve(() => ({ content: [] }));
     // The claim committed, then the process went away before anything else happened.
     Object.assign(mocks.tables.requests[0]!, { status: "unknown", decidedAt: new Date() });
-    expect(await decideActionRequest(authority, id, "confirm")).toEqual({ status: "unknown" });
+    expect(await decideActionRequest(authority, id, { decision: "confirm", authorization: undefined })).toEqual({ status: "unknown" });
     expect(await readActionRequestView("member-a", id)).toMatchObject({ outcome: { status: "unknown" } });
     expect((await callGateway(NOTE)).content[0]!.text).toMatch(/^It's not known whether this happened\./u);
     expect(sent).toEqual([]);
@@ -431,19 +551,37 @@ describe("Murph asks first: after the call leaves Web", () => {
 });
 
 describe("Murph asks first: the confirm page's view", () => {
-  it("opens the stored inputs only while the member can act on them", async () => {
-    const id = await requested();
+  it("opens the stored inputs in the action's declared order, only while the member can act on them", async () => {
+    const id = await requested({ tags: ["dinner"], position: 2, text: NOTE.text, folder: "Recipes" });
     expect(await readActionRequestView("member-a", id)).toEqual({
       askedAt: (mocks.tables.requests[0]!.createdAt as Date).toISOString(), host: "notes.example.com", id,
-      inputs: NOTE, outcome: { status: "waiting" }, server: "Notes", title: "Leave a note",
+      inputs: [{ name: "folder", value: "Recipes" }, { name: "text", value: NOTE.text }, { name: "tags", value: ["dinner"] }, { name: "position", value: 2 }],
+      outcome: { status: "waiting" }, server: "Notes", title: "Leave a note",
     });
-    await decideActionRequest(authority, id, "decline");
+    await decline(id);
     const decided = await readActionRequestView("member-a", id);
     expect(decided).toMatchObject({ outcome: { status: "declined" }, title: "Leave a note" });
     expect(decided).not.toHaveProperty("inputs");
     mocks.tables.requests[0]!.status = "waiting";
+    mocks.tables.requests[0]!.decidedAt = null;
     mocks.tables.requests[0]!.expiresAt = new Date(Date.now() - 1);
     expect(await readActionRequestView("member-a", id)).toMatchObject({ outcome: { status: "expired" } });
     expect(await readActionRequestView("member-a", "not-a-request")).toBeNull();
   });
+  it.each([["done", true], ["unknown", true], ["declined", false], ["failed", false]] as const)(
+    "tells the member when this same change was confirmed before (%s: %s)",
+    async (status, warned) => {
+      const earlier = await requested();
+      const decidedAt = new Date(Date.now() - 2 * 3_600_000);
+      Object.assign(mocks.tables.requests[0]!, { status, decidedAt, createdAt: new Date(decidedAt.getTime() - 60_000) });
+      const again = await requested();
+      expect(again).not.toBe(earlier);
+      const view = await readActionRequestView("member-a", again);
+      if (warned) expect(view?.confirmedBefore).toBe(decidedAt.toISOString());
+      else expect(view).not.toHaveProperty("confirmedBefore");
+      // A different change never warns.
+      const other = await requested({ text: "Buy basil" });
+      expect(await readActionRequestView("member-a", other)).not.toHaveProperty("confirmedBefore");
+    },
+  );
 });

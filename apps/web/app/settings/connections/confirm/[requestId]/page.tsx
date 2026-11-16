@@ -25,9 +25,10 @@ export default async function CustomConnectionConfirmPage({ params }: { params: 
   // Another member's request, or one that never existed, is simply not here.
   const request = await readActionRequestView(access.memberId, (await params).requestId);
   if (!request) notFound();
+  // Not one screen tall: Do it and Don't come after every input. A refresh after a change elsewhere starts afresh.
   return (
-    <LinkPageFrame fit>
-      <CustomConnectionConfirm request={request} />
+    <LinkPageFrame>
+      <CustomConnectionConfirm key={request.outcome.status} request={request} />
     </LinkPageFrame>
   );
 }
