@@ -1,7 +1,7 @@
 "use client";
 
 import { ChevronDownIcon, ChevronRightIcon } from "lucide-react";
-import type { RefObject } from "react";
+import { useState, type RefObject } from "react";
 
 import { LinkPageDots } from "@/src/components/link-page/link-page-dots";
 import { LinkPagePair } from "@/src/components/link-page/link-page-pair";
@@ -113,7 +113,7 @@ function ListScreen({ flow }: { flow: Flow }) {
     <LinkPageScreen
       actions={
         <>
-          <LinkPagePill onClick={() => flow.go({ error: null, kind: "add", url: "" })}>Add a service</LinkPagePill>
+          <LinkPagePill onClick={() => flow.go({ error: null, kind: "add", url: "" })}>Add an MCP server</LinkPagePill>
           <LinkPageLink onClick={flow.leave}>Back to settings</LinkPageLink>
         </>
       }
@@ -121,15 +121,15 @@ function ListScreen({ flow }: { flow: Flow }) {
       detail="Murph can look things up in these in your private chats and check-ins."
       fill
       headingRef={flow.headingRef}
-      title="Your services."
+      title="Your MCP servers."
     >
-      <ul aria-label="Your services" className="flex flex-col gap-2 pt-5">
+      <ul aria-label="Your MCP servers" className="flex flex-col gap-2 pt-5">
         {flow.connections.map((item) => (
           <li key={item.id}>
             <button
               className={cn(
                 ROW_CLASS,
-                "flex w-full items-center gap-3 text-left outline-offset-2 focus-visible:outline-2 focus-visible:outline-[#FFFCF6]/70",
+                "flex w-full items-center gap-3 text-left -outline-offset-2 focus-visible:outline-2 focus-visible:outline-[#FFFCF6]/70",
               )}
               onClick={() => flow.openService(item)}
               type="button"
@@ -182,7 +182,7 @@ function AddScreen({ error, flow, url }: { error: string | null; flow: Flow; url
           style={LINK_PAGE_NIGHT_TOKENS}
         >
           <label className="sr-only" htmlFor={flow.urlId}>
-            Service link
+            MCP server link
           </label>
           <Input
             aria-describedby={failure ? errorId : undefined}
@@ -206,9 +206,9 @@ function AddScreen({ error, flow, url }: { error: string | null; flow: Flow; url
           <DeveloperNote />
         </form>
       }
-      detail="Paste the link the service gave you."
+      detail="Paste the MCP server's link."
       headingRef={flow.headingRef}
-      title="Add a service."
+      title="Add an MCP server."
     />
   );
 }
@@ -223,9 +223,9 @@ function DeveloperNote() {
         <ChevronDownIcon aria-hidden="true" className="size-4 transition-transform group-open:rotate-180" />
       </summary>
       <p className={QUIET_TEXT_CLASS}>
-        Paste a remote MCP server URL (Streamable HTTP over HTTPS). If it needs sign-in, Murph uses the server&apos;s
-        OAuth, and the server must identify itself in its sign-in response (RFC 9207). Murph lists only tools marked
-        read-only, and each starts off.
+        Paste a remote MCP server URL (Streamable HTTP over HTTPS). If the server offers sign-in, Murph signs in with
+        its OAuth, and the server must identify itself in its sign-in response (RFC 9207). Murph can use only tools
+        marked read-only, and each starts off.
       </p>
     </details>
   );
@@ -254,9 +254,11 @@ function ActionError({ flow }: { flow: Flow }) {
 }
 
 function ChooseScreen({ connection, flow, mode }: { connection: CustomConnection; flow: Flow; mode: "edit" | "new" }) {
+  const [details, setDetails] = useState(false);
   const editing = mode === "edit";
   if (editing && connection.status === "needs_sign_in") return <SignedOutScreen connection={connection} flow={flow} />;
-  if (connection.tools.every((tool) => tool.state === "not_allowed")) return <NothingUsableScreen connection={connection} flow={flow} />;
+  const usable = connection.tools.filter((tool) => tool.state !== "not_allowed");
+  if (usable.length === 0) return <NothingUsableScreen connection={connection} flow={flow} />;
   const changed = connection.tools.some((tool) => flow.draft[tool.name] !== (tool.state === "on"));
   const anyOn = Object.values(flow.draft).some(Boolean);
   const saveLabel = editing ? "Save" : `Connect ${connection.name}`;
@@ -284,13 +286,51 @@ function ChooseScreen({ connection, flow, mode }: { connection: CustomConnection
       headingRef={flow.headingRef}
       title={editing ? `${connection.name}.` : "Choose what Murph can use."}
     >
-      <ul aria-label={`Actions from ${connection.name}`} className="flex flex-col gap-2 pt-5">
-        {connection.tools.map((tool) => (
-          <ToolRow flow={flow} key={tool.name} tool={tool} />
+      <button
+        aria-pressed={details}
+        className={cn(QUIET_TEXT_CLASS, "inline-flex min-h-11 shrink-0 items-center gap-1 self-end px-1 outline-none focus-visible:underline")}
+        onClick={() => setDetails(!details)}
+        type="button"
+      >
+        {details ? "Hide details" : "Show details"}
+        <ChevronDownIcon aria-hidden="true" className={cn("size-4 transition-transform motion-reduce:transition-none", details && "rotate-180")} />
+      </button>
+      <ul aria-label={`Actions from ${connection.name}`} className="flex flex-col gap-2">
+        {usable.map((tool) => (
+          <ToolRow details={details} flow={flow} key={tool.name} tool={tool} />
         ))}
       </ul>
+      <LockedTools tools={connection.tools.filter((tool) => tool.state === "not_allowed")} />
       <p className={cn(QUIET_TEXT_CLASS, "pt-4")}>Described by {connection.name}.</p>
     </LinkPageScreen>
+  );
+}
+
+/** Actions Murph can't use yet, folded away so the ones it can use come first. */
+function LockedTools({ tools }: { tools: CustomConnectionTool[] }) {
+  if (tools.length === 0) return null;
+  return (
+    <details className="group pt-2">
+      <summary
+        className={cn(
+          QUIET_TEXT_CLASS,
+          "flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 outline-none focus-visible:underline [&::-webkit-details-marker]:hidden",
+        )}
+      >
+        {tools.length === 1 ? "1 more Murph can't use yet" : `${tools.length} more Murph can't use yet`}
+        <ChevronDownIcon aria-hidden="true" className="size-4 shrink-0 transition-transform group-open:rotate-180 motion-reduce:transition-none" />
+      </summary>
+      <ul className="flex flex-col gap-2 pb-1">
+        {tools.map((tool) => (
+          <li className="flex flex-col" key={tool.name}>
+            <span className="text-[15px] font-semibold leading-5 text-[#FFFCF6]/60">{tool.title || tool.name}</span>
+            <span className={cn(QUIET_TEXT_CLASS, "text-[#FFFCF6]/45")}>
+              {tool.readOnly ? "Its description is too long to check." : "It can change things."}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </details>
   );
 }
 
@@ -308,42 +348,30 @@ function ManageLinks({ connection, flow }: { connection: CustomConnection; flow:
   );
 }
 
-function ToolRow({ flow, tool }: { flow: Flow; tool: CustomConnectionTool }) {
+/** One action: its name, its description when details are shown, and its switch. */
+function ToolRow({ details, flow, tool }: { details: boolean; flow: Flow; tool: CustomConnectionTool }) {
   const id = `${flow.urlId}-${tool.name}`;
-  const blocked = tool.state === "not_allowed";
   return (
     <li>
-      <label className={cn(ROW_CLASS, "flex w-full items-center gap-3", blocked ? "opacity-50" : "cursor-pointer")} htmlFor={id}>
+      <label className={cn(ROW_CLASS, "flex w-full cursor-pointer items-center gap-3")} htmlFor={id}>
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="text-pretty text-[17px] font-semibold leading-[22px]">{tool.title || tool.name}</span>
-          <span className={cn(QUIET_TEXT_CLASS, "line-clamp-3")}>{tool.description}</span>
-          <ToolNote tool={tool} />
+          {details && tool.description ? <span className={QUIET_TEXT_CLASS}>{tool.description}</span> : null}
+          {tool.state === "needs_look" ? (
+            <span className="text-sm font-semibold leading-[19px] text-[#EBD18B]">
+              Changed since you allowed it. Turn it on again if it still looks right.
+            </span>
+          ) : null}
         </span>
         <Checkbox
           checked={flow.draft[tool.name] ?? false}
-          className="size-[26px] rounded-full border-[1.5px] border-[#FFFCF6]/35 data-checked:border-[#FFFCF6] data-checked:bg-[#FFFCF6] data-checked:text-[#2D3436] [&_svg]:size-4"
-          disabled={blocked || flow.pending}
+          className="size-[26px] shrink-0 rounded-full border-[1.5px] border-[#FFFCF6]/35 data-checked:border-[#FFFCF6] data-checked:bg-[#FFFCF6] data-checked:text-[#2D3436] [&_svg]:size-4"
+          disabled={flow.pending}
           id={id}
           onCheckedChange={(checked) => flow.setTool(tool.name, checked === true)}
         />
       </label>
     </li>
-  );
-}
-
-function ToolNote({ tool }: { tool: CustomConnectionTool }) {
-  if (tool.state === "needs_look") {
-    return (
-      <span className="text-sm font-semibold leading-[19px] text-[#EBD18B]">
-        Changed since you allowed it. Turn it on again if it still looks right.
-      </span>
-    );
-  }
-  if (tool.state !== "not_allowed") return null;
-  return (
-    <span className={QUIET_TEXT_CLASS}>
-      {tool.readOnly ? "Murph can't use this one: its description is too long." : "Murph can't use this yet: it may change things."}
-    </span>
   );
 }
 
@@ -381,7 +409,7 @@ function NothingUsableScreen({ connection, flow }: { connection: CustomConnectio
           </LinkPagePill>
         </>
       }
-      detail="Murph can only look things up for now, and this service doesn't offer that yet."
+      detail="Murph can only look things up for now, and this MCP server doesn't offer that yet."
       headingRef={flow.headingRef}
       title="Nothing here Murph can use."
     />
@@ -389,7 +417,7 @@ function NothingUsableScreen({ connection, flow }: { connection: CustomConnectio
 }
 
 function ConnectedScreen({ flow }: { flow: Flow }) {
-  const name = flow.connection?.name ?? "Your service";
+  const name = flow.connection?.name ?? "Your MCP server";
   return (
     <LinkPageScreen
       actions={<LinkPagePill onClick={() => flow.go({ kind: "list" })}>Done</LinkPagePill>}

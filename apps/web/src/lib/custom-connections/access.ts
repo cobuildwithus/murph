@@ -5,11 +5,11 @@ import { notFound, redirect } from "next/navigation";
 import { readHostedExecutionRuntimeAuthority } from "@murphai/hosted-execution/auth";
 import { requireHostedCloudflareCallbackRequest } from "../hosted-execution/cloudflare-callback-auth";
 import { isHostedThreadContainerMember, readActiveHostedMemberAccess } from "../hosted-onboarding/member-access";
-import { getHostedAppSessionFromRequest, requireActiveHostedAppSession } from "../hosted-onboarding/app-session";
+import { getHostedAppSession, getHostedAppSessionFromRequest, requireActiveHostedAppSession } from "../hosted-onboarding/app-session";
 import { assertHostedOnboardingMutationOrigin } from "../hosted-onboarding/csrf";
 import { ConnectionError } from "./errors";
 
-/** Any active person may connect services; group chats (synthetic thread containers) never can. */
+/** Any active person may connect MCP servers; group chats (synthetic thread containers) never can. */
 export async function connectionMemberActive(memberId: string): Promise<boolean> {
   return !!await readActiveHostedMemberAccess({ memberId })
     && !await isHostedThreadContainerMember({ memberId });
@@ -30,8 +30,12 @@ export async function requireConnectionCallback(request: Request): Promise<strin
   return memberId;
 }
 
-/** The Settings page: signed-in members on the rollout list; everyone else gets a 404. */
-export async function requireCustomConnectionsPageAccess(): Promise<void> {
+/**
+ * The Settings page. Signed-out visitors sign in on the page, so a link Murph sent keeps its MCP link;
+ * other session problems go to Settings; group chats get a 404.
+ */
+export async function readCustomConnectionsPageAccess(): Promise<"member" | "signed_out"> {
+  if (!await getHostedAppSession()) return "signed_out";
   let memberId: string;
   try {
     memberId = (await requireActiveHostedAppSession()).member.id;
@@ -39,4 +43,5 @@ export async function requireCustomConnectionsPageAccess(): Promise<void> {
     redirect("/settings");
   }
   if (!await connectionMemberActive(memberId)) notFound();
+  return "member";
 }

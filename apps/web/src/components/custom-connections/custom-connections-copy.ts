@@ -41,7 +41,7 @@ export const CUSTOM_CONNECTION_ERRORS: Record<string, { detail: string; title: s
   },
   url_has_query: {
     title: "Murph can't use that link.",
-    detail: "It has extras after a question mark, often a key. Use the service's plain link.",
+    detail: "It has extras after a question mark, often a key. Use the MCP server's plain link.",
   },
   not_https: {
     title: "That link didn't work.",
@@ -52,24 +52,24 @@ export const CUSTOM_CONNECTION_ERRORS: Record<string, { detail: string; title: s
     detail: "It points somewhere Murph doesn't connect to.",
   },
   not_mcp: {
-    title: "That isn't a service link.",
-    detail: "It opens a regular web page. Check that you copied the whole link the service gave you.",
+    title: "That isn't an MCP server link.",
+    detail: "It opens a regular web page. Check that you copied the whole MCP link.",
   },
   unreachable: {
-    title: "Couldn't reach that service.",
+    title: "Couldn't reach that MCP server.",
     detail: "It didn't answer. Try again in a minute.",
   },
   provider_terms: {
-    title: "That service doesn't allow this.",
+    title: "That MCP server doesn't allow this.",
     detail: "Its terms only let a few AI assistants connect to it, and Murph isn't one of them.",
   },
   sign_in_unsupported: {
-    title: "This service needs its own setup.",
+    title: "This MCP server needs its own setup.",
     detail: "It only lets apps it has approved in advance sign in, so Murph can't connect to it yet.",
   },
   limit: {
     title: "You've reached the limit.",
-    detail: "Remove a service to add another.",
+    detail: "Remove an MCP server to add another.",
   },
   sign_in_failed: {
     title: "Sign-in didn't finish.",
