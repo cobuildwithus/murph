@@ -1,12 +1,9 @@
-import type { Day, Route } from './contract';
+import type { Day, MapQuery, Route } from './contract';
 import type { Candidate } from './registry';
 import type { MeasureState, RouteLeg } from './state';
 import type { StoredAward } from './awards';
-import { cutPolyline, decodePolyline, routeBbox, townPosition } from './route-geometry';
-
-export const MAP_WIDTH = 708;
-export const MAP_HEIGHT = 354;
-export const milesText = (meters: number) => `${Math.round(meters / 1609.344).toLocaleString('en-US')} miles`;
+import { cutPolyline, decodePolyline, MAP_SIZES, routeBbox, townPosition } from './route-geometry';
+import { formatAmount } from './format';
 export const routeMeters = (measureId: string, amount: number) => measureId === 'steps' || measureId.endsWith('.steps') ? amount / 2000 * 1609.344 : amount;
 type Points = readonly [Day, number][];
 const crossingDay = (points: Points, at: number) => points.find(point => point[1] >= at)?.[0] ?? null;
@@ -24,11 +21,20 @@ export function routeLegs(ctx: { measureId: string; legs: readonly RouteLeg[]; p
     const on = crossingDay(points, leg.startTotal + leg.distanceM);
     return on ? [{ key: routeAwardKey(ctx.measureId, leg, index), kind: 'route', measureId: ctx.measureId, subjectMemberId: null, on,
       data: { from: leg.from, to: leg.to, distanceM: leg.distanceM, startTotal: leg.startTotal,
-        face: { drawing: 'route' }, title: leg.to, detail: `${milesText(leg.distanceM)} from ${leg.from}`, page: 'totals' } }] : [];
+        face: { drawing: 'route' }, title: leg.to, detail: `${formatAmount(leg.distanceM, 'meters').text} from ${leg.from}`, page: 'totals' } }] : [];
   });
 }
 
-/** Label coordinates belong to the exact 2:1 PNG linked here; display that image without cropping. */
+/** Map labels share the renderer's viewport. Preview towns have no earned crossing dates. */
+export function routeTowns(leg: RouteLeg, meters: Points, size: MapQuery['size']): Route['towns'] {
+  const { width, height } = MAP_SIZES[size];
+  const geometry = decodePolyline(leg.polyline), bbox = routeBbox(geometry, width, height);
+  return leg.towns.map(town => ({ name: town.name, atText: `mile ${formatAmount(town.atM, 'meters').text.replace(' mi', '')}`,
+    ...townPosition(cutPolyline(geometry, town.atM / leg.distanceM).walked.at(-1)!, bbox),
+    passedOn: crossingDay(meters, leg.startTotal + town.atM) }));
+}
+
+/** Label coordinates belong to the linked card PNG; display that image without cropping. */
 export function routeView(measureId: string, state: MeasureState, points: Points, awards: readonly StoredAward[]): Route | null {
   const legs = state.legs ?? [], leg = legs.at(-1);
   if (!leg) return null;
@@ -37,13 +43,11 @@ export function routeView(measureId: string, state: MeasureState, points: Points
   const meters: [Day, number][] = points.map(([day, amount]) => [day, routeMeters(measureId, amount)]);
   const total = meters.at(-1)?.[1] ?? 0;
   const walked = earnedOn ? leg.distanceM : Math.min(leg.distanceM, Math.max(0, total - leg.startTotal));
-  const geometry = decodePolyline(leg.polyline), bbox = routeBbox(geometry, MAP_WIDTH, MAP_HEIGHT);
-  const map = `/api/game/v1/progress/map?${new URLSearchParams({ measure: measureId, w: String(MAP_WIDTH), h: String(MAP_HEIGHT) })}`;
-  return { name: `${leg.from} to ${leg.to}`, distanceText: milesText(leg.distanceM), walkedText: milesText(walked),
+  const map = `/api/game/v1/progress/map?${new URLSearchParams({ measure: measureId, size: 'card' })}`;
+  return { name: `${leg.from} to ${leg.to}`, distanceText: formatAmount(leg.distanceM, 'meters').text,
+    walkedText: formatAmount(walked, 'meters').text,
     progress: walked / leg.distanceM, straightLine: leg.straightLine,
     finishedOn: earnedOn, map, goalPicked: state.goal !== undefined,
     completed: completions.map(award => ({ name: `${award.data.from} to ${award.data.to}`, finishedOn: award.on })),
-    towns: leg.towns.map(town => ({ name: town.name, atText: `mile ${Math.round(town.atM / 1609.344)}`,
-      ...townPosition(cutPolyline(geometry, town.atM / leg.distanceM).walked.at(-1)!, bbox),
-      passedOn: crossingDay(meters, leg.startTotal + town.atM) })) };
+    towns: routeTowns(leg, meters, 'card'), drawerTowns: routeTowns(leg, meters, 'drawer') };
 }

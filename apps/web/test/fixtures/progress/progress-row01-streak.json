@@ -373,12 +373,12 @@
       "ladder": null,
       "route": {
         "name": "Atlanta to Chattanooga",
-        "distanceText": "118 miles",
+        "distanceText": "118 mi",
         "walkedText": "116 mi",
         "progress": 0.9830508474576272,
         "straightLine": false,
         "finishedOn": null,
-        "map": "/api/game/v1/progress/map?measure=walk.meters&w=700&h=400",
+        "map": "/api/game/v1/progress/map?measure=walk.meters&size=card",
         "towns": [
           {
             "name": "Atlanta",
@@ -396,7 +396,23 @@
           }
         ],
         "goalPicked": true,
-        "completed": []
+        "completed": [],
+        "drawerTowns": [
+          {
+            "name": "Atlanta",
+            "atText": "mile 0",
+            "x": 0.737037,
+            "y": 0.9,
+            "passedOn": "2026-10-21"
+          },
+          {
+            "name": "Chattanooga",
+            "atText": "2 mi to go",
+            "x": 0.341975,
+            "y": 0.1,
+            "passedOn": null
+          }
+        ]
       },
       "pics": []
     }

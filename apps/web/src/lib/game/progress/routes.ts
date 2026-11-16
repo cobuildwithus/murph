@@ -4,7 +4,8 @@ import type { StoredAward } from './awards';
 import { patchMeasureState, type BeforeProgressMutation } from './state';
 import { hostedOnboardingError } from '../../hosted-onboarding/errors';
 import { resolveRoute } from './mapbox';
-import { MAP_HEIGHT, MAP_WIDTH, milesText, replaceRouteLeg, routeMeters } from './route-progress';
+import { replaceRouteLeg, routeMeters, routeTowns } from './route-progress';
+import { formatAmount } from './format';
 import routesByTimeZone from './bank/routes-tz.json';
 import { BANK, search, type BankEntry } from './bank';
 import type { RouteLeg } from './state';
@@ -23,15 +24,16 @@ export async function setFirstRoute(memberId: string, measureId: string, route: 
 }
 
 /** Long bank entries require two named places; numeric and planetary goals are excluded. */
-export async function readRouteGoals(query: string | undefined, unit: 'meters' | 'steps'): Promise<Goals> {
+export async function readRouteGoals(query: string | undefined, unit: 'meters' | 'steps', total: number): Promise<Goals> {
   const eligible = (entry: BankEntry) => entry.kind === 'route' && routePlaces(entry.name) !== null;
   const tile = (entry: BankEntry): Rung => ({ id: entry.id, name: entry.name, drawing: null, at: unit === 'steps' ? entry.at / 1609.344 * 2000 : entry.at,
-    atText: entry.atText, blurb: entry.blurb, where: entry.where, on: null, toGo: null });
+    atText: formatAmount(entry.at, 'meters').text, blurb: entry.blurb, where: entry.where, on: null, toGo: null });
   const tiles = BANK.filter(eligible).slice(0, 6).map(tile);
-  if (!query) return { tiles, match: null, suggestions: [], route: null };
+  if (!query) return { tiles, match: null, suggestions: [], note: null, route: null };
   const places = routePlaces(query);
-  if (places) return { tiles, match: null, suggestions: [], route: await routeGoalPreview(places.from, places.to) };
-  return { tiles, match: null, suggestions: search(query).filter(eligible).slice(0, 4).map(tile), route: null };
+  if (places) return { tiles, match: null, suggestions: [], note: null,
+    route: await routeGoalPreview(places.from, places.to, routeMeters(unit, total)) };
+  return { tiles, match: null, suggestions: search(query).filter(eligible).slice(0, 4).map(tile), note: null, route: null };
 }
 
 /** BE1/BE2 supply their complete canonical series and live mutation authority. */
@@ -61,8 +63,13 @@ export function routePlaces(name: string): { from: string; to: string } | null {
   return parts.length === 2 && parts.every(part => part.trim().length > 0) ? { from: parts[0]!.trim(), to: parts[1]!.trim() } : null;
 }
 
-export async function routeGoalPreview(from: string, to: string): Promise<NonNullable<Goals['route']>> {
+export async function routeGoalPreview(from: string, to: string, totalM: number): Promise<NonNullable<Goals['route']>> {
   const route = await resolveRoute(from, to);
-  return { from, to, distanceText: milesText(route.distanceM), straightLine: route.straightLine,
-    map: `/api/game/v1/progress/map?${new URLSearchParams({ from, to, w: String(MAP_WIDTH), h: String(MAP_HEIGHT) })}` };
+  const current = formatAmount(totalM, 'meters').text.replace(' mi', '');
+  const remaining = formatAmount(Math.max(0, route.distanceM - totalM), 'meters').text.replace(' mi', '');
+  const detail = route.straightLine ? 'As the crow flies. No road crosses the ocean, so Murph counts the straight line.'
+    : `By road. You're ${current} in, so ${remaining} to go.`;
+  return { from, to, distanceText: formatAmount(route.distanceM, 'meters').text.replace(' mi', ' miles'), detail,
+    straightLine: route.straightLine, towns: routeTowns({ ...route, startTotal: 0 }, [], 'card'),
+    map: `/api/game/v1/progress/map?${new URLSearchParams({ from, to, size: 'card' })}` };
 }

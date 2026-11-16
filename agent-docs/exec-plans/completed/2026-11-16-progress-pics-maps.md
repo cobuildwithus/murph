@@ -1,6 +1,6 @@
 # Progress pics and maps
 
-Status: active
+Status: completed
 Created: 2026-11-16
 
 ## Outcome and scope
@@ -29,7 +29,7 @@ background job, cache table, retry or feature flag.
   Progress key namespace and resource kind. Consumer Worker deploy precedes Web.
 - Rebase on the published BE0 contract; never duplicate its types or tables.
 - Integrate current-total reads from their lane owners and one state CAS writer.
-- Create/upload the Murph style and render the two checked comparison routes.
+- The owner uploads the Murph style; rendered comparison maps remain integration work.
 - Run synthetic geometry, provider, storage and HTTP contracts, affected
   typechecks, the requested diff selector, complexity review, and exact-head CI.
 - Commit, push and open a draft PR against main; Ready after local checks. Do not
@@ -37,8 +37,10 @@ background job, cache table, retry or feature flag.
 
 ## Evidence and open dependencies
 
-- Stacked on BE1 at `55df03e617` (PR #5063), which includes BE0 at
-  `9ceaa81ba4` (PR #5061), to reuse the canonical game series.
+- Rebased on the corrected BE1 head `53d03a4ad4` (PR #5063), which includes
+  BE0 on main. Architecture and view conflicts retain BE1 behavior plus BE3
+  route and picture composition. BE1 merged as `17e0164ae6`; the final handoff
+  rebases BE3 onto main, then reruns focused tests and the Web typecheck.
 - Worker storage, HTTP and runtime purge: 18 tests passed, exit 0, including
   before/after-upload retirement and owner/scope rejection.
 - Integrated Web focused suites: 322 tests passed across 14 suites, exit 0.
@@ -97,14 +99,17 @@ background job, cache table, retry or feature flag.
   exit 1) was fixed with leg-position identity. All 322 focused tests and the
   Web typecheck passed afterward (exit 0); no second full Web run is needed for
   this isolated pure-key change.
-- Keep PR #5060 draft and this plan active. Do not merge or run ReviewGPT.
+- The fix-round handoff supersedes the earlier draft hold: mark PR #5060 Ready
+  after checks. Do not merge or run ReviewGPT; the integrator owns both. Style
+  upload and BE2 Steps map wiring are explicitly outside this round.
 
 ## Signature and bounded-effect refinements
 
 - Route rollover (rows 04/10) requires the caller's canonical series and current
   authority, hence the required setter context and computed state patch.
 - Map preview (rows 04/15) adds the explicitly requested `from`/`to` query variant
-  to BE0's parser and enforces Mapbox's documented 1280-pixel maximum.
+  to BE0's parser. The fix round replaces free dimensions with two fixed sizes
+  inside Mapbox's documented 1280-pixel maximum.
 - Picture collections admit at most 10,000 rows through a limit-plus-one read.
   Account deletion rejects an incomplete collection before purging, retires an
   admitted collection serially, then removes its rows. The earlier proposed
@@ -113,3 +118,32 @@ background job, cache table, retry or feature flag.
 
 - Camera transport also limits JPEGs to 2 MiB to fit the existing 3 MiB sealed
   store boundary; the plan's 2048-pixel limit still applies.
+
+## Fix round: previews and fixed map sizes
+
+- Outcome: the Where to drawer names progress against the previewed route;
+  card and walk drawer images use their drawn aspect ratios.
+- Reaches: rows 04/15 route previews, row 01 Totals cards and row 07 walk drawer.
+- Proof: composed goal/map HTTP contracts, shared formatting boundaries, exact
+  Mercator viewports, road versus NoRoute, existing route never-revoke and
+  earned-on tests. No PostgreSQL proof or persistence schema changed this round.
+- `Goals.route.detail` and `Goals.route.towns` are required response fields.
+  Preview town dates are null. Ocean routes skip reverse-geocoding and have no
+  towns. The server formats all route amounts through BE1's `format.ts`.
+- Map queries require `size=card|drawer`; `w` and `h` are rejected. Both sizes
+  use a single 2x scale: card 708 by 405, drawer 708 by 640. Card height is the
+  7:4 height rounded to a pixel.
+- Plan refinement: row 07 requires `Route.drawerTowns`, the same town shape with
+  coordinates for the taller viewport. `Route.map`/`towns` remain card values;
+  the drawer changes the URL size and uses `drawerTowns`. No new persisted
+  field, table, endpoint, flag or registry was added.
+- Fourteen focused Web suites: 374 tests passed (exit 0). Web prepared typecheck
+  and complexity diff passed (exit 0). The requested Web diff selector passed
+  (exit 0): 15,687 tests, 2,795 skipped, typecheck, lint, dev smoke and production
+  build. Runtime changes were stable throughout the selector; fixture wording
+  received the focused contract rerun. Total selector duration: 703 seconds.
+- Product UX: Ready for this backend contract round. Mock rows 04/07/15 were
+  inspected; synthetic tests cover the response path. Deployed rendering still
+  requires the owner-uploaded style and native wiring.
+Updated: 2026-11-16
+Completed: 2026-11-16

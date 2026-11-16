@@ -1,10 +1,29 @@
 import { describe, expect, it } from 'vitest';
 import { replaceRouteLeg, routeAwardKey, routeLegs, routeView } from '../src/lib/game/progress/route-progress';
-import { encodePolyline } from '../src/lib/game/progress/route-geometry';
+import { decodePolyline, encodePolyline, MAP_SIZES, routeBbox, townPosition } from '../src/lib/game/progress/route-geometry';
 import { medalSchema } from '../src/lib/game/progress/contract';
 const leg = { from: 'A', to: 'B', distanceM: 100, polyline: encodePolyline([[0, 0], [1, 0]]), towns: [{ name: 'B', atM: 100 }], straightLine: false, startTotal: 0 };
 const next = { ...leg, from: 'B', to: 'C', distanceM: 200 };
 describe('Progress route legs', () => {
+  it.each([
+    { miles: 8.4, text: '8.4 mi', atText: 'mile 8.4' },
+    { miles: 116.4, text: '116 mi', atText: 'mile 116' },
+    { miles: 31240, text: '31.2k mi', atText: 'mile 31.2k' },
+  ])('uses shared formatting and the matching viewport at $miles miles', ({ miles, text, atText }) => {
+    const distanceM = miles * 1609.344;
+    const route = { ...leg, distanceM, towns: [{ name: 'B', atM: distanceM }], polyline: encodePolyline([[0, 50], [2, 49]]) };
+    const points: [string, number][] = [['2026-11-01', distanceM]];
+    const view = routeView('walk.meters', { legs: [route] }, points, [])!;
+    expect(view).toMatchObject({ distanceText: text, walkedText: text, map: '/api/game/v1/progress/map?measure=walk.meters&size=card' });
+    for (const [size, towns] of [['card', view.towns], ['drawer', view.drawerTowns]] as const) {
+      const { width, height } = MAP_SIZES[size];
+      const geometry = decodePolyline(route.polyline);
+      expect(towns).toEqual([{ name: 'B', atText, passedOn: '2026-11-01',
+        ...townPosition(geometry.at(-1)!, routeBbox(geometry, width, height)) }]);
+    }
+    expect(view.towns[0].x).not.toBe(view.drawerTowns[0].x);
+    expect(routeLegs({ measureId: 'walk.meters', legs: [route], points })[0].data.detail).toBe(`${text} from A`);
+  });
   it.each([
     { total: 80, earned: [], count: 1, start: 0 },
     { total: 120, earned: [], count: 2, start: 120 },

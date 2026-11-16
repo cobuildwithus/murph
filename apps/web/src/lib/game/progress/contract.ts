@@ -16,13 +16,16 @@ export const rungSchema = z.object({
 export type Rung = z.infer<typeof rungSchema>;
 const ladder = z.object({ kind: z.enum(["height", "time"]), passed: z.array(rungSchema), next: rungSchema.nullable(), goalPicked: z.boolean() });
 export type Ladder = z.infer<typeof ladder>;
+const towns = z.array(z.object({ name: z.string(), atText: z.string(), x: z.number(), y: z.number(), passedOn: day.nullable() }));
 const route = z.object({
   name: z.string(), distanceText: z.string(), walkedText: z.string(), progress: z.number(), straightLine: z.boolean(),
   goalPicked: z.boolean(), completed: z.array(z.object({ name: z.string(), finishedOn: day })),
   finishedOn: day.nullable(),
   /** Authenticated Progress map path, never a provider URL. */
   map: z.string(),
-  towns: z.array(z.object({ name: z.string(), atText: z.string(), x: z.number(), y: z.number(), passedOn: day.nullable() })),
+  /** Card coordinates; use drawerTowns when requesting the same map with size=drawer. */
+  towns,
+  drawerTowns: towns,
 });
 export type Route = z.infer<typeof route>;
 const pic = z.object({ id: z.string(), takenOn: day, at: z.number() });
@@ -106,7 +109,8 @@ export type Friends = z.infer<typeof friendsSchema>;
 export const goalsSchema = z.object({
   tiles: z.array(rungSchema), match: rungSchema.nullable(), suggestions: z.array(rungSchema),
   note: z.string().nullable(),
-  route: z.object({ from: z.string(), to: z.string(), distanceText: z.string(), straightLine: z.boolean(), map: z.string() }).nullable(),
+  route: z.object({ from: z.string(), to: z.string(), distanceText: z.string(), detail: z.string(),
+    straightLine: z.boolean(), map: z.string(), towns: route.shape.towns }).nullable(),
 });
 export type Goals = z.infer<typeof goalsSchema>;
 
@@ -124,10 +128,10 @@ const goalsQuery = z.object({ measure: text, q: text.optional() });
 export type GoalsQuery = z.infer<typeof goalsQuery>;
 const picUpload = z.object({ id: z.string().uuid(), measureId: text, takenAt: z.iso.datetime({ offset: true }) });
 export type PicUploadQuery = z.infer<typeof picUpload>;
-const pixels = z.union([z.number(), z.string().regex(/^\d+$/u)]).transform(Number).pipe(z.number().int().positive().max(1280));
+const mapSize = z.enum(["card", "drawer"]);
 const mapQuery = z.union([
-  z.strictObject({ measure: text, w: pixels, h: pixels }),
-  z.strictObject({ from: text, to: text, w: pixels, h: pixels }),
+  z.strictObject({ measure: text, size: mapSize }),
+  z.strictObject({ from: text, to: text, size: mapSize }),
 ]);
 export type MapQuery = z.infer<typeof mapQuery>;
 

@@ -6722,12 +6722,19 @@ facts. Replacing an unfinished route cannot inherit another goal's award, and
 repeating a completed route after a correction cannot reuse the prior leg's key.
 
 Progress maps resolve two permanent geocodes, one simplified driving route and
-eight sequential place reverse-geocodes. Only the provider's explicit NoRoute
-permits a great circle; all other provider failures return retryable 503 with
+eight sequential place reverse-geocodes for road routes. Only the provider's explicit NoRoute
+permits a great circle, with no reverse-geocodes or towns; all other provider failures return retryable 503 with
 no retry or raw provider diagnostics. Maps use the constant Murph style,
-explicit Mercator bounds and two path overlays. The linked PNG is 708 by 354;
-its town coordinates use that exact viewport, and clients display it without
-cropping. Map requests accept their own dimensions and stream private PNGs;
+explicit Mercator bounds and two path overlays. Map requests require `size=card`
+(708 by 405 pixels, the 354pt 7:4 card at 2x rounded to a pixel) or `size=drawer`
+(708 by 640 pixels, the 354 by 320pt drawer at 2x). Free dimensions are rejected.
+`Route.map` links the card; `Route.towns` and `Route.drawerTowns` carry coordinates
+for their respective viewports. The drawer changes only the map query's size.
+Clients display the PNG without cropping. `Goals.route` adds the same town shape
+for its card preview, with null crossing dates, and `detail` from the current
+measure total and remaining route distance. Ocean previews explain the straight
+line and have no towns. These fields are private response-only content, never
+persisted. All route amounts use `format.ts`. Maps stream private PNGs;
 no map object or cache is persisted. Keep Mapbox attribution visible.
 The map handler reads frozen game legs and canonical points, preserves awarded
 finishes after corrections, and rechecks native authority in a short database-only

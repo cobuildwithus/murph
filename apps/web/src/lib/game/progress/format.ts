@@ -19,7 +19,7 @@ export function formatAmount(value: number, unit: MeasureSeries["unit"], style: 
     text = hours ? `${formatNumber(hours, style)}h${minutes ? ` ${minutes}m` : ""}` : minutes ? `${minutes}m` : `${Math.floor(value)}s`;
   } else if (unit === "meters") {
     const miles = value / 1609.344;
-    text = `${miles.toLocaleString("en-US", { maximumFractionDigits: miles < 10 ? 1 : 0 })} mi`;
+    text = `${miles < 10 ? miles.toLocaleString("en-US", { maximumFractionDigits: 1 }) : formatNumber(miles, style)} mi`;
   } else text = formatNumber(value, style);
   return { value, text, unit };
 }

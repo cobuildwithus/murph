@@ -1,6 +1,8 @@
 /** Mapbox polyline coordinates are [longitude, latitude], in degrees. */
 export type Coordinate = [number, number];
 export type Bbox = [number, number, number, number];
+/** Two 2x images for the 354pt column: 7:4 card (rounded to a pixel) and 320pt drawer. */
+export const MAP_SIZES = { card: { width: 708, height: 405 }, drawer: { width: 708, height: 640 } };
 const RADIUS_M = 6_371_008.8;
 const radians = (degrees: number) => degrees * Math.PI / 180;
 const degrees = (angle: number) => angle * 180 / Math.PI;

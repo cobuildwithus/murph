@@ -737,12 +737,12 @@
       "ladder": null,
       "route": {
         "name": "New York to Los Angeles",
-        "distanceText": "2,794 miles",
+        "distanceText": "2,794 mi",
         "walkedText": "1,360 mi",
         "progress": 0.4867573371510379,
         "straightLine": false,
         "finishedOn": null,
-        "map": "/api/game/v1/progress/map?measure=walk.meters&w=700&h=400",
+        "map": "/api/game/v1/progress/map?measure=walk.meters&size=card",
         "towns": [
           {
             "name": "New York",
@@ -771,6 +771,29 @@
           {
             "name": "San Diego to San Francisco",
             "finishedOn": "2026-02-09"
+          }
+        ],
+        "drawerTowns": [
+          {
+            "name": "New York",
+            "atText": "mile 0",
+            "x": 0.95,
+            "y": 0.286426,
+            "passedOn": "2026-02-09"
+          },
+          {
+            "name": "Tulsa",
+            "atText": "2 mi away",
+            "x": 0.4775,
+            "y": 0.535596,
+            "passedOn": null
+          },
+          {
+            "name": "Los Angeles",
+            "atText": "1,434 to go",
+            "x": 0.05,
+            "y": 0.642383,
+            "passedOn": null
           }
         ]
       },

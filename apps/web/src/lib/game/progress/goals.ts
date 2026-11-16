@@ -93,7 +93,7 @@ export async function readGoals(memberId: string, query: GoalsQuery): Promise<Go
   const snapshot = await readGameSeries(memberId, new Date());
   const measure = snapshot.measures.find(measure => measure.id === query.measure);
   if (!measure) throw gameNotFound();
-  if (measure.unit === "meters" || measure.unit === "steps") return readRouteGoals(query.q, measure.unit);
+  if (measure.unit === "meters" || measure.unit === "steps") return readRouteGoals(query.q, measure.unit, cumulativePoints(measure.amounts).at(-1)?.[1] ?? 0);
   const kind = measure.unit === "reps" ? "height" : measure.unit === "seconds" ? "time" : null;
   if (!kind) return { tiles: [], match: null, suggestions: [], note: null, route: null };
   const awards = snapshot.awards;

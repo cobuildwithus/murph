@@ -28,6 +28,6 @@ export const GET = withProgressJsonError(async (request: Request) => runWithHost
       progress = routeView(measure.id, state, cumulativePoints(measure.amounts), snapshot.awards)!.progress;
     }
     await getPrisma().$transaction(tx => assertGameMemberAuthCurrentTx(auth, tx));
-    return renderRouteMap({ polyline, progress, width: query.w, height: query.h, style: MURPH_MAP_STYLE });
+    return renderRouteMap({ polyline, progress, size: query.size, style: MURPH_MAP_STYLE });
   });
 }));

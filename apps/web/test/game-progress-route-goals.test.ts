@@ -7,8 +7,9 @@ vi.mock('../src/lib/prisma', () => ({ getPrisma: () => db }));
 vi.mock('../src/lib/game/progress/crypto', () => ({ progressLookup: () => 'lookup',
   openProgress: async (_target: object, value: string) => JSON.parse(value), sealProgress: mocks.seal }));
 vi.mock('../src/lib/game/progress/mapbox', () => ({ resolveRoute: mocks.resolve }));
-import { routePlaces, setFirstRoute, setRouteGoal } from '../src/lib/game/progress/routes';
+import { readRouteGoals, routePlaces, setFirstRoute, setRouteGoal } from '../src/lib/game/progress/routes';
 import { routeAwardKey } from '../src/lib/game/progress/route-progress';
+import { encodePolyline } from '../src/lib/game/progress/route-geometry';
 
 const leg = { from: 'A', to: 'B', distanceM: 100, polyline: 'synthetic', towns: [], straightLine: false, startTotal: 0 };
 const next = { ...leg, from: 'B', to: 'C', distanceM: 200 };
@@ -16,6 +17,14 @@ const context = () => ({ points: [['2026-11-02', 120]] as [string, number][], aw
 beforeEach(() => { vi.resetAllMocks(); mocks.write.mockResolvedValue({ count: 1 }); mocks.seal.mockResolvedValue('sealed-next'); mocks.resolve.mockResolvedValue(next); });
 
 describe('Progress route goal mutation', () => {
+  it.each([
+    { unit: 'meters', total: 116 * 1609.344 }, { unit: 'steps', total: 116 * 2000 },
+  ] as const)('converts the $unit total once for a route preview', async ({ unit, total }) => {
+    mocks.resolve.mockResolvedValue({ ...next, distanceM: 501 * 1609.344, polyline: encodePolyline([[0, 50], [2, 49]]) });
+    const result = await readRouteGoals('London to Paris', unit, total);
+    expect(result.route).toMatchObject({ distanceText: '501 miles', detail: "By road. You're 116 in, so 385 to go." });
+    expect(mocks.write).not.toHaveBeenCalled();
+  });
   it('freezes the automatic first route without claiming the member picked it', async () => {
     mocks.find.mockResolvedValue(null);
     const first = await setFirstRoute('owner', 'walk.meters', next, mocks.authorize);

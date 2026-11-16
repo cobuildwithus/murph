@@ -22,47 +22,49 @@ beforeEach(() => {
   mocks.render.mockImplementation(async () => new Response(new Uint8Array([137, 80, 78, 71]), { headers: { 'Content-Type': 'image/png' } }));
 });
 describe('Progress map HTTP contract', () => {
-  it('uses only the owner’s frozen leg and canonical total, rechecking authority before rendering', async () => {
-    const response = await GET(request('measure=walk.meters&w=708&h=354'));
+  it.each(['card', 'drawer'])('uses the owner’s frozen leg and rechecks authority for %s', async size => {
+    const response = await GET(request(`measure=walk.meters&size=${size}`));
     expect(response.status).toBe(200); expect(response.headers.get('Content-Type')).toBe('image/png');
     expect(response.headers.get('Cache-Control')).toBe('private, no-store');
     expect([...new Uint8Array(await response.arrayBuffer())]).toEqual([137, 80, 78, 71]);
     expect(mocks.series).toHaveBeenCalledWith('owner', expect.any(Date));
-    expect(mocks.render).toHaveBeenCalledWith({ polyline: leg.polyline, progress: 0.5, width: 708, height: 354, style: MURPH_MAP_STYLE });
+    expect(mocks.render).toHaveBeenCalledWith({ polyline: leg.polyline, progress: 0.5, size, style: MURPH_MAP_STYLE });
     expect(mocks.current.mock.invocationCallOrder[0]).toBeLessThan(mocks.render.mock.invocationCallOrder[0]!);
     expect(mocks.resolve).not.toHaveBeenCalled();
   });
   it('renders an awarded finish fully after the current total shrinks', async () => {
     const candidate = routeLegs({ measureId: 'walk.meters', legs: [leg], points: [['2026-11-01', 1000]] })[0]!;
     mocks.series.mockResolvedValue({ ...snapshot(), awards: [{ ...candidate, id: 'award', createdAt: new Date(), seenAt: null }] });
-    expect((await GET(request('measure=walk.meters&w=708&h=354'))).status).toBe(200);
+    expect((await GET(request('measure=walk.meters&size=card'))).status).toBe(200);
     expect(mocks.render).toHaveBeenCalledWith(expect.objectContaining({ progress: 1 }));
   });
-  it('previews two places without reading or changing measure state', async () => {
-    const response = await GET(request('from=London&to=New%20York&w=708&h=354'));
+  it.each(['card', 'drawer'])('previews two places at %s without reading or changing measure state', async size => {
+    const response = await GET(request(`from=London&to=New%20York&size=${size}`));
     expect(response.status).toBe(200); expect(mocks.resolve).toHaveBeenCalledExactlyOnceWith('London', 'New York');
-    expect(mocks.series).not.toHaveBeenCalled(); expect(mocks.render).toHaveBeenCalledWith(expect.objectContaining({ progress: 0 }));
+    expect(mocks.series).not.toHaveBeenCalled(); expect(mocks.render).toHaveBeenCalledWith(expect.objectContaining({ progress: 0, size }));
   });
-  it.each(['measure=walk.meters&w=1281&h=354', 'measure=walk.meters&from=London&to=Paris&w=708&h=354'])('rejects invalid or mixed queries: %s', async query => {
+  it.each(['measure=walk.meters&w=708&h=405', 'measure=walk.meters&size=poster',
+    'from=London&to=Paris&size=poster', 'measure=walk.meters', 'from=London&to=Paris',
+    'measure=walk.meters&size=card&w=708', 'measure=walk.meters&from=London&to=Paris&size=card'])('rejects invalid or mixed queries: %s', async query => {
     const response = await GET(request(query));
     expect(response.status).toBe(400); expect(response.headers.get('Cache-Control')).toBe('private, no-store');
     expect(mocks.series).not.toHaveBeenCalled(); expect(mocks.render).not.toHaveBeenCalled();
   });
   it('renders nothing from an incomplete collection or absent measure', async () => {
     mocks.series.mockResolvedValue({ ...snapshot(), incomplete: true });
-    expect((await GET(request('measure=walk.meters&w=708&h=354'))).status).toBe(503);
+    expect((await GET(request('measure=walk.meters&size=card'))).status).toBe(503);
     mocks.series.mockResolvedValue({ ...snapshot(), measures: [] });
-    expect((await GET(request('measure=walk.meters&w=708&h=354'))).status).toBe(404);
+    expect((await GET(request('measure=walk.meters&size=card'))).status).toBe(404);
     expect(mocks.render).not.toHaveBeenCalled();
   });
   it('does not render after live authority is revoked', async () => {
     mocks.current.mockRejectedValue(hostedOnboardingError({ code: 'UNAUTHENTICATED', httpStatus: 401, message: 'Sign in to continue.' }));
-    expect((await GET(request('measure=walk.meters&w=708&h=354'))).status).toBe(401);
+    expect((await GET(request('measure=walk.meters&size=card'))).status).toBe(401);
     expect(mocks.render).not.toHaveBeenCalled();
   });
   it('returns a fixed private 503 for dependency failures', async () => {
     mocks.resolve.mockRejectedValue(new Error('private-provider-body'));
-    const response = await GET(request('from=London&to=Paris&w=708&h=354'));
+    const response = await GET(request('from=London&to=Paris&size=card'));
     expect(response.status).toBe(503); expect(response.headers.get('Cache-Control')).toBe('private, no-store');
     expect(await response.json()).toEqual({ error: { code: 'PROGRESS_UNAVAILABLE', message: 'Progress could not load. Try again.', retryable: true } });
     expect(mocks.resolve).toHaveBeenCalledTimes(1); expect(mocks.render).not.toHaveBeenCalled();

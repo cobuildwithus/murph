@@ -75,6 +75,26 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); });
 
 describe("Progress HTTP contracts", () => {
+  it.each([
+    { distance: 501, total: 116, distanceText: "501 miles", detail: "By road. You're 116 in, so 385 to go.", straightLine: false },
+    { distance: 8.4, total: 1.2, distanceText: "8.4 miles", detail: "By road. You're 1.2 in, so 7.2 to go.", straightLine: false },
+    { distance: 31240, total: 10000, distanceText: "31.2k miles", detail: "By road. You're 10k in, so 21.2k to go.", straightLine: false },
+    { distance: 10, total: 11, distanceText: "10 miles", detail: "By road. You're 11 in, so 0 to go.", straightLine: false },
+    { distance: 3459, total: 116, distanceText: "3,459 miles", detail: "As the crow flies. No road crosses the ocean, so Murph counts the straight line.", straightLine: true },
+  ])("previews $distance miles using the canonical $total-mile total", async ({ distance, total, distanceText, detail, straightLine }) => {
+    mocks.entries.mockResolvedValue([{ ...routeEntry(), payloadEncrypted: JSON.stringify({ activity: "walk", distanceM: total * 1609.344, durationSec: 600 }) }]);
+    mocks.resolveRoute.mockResolvedValue({ ...routeLeg, distanceM: distance * 1609.344, straightLine,
+      towns: straightLine ? [] : [{ name: "Town", atM: 1.2 * 1609.344 }] });
+    const response = await goals(request("/goals?measure=walk.meters&q=London%20to%20Paris"));
+    expect(response.status).toBe(200); expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+    const body = goalsSchema.parse(await response.json());
+    expect(body).toMatchObject({ note: null, route: { from: "London", to: "Paris", distanceText, detail, straightLine,
+      map: "/api/game/v1/progress/map?from=London&to=Paris&size=card" } });
+    expect(body.route!.towns).toEqual(straightLine ? [] : [{ name: "Town", atText: "mile 1.2", x: expect.any(Number), y: expect.any(Number), passedOn: null }]);
+    expect(mocks.resolveRoute).toHaveBeenCalledExactlyOnceWith("London", "Paris");
+    expect(mocks.patch).not.toHaveBeenCalled(); expect(mocks.createAwards).not.toHaveBeenCalled();
+  });
+
   it("freezes one resolved first route for both distance measures without marking it picked", async () => {
     mocks.entries.mockResolvedValue([routeEntry(), { ...entryRow(1), kind: "route", payloadEncrypted: JSON.stringify({ activity: "run", distanceM: 500, durationSec: 300 }) }]);
     mocks.resolveRoute.mockResolvedValue({ ...routeLeg, distanceM: 100000 });
