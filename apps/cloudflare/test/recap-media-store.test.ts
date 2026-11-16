@@ -1,7 +1,7 @@
 import { hostedRecapMediaObjectKey, hostedProgressPicObjectKey } from '../src/storage-paths.ts';
 import { purgeHostedRuntimeResource } from '../src/worker/route-handlers/runtime-resource-purge.ts';
 import { describe, expect, it } from "vitest";
-import { createRecapMediaStore, createProgressPicStore, requireSealedGameMediaUpload, retireRecapMediaObject } from "../src/recap-media-store.ts";
+import { createRecapMediaStore, createProgressPicStore, requireRecapMediaEnvelope, requireProgressPicUpload, retireRecapMediaObject } from "../src/recap-media-store.ts";
 import { recapMediaRoutes } from "../src/worker/route-handlers/recap-media.ts";
 import { MemoryEncryptedR2Bucket } from "./test-helpers.ts";
 import { readHostedExecutionEnvironment } from '../src/env.ts';
@@ -19,7 +19,8 @@ const envelope = JSON.stringify({ alg: "AES-256-GCM-HKDF-SHA256", ciphertext: "c
   lane: "hosted-member-private-field", rootKeyId: "root-synthetic", schema: "murph.hosted-secure-box.v1", scope: "weekly-game" });
 
 async function write(store: ReturnType<typeof createRecapMediaStore>, id: string, envelope: string, hash: string) {
-  return store.write(id, requireSealedGameMediaUpload(envelope, hash, id.startsWith("progress/") ? "game-progress" : "weekly-game"));
+  return store.write(id, id.startsWith("progress/") ? requireProgressPicUpload(envelope, hash)
+    : { envelope: requireRecapMediaEnvelope(envelope, hash), hash });
 }
 
 describe("recap sealed storage", () => {
@@ -122,7 +123,7 @@ describe("Progress sealed storage", () => {
   });
   it("rejects a recap envelope on the Progress upload boundary", () => {
     const recap = JSON.stringify({ ...JSON.parse(envelope), scope: "weekly-game" });
-    expect(() => requireSealedGameMediaUpload(recap, "a".repeat(64), "game-progress")).toThrow("scope");
+    expect(() => requireProgressPicUpload(recap, "a".repeat(64))).toThrow("scope");
   });
   it("isolates owners and namespaces even when bytes are identical", async () => {
     const bucket = new ConditionalBucket();

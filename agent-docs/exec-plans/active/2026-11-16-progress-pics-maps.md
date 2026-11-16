@@ -75,16 +75,24 @@ background job, cache table, retry or feature flag.
   placeholder in `routes.ts` with its owner/style id. It is not deployable yet.
 - Render the San Diego to San Francisco and London to New York comparison PNGs
   and verify the deployed server token/style. These await the custom style.
-- Integrate BE2's health sums into route initialization/settlement and the map
-  reader. The current map handler reads BE1 games; wearable Steps is not wired.
-  BE1 and BE2 both publish `view.ts`, so their composition belongs in the lane
-  integration rather than copying a second health totals implementation here.
+- Connect BE2's canonical health reader to the map handler when the lanes are
+  combined. BE2's published `1758ac245a` already composes Steps initialization,
+  settlement and views through these shared route helpers. The current map
+  handler reads BE1 games. BE2 includes earlier BE3 commits and both lanes amend
+  `view.ts`; preserve the latest BE3 route identity and picture changes when
+  integrating instead of copying a second health totals implementation here.
 - POST pictures, game pins, first routes, route goals/previews and completion
   medals are now wired. `setFirstRoute` takes one resolved route so a first read
   makes only one provider resolution for all missing game legs.
 - The app-scoped selector passed the complete Web verify command: 15,616 tests
   passed, 2,792 skipped; typecheck, lint, dev smoke and production build passed.
-  Worker verification is queued for the shared host slot.
+  Worker verification initially failed nine existing recap contracts (selector
+  exit 1). The shared storage refactor had changed rejection messages, stored
+  record validation and normalized-envelope size checks. Restoring those
+  existing recap boundaries preserves Progress's once-only request validation.
+  Four focused Worker suites passed all 112 tests (exit 0). The Worker-only
+  diff selector then passed typecheck and all 5,221 tests: 5,182 Node, 20 helper
+  and 19 Workers-runtime tests (exit 0; two Node tests skipped).
 - After that Web run, a reproduced repeated-route key collision (regression
   exit 1) was fixed with leg-position identity. All 322 focused tests and the
   Web typecheck passed afterward (exit 0); no second full Web run is needed for

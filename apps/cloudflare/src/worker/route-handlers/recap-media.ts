@@ -1,7 +1,7 @@
 import { parseInput, RequestInputError, RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import { CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS, matchCloudflareHostedControlUserRoutePath } from "@murphai/cloudflare-hosted-control/routes";
 import { requireHostedRecapMediaId, requireHostedProgressPicId } from "../../storage-paths.ts";
-import { createRecapMediaStore, createProgressPicStore, requireSealedGameMediaUpload } from "../../recap-media-store.ts";
+import { createRecapMediaStore, createProgressPicStore, requireRecapMediaEnvelope, requireProgressPicUpload } from "../../recap-media-store.ts";
 import { json, jsonError, readRequestBodyText } from "../../json.ts";
 import type { WorkerRouteContext } from "../../worker-routes/shared.ts";
 import { requireBoundInternalRouteUser } from "../auth.ts";
@@ -27,12 +27,13 @@ export const recapMediaRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] =
       return result ? new Response(JSON.stringify(result), { headers: { "content-type": "application/json", "cache-control": "private, no-store" } }) : jsonError("Recap media not found.", 404);
     }
     const hash = context.request.headers.get("x-murph-recap-hash") ?? "";
-    let upload: ReturnType<typeof requireSealedGameMediaUpload>;
+    let upload: ReturnType<typeof requireProgressPicUpload>;
     try {
       const body = await readRequestBodyText(context.request, { limitBytes: 3 * 1024 * 1024 });
-      upload = parseInput(body, () => requireSealedGameMediaUpload(body, hash, progress ? "game-progress" : "weekly-game"));
+      upload = parseInput(body, () => progress ? requireProgressPicUpload(body, hash)
+        : { hash, envelope: requireRecapMediaEnvelope(body, hash) });
     } catch (error) {
-      if (error instanceof RequestInputError || error instanceof SyntaxError) return jsonError("Invalid sealed media.", 400);
+      if (error instanceof RequestInputError || error instanceof SyntaxError) return jsonError(progress ? "Invalid sealed progress picture." : "Invalid sealed recap asset.", 400);
       if (error instanceof RequestBodyTooLargeError) return jsonError("Recap asset is too large.", 413);
       throw error;
     }

@@ -6676,7 +6676,11 @@ Progress pictures have a separate owner-only Web route and random
 control key with `game-progress` scope and table/key/field AAD before the
 Worker stores them. They never use game photo, avatar or recap keys. The
 member-bound `progress-pics/{stage,read}` control routes share recap's
-conditional-create storage primitive. `game_progress_pic` purge replaces the
+conditional-create storage primitive. Progress validates uploads once at the
+Worker route and decodes its own typed records directly. Recap retains its
+existing envelope normalization, stored-record validation and error responses;
+the shared primitive does not change that shipped contract.
+`game_progress_pic` purge replaces the
 same object with a permanent content-free tombstone outside account-prefix
 removal; neither a delayed upload nor legacy recovery can replace it.
 
