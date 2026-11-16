@@ -1271,6 +1271,9 @@ attests the target as a sent Murph message, and Web derives the actor from the
 reaction's own synthetic message. The asker, other people, unrelated targets,
 negative reactions and question reactions do not approve. Telegram group
 reactions remain context only and cannot trigger this path.
+The first message that creates a game chat records its accepted Web delivery
+receipt as a terminal outbox entry, so it supports the same reaction attestation
+without queuing another send.
 
 Several requested fields travel together in one pair proposal or group terms
 edit. An addition to the asker's own waiting ask cancels it and replaces it with

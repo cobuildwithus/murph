@@ -313,6 +313,7 @@ export type AssistantOutboxCreateIntentInput = {
   initialState?:
     | { status: 'pending' }
     | { nextAttemptAt: string; status: 'awaiting_approval' }
+    | { delivery: AssistantChannelDelivery; status: 'sent' }
   card?: AssistantResponseCard | null
   media?: readonly AssistantResponseMedia[] | null
   message: string
@@ -341,7 +342,6 @@ export async function createAssistantOutboxIntent(
     timing.turnTimingOutboxLockWaitMs = performance.now() - lockRequestedAt
     await ensureAssistantState(paths)
     const createdAt = input.createdAt ?? new Date().toISOString()
-    const initialState = input.initialState ?? { status: 'pending' as const }
     const media = stripAssistantResponseMediaPlacement(
       normalizeAssistantResponseMediaList(input.media ?? []),
     )
@@ -531,6 +531,9 @@ export async function createAssistantOutboxIntent(
       return upgradedExisting
     }
 
+    const { diagnostic, ...initialState } = buildAssistantOutboxInitialState(
+      input.initialState ?? { status: 'pending' }, createdAt, persistedTarget.channel,
+    )
     const intent = assistantOutboxIntentSchema.parse({
       schema: ASSISTANT_OUTBOX_INTENT_SCHEMA,
       intentId: `outbox_${randomUUID().replace(/-/gu, '')}`,
@@ -539,13 +542,8 @@ export async function createAssistantOutboxIntent(
       createdAt,
       updatedAt: createdAt,
       lastAttemptAt: null,
-      nextAttemptAt:
-        initialState.status === 'awaiting_approval'
-          ? initialState.nextAttemptAt
-          : createdAt,
-      sentAt: null,
+      ...initialState,
       attemptCount: 0,
-      status: initialState.status,
       message,
       emailHtml: input.emailHtml ?? null,
       media,
@@ -562,7 +560,6 @@ export async function createAssistantOutboxIntent(
       plannedOccurrenceAt: input.plannedOccurrenceAt ?? null,
       scheduledOccurrenceAt: input.scheduledOccurrenceAt ?? null,
       externalThreadRouteAuthority: input.externalThreadRouteAuthority ?? null,
-      delivery: null,
       deliveryConfirmationPending: false,
       deliveryIdempotencyKey,
       deliveryTransportIdempotent,
@@ -612,14 +609,10 @@ export async function createAssistantOutboxIntent(
     await recordAssistantDiagnosticEvent({
       vault: input.vault,
       component: 'outbox',
-      kind: 'delivery.queued',
-      message: `Queued outbound delivery for ${intent.channel ?? 'unknown'} channel.`,
+      ...diagnostic,
       sessionId: intent.sessionId,
       turnId: intent.turnId,
       intentId: intent.intentId,
-      counterDeltas: {
-        deliveriesQueued: 1,
-      },
     })
 
     timing.turnTimingOutboxDiagnosticMs = performance.now() - diagnosticStartedAt
@@ -627,6 +620,23 @@ export async function createAssistantOutboxIntent(
   })
   reportHostedAssistantPersistenceTiming(input.onPersistenceTiming, timing)
   return result
+}
+
+function buildAssistantOutboxInitialState(
+  state: NonNullable<AssistantOutboxCreateIntentInput['initialState']>,
+  createdAt: string,
+  channel: string | null,
+) {
+  const delivery = state.status === 'sent' ? state.delivery : null
+  return {
+    status: state.status,
+    delivery,
+    sentAt: delivery?.sentAt ?? null,
+    nextAttemptAt: state.status === 'awaiting_approval' ? state.nextAttemptAt : delivery ? null : createdAt,
+    diagnostic: delivery
+      ? { kind: 'delivery.sent' as const, message: 'Recorded an accepted outbound delivery.', counterDeltas: { deliveriesSent: 1 } }
+      : { kind: 'delivery.queued' as const, message: `Queued outbound delivery for ${channel ?? 'unknown'} channel.`, counterDeltas: { deliveriesQueued: 1 } },
+  }
 }
 
 export async function readAssistantOutboxIntent(

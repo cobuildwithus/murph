@@ -1,5 +1,8 @@
 import { SYNTHETIC_SLEEP_CARD } from './support/sleep-card-fixture.js'
 import { renderAssistantResponseCardText } from '@murphai/operator-config/assistant-response-cards'
+import { createAssistantModelTarget } from '@murphai/operator-config/assistant-backend'
+import { deliverAssistantGameBootstrapMessage } from '../src/assistant/game-chat-bootstrap.ts'
+import { resolveAssistantSession } from '../src/assistant/store.ts'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -5265,6 +5268,37 @@ describe('assistant auto-reply event-first path', () => {
     )
   })
 
+  it.each([true, false])('attests a reaction to a game chat opening from its accepted receipt (exact target=%s)', async (exactTarget) => {
+    const vault = await createTempVault()
+    const target = createAssistantModelTarget({ provider: 'codex-cli', model: 'gpt-6.1-sol', approvalPolicy: 'never', sandbox: 'read-only' })
+    if (!target) throw new Error('Expected synthetic model target.')
+    const memberId = 'synthetic-group'
+    const bootstrap = await resolveAssistantSession({ vault, target, channel: 'linq', identityId: memberId, threadIsDirect: false })
+    const receipt = { status: 'sent' as const, message: 'Sam, can we switch the challenge to weekdays?',
+      chatId: 'thread-1', accountLookupKey: 'synthetic-account', deliveryId: 'synthetic-delivery',
+      providerMessageId: 'game-opening-message', acceptedAt: '2026-04-08T00:05:00.000Z' }
+    const sent = await deliverAssistantGameBootstrapMessage({ bootstrap: { send: async () => receipt, recover: async () => receipt },
+      message: receipt.message, memberId, session: bootstrap.session, turnId: 'turn-bootstrap', vault })
+    replyEventPathMocks.lookupAssistantSession.mockResolvedValue({ created: false, session: sent.session })
+    replyEventPathMocks.listAssistantOutboxIntents.mockImplementation(query => listAssistantOutboxIntentsForAutoReplyRoute(query))
+    const candidate = createAssistantInputCandidate({ accountId: sent.session.binding.identityId, actorId: 'asked-player',
+      threadId: sent.session.binding.threadId, occurredAt: '2026-04-08T00:10:00.000Z', optionalInboxCaptureId: null,
+      replyTarget: { channel: 'linq', messageId: 'reaction-event', threadId: receipt.chatId }, source: 'linq',
+      sourceMetadata: { affirmativeReaction: true, externalThreadRouteAuthorityPresent: true, kind: 'linq', partCount: 1,
+        reactionEligible: false, replyToMessageId: exactTarget ? receipt.providerMessageId : 'unattested-message', service: 'iMessage' },
+      text: 'Reacted with a heart reaction.', threadIsDirect: false })
+    const result = await processReply({ context: createReplyContext(candidate), enabledChannels: ['linq'], vault })
+    expect(result).toMatchObject({ failed: 0, replied: exactTarget ? 1 : 0, skipped: exactTarget ? 0 : 1 })
+    if (exactTarget) {
+      expect(replyEventPathMocks.sendAssistantMessage).toHaveBeenCalledOnce()
+      const input = replyEventPathMocks.sendAssistantMessage.mock.calls[0]![0]
+      expect(input.reactionRouting).toEqual({ reaction: candidate.event.text, targetMessage: receipt.message })
+      expect(input.acceptedTurnInput.initialInputs).toEqual([expect.objectContaining({ id: candidate.acceptedInput.id })])
+    } else {
+      expect(replyEventPathMocks.sendAssistantMessage).not.toHaveBeenCalled()
+    }
+  })
+
   it('terminally suppresses an affirmative Linq reaction without an exact same-route sent target', async () => {
     const vault = await createTempVault()
     replyEventPathMocks.listAssistantOutboxIntents.mockResolvedValue([
@@ -6197,6 +6231,7 @@ function createAssistantInputCandidate(input: {
   sourceMetadata?: AssistantInputSourceMetadata
   sourceRef?: AssistantInputCandidate['event']['sourceRef']
   text: string | null
+  threadId?: string | null
   threadIsDirect: boolean | null
   usageRunningLow?: true
 }): AssistantInputCandidate {
@@ -6210,7 +6245,7 @@ function createAssistantInputCandidate(input: {
     actorId: input.actorId === undefined ? 'actor-1' : input.actorId,
     actorIsSelf: input.actorIsSelf ?? false,
     source: input.source,
-    threadId: 'thread-1',
+    threadId: input.threadId === undefined ? 'thread-1' : input.threadId,
     threadIsDirect: input.threadIsDirect,
   }
 

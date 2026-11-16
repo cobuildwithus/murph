@@ -29,11 +29,19 @@ and propose the requested fields that are still allowed.
 ## Evidence
 
 Implemented in the classifier, generic reaction turn context and game tool rules.
-No new ingress or transport code was needed. Linq's reactor-owned synthetic
+No new ingress code was needed. Linq's reactor-owned synthetic
 message carries its native target and is accepted in group turns after exact
 sent-delivery attestation. The existing sender resolver maps the reactor's
 handle, ignoring transport attribution. Telegram reactions use the consumed
 context mailbox and do not trigger this path.
+
+Final path review found that a game chat's first message bypassed the outbox,
+so reactions to that message failed attestation. The accepted Web receipt now
+creates a terminal outbox entry through the existing intent owner. It never
+queues a resend; the receipt key deduplicates recovery. Normal notification
+delivery passes its turn ID and completed recovery reads the existing entry.
+The old runtime did not record these opening messages in the outbox; this does
+not backfill already completed historical deliveries.
 
 Combined edits already preserve all parsed fields and validate atomically. The
 existing task lock rejects the entire request; a reduced schedule-only proposal
@@ -76,9 +84,16 @@ including a heart on an agreement ask, with no fallback.
 All 15 game journeys and the 27-case classifier eval passed (each command exit
 0), including the three earlier-message regressions. The final reactor fixture
 uses the real sender resolver and ignores misleading transport attribution:
-55 Web authority tests passed again (exit 0). The broad diff-scoped check is
-running. The
-same PR result body holds the final results and exact-head CI status. Prior
+55 Web authority tests passed again (exit 0). The initial addendum diff run
+loaded old prompt text before a concurrent edit and exited 1; its rerun passed
+6302 engine tests before being stopped (exit 130) for the opening-message fix.
+That fix's real-storage bootstrap, notification, auto-reply and outbox suites
+pass 431 tests (one skip), exit 0. Engine typecheck, docs drift and complexity
+pass, exit 0; outbox complexity debt decreases by two. Initial fixture/mock
+assumptions failed (tests exit 1, typecheck exit 2), then were corrected. The
+first complexity run exited 1; deriving the initial state once removed the
+repeated branches. A final diff-scoped rerun covers the complete candidate.
+The same PR result body holds its final result and exact-head CI status. Prior
 24-hour work and PostgreSQL evidence remain in the completed 2026-11-15 plan.
 Product UX: Ready for the journeys completed above; no known implementation gap.
 
