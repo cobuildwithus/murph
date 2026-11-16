@@ -27,7 +27,10 @@ import {
   parseHostedLinqWebhookEvent,
   sendHostedLinqChatMessage,
 } from "./linq";
-import { getHostedLinqChatSummary } from "./linq-client";
+import {
+  getHostedLinqChatSummary,
+  isHostedLinqIdempotencyKeyReuseFailure,
+} from "./linq-client";
 import {
   claimHostedLinqSignupLinkReminderNotice,
   releaseHostedLinqSignupLinkReminderNoticeClaim,
@@ -227,30 +230,19 @@ export function withHostedVisibleSecondaryLinqOutcomes(
           })
         : null;
     if (await readHostedLinqGroupLeave({ chatId: context.summary.chatId, prisma })) return { ok: true, ignored: true, reason: "group-left" };
-    if (privateRecovery) {
-      try {
-        await dependencies.sendHostedLinqChatMessage({
-          chatId: privateRecovery.chatId,
-          idempotencyKey: buildHostedLinqPrivateGroupRecoveryId({
-            recoveryKind: privateRecovery.recoveryKind,
-            recoverySeed: privateRecoverySeed,
-          }),
-          message: privateRecovery.message,
-          replyToMessageId: null,
-          ...(input.signal ? { signal: input.signal } : {}),
-        });
-
-        return groupSetupAlreadySent
-          ? response
-          : buildVisibleSecondaryResponse(response, reason);
-      } catch (error) {
-        if (![400, 404, 410, 415, 422].includes(readHostedLinqPermanentRejectionStatus(error))) {
-          throw error;
-        }
-        // A provider-confirmed permanent rejection means the private message
-        // did not land. Continue to the neutral room response instead of
-        // retrying a stale private route forever.
-      }
+    if (privateRecovery && await deliverHostedLinqPrivateGroupRecovery(dependencies.sendHostedLinqChatMessage({
+      chatId: privateRecovery.chatId,
+      idempotencyKey: buildHostedLinqPrivateGroupRecoveryId({
+        recoveryKind: privateRecovery.recoveryKind,
+        recoverySeed: privateRecoverySeed,
+      }),
+      message: privateRecovery.message,
+      replyToMessageId: null,
+      ...(input.signal ? { signal: input.signal } : {}),
+    }))) {
+      return groupSetupAlreadySent
+        ? response
+        : buildVisibleSecondaryResponse(response, reason);
     }
 
     // The primary handler already sent the account-neutral setup guidance to
@@ -271,6 +263,24 @@ export function withHostedVisibleSecondaryLinqOutcomes(
       signal: input.signal,
     });
   };
+}
+
+/**
+ * True once today's private recovery is in the member's chat. The key names one
+ * recovery per member per day, so Linq refusing that key with different text
+ * (a re-minted invite link) means an earlier send already landed. False only
+ * when Linq refused the send for good, so the caller falls back to the room
+ * instead of retrying a stale private route forever. Anything else rethrows.
+ */
+async function deliverHostedLinqPrivateGroupRecovery(send: Promise<unknown>): Promise<boolean> {
+  try {
+    await send;
+    return true;
+  } catch (error) {
+    if (isHostedLinqIdempotencyKeyReuseFailure(error)) return true;
+    if ([400, 404, 410, 415, 422].includes(readHostedLinqPermanentRejectionStatus(error))) return false;
+    throw error;
+  }
 }
 
 // The provider status of a Linq request Linq refused for good; 0 for anything

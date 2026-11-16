@@ -328,18 +328,16 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     expect(await reserveGameEveningCheckIn(f.roomId, [id], eveningAt)).toBe(1);
   });
 
-  it("stops the evening pass on a bound live room with no route row", async () => {
+  // A pair game goes live before its chat exists, and creating that chat can wait a day for line capacity.
+  it("skips the evening check-in for a bound live room with no route row yet", async () => {
     vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");
     const f = await fixture(), id = await f.addGame();
     proof.realRoutes.add(f.roomId);
     await db.hostedThreadRoute.deleteMany({ where: { containerMemberId: f.roomId } });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const failure = await reserveGameEveningCheckIn(f.roomId, [id], eveningAt).catch(error => error);
-    expect(failure).toBeInstanceOf(Error);
-    expect(failure).not.toBeInstanceOf(GameChatAudienceError);
-    expect(failure.message).toBe("Game chat route is unavailable.");
+    expect(await reserveGameEveningCheckIn(f.roomId, [id], eveningAt)).toBe(0);
     expect(await db.hostedLinqDelivery.count({ where: { payloadOwnerMemberId: f.roomId } })).toBe(0);
-    expect(warn).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledExactlyOnceWith(expect.any(String), { warning: "game.evening.room-skipped", reason: "route_removed" });
   });
 
   it("combines pair and group games in one mixed-room evening witness", async () => {
@@ -588,11 +586,12 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     expect(open).toHaveBeenCalledOnce();
   });
 
-  it("stops the pass on a bound room with no route row, which deletion never leaves behind", async () => {
-    const [roomId] = await shardRooms(1), f = await fixture(3, roomId);
-    await f.addGame(); proof.realRoutes.add(f.roomId);
-    await db.hostedThreadRoute.deleteMany({ where: { containerMemberId: f.roomId } });
-    await expectPassStopped(f, "Game chat route is unavailable.");
+  // The removed-line repair detaches a live group's route, so the room is skipped and later rooms still get theirs.
+  it("skips a bound room with no route row and keeps draining", async () => {
+    await drainPastBrokenRoom("route_removed", async f => {
+      proof.realRoutes.add(f.roomId);
+      await db.hostedThreadRoute.deleteMany({ where: { containerMemberId: f.roomId } });
+    });
   });
 
   it.each([
