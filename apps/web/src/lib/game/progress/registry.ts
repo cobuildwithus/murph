@@ -2,6 +2,8 @@ import type { GameRepsData, GameRouteData } from "../contract";
 import type { Day } from "./contract";
 import type { MedalFace, Rung } from "./contract";
 import { ladderRungs, roundTotals, streakRuns } from "./achievements";
+import { routeLegs } from "./route-progress";
+import type { RouteLeg } from "./state";
 
 export const EXERCISES = {
   pushups: { label: "Pushups", icon: "pushups", ftPerRep: 1 },
@@ -56,9 +58,13 @@ export interface AchievementContext {
     points: readonly [Day, number][];
     rounds: readonly { at: number; face: MedalFace; title: string; detail: string }[];
     rungs: readonly Rung[];
+    legs: readonly RouteLeg[];
   }[];
   days: readonly { date: Day; done: boolean; ended: boolean }[];
 }
 
-// BE2 adds health/friend evaluators at their read boundaries; BE3 adds routeLegs.
-export const ACHIEVEMENTS: readonly Achievement<AchievementContext>[] = [roundTotals, ladderRungs, streakRuns];
+// BE2 adds health/friend evaluators at their read boundaries.
+export const ACHIEVEMENTS: readonly Achievement<AchievementContext>[] = [roundTotals, ladderRungs,
+  context => context.measures.filter(measure => !measure.pending).flatMap(measure => routeLegs({
+    measureId: measure.id, legs: measure.legs, points: measure.points,
+  })), streakRuns];

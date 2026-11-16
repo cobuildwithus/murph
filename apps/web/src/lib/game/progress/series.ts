@@ -168,9 +168,9 @@ export async function readGameSeries(memberId: string, clock: Date) {
     else if ("distanceM" in payload) ids.add(READERS[1].measureId(payload));
   }
   const awards = await readAwards(memberId);
-  const savedLadders = new Set(awards.flatMap(award => award.measureId && ["landmark", "time"].includes(award.kind)
-    && ["reps", "seconds"].includes(award.measureId.split(".")[1]) ? [award.measureId] : []));
-  for (const id of savedLadders) ids.add(id);
+  const savedMeasures = new Set(awards.flatMap(award => award.measureId && ["landmark", "time", "route"].includes(award.kind)
+    && ["reps", "seconds", "meters", "steps"].includes(award.measureId.split(".")[1]) ? [award.measureId] : []));
+  for (const id of savedMeasures) ids.add(id);
   const lookups = new Map([...ids].map(id => [progressLookup(memberId, "measure", [id]), id]));
   const stateRows = await db.gameProgressMeasure.findMany({ where: { memberId, lookup: { in: [...lookups.keys()] } }, select: { lookup: true, stateEncrypted: true } });
   const openedStates = await openProgressMany<MeasureState>(stateRows.map(row => ({ memberId, table: "game_progress_measure", rowId: row.lookup, field: "state", value: row.stateEncrypted })));
@@ -185,8 +185,8 @@ export async function readGameSeries(memberId: string, clock: Date) {
   }
   const pending = [...tasks.values()].filter(task => untyped.has(task.lookup) && !byLookup.has(task.lookup));
   const measures = gameSeries(facts, memberId, states);
-  // Even removal of the final post preserves passed ladders and their editable goal.
-  for (const id of savedLadders) if (!measures.some(measure => measure.id === id)) {
+  // Even removal of the final post preserves completed ladders/routes and their editable goal.
+  for (const id of savedMeasures) if (!measures.some(measure => measure.id === id)) {
     const name = id.split(".")[0];
     measures.push({ ...describeMeasure(id, name, name), pending: false, gameOn: false, needsPerDay: false, amounts: [] });
   }

@@ -4,17 +4,18 @@ import type { Prisma } from "@prisma/client";
 import type { TermWords } from "../src/lib/game/rules";
 
 const mocks = vi.hoisted(() => ({ games: vi.fn(), entries: vi.fn(), tasks: vi.fn(), states: vi.fn(), awards: vi.fn(),
-  createAwards: vi.fn(), updateSeen: vi.fn(), patch: vi.fn(), after: vi.fn(), auth: vi.fn(), current: vi.fn(), health: vi.fn(), transaction: vi.fn(), suggest: vi.fn() }));
+  createAwards: vi.fn(), updateSeen: vi.fn(), patch: vi.fn(), after: vi.fn(), auth: vi.fn(), current: vi.fn(), health: vi.fn(), transaction: vi.fn(), suggest: vi.fn(), pictures: vi.fn(), resolveRoute: vi.fn() }));
 vi.mock("next/server", async original => ({ ...await original<typeof import("next/server")>(), after: mocks.after }));
 vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({
   game: { findMany: mocks.games }, gameEntry: { findMany: mocks.entries },
   gameProfile: { findUniqueOrThrow: async () => ({ timeZone: "UTC", createdAt: new Date("2026-11-01T12:00:00Z") }) },
   gameProgressTaskMeasure: { findMany: mocks.tasks }, gameProgressMeasure: { findMany: mocks.states },
-  gameProgressAward: { findMany: mocks.awards }, gameProgressPic: { count: async () => 0 }, $transaction: mocks.transaction,
+  gameProgressAward: { findMany: mocks.awards }, gameProgressPic: { findMany: mocks.pictures }, $transaction: mocks.transaction,
 }) }));
 vi.mock("@/src/lib/game/http/auth", () => ({ requireGameMemberAuth: mocks.auth, assertGameMemberAuthCurrentTx: mocks.current }));
 vi.mock("@/src/lib/browser-vault/authority", () => ({ assertBrowserVaultMemberAuthority: mocks.health }));
 vi.mock("@/src/lib/game/progress/state", () => ({ patchMeasureState: mocks.patch }));
+vi.mock("@/src/lib/game/progress/mapbox", () => ({ resolveRoute: mocks.resolveRoute }));
 vi.mock("@/src/lib/game/progress/infer", async original => ({ ...await original<typeof import("../src/lib/game/progress/infer")>(),
   inferenceClient: () => ({ responses: { create: mocks.suggest } }) }));
 // Keep the test port's sealed content opaque to the rows and exercise the production batch bindings.
@@ -29,6 +30,8 @@ import { progressLookup, sealProgress } from "../src/lib/game/progress/crypto";
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 import { normalizeTask } from "../src/lib/game/progress/infer";
 import { ladder } from "../src/lib/game/progress/bank";
+import { encodePolyline } from "../src/lib/game/progress/route-geometry";
+import type { MeasureState } from "../src/lib/game/progress/state";
 
 const memberId = "member-ava";
 const request = (path = "", body?: object) => new Request(`https://example.test/api/game/v1/progress${path}`, { method: body ? "POST" : "GET",
@@ -47,6 +50,14 @@ function entryRow(day = 0) {
     payloadEncrypted: JSON.stringify({ exercise: "pushups", count: 40, reps: [] }) };
 }
 type AwardRow = Prisma.GameProgressAwardCreateManyInput;
+const routeLeg = { from: "London", to: "Paris", distanceM: 1000,
+  polyline: encodePolyline([[0, 50], [2, 49]]), towns: [], straightLine: false, startTotal: 0 };
+async function savedRoute(state: MeasureState) {
+  const lookup = progressLookup(memberId, "measure", ["walk.meters"]);
+  mocks.states.mockResolvedValue([{ lookup, stateEncrypted: await sealProgress({ memberId,
+    table: "game_progress_measure", rowId: lookup, field: "state" }, state) }]);
+}
+const routeEntry = () => ({ ...entryRow(), kind: "route", payloadEncrypted: JSON.stringify({ activity: "walk", distanceM: 1000, durationSec: 600 }) });
 let awards: AwardRow[];
 beforeEach(() => {
   vi.resetAllMocks();
@@ -54,6 +65,7 @@ beforeEach(() => {
   awards = [];
   mocks.auth.mockResolvedValue({ member: { id: memberId } }); mocks.current.mockResolvedValue(undefined); mocks.health.mockResolvedValue(undefined);
   mocks.games.mockResolvedValue([gameRow()]); mocks.entries.mockResolvedValue([entryRow()]); mocks.tasks.mockResolvedValue([]); mocks.states.mockResolvedValue([]);
+  mocks.pictures.mockResolvedValue([]);
   mocks.awards.mockImplementation(async () => [...awards].sort((a, b) => String(b.earnedOn).localeCompare(String(a.earnedOn)) || b.lookup.localeCompare(a.lookup)));
   mocks.createAwards.mockImplementation(async ({ data }: { data: AwardRow[] }) => {
     for (const row of data) if (!awards.some(award => award.lookup === row.lookup)) awards.push(row);
@@ -63,6 +75,62 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); });
 
 describe("Progress HTTP contracts", () => {
+  it("freezes one resolved first route for both distance measures without marking it picked", async () => {
+    mocks.entries.mockResolvedValue([routeEntry(), { ...entryRow(1), kind: "route", payloadEncrypted: JSON.stringify({ activity: "run", distanceM: 500, durationSec: 300 }) }]);
+    mocks.resolveRoute.mockResolvedValue({ ...routeLeg, distanceM: 100000 });
+    mocks.patch.mockImplementation(async (_member, _id, patch: (state: MeasureState) => Partial<MeasureState>) => patch({}));
+    const response = await GET(request());
+    expect(response.status).toBe(200);
+    const view = progressSchema.parse(await response.json());
+    expect(view.measures).toHaveLength(2);
+    expect(view.measures.every(measure => measure.route !== null && !measure.route.goalPicked)).toBe(true);
+    expect(mocks.resolveRoute).toHaveBeenCalledTimes(1); expect(mocks.patch).toHaveBeenCalledTimes(2);
+  });
+  it("keeps a completed route and its original medal after the final source post is withdrawn", async () => {
+    const entry = routeEntry(); mocks.entries.mockResolvedValue([entry]);
+    await savedRoute({ legs: [routeLeg] });
+    const before = progressSchema.parse(await (await GET(request())).json());
+    const medal = before.medals.find(medal => medal.kind === "route")!;
+    expect(medal).toMatchObject({ earnedOn: "2026-11-01", face: { drawing: "route" }, title: "Paris" });
+    expect(before.measures[0].route).toMatchObject({ progress: 1, finishedOn: "2026-11-01" });
+    mocks.entries.mockResolvedValue([{ ...entry, withdrawnAt: new Date() }]);
+    const after = progressSchema.parse(await (await GET(request())).json());
+    expect(after.measures[0]).toMatchObject({ total: { value: 0 }, route: { progress: 1, finishedOn: "2026-11-01" } });
+    expect(after.medals.find(item => item.id === medal.id)).toEqual(medal);
+    expect(mocks.resolveRoute).not.toHaveBeenCalled();
+  });
+  it("composes only a picture's own measure pin and stops all settlement at the picture cap", async () => {
+    const id = "11111111-1111-4111-8111-111111111111";
+    mocks.pictures.mockResolvedValue([{ id, takenAt: new Date("2026-11-02T12:00:00Z"),
+      metaEncrypted: await sealProgress({ memberId, table: "game_progress_pic", rowId: id, field: "meta" }, { measureId: "pushups.reps" }) }]);
+    const view = progressSchema.parse(await (await GET(request())).json());
+    expect(view.measures[0].pics).toEqual([{ id, takenOn: "2026-11-02", at: 40 }]);
+    expect(view.picCount).toBe(1);
+    mocks.transaction.mockClear(); mocks.pictures.mockResolvedValue(Array.from({ length: 10001 }, () => ({ id })));
+    expect(progressSchema.parse(await (await GET(request())).json()).incomplete).toBe(true);
+    expect(mocks.transaction).not.toHaveBeenCalled(); expect(mocks.resolveRoute).not.toHaveBeenCalled();
+  });
+  it("resolves a checked bank route through the same setter and rolls over at the current total", async () => {
+    mocks.entries.mockResolvedValue([routeEntry()]); await savedRoute({ legs: [routeLeg] });
+    mocks.resolveRoute.mockImplementation(async (from: string, to: string) => ({ ...routeLeg, from, to, distanceM: 2000 }));
+    mocks.patch.mockImplementation(async (_member, _id, patch: (state: MeasureState) => Partial<MeasureState>) => {
+      const state = patch({ legs: [routeLeg] }); await savedRoute(state); return state;
+    });
+    const response = await PUT(request("/measures/walk.meters", { goal: { rungId: "boston-to-nyc" } }), { params: Promise.resolve({ id: "walk.meters" }) });
+    expect(response.status).toBe(200);
+    expect((await response.json()).measure.route).toMatchObject({ name: "Boston to New York", progress: 0, goalPicked: true });
+    expect(mocks.resolveRoute).toHaveBeenCalledExactlyOnceWith("Boston", "New York");
+  });
+  it("returns route tiles and a typed preview without offering non-place routes", async () => {
+    mocks.entries.mockResolvedValue([routeEntry()]);
+    mocks.resolveRoute.mockResolvedValue(routeLeg);
+    const response = await goals(request("/goals?measure=walk.meters&q=London%20to%20Paris"));
+    const view = goalsSchema.parse(await response.json());
+    expect(view.route).toMatchObject({ from: "London", to: "Paris", straightLine: false });
+    expect(view.tiles.every(tile => tile.name.split(" to ").length === 2)).toBe(true);
+    expect(view.tiles.some(tile => ["to-the-moon", "5k"].includes(tile.id))).toBe(false);
+    expect(mocks.patch).not.toHaveBeenCalled(); expect(mocks.suggest).not.toHaveBeenCalled();
+  });
   it("builds the before-game screen from an empty source without inventing pre-join streak days", async () => {
     mocks.games.mockResolvedValue([]); mocks.entries.mockResolvedValue([]);
     expect(await (await GET(request())).json()).toEqual({ joinedOn: "2026-11-01", today: "2026-11-05", incomplete: false,
@@ -197,12 +265,12 @@ describe("Progress HTTP contracts", () => {
     const response = await PUT(request("/measures/pushups.reps", body), { params: Promise.resolve({ id: "pushups.reps" }) });
     expect(response.status).toBe(400); expect(mocks.patch).not.toHaveBeenCalled();
   });
-  it("writes a checked goal only through patchMeasureState and retains the BE3 501 branch", async () => {
+  it("writes a checked goal only through patchMeasureState and rejects a route on a rep measure", async () => {
     const response = await PUT(request("/measures/pushups.reps", { goal: { rungId: "half-dome" } }), { params: Promise.resolve({ id: "pushups.reps" }) });
     expect(response.status).toBe(200);
     expect(mocks.patch).toHaveBeenCalledWith(memberId, "pushups.reps", { goal: { rungId: "half-dome" } }, expect.any(Function));
     const route = await PUT(request("/measures/pushups.reps", { goal: { from: "London", to: "Paris" } }), { params: Promise.resolve({ id: "pushups.reps" }) });
-    expect(route.status).toBe(501);
+    expect(route.status).toBe(400); expect(mocks.resolveRoute).not.toHaveBeenCalled();
   });
   it("returns only checked height tiles and a typed bank match", async () => {
     const response = await goals(request("/goals?measure=pushups.reps&q=Half%20Dome"));

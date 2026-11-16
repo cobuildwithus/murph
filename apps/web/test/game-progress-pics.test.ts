@@ -7,12 +7,20 @@ vi.mock('../src/lib/prisma', () => ({ getPrisma: () => db }));
 vi.mock('../src/lib/game/progress/crypto', () => ({ sealProgress: async () => 'sealed-meta', openProgress: async () => ({ measureId: 'pushups.reps' }), openProgressMany: async () => [] }));
 vi.mock('../src/lib/hosted-crypto/secure-box', () => ({ openHostedUserSecureBoxBytes: mocks.open, sealHostedUserSecureBoxBytes: mocks.seal }));
 vi.mock('../src/lib/hosted-execution/control', () => ({ readHostedExecutionControlClientIfConfigured: () => ({ readProgressPic: mocks.read, putProgressPic: mocks.put, purgeRuntimeResource: mocks.purge }) }));
-import { putProgressPic, readProgressPic, deleteProgressPic, deleteProgressPicsForAccount } from '../src/lib/game/progress/pics';
+import { picturePin, putProgressPic, readProgressPic, deleteProgressPic, deleteProgressPicsForAccount } from '../src/lib/game/progress/pics';
 const id = '11111111-1111-4111-8111-111111111111';
 const storageKey = `progress/${'a'.repeat(32)}.jpg`;
 const row = { id, storageKey, takenAt: new Date('2026-11-02T12:00:00Z'), metaEncrypted: 'sealed-meta' };
 beforeEach(() => { vi.resetAllMocks(); mocks.seal.mockResolvedValue('sealed-bytes'); mocks.open.mockResolvedValue(new Uint8Array([1, 2])); });
 describe('Progress picture ownership and deletion', () => {
+  it.each([
+    ['2026-11-01T02:00:00Z', '2026-10-31', 0],
+    ['2026-11-02T02:00:00Z', '2026-11-01', 40],
+    ['2026-11-03T02:00:00Z', '2026-11-02', 60],
+  ])('places the %s capture on its local-day total', (takenAt, takenOn, at) => {
+    expect(picturePin({ id, takenAt: new Date(takenAt) }, [['2026-11-01', 40], ['2026-11-02', 60]], 'America/New_York'))
+      .toEqual({ id, takenOn, at });
+  });
   it('account deletion retires every key, including retired rows, before dropping ownership', async () => {
     mocks.many.mockResolvedValue([{ id, storageKey }]);
     await deleteProgressPicsForAccount(['owner'], db);

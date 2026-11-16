@@ -18,11 +18,11 @@ beforeEach(() => { vi.resetAllMocks(); mocks.write.mockResolvedValue({ count: 1 
 describe('Progress route goal mutation', () => {
   it('freezes the automatic first route without claiming the member picked it', async () => {
     mocks.find.mockResolvedValue(null);
-    const first = await setFirstRoute('owner', 'walk.meters', 'B', 'C', mocks.authorize);
+    const first = await setFirstRoute('owner', 'walk.meters', next, mocks.authorize);
     expect(first).toEqual({ legs: [{ ...next, startTotal: 0 }] });
     // A manual goal saved while Mapbox was resolving wins over the automatic choice.
     mocks.find.mockResolvedValue({ stateEncrypted: JSON.stringify({ goal: { from: 'A', to: 'B' }, legs: [leg] }) });
-    expect(await setFirstRoute('owner', 'walk.meters', 'B', 'C', mocks.authorize))
+    expect(await setFirstRoute('owner', 'walk.meters', next, mocks.authorize))
       .toEqual({ goal: { from: 'A', to: 'B' }, legs: [leg] });
   });
   it('rolls over the state observed after Mapbox, preserving completed legs and other fields', async () => {
@@ -38,7 +38,7 @@ describe('Progress route goal mutation', () => {
   it('keeps an awarded completion when the canonical total shrinks', async () => {
     mocks.find.mockResolvedValue({ stateEncrypted: JSON.stringify({ legs: [leg] }) });
     const result = await setRouteGoal('owner', 'walk.meters', 'B', 'C', { ...context(), points: [['2026-11-03', 80]],
-      awards: [{ key: routeAwardKey('walk.meters', leg), kind: 'route', measureId: 'walk.meters', subjectMemberId: null,
+      awards: [{ key: routeAwardKey('walk.meters', leg, 0), kind: 'route', measureId: 'walk.meters', subjectMemberId: null,
         on: '2026-11-02', data: {}, id: 'award', createdAt: new Date('2026-11-02'), seenAt: null }] });
     expect(result.legs).toEqual([leg, { ...next, startTotal: 80 }]);
   });

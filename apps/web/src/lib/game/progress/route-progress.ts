@@ -7,22 +7,22 @@ import { cutPolyline, decodePolyline, routeBbox, townPosition } from './route-ge
 export const MAP_WIDTH = 708;
 export const MAP_HEIGHT = 354;
 export const milesText = (meters: number) => `${Math.round(meters / 1609.344).toLocaleString('en-US')} miles`;
-export const routeMeters = (measureId: string, amount: number) => measureId === 'steps' ? amount / 2000 * 1609.344 : amount;
+export const routeMeters = (measureId: string, amount: number) => measureId === 'steps' || measureId.endsWith('.steps') ? amount / 2000 * 1609.344 : amount;
 type Points = readonly [Day, number][];
 const crossingDay = (points: Points, at: number) => points.find(point => point[1] >= at)?.[0] ?? null;
-export const routeAwardKey = (measureId: string, leg: RouteLeg) => `route:${JSON.stringify([measureId, leg.from, leg.to, leg.distanceM, leg.startTotal])}`;
+export const routeAwardKey = (measureId: string, leg: RouteLeg, index: number) => `route:${JSON.stringify([measureId, index, leg.from, leg.to, leg.distanceM, leg.startTotal])}`;
 
 /** Completed legs survive corrections; changing a goal only replaces the unfinished leg. */
 export function replaceRouteLeg(measureId: string, legs: readonly RouteLeg[], next: Omit<RouteLeg, 'startTotal'>, total: number, earned: ReadonlySet<string>): RouteLeg[] {
-  const finished = legs.filter((leg, i) => i < legs.length - 1 || earned.has(routeAwardKey(measureId, leg)) || total >= leg.startTotal + leg.distanceM);
+  const finished = legs.filter((leg, i) => i < legs.length - 1 || earned.has(routeAwardKey(measureId, leg, i)) || total >= leg.startTotal + leg.distanceM);
   return [...finished, { ...next, startTotal: finished.length ? total : 0 }];
 }
 
 export function routeLegs(ctx: { measureId: string; legs: readonly RouteLeg[]; points: Points }): Candidate[] {
   const points: [Day, number][] = ctx.points.map(([day, amount]) => [day, routeMeters(ctx.measureId, amount)]);
-  return ctx.legs.flatMap(leg => {
+  return ctx.legs.flatMap((leg, index) => {
     const on = crossingDay(points, leg.startTotal + leg.distanceM);
-    return on ? [{ key: routeAwardKey(ctx.measureId, leg), kind: 'route', measureId: ctx.measureId, subjectMemberId: null, on,
+    return on ? [{ key: routeAwardKey(ctx.measureId, leg, index), kind: 'route', measureId: ctx.measureId, subjectMemberId: null, on,
       data: { from: leg.from, to: leg.to, distanceM: leg.distanceM, startTotal: leg.startTotal,
         face: { drawing: 'route' }, title: leg.to, detail: `${milesText(leg.distanceM)} from ${leg.from}`, page: 'totals' } }] : [];
   });
@@ -33,7 +33,7 @@ export function routeView(measureId: string, state: MeasureState, points: Points
   const legs = state.legs ?? [], leg = legs.at(-1);
   if (!leg) return null;
   const completions = awards.filter(award => award.kind === 'route' && award.measureId === measureId);
-  const earnedOn = completions.find(award => award.key === routeAwardKey(measureId, leg))?.on ?? null;
+  const earnedOn = completions.find(award => award.key === routeAwardKey(measureId, leg, legs.length - 1))?.on ?? null;
   const meters: [Day, number][] = points.map(([day, amount]) => [day, routeMeters(measureId, amount)]);
   const total = meters.at(-1)?.[1] ?? 0;
   const walked = earnedOn ? leg.distanceM : Math.min(leg.distanceM, Math.max(0, total - leg.startTotal));

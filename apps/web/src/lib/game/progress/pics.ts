@@ -1,5 +1,6 @@
 import 'server-only';
 import { randomBytes, createHash } from 'node:crypto';
+import { formatTimeZoneDateTimeParts } from '@murphai/contracts';
 import type { PrismaClient } from '@prisma/client';
 import { hostedProgressPicObjectKey } from '@murphai/hosted-execution/storage-paths';
 import { readHostedExecutionControlClientIfConfigured } from '../../hosted-execution/control';
@@ -8,7 +9,12 @@ import { hostedOnboardingError } from '../../hosted-onboarding/errors';
 import { getPrisma } from '../../prisma';
 import { openProgress, openProgressMany, sealProgress } from './crypto';
 import type { BeforeProgressMutation } from './state';
-import type { PicUploadQuery } from './contract';
+import type { Day, Pic, PicUploadQuery } from './contract';
+
+export function picturePin(pic: { id: string; takenAt: Date }, points: readonly [Day, number][], timeZone: string): Pic {
+  const takenOn = formatTimeZoneDateTimeParts(pic.takenAt, timeZone).dayKey;
+  return { id: pic.id, takenOn, at: points.filter(([day]) => day <= takenOn).at(-1)?.[1] ?? 0 };
+}
 
 const MAX_PROGRESS_PICS = 10_000;
 const metaTarget = (memberId: string, rowId: string) => ({ memberId, rowId, table: 'game_progress_pic', field: 'meta' } as const);
