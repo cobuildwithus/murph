@@ -1,9 +1,9 @@
 import LinqAPIV3, { APIError } from "@linqapp/sdk";
 import type {
   Chat,
-  MessageCreateParams,
   PhoneNumberListResponse,
 } from "@linqapp/sdk/resources";
+import type { MessageSendParams } from "@linqapp/sdk/resources/chats";
 
 const OPERATOR_ALERT_LINQ_SDK_BASE_URL = "https://linq-sdk.invalid";
 const OPERATOR_ALERT_FETCH_TIMEOUT_MS = 10_000;
@@ -55,13 +55,13 @@ export async function sendOperatorLinqAlert(input: {
   const primaryResult = destinationResults[0];
   const secondaryResult = destinationResults[1];
   const failures: unknown[] = [];
-  const destinations: Array<{ idempotencyKey: string; recipient: string }> = [];
+  const destinations: Array<{ chatId: string; idempotencyKey: string }> = [];
   if (primaryResult.status === "rejected") {
     failures.push(primaryResult.reason);
   } else if (primaryResult.value.sendable) {
     destinations.push({
+      chatId: input.chatIds[0],
       idempotencyKey: input.idempotencyKey,
-      recipient: primaryResult.value.recipient,
     });
   } else {
     failures.push(new OperatorAlertLinqError("linq_health_suppressed"));
@@ -76,8 +76,8 @@ export async function sendOperatorLinqAlert(input: {
       failures.push(new OperatorAlertLinqError("linq_health_suppressed"));
     } else {
       destinations.push({
+        chatId: input.chatIds[1],
         idempotencyKey: `${input.idempotencyKey}-recipient-2`,
-        recipient: secondaryResult.value.recipient,
       });
     }
   }
@@ -87,10 +87,10 @@ export async function sendOperatorLinqAlert(input: {
       sendOperatorLinqMessage({
         apiBaseUrl: input.apiBaseUrl,
         apiToken: input.apiToken,
+        chatId: destination.chatId,
         fetchImplementation,
         idempotencyKey: destination.idempotencyKey,
         message: input.message,
-        recipient: destination.recipient,
       })
     ),
   );
@@ -143,16 +143,20 @@ async function resolveOperatorLinqDestination(input: {
   };
 }
 
+/**
+ * Sends into the configured chat itself, so the page leaves from the line the
+ * preflight just checked. Linq's recipient-only route picks its own chat and
+ * line, which can differ from the one preflight approved.
+ */
 async function sendOperatorLinqMessage(input: {
   apiBaseUrl: string;
   apiToken: string;
+  chatId: string;
   fetchImplementation: OperatorAlertFetch;
   idempotencyKey: string;
   message: string;
-  recipient: string;
 }): Promise<void> {
-  const body: MessageCreateParams = {
-    "Idempotency-Key": input.idempotencyKey,
+  const body: MessageSendParams = {
     message: {
       idempotency_key: input.idempotencyKey,
       parts: [
@@ -162,12 +166,13 @@ async function sendOperatorLinqMessage(input: {
         },
       ],
     },
-    to: [input.recipient],
   };
   try {
     await createOperatorLinqClient(input, {
       discardResponseBody: true,
-    }).messages.create(body).asResponse();
+    }).chats.messages.send(input.chatId, body, {
+      headers: { "Idempotency-Key": input.idempotencyKey },
+    }).asResponse();
   } catch (error) {
     const status = readOperatorLinqErrorStatus(error);
     if (status !== null) {

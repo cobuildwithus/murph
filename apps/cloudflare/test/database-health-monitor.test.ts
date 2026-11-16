@@ -57,7 +57,8 @@ interface LinqRequestBody {
       value: string;
     }>;
   };
-  to: string[];
+  /** The chat the page was sent into, read from the request path. */
+  chatId: string;
 }
 
 describe("database health monitor", () => {
@@ -341,13 +342,13 @@ describe("database health monitor", () => {
     const first = await readLinqRequestBody(harness.primaryLinqRequests[0]);
     const second = await readLinqRequestBody(harness.primaryLinqRequests[1]);
     expect(new URL(harness.primaryLinqRequests[0]?.url ?? "").pathname)
-      .toBe("/api/partner/v3/messages");
+      .toBe("/api/partner/v3/chats/chat_test/messages");
     expect(harness.primaryLinqRequests[0]?.headers.get("idempotency-key"))
       .toBe(first.message.idempotency_key);
     expect(first.message.parts[0]?.value).toContain("PgBouncer wait 8s");
     expect(first.message.parts[0]?.value).toContain("UTC");
-    expect(first.to).toEqual(["+12025550123"]);
-    expect(first).not.toHaveProperty("from");
+    expect(first.chatId).toBe("chat_test");
+    expect(first).not.toHaveProperty("to");
     expect(second.message.parts[0]?.value).not.toBe(first.message.parts[0]?.value);
     expect(second.message.idempotency_key).not.toBe(first.message.idempotency_key);
     expect(second.message.parts[0]?.value).toContain("PgBouncer wait 12s");
@@ -374,7 +375,7 @@ describe("database health monitor", () => {
     ]);
     expect(harness.primaryLinqRequests.map((request) =>
       new URL(request.url).pathname
-    )).toEqual(["/private/partner/v3/messages"]);
+    )).toEqual(["/private/partner/v3/chats/chat_test/messages"]);
     expect([
       ...harness.primaryLinqHealthRequests,
       ...harness.primaryLinqRequests,
@@ -427,8 +428,8 @@ describe("database health monitor", () => {
     const bodies = await Promise.all(
       harness.allLinqRequests.map(readLinqRequestBody),
     );
-    const primary = bodies.find((body) => body.to[0] === "+12025550123");
-    const secondary = bodies.find((body) => body.to[0] === "+12025550124");
+    const primary = bodies.find((body) => body.chatId === "chat_test");
+    const secondary = bodies.find((body) => body.chatId === "chat_secondary_test");
     expect(primary).toBeDefined();
     expect(secondary).toBeDefined();
     expect(secondary?.message.parts).toEqual(primary?.message.parts);
@@ -578,10 +579,10 @@ describe("database health monitor", () => {
       harness.allLinqRequests.map(readLinqRequestBody),
     );
     const primaryBodies = bodies.filter(
-      (body) => body.to[0] === "+12025550123",
+      (body) => body.chatId === "chat_test",
     );
     const secondaryBodies = bodies.filter(
-      (body) => body.to[0] === "+12025550124",
+      (body) => body.chatId === "chat_secondary_test",
     );
     expect(primaryBodies).toHaveLength(2);
     expect(secondaryBodies).toHaveLength(2);
@@ -604,7 +605,7 @@ describe("database health monitor", () => {
     expect(harness.primaryLinqRequests).toHaveLength(1);
     await expect(
       readLinqRequestBody(harness.primaryLinqRequests[0]),
-    ).resolves.toMatchObject({ to: ["+12025550123"] });
+    ).resolves.toMatchObject({ chatId: "chat_test" });
   });
 
   it("replays stable per-recipient keys after an unhealthy primary recovers", async () => {
@@ -794,7 +795,7 @@ describe("database health monitor", () => {
     expect(harness.allLinqRequests).toHaveLength(1);
     await expect(readLinqRequestBody(harness.allLinqRequests[0])).resolves.toMatchObject({
       message: { idempotency_key: "murph-db-1-1-recipient-2" },
-      to: ["+12025550124"],
+      chatId: "chat_secondary_test",
     });
     expect(harness.monitor.readAlertState()).toMatchObject({
       pendingAlertIdempotencyKey: "murph-db-1-1",
@@ -908,7 +909,7 @@ describe("database health monitor", () => {
       expect(harness.allLinqRequests).toHaveLength(1);
       await expect(
         readLinqRequestBody(harness.allLinqRequests[0]),
-      ).resolves.toMatchObject({ to: ["+12025550124"] });
+      ).resolves.toMatchObject({ chatId: "chat_secondary_test" });
     },
   );
 
@@ -3091,9 +3092,9 @@ describe("database health monitor", () => {
         body.message.parts[0]?.value
         === combinedAlert.message.parts[0]?.value,
     );
-    expect(combinedAttempts.map((body) => body.to[0]).sort()).toEqual([
-      "+12025550123",
-      "+12025550124",
+    expect(combinedAttempts.map((body) => body.chatId).sort()).toEqual([
+      "chat_secondary_test",
+      "chat_test",
     ]);
   });
 
@@ -3197,9 +3198,9 @@ describe("database health monitor", () => {
       (body) =>
         body.message.parts[0]?.value === pressurePending.pendingAlertMessage,
     );
-    expect(pressureAttempts.map((body) => body.to[0]).sort()).toEqual([
-      "+12025550123",
-      "+12025550124",
+    expect(pressureAttempts.map((body) => body.chatId).sort()).toEqual([
+      "chat_secondary_test",
+      "chat_test",
     ]);
     expect(pressureAttempts.map(
       (body) => body.message.idempotency_key,
@@ -3325,9 +3326,9 @@ describe("database health monitor", () => {
       (body) =>
         body.message.parts[0]?.value === pressurePending.pendingAlertMessage,
     );
-    expect(pressureAttempts.map((body) => body.to[0]).sort()).toEqual([
-      "+12025550123",
-      "+12025550124",
+    expect(pressureAttempts.map((body) => body.chatId).sort()).toEqual([
+      "chat_secondary_test",
+      "chat_test",
     ]);
     expect(pressureAttempts.map(
       (body) => body.message.idempotency_key,
@@ -3446,9 +3447,9 @@ describe("database health monitor", () => {
       (body) =>
         body.message.parts[0]?.value === mixedPending.pendingAlertMessage,
     );
-    expect(mixedAttempts.map((body) => body.to[0]).sort()).toEqual([
-      "+12025550123",
-      "+12025550124",
+    expect(mixedAttempts.map((body) => body.chatId).sort()).toEqual([
+      "chat_secondary_test",
+      "chat_test",
     ]);
     expect(mixedAttempts.map(
       (body) => body.message.idempotency_key,
@@ -3601,11 +3602,11 @@ describe("database health monitor", () => {
       || body.message.parts[0]?.value
       === secondTelemetryAlert.message.parts[0]?.value
     );
-    expect(telemetryAttempts.map((body) => body.to[0]).sort()).toEqual([
-      "+12025550123",
-      "+12025550123",
-      "+12025550124",
-      "+12025550124",
+    expect(telemetryAttempts.map((body) => body.chatId).sort()).toEqual([
+      "chat_secondary_test",
+      "chat_secondary_test",
+      "chat_test",
+      "chat_test",
     ]);
     expect(secondTelemetryAlert.message.idempotency_key)
       .not.toBe(firstTelemetryAlert.message.idempotency_key);
@@ -4881,7 +4882,7 @@ function createMonitorHarness(input: {
       }
       allLinqRequests.push(request);
       const body = await readLinqRequestBody(request);
-      if (body.to[0] === "+12025550124") {
+      if (body.chatId === secondaryLinqChatId) {
         const next = secondaryLinqResponses.shift();
         return next ? await next() : new Response(null, { status: 202 });
       }
@@ -5074,7 +5075,11 @@ async function readLinqRequestBody(
   if (!request) {
     throw new Error("Expected a Linq request.");
   }
-  return await request.clone().json() as LinqRequestBody;
+  const chatId = /\/chats\/([^/]+)\/messages$/u.exec(new URL(request.url).pathname)?.[1];
+  if (!chatId) {
+    throw new Error("Expected a Linq chat message request.");
+  }
+  return { ...await request.clone().json() as Omit<LinqRequestBody, "chatId">, chatId };
 }
 
 function expectObservationScopedDatabaseOpening(
