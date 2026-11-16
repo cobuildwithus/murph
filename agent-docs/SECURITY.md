@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-11-15
+Last verified: 2026-11-16
 
 ## Private weekly game images
 
@@ -60,10 +60,90 @@ containers (group chats) never get them. Settings uses the existing browser
 session and mutation-origin checks; the manifest and MCP gateway require the
 signed Worker callback and a present, current runtime write fence. Synthetic
 thread containers, inactive members, foreign connections, off connections and
-stale generation/catalog URLs are refused. Only explicitly approved tools with
-`readOnlyHint: true` appear in the stored catalog or execute; changed approved
-definitions are suspended until reviewed. An annotation is the service's claim,
-not a guarantee about its behavior. Tool content remains untrusted.
+stale generation/catalog URLs are refused. Only tools the member turned on are
+served; changed approved definitions are suspended until reviewed. A tool with
+`readOnlyHint: true` runs when Murph calls it; every other tool runs only after
+the member confirms that exact call (below). The annotation is the service's
+claim, not a guarantee about its behavior, so confirmation protects every tool
+not marked read-only. Tool content remains untrusted. Eligibility is derived
+from the stored definition each time, never stored as a reason: a definition
+over 24 KiB stays `not_allowed`, and a write that older Web locked as
+`not_allowed` reads as off, never on. Older Web never approves or serves a write
+and relocks one on refresh, so deploy skew fails closed.
+
+Murph asks first. The gateway never sends a write upstream. For an approved
+write it records the exact request (arguments at most 16 KiB, secure-box
+encrypted and bound to the request id and field) and returns a normal tool
+result with `https://www.withmurph.ai/settings/connections/confirm/<id>`
+(128 random bits); the link grants nothing without the member's session. One
+identity covers lookup and insert: member, connection id, generation, tool,
+approved definition digest and canonical arguments (sorted keys, array order
+and JSON types kept), stored only as a keyed lookup value under its own purpose
+in the contact-privacy owner, with every read candidate checked. Admission runs
+in one short transaction under the member-row lock: reuse a waiting, unexpired
+request (same link) or one decided within the last hour (done, declined or
+unknown, each answered as such), else admit a new one while fewer than 20
+unexpired requests wait. Failed and expired requests are never reused; a new
+call needs a new confirmation. Sealing runs before the lock. Before anything is
+stored, the arguments are checked against the tool's declared input schema,
+reduced to its declared names, types and required inputs (no patterns or
+references, through the MCP SDK's non-compiling validator): an undeclared
+top-level input, a type mismatch or a missing required input is refused with an
+error naming it, and nothing is requested. The model-facing declaration of an
+approved write keeps its name and input schema, leads with Murph's line about
+confirmation, labels the server's own text as `Description from <server>:`, and
+drops the remote output schema and annotations; the stored remote definition and
+its digest still govern approval, and the catalog token is the digest of exactly
+what the gateway serves.
+
+Confirm and decline use the full Settings mutation contract: browser session,
+mutation origin, and `assertHostedAppSessionCurrentTx` in the transaction that
+consumes the request. A session alone never confirms, since a model that can
+read the member's mail could sign in with an emailed code: confirming also needs
+the member's approval passkey, the same step-up action approvals use. A
+`custom-connection.action.confirm` challenge, issued under the same contract and
+never outliving the request, binds the member, browser session, request id,
+connection, generation, tool, approved digest and lookup key; the assertion is
+verified before the transaction, and the challenge is consumed (single use, with
+the passkey counter write) in the transaction that claims the request. The
+passkey prompt accepts that challenge only for one of the member's waiting
+requests in that session. Members without a passkey get the action approval
+card's enrollment path. A first approval passkey, for this page and every other
+approval-passkey consumer including action approvals, needs a sign-in by phone
+or Telegram within five minutes; the initial-enrollment owner enforces it at
+both options and registration, so an email-code session (which a model reading
+the inbox could complete) cannot add a key and its confirmation fails before
+any `tools/call`. An email-only member can still add a first phone or Telegram
+from a fresh email session and then enroll, so a passkey alone doesn't take the
+inbox out of the chain. MCP writes therefore also need an account established by
+phone or Telegram: `hosted_member.first_sign_in_method` is written once by the
+sign-in that claims the member (existing accounts were classified from user,
+Telegram account and phone verification timestamps; anything else stays null)
+and no sign-in method change touches it. Email or null refuses the challenge and
+confirmation before the passkey is checked (the request keeps waiting), the
+gateway answers a write call without storing a request, and Settings shows those
+writes off and won't turn one on. For action approvals an email-only member's
+inbox stays the root of trust. Declining needs no passkey. The POST
+carries only the decision and, to confirm, the signature; another member's id is
+not found, and Web reads the tool and arguments from the stored row. The page
+renders the stored inputs completely, in the tool's declared order, before Do it
+and Don't: text as text, yes/no, numbers and empty values each marked, runs of
+blank lines folded into a visible line, and bidi, zero-width and other invisible
+characters shown as escaped code points. When the same change was confirmed
+before (done or unknown), the page says it may already have happened. A
+confirmation commits `waiting → unknown` with its decision time before any
+outbound work, and dispatch requires that acknowledged claim. Write mode then lets sign-in, refresh and setup run, rechecks that the
+connection is on with the same generation and approved digest immediately before
+the call, and lets exactly one `tools/call` POST leave; a second is refused before
+it is sent, and a 401 to the call is its answer, never a cue to refresh and
+resend. Anything after that POST leaves (401, 403, connection loss, a broken
+stream, an invalid or oversized result, a token echo, or a valid result with
+`isError: true`) stays `unknown`; only a failure proven before the call becomes
+`failed`, and a lost process leaves the request `unknown`. Nothing returns a
+consumed request to waiting or sends it again, and there is no stored running or
+expired state (expiry is `expiresAt`). Results are capped and encrypted like
+arguments. `lastUsedAt` is best effort. Retention deletes requests after 30
+days; they cascade with the connection and the member.
 
 Web alone owns resource URLs, discovery, OAuth registration and credentials.
 Every remote request uses HTTPS, one validated DNS resolution pinned into the
@@ -764,10 +844,10 @@ Existing product admission, delivery and runtime safety rules still apply.
 - Better Auth is private behind explicit browser/native routes; do not expose its catch-all handler or default account-linking/deletion endpoints. The closed encrypted adapter authenticates all fields before reads, count, mutation or one-use consumption, including transaction callbacks and bulk operations. Canonical member/contact writes and OTP consumption/session issuance share one short transaction; known wrong-code failures commit attempt budgets and failures after proof roll back all writes.  SMS reserves at most three checks in the encrypted challenge before calling Twilio Verify outside locks. Provider approval persists only as a keyed code/generation digest; final completion revalidates exact generation and expiry, and consumes the challenge atomically. The approved digest permits a same-code retry after canonical rollback, but never after expiry, resend or successful consumption. Ambiguous provider approval fails closed. Delivery and KMS calls occur outside locks. Browser and native transports reject mixed ambient/bearer authority. Invalid replacement credentials never fall back; old browser cookies are anonymous and old native JWTs receive an upgrade response. Issuance can pause without disabling current session read, renewal or logout. The hourly owner drains expired auth rows in bounded indexed batches, and member deletion cascades member-bound auth records. Retirement deployment requires all continuity and protected-account gates in `docs/hosted-auth-migration.md`.
 - The only fixed sign-in code is the app-store review account: exactly `HOSTED_AUTH_REVIEW_EMAIL` accepts the six-digit `HOSTED_AUTH_REVIEW_CODE` from production secrets and is sent no email. It goes through the ordinary hashed OTP store, expiry, attempt and rate limits, and unset or malformed configuration disables it. While it is enabled, the companion's initial-onboarding projection also exempts only the member whose verified email matches from messaging setup, since reviewers have no phone or Telegram to link. Keep that account free of real member data.
 - Credential changes require a current first-party session, proof of the new contact, and approval of the exact member/session/method/old identity/new identity/operation. Consume contact proof, approval, canonical contact/routing updates, encrypted login projection changes and any session revocation in one database-only transaction. Adding a method preserves sessions; replacement/removal revokes other first-party sessions. Never remove the last usable sign-in or transfer another member's verified or pending contact. Browser Telegram uses verified numeric identity and a session-bound, one-use nonce purpose distinct from login. The explicitly approved unmodified native SDK path instead requires a five-minute member/session-bound pending start, verified issuer/audience/signature/expiry, a two-minute issued-at window, and an atomic globally unique consumed-token hash. Registered HTTPS app callbacks and SDK PKCE own delivery; this does not claim signed nonce equivalence. No raw provider token is retained. See `docs/hosted-auth-migration.md` for the native boundary. Canonical channel changes enqueue the existing durable mailbox wake atomically, with signaling outside the transaction.
-- Approval passkeys are scoped to sensitive actions, not primary sign-in. Store at most eight credential IDs, COSE public keys and signature counters in the encrypted member-bound approval aggregate; never persist private keys or browser assertion payloads. Require WebAuthn user verification, the canonical RP/origin and the complete action challenge. Enrollment requires the existing approved factor at both options and registration, with a five-minute member/session/action-bound challenge; an authenticated primary session alone cannot replace established protection. A first-party account with no established approval protection may enroll its first factor within five minutes of primary authentication; silent exchange and renewal do not satisfy this exception. Initial enrollment rechecks absent credential state and current session at commit. Prepare provider verification and encryption outside transactions, then recheck the original session authenticator and exact credential ciphertext under member-before-session locks. Commit credential changes, counter advancement and one-use action acceptance together. Member suspension or deletion fails closed and canonical deletion cascades credentials. Failed or corrupt passkey verification never falls back to another factor. Previously protected accounts must have usable first-party approval or recovery before retirement removes the legacy verifier. The enrollment switch remains disabled until all reachable readers enforce that ownership; see `docs/hosted-auth-migration.md` for activation and rollback floors.
+- Approval passkeys are scoped to sensitive actions, not primary sign-in. Store at most eight credential IDs, COSE public keys and signature counters in the encrypted member-bound approval aggregate; never persist private keys or browser assertion payloads. Require WebAuthn user verification, the canonical RP/origin and the complete action challenge. Enrollment requires the existing approved factor at both options and registration, with a five-minute member/session/action-bound challenge; an authenticated primary session alone cannot replace established protection. A first-party account with no established approval protection may enroll its first factor within five minutes of primary authentication by phone or Telegram; an email code, silent exchange and renewal do not satisfy this exception. Initial enrollment rechecks absent credential state and current session at commit. Prepare provider verification and encryption outside transactions, then recheck the original session authenticator and exact credential ciphertext under member-before-session locks. Commit credential changes, counter advancement and one-use action acceptance together. Member suspension or deletion fails closed and canonical deletion cascades credentials. Failed or corrupt passkey verification never falls back to another factor. Previously protected accounts must have usable first-party approval or recovery before retirement removes the legacy verifier. The enrollment switch remains disabled until all reachable readers enforce that ownership; see `docs/hosted-auth-migration.md` for activation and rollback floors.
 - Approval recovery requires a previously saved random 32-byte key and first-party primary proof within five minutes. A current Murph passkey must authorize key generation; store only its SHA-256 digest in a separately member/field-bound encrypted column on the existing approval aggregate. Return plaintext once and never place it in URLs, browser persistence, logs or notifications. Redeem through a five-minute member/session/key-generation-bound challenge and new user-verified WebAuthn registration. Atomically replace all previous credentials, consume the key/challenge, revoke other first-party sessions. Keep the authorizing browser. Rotation and recovery must compare current credential state under locks, and provider/KMS calls remain outside transactions. An existing primary session, OTP alone, or lost approval factor cannot provision independent recovery. Unresolved protected accounts block vendor retirement; there is no support override based only on a contact channel.
 
-- Initial approval enrollment is an explicit security tradeoff: an already-bound canonical verified first-party sign-in, proved within five minutes, may establish the first Murph passkey without a previously established approval factor. Require a current first-party session with non-future primary proof, an already-adopted encrypted login projection matching canonical verified methods, and strictly absent approval aggregate. Any approval aggregate (including corrupt/empty state) excludes this policy; no failed assertion or client report may enable it. Bound reauthentication selects only the current member's existing verified method, rechecks the original session and canonical projection under locks, and cannot import, link, create, merge, or mint login authority from registration. The registration challenge binds member, session, primary proof and canonical generation; require canonical RP/origin and WebAuthn user verification. Prepare the bounded twenty-session set and crypto outside locks, then atomically recheck eligibility/freshness/exact state, consume the challenge with absent-state CAS, revoke other sessions and stamp the existing credential-change fence. Preserve the authorizing browser. Both existing issuance/enrollment switches gate options and commit. Registration never approves an action: obtain a new exact-action/session challenge and native assertion through the existing decision owner. This consciously accepts compromise risk of the bound email, phone or Telegram account rather than preserving old-factor equivalence. No saved key, routing contact, link possession, old cookie, silent exchange or session renewal supplies enrollment authority. See `docs/hosted-auth-migration.md` for the required pre-retirement canonical-login inventory and rollback floor.
+- Initial approval enrollment is an explicit security tradeoff: an already-bound canonical verified first-party phone or Telegram sign-in, proved within five minutes, may establish the first Murph passkey without a previously established approval factor. An email-code sign-in never qualifies, because the assistant can read a connected inbox; saved-key recovery has the same rule. Each session issuer (OTP commit for email and phone, the verified-session issuer for Telegram, including bound reauthentication) records the proving factor in the issuing transaction as a reserved encrypted verification record keyed to the session id and expiring ten minutes after the proof. It is not a session field because older Web parses session records with a closed schema and opens every session of a member at sign-in, so a new field would lock members out after a revert. A missing, expired or unrecognized record (older sessions, older builds) is ineligible; there is no backfill. Require a current first-party session with non-future primary proof, an already-adopted encrypted login projection matching canonical verified methods, and strictly absent approval aggregate. Any approval aggregate (including corrupt/empty state) excludes this policy; no failed assertion or client report may enable it. Bound reauthentication selects only the current member's existing verified method, rechecks the original session and canonical projection under locks, and cannot import, link, create, merge, or mint login authority from registration. The registration challenge binds member, session, primary proof and canonical generation; require canonical RP/origin and WebAuthn user verification. Prepare the bounded twenty-session set and crypto outside locks, then atomically recheck eligibility/freshness/exact state, consume the challenge with absent-state CAS, revoke other sessions and stamp the existing credential-change fence. Preserve the authorizing browser. Both existing issuance/enrollment switches gate options and commit. Registration never approves an action: obtain a new exact-action/session challenge and native assertion through the existing decision owner. This consciously accepts compromise risk of the bound phone or Telegram account rather than preserving old-factor equivalence. No saved key, routing contact, link possession, old cookie, silent exchange or session renewal supplies enrollment authority. See `docs/hosted-auth-migration.md` for the required pre-retirement canonical-login inventory and rollback floor.
 - A Vercel `Ready` status and the aliases reported on a deployment are candidate
   evidence, not production-routing authority. The protected postdeploy gate must
   resolve the event's exact HTTPS deployment, require its configured project,

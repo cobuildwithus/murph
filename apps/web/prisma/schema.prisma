@@ -609,6 +609,7 @@ model AppleHealthReopenPush {
 
 model HostedMember {
   customConnections HostedMcpConnection[]
+  customConnectionActions HostedMcpActionRequest[]
   gameInvitations GameInvitee[] @relation("GameInviteeMember")
   chatHostedGames Game[] @relation("GameChatContainer")
   companionLastContactAt         DateTime?                       @map("companion_last_contact_at")
@@ -651,6 +652,9 @@ model HostedMember {
   groupJournalCaptureEnabled      Boolean?                       @map("group_journal_capture_enabled")
   groupJournalCaptureConsentRequestedAt DateTime?                @map("group_journal_capture_consent_requested_at")
   suspendedAt                    DateTime?                       @map("suspended_at")
+  /// How the first-party account was first signed in to: email, phone or telegram. Written once by the sign-in
+  /// that claims the member; later sign-in method changes never touch it. Null: not known to be phone or Telegram.
+  firstSignInMethod              String?                         @map("first_sign_in_method")
   createdAt                      DateTime                        @default(now()) @map("created_at")
   updatedAt                      DateTime                        @updatedAt @map("updated_at")
   invites                        HostedInvite[]                 @relation("HostedInviteMember")
@@ -3116,9 +3120,39 @@ model HostedMcpConnection {
   createdAt DateTime @default(now()) @map("created_at")
   lastUsedAt DateTime? @map("last_used_at")
   pending HostedMcpPendingAuthorization?
+  actionRequests HostedMcpActionRequest[]
 
   @@unique([memberId, slug])
   @@map("hosted_mcp_connection")
+}
+
+/// A change Murph asked to make with an approved tool. It runs only after the member confirms it on a
+/// signed-in Murph page, and at most once: confirming consumes it as unknown before anything is sent.
+model HostedMcpActionRequest {
+  id String @id
+  memberId String @map("member_id")
+  member HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  connectionId String @map("connection_id")
+  connection HostedMcpConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  generation Int
+  toolName String @map("tool_name")
+  /// The approved remote definition's digest when Murph asked.
+  digest String
+  /// Keyed identity of member, connection, generation, tool, digest and canonical arguments.
+  lookupKey String @map("lookup_key")
+  argumentsEncrypted String @map("arguments_encrypted")
+  /// waiting | declined | done | failed | unknown. Expiry is derived from expiresAt.
+  status String @default("waiting")
+  resultEncrypted String? @map("result_encrypted")
+  createdAt DateTime @default(now()) @map("created_at")
+  expiresAt DateTime @map("expires_at")
+  decidedAt DateTime? @map("decided_at")
+
+  @@index([memberId, lookupKey])
+  @@index([memberId, status, expiresAt])
+  @@index([connectionId])
+  @@index([createdAt])
+  @@map("hosted_mcp_action_request")
 }
 
 model HostedMcpPendingAuthorization {

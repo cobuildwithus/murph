@@ -13,6 +13,8 @@ export const connectionMessages = {
   needs_sign_in: "This connection needs to be signed in again in Murph's settings.",
   refused_result: "The service's answer included Murph's sign-in token, so Murph didn't use it.",
   refused_by_service: "The service refused the request. Try again later.",
+  request_closed: "This request was already answered or has expired.",
+  changes_need_phone_or_telegram: "Changes need an account set up with your phone or Telegram.",
 } as const;
 export type ConnectionErrorCode = keyof typeof connectionMessages;
 export class ConnectionError extends Error {

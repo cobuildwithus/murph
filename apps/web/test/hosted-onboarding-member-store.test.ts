@@ -3732,6 +3732,7 @@ function createHostedMember(overrides: Partial<HostedMember> = {}): HostedMember
     companionOsVersion: null,
     companionDeviceModel: null,
     companionLastForegroundAt: null,
+    firstSignInMethod: null,
     groupJournalCaptureConsentRequestedAt: null,
     groupJournalCaptureEnabled: null,
     assistantPersona: null,

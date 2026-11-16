@@ -19,7 +19,7 @@ export interface ConnectionCredentials {
 export interface PendingAuthorization extends ConnectionCredentials {
   verifier: string;
 }
-const WEB_ORIGIN = "https://www.withmurph.ai";
+export const WEB_ORIGIN = "https://www.withmurph.ai";
 export function connectionRedirectUri(id: string): string {
   return `${WEB_ORIGIN}/api/settings/custom-connections/callback/${encodeURIComponent(id)}`;
 }

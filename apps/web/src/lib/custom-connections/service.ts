@@ -4,8 +4,9 @@ import type { Prisma } from "@prisma/client";
 import { randomUUID } from "node:crypto";
 import { getPrisma } from "../prisma";
 import { assertHostedAppSessionCurrentTx, type HostedAppSession } from "../hosted-onboarding/app-session";
+import { connectionChangesAllowed } from "./access";
 import { activeHostedPersonAccessWhere } from "../hosted-onboarding/member-access";
-import { approvedSnapshot, digest, reconcileTools, storedToolsSchema, approveTools } from "./catalog";
+import { approvedSnapshot, digest, reconcileTools, storedToolsSchema, approveTools, toolKind } from "./catalog";
 import { ConnectionError } from "./errors";
 import { connectionUrl, guardedConnectionFetch } from "./guarded-fetch";
 import { completeConnectionAuthorization, ConnectionOAuthProvider, revocationEndpoint, startOfferedAuthorization, type PendingAuthorization } from "./oauth";
@@ -13,8 +14,9 @@ import { sealConnectionSecret, openConnectionSecret } from "./secrets";
 import { connectionWhere, nameConnection, projectConnection, readConnection, saveCatalog, type ConnectionRow } from "./store";
 import { describeConnection, listConnectionTools, readCredentials } from "./upstream";
 
-type SettingsMutation = { request: Request; session: HostedAppSession };
-async function settingsMutation<T>(authority: SettingsMutation, operation: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+export type SettingsMutation = { request: Request; session: HostedAppSession };
+/** One Settings change: the session is rechecked inside the transaction that commits it. */
+export async function settingsMutation<T>(authority: SettingsMutation, operation: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
   return getPrisma().$transaction(async (tx) => {
     await assertHostedAppSessionCurrentTx({ memberId: authority.session.member.id, sessionId: authority.session.sessionId,
       authProof: authority.session.authProof, prisma: tx, request: authority.request });
@@ -72,7 +74,7 @@ async function discoverConnection(row: ConnectionRow, authority: SettingsMutatio
       await nameConnection(row, serverName, tx);
       return saveCatalog(row, reconcileTools(storedToolsSchema.parse(row.tools), tools), undefined, tx);
     });
-    return { next: "choose" as const, connection: projectConnection(saved) };
+    return { next: "choose" as const, connection: projectConnection(saved, await connectionChangesAllowed(row.memberId)) };
   } catch (error) {
     if (provider.authorizationUrl) return signIn(provider.authorizationUrl);
     throw error;
@@ -131,7 +133,10 @@ export async function patchConnection(row: ConnectionRow, input: { revision: num
   if (input.revision !== row.revision) throw new ConnectionError("conflict", 409);
   // Only completed sign-in leaves needs_sign_in; turning it off and on again must not reuse a refresh token that may be spent.
   if (input.status !== undefined && row.status === "needs_sign_in") throw new ConnectionError("needs_sign_in");
-  const tools = approveTools(storedToolsSchema.parse(row.tools), input.tools ?? {});
+  const stored = storedToolsSchema.parse(row.tools);
+  const turnsOnWrite = stored.some((tool) => input.tools?.[tool.definition.name] === true && toolKind(tool.definition) === "write");
+  if (turnsOnWrite && !await connectionChangesAllowed(row.memberId)) throw new ConnectionError("changes_need_phone_or_telegram", 403);
+  const tools = approveTools(stored, input.tools ?? {}, row.name);
   return settingsMutation(authority, async (tx) => {
     const result = await saveCatalog(row, tools, input.status, tx);
     if (input.status === "off") await tx.hostedMcpPendingAuthorization.deleteMany({ where: { connectionId: row.id, generation: row.generation } });
@@ -164,9 +169,9 @@ export async function revokeConnectionBestEffort(row: ConnectionRow): Promise<vo
 export async function connectionManifest(memberId: string) {
   const rows = await getPrisma().hostedMcpConnection.findMany({
     where: { ...connectionWhere(memberId), status: "on" }, take: 10, orderBy: { slug: "asc" },
-    select: { id: true, slug: true, generation: true, catalog: true, tools: true },
+    select: { id: true, slug: true, generation: true, catalog: true, tools: true, name: true },
   });
-  return { connections: rows.filter((row) => approvedSnapshot(storedToolsSchema.parse(row.tools)).length > 0)
+  return { connections: rows.filter((row) => approvedSnapshot(storedToolsSchema.parse(row.tools), row.name).length > 0)
     .map(({ id, slug, generation, catalog }) => ({ id, slug, generation, catalog })) };
 }
 

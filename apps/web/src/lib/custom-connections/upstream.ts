@@ -44,7 +44,30 @@ export async function connectionAccessToken(row: ConnectionRow, forceRefresh = f
 // The relay waits 30 s; finish first so Web never works on after Codex has its answer.
 const CONNECTION_OPERATION_MS = 24_000;
 
-export async function withConnectionClient<T>(row: ConnectionRow, operation: (client: Client, options: { signal: AbortSignal; timeout: number }) => Promise<T>, provider?: ConnectionOAuthProvider): Promise<T> {
+/**
+ * A member-confirmed write. Sign-in, token refresh and setup may run first; `sent` turns true as its one
+ * tools/call leaves Web, and the client never sends another, so the SDK can't repeat it after a 401 or a retry.
+ */
+export interface ConnectionWrite { sent: boolean }
+function admitWrite(write: ConnectionWrite, init: RequestInit): boolean {
+  if (init.method !== "POST") return false;
+  // The SDK posts JSON-RPC text; anything else fails closed before it is sent.
+  const messages: unknown[] = [JSON.parse(String(init.body))].flat();
+  if (!messages.some((message) => (message as { method?: unknown } | null)?.method === "tools/call")) return false;
+  if (write.sent) throw new ConnectionError("conflict");
+  write.sent = true;
+  return true;
+}
+/** A refusal Web answers itself instead of letting the SDK sign in and send the request again. */
+function refusal(status: number, auth: string, toolCall: boolean, repeated: boolean, token: string | undefined) {
+  if (status !== 401 && status !== 403) return undefined;
+  if (auth === "none") return "refused" as const;
+  // A write never goes out twice, so a 401 to it is the answer, not a cue to refresh and resend.
+  if (toolCall && status === 401) return "refused" as const;
+  return status === 403 || repeated || !token ? "signed_out" as const : undefined;
+}
+
+export async function withConnectionClient<T>(row: ConnectionRow, operation: (client: Client, options: { signal: AbortSignal; timeout: number }) => Promise<T>, provider?: ConnectionOAuthProvider, write?: ConnectionWrite): Promise<T> {
   const deadline = AbortSignal.timeout(CONNECTION_OPERATION_MS);
   const startedAt = Date.now();
   const remaining = () => Math.max(1, CONNECTION_OPERATION_MS - (Date.now() - startedAt));
@@ -66,19 +89,17 @@ export async function withConnectionClient<T>(row: ConnectionRow, operation: (cl
     fetch: async (url, init = {}) => {
       if (++requests > 24) throw new ConnectionError("limit");
       if (!provider && new URL(String(url)).href !== row.serverUrl) throw new ConnectionError("unsafe_destination");
+      const toolCall = write ? admitWrite(write, init) : false;
       const response = await fetchRemote(url, { ...init,
         signal: init.signal ? AbortSignal.any([init.signal, deadline]) : deadline });
-      if (!provider && row.auth === "none" && (response.status === 401 || response.status === 403)) {
-        await response.body?.cancel();
-        throw new ConnectionError("refused_by_service");
-      }
-      if (!provider && ((response.status === 401 && (++unauthorizedResponses > 1 || !token)) || response.status === 403)) {
-        await response.body?.cancel();
-        const current = await readConnection(row.memberId, row.id);
-        if (current.generation === row.generation) await markNeedsSignIn(current);
-        throw new ConnectionError("needs_sign_in");
-      }
-      return response;
+      const refused = provider ? undefined
+        : refusal(response.status, row.auth, toolCall, response.status === 401 && ++unauthorizedResponses > 1, token);
+      if (!refused) return response;
+      await response.body?.cancel();
+      if (refused === "refused") throw new ConnectionError("refused_by_service");
+      const current = await readConnection(row.memberId, row.id);
+      if (current.generation === row.generation) await markNeedsSignIn(current);
+      throw new ConnectionError("needs_sign_in");
     },
   });
   // Servers on the 2026-07-28 revision drop the 2025 handshake; let the SDK pick the era.

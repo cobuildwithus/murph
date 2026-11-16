@@ -126,6 +126,8 @@ async function prepareUnclaimedLogin(prisma: PrismaClient, contact: HostedLinqPa
     }
     if (current) assertHostedMemberNotSuspended(current);
     else if (!invitedMemberId) await createHostedMember({ memberId, billingStatus: HostedBillingStatus.not_started, prisma: tx });
+    // Written once, by the sign-in that claims the member; MCP write approval reads it.
+    await tx.hostedMember.updateMany({ where: { id: memberId, firstSignInMethod: null }, data: { firstSignInMethod: contact.kind } });
     await revalidatePreparedHostedDomainRootForWebTx({ prepared: root, tx });
     if (contact.kind === "email") {
       if (!identity) await upsertHostedMemberIdentity({

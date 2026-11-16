@@ -69,6 +69,8 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     "authRecords HostedAuthRecord[]",
     // Custom connections live in their own encrypted, cascade-deleted table; the member row gains only the relation.
     "customConnections HostedMcpConnection[]",
+    // Requests Murph makes through them live in their own encrypted, cascade-deleted table too.
+    "customConnectionActions HostedMcpActionRequest[]",
     "appleHealthReopenPushes AppleHealthReopenPush[]",
     "id String @id",
     'assistantModelPreference String? @map("assistant_model_preference")',
@@ -99,6 +101,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     "companionPushRoute CompanionPushRoute?",
     "conversationPolls HostedConversationPoll[]",
     "emailPublicBootstrapAttempts HostedEmailPublicBootstrapAttempt[]",
+    'firstSignInMethod String? @map("first_sign_in_method")',
     "gameProfile GameProfile?",
     // Progress content is sealed in member-owned tables; these are cascade relations only.
     'progressAwards GameProgressAward[] @relation("ProgressAwardOwner")',

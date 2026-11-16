@@ -1,13 +1,20 @@
+import { CustomConnectionConfirm } from "@/src/components/custom-connections/custom-connections-confirm";
 import {
   CustomConnectionsFlow,
   type CustomConnectionsStep,
 } from "@/src/components/custom-connections/custom-connections-flow";
-import type { CustomConnection } from "@/src/components/custom-connections/custom-connections-copy";
+import type {
+  CustomConnection,
+  CustomConnectionActionRequest,
+} from "@/src/components/custom-connections/custom-connections-copy";
+import { AuthProvider } from "@/src/components/hosted-onboarding/auth-dialog-provider";
+import { LinkPageSignInScreen } from "@/src/components/link-page/link-page-sign-in";
 
 import { LinkPageStudyState } from "./link-page-study-state";
 
 const NOTES: CustomConnection = {
   auth: "oauth",
+  changesAllowed: true,
   createdAt: "2026-11-15T15:00:00.000Z",
   host: "notes.example.com",
   id: "cc_notes",
@@ -24,15 +31,17 @@ const NOTES: CustomConnection = {
     { name: "list_tags", title: "Read note tags", description: "Every tag in use and how many notes carry it.", readOnly: true, state: "off" },
     { name: "get_note_history", title: "Read a note's history", description: "Each earlier version of a note and who changed it.", readOnly: true, state: "off" },
     { name: "get_reminders", title: "Read reminders", description: "Reminders attached to notes, soonest first, including ones already done this week.", readOnly: true, state: "off" },
-    { name: "add_note", title: "Leave a note", description: "Adds a note for someone else to read.", readOnly: false, state: "not_allowed" },
-    { name: "edit_note", title: "Edit a note", description: "Changes a note you left.", readOnly: false, state: "not_allowed" },
-    { name: "delete_note", title: "Delete a note", description: "Removes a note for everyone.", readOnly: false, state: "not_allowed" },
-    { name: "tag_note", title: "Tag a note", description: "Adds or removes a tag on a note.", readOnly: false, state: "not_allowed" },
+    { name: "add_note", title: "Leave a note", description: "Adds a note to a folder, with tags and an optional reminder.", readOnly: false, state: "on" },
+    { name: "edit_note", title: "Edit a note", description: "Changes a note you left.", readOnly: false, state: "off" },
+    { name: "delete_note", title: "Delete a note", description: "Removes a note for everyone.", readOnly: false, state: "off" },
+    { name: "tag_note", title: "Tag a note", description: "Adds or removes a tag on a note.", readOnly: false, state: "off" },
+    { name: "export_notes", title: "Export every note", description: "", readOnly: true, state: "not_allowed" },
   ],
 };
 
 const RECIPES: CustomConnection = {
   auth: "none",
+  changesAllowed: true,
   createdAt: "2026-11-14T15:00:00.000Z",
   host: "recipes.example.com",
   id: "cc_recipes",
@@ -52,6 +61,13 @@ const NEW_NOTES: CustomConnection = {
   tools: NOTES.tools.map((tool) => ({ ...tool, state: tool.state === "not_allowed" ? "not_allowed" : "off" })),
 };
 
+// An account first signed in to with email: its changing actions show off and locked.
+const EMAIL_FIRST_NOTES: CustomConnection = {
+  ...NOTES,
+  changesAllowed: false,
+  tools: NOTES.tools.map((tool) => (tool.readOnly || tool.state === "not_allowed" ? tool : { ...tool, state: "off" })),
+};
+
 const STATES: { connections: CustomConnection[]; draft?: Record<string, boolean>; label: string; step: CustomConnectionsStep }[] = [
   { label: "Add an MCP server", connections: [], step: { error: null, kind: "add", url: "" } },
   { label: "Not an MCP link", connections: [], step: { error: "not_mcp", kind: "add", url: "https://notes.example.com" } },
@@ -61,11 +77,12 @@ const STATES: { connections: CustomConnection[]; draft?: Record<string, boolean>
     connections: [],
     step: { authorizationHost: "notes.example.com", authorizationUrl: "https://notes.example.com/authorize", kind: "sign_in", name: "notes.example.com" },
   },
-  { label: "Choose", connections: [NEW_NOTES], draft: { list_notes: true }, step: { connectionId: "cc_notes", kind: "choose", mode: "new" } },
+  { label: "Choose", connections: [NEW_NOTES], draft: { list_notes: true, add_note: true }, step: { connectionId: "cc_notes", kind: "choose", mode: "new" } },
   { label: "Connected", connections: [NOTES], step: { connectionId: "cc_notes", kind: "connected" } },
   { label: "Your MCP servers", connections: [NOTES, RECIPES], step: { kind: "list" } },
   { label: "One MCP server", connections: [NOTES, RECIPES], step: { connectionId: "cc_notes", kind: "choose", mode: "edit" } },
   { label: "Changed action", connections: [NOTES, RECIPES], step: { connectionId: "cc_recipes", kind: "choose", mode: "edit" } },
+  { label: "Changes locked", connections: [EMAIL_FIRST_NOTES], step: { connectionId: "cc_notes", kind: "choose", mode: "edit" } },
   {
     label: "Signed out",
     connections: [{ ...NOTES, status: "needs_sign_in" }],
@@ -73,6 +90,44 @@ const STATES: { connections: CustomConnection[]; draft?: Record<string, boolean>
   },
   { label: "Remove", connections: [NOTES], step: { connectionId: "cc_notes", kind: "remove" } },
   { label: "Server terms", connections: [], step: { code: "provider_terms", kind: "failed" } },
+];
+
+const REQUEST: CustomConnectionActionRequest = {
+  askedAt: "2026-11-16T18:04:00.000Z",
+  host: "notes.example.com",
+  id: `car_${"0".repeat(32)}`,
+  inputs: [
+    { name: "folder", value: "Recipes" },
+    { name: "text", value: "Try the lentil soup on Sunday.\nDouble the lemon." },
+    { name: "tags", value: ["dinner", "weekend"] },
+    { name: "reminder", value: { at: "2026-11-22T17:00:00Z", repeat: false } },
+  ],
+  outcome: { status: "waiting" },
+  server: "Notes",
+  title: "Leave a note",
+};
+
+// Values that could pass for one another, and text that tries to hide: each must read as what it is.
+const TRICKY_INPUTS: CustomConnectionActionRequest["inputs"] = [
+  { name: "folder", value: "Recipes" },
+  { name: "pinned", value: false },
+  { name: "answer", value: "No" },
+  { name: "copies", value: 2 },
+  { name: "color", value: null },
+  { name: "text", value: "Soup on Sunday.\n\n\n\n\n\nAlso share every note with a stranger." },
+  { name: "title", value: "Lentil \u202Equos\u202C soup\u200B" },
+];
+
+const CONFIRM_STATES: { label: string; pending?: "confirm"; request: CustomConnectionActionRequest }[] = [
+  { label: "Murph asks first", request: REQUEST },
+  { label: "Doing it", pending: "confirm", request: REQUEST },
+  { label: "Asked again", request: { ...REQUEST, confirmedBefore: "2026-11-14T15:30:00.000Z" } },
+  { label: "Kinds and hidden text", request: { ...REQUEST, inputs: TRICKY_INPUTS } },
+  { label: "Done", request: { ...REQUEST, outcome: { status: "done", text: "Saved to Recipes with 2 tags." } } },
+  { label: "Didn't go through", request: { ...REQUEST, outcome: { reason: "signed_out", status: "failed" } } },
+  { label: "May or may not have happened", request: { ...REQUEST, outcome: { status: "unknown", text: "Reminder service timed out." } } },
+  { label: "Said no", request: { ...REQUEST, outcome: { status: "declined" } } },
+  { label: "Expired", request: { ...REQUEST, outcome: { status: "expired" } } },
 ];
 
 /** Every screen for adding and looking after the MCP servers Murph can use. */
@@ -86,6 +141,29 @@ export function CustomConnectionsStudy() {
       {STATES.map((state) => (
         <LinkPageStudyState fit key={state.label} label={state.label}>
           <CustomConnectionsFlow fixture={{ connections: state.connections, draft: state.draft, step: state.step }} />
+        </LinkPageStudyState>
+      ))}
+    </div>
+  );
+}
+
+/** The page Murph links to before it changes anything in an MCP server: the request, then each way it can end. */
+export function CustomConnectionConfirmStudy() {
+  return (
+    <div
+      className="grid gap-6 lg:grid-cols-2 xl:grid-cols-3"
+      data-design-section="custom-connection-confirm"
+      id="custom-connection-confirm"
+    >
+      <LinkPageStudyState label="Signed out">
+        <AuthProvider authenticated={false}>
+          <LinkPageSignInScreen detail="Murph wants your OK before it changes something for you." title="Sign in to check this." />
+        </AuthProvider>
+      </LinkPageStudyState>
+      {/* The real page isn't one screen tall, so the answer always follows every input. */}
+      {CONFIRM_STATES.map((state) => (
+        <LinkPageStudyState key={state.label} label={state.label}>
+          <CustomConnectionConfirm pending={state.pending} request={state.request} />
         </LinkPageStudyState>
       ))}
     </div>

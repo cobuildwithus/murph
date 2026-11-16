@@ -89,6 +89,8 @@ async function prepareNewTelegramLogin(input: { telegramUserId: string; prisma: 
     const owned = await tx.hostedAuthRecord.findUnique({ where: { model_id: { model: "user", id: memberId } } });
     if ((current?.id ?? null) !== existingId || owned || snapshot !== await readHostedAuthSourceSnapshot(tx, memberId)) throw new HostedAuthIdentityConflictError("prepared_state_changed");
     if (!current && !invitedMemberId) await createHostedMember({ memberId, billingStatus: HostedBillingStatus.not_started, prisma: tx });
+    // Written once, by the sign-in that claims the member; MCP write approval reads it.
+    await tx.hostedMember.updateMany({ where: { id: memberId, firstSignInMethod: null }, data: { firstSignInMethod: "telegram" } });
     await revalidatePreparedHostedDomainRootForWebTx({ prepared: root, tx });
     if (!identity) await upsertHostedMemberIdentity({
       memberId, maskedPhoneNumberHint: null, phoneLookupKey: null, phoneNumber: null, phoneNumberVerifiedAt: null,

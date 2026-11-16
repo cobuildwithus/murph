@@ -15,6 +15,8 @@ export const SENSITIVE_ACTION_KINDS = [
   "approval.passkey.recover",
   "approval.passkey.initial-enrollment",
   "assistant.action.approve",
+  // Running one change Murph asked to make in a member's MCP server.
+  "custom-connection.action.confirm",
 ] as const;
 
 export type SettingsSensitiveActionKind =

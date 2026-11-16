@@ -1,4 +1,5 @@
 import { buildHostedActionApprovalBinding } from "@/src/lib/action-approvals";
+import { ACTION_CONFIRM_KIND, actionConfirmChallengeIsCurrent } from "@/src/lib/custom-connections/action-confirm";
 import { createHash } from "node:crypto";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
@@ -23,6 +24,9 @@ export const POST = withJsonError(async (request: Request) => {
     || !isSensitiveActionKind(challenge.kind) || !origin) throw unavailable();
   const bindingHash = challenge.kind === "account.credential.change"
     ? hostedCredentialChangeBinding({ change: parseHostedCredentialChange(body.credentialChange), memberId: session.member.id, sessionId: session.sessionId })
+    : challenge.kind === ACTION_CONFIRM_KIND
+    ? await actionConfirmChallengeIsCurrent({ bindingHash: challenge.bindingHash, memberId: session.member.id, sessionId: session.sessionId })
+      ? challenge.bindingHash : null
     : isSettingsSensitiveActionKind(challenge.kind)
     ? buildSettingsSensitiveActionBinding({ kind: challenge.kind, memberId: session.member.id, sessionId: session.sessionId })
     : challenge.approvalKey && challenge.actionId && challenge.actionHash && challenge.approvalStatus === "pending"

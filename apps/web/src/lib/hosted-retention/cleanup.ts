@@ -29,6 +29,8 @@ export const HOSTED_MAILBOX_STRUCTURAL_RETENTION_MS = 30 * DAY_MS;
 export const HOSTED_INGRESS_LATENCY_TRACE_RETENTION_MS = 7 * DAY_MS;
 export const HOSTED_TYPING_ALERT_RETENTION_MS = 30 * DAY_MS;
 export const HOSTED_DEVICE_WEBHOOK_TRACE_RETENTION_MS = 30 * DAY_MS;
+// Requests expire after an hour and answer repeat calls for an hour after their decision; the rest is record.
+export const HOSTED_CUSTOM_CONNECTION_ACTION_RETENTION_MS = 30 * DAY_MS;
 export const HOSTED_LINQ_PROVIDER_EVENT_DIAGNOSTIC_RETENTION_MS = 7 * DAY_MS;
 export const HOSTED_RUNTIME_LEDGER_RETENTION_MS = 30 * DAY_MS;
 // Every batched retention category uses ordered work with an explicit per-run
@@ -71,6 +73,7 @@ export interface HostedControlPlaneRetentionCleanupResult {
   expiredDeviceConnectIntentsDeleted: number;
   expiredDeviceOauthSessionsDeleted: number;
   expiredCustomConnectionAuthorizationsDeleted: number;
+  expiredCustomConnectionActionRequestsDeleted: number;
   expiredDeviceWebhookTracesDeleted: number;
   expiredEmailPublicBootstrapAttemptsDeleted: number;
   expiredGroupParticipantObservationsDeleted: number;
@@ -150,6 +153,7 @@ export async function runHostedControlPlaneRetentionCleanup(input: {
   const expiredRuntimePutDrainsDeleted = await deleteExpiredRuntimePutDrains({ now, prisma });
 
   const expiredCustomConnectionAuthorizationsDeleted = await deleteExpiredCustomConnectionAuthorizations({ now, prisma });
+  const expiredCustomConnectionActionRequestsDeleted = await deleteExpiredCustomConnectionActionRequests({ now, prisma });
   return {
     expiredLinqGroupRisk,
     compactedLinqProviderEventDiagnostics,
@@ -163,6 +167,7 @@ export async function runHostedControlPlaneRetentionCleanup(input: {
     expiredDeviceConnectIntentsDeleted,
     expiredDeviceOauthSessionsDeleted,
     expiredCustomConnectionAuthorizationsDeleted,
+    expiredCustomConnectionActionRequestsDeleted,
     expiredDeviceWebhookTracesDeleted,
     expiredEmailPublicBootstrapAttemptsDeleted,
     expiredGroupParticipantObservationsDeleted,
@@ -1144,5 +1149,25 @@ export async function deleteExpiredCustomConnectionAuthorizations(input: {
     )
     DELETE FROM "hosted_mcp_pending_authorization" AS pending
     USING doomed WHERE pending."connection_id" = doomed."connection_id"
+  `);
+}
+
+/** A request older than 30 days can no longer be confirmed or reused. A confirmation holding its row is skipped. */
+export async function deleteExpiredCustomConnectionActionRequests(input: {
+  now: Date;
+  prisma: Pick<PrismaClient, "$executeRaw">;
+}): Promise<number> {
+  const cutoff = new Date(input.now.getTime() - HOSTED_CUSTOM_CONNECTION_ACTION_RETENTION_MS);
+  return runRetentionBatches(() => input.prisma.$executeRaw`
+    WITH doomed AS MATERIALIZED (
+      SELECT request."id"
+      FROM "hosted_mcp_action_request" AS request
+      WHERE request."created_at" < ${cutoff}
+      ORDER BY request."created_at", request."id"
+      LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
+      FOR UPDATE OF request SKIP LOCKED
+    )
+    DELETE FROM "hosted_mcp_action_request" AS request
+    USING doomed WHERE request."id" = doomed."id"
   `);
 }

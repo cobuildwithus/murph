@@ -47,6 +47,9 @@ const INTEGRATIONS_CONNECT_PATH_PATTERN =
   /^\/integrations\/connect\/cai_[A-Za-z0-9_-]{32}$/u;
 const SETTINGS_DATA_PRIVACY_PATH = "/settings/data-privacy";
 const SETTINGS_PATH = "/settings";
+// Signing in again only sets up or recovers a Murph passkey, which an email
+// code alone cannot do: the assistant may be able to read that inbox.
+const REAUTHENTICATION_METHODS = ["phone", "telegram"] as const;
 const HOSTED_USAGE_CREDIT_PURCHASE_ID_PATTERN = /^hucp_[A-Za-z0-9_-]{16}$/u;
 
 interface AuthContextValue {
@@ -215,6 +218,7 @@ export function AuthProvider({
       {children}
       <AuthDialog
         open={open}
+        methods={authIntent === "reauthenticate" ? REAUTHENTICATION_METHODS : undefined}
         reauthenticate={authIntent === "reauthenticate"}
         onReauthenticated={handleReauthenticated}
         title={authIntent === "data-privacy"
@@ -225,7 +229,7 @@ export function AuthProvider({
         description={authIntent === "data-privacy"
           ? "Use the email address or phone number already linked to your Murph account."
           : authIntent === "reauthenticate"
-            ? "Use a sign-in method already linked to this account. Then add your Murph passkey and confirm the request."
+            ? "Use the phone number or Telegram already linked to this account. Then add your Murph passkey."
           : authenticated
             ? "Verify this device to manage secure approvals."
             : undefined}

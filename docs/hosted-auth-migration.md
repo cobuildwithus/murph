@@ -247,21 +247,42 @@ The rollout accepted canonical primary proof for imported accounts that never
 established Murph approval protection. This remains a deliberate weaker-factor
 policy than proving the former Privy factor. After provider/schema retirement,
 new and imported accounts use the same policy; no legacy identity marker remains.
-Email, phone or Telegram compromise can therefore permit initial enrollment.
-Any approval row, including empty or corrupt state, excludes this path.
+Only a phone or Telegram sign-in qualifies: the assistant can read a connected
+inbox, so an email code alone never enrolls a first passkey. Phone or Telegram
+compromise can therefore permit initial enrollment. A member whose only sign-in
+is email cannot enroll until a phone or Telegram is linked, and initial
+messaging setup still lets a fresh email session link the first one, so that
+inbox remains such a member's root of trust. Any approval row, including empty
+or corrupt state, excludes this path. MCP writes go further and need an account
+established by phone or Telegram (`hosted_member.first_sign_in_method`, written
+once by the claiming sign-in; see `agent-docs/SECURITY.md`).
+
+Each session issuer records the factor that proved it: `commitHostedAuthOtp`
+records `email` or `phone` from the verified code and `commitHostedAuthSession`
+records `telegram`, for sign-in and bound reauthentication alike, in the
+transaction that issues the session. The record is a reserved encrypted
+verification row keyed to the session id that expires ten minutes after the
+proof, and hosted retention drains it. It is deliberately not a session field:
+older Web parses session records with a closed schema and opens every session of
+a member during sign-in, so a new field would lock those members out after a
+revert. Older builds never read the record, so this needs no rollback floor.
+Sessions issued before this change, or by an older build during rollout, have
+no record and must sign in again by phone or Telegram; there is no backfill.
 
 `initial-passkey-enrollment.ts` requires a current first-party session, no approval
-row, fresh non-future primary proof and an encrypted login projection exactly
-matching canonical verified methods. It binds the challenge to member, session,
-primary proof and canonical generation, then rechecks all state under locks.
+row, fresh non-future primary proof by phone or Telegram and an encrypted login
+projection exactly matching canonical verified methods. It binds the challenge
+to member, session, primary proof, its factor and canonical generation, then
+rechecks all state under locks.
 Credential revocation fencing must not postdate primary proof. New users start
 without a revocation timestamp because no earlier authority exists; subsequent
 revocation, recovery and initial enrollment stamp the existing field. Enrollment
 never creates a primary session or changes a sign-in method.
 
-When primary proof is stale, the existing auth dialog runs a same-account
-reauthentication continuation. Fixed OTP send/verify and Telegram start/verify
-routes accept an explicit browser-only `reauthenticate` intent. The current
+When primary proof is stale or came from an email code, the existing auth
+dialog runs a same-account reauthentication continuation that offers only phone
+and Telegram. Fixed OTP send/verify and Telegram start/verify routes accept an
+explicit browser-only `reauthenticate` intent. The current
 session selects the member; the submitted method must already match its canonical
 verified sign-in. This branch never calls the importer, searches for another
 member by contact, creates an account, attaches a contact, merges accounts, or
@@ -326,8 +347,10 @@ field, is stored. Generation preserves sessions and replaces any prior recovery
 key. If delivery is lost, the current passkey can authorize a new key; no key
 retrieval endpoint exists. Keep the saved key separate from the passkey.
 
-**Use a recovery key** requires first-party primary authentication within five
-minutes and the previously saved key. A five-minute challenge binds the current
+**Use a recovery key** requires first-party primary authentication by phone or
+Telegram within five minutes and the previously saved key; an email code alone
+is refused, since a saved key may sit where the assistant can read it. A member
+whose only sign-in is email therefore cannot recover without support. A five-minute challenge binds the current
 member, browser session and exact recovery-key generation. Final registration
 requires a new user-verified WebAuthn credential. One transaction replaces all
 previous approval credentials, consumes the challenge/key, revokes other

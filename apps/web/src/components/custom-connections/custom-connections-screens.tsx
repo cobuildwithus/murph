@@ -17,14 +17,15 @@ import { Input } from "@/src/components/ui/input";
 import { cn } from "@/src/lib/utils";
 
 import {
+  CUSTOM_CONNECTION_CHANGES_LOCKED,
   describeCustomConnectionStatus,
   readCustomConnectionError,
   type CustomConnection,
   type CustomConnectionTool,
 } from "./custom-connections-copy";
 
-const ROW_CLASS = "rounded-[18px] bg-[#2A2622] px-4 py-3.5";
-const QUIET_TEXT_CLASS = "text-sm font-medium leading-[19px] text-[#FFFCF6]/60";
+export const ROW_CLASS = "rounded-[18px] bg-[#2A2622] px-4 py-3.5";
+export const QUIET_TEXT_CLASS = "text-sm font-medium leading-[19px] text-[#FFFCF6]/60";
 
 export type CustomConnectionsStep =
   | { kind: "loading" }
@@ -69,7 +70,7 @@ function describeEditingConnection(connection: CustomConnection): string {
   if (connection.status === "off") return "Off. Turn it on to let Murph use it again.";
   if (changed === 1) return "One action changed since you allowed it. Look it over below.";
   if (changed > 1) return "Some actions changed since you allowed them. Look them over below.";
-  return `Murph can look things up with ${connection.name} in your private chats and check-ins.`;
+  return `Murph can use ${connection.name} in your private chats and check-ins.`;
 }
 
 function needsAttention(connection: CustomConnection): boolean {
@@ -118,7 +119,7 @@ function ListScreen({ flow }: { flow: Flow }) {
         </>
       }
       announceDetail={false}
-      detail="Murph can look things up in these in your private chats and check-ins."
+      detail="Murph can use these in your private chats and check-ins."
       fill
       headingRef={flow.headingRef}
       title="Your MCP servers."
@@ -224,8 +225,9 @@ function DeveloperNote() {
       </summary>
       <p className={QUIET_TEXT_CLASS}>
         Paste a remote MCP server URL (Streamable HTTP over HTTPS). If the server offers sign-in, Murph signs in with
-        its OAuth, and the server must identify itself in its sign-in response (RFC 9207). Murph can use only tools
-        marked read-only, and each starts off.
+        its OAuth, and the server must identify itself in its sign-in response (RFC 9207). Every tool starts off.
+        Murph calls tools marked read-only when it needs them; any other tool runs only after you confirm that exact
+        call on a Murph page.
       </p>
     </details>
   );
@@ -262,6 +264,8 @@ function ChooseScreen({ connection, flow, mode }: { connection: CustomConnection
   const changed = connection.tools.some((tool) => flow.draft[tool.name] !== (tool.state === "on"));
   const anyOn = Object.values(flow.draft).some(Boolean);
   const saveLabel = editing ? "Save" : `Connect ${connection.name}`;
+  const reads = usable.filter((tool) => tool.readOnly);
+  const writes = usable.filter((tool) => !tool.readOnly);
   return (
     <LinkPageScreen
       actions={
@@ -281,7 +285,7 @@ function ChooseScreen({ connection, flow, mode }: { connection: CustomConnection
       }
       announceDetail={false}
       below={editing && connection.host !== connection.name ? <p className={cn(QUIET_TEXT_CLASS, "pt-1.5")}>{connection.host}</p> : undefined}
-      detail={editing ? describeEditingConnection(connection) : `Murph can only look things up with ${connection.name} for now.`}
+      detail={editing ? describeEditingConnection(connection) : "Murph asks you before it changes anything."}
       fill
       headingRef={flow.headingRef}
       title={editing ? `${connection.name}.` : "Choose what Murph can use."}
@@ -295,14 +299,48 @@ function ChooseScreen({ connection, flow, mode }: { connection: CustomConnection
         {details ? "Hide details" : "Show details"}
         <ChevronDownIcon aria-hidden="true" className={cn("size-4 transition-transform motion-reduce:transition-none", details && "rotate-180")} />
       </button>
-      <ul aria-label={`Actions from ${connection.name}`} className="flex flex-col gap-2">
-        {usable.map((tool) => (
-          <ToolRow details={details} flow={flow} key={tool.name} tool={tool} />
-        ))}
-      </ul>
+      {reads.length > 0 ? (
+        <ul aria-label={`Actions from ${connection.name}`} className="flex flex-col gap-2">
+          {reads.map((tool) => (
+            <ToolRow details={details} flow={flow} key={tool.name} tool={tool} />
+          ))}
+        </ul>
+      ) : null}
+      <AskFirstTools afterReads={reads.length > 0} details={details} flow={flow} locked={!connection.changesAllowed} tools={writes} />
       <LockedTools tools={connection.tools.filter((tool) => tool.state === "not_allowed")} />
       <p className={cn(QUIET_TEXT_CLASS, "pt-4")}>Described by {connection.name}.</p>
     </LinkPageScreen>
+  );
+}
+
+/**
+ * Actions that change things: each one runs only after the member confirms it on a Murph page. An account first
+ * signed in to with email can't confirm, so they show locked, without switches.
+ */
+function AskFirstTools({ afterReads, details, flow, locked, tools }: {
+  afterReads: boolean; details: boolean; flow: Flow; locked: boolean; tools: CustomConnectionTool[];
+}) {
+  const headingId = `${flow.urlId}-ask-first`;
+  if (tools.length === 0) return null;
+  return (
+    <section aria-labelledby={headingId} className={cn("flex flex-col gap-2", afterReads && "pt-5")}>
+      <div className="flex flex-col gap-0.5 px-1">
+        <h2 className={cn("text-[15px] font-semibold leading-5", locked && "text-[#FFFCF6]/60")} id={headingId}>
+          Murph asks you first
+        </h2>
+        <p className={QUIET_TEXT_CLASS}>{locked ? CUSTOM_CONNECTION_CHANGES_LOCKED : "Murph sends you a link to confirm each one."}</p>
+      </div>
+      <ul aria-labelledby={headingId} className="flex flex-col gap-2">
+        {tools.map((tool) => locked ? (
+          <li className={cn(ROW_CLASS, "flex flex-col gap-0.5")} key={tool.name}>
+            <span className="text-pretty text-[17px] font-semibold leading-[22px] text-[#FFFCF6]/60">{tool.title || tool.name}</span>
+            {details && tool.description ? <span className={cn(QUIET_TEXT_CLASS, "text-[#FFFCF6]/45")}>{tool.description}</span> : null}
+          </li>
+        ) : (
+          <ToolRow details={details} flow={flow} key={tool.name} tool={tool} />
+        ))}
+      </ul>
+    </section>
   );
 }
 
@@ -324,9 +362,7 @@ function LockedTools({ tools }: { tools: CustomConnectionTool[] }) {
         {tools.map((tool) => (
           <li className="flex flex-col" key={tool.name}>
             <span className="text-[15px] font-semibold leading-5 text-[#FFFCF6]/60">{tool.title || tool.name}</span>
-            <span className={cn(QUIET_TEXT_CLASS, "text-[#FFFCF6]/45")}>
-              {tool.readOnly ? "Its description is too long to check." : "It can change things."}
-            </span>
+            <span className={cn(QUIET_TEXT_CLASS, "text-[#FFFCF6]/45")}>Its description is too long to check.</span>
           </li>
         ))}
       </ul>
@@ -409,7 +445,7 @@ function NothingUsableScreen({ connection, flow }: { connection: CustomConnectio
           </LinkPagePill>
         </>
       }
-      detail="Murph can only look things up for now, and this MCP server doesn't offer that yet."
+      detail="This MCP server doesn't offer anything Murph can use yet."
       headingRef={flow.headingRef}
       title="Nothing here Murph can use."
     />

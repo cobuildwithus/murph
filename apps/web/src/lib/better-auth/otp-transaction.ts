@@ -7,6 +7,7 @@ import { runWithHostedDomainRootProviderCallsDisabled } from "../hosted-crypto/d
 import { createHostedBetterAuth } from "./auth";
 import { hostedAuthTransactionAdapter } from "./adapter";
 import { hostedAuthOtpIdentifier, lockHostedAuthOtpTx } from "./otp-store";
+import { recordHostedPrimaryAuthenticationFactorTx } from "./primary-factor";
 import { makeHostedAuthSessionRoomTx } from "./session-limit";
 import { verifyHostedAuthSmsOtpTx } from "./sms-otp";
 
@@ -38,6 +39,8 @@ export async function commitHostedAuthOtp(input: {
     let proofReached = false;
     let memberCommitted = false;
     let expiresAt: Date | undefined;
+    const authenticatedAt = new Date();
+    const sessionIds: string[] = [];
     const commitMember = async () => {
       proofReached = true;
       if (memberCommitted) return;
@@ -46,9 +49,14 @@ export async function commitHostedAuthOtp(input: {
     };
     const auth = createHostedBetterAuth({
       baseURL: input.baseURL, secret: input.secret, prisma: input.prisma,
-      primaryAuthenticatedAt: new Date(),
+      primaryAuthenticatedAt: authenticatedAt,
       database: (options: BetterAuthOptions) => hostedAuthTransactionAdapter(input.prisma, tx, options),
-      generateId: ({ model }) => model === "user" ? input.memberId : randomUUID(),
+      generateId: ({ model }) => {
+        if (model === "user") return input.memberId;
+        const id = randomUUID();
+        if (model === "session") sessionIds.push(id);
+        return id;
+      },
       delivery: {
         email: async () => { throw new Error("Delivery is forbidden inside login completion."); },
       },
@@ -83,9 +91,11 @@ export async function commitHostedAuthOtp(input: {
         : await auth.api.verifyPhoneNumber({
             body: { phoneNumber: input.otp.phoneNumber, code: input.otp.code }, returnHeaders: true,
           });
-      if (!memberCommitted || !expiresAt || result.response.user?.id !== input.memberId || !result.response.token) {
+      if (!memberCommitted || !expiresAt || result.response.user?.id !== input.memberId || !result.response.token
+        || sessionIds.length !== 1) {
         throw new Error("Authentication completion did not commit the prepared member.");
       }
+      await recordHostedPrimaryAuthenticationFactorTx(tx, { authenticatedAt, factor: input.otp.kind, sessionId: sessionIds[0] });
       return { ok: true as const, token: result.response.token, expiresAt, headers: result.headers };
     } catch (error) {
       if (!proofReached && error instanceof APIError && OTP_REJECTIONS.has(error.body?.code ?? "")) {

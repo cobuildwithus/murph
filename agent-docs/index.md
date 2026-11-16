@@ -19,7 +19,7 @@ A directory of the durable docs. Find the row for your task and read that doc;
 | `docs/device-sync-hosted-control-plane.md` | Junction-only hosted device control plane; companion ingestion, hosted agent sessions and source-labelled reads. | Device-sync architecture direction | Medium | 2026-09-08 |
 | `docs/device-provider-contribution-kit.md` | Junction transport and source-normalization contribution boundaries. | Provider contribution workflow | Medium | 2026-05-13 |
 | `docs/device-provider-compatibility-matrix.md` | Canonical provider planning matrix and evidence expectations. | Device-provider normalization planning | Medium | 2026-07-14 |
-| `docs/hosted-auth-migration.md` | Four-stage Privy removal, reviewed candidate heads, merge/deploy order, transition-only import, session continuity, recovery and guarded schema/vendor retirement. | Hosted auth migration rollout | High | 2026-09-10 |
+| `docs/hosted-auth-migration.md` | Four-stage Privy removal, reviewed candidate heads, merge/deploy order, transition-only import, session continuity, first-passkey and recovery sign-in factors, and guarded schema/vendor retirement. | Hosted auth migration rollout | High | 2026-11-16 |
 | `docs/hosted-contact-privacy-rotation.md` | Hosted blind-index keyring seam, dormant block/leave rotation and per-epoch group evidence deletion. | Hosted contact-privacy rotation seam | Medium | 2026-11-15 |
 | `docs/hosted-linq-db-home-lines-migration.md` | Database-backed Linq home-line assignment, provider inventory freshness, and bounded Serializable snapshot recovery. | Hosted Linq line ownership and rollout | High | 2026-09-11 |
 | `docs/hosted-account-data-deletion-export.md` | Hosted account data export and deletion workflow, store coverage, security checks, retention limits, and the authenticated canary diagnostic-retention exception. | Hosted account privacy workflow | High | 2026-05-13 |
@@ -37,7 +37,7 @@ A directory of the durable docs. Find the row for your task and read that doc;
 | `agent-docs/QUALITY_SCORE.md` | Current quality posture by area. | Current repo quality posture | Medium | 2026-04-06 |
 | `agent-docs/RELIABILITY.md` | Reliability rules for retries, queues, ordering, idempotency, delivery and failure recovery across the hosted runtime. | Runtime reliability policy | High | 2026-11-02 |
 | `agent-docs/operations/stripe-effect-compatibility-cutover.md` | Hosted billing operations. | Hosted billing operations | High | 2026-08-28 |
-| `agent-docs/SECURITY.md` | Security constraints, custom MCP OAuth and gateway boundaries, secret and auth rules, and escalation. | Security policy | High | 2026-11-15 |
+| `agent-docs/SECURITY.md` | Security constraints, custom MCP OAuth, gateway and passkey-confirmed write boundaries (phone- or Telegram-established accounts only), secret and auth rules, and escalation. | Security policy | High | 2026-11-16 |
 | `agent-docs/compliance/README.md` | Compliance reference-pack overview, launch minimums, and official source links for consumer health-data obligations. | Compliance docs index | High | 2026-04-29 |
 | `agent-docs/compliance/2026-07-23-connected-source-launch-gate.md` | Connected-source permission assumption, launch status, and ongoing provider controls. | Connected-source release gate | High | 2026-07-23 |
 | `agent-docs/compliance/ftc-hbnr-incident-plan.md` | Internal incident playbook for suspected FTC HBNR breaches, unauthorized disclosures, vendor incidents, and tracking disclosures involving health data. | Health-data incident response | High | 2026-04-29 |
