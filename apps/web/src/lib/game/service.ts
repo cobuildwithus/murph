@@ -4004,7 +4004,10 @@ async function buildViewInputs(
     const recipient = ticketMessageRecipient(ticket, input);
     return recipient ? [recipient] : [];
   }));
-  const verifiedPhones = await readHostedMemberVerifiedPhoneNumbers({ memberIds: memberIdsForPhones, prisma });
+  // No eligible ticket, no identity read.
+  const verifiedPhones = memberIdsForPhones.length === 0
+    ? new Map<string, string>()
+    : await readHostedMemberVerifiedPhoneNumbers({ memberIds: memberIdsForPhones, prisma });
   return inputs.map(input => ({ ...input, verifiedPhones }));
 }
 
