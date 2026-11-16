@@ -33,6 +33,22 @@ import {
 type ObservedRequest = { init?: RequestInit; url: string };
 
 describe("createCloudflareHostedControlClient", () => {
+  it("sends Progress ciphertext through its dedicated owner-bound routes", async () => {
+    const calls: { path: string; method: string | undefined; body: BodyInit | null | undefined }[] = [];
+    const envelope = JSON.stringify({ alg: "AES-256-GCM-HKDF-SHA256", ciphertext: "c3ludGhldGlj", domain: "control", iv: "AAAAAAAAAAAAAAAA",
+      lane: "hosted-member-private-field", rootKeyId: "root-synthetic", schema: "murph.hosted-secure-box.v1", scope: "game-progress" });
+    const client = createCloudflareHostedControlClient({ baseUrl: "https://runner.example.test", getBearerToken: async () => "synthetic-token",
+      fetchImpl: async (url, init) => {
+        calls.push({ path: new URL(String(url)).pathname, method: init?.method, body: init?.body });
+        return createJsonResponse(init?.method === "POST" ? { stored: true } : { envelope, hash: "a".repeat(64) });
+      } });
+    const identity = { userId: "synthetic-owner", mediaId: `progress/${"b".repeat(32)}.jpg` };
+    await client.putProgressPic({ ...identity, envelope, hash: "a".repeat(64) });
+    expect(await client.readProgressPic(identity)).toEqual({ envelope, hash: "a".repeat(64) });
+    expect(calls.map(call => call.path)).toEqual(["/internal/users/synthetic-owner/progress-pics/stage", "/internal/users/synthetic-owner/progress-pics/read"]);
+    expect(calls[0]!.body).toBe(envelope);
+  });
+
   it.each([{}, { deleted: false }])("owns a malformed purge acknowledgement: %j", async (body) => {
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(createJsonResponse(body));
     const client = createCloudflareHostedControlClient({
@@ -197,8 +213,10 @@ describe("createCloudflareHostedControlClient", () => {
       "purgeRuntimeResource",
       "putGameImage",
       "putGameMedia",
+      "putProgressPic",
       "putRecapMedia",
       "readGameMedia",
+      "readProgressPic",
       "readRecapMedia",
       "reconcileRuntimeHealthDataConsent",
       "sendTelegramUsageLimitNotice",

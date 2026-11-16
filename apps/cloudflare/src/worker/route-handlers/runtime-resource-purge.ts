@@ -1,7 +1,7 @@
 import { readOptionalJsonInput } from "../route-utils/json-body.ts";
 import { parseInput, RequestInputError } from "@murphai/hosted-execution/request-input";
 import { workspaceSnapshotBucket } from "../../workspace-snapshot-local-s3.ts";
-import { retireRecapMediaObject } from "../../recap-media-store.ts";
+import { retireRecapMediaObject, retireProgressPicObject } from "../../recap-media-store.ts";
 import { abortRuntimeMultipartUpload } from "../../runtime-object-upload.ts";
 import { parseHostedRuntimeResourcePurge } from "@murphai/hosted-execution/runtime-resource-purge";
 import { readHostedExecutionSnapshotBaseRef, readHostedExecutionSnapshotDeltaRef, readHostedExecutionSnapshotHotRef } from "@murphai/hosted-execution/parsers";
@@ -37,6 +37,10 @@ export async function purgeHostedRuntimeResource(input: {
   const bucket = workspaceSnapshotBucket(input.source);
   if (!bucket.delete) throw new Error("Runtime resource deletion is unavailable.");
   const resource = parseHostedRuntimeResourcePurge(input.resource);
+  if (resource.kind === "game_progress_pic") {
+    await retireProgressPicObject({ bucket: input.source.BUNDLES, userId: input.userId, objectKey: resource.objectKey });
+    return;
+  }
   if (resource.kind === "game_recap") {
     await retireRecapMediaObject({ bucket: input.source.BUNDLES, userId: input.userId, objectKey: resource.objectKey });
     return;

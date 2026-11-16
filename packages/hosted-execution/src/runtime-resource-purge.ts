@@ -5,7 +5,7 @@ import { isHostedWorkspaceSnapshotV2Ref, parseHostedExecutionSnapshotRef } from 
 import type { HostedExecutionSnapshotRef } from "./contracts.ts";
 
 export type HostedRuntimeResourcePurge =
-  | { kind: "snapshot" | "replica" | "media" | "game_recap"; objectKey: string }
+  | { kind: "snapshot" | "replica" | "media" | "game_recap" | "game_progress_pic"; objectKey: string }
   | { kind: "multipart"; objectKey: string; uploadId: string }
   | { kind: "legacy_snapshot"; snapshotRef: NonNullable<HostedExecutionSnapshotRef> };
 
@@ -22,7 +22,7 @@ export function parseHostedRuntimeResourcePurge(value: unknown): HostedRuntimeRe
     if (objectKey.length > 1024 || uploadId.length > 1024) throw new ContractValidationError("Multipart retirement identity is too long.");
     return { kind: "multipart", objectKey, uploadId };
   }
-  if (record.kind !== "snapshot" && record.kind !== "replica" && record.kind !== "media" && record.kind !== "game_recap") throw new ContractValidationError("Runtime resource purge kind is invalid.");
+  if (record.kind !== "snapshot" && record.kind !== "replica" && record.kind !== "media" && record.kind !== "game_recap" && record.kind !== "game_progress_pic") throw new ContractValidationError("Runtime resource purge kind is invalid.");
   const objectKey = requireString(record.objectKey, "Runtime resource object key");
   if (objectKey.length > 1024) throw new ContractValidationError("Runtime resource object key is too long.");
   return { kind: record.kind, objectKey };
