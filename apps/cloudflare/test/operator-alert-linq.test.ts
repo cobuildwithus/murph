@@ -40,14 +40,27 @@ describe("operator Linq alert delivery", () => {
     expect(requests).toHaveLength(6);
     expect(requests.every((request) => request.redirect === "manual")).toBe(true);
     const sends = requests.filter((request) => request.method === "POST");
-    await expect(Promise.all(sends.map(async (request) =>
-      (await request.clone().json() as {
+    // Each page goes into the configured chat the preflight checked, never
+    // through Linq's recipient-only route, which picks its own chat and line.
+    expect(sends.map((request) => new URL(request.url).pathname)).toEqual([
+      "/api/partner/v3/chats/chat_primary/messages",
+      "/api/partner/v3/chats/chat_secondary/messages",
+    ]);
+    const bodies = await Promise.all(sends.map(async (request) =>
+      await request.clone().json() as Record<string, unknown> & {
         message: { idempotency_key: string };
-      }).message.idempotency_key
-    ))).resolves.toEqual([
+      }
+    ));
+    expect(bodies.map((body) => body.message.idempotency_key)).toEqual([
       "operator-page-1",
       "operator-page-1-recipient-2",
     ]);
+    expect(sends.map((request) => request.headers.get("idempotency-key")))
+      .toEqual(["operator-page-1", "operator-page-1-recipient-2"]);
+    for (const body of bodies) {
+      expect(body).not.toHaveProperty("to");
+      expect(body).not.toHaveProperty("from");
+    }
   });
 
   it("fails closed when two configured chats resolve to one recipient", async () => {
