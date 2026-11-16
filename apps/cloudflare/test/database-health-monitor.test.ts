@@ -665,10 +665,21 @@ describe("database health monitor", () => {
   it.each([
     { label: "missing", omitSecondaryLinqChatId: true },
     { label: "blank", secondaryLinqChatId: "   " },
-  ])("fails closed when the secondary direct chat is $label", ({ label: _label, ...input }) => {
-    expect(() => createMonitorHarness(input)).toThrowError(
-      "HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID is required.",
-    );
+  ])("pages only the primary chat when the secondary is $label", async ({ label: _label, ...input }) => {
+    const harness = createMonitorHarness({
+      ...input,
+      metricsBody: buildMetricsBody({ branchId: BRANCH_ID, clientWaitSeconds: 8 }),
+    });
+
+    await expect(harness.runScheduledCheck(FIVE_MINUTES_MS)).resolves
+      .toMatchObject({ outcome: "alert_sent" });
+    expect(harness.allLinqRequests).toHaveLength(1);
+    await expect(readLinqRequestBody(harness.allLinqRequests[0])).resolves
+      .toMatchObject({ chatId: "chat_test", message: { idempotency_key: "murph-db-1-1" } });
+    expect(harness.monitor.readAlertState()).toMatchObject({
+      pendingAlertIdempotencyKey: null,
+      pendingAlertMessage: null,
+    });
   });
 
   it("rejects duplicate direct-chat configuration", () => {

@@ -11,6 +11,7 @@ import {
   assertRecoveryWorkerVersion,
   assertRetiredInferenceSecretsRemoved,
   hasRetiredInferenceSecrets,
+  RETIRED_WORKER_SECRET_NAMES,
   readExpectedWorkerSecrets,
 } from "../scripts/deploy-retired-inference-secrets.ts";
 
@@ -181,7 +182,7 @@ describe("retired inference secret upload", () => {
     await expect(readExpectedWorkerSecrets({ ...input, currentVersion, currentVersionId: baseline.id })).rejects.toThrow("Cannot safely retire");
   });
 
-  it.each(["VENICE_API_KEY", "VERCEL_AI_API_KEY"])("rejects reintroducing %s in the synchronized payload", async name => {
+  it.each([...RETIRED_WORKER_SECRET_NAMES])("rejects reintroducing %s in the synchronized payload", async name => {
     const input = await fixture();
     await writeFile(input.secretsFilePath, JSON.stringify({ [name]: "synthetic-retired" }));
     await expect(readExpectedWorkerSecrets({ ...input, currentVersion: baseline, currentVersionId: baseline.id })).rejects.toThrow("Cannot safely retire");

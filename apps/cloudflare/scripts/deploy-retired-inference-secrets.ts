@@ -2,7 +2,20 @@ import { readFile } from "node:fs/promises";
 
 import { isObjectRecord } from "./deploy-automation/shared.ts";
 
-const retiredSecrets = new Set(["VENICE_API_KEY", "VERCEL_AI_API_KEY"]);
+/**
+ * Worker secrets each deploy removes from the uploaded version. Named for the
+ * retired inference keys it first covered; any secret listed here is deleted
+ * even though omitted optional secrets otherwise stay live.
+ * HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID: operator pages run with the
+ * primary chat only. To restore a second operator, drop it from this list, put
+ * it back in HOSTED_WORKER_OPTIONAL_SECRET_NAMES, and set the secret.
+ */
+export const RETIRED_WORKER_SECRET_NAMES = [
+  "HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID",
+  "VENICE_API_KEY",
+  "VERCEL_AI_API_KEY",
+] as const;
+const retiredSecrets: ReadonlySet<string> = new Set(RETIRED_WORKER_SECRET_NAMES);
 
 /** Omitted optional secrets remain live configuration; deletion is a native version patch. */
 export async function readExpectedWorkerSecrets(input: {

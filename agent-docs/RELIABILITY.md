@@ -992,7 +992,11 @@ Current product admission, delivery and native runtime safety rules remain.
   stable provider
   idempotency deduplicates that primary replay while the actual secondary
   receives the page. Delivery otherwise posts into each configured chat, so
-  the page leaves from the line preflight checked. The primary retains the persisted Linq
+  the page leaves from the line preflight checked. Linq answers a key whose
+  message it deleted or expired with 404 and never resends it, so a 404 earns
+  one resend under a key bound to that chat; a chat Linq cannot find 404s
+  again and the page stays pending. The secondary chat is optional and is
+  currently retired by the deploy, so pages go to the primary only. The primary retains the persisted Linq
   idempotency key and the secondary uses a stable derived key. A
   transport-ambiguous or rejected send keeps the exact persisted body and both
   destination keys for the next eligible cycle; only acknowledged entry to both

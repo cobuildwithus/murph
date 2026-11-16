@@ -3,6 +3,7 @@ import { DurableObject } from "cloudflare:workers";
 
 import {
   classifyOperatorLinqAlertFailure,
+  readOperatorLinqChatIds,
   sendOperatorLinqAlert,
 } from "../operator-alert/linq.js";
 import type {
@@ -771,16 +772,7 @@ function createOperatorAlertSender(
     environment.LINQ_API_TOKEN,
     "LINQ_API_TOKEN",
   );
-  const chatIds: readonly [primary: string, secondary: string] = [
-    readRequiredEnvironmentValue(
-      environment.HOSTED_DATABASE_ALERT_LINQ_CHAT_ID,
-      "HOSTED_DATABASE_ALERT_LINQ_CHAT_ID",
-    ),
-    readRequiredEnvironmentValue(
-      environment.HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID,
-      "HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID",
-    ),
-  ];
+  const chatIds = readOperatorLinqChatIds(environment);
   return {
     async send(input): Promise<void> {
       await sendOperatorLinqAlert({

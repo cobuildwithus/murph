@@ -816,9 +816,10 @@ Before deploying the Worker version that introduces
 - secrets `HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN_ID` and
   `HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN` for a dedicated PlanetScale
   token with only the organization-level `read_metrics_endpoints` permission;
-- secrets `HOSTED_DATABASE_ALERT_LINQ_CHAT_ID` and
-  `HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID` for two separate existing
-  direct operator chats whose sole external recipients are different; and
+- secret `HOSTED_DATABASE_ALERT_LINQ_CHAT_ID` for an existing direct operator
+  chat. A second operator chat (`HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID`,
+  a different recipient) is optional and currently retired: the deploy strips
+  it from the Worker (see `RETIRED_WORKER_SECRET_NAMES`); and
 - the already-required `LINQ_API_TOKEN`.
 
 Deploy Cloudflare only; no Web or database migration is involved. Wrangler
@@ -848,8 +849,8 @@ and production config must land together with the
 `OPENAI_AUTHORIZATION_ALERT_MONITOR` binding, and append-only SQLite migration
 `v6`. Do not alter the existing `*/5 * * * *` cron: this owner uses native
 Durable Object alarms. It adds no secret or recipient and reuses the existing
-`LINQ_API_TOKEN`, `HOSTED_DATABASE_ALERT_LINQ_CHAT_ID`, and
-`HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID`.
+`LINQ_API_TOKEN` and `HOSTED_DATABASE_ALERT_LINQ_CHAT_ID`, plus the optional
+secondary chat when one is configured.
 
 The trigger is limited to an authorized OpenAI upstream HTTP 401 or 403 after
 Worker key injection, and the singleton RPC contains only `{ status,
@@ -1807,8 +1808,8 @@ Once the OpenAI-only Worker and runner consumers have converged, retire
 `VENICE_API_KEY` and `VERCEL_AI_API_KEY` through the existing protected Murph
 Cloud deployment. The ordinary Wrangler upload uses the canonical generated
 config and existing secret payload. If its binding inventory still contains a
-retired name, the existing deployment owner makes one native merge PATCH with
-`env: { VENICE_API_KEY: null, VERCEL_AI_API_KEY: null }` and the deployment's
+retired name, the existing deployment owner makes one native merge PATCH that
+nulls every name in `RETIRED_WORKER_SECRET_NAMES` and carries the deployment's
 message/tag. This follows the [official Wrangler version-secret owner](https://github.com/cloudflare/workers-sdk/blob/c82d96ba63a3b343b520e781a070889251868d9a/packages/wrangler/src/versions/secrets/index.ts#L74-L112):
 `PATCH /accounts/{accountId}/workers/workers/{name}/versions/latest` with
 `Content-Type: application/merge-patch+json`. Cloudflare preserves the remaining
@@ -1880,7 +1881,6 @@ Set these in the selected GitHub environment as secrets:
 - `CLOUDFLARE_IMAGES_SIGNING_KEY`
 - `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK`
 - `HOSTED_DATABASE_ALERT_LINQ_CHAT_ID`
-- `HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID`
 - `HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN`
 - `HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN_ID`
 - `HOSTED_LOG_FINGERPRINT_SECRET`
