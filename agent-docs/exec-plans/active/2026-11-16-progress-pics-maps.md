@@ -37,15 +37,45 @@ background job, cache table, retry or feature flag.
 
 ## Evidence and open dependencies
 
-- Worker storage: 11 tests passed, including before/after-upload retirement.
-- Map provider and geometry: 20 tests passed. Route rollover: 5 tests passed.
-- Shared control client/routes: 107 tests passed. Shared-package typechecks passed
-  before the latest client extraction; rerun on the candidate.
+- Rebased on the published BE0 contract at `9ceaa81ba4` (PR #5061).
+- Worker storage, HTTP and runtime purge: 18 tests passed, exit 0, including
+  before/after-upload retirement and owner/scope rejection.
+- Web focused suites: 258 tests passed, exit 0. They cover provider and geometry,
+  route rollover and identity, picture ownership, JPEG validation, GET/DELETE
+  contracts, account deletion, shared contract and control-client mocks.
+- Shared control client/routes: 107 tests passed, exit 0.
+- Web, Worker, hosted-execution and cloudflare-hosted-control typechecks passed,
+  exit 0. Complexity diff passed, exit 0; existing client hotspots are unchanged.
 - Live Mapbox: permanent geocoding succeeds; San Diego to San Francisco returns
   Ok; London to New York returns NoRoute. No private input or token was retained.
 - Styles create/list both return HTTP 403. Style JSON is prepared outside the
   repository for the owner to upload in Studio. Awaiting the resulting style id.
-- BE0 remote and the BE1/BE2 current-total reader interface are pending. Picture
-  service tests currently cannot resolve BE0's unpublished crypto module.
-- BE0's patch writer must evaluate a leg-update function against its own observed
-  state to avoid replacing legs derived from a stale caller read.
+- BE1/BE2 current-total reader composition is pending. `setRouteGoal` takes a
+  required fifth context argument containing complete canonical points, awards,
+  completeness and mutation authority; it does not introduce a totals reader.
+- The shared patch writer now also accepts a synchronous computed patch evaluated
+  against its observed state. Route awards use frozen route identity, so an old
+  completion cannot attach to a replacement at the same array index.
+- The first diff-scoped remote check is still running against the earlier
+  foundation head. The final integrated candidate needs its own selector run.
+
+## Remaining integration
+
+- POST picture response needs the canonical measure series for `Pic.at`.
+- GET map needs the canonical measure progress and uploaded Murph style id.
+- BE1/BE2 must compose route views, first-route selection, route awards and photo
+  pins into their reads and connect goals to the route preview/setter.
+- Comparison PNGs and deployed token/style verification await the custom style.
+- Keep PR #5060 draft and this plan active. Do not merge or run ReviewGPT.
+
+## Signature and bounded-effect refinements
+
+- Route rollover (rows 04/10) requires the caller's canonical series and current
+  authority, hence the required setter context and computed state patch.
+- Map preview (rows 04/15) adds the explicitly requested `from`/`to` query variant
+  to BE0's parser and enforces Mapbox's documented 1280-pixel maximum.
+- Account deletion retires at most 100 picture objects per member per request;
+  successful pages are removed before an explicit continuation. No background
+  job or automatic retry is added. This bounded cleanup behavior must remain
+  visible in integration review; it is separate from incomplete award input,
+  which settles nothing.

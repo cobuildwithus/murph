@@ -124,8 +124,11 @@ const goalsQuery = z.object({ measure: text, q: text.optional() });
 export type GoalsQuery = z.infer<typeof goalsQuery>;
 const picUpload = z.object({ id: z.string().uuid(), measureId: text, takenAt: z.iso.datetime({ offset: true }) });
 export type PicUploadQuery = z.infer<typeof picUpload>;
-const pixels = z.union([z.number(), z.string().regex(/^\d+$/u)]).transform(Number).pipe(z.number().int().positive());
-const mapQuery = z.object({ measure: text, w: pixels, h: pixels });
+const pixels = z.union([z.number(), z.string().regex(/^\d+$/u)]).transform(Number).pipe(z.number().int().positive().max(1280));
+const mapQuery = z.union([
+  z.strictObject({ measure: text, w: pixels, h: pixels }),
+  z.strictObject({ from: text, to: text, w: pixels, h: pixels }),
+]);
 export type MapQuery = z.infer<typeof mapQuery>;
 
 function parse<T>(schema: z.ZodType<T>, value: unknown): T {

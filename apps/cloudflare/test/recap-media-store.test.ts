@@ -4,6 +4,9 @@ import { describe, expect, it } from "vitest";
 import { createRecapMediaStore, createProgressPicStore, requireSealedGameMediaUpload, retireRecapMediaObject } from "../src/recap-media-store.ts";
 import { recapMediaRoutes } from "../src/worker/route-handlers/recap-media.ts";
 import { MemoryEncryptedR2Bucket } from "./test-helpers.ts";
+import { readHostedExecutionEnvironment } from '../src/env.ts';
+import type { WorkerRouteContext } from '../src/worker-routes/shared.ts';
+import { createHostedExecutionTestEnv } from './hosted-execution-fixtures.ts';
 
 class ConditionalBucket extends MemoryEncryptedR2Bucket {
   override async put(key: string, value: string, options?: { onlyIf?: unknown }): Promise<unknown> {
@@ -83,6 +86,30 @@ describe("Progress sealed storage", () => {
   const envelope = JSON.stringify({ alg: "AES-256-GCM-HKDF-SHA256", ciphertext: "c3ludGhldGlj", domain: "control", iv: "AAAAAAAAAAAAAAAA",
     lane: "hosted-member-private-field", rootKeyId: "root-synthetic", schema: "murph.hosted-secure-box.v1", scope: "game-progress" });
   const mediaId = `progress/${"c".repeat(32)}.jpg`;
+  function context(bucket: ConditionalBucket, method: 'POST' | 'GET', boundUser: string, body: string | undefined): WorkerRouteContext {
+    const request = new Request('https://runner.example.test/internal/users/member_ava/progress-pics/' + (method === 'POST' ? 'stage' : 'read'), {
+      method, body, headers: { 'x-hosted-execution-user-id': boundUser, 'x-murph-recap-media-id': mediaId, 'x-murph-recap-hash': 'a'.repeat(64) },
+    });
+    const unused = { getByName() { throw new Error('Progress must not activate a runner.'); } };
+    return { request, url: new URL(request.url), environment: readHostedExecutionEnvironment(createHostedExecutionTestEnv()),
+      env: { ...createHostedExecutionTestEnv(), BUNDLES: bucket, RUNNER_CONTAINER: unused, RUNNER_CONTAINER_SMOKE: unused } };
+  }
+  it('serves the dedicated HTTP contract only for the bound owner and Progress crypto scope', async () => {
+    const bucket = new ConditionalBucket();
+    const stage = recapMediaRoutes.find(route => route.name === 'progressPicStage')!;
+    const read = recapMediaRoutes.find(route => route.name === 'progressPicRead')!;
+    const params = { userId: 'member_ava' };
+    for (const route of [stage, read]) {
+      expect(route.beforeMethod!(context(bucket, 'GET', 'member_leo', undefined), params)).toMatchObject({ status: 401 });
+      expect(route.beforeMethod!(context(bucket, 'GET', 'member_ava', undefined), params)).toBeNull();
+    }
+    expect((await stage.handle(context(bucket, 'POST', 'member_ava', JSON.stringify({ ...JSON.parse(envelope), scope: 'weekly-game' })), params)).status).toBe(400);
+    expect(bucket.objects.size).toBe(0);
+    expect((await stage.handle(context(bucket, 'POST', 'member_ava', envelope), params)).status).toBe(200);
+    const response = await read.handle(context(bucket, 'GET', 'member_ava', undefined), params);
+    expect(response.status).toBe(200); expect(response.headers.get('cache-control')).toBe('private, no-store');
+    expect(await response.json()).toEqual({ envelope, hash: 'a'.repeat(64) });
+  });
   it.each([false, true])("permanently retires before/after upload (%s)", async uploadFirst => {
     const bucket = new ConditionalBucket(), userId = "synthetic-owner";
     const store = createProgressPicStore({ bucket, userId });

@@ -6023,7 +6023,9 @@ open and shallow field merge, then seal outside the transaction. Its short
 transaction rechecks caller authority and writes only against the observed
 ciphertext; first creation uses the composite unique key. A loser throws
 `GAME_PROGRESS_STATE_CONFLICT` (503, retryable); it does not retry. Patches replace
-whole fields, including the legs array. BE2 must only propose a baseline while
+whole fields, including the legs array. A computed patch runs against that same
+observed state, so route rollover cannot overwrite a newer legs array from a
+separate caller read. BE2 must only propose a baseline while
 it is absent and include current health authority in the transaction callback.
 
 All three mutation helpers require `beforeMutationTx`: route owners pass the
@@ -6663,6 +6665,49 @@ hash and preserves conditional pointer creation and account-deletion fencing.
 Web clears decrypted bytes after upload and retains the encrypted source for
 retries and rollback. No new Worker route or crypto authority is needed. Local
 stacks keep plain files on disk.
+
+Progress pictures have a separate owner-only Web route and random
+`progress/<random-id>.jpg` identity. Web seals JPEG bytes under the member's
+control key with `game-progress` scope and table/key/field AAD before the
+Worker stores them. They never use game photo, avatar or recap keys. The
+member-bound `progress-pics/{stage,read}` control routes share recap's
+conditional-create storage primitive. `game_progress_pic` purge replaces the
+same object with a permanent content-free tombstone outside account-prefix
+removal; neither a delayed upload nor legacy recovery can replace it.
+
+Picture reads require the requesting owner's live row both before retrieval
+and after decryption. Deletion retires the row before awaiting the Worker
+purge and reports failure if that purge fails. Account deletion, after its
+existing suspension fence, retires up to 100 pictures per member before deleting
+those rows; a larger collection returns retryable pending cleanup, and the next
+explicit deletion request continues from the remaining rows. Upload admission
+rechecks native auth under the member lock before registering the random key,
+so account cleanup also fences uploads still in flight. Live picture lists read
+10,001 rows; more than 10,000 marks the input incomplete and yields no truncated
+pins or award evidence.
+
+For this object store, `version`, the plaintext-byte integrity `hash`, random
+object identity and `retired` marker are approved operational metadata.
+`envelope` is encrypted content; the owner namespace is keyed. The picture's
+exercise association is sealed in `meta_encrypted`; no health amount or image
+content is stored in operational metadata. Route endpoints, geometry, towns,
+distance and starting total are private content inside the existing sealed
+measure state. Mapbox receives only requested places or sampled coordinates,
+never a member identity, health total or provider token in a client response.
+
+Progress maps resolve two permanent geocodes, one simplified driving route and
+eight sequential place reverse-geocodes. Only the provider's explicit NoRoute
+permits a great circle; all other provider failures return retryable 503 with
+no retry or raw provider diagnostics. Maps use the constant Murph style,
+explicit Mercator bounds and two path overlays. The linked PNG is 708 by 354;
+its town coordinates use that exact viewport, and clients display it without
+cropping. Map requests accept their own dimensions and stream private PNGs;
+no map object or cache is persisted. Keep Mapbox attribution visible.
+
+Deploy the compatible Worker before Web emits Progress storage requests or
+purges, after the shared Progress migration. Existing recap producers remain
+compatible. Once picture retirement has been used, do not roll back to a Worker
+that cannot honor the new resource kind. There are no warm-runner changes.
 
 History keeps `mediaUrls` as stable cache identities and adds optional
 `delivery: { url, expiresAt }` to the previews in each person's or group's latest

@@ -77,6 +77,15 @@ describe("Progress request boundary", () => {
     expect(parseFriendsQuery({ measure: "steps", with: "member-leo" })).toEqual({ measure: "steps", range: "month", with: "member-leo" });
     expect(parseMapQuery({ measure: "walk.meters", w: "700", h: "400" })).toEqual({ measure: "walk.meters", w: 700, h: 400 });
   });
+  it("accepts a route preview and rejects mixed selectors or oversized maps", () => {
+    expect(parseMapQuery({ from: "London", to: "New York", w: "708", h: "354" }))
+      .toEqual({ from: "London", to: "New York", w: 708, h: 354 });
+    for (const input of [
+      { from: "London", to: "New York", measure: "steps", w: "708", h: "354" },
+      { measure: "walk.meters", w: "1281", h: "354" },
+      { from: "London", w: "708", h: "354" },
+    ]) expect(() => parseMapQuery(input)).toThrow("Invalid Progress request.");
+  });
   it("typed readers name their own measure and preserve canonical units", () => {
     const [reps, route] = READERS;
     expect([reps.measureId({ exercise: "pushups", count: 40, reps: [] }), reps.amount({ exercise: "pushups", count: 40, reps: [] })]).toEqual(["pushups.reps", 40]);
