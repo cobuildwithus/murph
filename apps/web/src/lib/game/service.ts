@@ -1,6 +1,6 @@
 import { isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { gameAreaCode } from "./area-code";
-import { readHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
+import { readHostedMemberIdentity, readHostedMemberVerifiedPhoneNumbers } from "../hosted-onboarding/hosted-member-identity-store";
 import { isBothWinOfferDue, mergeStakeSlots } from "./rules";
 import { buildRecapFallback, gameResultCorrectionLine } from './recap-fallback';
 import { gameRecapEnvelopeSchema, recapStorageObjects, type GameRecapEnvelope, type RecapAsset, type RecapVideoIdentity } from '@murphai/contracts/recap-show';
@@ -145,6 +145,7 @@ import {
   stakeItem,
   termsView,
   ticketView,
+  ticketMessageRecipient,
   visibleEntryIds,
   type BuiltGameHistoryView,
   type GameTicketRow,
@@ -3950,7 +3951,7 @@ async function buildViewInputs(
   const entryWords = new Map([...entryAt].map(([entryId, at]) => [entryId, {
     text: plain[at.text], data: parseStoredGameEntryData(at.kind, plain[at.payload]),
   }]));
-  return games.map((game, index) => {
+  const inputs: GameViewInput[] = games.map((game, index) => {
     const invite = inviteAt[index];
     const tokenIndex = tokenAt[index];
     const result: StoredResult | null = game.row.result ? parseStoredResult(game.row.result) : null;
@@ -3999,6 +4000,12 @@ async function buildViewInputs(
       words: parseTermWords(plain[wordsAt[index]] ?? ""),
     };
   });
+  const memberIdsForPhones = inputs.flatMap(input => input.tickets.flatMap(ticket => {
+    const recipient = ticketMessageRecipient(ticket, input);
+    return recipient ? [recipient] : [];
+  }));
+  const verifiedPhones = await readHostedMemberVerifiedPhoneNumbers({ memberIds: memberIdsForPhones, prisma });
+  return inputs.map(input => ({ ...input, verifiedPhones }));
 }
 
 function isHomeEntry(game: LoadedGame, viewerId: string, clock: Date, entry: Pick<GameEntry, "memberId" | "dayIndex">): boolean {
