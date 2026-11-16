@@ -85,6 +85,15 @@ describe("checked lookup boundary", () => {
     const parsed = checkedGoalLookup({ ...response, output_text: JSON.stringify({ found: null, closest: ["half-dome", "half-dome", "invented"], note: "Try a real mountain." }) }, "height", eligible);
     expect(parsed).toEqual({ found: null, closest: ["half-dome"], note: "Try a real mountain." });
   });
+  it("drops the markdown source links web search appends to prose", () => {
+    const link = " ([facts.example.test](https://facts.example.test/tower?utm_source=openai))";
+    const fictional = JSON.stringify({ found: null, closest: ["half-dome"], note: `${"A made-up tower. ".repeat(13)}Try a real one.${link}` });
+    expect(checkedGoalLookup({ ...response, output_text: fictional }, "height", eligible)).toEqual(
+      { found: null, closest: ["half-dome"], note: `${"A made-up tower. ".repeat(13)}Try a real one.` });
+    const found = JSON.stringify({ found: { ...proposed, blurb: `${proposed.blurb}${link}`, tagline: `${proposed.tagline}${link}` }, closest: [], note: null });
+    expect(checkedGoalLookup({ ...response, output_text: found }, "height", eligible).found)
+      .toMatchObject({ blurb: proposed.blurb, tagline: proposed.tagline, sourceUrl: proposed.sourceUrl });
+  });
   it("accepts a page the search read even without an inline citation", () => {
     expect(checkedGoalLookup({ ...response, output: response.output.filter(item => item.type === "web_search_call") }, "height", eligible).found).toMatchObject({ at: 1000 });
   });
