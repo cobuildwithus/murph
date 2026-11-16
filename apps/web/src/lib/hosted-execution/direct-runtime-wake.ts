@@ -151,16 +151,37 @@ async function runHostedDirectRuntimeWakeBestEffort(input: {
       // fails before returning a parseable control response.
       timing.latest = null;
       directWakeAttemptCount = attemptNumber;
-      const ensureResult = await client.ensureRuntimeProcessing({
-        ...(owner ? { admission: parseHostedRuntimeOwnerResponse({ cutover: "postgres", status: "existing", owner: projectHostedRuntimeOwner(owner) }) } : {}),
-        commandTimeoutMs,
-        onTiming: (value) => {
-          timing.latest = value;
-        },
-        orchestrationAttemptId,
-        signal,
-        userId,
-      });
+      let ensureResult: Awaited<ReturnType<typeof client.ensureRuntimeProcessing>>;
+      try {
+        ensureResult = await client.ensureRuntimeProcessing({
+          ...(owner ? { admission: parseHostedRuntimeOwnerResponse({ cutover: "postgres", status: "existing", owner: projectHostedRuntimeOwner(owner) }) } : {}),
+          commandTimeoutMs,
+          onTiming: (value) => {
+            timing.latest = value;
+          },
+          orchestrationAttemptId,
+          signal,
+          userId,
+        });
+      } catch (error) {
+        // An idle Vercel instance can resume holding a pooled socket that the
+        // far side already dropped. Resend once on a new connection; a repeated
+        // ensure is harmless because Temporal sends the same one anyway.
+        const transportErrorCode = readHostedDirectRuntimeWakeTransportErrorCode(error);
+        if (
+          attemptNumber === HOSTED_DIRECT_RUNTIME_WAKE_MAX_ATTEMPTS
+          || (transportErrorCode !== "ECONNRESET" && transportErrorCode !== "UND_ERR_SOCKET")
+        ) {
+          throw error;
+        }
+        console.info("Hosted direct ensure wake resending on a new connection.", {
+          attemptNumber,
+          orchestrationAttemptId,
+          source: wakeSource,
+          transportErrorCode,
+        });
+        continue;
+      }
       if (!("kind" in ensureResult)) {
         console.info("Hosted direct ensure wake accepted.", {
           accepted: ensureResult.accepted,

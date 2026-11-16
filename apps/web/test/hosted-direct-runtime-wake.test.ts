@@ -113,10 +113,24 @@ describe("Web direct runtime wake", () => {
     expect(mocks.ensure.mock.calls[0]?.[0]).not.toHaveProperty("admission");
   });
 
-  it("settles failed dispatch without retrying an uncertain request", async () => {
+  it("settles other dispatch failures without resending", async () => {
     mocks.ensure.mockRejectedValue(new TypeError("fetch failed"));
     await expect(startHostedDirectRuntimeWakeBestEffort(input)).resolves.toBeUndefined();
     expect(mocks.ensure).toHaveBeenCalledOnce();
+  });
+
+  it.each(["ECONNRESET", "UND_ERR_SOCKET"])("resends once on a new connection after %s", async code => {
+    const dropped = new TypeError("fetch failed", { cause: Object.assign(new Error("socket dropped"), { code }) });
+    mocks.ensure.mockRejectedValueOnce(dropped);
+    await startHostedDirectRuntimeWakeBestEffort(input);
+    expect(mocks.ensure).toHaveBeenCalledTimes(2);
+    const [first, second] = mocks.ensure.mock.calls.map(([value]) => value.orchestrationAttemptId);
+    expect(second).toBe(first);
+
+    mocks.ensure.mockReset();
+    mocks.ensure.mockRejectedValue(dropped);
+    await expect(startHostedDirectRuntimeWakeBestEffort(input)).resolves.toBeUndefined();
+    expect(mocks.ensure).toHaveBeenCalledTimes(2);
   });
 
   it("does nothing when no direct client is configured", async () => {
