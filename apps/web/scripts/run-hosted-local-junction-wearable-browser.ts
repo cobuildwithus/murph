@@ -1092,18 +1092,25 @@ async function describeAuthorizationSurface(page: Page): Promise<string> {
     const countActions = async (controls: Locator) => {
       let actions = 0;
       let enabledActions = 0;
+      const labels: string[] = [];
       for (let index = 0; index < await controls.count(); index += 1) {
-        const state = await readAuthorizationActionState(controls.nth(index));
-        if (state !== null) actions += 1;
+        const control = controls.nth(index);
+        const state = await readAuthorizationActionState(control);
+        if (state !== null) {
+          actions += 1;
+          labels.push(safeActionLabel(await readAuthorizationActionText(control)));
+        }
         if (state === "enabled") enabledActions += 1;
       }
-      return { actions, enabledActions };
+      return { actions, enabledActions, labels };
     };
     let actions = 0;
     let allActions = 0;
     let enabledActions = 0;
+    const labels: string[] = [];
     for (const role of ["button", "link"] as const) {
       const all = await countActions(scope.getByRole(role));
+      labels.push(...all.labels);
       const recognized = await countActions(
         scope.getByRole(role, { name: AUTH_ACTION_PATTERN }),
       );
@@ -1125,6 +1132,7 @@ async function describeAuthorizationSurface(page: Page): Promise<string> {
     return {
       actions,
       enabledActions,
+      labels,
       otherActions: Math.max(0, allActions - actions),
       uncheckedCheckboxes,
     };
@@ -1157,8 +1165,16 @@ async function describeAuthorizationSurface(page: Page): Promise<string> {
     `childEnabledActions=${child.enabledActions}`,
     `childOtherActions=${child.otherActions}`,
     `mainUncheckedCheckboxes=${main.uncheckedCheckboxes}`,
-    `childUncheckedCheckboxes=${child.uncheckedCheckboxes}.`,
+    `childUncheckedCheckboxes=${child.uncheckedCheckboxes}`,
+    `mainActionLabels=${main.labels.join("|") || "none"}.`,
   ].join(" ");
+}
+
+// Provider button text names the next step without revealing the account;
+// anything beyond a few plain words is withheld.
+function safeActionLabel(text: string): string {
+  const label = text.replace(/\s+/gu, " ").trim();
+  return /^[A-Za-z][A-Za-z ]{0,23}$/u.test(label) ? label : "?";
 }
 
 async function requirePersistedWearableConnection(
@@ -1462,7 +1478,11 @@ function safePageLocation(page: Pick<Page, "url"> | null): string {
         ? "partner_consent"
         : url.pathname === "/oauth2Confirm"
           ? "oauth2_consent"
-          : "other";
+          // Garmin routes are fixed words; a segment with digits, symbols or
+          // more than three segments could carry an identifier.
+          : /^(?:\/[A-Za-z]{1,32}){1,3}$/u.test(url.pathname)
+            ? `other:${url.pathname}`
+            : "other";
     return `${host}/${route}`;
   } catch {
     return "unavailable";

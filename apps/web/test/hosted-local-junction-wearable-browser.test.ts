@@ -257,6 +257,9 @@ describe("hosted-local Junction wearable browser authorization", () => {
     ["https://private-subdomain.garmin.com/partner/oauthConfirm?token=private#private", "garmin.com/partner_consent"],
     ["https://connect.garmin.com/oauth2Confirm?client_id=private#private", "garmin.com/oauth2_consent"],
     ["https://connect.garmin.com/private-path/private-id", "garmin.com/other"],
+    ["https://connect.garmin.com/modern/consent?token=private", "garmin.com/other:/modern/consent"],
+    ["https://connect.garmin.com/consent/a1b2c3", "garmin.com/other"],
+    ["https://connect.garmin.com/a/b/c/d", "garmin.com/other"],
     ["https://private.tryvital.io/private-path", "tryvital.io/other"],
     ["https://garmin.com.untrusted.invalid/private", "other"],
     ["https://private.invalid/private", "other"],
@@ -340,7 +343,7 @@ describe("hosted-local Junction wearable browser authorization", () => {
       expect(close).toHaveBeenCalledOnce();
       expect(clicks).toBe(1);
       expect(formatHostedLocalJunctionBrowserFailureForTest(new Error("later error")))
-        .toBe("Junction wearable browser E2E failed at junction_garmin_authorization (browser_error): Authorization action failed (timeout); action=authorization_button; before=garmin.com/other; after=browser_error.");
+        .toBe("Junction wearable browser E2E failed at junction_garmin_authorization (browser_error): Authorization action failed (timeout); action=authorization_button; before=garmin.com/other:/signin; after=browser_error.");
     } finally {
       releaseCleanup();
       await failedRun;
@@ -993,7 +996,7 @@ describe("hosted-local Junction wearable browser authorization", () => {
         "Authorization surface: childFrames=0 mainActions=0",
         "mainEnabledActions=0 mainOtherActions=0 childActions=0",
         "childEnabledActions=0 childOtherActions=0",
-        "mainUncheckedCheckboxes=0 childUncheckedCheckboxes=0.",
+        "mainUncheckedCheckboxes=0 childUncheckedCheckboxes=0 mainActionLabels=none.",
       ].join(" "),
     );
     expect(now).toBe(15_000);
@@ -1033,7 +1036,7 @@ describe("hosted-local Junction wearable browser authorization", () => {
       "Authorization surface: childFrames=1 mainActions=1",
       "mainEnabledActions=0 mainOtherActions=2 childActions=1",
       "childEnabledActions=1 childOtherActions=1",
-      "mainUncheckedCheckboxes=0 childUncheckedCheckboxes=1.",
+      "mainUncheckedCheckboxes=0 childUncheckedCheckboxes=1 mainActionLabels=?|Proceed|Privacy policy.",
     ].join(" "));
   });
 
@@ -1223,7 +1226,7 @@ describe("hosted-local Junction wearable browser authorization", () => {
         "Authorization surface: childFrames=0 mainActions=1",
         "mainEnabledActions=1 mainOtherActions=0",
         "childActions=0 childEnabledActions=0 childOtherActions=0",
-        "mainUncheckedCheckboxes=0 childUncheckedCheckboxes=0.",
+        "mainUncheckedCheckboxes=0 childUncheckedCheckboxes=0 mainActionLabels=Agree.",
       ].join(" "),
     );
 
