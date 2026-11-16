@@ -722,6 +722,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       game_photo: "participant_aware",
       game_chat_bootstrap: "participant_aware",
       my_game_reminders: "personal_active",
+      my_game_not_for_me: "personal_active",
       ask: "personal_active",
       handoff: "personal_active",
       ask_current_sender: "participant_aware",

@@ -1603,6 +1603,28 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(await authorizeLockedPreviewReads(leo, [retake])).toEqual(new Set());
   });
 
+  it("stores, clears and preserves Not for me through profile, home, visible players and history", async () => {
+    const first = await member("First", "UTC");
+    const second = await member("Second", "UTC");
+    const saved = await run(second, { type: "setProfile", notForMe: ["dance", "swimming", "yoga", "dance"] });
+    expect(saved).toMatchObject({ ok: true, profile: { notForMe: ["swimming", "yoga", "dance"] } });
+    await ok(second, { type: "setProfile", firstName: "Second updated" });
+    await ok(second, { type: "setProfile", photoKey: await upload(second, "not-for-me") });
+    expect((await readHome(second)).me.notForMe).toEqual(["swimming", "yoga", "dance"]);
+    const { gameId } = await startGame(first, second, {}, "UTC");
+    expect((await readGame(gameId, first))!.players.find(player => player.memberId === second)?.notForMe).toEqual(["swimming", "yoga", "dance"]);
+    await devSettleNow(gameId, first);
+    expect((await readHistory(first)).people.find(person => person.memberId === second)?.notForMe).toEqual(["swimming", "yoga", "dance"]);
+    await ok(first, { type: "report", gameId, about: "player", reason: "other", reportedMemberId: second, reportId: randomUUID() });
+    expect((await readGame(gameId, first))!.players.find(player => player.memberId === second)).not.toHaveProperty("notForMe");
+    expect((await readHistory(first)).people.find(person => person.memberId === second)).not.toHaveProperty("notForMe");
+    expect(await run(second, { type: "setProfile", notForMe: [] })).toMatchObject({ ok: true, profile: { notForMe: [] } });
+    expect((await getPrisma().gameProfile.findUniqueOrThrow({ where: { memberId: second } })).notForMe).toEqual([]);
+    const noProfile = await member("New", "UTC");
+    await getPrisma().gameProfile.delete({ where: { memberId: noProfile } });
+    expect(await errorCode(noProfile, { type: "setProfile", notForMe: ["yoga"] })).toBe("PROFILE_REQUIRED");
+  });
+
   it("syncs canonical profile photos, preserves private overrides and scopes media to game participants", async () => {
     const leo = await member("Leo", "America/New_York");
     const ava = await member("Ava", "Australia/Sydney");

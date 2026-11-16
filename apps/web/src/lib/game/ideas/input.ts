@@ -1,3 +1,4 @@
+import { GAME_ACTIVITIES, type GameActivity } from "../contract";
 import { invalidGameRequest } from "../http/errors";
 import { isRecord } from "../../primitives";
 
@@ -15,6 +16,7 @@ export interface GameIdeasInput {
   words: string;
   task?: string;
   skipped: string[];
+  notForMe?: GameActivity[];
 }
 export interface GameIdea { text: string; schedule: typeof SCHEDULES[number] }
 
@@ -24,6 +26,9 @@ export function parseGameIdeasInput(value: unknown): GameIdeasInput {
   const step = oneOf(value.step, "step", STEPS);
   if (typeof value.apart !== "boolean") throw invalidGameRequest("apart must be a boolean.");
   const task = value.task === undefined ? undefined : words(value.task, "task", 120);
+  if (value.notForMe !== undefined && !Array.isArray(value.notForMe)) throw invalidGameRequest("notForMe must be a list of activities.");
+  const activities = (value.notForMe ?? []).map((item: unknown) => oneOf(item, "notForMe", GAME_ACTIVITIES));
+  const notForMe = GAME_ACTIVITIES.filter(activity => activities.includes(activity));
   return {
     step,
     ...(value.category === undefined ? {} : { category: oneOf(value.category, "category", CATEGORIES) }),
@@ -33,6 +38,7 @@ export function parseGameIdeasInput(value: unknown): GameIdeasInput {
     words: words(value.words, "words", 120),
     ...(step !== "task" && task !== undefined ? { task } : {}),
     skipped: strings(value.skipped, "skipped", 24, 40),
+    ...(notForMe.length ? { notForMe } : {}),
   };
 }
 

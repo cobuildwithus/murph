@@ -674,6 +674,7 @@ async function setProfile(context: CommandContext, command: Extract<GameCommand,
     ...(firstNameEncrypted === undefined ? {} : { firstNameEncrypted }),
     ...(command.timeZone === undefined ? {} : { timeZone: command.timeZone }),
     ...(command.photoKey === undefined ? {} : { photoKey: command.photoKey }),
+    ...(command.notForMe === undefined ? {} : { notForMe: command.notForMe }),
   };
   const prisma = getPrisma();
   const previous = command.firstName === undefined ? null
@@ -713,6 +714,7 @@ async function setProfile(context: CommandContext, command: Extract<GameCommand,
     }
   }
   return {
+    notForMe: profile.notForMe,
     avatarUrl: profile.photoKey ? gameMediaUrl(profile.photoKey) : null,
     firstName: firstName ?? "",
     memberId: actor,
@@ -3343,7 +3345,7 @@ export async function readHome(memberId: string, multiplayer = false, auth?: Hos
     games: views,
     canStartGames: isGameEnabled(),
     ...(multiplayer ? { canStartGroups: areGameGroupsEnabled() } : {}),
-    me: { ...(areaCode ? { areaCode } : {}), usualKind: usualEntry ? toEntryKind(usualEntry.kind) : null, avatarUrl: profile?.photoKey ? gameMediaUrl(profile.photoKey) : null, firstName: profile?.firstName ?? null, memberId, timeZone: profile?.timeZone ?? null },
+    me: { notForMe: profile?.notForMe ?? [], ...(areaCode ? { areaCode } : {}), usualKind: usualEntry ? toEntryKind(usualEntry.kind) : null, avatarUrl: profile?.photoKey ? gameMediaUrl(profile.photoKey) : null, firstName: profile?.firstName ?? null, memberId, timeZone: profile?.timeZone ?? null },
     wallet: {
       // Expired tickets stay where they were, marked expired.
       held: wallet.filter((ticket) => ticket.status !== "redeemed" && ticket.youHold),
@@ -3925,6 +3927,7 @@ async function buildViewInputs(
   }
   // Only the viewer's own invite photos and relationships: nobody else ever sees them.
   const avatarKeys = new Map(labels.map((label) => [label.subjectMemberId, reported.players.has(label.subjectMemberId) ? null : label.photoKey]));
+  const profileNotForMe = new Map(profiles.map(profile => [profile.memberId, reported.players.has(profile.memberId) ? [] : profile.notForMe]));
   const profileAvatarKeys = new Map(profiles.map((profile) => [profile.memberId, reported.players.has(profile.memberId) ? null : profile.photoKey]));
   const relationships = new Map([...labelRelationshipAt].map(([memberId, at]) => [memberId, plain[at]]));
   /** The invite's own typed relationship, else the viewer's existing label for an addressed rematch. */
@@ -3950,6 +3953,7 @@ async function buildViewInputs(
         && game.row.settledAt !== null && clock.getTime() - game.row.settledAt.getTime() < GAME_RECAP_UI_WAIT_MS,
       avatarKeys,
       profileAvatarKeys,
+      profileNotForMe,
       entryWords, ...(history ? {} : { entryReplies, replyEligibleEntryIds }),
       inviteExpiresAt: game.row.inviteExpiresAt,
       inviteToken: tokenIndex === null ? null : plain[tokenIndex],

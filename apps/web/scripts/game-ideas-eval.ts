@@ -1,4 +1,4 @@
-/** Live, synthetic-only eval; not in CI. Usage: game:ideas-eval [seed] [count=20]. */
+/** Live, synthetic-only eval; not in CI. Usage: game:ideas-eval [seed] [count=20] [--not-for-me]. */
 import { CATEGORIES, RELATIONSHIPS, type GameIdeasInput } from "../src/lib/game/ideas/input";
 import { writeGameIdeas } from "../src/lib/game/ideas/writer";
 
@@ -28,6 +28,7 @@ function makeCase(): GameIdeasInput {
     words: pick(step === "task" ? TASK_WORDS : STAKE_WORDS),
     ...(step === "task" ? {} : { task: pick(["20 squats", "Walk 30 min", "Meditate 10 min", "Cook dinner at home"]) }),
     skipped: [],
+    ...(process.argv.includes("--not-for-me") ? { notForMe: ["swimming", "yoga", "dance"] as GameIdeasInput["notForMe"] } : {}),
   };
 }
 

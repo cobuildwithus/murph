@@ -4,6 +4,10 @@ import * as z from "@murphai/contracts/zod-runtime";
 // A new value of the existing error field: this generation is durably finished and must end without sending.
 export const GAME_RECAP_GENERATION_RETIRED = "recap_generation_retired";
 
+export const GAME_ACTIVITIES = ["walking", "running", "cycling", "swimming", "yoga", "dance", "pilates", "lifting", "stretching", "climbing", "rowing", "golf"] as const;
+export type GameActivity = typeof GAME_ACTIVITIES[number];
+export const GAME_TOOL_ACTIONS = ["read_game", "update_game", "game_photo", "write_recap", "my_game_reminders", "my_game_not_for_me"] as const;
+
 const ref = z.string().min(1).max(128);
 const gameId = z.string().regex(/^[A-Za-z0-9_-]{8,64}$/u);
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/u);
@@ -55,6 +59,9 @@ export { gameRecapStorySchema as hostedGameRecapSchema, gameRecapWriterSchema as
 import { gameRecapStorySchema as hostedGameRecapSchema, gameRecapWriterSchema, recapShowStorySchema } from "@murphai/contracts/recap-show";
 export type { GameRecapStory as HostedGameRecap } from "@murphai/contracts/recap-show";
 export const hostedGameToolRequestSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("my_game_not_for_me"), origin: acceptedInputOrigin, operation: z.enum(["read", "set"]),
+    activities: z.array(z.enum(GAME_ACTIVITIES)).transform(values => GAME_ACTIVITIES.filter(value => values.includes(value))).optional() }).strict()
+    .refine(value => value.operation !== "set" || value.activities !== undefined, "Set requires activities."),
   z.object({ action: z.literal("my_game_reminders"), origin: acceptedInputOrigin, operation: z.enum(["read", "set"]),
     minutes: z.number().int().min(0).max(1439).optional(), gameId: gameId.optional(), on: z.boolean().optional(),
     everyDay: z.boolean().optional(), text: z.boolean().optional(), push: z.boolean().optional() }).strict(),
@@ -154,7 +161,7 @@ export const hostedGameChatStateSchema = z.object({
 }).strict()).max(10), photoCheckIn: z.object({ introductionAvailable: z.boolean(), hasPendingOffer: z.boolean() }).strict().optional() }).strict();
 export type HostedGameChatState = z.infer<typeof hostedGameChatStateSchema>;
 export const hostedGameToolResponseSchema = z.object({
-  action: z.enum(["read_game", "update_game", "game_photo", "write_recap", "my_game_reminders"]),
+  action: z.enum(GAME_TOOL_ACTIONS),
   result: z.object({
     status: z.enum(["ok", "unavailable", "rejected"]),
     state: hostedGameChatStateSchema.optional(),
@@ -168,6 +175,7 @@ export const hostedGameToolResponseSchema = z.object({
     // so a runtime that predates the field never receives it. First acceptance wins on every retry.
     recapVideo: recapVideoIdentitySchema.nullable().optional(),
     reaches: z.enum(["push", "text", "none"]).optional(),
+    activities: z.array(z.enum(GAME_ACTIVITIES)).optional(),
     reminders: z.object({ minutes: z.number().int(), push: z.boolean(), text: z.boolean(), canText: z.boolean(),
       games: z.array(z.object({ id: gameId, task: z.string(), schedule: hostedGameScheduleSchema,
         today: z.enum(["posted", "open", "off", "upcoming"]), otherFirstNames: z.array(z.string()),

@@ -135,6 +135,16 @@ describe("weekly game command validator", () => {
     })).toEqual({ firstName: "Leo", timeZone: "America/New_York", type: "setProfile" });
   });
 
+  it("parses Not for me alone, rejects unknown activities, and distinguishes omission from clearing", () => {
+    expect(parseGameCommand({ type: "setProfile", notForMe: ["dance", "swimming", "dance", "yoga"] }))
+      .toEqual({ type: "setProfile", notForMe: ["swimming", "yoga", "dance"] });
+    expect(parseGameCommand({ type: "setProfile", notForMe: [] })).toEqual({ type: "setProfile", notForMe: [] });
+    expect(parseGameCommand({ type: "setProfile", firstName: "Player" })).not.toHaveProperty("notForMe");
+    for (const notForMe of [["water"], ["unknown"], [1], "swimming", null]) {
+      expect(codeOf(() => parseGameCommand({ type: "setProfile", notForMe }))).toBe("INVALID_REQUEST");
+    }
+  });
+
   it("distinguishes profile photo omission, replacement and removal without requiring unrelated fields", () => {
     expect(parseGameCommand({ type: "setProfile", photoKey: PHOTO_KEY })).toEqual({ type: "setProfile", photoKey: PHOTO_KEY });
     expect(parseGameCommand({ type: "setProfile", photoKey: null })).toEqual({ type: "setProfile", photoKey: null });

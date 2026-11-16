@@ -408,6 +408,22 @@ memory update; time-zone-only changes do not. Existing game profiles remain
 authoritative. See [first-name persistence](ios-game.md#first-name-persistence)
 for validation, authority, timeout and concurrent-save behavior.
 
+The profile also owns `notForMe`, the closed activity list from
+`GAME_ACTIVITIES` in hosted-execution. `PUT /me/profile` replaces the whole list;
+omission keeps it and `[]` clears it. Unknown activity keys are invalid. Lists
+are deduplicated in canonical activity order. A list-only write requires an
+existing profile (`PROFILE_REQUIRED` otherwise). The profile reply and home
+`me.notForMe` always carry an array. Visible players, bound invitees and history
+people carry `notForMe` only when nonempty; hidden, reported and departed people
+never expose it. Unbound contacts stay unknown; there is no contact lookup.
+
+`murph.my_game_not_for_me` reads or sets this same list in a current direct chat,
+using the private reminders tool's wake and route authority, port and availability.
+`operation: set` requires `activities` and replaces the list through `setProfile`;
+read first to add or remove one. No profile is created. Results carry the saved
+`activities` or a refusal. Surfing, kayaking and beach days are not swimming.
+The separate action preserves compatibility with older strict tool readers.
+
 Each member may also upload, replace or remove their own profile photo. It syncs
 across devices and becomes their default when creating or joining a game. Inside
 the app, the person's own profile photo wins, then the viewer's private contact
@@ -1069,7 +1085,9 @@ Typing in More ideas can call `POST /api/game/v1/ideas` for fresh task, prize or
 dare suggestions. It requires game member auth and a valid request of at most
 16 KiB. The request carries step, optional category, relationship kind, apart,
 up to six direction labels, required trimmed words (1-120 characters), optional
-chosen task (up to 120 characters for stakes), and up to 24 skipped texts.
+chosen task (up to 120 characters for stakes), up to 24 skipped texts, and optional
+`notForMe` activity keys. Unknown activity keys are invalid. The caller sends the
+applicable list; the endpoint does not look up players.
 Labels are at most 30 characters and skipped texts at most 40 characters.
 It returns `{ ok: true, ideas: [{ text, schedule }] }`, zero to nine ideas,
 with private/no-store caching. Schedules are `every_day`, `weekdays` or
@@ -1090,6 +1108,13 @@ second deadline. Auth, input and rate-limit errors keep their normal statuses.
 One budget of 30 requests per member per 10 minutes covers all steps. At most
 two writes and two checks occur, outside database transactions. The live check
 copies the rule text in `murph-ios/scripts/game-ideas/build.mjs`; update both.
+With a nonempty `notForMe`, the brief names excluded activity descriptions and
+Decisions adds one activity choice per idea. A listed activity at probability
+0.5 or higher drops the idea before fit sorting, even below four survivors.
+Malformed or incomplete choice answers return no ideas. Absent or empty lists
+leave both provider bodies unchanged. Deploy this backend before the native
+filtering feature; rolling Web back below it loses typed-word exclusions while
+the native bank remains filtered.
 Manual-entry acceptance remains unchanged, including ordinary alcohol-related
 wording. Suggestions have stricter rules and are checked after cleanup.
 

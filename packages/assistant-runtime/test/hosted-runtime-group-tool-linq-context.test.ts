@@ -1541,3 +1541,11 @@ it("preserves the marked game read without adding model-selected authority", asy
   await tool.request(read);
   expect(request).toHaveBeenCalledExactlyOnceWith(read);
 });
+
+it.each(["my_game_reminders", "my_game_not_for_me"] as const)("refuses private action %s from email", async action => {
+  const request = vi.fn();
+  const tool = createHostedGroupToolWithCurrentTurnContext({ groupToolPort: { request }, linqDeliveryContexts: [], groupEmailIngress: true });
+  await expect(tool.request({ action, operation: "read", origin: { kind: "accepted_input", assistantInputId: PRIVATE_ASSISTANT_INPUT_ID } }))
+    .resolves.toEqual({ action, result: { status: "unavailable", error: "authenticated_sender_required" } });
+  expect(request).not.toHaveBeenCalled();
+});

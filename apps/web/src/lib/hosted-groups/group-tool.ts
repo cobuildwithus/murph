@@ -277,6 +277,7 @@ export type HostedRuntimeGroupToolAccessClassification =
 
 export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   my_game_reminders: "personal_active",
+  my_game_not_for_me: "personal_active",
   leave_group: "participant_aware",
   read_game: "participant_aware",
   update_game: "participant_aware",
@@ -462,6 +463,10 @@ export async function handleHostedRuntimeConversationTool(
   if (input.request.action === "game_chat_bootstrap") {
     return handleGameChatBootstrapControl({ memberId: input.memberId, runtimeIdentity: input.runtimeIdentity ?? null, request: input.request });
   }
+  if (input.request.action === "my_game_not_for_me") {
+    const { handleMyGameNotForMeTool } = await import("../game/direct-tool");
+    return handleMyGameNotForMeTool({ memberId: input.memberId, runtimeIdentity: input.runtimeIdentity ?? null, request: input.request });
+  }
   if (input.request.action === "my_game_reminders") {
     const { handleMyGameRemindersTool } = await import("../game/direct-tool");
     return handleMyGameRemindersTool({ memberId: input.memberId, runtimeIdentity: input.runtimeIdentity ?? null, request: input.request });
@@ -473,7 +478,7 @@ export async function handleHostedRuntimeConversationTool(
 }
 
 type HostedRuntimeNonGameToolHandlerInput = Omit<HostedRuntimeGroupToolHandlerInput, "request"> & {
-  request: Exclude<HostedRuntimeGroupToolRequest, { action: "leave_group" | "read_game" | "update_game" | "game_photo" | "write_recap" | "game_chat_bootstrap" | "my_game_reminders" }>;
+  request: Exclude<HostedRuntimeGroupToolRequest, { action: "leave_group" | "read_game" | "update_game" | "game_photo" | "write_recap" | "game_chat_bootstrap" | "my_game_reminders" | "my_game_not_for_me" }>;
 };
 
 export async function handleHostedRuntimeGroupTool(

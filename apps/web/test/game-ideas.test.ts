@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { gameIdeasBrief } from "../src/lib/game/ideas/brief";
 import { parseGameIdeasInput, type GameIdeasInput } from "../src/lib/game/ideas/input";
 import { cleanGameIdea, gameIdeasCheck, writeGameIdeas } from "../src/lib/game/ideas/writer";
-import { dareQuestion, stakeInput, stakeQuestion } from "../src/lib/game/ideas/rules";
+import { ACTIVITY_CHOICES, activityQuestion, dareQuestion, stakeInput, stakeQuestion } from "../src/lib/game/ideas/rules";
 import { normalizeGameText } from "../src/lib/game/text";
 import { isGameTextRefused } from "../src/lib/game/moderation";
 import { capLeads } from "../src/lib/game/ideas/variety";
@@ -15,6 +15,11 @@ afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); });
 const client = (fetch: typeof globalThis.fetch) => new OpenAI({ apiKey: "sk-test", fetch, maxRetries: 0 });
 
 describe("typed game ideas", () => {
+  it.each([undefined, []])("preserves provider bodies with no activities: %j", async notForMe => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValueOnce(written()).mockResolvedValueOnce(checked());
+    await writeGameIdeas({ ...INPUT, ...(notForMe === undefined ? {} : { notForMe }) }, { client: client(fetch) });
+    expect(fetch.mock.calls.map(([, init]) => String(init?.body))).toMatchSnapshot();
+  });
   it("uses strict structured writing and sends only allowed context through the SDK", async () => {
     const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValueOnce(written()).mockResolvedValueOnce(checked());
     const request = { ...INPUT, words: "  with the dog  ", directions: ["Outdoors"], skipped: ["Jog 20 min"],
@@ -29,6 +34,53 @@ describe("typed game ideas", () => {
     expect(bodies[1].questions).toHaveLength(TASKS.length * 2);
     expect(bodies[1].questions.every((q: { type: string }) => q.type === "predicate")).toBe(true);
     expect(bodies[1].questions[1].instructions).toContain('"with the dog"');
+  });
+
+  it("uses the exact activity questions and names exclusions by their descriptions", () => {
+    const ctx: GameIdeasInput = { ...INPUT, notForMe: ["swimming", "yoga", "dance"] };
+    expect(gameIdeasCheck(ctx, TASKS).questions.filter(q => q.type === "choice")).toEqual(TASKS.map((idea, i) => ({
+      type: "choice", name: `a${i}`, instructions: activityQuestion(idea.text), choices: ACTIVITY_CHOICES,
+    })));
+    expect(gameIdeasCheck(ctx, TASKS).input).toBe(gameIdeasCheck(INPUT, TASKS).input);
+    for (const step of ["task", "prize", "dare"] as const) {
+      expect(gameIdeasBrief({ ...ctx, step })).toContain("swimming, or time in a pool or water park; yoga; dancing");
+    }
+    expect(parseGameIdeasInput({ ...INPUT, notForMe: [] })).not.toHaveProperty("notForMe");
+  });
+
+  const activityAnswers = () => TASKS.map((_, i) => ({ type: "choice", name: `a${i}`,
+    probabilities: ACTIVITY_CHOICES.map(({ value }) => ({ value, probability: value === "swimming" ? (i === 2 ? 0.5 : 0.49) : 0 })),
+  }));
+  it("drops a listed activity at the threshold even below four and carries the list to the second pass", async () => {
+    const predicates = await checked().json();
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValueOnce(written())
+      .mockResolvedValueOnce(Response.json({ answers: [...predicates.answers, ...activityAnswers()] }))
+      .mockResolvedValueOnce(written([]));
+    const ctx: GameIdeasInput = { ...INPUT, notForMe: ["swimming"] };
+    expect(await writeGameIdeas(ctx, { client: client(fetch) })).toEqual([TASKS[0], TASKS[1], TASKS[3]]);
+    const bodies = fetch.mock.calls.map(([, init]) => JSON.parse(String(init?.body)));
+    expect(JSON.parse(bodies[2].input).notForMe).toEqual(["swimming"]);
+    expect(bodies[2].instructions).toContain("swimming, or time in a pool or water park");
+  });
+
+  it.each(["missing answer", "duplicate answer", "unexpected answer", "unexpected value", "negative", "over one", "wrong type", "predicate instead"])("fails soft on malformed activity decisions: %s", async fault => {
+    const predicates = await checked().json();
+    const answers: Record<string, unknown>[] = activityAnswers();
+    const first = answers[0];
+    const probabilities = activityAnswers()[0].probabilities;
+    first.probabilities = probabilities;
+    if (fault === "missing answer") answers.pop();
+    if (fault === "duplicate answer") answers.push(answers[0]);
+    if (fault === "unexpected answer") answers[3].name = "a4";
+    if (fault === "unexpected value") probabilities[0].value = "unknown";
+    if (fault === "negative") probabilities[0].probability = -0.1;
+    if (fault === "over one") probabilities[0].probability = 1.1;
+    if (fault === "wrong type") first.probabilities = [{ value: "swimming", probability: "0.9" }];
+    if (fault === "predicate instead") answers[0] = { type: "predicate", name: "a0", probability: 1 };
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValueOnce(written())
+      .mockResolvedValueOnce(Response.json({ answers: [...predicates.answers, ...answers] }));
+    expect(await writeGameIdeas({ ...INPUT, notForMe: ["swimming"] }, { client: client(fetch) })).toEqual([]);
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
 
   it("checks with the build's calibrated input and questions, plus the dare question and a fit question", () => {

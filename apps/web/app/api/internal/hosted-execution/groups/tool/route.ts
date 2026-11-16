@@ -4,6 +4,7 @@ import {
   parseHostedRuntimeGroupToolRequest,
 } from "@murphai/hosted-execution/parsers";
 import {
+  GAME_TOOL_ACTIONS,
   HOSTED_RUNTIME_ASSISTANT_ASK_DIAGNOSTIC_CODE_HEADER,
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_HEADER,
   HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER,
@@ -75,7 +76,7 @@ export const POST = withJsonError(async (request: Request) => {
         || membershipInventoryProtocol
           === HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_LEGACY_VALUE,
       memberId,
-      ...(body.action === "leave_group" || body.action === "read_game" || body.action === "update_game" || body.action === "game_photo" || body.action === "write_recap" || body.action === "game_chat_bootstrap" || body.action === "my_game_reminders"
+      ...(body.action === "leave_group" || body.action === "game_chat_bootstrap" || GAME_TOOL_ACTIONS.some(action => action === body.action)
         ? { runtimeIdentity: runtimeAuthority ? { ...runtimeAuthority, userId: memberId } : null }
         : {}),
       request: body,

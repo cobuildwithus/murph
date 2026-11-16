@@ -1,6 +1,6 @@
 import { recapAssetSchema, gameRecapDraftSchema, recapVideoDraftSchema, recapVideoPartSchema, type GameRecapEnvelope, type RecapAsset, type RecapVideoDraft } from '@murphai/contracts/recap-show'
 import * as z from '@murphai/contracts/zod-runtime'
-import { GAME_PRIZE_WORDS, hostedGameUpdateSchema, hostedGamePhotoSchema, hostedGameRecapWriterSchema, type HostedGameChatState, type HostedGameUpdate, type HostedGamePhoto, type HostedGameRecap, type HostedGameToolResponse } from '@murphai/hosted-execution/runtime-control'
+import { GAME_ACTIVITIES, type GameActivity, GAME_PRIZE_WORDS, hostedGameUpdateSchema, hostedGamePhotoSchema, hostedGameRecapWriterSchema, type HostedGameChatState, type HostedGameUpdate, type HostedGamePhoto, type HostedGameRecap, type HostedGameToolResponse } from '@murphai/hosted-execution/runtime-control'
 import type { AssistantHostedToolContext } from '../../assistant/hosted-tool-context.js'
 import { parseDynamicToolArguments } from './dynamic-tool-wrapper.js'
 import { toolTextResult } from '../tool-failure-diagnostics.js'
@@ -21,6 +21,15 @@ export const MURPH_MY_GAME_REMINDERS_TOOL = {
     operation: { type: 'string', enum: ['read', 'set'] }, messageRef: { type: 'string' },
     minutes: { type: 'integer', minimum: 0, maximum: 1439 }, gameId: { type: 'string' },
     on: { type: 'boolean' }, everyDay: { type: 'boolean' }, text: { type: 'boolean' }, push: { type: 'boolean' },
+  } },
+} as const
+export const MURPH_MY_GAME_NOT_FOR_ME_TOOL = {
+  deferLoading: true,
+  namespace: 'murph', name: 'my_game_not_for_me',
+  description: "Read or set the app's About you, Not for me: activities Murph never suggests in this person's games. Direct chat only. Set replaces the whole list, so read first to add or remove one. Water that isn't swimming (surfing, kayaking, a beach day) is not swimming.",
+  inputSchema: { type: 'object', additionalProperties: false, required: ['operation'], properties: {
+    operation: { type: 'string', enum: ['read', 'set'] }, messageRef: { type: 'string' },
+    activities: { type: 'array', items: { type: 'string', enum: GAME_ACTIVITIES }, description: 'The whole list; required for set. An empty list clears it.' },
   } },
 } as const
 export const GAME_PRIVATE_REMINDER_DIRECT_GUIDANCE = 'For game reminders, use murph.my_game_reminders.'
@@ -212,8 +221,15 @@ const rawUpdateArguments = z.object({ messageRef: z.string().min(1).max(128), op
   }
   return { messageRef, update: parsed.data }
 })
-export type GameDynamicRequest = { action: 'my_game_reminders'; operation: 'read' | 'set'; messageRef?: string; minutes?: number; gameId?: string; on?: boolean; everyDay?: boolean; text?: boolean; push?: boolean } | { action: 'read_game'; messageRef?: string } | { action: 'update_game'; messageRef: string; update: HostedGameUpdate } | { action: 'game_photo'; messageRef: string; photo: HostedGamePhoto } | { action: 'write_recap'; recap: HostedGameRecap } | { action: 'write_recap_file'; draftPath: string } | { action: 'game_lore'; operation: 'read' | 'replace'; content?: string }
+export type GameDynamicRequest = { action: 'my_game_not_for_me'; operation: 'read' | 'set'; messageRef?: string; activities?: GameActivity[] } | { action: 'my_game_reminders'; operation: 'read' | 'set'; messageRef?: string; minutes?: number; gameId?: string; on?: boolean; everyDay?: boolean; text?: boolean; push?: boolean } | { action: 'read_game'; messageRef?: string } | { action: 'update_game'; messageRef: string; update: HostedGameUpdate } | { action: 'game_photo'; messageRef: string; photo: HostedGamePhoto } | { action: 'write_recap'; recap: HostedGameRecap } | { action: 'write_recap_file'; draftPath: string } | { action: 'game_lore'; operation: 'read' | 'replace'; content?: string }
 export function readGameDynamicToolRequest(input: { arguments: unknown; tool: string | null }) {
+  if (input.tool === 'my_game_not_for_me') {
+    const schema = z.object({ operation: z.enum(['read', 'set']), messageRef: z.string().min(1).max(128).optional(),
+      activities: z.array(z.enum(GAME_ACTIVITIES)).transform(values => GAME_ACTIVITIES.filter(value => values.includes(value))).optional() }).strict()
+      .refine(value => value.operation !== 'set' || value.activities !== undefined, 'Set requires activities.')
+    const parsed = parseDynamicToolArguments({ schema, value: input.arguments, schemaRootKeys: ['operation', 'messageRef', 'activities'], toolName: 'murph.my_game_not_for_me' })
+    return parsed.ok ? { kind: 'game' as const, request: { action: 'my_game_not_for_me' as const, ...parsed.args } } : { kind: 'invalid-tool-arguments' as const, errorCode: 'invalid_game_arguments', validationDigest: parsed.validationDigest }
+  }
   if (input.tool === 'my_game_reminders') {
     const schema = z.object({ operation: z.enum(['read', 'set']), messageRef: z.string().min(1).max(128).optional(),
       minutes: z.number().int().min(0).max(1439).optional(), gameId: z.string().min(8).max(64).optional(),
@@ -510,16 +526,17 @@ function gameRefusalGuidance(payload: GameToolResult, action: 'update_game' | 'g
 
 export async function executeGameTool(input: { request: GameDynamicRequest; context: AssistantHostedToolContext | null; turnState?: GameRulesTurnState | null; signal?: AbortSignal }) {
   if (input.request.action === 'write_recap_file') return executeRecapFileWrite({ context: input.context, draftPath: input.request.draftPath, signal: input.signal })
-  if (input.request.action === 'my_game_reminders') {
+  if (input.request.action === 'my_game_reminders' || input.request.action === 'my_game_not_for_me') {
+    const setting = { my_game_reminders: 'Game reminders', my_game_not_for_me: 'Not for me' }[input.request.action]
     const scope = input.context?.currentUserActionScope?.()
     const tool = input.context?.myGameRemindersTool
-    if (!tool || scope?.conversationScope !== 'direct' || !scope.acceptedInputIds.length) return toolTextResult(false, 'Private game reminders require your current direct message.', 'authority_rejected')
+    if (!tool || scope?.conversationScope !== 'direct' || !scope.acceptedInputIds.length) return toolTextResult(false, `${setting} requires your current direct message.`, 'authority_rejected')
     const assistantInputId = input.request.messageRef ?? scope.acceptedInputIds[scope.acceptedInputIds.length - 1]!
-    if (!scope.acceptedInputIds.includes(assistantInputId)) return toolTextResult(false, 'Use this direct message to change reminders.', 'authority_rejected')
+    if (!scope.acceptedInputIds.includes(assistantInputId)) return toolTextResult(false, `Use this direct message to change ${setting.toLowerCase()}.`, 'authority_rejected')
     try {
       const { messageRef: _messageRef, ...request } = input.request
       return toolTextResult(true, JSON.stringify(await tool.request({ ...request, origin: { kind: 'accepted_input', assistantInputId } })))
-    } catch (error) { return toolTextResult(false, 'Game reminders could not be confirmed.', 'handler_exception', error) }
+    } catch (error) { return toolTextResult(false, `${setting} could not be confirmed.`, 'handler_exception', error) }
   }
   if (input.request.action === 'game_lore') return executeGameLoreTool({ ...input, request: input.request })
   const recapResult = await executeTrustedGameRecapTool(input)

@@ -126,6 +126,7 @@ export interface GameViewInput {
   names: ReadonlyMap<string, string>;
   /** Per member: the photo the viewer attached when they invited them, if any. */
   avatarKeys: ReadonlyMap<string, string | null>;
+  profileNotForMe?: ReadonlyMap<string, string[]>;
   /** Canonical photos, separate from viewer-private overrides for shared exports. */
   profileAvatarKeys?: ReadonlyMap<string, string | null>;
   /** Per member: the relationship the viewer typed for them, if any. */
@@ -224,7 +225,7 @@ export function ticketView(row: GameTicketRow, words: TermWords | null, viewerId
     const hidden = memberId !== null && hiddenMembers.has(memberId);
     return { seat, memberId: hidden ? null : memberId,
       firstName: hidden ? "" : memberId ? input?.names.get(memberId) ?? "" : input?.departed?.find(player => player.seat === seat)?.name ?? "",
-      avatarUrl: memberId && input && !hidden ? playerAvatars(input, memberId).avatarUrl : null };
+      avatarUrl: memberId && input && !hidden ? playerProfile(input, memberId).avatarUrl : null };
   });
   return {
     ...(input?.multiplayer ? { parties: { owedBy: parties(row.owedBySeats), owedTo: parties(row.owedToSeats) },
@@ -285,7 +286,7 @@ function entryView(entry: RuleEntry, input: GameViewInput): GameEntryView {
 
 export type BuiltGameHistoryView = {
   game: GameHistoryGameView;
-  person: Pick<GameHistoryPersonView, "memberId" | "firstName" | "avatarUrl" | "profileAvatarUrl">;
+  person: Pick<GameHistoryPersonView, "memberId" | "firstName" | "avatarUrl" | "profileAvatarUrl" | "notForMe">;
 } | { game: GameHistoryGroupGameView; group: Pick<GameHistoryGroupView, "id" | "word" | "task" | "prize"> };
 
 /** The bounded history projection, built from the same viewer-scoped inputs as a recap. */
@@ -349,6 +350,7 @@ export function buildGameHistoryView(input: GameViewInput): BuiltGameHistoryView
     person: {
       ...(theirs!.avatarUrl ? { avatarUrl: theirs!.avatarUrl } : {}),
       ...(theirs!.profileAvatarUrl ? { profileAvatarUrl: theirs!.profileAvatarUrl } : {}),
+      ...(theirs!.notForMe ? { notForMe: theirs!.notForMe } : {}),
       firstName: theirs!.firstName,
       memberId: other!.memberId,
     },
@@ -467,7 +469,7 @@ function playerView(input: GameViewInput, player: RulePlayer, entries: GameEntry
   const isMe = player.memberId === input.viewerId;
   return {
     ...(input.multiplayer ? { participation: participationView(input, player) } : {}),
-    ...playerAvatars(input, player.memberId),
+    ...playerProfile(input, player.memberId, player.leftAt),
     ...(player.leftAt ? { left: true as const } : {}),
     dayIndex: !player.leftAt && started && today < game.lengthDays ? today : null,
     firstName: input.names.get(player.memberId) ?? "",
@@ -487,12 +489,14 @@ function participationView(input: GameViewInput, player: RulePlayer): NonNullabl
     canWin: input.result ? input.result.scores.some(score => score.seat === player.seat && score.eligible !== false) : !player.leftAt && input.state.game.status !== "void" };
 }
 
-/** Resolve private/canonical photos only after the symmetric member mask. */
-function playerAvatars(input: GameViewInput, memberId: string): Pick<GamePlayerView, "avatarUrl" | "profileAvatarUrl"> {
+/** Resolve profile details only after the symmetric member mask. */
+function playerProfile(input: GameViewInput, memberId: string, leftAt?: Date | null): Pick<GamePlayerView, "avatarUrl" | "profileAvatarUrl" | "notForMe"> {
   if (input.hiddenMemberIds?.has(memberId)) return { avatarUrl: null, profileAvatarUrl: null };
   const profileKey = input.profileAvatarKeys?.get(memberId) ?? null;
   const avatarKey = profileKey ?? input.avatarKeys.get(memberId);
-  return { avatarUrl: avatarKey ? gameMediaUrl(avatarKey) : null, profileAvatarUrl: profileKey ? gameMediaUrl(profileKey) : null };
+  const notForMe = input.profileNotForMe?.get(memberId);
+  return { avatarUrl: avatarKey ? gameMediaUrl(avatarKey) : null, profileAvatarUrl: profileKey ? gameMediaUrl(profileKey) : null,
+    ...(!leftAt && notForMe?.length ? { notForMe } : {}) };
 }
 
 /** A player who deleted their account: only their seat, final score and the viewer's name for them remain. */
@@ -519,6 +523,8 @@ function inviteeView(input: GameViewInput, invitee: NonNullable<GameViewInput["i
   const profileKey = invitee.memberId ? input.profileAvatarKeys?.get(invitee.memberId) ?? null : null;
   const avatarKey = profileKey ?? invitee.photoKey ?? (invitee.memberId ? input.avatarKeys.get(invitee.memberId) : null);
   return {
+    ...(invitee.memberId && !input.hiddenMemberIds?.has(invitee.memberId) && input.profileNotForMe?.get(invitee.memberId)?.length
+      ? { notForMe: input.profileNotForMe.get(invitee.memberId) } : {}),
     avatarUrl: avatarKey ? gameMediaUrl(avatarKey) : null,
     profileAvatarUrl: profileKey ? gameMediaUrl(profileKey) : null,
     dayIndex: null,

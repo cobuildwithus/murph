@@ -2828,6 +2828,8 @@ model GameProfile {
   reminderMinutes Int @default(1140) @map("reminder_minutes")
   reminderPush Boolean @default(true) @map("reminder_push")
   reminderText Boolean @default(false) @map("reminder_text")
+  /// Activities never to suggest in their games, by `GAME_ACTIVITIES` key.
+  notForMe String[] @default([]) @map("not_for_me")
   chatPhotoIntroducedAt DateTime? @map("chat_photo_introduced_at")
   chatPhotoOffer Json? @map("chat_photo_offer")
   photoKey           String?            @map("photo_key")
