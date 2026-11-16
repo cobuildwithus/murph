@@ -258,7 +258,7 @@ function createHostedVaultShareDeliveryDeferredError(
   replacementDeferralReason?: HostedVaultShareReplacementDeferralReason,
 ): Error {
   try {
-    console.warn("Hosted vault-share delivery deferred.", {
+    console.info("Hosted vault-share delivery deferred.", {
       schema: "murph.hosted-vault-share-delivery-deferred.v1",
       reason,
       ...(replacementDeferralReason === undefined ? {} : { replacementDeferralReason }),

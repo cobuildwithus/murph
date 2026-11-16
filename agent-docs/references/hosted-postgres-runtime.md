@@ -642,6 +642,9 @@ The request-local Postgres ensure path emits the same detached
 outcome, elapsed time, observed fence and a finite retry reason. Telemetry cannot
 delay the control response or change its result; orchestration correlation uses
 the existing domain-separated hash rather than retaining the raw attempt ID.
+Waiting for an existing starting fence logs at info when the command observed
+no failed operation. Failed steps, uncertain wakes and other retry reasons
+retain warning summaries; the retry timing and ownership rules are unchanged.
 
 Runtime log uploads still authenticate the signed callback, consume its nonce,
 and check runtime ownership. When that admission rejects a stale owner with
