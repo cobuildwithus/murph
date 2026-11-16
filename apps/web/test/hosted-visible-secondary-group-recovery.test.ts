@@ -347,6 +347,58 @@ describe("Linq group-chat visible access recovery", () => {
     }
   });
 
+  it("treats a reused daily recovery key with changed text as today's recovery already sent", async () => {
+    const event = buildGroupLinqEvent("evt_private_key_reuse");
+    // Linq's answer when today's key comes back with a re-minted invite link.
+    const sendHostedLinqChatMessage = vi.fn(async () => {
+      throw hostedOnboardingError({
+        code: "LINQ_SEND_FAILED",
+        details: { failureStage: "http", idempotencyKeyReuseConflict: true, status: 409 },
+        httpStatus: 502,
+        message: "Linq outbound reply failed with HTTP 409.",
+        retryable: false,
+      });
+    });
+    const dependencies = buildLinqDependencies({
+      event,
+      getHostedLinqChatSummary: vi.fn(async () => linqRoster({
+        handles: MATCHING_PRIVATE_HANDLES,
+        isGroup: false,
+      })),
+      readHostedMemberRoutingState: vi.fn(async () => ({
+        linqChatId: "chat_private_member",
+        linqRecipientPhone: "+15550000000",
+      }) as never),
+      resolveHostedRecognizedInboundAccess: vi.fn(async () => ({
+        kind: "access_notice" as const,
+        message: BILLING_INACTIVE_MESSAGE,
+        noticeCode: "billing_inactive" as const,
+        responseReason: "sent-billing-inactive-notice",
+      })),
+      sendHostedLinqChatMessage,
+    });
+    const handler: HostedOnboardingLinqWebhookHandler = vi.fn(async () => ({
+      ignored: true,
+      ok: true as const,
+      reason: "group-chat",
+    }));
+
+    await expect(withHostedVisibleSecondaryLinqOutcomes(handler, dependencies)({
+      rawBody: JSON.stringify(event),
+      signature: "signature",
+      timestamp: "timestamp",
+    })).resolves.toMatchObject({
+      ignored: false,
+      reason: "visible-secondary-reply:group-chat",
+    });
+    // One private attempt and no neutral room reply.
+    expect(sendHostedLinqChatMessage).toHaveBeenCalledOnce();
+    expect(sendHostedLinqChatMessage).toHaveBeenCalledWith(expect.objectContaining({
+      chatId: "chat_private_member",
+      idempotencyKey: expect.stringMatching(PRIVATE_RECOVERY_KEY),
+    }));
+  });
+
   it.each(PRIVATE_RECOVERY_FAILURES)("retries $label with the same provider key after room completion", async ({ error }) => {
     const event = buildGroupLinqEvent(
       "evt_group_setup_private_retry",
