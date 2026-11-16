@@ -61,17 +61,28 @@ export function journalSourceAliases(source: Locator): string[] {
   return [...aliases]
 }
 
+/** Where preparation failed; each step below reports under exactly one stage. */
+type PrepareStage = 'policy' | 'inventory' | 'calendar_list' | 'calendar_events' | 'mail' | 'reconcile' | 'existing_plans' | 'controls' | 'digest'
+interface FailureSite { stage: PrepareStage; toolkit?: string }
+// Web and transport codes are code-owned tokens; anything else may be provider text.
+const upstreamCodePattern = /^[A-Z][A-Z0-9_]{2,63}$/u
+
 function failure(error: unknown) {
   if (error instanceof ConnectedReadFailure) return error
   const record = readRecord(error)
   const body = readRecord(record?.body) ?? readRecord(record?.responseBody)
   const code = record?.code ?? readRecord(body?.error)?.code ?? body?.code
-  return new ConnectedReadFailure(code === 'CONNECTED_APPS_REQUEST_INVALID' ? 'old_web' : 'read_failed')
+  const status = record?.status
+  return new ConnectedReadFailure(code === 'CONNECTED_APPS_REQUEST_INVALID' ? 'old_web' : 'read_failed', [], {
+    ...(typeof code === 'string' && upstreamCodePattern.test(code) ? { upstreamCode: code } : {}),
+    ...(typeof status === 'number' && Number.isInteger(status) && status >= 100 && status <= 599 ? { upstreamStatus: status } : {}),
+  })
 }
-function issue(error: ConnectedReadFailure): AssistantRuntimeIssueInput {
+function issue(error: ConnectedReadFailure, site: FailureSite): AssistantRuntimeIssueInput {
   return { component: 'assistant.journal-prepare', operation: 'connected-read', issueKind: 'tool_error', phase: 'tool_call', severity: 'warning',
     errorCode: 'JOURNAL_PREPARE_INCOMPLETE', summary: 'Prepared Journal connected context has incomplete coverage.',
-    details: { failureReason: error.reason, ...(error.structuralKeys.length ? { structuralKeys: error.structuralKeys } : {}) } }
+    details: { failureReason: error.reason, failureStage: site.stage, ...(site.toolkit ? { toolkit: site.toolkit } : {}),
+      ...error.diagnostic, ...(error.structuralKeys.length ? { structuralKeys: error.structuralKeys } : {}) } }
 }
 const digestLimit = 48 * 1024
 // Escaping < and backticks prevents provider text from terminating the fence.
@@ -92,7 +103,7 @@ interface AccountReadContext {
   candidates: Candidate[]
   locators: Map<string, Locator>
   calendars: Map<string, Locator>
-  report(error: unknown): string
+  report(error: unknown, site: FailureSite): string
 }
 
 export async function prepareJournalConnectedContext(input: PreparationInput): Promise<PreparedJournalContext> {
@@ -105,18 +116,21 @@ export async function prepareJournalConnectedContext(input: PreparationInput): P
   let admission: 'run' | 'empty' = 'run'
   let policy = emptyConnectedContextPolicy()
   let digestPolicy: unknown = policy.optOuts
-  const report = (error: unknown) => { const f = failure(error); issues.push(issue(f)); return f.reason }
+  const report = (error: unknown, site: FailureSite) => { const f = failure(error); issues.push(issue(f, site)); return f.reason }
+  // Steps after the inventory catch and report their own failures.
+  let stage: PrepareStage = 'policy'
   try {
     input.signal?.throwIfAborted()
     const previous = await budget.run(() => readConnectedContextPolicyState(input.vaultRoot))
-    if (previous.kind === 'unreadable') throw new ConnectedReadFailure('policy_unreadable')
+    if (previous.kind === 'unreadable') throw new ConnectedReadFailure('policy_unreadable', previous.structuralKeys, { failedCheck: previous.check })
     if (previous.kind === 'readable') policy = previous.policy
     if (policy.optOuts.global) {
       admission = 'empty'
     } else {
+      stage = 'inventory'
       const listed = parseConnectedRead(connectedAppsInventorySchema, await budget.request({ operation: 'manage', input: { action: 'list' } }))
       const inventory = normalizeConnectedReadItems(listed.result.accounts, item => parseConnectedRead(connectedAppAccountSchema, item))
-      for (const error of inventory.failures) coverage.push({ accountId: 'inventory', provider: 'none', coverage: 'partial', readAt: null, reason: report(error) })
+      for (const error of inventory.failures) coverage.push({ accountId: 'inventory', provider: 'none', coverage: 'partial', readAt: null, reason: report(error, { stage }) })
       const accounts = inventory.items.map(a => ({ ...a, toolkit: a.toolkit.toLowerCase() }))
         .filter(a => ['gmail', 'googlecalendar', 'outlook'].includes(a.toolkit)).sort((a, b) => a.id.localeCompare(b.id))
       const eligible = accounts.filter(a => !policy.optOuts.accounts.includes(a.id) && !policy.optOuts.providers.includes(a.toolkit))
@@ -133,31 +147,31 @@ export async function prepareJournalConnectedContext(input: PreparationInput): P
         .map(account => ({ id: account.id, provider: account.toolkit }))
       try {
         if (!inventory.failures.length) await budget.run(() => reconcileConnectedContextAccounts({ vaultRoot: input.vaultRoot, previous, accounts: activeAccounts }))
-      } catch { input.signal?.throwIfAborted(); report(new ConnectedReadFailure('reconcile_failed')) }
+      } catch { input.signal?.throwIfAborted(); report(new ConnectedReadFailure('reconcile_failed'), { stage: 'reconcile' }) }
       try {
         await attachExistingPlans(input.vaultRoot, candidates, locators, budget, report)
       } catch {
         input.signal?.throwIfAborted()
         for (const candidate of candidates) candidate.existingPlans = []
-        report(new ConnectedReadFailure('aliases_unreadable'))
+        report(new ConnectedReadFailure('aliases_unreadable'), { stage: 'existing_plans' })
       }
 
     }
   } catch (error) {
     input.signal?.throwIfAborted()
-    coverage.push({ accountId: 'inventory', provider: 'none', coverage: 'failed', readAt: null, reason: report(error) })
+    coverage.push({ accountId: 'inventory', provider: 'none', coverage: 'failed', readAt: null, reason: report(error, { stage }) })
   } finally {
     try { digestPolicy = await refreshPreparedControls({ input, policy, budget, candidates, locators, calendars, report }, coverage) }
     finally { budget.close() }
   }
   const lines = fitDigestCandidates(candidates, coverage, digestPolicy)
   let instructions = digest(coverage, lines, digestPolicy)
-  if (coverage.some(c => c.reason === 'digest_cap')) issues.push(issue(new ConnectedReadFailure('digest_cap')))
+  if (coverage.some(c => c.reason === 'digest_cap')) issues.push(issue(new ConnectedReadFailure('digest_cap'), { stage: 'digest' }))
   if (Buffer.byteLength(instructions) > digestLimit) {
     // Controls remain enforced by the host. Never truncate JSON or turn omitted
     // inventory into evidence of absence, even for pathological account lists.
     instructions = digest([{ accountId: 'inventory', provider: 'none', coverage: 'partial', readAt: null, reason: 'digest_cap' }], [], { omitted: true })
-    issues.push(issue(new ConnectedReadFailure('digest_cap')))
+    issues.push(issue(new ConnectedReadFailure('digest_cap'), { stage: 'digest' }))
   }
   return { instructions, issues, admission, readSource: createJournalSourceReader(input, locators, calendars) }
 }
@@ -166,7 +180,7 @@ async function refreshPreparedControls(context: AccountReadContext, coverage: Ac
   const { input, budget, candidates, locators, calendars } = context
   const current = await budget.run(() => readConnectedContextPolicyState(input.vaultRoot)).catch(() => {
     input.signal?.throwIfAborted()
-    return { kind: 'unreadable' as const }
+    return { kind: 'unreadable' as const, check: 'read' as const }
   })
   input.signal?.throwIfAborted()
   const optOuts = current.kind === 'readable' ? current.policy.optOuts : emptyConnectedContextPolicy().optOuts
@@ -176,7 +190,7 @@ async function refreshPreparedControls(context: AccountReadContext, coverage: Ac
     calendars.clear()
     const accountCoverage = coverage.filter(row => row.provider !== 'none')
     for (const row of accountCoverage) { row.coverage = 'failed'; row.readAt = null; row.reason = 'controls_changed' }
-    if (accountCoverage.length) context.report(new ConnectedReadFailure('controls_changed'))
+    if (accountCoverage.length) context.report(new ConnectedReadFailure('controls_changed'), { stage: 'controls' })
     return current.kind === 'unreadable' ? { unavailable: true } : optOuts
   }
   for (const map of [locators, calendars]) {
@@ -257,20 +271,25 @@ function fitDigestCandidates(candidates: Candidate[], coverage: AccountCoverage[
 async function prepareAccount(context: AccountReadContext, account: { id: string; toolkit: string }): Promise<{ coverage: AccountCoverage; canActivate: boolean }> {
   const { input, policy, budget, candidates, locators, calendars } = context
   const row: AccountCoverage = { accountId: account.id, provider: account.toolkit, coverage: 'complete', readAt: null }
-  const shapeKeys = new Set<string>()
-  let malformed = false
-  const report = (error: unknown) => {
+  const site = (stage: PrepareStage): FailureSite => ({ stage, toolkit: account.toolkit })
+  // One shape row per stage, carrying every structural key that stage saw.
+  const shapeKeys = new Map<PrepareStage, Set<string>>()
+  const report = (error: unknown, stage: PrepareStage) => {
     const parsed = failure(error)
-    if (parsed.reason !== 'shape_mismatch') return context.report(error)
-    malformed = true
-    for (const key of parsed.structuralKeys) shapeKeys.add(key)
+    if (parsed.reason !== 'shape_mismatch') return context.report(parsed, site(stage))
+    const keys = shapeKeys.get(stage) ?? new Set<string>()
+    for (const key of parsed.structuralKeys) keys.add(key)
+    shapeKeys.set(stage, keys)
     return parsed.reason
   }
+  // The first step that capped coverage, reported when nothing else explains it.
+  let capStage: PrepareStage | null = null
+  const partial = (stage: PrepareStage) => { row.coverage = 'partial'; capStage ??= stage }
   let succeeded = false
   let mailSucceeded = false
-  const fail = (error: unknown) => {
+  const fail = (error: unknown, stage: PrepareStage) => {
     input.signal?.throwIfAborted()
-    row.reason = report(error)
+    row.reason = report(error, stage)
     row.coverage = succeeded ? 'partial' : 'failed'
   }
   async function prepareCalendars(provider: CalendarProvider) {
@@ -278,9 +297,9 @@ async function prepareAccount(context: AccountReadContext, account: { id: string
       const prefix = `${account.id}:`
       const listedCalendars = await listConnectedCalendars({ read: budget.request, account: account.id, provider,
         excludedCalendarIds: policy.optOuts.calendars.filter(id => id.startsWith(prefix)).map(id => id.slice(prefix.length)) })
-      row.coverage = listedCalendars.coverage
+      if (listedCalendars.coverage === 'partial') partial('calendar_list')
       row.readAt = input.now.toISOString()
-      for (const error of listedCalendars.failures) row.reason = report(error)
+      for (const error of listedCalendars.failures) row.reason = report(error, 'calendar_list')
       for (const calendar of listedCalendars.calendars) {
         calendars.set(JSON.stringify([provider, account.id, calendar.id]), { provider, account: account.id, calendar, id: '' })
         try {
@@ -290,17 +309,17 @@ async function prepareAccount(context: AccountReadContext, account: { id: string
           for (const item of normalized.items) {
             const locator: Locator = { provider, account: account.id, calendar, id: item.id }
             const sourceId = journalSourceId(locator)
-            if (sourceId.length > 500) { row.coverage = 'partial'; continue }
+            if (sourceId.length > 500) { partial('calendar_events'); continue }
             locators.set(sourceId, locator)
             candidates.push({ ...item, kind: 'calendar', accountId: account.id, calendarId: calendar.id, sourceId })
           }
-          for (const error of [...result.failures, ...normalized.failures]) row.reason = report(error)
+          for (const error of [...result.failures, ...normalized.failures]) row.reason = report(error, 'calendar_events')
           succeeded = true
           row.readAt = input.now.toISOString()
-          if (result.coverage === 'partial' || row.reason) row.coverage = 'partial'
-        } catch (error) { fail(error) }
+          if (result.coverage === 'partial' || row.reason) partial('calendar_events')
+        } catch (error) { fail(error, 'calendar_events') }
       }
-    } catch (error) { fail(error) }
+    } catch (error) { fail(error, 'calendar_list') }
   }
   async function prepareMail(provider: 'gmail' | 'outlook') {
     try {
@@ -310,28 +329,28 @@ async function prepareAccount(context: AccountReadContext, account: { id: string
       for (const item of result.items) {
         const locator: Locator = { provider, account: account.id, id: item.id }
         const sourceId = journalSourceId(locator)
-        if (sourceId.length > 500) { row.coverage = 'partial'; continue }
+        if (sourceId.length > 500) { partial('mail'); continue }
         locators.set(sourceId, locator)
         candidates.push({ ...item, kind: 'mail', accountId: account.id, sourceId })
       }
-      for (const error of result.failures) row.reason = report(error)
+      for (const error of result.failures) row.reason = report(error, 'mail')
       succeeded = true
       row.readAt = input.now.toISOString()
-      if (result.coverage === 'partial' || row.coverage === 'failed') row.coverage = 'partial'
-    } catch (error) { fail(error) }
+      if (result.coverage === 'partial' || row.coverage === 'failed') partial('mail')
+    } catch (error) { fail(error, 'mail') }
   }
   if (account.toolkit === 'googlecalendar' || account.toolkit === 'outlook') await prepareCalendars(account.toolkit)
   if (account.toolkit === 'gmail' || account.toolkit === 'outlook') await prepareMail(account.toolkit)
-  if (malformed) context.report(new ConnectedReadFailure('shape_mismatch', [...shapeKeys].sort()))
-  if (row.coverage === 'partial' && !row.reason) row.reason = report(new ConnectedReadFailure('coverage_cap'))
+  for (const [stage, keys] of shapeKeys) context.report(new ConnectedReadFailure('shape_mismatch', [...keys].sort()), site(stage))
+  if (capStage && !row.reason) row.reason = report(new ConnectedReadFailure('coverage_cap'), capStage)
   // Outlook calendar success must not consume a failed first mail backfill.
   return { coverage: row, canActivate: account.toolkit === 'googlecalendar' ? row.coverage !== 'failed' : mailSucceeded }
 }
 
-async function attachExistingPlans(vaultRoot: string, candidates: Candidate[], locators: Map<string, Locator>, budget: ReturnType<typeof createConnectedReadBudget>, report: (error: unknown) => string) {
+async function attachExistingPlans(vaultRoot: string, candidates: Candidate[], locators: Map<string, Locator>, budget: ReturnType<typeof createConnectedReadBudget>, report: AccountReadContext['report']) {
   // Exact aliases only. Canonical event identity is never rewritten.
   const { sources, unreadable } = await budget.run(() => readConnectedContextSources(vaultRoot))
-  if (unreadable) report(new ConnectedReadFailure('sources_unreadable'))
+  if (unreadable) report(new ConnectedReadFailure('sources_unreadable'), { stage: 'existing_plans' })
   const aliases = candidates.flatMap(candidate => journalSourceAliases(locators.get(candidate.sourceId)!))
   const saved = await budget.run(() => findEventsByExternalRefs({ vaultRoot,
     refs: aliases.map(resourceId => ({ system: 'connected-context', resourceType: 'plan', resourceId, includeDeleted: true })) }))

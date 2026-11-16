@@ -6,8 +6,10 @@ import type { AssistantConnectedAppsPort } from './connected-apps-port.js'
 export type CalendarProvider = 'googlecalendar' | 'outlook'
 export type ConnectedRead = (request: HostedConnectedAppsRequest) => Promise<HostedConnectedAppsResponse>
 export type Coverage = 'complete' | 'partial' | 'failed'
+/** Code-owned metadata only: a strict-token upstream code, its HTTP status, or the validation check that failed. */
+export interface ConnectedReadDiagnostic { upstreamCode?: string; upstreamStatus?: number; failedCheck?: string }
 export class ConnectedReadFailure extends Error {
-  constructor(readonly reason: string, readonly structuralKeys: string[] = []) { super(reason) }
+  constructor(readonly reason: string, readonly structuralKeys: string[] = [], readonly diagnostic: ConnectedReadDiagnostic = {}) { super(reason) }
 }
 
 export function readRecord(value: unknown): Record<string, unknown> | null {
@@ -43,7 +45,7 @@ export function normalizeConnectedReadItems<T>(raw: unknown[], normalize: (item:
 }
 
 export function connectedReadData(response: HostedConnectedAppsResponse): unknown {
-  if (readRecord(response.result)?.successful === false) throw new ConnectedReadFailure('read_failed')
+  if (readRecord(response.result)?.successful === false) throw new ConnectedReadFailure('provider_unsuccessful')
   const envelope = parseConnectedRead(hostedConnectedAppsReadResultSchema, response.result)
   let data = envelope.data
   if (typeof data === 'string') {
