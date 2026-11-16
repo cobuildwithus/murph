@@ -115,8 +115,9 @@ export async function readProgress(memberId: string, beforeMutationTx: BeforePro
       && (measure.unit === "meters" || measure.unit === "steps") && !snapshot.states.get(measure.id)?.legs);
     if (firstRoutes.length) {
       const places = routePlaces(BANK.find(entry => entry.id === firstRouteId(profile.timeZone))!.name)!;
-      const route = await resolveRoute(places.from, places.to);
-      for (const measure of firstRoutes) snapshot.states.set(measure.id,
+      // Mapbox down: the page still loads without a map; the next read sets the first route.
+      const route = await resolveRoute(places.from, places.to).catch(() => null);
+      if (route) for (const measure of firstRoutes) snapshot.states.set(measure.id,
         await setFirstRoute(memberId, measure.id, route, beforeMutationTx));
     }
     const context = achievementContext(snapshot.measures, snapshot.states, days);
