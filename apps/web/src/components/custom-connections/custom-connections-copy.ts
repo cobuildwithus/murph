@@ -1,9 +1,10 @@
-/** What the Settings API returns for one tool on a connected service. */
+/** What the Settings API returns for one tool on an MCP server. */
 export interface CustomConnectionTool {
   description: string;
   name: string;
+  /** The server says it only looks things up. Anything else can change things, so Murph asks first. */
   readOnly: boolean;
-  /** `not_allowed`: the service doesn't say it only looks things up, so Murph can't use it yet. */
+  /** `not_allowed`: its description is too long for Murph to carry, so it can't be turned on. */
   state: "needs_look" | "not_allowed" | "off" | "on";
   title: string;
 }
@@ -84,6 +85,46 @@ export const CUSTOM_CONNECTION_UNKNOWN_ERROR = {
 
 export function readCustomConnectionError(code: string | null | undefined) {
   return (code && CUSTOM_CONNECTION_ERRORS[code]) || CUSTOM_CONNECTION_UNKNOWN_ERROR;
+}
+
+/** Why a change Murph asked for didn't go through. Each was found before anything was sent. */
+export type CustomConnectionActionFailure = "changed" | "off" | "refused" | "signed_out" | "unreachable";
+
+export type CustomConnectionActionOutcome =
+  | { status: "declined" | "expired" | "waiting" }
+  | { status: "done" | "unknown"; text?: string }
+  | { reason: CustomConnectionActionFailure; status: "failed" };
+
+/** One change Murph asked to make, as the member's confirm page shows it. */
+export interface CustomConnectionActionRequest {
+  askedAt: string;
+  host: string;
+  id: string;
+  /** Exactly what Murph will send, present while the request waits for the member. */
+  inputs?: Record<string, unknown>;
+  outcome: CustomConnectionActionOutcome;
+  server: string;
+  title: string;
+}
+
+export function customConnectionActionUrl(id: string): string {
+  return `${CUSTOM_CONNECTIONS_API}/requests/${encodeURIComponent(id)}`;
+}
+
+/** The line under "That didn't go through.": what stopped it and what to do next. */
+export function describeCustomConnectionActionFailure(reason: CustomConnectionActionFailure, server: string): string {
+  switch (reason) {
+    case "off":
+      return `${server} is turned off, so nothing changed. Turn it on in your MCP servers, then ask Murph again.`;
+    case "signed_out":
+      return `Murph is signed out of ${server}, so nothing changed. Sign in again in your MCP servers, then ask Murph again.`;
+    case "changed":
+      return "This action changed or was turned off since Murph asked, so nothing changed. Look it over in your MCP servers, then ask Murph again.";
+    case "refused":
+      return `${server} turned it down, so nothing changed. Ask Murph again if you still want this.`;
+    case "unreachable":
+      return `Murph couldn't reach ${server}, so nothing changed. Ask Murph again in a minute.`;
+  }
 }
 
 /** One short line under a service's name. */

@@ -34,7 +34,7 @@ export async function requireConnectionCallback(request: Request): Promise<strin
  * The Settings page. Signed-out visitors sign in on the page, so a link Murph sent keeps its MCP link;
  * other session problems go to Settings; group chats get a 404.
  */
-export async function readCustomConnectionsPageAccess(): Promise<"member" | "signed_out"> {
+export async function readCustomConnectionsPageAccess(): Promise<{ memberId: string } | "signed_out"> {
   if (!await getHostedAppSession()) return "signed_out";
   let memberId: string;
   try {
@@ -43,5 +43,5 @@ export async function readCustomConnectionsPageAccess(): Promise<"member" | "sig
     redirect("/settings");
   }
   if (!await connectionMemberActive(memberId)) notFound();
-  return "member";
+  return { memberId };
 }

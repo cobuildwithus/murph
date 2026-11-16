@@ -40,7 +40,7 @@ import { ClubsPageStudy } from "./clubs-page-study";
 import { WearableConnectLinkStudy } from "./wearable-connect-link-study";
 import { ComputerHandoffStudy } from "./computer-handoff-study";
 import { ConnectedAppAuthorizationStudy } from "./connected-app-authorization-study";
-import { CustomConnectionsStudy } from "./custom-connections-study";
+import { CustomConnectionConfirmStudy, CustomConnectionsStudy } from "./custom-connections-study";
 import {
   AppleHealthRelaySetupStudy,
   ConnectSourceCardStudy,
@@ -259,6 +259,12 @@ export function SectionsContent({
 
           <StudySection title="MCP servers Murph can use: add, sign in, choose, manage">
             <CustomConnectionsStudy />
+          </StudySection>
+
+          <Separator />
+
+          <StudySection title="Murph asks first: confirm a change in an MCP server">
+            <CustomConnectionConfirmStudy />
           </StudySection>
 
           <Separator />
