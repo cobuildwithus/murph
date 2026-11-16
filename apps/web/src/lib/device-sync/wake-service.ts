@@ -3845,15 +3845,17 @@ async function runWithHostedDeviceSyncPreparedWriteReplan<T>(
       if (!isHostedDeviceSyncPreparedWriteReplanError(error)) {
         throw error;
       }
-      console.warn("Hosted device-sync prepared write changed before commit.", {
+      const exhausted = attempt === HOSTED_DEVICE_SYNC_PREPARED_WRITE_ATTEMPTS - 1;
+      const log = exhausted ? console.warn : console.info;
+      log("Hosted device-sync prepared write changed before commit.", {
         eventCode: "device_sync.prepared_write_drift",
         operation: operationKind,
         attempt: attempt + 1,
         maxAttempts: HOSTED_DEVICE_SYNC_PREPARED_WRITE_ATTEMPTS,
-        exhausted: attempt === HOSTED_DEVICE_SYNC_PREPARED_WRITE_ATTEMPTS - 1,
+        exhausted,
         reason: readHostedDeviceSyncPreparedWriteDriftReason(error),
       });
-      if (attempt === HOSTED_DEVICE_SYNC_PREPARED_WRITE_ATTEMPTS - 1) {
+      if (exhausted) {
         if (isDeviceSyncError(error)) {
           throw error;
         }
