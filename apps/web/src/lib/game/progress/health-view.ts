@@ -109,7 +109,7 @@ function healthAgeView(metric: HealthMetric["id"], baseline: number | null, curr
 }
 
 function healthAmount(metric: HealthMetric["id"], value: number): Amount {
-  return formatAmount(value, units[metric], metric === "sleep" ? "clock" : "compact");
+  return formatAmount(value, units[metric], metric === "sleep" ? "clock" : "compact", "us");
 }
 
 function healthAmountText(metric: HealthMetric["id"], value: number, delta: boolean): string {

@@ -254,7 +254,9 @@
           "blurb": "Africa's highest mountain, a snowcapped volcano in Tanzania you can hike up.",
           "where": "Tanzania",
           "on": null,
-          "toGo": "1,221 to go"
+          "toGo": "1,221 to go",
+          "short": "Mount Kilimanjaro",
+          "tagline": "A snowy crown above the plains"
         },
         "passed": [
           {
@@ -266,7 +268,9 @@
             "blurb": "The highest peak in the Alps, on the French-Italian border, first climbed in 1786.",
             "where": "France / Italy",
             "on": "2026-10-01",
-            "toGo": null
+            "toGo": null,
+            "short": "Mont Blanc",
+            "tagline": "A white summit above the Alps"
           },
           {
             "id": "matterhorn",
@@ -277,7 +281,9 @@
             "blurb": "The pointed Alpine peak on the Swiss-Italian border, first climbed in 1865.",
             "where": "Switzerland / Italy",
             "on": "2026-09-14",
-            "toGo": null
+            "toGo": null,
+            "short": "Matterhorn",
+            "tagline": "A sharp pyramid of rock and snow"
           },
           {
             "id": "mount-whitney",
@@ -288,7 +294,9 @@
             "blurb": "The highest point in the lower 48 states, in California's Sierra Nevada.",
             "where": "California, USA",
             "on": "2026-09-09",
-            "toGo": null
+            "toGo": null,
+            "short": "Mount Whitney",
+            "tagline": "A granite summit above the valley"
           },
           {
             "id": "mount-rainier",
@@ -299,7 +307,9 @@
             "blurb": "The glacier-covered volcano that towers over Seattle, the highest peak in Washington.",
             "where": "Washington, USA",
             "on": "2026-09-08",
-            "toGo": null
+            "toGo": null,
+            "short": "Mount Rainier",
+            "tagline": "A great volcano beneath the snow"
           },
           {
             "id": "mount-fuji",
@@ -310,7 +320,9 @@
             "blurb": "Japan's highest mountain, a snowcapped volcano and national symbol.",
             "where": "Honshu, Japan",
             "on": "2026-07-28",
-            "toGo": null
+            "toGo": null,
+            "short": "Mount Fuji",
+            "tagline": "A familiar cone against the sky"
           },
           {
             "id": "mount-olympus",
@@ -321,7 +333,9 @@
             "blurb": "Greece's highest mountain, home of the gods in ancient Greek myths.",
             "where": "Thessaly / Macedonia, Greece",
             "on": "2026-05-14",
-            "toGo": null
+            "toGo": null,
+            "short": "Mount Olympus",
+            "tagline": "A mountain with an ancient story"
           },
           {
             "id": "mount-washington",
@@ -332,7 +346,9 @@
             "blurb": "New Hampshire's highest peak, famous for brutal weather, including a 231 mph gust in 1934.",
             "where": "New Hampshire, USA",
             "on": "2026-03-02",
-            "toGo": null
+            "toGo": null,
+            "short": "Mount Washington",
+            "tagline": "A high summit in the clouds"
           },
           {
             "id": "half-dome",
@@ -343,7 +359,9 @@
             "blurb": "Yosemite's granite dome, sliced flat on one side, with cables to help hikers up.",
             "where": "Yosemite National Park, California, USA",
             "on": "2026-01-31",
-            "toGo": null
+            "toGo": null,
+            "short": "Half Dome",
+            "tagline": "A rounded summit with a sheer face"
           },
           {
             "id": "ben-nevis",
@@ -354,7 +372,9 @@
             "blurb": "The highest mountain in the British Isles, near Fort William in Scotland.",
             "where": "Highlands, Scotland, UK",
             "on": "2026-01-23",
-            "toGo": null
+            "toGo": null,
+            "short": "Ben Nevis",
+            "tagline": "A summit above the Highlands"
           },
           {
             "id": "table-mountain",
@@ -365,7 +385,9 @@
             "blurb": "The flat-topped mountain over Cape Town, often draped in a \"tablecloth\" of cloud.",
             "where": "Cape Town, South Africa",
             "on": "2026-01-06",
-            "toGo": null
+            "toGo": null,
+            "short": "Table Mountain",
+            "tagline": "A flat summit above the city"
           }
         ]
       },
@@ -640,7 +662,9 @@
             "blurb": "The towers of San Francisco's orange suspension bridge, opened in 1937.",
             "where": "San Francisco, USA",
             "on": "2026-11-12",
-            "toGo": null
+            "toGo": null,
+            "short": "Golden Gate towers",
+            "tagline": "Orange towers above the bay"
           }
         ],
         "next": {
@@ -652,7 +676,9 @@
           "blurb": "Paris's iron tower, built for the 1889 World's Fair and meant to be temporary.",
           "where": "Paris, France",
           "on": null,
-          "toGo": "162 to go"
+          "toGo": "162 to go",
+          "short": "Eiffel Tower",
+          "tagline": "An iron tower above the rooftops"
         },
         "goalPicked": false
       },

@@ -1,6 +1,7 @@
 import "server-only";
 import { toLocalDayKey } from "@murphai/contracts";
 import type { HostedNativeMemberAuth } from "../../better-auth/native-auth";
+import type { ClientUnits } from "../../companion/client-info";
 import { getPrisma } from "../../prisma";
 import { hostedOnboardingError, isHostedOnboardingError } from "../../hosted-onboarding/errors";
 import { assertGameMemberAuthCurrentTx } from "../http/auth";
@@ -16,7 +17,7 @@ import { settleAwards } from "./awards";
 import type { DayAmount } from "./registry";
 import { scheduleInference } from "./series";
 
-export async function readProgressFriends(auth: HostedNativeMemberAuth, query: FriendsQuery, signal: AbortSignal) {
+export async function readProgressFriends(auth: HostedNativeMemberAuth, query: FriendsQuery, signal: AbortSignal, units: ClientUnits) {
   try {
     const db = getPrisma(), memberId = auth.member.id;
     const cohort = await readFriendCohort(memberId), joined = cohort.people.filter(person => !person.invited);
@@ -68,7 +69,7 @@ export async function readProgressFriends(auth: HostedNativeMemberAuth, query: F
       if (atCommit.incomplete || owners.some(owner => !atCommit.ids.includes(owner))) throw audienceChanged();
     });
     const shareAudience = incomplete ? [] : sharingPreview(people, rooms.rooms, query.measure);
-    return friendsView({ people, measure, pills, query, today: toLocalDayKey(new Date(), cohort.timeZone),
+    return friendsView({ people, measure, pills, query, units, today: toLocalDayKey(new Date(), cohort.timeZone),
       shareAudience, incomplete, departureNotice: cohort.departureNotice });
   } catch (error) {
     if (isHostedOnboardingError(error)) throw error;

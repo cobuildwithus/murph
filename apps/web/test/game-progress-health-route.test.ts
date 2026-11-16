@@ -23,11 +23,13 @@ import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { GET } from "../app/api/game/v1/progress/health/route";
 import { healthSchema, savedHealthSchema } from "@/src/lib/game/progress/contract";
 import { healthAgeShare, healthSteps } from "@/src/lib/game/progress/health";
+import { encodePolyline } from "@/src/lib/game/progress/route-geometry";
 import type { StoredAward } from "@/src/lib/game/progress/awards";
 import notConnected from "./fixtures/progress/health-row08-not-connected.json";
 
 const joinedOn = "2026-10-21", today = "2026-11-16";
-const request = (query = "") => new Request(`https://example.test/api/game/v1/progress/health${query}`);
+const request = (query = "", units = "us") => new Request(`https://example.test/api/game/v1/progress/health${query}`,
+  { headers: { "X-Murph-Client-Units": units } });
 function snapshot() {
   const daily = Array.from({ length: 55 }, (_, index) => {
     const date = addDaysToIsoDate(joinedOn, index - 28);
@@ -136,6 +138,18 @@ it("returns private uncached health with raw baseline and all crossed levels", a
   expect(candidates.filter((award: { kind: string }) => award.kind === "health").map((award: { data: { level: number } }) => award.data.level))
     .toEqual([1, 2, 3]);
   expect(mocks.authority).toHaveBeenCalledWith({ memberId: "ava", prisma: { transaction: true } });
+});
+
+it.each([["us", "about 1 mi"], ["metric", "about 1.6 km"]])("renders the Steps journey in requested %s units", async (units, walkedText) => {
+  const raw = snapshot();
+  mocks.raw.mockResolvedValue({ ...raw, numbers: { ...raw.numbers,
+    steps: { daily: [{ date: joinedOn, value: 2000, source: "Garmin", observedAt: `${joinedOn}T12:00:00Z` }] } } });
+  mocks.measures.mockResolvedValue([{ lookup: "steps", stateEncrypted: "synthetic-sealed" }]);
+  mocks.open.mockResolvedValue([{ legs: [{ from: "A", to: "B", distanceM: 16093.44, startTotal: 0,
+    polyline: encodePolyline([[0, 0], [1, 0]]), towns: [], straightLine: false }] }]);
+  const body = healthSchema.parse(await (await GET(request("", units))).json());
+  expect(body.sums.find(sum => sum.id === "steps")).toMatchObject({ total: { value: 2000, unit: "steps" }, route: { walkedText } });
+  expect(mocks.resolve).not.toHaveBeenCalled();
 });
 
 it("serves curated recommendation glyphs on a flat metric without model work", async () => {

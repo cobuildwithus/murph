@@ -1,3 +1,4 @@
+import { clientUnits } from "@/src/lib/companion/client-info";
 import { assertGameMemberAuthCurrentTx, requireGameMemberAuth } from '@/src/lib/game/http/auth';
 import { gameNotFound } from '@/src/lib/game/http/errors';
 import { parseMapQuery } from '@/src/lib/game/progress/contract';
@@ -13,6 +14,7 @@ import { getPrisma } from '@/src/lib/prisma';
 
 export const GET = withProgressJsonError(async (request: Request) => runWithHostedDomainRootUnwrapCache(async () => {
   const auth = await requireGameMemberAuth(request);
+  const units = clientUnits(request);
   const query = parseMapQuery(Object.fromEntries(new URL(request.url).searchParams));
   return progressEffect(async () => {
     let polyline: string, progress: number;
@@ -29,7 +31,7 @@ export const GET = withProgressJsonError(async (request: Request) => runWithHost
       const state = snapshot.states.get(query.measure);
       if (!measure || !state?.legs?.length) throw gameNotFound();
       polyline = state.legs.at(-1)!.polyline;
-      progress = routeView(measure.id, state, cumulativePoints(measure.amounts), snapshot.awards)!.progress;
+      progress = routeView(measure.id, state, cumulativePoints(measure.amounts), snapshot.awards, units)!.progress;
     }
     await getPrisma().$transaction(async tx => {
       await assertGameMemberAuthCurrentTx(auth, tx);

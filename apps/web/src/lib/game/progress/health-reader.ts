@@ -1,6 +1,7 @@
 import "server-only";
 import { addDaysToIsoDate, toLocalDayKey } from "@murphai/contracts";
 import type { HostedNativeMemberAuth } from "../../better-auth/native-auth";
+import type { ClientUnits } from "../../companion/client-info";
 import { assertBrowserVaultMemberAuthority } from "../../browser-vault/authority";
 import { readCompanionHealthSeries } from "../../device-sync/companion-numbers";
 import { getPrisma } from "../../prisma";
@@ -56,11 +57,11 @@ export async function readProgressStepsRoute(auth: HostedNativeMemberAuth, signa
   if (!leg) throw gameNotFound();
   const joinedOn = toLocalDayKey(profile.createdAt, profile.timeZone), today = toLocalDayKey(new Date(), profile.timeZone);
   const points = cumulativePoints(healthSums("steps", snapshot?.numbers.steps?.daily ?? [], joinedOn, today));
-  const route = routeView("steps", state, points, await readAwards(memberId))!;
+  const route = routeView("steps", state, points, await readAwards(memberId), "us")!;
   return { polyline: leg.polyline, progress: route.progress };
 }
 
-export async function readProgressHealth(auth: HostedNativeMemberAuth, signal: AbortSignal) {
+export async function readProgressHealth(auth: HostedNativeMemberAuth, signal: AbortSignal, units: ClientUnits) {
   try {
     const db = getPrisma(), memberId = auth.member.id;
     const profile = await db.gameProfile.findUnique({ where: { memberId }, select: { createdAt: true, timeZone: true } });
@@ -101,7 +102,7 @@ export async function readProgressHealth(auth: HostedNativeMemberAuth, signal: A
     await settleAwards(memberId, [...candidates, ...journeys.candidates], beforeMutationTx);
     const awards = await readAwards(memberId);
     for (const model of models) model.wins = awards.filter(award => award.measureId === model.id && ["health", "healthAge"].includes(award.kind));
-    const sums = healthJourneyViews(journeys, awards, today);
+    const sums = healthJourneyViews(journeys, awards, today, units);
     // Returning private values also requires current session and health authority.
     await assertGameMemberAuthCurrentTx(auth, db);
     await assertBrowserVaultMemberAuthority({ memberId, prisma: db });

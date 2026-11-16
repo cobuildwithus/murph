@@ -22,13 +22,13 @@ describe("native completion publication", () => {
 
   it("publishes settled completion with the compatibility boolean", async () => {
     const call = { ...input, settledRunnerContainerName: "synthetic-target" };
-    expect(await recordHostedRuntimeOwnerCompletion(call)).toBe(true);
+    expect(await recordHostedRuntimeOwnerCompletion(call)).toEqual({ completed: true });
     expectOriginalCommand(call);
     expectObservation("native_invocation", "updated");
   });
 
   it("cannot claim native settlement from an early runtime callback", async () => {
-    expect(await recordHostedRuntimeOwnerCompletion(input)).toBe(true);
+    expect(await recordHostedRuntimeOwnerCompletion(input)).toEqual({ completed: true });
     expectOriginalCommand(input);
     expectObservation("runtime_callback", "updated");
   });
@@ -41,7 +41,7 @@ describe("native completion publication", () => {
 
     it.each(nonUpdatedStatuses)("does not claim completion for %s", async (status) => {
       vi.mocked(commandHostedRuntimeOwner).mockResolvedValue({ cutover: "postgres", status, owner: null });
-      expect(await recordHostedRuntimeOwnerCompletion(call)).toBe(false);
+      expect(await recordHostedRuntimeOwnerCompletion(call)).toEqual({ completed: false, reason: "canonical_completion_rejected" });
       expectOriginalCommand(call);
       expectObservation(caller, "not_updated");
     });
@@ -66,7 +66,7 @@ describe("native completion publication", () => {
         await expect(recordHostedRuntimeOwnerCompletion(call)).rejects.toBe(failure);
       } else {
         vi.mocked(commandHostedRuntimeOwner).mockResolvedValueOnce({ cutover: "postgres", status: outcome, owner: null });
-        expect(await recordHostedRuntimeOwnerCompletion(call)).toBe(outcome === "updated");
+        expect(await recordHostedRuntimeOwnerCompletion(call)).toMatchObject({ completed: outcome === "updated" });
       }
       expectOriginalCommand(call);
       expectObservation(caller, outcome === "stale" ? "not_updated" : outcome);
@@ -91,7 +91,7 @@ describe("native completion publication", () => {
         await rejected;
       } else {
         resolve({ cutover: "postgres", status: outcome, owner: null });
-        expect(await pending).toBe(outcome === "updated");
+        expect(await pending).toMatchObject({ completed: outcome === "updated" });
       }
       expectOriginalCommand(call);
       expectObservation(caller, outcome === "stale" ? "not_updated" : outcome);
@@ -102,11 +102,11 @@ describe("native completion publication", () => {
     vi.mocked(commandHostedRuntimeOwner)
       .mockResolvedValueOnce({ cutover: "postgres", status: "stale", owner: null })
       .mockResolvedValueOnce({ cutover: "postgres", status: "updated", owner: null });
-    expect(await recordHostedRuntimeOwnerCompletion(input)).toBe(false);
+    expect(await recordHostedRuntimeOwnerCompletion(input)).toEqual({ completed: false, reason: "canonical_completion_rejected" });
     expectObservation("runtime_callback", "not_updated");
     expect(await recordHostedRuntimeOwnerCompletion({ ...input, attemptId,
       generation: attemptId === input.attemptId ? input.generation : "2",
-      settledRunnerContainerName: "synthetic-target" })).toBe(true);
+      settledRunnerContainerName: "synthetic-target" })).toEqual({ completed: true });
     expect(commandHostedRuntimeOwner).toHaveBeenCalledTimes(2);
     const entries = vi.mocked(emitHostedExecutionStructuredLog).mock.calls.map(([entry]) => entry);
     expect(entries.map(entry => entry.details)).toEqual([
@@ -135,7 +135,7 @@ describe("native completion publication", () => {
       },
     };
     vi.mocked(commandHostedRuntimeOwner).mockResolvedValueOnce(response);
-    expect(await recordHostedRuntimeOwnerCompletion(call)).toBe(status === "updated");
+    expect(await recordHostedRuntimeOwnerCompletion(call)).toMatchObject({ completed: status === "updated" });
     expectOriginalCommand(call);
     expectObservation("native_invocation", status === "updated" ? "updated" : "not_updated");
     const [entry] = vi.mocked(emitHostedExecutionStructuredLog).mock.calls[0]!;

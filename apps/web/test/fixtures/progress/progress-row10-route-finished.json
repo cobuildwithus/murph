@@ -106,7 +106,9 @@
             "blurb": "New York's 1931 Art Deco tower, the world's tallest for nearly 40 years.",
             "where": "New York City, USA",
             "on": "2026-11-12",
-            "toGo": null
+            "toGo": null,
+            "short": "Empire State",
+            "tagline": "An old favorite in the skyline"
           },
           {
             "id": "eiffel-tower",
@@ -117,7 +119,9 @@
             "blurb": "Paris's iron tower, built for the 1889 World's Fair and meant to be temporary.",
             "where": "Paris, France",
             "on": "2026-11-10",
-            "toGo": null
+            "toGo": null,
+            "short": "Eiffel Tower",
+            "tagline": "An iron tower above the rooftops"
           },
           {
             "id": "golden-gate-bridge-towers",
@@ -128,7 +132,9 @@
             "blurb": "The towers of San Francisco's orange suspension bridge, opened in 1937.",
             "where": "San Francisco, USA",
             "on": "2026-11-04",
-            "toGo": null
+            "toGo": null,
+            "short": "Golden Gate towers",
+            "tagline": "Orange towers above the bay"
           },
           {
             "id": "washington-monument",
@@ -139,7 +145,9 @@
             "blurb": "Washington, D.C.'s marble obelisk, the world's tallest structure until the Eiffel Tower.",
             "where": "Washington, D.C., USA",
             "on": "2026-11-02",
-            "toGo": null
+            "toGo": null,
+            "short": "Washington Monument",
+            "tagline": "A stone needle above the capital"
           },
           {
             "id": "statue-of-liberty",
@@ -150,7 +158,9 @@
             "blurb": "The copper statue France gave the US, holding her torch in New York Harbor since 1886.",
             "where": "New York City, USA",
             "on": "2026-10-27",
-            "toGo": null
+            "toGo": null,
+            "short": "Statue of Liberty",
+            "tagline": "A torch above the harbor"
           }
         ],
         "next": {
@@ -162,7 +172,9 @@
           "blurb": "New York's tallest tower, its height a nod to 1776, the year of independence.",
           "where": "New York City, USA",
           "on": null,
-          "toGo": "376 to go"
+          "toGo": "376 to go",
+          "short": "One World Trade",
+          "tagline": "A bright point above the harbor"
         },
         "goalPicked": false
       },
@@ -276,7 +288,9 @@
             "blurb": "The towers of San Francisco's orange suspension bridge, opened in 1937.",
             "where": "San Francisco, USA",
             "on": "2026-11-12",
-            "toGo": null
+            "toGo": null,
+            "short": "Golden Gate towers",
+            "tagline": "Orange towers above the bay"
           }
         ],
         "next": {
@@ -288,7 +302,9 @@
           "blurb": "Paris's iron tower, built for the 1889 World's Fair and meant to be temporary.",
           "where": "Paris, France",
           "on": null,
-          "toGo": "162 to go"
+          "toGo": "162 to go",
+          "short": "Eiffel Tower",
+          "tagline": "An iron tower above the rooftops"
         },
         "goalPicked": false
       },
@@ -558,7 +574,9 @@
         "blurb": "634 miles from here",
         "where": null,
         "on": null,
-        "toGo": "634 miles from here"
+        "toGo": "634 miles from here",
+        "short": "On to Portland",
+        "tagline": "A journey north toward the forests"
       },
       "title": "San Francisco",
       "line": "501 miles from San Diego, arrived today"

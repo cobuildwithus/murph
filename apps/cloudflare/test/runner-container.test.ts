@@ -9982,6 +9982,9 @@ describe("RunnerContainer", () => {
         ), { headers: { "content-type": "application/json" } })),
       });
       const request = createRunnerRequest("evt_previous_release_completion");
+      destroy.mockImplementation(async () => {
+        container.onStop({ exitCode: 137, reason: "exit" });
+      });
       await container.invoke({ job: { kind: "workspace-invocation", request }, timeoutMs: 30_000, userId: request.userId });
       expect(destroy).not.toHaveBeenCalled();
       await container.onRuntimeCompletionRecorded({ attemptId: "attempt_unrelated", leaseGeneration: request.leaseGeneration, userId: request.userId });
@@ -9989,6 +9992,17 @@ describe("RunnerContainer", () => {
       await container.onRuntimeCompletionRecorded({ attemptId: request.attemptId, leaseGeneration: request.leaseGeneration, userId: request.userId });
       expect(destroy).toHaveBeenCalledOnce();
       expect(startAndWaitForPorts).not.toHaveBeenCalled();
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(expect.objectContaining({
+        level: "info",
+        phase: "container.ready",
+        message: "Hosted execution container lifecycle hook reported stop.",
+        details: expect.objectContaining({
+          exitCode: 137,
+          destroyRequestReason: "invoke-completed",
+          stopClassification: "requested-nonzero-stop",
+          activeWorkspaceInvocationPresent: false,
+        }),
+      }));
     },
   );
 

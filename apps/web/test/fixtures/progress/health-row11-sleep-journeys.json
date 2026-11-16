@@ -338,7 +338,9 @@
             "blurb": "A shorebird flew this long without landing once, New Zealand to China.",
             "where": null,
             "on": "2026-11-12",
-            "toGo": null
+            "toGo": null,
+            "short": "A godwit's nonstop flight",
+            "tagline": "A long flight without landing"
           },
           {
             "id": "apollo11-mission",
@@ -349,7 +351,9 @@
             "blurb": "The whole first Moon landing trip, launch to splashdown, 1969.",
             "where": null,
             "on": "2026-11-09",
-            "toGo": null
+            "toGo": null,
+            "short": "The first Moon landing mission",
+            "tagline": "To the Moon and safely home"
           },
           {
             "id": "pony-express",
@@ -360,7 +364,9 @@
             "blurb": "The fastest horseback mail relay across the American West, 1860.",
             "where": null,
             "on": "2026-11-08",
-            "toGo": null
+            "toGo": null,
+            "short": "Pony Express",
+            "tagline": "Mail carried from rider to rider"
           },
           {
             "id": "trans-siberian",
@@ -371,7 +377,9 @@
             "blurb": "The train ride across Russia, from Moscow to the Pacific coast.",
             "where": null,
             "on": "2026-11-03",
-            "toGo": null
+            "toGo": null,
+            "short": "Trans-Siberian",
+            "tagline": "A train journey toward the Pacific"
           },
           {
             "id": "serum-run",
@@ -382,7 +390,9 @@
             "blurb": "Dog sled teams raced medicine 674 miles to a sick Alaska town, 1925.",
             "where": null,
             "on": "2026-10-31",
-            "toGo": null
+            "toGo": null,
+            "short": "The serum run to Nome",
+            "tagline": "A relay carrying medicine through snow"
           }
         ],
         "next": {
@@ -394,7 +404,9 @@
           "blurb": "The record for staying awake, set by a 17-year-old in 1964.",
           "where": null,
           "on": null,
-          "toGo": "22 h to go"
+          "toGo": "22 h to go",
+          "short": "Staying-awake record",
+          "tagline": "A remarkable stretch without sleep"
         },
         "goalPicked": false
       },

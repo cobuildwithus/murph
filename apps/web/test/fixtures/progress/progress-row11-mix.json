@@ -94,7 +94,9 @@
             "blurb": "The longest dive by any mammal: a deep-diving whale, tracked in 2020.",
             "where": null,
             "on": "2026-11-13",
-            "toGo": null
+            "toGo": null,
+            "short": "A whale's longest dive",
+            "tagline": "A long journey beneath the waves"
           },
           {
             "id": "concorde",
@@ -105,7 +107,9 @@
             "blurb": "The fastest a passenger jet has flown New York to London, 1996.",
             "where": null,
             "on": "2026-11-09",
-            "toGo": null
+            "toGo": null,
+            "short": "Concorde's cruising altitude",
+            "tagline": "Above the ordinary flight path"
           },
           {
             "id": "moonwalk",
@@ -116,7 +120,9 @@
             "blurb": "The first walk on the Moon, Apollo 11, 1969.",
             "where": null,
             "on": "2026-11-07",
-            "toGo": null
+            "toGo": null,
+            "short": "The first moonwalk",
+            "tagline": "The first walk on another world"
           },
           {
             "id": "marathon",
@@ -127,7 +133,9 @@
             "blurb": "The fastest anyone has run 26.2 miles, and the first record under 2 hours.",
             "where": null,
             "on": "2026-11-03",
-            "toGo": null
+            "toGo": null,
+            "short": "The marathon world record",
+            "tagline": "A new mark for the marathon"
           },
           {
             "id": "gagarin",
@@ -138,7 +146,9 @@
             "blurb": "The first person in space, once around the Earth, 1961.",
             "where": null,
             "on": "2026-11-02",
-            "toGo": null
+            "toGo": null,
+            "short": "Yuri Gagarin's flight",
+            "tagline": "The first person in space"
           }
         ],
         "next": {
@@ -150,7 +160,9 @@
           "blurb": "The longest plank ever held by a woman, set in 2024 at age 58.",
           "where": null,
           "on": null,
-          "toGo": "18 min to go"
+          "toGo": "18 min to go",
+          "short": "Women's plank record",
+          "tagline": "A remarkable hold from start to finish"
         },
         "goalPicked": false
       },
@@ -244,7 +256,9 @@
             "blurb": "New York's 1931 Art Deco tower, the world's tallest for nearly 40 years.",
             "where": "New York City, USA",
             "on": "2026-11-12",
-            "toGo": null
+            "toGo": null,
+            "short": "Empire State",
+            "tagline": "An old favorite in the skyline"
           },
           {
             "id": "eiffel-tower",
@@ -255,7 +269,9 @@
             "blurb": "Paris's iron tower, built for the 1889 World's Fair and meant to be temporary.",
             "where": "Paris, France",
             "on": "2026-11-10",
-            "toGo": null
+            "toGo": null,
+            "short": "Eiffel Tower",
+            "tagline": "An iron tower above the rooftops"
           },
           {
             "id": "golden-gate-bridge-towers",
@@ -266,7 +282,9 @@
             "blurb": "The towers of San Francisco's orange suspension bridge, opened in 1937.",
             "where": "San Francisco, USA",
             "on": "2026-11-04",
-            "toGo": null
+            "toGo": null,
+            "short": "Golden Gate towers",
+            "tagline": "Orange towers above the bay"
           }
         ],
         "next": {
@@ -278,7 +296,9 @@
           "blurb": "New York's tallest tower, its height a nod to 1776, the year of independence.",
           "where": "New York City, USA",
           "on": null,
-          "toGo": "376 to go"
+          "toGo": "376 to go",
+          "short": "One World Trade",
+          "tagline": "A bright point above the harbor"
         },
         "goalPicked": false
       },

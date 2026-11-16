@@ -1,3 +1,4 @@
+import { clientUnits } from "@/src/lib/companion/client-info";
 import { requireGameMemberAuth, assertGameMemberAuthCurrentTx } from "@/src/lib/game/http/auth";
 import { readProgress } from "@/src/lib/game/progress/view";
 import { runWithHostedDomainRootUnwrapCache } from "@/src/lib/hosted-crypto/domain-root-unwrap-cache";
@@ -6,6 +7,7 @@ import { progressEffect, withProgressJsonError } from "@/src/lib/game/progress/h
 
 export const GET = withProgressJsonError(async (request: Request) => runWithHostedDomainRootUnwrapCache(async () => {
   const auth = await requireGameMemberAuth(request);
-  const view = await progressEffect(() => readProgress(auth.member.id, tx => assertGameMemberAuthCurrentTx(auth, tx)));
+  const units = clientUnits(request);
+  const view = await progressEffect(() => readProgress(auth.member.id, units, tx => assertGameMemberAuthCurrentTx(auth, tx)));
   return jsonOk(view, 200, { "Cache-Control": "private, no-store" });
 }));

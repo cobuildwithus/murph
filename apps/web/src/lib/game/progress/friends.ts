@@ -1,4 +1,5 @@
 import { addDaysToIsoDate } from "@murphai/contracts";
+import type { ClientUnits } from "../../companion/client-info";
 import type { Amount, Friends, FriendsQuery, Measure } from "./contract";
 import type { Candidate } from "./registry";
 import { formatAmount, formatNumber } from "./format";
@@ -19,6 +20,7 @@ export function friendsView(input: {
   people: readonly FriendSeries[]; measure: FriendMeasure; pills: Friends["pills"];
   query: FriendsQuery; today: string; shareAudience: Friends["shareAudience"];
   incomplete: boolean; departureNotice: string | null;
+  units: ClientUnits;
 }): Friends {
   const { measure, query, today } = input;
   const from = query.range === "month" ? `${today.slice(0, 7)}-01`
@@ -40,7 +42,7 @@ export function friendsView(input: {
       me: person.me, invited: person.invited, joinedOn: person.joinedOn };
     return !visible && !person.invited ? { ...identity, private: true, rank: null, total: null }
       : { ...identity, private: false, rank: visible && ranked.length > 1 ? ranked.findIndex(row => row.total === total) + 1 : null,
-        total: visible ? friendAmount(total, measure) : null };
+        total: visible ? friendAmount(total, measure, input.units) : null };
   });
   const me = ranked.find(row => row.person.me);
   const ahead = me ? ranked.filter(row => row.total > me.total).at(-1) : undefined;
@@ -49,14 +51,14 @@ export function friendsView(input: {
   return { incomplete: input.incomplete, departureNotice: input.departureNotice,
     pills: input.pills, pill: measure.id, range: query.range, rows, chart,
     next: ahead && gap !== null ? { memberId: ahead.person.memberId,
-      text: `${measure.format === "duration" && gap < 3600 ? `${formatNumber(gap / 60, "compact")} min` : friendAmount(gap, measure).text} to pass ${ahead.person.firstName}` } : null,
+      text: `${measure.format === "duration" && gap < 3600 ? `${formatNumber(gap / 60, "compact")} min` : friendAmount(gap, measure, input.units).text} to pass ${ahead.person.firstName}` } : null,
     shareAsk: (measure.id === "steps" || measure.id === "sleep") && input.shareAudience.length > 0,
     shareAudience: input.shareAudience };
 }
 
-export function friendAmount(value: number, measure: Pick<FriendMeasure, "id" | "format" | "noun">): Amount {
-  if (measure.format === "duration") return formatAmount(value, "seconds");
-  if (measure.format === "distance") return formatAmount(value, "meters");
+export function friendAmount(value: number, measure: Pick<FriendMeasure, "id" | "format" | "noun">, units: ClientUnits): Amount {
+  if (measure.format === "duration") return formatAmount(value, "seconds", "compact", units);
+  if (measure.format === "distance") return formatAmount(value, "meters", "compact", units);
   return { value, text: formatNumber(value, "compact"), unit: measure.id.split(".").at(-1)! };
 }
 

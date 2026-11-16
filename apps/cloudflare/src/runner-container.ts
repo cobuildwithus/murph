@@ -1035,7 +1035,7 @@ export class RunnerContainer extends Container {
         generation: payload.job.request.leaseGeneration,
         settledRunnerContainerName: target.slotName,
       });
-      if (recorded) await this.onRuntimeCompletionRecorded({
+      if (recorded.completed) await this.onRuntimeCompletionRecorded({
         attemptId: payload.job.request.attemptId,
         leaseGeneration: payload.job.request.leaseGeneration,
         userId: payload.userId,
@@ -1059,8 +1059,8 @@ export class RunnerContainer extends Container {
     const completed = await recordHostedRuntimeOwnerCompletion({
       source: this.environment, userId: input.userId, attemptId: input.attemptId, generation: input.generation,
     });
-    if (completed) await this.onRuntimeCompletionRecorded({ userId: input.userId, attemptId: input.attemptId, leaseGeneration: input.generation });
-    return completed ? { completed: true } : { completed: false, reason: "canonical_completion_rejected" };
+    if (completed.completed) await this.onRuntimeCompletionRecorded({ userId: input.userId, attemptId: input.attemptId, leaseGeneration: input.generation });
+    return completed;
   }
 
   async readSupervisedInvocation(input: { userId: string }): Promise<RunnerInvocationReceipt | null> {
@@ -2503,6 +2503,11 @@ export class RunnerContainer extends Container {
       && this.currentContainerStart !== null
     )
       && this.recordCurrentContainerStopped();
+    const expectedStop = cleanExit || (
+      params.exitCode === 137
+      && stopClassification === "requested-nonzero-stop"
+      && lifecycleDetails.destroyRequestReason === "invoke-completed"
+    );
     emitHostedExecutionStructuredLog({
       component: "container",
       details: {
@@ -2514,11 +2519,11 @@ export class RunnerContainer extends Container {
         stopClassification,
         stopReason: params.reason,
       },
-      level: cleanExit ? "info" : "warn",
-      message: cleanExit
+      level: expectedStop ? "info" : "warn",
+      message: expectedStop
         ? "Hosted execution container lifecycle hook reported stop."
         : "Hosted execution container lifecycle hook reported non-zero stop.",
-      phase: cleanExit ? "container.ready" : "failed",
+      phase: expectedStop ? "container.ready" : "failed",
       userId: context?.userId,
     });
   }

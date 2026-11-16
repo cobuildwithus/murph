@@ -9,6 +9,9 @@ import {
   verifyHostedExecutionVercelOidcBearerToken,
   verifyHostedExecutionVercelOidcRequest,
 } from "../src/auth-adapter.js";
+import { readHostedExecutionEnvironment } from "../src/env.ts";
+import { authorizeRoute } from "../src/worker/auth.ts";
+import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
 
 const TEST_TEAM_SLUG = "murph-team";
 const TEST_PROJECT_NAME = "murph-web";
@@ -28,6 +31,8 @@ const TEST_PUBLIC_JWK = {
 describe("cloudflare hosted execution auth adapter", () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   });
 
   it("reads bearer authorization tokens", () => {
@@ -107,9 +112,11 @@ describe("cloudflare hosted execution auth adapter", () => {
         validation: TEST_VALIDATION,
       }),
     ).resolves.toMatchObject({
-      aud: TEST_VALIDATION.audience,
-      iss: TEST_VALIDATION.issuer,
-      sub: TEST_VALIDATION.subject,
+      claims: {
+        aud: TEST_VALIDATION.audience,
+        iss: TEST_VALIDATION.issuer,
+        sub: TEST_VALIDATION.subject,
+      },
     });
   });
 
@@ -123,7 +130,7 @@ describe("cloudflare hosted execution auth adapter", () => {
         }),
         validation: TEST_VALIDATION,
       }),
-    ).resolves.toBeNull();
+    ).resolves.toMatchObject({ failure: "ERR_JWT_CLAIM_VALIDATION_FAILED:sub" });
   });
 
   it("verifies request authorization headers end to end", async () => {
@@ -140,8 +147,88 @@ describe("cloudflare hosted execution auth adapter", () => {
         validation: TEST_VALIDATION,
       }),
     ).resolves.toMatchObject({
-      sub: TEST_VALIDATION.subject,
+      claims: { sub: TEST_VALIDATION.subject },
     });
+  });
+
+  it.each([
+    ["ERR_JWT_EXPIRED:exp", { exp: 1 }],
+    ["ERR_JWT_CLAIM_VALIDATION_FAILED:nbf", { nbf: 9_999_999_999 }],
+    ["ERR_JWT_CLAIM_VALIDATION_FAILED:iss", { iss: "https://wrong-issuer.example.test" }],
+    ["ERR_JWT_CLAIM_VALIDATION_FAILED:aud", { aud: "wrong-audience" }],
+  ])("reports %s with the signed token's age", async (failure, overrides) => {
+    installOidcJwksFetch();
+    const issuedAt = Math.floor(Date.now() / 1000) - 600;
+    const result = await verifyHostedExecutionVercelOidcBearerToken({
+      token: createOidcToken({ iat: issuedAt, ...overrides }),
+      validation: TEST_VALIDATION,
+    });
+
+    expect(result).toEqual({ failure, issuedSecondsAgo: expect.any(Number) });
+    expect("issuedSecondsAgo" in result && result.issuedSecondsAgo).toBeGreaterThanOrEqual(600);
+  });
+
+  it.each([
+    ["missing_token", ""],
+    ["ERR_JWS_INVALID", "not-a-jwt"],
+  ])("reports %s for an unusable token", async (failure, token) => {
+    await expect(verifyHostedExecutionVercelOidcBearerToken({ token, validation: TEST_VALIDATION }))
+      .resolves.toEqual({ failure });
+  });
+
+  it("reports a bad signature without reading its claims", async () => {
+    installOidcJwksFetch();
+    const token = createOidcToken({ exp: 1 }).split(".");
+    token[2] = Buffer.alloc(256).toString("base64url");
+
+    await expect(verifyHostedExecutionVercelOidcBearerToken({
+      token: token.join("."),
+      validation: TEST_VALIDATION,
+    })).resolves.toEqual({ failure: "ERR_JWS_SIGNATURE_VERIFICATION_FAILED" });
+  });
+
+  it.each([
+    ["TypeError", () => { throw new TypeError("private network detail"); }],
+    ["ERR_JOSE_GENERIC", () => new Response("private upstream detail", { status: 503 })],
+    ["ERR_JWKS_NO_MATCHING_KEY", () => Response.json({ keys: [] })],
+  ] as const)("reports key-set failure %s without its message", async (failure, respond) => {
+    vi.stubGlobal("fetch", vi.fn(async () => respond()));
+
+    await expect(verifyHostedExecutionVercelOidcBearerToken({
+      token: createOidcToken(),
+      validation: { ...TEST_VALIDATION, jwksUrl: `https://jwks.example.test/${failure}` },
+    })).resolves.toEqual({ failure });
+  });
+
+  it("logs why the worker rejected an internal hand-off, without the token", async () => {
+    installOidcJwksFetch();
+    vi.stubEnv("MURPH_HOSTED_EXECUTION_STDIO_LOGS", "1");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const now = Math.floor(Date.now() / 1000);
+    const token = createOidcToken({ exp: now - 120, iat: now - 3_720 });
+
+    const response = await authorizeRoute("vercel-oidc", {
+      environment: {
+        ...readHostedExecutionEnvironment(createHostedExecutionTestEnv()),
+        vercelOidcValidation: TEST_VALIDATION,
+      },
+      request: new Request("https://worker.example.test/internal/device-webhooks/enqueue", {
+        headers: { authorization: `Bearer ${token}` },
+        method: "POST",
+      }),
+    }, "device-webhook-enqueue");
+
+    expect(response?.status).toBe(401);
+    await expect(response?.json()).resolves.toEqual({ error: "Unauthorized" });
+    expect(warn).toHaveBeenCalledOnce();
+    const log = JSON.parse(String(warn.mock.calls[0]?.[0]));
+    expect(log.details).toMatchObject({
+      reason: "vercel-oidc-verification-failed",
+      routeName: "device-webhook-enqueue",
+      verificationFailure: "ERR_JWT_EXPIRED:exp",
+    });
+    expect(Number(log.details.issuedSecondsAgo)).toBeGreaterThanOrEqual(3_720);
+    expect(JSON.stringify(log)).not.toContain(token);
   });
 });
 
@@ -166,6 +253,7 @@ function createOidcToken(
     exp: number;
     iat: number;
     iss: string;
+    nbf: number;
     sub: string;
   }> = {},
 ): string {

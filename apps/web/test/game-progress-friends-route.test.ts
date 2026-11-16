@@ -20,7 +20,8 @@ vi.mock("@/src/lib/game/progress/friend-sharing", () => ({ readFriendRooms: mock
 import { GET } from "../app/api/game/v1/progress/friends/route";
 import { friendsSchema } from "@/src/lib/game/progress/contract";
 
-const request = (query = "measure=pushups.reps") => new Request(`https://example.test/api/game/v1/progress/friends?${query}`);
+const request = (query = "measure=pushups.reps", units = "us") => new Request(`https://example.test/api/game/v1/progress/friends?${query}`,
+  { headers: { "X-Murph-Client-Units": units } });
 const game = (id: string, memberIds: string[]) => ({ id, wordsOwnerMemberId: memberIds[0],
   terms: { v: 1, versions: [{ n: 1, fromDay: 0, schedule: { count: 7 }, stakes: [] }] },
   termsWordsEncrypted: JSON.stringify({ v: 1, versions: [{ n: 1, tasks: memberIds.map((_, seat) => ({ seat, text: "40 pushups daily" })), stakes: [] }] }),
@@ -60,6 +61,17 @@ it("counts a friend's other games, merges same-day amounts and counts a retake o
   expect(mocks.games.mock.calls[0][0].where.players.some).toEqual({ memberId: { in: ["ava", "leo"] } });
   expect(mocks.settle.mock.calls[0][1]).toEqual([expect.objectContaining({ kind: "friend", subjectMemberId: "leo", on: "2026-11-02" })]);
   expect(response.headers.get("cache-control")).toBe("private, no-store");
+});
+
+it.each([["us", "1 mi"], ["metric", "1.6 km"]])("renders ranked distance and gaps in requested %s units", async (units, text) => {
+  mocks.entries.mockResolvedValue(["ava", "leo"].map((memberId, index) => ({
+    ...entry(memberId, "shared", memberId, 0, 0), kind: "route",
+    payloadEncrypted: JSON.stringify({ activity: "walk", distanceM: 1609.344 * (index + 1), durationS: 1800, polyline: "" }),
+  })));
+  const body = friendsSchema.parse(await (await GET(request("measure=walk.meters", units))).json());
+  expect(body.rows.find(row => row.me)?.total).toEqual({ value: 1609.344, unit: "meters", text });
+  expect(body.next).toEqual({ memberId: "leo", text: `${text} to pass Leo` });
+  expect(body.chart.find(line => line.memberId === "ava")?.points).toEqual([["2026-11-01", 1609.344]]);
 });
 
 it.each(["games", "entries"])("marks a capped %s input incomplete and settles nothing", async cap => {

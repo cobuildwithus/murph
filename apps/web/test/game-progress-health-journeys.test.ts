@@ -37,14 +37,14 @@ it("uses Sleep's curated time ladder, dates every crossing, and preserves passed
   const journeys = await prepare([metric("sleep", 8 * 3600)]);
   const awards = saved(journeys.candidates);
   const timeAwards = awards.filter(award => award.kind === "time");
-  expect(timeAwards.map(award => award.data.title)).toEqual(ladder("time", "sleep").filter(entry => entry.at <= 27 * 8 * 3600).map(entry => entry.name));
+  expect(timeAwards.map(award => medalView(award, false, "us").title)).toEqual(ladder("time", "sleep").filter(entry => entry.at <= 27 * 8 * 3600).map(entry => entry.name));
   expect(timeAwards[0].on).toBe(joinedOn);
-  const view = measureSchema.parse(healthJourneyViews(journeys, awards, today)[0]);
+  const view = measureSchema.parse(healthJourneyViews(journeys, awards, today, "us")[0]);
   expect(view).toMatchObject({ id: "sleep", source: "wearable", total: { value: 777600, text: "9 days", unit: "seconds" }, ladder: { kind: "time" }, route: null });
-  expect(view.projection).toEqual(projection(journeys.measures[0], today));
+  expect(view.projection).toEqual(projection(journeys.measures[0], today, "us"));
   expect(view.projection).toHaveProperty("on", null);
   const corrected = await prepare([{ ...metric("sleep", 1), daily: [] }], new Map(), awards);
-  expect(healthJourneyViews(corrected, awards, today)[0].ladder?.passed).toEqual(view.ladder?.passed);
+  expect(healthJourneyViews(corrected, awards, today, "us")[0].ladder?.passed).toEqual(view.ladder?.passed);
   expect(mocks.resolve).not.toHaveBeenCalled();
 });
 
@@ -54,7 +54,7 @@ it("composes settled Steps into an about-miles route without mixing measured wal
   expect(before).toHaveBeenCalledWith({ transaction: true });
   const routeAward = journeys.candidates.find(award => award.kind === "route")!;
   expect(routeAward.on).toBe("2026-11-09");
-  const view = measureSchema.parse(healthJourneyViews(journeys, saved(journeys.candidates), today)[0]);
+  const view = measureSchema.parse(healthJourneyViews(journeys, saved(journeys.candidates), today, "us")[0]);
   expect(view.total).toEqual({ value: 27000, text: "27,000", unit: "steps" });
   expect(view.route).toMatchObject({ walkedText: "about 10 mi", progress: 1, goalPicked: false, finishedOn: "2026-11-09" });
   expect(view.route?.map).toContain("measure=steps");
@@ -62,9 +62,9 @@ it("composes settled Steps into an about-miles route without mixing measured wal
 });
 
 it("a route selected during the first resolution wins over the default", async () => {
-  mocks.previous = { legs: [{ ...leg, from: "C", to: "D" }], goal: { from: "C", to: "D" } };
+  mocks.previous = { legs: [{ ...leg, from: "C", to: "D" }], goal: { route: { from: "C", to: "D" } } };
   const journeys = await prepare([metric("steps", 10)]);
-  expect(healthJourneyViews(journeys, [], today)[0].route).toMatchObject({ name: "C to D", goalPicked: true });
+  expect(healthJourneyViews(journeys, [], today, "us")[0].route).toMatchObject({ name: "C to D", goalPicked: true });
 });
 
 it("reuses frozen geometry without another provider call", async () => {
@@ -82,5 +82,5 @@ it("new health, friend and route awards decode through the shared medal view", a
     { memberId: "leo", firstName: "Leo", avatarUrl: null, me: false, invited: false, joinedOn, daily: [{ date: today, amount: 50 }] },
   ] });
   const routes = (await prepare([metric("steps", 1000)])).candidates;
-  for (const award of saved([...health, ...friends, ...routes])) expect(medalSchema.safeParse(medalView(award, false)).success).toBe(true);
+  for (const award of saved([...health, ...friends, ...routes])) expect(medalSchema.safeParse(medalView(award, false, "us")).success).toBe(true);
 });

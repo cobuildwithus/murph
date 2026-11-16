@@ -18,7 +18,7 @@ it.each(readdirSync(directory).filter(name => name.startsWith("friends-")))("ren
       me: row.me, invited: row.invited, joinedOn: row.joinedOn, daily };
   });
   const pill = expected.pills.find(pill => pill.id === expected.pill)!;
-  expect(friendsView({ people, measure: { ...pill, noun: pill.label.toLowerCase(),
+  expect(friendsView({ units: "us", people, measure: { ...pill, noun: pill.label.toLowerCase(),
     format: pill.id.endsWith(".seconds") || pill.id === "sleep" ? "duration" : "count" },
   pills: expected.pills, query: { measure: pill.id, range: expected.range }, today,
   shareAudience: expected.shareAudience, incomplete: false, departureNotice: expected.departureNotice })).toEqual(expected);

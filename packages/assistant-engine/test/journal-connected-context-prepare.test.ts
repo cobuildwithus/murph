@@ -1,8 +1,10 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { deleteEvent, initializeVault, upsertAutomation, upsertEvent } from '@murphai/core'
 import type { HostedConnectedAppsRequest } from '@murphai/hosted-execution/connected-apps'
+import { parseHostedRuntimeIssueExportRequest } from '@murphai/hosted-execution/parsers'
+import { listPendingAssistantRuntimeIssueRecords } from '@murphai/runtime-state/node'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { prepareJournalConnectedContext, journalSourceAliases, journalSourceId } from '../src/assistant/journal-connected-context-prepare.js'
 import { canSkipManagedJournalConnectedContext } from '../src/assistant/journal-connected-context-eligibility.js'
@@ -11,6 +13,7 @@ import * as ledger from '../src/assistant/journal-connected-context-ledger.js'
 import { MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID } from '../src/assistant/managed-automations.js'
 import { buildKnowledgePageRelativePath } from '../src/knowledge/documents.js'
 import { getKnowledgePage, upsertKnowledgePage } from '../src/knowledge/service.js'
+import { recordAssistantRuntimeIssue } from '../src/assistant/issue-reporting.js'
 import { createConnectedReadBudget, listConnectedCalendars, normalizeConnectedCalendarEvent, parseCalendarPage, readConnectedCalendarWindow, type ConnectedRead } from '../src/assistant/connected-calendar-read.js'
 import { buildJournalMailQueries, journalMailWindows, readJournalMail } from '../src/assistant/journal-mail-match.js'
 import { resolveMurphDynamicTools } from '../src/assistant-codex/dynamic-tool-catalog.js'
@@ -282,7 +285,7 @@ describe('prepared Journal acquisition', () => {
     expect(rows[0].coverage[0].coverage).toBe('partial')
     expect(rows.slice(1).map(item => item.id).sort()).toEqual(['after', 'before', 'later'])
     expect(prepared.issues).toHaveLength(1)
-    expect(prepared.issues[0]?.details).toEqual({ failureReason: 'shape_mismatch', structuralKeys: ['end', 'id', 'start'] })
+    expect(prepared.issues[0]?.details).toEqual({ failureReason: 'shape_mismatch', failureStage: 'calendar_events', toolkit: provider, structuralKeys: ['end', 'id', 'start'] })
   })
 
   it('global opt-out performs zero connected calls but retains active and paused reminder admission', async () => {
@@ -304,8 +307,86 @@ describe('prepared Journal acquisition', () => {
     const request = vi.fn(defaultRead)
     const prepared = await prepare(request)
     expect(request).not.toHaveBeenCalled()
-    expect(prepared.issues[0]?.details).toEqual({ failureReason: 'policy_unreadable' })
+    expect(prepared.issues[0]?.details).toEqual({ failureReason: 'policy_unreadable', failureStage: 'policy', failedCheck: 'json' })
     expect((await getKnowledgePage({ vault: vaultRoot, slug: 'journal-connected-context' })).page.body).toContain('{broken')
+  })
+
+  // Every format the old journal-connected-context skill or this code wrote
+  // through the Knowledge service, each with a provider opt-out.
+  const controls = (calendars: boolean) => JSON.stringify({ version: 1, optOuts: { global: false, accounts: [], providers: ['gmail'], categories: [],
+    ...(calendars ? { calendars: [] } : {}) }, activeAccounts: [] })
+  it.each([
+    ['skill control line before calendar opt-outs', `${controls(false)}\n\n## Sources\n\n[]`],
+    ['skill control line with calendar opt-outs', `${controls(true)}\n\n## Sources\n\n[]`],
+    ['skill body that repeats the page heading', `# Journal connected context\n\n${controls(true)}\n\n## Sources\n\n[]`],
+    ['code-written control line', controls(true)],
+    ['legacy object with inline sources', JSON.stringify({ ...JSON.parse(controls(false)), sources: [{ accountId: 'a', sourceId: 's', eventId: 'e', revision: 1 }] }, null, 2)],
+  ])('reads the %s and honours its opt-out', async (_format, body) => {
+    await upsertKnowledgePage({ vault: vaultRoot, slug: 'journal-connected-context', body })
+    const request = vi.fn(defaultRead)
+    const prepared = await prepare(request)
+    expect(await readConnectedContextPolicyState(vaultRoot)).toMatchObject({ kind: 'readable', policy: { optOuts: { providers: ['gmail'] } } })
+    expect(request.mock.calls.map(([r]) => r.operation)).toEqual(['manage'])
+    expect(prepared).toMatchObject({ admission: 'empty', issues: [] })
+  })
+
+  // Opt-out shapes not fully known stay unreadable: no connected call, and the
+  // issue names the failed check and schema paths, never page values.
+  const page = async (attributes: string, body: string) => {
+    const file = path.join(vaultRoot, buildKnowledgePageRelativePath('journal-connected-context'))
+    await mkdir(path.dirname(file), { recursive: true })
+    await writeFile(file, `---\n${attributes}\n---\n\n# Journal connected context\n\n${body}\n`)
+  }
+  it.each([
+    ['first-skill free-form list', () => upsertKnowledgePage({ vault: vaultRoot, slug: 'journal-connected-context',
+      body: '- account: PRIVATE-account\n  toolkit: gmail\n  state: notice-sent' }), { failedCheck: 'json' }],
+    ['object without controls', () => save({ accounts: [{ id: 'PRIVATE-account', toolkit: 'gmail', state: 'baseline' }] }),
+      { failedCheck: 'schema', structuralKeys: ['activeAccounts', 'optOuts', 'version'] }],
+    ['partial controls', () => save({ version: 1, optOuts: { global: false, accounts: 'PRIVATE' }, activeAccounts: [] }),
+      { failedCheck: 'schema', structuralKeys: ['optOuts.accounts', 'optOuts.categories', 'optOuts.providers'] }],
+    ['inactive page', () => upsertKnowledgePage({ vault: vaultRoot, slug: 'journal-connected-context', status: 'archived', body: controls(true) }), { failedCheck: 'status' }],
+    ['page under another slug', () => page('slug: PRIVATE-slug\nstatus: active', controls(true)), { failedCheck: 'slug' }],
+    ['broken frontmatter', () => page('slug: "PRIVATE', controls(true)), { failedCheck: 'frontmatter' }],
+    ['legacy object past the read cap', () => save({ ...JSON.parse(controls(true)), sources: Array.from({ length: 2000 }, (_, i) => ({ accountId: 'a', sourceId: `PRIVATE-${i}`, eventId: 'e' })) }),
+      { failedCheck: 'size' }],
+  ])('fails closed on a %s', async (_format, write, diagnostic) => {
+    await write()
+    const request = vi.fn(defaultRead)
+    const prepared = await prepare(request)
+    expect(request).not.toHaveBeenCalled()
+    expect(prepared.issues.map(issue => issue.details)).toEqual([{ failureReason: 'policy_unreadable', failureStage: 'policy', ...diagnostic }])
+    expect(JSON.stringify(prepared.issues)).not.toContain('PRIVATE')
+  })
+
+  it('names the stage, toolkit and safe upstream cause, and the issue sink keeps them', async () => {
+    const upstream = (code: string, status: number) => Object.assign(new Error('PRIVATE message'), { code, status, detail: 'PRIVATE detail' })
+    await save({ ...emptyConnectedContextPolicy(), optOuts: { global: false, accounts: 'PRIVATE' } })
+    const policy = await prepare()
+    await save(emptyConnectedContextPolicy())
+    const inventory = await prepare(async () => { throw upstream('CONNECTED_APPS_PROVIDER_UNAVAILABLE', 503) })
+    const accounts = await prepare(async request => {
+      if (request.operation === 'manage') return { result: { accounts: [account('gmail', 'a-mail'), account('googlecalendar', 'b-list'), account('googlecalendar', 'c-capped')], toolkits: [] } }
+      if (request.operation !== 'read') throw new Error('Forbidden lane')
+      if (request.input.account === 'a-mail') throw upstream('PRIVATE free text code', 502)
+      if (request.input.account === 'b-list') throw upstream('CONNECTED_APPS_RESULT_TOO_LARGE', 413)
+      if (request.input.toolSlug === 'GOOGLECALENDAR_LIST_CALENDARS') return envelope({ items: [{ id: 'owned', accessRole: 'owner' }] })
+      return envelope({ items: [event(`page-${String(request.input.arguments.pageToken)}`)], nextPageToken: `after-${String(request.input.arguments.pageToken)}` })
+    })
+    const issues = [...policy.issues, ...inventory.issues, ...accounts.issues]
+    expect(issues.map(issue => issue.details)).toEqual([
+      { failureReason: 'policy_unreadable', failureStage: 'policy', failedCheck: 'schema', structuralKeys: ['optOuts.accounts', 'optOuts.categories', 'optOuts.providers'] },
+      { failureReason: 'read_failed', failureStage: 'inventory', upstreamCode: 'CONNECTED_APPS_PROVIDER_UNAVAILABLE', upstreamStatus: 503 },
+      { failureReason: 'read_failed', failureStage: 'mail', toolkit: 'gmail', upstreamStatus: 502 },
+      { failureReason: 'read_failed', failureStage: 'calendar_list', toolkit: 'googlecalendar', upstreamCode: 'CONNECTED_APPS_RESULT_TOO_LARGE', upstreamStatus: 413 },
+      { failureReason: 'coverage_cap', failureStage: 'calendar_events', toolkit: 'googlecalendar' },
+    ])
+    expect(JSON.stringify(issues)).not.toContain('PRIVATE')
+    // The same record the hosted export and Web import persist as details_json.
+    const diagnostics = { environment: 'hosted' as const, surface: null, privateIssueCaptureEnabled: true }
+    for (const issue of issues) await recordAssistantRuntimeIssue({ issue, policy: diagnostics, vault: vaultRoot })
+    const exported = parseHostedRuntimeIssueExportRequest({ issues: await listPendingAssistantRuntimeIssueRecords({ vault: vaultRoot }) })
+    const sorted = (rows: unknown[]) => rows.map(row => JSON.stringify(row)).sort()
+    expect(sorted(exported.issues.map(issue => issue.details))).toEqual(sorted(issues.map(issue => issue.details)))
   })
 
   it('finishes stalled preparation with failed coverage and reminder admission', async () => {
@@ -318,7 +399,7 @@ describe('prepared Journal acquisition', () => {
     const prepared = await pending
     expect(prepared.admission).toBe('run')
     expect(prepared.instructions).toContain('"coverage":"failed"')
-    expect(prepared.issues).toEqual([expect.objectContaining({ details: { failureReason: 'deadline' } })])
+    expect(prepared.issues).toEqual([expect.objectContaining({ details: { failureReason: 'deadline', failureStage: 'inventory' } })])
     expect(vi.getTimerCount()).toBe(0)
   })
 
@@ -336,7 +417,8 @@ describe('prepared Journal acquisition', () => {
       if (request.operation === 'manage') return defaultRead(request)
       throw Object.assign(new Error('PRIVATE ERROR'), { status: 400, code })
     })
-    expect(prepared.issues[0]?.details?.failureReason).toBe(code === 'CONNECTED_APPS_REQUEST_INVALID' ? 'old_web' : 'read_failed')
+    expect(prepared.issues[0]?.details).toEqual({ failureReason: code === 'CONNECTED_APPS_REQUEST_INVALID' ? 'old_web' : 'read_failed',
+      failureStage: 'mail', toolkit: 'gmail', upstreamCode: code, upstreamStatus: 400 })
   })
 
   it('one failed account leaves successful accounts processed and reports only structural schema keys', async () => {
@@ -347,7 +429,7 @@ describe('prepared Journal acquisition', () => {
     })
     expect(candidates(prepared.instructions)[0].coverage).toMatchObject([{ accountId: 'bad', coverage: 'failed' }, { accountId: 'good', coverage: 'complete' }])
     expect(prepared.instructions).toContain('gmail:good:mail:mail-1')
-    expect(prepared.issues[0]?.details).toEqual({ failureReason: 'shape_mismatch', structuralKeys: ['messages'] })
+    expect(prepared.issues[0]?.details).toEqual({ failureReason: 'shape_mismatch', failureStage: 'mail', toolkit: 'gmail', structuralKeys: ['messages'] })
     expect(JSON.stringify(prepared.issues)).not.toMatch(/privateUnexpected|SECRET|not an array/)
   })
 

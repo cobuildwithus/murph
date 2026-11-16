@@ -356,6 +356,30 @@ describe("completion client, router, and native receipt composition", () => {
     expectCompletionLog("warn", false, reason, canonicalRejected);
   });
 
+  it.each([
+    { owner: { phase: "idle", attemptId: null, completedAt: COMPLETED_AT }, reason: "already_completed", level: "info" },
+    { owner: { generation: "8", attemptId: "attempt_successor" }, reason: "superseded", level: "info" },
+    { owner: { phase: "idle", attemptId: null, completedAt: null }, reason: "canonical_completion_rejected", level: "warn" },
+    { owner: { phase: "retiring", completedAt: null }, reason: "canonical_completion_rejected", level: "warn" },
+    { owner: {}, reason: "canonical_completion_rejected", level: "warn" },
+  ] as const)("classifies a post-routing canonical race as $reason ($level)", async ({ owner, reason, level }) => {
+    const f = createRoutedCompletion();
+    vi.mocked(commandHostedRuntimeOwner).mockImplementation(async ({ command }) => {
+      if (command.operation === "reconcile") return f.state;
+      if (command.operation === "complete") return {
+        cutover: "postgres", status: "stale", owner: { ...f.owner, ...owner },
+      };
+      throw new Error("Unexpected synthetic completion command.");
+    });
+    await recordHostedContainerRuntimeCompletionBestEffort({ ...f.input, fetchImpl: f.fetchImpl });
+    expect(f.responses).toEqual([{ completed: false, reason }]);
+    expectCompletionLog(level, false, reason, true);
+    expect(f.recorded).not.toHaveBeenCalled();
+    expect(f.receipts.read()).toMatchObject({ ...f.identity, state: "completed" });
+    expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([call]) => call.command.operation))
+      .toEqual(["reconcile", "complete"]);
+  });
+
   it.each(["binding", "RPC"])("warns when the native %s is unavailable", async (missing) => {
     const f = createRoutedCompletion();
     if (missing === "binding") f.env.RUNNER_CONTAINER = undefined;

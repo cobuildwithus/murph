@@ -1,0 +1,43 @@
+{
+  "status": "completed",
+  "output_text": "{\"found\": {\"name\": \"Synthetic Tower\", \"short\": \"Synthetic Tower\", \"tagline\": \"A tower above the rooftops\", \"value\": 304.8, \"where\": \"Sample Town\", \"blurb\": \"A tower above the old town.\", \"sourceUrl\": \"https://facts.example.test/tower\"}, \"closest\": [], \"note\": null}",
+  "output": [
+    {
+      "id": "search-synthetic",
+      "type": "web_search_call",
+      "status": "completed",
+      "action": {
+        "type": "search",
+        "query": "Synthetic Tower height",
+        "sources": [
+          {
+            "type": "url",
+            "url": "https://facts.example.test/tower"
+          }
+        ]
+      }
+    },
+    {
+      "id": "message-synthetic",
+      "type": "message",
+      "role": "assistant",
+      "status": "completed",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "{\"found\": {\"name\": \"Synthetic Tower\", \"short\": \"Synthetic Tower\", \"tagline\": \"A tower above the rooftops\", \"value\": 304.8, \"where\": \"Sample Town\", \"blurb\": \"A tower above the old town.\", \"sourceUrl\": \"https://facts.example.test/tower\"}, \"closest\": [], \"note\": null}",
+          "annotations": [
+            {
+              "type": "url_citation",
+              "url": "https://facts.example.test/tower",
+              "title": "Synthetic tower facts",
+              "start_index": 201,
+              "end_index": 233
+            }
+          ],
+          "logprobs": []
+        }
+      ]
+    }
+  ]
+}

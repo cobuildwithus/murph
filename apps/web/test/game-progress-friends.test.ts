@@ -6,7 +6,7 @@ const person = (memberId: string, firstName: string, amount: number, me = false)
   memberId, firstName, avatarUrl: null, me, invited: false, joinedOn: "2026-10-21",
   daily: [{ date: "2026-11-01", amount }],
 });
-const view = (people: FriendSeries[]) => friendsView({ people, measure, pills: [measure],
+const view = (people: FriendSeries[]) => friendsView({ units: "us", people, measure, pills: [measure],
   query: { measure: measure.id, range: "month" }, today: "2026-11-16", shareAudience: [], incomplete: false, departureNotice: null });
 
 it("competition ranks ties 1, 2, 2, 4", () => {
@@ -33,7 +33,7 @@ it("a private friend has no rank, amount, line or gap", () => {
 it.each(["pushups.reps", "steps", "sleep"])("charts every ranked person for %s", id => {
   const people = [person("sam", "Sam", 120), person("maya", "Maya", 110), person("leo", "Leo", 100),
     person("ava", "Ava", 90, true), person("jordan", "Jordan", 80), person("priya", "Priya", 70)];
-  const result = friendsView({ people, measure: { ...measure, id }, pills: [], query: { measure: id, range: "month" },
+  const result = friendsView({ units: "us", people, measure: { ...measure, id }, pills: [], query: { measure: id, range: "month" },
     today: "2026-11-16", shareAudience: [], incomplete: false, departureNotice: null });
   expect(result.chart).toEqual(people.map(person => ({ memberId: person.memberId,
     points: [["2026-11-01", person.daily![0].amount]] })));
@@ -59,7 +59,7 @@ it("filters the drawer's dates without changing the all-time award input", () =>
     { date: "2026-10-30", amount: 1000 }, { date: "2026-11-01", amount: 900 }, { date: "2026-11-16", amount: 100 },
   ] };
   const people = [me, person("leo", "Leo", 700), person("sam", "Sam", 900)];
-  const result = friendsView({ people, measure, pills: [measure], query: { measure: measure.id, range: "week", with: "leo" },
+  const result = friendsView({ units: "us", people, measure, pills: [measure], query: { measure: measure.id, range: "week", with: "leo" },
     today: "2026-11-16", shareAudience: [], incomplete: false, departureNotice: null });
   expect(result.rows.map(row => [row.memberId, row.total?.value])).toEqual([["ava", 100], ["leo", 0]]);
   expect(result.chart).toEqual([{ memberId: "ava", points: [["2026-11-16", 100]] }, { memberId: "leo", points: [] }]);
@@ -67,6 +67,6 @@ it("filters the drawer's dates without changing the all-time award input", () =>
 });
 
 it("formats route distance in miles while retaining canonical meters", () => {
-  expect(friendAmount(3218.688, { id: "walk.meters", format: "distance", noun: "walked" }))
+  expect(friendAmount(3218.688, { id: "walk.meters", format: "distance", noun: "walked" }, "us"))
     .toEqual({ value: 3218.688, text: "2 mi", unit: "meters" });
 });

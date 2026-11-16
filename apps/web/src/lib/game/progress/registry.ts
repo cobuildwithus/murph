@@ -1,6 +1,7 @@
 import type { GameRepsData, GameRouteData } from "../contract";
 import type { Day } from "./contract";
-import type { MedalFace, Rung } from "./contract";
+import type { RungDefinition } from "./bank";
+import type { MeasureSeries } from "./series";
 import { ladderRungs, roundTotals, streakRuns } from "./achievements";
 import { routeLegs } from "./route-progress";
 import type { RouteLeg } from "./state";
@@ -54,10 +55,10 @@ export type Achievement<Context> = (context: Context) => Candidate[];
 
 export interface AchievementContext {
   measures: readonly {
-    id: string; pending: boolean; unit: string; noun: string;
+    id: string; pending: boolean; unit: MeasureSeries["unit"]; noun: string;
     points: readonly [Day, number][];
-    rounds: readonly { at: number; face: MedalFace; title: string; detail: string }[];
-    rungs: readonly Rung[];
+    rounds: readonly number[];
+    rungs: readonly RungDefinition[];
     legs: readonly RouteLeg[];
   }[];
   days: readonly { date: Day; done: boolean; ended: boolean }[];

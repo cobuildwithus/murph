@@ -282,7 +282,9 @@
             "blurb": "The highest mountain on Earth, first climbed by Edmund Hillary and Tenzing Norgay in 1953.",
             "where": "Nepal / China",
             "on": "2026-10-16",
-            "toGo": null
+            "toGo": null,
+            "short": "Mount Everest",
+            "tagline": "The highest summit on Earth"
           },
           {
             "id": "k2",
@@ -293,7 +295,9 @@
             "blurb": "The second highest mountain on Earth, in Pakistan, known as the \"Savage Mountain.\"",
             "where": "Pakistan / China",
             "on": "2026-10-06",
-            "toGo": null
+            "toGo": null,
+            "short": "K two",
+            "tagline": "A steep summit in the Karakoram"
           },
           {
             "id": "denali",
@@ -304,7 +308,9 @@
             "blurb": "The highest mountain in North America, in Alaska's Denali National Park.",
             "where": "Alaska, USA",
             "on": "2026-05-30",
-            "toGo": null
+            "toGo": null,
+            "short": "Denali",
+            "tagline": "A great summit above the wilderness"
           },
           {
             "id": "skydive",
@@ -315,7 +321,9 @@
             "blurb": "A tandem skydive starts about two and a half miles above the ground.",
             "where": "Drop zones everywhere",
             "on": "2026-01-31",
-            "toGo": null
+            "toGo": null,
+            "short": "A skydive",
+            "tagline": "A long way down to solid ground"
           },
           {
             "id": "cumulus-clouds",
@@ -326,7 +334,9 @@
             "blurb": "The puffy white fair-weather clouds that look like floating cotton balls.",
             "where": "Overhead on a fair day",
             "on": "2025-08-24",
-            "toGo": null
+            "toGo": null,
+            "short": "Puffy cumulus clouds",
+            "tagline": "The soft clouds overhead"
           }
         ],
         "next": {
@@ -338,7 +348,9 @@
           "blurb": "The height where passenger jets usually cruise, about 6 to 7 miles up.",
           "where": "Anywhere overhead",
           "on": null,
-          "toGo": "3,760 to go"
+          "toGo": "3,760 to go",
+          "short": "Where jets fly",
+          "tagline": "High above the clouds"
         },
         "goalPicked": false
       },
