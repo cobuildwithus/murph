@@ -65,8 +65,10 @@ async function executeIdentityCommand(input: Omit<CommandInput, "command"> & { c
       return mutated(await recordHostedRuntimeAccepted({ prisma, identity }));
     case "record_failure":
       return mutated(await recordHostedRuntimeFailure({ prisma, identity, errorCode: command.errorCode }));
-    case "complete":
-      return mutated(await completeHostedRuntime({ prisma, identity, settledRunnerContainerName: command.settledRunnerContainerName }));
+    case "complete": {
+      const result = await completeHostedRuntime({ prisma, identity, settledRunnerContainerName: command.settledRunnerContainerName });
+      return { ...mutated(result.applied), owner: result.owner };
+    }
     case "retire":
       return mutated(await retireHostedRuntime({ prisma, identity, completed: command.completed }));
     case "release":

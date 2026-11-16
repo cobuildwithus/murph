@@ -298,6 +298,13 @@ receipt and either a settled native invocation or an inactive runtime fence
 proved during reconciliation. Successful release retains the member's
 warm target. Failed or ambiguous retirement requires exact native stop proof
 before clearing its assignment. Bound slots never return to shared inventory.
+Rejected completion commands return the already-locked owner snapshot. The
+callback uses that snapshot to classify a released, completed generation or a
+newer generation as obsolete, including when release races its routing read.
+Only those proven obsolete callbacks log at info; unknown or cold-retirement
+rejections remain warnings. The receipt remains `completed: false` and grants
+no cleanup or delivery authority. Older Web responses omit the snapshot and
+retain the warning; either deployment order is compatible.
 Without a completed native invocation receipt, idle cleanup first checks native
 status, active jobs, and the trusted conversation receipt deadline. Those local
 vetoes need no owner callback; a future receipt deadline schedules cleanup directly
