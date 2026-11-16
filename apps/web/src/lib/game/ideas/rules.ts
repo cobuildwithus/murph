@@ -41,3 +41,23 @@ export const stakeQuestion = (kind: "prize" | "dare", text: string) =>
 export const DARE_INPUT = 'Two people made a week-long bet in a health challenge app. The loser has to do a dare.';
 export const dareQuestion = (text: string) =>
   `Is "${text}" something the loser does themselves, like a hard workout, giving something up, friendly embarrassment or doing some good, rather than a favor or service for the winner such as cooking, cleaning, buying, driving or doing chores for them?`;
+
+export const ACTIVITY_BAR = 0.5;
+export const activityQuestion = (text: string) => `Which activity is "${text}"?`;
+export const ACTIVITY_CHOICES = [
+  { value: 'walking', description: 'walking or hiking' },
+  { value: 'running', description: 'running or jogging' },
+  { value: 'cycling', description: 'cycling or a spin class' },
+  { value: 'swimming', description: 'swimming, or time in a pool or water park' },
+  { value: 'yoga', description: 'yoga' },
+  { value: 'dance', description: 'dancing' },
+  { value: 'pilates', description: 'pilates' },
+  { value: 'lifting', description: 'lifting weights' },
+  { value: 'stretching', description: 'stretching, mobility or foam rolling' },
+  { value: 'climbing', description: 'rock climbing or bouldering' },
+  { value: 'rowing', description: 'rowing' },
+  { value: 'golf', description: 'golf, mini golf or disc golf' },
+  { value: 'water', description: 'surfing, kayaking, paddleboarding, boating or a day at the beach' },
+  { value: 'exercise', description: 'another workout or exercise, like pushups, planks, stairs, tai chi, martial arts, a class or a sport' },
+  { value: 'none', description: 'not one activity: a treat, a trip, a habit, a chore or anything else' },
+];

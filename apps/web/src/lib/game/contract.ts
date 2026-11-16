@@ -1,3 +1,4 @@
+export { GAME_ACTIVITIES, type GameActivity } from "@murphai/hosted-execution/runtime-control";
 import type { GameRecapPresentation } from "@murphai/contracts/recap-show";
 /**
  * The weekly game's wire contract: the request bodies of the /api/game/v1
@@ -113,6 +114,8 @@ export interface GameInviteeLabel {
 
 /** PUT /me/profile */
 export interface SetProfileBody {
+  /** Whole list; omitted keeps it, [] clears it. */
+  notForMe?: string[];
   firstName?: string;
   timeZone?: string;
   /** Omitted keeps the current photo; null removes it. Must be your own upload. */
@@ -126,6 +129,7 @@ export interface SetPlayerPhotoBody {
 }
 
 export interface GameProfileView {
+  notForMe: string[];
   memberId: string;
   firstName: string;
   timeZone: string;
@@ -359,6 +363,7 @@ export interface GamePermissions {
 }
 
 export interface GamePlayerView {
+  notForMe?: string[];
   participation?: GameParticipationView;
   memberId: string | null;
   seat: number;
@@ -534,7 +539,7 @@ export interface GameView {
 
 export interface GameHomeView {
   canStartGroups?: boolean;
-  me: { memberId: string; firstName: string | null; timeZone: string | null; avatarUrl: string | null; usualKind?: GameEntryKind | null;
+  me: { notForMe: string[]; memberId: string; firstName: string | null; timeZone: string | null; avatarUrl: string | null; usualKind?: GameEntryKind | null;
     /** Caller-only verified NANP area-code hint. Missing means unknown. */
     areaCode?: string };
   /** Whether the global game switch is on. Older apps ignore it. */
@@ -577,6 +582,7 @@ export interface GameHistoryGroupView {
 }
 
 export interface GameHistoryPersonView {
+  notForMe?: string[];
   memberId: string;
   firstName: string;
   avatarUrl?: string;

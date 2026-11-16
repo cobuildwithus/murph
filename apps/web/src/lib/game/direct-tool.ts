@@ -1,6 +1,6 @@
 import "server-only";
 
-import type { HostedGameToolRequest, HostedGameToolResponse } from "@murphai/hosted-execution/runtime-control";
+import { GAME_ACTIVITIES, type HostedGameToolRequest, type HostedGameToolResponse } from "@murphai/hosted-execution/runtime-control";
 import { isHostedLinqConversationMessageWake, isHostedTelegramConversationMessageWake } from "@murphai/hosted-execution";
 import type { HostedRuntimeIdentity } from "../hosted-execution/runtime-owner";
 import { requireHostedRuntimeCallbackTx } from "../hosted-execution/runtime-owner";
@@ -15,7 +15,7 @@ import { readGame, readGameReminders, runGameCommand } from "./service";
 
 type Request = Extract<HostedGameToolRequest, { action: "my_game_reminders" }>;
 
-async function authorize(memberId: string, runtimeIdentity: HostedRuntimeIdentity | null, request: Request): Promise<boolean> {
+async function authorize(memberId: string, runtimeIdentity: HostedRuntimeIdentity | null, request: Extract<HostedGameToolRequest, { action: "my_game_reminders" | "my_game_not_for_me" }>): Promise<boolean> {
   const db = getPrisma();
   await db.$transaction(async tx => {
     await requireHostedRuntimeCallbackTx(tx, memberId, runtimeIdentity);
@@ -102,4 +102,26 @@ async function setMyGameReminders(input: { memberId: string; runtimeIdentity: Ho
     push: input.request.push ?? current.push, text: input.request.text ?? current.text,
     offGameIds: [...off], everyDayGameIds: [...everyDay] } });
   return saved.ok ? null : { action: "my_game_reminders", result: { status: "rejected", error: saved.error.message.slice(0, 128) } };
+}
+
+export async function handleMyGameNotForMeTool(input: {
+  memberId: string; runtimeIdentity: HostedRuntimeIdentity | null;
+  request: Extract<HostedGameToolRequest, { action: "my_game_not_for_me" }>;
+}): Promise<HostedGameToolResponse> {
+  const action = "my_game_not_for_me";
+  if (!await authorize(input.memberId, input.runtimeIdentity, input.request)) {
+    return { action, result: { status: "unavailable", error: "Not for me requires your current direct message." } };
+  }
+  if (input.request.operation === "set") {
+    const saved = await runGameCommand({ actorMemberId: input.memberId, beforeMutationTx: async tx => {
+      await requireHostedRuntimeCallbackTx(tx, input.memberId, input.runtimeIdentity);
+      await requireHostedRuntimeActiveAccessForUpdateTx(input.memberId, { prisma: tx });
+    }, command: { type: "setProfile", notForMe: input.request.activities } });
+    return saved.ok
+      ? { action, result: { status: "ok", activities: GAME_ACTIVITIES.filter(activity => saved.profile!.notForMe.includes(activity)) } }
+      : { action, result: { status: "rejected", error: saved.error.message.slice(0, 128) } };
+  }
+  const profile = await getPrisma().gameProfile.findUnique({ where: { memberId: input.memberId }, select: { notForMe: true } });
+  return profile ? { action, result: { status: "ok", activities: GAME_ACTIVITIES.filter(activity => profile.notForMe.includes(activity)) } }
+    : { action, result: { status: "rejected", error: "Add your first name and time zone in the Murph app first." } };
 }

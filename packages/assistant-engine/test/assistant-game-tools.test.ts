@@ -51,6 +51,30 @@ function splitResult(text: string | undefined) {
 }
 const sharedReadTurn = () => ({ invalid: false, readProjectionScopeKeyBatches: [], roster: null })
 describe('game dynamic tools', () => {
+  it('offers and executes Not for me through the private game port only', async () => {
+    const requestPort = vi.fn(async () => ({ action: 'my_game_not_for_me' as const, result: { status: 'ok' as const, activities: ['yoga' as const, 'dance' as const] } }))
+    const direct = { ...context(), myGameRemindersTool: { request: requestPort }, currentUserActionScope: () => ({
+      conversationId: 'synthetic-direct', inboundMailboxItemIds: [], recipientKey: 'synthetic-member', acceptedInputIds: [inputId], originSessionId: 'synthetic-session', conversationScope: 'direct' as const,
+    }) }
+    const tools = resolveMurphDynamicTools({ myGameRemindersAvailable: true })
+    const definition = tools.find(tool => tool.name === 'my_game_not_for_me')!
+    expect(definition).toBeDefined()
+    expect(definition.description).toContain('read first')
+    expect(definition.description).toContain('surfing, kayaking, a beach day')
+    expect(resolveMurphDynamicTools({ myGameRemindersAvailable: false }).some(tool => tool.name === 'my_game_not_for_me')).toBe(false)
+    const request = parse('my_game_not_for_me', { operation: 'set', activities: ['dance', 'yoga', 'dance'] })!
+    const result = await executeMurphDynamicToolRequest({ request, hostedToolContext: direct, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
+    expect(result.rpcResult.contentItems[0]?.text).toContain('"activities":["yoga","dance"]')
+    expect(requestPort).toHaveBeenCalledExactlyOnceWith({ action: 'my_game_not_for_me', operation: 'set', activities: ['yoga', 'dance'], origin })
+    for (const ctx of [{ ...context(), myGameRemindersTool: { request: requestPort } }, { ...direct, currentUserActionScope: () => ({ ...direct.currentUserActionScope(), acceptedInputIds: [] }) }]) {
+      const denied = await executeMurphDynamicToolRequest({ request, hostedToolContext: ctx, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
+      expect(denied.rpcResult.contentItems[0]?.text).toContain('current direct message')
+    }
+    expect(requestPort).toHaveBeenCalledOnce()
+    for (const args of [{ operation: 'set' }, { operation: 'set', activities: ['water'] }, { operation: 'set', activities: [1] }]) {
+      expect(parse('my_game_not_for_me', args)).toMatchObject({ kind: 'invalid-tool-arguments' })
+    }
+  })
   it('offers a member-only reminder tool on direct accepted input and rejects group scope', async () => {
     const requestPort = vi.fn(async () => ({ action: 'my_game_reminders' as const, result: { status: 'ok' as const, reaches: 'none' as const } }))
     const direct = { ...context(), myGameRemindersTool: { request: requestPort }, currentUserActionScope: () => ({

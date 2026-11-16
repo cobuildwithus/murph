@@ -230,6 +230,21 @@ describe("weekly game views: tickets", () => {
     });
   });
 
+  it("shows Not for me only for visible current players and bound invitees", () => {
+    const state = liveState();
+    const input = { profileNotForMe: new Map([[AVA, ["swimming", "yoga"]]]) };
+    expect(view(state, LEO, JOIN_AT, input).players[1].notForMe).toEqual(["swimming", "yoga"]);
+    expect(view(state, LEO, JOIN_AT, { profileNotForMe: new Map([[AVA, []]]) }).players[1]).not.toHaveProperty("notForMe");
+    expect(view(state, LEO, JOIN_AT, { ...input, hiddenMemberIds: new Set([AVA]) }).players[1]).not.toHaveProperty("notForMe");
+    state.players[1].leftAt = JOIN_AT;
+    expect(view(state, LEO, JOIN_AT, input).players[1]).not.toHaveProperty("notForMe");
+    state.players = [state.players[0]];
+    state.game.status = "invited";
+    const invitee = { memberId: AVA, name: "Opponent", photoKey: null, relationship: null };
+    expect(view(state, LEO, JOIN_AT, { ...input, invitee }).players[1].notForMe).toEqual(["swimming", "yoga"]);
+    expect(view(state, LEO, JOIN_AT, { ...input, invitee: { ...invitee, memberId: null } }).players[1]).not.toHaveProperty("notForMe");
+  });
+
   it("prefers canonical profile photos and keeps private fallbacks out of shared exports", () => {
     const state = liveState();
     const profile = "game/hbm_ava/profile.jpg";

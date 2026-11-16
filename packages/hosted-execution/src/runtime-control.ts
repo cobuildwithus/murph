@@ -15,8 +15,8 @@ import type { HostedLeaveGroupRequest, HostedLeaveGroupResponse } from "./leave-
 export { hostedLeaveGroupReasonSchema, hostedLeaveGroupRequestSchema, hostedLeaveGroupResponseSchema } from "./leave-group.ts";
 export type { HostedLeaveGroupRequest, HostedLeaveGroupResponse } from "./leave-group.ts";
 import type { HostedGameToolRequest, HostedGameToolResponse } from "./game-tools.ts";
-export { GAME_RECAP_GENERATION_RETIRED, parseGameRecapEventId, hostedGameToolRequestSchema, hostedGameToolResponseSchema, hostedGameUpdateSchema, hostedGameChatStateSchema, hostedGamePhotoSchema, hostedGameRecapSchema, hostedGameRecapWriterSchema } from "./game-tools.ts";
-export type { HostedGameToolRequest, HostedGameToolResponse, HostedGameUpdate, HostedGamePhoto, HostedGameChatState, HostedGameRecap } from "./game-tools.ts";
+export { GAME_ACTIVITIES, GAME_TOOL_ACTIONS, GAME_RECAP_GENERATION_RETIRED, parseGameRecapEventId, hostedGameToolRequestSchema, hostedGameToolResponseSchema, hostedGameUpdateSchema, hostedGameChatStateSchema, hostedGamePhotoSchema, hostedGameRecapSchema, hostedGameRecapWriterSchema } from "./game-tools.ts";
+export type { GameActivity, HostedGameToolRequest, HostedGameToolResponse, HostedGameUpdate, HostedGamePhoto, HostedGameChatState, HostedGameRecap } from "./game-tools.ts";
 import {
   HOSTED_MAILBOX_LANES,
   type HostedMailboxLane,

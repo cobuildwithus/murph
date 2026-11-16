@@ -52,6 +52,7 @@ describe("POST game ideas", () => {
     ["task", 1], ["task", ""], ["task", "a".repeat(121)],
     ["directions", "outside"], ["directions", Array(7).fill("Outside")], ["directions", [1]],
     ["directions", ["a".repeat(31)]], ["directions", [""]],
+    ["notForMe", ["water"]], ["notForMe", [1]], ["notForMe", null], ["notForMe", "yoga"],
     ["skipped", "walk"], ["skipped", Array(25).fill("Walk")], ["skipped", [1]],
     ["skipped", ["a".repeat(41)]], ["skipped", [""]],
   ])("rejects invalid %s before limiting or generating", async (field, value) => {
@@ -61,6 +62,11 @@ describe("POST game ideas", () => {
     expect(suggestGameIdeas).not.toHaveBeenCalled();
     expect(mocks.consume).not.toHaveBeenCalled();
     expect(fetch).not.toHaveBeenCalled();
+  });
+  it("accepts and normalizes Not for me", async () => {
+    vi.stubEnv("HOSTED_GAME_IDEAS", "off");
+    expect((await POST(request({ ...INPUT, notForMe: ["dance", "swimming", "dance", "yoga"] }))).status).toBe(200);
+    expect(suggestGameIdeas).toHaveBeenCalledWith("member-self", { ...INPUT, notForMe: ["swimming", "yoga", "dance"] });
   });
   it("accepts trimmed bounds and optional fields while dropping private fields", async () => {
     const result = await POST(request({ step: "prize", relationship: "partner", apart: true, words: ` ${"a".repeat(120)} `,

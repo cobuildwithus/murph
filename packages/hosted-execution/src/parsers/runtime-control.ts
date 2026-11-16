@@ -2,7 +2,7 @@ import { assertContract } from "@murphai/contracts";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { hostedLeaveGroupRequestSchema, hostedLeaveGroupResponseSchema } from "../leave-group.ts";
 import { hostedGameChatBootstrapRequestSchema, hostedGameChatBootstrapResponseSchema } from "../game-bootstrap-control.ts";
-import { hostedGameToolRequestSchema, hostedGameToolResponseSchema } from "../game-tools.ts";
+import { GAME_TOOL_ACTIONS, hostedGameToolRequestSchema, hostedGameToolResponseSchema } from "../game-tools.ts";
 import { parseHostedMailboxLane, parseHostedMailboxKind } from "./mailbox.ts";
 export {
   parseHostedMailboxItem,
@@ -957,7 +957,7 @@ export function parseHostedRuntimeGroupToolRequest(
   );
   if (action === "leave_group") return assertContract(hostedLeaveGroupRequestSchema, record, "Hosted runtime group tool request");
   if (action === "game_chat_bootstrap") return assertContract(hostedGameChatBootstrapRequestSchema, record, "Hosted runtime group tool request");
-  if (["read_game", "update_game", "game_photo", "write_recap", "my_game_reminders"].includes(action)) return assertContract(hostedGameToolRequestSchema, record, "Hosted runtime group tool request");
+  if (GAME_TOOL_ACTIONS.some(value => value === action)) return assertContract(hostedGameToolRequestSchema, record, "Hosted runtime group tool request");
   const parsed =
     parseHostedRuntimeGroupConsultationRequest(record, action) ??
     parseHostedRuntimeGroupJournalRequest(record, action) ??
@@ -2883,7 +2883,7 @@ export function parseHostedRuntimeGroupToolResponse(
 
   if (action === "leave_group") return hostedLeaveGroupResponseSchema.parse(record);
   if (action === "game_chat_bootstrap") return hostedGameChatBootstrapResponseSchema.parse(record);
-  if (["read_game", "update_game", "game_photo", "write_recap", "my_game_reminders"].includes(action)) return hostedGameToolResponseSchema.parse(record);
+  if (GAME_TOOL_ACTIONS.some(value => value === action)) return hostedGameToolResponseSchema.parse(record);
   if (action === "ask_current_sender") {
     const label = "Hosted runtime group tool ask_current_sender response";
     assertAllowedObjectKeys(record, new Set(["action", "result"]), label);

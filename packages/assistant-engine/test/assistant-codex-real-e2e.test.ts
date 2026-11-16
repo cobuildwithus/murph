@@ -51047,6 +51047,48 @@ describeRealCodex('real Codex isolated notification thread continuity', () => {
 })
 
 describeRealCodex('private game reminder reply', () => {
+  it('private game Not for me preserves existing exclusions and leaves surfing available', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-game-not-for-me-e2e-'))
+    const { MURPH_MY_GAME_NOT_FOR_ME_TOOL } = await import('../src/assistant-codex/dynamic-tools/games.js')
+    const { hostedGameToolResponseSchema } = await import('@murphai/hosted-execution/runtime-control')
+    const inputId = 'ain_' + 'e'.repeat(32)
+    const calls: import('@murphai/hosted-execution/runtime-control').HostedGameToolRequest[] = []
+    let activities = ['lifting']
+    try {
+      await initializeVault({ timezone: 'UTC', vaultRoot: workingDirectory })
+      const result = await executeRealCodexAppServerTurn({
+        allowFinishWithoutReply: false, approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, env: config.env, model: config.model, modelProvider: config.modelProvider,
+        developerInstructions: buildDirectConversationDeveloperInstructions(false, '', [], '2030-03-06T12:00:00.000Z'),
+        dynamicTools: [MURPH_MY_GAME_NOT_FOR_ME_TOOL],
+        hostedToolContext: { computerToolsAvailable: false, vaultFileSendAvailable: false,
+          currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+          sendVaultFile: async () => { throw new Error('No media') },
+          currentUserActionScope: () => ({ conversationId: 'synthetic-direct', inboundMailboxItemIds: [],
+            recipientKey: 'synthetic-member', acceptedInputIds: [inputId], originSessionId: 'synthetic-session', conversationScope: 'direct' }),
+          myGameRemindersTool: { request: async request => {
+            if (request.action !== 'my_game_not_for_me') throw new Error('Unexpected game request')
+            calls.push(request)
+            if (request.operation === 'set') activities = request.activities!
+            return hostedGameToolResponseSchema.parse({ action: request.action, result: { status: 'ok', activities } })
+          } },
+        },
+        prompt: 'Add swimming, yoga and dance to Not for me in my games. Keep anything already there. Surfing and beach days are still fine.',
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const reply = result.finalMessage.trim()
+      process.stdout.write(`[not-for-me-reply] ${JSON.stringify({ reply, activities })}\n`)
+      expect(calls.map(call => call.action === 'my_game_not_for_me' ? call.operation : call.action)).toEqual(['read', 'set'])
+      expect(activities).toEqual(['swimming', 'yoga', 'dance', 'lifting'])
+      expect(reply).toMatch(/swim/iu)
+      expect(reply).toMatch(/yoga/iu)
+      expect(reply).toMatch(/danc/iu)
+      expect(reply).not.toMatch(/cannot|unable|failed|game_|my_game|API/iu)
+    } finally { await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths]) }
+  }, 360_000)
+
   it('private game reply saves an evening reminder through the direct tool', async () => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-game-direct-e2e-'))

@@ -2,6 +2,7 @@ import { normalizeGameText as words } from "./text";
 import { isStrictIsoDate, normalizeIanaTimeZone } from "@murphai/contracts";
 
 import {
+  GAME_ACTIVITIES,
   GAME_ENTRY_KINDS,
   GAME_CHECK_IN_KINDS,
   GAME_REPORT_ABOUT,
@@ -229,11 +230,16 @@ function oneLineWords(value: unknown): string {
 }
 
 function profile(input: Record<string, unknown>): Extract<GameCommand, { type: "setProfile" }> {
-  if (input.firstName === undefined && input.timeZone === undefined && input.photoKey === undefined) {
+  if (input.firstName === undefined && input.timeZone === undefined && input.photoKey === undefined && input.notForMe === undefined) {
     reject("INVALID_REQUEST", "Choose a profile field to update.");
   }
   return {
     type: "setProfile",
+    ...optional(input.notForMe, value => {
+      if (!Array.isArray(value)) reject("INVALID_REQUEST", "notForMe must be a list of activities.");
+      const activities = value.map(item => oneOf(item, "notForMe", GAME_ACTIVITIES));
+      return { notForMe: GAME_ACTIVITIES.filter(activity => activities.includes(activity)) };
+    }),
     ...optional(input.firstName, (value) => ({ firstName: words(value, "firstName") })),
     ...optional(input.timeZone, (value) => ({ timeZone: timeZone(value) })),
     ...optional(input.photoKey, (value) => ({ photoKey: nullable(value, mediaKey) })),

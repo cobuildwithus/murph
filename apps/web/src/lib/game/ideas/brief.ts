@@ -1,3 +1,4 @@
+import { ACTIVITY_CHOICES } from "./rules";
 import type { GameIdeasInput } from "./input";
 
 // Ported from the tuned idea lab (17 batches of 20 live spins). What people
@@ -85,6 +86,7 @@ export function gameIdeasBrief(ctx: GameIdeasInput): string {
   const wanted = asks(ctx);
   const every = `, every one ${wanted.map(ask => ask.phrase).join(" and ")}`;
   const notes = wanted.flatMap(ask => ask.note ? [ask.note] : []);
+  if (ctx.notForMe?.length) notes.push(`Never suggest anything that is one of these activities: ${ACTIVITY_CHOICES.filter(choice => ctx.notForMe?.some(activity => activity === choice.value)).map(choice => choice.description).join("; ")}.`);
   const sized = wanted.some(ask => ask.sized);
   const skipped = ctx.skipped.length ? ["They already saw and skipped the skipped texts in the request data; write different ones."] : [];
   if (ctx.step === "task") {

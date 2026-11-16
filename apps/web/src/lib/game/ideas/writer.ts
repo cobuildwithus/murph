@@ -1,10 +1,11 @@
+import * as z from "@murphai/contracts/zod-runtime";
 import OpenAI from "openai";
 import { normalizeGameText } from "../text";
 import { isGameTextRefused } from "../moderation";
 import { isRecord } from "../../primitives";
 import { gameIdeasBrief, gameIdeasFits, isGameIdeasApart } from "./brief";
 import { parseGameIdeasInput, SCHEDULES, type GameIdea, type GameIdeasInput } from "./input";
-import { BANNED, dareQuestion, MAX_CHARS, PRIZE_CHORE, PRIZE_STRETCH, stakeInput, stakeQuestion, STAKE_BAR, TASK_UNSEEN } from "./rules";
+import { ACTIVITY_BAR, ACTIVITY_CHOICES, activityQuestion, BANNED, dareQuestion, MAX_CHARS, PRIZE_CHORE, PRIZE_STRETCH, stakeInput, stakeQuestion, STAKE_BAR, TASK_UNSEEN } from "./rules";
 import { tidy } from "./tidy";
 import { capLeads, ideaShape } from "./variety";
 
@@ -70,33 +71,49 @@ export function gameIdeasCheck(ctx: GameIdeasInput, ideas: GameIdea[]) {
       { type: "predicate", name: `r${index}`, instructions: ctx.step === "task" ? realTask(idea.text, isGameIdeasApart(ctx)) : stakeQuestion(ctx.step, idea.text) },
       ...(ctx.step === "dare" ? [{ type: "predicate", name: `d${index}`, instructions: dareQuestion(idea.text) }] : []),
       { type: "predicate", name: `f${index}`, instructions: `Could "${idea.text}" be ${fits.join(" and ")}?` },
+      ...(ctx.notForMe?.length ? [{ type: "choice", name: `a${index}`, instructions: activityQuestion(idea.text), choices: ACTIVITY_CHOICES }] : []),
     ]),
   };
 }
 
 /** Good enough for the pair, then best fit first; clear misses go when at
  * least four others are left. */
-function acceptedIdeas(payload: unknown, ideas: GameIdea[], step: GameIdeasInput["step"]): GameIdea[] {
-  if (!isRecord(payload) || !Array.isArray(payload.answers)) throw new Error("Invalid decisions.");
+function acceptedIdeas(payload: unknown, ideas: GameIdea[], ctx: GameIdeasInput): GameIdea[] {
+  const { step } = ctx;
+  const answers = z.object({ answers: z.array(z.discriminatedUnion("type", [
+    z.object({ type: z.literal("predicate"), name: z.string(), probability: z.number().min(0).max(1) }),
+    z.object({ type: z.literal("choice"), name: z.string(), probabilities: z.array(z.object({
+      value: z.enum(ACTIVITY_CHOICES.map(choice => choice.value)), probability: z.number().min(0).max(1),
+    })) }),
+  ])) }).parse(payload).answers;
   const probabilities = new Map<string, number>();
-  for (const answer of payload.answers) {
-    if (!isRecord(answer) || answer.type !== "predicate" || typeof answer.name !== "string"
-      || typeof answer.probability !== "number" || !Number.isFinite(answer.probability)
-      || answer.probability < 0 || answer.probability > 1 || probabilities.has(answer.name)) throw new Error("Invalid decision.");
-    probabilities.set(answer.name, answer.probability);
+  const excluded = new Map<string, boolean>();
+  for (const answer of answers) {
+    if (probabilities.has(answer.name) || excluded.has(answer.name)) throw new Error("Duplicate decision.");
+    if (answer.type === "choice") {
+      if (!ctx.notForMe?.length) throw new Error("Unexpected activity decision.");
+      excluded.set(answer.name, answer.probabilities.some(item => ctx.notForMe!.some(activity => activity === item.value) && item.probability >= ACTIVITY_BAR));
+    } else probabilities.set(answer.name, answer.probability);
   }
   const probability = (name: string) => {
     const value = probabilities.get(name);
     if (value === undefined) throw new Error("Missing decision.");
     return value;
   };
+  const allowed = (index: number) => {
+    if (!ctx.notForMe?.length) return true;
+    const blocked = excluded.get(`a${index}`);
+    if (blocked === undefined) throw new Error("Missing activity decision.");
+    return !blocked;
+  };
   const scored = ideas.map((idea, index) => ({
+    allowed: allowed(index),
     idea,
     good: probability(`r${index}`) >= (step === "task" ? 0.5 : STAKE_BAR) && (step !== "dare" || probability(`d${index}`) >= 0.5),
     fit: probability(`f${index}`),
   }));
-  if (probabilities.size !== ideas.length * (step === "dare" ? 3 : 2)) throw new Error("Unexpected decisions.");
-  const kept = scored.filter(item => item.good).sort((a, b) => b.fit - a.fit);
+  if (probabilities.size !== ideas.length * (step === "dare" ? 3 : 2) || excluded.size !== (ctx.notForMe?.length ? ideas.length : 0)) throw new Error("Unexpected decisions.");
+  const kept = scored.filter(item => item.good && item.allowed).sort((a, b) => b.fit - a.fit);
   const hits = kept.filter(item => item.fit >= 0.3);
   return (hits.length >= 4 ? hits : kept).map(item => item.idea);
 }
@@ -125,7 +142,7 @@ async function generate(ctx: GameIdeasInput, client: OpenAI, signal: AbortSignal
     if (!ideas.length) return [];
     const checked = await client.post<unknown>("/decisions", { body: gameIdeasCheck(input, ideas), ...options() });
     options();
-    return capLeads(acceptedIdeas(checked, ideas, input.step));
+    return capLeads(acceptedIdeas(checked, ideas, input));
   };
   const first = await writeOnce(ctx);
   if (first.length >= 4) return first.slice(0, 9);

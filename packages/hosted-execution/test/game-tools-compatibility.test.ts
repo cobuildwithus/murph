@@ -500,3 +500,16 @@ it("both-win rollback-floor readers accept waiting asks, terms and reciprocal se
     update: { operation: "create", gameId: game.id, terms: { tasks: base.players.map(player => ({ memberId: player.memberId, text: "Walk" })),
       schedule: game.terms.schedule, stakes: pendingChange.change.stakes } } }).success).toBe(false);
 });
+
+it("parses private Not for me reads, replacements and results through runtime control", () => {
+  const action = "my_game_not_for_me";
+  expect(parseHostedRuntimeGroupToolRequest({ action, origin, operation: "read" })).toEqual({ action, origin, operation: "read" });
+  expect(parseHostedRuntimeGroupToolRequest({ action, origin, operation: "set", activities: ["dance", "yoga", "dance"] }))
+    .toEqual({ action, origin, operation: "set", activities: ["yoga", "dance"] });
+  expect(parseHostedRuntimeGroupToolRequest({ action, origin, operation: "set", activities: [] })).toMatchObject({ activities: [] });
+  for (const activities of [undefined, ["water"], [1], null]) {
+    expect(() => parseHostedRuntimeGroupToolRequest({ action, origin, operation: "set", activities })).toThrow();
+  }
+  const response = { action, result: { status: "ok", activities: ["swimming", "yoga"] } };
+  expect(parseHostedRuntimeGroupToolResponse(response)).toEqual(response);
+});

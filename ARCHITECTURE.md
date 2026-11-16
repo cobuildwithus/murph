@@ -6981,6 +6981,17 @@ receipt and blocks deletion acknowledgement until operator reconciliation;
 elapsed time alone does not authorize clearing it. Deployment and recovery are
 owned by `apps/cloudflare/DEPLOY.md` § Private weekly game images.
 
+The game profile's `not_for_me` array stores the closed activity keys declared in
+hosted-execution. `setProfile` replaces it only when supplied; omission preserves
+it and an empty array clears it. Profile replies and home `me` always include
+`notForMe`; the existing batched profile read supplies nonempty lists to visible
+players, bound invitees and history people, applying report and member masks.
+Departed players never expose it. The private `my_game_not_for_me` action reuses
+the direct reminders port and authority and writes through `setProfile` without
+creating a profile. `GAME_TOOL_ACTIONS` owns runtime parsing and signed identity
+forwarding; per-action authority remains explicit. The weekly game spec owns the
+ideas exclusion contract and deployment floor.
+
 The game profile's nullable `photo_key` references an owned, completed upload.
 `PUT /me/profile` accepts partial updates: absent fields remain unchanged, and
 `photoKey: null` removes the canonical photo. Initial creation still requires

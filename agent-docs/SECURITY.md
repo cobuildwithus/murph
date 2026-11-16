@@ -30,7 +30,8 @@ is in; the media route itself stays post-to-unlock.
 
 `POST /api/game/v1/ideas` is an optional authenticated native game action.
 OpenAI receives only words, step, category, relationship kind, apart, direction
-labels, the chosen task and skipped idea texts. The app and server never attach
+labels, the chosen task, skipped idea texts and optional closed `notForMe` activity
+keys. The app and server never attach
 names, phone numbers, private relationship labels or member identifiers.
 Typed words can contain anything a member writes, including personal details;
 the same is true of their task text. This is not an anonymity guarantee.
