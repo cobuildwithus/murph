@@ -145,6 +145,7 @@ describe("hosted retention cleanup", () => {
       expiredConversationPolicyNonRepliesRecorded: 0,
       expiredDeviceConnectIntentsDeleted: 3,
       expiredDeviceOauthSessionsDeleted: 4,
+      expiredCustomConnectionAuthorizationsDeleted: 0,
       expiredDeviceWebhookTracesDeleted: 4,
       expiredEmailPublicBootstrapAttemptsDeleted: 2,
       expiredGroupParticipantObservationsDeleted: 4,
@@ -221,7 +222,7 @@ describe("hosted retention cleanup", () => {
     ]);
 
     // One statement per category: every short batch stops that category's loop.
-    expect(executeRaw).toHaveBeenCalledTimes(20);
+    expect(executeRaw).toHaveBeenCalledTimes(21);
     expect(findRetentionCall(executeRaw, 'DELETE FROM "hosted_runtime_put_drain"').slice(1))
       .toEqual([new Date(now.getTime() - HOSTED_RUNTIME_LEDGER_RETENTION_MS), HOSTED_RETENTION_BATCH_SIZE]);
     expect(executeRaw.mock.calls.some(call => sqlOf(call).includes('DELETE FROM "hosted_runtime_orphan"'))).toBe(false);

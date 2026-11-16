@@ -40,6 +40,7 @@ import { ClubsPageStudy } from "./clubs-page-study";
 import { WearableConnectLinkStudy } from "./wearable-connect-link-study";
 import { ComputerHandoffStudy } from "./computer-handoff-study";
 import { ConnectedAppAuthorizationStudy } from "./connected-app-authorization-study";
+import { CustomConnectionsStudy } from "./custom-connections-study";
 import {
   AppleHealthRelaySetupStudy,
   ConnectSourceCardStudy,
@@ -254,6 +255,12 @@ export function SectionsContent({
 
       {category === "settings" ? (
         <>
+          <Separator />
+
+          <StudySection title="Services Murph can use: add, sign in, choose, manage">
+            <CustomConnectionsStudy />
+          </StudySection>
+
           <Separator />
 
           <StudySection title="Settings retained export while newer data is processing">

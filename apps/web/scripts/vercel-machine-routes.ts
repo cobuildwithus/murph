@@ -25,6 +25,7 @@ const PROVIDER_PREFIXES = [
 
 export const BROWSER_CALLBACK_ROUTES = [
   "/api/clinical-records/oauth/callback",
+  "/api/settings/custom-connections/callback/[connectionId]",
   "/api/device-sync/connect/[provider]/callback",
   "/api/device-sync/oauth/[provider]/callback",
 ];
