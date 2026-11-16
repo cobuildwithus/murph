@@ -79,7 +79,8 @@
       ],
       "projection": {
         "value": 30,
-        "label": "30 by Nov 22"
+        "label": "30 by Nov 22",
+        "on": "2026-11-22"
       },
       "ladder": null,
       "route": null,

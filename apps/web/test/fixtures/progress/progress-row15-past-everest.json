@@ -15,7 +15,7 @@
       "needsPerDay": false,
       "total": {
         "value": 31240,
-        "text": "31.2k",
+        "text": "31,240",
         "unit": "reps"
       },
       "today": {
@@ -267,7 +267,8 @@
       ],
       "projection": {
         "value": 35000,
-        "label": "35k by Jan 28"
+        "label": "35k by Jan 28",
+        "on": "2026-01-28"
       },
       "ladder": {
         "kind": "height",
@@ -277,7 +278,7 @@
             "name": "Mount Everest",
             "drawing": "mount-everest",
             "at": 29032,
-            "atText": "29,032 ft",
+            "atText": "29k ft",
             "blurb": "The highest mountain on Earth, first climbed by Edmund Hillary and Tenzing Norgay in 1953.",
             "where": "Nepal / China",
             "on": "2026-10-16",
@@ -288,7 +289,7 @@
             "name": "K2",
             "drawing": "k2",
             "at": 28251,
-            "atText": "28,251 ft",
+            "atText": "28.3k ft",
             "blurb": "The second highest mountain on Earth, in Pakistan, known as the \"Savage Mountain.\"",
             "where": "Pakistan / China",
             "on": "2026-10-06",
@@ -299,7 +300,7 @@
             "name": "Denali",
             "drawing": "denali",
             "at": 20310,
-            "atText": "20,310 ft",
+            "atText": "20.3k ft",
             "blurb": "The highest mountain in North America, in Alaska's Denali National Park.",
             "where": "Alaska, USA",
             "on": "2026-05-30",
@@ -310,7 +311,7 @@
             "name": "A skydive",
             "drawing": "skydive",
             "at": 13000,
-            "atText": "13,000 ft",
+            "atText": "13k ft",
             "blurb": "A tandem skydive starts about two and a half miles above the ground.",
             "where": "Drop zones everywhere",
             "on": "2026-01-31",
@@ -333,7 +334,7 @@
           "name": "Where jets fly",
           "drawing": "jet-cruising-altitude",
           "at": 35000,
-          "atText": "35,000 ft",
+          "atText": "35k ft",
           "blurb": "The height where passenger jets usually cruise, about 6 to 7 miles up.",
           "where": "Anywhere overhead",
           "on": null,
@@ -383,9 +384,9 @@
       "kind": "total",
       "gold": true,
       "face": {
-        "number": "30K"
+        "number": "30k"
       },
-      "title": "30,000",
+      "title": "30k",
       "detail": "pushups",
       "earnedOn": "2026-11-14",
       "open": {

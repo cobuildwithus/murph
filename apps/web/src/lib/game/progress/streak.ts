@@ -2,18 +2,19 @@ import { completedEntry, dayIndexAt, eligibleFromDay, indexGameEntries, termsFor
 import { addDays, weekdayOf } from "../time";
 import type { Day, Streak } from "./contract";
 
-export interface StreakGame { state: RuleState; now: Date; settledAt?: Date | null }
+export interface StreakGame { state: RuleState; now: Date; settledAt?: Date | null; endedAt?: Date | null }
 export interface ObligationDay { date: Day; gameId: string; dayIndex: number; done: boolean; ended: boolean }
 export interface StreakDay { date: Day; done: boolean; ended: boolean }
 
 /** A departure ends that day's unfulfilled obligation, retaining a post made before leaving. */
-export function gameDays({ state, now, settledAt }: StreakGame, memberId: string): ObligationDay[] | null {
+export function gameDays({ state, now, settledAt, endedAt }: StreakGame, memberId: string): ObligationDay[] | null {
   const player = state.players.find(player => player.memberId === memberId);
   if (!player?.dayOne) return null;
   const today = dayIndexAt(player, now)!;
   const left = player.leftAt ? dayIndexAt(player, player.leftAt)! : state.game.lengthDays;
   const end = state.game.status !== "live" && settledAt ? dayIndexAt(player, settledAt)! : state.game.lengthDays;
-  const last = Math.min(today, left, end, state.game.lengthDays - 1);
+  const cancelled = endedAt ? dayIndexAt(player, endedAt)! : state.game.lengthDays;
+  const last = Math.min(today, left, end, cancelled, state.game.lengthDays - 1);
   const entries = indexGameEntries(state.entries);
   const days: ObligationDay[] = [];
   for (let index = eligibleFromDay(state, player); index <= last; index++) {
@@ -21,7 +22,7 @@ export function gameDays({ state, now, settledAt }: StreakGame, memberId: string
     const schedule = termsForDay(state.game.terms, index).schedule;
     if ("days" in schedule && !schedule.days.includes(weekdayOf(date))) continue;
     const done = completedEntry(entries, memberId, index) !== null;
-    if (index === left && !done) continue;
+    if ((index === left || index === cancelled) && !done) continue;
     days.push({ date, gameId: state.game.id, dayIndex: index, done, ended: index < today });
   }
   return days;

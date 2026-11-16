@@ -32,7 +32,7 @@ export const measureSchema = z.object({
   format: z.enum(["count", "duration", "distance", "days"]), source: z.enum(["games", "wearable"]),
   pending: z.boolean(), gameOn: z.boolean(), needsPerDay: z.boolean(),
   total: amount, today: amount.nullable(), points: z.array(point),
-  projection: z.object({ value: z.number(), label: z.string() }).nullable(),
+  projection: z.object({ value: z.number(), label: z.string(), on: day.nullable() }).nullable(),
   ladder: ladder.nullable(), route: route.nullable(), pics: z.array(pic),
 });
 export type Measure = z.infer<typeof measureSchema>;
@@ -59,6 +59,7 @@ export type Medal = z.infer<typeof medalSchema>;
 const moment = z.object({
   id: z.string(), kind: z.enum(["goal", "route", "medal", "held", "bigDay"]), medalIds: z.array(z.string()),
   measureId: z.string().nullable(), nextGoal: rungSchema.nullable(),
+  title: z.string(), line: z.string().nullable(),
 });
 export type Moment = z.infer<typeof moment>;
 export const progressSchema = z.object({
@@ -104,13 +105,14 @@ export const friendsSchema = z.object({
 export type Friends = z.infer<typeof friendsSchema>;
 export const goalsSchema = z.object({
   tiles: z.array(rungSchema), match: rungSchema.nullable(), suggestions: z.array(rungSchema),
+  note: z.string().nullable(),
   route: z.object({ from: z.string(), to: z.string(), distanceText: z.string(), straightLine: z.boolean(), map: z.string() }).nullable(),
 });
 export type Goals = z.infer<typeof goalsSchema>;
 
 const text = z.string().trim().min(1);
 const goal = z.union([z.strictObject({ rungId: text }), z.strictObject({ from: text, to: text })]);
-const setMeasure = z.union([z.strictObject({ goal }), z.strictObject({ perDay: z.number().positive() })]);
+const setMeasure = z.union([z.strictObject({ goal }), z.strictObject({ perDay: z.number().int().min(1).max(10_000) })]);
 export type SetMeasureBody = z.infer<typeof setMeasure>;
 const sharing = z.strictObject({ metrics: z.array(z.enum(["steps", "sleep"])).min(1).max(2), share: z.boolean() });
 export type SetSharingBody = z.infer<typeof sharing>;

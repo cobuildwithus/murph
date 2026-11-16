@@ -3,6 +3,7 @@ import { gameSeries, cumulativePoints } from "../src/lib/game/progress/series";
 import { bestRun, calendarMonths, currentRun, gameDays, obligationDays, pairBoardStreak } from "../src/lib/game/progress/streak";
 import { BANK, ladder, search } from "../src/lib/game/progress/bank";
 import { measureLadder, projection, roundValues } from "../src/lib/game/progress/goals";
+import { formatAmount, formatNumber } from "../src/lib/game/progress/format";
 import { ACHIEVEMENTS } from "../src/lib/game/progress/registry";
 import { achievementContext, measureView, momentsView, visibleAwards } from "../src/lib/game/progress/view";
 import type { StoredAward } from "../src/lib/game/progress/awards";
@@ -75,6 +76,19 @@ describe("Progress source contributions", () => {
 });
 
 describe("one obligation calendar", () => {
+  it.each([false, true])("keeps real earlier misses and the terminal day's completed post: %s", completed => {
+    const source = game("cancelled", reps);
+    source.state.game.status = "void";
+    source.state.players[0].timeZone = "America/New_York";
+    source.endedAt = new Date("2026-11-04T02:00:00Z");
+    post(source, 0, "photo", null);
+    if (completed) post(source, 2, "photo", null);
+    const days = gameDays(source, memberId)!;
+    expect(days.map(day => [day.date, day.done])).toEqual([
+      ["2026-11-01", true], ["2026-11-02", false], ...(completed ? [["2026-11-03", true]] : []),
+    ]);
+    expect(gameSeries([source], memberId, new Map())[0].amounts).toHaveLength(completed ? 2 : 1);
+  });
   it.each([
     ["before leaving day's post", false, [0, 1]],
     ["after leaving day's post", true, [0, 1, 2]],
@@ -155,12 +169,12 @@ describe("checked ladders and permanent crossings", () => {
   it.each([["reps", 1400, 2000], ["seconds", 13800, 18000], ["days", 23, 50]] as const)("uses the locked 1/2/5 rounds in %s", (unit, total, expected) => {
     expect(roundValues(total, unit).at(-1)).toBe(expected);
   });
-  it("projects the last fourteen calendar days, and returns null with no live game or no rate", () => {
+  it("projects fourteen calendar days and keeps a dateless next round with no game or no rate", () => {
     const source = game("rate", reps); post(source, 0, "photo", null);
     const [series] = gameSeries([source], memberId, new Map());
-    expect(projection(series, "2026-11-05")).toEqual({ value: 100, label: "100 by Nov 26" });
-    expect(projection({ ...series, gameOn: false }, "2026-11-05")).toBeNull();
-    expect(projection(series, "2026-12-05")).toBeNull();
+    expect(projection(series, "2026-11-05")).toEqual({ value: 100, label: "100 by Nov 26", on: "2026-11-26" });
+    expect(projection({ ...series, gameOn: false }, "2026-11-05")).toEqual({ value: 100, label: "100 next", on: null });
+    expect(projection(series, "2026-12-05")).toEqual({ value: 100, label: "100 next", on: null });
   });
   it("removes all health-derived awards and their moments after authority loss", () => {
     const awards: StoredAward[] = stored(["health", "healthAge", "total"].map((kind, i) => ({ key: kind, kind,
@@ -168,5 +182,44 @@ describe("checked ladders and permanent crossings", () => {
     const visible = visibleAwards(awards, false);
     expect(visible.map(award => award.kind)).toEqual(["total"]);
     expect(momentsView(visible, [])[0].medalIds).toEqual(["total"]);
+  });
+});
+
+describe("shared Progress numbers", () => {
+  it.each([
+    [18120, "full", "18,120"], [187700, "full", "187,700"], [31240, "full", "31,240"],
+    [9999, "compact", "9,999"], [10000, "compact", "10k"], [20000, "compact", "20k"],
+    [10989, "compact", "11k"], [31240, "compact", "31.2k"], [200000, "compact", "200k"],
+    [187700, "compact", "188k"], [1400, "compact", "1,400"], [1400, "delta", "+1.4k"],
+    [-1400, "delta", "-1.4k"], [60, "delta", "+60"],
+  ] as const)("formats %s as %s", (value, style, expected) => expect(formatNumber(value, style)).toBe(expected));
+  it.each([[3, "3 mi"], [8.4, "8.4 mi"], [10.4, "10 mi"], [116.4, "116 mi"]])("formats %s miles", (miles, expected) => {
+    expect(formatAmount(Number(miles) * 1609.344, "meters").text).toBe(expected);
+  });
+  it("uses full hero digits and compact projections, goals and medals", () => {
+    const source = game("large", task("3124 pushups", { quantity: 3124, unit: "reps", name: "pushups" }));
+    post(source, 0, "photo", null);
+    const [series] = gameSeries([source], memberId, new Map());
+    series.amounts[0].amount = 31240;
+    const context = achievementContext([series], new Map([[series.id, { goal: { rungId: "half-dome" } }]]), []);
+    expect(context.measures[0].rounds.at(-1)).toMatchObject({ face: { number: "20k" }, title: "20k" });
+    expect(measureView(series, {}, [], "2026-11-05")).toMatchObject({ total: { text: "31,240" }, projection: { label: expect.stringMatching(/^50k by /u) } });
+    expect(context.measures[0].rungs.find(rung => rung.id === "mount-everest")?.atText).toBe("29k ft");
+  });
+});
+
+describe("moment words", () => {
+  it.each([
+    ["landmark", "goal", "One World Trade Center", "1,776 pushups", "New York's tallest tower.", "One World Trade Center", "New York's tallest tower."],
+    ["time", "held", "Women's plank record", "4 hr 30 min", "The longest plank ever held by a woman.", "Women's plank record", "The longest plank ever held by a woman."],
+    ["route", "route", "San Francisco", "501 miles from San Diego, arrived today", null, "San Francisco", "501 miles from San Diego, arrived today"],
+    ["health", "medal", "Heart rate", "down 3 bpm", null, "Heart rate down 3 bpm", "Your best since you joined. It's your newest medal, so it's the gold one on Prizes."],
+    ["streak", "medal", "12 days", "your best run", null, "12 days in a row", "Your best run yet."],
+    ["total", "medal", "20k", "pushups", null, "20k pushups", null],
+  ])("writes %s drawer copy without changing shelf words", (kind, momentKind, title, detail, blurb, expectedTitle, line) => {
+    const awards = stored([{ key: "one", kind: kind!, measureId: "pushups.reps", subjectMemberId: null, on: "2026-11-05",
+      data: { title, detail, rung: { blurb } } }]);
+    expect(momentsView(awards, [])[0]).toMatchObject({ kind: momentKind, title: expectedTitle, line });
+    expect(awards[0].data).toMatchObject({ title, detail });
   });
 });

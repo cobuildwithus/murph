@@ -79,7 +79,8 @@
       ],
       "projection": {
         "value": 18000,
-        "label": "5h by Nov 20"
+        "label": "5h by Nov 20",
+        "on": "2026-11-20"
       },
       "ladder": {
         "kind": "time",
@@ -360,7 +361,8 @@
       ],
       "projection": {
         "value": 20,
-        "label": "20 by Nov 17"
+        "label": "20 by Nov 17",
+        "on": "2026-11-17"
       },
       "ladder": null,
       "route": null,
@@ -423,7 +425,7 @@
       "kind": "total",
       "gold": false,
       "face": {
-        "number": "1K"
+        "number": "1,000"
       },
       "title": "1,000",
       "detail": "squats",

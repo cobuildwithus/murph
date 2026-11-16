@@ -42,4 +42,12 @@ describe("Progress task inference", () => {
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(log).not.toHaveBeenCalled();
   });
+  it.each([1e308, 10_001, 10_000, 1.5])("bounds the provider quantity once: %s", async quantity => {
+    const fetch = vi.fn(async (url: RequestInfo | URL) => Response.json(String(url).endsWith("/decisions") ? checks([1, 1, 1]) : {
+      status: "completed", output: [], output_text: JSON.stringify({ quantity, unit: "miles", name: "walk" }),
+    }));
+    const result = await inferTask({ text: `${quantity} miles`, kind: "photo" }, new OpenAI({ apiKey: "synthetic", fetch }));
+    expect(result).toEqual(quantity > 10_000 ? null : { quantity, unit: "miles", name: "walk" });
+    expect(fetch).toHaveBeenCalledTimes(quantity > 10_000 ? 1 : 2);
+  });
 });

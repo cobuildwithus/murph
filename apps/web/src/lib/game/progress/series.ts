@@ -112,7 +112,8 @@ export async function readGameSeries(memberId: string, clock: Date) {
     orderBy: [{ createdAt: "asc" }, { id: "asc" }], take: GAME_LIMIT + 1,
     select: { id: true, createdBy: true, status: true, maxPlayers: true, lengthDays: true, terms: true,
       termsWordsEncrypted: true, wordsOwnerMemberId: true, startsOn: true, settledAt: true, devClockOffsetMs: true,
-      players: { where: { memberId }, take: 1, select: { memberId: true, seat: true, dayOne: true, timeZone: true, joinedAt: true, leftAt: true } } },
+      events: { where: { type: "cancelled" }, orderBy: { id: "desc" }, take: 1, select: { createdAt: true } },
+      players: { take: 10, select: { memberId: true, seat: true, dayOne: true, timeZone: true, joinedAt: true, leftAt: true } } },
   });
   const games = rows.slice(0, GAME_LIMIT);
   const entries = await db.gameEntry.findMany({ where: { memberId, gameId: { in: games.map(game => game.id) } },
@@ -134,7 +135,10 @@ export async function readGameSeries(memberId: string, clock: Date) {
     // service.ts persists decideNewTerms/applyChangeTermsTx's StoredTerms through
     // toPrismaJsonObject; Prisma erases that type, not the validated write contract.
     const terms = game.terms as unknown as StoredTerms;
-    const player = game.players.filter(hasGameIdentity)[0];
+    const player = game.players.filter(hasGameIdentity).find(player => player.memberId === memberId)!;
+    const cancellation = game.events[0];
+    // Departure timestamps already use the game's clock; events use the database clock.
+    const departedAt = game.players.flatMap(player => player.leftAt ? [player.leftAt] : []).sort((a, b) => b.getTime() - a.getTime())[0] ?? null;
     const versions = new Map<number, ProgressTask>();
     for (const version of terms.versions) {
       const effective = effectiveTermWords(words, version.n);
@@ -147,6 +151,7 @@ export async function readGameSeries(memberId: string, clock: Date) {
     return { tasks: versions, payloads,
       now: new Date(clock.getTime() + Number(game.devClockOffsetMs ?? 0)),
       settledAt: game.settledAt ? new Date(game.settledAt.getTime() + Number(game.devClockOffsetMs ?? 0)) : null,
+      endedAt: game.status === "void" ? cancellation ? new Date(cancellation.createdAt.getTime() + Number(game.devClockOffsetMs ?? 0)) : departedAt : null,
       state: { game: { id: game.id, createdBy: game.createdBy, seats: game.maxPlayers, status: game.status as StreakGame["state"]["game"]["status"],
         lengthDays: game.lengthDays, terms, startsOn: game.startsOn?.toISOString().slice(0, 10) ?? null, inviteExpiresAt: null },
       players: [{ ...player, dayOne: player.dayOne!.toISOString().slice(0, 10) }],

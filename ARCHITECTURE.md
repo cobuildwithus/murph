@@ -6010,6 +6010,14 @@ trimmed, whitespace-collapsed, lowercase text plus check-in kind. Member identit
 is included by the keyed lookup owner. `goal.rungId` and `perDay` remain sealed
 measure content; no plaintext activity identity or amount is added.
 
+The request parser admits integer `perDay` values from 1 through 10,000.
+The inference provider boundary caps positive quantities at 10,000 while
+preserving fractional units. Typed rep counts already have a safe-integer
+bound; the route-summary boundary also caps `distanceM` at
+`Number.MAX_SAFE_INTEGER`, preserving fractional and long-distance posts.
+These bounds keep totals finite across the admitted 10,000 entries. Reducers
+do not validate the same input again.
+
 `patchMeasureState` is the sole writer of `state_encrypted`: one exact read,
 open and shallow field merge, then seal outside the transaction. Its short
 transaction rechecks caller authority and writes only against the observed
@@ -6051,8 +6059,12 @@ are pending days and produce no measure awards. A per-day choice applies to all
 completed history while previously earned day medals remain stored.
 
 `streak.ts` owns the shared board/Progress calendar: each game's frozen clock,
-join, departure, settlement and end bound its obligations. The departure day's
-post remains history; an unfulfilled departure day ends with membership. All
+join, departure, settlement and end bound its obligations. Void games end at
+their canonical cancellation event or the latest player's departure that
+voided a two-player group. Event times receive the game's dev-clock offset;
+player departure times already use that clock. The terminal day's completed
+post remains history; an unfulfilled terminal day ends with the game or
+membership. Earlier misses and stored awards remain. All
 obligations on a date must succeed, and dates without obligations neither add
 nor break a run. Current, best and month strings come from these same dates.
 
@@ -6065,6 +6077,16 @@ contribution is removed; their total becomes zero and their goals stay editable.
 under current Postgres browser-vault authority, then chooses gold and moments.
 Moments group unseen awards by earned date; the seen route resolves their ids
 to owner-bound rows. The four routes return private, non-cacheable responses.
+
+`format.ts` owns the exported number and amount formatters for all lanes.
+Hero totals use full digits; smaller labels compact from 10,000, with one
+decimal below 100,000. Signed friend gaps can compact from 1,000. Miles use
+whole numbers from ten miles and one decimal below. Projections include an
+explicit nullable `on` date; without a live game or recent pace they retain
+the next round number with a dateless label. Route-map projections stay null.
+Moment `title` and nullable `line` are response-only words derived from the
+shown awards; shelf titles and details remain the medal's own. Grouped
+moments describe an earned day, without inventing a post or time of day.
 
 An ordinary complete games read uses ten domain queries including a nonempty
 settlement (profile twice, games, entries, task cache, measure state, award insert,
@@ -6087,7 +6109,9 @@ apps/web/scripts/progress-inference-eval.ts` and an already-provisioned key.
 and separate 30-rung plank/sleep ladders. `ladderUse` is public bank metadata
 needed by the two time screens, not member persistence. A typed goal uses bank
 search first; a miss makes one Responses call constrained to at most four bank
-ids. Provider failure returns 503 without provider content. Goals and per-day
+ids and a nullable explanation of at most 240 characters in the same response.
+The response-only `Goals.note` is null for a match or no suggestions; it adds
+no stored field. Provider failure returns 503 without provider content. Goals and per-day
 choices use `patchMeasureState`; route goals return 501 until BE3 supplies
 `setRouteGoal`. No new table, endpoint, flag or preference is introduced.
 

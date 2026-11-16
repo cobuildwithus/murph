@@ -91,7 +91,8 @@
       ],
       "projection": {
         "value": 2000,
-        "label": "2,000 by Nov 23"
+        "label": "2,000 by Nov 23",
+        "on": "2026-11-23"
       },
       "ladder": {
         "kind": "height",
@@ -271,7 +272,8 @@
       ],
       "projection": {
         "value": 500,
-        "label": "500 by Nov 24"
+        "label": "500 by Nov 24",
+        "on": "2026-11-24"
       },
       "ladder": {
         "kind": "height",
@@ -519,7 +521,9 @@
         "where": "Toronto, Canada",
         "on": null,
         "toGo": "39 to go"
-      }
+      },
+      "title": "Four wins in one post",
+      "line": "Your 80 pushups this morning did all this."
     }
   ],
   "picCount": 3

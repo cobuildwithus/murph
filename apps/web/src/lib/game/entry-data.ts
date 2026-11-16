@@ -27,7 +27,9 @@ function heartRate(value: unknown): GameHeartRateData {
 function route(value: unknown): GameRouteData {
   const data = object(value, ["activity", "distanceM", "durationSec"]);
   if (data.activity !== "walk" && data.activity !== "run") invalid();
-  return { activity: data.activity, distanceM: number(data.distanceM), durationSec: number(data.durationSec) };
+  const distanceM = number(data.distanceM);
+  if (distanceM > Number.MAX_SAFE_INTEGER) invalid();
+  return { activity: data.activity, distanceM, durationSec: number(data.durationSec) };
 }
 
 function reps(value: unknown): GameRepsData {

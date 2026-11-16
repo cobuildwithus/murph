@@ -36,7 +36,7 @@ const request = (path = "", body?: object) => new Request(`https://example.test/
 function gameRow(id = "game-one") {
   const words: TermWords = { v: 1, versions: [{ n: 1, tasks: [{ seat: 0, text: "40 pushups" }], stakes: [] }] };
   return { id, createdBy: memberId, wordsOwnerMemberId: memberId, status: "live", maxPlayers: 2, lengthDays: 7,
-    startsOn: new Date("2026-11-01"), settledAt: null, devClockOffsetMs: null,
+    startsOn: new Date("2026-11-01"), settledAt: null, devClockOffsetMs: null, events: [],
     terms: { v: 1, versions: [{ n: 1, fromDay: 0, schedule: { count: 7 }, stakes: [] }] },
     termsWordsEncrypted: JSON.stringify(words),
     players: [{ memberId, seat: 0, dayOne: new Date("2026-11-01"), timeZone: "UTC", joinedAt: new Date("2026-11-01T12:00:00Z"), leftAt: null }] };
@@ -137,6 +137,24 @@ describe("Progress HTTP contracts", () => {
     const view = progressSchema.parse(await (await GET(request())).json());
     expect(view.streak.obligations).toEqual([{ id: "game-one", label: "40 pushups", icon: "dumbbell", done: false }]);
   });
+  it("uses the terminal event in the game's shifted clock without dropping earlier history", async () => {
+    const row = { ...gameRow(), status: "void", devClockOffsetMs: BigInt(86_400_000), events: [{ createdAt: new Date("2026-11-02T12:00:00Z") }] };
+    mocks.games.mockResolvedValue([row]); mocks.entries.mockResolvedValue([entryRow(0), entryRow(2)]);
+    const view = progressSchema.parse(await (await GET(request())).json());
+    expect(view.measures[0].total.value).toBe(80);
+    expect(view.streak).toMatchObject({ current: 1, obligations: [], best: { count: 1 }, today: "none" });
+    expect(view.streak.months[0].days).toBe(`dmd.t${"f".repeat(25)}`);
+  });
+  it("uses the departing peer's already-shifted time for a void group's surviving member", async () => {
+    const row = { ...gameRow(), status: "void", maxPlayers: 10, devClockOffsetMs: BigInt(86_400_000) };
+    const peer = { ...row.players[0], memberId: "member-leo", seat: 1, leftAt: new Date("2026-11-03T12:00:00Z") };
+    mocks.games.mockResolvedValue([{ ...row, players: [peer, ...row.players] }]);
+    mocks.entries.mockResolvedValue([entryRow(0), entryRow(2)]);
+    const view = progressSchema.parse(await (await GET(request())).json());
+    expect(view.measures[0].total.value).toBe(80);
+    expect(view.streak).toMatchObject({ current: 1, obligations: [], today: "none" });
+    expect(view.streak.months[0].days).toBe(`dmd.t${"f".repeat(25)}`);
+  });
   it("schedules only unresolved untyped phrases after the response, with member and kind bound lookups", async () => {
     mocks.entries.mockResolvedValue([0, 1].map(day => ({ ...entryRow(day), kind: "photo", payloadEncrypted: null })));
     const response = await GET(request());
@@ -175,7 +193,7 @@ describe("Progress HTTP contracts", () => {
     expect(response.status).toBe(200); expect(await response.json()).toEqual({ ok: true });
     expect(mocks.updateSeen).toHaveBeenCalledWith({ where: { memberId, lookup: { in: awards.map(award => award.lookup) }, seenAt: null }, data: { seenAt: expect.any(Date) } });
   });
-  it.each([{ perDay: -1 }, { goal: { rungId: "" } }, { memberId: "member-leo", perDay: 40 }])("rejects invalid measure input before storage", async body => {
+  it.each([{ perDay: -1 }, { perDay: 1e308 }, { perDay: 10_001 }, { perDay: 1.5 }, { goal: { rungId: "" } }, { memberId: "member-leo", perDay: 40 }])("rejects invalid measure input before storage", async body => {
     const response = await PUT(request("/measures/pushups.reps", body), { params: Promise.resolve({ id: "pushups.reps" }) });
     expect(response.status).toBe(400); expect(mocks.patch).not.toHaveBeenCalled();
   });
@@ -189,7 +207,7 @@ describe("Progress HTTP contracts", () => {
   it("returns only checked height tiles and a typed bank match", async () => {
     const response = await goals(request("/goals?measure=pushups.reps&q=Half%20Dome"));
     expect(response.status).toBe(200);
-    expect(goalsSchema.parse(await response.json())).toMatchObject({ match: { id: "half-dome" }, route: null });
+    expect(goalsSchema.parse(await response.json())).toMatchObject({ match: { id: "half-dome" }, note: null, route: null });
     expect(mocks.transaction).not.toHaveBeenCalled();
     expect(mocks.suggest).not.toHaveBeenCalled();
   });
@@ -203,13 +221,19 @@ describe("Progress HTTP contracts", () => {
     expect(goalsSchema.parse(await response.json()).tiles.map(tile => tile.id)).toEqual(ladder("time", "plank").filter(entry => entry.at > 600).slice(0, 6).map(entry => entry.id));
   });
   it("uses one bank-id-only Responses call for an unmatched goal and rejects invented ids", async () => {
-    mocks.suggest.mockResolvedValue({ status: "completed", output_text: JSON.stringify({ ids: ["half-dome"] }) });
+    mocks.suggest.mockResolvedValue({ status: "completed", output_text: JSON.stringify({ ids: ["half-dome"], note: "A real mountain to climb." }) });
     const response = await goals(request("/goals?measure=pushups.reps&q=Mount%20Doom"));
-    expect(goalsSchema.parse(await response.json()).suggestions.map(rung => rung.id)).toEqual(["half-dome"]);
+    expect(goalsSchema.parse(await response.json())).toMatchObject({ suggestions: [{ id: "half-dome" }], note: "A real mountain to climb." });
     expect(mocks.suggest).toHaveBeenCalledTimes(1);
     expect(mocks.suggest.mock.calls[0][0].text.format.schema.properties.ids).toMatchObject({ maxItems: 4, items: { enum: expect.arrayContaining(["half-dome"]) } });
     expect(mocks.suggest.mock.calls[0][1]).toMatchObject({ maxRetries: 0, timeout: 8000 });
-    mocks.suggest.mockResolvedValue({ status: "completed", output_text: JSON.stringify({ ids: ["mount-doom"] }) });
+    mocks.suggest.mockResolvedValue({ status: "completed", output_text: JSON.stringify({ ids: ["mount-doom"], note: null }) });
     expect((await goals(request("/goals?measure=pushups.reps&q=Mount%20Doom"))).status).toBe(503);
+  });
+  it("omits the unmatched-goal note when the single call has no suggestions", async () => {
+    mocks.suggest.mockResolvedValue({ status: "completed", output_text: JSON.stringify({ ids: [], note: "No close match." }) });
+    expect(goalsSchema.parse(await (await goals(request("/goals?measure=pushups.reps&q=Mount%20Doom"))).json()))
+      .toMatchObject({ match: null, suggestions: [], note: null });
+    expect(mocks.suggest).toHaveBeenCalledTimes(1);
   });
 });

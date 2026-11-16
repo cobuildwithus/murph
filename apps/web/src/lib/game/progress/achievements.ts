@@ -1,4 +1,5 @@
 import type { AchievementContext, Candidate } from "./registry";
+import { formatNumber } from "./format";
 
 export function roundTotals({ measures }: AchievementContext): Candidate[] {
   return measures.filter(measure => !measure.pending).flatMap(measure => measure.rounds.flatMap(round => {
@@ -16,7 +17,7 @@ export function ladderRungs({ measures }: AchievementContext): Candidate[] {
     return crossing ? [{ key: `rung:${measure.id}:${rung.id}`, kind: measure.unit === "seconds" ? "time" : "landmark",
       measureId: measure.id, subjectMemberId: null, on: crossing[0], data: {
         rung: { ...rung, on: crossing[0], toGo: null }, face: { drawing: rung.drawing ?? rung.id },
-        title: rung.name, detail: measure.unit === "seconds" ? rung.atText : `${Math.ceil(rung.at).toLocaleString("en-US")} ${measure.noun}`,
+        title: rung.name, detail: measure.unit === "seconds" ? rung.atText : `${formatNumber(Math.ceil(rung.at), "compact")} ${measure.noun}`,
         page: "totals", evaluator: 1,
       } }] : [];
   }));

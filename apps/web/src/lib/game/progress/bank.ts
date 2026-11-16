@@ -1,5 +1,6 @@
 import landmarks from "./bank/landmarks.json";
 import times from "./bank/time.json";
+import { formatAmount, formatNumber } from "./format";
 
 export interface BankEntry {
   id: string;
@@ -18,7 +19,7 @@ export const BANK: readonly BankEntry[] = [
   ...landmarks.map(entry => ({
     id: entry.id, name: entry.name, kind: entry.kind === "long" ? "route" as const : "height" as const,
     at: entry.kind === "long" ? entry.distance_km! * 1000 : entry.height_ft!,
-    atText: entry.kind === "long" ? `${entry.distance_mi} mi` : `${entry.height_ft!.toLocaleString("en-US")} ft`,
+    atText: entry.kind === "long" ? formatAmount(entry.distance_km! * 1000, "meters").text : `${formatNumber(entry.height_ft!, "compact")} ft`,
     blurb: entry.blurb, where: entry.where, source: entry.source_url, ladder: entry.ladder, use: [],
   })),
   ...times.map(entry => ({

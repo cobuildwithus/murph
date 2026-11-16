@@ -27,7 +27,8 @@
       ],
       "projection": {
         "value": 100,
-        "label": "100 by Nov 17"
+        "label": "100 by Nov 17",
+        "on": "2026-11-17"
       },
       "ladder": {
         "kind": "height",

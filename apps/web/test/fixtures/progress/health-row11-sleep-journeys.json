@@ -317,7 +317,8 @@
       ],
       "projection": {
         "value": 1036800,
-        "label": "12 days by Nov 21"
+        "label": "12 days by Nov 21",
+        "on": "2026-11-21"
       },
       "ladder": {
         "kind": "time",

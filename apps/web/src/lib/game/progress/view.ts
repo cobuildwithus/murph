@@ -5,10 +5,11 @@ import { assertBrowserVaultMemberAuthority } from "../../browser-vault/authority
 import { isHostedOnboardingError } from "../../hosted-onboarding/errors";
 import { getPrisma } from "../../prisma";
 import { termsForDay } from "../rules";
-import type { Medal, Moment, Progress } from "./contract";
+import type { Medal, Moment, Progress, Rung } from "./contract";
 import { readAwards, settleAwards, markAwardsSeen, type StoredAward } from "./awards";
 import { ACHIEVEMENTS, HEALTH, type AchievementContext } from "./registry";
-import { formatAmount, measureLadder, measureRungs, projection, roundValues } from "./goals";
+import { measureLadder, measureRungs, projection, roundValues } from "./goals";
+import { formatAmount, formatNumber } from "./format";
 import { cumulativePoints, readGameSeries, scheduleInference, type MeasureSeries } from "./series";
 import { bestRun, calendarMonths, currentRun, gameDays, obligationDays, type StreakDay } from "./streak";
 import type { BeforeProgressMutation, MeasureState } from "./state";
@@ -21,10 +22,9 @@ export function achievementContext(measures: readonly MeasureSeries[], states: R
       rungs: measureRungs(measure, states.get(measure.id) ?? {}),
       rounds: roundValues(total, measure.unit).filter(at => at <= total).map(at => {
         const amount = formatAmount(at, measure.unit);
-        const number = measure.unit === "reps" && at >= 1000 ? `${at / 1000}K` : amount.text;
-        const title = measure.unit === "seconds" ? `${at / 3600} ${at === 3600 ? "hour" : "hours"}`
+        const title = measure.unit === "seconds" ? `${formatNumber(at / 3600, "compact")} ${at === 3600 ? "hour" : "hours"}`
           : measure.unit === "days" ? `${amount.text} days` : amount.text;
-        return { at, face: { number }, title, detail: measure.unit === "days" ? measure.label.toLowerCase() : measure.noun };
+        return { at, face: { number: amount.text }, title, detail: measure.unit === "days" ? measure.label.toLowerCase() : measure.noun };
       }),
     };
   }) };
@@ -40,6 +40,22 @@ export function medalView(award: StoredAward, gold: boolean): Medal {
     open: { page: award.data.page as Medal["open"]["page"], measureId: award.measureId } };
 }
 
+function momentWords(kind: Moment["kind"], group: readonly StoredAward[], gold: boolean): Pick<Moment, "title" | "line"> {
+  const first = group[0];
+  const title = first.data.title as string;
+  const detail = first.data.detail as string;
+  if (kind === "bigDay") {
+    const count = group.length < 10 ? ["Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine"][group.length] : formatNumber(group.length, "compact");
+    return { title: `${count} wins in one day`, line: null };
+  }
+  if (kind === "goal" || kind === "held") return { title, line: (first.data.rung as Rung).blurb };
+  if (kind === "route") return { title, line: detail };
+  if (first.kind.startsWith("health")) return { title: `${title} ${detail}`,
+    line: gold ? "Your best since you joined. It's your newest medal, so it's the gold one on Prizes." : "Your best since you joined." };
+  if (first.kind === "streak") return { title: `${title} in a row`, line: "Your best run yet." };
+  return { title: `${title} ${detail}`, line: null };
+}
+
 /** A moment is an earned date, grouping every unseen crossing on that day. */
 export function momentsView(awards: readonly StoredAward[], measures: Progress["measures"]): Moment[] {
   const groups = new Map<string, StoredAward[]>();
@@ -52,7 +68,7 @@ export function momentsView(awards: readonly StoredAward[], measures: Progress["
     const first = group[0];
     const sameMeasure = group.every(award => award.measureId === first.measureId);
     const kind = group.length > 1 ? "bigDay" : first.kind === "landmark" ? "goal" : first.kind === "time" ? "held" : first.kind === "route" ? "route" : "medal";
-    return { id: `day:${on}`, kind, medalIds: group.map(award => award.id), measureId: sameMeasure ? first.measureId : null,
+    return { id: `day:${on}`, kind, ...momentWords(kind, group, first === awards[0]), medalIds: group.map(award => award.id), measureId: sameMeasure ? first.measureId : null,
       nextGoal: sameMeasure ? measures.find(measure => measure.id === first.measureId)?.ladder?.next ?? null : null };
   });
 }
@@ -63,7 +79,7 @@ export function measureView(measure: MeasureSeries, state: MeasureState, awards:
   return { id: measure.id, label: measure.label, noun: measure.noun, icon: measure.icon,
     format: measure.unit === "seconds" ? "duration" : measure.unit === "meters" ? "distance" : measure.unit === "days" ? "days" : "count",
     source: "games", pending: measure.pending, gameOn: measure.gameOn, needsPerDay: measure.needsPerDay,
-    total: formatAmount(points.at(-1)?.[1] ?? 0, measure.unit), today: todayValue > 0 ? formatAmount(todayValue, measure.unit) : null,
+    total: formatAmount(points.at(-1)?.[1] ?? 0, measure.unit, "full"), today: todayValue > 0 ? formatAmount(todayValue, measure.unit) : null,
     points, projection: projection(measure, today), ladder: measureLadder(measure, state, awards), route: null, pics: [] };
 }
 

@@ -5,12 +5,12 @@ import { GAME_IDEAS_MODEL, GAME_IDEAS_TIMEOUT_MS } from "../ideas/writer";
 import { EXERCISES } from "./registry";
 
 export const UNITS = ["reps", "seconds", "minutes", "hours", "meters", "km", "miles", "steps", "days"] as const;
-const inference = z.object({ quantity: z.number().positive().nullable(), unit: z.enum(UNITS), name: z.string().nullable() });
+const inference = z.object({ quantity: z.number().positive().max(10_000).nullable(), unit: z.enum(UNITS), name: z.string().nullable() });
 export type InferredMeasure = z.infer<typeof inference>;
 export interface TaskInput { text: string; kind: GameCheckInKind }
 const decisions = z.object({ answers: z.array(z.object({ type: z.literal("predicate"), name: z.enum(["amount", "stated", "activity"]), probability: z.number().min(0).max(1) })).length(3) });
 const schema = { type: "object", additionalProperties: false, required: ["quantity", "unit", "name"], properties: {
-  quantity: { type: ["number", "null"] }, unit: { type: "string", enum: UNITS }, name: { type: ["string", "null"] },
+  quantity: { type: ["number", "null"], exclusiveMinimum: 0, maximum: 10_000 }, unit: { type: "string", enum: UNITS }, name: { type: ["string", "null"] },
 } };
 
 export const normalizeTask = (text: string): string => text.normalize("NFKC").trim().replace(/\s+/gu, " ").toLocaleLowerCase("en-US");

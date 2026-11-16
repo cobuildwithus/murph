@@ -81,7 +81,11 @@
           1400
         ]
       ],
-      "projection": null,
+      "projection": {
+        "value": 2000,
+        "label": "2,000 next",
+        "on": null
+      },
       "ladder": {
         "kind": "height",
         "passed": [
@@ -251,7 +255,11 @@
           380
         ]
       ],
-      "projection": null,
+      "projection": {
+        "value": 500,
+        "label": "500 next",
+        "on": null
+      },
       "ladder": {
         "kind": "height",
         "passed": [
@@ -415,7 +423,7 @@
       "kind": "total",
       "gold": true,
       "face": {
-        "number": "1K"
+        "number": "1,000"
       },
       "title": "1,000",
       "detail": "pushups",

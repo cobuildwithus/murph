@@ -101,6 +101,12 @@ describe("weekly game command validator", () => {
     expect(codeOf(() => parseGameCommand({ ...command, kind: "reps", data: { ...tape, reps: Array(300).fill(tape.reps[0]) } }))).toBe("OK");
   });
 
+  it.each([1e308, Number.MAX_SAFE_INTEGER + 1, Number.MAX_SAFE_INTEGER, 42_195, 1250.5])("bounds route amounts at admission: %s", distanceM => {
+    const command = { type: "post", gameId: "game_route", entryId: "entry_route", kind: "route", mediaKeys: [PHOTO_KEY],
+      data: { activity: "walk", distanceM, durationSec: 600 } };
+    expect(codeOf(() => parseGameCommand(command))).toBe(distanceM > Number.MAX_SAFE_INTEGER ? "INVALID_REQUEST" : "OK");
+  });
+
   it("validates legacy kind requests and defaults new games to free artifact choice", () => {
     const command = { type: "createGame", gameId: "game_checkin", inviteeFirstName: "Ava", terms: {
       tasks: [{ seat: 0, text: "Pushups" }, { seat: 1, text: "Pushups" }],

@@ -60,7 +60,7 @@
       "name": "Mount Everest",
       "drawing": "mount-everest",
       "at": 29032,
-      "atText": "29,032 ft",
+      "atText": "29k ft",
       "blurb": "The highest mountain on Earth, first climbed by Edmund Hillary and Tenzing Norgay in 1953.",
       "where": "Nepal",
       "on": null,
@@ -69,5 +69,6 @@
   ],
   "match": null,
   "suggestions": [],
-  "route": null
+  "route": null,
+  "note": null
 }
