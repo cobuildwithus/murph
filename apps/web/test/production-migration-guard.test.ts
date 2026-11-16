@@ -1155,6 +1155,18 @@ describe("hosted web production migration guard", () => {
     }
   });
 
+  test("permits the additive Not for me list", async () => {
+    const migrationsDir = await mkdtemp(path.join(tmpdir(), "game-not-for-me-migration-"));
+    const migrationId = "20261116210000_game_profile_not_for_me";
+    const sql = await readFile(new URL(`../prisma/migrations/${migrationId}/migration.sql`, import.meta.url), "utf8");
+    try {
+      await writeMigrationSql(migrationsDir, migrationId, sql);
+      assert.deepEqual(await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir), []);
+    } finally {
+      await rm(migrationsDir, { recursive: true, force: true });
+    }
+  });
+
   test("blocks newly introduced backdated destructive Prisma migrations", async () => {
     const migrationsDir = await mkdtemp(
       path.join(tmpdir(), "hosted-web-prisma-migrations-"),

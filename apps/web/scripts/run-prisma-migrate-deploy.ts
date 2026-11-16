@@ -107,6 +107,11 @@ const hostedWebPrismaPredeployHistoricalMigrationIds = new Set([
 
 const hostedWebPrismaPredeployCompatibleMigrationReasons = new Map([
   [
+    "20261116210000_game_profile_not_for_me",
+    // A constant empty-array default preserves existing rows and old writers.
+    new Set(["ADD COLUMN NOT NULL"]),
+  ],
+  [
     "20261115190000_linq_group_risk_ledger",
     // Widens leave reasons atomically; zero attempts and nullable status preserve
     // every old marker and insert. New-table constraints have no legacy writers.
