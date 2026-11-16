@@ -4000,15 +4000,20 @@ async function buildViewInputs(
       words: parseTermWords(plain[wordsAt[index]] ?? ""),
     };
   });
-  const memberIdsForPhones = inputs.flatMap(input => input.tickets.flatMap(ticket => {
+  const verifiedPhones = await ticketRecipientPhones(inputs, prisma);
+  return inputs.map(input => ({ ...input, verifiedPhones }));
+}
+
+/** The verified numbers of everyone owing a ticket a viewer can text about; no read when nobody qualifies. */
+async function ticketRecipientPhones(
+  inputs: readonly GameViewInput[],
+  prisma: Parameters<typeof readHostedMemberVerifiedPhoneNumbers>[0]["prisma"],
+): Promise<ReadonlyMap<string, string>> {
+  const memberIds = inputs.flatMap(input => input.tickets.flatMap(ticket => {
     const recipient = ticketMessageRecipient(ticket, input);
     return recipient ? [recipient] : [];
   }));
-  // No eligible ticket, no identity read.
-  const verifiedPhones = memberIdsForPhones.length === 0
-    ? new Map<string, string>()
-    : await readHostedMemberVerifiedPhoneNumbers({ memberIds: memberIdsForPhones, prisma });
-  return inputs.map(input => ({ ...input, verifiedPhones }));
+  return memberIds.length === 0 ? new Map() : await readHostedMemberVerifiedPhoneNumbers({ memberIds, prisma });
 }
 
 function isHomeEntry(game: LoadedGame, viewerId: string, clock: Date, entry: Pick<GameEntry, "memberId" | "dayIndex">): boolean {
