@@ -8,6 +8,7 @@ import {
   resolveAssistantMurphProductBaseUrl,
   type AssistantSystemPromptInput,
 } from '../src/assistant/system-prompt.js'
+import { sweepPromptInputs } from './support/prompt-route-fixtures.js'
 
 const blockIds = (input: AssistantSystemPromptInput) =>
   buildAssistantSystemPromptLayers(input).blocks.map((block) => block.id)
@@ -103,6 +104,30 @@ describe('assistant hosted wearable connection guidance', () => {
     expect(rule(true)).toContain(MURPH_PRODUCT_ORIGIN)
     expect(rule(false)).toContain(MURPH_PRODUCT_ORIGIN)
     expect(rule(true)).not.toBe(rule(false))
+  })
+})
+
+describe('assistant MCP server guidance', () => {
+  // Web serves this page and its `?url=` prefill; Codex names each connected
+  // server's namespace `mcp__<server>`; Murph's own tools are `murph`.
+  const settingsLink = `${MURPH_PRODUCT_ORIGIN}/settings/connections`
+
+  it('reaches every private prompt once and no group or unverified prompt', () => {
+    for (const input of sweepPromptInputs()) {
+      const scope = input.conversationScope ?? 'direct'
+      const label = `${scope} ${input.channel ?? 'local'}`
+      const { prompt } = buildAssistantSystemPromptLayers(input)
+      if (scope === 'direct') {
+        expect(prompt.split(settingsLink), label).toHaveLength(2)
+        const block = blockText(input, 'route.connected-apps.direct')
+        for (const token of [settingsLink, '`?url=`', '`mcp__`', '`murph`']) {
+          expect(block, `${label}: ${token}`).toContain(token)
+        }
+      } else {
+        expect(prompt, label).not.toContain(settingsLink)
+        expect(prompt, label).not.toContain('`mcp__`')
+      }
+    }
   })
 })
 
