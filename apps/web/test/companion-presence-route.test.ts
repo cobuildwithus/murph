@@ -7,7 +7,7 @@ vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({ requireH
 vi.mock("@/src/lib/companion/presence", () => ({ recordCompanionHeartbeat: m.record, readRuntimeCompanionPresence: m.read }));
 import { POST as heartbeat } from "../app/api/companion/heartbeat/route";
 import { POST as presence } from "../app/api/internal/companion/presence/route";
-const request = (body: unknown) => new Request("https://backend.test/api/companion/heartbeat", { method: "POST", body: JSON.stringify(body), headers: { "content-type": "application/json" } });
+const request = (body: unknown, headers: Record<string, string> = {}) => new Request("https://backend.test/api/companion/heartbeat", { method: "POST", body: JSON.stringify(body), headers: { "content-type": "application/json", ...headers } });
 describe("companion presence route authority", () => {
   beforeEach(() => {
     vi.resetAllMocks(); m.bearer.mockResolvedValue({ member: { id: "member-bound" } });
@@ -18,12 +18,31 @@ describe("companion presence route authority", () => {
     const response = await heartbeat(request({ state: "background" }));
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toContain("no-store");
-    expect(m.record).toHaveBeenCalledExactlyOnceWith("member-bound", "background");
+    expect(m.record).toHaveBeenCalledExactlyOnceWith("member-bound", "background", null);
     m.record.mockClear();
     expect((await heartbeat(request({ state: "foreground", memberId: "other" }))).status).toBe(400);
     expect((await heartbeat(request({ state: "x".repeat(200) }))).status).toBeGreaterThanOrEqual(400);
     expect(m.record).not.toHaveBeenCalled();
   });
+  it("passes validated client headers to the existing heartbeat writer", async () => {
+    const response = await heartbeat(request({ state: "foreground" }, {
+      "X-Murph-Client-Platform": "android", "X-Murph-Client-Version": "0.1.3-dev", "X-Murph-Client-Build": "109",
+      "X-Murph-Client-OS-Version": "15", "X-Murph-Client-Device-Model": "Pixel 8 Pro",
+    }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ recorded: true });
+    expect(m.record).toHaveBeenCalledExactlyOnceWith("member-bound", "foreground", {
+      platform: "android", version: "0.1.3-dev", build: "109", osVersion: "15", deviceModel: "Pixel 8 Pro",
+    });
+  });
+  it.each<Record<string, string>>([{}, { "X-Murph-Client-Platform": "unknown", "X-Murph-Client-Version": "bad", "X-Murph-Client-Build": "109" }])(
+    "records contact when client headers are absent or invalid", async (headers) => {
+      const response = await heartbeat(request({ state: "foreground" }, headers));
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ recorded: true });
+      expect(m.record).toHaveBeenCalledExactlyOnceWith("member-bound", "foreground", null);
+    },
+  );
   it("uses signed callback identity and rejects unauthenticated native writes", async () => {
     expect((await presence(request({}))).status).toBe(200);
     expect(m.read).toHaveBeenCalledExactlyOnceWith("member-bound", null);
