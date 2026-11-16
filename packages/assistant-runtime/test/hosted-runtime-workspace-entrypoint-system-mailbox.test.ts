@@ -6131,6 +6131,7 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
             },
             credential: { kind: "provider_config", providerConfigKey: "junction", credentialMetadata: {} },
             sources: [{
+              sourceInstanceKey: "synthetic_whoop_source",
               sourceProviderSlug: "whoop_v2", displayName: "WHOOP", status: "connected",
               firstSeenAt: connectedAt, lastSeenAt: connectedAt, lastDataAt: null,
               resourceCount: 1, resourceAvailabilitySummary: { sleep: true },

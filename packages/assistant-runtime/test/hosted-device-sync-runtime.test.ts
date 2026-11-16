@@ -14654,6 +14654,20 @@ describe("hosted device-sync runtime", () => {
           hostedConnectionEpoch: "fresh",
         },
         provider: "junction",
+        // Connect-window history is owed only while a wearable is linked.
+        sources: [{
+          displayName: "Garmin",
+          firstSeenAt: reconnectedAt,
+          lastDataAt: null,
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastSeenAt: reconnectedAt,
+          resourceCount: 1,
+          resourceAvailabilitySummary: { activity: true },
+          sourceInstanceKey: "hosted_garmin_source",
+          sourceProviderSlug: "garmin",
+          status: "connected",
+        }],
       });
 
       await syncHostedDeviceSyncControlPlaneState({
