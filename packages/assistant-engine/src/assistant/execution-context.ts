@@ -1,3 +1,4 @@
+import type { HostedCustomConnectionsPort } from "@murphai/hosted-execution";
 import type { CompanionPresence } from "@murphai/hosted-execution/companion-presence";
 import { gameGroupMissedCheckInPolicySchema, type HostedGameGroupMissedCheckInPolicy } from '@murphai/hosted-execution/runtime-control'
 import type { AssistantCurrentDeliveryRoute } from '@murphai/operator-config/assistant/current-delivery-route'
@@ -634,6 +635,7 @@ export interface AssistantHostedExecutionContext {
   } | null
   assistantConfigurationTool?: AssistantHostedAssistantConfigurationTool | null
   channelTypingDependencies?: AssistantChannelTypingDependencies
+  customConnections?: HostedCustomConnectionsPort | null
   connectedApps?: AssistantConnectedAppsPort | null
   preparedJournal?: import('./journal-connected-context-prepare.js').PreparedJournalContext | null
   clinicalRecordsConnectLinkTool?: AssistantHostedClinicalRecordsConnectLinkTool | null
@@ -834,6 +836,7 @@ export function normalizeAssistantExecutionContext(
         ? { createScheduledGroupTools: hosted.createScheduledGroupTools }
         : {}),
       ...optionalHostedField('assistantConfigurationTool', assistantConfigurationTool),
+      ...optionalHostedField('customConnections', hosted.customConnections),
       ...optionalHostedField('connectedApps', connectedApps),
       ...optionalHostedField('preparedJournal', hosted.preparedJournal),
       ...optionalHostedField('clinicalRecordsConnectLinkTool', clinicalRecordsConnectLinkTool),

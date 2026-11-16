@@ -9,6 +9,12 @@ projection does not replace the parent environment or change its working directo
 Email retention uses the trusted mailbox occurrence time as receipt time; the
 sender-controlled message Date header is message metadata only.
 
+The optional `customConnections` platform port supplies only approved mount
+identity (id, slug, generation, catalog). It is passed into hosted execution
+context without reading it. The engine reads it when an eligible personal
+ordinary hosted turn plans; the Cloudflare implementation memoizes that read
+for the invocation. Web owns all connection credentials and admission checks.
+
 Background notifications yield at the existing delivery checkpoint before
 another automation decision or managed-automation setup. Queue-only cron work
 also yields after creating pending output. The existing outbox dispatch and

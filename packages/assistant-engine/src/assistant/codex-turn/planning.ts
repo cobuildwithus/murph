@@ -1,3 +1,5 @@
+import type { HostedCustomConnectionManifestEntry } from "@murphai/hosted-execution"
+import { resolveCodexAttemptCapabilities } from "../codex-attempt-capabilities.js"
 import { MURPH_GENERATE_IMAGE_RECAP_TOOL, MURPH_GENERATE_SONG_RECAP_TOOL, MURPH_WRITE_RECAP_FILE_TOOL } from '../../assistant-codex/dynamic-tools/games.js'
 import { GAME_PHOTO_CHAT_GUIDANCE, GAME_RESIDENT_GROUP_POINTER, GAME_PRIVATE_REMINDER_DIRECT_GUIDANCE, MURPH_GAME_LORE_TOOL, MURPH_READ_GAME_RECAP_TOOL, MURPH_WRITE_RECAP_TOOL } from "../../assistant-codex/dynamic-tools/games.js"
 import { resolveUsageOptimizerFeedbackScope } from '../weekly-usage-optimizer.js'
@@ -147,6 +149,7 @@ import {
 const ASSISTANT_CONTEXT_SNAPSHOT_FOREGROUND_REFRESH_MAX_STEPS = 64
 
 export interface AssistantRouteTurnPlan {
+  customConnections?: readonly HostedCustomConnectionManifestEntry[]
   followUpAttachmentAllowed?: boolean
   followUpInvocation?: boolean
   assistantContractFingerprint: string
@@ -840,6 +843,7 @@ function resolveRouteNativeResumeThreadId({
   assistantContractFingerprint,
   threadStartDeveloperInstructions,
   dynamicTools,
+  customConnections,
   transcriptEntries,
 }: {
   input: AssistantRouteTurnPlanInput
@@ -847,6 +851,7 @@ function resolveRouteNativeResumeThreadId({
   assistantContractFingerprint: string
   threadStartDeveloperInstructions: string | null
   dynamicTools: readonly MurphDynamicTool[]
+  customConnections: readonly HostedCustomConnectionManifestEntry[]
   transcriptEntries: readonly AssistantTranscriptEntry[] | null
 }): { resumeCodexThreadId: string | null; threadRotationReason: AssistantRoutePlanningDiagnostics['threadRotationReason'] } {
   const storedAssistantContractFingerprint = normalizeNullableString(
@@ -855,6 +860,7 @@ function resolveRouteNativeResumeThreadId({
   const assistantContractMatches =
     storedAssistantContractFingerprint === assistantContractFingerprint ||
     (
+      customConnections.length === 0 &&
       resumeBinding !== null &&
       [readCodexThreadCompatibilityFingerprint(input.route), resumeBinding.routeFingerprint]
         .some((routeFingerprint) =>
@@ -896,6 +902,15 @@ function resolveGroupRoomModelInjectedDigest(
     && turnContextPrompt?.includes(groupRoomModel.prompt)
     ? groupRoomModel.bodyDigest
     : null
+}
+
+async function readEligibleCustomConnections(
+  input: AssistantRouteTurnPlanInput,
+  followUpInvocation: boolean,
+): Promise<readonly HostedCustomConnectionManifestEntry[]> {
+  const capabilities = resolveCodexAttemptCapabilities({ route: input.route, routePlan: { followUpInvocation } }, input)
+  if (!capabilities.customConnectionsEligible) return []
+  return await input.executionContext?.hosted?.customConnections?.readManifest() ?? []
 }
 
 export async function resolveAssistantRouteTurnPlan(
@@ -1400,7 +1415,9 @@ export async function resolveAssistantRouteTurnPlan(
     dynamicTools.some(
       (tool) => tool.namespace === 'murph' && tool.name === 'react_to_message',
     )
+  const customConnections = await readEligibleCustomConnections(input, followUpInvocation)
   const assistantContractFingerprint = buildAssistantCodexContractFingerprint({
+    customConnections,
     developerInstructions: supportsCodexTurnDeveloperInstructions({ env: input.sharedPlan.cliAccess.env })
       ? undefined
       : threadStartDeveloperInstructions,
@@ -1412,6 +1429,7 @@ export async function resolveAssistantRouteTurnPlan(
     resumeBinding,
     transcriptEntries: routeTranscript.entries,
     assistantContractFingerprint,
+    customConnections,
     threadStartDeveloperInstructions,
     dynamicTools,
   })
@@ -1456,6 +1474,7 @@ export async function resolveAssistantRouteTurnPlan(
     resolveRoutePlanningSlowestSpan(routePlanningSpans)
 
   return {
+    customConnections,
     followUpInvocation,
     followUpAttachmentAllowed,
     assistantContractFingerprint,

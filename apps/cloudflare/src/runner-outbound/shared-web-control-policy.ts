@@ -1,3 +1,4 @@
+import { HOSTED_CUSTOM_CONNECTIONS_MANIFEST_PATH } from "@murphai/hosted-execution";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { HOSTED_RUNTIME_POLL_TOOL_PATH } from "@murphai/hosted-execution/routes";
 import {
@@ -184,6 +185,10 @@ export const HOSTED_RUNNER_WEB_CONTROL_ROUTES = {
   clinicalRecordsRecordOutcome: defineHostedRunnerWebControlPostRoute(
     "clinical_records_record_outcome",
     HOSTED_CLINICAL_RECORDS_RUNTIME_RECORD_OUTCOME_PATH,
+  ),
+  customConnectionsManifest: defineHostedRunnerWebControlPostRoute(
+    "custom_connections_manifest",
+    HOSTED_CUSTOM_CONNECTIONS_MANIFEST_PATH,
   ),
   connectedApps: defineHostedRunnerWebControlPostRoute(
     "connected_apps",

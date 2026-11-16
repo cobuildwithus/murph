@@ -300,6 +300,23 @@ container records identify their application through `$containers.applicationId`
 An absent field is unknown, not `missing`; zero matches do not establish health.
 
 The phone-call start port is one bounded `web-control.worker` callback into `apps/web`; its protocol floor is 45 seconds even when the generic web-control timeout is 30 seconds, so the web-owned 40-second aggregate deadline finishes before the caller gives up. Deploy and prove convergence of this 45-second Cloudflare caller before deploying a web build with the 40-second deadline. The longer caller is backward compatible with older web builds; an old 30-second caller is not compatible with the 40-second web deadline, so Cloudflare cannot be rolled back below 45 seconds while that web build is active. Retell credentials and provider calls remain web-owned and are never forwarded into the runner.
+
+Custom connections use `connections.worker/v1/<id>/<generation>/<catalog>/mcp`.
+The POST-only relay reads member and write-fence authority from ContainerProxy,
+rejects absent or retiring authority, bounds request bodies to 256 KiB, and
+signs the matching Web gateway callback. Caller headers are discarded; only
+response status, body and content type return to the container. Web owns
+credentials, approval and current member/version admission.
+
+The invocation-local `customConnections` port lazily reads the allowlisted
+`POST /api/internal/custom-connections/manifest` once, at the first eligible
+personal ordinary hosted turn; old-Web 404 means an empty manifest. The
+manifest joins the assistant contract fingerprint, so catalog, generation and
+connection changes use the existing fresh-thread path. Restricted launches
+receive an explicit empty MCP map. Public fetch rejects internal hosts on its
+initial URL and every redirect hop. Deploy compatible Web routes first, then
+Worker/runtime; keep the feature allowlist disabled until both converge.
+
 `murph.plan_usage` uses one allowlisted signed `web-control.worker` callback.
 Cloudflare transports and validates the strict result but owns no billing or
 usage truth and has no billing mutation authority. The current runner opts into
