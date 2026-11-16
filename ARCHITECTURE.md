@@ -5981,7 +5981,7 @@ inference. The following classification covers every column of exactly
 | Table | Encrypted content | Keyed lookup | Approved operational metadata |
 | --- | --- | --- | --- |
 | `game_progress_award` | `data_encrypted`: candidate key, kind, measure, subject, crossing day and numeric/content facts | `lookup`: member-bound award identity | `member_id`: owner FK; `subject_member_id`: nullable friend FK; `earned_on`: local calendar date for ordering; `created_at`: insertion order; `seen_at`: drawer acknowledgement |
-| `game_progress_measure` | `state_encrypted`: goal, frozen route legs/geometry/towns, per-day amount, frozen baseline | `lookup`: member-bound measure identity | `member_id`: owner FK; `updated_at`: mutation time |
+| `game_progress_measure` | `state_encrypted`: goal, latest checked found goal, frozen route legs/geometry/towns, per-day amount, frozen baseline | `lookup`: member-bound measure identity | `member_id`: owner FK; `updated_at`: mutation time |
 | `game_progress_pic` | `meta_encrypted`: measure identity | None | `id`: client UUID; `member_id`: owner FK; `storage_key`: random exclusive Progress object identity; `taken_at`: capture ordering; `retired_at`: permanent retirement time |
 | `game_progress_task_measure` | `measure_encrypted`: inferred name, quantity and unit | `lookup`: member-bound normalized task text plus check-in kind | `member_id`: owner FK; `created_at`: insertion time |
 
@@ -5999,16 +5999,26 @@ owner root; batch opening uses the existing root batch reader. The keyed lookup
 uses `createHostedOpaqueIdentifier` and JSON-framed owner/value parts under
 separate Progress award, measure and task purposes. No content is logged.
 
-The games award envelope additionally seals `data.value`, `data.rung` (the
-checked bank identity, threshold, crossing date and displayed facts), `data.face`,
-`data.title`, `data.detail`, `data.page` and `data.evaluator`. All are private
-content: even public landmark text identifies an owner's accomplishment when
-attached to an award. The evaluator version is evidence, never part of its key.
+The games award envelope seals facts, not rendered text: `data.value`, `unit`,
+`noun`, `rung`, `page` and `evaluator`; route awards also seal `from`, `to`,
+`distanceM` and `startTotal`. A rung seals its earned threshold `at` and either
+`target.{kind,id}` for the bank or `target.found` for the complete checked found
+definition. All are private content: even public landmark text identifies an
+owner's accomplishment when attached to an award. Reader units never enter
+settlement or award identity. The evaluator version is evidence, never part of
+its key. Health/friend award content remains with its lane owner.
 The inference envelope contains only `{quantity, unit, name}`; task words stay
 in their existing sealed game owner. The keyed cache input is NFKC-normalized,
 trimmed, whitespace-collapsed, lowercase text plus check-in kind. Member identity
-is included by the keyed lookup owner. `goal.rungId` and `perDay` remain sealed
-measure content; no plaintext activity identity or amount is added.
+is included by the keyed lookup owner. The internal goal is `{rungId}`, `{route}`
+or `{found}`; the public pick still accepts only a bank/found id or two route
+places. The latest lookup occupies one `found` slot. Every found field (`id`,
+`kind`, `name`, `short`, `tagline`, `at`, `where`, `blurb`, `sourceUrl`) is sealed
+private content in cache, selected goal and earned award. Heights normalize once
+to feet; durations use seconds. The found id hashes kind, normalized name and
+location, canonical value and cited URL; prose and reader units are excluded.
+It remains inside the existing member-keyed state/award owners. `perDay` stays
+sealed; no plaintext activity identity or amount is added.
 
 The request parser admits integer `perDay` values from 1 through 10,000.
 The inference provider boundary caps positive quantities at 10,000 while
@@ -6025,7 +6035,9 @@ ciphertext; first creation uses the composite unique key. A loser throws
 `GAME_PROGRESS_STATE_CONFLICT` (503, retryable); it does not retry. Patches replace
 whole fields, including the legs array. A computed patch runs against that same
 observed state, so route rollover cannot overwrite a newer legs array from a
-separate caller read. BE2 must only propose a baseline while
+separate caller read. Found picks check the requested id and measure kind in
+this transform and copy the complete definition into the goal. Replacing the
+lookup slot cannot change an already selected goal or earned award. BE2 must only propose a baseline while
 it is absent and include current health authority in the transaction callback.
 
 All three mutation helpers require `beforeMutationTx`: route owners pass the
@@ -6081,9 +6093,16 @@ Moments group unseen awards by earned date; the seen route resolves their ids
 to owner-bound rows. The four routes return private, non-cacheable responses.
 
 `format.ts` owns the exported number and amount formatters for all lanes.
+Progress handlers read `X-Murph-Client-Units` once with `clientUnits` and pass
+`us`, `uk` or `metric` explicitly to text builders; missing/unknown means `us`.
+Distance is miles for US/UK and kilometers for metric; height is feet for US
+and meters for UK/metric. Metric bank prose uses `blurb_metric` where present;
+UK retains imperial prose. Award renderers resolve bank references by `(kind,id)`
+or use the complete stored found definition. The same one-mile award therefore
+reads `1.6 km` to a metric reader without earning a different award.
 Hero totals use full digits; smaller labels compact from 10,000, with one
-decimal below 100,000. Signed friend gaps can compact from 1,000. Miles use
-whole numbers from ten miles and one decimal below. Projections include an
+decimal below 100,000. Signed friend gaps can compact from 1,000. Distances use
+whole numbers from ten displayed units and one decimal below. Projections include an
 explicit nullable `on` date; without a live game or recent pace they retain
 the next round number with a dateless label. Route-map projections stay null.
 Moment `title` and nullable `line` are response-only words derived from the
@@ -6112,11 +6131,23 @@ apps/web/scripts/progress-inference-eval.ts` and an already-provisioned key.
 
 `bank.ts` exposes only checked entries, including the supplied 70 height rungs
 and separate 30-rung plank/sleep ladders. `ladderUse` is public bank metadata
-needed by the two time screens, not member persistence. A typed goal uses bank
-search first; a miss makes one Responses call constrained to at most four bank
-ids and a nullable explanation of at most 240 characters in the same response.
-The response-only `Goals.note` is null for a match or no suggestions; it adds
-no stored field. Provider failure returns 503 without provider content. Goals and per-day
+needed by the two time screens, not member persistence. `Rung.short` and
+`Rung.tagline` are required, single-line, number-free strings up to 40 characters.
+Found rungs have no drawing; their medal uses the explicit `{generic:true}` face.
+Typing searches only the bank. `GET /progress/goals?measure=...&q=...&find=1`
+admits one explicit lookup through the existing persisted auth rate limiter:
+20 calls per member per 24-hour window, across measures. Its selector is keyed
+and its counter stays in the existing sealed auth owner; no Progress preference
+or table is added. Exhaustion returns 429 without a provider call.
+The lookup uses `gpt-6.1-sol`, low reasoning, required `web_search`, strict JSON,
+`store:false`, a 30-second deadline and no retry. Input contains only kind,
+search words and eligible bank ids/names. A found source must occur in an
+`output_text` URL citation, with a height in 1–400,000,000 meters or duration in
+1–31,536,000 seconds. Closest ids must be eligible. Invalid semantic evidence
+returns no found goal; malformed/provider failures return 503 without provider
+content. `Goals.note` and suggestions are response-only. A successful found
+write rechecks native-session authority inside `patchMeasureState`, outside
+the provider catch, preserving authority and conflict errors. Goals and per-day
 choices use `patchMeasureState`. Distance goals call `setRouteGoal` with the
 complete canonical series, stored awards and current mutation authority. Typed
 and checked two-place bank routes use the same resolver; other long bank entries

@@ -3,7 +3,8 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 import { getPrisma } from "../../prisma";
 import { hostedOnboardingError } from "../../hosted-onboarding/errors";
-import type { Day, SetMeasureBody } from "./contract";
+import type { Day } from "./contract";
+import type { FoundEntry } from "./bank";
 import { openProgress, progressLookup, sealProgress } from "./crypto";
 
 export type BeforeProgressMutation = (tx: Prisma.TransactionClient) => Promise<void>;
@@ -17,7 +18,8 @@ export interface RouteLeg {
   startTotal: number;
 }
 export interface MeasureState {
-  goal?: Extract<SetMeasureBody, { goal: object }>["goal"];
+  goal?: { rungId: string } | { route: { from: string; to: string } } | { found: FoundEntry };
+  found?: FoundEntry;
   legs?: RouteLeg[];
   perDay?: number;
   baseline?: { value: number; from: Day; to: Day };

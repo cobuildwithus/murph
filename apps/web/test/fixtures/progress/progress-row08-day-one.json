@@ -42,7 +42,9 @@
           "blurb": "The giant white letters above Los Angeles, first put up in 1923 as a real estate ad.",
           "where": "Los Angeles, USA",
           "on": null,
-          "toGo": "5 to go"
+          "toGo": "5 to go",
+          "short": "Hollywood Sign",
+          "tagline": "Letters high above the city"
         },
         "goalPicked": false
       },

@@ -8,9 +8,11 @@ const amount = z.object({ value: z.number(), text: z.string(), unit: z.string() 
 export type Amount = z.infer<typeof amount>;
 const point = z.tuple([day, z.number()]);
 const person = z.object({ memberId: z.string(), firstName: z.string(), avatarUrl: z.string().nullable() });
+const shortText = z.string().min(1).max(40).regex(/^[^\d\r\n\u2014]+$/u);
 
 export const rungSchema = z.object({
-  id: z.string(), name: z.string(), drawing: z.string().nullable(), at: z.number(), atText: z.string(),
+  id: z.string(), name: z.string(), short: shortText, tagline: shortText,
+  drawing: z.string().nullable(), at: z.number(), atText: z.string(),
   blurb: z.string(), where: z.string().nullable(), on: day.nullable(), toGo: z.string().nullable(),
 });
 export type Rung = z.infer<typeof rungSchema>;
@@ -51,6 +53,7 @@ const medalFace = z.union([
   z.object({ number: z.string() }), z.object({ drawing: z.string() }),
   z.object({ delta: z.object({ icon: z.string(), text: z.string() }) }),
   z.object({ member: person }), z.object({ streak: z.number() }),
+  z.object({ generic: z.literal(true) }),
 ]);
 export type MedalFace = z.infer<typeof medalFace>;
 export const medalSchema = z.object({
@@ -124,7 +127,8 @@ const seen = z.strictObject({ momentIds: z.array(text) });
 export type SeenBody = z.infer<typeof seen>;
 const friendsQuery = z.object({ measure: text, range: z.enum(["week", "month", "all"]).default("month"), with: text.optional() });
 export type FriendsQuery = z.infer<typeof friendsQuery>;
-const goalsQuery = z.object({ measure: text, q: text.optional() });
+const goalsQuery = z.object({ measure: text, q: text.optional(), find: z.literal("1").optional() })
+  .refine(query => query.find === undefined || query.q !== undefined);
 export type GoalsQuery = z.infer<typeof goalsQuery>;
 const picUpload = z.object({ id: z.string().uuid(), measureId: text, takenAt: z.iso.datetime({ offset: true }) });
 export type PicUploadQuery = z.infer<typeof picUpload>;

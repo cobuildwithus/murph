@@ -9,7 +9,9 @@
       "blurb": "Chicago's black skyscraper, formerly the Sears Tower, with glass boxes on its sky deck.",
       "where": "Chicago",
       "on": null,
-      "toGo": "51 to go"
+      "toGo": "51 to go",
+      "short": "Willis Tower",
+      "tagline": "A high view over the lake"
     },
     {
       "id": "taipei-101",
@@ -20,7 +22,9 @@
       "blurb": "Taiwan's bamboo-shaped skyscraper, the world's tallest from 2004 to 2010.",
       "where": "Taipei",
       "on": null,
-      "toGo": "267 to go"
+      "toGo": "267 to go",
+      "short": "Taipei tower",
+      "tagline": "A stepped tower above the city"
     },
     {
       "id": "cn-tower",
@@ -31,7 +35,9 @@
       "blurb": "Toronto's needle-like tower, the world's tallest freestanding structure for over 30 years.",
       "where": "Toronto",
       "on": null,
-      "toGo": "415 to go"
+      "toGo": "415 to go",
+      "short": "CN Tower",
+      "tagline": "A tall view above the lake"
     },
     {
       "id": "burj-khalifa",
@@ -42,7 +48,9 @@
       "blurb": "Dubai's needle-like skyscraper, the tallest building in the world since 2010.",
       "where": "Dubai",
       "on": null,
-      "toGo": "1,317 to go"
+      "toGo": "1,317 to go",
+      "short": "Burj Khalifa",
+      "tagline": "A tower reaching beyond the rest"
     },
     {
       "id": "el-capitan",
@@ -53,7 +61,9 @@
       "blurb": "Yosemite's giant granite wall, a climbing legend, scaled with no ropes in 2017.",
       "where": "Yosemite",
       "on": null,
-      "toGo": "1,600 to go"
+      "toGo": "1,600 to go",
+      "short": "El Capitan",
+      "tagline": "A great wall above the valley"
     },
     {
       "id": "mount-everest",
@@ -64,7 +74,9 @@
       "blurb": "The highest mountain on Earth, first climbed by Edmund Hillary and Tenzing Norgay in 1953.",
       "where": "Nepal",
       "on": null,
-      "toGo": "27.6k to go"
+      "toGo": "27.6k to go",
+      "short": "Mount Everest",
+      "tagline": "The highest summit on Earth"
     }
   ],
   "match": null,

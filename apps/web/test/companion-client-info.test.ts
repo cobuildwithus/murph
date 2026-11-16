@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { readCompanionClientInfo } from "@/src/lib/companion/client-info";
+import { readCompanionClientInfo, clientUnits } from "@/src/lib/companion/client-info";
 
 const iosHeaders = {
   "X-Murph-Client-Platform": "ios",
@@ -66,4 +66,10 @@ describe("companion client headers", () => {
     headers.set("X-Murph-Client-Device-Model", "x".repeat(64));
     expect(readCompanionClientInfo(headers)).toMatchObject({ osVersion: "1234.1234.1234.1234", deviceModel: "x".repeat(64) });
   });
+});
+
+it.each([[null, "us"], ["unknown", "us"], ["US", "us"], ["us", "us"], ["uk", "uk"], ["metric", "metric"]] as const)("reads Progress units %s as %s", (header, expected) => {
+  const headers = new Headers();
+  if (header !== null) headers.set("X-Murph-Client-Units", header);
+  expect(clientUnits(new Request("https://example.test", { headers }))).toBe(expected);
 });

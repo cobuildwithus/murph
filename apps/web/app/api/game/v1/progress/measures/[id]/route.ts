@@ -1,3 +1,4 @@
+import { clientUnits } from "@/src/lib/companion/client-info";
 import { RequestInputError } from "@murphai/hosted-execution/request-input";
 import { requireGameMemberAuth, assertGameMemberAuthCurrentTx } from "@/src/lib/game/http/auth";
 import { invalidGameRequest } from "@/src/lib/game/http/errors";
@@ -11,6 +12,7 @@ import { progressEffect, withProgressJsonError } from "@/src/lib/game/progress/h
 
 export const PUT = withProgressJsonError(async (request: Request, context: { params: Promise<{ id: string }> }) => runWithHostedDomainRootUnwrapCache(async () => {
   const auth = await requireGameMemberAuth(request);
+  const units = clientUnits(request);
   const id = await resolveDecodedRouteParam(context.params, "id");
   const raw = await readJsonObject(request, { limitBytes: 4096 }).catch(error => {
     if (error instanceof RequestInputError) throw invalidGameRequest("Send a JSON object.");
@@ -20,7 +22,7 @@ export const PUT = withProgressJsonError(async (request: Request, context: { par
   const beforeMutationTx = (tx: Parameters<typeof assertGameMemberAuthCurrentTx>[1]) => assertGameMemberAuthCurrentTx(auth, tx);
   return progressEffect(async () => {
     const measureId = await setMeasure(auth.member.id, id, body, beforeMutationTx);
-    const view = await readProgress(auth.member.id, beforeMutationTx);
+    const view = await readProgress(auth.member.id, units, beforeMutationTx);
     return jsonOk({ ok: true, measure: view.measures.find(measure => measure.id === measureId)! });
   });
 }));

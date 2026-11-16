@@ -72,7 +72,7 @@ async function continuingProgress(a: string, b: string, endedGameId: string) {
 
 async function progressAt(memberId: string, now: Date): Promise<Progress> {
   vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(now); response.tasks = [];
-  try { return await readProgress(memberId, fence); }
+  try { return await readProgress(memberId, "us", fence); }
   finally { response.tasks = null; vi.useRealTimers(); }
 }
 

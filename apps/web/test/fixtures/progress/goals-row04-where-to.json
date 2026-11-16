@@ -11,7 +11,9 @@
       "blurb": "",
       "where": null,
       "on": null,
-      "toGo": null
+      "toGo": null,
+      "short": "Boston to New York",
+      "tagline": "A journey between harbor cities"
     }
   ],
   "route": {
