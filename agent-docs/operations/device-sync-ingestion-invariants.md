@@ -1,6 +1,6 @@
 # Device Sync Ingestion Invariants
 
-Last verified: 2026-11-14
+Last verified: 2026-11-15
 
 ## Purpose
 
@@ -810,8 +810,10 @@ and authority exclusions separately. Pull frequency is unchanged by this feature
 - A sleep session's total and stage minutes are owned by the provider's session
   id, which a sleep cycle names as `sleep_id`. The coverage window is the key
   only for a record that carries no session id. A superseded window ref moves a
-  stored record across once; once the session owns a record, a window ref names
-  at most a stale copy and must not merge two live records.
+  stored record across once, to one session: when an import holds several
+  sessions for one window, the first takes the record and the others start
+  their own. Once the session owns a record, a window ref names at most a stale
+  copy and must not merge two live records.
 
 ## Related docs
 

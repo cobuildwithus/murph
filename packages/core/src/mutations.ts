@@ -2896,10 +2896,13 @@ function isJunctionSleepStageCycleFallbackObservation(record: EventRecord): bool
 /**
  * A sleep session's total and stage minutes were keyed on its coverage window
  * (`sleep-stage-`) before they were keyed on the provider's session id
- * (`sleep-session-`). The window ref moves a stored record across once. After
- * that the session ref owns the record, and a window ref can only name a stale
- * copy left by an earlier rewrite of the session's start or end, which must
- * not turn the import into an ambiguous merge of two live records.
+ * (`sleep-session-`). The window ref moves a stored record across once, to
+ * one session. Every session a source sends for the same start and end names
+ * that record; the first in an import takes it over and the others resolve by
+ * their own session refs, as they would in an empty vault. After that the
+ * session ref owns the record, and a window ref can only name a stale copy left
+ * by an earlier rewrite of the session's start or end, which must not turn the
+ * import into an ambiguous merge of two live records.
  */
 function isSupersededJunctionSleepWindowRef(
   legacyExternalRef: ExternalRef,
@@ -3396,9 +3399,13 @@ function buildLegacyExternalRefReservations(
     entry: PreparedDeviceEventEntry,
     refKey: string,
     indexedMatch: IndexedEventExternalRefMatch,
+    firstClaimKeeps = false,
   ): void => {
     const existing = reservations.get(refKey);
     if (existing && existing.entry !== entry) {
+      if (firstClaimKeeps) {
+        return;
+      }
       const externalRef = indexedMatch.indexedExternalRef;
       throw new VaultError(
         "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
@@ -3452,7 +3459,12 @@ function buildLegacyExternalRefReservations(
         continue;
       }
 
-      reserve(entry, legacyRefKey, indexedMatch);
+      reserve(
+        entry,
+        legacyRefKey,
+        indexedMatch,
+        isSupersededJunctionSleepWindowRef(legacyExternalRef, externalRef),
+      );
     }
 
     if (!isIncomingJunctionNoIdProfile(entry.record)) {
