@@ -5964,6 +5964,86 @@ core `setMemoryDisplayName`; its locked `changed` result selects `applied` or
 without a model turn or a new dispatch event. Deploy this consumer before the
 Web producer; keep it while accepted actions can remain queued or restored.
 
+## Progress contract and storage
+
+`apps/web/src/lib/game/progress/contract.ts` owns the additive Progress wire
+types and request parsers. Routes parse once; persistence accepts typed input.
+The response schemas also decode the synthetic board fixtures; stored sealed
+JSON is authenticated and decoded without revalidation. BE0 supplies these
+primitives, not route handlers, scoring, inference, media effects or maps.
+
+Progress persists only awards, measure choices, picture ownership and task
+inference. The following classification covers every column of exactly
+`GameProgressAward`, `GameProgressMeasure`, `GameProgressPic` and
+`GameProgressTaskMeasure`; it is not an audit of other game tables.
+
+| Table | Encrypted content | Keyed lookup | Approved operational metadata |
+| --- | --- | --- | --- |
+| `game_progress_award` | `data_encrypted`: candidate key, kind, measure, subject, crossing day and numeric/content facts | `lookup`: member-bound award identity | `member_id`: owner FK; `subject_member_id`: nullable friend FK; `earned_on`: local calendar date for ordering; `created_at`: insertion order; `seen_at`: drawer acknowledgement |
+| `game_progress_measure` | `state_encrypted`: goal, frozen route legs/geometry/towns, per-day amount, frozen baseline | `lookup`: member-bound measure identity | `member_id`: owner FK; `updated_at`: mutation time |
+| `game_progress_pic` | `meta_encrypted`: measure identity | None | `id`: client UUID; `member_id`: owner FK; `storage_key`: random exclusive Progress object identity; `taken_at`: capture ordering; `retired_at`: permanent retirement time |
+| `game_progress_task_measure` | `measure_encrypted`: inferred name, quantity and unit | `lookup`: member-bound normalized task text plus check-in kind | `member_id`: owner FK; `created_at`: insertion time |
+
+Every owner FK cascades from `HostedMember`. Award subjects also cascade, so
+deleting a friend removes awards about that friend without deleting unrelated
+awards. Task inference cannot arrive after its owner is deleted. Pictures have
+a unique random storage key, never a shared content hash; BE3 owns sealed bytes,
+retirement and account-deletion object cleanup. These rows live in Postgres,
+outside workspace snapshots, for the member's lifetime. Retired picture rows
+remain until account deletion. There is no backfill or expiry sweep.
+
+`crypto.ts` reuses secure-box's member-private-field lane with `game-progress`
+scope/purpose, owner key, table, row and field AAD. Batch sealing unwraps one
+owner root; batch opening uses the existing root batch reader. The keyed lookup
+uses `createHostedOpaqueIdentifier` and JSON-framed owner/value parts under
+separate Progress award, measure and task purposes. No content is logged.
+
+`patchMeasureState` is the sole writer of `state_encrypted`: one exact read,
+open and shallow field merge, then seal outside the transaction. Its short
+transaction rechecks caller authority and writes only against the observed
+ciphertext; first creation uses the composite unique key. A loser throws
+`GAME_PROGRESS_STATE_CONFLICT` (503, retryable); it does not retry. Patches replace
+whole fields, including the legs array. BE2 must only propose a baseline while
+it is absent and include current health authority in the transaction callback.
+
+All three mutation helpers require `beforeMutationTx`: route owners pass the
+existing native-session assertion, plus current health/share authority when
+applicable. It runs after crypto preparation and inside the committing
+transaction, with no external work. This required callback is the refinement
+of the locked plan's abbreviated persistence signatures.
+
+`settleAwards` reads the profile timezone once, seals the candidate batch, then
+performs one `createMany` with `skipDuplicates` in one transaction. Its only
+later mutation is `seen_at`; a corrected total cannot revoke or rewrite an
+award. Awards strictly older than seven member-local calendar days at insertion
+start seen. `readAwards` opens a single owner-scoped ordered result, newest by
+`(earned_on, created_at, lookup)` descending. View owners filter health awards
+under live authority before choosing one gold medal. Moment ids resolve to
+award ids at the view owner; `markAwardsSeen` updates only those owner-bound,
+unseen rows and preserves the first acknowledgement time.
+
+The input readers in BE1/BE2 own the plan's limit-plus-one admission (500 games,
+10,000 entries); an incomplete input settles nothing. Persistence adds no
+per-item queries or transactions. Award reads deliberately have no pagination
+or materialized totals, per the locked plan. The award sort index serves the
+Medals page, the subject index serves cascading deletion, the picture index
+serves owner/live/capture-order reads, and measure/task reads use composite keys.
+
+Fixtures cover new, established, year-long, mixed-unit, no-game, gap, privacy,
+tie and moment states. They are presentation examples, not expected engine
+outputs: mock historical amounts sometimes differ from the checked bank and
+the approved health step sizes. Friend avatars use the existing nullable
+`avatarUrl` wire field; fixtures use initials rather than real photos. The wire
+adds `incomplete` from the plan, health dates for its independent chart,
+friend invite/join metadata for rows 02/05/07, and exact sharing recipients for
+row 16 and decision D8. Row 16 also needs `departureNotice`; its fixture contains
+the drawn footer, but BE2 must resolve the surviving source after account deletion.
+Streak obligations serve row 11; route completion history
+and `goalPicked` serve rows 09/15. Health medal faces and age-chart amounts serve
+rows 02/06 without requiring the client to parse labels or calculate health
+results. No endpoint, table, flag or registry is added beyond the plan. Deploy
+the additive migration before any Progress caller.
+
 ## Weekly Game
 
 Recap media retirement receipts live in the additive, FK-free `game_recap_asset`

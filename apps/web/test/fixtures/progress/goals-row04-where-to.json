@@ -1,0 +1,24 @@
+{
+  "tiles": [],
+  "match": null,
+  "suggestions": [
+    {
+      "id": "boston-new-york",
+      "name": "Boston to New York",
+      "drawing": null,
+      "at": 344399.61600000004,
+      "atText": "214 mi",
+      "blurb": "",
+      "where": null,
+      "on": null,
+      "toGo": null
+    }
+  ],
+  "route": {
+    "from": "San Diego",
+    "to": "San Francisco",
+    "distanceText": "501 miles",
+    "straightLine": false,
+    "map": "/api/game/v1/progress/map?measure=walk.meters&w=700&h=400"
+  }
+}
