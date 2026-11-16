@@ -10,13 +10,14 @@ import { EXERCISES, type DayAmount } from "./registry";
 import type { FriendMeasure } from "./friends";
 
 import { normalizeTask, type InferredMeasure } from "./infer";
-import { entryContribution, taskMeasureId, type ProgressTask, GAME_LIMIT, ENTRY_LIMIT } from "./series";
+import { entryContribution, taskMeasureId, type ProgressTask, type PendingProgressTask, GAME_LIMIT, ENTRY_LIMIT } from "./series";
 import type { MeasureState } from "./state";
 
 export interface FriendGameSeries {
   incomplete: boolean;
   amounts: Map<string, DayAmount[]>;
   measures: Map<string, FriendMeasure>;
+  pending: PendingProgressTask[];
 }
 
 /** D7: load each current friend's own posts, including games the viewer never joined. */
@@ -29,7 +30,7 @@ export async function readFriendGameSeries(memberIds: string[]): Promise<FriendG
         id: true, terms: true, termsWordsEncrypted: true, wordsOwnerMemberId: true,
         players: { where: { memberId: { in: memberIds } }, take: 10, select: { memberId: true, seat: true, dayOne: true } },
       } });
-    const empty: FriendGameSeries = { incomplete: true, amounts: new Map(), measures: new Map() };
+    const empty: FriendGameSeries = { incomplete: true, amounts: new Map(), measures: new Map(), pending: [] };
     if (games.length > GAME_LIMIT) return empty;
     const entries = await db.gameEntry.findMany({ where: { gameId: { in: games.map(game => game.id) },
       memberId: { in: memberIds }, attempt: { gt: 0 }, withdrawnAt: null, OR: [{ incomplete: false }, { incomplete: null }] },
@@ -79,7 +80,8 @@ export async function readFriendGameSeries(memberIds: string[]): Promise<FriendG
       const own = states.get(row.memberId) ?? new Map<string, MeasureState>();
       own.set(stateLookups.get(row.lookup)!, openedStates[index]); states.set(row.memberId, own);
     });
-    const result: FriendGameSeries = { incomplete: false, amounts: new Map(), measures: new Map() };
+    const result: FriendGameSeries = { incomplete: false, amounts: new Map(), measures: new Map(), pending: [] };
+    const pending = new Map<string, PendingProgressTask>();
     // Retakes have the same obligation key; only the latest surviving attempt counts.
     const surviving = new Map<string, typeof prepared[number]>();
     for (const item of prepared) {
@@ -89,13 +91,18 @@ export async function readFriendGameSeries(memberIds: string[]): Promise<FriendG
     for (const { entry, date, payload, task } of surviving.values()) {
       const data = payload !== null && ["reps", "route"].includes(entry.kind) ? JSON.parse(payload) as GameEntryData : undefined;
       const contribution = entryContribution(entry.kind as GameEntryKind, data, task, states.get(entry.memberId) ?? new Map());
-      if (contribution.pending) { result.incomplete = true; continue; }
+      if (contribution.pending) {
+        result.incomplete = true;
+        pending.set(task.lookup, { ...task, memberId: entry.memberId });
+        continue;
+      }
       if (contribution.id.endsWith(".days")) continue;
       const amounts = result.amounts.get(entry.memberId) ?? [];
       amounts.push({ measureId: contribution.id, date, amount: contribution.amount });
       result.amounts.set(entry.memberId, amounts);
       result.measures.set(contribution.id, friendMeasure(contribution.id));
     }
+    result.pending = [...pending.values()];
     return result;
   });
 }

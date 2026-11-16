@@ -14,6 +14,7 @@ import { readFriendRooms, shareWithFriends, type FriendRoom } from "./friend-sha
 import { friendPasses, friendsView, type FriendSeries } from "./friends";
 import { settleAwards } from "./awards";
 import type { DayAmount } from "./registry";
+import { scheduleInference } from "./series";
 
 export async function readProgressFriends(auth: HostedNativeMemberAuth, query: FriendsQuery, signal: AbortSignal) {
   try {
@@ -59,6 +60,13 @@ export async function readProgressFriends(auth: HostedNativeMemberAuth, query: F
       });
     }
     await assertGameMemberAuthCurrentTx(auth, db);
+    scheduleInference(games.pending, async tx => {
+      await assertGameMemberAuthCurrentTx(auth, tx);
+      const owners = [...new Set(games.pending.map(task => task.memberId))].sort();
+      for (const owner of owners) if (owner !== memberId) await lockGamePair(tx, memberId, owner);
+      const atCommit = await friendCohortIds(memberId, tx);
+      if (atCommit.incomplete || owners.some(owner => !atCommit.ids.includes(owner))) throw audienceChanged();
+    });
     const shareAudience = incomplete ? [] : sharingPreview(people, rooms.rooms, query.measure);
     return friendsView({ people, measure, pills, query, today: toLocalDayKey(new Date(), cohort.timeZone),
       shareAudience, incomplete, departureNotice: cohort.departureNotice });

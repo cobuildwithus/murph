@@ -15,6 +15,7 @@ import { gameDays, type StreakGame } from "./streak";
 import { readAwards } from "./awards";
 
 export interface ProgressTask extends TaskInput { lookup: string; inferred: InferredMeasure | null }
+export interface PendingProgressTask extends ProgressTask { memberId: string }
 export interface ProgressGame extends StreakGame { tasks: Map<number, ProgressTask>; payloads: Map<string, GameEntryData> }
 export interface MeasureSeries {
   id: string; name: string; label: string; noun: string; icon: string;
@@ -194,22 +195,29 @@ export async function readGameSeries(memberId: string, clock: Date) {
 }
 
 /** Deduplicated, sequential provider work after the response; one batched cache insert. */
-export function scheduleInference(memberId: string, pending: readonly ProgressTask[], beforeMutationTx: BeforeProgressMutation): void {
+export function scheduleInference(pending: readonly PendingProgressTask[], beforeMutationTx: BeforeProgressMutation): void {
   if (!pending.length) return;
   after(async () => {
     if (!process.env.OPENAI_API_KEY) return;
     const client = inferenceClient();
-    const resolved: { task: ProgressTask; inferred: InferredMeasure }[] = [];
+    const resolved = new Map<string, { task: ProgressTask; inferred: InferredMeasure }[]>();
     for (const task of pending) {
       const inferred = await inferTask({ text: normalizeTask(task.text), kind: task.kind }, client);
-      if (inferred) resolved.push({ task, inferred });
+      if (inferred) {
+        const own = resolved.get(task.memberId) ?? [];
+        own.push({ task, inferred }); resolved.set(task.memberId, own);
+      }
     }
-    if (!resolved.length) return;
+    if (!resolved.size) return;
     await runWithHostedDomainRootUnwrapCache(async () => {
-      const sealed = await sealProgressMany(memberId, resolved.map(({ task, inferred }) => ({ table: "game_progress_task_measure", rowId: task.lookup, field: "measure", value: inferred })));
+      const data: { memberId: string; lookup: string; measureEncrypted: string }[] = [];
+      for (const [memberId, tasks] of resolved) {
+        const sealed = await sealProgressMany(memberId, tasks.map(({ task, inferred }) => ({ table: "game_progress_task_measure", rowId: task.lookup, field: "measure", value: inferred })));
+        data.push(...tasks.map(({ task }, i) => ({ memberId, lookup: task.lookup, measureEncrypted: sealed[i] })));
+      }
       await getPrisma().$transaction(async tx => {
         await beforeMutationTx(tx);
-        await tx.gameProgressTaskMeasure.createMany({ skipDuplicates: true, data: resolved.map(({ task }, i) => ({ memberId, lookup: task.lookup, measureEncrypted: sealed[i] })) });
+        await tx.gameProgressTaskMeasure.createMany({ skipDuplicates: true, data });
       });
     });
   });

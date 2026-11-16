@@ -2,8 +2,9 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 const mocks = vi.hoisted(() => ({
-  health: vi.fn(), openGameTexts: vi.fn(), states: vi.fn(), games: vi.fn(), entries: vi.fn(), tasks: vi.fn(), openTasks: vi.fn(), settle: vi.fn(), rooms: vi.fn(), current: vi.fn(), cohort: vi.fn(), ids: vi.fn(),
+  health: vi.fn(), openGameTexts: vi.fn(), states: vi.fn(), games: vi.fn(), entries: vi.fn(), tasks: vi.fn(), openTasks: vi.fn(), settle: vi.fn(), rooms: vi.fn(), current: vi.fn(), cohort: vi.fn(), ids: vi.fn(), after: vi.fn(),
 }));
+vi.mock("next/server", async original => ({ ...await original<typeof import("next/server")>(), after: mocks.after }));
 vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({ game: { findMany: mocks.games },
   gameEntry: { findMany: mocks.entries }, gameProgressTaskMeasure: { findMany: mocks.tasks }, gameProgressMeasure: { findMany: mocks.states } }) }));
 vi.mock("@/src/lib/game/http/auth", () => ({ requireGameMemberAuth: async () => ({ member: { id: "ava" } }),
@@ -68,6 +69,7 @@ it.each(["games", "entries"])("marks a capped %s input incomplete and settles no
   expect(response.status).toBe(200);
   expect(await response.json()).toMatchObject({ incomplete: true, rows: [], chart: [], next: null });
   expect(mocks.settle).not.toHaveBeenCalled();
+  expect(mocks.after).not.toHaveBeenCalled();
 });
 
 it("withholds a friend blocked while loading private game inputs", async () => {
@@ -103,6 +105,7 @@ it("does not settle incomplete inference as a zero-amount opponent", async () =>
   mocks.entries.mockResolvedValue([{ ...entry("photo", "shared", "leo", 0, 0), kind: "photo", payloadEncrypted: null }]);
   expect(await (await GET(request())).json()).toMatchObject({ incomplete: true, rows: [], chart: [] });
   expect(mocks.settle).not.toHaveBeenCalled();
+  expect(mocks.after).toHaveBeenCalledTimes(1);
 });
 
 it("validates range and private drawer identity before reading game amounts", async () => {

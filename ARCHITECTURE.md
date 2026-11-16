@@ -6216,8 +6216,14 @@ other games, and exposes only exercise aggregates. Typed quantities use the
 shared series contribution function; untyped quantities use the existing member-scoped
 inference cache, per-day measure state and the entry's terms version and seat.
 Only typed quantity payloads are decrypted; untyped photos/text stay sealed. Unresolved inference
-withholds exercise ranking and settlement. Duplicate attempts count once and
-same-date contributions add together. Friends rank raw amounts with competition
+withholds exercise ranking and settlement. Friends reads return the
+deduplicated unresolved tasks with their source-member ids to `scheduleInference`,
+the same deferred cache writer used by own Progress. It classifies sequentially,
+seals each owner's batch under that owner's key outside the transaction, then
+inserts all resolved rows once. The committing transaction rechecks the requesting
+session and current friendship while holding the affected pair locks; authority
+loss writes nothing. The next complete read settles awards idempotently.
+Duplicate attempts count once and same-date contributions add together. Friends rank raw amounts with competition
 ranks; private rows have no rank, amount, chart line or gap. Caps set
 `Friends.incomplete` and settle nothing. Friend award commits recheck friendship
 and blocks while holding the affected pair locks. Health pills never produce
@@ -6235,7 +6241,11 @@ removes nothing. Success and partial-failure responses list committed
 `sharedWith` recipients; no retry loop or alternate sharing state exists.
 
 Progress collection bounds are 500 games, 10,000 entries and at most 5,000
-current player identities. Cohort reads use two set queries each (games and
+current player identities. Deferred friend inference admits at most 10,000
+member-bound phrases, each with at most two sequential provider calls. Sealing
+runs one owner batch at a time, then one transaction takes at most 4,999 pair
+locks, two cohort queries, the existing native-session check and one cache insert.
+No provider or key work runs inside that transaction. Cohort reads use two set queries each (games and
 blocks), repeated at the post-decryption and award-commit authority boundaries.
 Game inputs use four set queries (games, entries, task cache, measure state); at most 10,500
 source fields, 10,000 cached task fields and 10,000 measure states are opened in batches, outside

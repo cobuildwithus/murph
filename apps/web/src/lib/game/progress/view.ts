@@ -122,7 +122,7 @@ export async function readProgress(memberId: string, beforeMutationTx: BeforePro
     }
     const context = achievementContext(snapshot.measures, snapshot.states, days);
     await settleAwards(memberId, ACHIEVEMENTS.flatMap(evaluate => evaluate(context)), beforeMutationTx);
-    scheduleInference(memberId, snapshot.pending, beforeMutationTx);
+    scheduleInference(snapshot.pending.map(task => ({ ...task, memberId })), beforeMutationTx);
   }
   const stored = snapshot.incomplete ? snapshot.awards : await readAwards(memberId);
   const awards = visibleAwards(stored, await healthAuthority(memberId));
