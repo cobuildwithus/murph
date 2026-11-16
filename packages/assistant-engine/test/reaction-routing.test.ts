@@ -67,3 +67,14 @@ it('aborts a slow classifier at eight seconds and continues with normal interpre
   expect(timeout).toHaveBeenCalledWith(8_000)
   expect(onFallback).toHaveBeenCalledExactlyOnceWith('timeout')
 })
+
+it('routes a heart on an agreement question through tool-owned consent rules', async () => {
+  mocks.execute.mockResolvedValue({ finalMessage: '{"decision":"escalate"}', jsonEvents: [], additionalUsages: [] })
+  const targetMessage = 'Ava wants the prize to be Choose brunch. Sam, still good with that?'
+  expect(await classifyAssistantReaction({ reaction: 'Reacted with a heart reaction.', targetMessage })).toBe('escalate')
+  const turn = mocks.execute.mock.calls[0]![0]
+  expect(JSON.parse(turn.prompt).targetMessage).toBe(targetMessage)
+  expect(turn.baseInstructions).toContain('A like or heart on a message asking the reader to agree')
+  expect(turn.baseInstructions).toContain('The rules of the tool being used decide')
+  expect(turn.baseInstructions).not.toContain('Reaction-only consent and effect restrictions remain unchanged')
+})

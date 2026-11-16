@@ -150,6 +150,10 @@ describe("weekly game mutually agreed changes", () => {
     expect(() => decideGameChange(s, "player_a", tasks, DURING)).toThrow("Tasks lock");
     expect(() => decideGameChange(s, "player_a", {kind:"edit"}, DURING, {tasksChanged:true})).toThrow("Tasks lock");
     expect(decideGameChange(s, "player_a", prize, DURING).effectiveFromDay).toBe(2);
+    const combined = { ...tasks, schedule: { days: [0 as const, 1 as const, 2 as const, 3 as const, 4 as const] } };
+    expect(() => decideGameChange(s, "player_a", combined, DURING)).toThrow("Tasks lock once Day 1 begins.");
+    expect(decideGameChange(s, "player_a", { kind: "edit", schedule: combined.schedule }, DURING).effectiveFromDay).toBe(2);
+
     const sealed = { ...pending(s, DURING), change: { kind: "edit" as const }, stakes: [{ kind: "dare" as const, key: "stake_2" }] };
     expect(decideApprovedGameChange(s, "player_b", sealed, DURING).effectiveFromDay).toBe(2);
     expect(isGameChangeExpired(s, sealed, DURING)).toBe(false);

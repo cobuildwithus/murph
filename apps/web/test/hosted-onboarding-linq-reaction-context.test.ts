@@ -650,6 +650,9 @@ describe("buildHostedLinqAffirmativeReactionMessageEvent", () => {
         event: buildReactionEvent({ customEmoji, reactionType }),
       })).resolves.toMatchObject({
         data: {
+          from: "+15551234567",
+          from_handle: { handle: "+15551234567", is_me: false },
+          sender_handle: { handle: "+15551234567", is_me: false },
           message: {
             id: "event_reaction_123",
             parts: [{ type: "text", value: expectedText }],

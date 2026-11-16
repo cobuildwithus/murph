@@ -1,4 +1,4 @@
-import type { HostedGameUpdate } from '@murphai/hosted-execution/runtime-control'
+import type { HostedGameChatState, HostedGameUpdate } from '@murphai/hosted-execution/runtime-control'
 export const SETUP_PLAYERS = [
   { memberId: 'player_ava', firstName: 'Ava', timeZone: 'UTC' },
   { memberId: 'player_sam', firstName: 'Sam', timeZone: 'UTC' },
@@ -13,12 +13,20 @@ export interface GameSetupScenario {
   message: string
   history?: string
   speaker?: 'Sam'
+  groupGame?: true
+  editTerms?: Extract<HostedGameUpdate, { operation: 'edit_terms' }>['terms']
+  reactionTarget?: string
+  replacePending?: 'cancel' | 'decline'
+  rejectedChange?: Extract<HostedGameUpdate, { operation: 'propose' }>['change']
   state?: 'waiting' | 'live' | 'settled' | 'invited'
   pendingCallOff?: true
+  pendingChange?: HostedGameChatState['games'][number]['pendingChange']
+  earlierMessage?: { ref: string; speaker: 'Ava' | 'Sam'; occurredAt: string; text: string }
+  actionMessageRef?: string
   otherLiveGame?: boolean
   create?: CreateTerms
   previousGameId?: string
-  operation?: 'approve' | 'cancel_game' | 'propose'
+  operation?: 'approve' | 'cancel_game' | 'propose' | 'edit_terms'
   change?: Extract<HostedGameUpdate, { operation: 'propose' }>['change']
   error?: string
   unavailable?: boolean
@@ -31,12 +39,65 @@ export interface GameSetupScenario {
 const full = 'Murph, set up a challenge for us: I walk twenty minutes, Sam reads a chapter, every day for 7 days, winner gets to choose the film, start when Sam agrees.'
 const create = (name: string, message = full, terms: CreateTerms = SETUP_TERMS): GameSetupScenario => ({ name, message, create: terms, reply: [/walk(?:s|ing)? (?:twenty|20) minutes/i, /read(?:s|ing)? (?:a|one|1) chapter/i, /film/i, /Sam/i, /\?/u] })
 const termsHistory = 'Ava: My task is Walk twenty minutes. Sam: My task is Read a chapter. Ava: Winner gets to Choose the film.'
+const weekdayChange = { kind: 'edit' as const, schedule: { days: [0, 1, 2, 3, 4] } }
+const combinedChange = { ...weekdayChange, stakes: [{ kind: 'prize' as const, item: 'Choose brunch' }] }
+const waitingWeekdays = { id: 'proposal_weekdays', proposedByMemberId: 'player_ava', expectedTermsVersion: 1,
+  change: weekdayChange, effectiveFromDay: 0, origin: 'chat' as const, deliveryStatus: 'conversation' as const, startsOn: null }
+const weekdayAsk = 'Ava asked to play on weekdays instead of every day. Sam, does that work for you?'
 export const GAME_CHAT_SETUP_SCENARIOS: GameSetupScenario[] = [
   { name: 'game talk follow-up proposes only the current speakers requested prize', state: 'waiting',
     history: 'Murph: Sam wants to talk about the film prize before agreeing. Nothing has changed. Ava, what do you think? Sam: Breakfast in bed would be fun.',
     message: 'Murph, I would like breakfast in bed as the prize instead. Ask Sam if that works.',
     operation: 'propose', change: { kind: 'edit', stakes: [{ kind: 'prize', item: 'Breakfast in bed' }] },
     reply: [/Sam/i, /breakfast in bed/i, /\?/u], forbidden: /now live|has started|you.ve agreed|we.ve changed/i },
+
+  ...(['own request', 'hearsay only', 'different request'] as const).map(evidence => ({
+    name: `earlier game message: ${evidence}`,
+    state: 'waiting' as const,
+    message: 'Murph, Sam already asked for this task. Can you use that to agree to the waiting change?',
+    history: 'Ava proposed in the app that Sam changes from Read a chapter to Stretch ten minutes. Murph: Sam, does that task change work for you?',
+    ...(evidence === 'hearsay only' ? {} : { earlierMessage: { ref: 'ain_' + 'b'.repeat(32), speaker: 'Sam' as const,
+      occurredAt: '2030-03-06T11:00:00.000Z', text: evidence === 'own request' ? 'Murph, please make my task Stretch ten minutes.' : 'Murph, please make my task Swim ten minutes.' } }),
+    pendingChange: { id: 'proposal_task_change', proposedByMemberId: 'player_ava', expectedTermsVersion: 1,
+      change: { kind: 'edit' as const, tasks: [{ seat: 0 as const, text: 'Walk twenty minutes' }, { seat: 1 as const, text: 'Stretch ten minutes' }] },
+      effectiveFromDay: 0, origin: 'app' as const, deliveryStatus: 'sent' as const, startsOn: null },
+    ...(evidence === 'own request' ? { operation: 'approve' as const, actionMessageRef: 'ain_' + 'b'.repeat(32), reply: [/approve|changed|updated|set|done|agreed|counts/i], forbidden: /\?|need.*(?:yes|reply)|before.*ask/i }
+      : { reply: [/Sam/i, /agree|yes|confirm|stretch|said|message/i], forbidden: /(?:I.ve |I have )?(?:approved|changed|updated)|now (?:set|counts)/i }),
+  })),
+
+  ...(['pair', 'group'] as const).map(mode => ({ name: `combined game ask: ${mode}`, state: 'waiting' as const,
+    ...(mode === 'group' ? { groupGame: true as const } : {}),
+    message: 'Murph, make the game weekdays only and the prize Choose brunch. Ask Sam.',
+    ...(mode === 'group' ? { operation: 'edit_terms' as const, editTerms: { ...SETUP_TERMS, defaultTask: 'Walk twenty minutes', schedule: combinedChange.schedule, stakes: combinedChange.stakes } } : { operation: 'propose' as const, change: combinedChange }),
+    reply: [/weekdays|Monday.*Friday/i, /brunch/i, /Sam/i, /\?/u], forbidden: /now (?:set|changed)|I.ve changed/i })),
+  { name: 'combined game ask: own addition preserves earlier fields', state: 'waiting', pendingChange: waitingWeekdays,
+    history: `Murph: ${weekdayAsk}`, message: 'Murph, add Choose brunch as the prize to my waiting ask too.',
+    replacePending: 'cancel', operation: 'propose', change: combinedChange,
+    reply: [/replac|instead|updated ask/i, /weekdays|Monday.*Friday/i, /brunch/i, /Sam/i, /\?/u] },
+  { name: 'combined game ask: other player counteroffer replaces fields', state: 'waiting', speaker: 'Sam', pendingChange: waitingWeekdays,
+    history: `Murph: ${weekdayAsk}`, message: 'No to weekdays, Murph. Instead, ask Ava for Choose brunch as the prize.',
+    replacePending: 'decline', operation: 'propose', change: { kind: 'edit', stakes: combinedChange.stakes },
+    reply: [/brunch/i, /Ava/i, /\?/u], forbidden: /now (?:set|changed)/i },
+  { name: 'combined game ask: task lock refusal keeps allowed schedule', state: 'waiting',
+    message: 'Murph, make my task Stretch ten minutes and make the game weekdays only. Ask Sam.',
+    rejectedChange: { ...weekdayChange, tasks: [{ seat: 0, text: 'Stretch ten minutes' }, { seat: 1, text: 'Read a chapter' }] },
+    operation: 'propose', change: weekdayChange,
+    reply: [/task/i, /lock|Day 1|started|cannot|can.t/i, /weekdays|Monday.*Friday/i, /Sam/i, /\?/u], forbidden: /task (?:is|has).*changed/i },
+  ...(['like', 'heart', 'asker like', 'unrelated like', 'question', 'dislike'] as const).map(reaction => {
+    const approves = reaction === 'like' || reaction === 'heart'
+    return { name: `game reaction: ${reaction}`, state: 'waiting' as const,
+      ...(reaction === 'asker like' ? {} : { speaker: 'Sam' as const }), pendingChange: waitingWeekdays,
+      history: `Murph: ${weekdayAsk}`,
+      reactionTarget: reaction === 'unrelated like' ? 'Your afternoon walk is logged.' : weekdayAsk,
+      message: `Reacted with a ${reaction.includes('like') ? (reaction === 'dislike' ? 'dislike' : 'like') : reaction} reaction.`,
+      ...(approves ? { operation: 'approve' as const, reply: [/done|set|changed|updated|weekdays|count|agreed|approved/i], forbidden: /\?|type.*yes|need.*(?:yes|reply)/i }
+        : { reply: [], forbidden: /(?:I.ve |I have )?(?:approved|changed|updated)|now (?:set|counts)|your yes (?:is )?counted/i }),
+    }
+  }),
+  { name: 'game reaction: invitation like', state: 'waiting', speaker: 'Sam',
+    message: 'Reacted with a like reaction.',
+    reactionTarget: 'Ava walks twenty minutes, Sam reads a chapter, every day for 7 days, winner chooses the film, starts on acceptance. Sam, in?',
+    operation: 'approve', reply: [/on|started|set|in|agreed/i], forbidden: /\?|type.*yes|need.*(?:yes|reply)/i },
 
   create('full terms in one message'),
   create('default seven days every day', 'Murph, set up a game: I walk twenty minutes, Sam reads a chapter, winner chooses the film. Start when Sam agrees.'),
