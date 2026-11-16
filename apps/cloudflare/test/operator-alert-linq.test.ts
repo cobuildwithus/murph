@@ -63,29 +63,11 @@ describe("operator Linq alert delivery", () => {
     }
   });
 
-  it("counts a 404 replay of an already delivered page as delivered", async () => {
-    // Linq answers a key whose accepted message it has since deleted with 404
-    // and never resends it. Without this, a page that reached one chat while
-    // the other was held would retry that 404 forever.
-    const fetchImplementation = createHealthyChatsFetch((chatPath) =>
-      chatPath.endsWith("/chat_primary/messages")
-        ? new Response(null, { status: 404 })
-        : new Response(null, { status: 202 })
-    );
-
-    await expect(sendOperatorLinqAlert({
-      apiBaseUrl: "https://api.linqapp.test/api/partner/v3",
-      apiToken: "opaque-token",
-      chatIds: ["chat_primary", "chat_secondary"],
-      fetchImplementation,
-      idempotencyKey: "operator-page-3",
-      message: "Bounded operational evidence.",
-    })).resolves.toBeUndefined();
-  });
-
-  it("still rejects a page Linq refuses outright", async () => {
+  it.each([404, 422])("keeps a page Linq refuses with %i pending", async (status) => {
+    // A 404 here can be Linq's chat-not-found rejection, so it never counts as
+    // delivered without proof that this destination accepted the key before.
     const fetchImplementation = createHealthyChatsFetch(() =>
-      new Response(null, { status: 422 })
+      new Response(null, { status })
     );
 
     const failure = await sendOperatorLinqAlert({

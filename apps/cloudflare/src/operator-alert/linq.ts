@@ -146,7 +146,7 @@ async function resolveOperatorLinqDestination(input: {
 /**
  * Sends into the configured chat itself, so the page leaves from the line the
  * preflight just checked. Linq's recipient-only route picks its own chat and
- * line, and it answered every page with 404 from Nov 14 2026.
+ * line, which can differ from the one preflight approved.
  */
 async function sendOperatorLinqMessage(input: {
   apiBaseUrl: string;
@@ -175,14 +175,6 @@ async function sendOperatorLinqMessage(input: {
     }).asResponse();
   } catch (error) {
     const status = readOperatorLinqErrorStatus(error);
-    // Preflight just read this chat, so a 404 is Linq's documented answer to a
-    // key whose message it already accepted and has since deleted: that page
-    // was delivered, and Linq never resends a deleted message. Without this, a
-    // page that reached one chat stays pending, and once Linq drops the
-    // delivered copy every retry 404s for good.
-    if (status === 404) {
-      return;
-    }
     if (status !== null) {
       throw new OperatorAlertLinqError(
         status === 429 || status >= 500

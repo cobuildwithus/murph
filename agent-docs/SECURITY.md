@@ -230,9 +230,8 @@ Existing product admission, delivery and runtime safety rules still apply.
   so a healthy distinct secondary may still enter while the primary is
   suppressed. Each page is sent into its configured direct chat, so it leaves
   from the line preflight just checked. Linq's recipient-only route picks its
-  own chat and line, and it answered every operator page with 404 from Nov 14
-  2026. No model, runner, request, or stored state can select another
-  recipient.
+  own chat and line, which can differ from the one preflight approved. No
+  model, runner, request, or stored state can select another recipient.
 - Runtime trust boundaries exist for local loopback daemons, hosted web, Cloudflare-hosted execution, provider ingress, billing, device sync, and assistant runtime state. `ARCHITECTURE.md`, this file, and the relevant app/package docs must change together when those boundaries change.
 - Hosted core assistant inference uses OpenAI. Cloudflare owns the real API key
   and gives the runner only SDK credential placeholders. Platform container
