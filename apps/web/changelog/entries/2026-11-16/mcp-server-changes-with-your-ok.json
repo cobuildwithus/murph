@@ -9,7 +9,7 @@
     "summary": "You can now turn on MCP server actions that change things. Before using one, Murph sends you a link that shows exactly what it will send, and nothing happens until you tap Do it.",
     "details": "Each change you confirm is sent once. If the MCP server's answer doesn't come back clearly, Murph tells you it may or may not have happened instead of trying again. A request you don't answer expires after an hour, and actions that only look things up work as before.",
     "relevanceTags": ["connections", "assistant", "settings", "privacy"],
-    "sourcePullRequests": [],
+    "sourcePullRequests": [5054],
     "tryIt": {
       "href": "/settings/connections",
       "label": "Open your MCP servers"
