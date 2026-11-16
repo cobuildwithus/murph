@@ -9,6 +9,7 @@ import {
   HOSTED_CALLBACK_REQUEST_NONCE_RETENTION_MAX_BATCHES,
   HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE,
   HOSTED_CONTROL_ARTIFACT_RETENTION_MAX_BATCHES,
+  HOSTED_CUSTOM_CONNECTION_ACTION_RETENTION_MS,
   HOSTED_DEVICE_WEBHOOK_TRACE_RETENTION_MS,
   HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_BATCH_SIZE,
   HOSTED_INBOX_MEDIA_RETENTION_SIGNAL_TIMEOUT_MS,
@@ -109,6 +110,7 @@ describe("hosted retention cleanup", () => {
       ['DELETE FROM "hosted_group_participant_observation"', 4],
       ['DELETE FROM "device_webhook_trace"', 4],
       ['DELETE FROM "hosted_runtime_put_drain"', 6],
+      ['DELETE FROM "hosted_mcp_action_request"', 7],
       ['UPDATE "hosted_linq_provider_event"', 5],
       ['UPDATE "hosted_member"', 3],
       ['UPDATE "hosted_operator_task"', 2],
@@ -146,6 +148,7 @@ describe("hosted retention cleanup", () => {
       expiredDeviceConnectIntentsDeleted: 3,
       expiredDeviceOauthSessionsDeleted: 4,
       expiredCustomConnectionAuthorizationsDeleted: 0,
+      expiredCustomConnectionActionRequestsDeleted: 7,
       expiredDeviceWebhookTracesDeleted: 4,
       expiredEmailPublicBootstrapAttemptsDeleted: 2,
       expiredGroupParticipantObservationsDeleted: 4,
@@ -222,7 +225,7 @@ describe("hosted retention cleanup", () => {
     ]);
 
     // One statement per category: every short batch stops that category's loop.
-    expect(executeRaw).toHaveBeenCalledTimes(21);
+    expect(executeRaw).toHaveBeenCalledTimes(22);
     expect(findRetentionCall(executeRaw, 'DELETE FROM "hosted_runtime_put_drain"').slice(1))
       .toEqual([new Date(now.getTime() - HOSTED_RUNTIME_LEDGER_RETENTION_MS), HOSTED_RETENTION_BATCH_SIZE]);
     expect(executeRaw.mock.calls.some(call => sqlOf(call).includes('DELETE FROM "hosted_runtime_orphan"'))).toBe(false);
@@ -277,6 +280,15 @@ describe("hosted retention cleanup", () => {
         sqlOf(call).includes('device_sync_signal')
       ),
     ).toBe(false);
+
+    // Action requests go after 30 days, skipping one a confirmation is holding.
+    const actionRequestCall = findRetentionCall(executeRaw, 'DELETE FROM "hosted_mcp_action_request"');
+    expect(sqlOf(actionRequestCall)).toContain('request."created_at" < ?');
+    expect(sqlOf(actionRequestCall)).toContain("FOR UPDATE OF request SKIP LOCKED");
+    expect(actionRequestCall.slice(1)).toEqual([
+      new Date(now.getTime() - HOSTED_CUSTOM_CONNECTION_ACTION_RETENTION_MS),
+      HOSTED_RETENTION_BATCH_SIZE,
+    ]);
 
     // Only processed traces expire; an in-flight claim is still the duplicate gate.
     const webhookTraceCall = findRetentionCall(executeRaw, 'DELETE FROM "device_webhook_trace"');

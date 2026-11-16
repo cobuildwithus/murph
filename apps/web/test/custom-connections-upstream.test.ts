@@ -80,6 +80,29 @@ describe("request-scoped upstream SDK lifecycle", () => {
     const signedIn = { ...row, auth: "oauth", credentialsEncrypted: JSON.stringify({ discovery: {}, tokens: { access_token: "synthetic-member-access", token_type: "Bearer" }, expiresAt: Date.now() + 3_600_000 }) };
     await expect(withConnectionClient(signedIn, (client) => client.callTool({ name: "read_notes", arguments: {} }))).rejects.toThrow("sign-in token");
   });
+  it("lets one tools/call of a confirmed write leave Web and refuses a second before it is sent", async () => {
+    const handler = createMcpHandler(server);
+    const calls: unknown[] = [];
+    mocks.fetch.mockImplementation(async (url: string | URL, init?: RequestInit) => {
+      if (typeof init?.body === "string" && JSON.parse(init.body).method === "tools/call") calls.push(init.body);
+      return handler.fetch(new Request(url, init));
+    });
+    const write = { sent: false };
+    await expect(withConnectionClient(row, async (client) => {
+      await client.callTool({ name: "read_notes", arguments: {} });
+      return client.callTool({ name: "read_notes", arguments: {} });
+    }, undefined, write)).rejects.toThrow();
+    expect(calls).toHaveLength(1);
+    expect(write.sent).toBe(true);
+  });
+  it("lets setup through for a write and records nothing as sent until the call itself", async () => {
+    const handler = createMcpHandler(server);
+    mocks.fetch.mockImplementation(async (url: string | URL, init?: RequestInit) => handler.fetch(new Request(url, init)));
+    const write = { sent: false };
+    await expect(withConnectionClient(row, async () => { throw new Error("stopped before the call"); }, undefined, write)).rejects.toThrow("stopped");
+    expect(mocks.fetch).toHaveBeenCalled();
+    expect(write.sent).toBe(false);
+  });
   it("connects to a server that only speaks the 2026-07-28 revision", async () => {
     const handler = createMcpHandler(server, { legacy: "reject" });
     mocks.fetch.mockImplementation(async (url: string | URL, init?: RequestInit) => handler.fetch(new Request(url, init)));

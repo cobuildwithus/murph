@@ -69,6 +69,8 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     "authRecords HostedAuthRecord[]",
     // Custom connections live in their own encrypted, cascade-deleted table; the member row gains only the relation.
     "customConnections HostedMcpConnection[]",
+    // Requests Murph makes through them live in their own encrypted, cascade-deleted table too.
+    "customConnectionActions HostedMcpActionRequest[]",
     "appleHealthReopenPushes AppleHealthReopenPush[]",
     "id String @id",
     'assistantModelPreference String? @map("assistant_model_preference")',

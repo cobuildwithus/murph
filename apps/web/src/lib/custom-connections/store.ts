@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { HostedMcpConnection, Prisma } from "@prisma/client";
 import { getPrisma } from "../prisma";
 import { activeHostedPersonAccessWhere } from "../hosted-onboarding/member-access";
-import { approvedSnapshot, digest, storedToolsSchema, type StoredTool } from "./catalog";
+import { approvedSnapshot, digest, normalizeTools, storedToolsSchema, type StoredTool } from "./catalog";
 import { ConnectionError } from "./errors";
 
 export type ConnectionRow = HostedMcpConnection;
@@ -20,19 +20,28 @@ export function projectConnection(row: ConnectionRow) {
   return {
     id: row.id, revision: row.revision, slug: row.slug, name: row.name, host: new URL(row.serverUrl).host,
     status: row.status, auth: row.auth, createdAt: row.createdAt.toISOString(), lastUsedAt: row.lastUsedAt?.toISOString() ?? null,
-    tools: storedToolsSchema.parse(row.tools).map(({ definition, state }) => ({
+    // Settings shows what this Web enforces: after normalization only an oversized tool is not_allowed.
+    tools: normalizeTools(storedToolsSchema.parse(row.tools)).map(({ definition, state }) => ({
       name: definition.name, title: definition.title ?? definition.name, description: definition.description ?? "",
       readOnly: definition.annotations?.readOnlyHint === true, state,
     })),
   };
 }
 export async function saveCatalog(row: ConnectionRow, tools: StoredTool[], status?: "on" | "off", prisma: Pick<Prisma.TransactionClient, "hostedMcpConnection"> = getPrisma()) {
+  // A write's served description names the server, so the token reads the name this save leaves in place.
+  const { name } = await readConnection(row.memberId, row.id, prisma);
   const result = await prisma.hostedMcpConnection.updateMany({
     where: { ...connectionWhere(row.memberId), id: row.id, generation: row.generation, revision: row.revision },
-    data: { tools: JSON.parse(JSON.stringify(tools)), catalog: digest(approvedSnapshot(tools)), revision: { increment: 1 }, ...(status ? { status } : {}) },
+    data: { tools: JSON.parse(JSON.stringify(tools)), catalog: digest(approvedSnapshot(tools, name)), revision: { increment: 1 }, ...(status ? { status } : {}) },
   });
   if (result.count !== 1) throw new ConnectionError("conflict", 409);
   return readConnection(row.memberId, row.id, prisma);
+}
+/** Bookkeeping only: it never turns a finished call into an error. */
+export async function markConnectionUsed(row: ConnectionRow) {
+  try {
+    await getPrisma().hostedMcpConnection.updateMany({ where: { id: row.id, generation: row.generation, status: "on" }, data: { lastUsedAt: new Date() } });
+  } catch { /* The call already happened; a missed timestamp changes nothing. */ }
 }
 export async function markNeedsSignIn(row: ConnectionRow, claim?: string) {
   await getPrisma().hostedMcpConnection.updateMany({

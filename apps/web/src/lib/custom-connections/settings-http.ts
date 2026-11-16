@@ -3,6 +3,7 @@ import "server-only";
 import * as z from "@murphai/contracts/zod-runtime";
 import { readHostedOnboardingJsonObject } from "../hosted-onboarding/http";
 import { requireConnectionSession } from "./access";
+import { decideActionRequest } from "./action-requests";
 import { connectionErrorResponse } from "./errors";
 import { readConnection, projectConnection, connectionWhere } from "./store";
 import { getPrisma } from "../prisma";
@@ -41,6 +42,14 @@ export async function settingsConnections(request: Request, id?: string, action?
       return json({ removed: true });
     }
     return new Response(null, { status: 405 });
+  } catch (error) { return connectionErrorResponse(error); }
+}
+/** The member's answer to one request Murph made: the full Settings mutation contract, and only the decision in the body. */
+export async function settingsActionRequest(request: Request, requestId: string): Promise<Response> {
+  try {
+    const session = await requireConnectionSession(request, true);
+    const input = z.object({ decision: z.enum(["confirm", "decline"]) }).strict().parse(await body(request));
+    return json({ outcome: await decideActionRequest({ request, session }, requestId, input.decision) });
   } catch (error) { return connectionErrorResponse(error); }
 }
 function json(value: unknown) { return Response.json(value, { headers: { "Cache-Control": "no-store" } }); }

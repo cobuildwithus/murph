@@ -510,6 +510,12 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Encrypted ten-minute sign-in state is deleted with the member; expired rows are also removed by retention cleanup.",
   },
   {
+    slug: "prisma.hosted_mcp_action_request",
+    label: "Changes Murph asked to make in MCP servers",
+    deletion: "live-delete",
+    note: "Each request's encrypted inputs and result are deleted with the member or the connection; retention cleanup removes requests older than 30 days.",
+  },
+  {
     slug: "prisma.hosted_connected_apps_session",
     label: "Connected-app Tool Router sessions",
     deletion: "live-delete",
