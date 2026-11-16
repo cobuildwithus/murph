@@ -198,6 +198,20 @@ describe("production conversation canary runner", () => {
     expect(mocks.stop).toHaveBeenCalledOnce();
   });
 
+  it("reports a provider send error as the only failure when the reply stream also ends", async () => {
+    mocks.now = [0];
+    const sendError = Object.assign(new Error("Provider rejected the send."), { name: "ValidationError" });
+    mocks.spaceSend.mockImplementation(async () => {
+      // Let the reply wait observe the ended stream before the send fails.
+      await new Promise((resolve) => setImmediate(resolve));
+      throw sendError;
+    });
+
+    await expect(runLinqProductionCanary(TEST_ENV)).rejects.toBe(sendError);
+    expect(mocks.next).toHaveBeenCalled();
+    expect(mocks.stop).toHaveBeenCalledOnce();
+  });
+
   it("reports an exact-boundary send-to-reply failure and still stops", async () => {
     mocks.now = [0, 0, 20_000];
     mocks.sendResults = [true];
