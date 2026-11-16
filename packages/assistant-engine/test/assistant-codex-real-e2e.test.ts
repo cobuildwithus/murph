@@ -19119,6 +19119,53 @@ describeRealCodex('real Codex weekly digest natural recognition e2e', () => {
   }, 360_000)
 })
 
+describeRealCodex('real Codex scheduled recap plain numbers e2e', () => {
+  it('scheduled recap states disagreeing step counts plainly without source hedges', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(
+      path.join(tmpdir(), 'murph-scheduled-recap-plain-numbers-e2e-'),
+    )
+
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildScheduledAutomationDeveloperInstructions('direct', 'none'),
+        dynamicTools: [],
+        env: config.env,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: [
+          'Saved member automation: "Every Monday, text me a recap of last week covering sleep, recovery, and movement."',
+          'Current synthetic evidence from the completed required reads for July 28 through August 3:',
+          '- Sleep: the ring recorded all 7 nights, averaging 7h 41m, mostly between 11:30 p.m. and 7:15 a.m.',
+          '- Recovery: readiness ran 62 to 71 all week; resting heart rate 52 to 55 bpm.',
+          '- Steps: the ring averaged 8,412 steps/day on 7 of 7 days. The phone averaged 9,950 steps/day over the same days. Wearable output notes: "Some metrics still conflict across providers: steps."',
+          '- Movement: two logged runs, 34 and 41 minutes.',
+          '- The evidence is complete and no follow-up information is needed. Do not repeat the reads; complete the terminal scheduled decision.',
+        ].join('\n\n'),
+        reasoningEffort: 'low',
+        sandbox: 'read-only',
+        workingDirectory,
+      })
+      const decision = parseAssistantNotificationDecision(result.finalMessage)
+      process.stdout.write(`[scheduled-recap-plain-numbers-e2e] ${JSON.stringify({ decision })}\n`)
+      expect(decision.kind).toBe('send_message')
+      if (decision.kind !== 'send_message') {
+        throw new Error('Expected the saved recap to send.')
+      }
+      expect(decision.text).toMatch(/\b(?:8,412|8,4\d\d|9,950|8\.4k|9\.9k)\b/iu)
+      expect(decision.text).not.toMatch(
+        /other sources?|counted differently|sources? (?:disagree|differ|conflict)|(?:7|seven) of (?:7|seven)|\babout (?:8|9)|\broughly\b|\bon the (?:ring|phone)\b|\bphone (?:counted|said|showed)/iu,
+      )
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+})
+
 describeRealCodex('real Codex weekly digest emerging behavior e2e', () => {
   it(
     'recognizes a repeated new cardio routine and suppresses an ordinary shortfall',

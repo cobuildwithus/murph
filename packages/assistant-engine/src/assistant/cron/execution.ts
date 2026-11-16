@@ -3278,15 +3278,24 @@ async function preemptAssistantCronNotificationCommitForForeground(input: {
   }
 
   if (deliveryOutcome?.kind === 'queued') {
-    const abandonedIntent = await markAssistantOutboxIntentMirrorTerminalById({
-      error: buildAssistantCronForegroundYieldedError(input.jobName),
-      intentId: deliveryOutcome.intentId,
-      onlyCurrentStatuses: ['pending', 'retryable', 'awaiting_approval'],
-      status: 'abandoned',
-      vault: input.vault,
-    })
-    if (abandonedIntent !== null && abandonedIntent.status !== 'abandoned') {
-      return
+    // A multi-bubble message counts as sent once its first bubble is past
+    // pending; otherwise every bubble is abandoned with it.
+    const intentIds = deliveryOutcome.bubbleIntentIds ?? [deliveryOutcome.intentId]
+    for (const [index, intentId] of intentIds.entries()) {
+      const abandonedIntent = await markAssistantOutboxIntentMirrorTerminalById({
+        error: buildAssistantCronForegroundYieldedError(input.jobName),
+        intentId,
+        onlyCurrentStatuses: ['pending', 'retryable', 'awaiting_approval'],
+        status: 'abandoned',
+        vault: input.vault,
+      })
+      if (
+        index === 0 &&
+        abandonedIntent !== null &&
+        abandonedIntent.status !== 'abandoned'
+      ) {
+        return
+      }
     }
   }
 

@@ -6545,7 +6545,10 @@ describe('assistant cron runtime orchestration', () => {
     }
   })
 
-  it('abandons a queued cron outbox intent when foreground work appears before durable commit', async () => {
+  it.each([
+    ['a single message', []],
+    ['every bubble of a split message', ['outbox_yield_queued_bubble_0']],
+  ] as const)('abandons %s queued by cron when foreground work appears before durable commit', async (_label, precedingIntentIds) => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T10:20:00.000Z'))
     try {
@@ -6576,13 +6579,15 @@ describe('assistant cron runtime orchestration', () => {
         onProviderRequestStarted?: () => Promise<void> | void
       }) => {
         await input.onProviderRequestStarted?.()
-        await saveAssistantOutboxIntent(
-          vaultRoot,
-          buildTestLinqOutboxIntent({
-            createdAt: '2026-04-08T10:20:00.000Z',
-            intentId: queuedIntentId,
-          }),
-        )
+        for (const intentId of [...precedingIntentIds, queuedIntentId]) {
+          await saveAssistantOutboxIntent(
+            vaultRoot,
+            buildTestLinqOutboxIntent({
+              createdAt: '2026-04-08T10:20:00.000Z',
+              intentId,
+            }),
+          )
+        }
         const decision = {
           kind: 'send_message' as const,
           privateSummary: 'Queued scheduled reminder.',
@@ -6592,6 +6597,9 @@ describe('assistant cron runtime orchestration', () => {
           kind: 'queued' as const,
           error: null,
           intentId: queuedIntentId,
+          ...(precedingIntentIds.length > 0
+            ? { bubbleIntentIds: [...precedingIntentIds, queuedIntentId] }
+            : {}),
           session: {
             sessionId: 'session-default',
           },
@@ -6626,11 +6634,13 @@ describe('assistant cron runtime orchestration', () => {
         succeeded: 0,
       })
       expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledOnce()
-      const intent = await readAssistantOutboxIntent(vaultRoot, queuedIntentId)
-      expect(intent?.status).toBe('abandoned')
-      expect(intent?.lastError).toMatchObject({
-        code: 'ASSISTANT_CRON_FOREGROUND_YIELDED',
-      })
+      for (const intentId of [...precedingIntentIds, queuedIntentId]) {
+        const intent = await readAssistantOutboxIntent(vaultRoot, intentId)
+        expect(intent?.status).toBe('abandoned')
+        expect(intent?.lastError).toMatchObject({
+          code: 'ASSISTANT_CRON_FOREGROUND_YIELDED',
+        })
+      }
       await expect(
         listAssistantCronRuns({
           job: canonicalJob.jobId,

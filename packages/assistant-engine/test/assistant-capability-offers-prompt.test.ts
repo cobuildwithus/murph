@@ -56,6 +56,23 @@ describe('assistant capability-offers prompt contract', () => {
     }
   })
 
+  it('gives a scheduled direct Linq turn the bubble delimiter and plain-number rules', () => {
+    const scheduled = buildAssistantSystemPromptLayers(
+      createCommonCodexPromptInput({
+        channel: 'linq',
+        conversationScope: 'direct',
+        hostedRuntime: true,
+        scheduledOccurrenceAt: '2026-04-15T13:00:00.000Z',
+        turnTrigger: 'automation-cron',
+      }),
+    ).prompt
+
+    expect(scheduled).toContain('Put a line containing only `---` between bubbles')
+    expect(scheduled).toContain(
+      'State numbers with confidence; if sources disagree, use the best-supported one.',
+    )
+  })
+
   it('scopes address-book name trust when a reaction target imitates a participant event', () => {
     const participantChange =
       'Participant +15553330000 (address-book name: Taylor R.) was added to the group.'

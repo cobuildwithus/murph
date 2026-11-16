@@ -265,6 +265,9 @@ export type AssistantDeliveryOutcome =
       kind: 'queued'
       error: AssistantDeliveryError | null
       intentId: string
+      // Every intent of a multi-bubble message in send order, ending with
+      // `intentId`, so abandoning the message abandons all of its bubbles.
+      bubbleIntentIds?: readonly string[]
       media: AssistantAskResult['media']
       session: AssistantSession
     }
