@@ -335,7 +335,7 @@ for (const reread of [
   [SESSION_A, { ...SESSION_A, deep: 3000 }],
   [{ ...SESSION_A, deep: 3000 }, SESSION_A],
   [{ ...SESSION_B, deep: 2400 }, SESSION_A, SESSION_B],
-  [sleepSummary(REWRITTEN_END, { ...GOOGLE_HEALTH, id: "gh-sleep-a" }), SESSION_A],
+  [sleepSummary(REWRITTEN_END, { ...GOOGLE_HEALTH, id: "gh-sleep-a", deep: 3000 }), SESSION_A],
 ]) {
   const label = reread
     .map((summary) => `${summary.id} ${summary.deep}s to ${summary.bedtime_stop.slice(11, 16)}`)
