@@ -55,8 +55,8 @@ unknown, unverified or non-NANP phones. No phone is sent to the ideas provider.
 
 ## Custom remote MCP connections
 
-Custom connections are dark unless the personal member is listed in
-`HOSTED_CUSTOM_CONNECTION_MEMBER_IDS`. Settings uses the existing browser
+Custom connections are open to every active personal member; synthetic thread
+containers (group chats) never get them. Settings uses the existing browser
 session and mutation-origin checks; the manifest and MCP gateway require the
 signed Worker callback and a present, current runtime write fence. Synthetic
 thread containers, inactive members, foreign connections, off connections and

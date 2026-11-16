@@ -9,12 +9,9 @@ import { getHostedAppSessionFromRequest, requireActiveHostedAppSession } from ".
 import { assertHostedOnboardingMutationOrigin } from "../hosted-onboarding/csrf";
 import { ConnectionError } from "./errors";
 
-export function connectionMemberAllowed(memberId: string): boolean {
-  return /^[A-Za-z0-9_.:-]{1,256}$/u.test(memberId) && (process.env.HOSTED_CUSTOM_CONNECTION_MEMBER_IDS ?? "").split(",").map((id) => id.trim()).includes(memberId);
-}
+/** Any active person may connect services; group chats (synthetic thread containers) never can. */
 export async function connectionMemberActive(memberId: string): Promise<boolean> {
-  return connectionMemberAllowed(memberId)
-    && !!await readActiveHostedMemberAccess({ memberId })
+  return !!await readActiveHostedMemberAccess({ memberId })
     && !await isHostedThreadContainerMember({ memberId });
 }
 export async function requireConnectionSession(request: Request, mutation = false) {

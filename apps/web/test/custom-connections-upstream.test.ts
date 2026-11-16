@@ -4,7 +4,6 @@ import type { HostedMcpConnection } from "@prisma/client";
 const mocks = vi.hoisted(() => ({ fetch: vi.fn(), updates: vi.fn() }));
 vi.mock("../src/lib/custom-connections/guarded-fetch", async (original) => ({ ...await original<typeof import("../src/lib/custom-connections/guarded-fetch")>(), guardedConnectionFetch: mocks.fetch }));
 vi.mock("../src/lib/prisma", () => ({ getPrisma: () => ({ hostedMcpConnection: { updateMany: mocks.updates } }) }));
-vi.mock("../src/lib/custom-connections/access", () => ({ connectionMemberAllowed: () => true }));
 vi.mock("../src/lib/custom-connections/secrets", () => ({ openConnectionSecret: async (_member: string, _id: string, _generation: number, _field: string, value: string) => JSON.parse(value),
   sealConnectionSecret: async (_member: string, _id: string, _generation: number, _field: string, value: unknown) => JSON.stringify(value) }));
 import { listConnectionTools, withConnectionClient } from "../src/lib/custom-connections/upstream";

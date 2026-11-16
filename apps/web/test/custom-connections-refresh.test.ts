@@ -17,7 +17,6 @@ vi.mock("../src/lib/prisma", () => ({ getPrisma: () => ({ hostedMcpConnection: {
   },
 } }) }));
 vi.mock("../src/lib/hosted-onboarding/member-access", () => ({ activeHostedPersonAccessWhere: () => ({ suspendedAt: null }) }));
-vi.mock("../src/lib/custom-connections/access", () => ({ connectionMemberAllowed: () => true }));
 vi.mock("../src/lib/custom-connections/secrets", () => ({ openConnectionSecret: async (_member: string, _id: string, _generation: number, _field: string, value: string) => JSON.parse(value),
   sealConnectionSecret: async (_member: string, _id: string, _generation: number, _field: string, value: unknown) => JSON.stringify(value) }));
 vi.mock("../src/lib/custom-connections/guarded-fetch", async (original) => ({ ...await original<typeof import("../src/lib/custom-connections/guarded-fetch")>(), guardedConnectionFetch: mocks.fetch }));

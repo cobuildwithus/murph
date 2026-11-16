@@ -4,13 +4,11 @@ import { randomUUID } from "node:crypto";
 import type { HostedMcpConnection, Prisma } from "@prisma/client";
 import { getPrisma } from "../prisma";
 import { activeHostedPersonAccessWhere } from "../hosted-onboarding/member-access";
-import { connectionMemberAllowed } from "./access";
 import { approvedSnapshot, digest, storedToolsSchema, type StoredTool } from "./catalog";
 import { ConnectionError } from "./errors";
 
 export type ConnectionRow = HostedMcpConnection;
 export function connectionWhere(memberId: string): Prisma.HostedMcpConnectionWhereInput {
-  if (!connectionMemberAllowed(memberId)) throw new ConnectionError("not_found", 404);
   return { memberId, member: activeHostedPersonAccessWhere() };
 }
 export async function readConnection(memberId: string, id: string, prisma: Pick<Prisma.TransactionClient, "hostedMcpConnection"> = getPrisma()): Promise<ConnectionRow> {

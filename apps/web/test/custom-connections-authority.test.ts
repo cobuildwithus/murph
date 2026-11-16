@@ -9,10 +9,13 @@ import { connectionMemberActive, requireConnectionCallback, requireConnectionSes
 import { connectionErrorResponse } from "../src/lib/custom-connections/errors";
 afterEach(() => { vi.resetAllMocks(); vi.unstubAllEnvs(); });
 describe("custom connection admission", () => {
-  it.each(["not_allowlisted", "inactive", "synthetic"])("denies %s members", async (kind) => {
-    vi.stubEnv("HOSTED_CUSTOM_CONNECTION_MEMBER_IDS", kind === "not_allowlisted" ? "other-member" : "member-a");
+  it.each(["inactive", "synthetic"])("denies %s members", async (kind) => {
     mocks.active.mockResolvedValue(kind !== "inactive"); mocks.group.mockResolvedValue(kind === "synthetic");
     expect(await connectionMemberActive("member-a")).toBe(false);
+  });
+  it("admits any active person", async () => {
+    mocks.active.mockResolvedValue(true); mocks.group.mockResolvedValue(false);
+    expect(await connectionMemberActive("member-b")).toBe(true);
   });
   it("requires a present fence even after signature verification", async () => {
     mocks.callback.mockResolvedValue("member-a"); mocks.authority.mockReturnValue(null);
@@ -27,7 +30,6 @@ describe("custom connection admission", () => {
   it("hides settings from anonymous sessions and applies canonical CSRF to mutations", async () => {
     mocks.session.mockResolvedValue(null);
     await expect(requireConnectionSession(new Request("https://www.withmurph.ai"))).rejects.toMatchObject({ status: 404 });
-    vi.stubEnv("HOSTED_CUSTOM_CONNECTION_MEMBER_IDS", "member-a");
     mocks.session.mockResolvedValue({ member: { id: "member-a" } }); mocks.active.mockResolvedValue(true); mocks.group.mockResolvedValue(false);
     mocks.csrf.mockImplementation(() => { throw new Error("foreign origin"); });
     await expect(requireConnectionSession(new Request("https://www.withmurph.ai"), true)).rejects.toThrow();
