@@ -284,7 +284,7 @@ function ChooseScreen({ connection, flow, mode }: { connection: CustomConnection
       }
       announceDetail={false}
       below={editing && connection.host !== connection.name ? <p className={cn(QUIET_TEXT_CLASS, "pt-1.5")}>{connection.host}</p> : undefined}
-      detail={editing ? describeEditingConnection(connection) : "Pick what Murph can use. It asks you before changing anything."}
+      detail={editing ? describeEditingConnection(connection) : "Murph asks you before it changes anything."}
       fill
       headingRef={flow.headingRef}
       title={editing ? `${connection.name}.` : "Choose what Murph can use."}
