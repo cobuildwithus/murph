@@ -59,3 +59,29 @@ export async function claimRefresh(row: ConnectionRow): Promise<string> {
   if (result.count !== 1) throw new ConnectionError("conflict", 409);
   return claim;
 }
+
+// Names the model already knows mean something else; a service can't take them as its tool prefix.
+const RESERVED_SLUGS = /^(murph|codex|openai|mcp|functions|shell|web|connected_apps|multi_tool_use)(_|$)/u;
+
+/** A short display name from the server's own claim; never one that reads as Murph itself. */
+export function connectionDisplayName(claimed: string | undefined, host: string): string {
+  const cleaned = (claimed ?? "").replace(/[\p{C}]/gu, "").replace(/\s+/gu, " ").trim().slice(0, 40);
+  return cleaned && !/murph/iu.test(cleaned) ? cleaned : host;
+}
+/** The Codex tool prefix for a connection: lowercase letters, digits and underscores. */
+export function connectionSlug(name: string): string {
+  const base = name.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/gu, "_").replace(/^_+|_+$/gu, "").slice(0, 24).replace(/_+$/u, "");
+  const slug = /^[a-z]/u.test(base) ? base : `s_${base}`.slice(0, 24);
+  return slug === "s_" ? "service" : RESERVED_SLUGS.test(slug) ? `svc_${slug}`.slice(0, 24) : slug;
+}
+/** Gives a new connection its name and tool prefix once its server has answered. */
+export async function nameConnection(row: ConnectionRow, claimed: string | undefined, prisma: Pick<Prisma.TransactionClient, "hostedMcpConnection">) {
+  const host = new URL(row.serverUrl).hostname;
+  if (row.name !== host) return;
+  const name = connectionDisplayName(claimed, host);
+  const base = connectionSlug(name);
+  const taken = new Set((await prisma.hostedMcpConnection.findMany({ where: { memberId: row.memberId, NOT: { id: row.id } }, select: { slug: true } })).map((other) => other.slug));
+  const slug = [base, ...Array.from({ length: 8 }, (_, index) => `${base}_${index + 2}`)].find((candidate) => !taken.has(candidate));
+  if (!slug) return;
+  await prisma.hostedMcpConnection.updateMany({ where: { id: row.id, generation: row.generation, name: host }, data: { name, slug } });
+}

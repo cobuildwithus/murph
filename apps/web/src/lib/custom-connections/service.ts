@@ -10,8 +10,8 @@ import { ConnectionError } from "./errors";
 import { connectionUrl, guardedConnectionFetch } from "./guarded-fetch";
 import { completeConnectionAuthorization, ConnectionOAuthProvider, revocationEndpoint, type PendingAuthorization } from "./oauth";
 import { sealConnectionSecret, openConnectionSecret } from "./secrets";
-import { connectionWhere, projectConnection, readConnection, saveCatalog, type ConnectionRow } from "./store";
-import { listConnectionTools, readCredentials } from "./upstream";
+import { connectionWhere, nameConnection, projectConnection, readConnection, saveCatalog, type ConnectionRow } from "./store";
+import { describeConnection, listConnectionTools, readCredentials } from "./upstream";
 
 type SettingsMutation = { request: Request; session: HostedAppSession };
 async function settingsMutation<T>(authority: SettingsMutation, operation: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
@@ -62,8 +62,11 @@ async function discoverConnection(row: ConnectionRow, authority: SettingsMutatio
     },
   });
   try {
-    const tools = await listConnectionTools(row, provider);
-    const saved = await settingsMutation(authority, (tx) => saveCatalog(row, reconcileTools(storedToolsSchema.parse(row.tools), tools), undefined, tx));
+    const { tools, serverName } = await describeConnection(row, provider);
+    const saved = await settingsMutation(authority, async (tx) => {
+      await nameConnection(row, serverName, tx);
+      return saveCatalog(row, reconcileTools(storedToolsSchema.parse(row.tools), tools), undefined, tx);
+    });
     return { next: "choose" as const, connection: projectConnection(saved) };
   } catch (error) {
     if (provider.authorizationUrl) return { next: "sign_in" as const, connectionId: row.id,
@@ -113,8 +116,11 @@ export async function finishConnectionSignIn(request: Request, session: HostedAp
   });
   await completeConnectionAuthorization(provider, code, query.get("iss") ?? undefined);
   const updated = await readConnection(row.memberId, id);
-  const tools = await listConnectionTools(updated);
-  return settingsMutation({ request, session }, (tx) => saveCatalog(updated, reconcileTools(storedToolsSchema.parse(updated.tools), tools), undefined, tx));
+  const { tools, serverName } = await describeConnection(updated);
+  return settingsMutation({ request, session }, async (tx) => {
+    await nameConnection(updated, serverName, tx);
+    return saveCatalog(updated, reconcileTools(storedToolsSchema.parse(updated.tools), tools), undefined, tx);
+  });
 }
 export async function patchConnection(row: ConnectionRow, input: { tools?: Record<string, boolean>; status?: "on" | "off" }, authority: SettingsMutation) {
   if (input.status === "on" && row.status === "needs_sign_in") throw new ConnectionError("needs_sign_in");

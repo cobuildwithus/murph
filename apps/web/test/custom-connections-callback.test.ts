@@ -7,8 +7,9 @@ vi.mock("../src/lib/hosted-onboarding/app-session", () => ({ assertHostedAppSess
 vi.mock("../src/lib/hosted-onboarding/member-access", () => ({ activeHostedPersonAccessWhere: () => ({ suspendedAt: null }) }));
 vi.mock("../src/lib/custom-connections/store", () => ({
   readConnection: async () => mocks.row, connectionWhere: (memberId: string) => ({ memberId }), projectConnection: (row: unknown) => row, saveCatalog: mocks.saveCatalog,
+  nameConnection: async () => undefined,
 }));
-vi.mock("../src/lib/custom-connections/upstream", () => ({ listConnectionTools: async () => [], readCredentials: async () => undefined }));
+vi.mock("../src/lib/custom-connections/upstream", () => ({ listConnectionTools: async () => [], describeConnection: async () => ({ tools: [], serverName: undefined }), readCredentials: async () => undefined }));
 vi.mock("../src/lib/custom-connections/secrets", () => ({ openConnectionSecret: async (_member: string, _id: string, _generation: number, _field: string, value: string) => JSON.parse(value),
   sealConnectionSecret: async (_member: string, _id: string, _generation: number, _field: string, value: unknown) => JSON.stringify(value) }));
 vi.mock("../src/lib/custom-connections/guarded-fetch", async (original) => ({ ...await original<typeof import("../src/lib/custom-connections/guarded-fetch")>(), guardedConnectionFetch: mocks.fetch }));

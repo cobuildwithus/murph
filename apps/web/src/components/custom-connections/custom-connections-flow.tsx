@@ -178,7 +178,8 @@ export function CustomConnectionsFlow({ fixture, returned }: CustomConnectionsFl
     try {
       const { connection: saved } = await requestHostedOnboardingJson<{ connection: CustomConnection }>({
         method: "PATCH",
-        payload: { tools: draft },
+        // Connecting a new service turns it on with the chosen actions.
+        payload: mode === "new" ? { status: "on", tools: draft } : { tools: draft },
         url: `${CUSTOM_CONNECTIONS_API}/${encodeURIComponent(target.id)}`,
       });
       remember(saved);
@@ -477,6 +478,11 @@ export function CustomConnectionsFlow({ fixture, returned }: CustomConnectionsFl
             </>
           }
           announceDetail={false}
+          below={
+            editing && connection.host !== connection.name ? (
+              <p className={cn(QUIET_TEXT_CLASS, "pt-1.5")}>{connection.host}</p>
+            ) : undefined
+          }
           detail={editing ? describeEditingConnection(connection) : `Murph can only look things up with ${connection.name} for now.`}
           fill
           headingRef={headingRef}

@@ -84,6 +84,10 @@ export async function withConnectionClient<T>(row: ConnectionRow, operation: (cl
   }
 }
 export async function listConnectionTools(row: ConnectionRow, provider?: ConnectionOAuthProvider) {
+  return (await describeConnection(row, provider)).tools;
+}
+/** The server's tools and the name it gives itself (a claim, used only for display and the tool prefix). */
+export async function describeConnection(row: ConnectionRow, provider?: ConnectionOAuthProvider) {
   return withConnectionClient(row, async (client) => {
     const tools = [];
     let cursor: string | undefined;
@@ -92,7 +96,10 @@ export async function listConnectionTools(row: ConnectionRow, provider?: Connect
       tools.push(...result.tools);
       if (tools.length > 100) throw new ConnectionError("limit");
       cursor = result.nextCursor;
-      if (!cursor) return tools;
+      if (!cursor) {
+        const server = client.getServerVersion();
+        return { tools, serverName: server?.title ?? server?.name };
+      }
     }
     throw new ConnectionError("limit");
   }, provider);
