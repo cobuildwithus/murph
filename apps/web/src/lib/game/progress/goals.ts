@@ -97,24 +97,37 @@ export function foundEntry(kind: FoundEntry["kind"], found: NonNullable<z.infer<
   return { ...words, kind, at, id: `found:${createHash("sha1").update(JSON.stringify(identity)).digest("hex").slice(0, 12)}` };
 }
 
-/** Only output_text URL citations attest a source; search actions alone do not. */
+/** The same page however the provider decorates it: no utm_ parameters, fragment or trailing slash. */
+function sourceKey(url: string): string | null {
+  if (!URL.canParse(url)) return null;
+  const parsed = new URL(url);
+  for (const name of [...parsed.searchParams.keys()]) if (name.startsWith("utm_")) parsed.searchParams.delete(name);
+  return `${parsed.host.toLowerCase()}${parsed.pathname.replace(/\/+$/u, "")}${parsed.search}`;
+}
+
+/**
+ * A source must be a page this search actually read: an output_text URL citation or one of the search's own
+ * sources. JSON output often carries no inline citations, so the search's sources are the usual proof.
+ */
 export function checkedGoalLookup(response: Pick<Response, "status" | "output_text" | "output">, kind: FoundEntry["kind"], entries: readonly BankEntry[]) {
   if (response.status !== "completed") throw new Error("Incomplete goal response.");
   const result = lookupResult.parse(JSON.parse(response.output_text));
-  const cited = new Set(response.output.flatMap(item => item.type === "message"
+  const read = response.output.flatMap(item => item.type === "message"
     ? item.content.flatMap(content => content.type === "output_text"
-      ? content.annotations.flatMap(annotation => annotation.type === "url_citation" ? [annotation.url] : []) : []) : []));
+      ? content.annotations.flatMap(annotation => annotation.type === "url_citation" ? [annotation.url] : []) : [])
+    : item.type === "web_search_call" && item.action.type === "search" ? (item.action.sources ?? []).map(source => source.url) : []);
+  const cited = new Set(read.map(sourceKey));
   const closest = [...new Set(result.closest)].filter(id => entries.some(entry => entry.id === id));
   const found = result.found;
   const valid = found !== null && found.value >= 1 && found.value <= (kind === "height" ? 400_000_000 : 365 * 86400)
-    && cited.has(found.sourceUrl) && result.closest.every(id => entries.some(entry => entry.id === id));
+    && sourceKey(found.sourceUrl) !== null && cited.has(sourceKey(found.sourceUrl)) && result.closest.every(id => entries.some(entry => entry.id === id));
   return { found: valid ? foundEntry(kind, found) : null, closest, note: result.note };
 }
 
 export async function lookupGoal(kind: FoundEntry["kind"], words: string, entries: readonly BankEntry[]) {
   try {
     const response = await inferenceClient().responses.create({ model: "gpt-6.1-sol", reasoning: { effort: "low" },
-      tools: [{ type: "web_search" }], tool_choice: "required", store: false,
+      tools: [{ type: "web_search" }], tool_choice: "required", store: false, include: ["web_search_call.action.sources"],
       instructions: `Look up the real height or duration requested. Search the web and cite the source of the value.
 For height use metres; for time use seconds. A fictional or unverifiable target has found null.
 Return the canonical name, location (where), sourceUrl and one number-free sentence (blurb).

@@ -85,8 +85,18 @@ describe("checked lookup boundary", () => {
     const parsed = checkedGoalLookup({ ...response, output_text: JSON.stringify({ found: null, closest: ["half-dome", "half-dome", "invented"], note: "Try a real mountain." }) }, "height", eligible);
     expect(parsed).toEqual({ found: null, closest: ["half-dome"], note: "Try a real mountain." });
   });
-  it("does not accept a search action's source as a citation", () => {
-    expect(checkedGoalLookup({ ...response, output: response.output.filter(item => item.type === "web_search_call") }, "height", eligible).found).toBeNull();
+  it("accepts a page the search read even without an inline citation", () => {
+    expect(checkedGoalLookup({ ...response, output: response.output.filter(item => item.type === "web_search_call") }, "height", eligible).found).toMatchObject({ at: 1000 });
+  });
+  it("matches the provider's decorated URL to the model's plain one, and nothing looser", () => {
+    const decorated = { ...response, output: response.output.map(item => item.type === "web_search_call" && item.action.type === "search"
+      ? { ...item, action: { ...item.action, sources: [{ type: "url" as const, url: "https://FACTS.example.test/tower/?utm_source=openai#top" }] } } : item)
+      .filter(item => item.type === "web_search_call") };
+    expect(checkedGoalLookup(decorated, "height", eligible).found).toMatchObject({ at: 1000 });
+    const otherPage = JSON.stringify({ found: { ...proposed, sourceUrl: "https://facts.example.test/tower?page=2" }, closest: [], note: null });
+    expect(checkedGoalLookup({ ...decorated, output_text: otherPage }, "height", eligible).found).toBeNull();
+    const notAUrl = JSON.stringify({ found: { ...proposed, sourceUrl: "facts" }, closest: [], note: null });
+    expect(checkedGoalLookup({ ...decorated, output_text: notAUrl }, "height", eligible).found).toBeNull();
   });
   it.each(["short", "tagline", "blurb"] as const)("rejects numeric or multiline provider %s", field => {
     for (const text of ["A 10 story tower", "A tower\nabove town", "A tower — above town"]) {
