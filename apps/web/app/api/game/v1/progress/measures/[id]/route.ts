@@ -1,8 +1,11 @@
 import { clientUnits } from "@/src/lib/companion/client-info";
 import { RequestInputError } from "@murphai/hosted-execution/request-input";
-import { requireGameMemberAuth, assertGameMemberAuthCurrentTx } from "@/src/lib/game/http/auth";
+import { requireGameMemberAuth } from "@/src/lib/game/http/auth";
 import { invalidGameRequest } from "@/src/lib/game/http/errors";
 import { parseSetMeasureBody } from "@/src/lib/game/progress/contract";
+import { readGoalContext } from "@/src/lib/game/progress/goal-context";
+import { healthSumView } from "@/src/lib/game/progress/health-journeys";
+import { getPrisma } from "@/src/lib/prisma";
 import { setMeasure } from "@/src/lib/game/progress/goals";
 import { readProgress } from "@/src/lib/game/progress/view";
 import { resolveDecodedRouteParam } from "@/src/lib/http";
@@ -19,10 +22,15 @@ export const PUT = withProgressJsonError(async (request: Request, context: { par
     throw error;
   });
   const body = parseSetMeasureBody(raw);
-  const beforeMutationTx = (tx: Parameters<typeof assertGameMemberAuthCurrentTx>[1]) => assertGameMemberAuthCurrentTx(auth, tx);
   return progressEffect(async () => {
-    const measureId = await setMeasure(auth.member.id, id, body, beforeMutationTx);
-    const view = await readProgress(auth.member.id, units, beforeMutationTx);
+    const goalContext = await readGoalContext(auth, id, request.signal);
+    const measureId = await setMeasure(auth.member.id, body, goalContext);
+    if (goalContext.source === "wearable") {
+      const measure = healthSumView(goalContext.measure, goalContext.state, goalContext.awards, goalContext.today, units);
+      await goalContext.beforeMutationTx(getPrisma());
+      return jsonOk({ ok: true, measure });
+    }
+    const view = await readProgress(auth.member.id, units, goalContext.beforeMutationTx);
     return jsonOk({ ok: true, measure: view.measures.find(measure => measure.id === measureId)! });
   });
 }));

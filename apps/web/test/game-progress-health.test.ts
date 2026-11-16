@@ -3,6 +3,9 @@ import { addDaysToIsoDate } from "@murphai/contracts";
 import { healthAgeShare, healthBaseline, healthMeans, healthSteps, healthSums, heldHealthLevels, progressHealthDays,
   type HealthAchievementContext } from "../src/lib/game/progress/health";
 
+import { normalizeHealthDays } from "../src/lib/game/progress/health-input";
+import { healthSumMeasures } from "../src/lib/game/progress/health-journeys";
+
 const joinedOn = "2026-10-21";
 const days = (from: string, count: number, value: number) => Array.from({ length: count }, (_, i) => ({ date: addDaysToIsoDate(from, i), value }));
 const context = (baseline: number, current: number): HealthAchievementContext => ({
@@ -105,3 +108,30 @@ it.each([{ count: 9, expected: null }, { count: 10, expected: 26 }, { count: 11,
     const baseline = days(addDaysToIsoDate(joinedOn, -28), 20, 26).map((point, index) => ({ ...point, value: index === 0 ? 80 : point.value }));
     expect(healthBaseline("vo2Max", baseline, joinedOn)).toBe(26);
   });
+
+
+it.each([
+  { id: "steps", low: 0, high: 1_000_000, scale: 1 },
+  { id: "sleep", low: 0, high: 1440, scale: 60 },
+  { id: "restingHeartRate", low: 20, high: 250, scale: 1 },
+  { id: "vo2Max", low: 0, high: 100, scale: 1 },
+] as const)("normalizes $id once with inclusive reporting bounds and retained dates", ({ id, low, high, scale }) => {
+  const raw = [
+    ["2025-11-16", high], ["2025-11-17", low], ["2026-11-12", low - 1],
+    ["2026-11-13", high + 1], ["2026-11-14", high], ["2026-11-17", high],
+  ].map(([date, value]) => ({ date: String(date), value: Number(value), source: "Garmin", observedAt: `${date}T12:00:00Z` }));
+  expect(normalizeHealthDays(id, raw, "2026-11-16").map(point => [point.date, point.value]))
+    .toEqual([["2025-11-17", low * scale], ["2026-11-14", high * scale]]);
+});
+
+it.each([
+  { dates: ["2026-10-20"], expected: [] },
+  { dates: ["2026-10-20", "2026-10-23", "2026-10-25"], expected: ["2026-10-23", "2026-10-25"] },
+  { dates: ["2025-01-01"], expected: [] },
+])("health sums preserve join cutoff, late starts and gaps: $dates", ({ dates, expected }) => {
+  const daily = normalizeHealthDays("sleep", dates.map(date => ({ date, value: 480, source: "Garmin", observedAt: `${date}T12:00:00Z` })), "2026-11-16");
+  const sums = healthSumMeasures([{ id: "sleep", daily }], joinedOn, "2026-11-16", []);
+  expect(sums.flatMap(sum => sum.amounts.map(day => day.date))).toEqual(expected);
+  expect(sums.flatMap(sum => sum.amounts.map(day => day.amount))).toEqual(expected.map(() => 28800));
+  if (expected.length === 0) expect(sums).toEqual([]);
+});

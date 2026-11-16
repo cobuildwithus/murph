@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-16",
+  "order": 200,
+  "item": {
+    "id": "steps-map-matches-health-total",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Steps maps follow your health total",
+    "summary": "Your Steps route map now uses the same daily readings as your health total.",
+    "details": "Readings outside the supported range no longer move the map ahead or behind. Completed routes stay completed when earlier readings are corrected.",
+    "relevanceTags": ["progress", "steps"],
+    "sourcePullRequests": []
+  }
+}

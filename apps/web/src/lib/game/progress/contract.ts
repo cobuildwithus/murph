@@ -140,7 +140,7 @@ const seen = z.strictObject({ momentIds: z.array(text) });
 export type SeenBody = z.infer<typeof seen>;
 const friendsQuery = z.object({ measure: text, range: z.enum(["week", "month", "all"]).default("month"), with: text.optional() });
 export type FriendsQuery = z.infer<typeof friendsQuery>;
-const goalsQuery = z.object({ measure: text, q: text.optional(), find: z.literal("1").optional() })
+const goalsQuery = z.strictObject({ measure: text, q: text.optional(), find: z.literal("1").optional() })
   .refine(query => query.find === undefined || query.q !== undefined);
 export type GoalsQuery = z.infer<typeof goalsQuery>;
 const picUpload = z.object({ id: z.string().uuid(), measureId: text, takenAt: z.iso.datetime({ offset: true }) });
