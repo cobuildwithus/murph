@@ -9,7 +9,7 @@ import type {
   DeviceWebhookQueueHealthObservation,
   DeviceWebhookQueueHealthState,
 } from "../device-webhook-queue-health/store.js";
-import { sendOperatorLinqAlert } from "../operator-alert/linq.js";
+import { readOperatorLinqChatIds, sendOperatorLinqAlert } from "../operator-alert/linq.js";
 import type { DurableObjectStateLike } from "../user-runner/types.js";
 
 const DEFAULT_LINQ_API_BASE_URL = "https://api.linqapp.com/api/partner/v3";
@@ -72,16 +72,7 @@ function createOperatorAlertSender(
     environment.LINQ_API_TOKEN,
     "LINQ_API_TOKEN",
   );
-  const chatIds: readonly [primary: string, secondary: string] = [
-    readRequiredEnvironmentValue(
-      environment.HOSTED_DATABASE_ALERT_LINQ_CHAT_ID,
-      "HOSTED_DATABASE_ALERT_LINQ_CHAT_ID",
-    ),
-    readRequiredEnvironmentValue(
-      environment.HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID,
-      "HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID",
-    ),
-  ];
+  const chatIds = readOperatorLinqChatIds(environment);
   return {
     async send(input): Promise<void> {
       await sendOperatorLinqAlert({

@@ -1,9 +1,9 @@
 import LinqAPIV3, { APIError } from "@linqapp/sdk";
 import type {
   Chat,
-  MessageCreateParams,
   PhoneNumberListResponse,
 } from "@linqapp/sdk/resources";
+import type { MessageSendParams } from "@linqapp/sdk/resources/chats";
 
 const OPERATOR_ALERT_LINQ_SDK_BASE_URL = "https://linq-sdk.invalid";
 const OPERATOR_ALERT_FETCH_TIMEOUT_MS = 10_000;
@@ -28,15 +28,42 @@ export class OperatorAlertLinqError extends Error {
   }
 }
 
+/** The primary operator chat, plus a distinct secondary when one is set. */
+export type OperatorLinqChatIds =
+  | readonly [primary: string]
+  | readonly [primary: string, secondary: string];
+
 /**
- * Delivers one already-persisted operator page to both configured direct
- * chats. Callers own incident state, pacing, and exact pending bytes; this
- * helper owns only secret-safe Linq destination validation and egress.
+ * Reads the configured operator chats. The secondary is optional, so paging can
+ * run with one operator; when set, it must name a different chat.
+ */
+export function readOperatorLinqChatIds(environment: {
+  HOSTED_DATABASE_ALERT_LINQ_CHAT_ID?: string;
+  HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID?: string;
+}): OperatorLinqChatIds {
+  const primary = environment.HOSTED_DATABASE_ALERT_LINQ_CHAT_ID?.trim();
+  if (!primary) {
+    throw new Error("HOSTED_DATABASE_ALERT_LINQ_CHAT_ID is required.");
+  }
+  const secondary = environment.HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID?.trim();
+  if (!secondary) {
+    return [primary];
+  }
+  if (secondary === primary) {
+    throw new Error("Database health alert chat IDs must be distinct.");
+  }
+  return [primary, secondary];
+}
+
+/**
+ * Delivers one already-persisted operator page to each configured direct chat.
+ * Callers own incident state, pacing, and exact pending bytes; this helper owns
+ * only secret-safe Linq destination validation and egress.
  */
 export async function sendOperatorLinqAlert(input: {
   apiBaseUrl: string;
   apiToken: string;
-  chatIds: readonly [primary: string, secondary: string];
+  chatIds: OperatorLinqChatIds;
   fetchImplementation?: OperatorAlertFetch;
   idempotencyKey: string;
   message: string;
@@ -53,44 +80,37 @@ export async function sendOperatorLinqAlert(input: {
     ),
   );
   const primaryResult = destinationResults[0];
-  const secondaryResult = destinationResults[1];
   const failures: unknown[] = [];
-  const destinations: Array<{ idempotencyKey: string; recipient: string }> = [];
+  const destinations: OperatorLinqSendTarget[] = [];
   if (primaryResult.status === "rejected") {
     failures.push(primaryResult.reason);
   } else if (primaryResult.value.sendable) {
     destinations.push({
+      chatId: input.chatIds[0],
       idempotencyKey: input.idempotencyKey,
-      recipient: primaryResult.value.recipient,
     });
   } else {
     failures.push(new OperatorAlertLinqError("linq_health_suppressed"));
   }
 
-  if (secondaryResult.status === "rejected") {
-    failures.push(secondaryResult.reason);
-  } else if (primaryResult.status === "fulfilled") {
-    if (secondaryResult.value.recipient === primaryResult.value.recipient) {
-      failures.push(new OperatorAlertLinqError("linq_duplicate_recipient"));
-    } else if (!secondaryResult.value.sendable) {
-      failures.push(new OperatorAlertLinqError("linq_health_suppressed"));
-    } else {
-      destinations.push({
-        idempotencyKey: `${input.idempotencyKey}-recipient-2`,
-        recipient: secondaryResult.value.recipient,
-      });
-    }
-  }
+  const secondary = admitSecondaryOperatorLinqDestination({
+    chatId: input.chatIds[1],
+    idempotencyKey: input.idempotencyKey,
+    primary: primaryResult,
+    secondary: destinationResults[1],
+  });
+  failures.push(...secondary.failures);
+  destinations.push(...secondary.destinations);
 
   const sendResults = await Promise.allSettled(
     destinations.map((destination) =>
       sendOperatorLinqMessage({
         apiBaseUrl: input.apiBaseUrl,
         apiToken: input.apiToken,
+        chatId: destination.chatId,
         fetchImplementation,
         idempotencyKey: destination.idempotencyKey,
         message: input.message,
-        recipient: destination.recipient,
       })
     ),
   );
@@ -103,6 +123,42 @@ export async function sendOperatorLinqAlert(input: {
   if (failure !== undefined) {
     throw failure;
   }
+}
+
+type OperatorLinqDestination = { recipient: string; sendable: boolean };
+type OperatorLinqSendTarget = { chatId: string; idempotencyKey: string };
+
+/**
+ * A configured secondary joins the page only as a healthy recipient distinct
+ * from the primary. An unresolved primary keeps it out, because distinctness
+ * cannot be proven; the primary's own failure is already recorded.
+ */
+function admitSecondaryOperatorLinqDestination(input: {
+  chatId: string | undefined;
+  idempotencyKey: string;
+  primary: PromiseSettledResult<OperatorLinqDestination>;
+  secondary: PromiseSettledResult<OperatorLinqDestination> | undefined;
+}): { destinations: OperatorLinqSendTarget[]; failures: unknown[] } {
+  const { primary, secondary } = input;
+  if (input.chatId === undefined || secondary === undefined) {
+    return { destinations: [], failures: [] };
+  }
+  if (secondary.status === "rejected") {
+    return { destinations: [], failures: [secondary.reason] };
+  }
+  if (primary.status === "rejected") {
+    return { destinations: [], failures: [] };
+  }
+  if (secondary.value.recipient === primary.value.recipient) {
+    return { destinations: [], failures: [new OperatorAlertLinqError("linq_duplicate_recipient")] };
+  }
+  if (!secondary.value.sendable) {
+    return { destinations: [], failures: [new OperatorAlertLinqError("linq_health_suppressed")] };
+  }
+  return {
+    destinations: [{ chatId: input.chatId, idempotencyKey: `${input.idempotencyKey}-recipient-2` }],
+    failures: [],
+  };
 }
 
 export function classifyOperatorLinqAlertFailure(error: unknown): string {
@@ -143,31 +199,31 @@ async function resolveOperatorLinqDestination(input: {
   };
 }
 
+/**
+ * Sends into the configured chat itself, so the page leaves from the line the
+ * preflight just checked. Linq's recipient-only route picks its own chat and
+ * line, which can differ from the one preflight approved.
+ *
+ * Linq answers a key whose message it has deleted or expired with 404 and
+ * never resends it, which strands a page that stayed pending after one chat
+ * accepted it. A 404 therefore earns one send under a key bound to this chat.
+ * A chat Linq cannot find 404s again, so that page still fails.
+ */
 async function sendOperatorLinqMessage(input: {
   apiBaseUrl: string;
   apiToken: string;
+  chatId: string;
   fetchImplementation: OperatorAlertFetch;
   idempotencyKey: string;
   message: string;
-  recipient: string;
 }): Promise<void> {
-  const body: MessageCreateParams = {
-    "Idempotency-Key": input.idempotencyKey,
-    message: {
-      idempotency_key: input.idempotencyKey,
-      parts: [
-        {
-          type: "text",
-          value: input.message,
-        },
-      ],
-    },
-    to: [input.recipient],
-  };
   try {
-    await createOperatorLinqClient(input, {
-      discardResponseBody: true,
-    }).messages.create(body).asResponse();
+    await postOperatorLinqMessage(input, input.idempotencyKey).catch(async (error: unknown) => {
+      if (readOperatorLinqErrorStatus(error) !== 404) {
+        throw error;
+      }
+      await postOperatorLinqMessage(input, `${input.idempotencyKey}:${input.chatId}`);
+    });
   } catch (error) {
     const status = readOperatorLinqErrorStatus(error);
     if (status !== null) {
@@ -179,6 +235,34 @@ async function sendOperatorLinqMessage(input: {
     }
     throw error;
   }
+}
+
+async function postOperatorLinqMessage(
+  input: {
+    apiBaseUrl: string;
+    apiToken: string;
+    chatId: string;
+    fetchImplementation: OperatorAlertFetch;
+    message: string;
+  },
+  idempotencyKey: string,
+): Promise<void> {
+  const body: MessageSendParams = {
+    message: {
+      idempotency_key: idempotencyKey,
+      parts: [
+        {
+          type: "text",
+          value: input.message,
+        },
+      ],
+    },
+  };
+  await createOperatorLinqClient(input, {
+    discardResponseBody: true,
+  }).chats.messages.send(input.chatId, body, {
+    headers: { "Idempotency-Key": idempotencyKey },
+  }).asResponse();
 }
 
 function readOperatorLinqErrorStatus(error: unknown): number | null {

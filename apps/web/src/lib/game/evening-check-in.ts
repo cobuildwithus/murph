@@ -113,8 +113,8 @@ function hasDueCandidate(games: Games, now: Date): boolean {
 
 function skipUnprovableRoom(error: unknown): null {
   const reason = readGameChatAudienceRefusal(error);
-  // A live bound room cannot lose its route through normal group-leave cleanup.
-  if (reason === "route_removed") throw new Error("Game chat route is unavailable.", { cause: error });
+  // A bound room with no route can't be sent to, so it is skipped like any other refusal. A pair game is live before its
+  // chat is created, which can wait a day for line capacity, and the removed-line repair detaches a live group's route.
   if (!reason) throw error;
   logHostedOnboardingWarning("game.evening.room-skipped", { reason });
   return null;

@@ -1671,8 +1671,8 @@ boundaries are owned by `agent-docs/operations/verification-and-runtime.md`.
   the five-minute scheduled Durable Object path. Existing
   coverage continues to prove documented formatted/deprecated Linq inventory
   shapes with duplicate and mismatch rejection, zero message POSTs for
-  unhealthy or indeterminate chat/line health, healthy auto-selected Linq
-  delivery, discovery-only PlanetScale service authorization plus bounded
+  unhealthy or indeterminate chat/line health, healthy delivery into each
+  configured Linq chat, discovery-only PlanetScale service authorization plus bounded
   signed scrape parameters, unsafe discovered-target rejection, and singleton
   cron dispatch.
   The deploy-automation test keeps the five-minute trigger, v4 SQLite class

@@ -1266,6 +1266,7 @@ async function requestHostedLinqSdkOrThrow<T>(input: {
     const status = readLinqApiErrorStatus(error);
     if (status !== null) {
       throw buildHostedLinqRequestFailedError({
+        idempotencyKeyReuseConflict: isHostedLinqIdempotencyKeyReuseApiError(error),
         operation: input.operation,
         providerErrorDiagnostics: input.providerErrorDiagnostics
           ? readHostedLinqProviderErrorDiagnostics(readLinqApiErrorPayload(error))

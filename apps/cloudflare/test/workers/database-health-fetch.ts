@@ -212,15 +212,21 @@ export async function handleDatabaseHealthEgress(
       is_group: false,
     });
   }
+  const messageChatId = /^\/api\/partner\/v3\/chats\/(chat_worker_test|chat_worker_secondary_test)\/messages$/u
+    .exec(url.pathname)?.[1];
   if (
     method === "POST"
     && url.origin === "https://api.linqapp.com"
-    && url.pathname === "/api/partner/v3/messages"
+    && messageChatId !== undefined
     && headers.get("authorization") === "Bearer linq-token"
   ) {
     const messageRequest = readValidDatabaseHealthMessageRequest({
       body: init?.body,
       headers,
+      // The fake provider knows each configured chat's sole recipient.
+      recipient: messageChatId === "chat_worker_secondary_test"
+        ? "+12025550124"
+        : "+12025550123",
     });
     if (messageRequest) {
       recordedDatabaseHealthMessageRequests.push(messageRequest);
@@ -233,6 +239,7 @@ export async function handleDatabaseHealthEgress(
 function readValidDatabaseHealthMessageRequest(input: {
   body: BodyInit | null | undefined;
   headers: Headers;
+  recipient: string;
 }): RecordedDatabaseHealthMessageRequest | null {
   const idempotencyKey = input.headers.get("idempotency-key");
   if (typeof input.body !== "string") {
@@ -263,12 +270,7 @@ function readValidDatabaseHealthMessageRequest(input: {
       )
       || value.message.parts[0].value.startsWith("SEV1 OpenAI ")
     )
-    || !Array.isArray(value.to)
-    || value.to.length !== 1
-    || (
-      value.to[0] !== "+12025550123"
-      && value.to[0] !== "+12025550124"
-    )
+    || "to" in value
     || "from" in value
     || typeof idempotencyKey !== "string"
     || idempotencyKey.length === 0
@@ -281,7 +283,7 @@ function readValidDatabaseHealthMessageRequest(input: {
       type: value.message.parts[0].type,
       value: value.message.parts[0].value,
     }],
-    recipient: value.to[0],
+    recipient: input.recipient,
   };
 }
 
