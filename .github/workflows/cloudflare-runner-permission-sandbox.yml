@@ -148,5 +148,10 @@ jobs:
           pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts test/assistant-codex-scripted-runtime.test.ts --no-coverage -t 'preempts an unfinished SSE answer|explicitly disables instant steering|steered reply has no text|keeps reply requests opted in|keeps in-turn compaction on default retention'
           pnpm exec vitest run --config apps/cloudflare/vitest.config.ts apps/cloudflare/test/codex-openai-egress-conformance.test.ts --no-coverage
 
+      - name: Prove custom connection sandbox boundaries
+        env:
+          MURPH_REQUIRE_NATIVE_SANDBOX: "1"
+        run: pnpm --dir packages/assistant-engine exec vitest run --config vitest.config.ts test/custom-connections-native.test.ts --no-coverage
+
       - name: Prove native Codex permission confinement
         run: pnpm --dir apps/cloudflare runner:docker:smoke:prepared-base

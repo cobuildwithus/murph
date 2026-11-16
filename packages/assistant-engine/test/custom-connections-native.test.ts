@@ -14,6 +14,16 @@ import { buildAssistantCodexContractFingerprint } from '../src/assistant/codex-c
 import type { HostedCustomConnectionManifestEntry } from '@murphai/hosted-execution'
 import { prepareScriptedTurnScenario, startScriptedResponsesStub } from './support/codex-scripted-provider.ts'
 
+// Codex's Linux sandbox needs unprivileged user namespaces, which ordinary CI hosts refuse.
+// Those hosts skip the boundary proof; the runner permission sandbox gate enables them and
+// sets MURPH_REQUIRE_NATIVE_SANDBOX=1, so there the proof must run.
+const SANDBOX_START_FAILURE = /bwrap: setting up uid map|bwrap: .*(?:Permission denied|Operation not permitted)|sandbox_apply: Operation not permitted|SeccompInstall/u
+function sandboxUnavailable(outputs: string): boolean {
+  if (!SANDBOX_START_FAILURE.test(outputs)) return false
+  if (process.env.MURPH_REQUIRE_NATIVE_SANDBOX === '1') throw new Error('The native Codex sandbox could not start where it is required.')
+  return true
+}
+
 const roots: string[] = []
 afterEach(async () => {
   await stopWarmCodexAppServer()
@@ -98,7 +108,7 @@ it('pinned native custom connections rotate catalogs and reject stale URLs', asy
     expect(restrictedInput.includes('read_notes')).toBe(false)
     const restrictedOutputs = stub.requestSummariesSinceBaseline().flatMap(summary => summary.functionCallOutputs ?? []).join(' ')
     // Linux sandboxes refuse the socket; macOS refuses the connection. Either way nothing reached the relay above.
-    expect(restrictedOutputs).toMatch(/not permitted|denied|couldn't connect|failed to connect/iu)
+    if (!sandboxUnavailable(restrictedOutputs)) expect(restrictedOutputs).toMatch(/not permitted|denied|couldn't connect|failed to connect/iu)
     const oldUrl = `${origin}/v1/${entry.id}/${entry.generation}/${entry.catalog}/mcp`
     gateway.state.connection = { ...entry, catalog: 'b'.repeat(43) }; gateway.state.schemaField = 'search_text'
     await turn('schema-reapproved', [gateway.state.connection])
@@ -126,7 +136,7 @@ it('pinned native custom connections rotate catalogs and reject stale URLs', asy
 }, 60_000)
 
 
-it('pinned native member shell denies Codex home writes while workspace and temp writes succeed', async () => {
+it('pinned native member shell denies Codex home writes while workspace and temp writes succeed', async (context) => {
   const stub = await startScriptedResponsesStub()
   try {
     const scenario = await prepareScriptedTurnScenario(stub, roots, { additionalTomlLines: buildMurphHostedPermissionProfileTomlLines })
@@ -156,6 +166,7 @@ it('pinned native member shell denies Codex home writes while workspace and temp
     })
     expect(result.finalMessage).toBe('Synthetic sandbox proof complete.')
     const outputs = stub.requestSummariesSinceBaseline().flatMap(summary => summary.functionCallOutputs ?? []).join(' ')
+    if (sandboxUnavailable(outputs)) return context.skip()
     expect(outputs).toContain('CONFIG_WRITE_DENIED')
     expect(outputs).toContain('CONFIG_READ_DENIED')
     expect(outputs).not.toContain('CONFIG_WRITE_ALLOWED')
