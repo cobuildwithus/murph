@@ -28,7 +28,7 @@ export function HostedApprovalRecoverySettings({ enabled }: { enabled: boolean }
 }
 
 export function ApprovalRecoveryDialog({ onClose }: { onClose: () => void }) {
-  const { openAuthDialog } = useAuth();
+  const { openAuthDialog, reauthenticate } = useAuth();
   const { authorize } = useSensitiveActionAuthorization();
   const router = useRouter();
   const [mode, setMode] = useState<Mode>("rotate");
@@ -71,7 +71,11 @@ export function ApprovalRecoveryDialog({ onClose }: { onClose: () => void }) {
     } catch (caught) {
       if (controller.signal.aborted) return;
       if (caught instanceof HostedOnboardingApiError && caught.code === "SENSITIVE_ACTION_FRESH_LOGIN_REQUIRED") {
-        close(); openAuthDialog(); return;
+        close();
+        // Recovery needs a fresh phone or Telegram sign-in to this same account.
+        if (action === "recover" && reauthenticate) void reauthenticate().then(() => router.refresh(), () => undefined);
+        else openAuthDialog();
+        return;
       }
       setError(caught instanceof Error ? caught.message : "Recovery could not finish. Please try again.");
     } finally {

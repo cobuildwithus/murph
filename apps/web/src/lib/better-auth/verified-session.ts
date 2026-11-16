@@ -7,6 +7,7 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import { runWithHostedDomainRootProviderCallsDisabled } from "../hosted-crypto/domain-root-unwrap-cache";
 import { hostedBetterAuthOptions } from "./auth";
 import { hostedAuthTransactionAdapter } from "./adapter";
+import { recordHostedPrimaryAuthenticationFactorTx, type HostedPrimaryAuthenticationFactor } from "./primary-factor";
 import { makeHostedAuthSessionRoomTx } from "./session-limit";
 
 // This endpoint exists only on this private instance. It has no public route or
@@ -14,7 +15,7 @@ import { makeHostedAuthSessionRoomTx } from "./session-limit";
 // member under locks in commitMember before Better Auth issues the session.
 export async function commitHostedAuthSession(input: {
   baseURL: string; secret: string; prisma: PrismaClient; memberId: string;
-  primaryAuthenticatedAt: Date | null;
+  primaryAuthenticatedAt: Date | null; primaryAuthenticationFactor: HostedPrimaryAuthenticationFactor;
   commitMember(tx: Prisma.TransactionClient): Promise<void>;
 }) {
   return input.prisma.$transaction((tx) => runWithHostedDomainRootProviderCallsDisabled(async () => {
@@ -28,6 +29,9 @@ export async function commitHostedAuthSession(input: {
           if (!user) throw new Error("Verified authentication member is missing.");
           const session = await context.context.internalAdapter.createSession(input.memberId);
           if (!session || session.userId !== input.memberId) throw new Error("Session member changed.");
+          if (input.primaryAuthenticatedAt) await recordHostedPrimaryAuthenticationFactorTx(tx, {
+            authenticatedAt: input.primaryAuthenticatedAt, factor: input.primaryAuthenticationFactor, sessionId: session.id,
+          });
           await setSessionCookie(context, { user, session });
           return context.json({ token: session.token, expiresAt: session.expiresAt });
         }),

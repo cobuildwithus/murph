@@ -32,7 +32,7 @@ export function useInitialApprovalEnrollment() {
       try { registration = await getOptions(); }
       catch (error) {
         if (!(error instanceof HostedOnboardingApiError) || error.code !== "SENSITIVE_ACTION_FRESH_LOGIN_REQUIRED") throw error;
-        setPendingLabel("Sign in again to add your passkey…");
+        setPendingLabel("Sign in with your phone or Telegram to add your passkey…");
         if (!reauthenticate) throw new Error("Sign-in could not open. Refresh this page and try again.");
         await reauthenticate();
         signal.throwIfAborted();

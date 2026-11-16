@@ -3,12 +3,12 @@ import { beforeEach, expect, test, vi } from "vitest";
 import { renderClientComponent } from "./render-client-component";
 
 const mocks = vi.hoisted(() => ({
-  request: vi.fn(), authorize: vi.fn(), register: vi.fn(), refresh: vi.fn(), openAuth: vi.fn(), close: vi.fn(),
+  request: vi.fn(), authorize: vi.fn(), register: vi.fn(), refresh: vi.fn(), openAuth: vi.fn(), reauthenticate: vi.fn(), close: vi.fn(),
   enterKey: null as ((value: string) => void) | null, dismiss: null as (() => void) | null,
 }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: mocks.refresh }) }));
 vi.mock("@simplewebauthn/browser", () => ({ startRegistration: mocks.register }));
-vi.mock("@/src/components/hosted-onboarding/auth-dialog-provider", () => ({ useAuth: () => ({ openAuthDialog: mocks.openAuth }) }));
+vi.mock("@/src/components/hosted-onboarding/auth-dialog-provider", () => ({ useAuth: () => ({ openAuthDialog: mocks.openAuth, reauthenticate: mocks.reauthenticate }) }));
 vi.mock("@/src/components/hosted-onboarding/client-api", async (original) => ({
   ...await original<typeof import("@/src/components/hosted-onboarding/client-api")>(), requestHostedOnboardingJson: mocks.request,
 }));
@@ -148,12 +148,25 @@ test("a lost commit response refreshes canonical state without retry or false su
   await rendered.cleanup();
 });
 
-test("stale primary proof closes recovery and opens first-party login", async () => {
-  mocks.request.mockRejectedValue(new HostedOnboardingApiError({ code: "SENSITIVE_ACTION_FRESH_LOGIN_REQUIRED", message: "Sign in again." }));
+test("stale or email-code primary proof closes recovery and signs in again with phone or Telegram", async () => {
+  mocks.request.mockRejectedValue(new HostedOnboardingApiError({ code: "SENSITIVE_ACTION_FRESH_LOGIN_REQUIRED", message: "Sign in with your phone or Telegram, then recover your passkey." }));
+  mocks.reauthenticate.mockResolvedValue(undefined);
   const rendered = await render("recover");
   await click(rendered, "Replace passkey");
-  expect(mocks.close).toHaveBeenCalledOnce(); expect(mocks.openAuth).toHaveBeenCalledOnce();
+  expect(mocks.close).toHaveBeenCalledOnce(); expect(mocks.reauthenticate).toHaveBeenCalledOnce();
+  expect(mocks.openAuth).not.toHaveBeenCalled();
+  expect(mocks.refresh).toHaveBeenCalledOnce();
   expect(mocks.register).not.toHaveBeenCalled();
   expect(mocks.request).toHaveBeenCalledTimes(1);
+  await rendered.cleanup();
+});
+
+test("a canceled sign-in leaves recovery closed without refreshing", async () => {
+  mocks.request.mockRejectedValue(new HostedOnboardingApiError({ code: "SENSITIVE_ACTION_FRESH_LOGIN_REQUIRED", message: "Sign in with your phone or Telegram, then recover your passkey." }));
+  mocks.reauthenticate.mockRejectedValue(new Error("Sign-in was canceled. Nothing was approved."));
+  const rendered = await render("recover");
+  await click(rendered, "Replace passkey");
+  expect(mocks.close).toHaveBeenCalledOnce(); expect(mocks.openAuth).not.toHaveBeenCalled();
+  expect(mocks.refresh).not.toHaveBeenCalled();
   await rendered.cleanup();
 });

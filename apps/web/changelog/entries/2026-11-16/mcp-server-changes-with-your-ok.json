@@ -7,7 +7,7 @@
     "priority": 3,
     "title": "Murph can change things in MCP servers, with your OK",
     "summary": "You can now turn on MCP server actions that change things. Before using one, Murph sends you a link that shows exactly what it will send, and nothing happens until you tap Do it and confirm with your Murph passkey.",
-    "details": "Each change you confirm is sent once. If the MCP server's answer doesn't come back clearly, Murph tells you it may or may not have happened instead of trying again. A request you don't answer expires after an hour, and actions that only look things up work as before.",
+    "details": "Each change you confirm is sent once. If the MCP server's answer doesn't come back clearly, Murph tells you it may or may not have happened instead of trying again. A request you don't answer expires after an hour, and actions that only look things up work as before. Setting up your first Murph passkey now needs a sign-in with your phone or Telegram, not an email code.",
     "relevanceTags": ["connections", "assistant", "settings", "privacy"],
     "sourcePullRequests": [5054],
     "tryIt": {

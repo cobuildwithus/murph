@@ -31,7 +31,7 @@ export function ApprovalPasskeyStudy() {
       <div className="rounded-2xl border border-border bg-background p-5">
         <p className="mb-4 text-xs text-muted-foreground">First passkey — confirming sign-in</p>
         <InitialPasskeySetupView enrollmentEnabled pending registered={false} error={null}
-          pendingLabel="Sign in again to add your passkey…" />
+          pendingLabel="Sign in with your phone or Telegram to add your passkey…" />
       </div>
     </div>
   );

@@ -4,6 +4,7 @@ import type { PrismaClient } from "@prisma/client";
 import type { RegistrationResponseJSON } from "@simplewebauthn/server";
 import { hostedAuthTransactionAdapter } from "../better-auth/adapter";
 import { credentialRecordOptions } from "../better-auth/credential-change";
+import { readHostedPrimaryAuthenticationFactor } from "../better-auth/primary-factor";
 import { prepareHostedDomainRootForWeb, revalidatePreparedHostedDomainRootForWebTx } from "../hosted-crypto/domain-root-store";
 import { runWithHostedDomainRootProviderCallsDisabled } from "../hosted-crypto/domain-root-unwrap-cache";
 import { assertHostedAppSessionCurrentTx, type HostedAppSession } from "../hosted-onboarding/app-session";
@@ -22,10 +23,10 @@ type Input = { prisma: PrismaClient; request: Request; session: HostedAppSession
 
 function requireRecoverySession(session: HostedAppSession, fresh = false) {
   requireApprovalPasskeyEnrollmentEnabled();
-  if (!session.authProof) throw freshLoginRequired();
+  if (!session.authProof) throw freshLoginRequired(fresh);
   if (fresh) {
     const age = session.primaryAuthenticatedAt ? Date.now() - session.primaryAuthenticatedAt.getTime() : NaN;
-    if (!Number.isFinite(age) || age < 0 || age > 5 * 60 * 1000) throw freshLoginRequired();
+    if (!Number.isFinite(age) || age < 0 || age > 5 * 60 * 1000) throw freshLoginRequired(true);
   }
 }
 
@@ -55,6 +56,10 @@ export async function rotateApprovalRecoveryKey(input: Input & { authorization: 
 
 async function readRecoveryProof(input: Input & { key: unknown }) {
   requireRecoverySession(input.session, true);
+  // As for a first passkey, an email code alone cannot replace protection: a
+  // saved key may be kept somewhere the assistant can also read.
+  const factor = await readHostedPrimaryAuthenticationFactor(input.prisma, input.session.sessionId);
+  if (factor !== "phone" && factor !== "telegram") throw freshLoginRequired(true);
   if (typeof input.key !== "string" || !/^[A-Za-z0-9_-]{43}$/u.test(input.key)
     || Buffer.from(input.key, "base64url").toString("base64url") !== input.key) throw unavailable();
   const memberId = input.session.member.id;
@@ -111,4 +116,7 @@ export async function recoverApprovalPasskey(input: Input & { key: unknown; toke
 
 function digest(value: string) { return createHash("sha256").update(value).digest("hex"); }
 function unavailable() { return hostedOnboardingError({ code: "APPROVAL_RECOVERY_INVALID", httpStatus: 403, message: "Recovery could not be verified. Check your saved recovery key and try again." }); }
-function freshLoginRequired() { return hostedOnboardingError({ code: "SENSITIVE_ACTION_FRESH_LOGIN_REQUIRED", httpStatus: 403, message: "Sign in again before recovering your passkey." }); }
+function freshLoginRequired(phoneOrTelegram = false) {
+  return hostedOnboardingError({ code: "SENSITIVE_ACTION_FRESH_LOGIN_REQUIRED", httpStatus: 403, message: phoneOrTelegram
+    ? "Sign in with your phone or Telegram, then recover your passkey." : "Sign in again before recovering your passkey." });
+}

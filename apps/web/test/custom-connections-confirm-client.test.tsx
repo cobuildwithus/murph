@@ -95,6 +95,44 @@ describe("the confirm page's answer", () => {
       expect(callsTo(base)[0]![0].payload.authorization.token).toBe(token(2));
     } finally { await view.cleanup(); }
   });
+  it("sends an email sign-in to phone or Telegram before a first passkey, then confirms in the same tap", async () => {
+    configured = false;
+    let emailSession = true;
+    const routes = mocks.request.getMockImplementation()!;
+    mocks.request.mockImplementation(async (input: { url: string }) => {
+      if (input.url.endsWith("/initial-options") && emailSession) {
+        throw new HostedOnboardingApiError({ code: "SENSITIVE_ACTION_FRESH_LOGIN_REQUIRED", message: "Sign in with your phone or Telegram, then add your Murph passkey." });
+      }
+      return routes(input);
+    });
+    mocks.reauthenticate.mockImplementation(async () => { emailSession = false; });
+    const view = await render();
+    try {
+      await click(view, "Do it");
+      expect(mocks.reauthenticate).toHaveBeenCalledOnce();
+      expect(mocks.register).toHaveBeenCalledOnce();
+      expect(callsTo(base)[0]![0].payload.authorization.token).toBe(token(2));
+      expect(view.container.textContent).toContain("Done.");
+    } finally { await view.cleanup(); }
+  });
+  it("leaves the request waiting, with the reason shown, when that sign-in is canceled", async () => {
+    configured = false;
+    mocks.request.mockImplementation(async ({ url }: { url: string }) => {
+      if (url === `${base}/challenge`) return { token: token(1), message: "Synthetic exact request challenge", expiresAt: "2099-01-01T00:00:00Z" };
+      if (url.endsWith("/authenticate")) return { method: "initial" };
+      if (url.endsWith("/initial-options")) throw new HostedOnboardingApiError({ code: "SENSITIVE_ACTION_FRESH_LOGIN_REQUIRED", message: "Sign in with your phone or Telegram, then add your Murph passkey." });
+      throw new Error(`Unexpected test route: ${url}`);
+    });
+    mocks.reauthenticate.mockRejectedValue(new Error("Sign-in was canceled. Nothing was approved."));
+    const view = await render();
+    try {
+      await click(view, "Do it");
+      expect(mocks.register).not.toHaveBeenCalled();
+      expect(callsTo(base)).toHaveLength(0);
+      expect(view.container.textContent).toContain("Sign-in was canceled. Nothing was approved.");
+      expect([...view.container.querySelectorAll("button")].find((button) => button.textContent === "Do it")?.disabled).toBe(false);
+    } finally { await view.cleanup(); }
+  });
   it("declines without a passkey", async () => {
     const view = await render();
     try {

@@ -38,6 +38,8 @@ import { sendHostedAuthOtp } from "../src/lib/better-auth/send-otp";
 import { commitHostedAuthOtp } from "../src/lib/better-auth/otp-transaction";
 import { createHostedLinqParticipantContact } from "../src/lib/hosted-onboarding/linq-participant-contact";
 import { readHostedLoginMethods } from "../src/lib/better-auth/credential-change";
+import { readHostedPrimaryAuthenticationFactor } from "../src/lib/better-auth/primary-factor";
+import { commitApprovalPasskeyWriteTx, prepareApprovalPasskeyWrite, readApprovalPasskeyState } from "../src/lib/sensitive-actions/passkey-store";
 
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
 if (enabled) {
@@ -142,7 +144,11 @@ describe.skipIf(!enabled)("Telegram public login PostgreSQL composition", () => 
     expect(result.status).toBe(200);
     expect(await result.json()).toMatchObject({ memberId });
     const renewedCookie = issuedCookie(result);
-    expect((await getHostedAppSessionFromRequest(request("/home", {}, renewedCookie)))?.primaryAuthenticatedAt).toBeInstanceOf(Date);
+    const renewed = await getHostedAppSessionFromRequest(request("/home", {}, renewedCookie));
+    expect(renewed?.primaryAuthenticatedAt).toBeInstanceOf(Date);
+    // The Telegram proof is what lets this session set up a first passkey.
+    expect(await readHostedPrimaryAuthenticationFactor(prisma, renewed!.sessionId)).toBe("telegram");
+    expect(await readHostedPrimaryAuthenticationFactor(prisma, session!.sessionId)).toBe("telegram");
     const options = await legacyRepairOptions(request("/api/settings/approval-passkeys/initial-options", {}, renewedCookie));
     expect(options.status).toBe(200);
     const registration = await options.json();
@@ -195,10 +201,11 @@ describe.skipIf(!enabled)("Telegram public login PostgreSQL composition", () => 
     vi.stubEnv("HOSTED_APPROVAL_PASSKEY_ENROLLMENT_ENABLED", "true");
     const key = authenticator("synthetic Telegram settings", baseURL);
     const enroll = async () => {
-      const initial = await (await initialPasskeyOptions(request("/api/settings/approval-passkeys/initial-options", {}, member.cookie))).json();
-      expect((await registerPasskey(request("/api/settings/approval-passkeys/register", {
-        initialToken: initial.token, response: key.registration(true, initial.options.challenge),
-      }, member.cookie))).status).toBe(200);
+      // An email code cannot set up a first passkey; this member's predates that rule.
+      expect((await initialPasskeyOptions(request("/api/settings/approval-passkeys/initial-options", {}, member.cookie))).status).toBe(403);
+      const state = await readApprovalPasskeyState({ memberId: member.memberId, prisma });
+      const write = await prepareApprovalPasskeyWrite({ prisma, state, credentials: [key.credential] });
+      await prisma.$transaction((tx) => commitApprovalPasskeyWriteTx({ prepared: write, prisma: tx }));
     };
     if (withApproval) await enroll();
     return { ...member, login, enroll, approve(challenge: { message: string; token: string }) {
@@ -445,7 +452,7 @@ describe.skipIf(!enabled)("Telegram public login PostgreSQL composition", () => 
     const { memberId } = await response.json(); memberIds.add(memberId);
     const prepared = await prepareHostedAuthTelegramMember({ prisma, telegramUserId: flow.id });
     await prisma.hostedAuthRecord.deleteMany({ where: { memberId, model: "account" } });
-    await expect(commitHostedAuthSession({ ...prepared, prisma, baseURL, secret, primaryAuthenticatedAt: new Date() })).rejects.toMatchObject({ code: "AUTH_IDENTITY_RECONCILIATION_REQUIRED" });
+    await expect(commitHostedAuthSession({ ...prepared, prisma, baseURL, secret, primaryAuthenticatedAt: new Date(), primaryAuthenticationFactor: "telegram" })).rejects.toMatchObject({ code: "AUTH_IDENTITY_RECONCILIATION_REQUIRED" });
     expect(await prisma.hostedAuthRecord.count({ where: { memberId, model: "session" } })).toBe(1);
     // Canonical messaging routing alone cannot restore a removed login account.
     expect((await finish(await begin(flow.id))).status).toBe(409);
