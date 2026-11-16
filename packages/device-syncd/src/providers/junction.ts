@@ -144,6 +144,7 @@ import {
   type JunctionDateQueryFormat,
   type JunctionBulkTriggerHistoricalPullResult,
   type JunctionHistoricalPullSnapshot,
+  type JunctionHistoricalPullSource,
   type JunctionProviderConnection,
   type JunctionWindowInput,
 } from "./junction-client.ts";
@@ -1502,7 +1503,10 @@ export function createJunctionDeviceSyncProvider(
     now: string,
   ): DeviceSyncJobInput[] {
     const metadata = account.metadata;
-    if (!canCurrentRuntimeMutateJunctionHistoricalBackfillProgress(metadata)) {
+    if (
+      !canCurrentRuntimeMutateJunctionHistoricalBackfillProgress(metadata)
+      || !hasLinkedJunctionSource(account)
+    ) {
       return [];
     }
 
@@ -11165,11 +11169,13 @@ function evaluateJunctionHistoricalBackfillCoverage(
           : [];
       }) ?? [],
     );
+    const historicalPullSettled = isJunctionHistoricalPullSettled(historicalSource);
     const requiredResources = new Set([
       ...(advertisedResourcesByProvider.get(providerSlug) ?? []),
       ...historicalResources.keys(),
     ].filter((resource) =>
-      !notPulledResources.has(resource) || historicalResources.has(resource)
+      historicalResources.has(resource)
+      || (!notPulledResources.has(resource) && !historicalPullSettled)
     ));
 
     if (status === "connected") {
@@ -11239,6 +11245,20 @@ function evaluateJunctionHistoricalBackfillCoverage(
     reconnectProviderSlugs: [...reconnectProviderSlugs]
       .sort((left, right) => left.localeCompare(right)),
   };
+}
+
+// Junction lists a pull from the moment it is scheduled. Once an entry lists
+// something and every pull it lists has finished, a resource it leaves out of
+// both lists has no pull coming (Garmin never lists sleep_cycle). While a
+// listed pull is unfinished, or nothing is listed, that resource keeps waiting.
+function isJunctionHistoricalPullSettled(
+  source: JunctionHistoricalPullSource | undefined,
+): boolean {
+  return source !== undefined
+    && (source.pulledResources.length > 0 || source.notPulledResources.length > 0)
+    && source.pulledResources.every((entry) =>
+      entry.status === "success" || entry.status === "failure"
+    );
 }
 
 function resolveJunctionHistoricalCoverageProviderSlug(
@@ -11863,6 +11883,18 @@ function encodeJunctionHistoricalUnresolvedProviderRecords(
     i: unresolved.identities,
     ...(unresolved.withoutStableIdentity ? { u: true } : {}),
   });
+}
+
+// Connect-window history is owed only while a wearable is linked. With no
+// source, or only disconnected ones, there is nothing to pull and coverage
+// cannot complete, so no connect-window job is queued. The stored status is
+// left as it is, and the first scheduled pass after a wearable links resumes
+// the check. An errored source still schedules, since its outcome can still
+// settle (a Garmin reset, for example). Accounts read without sources keep
+// scheduling.
+function hasLinkedJunctionSource(account: Pick<DeviceSyncAccount, "sources">): boolean {
+  return account.sources === undefined
+    || account.sources.some((source) => source.status !== "disconnected");
 }
 
 function buildConnectHistoricalBackfillWindow(

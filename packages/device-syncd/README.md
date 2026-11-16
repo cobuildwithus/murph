@@ -435,10 +435,11 @@ date on the existing bounded ladder. Historical-pull status is re-read before
 coverage, with supported connect-route aliases canonicalized on both sides:
 matching pulled state takes precedence, success permits terminal empty history,
 nonterminal state waits, and explicit failure remains uncovered. Explicit
-`not_pulled` is no obligation only without a pulled entry, while unavailable
-status requires canonical history evidence. Delayed work derives
-the live reconcile boundary after every completed segment and continues until
-no middle gap remains. An explicit timeseries backfill override still governs
+`not_pulled` is no obligation only without a pulled entry. A resource that a
+provider entry leaves out of both lists is no obligation once every pull that
+entry lists has finished. Unavailable status requires canonical history
+evidence. Delayed work derives the live reconcile boundary after every
+completed segment and continues until no middle gap remains. An explicit timeseries backfill override still governs
 only the generic bounded timeseries policy; it does not shorten the fixed
 extended-history horizon.
 
@@ -511,9 +512,14 @@ with `weight` in column 12. Update it with
 Junction's historical-pull status is authoritative when available. A `success`
 completes its source/resource obligation even when the provider reports zero
 rows, and Murph does not compare provider-specific history ranges with its own
-connect window. `not_pulled` is not an obligation. Scheduled, in-progress,
-retrying, unknown, malformed, or unavailable status remains pending on the
-existing daily retry cadence; none of those states can request a reset.
+connect window. `not_pulled` is not an obligation. Junction lists a pull under
+`pulled` from the moment it is scheduled. So once a provider entry lists
+something and every pull it lists is `success` or `failure`, a resource it
+leaves out of both lists has no pull coming and is not an obligation either;
+Garmin, for example, never lists `sleep_cycle`. While any listed pull is
+unfinished, or the entry lists nothing, that resource waits. Scheduled,
+in-progress, retrying, unknown, malformed, or unavailable status remains pending
+on the existing daily retry cadence; none of those states can request a reset.
 Canonical normalization evidence and authenticated old-window push evidence
 provide the bounded fallback when introspection is unavailable.
 
@@ -524,6 +530,11 @@ Junction `failure` for every still-pending Garmin obligation can mark Garmin
 reconnect-required while aggregate metadata remains `retrying` for another
 provider. Successful Garmin coverage clears that source marker without waiting
 for the other provider. Current ingestion remains active throughout.
+
+Connect-window history is owed only while a wearable is linked. A connection
+with no source, or only disconnected sources, queues no connect-window job; its
+stored status stays as it is, and the first scheduled pass after a wearable
+links resumes the check where it left off.
 
 Restarting the Garmin export requires the member to confirm the existing
 connection-wide disconnect and then reconnect Garmin. The reset can disconnect

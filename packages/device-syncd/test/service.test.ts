@@ -356,6 +356,21 @@ function admitJunctionWorkoutStreamSource(
   });
 }
 
+// Connect-window history is owed only while a wearable is linked.
+function linkJunctionGarminSource(
+  store: SqliteDeviceSyncStore,
+  connectionId: string,
+): void {
+  store.upsertConnectionSource({
+    connectionId,
+    firstSeenAt: "2026-04-01T00:00:00.000Z",
+    lastSeenAt: "2026-04-01T00:00:00.000Z",
+    sourceInstanceKey: "garmin",
+    sourceProviderSlug: "garmin",
+    status: "connected",
+  });
+}
+
 function assertJunctionWorkoutStreamRetryCoordinate(
   jobKind: JunctionWorkoutStreamServiceJobKind,
   job: DeviceSyncJobRecord,
@@ -3508,6 +3523,7 @@ test("Junction stale metadata backfill cannot suppress the current closed-day op
       },
       nextReconcileAt: now.toISOString(),
     });
+    linkJunctionGarminSource(store, account.id);
 
     await service.runSchedulerOnce();
     const dueJobs = readJobsForAccountForTesting(store, account.id)
@@ -8341,6 +8357,7 @@ test("manual reconcile boosts Junction reconcile priority without promoting hist
       connectedAt: "2026-04-01T00:00:00.000Z",
       nextReconcileAt: null,
     });
+    linkJunctionGarminSource(store, account.id);
 
     const reconcile = service.queueManualReconcile(account.id);
     const queuedByKind = new Map(reconcile.jobs.map((job) => [job.kind, job]));
@@ -8775,6 +8792,7 @@ test("device sync scheduler immediately repairs legacy Junction coverage progres
       },
       nextReconcileAt: scheduledAt,
     });
+    linkJunctionGarminSource(store, account.id);
 
     await service.runSchedulerOnce();
     const queuedJobs = readJobsForAccountForTesting(store, account.id).filter((job) => job.status === "queued");
@@ -8868,6 +8886,7 @@ test("device sync scheduler rematerializes dead Junction metadata retries", asyn
       },
       nextReconcileAt: scheduledAt,
     });
+    linkJunctionGarminSource(store, account.id);
     const expectedDedupeKey = createHash("sha256")
       .update(JSON.stringify(["junction", "backfill", ownerWindowStart, ownerWindowEnd]))
       .digest("hex");
@@ -10489,6 +10508,7 @@ test("Junction default reconcile keeps ordinary blood-oxygen coverage ahead of t
       connectedAt: "2026-08-01T00:00:00.000Z",
       nextReconcileAt: now.toISOString(),
     });
+    linkJunctionGarminSource(fixture.store, account.id);
 
     const scheduledJobs = await fixture.service.runSchedulerOnce(account.id);
     assert.equal(scheduledJobs.some((job) => job.kind === "reconcile"), true);

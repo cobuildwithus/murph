@@ -157,6 +157,33 @@ test("Junction historical-pull introspection matches the exact user without SDK 
   );
 });
 
+test("Junction historical-pull introspection keeps a listed resource whose statistics are malformed", () => {
+  const snapshot = parseJunctionHistoricalPullSnapshot({
+    data: [{
+      user_id: "junction-user-1",
+      provider: {
+        garmin: {
+          not_pulled: [],
+          pulled: {
+            activity: { days_with_data: 0, status: "success" },
+            sleep: null,
+            sleep_cycle: { days_with_data: 2 },
+          },
+        },
+      },
+    }],
+  }, "junction-user-1");
+
+  assert.deepEqual(
+    snapshot.sources[0]?.pulledResources.map(({ resource, status }) => ({ resource, status })),
+    [
+      { resource: "activity", status: "success" },
+      { resource: "sleep", status: "unknown" },
+      { resource: "sleep_cycle", status: "unknown" },
+    ],
+  );
+});
+
 test("Junction historical-pull introspection applies the optional provider filter at both request and parse boundaries", async () => {
   const client = new JunctionClient({
     apiKey: "sk_us_test_123",
