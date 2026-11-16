@@ -258,6 +258,8 @@ export interface CloudflareHostedControlClient {
   /** Legacy weekly game photos: Web seals them; the Worker stores the sealed envelope. */
   putRecapMedia(input: { envelope: string; hash: string; mediaId: string; userId: string }): Promise<void>;
   readRecapMedia(input: { mediaId: string; userId: string }): Promise<{ envelope: string; hash: string } | null>;
+  putProgressPic(input: { envelope: string; hash: string; mediaId: string; userId: string }): Promise<void>;
+  readProgressPic(input: { mediaId: string; userId: string }): Promise<{ envelope: string; hash: string } | null>;
   deleteGameMedia(input: { mediaId: string; userId: string }): Promise<void>;
   putGameMedia(input: { envelope: string; mediaId: string; userId: string }): Promise<void>;
   /** The sealed envelope, or null when there's none under that name. */
@@ -637,21 +639,20 @@ export function createCloudflareHostedControlClient(
       const userId = requireCloudflareHostedControlUserId(input.userId);
       return nullWhenNotFound(requestHostedExecutionAuthorizedJson({ baseUrl, boundUserId: userId, fetchImpl, getAuthorizationHeader,
         label: "recap media read", path: buildCloudflareHostedControlGameMediaPath("recapMediaRead", userId),
-        parse(value) {
-          const record = requireRecord(value, "Recap storage");
-          const envelope = requireString(record.envelope, "Recap envelope");
-          let parsedEnvelope: unknown;
-          try {
-            parsedEnvelope = JSON.parse(envelope);
-          } catch (error) {
-            if (error instanceof SyntaxError) {
-              throw new ContractValidationError("Recap envelope must be valid JSON.", { cause: error });
-            }
-            throw error;
-          }
-          parseHostedSecureBoxEnvelope(parsedEnvelope);
-          return { envelope, hash: requireString(record.hash, "Recap hash") };
-        }, request: { method: "GET", headers: { "x-murph-recap-media-id": input.mediaId } }, timeoutMs: options.timeoutMs }));
+        parse: parseSealedGameMedia, request: { method: "GET", headers: { "x-murph-recap-media-id": input.mediaId } }, timeoutMs: options.timeoutMs }));
+    },
+    async putProgressPic(input) {
+      const userId = requireCloudflareHostedControlUserId(input.userId);
+      await requestHostedExecutionAuthorizedJson({ baseUrl, boundUserId: userId, fetchImpl, getAuthorizationHeader,
+        label: "progress picture staging", path: buildCloudflareHostedControlGameMediaPath("progressPicStage", userId),
+        parse: value => { if (requireRecord(value, "Recap storage").stored !== true) throw new ContractValidationError("Recap storage was not confirmed."); },
+        request: { method: "POST", headers: { "content-type": "application/json", "x-murph-recap-media-id": input.mediaId, "x-murph-recap-hash": input.hash }, body: input.envelope }, timeoutMs: options.timeoutMs });
+    },
+    async readProgressPic(input) {
+      const userId = requireCloudflareHostedControlUserId(input.userId);
+      return nullWhenNotFound(requestHostedExecutionAuthorizedJson({ baseUrl, boundUserId: userId, fetchImpl, getAuthorizationHeader,
+        label: "progress picture read", path: buildCloudflareHostedControlGameMediaPath("progressPicRead", userId),
+        parse: parseSealedGameMedia, request: { method: "GET", headers: { "x-murph-recap-media-id": input.mediaId } }, timeoutMs: options.timeoutMs }));
     },
     async deleteGameMedia(input) {
       const userId = requireCloudflareHostedControlUserId(input.userId);
@@ -2585,3 +2586,19 @@ function requireNonNegativeInteger(value: unknown, label: string): number {
 
   return numberValue;
 }
+
+function parseSealedGameMedia(value: unknown): { envelope: string; hash: string } {
+          const record = requireRecord(value, "Sealed game media");
+          const envelope = requireString(record.envelope, "Sealed media envelope");
+          let parsedEnvelope: unknown;
+          try {
+            parsedEnvelope = JSON.parse(envelope);
+          } catch (error) {
+            if (error instanceof SyntaxError) {
+              throw new ContractValidationError("Sealed media envelope must be valid JSON.", { cause: error });
+            }
+            throw error;
+          }
+          parseHostedSecureBoxEnvelope(parsedEnvelope);
+          return { envelope, hash: requireString(record.hash, "Sealed media hash") };
+        }

@@ -13,6 +13,10 @@ import { formatAmount, formatNumber } from "./format";
 import { cumulativePoints, readGameSeries, scheduleInference, type MeasureSeries } from "./series";
 import { bestRun, calendarMonths, currentRun, gameDays, obligationDays, type StreakDay } from "./streak";
 import type { BeforeProgressMutation, MeasureState } from "./state";
+import { BANK } from "./bank";
+import { firstRouteId, routePlaces, routeView, setFirstRoute } from "./routes";
+import { resolveRoute } from "./mapbox";
+import { picturePin, readProgressPics } from "./pics";
 
 export function achievementContext(measures: readonly MeasureSeries[], states: ReadonlyMap<string, MeasureState>, days: readonly StreakDay[]): AchievementContext {
   return { days, measures: measures.map(measure => {
@@ -20,6 +24,7 @@ export function achievementContext(measures: readonly MeasureSeries[], states: R
     const total = points.at(-1)?.[1] ?? 0;
     return { id: measure.id, unit: measure.unit, noun: measure.noun, pending: measure.pending, points,
       rungs: measureRungs(measure, states.get(measure.id) ?? {}),
+      legs: states.get(measure.id)?.legs ?? [],
       rounds: roundValues(total, measure.unit).filter(at => at <= total).map(at => {
         const amount = formatAmount(at, measure.unit);
         const title = measure.unit === "seconds" ? `${formatNumber(at / 3600, "compact")} ${at === 3600 ? "hour" : "hours"}`
@@ -80,7 +85,8 @@ export function measureView(measure: MeasureSeries, state: MeasureState, awards:
     format: measure.unit === "seconds" ? "duration" : measure.unit === "meters" ? "distance" : measure.unit === "days" ? "days" : "count",
     source: "games", pending: measure.pending, gameOn: measure.gameOn, needsPerDay: measure.needsPerDay,
     total: formatAmount(points.at(-1)?.[1] ?? 0, measure.unit, "full"), today: todayValue > 0 ? formatAmount(todayValue, measure.unit) : null,
-    points, projection: projection(measure, today), ladder: measureLadder(measure, state, awards), route: null, pics: [] };
+    points, projection: projection(measure, today), ladder: measureLadder(measure, state, awards),
+    route: routeView(measure.id, state, points, awards), pics: [] };
 }
 
 async function healthAuthority(memberId: string): Promise<boolean> {
@@ -101,15 +107,30 @@ export async function readProgress(memberId: string, beforeMutationTx: BeforePro
   const today = formatTimeZoneDateTimeParts(clock, profile.timeZone).dayKey;
   const joinedOn = formatTimeZoneDateTimeParts(profile.createdAt, profile.timeZone).dayKey;
   const snapshot = await readGameSeries(memberId, clock);
+  const pictures = await readProgressPics(memberId);
+  snapshot.incomplete ||= pictures.incomplete;
   const days = obligationDays(snapshot.games, memberId) ?? [];
   if (!snapshot.incomplete) {
+    const firstRoutes = snapshot.measures.filter(measure => !measure.pending
+      && (measure.unit === "meters" || measure.unit === "steps") && !snapshot.states.get(measure.id)?.legs);
+    if (firstRoutes.length) {
+      const places = routePlaces(BANK.find(entry => entry.id === firstRouteId(profile.timeZone))!.name)!;
+      // Mapbox down: the page still loads without a map; the next read sets the first route.
+      const route = await resolveRoute(places.from, places.to).catch(() => null);
+      if (route) for (const measure of firstRoutes) snapshot.states.set(measure.id,
+        await setFirstRoute(memberId, measure.id, route, beforeMutationTx));
+    }
     const context = achievementContext(snapshot.measures, snapshot.states, days);
     await settleAwards(memberId, ACHIEVEMENTS.flatMap(evaluate => evaluate(context)), beforeMutationTx);
     scheduleInference(memberId, snapshot.pending, beforeMutationTx);
   }
   const stored = snapshot.incomplete ? snapshot.awards : await readAwards(memberId);
   const awards = visibleAwards(stored, await healthAuthority(memberId));
-  const measures = snapshot.measures.map(measure => measureView(measure, snapshot.states.get(measure.id) ?? {}, awards, today));
+  const measures = snapshot.measures.map(measure => {
+    const view = measureView(measure, snapshot.states.get(measure.id) ?? {}, awards, today);
+    view.pics = pictures.pics.filter(pic => pic.measureId === measure.id).map(pic => picturePin(pic, view.points, profile.timeZone));
+    return view;
+  });
   // Two units of the same exercise need distinct pills (row 15).
   for (const measure of measures) if (measure.format === "duration" && measures.some(other => other.id !== measure.id && other.label === measure.label)) measure.label += " minutes";
   const obligations = snapshot.games.flatMap(game => {
@@ -131,7 +152,7 @@ export async function readProgress(memberId: string, beforeMutationTx: BeforePro
     streak: { current: currentRun(days), best: bestRun(days),
       today: obligations.length === 0 ? "none" : obligations.every(day => day.done) ? "done" : "pending",
       obligations, months: calendarMonths(days, joinedOn, today) },
-    medals, shelf, moments: momentsView(awards, measures), picCount: await db.gameProgressPic.count({ where: { memberId, retiredAt: null } }) };
+    medals, shelf, moments: momentsView(awards, measures), picCount: pictures.pics.length };
 }
 
 export async function seeMoments(memberId: string, momentIds: readonly string[], beforeMutationTx: BeforeProgressMutation): Promise<void> {

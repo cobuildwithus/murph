@@ -1,0 +1,189 @@
+{
+ "version": 8,
+ "name": "Murph Progress",
+ "sources": {
+  "composite": {
+   "type": "vector",
+   "url": "mapbox://mapbox.mapbox-streets-v8"
+  }
+ },
+ "layers": [
+  {
+   "id": "background",
+   "type": "background",
+   "paint": {
+    "background-color": "#F1ECE2"
+   }
+  },
+  {
+   "id": "water",
+   "type": "fill",
+   "source": "composite",
+   "source-layer": "water",
+   "paint": {
+    "fill-color": "#F9F7F2",
+    "fill-opacity": [
+     "interpolate",
+     [
+      "linear"
+     ],
+     [
+      "zoom"
+     ],
+     5,
+     1,
+     7,
+     0.25
+    ]
+   }
+  },
+  {
+   "id": "coast",
+   "type": "line",
+   "source": "composite",
+   "source-layer": "water",
+   "paint": {
+    "line-color": "#E0D8C8",
+    "line-width": 1,
+    "line-opacity": [
+     "interpolate",
+     [
+      "linear"
+     ],
+     [
+      "zoom"
+     ],
+     5,
+     1,
+     6.5,
+     0
+    ]
+   }
+  },
+  {
+   "id": "admin",
+   "type": "line",
+   "source": "composite",
+   "source-layer": "admin",
+   "filter": [
+    "all",
+    [
+     "<=",
+     [
+      "get",
+      "admin_level"
+     ],
+     1
+    ],
+    [
+     "match",
+     [
+      "to-string",
+      [
+       "get",
+       "maritime"
+      ]
+     ],
+     "true",
+     false,
+     true
+    ]
+   ],
+   "paint": {
+    "line-color": "#E0D8C8",
+    "line-width": 1
+   }
+  },
+  {
+   "id": "place-names",
+   "type": "symbol",
+   "source": "composite",
+   "source-layer": "place_label",
+   "filter": [
+    "match",
+    [
+     "get",
+     "class"
+    ],
+    [
+     "state",
+     "country"
+    ],
+    true,
+    false
+   ],
+   "layout": {
+    "text-field": [
+     "upcase",
+     [
+      "coalesce",
+      [
+       "get",
+       "name_en"
+      ],
+      [
+       "get",
+       "name"
+      ]
+     ]
+    ],
+    "text-font": [
+     "Roboto Mono Regular",
+     "Arial Unicode MS Regular"
+    ],
+    "text-size": 10,
+    "text-letter-spacing": 0.12,
+    "text-max-width": 12
+   },
+   "paint": {
+    "text-color": "#B7AE9E"
+   }
+  },
+  {
+   "id": "sea-names",
+   "type": "symbol",
+   "source": "composite",
+   "source-layer": "natural_label",
+   "filter": [
+    "match",
+    [
+     "get",
+     "class"
+    ],
+    [
+     "ocean",
+     "sea"
+    ],
+    true,
+    false
+   ],
+   "layout": {
+    "text-field": [
+     "upcase",
+     [
+      "coalesce",
+      [
+       "get",
+       "name_en"
+      ],
+      [
+       "get",
+       "name"
+      ]
+     ]
+    ],
+    "text-font": [
+     "Roboto Mono Regular",
+     "Arial Unicode MS Regular"
+    ],
+    "text-size": 10,
+    "text-letter-spacing": 0.12,
+    "text-max-width": 12
+   },
+   "paint": {
+    "text-color": "#B7AE9E"
+   }
+  }
+ ],
+ "glyphs": "mapbox://fonts/mapbox/{fontstack}/{range}.pbf"
+}

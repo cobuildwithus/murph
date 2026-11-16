@@ -6023,7 +6023,9 @@ open and shallow field merge, then seal outside the transaction. Its short
 transaction rechecks caller authority and writes only against the observed
 ciphertext; first creation uses the composite unique key. A loser throws
 `GAME_PROGRESS_STATE_CONFLICT` (503, retryable); it does not retry. Patches replace
-whole fields, including the legs array. BE2 must only propose a baseline while
+whole fields, including the legs array. A computed patch runs against that same
+observed state, so route rollover cannot overwrite a newer legs array from a
+separate caller read. BE2 must only propose a baseline while
 it is absent and include current health authority in the transaction callback.
 
 All three mutation helpers require `beforeMutationTx`: route owners pass the
@@ -6071,7 +6073,7 @@ nor break a run. Current, best and month strings come from these same dates.
 `achievements.ts` holds the three pure games evaluators used by `registry.ts`.
 Round and ladder candidates use the first cumulative crossing date; all rungs
 crossed together are inserted. Each new best streak length is an award.
-The reader preserves measures with saved ladder awards even when their final
+The reader preserves measures with saved ladder or route awards even when their final
 contribution is removed; their total becomes zero and their goals stay editable.
 `view.ts` takes passed rungs from stored awards, filters health-derived awards
 under current Postgres browser-vault authority, then chooses gold and moments.
@@ -6090,9 +6092,12 @@ moments describe an earned day, without inventing a post or time of day.
 
 An ordinary complete games read uses ten domain queries including a nonempty
 settlement (profile twice, games, entries, task cache, measure state, award insert,
-award reads before and after settlement and live picture count), plus existing batched crypto and native/health
+award reads before and after settlement and live picture metadata), plus existing batched crypto and native/health
 authority owners. There are no per-game or per-entry database calls and at most
-one domain transaction/pooled connection at a time. Incomplete reads skip
+one domain transaction/pooled connection at a time. First distance reads resolve
+one default route for all missing legs (11 provider requests total), then add
+two domain queries per new route through sequential state CAS writes. Native
+authority runs inside each short write transaction. Incomplete reads skip
 settlement and inference. Crypto and provider work stay outside transactions;
 each write rechecks current native-session authority inside its transaction.
 
@@ -6112,8 +6117,10 @@ search first; a miss makes one Responses call constrained to at most four bank
 ids and a nullable explanation of at most 240 characters in the same response.
 The response-only `Goals.note` is null for a match or no suggestions; it adds
 no stored field. Provider failure returns 503 without provider content. Goals and per-day
-choices use `patchMeasureState`; route goals return 501 until BE3 supplies
-`setRouteGoal`. No new table, endpoint, flag or preference is introduced.
+choices use `patchMeasureState`. Distance goals call `setRouteGoal` with the
+complete canonical series, stored awards and current mutation authority. Typed
+and checked two-place bank routes use the same resolver; other long bank entries
+are excluded. No new table, endpoint, flag or preference is introduced.
 
 Fixtures cover new, established, year-long, mixed-unit, no-game, gap, privacy,
 tie and moment states. They are presentation examples, not expected engine
@@ -6663,6 +6670,82 @@ hash and preserves conditional pointer creation and account-deletion fencing.
 Web clears decrypted bytes after upload and retains the encrypted source for
 retries and rollback. No new Worker route or crypto authority is needed. Local
 stacks keep plain files on disk.
+
+Progress pictures have a separate owner-only Web route and random
+`progress/<random-id>.jpg` identity. Web seals JPEG bytes under the member's
+control key with `game-progress` scope and table/key/field AAD before the
+Worker stores them. They never use game photo, avatar or recap keys. The
+member-bound `progress-pics/{stage,read}` control routes share recap's
+conditional-create storage primitive. Progress validates uploads once at the
+Worker route and decodes its own typed records directly. Recap retains its
+existing envelope normalization, stored-record validation and error responses;
+the shared primitive does not change that shipped contract.
+`game_progress_pic` purge replaces the
+same object with a permanent content-free tombstone outside account-prefix
+removal; neither a delayed upload nor legacy recovery can replace it.
+
+Picture reads require the requesting owner's live row both before retrieval
+and after decryption. Deletion retires the row before awaiting the Worker
+purge and reports failure if that purge fails. Account deletion, after its
+existing suspension fence, reads at most 10,001 picture rows per member and
+rejects an incomplete collection before any purge. An admitted collection has
+at most 10,000 serial object retirements and one bulk row deletion, all outside
+database transactions; failures preserve the rows and block account deletion.
+There is no pagination recovery or automatic retry. Upload admission
+rechecks native auth under the member lock before registering the random key,
+so account cleanup also fences uploads still in flight. Live picture lists read
+10,001 rows; more than 10,000 marks the input incomplete and yields no truncated
+pins or award evidence.
+
+The JPEG upload route admits at most 2 MiB and 2048 pixels per dimension before
+storage effects. It reuses the five-query game-series reader and reads the
+profile timezone alongside it (at most two pooled connections), then registers
+ownership with two domain queries in one transaction and performs one final
+liveness read. Crypto and the single Worker stage request remain outside the
+transaction; existing auth/root-key readers retain their own query bounds.
+Pins use the cumulative value on or before the capture's member-local day;
+they persist no health total. The games view admits the complete picture list
+before route initialization or award settlement and attaches pins by measure.
+
+For this object store, `version`, the plaintext-byte integrity `hash`, random
+object identity and `retired` marker are approved operational metadata.
+`envelope` is encrypted content; the owner namespace is keyed. The picture's
+exercise association is sealed in `meta_encrypted`; no health amount or image
+content is stored in operational metadata. Route endpoints, geometry, towns,
+distance and starting total are private content inside the existing sealed
+measure state. Route award data seals those endpoints, distance, starting total,
+and the medal's face, title, detail and destination page. Mapbox receives only
+requested places or sampled coordinates,
+never a member identity, health total or provider token in a client response.
+Route award identity includes the retained leg's position and frozen route
+facts. Replacing an unfinished route cannot inherit another goal's award, and
+repeating a completed route after a correction cannot reuse the prior leg's key.
+
+Progress maps resolve two permanent geocodes, one simplified driving route and
+eight sequential place reverse-geocodes for road routes. Only the provider's explicit NoRoute
+permits a great circle, with no reverse-geocodes or towns; all other provider failures return retryable 503 with
+no retry or raw provider diagnostics. Maps use the constant Murph style,
+explicit Mercator bounds and two path overlays. Map requests require `size=card`
+(708 by 405 pixels, the 354pt 7:4 card at 2x rounded to a pixel) or `size=drawer`
+(708 by 640 pixels, the 354 by 320pt drawer at 2x). Free dimensions are rejected.
+`Route.map` links the card; `Route.towns` and `Route.drawerTowns` carry coordinates
+for their respective viewports. The drawer changes only the map query's size.
+Clients display the PNG without cropping. `Goals.route` adds the same town shape
+for its card preview, with null crossing dates, and `detail` from the current
+measure total and remaining route distance. Ocean previews explain the straight
+line and have no towns. These fields are private response-only content, never
+persisted. All route amounts use `format.ts`. Maps stream private PNGs;
+no map object or cache is persisted. Keep Mapbox attribution visible.
+The map handler reads frozen game legs and canonical points, preserves awarded
+finishes after corrections, and rechecks native authority in a short database-only
+transaction before the image fetch. Preview requests resolve the two requested
+places without state writes. The fixed style identifier in `routes.ts` must name
+the uploaded Murph style before rollout; the draft placeholder is not deployable.
+
+Deploy the compatible Worker before Web emits Progress storage requests or
+purges, after the shared Progress migration. Existing recap producers remain
+compatible. Once picture retirement has been used, do not roll back to a Worker
+that cannot honor the new resource kind. There are no warm-runner changes.
 
 History keeps `mediaUrls` as stable cache identities and adds optional
 `delivery: { url, expiresAt }` to the previews in each person's or group's latest

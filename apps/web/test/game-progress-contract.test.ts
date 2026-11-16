@@ -73,10 +73,21 @@ describe("Progress request boundary", () => {
     [parsePicUploadQuery, { id: "not-a-uuid", measureId: "pushups.reps", takenAt: "2026-11-14" }],
     [parseMapQuery, { measure: "walk.meters", w: "-1", h: "400" }],
   ] as const)("rejects malformed boundary input", (parse, input) => expect(() => parse(input)).toThrow("Invalid Progress request."));
-  it("defaults the friends range and converts map query dimensions once", () => {
+  it("defaults the friends range", () => {
     expect(parseFriendsQuery({ measure: "steps", with: "member-leo" })).toEqual({ measure: "steps", range: "month", with: "member-leo" });
-    expect(parseMapQuery({ measure: "walk.meters", w: "700", h: "400" })).toEqual({ measure: "walk.meters", w: 700, h: 400 });
   });
+  it.each(["card", "drawer"])("accepts only the named %s map size for measures and previews", size => {
+    expect(parseMapQuery({ measure: "walk.meters", size })).toEqual({ measure: "walk.meters", size });
+    expect(parseMapQuery({ from: "London", to: "New York", size })).toEqual({ from: "London", to: "New York", size });
+  });
+  it.each([
+    { from: "London", to: "New York", measure: "steps", size: "card" },
+    { measure: "walk.meters", w: "708", h: "405" },
+    { measure: "walk.meters", size: "card", w: "708" },
+    { measure: "walk.meters", size: "poster" },
+    { from: "London", to: "Paris", size: "poster" },
+    { from: "London", size: "card" }, { measure: "steps" },
+  ])("rejects invalid map queries: %j", input => expect(() => parseMapQuery(input)).toThrow("Invalid Progress request."));
   it("typed readers name their own measure and preserve canonical units", () => {
     const [reps, route] = READERS;
     expect([reps.measureId({ exercise: "pushups", count: 40, reps: [] }), reps.amount({ exercise: "pushups", count: 40, reps: [] })]).toEqual(["pushups.reps", 40]);

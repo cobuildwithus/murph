@@ -30,7 +30,9 @@
     "to": "New York",
     "distanceText": "3,459 miles",
     "straightLine": true,
-    "map": "/api/game/v1/progress/map?measure=walk.meters&w=700&h=400"
+    "map": "/api/game/v1/progress/map?from=London&to=New+York&size=card",
+    "detail": "As the crow flies. No road crosses the ocean, so Murph counts the straight line.",
+    "towns": []
   },
   "note": null
 }

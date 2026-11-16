@@ -193,8 +193,11 @@ describe("shared Progress numbers", () => {
     [187700, "compact", "188k"], [1400, "compact", "1,400"], [1400, "delta", "+1.4k"],
     [-1400, "delta", "-1.4k"], [60, "delta", "+60"],
   ] as const)("formats %s as %s", (value, style, expected) => expect(formatNumber(value, style)).toBe(expected));
-  it.each([[3, "3 mi"], [8.4, "8.4 mi"], [10.4, "10 mi"], [116.4, "116 mi"]])("formats %s miles", (miles, expected) => {
-    expect(formatAmount(Number(miles) * 1609.344, "meters").text).toBe(expected);
+  it.each([
+    [3, "compact", "3 mi"], [8.4, "compact", "8.4 mi"], [10.4, "compact", "10 mi"], [116.4, "compact", "116 mi"],
+    [10000, "compact", "10k mi"], [31240, "compact", "31.2k mi"], [31240, "full", "31,240 mi"],
+  ] as const)("formats %s miles as %s", (miles, style, expected) => {
+    expect(formatAmount(miles * 1609.344, "meters", style).text).toBe(expected);
   });
   it("uses full hero digits and compact projections, goals and medals", () => {
     const source = game("large", task("3124 pushups", { quantity: 3124, unit: "reps", name: "pushups" }));

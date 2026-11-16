@@ -29,12 +29,12 @@
       "ladder": null,
       "route": {
         "name": "Austin to San Antonio",
-        "distanceText": "80 miles",
+        "distanceText": "80 mi",
         "walkedText": "3 mi",
         "progress": 0.0375,
         "straightLine": false,
         "finishedOn": null,
-        "map": "/api/game/v1/progress/map?measure=walk.meters&w=700&h=400",
+        "map": "/api/game/v1/progress/map?measure=walk.meters&size=card",
         "towns": [
           {
             "name": "Austin",
@@ -52,7 +52,23 @@
           }
         ],
         "goalPicked": false,
-        "completed": []
+        "completed": [],
+        "drawerTowns": [
+          {
+            "name": "Austin",
+            "atText": "mile 0",
+            "x": 0.757143,
+            "y": 0.174554,
+            "passedOn": "2026-11-14"
+          },
+          {
+            "name": "San Antonio",
+            "atText": "77 mi to go",
+            "x": 0.05,
+            "y": 0.744085,
+            "passedOn": null
+          }
+        ]
       },
       "pics": []
     }

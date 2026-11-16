@@ -10,6 +10,7 @@ import { GAME_IDEAS_MODEL, GAME_IDEAS_TIMEOUT_MS } from "../ideas/writer";
 import { cumulativePoints, readGameSeries, type MeasureSeries } from "./series";
 import { patchMeasureState, type BeforeProgressMutation, type MeasureState } from "./state";
 import * as z from "@murphai/contracts/zod-runtime";
+import { readRouteGoals, routePlaces, setRouteGoal } from "./routes";
 
 export function roundValues(total: number, unit: MeasureSeries["unit"]): number[] {
   const factor = unit === "seconds" ? 3600 : unit === "meters" ? 1609.344 : 1;
@@ -92,6 +93,7 @@ export async function readGoals(memberId: string, query: GoalsQuery): Promise<Go
   const snapshot = await readGameSeries(memberId, new Date());
   const measure = snapshot.measures.find(measure => measure.id === query.measure);
   if (!measure) throw gameNotFound();
+  if (measure.unit === "meters" || measure.unit === "steps") return readRouteGoals(query.q, measure.unit, cumulativePoints(measure.amounts).at(-1)?.[1] ?? 0);
   const kind = measure.unit === "reps" ? "height" : measure.unit === "seconds" ? "time" : null;
   if (!kind) return { tiles: [], match: null, suggestions: [], note: null, route: null };
   const awards = snapshot.awards;
@@ -116,10 +118,20 @@ export async function setMeasure(memberId: string, measureId: string, body: SetM
     await patchMeasureState(memberId, measureId, body, beforeMutationTx);
     return `${measure.name}.reps`;
   }
-  if ("from" in body.goal) {
-    // TODO(BE3): call setRouteGoal(memberId, measureId, body.goal.from, body.goal.to) from routes.ts.
-    throw hostedOnboardingError({ code: "GAME_PROGRESS_ROUTE_NOT_READY", httpStatus: 501, message: "Route goals aren't available yet." });
+  if (measure.unit === "meters" || measure.unit === "steps") {
+    let places: { from: string; to: string } | null;
+    if ("from" in body.goal) places = body.goal;
+    else {
+      const id = body.goal.rungId;
+      const entry = BANK.find(entry => entry.id === id && entry.kind === "route");
+      places = entry ? routePlaces(entry.name) : null;
+    }
+    if (!places) throw invalidGameRequest("Choose a route with two places.");
+    await setRouteGoal(memberId, measureId, places.from, places.to, { points: cumulativePoints(measure.amounts),
+      awards: snapshot.awards, incomplete: snapshot.incomplete, beforeMutationTx });
+    return measureId;
   }
+  if ("from" in body.goal) throw invalidGameRequest("Choose a route for a distance measure.");
   const id = body.goal.rungId;
   const kind = measure.unit === "reps" ? "height" : measure.unit === "seconds" ? "time" : null;
   if (!BANK.some(entry => entry.id === id && entry.kind === kind)) throw invalidGameRequest("Choose a goal for this measure.");

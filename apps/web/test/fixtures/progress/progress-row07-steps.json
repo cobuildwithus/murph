@@ -377,12 +377,12 @@
       "ladder": null,
       "route": {
         "name": "San Diego to San Francisco",
-        "distanceText": "501 miles",
+        "distanceText": "501 mi",
         "walkedText": "85 mi",
         "progress": 0.16966067864271456,
         "straightLine": false,
         "finishedOn": null,
-        "map": "/api/game/v1/progress/map?measure=steps&w=700&h=400",
+        "map": "/api/game/v1/progress/map?measure=steps&size=card",
         "towns": [
           {
             "name": "San Diego",
@@ -435,7 +435,58 @@
           }
         ],
         "goalPicked": true,
-        "completed": []
+        "completed": [],
+        "drawerTowns": [
+          {
+            "name": "San Diego",
+            "atText": "mile 0",
+            "x": 0.8375,
+            "y": 0.820361,
+            "passedOn": "2026-10-21"
+          },
+          {
+            "name": "Del Mar",
+            "atText": "mile 19",
+            "x": 0.725,
+            "y": 0.713574,
+            "passedOn": "2026-10-26"
+          },
+          {
+            "name": "Oceanside",
+            "atText": "mile 38",
+            "x": 0.66875,
+            "y": 0.642383,
+            "passedOn": "2026-10-31"
+          },
+          {
+            "name": "San Clemente",
+            "atText": "mile 59",
+            "x": 0.6125,
+            "y": 0.571191,
+            "passedOn": "2026-11-07"
+          },
+          {
+            "name": "Irvine",
+            "atText": "mile 84",
+            "x": 0.55625,
+            "y": 0.5,
+            "passedOn": "2026-11-14"
+          },
+          {
+            "name": "LA",
+            "atText": "33 mi away",
+            "x": 0.4775,
+            "y": 0.428809,
+            "passedOn": null
+          },
+          {
+            "name": "San Francisco",
+            "atText": "416 to go",
+            "x": 0.05,
+            "y": 0.215234,
+            "passedOn": null
+          }
+        ]
       },
       "pics": []
     }

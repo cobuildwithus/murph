@@ -27,7 +27,7 @@ export interface MeasureState {
 export async function patchMeasureState(
   memberId: string,
   measureId: string,
-  patch: Partial<MeasureState>,
+  patch: Partial<MeasureState> | ((previous: Readonly<MeasureState>) => Partial<MeasureState>),
   beforeMutationTx: BeforeProgressMutation,
 ): Promise<MeasureState> {
   const db = getPrisma();
@@ -35,7 +35,7 @@ export async function patchMeasureState(
   const target = { memberId, table: "game_progress_measure", rowId: lookup, field: "state" } as const;
   const row = await db.gameProgressMeasure.findUnique({ where: { memberId_lookup: { memberId, lookup } }, select: { stateEncrypted: true } });
   const previous = row ? await openProgress<MeasureState>(target, row.stateEncrypted) : {};
-  const state = { ...previous, ...patch };
+  const state = { ...previous, ...(typeof patch === "function" ? patch(previous) : patch) };
   const stateEncrypted = await sealProgress(target, state);
   await db.$transaction(async tx => {
     await beforeMutationTx(tx);

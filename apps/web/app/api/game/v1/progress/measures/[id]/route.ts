@@ -6,9 +6,10 @@ import { setMeasure } from "@/src/lib/game/progress/goals";
 import { readProgress } from "@/src/lib/game/progress/view";
 import { resolveDecodedRouteParam } from "@/src/lib/http";
 import { runWithHostedDomainRootUnwrapCache } from "@/src/lib/hosted-crypto/domain-root-unwrap-cache";
-import { jsonOk, readJsonObject, withJsonError } from "@/src/lib/hosted-onboarding/http";
+import { jsonOk, readJsonObject } from "@/src/lib/hosted-onboarding/http";
+import { progressEffect, withProgressJsonError } from "@/src/lib/game/progress/http";
 
-export const PUT = withJsonError(async (request: Request, context: { params: Promise<{ id: string }> }) => runWithHostedDomainRootUnwrapCache(async () => {
+export const PUT = withProgressJsonError(async (request: Request, context: { params: Promise<{ id: string }> }) => runWithHostedDomainRootUnwrapCache(async () => {
   const auth = await requireGameMemberAuth(request);
   const id = await resolveDecodedRouteParam(context.params, "id");
   const raw = await readJsonObject(request, { limitBytes: 4096 }).catch(error => {
@@ -17,7 +18,9 @@ export const PUT = withJsonError(async (request: Request, context: { params: Pro
   });
   const body = parseSetMeasureBody(raw);
   const beforeMutationTx = (tx: Parameters<typeof assertGameMemberAuthCurrentTx>[1]) => assertGameMemberAuthCurrentTx(auth, tx);
-  const measureId = await setMeasure(auth.member.id, id, body, beforeMutationTx);
-  const view = await readProgress(auth.member.id, beforeMutationTx);
-  return jsonOk({ ok: true, measure: view.measures.find(measure => measure.id === measureId)! }, 200, { "Cache-Control": "private, no-store" });
+  return progressEffect(async () => {
+    const measureId = await setMeasure(auth.member.id, id, body, beforeMutationTx);
+    const view = await readProgress(auth.member.id, beforeMutationTx);
+    return jsonOk({ ok: true, measure: view.measures.find(measure => measure.id === measureId)! });
+  });
 }));

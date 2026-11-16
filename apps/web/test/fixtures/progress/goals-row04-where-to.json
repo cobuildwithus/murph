@@ -19,7 +19,17 @@
     "to": "San Francisco",
     "distanceText": "501 miles",
     "straightLine": false,
-    "map": "/api/game/v1/progress/map?measure=walk.meters&w=700&h=400"
+    "map": "/api/game/v1/progress/map?from=San+Diego&to=San+Francisco&size=card",
+    "detail": "By road. You're 116 in, so 385 to go.",
+    "towns": [
+      {
+        "name": "Los Angeles",
+        "atText": "mile 118",
+        "x": 0.55,
+        "y": 0.75,
+        "passedOn": null
+      }
+    ]
   },
   "note": null
 }
