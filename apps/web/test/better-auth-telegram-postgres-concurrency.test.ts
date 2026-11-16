@@ -276,6 +276,8 @@ describe.skipIf(!enabled)("Telegram public login PostgreSQL composition", () => 
     expect((await readHostedMemberRoutingState({ memberId: member.memberId, prisma }))?.telegramUserId).toBe(flow.id);
     expect((await prepareHostedAuthTelegramMember({ prisma, telegramUserId: flow.id })).memberId).toBe(member.memberId);
     expect(await prisma.hostedMemberApprovalCredentials.count({ where: { memberId: member.memberId } })).toBe(0);
+    // Linking Telegram later never changes how the account was established, so MCP writes stay off for it.
+    expect((await prisma.hostedMember.findUniqueOrThrow({ where: { id: member.memberId } })).firstSignInMethod).toBe("email");
     expect((await getHostedAppSessionFromRequest(request("/home", {}, member.cookie)))?.member.id).toBe(member.memberId);
     expect((await verifyCredential(request("/api/settings/login-methods/telegram/verify", completion, flow.cookie))).status).toBe(401);
     const replacement = await beginCredential(member);
@@ -385,7 +387,10 @@ describe.skipIf(!enabled)("Telegram public login PostgreSQL composition", () => 
       const result = await complete(request("/api/auth/complete", undefined, cookie));
       expect(result.status).toBe(200); expect(await result.json()).toMatchObject({ ok: true, launchConsentGranted: false });
     }
-    expect((await prisma.hostedMember.findUniqueOrThrow({ where: { id: body.memberId } })).billingStatus).toBe("not_started");
+    const member = await prisma.hostedMember.findUniqueOrThrow({ where: { id: body.memberId } });
+    expect(member.billingStatus).toBe("not_started");
+    // The sign-in that claims the member records how the account was established.
+    expect(member.firstSignInMethod).toBe("telegram");
   });
 
   it("reuses the same member on repeat login and rejects a consumed nonce", async () => {

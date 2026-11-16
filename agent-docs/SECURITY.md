@@ -113,10 +113,17 @@ approval-passkey consumer including action approvals, needs a sign-in by phone
 or Telegram within five minutes; the initial-enrollment owner enforces it at
 both options and registration, so an email-code session (which a model reading
 the inbox could complete) cannot add a key and its confirmation fails before
-any `tools/call`. A member whose only sign-in is email cannot set up a first
-passkey; such a member can still add a first phone or Telegram from a fresh
-email session, so for them that inbox stays the root of trust. Declining needs
-no passkey. The POST
+any `tools/call`. An email-only member can still add a first phone or Telegram
+from a fresh email session and then enroll, so a passkey alone doesn't take the
+inbox out of the chain. MCP writes therefore also need an account established by
+phone or Telegram: `hosted_member.first_sign_in_method` is written once by the
+sign-in that claims the member (existing accounts were classified from user,
+Telegram account and phone verification timestamps; anything else stays null)
+and no sign-in method change touches it. Email or null refuses the challenge and
+confirmation before the passkey is checked (the request keeps waiting), the
+gateway answers a write call without storing a request, and Settings shows those
+writes off and won't turn one on. For action approvals an email-only member's
+inbox stays the root of trust. Declining needs no passkey. The POST
 carries only the decision and, to confirm, the signature; another member's id is
 not found, and Web reads the tool and arguments from the stored row. The page
 renders the stored inputs completely, in the tool's declared order, before Do it

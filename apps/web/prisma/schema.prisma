@@ -652,6 +652,9 @@ model HostedMember {
   groupJournalCaptureEnabled      Boolean?                       @map("group_journal_capture_enabled")
   groupJournalCaptureConsentRequestedAt DateTime?                @map("group_journal_capture_consent_requested_at")
   suspendedAt                    DateTime?                       @map("suspended_at")
+  /// How the first-party account was first signed in to: email, phone or telegram. Written once by the sign-in
+  /// that claims the member; later sign-in method changes never touch it. Null: not known to be phone or Telegram.
+  firstSignInMethod              String?                         @map("first_sign_in_method")
   createdAt                      DateTime                        @default(now()) @map("created_at")
   updatedAt                      DateTime                        @updatedAt @map("updated_at")
   invites                        HostedInvite[]                 @relation("HostedInviteMember")

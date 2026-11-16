@@ -23,8 +23,14 @@ vi.mock("../src/lib/custom-connections/access", async (original) => ({
 import { POST as authenticateRoute } from "../app/api/settings/approval-passkeys/authenticate/route";
 import { POST as initialOptionsRoute } from "../app/api/settings/approval-passkeys/initial-options/route";
 import { POST as registerRoute } from "../app/api/settings/approval-passkeys/register/route";
+import { GET as listRoute } from "../app/api/settings/custom-connections/route";
+import { PATCH as patchRoute } from "../app/api/settings/custom-connections/[id]/route";
 import { POST as challengeRoute } from "../app/api/settings/custom-connections/requests/[requestId]/challenge/route";
 import { POST as decisionRoute } from "../app/api/settings/custom-connections/requests/[requestId]/route";
+import { POST as sendCredentialCode } from "../app/api/settings/login-methods/otp/send/route";
+import { POST as verifyCredentialCode } from "../app/api/settings/login-methods/otp/verify/route";
+import { hostedAuthAdapter } from "../src/lib/better-auth/adapter";
+import { authLookupKey } from "../src/lib/better-auth/record-crypto";
 import { prepareHostedAuthOtpMember } from "../src/lib/better-auth/member";
 import { commitHostedAuthOtp, type HostedAuthOtp } from "../src/lib/better-auth/otp-transaction";
 import { sendHostedAuthOtp } from "../src/lib/better-auth/send-otp";
@@ -50,6 +56,8 @@ const secret = Buffer.alloc(32, 31).toString("base64url");
 const read = { name: "list_notes", title: "Read notes", inputSchema: { type: "object" }, annotations: { readOnlyHint: true } };
 const write = { name: "add_note", title: "Leave a note", inputSchema: { type: "object", properties: { text: { type: "string" } }, required: ["text"] } };
 const NOTE = { text: "Try the lentil soup on Sunday." };
+const LINKED_PHONE = "+12025550189";
+type GatewayResult = { content: { text: string }[]; isError?: boolean };
 
 describe.skipIf(!enabled)("a first passkey for an MCP write in PostgreSQL", () => {
   const calls: unknown[] = [];
@@ -80,10 +88,9 @@ describe.skipIf(!enabled)("a first passkey for an MCP write in PostgreSQL", () =
   });
   afterAll(async () => { if (enabled) await getPrisma().$disconnect(); });
 
-  /** An active member, signed in with a real code, with no passkey and one enabled write. */
-  async function withMember(kind: "email" | "phone", run: (f: { cookie: string; requestId: string }) => Promise<void>) {
+  /** A real code sign-in; a contact that already belongs to a member signs in to that member. */
+  async function signIn(kind: "email" | "phone", value: string) {
     const prisma = getPrisma();
-    const value = kind === "email" ? `first-passkey-${randomUUID()}@example.test` : "+12025550188";
     const contact = createHostedLinqParticipantContact({ kind, value });
     if (!contact) throw new Error("Invalid synthetic contact");
     let code = "";
@@ -91,6 +98,13 @@ describe.skipIf(!enabled)("a first passkey for an MCP write in PostgreSQL", () =
     const otp: HostedAuthOtp = kind === "email" ? { kind, address: value, code } : { kind, phoneNumber: value, code: mocks.codes.get(value)!,
       verificationId: await prepareHostedAuthSmsOtp({ prisma, phoneNumber: value, code: mocks.codes.get(value)!, verification: sms }) };
     const issued = await commitHostedAuthOtp({ baseURL, secret, prisma, ...await prepareHostedAuthOtpMember({ prisma, contact }), otp });
+    return { memberId: issued.memberId, cookie: issued.headers.getSetCookie().find((entry) => entry.startsWith("murph-auth-session="))!.split(";")[0]! };
+  }
+
+  /** An active member, signed in with a real code, with no passkey and one enabled write. */
+  async function withMember(kind: "email" | "phone", run: (f: { cookie: string; memberId: string; ask(): Promise<GatewayResult> }) => Promise<void>) {
+    const prisma = getPrisma();
+    const issued = await signIn(kind, kind === "email" ? `first-passkey-${randomUUID()}@example.test` : "+12025550188");
     mocks.memberId = issued.memberId;
     try {
       await prisma.hostedMember.update({ where: { id: issued.memberId }, data: { billingStatus: "active" } });
@@ -99,16 +113,23 @@ describe.skipIf(!enabled)("a first passkey for an MCP write in PostgreSQL", () =
       await prisma.hostedMcpConnection.create({ data: { id: "cc_first_passkey", memberId: issued.memberId, slug: "notes", name: "Notes",
         serverUrl: "https://notes.example.com/mcp", status: "on", generation: 3, revision: 1, tools: JSON.parse(JSON.stringify(tools)), catalog } });
       // Murph asks for the write; the gateway only records it and links the member to it.
-      const asked = await handleConnectionMcp(new Request(`${baseURL}/api/internal/custom-connections/cc_first_passkey/3/${catalog}/mcp`, {
+      const ask = async (): Promise<GatewayResult> => (await (await handleConnectionMcp(new Request(`${baseURL}/api/internal/custom-connections/cc_first_passkey/3/${catalog}/mcp`, {
         method: "POST", headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
         body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "add_note", arguments: NOTE } }),
-      }), { id: "cc_first_passkey", generation: "3", catalog });
-      const text: string = (await asked.json()).result.content[0].text;
-      const requestId = /\/settings\/connections\/confirm\/(car_[0-9a-f]{32})\. /u.exec(text)?.[1];
-      if (!requestId) throw new Error("The gateway did not link a request.");
-      const cookie = issued.headers.getSetCookie().find((entry) => entry.startsWith("murph-auth-session="))!.split(";")[0]!;
-      await run({ cookie, requestId });
+      }), { id: "cc_first_passkey", generation: "3", catalog })).json()).result;
+      await run({ ...issued, ask });
     } finally { await prisma.hostedMember.deleteMany({ where: { id: issued.memberId } }); }
+  }
+  function requestIdIn(result: GatewayResult): string {
+    const requestId = /\/settings\/connections\/confirm\/(car_[0-9a-f]{32})\. /u.exec(result.content[0]!.text)?.[1];
+    if (!requestId) throw new Error("The gateway did not link a request.");
+    return requestId;
+  }
+  const firstSignInMethod = async (memberId: string) => (await getPrisma().hostedMember.findUniqueOrThrow({ where: { id: memberId } })).firstSignInMethod;
+  function send(cookie: string, path: string, method: string, body?: unknown) {
+    return new Request(`${baseURL}${path}`, { method, ...(body === undefined ? {} : { body: JSON.stringify(body) }), headers: {
+      origin: baseURL, cookie, "content-type": "application/json", "x-vercel-forwarded-for": ip,
+    } });
   }
   function post(cookie: string, path: string, body: unknown = {}) {
     return new Request(`${baseURL}${path}`, { method: "POST", body: JSON.stringify(body), headers: {
@@ -124,27 +145,70 @@ describe.skipIf(!enabled)("a first passkey for an MCP write in PostgreSQL", () =
   }
   const status = async (requestId: string) => (await getPrisma().hostedMcpActionRequest.findUniqueOrThrow({ where: { id: requestId } })).status;
 
-  it("refuses an email-code session a first passkey, so its confirmation never reaches the server", () => withMember("email", async ({ cookie, requestId }) => {
-    const asked = await challenge(cookie, requestId);
-    expect(await (await authenticateRoute(post(cookie, "/api/settings/approval-passkeys/authenticate", { token: asked.token }))).json()).toEqual({ method: "initial" });
-    const options = await initialOptionsRoute(post(cookie, "/api/settings/approval-passkeys/initial-options"));
-    expect(options.status).toBe(403);
-    expect(await options.json()).toMatchObject({ error: { code: "SENSITIVE_ACTION_FRESH_LOGIN_REQUIRED",
-      message: "Sign in with your phone or Telegram, then add your Murph passkey." } });
-    // A key the session made up cannot be registered, nor sign the confirmation.
-    const key = authenticator();
-    const registered = await registerRoute(post(cookie, "/api/settings/approval-passkeys/register", { initialToken: asked.token, response: key.registration() }));
-    expect(registered.status).toBe(403);
-    expect(await getPrisma().hostedMemberApprovalCredentials.count({ where: { memberId: mocks.memberId } })).toBe(0);
-    const confirmed = await decisionRoute(post(cookie, confirmPath(requestId), { decision: "confirm",
-      authorization: { method: "passkey", token: asked.token, assertion: key.assertion({ customMessage: asked.message }) } }), params(requestId));
-    expect(confirmed.status).toBe(409);
-    expect(await confirmed.json()).toMatchObject({ error: { code: "SENSITIVE_ACTION_SETUP_REQUIRED" } });
+  it("keeps an email-first account's writes off: the gateway stores nothing and Settings won't turn one on", () => withMember("email", async ({ cookie, memberId, ask }) => {
+    expect(await firstSignInMethod(memberId)).toBe("email");
+    expect(await ask()).toEqual({ isError: true, content: [{ type: "text",
+      text: "Not done. This member's account can't approve changes yet: that needs an account set up with their phone or Telegram. Nothing was requested." }] });
+    expect(await getPrisma().hostedMcpActionRequest.count({ where: { memberId } })).toBe(0);
+    // The stored write is on, but Settings shows it off and locked, and won't turn it on.
+    const listed = await (await listRoute(send(cookie, "/api/settings/custom-connections", "GET"))).json();
+    expect(listed.connections).toEqual([expect.objectContaining({ changesAllowed: false, tools: [
+      expect.objectContaining({ name: "list_notes", state: "on" }), expect.objectContaining({ name: "add_note", state: "off" })] })]);
+    const id = { params: Promise.resolve({ id: "cc_first_passkey" }) };
+    const turnedOn = await patchRoute(send(cookie, "/api/settings/custom-connections/cc_first_passkey", "PATCH", { revision: 1, tools: { list_notes: true, add_note: true } }), id);
+    expect(turnedOn.status).toBe(403);
+    expect(await turnedOn.json()).toMatchObject({ error: { code: "changes_need_phone_or_telegram" } });
+    // Reads are unaffected.
+    const reads = await patchRoute(send(cookie, "/api/settings/custom-connections/cc_first_passkey", "PATCH", { revision: 1, tools: { list_notes: false } }), id);
+    expect(reads.status).toBe(200);
     expect(calls).toEqual([]);
-    expect(await status(requestId)).toBe("waiting");
   }));
 
-  it("lets a phone-code session add its first passkey and confirm the write once", () => withMember("phone", async ({ cookie, requestId }) => {
+  // ReviewGPT round 3: from a fresh email session (say, a model reading the inbox), attach a first phone the attacker
+  // holds, sign in with it, add a first passkey and confirm. The account was established by email, so the last step fails.
+  it("still refuses an email-first account that links a phone, signs in with it and adds a passkey", () => withMember("email", async ({ cookie, memberId, ask }) => {
+    const prisma = getPrisma();
+    const change = { method: "phone", operation: "set", expectedIdentity: null, value: LINKED_PHONE } as const;
+    const limits = ["send:contact", "verify:contact", "send:cooldown"].map((prefix) => `arl_${authLookupKey("verification", "rate-limit", `${prefix}:phone:${LINKED_PHONE}`)}`);
+    await prisma.hostedAuthRecord.deleteMany({ where: { model: "verification", id: { in: limits } } });
+    try {
+      expect((await sendCredentialCode(send(cookie, "/api/settings/login-methods/otp/send", "POST", { change }))).status).toBe(200);
+      expect((await verifyCredentialCode(send(cookie, "/api/settings/login-methods/otp/verify", "POST", { change, code: mocks.codes.get(LINKED_PHONE) }))).status).toBe(200);
+      const phone = await signIn("phone", LINKED_PHONE);
+      expect(phone.memberId).toBe(memberId);
+      // A phone session may add the first passkey, which Murph's other approvals still allow.
+      const options = await initialOptionsRoute(post(phone.cookie, "/api/settings/approval-passkeys/initial-options"));
+      expect(options.status).toBe(200);
+      const setup: { token: string; options: { challenge: string } } = await options.json();
+      const key = authenticator();
+      expect((await registerRoute(post(phone.cookie, "/api/settings/approval-passkeys/register", {
+        initialToken: setup.token, response: key.registration(true, setup.options.challenge) }))).status).toBe(200);
+      // Neither the new phone nor the new passkey changes how the account was established.
+      expect(await firstSignInMethod(memberId)).toBe("email");
+      expect(await ask()).toMatchObject({ isError: true });
+      // Even a stored request with a fully signed confirmation is refused. The gateway never stores one for this
+      // account, so this one is made while the account briefly looks phone-first.
+      await prisma.hostedMember.update({ where: { id: memberId }, data: { firstSignInMethod: "phone" } });
+      const requestId = requestIdIn(await ask());
+      const asked = await challenge(phone.cookie, requestId);
+      await prisma.hostedMember.update({ where: { id: memberId }, data: { firstSignInMethod: "email" } });
+      const challenged = await challengeRoute(post(phone.cookie, `${confirmPath(requestId)}/challenge`), params(requestId));
+      expect(challenged.status).toBe(403);
+      expect(await challenged.json()).toMatchObject({ error: { code: "changes_need_phone_or_telegram" } });
+      const confirmed = await decisionRoute(post(phone.cookie, confirmPath(requestId), { decision: "confirm",
+        authorization: { method: "passkey", token: asked.token, assertion: key.assertion({ customMessage: asked.message }) } }), params(requestId));
+      expect(confirmed.status).toBe(403);
+      expect(await confirmed.json()).toMatchObject({ error: { code: "changes_need_phone_or_telegram" } });
+      expect(calls).toEqual([]);
+      expect(await status(requestId)).toBe("waiting");
+    } finally {
+      await hostedAuthAdapter(prisma)({}).deleteMany({ model: "verification", where: [{ field: "identifier", value: LINKED_PHONE }] });
+    }
+  }));
+
+  it("lets a phone-code session add its first passkey and confirm the write once", () => withMember("phone", async ({ cookie, memberId, ask }) => {
+    expect(await firstSignInMethod(memberId)).toBe("phone");
+    const requestId = requestIdIn(await ask());
     const first = await challenge(cookie, requestId);
     expect(await (await authenticateRoute(post(cookie, "/api/settings/approval-passkeys/authenticate", { token: first.token }))).json()).toEqual({ method: "initial" });
     const options = await initialOptionsRoute(post(cookie, "/api/settings/approval-passkeys/initial-options"));

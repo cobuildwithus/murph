@@ -3,7 +3,7 @@ import "server-only";
 import * as z from "@murphai/contracts/zod-runtime";
 import { isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { readHostedOnboardingJsonObject } from "../hosted-onboarding/http";
-import { requireConnectionSession } from "./access";
+import { connectionChangesAllowed, requireConnectionSession } from "./access";
 import { decideActionRequest, issueActionConfirmChallenge } from "./action-confirm";
 import { connectionErrorResponse } from "./errors";
 import { readConnection, projectConnection, connectionWhere } from "./store";
@@ -23,20 +23,22 @@ export async function settingsConnections(request: Request, id?: string, action?
         return callbackRedirect(id, "step", "choose");
       } catch { return callbackRedirect(id, "error", "sign_in_unsupported"); }
     }
+    const changesAllowed = () => connectionChangesAllowed(session.member.id);
     if (!id && request.method === "GET") {
       const rows = await getPrisma().hostedMcpConnection.findMany({ where: connectionWhere(session.member.id), take: 10, orderBy: { createdAt: "asc" } });
-      return json({ connections: rows.map(projectConnection) });
+      const allowed = await changesAllowed();
+      return json({ connections: rows.map((row) => projectConnection(row, allowed)) });
     }
     if (!id && request.method === "POST") {
       const input = z.object({ url: z.string().max(2048) }).strict().parse(await body(request));
       return json(await addConnection(request, session, input.url));
     }
     const row = await readConnection(session.member.id, id ?? "");
-    if (action === "refresh") return json({ connection: projectConnection(await refreshConnection(row, { request, session })) });
+    if (action === "refresh") return json({ connection: projectConnection(await refreshConnection(row, { request, session }), await changesAllowed()) });
     if (action === "sign-in") return json(await startConnectionSignIn(row, { request, session }));
     if (request.method === "PATCH") {
       const input = z.object({ revision: z.number().int().nonnegative(), tools: z.record(z.string().max(128), z.boolean()).optional(), status: z.enum(["on", "off"]).optional() }).strict().parse(await body(request));
-      return json({ connection: projectConnection(await patchConnection(row, input, { request, session })) });
+      return json({ connection: projectConnection(await patchConnection(row, input, { request, session }), await changesAllowed()) });
     }
     if (request.method === "DELETE") {
       await removeConnection(row, { request, session });

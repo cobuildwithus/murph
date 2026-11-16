@@ -14,6 +14,7 @@ import { LinkPageStudyState } from "./link-page-study-state";
 
 const NOTES: CustomConnection = {
   auth: "oauth",
+  changesAllowed: true,
   createdAt: "2026-11-15T15:00:00.000Z",
   host: "notes.example.com",
   id: "cc_notes",
@@ -40,6 +41,7 @@ const NOTES: CustomConnection = {
 
 const RECIPES: CustomConnection = {
   auth: "none",
+  changesAllowed: true,
   createdAt: "2026-11-14T15:00:00.000Z",
   host: "recipes.example.com",
   id: "cc_recipes",
@@ -59,6 +61,13 @@ const NEW_NOTES: CustomConnection = {
   tools: NOTES.tools.map((tool) => ({ ...tool, state: tool.state === "not_allowed" ? "not_allowed" : "off" })),
 };
 
+// An account first signed in to with email: its changing actions show off and locked.
+const EMAIL_FIRST_NOTES: CustomConnection = {
+  ...NOTES,
+  changesAllowed: false,
+  tools: NOTES.tools.map((tool) => (tool.readOnly || tool.state === "not_allowed" ? tool : { ...tool, state: "off" })),
+};
+
 const STATES: { connections: CustomConnection[]; draft?: Record<string, boolean>; label: string; step: CustomConnectionsStep }[] = [
   { label: "Add an MCP server", connections: [], step: { error: null, kind: "add", url: "" } },
   { label: "Not an MCP link", connections: [], step: { error: "not_mcp", kind: "add", url: "https://notes.example.com" } },
@@ -73,6 +82,7 @@ const STATES: { connections: CustomConnection[]; draft?: Record<string, boolean>
   { label: "Your MCP servers", connections: [NOTES, RECIPES], step: { kind: "list" } },
   { label: "One MCP server", connections: [NOTES, RECIPES], step: { connectionId: "cc_notes", kind: "choose", mode: "edit" } },
   { label: "Changed action", connections: [NOTES, RECIPES], step: { connectionId: "cc_recipes", kind: "choose", mode: "edit" } },
+  { label: "Changes locked", connections: [EMAIL_FIRST_NOTES], step: { connectionId: "cc_notes", kind: "choose", mode: "edit" } },
   {
     label: "Signed out",
     connections: [{ ...NOTES, status: "needs_sign_in" }],

@@ -37,6 +37,43 @@ describe.skipIf(!enabled)("custom connection PostgreSQL migration", () => {
       }
     } finally { await client.query("ROLLBACK"); await client.end(); }
   });
+  it("classifies existing accounts once, only from records a later sign-in change can't produce", async () => {
+    const client = new pg.Client({ connectionString: databaseUrl });
+    await client.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("CREATE TEMP TABLE first_sign_in_marker (id int)");
+      await client.query("SET LOCAL search_path TO pg_temp");
+      await client.query("CREATE TABLE hosted_member (id TEXT PRIMARY KEY)");
+      await client.query("CREATE TABLE hosted_auth_record (model TEXT, id TEXT, member_id TEXT, created_at TIMESTAMP(3))");
+      await client.query("CREATE TABLE hosted_member_identity (member_id TEXT PRIMARY KEY, phone_number_verified_at TIMESTAMP(3))");
+      const signedUp = "2026-10-01 12:00:00";
+      // [member, Telegram account created at, phone verified at]; every member but "never" has a user record at signedUp.
+      const members: [string, string | null, string | null][] = [
+        ["telegram", signedUp, null],
+        ["telegram-later", "2026-10-02 12:00:00", null],
+        ["telegram-then-phone", signedUp, "2026-10-03 12:00:00"],
+        ["phone", null, "2026-10-01 12:00:04"],
+        ["phone-imported", null, "2026-09-01 12:00:00"],
+        ["phone-later", null, "2026-10-01 12:00:11"],
+        ["email-only", null, null],
+      ];
+      for (const [id, telegram, phone] of members) {
+        await client.query("INSERT INTO hosted_member VALUES ($1)", [id]);
+        await client.query("INSERT INTO hosted_auth_record VALUES ('user', $1, $1, $2)", [id, signedUp]);
+        if (telegram) await client.query("INSERT INTO hosted_auth_record VALUES ('account', $1, $2, $3)", [`account-${id}`, id, telegram]);
+        await client.query("INSERT INTO hosted_member_identity VALUES ($1, $2)", [id, phone]);
+      }
+      await client.query("INSERT INTO hosted_member VALUES ('never')");
+      await client.query(await migration("20261116030000_member_first_sign_in_method"));
+      const rows = (await client.query("SELECT id, first_sign_in_method FROM hosted_member ORDER BY id")).rows;
+      expect(Object.fromEntries(rows.map((row) => [row.id, row.first_sign_in_method]))).toEqual({
+        "email-only": null, never: null, phone: "phone", "phone-imported": "phone", "phone-later": null,
+        telegram: "telegram", "telegram-later": null, "telegram-then-phone": "telegram",
+      });
+      await expect(client.query("UPDATE hosted_member SET first_sign_in_method = 'passkey' WHERE id = 'never'")).rejects.toThrow(/check constraint/u);
+    } finally { await client.query("ROLLBACK"); await client.end(); }
+  });
   it("cascades account deletion and admits only one refresh owner and one pending-state consumer", async () => {
     const schema = `mcp_test_${randomUUID().replaceAll("-", "")}`;
     const setup = new pg.Client({ connectionString: databaseUrl });

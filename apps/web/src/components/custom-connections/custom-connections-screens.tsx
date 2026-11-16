@@ -17,6 +17,7 @@ import { Input } from "@/src/components/ui/input";
 import { cn } from "@/src/lib/utils";
 
 import {
+  CUSTOM_CONNECTION_CHANGES_LOCKED,
   describeCustomConnectionStatus,
   readCustomConnectionError,
   type CustomConnection,
@@ -305,27 +306,37 @@ function ChooseScreen({ connection, flow, mode }: { connection: CustomConnection
           ))}
         </ul>
       ) : null}
-      <AskFirstTools afterReads={reads.length > 0} details={details} flow={flow} tools={writes} />
+      <AskFirstTools afterReads={reads.length > 0} details={details} flow={flow} locked={!connection.changesAllowed} tools={writes} />
       <LockedTools tools={connection.tools.filter((tool) => tool.state === "not_allowed")} />
       <p className={cn(QUIET_TEXT_CLASS, "pt-4")}>Described by {connection.name}.</p>
     </LinkPageScreen>
   );
 }
 
-/** Actions that change things: each one runs only after the member confirms it on a Murph page. */
-function AskFirstTools({ afterReads, details, flow, tools }: { afterReads: boolean; details: boolean; flow: Flow; tools: CustomConnectionTool[] }) {
+/**
+ * Actions that change things: each one runs only after the member confirms it on a Murph page. An account first
+ * signed in to with email can't confirm, so they show locked, without switches.
+ */
+function AskFirstTools({ afterReads, details, flow, locked, tools }: {
+  afterReads: boolean; details: boolean; flow: Flow; locked: boolean; tools: CustomConnectionTool[];
+}) {
   const headingId = `${flow.urlId}-ask-first`;
   if (tools.length === 0) return null;
   return (
     <section aria-labelledby={headingId} className={cn("flex flex-col gap-2", afterReads && "pt-5")}>
       <div className="flex flex-col gap-0.5 px-1">
-        <h2 className="text-[15px] font-semibold leading-5" id={headingId}>
+        <h2 className={cn("text-[15px] font-semibold leading-5", locked && "text-[#FFFCF6]/60")} id={headingId}>
           Murph asks you first
         </h2>
-        <p className={QUIET_TEXT_CLASS}>Murph sends you a link to confirm each one.</p>
+        <p className={QUIET_TEXT_CLASS}>{locked ? CUSTOM_CONNECTION_CHANGES_LOCKED : "Murph sends you a link to confirm each one."}</p>
       </div>
       <ul aria-labelledby={headingId} className="flex flex-col gap-2">
-        {tools.map((tool) => (
+        {tools.map((tool) => locked ? (
+          <li className={cn(ROW_CLASS, "flex flex-col gap-0.5")} key={tool.name}>
+            <span className="text-pretty text-[17px] font-semibold leading-[22px] text-[#FFFCF6]/60">{tool.title || tool.name}</span>
+            {details && tool.description ? <span className={cn(QUIET_TEXT_CLASS, "text-[#FFFCF6]/45")}>{tool.description}</span> : null}
+          </li>
+        ) : (
           <ToolRow details={details} flow={flow} key={tool.name} tool={tool} />
         ))}
       </ul>

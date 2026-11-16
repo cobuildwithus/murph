@@ -101,6 +101,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     "companionPushRoute CompanionPushRoute?",
     "conversationPolls HostedConversationPoll[]",
     "emailPublicBootstrapAttempts HostedEmailPublicBootstrapAttempt[]",
+    'firstSignInMethod String? @map("first_sign_in_method")',
     "gameProfile GameProfile?",
     'gameInvitations GameInvitee[] @relation("GameInviteeMember")',
     'chatHostedGames Game[] @relation("GameChatContainer")',

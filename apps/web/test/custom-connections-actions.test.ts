@@ -73,11 +73,11 @@ const mocks = vi.hoisted(() => {
     $queryRaw: async () => [],
     $transaction: async <T,>(operation: (tx: unknown) => Promise<T>) => operation(db),
   };
-  return { db, tables, failures, fetch: vi.fn(), callback: vi.fn(), active: vi.fn(), sessionCurrent: vi.fn(), passkeys: vi.fn(), commitPasskeys: vi.fn() };
+  return { db, tables, failures, fetch: vi.fn(), callback: vi.fn(), active: vi.fn(), changesAllowed: vi.fn(), sessionCurrent: vi.fn(), passkeys: vi.fn(), commitPasskeys: vi.fn() };
 });
 vi.mock("../src/lib/prisma", () => ({ getPrisma: () => mocks.db }));
 vi.mock("../src/lib/custom-connections/guarded-fetch", async (original) => ({ ...await original<typeof import("../src/lib/custom-connections/guarded-fetch")>(), guardedConnectionFetch: mocks.fetch }));
-vi.mock("../src/lib/custom-connections/access", () => ({ requireConnectionCallback: mocks.callback, connectionMemberActive: mocks.active }));
+vi.mock("../src/lib/custom-connections/access", () => ({ requireConnectionCallback: mocks.callback, connectionMemberActive: mocks.active, connectionChangesAllowed: mocks.changesAllowed }));
 vi.mock("../src/lib/hosted-onboarding/app-session", () => ({ assertHostedAppSessionCurrentTx: mocks.sessionCurrent }));
 vi.mock("../src/lib/hosted-onboarding/member-access", () => ({ activeHostedPersonAccessWhere: () => ({ suspendedAt: null }) }));
 vi.mock("../src/lib/hosted-web/public-url", async (original) => ({ ...await original<typeof import("../src/lib/hosted-web/public-url")>(), resolveHostedPublicOrigin: () => "https://www.withmurph.ai" }));
@@ -170,7 +170,7 @@ beforeEach(() => {
   mocks.tables.challenges.length = 0;
   sent.length = 0;
   Object.assign(mocks.failures, { claim: false, settle: false, resultSeal: false });
-  mocks.callback.mockResolvedValue("member-a"); mocks.active.mockResolvedValue(true); mocks.sessionCurrent.mockResolvedValue(undefined);
+  mocks.callback.mockResolvedValue("member-a"); mocks.active.mockResolvedValue(true); mocks.changesAllowed.mockResolvedValue(true); mocks.sessionCurrent.mockResolvedValue(undefined);
   mocks.passkeys.mockResolvedValue({ credentials: [account.credential], encrypted: "synthetic", memberId: "member-a" });
   mocks.commitPasskeys.mockResolvedValue(undefined);
 });
@@ -584,4 +584,30 @@ describe("Murph asks first: the confirm page's view", () => {
       expect(await readActionRequestView("member-a", other)).not.toHaveProperty("confirmedBefore");
     },
   );
+});
+
+describe("Murph asks first: an account first signed in to with email", () => {
+  it("gets an answer to its write call, with no request stored and nothing sent", async () => {
+    mocks.changesAllowed.mockResolvedValue(false);
+    serve(() => ({ content: [{ type: "text", text: "Saved." }] }));
+    const result = await callGateway(NOTE);
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toBe("Not done. This member's account can't approve changes yet: that needs an account set up with their phone or Telegram. Nothing was requested.");
+    expect(mocks.tables.requests).toEqual([]);
+    expect(sent).toEqual([]);
+  });
+
+  it("can't be challenged or confirm a stored request, even with a signed challenge, but can still decline it", async () => {
+    serve(() => ({ content: [{ type: "text", text: "Saved." }] }));
+    const id = await requested();
+    const signed = await signedConfirmation(id);
+    mocks.changesAllowed.mockResolvedValue(false);
+    await expect(issueActionConfirmChallenge(authority, id)).rejects.toMatchObject({ code: "changes_need_phone_or_telegram", status: 403 });
+    await expect(decideActionRequest(authority, id, signed)).rejects.toMatchObject({ code: "changes_need_phone_or_telegram", status: 403 });
+    // Refused before the passkey is checked: the challenge is unspent, the request still waits and nothing reached the server.
+    expect(mocks.tables.challenges).toHaveLength(1);
+    expect(mocks.tables.requests[0]).toMatchObject({ status: "waiting" });
+    expect(sent).toEqual([]);
+    expect(await decline(id)).toEqual({ status: "declined" });
+  });
 });

@@ -7,6 +7,7 @@ import * as z from "@murphai/contracts/zod-runtime";
 import type { HostedMcpActionRequest, Prisma } from "@prisma/client";
 import { createHostedCustomConnectionActionLookupKeys } from "../hosted-onboarding/contact-privacy";
 import { getPrisma } from "../prisma";
+import { connectionChangesAllowed } from "./access";
 import { canonical, storedToolsSchema, type StoredTool, type ToolDefinition } from "./catalog";
 import { WEB_ORIGIN } from "./oauth";
 import { openActionSecret, sealActionSecret } from "./secrets";
@@ -69,6 +70,9 @@ function argumentsProblem(definition: ToolDefinition, args: Record<string, unkno
  * It never calls the server; the same call again reuses the request or says what became of it.
  */
 export async function requestAction(row: ConnectionRow, tool: StoredTool, args: Record<string, unknown>): Promise<ToolResult> {
+  if (!await connectionChangesAllowed(row.memberId)) {
+    return answer("Not done. This member's account can't approve changes yet: that needs an account set up with their phone or Telegram. Nothing was requested.", true);
+  }
   if (Buffer.byteLength(canonical(args)) > ARGUMENTS_MAX_BYTES) return answer("These inputs are too large to ask the member about. Nothing was requested.", true);
   const problem = argumentsProblem(tool.definition, args);
   if (problem) return answer(`These inputs don't match ${tool.definition.name}'s input schema (${problem}). Nothing was requested.`, true);

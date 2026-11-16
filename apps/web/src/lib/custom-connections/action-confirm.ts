@@ -8,6 +8,7 @@ import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS, lockHostedMemberRow } from "../h
 import { getPrisma } from "../prisma";
 import { consumeSensitiveActionChallengeTx, createSensitiveActionChallengeMaterial, verifySensitiveActionChallenge } from "../sensitive-actions/server";
 import type { SensitiveActionChallengeResponse } from "../sensitive-actions/shared";
+import { connectionChangesAllowed } from "./access";
 import { ACTION_REQUEST_ID, WAITING_MAX, readActionOutcome, type ActionFailure, type ActionOutcome } from "./action-requests";
 import { approvedTool, storedToolsSchema } from "./catalog";
 import { ConnectionError } from "./errors";
@@ -45,6 +46,7 @@ export async function issueActionConfirmChallenge(authority: SettingsMutation, r
   const request = await readMemberRequest(memberId, requestId);
   const now = new Date();
   if (!waiting(request, now)) throw new ConnectionError("request_closed", 409);
+  await requireChangesAllowed(memberId);
   const bindingHash = actionConfirmBinding(request, authority.session.sessionId);
   // A challenge never outlives the request it confirms.
   const expiresAt = new Date(Math.min(now.getTime() + CHALLENGE_MS, request.expiresAt.getTime()));
@@ -63,6 +65,10 @@ export async function actionConfirmChallengeIsCurrent(input: { bindingHash: stri
   return requests.some((request) => actionConfirmBinding(request, input.sessionId) === input.bindingHash);
 }
 
+/** An account established by email can decline but never confirm: no passkey it has is independent of its inbox. */
+async function requireChangesAllowed(memberId: string) {
+  if (!await connectionChangesAllowed(memberId)) throw new ConnectionError("changes_need_phone_or_telegram", 403);
+}
 /** Member, then session, then the one-use challenge, in the order action approvals take them. */
 async function lockedSettingsMutation<T>(authority: SettingsMutation, operation: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
   const memberId = authority.session.member.id;
@@ -82,6 +88,8 @@ export async function decideActionRequest(authority: SettingsMutation, requestId
   const request = await readMemberRequest(memberId, requestId);
   const now = new Date();
   if (!waiting(request, now)) return readActionOutcome(request, now);
+  // Refused before the passkey is checked or anything is claimed, so the request keeps waiting.
+  if (input.decision === "confirm") await requireChangesAllowed(memberId);
   const proof = input.decision === "confirm" ? await verifySensitiveActionChallenge({
     authorization: input.authorization, bindingHash: actionConfirmBinding(request, authority.session.sessionId),
     kind: ACTION_CONFIRM_KIND, memberId, now, prisma: getPrisma(),

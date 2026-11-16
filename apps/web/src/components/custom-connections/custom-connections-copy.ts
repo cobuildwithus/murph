@@ -11,6 +11,8 @@ export interface CustomConnectionTool {
 
 export interface CustomConnection {
   auth: "none" | "oauth";
+  /** Whether this account can confirm changes; when it can't, its changing actions show off and locked. */
+  changesAllowed: boolean;
   createdAt: string;
   host: string;
   id: string;
@@ -33,6 +35,9 @@ export type CustomConnectionAddResult =
     };
 
 export const CUSTOM_CONNECTIONS_API = "/api/settings/custom-connections";
+
+/** Why an account first signed in to with email can't turn on actions that change things. */
+export const CUSTOM_CONNECTION_CHANGES_LOCKED = "Changes need an account set up with your phone or Telegram.";
 
 /** Each way adding or signing in can fail, in the member's words. */
 export const CUSTOM_CONNECTION_ERRORS: Record<string, { detail: string; title: string }> = {

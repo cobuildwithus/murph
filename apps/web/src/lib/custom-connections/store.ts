@@ -16,15 +16,18 @@ export async function readConnection(memberId: string, id: string, prisma: Pick<
   if (!row) throw new ConnectionError("not_found", 404);
   return row;
 }
-export function projectConnection(row: ConnectionRow) {
+/** `changesAllowed`: whether this account can approve changes; when it can't, its writes show off and locked. */
+export function projectConnection(row: ConnectionRow, changesAllowed: boolean) {
   return {
     id: row.id, revision: row.revision, slug: row.slug, name: row.name, host: new URL(row.serverUrl).host,
     status: row.status, auth: row.auth, createdAt: row.createdAt.toISOString(), lastUsedAt: row.lastUsedAt?.toISOString() ?? null,
+    changesAllowed,
     // Settings shows what this Web enforces: after normalization only an oversized tool is not_allowed.
-    tools: normalizeTools(storedToolsSchema.parse(row.tools)).map(({ definition, state }) => ({
-      name: definition.name, title: definition.title ?? definition.name, description: definition.description ?? "",
-      readOnly: definition.annotations?.readOnlyHint === true, state,
-    })),
+    tools: normalizeTools(storedToolsSchema.parse(row.tools)).map(({ definition, state }) => {
+      const readOnly = definition.annotations?.readOnlyHint === true;
+      return { name: definition.name, title: definition.title ?? definition.name, description: definition.description ?? "",
+        readOnly, state: changesAllowed || readOnly || state === "not_allowed" ? state : "off" as const };
+    }),
   };
 }
 export async function saveCatalog(row: ConnectionRow, tools: StoredTool[], status?: "on" | "off", prisma: Pick<Prisma.TransactionClient, "hostedMcpConnection"> = getPrisma()) {

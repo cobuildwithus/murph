@@ -253,7 +253,9 @@ compromise can therefore permit initial enrollment. A member whose only sign-in
 is email cannot enroll until a phone or Telegram is linked, and initial
 messaging setup still lets a fresh email session link the first one, so that
 inbox remains such a member's root of trust. Any approval row, including empty
-or corrupt state, excludes this path.
+or corrupt state, excludes this path. MCP writes go further and need an account
+established by phone or Telegram (`hosted_member.first_sign_in_method`, written
+once by the claiming sign-in; see `agent-docs/SECURITY.md`).
 
 Each session issuer records the factor that proved it: `commitHostedAuthOtp`
 records `email` or `phone` from the verified code and `commitHostedAuthSession`
