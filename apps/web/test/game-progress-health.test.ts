@@ -21,6 +21,9 @@ it.each([{ baseline: 70.51, current: 69.53, levels: [] }, { baseline: 74, curren
 it("does not award an age line that the baseline already beat", () => {
   const crossed = healthAgeShare(context(100, 20));
   expect(crossed.map(award => award.data.percentile)).toEqual([25, 100 / 3, 50]);
+  expect(crossed.map(award => [award.data.title, award.data.detail])).toEqual([
+    ["Beat 1 in 4", "women your age"], ["Beat 1 in 3", "women your age"], ["Beat half", "women your age"],
+  ]);
   expect(crossed.every(award => award.on === "2026-10-27")).toBe(true);
   expect(healthAgeShare(context(20, 19))).toEqual([]);
 });

@@ -7,6 +7,7 @@ import * as crypto from "../src/lib/game/progress/crypto";
 import { patchMeasureState, type MeasureState } from "../src/lib/game/progress/state";
 import type { Candidate } from "../src/lib/game/progress/registry";
 import { healthSteps } from "../src/lib/game/progress/health";
+import { savedHealthView } from "../src/lib/game/progress/health-view";
 
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
 if (enabled && !/^postgres(?:ql)?:\/\/[^/]*@(?:127\.0\.0\.1|localhost):\d+\/murph_test_[a-z0-9_]+$/u.test(process.env.DATABASE_URL ?? "")) throw new Error("Progress proof needs an isolated loopback test database.");
@@ -44,6 +45,14 @@ describe.skipIf(!enabled)("Progress PostgreSQL invariants", () => {
     await settleAwards(id, healthSteps(context), authorized);
     await settleAwards(id, healthSteps({ ...context, means: context.means.map(point => ({ ...point, value: 76 })) }), authorized);
     expect(await readAwards(id)).toEqual(first);
+    const state = await patchMeasureState(id, context.metric,
+      { baseline: { value: 74, from: "2026-10-04", to: "2026-10-31" } }, authorized);
+    const before = await db.gameProgressAward.findMany({ where: { memberId: id }, orderBy: { lookup: "asc" } });
+    const saved = savedHealthView(context.joinedOn, "2026-11-16", [{ id: context.metric, daily: [],
+      baseline: state.baseline!.value, step: context.step, direction: context.direction, wins: await readAwards(id) }]);
+    expect(saved.metrics[0]).toMatchObject({ headline: "Down 3 bpm", next: { detail: "70 bpm" } });
+    expect(saved.metrics[0].wins.map(win => [win.medalId, win.on])).toEqual(first.map(win => [win.id, win.on]));
+    expect(await db.gameProgressAward.findMany({ where: { memberId: id }, orderBy: { lookup: "asc" } })).toEqual(before);
   });
   it("settles concurrently and never revokes or rewrites the original crossing day", async () => {
     const id = await member();

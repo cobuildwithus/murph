@@ -122,6 +122,27 @@ it("returns an incomplete health view when the room authority recheck reaches it
   expect(mocks.settle).not.toHaveBeenCalled();
 });
 
+it.each(["steps", "sleep"])("returns every ranked %s line while keeping private rows unranked", async measure => {
+  const people = ["Sam", "Maya", "Leo", "Ava", "Jordan", "Priya"].map((firstName, index) => ({
+    memberId: firstName.toLowerCase(), firstName, avatarUrl: null, me: firstName === "Ava", invited: false,
+    joinedOn: "2026-10-21", daily: [{ date: "2026-11-01", amount: (6 - index) * 1000 }],
+  }));
+  const cohort = await mocks.cohort();
+  mocks.cohort.mockResolvedValue({ ...cohort, people });
+  mocks.ids.mockResolvedValue({ ids: people.map(person => person.memberId), invited: [], incomplete: false });
+  mocks.health.mockResolvedValue({ people, incomplete: false });
+  const body = friendsSchema.parse(await (await GET(request(`measure=${measure}`))).json());
+  expect(body.chart.map(line => line.memberId)).toEqual(people.map(person => person.memberId));
+  expect(body.rows.map(row => row.rank)).toEqual([1, 2, 3, 4, 5, 6]);
+  expect(body.incomplete).toBe(false);
+  expect(mocks.settle).not.toHaveBeenCalled();
+
+  mocks.health.mockResolvedValue({ people: people.map(person => person.memberId === "priya" ? { ...person, daily: null } : person), incomplete: false });
+  const privateBody = friendsSchema.parse(await (await GET(request(`measure=${measure}`))).json());
+  expect(privateBody.rows.at(-1)).toMatchObject({ memberId: "priya", private: true, rank: null, total: null });
+  expect(privateBody.chart.map(line => line.memberId)).toEqual(people.slice(0, -1).map(person => person.memberId));
+});
+
 it("shares BE1's Unicode task key and applies a per-day amount to earlier posts", async () => {
   const shared = game("shared", ["ava", "leo"]);
   shared.termsWordsEncrypted = JSON.stringify({ v: 1, versions: [{ n: 1, defaultTask: "Ｐｕｓｈｕｐｓ　daily", tasks: [], stakes: [] }] });

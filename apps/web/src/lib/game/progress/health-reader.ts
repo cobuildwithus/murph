@@ -17,8 +17,31 @@ import type { AgeProfile } from "./norms";
 import { healthAgeShare, healthBaseline, healthMeans, healthSteps, healthSums, progressHealthDays } from "./health";
 import { cumulativePoints } from "./series";
 import { routeView } from "./routes";
-import { healthView, type HealthMetricInput } from "./health-view";
+import { healthView, savedHealthView, type HealthMetricInput } from "./health-view";
 import { healthJourneys, healthJourneyViews } from "./health-journeys";
+
+const metricIds = Object.keys(HEALTH) as HealthMetric["id"][];
+
+async function readHealthStates(memberId: string): Promise<Map<string, MeasureState>> {
+  const lookups = metricIds.map(id => progressLookup(memberId, "measure", [id]));
+  const rows = await getPrisma().gameProgressMeasure.findMany({ where: { memberId, lookup: { in: lookups } },
+    take: 4, select: { lookup: true, stateEncrypted: true } });
+  const opened = await openProgressMany<MeasureState>(rows.map(row => ({ memberId, table: "game_progress_measure",
+    rowId: row.lookup, field: "state", value: row.stateEncrypted })));
+  return new Map(metricIds.map((id, index) => [id, opened[rows.findIndex(row => row.lookup === lookups[index])] ?? {}]));
+}
+
+async function readSavedHealth(auth: HostedNativeMemberAuth, joinedOn: string, today: string) {
+  const db = getPrisma(), memberId = auth.member.id;
+  await assertGameMemberAuthCurrentTx(auth, db);
+  await assertBrowserVaultMemberAuthority({ memberId, prisma: db });
+  const states = await readHealthStates(memberId), awards = await readAwards(memberId);
+  const metrics = metricIds.map(id => ({ id, ...HEALTH[id], daily: [], baseline: states.get(id)!.baseline?.value ?? null,
+    wins: awards.filter(award => award.measureId === id && ["health", "healthAge"].includes(award.kind)) }));
+  await assertGameMemberAuthCurrentTx(auth, db);
+  await assertBrowserVaultMemberAuthority({ memberId, prisma: db });
+  return savedHealthView(joinedOn, today, metrics);
+}
 
 /** The map consumes the same settled daily Steps and join-date window as Health. */
 export async function readProgressStepsRoute(auth: HostedNativeMemberAuth, signal: AbortSignal) {
@@ -42,10 +65,15 @@ export async function readProgressHealth(auth: HostedNativeMemberAuth, signal: A
     const db = getPrisma(), memberId = auth.member.id;
     const profile = await db.gameProfile.findUnique({ where: { memberId }, select: { createdAt: true, timeZone: true } });
     if (!profile) throw gameHttpError("PROFILE_REQUIRED", 409, "Add your first name and time zone first.");
-    // A failed vault read exits before any baseline or award can be written.
-    const snapshot = await readCompanionHealthSeries(auth, signal);
     const timeZone = profile.timeZone;
     const today = toLocalDayKey(new Date(), timeZone), joinedOn = toLocalDayKey(profile.createdAt, timeZone);
+    // A failed live read returns saved presentation, never a baseline or award write.
+    const snapshot = await readCompanionHealthSeries(auth, signal).catch(async error => {
+      if (!isHostedOnboardingError(error) || error.code !== "NUMBERS_PROJECTION_UNAVAILABLE") throw error;
+      const health = await readSavedHealth(auth, joinedOn, today);
+      throw hostedOnboardingError({ code: error.code, httpStatus: 503, retryable: true,
+        message: error.message, details: { health } });
+    });
     const ageProfile = { age: snapshot?.demographics?.birthYear === null || !snapshot?.demographics
       ? null : Number(today.slice(0, 4)) - snapshot.demographics.birthYear,
     sex: snapshot?.demographics?.biologicalSex ?? null };
@@ -56,21 +84,15 @@ export async function readProgressHealth(auth: HostedNativeMemberAuth, signal: A
       await assertGameMemberAuthCurrentTx(auth, tx);
       await assertBrowserVaultMemberAuthority({ memberId, prisma: tx });
     };
-    const ids = Object.keys(HEALTH) as HealthMetric["id"][];
-    const lookups = ids.map(id => progressLookup(memberId, "measure", [id]));
-    const rows = await db.gameProgressMeasure.findMany({ where: { memberId, lookup: { in: lookups } },
-      take: 4, select: { lookup: true, stateEncrypted: true } });
-    const opened = await openProgressMany<MeasureState>(rows.map(row => ({ memberId, table: "game_progress_measure",
-      rowId: row.lookup, field: "state", value: row.stateEncrypted })));
+    const states = await readHealthStates(memberId);
     const previousAwards = await readAwards(memberId);
     const models: HealthMetricInput[] = [];
-    const states = new Map<string, MeasureState>();
     const candidates = [];
-    for (const [index, id] of ids.entries()) {
+    for (const id of metricIds) {
       const daily = progressHealthDays(id, (snapshot?.numbers[id]?.daily ?? [])
         .filter(point => point.date >= addDaysToIsoDate(today, -364) && point.date <= today));
       const result = await freezeAndScoreMetric({ memberId, id, daily, joinedOn, profile: awardProfile,
-        state: opened[rows.findIndex(row => row.lookup === lookups[index])] ?? {}, beforeMutationTx });
+        state: states.get(id)!, beforeMutationTx });
       candidates.push(...result.candidates);
       models.push(result.model);
       states.set(id, result.state);

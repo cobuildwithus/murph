@@ -90,10 +90,14 @@ export function healthAgeShare(context: HealthAchievementContext): Candidate[] {
     if (held) candidates.push({ key: `healthAge:${context.metric}:${threshold}`, kind: "healthAge",
       measureId: context.metric, subjectMemberId: null, on: held.date,
       data: { percentile: threshold, face: { delta: { icon: "age", text: threshold === 50 ? "half" : threshold === 25 ? "1 in 4" : "1 in 3" } },
-        detail: `${context.profile.sex === "female" ? "women" : "men"} your age`, page: "health", evaluator: 1, title: threshold === 50 ? `Beat half of ${context.profile.sex === "female" ? "women" : "men"} your age`
-        : `Beat 1 in ${threshold === 25 ? 4 : 3} ${context.profile.sex === "female" ? "women" : "men"} your age` } });
+        detail: `${context.profile.sex === "female" ? "women" : "men"} your age`, page: "health", evaluator: 1,
+        title: healthAgeTitle(threshold) } });
   }
   return candidates;
+}
+
+export function healthAgeTitle(percentile: number): string {
+  return `Beat ${percentile === 50 ? "half" : percentile === 25 ? "1 in 4" : "1 in 3"}`;
 }
 
 export function healthWinText(metric: HealthMetric["id"], amount: number): string {

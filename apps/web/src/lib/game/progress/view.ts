@@ -17,6 +17,7 @@ import { BANK } from "./bank";
 import { firstRouteId, routePlaces, routeView, setFirstRoute } from "./routes";
 import { resolveRoute } from "./mapbox";
 import { picturePin, readProgressPics } from "./pics";
+import { healthAgeTitle } from "./health";
 
 export function achievementContext(measures: readonly MeasureSeries[], states: ReadonlyMap<string, MeasureState>, days: readonly StreakDay[]): AchievementContext {
   return { days, measures: measures.map(measure => {
@@ -41,13 +42,14 @@ export function visibleAwards(awards: readonly StoredAward[], healthAuthority: b
 
 export function medalView(award: StoredAward, gold: boolean): Medal {
   return { id: award.id, kind: award.kind, gold, earnedOn: award.on,
-    face: award.data.face as Medal["face"], title: award.data.title as string, detail: award.data.detail as string,
+    face: award.data.face as Medal["face"], title: award.kind === "healthAge"
+      ? healthAgeTitle(award.data.percentile as number) : award.data.title as string, detail: award.data.detail as string,
     open: { page: award.data.page as Medal["open"]["page"], measureId: award.measureId } };
 }
 
 function momentWords(kind: Moment["kind"], group: readonly StoredAward[], gold: boolean): Pick<Moment, "title" | "line"> {
   const first = group[0];
-  const title = first.data.title as string;
+  const title = medalView(first, gold).title;
   const detail = first.data.detail as string;
   if (kind === "bigDay") {
     const count = group.length < 10 ? ["Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine"][group.length] : formatNumber(group.length, "compact");
@@ -55,7 +57,7 @@ function momentWords(kind: Moment["kind"], group: readonly StoredAward[], gold: 
   }
   if (kind === "goal" || kind === "held") return { title, line: (first.data.rung as Rung).blurb };
   if (kind === "route") return { title, line: detail };
-  if (first.kind.startsWith("health")) return { title: `${title} ${detail}`,
+  if (first.kind.startsWith("health")) return { title: `${title}${first.kind === "healthAge" && first.data.percentile === 50 ? " of" : ""} ${detail}`,
     line: gold ? "Your best since you joined. It's your newest medal, so it's the gold one on Prizes." : "Your best since you joined." };
   if (first.kind === "streak") return { title: `${title} in a row`, line: "Your best run yet." };
   return { title: `${title} ${detail}`, line: null };

@@ -51,7 +51,12 @@
       "joinedOn": null
     }
   ],
-  "chart": [],
+  "chart": [
+    {
+      "memberId": "member-0-ava",
+      "points": []
+    }
+  ],
   "next": null,
   "shareAsk": false,
   "shareAudience": [],

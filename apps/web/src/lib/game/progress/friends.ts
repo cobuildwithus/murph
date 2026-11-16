@@ -45,9 +45,7 @@ export function friendsView(input: {
   const me = ranked.find(row => row.person.me);
   const ahead = me ? ranked.filter(row => row.total > me.total).at(-1) : undefined;
   const gap = ahead && me ? ahead.total - me.total : null;
-  const chart = (query.with ? ranked : ranked.filter((row, index) => index < 3 || row.person.me))
-    .filter(row => row.points.length > 0)
-    .map(row => ({ memberId: row.person.memberId, points: row.points }));
+  const chart = ranked.map(row => ({ memberId: row.person.memberId, points: row.points }));
   return { incomplete: input.incomplete, departureNotice: input.departureNotice,
     pills: input.pills, pill: measure.id, range: query.range, rows, chart,
     next: ahead && gap !== null ? { memberId: ahead.person.memberId,

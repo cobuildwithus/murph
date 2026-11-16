@@ -93,6 +93,13 @@ export const healthSchema = z.object({
 });
 export type Health = z.infer<typeof healthSchema>;
 
+/** Read-only saved presentation in a live-read 503's error.details.health. */
+export const savedHealthSchema = healthSchema.pick({ joinedOn: true, today: true, winCount: true }).extend({
+  metrics: z.array(healthMetric.pick({ id: true, label: true, unit: true, baseline: true, wins: true, next: true })
+    .extend({ headline: z.string().nullable() })),
+});
+export type SavedHealth = z.infer<typeof savedHealthSchema>;
+
 const friend = person.extend({ me: z.boolean(), invited: z.boolean(), joinedOn: day.nullable() });
 const friendRow = z.discriminatedUnion("private", [
   friend.extend({ private: z.literal(true), rank: z.null(), total: z.null() }),
@@ -102,7 +109,7 @@ export const friendsSchema = z.object({
   incomplete: z.boolean(),
   pills: z.array(z.object({ id: z.string(), label: z.string(), icon: z.string() })), pill: z.string(), range: z.enum(["week", "month", "all"]),
   rows: z.array(friendRow),
-  /** Top three plus the member; private people have no line or gap. */
+  /** Every ranked person; private people have no line or gap. */
   chart: z.array(z.object({ memberId: z.string(), points: z.array(point) })),
   next: z.object({ memberId: z.string(), text: z.string() }).nullable(), shareAsk: z.boolean(),
   departureNotice: z.string().nullable(),

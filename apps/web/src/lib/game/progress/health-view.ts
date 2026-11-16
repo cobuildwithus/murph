@@ -1,8 +1,8 @@
 import { addDaysToIsoDate } from "@murphai/contracts";
 import type { CompanionHealthSeries, RawHealthPoint } from "../../device-sync/companion-numbers";
-import type { Amount, Health, HealthMetric, Measure } from "./contract";
+import type { Amount, Health, HealthMetric, Measure, SavedHealth } from "./contract";
 import type { StoredAward } from "./awards";
-import { HEALTH_RECS, healthMean14, healthMedalFace, healthWinText } from "./health";
+import { HEALTH_RECS, healthAgeTitle, healthMean14, healthMedalFace, healthWinText } from "./health";
 import { formatAmount, formatNumber } from "./format";
 import { rankAge, agePercentile, type AgeProfile } from "./norms";
 
@@ -50,7 +50,6 @@ export function healthMetricView(metric: HealthMetricInput, joinedOn: string, to
   const highest = Math.max(0, ...metric.wins.filter(award => award.kind === "health").map(award => award.data.level as number));
   const target = metric.baseline === null ? null : metric.baseline + metric.direction * (highest + 1) * metric.step;
   const source = metric.daily.at(-1)?.source ?? null;
-  const who = profile.sex === "female" ? "women" : "men";
   const daily: HealthMetric["daily"] = [];
   const values = new Map(metric.daily.map(point => [point.date, point.value]));
   // Preserve gaps explicitly for the chart, within the replica's one-year window.
@@ -66,17 +65,29 @@ export function healthMetricView(metric: HealthMetricInput, joinedOn: string, to
       const amount = award.data.amount as number;
       const share = award.data.percentile === 50 ? "half" : award.data.percentile === 25 ? "1 in 4" : "1 in 3";
       const age = award.kind === "healthAge";
-      const title = age ? `Beat ${share}` : metric.id === "restingHeartRate" ? `Down ${formatNumber(amount, "compact")}`
+      const title = age ? healthAgeTitle(award.data.percentile as number) : metric.id === "restingHeartRate" ? `Down ${formatNumber(amount, "compact")}`
         : metric.id === "steps" ? `${formatNumber(amount, "compact")} more`
         : `Up ${metric.id === "sleep" ? `${formatNumber(amount / 60, "compact")} min` : formatNumber(amount, "compact", 1)}`;
-      return { medalId: award.id, on: award.on, text: age ? award.data.title as string : healthWinText(metric.id, amount),
+      const detail = age ? award.data.detail as string : "";
+      return { medalId: award.id, on: award.on, text: age ? `${title}${share === "half" ? " of" : ""} ${detail}` : healthWinText(metric.id, amount),
         face: age ? { delta: { icon: "age", text: share } } : healthMedalFace(metric.id, amount, award.data.value as number),
-        title, detail: age ? `${who} your age` : "" };
+        title, detail };
     }),
     next: target === null ? null : { title: metric.wins.length ? "Next" : "Next win", detail:
       `${direction === "worse" ? "Back to " : ""}${healthAmountText(metric.id, target, false)}`,
       face: healthMedalFace(metric.id, (highest + 1) * metric.step, target) },
     age: healthAgeView(metric.id, metric.baseline, current, source, profile, joinedOn) };
+}
+
+export function savedHealthView(joinedOn: string, today: string, metrics: HealthMetricInput[]): SavedHealth {
+  return { joinedOn, today, winCount: metrics.reduce((count, metric) => count + metric.wins.length, 0),
+    metrics: metrics.map(metric => {
+      const { id, label, unit, baseline, wins, next } = healthMetricView(metric, joinedOn, today, { age: null, sex: null });
+      const held = metric.wins.filter(award => award.kind === "health")
+        .sort((a, b) => (b.data.level as number) - (a.data.level as number))[0];
+      return { id, label, unit, baseline, wins, next,
+        headline: held ? healthHeadline(id, metric.direction * (held.data.amount as number)) : null };
+    }) };
 }
 
 function healthHeadline(metric: HealthMetric["id"], change: number | null): string {

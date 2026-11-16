@@ -6146,6 +6146,20 @@ after this shared read. Session and health authority are checked after vault
 decryption as well as before the read. A transport/decryption failure returns
 one retryable 503; Progress loads this input before proposing any baseline or
 health award. No source values or provider bodies enter error logs.
+When that live read returns `NUMBERS_PROJECTION_UNAVAILABLE`, its retryable 503
+includes `error.details.health`, decoded by `savedHealthSchema`. This read-only
+payload holds join/today dates, win count and metric id/label/unit, baseline,
+wins, headline and next target. Saved tiles and next faces use the same metric
+presenter as the live response. The headline is the highest saved held-step
+improvement, not a current trend; without a step award it is null. Without a
+frozen baseline, next is null. Chart, current direction/access, age comparison,
+recommendations, sums and snapshot timestamp require live input and are absent
+from this saved-only contract. Saved age tile audiences come from the sealed
+award detail. Native session and health authority are checked before opening
+saved state and again before returning it. The path performs one four-measure
+set read and one award read, with existing batched decryption, no parallel
+database work, no writes and no additional live read. Other failures retain
+their ordinary error response; failure of the saved read is not swallowed.
 
 `progress/health.ts` derives the 28 days before the profile's local creation
 date (20 observed dates), 14-day statistics (10 observed dates), and seven-day holds
@@ -6180,6 +6194,8 @@ age, sex and device table as the percentile. Recommendations carry a fixed
 glyph from the contract's closed list, assigned in the existing curated map.
 These response fields add no stored state; earned faces stay sealed in award
 content under the classification below.
+Age medal titles are derived from the saved percentile for both old and new
+awards, with the audience only in detail; moments join those words once.
 
 The Steps map reads `readCompanionHealthSeries` and `healthSums`, exactly as the
 Health page does, and rechecks health authority before rendering. It never
@@ -6228,6 +6244,9 @@ ranks; private rows have no rank, amount, chart line or gap. Caps set
 `Friends.incomplete` and settle nothing. Friend award commits recheck friendship
 and blocks while holding the affected pair locks. Health pills never produce
 friend awards.
+The chart includes every ranked row within the existing reader cap, in ranking
+order. A ranked person with no points in the selected range has an empty point
+array; private and invited rows never have a chart entry.
 
 Friend Steps/Sleep reads use the existing pair-board projection grants and its
 180-day retained history, not another member's private replica. Pair rooms must

@@ -5,7 +5,7 @@ import { BANK, ladder, search } from "../src/lib/game/progress/bank";
 import { measureLadder, projection, roundValues } from "../src/lib/game/progress/goals";
 import { formatAmount, formatNumber } from "../src/lib/game/progress/format";
 import { ACHIEVEMENTS } from "../src/lib/game/progress/registry";
-import { achievementContext, measureView, momentsView, visibleAwards } from "../src/lib/game/progress/view";
+import { achievementContext, medalView, measureView, momentsView, visibleAwards } from "../src/lib/game/progress/view";
 import type { StoredAward } from "../src/lib/game/progress/awards";
 import { game, memberId, post, task } from "./support/progress-games";
 
@@ -212,6 +212,20 @@ describe("shared Progress numbers", () => {
 });
 
 describe("moment words", () => {
+  it.each([
+    [25, "Beat 1 in 4", "women your age"],
+    [100 / 3, "Beat 1 in 3", "women your age"],
+    [50, "Beat half", "men your age"],
+  ])("says the age audience once for saved and new %s-percent medals", (percentile, title, detail) => {
+    const full = `${title}${percentile === 50 ? " of" : ""} ${detail}`;
+    for (const savedTitle of [title, full]) {
+      const awards = stored([{ key: "age", kind: "healthAge", measureId: "restingHeartRate", subjectMemberId: null,
+        on: "2026-11-05", data: { percentile, title: savedTitle, detail, page: "health", face: { delta: { icon: "age", text: "1 in 3" } } } }]);
+      expect(momentsView(awards, [])[0].title).toBe(full);
+      expect(medalView(awards[0], true)).toMatchObject({ title, detail });
+      expect(awards[0].data.title).toBe(savedTitle);
+    }
+  });
   it.each([
     ["landmark", "goal", "One World Trade Center", "1,776 pushups", "New York's tallest tower.", "One World Trade Center", "New York's tallest tower."],
     ["time", "held", "Women's plank record", "4 hr 30 min", "The longest plank ever held by a woman.", "Women's plank record", "The longest plank ever held by a woman."],

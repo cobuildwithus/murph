@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import { addDaysToIsoDate } from "@murphai/contracts";
-import { healthView, healthMetricView, type HealthMetricInput } from "../src/lib/game/progress/health-view";
+import { healthView, healthMetricView, savedHealthView, type HealthMetricInput } from "../src/lib/game/progress/health-view";
 import { healthMedalFace, healthSteps } from "../src/lib/game/progress/health";
 import { rankAge } from "../src/lib/game/progress/norms";
 
@@ -55,6 +55,23 @@ it.each([
 
 it.each([[1400, "+1,400"], [2000, "+2,000"], [12000, "+12k"]])("formats a %s Steps face through D20", (amount, text) => {
   expect(healthMedalFace("steps", amount, 6000 + amount)).toEqual({ delta: { icon: "steps", text } });
+});
+
+it.each([
+  ["restingHeartRate", 74, 72, 1, -1, "Down 2 bpm", "71 bpm"],
+  ["steps", 6000, 8000, 1000, 1, "Up 2,000 a day", "9,000 a day"],
+  ["sleep", 24600, 26400, 900, 1, "Up 30 min", "7h 35"],
+  ["vo2Max", 30, 32, 1, 1, "Up 2", "33"],
+] as const)("builds saved %s tiles and targets through the normal presenter", (id, baseline, value, step, direction, headline, detail) => {
+  const daily = metric.daily.map(point => ({ ...point, value }));
+  const wins = healthSteps({ metric: id, joinedOn, baseline, means: daily, profile, step, direction })
+    .map((award, index) => ({ ...award, id: `saved-${index}`, createdAt: new Date(`${today}T12:00:00Z`), seenAt: null }));
+  const input = { id, baseline, daily, step, direction, wins };
+  const normal = healthMetricView(input, joinedOn, today, profile);
+  const saved = savedHealthView(joinedOn, today, [{ ...input, daily: [] }]).metrics[0];
+  expect(saved).toMatchObject({ headline, wins: normal.wins, next: { ...normal.next, detail } });
+  expect(savedHealthView(joinedOn, today, [{ ...input, daily: [], wins: [] }]).metrics[0].headline).toBeNull();
+  expect(savedHealthView(joinedOn, today, [{ ...input, daily: [], baseline: null }]).metrics[0].next).toBeNull();
 });
 
 it.each(["restingHeartRate", "steps", "vo2Max"] as const)("uses the same age/sex table's median for %s", id => {

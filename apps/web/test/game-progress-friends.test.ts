@@ -30,6 +30,17 @@ it("a private friend has no rank, amount, line or gap", () => {
     { ...person("leo", "Leo", 1), daily: null }] })).toEqual([]);
 });
 
+it.each(["pushups.reps", "steps", "sleep"])("charts every ranked person for %s", id => {
+  const people = [person("sam", "Sam", 120), person("maya", "Maya", 110), person("leo", "Leo", 100),
+    person("ava", "Ava", 90, true), person("jordan", "Jordan", 80), person("priya", "Priya", 70)];
+  const result = friendsView({ people, measure: { ...measure, id }, pills: [], query: { measure: id, range: "month" },
+    today: "2026-11-16", shareAudience: [], incomplete: false, departureNotice: null });
+  expect(result.chart).toEqual(people.map(person => ({ memberId: person.memberId,
+    points: [["2026-11-01", person.daily![0].amount]] })));
+  expect(result.rows.map(row => row.rank)).toEqual([1, 2, 3, 4, 5, 6]);
+  expect(result.incomplete).toBe(false);
+});
+
 it.each(["steps", "sleep"])("never settles friend awards from %s", measureId => {
   expect(friendPasses({ measureId, people: [person("ava", "Ava", 900, true), person("leo", "Leo", 700)] })).toEqual([]);
 });
@@ -51,7 +62,7 @@ it("filters the drawer's dates without changing the all-time award input", () =>
   const result = friendsView({ people, measure, pills: [measure], query: { measure: measure.id, range: "week", with: "leo" },
     today: "2026-11-16", shareAudience: [], incomplete: false, departureNotice: null });
   expect(result.rows.map(row => [row.memberId, row.total?.value])).toEqual([["ava", 100], ["leo", 0]]);
-  expect(result.chart.map(row => row.memberId)).toEqual(["ava"]);
+  expect(result.chart).toEqual([{ memberId: "ava", points: [["2026-11-16", 100]] }, { memberId: "leo", points: [] }]);
   expect(friendPasses({ measureId: measure.id, people }).map(award => award.on)).toEqual(["2026-10-30", "2026-10-30"]);
 });
 
