@@ -1,0 +1,271 @@
+{
+  "pills": [
+    {
+      "id": "pushups.reps",
+      "label": "Pushups",
+      "icon": "pushups"
+    },
+    {
+      "id": "pullups.reps",
+      "label": "Pull-ups",
+      "icon": "pullups"
+    },
+    {
+      "id": "steps",
+      "label": "Steps",
+      "icon": "steps"
+    },
+    {
+      "id": "sleep",
+      "label": "Sleep",
+      "icon": "sleep"
+    }
+  ],
+  "pill": "steps",
+  "range": "month",
+  "rows": [
+    {
+      "memberId": "member-0-sam",
+      "firstName": "Sam",
+      "avatarUrl": null,
+      "me": false,
+      "rank": 1,
+      "total": {
+        "value": 142000,
+        "text": "142k",
+        "unit": "steps"
+      },
+      "private": false,
+      "invited": false,
+      "joinedOn": "2026-10-21"
+    },
+    {
+      "memberId": "member-1-maya",
+      "firstName": "Maya",
+      "avatarUrl": null,
+      "me": false,
+      "rank": 2,
+      "total": {
+        "value": 121000,
+        "text": "121k",
+        "unit": "steps"
+      },
+      "private": false,
+      "invited": false,
+      "joinedOn": "2026-10-21"
+    },
+    {
+      "memberId": "member-2-leo",
+      "firstName": "Leo",
+      "avatarUrl": null,
+      "me": false,
+      "rank": 3,
+      "total": {
+        "value": 108000,
+        "text": "108k",
+        "unit": "steps"
+      },
+      "private": false,
+      "invited": false,
+      "joinedOn": "2026-10-21"
+    },
+    {
+      "memberId": "member-3-ava",
+      "firstName": "Ava",
+      "avatarUrl": null,
+      "me": true,
+      "rank": 4,
+      "total": {
+        "value": 96000,
+        "text": "96k",
+        "unit": "steps"
+      },
+      "private": false,
+      "invited": false,
+      "joinedOn": "2026-10-21"
+    },
+    {
+      "memberId": "member-5-priya",
+      "firstName": "Priya",
+      "avatarUrl": null,
+      "me": false,
+      "rank": 5,
+      "total": {
+        "value": 41000,
+        "text": "41k",
+        "unit": "steps"
+      },
+      "private": false,
+      "invited": false,
+      "joinedOn": "2026-11-09"
+    },
+    {
+      "memberId": "member-4-jordan",
+      "firstName": "Jordan",
+      "avatarUrl": null,
+      "me": false,
+      "rank": null,
+      "total": null,
+      "private": true,
+      "invited": false,
+      "joinedOn": null
+    }
+  ],
+  "chart": [
+    {
+      "memberId": "member-0-sam",
+      "points": [
+        [
+          "2026-11-01",
+          0.0
+        ],
+        [
+          "2026-11-02",
+          20285.714
+        ],
+        [
+          "2026-11-04",
+          40571.429
+        ],
+        [
+          "2026-11-06",
+          60857.143
+        ],
+        [
+          "2026-11-08",
+          81142.857
+        ],
+        [
+          "2026-11-10",
+          101428.571
+        ],
+        [
+          "2026-11-12",
+          121714.286
+        ],
+        [
+          "2026-11-14",
+          142000.0
+        ]
+      ]
+    },
+    {
+      "memberId": "member-1-maya",
+      "points": [
+        [
+          "2026-11-01",
+          0.0
+        ],
+        [
+          "2026-11-02",
+          17285.714
+        ],
+        [
+          "2026-11-04",
+          34571.429
+        ],
+        [
+          "2026-11-06",
+          51857.143
+        ],
+        [
+          "2026-11-08",
+          69142.857
+        ],
+        [
+          "2026-11-10",
+          86428.571
+        ],
+        [
+          "2026-11-12",
+          103714.286
+        ],
+        [
+          "2026-11-14",
+          121000.0
+        ]
+      ]
+    },
+    {
+      "memberId": "member-2-leo",
+      "points": [
+        [
+          "2026-11-01",
+          0.0
+        ],
+        [
+          "2026-11-02",
+          15428.571
+        ],
+        [
+          "2026-11-04",
+          30857.143
+        ],
+        [
+          "2026-11-06",
+          46285.714
+        ],
+        [
+          "2026-11-08",
+          61714.286
+        ],
+        [
+          "2026-11-10",
+          77142.857
+        ],
+        [
+          "2026-11-12",
+          92571.429
+        ],
+        [
+          "2026-11-14",
+          108000.0
+        ]
+      ]
+    },
+    {
+      "memberId": "member-3-ava",
+      "points": [
+        [
+          "2026-11-01",
+          0.0
+        ],
+        [
+          "2026-11-02",
+          13714.286
+        ],
+        [
+          "2026-11-04",
+          27428.571
+        ],
+        [
+          "2026-11-06",
+          41142.857
+        ],
+        [
+          "2026-11-08",
+          54857.143
+        ],
+        [
+          "2026-11-10",
+          68571.429
+        ],
+        [
+          "2026-11-12",
+          82285.714
+        ],
+        [
+          "2026-11-14",
+          96000.0
+        ]
+      ]
+    }
+  ],
+  "next": {
+    "memberId": "member-2-leo",
+    "text": "12k to pass Leo"
+  },
+  "shareAsk": false,
+  "shareAudience": [],
+  "departureNotice": null
+}

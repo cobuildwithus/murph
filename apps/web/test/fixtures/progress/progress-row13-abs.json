@@ -1,0 +1,260 @@
+{
+  "joinedOn": "2026-10-21",
+  "today": "2026-11-14",
+  "incomplete": false,
+  "measures": [
+    {
+      "id": "abs.seconds",
+      "label": "Abs",
+      "noun": "of abs",
+      "icon": "abs",
+      "format": "duration",
+      "source": "games",
+      "pending": false,
+      "gameOn": true,
+      "needsPerDay": false,
+      "total": {
+        "value": 13800,
+        "text": "3h 50m",
+        "unit": "seconds"
+      },
+      "today": null,
+      "points": [
+        [
+          "2026-10-21",
+          0.0
+        ],
+        [
+          "2026-10-22",
+          1061.538
+        ],
+        [
+          "2026-10-24",
+          2123.077
+        ],
+        [
+          "2026-10-26",
+          3184.615
+        ],
+        [
+          "2026-10-28",
+          4246.154
+        ],
+        [
+          "2026-10-30",
+          5307.692
+        ],
+        [
+          "2026-11-01",
+          6369.231
+        ],
+        [
+          "2026-11-02",
+          7430.769
+        ],
+        [
+          "2026-11-04",
+          8492.308
+        ],
+        [
+          "2026-11-06",
+          9553.846
+        ],
+        [
+          "2026-11-08",
+          10615.385
+        ],
+        [
+          "2026-11-10",
+          11676.923
+        ],
+        [
+          "2026-11-12",
+          12738.462
+        ],
+        [
+          "2026-11-14",
+          13800.0
+        ]
+      ],
+      "projection": {
+        "value": 18000,
+        "label": "5h by Nov 22"
+      },
+      "ladder": {
+        "kind": "time",
+        "passed": [
+          {
+            "id": "whale-dive",
+            "name": "A whale's longest dive",
+            "drawing": "whale-dive",
+            "at": 13320,
+            "atText": "3 hr 42 min",
+            "blurb": "The longest dive by any mammal: a deep-diving whale, tracked in 2020.",
+            "where": null,
+            "on": "2026-11-14",
+            "toGo": null
+          },
+          {
+            "id": "concorde",
+            "name": "Concorde",
+            "drawing": "concorde",
+            "at": 10379,
+            "atText": "2 hr 53 min",
+            "blurb": "Fastest jet, New York to London",
+            "where": null,
+            "on": "2026-11-10",
+            "toGo": null
+          },
+          {
+            "id": "moonwalk",
+            "name": "The first moonwalk",
+            "drawing": "moonwalk",
+            "at": 9100,
+            "atText": "2 hr 31 min",
+            "blurb": "First walk on the Moon, 1969",
+            "where": null,
+            "on": "2026-11-08",
+            "toGo": null
+          },
+          {
+            "id": "marathon",
+            "name": "The marathon world record",
+            "drawing": "marathon",
+            "at": 7170,
+            "atText": "1 hr 59 min",
+            "blurb": "Fastest 26.2 miles ever run",
+            "where": null,
+            "on": "2026-11-03",
+            "toGo": null
+          },
+          {
+            "id": "gagarin",
+            "name": "Yuri Gagarin's flight",
+            "drawing": "gagarin",
+            "at": 6480,
+            "atText": "1 hr 48 min",
+            "blurb": "First person in space, 1961",
+            "where": null,
+            "on": "2026-11-02",
+            "toGo": null
+          },
+          {
+            "id": "iss-lap",
+            "name": "Space station lap",
+            "drawing": "iss-lap",
+            "at": 5574.0,
+            "atText": "1 hr 33 min",
+            "blurb": "How long the space station takes to circle the whole Earth once.",
+            "where": null,
+            "on": "2026-11-01",
+            "toGo": null
+          }
+        ],
+        "next": {
+          "id": "womens-plank",
+          "name": "Women's plank record",
+          "drawing": "womens-plank",
+          "at": 16211,
+          "atText": "4 hr 30 min",
+          "blurb": "The longest plank ever held by a woman, set in 2024 at age 58.",
+          "where": null,
+          "on": null,
+          "toGo": "40 min to go"
+        },
+        "goalPicked": false
+      },
+      "route": null,
+      "pics": []
+    }
+  ],
+  "streak": {
+    "current": 10,
+    "best": {
+      "count": 10,
+      "from": "2026-10-26",
+      "to": "2026-11-13"
+    },
+    "today": "pending",
+    "months": [
+      {
+        "month": "2026-11",
+        "days": "dddddddddddddtffffffffffffffff"
+      }
+    ],
+    "obligations": []
+  },
+  "medals": [
+    {
+      "id": "abs-whale",
+      "kind": "time",
+      "gold": true,
+      "face": {
+        "drawing": "whale-dive"
+      },
+      "title": "A whale's longest dive",
+      "detail": "3 hr 42 min",
+      "earnedOn": "2026-11-14",
+      "open": {
+        "page": "totals",
+        "measureId": "abs.seconds"
+      }
+    },
+    {
+      "id": "abs-3h",
+      "kind": "total",
+      "gold": false,
+      "face": {
+        "number": "3h"
+      },
+      "title": "3 hours",
+      "detail": "of abs",
+      "earnedOn": "2026-11-14",
+      "open": {
+        "page": "totals",
+        "measureId": "abs.seconds"
+      }
+    },
+    {
+      "id": "abs-streak",
+      "kind": "streak",
+      "gold": false,
+      "face": {
+        "streak": 10
+      },
+      "title": "10 days",
+      "detail": "your best run",
+      "earnedOn": "2026-11-14",
+      "open": {
+        "page": "streak",
+        "measureId": null
+      }
+    },
+    {
+      "id": "abs-hr",
+      "kind": "health",
+      "gold": false,
+      "face": {
+        "delta": {
+          "icon": "heart",
+          "text": "↓3"
+        }
+      },
+      "title": "Heart rate",
+      "detail": "down 3 bpm",
+      "earnedOn": "2026-11-14",
+      "open": {
+        "page": "health",
+        "measureId": "restingHeartRate"
+      }
+    }
+  ],
+  "shelf": [
+    "abs-whale",
+    "abs-3h",
+    "abs-streak",
+    "abs-hr"
+  ],
+  "moments": [],
+  "picCount": 0
+}

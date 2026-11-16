@@ -1,0 +1,240 @@
+{
+  "joinedOn": "2026-10-21",
+  "today": "2026-11-20",
+  "incomplete": false,
+  "measures": [
+    {
+      "id": "abs.seconds",
+      "label": "Abs",
+      "noun": "of abs",
+      "icon": "abs",
+      "format": "duration",
+      "source": "games",
+      "pending": false,
+      "gameOn": true,
+      "needsPerDay": false,
+      "total": {
+        "value": 16800,
+        "text": "4h 40m",
+        "unit": "seconds"
+      },
+      "today": null,
+      "points": [
+        [
+          "2026-10-21",
+          0.0
+        ],
+        [
+          "2026-10-23",
+          1292.308
+        ],
+        [
+          "2026-10-25",
+          2584.615
+        ],
+        [
+          "2026-10-27",
+          3876.923
+        ],
+        [
+          "2026-10-30",
+          5169.231
+        ],
+        [
+          "2026-11-01",
+          6461.538
+        ],
+        [
+          "2026-11-03",
+          7753.846
+        ],
+        [
+          "2026-11-06",
+          9046.154
+        ],
+        [
+          "2026-11-08",
+          10338.462
+        ],
+        [
+          "2026-11-10",
+          11630.769
+        ],
+        [
+          "2026-11-13",
+          12923.077
+        ],
+        [
+          "2026-11-15",
+          14215.385
+        ],
+        [
+          "2026-11-17",
+          15507.692
+        ],
+        [
+          "2026-11-20",
+          16800.0
+        ]
+      ],
+      "projection": {
+        "value": 18000,
+        "label": "5h by Nov 22"
+      },
+      "ladder": {
+        "kind": "time",
+        "passed": [
+          {
+            "id": "womens-plank",
+            "name": "Women's plank record",
+            "drawing": "womens-plank",
+            "at": 16211,
+            "atText": "4 hr 30 min",
+            "blurb": "The longest plank ever held by a woman, set in 2024 at age 58.",
+            "where": null,
+            "on": "2026-11-20",
+            "toGo": null
+          },
+          {
+            "id": "whale-dive",
+            "name": "A whale's longest dive",
+            "drawing": "whale-dive",
+            "at": 13320,
+            "atText": "3 hr 42 min",
+            "blurb": "The longest dive by any mammal: a deep-diving whale, tracked in 2020.",
+            "where": null,
+            "on": "2026-11-14",
+            "toGo": null
+          },
+          {
+            "id": "concorde",
+            "name": "Concorde",
+            "drawing": "concorde",
+            "at": 10379,
+            "atText": "2 hr 53 min",
+            "blurb": "Fastest jet, New York to London",
+            "where": null,
+            "on": "2026-11-10",
+            "toGo": null
+          },
+          {
+            "id": "moonwalk",
+            "name": "The first moonwalk",
+            "drawing": "moonwalk",
+            "at": 9100,
+            "atText": "2 hr 31 min",
+            "blurb": "First walk on the Moon, 1969",
+            "where": null,
+            "on": "2026-11-08",
+            "toGo": null
+          },
+          {
+            "id": "marathon",
+            "name": "The marathon world record",
+            "drawing": "marathon",
+            "at": 7170,
+            "atText": "1 hr 59 min",
+            "blurb": "Fastest 26.2 miles ever run",
+            "where": null,
+            "on": "2026-11-03",
+            "toGo": null
+          },
+          {
+            "id": "gagarin",
+            "name": "Yuri Gagarin's flight",
+            "drawing": "gagarin",
+            "at": 6480,
+            "atText": "1 hr 48 min",
+            "blurb": "First person in space, 1961",
+            "where": null,
+            "on": "2026-11-02",
+            "toGo": null
+          },
+          {
+            "id": "iss-lap",
+            "name": "Space station lap",
+            "drawing": "iss-lap",
+            "at": 5574.0,
+            "atText": "1 hr 33 min",
+            "blurb": "How long the space station takes to circle the whole Earth once.",
+            "where": null,
+            "on": "2026-11-01",
+            "toGo": null
+          }
+        ],
+        "next": {
+          "id": "glenn",
+          "name": "John Glenn's orbit",
+          "drawing": "glenn",
+          "at": 17723,
+          "atText": "4 hr 55 min",
+          "blurb": "The first American to circle the Earth, three times around, 1962.",
+          "where": null,
+          "on": null,
+          "toGo": "15 min to go"
+        },
+        "goalPicked": false
+      },
+      "route": null,
+      "pics": []
+    }
+  ],
+  "streak": {
+    "current": 11,
+    "best": {
+      "count": 11,
+      "from": "2026-10-26",
+      "to": "2026-11-13"
+    },
+    "today": "pending",
+    "months": [
+      {
+        "month": "2026-11",
+        "days": "dddddddddddddtffffffffffffffff"
+      }
+    ],
+    "obligations": []
+  },
+  "medals": [
+    {
+      "id": "abs-plank",
+      "kind": "time",
+      "gold": true,
+      "face": {
+        "drawing": "womens-plank"
+      },
+      "title": "Women's plank record",
+      "detail": "4 hr 30 min",
+      "earnedOn": "2026-11-20",
+      "open": {
+        "page": "totals",
+        "measureId": "abs.seconds"
+      }
+    }
+  ],
+  "shelf": [
+    "abs-plank"
+  ],
+  "moments": [
+    {
+      "id": "moment-held",
+      "kind": "held",
+      "medalIds": [
+        "abs-plank"
+      ],
+      "measureId": "abs.seconds",
+      "nextGoal": {
+        "id": "glenn",
+        "name": "John Glenn's orbit",
+        "drawing": "glenn",
+        "at": 17723,
+        "atText": "4 hr 55 min",
+        "blurb": "The first American to circle the Earth, three times around, 1962.",
+        "where": null,
+        "on": null,
+        "toGo": "15 min to go"
+      }
+    }
+  ],
+  "picCount": 0
+}

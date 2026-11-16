@@ -8,7 +8,7 @@ import { activeHostedPersonAccessWhere } from "../hosted-onboarding/member-acces
 import { approvedSnapshot, digest, reconcileTools, storedToolsSchema, approveTools } from "./catalog";
 import { ConnectionError } from "./errors";
 import { connectionUrl, guardedConnectionFetch } from "./guarded-fetch";
-import { completeConnectionAuthorization, ConnectionOAuthProvider, revocationEndpoint, type PendingAuthorization } from "./oauth";
+import { completeConnectionAuthorization, ConnectionOAuthProvider, revocationEndpoint, startOfferedAuthorization, type PendingAuthorization } from "./oauth";
 import { sealConnectionSecret, openConnectionSecret } from "./secrets";
 import { connectionWhere, nameConnection, projectConnection, readConnection, saveCatalog, type ConnectionRow } from "./store";
 import { describeConnection, listConnectionTools, readCredentials } from "./upstream";
@@ -63,6 +63,9 @@ async function discoverConnection(row: ConnectionRow, authority: SettingsMutatio
       });
     },
   });
+  const signIn = (url: URL) => ({ next: "sign_in" as const, connectionId: row.id, authorizationUrl: url.href, authorizationHost: url.host });
+  // A server that offers sign-in gets it up front, so its tools for the member's own account work.
+  if (await startOfferedAuthorization(provider) && provider.authorizationUrl) return signIn(provider.authorizationUrl);
   try {
     const { tools, serverName } = await describeConnection(row, provider);
     const saved = await settingsMutation(authority, async (tx) => {
@@ -71,8 +74,7 @@ async function discoverConnection(row: ConnectionRow, authority: SettingsMutatio
     });
     return { next: "choose" as const, connection: projectConnection(saved) };
   } catch (error) {
-    if (provider.authorizationUrl) return { next: "sign_in" as const, connectionId: row.id,
-      authorizationUrl: provider.authorizationUrl.href, authorizationHost: provider.authorizationUrl.host };
+    if (provider.authorizationUrl) return signIn(provider.authorizationUrl);
     throw error;
   }
 }

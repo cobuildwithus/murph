@@ -257,7 +257,7 @@ export function SectionsContent({
         <>
           <Separator />
 
-          <StudySection title="Services Murph can use: add, sign in, choose, manage">
+          <StudySection title="MCP servers Murph can use: add, sign in, choose, manage">
             <CustomConnectionsStudy />
           </StudySection>
 

@@ -1,0 +1,198 @@
+{
+  "joinedOn": "2026-10-21",
+  "today": "2026-11-14",
+  "incomplete": false,
+  "measures": [
+    {
+      "id": "burpees.reps",
+      "label": "Burpees",
+      "noun": "burpees",
+      "icon": "dumbbell",
+      "format": "count",
+      "source": "games",
+      "pending": false,
+      "gameOn": true,
+      "needsPerDay": false,
+      "total": {
+        "value": 640,
+        "text": "640",
+        "unit": "reps"
+      },
+      "today": null,
+      "points": [
+        [
+          "2026-10-21",
+          0.0
+        ],
+        [
+          "2026-10-22",
+          49.231
+        ],
+        [
+          "2026-10-24",
+          98.462
+        ],
+        [
+          "2026-10-26",
+          147.692
+        ],
+        [
+          "2026-10-28",
+          196.923
+        ],
+        [
+          "2026-10-30",
+          246.154
+        ],
+        [
+          "2026-11-01",
+          295.385
+        ],
+        [
+          "2026-11-02",
+          344.615
+        ],
+        [
+          "2026-11-04",
+          393.846
+        ],
+        [
+          "2026-11-06",
+          443.077
+        ],
+        [
+          "2026-11-08",
+          492.308
+        ],
+        [
+          "2026-11-10",
+          541.538
+        ],
+        [
+          "2026-11-12",
+          590.769
+        ],
+        [
+          "2026-11-14",
+          640.0
+        ]
+      ],
+      "projection": {
+        "value": 1000,
+        "label": "1,000 by Nov 27"
+      },
+      "ladder": {
+        "kind": "height",
+        "passed": [
+          {
+            "id": "gateway-arch",
+            "name": "Gateway Arch",
+            "drawing": "gateway-arch",
+            "at": 630,
+            "atText": "630 ft",
+            "blurb": "St. Louis's shiny steel arch, the tallest arch in the world, finished in 1965.",
+            "where": "St. Louis, Missouri, USA",
+            "on": "2026-11-14",
+            "toGo": null
+          },
+          {
+            "id": "space-needle",
+            "name": "Space Needle",
+            "drawing": "space-needle",
+            "at": 605,
+            "atText": "605 ft",
+            "blurb": "Seattle's flying-saucer-topped tower, built for the 1962 World's Fair.",
+            "where": "Seattle, USA",
+            "on": "2026-11-12",
+            "toGo": null
+          },
+          {
+            "id": "washington-monument",
+            "name": "Washington Monument",
+            "drawing": "washington-monument",
+            "at": 555,
+            "atText": "555 ft",
+            "blurb": "Washington, D.C.'s marble obelisk, the world's tallest structure until the Eiffel Tower.",
+            "where": "Washington, D.C., USA",
+            "on": "2026-11-08",
+            "toGo": null
+          },
+          {
+            "id": "great-pyramid-of-giza",
+            "name": "Great Pyramid of Giza",
+            "drawing": "great-pyramid-of-giza",
+            "at": 454,
+            "atText": "454 ft",
+            "blurb": "The oldest of the Seven Wonders and the only one still standing, about 4,500 years old.",
+            "where": "Giza, Egypt",
+            "on": "2026-11-03",
+            "toGo": null
+          },
+          {
+            "id": "statue-of-liberty",
+            "name": "Statue of Liberty",
+            "drawing": "statue-of-liberty",
+            "at": 305,
+            "atText": "305 ft",
+            "blurb": "The copper statue France gave the US, holding her torch in New York Harbor since 1886.",
+            "where": "New York City, USA",
+            "on": "2026-10-26",
+            "toGo": null
+          }
+        ],
+        "next": {
+          "id": "golden-gate-bridge-towers",
+          "name": "Golden Gate Bridge",
+          "drawing": "golden-gate-bridge-towers",
+          "at": 746,
+          "atText": "746 ft",
+          "blurb": "The towers of San Francisco's orange suspension bridge, opened in 1937.",
+          "where": "San Francisco, USA",
+          "on": null,
+          "toGo": "106 to go"
+        },
+        "goalPicked": false
+      },
+      "route": null,
+      "pics": []
+    }
+  ],
+  "streak": {
+    "current": 11,
+    "best": {
+      "count": 11,
+      "from": "2026-10-26",
+      "to": "2026-11-13"
+    },
+    "today": "pending",
+    "months": [
+      {
+        "month": "2026-11",
+        "days": "dddddddddddddtffffffffffffffff"
+      }
+    ],
+    "obligations": []
+  },
+  "medals": [
+    {
+      "id": "burpees500",
+      "kind": "total",
+      "gold": true,
+      "face": {
+        "number": "500"
+      },
+      "title": "500",
+      "detail": "burpees",
+      "earnedOn": "2026-11-14",
+      "open": {
+        "page": "totals",
+        "measureId": "burpees.reps"
+      }
+    }
+  ],
+  "shelf": [
+    "burpees500"
+  ],
+  "moments": [],
+  "picCount": 0
+}

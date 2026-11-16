@@ -867,3 +867,83 @@ test("a coverage generation bump re-reads older summaries once, in place, and re
     await rm(vaultRoot, { recursive: true, force: true });
   }
 });
+
+// Before sessions were keyed on their id, a night's stage minutes were keyed
+// on its window, so every summary a source sent for that window wrote one
+// record. A source can send two summaries for one night under different
+// session ids. The re-read now names both sessions against that one record.
+test("a re-read finishes when a source sends two sessions for a window the vault holds as one", async () => {
+  const vaultRoot = await makeTempDirectory("murph-junction-history-shared-window");
+  const coreRuntime = await import("@murphai/core");
+  await initializeVault({ vaultRoot });
+  const night = onHistoryDay(SUMMARY_FIXTURES.sleep!.record, 3);
+  const { id: _id, ...nightWithoutSession } = night;
+  let sleeps: Record<string, unknown>[] = [nightWithoutSession];
+  const provider = createJunctionProvider(async (request) => {
+    const url = new URL(readUrl(request));
+    if (url.pathname.includes("/user/providers/")) {
+      return createJsonResponse({ providers: [{
+        id: "synthetic-provider", name: "Garmin", slug: "garmin", status: "connected",
+        resource_availability: {},
+      }] });
+    }
+    if (url.pathname.startsWith("/v2/summary/sleep/")) {
+      const start = url.searchParams.get("start_date")!.slice(0, 10);
+      const end = url.searchParams.get("end_date")!.slice(0, 10);
+      return createJsonResponse({
+        sleep: historyDate(3) >= start && historyDate(3) <= end ? sleeps : [],
+      });
+    }
+    throw new Error(`Unexpected request: ${url.pathname}`);
+  }, { summaryBackfillDays: 13, summaryResources: ["sleep"], timeseriesResources: [] });
+  const settled = {
+    junctionHistoricalBackfillStatus: "coverage_v3_complete",
+    junctionHistoricalBackfillWindowStart: HISTORY_WINDOW.windowStart,
+    junctionHistoricalBackfillWindowEnd: HISTORY_WINDOW.windowEnd,
+  };
+  const runReread = async () => {
+    const [job] = provider.jobExecutor!.createScheduledJobs!(
+      createStoredAccount({ connectedAt: HISTORY_CONNECTED_AT, metadata: settled }),
+      HISTORY_NOW,
+    ).jobs.filter((candidate) => candidate.kind === "backfill");
+    assert.ok(job, "a settled window under an older generation is re-read");
+    return await executeJunctionJob(provider, createJunctionJobContext({
+      account: createAccount({ connectedAt: HISTORY_CONNECTED_AT, metadata: settled }),
+      now: HISTORY_NOW,
+      vaultTimeZone: VAULT_TIME_ZONE,
+      importSnapshot: async (snapshot) => {
+        await importDeviceProviderSnapshot({
+          vaultRoot, provider: "junction", snapshot: JSON.parse(JSON.stringify(snapshot)),
+        }, { corePort: coreRuntime });
+        return { imported: true };
+      },
+    }), createJobFromInput(job));
+  };
+  const readDeepSleep = async () => (await readJsonlRecords({
+    vaultRoot, relativePath: "ledger/events/2026/2026-04.jsonl",
+  }) as Array<{ externalRef?: { resourceId?: string }; id?: string; metric?: string; value?: number }>)
+    .filter((event) => event.metric === "sleep-deep-minutes");
+
+  try {
+    // What the vault holds for the night from before the change.
+    await runReread();
+    const [stored] = await readDeepSleep();
+    assert.ok(stored?.externalRef?.resourceId?.startsWith("sleep-stage-"));
+
+    sleeps = [night, { ...night, id: "22222222-2222-4222-8222-2222222222ff", deep: 5400 }];
+    const reread = await runReread();
+    assert.equal(reread.metadataPatch?.junctionHistoricalBackfillStatus, "coverage_v4_complete");
+
+    // One session takes the stored record over; the other starts its own.
+    const latest = new Map((await readDeepSleep()).map((event) => [event.id, event]));
+    assert.deepEqual(
+      [...latest.values()].map((event) => [event.id === stored.id, event.value]).sort(),
+      [[false, 90], [true, 100]],
+    );
+    for (const event of latest.values()) {
+      assert.ok(event.externalRef?.resourceId?.startsWith("sleep-session-"));
+    }
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});

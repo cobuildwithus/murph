@@ -70,6 +70,7 @@ import {
   experimentProgressSnapshotSchema,
   getNutritionCardGoalStatus,
   goalMetricTargetSchema,
+  MURPH_PRODUCT_ORIGIN,
   parseCalendarEventPayload,
   regimenFrontmatterSchema,
   toLocalDayKey,
@@ -47553,6 +47554,56 @@ describeRealCodex('custom connection native tool journey', () => {
       await fixture.close()
     }
   }, 240_000)
+
+  it('MCP servers live name the connected server and link the connections page', async () => {
+    const { startCustomConnectionsGateway } = await import('./support/custom-connections-gateway.js')
+    const gateway = await startCustomConnectionsGateway()
+    onTestFinished(() => gateway.close())
+    const entry = { id: 'cc_notes', slug: 'notes', generation: 3, catalog: 'a'.repeat(43) }
+    gateway.state.connection = entry
+    const config = await resolveRealCodexE2eConfig()
+    onTestFinished(() => removeRealCodexTemporaryPaths(config.temporaryPaths))
+    const catalogRoot = await mkdtemp(path.join(tmpdir(), 'murph-connections-catalog-'))
+    onTestFinished(() => removeRealCodexTemporaryPaths([catalogRoot]))
+    const codexCommand = normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+      ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../node_modules/.bin/codex')
+    config.env[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV] = await writeHostedOpenAiMixedModeModelCatalogJson({ codexCommand, directory: catalogRoot })
+    const fixture = await createCanonicalLiveFixture(config, 'linq', { capabilities: 'production-hosted' })
+    const settingsLink = `${MURPH_PRODUCT_ORIGIN}/settings/connections`
+    const nativeExecute = clinicalExtractionCodex.executeCodexAppServerTurn
+    const observer = vi.spyOn(clinicalExtractionCodex, 'executeCodexAppServerTurn').mockImplementation(async input => {
+      expect(input.developerInstructions).toContain(settingsLink)
+      const mounts = input.threadConfig?.mcp_servers as Record<string, { url: string }> | undefined
+      // Preserve the production-built config, changing only virtual-host routing for the local fake Web.
+      // A local ChatGPT login also mounts the developer's own app connectors as MCP tools, and one of
+      // them can be named Notes; production's provider-key runner never has them, so they stay off.
+      return nativeExecute({ ...input, threadConfig: { ...input.threadConfig, 'features.apps': false, mcp_servers: {
+        ...mounts, notes: { ...mounts!.notes, url: mounts!.notes!.url.replace('http://connections.worker', gateway.origin) },
+      } } })
+    })
+    const executionContext = { hosted: { memberId: 'synthetic-member', userEnvKeys: [], customConnections: { readManifest: async () => [entry] } } }
+    try {
+      const before = await listCanonicalWriteEvidence(fixture.vault)
+      const listed = await fixture.message('What MCP servers do you have?', { executionContext })
+      expect(listed.response).toMatch(/notes/iu)
+      // Murph's own tools are never presented as an MCP server, and namespaces stay internal.
+      expect(listed.response).not.toMatch(/mcp__|(?<![A-Za-z])murph(?![A-Za-z])/u)
+      expect(listed.response).not.toMatch(/\bMurph(?:['’]s)?(?:\s+(?:own|built-in|itself|is|as|an?|the))*\s+MCP\b/iu)
+      const serverLink = 'https://mcp.recipes.example/mcp'
+      const connect = await fixture.message(`Can you add my recipes MCP server too? Its link is ${serverLink}`, {
+        executionContext, sessionId: listed.session.sessionId,
+      })
+      const sent = connect.response.match(/https:\/\/\S+/gu)?.find(link => link.startsWith(`${settingsLink}?`))?.replace(/[.,)]+$/u, '')
+      expect(sent, connect.response).toBeDefined()
+      expect(new URL(sent!).searchParams.get('url')).toBe(serverLink)
+      expect(connect.response).not.toMatch(/I(?:'|’)?(?:ve| have) (?:connected|added)|(?:is|it(?:'|’)s) now (?:connected|added)/iu)
+      expect(await listCanonicalWriteEvidence(fixture.vault)).toEqual(before)
+      process.stdout.write(`[mcp-servers-live] ${JSON.stringify({ listed: listed.response, connect: connect.response })}\n`)
+    } finally {
+      observer.mockRestore()
+      await fixture.close()
+    }
+  }, 300_000)
 })
 
 describeRealCodex('production reaction routing turn journey', () => {

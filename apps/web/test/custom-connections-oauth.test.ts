@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { auth, type OAuthDiscoveryState } from "@modelcontextprotocol/client";
-import { ConnectionOAuthProvider, completeConnectionAuthorization, validateDiscovery, type PendingAuthorization } from "../src/lib/custom-connections/oauth";
+import { ConnectionOAuthProvider, completeConnectionAuthorization, startOfferedAuthorization, validateDiscovery, type PendingAuthorization } from "../src/lib/custom-connections/oauth";
 
 vi.mock("node:dns/promises", () => ({ lookup: async () => [{ address: "8.8.8.8", family: 4 }] }));
 
@@ -42,6 +42,27 @@ describe("SDK-backed connection OAuth", () => {
     expect(await completeConnectionAuthorization(callback, "synthetic-code", issuer)).toBe("AUTHORIZED");
     expect(callbackFetch.mock.calls.map(([url]) => String(url))).toEqual([`${issuer}/token`]);
     expect(save).toHaveBeenCalledTimes(1);
+  });
+  it("signs in up front when a server that also answers without sign-in publishes resource metadata", async () => {
+    let pending: PendingAuthorization | undefined;
+    const provider = new ConnectionOAuthProvider("cc_synthetic", resource, { fetch: fakeFetch(discovery()), redirect: async (_state, value) => { pending = value; } });
+    expect(await startOfferedAuthorization(provider)).toBe(true);
+    expect(provider.authorizationUrl?.origin).toBe(issuer);
+    expect(pending?.verifier).toBeTruthy();
+  });
+  it.each([
+    ["publishes no resource metadata", (state: OAuthDiscoveryState) => { state.resourceMetadata = undefined; }],
+    ["can't identify itself in the sign-in response", (state: OAuthDiscoveryState) => { state.authorizationServerMetadata!.authorization_response_iss_parameter_supported = false; }],
+    ["describes a different resource", (state: OAuthDiscoveryState) => { state.resourceMetadata!.resource = "https://notes.example.com/api"; }],
+  ])("connects without sign-in when the server %s", async (_case, change) => {
+    const state = discovery(); change(state);
+    const fetch = vi.fn(async (url: string | URL, init?: RequestInit) => (
+      String(url).includes("oauth-protected-resource") && !state.resourceMetadata ? new Response(null, { status: 404 }) : fakeFetch(state)(url, init)
+    ));
+    const redirect = vi.fn();
+    const provider = new ConnectionOAuthProvider("cc_synthetic", resource, { fetch, redirect });
+    expect(await startOfferedAuthorization(provider)).toBe(false);
+    expect(redirect).not.toHaveBeenCalled();
   });
   it.each([undefined, "https://other.example.com"])("rejects missing or wrong response issuer %s before token exchange", async (iss) => {
     const fetch = fakeFetch(discovery());

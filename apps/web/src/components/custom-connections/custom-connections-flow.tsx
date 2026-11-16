@@ -22,11 +22,13 @@ export type { CustomConnectionsStep } from "./custom-connections-screens";
 export interface CustomConnectionsFlowProps {
   /** A fixed screen with sample data, for the design page. Nothing is loaded or saved. */
   fixture?: { connections: CustomConnection[]; draft?: Record<string, boolean>; step: CustomConnectionsStep };
+  /** An MCP link from the page address, shown ready to continue. */
+  prefill?: string | null;
   /** Set when sign-in sends the member back here. */
   returned?: { connectionId: string | null; error: string | null; step: string | null };
 }
 
-const CHANGED_SINCE_OPENED = "This service changed since you opened it. Look it over again.";
+const CHANGED_SINCE_OPENED = "This MCP server changed since you opened it. Look it over again.";
 
 function errorCode(error: unknown): string | null {
   return error instanceof HostedOnboardingApiError ? error.code ?? null : null;
@@ -66,7 +68,7 @@ function startingDraft(fixture: CustomConnectionsFlowProps["fixture"]): Record<s
 }
 
 /** Every screen for adding and looking after the services Murph can use. */
-export function CustomConnectionsFlow({ fixture, returned }: CustomConnectionsFlowProps) {
+export function CustomConnectionsFlow({ fixture, prefill = null, returned }: CustomConnectionsFlowProps) {
   const [step, setStep] = useState<CustomConnectionsStep>(fixture?.step ?? { kind: "loading" });
   const [connections, setConnections] = useState<CustomConnection[]>(fixture?.connections ?? []);
   const [draft, setDraft] = useState<Record<string, boolean>>(() => startingDraft(fixture));
@@ -111,6 +113,7 @@ export function CustomConnectionsFlow({ fixture, returned }: CustomConnectionsFl
         const back = loaded.find((item) => item.id === returnedConnectionId);
         if (returnedError) go({ code: returnedError, kind: "failed" });
         else if (back && returnedStep === "choose") openChoose(back, "new");
+        else if (prefill) go({ error: null, kind: "add", url: prefill });
         else go(home(loaded));
       })
       .catch((error: unknown) => {
@@ -119,7 +122,7 @@ export function CustomConnectionsFlow({ fixture, returned }: CustomConnectionsFl
     return () => {
       cancelled = true;
     };
-  }, [fixture, go, home, openChoose, returnedConnectionId, returnedError, returnedStep]);
+  }, [fixture, go, home, openChoose, prefill, returnedConnectionId, returnedError, returnedStep]);
 
   // Screen readers and keyboards start each screen at its headline.
   useEffect(() => {

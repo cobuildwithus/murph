@@ -1,0 +1,402 @@
+{
+  "joinedOn": "2025-08-01",
+  "today": "2026-11-14",
+  "incomplete": false,
+  "measures": [
+    {
+      "id": "pushups.reps",
+      "label": "Pushups",
+      "noun": "pushups",
+      "icon": "pushups",
+      "format": "count",
+      "source": "games",
+      "pending": false,
+      "gameOn": true,
+      "needsPerDay": false,
+      "total": {
+        "value": 31240,
+        "text": "31.2k",
+        "unit": "reps"
+      },
+      "today": {
+        "value": 100,
+        "text": "+100",
+        "unit": "reps"
+      },
+      "points": [
+        [
+          "2025-08-01",
+          0.0
+        ],
+        [
+          "2025-08-08",
+          529.492
+        ],
+        [
+          "2025-08-16",
+          1058.983
+        ],
+        [
+          "2025-08-24",
+          1588.475
+        ],
+        [
+          "2025-09-01",
+          2117.966
+        ],
+        [
+          "2025-09-09",
+          2647.458
+        ],
+        [
+          "2025-09-17",
+          3176.949
+        ],
+        [
+          "2025-09-25",
+          3706.441
+        ],
+        [
+          "2025-10-03",
+          4235.932
+        ],
+        [
+          "2025-10-11",
+          4765.424
+        ],
+        [
+          "2025-10-19",
+          5294.915
+        ],
+        [
+          "2025-10-27",
+          5824.407
+        ],
+        [
+          "2025-11-04",
+          6353.898
+        ],
+        [
+          "2025-11-12",
+          6883.39
+        ],
+        [
+          "2025-11-20",
+          7412.881
+        ],
+        [
+          "2025-11-28",
+          7942.373
+        ],
+        [
+          "2025-12-06",
+          8471.864
+        ],
+        [
+          "2025-12-14",
+          9001.356
+        ],
+        [
+          "2025-12-22",
+          9530.847
+        ],
+        [
+          "2025-12-30",
+          10060.339
+        ],
+        [
+          "2026-01-07",
+          10589.831
+        ],
+        [
+          "2026-01-15",
+          11119.322
+        ],
+        [
+          "2026-01-23",
+          11648.814
+        ],
+        [
+          "2026-01-31",
+          12178.305
+        ],
+        [
+          "2026-02-08",
+          12707.797
+        ],
+        [
+          "2026-02-16",
+          13237.288
+        ],
+        [
+          "2026-02-24",
+          13766.78
+        ],
+        [
+          "2026-03-04",
+          14296.271
+        ],
+        [
+          "2026-03-12",
+          14825.763
+        ],
+        [
+          "2026-03-20",
+          15355.254
+        ],
+        [
+          "2026-03-27",
+          15884.746
+        ],
+        [
+          "2026-04-04",
+          16414.237
+        ],
+        [
+          "2026-04-12",
+          16943.729
+        ],
+        [
+          "2026-04-20",
+          17473.22
+        ],
+        [
+          "2026-04-28",
+          18002.712
+        ],
+        [
+          "2026-05-06",
+          18532.203
+        ],
+        [
+          "2026-05-14",
+          19061.695
+        ],
+        [
+          "2026-05-22",
+          19591.186
+        ],
+        [
+          "2026-05-30",
+          20120.678
+        ],
+        [
+          "2026-06-07",
+          20650.169
+        ],
+        [
+          "2026-06-15",
+          21179.661
+        ],
+        [
+          "2026-06-23",
+          21709.153
+        ],
+        [
+          "2026-07-01",
+          22238.644
+        ],
+        [
+          "2026-07-09",
+          22768.136
+        ],
+        [
+          "2026-07-17",
+          23297.627
+        ],
+        [
+          "2026-07-25",
+          23827.119
+        ],
+        [
+          "2026-08-02",
+          24356.61
+        ],
+        [
+          "2026-08-10",
+          24886.102
+        ],
+        [
+          "2026-08-18",
+          25415.593
+        ],
+        [
+          "2026-08-26",
+          25945.085
+        ],
+        [
+          "2026-09-03",
+          26474.576
+        ],
+        [
+          "2026-09-11",
+          27004.068
+        ],
+        [
+          "2026-09-19",
+          27533.559
+        ],
+        [
+          "2026-09-27",
+          28063.051
+        ],
+        [
+          "2026-10-05",
+          28592.542
+        ],
+        [
+          "2026-10-13",
+          29122.034
+        ],
+        [
+          "2026-10-21",
+          29651.525
+        ],
+        [
+          "2026-10-29",
+          30181.017
+        ],
+        [
+          "2026-11-06",
+          30710.508
+        ],
+        [
+          "2026-11-14",
+          31240.0
+        ]
+      ],
+      "projection": {
+        "value": 35000,
+        "label": "35k by Jan 28"
+      },
+      "ladder": {
+        "kind": "height",
+        "passed": [
+          {
+            "id": "mount-everest",
+            "name": "Mount Everest",
+            "drawing": "mount-everest",
+            "at": 29032,
+            "atText": "29,032 ft",
+            "blurb": "The highest mountain on Earth, first climbed by Edmund Hillary and Tenzing Norgay in 1953.",
+            "where": "Nepal / China",
+            "on": "2026-10-16",
+            "toGo": null
+          },
+          {
+            "id": "k2",
+            "name": "K2",
+            "drawing": "k2",
+            "at": 28251,
+            "atText": "28,251 ft",
+            "blurb": "The second highest mountain on Earth, in Pakistan, known as the \"Savage Mountain.\"",
+            "where": "Pakistan / China",
+            "on": "2026-10-06",
+            "toGo": null
+          },
+          {
+            "id": "denali",
+            "name": "Denali",
+            "drawing": "denali",
+            "at": 20310,
+            "atText": "20,310 ft",
+            "blurb": "The highest mountain in North America, in Alaska's Denali National Park.",
+            "where": "Alaska, USA",
+            "on": "2026-05-30",
+            "toGo": null
+          },
+          {
+            "id": "skydive",
+            "name": "A skydive",
+            "drawing": "skydive",
+            "at": 13000,
+            "atText": "13,000 ft",
+            "blurb": "A tandem skydive starts about two and a half miles above the ground.",
+            "where": "Drop zones everywhere",
+            "on": "2026-01-31",
+            "toGo": null
+          },
+          {
+            "id": "cumulus-clouds",
+            "name": "Puffy cumulus clouds",
+            "drawing": "cumulus-clouds",
+            "at": 6562,
+            "atText": "6,562 ft",
+            "blurb": "The puffy white fair-weather clouds that look like floating cotton balls.",
+            "where": "Overhead on a fair day",
+            "on": "2025-08-24",
+            "toGo": null
+          }
+        ],
+        "next": {
+          "id": "jet-cruising-altitude",
+          "name": "Where jets fly",
+          "drawing": "jet-cruising-altitude",
+          "at": 35000,
+          "atText": "35,000 ft",
+          "blurb": "The height where passenger jets usually cruise, about 6 to 7 miles up.",
+          "where": "Anywhere overhead",
+          "on": null,
+          "toGo": "3,760 to go"
+        },
+        "goalPicked": false
+      },
+      "route": null,
+      "pics": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "takenOn": "2026-10-24",
+          "at": 100
+        },
+        {
+          "id": "10000000-0000-4000-8000-000000000002",
+          "takenOn": "2026-11-02",
+          "at": 600
+        },
+        {
+          "id": "10000000-0000-4000-8000-000000000003",
+          "takenOn": "2026-11-12",
+          "at": 1300
+        }
+      ]
+    }
+  ],
+  "streak": {
+    "current": 11,
+    "best": {
+      "count": 11,
+      "from": "2026-10-26",
+      "to": "2026-11-13"
+    },
+    "today": "pending",
+    "months": [
+      {
+        "month": "2026-11",
+        "days": "dddddddddddddtffffffffffffffff"
+      }
+    ],
+    "obligations": []
+  },
+  "medals": [
+    {
+      "id": "push30k",
+      "kind": "total",
+      "gold": true,
+      "face": {
+        "number": "30K"
+      },
+      "title": "30,000",
+      "detail": "pushups",
+      "earnedOn": "2026-11-14",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    }
+  ],
+  "shelf": [
+    "push30k"
+  ],
+  "moments": [],
+  "picCount": 3
+}

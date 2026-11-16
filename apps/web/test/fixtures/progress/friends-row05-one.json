@@ -1,0 +1,138 @@
+{
+  "pills": [
+    {
+      "id": "pushups.reps",
+      "label": "Pushups",
+      "icon": "pushups"
+    },
+    {
+      "id": "pullups.reps",
+      "label": "Pull-ups",
+      "icon": "pullups"
+    },
+    {
+      "id": "steps",
+      "label": "Steps",
+      "icon": "steps"
+    },
+    {
+      "id": "sleep",
+      "label": "Sleep",
+      "icon": "sleep"
+    }
+  ],
+  "pill": "pushups.reps",
+  "range": "month",
+  "rows": [
+    {
+      "memberId": "member-0-ava",
+      "firstName": "Ava",
+      "avatarUrl": null,
+      "me": true,
+      "rank": 1,
+      "total": {
+        "value": 900,
+        "text": "900",
+        "unit": "reps"
+      },
+      "private": false,
+      "invited": false,
+      "joinedOn": "2026-10-21"
+    },
+    {
+      "memberId": "member-1-leo",
+      "firstName": "Leo",
+      "avatarUrl": null,
+      "me": false,
+      "rank": 2,
+      "total": {
+        "value": 700,
+        "text": "700",
+        "unit": "reps"
+      },
+      "private": false,
+      "invited": false,
+      "joinedOn": "2026-10-21"
+    }
+  ],
+  "chart": [
+    {
+      "memberId": "member-0-ava",
+      "points": [
+        [
+          "2026-11-01",
+          0.0
+        ],
+        [
+          "2026-11-02",
+          128.571
+        ],
+        [
+          "2026-11-04",
+          257.143
+        ],
+        [
+          "2026-11-06",
+          385.714
+        ],
+        [
+          "2026-11-08",
+          514.286
+        ],
+        [
+          "2026-11-10",
+          642.857
+        ],
+        [
+          "2026-11-12",
+          771.429
+        ],
+        [
+          "2026-11-14",
+          900.0
+        ]
+      ]
+    },
+    {
+      "memberId": "member-1-leo",
+      "points": [
+        [
+          "2026-11-01",
+          0.0
+        ],
+        [
+          "2026-11-02",
+          100.0
+        ],
+        [
+          "2026-11-04",
+          200.0
+        ],
+        [
+          "2026-11-06",
+          300.0
+        ],
+        [
+          "2026-11-08",
+          400.0
+        ],
+        [
+          "2026-11-10",
+          500.0
+        ],
+        [
+          "2026-11-12",
+          600.0
+        ],
+        [
+          "2026-11-14",
+          700.0
+        ]
+      ]
+    }
+  ],
+  "next": null,
+  "shareAsk": false,
+  "shareAudience": [],
+  "departureNotice": null
+}

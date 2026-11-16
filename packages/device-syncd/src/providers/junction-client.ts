@@ -1827,11 +1827,14 @@ export function parseJunctionHistoricalPullSnapshot(
       const pulledResources = pulled
         ? Object.entries(pulled).flatMap(([rawResource, rawStatistics]) => {
             const resource = normalizeJunctionProviderSlug(rawResource);
-            const statistics = readPlainObject(rawStatistics);
-            const status = normalizeString(statistics?.status)?.toLowerCase();
-            if (!resource || !statistics || !status) {
+            if (!resource) {
               return [];
             }
+            // A listed resource stays listed when its statistics are
+            // malformed, so coverage waits on it instead of reading it as
+            // a resource Junction never pulls.
+            const statistics = readPlainObject(rawStatistics) ?? {};
+            const status = normalizeString(statistics.status)?.toLowerCase() ?? "unknown";
 
             const rawDaysWithData = statistics.days_with_data ?? statistics.daysWithData;
             const daysWithData = typeof rawDaysWithData === "number"

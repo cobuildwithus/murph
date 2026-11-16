@@ -11885,3 +11885,136 @@ test("receipts with and without publication metadata authorize byte-stable exact
     assert.equal(await fs.readFile(path.join(vaultRoot, first.eventShardPaths[0]!), "utf8"), canonicalBytes);
   } finally { await fs.rm(vaultRoot, { recursive: true, force: true }); }
 });
+
+// Two incoming events that both name one stored legacy record. Only a sleep
+// window ref superseded by session refs resolves that; every other legacy ref
+// still refuses the import.
+function legacyClaimObservation(input: {
+  externalRef: Record<string, string>;
+  legacyExternalRefs?: Record<string, string>[];
+  normalizerVersion: string;
+  value: number;
+}) {
+  return {
+    kind: "observation" as const,
+    occurredAt: "2026-03-01T08:00:00.000Z",
+    recordedAt: "2026-03-01T08:00:00.000Z",
+    dayKey: "2026-03-01",
+    title: "Junction deep sleep",
+    externalRef: input.externalRef,
+    ...(input.legacyExternalRefs ? { legacyExternalRefs: input.legacyExternalRefs } : {}),
+    dataOrigin: {
+      version: 1 as const,
+      aggregatorProvider: "junction",
+      sourceProviderSlug: "garmin",
+      sourceType: "watch",
+      observedAtRaw: "2026-03-01T08:00:00.000Z",
+      timestampSemantics: "utc" as const,
+      normalizerVersion: input.normalizerVersion,
+    },
+    fields: {
+      metric: input.externalRef.facet!,
+      observationGrain: "summary" as const,
+      value: input.value,
+      unit: "minutes",
+    },
+  };
+}
+
+async function importLegacyClaims(input: {
+  legacy: Record<string, string>;
+  primaries: readonly [Record<string, string>, Record<string, string>];
+  normalizerVersion?: string;
+}) {
+  const vaultRoot = await makeTempDirectory("murph-device-import-legacy-claims");
+  await initializeVault({ vaultRoot, createdAt: "2026-03-01T00:00:00.000Z" });
+  const normalizerVersion = input.normalizerVersion ?? "junction-normalizer.v1";
+  const stored = await importDeviceBatch({
+    vaultRoot,
+    provider: "junction",
+    importedAt: "2026-03-01T09:00:00.000Z",
+    events: [legacyClaimObservation({ externalRef: input.legacy, normalizerVersion, value: 50 })],
+  });
+  const claims = {
+    vaultRoot,
+    provider: "junction",
+    importedAt: "2026-03-01T10:00:00.000Z",
+    events: input.primaries.map((externalRef, index) => legacyClaimObservation({
+      externalRef,
+      legacyExternalRefs: [input.legacy],
+      normalizerVersion,
+      value: index === 0 ? 60 : 50,
+    })),
+  };
+  return { claims, storedId: stored.events[0]!.id, vaultRoot };
+}
+
+test("importDeviceBatch refuses two claims on one legacy ref outside a superseded sleep window", async () => {
+  const ref = (resourceType: string, resourceId: string, facet: string) => ({
+    system: "junction", resourceType, resourceId, facet,
+  });
+  for (const [label, legacy, primaries] of [
+    [
+      "a non-sleep ref",
+      ref("junction-garmin-activity", "activity-old", "steps"),
+      [ref("junction-garmin-activity", "activity-a", "steps"), ref("junction-garmin-activity", "activity-b", "steps")],
+    ],
+    [
+      "a window ref under a non-session ref",
+      ref("junction-garmin-sleep", "sleep-stage-window", "sleep-deep-minutes"),
+      [ref("junction-garmin-sleep", "sleep-a", "sleep-deep-minutes"), ref("junction-garmin-sleep", "sleep-b", "sleep-deep-minutes")],
+    ],
+    [
+      "a session ref under a session ref",
+      ref("junction-garmin-sleep", "sleep-session-old", "sleep-deep-minutes"),
+      [ref("junction-garmin-sleep", "sleep-session-a", "sleep-deep-minutes"), ref("junction-garmin-sleep", "sleep-session-b", "sleep-deep-minutes")],
+    ],
+  ] as const) {
+    const { claims, vaultRoot } = await importLegacyClaims({ legacy, primaries });
+    try {
+      const before = await snapshotVaultFiles(vaultRoot);
+      await assert.rejects(
+        importDeviceBatch(claims),
+        (error: unknown) => error instanceof VaultError
+          && error.code === "EVENT_EXTERNAL_REF_ALIAS_CONFLICT"
+          && error.message.includes("matched multiple incoming device events"),
+        label,
+      );
+      assert.deepEqual(await snapshotVaultFiles(vaultRoot), before, label);
+    } finally {
+      await fs.rm(vaultRoot, { recursive: true, force: true });
+    }
+  }
+});
+
+test("importDeviceBatch hands a superseded sleep window record to the cycle session holding its values", async () => {
+  const window = {
+    system: "junction",
+    resourceType: "junction-garmin-sleep",
+    resourceId: "sleep-stage-window",
+    facet: "sleep-deep-minutes",
+  };
+  const sessionA = { ...window, resourceId: "sleep-session-a" };
+  const sessionB = { ...window, resourceId: "sleep-session-b" };
+  const { claims, storedId, vaultRoot } = await importLegacyClaims({
+    legacy: window,
+    primaries: [sessionA, sessionB],
+    normalizerVersion: "junction-sleep-stage-cycle-fallback.v1",
+  });
+  try {
+    const imported = await importDeviceBatch(claims);
+    const latest = collapseEventSpines((await Promise.all(imported.eventShardPaths.map((relativePath) =>
+      readJsonlRecords({ vaultRoot, relativePath })
+    ))).flat() as EventRecord[]);
+    assert.deepEqual(
+      latest.map((record) => [
+        record.id === storedId,
+        record.externalRef?.resourceId,
+        record.kind === "observation" ? record.value : null,
+      ]).sort(),
+      [[false, "sleep-session-a", 60], [true, "sleep-session-b", 50]],
+    );
+  } finally {
+    await fs.rm(vaultRoot, { recursive: true, force: true });
+  }
+});

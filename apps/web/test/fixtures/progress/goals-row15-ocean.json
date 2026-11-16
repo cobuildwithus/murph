@@ -1,0 +1,35 @@
+{
+  "tiles": [],
+  "match": null,
+  "suggestions": [
+    {
+      "id": "london-edinburgh",
+      "name": "London to Edinburgh",
+      "drawing": null,
+      "at": 648565.632,
+      "atText": "403 mi",
+      "blurb": "",
+      "where": null,
+      "on": null,
+      "toGo": null
+    },
+    {
+      "id": "new-york-boston",
+      "name": "New York to Boston",
+      "drawing": null,
+      "at": 344399.61600000004,
+      "atText": "214 mi",
+      "blurb": "",
+      "where": null,
+      "on": null,
+      "toGo": null
+    }
+  ],
+  "route": {
+    "from": "London",
+    "to": "New York",
+    "distanceText": "3,459 miles",
+    "straightLine": true,
+    "map": "/api/game/v1/progress/map?measure=walk.meters&w=700&h=400"
+  }
+}
