@@ -121,7 +121,7 @@
             "where": null,
             "on": "2026-11-10",
             "toGo": null,
-            "short": "Concorde",
+            "short": "Concorde's cruising altitude",
             "tagline": "Across the Atlantic at record speed"
           },
           {
@@ -147,7 +147,7 @@
             "where": null,
             "on": "2026-11-03",
             "toGo": null,
-            "short": "The marathon world record",
+            "short": "A marathon",
             "tagline": "A new mark for the marathon"
           },
           {
@@ -196,22 +196,6 @@
       "pics": []
     }
   ],
-  "streak": {
-    "current": 11,
-    "best": {
-      "count": 11,
-      "from": "2026-10-26",
-      "to": "2026-11-13"
-    },
-    "today": "pending",
-    "months": [
-      {
-        "month": "2026-11",
-        "days": "dddddddddddddtffffffffffffffff"
-      }
-    ],
-    "obligations": []
-  },
   "medals": [
     {
       "id": "abs-plank",

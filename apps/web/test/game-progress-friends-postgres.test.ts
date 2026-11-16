@@ -8,7 +8,8 @@ import { sealGameText } from "../src/lib/game/crypto";
 import { lockGamePair } from "../src/lib/game/blocks";
 import { friendsSchema } from "../src/lib/game/progress/contract";
 import { openProgress, progressLookup } from "../src/lib/game/progress/crypto";
-import { readAwards } from "../src/lib/game/progress/awards";
+import { readAwards, settleAwards } from "../src/lib/game/progress/awards";
+import { removeProgressStreakAwards } from "../scripts/migrations/remove-progress-streak-awards";
 import * as inference from "../src/lib/game/progress/infer";
 
 const mocks = vi.hoisted(() => ({ after: vi.fn(), auth: vi.fn() }));
@@ -97,6 +98,21 @@ afterAll(async () => {
 });
 
 describe.skipIf(!enabled)("Friends deferred inference with PostgreSQL", () => {
+  it("migrates only encrypted streak awards across page boundaries and is idempotent", async () => {
+    const ava = await member("Ava");
+    await settleAwards(ava, [
+      ...Array.from({ length: 105 }, (_, index) => ({ key: `streak:${index + 1}`, kind: "streak", measureId: null,
+        subjectMemberId: null, on: "2026-11-01", data: { value: index + 1, page: "streak", evaluator: 1 } })),
+      ...["total", "days", "landmark", "route", "health"].map(kind => ({ key: `keep:${kind}`, kind,
+        measureId: "synthetic", subjectMemberId: null, on: "2026-11-01", data: { value: 100, page: "totals", evaluator: 1 } })),
+    ], async () => {});
+    const kept = (await readAwards(ava)).filter(award => award.kind !== "streak");
+    expect(await removeProgressStreakAwards()).toBe(105);
+    expect(await readAwards(ava)).toEqual(kept);
+    expect(await removeProgressStreakAwards()).toBe(0);
+    expect(await readAwards(ava)).toEqual(kept);
+  });
+
   it.each([
     { task: "10 pushups", inferred: { name: "pushups", quantity: 10, unit: "reps" } as const, total: 60, points: [["2026-11-01", 50], ["2026-11-02", 60]] },
     { task: "Lights out by 11", inferred: { name: null, quantity: null, unit: "days" } as const, total: 40, points: [["2026-11-01", 40]] },
@@ -104,7 +120,9 @@ describe.skipIf(!enabled)("Friends deferred inference with PostgreSQL", () => {
     const { ava, leo } = await fixture(task), fetch = provider(inferred);
     const first = await readFriends();
     expect(first.status).toBe(200);
-    expect(friendsSchema.parse(await first.json())).toMatchObject({ incomplete: true, rows: [], chart: [], next: null });
+    const partial = friendsSchema.parse(await first.json());
+    expect(partial.incomplete).toBe(false);
+    expect(partial.rows.map(row => [row.memberId, row.total?.value])).toEqual([[ava, 120], [leo, 40]]);
     expect(await readAwards(ava)).toEqual([]);
     expect(fetch).not.toHaveBeenCalled();
     expect(mocks.after).toHaveBeenCalledTimes(1);
@@ -147,6 +165,27 @@ describe.skipIf(!enabled)("Friends deferred inference with PostgreSQL", () => {
       expect(await openProgress({ memberId, table: "game_progress_task_measure", rowId: lookup, field: "measure" }, row.measureEncrypted))
         .toEqual({ name: "pushups", quantity: 40, unit: "reps" });
     }
+  });
+
+  it("shows a photo-only friend immediately, then stores the read's inference under that friend", async () => {
+    const { ava, leo } = await fixture("10 pushups");
+    await db.gameEntry.deleteMany({ where: { memberId: leo, kind: "reps" } });
+    const fetch = provider({ name: "pushups", quantity: 10, unit: "reps" });
+    const first = friendsSchema.parse(await (await readFriends()).json());
+    expect(first.incomplete).toBe(false);
+    expect(first.rows.map(row => [row.memberId, row.total?.value])).toEqual([[ava, 120], [leo, 0]]);
+    expect(first.pills.map(pill => pill.id)).toContain("pushups.reps");
+    expect(await readAwards(ava)).toEqual([]);
+    await mocks.after.mock.calls[0][0]();
+    expect(fetch).toHaveBeenCalledTimes(2);
+    const lookup = progressLookup(leo, "task", ["10 pushups", "photo"]);
+    const row = await db.gameProgressTaskMeasure.findUniqueOrThrow({ where: { memberId_lookup: { memberId: leo, lookup } } });
+    expect(await openProgress({ memberId: leo, table: "game_progress_task_measure", rowId: lookup, field: "measure" }, row.measureEncrypted))
+      .toEqual({ name: "pushups", quantity: 10, unit: "reps" });
+    const second = friendsSchema.parse(await (await readFriends()).json());
+    expect(second.rows.map(row => [row.memberId, row.total?.value])).toEqual([[ava, 120], [leo, 20]]);
+    expect(JSON.stringify(second)).not.toContain("10 pushups");
+    expect(await db.gameProgressTaskMeasure.count({ where: { memberId: leo } })).toBe(1);
   });
 
   it.each(["departure", "block", "session"])("writes no cache when %s removes authority during classification", async loss => {

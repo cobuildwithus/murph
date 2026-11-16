@@ -80,7 +80,7 @@ describe("Progress HTTP contracts", () => {
   it.each([
     { distance: 501, total: 116, distanceText: "501 miles", detail: "By road. You're 116 in, so 385 to go.", straightLine: false },
     { distance: 8.4, total: 1.2, distanceText: "8.4 miles", detail: "By road. You're 1.2 in, so 7.2 to go.", straightLine: false },
-    { distance: 31240, total: 10000, distanceText: "31.2k miles", detail: "By road. You're 10k in, so 21.2k to go.", straightLine: false },
+    { distance: 31240, total: 10000, distanceText: "31,240 miles", detail: "By road. You're 10k in, so 21.2k to go.", straightLine: false },
     { distance: 10, total: 11, distanceText: "10 miles", detail: "By road. You're 11 in, so 0 to go.", straightLine: false },
     { distance: 3459, total: 116, distanceText: "3,459 miles", detail: "As the crow flies. No road crosses the ocean, so Murph counts the straight line.", straightLine: true },
   ])("previews $distance miles using the canonical $total-mile total", async ({ distance, total, distanceText, detail, straightLine }) => {
@@ -153,18 +153,18 @@ describe("Progress HTTP contracts", () => {
     expect(view.tiles.some(tile => ["to-the-moon", "5k"].includes(tile.id))).toBe(false);
     expect(mocks.patch).not.toHaveBeenCalled(); expect(mocks.suggest).not.toHaveBeenCalled();
   });
-  it("builds the before-game screen from an empty source without inventing pre-join streak days", async () => {
+  it("builds the before-game screen without retired streak fields", async () => {
     mocks.games.mockResolvedValue([]); mocks.entries.mockResolvedValue([]);
     expect(await (await GET(request())).json()).toEqual({ joinedOn: "2026-11-01", today: "2026-11-05", incomplete: false,
-      measures: [], medals: [], shelf: [], moments: [], picCount: 0,
-      streak: { current: 0, best: null, today: "none", obligations: [], months: [{ month: "2026-11", days: `....t${"f".repeat(25)}` }] } });
+      measures: [], medals: [], shelf: [], moments: [], picCount: 0 });
     expect(mocks.transaction).not.toHaveBeenCalled();
   });
   it("returns a private complete response and settles the same crossing only once", async () => {
+    mocks.entries.mockResolvedValue([{ ...entryRow(), payloadEncrypted: JSON.stringify({ exercise: "pushups", count: 100, reps: [] }) }]);
     const first = await GET(request());
     expect(first.status).toBe(200); expect(first.headers.get("Cache-Control")).toBe("private, no-store");
     const view = progressSchema.parse(await first.json());
-    expect(view.measures[0]).toMatchObject({ id: "pushups.reps", pending: false, total: { value: 40 } });
+    expect(view.measures[0]).toMatchObject({ id: "pushups.reps", pending: false, total: { value: 100 } });
     expect(mocks.after).not.toHaveBeenCalled();
     const original = structuredClone(awards);
     expect((await GET(request())).status).toBe(200);
@@ -172,6 +172,31 @@ describe("Progress HTTP contracts", () => {
     expect(mocks.current).toHaveBeenCalled();
     expect(mocks.games).toHaveBeenCalledWith(expect.objectContaining({ take: 501 }));
     expect(mocks.entries).toHaveBeenCalledWith(expect.objectContaining({ take: 10001, where: expect.objectContaining({ memberId }) }));
+  });
+  it("supplies each exercise's latest total medal and a next coin when no total medal is earned", async () => {
+    const planks = gameRow("game-planks");
+    planks.termsWordsEncrypted = JSON.stringify({ v: 1, versions: [{ n: 1, tasks: [{ seat: 0, text: "2 min planks" }], stakes: [] }] });
+    mocks.games.mockResolvedValue([gameRow(), planks]);
+    mocks.entries.mockResolvedValue([
+      { ...entryRow(), payloadEncrypted: JSON.stringify({ exercise: "pushups", count: 1000, reps: [] }) },
+      { ...entryRow(1), id: "burpees", payloadEncrypted: JSON.stringify({ exercise: "burpees", count: 40, reps: [] }) },
+      { ...entryRow(), id: "planks", gameId: planks.id, kind: "photo", payloadEncrypted: null },
+    ]);
+    const lookup = progressLookup(memberId, "task", ["2 min planks", "photo"]);
+    mocks.tasks.mockResolvedValue([{ lookup, measureEncrypted: await sealProgress({ memberId,
+      table: "game_progress_task_measure", rowId: lookup, field: "measure" }, { quantity: 2, unit: "minutes", name: "planks" }) }]);
+    const view = progressSchema.parse(await (await GET(request())).json());
+    const totals = view.medals.filter(medal => medal.kind === "total");
+    expect(totals.filter(medal => medal.open.measureId === "pushups.reps").map(medal => medal.face))
+      .toEqual([{ number: "1,000" }, { number: "500" }, { number: "200" }, { number: "100" }]);
+    expect(totals.find(medal => medal.open.measureId === "planks.seconds")?.face).toEqual({ number: "2m" });
+    expect(totals.some(medal => medal.open.measureId === "burpees.reps")).toBe(false);
+    expect(view.measures.find(measure => measure.id === "burpees.reps")?.projection?.value).toBe(100);
+    expect(view.shelf.every(id => view.medals.some(medal => medal.id === id))).toBe(true);
+    expect(view.shelf).toContain(view.medals.find(medal => medal.gold)!.id);
+    expect(new Set(view.medals.map(medal => medal.id)).size).toBe(view.medals.length);
+    expect(view).not.toHaveProperty("streak");
+    expect(view.medals.some(medal => medal.kind === "streak")).toBe(false);
   });
   it.each(["games", "entries"])("marks %s overflow incomplete and makes no settling or inference writes", async cap => {
     if (cap === "games") mocks.games.mockResolvedValue(Array.from({ length: 501 }, (_, i) => gameRow(`game-${i}`)));
@@ -216,24 +241,11 @@ describe("Progress HTTP contracts", () => {
     expect(response.status).toBe(200);
     expect(progressSchema.parse(await response.json()).measures.map(measure => [measure.id, measure.total.value])).toEqual([["squats.reps", 20], ["abs.seconds", 600]]);
   });
-  it("shows today's obligation text until a future terms revision takes effect", async () => {
-    const row = gameRow();
-    row.terms.versions.push({ n: 2, fromDay: 5, schedule: { count: 7 }, stakes: [] });
-    row.termsWordsEncrypted = JSON.stringify({ v: 1, versions: [
-      { n: 1, tasks: [{ seat: 0, text: "40 pushups" }], stakes: [] },
-      { n: 2, tasks: [{ seat: 0, text: "20 squats" }], stakes: [] },
-    ] });
-    mocks.games.mockResolvedValue([row]);
-    const view = progressSchema.parse(await (await GET(request())).json());
-    expect(view.streak.obligations).toEqual([{ id: "game-one", label: "40 pushups", icon: "dumbbell", done: false }]);
-  });
   it("uses the terminal event in the game's shifted clock without dropping earlier history", async () => {
     const row = { ...gameRow(), status: "void", devClockOffsetMs: BigInt(86_400_000), events: [{ createdAt: new Date("2026-11-02T12:00:00Z") }] };
     mocks.games.mockResolvedValue([row]); mocks.entries.mockResolvedValue([entryRow(0), entryRow(2)]);
     const view = progressSchema.parse(await (await GET(request())).json());
     expect(view.measures[0].total.value).toBe(80);
-    expect(view.streak).toMatchObject({ current: 1, obligations: [], best: { count: 1 }, today: "none" });
-    expect(view.streak.months[0].days).toBe(`dmd.t${"f".repeat(25)}`);
   });
   it("uses the departing peer's already-shifted time for a void group's surviving member", async () => {
     const row = { ...gameRow(), status: "void", maxPlayers: 10, devClockOffsetMs: BigInt(86_400_000) };
@@ -242,8 +254,6 @@ describe("Progress HTTP contracts", () => {
     mocks.entries.mockResolvedValue([entryRow(0), entryRow(2)]);
     const view = progressSchema.parse(await (await GET(request())).json());
     expect(view.measures[0].total.value).toBe(80);
-    expect(view.streak).toMatchObject({ current: 1, obligations: [], today: "none" });
-    expect(view.streak.months[0].days).toBe(`dmd.t${"f".repeat(25)}`);
   });
   it("schedules only unresolved untyped phrases after the response, with member and kind bound lookups", async () => {
     mocks.entries.mockResolvedValue([0, 1].map(day => ({ ...entryRow(day), kind: "photo", payloadEncrypted: null })));
@@ -258,11 +268,13 @@ describe("Progress HTTP contracts", () => {
     expect(lookup).not.toBe(createHash("sha256").update("40 pushups").digest("hex"));
   });
   it("denies a session revoked between read and settlement without writing", async () => {
+    mocks.entries.mockResolvedValue([{ ...entryRow(), payloadEncrypted: JSON.stringify({ exercise: "pushups", count: 100, reps: [] }) }]);
     mocks.current.mockRejectedValue(hostedOnboardingError({ code: "UNAUTHENTICATED", httpStatus: 401, message: "Sign in to continue." }));
     expect((await GET(request())).status).toBe(401);
     expect(mocks.createAwards).not.toHaveBeenCalled();
   });
   it("filters stored health medals and moments when current Postgres authority denies access", async () => {
+    mocks.entries.mockResolvedValue([{ ...entryRow(), payloadEncrypted: JSON.stringify({ exercise: "pushups", count: 100, reps: [] }) }]);
     const lookup = progressLookup(memberId, "award", ["health:one"]);
     const dataEncrypted = await sealProgress({ memberId, table: "game_progress_award", rowId: lookup, field: "data" }, {
       key: "health:one", kind: "health", measureId: "restingHeartRate", subjectMemberId: null, on: "2026-11-05",

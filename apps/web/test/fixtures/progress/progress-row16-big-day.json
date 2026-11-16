@@ -448,22 +448,6 @@
       "pics": []
     }
   ],
-  "streak": {
-    "current": 11,
-    "best": {
-      "count": 11,
-      "from": "2026-10-26",
-      "to": "2026-11-13"
-    },
-    "today": "pending",
-    "months": [
-      {
-        "month": "2026-11",
-        "days": "dddddddddddddtffffffffffffffff"
-      }
-    ],
-    "obligations": []
-  },
   "medals": [
     {
       "id": "big-ow",
@@ -513,28 +497,12 @@
         "page": "totals",
         "measureId": "pushups.reps"
       }
-    },
-    {
-      "id": "big-streak",
-      "kind": "streak",
-      "gold": false,
-      "face": {
-        "streak": 12
-      },
-      "title": "12 days in a row",
-      "detail": "Your best run yet.",
-      "earnedOn": "2026-11-14",
-      "open": {
-        "page": "streak",
-        "measureId": null
-      }
     }
   ],
   "shelf": [
     "big-ow",
     "big-leo",
-    "big-willis",
-    "big-streak"
+    "big-willis"
   ],
   "moments": [
     {
@@ -543,8 +511,7 @@
       "medalIds": [
         "big-ow",
         "big-leo",
-        "big-willis",
-        "big-streak"
+        "big-willis"
       ],
       "measureId": "pushups.reps",
       "nextGoal": {
@@ -560,8 +527,8 @@
         "short": "CN Tower",
         "tagline": "A tall view above the lake"
       },
-      "title": "Four wins in one post",
-      "line": "Your 80 pushups this morning did all this."
+      "title": "Three wins in one day",
+      "line": null
     }
   ],
   "picCount": 3

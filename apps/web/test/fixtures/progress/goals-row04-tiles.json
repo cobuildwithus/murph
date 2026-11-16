@@ -23,7 +23,7 @@
       "where": "Taipei",
       "on": null,
       "toGo": "267 to go",
-      "short": "Taipei tower",
+      "short": "Taipei 101",
       "tagline": "A stepped tower above the city"
     },
     {
@@ -70,7 +70,7 @@
       "name": "Mount Everest",
       "drawing": "mount-everest",
       "at": 29032,
-      "atText": "29k ft",
+      "atText": "29,032 ft",
       "blurb": "The highest mountain on Earth, first climbed by Edmund Hillary and Tenzing Norgay in 1953.",
       "where": "Nepal",
       "on": null,

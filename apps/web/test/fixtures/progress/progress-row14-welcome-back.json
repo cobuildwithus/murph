@@ -435,22 +435,6 @@
       "pics": []
     }
   ],
-  "streak": {
-    "current": 0,
-    "best": {
-      "count": 11,
-      "from": "2026-10-26",
-      "to": "2026-11-13"
-    },
-    "today": "none",
-    "months": [
-      {
-        "month": "2026-11",
-        "days": "dddddddddddddtffffffffffffffff"
-      }
-    ],
-    "obligations": []
-  },
   "medals": [
     {
       "id": "total-1000",
@@ -501,21 +485,6 @@
       }
     },
     {
-      "id": "streak-11",
-      "kind": "streak",
-      "gold": false,
-      "face": {
-        "streak": 11
-      },
-      "title": "11 days",
-      "detail": "your best run",
-      "earnedOn": "2026-11-09",
-      "open": {
-        "page": "streak",
-        "measureId": null
-      }
-    },
-    {
       "id": "friend-leo",
       "kind": "friend",
       "gold": false,
@@ -539,7 +508,6 @@
     "total-1000",
     "pull-golden",
     "hr-2",
-    "streak-11",
     "friend-leo"
   ],
   "moments": [],

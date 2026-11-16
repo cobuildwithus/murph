@@ -16,10 +16,15 @@ import { cumulativePoints, readGameSeries, type MeasureSeries } from "./series";
 import { patchMeasureState, type BeforeProgressMutation, type MeasureState } from "./state";
 import { readRouteGoals, routePlaces, setRouteGoal } from "./routes";
 
-export function roundValues(total: number, unit: MeasureSeries["unit"]): number[] {
+export function roundValues(total: number, { id, unit }: Pick<MeasureSeries, "id" | "unit">): number[] {
   const factor = unit === "seconds" ? 3600 : unit === "meters" ? 1609.344 : 1;
   const start = unit === "reps" || unit === "steps" ? 100 : unit === "days" ? 10 : 1;
   const values: number[] = [];
+  if (unit === "seconds" && id !== "sleep") for (const minutes of [1, 2, 5, 10, 15, 30]) {
+    const value = minutes * 60;
+    values.push(value);
+    if (value > total) return values;
+  }
   for (let base = start; ; base *= 10) {
     for (const multiple of [1, 2, 5]) {
       const value = base * multiple * factor;
@@ -31,7 +36,7 @@ export function roundValues(total: number, unit: MeasureSeries["unit"]): number[
 
 export function projection(measure: MeasureSeries, today: string, units: ClientUnits) {
   const total = measure.amounts.reduce((sum, day) => sum + day.amount, 0);
-  const next = roundValues(total, measure.unit).at(-1)!;
+  const next = roundValues(total, measure).at(-1)!;
   const recent = measure.amounts.filter(day => day.date >= addDays(today, -13) && day.date <= today).reduce((sum, day) => sum + day.amount, 0);
   if (!measure.gameOn || recent === 0) return { value: next, label: `${formatAmount(next, measure.unit, "compact", units).text} next`, on: null };
   const on = addDays(today, Math.ceil((next - total) / (recent / 14)));
