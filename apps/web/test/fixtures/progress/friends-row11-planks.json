@@ -1,0 +1,228 @@
+{
+  "pills": [
+    {
+      "id": "planks.seconds",
+      "label": "Planks",
+      "icon": "planks"
+    },
+    {
+      "id": "h0123456789ab.days",
+      "label": "Lights out",
+      "icon": "sleep"
+    }
+  ],
+  "pill": "planks.seconds",
+  "range": "month",
+  "rows": [
+    {
+      "memberId": "member-0-maya",
+      "firstName": "Maya",
+      "avatarUrl": null,
+      "me": false,
+      "rank": 1,
+      "total": {
+        "value": 11100,
+        "text": "3h 05m",
+        "unit": "seconds"
+      },
+      "private": false,
+      "invited": false,
+      "joinedOn": "2026-10-21"
+    },
+    {
+      "memberId": "member-1-ava",
+      "firstName": "Ava",
+      "avatarUrl": null,
+      "me": true,
+      "rank": 2,
+      "total": {
+        "value": 10200,
+        "text": "2h 50m",
+        "unit": "seconds"
+      },
+      "private": false,
+      "invited": false,
+      "joinedOn": "2026-10-21"
+    },
+    {
+      "memberId": "member-2-leo",
+      "firstName": "Leo",
+      "avatarUrl": null,
+      "me": false,
+      "rank": 3,
+      "total": {
+        "value": 9060,
+        "text": "2h 31m",
+        "unit": "seconds"
+      },
+      "private": false,
+      "invited": false,
+      "joinedOn": "2026-10-21"
+    },
+    {
+      "memberId": "member-3-sam",
+      "firstName": "Sam",
+      "avatarUrl": null,
+      "me": false,
+      "rank": 4,
+      "total": {
+        "value": 7080,
+        "text": "1h 58m",
+        "unit": "seconds"
+      },
+      "private": false,
+      "invited": false,
+      "joinedOn": "2026-10-21"
+    },
+    {
+      "memberId": "member-4-jordan",
+      "firstName": "Jordan",
+      "avatarUrl": null,
+      "me": false,
+      "rank": 5,
+      "total": {
+        "value": 4920,
+        "text": "1h 22m",
+        "unit": "seconds"
+      },
+      "private": false,
+      "invited": false,
+      "joinedOn": "2026-10-21"
+    },
+    {
+      "memberId": "member-5-priya",
+      "firstName": "Priya",
+      "avatarUrl": null,
+      "me": false,
+      "rank": 6,
+      "total": {
+        "value": 2460,
+        "text": "41m",
+        "unit": "seconds"
+      },
+      "private": false,
+      "invited": false,
+      "joinedOn": "2026-11-09"
+    }
+  ],
+  "chart": [
+    {
+      "memberId": "member-0-maya",
+      "points": [
+        [
+          "2026-11-01",
+          0.0
+        ],
+        [
+          "2026-11-02",
+          1585.714
+        ],
+        [
+          "2026-11-04",
+          3171.429
+        ],
+        [
+          "2026-11-06",
+          4757.143
+        ],
+        [
+          "2026-11-08",
+          6342.857
+        ],
+        [
+          "2026-11-10",
+          7928.571
+        ],
+        [
+          "2026-11-12",
+          9514.286
+        ],
+        [
+          "2026-11-14",
+          11100.0
+        ]
+      ]
+    },
+    {
+      "memberId": "member-1-ava",
+      "points": [
+        [
+          "2026-11-01",
+          0.0
+        ],
+        [
+          "2026-11-02",
+          1457.143
+        ],
+        [
+          "2026-11-04",
+          2914.286
+        ],
+        [
+          "2026-11-06",
+          4371.429
+        ],
+        [
+          "2026-11-08",
+          5828.571
+        ],
+        [
+          "2026-11-10",
+          7285.714
+        ],
+        [
+          "2026-11-12",
+          8742.857
+        ],
+        [
+          "2026-11-14",
+          10200.0
+        ]
+      ]
+    },
+    {
+      "memberId": "member-2-leo",
+      "points": [
+        [
+          "2026-11-01",
+          0.0
+        ],
+        [
+          "2026-11-02",
+          1294.286
+        ],
+        [
+          "2026-11-04",
+          2588.571
+        ],
+        [
+          "2026-11-06",
+          3882.857
+        ],
+        [
+          "2026-11-08",
+          5177.143
+        ],
+        [
+          "2026-11-10",
+          6471.429
+        ],
+        [
+          "2026-11-12",
+          7765.714
+        ],
+        [
+          "2026-11-14",
+          9060.0
+        ]
+      ]
+    }
+  ],
+  "next": {
+    "memberId": "member-0-maya",
+    "text": "15 min to pass Maya"
+  },
+  "shareAsk": false,
+  "shareAudience": [],
+  "departureNotice": null
+}

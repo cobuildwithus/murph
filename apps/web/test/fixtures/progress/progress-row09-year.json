@@ -1,0 +1,3135 @@
+{
+  "joinedOn": "2025-10-21",
+  "today": "2026-11-14",
+  "incomplete": false,
+  "measures": [
+    {
+      "id": "pushups.reps",
+      "label": "Pushups",
+      "noun": "pushups",
+      "icon": "pushups",
+      "format": "count",
+      "source": "games",
+      "pending": false,
+      "gameOn": true,
+      "needsPerDay": false,
+      "total": {
+        "value": 18120,
+        "text": "18,120",
+        "unit": "reps"
+      },
+      "today": {
+        "value": 100,
+        "text": "+100",
+        "unit": "reps"
+      },
+      "points": [
+        [
+          "2025-10-21",
+          0.0
+        ],
+        [
+          "2025-10-28",
+          348.462
+        ],
+        [
+          "2025-11-04",
+          696.923
+        ],
+        [
+          "2025-11-12",
+          1045.385
+        ],
+        [
+          "2025-11-19",
+          1393.846
+        ],
+        [
+          "2025-11-27",
+          1742.308
+        ],
+        [
+          "2025-12-04",
+          2090.769
+        ],
+        [
+          "2025-12-12",
+          2439.231
+        ],
+        [
+          "2025-12-19",
+          2787.692
+        ],
+        [
+          "2025-12-27",
+          3136.154
+        ],
+        [
+          "2026-01-03",
+          3484.615
+        ],
+        [
+          "2026-01-11",
+          3833.077
+        ],
+        [
+          "2026-01-18",
+          4181.538
+        ],
+        [
+          "2026-01-26",
+          4530.0
+        ],
+        [
+          "2026-02-02",
+          4878.462
+        ],
+        [
+          "2026-02-10",
+          5226.923
+        ],
+        [
+          "2026-02-17",
+          5575.385
+        ],
+        [
+          "2026-02-25",
+          5923.846
+        ],
+        [
+          "2026-03-04",
+          6272.308
+        ],
+        [
+          "2026-03-12",
+          6620.769
+        ],
+        [
+          "2026-03-19",
+          6969.231
+        ],
+        [
+          "2026-03-27",
+          7317.692
+        ],
+        [
+          "2026-04-03",
+          7666.154
+        ],
+        [
+          "2026-04-11",
+          8014.615
+        ],
+        [
+          "2026-04-18",
+          8363.077
+        ],
+        [
+          "2026-04-26",
+          8711.538
+        ],
+        [
+          "2026-05-03",
+          9060.0
+        ],
+        [
+          "2026-05-10",
+          9408.462
+        ],
+        [
+          "2026-05-18",
+          9756.923
+        ],
+        [
+          "2026-05-25",
+          10105.385
+        ],
+        [
+          "2026-06-02",
+          10453.846
+        ],
+        [
+          "2026-06-09",
+          10802.308
+        ],
+        [
+          "2026-06-17",
+          11150.769
+        ],
+        [
+          "2026-06-24",
+          11499.231
+        ],
+        [
+          "2026-07-02",
+          11847.692
+        ],
+        [
+          "2026-07-09",
+          12196.154
+        ],
+        [
+          "2026-07-17",
+          12544.615
+        ],
+        [
+          "2026-07-24",
+          12893.077
+        ],
+        [
+          "2026-08-01",
+          13241.538
+        ],
+        [
+          "2026-08-08",
+          13590.0
+        ],
+        [
+          "2026-08-16",
+          13938.462
+        ],
+        [
+          "2026-08-23",
+          14286.923
+        ],
+        [
+          "2026-08-31",
+          14635.385
+        ],
+        [
+          "2026-09-07",
+          14983.846
+        ],
+        [
+          "2026-09-15",
+          15332.308
+        ],
+        [
+          "2026-09-22",
+          15680.769
+        ],
+        [
+          "2026-09-30",
+          16029.231
+        ],
+        [
+          "2026-10-07",
+          16377.692
+        ],
+        [
+          "2026-10-15",
+          16726.154
+        ],
+        [
+          "2026-10-22",
+          17074.615
+        ],
+        [
+          "2026-10-30",
+          17423.077
+        ],
+        [
+          "2026-11-06",
+          17771.538
+        ],
+        [
+          "2026-11-14",
+          18120.0
+        ]
+      ],
+      "projection": {
+        "value": 20000,
+        "label": "20k by Dec 19"
+      },
+      "ladder": {
+        "kind": "height",
+        "goalPicked": false,
+        "next": {
+          "id": "mount-kilimanjaro",
+          "name": "Mount Kilimanjaro",
+          "drawing": "mount-kilimanjaro",
+          "at": 19341,
+          "atText": "19,341 ft",
+          "blurb": "Africa's highest mountain, a snowcapped volcano in Tanzania you can hike up.",
+          "where": "Tanzania",
+          "on": null,
+          "toGo": "1,221 to go"
+        },
+        "passed": [
+          {
+            "id": "mont-blanc",
+            "name": "Mont Blanc",
+            "drawing": "mont-blanc",
+            "at": 15766,
+            "atText": "15,766 ft",
+            "blurb": "The highest peak in the Alps, on the French-Italian border, first climbed in 1786.",
+            "where": "France / Italy",
+            "on": "2026-10-01",
+            "toGo": null
+          },
+          {
+            "id": "matterhorn",
+            "name": "Matterhorn",
+            "drawing": "matterhorn",
+            "at": 14692,
+            "atText": "14,692 ft",
+            "blurb": "The pointed Alpine peak on the Swiss-Italian border, first climbed in 1865.",
+            "where": "Switzerland / Italy",
+            "on": "2026-09-14",
+            "toGo": null
+          },
+          {
+            "id": "mount-whitney",
+            "name": "Mount Whitney",
+            "drawing": "mount-whitney",
+            "at": 14505,
+            "atText": "14,505 ft",
+            "blurb": "The highest point in the lower 48 states, in California's Sierra Nevada.",
+            "where": "California, USA",
+            "on": "2026-09-09",
+            "toGo": null
+          },
+          {
+            "id": "mount-rainier",
+            "name": "Mount Rainier",
+            "drawing": "mount-rainier",
+            "at": 14406,
+            "atText": "14,406 ft",
+            "blurb": "The glacier-covered volcano that towers over Seattle, the highest peak in Washington.",
+            "where": "Washington, USA",
+            "on": "2026-09-08",
+            "toGo": null
+          },
+          {
+            "id": "mount-fuji",
+            "name": "Mount Fuji",
+            "drawing": "mount-fuji",
+            "at": 12389,
+            "atText": "12,389 ft",
+            "blurb": "Japan's highest mountain, a snowcapped volcano and national symbol.",
+            "where": "Honshu, Japan",
+            "on": "2026-07-28",
+            "toGo": null
+          },
+          {
+            "id": "mount-olympus",
+            "name": "Mount Olympus",
+            "drawing": "mount-olympus",
+            "at": 9573,
+            "atText": "9,573 ft",
+            "blurb": "Greece's highest mountain, home of the gods in ancient Greek myths.",
+            "where": "Thessaly / Macedonia, Greece",
+            "on": "2026-05-14",
+            "toGo": null
+          },
+          {
+            "id": "mount-washington",
+            "name": "Mount Washington",
+            "drawing": "mount-washington",
+            "at": 6288,
+            "atText": "6,288 ft",
+            "blurb": "New Hampshire's highest peak, famous for brutal weather, including a 231 mph gust in 1934.",
+            "where": "New Hampshire, USA",
+            "on": "2026-03-02",
+            "toGo": null
+          },
+          {
+            "id": "half-dome",
+            "name": "Half Dome",
+            "drawing": "half-dome",
+            "at": 4737,
+            "atText": "4,737 ft",
+            "blurb": "Yosemite's granite dome, sliced flat on one side, with cables to help hikers up.",
+            "where": "Yosemite National Park, California, USA",
+            "on": "2026-01-31",
+            "toGo": null
+          },
+          {
+            "id": "ben-nevis",
+            "name": "Ben Nevis",
+            "drawing": "ben-nevis",
+            "at": 4413,
+            "atText": "4,413 ft",
+            "blurb": "The highest mountain in the British Isles, near Fort William in Scotland.",
+            "where": "Highlands, Scotland, UK",
+            "on": "2026-01-23",
+            "toGo": null
+          },
+          {
+            "id": "table-mountain",
+            "name": "Table Mountain",
+            "drawing": "table-mountain",
+            "at": 3563,
+            "atText": "3,563 ft",
+            "blurb": "The flat-topped mountain over Cape Town, often draped in a \"tablecloth\" of cloud.",
+            "where": "Cape Town, South Africa",
+            "on": "2026-01-06",
+            "toGo": null
+          }
+        ]
+      },
+      "route": null,
+      "pics": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "takenOn": "2026-02-01",
+          "at": 3000
+        },
+        {
+          "id": "10000000-0000-4000-8000-000000000002",
+          "takenOn": "2026-05-01",
+          "at": 6000
+        },
+        {
+          "id": "10000000-0000-4000-8000-000000000003",
+          "takenOn": "2026-08-01",
+          "at": 12000
+        },
+        {
+          "id": "10000000-0000-4000-8000-000000000004",
+          "takenOn": "2026-11-01",
+          "at": 17000
+        }
+      ]
+    },
+    {
+      "id": "pullups.reps",
+      "label": "Pull-ups",
+      "noun": "pull-ups",
+      "icon": "pullups",
+      "format": "count",
+      "source": "games",
+      "pending": false,
+      "gameOn": true,
+      "needsPerDay": false,
+      "total": {
+        "value": 2372,
+        "text": "2,372",
+        "unit": "reps"
+      },
+      "today": null,
+      "points": [
+        [
+          "2025-10-21",
+          0.0
+        ],
+        [
+          "2025-10-28",
+          45.615
+        ],
+        [
+          "2025-11-04",
+          91.231
+        ],
+        [
+          "2025-11-12",
+          136.846
+        ],
+        [
+          "2025-11-19",
+          182.462
+        ],
+        [
+          "2025-11-27",
+          228.077
+        ],
+        [
+          "2025-12-04",
+          273.692
+        ],
+        [
+          "2025-12-12",
+          319.308
+        ],
+        [
+          "2025-12-19",
+          364.923
+        ],
+        [
+          "2025-12-27",
+          410.538
+        ],
+        [
+          "2026-01-03",
+          456.154
+        ],
+        [
+          "2026-01-11",
+          501.769
+        ],
+        [
+          "2026-01-18",
+          547.385
+        ],
+        [
+          "2026-01-26",
+          593.0
+        ],
+        [
+          "2026-02-02",
+          638.615
+        ],
+        [
+          "2026-02-10",
+          684.231
+        ],
+        [
+          "2026-02-17",
+          729.846
+        ],
+        [
+          "2026-02-25",
+          775.462
+        ],
+        [
+          "2026-03-04",
+          821.077
+        ],
+        [
+          "2026-03-12",
+          866.692
+        ],
+        [
+          "2026-03-19",
+          912.308
+        ],
+        [
+          "2026-03-27",
+          957.923
+        ],
+        [
+          "2026-04-03",
+          1003.538
+        ],
+        [
+          "2026-04-11",
+          1049.154
+        ],
+        [
+          "2026-04-18",
+          1094.769
+        ],
+        [
+          "2026-04-26",
+          1140.385
+        ],
+        [
+          "2026-05-03",
+          1186.0
+        ],
+        [
+          "2026-05-10",
+          1231.615
+        ],
+        [
+          "2026-05-18",
+          1277.231
+        ],
+        [
+          "2026-05-25",
+          1322.846
+        ],
+        [
+          "2026-06-02",
+          1368.462
+        ],
+        [
+          "2026-06-09",
+          1414.077
+        ],
+        [
+          "2026-06-17",
+          1459.692
+        ],
+        [
+          "2026-06-24",
+          1505.308
+        ],
+        [
+          "2026-07-02",
+          1550.923
+        ],
+        [
+          "2026-07-09",
+          1596.538
+        ],
+        [
+          "2026-07-17",
+          1642.154
+        ],
+        [
+          "2026-07-24",
+          1687.769
+        ],
+        [
+          "2026-08-01",
+          1733.385
+        ],
+        [
+          "2026-08-08",
+          1779.0
+        ],
+        [
+          "2026-08-16",
+          1824.615
+        ],
+        [
+          "2026-08-23",
+          1870.231
+        ],
+        [
+          "2026-08-31",
+          1915.846
+        ],
+        [
+          "2026-09-07",
+          1961.462
+        ],
+        [
+          "2026-09-15",
+          2007.077
+        ],
+        [
+          "2026-09-22",
+          2052.692
+        ],
+        [
+          "2026-09-30",
+          2098.308
+        ],
+        [
+          "2026-10-07",
+          2143.923
+        ],
+        [
+          "2026-10-15",
+          2189.538
+        ],
+        [
+          "2026-10-22",
+          2235.154
+        ],
+        [
+          "2026-10-30",
+          2280.769
+        ],
+        [
+          "2026-11-06",
+          2326.385
+        ],
+        [
+          "2026-11-14",
+          2372.0
+        ]
+      ],
+      "projection": {
+        "value": 2500,
+        "label": "2,500 by Dec 6"
+      },
+      "ladder": {
+        "kind": "height",
+        "passed": [
+          {
+            "id": "golden-gate-bridge-towers",
+            "name": "Golden Gate Bridge towers",
+            "drawing": "golden-gate-bridge-towers",
+            "at": 746,
+            "atText": "746 ft",
+            "blurb": "The towers of San Francisco's orange suspension bridge, opened in 1937.",
+            "where": "San Francisco, USA",
+            "on": "2026-11-12",
+            "toGo": null
+          }
+        ],
+        "next": {
+          "id": "eiffel-tower",
+          "name": "Eiffel Tower",
+          "drawing": "eiffel-tower",
+          "at": 1083,
+          "atText": "1,083 ft",
+          "blurb": "Paris's iron tower, built for the 1889 World's Fair and meant to be temporary.",
+          "where": "Paris, France",
+          "on": null,
+          "toGo": "162 to go"
+        },
+        "goalPicked": false
+      },
+      "route": null,
+      "pics": []
+    },
+    {
+      "id": "walk.meters",
+      "label": "Walk",
+      "noun": "walked and run",
+      "icon": "walk",
+      "format": "distance",
+      "source": "games",
+      "pending": false,
+      "gameOn": true,
+      "needsPerDay": false,
+      "total": {
+        "value": 2994989.184,
+        "text": "1,861 mi",
+        "unit": "meters"
+      },
+      "today": null,
+      "points": [
+        [
+          "2026-10-21",
+          0.0
+        ],
+        [
+          "2026-10-22",
+          230383.783
+        ],
+        [
+          "2026-10-24",
+          460767.567
+        ],
+        [
+          "2026-10-26",
+          691151.35
+        ],
+        [
+          "2026-10-28",
+          921535.134
+        ],
+        [
+          "2026-10-30",
+          1151918.917
+        ],
+        [
+          "2026-11-01",
+          1382302.7
+        ],
+        [
+          "2026-11-02",
+          1612686.484
+        ],
+        [
+          "2026-11-04",
+          1843070.267
+        ],
+        [
+          "2026-11-06",
+          2073454.05
+        ],
+        [
+          "2026-11-08",
+          2303837.834
+        ],
+        [
+          "2026-11-10",
+          2534221.617
+        ],
+        [
+          "2026-11-12",
+          2764605.401
+        ],
+        [
+          "2026-11-14",
+          2994989.184
+        ]
+      ],
+      "projection": null,
+      "ladder": null,
+      "route": {
+        "name": "New York to Los Angeles",
+        "distanceText": "2,794 miles",
+        "walkedText": "1,360 mi",
+        "progress": 0.4867573371510379,
+        "straightLine": false,
+        "finishedOn": null,
+        "map": "/api/game/v1/progress/map?measure=walk.meters&w=700&h=400",
+        "towns": [
+          {
+            "name": "New York",
+            "atText": "mile 0",
+            "x": 0.9,
+            "y": 0.2,
+            "passedOn": "2026-02-09"
+          },
+          {
+            "name": "Tulsa",
+            "atText": "2 mi away",
+            "x": 0.48,
+            "y": 0.55,
+            "passedOn": null
+          },
+          {
+            "name": "Los Angeles",
+            "atText": "1,434 to go",
+            "x": 0.1,
+            "y": 0.7,
+            "passedOn": null
+          }
+        ],
+        "goalPicked": true,
+        "completed": [
+          {
+            "name": "San Diego to San Francisco",
+            "finishedOn": "2026-02-09"
+          }
+        ]
+      },
+      "pics": []
+    }
+  ],
+  "streak": {
+    "current": 64,
+    "best": {
+      "count": 64,
+      "from": "2026-09-07",
+      "to": "2026-11-13"
+    },
+    "today": "pending",
+    "months": [
+      {
+        "month": "2026-11",
+        "days": "dddddd.ddddddtffffffffffffffff"
+      }
+    ],
+    "obligations": []
+  },
+  "medals": [
+    {
+      "id": "year-half-dome",
+      "kind": "landmark",
+      "gold": true,
+      "face": {
+        "drawing": "half-dome"
+      },
+      "title": "Half Dome",
+      "detail": "2,369 pull-ups",
+      "earnedOn": "2026-11-14",
+      "open": {
+        "page": "totals",
+        "measureId": "pullups.reps"
+      }
+    },
+    {
+      "id": "year-mont-blanc",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "mont-blanc"
+      },
+      "title": "Mont Blanc",
+      "detail": "15,766 pushups",
+      "earnedOn": "2026-10-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-mount-fuji",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "mount-fuji"
+      },
+      "title": "Mount Fuji",
+      "detail": "12,389 pushups",
+      "earnedOn": "2026-07-28",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-burj-khalifa",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "burj-khalifa"
+      },
+      "title": "Burj Khalifa",
+      "detail": "2,717 pushups",
+      "earnedOn": "2026-02-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-el-capitan",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "el-capitan"
+      },
+      "title": "El Capitan",
+      "detail": "3,000 pushups",
+      "earnedOn": "2026-02-02",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-antelope-canyon",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "antelope-canyon"
+      },
+      "title": "Antelope Canyon",
+      "detail": "120 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-great-blue-hole",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "great-blue-hole"
+      },
+      "title": "Great Blue Hole",
+      "detail": "407 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-deans-blue-hole",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "deans-blue-hole"
+      },
+      "title": "Dean's Blue Hole",
+      "detail": "663 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-cave-of-swallows",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "cave-of-swallows"
+      },
+      "title": "Cave of Swallows",
+      "detail": "1,093 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-xiaozhai-tiankeng",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "xiaozhai-tiankeng"
+      },
+      "title": "Xiaozhai Tiankeng",
+      "detail": "2,172 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-tara-river-canyon",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "tara-river-canyon"
+      },
+      "title": "Tara River Canyon",
+      "detail": "4,265 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-grand-canyon",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "grand-canyon"
+      },
+      "title": "Grand Canyon",
+      "detail": "6,093 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-krubera-cave",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "krubera-cave"
+      },
+      "title": "Krubera Cave",
+      "detail": "7,297 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-hells-canyon",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "hells-canyon"
+      },
+      "title": "Hells Canyon",
+      "detail": "7,993 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-colca-canyon",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "colca-canyon"
+      },
+      "title": "Colca Canyon",
+      "detail": "10,728 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-tower-of-babel",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "tower-of-babel"
+      },
+      "title": "Tower of Babel (Etemenanki)",
+      "detail": "299 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-cumulus-clouds",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "cumulus-clouds"
+      },
+      "title": "Puffy cumulus clouds",
+      "detail": "6,562 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-skydive",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "skydive"
+      },
+      "title": "A skydive",
+      "detail": "13,000 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-giraffe",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "giraffe"
+      },
+      "title": "A tall giraffe",
+      "detail": "19 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-great-white-shark",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "great-white-shark"
+      },
+      "title": "A great white shark, stood on end",
+      "detail": "20 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-stonehenge",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "stonehenge"
+      },
+      "title": "Stonehenge",
+      "detail": "24 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-cloud-gate",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "cloud-gate"
+      },
+      "title": "Cloud Gate (the Bean)",
+      "detail": "33 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-easter-island-moai",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "easter-island-moai"
+      },
+      "title": "Easter Island moai",
+      "detail": "33 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-green-monster",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "green-monster"
+      },
+      "title": "Fenway's Green Monster",
+      "detail": "37 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-giants-causeway",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "giants-causeway"
+      },
+      "title": "Giant's Causeway",
+      "detail": "39 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-t-rex",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "t-rex"
+      },
+      "title": "A T. rex, stood on end",
+      "detail": "40 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-hollywood-sign",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "hollywood-sign"
+      },
+      "title": "Hollywood Sign",
+      "detail": "45 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-parthenon",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "parthenon"
+      },
+      "title": "Parthenon",
+      "detail": "45 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-great-torii-itsukushima",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "great-torii-itsukushima"
+      },
+      "title": "Great Torii of Itsukushima",
+      "detail": "50 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-delicate-arch",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "delicate-arch"
+      },
+      "title": "Delicate Arch",
+      "detail": "52 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-bay-of-fundy-tide",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "bay-of-fundy-tide"
+      },
+      "title": "The Bay of Fundy tide",
+      "detail": "52 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-mount-rushmore-faces",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "mount-rushmore-faces"
+      },
+      "title": "Mount Rushmore's faces",
+      "detail": "60 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-angel-of-the-north",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "angel-of-the-north"
+      },
+      "title": "Angel of the North",
+      "detail": "66 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-great-sphinx-of-giza",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "great-sphinx-of-giza"
+      },
+      "title": "Great Sphinx of Giza",
+      "detail": "66 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-louvre-pyramid",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "louvre-pyramid"
+      },
+      "title": "Louvre Pyramid",
+      "detail": "71 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-brachiosaurus",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "brachiosaurus"
+      },
+      "title": "A brachiosaurus, stood on end",
+      "detail": "72 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-coney-island-cyclone",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "coney-island-cyclone"
+      },
+      "title": "Coney Island Cyclone",
+      "detail": "75 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-luxor-obelisk",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "luxor-obelisk"
+      },
+      "title": "Luxor Obelisk",
+      "detail": "75 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-rhine-falls",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "rhine-falls"
+      },
+      "title": "Rhine Falls",
+      "detail": "75 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-marine-corps-war-memorial",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "marine-corps-war-memorial"
+      },
+      "title": "Marine Corps War Memorial",
+      "detail": "78 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-saguaro",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "saguaro"
+      },
+      "title": "The tallest saguaro cactus",
+      "detail": "78 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-portland-head-light",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "portland-head-light"
+      },
+      "title": "Portland Head Light",
+      "detail": "80 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-brandenburg-gate",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "brandenburg-gate"
+      },
+      "title": "Brandenburg Gate",
+      "detail": "85 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-trevi-fountain",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "trevi-fountain"
+      },
+      "title": "Trevi Fountain",
+      "detail": "86 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-crazy-horse-memorial",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "crazy-horse-memorial"
+      },
+      "title": "Crazy Horse Memorial",
+      "detail": "88 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-tower-of-belem",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "tower-of-belem"
+      },
+      "title": "Belém Tower",
+      "detail": "98 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-el-castillo-chichen-itza",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "el-castillo-chichen-itza"
+      },
+      "title": "El Castillo, Chichen Itza",
+      "detail": "98 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-the-kelpies",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "the-kelpies"
+      },
+      "title": "The Kelpies",
+      "detail": "98 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-ziggurat-of-ur",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "ziggurat-of-ur"
+      },
+      "title": "Great Ziggurat of Ur",
+      "detail": "98 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-blue-whale",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "blue-whale"
+      },
+      "title": "A blue whale, stood on end",
+      "detail": "98 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-lincoln-memorial",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "lincoln-memorial"
+      },
+      "title": "Lincoln Memorial",
+      "detail": "99 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-havasu-falls",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "havasu-falls"
+      },
+      "title": "Havasu Falls",
+      "detail": "100 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-colossus-of-rhodes",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "colossus-of-rhodes"
+      },
+      "title": "Colossus of Rhodes",
+      "detail": "108 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-tian-tan-buddha",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "tian-tan-buddha"
+      },
+      "title": "Big Buddha (Tian Tan)",
+      "detail": "112 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-borobudur",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "borobudur"
+      },
+      "title": "Borobudur",
+      "detail": "115 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-lions-mane-jellyfish",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "lions-mane-jellyfish"
+      },
+      "title": "The biggest lion's mane jellyfish",
+      "detail": "120 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-christ-the-redeemer",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "christ-the-redeemer"
+      },
+      "title": "Christ the Redeemer",
+      "detail": "125 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-balanced-rock",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "balanced-rock"
+      },
+      "title": "Balanced Rock",
+      "detail": "128 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-india-gate",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "india-gate"
+      },
+      "title": "India Gate",
+      "detail": "138 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-unisphere",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "unisphere"
+      },
+      "title": "Unisphere",
+      "detail": "140 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-giant-kelp",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "giant-kelp"
+      },
+      "title": "Giant kelp",
+      "detail": "148 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-wonder-wheel",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "wonder-wheel"
+      },
+      "title": "Coney Island Wonder Wheel",
+      "detail": "150 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-himeji-castle",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "himeji-castle"
+      },
+      "title": "Himeji Castle",
+      "detail": "152 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-st-basils-cathedral",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "st-basils-cathedral"
+      },
+      "title": "St. Basil's Cathedral",
+      "detail": "156 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-colosseum",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "colosseum"
+      },
+      "title": "Colosseum",
+      "detail": "157 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-pont-du-gard",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "pont-du-gard"
+      },
+      "title": "Pont du Gard",
+      "detail": "160 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-arc-de-triomphe",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "arc-de-triomphe"
+      },
+      "title": "Arc de Triomphe",
+      "detail": "163 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-twelve-apostles",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "twelve-apostles"
+      },
+      "title": "The Twelve Apostles",
+      "detail": "164 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-malwiya-minaret",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "malwiya-minaret"
+      },
+      "title": "Malwiya Minaret",
+      "detail": "171 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-toji-pagoda",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "toji-pagoda"
+      },
+      "title": "Tō-ji Pagoda",
+      "detail": "180 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-tower-of-hercules",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "tower-of-hercules"
+      },
+      "title": "Tower of Hercules",
+      "detail": "180 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-hagia-sophia",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "hagia-sophia"
+      },
+      "title": "Hagia Sophia",
+      "detail": "180 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-space-shuttle",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "space-shuttle"
+      },
+      "title": "Space Shuttle (full stack)",
+      "detail": "184 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-old-faithful",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "old-faithful"
+      },
+      "title": "Old Faithful",
+      "detail": "185 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-leaning-tower-of-pisa",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "leaning-tower-of-pisa"
+      },
+      "title": "Leaning Tower of Pisa",
+      "detail": "186 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-quindio-wax-palm",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "quindio-wax-palm"
+      },
+      "title": "Quindío wax palm",
+      "detail": "197 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-skogafoss",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "skogafoss"
+      },
+      "title": "Skógafoss",
+      "detail": "197 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-cape-hatteras-lighthouse",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "cape-hatteras-lighthouse"
+      },
+      "title": "Cape Hatteras Lighthouse",
+      "detail": "198 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-galata-tower",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "galata-tower"
+      },
+      "title": "Galata Tower",
+      "detail": "205 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-pyramid-of-djoser",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "pyramid-of-djoser"
+      },
+      "title": "Step Pyramid of Djoser",
+      "detail": "205 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-great-wild-goose-pagoda",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "great-wild-goose-pagoda"
+      },
+      "title": "Giant Wild Goose Pagoda",
+      "detail": "210 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-wiener-riesenrad",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "wiener-riesenrad"
+      },
+      "title": "Vienna Giant Ferris Wheel",
+      "detail": "212 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-angkor-wat",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "angkor-wat"
+      },
+      "title": "Angkor Wat",
+      "detail": "213 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-neuschwanstein-castle",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "neuschwanstein-castle"
+      },
+      "title": "Neuschwanstein Castle",
+      "detail": "213 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-tower-bridge",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "tower-bridge"
+      },
+      "title": "Tower Bridge",
+      "detail": "213 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-pyramid-of-the-sun",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "pyramid-of-the-sun"
+      },
+      "title": "Pyramid of the Sun",
+      "detail": "215 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-cordouan-lighthouse",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "cordouan-lighthouse"
+      },
+      "title": "Cordouan Lighthouse",
+      "detail": "221 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-bunker-hill-monument",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "bunker-hill-monument"
+      },
+      "title": "Bunker Hill Monument",
+      "detail": "221 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-falcon-9",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "falcon-9"
+      },
+      "title": "Falcon 9 rocket",
+      "detail": "229 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-capilano-suspension-bridge",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "capilano-suspension-bridge"
+      },
+      "title": "Capilano Suspension Bridge",
+      "detail": "230 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-leshan-giant-buddha",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "leshan-giant-buddha"
+      },
+      "title": "Leshan Giant Buddha",
+      "detail": "233 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-qutub-minar",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "qutub-minar"
+      },
+      "title": "Qutub Minar",
+      "detail": "238 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-taj-mahal",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "taj-mahal"
+      },
+      "title": "Taj Mahal",
+      "detail": "240 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-perito-moreno-glacier",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "perito-moreno-glacier"
+      },
+      "title": "Perito Moreno Glacier",
+      "detail": "243 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-jumbo-jet-747",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "jumbo-jet-747"
+      },
+      "title": "747-8 jumbo jet",
+      "detail": "250 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-koutoubia-mosque",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "koutoubia-mosque"
+      },
+      "title": "Koutoubia minaret",
+      "detail": "253 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-original-ferris-wheel",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "original-ferris-wheel"
+      },
+      "title": "The first Ferris wheel",
+      "detail": "264 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-iguazu-falls",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "iguazu-falls"
+      },
+      "title": "Iguazú Falls",
+      "detail": "269 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-ile-vierge-lighthouse",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "ile-vierge-lighthouse"
+      },
+      "title": "Île Vierge Lighthouse",
+      "detail": "271 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-superdome",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "superdome"
+      },
+      "title": "Superdome",
+      "detail": "273 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-general-sherman-tree",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "general-sherman-tree"
+      },
+      "title": "General Sherman Tree",
+      "detail": "275 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-land-antonov-an-225",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "antonov-an-225"
+      },
+      "title": "An-225 Mriya",
+      "detail": "276 pushups",
+      "earnedOn": "2026-01-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-friend-sam",
+      "kind": "friend",
+      "gold": false,
+      "face": {
+        "member": {
+          "memberId": "member-sam",
+          "firstName": "Sam",
+          "avatarUrl": null
+        }
+      },
+      "title": "Passed Sam",
+      "detail": "in total pushups",
+      "earnedOn": "2026-11-13",
+      "open": {
+        "page": "friends",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-friend-maya",
+      "kind": "friend",
+      "gold": false,
+      "face": {
+        "member": {
+          "memberId": "member-maya",
+          "firstName": "Maya",
+          "avatarUrl": null
+        }
+      },
+      "title": "Passed Maya",
+      "detail": "in total pushups",
+      "earnedOn": "2026-11-13",
+      "open": {
+        "page": "friends",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-friend-jordan",
+      "kind": "friend",
+      "gold": false,
+      "face": {
+        "member": {
+          "memberId": "member-jordan",
+          "firstName": "Jordan",
+          "avatarUrl": null
+        }
+      },
+      "title": "Passed Jordan",
+      "detail": "in total pushups",
+      "earnedOn": "2026-11-13",
+      "open": {
+        "page": "friends",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-friend-leo",
+      "kind": "friend",
+      "gold": false,
+      "face": {
+        "member": {
+          "memberId": "member-leo",
+          "firstName": "Leo",
+          "avatarUrl": null
+        }
+      },
+      "title": "Passed Leo",
+      "detail": "in total pushups",
+      "earnedOn": "2026-11-13",
+      "open": {
+        "page": "friends",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-health-0",
+      "kind": "health",
+      "gold": false,
+      "face": {
+        "delta": {
+          "icon": "heart",
+          "text": "↓5"
+        }
+      },
+      "title": "Heart rate",
+      "detail": "down 5 bpm",
+      "earnedOn": "2026-11-02",
+      "open": {
+        "page": "health",
+        "measureId": "restingHeartRate"
+      }
+    },
+    {
+      "id": "year-health-1",
+      "kind": "health",
+      "gold": false,
+      "face": {
+        "delta": {
+          "icon": "steps",
+          "text": "+2k"
+        }
+      },
+      "title": "Steps",
+      "detail": "up 2,000 a day",
+      "earnedOn": "2026-10-18",
+      "open": {
+        "page": "health",
+        "measureId": "steps"
+      }
+    },
+    {
+      "id": "year-health-2",
+      "kind": "health",
+      "gold": false,
+      "face": {
+        "delta": {
+          "icon": "sleep",
+          "text": "+20m"
+        }
+      },
+      "title": "Sleep",
+      "detail": "up 20 min",
+      "earnedOn": "2026-10-09",
+      "open": {
+        "page": "health",
+        "measureId": "sleep"
+      }
+    },
+    {
+      "id": "year-health-3",
+      "kind": "health",
+      "gold": false,
+      "face": {
+        "delta": {
+          "icon": "vo2Max",
+          "text": "+2"
+        }
+      },
+      "title": "VO2 max",
+      "detail": "up 2",
+      "earnedOn": "2026-10-03",
+      "open": {
+        "page": "health",
+        "measureId": "vo2Max"
+      }
+    },
+    {
+      "id": "year-health-old-0",
+      "kind": "health",
+      "gold": false,
+      "face": {
+        "delta": {
+          "icon": "heart",
+          "text": "↓1"
+        }
+      },
+      "title": "Heart rate",
+      "detail": "down 1 bpm",
+      "earnedOn": "2026-09-14",
+      "open": {
+        "page": "health",
+        "measureId": "restingHeartRate"
+      }
+    },
+    {
+      "id": "year-health-old-1",
+      "kind": "health",
+      "gold": false,
+      "face": {
+        "delta": {
+          "icon": "heart",
+          "text": "↓2"
+        }
+      },
+      "title": "Heart rate",
+      "detail": "down 2 bpm",
+      "earnedOn": "2026-09-07",
+      "open": {
+        "page": "health",
+        "measureId": "restingHeartRate"
+      }
+    },
+    {
+      "id": "year-health-old-2",
+      "kind": "health",
+      "gold": false,
+      "face": {
+        "delta": {
+          "icon": "heart",
+          "text": "↓3"
+        }
+      },
+      "title": "Heart rate",
+      "detail": "down 3 bpm",
+      "earnedOn": "2026-08-31",
+      "open": {
+        "page": "health",
+        "measureId": "restingHeartRate"
+      }
+    },
+    {
+      "id": "year-health-old-3",
+      "kind": "health",
+      "gold": false,
+      "face": {
+        "delta": {
+          "icon": "heart",
+          "text": "↓4"
+        }
+      },
+      "title": "Heart rate",
+      "detail": "down 4 bpm",
+      "earnedOn": "2026-08-24",
+      "open": {
+        "page": "health",
+        "measureId": "restingHeartRate"
+      }
+    },
+    {
+      "id": "year-health-old-4",
+      "kind": "health",
+      "gold": false,
+      "face": {
+        "delta": {
+          "icon": "heart",
+          "text": "↓1"
+        }
+      },
+      "title": "Heart rate",
+      "detail": "down 1 bpm",
+      "earnedOn": "2026-08-17",
+      "open": {
+        "page": "health",
+        "measureId": "restingHeartRate"
+      }
+    },
+    {
+      "id": "year-health-old-5",
+      "kind": "health",
+      "gold": false,
+      "face": {
+        "delta": {
+          "icon": "heart",
+          "text": "↓2"
+        }
+      },
+      "title": "Heart rate",
+      "detail": "down 2 bpm",
+      "earnedOn": "2026-08-10",
+      "open": {
+        "page": "health",
+        "measureId": "restingHeartRate"
+      }
+    },
+    {
+      "id": "year-health-old-6",
+      "kind": "health",
+      "gold": false,
+      "face": {
+        "delta": {
+          "icon": "heart",
+          "text": "↓3"
+        }
+      },
+      "title": "Heart rate",
+      "detail": "down 3 bpm",
+      "earnedOn": "2026-08-03",
+      "open": {
+        "page": "health",
+        "measureId": "restingHeartRate"
+      }
+    },
+    {
+      "id": "year-health-old-7",
+      "kind": "health",
+      "gold": false,
+      "face": {
+        "delta": {
+          "icon": "heart",
+          "text": "↓4"
+        }
+      },
+      "title": "Heart rate",
+      "detail": "down 4 bpm",
+      "earnedOn": "2026-07-27",
+      "open": {
+        "page": "health",
+        "measureId": "restingHeartRate"
+      }
+    },
+    {
+      "id": "year-health-old-8",
+      "kind": "health",
+      "gold": false,
+      "face": {
+        "delta": {
+          "icon": "heart",
+          "text": "↓1"
+        }
+      },
+      "title": "Heart rate",
+      "detail": "down 1 bpm",
+      "earnedOn": "2026-07-20",
+      "open": {
+        "page": "health",
+        "measureId": "restingHeartRate"
+      }
+    },
+    {
+      "id": "year-health-old-9",
+      "kind": "health",
+      "gold": false,
+      "face": {
+        "delta": {
+          "icon": "heart",
+          "text": "↓2"
+        }
+      },
+      "title": "Heart rate",
+      "detail": "down 2 bpm",
+      "earnedOn": "2026-07-13",
+      "open": {
+        "page": "health",
+        "measureId": "restingHeartRate"
+      }
+    },
+    {
+      "id": "year-health-old-10",
+      "kind": "health",
+      "gold": false,
+      "face": {
+        "delta": {
+          "icon": "heart",
+          "text": "↓3"
+        }
+      },
+      "title": "Heart rate",
+      "detail": "down 3 bpm",
+      "earnedOn": "2026-07-06",
+      "open": {
+        "page": "health",
+        "measureId": "restingHeartRate"
+      }
+    },
+    {
+      "id": "year-health-old-11",
+      "kind": "health",
+      "gold": false,
+      "face": {
+        "delta": {
+          "icon": "heart",
+          "text": "↓4"
+        }
+      },
+      "title": "Heart rate",
+      "detail": "down 4 bpm",
+      "earnedOn": "2026-06-29",
+      "open": {
+        "page": "health",
+        "measureId": "restingHeartRate"
+      }
+    },
+    {
+      "id": "year-health-old-12",
+      "kind": "health",
+      "gold": false,
+      "face": {
+        "delta": {
+          "icon": "heart",
+          "text": "↓1"
+        }
+      },
+      "title": "Heart rate",
+      "detail": "down 1 bpm",
+      "earnedOn": "2026-06-22",
+      "open": {
+        "page": "health",
+        "measureId": "restingHeartRate"
+      }
+    },
+    {
+      "id": "year-health-old-13",
+      "kind": "health",
+      "gold": false,
+      "face": {
+        "delta": {
+          "icon": "heart",
+          "text": "↓2"
+        }
+      },
+      "title": "Heart rate",
+      "detail": "down 2 bpm",
+      "earnedOn": "2026-06-15",
+      "open": {
+        "page": "health",
+        "measureId": "restingHeartRate"
+      }
+    },
+    {
+      "id": "year-health-old-14",
+      "kind": "health",
+      "gold": false,
+      "face": {
+        "delta": {
+          "icon": "heart",
+          "text": "↓3"
+        }
+      },
+      "title": "Heart rate",
+      "detail": "down 3 bpm",
+      "earnedOn": "2026-06-08",
+      "open": {
+        "page": "health",
+        "measureId": "restingHeartRate"
+      }
+    },
+    {
+      "id": "year-health-old-15",
+      "kind": "health",
+      "gold": false,
+      "face": {
+        "delta": {
+          "icon": "heart",
+          "text": "↓4"
+        }
+      },
+      "title": "Heart rate",
+      "detail": "down 4 bpm",
+      "earnedOn": "2026-06-01",
+      "open": {
+        "page": "health",
+        "measureId": "restingHeartRate"
+      }
+    },
+    {
+      "id": "year-health-old-16",
+      "kind": "health",
+      "gold": false,
+      "face": {
+        "delta": {
+          "icon": "heart",
+          "text": "↓1"
+        }
+      },
+      "title": "Heart rate",
+      "detail": "down 1 bpm",
+      "earnedOn": "2026-05-25",
+      "open": {
+        "page": "health",
+        "measureId": "restingHeartRate"
+      }
+    },
+    {
+      "id": "year-health-old-17",
+      "kind": "health",
+      "gold": false,
+      "face": {
+        "delta": {
+          "icon": "heart",
+          "text": "↓2"
+        }
+      },
+      "title": "Heart rate",
+      "detail": "down 2 bpm",
+      "earnedOn": "2026-05-18",
+      "open": {
+        "page": "health",
+        "measureId": "restingHeartRate"
+      }
+    },
+    {
+      "id": "year-health-old-18",
+      "kind": "health",
+      "gold": false,
+      "face": {
+        "delta": {
+          "icon": "heart",
+          "text": "↓3"
+        }
+      },
+      "title": "Heart rate",
+      "detail": "down 3 bpm",
+      "earnedOn": "2026-05-11",
+      "open": {
+        "page": "health",
+        "measureId": "restingHeartRate"
+      }
+    },
+    {
+      "id": "year-health-old-19",
+      "kind": "health",
+      "gold": false,
+      "face": {
+        "delta": {
+          "icon": "heart",
+          "text": "↓4"
+        }
+      },
+      "title": "Heart rate",
+      "detail": "down 4 bpm",
+      "earnedOn": "2026-05-04",
+      "open": {
+        "page": "health",
+        "measureId": "restingHeartRate"
+      }
+    },
+    {
+      "id": "year-health-old-20",
+      "kind": "health",
+      "gold": false,
+      "face": {
+        "delta": {
+          "icon": "heart",
+          "text": "↓1"
+        }
+      },
+      "title": "Heart rate",
+      "detail": "down 1 bpm",
+      "earnedOn": "2026-04-27",
+      "open": {
+        "page": "health",
+        "measureId": "restingHeartRate"
+      }
+    },
+    {
+      "id": "year-health-old-21",
+      "kind": "health",
+      "gold": false,
+      "face": {
+        "delta": {
+          "icon": "heart",
+          "text": "↓2"
+        }
+      },
+      "title": "Heart rate",
+      "detail": "down 2 bpm",
+      "earnedOn": "2026-04-20",
+      "open": {
+        "page": "health",
+        "measureId": "restingHeartRate"
+      }
+    },
+    {
+      "id": "year-health-old-22",
+      "kind": "health",
+      "gold": false,
+      "face": {
+        "delta": {
+          "icon": "heart",
+          "text": "↓3"
+        }
+      },
+      "title": "Heart rate",
+      "detail": "down 3 bpm",
+      "earnedOn": "2026-04-13",
+      "open": {
+        "page": "health",
+        "measureId": "restingHeartRate"
+      }
+    },
+    {
+      "id": "year-health-old-23",
+      "kind": "health",
+      "gold": false,
+      "face": {
+        "delta": {
+          "icon": "heart",
+          "text": "↓4"
+        }
+      },
+      "title": "Heart rate",
+      "detail": "down 4 bpm",
+      "earnedOn": "2026-04-06",
+      "open": {
+        "page": "health",
+        "measureId": "restingHeartRate"
+      }
+    },
+    {
+      "id": "year-health-old-24",
+      "kind": "health",
+      "gold": false,
+      "face": {
+        "delta": {
+          "icon": "heart",
+          "text": "↓1"
+        }
+      },
+      "title": "Heart rate",
+      "detail": "down 1 bpm",
+      "earnedOn": "2026-03-30",
+      "open": {
+        "page": "health",
+        "measureId": "restingHeartRate"
+      }
+    },
+    {
+      "id": "year-health-old-25",
+      "kind": "health",
+      "gold": false,
+      "face": {
+        "delta": {
+          "icon": "heart",
+          "text": "↓2"
+        }
+      },
+      "title": "Heart rate",
+      "detail": "down 2 bpm",
+      "earnedOn": "2026-03-23",
+      "open": {
+        "page": "health",
+        "measureId": "restingHeartRate"
+      }
+    },
+    {
+      "id": "year-health-old-26",
+      "kind": "health",
+      "gold": false,
+      "face": {
+        "delta": {
+          "icon": "heart",
+          "text": "↓3"
+        }
+      },
+      "title": "Heart rate",
+      "detail": "down 3 bpm",
+      "earnedOn": "2026-03-16",
+      "open": {
+        "page": "health",
+        "measureId": "restingHeartRate"
+      }
+    },
+    {
+      "id": "year-streak-64",
+      "kind": "streak",
+      "gold": false,
+      "face": {
+        "streak": 64
+      },
+      "title": "Best run",
+      "detail": "your best run",
+      "earnedOn": "2026-11-13",
+      "open": {
+        "page": "streak",
+        "measureId": null
+      }
+    },
+    {
+      "id": "year-streak-30",
+      "kind": "streak",
+      "gold": false,
+      "face": {
+        "streak": 30
+      },
+      "title": "30 days",
+      "detail": "your best run",
+      "earnedOn": "2026-11-13",
+      "open": {
+        "page": "streak",
+        "measureId": null
+      }
+    },
+    {
+      "id": "year-streak-14",
+      "kind": "streak",
+      "gold": false,
+      "face": {
+        "streak": 14
+      },
+      "title": "14 days",
+      "detail": "your best run",
+      "earnedOn": "2026-11-13",
+      "open": {
+        "page": "streak",
+        "measureId": null
+      }
+    },
+    {
+      "id": "year-total-0",
+      "kind": "total",
+      "gold": false,
+      "face": {
+        "number": "15K"
+      },
+      "title": "15,000",
+      "detail": "pushups",
+      "earnedOn": "2026-10-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-total-1",
+      "kind": "total",
+      "gold": false,
+      "face": {
+        "number": "2K"
+      },
+      "title": "2,000",
+      "detail": "pull-ups",
+      "earnedOn": "2026-10-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pullups.reps"
+      }
+    },
+    {
+      "id": "year-total-2",
+      "kind": "total",
+      "gold": false,
+      "face": {
+        "number": "10K"
+      },
+      "title": "10,000",
+      "detail": "pushups",
+      "earnedOn": "2026-10-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-total-3",
+      "kind": "total",
+      "gold": false,
+      "face": {
+        "number": "1K"
+      },
+      "title": "1,000",
+      "detail": "pull-ups",
+      "earnedOn": "2026-10-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pullups.reps"
+      }
+    },
+    {
+      "id": "year-total-4",
+      "kind": "total",
+      "gold": false,
+      "face": {
+        "number": "5K"
+      },
+      "title": "5,000",
+      "detail": "pushups",
+      "earnedOn": "2026-10-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-total-5",
+      "kind": "total",
+      "gold": false,
+      "face": {
+        "number": "2K"
+      },
+      "title": "2,000",
+      "detail": "pushups",
+      "earnedOn": "2026-10-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-total-6",
+      "kind": "total",
+      "gold": false,
+      "face": {
+        "number": "1K"
+      },
+      "title": "1,000",
+      "detail": "pushups",
+      "earnedOn": "2026-10-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "year-total-7",
+      "kind": "total",
+      "gold": false,
+      "face": {
+        "number": "500"
+      },
+      "title": "500",
+      "detail": "pull-ups",
+      "earnedOn": "2026-10-01",
+      "open": {
+        "page": "totals",
+        "measureId": "pullups.reps"
+      }
+    }
+  ],
+  "shelf": [
+    "year-half-dome",
+    "year-friend-sam",
+    "year-health-0",
+    "year-streak-64",
+    "year-mont-blanc",
+    "year-total-0"
+  ],
+  "moments": [],
+  "picCount": 4
+}

@@ -1,0 +1,549 @@
+{
+  "joinedOn": "2026-10-21",
+  "today": "2026-11-14",
+  "incomplete": false,
+  "measures": [
+    {
+      "id": "pushups.reps",
+      "label": "Pushups",
+      "noun": "pushups",
+      "icon": "pushups",
+      "format": "count",
+      "source": "games",
+      "pending": false,
+      "gameOn": true,
+      "needsPerDay": false,
+      "total": {
+        "value": 1400,
+        "text": "1,400",
+        "unit": "reps"
+      },
+      "today": {
+        "value": 100,
+        "text": "+100",
+        "unit": "reps"
+      },
+      "points": [
+        [
+          "2026-10-21",
+          0
+        ],
+        [
+          "2026-10-22",
+          100
+        ],
+        [
+          "2026-10-24",
+          100
+        ],
+        [
+          "2026-10-25",
+          200
+        ],
+        [
+          "2026-10-27",
+          400
+        ],
+        [
+          "2026-10-29",
+          500
+        ],
+        [
+          "2026-11-01",
+          500
+        ],
+        [
+          "2026-11-02",
+          600
+        ],
+        [
+          "2026-11-04",
+          800
+        ],
+        [
+          "2026-11-06",
+          900
+        ],
+        [
+          "2026-11-08",
+          900
+        ],
+        [
+          "2026-11-09",
+          1000
+        ],
+        [
+          "2026-11-10",
+          1100
+        ],
+        [
+          "2026-11-12",
+          1300
+        ],
+        [
+          "2026-11-13",
+          1300
+        ],
+        [
+          "2026-11-14",
+          1400
+        ]
+      ],
+      "projection": {
+        "value": 2000,
+        "label": "2,000 by Nov 23"
+      },
+      "ladder": {
+        "kind": "height",
+        "passed": [
+          {
+            "id": "empire-state-building",
+            "name": "Empire State Building",
+            "drawing": "empire-state-building",
+            "at": 1250,
+            "atText": "1,250 ft",
+            "blurb": "New York's 1931 Art Deco tower, the world's tallest for nearly 40 years.",
+            "where": "New York City, USA",
+            "on": "2026-11-12",
+            "toGo": null
+          },
+          {
+            "id": "eiffel-tower",
+            "name": "Eiffel Tower",
+            "drawing": "eiffel-tower",
+            "at": 1083,
+            "atText": "1,083 ft",
+            "blurb": "Paris's iron tower, built for the 1889 World's Fair and meant to be temporary.",
+            "where": "Paris, France",
+            "on": "2026-11-10",
+            "toGo": null
+          },
+          {
+            "id": "golden-gate-bridge-towers",
+            "name": "Golden Gate Bridge towers",
+            "drawing": "golden-gate-bridge-towers",
+            "at": 746,
+            "atText": "746 ft",
+            "blurb": "The towers of San Francisco's orange suspension bridge, opened in 1937.",
+            "where": "San Francisco, USA",
+            "on": "2026-11-04",
+            "toGo": null
+          },
+          {
+            "id": "washington-monument",
+            "name": "Washington Monument",
+            "drawing": "washington-monument",
+            "at": 555,
+            "atText": "555 ft",
+            "blurb": "Washington, D.C.'s marble obelisk, the world's tallest structure until the Eiffel Tower.",
+            "where": "Washington, D.C., USA",
+            "on": "2026-11-02",
+            "toGo": null
+          },
+          {
+            "id": "statue-of-liberty",
+            "name": "Statue of Liberty",
+            "drawing": "statue-of-liberty",
+            "at": 305,
+            "atText": "305 ft",
+            "blurb": "The copper statue France gave the US, holding her torch in New York Harbor since 1886.",
+            "where": "New York City, USA",
+            "on": "2026-10-27",
+            "toGo": null
+          }
+        ],
+        "next": {
+          "id": "one-world-trade-center",
+          "name": "One World Trade Center",
+          "drawing": "one-world-trade-center",
+          "at": 1776,
+          "atText": "1,776 ft",
+          "blurb": "New York's tallest tower, its height a nod to 1776, the year of independence.",
+          "where": "New York City, USA",
+          "on": null,
+          "toGo": "376 to go"
+        },
+        "goalPicked": false
+      },
+      "route": null,
+      "pics": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "takenOn": "2026-10-24",
+          "at": 100
+        },
+        {
+          "id": "10000000-0000-4000-8000-000000000002",
+          "takenOn": "2026-11-02",
+          "at": 600
+        },
+        {
+          "id": "10000000-0000-4000-8000-000000000003",
+          "takenOn": "2026-11-12",
+          "at": 1300
+        }
+      ]
+    },
+    {
+      "id": "pullups.reps",
+      "label": "Pull-ups",
+      "noun": "pull-ups",
+      "icon": "pullups",
+      "format": "count",
+      "source": "games",
+      "pending": false,
+      "gameOn": true,
+      "needsPerDay": false,
+      "total": {
+        "value": 380,
+        "text": "380",
+        "unit": "reps"
+      },
+      "today": null,
+      "points": [
+        [
+          "2026-10-21",
+          0.0
+        ],
+        [
+          "2026-10-22",
+          29.231
+        ],
+        [
+          "2026-10-24",
+          58.462
+        ],
+        [
+          "2026-10-26",
+          87.692
+        ],
+        [
+          "2026-10-28",
+          116.923
+        ],
+        [
+          "2026-10-30",
+          146.154
+        ],
+        [
+          "2026-11-01",
+          175.385
+        ],
+        [
+          "2026-11-02",
+          204.615
+        ],
+        [
+          "2026-11-04",
+          233.846
+        ],
+        [
+          "2026-11-06",
+          263.077
+        ],
+        [
+          "2026-11-08",
+          292.308
+        ],
+        [
+          "2026-11-10",
+          321.538
+        ],
+        [
+          "2026-11-12",
+          350.769
+        ],
+        [
+          "2026-11-14",
+          380.0
+        ]
+      ],
+      "projection": {
+        "value": 500,
+        "label": "500 by Nov 24"
+      },
+      "ladder": {
+        "kind": "height",
+        "passed": [
+          {
+            "id": "golden-gate-bridge-towers",
+            "name": "Golden Gate Bridge towers",
+            "drawing": "golden-gate-bridge-towers",
+            "at": 746,
+            "atText": "746 ft",
+            "blurb": "The towers of San Francisco's orange suspension bridge, opened in 1937.",
+            "where": "San Francisco, USA",
+            "on": "2026-11-12",
+            "toGo": null
+          }
+        ],
+        "next": {
+          "id": "eiffel-tower",
+          "name": "Eiffel Tower",
+          "drawing": "eiffel-tower",
+          "at": 1083,
+          "atText": "1,083 ft",
+          "blurb": "Paris's iron tower, built for the 1889 World's Fair and meant to be temporary.",
+          "where": "Paris, France",
+          "on": null,
+          "toGo": "162 to go"
+        },
+        "goalPicked": false
+      },
+      "route": null,
+      "pics": []
+    },
+    {
+      "id": "steps",
+      "label": "Steps",
+      "noun": "steps",
+      "icon": "steps",
+      "format": "count",
+      "source": "wearable",
+      "pending": false,
+      "gameOn": false,
+      "needsPerDay": false,
+      "total": {
+        "value": 187700,
+        "text": "187,700",
+        "unit": "steps"
+      },
+      "today": null,
+      "points": [
+        [
+          "2026-10-21",
+          0.0
+        ],
+        [
+          "2026-10-22",
+          14438.462
+        ],
+        [
+          "2026-10-24",
+          28876.923
+        ],
+        [
+          "2026-10-26",
+          43315.385
+        ],
+        [
+          "2026-10-28",
+          57753.846
+        ],
+        [
+          "2026-10-30",
+          72192.308
+        ],
+        [
+          "2026-11-01",
+          86630.769
+        ],
+        [
+          "2026-11-02",
+          101069.231
+        ],
+        [
+          "2026-11-04",
+          115507.692
+        ],
+        [
+          "2026-11-06",
+          129946.154
+        ],
+        [
+          "2026-11-08",
+          144384.615
+        ],
+        [
+          "2026-11-10",
+          158823.077
+        ],
+        [
+          "2026-11-12",
+          173261.538
+        ],
+        [
+          "2026-11-14",
+          187700.0
+        ]
+      ],
+      "projection": {
+        "value": 200000,
+        "label": "200k by Nov 17"
+      },
+      "ladder": null,
+      "route": {
+        "name": "San Diego to San Francisco",
+        "distanceText": "501 miles",
+        "walkedText": "85 mi",
+        "progress": 0.16966067864271456,
+        "straightLine": false,
+        "finishedOn": null,
+        "map": "/api/game/v1/progress/map?measure=steps&w=700&h=400",
+        "towns": [
+          {
+            "name": "San Diego",
+            "atText": "mile 0",
+            "x": 0.8,
+            "y": 0.95,
+            "passedOn": "2026-10-21"
+          },
+          {
+            "name": "Del Mar",
+            "atText": "mile 19",
+            "x": 0.7,
+            "y": 0.8,
+            "passedOn": "2026-10-26"
+          },
+          {
+            "name": "Oceanside",
+            "atText": "mile 38",
+            "x": 0.65,
+            "y": 0.7,
+            "passedOn": "2026-10-31"
+          },
+          {
+            "name": "San Clemente",
+            "atText": "mile 59",
+            "x": 0.6,
+            "y": 0.6,
+            "passedOn": "2026-11-07"
+          },
+          {
+            "name": "Irvine",
+            "atText": "mile 84",
+            "x": 0.55,
+            "y": 0.5,
+            "passedOn": "2026-11-14"
+          },
+          {
+            "name": "LA",
+            "atText": "33 mi away",
+            "x": 0.48,
+            "y": 0.4,
+            "passedOn": null
+          },
+          {
+            "name": "San Francisco",
+            "atText": "416 to go",
+            "x": 0.1,
+            "y": 0.1,
+            "passedOn": null
+          }
+        ],
+        "goalPicked": true,
+        "completed": []
+      },
+      "pics": []
+    }
+  ],
+  "streak": {
+    "current": 11,
+    "best": {
+      "count": 11,
+      "from": "2026-10-26",
+      "to": "2026-11-13"
+    },
+    "today": "pending",
+    "months": [
+      {
+        "month": "2026-11",
+        "days": "dddddddddddddtffffffffffffffff"
+      }
+    ],
+    "obligations": []
+  },
+  "medals": [
+    {
+      "id": "total-1000",
+      "kind": "total",
+      "gold": true,
+      "face": {
+        "number": "1K"
+      },
+      "title": "1,000",
+      "detail": "pushups",
+      "earnedOn": "2026-11-14",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "pull-golden",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "golden-gate-bridge-towers"
+      },
+      "title": "Golden Gate",
+      "detail": "380 pull-ups",
+      "earnedOn": "2026-11-12",
+      "open": {
+        "page": "totals",
+        "measureId": "pullups.reps"
+      }
+    },
+    {
+      "id": "hr-2",
+      "kind": "health",
+      "gold": false,
+      "face": {
+        "delta": {
+          "icon": "heart",
+          "text": "↓2"
+        }
+      },
+      "title": "Heart rate",
+      "detail": "down 2 bpm",
+      "earnedOn": "2026-11-12",
+      "open": {
+        "page": "health",
+        "measureId": "restingHeartRate"
+      }
+    },
+    {
+      "id": "streak-11",
+      "kind": "streak",
+      "gold": false,
+      "face": {
+        "streak": 11
+      },
+      "title": "11 days",
+      "detail": "your best run",
+      "earnedOn": "2026-11-09",
+      "open": {
+        "page": "streak",
+        "measureId": null
+      }
+    },
+    {
+      "id": "friend-leo",
+      "kind": "friend",
+      "gold": false,
+      "face": {
+        "member": {
+          "memberId": "member-leo",
+          "firstName": "Leo",
+          "avatarUrl": null
+        }
+      },
+      "title": "Passed Leo",
+      "detail": "in total pushups",
+      "earnedOn": "2026-11-08",
+      "open": {
+        "page": "friends",
+        "measureId": "pushups.reps"
+      }
+    }
+  ],
+  "shelf": [
+    "total-1000",
+    "pull-golden",
+    "hr-2",
+    "streak-11",
+    "friend-leo"
+  ],
+  "moments": [],
+  "picCount": 3
+}
