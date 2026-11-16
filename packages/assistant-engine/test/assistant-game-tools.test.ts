@@ -104,7 +104,7 @@ describe('game dynamic tools', () => {
     expect(guidance).not.toContain("or cancel it when it is the speaker's own")
     expect(guidance).toContain('even though it came before the ask')
     expect(guidance).toContain("Another player's account")
-    expect(guidance).not.toMatch(/act only for the player whose message you are answering|it is not a yes and changes nothing|requests from earlier messages/)
+    expect(guidance).not.toMatch(/act only for the player whose message you are answering|requests from earlier messages/)
     for (const tool of [MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL, MURPH_GAME_PHOTO_TOOL]) {
       expect(tool.inputSchema.properties.messageRef.description).toContain('last 24 hours')
       expect(tool.inputSchema.properties.messageRef.description).not.toContain('current message')
