@@ -578,6 +578,19 @@ describe.skipIf(!enabled)("weekly game change serialization against PostgreSQL",
     expect(await db.gamePlayer.findUniqueOrThrow({ where: { gameId_memberId: { gameId, memberId: a } } })).toMatchObject({ leftAt: null });
     await proveContinuingProgress(a, gameId, continuing, before);
   });
+  it("ends obligations when a block voids a live pair game, and unblocking changes nothing", async () => {
+    const {a,b,gameId} = await setup({ days: [0, 1, 2, 3, 4, 5, 6] }); const db = getPrisma();
+    const c = `game_c_${randomUUID()}`; members.push(c);
+    await db.hostedMember.create({ data: { id: c, billingStatus: "not_started" } });
+    await run(c, { type: "setProfile", firstName: "Sam", timeZone: "UTC" });
+    const continuing = await continuingProgress(a, c, gameId);
+    const before = await progressAt(a, new Date());
+    expect(await run(a, { type: "block", memberId: b })).toMatchObject({ ok: true });
+    expect(await db.game.findUniqueOrThrow({ where: { id: gameId } })).toMatchObject({ status: "void", settledAt: null });
+    await proveContinuingProgress(a, gameId, continuing, before);
+    expect(await run(a, { type: "unblock", memberId: b })).toMatchObject({ ok: true });
+    expect((await progressAt(a, new Date(`${addDays(continuing.dayOne, 4)}T18:00:00Z`))).streak.current).toBe(5);
+  });
   it("asks again for a call-off the other player declined, and refuses one before the game is live", async () => {
     const {a,b,room,gameId} = await setup(); const db = getPrisma(); const chat = {chatContainerMemberId:room,beforeMutationTx:fence};
     const callOff = {kind:"call_off" as const}; const asked = randomUUID();
