@@ -612,6 +612,11 @@ model HostedMember {
   gameInvitations GameInvitee[] @relation("GameInviteeMember")
   chatHostedGames Game[] @relation("GameChatContainer")
   companionLastContactAt         DateTime?                       @map("companion_last_contact_at")
+  companionAppPlatform           String?                         @map("companion_app_platform")
+  companionAppVersion            String?                         @map("companion_app_version")
+  companionAppBuild              String?                         @map("companion_app_build")
+  companionOsVersion             String?                         @map("companion_os_version")
+  companionDeviceModel           String?                         @map("companion_device_model")
   companionLastForegroundAt      DateTime?                       @map("companion_last_foreground_at")
   companionPushRoute             CompanionPushRoute?
   appleHealthReopenPushes        AppleHealthReopenPush[]

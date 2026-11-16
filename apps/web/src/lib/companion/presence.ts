@@ -4,10 +4,15 @@ import { companionPresence } from "@murphai/hosted-execution/companion-presence"
 import { getPrisma } from "../prisma";
 import { requireHostedRuntimeCallbackTx, type HostedRuntimeIdentity } from "../hosted-execution/runtime-owner";
 import { requirePersonalMember } from "./member-access";
+import type { CompanionClientInfo } from "./client-info";
 
 const transactionOptions = { maxWait: 5_000, timeout: 5_000 };
 
-export async function recordCompanionHeartbeat(memberId: string, state: "foreground" | "background"): Promise<void> {
+export async function recordCompanionHeartbeat(
+  memberId: string,
+  state: "foreground" | "background",
+  clientInfo: CompanionClientInfo | null = null,
+): Promise<void> {
   await getPrisma().$transaction(async (tx) => {
     await requirePersonalMember(tx, memberId);
     // Receipt time is sampled after the member lock. Concurrent requests cannot
@@ -16,6 +21,13 @@ export async function recordCompanionHeartbeat(memberId: string, state: "foregro
     await tx.hostedMember.update({
       where: { id: memberId }, data: { companionLastContactAt: now,
         ...(state === "foreground" ? { companionLastForegroundAt: now } : {}),
+        ...(clientInfo ? {
+          companionAppPlatform: clientInfo.platform,
+          companionAppVersion: clientInfo.version,
+          companionAppBuild: clientInfo.build,
+          companionOsVersion: clientInfo.osVersion,
+          companionDeviceModel: clientInfo.deviceModel,
+        } : {}),
       },
     });
   }, transactionOptions);
