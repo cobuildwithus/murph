@@ -1,5 +1,5 @@
 import 'server-only';
-import { z } from 'zod';
+import * as z from '@murphai/contracts/zod-runtime';
 import { hostedOnboardingError } from '../../hosted-onboarding/errors';
 import { cutPolyline, decodePolyline, distanceM, encodePolyline, greatCircle, routeBbox, type Coordinate } from './route-geometry';
 

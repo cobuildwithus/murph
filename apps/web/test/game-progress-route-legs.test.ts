@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { replaceRouteLeg, routeAwardKey, routeLegs, routeView } from '../src/lib/game/progress/route-progress';
 import { encodePolyline } from '../src/lib/game/progress/route-geometry';
+import { medalSchema } from '../src/lib/game/progress/contract';
 const leg = { from: 'A', to: 'B', distanceM: 100, polyline: encodePolyline([[0, 0], [1, 0]]), towns: [{ name: 'B', atM: 100 }], straightLine: false, startTotal: 0 };
 const next = { ...leg, from: 'B', to: 'C', distanceM: 200 };
 describe('Progress route legs', () => {
@@ -19,6 +20,9 @@ describe('Progress route legs', () => {
     const awards = routeLegs({ measureId: 'walk.meters', legs, points });
     expect(awards.map(award => [award.key, award.on])).toEqual([[routeAwardKey('walk.meters', legs[0]!), '2026-11-02'], [routeAwardKey('walk.meters', legs[1]!), '2026-11-09']]);
     expect(routeLegs({ measureId: 'walk.meters', legs, points })).toEqual(awards);
+    for (const award of awards) expect(medalSchema.safeParse({ id: 'award', kind: award.kind, gold: false,
+      face: award.data.face, title: award.data.title, detail: award.data.detail, earnedOn: award.on,
+      open: { page: award.data.page, measureId: award.measureId } }).success).toBe(true);
   });
   it('does not transfer an old goal award to a replacement in the same leg slot', () => {
     const award = routeLegs({ measureId: 'walk.meters', legs: [leg], points: [['2026-11-02', 100]] })[0]!;

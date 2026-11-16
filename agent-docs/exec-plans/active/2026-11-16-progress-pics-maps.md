@@ -56,8 +56,15 @@ background job, cache table, retry or feature flag.
 - The shared patch writer now also accepts a synchronous computed patch evaluated
   against its observed state. Route awards use frozen route identity, so an old
   completion cannot attach to a replacement at the same array index.
-- The first diff-scoped remote check is still running against the earlier
-  foundation head. The final integrated candidate needs its own selector run.
+- Remote diff verification exited 5 before admission: the worker was unreachable
+  during the 20-minute SSH bootstrap window. No test ran remotely.
+- Local diff verification found two direct Zod imports (exit 1); changed them to
+  the repository's public contracts entrypoint and reran the selector.
+- That selector passed all six affected package suites and typechecks. Its Web
+  run overlapped the cleanup-cap edit and reported two failures; a fresh
+  four-suite run passed all 126 tests (exit 0), then ten suites passed all 258.
+  The app-scoped selector was cancelled while queued for the shared host slot
+  to integrate the newly published BE1 reader (selector exit 1, waiter 143).
 
 ## Remaining integration
 
@@ -65,6 +72,10 @@ background job, cache table, retry or feature flag.
 - GET map needs the canonical measure progress and uploaded Murph style id.
 - BE1/BE2 must compose route views, first-route selection, route awards and photo
   pins into their reads and connect goals to the route preview/setter.
+- BE1 has published `readGameSeries`, and BE2's published health reader returns
+  `Health.sums`. Integration must preserve these existing totals owners.
+- `setFirstRoute` freezes the automatic route without setting `goal`, and keeps
+  a manual choice made while its provider call was in flight.
 - Comparison PNGs and deployed token/style verification await the custom style.
 - Keep PR #5060 draft and this plan active. Do not merge or run ReviewGPT.
 
@@ -74,8 +85,8 @@ background job, cache table, retry or feature flag.
   authority, hence the required setter context and computed state patch.
 - Map preview (rows 04/15) adds the explicitly requested `from`/`to` query variant
   to BE0's parser and enforces Mapbox's documented 1280-pixel maximum.
-- Account deletion retires at most 100 picture objects per member per request;
-  successful pages are removed before an explicit continuation. No background
-  job or automatic retry is added. This bounded cleanup behavior must remain
-  visible in integration review; it is separate from incomplete award input,
-  which settles nothing.
+- Picture collections admit at most 10,000 rows through a limit-plus-one read.
+  Account deletion rejects an incomplete collection before purging, retires an
+  admitted collection serially, then removes its rows. The earlier proposed
+  100-picture continuation was removed to honor section 9. No background job,
+  truncation recovery or automatic retry is added.

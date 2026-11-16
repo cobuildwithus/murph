@@ -16,17 +16,16 @@ describe('Progress picture ownership and deletion', () => {
   it('account deletion retires every key, including retired rows, before dropping ownership', async () => {
     mocks.many.mockResolvedValue([{ id, storageKey }]);
     await deleteProgressPicsForAccount(['owner'], db);
-    expect(mocks.many).toHaveBeenCalledWith({ where: { memberId: 'owner' }, select: { id: true, storageKey: true }, orderBy: { id: 'asc' }, take: 101 });
+    expect(mocks.many).toHaveBeenCalledWith({ where: { memberId: 'owner' }, select: { id: true, storageKey: true }, orderBy: { id: 'asc' }, take: 10001 });
     expect(mocks.purge.mock.invocationCallOrder[0]).toBeLessThan(mocks.remove.mock.invocationCallOrder[0]!);
     mocks.purge.mockRejectedValueOnce(new Error('unavailable')); mocks.remove.mockClear();
-    await expect(deleteProgressPicsForAccount(['owner'], db)).rejects.toThrow('unavailable');
+    await expect(deleteProgressPicsForAccount(['owner'], db)).rejects.toMatchObject({ httpStatus: 503, retryable: true, cause: undefined });
     expect(mocks.remove).not.toHaveBeenCalled();
   });
-  it('bounds account cleanup and preserves the next page for an explicit continuation', async () => {
-    mocks.many.mockResolvedValue(Array.from({ length: 101 }, (_, i) => ({ id: String(i), storageKey })));
+  it('rejects an incomplete account-cleanup collection before any purge or deletion', async () => {
+    mocks.many.mockResolvedValue(Array.from({ length: 10001 }, (_, i) => ({ id: String(i), storageKey })));
     await expect(deleteProgressPicsForAccount(['owner'], db)).rejects.toMatchObject({ httpStatus: 503, retryable: true });
-    expect(mocks.purge).toHaveBeenCalledTimes(100);
-    expect(mocks.remove.mock.calls[0]![0].where.id.in).toHaveLength(100);
+    expect(mocks.purge).not.toHaveBeenCalled(); expect(mocks.remove).not.toHaveBeenCalled();
   });
   it('gives a different owner exactly the missing-picture result without fetching or opening bytes', async () => {
     mocks.find.mockResolvedValue(null);
@@ -59,7 +58,7 @@ describe('Progress picture ownership and deletion', () => {
   });
   it('propagates a failed tombstone so delete cannot claim success', async () => {
     mocks.find.mockResolvedValue(row); mocks.purge.mockRejectedValue(new Error('storage unavailable'));
-    await expect(deleteProgressPic('owner', id, mocks.auth)).rejects.toThrow('storage unavailable');
+    await expect(deleteProgressPic('owner', id, mocks.auth)).rejects.toMatchObject({ httpStatus: 503, retryable: true, cause: undefined });
     expect(mocks.update).toHaveBeenCalledTimes(1);
   });
   it('uses the existing immutable key on upload replay and never uploads for a retired/colliding UUID', async () => {

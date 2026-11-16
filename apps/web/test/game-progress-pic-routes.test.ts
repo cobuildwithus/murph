@@ -28,16 +28,19 @@ describe('Progress picture HTTP contract', () => {
   it.each([GET, DELETE])('rejects malformed ids before effects', async route => {
     const response = await route(request(), { params: Promise.resolve({ id: 'bad' }) });
     expect(response.status).toBe(400); expect(mocks.read).not.toHaveBeenCalled(); expect(mocks.remove).not.toHaveBeenCalled();
+    expect(response.headers.get('cache-control')).toBe('private, no-store');
   });
   it('preserves the indistinguishable missing/foreign/retired result', async () => {
     mocks.read.mockRejectedValue(hostedOnboardingError({ code: 'PROGRESS_PIC_NOT_FOUND', httpStatus: 404, message: 'That picture is not available.' }));
     const response = await GET(request(), context);
     expect(response.status).toBe(404); expect(await response.json()).toMatchObject({ error: { code: 'PROGRESS_PIC_NOT_FOUND' } });
+    expect(response.headers.get('cache-control')).toBe('private, no-store');
   });
   it('returns one retryable 503 without leaking storage errors', async () => {
     mocks.read.mockRejectedValue(new Error('private-provider-body'));
     const response = await GET(request(), context);
     expect(response.status).toBe(503);
+    expect(response.headers.get('cache-control')).toBe('private, no-store');
     expect(await response.json()).toEqual({ error: { code: 'PROGRESS_UNAVAILABLE', message: 'Progress could not load. Try again.', retryable: true } });
     expect(mocks.read).toHaveBeenCalledTimes(1);
   });

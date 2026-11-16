@@ -23,7 +23,8 @@ export function routeLegs(ctx: { measureId: string; legs: readonly RouteLeg[]; p
   return ctx.legs.flatMap(leg => {
     const on = crossingDay(points, leg.startTotal + leg.distanceM);
     return on ? [{ key: routeAwardKey(ctx.measureId, leg), kind: 'route', measureId: ctx.measureId, subjectMemberId: null, on,
-      data: { from: leg.from, to: leg.to, distanceM: leg.distanceM, startTotal: leg.startTotal } }] : [];
+      data: { from: leg.from, to: leg.to, distanceM: leg.distanceM, startTotal: leg.startTotal,
+        face: { drawing: 'route' }, title: leg.to, detail: `${milesText(leg.distanceM)} from ${leg.from}`, page: 'totals' } }] : [];
   });
 }
 

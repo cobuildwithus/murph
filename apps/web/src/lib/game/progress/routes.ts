@@ -9,6 +9,14 @@ import routesByTimeZone from './bank/routes-tz.json';
 
 export { routeLegs, routeView } from './route-progress';
 
+/** The reader resolves firstRouteId through the checked bank and calls this only when legs are absent. */
+export async function setFirstRoute(memberId: string, measureId: string, from: string, to: string, beforeMutationTx: BeforeProgressMutation) {
+  const route = await resolveRoute(from, to);
+  return patchMeasureState(memberId, measureId, previous => ({
+    legs: previous.legs ?? [{ ...route, startTotal: 0 }],
+  }), beforeMutationTx);
+}
+
 /** BE1/BE2 supply their complete canonical series and live mutation authority. */
 export async function setRouteGoal(memberId: string, measureId: string, from: string, to: string, context: {
   points: readonly [Day, number][];

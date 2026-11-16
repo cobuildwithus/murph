@@ -6678,9 +6678,11 @@ removal; neither a delayed upload nor legacy recovery can replace it.
 Picture reads require the requesting owner's live row both before retrieval
 and after decryption. Deletion retires the row before awaiting the Worker
 purge and reports failure if that purge fails. Account deletion, after its
-existing suspension fence, retires up to 100 pictures per member before deleting
-those rows; a larger collection returns retryable pending cleanup, and the next
-explicit deletion request continues from the remaining rows. Upload admission
+existing suspension fence, reads at most 10,001 picture rows per member and
+rejects an incomplete collection before any purge. An admitted collection has
+at most 10,000 serial object retirements and one bulk row deletion, all outside
+database transactions; failures preserve the rows and block account deletion.
+There is no pagination recovery or automatic retry. Upload admission
 rechecks native auth under the member lock before registering the random key,
 so account cleanup also fences uploads still in flight. Live picture lists read
 10,001 rows; more than 10,000 marks the input incomplete and yields no truncated
@@ -6692,7 +6694,8 @@ object identity and `retired` marker are approved operational metadata.
 exercise association is sealed in `meta_encrypted`; no health amount or image
 content is stored in operational metadata. Route endpoints, geometry, towns,
 distance and starting total are private content inside the existing sealed
-measure state. Mapbox receives only requested places or sampled coordinates,
+measure state. Route award data seals those endpoints, distance, starting total,
+and the medal's face, title, detail and destination page. Mapbox receives only requested places or sampled coordinates,
 never a member identity, health total or provider token in a client response.
 
 Progress maps resolve two permanent geocodes, one simplified driving route and

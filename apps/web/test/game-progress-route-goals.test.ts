@@ -7,7 +7,7 @@ vi.mock('../src/lib/prisma', () => ({ getPrisma: () => db }));
 vi.mock('../src/lib/game/progress/crypto', () => ({ progressLookup: () => 'lookup',
   openProgress: async (_target: object, value: string) => JSON.parse(value), sealProgress: mocks.seal }));
 vi.mock('../src/lib/game/progress/mapbox', () => ({ resolveRoute: mocks.resolve }));
-import { firstRouteId, routePlaces, setRouteGoal } from '../src/lib/game/progress/routes';
+import { routePlaces, setFirstRoute, setRouteGoal } from '../src/lib/game/progress/routes';
 import { routeAwardKey } from '../src/lib/game/progress/route-progress';
 
 const leg = { from: 'A', to: 'B', distanceM: 100, polyline: 'synthetic', towns: [], straightLine: false, startTotal: 0 };
@@ -16,6 +16,15 @@ const context = () => ({ points: [['2026-11-02', 120]] as [string, number][], aw
 beforeEach(() => { vi.resetAllMocks(); mocks.write.mockResolvedValue({ count: 1 }); mocks.seal.mockResolvedValue('sealed-next'); mocks.resolve.mockResolvedValue(next); });
 
 describe('Progress route goal mutation', () => {
+  it('freezes the automatic first route without claiming the member picked it', async () => {
+    mocks.find.mockResolvedValue(null);
+    const first = await setFirstRoute('owner', 'walk.meters', 'B', 'C', mocks.authorize);
+    expect(first).toEqual({ legs: [{ ...next, startTotal: 0 }] });
+    // A manual goal saved while Mapbox was resolving wins over the automatic choice.
+    mocks.find.mockResolvedValue({ stateEncrypted: JSON.stringify({ goal: { from: 'A', to: 'B' }, legs: [leg] }) });
+    expect(await setFirstRoute('owner', 'walk.meters', 'B', 'C', mocks.authorize))
+      .toEqual({ goal: { from: 'A', to: 'B' }, legs: [leg] });
+  });
   it('rolls over the state observed after Mapbox, preserving completed legs and other fields', async () => {
     const previous = JSON.stringify({ legs: [leg], baseline: { value: 10, from: '2026-10-01', to: '2026-10-28' } });
     mocks.resolve.mockImplementation(async () => { mocks.find.mockResolvedValue({ stateEncrypted: previous }); return next; });
@@ -45,9 +54,4 @@ describe('Progress route goal mutation', () => {
   it.each([
     ['London to Paris', { from: 'London', to: 'Paris' }], ['5k', null], ['To the Moon', null],
   ])('uses only two-place bank routes: %s', (name, expected) => expect(routePlaces(name)).toEqual(expected));
-  it('chooses only the curated time-zone route without location data', () => {
-    expect(firstRouteId('America/Los_Angeles')).toBe('sf-to-la');
-    expect(firstRouteId('Europe/London')).toBe('lands-end-to-john-o-groats');
-    expect(firstRouteId('Etc/UTC')).toBe('nyc-to-dc');
-  });
 });

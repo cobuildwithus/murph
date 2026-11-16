@@ -10,6 +10,7 @@ import { openProgress, openProgressMany, sealProgress } from './crypto';
 import type { BeforeProgressMutation } from './state';
 import type { PicUploadQuery } from './contract';
 
+const MAX_PROGRESS_PICS = 10_000;
 const metaTarget = (memberId: string, rowId: string) => ({ memberId, rowId, table: 'game_progress_pic', field: 'meta' } as const);
 const bytesTarget = (userId: string, key: string) => ({ userId, lane: 'hosted-member-private-field', scope: 'game-progress',
   aad: { purpose: 'game-progress', table: 'game_progress_pic', rowId: key, field: 'bytes' } } as const);
@@ -19,6 +20,17 @@ function storage() {
   const control = readHostedExecutionControlClientIfConfigured();
   if (!control) throw hostedOnboardingError({ code: 'PROGRESS_PIC_UNAVAILABLE', httpStatus: 503, retryable: true, message: 'Pictures could not load. Try again.' });
   return control;
+}
+
+/** Account cleanup also crosses this boundary, outside the picture HTTP wrapper. */
+async function purgePicture(memberId: string, storageKey: string): Promise<void> {
+  try {
+    await storage().purgeRuntimeResource({ userId: memberId, resource: { kind: 'game_progress_pic',
+      objectKey: hostedProgressPicObjectKey({ userId: memberId, mediaId: storageKey }) } });
+  } catch {
+    throw hostedOnboardingError({ code: 'PROGRESS_PIC_UNAVAILABLE', httpStatus: 503, retryable: true,
+      message: 'Pictures could not be deleted. Try again.' });
+  }
 }
 
 /** Create ownership before uploading, under the same member fence as account deletion. */
@@ -59,15 +71,14 @@ export async function deleteProgressPic(memberId: string, id: string, beforeMuta
     await tx.gameProgressPic.updateMany({ where: { id, memberId, retiredAt: null }, data: { retiredAt: new Date() } });
     return owned;
   });
-  await storage().purgeRuntimeResource({ userId: memberId, resource: { kind: 'game_progress_pic',
-    objectKey: hostedProgressPicObjectKey({ userId: memberId, mediaId: row.storageKey }) } });
+  await purgePicture(memberId, row.storageKey);
 }
 
 /** The view computes chart positions from its own cumulative points. No totals are persisted here. */
 export async function readProgressPics(memberId: string) {
   const rows = await getPrisma().gameProgressPic.findMany({ where: { memberId, retiredAt: null },
-    select: { id: true, takenAt: true, metaEncrypted: true }, orderBy: [{ takenAt: 'asc' }, { id: 'asc' }], take: 10001 });
-  if (rows.length > 10000) return { incomplete: true, pics: [] };
+    select: { id: true, takenAt: true, metaEncrypted: true }, orderBy: [{ takenAt: 'asc' }, { id: 'asc' }], take: MAX_PROGRESS_PICS + 1 });
+  if (rows.length > MAX_PROGRESS_PICS) return { incomplete: true, pics: [] };
   const metadata = await openProgressMany<{ measureId: string }>(rows.map(row => ({ ...metaTarget(memberId, row.id), value: row.metaEncrypted })));
   return { incomplete: false, pics: rows.map((row, i) => ({ id: row.id, takenAt: row.takenAt, measureId: metadata[i]!.measureId })) };
 }
@@ -75,10 +86,10 @@ export async function readProgressPics(memberId: string) {
 /** Called after account suspension, before member cascades. Tombstones outlive both rows and keys. */
 export async function deleteProgressPicsForAccount(memberIds: readonly string[], db: { gameProgressPic: Pick<PrismaClient['gameProgressPic'], 'findMany' | 'deleteMany'> }): Promise<void> {
   for (const memberId of memberIds) {
-    const rows = await db.gameProgressPic.findMany({ where: { memberId }, select: { id: true, storageKey: true }, orderBy: { id: 'asc' }, take: 101 });
-    for (const row of rows.slice(0, 100)) await storage().purgeRuntimeResource({ userId: memberId,
-      resource: { kind: 'game_progress_pic', objectKey: hostedProgressPicObjectKey({ userId: memberId, mediaId: row.storageKey }) } });
-    if (rows.length) await db.gameProgressPic.deleteMany({ where: { memberId, id: { in: rows.slice(0, 100).map(row => row.id) } } });
-    if (rows.length > 100) throw hostedOnboardingError({ code: 'PROGRESS_PIC_DELETION_PENDING', httpStatus: 503, retryable: true, message: 'Picture cleanup is still in progress. Try deleting your account again.' });
+    const rows = await db.gameProgressPic.findMany({ where: { memberId }, select: { id: true, storageKey: true }, orderBy: { id: 'asc' }, take: MAX_PROGRESS_PICS + 1 });
+    if (rows.length > MAX_PROGRESS_PICS) throw hostedOnboardingError({ code: 'PROGRESS_PIC_DELETION_INCOMPLETE', httpStatus: 503,
+      retryable: true, message: 'Picture cleanup could not load completely. Your account has not been deleted.' });
+    for (const row of rows) await purgePicture(memberId, row.storageKey);
+    if (rows.length) await db.gameProgressPic.deleteMany({ where: { memberId, id: { in: rows.map(row => row.id) } } });
   }
 }
