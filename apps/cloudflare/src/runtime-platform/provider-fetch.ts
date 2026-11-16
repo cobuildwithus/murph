@@ -208,7 +208,9 @@ async function fetchCloudflareHostedInternalRequest(input: {
           workspaceAttemptId: input.workspaceAttemptId ?? null,
         },
         error,
-        level: "warn",
+        level: internalRequest.signal.aborted && error === internalRequest.signal.reason
+          ? "info"
+          : "warn",
         message: "Hosted runtime internal request failed.",
         phase: "outbox",
         userId: input.boundUserId,
