@@ -14,7 +14,7 @@ if (enabled) {
   if (!["127.0.0.1", "localhost", "[::1]"].includes(url.hostname) || !url.pathname.startsWith("/murph_test")) throw new Error("Custom connection SQL proof requires an isolated local test database.");
 }
 const migration = (name: string) => readFile(new URL(`../prisma/migrations/${name}/migration.sql`, import.meta.url), "utf8");
-const MIGRATIONS = ["20261116000000_custom_connections", "20261116020000_custom_connection_action_requests"];
+const MIGRATIONS = ["20261116000000_custom_connections", "20261116130000_custom_connection_action_requests"];
 
 describe.skipIf(!enabled)("custom connection PostgreSQL migration", () => {
   it("applies the exact migrations in a temporary namespace and cascades deletion", async () => {
@@ -65,7 +65,7 @@ describe.skipIf(!enabled)("custom connection PostgreSQL migration", () => {
         await client.query("INSERT INTO hosted_member_identity VALUES ($1, $2)", [id, phone]);
       }
       await client.query("INSERT INTO hosted_member VALUES ('never')");
-      await client.query(await migration("20261116030000_member_first_sign_in_method"));
+      await client.query(await migration("20261116130100_member_first_sign_in_method"));
       const rows = (await client.query("SELECT id, first_sign_in_method FROM hosted_member ORDER BY id")).rows;
       expect(Object.fromEntries(rows.map((row) => [row.id, row.first_sign_in_method]))).toEqual({
         "email-only": null, never: null, phone: "phone", "phone-imported": "phone", "phone-later": null,
