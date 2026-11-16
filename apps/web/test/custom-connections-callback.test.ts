@@ -67,6 +67,10 @@ describe("Settings changes", () => {
     await expect(patchConnection({ ...mocks.row!, revision: 5 }, { revision: 4, tools: {} }, { request: request(), session })).rejects.toMatchObject({ code: "conflict" });
     expect(mocks.saveCatalog).not.toHaveBeenCalled();
   });
+  it.each(["on", "off"] as const)("keeps a signed-out service locked when turned %s", async (status) => {
+    await expect(patchConnection({ ...mocks.row!, status: "needs_sign_in" }, { revision: mocks.row!.revision, status }, { request: request(), session })).rejects.toMatchObject({ code: "needs_sign_in" });
+    expect(mocks.saveCatalog).not.toHaveBeenCalled();
+  });
   it("refuses a pasted link that carries a query, before storing anything", async () => {
     await expect(addConnection(request(), session, "https://notes.example.com/mcp?key=synthetic")).rejects.toMatchObject({ code: "url_has_query" });
   });

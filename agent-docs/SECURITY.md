@@ -75,7 +75,7 @@ at ten per member under member-row admission. Runtime manifests select only
 nonsecret mount coordinates and stored catalogs; listing never calls upstream.
 Tool results have an additional 256-KiB limit, and a result containing the
 member's access token is refused. The gateway refuses JSON-RPC batches, so one
-relay request is one call. A tool definition over 16 KiB is locked, and the
+relay request is one call. A tool definition over 24 KiB is locked, and the
 approved snapshot is capped at 64 KiB. A pasted link with a query is refused,
 since it usually carries a key that would sit unencrypted.
 

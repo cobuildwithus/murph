@@ -37,6 +37,17 @@ describe("stateless custom connection gateway", () => {
     expect((await response.json()).result.isError).toBe(true);
     expect(mocks.upstream).not.toHaveBeenCalled();
   });
+  it("re-checks approval just before the call leaves Web", async () => {
+    const callTool = vi.fn();
+    mocks.upstream.mockImplementation(async (_row: unknown, operation: (client: unknown, options: unknown) => Promise<unknown>) => {
+      // The member turns the tool off while sign-in and setup are running.
+      mocks.read.mockResolvedValue({ ...row, tools: tools.map((tool) => ({ ...tool, state: "off" })) });
+      return operation({ callTool }, {});
+    });
+    const response = await handleConnectionMcp(request("tools/call", { name: "read_notes", arguments: {} }), coordinates);
+    expect((await response.json()).result.isError).toBe(true);
+    expect(callTool).not.toHaveBeenCalled();
+  });
   it("refuses JSON-RPC batches before any upstream call", async () => {
     const one = { jsonrpc: "2.0", method: "tools/call", params: { name: "read_notes", arguments: {} } };
     const batch = new Request("https://www.withmurph.ai/api/internal/custom-connections/cc_synthetic/3/catalog/mcp", {

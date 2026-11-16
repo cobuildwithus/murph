@@ -49,6 +49,8 @@ export interface CustomConnectionsFlowApi {
   headingRef: RefObject<HTMLHeadingElement | null>;
   leave: () => void;
   openChoose: (target: CustomConnection, mode: "edit" | "new") => void;
+  /** Opens a service's screen and asks the service what its actions are now. */
+  openService: (target: CustomConnection) => void;
   pending: boolean;
   removeService: (target: CustomConnection) => Promise<void>;
   saveTools: (target: CustomConnection, mode: "edit" | "new") => Promise<void>;
@@ -129,7 +131,7 @@ function ListScreen({ flow }: { flow: Flow }) {
                 ROW_CLASS,
                 "flex w-full items-center gap-3 text-left outline-offset-2 focus-visible:outline-2 focus-visible:outline-[#FFFCF6]/70",
               )}
-              onClick={() => flow.openChoose(item, "edit")}
+              onClick={() => flow.openService(item)}
               type="button"
             >
               <span className="flex min-w-0 flex-1 flex-col gap-0.5">

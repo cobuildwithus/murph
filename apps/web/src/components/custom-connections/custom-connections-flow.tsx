@@ -52,6 +52,11 @@ function toolDraft(connection: CustomConnection): Record<string, boolean> {
   return Object.fromEntries(connection.tools.map((tool) => [tool.name, tool.state === "on"]));
 }
 
+function sameDraft(a: Record<string, boolean>, b: Record<string, boolean>): boolean {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  return [...keys].every((key) => Boolean(a[key]) === Boolean(b[key]));
+}
+
 function startingDraft(fixture: CustomConnectionsFlowProps["fixture"]): Record<string, boolean> {
   if (!fixture) return {};
   if (fixture.draft) return fixture.draft;
@@ -171,6 +176,23 @@ export function CustomConnectionsFlow({ fixture, returned }: CustomConnectionsFl
     return saved;
   }
 
+  /** New actions and changed definitions only show up when the service is asked again. */
+  async function refreshService(target: CustomConnection) {
+    try {
+      const { connection: fresh } = await requestHostedOnboardingJson<{ connection: CustomConnection }>({
+        method: "POST",
+        url: connectionUrl(target.id, "/refresh"),
+      });
+      remember(fresh);
+      // Keep any choices the member has started making; otherwise show what is stored now.
+      setDraft((current) => (sameDraft(current, toolDraft(target)) ? toolDraft(fresh) : current));
+    } catch {
+      // A service that signed Murph out or can't be reached shows that from the stored state.
+      const loaded = await loadConnections().catch(() => null);
+      if (loaded) setConnections(loaded);
+    }
+  }
+
   const flow: CustomConnectionsFlowApi = {
     actionError,
     connection: "connectionId" in step ? connections.find((item) => item.id === step.connectionId) ?? null : null,
@@ -182,6 +204,10 @@ export function CustomConnectionsFlow({ fixture, returned }: CustomConnectionsFl
     urlId,
     go,
     openChoose,
+    openService: (target) => {
+      openChoose(target, "edit");
+      void refreshService(target);
+    },
     back: () => go(home(connections)),
     leave: () => router.push("/settings"),
     setTool: (name, on) => setDraft((current) => ({ ...current, [name]: on })),

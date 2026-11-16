@@ -38,7 +38,7 @@ export async function settingsConnections(request: Request, id?: string, action?
     }
     if (request.method === "DELETE") {
       await removeConnection(row, { request, session });
-      return new Response(null, { status: 204, headers: { "Cache-Control": "no-store" } });
+      return json({ removed: true });
     }
     return new Response(null, { status: 405 });
   } catch (error) { return connectionErrorResponse(error); }

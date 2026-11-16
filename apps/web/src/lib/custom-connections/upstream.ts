@@ -81,7 +81,10 @@ export async function withConnectionClient<T>(row: ConnectionRow, operation: (cl
       return response;
     },
   });
-  const client = new Client({ name: "murph-custom-connections", version: "1.0.0" }, { capabilities: {} });
+  // Servers on the 2026-07-28 revision drop the 2025 handshake; let the SDK pick the era.
+  const client = new Client({ name: "murph-custom-connections", version: "1.0.0" }, {
+    capabilities: {}, listMaxPages: 10, versionNegotiation: { mode: "auto" },
+  });
   try {
     await client.connect(transport, { signal: deadline, timeout: remaining() });
     const result = await operation(client, { signal: deadline, timeout: remaining() });
@@ -100,19 +103,11 @@ export async function listConnectionTools(row: ConnectionRow, provider?: Connect
 /** The server's tools and the name it gives itself (a claim, used only for display and the tool prefix). */
 export async function describeConnection(row: ConnectionRow, provider?: ConnectionOAuthProvider) {
   return withConnectionClient(row, async (client, options) => {
-    const tools = [];
-    let cursor: string | undefined;
-    for (let page = 0; page < 10; page++) {
-      const result = await client.listTools(cursor ? { cursor } : undefined, options);
-      tools.push(...result.tools);
-      if (tools.length > 100) throw new ConnectionError("limit");
-      cursor = result.nextCursor;
-      if (!cursor) {
-        const server = client.getServerVersion();
-        return { tools, serverName: server?.title ?? server?.name };
-      }
-    }
-    throw new ConnectionError("limit");
+    // With no cursor the SDK walks every page itself, up to listMaxPages.
+    const { tools } = await client.listTools(undefined, options);
+    if (tools.length > 100) throw new ConnectionError("limit");
+    const server = client.getServerVersion();
+    return { tools, serverName: server?.title ?? server?.name };
   }, provider);
 }
 

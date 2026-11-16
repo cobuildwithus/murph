@@ -127,7 +127,8 @@ export async function finishConnectionSignIn(request: Request, session: HostedAp
 export async function patchConnection(row: ConnectionRow, input: { revision: number; tools?: Record<string, boolean>; status?: "on" | "off" }, authority: SettingsMutation) {
   // The member approves what they saw; a refresh in between means look again.
   if (input.revision !== row.revision) throw new ConnectionError("conflict", 409);
-  if (input.status === "on" && row.status === "needs_sign_in") throw new ConnectionError("needs_sign_in");
+  // Only completed sign-in leaves needs_sign_in; turning it off and on again must not reuse a refresh token that may be spent.
+  if (input.status !== undefined && row.status === "needs_sign_in") throw new ConnectionError("needs_sign_in");
   const tools = approveTools(storedToolsSchema.parse(row.tools), input.tools ?? {});
   return settingsMutation(authority, async (tx) => {
     const result = await saveCatalog(row, tools, input.status, tx);

@@ -81,4 +81,9 @@ describe("request-scoped upstream SDK lifecycle", () => {
     const signedIn = { ...row, auth: "oauth", credentialsEncrypted: JSON.stringify({ discovery: {}, tokens: { access_token: "synthetic-member-access", token_type: "Bearer" }, expiresAt: Date.now() + 3_600_000 }) };
     await expect(withConnectionClient(signedIn, (client) => client.callTool({ name: "read_notes", arguments: {} }))).rejects.toThrow("sign-in token");
   });
+  it("connects to a server that only speaks the 2026-07-28 revision", async () => {
+    const handler = createMcpHandler(server, { legacy: "reject" });
+    mocks.fetch.mockImplementation(async (url: string | URL, init?: RequestInit) => handler.fetch(new Request(url, init)));
+    expect((await listConnectionTools(row))[0]?.name).toBe("read_notes");
+  });
 });

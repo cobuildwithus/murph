@@ -28,7 +28,7 @@ export function digest(value: unknown): string {
   return createHash("sha256").update(canonical(value)).digest("base64url");
 }
 // Each approved definition rides in every eligible turn; the member sees only its title and description.
-const TOOL_DEFINITION_MAX_BYTES = 16_384;
+const TOOL_DEFINITION_MAX_BYTES = 24_576;
 const APPROVED_SNAPSHOT_MAX_BYTES = 65_536;
 function definitionBytes(definition: ToolDefinition): number {
   return Buffer.byteLength(canonical(definition));

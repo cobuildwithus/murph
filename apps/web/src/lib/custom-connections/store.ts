@@ -40,7 +40,8 @@ export async function markNeedsSignIn(row: ConnectionRow, claim?: string) {
   await getPrisma().hostedMcpConnection.updateMany({
     where: { id: row.id, generation: row.generation, tokenVersion: row.tokenVersion,
       status: row.status, ...(claim ? { refreshClaim: claim } : {}) },
-    data: { status: "needs_sign_in", refreshClaim: null, refreshExpiresAt: null },
+    // A new revision makes any open Settings page reload before it can save over this.
+    data: { status: "needs_sign_in", refreshClaim: null, refreshExpiresAt: null, revision: { increment: 1 } },
   });
 }
 export async function claimRefresh(row: ConnectionRow): Promise<string> {

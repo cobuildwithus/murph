@@ -17,6 +17,13 @@ export async function admitGateway(request: Request, coordinates: { id: string; 
   }
   return row;
 }
+async function readApprovedConnection(admitted: { memberId: string; id: string; generation: number; catalog: string }, tool: string) {
+  const current = await readConnection(admitted.memberId, admitted.id);
+  const approved = approvedSnapshot(storedToolsSchema.parse(current.tools));
+  if (current.status !== "on" || current.generation !== admitted.generation || current.catalog !== admitted.catalog
+    || !approved.some((definition) => definition.name === tool)) throw new ConnectionError("not_found", 403);
+  return current;
+}
 export async function handleConnectionMcp(request: Request, coordinates: { id: string; generation: string; catalog: string }): Promise<Response> {
   try {
     const admitted = await admitGateway(request, coordinates);
@@ -30,12 +37,13 @@ export async function handleConnectionMcp(request: Request, coordinates: { id: s
       server.setRequestHandler("tools/list", async () => ({ tools: approvedSnapshot(storedToolsSchema.parse(admitted.tools)) }));
       server.setRequestHandler("tools/call", async (rpc) => {
         try {
-          // The request may have waited behind initialization; reload approval before egress.
-          const current = await readConnection(admitted.memberId, admitted.id);
-          const approved = approvedSnapshot(storedToolsSchema.parse(current.tools));
-          if (current.status !== "on" || current.generation !== admitted.generation || current.catalog !== admitted.catalog
-            || !approved.some((tool) => tool.name === rpc.params.name)) throw new ConnectionError("not_found", 403);
-          const result = await withConnectionClient(current, (client, options) => client.callTool({ name: rpc.params.name, arguments: rpc.params.arguments }, options));
+          // Approval is checked before sign-in and setup, and again just before the call
+          // leaves Web, since a refresh or a slow server can give the member time to revoke it.
+          const current = await readApprovedConnection(admitted, rpc.params.name);
+          const result = await withConnectionClient(current, async (client, options) => {
+            await readApprovedConnection(admitted, rpc.params.name);
+            return await client.callTool({ name: rpc.params.name, arguments: rpc.params.arguments }, options);
+          });
           if (!isCallToolResult(result)) throw new ConnectionError("not_mcp");
           if (Buffer.byteLength(JSON.stringify(result)) > 262144) throw new ConnectionError("limit");
           await getPrisma().hostedMcpConnection.updateMany({ where: { id: current.id, generation: current.generation, status: "on" }, data: { lastUsedAt: new Date() } });
