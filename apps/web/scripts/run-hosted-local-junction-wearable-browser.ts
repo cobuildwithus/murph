@@ -1092,18 +1092,25 @@ async function describeAuthorizationSurface(page: Page): Promise<string> {
     const countActions = async (controls: Locator) => {
       let actions = 0;
       let enabledActions = 0;
+      const labels: string[] = [];
       for (let index = 0; index < await controls.count(); index += 1) {
-        const state = await readAuthorizationActionState(controls.nth(index));
-        if (state !== null) actions += 1;
+        const control = controls.nth(index);
+        const state = await readAuthorizationActionState(control);
+        if (state !== null) {
+          actions += 1;
+          labels.push(safeActionLabel(await readAuthorizationActionText(control)));
+        }
         if (state === "enabled") enabledActions += 1;
       }
-      return { actions, enabledActions };
+      return { actions, enabledActions, labels };
     };
     let actions = 0;
     let allActions = 0;
     let enabledActions = 0;
+    const labels: string[] = [];
     for (const role of ["button", "link"] as const) {
       const all = await countActions(scope.getByRole(role));
+      labels.push(...all.labels);
       const recognized = await countActions(
         scope.getByRole(role, { name: AUTH_ACTION_PATTERN }),
       );
@@ -1125,6 +1132,7 @@ async function describeAuthorizationSurface(page: Page): Promise<string> {
     return {
       actions,
       enabledActions,
+      labels,
       otherActions: Math.max(0, allActions - actions),
       uncheckedCheckboxes,
     };
@@ -1157,8 +1165,22 @@ async function describeAuthorizationSurface(page: Page): Promise<string> {
     `childEnabledActions=${child.enabledActions}`,
     `childOtherActions=${child.otherActions}`,
     `mainUncheckedCheckboxes=${main.uncheckedCheckboxes}`,
-    `childUncheckedCheckboxes=${child.uncheckedCheckboxes}.`,
+    `childUncheckedCheckboxes=${child.uncheckedCheckboxes}`,
+    `mainActionWords=${main.labels.join("|") || "none"}.`,
   ].join(" ");
+}
+
+// Failures stay content-free: an action is reported only as one of these
+// fixed words when its whole label matches, otherwise as "other".
+const DIAGNOSTIC_ACTION_WORDS = [
+  "accept", "agree", "allow", "approve", "authorize", "back", "cancel",
+  "confirm", "continue", "decline", "deny", "done", "grant", "help", "log in",
+  "next", "proceed", "save", "sign in", "skip", "submit",
+] as const;
+
+function safeActionLabel(text: string): string {
+  const label = text.replace(/\s+/gu, " ").trim().toLowerCase();
+  return DIAGNOSTIC_ACTION_WORDS.find((word) => word === label) ?? "other";
 }
 
 async function requirePersistedWearableConnection(
@@ -1462,7 +1484,11 @@ function safePageLocation(page: Pick<Page, "url"> | null): string {
         ? "partner_consent"
         : url.pathname === "/oauth2Confirm"
           ? "oauth2_consent"
-          : "other";
+          // Garmin routes are fixed words; a segment with digits, symbols or
+          // more than three segments could carry an identifier.
+          : /^(?:\/[A-Za-z]{1,32}){1,3}$/u.test(url.pathname)
+            ? `other:${url.pathname}`
+            : "other";
     return `${host}/${route}`;
   } catch {
     return "unavailable";
