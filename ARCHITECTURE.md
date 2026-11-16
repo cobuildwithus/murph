@@ -6159,6 +6159,12 @@ the mean.
 The current headline uses the current fourteen-day window, not an older
 complete window. Sleep converts canonical minutes to seconds once. All sums
 and scoring inputs remain inside the 365-day replica window.
+Metric access uses the last seven member-local dates, including today. Recent
+resting-HR or VO2 samples establish wearable evidence; a wearable metric with no
+sample in that window is `off` when that evidence exists. Phone-only missing
+metrics remain `missing`; Steps does not infer wearable access. Historical
+values, baselines and earned wins remain intact. This is a data-derived hint,
+not an OS permission fact.
 
 `norms.ts` ports the iOS age ranking, including the original-device HR rule.
 `age-norms.json` is byte-identical to the iOS resource. The shared synthetic
@@ -6178,8 +6184,16 @@ owners; no additional table or plaintext private field is introduced:
 | Friend award `data_encrypted.data` | `amount`, `otherAmount`: crossing facts; `face.member` contains subject id, name and avatar; common medal presentation and scoring evidence |
 | Route award `data_encrypted.data` | `from`, `to`, `distanceM`, `startTotal`: frozen journey facts; common medal presentation and scoring evidence |
 
-`friend-cohort.ts` admits current, unblocked players from games already played.
-It rechecks the cohort after opening names. Deleted-member notices use the
+`friend-cohort.ts` admits current, unblocked players from games already played,
+plus unjoined invitees from the viewer's current created games. Invited and
+negotiating games use the existing invitation deadline; cancelled and closed
+invitations disappear. Pending names use Home's `pendingInviteeLabel` and the
+creator-owned sealed name, never another name source. A pending row has
+`invited: true`, null total/rank/join date, and no chart line, award or sharing
+audience. Invitations without a member use the existing game id and seat as an
+opaque row identity; no contact identifier is exposed or persisted. A joined
+friend wins over duplicate pending invitations. The cohort is rechecked after
+opening names and again before returning data. Deleted-member notices use the
 existing viewer-owned `GamePlayer.departedLabel` and `leftAt`; no former member
 identifier or separate deletion ledger is retained. `friend-games.ts` reads
 500 games / 10,000 entries as limit-plus-one batches, including each friend's
@@ -6210,8 +6224,10 @@ current player identities. Cohort reads use two set queries each (games and
 blocks), repeated at the post-decryption and award-commit authority boundaries.
 Game inputs use four set queries (games, entries, task cache, measure state); at most 10,500
 source fields, 10,000 cached task fields and 10,000 measure states are opened in batches, outside
-transactions. Names are one batch of at most 5,001 fields including a departure
-label. Room discovery uses four set queries, with at most three concurrent
+transactions. Names are one batch of at most 5,001 fields including pending invite labels
+and a departure label. The same 501-game admission query selects at most ten
+player seats and nine invitation seats per game; occupied invitation seats are
+excluded. Pending identities never enter game-amount or pair-health reads. Room discovery uses four set queries, with at most three concurrent
 queries. Pair health reads deduplicate by friend and choose one room; at most
 500 existing board-owner reads run sequentially. Each board owner reads at most
 eight scope snapshots in batches of four with its pre/post grant checks; no

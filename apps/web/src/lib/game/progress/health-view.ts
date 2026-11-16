@@ -20,7 +20,14 @@ export function healthView(input: {
   joinedOn: string; today: string; snapshot: CompanionHealthSeries | null;
   profile: AgeProfile; metrics: HealthMetricInput[]; sums: Measure[];
 }): Health {
-  const metrics = input.metrics.map(metric => healthMetricView(metric, input.joinedOn, input.today, input.profile));
+  const from = addDaysToIsoDate(input.today, -6);
+  const recent = new Set(input.metrics.filter(metric => metric.daily.some(point => point.date >= from && point.date <= input.today)).map(metric => metric.id));
+  const wearable = recent.has("restingHeartRate") || recent.has("vo2Max");
+  const metrics = input.metrics.map((metric): HealthMetric => ({
+    ...healthMetricView(metric, input.joinedOn, input.today, input.profile),
+    access: recent.has(metric.id) ? "ok" : wearable && metric.id !== "steps" ? "off"
+      : metric.daily.length ? "ok" : "missing",
+  }));
   const available = input.metrics.filter(metric => metric.daily.length > 0);
   const winCount = input.metrics.reduce((sum, metric) => sum + metric.wins.length, 0);
   if (!input.snapshot && winCount === 0) return { joinedOn: input.joinedOn, today: input.today,

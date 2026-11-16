@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 const mocks = vi.hoisted(() => ({
-  health: vi.fn(), openGameTexts: vi.fn(), states: vi.fn(), games: vi.fn(), entries: vi.fn(), tasks: vi.fn(), openTasks: vi.fn(), settle: vi.fn(), current: vi.fn(), cohort: vi.fn(), ids: vi.fn(),
+  health: vi.fn(), openGameTexts: vi.fn(), states: vi.fn(), games: vi.fn(), entries: vi.fn(), tasks: vi.fn(), openTasks: vi.fn(), settle: vi.fn(), rooms: vi.fn(), current: vi.fn(), cohort: vi.fn(), ids: vi.fn(),
 }));
 vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({ game: { findMany: mocks.games },
   gameEntry: { findMany: mocks.entries }, gameProgressTaskMeasure: { findMany: mocks.tasks }, gameProgressMeasure: { findMany: mocks.states } }) }));
@@ -15,7 +15,7 @@ vi.mock("@/src/lib/game/progress/crypto", () => ({ openProgressMany: mocks.openT
 vi.mock("@/src/lib/game/progress/awards", () => ({ settleAwards: mocks.settle }));
 vi.mock("@/src/lib/game/progress/friend-cohort", () => ({ readFriendCohort: mocks.cohort, friendCohortIds: mocks.ids }));
 vi.mock("@/src/lib/game/progress/friend-health", () => ({ readFriendHealthSeries: mocks.health }));
-vi.mock("@/src/lib/game/progress/friend-sharing", () => ({ readFriendRooms: async () => ({ rooms: [], incomplete: false }) }));
+vi.mock("@/src/lib/game/progress/friend-sharing", () => ({ readFriendRooms: mocks.rooms }));
 import { GET } from "../app/api/game/v1/progress/friends/route";
 import { friendsSchema } from "@/src/lib/game/progress/contract";
 
@@ -35,7 +35,8 @@ beforeEach(() => {
     { memberId: "ava", firstName: "Ava", avatarUrl: null, me: true, invited: false, joinedOn: "2026-10-21", daily: null },
     { memberId: "leo", firstName: "Leo", avatarUrl: null, me: false, invited: false, joinedOn: "2026-10-21", daily: null },
   ] });
-  mocks.ids.mockResolvedValue({ ids: ["ava", "leo"], incomplete: false });
+  mocks.rooms.mockResolvedValue({ rooms: [], incomplete: false });
+  mocks.ids.mockResolvedValue({ ids: ["ava", "leo"], invited: [], incomplete: false });
   mocks.games.mockResolvedValue([game("shared", ["ava", "leo"]), game("other-game", ["leo"])]);
   mocks.entries.mockResolvedValue([
     entry("replaced", "shared", "ava", 0, 100), entry("retake", "shared", "ava", 0, 120, 2),
@@ -70,7 +71,7 @@ it.each(["games", "entries"])("marks a capped %s input incomplete and settles no
 });
 
 it("withholds a friend blocked while loading private game inputs", async () => {
-  mocks.ids.mockResolvedValue({ ids: ["ava"], incomplete: false });
+  mocks.ids.mockResolvedValue({ ids: ["ava"], invited: [], incomplete: false });
   const response = await GET(request());
   const body = friendsSchema.parse(await response.json());
   expect(body.rows.map(row => row.memberId)).toEqual(["ava"]);
@@ -131,4 +132,38 @@ it("shares BE1's Unicode task key and applies a per-day amount to earlier posts"
   const body = friendsSchema.parse(await (await GET(request())).json());
   expect(body.rows.map(row => [row.memberId, row.total?.value])).toEqual([["ava", 40], ["leo", 40]]);
   expect(mocks.tasks.mock.calls[0][0].where.lookup.in).toEqual(["ava:pushups daily:photo", "leo:pushups daily:photo"]);
+});
+
+
+it.each(["pushups.reps", "sleep"])("keeps invited-only friends out of %s totals, charts, awards and sharing", async measure => {
+  const cohort = await mocks.cohort();
+  cohort.people[1] = { ...cohort.people[1], invited: true, joinedOn: null };
+  mocks.cohort.mockResolvedValue(cohort);
+  mocks.ids.mockResolvedValue({ ids: ["ava"], invited: [{ memberId: "leo" }], incomplete: false });
+  mocks.games.mockResolvedValue([game("mine", ["ava"])]);
+  mocks.entries.mockResolvedValue([entry("mine", "mine", "ava", 0, 100)]);
+  mocks.health.mockImplementation(async ({ people }: { people: typeof cohort.people }) => ({ people, incomplete: false }));
+  const response = await GET(request(`measure=${measure}`));
+  expect(response.status).toBe(200);
+  const body = friendsSchema.parse(await response.json());
+  expect(body.rows.find(row => row.memberId === "leo")).toEqual({ memberId: "leo", firstName: "Leo", avatarUrl: null,
+    me: false, invited: true, joinedOn: null, private: false, rank: null, total: null });
+  expect(body.chart.some(line => line.memberId === "leo")).toBe(false);
+  expect(body.next).toBeNull();
+  expect(body.shareAudience).toEqual([]);
+  expect(mocks.games.mock.calls[0][0].where.players.some.memberId.in).toEqual(["ava"]);
+  expect(mocks.rooms).toHaveBeenCalledWith("ava", []);
+  expect(mocks.settle.mock.calls.flatMap(call => call[1])).toEqual([]);
+  if (measure === "sleep") expect(mocks.health.mock.calls[0][0].people.map((person: { memberId: string }) => person.memberId)).toEqual(["ava"]);
+  else expect(body.pills.map(pill => pill.id)).toContain("pushups.reps");
+});
+
+it("removes an invitation cancelled or expired while loading inputs", async () => {
+  const cohort = await mocks.cohort();
+  cohort.people[1] = { ...cohort.people[1], invited: true, joinedOn: null };
+  mocks.cohort.mockResolvedValue(cohort);
+  mocks.ids.mockResolvedValue({ ids: ["ava"], invited: [], incomplete: false });
+  const body = friendsSchema.parse(await (await GET(request())).json());
+  expect(body.rows.map(row => row.memberId)).toEqual(["ava"]);
+  expect(body.chart.some(line => line.memberId === "leo")).toBe(false);
 });

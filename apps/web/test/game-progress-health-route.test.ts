@@ -21,6 +21,7 @@ vi.mock("@/src/lib/game/progress/awards", () => ({ readAwards: mocks.awards, set
 import { addDaysToIsoDate } from "@murphai/contracts";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { GET } from "../app/api/game/v1/progress/health/route";
+import { healthSchema } from "@/src/lib/game/progress/contract";
 import notConnected from "./fixtures/progress/health-row08-not-connected.json";
 
 const joinedOn = "2026-10-21", today = "2026-11-16";
@@ -132,4 +133,24 @@ it("a default-route failure returns one retryable 503 before settling any health
   expect(await response.json()).toMatchObject({ error: { retryable: true } });
   expect(mocks.resolve).toHaveBeenCalledTimes(1);
   expect(mocks.settle).not.toHaveBeenCalled();
+});
+
+
+it.each([
+  ["2026-11-09", "off"],
+  ["2026-11-08", "missing"],
+] as const)("uses member-local seven-day boundaries for wearable evidence on %s", async (date, access) => {
+  vi.setSystemTime(new Date("2026-11-16T01:00:00Z"));
+  mocks.profile.mockResolvedValue({ createdAt: new Date(`${joinedOn}T12:00:00Z`), timeZone: "America/Los_Angeles" });
+  const raw = snapshot();
+  mocks.raw.mockResolvedValue({ ...raw, numbers: { ...raw.numbers, restingHeartRate: { daily: [
+    { date, value: 70, source: "Apple Watch", observedAt: `${date}T12:00:00Z` },
+  ] } } });
+  const response = await GET(request());
+  expect(response.status).toBe(200);
+  const body = healthSchema.parse(await response.json());
+  expect(body.today).toBe("2026-11-15");
+  expect(body.metrics.find(metric => metric.id === "sleep")!.access).toBe(access);
+  expect(body.metrics.find(metric => metric.id === "vo2Max")!.access).toBe(access);
+  expect(body.metrics.find(metric => metric.id === "steps")!.access).toBe("missing");
 });

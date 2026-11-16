@@ -46,7 +46,8 @@ Updated: 2026-11-16
 3. Implement friends ranking and additive sharing, then route/view contracts.
 4. Prove invariants, review the candidate, commit, push and open the PR.
 5. Integrate published BE1 series/bank and BE3 route views; rebase onto main
-   after BE0 merges, complete health fixture reconciliation, then mark Ready.
+   after the integrator requests it, then mark Ready. Health goldens stay as
+   presentation examples; D5 route assertions remain authoritative.
 
 ## Decisions
 
@@ -56,6 +57,25 @@ Updated: 2026-11-16
   journeys through the API. Native rendering is owned by the iOS lanes.
 
 ## Verification
+
+- Fix-round `pnpm test:diff` across the eleven touched paths: exit 1. The full
+  Web suite passed 15,740 tests and skipped 2,794; its only failure was the
+  unchanged Google KMS retry-backoff deadline test (plus its unhandled rejection).
+  The standalone KMS file then passed all 32 tests, exit 0. That isolated pass
+  does not replace broad proof; the production build was not reached. Frog
+  records the timer race. Keep the PR draft with this verification hold.
+
+- Fix round: 145 tests across ten focused Progress and Home-view files, exit 0.
+  Seven-date tables cover wearable anchors, absent/old Sleep, phone-only data,
+  and the member-local midnight boundary. Cohort and route contracts cover
+  pending known/unbound invitees, expiry, cancellation, joining, blocks and
+  exclusion from totals, charts, awards and sharing.
+- Fix round: Web typecheck and final prepared typecheck, scoped lint, complexity,
+  docs drift and whitespace/privacy review all pass, exit 0. Existing lint
+  warnings in the game service are unchanged.
+- Fix-round Product UX: Ready at the backend route boundary. Rows 14 and 05
+  now follow the integrator's decisions. D5 scoring and presentation goldens
+  remain unchanged. Native/deployed proof remains with the integration lanes.
 
 - Final integrated `pnpm test:diff` on the 56 BE2/integration paths: exit 0.
   Web: 15,713 tests passed, 2,794 skipped; production build passed. Its final
@@ -84,7 +104,7 @@ Updated: 2026-11-16
 - All eleven friends golden views match BE0. The not-connected health golden
   is replayed through the route. Other health goldens contain illustrative
   500/1,400-step awards that conflict with D5's 1,000-step levels; preserve D5
-  pending fixture-owner reconciliation, rather than manufacture those awards.
+  as authoritative scoring; the goldens remain presentation examples.
 - Integrated BE1 #5063 and BE3 #5060 dependencies locally. Steps now uses the
   shared route owner and Sleep uses its own curated time ladder (rows 07/11).
   Generic medal presentation carries health, age, friend and route awards.
@@ -96,9 +116,17 @@ Updated: 2026-11-16
   The shared state writer preserves frozen baselines and computed route patches.
 - BE3 owns the remaining map route/style delivery; this lane composes its private
   map path and frozen geometry, with provider calls mocked in route contracts.
-- The replica does not expose a per-metric permission-off fact. Sleep is missing
-  when absent; row 14's explicit off state needs an authoritative input.
-- Product UX: Hold until these integration gaps are resolved. Keep this plan
-  active and the PR draft; do not merge or run ReviewGPT in this lane.
+- Fix round: derive missing wearable metrics as off when HR/VO2 evidence exists
+  in the last seven member-local dates; no OS permission input or persisted state.
+- Fix round: include current unjoined invitees using Home's sealed label owner.
+  They receive no total, rank, chart, award or health-sharing access. Cancellation,
+  expiry, joining and block changes are rechecked at the existing read boundaries.
+- Product UX patch: Outcome: resolve rows 14 and 05. Reaches: phone-only and
+  wearable members, pending and joined friends. Proof: date-boundary tables,
+  cohort transitions and private route contracts. No new table, endpoint or flag.
+- Integration handoff: the integrator requested no main rebase until BE1/BE3
+  merge. The backend fixes are implemented; the integrator will request that
+  rebase separately and owns ReviewGPT, merge and native/deployed proof. Keep
+  this plan active while the broad verification hold and integration remain.
 - Changelog: integrated native Progress release owns the member-facing entry;
   these backend routes alone have no shipped client caller.

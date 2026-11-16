@@ -64,6 +64,13 @@ import {
 import { addDays, gameLocalDate } from "./time";
 import { pendingGameChangeView, gameChangeControls } from "./changes";
 import { firstOpenSeat, isPairRoster } from "./roster";
+import type { Prisma } from "@prisma/client";
+
+/** The creator's sealed label is the name Home shows until an invitee joins. */
+export function pendingInviteeLabel(value: Prisma.JsonValue | null) {
+  return value as { nameEncrypted: string | null; relationshipEncrypted: string | null; photoKey: string | null } | null
+    ?? { nameEncrypted: null, relationshipEncrypted: null, photoKey: null };
+}
 
 const GAME_MEDIA_PATH = "/api/game/v1/media/";
 export const GAME_HISTORY_PREVIEW_LIMIT = 6;

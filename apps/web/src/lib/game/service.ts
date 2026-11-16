@@ -139,6 +139,7 @@ import { claimGamePostNotification, sendGamePostNotificationAfterResponse } from
 import { prepareGameAcceptNotification, sendGameAcceptNotificationAfterResponse } from "./accept-notification";
 import {
   buildGameHistoryView,
+  pendingInviteeLabel,
   buildGameView,
   GAME_HISTORY_PREVIEW_LIMIT,
   gameMediaUrl,
@@ -719,22 +720,6 @@ async function setProfile(context: CommandContext, command: Extract<GameCommand,
   };
 }
 
-interface PendingLabel {
-  nameEncrypted: string | null;
-  relationshipEncrypted: string | null;
-  photoKey: string | null;
-}
-
-function parsePendingLabel(value: Prisma.JsonValue | null): PendingLabel {
-  const label = isRecord(value) ? value : {};
-  const text = (field: unknown) => (typeof field === "string" ? field : null);
-  return {
-    nameEncrypted: text(label.nameEncrypted),
-    photoKey: text(label.photoKey),
-    relationshipEncrypted: text(label.relationshipEncrypted),
-  };
-}
-
 async function createGame(context: CommandContext, command: Extract<GameCommand, { type: "createGame" }>): Promise<string | { gameId: string; composer?: { murphPhoneNumber: string } }> {
   if (command.maxPlayers === 10 && (command.inviteeRecipient || command.inviteeMemberId)) reject("INVALID_REQUEST", "Group invites address each person in invitees.");
   if (command.maxPlayers === 10) return createGroupGame(context, command);
@@ -1180,7 +1165,7 @@ async function writeSchedule(tx: Tx, gameId: string, schedule: Schedule): Promis
 async function acceptInvitation(tx: Tx, row: GameRow, joinerId: string, seat: number): Promise<void> {
   const invitation = row.invitees.find(invitee => invitee.seat === seat);
   if (!invitation) return;
-  const label = parsePendingLabel(invitation.pendingLabel);
+  const label = pendingInviteeLabel(invitation.pendingLabel);
   await tx.gameInvitee.update({ where: { gameId_seat: { gameId: row.id, seat } }, data: { memberId: joinerId, pendingLabel: Prisma.DbNull,
     ...(row.maxPlayers === 2 ? { recipientLookupKey: null } : {}) } });
   if (!row.createdBy || (!label.nameEncrypted && !label.relationshipEncrypted && !label.photoKey)) return;
@@ -3915,7 +3900,7 @@ async function buildViewInputs(
     const invitation = row.invitees.find(invitee => !row.players.some(player => player.seat === invitee.seat));
     if (!invitation) return null;
     if (row.createdBy === viewerId) {
-      const pending = parsePendingLabel(invitation.pendingLabel);
+      const pending = pendingInviteeLabel(invitation.pendingLabel);
       return {
         memberId: invitation.memberId,
         name: ask(labelTarget(viewerId, "name"), pending.nameEncrypted),

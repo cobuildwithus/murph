@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import { addDaysToIsoDate } from "@murphai/contracts";
-import { healthMetricView, type HealthMetricInput } from "../src/lib/game/progress/health-view";
+import { healthView, healthMetricView, type HealthMetricInput } from "../src/lib/game/progress/health-view";
 
 const joinedOn = "2026-10-21", today = "2026-11-16";
 const profile = { age: 35, sex: "female" as const };
@@ -48,4 +48,25 @@ it("does not call an old complete window the current fourteen-day mean", () => {
     joinedOn, today, profile);
   expect(result.headline).toBe("Not enough data yet");
   expect(result.age).toBeNull();
+});
+
+
+it.each([
+  ["phone only", "steps", "2026-11-16", null, "missing"],
+  ["recent heart rate", "restingHeartRate", "2026-11-16", null, "off"],
+  ["recent VO2", "vo2Max", "2026-11-10", null, "off"],
+  ["old wearable", "restingHeartRate", "2026-11-09", null, "missing"],
+  ["future wearable", "restingHeartRate", "2026-11-17", null, "missing"],
+  ["sleep at the boundary", "restingHeartRate", "2026-11-16", "2026-11-10", "ok"],
+  ["sleep outside the boundary", "restingHeartRate", "2026-11-16", "2026-11-09", "off"],
+  ["old sleep on a stale wearable", "restingHeartRate", "2026-11-09", "2026-11-09", "ok"],
+] as const)("derives sleep access from seven dates: %s", (_name, id, date, sleepDate, access) => {
+  const point = (date: string) => ({ ...metric.daily[0], date });
+  const result = healthView({ joinedOn, today, profile, sums: [],
+    snapshot: { timeZone: "UTC", savedAt: `${today}T12:00:00Z`, freshness: "fresh", demographics: null,
+      window: { from: "2025-11-17", through: today }, stepsWindow: { from: "2025-11-17", through: today },
+      numbers: { restingHeartRate: null, vo2Max: null, sleep: null, steps: null } },
+    metrics: [{ ...metric, id, daily: [point(date)] }, { ...metric, id: "sleep", daily: sleepDate ? [point(sleepDate)] : [] }],
+  });
+  expect(result.metrics.find(item => item.id === "sleep")!.access).toBe(access);
 });
