@@ -18,7 +18,7 @@
       "name": "Mount Etna",
       "drawing": "mount-etna",
       "at": 11165,
-      "atText": "11,165 ft",
+      "atText": "11.2k ft",
       "blurb": "Sicily's giant volcano, one of the most active in the world, erupting often.",
       "where": "Sicily",
       "on": null,
@@ -29,7 +29,7 @@
       "name": "Mount Fuji",
       "drawing": "mount-fuji",
       "at": 12389,
-      "atText": "12,389 ft",
+      "atText": "12.4k ft",
       "blurb": "Japan's highest mountain, a snowcapped volcano and national symbol.",
       "where": "Japan",
       "on": null,
@@ -40,12 +40,13 @@
       "name": "Mount Rainier",
       "drawing": "mount-rainier",
       "at": 14406,
-      "atText": "14,406 ft",
+      "atText": "14.4k ft",
       "blurb": "The glacier-covered volcano that towers over Seattle, the highest peak in Washington.",
       "where": "Washington",
       "on": null,
       "toGo": "13k to go"
     }
   ],
-  "route": null
+  "route": null,
+  "note": "These real volcanoes are the closest match."
 }

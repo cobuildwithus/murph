@@ -91,7 +91,8 @@
       ],
       "projection": {
         "value": 2000,
-        "label": "2,000 by Nov 23"
+        "label": "2,000 by Nov 23",
+        "on": "2026-11-23"
       },
       "ladder": {
         "kind": "height",
@@ -260,7 +261,8 @@
       ],
       "projection": {
         "value": 500,
-        "label": "500 by Nov 24"
+        "label": "500 by Nov 24",
+        "on": "2026-11-24"
       },
       "ladder": {
         "kind": "height",
@@ -426,8 +428,8 @@
           "text": "↓3"
         }
       },
-      "title": "Heart rate down 3 bpm",
-      "detail": "Your best since you joined. It's your newest medal, so it's the gold one on Prizes.",
+      "title": "Heart rate",
+      "detail": "down 3 bpm",
       "earnedOn": "2026-11-14",
       "open": {
         "page": "health",
@@ -439,7 +441,7 @@
       "kind": "total",
       "gold": false,
       "face": {
-        "number": "1K"
+        "number": "1,000"
       },
       "title": "1,000",
       "detail": "pushups",
@@ -532,7 +534,9 @@
         "hr-3"
       ],
       "measureId": "restingHeartRate",
-      "nextGoal": null
+      "nextGoal": null,
+      "title": "Heart rate down 3 bpm",
+      "line": "Your best since you joined. It's your newest medal, so it's the gold one on Prizes."
     }
   ],
   "picCount": 3

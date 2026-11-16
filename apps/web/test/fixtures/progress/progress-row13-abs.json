@@ -79,7 +79,8 @@
       ],
       "projection": {
         "value": 18000,
-        "label": "5h by Nov 22"
+        "label": "5h by Nov 22",
+        "on": "2026-11-22"
       },
       "ladder": {
         "kind": "time",

@@ -342,7 +342,8 @@
       ],
       "projection": {
         "value": 200000,
-        "label": "200k by Nov 17"
+        "label": "200k by Nov 17",
+        "on": "2026-11-17"
       },
       "ladder": null,
       "route": {

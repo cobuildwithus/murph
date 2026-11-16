@@ -20,5 +20,6 @@
     "distanceText": "501 miles",
     "straightLine": false,
     "map": "/api/game/v1/progress/map?measure=walk.meters&w=700&h=400"
-  }
+  },
+  "note": null
 }

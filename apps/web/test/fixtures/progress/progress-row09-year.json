@@ -239,7 +239,8 @@
       ],
       "projection": {
         "value": 20000,
-        "label": "20k by Dec 19"
+        "label": "20k by Dec 19",
+        "on": "2026-12-19"
       },
       "ladder": {
         "kind": "height",
@@ -249,7 +250,7 @@
           "name": "Mount Kilimanjaro",
           "drawing": "mount-kilimanjaro",
           "at": 19341,
-          "atText": "19,341 ft",
+          "atText": "19.3k ft",
           "blurb": "Africa's highest mountain, a snowcapped volcano in Tanzania you can hike up.",
           "where": "Tanzania",
           "on": null,
@@ -261,7 +262,7 @@
             "name": "Mont Blanc",
             "drawing": "mont-blanc",
             "at": 15766,
-            "atText": "15,766 ft",
+            "atText": "15.8k ft",
             "blurb": "The highest peak in the Alps, on the French-Italian border, first climbed in 1786.",
             "where": "France / Italy",
             "on": "2026-10-01",
@@ -272,7 +273,7 @@
             "name": "Matterhorn",
             "drawing": "matterhorn",
             "at": 14692,
-            "atText": "14,692 ft",
+            "atText": "14.7k ft",
             "blurb": "The pointed Alpine peak on the Swiss-Italian border, first climbed in 1865.",
             "where": "Switzerland / Italy",
             "on": "2026-09-14",
@@ -283,7 +284,7 @@
             "name": "Mount Whitney",
             "drawing": "mount-whitney",
             "at": 14505,
-            "atText": "14,505 ft",
+            "atText": "14.5k ft",
             "blurb": "The highest point in the lower 48 states, in California's Sierra Nevada.",
             "where": "California, USA",
             "on": "2026-09-09",
@@ -294,7 +295,7 @@
             "name": "Mount Rainier",
             "drawing": "mount-rainier",
             "at": 14406,
-            "atText": "14,406 ft",
+            "atText": "14.4k ft",
             "blurb": "The glacier-covered volcano that towers over Seattle, the highest peak in Washington.",
             "where": "Washington, USA",
             "on": "2026-09-08",
@@ -305,7 +306,7 @@
             "name": "Mount Fuji",
             "drawing": "mount-fuji",
             "at": 12389,
-            "atText": "12,389 ft",
+            "atText": "12.4k ft",
             "blurb": "Japan's highest mountain, a snowcapped volcano and national symbol.",
             "where": "Honshu, Japan",
             "on": "2026-07-28",
@@ -624,7 +625,8 @@
       ],
       "projection": {
         "value": 2500,
-        "label": "2,500 by Dec 6"
+        "label": "2,500 by Dec 6",
+        "on": "2026-12-06"
       },
       "ladder": {
         "kind": "height",
@@ -815,7 +817,7 @@
         "drawing": "mont-blanc"
       },
       "title": "Mont Blanc",
-      "detail": "15,766 pushups",
+      "detail": "15.8k pushups",
       "earnedOn": "2026-10-01",
       "open": {
         "page": "totals",
@@ -830,7 +832,7 @@
         "drawing": "mount-fuji"
       },
       "title": "Mount Fuji",
-      "detail": "12,389 pushups",
+      "detail": "12.4k pushups",
       "earnedOn": "2026-07-28",
       "open": {
         "page": "totals",
@@ -1010,7 +1012,7 @@
         "drawing": "colca-canyon"
       },
       "title": "Colca Canyon",
-      "detail": "10,728 pushups",
+      "detail": "10.7k pushups",
       "earnedOn": "2026-01-01",
       "open": {
         "page": "totals",
@@ -1055,7 +1057,7 @@
         "drawing": "skydive"
       },
       "title": "A skydive",
-      "detail": "13,000 pushups",
+      "detail": "13k pushups",
       "earnedOn": "2026-01-01",
       "open": {
         "page": "totals",
@@ -3006,9 +3008,9 @@
       "kind": "total",
       "gold": false,
       "face": {
-        "number": "15K"
+        "number": "15k"
       },
-      "title": "15,000",
+      "title": "15k",
       "detail": "pushups",
       "earnedOn": "2026-10-01",
       "open": {
@@ -3021,7 +3023,7 @@
       "kind": "total",
       "gold": false,
       "face": {
-        "number": "2K"
+        "number": "2,000"
       },
       "title": "2,000",
       "detail": "pull-ups",
@@ -3036,9 +3038,9 @@
       "kind": "total",
       "gold": false,
       "face": {
-        "number": "10K"
+        "number": "10k"
       },
-      "title": "10,000",
+      "title": "10k",
       "detail": "pushups",
       "earnedOn": "2026-10-01",
       "open": {
@@ -3051,7 +3053,7 @@
       "kind": "total",
       "gold": false,
       "face": {
-        "number": "1K"
+        "number": "1,000"
       },
       "title": "1,000",
       "detail": "pull-ups",
@@ -3066,7 +3068,7 @@
       "kind": "total",
       "gold": false,
       "face": {
-        "number": "5K"
+        "number": "5,000"
       },
       "title": "5,000",
       "detail": "pushups",
@@ -3081,7 +3083,7 @@
       "kind": "total",
       "gold": false,
       "face": {
-        "number": "2K"
+        "number": "2,000"
       },
       "title": "2,000",
       "detail": "pushups",
@@ -3096,7 +3098,7 @@
       "kind": "total",
       "gold": false,
       "face": {
-        "number": "1K"
+        "number": "1,000"
       },
       "title": "1,000",
       "detail": "pushups",

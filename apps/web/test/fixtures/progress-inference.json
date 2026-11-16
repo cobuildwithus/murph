@@ -1,0 +1,602 @@
+[
+  {
+    "id": "case-01",
+    "text": "100 pushups",
+    "kind": "photo",
+    "expected": {
+      "quantity": 100,
+      "unit": "reps",
+      "name": "pushups"
+    }
+  },
+  {
+    "id": "case-02",
+    "text": "20 pull-ups",
+    "kind": "photo",
+    "expected": {
+      "quantity": 20,
+      "unit": "reps",
+      "name": "pullups"
+    }
+  },
+  {
+    "id": "case-03",
+    "text": "40 squats",
+    "kind": "photo",
+    "expected": {
+      "quantity": 40,
+      "unit": "reps",
+      "name": "squats"
+    }
+  },
+  {
+    "id": "case-04",
+    "text": "10 min abs",
+    "kind": "photo",
+    "expected": {
+      "quantity": 10,
+      "unit": "minutes",
+      "name": "abs"
+    }
+  },
+  {
+    "id": "case-05",
+    "text": "Plank 60 seconds",
+    "kind": "photo",
+    "expected": {
+      "quantity": 60,
+      "unit": "seconds",
+      "name": "planks"
+    }
+  },
+  {
+    "id": "case-06",
+    "text": "Plank 5 minutes",
+    "kind": "photo",
+    "expected": {
+      "quantity": 5,
+      "unit": "minutes",
+      "name": "planks"
+    }
+  },
+  {
+    "id": "case-07",
+    "text": "Pushups for 10 minutes",
+    "kind": "photo",
+    "expected": {
+      "quantity": 10,
+      "unit": "minutes",
+      "name": "pushups"
+    }
+  },
+  {
+    "id": "case-08",
+    "text": "12 push-ups",
+    "kind": "photo",
+    "expected": {
+      "quantity": 12,
+      "unit": "reps",
+      "name": "pushups"
+    }
+  },
+  {
+    "id": "case-09",
+    "text": "Walk 30 min",
+    "kind": "photo",
+    "expected": {
+      "quantity": 30,
+      "unit": "minutes",
+      "name": "walk"
+    }
+  },
+  {
+    "id": "case-10",
+    "text": "Run 1 mile",
+    "kind": "photo",
+    "expected": {
+      "quantity": 1,
+      "unit": "miles",
+      "name": "run"
+    }
+  },
+  {
+    "id": "case-11",
+    "text": "Walk 2 miles",
+    "kind": "photo",
+    "expected": {
+      "quantity": 2,
+      "unit": "miles",
+      "name": "walk"
+    }
+  },
+  {
+    "id": "case-12",
+    "text": "Run 5 km",
+    "kind": "photo",
+    "expected": {
+      "quantity": 5,
+      "unit": "km",
+      "name": "run"
+    }
+  },
+  {
+    "id": "case-13",
+    "text": "Walk 500 meters",
+    "kind": "photo",
+    "expected": {
+      "quantity": 500,
+      "unit": "meters",
+      "name": "walk"
+    }
+  },
+  {
+    "id": "case-14",
+    "text": "10,000 steps",
+    "kind": "photo",
+    "expected": {
+      "quantity": 10000,
+      "unit": "steps",
+      "name": "steps"
+    }
+  },
+  {
+    "id": "case-15",
+    "text": "Meditate 10 min",
+    "kind": "photo",
+    "expected": {
+      "quantity": 10,
+      "unit": "minutes",
+      "name": "meditation"
+    }
+  },
+  {
+    "id": "case-16",
+    "text": "Yoga 1 hour",
+    "kind": "photo",
+    "expected": {
+      "quantity": 1,
+      "unit": "hours",
+      "name": "yoga"
+    }
+  },
+  {
+    "id": "case-17",
+    "text": "Stretch 15 minutes",
+    "kind": "photo",
+    "expected": {
+      "quantity": 15,
+      "unit": "minutes",
+      "name": "stretching"
+    }
+  },
+  {
+    "id": "case-18",
+    "text": "20 lunges",
+    "kind": "photo",
+    "expected": {
+      "quantity": 20,
+      "unit": "reps",
+      "name": "lunges"
+    }
+  },
+  {
+    "id": "case-19",
+    "text": "30 situps",
+    "kind": "photo",
+    "expected": {
+      "quantity": 30,
+      "unit": "reps",
+      "name": "situps"
+    }
+  },
+  {
+    "id": "case-20",
+    "text": "40 crunches",
+    "kind": "photo",
+    "expected": {
+      "quantity": 40,
+      "unit": "reps",
+      "name": "crunches"
+    }
+  },
+  {
+    "id": "case-21",
+    "text": "20 burpees",
+    "kind": "photo",
+    "expected": {
+      "quantity": 20,
+      "unit": "reps",
+      "name": "burpees"
+    }
+  },
+  {
+    "id": "case-22",
+    "text": "25 jumping jacks",
+    "kind": "photo",
+    "expected": {
+      "quantity": 25,
+      "unit": "reps",
+      "name": "jumpingjacks"
+    }
+  },
+  {
+    "id": "case-23",
+    "text": "30 calf raises",
+    "kind": "photo",
+    "expected": {
+      "quantity": 30,
+      "unit": "reps",
+      "name": "calfraises"
+    }
+  },
+  {
+    "id": "case-24",
+    "text": "12 step-ups",
+    "kind": "photo",
+    "expected": {
+      "quantity": 12,
+      "unit": "reps",
+      "name": "stepups"
+    }
+  },
+  {
+    "id": "case-25",
+    "text": "2.5 km walk",
+    "kind": "photo",
+    "expected": {
+      "quantity": 2.5,
+      "unit": "km",
+      "name": "walk"
+    }
+  },
+  {
+    "id": "case-26",
+    "text": "0.5 hours of yoga",
+    "kind": "photo",
+    "expected": {
+      "quantity": 0.5,
+      "unit": "hours",
+      "name": "yoga"
+    }
+  },
+  {
+    "id": "case-27",
+    "text": "90 seconds of abs",
+    "kind": "photo",
+    "expected": {
+      "quantity": 90,
+      "unit": "seconds",
+      "name": "abs"
+    }
+  },
+  {
+    "id": "case-28",
+    "text": "2 hours walking",
+    "kind": "photo",
+    "expected": {
+      "quantity": 2,
+      "unit": "hours",
+      "name": "walk"
+    }
+  },
+  {
+    "id": "case-29",
+    "text": "Pushups: 50",
+    "kind": "photo",
+    "expected": {
+      "quantity": 50,
+      "unit": "reps",
+      "name": "pushups"
+    }
+  },
+  {
+    "id": "case-30",
+    "text": "3 miles running",
+    "kind": "photo",
+    "expected": {
+      "quantity": 3,
+      "unit": "miles",
+      "name": "run"
+    }
+  },
+  {
+    "id": "case-31",
+    "text": "1000 meters running",
+    "kind": "photo",
+    "expected": {
+      "quantity": 1000,
+      "unit": "meters",
+      "name": "run"
+    }
+  },
+  {
+    "id": "case-32",
+    "text": "45 second plank",
+    "kind": "photo",
+    "expected": {
+      "quantity": 45,
+      "unit": "seconds",
+      "name": "planks"
+    }
+  },
+  {
+    "id": "case-33",
+    "text": "15 pullups every day",
+    "kind": "photo",
+    "expected": {
+      "quantity": 15,
+      "unit": "reps",
+      "name": "pullups"
+    }
+  },
+  {
+    "id": "case-34",
+    "text": "100 pushups each morning",
+    "kind": "photo",
+    "expected": {
+      "quantity": 100,
+      "unit": "reps",
+      "name": "pushups"
+    }
+  },
+  {
+    "id": "case-35",
+    "text": "20 squats daily",
+    "kind": "photo",
+    "expected": {
+      "quantity": 20,
+      "unit": "reps",
+      "name": "squats"
+    }
+  },
+  {
+    "id": "case-36",
+    "text": "10 minutes meditation",
+    "kind": "photo",
+    "expected": {
+      "quantity": 10,
+      "unit": "minutes",
+      "name": "meditation"
+    }
+  },
+  {
+    "id": "case-37",
+    "text": "Lights out by 11",
+    "kind": "photo",
+    "expected": {
+      "quantity": null,
+      "unit": "days",
+      "name": null
+    }
+  },
+  {
+    "id": "case-38",
+    "text": "No sugar",
+    "kind": "photo",
+    "expected": {
+      "quantity": null,
+      "unit": "days",
+      "name": null
+    }
+  },
+  {
+    "id": "case-39",
+    "text": "Read 20 pages",
+    "kind": "photo",
+    "expected": {
+      "quantity": null,
+      "unit": "days",
+      "name": null
+    }
+  },
+  {
+    "id": "case-40",
+    "text": "Drink 2 liters of water",
+    "kind": "photo",
+    "expected": {
+      "quantity": null,
+      "unit": "days",
+      "name": null
+    }
+  },
+  {
+    "id": "case-41",
+    "text": "Eat 5 vegetables",
+    "kind": "photo",
+    "expected": {
+      "quantity": null,
+      "unit": "days",
+      "name": null
+    }
+  },
+  {
+    "id": "case-42",
+    "text": "Move",
+    "kind": "photo",
+    "expected": {
+      "quantity": null,
+      "unit": "days",
+      "name": null
+    }
+  },
+  {
+    "id": "case-43",
+    "text": "Morning walk",
+    "kind": "photo",
+    "expected": {
+      "quantity": null,
+      "unit": "days",
+      "name": "walk"
+    }
+  },
+  {
+    "id": "case-44",
+    "text": "Pushups every day",
+    "kind": "photo",
+    "expected": {
+      "quantity": null,
+      "unit": "days",
+      "name": "pushups"
+    }
+  },
+  {
+    "id": "case-45",
+    "text": "Yoga before bed",
+    "kind": "photo",
+    "expected": {
+      "quantity": null,
+      "unit": "days",
+      "name": "yoga"
+    }
+  },
+  {
+    "id": "case-46",
+    "text": "Planks",
+    "kind": "photo",
+    "expected": {
+      "quantity": null,
+      "unit": "days",
+      "name": "planks"
+    }
+  },
+  {
+    "id": "case-47",
+    "text": "No phone in bed",
+    "kind": "photo",
+    "expected": {
+      "quantity": null,
+      "unit": "days",
+      "name": null
+    }
+  },
+  {
+    "id": "case-48",
+    "text": "Cook dinner at home",
+    "kind": "photo",
+    "expected": {
+      "quantity": null,
+      "unit": "days",
+      "name": null
+    }
+  },
+  {
+    "id": "case-49",
+    "text": "Run at 7 AM",
+    "kind": "photo",
+    "expected": {
+      "quantity": null,
+      "unit": "days",
+      "name": "run"
+    }
+  },
+  {
+    "id": "case-50",
+    "text": "Walk by 6 pm",
+    "kind": "photo",
+    "expected": {
+      "quantity": null,
+      "unit": "days",
+      "name": "walk"
+    }
+  },
+  {
+    "id": "case-51",
+    "text": "100 pushups per week",
+    "kind": "photo",
+    "expected": {
+      "quantity": null,
+      "unit": "days",
+      "name": "pushups"
+    }
+  },
+  {
+    "id": "case-52",
+    "text": "Run 5 miles this week",
+    "kind": "photo",
+    "expected": {
+      "quantity": null,
+      "unit": "days",
+      "name": "run"
+    }
+  },
+  {
+    "id": "case-53",
+    "text": "Ten pushups",
+    "kind": "photo",
+    "expected": {
+      "quantity": null,
+      "unit": "days",
+      "name": "pushups"
+    }
+  },
+  {
+    "id": "case-54",
+    "text": "Twenty squats",
+    "kind": "photo",
+    "expected": {
+      "quantity": null,
+      "unit": "days",
+      "name": "squats"
+    }
+  },
+  {
+    "id": "case-55",
+    "text": "Meditate for ten minutes",
+    "kind": "photo",
+    "expected": {
+      "quantity": null,
+      "unit": "days",
+      "name": "meditation"
+    }
+  },
+  {
+    "id": "case-56",
+    "text": "Walk two miles",
+    "kind": "photo",
+    "expected": {
+      "quantity": null,
+      "unit": "days",
+      "name": "walk"
+    }
+  },
+  {
+    "id": "case-57",
+    "text": "Do not do 50 pushups",
+    "kind": "photo",
+    "expected": {
+      "quantity": null,
+      "unit": "days",
+      "name": "pushups"
+    }
+  },
+  {
+    "id": "case-58",
+    "text": "No 10 minute runs",
+    "kind": "photo",
+    "expected": {
+      "quantity": null,
+      "unit": "days",
+      "name": "run"
+    }
+  },
+  {
+    "id": "case-59",
+    "text": "Sleep by 10:30",
+    "kind": "photo",
+    "expected": {
+      "quantity": null,
+      "unit": "days",
+      "name": null
+    }
+  },
+  {
+    "id": "case-60",
+    "text": "Avoid snacks after 8",
+    "kind": "photo",
+    "expected": {
+      "quantity": null,
+      "unit": "days",
+      "name": null
+    }
+  }
+]

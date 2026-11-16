@@ -18,6 +18,10 @@ import { POST as upload } from "../app/api/game/v1/media/route";
 import { POST as post } from "../app/api/game/v1/games/[id]/entries/route";
 import { GET as read } from "../app/api/game/v1/games/[id]/route";
 import { GET as home } from "../app/api/game/v1/home/route";
+import { GET as progress } from "../app/api/game/v1/progress/route";
+import { PUT as progressAmount } from "../app/api/game/v1/progress/measures/[id]/route";
+import { progressSchema } from "../src/lib/game/progress/contract";
+import { progressLookup, sealProgress } from "../src/lib/game/progress/crypto";
 import { POST as recapWatched } from "../app/api/game/v1/games/[id]/recap-watched/route";
 import { DELETE as unblockRoute, PUT as blockRoute } from "../app/api/game/v1/blocks/[memberId]/route";
 import { PUT as blockInviteRoute } from "../app/api/game/v1/invites/[token]/block/route";
@@ -32,6 +36,8 @@ import { serializeHostedNativeSessionToken } from "../src/lib/better-auth/transp
 import type { GameHomeView, GameView } from "../src/lib/game/contract";
 import { assertGameMemberAuthCurrentTx, requireGameMemberAuth } from "../src/lib/game/http/auth";
 import { getPrisma } from "../src/lib/prisma";
+
+vi.mock("next/server", async original => ({ ...await original<typeof import("next/server")>(), after: vi.fn() }));
 
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
 if (enabled) {
@@ -139,6 +145,39 @@ describe.skipIf(!enabled)("game v1 local API smoke", () => {
   async function revoke(token: string) {
     await hostedAuthAdapter(getPrisma())({}).delete({ model: "session", where: [{ field: "id", value: `session-${tokenMember.get(token)!}` }] });
   }
+
+  it("rejects overflowing Progress amounts before writing and accepts 10,000 for two completed days", async () => {
+    const actor = await member("Ava"), peer = await member("Leo"), id = randomUUID();
+    const context = { params: Promise.resolve({ id }) };
+    const created = await game(create(request(actor, { gameId: id, inviteeFirstName: "Leo", terms: {
+      startsOn: new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10),
+      tasks: [{ seat: 0, text: "Pushups every day" }, { seat: 1, text: "Pushups every day" }],
+      schedule: { count: 7 }, stakes: [{ kind: "prize", item: "Lunch" }],
+    } })));
+    await game(accept(request(peer, { termsVersion: 1, timeZone: "UTC" }), { params: Promise.resolve({ token: created.inviteToken! }) }));
+    await game(start(request(actor), context));
+    for (let day = 0; day < 2; day++) {
+      if (day) await game(advance(request(actor, { days: 1 }), context));
+      await game(post(request(actor, { entryId: randomUUID(), kind: "words", text: "Done" }), context));
+    }
+    const db = getPrisma(), memberId = tokenMember.get(actor)!;
+    const lookup = progressLookup(memberId, "task", ["pushups every day", "any"]);
+    await db.gameProgressTaskMeasure.create({ data: { memberId, lookup,
+      measureEncrypted: await sealProgress({ memberId, table: "game_progress_task_measure", rowId: lookup, field: "measure" }, { quantity: null, unit: "days", name: "pushups" }) } });
+    const before = progressSchema.parse(await (await progress(request(actor, undefined, "GET"))).json());
+    expect(before.measures[0]).toMatchObject({ needsPerDay: true, total: { value: 2 } });
+    const measureContext = { params: Promise.resolve({ id: before.measures[0].id }) };
+    const awards = await db.gameProgressAward.findMany({ where: { memberId } });
+    for (const perDay of [1e308, 10_001, 1.5]) {
+      expect((await progressAmount(request(actor, { perDay }, "PUT"), measureContext)).status).toBe(400);
+      expect(await db.gameProgressMeasure.count({ where: { memberId } })).toBe(0);
+      expect(await db.gameProgressAward.findMany({ where: { memberId } })).toEqual(awards);
+    }
+    const accepted = await progressAmount(request(actor, { perDay: 10_000 }, "PUT"), measureContext);
+    expect(accepted.status).toBe(200);
+    expect(await accepted.json()).toMatchObject({ ok: true, measure: { id: "pushups.reps", total: { value: 20_000, text: "20,000" } } });
+    expect(await db.gameProgressMeasure.count({ where: { memberId } })).toBe(1);
+  });
 
   function revokeOnBodyRead(token: string, body: unknown, method = "POST") {
     const init: RequestInit & { duplex: "half" } = {
@@ -589,6 +628,16 @@ describe.skipIf(!enabled)("game v1 local API smoke", () => {
         postedAt: expect.any(String), blurHash: "synthetic-blur",
         ...(mediaKeys.length ? { preview: { kind: artifact.kind, mediaUrl: `/api/game/v1/media/${encodeURIComponent(mediaKeys[0])}` } } : {}) });
     }
+    const progressResponse = await progress(request(poster, undefined, "GET"));
+    expect(progressResponse.status).toBe(200);
+    const progressView = progressSchema.parse(await progressResponse.json());
+    expect(progressView.measures.map(measure => [measure.id, measure.total.value, measure.pending])).toEqual([
+      [expect.stringMatching(/^h[a-z0-9_-]{12}\.days$/iu), 2, true],
+      ["walk.meters", 1200.5, false], ["pushups.reps", 1, false],
+    ]);
+    const awardCount = await getPrisma().gameProgressAward.count({ where: { memberId: tokenMember.get(poster)! } });
+    expect((await progress(request(poster, undefined, "GET"))).status).toBe(200);
+    expect(await getPrisma().gameProgressAward.count({ where: { memberId: tokenMember.get(poster)! } })).toBe(awardCount);
     await game(advance(request(poster, { days: 1 }), context));
     await game(post(request(poster, { entryId: randomUUID(), kind: "words", text: "First" }), context));
     // The shared cap still counts attempts across different artifact kinds.
