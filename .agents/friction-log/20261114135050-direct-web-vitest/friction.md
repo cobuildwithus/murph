@@ -1,6 +1,7 @@
 ---
 title: 'Direct Web Vitest runs fail in a fresh worktree until changelog fragments are generated'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4965'
 ---
 
 ## Expected Behavior

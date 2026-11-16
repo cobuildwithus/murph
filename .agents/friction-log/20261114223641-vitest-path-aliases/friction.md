@@ -1,6 +1,7 @@
 ---
 title: 'Vitest path aliases can shadow exact entries with an earlier wildcard'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4987'
 ---
 
 ## Expected Behavior

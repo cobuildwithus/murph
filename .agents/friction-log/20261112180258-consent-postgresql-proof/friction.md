@@ -1,6 +1,7 @@
 ---
 title: 'Consent PostgreSQL proof rejects documented isolated test database names'
 severity: 'minor'
+issue: 'cobuildwithus/murph#4912'
 ---
 
 ## Expected Behavior

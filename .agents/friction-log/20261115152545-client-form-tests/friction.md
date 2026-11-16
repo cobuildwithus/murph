@@ -1,6 +1,7 @@
 ---
 title: 'Client form tests need an input event adapter for controlled inputs'
 severity: 'minor'
+issue: 'cobuildwithus/murph#5047'
 ---
 
 ## Expected Behavior
