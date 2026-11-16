@@ -1,6 +1,6 @@
 # Group Managed Automations
 
-Last verified: 2026-07-26
+Last verified: 2026-11-16
 
 ## Purpose
 
@@ -54,6 +54,10 @@ built-in.
 The saved delivery route is only a hint. Live Web-owned group-route authority
 must still resolve to the exact synthetic group runtime and non-direct
 Linq/iMessage or Telegram route. Group email is excluded.
+
+When Web refuses a Linq route because the runtime no longer owns it (a member
+with no private chat, or a group Murph has left), the refusal is permanent, so
+the occurrence is skipped as an owner mismatch instead of retried.
 
 ## Adding a future group automation
 

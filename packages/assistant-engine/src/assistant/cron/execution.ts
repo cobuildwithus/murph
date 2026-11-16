@@ -2917,9 +2917,11 @@ async function resolveAssistantCronManagedOwnerAuthorization(input: {
           target: input.target,
         })
     } catch (error) {
+      // Web refuses a Linq route this runtime no longer owns (no private
+      // chat, or a group thread it left). The refusal is permanent, so skip
+      // the occurrence; retrying would pin maintenance to it forever.
       if (
-        ownerScope === 'member'
-        && input.target.channel === 'linq'
+        input.target.channel === 'linq'
         && readAssistantCronErrorCode(error)
           === HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH
       ) {
