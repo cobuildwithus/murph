@@ -27,6 +27,12 @@ function canonical(value: unknown): string {
 export function digest(value: unknown): string {
   return createHash("sha256").update(canonical(value)).digest("base64url");
 }
+// Each approved definition rides in every eligible turn; the member sees only its title and description.
+const TOOL_DEFINITION_MAX_BYTES = 16_384;
+const APPROVED_SNAPSHOT_MAX_BYTES = 65_536;
+function definitionBytes(definition: ToolDefinition): number {
+  return Buffer.byteLength(canonical(definition));
+}
 export function approvedSnapshot(tools: StoredTool[]): ToolDefinition[] {
   return tools.filter((tool) => tool.state === "on" && tool.definition.annotations?.readOnlyHint === true)
     .map((tool) => tool.definition).sort((a, b) => a.name.localeCompare(b.name));
@@ -42,7 +48,7 @@ export function reconcileTools(previous: StoredTool[], definitions: unknown[]): 
     names.add(definition.name);
     const hash = digest(definition);
     const old = previous.find((tool) => tool.definition.name === definition.name);
-    const state = definition.annotations?.readOnlyHint !== true ? "not_allowed"
+    const state = definition.annotations?.readOnlyHint !== true || definitionBytes(definition) > TOOL_DEFINITION_MAX_BYTES ? "not_allowed"
       : old?.digest === hash ? old.state
       : old?.state === "on" || old?.state === "needs_look" ? "needs_look" : "off";
     return { definition, digest: hash, state };
@@ -53,7 +59,11 @@ export function approveTools(tools: StoredTool[], choices: Record<string, boolea
     const tool = tools.find((item) => item.definition.name === name);
     if (!tool || (enabled && tool.definition.annotations?.readOnlyHint !== true)) throw new ConnectionError("not_mcp");
   }
-  return tools.map((tool) => Object.hasOwn(choices, tool.definition.name)
-    ? { ...tool, state: tool.state === "not_allowed" ? "not_allowed" : choices[tool.definition.name] ? "on" : "off" }
+  const next = tools.map((tool) => Object.hasOwn(choices, tool.definition.name)
+    ? { ...tool, state: tool.state === "not_allowed" ? "not_allowed" as const : choices[tool.definition.name] ? "on" as const : "off" as const }
     : tool);
+  if (approvedSnapshot(next).reduce((total, definition) => total + definitionBytes(definition), 0) > APPROVED_SNAPSHOT_MAX_BYTES) {
+    throw new ConnectionError("limit");
+  }
+  return next;
 }

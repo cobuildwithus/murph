@@ -20,6 +20,11 @@ export async function admitGateway(request: Request, coordinates: { id: string; 
 export async function handleConnectionMcp(request: Request, coordinates: { id: string; generation: string; catalog: string }): Promise<Response> {
   try {
     const admitted = await admitGateway(request, coordinates);
+    if ((await request.clone().text()).trimStart().startsWith("[")) {
+      return Response.json({ jsonrpc: "2.0", id: null, error: { code: -32600, message: "Batches are not supported." } }, {
+        status: 400, headers: { "Cache-Control": "no-store" },
+      });
+    }
     const createServer = () => {
       const server = new Server({ name: "murph-connection", version: "1.0.0" }, { capabilities: { tools: {} } });
       server.setRequestHandler("tools/list", async () => ({ tools: approvedSnapshot(storedToolsSchema.parse(admitted.tools)) }));
@@ -30,7 +35,7 @@ export async function handleConnectionMcp(request: Request, coordinates: { id: s
           const approved = approvedSnapshot(storedToolsSchema.parse(current.tools));
           if (current.status !== "on" || current.generation !== admitted.generation || current.catalog !== admitted.catalog
             || !approved.some((tool) => tool.name === rpc.params.name)) throw new ConnectionError("not_found", 403);
-          const result = await withConnectionClient(current, (client) => client.callTool({ name: rpc.params.name, arguments: rpc.params.arguments }));
+          const result = await withConnectionClient(current, (client, options) => client.callTool({ name: rpc.params.name, arguments: rpc.params.arguments }, options));
           if (!isCallToolResult(result)) throw new ConnectionError("not_mcp");
           if (Buffer.byteLength(JSON.stringify(result)) > 262144) throw new ConnectionError("limit");
           await getPrisma().hostedMcpConnection.updateMany({ where: { id: current.id, generation: current.generation, status: "on" }, data: { lastUsedAt: new Date() } });

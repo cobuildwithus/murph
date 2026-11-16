@@ -5,6 +5,8 @@ const mocks = vi.hoisted(() => ({ fetch: vi.fn(), updates: vi.fn() }));
 vi.mock("../src/lib/custom-connections/guarded-fetch", async (original) => ({ ...await original<typeof import("../src/lib/custom-connections/guarded-fetch")>(), guardedConnectionFetch: mocks.fetch }));
 vi.mock("../src/lib/prisma", () => ({ getPrisma: () => ({ hostedMcpConnection: { updateMany: mocks.updates } }) }));
 vi.mock("../src/lib/custom-connections/access", () => ({ connectionMemberAllowed: () => true }));
+vi.mock("../src/lib/custom-connections/secrets", () => ({ openConnectionSecret: async (_member: string, _id: string, _generation: number, _field: string, value: string) => JSON.parse(value),
+  sealConnectionSecret: async (_member: string, _id: string, _generation: number, _field: string, value: unknown) => JSON.stringify(value) }));
 import { listConnectionTools, withConnectionClient } from "../src/lib/custom-connections/upstream";
 const row: HostedMcpConnection = { id: "cc_synthetic", memberId: "member-a", slug: "notes", name: "Notes", serverUrl: "https://notes.example.com/mcp", status: "on", auth: "none", generation: 1, revision: 0, tools: [], catalog: "catalog", credentialsEncrypted: null, tokenVersion: 0, refreshClaim: null, refreshExpiresAt: null, createdAt: new Date(), lastUsedAt: null };
 function server() {
@@ -65,5 +67,18 @@ describe("request-scoped upstream SDK lifecycle", () => {
         .toMatchObject({ content: [{ text: "Capabilities refused" }] });
     } finally { await upstream.close(); }
   });
-
+  it("never marks a no-sign-in service as needing sign-in when it refuses a request", async () => {
+    mocks.fetch.mockImplementation(async () => new Response("no", { status: 401 }));
+    await expect(withConnectionClient(row, (client) => client.callTool({ name: "read_notes", arguments: {} }))).rejects.toThrow("refused the request");
+    expect(mocks.updates).not.toHaveBeenCalled();
+  });
+  it("refuses a result that echoes the member's token", async () => {
+    const echo = new Server({ name: "notes", version: "1" }, { capabilities: { tools: {} } });
+    echo.setRequestHandler("tools/list", () => ({ tools: [] }));
+    echo.setRequestHandler("tools/call", () => ({ content: [{ type: "text", text: "your token is synthetic-member-access" }] }));
+    const handler = createMcpHandler(() => echo);
+    mocks.fetch.mockImplementation(async (url: string | URL, init?: RequestInit) => handler.fetch(new Request(url, init)));
+    const signedIn = { ...row, auth: "oauth", credentialsEncrypted: JSON.stringify({ discovery: {}, tokens: { access_token: "synthetic-member-access", token_type: "Bearer" }, expiresAt: Date.now() + 3_600_000 }) };
+    await expect(withConnectionClient(signedIn, (client) => client.callTool({ name: "read_notes", arguments: {} }))).rejects.toThrow("sign-in token");
+  });
 });

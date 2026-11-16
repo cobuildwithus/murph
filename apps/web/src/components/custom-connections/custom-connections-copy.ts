@@ -15,6 +15,8 @@ export interface CustomConnection {
   id: string;
   lastUsedAt: string | null;
   name: string;
+  /** Changes with every edit; saves send it back so a change in between means "look again". */
+  revision: number;
   slug: string;
   status: "needs_sign_in" | "off" | "on";
   tools: CustomConnectionTool[];
@@ -36,6 +38,10 @@ export const CUSTOM_CONNECTION_ERRORS: Record<string, { detail: string; title: s
   invalid_url: {
     title: "That link didn't work.",
     detail: "Paste the whole link, starting with https://.",
+  },
+  url_has_query: {
+    title: "Murph can't use that link.",
+    detail: "It has extras after a question mark, often a key. Use the service's plain link.",
   },
   not_https: {
     title: "That link didn't work.",

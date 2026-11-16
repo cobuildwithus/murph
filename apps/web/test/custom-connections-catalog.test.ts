@@ -27,3 +27,15 @@ describe("custom connection approval snapshots", () => {
     expect(() => reconcileTools([], [tool, tool])).toThrow();
   });
 });
+
+describe("tool definition size", () => {
+  it("locks a definition too large to carry in every turn, and bounds the approved total", async () => {
+    const { approveTools, reconcileTools } = await import("../src/lib/custom-connections/catalog");
+    const big = { name: "big", inputSchema: { type: "object", description: "x".repeat(20_000) }, annotations: { readOnlyHint: true } };
+    expect(reconcileTools([], [big])[0]?.state).toBe("not_allowed");
+    const medium = (index: number) => ({ name: `tool_${index}`, inputSchema: { type: "object", description: "x".repeat(15_000) }, annotations: { readOnlyHint: true } });
+    const tools = reconcileTools([], [0, 1, 2, 3, 4].map(medium));
+    expect(() => approveTools(tools, { tool_0: true, tool_1: true, tool_2: true, tool_3: true })).not.toThrow();
+    expect(() => approveTools(tools, { tool_0: true, tool_1: true, tool_2: true, tool_3: true, tool_4: true })).toThrow();
+  });
+});

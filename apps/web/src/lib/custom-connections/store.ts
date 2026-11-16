@@ -20,7 +20,7 @@ export async function readConnection(memberId: string, id: string, prisma: Pick<
 }
 export function projectConnection(row: ConnectionRow) {
   return {
-    id: row.id, slug: row.slug, name: row.name, host: new URL(row.serverUrl).host,
+    id: row.id, revision: row.revision, slug: row.slug, name: row.name, host: new URL(row.serverUrl).host,
     status: row.status, auth: row.auth, createdAt: row.createdAt.toISOString(), lastUsedAt: row.lastUsedAt?.toISOString() ?? null,
     tools: storedToolsSchema.parse(row.tools).map(({ definition, state }) => ({
       name: definition.name, title: definition.title ?? definition.name, description: definition.description ?? "",

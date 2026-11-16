@@ -37,6 +37,16 @@ describe("stateless custom connection gateway", () => {
     expect((await response.json()).result.isError).toBe(true);
     expect(mocks.upstream).not.toHaveBeenCalled();
   });
+  it("refuses JSON-RPC batches before any upstream call", async () => {
+    const one = { jsonrpc: "2.0", method: "tools/call", params: { name: "read_notes", arguments: {} } };
+    const batch = new Request("https://www.withmurph.ai/api/internal/custom-connections/cc_synthetic/3/catalog/mcp", {
+      method: "POST", headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
+      body: ` ${JSON.stringify(Array.from({ length: 100 }, (_, index) => ({ ...one, id: index })))}`,
+    });
+    const response = await handleConnectionMcp(batch, coordinates);
+    expect(response.status).toBe(400);
+    expect(mocks.upstream).not.toHaveBeenCalled();
+  });
   it("maps auth failure and raw provider exceptions to safe owned tool results", async () => {
     for (const error of [new ConnectionError("needs_sign_in"), new Error("access_token=synthetic-secret")]) {
       mocks.upstream.mockRejectedValue(error);

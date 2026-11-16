@@ -7,7 +7,7 @@ import {
   type OAuthClientProvider, type OAuthDiscoveryState, type OAuthClientMetadata,
   type StoredOAuthClientInformation, type StoredOAuthTokens,
 } from "@modelcontextprotocol/client";
-import { connectionUrl, guardedConnectionFetch, resolveConnectionAddresses, type ConnectionFetch } from "./guarded-fetch";
+import { connectionUrl, guardedConnectionFetch, type ConnectionFetch } from "./guarded-fetch";
 import { ConnectionError } from "./errors";
 
 export interface ConnectionCredentials {
@@ -33,7 +33,11 @@ export function connectionClientMetadata(id: string): OAuthClientMetadata {
 
 export function validateDiscovery(state: OAuthDiscoveryState, resource: string): void {
   const metadata = state.authorizationServerMetadata;
+  // Without RFC 9207 issuer identification, a hostile authorization server can relay
+  // the member to an honest one and receive its code: per-connection return
+  // addresses don't prevent that, since the client document is public.
   if (!state.resourceMetadata || !metadata || metadata.issuer !== state.authorizationServerUrl
+    || metadata.authorization_response_iss_parameter_supported !== true
     || !metadata.code_challenge_methods_supported?.includes("S256")
     || !state.resourceMetadata.authorization_servers?.includes(metadata.issuer)
     || (!metadata.client_id_metadata_document_supported && !metadata.registration_endpoint)) {
@@ -145,6 +149,8 @@ export class ConnectionOAuthProvider implements OAuthClientProvider {
     // A rejected durable save must never make the successor usable by the SDK.
     this.savedTokens = tokens;
   }
+  /** The SDK would retry a failed grant with the same code or refresh token; one try, then sign in again. */
+  invalidateCredentials(): never { throw new ConnectionError("needs_sign_in"); }
   saveCodeVerifier(verifier: string) { this.verifier = verifier; }
   codeVerifier() {
     if (!this.verifier) throw new ConnectionError("sign_in_unsupported");
@@ -162,7 +168,6 @@ export class ConnectionOAuthProvider implements OAuthClientProvider {
     if (url.origin !== endpoint.origin || url.pathname !== endpoint.pathname || url.searchParams.get("state") !== this.stateValue) {
       throw new ConnectionError("sign_in_unsupported");
     }
-    await resolveConnectionAddresses(endpoint.hostname.replace(/^\[|\]$/g, ""), AbortSignal.timeout(15_000));
     await this.options.redirect(this.stateValue, { discovery: this.discovery, client: this.client, verifier: this.codeVerifier() });
     this.authorizationUrl = url;
   }
@@ -173,8 +178,8 @@ export class ConnectionOAuthProvider implements OAuthClientProvider {
 
 export async function completeConnectionAuthorization(provider: ConnectionOAuthProvider, code: string, iss?: string) {
   const metadata = provider.discoveryState()?.authorizationServerMetadata;
-  validateAuthorizationResponseIssuer({ iss, expectedIssuer: metadata?.issuer,
-    issParameterSupported: metadata?.authorization_response_iss_parameter_supported === true });
+  // validateDiscovery admits only servers that send iss, so it is always required here.
+  validateAuthorizationResponseIssuer({ iss, expectedIssuer: metadata?.issuer, issParameterSupported: true });
   return auth(provider, { serverUrl: provider.resource, authorizationCode: code, iss, fetchFn: provider.fetch });
 }
 

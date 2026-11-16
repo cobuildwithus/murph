@@ -13,6 +13,7 @@ const NOTES: CustomConnection = {
   id: "cc_notes",
   lastUsedAt: "2026-11-15T16:10:00.000Z",
   name: "Notes",
+  revision: 4,
   slug: "notes",
   status: "on",
   tools: [
@@ -30,6 +31,7 @@ const RECIPES: CustomConnection = {
   id: "cc_recipes",
   lastUsedAt: null,
   name: "Recipes",
+  revision: 2,
   slug: "recipes",
   status: "on",
   tools: [

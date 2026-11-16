@@ -1,5 +1,6 @@
 export const connectionMessages = {
   invalid_url: "Enter a valid server URL.",
+  url_has_query: "Use the service's plain link, with nothing after a question mark.",
   not_https: "Use an HTTPS server URL.",
   unsafe_destination: "This server address isn't allowed.",
   not_mcp: "This server doesn't support this connection type.",
@@ -10,6 +11,8 @@ export const connectionMessages = {
   not_found: "Connection not found.",
   conflict: "The connection changed. Try again.",
   needs_sign_in: "This connection needs to be signed in again in Murph's settings.",
+  refused_result: "The service's answer included Murph's sign-in token, so Murph didn't use it.",
+  refused_by_service: "The service refused the request. Try again later.",
 } as const;
 export type ConnectionErrorCode = keyof typeof connectionMessages;
 export class ConnectionError extends Error {

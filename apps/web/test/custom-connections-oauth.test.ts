@@ -49,12 +49,14 @@ describe("SDK-backed connection OAuth", () => {
     await expect(completeConnectionAuthorization(provider, "synthetic-code", iss)).rejects.toThrow();
     expect(fetch).not.toHaveBeenCalled();
   });
-  it("validates a supplied issuer even when response issuer support is not advertised", async () => {
-    const state = discovery(); state.authorizationServerMetadata!.authorization_response_iss_parameter_supported = false;
-    const fetch = fakeFetch(state);
-    const provider = new ConnectionOAuthProvider("cc_synthetic", resource, { pending: { discovery: state, verifier: "synthetic-verifier", client: { client_id: "synthetic-client", issuer } }, fetch, saveTokens: vi.fn() });
-    await expect(completeConnectionAuthorization(provider, "synthetic-code", "https://other.example.com")).rejects.toThrow();
-    expect(fetch).not.toHaveBeenCalled();
+  it("refuses a server that doesn't identify itself in the sign-in response (RFC 9207)", async () => {
+    for (const supported of [false, undefined]) {
+      const state = discovery(); state.authorizationServerMetadata!.authorization_response_iss_parameter_supported = supported;
+      expect(() => validateDiscovery(state, resource)).toThrow("doesn't support sign-in");
+      const fetch = fakeFetch(state);
+      expect(() => new ConnectionOAuthProvider("cc_synthetic", resource, { pending: { discovery: state, verifier: "synthetic-verifier", client: { client_id: "synthetic-client", issuer } }, fetch, saveTokens: vi.fn() })).toThrow();
+      expect(fetch).not.toHaveBeenCalled();
+    }
   });
   it("refuses missing resource metadata, PKCE, issuer mismatch and unsupported registration", () => {
     for (const change of [

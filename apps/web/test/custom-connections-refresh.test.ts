@@ -24,7 +24,7 @@ vi.mock("../src/lib/custom-connections/guarded-fetch", async (original) => ({ ..
 import { connectionAccessToken } from "../src/lib/custom-connections/upstream";
 const issuer = "https://login.example.com";
 const credentials = { discovery: { authorizationServerUrl: issuer, resourceMetadata: { resource: "https://notes.example.com/mcp", authorization_servers: [issuer] },
-  authorizationServerMetadata: { issuer, authorization_endpoint: `${issuer}/authorize`, token_endpoint: `${issuer}/token`, registration_endpoint: `${issuer}/register`, code_challenge_methods_supported: ["S256"], response_types_supported: ["code"] } },
+  authorizationServerMetadata: { issuer, authorization_endpoint: `${issuer}/authorize`, token_endpoint: `${issuer}/token`, registration_endpoint: `${issuer}/register`, code_challenge_methods_supported: ["S256"], response_types_supported: ["code"], authorization_response_iss_parameter_supported: true } },
   client: { client_id: "synthetic-client", issuer }, tokens: { access_token: "old-access", refresh_token: "rotation-0", token_type: "Bearer", issuer }, expiresAt: 0 };
 function row(): HostedMcpConnection {
   return { id: "cc_synthetic", memberId: "member-a", slug: "notes", name: "Notes", serverUrl: "https://notes.example.com/mcp", status: "on", auth: "oauth", generation: 1,
@@ -43,20 +43,33 @@ describe("refresh claim before provider rotation", () => {
     expect(await connectionAccessToken({ ...mocks.row! })).toBe("new-access");
     expect(mocks.fetch).toHaveBeenCalledTimes(1);
   });
-  it.each(["disable", "replacement", "response_loss", "save_conflict"])("does not use an uncommitted token after %s", async (kind) => {
+  it.each(["replacement", "response_loss"])("does not use an uncommitted token after %s", async (kind) => {
     mocks.fetch.mockImplementation(async () => {
-      if (kind === "disable") { mocks.row!.status = "off"; mocks.row!.revision++; }
       if (kind === "replacement") mocks.row!.generation++;
-      if (kind === "save_conflict") mocks.row!.revision++;
       if (kind === "response_loss") throw new Error("bounded transport failure");
       return Response.json({ access_token: "uncommitted-access", refresh_token: "rotation-1", token_type: "Bearer", expires_in: 3600 });
     });
     await expect(connectionAccessToken(row())).rejects.toThrow();
     expect(mocks.row?.tokenVersion).toBe(0);
     expect(mocks.row?.credentialsEncrypted).not.toContain("uncommitted-access");
-    if (kind === "disable") expect(mocks.row?.status).toBe("off");
     if (kind === "replacement") expect(mocks.row?.generation).toBe(2);
-    if (kind === "response_loss" || kind === "save_conflict") expect(mocks.row?.status).toBe("needs_sign_in");
+    if (kind === "response_loss") expect(mocks.row?.status).toBe("needs_sign_in");
+  });
+  it.each(["turned_off", "tools_changed"])("keeps a rotated token when Settings changes during the refresh (%s)", async (kind) => {
+    mocks.fetch.mockImplementation(async () => {
+      if (kind === "turned_off") { mocks.row!.status = "off"; mocks.row!.revision++; }
+      if (kind === "tools_changed") mocks.row!.revision++;
+      return Response.json({ access_token: "rotated-access", refresh_token: "rotation-1", token_type: "Bearer", expires_in: 3600 });
+    });
+    expect(await connectionAccessToken(row())).toBe("rotated-access");
+    expect(mocks.row?.tokenVersion).toBe(1);
+    expect(mocks.row?.status).toBe(kind === "turned_off" ? "off" : "on");
+  });
+  it.each([429, 500, 503])("sends a refresh token once when the provider answers %s, then needs sign-in", async (status) => {
+    mocks.fetch.mockImplementation(async () => new Response("unavailable", { status }));
+    await expect(connectionAccessToken(row())).rejects.toThrow();
+    expect(mocks.fetch).toHaveBeenCalledTimes(1);
+    expect(mocks.row?.status).toBe("needs_sign_in");
   });
   it("requires sign-in after an expired abandoned claim without another rotation", async () => {
     mocks.row!.refreshClaim = "abandoned"; mocks.row!.refreshExpiresAt = new Date(0);

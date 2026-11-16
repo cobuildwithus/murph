@@ -26,8 +26,7 @@ export async function connectionAccessToken(row: ConnectionRow, forceRefresh = f
         const encrypted = await sealConnectionSecret(row.memberId, row.id, row.generation, "credentials", next);
         const result = await getPrisma().hostedMcpConnection.updateMany({
           where: { ...connectionWhere(row.memberId), id: row.id, generation: row.generation,
-            tokenVersion: row.tokenVersion, revision: row.revision, status: row.status, refreshClaim: claim,
-            refreshExpiresAt: { gt: new Date() } },
+            tokenVersion: row.tokenVersion, refreshClaim: claim, refreshExpiresAt: { gt: new Date() } },
           data: { credentialsEncrypted: encrypted, tokenVersion: { increment: 1 }, refreshClaim: null, refreshExpiresAt: null },
         });
         if (result.count !== 1) throw new ConnectionError("conflict", 409);
@@ -42,9 +41,14 @@ export async function connectionAccessToken(row: ConnectionRow, forceRefresh = f
 }
 
 /** Every operation owns its entire SDK lifecycle; no remote session survives it. */
-export async function withConnectionClient<T>(row: ConnectionRow, operation: (client: Client) => Promise<T>, provider?: ConnectionOAuthProvider): Promise<T> {
-  let token = provider ? undefined : await connectionAccessToken(row);
-  const deadline = AbortSignal.timeout(25_000);
+// The relay waits 30 s; finish first so Web never works on after Codex has its answer.
+const CONNECTION_OPERATION_MS = 24_000;
+
+export async function withConnectionClient<T>(row: ConnectionRow, operation: (client: Client, options: { signal: AbortSignal; timeout: number }) => Promise<T>, provider?: ConnectionOAuthProvider): Promise<T> {
+  const deadline = AbortSignal.timeout(CONNECTION_OPERATION_MS);
+  const startedAt = Date.now();
+  const remaining = () => Math.max(1, CONNECTION_OPERATION_MS - (Date.now() - startedAt));
+  let token = provider ? undefined : await raceDeadline(connectionAccessToken(row), deadline);
   const fetchRemote = provider?.fetch ?? guardedConnectionFetch;
   let requests = 0;
   let unauthorizedResponses = 0;
@@ -64,6 +68,10 @@ export async function withConnectionClient<T>(row: ConnectionRow, operation: (cl
       if (!provider && new URL(String(url)).href !== row.serverUrl) throw new ConnectionError("unsafe_destination");
       const response = await fetchRemote(url, { ...init,
         signal: init.signal ? AbortSignal.any([init.signal, deadline]) : deadline });
+      if (!provider && row.auth === "none" && (response.status === 401 || response.status === 403)) {
+        await response.body?.cancel();
+        throw new ConnectionError("refused_by_service");
+      }
       if (!provider && ((response.status === 401 && (++unauthorizedResponses > 1 || !token)) || response.status === 403)) {
         await response.body?.cancel();
         const current = await readConnection(row.memberId, row.id);
@@ -75,8 +83,11 @@ export async function withConnectionClient<T>(row: ConnectionRow, operation: (cl
   });
   const client = new Client({ name: "murph-custom-connections", version: "1.0.0" }, { capabilities: {} });
   try {
-    await client.connect(transport);
-    return await operation(client);
+    await client.connect(transport, { signal: deadline, timeout: remaining() });
+    const result = await operation(client, { signal: deadline, timeout: remaining() });
+    // A tool that echoes the member's token would hand it to the model and the container.
+    if (token && JSON.stringify(result).includes(token)) throw new ConnectionError("refused_result");
+    return result;
   } finally {
     if (transport.sessionId) await transport.terminateSession().catch(() => undefined);
     await client.close().catch(() => undefined);
@@ -88,11 +99,11 @@ export async function listConnectionTools(row: ConnectionRow, provider?: Connect
 }
 /** The server's tools and the name it gives itself (a claim, used only for display and the tool prefix). */
 export async function describeConnection(row: ConnectionRow, provider?: ConnectionOAuthProvider) {
-  return withConnectionClient(row, async (client) => {
+  return withConnectionClient(row, async (client, options) => {
     const tools = [];
     let cursor: string | undefined;
     for (let page = 0; page < 10; page++) {
-      const result = await client.listTools(cursor ? { cursor } : undefined);
+      const result = await client.listTools(cursor ? { cursor } : undefined, options);
       tools.push(...result.tools);
       if (tools.length > 100) throw new ConnectionError("limit");
       cursor = result.nextCursor;
@@ -103,4 +114,11 @@ export async function describeConnection(row: ConnectionRow, provider?: Connecti
     }
     throw new ConnectionError("limit");
   }, provider);
+}
+
+async function raceDeadline<T>(work: Promise<T>, deadline: AbortSignal): Promise<T> {
+  if (deadline.aborted) throw new ConnectionError("unreachable");
+  return await Promise.race([work, new Promise<never>((_, reject) => {
+    deadline.addEventListener("abort", () => reject(new ConnectionError("unreachable")), { once: true });
+  })]);
 }

@@ -24,6 +24,8 @@ async function settingsMutation<T>(authority: SettingsMutation, operation: (tx: 
 
 export async function addConnection(request: Request, session: HostedAppSession, inputUrl: string) {
   const url = connectionUrl(inputUrl);
+  // A query usually carries a key, which would sit unencrypted in server_url.
+  if (url.search) throw new ConnectionError("url_has_query");
   const id = `cc_${randomUUID().replaceAll("-", "")}`;
   const row = await getPrisma().$transaction(async (tx) => {
     await assertHostedAppSessionCurrentTx({ memberId: session.member.id, sessionId: session.sessionId, authProof: session.authProof, prisma: tx, request });
@@ -122,7 +124,9 @@ export async function finishConnectionSignIn(request: Request, session: HostedAp
     return saveCatalog(updated, reconcileTools(storedToolsSchema.parse(updated.tools), tools), undefined, tx);
   });
 }
-export async function patchConnection(row: ConnectionRow, input: { tools?: Record<string, boolean>; status?: "on" | "off" }, authority: SettingsMutation) {
+export async function patchConnection(row: ConnectionRow, input: { revision: number; tools?: Record<string, boolean>; status?: "on" | "off" }, authority: SettingsMutation) {
+  // The member approves what they saw; a refresh in between means look again.
+  if (input.revision !== row.revision) throw new ConnectionError("conflict", 409);
   if (input.status === "on" && row.status === "needs_sign_in") throw new ConnectionError("needs_sign_in");
   const tools = approveTools(storedToolsSchema.parse(row.tools), input.tools ?? {});
   return settingsMutation(authority, async (tx) => {
@@ -139,6 +143,10 @@ export async function removeConnection(row: ConnectionRow, authority: SettingsMu
   // Deletion is the local disable commit; provider revocation cannot restore it.
   const removed = await settingsMutation(authority, (tx) => tx.hostedMcpConnection.deleteMany({ where: { ...connectionWhere(row.memberId), id: row.id, generation: row.generation } }));
   if (removed.count !== 1) throw new ConnectionError("conflict", 409);
+  await revokeConnectionBestEffort(row);
+}
+/** Asks the service to end Murph's grant. Local removal never depends on it. */
+export async function revokeConnectionBestEffort(row: ConnectionRow): Promise<void> {
   try {
     const credentials = await readCredentials(row);
     const endpoint = credentials ? revocationEndpoint(credentials.discovery) : undefined;
@@ -157,4 +165,17 @@ export async function connectionManifest(memberId: string) {
   });
   return { connections: rows.filter((row) => approvedSnapshot(storedToolsSchema.parse(row.tools)).length > 0)
     .map(({ id, slug, generation, catalog }) => ({ id, slug, generation, catalog })) };
+}
+
+/** Account deletion: ask each service to end Murph's grant, in parallel and for at most ten seconds. */
+export async function revokeCustomConnectionsBestEffort(input: { memberId: string; prisma?: Pick<Prisma.TransactionClient, "hostedMcpConnection"> }): Promise<void> {
+  try {
+    const rows = await (input.prisma ?? getPrisma()).hostedMcpConnection.findMany({
+      where: { memberId: input.memberId, credentialsEncrypted: { not: null } }, take: 10,
+    });
+    await Promise.race([
+      Promise.allSettled(rows.map((row) => revokeConnectionBestEffort(row))),
+      new Promise((resolve) => setTimeout(resolve, 10_000)),
+    ]);
+  } catch { /* Deletion of the local rows is what removes Murph's access. */ }
 }

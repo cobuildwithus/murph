@@ -29,7 +29,7 @@ vi.mock("../src/lib/prisma", () => {
   };
   return { getPrisma: () => ({ ...store, $transaction: async (operation: (tx: typeof store) => Promise<unknown>) => operation(store) }) };
 });
-import { finishConnectionSignIn } from "../src/lib/custom-connections/service";
+import { addConnection, finishConnectionSignIn, patchConnection } from "../src/lib/custom-connections/service";
 import { digest } from "../src/lib/custom-connections/catalog";
 
 const issuer = "https://login.example.com";
@@ -40,7 +40,7 @@ beforeEach(() => {
   mocks.pending = { connectionId: "cc_synthetic", memberId: "member-a", sessionBinding: digest("browser-session"), generation: 1, stateHash: digest("synthetic-state"), expiresAt: new Date(Date.now() + 60_000),
     payloadEncrypted: JSON.stringify({ verifier: "synthetic-verifier", client: { client_id: "synthetic-client", issuer }, discovery: {
       authorizationServerUrl: issuer, resourceMetadata: { resource: "https://notes.example.com/mcp", authorization_servers: [issuer] },
-      authorizationServerMetadata: { issuer, authorization_endpoint: `${issuer}/authorize`, token_endpoint: `${issuer}/token`, registration_endpoint: `${issuer}/register`, code_challenge_methods_supported: ["S256"], response_types_supported: ["code"] },
+      authorizationServerMetadata: { issuer, authorization_endpoint: `${issuer}/authorize`, token_endpoint: `${issuer}/token`, registration_endpoint: `${issuer}/register`, code_challenge_methods_supported: ["S256"], response_types_supported: ["code"], authorization_response_iss_parameter_supported: true },
     } }) };
   mocks.fetch.mockResolvedValue(Response.json({ access_token: "synthetic-access", token_type: "Bearer" }));
 });
@@ -60,5 +60,14 @@ describe("pending browser authorization consumption", () => {
     if (kind === "revoked_session") mocks.session.mockRejectedValue(new Error("session revoked"));
     await expect(finishConnectionSignIn(request(kind === "wrong_state" ? "another-state" : undefined), session, "cc_synthetic")).rejects.toThrow();
     expect(mocks.fetch).not.toHaveBeenCalled();
+  });
+});
+describe("Settings changes", () => {
+  it("refuses a change made against an older revision, before any write", async () => {
+    await expect(patchConnection({ ...mocks.row!, revision: 5 }, { revision: 4, tools: {} }, { request: request(), session })).rejects.toMatchObject({ code: "conflict" });
+    expect(mocks.saveCatalog).not.toHaveBeenCalled();
+  });
+  it("refuses a pasted link that carries a query, before storing anything", async () => {
+    await expect(addConnection(request(), session, "https://notes.example.com/mcp?key=synthetic")).rejects.toMatchObject({ code: "url_has_query" });
   });
 });

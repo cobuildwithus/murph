@@ -33,7 +33,7 @@ export async function settingsConnections(request: Request, id?: string, action?
     if (action === "refresh") return json({ connection: projectConnection(await refreshConnection(row, { request, session })) });
     if (action === "sign-in") return json(await startConnectionSignIn(row, { request, session }));
     if (request.method === "PATCH") {
-      const input = z.object({ tools: z.record(z.string().max(128), z.boolean()).optional(), status: z.enum(["on", "off"]).optional() }).strict().parse(await body(request));
+      const input = z.object({ revision: z.number().int().nonnegative(), tools: z.record(z.string().max(128), z.boolean()).optional(), status: z.enum(["on", "off"]).optional() }).strict().parse(await body(request));
       return json({ connection: projectConnection(await patchConnection(row, input, { request, session })) });
     }
     if (request.method === "DELETE") {

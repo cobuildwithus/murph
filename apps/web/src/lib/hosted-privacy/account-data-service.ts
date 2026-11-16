@@ -1,4 +1,5 @@
 import { type HostedBillingStatus, Prisma, type PrismaClient } from "@prisma/client";
+import { revokeCustomConnectionsBestEffort } from "../custom-connections/service";
 
 import { sanitizeHostedRuntimeErrorCode } from "@murphai/device-syncd/hosted-runtime";
 import { isDeviceSyncError } from "@murphai/device-syncd/errors";
@@ -497,6 +498,18 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Deletes bounded operational replay metadata, including capture-key and envelope hashes, before device connection rows; receipts expire after 30 days and are capped at 1,024 per connection.",
   },
   {
+    slug: "prisma.hosted_mcp_connection",
+    label: "Custom connections and their sign-in tokens",
+    deletion: "live-delete",
+    note: "Best-effort revocation at each service runs first; connection rows and their encrypted tokens are deleted with the member.",
+  },
+  {
+    slug: "prisma.hosted_mcp_pending_authorization",
+    label: "Custom connection sign-ins in progress",
+    deletion: "live-delete",
+    note: "Encrypted ten-minute sign-in state is deleted with the member; expired rows are also removed by retention cleanup.",
+  },
+  {
     slug: "prisma.hosted_connected_apps_session",
     label: "Connected-app Tool Router sessions",
     deletion: "live-delete",
@@ -639,6 +652,12 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     label: "Composio connected-app provider revocation",
     deletion: "best-effort-delete",
     note: "Lists connected accounts owned by the hosted member and calls Composio provider revocation before local ownership state is deleted.",
+  },
+  {
+    slug: "providers.custom_connections",
+    label: "Custom connection revocation",
+    deletion: "best-effort-delete",
+    note: "Asks each connected service to revoke Murph's token where it publishes a revocation endpoint, within ten seconds; local deletion never waits on or depends on the answer.",
   },
   {
     slug: "providers.linq_telegram_email_messages",
@@ -1020,6 +1039,7 @@ async function deleteHostedAccountDataInternal(input: {
     now: deletionStartedAt,
     prisma: input.prisma,
   });
+  await revokeCustomConnectionsBestEffort({ memberId: input.memberId, prisma: input.prisma });
   const providerRevocations = [
     ...deviceProviderRevocations,
     ...connectedAppRevocations,
