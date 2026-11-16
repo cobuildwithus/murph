@@ -175,6 +175,14 @@ async function sendOperatorLinqMessage(input: {
     }).asResponse();
   } catch (error) {
     const status = readOperatorLinqErrorStatus(error);
+    // Preflight just read this chat, so a 404 is Linq's documented answer to a
+    // key whose message it already accepted and has since deleted: that page
+    // was delivered, and Linq never resends a deleted message. Without this, a
+    // page that reached one chat stays pending, and once Linq drops the
+    // delivered copy every retry 404s for good.
+    if (status === 404) {
+      return;
+    }
     if (status !== null) {
       throw new OperatorAlertLinqError(
         status === 429 || status >= 500

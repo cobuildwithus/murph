@@ -647,7 +647,9 @@ healthy primary can still post. If the primary identity is known but its chat
 or line health is unsafe or indeterminate, a healthy distinct secondary can
 still post. A duplicate resolved recipient allows the primary operation only
 and leaves the alert pending. Each healthy destination is sent into its
-configured chat, so the page leaves from the line preflight checked.
+configured chat, so the page leaves from the line preflight checked. A 404 from
+that send counts as delivered, because Linq answers a replayed key whose
+accepted message it has since deleted with 404 and never resends it.
 Unhealthy or indeterminate delivery health suppresses that destination's POST
 and leaves the alert pending for the next paced attempt. This path does not
 share state or fallback behavior with the Resend-only hosted reply-latency
