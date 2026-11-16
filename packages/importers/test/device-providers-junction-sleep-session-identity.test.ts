@@ -329,13 +329,17 @@ function stageFacts(records: readonly Stored[]): string[] {
 }
 
 // A session can also arrive twice in one import, with the same or different
-// values, beside another session for the same window.
+// values, beside another session for the same window. Its first copy can carry
+// a rewritten end, so only its second copy names the stored window.
 for (const reread of [
   [SESSION_A, { ...SESSION_A, deep: 3000 }],
   [{ ...SESSION_A, deep: 3000 }, SESSION_A],
   [{ ...SESSION_B, deep: 2400 }, SESSION_A, SESSION_B],
+  [sleepSummary(REWRITTEN_END, { ...GOOGLE_HEALTH, id: "gh-sleep-a" }), SESSION_A],
 ]) {
-  const label = reread.map((summary) => `${summary.id} ${summary.deep}s`).join(", ");
+  const label = reread
+    .map((summary) => `${summary.id} ${summary.deep}s to ${summary.bedtime_stop.slice(11, 16)}`)
+    .join(", ");
   test(`a stored window record moves once, and the night ends as in an empty vault (${label})`, async () => {
     let expected: string[] = [];
     await withVault(async ({ importSummaries, readLive }) => {
@@ -358,6 +362,26 @@ for (const reread of [
     });
   });
 }
+
+test("a session whose copies name two stored windows moves one and leaves the other", async () => {
+  await withVault(async ({ importSummaries, readLive }) => {
+    // Before session refs, a rewritten end left a second window record.
+    await importSummaries("2026-01-02T12:00:00.000Z", {
+      sleep: [sleepSummary(FIRST_END, { ...GOOGLE_HEALTH, id: undefined })],
+    });
+    await importSummaries("2026-01-02T12:30:00.000Z", {
+      sleep: [sleepSummary(REWRITTEN_END, { ...GOOGLE_HEALTH, id: undefined })],
+    });
+
+    await importSummaries("2026-01-02T13:00:00.000Z", {
+      sleep: [sleepSummary(REWRITTEN_END, { ...GOOGLE_HEALTH, id: "gh-sleep-a" }), SESSION_A],
+    });
+
+    // The session takes the record its first copy names; the other stays a stale copy.
+    const deep = metricRecords(await readLive(), "sleep-deep-minutes");
+    assert.deepEqual(deep.map(refPrefix).sort(), ["sleep-session", "sleep-stage"]);
+  });
+});
 
 test("a stored window record the member deleted stays deleted, and each session imports anew", async () => {
   await withVault(async ({ deleteRecord, importSummaries, readLive }) => {
