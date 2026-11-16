@@ -236,6 +236,42 @@ describe("json route helper factory", () => {
     expect(JSON.stringify(warnSpy.mock.calls)).not.toContain("/api/demo");
   });
 
+  it.each(["ios", "android"])("adds validated %s client info to JSON route error logs", async (platform) => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const helpers = httpModule.createJsonRouteHelpers({ internalMessage: "route failed unexpectedly", logMessage: "route failed" });
+    const handler = helpers.withJsonError<[Request]>(async () => { throw new Error("synthetic failure"); });
+    const response = await handler(new Request("https://example.test/api/demo", { headers: {
+      "X-Murph-Client-Platform": platform, "X-Murph-Client-Version": "1.1.22-dev", "X-Murph-Client-Build": "109",
+      "X-Murph-Client-OS-Version": "18.1.0", "X-Murph-Client-Device-Model": "Example Model",
+      "X-Murph-Member-Id": "private-member", authorization: "Bearer private-token",
+    } }));
+    expect(response.status).toBe(500);
+    expect(errorSpy).toHaveBeenCalledWith("route failed", expect.objectContaining({
+      requestMethod: "GET", clientPlatform: platform, clientVersion: "1.1.22-dev", clientBuild: "109",
+      clientOsVersion: "18.1.0", clientDeviceModel: "Example Model",
+    }));
+    expect(JSON.stringify(errorSpy.mock.calls)).not.toContain("private-member");
+    expect(JSON.stringify(errorSpy.mock.calls)).not.toContain("private-token");
+    expect(JSON.stringify(await response.json())).not.toContain("clientPlatform");
+  });
+
+  it.each([false, true])("omits client log fields when the core header set is absent or invalid (%s)", async (invalid) => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const helpers = httpModule.createJsonRouteHelpers({ internalMessage: "route failed unexpectedly", logMessage: "route failed" });
+    const handler = helpers.withJsonError<[Request]>(async () => { throw new Error("synthetic failure"); });
+    const headers = new Headers();
+    if (invalid) {
+      headers.set("X-Murph-Client-Platform", "ios"); headers.set("X-Murph-Client-Version", "1.1.22");
+      headers.set("X-Murph-Client-Build", "invalid-build");
+    }
+    expect((await handler(new Request("https://example.test/api/demo", { headers }))).status).toBe(500);
+    const details = errorSpy.mock.calls[0]?.[1];
+    for (const field of ["clientPlatform", "clientVersion", "clientBuild", "clientOsVersion", "clientDeviceModel"]) {
+      expect(details).not.toHaveProperty(field);
+    }
+    expect(JSON.stringify(details)).not.toContain("invalid-build");
+  });
+
   it("can suppress logs for explicitly quiet mapped errors", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const helpers = httpModule.createJsonRouteHelpers({

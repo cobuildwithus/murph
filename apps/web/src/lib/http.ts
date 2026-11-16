@@ -4,6 +4,7 @@ import { Buffer } from "node:buffer";
 import { NextResponse } from "next/server";
 
 import { isRecord } from "./primitives";
+import { readCompanionClientInfo, type CompanionClientInfo } from "./companion/client-info";
 
 export function jsonOk(payload: unknown, status = 200): NextResponse {
   return NextResponse.json(payload, { status });
@@ -110,6 +111,11 @@ export interface JsonRouteHelpers {
 
 interface JsonRouteLogContext {
   requestMethod?: string;
+  clientPlatform?: CompanionClientInfo["platform"];
+  clientVersion?: string;
+  clientBuild?: string;
+  clientOsVersion?: string | null;
+  clientDeviceModel?: string | null;
 }
 
 export class InvalidRouteParamEncodingError extends RequestInputError {
@@ -543,8 +549,16 @@ function describeJsonRouteLogContext(args: readonly unknown[]): JsonRouteLogCont
     return null;
   }
 
+  const clientInfo = readCompanionClientInfo(request.headers);
   return {
     requestMethod: request.method,
+    ...(clientInfo ? {
+      clientPlatform: clientInfo.platform,
+      clientVersion: clientInfo.version,
+      clientBuild: clientInfo.build,
+      clientOsVersion: clientInfo.osVersion,
+      clientDeviceModel: clientInfo.deviceModel,
+    } : {}),
   };
 }
 

@@ -59,7 +59,7 @@ A directory of the durable docs. Find the row for your task and read that doc;
 | `agent-docs/product-specs/hosted-usage-referrals.md` | Hosted growth/product spec. | Hosted growth/product spec | High | 2026-08-10 |
 | `agent-docs/product-specs/physical-notes.md` | Hosted physical-note product spec. | Hosted physical-note product spec | High | 2026-08-21 |
 | `agent-docs/product-specs/ios-game.md` | iOS game group Prove it and pre-join Talk contracts, a missed day counted as a post in the player's own words, day corrections for 7 days after a pair game ends, off-day refusal and optional member-addressed recap superlatives JSON, validation and legacy fallback. | iOS game API contract | High | 2026-11-14 |
-| `agent-docs/product-specs/weekly-game.md` | Weekly game product spec: pair and group habit games, 24-hour own-message chat authority, invites, posting and unlocking, day close, stakes, settlement and the 7-day correction window, recap, typed-word ideas, self area-code hints and the server contract the app renders. | Weekly game product spec | High | 2026-11-15 |
+| `agent-docs/product-specs/weekly-game.md` | Weekly game product spec: pair and group habit games, 24-hour own-message chat authority, invites, posting and unlocking, day close, stakes, settlement and the 7-day correction window, recap, typed-word ideas, self area-code hints, held-ticket message addresses and the server contract the app renders. | Weekly game product spec | High | 2026-11-15 |
 | `agent-docs/product-specs/hosted-support-escalation.md` | Hosted support product spec. | Hosted support product spec | High | 2026-08-05 |
 | `agent-docs/product-specs/hosted-family-plan.md` | Hosted billing/product spec. | Hosted billing/product spec | High | 2026-08-10 |
 | `agent-docs/product-specs/health-commons.md` | Health Commons behavior. | Health Commons behavior | High | 2026-10-19 |
@@ -89,7 +89,7 @@ A directory of the durable docs. Find the row for your task and read that doc;
 | `agent-docs/product-specs/consented-group-disclosure.md` | Hosted group disclosure. | Hosted group disclosure | High | 2026-08-26 |
 | `agent-docs/product-specs/hosted-group-join-confirmation.md` | Hosted group membership behavior. | Hosted group membership behavior | High | 2026-07-23 |
 | `agent-docs/product-specs/clinical-records-intake.md` | Bounded clinical import, stable undated-fact replay, optional daily checks, document enrichment, saved results and privacy controls. | Clinical Records intake behavior | High | 2026-09-15 |
-| `agent-docs/references/companion-presence.md` | Companion contact observations, private diagnostics, and consented group timestamps. | Companion presence | High | 2026-11-04 |
+| `agent-docs/references/companion-presence.md` | Companion contact observations, client header/build diagnostics, member lookup SQL, and consented group timestamps. | Companion presence | High | 2026-11-15 |
 | `agent-docs/references/epic-automatic-distribution.md` | Epic automatic-distribution API matrix, hospital-approved imports, optional persistent credentials and privacy questionnaire guidance. | Epic import registration and rollout | High | 2026-09-15 |
 | `agent-docs/phone-calls/retell-phone-agent.md` | Retell hosted phone agent prompt, authority, transfer, and call-brief handling rules. | Hosted phone-call provider setup | Medium | 2026-06-25 |
 | `agent-docs/phone-calls/retell-analysis-fields.md` | Retell post-call analysis field contract and transcript-retention boundary. | Hosted phone-call provider setup | Medium | 2026-06-25 |

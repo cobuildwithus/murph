@@ -35,7 +35,9 @@ describe.skipIf(!enabled)("account deletion route with real encrypted browser au
     vi.stubEnv("HOSTED_AUTH_STORAGE_KEY", Buffer.alloc(32, 17).toString("base64url"));
     vi.stubEnv("HOSTED_BETTER_AUTH_SECRET", secret);
     vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", baseURL);
-    await prisma.hostedMember.create({ data: { id: memberId } });
+    const clientInfo = { companionAppPlatform: "ios", companionAppVersion: "1.1.22", companionAppBuild: "109",
+      companionOsVersion: "18.1.0", companionDeviceModel: "iPhone16,2", companionLastContactAt: new Date() };
+    await prisma.hostedMember.create({ data: { id: memberId, ...clientInfo } });
     try {
       await hostedAuthAdapter(prisma)({}).create({ model: "user", forceAllowId: true, data: {
         id: memberId, email, emailVerified: true, name: "", createdAt: new Date(), updatedAt: new Date(),
@@ -63,11 +65,14 @@ describe.skipIf(!enabled)("account deletion route with real encrypted browser au
         return { memberId, deletedAt: new Date().toISOString() };
       });
       expect((await POST(request())).status).toBe(503);
+      expect(await prisma.hostedMember.findUnique({ where: { id: memberId } })).toMatchObject(clientInfo);
       await expect(requireHostedAppSessionFromRequest(request())).rejects.toMatchObject({ code: "HOSTED_MEMBER_SUSPENDED" });
       const retried = await POST(request());
       expect(retried.status).toBe(200);
       expect(retried.headers.get("set-cookie")).toContain("Max-Age=0");
       expect(deletion).toHaveBeenCalledTimes(2);
+      // Client telemetry is on the deleted member row, with no separate retention owner.
+      expect(await prisma.hostedMember.findUnique({ where: { id: memberId } })).toBeNull();
       expect((await POST(request())).status).toBe(401);
     } finally {
       await prisma.hostedMember.deleteMany({ where: { id: memberId } });

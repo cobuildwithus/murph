@@ -262,6 +262,11 @@ async function renderJoinResumePage(searchParams: {
 function createHostedMember(overrides: Partial<HostedMember> = {}): HostedMember {
   return {
     companionLastContactAt: null,
+    companionAppPlatform: null,
+    companionAppVersion: null,
+    companionAppBuild: null,
+    companionOsVersion: null,
+    companionDeviceModel: null,
     companionLastForegroundAt: null,
     groupJournalCaptureConsentRequestedAt: null,
     groupJournalCaptureEnabled: null,

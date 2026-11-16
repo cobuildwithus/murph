@@ -87,7 +87,8 @@ describe.skipIf(!enabled)("canonical game storage migration PostgreSQL proof", (
       await previousSchema(migratedUrl);
       fixture.prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: migratedUrl.toString() }) });
       const label = await seed(client);
-      await fixture.prisma.hostedMember.create({ data: { id: "synthetic_migration_unseated", billingStatus: "active" } });
+      // Return only the id: the current client knows member columns this older schema does not have yet.
+      await fixture.prisma.hostedMember.create({ data: { id: "synthetic_migration_unseated", billingStatus: "active" }, select: { id: true } });
       await client.query("INSERT INTO game_profile(member_id, first_name_encrypted, time_zone, updated_at) VALUES ('synthetic_migration_unseated','unused','UTC',$1)", [at]);
       const sql = await readFile(new URL(`${migrationId}/migration.sql`, migrations), "utf8");
       for (const invalid of [

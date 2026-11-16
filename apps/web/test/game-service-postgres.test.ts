@@ -102,6 +102,7 @@ import { toPrismaJsonObject } from "@/src/lib/device-sync/prisma-store/prisma-js
 import { addDays, dayStartInstant, gameLocalDate, weekdayOf } from "@/src/lib/game/time";
 import { getPrisma } from "@/src/lib/prisma";
 import { upsertHostedMemberIdentity } from "@/src/lib/hosted-onboarding/hosted-member-identity-store";
+import * as identityCodecs from "@/src/lib/hosted-onboarding/member-private-codecs";
 import { buildHostedMemberPhoneIdentityFields } from "@/src/lib/hosted-onboarding/member-identity-fields";
 import { createHostedLinqParticipantContact } from "@/src/lib/hosted-onboarding/linq-participant-contact";
 import { gameChatLifecycleEventId, reserveGameChatLifecycleTx, markGameChatGenerationQueuedTx } from "@/src/lib/game/chat-lifecycle-receipt";
@@ -306,6 +307,79 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       phoneNumberVerifiedAt: new Date(), signupPhoneNumber: null,
     }));
     expect((await readHome(self)).me).not.toHaveProperty("areaCode");
+  });
+
+  it("batch reads distinct verified ticket debtors once for Home and skips the read with no eligible tickets", async () => {
+    const db = getPrisma();
+    const holder = await member("Holder", "UTC");
+    const debtors = await Promise.all([member("First", "UTC"), member("Second", "UTC"), member("Unverified", "UTC")]);
+    const phones = ["+12125550191", "+12125550192", "+12125550193"];
+    const games: string[] = [];
+    for (const [index, debtor] of debtors.entries()) {
+      await db.$transaction(tx => upsertHostedMemberIdentity({
+        ...buildHostedMemberPhoneIdentityFields(phones[index]), memberId: debtor, prisma: tx,
+        phoneNumberVerifiedAt: index === 2 ? null : new Date(), signupPhoneNumber: null,
+      }));
+      const { gameId } = await seedSettledGame({ challenger: holder, opponent: debtor, settledAt: new Date() });
+      games.push(gameId);
+      await db.gameTicket.createMany({ data: [0, 1].map(() => ({
+        id: randomUUID(), gameId, stakeKey: "synthetic-prize", owedBySeats: [1], owedToSeats: [0],
+      })) });
+    }
+    const identityRead = vi.spyOn(db.hostedMemberIdentity, "findMany");
+    const singleIdentityRead = vi.spyOn(db.hostedMemberIdentity, "findUnique");
+    const phoneBatch = vi.spyOn(identityCodecs, "readHostedMemberIdentityPhoneNumberBatch");
+    const home = await readHome(holder);
+    expect(identityRead).toHaveBeenCalledTimes(1);
+    expect(identityRead).toHaveBeenCalledWith({
+      where: { memberId: { in: expect.arrayContaining(debtors) }, phoneNumberVerifiedAt: { not: null } },
+      select: { memberId: true, phoneNumberEncrypted: true },
+    });
+    const memberFilter = identityRead.mock.calls[0][0]?.where?.memberId;
+    expect(typeof memberFilter === "object" && memberFilter?.in).toHaveLength(3);
+    // The existing self area-code read is the only scalar identity read.
+    expect(singleIdentityRead).toHaveBeenCalledTimes(1);
+    expect(singleIdentityRead).toHaveBeenCalledWith({ where: { memberId: holder } });
+    expect(phoneBatch).toHaveBeenCalledTimes(1);
+    expect(phoneBatch.mock.calls[0][0].map(identity => identity.memberId).sort()).toEqual(debtors.slice(0, 2).sort());
+    expect(home.wallet.held).toHaveLength(6);
+    for (const ticket of home.wallet.held) {
+      const index = debtors.indexOf(ticket.owedByMemberId);
+      if (index === 2) expect(ticket).not.toHaveProperty("owedByPhone");
+      else expect(ticket.owedByPhone).toBe(phones[index]);
+    }
+    expect(home.games.flatMap(game => game.tickets).filter(ticket => ticket.owedByPhone)).toHaveLength(4);
+    identityRead.mockClear();
+    phoneBatch.mockClear();
+    expect((await readHome(debtors[0])).wallet.owed.every(ticket => !("owedByPhone" in ticket))).toBe(true);
+    expect(identityRead).not.toHaveBeenCalled();
+    await db.gameTicket.updateMany({ where: { gameId: { in: games } }, data: { status: "redeemed", redeemedAt: new Date() } });
+    const redeemed = await readHome(holder);
+    expect(redeemed.wallet.redeemed).toHaveLength(6);
+    expect(redeemed.wallet.redeemed.every(ticket => !("owedByPhone" in ticket))).toBe(true);
+    expect(identityRead).not.toHaveBeenCalled();
+    expect(phoneBatch).not.toHaveBeenCalled();
+  });
+
+  it.each(["expired", "left", "blocked", "hidden", "group"] as const)("does not read ticket phones for %s games", async scenario => {
+    const db = getPrisma();
+    const holder = await member("Holder", "UTC");
+    const debtor = await member("Debtor", "UTC");
+    const { gameId } = await seedSettledGame({ challenger: holder, opponent: debtor, settledAt: new Date() });
+    await db.gameTicket.create({ data: {
+      id: randomUUID(), gameId, stakeKey: "synthetic-prize", owedBySeats: [1], owedToSeats: [0],
+    } });
+    if (scenario === "expired") await db.game.update({ where: { id: gameId }, data: { devClockOffsetMs: BigInt(15 * 86_400_000) } });
+    if (scenario === "left") await db.gamePlayer.updateMany({ where: { gameId, memberId: debtor }, data: { leftAt: new Date() } });
+    if (scenario === "blocked" || scenario === "hidden") await db.gameBlock.create({ data: {
+      blockerMemberId: scenario === "blocked" ? holder : debtor,
+      blockedMemberId: scenario === "blocked" ? debtor : holder,
+    } });
+    if (scenario === "group") await db.game.update({ where: { id: gameId }, data: { maxPlayers: 10 } });
+    const identityRead = vi.spyOn(db.hostedMemberIdentity, "findMany");
+    const home = await readHome(holder, true);
+    expect(home.wallet.held.every(ticket => !("owedByPhone" in ticket))).toBe(true);
+    expect(identityRead).not.toHaveBeenCalled();
   });
 
   describe("invite recovery after install", () => {

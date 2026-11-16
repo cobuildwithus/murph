@@ -95,6 +95,8 @@ export interface GameTicketRow {
 }
 
 export interface GameViewInput {
+  /** Request-local verified phones, loaded only for eligible ticket counterparties. */
+  verifiedPhones?: ReadonlyMap<string, string>;
   entryReplies?: ReadonlyMap<string, import("./contract").GameReplyView>;
   replyEligibleEntryIds?: ReadonlySet<string>;
   challenges?: readonly RuleChallenge[];
@@ -225,6 +227,7 @@ export function ticketView(row: GameTicketRow, words: TermWords | null, viewerId
     kind: terms?.versions.flatMap((version) => version.stakes).find((stake) => stake.key === row.stakeKey)?.kind,
     ...(!group && (owedBy === null || owedTo === null) ? { left: true as const } : {}),
     owedByMemberId: group ? "" : owedBy ?? "",
+    ...ticketPhoneView(row, viewerId, now, hiddenMembers, input),
     owedToMemberId: group ? "" : owedTo ?? "",
     redeemedAt: row.redeemedAt?.toISOString() ?? null,
     status: isTicketExpired(row, now) ? "expired" : row.status,
@@ -232,6 +235,24 @@ export function ticketView(row: GameTicketRow, words: TermWords | null, viewerId
     what: words ? stakeItem(words, row.stakeKey) : "",
     youHold: group ? row.players.some(player => player.memberId === viewerId && row.owedToSeats.includes(player.seat)) : owedTo === viewerId,
   };
+}
+
+function ticketPhoneView(row: GameTicketRow, viewerId: string, now: Date, hiddenMemberIds: ReadonlySet<string>, input?: GameViewInput): Pick<GameTicketView, "owedByPhone"> {
+  if (!input) return {};
+  const recipient = ticketMessageRecipient(row, { state: input.state, viewerId, now, hiddenMemberIds });
+  const owedByPhone = recipient ? input.verifiedPhones?.get(recipient) : undefined;
+  return owedByPhone ? { owedByPhone } : {};
+}
+
+/** Shared admission for the identity read and the final phone projection. */
+export function ticketMessageRecipient(row: GameTicketRow, input: Pick<GameViewInput, "state" | "viewerId" | "now" | "hiddenMemberIds">): string | null {
+  if (input.state.game.seats !== 2 || row.status !== "open" || isTicketExpired(row, input.now)
+    || row.owedBySeats.length !== 1 || row.owedToSeats.length !== 1) return null;
+  const owedBy = row.players.find(player => player.seat === row.owedBySeats[0])?.memberId;
+  const owedTo = row.players.find(player => player.seat === row.owedToSeats[0])?.memberId;
+  if (!owedBy || owedBy === input.viewerId || owedTo !== input.viewerId
+    || input.hiddenMemberIds?.has(owedBy) || input.hiddenMemberIds?.has(owedTo)) return null;
+  return remainingPlayers(input.state).some(player => player.memberId === owedBy) ? owedBy : null;
 }
 
 function canRedeemTicketView(row: GameTicketRow, input: GameViewInput, owedBy: string | null, owedTo: string | null): boolean {

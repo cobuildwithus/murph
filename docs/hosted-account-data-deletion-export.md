@@ -141,7 +141,7 @@ The Settings vault export does not include:
 | Store | Delete mode | Export mode | Notes |
 | --- | --- | --- | --- |
 | Weekly game replies (`game_reply`) | Cascade from author profile or parent entry/game | Not included in the vault-only Settings export | Encrypted text or inline AAC audio, no transcript. Report evidence is reporter-owned and follows report lifetime. |
-| `prisma.hosted_member` | Live delete | Metadata/counts | Deletes the member row after explicit child cleanup. Prisma cascade remains a safety net. |
+| `prisma.hosted_member` | Live delete | Metadata/counts | Deletes the member row, including companion contact timestamps and latest client platform/version/build/OS/model, after explicit child cleanup. These diagnostics are omitted from the vault-only Settings export. Prisma cascade remains a safety net. |
 | `prisma.hosted_auth_record` | Member cascade | Not exported secret | Deletes member-bound login users, accounts and sessions. Independent pre-member verification/rate-limit records expire through bounded retention. No login record or bearer is exported. |
 | `prisma.hosted_member_approval_credentials` | Member cascade | Not exported secret | Deletes the encrypted approval credential aggregate and saved recovery-key digest. |
 | `prisma.hosted_sensitive_action_challenge` | Live delete | Not exported secret | Deletes hashed authorization challenges and durable Assistant approval decisions stored in the same member-scoped table. Raw tokens, signatures, action hashes, and approval material are never exported. |
