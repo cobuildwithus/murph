@@ -20,7 +20,7 @@ export function roundValues(total: number, { id, unit }: Pick<MeasureSeries, "id
   const factor = unit === "seconds" ? 3600 : unit === "meters" ? 1609.344 : 1;
   const start = unit === "reps" || unit === "steps" ? 100 : unit === "days" ? 10 : 1;
   const values: number[] = [];
-  if (unit === "seconds" && id !== "sleep") for (const minutes of [1, 2, 5, 10, 15, 30]) {
+  if (unit === "seconds" && id !== "sleep") for (const minutes of [10, 15, 30]) {
     const value = minutes * 60;
     values.push(value);
     if (value > total) return values;

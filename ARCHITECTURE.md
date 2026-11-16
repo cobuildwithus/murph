@@ -6084,7 +6084,7 @@ Total days posted remain an ordinary measure.
 `achievements.ts` holds the round-total and ladder evaluators used by
 `registry.ts`, alongside route-leg evaluation. Round and ladder candidates use
 the first cumulative crossing date; all rungs crossed together are inserted.
-Game-duration rounds begin at one, two, five, ten, fifteen and thirty minutes,
+Game-duration rounds begin at ten, fifteen and thirty minutes,
 then one, two and five hours per decade. Existing hour awards remain valid.
 Wearable Sleep keeps its existing hour rounds. Totals medals group by exercise,
 newest earned date first with larger amounts first on ties. The first total

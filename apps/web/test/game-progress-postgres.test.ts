@@ -8,6 +8,10 @@ import { patchMeasureState, type MeasureState } from "../src/lib/game/progress/s
 import type { Candidate } from "../src/lib/game/progress/registry";
 import { healthSteps } from "../src/lib/game/progress/health";
 import { savedHealthView } from "../src/lib/game/progress/health-view";
+import { roundTotals } from "../src/lib/game/progress/achievements";
+import { gameSeries } from "../src/lib/game/progress/series";
+import { achievementContext } from "../src/lib/game/progress/view";
+import { game, memberId, post, task } from "./support/progress-games";
 
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
 if (enabled && !/^postgres(?:ql)?:\/\/[^/]*@(?:127\.0\.0\.1|localhost):\d+\/murph_test_[a-z0-9_]+$/u.test(process.env.DATABASE_URL ?? "")) throw new Error("Progress proof needs an isolated loopback test database.");
@@ -32,6 +36,23 @@ afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 afterAll(async () => { if (enabled) await db.hostedMember.deleteMany({ where: { id: { in: members } } }); });
 
 describe.skipIf(!enabled)("Progress PostgreSQL invariants", () => {
+  it("starts time-total awards at ten minutes and preserves earned dates through repeated reads and corrections", async () => {
+    const id = await member();
+    const source = game("time", task("4 min planks", { quantity: 4, unit: "minutes", name: "planks" }));
+    const candidates = () => roundTotals(achievementContext(gameSeries([source], memberId, new Map()), new Map()));
+    post(source, 0, "photo", null); post(source, 1, "photo", null);
+    await settleAwards(id, candidates(), authorized);
+    expect(await readAwards(id)).toEqual([]);
+    post(source, 2, "photo", null); post(source, 3, "photo", null);
+    await settleAwards(id, candidates(), authorized);
+    const earned = await readAwards(id);
+    expect(earned.map(award => [award.data.value, award.on])).toEqual([[900, "2026-11-04"], [600, "2026-11-03"]]);
+    await settleAwards(id, candidates(), authorized);
+    source.state.entries[2].withdrawnAt = source.now;
+    source.state.entries[3].withdrawnAt = source.now;
+    await settleAwards(id, candidates(), authorized);
+    expect(await readAwards(id)).toEqual(earned);
+  });
   it("settles every held health level on its earned date once, even after readings worsen", async () => {
     const id = await member();
     const context = { metric: "restingHeartRate" as const, baseline: 74, joinedOn: "2026-11-01", step: 1, direction: -1,

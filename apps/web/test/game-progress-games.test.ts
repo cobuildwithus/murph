@@ -157,7 +157,7 @@ describe("checked ladders and permanent crossings", () => {
   it.each([
     ["reps", 40, 100], ["reps", 60, 100], ["reps", 1400, 2000], ["days", 23, 50],
     ["meters", 1609.344, 3218.688], ["steps", 240, 500],
-    ["seconds", 0, 60], ["seconds", 60, 120], ["seconds", 120, 300], ["seconds", 480, 600],
+    ["seconds", 0, 600], ["seconds", 60, 600], ["seconds", 120, 600], ["seconds", 300, 600], ["seconds", 480, 600], ["seconds", 599, 600],
     ["seconds", 600, 900], ["seconds", 900, 1800], ["seconds", 1800, 3600],
     ["seconds", 3600, 7200], ["seconds", 7200, 18000], ["seconds", 18000, 36000],
     ["seconds", 13800, 18000],
@@ -167,24 +167,32 @@ describe("checked ladders and permanent crossings", () => {
   it("preserves the separate wearable Sleep rounds", () => {
     expect(roundValues(480, { id: "sleep", unit: "seconds" })).toEqual([3600]);
   });
-  it("earns minute medals on their crossing dates and retains earlier hour medals after correction", () => {
+  it("keeps ten minutes next at eight minutes without earning a time-total medal", () => {
     const source = game("time", task("4 min planks", { quantity: 4, unit: "minutes", name: "planks" }));
+    post(source, 0, "photo", null); post(source, 2, "photo", null);
+    const [series] = gameSeries([source], memberId, new Map());
+    const awards = ACHIEVEMENTS.flatMap(evaluate => evaluate(achievementContext([series], new Map())));
+    expect(awards.filter(award => award.kind === "total")).toEqual([]);
+    expect(projection({ ...series, gameOn: false }, "2026-11-05", "us")).toEqual({ value: 600, label: "10m next", on: null });
+  });
+  it("earns minute medals on their crossing dates and retains earlier hour medals after correction", () => {
+    const source = game("time", task("10 min planks", { quantity: 10, unit: "minutes", name: "planks" }));
     post(source, 0, "photo", null); post(source, 2, "photo", null);
     const [series] = gameSeries([source], memberId, new Map());
     const awards = stored(ACHIEVEMENTS.flatMap(evaluate => evaluate(achievementContext([series], new Map()))));
     expect(awards.filter(award => award.kind === "total").map(award => [award.data.value, award.on])).toEqual([
-      [60, "2026-11-01"], [120, "2026-11-01"], [300, "2026-11-03"],
+      [600, "2026-11-01"], [900, "2026-11-03"],
     ]);
-    expect(projection({ ...series, gameOn: false }, "2026-11-05", "us")).toEqual({ value: 600, label: "10m next", on: null });
+    expect(projection({ ...series, gameOn: false }, "2026-11-05", "us")).toEqual({ value: 1800, label: "30m next", on: null });
     const prior = stored([{ key: "total:planks.seconds:10800", kind: "total", measureId: "planks.seconds",
       subjectMemberId: null, on: "2026-10-30", data: { value: 10800, unit: "seconds", noun: "planked", page: "totals" } }]);
     expect(medalsView([...awards, ...prior], "us").find(medal => medal.id === prior[0].id))
       .toMatchObject({ face: { number: "3h" }, earnedOn: "2026-10-30" });
-    expect(medalView(awards.find(award => award.data.value === 60)!, false, "us").title).toBe("1 minute");
+    expect(medalView(awards.find(award => award.data.value === 600)!, false, "us").title).toBe("10 minutes");
   });
   it.each(["us", "metric"] as const)("groups totals by exercise, newest date then largest amount, for %s", units => {
     const inputs = [
-      ["pushups.reps", 100, "2026-11-05"], ["planks.seconds", 300, "2026-11-04"],
+      ["pushups.reps", 100, "2026-11-05"], ["planks.seconds", 900, "2026-11-04"],
       ["pushups.reps", 1000, "2026-11-05"], ["pushups.reps", 500, "2026-11-05"],
       ["pushups.reps", 200, "2026-11-05"], ["planks.seconds", 600, "2026-11-03"],
     ] as const;
@@ -192,11 +200,11 @@ describe("checked ladders and permanent crossings", () => {
       measureId, subjectMemberId: null, on, data: { value, unit: measureId.split(".")[1], noun: "exercise", page: "totals" } })));
     const medals = medalsView(awards, units);
     expect(medals.map(medal => medal.id)).toEqual([
-      "pushups.reps:1000", "pushups.reps:500", "pushups.reps:200", "pushups.reps:100", "planks.seconds:300", "planks.seconds:600",
+      "pushups.reps:1000", "pushups.reps:500", "pushups.reps:200", "pushups.reps:100", "planks.seconds:900", "planks.seconds:600",
     ]);
     expect(medals.filter(medal => medal.gold)).toHaveLength(1);
     expect(medals.find(medal => medal.gold)?.id).toBe("pushups.reps:1000");
-    expect(medals.find(medal => medal.open.measureId === "planks.seconds")?.face).toEqual({ number: "5m" });
+    expect(medals.find(medal => medal.open.measureId === "planks.seconds")?.face).toEqual({ number: "15m" });
   });
   it("projects fourteen calendar days and keeps a dateless next round with no game or no rate", () => {
     const source = game("rate", reps); post(source, 0, "photo", null);

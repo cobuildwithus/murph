@@ -173,23 +173,27 @@ describe("Progress HTTP contracts", () => {
     expect(mocks.games).toHaveBeenCalledWith(expect.objectContaining({ take: 501 }));
     expect(mocks.entries).toHaveBeenCalledWith(expect.objectContaining({ take: 10001, where: expect.objectContaining({ memberId }) }));
   });
-  it("supplies each exercise's latest total medal and a next coin when no total medal is earned", async () => {
+  it.each([8, 10])("supplies each exercise's latest total medal or next coin at %s minutes", async minutes => {
     const planks = gameRow("game-planks");
-    planks.termsWordsEncrypted = JSON.stringify({ v: 1, versions: [{ n: 1, tasks: [{ seat: 0, text: "2 min planks" }], stakes: [] }] });
+    const words = `${minutes} min planks`;
+    planks.termsWordsEncrypted = JSON.stringify({ v: 1, versions: [{ n: 1, tasks: [{ seat: 0, text: words }], stakes: [] }] });
     mocks.games.mockResolvedValue([gameRow(), planks]);
     mocks.entries.mockResolvedValue([
       { ...entryRow(), payloadEncrypted: JSON.stringify({ exercise: "pushups", count: 1000, reps: [] }) },
       { ...entryRow(1), id: "burpees", payloadEncrypted: JSON.stringify({ exercise: "burpees", count: 40, reps: [] }) },
       { ...entryRow(), id: "planks", gameId: planks.id, kind: "photo", payloadEncrypted: null },
     ]);
-    const lookup = progressLookup(memberId, "task", ["2 min planks", "photo"]);
+    const lookup = progressLookup(memberId, "task", [words, "photo"]);
     mocks.tasks.mockResolvedValue([{ lookup, measureEncrypted: await sealProgress({ memberId,
-      table: "game_progress_task_measure", rowId: lookup, field: "measure" }, { quantity: 2, unit: "minutes", name: "planks" }) }]);
+      table: "game_progress_task_measure", rowId: lookup, field: "measure" }, { quantity: minutes, unit: "minutes", name: "planks" }) }]);
     const view = progressSchema.parse(await (await GET(request())).json());
     const totals = view.medals.filter(medal => medal.kind === "total");
     expect(totals.filter(medal => medal.open.measureId === "pushups.reps").map(medal => medal.face))
       .toEqual([{ number: "1,000" }, { number: "500" }, { number: "200" }, { number: "100" }]);
-    expect(totals.find(medal => medal.open.measureId === "planks.seconds")?.face).toEqual({ number: "2m" });
+    expect(totals.filter(medal => medal.open.measureId === "planks.seconds").map(medal => medal.face))
+      .toEqual(minutes === 8 ? [] : [{ number: "10m" }]);
+    expect(view.measures.find(measure => measure.id === "planks.seconds"))
+      .toMatchObject({ total: { value: minutes * 60 }, projection: { value: minutes === 8 ? 600 : 900 } });
     expect(totals.some(medal => medal.open.measureId === "burpees.reps")).toBe(false);
     expect(view.measures.find(measure => measure.id === "burpees.reps")?.projection?.value).toBe(100);
     expect(view.shelf.every(id => view.medals.some(medal => medal.id === id))).toBe(true);
