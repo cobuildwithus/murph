@@ -1466,6 +1466,19 @@ function readOrigin(value: string): string | null {
   }
 }
 
+// Garmin route names are product words such as "oauth2Confirm"; a segment
+// that could be an identifier (three or more digits, longer than 32
+// characters, or other characters) is masked as ":id".
+function garminRouteShape(pathname: string): string {
+  const segments = pathname.split("/").slice(1);
+  if (segments.length === 0 || segments.length > 5) return "other";
+  return `other:/${segments.map((segment) =>
+    /^[A-Za-z][A-Za-z0-9_-]{0,31}$/u.test(segment) && !/[0-9].*[0-9].*[0-9]/u.test(segment)
+      ? segment
+      : ":id"
+  ).join("/")}`;
+}
+
 function safePageLocation(page: Pick<Page, "url"> | null): string {
   try {
     const url = new URL(page?.url() ?? "");
@@ -1484,11 +1497,7 @@ function safePageLocation(page: Pick<Page, "url"> | null): string {
         ? "partner_consent"
         : url.pathname === "/oauth2Confirm"
           ? "oauth2_consent"
-          // Garmin routes are fixed words; a segment with digits, symbols or
-          // more than three segments could carry an identifier.
-          : /^(?:\/[A-Za-z]{1,32}){1,3}$/u.test(url.pathname)
-            ? `other:${url.pathname}`
-            : "other";
+          : garminRouteShape(url.pathname);
     return `${host}/${route}`;
   } catch {
     return "unavailable";
