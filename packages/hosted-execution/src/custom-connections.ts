@@ -1,4 +1,4 @@
-import { z } from "zod";
+import * as z from "@murphai/contracts/zod-runtime";
 
 export const HOSTED_CUSTOM_CONNECTIONS_MANIFEST_PATH = "/api/internal/custom-connections/manifest";
 
