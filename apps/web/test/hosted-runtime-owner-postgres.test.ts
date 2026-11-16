@@ -921,10 +921,18 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
       .toMatchObject({ status: "updated" });
     const idle = await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } });
     expect(idle).toMatchObject({ phase: "idle", runnerContainerName: target, allocationId: owner.allocationId });
+    expect(await send({ operation: "complete", ...runtime, settledRunnerContainerName: null, immediateRecheckRequested: false }))
+      .toMatchObject({ status: "stale", owner: {
+        generation: runtime.generation, attemptId: null, phase: "idle", completedAt: expect.any(String),
+      } });
     expect(await send({ operation: "retire", ...runtime, completed: false })).toMatchObject({ status: "stale" });
     expect(await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).toEqual(idle);
     const successor = (await claim(userId, second)).owner;
     expect(successor).toMatchObject({ generation: owner.generation + 1n, runnerContainerName: target, allocationId: owner.allocationId });
+    expect(await send({ operation: "complete", ...runtime, settledRunnerContainerName: null, immediateRecheckRequested: false }))
+      .toMatchObject({ status: "stale", owner: {
+        generation: successor.generation.toString(), attemptId: successor.attemptId, phase: "starting", completedAt: null,
+      } });
     expect(await send({ operation: "retire", ...runtime, completed: false })).toMatchObject({ status: "stale" });
     expect(await send({ operation: "release", ...runtime, runnerContainerName: target })).toMatchObject({ status: "stale" });
     expect(await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).toEqual(successor);

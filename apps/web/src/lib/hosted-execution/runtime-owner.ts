@@ -292,14 +292,16 @@ export async function completeHostedRuntime(input: {
   prisma: PrismaClient;
   identity: HostedRuntimeIdentity;
   settledRunnerContainerName: string | null;
-}): Promise<boolean> {
+}): Promise<{ applied: boolean; owner: HostedRuntimeOwner | null }> {
   return input.prisma.$transaction(async tx => {
     const owner = await lockHostedRuntimeOwnerRowTx(tx, input.identity.userId);
-    if (input.settledRunnerContainerName !== null && input.settledRunnerContainerName !== owner?.runnerContainerName) return false;
-    if (!await retireHostedRuntimeTx(tx, { identity: input.identity, completed: true })) return false;
-    return input.settledRunnerContainerName === null || releaseHostedRuntimeAfterCompletionTx(tx, {
+    if (input.settledRunnerContainerName !== null && input.settledRunnerContainerName !== owner?.runnerContainerName) return { applied: false, owner };
+    if (!await retireHostedRuntimeTx(tx, { identity: input.identity, completed: true })) return { applied: false, owner };
+    const applied = input.settledRunnerContainerName === null || await releaseHostedRuntimeAfterCompletionTx(tx, {
       identity: input.identity, runnerContainerName: input.settledRunnerContainerName,
     });
+    // The locked pre-mutation snapshot explains rejection without another read.
+    return { applied, owner: applied ? null : owner };
   }, OWNER_TRANSACTION_OPTIONS);
 }
 
