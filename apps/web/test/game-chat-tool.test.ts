@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-const m = vi.hoisted(() => ({ audience: vi.fn(), groupAuthority: vi.fn(), exact: vi.fn(), runtime: vi.fn(), access: vi.fn(), wake: vi.fn(), route: vi.fn(), sender: vi.fn(), game: vi.fn(), loreRows: vi.fn(), run: vi.fn(), read: vi.fn(), profiles: vi.fn(), players: vi.fn(), photo: vi.fn(), recapMaterial: vi.fn(), acceptedVideo: { value: null as null | { generationId: string; hash: string; byteLength: number } }, sealRecap: vi.fn(), mailbox: vi.fn(), decodeMailbox: vi.fn() }));
+const m = vi.hoisted(() => ({ audience: vi.fn(), groupAuthority: vi.fn(), exact: vi.fn(), runtime: vi.fn(), access: vi.fn(), wake: vi.fn(), route: vi.fn(), sender: vi.fn(), game: vi.fn(), loreRows: vi.fn(), run: vi.fn(), read: vi.fn(), profiles: vi.fn(), players: vi.fn(), photo: vi.fn(), recapMaterial: vi.fn(), acceptedVideo: { value: null as null | { generationId: string; hash: string; byteLength: number } }, sealRecap: vi.fn(), mailbox: vi.fn(), decodeMailbox: vi.fn(), participant: vi.fn() }));
 vi.mock("../src/lib/prisma", () => ({ getPrisma: () => ({ hostedLinqDelivery: { findFirst: async () => null }, game: { findFirst: m.game, findMany: m.loreRows }, $transaction: (fn: (tx: object) => unknown) => fn({ game: { findFirst: m.game } }), hostedMailboxItem: { findMany: m.mailbox } }) }));
 vi.mock("../src/lib/hosted-execution/runtime-owner", () => ({ requireHostedRuntimeCallbackTx: m.runtime }));
 vi.mock("../src/lib/hosted-mailbox/runtime-access", () => ({ requireHostedRuntimeActiveAccessForUpdateTx: m.access }));
@@ -29,6 +29,8 @@ vi.mock("../src/lib/game/service", () => ({
 }));
 vi.mock("../src/lib/game/chat-photo", () => ({ handleGameChatPhoto: m.photo }));
 vi.mock("../src/lib/game/recap-asset-access", () => ({ readRecapEnvelope: async () => null }));
+vi.mock("../src/lib/hosted-groups/participant-member", () => ({ lookupHostedGroupParticipantMemberByHandle: m.participant }));
+import { buildHostedExecutionLinqConversationMessageWake } from "@murphai/hosted-execution";
 import { hostedGameToolRequestSchema, hostedGameToolResponseSchema } from "@murphai/hosted-execution/runtime-control";
 import { gameGroupLoreFingerprint, gamePairLoreFingerprint } from "../src/lib/game/audience";
 import { handleGameChatTool } from "../src/lib/game/chat-tool";
@@ -200,6 +202,28 @@ describe("game chat tool authority", () => {
     m.game.mockResolvedValue(null);
     expect((await handleGameChatTool(update)).result.status).toBe("unavailable");
     expect(m.run).not.toHaveBeenCalled();
+  });
+  it.each(["like", "heart"])("approves as the synthetic Linq %s reactor through the real sender resolver", async reaction => {
+    const { resolveHostedGroupMessageSenderMemberId } = await vi.importActual<typeof import("../src/lib/hosted-groups/group-message-sender")>("../src/lib/hosted-groups/group-message-sender");
+    m.sender.mockImplementation(resolveHostedGroupMessageSenderMemberId);
+    m.participant.mockResolvedValue({ core: { id: "other_synthetic" } });
+    const reactionWake = buildHostedExecutionLinqConversationMessageWake({
+      eventId: "event_reaction", senderMemberId: actor, contactKind: "email", contactLookupKey: "hclk_synthetic", occurredAt: new Date().toISOString(), userId: group,
+      routeAuthority: { channel: "linq", containerMemberId: group, threadId: "chat_synthetic" },
+      linqMessage: { affirmativeReaction: true, reactionEligible: false, chatId: "chat_synthetic", from: "sam@example.test", isFromMe: false, threadIsDirect: false,
+        messageId: "event_reaction", parts: [{ type: "text", value: `Reacted with a ${reaction} reaction.` }],
+        replyToMessageId: "murph_waiting_ask", service: "imessage" },
+    });
+    m.wake.mockResolvedValue(reactionWake);
+    m.run.mockImplementationOnce(async input => {
+      await input.beforeMutationTx({ game: { findFirst: m.game } });
+      return { ok: true, game: null };
+    });
+    expect((await handleGameChatTool(update)).result.status).toBe("ok");
+    expect(m.participant).toHaveBeenCalledTimes(2);
+    expect(m.participant).toHaveBeenLastCalledWith(expect.objectContaining({ handle: "sam@example.test" }));
+    expect(m.run).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ actorMemberId: "other_synthetic", update: update.request.update }));
+    expect(m.read).toHaveBeenCalledExactlyOnceWith(group, [actor, "other_synthetic"], "other_synthetic", false);
   });
   it.each([24 * 60 * 60 * 1000 - 1, 24 * 60 * 60 * 1000])("approves for the earlier message's sender at age %i, not the current speaker", async age => {
     vi.useFakeTimers(); vi.setSystemTime(new Date("2030-04-02T12:00:00.000Z"));

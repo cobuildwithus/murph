@@ -1265,6 +1265,21 @@ Another player's report of what someone said never supplies consent. Expired
 refs require that player to say it again. Photo source, day and offer rules
 still apply.
 
+In Linq iMessage, a like or heart from the player being asked on Murph's exact
+waiting ask or an invitation they can accept counts as their yes. The runtime
+attests the target as a sent Murph message, and Web derives the actor from the
+reaction's own synthetic message. The asker, other people, unrelated targets,
+negative reactions and question reactions do not approve. Telegram group
+reactions remain context only and cannot trigger this path.
+
+Several requested fields travel together in one pair proposal or group terms
+edit. An addition to the asker's own waiting ask cancels it and replaces it with
+one ask containing the earlier and new changes; the latest requested value wins
+for an overlapping field. Another player's counteroffer declines the old ask
+and proposes that player's new request. Combined edits validate atomically: a
+locked task rejects the entire edit, even with an otherwise allowed schedule.
+Murph explains the named rule and proposes the requested fields still allowed.
+
 Before Day 1, either player can propose Start now. Until anyone checks in
 (any post, words or excuse), either player can propose a different start date,
 even after Day 1 has begun, from the latest player's today to 60 days out. That

@@ -5174,7 +5174,7 @@ describe('assistant auto-reply event-first path', () => {
     )
   })
 
-  it.each(['like', 'question', 'dislike'])('binds an attested same-session Linq %s reaction to the exact older target', async (reaction) => {
+  it.each(['like', 'heart', 'question', 'dislike'].flatMap(reaction => [true, false].map(threadIsDirect => ({ reaction, threadIsDirect }))))('binds an attested Linq $reaction to the exact target (direct=$threadIsDirect)', async ({ reaction, threadIsDirect }) => {
     const vault = await createTempVault()
     const automationId = 'automation_01JQ8PWXP5A68SQM1W0GYM42AA'
     const experimentId = 'exp_01JQ8PWXP5A68SQM1W0GYM42AB'
@@ -5192,7 +5192,7 @@ describe('assistant auto-reply event-first path', () => {
           expectedUpdatedAt: '2026-04-08T00:04:00.000Z',
           supportSeriesId: `experiment:${experimentId}`,
         },
-        channel: 'linq',
+        channel: 'linq', threadIsDirect,
         intentId: 'intent-same-session-reaction-target',
         message: 'Would you like me to continue?',
         providerMessageId: 'linq-msg-same-session-target',
@@ -5201,7 +5201,7 @@ describe('assistant auto-reply event-first path', () => {
         sessionId: 'session-chat',
       }),
       createOutboxMessage({
-        channel: 'linq',
+        channel: 'linq', threadIsDirect,
         intentId: 'intent-newer-same-session-message',
         message: 'Should I send the newer message?',
         providerMessageId: 'linq-msg-newer-same-session',
@@ -5220,6 +5220,7 @@ describe('assistant auto-reply event-first path', () => {
       source: 'linq',
       sourceMetadata: {
         affirmativeReaction: true,
+        externalThreadRouteAuthorityPresent: true,
         kind: 'linq',
         partCount: 1,
         reactionEligible: false,
@@ -5227,7 +5228,7 @@ describe('assistant auto-reply event-first path', () => {
         service: 'iMessage',
       },
       text: `Reacted with a ${reaction} reaction.`,
-      threadIsDirect: true,
+      threadIsDirect,
     })
 
     const result = await processReply({
@@ -5244,6 +5245,7 @@ describe('assistant auto-reply event-first path', () => {
     expect(result.terminalLinqCleanup).toBeUndefined()
     expect(replyEventPathMocks.sendAssistantMessage).toHaveBeenCalledTimes(1)
     const sendInput = replyEventPathMocks.sendAssistantMessage.mock.calls[0]?.[0]
+    expect(sendInput?.acceptedTurnInput.initialInputs).toEqual([expect.objectContaining({ id: candidate.acceptedInput.id })])
     const turnContext = sendInput?.turnContext
     expect(sendInput?.reactionRouting).toEqual({ reaction: `Reacted with a ${reaction} reaction.`, targetMessage: 'Would you like me to continue?' })
     expect(turnContext).toContain([
@@ -5252,7 +5254,7 @@ describe('assistant auto-reply event-first path', () => {
       '',
       'Would you like me to continue?',
       '',
-      'Interpret the reaction in the context of this message. A tapback usually signals acknowledgment or appreciation. Treat it as a "yes" only when this message asked a single closed yes/no question or proposed one specific action whose affirmative answer is unambiguous; never infer facts about the user or treat a reaction alone as consent or authorization. A question reaction may request clarification and a negative reaction may signal disagreement. Respond only when an answer or follow-through is useful; ordinary acknowledgment stays quiet.',
+      'Interpret the reaction in the context of this message. A tapback usually signals acknowledgment or appreciation. Treat it as a "yes" only when this message asked a single closed yes/no question or proposed one specific action whose affirmative answer is unambiguous; never infer facts about the user. Treat a reaction as consent or authorization only when the rules of the tool being used allow it. A question reaction may request clarification and a negative reaction may signal disagreement. Respond only when an answer or follow-through is useful; ordinary acknowledgment stays quiet.',
     ].join('\n'))
     expect(turnContext).not.toContain('Canonical experiment reminder context:')
     expect(turnContext).not.toContain(`experiment:${experimentId}`)

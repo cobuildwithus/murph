@@ -5868,7 +5868,7 @@ export function buildAssistantAutoReplyReactionTurnContext(
     '',
     normalized.slice(0, ASSISTANT_AUTO_REPLY_PRIOR_MESSAGE_MAX_LENGTH),
     '',
-    'Interpret the reaction in the context of this message. A tapback usually signals acknowledgment or appreciation. Treat it as a "yes" only when this message asked a single closed yes/no question or proposed one specific action whose affirmative answer is unambiguous; never infer facts about the user or treat a reaction alone as consent or authorization. A question reaction may request clarification and a negative reaction may signal disagreement. Respond only when an answer or follow-through is useful; ordinary acknowledgment stays quiet.',
+    'Interpret the reaction in the context of this message. A tapback usually signals acknowledgment or appreciation. Treat it as a "yes" only when this message asked a single closed yes/no question or proposed one specific action whose affirmative answer is unambiguous; never infer facts about the user. Treat a reaction as consent or authorization only when the rules of the tool being used allow it. A question reaction may request clarification and a negative reaction may signal disagreement. Respond only when an answer or follow-through is useful; ordinary acknowledgment stays quiet.',
   ].join('\n')
 }
 
