@@ -72,7 +72,11 @@ describe("native Worker secret retirement", () => {
       Authorization: "Bearer fixture-token", "Content-Type": "application/merge-patch+json",
     });
     expect(JSON.parse(String(request?.body))).toEqual({
-      env: { VENICE_API_KEY: null, VERCEL_AI_API_KEY: null },
+      env: {
+        HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID: null,
+        VENICE_API_KEY: null,
+        VERCEL_AI_API_KEY: null,
+      },
       annotations: { "workers/message": input.versionMessage, "workers/tag": input.versionTag },
     });
   });

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   classifyOperatorLinqAlertFailure,
+  readOperatorLinqChatIds,
   sendOperatorLinqAlert,
 } from "../src/operator-alert/linq.ts";
 
@@ -82,6 +83,42 @@ describe("operator Linq alert delivery", () => {
     expect(classifyOperatorLinqAlertFailure(failure)).toBe(
       "linq_rejected_response",
     );
+  });
+
+  it("sends one page into the only configured chat", async () => {
+    const fetchImplementation = createHealthyChatsFetch(() =>
+      new Response(null, { status: 202 })
+    );
+
+    await sendOperatorLinqAlert({
+      apiBaseUrl: "https://api.linqapp.test/api/partner/v3",
+      apiToken: "opaque-token",
+      chatIds: ["chat_primary"],
+      fetchImplementation,
+      idempotencyKey: "operator-page-5",
+      message: "Bounded operational evidence.",
+    });
+
+    const requests = fetchImplementation.mock.calls.map(([input, init]) => new Request(input, init));
+    expect(requests.filter((request) => request.method === "POST")
+      .map((request) => new URL(request.url).pathname))
+      .toEqual(["/api/partner/v3/chats/chat_primary/messages"]);
+    expect(requests.some((request) => new URL(request.url).pathname.endsWith("/chat_secondary")))
+      .toBe(false);
+  });
+
+  it.each([
+    [{}, "HOSTED_DATABASE_ALERT_LINQ_CHAT_ID is required."],
+    [{ HOSTED_DATABASE_ALERT_LINQ_CHAT_ID: " chat_a ", HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID: "chat_a" }, "Database health alert chat IDs must be distinct."],
+  ])("rejects an unusable operator chat configuration %#", (environment, message) => {
+    expect(() => readOperatorLinqChatIds(environment)).toThrowError(message);
+  });
+
+  it("reads one or two operator chats", () => {
+    expect(readOperatorLinqChatIds({ HOSTED_DATABASE_ALERT_LINQ_CHAT_ID: " chat_a ", HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID: " " }))
+      .toEqual(["chat_a"]);
+    expect(readOperatorLinqChatIds({ HOSTED_DATABASE_ALERT_LINQ_CHAT_ID: "chat_a", HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID: "chat_b" }))
+      .toEqual(["chat_a", "chat_b"]);
   });
 
   it("fails closed when two configured chats resolve to one recipient", async () => {
