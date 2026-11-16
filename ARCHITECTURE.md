@@ -6201,9 +6201,11 @@ below the line and held under the same coverage rule. Award comparisons use the
 join-date age bracket, so changing brackets does not issue an award. Sleep has
 no age wins. VO2 retains the existing median statistic; the other metrics use
 the mean.
-`freezeAndScoreMetric` applies the existing group-report daily metric projection
-ranges to readings before baseline/statistic calculation and to any frozen
-baseline before scoring. Sleep scales those canonical-minute ranges to seconds.
+`health-input.ts` owns the shared retained-date admission, Sleep unit conversion
+and inclusive group-report daily metric projection ranges for Health, health goal
+contexts and the Steps PNG. `freezeAndScoreMetric` consumes those admitted days
+and checks any frozen baseline against the same ranges before scoring. Sleep
+scales those canonical-minute ranges to seconds.
 Out-of-range values are omitted, never clamped; an invalid frozen baseline stays
 stored but cannot issue new wins. Existing earned awards are unchanged. These
 shared ranges bound held-step enumeration to 230 HR, 1,000 Steps, 96 Sleep and
@@ -6235,18 +6237,44 @@ content under the classification below.
 Age medal titles are derived from the saved percentile for both old and new
 awards, with the audience only in detail; moments join those words once.
 
-The Steps map reads `readCompanionHealthSeries` and `healthSums`, exactly as the
-Health page does, and rechecks health authority before rendering. It never
-adds game Steps or measured walk distance. Route `here` and `drawerHere` are
+`goal-context.ts` composes the existing games context or own-health context for
+exact IDs `steps` and `sleep`; `goals.ts` consumes typed input without importing
+the health reader. Health goals load one replica, one four-measure state set and
+saved awards, with no game-history scan. Preview freezes no baseline/default
+route and settles no award. Sleep uses the sleep time ladder. Steps uses the
+canonical sum for the new leg start and saved completion awards for retained
+legs. The only writer remains `patchMeasureState`, including explicit found-goal
+lookup writes; session and health authority are checked after private reads and
+inside the committing transaction. Provider and crypto work stays outside it.
+PUT returns `healthSumView` from the same read and the committed state, without a
+second vault read; the next ordinary Health refresh settles crossings. Missing
+postjoin points return retryable `PROGRESS_HEALTH_UNAVAILABLE`, even with saved
+medals. Wearable measures reject per-day amounts.
+
+Native integration must read Health before Progress, even after a health
+failure, then compose game measures with successful `Health.sums` in memory. Progress
+stays game-only and vault-free. No wire field is removed, renamed or added.
+Retained history is still bounded to 365 dates since joining; missing dates stay
+unknown, and health projections remain undated. The iOS lane owns this refresh
+ordering and rendering; backend deployment alone does not change app navigation.
+
+The Steps map uses the same `readHealthInput` and `healthSums` as Health and goals,
+with one on-demand replica read, and rechecks health authority before rendering.
+It does not freeze baselines, initialize a route or settle awards. Saved route
+completion still survives a shrinking total. It never adds game Steps or measured walk distance. Route `here` and `drawerHere` are
 derived unit image coordinates from the same geometry cut and respective
 viewports as the card and drawer PNGs; neither is persisted. Sleep journeys
 retain the shared `projection()` result, including its nullable `on` date.
 
 The following nested fields are encrypted content under the existing Progress
-owners; no additional table or plaintext private field is introduced:
+owners; no additional table or persisted field is introduced. Lookups stay
+member-bound HMACs; owner FKs and existing ordering/seen timestamps retain their
+approved metadata classification. Composed display values are response-only:
 
 | Owner | Fields |
 | --- | --- |
+| Measure `state_encrypted.goal`, `.found`, `.legs` | Health goal definitions and route geometry, towns and start totals use the existing encrypted measure content, exactly as game goals do |
+| Total/time award `data_encrypted.data` | Health measure identity, threshold, rung definition and crossing evidence use the existing encrypted award content |
 | Measure `state_encrypted.baseline` | `value`, `from`, `to`: frozen health statistic and its observed-date window |
 | Health award `data_encrypted.data` | `level`, `baseline`, `value`, `amount`: held step facts; common `face`, `title`, `detail`, `page`, `evaluator`: medal presentation and scoring evidence |
 | Age award `data_encrypted.data` | `percentile`: held age crossing; common medal presentation and scoring evidence |

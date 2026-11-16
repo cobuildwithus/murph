@@ -193,6 +193,11 @@ it.each([
       delta: current - 6000,
     },
   });
+  const { readHealthInput } = await import("../src/lib/game/progress/health-input");
+  const admitted = await readHealthInput(await mocks.auth(), new AbortController().signal, "2026-11-05");
+  const steps = admitted.metrics.find(metric => metric.id === "steps")!.daily;
+  expect(steps).toHaveLength(days);
+  expect(steps.at(-1)).toMatchObject({ date: settledThrough, value: time === "07:00:00" ? 8000 : 4000 });
   expect(body.numbers.steps.daily).toHaveLength(days);
   expect(body.numbers.steps.daily.every((point: { date: string }) => point.date <= settledThrough)).toBe(true);
   expect(body.numbers.restingHeartRate.latest).toEqual({ date: "2026-11-05", value: 59, observedAt: "2026-11-05T12:00:00.000Z" });

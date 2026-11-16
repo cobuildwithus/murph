@@ -7,6 +7,10 @@ import * as crypto from "../src/lib/game/progress/crypto";
 import { patchMeasureState, type MeasureState } from "../src/lib/game/progress/state";
 import type { Candidate } from "../src/lib/game/progress/registry";
 import { healthSteps } from "../src/lib/game/progress/health";
+import { healthJourneys, healthJourneyViews } from "../src/lib/game/progress/health-journeys";
+import { normalizeHealthDays } from "../src/lib/game/progress/health-input";
+import { encodePolyline } from "../src/lib/game/progress/route-geometry";
+import { medalView } from "../src/lib/game/progress/view";
 import { savedHealthView } from "../src/lib/game/progress/health-view";
 
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
@@ -32,6 +36,41 @@ afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 afterAll(async () => { if (enabled) await db.hostedMember.deleteMany({ where: { id: { in: members } } }); });
 
 describe.skipIf(!enabled)("Progress PostgreSQL invariants", () => {
+  it("settles real Steps and Sleep crossings once and never rewrites them after correction or earlier backfill", async () => {
+    const id = await member(), joinedOn = "2026-11-01", today = "2026-11-16";
+    const states = new Map<string, MeasureState>([["steps", { legs: [{ from: "London", to: "Paris", distanceM: 1609.344,
+      polyline: encodePolyline([[0, 50], [2, 49]]), towns: [], straightLine: false, startTotal: 0 }] }]]);
+    const calculate = async (dates: string[], value: number) => healthJourneys({ memberId: id, joinedOn, today,
+      timeZone: "UTC", states, awards: await readAwards(id), beforeMutationTx: authorized,
+      metrics: (["steps", "sleep"] as const).map(metric => ({ id: metric, baseline: null, step: 1, direction: 1, wins: [],
+        daily: normalizeHealthDays(metric, dates.map(date => ({ date, value: metric === "steps" ? value : value / 5,
+          source: "Garmin", observedAt: `${date}T12:00:00Z` })), today) })) });
+    const settle = async (dates: string[], value: number) => {
+      const journeys = await calculate(dates, value);
+      await settleAwards(id, journeys.candidates, authorized);
+      return journeys;
+    };
+    await settle(["2026-11-02", "2026-11-15"], 2000);
+    const first = await readAwards(id);
+    expect(new Set(first.map(award => award.kind))).toEqual(new Set(["total", "time", "route"]));
+    expect(first.filter(award => award.on === "2026-11-02").every(award => award.seenAt !== null)).toBe(true);
+    expect(first.some(award => award.on === "2026-11-15" && award.seenAt === null)).toBe(true);
+    await settle(["2026-11-02", "2026-11-15"], 2000);
+    await settle(["2026-11-02", "2026-11-15"], 1);
+    expect(await readAwards(id)).toEqual(first);
+    await settle(["2026-11-01", "2026-11-02", "2026-11-15"], 2000);
+    const backfilled = await readAwards(id);
+    expect(backfilled.filter(award => first.some(original => original.id === award.id))).toEqual(first);
+    expect(new Set(backfilled.map(award => award.id)).size).toBe(backfilled.length);
+    const corrected = await calculate([], 0);
+    const views = healthJourneyViews(corrected, backfilled, today, "us");
+    expect(views.find(view => view.id === "steps")?.route).toMatchObject({ progress: 1, finishedOn: "2026-11-02" });
+    const sleep = views.find(view => view.id === "sleep")!;
+    expect(sleep.ladder!.next!.at).toBeGreaterThan(Math.max(...sleep.ladder!.passed.map(rung => rung.at)));
+    const medals = backfilled.map((award, index) => medalView(award, index === 0, "us"));
+    expect(medals.filter(medal => medal.gold)).toHaveLength(1);
+    expect(medals[0].earnedOn).toBe("2026-11-15");
+  });
   it("settles every held health level on its earned date once, even after readings worsen", async () => {
     const id = await member();
     const context = { metric: "restingHeartRate" as const, baseline: 74, joinedOn: "2026-11-01", step: 1, direction: -1,
