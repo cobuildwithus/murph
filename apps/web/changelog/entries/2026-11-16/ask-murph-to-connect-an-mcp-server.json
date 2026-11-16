@@ -1,0 +1,23 @@
+{
+  "publishedOn": "2026-11-16",
+  "order": 100,
+  "item": {
+    "id": "ask-murph-to-connect-an-mcp-server",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Ask Murph to connect an MCP server",
+    "summary": "In your private chat, ask Murph to connect an MCP server and it sends you the page where you add one.",
+    "details": "Ask which MCP servers Murph has, and it names the ones you connected, apart from its own built-in tools. MCP servers never reach group chats.",
+    "relevanceTags": [
+      "connections",
+      "assistant"
+    ],
+    "sourcePullRequests": [
+      5053
+    ],
+    "tryIt": {
+      "label": "Ask about MCP servers",
+      "prompt": "How do I connect an MCP server?"
+    }
+  }
+}
