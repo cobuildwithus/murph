@@ -1,0 +1,1098 @@
+[
+  {
+    "metric": "vo2Max",
+    "sex": "female",
+    "ageFrom": 20,
+    "ageTo": 29,
+    "percentiles": {
+      "1": 14.6,
+      "5": 19.4,
+      "10": 22.5,
+      "25": 29.1,
+      "50": 36.6,
+      "75": 43.2,
+      "90": 49.0,
+      "95": 52.5,
+      "99": 58.9
+    },
+    "source": "Kaminsky LA, Arena R, Myers J, et al. Mayo Clin Proc 2022;97(2):285-293 (FRIEND), Table 3, treadmill, directly measured VO2peak, RER>=1.0. 10th, 50th and 90th as printed; 25th and 75th interpolated between printed deciles; 1st, 5th, 95th and 99th extended from each tail by scripts/friend-2022-vo2-norms.py"
+  },
+  {
+    "metric": "vo2Max",
+    "sex": "female",
+    "ageFrom": 30,
+    "ageTo": 39,
+    "percentiles": {
+      "1": 13.0,
+      "5": 16.4,
+      "10": 18.6,
+      "25": 23.1,
+      "50": 28.3,
+      "75": 35.2,
+      "90": 42.1,
+      "95": 46.1,
+      "99": 53.8
+    },
+    "source": "Kaminsky LA, Arena R, Myers J, et al. Mayo Clin Proc 2022;97(2):285-293 (FRIEND), Table 3, treadmill, directly measured VO2peak, RER>=1.0. 10th, 50th and 90th as printed; 25th and 75th interpolated between printed deciles; 1st, 5th, 95th and 99th extended from each tail by scripts/friend-2022-vo2-norms.py"
+  },
+  {
+    "metric": "vo2Max",
+    "sex": "female",
+    "ageFrom": 40,
+    "ageTo": 49,
+    "percentiles": {
+      "1": 12.5,
+      "5": 15.3,
+      "10": 17.2,
+      "25": 20.8,
+      "50": 25.7,
+      "75": 31.4,
+      "90": 37.8,
+      "95": 41.5,
+      "99": 48.5
+    },
+    "source": "Kaminsky LA, Arena R, Myers J, et al. Mayo Clin Proc 2022;97(2):285-293 (FRIEND), Table 3, treadmill, directly measured VO2peak, RER>=1.0. 10th, 50th and 90th as printed; 25th and 75th interpolated between printed deciles; 1st, 5th, 95th and 99th extended from each tail by scripts/friend-2022-vo2-norms.py"
+  },
+  {
+    "metric": "vo2Max",
+    "sex": "female",
+    "ageFrom": 50,
+    "ageTo": 59,
+    "percentiles": {
+      "1": 12.5,
+      "5": 15.0,
+      "10": 16.5,
+      "25": 19.3,
+      "50": 22.9,
+      "75": 27.3,
+      "90": 32.4,
+      "95": 35.2,
+      "99": 40.8
+    },
+    "source": "Kaminsky LA, Arena R, Myers J, et al. Mayo Clin Proc 2022;97(2):285-293 (FRIEND), Table 3, treadmill, directly measured VO2peak, RER>=1.0. 10th, 50th and 90th as printed; 25th and 75th interpolated between printed deciles; 1st, 5th, 95th and 99th extended from each tail by scripts/friend-2022-vo2-norms.py"
+  },
+  {
+    "metric": "vo2Max",
+    "sex": "female",
+    "ageFrom": 60,
+    "ageTo": 69,
+    "percentiles": {
+      "1": 9.7,
+      "5": 12.0,
+      "10": 13.4,
+      "25": 16.2,
+      "50": 19.6,
+      "75": 23.3,
+      "90": 27.3,
+      "95": 29.6,
+      "99": 34.0
+    },
+    "source": "Kaminsky LA, Arena R, Myers J, et al. Mayo Clin Proc 2022;97(2):285-293 (FRIEND), Table 3, treadmill, directly measured VO2peak, RER>=1.0. 10th, 50th and 90th as printed; 25th and 75th interpolated between printed deciles; 1st, 5th, 95th and 99th extended from each tail by scripts/friend-2022-vo2-norms.py"
+  },
+  {
+    "metric": "vo2Max",
+    "sex": "female",
+    "ageFrom": 70,
+    "ageTo": 79,
+    "percentiles": {
+      "1": 9.2,
+      "5": 11.1,
+      "10": 12.3,
+      "25": 14.6,
+      "50": 17.2,
+      "75": 20.2,
+      "90": 22.8,
+      "95": 24.3,
+      "99": 27.2
+    },
+    "source": "Kaminsky LA, Arena R, Myers J, et al. Mayo Clin Proc 2022;97(2):285-293 (FRIEND), Table 3, treadmill, directly measured VO2peak, RER>=1.0. 10th, 50th and 90th as printed; 25th and 75th interpolated between printed deciles; 1st, 5th, 95th and 99th extended from each tail by scripts/friend-2022-vo2-norms.py"
+  },
+  {
+    "metric": "vo2Max",
+    "sex": "female",
+    "ageFrom": 80,
+    "ageTo": 89,
+    "percentiles": {
+      "1": 8.8,
+      "5": 10.4,
+      "10": 11.4,
+      "25": 13.2,
+      "50": 15.4,
+      "75": 17.8,
+      "90": 20.8,
+      "95": 22.4,
+      "99": 25.6
+    },
+    "source": "Kaminsky LA, Arena R, Myers J, et al. Mayo Clin Proc 2022;97(2):285-293 (FRIEND), Table 3, treadmill, directly measured VO2peak, RER>=1.0. 10th, 50th and 90th as printed; 25th and 75th interpolated between printed deciles; 1st, 5th, 95th and 99th extended from each tail by scripts/friend-2022-vo2-norms.py"
+  },
+  {
+    "metric": "vo2Max",
+    "sex": "male",
+    "ageFrom": 20,
+    "ageTo": 29,
+    "percentiles": {
+      "1": 18.0,
+      "5": 24.4,
+      "10": 28.6,
+      "25": 37.7,
+      "50": 46.5,
+      "75": 53.1,
+      "90": 58.6,
+      "95": 61.8,
+      "99": 67.9
+    },
+    "source": "Kaminsky LA, Arena R, Myers J, et al. Mayo Clin Proc 2022;97(2):285-293 (FRIEND), Table 3, treadmill, directly measured VO2peak, RER>=1.0. 10th, 50th and 90th as printed; 25th and 75th interpolated between printed deciles; 1st, 5th, 95th and 99th extended from each tail by scripts/friend-2022-vo2-norms.py"
+  },
+  {
+    "metric": "vo2Max",
+    "sex": "male",
+    "ageFrom": 30,
+    "ageTo": 39,
+    "percentiles": {
+      "1": 16.6,
+      "5": 21.6,
+      "10": 24.9,
+      "25": 31.7,
+      "50": 39.7,
+      "75": 48.1,
+      "90": 55.5,
+      "95": 59.8,
+      "99": 67.9
+    },
+    "source": "Kaminsky LA, Arena R, Myers J, et al. Mayo Clin Proc 2022;97(2):285-293 (FRIEND), Table 3, treadmill, directly measured VO2peak, RER>=1.0. 10th, 50th and 90th as printed; 25th and 75th interpolated between printed deciles; 1st, 5th, 95th and 99th extended from each tail by scripts/friend-2022-vo2-norms.py"
+  },
+  {
+    "metric": "vo2Max",
+    "sex": "male",
+    "ageFrom": 40,
+    "ageTo": 49,
+    "percentiles": {
+      "1": 14.7,
+      "5": 19.3,
+      "10": 22.1,
+      "25": 28.3,
+      "50": 35.3,
+      "75": 42.9,
+      "90": 50.8,
+      "95": 55.6,
+      "99": 64.5
+    },
+    "source": "Kaminsky LA, Arena R, Myers J, et al. Mayo Clin Proc 2022;97(2):285-293 (FRIEND), Table 3, treadmill, directly measured VO2peak, RER>=1.0. 10th, 50th and 90th as printed; 25th and 75th interpolated between printed deciles; 1st, 5th, 95th and 99th extended from each tail by scripts/friend-2022-vo2-norms.py"
+  },
+  {
+    "metric": "vo2Max",
+    "sex": "male",
+    "ageFrom": 50,
+    "ageTo": 59,
+    "percentiles": {
+      "1": 12.7,
+      "5": 16.4,
+      "10": 18.6,
+      "25": 23.4,
+      "50": 29.2,
+      "75": 36.2,
+      "90": 43.4,
+      "95": 47.8,
+      "99": 56.0
+    },
+    "source": "Kaminsky LA, Arena R, Myers J, et al. Mayo Clin Proc 2022;97(2):285-293 (FRIEND), Table 3, treadmill, directly measured VO2peak, RER>=1.0. 10th, 50th and 90th as printed; 25th and 75th interpolated between printed deciles; 1st, 5th, 95th and 99th extended from each tail by scripts/friend-2022-vo2-norms.py"
+  },
+  {
+    "metric": "vo2Max",
+    "sex": "male",
+    "ageFrom": 60,
+    "ageTo": 69,
+    "percentiles": {
+      "1": 10.9,
+      "5": 13.9,
+      "10": 15.8,
+      "25": 19.7,
+      "50": 24.6,
+      "75": 30.3,
+      "90": 37.1,
+      "95": 41.1,
+      "99": 48.7
+    },
+    "source": "Kaminsky LA, Arena R, Myers J, et al. Mayo Clin Proc 2022;97(2):285-293 (FRIEND), Table 3, treadmill, directly measured VO2peak, RER>=1.0. 10th, 50th and 90th as printed; 25th and 75th interpolated between printed deciles; 1st, 5th, 95th and 99th extended from each tail by scripts/friend-2022-vo2-norms.py"
+  },
+  {
+    "metric": "vo2Max",
+    "sex": "male",
+    "ageFrom": 70,
+    "ageTo": 79,
+    "percentiles": {
+      "1": 9.8,
+      "5": 12.2,
+      "10": 13.6,
+      "25": 16.6,
+      "50": 20.6,
+      "75": 24.8,
+      "90": 29.4,
+      "95": 32.0,
+      "99": 37.1
+    },
+    "source": "Kaminsky LA, Arena R, Myers J, et al. Mayo Clin Proc 2022;97(2):285-293 (FRIEND), Table 3, treadmill, directly measured VO2peak, RER>=1.0. 10th, 50th and 90th as printed; 25th and 75th interpolated between printed deciles; 1st, 5th, 95th and 99th extended from each tail by scripts/friend-2022-vo2-norms.py"
+  },
+  {
+    "metric": "vo2Max",
+    "sex": "male",
+    "ageFrom": 80,
+    "ageTo": 89,
+    "percentiles": {
+      "1": 9.5,
+      "5": 11.6,
+      "10": 12.9,
+      "25": 15.5,
+      "50": 17.6,
+      "75": 20.7,
+      "90": 22.8,
+      "95": 24.2,
+      "99": 26.7
+    },
+    "source": "Kaminsky LA, Arena R, Myers J, et al. Mayo Clin Proc 2022;97(2):285-293 (FRIEND), Table 3, treadmill, directly measured VO2peak, RER>=1.0. 10th, 50th and 90th as printed; 25th and 75th interpolated between printed deciles; 1st, 5th, 95th and 99th extended from each tail by scripts/friend-2022-vo2-norms.py"
+  },
+  {
+    "metric": "restingHeartRate",
+    "sex": "female",
+    "ageFrom": 18,
+    "ageTo": 19,
+    "percentiles": {
+      "1": 50.7,
+      "5": 54.6,
+      "10": 56.9,
+      "25": 61.1,
+      "50": 66.4,
+      "75": 71.9,
+      "90": 77.0,
+      "95": 80.8,
+      "99": 87.8
+    },
+    "source": "Apple Heart and Movement Study, Heart Health Trends (Brigham and Women's Hospital, Feb 2026), Table 4 and Figure 3, Apple Watch resting heart rate, n=207,609. Percentiles from scripts/resting-heart-rate-norms.py"
+  },
+  {
+    "metric": "restingHeartRate",
+    "sex": "female",
+    "ageFrom": 20,
+    "ageTo": 29,
+    "percentiles": {
+      "1": 51.8,
+      "5": 55.9,
+      "10": 58.3,
+      "25": 62.7,
+      "50": 68.2,
+      "75": 74.0,
+      "90": 79.5,
+      "95": 83.5,
+      "99": 91.0
+    },
+    "source": "Apple Heart and Movement Study, Heart Health Trends (Brigham and Women's Hospital, Feb 2026), Table 4 and Figure 3, Apple Watch resting heart rate, n=207,609. Percentiles from scripts/resting-heart-rate-norms.py"
+  },
+  {
+    "metric": "restingHeartRate",
+    "sex": "female",
+    "ageFrom": 30,
+    "ageTo": 39,
+    "percentiles": {
+      "1": 51.8,
+      "5": 55.9,
+      "10": 58.3,
+      "25": 62.8,
+      "50": 68.4,
+      "75": 74.3,
+      "90": 79.9,
+      "95": 83.9,
+      "99": 91.5
+    },
+    "source": "Apple Heart and Movement Study, Heart Health Trends (Brigham and Women's Hospital, Feb 2026), Table 4 and Figure 3, Apple Watch resting heart rate, n=207,609. Percentiles from scripts/resting-heart-rate-norms.py"
+  },
+  {
+    "metric": "restingHeartRate",
+    "sex": "female",
+    "ageFrom": 40,
+    "ageTo": 49,
+    "percentiles": {
+      "1": 50.8,
+      "5": 55.0,
+      "10": 57.5,
+      "25": 62.1,
+      "50": 67.8,
+      "75": 73.8,
+      "90": 79.5,
+      "95": 83.7,
+      "99": 91.5
+    },
+    "source": "Apple Heart and Movement Study, Heart Health Trends (Brigham and Women's Hospital, Feb 2026), Table 4 and Figure 3, Apple Watch resting heart rate, n=207,609. Percentiles from scripts/resting-heart-rate-norms.py"
+  },
+  {
+    "metric": "restingHeartRate",
+    "sex": "female",
+    "ageFrom": 50,
+    "ageTo": 59,
+    "percentiles": {
+      "1": 49.6,
+      "5": 53.6,
+      "10": 56.0,
+      "25": 60.3,
+      "50": 65.8,
+      "75": 71.6,
+      "90": 77.0,
+      "95": 81.0,
+      "99": 88.4
+    },
+    "source": "Apple Heart and Movement Study, Heart Health Trends (Brigham and Women's Hospital, Feb 2026), Table 4 and Figure 3, Apple Watch resting heart rate, n=207,609. Percentiles from scripts/resting-heart-rate-norms.py"
+  },
+  {
+    "metric": "restingHeartRate",
+    "sex": "female",
+    "ageFrom": 60,
+    "ageTo": 69,
+    "percentiles": {
+      "1": 48.5,
+      "5": 52.2,
+      "10": 54.4,
+      "25": 58.4,
+      "50": 63.4,
+      "75": 68.6,
+      "90": 73.5,
+      "95": 77.1,
+      "99": 83.8
+    },
+    "source": "Apple Heart and Movement Study, Heart Health Trends (Brigham and Women's Hospital, Feb 2026), Table 4 and Figure 3, Apple Watch resting heart rate, n=207,609. Percentiles from scripts/resting-heart-rate-norms.py"
+  },
+  {
+    "metric": "restingHeartRate",
+    "sex": "female",
+    "ageFrom": 70,
+    "ageTo": 79,
+    "percentiles": {
+      "1": 48.2,
+      "5": 51.6,
+      "10": 53.7,
+      "25": 57.4,
+      "50": 62.0,
+      "75": 66.7,
+      "90": 71.2,
+      "95": 74.4,
+      "99": 80.4
+    },
+    "source": "Apple Heart and Movement Study, Heart Health Trends (Brigham and Women's Hospital, Feb 2026), Table 4 and Figure 3, Apple Watch resting heart rate, n=207,609. Percentiles from scripts/resting-heart-rate-norms.py"
+  },
+  {
+    "metric": "restingHeartRate",
+    "sex": "female",
+    "ageFrom": 80,
+    "ageTo": 120,
+    "percentiles": {
+      "1": 48.0,
+      "5": 51.3,
+      "10": 53.3,
+      "25": 56.8,
+      "50": 61.3,
+      "75": 65.9,
+      "90": 70.2,
+      "95": 73.3,
+      "99": 79.0
+    },
+    "source": "Apple Heart and Movement Study, Heart Health Trends (Brigham and Women's Hospital, Feb 2026), Table 4 and Figure 3, Apple Watch resting heart rate, n=207,609. Percentiles from scripts/resting-heart-rate-norms.py"
+  },
+  {
+    "metric": "restingHeartRate",
+    "sex": "female",
+    "ageFrom": 18,
+    "ageTo": 19,
+    "percentiles": {
+      "1": 42.4,
+      "5": 46.0,
+      "10": 48.2,
+      "25": 52.3,
+      "50": 57.4,
+      "75": 62.8,
+      "90": 68.0,
+      "95": 71.7,
+      "99": 78.8
+    },
+    "source": "Oura, What Is the Average Resting Heart Rate? (updated Sep 30 2026), lowest sleeping heart rate by age and sex, 6 million members; spread from Apple Heart and Movement Study Figure 6. Percentiles from scripts/resting-heart-rate-norms.py",
+    "measured": "sleep"
+  },
+  {
+    "metric": "restingHeartRate",
+    "sex": "female",
+    "ageFrom": 20,
+    "ageTo": 29,
+    "percentiles": {
+      "1": 42.8,
+      "5": 46.5,
+      "10": 48.7,
+      "25": 52.8,
+      "50": 58.0,
+      "75": 63.5,
+      "90": 68.7,
+      "95": 72.5,
+      "99": 79.7
+    },
+    "source": "Oura, What Is the Average Resting Heart Rate? (updated Sep 30 2026), lowest sleeping heart rate by age and sex, 6 million members; spread from Apple Heart and Movement Study Figure 6. Percentiles from scripts/resting-heart-rate-norms.py",
+    "measured": "sleep"
+  },
+  {
+    "metric": "restingHeartRate",
+    "sex": "female",
+    "ageFrom": 30,
+    "ageTo": 39,
+    "percentiles": {
+      "1": 43.5,
+      "5": 47.4,
+      "10": 49.7,
+      "25": 53.9,
+      "50": 59.3,
+      "75": 65.0,
+      "90": 70.4,
+      "95": 74.4,
+      "99": 81.9
+    },
+    "source": "Oura, What Is the Average Resting Heart Rate? (updated Sep 30 2026), lowest sleeping heart rate by age and sex, 6 million members; spread from Apple Heart and Movement Study Figure 6. Percentiles from scripts/resting-heart-rate-norms.py",
+    "measured": "sleep"
+  },
+  {
+    "metric": "restingHeartRate",
+    "sex": "female",
+    "ageFrom": 40,
+    "ageTo": 49,
+    "percentiles": {
+      "1": 44.3,
+      "5": 48.2,
+      "10": 50.5,
+      "25": 54.8,
+      "50": 60.3,
+      "75": 66.0,
+      "90": 71.5,
+      "95": 75.6,
+      "99": 83.1
+    },
+    "source": "Oura, What Is the Average Resting Heart Rate? (updated Sep 30 2026), lowest sleeping heart rate by age and sex, 6 million members; spread from Apple Heart and Movement Study Figure 6. Percentiles from scripts/resting-heart-rate-norms.py",
+    "measured": "sleep"
+  },
+  {
+    "metric": "restingHeartRate",
+    "sex": "female",
+    "ageFrom": 50,
+    "ageTo": 59,
+    "percentiles": {
+      "1": 44.0,
+      "5": 47.9,
+      "10": 50.2,
+      "25": 54.4,
+      "50": 59.8,
+      "75": 65.5,
+      "90": 70.9,
+      "95": 74.8,
+      "99": 82.3
+    },
+    "source": "Oura, What Is the Average Resting Heart Rate? (updated Sep 30 2026), lowest sleeping heart rate by age and sex, 6 million members; spread from Apple Heart and Movement Study Figure 6. Percentiles from scripts/resting-heart-rate-norms.py",
+    "measured": "sleep"
+  },
+  {
+    "metric": "restingHeartRate",
+    "sex": "female",
+    "ageFrom": 60,
+    "ageTo": 69,
+    "percentiles": {
+      "1": 43.6,
+      "5": 47.3,
+      "10": 49.5,
+      "25": 53.6,
+      "50": 58.7,
+      "75": 64.1,
+      "90": 69.3,
+      "95": 73.0,
+      "99": 80.1
+    },
+    "source": "Oura, What Is the Average Resting Heart Rate? (updated Sep 30 2026), lowest sleeping heart rate by age and sex, 6 million members; spread from Apple Heart and Movement Study Figure 6. Percentiles from scripts/resting-heart-rate-norms.py",
+    "measured": "sleep"
+  },
+  {
+    "metric": "restingHeartRate",
+    "sex": "female",
+    "ageFrom": 70,
+    "ageTo": 79,
+    "percentiles": {
+      "1": 43.0,
+      "5": 46.5,
+      "10": 48.5,
+      "25": 52.2,
+      "50": 56.9,
+      "75": 61.8,
+      "90": 66.4,
+      "95": 69.8,
+      "99": 76.1
+    },
+    "source": "Oura, What Is the Average Resting Heart Rate? (updated Sep 30 2026), lowest sleeping heart rate by age and sex, 6 million members; spread from Apple Heart and Movement Study Figure 6. Percentiles from scripts/resting-heart-rate-norms.py",
+    "measured": "sleep"
+  },
+  {
+    "metric": "restingHeartRate",
+    "sex": "female",
+    "ageFrom": 80,
+    "ageTo": 120,
+    "percentiles": {
+      "1": 42.9,
+      "5": 46.4,
+      "10": 48.4,
+      "25": 52.1,
+      "50": 56.8,
+      "75": 61.7,
+      "90": 66.3,
+      "95": 69.7,
+      "99": 76.0
+    },
+    "source": "Oura, What Is the Average Resting Heart Rate? (updated Sep 30 2026), lowest sleeping heart rate by age and sex, 6 million members; spread from Apple Heart and Movement Study Figure 6. Percentiles from scripts/resting-heart-rate-norms.py",
+    "measured": "sleep"
+  },
+  {
+    "metric": "restingHeartRate",
+    "sex": "male",
+    "ageFrom": 18,
+    "ageTo": 19,
+    "percentiles": {
+      "1": 49.3,
+      "5": 53.2,
+      "10": 55.5,
+      "25": 59.7,
+      "50": 65.0,
+      "75": 70.6,
+      "90": 75.9,
+      "95": 79.7,
+      "99": 86.9
+    },
+    "source": "Apple Heart and Movement Study, Heart Health Trends (Brigham and Women's Hospital, Feb 2026), Table 4 and Figure 3, Apple Watch resting heart rate, n=207,609. Percentiles from scripts/resting-heart-rate-norms.py"
+  },
+  {
+    "metric": "restingHeartRate",
+    "sex": "male",
+    "ageFrom": 20,
+    "ageTo": 29,
+    "percentiles": {
+      "1": 48.3,
+      "5": 52.3,
+      "10": 54.8,
+      "25": 59.2,
+      "50": 64.9,
+      "75": 70.8,
+      "90": 76.5,
+      "95": 80.6,
+      "99": 88.3
+    },
+    "source": "Apple Heart and Movement Study, Heart Health Trends (Brigham and Women's Hospital, Feb 2026), Table 4 and Figure 3, Apple Watch resting heart rate, n=207,609. Percentiles from scripts/resting-heart-rate-norms.py"
+  },
+  {
+    "metric": "restingHeartRate",
+    "sex": "male",
+    "ageFrom": 30,
+    "ageTo": 39,
+    "percentiles": {
+      "1": 47.9,
+      "5": 52.1,
+      "10": 54.6,
+      "25": 59.3,
+      "50": 65.2,
+      "75": 71.5,
+      "90": 77.5,
+      "95": 81.8,
+      "99": 90.1
+    },
+    "source": "Apple Heart and Movement Study, Heart Health Trends (Brigham and Women's Hospital, Feb 2026), Table 4 and Figure 3, Apple Watch resting heart rate, n=207,609. Percentiles from scripts/resting-heart-rate-norms.py"
+  },
+  {
+    "metric": "restingHeartRate",
+    "sex": "male",
+    "ageFrom": 40,
+    "ageTo": 49,
+    "percentiles": {
+      "1": 47.6,
+      "5": 51.9,
+      "10": 54.5,
+      "25": 59.2,
+      "50": 65.2,
+      "75": 71.6,
+      "90": 77.6,
+      "95": 82.1,
+      "99": 90.5
+    },
+    "source": "Apple Heart and Movement Study, Heart Health Trends (Brigham and Women's Hospital, Feb 2026), Table 4 and Figure 3, Apple Watch resting heart rate, n=207,609. Percentiles from scripts/resting-heart-rate-norms.py"
+  },
+  {
+    "metric": "restingHeartRate",
+    "sex": "male",
+    "ageFrom": 50,
+    "ageTo": 59,
+    "percentiles": {
+      "1": 47.0,
+      "5": 51.2,
+      "10": 53.7,
+      "25": 58.4,
+      "50": 64.2,
+      "75": 70.4,
+      "90": 76.4,
+      "95": 80.7,
+      "99": 88.9
+    },
+    "source": "Apple Heart and Movement Study, Heart Health Trends (Brigham and Women's Hospital, Feb 2026), Table 4 and Figure 3, Apple Watch resting heart rate, n=207,609. Percentiles from scripts/resting-heart-rate-norms.py"
+  },
+  {
+    "metric": "restingHeartRate",
+    "sex": "male",
+    "ageFrom": 60,
+    "ageTo": 69,
+    "percentiles": {
+      "1": 45.3,
+      "5": 49.2,
+      "10": 51.6,
+      "25": 55.9,
+      "50": 61.3,
+      "75": 67.0,
+      "90": 72.5,
+      "95": 76.4,
+      "99": 83.9
+    },
+    "source": "Apple Heart and Movement Study, Heart Health Trends (Brigham and Women's Hospital, Feb 2026), Table 4 and Figure 3, Apple Watch resting heart rate, n=207,609. Percentiles from scripts/resting-heart-rate-norms.py"
+  },
+  {
+    "metric": "restingHeartRate",
+    "sex": "male",
+    "ageFrom": 70,
+    "ageTo": 79,
+    "percentiles": {
+      "1": 43.9,
+      "5": 47.6,
+      "10": 49.8,
+      "25": 53.7,
+      "50": 58.8,
+      "75": 64.0,
+      "90": 69.0,
+      "95": 72.7,
+      "99": 79.5
+    },
+    "source": "Apple Heart and Movement Study, Heart Health Trends (Brigham and Women's Hospital, Feb 2026), Table 4 and Figure 3, Apple Watch resting heart rate, n=207,609. Percentiles from scripts/resting-heart-rate-norms.py"
+  },
+  {
+    "metric": "restingHeartRate",
+    "sex": "male",
+    "ageFrom": 80,
+    "ageTo": 120,
+    "percentiles": {
+      "1": 43.8,
+      "5": 47.2,
+      "10": 49.2,
+      "25": 52.9,
+      "50": 57.4,
+      "75": 62.2,
+      "90": 66.7,
+      "95": 70.0,
+      "99": 76.1
+    },
+    "source": "Apple Heart and Movement Study, Heart Health Trends (Brigham and Women's Hospital, Feb 2026), Table 4 and Figure 3, Apple Watch resting heart rate, n=207,609. Percentiles from scripts/resting-heart-rate-norms.py"
+  },
+  {
+    "metric": "restingHeartRate",
+    "sex": "male",
+    "ageFrom": 18,
+    "ageTo": 19,
+    "percentiles": {
+      "1": 38.5,
+      "5": 41.7,
+      "10": 43.6,
+      "25": 47.1,
+      "50": 51.4,
+      "75": 56.0,
+      "90": 60.3,
+      "95": 63.5,
+      "99": 69.4
+    },
+    "source": "Oura, What Is the Average Resting Heart Rate? (updated Sep 30 2026), lowest sleeping heart rate by age and sex, 6 million members; spread from Apple Heart and Movement Study Figure 6. Percentiles from scripts/resting-heart-rate-norms.py",
+    "measured": "sleep"
+  },
+  {
+    "metric": "restingHeartRate",
+    "sex": "male",
+    "ageFrom": 20,
+    "ageTo": 29,
+    "percentiles": {
+      "1": 39.0,
+      "5": 42.2,
+      "10": 44.2,
+      "25": 47.7,
+      "50": 52.1,
+      "75": 56.7,
+      "90": 61.1,
+      "95": 64.3,
+      "99": 70.3
+    },
+    "source": "Oura, What Is the Average Resting Heart Rate? (updated Sep 30 2026), lowest sleeping heart rate by age and sex, 6 million members; spread from Apple Heart and Movement Study Figure 6. Percentiles from scripts/resting-heart-rate-norms.py",
+    "measured": "sleep"
+  },
+  {
+    "metric": "restingHeartRate",
+    "sex": "male",
+    "ageFrom": 30,
+    "ageTo": 39,
+    "percentiles": {
+      "1": 39.6,
+      "5": 43.2,
+      "10": 45.3,
+      "25": 49.3,
+      "50": 54.3,
+      "75": 59.6,
+      "90": 64.7,
+      "95": 68.4,
+      "99": 75.4
+    },
+    "source": "Oura, What Is the Average Resting Heart Rate? (updated Sep 30 2026), lowest sleeping heart rate by age and sex, 6 million members; spread from Apple Heart and Movement Study Figure 6. Percentiles from scripts/resting-heart-rate-norms.py",
+    "measured": "sleep"
+  },
+  {
+    "metric": "restingHeartRate",
+    "sex": "male",
+    "ageFrom": 40,
+    "ageTo": 49,
+    "percentiles": {
+      "1": 40.5,
+      "5": 44.3,
+      "10": 46.6,
+      "25": 50.7,
+      "50": 56.0,
+      "75": 61.6,
+      "90": 67.0,
+      "95": 71.0,
+      "99": 78.5
+    },
+    "source": "Oura, What Is the Average Resting Heart Rate? (updated Sep 30 2026), lowest sleeping heart rate by age and sex, 6 million members; spread from Apple Heart and Movement Study Figure 6. Percentiles from scripts/resting-heart-rate-norms.py",
+    "measured": "sleep"
+  },
+  {
+    "metric": "restingHeartRate",
+    "sex": "male",
+    "ageFrom": 50,
+    "ageTo": 59,
+    "percentiles": {
+      "1": 41.3,
+      "5": 45.1,
+      "10": 47.4,
+      "25": 51.5,
+      "50": 56.9,
+      "75": 62.5,
+      "90": 67.9,
+      "95": 71.9,
+      "99": 79.4
+    },
+    "source": "Oura, What Is the Average Resting Heart Rate? (updated Sep 30 2026), lowest sleeping heart rate by age and sex, 6 million members; spread from Apple Heart and Movement Study Figure 6. Percentiles from scripts/resting-heart-rate-norms.py",
+    "measured": "sleep"
+  },
+  {
+    "metric": "restingHeartRate",
+    "sex": "male",
+    "ageFrom": 60,
+    "ageTo": 69,
+    "percentiles": {
+      "1": 40.7,
+      "5": 44.5,
+      "10": 46.7,
+      "25": 50.8,
+      "50": 56.0,
+      "75": 61.6,
+      "90": 66.9,
+      "95": 70.8,
+      "99": 78.1
+    },
+    "source": "Oura, What Is the Average Resting Heart Rate? (updated Sep 30 2026), lowest sleeping heart rate by age and sex, 6 million members; spread from Apple Heart and Movement Study Figure 6. Percentiles from scripts/resting-heart-rate-norms.py",
+    "measured": "sleep"
+  },
+  {
+    "metric": "restingHeartRate",
+    "sex": "male",
+    "ageFrom": 70,
+    "ageTo": 79,
+    "percentiles": {
+      "1": 39.1,
+      "5": 42.6,
+      "10": 44.8,
+      "25": 48.7,
+      "50": 53.7,
+      "75": 59.0,
+      "90": 64.1,
+      "95": 67.8,
+      "99": 74.8
+    },
+    "source": "Oura, What Is the Average Resting Heart Rate? (updated Sep 30 2026), lowest sleeping heart rate by age and sex, 6 million members; spread from Apple Heart and Movement Study Figure 6. Percentiles from scripts/resting-heart-rate-norms.py",
+    "measured": "sleep"
+  },
+  {
+    "metric": "restingHeartRate",
+    "sex": "male",
+    "ageFrom": 80,
+    "ageTo": 120,
+    "percentiles": {
+      "1": 38.6,
+      "5": 42.2,
+      "10": 44.3,
+      "25": 48.2,
+      "50": 53.2,
+      "75": 58.5,
+      "90": 63.6,
+      "95": 67.3,
+      "99": 74.3
+    },
+    "source": "Oura, What Is the Average Resting Heart Rate? (updated Sep 30 2026), lowest sleeping heart rate by age and sex, 6 million members; spread from Apple Heart and Movement Study Figure 6. Percentiles from scripts/resting-heart-rate-norms.py",
+    "measured": "sleep"
+  },
+  {
+    "metric": "steps",
+    "sex": "female",
+    "ageFrom": 20,
+    "ageTo": 29,
+    "percentiles": {
+      "1": 2480,
+      "5": 3481,
+      "10": 4406,
+      "25": 5826,
+      "50": 7810,
+      "75": 10537,
+      "90": 12761,
+      "95": 13953,
+      "99": 18235
+    },
+    "source": "Koffman L, Crainiceanu C, Muschelli J. Med Sci Sports Exerc 2025;57(4):746-755; NHANES 2011-2014 wrist accelerometry, stepcount SSL steps per day, survey-weighted age and sex quantiles (github.com/lilykoff/nhanes_steps_mortality, results/age_sex_quantiles.csv.gz)"
+  },
+  {
+    "metric": "steps",
+    "sex": "female",
+    "ageFrom": 30,
+    "ageTo": 39,
+    "percentiles": {
+      "1": 2496,
+      "5": 3752,
+      "10": 4430,
+      "25": 6153,
+      "50": 8448,
+      "75": 10949,
+      "90": 13862,
+      "95": 15890,
+      "99": 18474
+    },
+    "source": "Koffman L, Crainiceanu C, Muschelli J. Med Sci Sports Exerc 2025;57(4):746-755; NHANES 2011-2014 wrist accelerometry, stepcount SSL steps per day, survey-weighted age and sex quantiles (github.com/lilykoff/nhanes_steps_mortality, results/age_sex_quantiles.csv.gz)"
+  },
+  {
+    "metric": "steps",
+    "sex": "female",
+    "ageFrom": 40,
+    "ageTo": 49,
+    "percentiles": {
+      "1": 1524,
+      "5": 3779,
+      "10": 4669,
+      "25": 6336,
+      "50": 8663,
+      "75": 11634,
+      "90": 14314,
+      "95": 16213,
+      "99": 18568
+    },
+    "source": "Koffman L, Crainiceanu C, Muschelli J. Med Sci Sports Exerc 2025;57(4):746-755; NHANES 2011-2014 wrist accelerometry, stepcount SSL steps per day, survey-weighted age and sex quantiles (github.com/lilykoff/nhanes_steps_mortality, results/age_sex_quantiles.csv.gz)"
+  },
+  {
+    "metric": "steps",
+    "sex": "female",
+    "ageFrom": 50,
+    "ageTo": 59,
+    "percentiles": {
+      "1": 431,
+      "5": 2749,
+      "10": 3878,
+      "25": 6093,
+      "50": 8622,
+      "75": 11373,
+      "90": 13613,
+      "95": 15458,
+      "99": 18900
+    },
+    "source": "Koffman L, Crainiceanu C, Muschelli J. Med Sci Sports Exerc 2025;57(4):746-755; NHANES 2011-2014 wrist accelerometry, stepcount SSL steps per day, survey-weighted age and sex quantiles (github.com/lilykoff/nhanes_steps_mortality, results/age_sex_quantiles.csv.gz)"
+  },
+  {
+    "metric": "steps",
+    "sex": "female",
+    "ageFrom": 60,
+    "ageTo": 69,
+    "percentiles": {
+      "1": 53,
+      "5": 2288,
+      "10": 3541,
+      "25": 5389,
+      "50": 7779,
+      "75": 10641,
+      "90": 13039,
+      "95": 14908,
+      "99": 19083
+    },
+    "source": "Koffman L, Crainiceanu C, Muschelli J. Med Sci Sports Exerc 2025;57(4):746-755; NHANES 2011-2014 wrist accelerometry, stepcount SSL steps per day, survey-weighted age and sex quantiles (github.com/lilykoff/nhanes_steps_mortality, results/age_sex_quantiles.csv.gz)"
+  },
+  {
+    "metric": "steps",
+    "sex": "female",
+    "ageFrom": 70,
+    "ageTo": 79,
+    "percentiles": {
+      "1": 13,
+      "5": 786,
+      "10": 1692,
+      "25": 3547,
+      "50": 5712,
+      "75": 8232,
+      "90": 10903,
+      "95": 11968,
+      "99": 15466
+    },
+    "source": "Koffman L, Crainiceanu C, Muschelli J. Med Sci Sports Exerc 2025;57(4):746-755; NHANES 2011-2014 wrist accelerometry, stepcount SSL steps per day, survey-weighted age and sex quantiles (github.com/lilykoff/nhanes_steps_mortality, results/age_sex_quantiles.csv.gz)"
+  },
+  {
+    "metric": "steps",
+    "sex": "female",
+    "ageFrom": 80,
+    "ageTo": 120,
+    "percentiles": {
+      "1": 0,
+      "5": 13,
+      "10": 94,
+      "25": 1383,
+      "50": 3386,
+      "75": 5424,
+      "90": 7868,
+      "95": 9571,
+      "99": 12660
+    },
+    "source": "Koffman L, Crainiceanu C, Muschelli J. Med Sci Sports Exerc 2025;57(4):746-755; NHANES 2011-2014 wrist accelerometry, stepcount SSL steps per day, survey-weighted age and sex quantiles (github.com/lilykoff/nhanes_steps_mortality, results/age_sex_quantiles.csv.gz)"
+  },
+  {
+    "metric": "steps",
+    "sex": "male",
+    "ageFrom": 20,
+    "ageTo": 29,
+    "percentiles": {
+      "1": 2087,
+      "5": 3530,
+      "10": 4907,
+      "25": 7293,
+      "50": 10136,
+      "75": 13224,
+      "90": 16645,
+      "95": 19227,
+      "99": 22690
+    },
+    "source": "Koffman L, Crainiceanu C, Muschelli J. Med Sci Sports Exerc 2025;57(4):746-755; NHANES 2011-2014 wrist accelerometry, stepcount SSL steps per day, survey-weighted age and sex quantiles (github.com/lilykoff/nhanes_steps_mortality, results/age_sex_quantiles.csv.gz)"
+  },
+  {
+    "metric": "steps",
+    "sex": "male",
+    "ageFrom": 30,
+    "ageTo": 39,
+    "percentiles": {
+      "1": 3150,
+      "5": 4333,
+      "10": 5429,
+      "25": 7794,
+      "50": 10304,
+      "75": 13197,
+      "90": 16429,
+      "95": 18644,
+      "99": 23955
+    },
+    "source": "Koffman L, Crainiceanu C, Muschelli J. Med Sci Sports Exerc 2025;57(4):746-755; NHANES 2011-2014 wrist accelerometry, stepcount SSL steps per day, survey-weighted age and sex quantiles (github.com/lilykoff/nhanes_steps_mortality, results/age_sex_quantiles.csv.gz)"
+  },
+  {
+    "metric": "steps",
+    "sex": "male",
+    "ageFrom": 40,
+    "ageTo": 49,
+    "percentiles": {
+      "1": 1646,
+      "5": 4445,
+      "10": 5636,
+      "25": 7687,
+      "50": 10015,
+      "75": 13339,
+      "90": 17178,
+      "95": 21054,
+      "99": 25750
+    },
+    "source": "Koffman L, Crainiceanu C, Muschelli J. Med Sci Sports Exerc 2025;57(4):746-755; NHANES 2011-2014 wrist accelerometry, stepcount SSL steps per day, survey-weighted age and sex quantiles (github.com/lilykoff/nhanes_steps_mortality, results/age_sex_quantiles.csv.gz)"
+  },
+  {
+    "metric": "steps",
+    "sex": "male",
+    "ageFrom": 50,
+    "ageTo": 59,
+    "percentiles": {
+      "1": 970,
+      "5": 4008,
+      "10": 4940,
+      "25": 7120,
+      "50": 10047,
+      "75": 12913,
+      "90": 16145,
+      "95": 19037,
+      "99": 24916
+    },
+    "source": "Koffman L, Crainiceanu C, Muschelli J. Med Sci Sports Exerc 2025;57(4):746-755; NHANES 2011-2014 wrist accelerometry, stepcount SSL steps per day, survey-weighted age and sex quantiles (github.com/lilykoff/nhanes_steps_mortality, results/age_sex_quantiles.csv.gz)"
+  },
+  {
+    "metric": "steps",
+    "sex": "male",
+    "ageFrom": 60,
+    "ageTo": 69,
+    "percentiles": {
+      "1": 1197,
+      "5": 2703,
+      "10": 3526,
+      "25": 5836,
+      "50": 8933,
+      "75": 12020,
+      "90": 14086,
+      "95": 16250,
+      "99": 19563
+    },
+    "source": "Koffman L, Crainiceanu C, Muschelli J. Med Sci Sports Exerc 2025;57(4):746-755; NHANES 2011-2014 wrist accelerometry, stepcount SSL steps per day, survey-weighted age and sex quantiles (github.com/lilykoff/nhanes_steps_mortality, results/age_sex_quantiles.csv.gz)"
+  },
+  {
+    "metric": "steps",
+    "sex": "male",
+    "ageFrom": 70,
+    "ageTo": 79,
+    "percentiles": {
+      "1": 21,
+      "5": 1288,
+      "10": 2077,
+      "25": 4878,
+      "50": 6938,
+      "75": 9695,
+      "90": 12453,
+      "95": 14734,
+      "99": 16294
+    },
+    "source": "Koffman L, Crainiceanu C, Muschelli J. Med Sci Sports Exerc 2025;57(4):746-755; NHANES 2011-2014 wrist accelerometry, stepcount SSL steps per day, survey-weighted age and sex quantiles (github.com/lilykoff/nhanes_steps_mortality, results/age_sex_quantiles.csv.gz)"
+  },
+  {
+    "metric": "steps",
+    "sex": "male",
+    "ageFrom": 80,
+    "ageTo": 120,
+    "percentiles": {
+      "1": 10,
+      "5": 44,
+      "10": 392,
+      "25": 2533,
+      "50": 4863,
+      "75": 7244,
+      "90": 9019,
+      "95": 12205,
+      "99": 15268
+    },
+    "source": "Koffman L, Crainiceanu C, Muschelli J. Med Sci Sports Exerc 2025;57(4):746-755; NHANES 2011-2014 wrist accelerometry, stepcount SSL steps per day, survey-weighted age and sex quantiles (github.com/lilykoff/nhanes_steps_mortality, results/age_sex_quantiles.csv.gz)"
+  }
+]

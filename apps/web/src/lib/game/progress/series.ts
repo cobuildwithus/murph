@@ -56,7 +56,7 @@ function taskContribution(task: ProgressTask, states: ReadonlyMap<string, Measur
 }
 
 /** Entry kind and sealed payload are written together by the existing game boundary. */
-function entryContribution(kind: GameEntryKind, payload: GameEntryData | undefined, task: ProgressTask, states: ReadonlyMap<string, MeasureState>): Contribution {
+export function entryContribution(kind: GameEntryKind, payload: GameEntryData | undefined, task: ProgressTask, states: ReadonlyMap<string, MeasureState>): Contribution {
   if (kind === "reps") {
     const reps = payload as GameRepsData;
     return { id: READERS[0].measureId(reps), name: reps.exercise, amount: READERS[0].amount(reps), pending: false, needsPerDay: false };

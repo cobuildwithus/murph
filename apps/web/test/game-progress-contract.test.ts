@@ -60,7 +60,7 @@ describe("Progress request boundary", () => {
     { perDay: 40, goal: { rungId: "a" } }, { perDay: 40, memberId: "foreign" },
   ])("rejects malformed or ambiguous measure edits: %j", body => expect(() => parseSetMeasureBody(body)).toThrow("Invalid Progress request."));
   it.each([
-    [parseSetSharingBody, { metrics: ["steps", "sleep"], share: true }],
+    [parseSetSharingBody, { metrics: ["steps", "sleep"], share: true, audience: ["leo"] }],
     [parseSeenBody, { momentIds: ["moment-one"] }],
     [parseGoalsQuery, { measure: "pushups.reps", q: "Half Dome" }],
     [parsePicUploadQuery, { id: "10000000-0000-4000-8000-000000000001", measureId: "pushups.reps", takenAt: "2026-11-14T12:00:00Z" }],

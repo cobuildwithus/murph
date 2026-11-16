@@ -96,6 +96,7 @@ const friendRow = z.discriminatedUnion("private", [
   friend.extend({ private: z.literal(false), rank: z.number().nullable(), total: amount.nullable() }),
 ]);
 export const friendsSchema = z.object({
+  incomplete: z.boolean(),
   pills: z.array(z.object({ id: z.string(), label: z.string(), icon: z.string() })), pill: z.string(), range: z.enum(["week", "month", "all"]),
   rows: z.array(friendRow),
   /** Top three plus the member; private people have no line or gap. */
@@ -118,7 +119,9 @@ const text = z.string().trim().min(1);
 const goal = z.union([z.strictObject({ rungId: text }), z.strictObject({ from: text, to: text })]);
 const setMeasure = z.union([z.strictObject({ goal }), z.strictObject({ perDay: z.number().int().min(1).max(10_000) })]);
 export type SetMeasureBody = z.infer<typeof setMeasure>;
-const sharing = z.strictObject({ metrics: z.array(z.enum(["steps", "sleep"])).min(1).max(2), share: z.boolean() });
+const sharing = z.strictObject({ metrics: z.array(z.enum(["steps", "sleep"])).min(1).max(2)
+  .refine(values => new Set(values).size === values.length), share: z.boolean(),
+  audience: z.array(text).max(5000).refine(values => new Set(values).size === values.length) });
 export type SetSharingBody = z.infer<typeof sharing>;
 const seen = z.strictObject({ momentIds: z.array(text) });
 export type SeenBody = z.infer<typeof seen>;

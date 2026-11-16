@@ -6137,6 +6137,98 @@ rows 02/06 without requiring the client to parse labels or calculate health
 results. No endpoint, table, flag or registry is added beyond the plan. Deploy
 the additive migration before any Progress caller.
 
+### Progress health and friends inputs
+
+`device-sync/companion-numbers.ts` owns `readCompanionHealthSeries`: canonical,
+unrounded daily values, original source labels, units, freshness and settled
+step dates. The existing numbers route applies its original display rounding
+after this shared read. Session and health authority are checked after vault
+decryption as well as before the read. A transport/decryption failure returns
+one retryable 503; Progress loads this input before proposing any baseline or
+health award. No source values or provider bodies enter error logs.
+
+`progress/health.ts` derives the 28 days before the profile's local creation
+date (20 observed dates), 14-day statistics (10 observed dates), and seven-day holds
+(five observed endpoints after a complete week since joining). Missing dates
+stay absent. Each newly held whole level is a separate candidate dated on the
+hold day. Age lines are 25%, one third and 50%, crossed only from a baseline
+below the line and held under the same coverage rule. Award comparisons use the
+join-date age bracket, so changing brackets does not issue an award. Sleep has
+no age wins. VO2 retains the existing median statistic; the other metrics use
+the mean.
+The current headline uses the current fourteen-day window, not an older
+complete window. Sleep converts canonical minutes to seconds once. All sums
+and scoring inputs remain inside the 365-day replica window.
+
+`norms.ts` ports the iOS age ranking, including the original-device HR rule.
+`age-norms.json` is byte-identical to the iOS resource. The shared synthetic
+fixture at `apps/web/test/fixtures/progress-age-rank-golden.json` contains Swift
+results for the same metric, value, demographics and source inputs; no member
+data is used. Recommendations are the fixed map in `health.ts` and appear only
+for a sufficiently observed flat or worsening metric.
+
+The following nested fields are encrypted content under the existing Progress
+owners; no additional table or plaintext private field is introduced:
+
+| Owner | Fields |
+| --- | --- |
+| Measure `state_encrypted.baseline` | `value`, `from`, `to`: frozen health statistic and its observed-date window |
+| Health award `data_encrypted.data` | `level`, `baseline`, `value`, `amount`: held step facts; common `face`, `title`, `detail`, `page`, `evaluator`: medal presentation and scoring evidence |
+| Age award `data_encrypted.data` | `percentile`: held age crossing; common medal presentation and scoring evidence |
+| Friend award `data_encrypted.data` | `amount`, `otherAmount`: crossing facts; `face.member` contains subject id, name and avatar; common medal presentation and scoring evidence |
+| Route award `data_encrypted.data` | `from`, `to`, `distanceM`, `startTotal`: frozen journey facts; common medal presentation and scoring evidence |
+
+`friend-cohort.ts` admits current, unblocked players from games already played.
+It rechecks the cohort after opening names. Deleted-member notices use the
+existing viewer-owned `GamePlayer.departedLabel` and `leftAt`; no former member
+identifier or separate deletion ledger is retained. `friend-games.ts` reads
+500 games / 10,000 entries as limit-plus-one batches, including each friend's
+other games, and exposes only exercise aggregates. Typed quantities use the
+shared series contribution function; untyped quantities use the existing member-scoped
+inference cache, per-day measure state and the entry's terms version and seat.
+Only typed quantity payloads are decrypted; untyped photos/text stay sealed. Unresolved inference
+withholds exercise ranking and settlement. Duplicate attempts count once and
+same-date contributions add together. Friends rank raw amounts with competition
+ranks; private rows have no rank, amount, chart line or gap. Caps set
+`Friends.incomplete` and settle nothing. Friend award commits recheck friendship
+and blocks while holding the affected pair locks. Health pills never produce
+friend awards.
+
+Friend Steps/Sleep reads use the existing pair-board projection grants and its
+180-day retained history, not another member's private replica. Pair rooms must
+have exactly two humans and no extra group membership. The consent preview
+names every recipient; `SetSharingBody.audience` echoes those ids so a changed
+audience cannot silently receive a grant. Every granting transaction rechecks
+the live-provider-backed route, current pair, verified contacts, block/consent/
+session state and room roster. `addHostedGroupPairBoardSharingTx` adds only Steps/Sleep through the
+existing sharing owner, preserving HR/VO2 and every other grant. Declining
+removes nothing. Success and partial-failure responses list committed
+`sharedWith` recipients; no retry loop or alternate sharing state exists.
+
+Progress collection bounds are 500 games, 10,000 entries and at most 5,000
+current player identities. Cohort reads use two set queries each (games and
+blocks), repeated at the post-decryption and award-commit authority boundaries.
+Game inputs use four set queries (games, entries, task cache, measure state); at most 10,500
+source fields, 10,000 cached task fields and 10,000 measure states are opened in batches, outside
+transactions. Names are one batch of at most 5,001 fields including a departure
+label. Room discovery uses four set queries, with at most three concurrent
+queries. Pair health reads deduplicate by friend and choose one room; at most
+500 existing board-owner reads run sequentially. Each board owner reads at most
+eight scope snapshots in batches of four with its pre/post grant checks; no
+per-room reads or transactions overlap. Sharing likewise has at most 500
+sequential provider observations, transactions and post-commit wakes; verified
+contact checks run twice per room. The existing board/sharing owners retain
+their internal database and key-access bounds. Maximum-room tests assert one
+active shared read or transaction, exact provider/contact call counts, and
+commit-boundary authority checks. The health reader opens four measure states,
+freezes at most four baselines sequentially, initializes at most one Steps route
+and performs one award settlement. Steps uses the shared route owner; Sleep uses
+the shared time ladder in canonical seconds. Existing awards retain passed
+journeys after corrections. A new route resolves at most eleven provider calls,
+at most two concurrently, before its authority-checked state write. Award reads
+before and after settlement preserve historical presentation. All vault,
+provider and cryptographic work stays outside committing transactions.
+
 ## Weekly Game
 
 Recap media retirement receipts live in the additive, FK-free `game_recap_asset`

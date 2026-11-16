@@ -41,6 +41,16 @@ export interface PairBoard {
 
 export function boardNumber(metric: BoardMetric, projection: HostedGroupBoardProjection,
   window: PairBoard["window"], firstGameOn: string): BoardNumber {
+  const number = rawBoardNumber(metric, projection, window, firstGameOn);
+  if (number.state !== "available") return number;
+  const round = (value: number) => Number(value.toFixed(POLICY[metric].precision));
+  return { ...number, daily: number.daily.map(point => ({ ...point, value: round(point.value) })),
+    latest: { ...number.latest, value: round(number.latest.value) } };
+}
+
+/** The same selected, grant-authorized series before the board's display rounding. */
+export function rawBoardNumber(metric: BoardMetric, projection: HostedGroupBoardProjection,
+  window: PairBoard["window"], firstGameOn: string): BoardNumber {
   if (projection.state === "not_granted") return { state: "not_shared" };
   if (projection.state === "missing") return { state: "pending", reason: "no_readings" };
   if (projection.state !== "available") return { state: "pending" };
@@ -95,9 +105,8 @@ export function boardNumber(metric: BoardMetric, projection: HostedGroupBoardPro
   const selected = candidates[0];
   if (!selected) return { state: "pending", reason: "no_readings" };
   const { result } = selected;
-  const round = (value: number) => Number(value.toFixed(policy.precision));
   const daily = selected.points.filter(point => point.date >= window.from)
-    .map(point => ({ date: point.date, value: round(point.value!) }));
+    .map(point => ({ date: point.date, value: point.value! }));
   const delta = result.delta;
   return { state: "available", unit: policy.unit, ...sourceField(selected.source), daily, latest: daily.at(-1)!,
     stale: !selected.fresh,

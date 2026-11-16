@@ -72,6 +72,19 @@ describe.skipIf(!enabled)("Progress PostgreSQL invariants", () => {
     await patchMeasureState(id, "pushups.reps", { perDay: 40 }, authorized);
     expect(await readState(id)).toEqual({ baseline: { value: 72, from: "2026-09-23", to: "2026-10-20" }, goal: { rungId: "empire-state-building" }, perDay: 40 });
   });
+  it("keeps the first eligible baseline when a stale caller proposes another", async () => {
+    const id = await member();
+    const baseline = { value: 70.51, from: "2026-09-23", to: "2026-10-20" };
+    await patchMeasureState(id, "restingHeartRate", { baseline }, authorized);
+    const state = await patchMeasureState(id, "restingHeartRate", previous => ({
+      baseline: { ...previous.baseline!, value: 75 }, goal: { rungId: "empire-state-building" },
+    }), authorized);
+    expect(state.baseline).toEqual(baseline);
+    const lookup = progressLookup(id, "measure", ["restingHeartRate"]);
+    const row = await db.gameProgressMeasure.findUniqueOrThrow({ where: { memberId_lookup: { memberId: id, lookup } } });
+    expect(await openProgress<MeasureState>({ memberId: id, table: "game_progress_measure", rowId: lookup, field: "state" }, row.stateEncrypted))
+      .toEqual({ baseline, goal: { rungId: "empire-state-building" } });
+  });
   it.each([false, true])("a racing %s-state patch returns a retryable conflict instead of losing another field", async exists => {
     const id = await member();
     if (exists) await patchMeasureState(id, "pushups.reps", { perDay: 40 }, authorized);

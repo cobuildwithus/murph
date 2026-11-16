@@ -23,7 +23,7 @@ export interface MeasureState {
   baseline?: { value: number; from: Day; to: Day };
 }
 
-/** One state writer. Patch fields replace whole fields; unrelated lanes survive. */
+/** One state writer. Fields replace whole fields; an eligible baseline freezes once. */
 export async function patchMeasureState(
   memberId: string,
   measureId: string,
@@ -35,7 +35,7 @@ export async function patchMeasureState(
   const target = { memberId, table: "game_progress_measure", rowId: lookup, field: "state" } as const;
   const row = await db.gameProgressMeasure.findUnique({ where: { memberId_lookup: { memberId, lookup } }, select: { stateEncrypted: true } });
   const previous = row ? await openProgress<MeasureState>(target, row.stateEncrypted) : {};
-  const state = { ...previous, ...(typeof patch === "function" ? patch(previous) : patch) };
+  const state = { ...previous, ...(typeof patch === "function" ? patch(previous) : patch), ...(previous.baseline ? { baseline: previous.baseline } : {}) };
   const stateEncrypted = await sealProgress(target, state);
   await db.$transaction(async tx => {
     await beforeMutationTx(tx);

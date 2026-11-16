@@ -161,3 +161,5 @@ export async function seeMoments(memberId: string, momentIds: readonly string[],
   const ids = awards.filter(award => requested.has(`day:${award.on}`)).map(award => award.id);
   await markAwardsSeen(memberId, ids, beforeMutationTx);
 }
+
+export { healthView, healthMetricView, type HealthMetricInput } from "./health-view";

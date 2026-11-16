@@ -219,5 +219,6 @@
   },
   "shareAsk": false,
   "shareAudience": [],
-  "departureNotice": "Jordan left Murph on Nov 12. Your games with him still count in your totals."
+  "departureNotice": "Jordan left Murph on Nov 12. Your games with him still count in your totals.",
+  "incomplete": false
 }

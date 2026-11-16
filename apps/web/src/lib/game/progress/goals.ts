@@ -48,7 +48,7 @@ export function rungFor(entry: BankEntry, measure: MeasureSeries, on: string | n
 export function measureRungs(measure: MeasureSeries, state: MeasureState): Rung[] {
   const kind = measure.unit === "reps" ? "height" : measure.unit === "seconds" ? "time" : null;
   if (kind === null || measure.pending) return [];
-  const entries = ladder(kind, "plank");
+  const entries = ladder(kind, measure.id === "sleep" ? "sleep" : "plank");
   if (state.goal && "rungId" in state.goal) {
     const id = state.goal.rungId;
     const goal = BANK.find(entry => entry.id === id && entry.kind === kind)!;
