@@ -6929,7 +6929,7 @@ describe('assistant cron runtime orchestration', () => {
     } else {
       expect(prepared?.instructions).toContain('"accountId":"failed","provider":"gmail","coverage":"failed"')
       expect(prepared?.instructions).toContain('"accountId":"healthy","provider":"gmail","coverage":"complete"')
-      expect(prepared?.issues).toEqual([expect.objectContaining({ details: { failureReason: 'read_failed' } })])
+      expect(prepared?.issues).toEqual([expect.objectContaining({ details: { failureReason: 'read_failed', failureStage: 'mail', toolkit: 'gmail' } })])
     }
   })
 
