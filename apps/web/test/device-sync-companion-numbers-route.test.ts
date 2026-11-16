@@ -512,3 +512,16 @@ it("keeps older devices, manual and unknown-source dates in RHR history and comp
     comparison: { baseline: { value: 60, days: 4 }, current: { value: 58, days: 4 }, delta: -2 },
   });
 });
+
+it("shares canonical raw days below display rounding, including source and settled steps", async () => {
+  const { readCompanionHealthSeries } = await import("../src/lib/device-sync/companion-numbers");
+  const raw = await readCompanionHealthSeries(await mocks.auth(), new AbortController().signal);
+  expect(raw?.numbers.restingHeartRate?.latest).toMatchObject({ value: 58.2, source: "Garmin" });
+  expect(raw?.numbers.sleep?.unit).toBe("minutes");
+  expect(raw?.numbers.sleep?.daily.find(point => point.date === from)?.value).toBe(420);
+  expect(raw?.numbers.sleep?.latest.value).toBe(450.4);
+  expect(raw?.numbers.steps?.latest).toMatchObject({ date: stepsThrough, value: 8000.2 });
+  expect(raw?.numbers.steps?.daily.some(point => point.date === through)).toBe(false);
+  expect(mocks.authority).toHaveBeenCalledTimes(2);
+  expect(mocks.current).toHaveBeenCalledTimes(1);
+});

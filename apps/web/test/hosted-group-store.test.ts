@@ -68,6 +68,7 @@ vi.mock("@/src/lib/hosted-vault-share/share-grant-store", () => ({
 }));
 
 import {
+  addHostedGroupPairBoardSharingTx,
   acceptHostedGroupJoinCodeTx,
   acceptHostedGroupJoinOfferTx,
   createHostedGroupJoinLinkForOwnedThreadContainerTx,
@@ -358,6 +359,32 @@ describe("acceptHostedGroupJoinCodeTx", () => {
     mocks.hasHostedRuntimeActiveAccess.mockResolvedValue(true);
     mocks.readActiveHostedVaultShareProjectionScopes.mockResolvedValue([]);
     mocks.revokeHostedVaultSharesTx.mockResolvedValue(0);
+  });
+
+  it.each(["pair", "three participants", "third member"])("Progress adds sharing only to the exact pair: %s", async variant => {
+    const tx = buildTx({ existingMembershipId: "membership_existing" });
+    const group = await tx.hostedGroup.findUnique({ where: { id: "group_1" } });
+    vi.mocked(tx.hostedGroup.findUnique).mockResolvedValue({ ...group,
+      members: ["member_grantor", "member_friend", ...(variant === "third member" ? ["member_other"] : [])]
+        .map(memberId => ({ memberId })),
+    });
+    Object.defineProperty(tx, "hostedThreadContainer", { value: { findUnique: vi.fn(async () => ({
+      participants: ["member_grantor", "member_friend", ...(variant === "three participants" ? ["member_other"] : [])]
+        .map(participantMemberId => ({ participantMemberId })),
+    })) } });
+    const promise = addHostedGroupPairBoardSharingTx({ groupId: "group_1", runtimeMemberId: "member_group_runtime",
+      memberId: "member_grantor", otherMemberId: "member_friend", expectedMembershipId: "membership_existing",
+      metrics: ["steps", "sleep"], now: new Date("2026-11-16T12:00:00Z"), tx });
+    if (variant !== "pair") {
+      await expect(promise).rejects.toMatchObject({ code: "PROGRESS_SHARING_AUDIENCE_CHANGED" });
+      expect(mocks.grantHostedVaultShareTx).not.toHaveBeenCalled();
+      return;
+    }
+    await expect(promise).resolves.toMatchObject({ alreadyMember: true });
+    const grants = mocks.grantHostedVaultShareTx.mock.calls.map(([input]) => input.projectionScope.projectionKind);
+    expect(grants).toEqual(["profile-name.v0", "sleep-duration-days.v0", "steps-days.v0"]);
+    // HR/VO2 and every other active grant survive: this operation never revokes them.
+    expect(mocks.revokeHostedVaultSharesTx).not.toHaveBeenCalled();
   });
 
   it("retains the selected active plain metric without grant supersession", async () => {

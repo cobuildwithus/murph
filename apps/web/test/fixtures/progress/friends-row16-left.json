@@ -211,6 +211,32 @@
           700.0
         ]
       ]
+    },
+    {
+      "memberId": "member-3-maya",
+      "points": [
+        [
+          "2026-11-01",
+          0
+        ],
+        [
+          "2026-11-14",
+          420
+        ]
+      ]
+    },
+    {
+      "memberId": "member-4-priya",
+      "points": [
+        [
+          "2026-11-09",
+          0
+        ],
+        [
+          "2026-11-14",
+          200
+        ]
+      ]
     }
   ],
   "next": {
@@ -219,5 +245,6 @@
   },
   "shareAsk": false,
   "shareAudience": [],
-  "departureNotice": "Jordan left Murph on Nov 12. Your games with him still count in your totals."
+  "departureNotice": "Jordan left Murph on Nov 12. Your games with him still count in your totals.",
+  "incomplete": false
 }

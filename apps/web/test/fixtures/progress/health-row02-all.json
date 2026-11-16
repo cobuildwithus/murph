@@ -274,7 +274,13 @@
       ],
       "next": {
         "title": "Next",
-        "detail": "71 bpm"
+        "detail": "71 bpm",
+        "face": {
+          "delta": {
+            "icon": "heart",
+            "text": "↓3"
+          }
+        }
       },
       "age": {
         "percentile": 34,
@@ -529,7 +535,13 @@
       "wins": [],
       "next": {
         "title": "Next win",
-        "detail": "Back to 7h 05 a night"
+        "detail": "Back to 7h 05",
+        "face": {
+          "delta": {
+            "icon": "sleep",
+            "text": "+15m"
+          }
+        }
       },
       "age": null
     },
@@ -767,7 +779,7 @@
           "face": {
             "delta": {
               "icon": "steps",
-              "text": "+1.4k"
+              "text": "+1,400"
             }
           },
           "title": "1,400 more",
@@ -789,7 +801,13 @@
       ],
       "next": {
         "title": "Next",
-        "detail": "7,900 a day"
+        "detail": "7,900 a day",
+        "face": {
+          "delta": {
+            "icon": "steps",
+            "text": "+2,000"
+          }
+        }
       },
       "age": {
         "percentile": 37,
@@ -799,7 +817,11 @@
           "text": "7,300",
           "unit": "steps"
         },
-        "typical": null,
+        "typical": {
+          "value": 8448,
+          "text": "8,448",
+          "unit": "steps"
+        },
         "previous": {
           "percentile": 22,
           "amount": {
@@ -1045,7 +1067,7 @@
           "face": {
             "delta": {
               "icon": "vo2Max",
-              "text": "+1"
+              "text": "30"
             }
           },
           "title": "Up 1",
@@ -1054,7 +1076,13 @@
       ],
       "next": {
         "title": "Next",
-        "detail": "31"
+        "detail": "31",
+        "face": {
+          "delta": {
+            "icon": "vo2Max",
+            "text": "31"
+          }
+        }
       },
       "age": {
         "percentile": 56,
@@ -1064,7 +1092,11 @@
           "text": "30",
           "unit": "mL/kg/min"
         },
-        "typical": null,
+        "typical": {
+          "value": 28.3,
+          "text": "28.3",
+          "unit": "mL/kg/min"
+        },
         "previous": {
           "percentile": 52,
           "amount": {
@@ -1084,7 +1116,8 @@
       "title": "Lights out by 11",
       "detail": "Sleep is down 10 min",
       "task": "Lights out by 11",
-      "category": "rest"
+      "category": "rest",
+      "icon": "sleep"
     },
     {
       "id": "no-phone",
@@ -1092,7 +1125,8 @@
       "title": "No phone in bed",
       "detail": "Also for sleep",
       "task": "No phone in bed",
-      "category": "rest"
+      "category": "rest",
+      "icon": "phone"
     },
     {
       "id": "morning-walk",
@@ -1100,7 +1134,8 @@
       "title": "Morning walk",
       "detail": "Daylight early helps sleep",
       "task": "Morning walk",
-      "category": "move"
+      "category": "move",
+      "icon": "sun"
     }
   ],
   "sums": []

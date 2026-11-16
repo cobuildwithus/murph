@@ -22,7 +22,7 @@
       "rank": 1,
       "total": {
         "value": 11100,
-        "text": "3h 05m",
+        "text": "3h 5m",
         "unit": "seconds"
       },
       "private": false,
@@ -216,6 +216,45 @@
           9060.0
         ]
       ]
+    },
+    {
+      "memberId": "member-3-sam",
+      "points": [
+        [
+          "2026-11-01",
+          0
+        ],
+        [
+          "2026-11-14",
+          7080
+        ]
+      ]
+    },
+    {
+      "memberId": "member-4-jordan",
+      "points": [
+        [
+          "2026-11-01",
+          0
+        ],
+        [
+          "2026-11-14",
+          4920
+        ]
+      ]
+    },
+    {
+      "memberId": "member-5-priya",
+      "points": [
+        [
+          "2026-11-09",
+          0
+        ],
+        [
+          "2026-11-14",
+          2460
+        ]
+      ]
     }
   ],
   "next": {
@@ -224,5 +263,6 @@
   },
   "shareAsk": false,
   "shareAudience": [],
-  "departureNotice": null
+  "departureNotice": null,
+  "incomplete": false
 }

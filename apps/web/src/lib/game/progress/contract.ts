@@ -28,6 +28,8 @@ const route = z.object({
   /** Card coordinates; use drawerTowns when requesting the same map with size=drawer. */
   towns,
   drawerTowns: towns,
+  here: z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) }),
+  drawerHere: z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) }),
 });
 export type Route = z.infer<typeof route>;
 const pic = z.object({ id: z.string(), takenOn: day, at: z.number() });
@@ -79,12 +81,13 @@ const healthMetric = z.object({
   access: z.enum(["ok", "off", "missing"]), direction: z.enum(["better", "worse", "flat"]), headline: z.string(),
   daily: z.array(z.tuple([day, z.number().nullable()])), baseline: amount.nullable(),
   wins: z.array(z.object({ medalId: z.string(), on: day, text: z.string(), face: medalFace, title: z.string(), detail: z.string() })),
-  next: z.object({ title: z.string(), detail: z.string() }).nullable(),
+  next: z.object({ title: z.string(), detail: z.string(), face: medalFace }).nullable(),
   age: z.object({ percentile: z.number(), text: z.string(), current: amount, typical: amount.nullable(),
     previous: z.object({ percentile: z.number(), amount, on: day }) }).nullable(),
 });
 export type HealthMetric = z.infer<typeof healthMetric>;
-const rec = z.object({ id: z.string(), metric: z.string(), title: z.string(), detail: z.string(), task: z.string(), category: z.string() });
+const rec = z.object({ id: z.string(), metric: z.string(), title: z.string(), detail: z.string(), task: z.string(), category: z.string(),
+  icon: z.enum(["sleep", "phone", "walk", "stairs", "run", "heart", "water", "sun"]) });
 export type Rec = z.infer<typeof rec>;
 export const healthSchema = z.object({
   joinedOn: day, today: day,
@@ -93,15 +96,23 @@ export const healthSchema = z.object({
 });
 export type Health = z.infer<typeof healthSchema>;
 
+/** Read-only saved presentation in a live-read 503's error.details.health. */
+export const savedHealthSchema = healthSchema.pick({ joinedOn: true, today: true, winCount: true }).extend({
+  metrics: z.array(healthMetric.pick({ id: true, label: true, unit: true, baseline: true, wins: true, next: true })
+    .extend({ headline: z.string().nullable() })),
+});
+export type SavedHealth = z.infer<typeof savedHealthSchema>;
+
 const friend = person.extend({ me: z.boolean(), invited: z.boolean(), joinedOn: day.nullable() });
 const friendRow = z.discriminatedUnion("private", [
   friend.extend({ private: z.literal(true), rank: z.null(), total: z.null() }),
   friend.extend({ private: z.literal(false), rank: z.number().nullable(), total: amount.nullable() }),
 ]);
 export const friendsSchema = z.object({
+  incomplete: z.boolean(),
   pills: z.array(z.object({ id: z.string(), label: z.string(), icon: z.string() })), pill: z.string(), range: z.enum(["week", "month", "all"]),
   rows: z.array(friendRow),
-  /** Top three plus the member; private people have no line or gap. */
+  /** Every ranked person; private people have no line or gap. */
   chart: z.array(z.object({ memberId: z.string(), points: z.array(point) })),
   next: z.object({ memberId: z.string(), text: z.string() }).nullable(), shareAsk: z.boolean(),
   departureNotice: z.string().nullable(),
@@ -121,7 +132,9 @@ const text = z.string().trim().min(1);
 const goal = z.union([z.strictObject({ rungId: text }), z.strictObject({ from: text, to: text })]);
 const setMeasure = z.union([z.strictObject({ goal }), z.strictObject({ perDay: z.number().int().min(1).max(10_000) })]);
 export type SetMeasureBody = z.infer<typeof setMeasure>;
-const sharing = z.strictObject({ metrics: z.array(z.enum(["steps", "sleep"])).min(1).max(2), share: z.boolean() });
+const sharing = z.strictObject({ metrics: z.array(z.enum(["steps", "sleep"])).min(1).max(2)
+  .refine(values => new Set(values).size === values.length), share: z.boolean(),
+  audience: z.array(text).max(5000).refine(values => new Set(values).size === values.length) });
 export type SetSharingBody = z.infer<typeof sharing>;
 const seen = z.strictObject({ momentIds: z.array(text) });
 export type SeenBody = z.infer<typeof seen>;

@@ -34,6 +34,12 @@ export function routeTowns(leg: RouteLeg, meters: Points, size: MapQuery['size']
     passedOn: crossingDay(meters, leg.startTotal + town.atM) }));
 }
 
+function routeHere(leg: RouteLeg, progress: number, size: MapQuery['size']): Route['here'] {
+  const { width, height } = MAP_SIZES[size];
+  const geometry = decodePolyline(leg.polyline);
+  return townPosition(cutPolyline(geometry, progress).walked.at(-1)!, routeBbox(geometry, width, height));
+}
+
 /** Label coordinates belong to the linked card PNG; display that image without cropping. */
 export function routeView(measureId: string, state: MeasureState, points: Points, awards: readonly StoredAward[], units: ClientUnits): Route | null {
   const legs = state.legs ?? [], leg = legs.at(-1);
@@ -47,6 +53,7 @@ export function routeView(measureId: string, state: MeasureState, points: Points
   return { name: `${leg.from} to ${leg.to}`, distanceText: formatAmount(leg.distanceM, 'meters', 'compact', units).text,
     walkedText: formatAmount(walked, 'meters', 'compact', units).text,
     progress: walked / leg.distanceM, straightLine: leg.straightLine,
+    here: routeHere(leg, walked / leg.distanceM, 'card'), drawerHere: routeHere(leg, walked / leg.distanceM, 'drawer'),
     finishedOn: earnedOn, map, goalPicked: state.goal !== undefined,
     completed: completions.map(award => ({ name: `${award.data.from} to ${award.data.to}`, finishedOn: award.on })),
     towns: routeTowns(leg, meters, 'card', units), drawerTowns: routeTowns(leg, meters, 'drawer', units) };

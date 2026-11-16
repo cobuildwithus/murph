@@ -234,7 +234,13 @@
       "wins": [],
       "next": {
         "title": "Next win",
-        "detail": "Up 1, to 31"
+        "detail": "Up 1, to 31",
+        "face": {
+          "delta": {
+            "icon": "vo2Max",
+            "text": "31"
+          }
+        }
       },
       "age": null
     }
@@ -246,7 +252,8 @@
       "title": "Run a mile",
       "detail": "Getting out of breath moves this",
       "task": "Run a mile",
-      "category": "move"
+      "category": "move",
+      "icon": "run"
     }
   ],
   "sums": []

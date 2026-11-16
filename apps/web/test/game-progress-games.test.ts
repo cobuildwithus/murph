@@ -5,7 +5,7 @@ import { BANK, ladder, search, rungEntry } from "../src/lib/game/progress/bank";
 import { measureLadder, projection, roundValues, rungFor } from "../src/lib/game/progress/goals";
 import { formatAmount, formatNumber } from "../src/lib/game/progress/format";
 import { ACHIEVEMENTS } from "../src/lib/game/progress/registry";
-import { achievementContext, measureView, momentsView, visibleAwards, medalView } from "../src/lib/game/progress/view";
+import { achievementContext, medalView, measureView, momentsView, visibleAwards } from "../src/lib/game/progress/view";
 import type { StoredAward } from "../src/lib/game/progress/awards";
 import { game, memberId, post, task } from "./support/progress-games";
 
@@ -213,6 +213,20 @@ describe("shared Progress numbers", () => {
 });
 
 describe("moment words", () => {
+  it.each([
+    [25, "Beat 1 in 4", "women your age"],
+    [100 / 3, "Beat 1 in 3", "women your age"],
+    [50, "Beat half", "men your age"],
+  ])("says the age audience once for saved and new %s-percent medals", (percentile, title, detail) => {
+    const full = `${title}${percentile === 50 ? " of" : ""} ${detail}`;
+    for (const savedTitle of [title, full]) {
+      const awards = stored([{ key: "age", kind: "healthAge", measureId: "restingHeartRate", subjectMemberId: null,
+        on: "2026-11-05", data: { percentile, title: savedTitle, detail, page: "health", face: { delta: { icon: "age", text: "1 in 3" } } } }]);
+      expect(momentsView(awards, [], "us")[0].title).toBe(full);
+      expect(medalView(awards[0], true, "us")).toMatchObject({ title, detail });
+      expect(awards[0].data.title).toBe(savedTitle);
+    }
+  });
   it.each([
     ["landmark", "goal", { rung: { at: 1776, target: { kind: "height", id: "one-world-trade-center" } }, noun: "pushups" }, "One World Trade Center", BANK.find(entry => entry.id === "one-world-trade-center")!.blurb],
     ["time", "held", { rung: { at: 10800, target: { kind: "time", id: "concorde" } }, noun: "planked" }, "Concorde", BANK.find(entry => entry.id === "concorde" && entry.kind === "time")!.blurb],

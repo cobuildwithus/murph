@@ -6168,6 +6168,165 @@ rows 02/06 without requiring the client to parse labels or calculate health
 results. No endpoint, table, flag or registry is added beyond the plan. Deploy
 the additive migration before any Progress caller.
 
+### Progress health and friends inputs
+
+`device-sync/companion-numbers.ts` owns `readCompanionHealthSeries`: canonical,
+unrounded daily values, original source labels, units, freshness and settled
+step dates. The existing numbers route applies its original display rounding
+after this shared read. Session and health authority are checked after vault
+decryption as well as before the read. A transport/decryption failure returns
+one retryable 503; Progress loads this input before proposing any baseline or
+health award. No source values or provider bodies enter error logs.
+When that live read returns `NUMBERS_PROJECTION_UNAVAILABLE`, its retryable 503
+includes `error.details.health`, decoded by `savedHealthSchema`. This read-only
+payload holds join/today dates, win count and metric id/label/unit, baseline,
+wins, headline and next target. Saved tiles and next faces use the same metric
+presenter as the live response. The headline is the highest saved held-step
+improvement, not a current trend; without a step award it is null. Without a
+frozen baseline, next is null. Chart, current direction/access, age comparison,
+recommendations, sums and snapshot timestamp require live input and are absent
+from this saved-only contract. Saved age tile audiences come from the sealed
+award detail. Native session and health authority are checked before opening
+saved state and again before returning it. The path performs one four-measure
+set read and one award read, with existing batched decryption, no parallel
+database work, no writes and no additional live read. Other failures retain
+their ordinary error response; failure of the saved read is not swallowed.
+
+`progress/health.ts` derives the 28 days before the profile's local creation
+date (20 observed dates), 14-day statistics (10 observed dates), and seven-day holds
+(five observed endpoints after a complete week since joining). Missing dates
+stay absent. Each newly held whole level is a separate candidate dated on the
+hold day. Age lines are 25%, one third and 50%, crossed only from a baseline
+below the line and held under the same coverage rule. Award comparisons use the
+join-date age bracket, so changing brackets does not issue an award. Sleep has
+no age wins. VO2 retains the existing median statistic; the other metrics use
+the mean.
+`freezeAndScoreMetric` applies the existing group-report daily metric projection
+ranges to readings before baseline/statistic calculation and to any frozen
+baseline before scoring. Sleep scales those canonical-minute ranges to seconds.
+Out-of-range values are omitted, never clamped; an invalid frozen baseline stays
+stored but cannot issue new wins. Existing earned awards are unchanged. These
+shared ranges bound held-step enumeration to 230 HR, 1,000 Steps, 96 Sleep and
+100 VO2 levels per metric, independent of imported numeric magnitude.
+The current headline uses the current fourteen-day window, not an older
+complete window. Sleep converts canonical minutes to seconds once. All sums
+and scoring inputs remain inside the 365-day replica window.
+Metric access uses the last seven member-local dates, including today. Recent
+resting-HR or VO2 samples establish wearable evidence; a wearable metric with no
+sample in that window is `off` when that evidence exists. Phone-only missing
+metrics remain `missing`; Steps does not infer wearable access. Historical
+values, baselines and earned wins remain intact. This is a data-derived hint,
+not an OS permission fact.
+
+`norms.ts` ports the iOS age ranking, including the original-device HR rule.
+`age-norms.json` is byte-identical to the iOS resource. The shared synthetic
+fixture at `apps/web/test/fixtures/progress-age-rank-golden.json` contains Swift
+results for the same metric, value, demographics and source inputs; no member
+data is used. Recommendations are the fixed map in `health.ts` and appear only
+for a sufficiently observed flat or worsening metric.
+
+Health labels use `progress/format.ts`, including full digits below 10,000,
+clock-style sleep amounts and one-decimal VO2 values. `healthMedalFace` owns
+both earned and next faces. Age `typical` is the median cutoff from the same
+age, sex and device table as the percentile. Recommendations carry a fixed
+glyph from the contract's closed list, assigned in the existing curated map.
+These response fields add no stored state; earned faces stay sealed in award
+content under the classification below.
+Age medal titles are derived from the saved percentile for both old and new
+awards, with the audience only in detail; moments join those words once.
+
+The Steps map reads `readCompanionHealthSeries` and `healthSums`, exactly as the
+Health page does, and rechecks health authority before rendering. It never
+adds game Steps or measured walk distance. Route `here` and `drawerHere` are
+derived unit image coordinates from the same geometry cut and respective
+viewports as the card and drawer PNGs; neither is persisted. Sleep journeys
+retain the shared `projection()` result, including its nullable `on` date.
+
+The following nested fields are encrypted content under the existing Progress
+owners; no additional table or plaintext private field is introduced:
+
+| Owner | Fields |
+| --- | --- |
+| Measure `state_encrypted.baseline` | `value`, `from`, `to`: frozen health statistic and its observed-date window |
+| Health award `data_encrypted.data` | `level`, `baseline`, `value`, `amount`: held step facts; common `face`, `title`, `detail`, `page`, `evaluator`: medal presentation and scoring evidence |
+| Age award `data_encrypted.data` | `percentile`: held age crossing; common medal presentation and scoring evidence |
+| Friend award `data_encrypted.data` | `amount`, `otherAmount`: crossing facts; `face.member` contains subject id, name and avatar; common medal presentation and scoring evidence |
+| Route award `data_encrypted.data` | `from`, `to`, `distanceM`, `startTotal`: frozen journey facts; common medal presentation and scoring evidence |
+
+`friend-cohort.ts` admits current, unblocked players from games already played,
+plus unjoined invitees from the viewer's current created games. Invited and
+negotiating games use the existing invitation deadline; cancelled and closed
+invitations disappear. Pending names use Home's `pendingInviteeLabel` and the
+creator-owned sealed name, never another name source. A pending row has
+`invited: true`, null total/rank/join date, and no chart line, award or sharing
+audience. Invitations without a member use the existing game id and seat as an
+opaque row identity; no contact identifier is exposed or persisted. A joined
+friend wins over duplicate pending invitations. The cohort is rechecked after
+opening names and again before returning data. Deleted-member notices use the
+existing viewer-owned `GamePlayer.departedLabel` and `leftAt`; no former member
+identifier or separate deletion ledger is retained. `friend-games.ts` reads
+500 games / 10,000 entries as limit-plus-one batches, including each friend's
+other games, and exposes only exercise aggregates. Typed quantities use the
+shared series contribution function; untyped quantities use the existing member-scoped
+inference cache, per-day measure state and the entry's terms version and seat.
+Only typed quantity payloads are decrypted; untyped photos/text stay sealed. Unresolved inference
+withholds exercise ranking and settlement. Friends reads return the
+deduplicated unresolved tasks with their source-member ids to `scheduleInference`,
+the same deferred cache writer used by own Progress. It classifies sequentially,
+seals each owner's batch under that owner's key outside the transaction, then
+inserts all resolved rows once. The committing transaction rechecks the requesting
+session and current friendship while holding the affected pair locks; authority
+loss writes nothing. The next complete read settles awards idempotently.
+Duplicate attempts count once and same-date contributions add together. Friends rank raw amounts with competition
+ranks; private rows have no rank, amount, chart line or gap. Caps set
+`Friends.incomplete` and settle nothing. Friend award commits recheck friendship
+and blocks while holding the affected pair locks. Health pills never produce
+friend awards.
+The chart includes every ranked row within the existing reader cap, in ranking
+order. A ranked person with no points in the selected range has an empty point
+array; private and invited rows never have a chart entry.
+
+Friend Steps/Sleep reads use the existing pair-board projection grants and its
+180-day retained history, not another member's private replica. Pair rooms must
+have exactly two humans and no extra group membership. The consent preview
+names every recipient; `SetSharingBody.audience` echoes those ids so a changed
+audience cannot silently receive a grant. Every granting transaction rechecks
+the live-provider-backed route, current pair, verified contacts, block/consent/
+session state and room roster. `addHostedGroupPairBoardSharingTx` adds only Steps/Sleep through the
+existing sharing owner, preserving HR/VO2 and every other grant. Declining
+removes nothing. Success and partial-failure responses list committed
+`sharedWith` recipients; no retry loop or alternate sharing state exists.
+
+Progress collection bounds are 500 games, 10,000 entries and at most 5,000
+current player identities. Deferred friend inference admits at most 10,000
+member-bound phrases, each with at most two sequential provider calls. Sealing
+runs one owner batch at a time, then one transaction takes at most 4,999 pair
+locks, two cohort queries, the existing native-session check and one cache insert.
+No provider or key work runs inside that transaction. Cohort reads use two set queries each (games and
+blocks), repeated at the post-decryption and award-commit authority boundaries.
+Game inputs use four set queries (games, entries, task cache, measure state); at most 10,500
+source fields, 10,000 cached task fields and 10,000 measure states are opened in batches, outside
+transactions. Names are one batch of at most 5,001 fields including pending invite labels
+and a departure label. The same 501-game admission query selects at most ten
+player seats and nine invitation seats per game; occupied invitation seats are
+excluded. Pending identities never enter game-amount or pair-health reads. Room discovery uses four set queries, with at most three concurrent
+queries. Pair health reads deduplicate by friend and choose one room; at most
+500 existing board-owner reads run sequentially. Each board owner reads at most
+eight scope snapshots in batches of four with its pre/post grant checks; no
+per-room reads or transactions overlap. Sharing likewise has at most 500
+sequential provider observations, transactions and post-commit wakes; verified
+contact checks run twice per room. The existing board/sharing owners retain
+their internal database and key-access bounds. Maximum-room tests assert one
+active shared read or transaction, exact provider/contact call counts, and
+commit-boundary authority checks. The health reader opens four measure states,
+freezes at most four baselines sequentially, initializes at most one Steps route
+and performs one award settlement. Steps uses the shared route owner; Sleep uses
+the shared time ladder in canonical seconds. Existing awards retain passed
+journeys after corrections. A new route resolves at most eleven provider calls,
+at most two concurrently, before its authority-checked state write. Award reads
+before and after settlement preserve historical presentation. All vault,
+provider and cryptographic work stays outside committing transactions.
+
 ## Weekly Game
 
 Recap media retirement receipts live in the additive, FK-free `game_recap_asset`

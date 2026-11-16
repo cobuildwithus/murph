@@ -6,6 +6,8 @@ import { openProgress, progressLookup, sealProgress } from "../src/lib/game/prog
 import * as crypto from "../src/lib/game/progress/crypto";
 import { patchMeasureState, type MeasureState } from "../src/lib/game/progress/state";
 import type { Candidate } from "../src/lib/game/progress/registry";
+import { healthSteps } from "../src/lib/game/progress/health";
+import { savedHealthView } from "../src/lib/game/progress/health-view";
 
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
 if (enabled && !/^postgres(?:ql)?:\/\/[^/]*@(?:127\.0\.0\.1|localhost):\d+\/murph_test_[a-z0-9_]+$/u.test(process.env.DATABASE_URL ?? "")) throw new Error("Progress proof needs an isolated loopback test database.");
@@ -30,6 +32,28 @@ afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 afterAll(async () => { if (enabled) await db.hostedMember.deleteMany({ where: { id: { in: members } } }); });
 
 describe.skipIf(!enabled)("Progress PostgreSQL invariants", () => {
+  it("settles every held health level on its earned date once, even after readings worsen", async () => {
+    const id = await member();
+    const context = { metric: "restingHeartRate" as const, baseline: 74, joinedOn: "2026-11-01", step: 1, direction: -1,
+      profile: { age: 35, sex: "female" as const }, means: Array.from({ length: 7 }, (_, index) => ({
+        date: `2026-11-0${index + 1}`, value: 71, source: "Apple Watch", observedAt: "2026-11-16T00:00:00Z",
+      })) };
+    await settleAwards(id, healthSteps(context), authorized);
+    const first = await readAwards(id);
+    expect(first).toHaveLength(3);
+    expect(first.every(award => award.on === "2026-11-07")).toBe(true);
+    await settleAwards(id, healthSteps(context), authorized);
+    await settleAwards(id, healthSteps({ ...context, means: context.means.map(point => ({ ...point, value: 76 })) }), authorized);
+    expect(await readAwards(id)).toEqual(first);
+    const state = await patchMeasureState(id, context.metric,
+      { baseline: { value: 74, from: "2026-10-04", to: "2026-10-31" } }, authorized);
+    const before = await db.gameProgressAward.findMany({ where: { memberId: id }, orderBy: { lookup: "asc" } });
+    const saved = savedHealthView(context.joinedOn, "2026-11-16", [{ id: context.metric, daily: [],
+      baseline: state.baseline!.value, step: context.step, direction: context.direction, wins: await readAwards(id) }]);
+    expect(saved.metrics[0]).toMatchObject({ headline: "Down 3 bpm", next: { detail: "70 bpm" } });
+    expect(saved.metrics[0].wins.map(win => [win.medalId, win.on])).toEqual(first.map(win => [win.id, win.on]));
+    expect(await db.gameProgressAward.findMany({ where: { memberId: id }, orderBy: { lookup: "asc" } })).toEqual(before);
+  });
   it("settles concurrently and never revokes or rewrites the original crossing day", async () => {
     const id = await member();
     await Promise.all([settleAwards(id, [candidate("1000", "2026-11-13")], authorized), settleAwards(id, [candidate("1000", "2026-11-13")], authorized)]);
@@ -71,6 +95,19 @@ describe.skipIf(!enabled)("Progress PostgreSQL invariants", () => {
     await patchMeasureState(id, "pushups.reps", { goal: { rungId: "empire-state-building" } }, authorized);
     await patchMeasureState(id, "pushups.reps", { perDay: 40 }, authorized);
     expect(await readState(id)).toEqual({ baseline: { value: 72, from: "2026-09-23", to: "2026-10-20" }, goal: { rungId: "empire-state-building" }, perDay: 40 });
+  });
+  it("keeps the first eligible baseline when a stale caller proposes another", async () => {
+    const id = await member();
+    const baseline = { value: 70.51, from: "2026-09-23", to: "2026-10-20" };
+    await patchMeasureState(id, "restingHeartRate", { baseline }, authorized);
+    const state = await patchMeasureState(id, "restingHeartRate", previous => ({
+      baseline: { ...previous.baseline!, value: 75 }, goal: { rungId: "empire-state-building" },
+    }), authorized);
+    expect(state.baseline).toEqual(baseline);
+    const lookup = progressLookup(id, "measure", ["restingHeartRate"]);
+    const row = await db.gameProgressMeasure.findUniqueOrThrow({ where: { memberId_lookup: { memberId: id, lookup } } });
+    expect(await openProgress<MeasureState>({ memberId: id, table: "game_progress_measure", rowId: lookup, field: "state" }, row.stateEncrypted))
+      .toEqual({ baseline, goal: { rungId: "empire-state-building" } });
   });
   it.each([false, true])("a racing %s-state patch returns a retryable conflict instead of losing another field", async exists => {
     const id = await member();

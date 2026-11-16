@@ -234,7 +234,13 @@
       "wins": [],
       "next": {
         "title": "Next win",
-        "detail": "Back to 7h 05 a night"
+        "detail": "Back to 7h 05",
+        "face": {
+          "delta": {
+            "icon": "sleep",
+            "text": "+15m"
+          }
+        }
       },
       "age": null
     }

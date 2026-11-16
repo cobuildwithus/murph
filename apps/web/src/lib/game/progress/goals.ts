@@ -60,7 +60,7 @@ export function rungFor(definition: RungDefinition, total: number, on: string | 
 export function measureRungs(measure: MeasureSeries, state: MeasureState): RungDefinition[] {
   const kind = measure.unit === "reps" ? "height" : measure.unit === "seconds" ? "time" : null;
   if (kind === null || measure.pending) return [];
-  const entries: (BankEntry | FoundEntry)[] = ladder(kind, "plank");
+  const entries: (BankEntry | FoundEntry)[] = ladder(kind, measure.id === "sleep" ? "sleep" : "plank");
   if (state.goal && "rungId" in state.goal) {
     const id = state.goal.rungId;
     if (!entries.some(entry => entry.id === id)) entries.push(BANK.find(entry => entry.id === id && entry.kind === kind)!);

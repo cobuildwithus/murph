@@ -226,6 +226,45 @@
           374400.0
         ]
       ]
+    },
+    {
+      "memberId": "member-3-sam",
+      "points": [
+        [
+          "2026-11-01",
+          0
+        ],
+        [
+          "2026-11-14",
+          352800
+        ]
+      ]
+    },
+    {
+      "memberId": "member-4-jordan",
+      "points": [
+        [
+          "2026-11-01",
+          0
+        ],
+        [
+          "2026-11-14",
+          342000
+        ]
+      ]
+    },
+    {
+      "memberId": "member-5-priya",
+      "points": [
+        [
+          "2026-11-09",
+          0
+        ],
+        [
+          "2026-11-14",
+          165600
+        ]
+      ]
     }
   ],
   "next": {
@@ -234,5 +273,6 @@
   },
   "shareAsk": false,
   "shareAudience": [],
-  "departureNotice": null
+  "departureNotice": null,
+  "incomplete": false
 }

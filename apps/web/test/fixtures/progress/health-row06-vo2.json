@@ -239,7 +239,7 @@
           "face": {
             "delta": {
               "icon": "vo2Max",
-              "text": "+1"
+              "text": "30"
             }
           },
           "title": "Up 1",
@@ -248,7 +248,13 @@
       ],
       "next": {
         "title": "Next",
-        "detail": "31"
+        "detail": "31",
+        "face": {
+          "delta": {
+            "icon": "vo2Max",
+            "text": "31"
+          }
+        }
       },
       "age": {
         "percentile": 56,
@@ -258,7 +264,11 @@
           "text": "30",
           "unit": "mL/kg/min"
         },
-        "typical": null,
+        "typical": {
+          "value": 28.3,
+          "text": "28.3",
+          "unit": "mL/kg/min"
+        },
         "previous": {
           "percentile": 52,
           "amount": {

@@ -18,6 +18,7 @@ import type { ClientUnits } from "../../companion/client-info";
 import { firstRouteId, routePlaces, routeView, setFirstRoute } from "./routes";
 import { resolveRoute } from "./mapbox";
 import { picturePin, readProgressPics } from "./pics";
+import { healthAgeTitle } from "./health";
 
 export function achievementContext(measures: readonly MeasureSeries[], states: ReadonlyMap<string, MeasureState>, days: readonly StreakDay[]): AchievementContext {
   return { days, measures: measures.map(measure => {
@@ -56,7 +57,9 @@ export function medalView(award: StoredAward, gold: boolean, units: ClientUnits)
     const value = award.data.value as number;
     face = { streak: value }; title = `${value} ${value === 1 ? "day" : "days"}`; detail = "your best run";
   } else {
-    face = award.data.face as Medal["face"]; title = award.data.title as string; detail = award.data.detail as string;
+    face = award.data.face as Medal["face"];
+    title = award.kind === "healthAge" ? healthAgeTitle(award.data.percentile as number) : award.data.title as string;
+    detail = award.data.detail as string;
   }
   return { id: award.id, kind: award.kind, gold, earnedOn: award.on, face, title, detail,
     open: { page: award.data.page as Medal["open"]["page"], measureId: award.measureId } };
@@ -71,7 +74,7 @@ function momentWords(kind: Moment["kind"], group: readonly StoredAward[], gold: 
   }
   if (kind === "goal" || kind === "held") return { title, line: rungFor(first.data.rung as RungDefinition, 0, first.on, units).blurb };
   if (kind === "route") return { title, line: detail };
-  if (first.kind.startsWith("health")) return { title: `${title} ${detail}`,
+  if (first.kind.startsWith("health")) return { title: `${title}${first.kind === "healthAge" && first.data.percentile === 50 ? " of" : ""} ${detail}`,
     line: gold ? "Your best since you joined. It's your newest medal, so it's the gold one on Prizes." : "Your best since you joined." };
   if (first.kind === "streak") return { title: `${title} in a row`, line: "Your best run yet." };
   return { title: `${title} ${detail}`, line: null };
@@ -138,7 +141,7 @@ export async function readProgress(memberId: string, units: ClientUnits, beforeM
     }
     const context = achievementContext(snapshot.measures, snapshot.states, days);
     await settleAwards(memberId, ACHIEVEMENTS.flatMap(evaluate => evaluate(context)), beforeMutationTx);
-    scheduleInference(memberId, snapshot.pending, beforeMutationTx);
+    scheduleInference(snapshot.pending.map(task => ({ ...task, memberId })), beforeMutationTx);
   }
   const stored = snapshot.incomplete ? snapshot.awards : await readAwards(memberId);
   const awards = visibleAwards(stored, await healthAuthority(memberId));

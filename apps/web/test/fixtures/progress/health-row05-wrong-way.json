@@ -234,7 +234,13 @@
       "wins": [],
       "next": {
         "title": "Next win",
-        "detail": "Back to 70 bpm"
+        "detail": "Back to 70 bpm",
+        "face": {
+          "delta": {
+            "icon": "heart",
+            "text": "↓1"
+          }
+        }
       },
       "age": null
     }
@@ -246,7 +252,8 @@
       "title": "Start a cardio game",
       "detail": "",
       "task": "30 min of cardio every day",
-      "category": "move"
+      "category": "move",
+      "icon": "heart"
     }
   ],
   "sums": []

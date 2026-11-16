@@ -45,6 +45,12 @@ describe("Progress wire fixtures", () => {
     expect(() => friendsSchema.parse({ ...fixture, rows: fixture.rows.map(row => row.private
       ? { ...row, rank: 6, total: { value: 88000, text: "88k", unit: "steps" } } : row) })).toThrow();
   });
+  it("requires the next face and a known recommendation icon", () => {
+    const fixture = JSON.parse(readFileSync(path.join(directory, "health-row06-sleep.json"), "utf8"));
+    const next = { title: fixture.metrics[0].next.title, detail: fixture.metrics[0].next.detail };
+    expect(healthSchema.safeParse({ ...fixture, metrics: [{ ...fixture.metrics[0], next }] }).success).toBe(false);
+    expect(healthSchema.safeParse({ ...fixture, recs: [{ ...fixture.recs[0], icon: "unknown" }] }).success).toBe(false);
+  });
 });
 
 describe("Progress request boundary", () => {
@@ -60,7 +66,7 @@ describe("Progress request boundary", () => {
     { perDay: 40, goal: { rungId: "a" } }, { perDay: 40, memberId: "foreign" },
   ])("rejects malformed or ambiguous measure edits: %j", body => expect(() => parseSetMeasureBody(body)).toThrow("Invalid Progress request."));
   it.each([
-    [parseSetSharingBody, { metrics: ["steps", "sleep"], share: true }],
+    [parseSetSharingBody, { metrics: ["steps", "sleep"], share: true, audience: ["leo"] }],
     [parseSeenBody, { momentIds: ["moment-one"] }],
     [parseGoalsQuery, { measure: "pushups.reps", q: "Half Dome" }],
     [parsePicUploadQuery, { id: "10000000-0000-4000-8000-000000000001", measureId: "pushups.reps", takenAt: "2026-11-14T12:00:00Z" }],

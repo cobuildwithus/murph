@@ -259,6 +259,19 @@
           96000.0
         ]
       ]
+    },
+    {
+      "memberId": "member-5-priya",
+      "points": [
+        [
+          "2026-11-09",
+          0
+        ],
+        [
+          "2026-11-14",
+          41000
+        ]
+      ]
     }
   ],
   "next": {
@@ -267,5 +280,6 @@
   },
   "shareAsk": false,
   "shareAudience": [],
-  "departureNotice": null
+  "departureNotice": null,
+  "incomplete": false
 }

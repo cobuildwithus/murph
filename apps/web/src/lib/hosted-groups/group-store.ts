@@ -1197,7 +1197,10 @@ export async function readHostedGroupBoardData(input: {
   };
   // Key access and decryption stay outside both authority transactions.
   const snapshots = await readHostedGroupSharedSnapshots({ capture, prisma, now: input.now,
-    options: {}, retainedHistory: true, boardAgeGroups: true, runtimeMemberId: input.runtimeMemberId }).catch(() => null);
+    options: {}, retainedHistory: true, boardAgeGroups: true, runtimeMemberId: input.runtimeMemberId }).catch(() => {
+    throw hostedOnboardingError({ code: "BOARD_PROJECTION_UNAVAILABLE", httpStatus: 503, retryable: true,
+      message: "Shared numbers are temporarily unavailable." });
+  });
   const current = await captureAuthority();
   if (!current) return null;
   const membershipId = current.members.find(member => member.memberId === input.viewerId)?.id ?? null;
@@ -2475,6 +2478,39 @@ export async function saveHostedGroupBoardSharingTx(input: {
   return acceptHostedGroupJoinTx({
     ...input, additiveOnly: false, confirmationPublicBaseUrl: null,
     joinOrigin: "web", policyProjectionScopes: HOSTED_GROUP_BOARD_SCOPES,
+  });
+}
+
+/** Add only the Progress metrics after the caller proves the current provider audience. */
+export async function addHostedGroupPairBoardSharingTx(input: {
+  groupId: string;
+  runtimeMemberId: string;
+  memberId: string;
+  otherMemberId: string;
+  expectedMembershipId: string | null;
+  metrics: readonly ("steps" | "sleep")[];
+  now: Date;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedGroupJoinAcceptanceTxResult> {
+  await lockHostedGroupRow(input.tx, input.groupId);
+  await input.tx.$queryRaw`SELECT member_id FROM hosted_thread_container
+    WHERE member_id = ${input.runtimeMemberId} FOR UPDATE`;
+  const group = await input.tx.hostedGroup.findUnique({ where: { id: input.groupId },
+    select: { runtimeMemberId: true, members: { take: 3, select: { memberId: true } } } });
+  const container = await input.tx.hostedThreadContainer.findUnique({ where: { memberId: input.runtimeMemberId },
+    select: { participants: { where: { removedAt: null }, take: 3, select: { participantMemberId: true } } } });
+  const pair = [input.memberId, input.otherMemberId];
+  const participants = container?.participants.map(person => person.participantMemberId) ?? [];
+  if (group?.runtimeMemberId !== input.runtimeMemberId || participants.length !== 2
+    || !pair.every(id => participants.includes(id)) || group.members.some(person => !pair.includes(person.memberId))) {
+    throw hostedOnboardingError({ code: "PROGRESS_SHARING_AUDIENCE_CHANGED", httpStatus: 409,
+      message: "The people in this room changed. Reload before sharing." });
+  }
+  return acceptHostedGroupJoinTx({
+    ...input, additiveOnly: true, confirmationPublicBaseUrl: null, joinOrigin: "web",
+    policyProjectionScopes: HOSTED_GROUP_BOARD_SCOPES,
+    selectedVaultShareProjectionScopes: HOSTED_GROUP_BOARD_SCOPES.filter((_, index) =>
+      index === 1 && input.metrics.includes("sleep") || index === 2 && input.metrics.includes("steps")),
   });
 }
 
