@@ -38,6 +38,15 @@ test("Linq production canary admits one verified serialized production journey n
   assert.match(workflow, /persist-credentials: false/u);
 });
 
+test("Linq production canary records the launch deployment without failing on a later promotion", async () => {
+  const workflow = await readFile(workflowPath, "utf8");
+  const record = workflow.slice(workflow.indexOf("- name: Record completed journey"));
+
+  assert.match(record, /DEPLOYED_SHA: \$\{\{ steps\.current-production\.outputs\.deployed_sha \}\}/u);
+  assert.match(record, /deployed_sha=\$\{DEPLOYED_SHA\}/u);
+  assert.doesNotMatch(record, /verify-current-vercel-production-deployment|exit 1/u);
+});
+
 test("Linq production canary keeps destructive and provider credentials in the live journey only", async () => {
   const workflow = await readFile(workflowPath, "utf8");
   const liveStep = workflow.slice(
