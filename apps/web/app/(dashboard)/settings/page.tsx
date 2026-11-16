@@ -484,14 +484,14 @@ function renderAuthenticatedSettingsPage(input: {
 
       <section className="flex flex-col gap-4">
         <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
-          Services
+          MCP servers
         </div>
         <Link
           href="/settings/connections"
           className="relative inline-flex items-center gap-2.5 self-start text-sm font-medium text-primary underline-offset-4 hover:underline before:absolute before:-inset-x-2 before:-inset-y-2.5 before:content-['']"
         >
           <Plug className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />
-          Connect a service
+          Connect an MCP server
         </Link>
       </section>
 

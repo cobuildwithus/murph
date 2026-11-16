@@ -3,7 +3,7 @@ import "server-only";
 import * as z from "@murphai/contracts/zod-runtime";
 import { randomBytes } from "node:crypto";
 import {
-  auth, validateAuthorizationResponseIssuer,
+  auth, discoverOAuthProtectedResourceMetadata, validateAuthorizationResponseIssuer,
   type OAuthClientProvider, type OAuthDiscoveryState, type OAuthClientMetadata,
   type StoredOAuthClientInformation, type StoredOAuthTokens,
 } from "@modelcontextprotocol/client";
@@ -173,6 +173,22 @@ export class ConnectionOAuthProvider implements OAuthClientProvider {
   }
   private assertIssuer(issuer?: string) {
     if (issuer && issuer !== this.discovery?.authorizationServerMetadata?.issuer) throw new ConnectionError("sign_in_unsupported");
+  }
+}
+
+/**
+ * Starts sign-in for a server that publishes protected-resource metadata, even when it also answers without
+ * sign-in: its tools for the member's own account only work signed in. False when the server publishes none,
+ * or sign-in can't start here (for example no RFC 9207 support), so the caller connects without it.
+ */
+export async function startOfferedAuthorization(provider: ConnectionOAuthProvider): Promise<boolean> {
+  try {
+    const metadata = await discoverOAuthProtectedResourceMetadata(provider.resource, undefined, provider.fetch);
+    if (!metadata.authorization_servers?.length) return false;
+    return await auth(provider, { serverUrl: provider.resource, fetchFn: provider.fetch }) === "REDIRECT"
+      && provider.authorizationUrl !== undefined;
+  } catch {
+    return provider.authorizationUrl !== undefined;
   }
 }
 
