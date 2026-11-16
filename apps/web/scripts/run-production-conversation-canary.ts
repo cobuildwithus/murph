@@ -130,9 +130,12 @@ export async function runLinqProductionCanary(
         timeoutMs: CANARY_REPLY_WAIT_MS,
         userId: target.id,
       });
+      // A failed send leaves the turn before the reply is awaited, and stopping
+      // the app then ends the stream. Keep that second rejection handled so the
+      // send failure stays the only one reported.
+      void replyPromise.catch(() => undefined);
       const sent = await space.send(prompt);
       if (!sent) {
-        void replyPromise.catch(() => undefined);
         throwCanaryFailure("send-unconfirmed");
       }
       sentMessageId = readCanarySentMessageId(sent);

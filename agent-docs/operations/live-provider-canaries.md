@@ -46,9 +46,12 @@ restore its cron entries (`17 0 * * 0,3,6` and `17 12 * * 1,4`) in
   deployment selected at launch, not an assertion that production stays frozen
   for the entire native journey. Ordinary promotions do not invalidate successful
   native business assertions; the canary emits no per-commit acceptance status.
-- Linq resolves the actual production alias before its scheduled journey, verifies
-  protected-main ancestry and exact deployment, and repeats deployment validation
-  after execution. A manual requested SHA must match the deployed revision.
+- Linq resolves the actual production alias before its scheduled journey and
+  verifies protected-main ancestry and exact deployment. Like the native
+  journeys, its recorded SHA is the deployment selected at launch: the journey
+  takes about 22 minutes, and an ordinary promotion during it does not fail a
+  run whose assertions passed. A manual requested SHA must match the deployed
+  revision.
   The fixed canary account is reset through its existing input-free owner.
   Phone-account creation saves an explicit GPT-6 Luna preference only for the
   server-configured Linq canary number. Each reset recreates that preference;
