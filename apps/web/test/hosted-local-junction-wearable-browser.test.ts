@@ -255,6 +255,7 @@ describe("hosted-local Junction wearable browser authorization", () => {
 
   it.each([
     ["https://private-subdomain.garmin.com/partner/oauthConfirm?token=private#private", "garmin.com/partner_consent"],
+    ["https://connect.garmin.com/oauth2Confirm?client_id=private#private", "garmin.com/oauth2_consent"],
     ["https://connect.garmin.com/private-path/private-id", "garmin.com/other"],
     ["https://private.tryvital.io/private-path", "tryvital.io/other"],
     ["https://garmin.com.untrusted.invalid/private", "other"],
@@ -1036,9 +1037,15 @@ describe("hosted-local Junction wearable browser authorization", () => {
     ].join(" "));
   });
 
-  it.each(["none", "read", "fill", "unchanged"] as const)(
-    "completes Garmin consent after a login-field transition (%s)",
-    async (transition) => {
+  it.each([
+    ["none", "/partner/oauthConfirm"],
+    ["read", "/partner/oauthConfirm"],
+    ["fill", "/partner/oauthConfirm"],
+    ["unchanged", "/partner/oauthConfirm"],
+    ["none", "/oauth2Confirm"],
+  ] as const)(
+    "completes Garmin consent after a login-field transition (%s) on %s",
+    async (transition, consentPath) => {
     let step: "login" | "selection" | "confirmation" | "murph" =
       transition === "none" ? "selection" : "login";
     let now = 0;
@@ -1126,12 +1133,12 @@ describe("hosted-local Junction wearable browser authorization", () => {
         ? "https://app.example.test/home"
         : step === "confirmation"
         ? [
-          "https://connect.garmin.com/partner/oauthConfirm",
+          `https://connect.garmin.com${consentPath}`,
           "?oauth_token=opaque&oauth_callback=opaque",
           "&permissionsUpdated=1&selectedCapabilities=opaque",
         ].join("")
         : [
-          "https://connect.garmin.com/partner/oauthConfirm",
+          `https://connect.garmin.com${consentPath}`,
           "?oauth_token=opaque&oauth_callback=opaque",
         ].join(""),
       waitForTimeout: vi.fn(async (duration: number) => {
