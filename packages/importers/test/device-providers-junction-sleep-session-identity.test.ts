@@ -56,6 +56,7 @@ const NO_STAGE_MINUTES = { awake: null, light: null, deep: null, rem: null };
 
 async function withVault(
   run: (vault: {
+    deleteRecord: (record: Stored) => Promise<void>;
     editNote: (record: Stored, note: string) => Promise<void>;
     importSummaries: (importedAt: string, summaries: Record<string, unknown[]>) => Promise<void>;
     readLive: () => Promise<Stored[]>;
@@ -74,6 +75,9 @@ async function withVault(
       timezone: "UTC",
     });
     await run({
+      deleteRecord: async (record) => {
+        await coreRuntime.deleteEvent({ vaultRoot, eventId: String(record.id) });
+      },
       // A member edit, as the app writes it: the event's own fields plus a note.
       editNote: async (record, note) => {
         const { ledgerFile } = await coreRuntime.upsertEvent({
@@ -250,53 +254,79 @@ function refPrefix(record: Stored): string {
 }
 
 // Before sessions were keyed on their id, every summary a source sent for one
-// window wrote the same stage records. A source can send two summaries for one
-// window under different session ids, or one summary twice. Each now has its
-// own session ref, and each names the record the window holds.
+// window wrote the same stage records, so they hold the last one's values. A
+// source can send two summaries for one window under different session ids, or
+// one summary twice. Each now has its own session ref, and each names the
+// record the window holds.
 const GOOGLE_HEALTH = { source_provider: "google_health", source_type: "watch" };
+const SESSION_A = sleepSummary(FIRST_END, { ...GOOGLE_HEALTH, id: "gh-sleep-a" });
+const SESSION_B = sleepSummary(FIRST_END, { ...GOOGLE_HEALTH, id: "gh-sleep-b", deep: 3000 });
+const BEFORE_SESSION_REFS = [SESSION_A, SESSION_B].map(({ id: _id, ...summary }) => summary);
 
-test("two sessions covering one stored window both import, and the stored record keeps its member edit", async () => {
-  await withVault(async ({ editNote, importSummaries, readLive, readRows }) => {
-    // What the vault holds for the night from before the change.
-    await importSummaries("2026-01-02T12:00:00.000Z", {
-      sleep: [sleepSummary(FIRST_END, { ...GOOGLE_HEALTH, id: undefined })],
+function deepSleepRef(summary: Record<string, unknown>): string | undefined {
+  const payload = normalizeJunctionSnapshot({
+    importedAt: "2026-01-02T12:00:00.000Z",
+    summaries: { sleep: [summary] },
+  }, { defaultTimeZone: "UTC" });
+  return payload.events?.find((event) => event.fields?.metric === "sleep-deep-minutes")
+    ?.externalRef?.resourceId;
+}
+
+for (const reread of [[SESSION_A, SESSION_B], [SESSION_B, SESSION_A]]) {
+  test(`two sessions for one stored window import as in an empty vault (${reread.map((s) => s.id).join(", ")})`, async () => {
+    await withVault(async ({ editNote, importSummaries, readLive, readRows }) => {
+      await importSummaries("2026-01-02T12:00:00.000Z", { sleep: BEFORE_SESSION_REFS });
+      const [stored] = metricRecords(await readLive(), "sleep-deep-minutes");
+      assert.ok(stored);
+      assert.equal(refPrefix(stored), "sleep-stage");
+      assert.equal(stored.value, 50);
+      await editNote(stored, "Woke up twice");
+
+      await importSummaries("2026-01-02T13:00:00.000Z", { sleep: reread });
+
+      const live = await readLive();
+      for (const metric of ["sleep-awake-minutes", "sleep-light-minutes", "sleep-rem-minutes"]) {
+        const records = metricRecords(live, metric);
+        assert.deepEqual(records.map(refPrefix), ["sleep-session", "sleep-session"], metric);
+        assert.equal(new Set(records.map((record) => JSON.stringify(record.externalRef))).size, 2);
+      }
+      // The stored record holds session b's minutes, so session b takes it over
+      // with the member's note; session a starts its own record.
+      const deep = metricRecords(live, "sleep-deep-minutes");
+      assert.deepEqual(
+        deep.map((record) => [record.id === stored.id, record.value, record.note ?? null]).sort(),
+        [[false, 60, null], [true, 50, "Woke up twice"]],
+      );
+      const keptProvider = (await readRows())
+        .filter((row) => row.id === stored.id && row.source === "device")
+        .sort((left, right) => revision(right) - revision(left))[0];
+      assert.equal(
+        (keptProvider?.externalRef as { resourceId?: string } | undefined)?.resourceId,
+        deepSleepRef(SESSION_B),
+      );
+      const started = deep.find((record) => record.id !== stored.id);
+      assert.equal((started?.externalRef as { resourceId?: string } | undefined)?.resourceId, deepSleepRef(SESSION_A));
+
+      await importSummaries("2026-01-02T14:00:00.000Z", { sleep: [...reread].reverse() });
+      assert.deepEqual(await readLive(), live);
     });
+  });
+}
+
+test("a stored window record the member deleted stays deleted, and each session imports anew", async () => {
+  await withVault(async ({ deleteRecord, importSummaries, readLive }) => {
+    await importSummaries("2026-01-02T12:00:00.000Z", { sleep: BEFORE_SESSION_REFS });
     const [stored] = metricRecords(await readLive(), "sleep-deep-minutes");
     assert.ok(stored);
-    assert.equal(refPrefix(stored), "sleep-stage");
-    await editNote(stored, "Woke up twice");
+    await deleteRecord(stored);
 
-    const reread = {
-      sleep: [
-        sleepSummary(FIRST_END, { ...GOOGLE_HEALTH, id: "gh-sleep-a" }),
-        sleepSummary(FIRST_END, { ...GOOGLE_HEALTH, id: "gh-sleep-b", deep: 3000 }),
-      ],
-    };
-    await importSummaries("2026-01-02T13:00:00.000Z", reread);
+    await importSummaries("2026-01-02T13:00:00.000Z", { sleep: [SESSION_A, SESSION_B] });
 
-    const live = await readLive();
-    for (const metric of ["sleep-awake-minutes", "sleep-light-minutes", "sleep-rem-minutes"]) {
-      const records = metricRecords(live, metric);
-      assert.deepEqual(records.map(refPrefix), ["sleep-session", "sleep-session"], metric);
-      assert.equal(new Set(records.map((record) => JSON.stringify(record.externalRef))).size, 2);
-    }
-    // The first session takes the stored record over, and the member's note
-    // stays on it; the second starts its own record, as in an empty vault.
-    const deep = metricRecords(live, "sleep-deep-minutes");
-    assert.equal(deep.length, 2);
-    const kept = deep.find((record) => record.id === stored.id);
-    assert.equal(kept?.note, "Woke up twice");
-    assert.equal(kept?.value, 60);
-    const keptProviderRef = (await readRows())
-      .filter((row) => row.id === stored.id && row.source === "device")
-      .sort((left, right) => revision(right) - revision(left))[0];
-    assert.equal(refPrefix(keptProviderRef!), "sleep-session");
-    const started = deep.find((record) => record.id !== stored.id);
-    assert.equal(started?.value, 50);
-    assert.equal(refPrefix(started!), "sleep-session");
-
-    await importSummaries("2026-01-02T14:00:00.000Z", reread);
-    assert.deepEqual(await readLive(), live);
+    // A deleted record's content never matches an incoming session, so neither
+    // takes it over. One session does the same since sessions got their own refs.
+    const deep = metricRecords(await readLive(), "sleep-deep-minutes");
+    assert.deepEqual(deep.map((record) => record.value).sort(), [50, 60]);
+    assert.equal(deep.some((record) => record.id === stored.id), false);
   });
 });
 

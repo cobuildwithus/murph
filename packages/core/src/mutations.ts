@@ -2898,11 +2898,14 @@ function isJunctionSleepStageCycleFallbackObservation(record: EventRecord): bool
  * (`sleep-stage-`) before they were keyed on the provider's session id
  * (`sleep-session-`). The window ref moves a stored record across once, to
  * one session. Every session a source sends for the same start and end names
- * that record; the first in an import takes it over and the others resolve by
- * their own session refs, as they would in an empty vault. After that the
- * session ref owns the record, and a window ref can only name a stale copy left
- * by an earlier rewrite of the session's start or end, which must not turn the
- * import into an ambiguous merge of two live records.
+ * that record, and before session refs each of them wrote it, so it holds the
+ * values of the last one. The session whose values it holds takes it over (the
+ * first in the import when none or several do), so a member edit stays over the
+ * values it was made on; the others resolve by their own session refs, as they
+ * would in an empty vault. After that the session ref owns the record, and a
+ * window ref can only name a stale copy left by an earlier rewrite of the
+ * session's start or end, which must not turn the import into an ambiguous
+ * merge of two live records.
  */
 function isSupersededJunctionSleepWindowRef(
   legacyExternalRef: ExternalRef,
@@ -3389,6 +3392,12 @@ function hasHistoricalExternalRefUserAuthoredChanges(match: IndexedEventExternal
     userAuthoredEventStateKey(match.record) !== userAuthoredEventStateKey(match.indexedRecord);
 }
 
+/** Whether a claimant carries the provider values its legacy record holds, identity aside. */
+function holdsLegacyProviderContent({ entry, indexedMatch }: LegacyExternalRefReservation): boolean {
+  return eventContentKey(entry.record, { includeProviderAttribution: false })
+    === eventContentKey(indexedMatch.indexedRecord, { includeProviderAttribution: false });
+}
+
 function buildLegacyExternalRefReservations(
   entries: readonly PreparedDeviceEventEntry[],
   index: EventExternalRefIndex,
@@ -3399,11 +3408,16 @@ function buildLegacyExternalRefReservations(
     entry: PreparedDeviceEventEntry,
     refKey: string,
     indexedMatch: IndexedEventExternalRefMatch,
-    firstClaimKeeps = false,
+    sharedSleepWindow = false,
   ): void => {
     const existing = reservations.get(refKey);
     if (existing && existing.entry !== entry) {
-      if (firstClaimKeeps) {
+      if (sharedSleepWindow) {
+        // See isSupersededJunctionSleepWindowRef for which session keeps it.
+        const claim = { entry, indexedMatch };
+        if (!holdsLegacyProviderContent(existing) && holdsLegacyProviderContent(claim)) {
+          reservations.set(refKey, claim);
+        }
         return;
       }
       const externalRef = indexedMatch.indexedExternalRef;
