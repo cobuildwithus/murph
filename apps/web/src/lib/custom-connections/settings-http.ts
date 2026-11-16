@@ -1,6 +1,6 @@
 import "server-only";
 
-import { z } from "zod";
+import * as z from "@murphai/contracts/zod-runtime";
 import { readHostedOnboardingJsonObject } from "../hosted-onboarding/http";
 import { requireConnectionSession } from "./access";
 import { connectionErrorResponse } from "./errors";

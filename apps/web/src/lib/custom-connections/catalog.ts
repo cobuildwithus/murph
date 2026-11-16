@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { z } from "zod";
+import * as z from "@murphai/contracts/zod-runtime";
 import { ConnectionError } from "./errors";
 
 export const toolDefinitionSchema = z.object({
