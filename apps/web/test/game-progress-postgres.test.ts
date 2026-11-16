@@ -6,6 +6,7 @@ import { openProgress, progressLookup, sealProgress } from "../src/lib/game/prog
 import * as crypto from "../src/lib/game/progress/crypto";
 import { patchMeasureState, type MeasureState } from "../src/lib/game/progress/state";
 import type { Candidate } from "../src/lib/game/progress/registry";
+import { healthSteps } from "../src/lib/game/progress/health";
 
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
 if (enabled && !/^postgres(?:ql)?:\/\/[^/]*@(?:127\.0\.0\.1|localhost):\d+\/murph_test_[a-z0-9_]+$/u.test(process.env.DATABASE_URL ?? "")) throw new Error("Progress proof needs an isolated loopback test database.");
@@ -30,6 +31,20 @@ afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 afterAll(async () => { if (enabled) await db.hostedMember.deleteMany({ where: { id: { in: members } } }); });
 
 describe.skipIf(!enabled)("Progress PostgreSQL invariants", () => {
+  it("settles every held health level on its earned date once, even after readings worsen", async () => {
+    const id = await member();
+    const context = { metric: "restingHeartRate" as const, baseline: 74, joinedOn: "2026-11-01", step: 1, direction: -1,
+      profile: { age: 35, sex: "female" as const }, means: Array.from({ length: 7 }, (_, index) => ({
+        date: `2026-11-0${index + 1}`, value: 71, source: "Apple Watch", observedAt: "2026-11-16T00:00:00Z",
+      })) };
+    await settleAwards(id, healthSteps(context), authorized);
+    const first = await readAwards(id);
+    expect(first).toHaveLength(3);
+    expect(first.every(award => award.on === "2026-11-07")).toBe(true);
+    await settleAwards(id, healthSteps(context), authorized);
+    await settleAwards(id, healthSteps({ ...context, means: context.means.map(point => ({ ...point, value: 76 })) }), authorized);
+    expect(await readAwards(id)).toEqual(first);
+  });
   it("settles concurrently and never revokes or rewrites the original crossing day", async () => {
     const id = await member();
     await Promise.all([settleAwards(id, [candidate("1000", "2026-11-13")], authorized), settleAwards(id, [candidate("1000", "2026-11-13")], authorized)]);

@@ -2,7 +2,8 @@ import { addDaysToIsoDate } from "@murphai/contracts";
 import type { CompanionHealthSeries, RawHealthPoint } from "../../device-sync/companion-numbers";
 import type { Amount, Health, HealthMetric, Measure } from "./contract";
 import type { StoredAward } from "./awards";
-import { HEALTH_RECS, healthMean14 } from "./health";
+import { HEALTH_RECS, healthMean14, healthMedalFace, healthWinText } from "./health";
+import { formatAmount, formatNumber } from "./format";
 import { rankAge, agePercentile, type AgeProfile } from "./norms";
 
 export interface HealthMetricInput {
@@ -65,17 +66,16 @@ export function healthMetricView(metric: HealthMetricInput, joinedOn: string, to
       const amount = award.data.amount as number;
       const share = award.data.percentile === 50 ? "half" : award.data.percentile === 25 ? "1 in 4" : "1 in 3";
       const age = award.kind === "healthAge";
-      const title = age ? `Beat ${share}` : metric.id === "restingHeartRate" ? `Down ${amount}`
-        : metric.id === "steps" ? `${amount.toLocaleString("en-US")} more`
-        : `Up ${metric.id === "sleep" ? `${amount / 60} min` : amount}`;
-      const text = age ? share : `${metric.id === "restingHeartRate" ? "↓" : "+"}${metric.id === "sleep" ? `${amount / 60}m`
-        : metric.id === "steps" && amount >= 1000 ? `${amount / 1000}k` : amount}`;
-      return { medalId: award.id, on: award.on, text: award.data.title as string,
-        face: { delta: { icon: age ? "age" : metric.id === "restingHeartRate" ? "heart" : metric.id, text } },
+      const title = age ? `Beat ${share}` : metric.id === "restingHeartRate" ? `Down ${formatNumber(amount, "compact")}`
+        : metric.id === "steps" ? `${formatNumber(amount, "compact")} more`
+        : `Up ${metric.id === "sleep" ? `${formatNumber(amount / 60, "compact")} min` : formatNumber(amount, "compact", 1)}`;
+      return { medalId: award.id, on: award.on, text: age ? award.data.title as string : healthWinText(metric.id, amount),
+        face: age ? { delta: { icon: "age", text: share } } : healthMedalFace(metric.id, amount, award.data.value as number),
         title, detail: age ? `${who} your age` : "" };
     }),
     next: target === null ? null : { title: metric.wins.length ? "Next" : "Next win", detail:
-      `${direction === "worse" ? "Back to " : ""}${healthAmountText(metric.id, target, false)}` },
+      `${direction === "worse" ? "Back to " : ""}${healthAmountText(metric.id, target, false)}`,
+      face: healthMedalFace(metric.id, (highest + 1) * metric.step, target) },
     age: healthAgeView(metric.id, metric.baseline, current, source, profile, joinedOn) };
 }
 
@@ -91,24 +91,20 @@ function healthAgeView(metric: HealthMetric["id"], baseline: number | null, curr
   if (!rank || !previous) return null;
   const percentile = agePercentile(metric, rank), who = profile.sex === "female" ? "women" : "men";
   return { percentile,
-    text: `${metric === "restingHeartRate" ? "Lower than" : metric === "steps" ? "More steps than" : "Higher than"} ${Math.round(percentile)} of 100 ${who} your age`,
+    text: `${metric === "restingHeartRate" ? "Lower than" : metric === "steps" ? "More steps than" : "Higher than"} ${formatNumber(percentile, "compact")} of 100 ${who} your age`,
     current: healthAmount(metric, current),
-    typical: metric === "restingHeartRate" ? healthAmount(metric, rank.cuts.find(cut => cut.percentile === 50)!.value) : null,
+    typical: healthAmount(metric, rank.cuts.find(cut => cut.percentile === 50)!.value),
     previous: { percentile: agePercentile(metric, previous), amount: healthAmount(metric, baseline), on: joinedOn } };
 }
 
 function healthAmount(metric: HealthMetric["id"], value: number): Amount {
-  const minutes = Math.round(value / 60);
-  const text = metric === "sleep" ? `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, "0")}`
-    : value.toLocaleString("en-US", { maximumFractionDigits: metric === "vo2Max" ? 1 : 0 });
-  return { value, text, unit: units[metric] };
+  return formatAmount(value, units[metric], metric === "sleep" ? "clock" : "compact");
 }
 
 function healthAmountText(metric: HealthMetric["id"], value: number, delta: boolean): string {
   if (metric === "sleep") {
-    const minutes = Math.round(value / 60);
-    return delta ? `${minutes} min` : `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, "0")} a night`;
+    return delta ? `${formatNumber(value / 60, "compact")} min` : healthAmount(metric, value).text;
   }
-  const number = value.toLocaleString("en-US", { maximumFractionDigits: metric === "vo2Max" ? 1 : 0 });
+  const number = healthAmount(metric, value).text;
   return metric === "restingHeartRate" ? `${number} bpm` : metric === "steps" ? `${number} a day` : number;
 }

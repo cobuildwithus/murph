@@ -1,6 +1,7 @@
 import { addDaysToIsoDate } from "@murphai/contracts";
 import type { RawHealthPoint } from "../../device-sync/companion-numbers";
-import type { HealthMetric, Rec } from "./contract";
+import type { HealthMetric, MedalFace, Rec } from "./contract";
+import { formatNumber } from "./format";
 import type { Candidate, DayAmount } from "./registry";
 import { agePercentile, rankAge, type AgeProfile } from "./norms";
 
@@ -21,27 +22,27 @@ export function healthSums(metric: "steps" | "sleep", daily: readonly HealthDay[
 export const HEALTH_RECS: Record<HealthMetric["id"], Rec[]> = {
   restingHeartRate: [
     { id: "cardio", metric: "restingHeartRate", title: "Start a cardio game", detail: "Make time to move",
-      task: "30 min of cardio every day", category: "move" },
+      task: "30 min of cardio every day", category: "move", icon: "heart" },
   ],
   steps: [
     { id: "after-dinner", metric: "steps", title: "Walk after dinner", detail: "20 min is about 2,000 steps",
-      task: "Walk 20 min after dinner every day", category: "move" },
+      task: "Walk 20 min after dinner every day", category: "move", icon: "walk" },
     { id: "stairs", metric: "steps", title: "Take the stairs", detail: "Every time, all week",
-      task: "Take the stairs every day", category: "move" },
+      task: "Take the stairs every day", category: "move", icon: "stairs" },
     { id: "walk-calls", metric: "steps", title: "Walk your calls", detail: "Take one call a day on foot",
-      task: "Take one call on foot every day", category: "move" },
+      task: "Take one call on foot every day", category: "move", icon: "phone" },
   ],
   sleep: [
     { id: "lights-out", metric: "sleep", title: "Lights out by 11", detail: "Make room for sleep",
-      task: "Lights out by 11 every night", category: "calm" },
+      task: "Lights out by 11 every night", category: "calm", icon: "sleep" },
     { id: "no-phone", metric: "sleep", title: "No phone in bed", detail: "Also for sleep",
-      task: "No phone in bed every night", category: "calm" },
+      task: "No phone in bed every night", category: "calm", icon: "phone" },
     { id: "morning-walk", metric: "sleep", title: "Morning walk", detail: "Daylight early helps sleep",
-      task: "Walk 20 min every morning", category: "move" },
+      task: "Walk 20 min every morning", category: "move", icon: "sun" },
   ],
   vo2Max: [
     { id: "run-mile", metric: "vo2Max", title: "Run a mile", detail: "Getting out of breath moves this",
-      task: "Run a mile every day", category: "move" },
+      task: "Run a mile every day", category: "move", icon: "run" },
   ],
 };
 export interface HealthAchievementContext {
@@ -66,8 +67,7 @@ export function healthSteps(context: HealthAchievementContext): Candidate[] {
         subjectMemberId: null, on: point.date,
         data: { level, baseline, value: baseline + direction * level * step,
           title: healthWinText(metric, level * step), amount: level * step,
-          face: { delta: { icon: metric === "restingHeartRate" ? "heart" : metric,
-            text: `${direction < 0 ? "↓" : "+"}${metric === "sleep" ? `${level * step / 60}m` : level * step}` } },
+          face: healthMedalFace(metric, level * step, baseline + direction * level * step),
           detail: "held a week", page: "health", evaluator: 1 } });
     }
     best = Math.max(best, point.value);
@@ -98,11 +98,19 @@ export function healthAgeShare(context: HealthAchievementContext): Candidate[] {
 
 export function healthWinText(metric: HealthMetric["id"], amount: number): string {
   switch (metric) {
-    case "restingHeartRate": return `Resting HR down ${amount} bpm`;
-    case "steps": return `Steps up ${amount.toLocaleString("en-US")} a day`;
-    case "sleep": return `Sleep up ${amount / 60} min`;
-    case "vo2Max": return `VO2 max up ${amount}`;
+    case "restingHeartRate": return `Resting HR down ${formatNumber(amount, "compact")} bpm`;
+    case "steps": return `Steps up ${formatNumber(amount, "compact")} a day`;
+    case "sleep": return `Sleep up ${formatNumber(amount / 60, "compact")} min`;
+    case "vo2Max": return `VO2 max up ${formatNumber(amount, "compact", 1)}`;
   }
+}
+
+/** Earned and next medals use the same metric-specific face. */
+export function healthMedalFace(metric: HealthMetric["id"], amount: number, value: number): MedalFace {
+  const text = metric === "vo2Max" ? formatNumber(value, "compact", 1)
+    : metric === "sleep" ? `+${formatNumber(amount / 60, "compact")}m`
+    : `${metric === "restingHeartRate" ? "↓" : "+"}${formatNumber(amount, "compact")}`;
+  return { delta: { icon: metric === "restingHeartRate" ? "heart" : metric, text } };
 }
 
 /** D4: exactly the 28 dates before joining; VO2 retains its median statistic. */

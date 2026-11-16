@@ -1,6 +1,8 @@
 import { expect, it } from "vitest";
 import { addDaysToIsoDate } from "@murphai/contracts";
 import { healthView, healthMetricView, type HealthMetricInput } from "../src/lib/game/progress/health-view";
+import { healthMedalFace, healthSteps } from "../src/lib/game/progress/health";
+import { rankAge } from "../src/lib/game/progress/norms";
 
 const joinedOn = "2026-10-21", today = "2026-11-16";
 const profile = { age: 35, sex: "female" as const };
@@ -13,7 +15,7 @@ it("uses raw means for direction and next win, rounding only presentation", () =
   expect(result.headline).toBe("Down 1 bpm");
   expect(result.baseline).toEqual({ value: 70.51, text: "71", unit: "bpm" });
   expect(result.wins).toEqual([]);
-  expect(result.next).toEqual({ title: "Next win", detail: "70 bpm" });
+  expect(result.next).toEqual({ title: "Next win", detail: "70 bpm", face: { delta: { icon: "heart", text: "↓1" } } });
   expect(result.daily.filter(([, value]) => value === null)).not.toHaveLength(0);
   expect(result.age?.current.value).toBeCloseTo(69.53);
 });
@@ -26,7 +28,7 @@ it("a worse reading preserves the earned win and points to the next unearned lev
       data: { level: 1, amount: 1, title: "Resting HR down 1 bpm" } }] }, joinedOn, today, profile);
   expect(result.direction).toBe("worse");
   expect(result.wins[0]).toMatchObject({ medalId: "medal-heart-1", on: "2026-11-01", title: "Down 1" });
-  expect(result.next).toEqual({ title: "Next", detail: "Back to 70 bpm" });
+  expect(result.next).toEqual({ title: "Next", detail: "Back to 70 bpm", face: { delta: { icon: "heart", text: "↓2" } } });
 });
 
 it("renders seconds once and gives sleep no age comparison", () => {
@@ -35,6 +37,32 @@ it("renders seconds once and gives sleep no age comparison", () => {
   expect(result.headline).toBe("Down 60 min");
   expect(result.baseline).toEqual({ value: 28800, text: "8h 00", unit: "seconds" });
   expect(result.age).toBeNull();
+  expect(result.next).toMatchObject({ detail: "Back to 8h 15", face: { delta: { icon: "sleep", text: "+15m" } } });
+});
+
+it.each([
+  ["restingHeartRate", 74, 71, 1, -1, "↓1"],
+  ["steps", 6000, 8000, 1000, 1, "+1,000"],
+  ["sleep", 24600, 26400, 900, 1, "+15m"],
+  ["vo2Max", 30, 31, 1, 1, "31"],
+] as const)("shares the %s face between the next medal and the earned award", (id, baseline, value, step, direction, text) => {
+  const daily = metric.daily.map(point => ({ ...point, value }));
+  const next = healthMetricView({ ...metric, id, baseline, daily, step, direction }, joinedOn, today, profile).next!;
+  const candidate = healthSteps({ metric: id, joinedOn, baseline, means: daily, profile, step, direction })[0];
+  expect(next.face).toEqual(candidate.data.face);
+  expect(next.face).toMatchObject({ delta: { text } });
+});
+
+it.each([[1400, "+1,400"], [2000, "+2,000"], [12000, "+12k"]])("formats a %s Steps face through D20", (amount, text) => {
+  expect(healthMedalFace("steps", amount, 6000 + amount)).toEqual({ delta: { icon: "steps", text } });
+});
+
+it.each(["restingHeartRate", "steps", "vo2Max"] as const)("uses the same age/sex table's median for %s", id => {
+  const result = healthMetricView({ ...metric, id }, joinedOn, today, profile);
+  const rank = rankAge(id, result.age!.current.value, profile, "Apple Watch")!;
+  expect(result.age!.typical!.value).toBe(rank.cuts.find(cut => cut.percentile === 50)!.value);
+  expect(healthMetricView({ ...metric, id }, joinedOn, today, { ...profile, age: null }).age).toBeNull();
+  expect(healthMetricView({ ...metric, id }, joinedOn, today, { ...profile, sex: null }).age).toBeNull();
 });
 
 it("keeps missing health empty rather than a zero trend", () => {

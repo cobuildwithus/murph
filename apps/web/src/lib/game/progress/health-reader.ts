@@ -6,17 +6,36 @@ import { readCompanionHealthSeries } from "../../device-sync/companion-numbers";
 import { getPrisma } from "../../prisma";
 import { hostedOnboardingError, isHostedOnboardingError } from "../../hosted-onboarding/errors";
 import { assertGameMemberAuthCurrentTx } from "../http/auth";
-import { gameHttpError } from "../http/errors";
+import { gameHttpError, gameNotFound } from "../http/errors";
 import type { HealthMetric } from "./contract";
-import { openProgressMany, progressLookup } from "./crypto";
+import { openProgress, openProgressMany, progressLookup } from "./crypto";
 import { readAwards, settleAwards } from "./awards";
 import { patchMeasureState, type MeasureState, type BeforeProgressMutation } from "./state";
 import { HEALTH } from "./registry";
 import type { RawHealthPoint } from "../../device-sync/companion-numbers";
 import type { AgeProfile } from "./norms";
-import { healthAgeShare, healthBaseline, healthMeans, healthSteps, progressHealthDays } from "./health";
+import { healthAgeShare, healthBaseline, healthMeans, healthSteps, healthSums, progressHealthDays } from "./health";
+import { cumulativePoints } from "./series";
+import { routeView } from "./routes";
 import { healthView, type HealthMetricInput } from "./health-view";
 import { healthJourneys, healthJourneyViews } from "./health-journeys";
+
+/** The map consumes the same settled daily Steps and join-date window as Health. */
+export async function readProgressStepsRoute(auth: HostedNativeMemberAuth, signal: AbortSignal) {
+  const db = getPrisma(), memberId = auth.member.id;
+  const snapshot = await readCompanionHealthSeries(auth, signal);
+  const profile = await db.gameProfile.findUnique({ where: { memberId }, select: { createdAt: true, timeZone: true } });
+  const lookup = progressLookup(memberId, "measure", ["steps"]);
+  const row = await db.gameProgressMeasure.findUnique({ where: { memberId_lookup: { memberId, lookup } }, select: { stateEncrypted: true } });
+  if (!profile || !row) throw gameNotFound();
+  const state = await openProgress<MeasureState>({ memberId, table: "game_progress_measure", rowId: lookup, field: "state" }, row.stateEncrypted);
+  const leg = state.legs?.at(-1);
+  if (!leg) throw gameNotFound();
+  const joinedOn = toLocalDayKey(profile.createdAt, profile.timeZone), today = toLocalDayKey(new Date(), profile.timeZone);
+  const points = cumulativePoints(healthSums("steps", snapshot?.numbers.steps?.daily ?? [], joinedOn, today));
+  const route = routeView("steps", state, points, await readAwards(memberId))!;
+  return { polyline: leg.polyline, progress: route.progress };
+}
 
 export async function readProgressHealth(auth: HostedNativeMemberAuth, signal: AbortSignal) {
   try {

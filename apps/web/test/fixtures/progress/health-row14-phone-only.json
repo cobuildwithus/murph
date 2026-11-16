@@ -265,7 +265,7 @@
           "face": {
             "delta": {
               "icon": "steps",
-              "text": "+1.4k"
+              "text": "+1,400"
             }
           },
           "title": "1,400 more",
@@ -287,7 +287,13 @@
       ],
       "next": {
         "title": "Up next: steps up to 8,400 a day",
-        "detail": ""
+        "detail": "",
+        "face": {
+          "delta": {
+            "icon": "steps",
+            "text": "+2,000"
+          }
+        }
       },
       "age": {
         "percentile": 37,
@@ -297,7 +303,11 @@
           "text": "7,300",
           "unit": "steps"
         },
-        "typical": null,
+        "typical": {
+          "value": 8448,
+          "text": "8,448",
+          "unit": "steps"
+        },
         "previous": {
           "percentile": 22,
           "amount": {

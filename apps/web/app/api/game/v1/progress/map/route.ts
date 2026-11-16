@@ -1,6 +1,8 @@
 import { assertGameMemberAuthCurrentTx, requireGameMemberAuth } from '@/src/lib/game/http/auth';
 import { gameNotFound } from '@/src/lib/game/http/errors';
 import { parseMapQuery } from '@/src/lib/game/progress/contract';
+import { assertBrowserVaultMemberAuthority } from '@/src/lib/browser-vault/authority';
+import { readProgressStepsRoute } from '@/src/lib/game/progress/health-reader';
 import { progressEffect, withProgressJsonError } from '@/src/lib/game/progress/http';
 import { renderRouteMap, resolveRoute } from '@/src/lib/game/progress/mapbox';
 import { routeView } from '@/src/lib/game/progress/routes';
@@ -17,6 +19,8 @@ export const GET = withProgressJsonError(async (request: Request) => runWithHost
     if ('from' in query) {
       polyline = (await resolveRoute(query.from, query.to)).polyline;
       progress = 0;
+    } else if (query.measure === 'steps') {
+      ({ polyline, progress } = await readProgressStepsRoute(auth, request.signal));
     } else {
       const snapshot = await readGameSeries(auth.member.id, new Date());
       if (snapshot.incomplete) throw hostedOnboardingError({ code: 'PROGRESS_INCOMPLETE', httpStatus: 503,
@@ -27,7 +31,10 @@ export const GET = withProgressJsonError(async (request: Request) => runWithHost
       polyline = state.legs.at(-1)!.polyline;
       progress = routeView(measure.id, state, cumulativePoints(measure.amounts), snapshot.awards)!.progress;
     }
-    await getPrisma().$transaction(tx => assertGameMemberAuthCurrentTx(auth, tx));
+    await getPrisma().$transaction(async tx => {
+      await assertGameMemberAuthCurrentTx(auth, tx);
+      if ('measure' in query && query.measure === 'steps') await assertBrowserVaultMemberAuthority({ memberId: auth.member.id, prisma: tx });
+    });
     return renderRouteMap({ polyline, progress, size: query.size });
   });
 }));

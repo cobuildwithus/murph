@@ -1,6 +1,7 @@
 import { addDaysToIsoDate } from "@murphai/contracts";
 import type { Amount, Friends, FriendsQuery, Measure } from "./contract";
 import type { Candidate } from "./registry";
+import { formatAmount, formatNumber } from "./format";
 
 export interface FriendSeries {
   memberId: string;
@@ -50,21 +51,15 @@ export function friendsView(input: {
   return { incomplete: input.incomplete, departureNotice: input.departureNotice,
     pills: input.pills, pill: measure.id, range: query.range, rows, chart,
     next: ahead && gap !== null ? { memberId: ahead.person.memberId,
-      text: `${measure.format === "duration" && gap < 3600 ? `${Math.round(gap / 60)} min` : friendAmount(gap, measure).text} to pass ${ahead.person.firstName}` } : null,
+      text: `${measure.format === "duration" && gap < 3600 ? `${formatNumber(gap / 60, "compact")} min` : friendAmount(gap, measure).text} to pass ${ahead.person.firstName}` } : null,
     shareAsk: (measure.id === "steps" || measure.id === "sleep") && input.shareAudience.length > 0,
     shareAudience: input.shareAudience };
 }
 
 export function friendAmount(value: number, measure: Pick<FriendMeasure, "id" | "format" | "noun">): Amount {
-  if (measure.format === "duration") {
-    const minutes = Math.round(value / 60), hours = Math.floor(minutes / 60), remainder = minutes % 60;
-    return { value, text: hours ? `${hours}h${remainder ? ` ${String(remainder).padStart(2, "0")}m` : ""}` : `${minutes}m`, unit: "seconds" };
-  }
-  if (measure.format === "distance") return { value,
-    text: `${(value / 1609.344).toLocaleString("en-US", { maximumFractionDigits: 1 })} mi`, unit: "meters" };
-  return { value, text: measure.id === "steps" && value >= 1000
-    ? `${(value / 1000).toLocaleString("en-US", { maximumFractionDigits: 1 })}k`
-    : value.toLocaleString("en-US", { maximumFractionDigits: 0 }), unit: measure.id.split(".").at(-1)! };
+  if (measure.format === "duration") return formatAmount(value, "seconds");
+  if (measure.format === "distance") return formatAmount(value, "meters");
+  return { value, text: formatNumber(value, "compact"), unit: measure.id.split(".").at(-1)! };
 }
 
 /** One all-time pass per friend and exercise; a later correction cannot revoke it. */

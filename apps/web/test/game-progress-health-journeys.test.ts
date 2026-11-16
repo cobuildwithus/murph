@@ -10,6 +10,7 @@ import { medalView } from "../src/lib/game/progress/view";
 import { medalSchema, measureSchema } from "../src/lib/game/progress/contract";
 import { encodePolyline } from "../src/lib/game/progress/route-geometry";
 import { ladder } from "../src/lib/game/progress/bank";
+import { projection } from "../src/lib/game/progress/goals";
 import type { HealthMetricInput } from "../src/lib/game/progress/health-view";
 import type { Candidate } from "../src/lib/game/progress/registry";
 import { addDaysToIsoDate } from "@murphai/contracts";
@@ -40,6 +41,8 @@ it("uses Sleep's curated time ladder, dates every crossing, and preserves passed
   expect(timeAwards[0].on).toBe(joinedOn);
   const view = measureSchema.parse(healthJourneyViews(journeys, awards, today)[0]);
   expect(view).toMatchObject({ id: "sleep", source: "wearable", total: { value: 777600, text: "9 days", unit: "seconds" }, ladder: { kind: "time" }, route: null });
+  expect(view.projection).toEqual(projection(journeys.measures[0], today));
+  expect(view.projection).toHaveProperty("on", null);
   const corrected = await prepare([{ ...metric("sleep", 1), daily: [] }], new Map(), awards);
   expect(healthJourneyViews(corrected, awards, today)[0].ladder?.passed).toEqual(view.ladder?.passed);
   expect(mocks.resolve).not.toHaveBeenCalled();
@@ -53,7 +56,7 @@ it("composes settled Steps into an about-miles route without mixing measured wal
   expect(routeAward.on).toBe("2026-11-09");
   const view = measureSchema.parse(healthJourneyViews(journeys, saved(journeys.candidates), today)[0]);
   expect(view.total).toEqual({ value: 27000, text: "27,000", unit: "steps" });
-  expect(view.route).toMatchObject({ walkedText: "about 10 miles", progress: 1, goalPicked: false, finishedOn: "2026-11-09" });
+  expect(view.route).toMatchObject({ walkedText: "about 10 mi", progress: 1, goalPicked: false, finishedOn: "2026-11-09" });
   expect(view.route?.map).toContain("measure=steps");
   expect(view.ladder).toBeNull();
 });

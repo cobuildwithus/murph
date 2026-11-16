@@ -26,6 +26,8 @@ const route = z.object({
   /** Card coordinates; use drawerTowns when requesting the same map with size=drawer. */
   towns,
   drawerTowns: towns,
+  here: z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) }),
+  drawerHere: z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) }),
 });
 export type Route = z.infer<typeof route>;
 const pic = z.object({ id: z.string(), takenOn: day, at: z.number() });
@@ -76,12 +78,13 @@ const healthMetric = z.object({
   access: z.enum(["ok", "off", "missing"]), direction: z.enum(["better", "worse", "flat"]), headline: z.string(),
   daily: z.array(z.tuple([day, z.number().nullable()])), baseline: amount.nullable(),
   wins: z.array(z.object({ medalId: z.string(), on: day, text: z.string(), face: medalFace, title: z.string(), detail: z.string() })),
-  next: z.object({ title: z.string(), detail: z.string() }).nullable(),
+  next: z.object({ title: z.string(), detail: z.string(), face: medalFace }).nullable(),
   age: z.object({ percentile: z.number(), text: z.string(), current: amount, typical: amount.nullable(),
     previous: z.object({ percentile: z.number(), amount, on: day }) }).nullable(),
 });
 export type HealthMetric = z.infer<typeof healthMetric>;
-const rec = z.object({ id: z.string(), metric: z.string(), title: z.string(), detail: z.string(), task: z.string(), category: z.string() });
+const rec = z.object({ id: z.string(), metric: z.string(), title: z.string(), detail: z.string(), task: z.string(), category: z.string(),
+  icon: z.enum(["sleep", "phone", "walk", "stairs", "run", "heart", "water", "sun"]) });
 export type Rec = z.infer<typeof rec>;
 export const healthSchema = z.object({
   joinedOn: day, today: day,

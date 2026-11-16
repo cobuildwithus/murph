@@ -1,10 +1,23 @@
 import { describe, expect, it } from 'vitest';
 import { replaceRouteLeg, routeAwardKey, routeLegs, routeView } from '../src/lib/game/progress/route-progress';
-import { decodePolyline, encodePolyline, MAP_SIZES, routeBbox, townPosition } from '../src/lib/game/progress/route-geometry';
+import { cutPolyline, decodePolyline, encodePolyline, MAP_SIZES, routeBbox, townPosition } from '../src/lib/game/progress/route-geometry';
 import { medalSchema } from '../src/lib/game/progress/contract';
 const leg = { from: 'A', to: 'B', distanceM: 100, polyline: encodePolyline([[0, 0], [1, 0]]), towns: [{ name: 'B', atM: 100 }], straightLine: false, startTotal: 0 };
 const next = { ...leg, from: 'B', to: 'C', distanceM: 200 };
 describe('Progress route legs', () => {
+  it.each([0, 25, 100, 150])('places the current dot at the walked cut with %s meters', total => {
+    const geometry = [[0, 50], [0.2, 49.5], [2, 49]] as [number, number][];
+    const route = { ...leg, polyline: encodePolyline(geometry) };
+    const view = routeView('walk.meters', { legs: [route] }, [['2026-11-01', total]], [])!;
+    const cut = cutPolyline(geometry, Math.min(1, total / 100)).walked.at(-1)!;
+    for (const [size, here] of [['card', view.here], ['drawer', view.drawerHere]] as const) {
+      const { width, height } = MAP_SIZES[size];
+      expect(here).toEqual(townPosition(cut, routeBbox(geometry, width, height)));
+      expect(here.x).toBeGreaterThanOrEqual(0); expect(here.x).toBeLessThanOrEqual(1);
+      expect(here.y).toBeGreaterThanOrEqual(0); expect(here.y).toBeLessThanOrEqual(1);
+    }
+    expect(view.here).not.toEqual(view.drawerHere);
+  });
   it.each([
     { miles: 8.4, text: '8.4 mi', atText: 'mile 8.4' },
     { miles: 116.4, text: '116 mi', atText: 'mile 116' },
@@ -62,13 +75,14 @@ describe('Progress route legs', () => {
     expect(repeated[1]!.key).not.toBe(award.key); expect(repeated[1]!.on).toBe('2026-11-03');
   });
   it('converts Steps separately and keeps a recorded completion after totals shrink', () => {
-    const mile = { ...leg, distanceM: 1609.344 };
+    const mile = { ...leg, distanceM: 1609.344, towns: [{ name: 'B', atM: 1609.344 }] };
     expect(routeLegs({ measureId: 'steps', legs: [mile], points: [['2026-11-02', 2000]] })).toHaveLength(1);
     expect(routeLegs({ measureId: 'walk.meters', legs: [mile], points: [['2026-11-02', 1000]] })).toEqual([]);
     const candidate = routeLegs({ measureId: 'steps', legs: [mile], points: [['2026-11-02', 2000]] })[0]!;
     const view = routeView('steps', { legs: [mile] }, [['2026-11-03', 10]],
       [{ ...candidate, id: 'award', createdAt: new Date('2026-11-02'), seenAt: null }])!;
     expect(view.progress).toBe(1); expect(view.finishedOn).toBe('2026-11-02');
+    expect(view.here).toMatchObject({ x: view.towns[0].x, y: view.towns[0].y });
     expect(view.completed).toEqual([{ name: 'A to B', finishedOn: '2026-11-02' }]);
     expect(view.goalPicked).toBe(false);
     expect(view.map).toMatch(/^\/api\/game\/v1\/progress\/map\?/u);

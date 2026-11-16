@@ -3,12 +3,13 @@ import { BANK } from "./bank";
 import { roundTotals, ladderRungs } from "./achievements";
 import { achievementContext, measureView } from "./view";
 import { cumulativePoints, type MeasureSeries } from "./series";
-import { patchMeasureState, type MeasureState, type BeforeProgressMutation } from "./state";
-import { firstRouteId, routePlaces, routeLegs, routeView } from "./routes";
+import type { MeasureState, BeforeProgressMutation } from "./state";
+import { firstRouteId, routePlaces, routeLegs, routeView, setFirstRoute } from "./routes";
 import { resolveRoute } from "./mapbox";
 import { healthSums } from "./health";
 import type { HealthMetricInput } from "./health-view";
 import type { StoredAward } from "./awards";
+import { formatNumber } from "./format";
 
 /** The shared ladder and route owners consume the same retained health amounts. */
 export async function healthJourneys(input: {
@@ -29,9 +30,7 @@ export async function healthJourneys(input: {
     const route = BANK.find(entry => entry.id === firstRouteId(input.timeZone))!;
     const places = routePlaces(route.name)!;
     const leg = await resolveRoute(places.from, places.to);
-    const state = await patchMeasureState(input.memberId, "steps", previous => ({
-      legs: previous.legs?.length ? previous.legs : [{ ...leg, startTotal: 0 }],
-    }), input.beforeMutationTx);
+    const state = await setFirstRoute(input.memberId, "steps", leg, input.beforeMutationTx);
     input.states.set("steps", state);
   }
   const context = achievementContext(measures, input.states, []);
@@ -49,7 +48,7 @@ export function healthJourneyViews(journeys: Awaited<ReturnType<typeof healthJou
     if (route && measure.id === "steps") route.walkedText = `about ${route.walkedText}`;
     return { ...view, source: "wearable" as const, route,
       total: measure.id === "sleep" && view.total.value >= 86400
-        ? { ...view.total, text: `${(view.total.value / 86400).toLocaleString("en-US", { maximumFractionDigits: 1 })} days` }
+        ? { ...view.total, text: `${formatNumber(view.total.value / 86400, "full", 1)} days` }
         : view.total };
   });
 }

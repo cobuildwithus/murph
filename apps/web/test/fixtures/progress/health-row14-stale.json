@@ -274,7 +274,13 @@
       ],
       "next": {
         "title": "Next",
-        "detail": "71 bpm"
+        "detail": "71 bpm",
+        "face": {
+          "delta": {
+            "icon": "heart",
+            "text": "↓3"
+          }
+        }
       },
       "age": {
         "percentile": 34,

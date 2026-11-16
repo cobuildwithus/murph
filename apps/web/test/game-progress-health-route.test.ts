@@ -68,8 +68,10 @@ it("returns private uncached health with raw baseline and all crossed levels", a
   const response = await GET(request());
   expect(response.status).toBe(200);
   expect(response.headers.get("cache-control")).toBe("private, no-store");
-  expect(await response.json()).toMatchObject({ joinedOn, today,
-    metrics: [expect.objectContaining({ id: "restingHeartRate", baseline: { value: 74, text: "74", unit: "bpm" } }),
+  expect(healthSchema.parse(await response.json())).toMatchObject({ joinedOn, today,
+    metrics: [expect.objectContaining({ id: "restingHeartRate", baseline: { value: 74, text: "74", unit: "bpm" },
+      next: { title: "Next win", detail: "73 bpm", face: { delta: { icon: "heart", text: "↓1" } } },
+      age: expect.objectContaining({ typical: expect.objectContaining({ unit: "bpm", value: expect.any(Number) }) }) }),
       expect.any(Object), expect.any(Object), expect.any(Object)] });
   expect(mocks.patch).toHaveBeenCalledWith("ava", "restingHeartRate",
     { baseline: { value: 74, from: "2026-09-23", to: "2026-10-20" } }, expect.any(Function));
@@ -77,6 +79,14 @@ it("returns private uncached health with raw baseline and all crossed levels", a
   expect(candidates.filter((award: { kind: string }) => award.kind === "health").map((award: { data: { level: number } }) => award.data.level))
     .toEqual([1, 2, 3]);
   expect(mocks.authority).toHaveBeenCalledWith({ memberId: "ava", prisma: { transaction: true } });
+});
+
+it("serves curated recommendation glyphs on a flat metric without model work", async () => {
+  const raw = snapshot();
+  raw.numbers.restingHeartRate.daily = raw.numbers.restingHeartRate.daily.map(point => ({ ...point, value: 74 }));
+  mocks.raw.mockResolvedValue(raw);
+  const body = healthSchema.parse(await (await GET(request())).json());
+  expect(body.recs).toEqual([expect.objectContaining({ id: "cardio", category: "move", icon: "heart" })]);
 });
 
 it("authority lost at baseline commit prevents settlement", async () => {

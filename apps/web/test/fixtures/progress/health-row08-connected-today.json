@@ -138,7 +138,13 @@
       "wins": [],
       "next": {
         "title": "Resting HR down to 71",
-        "detail": "now 72"
+        "detail": "now 72",
+        "face": {
+          "delta": {
+            "icon": "heart",
+            "text": "↓1"
+          }
+        }
       },
       "age": null
     },
@@ -275,7 +281,13 @@
       "wins": [],
       "next": {
         "title": "Steps up to 8,400 a day",
-        "detail": "now 7,400"
+        "detail": "now 7,400",
+        "face": {
+          "delta": {
+            "icon": "steps",
+            "text": "+1,000"
+          }
+        }
       },
       "age": null
     },
@@ -412,7 +424,13 @@
       "wins": [],
       "next": {
         "title": "Sleep up to 7h 20",
-        "detail": "now 7h 05"
+        "detail": "now 7h 05",
+        "face": {
+          "delta": {
+            "icon": "sleep",
+            "text": "+15m"
+          }
+        }
       },
       "age": null
     },
@@ -549,7 +567,13 @@
       "wins": [],
       "next": {
         "title": "VO2 max up to 37",
-        "detail": "now 36"
+        "detail": "now 36",
+        "face": {
+          "delta": {
+            "icon": "vo2Max",
+            "text": "37"
+          }
+        }
       },
       "age": null
     }

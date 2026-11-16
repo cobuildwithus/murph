@@ -130,3 +130,35 @@ Updated: 2026-11-16
   this plan active while the broad verification hold and integration remain.
 - Changelog: integrated native Progress release owns the member-facing entry;
   these backend routes alone have no shipped client caller.
+
+## Fix round 2
+
+- Outcome: finish Health medal faces, age medians, recommendation icons, sleep
+  wording and route positions at the existing owners. Reaches: health pills,
+  Try next, Sleep journeys, Steps routes, route cards and drawers.
+- Recorded BE3 base: `7eebc8b515ba0179ffed1fe7a064c12c00043d02`. Rebased only
+  the two commits after the old base, restoring original BE2-owned files that
+  had lived in that base. Kept reviewed BE1/BE3 owners and their fixes.
+- Required wire additions: `HealthMetric.next.face`, `Rec.icon`, `Route.here`.
+  Also `Route.drawerHere`: row 07's drawer uses a different image aspect from
+  row 04's card, just as `drawerTowns` already does. All are derived response
+  fields; earned face content remains under existing sealed award ownership.
+- `HealthMetric.age.typical` is now populated for every supported age table.
+  Sleep still has no norms. `projection.on` remains BE1's shared projection.
+- Shared formatting keeps health labels full below 10,000 (including +2,000);
+  the smaller +2k illustration yields to D20. Sleep is duration, not a score.
+- One `healthMedalFace` builds earned and next faces; rec glyphs are literals in
+  the existing curated recommendations. No additional tables, endpoints, flags
+  or registries. Map progress reads canonical settled Steps and the same
+  retained join-date sums, with live health authority before image rendering.
+- Proof: focused Progress, companion, group-store and Home tests: 636 passed,
+  14 skipped (PostgreSQL opt-in), exit 0. The separate isolated PostgreSQL
+  proof ran all 14 tests, exit 0; migration setup and database drop also exit 0.
+  Web `typecheck:prepared` and complexity checks exit 0. Broad diff verification
+  and the final rebase after BE3 merges are in progress.
+- Product UX: Ready at the backend boundary for improving, declining, missing
+  demographics, phone-only Steps, private friends and corrected route totals.
+  Table tests cover cut-point coordinates at zero, partial and completed routes
+  for both viewports; route contracts cover Steps source and authority loss.
+  Existing presentation fixtures remain illustrations, not D5 scoring evidence.
+- ReviewGPT and merge remain explicitly owned by the integrator.

@@ -6173,6 +6173,21 @@ results for the same metric, value, demographics and source inputs; no member
 data is used. Recommendations are the fixed map in `health.ts` and appear only
 for a sufficiently observed flat or worsening metric.
 
+Health labels use `progress/format.ts`, including full digits below 10,000,
+clock-style sleep amounts and one-decimal VO2 values. `healthMedalFace` owns
+both earned and next faces. Age `typical` is the median cutoff from the same
+age, sex and device table as the percentile. Recommendations carry a fixed
+glyph from the contract's closed list, assigned in the existing curated map.
+These response fields add no stored state; earned faces stay sealed in award
+content under the classification below.
+
+The Steps map reads `readCompanionHealthSeries` and `healthSums`, exactly as the
+Health page does, and rechecks health authority before rendering. It never
+adds game Steps or measured walk distance. Route `here` and `drawerHere` are
+derived unit image coordinates from the same geometry cut and respective
+viewports as the card and drawer PNGs; neither is persisted. Sleep journeys
+retain the shared `projection()` result, including its nullable `on` date.
+
 The following nested fields are encrypted content under the existing Progress
 owners; no additional table or plaintext private field is introduced:
 
