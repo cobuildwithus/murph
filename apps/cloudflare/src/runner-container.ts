@@ -2503,6 +2503,11 @@ export class RunnerContainer extends Container {
       && this.currentContainerStart !== null
     )
       && this.recordCurrentContainerStopped();
+    const expectedStop = cleanExit || (
+      params.exitCode === 137
+      && stopClassification === "requested-nonzero-stop"
+      && lifecycleDetails.destroyRequestReason === "invoke-completed"
+    );
     emitHostedExecutionStructuredLog({
       component: "container",
       details: {
@@ -2514,11 +2519,11 @@ export class RunnerContainer extends Container {
         stopClassification,
         stopReason: params.reason,
       },
-      level: cleanExit ? "info" : "warn",
-      message: cleanExit
+      level: expectedStop ? "info" : "warn",
+      message: expectedStop
         ? "Hosted execution container lifecycle hook reported stop."
         : "Hosted execution container lifecycle hook reported non-zero stop.",
-      phase: cleanExit ? "container.ready" : "failed",
+      phase: expectedStop ? "container.ready" : "failed",
       userId: context?.userId,
     });
   }
