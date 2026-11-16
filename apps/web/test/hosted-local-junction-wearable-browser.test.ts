@@ -255,10 +255,10 @@ describe("hosted-local Junction wearable browser authorization", () => {
 
   it.each([
     ["https://private-subdomain.garmin.com/partner/oauthConfirm?token=private#private", "garmin.com/partner_consent"],
-    ["https://connect.garmin.com/oauth2Confirm?client_id=private#private", "garmin.com/oauth2_consent"],
+    ["https://connect.garmin.com/partner/oauth2Confirm?client_id=private#private", "garmin.com/oauth2_consent"],
     ["https://connect.garmin.com/partner/8c6f2d1e-4b7a-4f3e-9a10-2f5d7c3b9e41", "garmin.com/other:/partner/:id"],
     ["https://connect.garmin.com/modern/consent?token=private", "garmin.com/other:/modern/consent"],
-    ["https://connect.garmin.com/partner/oauth2Confirm?code=private", "garmin.com/other:/partner/oauth2Confirm"],
+    ["https://connect.garmin.com/oauth2Confirm?code=private", "garmin.com/other:/oauth2Confirm"],
     ["https://connect.garmin.com/consent/a1b2c3", "garmin.com/other:/consent/:id"],
     ["https://connect.garmin.com/user/123456/consent", "garmin.com/other:/user/:id/consent"],
     ["https://connect.garmin.com/a/b/c/d/e/f", "garmin.com/other"],
@@ -1047,7 +1047,7 @@ describe("hosted-local Junction wearable browser authorization", () => {
     ["read", "/partner/oauthConfirm"],
     ["fill", "/partner/oauthConfirm"],
     ["unchanged", "/partner/oauthConfirm"],
-    ["none", "/oauth2Confirm"],
+    ["none", "/partner/oauth2Confirm"],
   ] as const)(
     "completes Garmin consent after a login-field transition (%s) on %s",
     async (transition, consentPath) => {

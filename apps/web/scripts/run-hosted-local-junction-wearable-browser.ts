@@ -100,9 +100,9 @@ const PROVIDER_AUTHORIZATION_DOMAINS = {
 const REQUIRED_CONSENT_PATTERN = /\b(?:authorization|required|privacy|terms)\b/iu;
 const OPTIONAL_MARKETING_PATTERN = /\b(?:marketing|newsletter|offers?|promotions?)\b/iu;
 const GARMIN_PARTNER_CONSENT_CHECKBOX_COUNT = 3;
-// Garmin serves the same three-box consent on its OAuth 1 partner route and
-// its OAuth 2 route.
-const GARMIN_PARTNER_CONSENT_PATHS = new Set(["/partner/oauthConfirm", "/oauth2Confirm"]);
+// Since 2026-11-02 Garmin serves the same three-box consent on its OAuth 2
+// partner route; the OAuth 1 route stays accepted while it is still served.
+const GARMIN_PARTNER_CONSENT_PATHS = new Set(["/partner/oauthConfirm", "/partner/oauth2Confirm"]);
 const PROVIDER_AUTOMATION_BLOCKED_GRACE_MS = 15_000;
 const KERNEL_TUNNEL_SETUP_TIMEOUT_MS = 60_000;
 const KERNEL_TUNNEL_STOP_GRACE_MS = 5_000;
@@ -1495,7 +1495,7 @@ function safePageLocation(page: Pick<Page, "url"> | null): string {
       ? "other"
       : url.pathname === "/partner/oauthConfirm"
         ? "partner_consent"
-        : url.pathname === "/oauth2Confirm"
+        : url.pathname === "/partner/oauth2Confirm"
           ? "oauth2_consent"
           : garminRouteShape(url.pathname);
     return `${host}/${route}`;
