@@ -2900,9 +2900,9 @@ function isJunctionSleepStageCycleFallbackObservation(record: EventRecord): bool
  * one session. Every session a source sends for the same start and end names
  * that record, and before session refs each of them wrote it, so it holds the
  * values of the last one. The session whose values it holds takes it over (the
- * first in the import when none or several do), so a member edit stays over the
- * values it was made on; the others resolve by their own session refs, as they
- * would in an empty vault. After that the session ref owns the record, and a
+ * first in the import when none or several do), through that session's first
+ * event in the import, so a member edit stays over the values it was made on;
+ * the others resolve by their own session refs, as they would in an empty vault. After that the session ref owns the record, and a
  * window ref can only name a stale copy left by an earlier rewrite of the
  * session's start or end, which must not turn the import into an ambiguous
  * merge of two live records.
@@ -3398,11 +3398,28 @@ function holdsLegacyProviderContent({ entry, indexedMatch }: LegacyExternalRefRe
     === eventContentKey(indexedMatch.indexedRecord, { includeProviderAttribution: false });
 }
 
+/**
+ * Which claim of a shared sleep window record holds it (see
+ * isSupersededJunctionSleepWindowRef): the session of the first claim whose
+ * values the record holds, else of the first claim, and that session's first
+ * claim in the import, so a later claim never displaces its own session.
+ */
+function selectSleepWindowOwnerClaim(
+  claims: readonly LegacyExternalRefReservation[],
+): LegacyExternalRefReservation | undefined {
+  const sessionOf = (claim: LegacyExternalRefReservation | undefined) =>
+    claim?.entry.record.externalRef && eventExternalRefKey(claim.entry.record.externalRef);
+  const ownerSession = sessionOf(claims.find(holdsLegacyProviderContent) ?? claims[0]);
+  return claims.find((claim) => sessionOf(claim) === ownerSession);
+}
+
 function buildLegacyExternalRefReservations(
   entries: readonly PreparedDeviceEventEntry[],
   index: EventExternalRefIndex,
 ): Map<string, LegacyExternalRefReservation> {
   const reservations = new Map<string, LegacyExternalRefReservation>();
+  // Every claim on a shared sleep window record is in before one holds it.
+  const sleepWindowClaims = new Map<string, LegacyExternalRefReservation[]>();
 
   const reserve = (
     entry: PreparedDeviceEventEntry,
@@ -3410,16 +3427,15 @@ function buildLegacyExternalRefReservations(
     indexedMatch: IndexedEventExternalRefMatch,
     sharedSleepWindow = false,
   ): void => {
+    if (sharedSleepWindow) {
+      sleepWindowClaims.set(refKey, [
+        ...(sleepWindowClaims.get(refKey) ?? []),
+        { entry, indexedMatch },
+      ]);
+      return;
+    }
     const existing = reservations.get(refKey);
     if (existing && existing.entry !== entry) {
-      if (sharedSleepWindow) {
-        // See isSupersededJunctionSleepWindowRef for which session keeps it.
-        const claim = { entry, indexedMatch };
-        if (!holdsLegacyProviderContent(existing) && holdsLegacyProviderContent(claim)) {
-          reservations.set(refKey, claim);
-        }
-        return;
-      }
       const externalRef = indexedMatch.indexedExternalRef;
       throw new VaultError(
         "EVENT_EXTERNAL_REF_ALIAS_CONFLICT",
@@ -3545,6 +3561,12 @@ function buildLegacyExternalRefReservations(
     }
   }
 
+  sleepWindowClaims.forEach((claims, refKey) => {
+    const owner = selectSleepWindowOwnerClaim(claims);
+    if (owner) {
+      reserve(owner.entry, refKey, owner.indexedMatch);
+    }
+  });
   return reservations;
 }
 

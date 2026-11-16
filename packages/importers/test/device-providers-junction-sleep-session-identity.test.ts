@@ -313,6 +313,52 @@ for (const reread of [[SESSION_A, SESSION_B], [SESSION_B, SESSION_A]]) {
   });
 }
 
+const STAGE_METRICS = [
+  "sleep-awake-minutes", "sleep-light-minutes", "sleep-deep-minutes", "sleep-rem-minutes",
+];
+
+function stageFacts(records: readonly Stored[]): string[] {
+  return records
+    .filter((record) => record.kind === "observation" && STAGE_METRICS.includes(String(record.metric)))
+    .map((record) => JSON.stringify([
+      record.metric,
+      (record.externalRef as { resourceId?: string } | undefined)?.resourceId,
+      record.value,
+    ]))
+    .sort();
+}
+
+// A session can also arrive twice in one import, with the same or different
+// values, beside another session for the same window.
+for (const reread of [
+  [SESSION_A, { ...SESSION_A, deep: 3000 }],
+  [{ ...SESSION_A, deep: 3000 }, SESSION_A],
+  [{ ...SESSION_B, deep: 2400 }, SESSION_A, SESSION_B],
+]) {
+  const label = reread.map((summary) => `${summary.id} ${summary.deep}s`).join(", ");
+  test(`a stored window record moves once, and the night ends as in an empty vault (${label})`, async () => {
+    let expected: string[] = [];
+    await withVault(async ({ importSummaries, readLive }) => {
+      await importSummaries("2026-01-02T13:00:00.000Z", { sleep: reread });
+      expected = stageFacts(await readLive());
+    });
+
+    await withVault(async ({ importSummaries, readLive }) => {
+      await importSummaries("2026-01-02T12:00:00.000Z", { sleep: BEFORE_SESSION_REFS });
+      const [stored] = metricRecords(await readLive(), "sleep-deep-minutes");
+      assert.ok(stored);
+
+      await importSummaries("2026-01-02T13:00:00.000Z", { sleep: reread });
+      const live = await readLive();
+      assert.deepEqual(stageFacts(live), expected);
+      assert.ok(metricRecords(live, "sleep-deep-minutes").some((record) => record.id === stored.id));
+
+      await importSummaries("2026-01-02T14:00:00.000Z", { sleep: reread.slice(-1) });
+      assert.deepEqual(await readLive(), live);
+    });
+  });
+}
+
 test("a stored window record the member deleted stays deleted, and each session imports anew", async () => {
   await withVault(async ({ deleteRecord, importSummaries, readLive }) => {
     await importSummaries("2026-01-02T12:00:00.000Z", { sleep: BEFORE_SESSION_REFS });
