@@ -203,6 +203,11 @@ async function resolveOperatorLinqDestination(input: {
  * Sends into the configured chat itself, so the page leaves from the line the
  * preflight just checked. Linq's recipient-only route picks its own chat and
  * line, which can differ from the one preflight approved.
+ *
+ * Linq answers a key whose message it has deleted or expired with 404 and
+ * never resends it, which strands a page that stayed pending after one chat
+ * accepted it. A 404 therefore earns one send under a key bound to this chat.
+ * A chat Linq cannot find 404s again, so that page still fails.
  */
 async function sendOperatorLinqMessage(input: {
   apiBaseUrl: string;
@@ -212,23 +217,13 @@ async function sendOperatorLinqMessage(input: {
   idempotencyKey: string;
   message: string;
 }): Promise<void> {
-  const body: MessageSendParams = {
-    message: {
-      idempotency_key: input.idempotencyKey,
-      parts: [
-        {
-          type: "text",
-          value: input.message,
-        },
-      ],
-    },
-  };
   try {
-    await createOperatorLinqClient(input, {
-      discardResponseBody: true,
-    }).chats.messages.send(input.chatId, body, {
-      headers: { "Idempotency-Key": input.idempotencyKey },
-    }).asResponse();
+    await postOperatorLinqMessage(input, input.idempotencyKey).catch(async (error: unknown) => {
+      if (readOperatorLinqErrorStatus(error) !== 404) {
+        throw error;
+      }
+      await postOperatorLinqMessage(input, `${input.idempotencyKey}:${input.chatId}`);
+    });
   } catch (error) {
     const status = readOperatorLinqErrorStatus(error);
     if (status !== null) {
@@ -240,6 +235,34 @@ async function sendOperatorLinqMessage(input: {
     }
     throw error;
   }
+}
+
+async function postOperatorLinqMessage(
+  input: {
+    apiBaseUrl: string;
+    apiToken: string;
+    chatId: string;
+    fetchImplementation: OperatorAlertFetch;
+    message: string;
+  },
+  idempotencyKey: string,
+): Promise<void> {
+  const body: MessageSendParams = {
+    message: {
+      idempotency_key: idempotencyKey,
+      parts: [
+        {
+          type: "text",
+          value: input.message,
+        },
+      ],
+    },
+  };
+  await createOperatorLinqClient(input, {
+    discardResponseBody: true,
+  }).chats.messages.send(input.chatId, body, {
+    headers: { "Idempotency-Key": idempotencyKey },
+  }).asResponse();
 }
 
 function readOperatorLinqErrorStatus(error: unknown): number | null {

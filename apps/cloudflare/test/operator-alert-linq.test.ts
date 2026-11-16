@@ -65,8 +65,8 @@ describe("operator Linq alert delivery", () => {
   });
 
   it.each([404, 422])("keeps a page Linq refuses with %i pending", async (status) => {
-    // A 404 here can be Linq's chat-not-found rejection, so it never counts as
-    // delivered without proof that this destination accepted the key before.
+    // A 404 can be Linq's chat-not-found rejection. Its one chat-bound resend
+    // 404s too, so the page never counts as delivered without an accepted send.
     const fetchImplementation = createHealthyChatsFetch(() =>
       new Response(null, { status })
     );
@@ -83,6 +83,53 @@ describe("operator Linq alert delivery", () => {
     expect(classifyOperatorLinqAlertFailure(failure)).toBe(
       "linq_rejected_response",
     );
+  });
+
+  it("resends a page whose key Linq deleted under one key bound to the chat", async () => {
+    // Linq never resends a deleted key's message and answers it with 404, so a
+    // page that stayed pending after delivery needs a fresh key to land again.
+    const sentKeys: string[] = [];
+    const fetchImplementation = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = new Request(input, init);
+      const url = new URL(request.url);
+      if (request.method === "GET" && url.pathname.endsWith("/phone_numbers")) {
+        return Response.json(createPhoneNumbersBody());
+      }
+      if (request.method === "GET") {
+        return Response.json(createDirectChatBody("+12025550123"));
+      }
+      const key = (await request.clone().json() as { message: { idempotency_key: string } })
+        .message.idempotency_key;
+      sentKeys.push(key);
+      expect(request.headers.get("idempotency-key")).toBe(key);
+      return new Response(null, { status: key === "operator-page-6" ? 404 : 202 });
+    });
+
+    await sendOperatorLinqAlert({
+      apiBaseUrl: "https://api.linqapp.test/api/partner/v3",
+      apiToken: "opaque-token",
+      chatIds: ["chat_primary"],
+      fetchImplementation,
+      idempotencyKey: "operator-page-6",
+      message: "Bounded operational evidence.",
+    });
+
+    expect(sentKeys).toEqual(["operator-page-6", "operator-page-6:chat_primary"]);
+  });
+
+  it("does not resend under a fresh key for a rejection other than 404", async () => {
+    const fetchImplementation = createHealthyChatsFetch(() => new Response(null, { status: 422 }));
+
+    await expect(sendOperatorLinqAlert({
+      apiBaseUrl: "https://api.linqapp.test/api/partner/v3",
+      apiToken: "opaque-token",
+      chatIds: ["chat_primary"],
+      fetchImplementation,
+      idempotencyKey: "operator-page-7",
+      message: "Bounded operational evidence.",
+    })).rejects.toThrow();
+    expect(fetchImplementation.mock.calls.filter(([input, init]) => new Request(input, init).method === "POST"))
+      .toHaveLength(1);
   });
 
   it("sends one page into the only configured chat", async () => {
