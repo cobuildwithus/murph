@@ -1863,7 +1863,7 @@ test('an organic same-route reply supersedes the exact-text signup welcome throu
   }
 })
 
-test('sendAssistantNotificationLocal derives hosted Linq deterministic delivery keys centrally', async () => {
+async function sendHostedLinqNotificationText(text: string) {
   const linqSession = createAssistantSession({
     binding: {
       actorId: 'actor-linq',
@@ -1882,11 +1882,11 @@ test('sendAssistantNotificationLocal derives hosted Linq deterministic delivery 
     response: JSON.stringify({
       kind: 'send_message',
       privateSummary: 'summary',
-      text: 'Hosted Linq notification',
+      text,
     }),
     session: linqSession,
   })
-  const deliverMessage = vi.fn(async () => ({
+  const deliverMessage = vi.fn(async (_input: Record<string, unknown>) => ({
     delivery: null,
     intent: {
       intentId: 'intent-hosted-linq-notification',
@@ -2014,14 +2014,44 @@ test('sendAssistantNotificationLocal derives hosted Linq deterministic delivery 
     vault: '/vaults/test',
   })
 
-  expect(deliverMessage).toHaveBeenCalledWith(
+  return deliverMessage.mock.calls.map(([call]) => call)
+}
+
+test('sendAssistantNotificationLocal derives hosted Linq deterministic delivery keys centrally', async () => {
+  const calls = await sendHostedLinqNotificationText('Hosted Linq notification')
+
+  expect(calls).toEqual([
     expect.objectContaining({
       channel: 'linq',
       deliveryIdempotencyKey: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
       deliveryTransportIdempotent: true,
+      message: 'Hosted Linq notification',
     }),
-  )
+  ])
 })
+
+test('sendAssistantNotificationLocal sends each --- bubble of a Linq notification as its own message', async () => {
+  const calls = await sendHostedLinqNotificationText(
+    'Sleep held steady all week.\n---\nRecovery bounced back by Sunday.',
+  )
+
+  expect(calls.map((call) => call.message)).toEqual([
+    'Sleep held steady all week.',
+    'Recovery bounced back by Sunday.',
+  ])
+  const finalKey = String(calls[1]!.deliveryIdempotencyKey)
+  expect(finalKey).toMatch(/^sha256:[0-9a-f]{64}$/u)
+  expect(calls[0]).toEqual(expect.objectContaining({
+    answeredMailboxItemIds: [],
+    dedupeToken: `${finalKey}:bubble:0`,
+    deliveryIdempotencyKey: `${finalKey}:bubble:0`,
+    deliveryTransportIdempotent: true,
+  }))
+  expect(calls[1]).toEqual(expect.objectContaining({
+    deliveryTransportIdempotent: true,
+  }))
+})
+
 
 test('sendAssistantNotificationLocal derives hosted notification keys from resolved delivery target', async () => {
   const linqSession = createAssistantSession({
@@ -4990,6 +5020,71 @@ test('sendAssistantNotificationLocal abandons queued delivery when deferred comm
       providerStop: true,
     },
   )
+})
+
+test('sendAssistantNotificationLocal abandons every queued bubble when deferred commit fails', async () => {
+  const providerSession = createAssistantSession({
+    binding: {
+      actorId: 'actor-linq-bubbles',
+      channel: 'linq',
+      conversationKey: null,
+      delivery: { kind: 'thread', target: 'thread-linq-bubbles' },
+      identityId: 'identity-linq-bubbles',
+      threadId: 'thread-linq-bubbles',
+      threadIsDirect: true,
+    },
+  })
+  const providerResult = createProviderResult({
+    response: JSON.stringify({
+      kind: 'send_message',
+      privateSummary: 'Queued two-bubble recap.',
+      text: 'Sleep held steady.\n---\nRecovery bounced back.',
+    }),
+    session: providerSession,
+  })
+  const { deliverMessage, mocks, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-notification-deferred-bubbles-commit-failure',
+    })
+  for (const intentId of ['intent-bubble-first', 'intent-bubble-final']) {
+    deliverMessage.mockResolvedValueOnce({
+      delivery: null,
+      deliveryError: null,
+      intent: { intentId },
+      kind: 'queued',
+      session: providerSession,
+    })
+  }
+  const commitError = new Error('durable notification commit failed')
+  mocks.persistAssistantTurnAndSession.mockRejectedValueOnce(commitError)
+
+  await expect(
+    sendAssistantNotificationLocal({
+      deferCommitUntilDeliveryAccepted: true,
+      deliveryDispatchMode: 'queue-only',
+      executionContext: {
+        hosted: null,
+      },
+      instructions: 'Queue this scheduled recap.',
+      vault: '/vaults/deferred-bubbles-commit-failure',
+    }),
+  ).rejects.toBe(commitError)
+
+  expect(deliverMessage).toHaveBeenCalledTimes(2)
+  expect(deliverMessage).toHaveBeenNthCalledWith(1, expect.objectContaining({
+    message: 'Sleep held steady.',
+  }))
+  expect(deliverMessage).toHaveBeenNthCalledWith(2, expect.objectContaining({
+    message: 'Recovery bounced back.',
+  }))
+  expect(mocks.markAssistantOutboxIntentMirrorTerminalById).toHaveBeenCalledTimes(2)
+  for (const [index, intentId] of ['intent-bubble-first', 'intent-bubble-final'].entries()) {
+    expect(mocks.markAssistantOutboxIntentMirrorTerminalById).toHaveBeenNthCalledWith(
+      index + 1,
+      expect.objectContaining({ intentId, status: 'abandoned' }),
+    )
+  }
 })
 
 test('sendAssistantNotificationLocal keeps a queued model reply when the terminal diagnostic write fails', async () => {

@@ -83,11 +83,19 @@ import type {
   ResolvedAssistantSession,
 } from './service-contracts.js'
 import {
+  buildAssistantReplyBubbleDeliveryIdempotencyKey,
   dropUnsupportedAssistantResponseMediaForChannel,
   finalizeAssistantTurnFromDeliveryOutcome,
   resolveAssistantCurrentAudienceDeliveryFields,
   resolveAssistantHostedDeliveryIdempotency,
+  resolveHostedAssistantDeliveryTransportIdempotentOverride,
 } from './delivery-service.js'
+import {
+  assistantChannelSupportsReplyBubbles,
+  placeAssistantResponseMediaInReplyBubbles,
+  splitAssistantReplyBubbles,
+  stripAssistantReplyBubbleDelimiters,
+} from './reply-bubbles.js'
 import { normalizeAssistantResponseMediaList } from './response-media.js'
 import {
   hasAssistantSeenFirstContact,
@@ -1351,13 +1359,17 @@ async function abandonQueuedNotificationDeliveryAfterCommitFailure(input: {
     return
   }
 
-  await markAssistantOutboxIntentMirrorTerminalById({
-    error: input.error,
-    intentId: input.deliveryOutcome.intentId,
-    onlyCurrentStatuses: ['pending', 'retryable', 'awaiting_approval'],
-    status: 'abandoned',
-    vault: input.vault,
-  })
+  for (const intentId of input.deliveryOutcome.bubbleIntentIds ?? [
+    input.deliveryOutcome.intentId,
+  ]) {
+    await markAssistantOutboxIntentMirrorTerminalById({
+      error: input.error,
+      intentId,
+      onlyCurrentStatuses: ['pending', 'retryable', 'awaiting_approval'],
+      status: 'abandoned',
+      vault: input.vault,
+    })
+  }
 }
 
 function assistantNotificationDeliveryAcceptedFirstContact(input: {
@@ -1725,11 +1737,21 @@ async function deliverAssistantNotificationMessage(input: {
     channel: deliveryFields.channel,
     media: requestedMedia,
   })
-  const outcome = await state.outbox.deliverMessage({
-    answeredMailboxItemIds: input.input.answeredMailboxItemIds ?? [],
+  // Scheduled turns get the same `---` texting-rhythm prompt as replies, so
+  // they split into bubbles the same way `deliverAssistantReply` does.
+  const bubbles =
+    input.card || !assistantChannelSupportsReplyBubbles(deliveryFields.channel)
+      ? [input.message]
+      : input.input.reviewedAssistantAskCompletionExpiresAt
+        ? [stripAssistantReplyBubbleDelimiters(input.message)]
+        : splitAssistantReplyBubbles(input.message)
+  const bubbleMedia = placeAssistantResponseMediaInReplyBubbles({
+    bubbleCount: bubbles.length,
+    media,
+  })
+  const sharedFields = {
     reviewedAssistantAskCompletionExpiresAt:
       input.input.reviewedAssistantAskCompletionExpiresAt ?? null,
-    followUpRequest: input.followUpRequest ?? undefined,
     followUpEvaluatedThrough: input.input.outboxFollowUpEvaluatedThrough,
     automationAuthority: input.input.outboxAutomationAuthority ?? null,
     automationContextReferences:
@@ -1739,23 +1761,87 @@ async function deliverAssistantNotificationMessage(input: {
     externalThreadRouteAuthority:
       input.input.outboxExternalThreadRouteAuthority ?? null,
     turnId: input.turnId,
-    message: input.message,
-    dedupeToken: input.dedupeToken,
-    deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
-    deliveryTransportIdempotent: hostedDelivery.deliveryTransportIdempotent,
     signal: input.input.abortSignal,
     ...deliveryFields,
     card: input.card ?? null,
-    media,
-    recapVideo: outboxRecapVideo(input.recapVideo),
-    ...(input.privateCompletionContinuitySessionId === undefined
-      ? {}
-      : {
-          privateCompletionContinuitySessionId:
-            input.privateCompletionContinuitySessionId,
-        }),
     dispatchMode: input.input.deliveryDispatchMode,
+  }
+  let session = input.session
+  const precedingIntentIds: string[] = []
+  for (let index = 0; index < bubbles.length - 1; index += 1) {
+    const bubbleKey = buildAssistantReplyBubbleDeliveryIdempotencyKey({
+      deliveryIdempotencyKey:
+        hostedDelivery.deliveryIdempotencyKey ?? input.dedupeToken,
+      index,
+      turnId: input.turnId,
+    })
+    const bubbleOutcome = toAssistantNotificationDeliveryOutcome({
+      media: bubbleMedia[index]!,
+      outcome: await state.outbox.deliverMessage({
+        ...sharedFields,
+        answeredMailboxItemIds: [],
+        message: bubbles[index]!,
+        media: bubbleMedia[index]!,
+        dedupeToken: bubbleKey,
+        deliveryIdempotencyKey: bubbleKey,
+        deliveryTransportIdempotent:
+          resolveHostedAssistantDeliveryTransportIdempotentOverride({
+            channel: deliveryFields.channel,
+            deliveryIdempotencyKey: bubbleKey,
+            executionContext: input.input.executionContext,
+            media: bubbleMedia[index]!,
+          }),
+      }),
+      session,
+    })
+    if (bubbleOutcome.kind === 'failed') {
+      return bubbleOutcome
+    }
+    if ('intentId' in bubbleOutcome && bubbleOutcome.intentId) {
+      precedingIntentIds.push(bubbleOutcome.intentId)
+    }
+    session = bubbleOutcome.session
+  }
+  const finalOutcome = toAssistantNotificationDeliveryOutcome({
+    media: bubbleMedia.at(-1)!,
+    outcome: await state.outbox.deliverMessage({
+      ...sharedFields,
+      answeredMailboxItemIds: input.input.answeredMailboxItemIds ?? [],
+      followUpRequest: input.followUpRequest ?? undefined,
+      message: bubbles.at(-1)!,
+      media: bubbleMedia.at(-1)!,
+      dedupeToken: input.dedupeToken,
+      deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
+      deliveryTransportIdempotent: hostedDelivery.deliveryTransportIdempotent,
+      recapVideo: outboxRecapVideo(input.recapVideo),
+      ...(input.privateCompletionContinuitySessionId === undefined
+        ? {}
+        : {
+            privateCompletionContinuitySessionId:
+              input.privateCompletionContinuitySessionId,
+          }),
+    }),
+    session,
   })
+  return finalOutcome.kind === 'queued' && precedingIntentIds.length > 0
+    ? {
+        ...finalOutcome,
+        bubbleIntentIds: [...precedingIntentIds, finalOutcome.intentId],
+        media: bubbleMedia.flat(),
+      }
+    : { ...finalOutcome, media: bubbleMedia.flat() }
+}
+
+function toAssistantNotificationDeliveryOutcome(input: {
+  media: AssistantResponseMedia[]
+  outcome: Awaited<
+    ReturnType<
+      ReturnType<typeof createAssistantRuntimeStateService>['outbox']['deliverMessage']
+    >
+  >
+  session: AssistantSession
+}): AssistantDeliveryOutcome {
+  const { media, outcome } = input
   switch (outcome.kind) {
     case 'sent':
       return {
