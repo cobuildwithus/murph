@@ -1,6 +1,6 @@
 # Steps and Sleep goal context and shared health input
 
-Status: active
+Status: completed
 Created: 2026-11-16
 Updated: 2026-11-16
 
@@ -39,7 +39,7 @@ proof remains with the iOS lane; this backend task does not claim it.
 1. Extract common health input and sum presentation; compose health goal context.
 2. Prove normalization, goal controls, authority and settlement invariants.
 3. Update architecture classification, record gates and exact native handoff.
-4. Review, commit, push and open a Ready PR with the explicit merge hold.
+4. Review, commit, push and open PR #5102 with the explicit merge hold; admit the final candidate to Ready CI.
 
 ## Verification
 
@@ -48,7 +48,14 @@ settled-step edits passed 107 tests across three affected suites, exit 0; the
 subsequent goal test-label cleanup passed all 20 cases, exit 0. PostgreSQL:
 15 tests, no skips, exit 0 through the existing receipt-validating runner against
 an isolated migrated loopback database. Web typecheck, complexity and docs drift
-passed, exit 0. Diff selector chose apps/web and is waiting for its shared slot.
+passed, exit 0. Changelog generation and its four archive render tests passed,
+exit 0. Diff selector chose apps/web and passed root syntax, guards, repository
+typecheck, dependency and workspace checks, then could not acquire the exclusive
+Web verifier slot for over ten minutes. Per the admission rule, the proven
+session-owned waiter was stopped: test:diff exit 1 (blocked, not passed). No SSH
+worker host/account is configured for fallback. Focused proof above is complete;
+exact-head CI owns the remaining broad proof. The isolated test database was
+removed after its successful run.
 
 Synthetic sequential Health/Progress refresh timing (mock replica/provider I/O):
 cold first-route 17.81/20.56 ms health/total; saved route 3.08/3.96 ms; route
@@ -63,3 +70,6 @@ ReviewGPT is explicitly delegated to the integrator; do not run or merge here.
 ## Deviations
 
 None. Existing wire/state owners cover the screens; all native edits excluded.
+Verification limitation: canonical local diff check blocked at shared-host admission.
+No source or workflow workaround was introduced.
+Completed: 2026-11-16
