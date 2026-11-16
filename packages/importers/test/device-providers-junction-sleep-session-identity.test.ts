@@ -329,13 +329,17 @@ function stageFacts(records: readonly Stored[]): string[] {
 }
 
 // A session can also arrive twice in one import, with the same or different
-// values, beside another session for the same window.
+// values, beside another session for the same window. Its first copy can carry
+// a rewritten end, so only its second copy names the stored window.
 for (const reread of [
   [SESSION_A, { ...SESSION_A, deep: 3000 }],
   [{ ...SESSION_A, deep: 3000 }, SESSION_A],
   [{ ...SESSION_B, deep: 2400 }, SESSION_A, SESSION_B],
+  [sleepSummary(REWRITTEN_END, { ...GOOGLE_HEALTH, id: "gh-sleep-a", deep: 3000 }), SESSION_A],
 ]) {
-  const label = reread.map((summary) => `${summary.id} ${summary.deep}s`).join(", ");
+  const label = reread
+    .map((summary) => `${summary.id} ${summary.deep}s to ${summary.bedtime_stop.slice(11, 16)}`)
+    .join(", ");
   test(`a stored window record moves once, and the night ends as in an empty vault (${label})`, async () => {
     let expected: string[] = [];
     await withVault(async ({ importSummaries, readLive }) => {
@@ -354,6 +358,95 @@ for (const reread of [
       assert.ok(metricRecords(live, "sleep-deep-minutes").some((record) => record.id === stored.id));
 
       await importSummaries("2026-01-02T14:00:00.000Z", { sleep: reread.slice(-1) });
+      assert.deepEqual(await readLive(), live);
+    });
+  });
+}
+
+test("a session whose copies name two stored windows moves one, and the other keeps its note", async () => {
+  await withVault(async ({ editNote, importSummaries, readLive }) => {
+    // Before session refs, a rewritten end left a second window record.
+    await importSummaries("2026-01-02T12:00:00.000Z", {
+      sleep: [sleepSummary(FIRST_END, { ...GOOGLE_HEALTH, id: undefined })],
+    });
+    const [firstWindow] = metricRecords(await readLive(), "sleep-deep-minutes");
+    assert.ok(firstWindow);
+    await editNote(firstWindow, "Woke up twice");
+    await importSummaries("2026-01-02T12:30:00.000Z", {
+      sleep: [sleepSummary(REWRITTEN_END, { ...GOOGLE_HEALTH, id: undefined })],
+    });
+    const rewrittenWindow = metricRecords(await readLive(), "sleep-deep-minutes")
+      .find((record) => record.id !== firstWindow.id);
+    assert.ok(rewrittenWindow);
+
+    // Session a holds the first window's values but names the rewritten one first.
+    const batch = [SESSION_B, sleepSummary(REWRITTEN_END, { ...GOOGLE_HEALTH, id: "gh-sleep-a" }), SESSION_A];
+    await importSummaries("2026-01-02T13:00:00.000Z", { sleep: batch });
+
+    // Session a takes the window its first copy names. The first window stays
+    // as the member left it, and session b, which it doesn't hold, starts its own.
+    const live = await readLive();
+    const roleOf = (record: Stored) =>
+      record.id === firstWindow.id ? "first window" : record.id === rewrittenWindow.id ? "rewritten window" : "new";
+    assert.deepEqual(
+      metricRecords(live, "sleep-deep-minutes")
+        .map((record) => [
+          roleOf(record),
+          record.externalRef ? refPrefix(record) : "member edit",
+          record.value,
+          record.note ?? null,
+        ])
+        .sort(),
+      [
+        ["first window", "member edit", 60, "Woke up twice"],
+        ["new", "sleep-session", 50, null],
+        ["rewritten window", "sleep-session", 60, null],
+      ],
+    );
+
+    await importSummaries("2026-01-02T14:00:00.000Z", { sleep: batch });
+    assert.deepEqual(await readLive(), live);
+  });
+});
+
+// A summary without a start keys its stages on the generic summary ref, which a
+// complete copy of the same session also names. Whether that record is stored
+// or written earlier in the import, the session keeps it rather than also
+// taking the stored window record.
+const PARTIAL_A = sleepSummary(REWRITTEN_END, { ...GOOGLE_HEALTH, id: "gh-sleep-a", bedtime_start: undefined });
+for (const partialInBatch of [false, true]) {
+  test(`a session's first copy keeps the summary record it already reaches (partial ${partialInBatch ? "in the import" : "stored"})`, async () => {
+    await withVault(async ({ editNote, importSummaries, readLive }) => {
+      await importSummaries("2026-01-02T12:00:00.000Z", {
+        sleep: [sleepSummary(FIRST_END, { ...GOOGLE_HEALTH, id: undefined })],
+      });
+      const [storedWindow] = metricRecords(await readLive(), "sleep-deep-minutes");
+      assert.ok(storedWindow);
+      await editNote(storedWindow, "Woke up twice");
+      if (!partialInBatch) {
+        await importSummaries("2026-01-02T12:30:00.000Z", { sleep: [PARTIAL_A] });
+      }
+      const summaryRecord = metricRecords(await readLive(), "sleep-deep-minutes")
+        .find((record) => record.id !== storedWindow.id);
+      const batch = [
+        ...(partialInBatch ? [PARTIAL_A] : []),
+        sleepSummary(REWRITTEN_END, { ...GOOGLE_HEALTH, id: "gh-sleep-a" }),
+        SESSION_A,
+      ];
+
+      await importSummaries("2026-01-02T13:00:00.000Z", { sleep: batch });
+
+      const live = await readLive();
+      const deep = metricRecords(live, "sleep-deep-minutes");
+      assert.equal(deep.length, 2);
+      const kept = deep.find((record) => record.id === storedWindow.id);
+      assert.equal(kept?.note, "Woke up twice");
+      assert.equal(kept?.externalRef, undefined);
+      if (summaryRecord) {
+        assert.ok(deep.some((record) => record.id === summaryRecord.id));
+      }
+
+      await importSummaries("2026-01-02T14:00:00.000Z", { sleep: batch });
       assert.deepEqual(await readLive(), live);
     });
   });

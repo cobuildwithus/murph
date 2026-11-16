@@ -812,7 +812,11 @@ and authority exclusions separately. Pull frequency is unchanged by this feature
   only for a record that carries no session id. A superseded window ref moves a
   stored record across once, to one session: when an import holds several
   sessions for one window, the session whose values the record holds takes it
-  (the first when none or several do) and the others start their own. A record
+  (the first when none or several do) and the others start their own. The
+  window a session claims first moves through the session's first event in the
+  import, even when that copy names a rewritten window, but only in place of a
+  new record: an event that already reaches a record keeps it. Any other window
+  the session owns stays a stale copy, and no other session takes it. A record
   the member deleted stays deleted, and each session imports as a new record.
   Once the session owns a record, a window ref names at most a stale copy and
   must not merge two live records.

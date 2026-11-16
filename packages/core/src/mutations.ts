@@ -3399,18 +3399,51 @@ function holdsLegacyProviderContent({ entry, indexedMatch }: LegacyExternalRefRe
 }
 
 /**
- * Which claim of a shared sleep window record holds it (see
- * isSupersededJunctionSleepWindowRef): the session of the first claim whose
- * values the record holds, else of the first claim, and that session's first
- * claim in the import, so a later claim never displaces its own session.
+ * Which event holds each shared sleep window record (see
+ * isSupersededJunctionSleepWindowRef). The session of the first claim whose
+ * values the record holds owns it, else the session of the first claim, and
+ * that session's first claim in the import holds it. The window a session
+ * claims first moves through the session's first event instead, even when that
+ * event names another window: it writes the session's record, so no later copy
+ * leaves the stored record beside it. Any other window the session owns stays
+ * with its claim, which keeps other sessions off it and leaves it a stale copy
+ * once the session has its record.
  */
-function selectSleepWindowOwnerClaim(
-  claims: readonly LegacyExternalRefReservation[],
-): LegacyExternalRefReservation | undefined {
-  const sessionOf = (claim: LegacyExternalRefReservation | undefined) =>
-    claim?.entry.record.externalRef && eventExternalRefKey(claim.entry.record.externalRef);
-  const ownerSession = sessionOf(claims.find(holdsLegacyProviderContent) ?? claims[0]);
-  return claims.find((claim) => sessionOf(claim) === ownerSession);
+function selectSleepWindowOwners(
+  claimsByRefKey: ReadonlyMap<string, readonly LegacyExternalRefReservation[]>,
+  entries: readonly PreparedDeviceEventEntry[],
+): Map<string, LegacyExternalRefReservation> {
+  const owners = new Map<string, LegacyExternalRefReservation>();
+  if (claimsByRefKey.size === 0) {
+    return owners;
+  }
+  const sessionOf = (entry: PreparedDeviceEventEntry | undefined) =>
+    entry?.record.externalRef && eventExternalRefKey(entry.record.externalRef);
+  const windowByHolder = new Map<PreparedDeviceEventEntry, { refKey: string } & LegacyExternalRefReservation>();
+  for (const [refKey, claims] of claimsByRefKey) {
+    const session = sessionOf((claims.find(holdsLegacyProviderContent) ?? claims[0])?.entry);
+    const holder = claims.find((claim) => sessionOf(claim.entry) === session);
+    if (holder) {
+      owners.set(refKey, holder);
+      windowByHolder.set(holder.entry, { ...holder, refKey });
+    }
+  }
+  const firstEntryBySession = new Map<string, PreparedDeviceEventEntry>();
+  const movedSessions = new Set<string>();
+  for (const entry of entries) {
+    const session = sessionOf(entry);
+    if (!session) {
+      continue;
+    }
+    const first = firstEntryBySession.get(session) ?? entry;
+    firstEntryBySession.set(session, first);
+    const window = windowByHolder.get(entry);
+    if (window && !movedSessions.has(session)) {
+      movedSessions.add(session);
+      owners.set(window.refKey, { entry: first, indexedMatch: window.indexedMatch });
+    }
+  }
+  return owners;
 }
 
 function buildLegacyExternalRefReservations(
@@ -3561,11 +3594,8 @@ function buildLegacyExternalRefReservations(
     }
   }
 
-  sleepWindowClaims.forEach((claims, refKey) => {
-    const owner = selectSleepWindowOwnerClaim(claims);
-    if (owner) {
-      reserve(owner.entry, refKey, owner.indexedMatch);
-    }
+  selectSleepWindowOwners(sleepWindowClaims, entries).forEach((owner, refKey) => {
+    reserve(owner.entry, refKey, owner.indexedMatch);
   });
   return reservations;
 }
@@ -4498,11 +4528,18 @@ function resolveDeviceEventIdentity(
       refKey: reservedRefKey,
       indexedMatch: reservation.indexedMatch,
     }));
-  const matchedEntries = [
+  // A window record handed to a session's first event (selectSleepWindowOwners)
+  // only stands in for a new record; it never joins a record the event reaches.
+  const isWindowHandoff = (match: { indexedMatch: IndexedEventExternalRefMatch }) =>
+    isSupersededJunctionSleepWindowRef(match.indexedMatch.indexedExternalRef, externalRef);
+  const directMatches = [
     ...(primaryMatch ? [{ refKey, indexedMatch: primaryMatch }] : []),
     ...legacyMatchedEntries,
-    ...implicitReservedEntries,
+    ...implicitReservedEntries.filter((match) => !isWindowHandoff(match)),
   ];
+  const matchedEntries = directMatches.length > 0
+    ? directMatches
+    : implicitReservedEntries.filter(isWindowHandoff);
   const selectedPrimaryMatch = matchedEntries.find((match) => match.refKey === refKey);
   const latest = selectedPrimaryMatch?.indexedMatch.record ?? matchedEntries[0]?.indexedMatch.record;
   let associationSafe = true;
