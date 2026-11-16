@@ -89,6 +89,20 @@ describe('game dynamic tools', () => {
     for (const [name, guidance] of Object.entries(blocks)) expect(text.split(guidance), name).toHaveLength(carries.includes(name) ? 2 : 1)
   })
 
+  it('returns recent own-message consent guidance without current-turn-only rules', async () => {
+    const request = parse('read_game', { messageRef: inputId })!
+    const result = await executeMurphDynamicToolRequest({ request, hostedToolContext: { ...context(), groupTool: { request: async () => parseHostedRuntimeGroupToolResponse({ action: 'read_game', result: { status: 'ok', state: { games: [chatGame({ status: 'negotiating' }), chatGame({ id: 'game_group', maxPlayers: 10, pendingInviteeCount: 1 })] } } }) } }, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
+    const guidance = result.rpcResult.contentItems[0]?.text ?? ''
+    expect(guidance).toContain('last 24 hours')
+    expect(guidance).toContain('even though it came before the ask')
+    expect(guidance).toContain("Another player's account")
+    expect(guidance).not.toMatch(/act only for the player whose message you are answering|it is not a yes and changes nothing|requests from earlier messages/)
+    for (const tool of [MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL, MURPH_GAME_PHOTO_TOOL]) {
+      expect(tool.inputSchema.properties.messageRef.description).toContain('last 24 hours')
+      expect(tool.inputSchema.properties.messageRef.description).not.toContain('current message')
+    }
+  })
+
   it.each([
     { label: 'an accepted invitation', args: { operation: 'approve', gameId: 'game_synthetic', expectedTermsVersion: 1 }, result: { status: 'ok', state: { games: [chatGame()] } }, says: GAME_UPDATE_RESULT_GUIDANCE.joined },
     { label: 'a yes that applies an ask', args: approval, result: { status: 'ok', state: { games: [chatGame()] } }, says: GAME_UPDATE_RESULT_GUIDANCE.applied },
@@ -196,6 +210,15 @@ describe('game dynamic tools', () => {
     expect((await execute(approval)).rpcResult.success).toBe(true)
     expect(port).toHaveBeenCalledExactlyOnceWith({ action: 'update_game', origin, update: { operation: 'approve', gameId: approval.gameId, proposalId: approval.proposalId } })
   })
+  it.each(['read_game', 'update_game'] as const)('forwards an earlier same-chat message for %s', async tool => {
+    port.mockClear()
+    const earlierRef = 'ain_' + 'c'.repeat(32)
+    const request = parse(tool, tool === 'read_game' ? { messageRef: earlierRef } : { ...approval, messageRef: earlierRef })!
+    const result = await executeMurphDynamicToolRequest({ request, hostedToolContext: context(), env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
+    expect(result.rpcResult.success).toBe(true)
+    expect(port).toHaveBeenCalledExactlyOnceWith({ action: tool, origin: { kind: 'accepted_input', assistantInputId: earlierRef },
+      ...(tool === 'read_game' ? { includePlayers: true } : { update: { operation: 'approve', gameId: approval.gameId, proposalId: approval.proposalId } }) })
+  })
   it.each([
     { ...approval, actorMemberId: 'other' }, { ...approval, chatId: 'other' },
     { ...approval, operation: 'apply' }, { ...approval, change: { kind: 'start_now' } },
@@ -203,9 +226,9 @@ describe('game dynamic tools', () => {
   ])('rejects selectors or invalid operations %j', (args) => {
     expect(parse('update_game', args)?.kind).toBe('invalid-tool-arguments')
   })
-  it('rejects stale messages and direct contexts without forwarding', async () => {
+  it('requires current group input even when selecting an earlier message', async () => {
     port.mockClear()
-    expect((await execute({ ...approval, messageRef: 'old-input' })).rpcResult.success).toBe(false)
+    expect((await execute(approval, { ...context(), currentUserActionScope: () => ({ ...context().currentUserActionScope!()!, acceptedInputIds: [] }) })).rpcResult.success).toBe(false)
     expect((await execute(approval, { ...context(), currentUserActionScope: () => ({ conversationScope: 'direct', conversationId: 'synthetic-game-chat', inboundMailboxItemIds: [], recipientKey: 'synthetic-game-recipient', acceptedInputIds: [inputId], originSessionId: 'synthetic-game-session' }) })).rpcResult.success).toBe(false)
     expect(port).not.toHaveBeenCalled()
   })
@@ -573,13 +596,13 @@ describe('game photo dynamic contract', () => {
     await executeMurphDynamicToolRequest({ request, hostedToolContext: context(), env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
     expect(port).toHaveBeenCalledExactlyOnceWith({ action: 'read_game', origin, includePlayers: true })
   })
-  it('rejects a stale consent message without forwarding', async () => {
+  it('forwards an earlier same-chat consent message for server authorization', async () => {
     port.mockClear()
-    const request = parse('game_photo', { messageRef: 'old', operation: 'save', gameId: 'game_synthetic' })
+    const request = parse('game_photo', { messageRef: 'ain_' + 'c'.repeat(32), operation: 'save', gameId: 'game_synthetic' })
     if (!request) throw new Error('Expected photo request')
     const result = await executeMurphDynamicToolRequest({ request, hostedToolContext: context(), env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
-    expect(result.rpcResult.success).toBe(false)
-    expect(port).not.toHaveBeenCalled()
+    expect(result.rpcResult.success).toBe(true)
+    expect(port).toHaveBeenCalledExactlyOnceWith({ action: 'game_photo', origin: { kind: 'accepted_input', assistantInputId: 'ain_' + 'c'.repeat(32) }, photo: { operation: 'save', gameId: 'game_synthetic' } })
   })
   it('round-trips photo outcomes through the shared transport', () => {
     const request = { action: 'game_photo', origin, photo: { operation: 'offer', gameId: 'game_synthetic', sourceMessageRef: inputId, attachmentOrdinal: 1 } }

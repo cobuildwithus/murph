@@ -1,0 +1,16 @@
+{
+  "publishedOn": "2026-11-15",
+  "order": 200,
+  "item": {
+    "id": "game-recent-message-agreement",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Your earlier game request can count as your yes",
+    "summary": "Murph can use your own message from the last 24 hours in the game chat to act on a matching request, even if you wrote it before the change was proposed.",
+    "details": "Your words must clearly ask for or agree to that exact change. Someone else saying you agreed does not count; after 24 hours, Murph needs you to say it again.",
+    "relevanceTags": [
+      "games"
+    ],
+    "sourcePullRequests": []
+  }
+}

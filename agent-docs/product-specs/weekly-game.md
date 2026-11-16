@@ -1247,6 +1247,15 @@ Native clients render and capture artifacts; there is no server map or dare bank
 
 ## Changes agreed in chat
 
+During a live group turn, game reads, updates and photo actor refs may use a
+player's own message from this same chat received at most 24 hours ago. Web
+resolves the sender and rechecks the cutoff before mutation. The words must
+clearly request or agree to exactly the action: a request made before another
+player proposes that identical change counts as the first player's yes.
+Another player's report of what someone said never supplies consent. Expired
+refs require that player to say it again. Photo source, day and offer rules
+still apply.
+
 Before Day 1, either player can propose Start now. Until anyone checks in
 (any post, words or excuse), either player can propose a different start date,
 even after Day 1 has begun, from the latest player's today to 60 days out. That

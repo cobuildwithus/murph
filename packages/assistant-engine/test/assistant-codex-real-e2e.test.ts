@@ -50053,7 +50053,7 @@ describeRealCodex('real Codex game chat setup', () => {
       lengthDays: 7, startsOn: scenario.change?.kind === 'start_now' ? '2030-03-07' : null,
       terms: { schedule: SETUP_TERMS.schedule, stakes: SETUP_TERMS.stakes, n: 1, fromDay: 0, tasks: SETUP_TERMS.tasks.map((task, seat) => ({ seat, text: task.text })) },
       players: SETUP_PLAYERS.slice(0, scenario.state === 'invited' ? 1 : 2).map((player, seat) => ({ ...player, seat, dayOne: ['waiting', 'invited'].includes(scenario.state ?? '') ? null : scenario.change?.kind === 'start_now' ? '2030-03-07' : '2030-03-04' })),
-      pendingChange: scenario.pendingCallOff ? { id: 'proposal_call_off', proposedByMemberId: 'player_ava', expectedTermsVersion: 1, change: { kind: 'call_off' }, effectiveFromDay: 2, origin: 'chat', deliveryStatus: 'conversation', startsOn: null } : null, changeControls: { canStartNow: scenario.state !== 'invited' && scenario.change?.kind === 'start_now', canEdit: scenario.state !== 'invited', canEditSchedule: scenario.state !== 'invited', canEditStartDate: scenario.state !== 'invited', canEditTasks: scenario.state === 'waiting', canEditStakes: scenario.state === 'waiting', editableFromDay: 0 },
+      pendingChange: scenario.pendingChange ?? (scenario.pendingCallOff ? { id: 'proposal_call_off', proposedByMemberId: 'player_ava', expectedTermsVersion: 1, change: { kind: 'call_off' }, effectiveFromDay: 2, origin: 'chat', deliveryStatus: 'conversation', startsOn: null } : null), changeControls: { canStartNow: scenario.state !== 'invited' && scenario.change?.kind === 'start_now', canEdit: scenario.state !== 'invited', canEditSchedule: scenario.state !== 'invited', canEditStartDate: scenario.state !== 'invited', canEditTasks: scenario.state === 'waiting', canEditStakes: scenario.state === 'waiting', editableFromDay: 0 },
     }
     const existingGames: SharedGame[] = scenario.state ? [game] : []
     if (scenario.otherLiveGame) existingGames.push({ ...game, id: 'game_other_existing', terms: { ...game.terms, tasks: [{ seat: 0, text: 'Stretch' }, { seat: 1, text: 'Drink water' }] } })
@@ -50075,11 +50075,13 @@ describeRealCodex('real Codex game chat setup', () => {
           groupTool: { request: async request => {
             calls.push(request)
             if (request.action !== 'read_game' && request.action !== 'update_game') throw new Error('Unexpected game effect')
+            const referencedSpeaker = request.origin.kind === 'accepted_input' && request.origin.assistantInputId === scenario.earlierMessage?.ref ? scenario.earlierMessage.speaker : scenario.speaker ?? 'Ava'
             if (scenario.unavailable) return { action: request.action, result: { status: 'unavailable', error: 'Games are one-on-one. Use a chat with just the two players and Murph, or the app.' } }
             if (request.action === 'update_game') {
               if (scenario.error) return { action: request.action, result: { status: 'rejected', error: scenario.error } }
               const update = request.update
-              if (update.operation === 'approve' && !update.proposalId && scenario.speaker !== 'Sam') return { action: request.action, result: { status: 'rejected', error: 'NOT_A_PLAYER: That is your own invite.' } }
+              if (scenario.actionMessageRef) expect(request.origin).toEqual({ kind: 'accepted_input', assistantInputId: scenario.actionMessageRef })
+              if (update.operation === 'approve' && !update.proposalId && referencedSpeaker !== 'Sam') return { action: request.action, result: { status: 'rejected', error: 'NOT_A_PLAYER: That is your own invite.' } }
               if (update.operation === 'create' && update.terms.startsOn && update.terms.startsOn > '2030-05-05') return { action: request.action, result: { status: 'rejected', error: 'INVALID_REQUEST: Pick a start from tomorrow through 60 days out.' } }
               if (update.operation === 'create') {
                 if (scenario.poll === 'read') expect(polls.map(p => p.request.action)).toEqual(['read'])
@@ -50093,7 +50095,7 @@ describeRealCodex('real Codex game chat setup', () => {
               else if (update.operation === 'propose') games = [{ ...game, status: game.status === 'invited' ? 'negotiating' : game.status, players: SETUP_PLAYERS.map((p, seat) => ({ ...p, seat, dayOne: null })), pendingChange: { id: update.proposalId, proposedByMemberId: scenario.speaker === 'Sam' ? 'player_sam' : 'player_ava', expectedTermsVersion: 1, change: update.change, effectiveFromDay: 0, origin: 'chat', deliveryStatus: 'conversation', startsOn: null } }]
               else throw new Error('Unexpected game operation')
             }
-            return hostedGameToolResponseSchema.parse({ action: request.action, result: { status: 'ok', state: { games, ...(request.action === 'read_game' ? { players: SETUP_PLAYERS.map(p => ({ ...p, firstName: scenario.error?.startsWith('PROFILE_REQUIRED') && p.firstName === 'Sam' ? null : p.firstName, isSender: p.firstName === (scenario.speaker ?? 'Ava') })) } : {}) } } })
+            return hostedGameToolResponseSchema.parse({ action: request.action, result: { status: 'ok', state: { games, ...(request.action === 'read_game' ? { players: SETUP_PLAYERS.map(p => ({ ...p, firstName: scenario.error?.startsWith('PROFILE_REQUIRED') && p.firstName === 'Sam' ? null : p.firstName, isSender: p.firstName === referencedSpeaker })) } : {}) } } })
           } },
           pollTool: { request: async request => {
             polls.push(request)
@@ -50109,7 +50111,7 @@ describeRealCodex('real Codex game chat setup', () => {
           currentInvocationScope: () => ({ origin: { ...origin, sessionId: 'synthetic-session' }, conversationScope: 'group' }),
           currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [], sendVaultFile: async () => { throw new Error('No file send authorized') },
         },
-        prompt: `Group participants: Ava (ava@example.test), Sam (sam@example.test)${scenario.unavailable ? ', Lee (player_lee)' : ''}, and Murph.\n${scenario.history ?? ''}\nCurrent accepted message from ${scenario.speaker ?? 'Ava'} (Message ref: ${inputId}, Occurred at: 2030-03-06T12:00:00.000Z): ${scenario.message}`,
+        prompt: `Group participants: Ava (ava@example.test), Sam (sam@example.test)${scenario.unavailable ? ', Lee (player_lee)' : ''}, and Murph.\n${scenario.earlierMessage ? `Earlier message from ${scenario.earlierMessage.speaker} (Message ref: ${scenario.earlierMessage.ref}, Occurred at: ${scenario.earlierMessage.occurredAt}): ${scenario.earlierMessage.text}\n` : ''}${scenario.history ?? ''}\nCurrent accepted message from ${scenario.speaker ?? 'Ava'} (Message ref: ${inputId}, Occurred at: 2030-03-06T12:00:00.000Z): ${scenario.message}`,
         reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
       })
       const reply = result.finalMessage.trim()
@@ -50120,8 +50122,10 @@ describeRealCodex('real Codex game chat setup', () => {
       expect(writes).toHaveLength(scenario.create || scenario.operation ? 1 : 0)
       expect(calls.filter(c => c.action === 'read_game').length).toBeLessThanOrEqual(1)
       for (const call of calls) {
-        expect(call).toMatchObject({ origin })
-        if (call.action === 'read_game') expect(call).toEqual({ action: 'read_game', origin, includePlayers: true })
+        const expectedOrigin = call.action === 'update_game' && scenario.actionMessageRef ? { kind: 'accepted_input', assistantInputId: scenario.actionMessageRef } : origin
+        if (call.action === 'read_game' && scenario.earlierMessage) expect([inputId, scenario.earlierMessage.ref]).toContain(call.origin.kind === 'accepted_input' ? call.origin.assistantInputId : null)
+        else expect(call).toMatchObject({ origin: expectedOrigin })
+        if (call.action === 'read_game') expect(call).toMatchObject({ action: 'read_game', includePlayers: true })
       }
       expect(calls.filter(c => c.action !== 'read_game' && c.action !== 'update_game')).toHaveLength(0)
       if (scenario.create && !scenario.error) {
@@ -50151,7 +50155,7 @@ describeRealCodex('real Codex game chat setup', () => {
           })
           expect(normalize(update.terms)).toEqual(normalize(scenario.create))
           expect(update.previousGameId).toBe(scenario.previousGameId)
-        } else if (scenario.operation === 'approve') expect(update).toEqual(scenario.pendingCallOff ? { operation: 'approve', gameId: game.id, proposalId: 'proposal_call_off' } : { operation: 'approve', gameId: game.id, expectedTermsVersion: 1 })
+        } else if (scenario.operation === 'approve') expect(update).toEqual(scenario.pendingChange ? { operation: 'approve', gameId: game.id, proposalId: scenario.pendingChange.id } : scenario.pendingCallOff ? { operation: 'approve', gameId: game.id, proposalId: 'proposal_call_off' } : { operation: 'approve', gameId: game.id, expectedTermsVersion: 1 })
         else if (scenario.operation === 'cancel_game') expect(update).toEqual({ operation: 'cancel_game', gameId: game.id })
         else expect(update).toEqual({ operation: 'propose', gameId: game.id, proposalId: expect.stringMatching(/^[A-Za-z0-9_-]{8,64}$/u), expectedTermsVersion: 1, change: scenario.change })
       }

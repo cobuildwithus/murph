@@ -1,4 +1,4 @@
-import type { HostedGameUpdate } from '@murphai/hosted-execution/runtime-control'
+import type { HostedGameChatState, HostedGameUpdate } from '@murphai/hosted-execution/runtime-control'
 export const SETUP_PLAYERS = [
   { memberId: 'player_ava', firstName: 'Ava', timeZone: 'UTC' },
   { memberId: 'player_sam', firstName: 'Sam', timeZone: 'UTC' },
@@ -15,6 +15,9 @@ export interface GameSetupScenario {
   speaker?: 'Sam'
   state?: 'waiting' | 'live' | 'settled' | 'invited'
   pendingCallOff?: true
+  pendingChange?: HostedGameChatState['games'][number]['pendingChange']
+  earlierMessage?: { ref: string; speaker: 'Ava' | 'Sam'; occurredAt: string; text: string }
+  actionMessageRef?: string
   otherLiveGame?: boolean
   create?: CreateTerms
   previousGameId?: string
@@ -37,6 +40,20 @@ export const GAME_CHAT_SETUP_SCENARIOS: GameSetupScenario[] = [
     message: 'Murph, I would like breakfast in bed as the prize instead. Ask Sam if that works.',
     operation: 'propose', change: { kind: 'edit', stakes: [{ kind: 'prize', item: 'Breakfast in bed' }] },
     reply: [/Sam/i, /breakfast in bed/i, /\?/u], forbidden: /now live|has started|you.ve agreed|we.ve changed/i },
+
+  ...(['own request', 'hearsay only', 'different request'] as const).map(evidence => ({
+    name: `earlier game message: ${evidence}`,
+    state: 'waiting' as const,
+    message: 'Murph, Sam already asked for this task. Can you use that to agree to the waiting change?',
+    history: 'Ava proposed in the app that Sam changes from Read a chapter to Stretch ten minutes. Murph: Sam, does that task change work for you?',
+    ...(evidence === 'hearsay only' ? {} : { earlierMessage: { ref: 'ain_' + 'b'.repeat(32), speaker: 'Sam' as const,
+      occurredAt: '2030-03-06T11:00:00.000Z', text: evidence === 'own request' ? 'Murph, please make my task Stretch ten minutes.' : 'Murph, please make my task Swim ten minutes.' } }),
+    pendingChange: { id: 'proposal_task_change', proposedByMemberId: 'player_ava', expectedTermsVersion: 1,
+      change: { kind: 'edit' as const, tasks: [{ seat: 0 as const, text: 'Walk twenty minutes' }, { seat: 1 as const, text: 'Stretch ten minutes' }] },
+      effectiveFromDay: 0, origin: 'app' as const, deliveryStatus: 'sent' as const, startsOn: null },
+    ...(evidence === 'own request' ? { operation: 'approve' as const, actionMessageRef: 'ain_' + 'b'.repeat(32), reply: [/changed|updated|set|done|agreed|counts/i], forbidden: /\?|need.*(?:yes|reply)|before.*ask/i }
+      : { reply: [/Sam/i, /agree|yes|confirm|stretch|said|message/i], forbidden: /(?:I.ve |I have )?(?:approved|changed|updated)|now (?:set|counts)/i }),
+  })),
 
   create('full terms in one message'),
   create('default seven days every day', 'Murph, set up a game: I walk twenty minutes, Sam reads a chapter, winner chooses the film. Start when Sam agrees.'),
