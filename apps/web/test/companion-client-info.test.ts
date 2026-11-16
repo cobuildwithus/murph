@@ -18,10 +18,10 @@ describe("companion client headers", () => {
 
   it("reads Android development builds without numeric normalization", () => {
     expect(readCompanionClientInfo(new Headers({
-      "X-Murph-Client-Platform": "android", "X-Murph-Client-Version": "0.1.3-dev",
+      "X-Murph-Client-Platform": "android", "X-Murph-Client-Version": "0.1.3-hosted-e2e",
       "X-Murph-Client-Build": "00109", "X-Murph-Client-OS-Version": "15",
       "X-Murph-Client-Device-Model": "Pixel 8 Pro",
-    }))).toEqual({ platform: "android", version: "0.1.3-dev", build: "00109", osVersion: "15", deviceModel: "Pixel 8 Pro" });
+    }))).toEqual({ platform: "android", version: "0.1.3-hosted-e2e", build: "00109", osVersion: "15", deviceModel: "Pixel 8 Pro" });
   });
 
   it.each(["Platform", "Version", "Build"])("requires %s along with the other core fields", (field) => {

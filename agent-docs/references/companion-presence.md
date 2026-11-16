@@ -32,7 +32,7 @@ Missing or invalid telemetry never changes request admission or the response.
 | Header (`X-Murph-Client-` prefix) | Accepted value |
 | --- | --- |
 | `Platform` | Exactly `ios` or `android` |
-| `Version` | `^\d{1,4}(\.\d{1,4}){0,3}(-[A-Za-z0-9.]{1,24})?$` |
+| `Version` | `^\d{1,4}(\.\d{1,4}){0,3}(-[A-Za-z0-9.-]{1,24})?$` |
 | `Build` | `^\d{1,10}$` |
 | `OS-Version` | `^\d{1,4}(\.\d{1,4}){0,3}$` |
 | `Device-Model` | `^[A-Za-z0-9 ,._()+-]{1,64}$` |
@@ -52,13 +52,20 @@ Client assertions are diagnostics, never authentication or authorization facts.
 Like contact timestamps, the fields are member-row metadata, omitted from the
 vault-only Settings export and removed with account deletion.
 
-Apply `20261116010000_companion_client_info` before deploying Web. Older Web
-and clients tolerate the nullable additions; no client rollout coordination or
-backfill is required. Leave the additive columns in place when reverting Web.
+The production Web build applies `20261116010000_companion_client_info` through
+`release:production:migrate` before the new code serves. Older Web and clients
+tolerate the nullable additions; no client rollout coordination or backfill is
+required. Leave the additive columns in place when reverting Web.
 
 To check which build a member last reported, use the primary read-only database
 helper with an operator-bound `member_id` psql variable (timestamps use UTC):
 
 ```sql
 SELECT companion_app_platform, companion_app_version, companion_app_build, companion_os_version, companion_device_model, to_char(companion_last_contact_at, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS last_contact_at FROM hosted_member WHERE id = :'member_id' LIMIT 1;
+```
+
+Builds in use by members whose app made contact in the last week:
+
+```sql
+SELECT companion_app_platform, companion_app_version, companion_app_build, count(*) FROM hosted_member WHERE companion_last_contact_at > now() - interval '7 days' GROUP BY 1, 2, 3 ORDER BY count(*) DESC;
 ```

@@ -6,7 +6,7 @@ export interface CompanionClientInfo {
   deviceModel: string | null;
 }
 
-const VERSION = /^\d{1,4}(\.\d{1,4}){0,3}(-[A-Za-z0-9.]{1,24})?$/;
+const VERSION = /^\d{1,4}(\.\d{1,4}){0,3}(-[A-Za-z0-9.-]{1,24})?$/;
 const BUILD = /^\d{1,10}$/;
 const OS_VERSION = /^\d{1,4}(\.\d{1,4}){0,3}$/;
 const DEVICE_MODEL = /^[A-Za-z0-9 ,._()+-]{1,64}$/;
