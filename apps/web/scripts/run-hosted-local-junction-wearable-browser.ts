@@ -1166,15 +1166,21 @@ async function describeAuthorizationSurface(page: Page): Promise<string> {
     `childOtherActions=${child.otherActions}`,
     `mainUncheckedCheckboxes=${main.uncheckedCheckboxes}`,
     `childUncheckedCheckboxes=${child.uncheckedCheckboxes}`,
-    `mainActionLabels=${main.labels.join("|") || "none"}.`,
+    `mainActionWords=${main.labels.join("|") || "none"}.`,
   ].join(" ");
 }
 
-// Provider button text names the next step without revealing the account;
-// anything beyond a few plain words is withheld.
+// Failures stay content-free: an action is reported only as one of these
+// fixed words when its whole label matches, otherwise as "other".
+const DIAGNOSTIC_ACTION_WORDS = [
+  "accept", "agree", "allow", "approve", "authorize", "back", "cancel",
+  "confirm", "continue", "decline", "deny", "done", "grant", "help", "log in",
+  "next", "proceed", "save", "sign in", "skip", "submit",
+] as const;
+
 function safeActionLabel(text: string): string {
-  const label = text.replace(/\s+/gu, " ").trim();
-  return /^[A-Za-z][A-Za-z ]{0,23}$/u.test(label) ? label : "?";
+  const label = text.replace(/\s+/gu, " ").trim().toLowerCase();
+  return DIAGNOSTIC_ACTION_WORDS.find((word) => word === label) ?? "other";
 }
 
 async function requirePersistedWearableConnection(
