@@ -5969,8 +5969,9 @@ Web producer; keep it while accepted actions can remain queued or restored.
 `apps/web/src/lib/game/progress/contract.ts` owns the additive Progress wire
 types and request parsers. Routes parse once; persistence accepts typed input.
 The response schemas also decode the synthetic board fixtures; stored sealed
-JSON is authenticated and decoded without revalidation. BE0 supplies these
-primitives, not route handlers, scoring, inference, media effects or maps.
+JSON is authenticated and decoded without revalidation. The games reader and
+four BE1 routes compose these primitives; health/friends and media/maps retain
+their separate lane owners.
 
 Progress persists only awards, measure choices, picture ownership and task
 inference. The following classification covers every column of exactly
@@ -5997,6 +5998,17 @@ scope/purpose, owner key, table, row and field AAD. Batch sealing unwraps one
 owner root; batch opening uses the existing root batch reader. The keyed lookup
 uses `createHostedOpaqueIdentifier` and JSON-framed owner/value parts under
 separate Progress award, measure and task purposes. No content is logged.
+
+The games award envelope additionally seals `data.value`, `data.rung` (the
+checked bank identity, threshold, crossing date and displayed facts), `data.face`,
+`data.title`, `data.detail`, `data.page` and `data.evaluator`. All are private
+content: even public landmark text identifies an owner's accomplishment when
+attached to an award. The evaluator version is evidence, never part of its key.
+The inference envelope contains only `{quantity, unit, name}`; task words stay
+in their existing sealed game owner. The keyed cache input is NFKC-normalized,
+trimmed, whitespace-collapsed, lowercase text plus check-in kind. Member identity
+is included by the keyed lookup owner. `goal.rungId` and `perDay` remain sealed
+measure content; no plaintext activity identity or amount is added.
 
 `patchMeasureState` is the sole writer of `state_encrypted`: one exact read,
 open and shallow field merge, then seal outside the transaction. Its short
@@ -6028,6 +6040,56 @@ per-item queries or transactions. Award reads deliberately have no pagination
 or materialized totals, per the locked plan. The award sort index serves the
 Medals page, the subject index serves cascading deletion, the picture index
 serves owner/live/capture-order reads, and measure/task reads use composite keys.
+
+`series.ts` loads at most 501 games and 10,001 own entries, admits 500/10,000,
+and opens admitted task words and typed reps/route payloads in one batch. It
+loads task classifications and measure state in two owner-scoped batch reads.
+Typed entries emit their own measure immediately; untyped entries use the day's
+terms revision and the seat override or group default. Retakes contribute once;
+withdrawn, incomplete and excuse entries contribute nothing. Unresolved entries
+are pending days and produce no measure awards. A per-day choice applies to all
+completed history while previously earned day medals remain stored.
+
+`streak.ts` owns the shared board/Progress calendar: each game's frozen clock,
+join, departure, settlement and end bound its obligations. The departure day's
+post remains history; an unfulfilled departure day ends with membership. All
+obligations on a date must succeed, and dates without obligations neither add
+nor break a run. Current, best and month strings come from these same dates.
+
+`achievements.ts` holds the three pure games evaluators used by `registry.ts`.
+Round and ladder candidates use the first cumulative crossing date; all rungs
+crossed together are inserted. Each new best streak length is an award.
+The reader preserves measures with saved ladder awards even when their final
+contribution is removed; their total becomes zero and their goals stay editable.
+`view.ts` takes passed rungs from stored awards, filters health-derived awards
+under current Postgres browser-vault authority, then chooses gold and moments.
+Moments group unseen awards by earned date; the seen route resolves their ids
+to owner-bound rows. The four routes return private, non-cacheable responses.
+
+An ordinary complete games read uses ten domain queries including a nonempty
+settlement (profile twice, games, entries, task cache, measure state, award insert,
+award reads before and after settlement and live picture count), plus existing batched crypto and native/health
+authority owners. There are no per-game or per-entry database calls and at most
+one domain transaction/pooled connection at a time. Incomplete reads skip
+settlement and inference. Crypto and provider work stay outside transactions;
+each write rechecks current native-session authority inside its transaction.
+
+Uncached untyped phrases are deduplicated and classified sequentially in
+`after()`, with one Responses and one Decisions call sharing an eight-second
+deadline per phrase, no retries, then one sealed cache batch insert. The source
+caps bound distinct credited phrases by 10,000. Provider failure leaves the
+phrase uncached; interrupted background work can remain pending on a later read.
+The classifier uses the existing ideas model/client configuration. The live
+synthetic eval runs with `pnpm exec tsx --tsconfig apps/web/tsconfig.json
+apps/web/scripts/progress-inference-eval.ts` and an already-provisioned key.
+
+`bank.ts` exposes only checked entries, including the supplied 70 height rungs
+and separate 30-rung plank/sleep ladders. `ladderUse` is public bank metadata
+needed by the two time screens, not member persistence. A typed goal uses bank
+search first; a miss makes one Responses call constrained to at most four bank
+ids. Provider failure returns 503 without provider content. Goals and per-day
+choices use `patchMeasureState`; route goals return 501 until BE3 supplies
+`setRouteGoal`. No new table, endpoint, flag or preference is introduced.
 
 Fixtures cover new, established, year-long, mixed-unit, no-game, gap, privacy,
 tie and moment states. They are presentation examples, not expected engine

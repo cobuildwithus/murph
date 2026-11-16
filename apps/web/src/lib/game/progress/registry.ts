@@ -1,5 +1,7 @@
 import type { GameRepsData, GameRouteData } from "../contract";
 import type { Day } from "./contract";
+import type { MedalFace, Rung } from "./contract";
+import { ladderRungs, roundTotals, streakRuns } from "./achievements";
 
 export const EXERCISES = {
   pushups: { label: "Pushups", icon: "pushups", ftPerRep: 1 },
@@ -7,6 +9,15 @@ export const EXERCISES = {
   squats: { label: "Squats", icon: "squats", ftPerRep: 1 },
   planks: { label: "Planks", icon: "planks", ftPerRep: 1 },
   abs: { label: "Abs", icon: "abs", ftPerRep: 1 },
+  lunges: { label: "Lunges", icon: "dumbbell", ftPerRep: 1 },
+  situps: { label: "Sit-ups", icon: "dumbbell", ftPerRep: 1 },
+  crunches: { label: "Crunches", icon: "dumbbell", ftPerRep: 1 },
+  burpees: { label: "Burpees", icon: "dumbbell", ftPerRep: 1 },
+  walk: { label: "Walk", icon: "steps", ftPerRep: 1 },
+  run: { label: "Run", icon: "run", ftPerRep: 1 },
+  meditation: { label: "Meditation", icon: "dumbbell", ftPerRep: 1 },
+  stretching: { label: "Stretching", icon: "dumbbell", ftPerRep: 1 },
+  yoga: { label: "Yoga", icon: "dumbbell", ftPerRep: 1 },
 } as const;
 
 export interface DayAmount { measureId: string; date: Day; amount: number }
@@ -37,5 +48,17 @@ export interface Candidate {
   on: Day;
   data: { [key: string]: AwardValue };
 }
-/** BE1 supplies the concrete context and achievement list. */
 export type Achievement<Context> = (context: Context) => Candidate[];
+
+export interface AchievementContext {
+  measures: readonly {
+    id: string; pending: boolean; unit: string; noun: string;
+    points: readonly [Day, number][];
+    rounds: readonly { at: number; face: MedalFace; title: string; detail: string }[];
+    rungs: readonly Rung[];
+  }[];
+  days: readonly { date: Day; done: boolean; ended: boolean }[];
+}
+
+// BE2 adds health/friend evaluators at their read boundaries; BE3 adds routeLegs.
+export const ACHIEVEMENTS: readonly Achievement<AchievementContext>[] = [roundTotals, ladderRungs, streakRuns];

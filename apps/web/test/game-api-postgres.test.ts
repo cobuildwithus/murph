@@ -18,6 +18,8 @@ import { POST as upload } from "../app/api/game/v1/media/route";
 import { POST as post } from "../app/api/game/v1/games/[id]/entries/route";
 import { GET as read } from "../app/api/game/v1/games/[id]/route";
 import { GET as home } from "../app/api/game/v1/home/route";
+import { GET as progress } from "../app/api/game/v1/progress/route";
+import { progressSchema } from "../src/lib/game/progress/contract";
 import { POST as recapWatched } from "../app/api/game/v1/games/[id]/recap-watched/route";
 import { DELETE as unblockRoute, PUT as blockRoute } from "../app/api/game/v1/blocks/[memberId]/route";
 import { PUT as blockInviteRoute } from "../app/api/game/v1/invites/[token]/block/route";
@@ -32,6 +34,8 @@ import { serializeHostedNativeSessionToken } from "../src/lib/better-auth/transp
 import type { GameHomeView, GameView } from "../src/lib/game/contract";
 import { assertGameMemberAuthCurrentTx, requireGameMemberAuth } from "../src/lib/game/http/auth";
 import { getPrisma } from "../src/lib/prisma";
+
+vi.mock("next/server", async original => ({ ...await original<typeof import("next/server")>(), after: vi.fn() }));
 
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
 if (enabled) {
@@ -589,6 +593,16 @@ describe.skipIf(!enabled)("game v1 local API smoke", () => {
         postedAt: expect.any(String), blurHash: "synthetic-blur",
         ...(mediaKeys.length ? { preview: { kind: artifact.kind, mediaUrl: `/api/game/v1/media/${encodeURIComponent(mediaKeys[0])}` } } : {}) });
     }
+    const progressResponse = await progress(request(poster, undefined, "GET"));
+    expect(progressResponse.status).toBe(200);
+    const progressView = progressSchema.parse(await progressResponse.json());
+    expect(progressView.measures.map(measure => [measure.id, measure.total.value, measure.pending])).toEqual([
+      [expect.stringMatching(/^h[a-z0-9_-]{12}\.days$/iu), 2, true],
+      ["walk.meters", 1200.5, false], ["pushups.reps", 1, false],
+    ]);
+    const awardCount = await getPrisma().gameProgressAward.count({ where: { memberId: tokenMember.get(poster)! } });
+    expect((await progress(request(poster, undefined, "GET"))).status).toBe(200);
+    expect(await getPrisma().gameProgressAward.count({ where: { memberId: tokenMember.get(poster)! } })).toBe(awardCount);
     await game(advance(request(poster, { days: 1 }), context));
     await game(post(request(poster, { entryId: randomUUID(), kind: "words", text: "First" }), context));
     // The shared cap still counts attempts across different artifact kinds.
