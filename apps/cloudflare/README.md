@@ -1035,6 +1035,11 @@ check also logs `issuedSecondsAgo`, which separates a stale credential from
 clock skew. The token, its claims and the error message are never logged. The
 401 response is unchanged.
 
+`ERR_JWKS_TIMEOUT` means the Worker could not download Vercel's signing keys in
+time. Each Worker instance keeps the keys it downloaded for 24 hours, and
+fetches again early only when a token names a key it does not have, so only a
+fresh instance's first download can hit this.
+
 ### Web-control preflight rejections
 
 Ordinary runtime callers select a branded route descriptor from the same

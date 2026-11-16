@@ -16,6 +16,9 @@ type EnvSource = Readonly<Record<string, string | undefined>>;
 type RemoteJwkSet = ReturnType<typeof createRemoteJWKSet>;
 
 const remoteJwkSetCache = new Map<string, RemoteJwkSet>();
+// jose refetches stale keys before verifying, so a slow key endpoint fails
+// requests that the cached keys would accept. An unknown key id still refetches.
+const VERCEL_OIDC_JWKS_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const HOSTED_EXECUTION_LOCAL_JWKS_HOSTS = new Set([
   "127.0.0.1",
   "::1",
@@ -246,7 +249,9 @@ function resolveHostedExecutionVercelOidcJwkSet(jwksUrl: string): RemoteJwkSet {
     return existing;
   }
 
-  const next = createRemoteJWKSet(new URL(jwksUrl));
+  const next = createRemoteJWKSet(new URL(jwksUrl), {
+    cacheMaxAge: VERCEL_OIDC_JWKS_CACHE_MAX_AGE_MS,
+  });
   remoteJwkSetCache.set(jwksUrl, next);
   return next;
 }
