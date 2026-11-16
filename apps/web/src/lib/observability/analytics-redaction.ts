@@ -35,6 +35,7 @@ export const VERCEL_TELEMETRY_PATHNAMES = [
   "/refer",
   "/security",
   "/settings",
+  "/settings/connections",
   "/settings/data-privacy",
   "/subprocessors",
 ] as const;

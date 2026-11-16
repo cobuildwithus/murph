@@ -41,8 +41,8 @@ export const HOSTED_RETENTION_MAX_BATCHES = 4;
 export const HOSTED_CALLBACK_REQUEST_NONCE_RETENTION_MAX_BATCHES =
   HOSTED_RETENTION_MAX_BATCHES * 100;
 // Short-lived control artifacts are normally tiny and should never inherit the
-// high-volume diagnostic drain budget. Across the ten categories below this caps
-// one hourly pass at 20 statements and 5,000 deleted or compacted rows.
+// high-volume diagnostic drain budget. Across the eleven categories below this caps
+// one hourly pass at 22 statements and 5,500 deleted or compacted rows.
 export const HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE = 250;
 export const HOSTED_CONTROL_ARTIFACT_RETENTION_MAX_BATCHES = 2;
 // Clinical Records started intents remain the completion owner after their
@@ -70,6 +70,7 @@ export interface HostedControlPlaneRetentionCleanupResult {
   expiredConversationPolicyNonRepliesRecorded: number;
   expiredDeviceConnectIntentsDeleted: number;
   expiredDeviceOauthSessionsDeleted: number;
+  expiredCustomConnectionAuthorizationsDeleted: number;
   expiredDeviceWebhookTracesDeleted: number;
   expiredEmailPublicBootstrapAttemptsDeleted: number;
   expiredGroupParticipantObservationsDeleted: number;
@@ -148,6 +149,7 @@ export async function runHostedControlPlaneRetentionCleanup(input: {
   });
   const expiredRuntimePutDrainsDeleted = await deleteExpiredRuntimePutDrains({ now, prisma });
 
+  const expiredCustomConnectionAuthorizationsDeleted = await deleteExpiredCustomConnectionAuthorizations({ now, prisma });
   return {
     expiredLinqGroupRisk,
     compactedLinqProviderEventDiagnostics,
@@ -160,6 +162,7 @@ export async function runHostedControlPlaneRetentionCleanup(input: {
       expiredMailboxItems.policyNonReplies,
     expiredDeviceConnectIntentsDeleted,
     expiredDeviceOauthSessionsDeleted,
+    expiredCustomConnectionAuthorizationsDeleted,
     expiredDeviceWebhookTracesDeleted,
     expiredEmailPublicBootstrapAttemptsDeleted,
     expiredGroupParticipantObservationsDeleted,
@@ -1124,4 +1127,22 @@ export function normalizeHostedRetentionDate(value: Date | string): Date {
   }
 
   return date;
+}
+
+export async function deleteExpiredCustomConnectionAuthorizations(input: {
+  now: Date;
+  prisma: Pick<PrismaClient, "$executeRaw">;
+}): Promise<number> {
+  return runControlArtifactRetentionBatches(() => input.prisma.$executeRaw`
+    WITH doomed AS MATERIALIZED (
+      SELECT pending."connection_id"
+      FROM "hosted_mcp_pending_authorization" AS pending
+      WHERE pending."expires_at" <= ${input.now}
+      ORDER BY pending."expires_at", pending."connection_id"
+      LIMIT ${HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE}
+      FOR UPDATE OF pending SKIP LOCKED
+    )
+    DELETE FROM "hosted_mcp_pending_authorization" AS pending
+    USING doomed WHERE pending."connection_id" = doomed."connection_id"
+  `);
 }

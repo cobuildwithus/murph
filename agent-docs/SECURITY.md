@@ -1,6 +1,6 @@
 # Security
 
-Last verified: 2026-08-31
+Last verified: 2026-11-15
 
 ## Private weekly game images
 
@@ -52,6 +52,62 @@ Game Home's optional `me.areaCode` is derived from only the authenticated
 caller's verified `+1` phone in `HostedMemberIdentityState`. It exposes three
 NANP digits, never the full phone or an opponent's identity, and is omitted for
 unknown, unverified or non-NANP phones. No phone is sent to the ideas provider.
+
+## Custom remote MCP connections
+
+Custom connections are open to every active personal member; synthetic thread
+containers (group chats) never get them. Settings uses the existing browser
+session and mutation-origin checks; the manifest and MCP gateway require the
+signed Worker callback and a present, current runtime write fence. Synthetic
+thread containers, inactive members, foreign connections, off connections and
+stale generation/catalog URLs are refused. Only explicitly approved tools with
+`readOnlyHint: true` appear in the stored catalog or execute; changed approved
+definitions are suspended until reviewed. An annotation is the service's claim,
+not a guarantee about its behavior. Tool content remains untrusted.
+
+Web alone owns resource URLs, discovery, OAuth registration and credentials.
+Every remote request uses HTTPS, one validated DNS resolution pinned into the
+TLS connection, redirect refusal, a cumulative one-MiB response cap and a
+15-second deadline. One SDK operation, token refresh included, has a 24-second
+deadline (under the relay's 30 seconds) and at most 24 requests; listings have at
+most ten pages and 100 tools. Connections are capped
+at ten per member under member-row admission. Runtime manifests select only
+nonsecret mount coordinates and stored catalogs; listing never calls upstream.
+Tool results have an additional 256-KiB limit, and a result containing the
+member's access token is refused. The gateway refuses JSON-RPC batches, so one
+relay request is one call. A tool definition over 24 KiB is locked, and the
+approved snapshot is capped at 64 KiB. A pasted link with a query is refused,
+since it usually carries a key that would sit unencrypted.
+
+OAuth requires protected-resource metadata, issuer equality, explicit PKCE
+S256 support and RFC 9207 response issuer identification
+(`authorization_response_iss_parameter_supported: true`). The last one is the
+mix-up defence: each connection's public client and metadata document can be
+replayed at any authorization server that accepts metadata documents or open
+registration, so per-connection redirect URIs alone don't stop a hostile server
+from relaying the member to an honest one and receiving its code. Servers that
+don't send `iss` are refused. Each connection has its own redirect URI and
+metadata document.
+Single-use pending state binds the member, browser session, generation, frozen
+issuer/endpoints and encrypted verifier for ten minutes, with bounded hourly
+retirement. Callback never rediscovers endpoints. The response issuer is
+mandatory and must match. Discovery
+receives no saved credentials; access tokens go only to the exact resource;
+code/refresh credentials go only to the frozen token endpoint. Provider error
+bodies are discarded before SDK parsing or public error handling.
+
+Secure-box encryption uses the hosted private-field lane with connection and
+generation scope, row identity, field and purpose AAD. Refresh claims generation
+and token version before external I/O, then conditionally commits the encrypted
+successor under the same live claim, generation and token version, so Settings
+edits during a refresh never discard a rotated token. A refused grant is sent
+once, never retried with the same code or refresh token. Concurrent callers retry;
+expired claims and ambiguous rotations require sign-in. Failed persistence
+aborts execution. Disable/removal is locally authoritative before best-effort
+issuer-bound revocation. Member deletion asks each service to revoke Murph's token (best effort, ten
+seconds), then cascades connection and pending rows;
+suspension is rechecked at admission and conditional publication. No provider
+or crypto I/O runs inside the short database transactions.
 
 ## Non-Negotiable Rules
 
