@@ -15,7 +15,7 @@ describe('host-support coverage matrix guards', () => {
 
   it('keeps every shard of a reached package and only reached shards', () => {
     const shards = (reached?: string[]) =>
-      reachedPackageCoverageMatrix(reached).include.map(({ shard }: { shard: string }) => shard)
+      reachedPackageCoverageMatrix(reached).include.map(({ shard }) => shard)
     const everything = shards()
     expect(shards(PACKAGE_COVERAGE_PLAN.map(({ dir }) => dir))).toEqual(everything)
     expect(shards([])).toEqual([])
