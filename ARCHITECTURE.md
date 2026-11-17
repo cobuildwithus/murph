@@ -7339,7 +7339,13 @@ assistant or legal-version change is part of this release.
 ### Daily game reminders
 
 `setReminders` in the game command owner stores profile timing/channel preferences
-and live-seat opt-outs in one database-only transaction. The separate bearer
+and live-seat opt-outs in one database-only transaction. A live seat may also have
+its own `reminder_minutes`; null follows the profile time. The app's `gameMinutes`
+map replaces every live seat's own time, and leaving it out keeps them. The chat
+tools send `timeForGameIds` instead: `minutes` becomes the own time of only those
+seats (none for an empty list), the profile time is not written, and only those
+seats get the minutes choice fact. A direct-chat time with no game sets the profile
+time and clears every own time. The separate bearer
 settings endpoint keeps Home unchanged; `canText` is false. Push registration
 owns `game_reminders` capability, default false and cleared by old game clients.
 Wearable refreshes preserve it only for the same address.
@@ -7352,11 +7358,15 @@ Each projection admits at most 20 live seats per member and 1,095 own attempts
 per seat, skipping overflow. Reads batch seats and own histories; peer posts
 and blocks need two bounded reads only for single-game wording. Only final own
 task words are opened, at most 20 fields per attempt, outside transactions.
-`reminderOpenDay` composes game rules and score credit; profile time controls the
-30-minute window while frozen seat time controls game days.
+`reminderOpenDay` composes game rules and score credit; profile time zone and each
+seat's effective time control the 30-minute window, while frozen seat time controls
+game days. The page query returns each member's distinct effective times; each due
+time is a slot that reads only its own games.
 
-The unique `game-reminder:<sha256(member, localDate)>` event key owns a daily
-member-wide claim, regardless of its anchor game. A fresh projection after the
+The unique `game-reminder:<sha256(member, localDate, minutes)>` event key owns a
+daily claim per member and time, regardless of its anchor game. Games at one time
+share one push; a game moved after its claim drops out of that push and reminds at
+its new time. A fresh projection after the
 claim builds task title, body and target immediately before `deliverGamePush`.
 That owner rechecks current route, session, permission, capability and expiry.
 No retry releases the claim; only content-free outcomes are recorded. The push
@@ -7893,20 +7903,25 @@ changes count-game reminder urgency without changing posting eligibility.
 Both tools' `reaches` says `text` only when a selected game would get the
 private evening text: it has no group chat, or its players live hours apart, so
 no room check-in covers it. Otherwise the reminder at the member's time is the
-push. The runner shows the direct tool's result in words: one time for every
-game, named weekdays, and `everyDay` only on count games.
+push. The runner shows the direct tool's result in words: each game's own time, named
+weekdays, and `everyDay` only on count games. A group `set_reminder` time changes
+only that chat's games.
 Saving choices records the ordered per-seat facts first, then updates the member's
 live seats in one parameterized statement with the same live receipt predicate.
 Choice arrays determine assigned values rather than row-lookup membership, so a
 large choice list does not become a repeated bitmap-index probe. Omitted cadence
 preserves its prior value; newly admitted seats without a choice fact are untouched.
 
-The minute drain reserves one `game_private_evening` receipt per member and
-local date, one hour after their saved reminder time, for open games no room
-check-in covers. Its typed policy freezes game/day/terms; publication and
+The minute drain reserves one `game_private_evening` receipt per member, local
+date and effective reminder time (`game-evening-private:<member>:<date>:<minutes>`),
+one hour after that time, for that time's open games no room check-in covers. The
+unanswered pause reads the member's published private-evening wakes from 28 days
+and their receipts by idempotency key, since dispatch rewrites a receipt's template
+and source. After its 30 minutes, unsent work is skipped and published work leaves
+the lifecycle sweep. Its typed policy freezes game/day/terms; publication and
 egress recheck text consent, access, the witness, expiry and unanswered-evening
 pause. A new direct message does not stop it. Each player's live-game activation copies
-opt-out and cadence from validated lineage or the latest exact cohort, then
+opt-out, cadence and own time from validated lineage or the latest exact cohort, then
 records an idempotent activation event. A new-person or changed-rhythm offer
 gets one `game_private_kickoff` receipt per game and member. It waits overnight
 until 09:00 local, expires 24 hours after start, and rechecks live seating and

@@ -226,23 +226,26 @@ async function processPrivateKickoffIntent(receipt: GameChatIntent, now: Date): 
 }
 
 async function processPrivateEveningIntent(receipt: GameChatIntent, now: Date): Promise<boolean> {
-  const parts = /^([^:]+):(\d{4}-\d{2}-\d{2})$/u.exec(receipt.sourceRef ?? "");
+  const parts = /^([^:]+):(\d{4}-\d{2}-\d{2}):(\d{1,4})$/u.exec(receipt.sourceRef ?? "");
   if (!parts) return false;
-  const [, memberId, date] = parts;
+  const [, memberId, date] = parts, minutes = Number(parts[3]);
   const { privateEveningEventId, publishPrivateEveningCheckIn, readPrivateEveningDeliveryAuthority, isPrivateEveningCurrentTx } = await import("./private-notification");
-  const eventId = privateEveningEventId(memberId, date);
+  const eventId = privateEveningEventId(memberId, date, minutes);
   if (receipt.idempotencyKey !== createHostedLinqDeliveryIdempotencyLookupKey(eventId)) return false;
+  // Like the room's evening: once its half hour is over, unsent work ends and sent work stops being polled.
+  if (now.getTime() >= receipt.createdAt.getTime() + 30 * 60_000) {
+    const published = receipt.status === "generation_queued";
+    if (!published && await readHostedMailboxItemByDedupeKey({ dedupeKey: eventId, userId: memberId })) return false;
+    await getPrisma().hostedLinqDelivery.updateMany({ where: { id: receipt.id, status: receipt.status },
+      data: published ? { retryAfterAt: null } : { status: "skipped", skippedAt: now, skipReason: "game_private_evening_expired", retryAfterAt: null } });
+    return false;
+  }
   if (receipt.status === "generation_queued") {
     const policy = await readPrivateEveningDeliveryAuthority(eventId, memberId);
     if (!policy || !await getPrisma().$transaction(tx => isPrivateEveningCurrentTx(policy, tx, now))) return false;
     return recoverGameNotificationPointer(receipt.id, memberId, eventId);
   }
-  const published = await publishPrivateEveningCheckIn(memberId, date, now);
-  if (!published && now.getTime() >= receipt.createdAt.getTime() + 30 * 60_000) {
-    await getPrisma().hostedLinqDelivery.updateMany({ where: { id: receipt.id, status: "awaiting_generation" },
-      data: { status: "skipped", skippedAt: now, skipReason: "game_private_evening_expired", retryAfterAt: null } });
-  }
-  return published;
+  return publishPrivateEveningCheckIn(memberId, date, minutes, now);
 }
 
 async function processEveningCheckInIntent(receipt: GameChatIntent, now: Date): Promise<boolean> {

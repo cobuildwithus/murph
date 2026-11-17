@@ -199,11 +199,13 @@ const BLOCK_GAME_LIMIT = 50;
 export async function readGameReminders(memberId: string, db: Db = getPrisma()): Promise<GameReminders> {
   const [profile, seats] = await Promise.all([
     db.gameProfile.findUnique({ where: { memberId }, select: { reminderMinutes: true, reminderPush: true, reminderText: true } }),
-    db.gamePlayer.findMany({ where: { memberId, reminderOff: true, game: { status: "live" } }, select: { gameId: true }, orderBy: { gameId: "asc" } }),
+    db.gamePlayer.findMany({ where: { memberId, OR: [{ reminderOff: true }, { reminderMinutes: { not: null } }], game: { status: "live" } },
+      select: { gameId: true, reminderOff: true, reminderMinutes: true }, orderBy: { gameId: "asc" } }),
   ]);
   const canText = await canTextGameReminders(memberId, db);
   return { minutes: profile?.reminderMinutes ?? 1140, push: profile?.reminderPush ?? true, text: profile?.reminderText ?? false,
-    canText, offGameIds: seats.map(seat => seat.gameId) };
+    canText, offGameIds: seats.filter(seat => seat.reminderOff).map(seat => seat.gameId),
+    gameMinutes: Object.fromEntries(seats.flatMap(seat => seat.reminderMinutes === null ? [] : [[seat.gameId, seat.reminderMinutes]])) };
 }
 
 /** A game never grants private AI access or creates a new direct route. Linq only: its egress holds the final game and pause checks. */
@@ -289,11 +291,13 @@ async function saveGameReminders(input: Parameters<typeof runGameCommand>[0], co
   return commandTransaction(input, async tx => {
     const actor = input.actorMemberId;
     if (command.text && !await canTextGameReminders(actor, tx)) reject("INVALID_REQUEST", "Private texts aren't available for this account right now.");
+    // A time for some games is theirs alone: the default time and every other game stay.
     const saved = await tx.gameProfile.updateMany({ where: { memberId: actor }, data: {
-      reminderMinutes: command.minutes, reminderPush: command.push, reminderText: command.text,
+      ...(command.timeForGameIds ? {} : { reminderMinutes: command.minutes }), reminderPush: command.push, reminderText: command.text,
     } });
     if (!saved.count) reject("PROFILE_REQUIRED", "Add your first name and time zone first.");
-    await recordGameReminderPreferencesTx(tx, actor, command.everyDayGameIds !== undefined);
+    await recordGameReminderPreferencesTx(tx, actor, { everyDay: command.everyDayGameIds !== undefined,
+      minutes: command.gameMinutes !== undefined || (command.timeForGameIds ?? false) });
     // A seat admitted after the recorded choice keeps its own activation defaults.
     // Keep choice lists out of the row lookup: sparse event statistics can otherwise
     // make PostgreSQL repeat a large ID-list bitmap scan for every admitted seat.
@@ -302,7 +306,11 @@ async function saveGameReminders(input: Parameters<typeof runGameCommand>[0], co
       SET reminder_off = seat.game_id = ANY(${command.offGameIds}::text[]),
         reminder_every_day = CASE WHEN ${command.everyDayGameIds !== undefined}
           THEN seat.game_id = ANY(${command.everyDayGameIds ?? []}::text[])
-          ELSE seat.reminder_every_day END
+          ELSE seat.reminder_every_day END,
+        reminder_minutes = CASE WHEN ${command.gameMinutes !== undefined}
+            THEN (${JSON.stringify(command.gameMinutes ?? {})}::jsonb ->> seat.game_id)::int
+          WHEN seat.game_id = ANY(${command.timeForGameIds ?? []}::text[]) THEN ${command.minutes}::int
+          ELSE seat.reminder_minutes END
       FROM game
       WHERE game.id = seat.game_id AND game.status = 'live' AND seat.member_id = ${actor}
         AND EXISTS (SELECT 1 FROM game_event choice WHERE choice.game_id = game.id
@@ -386,17 +394,21 @@ async function setGameChatReminder(input: Parameters<typeof runGameChatUpdate>[0
   await requireSelectedGameChatReminder(input, update);
   const current = await readGameReminders(input.actorMemberId);
   const seats = await getPrisma().gamePlayer.findMany({ where: { memberId: input.actorMemberId, leftAt: null, game: { status: "live" } },
-    select: { gameId: true, reminderEveryDay: true }, take: 1001 });
+    select: { gameId: true, reminderEveryDay: true, game: { select: { chatContainerMemberId: true } } }, take: 1001 });
   if (seats.length > 1000) reject("INVALID_REQUEST", "Too many open games to save reminders.");
+  // A time set in a group chat is for that chat's games only, never the player's other games.
+  const chatGames = update.gameId ? [update.gameId]
+    : seats.filter(seat => input.chatContainerMemberId && seat.game.chatContainerMemberId === input.chatContainerMemberId).map(seat => seat.gameId);
+  if (!chatGames.length) reject("NOT_A_PLAYER", "Choose one of your live games in this chat.");
   const off = new Set(current.offGameIds);
   if (update.gameId && update.on !== undefined) update.on ? off.delete(update.gameId) : off.add(update.gameId);
   const { update: _update, ...context } = input;
   const result = await runGameCommand({ ...context, command: { type: "setReminders", minutes: update.minutes ?? current.minutes,
-    push: current.push, text: current.text && current.canText, offGameIds: [...off],
+    timeForGameIds: update.minutes === undefined ? [] : chatGames, push: current.push, text: current.text && current.canText, offGameIds: [...off],
     everyDayGameIds: seats.filter(seat => seat.reminderEveryDay).map(seat => seat.gameId) } });
   if (!result.ok) return result;
   const [route] = await readGamePushRoutes(getPrisma(), [input.actorMemberId], true);
-  const selected = (update.gameId ? [update.gameId] : seats.map(seat => seat.gameId)).filter(gameId => !result.reminders?.offGameIds.includes(gameId));
+  const selected = chatGames.filter(gameId => !result.reminders?.offGameIds.includes(gameId));
   const { readPrivatelyTextedGameIds } = await import("./evening-check-in");
   const texted = await readPrivatelyTextedGameIds(selected, new Date());
   const reaches = result.reminders ? gameReminderReach(result.reminders, { on: selected.length > 0, textedPrivately: texted.size > 0 }, Boolean(route)) : "none";

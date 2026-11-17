@@ -119,11 +119,12 @@ describe('game dynamic tools', () => {
     expect(describeMyGameReminders(refused)).toBe(refused)
   })
   it('states the reminder facts the replies rely on, without the every-evening wording', () => {
-    expect(MURPH_MY_GAME_REMINDERS_TOOL.description).toContain('One time covers all of their games')
+    expect(MURPH_MY_GAME_REMINDERS_TOOL.description).toContain('Each game has its own time')
+    expect(MURPH_MY_GAME_REMINDERS_TOOL.description).toContain('with gameId for that game only or without for all games')
     expect(MURPH_MY_GAME_REMINDERS_TOOL.description).toContain('for an any-N-days game everyDay')
     expect(MURPH_MY_GAME_REMINDERS_TOOL.description).toContain("A game in a group chat gets that chat's evening check-in instead")
     expect(MURPH_MY_GAME_REMINDERS_TOOL.description).not.toMatch(/every evening/u)
-    expect(GAME_REMINDER_GUIDANCE).toContain("One time covers all of that player's games")
+    expect(GAME_REMINDER_GUIDANCE).toContain("The time is for this chat's game only")
     expect(GAME_REMINDER_GUIDANCE).toContain("this chat gets Murph's evening check-in on game days")
   })
   it.each([

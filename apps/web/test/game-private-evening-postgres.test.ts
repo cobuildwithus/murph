@@ -47,7 +47,7 @@ async function game(owner: string, room?: string, peer?: string) {
       ...(peer ? [{ memberId: peer, seat: 1, timeZone: "UTC", dayOne: new Date("2026-11-06T00:00:00Z"), joinedAt: now }] : [])] } } });
   return id;
 }
-function key(memberId: string, on = date) { return createHostedLinqDeliveryIdempotencyLookupKey(privateEveningEventId(memberId, on))!; }
+function key(memberId: string, on = date, minutes = 1140) { return createHostedLinqDeliveryIdempotencyLookupKey(privateEveningEventId(memberId, on, minutes))!; }
 
 describe.skipIf(!enabled)("private game evening PostgreSQL", () => {
   beforeEach(() => {
@@ -69,11 +69,28 @@ describe.skipIf(!enabled)("private game evening PostgreSQL", () => {
     expect(await reserveDuePrivateEveningCheckIns(now)).toBe(1);
     expect(await reserveDuePrivateEveningCheckIns(now)).toBe(0);
     const receipt = await db.hostedLinqDelivery.findUnique({ where: { idempotencyKey: key(owner) } });
-    expect(receipt).toMatchObject({ sourceRef: `${owner}:${date}`, template: "game_private_evening", payloadOwnerMemberId: owner });
-    const policy = { kind: "game_private_evening_check_in" as const, eventId: privateEveningEventId(owner, date), memberId: owner, date,
+    expect(receipt).toMatchObject({ sourceRef: `${owner}:${date}:1140`, template: "game_private_evening", payloadOwnerMemberId: owner });
+    const policy = { kind: "game_private_evening_check_in" as const, eventId: privateEveningEventId(owner, date, 1140), memberId: owner, date,
       expiresAt: "2026-11-06T20:30:00.000Z", conversationLaneSeq: "0", batch: [{ gameId: id, termsVersion: 1, dayIndex: 0 }] };
     await db.gameEntry.create({ data: { id: randomUUID(), gameId: id, memberId: owner, dayIndex: 0, attempt: 1, kind: "words", receivedAt: now } });
     expect(await db.$transaction(tx => isPrivateEveningCurrentTx(policy, tx, now))).toBe(false);
+  });
+
+  it("texts each game an hour after its own time, with only the games at that time", async () => {
+    const owner = await member(), evening = await game(owner), noon = await game(owner);
+    await db.gamePlayer.update({ where: { gameId_memberId: { gameId: noon, memberId: owner } }, data: { reminderMinutes: 720 } });
+    const policy = (eventId: string, expiresAt: string, gameIds: string[]) => ({ kind: "game_private_evening_check_in" as const, eventId, memberId: owner, date,
+      expiresAt, conversationLaneSeq: "0", batch: gameIds.map(gameId => ({ gameId, termsVersion: 1, dayIndex: 0 })) });
+    expect(await reserveDuePrivateEveningCheckIns(now)).toBe(1);
+    expect(await db.hostedLinqDelivery.findUnique({ where: { idempotencyKey: key(owner) } })).toMatchObject({ sourceRef: `${owner}:${date}:1140` });
+    const atSeven = privateEveningEventId(owner, date, 1140);
+    expect(await db.$transaction(tx => isPrivateEveningCurrentTx(policy(atSeven, "2026-11-06T20:30:00.000Z", [evening]), tx, now))).toBe(true);
+    expect(await db.$transaction(tx => isPrivateEveningCurrentTx(policy(atSeven, "2026-11-06T20:30:00.000Z", [evening, noon].sort()), tx, now))).toBe(false);
+    const one = new Date("2026-11-06T13:00:00Z"), atNoon = privateEveningEventId(owner, date, 720);
+    expect(await reserveDuePrivateEveningCheckIns(one)).toBe(1);
+    expect(await db.hostedLinqDelivery.findUnique({ where: { idempotencyKey: key(owner, date, 720) } })).toMatchObject({ sourceRef: `${owner}:${date}:720` });
+    expect(await db.$transaction(tx => isPrivateEveningCurrentTx(policy(atNoon, "2026-11-06T13:30:00.000Z", [noon]), tx, one))).toBe(true);
+    expect(await reserveDuePrivateEveningCheckIns(one)).toBe(0);
   });
 
   it("names the games that get the private text: no group chat, or players hours apart", async () => {
@@ -86,21 +103,44 @@ describe.skipIf(!enabled)("private game evening PostgreSQL", () => {
     expect([...await readPrivatelyTextedGameIds([together], now)]).toEqual([together]);
   });
 
-  it("pauses after three accepted unanswered evenings", async () => {
+  it("pauses after three accepted unanswered texts at any of their times, though dispatch rewrote their receipts", async () => {
     const owner = await member(); await game(owner);
-    for (const [index, day] of ["2026-11-03", "2026-11-04", "2026-11-05"].entries()) {
-      const idempotencyKey = key(owner, day);
-      await db.hostedLinqDelivery.create({ data: { id: `private_evening_${randomUUID()}`, idempotencyKey, source: "game_lifecycle",
-        sourceRef: `${owner}:${day}`, template: "game_private_evening", status: "sent", targetKind: "thread",
-        payloadOwnerMemberId: owner, attemptedAt: new Date(`2026-11-0${index + 3}T20:00:00Z`),
-        acceptedAt: new Date(`${day}T20:00:00Z`), createdAt: new Date(`${day}T20:00:00Z`) } });
+    const sent = [["2026-11-03", 1140, "accepted"], ["2026-11-05", 720, "accepted"], ["2026-11-05", 1140, "failed"], ["2026-11-05", 1200, "accepted"]] as const;
+    for (const [index, [day, minutes, status]] of sent.entries()) {
+      const eventId = privateEveningEventId(owner, day, minutes), at = new Date(`${day}T${String(10 + index).padStart(2, "0")}:00:00Z`);
+      await db.hostedMailboxItem.create({ data: { id: `private_evening_wake_${randomUUID()}`, userId: owner, kind: "assistant.notification.requested",
+        lane: "notification", laneSeq: BigInt(index + 1), dedupeKey: eventId, occurredAt: at, createdAt: at, payloadSchema: "synthetic-private-evening" } });
+      // Dispatch keeps the idempotency key but rewrites the template and source fields.
+      await db.hostedLinqDelivery.create({ data: { id: `private_evening_${randomUUID()}`, idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(eventId)!,
+        source: "hosted_runtime_linq_delivery", sourceRef: "rewritten", template: null, status, targetKind: "thread", payloadOwnerMemberId: owner,
+        attemptedAt: at, createdAt: at, ...(status === "accepted" ? { acceptedAt: at } : {}) } });
     }
     expect(await reserveDuePrivateEveningCheckIns(now)).toBe(0);
+    await db.$transaction(tx => appendHostedMailboxEnvelopeTx({ tx, envelope: buildHostedExecutionTelegramConversationMessageWake({
+      eventId: `private-evening-reply-${randomUUID()}`, userId: owner, occurredAt: now.toISOString(),
+      telegramMessage: { messageId: "2", schema: "murph.hosted-telegram-message.v1", text: "on it", threadId: "123", threadIsDirect: true },
+    }) }));
+    expect(await reserveDuePrivateEveningCheckIns(now)).toBe(1);
+  });
+
+  it("ends an unsent receipt once its half hour is over, and stops polling a sent one", async () => {
+    const owner = await member(); await game(owner);
+    expect(await reserveDuePrivateEveningCheckIns(now)).toBe(1);
+    const receipt = await db.hostedLinqDelivery.findUniqueOrThrow({ where: { idempotencyKey: key(owner) } });
+    const { drainGameChatLifecycle } = await import("@/src/lib/game/chat-lifecycle");
+    await drainGameChatLifecycle({ now: new Date(now.getTime() + 31 * 60_000) });
+    expect(await db.hostedLinqDelivery.findUniqueOrThrow({ where: { id: receipt.id } }))
+      .toMatchObject({ status: "skipped", skipReason: "game_private_evening_expired", retryAfterAt: null });
+    // Sent work keeps its row and leaves the due sweep.
+    await db.hostedLinqDelivery.update({ where: { id: receipt.id }, data: { status: "generation_queued", skippedAt: null, skipReason: null,
+      retryAfterAt: new Date(now.getTime() + 31 * 60_000) } });
+    await drainGameChatLifecycle({ now: new Date(now.getTime() + 32 * 60_000) });
+    expect(await db.hostedLinqDelivery.findUniqueOrThrow({ where: { id: receipt.id } })).toMatchObject({ status: "generation_queued", retryAfterAt: null });
   });
 
   it("keeps a private evening current after the member writes", async () => {
     const owner = await member(), id = await game(owner);
-    const policy = { kind: "game_private_evening_check_in" as const, eventId: privateEveningEventId(owner, date), memberId: owner, date,
+    const policy = { kind: "game_private_evening_check_in" as const, eventId: privateEveningEventId(owner, date, 1140), memberId: owner, date,
       expiresAt: "2026-11-06T20:30:00.000Z", conversationLaneSeq: "0", batch: [{ gameId: id, termsVersion: 1, dayIndex: 0 }] };
     expect(await db.$transaction(tx => isPrivateEveningCurrentTx(policy, tx, now))).toBe(true);
     await db.$transaction(tx => appendHostedMailboxEnvelopeTx({ tx, envelope: buildHostedExecutionTelegramConversationMessageWake({
