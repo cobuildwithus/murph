@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createLinqProductionCanaryTokenSupplier } from "@/scripts/linq-production-canary-oidc";
+import { createGitHubActionsOidcTokenSupplier } from "@/scripts/github-actions-oidc-token";
 import { LINQ_PRODUCTION_CANARY_OIDC_AUDIENCE } from "@/src/lib/hosted-onboarding/linq-production-canary-contract";
 
 const source = {
@@ -15,7 +15,7 @@ describe("canary request-time GitHub OIDC supplier", () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(Response.json({ value: "synthetic-first-token" }))
       .mockResolvedValueOnce(Response.json({ value: "synthetic-next-token" }));
     vi.stubGlobal("fetch", fetchMock);
-    const getToken = createLinqProductionCanaryTokenSupplier(source);
+    const getToken = createGitHubActionsOidcTokenSupplier(source, LINQ_PRODUCTION_CANARY_OIDC_AUDIENCE);
     const signal = new AbortController().signal;
     await expect(getToken(signal)).resolves.toBe("synthetic-first-token");
     await expect(getToken(signal)).resolves.toBe("synthetic-next-token");
@@ -34,8 +34,8 @@ describe("canary request-time GitHub OIDC supplier", () => {
       else fetchMock.mockResolvedValue(mode === "status"
         ? new Response("synthetic-private-provider-details", { status: 403 })
         : Response.json(mode === "empty-token" ? { value: "" } : { unexpected: "synthetic-private-provider-details" }));
-      const getToken = createLinqProductionCanaryTokenSupplier(mode === "missing-config"
-        ? { MURPH_LINQ_PRODUCTION_CANARY_RESET_SECRET: "unused-static-secret" } : source);
+      const getToken = createGitHubActionsOidcTokenSupplier(mode === "missing-config"
+        ? { MURPH_LINQ_PRODUCTION_CANARY_RESET_SECRET: "unused-static-secret" } : source, LINQ_PRODUCTION_CANARY_OIDC_AUDIENCE);
       await expect(getToken(new AbortController().signal)).rejects.toMatchObject({
         name: "oidc-token-unavailable", message: "The Linq production canary failed.",
       });
@@ -49,7 +49,7 @@ describe("canary request-time GitHub OIDC supplier", () => {
       controller.abort();
       options.signal?.throwIfAborted();
     }));
-    await expect(createLinqProductionCanaryTokenSupplier(source)(controller.signal))
+    await expect(createGitHubActionsOidcTokenSupplier(source, LINQ_PRODUCTION_CANARY_OIDC_AUDIENCE)(controller.signal))
       .rejects.toMatchObject({ name: "oidc-token-unavailable" });
   });
 });

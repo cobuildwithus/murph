@@ -15,11 +15,12 @@ import {
 import {
   LINQ_PRODUCTION_CANARY_DIAGNOSTIC_TRACE_LIMIT,
   LINQ_PRODUCTION_CANARY_DIAGNOSTIC_WINDOW_MS,
+  LINQ_PRODUCTION_CANARY_OIDC_AUDIENCE,
   type LinqProductionCanaryDiagnostics,
   type LinqProductionCanaryLatencyTrace,
   type LinqProductionCanaryOutcome,
 } from "../src/lib/hosted-onboarding/linq-production-canary-contract";
-import { createLinqProductionCanaryTokenSupplier } from "./linq-production-canary-oidc";
+import { createGitHubActionsOidcTokenSupplier } from "./github-actions-oidc-token";
 import CANARY_TURNS from "./fixtures/linq-production-conversation.json";
 
 const CANARY_RESET_PATH =
@@ -511,7 +512,7 @@ function readLinqProductionCanaryConfig(
     source,
     "SPECTRUM_PROJECT_SECRET",
   );
-  const getToken = createLinqProductionCanaryTokenSupplier(source);
+  const getToken = createGitHubActionsOidcTokenSupplier(source, LINQ_PRODUCTION_CANARY_OIDC_AUDIENCE);
   const targetPhoneNumber = requireEnvironmentValue(
     source,
     "MURPH_LINQ_PRODUCTION_CANARY_TARGET_PHONE_NUMBER",

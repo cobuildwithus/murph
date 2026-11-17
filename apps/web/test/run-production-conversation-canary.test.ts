@@ -17,8 +17,8 @@ const mocks = vi.hoisted(() => ({
   getToken: vi.fn(),
 }));
 
-vi.mock("@/scripts/linq-production-canary-oidc", () => ({
-  createLinqProductionCanaryTokenSupplier: () => mocks.getToken,
+vi.mock("@/scripts/github-actions-oidc-token", () => ({
+  createGitHubActionsOidcTokenSupplier: () => mocks.getToken,
 }));
 
 vi.mock("node:timers/promises", () => ({ setTimeout: mocks.delay }));

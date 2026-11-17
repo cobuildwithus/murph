@@ -1,7 +1,8 @@
-import { LINQ_PRODUCTION_CANARY_OIDC_AUDIENCE } from "../src/lib/hosted-onboarding/linq-production-canary-contract";
-
-/** Acquire at request time: a journey can outlive many GitHub ID tokens. */
-export function createLinqProductionCanaryTokenSupplier(source: Readonly<Record<string, string | undefined>>) {
+/** Fetch a fresh GitHub Actions ID token per call: a journey can outlive many tokens. */
+export function createGitHubActionsOidcTokenSupplier(
+  source: Readonly<Record<string, string | undefined>>,
+  audience: string,
+) {
   return async (signal: AbortSignal): Promise<string> => {
     try {
       const requestUrl = source.ACTIONS_ID_TOKEN_REQUEST_URL;
@@ -9,7 +10,7 @@ export function createLinqProductionCanaryTokenSupplier(source: Readonly<Record<
       if (!requestUrl || !requestToken) throw new Error();
       const url = new URL(requestUrl);
       if (url.protocol !== "https:" || url.username || url.password || url.hash) throw new Error();
-      url.searchParams.set("audience", LINQ_PRODUCTION_CANARY_OIDC_AUDIENCE);
+      url.searchParams.set("audience", audience);
       const response = await fetch(url, {
         headers: { authorization: `Bearer ${requestToken}` },
         redirect: "error",
