@@ -367,6 +367,8 @@ describe("official Stripe Checkout fixture diagnostics", () => {
     ["payment decline", 402, "card_error", "card_declined", "payment_method"],
     ["payment authentication", 402, "card_error", "authentication_required", "payment_method"],
     ["payment state", 400, "invalid_request_error", "payment_intent_unexpected_state", undefined],
+    ["payment method state", 400, "invalid_request_error", "payment_method_unexpected_state", "payment_method"],
+    ["payment method address", 400, "invalid_request_error", "payment_method_billing_details_address_missing", "payment_method"],
     ["API failure", 500, "api_error", undefined, undefined],
     ["idempotency mismatch", 400, "idempotency_error", undefined, undefined],
   ] as const)("distinguishes %s through the sanitizer", async (

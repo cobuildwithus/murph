@@ -858,10 +858,16 @@ function formatStripeFixtureRejection(body: string | null): string {
     const type = [
       "api_error", "card_error", "idempotency_error", "invalid_request_error",
     ].find((value) => "type" in error && error.type === value) ?? "unknown";
+    // Documented Stripe codes only. The confirm step's payment_method rejection
+    // reported none of the original seven, so name the payment-method ones.
     const code = [
       "parameter_missing", "parameter_unknown", "parameter_invalid_integer",
       "resource_missing", "card_declined", "authentication_required",
-      "payment_intent_unexpected_state",
+      "payment_intent_unexpected_state", "parameter_invalid_empty",
+      "payment_method_invalid_parameter", "payment_method_unexpected_state",
+      "payment_method_unactivated", "payment_method_not_available",
+      "payment_intent_incompatible_payment_method",
+      "payment_method_billing_details_address_missing",
     ].find((value) => "code" in error && error.code === value) ?? "unknown";
     const param = [
       "expected_amount", "payment_method",
