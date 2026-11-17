@@ -106,7 +106,8 @@ describe.skipIf(!enabled)("Friends deferred inference with PostgreSQL", () => {
       ...["total", "days", "landmark", "route", "health"].map(kind => ({ key: `keep:${kind}`, kind,
         measureId: "synthetic", subjectMemberId: null, on: "2026-11-01", data: { value: 100, page: "totals", evaluator: 1 } })),
     ], async () => {});
-    const kept = (await readAwards(ava)).filter(award => award.kind !== "streak");
+    const kept = await readAwards(ava);
+    expect(kept.map(award => award.kind).sort()).toEqual(["days", "health", "landmark", "route", "total"]);
     expect(await removeProgressStreakAwards()).toBe(105);
     expect(await readAwards(ava)).toEqual(kept);
     expect(await removeProgressStreakAwards()).toBe(0);
