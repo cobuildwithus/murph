@@ -68,7 +68,7 @@ const member = {
   companionLastContactAt: null, companionLastForegroundAt: null,
 };
 const db = {
-  $queryRaw: vi.fn(), $transaction: vi.fn(),
+  $executeRaw: vi.fn(), $queryRaw: vi.fn(), $transaction: vi.fn(),
   hostedMember: { findUnique: vi.fn(), findUniqueOrThrow: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
   hostedThreadContainer: { findUnique: vi.fn() },
   hostedAccountGroupMembership: { findFirst: vi.fn() },

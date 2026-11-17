@@ -12,6 +12,8 @@ import { buildHostedDeviceSyncWake } from "@/src/lib/device-sync/wake";
 import { runHostedDeviceSyncDueReconcileSweeper } from "@/src/lib/device-sync/due-reconcile-sweeper";
 import { runHostedDeviceSyncRecoverySweep } from "@/src/lib/device-sync/recovery-sweeper";
 import { runHostedDeviceSyncDeferredWakeSweeper } from "@/src/lib/device-sync/deferred-wake-sweeper";
+import { postponeHostedDeviceSyncQuietReconcile } from "@/src/lib/device-sync/quiet-member";
+import { pullForwardHostedDeviceSyncQuietDeferrals } from "@/src/lib/device-sync/quiet-member-return";
 import { appendHostedDeviceSyncScheduledReconcileWake } from "@/src/lib/device-sync/wake-service";
 import * as cryptoEnv from "@/src/lib/hosted-crypto/env";
 import * as runtimeSignal from "@/src/lib/hosted-orchestration/signal-runtime";
@@ -109,6 +111,68 @@ describe.skipIf(!runPostgresProof)(
       await f.client.hostedConsentGrant.create({ data: { memberId: f.memberId, scope: "launch.health-data", status: "revoked",
         documentVersionsJson: {}, source: "web_onboarding", grantedAt: f.now, revokedAt: f.now } });
       expect(await select()).toEqual([]);
+    });
+
+    it("postpones a quiet member's reconcile under the admission lock and resumes on return", async () => {
+      const f = await seedDueBudgetConnection();
+      await f.client.hostedMember.update({
+        where: { id: f.memberId }, data: { createdAt: new Date(f.now.getTime() - 90 * 86_400_000) },
+      });
+      // Connected at 11:00 UTC; the 11:00-12:00 window has just ended.
+      const connection = {
+        connectedAt: new Date(f.now.getTime() - 3_600_000).toISOString(), connectionId: f.connectionId,
+        nextReconcileAt: f.now.toISOString(), userId: f.memberId,
+      };
+      const postpone = () => postponeHostedDeviceSyncQuietReconcile({
+        connection, now: f.now, prisma: f.client, store: f.options.store,
+      });
+      expect(await postpone()).toBe(true);
+      expect((await f.read()).nextReconcileAt).toEqual(new Date("2026-09-05T11:00:00.000Z"));
+      // The sweep's observation is now stale, so a repeat changes nothing.
+      expect(await postpone()).toBe(false);
+      expect((await f.read()).nextReconcileAt).toEqual(new Date("2026-09-05T11:00:00.000Z"));
+
+      const routine = new Date(f.now.getTime() + 20 * 60_000);
+      await f.client.deviceSyncDirtyConnection.create({ data: {
+        connectionId: f.connectionId, userId: f.memberId, provider: "oura", dirtyRevision: 2n, processedRevision: 1n,
+        firstDirtyAt: f.now, latestDirtyAt: f.now, wakeDeferredUntil: new Date("2026-09-05T11:10:00.000Z"),
+      } });
+      await pullForwardHostedDeviceSyncQuietDeferrals({ now: f.now, prisma: f.client, userId: f.memberId });
+      expect((await f.read()).dirtyState?.wakeDeferredUntil).toEqual(f.now);
+      // A routine 30-minute batch keeps its own timing.
+      await f.client.deviceSyncDirtyConnection.update({
+        where: { connectionId: f.connectionId }, data: { wakeDeferredUntil: routine },
+      });
+      await pullForwardHostedDeviceSyncQuietDeferrals({ now: f.now, prisma: f.client, userId: f.memberId });
+      expect((await f.read()).dirtyState?.wakeDeferredUntil).toEqual(routine);
+    });
+
+    it("leaves a deferred dirty batch to its sweeper instead of orphan recovery", async () => {
+      const f = await seedDueBudgetConnection();
+      await f.client.deviceSyncDirtyConnection.create({ data: {
+        connectionId: f.connectionId, userId: f.memberId, provider: "oura",
+        dirtyRevision: 2n, processedRevision: 1n, firstDirtyAt: f.now, latestDirtyAt: f.now,
+      } });
+      await f.client.hostedWorkspace.create({ data: { userId: f.memberId, redactedStatusJson: {
+        hostedMailboxSystemDeviceSyncContinuationSeqs: [],
+        hostedMailboxSystemFirstPendingSeq: null,
+        hostedMailboxSystemHandledThroughSeq: "3",
+      } } });
+      await f.client.hostedMailboxLaneCounter.create({ data: {
+        userId: f.memberId, lane: "system", nextSeq: 4n, consumedSeq: 3n,
+      } });
+      const select = () => f.options.store.listDueReconcileConnectionsForSweep({
+        dueAt: f.now, limit: 5, recoveryBucketStartedAt: f.now,
+      });
+      expect(await select()).toMatchObject([{ connectionId: f.connectionId, orphanedDirtyRecoveryKey: "3" }]);
+
+      await f.client.deviceSyncDirtyConnection.update({
+        where: { connectionId: f.connectionId },
+        data: { wakeDeferredUntil: new Date(f.now.getTime() + 3_600_000) },
+      });
+      const [deferred] = await select();
+      expect(deferred).toMatchObject({ connectionId: f.connectionId });
+      expect(deferred).not.toHaveProperty("orphanedDirtyRecoveryKey");
     });
 
     it("waits for pool checkout without returning an open transaction to the pool", async () => {

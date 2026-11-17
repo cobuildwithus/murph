@@ -112,6 +112,8 @@ import {
 import type { HostedDeviceConnectionSource } from "./prisma-store";
 import type { HostedDeviceSyncDirtyResource } from "./prisma-store";
 import type { HostedDeviceSyncDeferredDirtyWakeRecord } from "./prisma-store/dirty-connections";
+import { resolveHostedDeviceSyncQuietDirtyReleaseAt } from "./quiet-member";
+import { HOSTED_DEVICE_SYNC_ROUTINE_WAKE_DEFER_MS } from "./quiet-member-return";
 import {
   buildHostedTokenRefreshStateUnknownError,
   classifyHostedTokenRefreshLease,
@@ -3570,7 +3572,6 @@ const HOSTED_JUNCTION_ROUTINE_DAILY_RESOURCES = new Set([
   "stress_level",
   "vo2_max",
 ]);
-export const HOSTED_DEVICE_SYNC_ROUTINE_WAKE_DEFER_MS = 30 * 60_000;
 
 /**
  * Applies routine batching to a webhook's dirty-transition wake and returns
@@ -3580,6 +3581,7 @@ async function settleHostedDeviceSyncWebhookWakeDeferralTx(input: {
   acceptedAt: string;
   connectionId: string;
   eventType: string;
+  expectedConnectedAt: string;
   provider: string;
   shouldRequestWake: boolean;
   store: PrismaDeviceSyncControlPlaneStore;
@@ -3587,6 +3589,26 @@ async function settleHostedDeviceSyncWebhookWakeDeferralTx(input: {
   userId: string;
 }): Promise<boolean> {
   const routine = isHostedJunctionRoutineDailyTotalWebhook(input);
+  const claimsPendingBatch = !input.shouldRequestWake && !routine && input.provider === "junction";
+  if (!input.shouldRequestWake && !claimsPendingBatch) return false;
+  // A quiet member's device data waits for the connection's daily window.
+  const quietReleaseAt = await resolveHostedDeviceSyncQuietDirtyReleaseAt({
+    connectedAt: input.expectedConnectedAt,
+    memberId: input.userId,
+    now: new Date(input.acceptedAt),
+    prisma: input.tx,
+  });
+  if (quietReleaseAt) {
+    if (input.shouldRequestWake) {
+      await input.store.deferDirtyConnectionWakeTx({
+        connectionId: input.connectionId,
+        deferredUntil: quietReleaseAt,
+        tx: input.tx,
+        userId: input.userId,
+      });
+    }
+    return false;
+  }
   if (input.shouldRequestWake && routine) {
     // The recovery sweep releases this batch's ordinary dirty wake unless
     // runtime work drains the connection first.
@@ -3600,7 +3622,7 @@ async function settleHostedDeviceSyncWebhookWakeDeferralTx(input: {
     });
     return false;
   }
-  if (!input.shouldRequestWake && !routine && input.provider === "junction") {
+  if (claimsPendingBatch) {
     // Clearing the batch and appending its ordinary wake share this transaction.
     // A concurrent hint or sweep can no longer release the same pending batch.
     return input.store.claimDeferredDirtyConnectionWakeTx({

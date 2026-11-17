@@ -4,10 +4,25 @@ import {
   HOSTED_AUTOMATION_ENGAGEMENT_WINDOW_DAYS,
   claimHostedLinqSignupLinkReminderNotice,
   hasHostedLinqInboundWithinDays,
+  incrementHostedLinqInboundDailyState,
   releaseHostedLinqSignupLinkReminderNoticeClaim,
 } from "@/src/lib/hosted-onboarding/linq-daily-state";
 
 describe("hosted Linq daily state", () => {
+  it("pulls a quiet member's held device sync forward when they text", async () => {
+    const executeRaw = vi.fn().mockResolvedValue(0);
+    const upsert = vi.fn().mockResolvedValue({});
+    await incrementHostedLinqInboundDailyState({
+      memberId: "member_back",
+      occurredAt: "2026-11-17T12:00:00.000Z",
+      prisma: { $executeRaw: executeRaw, hostedLinqDailyState: { upsert } } as never,
+    });
+    expect(executeRaw).toHaveBeenCalledOnce();
+    expect(executeRaw.mock.calls[0][0].sql).toContain("UPDATE \"device_sync_dirty_connection\"");
+    expect(executeRaw.mock.calls[0][0].values).toContain("member_back");
+    expect(upsert).toHaveBeenCalledOnce();
+  });
+
   it.each([0, 1])("atomically claims a reminder only when one daily row was updated (%s)", async (count) => {
     const updateMany = vi.fn().mockResolvedValue({ count });
     const sentAt = new Date("2026-07-26T00:01:00.000Z");

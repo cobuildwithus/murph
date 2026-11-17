@@ -2,8 +2,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   appendHostedDeviceSyncScheduledReconcileWake: vi.fn(),
+  postponeQuiet: vi.fn(),
   preflight: vi.fn(),
 }));
+
+vi.mock("@/src/lib/device-sync/quiet-member", () => ({ postponeHostedDeviceSyncQuietReconcile: mocks.postponeQuiet }));
 
 vi.mock("@/src/lib/device-sync/scheduled-reconcile-preflight", () => ({ preflightHostedScheduledReconcile: mocks.preflight }));
 
@@ -28,6 +31,7 @@ import {
 describe("hosted device-sync due reconcile sweeper", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.postponeQuiet.mockResolvedValue(false);
     mocks.preflight.mockResolvedValue({
       outcome: "ineligible", reason: "no_proof", wakeAvoided: false,
       requestCount: 0, recordCount: 0, responseBytes: 0, elapsedMs: 0,
@@ -165,6 +169,43 @@ describe("hosted device-sync due reconcile sweeper", () => {
         reasons: { content_unchanged: 7 },
         webhookAgeOutcomes: { "unavailable:unchanged": 7 },
       } }));
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("moves quiet members to their daily window without probing or waking, never holding dirty recovery", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "performance", "setTimeout", "clearTimeout"] });
+    try {
+      const rows = ["orphaned", "quiet", "active"].map((name) => ({
+        connectionId: `synthetic-${name}`, userId: `synthetic-member-${name}`,
+        provider: "junction", connectedAt: "2026-01-01T00:00:00.000Z", nextReconcileAt: "2026-01-02T00:00:00.000Z",
+        ...(name === "orphaned" ? { orphanedDirtyRecoveryKey: "1" } : {}),
+      }));
+      mocks.postponeQuiet.mockImplementation(async ({ connection }) => connection.connectionId === "synthetic-quiet");
+      const logger = buildLogger();
+      const run = runHostedDeviceSyncDueReconcileSweeper({ logger, store: buildStore(rows), wakeLimit: 3 });
+      await vi.runAllTimersAsync();
+      expect(await run).toMatchObject({ wakeAccepted: 2, wakeAttempted: 2 });
+      expect(mocks.postponeQuiet.mock.calls.map(([input]) => input.connection.connectionId).sort())
+        .toEqual(["synthetic-active", "synthetic-quiet"]);
+      expect(mocks.preflight.mock.calls.map(([input]) => input.connection.connectionId)).toEqual(["synthetic-active"]);
+      expect(mocks.appendHostedDeviceSyncScheduledReconcileWake.mock.calls.map(([wake]) => wake.connectionId).sort())
+        .toEqual(["synthetic-active", "synthetic-orphaned"]);
+      expect(logger.info).toHaveBeenLastCalledWith(expect.any(String), expect.objectContaining({ quietPostponed: 1 }));
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("keeps the ordinary wake when the quiet check fails", async () => {
+    vi.useFakeTimers();
+    try {
+      mocks.postponeQuiet.mockRejectedValue(new Error("synthetic database outage"));
+      const logger = buildLogger();
+      const run = runHostedDeviceSyncDueReconcileSweeper({ logger, store: buildStore([{
+        connectionId: "synthetic-quiet-check-failed", userId: "synthetic-member", provider: "junction",
+        connectedAt: "2026-01-01T00:00:00.000Z", nextReconcileAt: "2026-01-02T00:00:00.000Z",
+      }]) });
+      await vi.runAllTimersAsync();
+      expect(await run).toMatchObject({ wakeAccepted: 1, wakeAttempted: 1 });
+      expect(JSON.stringify(logger.info.mock.calls)).not.toContain("synthetic database outage");
     } finally { vi.useRealTimers(); }
   });
 
