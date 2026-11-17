@@ -2788,6 +2788,38 @@ Dev-only helpers for iterating on UI. All guarded by `process.env.NODE_ENV !== "
 - `/join/<inviteCode>?preview=<stage>` and `/join/<inviteCode>/success?preview=<stage>` render any signup-flow stage without a real invite. Stages: `invalid`, `expired`, `verify`, `checkout`, `messaging-setup`, `blocked`, `active`, `active-pending`. Disables the status-refresh poll so the mocked status is not overwritten.
 - CSP allows `https://ui.sh` only in development so the `ui-picker` toolbar can load during design iteration. Production CSP is unchanged.
 
+## APNs provider signing
+
+`APNS_TEAM_ID` and `APNS_KEY_ID` identify the Apple provider. Set the non-secret
+`APNS_KMS_KEY_VERSION` to the full KMS version resource name to sign ES256
+provider tokens through the existing hosted-crypto Vercel OIDC / Google KMS
+client. That mode never reads `APNS_PRIVATE_KEY`, including on signing failure.
+Without a KMS version, the transitional `APNS_PRIVATE_KEY` PEM path remains.
+Missing credentials or failed signing produce `failed`, with no static-key
+fallback. Tokens are reused for 40 minutes; concurrent refreshes share signing.
+
+Game delivery and Apple Health reopen reminders prepare the provider token
+outside transactions, before their final route/session or eligibility checks.
+Apple Health still checks configuration before claiming a reminder. Once claimed,
+a failed or superseded send consumes that step; there is no retry queue.
+
+This rollout rotates the Apple key, not just its storage:
+
+1. Create a **new** APNs key in Apple Developer and retain its new key ID.
+2. After the separate import-tool PR lands, import the new `.p8` using
+   `scripts/import-signing-key-to-kms.sh projects/murph-495013/locations/global/keyRings/murph-hosted/cryptoKeys/apns-provider-token ec-sign-p256-sha256 <AuthKey.p8>`.
+   The key is import-only `EC_SIGN_P256_SHA256`; its initial imported version is 1.
+3. Set `APNS_KMS_KEY_VERSION` to
+   `projects/murph-495013/locations/global/keyRings/murph-hosted/cryptoKeys/apns-provider-token/cryptoKeyVersions/1`
+   and `APNS_KEY_ID` to that **new Apple key ID** together in Vercel production.
+   Keep `APNS_TEAM_ID`. The existing `vercel-hosted-crypto` service account
+   already holds `roles/cloudkms.signer` on this key.
+4. Deploy and verify a push. A missing import, mismatched key ID/version, or
+   federation/signing failure stops pushes; the old PEM cannot rescue KMS mode.
+5. Delete `APNS_PRIVATE_KEY`. After all old deployments drain, revoke the **old**
+   Apple key, never the new key imported into KMS. Remove the transitional PEM
+   code in a follow-up after rotation is verified.
+
 ## Local verification
 
 - `pnpm --dir apps/web lint`
