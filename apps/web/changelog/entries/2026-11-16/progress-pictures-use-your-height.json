@@ -9,6 +9,6 @@
     "summary": "New Progress share pictures use your saved height to help preserve your real proportions.",
     "details": "When a recent height is available, it guides the image without appearing in the card or Messages text. Pictures still generate when no height is available.",
     "relevanceTags": ["progress", "games"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [5129]
   }
 }
