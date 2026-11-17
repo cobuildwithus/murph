@@ -80,4 +80,40 @@ describe("engine connected-app read lane", () => {
       })).rejects.toMatchObject(unsuccessful ? { code: 'CONNECTED_APPS_PROVIDER_UNAVAILABLE' } : { code: 'CONNECTED_APPS_RESULT_TOO_LARGE', httpStatus: 413 });
     }
   });
+
+  it('keeps only the fields the engine reads from Outlook search hits, so a busy mailbox fits the cap', async () => {
+    const recipients = Array.from({ length: 40 }, (_, index) => ({ emailAddress: { name: `Person ${index}`, address: `person${index}@example.test` } }));
+    const hit = (index: number) => ({
+      hitId: `hit-${index}`, rank: index, summary: 'Your booking reference',
+      resource: {
+        '@odata.type': '#microsoft.graph.message', subject: `Booking ${index}`, receivedDateTime: '2026-11-16T09:00:00Z',
+        sender: { emailAddress: { name: 'Airline', address: 'news@airline.test' } }, from: { emailAddress: { name: 'Airline', address: 'news@airline.test' } },
+        bodyPreview: 'Trip details', toRecipients: recipients, ccRecipients: recipients,
+        body: { contentType: 'text', content: 'Fare rules and travel conditions. '.repeat(60) },
+      },
+    });
+    const busy = { value: [{ hitsContainers: [{ hits: Array.from({ length: 25 }, (_, index) => hit(index)), total: 900, moreResultsAvailable: true }] }], next_page_token: 'opaque' };
+    expect(Buffer.byteLength(JSON.stringify(busy))).toBeGreaterThan(120_000);
+    const read = async (data: unknown) => {
+      const fetchImpl = vi.fn(async (url: string | URL | Request) => new URL(String(url)).pathname.endsWith('/connected_accounts')
+        ? json({ items: [{ id: 'account', status: 'ACTIVE', toolkit: { slug: 'outlook' } }], next_cursor: null })
+        : json({ successful: true, data }));
+      const result = await executeHostedConnectedAppsRequest({ memberId: 'synthetic-member', prisma: {} as never, fetchImpl,
+        request: { operation: 'read', input: { account: 'account', toolSlug: 'OUTLOOK_SEARCH_MESSAGES', arguments: { query: 'booking', size: 25 } } } });
+      return hostedConnectedAppsReadResultSchema.parse(result).data;
+    };
+
+    const page = await read(busy) as typeof busy;
+    expect(Object.keys(page).sort()).toEqual(['next_page_token', 'value']);
+    expect(page.value[0]!.hitsContainers[0]).toEqual({ hits: expect.any(Array), moreResultsAvailable: true });
+    expect(page.value[0]!.hitsContainers[0]!.hits[3]).toEqual({
+      hitId: 'hit-3', summary: 'Your booking reference',
+      resource: { subject: 'Booking 3', receivedDateTime: '2026-11-16T09:00:00Z', sender: hit(3).resource.sender, from: hit(3).resource.from, bodyPreview: 'Trip details' },
+    });
+    expect(page.value[0]!.hitsContainers[0]!.hits).toHaveLength(25);
+
+    // A shape the projection does not recognize reaches the engine unchanged.
+    const unknownShape = { value: [{ hitsContainers: 'unexpected' }] };
+    await expect(read(unknownShape)).resolves.toEqual(unknownShape);
+  });
 });

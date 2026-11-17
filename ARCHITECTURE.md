@@ -306,6 +306,9 @@ Mail query tiers are greedily packed once into stable batches of at most 1,800
 characters, including date bounds and exclusions. Each batch gets two pages of
 25 results per partition; merged message IDs are ordered newest first, and any
 batch cap or exhausted shared request budget produces incomplete coverage.
+Web returns mail search results as metadata only. Gmail asks for no payload,
+and Outlook search hits, which have no field selector, keep only the subject,
+sender, received time and preview, so a busy mailbox fits the read cap.
 It reconciles `activeAccounts` after acquisition from a complete inventory:
 retain previously active accounts that are still listed, add new Gmail/Outlook
 accounts only after complete or partial mail acquisition (calendar-only accounts
