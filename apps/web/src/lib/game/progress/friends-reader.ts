@@ -46,22 +46,10 @@ export async function readProgressFriends(auth: HostedNativeMemberAuth, query: F
     people = incomplete ? [] : people.filter(person => person.invited
       ? current.invited.some(invitee => invitee.memberId === person.memberId) : current.ids.includes(person.memberId));
     if (!incomplete && !health && games.pending.length === 0) {
-      const candidates = friendPasses({ measureId: query.measure, people });
-      await settleAwards(memberId, candidates, async tx => {
-        await assertGameMemberAuthCurrentTx(auth, tx);
-        for (const subject of [...new Set(candidates.map(candidate => candidate.subjectMemberId!))].sort()) await lockGamePair(tx, memberId, subject);
-        const atCommit = await friendCohortIds(memberId, tx);
-        if (atCommit.incomplete || people.some(person => !person.invited && !atCommit.ids.includes(person.memberId))) throw audienceChanged();
-      });
+      await settleGameFriendAwards(auth, games, people, [query.measure]);
     }
     await assertGameMemberAuthCurrentTx(auth, db);
-    scheduleInference(games.pending, async tx => {
-      await assertGameMemberAuthCurrentTx(auth, tx);
-      const owners = [...new Set(games.pending.map(task => task.memberId))].sort();
-      for (const owner of owners) if (owner !== memberId) await lockGamePair(tx, memberId, owner);
-      const atCommit = await friendCohortIds(memberId, tx);
-      if (atCommit.incomplete || owners.some(owner => !atCommit.ids.includes(owner))) throw audienceChanged();
-    });
+    scheduleFriendInference(auth, games.pending);
     const shareAudience = incomplete ? [] : sharingPreview(people, rooms.rooms, query.measure);
     return friendsView({ people, measure, pills, query, units, today: toLocalDayKey(new Date(), cohort.timeZone),
       shareAudience, incomplete, departureNotice: cohort.departureNotice });
@@ -72,12 +60,59 @@ export async function readProgressFriends(auth: HostedNativeMemberAuth, query: F
   }
 }
 
+/** All exercise pills share one cohort, one game-series read and one award commit. */
+export async function settleProgressFriends(auth: HostedNativeMemberAuth) {
+  const db = getPrisma(), memberId = auth.member.id;
+  await assertGameMemberAuthCurrentTx(auth, db);
+  const cohort = await readFriendCohort(memberId);
+  if (cohort.incomplete) return;
+  const joined = cohort.people.filter(person => !person.invited), ids = joined.map(person => person.memberId);
+  if (!joined.some(person => !person.me)) return;
+  const games = await readFriendGameSeries(ids);
+  if (games.incomplete) return;
+  const current = await friendCohortIds(memberId, db);
+  if (current.incomplete) return;
+  const people = joined.filter(person => current.ids.includes(person.memberId));
+  if (games.pending.length === 0) await settleGameFriendAwards(auth, games, people, friendExerciseIds(games, memberId, ids));
+  await assertGameMemberAuthCurrentTx(auth, db);
+  scheduleFriendInference(auth, games.pending.filter(task => task.memberId !== memberId));
+}
+
+async function settleGameFriendAwards(auth: HostedNativeMemberAuth, games: FriendGameSeries, people: FriendSeries[], measures: string[]) {
+  const memberId = auth.member.id;
+  const candidates = measures.flatMap(measureId => friendPasses({ measureId,
+    people: people.map(person => ({ ...person, daily: person.invited ? null : friendDaily(games.amounts.get(person.memberId) ?? [], measureId) })),
+  }));
+  await settleAwards(memberId, candidates, async tx => {
+    await assertGameMemberAuthCurrentTx(auth, tx);
+    for (const subject of [...new Set(candidates.map(candidate => candidate.subjectMemberId!))].sort()) await lockGamePair(tx, memberId, subject);
+    const atCommit = await friendCohortIds(memberId, tx);
+    if (atCommit.incomplete || people.some(person => !person.invited && !atCommit.ids.includes(person.memberId))) throw audienceChanged();
+  });
+}
+
+function scheduleFriendInference(auth: HostedNativeMemberAuth, pending: FriendGameSeries["pending"]) {
+  const memberId = auth.member.id;
+  scheduleInference(pending, async tx => {
+    await assertGameMemberAuthCurrentTx(auth, tx);
+    const owners = [...new Set(pending.map(task => task.memberId))].sort();
+    for (const owner of owners) if (owner !== memberId) await lockGamePair(tx, memberId, owner);
+    const atCommit = await friendCohortIds(memberId, tx);
+    if (atCommit.incomplete || owners.some(owner => !atCommit.ids.includes(owner))) throw audienceChanged();
+  });
+}
+
+function friendExerciseIds(games: FriendGameSeries, memberId: string, ids: string[]): string[] {
+  const mine = new Set((games.amounts.get(memberId) ?? []).map(day => day.measureId));
+  const shared = new Set(ids.filter(id => id !== memberId).flatMap(id => (games.amounts.get(id) ?? []).map(day => day.measureId)));
+  return [...mine].filter(id => ids.length === 1 || shared.has(id) || games.pending.length > 0);
+}
+
 /** Pending classifications must not remove the member's known exercise pills. */
 function friendPills(games: FriendGameSeries, memberId: string, ids: string[], selected: string): Friends["pills"] {
   const mine = new Set((games.amounts.get(memberId) ?? []).map(day => day.measureId));
-  const shared = new Set(ids.filter(id => id !== memberId).flatMap(id => (games.amounts.get(id) ?? []).map(day => day.measureId)));
   if (!["steps", "sleep"].includes(selected) && !mine.has(selected) && !games.incomplete && !games.pending.length) throw gameNotFound();
-  const exercises = [...mine].filter(id => ids.length === 1 || shared.has(id) || games.pending.length > 0);
+  const exercises = friendExerciseIds(games, memberId, ids);
   return [...exercises.map(id => games.measures.get(id)!),
     { id: "steps", label: "Steps", icon: "steps" }, { id: "sleep", label: "Sleep", icon: "sleep" }]
     .map(({ id, label, icon }) => ({ id, label, icon }));

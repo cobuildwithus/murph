@@ -23,6 +23,7 @@ export interface MeasureState {
   legs?: RouteLeg[];
   perDay?: number;
   baseline?: { value: number; from: Day; to: Day };
+  healthSettlement?: { savedAt: string; checkedAt: string; timeZone: string; profileTimeZone: string };
 }
 
 /** One state writer. Fields replace whole fields; an eligible baseline freezes once. */

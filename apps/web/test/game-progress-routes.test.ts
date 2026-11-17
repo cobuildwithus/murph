@@ -15,6 +15,7 @@ vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({
 }) }));
 vi.mock("@/src/lib/game/http/auth", () => ({ requireGameMemberAuth: mocks.auth, assertGameMemberAuthCurrentTx: mocks.current }));
 vi.mock("@/src/lib/browser-vault/authority", () => ({ assertBrowserVaultMemberAuthority: mocks.health }));
+vi.mock("@/src/lib/game/progress/settlement", () => ({ scheduleProgressSettlement: vi.fn() }));
 vi.mock("@/src/lib/game/progress/state", () => ({ patchMeasureState: mocks.patch }));
 vi.mock("@/src/lib/game/progress/mapbox", () => ({ resolveRoute: mocks.resolveRoute }));
 vi.mock("@/src/lib/game/progress/infer", async original => ({ ...await original<typeof import("../src/lib/game/progress/infer")>(),

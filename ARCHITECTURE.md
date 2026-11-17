@@ -6010,7 +6010,7 @@ inference. The following classification covers every column of exactly
 | Table | Encrypted content | Keyed lookup | Approved operational metadata |
 | --- | --- | --- | --- |
 | `game_progress_award` | `data_encrypted`: candidate key, kind, measure, subject, crossing day and numeric/content facts | `lookup`: member-bound award identity | `member_id`: owner FK; `subject_member_id`: nullable friend FK; `earned_on`: local calendar date for ordering; `created_at`: insertion order; `seen_at`: drawer acknowledgement |
-| `game_progress_measure` | `state_encrypted`: goal, latest checked found goal, frozen route legs/geometry/towns, per-day amount, frozen baseline | `lookup`: member-bound measure identity | `member_id`: owner FK; `updated_at`: mutation time |
+| `game_progress_measure` | `state_encrypted`: goal, latest checked found goal, frozen route legs/geometry/towns, per-day amount, frozen baseline, health settlement receipt | `lookup`: member-bound measure identity | `member_id`: owner FK; `updated_at`: mutation time |
 | `game_progress_pic` | `meta_encrypted`: measure identity | None | `id`: client UUID; `member_id`: owner FK; `storage_key`: random exclusive Progress object identity; `taken_at`: capture ordering; `retired_at`: permanent retirement time |
 | `game_progress_task_measure` | `measure_encrypted`: inferred name, quantity and unit | `lookup`: member-bound normalized task text plus check-in kind | `member_id`: owner FK; `created_at`: insertion time |
 | `game_progress_share` | None in the row; generated JPEG bytes are sealed in the Progress store | `award_lookup`: existing member-bound award identity | `member_id`: owner FK; `storage_key`: unique random Progress object identity; `status`: generating, ready, failed or retired; `created_at`: admission time; `failure_code`: nullable generation_failed, timeout or refused |
@@ -6297,16 +6297,28 @@ Moment `title` and nullable `line` are response-only words derived from the
 shown awards; shelf titles and details remain the medal's own. Grouped
 moments describe an earned day, without inventing a post or time of day.
 
-An ordinary complete games read uses ten domain queries including a nonempty
-settlement (profile twice, games, entries, task cache, measure state, award insert,
+An ordinary complete games read uses eleven domain queries including new award
+settlement (profile twice, games, entries, task cache, measure state, existing award lookups, award insert,
 award reads before and after settlement and live picture metadata), plus existing batched crypto and native/health
-authority owners. There are no per-game or per-entry database calls and at most
+authority owners. Settlement reads candidate lookups once for the member and seals
+only missing awards; when all exist it skips the profile read, sealing and write
+transaction. Inserts still skip duplicates to preserve concurrent append-only
+settlement. There are no per-game or per-entry database calls and at most
 one domain transaction/pooled connection at a time. First distance reads resolve
 one default route for all missing legs (11 provider requests total), then add
 two domain queries per new route through sequential state CAS writes. Native
 authority runs inside each short write transaction. Incomplete reads skip
 settlement and inference. Crypto and provider work stay outside transactions;
 each write rechecks current native-session authority inside its transaction.
+
+After a complete `readProgress`, the authenticated `GET /progress` boundary
+registers `scheduleProgressSettlement` with `after()`. Health and Friends settle
+sequentially after the response, each in a fresh domain-root unwrap-cache scope.
+Neither phase builds its page response. A failure does not stop the other phase
+or change Prizes; the batch logs only `PROGRESS_BACKGROUND_SETTLEMENT_FAILED`
+once, with no exception, member, task or health content. New medals appear on
+the next read. Incomplete main reads schedule neither phase. There is no queue,
+retry, new route or wire change; the next ordinary read can try unfinished work.
 
 Uncached untyped phrases are deduplicated and classified sequentially in
 `after()`, with one Responses and one Decisions call sharing an eight-second
@@ -6367,6 +6379,31 @@ after this shared read. Session and health authority are checked after vault
 decryption as well as before the read. A transport/decryption failure returns
 one retryable 503; Progress loads this input before proposing any baseline or
 health award. No source values or provider bodies enter error logs.
+`settleProgressHealth` owns baseline freeze, health/age scoring, journey and
+first-route initialization, and award settlement for both the Health page and
+the main read's background phase. The background phase checks the current
+session and browser-vault/health authority before reading saved input; absent
+authority or a missing replica produces no health writes. All effects keep the
+page's session and health checks in their committing transactions.
+
+The background cost gate reads the published replica pointer, profile and four
+health measure states before any Cloudflare session or replica decryption.
+After a successful entire batch, the sole state writer saves `healthSettlement`
+on the existing `restingHeartRate` measure. The receipt matches the replica's
+`generatedAt`, profile time zone, both member/vault local dates, and the vault's
+existing settled-step date (eight hours after day end). Repeated opens with
+unchanged inputs perform no Cloudflare session/decryption or health writes.
+Each successful load is reused for that publication/date-window tuple; the
+three existing date boundaries or a new publication make it eligible again. Failed or overlapping reads may repeat input work: this is a
+completion receipt, not a lease. A baseline's `updated_at` alone cannot prove
+that the later route and award writes succeeded. No new table or column is
+needed. The Health page always loads its chart input but never writes the
+receipt; only the background phase records its completion.
+An eligible batch has one saved-replica session, four metric evaluations, at
+most four baseline CAS writes, one first-route CAS, one award insert and one
+receipt CAS, sequentially. First-route resolution retains its eleven bounded
+Mapbox calls; later passes use frozen geometry. Crypto/provider work stays
+outside transactions, with at most one health transaction at a time.
 When that live read returns `NUMBERS_PROJECTION_UNAVAILABLE`, its retryable 503
 includes `error.details.health`, decoded by `savedHealthSchema`. This read-only
 payload holds join/today dates, win count and metric id/label/unit, baseline,
@@ -6438,6 +6475,7 @@ owners; no additional table or plaintext private field is introduced:
 | Owner | Fields |
 | --- | --- |
 | Measure `state_encrypted.baseline` | `value`, `from`, `to`: frozen health statistic and its observed-date window |
+| Measure `state_encrypted.healthSettlement` | `savedAt`, `checkedAt`, `timeZone`, `profileTimeZone`: sealed replica publication/evaluation timestamps and vault/member zones for the completed health batch; never exposed on the wire |
 | Health award `data_encrypted.data` | `level`, `baseline`, `value`, `amount`: held step facts; common `face`, `title`, `detail`, `page`, `evaluator`: medal presentation and scoring evidence |
 | Age award `data_encrypted.data` | `percentile`: held age crossing; common medal presentation and scoring evidence |
 | Friend award `data_encrypted.data` | `amount`, `otherAmount`: crossing facts; `face.member` contains subject id, name and avatar; common medal presentation and scoring evidence |
@@ -6475,6 +6513,18 @@ ranks; private rows have no rank, amount, chart line or gap. Caps set
 `Friends.incomplete` and settle nothing. Friend award commits recheck friendship
 and blocks while holding the affected pair locks. Health pills never produce
 friend awards.
+The main read's background Friends phase returns before game-series loading
+when no co-player has joined. Otherwise it uses one cohort and one game-series
+load for every exercise pill offered by the Friends page, without reading sharing
+rooms. It reuses the page's pill selection, pending-inference writer and guarded
+award commit, scheduling only other members' pending tasks because the foreground
+read already schedules the viewer's. Candidates for all exercise pills share one
+award insert; subject pair locks are deduplicated and sorted, then the complete
+audience is rechecked once at commit. Cohort/game caps and any pending
+classification prevent pass settlement. Steps/Sleep never enter health reads
+or friend awards in this phase. Collection bounds and crypto batches below
+apply once to the batch, rather than once per exercise; authority checks remain
+at their read and effect boundaries.
 The chart includes every ranked row within the existing reader cap, in ranking
 order. A ranked person with no points in the selected range has an empty point
 array; private and invited rows never have a chart entry.

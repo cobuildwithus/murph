@@ -17,17 +17,22 @@ export interface StoredAward extends Candidate {
 export async function settleAwards(memberId: string, candidates: readonly Candidate[], beforeMutationTx: BeforeProgressMutation): Promise<void> {
   if (candidates.length === 0) return;
   const db = getPrisma();
+  const keyed = candidates.map(candidate => ({ candidate, lookup: progressLookup(memberId, "award", [candidate.key]) }));
+  const existing = new Set((await db.gameProgressAward.findMany({
+    where: { memberId, lookup: { in: keyed.map(row => row.lookup) } }, select: { lookup: true },
+  })).map(row => row.lookup));
+  const fresh = keyed.filter(row => !existing.has(row.lookup));
+  if (fresh.length === 0) return;
   const profile = await db.gameProfile.findUniqueOrThrow({ where: { memberId }, select: { timeZone: true } });
   const now = new Date();
   const cutoff = addDays(formatTimeZoneDateTimeParts(now, profile.timeZone).dayKey, -7);
-  const lookups = candidates.map(candidate => progressLookup(memberId, "award", [candidate.key]));
-  const sealed = await sealProgressMany(memberId, candidates.map((candidate, index) => ({
-    table: "game_progress_award", rowId: lookups[index], field: "data", value: candidate,
+  const sealed = await sealProgressMany(memberId, fresh.map(({ candidate, lookup }) => ({
+    table: "game_progress_award", rowId: lookup, field: "data", value: candidate,
   })));
   await db.$transaction(async tx => {
     await beforeMutationTx(tx);
-    await tx.gameProgressAward.createMany({ skipDuplicates: true, data: candidates.map((candidate, index) => ({
-      memberId, lookup: lookups[index], subjectMemberId: candidate.subjectMemberId,
+    await tx.gameProgressAward.createMany({ skipDuplicates: true, data: fresh.map(({ candidate, lookup }, index) => ({
+      memberId, lookup, subjectMemberId: candidate.subjectMemberId,
       earnedOn: new Date(`${candidate.on}T00:00:00.000Z`), createdAt: now,
       dataEncrypted: sealed[index], seenAt: candidate.on < cutoff ? now : null,
     })) });
