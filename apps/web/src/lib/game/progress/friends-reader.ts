@@ -49,7 +49,7 @@ export async function readProgressFriends(auth: HostedNativeMemberAuth, query: F
       await settleGameFriendAwards(auth, games, people, [query.measure]);
     }
     await assertGameMemberAuthCurrentTx(auth, db);
-    scheduleFriendInference(auth, games);
+    scheduleFriendInference(auth, games.pending);
     const shareAudience = incomplete ? [] : sharingPreview(people, rooms.rooms, query.measure);
     return friendsView({ people, measure, pills, query, units, today: toLocalDayKey(new Date(), cohort.timeZone),
       shareAudience, incomplete, departureNotice: cohort.departureNotice });
@@ -67,16 +67,15 @@ export async function settleProgressFriends(auth: HostedNativeMemberAuth) {
   const cohort = await readFriendCohort(memberId);
   if (cohort.incomplete) return;
   const joined = cohort.people.filter(person => !person.invited), ids = joined.map(person => person.memberId);
+  if (!joined.some(person => !person.me)) return;
   const games = await readFriendGameSeries(ids);
   if (games.incomplete) return;
-  const rooms = await readFriendRooms(memberId, ids.filter(id => id !== memberId));
-  if (rooms.incomplete) return;
   const current = await friendCohortIds(memberId, db);
   if (current.incomplete) return;
   const people = joined.filter(person => current.ids.includes(person.memberId));
   if (games.pending.length === 0) await settleGameFriendAwards(auth, games, people, friendExerciseIds(games, memberId, ids));
   await assertGameMemberAuthCurrentTx(auth, db);
-  scheduleFriendInference(auth, games);
+  scheduleFriendInference(auth, games.pending.filter(task => task.memberId !== memberId));
 }
 
 async function settleGameFriendAwards(auth: HostedNativeMemberAuth, games: FriendGameSeries, people: FriendSeries[], measures: string[]) {
@@ -92,11 +91,11 @@ async function settleGameFriendAwards(auth: HostedNativeMemberAuth, games: Frien
   });
 }
 
-function scheduleFriendInference(auth: HostedNativeMemberAuth, games: FriendGameSeries) {
+function scheduleFriendInference(auth: HostedNativeMemberAuth, pending: FriendGameSeries["pending"]) {
   const memberId = auth.member.id;
-  scheduleInference(games.pending, async tx => {
+  scheduleInference(pending, async tx => {
     await assertGameMemberAuthCurrentTx(auth, tx);
-    const owners = [...new Set(games.pending.map(task => task.memberId))].sort();
+    const owners = [...new Set(pending.map(task => task.memberId))].sort();
     for (const owner of owners) if (owner !== memberId) await lockGamePair(tx, memberId, owner);
     const atCommit = await friendCohortIds(memberId, tx);
     if (atCommit.incomplete || owners.some(owner => !atCommit.ids.includes(owner))) throw audienceChanged();

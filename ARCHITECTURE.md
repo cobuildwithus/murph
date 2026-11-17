@@ -6297,10 +6297,13 @@ Moment `title` and nullable `line` are response-only words derived from the
 shown awards; shelf titles and details remain the medal's own. Grouped
 moments describe an earned day, without inventing a post or time of day.
 
-An ordinary complete games read uses ten domain queries including a nonempty
-settlement (profile twice, games, entries, task cache, measure state, award insert,
+An ordinary complete games read uses eleven domain queries including new award
+settlement (profile twice, games, entries, task cache, measure state, existing award lookups, award insert,
 award reads before and after settlement and live picture metadata), plus existing batched crypto and native/health
-authority owners. There are no per-game or per-entry database calls and at most
+authority owners. Settlement reads candidate lookups once for the member and seals
+only missing awards; when all exist it skips the profile read, sealing and write
+transaction. Inserts still skip duplicates to preserve concurrent append-only
+settlement. There are no per-game or per-entry database calls and at most
 one domain transaction/pooled connection at a time. First distance reads resolve
 one default route for all missing legs (11 provider requests total), then add
 two domain queries per new route through sequential state CAS writes. Native
@@ -6394,7 +6397,8 @@ Each successful load is reused for that publication/date-window tuple; the
 three existing date boundaries or a new publication make it eligible again. Failed or overlapping reads may repeat input work: this is a
 completion receipt, not a lease. A baseline's `updated_at` alone cannot prove
 that the later route and award writes succeeded. No new table or column is
-needed. The Health page always loads its chart input and shares receipt writes.
+needed. The Health page always loads its chart input but never writes the
+receipt; only the background phase records its completion.
 An eligible batch has one saved-replica session, four metric evaluations, at
 most four baseline CAS writes, one first-route CAS, one award insert and one
 receipt CAS, sequentially. First-route resolution retains its eleven bounded
@@ -6509,12 +6513,14 @@ ranks; private rows have no rank, amount, chart line or gap. Caps set
 `Friends.incomplete` and settle nothing. Friend award commits recheck friendship
 and blocks while holding the affected pair locks. Health pills never produce
 friend awards.
-The main read's background Friends phase uses one cohort and one game-series
-load for every exercise pill offered by the Friends page, plus its existing
-room-completeness check. It reuses the page's pill selection, pending-inference
-writer and guarded award commit. Candidates for all exercise pills share one
+The main read's background Friends phase returns before game-series loading
+when no co-player has joined. Otherwise it uses one cohort and one game-series
+load for every exercise pill offered by the Friends page, without reading sharing
+rooms. It reuses the page's pill selection, pending-inference writer and guarded
+award commit, scheduling only other members' pending tasks because the foreground
+read already schedules the viewer's. Candidates for all exercise pills share one
 award insert; subject pair locks are deduplicated and sorted, then the complete
-audience is rechecked once at commit. Cohort, game or room caps and pending
+audience is rechecked once at commit. Cohort/game caps and any pending
 classification prevent pass settlement. Steps/Sleep never enter health reads
 or friend awards in this phase. Collection bounds and crypto batches below
 apply once to the batch, rather than once per exercise; authority checks remain

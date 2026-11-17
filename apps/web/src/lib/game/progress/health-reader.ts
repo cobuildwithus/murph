@@ -125,7 +125,16 @@ export async function settleProgressHealthInBackground(auth: HostedNativeMemberA
   const states = await readHealthStates(memberId), now = new Date();
   if (healthSettlementCurrent(states.get("restingHeartRate")!.healthSettlement, ref.generatedAt, profile.timeZone, now)) return;
   const snapshot = await readCompanionHealthSeries(auth, new AbortController().signal);
-  if (snapshot) await settleProgressHealth(auth, snapshot, profile, states, now);
+  if (!snapshot) return;
+  await settleProgressHealth(auth, snapshot, profile, states, now);
+  if (!healthSettlementCurrent(states.get("restingHeartRate")!.healthSettlement, snapshot.savedAt, profile.timeZone, now)) {
+    await patchMeasureState(memberId, "restingHeartRate", { healthSettlement: {
+      savedAt: snapshot.savedAt, checkedAt: now.toISOString(), timeZone: snapshot.timeZone, profileTimeZone: profile.timeZone,
+    } }, async tx => {
+      await assertGameMemberAuthCurrentTx(auth, tx);
+      await assertBrowserVaultMemberAuthority({ memberId, prisma: tx });
+    });
+  }
 }
 
 /** The page and background share every baseline, journey and award write. */
@@ -159,11 +168,6 @@ async function settleProgressHealth(
   }
   const journeys = await healthJourneys({ memberId, metrics: models, states, joinedOn, today, timeZone, beforeMutationTx, awards: previousAwards });
   await settleAwards(memberId, [...candidates, ...journeys.candidates], beforeMutationTx);
-  if (snapshot && !healthSettlementCurrent(states.get("restingHeartRate")!.healthSettlement, snapshot.savedAt, timeZone, now)) {
-    await patchMeasureState(memberId, "restingHeartRate", { healthSettlement: {
-      savedAt: snapshot.savedAt, checkedAt: now.toISOString(), timeZone: snapshot.timeZone, profileTimeZone: timeZone,
-    } }, beforeMutationTx);
-  }
   return { models, journeys, ageProfile };
 }
 

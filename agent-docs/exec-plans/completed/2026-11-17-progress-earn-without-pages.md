@@ -27,8 +27,10 @@ Keep session/health checks and pair locks plus commit-time audience checks.
 
 A sealed completion receipt on the existing restingHeartRate measure records
 the replica publication timestamp, evaluation instant and both time zones.
-Only a successful entire health batch writes it. An unchanged publication and
-unchanged member/vault date and settled-step date skip Cloudflare input loading.
+Only a successful entire background health batch writes it; the Health page
+shares baseline, journey and award writes but never writes the receipt. An
+unchanged publication and unchanged member/vault date and settled-step date
+skip Cloudflare input loading.
 Baseline mutation timestamps cannot prove a completed batch; no table or column
 is needed. Concurrent reads may duplicate work; existing CAS/unique guards stay
 in charge. Failures leave the input eligible on the next ordinary read.

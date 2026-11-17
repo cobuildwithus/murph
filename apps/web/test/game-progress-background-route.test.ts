@@ -36,12 +36,15 @@ vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({
 
 import { addDaysToIsoDate } from "@murphai/contracts";
 import { GET } from "../app/api/game/v1/progress/route";
-import { progressSchema } from "@/src/lib/game/progress/contract";
+import { GET as healthGET } from "../app/api/game/v1/progress/health/route";
+import { healthSchema, progressSchema } from "@/src/lib/game/progress/contract";
 import { openProgress, progressLookup } from "@/src/lib/game/progress/crypto";
-import { readAwards } from "@/src/lib/game/progress/awards";
+import * as crypto from "@/src/lib/game/progress/crypto";
+import { readAwards, settleAwards } from "@/src/lib/game/progress/awards";
 import { healthSettlementCurrent } from "@/src/lib/game/progress/health-reader";
 import { encodePolyline } from "@/src/lib/game/progress/route-geometry";
-import type { MeasureState } from "@/src/lib/game/progress/state";
+import { patchMeasureState, type MeasureState } from "@/src/lib/game/progress/state";
+import type { Candidate } from "@/src/lib/game/progress/registry";
 import type { FriendGameSeries } from "@/src/lib/game/progress/friend-games";
 import { friendMeasure } from "@/src/lib/game/progress/friend-games";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
@@ -66,6 +69,11 @@ function healthSnapshot() {
 async function drain() {
   const callbacks = mocks.after.mock.calls.splice(0);
   for (const [callback] of callbacks) await callback();
+}
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>(done => { resolve = done; });
+  return { promise, resolve };
 }
 async function healthState() {
   const lookup = progressLookup("ava", "measure", ["restingHeartRate"]);
@@ -93,7 +101,10 @@ beforeEach(() => {
     ])])) };
   mocks.friendGames.mockResolvedValue(games);
   mocks.states.mockImplementation(async ({ where }) => states.filter(row => where.lookup.in.includes(row.lookup)));
-  mocks.state.mockImplementation(async ({ where }) => states.find(row => row.lookup === where.memberId_lookup.lookup) ?? null);
+  mocks.state.mockImplementation(async ({ where }) => {
+    const row = states.find(row => row.lookup === where.memberId_lookup.lookup);
+    return row ? { ...row } : null;
+  });
   mocks.createState.mockImplementation(async ({ data }: { data: StateRow[] }) => {
     if (states.some(row => row.lookup === data[0].lookup)) return { count: 0 };
     states.push(...data); return { count: 1 };
@@ -131,9 +142,14 @@ it("freezes pre-join health and earns both exercise passes after the response, v
   expect(mocks.authority).toHaveBeenCalledWith({ memberId: "ava", prisma: tx });
   const next = progressSchema.parse(await (await GET(request())).json());
   expect(next.medals).toHaveLength(earned.length);
+  const seal = vi.spyOn(crypto, "sealProgressMany");
+  mocks.createAwards.mockClear();
   await drain();
   expect(await readAwards("ava")).toEqual(earned);
   expect(mocks.raw).toHaveBeenCalledTimes(1);
+  expect(seal).not.toHaveBeenCalled();
+  expect(mocks.createAwards).not.toHaveBeenCalled();
+  expect(mocks.rooms).not.toHaveBeenCalled();
   // The published input changes, but neither worsening readings nor corrections revoke wins.
   mocks.replica.mockResolvedValue({ browserVaultReplicaRef: { generatedAt: "2026-11-16T13:00:00Z" } });
   const snapshot = healthSnapshot();
@@ -180,13 +196,103 @@ it.each(["authority", "reference", "replica"])("does no health writes without %s
   if (missing !== "replica") expect(mocks.raw).not.toHaveBeenCalled();
 });
 
-it.each(["cohort", "games", "rooms", "current", "pending"])("never settles Friends from %s-incomplete inputs", async boundary => {
-  const target = { cohort: mocks.cohort, games: mocks.friendGames, rooms: mocks.rooms, current: mocks.ids, pending: mocks.friendGames }[boundary]!;
+it.each(["cohort", "games", "current", "pending"])("never settles Friends from %s-incomplete inputs", async boundary => {
+  const target = { cohort: mocks.cohort, games: mocks.friendGames, current: mocks.ids, pending: mocks.friendGames }[boundary]!;
   const input = await target(); target.mockClear();
   target.mockResolvedValue({ ...input, ...(boundary === "pending" ? { pending: [{ memberId: "leo", lookup: "pending", text: "40 pushups", kind: "photo", inferred: null }] } : { incomplete: true }) });
   await GET(request()); await drain();
   expect((await readAwards("ava")).some(award => award.kind === "friend")).toBe(false);
   if (boundary === "pending") expect(mocks.inference).toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({ memberId: "leo" })]), expect.any(Function));
+});
+
+it.each([false, true])("skips background Friends input work without joined co-players (invited: %s)", async invited => {
+  const cohort = await mocks.cohort();
+  mocks.cohort.mockResolvedValue({ ...cohort, people: cohort.people.flatMap((person: { me: boolean }) =>
+    person.me ? [person] : invited ? [{ ...person, invited: true }] : []) });
+  await GET(request()); await drain();
+  expect(mocks.friendGames).not.toHaveBeenCalled();
+  expect(mocks.rooms).not.toHaveBeenCalled();
+  expect(mocks.ids).not.toHaveBeenCalled();
+  expect((await readAwards("ava")).some(award => award.kind === "friend")).toBe(false);
+});
+
+it("schedules the viewer's pending tasks only in the foreground and friends' tasks in the background", async () => {
+  const own = { memberId: "ava", lookup: "ava-pending", text: "40 pushups", kind: "photo", inferred: null };
+  const friend = { ...own, memberId: "leo", lookup: "leo-pending" };
+  const games = await mocks.friendGames();
+  mocks.friendGames.mockResolvedValue({ ...games, pending: [own, friend] });
+  mocks.ownGames.mockResolvedValue({ incomplete: false, measures: [], states: new Map(), awards: [], pending: [own] });
+  await GET(request());
+  expect(mocks.inference.mock.calls.map(call => call[0])).toEqual([[own]]);
+  await drain();
+  expect(mocks.inference.mock.calls.map(call => call[0])).toEqual([[own], [friend]]);
+  await mocks.inference.mock.calls[1][1](tx);
+  expect(mocks.pairLock).toHaveBeenCalledExactlyOnceWith(tx, "ava", "leo");
+  expect((await readAwards("ava")).some(award => award.kind === "friend")).toBe(false);
+});
+
+it("earns exercise passes without consulting incomplete sharing rooms", async () => {
+  mocks.rooms.mockResolvedValue({ incomplete: true, rooms: [] });
+  await GET(request()); await drain();
+  expect(mocks.rooms).not.toHaveBeenCalled();
+  expect((await readAwards("ava")).filter(award => award.kind === "friend")).toHaveLength(2);
+});
+
+it.each([0, 1, 2])("seals only missing awards with %s already stored, preserving original facts", async existingCount => {
+  const candidates: Candidate[] = ["first", "second"].map(key => ({ key, kind: "total", measureId: "pushups.reps",
+    subjectMemberId: null, on: "2026-11-02", data: { value: 100 } }));
+  const before = vi.fn();
+  await settleAwards("ava", candidates.slice(0, existingCount), before);
+  const original = awards.slice();
+  const seal = vi.spyOn(crypto, "sealProgressMany");
+  mocks.awards.mockClear(); mocks.createAwards.mockClear(); before.mockClear();
+  const corrected = candidates.map(candidate => ({ ...candidate, on: "2026-11-16", data: { value: 50 } }));
+  await settleAwards("ava", corrected, before);
+  expect(mocks.awards).toHaveBeenCalledExactlyOnceWith({ where: { memberId: "ava",
+    lookup: { in: candidates.map(candidate => progressLookup("ava", "award", [candidate.key])) } }, select: { lookup: true } });
+  expect(seal.mock.calls.flatMap(call => call[1].map(row => row.value))).toEqual(corrected.slice(existingCount));
+  expect(awards.slice(0, existingCount)).toEqual(original);
+  expect(await readAwards("ava")).toHaveLength(2);
+  if (existingCount === 2) {
+    expect(seal).not.toHaveBeenCalled();
+    expect(mocks.createAwards).not.toHaveBeenCalled();
+    expect(before).not.toHaveBeenCalled();
+  } else {
+    expect(mocks.createAwards).toHaveBeenCalledExactlyOnceWith({ skipDuplicates: true, data: expect.any(Array) });
+    expect(before).toHaveBeenCalledExactlyOnceWith(tx);
+  }
+});
+
+it("returns the Health page while a background receipt commits against the same frozen baseline", async () => {
+  await patchMeasureState("ava", "restingHeartRate", {
+    baseline: { value: 74, from: "2026-09-23", to: "2026-10-20" },
+  }, async () => {});
+  const started = deferred(), release = deferred();
+  const committed = deferred(), pageWrite = deferred();
+  const update = mocks.updateState.getMockImplementation()!;
+  mocks.updateState.mockImplementationOnce(async input => {
+    started.resolve();
+    await release.promise;
+    const result = await update(input);
+    committed.resolve();
+    return result;
+  }).mockImplementationOnce(async input => {
+    pageWrite.resolve();
+    await committed.promise;
+    return update(input);
+  });
+  await GET(request());
+  const background = drain();
+  await started.promise;
+  const page = healthGET(new Request("https://example.test/api/game/v1/progress/health"));
+  // If the page tries its own receipt CAS, let the background win that race.
+  await Promise.race([page, pageWrite.promise]);
+  release.resolve();
+  const [response] = await Promise.all([page, background]);
+  expect(response.status).toBe(200);
+  expect(healthSchema.parse(await response.json()).winCount).toBeGreaterThan(0);
+  expect(mocks.updateState).toHaveBeenCalledTimes(1);
+  expect((await healthState())?.healthSettlement?.savedAt).toBe(savedAt);
 });
 
 it("an incomplete main read schedules no settlement", async () => {
