@@ -6098,7 +6098,7 @@ destination label. No member identifier, award date, total, source URL, friend
 content, route coordinates or token is sent. The only scene-specific branches
 are the approved Mont Blanc summit and sleeping godwit. Share heights use full
 digits and target height, not a repetition count; planks retain the approved
-"planked longer than" wording even at equality. The plank pose specifies flat
+"You've planked longer than this moment lasted." wording even at equality. The plank pose specifies flat
 forearms, elbows under shoulders and a straight body. Walking card copy and
 distances omit "about". Loading is native-only;
 there are no streamed partial images. iOS owns rendering and native

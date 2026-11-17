@@ -27,7 +27,8 @@ describe('share card copy and scene facts', () => {
     ['breathing.seconds', "You've done breathing longer than", 'Doing breathing'],
   ])('%s keeps the accepted equal-threshold wording', (measure, prefix, pose) => {
     const result = shareCard(rung(measure, 'godwit', 'time', 9 * 86400), 'us');
-    expect(result.card.contextLine).toBe(`${prefix} A godwit's nonstop flight.`);
+    expect(result.card.contextLine).toBe(`${prefix} this moment lasted.`);
+    expect(result.card.messageText).toBe(`${prefix.replace("You've", "I've")} a godwit's nonstop flight`);
     expect(result.card.valueText).toBe('9 days'); expect(result.prompt).toContain(pose);
   });
   it('keeps the plank on flat forearms with a straight body', () => {

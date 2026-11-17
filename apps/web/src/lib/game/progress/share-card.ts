@@ -56,6 +56,7 @@ export function shareCard(award: Candidate, units: ClientUnits): { card: ShareVi
       : "The person is peacefully asleep, integrated into the journey described by the scene facts: resting in its vehicle, or carried by its animal. Preserve the journey's defining visual subject.", facts) };
   }
   const action = activity === 'planks' ? 'planked' : `done ${activity}`;
-  card.contextLine = `You've ${action} longer than ${entry.name}.`; card.messageText = `I've ${action} longer than ${entry.name}`;
+  card.contextLine = `You've ${action} longer than this moment lasted.`;
+  card.messageText = `I've ${action} longer than ${entry.name.replace(/^(The|A) /u, article => article.toLowerCase())}`;
   return { card, prompt: scenePrompt(`${activity === 'planks' ? 'Holding a forearm plank with forearms flat on the ground, elbows under the shoulders, and body in a straight line' : `Doing ${activity}`} in a setting illustrating the scene facts. The person is doing the exercise, not performing the historical feat.`, facts) };
 }
