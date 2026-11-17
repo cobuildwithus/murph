@@ -5,7 +5,7 @@ import { normalizeAssistantExecutionContext } from '../src/assistant/execution-c
 import { describe, expect, it, vi } from 'vitest'
 import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import { executeMurphDynamicToolRequest, resolveMurphDynamicTools } from '../src/assistant-codex/dynamic-tools.js'
-import { GAME_GROUP_CHAT_GUIDANCE, GAME_SETUP_CHAT_GUIDANCE, GAME_SHARED_SETUP_GUIDANCE, GAME_SHARED_CHOICE_POLL_GUIDANCE, GAME_PAIR_CHAT_GUIDANCE, GAME_GROUP_MODE_GUIDANCE, GAME_REMINDER_GUIDANCE, GAME_READ_FACTS_GUIDANCE, GAME_PLAY_AGAIN_GUIDANCE, GAME_PAIR_AGREE_GUIDANCE, GAME_GROUP_JOIN_GUIDANCE, GAME_DAY_CORRECTION_GUIDANCE, GAME_UPDATE_RESULT_GUIDANCE, GAME_DAY_OUTCOME_GUIDANCE, GAME_RESULT_CORRECTED_GUIDANCE, GAME_REMINDER_OUTCOME_GUIDANCE, GAME_PHOTO_OUTCOME_GUIDANCE, GAME_REFUSAL_GUIDANCE, MURPH_READ_GAME_TOOL, MURPH_READ_GAME_RECAP_TOOL, MURPH_UPDATE_GAME_TOOL, MURPH_GAME_PHOTO_TOOL, MURPH_WRITE_RECAP_TOOL, MURPH_GAME_LORE_TOOL, GAME_SELECTION_GUIDANCE, GAME_RULES_REPEAT_POINTER } from '../src/assistant-codex/dynamic-tools/games.js'
+import { describeMyGameReminders, MURPH_MY_GAME_REMINDERS_TOOL, GAME_GROUP_CHAT_GUIDANCE, GAME_SETUP_CHAT_GUIDANCE, GAME_SHARED_SETUP_GUIDANCE, GAME_SHARED_CHOICE_POLL_GUIDANCE, GAME_PAIR_CHAT_GUIDANCE, GAME_GROUP_MODE_GUIDANCE, GAME_REMINDER_GUIDANCE, GAME_READ_FACTS_GUIDANCE, GAME_PLAY_AGAIN_GUIDANCE, GAME_PAIR_AGREE_GUIDANCE, GAME_GROUP_JOIN_GUIDANCE, GAME_DAY_CORRECTION_GUIDANCE, GAME_UPDATE_RESULT_GUIDANCE, GAME_DAY_OUTCOME_GUIDANCE, GAME_RESULT_CORRECTED_GUIDANCE, GAME_REMINDER_OUTCOME_GUIDANCE, GAME_PHOTO_OUTCOME_GUIDANCE, GAME_REFUSAL_GUIDANCE, MURPH_READ_GAME_TOOL, MURPH_READ_GAME_RECAP_TOOL, MURPH_UPDATE_GAME_TOOL, MURPH_GAME_PHOTO_TOOL, MURPH_WRITE_RECAP_TOOL, MURPH_GAME_LORE_TOOL, GAME_SELECTION_GUIDANCE, GAME_RULES_REPEAT_POINTER } from '../src/assistant-codex/dynamic-tools/games.js'
 import { resolveAssistantGameHostDynamicTools } from '../src/assistant/codex-turn/planning.js'
 import { MURPH_FINISH_WITHOUT_REPLY_TOOL } from '../src/assistant-codex/dynamic-tool-catalog.js'
 import { createAssistantHostedToolContext, type AssistantHostedToolContext } from '../src/assistant/hosted-tool-context.js'
@@ -88,6 +88,43 @@ describe('game dynamic tools', () => {
     const group = await executeMurphDynamicToolRequest({ request, hostedToolContext: { ...context(), myGameRemindersTool: { request: requestPort } }, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
     expect(group.rpcResult.contentItems[0]?.text).toContain('current direct message')
     expect(requestPort).toHaveBeenCalledOnce()
+  })
+  it('reads reminders back in words: one time, named weekdays, and everyDay only where it changes anything', async () => {
+    const reminders = { minutes: 720, push: true, text: true, canText: true, games: [
+      { id: 'game_weekdays', task: '20 pullups', schedule: { days: [0, 1, 2, 3, 4] }, today: 'upcoming' as const, otherFirstNames: ['Sam'], on: true, everyDay: false },
+      { id: 'game_daily', task: '50 pushups', schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, today: 'posted' as const, otherFirstNames: ['Ava'], on: false, everyDay: true },
+      { id: 'game_count', task: '3 lifts', schedule: { count: 3 }, today: 'open' as const, otherFirstNames: ['Leo'], on: true, everyDay: false },
+    ] }
+    const response = hostedGameToolResponseSchema.parse({ action: 'my_game_reminders', result: { status: 'ok', reminders, reaches: 'push' } })
+    const requestPort = vi.fn(async () => response)
+    const direct = { ...context(), myGameRemindersTool: { request: requestPort }, currentUserActionScope: () => ({
+      conversationId: 'synthetic-direct', inboundMailboxItemIds: [], recipientKey: 'synthetic-member',
+      acceptedInputIds: [inputId], originSessionId: 'synthetic-session', conversationScope: 'direct' as const,
+    }) }
+    const result = await executeMurphDynamicToolRequest({ request: parse('my_game_reminders', { operation: 'read' })!, hostedToolContext: direct, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null })
+    expect(JSON.parse(result.rpcResult.contentItems[0]!.text!)).toEqual({ action: 'my_game_reminders', result: { status: 'ok', reaches: 'push', reminders: {
+      minutes: 720, time: '12:00 PM', push: true, text: true, canText: true, games: [
+        { id: 'game_weekdays', task: '20 pullups', today: 'upcoming', otherFirstNames: ['Sam'], on: true, days: 'Mon, Tue, Wed, Thu, Fri', reminds: 'each of these days not posted yet' },
+        { id: 'game_daily', task: '50 pushups', today: 'posted', otherFirstNames: ['Ava'], on: false, days: 'every day', reminds: 'off' },
+        { id: 'game_count', task: '3 lifts', today: 'open', otherFirstNames: ['Leo'], on: true, days: 'any 3 days', everyDay: false, reminds: 'only once every remaining day is needed to reach 3' },
+      ] } } })
+    expect(describeMyGameReminders(hostedGameToolResponseSchema.parse({ action: 'my_game_reminders', result: { status: 'ok', reaches: 'none', reminders: {
+      ...reminders, minutes: 0, games: [{ ...reminders.games[2]!, everyDay: true }] } } }))).toMatchObject({ result: { reminders: { time: '12:00 AM',
+      games: [{ everyDay: true, reminds: 'every day not posted yet' }] } } })
+    // A game's own time, once Web sends one, shows beside that game.
+    expect(describeMyGameReminders(hostedGameToolResponseSchema.parse({ action: 'my_game_reminders', result: { status: 'ok', reaches: 'push', reminders: {
+      ...reminders, games: [{ ...reminders.games[0]!, minutes: 1260 }] } } }))).toMatchObject({ result: { reminders: { time: '12:00 PM',
+      games: [{ minutes: 1260, time: '9:00 PM', days: 'Mon, Tue, Wed, Thu, Fri' }] } } })
+    const refused = hostedGameToolResponseSchema.parse({ action: 'my_game_reminders', result: { status: 'unavailable', error: 'Private game reminders are unavailable.' } })
+    expect(describeMyGameReminders(refused)).toBe(refused)
+  })
+  it('states the reminder facts the replies rely on, without the every-evening wording', () => {
+    expect(MURPH_MY_GAME_REMINDERS_TOOL.description).toContain('One time covers all of their games')
+    expect(MURPH_MY_GAME_REMINDERS_TOOL.description).toContain('for an any-N-days game everyDay')
+    expect(MURPH_MY_GAME_REMINDERS_TOOL.description).toContain("A game in a group chat gets that chat's evening check-in instead")
+    expect(MURPH_MY_GAME_REMINDERS_TOOL.description).not.toMatch(/every evening/u)
+    expect(GAME_REMINDER_GUIDANCE).toContain("One time covers all of that player's games")
+    expect(GAME_REMINDER_GUIDANCE).toContain("this chat gets Murph's evening check-in on game days")
   })
   it.each([
     { label: 'no game', games: [], carries: ['poll'] },

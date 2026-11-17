@@ -3,9 +3,11 @@ import { attemptsUsed, currentTerms, dayIndexAt, eligibleFromDay, entriesForDay,
   needsPostToday, scorePlayer, type RulePlayer, type RuleState } from "./rules";
 import { addDays } from "./time";
 
-export function gameReminderReach(input: { push: boolean; text: boolean; canText: boolean }, selectedOn: boolean, hasPushRoute: boolean): "push" | "text" | "none" {
-  if (!selectedOn) return "none";
-  if (input.text && input.canText) return "text";
+/** How a reminder for the selected games reaches the player. Text only when one of them gets the private text, not its group chat's check-in. */
+export function gameReminderReach(input: { push: boolean; text: boolean; canText: boolean },
+  selected: { on: boolean; textedPrivately: boolean }, hasPushRoute: boolean): "push" | "text" | "none" {
+  if (!selected.on) return "none";
+  if (input.text && input.canText && selected.textedPrivately) return "text";
   return input.push && hasPushRoute ? "push" : "none";
 }
 

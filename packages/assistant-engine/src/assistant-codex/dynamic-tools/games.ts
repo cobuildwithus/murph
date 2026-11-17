@@ -1,6 +1,6 @@
 import { recapAssetSchema, gameRecapDraftSchema, recapVideoDraftSchema, recapVideoPartSchema, type GameRecapEnvelope, type RecapAsset, type RecapVideoDraft } from '@murphai/contracts/recap-show'
 import * as z from '@murphai/contracts/zod-runtime'
-import { GAME_ACTIVITIES, type GameActivity, GAME_PRIZE_WORDS, hostedGameUpdateSchema, hostedGamePhotoSchema, hostedGameRecapWriterSchema, type HostedGameChatState, type HostedGameUpdate, type HostedGamePhoto, type HostedGameRecap, type HostedGameToolResponse } from '@murphai/hosted-execution/runtime-control'
+import { GAME_ACTIVITIES, type GameActivity, GAME_PRIZE_WORDS, hostedGameUpdateSchema, hostedGamePhotoSchema, hostedGameRecapWriterSchema, type HostedGameChatState, type HostedGameUpdate, type HostedGamePhoto, type HostedGameRecap, type HostedGameToolResponse, type HostedRuntimeGroupToolResponse } from '@murphai/hosted-execution/runtime-control'
 import type { AssistantHostedToolContext } from '../../assistant/hosted-tool-context.js'
 import { parseDynamicToolArguments } from './dynamic-tool-wrapper.js'
 import { toolTextResult } from '../tool-failure-diagnostics.js'
@@ -16,7 +16,7 @@ export const MURPH_READ_GAME_TOOL = {
 export const MURPH_MY_GAME_REMINDERS_TOOL = {
   deferLoading: true,
   namespace: 'murph', name: 'my_game_reminders',
-  description: "Read or set this person's own game reminders, only in their direct chat with Murph. operation=read returns their reminder time, how reminders reach them, and their live games; read before you coach them about a reminder or suggest a task. operation=set changes their local time, whether reminders arrive by text or push, and for one gameId whether reminders are on and whether they come every evening. Every evening covers only the open game days they have not posted on. Confirm delivery only from reaches in the result; when it is none, ask them to turn on notifications in the Murph app. If they want help sticking to it, use the behavior-followthrough skill: one question at a time, a real time of day, a small first step and a plan for a bad day. Never state or guess another player's status or private words.",
+  description: "Read or set this person's own game reminders, only in their direct chat; read before you answer about one, coach them or suggest a task. One time covers all of their games, and a game reminds only on its days they haven't posted. Set minutes to the local time they ask for, in minutes after midnight; push or text; and for one gameId on, or for an any-N-days game everyDay: every unposted day instead of only when every remaining day is needed. Confirm delivery only from reaches: push is an app notification at that time; text adds a private text here an hour after it. A game in a group chat gets that chat's evening check-in instead. When reaches is none, ask them to turn on notifications in the Murph app. If they want help sticking to it, use the behavior-followthrough skill. Never state or guess another player's status or private words.",
   inputSchema: { type: 'object', additionalProperties: false, required: ['operation'], properties: {
     operation: { type: 'string', enum: ['read', 'set'] }, messageRef: { type: 'string' },
     minutes: { type: 'integer', minimum: 0, maximum: 1439 }, gameId: { type: 'string' },
@@ -109,7 +109,7 @@ export const GAME_GROUP_MODE_GUIDANCE = [
 /** Added while a game is live, or finished and still listing its days: how a player corrects one of their own days. */
 export const GAME_DAY_CORRECTION_GUIDANCE = "Correcting a day: when a player says they did not finish a day, call update_game mark_incomplete with that date. When a player says they did a day, or asks you to count it, call mark_complete with that date. Take their word: do not ask for proof, do not put it to the other players, and do not offer this unasked. The post for a counted day is the player's own words, so leave text out unless they give the words for the post (for example \"make my post say: ...\") or are answering your question about what it should say; then pass their words exactly as written. Both calls act only on the speaker's own days, in a live game in this chat or a finished one that still lists its days, and need gameId and date but no proposalId and nobody's approval. A finished game lists its days for 7 days after it ends; after that its result is final. While it lists them it is one of the games a day correction can apply to. Work out the date from the message's Occurred at time, converted to the speaker's timeZone: before 3 AM, today is the previous calendar date and yesterday is the day before that; from 3 AM on, today is that calendar date. Do not use the current time. If there is no timestamp, or the message covers a range of times, ask once which day. A refusal names its rule: an open day is still theirs to post, and a day off, or a game that requires a photo or heart rate, cannot be counted this way."
 /** Added while a game is waiting or live. */
-export const GAME_REMINDER_GUIDANCE = "Reminders: when a player asks for a reminder for their own game, call update_game set_reminder with minutes after midnight in their local time. It is never a new room automation, and an older scheduled room reminder is left to finish on its own. Leave on out for a change of time; pass on together with gameId only when they ask to switch one game's reminders on or off. Ask which task only when several games could fit. A reminder belongs to the player who asked: never set another player's reminder from someone else's words or a group vote."
+export const GAME_REMINDER_GUIDANCE = "Reminders: when a player asks for a reminder for their own game, call update_game set_reminder with minutes after midnight in their local time. It is never a new room automation, and an older scheduled room reminder is left to finish on its own. Leave on out for a change of time; pass on together with gameId only when they ask to switch one game's reminders on or off. Ask which task only when several games could fit. A reminder belongs to the player who asked: never set another player's reminder from someone else's words or a group vote. One time covers all of that player's games, and the reminder comes just to them. Separately, this chat gets Murph's evening check-in on game days for anyone who hasn't posted, unless the players live hours apart."
 /** What a read carries when the room's only games are group games that people are still joining. */
 export const GAME_GROUP_CHAT_GUIDANCE = [GAME_SETUP_CHAT_GUIDANCE, GAME_GROUP_JOIN_GUIDANCE, GAME_GROUP_MODE_GUIDANCE, GAME_REMINDER_GUIDANCE].join('\n')
 /** With several games in one room, a move acts on the one game it can mean, or asks once. */
@@ -524,6 +524,28 @@ function gameRefusalGuidance(payload: GameToolResult, action: 'update_game' | 'g
   return code === 'PROFILE_REQUIRED' || code === 'CONTENT_NOT_ALLOWED' ? GAME_REFUSAL_GUIDANCE[code] : ''
 }
 
+const REMINDER_WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const
+
+function reminderClock(minutes: number): string {
+  const hour = Math.floor(minutes / 60)
+  return `${hour % 12 || 12}:${String(minutes % 60).padStart(2, '0')} ${hour < 12 ? 'AM' : 'PM'}`
+}
+
+/** The saved reminders in words: the one time for every game, each game's named days, and when each game reminds. */
+export function describeMyGameReminders(response: HostedRuntimeGroupToolResponse) {
+  if (response.action !== 'my_game_reminders' || !('reminders' in response.result) || !response.result.reminders) return response
+  const reminders = response.result.reminders
+  const { minutes, games, ...channels } = reminders
+  const time = reminderClock(minutes)
+  // everyDay changes only an any-N-days game, so a game on set weekdays never shows it.
+  const described = games.map(({ schedule, everyDay, minutes: own, ...game }) => ({ ...(own === undefined ? {} : { minutes: own, time: reminderClock(own) }), ...('count' in schedule
+    ? { ...game, days: `any ${schedule.count} days`, everyDay,
+      reminds: !game.on ? 'off' : everyDay ? 'every day not posted yet' : `only once every remaining day is needed to reach ${schedule.count}` }
+    : { ...game, days: schedule.days.length === 7 ? 'every day' : schedule.days.map(day => REMINDER_WEEKDAYS[day]).join(', '),
+      reminds: game.on ? 'each of these days not posted yet' : 'off' }) }))
+  return { ...response, result: { ...response.result, reminders: { minutes, time, ...channels, games: described } } }
+}
+
 export async function executeGameTool(input: { request: GameDynamicRequest; context: AssistantHostedToolContext | null; turnState?: GameRulesTurnState | null; signal?: AbortSignal }) {
   if (input.request.action === 'write_recap_file') return executeRecapFileWrite({ context: input.context, draftPath: input.request.draftPath, signal: input.signal })
   if (input.request.action === 'my_game_reminders' || input.request.action === 'my_game_not_for_me') {
@@ -535,7 +557,8 @@ export async function executeGameTool(input: { request: GameDynamicRequest; cont
     if (!scope.acceptedInputIds.includes(assistantInputId)) return toolTextResult(false, `Use this direct message to change ${setting.toLowerCase()}.`, 'authority_rejected')
     try {
       const { messageRef: _messageRef, ...request } = input.request
-      return toolTextResult(true, JSON.stringify(await tool.request({ ...request, origin: { kind: 'accepted_input', assistantInputId } })))
+      const response = await tool.request({ ...request, origin: { kind: 'accepted_input', assistantInputId } })
+      return toolTextResult(true, JSON.stringify(describeMyGameReminders(response)))
     } catch (error) { return toolTextResult(false, `${setting} could not be confirmed.`, 'handler_exception', error) }
   }
   if (input.request.action === 'game_lore') return executeGameLoreTool({ ...input, request: input.request })

@@ -15,6 +15,7 @@ import { appendHostedMailboxEnvelopeTx } from "@/src/lib/hosted-mailbox/store";
 import { sealGameText } from "@/src/lib/game/crypto";
 import { isPrivateEveningCurrentTx, privateEveningEventId, reserveDuePrivateEveningCheckIns } from "@/src/lib/game/private-notification";
 import { runGameCommand } from "@/src/lib/game/service";
+import { readPrivatelyTextedGameIds } from "@/src/lib/game/evening-check-in";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "@/src/lib/hosted-onboarding/linq-observability-identifiers";
 import { cleanupGameFixtures } from "./support/game-fixture-cleanup";
 
@@ -35,13 +36,15 @@ async function member() {
   return id;
 }
 
-async function game(owner: string) {
+async function game(owner: string, room?: string, peer?: string) {
   const id = `game_${randomUUID().replaceAll("-", "")}`;
   const words = { v: 1, versions: [{ n: 1, defaultTask: "Walk", tasks: [{ seat: 0, text: "Walk" }], stakes: [] }] };
   const encrypted = await sealGameText({ field: "terms_words", memberId: owner, rowId: id, table: "game" }, JSON.stringify(words));
   await db.game.create({ data: { id, createdBy: owner, wordsOwnerMemberId: owner, status: "live", startedAt: new Date("2026-11-06T12:00:00Z"),
     terms: { v: 1, versions: [{ n: 1, fromDay: 0, schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, stakes: [] }] }, termsWordsEncrypted: encrypted!,
-    players: { create: [{ memberId: owner, seat: 0, timeZone: "UTC", dayOne: new Date("2026-11-06T00:00:00Z"), joinedAt: now }] } } });
+    ...(room ? { chatContainerMemberId: room } : {}),
+    players: { create: [{ memberId: owner, seat: 0, timeZone: "UTC", dayOne: new Date("2026-11-06T00:00:00Z"), joinedAt: now },
+      ...(peer ? [{ memberId: peer, seat: 1, timeZone: "UTC", dayOne: new Date("2026-11-06T00:00:00Z"), joinedAt: now }] : [])] } } });
   return id;
 }
 function key(memberId: string, on = date) { return createHostedLinqDeliveryIdempotencyLookupKey(privateEveningEventId(memberId, on))!; }
@@ -71,6 +74,16 @@ describe.skipIf(!enabled)("private game evening PostgreSQL", () => {
       expiresAt: "2026-11-06T20:30:00.000Z", conversationLaneSeq: "0", batch: [{ gameId: id, termsVersion: 1, dayIndex: 0 }] };
     await db.gameEntry.create({ data: { id: randomUUID(), gameId: id, memberId: owner, dayIndex: 0, attempt: 1, kind: "words", receivedAt: now } });
     expect(await db.$transaction(tx => isPrivateEveningCurrentTx(policy, tx, now))).toBe(false);
+  });
+
+  it("names the games that get the private text: no group chat, or players hours apart", async () => {
+    vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");
+    const owner = await member(), near = await member(), far = await member(), room = await member();
+    await db.gameProfile.update({ where: { memberId: far }, data: { timeZone: "Asia/Tokyo" } });
+    const alone = await game(owner), together = await game(owner, room, near), apart = await game(owner, room, far);
+    expect([...await readPrivatelyTextedGameIds([alone, together, apart], now)].sort()).toEqual([alone, apart].sort());
+    vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "false");
+    expect([...await readPrivatelyTextedGameIds([together], now)]).toEqual([together]);
   });
 
   it("pauses after three accepted unanswered evenings", async () => {
