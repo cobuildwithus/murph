@@ -1261,6 +1261,8 @@ export class PrismaHostedConnectionStore {
         case when
           counters.consumed_seq = counters.next_seq - 1
           and dirty.connection_id is not null
+          -- A deferred batch is owned by the deferred-wake sweeper, not orphaned.
+          and dirty.wake_deferred_until is null
           and workspace.redacted_status_json->>'hostedMailboxSystemHandledThroughSeq' = counters.consumed_seq::text
           and workspace.redacted_status_json->'hostedMailboxSystemDeviceSyncContinuationSeqs' = '[]'::jsonb
           and workspace.redacted_status_json->'hostedMailboxSystemFirstPendingSeq' = 'null'::jsonb

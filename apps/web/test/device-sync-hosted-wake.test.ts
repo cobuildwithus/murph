@@ -71,6 +71,7 @@ const mocks = vi.hoisted(() => {
     clearDeferredDirtyConnectionWake: vi.fn(),
     deferDirtyConnectionWakeTx: vi.fn(),
     readDueDeferredDirtyConnectionWake: vi.fn(),
+    resolveHostedDeviceSyncQuietDirtyReleaseAt: vi.fn(),
     prepareDirtyConnectionUpsert: vi.fn(),
     shouldRequestWakeForDirtyConnectionUpsert: vi.fn(),
     upsertDirtyConnection: vi.fn(),
@@ -641,6 +642,11 @@ vi.mock("@/src/lib/device-sync/prisma-store", () => ({
   hostedConnectionRecordArgs: {},
 }));
 
+vi.mock("@/src/lib/device-sync/quiet-member", () => ({
+  HOSTED_DEVICE_SYNC_ROUTINE_WAKE_DEFER_MS: 30 * 60_000,
+  resolveHostedDeviceSyncQuietDirtyReleaseAt: mocks.resolveHostedDeviceSyncQuietDirtyReleaseAt,
+}));
+
 vi.mock("@/src/lib/device-sync/shared", () => ({
   normalizeNullableString: vi.fn((value: unknown) =>
     typeof value === "string" && value.trim().length > 0 ? value.trim() : null),
@@ -744,6 +750,7 @@ function mockFitbitMigrationAdmissionSources(input: {
 describe("hosted device-sync wakes", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.resolveHostedDeviceSyncQuietDirtyReleaseAt.mockResolvedValue(null);
     mocks.webhookProvider = "oura";
     mocks.webhookAccountConnectedAt = "2026-03-26T12:00:00.000Z";
     mocks.webhookProcessingAttemptedAt = "2026-03-26T12:00:00.000Z";
@@ -2705,6 +2712,44 @@ describe("hosted device-sync wakes", () => {
 
       expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
       expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
+    });
+
+    it("holds a quiet member's urgent transition until their daily window", async () => {
+      const releaseAt = new Date("2026-03-27T09:10:00.000Z");
+      mocks.resolveHostedDeviceSyncQuietDirtyReleaseAt.mockResolvedValue(releaseAt);
+      await admitJunctionDailyWebhook("daily.data.sleep.created");
+
+      expect(mocks.resolveHostedDeviceSyncQuietDirtyReleaseAt).toHaveBeenCalledWith({
+        connectedAt: "2026-03-26T12:00:00.000Z",
+        memberId: "user-123",
+        now: new Date("2026-03-26T12:00:00.000Z"),
+        prisma: mocks.prismaTx,
+      });
+      expect(mocks.deferDirtyConnectionWakeTx).toHaveBeenCalledWith({
+        connectionId: "dsc_123",
+        deferredUntil: releaseAt,
+        tx: mocks.prismaTx,
+        userId: "user-123",
+      });
+      expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+      expect(mocks.signalHostedDeviceSyncMailboxRuntime).not.toHaveBeenCalled();
+    });
+
+    it("does not claim a quiet member's pending batch for an urgent hint", async () => {
+      markConnectionAlreadyDirty();
+      mocks.resolveHostedDeviceSyncQuietDirtyReleaseAt.mockResolvedValue(new Date("2026-03-27T09:10:00.000Z"));
+      await admitJunctionDailyWebhook("daily.data.workouts.created");
+
+      expect(mocks.claimDeferredDirtyConnectionWakeTx).not.toHaveBeenCalled();
+      expect(mocks.deferDirtyConnectionWakeTx).not.toHaveBeenCalled();
+      expect(mocks.appendHostedMailboxEnvelope).not.toHaveBeenCalled();
+    });
+
+    it("skips the quiet check when the event would not wake", async () => {
+      markConnectionAlreadyDirty();
+      await admitJunctionDailyWebhook("daily.data.heartrate.updated");
+
+      expect(mocks.resolveHostedDeviceSyncQuietDirtyReleaseAt).not.toHaveBeenCalled();
     });
 
     it("leaves an already-dirty routine batch unchanged", async () => {
