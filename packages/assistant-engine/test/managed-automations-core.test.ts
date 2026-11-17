@@ -19,6 +19,7 @@ import {
   MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION_ID,
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
   MURPH_MANAGED_AUTOMATIONS,
+  MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID,
   MURPH_ONBOARDING_FOLLOWUP_AUTOMATION,
   MURPH_OVERNIGHT_MEMORY_CONSOLIDATION_AUTOMATION_ID,
   MURPH_WEEKLY_HEALTH_DIGEST_AUTOMATION_ID,
@@ -40,6 +41,7 @@ import {
 } from '../src/assistant/onboarding-state.ts'
 import { ASSISTANT_REQUIRE_SEND_AUTOMATION_TAG } from '../src/assistant/automation-tags.ts'
 import { upsertAssistantCronAutomation } from '../src/assistant/cron/authoring.ts'
+import { listAssistantCronJobs } from '../src/assistant/cron.ts'
 import { resolveAssistantCronDefaultTimeZone } from '../src/assistant/cron/canonical-jobs.ts'
 import { computeAssistantCronFirstRunAfterCurrentLocalDay } from '../src/assistant/cron/schedule.ts'
 import * as assistantCronRuntimeState from '../src/assistant/cron/runtime-state.ts'
@@ -2671,4 +2673,56 @@ describe('applyMurphManagedAutomations core integration', () => {
       title: 'My product updates',
     })
   })
+})
+
+
+describe('morning Journal spread cadence through core and cron projection', () => {
+  it.each(['unrun', 'yesterday', 'consumed', 'expired', 'pending'] as const)(
+    'preserves the local-day occurrence when the old slot is %s', async (state) => {
+      const vaultRoot = await createVaultRoot()
+      const vault = await loadVault({ vaultRoot })
+      await writeFile(join(vaultRoot, vault.layout.metadata), JSON.stringify({
+        ...vault.metadata,
+        vaultId: 'vault_01JNV40W8VFYQ2H7CMJY5A9R4K',
+        timezone: 'America/New_York',
+      }))
+      const seed = MURPH_MANAGED_AUTOMATIONS.find((entry) => entry.automationId === MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID)!
+      const previousDay = new Date('2026-11-16T12:00:00.000Z')
+      const now = new Date('2026-11-17T13:05:00.000Z') // 08:05 local; new slot is 08:26.
+      const options = { defaultRoute, now, runtimeEnv: { [HOSTED_RUNTIME_PROCESS_ENV]: '1' }, seeds: [seed], vaultRoot }
+      await applyMurphManagedAutomations({ ...options, now: previousDay })
+      await patchAutomation({ lookup: seed.automationId, now: previousDay, schedule: { kind: 'dailyLocal', localTime: '08:00' }, vaultRoot })
+      const runtime = assistantCronRuntimeState.createAssistantCronCanonicalRuntimeRecord({ jobId: seed.automationId, now: previousDay.toISOString() })
+      if (state === 'consumed' || state === 'yesterday') {
+        runtime.state.lastSucceededAt = state === 'consumed' ? '2026-11-17T13:01:00.000Z' : '2026-11-16T13:01:00.000Z'
+      } else if (state === 'expired') {
+        runtime.state.lastFailedAt = '2026-11-17T13:01:00.000Z'
+      } else if (state === 'pending') {
+        runtime.state.pendingOccurrenceAt = '2026-11-17T13:00:00.000Z'
+        runtime.state.retryAfterAt = '2026-11-17T13:06:00.000Z'
+        runtime.state.consecutiveFailures = 1
+      }
+      await assistantCronRuntimeState.writeAssistantCronCanonicalRuntimeStore(resolveAssistantStatePaths(vaultRoot), { version: 1, jobs: [runtime] })
+
+      const result = await applyMurphManagedAutomations(options)
+      const record = await showAutomation({ automationId: seed.automationId, vaultRoot })
+      const job = (await listAssistantCronJobs(vaultRoot)).find((entry) => entry.jobId === seed.automationId)
+      if (state === 'pending') {
+        expect(result.updated).toBe(0)
+        expect(record?.schedule).toEqual({ kind: 'dailyLocal', localTime: '08:00' })
+        expect(job?.state.nextRunAt).toBe('2026-11-17T13:06:00.000Z')
+        return
+      }
+      expect(result.updated).toBe(1)
+      expect(record?.schedule).toEqual({ kind: 'dailyLocal', localTime: '08:26' })
+      const consumedToday = state === 'consumed' || state === 'expired'
+      // Core changes the anchor to now, unless scheduleNotBefore moves it past
+      // today's new slot. Cron must use the saved anchor, not rerun the old day.
+      expect(record?.scheduleAnchorAt).toBe(consumedToday ? '2026-11-17T13:26:00.000Z' : now.toISOString())
+      expect(job?.state.nextRunAt).toBe(consumedToday ? '2026-11-18T13:26:00.000Z' : '2026-11-17T13:26:00.000Z')
+      await expect(applyMurphManagedAutomations({ ...options, now: new Date('2026-11-17T13:06:00Z') }))
+        .resolves.toMatchObject({ updated: 0, skipped: 1 })
+      expect(await showAutomation({ automationId: seed.automationId, vaultRoot })).toEqual(record)
+    },
+  )
 })

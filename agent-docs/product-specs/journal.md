@@ -1,6 +1,6 @@
 # Journal
 
-Last verified: 2026-10-19
+Last verified: 2026-11-17
 
 ## Product boundary
 
@@ -105,7 +105,9 @@ baseline/notice markers. No heads-up message is sent and no extra day is require
 Global/provider/category opt-outs and source mappings survive migration. Opt-outs remove matching
 upcoming context without disconnecting the account or deleting Journal history.
 
-One managed pass runs at 08:00 local time. It reads a fourteen-day calendar window,
+One managed pass runs at a stable per-vault minute from 08:00 through 08:29 local
+time. Active records reconcile to that slot; a consumed morning occurrence is
+not repeated when its slot changes later that day. It reads a fourteen-day calendar window,
 using exact UTC boundaries from the cron host, and reconciles known ongoing and
 future plans outside that discovery window by their source identities. It retains
 training, matches, races, sauna, recovery, long travel, flights, and outdoor plans,
