@@ -220,10 +220,10 @@ jobs:
           MURPH_VITEST_MAX_WORKERS: "2"
         run: pnpm test:repo-tools
 
-      # On a pull request that reaches an app but not these packages' code,
-      # run just the package tests that read app files (no-op otherwise).
-      - name: Test package files that read app files
-        run: node scripts/ci-diff-reach.mjs --run-app-tests
+      # On a pull request that reaches files another package's tests read but
+      # not that package's code, run just those test files (no-op otherwise).
+      - name: Test package files that read reached files
+        run: node scripts/ci-diff-reach.mjs --run-reader-tests
 
       - name: Artifact hygiene
         run: pnpm no-js
