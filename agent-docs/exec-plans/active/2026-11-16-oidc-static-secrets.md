@@ -223,6 +223,7 @@ Revisit when PlanetScale trusts can match `ref`/`environment`/`workflow_ref`.
 Owner: the Vercel → Google STS → generateIdToken → OpenAI chain plus a Worker
 broker is too complex and brittle. Codex run stopped; the two GCP service
 accounts `openai-web` / `openai-hosted-assistant` were deleted (no roles were
-ever granted beyond the token-creator binding). OpenAI stays on static keys
-for now; options are a locked-down key, asking OpenAI to accept Vercel's
-issuer directly, or AI Gateway OIDC for Web calls.
+ever granted beyond the token-creator binding). Follow-up (2026-11-17): owner
+chose to leave OpenAI as is, with no key lockdown or OpenAI support request. If
+it is revisited: a locked-down key, OpenAI accepting Vercel's issuer directly,
+or AI Gateway OIDC for Web calls.
