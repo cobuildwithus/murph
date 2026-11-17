@@ -877,9 +877,7 @@ Existing product admission, delivery and runtime safety rules still apply.
   SHA-256 hash of `jti` through `PrismaHostedWebInternalRequestNonceStore`,
   expiring at token `exp`. The fixed service identity keeps that replay record
   independent of canary-account deletion. Status GET never consumes a nonce.
-  During rollout only, a constant-time static bearer match is accepted while
-  `HOSTED_ONBOARDING_LINQ_PRODUCTION_CANARY_RESET_SECRET` remains configured.
-  Removing it disables that path; failed OIDC never retries static auth.
+  There is no static bearer path; the rollout secret was removed 2026-11-17.
   The admission owner takes its existing version-independent
   contact lock, derives event ids only from that contact's key-rotation-aware
   budget rows, and asks the delivery-ledger owner to remove only compare-and-
