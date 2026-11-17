@@ -4,7 +4,7 @@ import type { ApplePushRequest } from "@/src/lib/apple-push/send";
 
 const m = vi.hoisted(() => ({ send: vi.fn(), beforeSend: vi.fn(), actor: "", current: vi.fn() }));
 vi.mock("@/src/lib/apple-push/send", async original => ({
-  ...await original<typeof import("@/src/lib/apple-push/send")>(), sendApplePush: m.send,
+  ...await original<typeof import("@/src/lib/apple-push/send")>(), prepareApplePushProviderToken: async () => ({ issuedAt: Date.now(), value: "test-provider-token" }), sendApplePush: m.send,
 }));
 vi.mock("@/src/lib/game/push-delivery", async original => {
   const actual = await original<typeof import("@/src/lib/game/push-delivery")>();
@@ -148,7 +148,7 @@ describe.skipIf(!enabled)("game reminders PostgreSQL", () => {
     m.beforeSend.mockImplementationOnce(() => db.game.update({ where: { id: closed }, data: { status: "settled" } }));
     await sendDueGameReminders(now);
     expect(m.send).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ data: { gameId: surviving, notification: "game_reminder" },
-      message: { kind: "alert", title: "Read", body: "Still time today." } }));
+      message: { kind: "alert", title: "Read", body: "Still time today." } }), { providerToken: { issuedAt: expect.any(Number), value: "test-provider-token" } });
   });
   it.each(["none", "outgoing", "incoming"])("uses a visible peer post only, block=%s", async block => {
     const owner = await member(), peer = await member("UTC", false), id = await game(owner, "Walk", peer);

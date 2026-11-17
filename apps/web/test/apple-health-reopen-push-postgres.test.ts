@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const m = vi.hoisted(() => ({ send: vi.fn(), credentials: vi.fn(), beforeClaim: vi.fn() }));
 vi.mock("@/src/lib/apple-push/send", async original => ({
-  ...await original<typeof import("@/src/lib/apple-push/send")>(), sendApplePush: m.send, readApplePushCredentials: m.credentials,
+  ...await original<typeof import("@/src/lib/apple-push/send")>(), prepareApplePushProviderToken: async () => ({ issuedAt: Date.now(), value: "test-provider-token" }), sendApplePush: m.send, readApplePushCredentials: m.credentials,
 }));
 vi.mock("@/src/lib/hosted-onboarding/member-access", async original => {
   const actual = await original<typeof import("@/src/lib/hosted-onboarding/member-access")>();

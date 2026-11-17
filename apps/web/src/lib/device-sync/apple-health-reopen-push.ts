@@ -6,6 +6,7 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 
 import {
   APPLE_PUSH_TOPICS,
+  prepareApplePushProviderToken,
   readApplePushCredentials,
   sendApplePush,
   type ApplePushResult,
@@ -170,7 +171,7 @@ async function claimAndSend(
   // A claim is never released: a failed or superseded send costs this one step, and the next still goes out.
   let outcome: AppleHealthReopenPushOutcome = "failed";
   try {
-    outcome = await deliver(prisma, claim, clock());
+    outcome = await deliver(prisma, claim, clock);
   } finally {
     await prisma.appleHealthReopenPush.updateMany({
       data: { outcome },
@@ -181,7 +182,10 @@ async function claimAndSend(
 }
 
 /** Last look before Apple: data, app contact, the switch, a new phone or the clock may have moved since the claim. */
-async function deliver(prisma: PrismaClient, claim: Claim, now: Date): Promise<AppleHealthReopenPushOutcome> {
+async function deliver(prisma: PrismaClient, claim: Claim, clock: () => Date): Promise<AppleHealthReopenPushOutcome> {
+  const providerToken = await prepareApplePushProviderToken();
+  if (!providerToken) return "failed";
+  const now = clock();
   const [current] = await readDueMembers(prisma, { ignoreClaim: claim, memberId: claim.memberId, now });
   const ready = current ? readReady(current, now) : null;
   if (
@@ -202,7 +206,7 @@ async function deliver(prisma: PrismaClient, claim: Claim, now: Date): Promise<A
     target: ready.target,
     threadId: APPLE_HEALTH_REOPEN_NOTIFICATION_ID,
     ...(ready.timeSensitive ? { interruptionLevel: "time-sensitive" as const } : {}),
-  });
+  }, { providerToken });
   // Apple rejected this exact token. A newer registration is left untouched.
   if (outcome === "unregistered") await forgetCompanionPushRoute(claim.memberId, claim.target.token);
   return outcome;

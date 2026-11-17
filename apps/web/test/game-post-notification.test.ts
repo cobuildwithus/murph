@@ -3,7 +3,7 @@ import { sha256Hex } from "@/src/lib/primitives";
 import type { RuleEntry, RuleState } from "@/src/lib/game/rules";
 
 const m = vi.hoisted(() => ({ replyAccess: vi.fn(), routes: vi.fn(), route: vi.fn(), claims: vi.fn(), previous: vi.fn(), blocks: vi.fn(), game: vi.fn(), report: vi.fn(), update: vi.fn(), send: vi.fn(), forget: vi.fn() }));
-vi.mock("@/src/lib/apple-push/send", async original => ({ ...await original<typeof import("@/src/lib/apple-push/send")>(), sendApplePush: m.send }));
+vi.mock("@/src/lib/apple-push/send", async original => ({ ...await original<typeof import("@/src/lib/apple-push/send")>(), prepareApplePushProviderToken: async () => ({ issuedAt: Date.now(), value: "test-provider-token" }), sendApplePush: m.send }));
 vi.mock("@/src/lib/companion/push-route", async original => ({ ...await original<typeof import("@/src/lib/companion/push-route")>(), forgetCompanionPushRoute: m.forget }));
 vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({ companionPushRoute: { findFirst: m.route }, gameEvent: { updateMany: m.update }, game: { findUnique: m.game }, gameBlock: { findMany: m.blocks }, gameReport: { findFirst: m.report } }) }));
 vi.mock("@/src/lib/game/service", () => ({ canReadGameReply: m.replyAccess }));
@@ -46,7 +46,7 @@ describe("one daily game notifier", () => {
     expect(notifications[0].claims.map(claim => claim.slot)).toEqual(["first", "completion"]);
     await deliverGamePostNotification(notifications[0]);
     expect(m.send).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ data: { gameId: "game-a", notification: "game_post" },
-      message: { kind: "alert", title: "New game check-in", body: "Someone posted. Share yours to see it." } }));
+      message: { kind: "alert", title: "New game check-in", body: "Someone posted. Share yours to see it." } }), { providerToken: { issuedAt: Date.now(), value: "test-provider-token" } });
     expect(await applePushWireAps(m.send.mock.calls[0][0])).toMatchObject({ sound: "default" });
   });
   it.each([null, clock])("tells a pair's first poster theirs develops, even after withdrawal %s", async withdrawnAt => {
@@ -158,7 +158,7 @@ describe("one reply push per post", () => {
     expect(m.send).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
       data: { gameId: "game-reply", notification: "game_reply" }, expiresAt: new Date(clock.getTime() + 24 * 60 * 60 * 1000),
       message: { kind: "alert", body: kind === "voice" ? "New voice note on your post." : "New note on your post." },
-    }));
+    }), { providerToken: { issuedAt: Date.now(), value: "test-provider-token" } });
     expect(await applePushWireAps(m.send.mock.calls[0][0])).toMatchObject({ sound: "default" });
     expect(m.claims.mock.calls[0][0].data[0]).toEqual({ gameId: "game-reply", actor: "system", type: "reply_notification",
       commandKey: "game-reply-push:post-reply", payload: { entryId: "post-reply" } });

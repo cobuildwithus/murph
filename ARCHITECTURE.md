@@ -7129,7 +7129,13 @@ are unchanged. Evidence outlives the author's account and follows the reporter's
 existing report lifetime.
 
 `push-delivery.ts` shares route/session, permission, suspension, APNs delivery
-and unregistered-token cleanup with post notifications. Reply claims and
+and unregistered-token cleanup with post notifications. It prepares the APNs
+provider token before the final subject and route/session checks. The sender
+uses the existing hosted-crypto KMS client when `APNS_KMS_KEY_VERSION` is set,
+paired with the rotated `APNS_KEY_ID`, and never consults the transitional PEM
+in that mode. Signing is shared across concurrent callers and tokens are reused
+for 40 minutes. A prepared send cannot trigger a later signing refresh.
+Reply claims and
 subject checks remain separate. The push body is exactly “New voice note on
 your post.” or “New note on your post.”, with data `{gameId, notification:
 "game_reply"}`. The sender's required title matches post pushes. Delivery is
@@ -7211,6 +7217,10 @@ is who needs to reopen the app; it marks the push Time Sensitive only for a
 route that reported the switch, since only those builds are known to hold the
 entitlement. Web must deploy before an app that sends the field: the
 registration schemas are strict, so an older Web rejects it.
+The sweep checks APNs configuration before claiming, then prepares the provider
+token after the claim transaction and before its final eligibility read, using
+the clock after signing. Signing failure consumes the claim as a failed send;
+neither failure nor supersession releases it.
 Companion installation-scoped deletion still owns sign-out. Native
 uses the existing notification delegate; the alert's structural game id selects
 an authenticated game after refresh. No entry content leaves the game reader.

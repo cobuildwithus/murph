@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const m = vi.hoisted(() => ({ after: vi.fn(), routes: vi.fn(), route: vi.fn(), game: vi.fn(), block: vi.fn(), send: vi.fn(), forget: vi.fn() }));
 vi.mock("next/server", () => ({ after: m.after }));
-vi.mock("@/src/lib/apple-push/send", async original => ({ ...await original<typeof import("@/src/lib/apple-push/send")>(), sendApplePush: m.send }));
+vi.mock("@/src/lib/apple-push/send", async original => ({ ...await original<typeof import("@/src/lib/apple-push/send")>(), prepareApplePushProviderToken: async () => ({ issuedAt: Date.now(), value: "test-provider-token" }), sendApplePush: m.send }));
 vi.mock("@/src/lib/companion/push-route", async original => ({ ...await original<typeof import("@/src/lib/companion/push-route")>(), forgetCompanionPushRoute: m.forget }));
 vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({ companionPushRoute: { findFirst: m.route }, game: { findUnique: m.game }, gameBlock: { findFirst: m.block } }) }));
 import { applePushWireAps } from "./support/apple-push-wire";
@@ -51,7 +51,7 @@ describe("pair invite acceptance push", () => {
     expect(m.send).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
       data: { gameId: "game-a", notification: "game_accepted" }, expiresAt: new Date(expiry), target,
       message: { kind: "alert", title: "They shook on it.", body: `Your game starts ${word}.` },
-    }));
+    }), { providerToken: { issuedAt: Date.now(), value: "test-provider-token" } });
     expect(await applePushWireAps(m.send.mock.calls[0]![0])).toMatchObject({ sound: "default" });
   });
 

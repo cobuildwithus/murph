@@ -53,7 +53,7 @@ vi.mock("@/src/lib/game/chat-lifecycle", () => ({ deliverGameChatLifecycle: life
 vi.mock("@/src/lib/game/chat-delivery", () => ({ deliverGameChangeProposal: proposalDelivery }));
 vi.mock("@/src/lib/hosted-orchestration/signal-runtime", () => ({ signalHostedMailboxAppendRuntime: vi.fn().mockResolvedValue(undefined) }));
 vi.mock("@/src/lib/apple-push/send", async (original) => ({
-  ...await original<typeof import("@/src/lib/apple-push/send")>(), sendApplePush: push,
+  ...await original<typeof import("@/src/lib/apple-push/send")>(), prepareApplePushProviderToken: async () => ({ issuedAt: Date.now(), value: "test-provider-token" }), sendApplePush: push,
 }));
 // A post's push goes after its response; these runs wait for it like the platform does.
 const afterResponse = vi.hoisted(() => [] as Promise<unknown>[]);
@@ -653,7 +653,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       expect(await db.gameEvent.count({ where: { gameId, type: "settled" } })).toBe(1);
       expect(await db.hostedLinqDelivery.count({ where: { sourceRef: gameId, template: "game_recap" } })).toBe(1);
       await Promise.all(deferredResponse.tasks.splice(0).map(task => task()));
-      expect(push).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ data: { gameId, notification: "game_post" } }));
+      expect(push).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ data: { gameId, notification: "game_post" } }), { providerToken: { issuedAt: expect.any(Number), value: "test-provider-token" } });
       expect(await ok(b, last)).toMatchObject({ status: "settled" });
       expect(await ok(a, { type: "replyToPost", gameId, entryId: last.entryId, replyId: randomUUID(), kind: "text", text: "Nice finish" })).toMatchObject({ status: "settled" });
       await move("2030-03-11T03:00:00Z");
@@ -1476,7 +1476,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       for (const task of deferredResponse.tasks.splice(0)) await task();
       expect(push).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
         data: { gameId, notification: "game_accepted" }, message: { kind: "alert", title: "They shook on it.", body: "Your game starts tomorrow." },
-      }));
+      }), { providerToken: { issuedAt: expect.any(Number), value: "test-provider-token" } });
       await devStartNow(gameId, ava);
       expect(push).toHaveBeenCalledOnce();
     } finally { deferredResponse.hold = false; deferredResponse.tasks.length = 0; }
