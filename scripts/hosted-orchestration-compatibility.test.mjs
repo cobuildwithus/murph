@@ -1437,7 +1437,7 @@ test("workflow keeps credentials behind trusted selection and publishes one stab
   assert.match(workflow, /on:\n  workflow_run:/u);
   assert.match(workflow, /environment: temporal-compatibility/u);
   assert.match(workflow, /owner: cobuildwithus\n\s+repositories: murph-cloud/u);
-  assert.match(workflow, /permission-actions: write\n\s+permission-contents: read/u);
+  assert.match(workflow, /permissions: '\{"actions":"write","contents":"read"\}'/u);
   assert.match(
     workflow,
     /EXPECTED_BASE_REF: \$\{\{ github\.event\.repository\.default_branch \}\}/u,
@@ -1610,7 +1610,7 @@ test("Web production admission runs only for exact public main", async () => {
     /TEMPORAL_PRODUCTION_TARGET_DIGEST: \$\{\{ vars\.TEMPORAL_PRODUCTION_TARGET_DIGEST \}\}/u,
   );
   assert.match(workflow, /--sha "\$\{GITHUB_SHA\}"/u);
-  assert.match(workflow, /permission-actions: write/u);
+  assert.match(workflow, /permissions: '\{"actions":"write","contents":"read"\}'/u);
   assert.match(workflow, /repositories: murph-cloud/u);
   const timeoutMinutes = Number(/timeout-minutes: (\d+)/u.exec(admissionJob)?.[1]);
   assert.ok(Number.isSafeInteger(timeoutMinutes));

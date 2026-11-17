@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
-import { createGitHubAppTokenSupplier } from "./native-android-hosted-e2e-native.mjs";
+import { createGitHubAppTokenSupplier } from "./github-app-token.mjs";
 
 import { assertSafeId, assertSha, isRecord, sleep } from "./native-ios-hosted-e2e-support.mjs";
 
@@ -132,10 +132,11 @@ function readCanaryRequest(env, { now, tokenSupplier }) {
     throw new Error("Wearable canary requires an exact protected-main controller.");
   }
   const appId = requiredToken(env.WEARABLE_CANARY_GITHUB_APP_ID);
-  const privateKey = requiredToken(env.WEARABLE_CANARY_GITHUB_APP_PRIVATE_KEY);
+  const keyVersion = requiredToken(env.WEARABLE_CANARY_GITHUB_APP_KMS_KEY_VERSION);
   const publicToken = requiredToken(env.GITHUB_TOKEN);
   const privateTokenSupplier = tokenSupplier ?? createGitHubAppTokenSupplier({
-    appId, privateKey, repository: PRIVATE_REPOSITORY, now,
+    appId, keyVersion, env, repository: PRIVATE_REPOSITORY, now,
+    repositories: ["murph-cloud"], permissions: { actions: "write", contents: "read" },
   });
   return { privateTokenSupplier, publicSha, requestId, publicToken };
 }

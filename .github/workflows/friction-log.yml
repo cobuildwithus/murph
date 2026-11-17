@@ -33,6 +33,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
+      id-token: write
       contents: read
     steps:
       - name: Clone repository
@@ -55,13 +56,13 @@ jobs:
 
       - name: Mint Frog GitHub App token
         id: frog-app-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: ./.github/actions/github-app-token
         with:
-          client-id: ${{ vars.FROG_APP_CLIENT_ID }}
-          private-key: ${{ secrets.FROG_APP_PRIVATE_KEY }}
-          permission-contents: write
-          permission-issues: write
-          permission-pull-requests: write
+          app-id: ${{ vars.FROG_APP_CLIENT_ID }}
+          key-version: projects/murph-495013/locations/global/keyRings/github-apps/cryptoKeys/frog-app/cryptoKeyVersions/1
+          owner: ${{ github.repository_owner }}
+          repositories: murph
+          permissions: '{"contents":"write","issues":"write","pull_requests":"write"}'
 
       - name: Report and reconcile frictions
         uses: wevm/frog/action@7b71c098683d49a573c279a2031a24205ea76841 # v1.1.0
