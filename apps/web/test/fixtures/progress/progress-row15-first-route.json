@@ -69,8 +69,15 @@
             "passedOn": null
           }
         ],
-        "here": {"x": 0.679375, "y": 0.12625},
-        "drawerHere": {"x": 0.730625, "y": 0.195911}
+        "here": {
+          "x": 0.679375,
+          "y": 0.12625
+        },
+        "drawerHere": {
+          "x": 0.730625,
+          "y": 0.195911
+        },
+        "shareAwardId": null
       },
       "pics": []
     }

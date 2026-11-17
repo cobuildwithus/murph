@@ -6056,6 +6056,78 @@ share producer, verify the exact deployment, and drain predecessor functions.
 That Web release and schema are the rollback floor once share objects exist.
 No backfill, Worker API change, queue, retry worker or flag is required.
 
+Share drawers read one exact stored owner award; they never settle, recompute
+health or query games. Rungs and the current route carry nullable `shareAwardId`;
+each completed route carries its actual stored award ID. Earned dates and
+identities survive corrections and route rollover. Friend awards, numerical
+health wins, streaks and unearned goals do not enter this share surface.
+
+The bearer-only `GET/POST /api/game/v1/progress/shares/:awardId`, image GET and
+`PUT /api/game/v1/progress/share-consent` routes parse once and use private,
+no-store responses. POST accepts no body. The native consent operation accepts
+only allow/deny with disclosure version 1 and uses the same atomic owner as Web
+withdrawal. The share view contains server copy, the existing MedalFace and one
+strict needs_photo/medal/available/generating/photo presentation. No recorded
+choice allows pictures; an explicit denial turns them off. No consent question
+is part of the drawer. Missing profile photos use the existing profile upload. Failure, refusal,
+retirement and the fixed timeout present the medal; no failed wire state exists.
+
+Admission returns an existing row before budgets or source preparation. Otherwise
+it reads the GameProfile photo through the existing game media store, orients
+and strips metadata outside locks, then rechecks that photo key under the member
+fence. Neither a missing profile photo nor unreadable bytes spends an attempt. One
+31-row rolling-window read limits admission to five attempts per 24 hours,
+thirty per 30 days and one unexpired generation. Failed and retired attempts
+still count. A pre-admission source failure returns a sanitized 503 without a
+row or quota use; a limit returns 429 and bounded retryAfterSeconds. Losing
+prepared buffers are cleared. No attempt is restarted or regenerated.
+
+Only the insertion winner schedules Next after(), with its own secure-box unwrap
+scope and prepared in-memory reference. The Node route declares maxDuration 300.
+One Web OpenAI images.edit call uses gpt-image-2.6-flare, one generic-named JPEG
+reference, medium quality, 1024x1536 and JPEG compression 90. SDK retries and
+logging are off. The operation owns a 240-second deadline from admission,
+independent of client disconnect. Output is decoded and encoded once at quality
+90, stripped of metadata and rejected above 2 MiB; no quality retry is made.
+The existing store enforces the 3 MiB envelope bound.
+
+Native session/account authority and the Privacy choice are checked
+at admission, before provider dispatch, before staging and at ready commit.
+The existing explicit-withdrawal health consent policy blocks all photo effects
+and reads after launch health permission is revoked; missing historical grants
+retain the owner's existing compatibility policy. Steps/Sleep additionally use
+Browser Vault authority for card and image reads, even for cached pictures.
+Only a generating row before its deadline can become ready. Permanent tombstones
+beat late staging. Failure stores a closed code, purges the reserved key and
+clears reference/output buffers. Cleanup errors remain visible and retain the
+row/key. An expired generating row reads as a medal without a GET mutation.
+Image GET checks authority before retrieval and after decryption, returns JPEG
+bytes with nosniff, and clears decrypted bytes after the response copy.
+
+Source preparation, KMS, OpenAI and storage effects stay outside database
+transactions. Domain reads are serial: one award, at most four selection queries,
+one profile-key recheck, then at most eight admission queries including the
+bounded budget and insertion. Each generation authority phase adds at most five
+domain queries; ready publication adds one conditional update. Existing native,
+health and crypto owners retain their own bounded queries; only one pooled
+transaction is active at a time. No collection fanout or external work occurs
+under a lock. There is at most one image provider call and output stage per
+admitted attempt.
+
+Copy and prompts derive activity only from the saved measure identity: registry
+label or normalized custom activity name. Opaque hashed activities are medal
+only. Task prose and saved display nouns never enter either output. Scene facts
+come from the checked bank/frozen found target; a route sends only its saved
+destination label. No member identifier, award date, total, source URL, friend
+content, route coordinates or token is sent. The only scene-specific branches
+are the approved Mont Blanc summit and sleeping godwit. Share heights use full
+digits and target height, not a repetition count; planks retain the approved
+"You've planked longer than this moment lasted." wording even at equality. The plank pose specifies flat
+forearms, elbows under shoulders and a straight body. Walking card copy and
+distances omit "about". Loading is native-only;
+there are no streamed partial images. iOS owns rendering and native
+sharing and must ship after the deployed, drained PR A floor and PR B producer.
+
 Every owner FK cascades from `HostedMember`. Award subjects also cascade, so
 deleting a friend removes awards about that friend without deleting unrelated
 awards. Task inference cannot arrive after its owner is deleted. Pictures have

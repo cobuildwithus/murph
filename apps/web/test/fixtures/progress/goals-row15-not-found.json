@@ -13,7 +13,8 @@
       "on": null,
       "toGo": "6,963 to go",
       "short": "Mount St. Helens",
-      "tagline": "A volcano with a changed summit"
+      "tagline": "A volcano with a changed summit",
+      "shareAwardId": null
     },
     {
       "id": "mount-etna",
@@ -26,7 +27,8 @@
       "on": null,
       "toGo": "9,765 to go",
       "short": "Mount Etna",
-      "tagline": "A volcano high above the sea"
+      "tagline": "A volcano high above the sea",
+      "shareAwardId": null
     },
     {
       "id": "mount-fuji",
@@ -39,7 +41,8 @@
       "on": null,
       "toGo": "11k to go",
       "short": "Mount Fuji",
-      "tagline": "A familiar cone against the sky"
+      "tagline": "A familiar cone against the sky",
+      "shareAwardId": null
     },
     {
       "id": "mount-rainier",
@@ -52,7 +55,8 @@
       "on": null,
       "toGo": "13k to go",
       "short": "Mount Rainier",
-      "tagline": "A great volcano beneath the snow"
+      "tagline": "A great volcano beneath the snow",
+      "shareAwardId": null
     }
   ],
   "route": null,

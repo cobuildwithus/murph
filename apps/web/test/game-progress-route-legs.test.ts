@@ -60,8 +60,8 @@ describe('Progress route legs', () => {
     const award = routeLegs({ measureId: 'walk.meters', legs: [leg], points: [['2026-11-02', 100]] })[0]!;
     const view = routeView('walk.meters', { goal: { route: { from: 'B', to: 'C' } }, legs: [next] }, [['2026-11-02', 100]],
       [{ ...award, id: 'award', createdAt: new Date('2026-11-02'), seenAt: null }], 'us')!;
-    expect(view.finishedOn).toBeNull(); expect(view.progress).toBe(0.5);
-    expect(view.completed).toEqual([{ name: 'A to B', finishedOn: '2026-11-02' }]);
+    expect(view.shareAwardId).toBeNull(); expect(view.finishedOn).toBeNull(); expect(view.progress).toBe(0.5);
+    expect(view.completed).toEqual([{ name: 'A to B', finishedOn: '2026-11-02', shareAwardId: 'award' }]);
     expect(routeAwardKey('walk.meters', next, 0)).not.toBe(award.key);
   });
   it('does not reuse an old completion when a repeated leg starts at the same corrected total', () => {
@@ -69,8 +69,8 @@ describe('Progress route legs', () => {
     const legs = replaceRouteLeg('walk.meters', [leg], leg, 0, new Set([award.key]));
     const view = routeView('walk.meters', { legs }, [['2026-11-02', 0]],
       [{ ...award, id: 'award', createdAt: new Date('2026-11-01'), seenAt: null }], 'us')!;
-    expect(legs).toHaveLength(2); expect(view.finishedOn).toBeNull(); expect(view.progress).toBe(0);
-    expect(view.completed).toEqual([{ name: 'A to B', finishedOn: '2026-11-01' }]);
+    expect(legs).toHaveLength(2); expect(view.shareAwardId).toBeNull(); expect(view.finishedOn).toBeNull(); expect(view.progress).toBe(0);
+    expect(view.completed).toEqual([{ name: 'A to B', finishedOn: '2026-11-01', shareAwardId: 'award' }]);
     const repeated = routeLegs({ measureId: 'walk.meters', legs, points: [['2026-11-02', 0], ['2026-11-03', 100]] });
     expect(repeated[1]!.key).not.toBe(award.key); expect(repeated[1]!.on).toBe('2026-11-03');
   });
@@ -81,9 +81,9 @@ describe('Progress route legs', () => {
     const candidate = routeLegs({ measureId: 'steps', legs: [mile], points: [['2026-11-02', 2000]] })[0]!;
     const view = routeView('steps', { legs: [mile] }, [['2026-11-03', 10]],
       [{ ...candidate, id: 'award', createdAt: new Date('2026-11-02'), seenAt: null }], 'us')!;
-    expect(view.progress).toBe(1); expect(view.finishedOn).toBe('2026-11-02');
+    expect(view.shareAwardId).toBe('award'); expect(view.progress).toBe(1); expect(view.finishedOn).toBe('2026-11-02');
     expect(view.here).toMatchObject({ x: view.towns[0].x, y: view.towns[0].y });
-    expect(view.completed).toEqual([{ name: 'A to B', finishedOn: '2026-11-02' }]);
+    expect(view.completed).toEqual([{ name: 'A to B', finishedOn: '2026-11-02', shareAwardId: 'award' }]);
     expect(view.goalPicked).toBe(false);
     expect(view.map).toMatch(/^\/api\/game\/v1\/progress\/map\?/u);
   });

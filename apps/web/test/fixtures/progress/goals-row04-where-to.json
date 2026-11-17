@@ -13,7 +13,8 @@
       "on": null,
       "toGo": null,
       "short": "Boston to New York",
-      "tagline": "A journey between harbor cities"
+      "tagline": "A journey between harbor cities",
+      "shareAwardId": null
     }
   ],
   "route": {

@@ -108,7 +108,8 @@
             "on": "2026-11-14",
             "toGo": null,
             "short": "One World Trade",
-            "tagline": "A bright point above the harbor"
+            "tagline": "A bright point above the harbor",
+            "shareAwardId": "big-ow"
           },
           {
             "id": "empire-state-building",
@@ -121,7 +122,8 @@
             "on": "2026-11-12",
             "toGo": null,
             "short": "Empire State",
-            "tagline": "An old favorite in the skyline"
+            "tagline": "An old favorite in the skyline",
+            "shareAwardId": "award:pushups.reps:empire-state-building"
           },
           {
             "id": "eiffel-tower",
@@ -134,7 +136,8 @@
             "on": "2026-11-10",
             "toGo": null,
             "short": "Eiffel Tower",
-            "tagline": "An iron tower above the rooftops"
+            "tagline": "An iron tower above the rooftops",
+            "shareAwardId": "award:pushups.reps:eiffel-tower"
           },
           {
             "id": "golden-gate-bridge-towers",
@@ -147,7 +150,8 @@
             "on": "2026-11-04",
             "toGo": null,
             "short": "Golden Gate towers",
-            "tagline": "Orange towers above the bay"
+            "tagline": "Orange towers above the bay",
+            "shareAwardId": "award:pushups.reps:golden-gate-bridge-towers"
           },
           {
             "id": "washington-monument",
@@ -160,7 +164,8 @@
             "on": "2026-11-02",
             "toGo": null,
             "short": "Washington Monument",
-            "tagline": "A stone needle above the capital"
+            "tagline": "A stone needle above the capital",
+            "shareAwardId": "award:pushups.reps:washington-monument"
           },
           {
             "id": "statue-of-liberty",
@@ -173,7 +178,8 @@
             "on": "2026-10-27",
             "toGo": null,
             "short": "Statue of Liberty",
-            "tagline": "A torch above the harbor"
+            "tagline": "A torch above the harbor",
+            "shareAwardId": "award:pushups.reps:statue-of-liberty"
           }
         ],
         "next": {
@@ -187,7 +193,8 @@
           "on": null,
           "toGo": "39 to go",
           "short": "CN Tower",
-          "tagline": "A tall view above the lake"
+          "tagline": "A tall view above the lake",
+          "shareAwardId": null
         },
         "goalPicked": false
       },
@@ -303,7 +310,8 @@
             "on": "2026-11-12",
             "toGo": null,
             "short": "Golden Gate towers",
-            "tagline": "Orange towers above the bay"
+            "tagline": "Orange towers above the bay",
+            "shareAwardId": "award:pullups.reps:golden-gate-bridge-towers"
           }
         ],
         "next": {
@@ -317,7 +325,8 @@
           "on": null,
           "toGo": "162 to go",
           "short": "Eiffel Tower",
-          "tagline": "An iron tower above the rooftops"
+          "tagline": "An iron tower above the rooftops",
+          "shareAwardId": null
         },
         "goalPicked": false
       },
@@ -442,8 +451,15 @@
             "passedOn": null
           }
         ],
-        "here": {"x": 0.404237, "y": 0.113559},
-        "drawerHere": {"x": 0.348671, "y": 0.113559}
+        "here": {
+          "x": 0.404237,
+          "y": 0.113559
+        },
+        "drawerHere": {
+          "x": 0.348671,
+          "y": 0.113559
+        },
+        "shareAwardId": null
       },
       "pics": []
     }
@@ -525,7 +541,8 @@
         "on": null,
         "toGo": "39 to go",
         "short": "CN Tower",
-        "tagline": "A tall view above the lake"
+        "tagline": "A tall view above the lake",
+        "shareAwardId": null
       },
       "title": "Three wins in one day",
       "line": null

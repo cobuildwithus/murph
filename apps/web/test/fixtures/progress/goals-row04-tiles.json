@@ -11,7 +11,8 @@
       "on": null,
       "toGo": "51 to go",
       "short": "Willis Tower",
-      "tagline": "A high view over the lake"
+      "tagline": "A high view over the lake",
+      "shareAwardId": null
     },
     {
       "id": "taipei-101",
@@ -24,7 +25,8 @@
       "on": null,
       "toGo": "267 to go",
       "short": "Taipei 101",
-      "tagline": "A stepped tower above the city"
+      "tagline": "A stepped tower above the city",
+      "shareAwardId": null
     },
     {
       "id": "cn-tower",
@@ -37,7 +39,8 @@
       "on": null,
       "toGo": "415 to go",
       "short": "CN Tower",
-      "tagline": "A tall view above the lake"
+      "tagline": "A tall view above the lake",
+      "shareAwardId": null
     },
     {
       "id": "burj-khalifa",
@@ -50,7 +53,8 @@
       "on": null,
       "toGo": "1,317 to go",
       "short": "Burj Khalifa",
-      "tagline": "A tower reaching beyond the rest"
+      "tagline": "A tower reaching beyond the rest",
+      "shareAwardId": null
     },
     {
       "id": "el-capitan",
@@ -63,7 +67,8 @@
       "on": null,
       "toGo": "1,600 to go",
       "short": "El Capitan",
-      "tagline": "A great wall above the valley"
+      "tagline": "A great wall above the valley",
+      "shareAwardId": null
     },
     {
       "id": "mount-everest",
@@ -76,7 +81,8 @@
       "on": null,
       "toGo": "27.6k to go",
       "short": "Mount Everest",
-      "tagline": "The highest summit on Earth"
+      "tagline": "The highest summit on Earth",
+      "shareAwardId": null
     }
   ],
   "match": null,

@@ -96,7 +96,8 @@
             "on": "2026-11-14",
             "toGo": null,
             "short": "Gateway Arch",
-            "tagline": "A silver curve above the river"
+            "tagline": "A silver curve above the river",
+            "shareAwardId": "award:burpees.reps:gateway-arch"
           },
           {
             "id": "space-needle",
@@ -109,7 +110,8 @@
             "on": "2026-11-12",
             "toGo": null,
             "short": "Space Needle",
-            "tagline": "A view high above the city"
+            "tagline": "A view high above the city",
+            "shareAwardId": "award:burpees.reps:space-needle"
           },
           {
             "id": "washington-monument",
@@ -122,7 +124,8 @@
             "on": "2026-11-08",
             "toGo": null,
             "short": "Washington Monument",
-            "tagline": "A stone needle above the capital"
+            "tagline": "A stone needle above the capital",
+            "shareAwardId": "award:burpees.reps:washington-monument"
           },
           {
             "id": "great-pyramid-of-giza",
@@ -135,7 +138,8 @@
             "on": "2026-11-03",
             "toGo": null,
             "short": "Great Pyramid of Giza",
-            "tagline": "An ancient summit made of stone"
+            "tagline": "An ancient summit made of stone",
+            "shareAwardId": "award:burpees.reps:great-pyramid-of-giza"
           },
           {
             "id": "statue-of-liberty",
@@ -148,7 +152,8 @@
             "on": "2026-10-26",
             "toGo": null,
             "short": "Statue of Liberty",
-            "tagline": "A torch above the harbor"
+            "tagline": "A torch above the harbor",
+            "shareAwardId": "award:burpees.reps:statue-of-liberty"
           }
         ],
         "next": {
@@ -162,7 +167,8 @@
           "on": null,
           "toGo": "106 to go",
           "short": "Golden Gate towers",
-          "tagline": "Orange towers above the bay"
+          "tagline": "Orange towers above the bay",
+          "shareAwardId": null
         },
         "goalPicked": false
       },
