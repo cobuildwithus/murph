@@ -239,6 +239,27 @@ it("distinguishes no data from a missing metric bucket and hides decrypt error d
   expect(await failed.text()).not.toContain("ciphertext locator");
 });
 
+it("logs which saved-replica stage failed without its private text", async () => {
+  const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+  try {
+    mocks.decode.mockRejectedValueOnce(new Error("synthetic private ciphertext locator"));
+    mocks.decode.mockResolvedValueOnce({ client: { replica: {} } });
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const response = await GET(request());
+      expect(response.status).toBe(503);
+      expect(await response.text()).not.toMatch(/replica_metrics_missing|ciphertext locator/);
+    }
+    delete shards.core.meals;
+    expect((await GET(request())).status).toBe(503);
+    const failures = logged.mock.calls.filter(([message]) => message === "Hosted onboarding route failed.");
+    expect(failures.map(([, details]) => (details as { errorCauseMessage?: string }).errorCauseMessage))
+      .toEqual(["Error", "replica_metrics_missing", "replica_timezone_missing"]);
+    expect(JSON.stringify(logged.mock.calls)).not.toContain("ciphertext locator");
+  } finally {
+    logged.mockRestore();
+  }
+});
+
 it("fails closed without canonical timezone metadata", async () => {
   delete shards.core.meals;
   const response = await GET(request());
