@@ -278,7 +278,7 @@
             "name": "Mount Everest",
             "drawing": "mount-everest",
             "at": 29032,
-            "atText": "29k ft",
+            "atText": "29,032 ft",
             "blurb": "The highest mountain on Earth, first climbed by Edmund Hillary and Tenzing Norgay in 1953.",
             "where": "Nepal / China",
             "on": "2026-10-16",
@@ -292,12 +292,12 @@
             "name": "K2",
             "drawing": "k2",
             "at": 28251,
-            "atText": "28.3k ft",
+            "atText": "28,251 ft",
             "blurb": "The second highest mountain on Earth, in Pakistan, known as the \"Savage Mountain.\"",
             "where": "Pakistan / China",
             "on": "2026-10-06",
             "toGo": null,
-            "short": "K two",
+            "short": "K2",
             "tagline": "A steep summit in the Karakoram",
             "shareAwardId": "award:pushups.reps:k2"
           },
@@ -306,7 +306,7 @@
             "name": "Denali",
             "drawing": "denali",
             "at": 20310,
-            "atText": "20.3k ft",
+            "atText": "20,310 ft",
             "blurb": "The highest mountain in North America, in Alaska's Denali National Park.",
             "where": "Alaska, USA",
             "on": "2026-05-30",
@@ -320,7 +320,7 @@
             "name": "A skydive",
             "drawing": "skydive",
             "at": 13000,
-            "atText": "13k ft",
+            "atText": "13,000 ft",
             "blurb": "A tandem skydive starts about two and a half miles above the ground.",
             "where": "Drop zones everywhere",
             "on": "2026-01-31",
@@ -380,22 +380,6 @@
       ]
     }
   ],
-  "streak": {
-    "current": 11,
-    "best": {
-      "count": 11,
-      "from": "2026-10-26",
-      "to": "2026-11-13"
-    },
-    "today": "pending",
-    "months": [
-      {
-        "month": "2026-11",
-        "days": "dddddddddddddtffffffffffffffff"
-      }
-    ],
-    "obligations": []
-  },
   "medals": [
     {
       "id": "push30k",

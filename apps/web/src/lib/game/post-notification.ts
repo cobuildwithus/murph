@@ -11,8 +11,10 @@ import { dayIndexAt, eligibleFromDay, hasUnlockedDay, indexGameEntries, isSchedu
 import { addDays, dayStartInstant, gameLocalDate } from "./time";
 
 import { deliverGamePush, readGamePushRoutes } from "./push-delivery";
+import { readPushName } from "./viewer-names";
 
 type Slot = "first" | "completion";
+interface PostCopy { pair: boolean; unlocked: boolean; photo: boolean }
 interface ClaimedPostNotification {
   claims: { commandKey: string; slot: Slot }[];
   gameId: string;
@@ -24,6 +26,7 @@ interface ClaimedPostNotification {
   day: string;
   completion: boolean;
   everyone: boolean;
+  copy: PostCopy;
   request: ApplePushRequest;
 }
 
@@ -86,13 +89,14 @@ export async function claimGamePostNotification(tx: NotificationTx, input: {
       payload: { v: 2, recipientMemberId: item.recipient.memberId, day: item.day, slot: claim.slot, outcome: "claimed" },
     })) });
     if (claimed.count !== claims.length) continue;
-    const pair = state.game.seats === 2;
+    const wording = { completion, everyone: item.progress.everyone, copy: { pair: state.game.seats === 2,
+      unlocked: hasUnlockedDay(state.entries, item.recipient.memberId, dayIndex), photo: candidate.kind === "photo" } };
     notifications.push({ claims, gameId: state.game.id, actor, entryId: input.entryId, dayIndex,
-      memberId: item.recipient.memberId, sessionId: item.route.gameSessionId!, day: item.day, completion, everyone: item.progress.everyone,
+      memberId: item.recipient.memberId, sessionId: item.route.gameSessionId!, day: item.day, ...wording,
       request: {
         collapseId: sha256Hex(claims[claims.length - 1]!.commandKey), data: { gameId: state.game.id, notification: "game_post" },
         expiresAt: dayStartInstant(addDays(item.day, 1), item.recipient.timeZone),
-        message: postMessage(pair, hasUnlockedDay(state.entries, item.recipient.memberId, dayIndex), completion, item.progress.everyone),
+        message: postMessage(wording, null),
         target: item.target,
       },
     });
@@ -100,13 +104,17 @@ export async function claimGamePostNotification(tx: NotificationTx, input: {
   return notifications;
 }
 
-/** One recipient's push. No names or content. A pair's first poster gets
- * theirs developing on Home the first time they look, so the push says so. */
-function postMessage(pair: boolean, unlocked: boolean, completion: boolean, everyone: boolean) {
-  if (pair && unlocked) return { kind: "alert", title: "They're in too.", body: "Theirs develops when you open it." } as const;
-  const body = !pair && completion ? everyone ? "Everyone's in." : "Everyone's in but you."
-    : unlocked ? "There's a new post in your game. Take a look." : "Someone posted. Share yours to see it.";
-  return { kind: "alert", title: "New game check-in", body } as const;
+/** One recipient's push, naming the poster as the recipient knows them but never the content.
+ * A pair's first poster gets theirs developing on Home the first time they look, so the push says so. */
+function postMessage({ copy, completion, everyone: recipientPosted }: Pick<ClaimedPostNotification, "copy" | "completion" | "everyone">, name: string | null) {
+  if (copy.pair && copy.unlocked) return { kind: "alert", title: `${name ? `${name}'s` : "They're"} in too.`, body: "Theirs develops when you open it." } as const;
+  const everyone = !copy.pair && completion ? recipientPosted ? "Everyone's in." : "Everyone's in but you." : null;
+  if (!name) {
+    return { kind: "alert", title: "New game check-in",
+      body: everyone ?? (copy.unlocked ? "There's a new post in your game. Take a look." : "Someone posted. Share yours to see it.") } as const;
+  }
+  return { kind: "alert", title: `${name} ${copy.photo ? "posted a photo" : "checked in"}.`,
+    body: everyone ?? (copy.unlocked ? "Take a look." : "Share yours to see it.") } as const;
 }
 
 /** A push never holds up the committed post's HTTP answer. */
@@ -118,7 +126,11 @@ export function sendGamePostNotificationAfterResponse(notifications: readonly Cl
 
 /** Best effort, one attempt. A stale or ambiguous send never releases its claims. */
 export async function deliverGamePostNotification(notification: ClaimedPostNotification): Promise<void> {
-  const outcome = await deliverGamePush(notification, () => stillValid(notification));
+  const outcome = await deliverGamePush(notification, async () => {
+    if (!await stillValid(notification)) return false;
+    notification.request.message = postMessage(notification, await readPushName(notification.memberId, notification.actor));
+    return true;
+  });
   try {
     for (const claim of notification.claims) await getPrisma().gameEvent.updateMany({ where: { commandKey: claim.commandKey },
       data: { payload: { v: 2, recipientMemberId: notification.memberId, day: notification.day, slot: claim.slot, outcome } } });

@@ -51,6 +51,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as core from "@murphai/core";
 import * as runtimeResidue from "@murphai/assistant-engine/assistant-runtime-residue";
 import * as runtimeState from "@murphai/runtime-state/node";
+import * as observability from "@murphai/hosted-execution/observability";
 import * as snapshotCleanup from "../src/hosted-runtime/snapshot-cleanup.ts";
 import * as pendingInputIndex from "../src/hosted-runtime/pending-input-index.ts";
 import * as mediaReferences from "../src/hosted-runtime/media-references.ts";
@@ -2822,6 +2823,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
   });
 
   it("prunes only quiescent runtime deliveries before archive planning", async () => {
+    const log = vi.spyOn(observability, "emitHostedExecutionStructuredLog");
     const vaultRoot = await createVaultRoot();
     const { calls, platform } = createRuntimePlatform();
     const snapshotArchiveBuilder = createSnapshotArchiveBuilder();
@@ -2881,6 +2883,11 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     await expectPresent(path.join(vaultRoot, activeRef));
     await expectPresent(path.join(vaultRoot, nestedRef));
     await expectPresent(path.join(vaultRoot, legacyRef));
+
+    expect(log).toHaveBeenCalledWith(expect.objectContaining({
+      level: "info",
+      message: "Hosted workspace generated-delivery cleanup retained legacy nested entries.",
+    }));
 
     await drainHostedRuntimeLogWritesBestEffort();
     const entries = calls.logWrite.mock.calls.flatMap(([request]) => request.entries);
@@ -3005,6 +3012,7 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
   });
 
   it("prunes unrelated generated deliveries when an active delivery file is missing", async () => {
+    const log = vi.spyOn(observability, "emitHostedExecutionStructuredLog");
     const vaultRoot = await createVaultRoot();
     const activeRef = `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/missing.pdf`;
     const orphanRef = `${ASSISTANT_GENERATED_DELIVERY_DIRECTORY}/orphan.pdf`;
@@ -3047,6 +3055,10 @@ describe("createHostedWorkspaceRuntimeBridgeJobOptions", () => {
     expect(calls.completeSnapshotSession).toHaveBeenCalledOnce();
     expect(calls.abortSnapshotSession).not.toHaveBeenCalled();
     await expectMissing(path.join(vaultRoot, orphanRef));
+    expect(log).toHaveBeenCalledWith(expect.objectContaining({
+      level: "warn",
+      message: "Hosted workspace generated-delivery cleanup found active references without staging files.",
+    }));
     await drainHostedRuntimeLogWritesBestEffort();
     const entries = calls.logWrite.mock.calls.flatMap(([request]) => request.entries);
     expect(entries.some((entry) =>

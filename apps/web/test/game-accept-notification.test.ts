@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const m = vi.hoisted(() => ({ after: vi.fn(), routes: vi.fn(), route: vi.fn(), game: vi.fn(), block: vi.fn(), send: vi.fn(), forget: vi.fn() }));
+const m = vi.hoisted(() => ({ after: vi.fn(), routes: vi.fn(), route: vi.fn(), game: vi.fn(), block: vi.fn(), send: vi.fn(), forget: vi.fn(), profiles: vi.fn(), labels: vi.fn(), open: vi.fn() }));
 vi.mock("next/server", () => ({ after: m.after }));
 vi.mock("@/src/lib/apple-push/send", async original => ({ ...await original<typeof import("@/src/lib/apple-push/send")>(), prepareApplePushProviderToken: async () => ({ issuedAt: Date.now(), value: "test-provider-token" }), sendApplePush: m.send }));
 vi.mock("@/src/lib/companion/push-route", async original => ({ ...await original<typeof import("@/src/lib/companion/push-route")>(), forgetCompanionPushRoute: m.forget }));
-vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({ companionPushRoute: { findFirst: m.route }, game: { findUnique: m.game }, gameBlock: { findFirst: m.block } }) }));
+vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({ companionPushRoute: { findFirst: m.route }, game: { findUnique: m.game }, gameBlock: { findFirst: m.block },
+  gameProfile: { findMany: m.profiles }, gameContactLabel: { findMany: m.labels } }) }));
+vi.mock("@/src/lib/game/crypto", async original => ({ ...await original<typeof import("@/src/lib/game/crypto")>(), openGameTexts: m.open }));
 import { applePushWireAps } from "./support/apple-push-wire";
 import { prepareGameAcceptNotification, deliverGameAcceptNotification, sendGameAcceptNotificationAfterResponse } from "@/src/lib/game/accept-notification";
 
@@ -25,6 +27,8 @@ describe("pair invite acceptance push", () => {
     m.routes.mockResolvedValue([{ userId: "ava", ...target, gameSessionId: "session-ava" }]);
     m.route.mockResolvedValue({ userId: "ava" }); m.game.mockResolvedValue(liveGame());
     m.block.mockResolvedValue(null); m.send.mockResolvedValue("sent");
+    m.profiles.mockResolvedValue([{ memberId: "leo", firstNameEncrypted: "Leo" }]); m.labels.mockResolvedValue([]);
+    m.open.mockImplementation(async (entries: { value: string | null }[]) => entries.map(entry => entry.value));
   });
   afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); });
 
@@ -50,9 +54,28 @@ describe("pair invite acceptance push", () => {
     await deliverGameAcceptNotification(notification!);
     expect(m.send).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
       data: { gameId: "game-a", notification: "game_accepted" }, expiresAt: new Date(expiry), target,
-      message: { kind: "alert", title: "They shook on it.", body: `Your game starts ${word}.` },
+      message: { kind: "alert", title: "Leo shook on it.", body: `Your game starts ${word}.` },
     }), { providerToken: { issuedAt: Date.now(), value: "test-provider-token" } });
     expect(await applePushWireAps(m.send.mock.calls[0]![0])).toMatchObject({ sound: "default" });
+  });
+
+  it("names the friend by the recipient's own label, else their first name, else They", async () => {
+    m.labels.mockResolvedValue([{ subjectMemberId: "leo", nameEncrypted: "Leonardo" }]);
+    await deliverGameAcceptNotification((await prepareGameAcceptNotification(tx, input))!);
+    expect(m.labels).toHaveBeenCalledWith(expect.objectContaining({ where: { ownerMemberId: "ava", subjectMemberId: { in: ["leo"] } } }));
+    expect(m.open.mock.calls[0]![0][0]).toMatchObject({ table: "game_contact_label", memberId: "ava" });
+    m.labels.mockResolvedValue([]); m.open.mockRejectedValueOnce(new Error("kms unavailable"));
+    await deliverGameAcceptNotification((await prepareGameAcceptNotification(tx, input))!);
+    expect(m.send.mock.calls.map(call => call[0].message.title)).toEqual(["Leonardo shook on it.", "They shook on it."]);
+  });
+
+  it("names nobody before the recheck passes", async () => {
+    const notification = await prepareGameAcceptNotification(tx, input);
+    expect(notification!.request.message).toEqual({ kind: "alert", title: "They shook on it.", body: "Your game starts today." });
+    m.block.mockResolvedValue({ blockerMemberId: "ava" });
+    await deliverGameAcceptNotification(notification!);
+    expect(m.open).not.toHaveBeenCalled();
+    expect(m.send).not.toHaveBeenCalled();
   });
 
   it("uses alerts without the reminders switch", async () => {

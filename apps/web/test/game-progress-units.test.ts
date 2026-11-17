@@ -18,11 +18,23 @@ const source = (exercise = "pushups", unit: MeasureSeries["unit"] = "reps"): Mea
   ...describeMeasure(`${exercise}.${unit}`, exercise, exercise), pending: false, gameOn: true, needsPerDay: false, amounts: [],
 });
 const stored = (measure: MeasureSeries, goal = foundEntry("height", proposed)): StoredAward[] => {
-  const context = achievementContext([measure], new Map([[measure.id, { goal: { found: goal } }]]), []);
+  const context = achievementContext([measure], new Map([[measure.id, { goal: { found: goal } }]]));
   return ACHIEVEMENTS.flatMap(evaluate => evaluate(context)).map(award => ({ ...award, id: award.key, createdAt: new Date("2026-11-16"), seenAt: null }));
 };
 
 describe("Progress reader units", () => {
+  it.each([
+    ["us", 29032, "29,032 ft"], ["us", 11165, "11,165 ft"], ["us", 15766, "15,766 ft"],
+    ["metric", 40000, "12,192 m"], ["uk", 40000, "12,192 m"],
+  ] as const)("writes a named place's full %s height", (units, feet, expected) => {
+    expect(formatHeight(feet, units)).toBe(expected);
+  });
+  it.each([
+    ["taipei-101", "Taipei 101"], ["k2", "K2"], ["falcon-9", "Falcon 9 rocket"],
+    ["merdeka-118", "Merdeka 118"], ["route-66", "Route 66"], ["apollo11-mission", "Apollo 11"],
+  ])("keeps digits in the curated %s name", (id, name) => {
+    expect(BANK.find(entry => entry.id === id)!.short).toBe(name);
+  });
   it.each([
     [9.58, "9.58 sec"], [60, "1 min"], [3660, "1 hr 1 min"], [7200, "2 hr"],
     [86400, "1 day"], [172800, "2 days"],
@@ -53,7 +65,7 @@ describe("Progress reader units", () => {
     for (const entry of BANK) {
       for (const text of [entry.short, entry.tagline]) {
         expect(text.length).toBeGreaterThan(0); expect(text.length).toBeLessThanOrEqual(40);
-        expect(text).not.toMatch(/[\d\r\n\u2014]/u);
+        expect(text).not.toMatch(/[\r\n\u2014]/u);
       }
       if (/\b(?:miles?|feet|ft)\b|\d+-foot/iu.test(entry.blurb)) expect(entry.blurbMetric).not.toBeNull();
       if (entry.blurbMetric) expect(entry.blurbMetric).not.toMatch(/\b(?:miles?|feet|ft)\b|\d+-foot/iu);

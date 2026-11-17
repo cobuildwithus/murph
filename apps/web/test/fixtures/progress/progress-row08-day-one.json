@@ -59,18 +59,6 @@
       ]
     }
   ],
-  "streak": {
-    "current": 0,
-    "best": null,
-    "today": "pending",
-    "months": [
-      {
-        "month": "2026-11",
-        "days": "dddddddddddddtffffffffffffffff"
-      }
-    ],
-    "obligations": []
-  },
   "medals": [],
   "shelf": [],
   "moments": [],

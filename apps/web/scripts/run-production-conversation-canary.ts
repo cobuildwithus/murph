@@ -439,8 +439,12 @@ async function readCanonicalGoalOutcome(
   stage: string,
 ): Promise<LinqProductionCanaryOutcome | null> {
   const requestSignal = AbortSignal.any([observationSignal, AbortSignal.timeout(10_000)]);
+  // A fresh GitHub ID token is minted per poll. A missed mint is as transient as
+  // a timed-out read: skip this poll; the stage deadline still bounds the wait.
+  const token = await config.getToken(requestSignal).catch(() => null);
+  if (token === null) return null;
   const response = await fetch(new URL(CANARY_OUTCOME_PATH, config.productionBaseUrl), {
-    headers: { authorization: `Bearer ${await config.getToken(requestSignal)}` },
+    headers: { authorization: `Bearer ${token}` },
     method: "GET",
     redirect: "error",
     signal: requestSignal,

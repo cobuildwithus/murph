@@ -82,22 +82,6 @@
       "pics": []
     }
   ],
-  "streak": {
-    "current": 1,
-    "best": {
-      "count": 1,
-      "from": "2026-10-26",
-      "to": "2026-11-13"
-    },
-    "today": "pending",
-    "months": [
-      {
-        "month": "2026-11",
-        "days": "dddddddddddddtffffffffffffffff"
-      }
-    ],
-    "obligations": []
-  },
   "medals": [],
   "shelf": [],
   "moments": [],

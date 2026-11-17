@@ -6110,7 +6110,7 @@ awards. Task inference cannot arrive after its owner is deleted. Pictures have
 a unique random storage key, never a shared content hash; BE3 owns sealed bytes,
 retirement and account-deletion object cleanup. These rows live in Postgres,
 outside workspace snapshots, for the member's lifetime. Retired picture rows
-remain until account deletion. There is no backfill or expiry sweep.
+remain until account deletion. There is no recurring backfill or expiry sweep.
 
 `crypto.ts` reuses secure-box's member-private-field lane with `game-progress`
 scope/purpose, owner key, table, row and field AAD. Batch sealing unwraps one
@@ -6191,19 +6191,42 @@ withdrawn, incomplete and excuse entries contribute nothing. Unresolved entries
 are pending days and produce no measure awards. A per-day choice applies to all
 completed history while previously earned day medals remain stored.
 
-`streak.ts` owns the shared board/Progress calendar: each game's frozen clock,
-join, departure, settlement and end bound its obligations. Void games end at
-their canonical cancellation event or the latest player's departure that
-voided a two-player group. Event times receive the game's dev-clock offset;
-player departure times already use that clock. The terminal day's completed
-post remains history; an unfulfilled terminal day ends with the game or
-membership. Earlier misses and stored awards remain. All
-obligations on a date must succeed, and dates without obligations neither add
-nor break a run. Current, best and month strings come from these same dates.
+`game-days.ts` owns credited game dates: each game's frozen clock, join,
+departure, settlement and end bound its contributions. Void games end at their
+canonical cancellation event or the latest player's departure that voided a
+two-player group. Event times receive the game's dev-clock offset; player
+departure times already use that clock. The terminal day's completed post
+remains history. The separate pair-board current-run contract continues through
+`game/board-streak.ts`; Progress has no streak payload, page, face or evaluator.
+Total days posted remain an ordinary measure.
 
-`achievements.ts` holds the three pure games evaluators used by `registry.ts`.
-Round and ladder candidates use the first cumulative crossing date; all rungs
-crossed together are inserted. Each new best streak length is an award.
+`achievements.ts` holds the round-total and ladder evaluators used by
+`registry.ts`, alongside route-leg evaluation. Round and ladder candidates use
+the first cumulative crossing date; all rungs crossed together are inserted.
+Game-duration rounds begin at ten, fifteen and thirty minutes,
+then one, two and five hours per decade. Existing hour awards remain valid.
+Wearable Sleep keeps its existing hour rounds. Totals medals group by exercise,
+newest earned date first with larger amounts first on ties. The first total
+medal's `open.measureId` identifies the exercise for its title coin; an exercise
+with no total medal uses its projection. Shelf picks use that same order, and
+the largest tied total gets the gold face when that group owns the newest award.
+No new persisted fields are introduced.
+
+Retired streak awards are the explicit exception to append-only retention.
+`apps/web/scripts/migrations/remove-progress-streak-awards.ts` opens at most 100
+sealed awards at a time, deletes only authenticated `kind: streak` rows, and
+advances by the owner/lookup key even when the last row was deleted. It is
+idempotent; no permanent read-time filter or migration marker is added.
+Release requires murph-ios build 112 uploaded first. Keep Progress traffic
+quiesced while old writers drain, run this data migration in the hosted
+environment with the existing database and crypto configuration, and promote
+the new backend before reopening Progress. Do not run it locally against
+production or restore an old streak writer after cleanup. The hosted command is
+`NODE_OPTIONS=--conditions=react-server pnpm exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/migrations/remove-progress-streak-awards.ts`.
+Check that a second pass deletes zero rows and that Progress has no streak
+fields, faces or awards before restoring traffic. Non-streak awards, their
+earned dates and acknowledgement timestamps are unchanged.
+
 The reader preserves measures with saved ladder or route awards even when their final
 contribution is removed; their total becomes zero and their goals stay editable.
 `view.ts` takes passed rungs from stored awards, filters health-derived awards
@@ -6219,8 +6242,9 @@ and meters for UK/metric. Metric bank prose uses `blurb_metric` where present;
 UK retains imperial prose. Award renderers resolve bank references by `(kind,id)`
 or use the complete stored found definition. The same one-mile award therefore
 reads `1.6 km` to a metric reader without earning a different award.
-Hero totals use full digits; smaller labels compact from 10,000, with one
-decimal below 100,000. Signed friend gaps can compact from 1,000. Distances use
+Hero totals and named-place heights/distances use full digits with thousands
+separators. Other small labels, including to-go amounts, compact from 10,000,
+with one decimal below 100,000. Signed friend gaps can compact from 1,000. Distances use
 whole numbers from ten displayed units and one decimal below. Projections include an
 explicit nullable `on` date; without a live game or recent pace they retain
 the next round number with a dateless label. Route-map projections stay null.
@@ -6251,7 +6275,9 @@ apps/web/scripts/progress-inference-eval.ts` and an already-provisioned key.
 `bank.ts` exposes only checked entries, including the supplied 70 height rungs
 and separate 30-rung plank/sleep ladders. `ladderUse` is public bank metadata
 needed by the two time screens, not member persistence. `Rung.short` and
-`Rung.tagline` are required, single-line, number-free strings up to 40 characters.
+`Rung.tagline` are required single-line strings up to 40 characters. Curated
+short names retain digits in real names such as Taipei 101 and Apollo 11.
+Taglines and model-written lookup prose keep the number-free boundary.
 Found rungs have no drawing; their medal uses the explicit `{generic:true}` face.
 Typing searches only the bank. `GET /progress/goals?measure=...&q=...&find=1`
 admits one explicit lookup through the existing persisted auth rate limiter:
@@ -6388,8 +6414,11 @@ identifier or separate deletion ledger is retained. `friend-games.ts` reads
 other games, and exposes only exercise aggregates. Typed quantities use the
 shared series contribution function; untyped quantities use the existing member-scoped
 inference cache, per-day measure state and the entry's terms version and seat.
-Only typed quantity payloads are decrypted; untyped photos/text stay sealed. Unresolved inference
-withholds exercise ranking and settlement. Friends reads return the
+Only typed quantity payloads are decrypted; untyped photos/text stay sealed.
+Unresolved inference excludes only those check-ins from displayed totals.
+Current friends still appear, and known own exercise pills remain available
+while classifications are pending. Pass-award settlement waits for all pending
+tasks so a partial opponent total cannot mint an irreversible pass. Friends reads return the
 deduplicated unresolved tasks with their source-member ids to `scheduleInference`,
 the same deferred cache writer used by own Progress. It classifies sequentially,
 seals each owner's batch under that owner's key outside the transaction, then
@@ -7255,11 +7284,11 @@ paired with the rotated `APNS_KEY_ID`, and never consults the transitional PEM
 in that mode. Signing is shared across concurrent callers and tokens are reused
 for 40 minutes. A prepared send cannot trigger a later signing refresh.
 Reply claims and
-subject checks remain separate. The push body is exactly “New voice note on
-your post.” or “New note on your post.”, with data `{gameId, notification:
-"game_reply"}`. The sender's required title matches post pushes. Delivery is
-one best-effort attempt after the response, with expiry 24 hours after sending.
-No names, lengths, content, digests or media links enter events or pushes.
+subject checks remain separate. The push body is “Sam replied to your post.” or
+“Sam replied with a voice note.”, naming the replier as the recipient knows them,
+with data `{gameId, notification: "game_reply"}`. Delivery is one best-effort
+attempt after the response, with expiry 24 hours after sending. No lengths,
+content, digests or media links enter events or pushes, and names enter pushes only.
 
 Apply the additive migration before Web. This complete reply-aware Web release
 is the rollback floor once replies or reply reports exist. Recovery uses a
@@ -7309,8 +7338,12 @@ it rechecks the exact route/session, permission, suspension, game switch, active
 participation, real day, candidate, reporter mask, block mask and milestone.
 Group completion is suppressed if any eligible peer is blocked. A stale send,
 crash or uncertain provider result never releases its claims. Recipients are
-processed sequentially; provider work stays outside transactions. No names or
-content enter post pushes. Daily reminders may include the recipient's own task words. Pair copy continues to derive from permanent
+processed sequentially; provider work stays outside transactions. Every game
+push names the other person as the recipient knows them (`readNamesForViewer`:
+their private label, else that person's own first name). The name is opened
+after the delivery recheck passes, never stored in events, and a failed read
+falls back to the nameless wording. No other content enters post pushes; daily
+reminders may also include the recipient's own task words. Pair copy continues to derive from permanent
 `hasUnlockedDay`; group completion derives from live submitted artifacts.
 Missed-day chat uses the separate canonical room collector described below;
 it does not create additional push receipts.

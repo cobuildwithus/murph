@@ -20,15 +20,15 @@ describe('Progress route legs', () => {
     expect(view.here).not.toEqual(view.drawerHere);
   });
   it.each([
-    { miles: 8.4, text: '8.4 mi', atText: 'mile 8.4' },
-    { miles: 116.4, text: '116 mi', atText: 'mile 116' },
-    { miles: 31240, text: '31.2k mi', atText: 'mile 31.2k' },
-  ])('uses shared formatting and the matching viewport at $miles miles', ({ miles, text, atText }) => {
+    { miles: 8.4, text: '8.4 mi', distanceText: '8.4 mi', atText: 'mile 8.4' },
+    { miles: 116.4, text: '116 mi', distanceText: '116 mi', atText: 'mile 116' },
+    { miles: 31240, text: '31.2k mi', distanceText: '31,240 mi', atText: 'mile 31,240' },
+  ])('uses shared formatting and the matching viewport at $miles miles', ({ miles, text, distanceText, atText }) => {
     const distanceM = miles * 1609.344;
     const route = { ...leg, distanceM, towns: [{ name: 'B', atM: distanceM }], polyline: encodePolyline([[0, 50], [2, 49]]) };
     const points: [string, number][] = [['2026-11-01', distanceM]];
     const view = routeView('walk.meters', { legs: [route] }, points, [], 'us')!;
-    expect(view).toMatchObject({ distanceText: text, walkedText: text, map: '/api/game/v1/progress/map?measure=walk.meters&size=card' });
+    expect(view).toMatchObject({ distanceText, walkedText: text, map: '/api/game/v1/progress/map?measure=walk.meters&size=card' });
     for (const [size, towns] of [['card', view.towns], ['drawer', view.drawerTowns]] as const) {
       const { width, height } = MAP_SIZES[size];
       const geometry = decodePolyline(route.polyline);
@@ -37,7 +37,7 @@ describe('Progress route legs', () => {
     }
     expect(view.towns[0].x).not.toBe(view.drawerTowns[0].x);
     const award = routeLegs({ measureId: 'walk.meters', legs: [route], points })[0];
-    expect(medalView({ ...award, id: 'award', createdAt: new Date(), seenAt: null }, false, 'us').detail).toBe(`${text} from A`);
+    expect(medalView({ ...award, id: 'award', createdAt: new Date(), seenAt: null }, false, 'us').detail).toBe(`${distanceText} from A`);
   });
   it.each([
     { total: 80, earned: [], count: 1, start: 0 },

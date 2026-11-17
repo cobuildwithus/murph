@@ -63,6 +63,10 @@ jobs:
     environment: native-android-production-canary
     runs-on: ubuntu-24.04
     timeout-minutes: 110
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
     steps:
       - name: Checkout trusted default branch
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -122,7 +126,7 @@ jobs:
           NATIVE_ANDROID_E2E_ANDROID_REPOSITORY: ${{ vars.NATIVE_ANDROID_E2E_ANDROID_REPOSITORY_OWNER }}/${{ vars.NATIVE_ANDROID_E2E_ANDROID_REPOSITORY_NAME }}
           NATIVE_ANDROID_E2E_ANDROID_WORKFLOW: ${{ vars.NATIVE_ANDROID_E2E_ANDROID_WORKFLOW }}
           NATIVE_ANDROID_E2E_GITHUB_APP_ID: ${{ vars.NATIVE_ANDROID_E2E_GITHUB_APP_ID }}
-          NATIVE_ANDROID_E2E_GITHUB_APP_PRIVATE_KEY: ${{ secrets.NATIVE_ANDROID_E2E_GITHUB_APP_PRIVATE_KEY }}
+          NATIVE_ANDROID_E2E_GITHUB_APP_KMS_KEY_VERSION: projects/murph-495013/locations/global/keyRings/github-apps/cryptoKeys/native-android-e2e-app/cryptoKeyVersions/1
           PRODUCTION_BASE_URL: ${{ vars.HOSTED_WEB_PRODUCTION_BASE_URL }}
         shell: bash
         run: |

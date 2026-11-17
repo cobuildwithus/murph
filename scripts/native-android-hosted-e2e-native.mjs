@@ -1,4 +1,4 @@
-import { createPrivateKey, sign } from "node:crypto";
+import { createGitHubAppTokenSupplier } from "./github-app-token.mjs";
 
 import {
   HTTP_TIMEOUT_MS,
@@ -25,7 +25,6 @@ export const PRIVATE_ANDROID_JOB_TIMEOUT_SECONDS = 55 * 60;
 export const PRIVATE_ANDROID_TERMINAL_GRACE_SECONDS = 2 * 60;
 const PRIVATE_RUN_CANCEL_GRACE_MS = 30_000;
 const PRIVATE_RUN_FORCE_CANCEL_TIMEOUT_MS = 2 * 60_000;
-const TOKEN_REFRESH_SKEW_MS = 2 * 60_000;
 
 export function buildDispatchInputs({
   androidSha,
@@ -205,92 +204,19 @@ export async function dispatchAndWait({
   }
 }
 
-export function createGitHubAppTokenSupplier({
-  appId,
-  createJwt = createGitHubAppJwt,
-  fetchJsonImpl = fetchJson,
-  now = Date.now,
-  privateKey,
-  repository,
-}) {
-  if (!/^[1-9][0-9]*$/u.test(appId)) {
-    throw new Error("GitHub App id must be a positive integer.");
-  }
-  if (
-    typeof privateKey !== "string"
-    || privateKey.length < 256
-    || privateKey.length > 20_000
-    || privateKey.includes("\0")
-  ) {
-    throw new Error("GitHub App private key was invalid.");
-  }
-  const safePrivateRepository = safeRepository(repository);
-  const [owner, name] = safePrivateRepository.split("/");
-  let installationId = null;
-  let token = null;
-  let expiresAtMs = 0;
-
-  return async () => {
-    if (token && expiresAtMs - now() > TOKEN_REFRESH_SKEW_MS) return token;
-    const jwt = createJwt({ appId, now, privateKey });
-    if (installationId === null) {
-      const installation = await fetchJsonImpl(
-        `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/installation`,
-        { headers: githubAppHeaders(jwt) },
-        "private Android GitHub App installation lookup",
-      );
-      assertRecord(installation, "private Android GitHub App installation");
-      if (!Number.isSafeInteger(installation.id) || installation.id <= 0) {
-        throw new Error("Private Android GitHub App installation id was invalid.");
-      }
-      installationId = installation.id;
-    }
-    const credential = await fetchJsonImpl(
-      `https://api.github.com/app/installations/${installationId}/access_tokens`,
-      {
-        body: JSON.stringify({
-          permissions: { actions: "write", contents: "read" },
-          repositories: [name],
-        }),
-        headers: { ...githubAppHeaders(jwt), "content-type": "application/json" },
-        method: "POST",
-      },
-      "private Android GitHub App token mint",
-    );
-    assertRecord(credential, "private Android GitHub App token");
-    token = requiredString(credential.token, "private Android GitHub App token");
-    expiresAtMs = Date.parse(credential.expires_at);
-    if (!Number.isFinite(expiresAtMs) || expiresAtMs - now() <= TOKEN_REFRESH_SKEW_MS) {
-      token = null;
-      throw new Error("Private Android GitHub App token expiry was invalid.");
-    }
-    return token;
-  };
-}
-
-export function createGitHubAppJwt({ appId, now = Date.now, privateKey }) {
-  if (!/^[1-9][0-9]*$/u.test(appId)) {
-    throw new Error("GitHub App id must be a positive integer.");
-  }
-  const issuedAt = Math.floor(now() / 1000) - 60;
-  const header = base64UrlJson({ alg: "RS256", typ: "JWT" });
-  const payload = base64UrlJson({ exp: issuedAt + 9 * 60, iat: issuedAt, iss: appId });
-  const unsigned = `${header}.${payload}`;
-  const signature = sign("RSA-SHA256", Buffer.from(unsigned), createPrivateKey(privateKey));
-  return `${unsigned}.${signature.toString("base64url")}`;
-}
-
 function createGitHubAppTokenSupplierFromEnv({ fetchJsonImpl, now, repository }) {
   const appId = requiredEnv("NATIVE_ANDROID_E2E_GITHUB_APP_ID");
-  const privateKey = requiredEnv("NATIVE_ANDROID_E2E_GITHUB_APP_PRIVATE_KEY");
+  const keyVersion = requiredEnv("NATIVE_ANDROID_E2E_GITHUB_APP_KMS_KEY_VERSION");
   delete process.env.NATIVE_ANDROID_E2E_GITHUB_APP_ID;
-  delete process.env.NATIVE_ANDROID_E2E_GITHUB_APP_PRIVATE_KEY;
+  delete process.env.NATIVE_ANDROID_E2E_GITHUB_APP_KMS_KEY_VERSION;
   return createGitHubAppTokenSupplier({
     appId,
     fetchJsonImpl,
     now,
-    privateKey,
+    keyVersion,
     repository,
+    repositories: [repository.split("/")[1]],
+    permissions: { actions: "write", contents: "read" },
   });
 }
 
@@ -494,7 +420,9 @@ async function holdPrivateRunExecutionFence({
 function withoutNativeGitHubCredentials(env) {
   const childEnv = { ...env };
   delete childEnv.NATIVE_ANDROID_E2E_GITHUB_APP_ID;
-  delete childEnv.NATIVE_ANDROID_E2E_GITHUB_APP_PRIVATE_KEY;
+  delete childEnv.NATIVE_ANDROID_E2E_GITHUB_APP_KMS_KEY_VERSION;
+  delete childEnv.ACTIONS_ID_TOKEN_REQUEST_URL;
+  delete childEnv.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
   delete childEnv.NATIVE_ANDROID_E2E_GITHUB_TOKEN;
   return childEnv;
 }
@@ -506,19 +434,6 @@ function githubHeaders(token) {
     "user-agent": "murph-native-android-hosted-e2e",
     "x-github-api-version": GITHUB_API_VERSION,
   };
-}
-
-function githubAppHeaders(jwt) {
-  return {
-    accept: "application/vnd.github+json",
-    authorization: `Bearer ${jwt}`,
-    "user-agent": "murph-native-android-hosted-e2e",
-    "x-github-api-version": GITHUB_API_VERSION,
-  };
-}
-
-function base64UrlJson(value) {
-  return Buffer.from(JSON.stringify(value)).toString("base64url");
 }
 
 function safeRepository(value) {

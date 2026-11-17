@@ -24,7 +24,7 @@ export async function setFirstRoute(memberId: string, measureId: string, route: 
 export async function readRouteGoals(query: string | undefined, unit: 'meters' | 'steps', total: number, units: ClientUnits): Promise<Goals> {
   const eligible = (entry: BankEntry) => entry.kind === 'route' && routePlaces(entry.name) !== null;
   const tile = (entry: BankEntry): Rung => ({ id: entry.id, name: entry.name, short: entry.short, tagline: entry.tagline, shareAwardId: null, drawing: null, at: unit === 'steps' ? entry.at / 1609.344 * 2000 : entry.at,
-    atText: formatAmount(entry.at, 'meters', 'compact', units).text, blurb: units === 'metric' ? entry.blurbMetric ?? entry.blurb : entry.blurb, where: entry.where, on: null, toGo: null });
+    atText: formatAmount(entry.at, 'meters', 'full', units).text, blurb: units === 'metric' ? entry.blurbMetric ?? entry.blurb : entry.blurb, where: entry.where, on: null, toGo: null });
   const tiles = BANK.filter(eligible).slice(0, 6).map(tile);
   if (!query) return { tiles, match: null, suggestions: [], note: null, route: null };
   const places = routePlaces(query);
@@ -66,7 +66,7 @@ export async function routeGoalPreview(from: string, to: string, totalM: number,
   const remaining = formatAmount(Math.max(0, route.distanceM - totalM), 'meters', 'compact', units).text.split(' ')[0];
   const detail = route.straightLine ? 'As the crow flies. No road crosses the ocean, so Murph counts the straight line.'
     : `By road. You're ${current} in, so ${remaining} to go.`;
-  return { from, to, distanceText: formatAmount(route.distanceM, 'meters', 'compact', units).text.replace(' mi', ' miles'), detail,
+  return { from, to, distanceText: formatAmount(route.distanceM, 'meters', 'full', units).text.replace(' mi', ' miles'), detail,
     straightLine: route.straightLine, towns: routeTowns({ ...route, startTotal: 0 }, [], 'card', units),
     map: `/api/game/v1/progress/map?${new URLSearchParams({ from, to, size: 'card' })}` };
 }

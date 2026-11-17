@@ -34,7 +34,7 @@ export async function healthJourneys(input: {
     const state = await setFirstRoute(input.memberId, "steps", leg, input.beforeMutationTx);
     input.states.set("steps", state);
   }
-  const context = achievementContext(measures, input.states, []);
+  const context = achievementContext(measures, input.states);
   const candidates = [...roundTotals(context), ...ladderRungs(context),
     ...measures.flatMap(measure => routeLegs({ measureId: measure.id,
       legs: input.states.get(measure.id)?.legs ?? [], points: cumulativePoints(measure.amounts) }))];

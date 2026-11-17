@@ -1,0 +1,17 @@
+{
+  "publishedOn": "2026-11-16",
+  "order": 100,
+  "item": {
+    "id": "clearer-progress-goals-and-medals",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Clearer goals and medals in Progress",
+    "summary": "Time goals take smaller steps, landmark heights show full numbers, and total medals stay grouped by exercise.",
+    "details": "Friends can show known totals while photo check-ins are still being classified. In a row medals are retired; total days posted still count.",
+    "relevanceTags": [
+      "progress",
+      "games"
+    ],
+    "sourcePullRequests": [5100]
+  }
+}

@@ -29,7 +29,7 @@ export function routeLegs(ctx: { measureId: string; legs: readonly RouteLeg[]; p
 export function routeTowns(leg: RouteLeg, meters: Points, size: MapQuery['size'], units: ClientUnits): Route['towns'] {
   const { width, height } = MAP_SIZES[size];
   const geometry = decodePolyline(leg.polyline), bbox = routeBbox(geometry, width, height);
-  return leg.towns.map(town => ({ name: town.name, atText: `${units === 'metric' ? 'km' : 'mile'} ${formatAmount(town.atM, 'meters', 'compact', units).text.split(' ')[0]}`,
+  return leg.towns.map(town => ({ name: town.name, atText: `${units === 'metric' ? 'km' : 'mile'} ${formatAmount(town.atM, 'meters', 'full', units).text.split(' ')[0]}`,
     ...townPosition(cutPolyline(geometry, town.atM / leg.distanceM).walked.at(-1)!, bbox),
     passedOn: crossingDay(meters, leg.startTotal + town.atM) }));
 }
@@ -51,7 +51,7 @@ export function routeView(measureId: string, state: MeasureState, points: Points
   const total = meters.at(-1)?.[1] ?? 0;
   const walked = earnedOn ? leg.distanceM : Math.min(leg.distanceM, Math.max(0, total - leg.startTotal));
   const map = `/api/game/v1/progress/map?${new URLSearchParams({ measure: measureId, size: 'card' })}`;
-  return { name: `${leg.from} to ${leg.to}`, distanceText: formatAmount(leg.distanceM, 'meters', 'compact', units).text,
+  return { name: `${leg.from} to ${leg.to}`, distanceText: formatAmount(leg.distanceM, 'meters', 'full', units).text,
     walkedText: formatAmount(walked, 'meters', 'compact', units).text,
     progress: walked / leg.distanceM, straightLine: leg.straightLine,
     here: routeHere(leg, walked / leg.distanceM, 'card'), drawerHere: routeHere(leg, walked / leg.distanceM, 'drawer'),

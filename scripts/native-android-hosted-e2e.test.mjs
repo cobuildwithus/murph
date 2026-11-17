@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { generateKeyPairSync } from "node:crypto";
+import { fakeKms, keyVersion, oidcEnv } from "./fixtures/github-app-kms.mjs";
+import { createGitHubAppTokenSupplier } from "./github-app-token.mjs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -13,7 +14,6 @@ import {
   PRIVATE_ANDROID_JOB_TIMEOUT_SECONDS,
   PRIVATE_ANDROID_TERMINAL_GRACE_SECONDS,
   buildDispatchInputs,
-  createGitHubAppTokenSupplier,
   dispatchAndWait,
   inspectPrivateDispatchTag,
   inspectPrivateRun,
@@ -199,12 +199,27 @@ test("Android dispatch cancellation escalates on the same attested run", async (
   let nowMs = 2_000_000_000_000;
   let statusCalls = 0;
   const actions = [];
+  const kms = fakeKms({ now: () => nowMs });
+  let mints = 0;
+  const supplier = createGitHubAppTokenSupplier({
+    appId: "123", createJwt: kms.createJwt, now: () => nowMs,
+    repository: "example/murph-android", repositories: ["murph-android"],
+    permissions: { actions: "write", contents: "read" },
+    fetchJsonImpl: async (url, init) => {
+      if (url.endsWith("/installation")) return { id: 77 };
+      assert.deepEqual(JSON.parse(init.body), {
+        repositories: ["murph-android"], permissions: { actions: "write", contents: "read" },
+      });
+      return { token: `private-token-${++mints}`, expires_at: new Date(nowMs + 60 * 60_000).toISOString() };
+    },
+  });
   let sleepCalls = 0;
   await withPrivateEnv(async () => {
     await assert.rejects(() => dispatchAndWait(canaryDispatch(), {
-      fetchImpl: async (url) => {
+      fetchImpl: async (url, init) => {
         const value = String(url);
         if (value.endsWith("/dispatches")) return jsonResponse({ workflow_run_id: 42 });
+        assert.equal(init.headers.authorization, "Bearer private-token-2");
         actions.push(value.endsWith("/force-cancel") ? "force-cancel" : "cancel");
         return new Response(null, { status: 202 });
       },
@@ -222,22 +237,26 @@ test("Android dispatch cancellation escalates on the same attested run", async (
         sleepCalls += 1;
         nowMs += sleepCalls === 1 ? 86 * 60_000 : 31_000;
       },
-      tokenSupplier: async () => "private-token",
+      tokenSupplier: supplier,
     }), /timed out/u);
   });
   assert.deepEqual(actions, ["cancel", "force-cancel"]);
   assert.equal(statusCalls, 3);
+  assert.equal(kms.subjects, 2);
+  assert.equal(kms.exchanges, 2);
+  assert.equal(mints, 2);
 });
 
 test("GitHub App token supplier refreshes before expiry and keeps one installation owner", async () => {
   let nowMs = 2_000_000_000_000;
   let mintCount = 0;
   let installationLookups = 0;
+  const kms = fakeKms({ now: () => nowMs });
   const supplier = createGitHubAppTokenSupplier({
     appId: "123",
-    createJwt: () => "signed-app-jwt",
+    createJwt: kms.createJwt,
     fetchJsonImpl: async (url, init) => {
-      assert.equal(init.headers.authorization, "Bearer signed-app-jwt");
+      assert.match(init.headers.authorization, /^Bearer ey/u);
       if (String(url).endsWith("/installation")) {
         installationLookups += 1;
         return { id: 77 };
@@ -253,7 +272,8 @@ test("GitHub App token supplier refreshes before expiry and keeps one installati
       };
     },
     now: () => nowMs,
-    privateKey: "x".repeat(256),
+    repositories: ["murph-android"],
+    permissions: { actions: "write", contents: "read" },
     repository: "example/murph-android",
   });
   assert.equal(await supplier(), "private-token-1");
@@ -262,14 +282,17 @@ test("GitHub App token supplier refreshes before expiry and keeps one installati
   assert.equal(await supplier(), "private-token-2");
   assert.equal(installationLookups, 1);
   assert.equal(mintCount, 2);
+  assert.equal(kms.subjects, 2);
+  assert.equal(kms.exchanges, 2);
 });
 
 test("Android polling refreshes credentials without changing the attested run", async () => {
   let nowMs = 2_000_000_000_000;
   let mintCount = 0;
+  const kms = fakeKms({ now: () => nowMs });
   const supplier = createGitHubAppTokenSupplier({
     appId: "123",
-    createJwt: () => "signed-app-jwt",
+    createJwt: kms.createJwt,
     fetchJsonImpl: async (url) => {
       if (String(url).endsWith("/installation")) return { id: 77 };
       mintCount += 1;
@@ -279,7 +302,8 @@ test("Android polling refreshes credentials without changing the attested run", 
       };
     },
     now: () => nowMs,
-    privateKey: "x".repeat(256),
+    repositories: ["murph-android"],
+    permissions: { actions: "write", contents: "read" },
     repository: "example/murph-android",
   });
   const statusCredentials = [];
@@ -310,21 +334,25 @@ test("Android polling refreshes credentials without changing the attested run", 
     "Bearer private-token-2",
   ]);
   assert.equal(mintCount, 2);
+  assert.equal(kms.subjects, 2);
+  assert.equal(kms.exchanges, 2);
 });
 
 test("default Android token owner removes App credentials before child work", async () => {
-  const privateKey = generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey.export({
-    format: "pem",
-    type: "pkcs8",
-  });
+  const kms = fakeKms();
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = kms.fetchImpl;
   const names = [
     "NATIVE_ANDROID_E2E_GITHUB_APP_ID",
-    "NATIVE_ANDROID_E2E_GITHUB_APP_PRIVATE_KEY",
+    "NATIVE_ANDROID_E2E_GITHUB_APP_KMS_KEY_VERSION",
+    "ACTIONS_ID_TOKEN_REQUEST_URL",
+    "ACTIONS_ID_TOKEN_REQUEST_TOKEN",
   ];
   const original = new Map(names.map((name) => [name, process.env[name]]));
   try {
     process.env.NATIVE_ANDROID_E2E_GITHUB_APP_ID = "123";
-    process.env.NATIVE_ANDROID_E2E_GITHUB_APP_PRIVATE_KEY = privateKey;
+    process.env.NATIVE_ANDROID_E2E_GITHUB_APP_KMS_KEY_VERSION = keyVersion;
+    Object.assign(process.env, oidcEnv);
     await withPrivateEnv(() => dispatchAndWait(canaryDispatch(), {
       fetchImpl: async () => jsonResponse({ workflow_run_id: 42 }),
       fetchJsonImpl: async (url, init) => {
@@ -342,13 +370,16 @@ test("default Android token owner removes App credentials before child work", as
         if (value.endsWith("/actions/runs/42")) return completedRun("success");
         return privatePrerequisiteResponse(url, init);
       },
-      resolveWebSha: async () => {
+      resolveWebSha: async ({ env }) => {
+        assert.equal(env.ACTIONS_ID_TOKEN_REQUEST_TOKEN, undefined);
+        assert.equal(env.ACTIONS_ID_TOKEN_REQUEST_URL, undefined);
         assert.equal(process.env.NATIVE_ANDROID_E2E_GITHUB_APP_ID, undefined);
-        assert.equal(process.env.NATIVE_ANDROID_E2E_GITHUB_APP_PRIVATE_KEY, undefined);
+        assert.equal(process.env.NATIVE_ANDROID_E2E_GITHUB_APP_KMS_KEY_VERSION, undefined);
         return WEB_SHA;
       },
     }));
   } finally {
+    globalThis.fetch = originalFetch;
     for (const [name, value] of original) {
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;
@@ -411,7 +442,7 @@ test("trusted Android controller runs five times weekly, executed on every admis
   assert.match(workflow, /--policy \.github\/native-hosted-e2e-controller\.json/u);
   assert.match(workflow, /timeout-minutes: 110/u);
   assert.match(workflow, /NATIVE_ANDROID_E2E_ANDROID_WORKFLOW/u);
-  assert.match(workflow, /NATIVE_ANDROID_E2E_GITHUB_APP_PRIVATE_KEY/u);
+  assert.match(workflow, /NATIVE_ANDROID_E2E_GITHUB_APP_KMS_KEY_VERSION/u);
   assert.doesNotMatch(workflow, /NATIVE_ANDROID_E2E_ANDROID_(?:EXPECTED_SHA|REF)/u);
   assert.doesNotMatch(
     workflow,

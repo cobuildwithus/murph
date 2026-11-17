@@ -309,7 +309,7 @@
             "where": null,
             "on": "2026-11-09",
             "toGo": null,
-            "short": "The marathon world record",
+            "short": "A marathon",
             "tagline": "A new mark for the marathon",
             "shareAwardId": "award:pushups.seconds:marathon"
           },
@@ -376,22 +376,6 @@
       "pics": []
     }
   ],
-  "streak": {
-    "current": 11,
-    "best": {
-      "count": 11,
-      "from": "2026-10-26",
-      "to": "2026-11-13"
-    },
-    "today": "pending",
-    "months": [
-      {
-        "month": "2026-11",
-        "days": "dddddddddddddtffffffffffffffff"
-      }
-    ],
-    "obligations": []
-  },
   "medals": [
     {
       "id": "total-1000",
@@ -442,21 +426,6 @@
       }
     },
     {
-      "id": "streak-11",
-      "kind": "streak",
-      "gold": false,
-      "face": {
-        "streak": 11
-      },
-      "title": "11 days",
-      "detail": "your best run",
-      "earnedOn": "2026-11-09",
-      "open": {
-        "page": "streak",
-        "measureId": null
-      }
-    },
-    {
       "id": "friend-leo",
       "kind": "friend",
       "gold": false,
@@ -480,7 +449,6 @@
     "total-1000",
     "pull-golden",
     "hr-2",
-    "streak-11",
     "friend-leo"
   ],
   "moments": [],

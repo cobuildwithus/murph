@@ -10,6 +10,7 @@ import { deliverGamePush, readGamePushRoutes } from "./push-delivery";
 import { gameReminderWindow, reminderOpenDay } from "./reminders";
 import { effectiveTermWords, eligibleFromDay, liveEntry, parseTermWords, termsForDay } from "./rules";
 import { toRuleState } from "./row";
+import { readNamesForViewer } from "./viewer-names";
 
 /** Each member is visited every five minutes, so a reminder is at most that late and a missed sweep costs one visit of six. */
 const SHARDS = 5;
@@ -123,8 +124,9 @@ async function sendReminder(member: Awaited<ReturnType<typeof readOpenGames>>[nu
     });
     request.data.gameId = fresh.open[0]!.row.id;
     request.expiresAt = new Date(Math.min(window.expiresAt.getTime(), fresh.window.expiresAt.getTime()));
+    const posted = fresh.open.length === 1 ? await postedPeers(fresh.open[0]!, memberId) : [];
     request.message = { kind: "alert", title: tasks.join(", ").slice(0, 120),
-      body: fresh.open.length === 1 && await peerPosted(fresh.open[0]!, memberId) ? "They posted. Share yours to see it." : "Still time today." };
+      body: posted.length ? `${await whoPosted(memberId, posted)} posted. Share yours to see it.` : "Still time today." };
     return !stopped();
   });
   try {
@@ -132,7 +134,8 @@ async function sendReminder(member: Awaited<ReturnType<typeof readOpenGames>>[nu
   } catch { /* A claimed receipt still prevents replay. */ }
 }
 
-async function peerPosted(game: Awaited<ReturnType<typeof readOpenGames>>[number]["open"][number], memberId: string) {
+/** Peers with a visible post today, in seat order. */
+async function postedPeers(game: Awaited<ReturnType<typeof readOpenGames>>[number]["open"][number], memberId: string) {
   const peers = game.state.players.filter(player => player.memberId !== memberId && !player.leftAt && game.day >= eligibleFromDay(game.state, player)).map(player => player.memberId);
   const [entries, blocks] = await Promise.all([
     getPrisma().gameEntry.findMany({ where: { gameId: game.row.id, memberId: { in: peers }, dayIndex: game.day, attempt: { gt: 0 }, withdrawnAt: null,
@@ -141,5 +144,16 @@ async function peerPosted(game: Awaited<ReturnType<typeof readOpenGames>>[number
       { blockedMemberId: memberId, blockerMemberId: { in: peers } }] }, select: { blockerMemberId: true, blockedMemberId: true } }),
   ]);
   const hidden = new Set(blocks.map(block => block.blockerMemberId === memberId ? block.blockedMemberId : block.blockerMemberId));
-  return peers.some(peer => !hidden.has(peer) && !!liveEntry(toRuleState(game.row, entries).entries, peer, game.day));
+  const state = toRuleState(game.row, entries);
+  return peers.filter(peer => !hidden.has(peer) && !!liveEntry(state.entries, peer, game.day));
+}
+
+/** "Kat", "Kat and Zach", "Kat and 2 others", by the names the recipient knows them by. */
+async function whoPosted(memberId: string, peers: readonly string[]): Promise<string> {
+  const names = await readNamesForViewer(memberId, peers).catch(() => new Map<string, string>());
+  const named = peers.flatMap(peer => names.get(peer) ?? []);
+  if (named.length !== peers.length || !named.length) return "They";
+  if (named.length === 1) return named[0]!;
+  if (named.length === 2) return `${named[0]} and ${named[1]}`;
+  return `${named[0]} and ${named.length - 1} others`;
 }

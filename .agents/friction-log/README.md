@@ -56,13 +56,15 @@ is explicitly narrowed to those three repository permissions for each run and
 is revoked when the job ends.
 
 Repository administrators provide `FROG_APP_CLIENT_ID` and
-`FROG_APP_BOT_LOGIN` as Actions variables and `FROG_APP_PRIVATE_KEY` as a
-secret in the `frog-reconciliation` environment. That environment is limited
+`FROG_APP_BOT_LOGIN` as Actions variables in the `frog-reconciliation`
+environment. Signing uses GitHub OIDC and the committed `frog-app` KMS version;
+[the signing runbook](../../agent-docs/operations/github-app-kms.md) lists import
+and IAM prerequisites. That environment is limited
 to the `main` branch, and the workflow opts out of deployment records because
 this is credential access rather than a deployment. `FROG_APP_BOT_LOGIN` is
 the App's exact bot login, including the `[bot]` suffix. Never commit or print
-the private key. Missing credentials fail the workflow closed; Frog does not
-fall back to `GITHUB_TOKEN`.
+private key material. Missing federation authority fails the workflow closed;
+Frog does not fall back to `GITHUB_TOKEN`.
 
 The same job owns Murph PR-body normalization. It selects only the
 repository-owned `frog/sync` pull request created by the configured App bot and
