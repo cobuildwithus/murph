@@ -6232,7 +6232,8 @@ loads task classifications and measure state in two owner-scoped batch reads.
 Typed entries emit their own measure immediately; untyped entries use the day's
 terms revision and the seat override or group default. Retakes contribute once;
 withdrawn, incomplete and excuse entries contribute nothing. Unresolved entries
-are pending days and produce no measure awards. A per-day choice applies to all
+are pending days; the games read settles no awards until all credited tasks have
+classifications, while still scheduling inference. A per-day choice applies to all
 completed history while previously earned day medals remain stored.
 
 `game-days.ts` owns credited game dates: each game's frozen clock, join,
@@ -6250,10 +6251,10 @@ the first cumulative crossing date; all rungs crossed together are inserted.
 Game-duration rounds begin at ten, fifteen and thirty minutes,
 then one, two and five hours per decade. Existing hour awards remain valid.
 Wearable Sleep keeps its existing hour rounds. Totals medals group by exercise,
-newest earned date first with larger amounts first on ties. The first total
+largest amount first regardless of saved earned dates. The first total
 medal's `open.measureId` identifies the exercise for its title coin; an exercise
 with no total medal uses its projection. Shelf picks use that same order, and
-the largest tied total gets the gold face when that group owns the newest award.
+the largest total gets the gold face when that group owns the newest award.
 No new persisted fields are introduced.
 
 Retired streak awards are the explicit exception to append-only retention.

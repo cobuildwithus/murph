@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-17",
+  "order": 100,
+  "item": {
+    "id": "best-progress-totals-first",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Your best totals lead in Progress",
+    "summary": "Prizes and Medals show each exercise's highest total first, even when older medals were saved later.",
+    "details": "New game medals wait until your activities have been recognised, so their earned dates reflect the full history. Medals you already earned stay yours.",
+    "relevanceTags": ["progress", "games"],
+    "sourcePullRequests": []
+  }
+}
