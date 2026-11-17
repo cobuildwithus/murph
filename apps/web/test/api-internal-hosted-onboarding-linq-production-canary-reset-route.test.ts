@@ -22,7 +22,7 @@ import { POST } from "@/app/api/internal/hosted-onboarding/linq/production-canar
 describe("POST /api/internal/hosted-onboarding/linq/production-canary/reset", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.requireResetRequest.mockReturnValue(mocks.phoneNumber);
+    mocks.requireResetRequest.mockResolvedValue(mocks.phoneNumber);
     mocks.reset.mockResolvedValue({
       accountDeleted: true,
       admissionBudgetCount: 1,
@@ -82,13 +82,11 @@ describe("POST /api/internal/hosted-onboarding/linq/production-canary/reset", ()
   });
 
   it("does not inspect inputs or reset when authorization fails", async () => {
-    mocks.requireResetRequest.mockImplementationOnce(() => {
-      throw hostedOnboardingError({
+    mocks.requireResetRequest.mockRejectedValueOnce(hostedOnboardingError({
         code: "HOSTED_LINQ_PRODUCTION_CANARY_UNAUTHORIZED",
         httpStatus: 401,
         message: "Unauthorized production canary reset request.",
-      });
-    });
+      }));
     const request = new Request("https://example.test/api/internal/hosted-onboarding/linq/production-canary/reset?phone=private", {
       body: "{}",
       method: "POST",

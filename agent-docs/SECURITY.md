@@ -864,9 +864,23 @@ Existing product admission, delivery and runtime safety rules still apply.
   an older workflow that lacks the complete-domain proof.
 - The Linq production-canary reset is an internal fixed-target mutation, not a
   general test-account API. Vercel alone configures the one normalized Photon
-  sender and a dedicated reset bearer; the request accepts no path, query, or
-  body selector. Authentication uses constant-time comparison before input
-  inspection. The admission owner takes its existing version-independent
+  sender; the request accepts no path, query, or body selector. The shared
+  reset/outcome verifier authenticates before input inspection with GitHub
+  Actions RS256 OIDC and cached issuer JWKS. It pins issuer
+  `https://token.actions.githubusercontent.com`, audience
+  `https://www.withmurph.ai/linq-production-canary`, owner `cobuildwithus`,
+  repository `cobuildwithus/murph`, workflow
+  `cobuildwithus/murph/.github/workflows/linq-production-canary.yml@refs/heads/main`,
+  ref `refs/heads/main`, and events `schedule` or `workflow_dispatch`.
+  It requires `iat`, `nbf`, `exp`, and a nonempty `jti`; clock tolerance is five
+  seconds, but expiry is strict. Only reset POST consumes an issuer-namespaced
+  SHA-256 hash of `jti` through `PrismaHostedWebInternalRequestNonceStore`,
+  expiring at token `exp`. The fixed service identity keeps that replay record
+  independent of canary-account deletion. Status GET never consumes a nonce.
+  During rollout only, a constant-time static bearer match is accepted while
+  `HOSTED_ONBOARDING_LINQ_PRODUCTION_CANARY_RESET_SECRET` remains configured.
+  Removing it disables that path; failed OIDC never retries static auth.
+  The admission owner takes its existing version-independent
   contact lock, derives event ids only from that contact's key-rotation-aware
   budget rows, and asks the delivery-ledger owner to remove only compare-and-
   delete-proven `attempted` instant-first-turn claims with no provider,
@@ -876,7 +890,7 @@ Existing product admission, delivery and runtime safety rules still apply.
   response contains booleans and counts only, and no production log or CI
   artifact may contain either phone number, credentials, message text, chat or
   message ids, or provider responses.
-- The companion Linq canary outcome GET reuses that same bearer and fixed
+- The companion Linq canary outcome GET reuses that same verifier and fixed
   server-configured identity, authenticates before inspecting input, and accepts
   no query or body selectors. Before and after the read it requires active member
   access and the existing iMessage runtime access decision, including denial of

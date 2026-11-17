@@ -26,6 +26,9 @@ jobs:
     name: Exercise scheduled production iMessage journey
     runs-on: ubuntu-24.04
     environment: production
+    permissions:
+      contents: read
+      id-token: write
     # Reset (5m), three checkpoint observations (12m each), replies, and setup/checks.
     timeout-minutes: 55
     steps:
@@ -90,7 +93,6 @@ jobs:
       - name: Run production iMessage journey
         env:
           HOSTED_WEB_PRODUCTION_BASE_URL: ${{ vars.HOSTED_WEB_PRODUCTION_BASE_URL }}
-          MURPH_LINQ_PRODUCTION_CANARY_RESET_SECRET: ${{ secrets.MURPH_LINQ_PRODUCTION_CANARY_RESET_SECRET }}
           MURPH_LINQ_PRODUCTION_CANARY_TARGET_PHONE_NUMBER: ${{ secrets.MURPH_LINQ_PRODUCTION_CANARY_TARGET_PHONE_NUMBER }}
           SPECTRUM_PROJECT_ID: ${{ secrets.MURPH_LINQ_PRODUCTION_CANARY_SPECTRUM_PROJECT_ID }}
           SPECTRUM_PROJECT_SECRET: ${{ secrets.MURPH_LINQ_PRODUCTION_CANARY_SPECTRUM_PROJECT_SECRET }}

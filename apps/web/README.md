@@ -826,6 +826,19 @@ Required for the hosted device-sync lane in addition:
 - `JUNCTION_ENV`
 - `JUNCTION_REGION`
 
+The production Linq canary's reset and outcome endpoints authenticate GitHub
+Actions OIDC for the trusted main-branch canary workflow. The audience is
+`https://www.withmurph.ai/linq-production-canary`; the fixed target stays in
+`HOSTED_ONBOARDING_LINQ_PRODUCTION_CANARY_PHONE_NUMBER`. Reset tokens are
+single-use; status tokens are not consumed. The controller requests a fresh
+short-lived token per request and requires job-scoped `id-token: write`.
+During migration only, setting
+`HOSTED_ONBOARDING_LINQ_PRODUCTION_CANARY_RESET_SECRET` also enables the old
+bearer path. Deploy Web first, verify an OIDC journey, drain old controllers,
+then remove the Vercel and GitHub reset secrets and redeploy Web. See
+[production canary operations](../../agent-docs/operations/live-provider-canaries.md)
+for the rollout and static-code removal follow-up.
+
 Required for hosted Linq ingress:
 
 - `LINQ_WEBHOOK_SECRET`

@@ -5,7 +5,7 @@ import { requireHostedLinqProductionCanaryResetRequest } from "@/src/lib/hosted-
 import { getPrisma } from "@/src/lib/prisma";
 
 export const GET = withJsonError(async (request: Request) => {
-  requireHostedLinqProductionCanaryResetRequest(request);
+  await requireHostedLinqProductionCanaryResetRequest(request);
   if (new URL(request.url).search) throwInvalidRequest();
   const body = await readHostedOnboardingRawBodyText(request, {
     limitBytes: 1,
