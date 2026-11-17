@@ -7,14 +7,32 @@ const feature = (name: string, coordinates: [number, number]) => ({ features: [{
 const mockFetch = vi.fn();
 beforeEach(() => { vi.stubGlobal('fetch', mockFetch); vi.stubEnv('MAPBOX_ACCESS_TOKEN', 'synthetic-token'); vi.stubEnv('MAPBOX_STYLE_ID', 'synthetic/style'); });
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.resetAllMocks(); });
-function respond(code: string, status = 200) {
+function respond(code: string, status = 200, reverse = async () => Response.json(feature('Town', [-118, 34]))) {
   mockFetch.mockImplementation(async (url: URL) => {
     if (url.pathname.endsWith('/forward')) return Response.json(feature('City', url.searchParams.get('q') === 'Start' ? [-117.16, 32.72] : [-122.42, 37.77]));
-    if (url.pathname.endsWith('/reverse')) return Response.json(feature('Town', [-118, 34]));
+    if (url.pathname.endsWith('/reverse')) return reverse();
     return Response.json({ code, routes: [{ distance: 800000, geometry: polyline }] }, { status });
   });
 }
 describe('Progress Mapbox boundary', () => {
+  it('keeps the first occurrence in sample order with two reverse geocodes in flight', async () => {
+    const names = ['Start', 'Valley', 'Start', 'Ridge', 'Valley', 'Lake', 'Lake', 'End'];
+    let next = 0, active = 0, peak = 0;
+    const completed: number[] = [];
+    respond('Ok', 200, async () => {
+      const index = next++;
+      peak = Math.max(peak, ++active);
+      if (index % 2 === 0) await new Promise<void>(resolve => setImmediate(resolve));
+      completed.push(index);
+      active--;
+      return Response.json(feature(names[index]!, [-118, 34]));
+    });
+    const route = await resolveRoute('Start', 'End');
+    expect(next).toBe(8);
+    expect(peak).toBe(2);
+    expect(completed[0]).toBe(1);
+    expect(route.towns).toEqual([0, 1, 3, 5, 7].map(i => ({ name: names[i], atM: 800000 * i / 7 })));
+  });
   it('resolves both ends, driving geometry and exactly eight place samples', async () => {
     respond('Ok');
     const result = await resolveRoute('Start', 'End');

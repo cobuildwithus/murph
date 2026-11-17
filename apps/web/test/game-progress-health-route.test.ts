@@ -22,6 +22,7 @@ vi.mock("@/src/lib/game/progress/awards", () => ({ readAwards: mocks.awards, set
 
 
 import { addDaysToIsoDate } from "@murphai/contracts";
+import { getHostedDomainRootUnwrapCache } from "@/src/lib/hosted-crypto/domain-root-unwrap-cache";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { GET } from "../app/api/game/v1/progress/health/route";
 import { healthSchema, savedHealthSchema } from "@/src/lib/game/progress/contract";
@@ -57,6 +58,15 @@ beforeEach(() => {
   mocks.settle.mockImplementation(async (_member, _candidates, before) => { await before({ transaction: true }); });
 });
 afterEach(() => vi.useRealTimers());
+
+it("reads Health inside the request's root unwrap cache", async () => {
+  mocks.raw.mockImplementationOnce(async () => {
+    expect(getHostedDomainRootUnwrapCache()).toBeDefined();
+    return snapshot();
+  });
+  expect((await GET(request())).status).toBe(200);
+  expect(mocks.raw).toHaveBeenCalledOnce();
+});
 
 it("a vault read failure is one retryable 503 with empty saved presentation and no writes", async () => {
   mocks.raw.mockRejectedValueOnce(hostedOnboardingError({ code: "NUMBERS_PROJECTION_UNAVAILABLE", httpStatus: 503,

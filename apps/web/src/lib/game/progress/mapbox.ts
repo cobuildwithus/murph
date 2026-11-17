@@ -53,14 +53,21 @@ export async function resolveRoute(from: string, to: string) {
   const polyline = result.code === 'NoRoute' ? encodePolyline(greatCircle(start, end)) : result.routes[0]!.geometry;
   const points = decodePolyline(polyline);
   const towns: { name: string; atM: number }[] = [];
-  // Sequential requests keep the whole resolve to at most two concurrent provider calls.
-  for (let i = 0; !straightLine && i < 8; i++) {
+  const sampleTown = async (i: number) => {
     const at = cutPolyline(points, i / 7).walked.at(-1)!;
     const response = await mapboxJson('/search/geocode/v6/reverse', {
       longitude: String(at[0]), latitude: String(at[1]), types: 'place', limit: '1', permanent: 'true',
     }, geocoding);
     const town = response.features[0];
-    if (town && !towns.some(existing => existing.name === town.properties.name)) towns.push({ name: town.properties.name, atM: meters * i / 7 });
+    return town && { name: town.properties.name, atM: meters * i / 7 };
+  };
+  for (let i = 0; !straightLine && i < 8; i += 2) {
+    const pair = await Promise.allSettled([sampleTown(i), sampleTown(i + 1)]);
+    for (const sample of pair) {
+      if (sample.status === 'rejected') throw sample.reason;
+      const town = sample.value;
+      if (town && !towns.some(existing => existing.name === town.name)) towns.push(town);
+    }
   }
   return { from, to, distanceM: meters, polyline, towns, straightLine };
 }

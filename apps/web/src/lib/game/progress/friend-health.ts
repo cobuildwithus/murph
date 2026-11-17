@@ -12,7 +12,7 @@ import type { FriendSeries } from "./friends";
 /** Friend health comes only from the existing pair-board grants, never another member's vault. */
 export async function readFriendHealthSeries(input: {
   auth: HostedNativeMemberAuth; people: FriendSeries[]; rooms: FriendRoom[];
-  metric: "steps" | "sleep"; timeZone: string; signal: AbortSignal;
+  metric: "steps" | "sleep"; timeZone: string; signal: AbortSignal; with?: string;
 }): Promise<{ people: FriendSeries[]; incomplete: boolean }> {
   const now = new Date(), memberId = input.auth.member.id, today = toLocalDayKey(now, input.timeZone);
   const through = input.metric === "steps" ? lastSettledStepDay(now, input.timeZone) : today;
@@ -28,14 +28,15 @@ export async function readFriendHealthSeries(input: {
       ? number.daily.map(day => ({ date: day.date, amount: input.metric === "sleep" ? day.value * 60 : day.value })) : null };
   };
   // Your replica and friends' boards are independent: read them together, six boards at a time.
-  const others = input.people.filter(person => !person.me);
+  // Drawer totals use one friend. Sharing and the room-cap recheck still use the full cohort.
+  const others = input.people.filter(person => !person.me && (!input.with || person.memberId === input.with));
   const [snapshot, friends] = await Promise.all([readCompanionHealthSeries(input.auth, input.signal), (async () => {
     const read: FriendSeries[] = [];
     for (let index = 0; index < others.length; index += 6) read.push(...await Promise.all(others.slice(index, index + 6).map(friend)));
     return read;
   })()]);
   const people = input.people.map(person => {
-    if (!person.me) return friends.find(read => read.memberId === person.memberId)!;
+    if (!person.me) return friends.find(read => read.memberId === person.memberId) ?? { ...person, daily: null };
     const raw = snapshot?.numbers[input.metric]?.daily;
     return { ...person, daily: raw ? healthSums(input.metric, progressHealthDays(input.metric, raw), person.joinedOn!, through) : null };
   });
