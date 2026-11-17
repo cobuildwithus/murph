@@ -19,7 +19,7 @@ vi.mock("@/src/lib/game/http/auth", () => ({
 }));
 
 import { getPrisma } from "@/src/lib/prisma";
-import { sealGameText } from "@/src/lib/game/crypto";
+import { labelTarget, sealGameText } from "@/src/lib/game/crypto";
 import { sendDueGameReminders } from "@/src/lib/game/reminder-notification";
 import { deliverGamePush } from "@/src/lib/game/push-delivery";
 import { readGameReminders, readHome, runGameCommand } from "@/src/lib/game/service";
@@ -49,13 +49,13 @@ async function member(zone = "UTC", capable = true, sweepAt = now) {
     topic: "ai.withmurph.app.dev", environment: "development", alertsAllowed: true, gameSessionId: sessionId, gameReminders: capable, updatedAt: now } });
   return id;
 }
-async function game(owner: string, task = "Walk", peer?: string, group = false, dayOne = new Date("2026-11-06T00:00:00Z")) {
+async function game(owner: string, task = "Walk", peer?: string | string[], group = false, dayOne = new Date("2026-11-06T00:00:00Z")) {
   const id = randomUUID();
   const words = { v: 1, versions: [{ n: 1, defaultTask: "Shared task", tasks: [{ seat: 0, text: task }, { seat: 1, text: "Peer private words" }], stakes: [] }] };
   const encrypted = await sealGameText({ field: "terms_words", memberId: owner, rowId: id, table: "game" }, JSON.stringify(words));
   await db.game.create({ data: { id, createdBy: owner, wordsOwnerMemberId: owner, status: "live", maxPlayers: group ? 10 : 2,
     terms: { v: 1, versions: [{ n: 1, fromDay: 0, schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, stakes: [] }] }, termsWordsEncrypted: encrypted!,
-    players: { create: [owner, ...(peer ? [peer] : [])].map((memberId, seat) => ({ memberId, seat, timeZone: "UTC", dayOne, joinedAt: now })) } } });
+    players: { create: [owner, ...[peer ?? []].flat()].map((memberId, seat) => ({ memberId, seat, timeZone: "UTC", dayOne, joinedAt: now })) } } });
   return id;
 }
 async function post(gameId: string, memberId: string) {
@@ -155,7 +155,17 @@ describe.skipIf(!enabled)("game reminders PostgreSQL", () => {
     await post(id, peer);
     if (block !== "none") await db.gameBlock.create({ data: { blockerMemberId: block === "outgoing" ? owner : peer, blockedMemberId: block === "outgoing" ? peer : owner } });
     await sendDueGameReminders(now);
-    expect(m.send.mock.calls[0]![0].message).toEqual({ kind: "alert", title: "Walk", body: block === "none" ? "They posted. Share yours to see it." : "Still time today." });
+    expect(m.send.mock.calls[0]![0].message).toEqual({ kind: "alert", title: "Walk", body: block === "none" ? "Player posted. Share yours to see it." : "Still time today." });
+  });
+  it("names who posted by the recipient's private label, else their own first name", async () => {
+    const owner = await member(), labelled = await member("UTC", false), plain = await member("UTC", false), quiet = await member("UTC", false);
+    const id = await game(owner, "Walk", [labelled, plain, quiet], true);
+    await db.gameContactLabel.create({ data: { ownerMemberId: owner, subjectMemberId: labelled,
+      nameEncrypted: await sealGameText(labelTarget(owner, "name"), "Kat") } });
+    await post(id, labelled); await post(id, plain);
+    await sendDueGameReminders(now);
+    expect(m.send.mock.calls[0]![0].message).toMatchObject({ body: "Kat and Player posted. Share yours to see it." });
+    expect((await claims())[0]!.payload).toEqual({ v: 1, recipientMemberId: owner, day: "2026-11-06", outcome: "sent" });
   });
   it("uses the effective task and a group seat override, capped at 120 characters", async () => {
     const owner = await member(), id = await game(owner, "Old task", undefined, true);

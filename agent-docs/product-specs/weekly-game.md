@@ -493,7 +493,7 @@ resulting avatar. No private photo is shared with the subject or other players.
   game timezone, including its 3am boundary; delayed processing cannot shift
   the chosen day. Missing or ambiguous occurrence timestamps need clarification.
 - **Accept notifications.** An invite acceptance that activates a pair game sends
-  the other player one push per game: "They shook on it." / "Your game starts
+  the other player one push per game: "Sam shook on it." / "Your game starts
   today.", "tomorrow.", a weekday (2–6 days away), or a short date (7+ days away).
   Words use the written Day 1 and real calendar date in the recipient's frozen
   zone; expiry is the following date's 3am. `game_accepted` requires alerts,
@@ -504,18 +504,23 @@ resulting avatar. No private photo is shared with the subject or other players.
   the first eligible peer artifact, then completion ("Everyone's in but you."
   or "Everyone's in."). Incomplete artifacts count as submitted; excuses do
   not. The posting actor is excluded. Simultaneous milestones consume both
-  claims and send one message. Pairs always coincide: a pair recipient who
-  hasn't posted that day gets the generic "Someone posted. Share yours to see
-  it."; one who already has (permanent unlock) gets "They're in too." /
-  "Theirs develops when you open it.", because the app develops a post the
-  first time its viewer sees it on Home. Claims use `GameEvent.commandKey`
+  claims and send one message. The title names the poster: "Sam posted a
+  photo." (any other kind: "Sam checked in."). Pairs always coincide: a pair
+  recipient who hasn't posted that day gets "Share yours to see it."; one who
+  already has (permanent unlock) gets "Sam's in too." / "Theirs develops when
+  you open it.", because the app develops a post the first time its viewer
+  sees it on Home. Claims use `GameEvent.commandKey`
   over game, recipient and the real 03:00-to-03:00 day in their frozen zone;
   legacy daily receipts consume both slots. Candidate posts participate in the
   calculation. Retakes, retries, corrections and excuses create no new slots.
   Sending happens after commit, with route/session, active participation, block,
   report, real-day and milestone rechecks. Stale or uncertain sends keep claims
-  consumed. A blocked peer suppresses completion wording. No content or names
-  enter pushes except the recipient's own task words in a daily reminder.
+  consumed. A blocked peer suppresses completion wording. Pushes name people
+  the way the recipient sees them in the app (their private label, else the
+  person's first name) and fall back to "They"/"Someone" when no name reads.
+  No other content enters pushes except the recipient's own task words in a
+  daily reminder, whose single-game body names who posted ("Sam posted. Share
+  yours to see it.").
   Missed-day chat is separate from these push milestones.
 - **Excuses.** An excuse explains a missed day in a few words (1-500
   characters). It applies to the player's most recent past scheduled day with
