@@ -27,9 +27,8 @@ racing retirement/session loss. Native presentation and deployed generation are
 Hold for the integrator's release proof. No generation routes, native changes,
 production mutations, live provider calls, ReviewGPT or merge belong to PR A.
 
-The disclosure says that opening a passed thing's drawer sends the game profile
-photo to OpenAI, pictures are on until turned off, and Privacy off/account deletion
-remove made pictures. Both Markdown and generated PDFs were updated and rendered.
+The founder chose not to update the privacy policy or subprocessor register for
+this feature (2026-11-16). Privacy off and account deletion remove made pictures.
 
 The account export in this checkout was vault-only, with no Progress-pic export
 path. Section 12 assigns share export here, so the existing passkey-approved
