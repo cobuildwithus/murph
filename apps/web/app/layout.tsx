@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import Script from "next/script";
 
 import { AuthProvider } from "@/src/components/hosted-onboarding/auth-dialog-provider";
@@ -32,6 +32,12 @@ export const metadata: Metadata = {
     },
   }),
   metadataBase: resolveMetadataBase() ?? new URL(MURPH_PUBLIC_SITE_URL),
+};
+
+// Matches `color-scheme` on :root in globals.css; the meta tag reaches the
+// browser before the stylesheet does.
+export const viewport: Viewport = {
+  colorScheme: "only light",
 };
 
 export default async function RootLayout(input: { children: React.ReactNode }) {

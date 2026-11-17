@@ -31,32 +31,21 @@
   }
 }
 
-@keyframes fade-up {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
+/* Dialogs, popovers, menus and tooltips animate with tw-animate-css, whose
+   enter/exit keyframes read these properties. Under reduced motion they keep
+   their short fade but lose the zoom, slide and spin. This rule is unlayered
+   so it wins over the layered zoom-in-/slide-in- utilities. */
+@media (prefers-reduced-motion: reduce) {
+  :where([class*="animate-in"], [class*="animate-out"]) {
+    --tw-enter-scale: 1;
+    --tw-exit-scale: 1;
+    --tw-enter-translate-x: 0;
+    --tw-enter-translate-y: 0;
+    --tw-exit-translate-x: 0;
+    --tw-exit-translate-y: 0;
+    --tw-enter-rotate: 0;
+    --tw-exit-rotate: 0;
   }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@utility animate-fade-up {
-  animation: fade-up 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-
-@keyframes marquee {
-  from {
-    transform: translateX(0);
-  }
-  to {
-    transform: translateX(-50%);
-  }
-}
-
-@utility animate-marquee {
-  animation: marquee 30s linear infinite;
 }
 
 @keyframes panel-swap {
@@ -160,6 +149,9 @@
 }
 
 :root {
+  /* Light-only until a designed dark theme ships (PRODUCT.md). "only" also
+     stops browser auto-dark modes from inverting the page. */
+  color-scheme: only light;
   --background: #f5f0e8;
   --foreground: #2d3436;
   --card: rgba(255, 252, 246, 0.9);
