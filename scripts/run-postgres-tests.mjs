@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // @ts-check
 
+import { spawn } from "node:child_process";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -133,12 +134,127 @@ export async function executePostgresTests(files, root) {
   }
 }
 
+/**
+ * Splits `--workers <n>` from the shard arguments. Each worker gets its own
+ * copy of the migrated database, so files stay serial within a database.
+ * @param {string[]} argv
+ */
+export function parsePostgresWorkers(argv) {
+  const index = argv.indexOf("--workers");
+  if (index === -1) return { shardArgs: argv, workers: 1 };
+  const workers = Number(argv[index + 1]);
+  if (!Number.isSafeInteger(workers) || workers < 1 || workers > 8) {
+    throw new Error("PostgreSQL workers must be an integer from 1 to 8.");
+  }
+  return { shardArgs: [...argv.slice(0, index), ...argv.slice(index + 2)], workers };
+}
+
+/** @param {string[]} files @param {number} workers */
+export function splitPostgresWorkers(files, workers) {
+  const groups = Array.from({ length: Math.min(workers, files.length) }, () => /** @type {string[]} */ ([]));
+  files.forEach((file, ordinal) => groups[ordinal % groups.length].push(file));
+  return groups;
+}
+
+/** @param {string} databaseUrl @param {number} worker */
+export function workerDatabaseUrl(databaseUrl, worker) {
+  const url = new URL(databaseUrl);
+  url.pathname = `${url.pathname}_w${worker}`;
+  return url.toString();
+}
+
+/**
+ * Copies the migrated database once per worker. The name was validated by
+ * postgresTestEnvironment, so it is a plain murph_test identifier.
+ * @param {string} databaseUrl @param {number} workers
+ */
+async function cloneWorkerDatabases(databaseUrl, workers) {
+  const { default: pg } = await import("pg");
+  const source = new URL(databaseUrl).pathname.slice(1);
+  const admin = new URL(databaseUrl);
+  admin.pathname = "/postgres";
+  const client = new pg.Client({ connectionString: admin.toString() });
+  await client.connect();
+  try {
+    for (let worker = 1; worker <= workers; worker += 1) {
+      const target = new URL(workerDatabaseUrl(databaseUrl, worker)).pathname.slice(1);
+      await client.query(`DROP DATABASE IF EXISTS "${target}"`);
+      await client.query(`CREATE DATABASE "${target}" TEMPLATE "${source}"`);
+    }
+  } finally {
+    await client.end();
+  }
+}
+
+/**
+ * Runs one group of files serially in its own database, in a child process,
+ * and prints its output in one block when it ends.
+ * @param {string[]} files @param {string} databaseUrl @param {number} worker
+ * @returns {Promise<{ files: number, tests: number }>}
+ */
+function runPostgresWorker(files, databaseUrl, worker) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [fileURLToPath(import.meta.url), "--worker-files"], {
+      cwd: repoRoot,
+      env: {
+        ...process.env,
+        ...postgresTestEnvironment({ ...process.env, DATABASE_URL: databaseUrl }),
+        MURPH_POSTGRES_PROOF_FILES: JSON.stringify(files),
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    /** @type {Buffer[]} */
+    const output = [];
+    child.stdout.on("data", (chunk) => output.push(chunk));
+    child.stderr.on("data", (chunk) => output.push(chunk));
+    child.once("error", reject);
+    child.once("close", (code) => {
+      const text = Buffer.concat(output).toString("utf8");
+      process.stdout.write(`::group::PostgreSQL worker ${worker} (${files.length} files)\n${text}::endgroup::\n`);
+      const receipt = /^\[postgres-proof-worker\] (.+)$/mu.exec(text);
+      if (code !== 0 || !receipt) {
+        reject(new Error(`PostgreSQL worker ${worker} failed.`));
+        return;
+      }
+      resolve(JSON.parse(receipt[1]));
+    });
+  });
+}
+
 /** @param {string[]} argv */
 async function main(argv) {
+  if (argv.length === 1 && argv[0] === "--worker-files") {
+    Object.assign(process.env, postgresTestEnvironment(process.env));
+    const files = JSON.parse(process.env.MURPH_POSTGRES_PROOF_FILES ?? "[]");
+    const result = await executePostgresTests(files, repoRoot);
+    console.log(`[postgres-proof-worker] ${JSON.stringify(result)}`);
+    return;
+  }
+  const { shardArgs, workers } = parsePostgresWorkers(argv);
   Object.assign(process.env, postgresTestEnvironment(process.env));
-  const files = selectPostgresShard(await discoverPostgresTests(repoRoot), argv);
-  const result = await executePostgresTests(files, repoRoot);
-  console.log(`[postgres-proof] ${JSON.stringify({ shard: argv[1], ...result })}`);
+  const files = selectPostgresShard(await discoverPostgresTests(repoRoot), shardArgs);
+  let result;
+  if (workers === 1) {
+    result = await executePostgresTests(files, repoRoot);
+  } else {
+    const groups = splitPostgresWorkers(files, workers);
+    const databaseUrl = /** @type {string} */ (process.env.DATABASE_URL);
+    await cloneWorkerDatabases(databaseUrl, groups.length);
+    const settled = await Promise.allSettled(groups.map((group, index) =>
+      runPostgresWorker(group, workerDatabaseUrl(databaseUrl, index + 1), index + 1)));
+    const failed = settled.filter((outcome) => outcome.status === "rejected");
+    if (failed.length > 0) {
+      throw new Error(`PostgreSQL proof failed in ${failed.length} of ${groups.length} workers.`);
+    }
+    result = settled.reduce((total, outcome) => {
+      const value = /** @type {PromiseFulfilledResult<{ files: number, tests: number }>} */ (outcome).value;
+      return { files: total.files + value.files, tests: total.tests + value.tests };
+    }, { files: 0, tests: 0 });
+    if (result.files !== files.length) {
+      throw new Error("PostgreSQL workers did not cover the shard exactly once.");
+    }
+  }
+  console.log(`[postgres-proof] ${JSON.stringify({ shard: shardArgs[1], workers, ...result })}`);
 }
 
 if (process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url) {

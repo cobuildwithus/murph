@@ -88,7 +88,7 @@ test("every PostgreSQL shard index the workflow starts selects against the same 
   const source = await workflow("host-support.yml");
   const job = source.split("  release-web-postgres-linux:\n")[1].split(/^  [a-z]/mu)[0];
   const indexes = JSON.parse(/^ {8}shard: (\[[0-9, ]+\])$/mu.exec(job)[1]);
-  const count = Number(/--shard \$\{\{ matrix\.shard \}\}\/([0-9]+)$/mu.exec(job)[1]);
+  const count = Number(/--shard \$\{\{ matrix\.shard \}\}\/([0-9]+)(?: --workers [1-8])?$/mu.exec(job)[1]);
   assert.deepEqual(indexes, Array.from({ length: count }, (_, index) => index + 1));
   assert.match(job, new RegExp(`^ {6}max-parallel: ${count}$`, "mu"));
   assert.match(job, new RegExp(`\\(\\$\\{\\{ matrix\\.shard \\}\\}/${count}\\)$`, "mu"));

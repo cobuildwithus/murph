@@ -8,9 +8,12 @@ import { promisify } from "node:util";
 
 import {
   discoverPostgresTests,
+  parsePostgresWorkers,
   postgresTestEnvironment,
   selectPostgresShard,
+  splitPostgresWorkers,
   validatePostgresReceipt,
+  workerDatabaseUrl,
 } from "./run-postgres-tests.mjs";
 
 test("discovery includes alternate DB flags, nested files, and database-only files", async () => {
@@ -70,6 +73,23 @@ test("the lane enables every existing opt-in owner only for a local test databas
     "postgresql://localhost/murph_test#override"]) {
     assert.throws(() => postgresTestEnvironment({ DATABASE_URL }), /loopback murph_test/u);
   }
+});
+
+test("workers split a shard into disjoint groups, each with its own database copy", () => {
+  assert.deepEqual(parsePostgresWorkers(["--shard", "2/5"]), { shardArgs: ["--shard", "2/5"], workers: 1 });
+  assert.deepEqual(parsePostgresWorkers(["--shard", "2/5", "--workers", "4"]),
+    { shardArgs: ["--shard", "2/5"], workers: 4 });
+  for (const value of [undefined, "0", "9", "two", "1.5"]) {
+    assert.throws(() => parsePostgresWorkers(["--shard", "1/5", "--workers", ...(value ? [value] : [])]));
+  }
+  const files = Array.from({ length: 10 }, (_, index) => `file-${index}`);
+  const groups = splitPostgresWorkers(files, 4);
+  assert.deepEqual(groups.map((group) => group.length), [3, 3, 2, 2]);
+  assert.deepEqual(groups.flat().sort(), files.toSorted());
+  assert.equal(splitPostgresWorkers(["only"], 4).length, 1);
+  const url = workerDatabaseUrl("postgresql://postgres:postgres@127.0.0.1:5432/murph_test_gate", 3);
+  assert.equal(url, "postgresql://postgres:postgres@127.0.0.1:5432/murph_test_gate_w3");
+  assert.equal(postgresTestEnvironment({ DATABASE_URL: url }).DATABASE_URL, url);
 });
 
 const file = "apps/web/test/owner-postgres.test.ts";

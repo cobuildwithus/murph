@@ -230,12 +230,15 @@ canonical authenticated metadata lookup followed by the allowed local byte
 download while rejecting the bridge-origin direct locator. Full Linux container
 reachability, image normalization, and final replies remain hosted E2E proof.
 
-`node scripts/run-postgres-tests.mjs --shard 1/5` runs the first of five
-required PostgreSQL shards. Host Support prepares an isolated PostgreSQL 17
+`node scripts/run-postgres-tests.mjs --shard 1/3 --workers 4` runs the first
+of three required PostgreSQL shards. Host Support prepares an isolated PostgreSQL 17
 service with the checked-in Prisma migrations, then discovers Web tests that
 declare a `MURPH_TEST_*POSTGRES*` flag and all `*.db.test.ts` files. The runner
 uses the broad Web Vitest config, enables the concurrency, runtime-log, and
-iMessage enrollment database owners, and executes files serially in each shard.
+iMessage enrollment database owners, and splits each shard across four
+workers. Each worker gets its own copy of the migrated database (`CREATE
+DATABASE ... TEMPLATE`) and runs its files serially in it, so no two files
+share a database at once.
 Its in-memory receipt requires every selected file exactly once, at least one
 executed case per file, and no skipped, pending, or failed cases. Missing files,
 collection errors, interrupted runs, and an empty inventory fail the existing
