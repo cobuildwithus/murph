@@ -107,6 +107,18 @@ export function readCompanionBodyHeight(
   return height.value;
 }
 
+/** A height-only consumer of the same saved replica and health authority. */
+export async function readSavedCompanionBodyHeight(memberId: string, signal: AbortSignal): Promise<number | null> {
+  const prisma = getPrisma();
+  await assertBrowserVaultMemberAuthority({ memberId, prisma });
+  const snapshot = await loadSavedNumbers(memberId, signal);
+  await assertBrowserVaultMemberAuthority({ memberId, prisma });
+  if (!snapshot) return null;
+  const timeZone = snapshot.client.replica.meals?.timeZone;
+  if (!timeZone) throw numbersUnavailable();
+  return readCompanionBodyHeight(snapshot.client, toLocalDayKey(new Date(), timeZone));
+}
+
 async function loadSavedNumbers(memberId: string, signal: AbortSignal) {
   try {
     const workspace = await readHostedWorkspace({ userId: memberId });
