@@ -58,8 +58,16 @@ export const gamePrivateEveningCheckInPolicySchema = z.object({
   conversationLaneSeq: retiredConversationLaneSeq,
   batch: z.array(z.object({ gameId: identity, termsVersion: z.number().int().positive(), dayIndex: z.number().int().min(0).max(364) }).strict())
     .min(1).max(GAME_MISSED_ROOM_MAX_GAMES),
-}).strict().refine(policy => policy.eventId === `game-evening-private:${policy.memberId}:${policy.date}`
+}).strict().refine(policy => privateEveningEventIdMatches(policy.eventId, policy.memberId, policy.date)
   && unique(policy.batch.map(game => game.gameId)));
+
+/** One private text a day, or one for each reminder time when the id ends in its minutes after midnight. */
+function privateEveningEventIdMatches(eventId: string, memberId: string, date: string): boolean {
+  const day = `game-evening-private:${memberId}:${date}`;
+  if (eventId === day) return true;
+  const minutes = eventId.startsWith(`${day}:`) ? eventId.slice(day.length + 1) : "";
+  return /^(?:0|[1-9]\d{0,3})$/u.test(minutes) && Number(minutes) <= 1439;
+}
 export type HostedGamePrivateEveningCheckInPolicy = z.infer<typeof gamePrivateEveningCheckInPolicySchema>;
 
 export const gamePrivateKickoffPolicySchema = z.object({
