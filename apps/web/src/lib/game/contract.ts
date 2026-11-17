@@ -312,10 +312,13 @@ export interface GameReminders {
   canText: boolean;
   offGameIds: string[];
   everyDayGameIds?: string[];
+  /** Games with their own time, in minutes after local midnight; every other game uses minutes. */
+  gameMinutes?: Record<string, number>;
 }
 
 export type GameCommand =
-  | ({ type: "setReminders" } & Omit<GameReminders, "canText">)
+  /** With timeForGameIds, minutes is the own time of just those games (none when empty), and the profile time stays. */
+  | ({ type: "setReminders"; timeForGameIds?: string[] } & Omit<GameReminders, "canText">)
   | ({ type: "replyToPost"; gameId: string; entryId: string } & ReplyToPostBody)
   | { type: "deleteReply"; gameId: string; replyId: string }
   /** POST /games/:id/challenges { entryId: string }. Actor comes from authentication. */

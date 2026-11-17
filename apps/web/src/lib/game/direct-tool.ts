@@ -46,7 +46,7 @@ export async function readMyGameReminderProjection(memberId: string) {
   const [settings, seats] = await Promise.all([
     readGameReminders(memberId),
     db.gamePlayer.findMany({ where: { memberId, leftAt: null, game: { status: "live" } },
-      select: { gameId: true, seat: true, reminderOff: true, reminderEveryDay: true, game: {
+      select: { gameId: true, seat: true, reminderOff: true, reminderEveryDay: true, reminderMinutes: true, game: {
         select: { maxPlayers: true, players: { where: { leftAt: null }, select: { memberId: true } } },
       } }, orderBy: { gameId: "asc" }, take: 21 }),
   ]);
@@ -65,7 +65,7 @@ export async function readMyGameReminderProjection(memberId: string) {
       schedule: view.terms.schedule, today: !ownDay ? "upcoming" as const : ownDay.off ? "off" as const
         : ownDay.mine ? "posted" as const : "open" as const,
       otherFirstNames: seat.game.players.flatMap(player => player.memberId && player.memberId !== memberId ? [byId.get(player.memberId) ?? ""] : []).filter(Boolean),
-      on: !seat.reminderOff, everyDay: seat.reminderEveryDay });
+      on: !seat.reminderOff, everyDay: seat.reminderEveryDay, minutes: seat.reminderMinutes ?? settings.minutes });
   }
   return { minutes: settings.minutes, push: settings.push, text: settings.text, canText: settings.canText, games };
 }
@@ -96,13 +96,16 @@ async function setMyGameReminders(input: { memberId: string; runtimeIdentity: Ho
   const everyDay = new Set(current.games.filter(game => game.everyDay).map(game => game.id));
   if (game && input.request.on !== undefined) input.request.on ? off.delete(game.id) : off.add(game.id);
   if (game && input.request.everyDay !== undefined) input.request.everyDay ? everyDay.add(game.id) : everyDay.delete(game.id);
-  const saved = await runGameCommand({ actorMemberId: input.memberId, beforeMutationTx: async tx => {
+  // A time with a game is that game's own; without one it is every game's, so no game keeps its own.
+  const minutes = input.request.minutes;
+  const time = minutes === undefined ? { timeForGameIds: [] } : game ? { timeForGameIds: [game.id] } : { gameMinutes: {} };
+  const result = await runGameCommand({ actorMemberId: input.memberId, beforeMutationTx: async tx => {
     await requireHostedRuntimeCallbackTx(tx, input.memberId, input.runtimeIdentity);
     await requireHostedRuntimeActiveAccessForUpdateTx(input.memberId, { prisma: tx });
-  }, command: { type: "setReminders", minutes: input.request.minutes ?? current.minutes,
+  }, command: { type: "setReminders", minutes: minutes ?? current.minutes, ...time,
     push: input.request.push ?? current.push, text: input.request.text ?? current.text,
     offGameIds: [...off], everyDayGameIds: [...everyDay] } });
-  return saved.ok ? null : { action: "my_game_reminders", result: { status: "rejected", error: saved.error.message.slice(0, 128) } };
+  return result.ok ? null : { action: "my_game_reminders", result: { status: "rejected", error: result.error.message.slice(0, 128) } };
 }
 
 export async function handleMyGameNotForMeTool(input: {

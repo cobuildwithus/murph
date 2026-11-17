@@ -97,7 +97,17 @@ function reminders(input: Record<string, unknown>): Extract<GameCommand, { type:
   return { type: "setReminders", minutes: integer(input.minutes, "minutes", 0, 1439), push: input.push, text: input.text,
     offGameIds: [...new Set(list(input.offGameIds, "offGameIds", 1000).map(id => clientId(id, "gameId")))],
     ...(input.everyDayGameIds === undefined ? {} : { everyDayGameIds: [...new Set(list(input.everyDayGameIds, "everyDayGameIds", 1000).map(id => clientId(id, "gameId")))] }),
+    ...(input.gameMinutes === undefined ? {} : { gameMinutes: gameMinutes(input.gameMinutes) }),
+    ...(input.timeForGameIds === undefined ? {} : { timeForGameIds: [...new Set(list(input.timeForGameIds, "timeForGameIds", 1000).map(id => clientId(id, "gameId")))] }),
+    ...(input.gameMinutes !== undefined && input.timeForGameIds !== undefined ? reject("INVALID_REQUEST", "Send gameMinutes or timeForGameIds, not both.") : {}),
   };
+}
+
+/** Each game's own time. Left out, every game keeps the time it has. */
+function gameMinutes(value: unknown): Record<string, number> {
+  const entries = Object.entries(record(value, "gameMinutes"));
+  if (entries.length > 1000) reject("INVALID_REQUEST", "gameMinutes has more than 1000 games.");
+  return Object.fromEntries(entries.map(([id, minutes]) => [clientId(id, "gameId"), integer(minutes, "gameMinutes", 0, 1439)]));
 }
 
 /** Shared acceptance body for public token joins and addressed chat acceptance. */

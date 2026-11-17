@@ -51230,6 +51230,53 @@ describeRealCodex('private game reminder reply', () => {
       expect(reply).not.toMatch(/^yes|every (?:scheduled )?evening|not every|game_/iu)
     } finally { await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths]) }
   }, 360_000)
+
+  it('private game reminder moves one game to its own time and leaves the other', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-game-direct-own-time-e2e-'))
+    const { MURPH_MY_GAME_REMINDERS_TOOL, GAME_PRIVATE_REMINDER_DIRECT_GUIDANCE } = await import('../src/assistant-codex/dynamic-tools/games.js')
+    const { hostedGameToolResponseSchema } = await import('@murphai/hosted-execution/runtime-control')
+    const inputId = 'ain_' + 'e'.repeat(32)
+    const calls: import('@murphai/hosted-execution/runtime-control').HostedGameToolRequest[] = []
+    let reminders = { minutes: 720, push: true, text: false, canText: false, games: [
+      { id: 'game_synthetic_pullups', task: '20 pullups', schedule: { days: [0, 1, 2, 3, 4] }, today: 'open' as const, otherFirstNames: ['Sam'], on: true, everyDay: false, minutes: 720 },
+      { id: 'game_synthetic_pushups', task: '50 pushups', schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, today: 'open' as const, otherFirstNames: ['Ava'], on: true, everyDay: false, minutes: 720 },
+    ] }
+    try {
+      await initializeVault({ timezone: 'UTC', vaultRoot: workingDirectory })
+      const result = await executeRealCodexAppServerTurn({
+        allowFinishWithoutReply: false, approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, env: config.env, model: config.model, modelProvider: config.modelProvider,
+        developerInstructions: [buildDirectConversationDeveloperInstructions(false, null, [], '2030-03-06T12:00:00.000Z'), GAME_PRIVATE_REMINDER_DIRECT_GUIDANCE].join('\n\n'),
+        dynamicTools: [MURPH_MY_GAME_REMINDERS_TOOL],
+        hostedToolContext: { computerToolsAvailable: false, vaultFileSendAvailable: false,
+          currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+          sendVaultFile: async () => { throw new Error('No media') },
+          currentUserActionScope: () => ({ conversationId: 'synthetic-direct', inboundMailboxItemIds: [],
+            recipientKey: 'synthetic-member', acceptedInputIds: [inputId], originSessionId: 'synthetic-session', conversationScope: 'direct' }),
+          myGameRemindersTool: { request: async request => {
+            if (request.action !== 'my_game_reminders') throw new Error('Unexpected game request')
+            calls.push(request)
+            const minutes = request.operation === 'set' ? request.minutes : undefined
+            // As Web saves it: a time with a game is that game's own, a time without one is every game's.
+            if (minutes !== undefined) reminders = { ...reminders, minutes: request.gameId ? reminders.minutes : minutes,
+              games: reminders.games.map(game => !request.gameId || game.id === request.gameId ? { ...game, minutes } : game) }
+            return hostedGameToolResponseSchema.parse({ action: 'my_game_reminders', result: { status: 'ok', reminders, reaches: 'push' } })
+          } },
+        },
+        prompt: 'Can you move my pullups reminder to 9pm?', reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const reply = result.finalMessage.trim()
+      const sets = calls.filter(call => call.action === 'my_game_reminders' && call.operation === 'set')
+      process.stdout.write(`[private-game-reminder-own-time] ${JSON.stringify({ reply, calls })}\n`)
+      expect(sets).toEqual([expect.objectContaining({ gameId: 'game_synthetic_pullups', minutes: 1260 })])
+      expect(reminders.games.map(game => game.minutes)).toEqual([1260, 720])
+      expect(reply).toMatch(/9/u)
+      expect(reply).toMatch(/pullups/iu)
+      expect(reply).not.toMatch(/\b(?:both|all (?:of )?your)\b|game_/iu)
+    } finally { await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths]) }
+  }, 360_000)
 })
 
 
