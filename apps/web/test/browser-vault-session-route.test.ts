@@ -25,6 +25,7 @@ const TEST_BROWSER_VAULT_METRIC_BUCKET_IDS = Array.from(
 );
 
 const mocks = vi.hoisted(() => ({
+  prepareProgressShareExport: vi.fn(),
   assertBrowserVaultMemberAuthority: vi.fn(),
   afterResponse: vi.fn((callback: () => void | Promise<void>) => {
     void callback();
@@ -47,6 +48,8 @@ const mocks = vi.hoisted(() => ({
   consumeSensitiveActionChallenge: vi.fn(),
   readHostedWorkspaceBrowserVaultSourceStateHash: vi.fn<(snapshotRef: unknown) => string | null>(() => null),
 }));
+
+vi.mock("@/src/lib/game/progress/share-export", () => ({ prepareProgressShareExport: mocks.prepareProgressShareExport }));
 
 vi.mock("next/server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("next/server")>();
@@ -129,6 +132,7 @@ describe("browser vault session route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.prepareProgressShareExport.mockResolvedValue(async function* () {});
     mocks.signalHostedBrowserVaultRefreshRuntime.mockResolvedValue({
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_123",

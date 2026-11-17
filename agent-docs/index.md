@@ -9,7 +9,7 @@ A directory of the durable docs. Find the row for your task and read that doc;
 | Path | Purpose | Source of truth | Criticality | Last verified |
 | --- | --- | --- | --- | --- |
 | `README.md` | Human-facing repo overview, install path, public package posture, local/hosted runtime tiers, and verification entrypoints. | Current repository state | High | 2026-05-02 |
-| `ARCHITECTURE.md` | Current runtime architecture: owners, boundaries and data flow for every app, service and package, including Ops reset eligibility and Progress sealed facts, reader units, cited goals, game scoring and bounded reads. | Current runtime architecture | High | 2026-11-16 |
+| `ARCHITECTURE.md` | Current runtime architecture: owners, boundaries and data flow for every app, service and package, including Progress sealed facts, share cleanup and consent, reader units, cited goals, game scoring and bounded reads. | Current runtime architecture | High | 2026-11-16 |
 | `agent-docs/ARCHITECTURE_GUIDANCE.md` | Architecture planning guidance. | Architecture planning guidance | High | 2026-08-24 |
 | `PRODUCT.md` | Strategic design context: register, users, Web Home setup and Settings, brand personality, anti-references, design principles. Loaded by the impeccable skill before any UI work. | Product/brand strategic context | High | 2026-04-24 |
 | `DESIGN.md` | Visual design system. | Visual design system | High | 2026-07-22 |
@@ -22,7 +22,7 @@ A directory of the durable docs. Find the row for your task and read that doc;
 | `docs/hosted-auth-migration.md` | Four-stage Privy removal, reviewed candidate heads, merge/deploy order, transition-only import, session continuity, first-passkey and recovery sign-in factors, and guarded schema/vendor retirement. | Hosted auth migration rollout | High | 2026-11-16 |
 | `docs/hosted-contact-privacy-rotation.md` | Hosted blind-index keyring seam, dormant block/leave rotation and per-epoch group evidence deletion. | Hosted contact-privacy rotation seam | Medium | 2026-11-15 |
 | `docs/hosted-linq-db-home-lines-migration.md` | Database-backed Linq home-line assignment, provider inventory freshness, and bounded Serializable snapshot recovery. | Hosted Linq line ownership and rollout | High | 2026-09-11 |
-| `docs/hosted-account-data-deletion-export.md` | Hosted account data export and deletion workflow, store coverage, security checks, retention limits, and the authenticated canary diagnostic-retention exception. | Hosted account privacy workflow | High | 2026-05-13 |
+| `docs/hosted-account-data-deletion-export.md` | Hosted account vault/share-picture export and deletion, bounded private media reads, store coverage, and the canary retention exception. | Hosted account privacy workflow | High | 2026-11-16 |
 | `docs/hosted-runtime-log-database.md` | Hosted runtime log database: what is recorded, the bounded diagnostics it supports, retention and deletion. | Hosted runtime observability storage and usage-profile diagnostics | High | 2026-10-10 |
 | `docs/legal-consent-implementation.md` | Hosted legal consent document registry, event/grant storage, API routes, and gate helpers. | Hosted legal consent workflow | High | 2026-05-13 |
 | `docs/incident-response.md` | Canonical incident.io-backed runbook for declaring, coordinating, communicating, resolving, and learning from Murph production incidents. | Incident coordination and public status policy | High | 2026-08-05 |

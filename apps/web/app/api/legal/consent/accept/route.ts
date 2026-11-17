@@ -2,6 +2,7 @@ import { RequestInputError } from "@murphai/hosted-execution/request-input";
 
 import {
   HOSTED_HEALTH_DATA_CONSENT_SCOPE,
+  PROGRESS_SHARE_CONSENT_SCOPE,
   type HostedConsentLaunchScope,
   grantHostedOptionalFeatureConsent,
   parseHostedConsentAcceptRequest,
@@ -44,6 +45,9 @@ export const POST = withJsonError(async (request: Request) => {
   const auth = await requireHostedAppSessionFromRequest(request);
   const body = await readJsonObject(request);
   const consent = parseHostedConsentAcceptRequest(body);
+  if (consent.scope === PROGRESS_SHARE_CONSENT_SCOPE) {
+    throw new RequestInputError('Use the Progress picture Privacy control to turn pictures on.');
+  }
   const starterInviteCode = readOptionalStarterInviteCode(body);
   const priorHealthDataConsentState =
     consent.scope === HOSTED_HEALTH_DATA_CONSENT_SCOPE

@@ -5975,10 +5975,10 @@ JSON is authenticated and decoded without revalidation. The games reader and
 four BE1 routes compose these primitives; health/friends and media/maps retain
 their separate lane owners.
 
-Progress persists only awards, measure choices, picture ownership and task
+Progress persists awards, measure choices, picture and share ownership, and task
 inference. The following classification covers every column of exactly
 `GameProgressAward`, `GameProgressMeasure`, `GameProgressPic` and
-`GameProgressTaskMeasure`; it is not an audit of other game tables.
+`GameProgressTaskMeasure`, plus `GameProgressShare`; it is not an audit of other game tables.
 
 | Table | Encrypted content | Keyed lookup | Approved operational metadata |
 | --- | --- | --- | --- |
@@ -5986,6 +5986,51 @@ inference. The following classification covers every column of exactly
 | `game_progress_measure` | `state_encrypted`: goal, latest checked found goal, frozen route legs/geometry/towns, per-day amount, frozen baseline | `lookup`: member-bound measure identity | `member_id`: owner FK; `updated_at`: mutation time |
 | `game_progress_pic` | `meta_encrypted`: measure identity | None | `id`: client UUID; `member_id`: owner FK; `storage_key`: random exclusive Progress object identity; `taken_at`: capture ordering; `retired_at`: permanent retirement time |
 | `game_progress_task_measure` | `measure_encrypted`: inferred name, quantity and unit | `lookup`: member-bound normalized task text plus check-in kind | `member_id`: owner FK; `created_at`: insertion time |
+| `game_progress_share` | None in the row; generated JPEG bytes are sealed in the Progress store | `award_lookup`: existing member-bound award identity | `member_id`: owner FK; `storage_key`: unique random Progress object identity; `status`: generating, ready, failed or retired; `created_at`: admission time; `failure_code`: nullable generation_failed, timeout or refused |
+
+Share ownership uses the member/award composite primary and foreign key. No
+source photo identity is persisted: nothing reads it after admission. The member
+GameProfile owns the current photo key; changing it leaves admitted shares alone.
+An index covers member/admission time. Share
+bytes use the member-private-field lane, `game-progress` scope and purpose,
+`game_progress_share` table, storage key row AAD and `bytes` field. They are
+private health-related content, including likeness and activity, and never enter
+the Progress album or game media. The existing Progress R2 record classification
+also covers shares: encrypted envelope, operational version/hash/retired marker,
+random object identity and keyed owner namespace.
+
+`feature.progress-share-images` is a revocable scope in the existing legal
+consent owner, referencing the current Privacy, Consumer Health Data Notice and
+Health AI Safety Disclosure. Its member/event IDs, scope, status, action, fixed
+`ios-progress-share` source, decision timestamps and grant event link are approved
+operational consent metadata. Document versions and `metadata_json.disclosureVersion`
+(1) are approved public disclosure metadata. No image, award, prompt, health value,
+provider response or free-form reason is stored in those fields. This classification
+covers the new values in `HostedConsentGrant` and `HostedConsentEvent` only.
+
+The Progress consent operation holds the existing member lock and commits the
+legal decision and share retirement together. First denial records a declined
+event without fabricating a grant. Identical decisions add no audit event; a
+repeated denial still purges retained keys. The existing Web Privacy revoke route
+uses this owner; the generic accept route cannot grant this separate disclosure.
+Regrant never revives a retired share. Progress picture deletion has no share
+coupling. Account suspension fences new work before
+share cleanup, picture cleanup and row/key cascades, in that order. Failures block
+successful deletion and retain cleanup identities. Each share collection reads
+at most 10,001 keys, rejects more than 10,000 before effects, and purges serially
+outside transactions (one connection at a time, no decryption or provider calls).
+
+Account export includes every attempt's metadata and ready JPEG through the
+existing passkey-approved Settings export. It reads at most 10,001 rows, rejects
+overflow before effects, and opens pictures serially under share AAD with session
+and status rechecks. No source key or prompt is exported; plaintext buffers are
+cleared. The full export contract and maximum query counts live in
+`docs/hosted-account-data-deletion-export.md`.
+
+Deploy this additive table and deletion-aware Web consumer before exposing any
+share producer, verify the exact deployment, and drain predecessor functions.
+That Web release and schema are the rollback floor once share objects exist.
+No backfill, Worker API change, queue, retry worker or flag is required.
 
 Every owner FK cascades from `HostedMember`. Award subjects also cascade, so
 deleting a friend removes awards about that friend without deleting unrelated

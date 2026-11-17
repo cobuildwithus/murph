@@ -114,29 +114,65 @@ export async function loadBrowserVaultExport({
   }
 
   assertNotAborted(signal);
-  const session = parseBrowserVaultExportSession(await response.json());
-  assertNotAborted(signal);
-  assertBrowserVaultExportSessionMatchesAtomicRef(session);
+  const records = readExportRecords(response);
+  try {
+    const first = await records.next();
+    const session = parseBrowserVaultExportSession(first.value);
+    assertNotAborted(signal);
+    assertBrowserVaultExportSessionMatchesAtomicRef(session);
 
-  // Both transports wrap one replica data key. Unwrap it exactly once, after
-  // the complete response has passed its atomic ref/AAD validation.
-  const replicaKey = await unwrapHostedBrowserSessionKey({
-    envelope: session.replicaKeyEnvelope,
-    recipientPrivateKeyJwk: privateKeyJwk,
-  });
-  assertNotAborted(signal);
-  const payload = session.transport === "legacy"
-    ? await loadLegacyBrowserVaultExport({ replicaKey, session, signal })
-    : await loadBucketedBrowserVaultExport({ replicaKey, session, signal });
+    // Both transports wrap one replica data key. Unwrap it exactly once, after
+    // the complete response has passed its atomic ref/AAD validation.
+    const replicaKey = await unwrapHostedBrowserSessionKey({
+      envelope: session.replicaKeyEnvelope,
+      recipientPrivateKeyJwk: privateKeyJwk,
+    });
+    assertNotAborted(signal);
+    const payload = session.transport === "legacy"
+      ? await loadLegacyBrowserVaultExport({ replicaKey, session, signal })
+      : await loadBucketedBrowserVaultExport({ replicaKey, session, signal });
 
-  return {
-    blob: payload.blob,
-    deviceSyncImportPending: session.deviceSyncImportPending,
-    freshness: session.freshness,
-    generatedAt: payload.generatedAt,
-    refreshPending: session.refreshPending,
-    workspaceVersion: session.workspaceVersion,
-  };
+    const shareParts: BlobPart[] = [];
+    for await (const value of records) {
+      const record = requireRecord(value, 'Progress share export record');
+      const share = requireRecord(record.progressShare, 'Progress share export');
+      requireString(share.awardId, 'Progress share awardId');
+      requireIsoTimestamp(share.createdAt, 'Progress share createdAt');
+      requireString(share.status, 'Progress share status');
+      if (share.jpegBase64 !== null) requireString(share.jpegBase64, 'Progress share JPEG');
+      if (shareParts.length) shareParts.push(',');
+      shareParts.push(new Blob([JSON.stringify(share)]));
+    }
+    const blob = new Blob([payload.blob.slice(0, -1), ',"progressShares":[', ...shareParts, ']}'], { type: VAULT_EXPORT_MIME_TYPE });
+    return {
+      blob,
+      deviceSyncImportPending: session.deviceSyncImportPending,
+      freshness: session.freshness,
+      generatedAt: payload.generatedAt,
+      refreshPending: session.refreshPending,
+      workspaceVersion: session.workspaceVersion,
+    };
+  } finally { await records.return(undefined); }
+}
+
+/** Streaming export records never assemble all base64 images into one JS string. */
+async function* readExportRecords(response: Response): AsyncGenerator<unknown> {
+  if (!response.body) throw new Error('Export response has no body.');
+  const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+  let pending = '';
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      pending += value;
+      let end: number;
+      while ((end = pending.indexOf('\n')) >= 0) {
+        const line = pending.slice(0, end); pending = pending.slice(end + 1);
+        yield JSON.parse(line);
+      }
+    }
+    if (pending) yield JSON.parse(pending);
+  } finally { await reader.cancel(); reader.releaseLock(); }
 }
 
 export function normalizeBrowserVaultExportError(error: unknown): string {

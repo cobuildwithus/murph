@@ -7,19 +7,19 @@
       "effectiveDate": "2026-04-09",
       "id": "privacy-policy",
       "latest": {
-        "bytes": 99192,
+        "bytes": 101075,
         "path": "/legal/privacy.pdf",
-        "sha256": "ccbe3ccb3b9b3740cd2ae8feada99bfef33cf1f8ec5024722d2774c2c0a6643c"
+        "sha256": "e8f698b4bc933ea081cc5bcd2cd0ac02ee6291b8d0d55694a5bfa65e20648444"
       },
-      "lastUpdated": "2026-11-12",
+      "lastUpdated": "2026-11-16",
       "source": "apps/web/legal/privacy-policy.md",
       "title": "Murph Privacy Policy",
-      "version": "2026-11-12",
+      "version": "2026-11-16",
       "versions": [
         {
-          "bytes": 99192,
-          "path": "/legal/privacy-2026-11-12.pdf",
-          "sha256": "ccbe3ccb3b9b3740cd2ae8feada99bfef33cf1f8ec5024722d2774c2c0a6643c"
+          "bytes": 101075,
+          "path": "/legal/privacy-2026-11-16.pdf",
+          "sha256": "e8f698b4bc933ea081cc5bcd2cd0ac02ee6291b8d0d55694a5bfa65e20648444"
         }
       ]
     },
@@ -97,19 +97,19 @@
       "effectiveDate": "2026-04-29",
       "id": "subprocessors",
       "latest": {
-        "bytes": 30681,
+        "bytes": 31532,
         "path": "/legal/subprocessors.pdf",
-        "sha256": "c2ae44f791c909e91c59014df12ab6d37bf209ce8b828f5f4b2eb3015f7cd854"
+        "sha256": "15e6e5217d2262b8b7b4ab1bb35ff7dc2bc189a0e3971906722a6d317f965a89"
       },
-      "lastUpdated": "2026-11-12",
+      "lastUpdated": "2026-11-16",
       "source": "apps/web/legal/subprocessors.md",
       "title": "Murph Subprocessors, Model Providers, and Connected Services",
-      "version": "2026-11-12",
+      "version": "2026-11-16",
       "versions": [
         {
-          "bytes": 30681,
-          "path": "/legal/subprocessors-2026-11-12.pdf",
-          "sha256": "c2ae44f791c909e91c59014df12ab6d37bf209ce8b828f5f4b2eb3015f7cd854"
+          "bytes": 31532,
+          "path": "/legal/subprocessors-2026-11-16.pdf",
+          "sha256": "15e6e5217d2262b8b7b4ab1bb35ff7dc2bc189a0e3971906722a6d317f965a89"
         }
       ]
     },

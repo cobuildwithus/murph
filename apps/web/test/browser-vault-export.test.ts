@@ -171,9 +171,21 @@ test("Settings export decrypts all children sequentially and preserves semantic 
   );
   const exportedReplica = JSON.parse(await result.blob.text()) as BrowserVaultReplica;
   expect(exportedReplica.metricRows).toEqual(fixture.replica.metricRows);
-  expect(exportedReplica).toEqual(fixture.replica);
+  expect(exportedReplica).toEqual({ ...fixture.replica, progressShares: [] });
   expect(result.generatedAt).toBe(fixture.replica.generatedAt);
   expect(result.blob.type).toBe("application/json; charset=utf-8");
+});
+
+test("includes streamed share metadata and JPEG bytes in the approved export", async () => {
+  const fixture = await createBucketedExportFixture();
+  runtimeMocks.decryptHostedStoragePayload.mockImplementation(async ({ envelope }) => fixture.plaintextByCiphertext.get(envelope.ciphertext));
+  const share = { awardId: 'opaque-award', status: 'ready', createdAt: '2026-11-01T00:00:00.000Z', failureCode: null, jpegBase64: 'AQID' };
+  const encoded = new TextEncoder().encode(await fixture.response.text() + '\n' + JSON.stringify({ progressShare: share }) + '\n');
+  const response = new Response(new ReadableStream({ start(controller) {
+    controller.enqueue(encoded.slice(0, 37)); controller.enqueue(encoded.slice(37)); controller.close();
+  } }));
+  const result = await loadBrowserVaultExport({ authorization: createAuthorization(), fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(response) });
+  expect(JSON.parse(await result.blob.text())).toEqual({ ...fixture.replica, progressShares: [share] });
 });
 
 test.each([
@@ -242,7 +254,7 @@ test("Settings export retains the legacy monolith fallback", async () => {
     expect(requestBody.requestedMetricBuckets).toBeUndefined();
     expect(runtimeMocks.unwrapHostedBrowserSessionKey).toHaveBeenCalledTimes(1);
     expect(runtimeMocks.decryptHostedStoragePayload).toHaveBeenCalledTimes(1);
-    expect(JSON.parse(await result.blob.text())).toEqual(replica);
+    expect(JSON.parse(await result.blob.text())).toEqual({ ...replica, progressShares: [] });
   } finally {
     vi.stubGlobal("DecompressionStream", originalDecompressionStream);
   }

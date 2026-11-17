@@ -108,6 +108,7 @@ const HOSTED_MEMBER_SCHEMA_GUARD = {
     'progressAwardsAbout GameProgressAward[] @relation("ProgressAwardSubject")',
     "progressMeasures GameProgressMeasure[]",
     "progressPics GameProgressPic[]",
+    "progressShares GameProgressShare[]",
     "progressTaskMeasures GameProgressTaskMeasure[]",
     'gameInvitations GameInvitee[] @relation("GameInviteeMember")',
     'chatHostedGames Game[] @relation("GameChatContainer")',

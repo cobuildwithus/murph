@@ -717,6 +717,7 @@ model HostedMember {
   progressAwardsAbout            GameProgressAward[] @relation("ProgressAwardSubject")
   progressMeasures               GameProgressMeasure[]
   progressPics                   GameProgressPic[]
+  progressShares                 GameProgressShare[]
   progressTaskMeasures           GameProgressTaskMeasure[]
   phoneCalls                     HostedPhoneCall[]
   physicalNotes                  HostedPhysicalNote[]
@@ -3182,6 +3183,7 @@ model GameProgressAward {
   seenAt          DateTime?    @map("seen_at")
   member          HostedMember @relation("ProgressAwardOwner", fields: [memberId], references: [id], onDelete: Cascade)
   subject         HostedMember? @relation("ProgressAwardSubject", fields: [subjectMemberId], references: [id], onDelete: Cascade)
+  share           GameProgressShare?
 
   @@id([memberId, lookup])
   @@index([memberId, earnedOn(sort: Desc), createdAt(sort: Desc), lookup(sort: Desc)])
@@ -3211,6 +3213,21 @@ model GameProgressPic {
 
   @@index([memberId, retiredAt, takenAt])
   @@map("game_progress_pic")
+}
+
+model GameProgressShare {
+  memberId    String       @map("member_id")
+  awardLookup String       @map("award_lookup")
+  storageKey  String       @unique @map("storage_key")
+  status      String
+  createdAt   DateTime     @default(now()) @map("created_at")
+  failureCode String?      @map("failure_code")
+  member      HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  award       GameProgressAward @relation(fields: [memberId, awardLookup], references: [memberId, lookup], onDelete: Cascade)
+
+  @@id([memberId, awardLookup])
+  @@index([memberId, createdAt])
+  @@map("game_progress_share")
 }
 
 model GameProgressTaskMeasure {
