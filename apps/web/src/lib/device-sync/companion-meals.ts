@@ -17,13 +17,18 @@ import { submitCompanionMemberAction } from "./companion-member-actions";
 import { getPrisma } from "../prisma";
 import { readRawBodyBuffer } from "../http";
 import { recoverCompanionMealUploadIds } from "./companion-meal-upload-links";
+import { describeCompanionProjectionFailure } from "./companion-projection-failure";
 
 export function mealApiError(code: string, httpStatus: number, message: string) {
   return hostedOnboardingError({ code, httpStatus, message, retryable: httpStatus === 503 });
 }
 
-function projectionUnavailable() {
-  return mealApiError("MEALS_PROJECTION_UNAVAILABLE", 503, "Saved meals are temporarily unavailable.");
+// The stage reaches route logs as the error cause, never the response body.
+function projectionUnavailable(stage: string) {
+  return hostedOnboardingError({
+    cause: stage, code: "MEALS_PROJECTION_UNAVAILABLE", httpStatus: 503, retryable: true,
+    message: "Saved meals are temporarily unavailable.",
+  });
 }
 
 export async function readCompanionMeals(request: Request, recoverUploadIds = true) {
@@ -51,7 +56,9 @@ async function loadSavedMeals(memberId: string, signal: AbortSignal): Promise<{
     const control = readHostedExecutionControlClientIfConfigured();
     // A generation-17 Meals projection is also evidence that this member's
     // runtime has the meal.delete consumer. Never enqueue against legacy data.
-    if (!replicaRef || (replicaRef.generation ?? 0) < 17 || !control) throw projectionUnavailable();
+    if (!replicaRef) throw projectionUnavailable("replica_ref_missing");
+    if ((replicaRef.generation ?? 0) < 17) throw projectionUnavailable("replica_legacy");
+    if (!control) throw projectionUnavailable("control_unconfigured");
     const keys = await generateHostedUserRecipientKeyPair();
     const session = parseBrowserVaultSessionResponse({
       ...await control.createBrowserVaultSession({
@@ -62,14 +69,16 @@ async function loadSavedMeals(memberId: string, signal: AbortSignal): Promise<{
       deviceSyncImportPending: false,
       workspaceVersion: workspace?.version ?? null,
     });
-    if (session.state !== "ready") throw projectionUnavailable();
+    if (session.state !== "ready") throw projectionUnavailable("session_not_ready");
     const loaded = await decodeReadyBrowserVaultSession({ session, privateKeyJwk: keys.privateKeyJwk, expectedMemberId: memberId, signal });
     const replica = loaded.client.replica;
-    if (!replica.meals || (replica.generation ?? 0) < 17) throw projectionUnavailable();
+    if (!replica.meals || (replica.generation ?? 0) < 17) throw projectionUnavailable("replica_meals_missing");
     return { savedAt: replica.generatedAt, projection: structuredClone(replica.meals), entities: replica.entities };
-  } catch {
+  } catch (error) {
+    // Keep this read's own stage; every other failure stays a retryable 503.
+    if (isHostedOnboardingError(error) && error.code === "MEALS_PROJECTION_UNAVAILABLE") throw error;
     // Do not log decrypt errors, meal contents, signed URLs, or private paths.
-    throw projectionUnavailable();
+    throw projectionUnavailable(describeCompanionProjectionFailure(error));
   }
 }
 

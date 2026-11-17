@@ -12,11 +12,12 @@ import { assertHostedNativeMemberAuthCurrentTx, type HostedNativeMemberAuth } fr
 import { assertBrowserVaultMemberAuthority } from "../browser-vault/authority";
 import { decodeReadyBrowserVaultSession, parseBrowserVaultSessionResponse } from "../browser-vault/loader";
 import { readHostedExecutionControlClientIfConfigured } from "../hosted-execution/control";
-import { hostedOnboardingError } from "../hosted-onboarding/errors";
+import { hostedOnboardingError, isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { requireActiveHostedMemberAuthFromBearerToken } from "../hosted-onboarding/request-auth";
 import { readHostedWorkspace } from "../hosted-workspace/store";
 import { getPrisma } from "../prisma";
 import { lastSettledStepDay } from "../settled-step-day";
+import { describeCompanionProjectionFailure } from "./companion-projection-failure";
 
 export const COMPANION_HEALTH_METRICS = {
   restingHeartRate: { key: "resting-heart-rate", unit: "bpm", precision: 0 },
@@ -27,9 +28,10 @@ export const COMPANION_HEALTH_METRICS = {
 const requestedShards = ["core", "metricsIndex"] as const;
 const emptyNumbers = { numbers: null, demographics: null, heightCm: null, freshness: "stale" } as const;
 
-function numbersUnavailable() {
+// The stage reaches route logs as the error cause, never the response body.
+function numbersUnavailable(stage: string) {
   return hostedOnboardingError({
-    code: "NUMBERS_PROJECTION_UNAVAILABLE", httpStatus: 503, retryable: true,
+    cause: stage, code: "NUMBERS_PROJECTION_UNAVAILABLE", httpStatus: 503, retryable: true,
     message: "Saved numbers are temporarily unavailable.",
   });
 }
@@ -77,7 +79,7 @@ export async function readCompanionHealthSeries(auth: HostedNativeMemberAuth, si
   } : null;
   // Core already carries the canonical vault zone, even when there are no meals.
   const timeZone = client.replica.meals?.timeZone;
-  if (!timeZone) throw numbersUnavailable();
+  if (!timeZone) throw numbersUnavailable("replica_timezone_missing");
   const now = new Date();
   const through = toLocalDayKey(now, timeZone);
   // Charts reach back a year, all the saved replica keeps. The change still
@@ -115,7 +117,7 @@ export async function readSavedCompanionBodyHeight(memberId: string, signal: Abo
   await assertBrowserVaultMemberAuthority({ memberId, prisma });
   if (!snapshot) return null;
   const timeZone = snapshot.client.replica.meals?.timeZone;
-  if (!timeZone) throw numbersUnavailable();
+  if (!timeZone) throw numbersUnavailable("replica_timezone_missing");
   return readCompanionBodyHeight(snapshot.client, toLocalDayKey(new Date(), timeZone));
 }
 
@@ -125,7 +127,7 @@ async function loadSavedNumbers(memberId: string, signal: AbortSignal) {
     const replicaRef = parseHostedBrowserVaultReplicaRef(workspace?.browserVaultReplicaRef ?? null, "Companion numbers replica");
     if (!replicaRef) return null;
     const control = readHostedExecutionControlClientIfConfigured();
-    if (!control) throw numbersUnavailable();
+    if (!control) throw numbersUnavailable("control_unconfigured");
     const requestedMetricBuckets = [...new Set(await Promise.all(
       Object.values(COMPANION_HEALTH_METRICS).map(metric => getBrowserVaultMetricBucketId(metric.key)),
     ))].sort();
@@ -144,12 +146,14 @@ async function loadSavedNumbers(memberId: string, signal: AbortSignal) {
       session, privateKeyJwk: keys.privateKeyJwk, expectedMemberId: memberId,
       requestedShards, requestedMetricBuckets, signal,
     });
-    if (!("metrics" in loaded.client)) throw numbersUnavailable();
+    if (!("metrics" in loaded.client)) throw numbersUnavailable("replica_metrics_missing");
     return { client: loaded.client, freshness: session.freshness };
   } catch (error) {
     if (isCloudflareHostedControlBrowserVaultReplicaNotFoundError(error)) return null;
+    // Keep this read's own stage; every other failure stays a retryable 503.
+    if (isHostedOnboardingError(error) && error.code === "NUMBERS_PROJECTION_UNAVAILABLE") throw error;
     // Decrypt/transport failures may contain private paths or signed URLs.
-    throw numbersUnavailable();
+    throw numbersUnavailable(describeCompanionProjectionFailure(error));
   }
 }
 
