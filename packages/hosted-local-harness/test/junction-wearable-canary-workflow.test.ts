@@ -41,9 +41,11 @@ describe("live Junction wearable canary workflow", () => {
   it("keeps all provider credentials and private source out of the public controller", () => {
     const secretNames = [...workflow.matchAll(/\$\{\{ secrets\.([A-Z0-9_]+) \}\}/gu)]
       .map((match) => match[1]);
-    expect(secretNames).toEqual(["TEMPORAL_COMPATIBILITY_GITHUB_APP_PRIVATE_KEY"]);
+    expect(secretNames).toEqual([]);
     expect(workflow).toContain("WEARABLE_CANARY_GITHUB_APP_ID: ${{ vars.TEMPORAL_COMPATIBILITY_GITHUB_APP_ID }}");
-    expect(workflow).toContain("WEARABLE_CANARY_GITHUB_APP_PRIVATE_KEY: ${{ secrets.TEMPORAL_COMPATIBILITY_GITHUB_APP_PRIVATE_KEY }}");
+    expect(workflow).toContain("WEARABLE_CANARY_GITHUB_APP_KMS_KEY_VERSION: projects/murph-495013/locations/global/keyRings/github-apps/cryptoKeys/temporal-compatibility-app/cryptoKeyVersions/1");
+    expect(workflow).toContain("      contents: read\n      id-token: write");
+    expect(workflow).not.toContain("PRIVATE_KEY");
     expect(workflow).not.toContain("WEARABLE_CANARY_PRIVATE_GITHUB_TOKEN");
     expect(workflow).not.toMatch(/JUNCTION_API_KEY|GARMIN_CANARY_PASSWORD|KERNEL_API_KEY|actions\/(?:upload|download)-artifact/u);
     expect(workflow).not.toContain("pnpm install");
