@@ -155,6 +155,8 @@ describe("checked ladders and permanent crossings", () => {
     const corrected = { ...series, amounts: [{ measureId: series.id, date: "2026-11-02", amount: 20 }] };
     const next = measureLadder(corrected, {}, awards, "us")!;
     expect(next.passed).toHaveLength(awards.filter(award => award.kind === "landmark").length);
+    expect(new Set(next.passed.map(rung => rung.shareAwardId))).toEqual(new Set(awards.filter(award => award.kind === "landmark").map(award => award.id)));
+    expect(next.next!.shareAwardId).toBeNull();
     expect(next.next!.at).toBeGreaterThan(Math.max(...next.passed.map(rung => rung.at)));
     expect(momentsView(awards, [measureView(corrected, {}, awards, "2026-11-05", "us")], "us")).toMatchObject([{ kind: "bigDay", medalIds: awards.map(award => award.id) }]);
   });

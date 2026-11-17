@@ -45,7 +45,8 @@ export function routeView(measureId: string, state: MeasureState, points: Points
   const legs = state.legs ?? [], leg = legs.at(-1);
   if (!leg) return null;
   const completions = awards.filter(award => award.kind === 'route' && award.measureId === measureId);
-  const earnedOn = completions.find(award => award.key === routeAwardKey(measureId, leg, legs.length - 1))?.on ?? null;
+  const earned = completions.find(award => award.key === routeAwardKey(measureId, leg, legs.length - 1));
+  const earnedOn = earned?.on ?? null;
   const meters: [Day, number][] = points.map(([day, amount]) => [day, routeMeters(measureId, amount)]);
   const total = meters.at(-1)?.[1] ?? 0;
   const walked = earnedOn ? leg.distanceM : Math.min(leg.distanceM, Math.max(0, total - leg.startTotal));
@@ -54,7 +55,7 @@ export function routeView(measureId: string, state: MeasureState, points: Points
     walkedText: formatAmount(walked, 'meters', 'compact', units).text,
     progress: walked / leg.distanceM, straightLine: leg.straightLine,
     here: routeHere(leg, walked / leg.distanceM, 'card'), drawerHere: routeHere(leg, walked / leg.distanceM, 'drawer'),
-    finishedOn: earnedOn, map, goalPicked: state.goal !== undefined,
-    completed: completions.map(award => ({ name: `${award.data.from} to ${award.data.to}`, finishedOn: award.on })),
+    finishedOn: earnedOn, shareAwardId: earned?.id ?? null, map, goalPicked: state.goal !== undefined,
+    completed: completions.map(award => ({ name: `${award.data.from} to ${award.data.to}`, finishedOn: award.on, shareAwardId: award.id })),
     towns: routeTowns(leg, meters, 'card', units), drawerTowns: routeTowns(leg, meters, 'drawer', units) };
 }

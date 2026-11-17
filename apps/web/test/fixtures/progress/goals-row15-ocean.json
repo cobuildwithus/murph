@@ -13,7 +13,8 @@
       "on": null,
       "toGo": null,
       "short": "London to Edinburgh",
-      "tagline": "A journey north between capitals"
+      "tagline": "A journey north between capitals",
+      "shareAwardId": null
     },
     {
       "id": "new-york-boston",
@@ -26,7 +27,8 @@
       "on": null,
       "toGo": null,
       "short": "New York to Boston",
-      "tagline": "A journey between harbor cities"
+      "tagline": "A journey between harbor cities",
+      "shareAwardId": null
     }
   ],
   "route": {

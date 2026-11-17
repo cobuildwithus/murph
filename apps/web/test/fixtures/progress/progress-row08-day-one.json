@@ -44,7 +44,8 @@
           "on": null,
           "toGo": "5 to go",
           "short": "Hollywood Sign",
-          "tagline": "Letters high above the city"
+          "tagline": "Letters high above the city",
+          "shareAwardId": null
         },
         "goalPicked": false
       },

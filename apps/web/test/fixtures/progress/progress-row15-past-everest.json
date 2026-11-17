@@ -284,7 +284,8 @@
             "on": "2026-10-16",
             "toGo": null,
             "short": "Mount Everest",
-            "tagline": "The highest summit on Earth"
+            "tagline": "The highest summit on Earth",
+            "shareAwardId": "award:pushups.reps:mount-everest"
           },
           {
             "id": "k2",
@@ -297,7 +298,8 @@
             "on": "2026-10-06",
             "toGo": null,
             "short": "K two",
-            "tagline": "A steep summit in the Karakoram"
+            "tagline": "A steep summit in the Karakoram",
+            "shareAwardId": "award:pushups.reps:k2"
           },
           {
             "id": "denali",
@@ -310,7 +312,8 @@
             "on": "2026-05-30",
             "toGo": null,
             "short": "Denali",
-            "tagline": "A great summit above the wilderness"
+            "tagline": "A great summit above the wilderness",
+            "shareAwardId": "award:pushups.reps:denali"
           },
           {
             "id": "skydive",
@@ -323,7 +326,8 @@
             "on": "2026-01-31",
             "toGo": null,
             "short": "A skydive",
-            "tagline": "A long way down to solid ground"
+            "tagline": "A long way down to solid ground",
+            "shareAwardId": "award:pushups.reps:skydive"
           },
           {
             "id": "cumulus-clouds",
@@ -336,7 +340,8 @@
             "on": "2025-08-24",
             "toGo": null,
             "short": "Puffy cumulus clouds",
-            "tagline": "The soft clouds overhead"
+            "tagline": "The soft clouds overhead",
+            "shareAwardId": "award:pushups.reps:cumulus-clouds"
           }
         ],
         "next": {
@@ -350,7 +355,8 @@
           "on": null,
           "toGo": "3,760 to go",
           "short": "Where jets fly",
-          "tagline": "High above the clouds"
+          "tagline": "High above the clouds",
+          "shareAwardId": null
         },
         "goalPicked": false
       },

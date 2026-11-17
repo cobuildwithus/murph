@@ -256,7 +256,8 @@
           "on": null,
           "toGo": "1,221 to go",
           "short": "Mount Kilimanjaro",
-          "tagline": "A snowy crown above the plains"
+          "tagline": "A snowy crown above the plains",
+          "shareAwardId": null
         },
         "passed": [
           {
@@ -270,7 +271,8 @@
             "on": "2026-10-01",
             "toGo": null,
             "short": "Mont Blanc",
-            "tagline": "A white summit above the Alps"
+            "tagline": "A white summit above the Alps",
+            "shareAwardId": "year-mont-blanc"
           },
           {
             "id": "matterhorn",
@@ -283,7 +285,8 @@
             "on": "2026-09-14",
             "toGo": null,
             "short": "Matterhorn",
-            "tagline": "A sharp pyramid of rock and snow"
+            "tagline": "A sharp pyramid of rock and snow",
+            "shareAwardId": "award:pushups.reps:matterhorn"
           },
           {
             "id": "mount-whitney",
@@ -296,7 +299,8 @@
             "on": "2026-09-09",
             "toGo": null,
             "short": "Mount Whitney",
-            "tagline": "A granite summit above the valley"
+            "tagline": "A granite summit above the valley",
+            "shareAwardId": "award:pushups.reps:mount-whitney"
           },
           {
             "id": "mount-rainier",
@@ -309,7 +313,8 @@
             "on": "2026-09-08",
             "toGo": null,
             "short": "Mount Rainier",
-            "tagline": "A great volcano beneath the snow"
+            "tagline": "A great volcano beneath the snow",
+            "shareAwardId": "award:pushups.reps:mount-rainier"
           },
           {
             "id": "mount-fuji",
@@ -322,7 +327,8 @@
             "on": "2026-07-28",
             "toGo": null,
             "short": "Mount Fuji",
-            "tagline": "A familiar cone against the sky"
+            "tagline": "A familiar cone against the sky",
+            "shareAwardId": "year-mount-fuji"
           },
           {
             "id": "mount-olympus",
@@ -335,7 +341,8 @@
             "on": "2026-05-14",
             "toGo": null,
             "short": "Mount Olympus",
-            "tagline": "A mountain with an ancient story"
+            "tagline": "A mountain with an ancient story",
+            "shareAwardId": "award:pushups.reps:mount-olympus"
           },
           {
             "id": "mount-washington",
@@ -348,7 +355,8 @@
             "on": "2026-03-02",
             "toGo": null,
             "short": "Mount Washington",
-            "tagline": "A high summit in the clouds"
+            "tagline": "A high summit in the clouds",
+            "shareAwardId": "award:pushups.reps:mount-washington"
           },
           {
             "id": "half-dome",
@@ -361,7 +369,8 @@
             "on": "2026-01-31",
             "toGo": null,
             "short": "Half Dome",
-            "tagline": "A rounded summit with a sheer face"
+            "tagline": "A rounded summit with a sheer face",
+            "shareAwardId": "award:pushups.reps:half-dome"
           },
           {
             "id": "ben-nevis",
@@ -374,7 +383,8 @@
             "on": "2026-01-23",
             "toGo": null,
             "short": "Ben Nevis",
-            "tagline": "A summit above the Highlands"
+            "tagline": "A summit above the Highlands",
+            "shareAwardId": "award:pushups.reps:ben-nevis"
           },
           {
             "id": "table-mountain",
@@ -387,7 +397,8 @@
             "on": "2026-01-06",
             "toGo": null,
             "short": "Table Mountain",
-            "tagline": "A flat summit above the city"
+            "tagline": "A flat summit above the city",
+            "shareAwardId": "award:pushups.reps:table-mountain"
           }
         ]
       },
@@ -664,7 +675,8 @@
             "on": "2026-11-12",
             "toGo": null,
             "short": "Golden Gate towers",
-            "tagline": "Orange towers above the bay"
+            "tagline": "Orange towers above the bay",
+            "shareAwardId": "award:pullups.reps:golden-gate-bridge-towers"
           }
         ],
         "next": {
@@ -678,7 +690,8 @@
           "on": null,
           "toGo": "162 to go",
           "short": "Eiffel Tower",
-          "tagline": "An iron tower above the rooftops"
+          "tagline": "An iron tower above the rooftops",
+          "shareAwardId": null
         },
         "goalPicked": false
       },
@@ -796,7 +809,8 @@
         "completed": [
           {
             "name": "San Diego to San Francisco",
-            "finishedOn": "2026-02-09"
+            "finishedOn": "2026-02-09",
+            "shareAwardId": "award:walk.meters:route:San Diego to San Francisco"
           }
         ],
         "drawerTowns": [
@@ -822,8 +836,15 @@
             "passedOn": null
           }
         ],
-        "here": {"x": 0.480617, "y": 0.549486},
-        "drawerHere": {"x": 0.478194, "y": 0.53523}
+        "here": {
+          "x": 0.480617,
+          "y": 0.549486
+        },
+        "drawerHere": {
+          "x": 0.478194,
+          "y": 0.53523
+        },
+        "shareAwardId": null
       },
       "pics": []
     }

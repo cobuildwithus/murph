@@ -12,7 +12,7 @@ const shortText = z.string().min(1).max(40).regex(/^[^\d\r\n\u2014]+$/u);
 
 export const rungSchema = z.object({
   id: z.string(), name: z.string(), short: shortText, tagline: shortText,
-  drawing: z.string().nullable(), at: z.number(), atText: z.string(),
+  shareAwardId: z.string().nullable(), drawing: z.string().nullable(), at: z.number(), atText: z.string(),
   blurb: z.string(), where: z.string().nullable(), on: day.nullable(), toGo: z.string().nullable(),
 });
 export type Rung = z.infer<typeof rungSchema>;
@@ -21,8 +21,8 @@ export type Ladder = z.infer<typeof ladder>;
 const towns = z.array(z.object({ name: z.string(), atText: z.string(), x: z.number(), y: z.number(), passedOn: day.nullable() }));
 const route = z.object({
   name: z.string(), distanceText: z.string(), walkedText: z.string(), progress: z.number(), straightLine: z.boolean(),
-  goalPicked: z.boolean(), completed: z.array(z.object({ name: z.string(), finishedOn: day })),
-  finishedOn: day.nullable(),
+  goalPicked: z.boolean(), completed: z.array(z.object({ name: z.string(), finishedOn: day, shareAwardId: z.string() })),
+  finishedOn: day.nullable(), shareAwardId: z.string().nullable(),
   /** Authenticated Progress map path, never a provider URL. */
   map: z.string(),
   /** Card coordinates; use drawerTowns when requesting the same map with size=drawer. */
@@ -171,3 +171,19 @@ export type SetSharingResponse = { ok: true; sharedWith: (z.infer<typeof person>
 export type PicUploadResponse = { ok: true; pic: Pic };
 export type ProgressWriteResponse = { ok: true }; // DELETE pic, POST seen
 // GET pics/:id returns image/jpeg; GET map returns image/png. No JSON envelope.
+
+/** Passed-item drawer. Terminal image failure intentionally presents the medal. */
+export const shareViewSchema = z.strictObject({
+  awardId: z.string(),
+  card: z.strictObject({ name: z.string(), contextLine: z.string(), valueText: z.string(), face: medalFace, messageText: z.string() }),
+  presentation: z.discriminatedUnion('state', [
+    z.strictObject({ state: z.literal('needs_photo') }),
+    z.strictObject({ state: z.literal('medal') }),
+    z.strictObject({ state: z.literal('available') }),
+    z.strictObject({ state: z.literal('generating'), startedAt: z.iso.datetime(), expiresAt: z.iso.datetime() }),
+    z.strictObject({ state: z.literal('photo'), imagePath: z.string() }),
+  ]),
+});
+export type ShareView = z.infer<typeof shareViewSchema>;
+const shareConsent = z.strictObject({ decision: z.enum(['allow', 'deny']), disclosureVersion: z.literal(1) });
+export const parseShareConsent = (value: unknown) => parse(shareConsent, value);

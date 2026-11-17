@@ -340,7 +340,8 @@
             "on": "2026-11-12",
             "toGo": null,
             "short": "A godwit's nonstop flight",
-            "tagline": "A long flight without landing"
+            "tagline": "A long flight without landing",
+            "shareAwardId": "award:sleep:godwit"
           },
           {
             "id": "apollo11-mission",
@@ -353,7 +354,8 @@
             "on": "2026-11-09",
             "toGo": null,
             "short": "The first Moon landing mission",
-            "tagline": "To the Moon and safely home"
+            "tagline": "To the Moon and safely home",
+            "shareAwardId": "award:sleep:apollo11-mission"
           },
           {
             "id": "pony-express",
@@ -366,7 +368,8 @@
             "on": "2026-11-08",
             "toGo": null,
             "short": "Pony Express",
-            "tagline": "Mail carried from rider to rider"
+            "tagline": "Mail carried from rider to rider",
+            "shareAwardId": "award:sleep:pony-express"
           },
           {
             "id": "trans-siberian",
@@ -379,7 +382,8 @@
             "on": "2026-11-03",
             "toGo": null,
             "short": "Trans-Siberian",
-            "tagline": "A train journey toward the Pacific"
+            "tagline": "A train journey toward the Pacific",
+            "shareAwardId": "award:sleep:trans-siberian"
           },
           {
             "id": "serum-run",
@@ -392,7 +396,8 @@
             "on": "2026-10-31",
             "toGo": null,
             "short": "The serum run to Nome",
-            "tagline": "A relay carrying medicine through snow"
+            "tagline": "A relay carrying medicine through snow",
+            "shareAwardId": "award:sleep:serum-run"
           }
         ],
         "next": {
@@ -406,7 +411,8 @@
           "on": null,
           "toGo": "22 h to go",
           "short": "Staying-awake record",
-          "tagline": "A remarkable stretch without sleep"
+          "tagline": "A remarkable stretch without sleep",
+          "shareAwardId": null
         },
         "goalPicked": false
       },

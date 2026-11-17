@@ -54,7 +54,7 @@ export function rungFor(definition: RungDefinition, total: number, on: string | 
   return { id: entry.id, name: entry.name, short: entry.short, tagline: entry.tagline,
     drawing: "found" in definition.target ? null : entry.id, at: definition.at, atText,
     blurb: units === "metric" && "blurbMetric" in entry ? entry.blurbMetric ?? entry.blurb : entry.blurb,
-    where: entry.where, on, toGo: on === null ? toGo : null };
+    where: entry.where, on, shareAwardId: null, toGo: on === null ? toGo : null };
 }
 
 export function measureRungs(measure: MeasureSeries, state: MeasureState): RungDefinition[] {
@@ -72,7 +72,7 @@ export function measureLadder(measure: MeasureSeries, state: MeasureState, award
   if (measure.pending || !["reps", "seconds"].includes(measure.unit)) return null;
   const total = measure.amounts.reduce((sum, day) => sum + day.amount, 0);
   const passed = awards.filter(award => award.measureId === measure.id && ["landmark", "time"].includes(award.kind))
-    .map(award => rungFor(award.data.rung as RungDefinition, total, award.on, units)).sort((a, b) => b.at - a.at);
+    .map(award => ({ ...rungFor(award.data.rung as RungDefinition, total, award.on, units), shareAwardId: award.id })).sort((a, b) => b.at - a.at);
   const highest = Math.max(total, ...passed.map(rung => rung.at));
   const rungs = measureRungs(measure, state).map(rung => rungFor(rung, total, null, units));
   const goalId = state.goal && ("rungId" in state.goal ? state.goal.rungId : "found" in state.goal ? state.goal.found.id : null);

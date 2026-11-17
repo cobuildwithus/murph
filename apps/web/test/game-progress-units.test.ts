@@ -132,9 +132,10 @@ describe("immutable awards rendered for each reader", () => {
     const corrected = { ...measure, amounts: [] };
     for (const units of ["us", "uk", "metric"] as const) {
       const view = measureLadder(corrected, { found: b, goal: { found: b } }, [award], units)!;
-      expect(view.passed[0]).toMatchObject({ id: a.id, name: a.name, at: threshold, on: "2026-11-15", drawing: null,
+      expect(view.passed[0]).toMatchObject({ id: a.id, name: a.name, at: threshold, on: "2026-11-15", drawing: null, shareAwardId: award.id,
         atText: units === "us" ? "1,000 ft" : "305 m", blurb: a.blurb, short: a.short, tagline: a.tagline, toGo: null });
       expect(view.next!.id).toBe(b.id);
+      expect(view.next!.shareAwardId).toBeNull();
       expect(medalView(award, true, units)).toMatchObject({ face: { generic: true }, title: a.name, earnedOn: "2026-11-15" });
       expect(momentsView([award], [], units)[0]).toMatchObject({ title: a.name, line: a.blurb });
     }

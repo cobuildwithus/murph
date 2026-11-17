@@ -96,7 +96,8 @@
             "on": "2026-11-14",
             "toGo": null,
             "short": "A whale's longest dive",
-            "tagline": "A long journey beneath the waves"
+            "tagline": "A long journey beneath the waves",
+            "shareAwardId": "abs-whale"
           },
           {
             "id": "concorde",
@@ -109,7 +110,8 @@
             "on": "2026-11-10",
             "toGo": null,
             "short": "Concorde",
-            "tagline": "Across the Atlantic at record speed"
+            "tagline": "Across the Atlantic at record speed",
+            "shareAwardId": "award:abs.seconds:concorde"
           },
           {
             "id": "moonwalk",
@@ -122,7 +124,8 @@
             "on": "2026-11-08",
             "toGo": null,
             "short": "The first moonwalk",
-            "tagline": "The first walk on another world"
+            "tagline": "The first walk on another world",
+            "shareAwardId": "award:abs.seconds:moonwalk"
           },
           {
             "id": "marathon",
@@ -135,7 +138,8 @@
             "on": "2026-11-03",
             "toGo": null,
             "short": "The marathon world record",
-            "tagline": "A new mark for the marathon"
+            "tagline": "A new mark for the marathon",
+            "shareAwardId": "award:abs.seconds:marathon"
           },
           {
             "id": "gagarin",
@@ -148,7 +152,8 @@
             "on": "2026-11-02",
             "toGo": null,
             "short": "Yuri Gagarin's flight",
-            "tagline": "The first person in space"
+            "tagline": "The first person in space",
+            "shareAwardId": "award:abs.seconds:gagarin"
           },
           {
             "id": "iss-lap",
@@ -161,7 +166,8 @@
             "on": "2026-11-01",
             "toGo": null,
             "short": "Space station lap",
-            "tagline": "Once around Earth from orbit"
+            "tagline": "Once around Earth from orbit",
+            "shareAwardId": "award:abs.seconds:iss-lap"
           }
         ],
         "next": {
@@ -175,7 +181,8 @@
           "on": null,
           "toGo": "40 min to go",
           "short": "Women's plank record",
-          "tagline": "A remarkable hold from start to finish"
+          "tagline": "A remarkable hold from start to finish",
+          "shareAwardId": null
         },
         "goalPicked": false
       },
