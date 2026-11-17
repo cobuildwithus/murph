@@ -20,7 +20,7 @@ async function read() {
 }
 beforeEach(() => {
   vi.resetAllMocks(); vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date("2026-11-16T12:00:00Z"));
-  mocks.raw.mockResolvedValue({ numbers: { sleep: { daily: [day] } } });
+  mocks.raw.mockResolvedValue({ heightCm: 170, numbers: { sleep: { daily: [day] } } });
   mocks.shared.mockResolvedValue({ people: [{ memberId: "leo", projections: [
     { state: "not_granted", records: [] },
     { state: "available", records: [{ data: { date: day.date, metricKey: "total-sleep-minutes", value: 7.5, unit: "hours" },
@@ -35,6 +35,7 @@ it("converts raw own minutes and shared-board normalized minutes to seconds once
   expect(result[0].daily).toEqual([{ measureId: "sleep", date: day.date, amount: 25230 }]);
   expect(result[1].daily).toEqual([{ date: day.date, amount: 27000 }]);
   expect(result[2].daily).toBeNull(); // A group-only friend has no pair grant.
+  expect(JSON.stringify(result)).not.toContain("heightCm");
   expect(mocks.shared).toHaveBeenCalledTimes(1);
 });
 

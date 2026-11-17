@@ -478,12 +478,14 @@ it("applies a display name through core, stays silent, and reports changed versu
 });
 
 
-it("writes a typed reading at requestedAt and keeps an exact replay silent and unchanged", async () => {
+it.each([
+  ["estimated-vo2-max", 42.5, "mL/kg/min"],
+  ["body-height", 170.2, "cm"],
+] as const)("writes %s at requestedAt and keeps an exact replay silent and unchanged", async (metric, value, unit) => {
   const { mkdtemp, rm } = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
   const { deterministicContractId, ID_PREFIXES, initializeVault, readJsonlRecords } = await import("@murphai/core");
-  const { resolveMetricDefinition } = await import("@murphai/query");
   const root = await mkdtemp(join(tmpdir(), "measurement-action-"));
   const actionId = "d8653d1f-fb8d-400b-8efe-d3fbdc9f9830";
   const requestedAt = "2026-11-06T12:34:56.000Z";
@@ -492,7 +494,7 @@ it("writes a typed reading at requestedAt and keeps an exact replay silent and u
     kind: "member.action.requested" as const, userId: "member_synthetic",
     occurredAt: "2026-11-07T01:00:00.000Z",
     request: { actionId, requestedAt, schemaVersion: 1 as const,
-      action: { kind: "measurement.add" as const, version: 1 as const, metric: "estimated-vo2-max" as const, value: 42.5 },
+      action: { kind: "measurement.add" as const, version: 1 as const, metric, value },
     },
   };
   try {
@@ -507,7 +509,7 @@ it("writes a typed reading at requestedAt and keeps an exact replay silent and u
     expect(records).toEqual([expect.objectContaining({
       id: deterministicContractId(ID_PREFIXES.event, `member-action:${actionId}`),
       occurredAt: requestedAt, source: "manual", lifecycle: expect.objectContaining({ revision: 1 }),
-      measurements: [{ metric: "estimated-vo2-max", value: 42.5, unit: resolveMetricDefinition("estimated-vo2-max")!.canonicalUnit }],
+      measurements: [{ metric, value, unit }],
     })]);
   } finally { await rm(root, { force: true, recursive: true }); }
 });

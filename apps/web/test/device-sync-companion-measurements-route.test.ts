@@ -28,9 +28,11 @@ beforeEach(() => {
 });
 afterEach(() => vi.useRealTimers());
 
-it("accepts a stable typed reading and retries the identical envelope", async () => {
+it.each([
+  ["estimated-vo2-max", 42.5], ["body-height", 170.2],
+])("accepts a stable %s reading and retries the identical envelope", async (metric, value) => {
   for (let i = 0; i < 2; i++) {
-    const response = await POST(request());
+    const response = await POST(request({ ...body, metric, value }));
     expect(response.status).toBe(202);
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(await response.json()).toEqual({ accepted: true, actionId });
@@ -38,12 +40,14 @@ it("accepts a stable typed reading and retries the identical envelope", async ()
   }
   expect(mocks.submit.mock.calls[0]![0].request).toEqual(mocks.submit.mock.calls[1]![0].request);
   expect(mocks.submit.mock.calls[0]![0].request).toEqual({ actionId, requestedAt, schemaVersion: 1,
-    action: { kind: "measurement.add", version: 1, metric: "estimated-vo2-max", value: 42.5 } });
+    action: { kind: "measurement.add", version: 1, metric, value } });
   expect(mocks.current).toHaveBeenLastCalledWith({ member: { id: "member_native" } }, { transaction: true });
 });
 
-it.each([10, 90])("accepts the inclusive bound %s", async value => {
-  expect((await POST(request({ ...body, value }))).status).toBe(202);
+it.each([
+  ["estimated-vo2-max", 10], ["estimated-vo2-max", 90], ["body-height", 50], ["body-height", 272],
+])("accepts the inclusive %s bound %s", async (metric, value) => {
+  expect((await POST(request({ ...body, metric, value }))).status).toBe(202);
 });
 
 it.each([
@@ -51,8 +55,16 @@ it.each([
   { ...body, value: "42" }, { ...body, metric: "weight" }, { ...body, actionId: "bad" },
   { ...body, requestedAt: "2026-11-06" }, { ...body, requestedAt: "2026-11-07T12:00:00.001Z" },
   { ...body, memberId: "other" }, { ...body, source: "manual" }, { ...body, unit: "ml/kg/min" },
+  { ...body, metric: "body-height", value: 49.9 }, { ...body, metric: "body-height", value: 272.1 },
+  { ...body, metric: "body-height", value: "170" }, { ...body, metric: "body-height", value: null },
+  { ...body, metric: "body-height", value: 170, unit: "cm" },
 ])("rejects invalid input before append %j", async value => {
-  expect((await POST(request(value))).status).toBe(400);
+  const response = await POST(request(value));
+  expect(response.status).toBe(400);
+  expect(await response.json()).toMatchObject({ error: {
+    code: "MEASUREMENT_INVALID_REQUEST", retryable: false,
+    message: "Supply a stable action identity, timestamp and supported measurement within its range.",
+  } });
   expect(mocks.submit).not.toHaveBeenCalled();
 });
 
