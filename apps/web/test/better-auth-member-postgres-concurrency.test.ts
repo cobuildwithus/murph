@@ -1400,6 +1400,25 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     } finally { await prisma.hostedMember.deleteMany({ where: { id: { in: [memberId, otherId] } } }); }
   });
 
+  it("signs in to the member that texted Murph from this iMessage email address", async () => {
+    const prisma = getPrisma(); const memberId = `auth-handle-${randomUUID()}`;
+    const address = `handle-${randomUUID()}@example.test`; const selected = contact("email", address);
+    await prisma.hostedMember.create({ data: { id: memberId } });
+    try {
+      await prisma.$transaction((tx) => upsertHostedMemberIdentity({
+        linqEmailHandle: address, maskedPhoneNumberHint: null, memberId, phoneLookupKey: null, phoneNumber: null,
+        phoneNumberVerifiedAt: null, signupPhoneNumber: null,
+        preparedControlRoot: { domain: "control", userId: memberId, rootKeyId: "synthetic-root" }, prisma: tx,
+      }));
+      const membersBefore = await prisma.hostedMember.count();
+      const prepared = await prepareHostedAuthOtpMember({ contact: selected, prisma });
+      expect(prepared.memberId).toBe(memberId);
+      expect((await commitHostedAuthOtp({ ...configuration(), ...prepared, otp: await send("email", address) })).memberId).toBe(memberId);
+      expect(await prisma.hostedMember.count()).toBe(membersBefore);
+      expect((await readHostedMemberEmailAuthorization({ memberId, prisma }))?.verifiedEmail?.address).toBe(address);
+    } finally { await prisma.hostedMember.deleteMany({ where: { id: memberId } }); }
+  });
+
   it("rejects stale signup selection without losing the code or selecting a different member", async () => {
     const prisma = getPrisma(); const value = "+12025550142"; const selected = contact("phone", value);
     const stale = await prepareHostedAuthOtpMember({ prisma, contact: selected });
