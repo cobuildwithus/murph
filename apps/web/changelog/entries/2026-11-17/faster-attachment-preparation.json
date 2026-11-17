@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-17",
+  "order": 100,
+  "item": {
+    "id": "faster-attachment-preparation",
+    "kind": "improvement",
+    "priority": 1,
+    "title": "Faster preparation for attachment replies",
+    "summary": "Murph does less setup before it starts answering a message with a photo or document.",
+    "details": "Murph still checks that the attachment is ready before it starts your reply.",
+    "relevanceTags": ["messaging", "attachments"],
+    "sourcePullRequests": [5140]
+  }
+}
