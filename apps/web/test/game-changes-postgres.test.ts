@@ -79,19 +79,13 @@ async function progressAt(memberId: string, now: Date): Promise<Progress> {
 async function proveContinuingProgress(memberId: string, endedGameId: string, continuing: { dayOne: string; gameId: string }, before: Progress) {
   const db = getPrisma();
   const cancelled = await progressAt(memberId, new Date());
-  expect(cancelled.streak.current).toBe(2);
-  expect(cancelled.streak.obligations.map(item => item.id)).toEqual([continuing.gameId]);
   expect(cancelled.measures.reduce((sum, measure) => sum + measure.total.value, 0)).toBe(4);
-  expect(cancelled.streak.months.flatMap(month => [...month.days]).filter(day => day === "d")).toHaveLength(2);
   for (const dayIndex of [2, 3, 4]) {
     const now = new Date(`${addDays(continuing.dayOne, dayIndex)}T18:00:00Z`);
     await db.gameEntry.create({ data: { id: randomUUID(), gameId: continuing.gameId, memberId, dayIndex, attempt: 1, kind: "words", receivedAt: now } });
     const view = await progressAt(memberId, now);
-    expect(view.streak.current).toBe(dayIndex + 1);
-    expect(view.streak.obligations).toEqual([expect.objectContaining({ id: continuing.gameId, done: true })]);
-    expect(view.streak.best?.count).toBe(dayIndex + 1);
+    expect(view.measures.reduce((sum, measure) => sum + measure.total.value, 0)).toBe(dayIndex + 3);
     expect(view.medals).toEqual(expect.arrayContaining(before.medals.map(medal => ({ ...medal, gold: expect.any(Boolean) }))));
-    expect(view.medals).toContainEqual(expect.objectContaining({ kind: "streak", face: { streak: dayIndex + 1 }, earnedOn: addDays(continuing.dayOne, dayIndex) }));
   }
   const awards = await db.gameProgressAward.count({ where: { memberId } });
   await progressAt(memberId, new Date(`${addDays(continuing.dayOne, 4)}T18:00:00Z`));
@@ -589,7 +583,6 @@ describe.skipIf(!enabled)("weekly game change serialization against PostgreSQL",
     expect(await db.game.findUniqueOrThrow({ where: { id: gameId } })).toMatchObject({ status: "void", settledAt: null });
     await proveContinuingProgress(a, gameId, continuing, before);
     expect(await run(a, { type: "unblock", memberId: b })).toMatchObject({ ok: true });
-    expect((await progressAt(a, new Date(`${addDays(continuing.dayOne, 4)}T18:00:00Z`))).streak.current).toBe(5);
   });
   it("asks again for a call-off the other player declined, and refuses one before the game is live", async () => {
     const {a,b,room,gameId} = await setup(); const db = getPrisma(); const chat = {chatContainerMemberId:room,beforeMutationTx:fence};

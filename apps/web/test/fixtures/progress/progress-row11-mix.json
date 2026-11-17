@@ -134,7 +134,7 @@
             "where": null,
             "on": "2026-11-03",
             "toGo": null,
-            "short": "The marathon world record",
+            "short": "A marathon",
             "tagline": "A new mark for the marathon"
           },
           {
@@ -389,41 +389,6 @@
       "pics": []
     }
   ],
-  "streak": {
-    "current": 9,
-    "best": {
-      "count": 9,
-      "from": "2026-11-06",
-      "to": "2026-11-14"
-    },
-    "today": "pending",
-    "months": [
-      {
-        "month": "2026-11",
-        "days": "ddddddddddddddtfffffffffffffff"
-      }
-    ],
-    "obligations": [
-      {
-        "id": "game-planks",
-        "label": "Planks",
-        "icon": "planks",
-        "done": true
-      },
-      {
-        "id": "game-squats",
-        "label": "Squats",
-        "icon": "squats",
-        "done": true
-      },
-      {
-        "id": "game-lights",
-        "label": "Lights out",
-        "icon": "sleep",
-        "done": false
-      }
-    ]
-  },
   "medals": [
     {
       "id": "plank-4h",
@@ -474,21 +439,6 @@
       }
     },
     {
-      "id": "mix-streak",
-      "kind": "streak",
-      "gold": false,
-      "face": {
-        "streak": 9
-      },
-      "title": "9 days",
-      "detail": "your best run",
-      "earnedOn": "2026-11-14",
-      "open": {
-        "page": "streak",
-        "measureId": null
-      }
-    },
-    {
       "id": "squat-world",
       "kind": "landmark",
       "gold": false,
@@ -508,7 +458,6 @@
     "plank-4h",
     "squat-1000",
     "lights-15",
-    "mix-streak",
     "squat-world"
   ],
   "moments": [],

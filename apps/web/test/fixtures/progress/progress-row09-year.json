@@ -250,7 +250,7 @@
           "name": "Mount Kilimanjaro",
           "drawing": "mount-kilimanjaro",
           "at": 19341,
-          "atText": "19.3k ft",
+          "atText": "19,341 ft",
           "blurb": "Africa's highest mountain, a snowcapped volcano in Tanzania you can hike up.",
           "where": "Tanzania",
           "on": null,
@@ -264,7 +264,7 @@
             "name": "Mont Blanc",
             "drawing": "mont-blanc",
             "at": 15766,
-            "atText": "15.8k ft",
+            "atText": "15,766 ft",
             "blurb": "The highest peak in the Alps, on the French-Italian border, first climbed in 1786.",
             "where": "France / Italy",
             "on": "2026-10-01",
@@ -277,7 +277,7 @@
             "name": "Matterhorn",
             "drawing": "matterhorn",
             "at": 14692,
-            "atText": "14.7k ft",
+            "atText": "14,692 ft",
             "blurb": "The pointed Alpine peak on the Swiss-Italian border, first climbed in 1865.",
             "where": "Switzerland / Italy",
             "on": "2026-09-14",
@@ -290,7 +290,7 @@
             "name": "Mount Whitney",
             "drawing": "mount-whitney",
             "at": 14505,
-            "atText": "14.5k ft",
+            "atText": "14,505 ft",
             "blurb": "The highest point in the lower 48 states, in California's Sierra Nevada.",
             "where": "California, USA",
             "on": "2026-09-09",
@@ -303,7 +303,7 @@
             "name": "Mount Rainier",
             "drawing": "mount-rainier",
             "at": 14406,
-            "atText": "14.4k ft",
+            "atText": "14,406 ft",
             "blurb": "The glacier-covered volcano that towers over Seattle, the highest peak in Washington.",
             "where": "Washington, USA",
             "on": "2026-09-08",
@@ -316,7 +316,7 @@
             "name": "Mount Fuji",
             "drawing": "mount-fuji",
             "at": 12389,
-            "atText": "12.4k ft",
+            "atText": "12,389 ft",
             "blurb": "Japan's highest mountain, a snowcapped volcano and national symbol.",
             "where": "Honshu, Japan",
             "on": "2026-07-28",
@@ -355,7 +355,7 @@
             "name": "Half Dome",
             "drawing": "half-dome",
             "at": 4737,
-            "atText": "4,737 ft",
+            "atText": "8,846 ft",
             "blurb": "Yosemite's granite dome, sliced flat on one side, with cables to help hikers up.",
             "where": "Yosemite National Park, California, USA",
             "on": "2026-01-31",
@@ -828,22 +828,6 @@
       "pics": []
     }
   ],
-  "streak": {
-    "current": 64,
-    "best": {
-      "count": 64,
-      "from": "2026-09-07",
-      "to": "2026-11-13"
-    },
-    "today": "pending",
-    "months": [
-      {
-        "month": "2026-11",
-        "days": "dddddd.ddddddtffffffffffffffff"
-      }
-    ],
-    "obligations": []
-  },
   "medals": [
     {
       "id": "year-half-dome",
@@ -3010,51 +2994,6 @@
       }
     },
     {
-      "id": "year-streak-64",
-      "kind": "streak",
-      "gold": false,
-      "face": {
-        "streak": 64
-      },
-      "title": "Best run",
-      "detail": "your best run",
-      "earnedOn": "2026-11-13",
-      "open": {
-        "page": "streak",
-        "measureId": null
-      }
-    },
-    {
-      "id": "year-streak-30",
-      "kind": "streak",
-      "gold": false,
-      "face": {
-        "streak": 30
-      },
-      "title": "30 days",
-      "detail": "your best run",
-      "earnedOn": "2026-11-13",
-      "open": {
-        "page": "streak",
-        "measureId": null
-      }
-    },
-    {
-      "id": "year-streak-14",
-      "kind": "streak",
-      "gold": false,
-      "face": {
-        "streak": 14
-      },
-      "title": "14 days",
-      "detail": "your best run",
-      "earnedOn": "2026-11-13",
-      "open": {
-        "page": "streak",
-        "measureId": null
-      }
-    },
-    {
       "id": "year-total-0",
       "kind": "total",
       "gold": false,
@@ -3179,7 +3118,6 @@
     "year-half-dome",
     "year-friend-sam",
     "year-health-0",
-    "year-streak-64",
     "year-mont-blanc",
     "year-total-0"
   ],

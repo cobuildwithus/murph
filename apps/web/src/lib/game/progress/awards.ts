@@ -41,7 +41,10 @@ export async function readAwards(memberId: string): Promise<StoredAward[]> {
     select: { lookup: true, dataEncrypted: true, earnedOn: true, createdAt: true, seenAt: true },
   });
   const data = await openProgressMany<Candidate>(rows.map(row => ({ memberId, table: "game_progress_award", rowId: row.lookup, field: "data", value: row.dataEncrypted })));
-  return rows.map((row, index) => ({ ...data[index], id: row.lookup, on: row.earnedOn.toISOString().slice(0, 10), createdAt: row.createdAt, seenAt: row.seenAt }));
+  // Streak rows wait for scripts/migrations/remove-progress-streak-awards; until
+  // it has run they are not awards. Delete this filter after it has.
+  return rows.flatMap((row, index) => data[index].kind === "streak" ? []
+    : [{ ...data[index], id: row.lookup, on: row.earnedOn.toISOString().slice(0, 10), createdAt: row.createdAt, seenAt: row.seenAt }]);
 }
 
 /** The view resolves requested moment ids to their stored award ids. */

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { BOARD_METRICS, boardNumber, boardCrowns, type BoardMetric, type BoardPerson, type BoardNumber } from "@/src/lib/game/board-numbers";
 import type { HostedRuntimeGroupSharedRecord } from "@murphai/hosted-execution/runtime-control";
 import { addDays } from "@/src/lib/game/time";
-import { pairBoardStreak } from "@/src/lib/game/progress/streak";
+import { pairBoardStreak } from "@/src/lib/game/board-streak";
 import type { RuleState } from "@/src/lib/game/rules";
 import { lastSettledStepDay } from "@/src/lib/settled-step-day";
 

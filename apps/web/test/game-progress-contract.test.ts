@@ -34,9 +34,9 @@ describe("Progress wire fixtures", () => {
   });
   it("preserves the year board's medal counts and the two pushup units", () => {
     const year = progressSchema.parse(JSON.parse(readFileSync(path.join(directory, "progress-row09-year.json"), "utf8")));
-    expect(year.medals).toHaveLength(148);
-    expect(Object.fromEntries(["landmark", "friend", "health", "streak", "total"].map(kind => [kind, year.medals.filter(m => m.kind === kind).length])))
-      .toEqual({ landmark: 102, friend: 4, health: 31, streak: 3, total: 8 });
+    expect(year.medals).toHaveLength(145);
+    expect(Object.fromEntries(["landmark", "friend", "health", "total"].map(kind => [kind, year.medals.filter(m => m.kind === kind).length])))
+      .toEqual({ landmark: 102, friend: 4, health: 31, total: 8 });
     const units = progressSchema.parse(JSON.parse(readFileSync(path.join(directory, "progress-row15-two-units.json"), "utf8")));
     expect(units.measures.map(m => [m.id, m.total.text])).toEqual([["pushups.reps", "1,400"], ["pushups.seconds", "2h 40m"]]);
   });

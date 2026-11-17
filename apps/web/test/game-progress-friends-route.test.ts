@@ -113,9 +113,11 @@ it("uses each untyped post's terms version and group seat override", async () =>
   expect(mocks.openGameTexts.mock.calls[0][0].map((row: { table: string }) => row.table)).toEqual(["game"]);
 });
 
-it("does not settle incomplete inference as a zero-amount opponent", async () => {
+it("shows pending friends without settling them as zero-amount opponents", async () => {
   mocks.entries.mockResolvedValue([{ ...entry("photo", "shared", "leo", 0, 0), kind: "photo", payloadEncrypted: null }]);
-  expect(await (await GET(request())).json()).toMatchObject({ incomplete: true, rows: [], chart: [] });
+  const body = friendsSchema.parse(await (await GET(request())).json());
+  expect(body.incomplete).toBe(false);
+  expect(body.rows.map(row => [row.memberId, row.total?.value])).toEqual([["ava", 0], ["leo", 0]]);
   expect(mocks.settle).not.toHaveBeenCalled();
   expect(mocks.after).toHaveBeenCalledTimes(1);
 });
