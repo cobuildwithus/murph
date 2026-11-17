@@ -1160,6 +1160,14 @@ already-stopped target without another status read or destruction request.
 The immutable slot still enters retirement before cleanup and is scrubbed only
 after stop proof; ambiguous or failed cleanup keeps the existing target pinned.
 
+The SDK can deliver `onStop` after native destruction has cleared the current
+generation. Keep the destroy request for that diagnostic callback only, clearing
+it when consumed or a new start is observed. Exit 137 from `activity-expired` or
+`invoke-completed` cleanup with no active invocation logs at info; other nonzero
+stops remain warnings. Idle cleanup verifies drained child health and canonical
+ownership before `destroy()` sends SIGKILL; it does not rely on SIGTERM to save
+work after the invocation has returned.
+
 The native Cloudflare container is a warm per-user shell. Startup readiness is
 allowed up to 15 wall-clock seconds, including lifecycle-lock queue time. Once
 readiness-triggered cleanup starts, one absolute five-second cleanup deadline covers both
