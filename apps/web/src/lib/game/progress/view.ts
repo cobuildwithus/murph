@@ -68,8 +68,7 @@ export function medalsView(awards: readonly StoredAward[], units: ClientUnits): 
     const group = totals.get(award.measureId) ?? [];
     group.push(award); totals.set(award.measureId, group);
   }
-  for (const group of totals.values()) group.sort((a, b) => b.on.localeCompare(a.on)
-    || (b.data.value as number) - (a.data.value as number));
+  for (const group of totals.values()) group.sort((a, b) => (b.data.value as number) - (a.data.value as number));
   return awards.flatMap(award => {
     if (award.kind !== "total" && award.kind !== "days") return [medalView(award, award === awards[0], units)];
     const group = totals.get(award.measureId) ?? [];
@@ -150,8 +149,10 @@ export async function readProgress(memberId: string, units: ClientUnits, beforeM
       if (route) for (const measure of firstRoutes) snapshot.states.set(measure.id,
         await setFirstRoute(memberId, measure.id, route, beforeMutationTx));
     }
-    const context = achievementContext(snapshot.measures, snapshot.states);
-    await settleAwards(memberId, ACHIEVEMENTS.flatMap(evaluate => evaluate(context)), beforeMutationTx);
+    if (snapshot.pending.length === 0) {
+      const context = achievementContext(snapshot.measures, snapshot.states);
+      await settleAwards(memberId, ACHIEVEMENTS.flatMap(evaluate => evaluate(context)), beforeMutationTx);
+    }
     scheduleInference(snapshot.pending.map(task => ({ ...task, memberId })), beforeMutationTx);
   }
   const stored = snapshot.incomplete ? snapshot.awards : await readAwards(memberId);

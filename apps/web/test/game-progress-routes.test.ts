@@ -202,6 +202,54 @@ describe("Progress HTTP contracts", () => {
     expect(view).not.toHaveProperty("streak");
     expect(view.medals.some(medal => medal.kind === "streak")).toBe(false);
   });
+  it("shows the highest stored total on the shelf despite out-of-order earned dates", async () => {
+    mocks.entries.mockResolvedValue([]);
+    for (const [value, on] of [[100, "2026-11-05"], [200, "2026-11-01"], [500, "2026-11-02"]] as const) {
+      const key = `total:pushups.reps:${value}`;
+      const lookup = progressLookup(memberId, "award", [key]);
+      awards.push({ memberId, lookup, earnedOn: new Date(on), createdAt: new Date(), seenAt: null,
+        dataEncrypted: await sealProgress({ memberId, table: "game_progress_award", rowId: lookup, field: "data" }, {
+          key, kind: "total", measureId: "pushups.reps", subjectMemberId: null, on,
+          data: { value, unit: "reps", noun: "pushups", page: "totals" },
+        }) });
+    }
+    const original = structuredClone(awards);
+    const view = progressSchema.parse(await (await GET(request())).json());
+    expect(view.medals.map(medal => [medal.title, medal.earnedOn])).toEqual([
+      ["500", "2026-11-02"], ["200", "2026-11-01"], ["100", "2026-11-05"],
+    ]);
+    expect(view.shelf).toEqual([view.medals[0].id]);
+    expect(view.medals.filter(medal => medal.gold).map(medal => medal.title)).toEqual(["500"]);
+    expect(awards).toEqual(original);
+  });
+  it("waits for pending task inference before settling the full history's crossing dates", async () => {
+    const game = gameRow();
+    game.termsWordsEncrypted = JSON.stringify({ v: 1, versions: [{ n: 1, tasks: [{ seat: 0, text: "250 pushups" }], stakes: [] }] });
+    mocks.games.mockResolvedValue([game]);
+    mocks.entries.mockResolvedValue([
+      { ...entryRow(), kind: "photo", payloadEncrypted: null },
+      { ...entryRow(2), payloadEncrypted: JSON.stringify({ exercise: "pushups", count: 100, reps: [] }) },
+    ]);
+    const pending = progressSchema.parse(await (await GET(request())).json());
+    expect(pending.measures.find(measure => measure.id === "pushups.reps")?.total.value).toBe(100);
+    expect(pending.measures.some(measure => measure.pending)).toBe(true);
+    expect(pending.medals).toEqual([]);
+    expect(mocks.createAwards).not.toHaveBeenCalled();
+    expect(mocks.after).toHaveBeenCalledTimes(1);
+
+    const lookup = progressLookup(memberId, "task", ["250 pushups", "photo"]);
+    mocks.tasks.mockResolvedValue([{ lookup, measureEncrypted: await sealProgress({ memberId,
+      table: "game_progress_task_measure", rowId: lookup, field: "measure" }, { quantity: 250, unit: "reps", name: "pushups" }) }]);
+    const resolved = progressSchema.parse(await (await GET(request())).json());
+    expect(resolved.measures).toHaveLength(1);
+    expect(resolved.measures[0]).toMatchObject({ pending: false, total: { value: 350 } });
+    expect(resolved.medals.filter(medal => medal.kind === "total").map(medal => [medal.title, medal.earnedOn]))
+      .toEqual([["200", "2026-11-01"], ["100", "2026-11-01"]]);
+    const original = structuredClone(awards);
+    await GET(request());
+    expect(awards).toEqual(original);
+    expect(mocks.after).toHaveBeenCalledTimes(1);
+  });
   it.each(["games", "entries"])("marks %s overflow incomplete and makes no settling or inference writes", async cap => {
     if (cap === "games") mocks.games.mockResolvedValue(Array.from({ length: 501 }, (_, i) => gameRow(`game-${i}`)));
     else mocks.entries.mockResolvedValue(Array.from({ length: 10001 }, (_, i) => ({ ...entryRow(0), id: `entry-${i}` })));

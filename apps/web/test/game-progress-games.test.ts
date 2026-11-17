@@ -192,11 +192,11 @@ describe("checked ladders and permanent crossings", () => {
       .toMatchObject({ face: { number: "3h" }, earnedOn: "2026-10-30" });
     expect(medalView(awards.find(award => award.data.value === 600)!, false, "us").title).toBe("10 minutes");
   });
-  it.each(["us", "metric"] as const)("groups totals by exercise, newest date then largest amount, for %s", units => {
+  it.each(["us", "metric"] as const)("groups totals by exercise, largest amount first despite saved dates, for %s", units => {
     const inputs = [
       ["pushups.reps", 100, "2026-11-05"], ["planks.seconds", 900, "2026-11-04"],
-      ["pushups.reps", 1000, "2026-11-05"], ["pushups.reps", 500, "2026-11-05"],
-      ["pushups.reps", 200, "2026-11-05"], ["planks.seconds", 600, "2026-11-03"],
+      ["pushups.reps", 1000, "2026-11-03"], ["pushups.reps", 500, "2026-11-02"],
+      ["pushups.reps", 200, "2026-11-01"], ["planks.seconds", 600, "2026-11-05"],
     ] as const;
     const awards = stored(inputs.map(([measureId, value, on]) => ({ key: `${measureId}:${value}`, kind: "total",
       measureId, subjectMemberId: null, on, data: { value, unit: measureId.split(".")[1], noun: "exercise", page: "totals" } })));
