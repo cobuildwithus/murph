@@ -63,8 +63,10 @@ the private workflow's 55-minute timeout, and a terminal grace window.
 - `HOSTED_WEB_VERCEL_PROJECT_ID`;
 - `HOSTED_WEB_VERCEL_TEAM_ID`.
 
-Required secrets are `NATIVE_ANDROID_E2E_GITHUB_APP_PRIVATE_KEY` and
-`HOSTED_WEB_VERCEL_TOKEN`. This environment must contain no reset-capable
+The required secret is `HOSTED_WEB_VERCEL_TOKEN`. GitHub App signing uses the
+committed `native-android-e2e-app` KMS version through GitHub OIDC; see
+[GitHub App signing](github-app-kms.md) for import and IAM prerequisites.
+This environment must contain no reset-capable
 database, Privy, Junction, or candidate-deployment authority.
 
 ## Privacy and retention

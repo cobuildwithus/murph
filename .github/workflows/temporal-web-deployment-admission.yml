@@ -57,6 +57,7 @@ jobs:
     # Preserve the controller's 58m credential budget and 2m cleanup reserve.
     timeout-minutes: 80
     permissions:
+      id-token: write
       contents: read
       statuses: write
     outputs:
@@ -156,14 +157,13 @@ jobs:
 
       - name: Mint private compatibility token
         id: private-app-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        uses: ./.github/actions/github-app-token
         with:
           app-id: ${{ vars.TEMPORAL_COMPATIBILITY_GITHUB_APP_ID }}
-          private-key: ${{ secrets.TEMPORAL_COMPATIBILITY_GITHUB_APP_PRIVATE_KEY }}
+          key-version: projects/murph-495013/locations/global/keyRings/github-apps/cryptoKeys/temporal-compatibility-app/cryptoKeyVersions/1
           owner: cobuildwithus
           repositories: murph-cloud
-          permission-actions: write
-          permission-contents: read
+          permissions: '{"actions":"write","contents":"read"}'
 
       - name: Prove exact public main against private Temporal and hosted runtime
         env:

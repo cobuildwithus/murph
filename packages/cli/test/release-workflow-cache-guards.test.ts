@@ -548,13 +548,15 @@ function hasTemporalCompatibilityAppToken(value: unknown): boolean {
     return false
   }
 
-  return token.uses === 'actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1'
+  // The local action resolves from the trusted controller checkout and signs
+  // through KMS; no App private key reaches this workflow.
+  return token.uses === './.github/actions/github-app-token'
     && token.with['app-id'] === '${{ vars.TEMPORAL_COMPATIBILITY_GITHUB_APP_ID }}'
-    && token.with['private-key'] === '${{ secrets.TEMPORAL_COMPATIBILITY_GITHUB_APP_PRIVATE_KEY }}'
+    && token.with['key-version'] === 'projects/murph-495013/locations/global/keyRings/github-apps/cryptoKeys/temporal-compatibility-app/cryptoKeyVersions/1'
+    && token.with['private-key'] === undefined
     && token.with.owner === 'cobuildwithus'
     && token.with.repositories === 'murph-cloud'
-    && token.with['permission-actions'] === 'write'
-    && token.with['permission-contents'] === 'read'
+    && token.with.permissions === '{"actions":"write","contents":"read"}'
 }
 
 function hasTemporalCompatibilityPermissions(value: unknown): boolean {
@@ -562,9 +564,10 @@ function hasTemporalCompatibilityPermissions(value: unknown): boolean {
     return false
   }
 
-  return Object.keys(value).sort().join(',') === 'actions,contents,pull-requests'
+  return Object.keys(value).sort().join(',') === 'actions,contents,id-token,pull-requests'
     && value.actions === 'read'
     && value.contents === 'read'
+    && value['id-token'] === 'write'
     && value['pull-requests'] === 'read'
 }
 
