@@ -135,8 +135,14 @@ Current product admission, delivery and native runtime safety rules remain.
   pre-provider instant-reply claim, then invokes the canonical account-deletion owner.
   Completed delivery evidence is preserved, and any provider-entered or
   ambiguous claim blocks the reset. The route has no target input and accepts
-  only its dedicated constant-time bearer secret. Provider, reset, target, and
-  Vercel credentials are exposed only to their owning workflow steps, and the
+  GitHub Actions OIDC under the shared verifier's fixed claims, with atomic
+  one-time reset admission in the existing nonce store. The controller obtains
+  a fresh token for every reset or status request, within the request deadline;
+  a token failure never repeats reset or provider messages. Legacy static
+  bearer acceptance lasts only while its Web environment variable is set
+  (see Security and the live-provider canary rollout order). Provider, target,
+  and Vercel credentials remain in their owning workflow steps; OIDC minting
+  permission belongs only to the trusted production-canary job, and the
   journey emits counts and latency only. The final two turns save and read back
   one fixed synthetic goal. A read-only observer requires the current checkpoint's
   published replica and no pending conversation input, then checks canonical

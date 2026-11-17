@@ -15,10 +15,12 @@ import {
 import {
   LINQ_PRODUCTION_CANARY_DIAGNOSTIC_TRACE_LIMIT,
   LINQ_PRODUCTION_CANARY_DIAGNOSTIC_WINDOW_MS,
+  LINQ_PRODUCTION_CANARY_OIDC_AUDIENCE,
   type LinqProductionCanaryDiagnostics,
   type LinqProductionCanaryLatencyTrace,
   type LinqProductionCanaryOutcome,
 } from "../src/lib/hosted-onboarding/linq-production-canary-contract";
+import { createGitHubActionsOidcTokenSupplier } from "./github-actions-oidc-token";
 import CANARY_TURNS from "./fixtures/linq-production-conversation.json";
 
 const CANARY_RESET_PATH =
@@ -39,7 +41,7 @@ type LinqProductionCanaryConfig = {
   productionBaseUrl: string;
   projectId: string;
   projectSecret: string;
-  resetSecret: string;
+  getToken: (signal: AbortSignal) => Promise<string>;
   targetPhoneNumber: string;
 };
 
@@ -438,7 +440,7 @@ async function readCanonicalGoalOutcome(
 ): Promise<LinqProductionCanaryOutcome | null> {
   const requestSignal = AbortSignal.any([observationSignal, AbortSignal.timeout(10_000)]);
   const response = await fetch(new URL(CANARY_OUTCOME_PATH, config.productionBaseUrl), {
-    headers: { authorization: `Bearer ${config.resetSecret}` },
+    headers: { authorization: `Bearer ${await config.getToken(requestSignal)}` },
     method: "GET",
     redirect: "error",
     signal: requestSignal,
@@ -483,11 +485,13 @@ async function resetProductionConversationCanary(
   config: LinqProductionCanaryConfig,
 ): Promise<LinqProductionCanaryResetResult> {
   const url = new URL(CANARY_RESET_PATH, config.productionBaseUrl);
+  const requestSignal = AbortSignal.timeout(CANARY_RESET_TIMEOUT_MS);
+  const token = await config.getToken(requestSignal);
   const response = await fetch(url, {
-    headers: { authorization: `Bearer ${config.resetSecret}` },
+    headers: { authorization: `Bearer ${token}` },
     method: "POST",
     redirect: "error",
-    signal: AbortSignal.timeout(CANARY_RESET_TIMEOUT_MS),
+    signal: requestSignal,
   });
   if (!response.ok) {
     throwCanaryFailure("reset-failed");
@@ -508,10 +512,7 @@ function readLinqProductionCanaryConfig(
     source,
     "SPECTRUM_PROJECT_SECRET",
   );
-  const resetSecret = requireEnvironmentValue(
-    source,
-    "MURPH_LINQ_PRODUCTION_CANARY_RESET_SECRET",
-  );
+  const getToken = createGitHubActionsOidcTokenSupplier(source, LINQ_PRODUCTION_CANARY_OIDC_AUDIENCE);
   const targetPhoneNumber = requireEnvironmentValue(
     source,
     "MURPH_LINQ_PRODUCTION_CANARY_TARGET_PHONE_NUMBER",
@@ -545,7 +546,7 @@ function readLinqProductionCanaryConfig(
     productionBaseUrl: parsedBaseUrl.href,
     projectId,
     projectSecret,
-    resetSecret,
+    getToken,
     targetPhoneNumber,
   };
 }

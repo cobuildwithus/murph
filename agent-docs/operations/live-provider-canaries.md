@@ -53,6 +53,19 @@ restore its cron entries (`17 0 * * 0,3,6` and `17 12 * * 1,4`) in
   run whose assertions passed. A manual requested SHA must match the deployed
   revision.
   The fixed canary account is reset through its existing input-free owner.
+  Reset and outcome requests use fresh GitHub Actions OIDC tokens with audience
+  `https://www.withmurph.ai/linq-production-canary`. Only the protected-main
+  canary workflow's scheduled or manual runs are admitted; only reset consumes
+  the token's `jti`. The production-canary job alone has `id-token: write`.
+  Deploy the Web OIDC verifier first, retaining the configured
+  `HOSTED_ONBOARDING_LINQ_PRODUCTION_CANARY_RESET_SECRET` for old controllers.
+  Then run this controller once on OIDC, drain old runs (up to 55 minutes), and
+  delete that Vercel secret and GitHub's
+  `MURPH_LINQ_PRODUCTION_CANARY_RESET_SECRET`. Redeploy Web so no active receiver
+  retains the old value, then remove the temporary static-auth code in a
+  follow-up. The new controller never reads or retries with the static secret;
+  merging it before the receiver is deployed makes reset fail before messages
+  are sent.
   Phone-account creation saves an explicit GPT-6 Luna preference only for the
   server-configured Linq canary number. Each reset recreates that preference;
   ordinary member defaults and existing saved model choices are unchanged.

@@ -14,6 +14,11 @@ const mocks = vi.hoisted(() => ({
   spaceSend: vi.fn(),
   stop: vi.fn(),
   delay: vi.fn(),
+  getToken: vi.fn(),
+}));
+
+vi.mock("@/scripts/github-actions-oidc-token", () => ({
+  createGitHubActionsOidcTokenSupplier: () => mocks.getToken,
 }));
 
 vi.mock("node:timers/promises", () => ({ setTimeout: mocks.delay }));
@@ -66,7 +71,6 @@ import {
 
 const TEST_ENV = {
   HOSTED_WEB_PRODUCTION_BASE_URL: "https://example.test/",
-  MURPH_LINQ_PRODUCTION_CANARY_RESET_SECRET: "test-reset-secret",
   MURPH_LINQ_PRODUCTION_CANARY_TARGET_PHONE_NUMBER: "+15555550123",
   NODE_ENV: "test" as const,
   SPECTRUM_PROJECT_ID: "test-project",
@@ -86,6 +90,7 @@ describe("production conversation canary runner", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.spyOn(Date, "now").mockReturnValue(1_000);
+    mocks.getToken.mockReset().mockResolvedValue("test-oidc-token");
     mocks.messages = [];
     mocks.next.mockReset();
     mocks.next.mockImplementation(async () => {
@@ -113,6 +118,34 @@ describe("production conversation canary runner", () => {
         deliveryClaimCount: 1,
       },
     }), { status: 200 })));
+  });
+
+  it("never retries reset with a static credential after OIDC failure", async () => {
+    mocks.getToken.mockRejectedValue(new Error("Synthetic OIDC failure"));
+    await expect(runLinqProductionCanary({
+      ...TEST_ENV, MURPH_LINQ_PRODUCTION_CANARY_RESET_SECRET: "unused-static-credential",
+    })).rejects.toThrow("Synthetic OIDC failure");
+    expect(fetch).not.toHaveBeenCalled();
+    expect(mocks.spaceSend).not.toHaveBeenCalled();
+    expect(mocks.getToken).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not restart reset or resend messages when status token acquisition fails", async () => {
+    prepareCompleteConversation();
+    mocks.getToken.mockResolvedValueOnce("synthetic-reset-token")
+      .mockRejectedValue(new Error("Synthetic refresh failure"));
+    await expect(runLinqProductionCanary(TEST_ENV)).rejects.toThrow("Synthetic refresh failure");
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(mocks.spaceSend).toHaveBeenCalledTimes(3);
+    expect(mocks.stop).toHaveBeenCalledOnce();
+  });
+
+  it("does not retry a rejected OIDC reset", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(null, { status: 401 }));
+    await expect(runLinqProductionCanary(TEST_ENV)).rejects.toMatchObject({ name: "reset-failed" });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(mocks.getToken).toHaveBeenCalledTimes(1);
+    expect(mocks.spaceSend).not.toHaveBeenCalled();
   });
 
   it("separates sender acknowledgement time from total reply latency", async () => {
@@ -180,7 +213,7 @@ describe("production conversation canary runner", () => {
     }))).toEqual(Array.from({ length: 3 }, () => ({
       path: "/api/internal/hosted-onboarding/linq/production-canary/outcome",
       method: "GET",
-      headers: { authorization: "Bearer test-reset-secret" },
+      headers: { authorization: "Bearer test-oidc-token" },
     })));
     expect(mocks.stop).toHaveBeenCalledOnce();
   });
@@ -358,7 +391,7 @@ describe("production conversation canary runner", () => {
     const [url, options] = vi.mocked(fetch).mock.calls[1]!;
     expect(String(url)).toBe("https://example.test/api/internal/hosted-onboarding/linq/production-canary/outcome");
     expect(options).toMatchObject({
-      method: "GET", headers: { authorization: "Bearer test-reset-secret" }, redirect: "error",
+      method: "GET", headers: { authorization: "Bearer test-oidc-token" }, redirect: "error",
     });
     expect(options).not.toHaveProperty("body");
     expect(mocks.spaceSend).toHaveBeenCalledTimes(3);
@@ -772,7 +805,15 @@ describe("production conversation canary runner", () => {
     const clock = mockCanaryObservationClock();
     let stage = 0;
     let stageStartedAt = 0;
-    vi.mocked(fetch).mockResolvedValueOnce(resetResponse()).mockImplementation(async () => {
+    const issued = new Map<string, number>();
+    mocks.getToken.mockImplementation(async () => {
+      const token = `synthetic-oidc-${issued.size}`;
+      issued.set(token, clock.elapsedMs() + 300_000);
+      return token;
+    });
+    vi.mocked(fetch).mockResolvedValueOnce(resetResponse()).mockImplementation(async (_url, options) => {
+      const token = new Headers(options?.headers).get("authorization")!.slice(7);
+      expect(issued.get(token)).toBeGreaterThan(clock.elapsedMs());
       if (clock.elapsedMs() - stageStartedAt < HOSTED_EXECUTION_DEFAULT_RUNNER_IDLE_TTL_MS + 5_000) {
         return outcomeResponse({ ready: false, matchingGoalCount: 0, matchingGoalIdCount: 0 });
       }
@@ -785,6 +826,9 @@ describe("production conversation canary runner", () => {
     expect(result.canonicalOutcome).toEqual({ baselineGoalCount: 0, savedGoalCount: 1, proposalGoalCount: 0 });
     expect(result.turns.map((turn) => turn.latencyMs)).toEqual([1_000, 1_000, 1_000, 1_000, 1_000]);
     expect(clock.elapsedMs()).toBe(3 * (HOSTED_EXECUTION_DEFAULT_RUNNER_IDLE_TTL_MS + 5_000));
+    expect(clock.elapsedMs()).toBeGreaterThan(issued.get("synthetic-oidc-0")!);
+    expect(mocks.getToken).toHaveBeenCalledTimes(vi.mocked(fetch).mock.calls.length);
+    expect(vi.mocked(fetch).mock.calls.filter(([, options]) => options?.method === "POST")).toHaveLength(1);
     expect(mocks.spaceSend).toHaveBeenCalledTimes(5);
   });
 
