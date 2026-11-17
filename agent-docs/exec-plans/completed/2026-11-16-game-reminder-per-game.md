@@ -59,8 +59,10 @@ Updated: 2026-11-16
 ### Storage
 
 - Add the column with an additive migration: `ALTER TABLE game_player ADD
-  COLUMN reminder_minutes integer NULL CHECK (reminder_minutes BETWEEN 0 AND
-  1439)`.
+  COLUMN reminder_minutes integer`, nullable, with no CHECK. The predeploy
+  migration guard allows a CHECK only through a reviewed exception. The
+  `setReminders` parser bounds the value to 0..1439, and it is the only
+  writer.
 - No backfill. Every existing seat follows its profile time, which is exactly
   today's behavior.
 - Effective time = `seat.reminder_minutes ?? profile.reminder_minutes`.
