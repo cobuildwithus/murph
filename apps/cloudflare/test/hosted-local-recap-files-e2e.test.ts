@@ -92,11 +92,11 @@ it.each([false, true])('accepts a recap show through the production hosted Linux
     await writeFile(path.join(home, 'config.toml'), [
       `model_catalog_json = "/usr/local/share/murph/codex-model-catalog.openai-flex.json"`,
       buildHostedCodexConfigToml({
-        exposeSpawnAgentModelOverrides: false, model: 'gpt-6.1-sol', reasoningEffort: 'low',
+        exposeSpawnAgentModelOverrides: false, model: 'gpt-6.2-sol', reasoningEffort: 'low',
         provider: { id: 'hosted-openai', name: 'Synthetic loopback', baseUrl: `http://127.0.0.1:${address.port}/v1`, envKey: 'OPENAI_API_KEY', wireApi: 'responses', supportsWebSockets: false },
       }),
     ].join('\n'));
-    const target = createAssistantModelTarget({ approvalPolicy: 'never', codexCommand: '/usr/local/bin/codex', codexHome: home, model: 'gpt-6.1-sol', modelProvider: 'hosted-openai', provider: 'codex-cli', reasoningEffort: 'low', sandbox: 'workspace-write' });
+    const target = createAssistantModelTarget({ approvalPolicy: 'never', codexCommand: '/usr/local/bin/codex', codexHome: home, model: 'gpt-6.2-sol', modelProvider: 'hosted-openai', provider: 'codex-cli', reasoningEffort: 'low', sandbox: 'workspace-write' });
     if (!target) throw new Error('Expected synthetic target.');
     const scope = { gameId, eventId, pairFingerprint: '0123456789abcdef0123456789abcdef', show: true as const };
 

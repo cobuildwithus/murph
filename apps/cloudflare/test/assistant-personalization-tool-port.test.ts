@@ -8,7 +8,7 @@ afterEach(async () => { await webControl?.stop(); webControl = null; });
 
 it("sends accepted-input and scheduled authority through signed HTTP without mixing scopes", async () => {
   const response = { action: "update", result: {
-    mainPersona: "classic", model: "gpt-6-sol", modelChangeAppliesNextRun: false,
+    mainPersona: "classic", model: "gpt-6.2-sol", modelChangeAppliesNextRun: false,
     modelUpdated: false, solAvailable: true, status: "saved", supportingPersona: null,
     tone: "casual", voice: "warm",
   } };

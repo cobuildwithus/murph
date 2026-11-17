@@ -271,8 +271,8 @@ function assertRejectsDamagedProof(expected: AssistantProviderDynamicTool, obser
 describe('Codex canonical tool input contract upgrade guard', () => {
   afterEach(() => vi.restoreAllMocks())
 
-  it.each(['gpt-6.1-terra', 'gpt-6.1-sol', 'legacy', 'local'])('refreshes developer instructions through warm and cold turns: %s', { timeout: 90_000 }, async (variant) => {
-    const model = variant === 'local' ? 'gpt-6.1-sol' : variant === 'legacy' ? 'gpt-6.1-terra' : variant
+  it.each(['gpt-6.1-terra', 'gpt-6.2-sol', 'legacy', 'local'])('refreshes developer instructions through warm and cold turns: %s', { timeout: 90_000 }, async (variant) => {
+    const model = variant === 'local' ? 'gpt-6.2-sol' : variant === 'legacy' ? 'gpt-6.1-terra' : variant
     stub ??= await startScriptedResponsesStub()
     const scenario = await prepareScriptedTurnScenario(stub, temporaryPaths, { model })
     const env = { ...scenario.turnInput.env }

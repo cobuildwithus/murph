@@ -106,7 +106,7 @@ describe("hosted account settings snapshot", () => {
     mocks.resolveHostedMemberAssistantModel.mockReturnValue({
       configurationAvailable: true,
       dormantSolPreference: false,
-      model: "gpt-6.1-sol",
+      model: "gpt-6.2-sol",
       solAvailable: false,
     });
     mocks.runWithHostedDomainRootUnwrapCache.mockImplementation(
@@ -235,7 +235,7 @@ describe("hosted account settings snapshot", () => {
     });
     expect(result.account).toMatchObject({
       assistant: {
-        model: "gpt-6.1-sol",
+        model: "gpt-6.2-sol",
       },
       phone: {
         number: "+15550100002",
@@ -318,7 +318,7 @@ describe("hosted account settings snapshot", () => {
     expect(result).toMatchObject({
       account: {
         assistant: {
-          model: "gpt-6.1-sol",
+          model: "gpt-6.2-sol",
         },
         email: {
           address: null,
@@ -429,7 +429,7 @@ describe("hosted account settings snapshot", () => {
       assistant: {
         configurationAvailable: true,
         dormantSolPreference: false,
-        model: "gpt-6.1-sol",
+        model: "gpt-6.2-sol",
         persona: "classic",
         personality: {
           detail: null,
@@ -454,7 +454,7 @@ describe("hosted account settings snapshot", () => {
       memberId: "member_123",
     })).resolves.toMatchObject({
       assistant: {
-        model: "gpt-6.1-sol",
+        model: "gpt-6.2-sol",
         persona: null,
         personality: {
           detail: null,
@@ -473,7 +473,7 @@ describe("hosted account settings snapshot", () => {
       memberId: "member_123",
     })).resolves.toMatchObject({
       assistant: {
-        model: "gpt-6.1-sol",
+        model: "gpt-6.2-sol",
         persona: null,
         personality: {
           detail: null,
@@ -492,8 +492,8 @@ describe("hosted account settings snapshot", () => {
     mocks.resolveHostedMemberAssistantModel.mockReturnValue({
       configurationAvailable: true,
       dormantSolPreference: false,
-      hostedAssistantModelOverride: "gpt-6.1-sol",
-      model: "gpt-6.1-sol",
+      hostedAssistantModelOverride: "gpt-6.2-sol",
+      model: "gpt-6.2-sol",
       solAvailable: true,
     });
 
@@ -503,7 +503,7 @@ describe("hosted account settings snapshot", () => {
       assistant: {
         configurationAvailable: true,
         dormantSolPreference: false,
-        model: "gpt-6.1-sol",
+        model: "gpt-6.2-sol",
         solAvailable: true,
       },
     });
@@ -517,7 +517,7 @@ describe("hosted account settings snapshot", () => {
     mocks.resolveHostedMemberAssistantModel.mockReturnValue({
       configurationAvailable: true,
       dormantSolPreference: true,
-      model: "gpt-6.1-sol",
+      model: "gpt-6.2-sol",
       solAvailable: false,
     });
 
@@ -527,7 +527,7 @@ describe("hosted account settings snapshot", () => {
       assistant: {
         configurationAvailable: true,
         dormantSolPreference: true,
-        model: "gpt-6.1-sol",
+        model: "gpt-6.2-sol",
         solAvailable: false,
       },
     });

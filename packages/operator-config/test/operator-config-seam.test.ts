@@ -71,13 +71,13 @@ test('operator config reads defaults, persists hosted config, and flags invalid 
     assistant: {
       backend: {
         adapter: 'codex-cli', approvalPolicy: 'never', codexHome: '/tmp/codex-home',
-        model: 'gpt-6.1-sol', modelProvider: 'openai', reasoningEffort: 'medium',
+        model: 'gpt-6.2-sol', modelProvider: 'openai', reasoningEffort: 'medium',
         sandbox: 'danger-full-access',
       },
       identityId: ' user-123 ',
     },
   })
-  assert.equal(resolveAssistantProviderDefaults((await readOperatorConfig(homeDirectory))?.assistant)?.model, 'gpt-6.1-sol')
+  assert.equal(resolveAssistantProviderDefaults((await readOperatorConfig(homeDirectory))?.assistant)?.model, 'gpt-6.2-sol')
 
   const hostedConfig = createHostedAssistantConfig({
     activeProfileId: 'platform-default',
@@ -86,7 +86,7 @@ test('operator config reads defaults, persists hosted config, and flags invalid 
         id: 'platform-default',
         managedBy: 'platform',
         providerConfig: {
-          model: 'gpt-6.1-sol',
+          model: 'gpt-6.2-sol',
           modelProvider: 'openai',
           provider: 'codex-cli',
         },

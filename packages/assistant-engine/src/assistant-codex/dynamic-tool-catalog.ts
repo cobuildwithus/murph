@@ -737,7 +737,7 @@ export const MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL = {
   deferLoading: true,
   name: 'assistant_configuration',
   description:
-    `Read or change the model this room's Murph uses on future turns. It never reads or changes anyone's private model, reasoning, account, or billing settings. read returns the current model and availableModels. update saves a model from availableModels that someone in the room asked for in this turn, and it takes effect on the next turn. Rooms default to GPT-6.1 Sol and need no subscription; Terra and Luna can also be chosen. Asking for the default is enough to restore it: read the choices, then update, with no further confirmation. Never change the model because usage is low. Say a change is saved only when the result says updated or unchanged.`,
+    `Read or change the model this room's Murph uses on future turns. It never reads or changes anyone's private model, reasoning, account, or billing settings. read returns the current model and availableModels. update saves a model from availableModels that someone in the room asked for in this turn, and it takes effect on the next turn. Rooms default to GPT-6.2 Sol and need no subscription; Terra and Luna can also be chosen. Asking for the default is enough to restore it: read the choices, then update, with no further confirmation. Never change the model because usage is low. Say a change is saved only when the result says updated or unchanged.`,
   inputSchema: {
     oneOf: [
       {
@@ -761,7 +761,7 @@ export const MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL = {
           },
           model: {
             type: 'string',
-            enum: HOSTED_ASSISTANT_PRODUCT_MODELS.filter((model) => model !== 'gpt-6-astra'),
+            enum: HOSTED_ASSISTANT_PRODUCT_MODELS.filter((model) => model !== 'gpt-6.2-astra'),
             description:
               `The room's model for future turns.`,
           },

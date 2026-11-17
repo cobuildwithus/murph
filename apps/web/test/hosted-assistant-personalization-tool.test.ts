@@ -94,7 +94,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
       voice: "warm",
     });
     mocks.readHostedMemberAssistantModelPreference.mockResolvedValue({
-      model: "gpt-6.1-sol",
+      model: "gpt-6.2-sol",
       solAvailable: false,
     });
     mocks.readHostedMailboxConversationInputAuthorityByAssistantInputIdTx.mockResolvedValue({
@@ -126,7 +126,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
       result: {
         mainPersona: "classic" as const,
         supportingPersona: null,
-        model: "gpt-6.1-sol",
+        model: "gpt-6.2-sol",
         solAvailable: false,
         tone: "formal",
         voice: "warm",
@@ -170,7 +170,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
       result: {
         mainPersona: "classic" as const,
         supportingPersona: null,
-        model: "gpt-6.1-sol",
+        model: "gpt-6.2-sol",
         solAvailable: false,
         tone: "formal",
         voice: "upbeat",
@@ -930,7 +930,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
       result: {
         mainPersona: "classic" as const,
         supportingPersona: null,
-        model: "gpt-6.1-sol",
+        model: "gpt-6.2-sol",
         modelChangeAppliesNextRun: false,
         modelUpdated: false,
         solAvailable: false,
@@ -990,7 +990,7 @@ describe("hosted assistant personalization tool owner adapter", () => {
       result: {
         mainPersona: "classic" as const,
         supportingPersona: null,
-        model: "gpt-6.1-sol",
+        model: "gpt-6.2-sol",
         modelChangeAppliesNextRun: false,
         modelUpdated: false,
         solAvailable: false,

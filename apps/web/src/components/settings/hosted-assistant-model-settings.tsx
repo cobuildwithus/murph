@@ -4,8 +4,7 @@ import {
   HOSTED_ASSISTANT_ASTRA_MODEL,
   HOSTED_ASSISTANT_TERRA_MODEL,
   HOSTED_ASSISTANT_DEFAULT_MODEL,
-  HOSTED_ASSISTANT_GPT_6_SOL_MODEL,
-  HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
+  HOSTED_ASSISTANT_SOL_MODEL,
   HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
   HOSTED_ASSISTANT_LUNA_MODEL,
   isHostedAssistantProductModel,
@@ -58,7 +57,7 @@ const MODEL_OPTIONS = [
   {
     artwork: "sol",
     description: "Deep health intelligence",
-    model: HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
+    model: HOSTED_ASSISTANT_SOL_MODEL,
     name: "Sol",
     usage: "Balanced usage",
   },
@@ -224,7 +223,7 @@ function HostedAssistantModelSettingsForm(
               const selected = draftModel === option.model;
               const unavailable = option.model === HOSTED_ASSISTANT_ASTRA_MODEL
                 ? !availableModels?.includes(HOSTED_ASSISTANT_ASTRA_MODEL)
-                : option.model === HOSTED_ASSISTANT_GPT_61_SOL_MODEL && !solAvailable;
+                : option.model === HOSTED_ASSISTANT_SOL_MODEL && !solAvailable;
               const current = option.model === currentModel;
               const badge = readModelOptionBadge({
                 current,
@@ -349,5 +348,5 @@ function readProductModelName(model: HostedAssistantProductModel): string {
   if (model === HOSTED_ASSISTANT_LUNA_MODEL || model === HOSTED_ASSISTANT_GPT_6_LUNA_MODEL) {
     return "Luna";
   }
-  return model === HOSTED_ASSISTANT_GPT_6_SOL_MODEL || model === HOSTED_ASSISTANT_GPT_61_SOL_MODEL ? "Sol" : "Murph";
+  return model === HOSTED_ASSISTANT_SOL_MODEL ? "Sol" : "Murph";
 }

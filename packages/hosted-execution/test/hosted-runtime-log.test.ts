@@ -215,7 +215,7 @@ describe("hosted runtime log contracts", () => {
         jsonType: "object",
         jsonValid: true,
         methodKind: "POST",
-        modelKind: "gpt-6.1-sol",
+        modelKind: "gpt-6.2-sol",
         previousResponseFingerprint: `hmac-sha256:${"c".repeat(64)}`,
         previousResponseFingerprintPresent: true,
         previousResponsePresent: true,

@@ -9,7 +9,7 @@ vi.mock("@/src/lib/hosted-execution/usage-allowance", async (importOriginal) => 
 }));
 const now = new Date("2031-06-15T12:00:00.000Z");
 const totals = { records: 3n, turns: 1n, costUsdMicros: 125000n, inputTokens: 10000n, cachedInputTokens: 8000n, cacheWriteTokens: 0n, outputTokens: 100n, reasoningTokens: 10n, unpricedRecords: 0n, allowanceExcludedRecords: 0n };
-const row = { ...totals, category: "total", model: "gpt-6.1-sol", source: "message", pricingBasis: "standard", turnId: null, occurredAt: now, groups: 1n, profile: null };
+const row = { ...totals, category: "total", model: "gpt-6.2-sol", source: "message", pricingBasis: "standard", turnId: null, occurredAt: now, groups: 1n, profile: null };
 function profile() { return { schema: "murph.assistant-turn-profile.v2", modelContextWindow: 100000, requestCount: 1, requests: [{ input: 10000, cachedInput: 8000, output: 100 }], requestsTruncated: false, toolsTruncated: false, tools: [{ kind: "command", label: "vault-cli automation", calls: 1, durationKnownCalls: 1, durationMs: 20, failedCalls: 0, outputBytesTotal: 12000, outputBytesMax: 12000 }] }; }
 describe("usage diagnostics aggregates", () => {
   it("projects recorded costs and typed byte coverage without exposing profile payloads", async () => {
@@ -40,7 +40,7 @@ describe("usage diagnostics aggregates", () => {
   });
   it("derives Sol and Luna rates from the allowance price owner", () => {
     expect(readHostedUsageDiagnosticModelRates()).toEqual(expect.arrayContaining([
-      expect.objectContaining({ model: "gpt-6.1-sol", pricingBasis: "standard", inputUsdPerMillion: 2, cachedInputUsdPerMillion: 0.1, outputUsdPerMillion: 10 }),
+      expect.objectContaining({ model: "gpt-6.2-sol", pricingBasis: "standard", inputUsdPerMillion: 2, cachedInputUsdPerMillion: 0.1, outputUsdPerMillion: 10 }),
       expect.objectContaining({ model: "gpt-6-luna", pricingBasis: "openai-flex", inputUsdPerMillion: 0.05, cachedInputUsdPerMillion: 0.005, outputUsdPerMillion: 0.25 }),
       expect.objectContaining({ model: "gpt-6-luna", pricingBasis: "openai-priority", inputUsdPerMillion: 0.2 }),
     ]));

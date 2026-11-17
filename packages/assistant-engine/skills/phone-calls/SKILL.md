@@ -85,7 +85,7 @@ time, or when the wearable sync it was waiting for arrives. Scheduled group and
 email turns cannot place calls.
 
 When the member asks for a call later, save one `murph.automation` with the
-requested local time and timezone and Sol (`gpt-6.1-sol`) as its model. Put the
+requested local time and timezone and Sol (`gpt-6.2-sol`) as its model. Put the
 approved number, the goal of the call, the facts that may be shared, what
 counts as success, and any limits on disclosure or transfer in its
 instructions. The automation reports its result in the chat, and it is still

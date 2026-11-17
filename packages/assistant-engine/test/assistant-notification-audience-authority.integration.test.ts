@@ -118,7 +118,7 @@ const opaqueLocator = {
 const modelTarget = createAssistantModelTarget({
   provider: 'codex-cli',
   approvalPolicy: 'never',
-  model: 'gpt-6.1-sol',
+  model: 'gpt-6.2-sol',
   modelProvider: 'hosted-openai',
   reasoningEffort: 'medium',
   sandbox: 'danger-full-access',

@@ -295,7 +295,7 @@ function createAssistantUsageRecord(): AssistantUsageRecord {
     rawUsageJsonHash: null,
     reasoningTokens: null,
     reportingUserId: null,
-    requestedModel: "gpt-6.1-sol",
+    requestedModel: "gpt-6.2-sol",
     routeId: "route_usage",
     schema: ASSISTANT_USAGE_SCHEMA,
     servedModel: null,
@@ -6429,7 +6429,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
           action: "read",
           result: {
             mainPersona: "classic",
-            model: "gpt-6-sol",
+            model: "gpt-6.2-sol",
             solAvailable: false,
             supportingPersona: null,
             tone: "formal",
@@ -6555,7 +6555,7 @@ describe("buildHostedExecutionRuntimePlatform", () => {
         action: "read",
         result: {
           mainPersona: "classic",
-          model: "gpt-6-sol",
+          model: "gpt-6.2-sol",
           solAvailable: false,
           supportingPersona: null,
           tone: "formal",

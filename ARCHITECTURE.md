@@ -993,7 +993,7 @@ External conversation directness is three-state authority. Explicit direct evide
 Assistant-authored cron schedules require a literal wildcard in either day-of-month or day-of-week. The shared automation tool argument schema rejects combined restrictions before creation or schedule replacement and returns repair guidance through the existing validation feedback. Finite recurrences keep their repeating days in the schedule and their exclusive expiration in `activeUntil`. Canonical cron retains standard OR semantics for existing records and operator workflows; inspection and patches without a replacement schedule remain compatible.
 
 A private hosted monthly usage review is a managed automation pinned to
-GPT-6.1 Sol medium. Its verified private hosted occurrence uses the existing
+GPT-6.2 Sol medium. Its verified private hosted occurrence uses the existing
 isolated conversation/provider-turn profile: it neither resumes the member's
 provider thread nor replays committed chat history. Canonical context and the
 ordinary tool and delivery authorities remain available. Other scheduled
@@ -1736,13 +1736,14 @@ native `spawn_agent.model` field and never mutates that saved configuration.
 Web exposes the native field only when its existing assistant-configuration
 resolution confirms that the current managed runtime is authorized for the
 full product-model catalog; missing authority fails closed.
-The production image defaults to a catalog containing GPT-6.1 Terra, GPT-6.1 Sol and GPT-6 Luna plus
-GPT-5.6 Luna, retaining GPT-6 Sol for saved conversation preferences. CLI 0.167.1 supplies the existing entries from its native catalog; the pinned
-`apps/cloudflare/codex-model-catalog.terra.json` adds the official refreshed
-Codex Terra launch entry. Terra retains its native 500K context window; existing
-GPT-6 and GPT-6.1 Sol entries retain their native 272K limit. The image fails validation for missing entries. Web separately derives Astra authority from the canonical available models
+The standard runner catalog contains GPT-6.1 Terra, GPT-6.2 Sol, GPT-6 Luna
+and GPT-5.6 Luna. Codex 0.169.0 bundles Terra and Luna. The pinned
+`apps/cloudflare/codex-model-catalog.6.2.json` supplies the official refreshed
+Sol and Astra entries. The image validates its exact model set and keeps Sol
+and Astra at 272K context for turn-level usage accounting. Terra retains 500K.
+Web separately derives Astra authority from the canonical available models
 and managed OpenAI provider; only an explicitly authorized workspace selects the
-expanded image-owned Astra catalog. Missing authority retains the five-model
+expanded image-owned Astra catalog. Missing authority retains the four-model
 catalog, preserving Edge and group delegation while Codex's native validation
 rejects Astra before a provider request. Catalog selection changes the native
 launch key, so a warm process cannot retain an earlier catalog after access changes.
@@ -1774,7 +1775,7 @@ Only the authoritative
 web response updates an ephemeral invocation-local projection; web remains the
 sole durable owner, and a later invocation rereads the preference there.
 For a synthetic thread-container member, the same input-bound path accepts
-model changes only. Null selects GPT-6.1 Sol; explicit Terra, Luna, or supported
+model changes only. Null selects GPT-6.2 Sol; explicit Terra, Luna, or supported
 Sol choices use the member's existing nullable model field. Provider and reasoning stay fixed to OpenAI and `low`; no participant
 identity, raw plan state, or private preference enters the room prompt. Group
 Sol is available without a subscription; the personal Sol entitlement does not
@@ -1992,7 +1993,7 @@ Only four packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
 
   Nullable hosted-member model and reasoning preferences are web-owned,
   billing-gated control facts. Managed OpenAI personal chats default to GPT-6.1
-  Terra. Every group defaults to GPT-6.1 Sol without a subscription requirement.
+  Terra. Every group defaults to GPT-6.2 Sol without a subscription requirement.
   Terra and Luna are available without a paid model entitlement.
   All supported Sol versions require an active paid direct or family subscription
   in personal chats; group rooms are exempt. Astra remains personal-only
@@ -2004,17 +2005,13 @@ Only four packages are published to npm: `@murphai/contracts`, `@murphai/hosted-
   Ineligible personal Sol choices fall back to Terra without erasing later saved intent. New managed recipes and
   automation guidance use GPT-6 Luna for fixed cues and bounded low-risk workflows
   with a few targeted reads; ambiguous, research-heavy, sensitive, or demanding
-  sourcing work retains GPT-6.1 Sol or the explicitly selected stronger model.
+  sourcing work retains GPT-6.2 Sol or the explicitly selected stronger model.
   Morning Journal uses its managed Luna pin. Web opening replies
   also use GPT-6 Luna. At scheduled execution,
   automation pins use a reviewed OpenAI replacement map: GPT-5.6 Luna becomes
-  GPT-6 Luna, and GPT-6 Sol or GPT-5.6 Terra becomes GPT-6.1 Sol. Retired GPT-5.6 Sol
-  is normalized to GPT-6.1 Sol when reading canonical automation overrides, retained
-  cron targets, saved conversations and operator profiles; new writes reject it.
-  Other provider-neutral envelopes and canonical records retain the authored pin; resolution happens
-  after the executing provider is known and before default reasoning is derived.
-  Scheduled turns that inherit an explicitly saved GPT-6 Sol conversation target
-  also use GPT-6.1 Sol, preserving inherited reasoning and the conversation target.
+  GPT-6 Luna, and GPT-5.6 Terra becomes GPT-6.2 Sol. Stored GPT-5.6 Sol,
+  GPT-6 Sol, GPT-6.1 Sol and GPT-6 Astra selections resolve to the current
+  model in their family across conversations, profiles and scheduled work.
   Explicit reasoning survives; an omitted pinned value uses the replacement model's
   default. This adds no deploy-time scan or state write;
   new runtime code activates replacements on the next execution. Future versions
@@ -3048,7 +3045,7 @@ voice-input admission route, native media attachment, invocation call retention,
 or public Live provider forwarding. Historical voice mailbox and usage records
 retain their existing readers; pending voice delivery fails terminally without
 provider entry or a fallback to another channel. Messaging voice memos remain
-supported. Codex uses the pinned 0.167.1 release with `patches/codex-websocket-ack.patch`
+supported. Codex uses the pinned 0.169.0 release with `patches/codex-websocket-ack.patch`
 only for a 15-second first-frame WebSocket acknowledgement bound. Later frames
 retain the native stream idle timeout. Prompt caching uses provider defaults;
 historical twelve-hour usage remains readable through the existing accounting
@@ -3092,7 +3089,7 @@ turns, bounded multi-pass canonical CLI work may run in a fresh native child eve
 when its result is needed for the reply; tiny tasks stay in the root unless the
 member requests delegation. The root uses native `wait_agent` and synthesizes the
 result before its final reply. Children replace root work rather than duplicate
-it. The default target for these substantial tasks is GPT-6.1 Sol medium when
+it. The default target for these substantial tasks is GPT-6.2 Sol medium when
 native model overrides are authorized; an explicit member child-model choice
 wins, and runtimes without overrides inherit their authorized model.
 `fork_turns: "none"` excludes conversation history. The native
@@ -5798,7 +5795,7 @@ rechecks ownership and revision fences, then purges outside its transaction.
 The runtime-orphan kind constraint is unchanged.
 
 
-Pair shows use the existing recap notification on GPT-6.1 Sol with the normal
+Pair shows use the existing recap notification on GPT-6.2 Sol with the normal
 hosted group turn sandbox, cwd and tool surface. `read_game` returns scoped game
 material, shared chat and lore directly; the host resolves reference-photo IDs.
 Pair recap identity references include each player's own profile photo and the

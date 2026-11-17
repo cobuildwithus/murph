@@ -3226,7 +3226,7 @@ afterAll(() => {
     )
   }
 })
-const DEFAULT_REAL_CODEX_MODEL = 'gpt-6.1-sol'
+const DEFAULT_REAL_CODEX_MODEL = 'gpt-6.2-sol'
 const REAL_CODEX_HOSTED_CONFIG_OVERRIDES = [
   'allow_login_shell=false',
   'features.plugins=false',
@@ -4384,13 +4384,12 @@ describeRealCodex('real Codex voice memo attachment evidence e2e', () => {
 })
 
 describeRealCodex('real Codex GPT-6 configuration e2e', () => {
-  it.each(['astra', 'sol', 'luna'] as const)('saves GPT-6 %s exactly once for the next query', async (variant) => {
-    const selectedModel = `gpt-6-${variant}` as const
+  it.each([['astra', 'gpt-6.2-astra'], ['sol', 'gpt-6.2-sol'], ['luna', 'gpt-6-luna']] as const)('saves %s exactly once for the next query', async (variant, selectedModel) => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-astra-selection-'))
     const updates: unknown[] = []
     const snapshot: import('@murphai/hosted-execution/runtime-control').HostedRuntimeAssistantConfigurationSnapshot = {
-      availableModels: ['gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-luna', 'gpt-6.1-sol', 'gpt-6-astra'],
+      availableModels: ['gpt-6.2-sol', 'gpt-6-luna', 'gpt-5.6-luna', 'gpt-6.2-astra'],
       availableReasoningEfforts: ['low', 'medium', 'high', 'xhigh'] as const,
       configurationAvailable: true,
       dormantSolPreference: false,
@@ -4419,7 +4418,7 @@ describeRealCodex('real Codex GPT-6 configuration e2e', () => {
           },
           computerToolsAvailable: false,
           currentUserActionScope: () => createRealCodexDirectUserActionScope('ain_00000000000000000000000000000061'),
-          currentAssistantTarget: () => ({ model: 'gpt-6-sol', reasoningEffort: 'low' }),
+          currentAssistantTarget: () => ({ model: 'gpt-6.2-sol', reasoningEffort: 'low' }),
           currentHostedDeliveryContext: () => null,
           currentHostedMailboxItemIds: () => [],
           sendVaultFile: async () => ({ filename: 'unused', status: 'denied' }),
@@ -4427,7 +4426,7 @@ describeRealCodex('real Codex GPT-6 configuration e2e', () => {
         },
         model: config.model,
         modelProvider: config.modelProvider,
-        prompt: `I am on the paid Edge plan. Can you use GPT-6 ${variant} for my future queries? Keep my reasoning setting as it is.`,
+        prompt: `I am on the paid Edge plan. Can you use ${variant} for my future queries? Keep my reasoning setting as it is.`,
         reasoningEffort: 'low',
         sandbox: 'workspace-write',
         vaultRoot: workingDirectory,
@@ -4449,14 +4448,14 @@ describeRealCodex('real Codex GPT-6 configuration e2e', () => {
     { label: 'Terra model selection saves once in individual chat', audience: 'individual', selectedModel: 'gpt-6.1-terra', paid: true, restoreDefault: false },
     { label: 'Terra model selection saves once in group chat', audience: 'group', selectedModel: 'gpt-6.1-terra', paid: true, restoreDefault: false },
     { label: 'split model default restores Terra in individual chat', audience: 'individual', selectedModel: 'gpt-6.1-terra', paid: true, restoreDefault: true },
-    { label: 'split model default restores Sol in subscribed group chat', audience: 'group', selectedModel: 'gpt-6.1-sol', paid: true, restoreDefault: true },
-    { label: 'split model default restores Sol in free group chat', audience: 'group', selectedModel: 'gpt-6.1-sol', paid: false, restoreDefault: true },
+    { label: 'split model default restores Sol in subscribed group chat', audience: 'group', selectedModel: 'gpt-6.2-sol', paid: true, restoreDefault: true },
+    { label: 'split model default restores Sol in free group chat', audience: 'group', selectedModel: 'gpt-6.2-sol', paid: false, restoreDefault: true },
   ] as const)('$label', async ({ audience, selectedModel, paid, restoreDefault }) => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-terra-selection-'))
     const updates: unknown[] = []
     const snapshot: import('@murphai/hosted-execution/runtime-control').HostedRuntimeAssistantConfigurationSnapshot = {
-      availableModels: ['gpt-6.1-terra', 'gpt-6-luna', ...(paid || audience === 'group' ? ['gpt-6.1-sol' as const] : [])],
+      availableModels: ['gpt-6.1-terra', 'gpt-6-luna', ...(paid || audience === 'group' ? ['gpt-6.2-sol' as const] : [])],
       availableReasoningEfforts: ['low', 'medium', 'high', 'xhigh'] as const,
       configurationAvailable: true,
       dormantSolPreference: false,
@@ -4486,7 +4485,7 @@ describeRealCodex('real Codex GPT-6 configuration e2e', () => {
           },
           computerToolsAvailable: false,
           currentUserActionScope: () => createRealCodexDirectUserActionScope('ain_00000000000000000000000000000061'),
-          currentAssistantTarget: () => ({ model: 'gpt-6-sol', reasoningEffort: 'low' }),
+          currentAssistantTarget: () => ({ model: 'gpt-6.2-sol', reasoningEffort: 'low' }),
           currentHostedDeliveryContext: () => null,
           currentHostedMailboxItemIds: () => [],
           sendVaultFile: async () => ({ filename: 'unused', status: 'denied' }),
@@ -4518,7 +4517,7 @@ describeRealCodex('real Codex GPT-6 configuration e2e', () => {
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-openai-selection-'))
     const updates: unknown[] = []
     const snapshot: import('@murphai/hosted-execution/runtime-control').HostedRuntimeAssistantConfigurationSnapshot = {
-      availableModels: ['gpt-6-sol', 'gpt-6-luna', 'gpt-5.6-luna', 'gpt-6.1-sol', 'gpt-6-astra'],
+      availableModels: ['gpt-6.2-sol', 'gpt-6-luna', 'gpt-5.6-luna', 'gpt-6.2-astra'],
       availableReasoningEfforts: ['low', 'medium', 'high', 'xhigh'] as const,
       configurationAvailable: true,
       dormantSolPreference: false,
@@ -4548,7 +4547,7 @@ describeRealCodex('real Codex GPT-6 configuration e2e', () => {
           },
           computerToolsAvailable: false,
           currentUserActionScope: () => createRealCodexDirectUserActionScope('ain_00000000000000000000000000000061'),
-          currentAssistantTarget: () => ({ model: 'gpt-6-sol', reasoningEffort: 'low' }),
+          currentAssistantTarget: () => ({ model: 'gpt-6.2-sol', reasoningEffort: 'low' }),
           currentHostedDeliveryContext: () => null,
           currentHostedMailboxItemIds: () => [],
           sendVaultFile: async () => ({ filename: 'unused', status: 'denied' }),
@@ -6013,7 +6012,7 @@ describe('real Codex live fixture contracts', () => {
   }, 120_000)
 
   it('uses production Responses websocket configuration for canonical provider journeys', () => {
-    const toml = buildRealCodexConfigToml({ apiKeyEnv: 'OPENAI_API_KEY', model: 'gpt-6-sol', modelProvider: OPENAI_ENV_MODEL_PROVIDER, productionTransport: true })
+    const toml = buildRealCodexConfigToml({ apiKeyEnv: 'OPENAI_API_KEY', model: 'gpt-6.2-sol', modelProvider: OPENAI_ENV_MODEL_PROVIDER, productionTransport: true })
     expect(toml).toContain('wire_api = "responses"')
     expect(toml).toContain('supports_websockets = true')
     expect(toml).toContain(`base_url = "${OPENAI_CODEX_MODEL_PROVIDER_CONFIG.baseUrl}"`)
@@ -6070,7 +6069,7 @@ describe('real Codex live fixture contracts', () => {
     }
   })
   it('executes canonical gate CLI commands and rejects an unknown command without a model', async () => {
-    const fixture = await createCanonicalLiveFixture({ codexHome: null, env: { PATH: process.env.PATH }, model: 'gpt-6-sol', modelProvider: OPENAI_ENV_MODEL_PROVIDER })
+    const fixture = await createCanonicalLiveFixture({ codexHome: null, env: { PATH: process.env.PATH }, model: 'gpt-6.2-sol', modelProvider: OPENAI_ENV_MODEL_PROVIDER })
     try {
       const codex = await execFileAsync(fixture.codexCommand, ['-c', 'default_permissions="murph-member-read"', 'features', 'list'], { env: fixture.env, timeout: 60_000 })
       expect(codex.stdout.trim()).not.toBe('')
@@ -10264,7 +10263,7 @@ describeRealCodex('real Codex preference source e2e', () => {
           personalizationTool: {
             async request(request, authority) {
               if (request.action === 'read') return { action: 'read', result: {
-                mainPersona: 'classic', supportingPersona: null, model: 'gpt-6-sol', solAvailable: true, tone: 'casual', voice: 'warm',
+                mainPersona: 'classic', supportingPersona: null, model: 'gpt-6.2-sol', solAvailable: true, tone: 'casual', voice: 'warm',
               } }
               writes.push({ request, authority })
               if (request.action === 'update_personality') {
@@ -10284,7 +10283,7 @@ describeRealCodex('real Codex preference source e2e', () => {
               expect(authority).toMatchObject({ assistantInputId: later })
               expect(request).toEqual({ action: 'update', tone: 'formal' })
               return { action: 'update', result: {
-                mainPersona: 'classic', supportingPersona: null, model: 'gpt-6-sol',
+                mainPersona: 'classic', supportingPersona: null, model: 'gpt-6.2-sol',
                 modelChangeAppliesNextRun: false, modelUpdated: false, solAvailable: true,
                 status: 'saved', tone: 'formal', voice: 'warm',
               } }
@@ -12477,8 +12476,9 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
 
   it.each([
     ['gpt-5.6-luna', 'gpt-6-luna'],
-    ['gpt-6-sol', 'gpt-6.1-sol'],
-    ['gpt-5.6-sol', 'gpt-6.1-sol'],
+    ['gpt-6-sol', 'gpt-6.2-sol'],
+    ['gpt-6-astra', 'gpt-6.2-astra'],
+    ['gpt-5.6-sol', 'gpt-6.2-sol'],
   ])('runs a saved %s reminder on the current OpenAI model without rewriting it', async (savedModel, expectedModel) => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-automation-model-upgrade-e2e-'))
@@ -12488,7 +12488,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
       await materializeRealWorkoutVaultCli({ binDirectory, commandLogPath, vaultRoot: workingDirectory })
       await initializeVault({ timezone: 'UTC', vaultRoot: workingDirectory })
       const saved = await upsertAutomation({
-        assistantTargetOverride: { model: savedModel === 'gpt-5.6-sol' ? expectedModel : savedModel },
+        assistantTargetOverride: { model: savedModel === 'gpt-5.6-luna' ? savedModel : expectedModel },
         continuityPolicy: 'fresh',
         instructions: 'Send this self-contained reminder now: put the recycling bin outside. No lookups or other actions are needed.',
         now: new Date('2026-09-23T12:00:00.000Z'),
@@ -12496,7 +12496,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
         schedule: { kind: 'dailyLocal', localTime: '18:00' },
         slug: 'synthetic-model-upgrade-reminder', status: 'active', title: 'Recycling reminder', vaultRoot: workingDirectory,
       })
-      if (savedModel === 'gpt-5.6-sol') {
+      if (savedModel !== 'gpt-5.6-luna') {
         const storedFile = path.join(workingDirectory, saved.record.relativePath)
         await writeFile(storedFile, (await readFile(storedFile, 'utf8')).replace(expectedModel, savedModel), 'utf8')
       }
@@ -13724,7 +13724,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
                         action: 'read',
                         result: {
                           mainPersona: 'classic', supportingPersona: null,
-                          model: 'gpt-6-sol',
+                          model: 'gpt-6.2-sol',
                           solAvailable: true,
                           tone: 'casual',
                           voice: 'classic',
@@ -13736,7 +13736,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
                         action: 'update',
                         result: {
                           mainPersona: 'classic', supportingPersona: null,
-                          model: 'gpt-6-sol',
+                          model: 'gpt-6.2-sol',
                           modelChangeAppliesNextRun: false,
                           modelUpdated: false,
                           solAvailable: true,
@@ -18697,7 +18697,7 @@ describeRealCodex('real Codex group-chat behavior e2e', () => {
 
 describeRealCodex('real Codex generated-music fallback e2e', () => {
   it.each([
-    { label: 'Sol code-only', model: 'gpt-6-sol', toolMode: 'code_mode_only' as const },
+    { label: 'Sol code-only', model: 'gpt-6.2-sol', toolMode: 'code_mode_only' as const },
     { label: 'Luna deferred mixed', model: 'gpt-6-luna', toolMode: undefined },
   ])('shared schema: honors the canonical song limit in a subscription $label journey', async ({ model, toolMode }) => {
     const config = await resolveRealCodexE2eConfig({
@@ -31359,7 +31359,7 @@ describeRealCodex('real Codex personalization schema e2e', () => {
     const snapshot = {
       mainPersona: 'classic' as const, supportingPersona: null,
       tone: 'casual' as const, voice: 'classic' as const,
-      model: 'gpt-6-sol' as const, solAvailable: true,
+      model: 'gpt-6.2-sol' as const, solAvailable: true,
     }
     try {
       const codexCommand = normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? 'codex'
@@ -32145,7 +32145,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
           entityId: conditionId,
           entityKind: 'condition',
         }])
-        expect(['gpt-6-luna', 'gpt-6.1-sol']).toContain(
+        expect(['gpt-6-luna', 'gpt-6.2-sol']).toContain(
           savedRequest.assistantTargetOverride?.model,
         )
         if (savedRequest.schedule.kind === 'dailyLocal') {
@@ -33166,7 +33166,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
         /recovery/iu,
         /decid|recommend|train|recover/iu,
       ],
-      expectedModel: 'gpt-6.1-sol',
+      expectedModel: 'gpt-6.2-sol',
       expectedScheduleKind: 'recurring',
       occurrenceProjection: { status: 'pending' as const },
       prompt: [
@@ -33174,7 +33174,7 @@ describeRealCodex('real Codex app-server cache usage e2e', () => {
         'decide whether I should train or recover, and remind me here with that recommendation. Save it now.',
       ].join(' '),
       scenario: 'contextual-recovery-reminder',
-      testName: 'context reminder uses GPT-6.1 Sol',
+      testName: 'context reminder uses GPT-6.2 Sol',
     },
   ] as const)(
     '$testName',
@@ -34217,13 +34217,13 @@ describe('real Codex app-server cache usage e2e harness', () => {
   it('writes provider-key config without embedding the provider key value', () => {
     const configToml = buildRealCodexConfigToml({
       apiKeyEnv: 'PROVIDER_AUTH',
-      model: 'gpt-6-sol',
+      model: 'gpt-6.2-sol',
       modelProvider: OPENAI_ENV_MODEL_PROVIDER,
     })
     const hostedPermissionConfigToml = buildRealCodexHostedPermissionConfigToml({
       codexHome: null,
       env: {},
-      model: 'gpt-6-sol',
+      model: 'gpt-6.2-sol',
       modelProvider: OPENAI_ENV_MODEL_PROVIDER,
       providerApiKeyEnv: 'PROVIDER_AUTH',
       temporaryPaths: [],
@@ -34232,7 +34232,7 @@ describe('real Codex app-server cache usage e2e harness', () => {
       buildRealCodexHostedPermissionConfigToml({
         codexHome: null,
         env: {},
-        model: 'gpt-6-sol',
+        model: 'gpt-6.2-sol',
         modelProvider: OPENAI_SUBSCRIPTION_MODEL_PROVIDER,
         providerApiKeyEnv: null,
         temporaryPaths: [],
@@ -38604,7 +38604,7 @@ describeRealCodex('real Codex weekly usage optimizer e2e', () => {
     const definitions = [
       ['cue', 'Stretch cue', 'Say: Time for a short stretch break.'],
       ['lookup', 'Weather walk', 'Read the saved approximate city and current weather once; suggest the usual short walk only if weather is suitable. Do not ask for location or make medical recommendations.'],
-      ['pinned', 'Preferred reminder', 'The member explicitly requested GPT-6.1 Sol for this reminder. Keep that model. Say: Time for your break.'],
+      ['pinned', 'Preferred reminder', 'The member explicitly requested GPT-6.2 Sol for this reminder. Keep that model. Say: Time for your break.'],
       ['managed', 'Managed maintenance', 'Preserve this host-managed workflow.'],
       ['research', 'Research review', 'Research new clinical evidence, reconcile conflicting sources against relevant medical history, and verify citations before offering a carefully qualified summary.'],
     ] as const
@@ -38614,7 +38614,7 @@ describeRealCodex('real Codex weekly usage optimizer e2e', () => {
       occurrenceProjection: { status: 'resolved' as const, nextOccurrenceAt: '2026-10-06T09:00:00.000Z' },
       schedule: { kind: 'dailyLocal' as const, localTime: '09:00', timeZone: 'UTC' },
       managed: slug === 'managed', status: 'active' as const, updatedAt: '2026-10-01T00:00:00.000Z',
-      assistantTargetOverride: { model: 'gpt-6.1-sol' as const, reasoningEffort: 'medium' as const },
+      assistantTargetOverride: { model: 'gpt-6.2-sol' as const, reasoningEffort: 'medium' as const },
     }))
     const changed: string[] = []
     const usageRequests: unknown[] = []
@@ -38639,7 +38639,7 @@ describeRealCodex('real Codex weekly usage optimizer e2e', () => {
         items: [...records.map(({ instructions: _instructions, ...record }) => record), {
           automationId: MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION.automationId,
           title: MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION.title, status: 'active', tags: ['murph-managed:weekly-usage-optimizer'],
-          assistantTargetOverride: { model: 'gpt-6.1-sol', reasoningEffort: 'medium' },
+          assistantTargetOverride: { model: 'gpt-6.2-sol', reasoningEffort: 'medium' },
         }],
       } }
       const executable = path.join(binDirectory, 'vault-cli')
@@ -38738,13 +38738,13 @@ describeRealCodex('real Codex isolated usage review e2e', () => {
       const records: Array<Awaited<ReturnType<typeof upsertAutomation>>['record']> = []
       for (const [slug, instructions] of [
         ['cue', 'Say: Time for your short stretch break.'],
-        ['pinned', 'The member explicitly requested GPT-6.1 Sol for this reminder. Keep that model. Say: Time for your break.'],
+        ['pinned', 'The member explicitly requested GPT-6.2 Sol for this reminder. Keep that model. Say: Time for your break.'],
       ]) {
         const saved = await upsertAutomation({
           vaultRoot: vault, slug: `synthetic-review-${slug}`, title: `Synthetic ${slug}`,
           instructions, status: 'active', continuityPolicy: 'preserve', tags: [],
           schedule: { kind: 'dailyLocal', localTime: '09:00', timeZone: 'UTC' },
-          assistantTargetOverride: { model: 'gpt-6.1-sol', reasoningEffort: 'medium' },
+          assistantTargetOverride: { model: 'gpt-6.2-sol', reasoningEffort: 'medium' },
           route: { channel: 'telegram', identityId: null, participantId: null,
             threadId: 'synthetic-usage-review-thread', threadIsDirect: true, deliveryTarget: null },
         })
@@ -47174,7 +47174,7 @@ describeRealCodex('scheduled phone-call reminder journey', () => {
         return
       }
       expect(saves).toHaveLength(1)
-      expect(saves[0]).toMatchObject({ action: 'save', schedule: { kind: 'at', at: due }, assistantTargetOverride: { model: 'gpt-6.1-sol' } })
+      expect(saves[0]).toMatchObject({ action: 'save', schedule: { kind: 'at', at: due }, assistantTargetOverride: { model: 'gpt-6.2-sol' } })
       expect(setup.finalMessage).toMatch(/call/iu)
       expect(setup.finalMessage).toMatch(/10:20/iu)
       expect(setup.finalMessage).not.toMatch(/(?:can.t|cannot) (?:schedule|call)|iMessage instead|what.*number/iu)
@@ -47444,7 +47444,7 @@ describeRealCodex('production reaction routing turn journey', () => {
         let requests = 0
         const result = await sendAssistantMessageLocal({
           approvalPolicy: 'never', channel: 'linq', codexCommand: fixture.codexCommand, codexHome: fixture.codexHome,
-          deliverResponse: false, includeEarlySessionOnboarding: false, model: 'gpt-6.1-sol', modelProvider: config.modelProvider,
+          deliverResponse: false, includeEarlySessionOnboarding: false, model: 'gpt-6.2-sol', modelProvider: config.modelProvider,
           prompt: scenario.reaction, reactionRouting: { reaction: scenario.reaction, targetMessage: scenario.targetMessage },
           turnContext: buildAssistantAutoReplyReactionTurnContext(scenario.targetMessage),
           acceptedTurnInput: { initialInputs: [{ id: `synthetic-reaction-${scenario.name}`, source: 'manual', acceptedAt: new Date().toISOString() }] },
@@ -50656,7 +50656,7 @@ describeRealCodex('ordinary input replay reminder journeys', () => {
       for (const request of saves) {
         expect(request.slug).toBeUndefined()
         expect(request.instructions).toMatch(/stretch/iu)
-        expect(['gpt-6-luna', 'gpt-6.1-sol']).toContain(request.assistantTargetOverride?.model)
+        expect(['gpt-6-luna', 'gpt-6.2-sol']).toContain(request.assistantTargetOverride?.model)
         if (request.schedule.kind === 'dailyLocal') expect(request.schedule.localTime).toBe('09:00')
         else if (request.schedule.kind === 'cron') expect(request.schedule.expression).toBe('0 9 * * *')
         else throw new Error('Expected a daily stretch schedule.')

@@ -57,7 +57,7 @@ describe("hosted-local Cloudflare source snapshot", () => {
     fixture.root = await mkdtemp(path.join(os.tmpdir(), "murph-source-snapshot-"));
     await writeFixtureFile("Dockerfile.cloudflare-hosted-runner", "FROM fixture-runner\n");
     await writeFixtureFile("apps/cloudflare/.dockerignore", "node_modules\n");
-    await writeFixtureFile("apps/cloudflare/codex-model-catalog.terra.json", '{"models":[]}\n');
+    await writeFixtureFile("apps/cloudflare/codex-model-catalog.6.2.json", '{"models":[]}\n');
     await writeFixtureFile("apps/cloudflare/src/index.ts", "export const worker = true;\n");
     await writeFixtureFile("apps/cloudflare/.deploy/runner-bundle/index.js", "runner bundle\n");
     await writeFixtureFile("apps/cloudflare/package.json", JSON.stringify({
@@ -94,7 +94,7 @@ describe("hosted-local Cloudflare source snapshot", () => {
       .toBe("FROM fixture-runner\n");
     expect(await readFile(path.join(snapshot.cloudflareAppDir, ".dockerignore"), "utf8"))
       .toBe("node_modules\n");
-    expect(await readFile(path.join(snapshot.cloudflareAppDir, "codex-model-catalog.terra.json"), "utf8"))
+    expect(await readFile(path.join(snapshot.cloudflareAppDir, "codex-model-catalog.6.2.json"), "utf8"))
       .toBe('{"models":[]}\n');
     expect(await readFile(path.join(snapshot.cloudflareAppDir, ".deploy/runner-bundle/index.js"), "utf8"))
       .toBe("runner bundle\n");

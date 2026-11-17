@@ -5175,7 +5175,7 @@ test('sendAssistantMessageLocal composes group reconsideration through the real 
   const requestOneLive = createDeferred<void>()
   const providerConfig = normalizeAssistantProviderConfig({
     approvalPolicy: 'never',
-    model: 'gpt-6.1-sol',
+    model: 'gpt-6.2-sol',
     modelProvider: 'openai',
     provider: 'codex-cli',
     sandbox: 'workspace-write',

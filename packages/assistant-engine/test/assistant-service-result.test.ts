@@ -18,7 +18,7 @@ describe('assistant service-result seam', () => {
           approvalPolicy: 'never',
           codexCommand: null,
           codexHome: null,
-          model: 'gpt-6.1-sol',
+          model: 'gpt-6.2-sol',
           modelProvider: 'hosted-openai',
           oss: false,
           profile: null,
@@ -53,12 +53,12 @@ describe('assistant service-result seam', () => {
     expect(assistantAskResultSchema.parse(result)).toEqual(result)
     expect(result.session.target).toMatchObject({
       adapter: 'codex-cli',
-      model: 'gpt-6.1-sol',
+      model: 'gpt-6.2-sol',
       modelProvider: 'hosted-openai',
     })
     expect(result.session.providerOptions).toMatchObject({
       executionDriver: 'codex-app-server',
-      model: 'gpt-6.1-sol',
+      model: 'gpt-6.2-sol',
       modelProvider: 'hosted-openai',
       provider: 'codex-cli',
       resumeKind: 'codex-thread',

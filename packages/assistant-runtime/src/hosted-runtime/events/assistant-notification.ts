@@ -3,7 +3,7 @@ import { GAME_RECAP_GENERATION_RETIRED, gameGroupMissedCheckInPolicySchema, pars
 import { buildHostedGameChatBootstrapPolicy, isHostedGameBootstrapUnavailable } from "./game-chat-bootstrap.ts";
 import type { HostedRuntimeGroupToolPort } from "../platform.ts";
 import { resolveHostedOperatorModelProvider } from "../codex-runtime-env.ts";
-import { HOSTED_ASSISTANT_GPT_61_SOL_MODEL } from "@murphai/hosted-execution/assistant-model";
+import { HOSTED_ASSISTANT_SOL_MODEL } from "@murphai/hosted-execution/assistant-model";
 import { createHash } from "node:crypto";
 
 import { buildHostedNotificationAutomationRoute } from "../current-delivery-route.ts";
@@ -957,7 +957,7 @@ function buildAssistantNotificationInput(
 
 function withPairShowTarget(notificationInput: AssistantNotificationInput, wake: HostedExecutionAssistantNotificationRequestedWake, executionContext: AssistantExecutionContext): void {
   if (wake.notification.responsePolicy?.kind === "require_game_recap" && wake.notification.responsePolicy.show) {
-    notificationInput.assistantTargetOverride = { model: HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
+    notificationInput.assistantTargetOverride = { model: HOSTED_ASSISTANT_SOL_MODEL,
       modelProvider: resolveHostedOperatorModelProvider(executionContext.hosted?.defaultTarget?.modelProvider) };
   }
 }
@@ -969,7 +969,7 @@ function withOperatorTaskExecution(
 ): AssistantNotificationInput {
   if (operatorTask) {
     input.assistantTargetOverride = {
-      model: HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
+      model: HOSTED_ASSISTANT_SOL_MODEL,
       modelProvider: resolveHostedOperatorModelProvider(
         executionContext.hosted?.defaultTarget?.modelProvider,
       ),

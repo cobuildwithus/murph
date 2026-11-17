@@ -46,7 +46,7 @@ async function fixture(): Promise<ClinicalDocumentExtractionInput> {
     },
     family: 'labs',
     extractedText: bytes.toString(),
-    model: 'gpt-6.1-sol',
+    model: 'gpt-6.2-sol',
   }
 }
 

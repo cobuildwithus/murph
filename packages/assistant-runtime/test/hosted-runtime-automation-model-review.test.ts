@@ -46,7 +46,7 @@ it("projects model reviews without timing reads, preserving ordinary instruction
         slug: managed ? "synthetic-managed" : "synthetic-ordinary",
         title: "Synthetic review",
         instructions,
-        assistantTargetOverride: { model: "gpt-6.1-sol", reasoningEffort: "medium" },
+        assistantTargetOverride: { model: "gpt-6.2-sol", reasoningEffort: "medium" },
         contextReferences: [{ entityKind: "workout_format", entityId: "wfmt_synthetic" }],
         schedule: { kind: "dailyLocal", localTime: "09:00", timeZone: "UTC" },
         route: { channel: "linq", deliveryTarget: "synthetic-thread", threadIsDirect: true,

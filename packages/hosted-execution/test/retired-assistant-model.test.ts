@@ -28,14 +28,19 @@ describe("retired model compatibility", () => {
     })).toThrow("not supported");
   });
 
-  it("reads an old Web catalog without advertising or selecting retired Sol", () => {
+  it("maps legacy Web choices once per family and preserves reasoning", () => {
     const response = parseHostedRuntimeAssistantConfigurationToolResponse({ action: "read", result: {
-      availableModels: [...HOSTED_ASSISTANT_PRODUCT_MODELS, "gpt-5.6-sol"],
+      availableModels: [...HOSTED_ASSISTANT_PRODUCT_MODELS, "gpt-6-sol", "gpt-6.1-sol", "gpt-6-astra", "gpt-5.6-sol"],
       availableReasoningEfforts: ["low", "high"], configurationAvailable: true,
       dormantSolPreference: false, model: "gpt-5.6-sol", reasoningEffort: "high", solAvailable: true,
     } });
     expect(response.result.availableModels).toEqual(HOSTED_ASSISTANT_PRODUCT_MODELS);
-    expect(response.result.model).toBe("gpt-6.1-sol");
+    expect(response.result.model).toBe("gpt-6.2-sol");
     expect(response.result.reasoningEffort).toBe("high");
+
+    const restricted = parseHostedRuntimeAssistantConfigurationToolResponse({ action: "read", result: {
+      ...response.result, availableModels: ["gpt-6-luna", "gpt-5.6-sol"], solAvailable: false,
+    } });
+    expect(restricted.result.availableModels).toEqual(["gpt-6-luna"]);
   });
 });

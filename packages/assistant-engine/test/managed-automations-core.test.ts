@@ -792,7 +792,7 @@ describe('applyMurphManagedAutomations core integration', () => {
     })
     expectCronSchedule(insightRecord?.schedule)
     expect(insightRecord?.assistantTargetOverride).toEqual({
-      model: 'gpt-6.1-sol',
+      model: 'gpt-6.2-sol',
       reasoningEffort: 'high',
     })
     expect(insightRecord?.tags).toContain('murph-managed:weekly-health-insight')
@@ -906,7 +906,7 @@ describe('applyMurphManagedAutomations core integration', () => {
       title: 'Monthly improvement coach',
     })
     expect(improvementCoachRecord?.assistantTargetOverride).toEqual({
-      model: 'gpt-6.1-sol',
+      model: 'gpt-6.2-sol',
       reasoningEffort: 'high',
     })
     expect(improvementCoachRecord?.tags).toContain('murph-managed:monthly-improvement-coach')
@@ -2423,7 +2423,7 @@ describe('applyMurphManagedAutomations core integration', () => {
     expect(migrated).toMatchObject({
       automationId: MURPH_MONTHLY_IMPROVEMENT_COACH_AUTOMATION_ID,
       assistantTargetOverride: {
-        model: 'gpt-6.1-sol',
+        model: 'gpt-6.2-sol',
         reasoningEffort: 'high',
       },
       route: existingRoute,

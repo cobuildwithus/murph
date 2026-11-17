@@ -35,7 +35,7 @@ const PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET =
   "codex-route-conformance-signing-secret";
 const RUNNER_CONTAINER_NAME = "member_123--v-version_1";
 const TEST_USER_ID = "member_123";
-const SCRIPTED_MODEL = "gpt-6.1-sol";
+const SCRIPTED_MODEL = "gpt-6.2-sol";
 const SCRIPTED_PROVIDER_ENV = "MURPH_CODEX_ROUTE_CONFORMANCE_KEY";
 const TEST_TIMEOUT_MS = 90_000;
 const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
@@ -450,6 +450,7 @@ describe("pinned Codex OpenAI egress conformance", () => {
           codexHome,
           dynamicTools: [],
           env: {
+            MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON: fileURLToPath(new URL("../codex-model-catalog.6.2.json", import.meta.url)),
             [SCRIPTED_PROVIDER_ENV]: credential,
             HOME: process.env.HOME,
             PATH: process.env.PATH,
@@ -500,7 +501,7 @@ describe("pinned Codex OpenAI egress conformance", () => {
         expect(firstResponsesInput.split(
           "Search for the synthetic route-conformance result, then answer.",
         )).toHaveLength(2);
-        expect(firstResponsesInput.split("### `web__run`")).toHaveLength(2);
+        expect(JSON.stringify(firstResponsesBody).split("web__run(args:")).toHaveLength(2);
         const searchRequest = forwardedRequests.find((request) =>
           new URL(request.url).pathname === "/v1/alpha/search"
         );

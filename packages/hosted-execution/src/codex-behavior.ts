@@ -1,7 +1,7 @@
 // Shared hosted behavior for the runtime and opt-in local journey launcher.
 // Authentication, filesystem permissions, and shell environments keep their own owners.
 const HOSTED_CODEX_MULTI_AGENT_USAGE_HINT_TEXT = [
-  "When the active route or skill contract permits delegation, proactively spawn a fresh child for bounded multi-pass CLI work that replaces repeated root passes over a large conversation, even when needed for this reply; use fork_turns none and gpt-6.1-sol medium when model overrides are available unless the user selected another child model.",
+  "When the active route or skill contract permits delegation, proactively spawn a fresh child for bounded multi-pass CLI work that replaces repeated root passes over a large conversation, even when needed for this reply; use fork_turns none and gpt-6.2-sol medium when model overrides are available unless the user selected another child model.",
   "Use the child to replace a later root pass, not duplicate work; unless the user requests delegation, skip tiny tasks whose assignment and readback cost exceeds doing them once in the root.",
   "For any delegated result needed to answer, use native wait_agent, then answer in the same turn. Keep independent onboarding saves nonblocking.",
   "Follow the active route or skill contract for the exact leaf assignment and completion proof.",

@@ -69,15 +69,17 @@ export function supportsCodexTurnDeveloperInstructions(input: {
 // an admitted follow-up preempts unfinished generation in the same turn, and an
 // interrupted turn stops its code-mode cells and their nested tool calls. These
 // stay CLI-layer process overrides so user config isolation cannot drop them.
-const CODEX_APP_SERVER_STEERING_FEATURE_OVERRIDES = [
+const CODEX_APP_SERVER_RUNTIME_FEATURE_DEFAULTS = [
   'features.instant_interrupt=true',
   'features.code_mode_interrupt=true',
+  // Honor Murph's high-detail gallery cap and original-detail single images.
+  'features.unified_image_budget=false',
 ] as const
 
 export function withCodexAppServerRuntimeFeatureOverrides(
   configOverrides: readonly string[],
 ): readonly string[] {
-  const missing = CODEX_APP_SERVER_STEERING_FEATURE_OVERRIDES.filter((feature) =>
+  const missing = CODEX_APP_SERVER_RUNTIME_FEATURE_DEFAULTS.filter((feature) =>
     !configOverrides.some((override) =>
       readCodexConfigOverrideKey(override) === readCodexConfigOverrideKey(feature)
     )

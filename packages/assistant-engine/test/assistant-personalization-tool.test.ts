@@ -73,7 +73,7 @@ describe('assistant personalization tool', () => {
     const personalizationTool = { request: vi.fn(async () => ({ action: 'read' as const, result: {
       mainPersona: "classic" as const,
       supportingPersona: null,
-      model: 'gpt-6-sol' as const, solAvailable: true, tone: 'formal' as const, voice: 'warm' as const,
+      model: 'gpt-6.2-sol' as const, solAvailable: true, tone: 'formal' as const, voice: 'warm' as const,
     } })) }
     const result = await executeMurphDynamicToolRequest({
       env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null, request,
@@ -163,7 +163,7 @@ describe('assistant personalization tool', () => {
         result: {
           mainPersona: "classic" as const,
           supportingPersona: null,
-          model: 'gpt-6-sol' as const,
+          model: 'gpt-6.2-sol' as const,
           modelChangeAppliesNextRun: false as const,
           modelUpdated: false as const,
           solAvailable: true,

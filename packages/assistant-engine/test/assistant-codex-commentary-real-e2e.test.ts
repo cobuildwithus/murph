@@ -12,7 +12,7 @@ import { buildAssistantExecutionBehaviorText } from '../src/assistant/model-beha
 
 const RUN_REAL_CODEX_E2E = process.env.MURPH_RUN_REAL_CODEX_E2E === '1'
 const describeRealCodex = RUN_REAL_CODEX_E2E ? describe : describe.skip
-const model = process.env.MURPH_REAL_CODEX_MODEL?.trim() || 'gpt-6.1-sol'
+const model = process.env.MURPH_REAL_CODEX_MODEL?.trim() || 'gpt-6.2-sol'
 const subscription = process.env.MURPH_REAL_CODEX_AUTH === 'subscription'
 const modelProvider = subscription ? 'openai' : 'openai-env'
 

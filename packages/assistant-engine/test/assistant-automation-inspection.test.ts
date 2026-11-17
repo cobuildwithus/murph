@@ -37,7 +37,7 @@ describe('automation definition inspection', () => {
   ] as const)('preserves bounded inspection: %s', async (_label, instructions, success) => {
     const request = { action: 'inspect' as const, lookup: 'automation_synthetic' }
     const definition = {
-      assistantTargetOverride: { model: 'gpt-6.1-sol', reasoningEffort: 'medium' } as const,
+      assistantTargetOverride: { model: 'gpt-6.2-sol', reasoningEffort: 'medium' } as const,
       managed: false,
       instructions,
       title: 'Afternoon movement',

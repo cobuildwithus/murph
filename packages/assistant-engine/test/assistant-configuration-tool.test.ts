@@ -5,7 +5,7 @@ import {
   HOSTED_ASSISTANT_LUNA_MODEL,
   HOSTED_ASSISTANT_PRODUCT_MODELS,
   HOSTED_ASSISTANT_REASONING_EFFORTS,
-  HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
+  HOSTED_ASSISTANT_SOL_MODEL,
   HOSTED_ASSISTANT_DEFAULT_MODEL,
 } from "@murphai/hosted-execution/assistant-model";
 import {
@@ -30,7 +30,7 @@ describe("assistant configuration tool", () => {
       expect(readTestMurphDynamicToolRequest({
         method: "item/tool/call",
         params: {
-          arguments: { action: "update", model: "gpt-6-sol", provider },
+          arguments: { action: "update", model: "gpt-6.2-sol", provider },
           namespace: "murph",
           tool: "assistant_configuration",
         },
@@ -104,7 +104,7 @@ describe("assistant configuration tool", () => {
         assistantConfigurationTool,
         assistantInputId: `ain_${"g".repeat(32)}`,
         conversationScope: "group",
-        currentModel: HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
+        currentModel: HOSTED_ASSISTANT_SOL_MODEL,
         currentReasoningEffort: "low",
       }),
       nextUsageOrdinal: () => 0,
@@ -120,7 +120,7 @@ describe("assistant configuration tool", () => {
     });
     expect(readToolPayload(result)).toEqual({
       currentTurn: {
-        model: HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
+        model: HOSTED_ASSISTANT_SOL_MODEL,
         reasoningEffort: "low",
       },
       savedForNextTurn: updatedSaved,
@@ -153,7 +153,7 @@ describe("assistant configuration tool", () => {
           assistantConfigurationTool,
           assistantInputId: `ain_${"h".repeat(32)}`,
           conversationScope: "group",
-          currentModel: HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
+          currentModel: HOSTED_ASSISTANT_SOL_MODEL,
           currentReasoningEffort: "low",
         }),
         nextUsageOrdinal: () => 0,
@@ -197,7 +197,7 @@ describe("assistant configuration tool", () => {
       fetchImpl: fetch,
       hostedToolContext: createHostedToolContext({
         assistantConfigurationTool,
-        currentModel: HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
+        currentModel: HOSTED_ASSISTANT_SOL_MODEL,
         currentReasoningEffort: "high",
       }),
       nextUsageOrdinal: () => 0,
@@ -211,7 +211,7 @@ describe("assistant configuration tool", () => {
     expect(result.rpcResult.success).toBe(true);
     expect(readToolPayload(result)).toEqual({
       currentTurn: {
-        model: HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
+        model: HOSTED_ASSISTANT_SOL_MODEL,
         reasoningEffort: "high",
       },
       savedForNextTurn: createSavedConfiguration({
@@ -385,7 +385,7 @@ describe("assistant configuration tool", () => {
     });
   });
 
-  it.each([[HOSTED_ASSISTANT_GPT_61_SOL_MODEL, "edge"], ["gpt-6-astra", "edge"]] as const)("returns the authoritative %s upgrade requirement", async (model, requiredPlan) => {
+  it.each([[HOSTED_ASSISTANT_SOL_MODEL, "edge"], ["gpt-6.2-astra", "edge"]] as const)("returns the authoritative %s upgrade requirement", async (model, requiredPlan) => {
     const request = readTestMurphDynamicToolRequest({
       method: "item/tool/call",
       params: {
@@ -593,7 +593,7 @@ describe("assistant configuration tool", () => {
 function createSavedConfiguration(input: {
   model: typeof HOSTED_ASSISTANT_LUNA_MODEL
     | typeof HOSTED_ASSISTANT_DEFAULT_MODEL
-    | typeof HOSTED_ASSISTANT_GPT_61_SOL_MODEL;
+    | typeof HOSTED_ASSISTANT_SOL_MODEL;
   reasoningEffort: "low" | "medium" | "high" | "xhigh";
 }) {
   return {
@@ -610,7 +610,7 @@ function createSavedConfiguration(input: {
 function createGroupSavedConfiguration(
   model: typeof HOSTED_ASSISTANT_LUNA_MODEL
     | typeof HOSTED_ASSISTANT_DEFAULT_MODEL
-    | typeof HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
+    | typeof HOSTED_ASSISTANT_SOL_MODEL,
 ) {
   return {
     availableModels: [...HOSTED_ASSISTANT_PRODUCT_MODELS],

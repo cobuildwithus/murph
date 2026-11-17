@@ -90,7 +90,7 @@ describe.skipIf(process.env.MURPH_MEASURE_WEEKLY_USAGE_INPUT !== '1')('weekly us
         const tools = (phase === 'base' ? baselineCatalog.resolveMurphDynamicTools : resolveMurphDynamicTools)(availability)
         const configSource = await nativeDelegationSource(phase)
         const scenario = await prepareScriptedTurnScenario(stub, temporaryPaths, {
-          model: 'gpt-6.1-sol', additionalTomlLines: nativeDelegationConfig(configSource),
+          model: 'gpt-6.2-sol', additionalTomlLines: nativeDelegationConfig(configSource),
         })
         const build = phase === 'base' ? baseline.buildAssistantSystemPromptLayers : buildAssistantSystemPromptLayers
         const layers = build({
@@ -119,7 +119,7 @@ describe.skipIf(process.env.MURPH_MEASURE_WEEKLY_USAGE_INPUT !== '1')('weekly us
         assert.ok(capture)
         const body = readRecord(JSON.parse(capture.json))
         assert.ok(body)
-        expect(body.model).toBe('gpt-6.1-sol')
+        expect(body.model).toBe('gpt-6.2-sol')
         expect(capture.json).toContain('functions')
         captures.push({
           phase, bytes: Buffer.byteLength(capture.json),
@@ -134,9 +134,9 @@ describe.skipIf(process.env.MURPH_MEASURE_WEEKLY_USAGE_INPUT !== '1')('weekly us
       const [before, after] = captures
       assert.ok(before && after)
       process.stdout.write(`[weekly-usage-input-proof] ${JSON.stringify({
-        scope, base, model: 'gpt-6.1-sol', nativeDelegation: true, captures,
+        scope, base, model: 'gpt-6.2-sol', nativeDelegation: true, captures,
         deltaBytes: after.bytes - before.bytes, deltaPercent: (after.bytes - before.bytes) / before.bytes * 100,
-        tokens: null, tokenDelta: null, tokenLimitation: 'No exact GPT-6.1 Sol tokenizer is configured; no estimate is substituted.',
+        tokens: null, tokenDelta: null, tokenLimitation: 'No exact GPT-6.2 Sol tokenizer is configured; no estimate is substituted.',
       })}\n`)
     } finally {
       await stopWarmCodexAppServer()

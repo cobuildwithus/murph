@@ -1228,16 +1228,16 @@ Hosted managed crypto:
 Hosted AI usage accounting:
 
 - Hosted AI usage rows are recorded locally for allowance, audit, and future billing analysis. The hosted app no longer attaches Stripe usage prices at checkout or posts Stripe meter events.
-- GPT-6 Astra is an optional managed OpenAI model for active paid individual Edge/Max
+- GPT-6.2 Astra is an optional managed OpenAI model for active paid individual Edge/Max
   and active Family Edge/Max seats. The existing assistant preference owner enforces
   eligibility on writes and runtime reads; losing Edge/Max access retains the preference
-  while using the GPT-6.1 Sol default until access returns. Group rooms retain Luna and Sol.
-  Astra uses $10 input, $1 cache reads, $12.50 cache writes, and $50 output per
-  million tokens; OpenAI Flex uses half those rates. Exact requests above 272K
+  while using the GPT-6.1 Terra personal-chat default until access returns. Group rooms retain Luna and Sol.
+  Astra uses $8 input, $0.40 cache reads, $10 cache writes, and $40 output per
+  million tokens. Scheduled Sol and Astra work keeps Flex. Murph estimates their Flex prices at half the 6.2 standard rates pending published rates. Exact requests above 272K
   input use twice the input/cache rates and 1.5 times the output rate. Hosted
   Codex keeps Astra context at 272K, so cumulative turn/subagent usage is charged
   at ordinary rates even when several requests together exceed that threshold.
-  Rates: https://developers.openai.com/api/docs/models/gpt-6-astra
+  Rates: https://developers.openai.com/api/docs/models/gpt-6.2-astra
 - Hosted AI included-allowance accounting is app-owned: web prices recorded `HostedAiUsage` rows by canonical model and recorded provider into allowance columns and maintains `HostedAiUsagePeriod` spend snapshots from current hosted billing state. OpenAI usage uses the supported model rate table; previously settled usage retains its original pricing snapshot. Subsequent usage-bearing work is blocked when included capacity and usage credit are both exhausted. The operation that crosses the boundary may finish; its accepted input is not discarded.
 - Retell phone calls use the same ledger through a web-internal deterministic row keyed by the Murph call id. Web records Retell's final provider-reported combined cost, including discounts and transfer-leg cost, and never accepts that cost field from the hosted-runtime usage callback. `transfer_ended` and the pre-armed phone-call reconciliation workflow prevent a provisional transfer cost or lost callback from becoming permanent undercounting.
 - Usage credit is separate from the included-allowance period. A beneficiary-serialized transaction consumes included capacity first, then purchase/referral grant entries with remaining capacity in FIFO order, while `HostedMember` carries the bounded balance/version hot-path projection. Unused credit carries across allowance periods and does not create subscription entitlement. Stripe refunds and disputes may reverse only purchase-backed entries; earned referral grants are final.

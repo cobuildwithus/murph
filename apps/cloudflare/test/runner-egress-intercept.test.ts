@@ -560,7 +560,7 @@ describe("hostedRunnerIntercept", () => {
       new Request("https://api.openai.com/v1/responses", {
         body: JSON.stringify({
           input: "platform-funded request",
-          model: "gpt-6.1-sol",
+          model: "gpt-6.2-sol",
           stream: true,
         }),
         headers: {
@@ -673,7 +673,7 @@ describe("hostedRunnerIntercept", () => {
       new Request("https://api.openai.com/v1/responses", {
         body: JSON.stringify({
           input: "automatic retry",
-          model: "gpt-6.1-sol",
+          model: "gpt-6.2-sol",
           stream: true,
         }),
         headers: {
@@ -1353,7 +1353,7 @@ describe("hostedRunnerIntercept", () => {
 
     const response = await hostedRunnerIntercept(
       new Request("https://api.openai.com/v1/responses", {
-        body: JSON.stringify({ model: "gpt-6.1-sol", input: "Synthetic text turn." }),
+        body: JSON.stringify({ model: "gpt-6.2-sol", input: "Synthetic text turn." }),
         headers: {
           ...BOUND_USER_WRITE_FENCE_HEADERS,
           cookie: "session=user-supplied-cookie",
@@ -1428,7 +1428,7 @@ describe("hostedRunnerIntercept", () => {
         type: "message",
       }],
       max_output_tokens: 2_500,
-      model: "gpt-6.1-sol",
+      model: "gpt-6.2-sol",
       settings: {
         allowed_callers: ["direct"],
         external_web_access: false,
@@ -1494,7 +1494,7 @@ describe("hostedRunnerIntercept", () => {
       method: "POST",
       headers: { authorization: `Bearer ${credential}`, "content-type": "application/json" },
       body: JSON.stringify({
-        model: "gpt-6.1-sol",
+        model: "gpt-6.2-sol",
         input: "Draw a synthetic geometric pattern.",
         tools: image ? [{ type: "image_generation" }] : [],
       }),
@@ -1572,7 +1572,7 @@ describe("hostedRunnerIntercept", () => {
     vi.stubGlobal('fetch', upstream);
     const response = await hostedRunnerIntercept(new Request('https://api.openai.com/v1/responses', {
       method, headers: { authorization: `Bearer ${HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL}`, 'content-type': 'application/json', ...(method === 'GET' ? { upgrade: 'websocket', connection: 'Upgrade', 'sec-websocket-version': '13', 'sec-websocket-key': 'dGhlIHNhbXBsZSBub25jZQ==' } : {}) },
-      ...(method === 'POST' ? { body: JSON.stringify({ model: 'gpt-6.1-sol', input: 'Synthetic text' }) } : {}),
+      ...(method === 'POST' ? { body: JSON.stringify({ model: 'gpt-6.2-sol', input: 'Synthetic text' }) } : {}),
     }), createInterceptEnv({ OPENAI_API_KEY: 'synthetic-key', recapMediaScoped: true, consumeRecapMediaRequest: consume, validateRuntimeWriteFence: async () => true }),
     { className: 'RunnerContainer', containerId: 'synthetic-container' });
     // The Node harness has no WebSocketPair; its ordinary upgrade boundary returns 426.
@@ -3061,7 +3061,7 @@ describe("hostedRunnerIntercept", () => {
 
     const response = await hostedRunnerIntercept(
       new Request("https://api.openai.com/v1/responses", {
-        body: JSON.stringify({ model: "gpt-6.1-sol", input: "Synthetic text turn." }),
+        body: JSON.stringify({ model: "gpt-6.2-sol", input: "Synthetic text turn." }),
         headers: {
           authorization: `Bearer ${credential}`,
         },
@@ -3258,7 +3258,7 @@ describe("hostedRunnerIntercept", () => {
 
     const response = await hostedRunnerIntercept(
       new Request("https://api.openai.com/v1/responses", {
-        body: JSON.stringify({ model: "gpt-6.1-sol", input: "Synthetic text turn." }),
+        body: JSON.stringify({ model: "gpt-6.2-sol", input: "Synthetic text turn." }),
         headers: {
           authorization: `Bearer ${credential}`,
         },
@@ -3877,7 +3877,7 @@ describe("hostedRunnerIntercept", () => {
         role: "user",
       }],
       instructions: `synthetic instructions ${syntheticStablePrefix}`,
-      model: "gpt-6.1-sol",
+      model: "gpt-6.2-sol",
       previous_response_id: syntheticPreviousResponse,
       prompt_cache_key: syntheticCacheNamespace,
       prompt_cache_retention: "24h",
@@ -3954,7 +3954,7 @@ describe("hostedRunnerIntercept", () => {
       jsonType: "object",
       jsonValid: true,
       methodKind: "POST",
-      modelKind: "gpt-6.1-sol",
+      modelKind: "gpt-6.2-sol",
       previousResponsePresent: true,
       providerKind: "openai",
       requestFingerprintPresent: true,
@@ -4018,7 +4018,7 @@ describe("hostedRunnerIntercept", () => {
     const sensitiveTurnId = "turn-sensitive-diagnostic-id";
     const requestBody = {
       input: [],
-      model: "gpt-6.1-sol",
+      model: "gpt-6.2-sol",
     };
     const codexTurnMetadata = JSON.stringify({
       compaction: {
@@ -4097,7 +4097,7 @@ describe("hostedRunnerIntercept", () => {
       new Request("https://api.openai.com/v1/responses", {
         body: JSON.stringify({
           input: "hello",
-          model: "gpt-6.1-sol",
+          model: "gpt-6.2-sol",
           prompt_cache_retention: "24h",
         }),
         headers: {
@@ -4137,7 +4137,7 @@ describe("hostedRunnerIntercept", () => {
       new Request("https://api.openai.com/v1/responses", {
         body: JSON.stringify({
           input: "hello",
-          model: "gpt-6.1-sol",
+          model: "gpt-6.2-sol",
           prompt_cache_retention: "24h",
           stream: true,
         }),
@@ -4189,7 +4189,7 @@ describe("hostedRunnerIntercept", () => {
 
     const response = await hostedRunnerIntercept(
       new Request("https://api.openai.com/v1/responses", {
-        body: JSON.stringify({ model: "gpt-6.1-sol", stream: true }),
+        body: JSON.stringify({ model: "gpt-6.2-sol", stream: true }),
         headers: {
           ...BOUND_USER_WRITE_FENCE_WITH_BEARER_SENTINEL_HEADERS,
           "content-type": "application/json",
@@ -6298,7 +6298,7 @@ describe("maybeHandleHostedTranscribeRequest", () => {
       new Request("https://api.openai.com/v1/responses", {
         body: JSON.stringify({
           input: "automatic retry",
-          model: "gpt-6.1-sol",
+          model: "gpt-6.2-sol",
           stream: true,
         }),
         headers: {

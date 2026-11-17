@@ -462,7 +462,7 @@ const automationPublicPathCases = [
     invalidValue: () => ({ reasoningEffort: "not-an-effort" }),
     saveOptions: [
       "--trigger-kind", "cron", "--trigger-cron", "0 9 * * 1",
-      "--assistant-target-override-model", "gpt-6.1-sol",
+      "--assistant-target-override-model", "gpt-6.2-sol",
     ],
     expectedPaths: ["assistantTargetOverride.reasoningEffort"],
   },
@@ -473,7 +473,7 @@ const automationPublicPathCases = [
     overrideIssuePath: ["privateTargetField"],
     saveOptions: [
       "--trigger-kind", "cron", "--trigger-cron", "0 9 * * 1",
-      "--assistant-target-override-model", "gpt-6.1-sol",
+      "--assistant-target-override-model", "gpt-6.2-sol",
     ],
     expectedPaths: [],
   },
@@ -963,7 +963,7 @@ test("automation save and edit manage assistant target overrides from typed fiel
       "--delivery-target",
       "telegram_thread_real",
       "--assistant-target-override-model",
-      "gpt-6.1-sol",
+      "gpt-6.2-sol",
       "--assistant-target-override-model-provider",
       "openai",
       "--assistant-target-override-reasoning-effort",
@@ -992,7 +992,7 @@ test("automation save and edit manage assistant target overrides from typed fiel
     assert.equal(shown.exitCode, null);
     assert.equal(shown.envelope.ok, true);
     assert.deepEqual(shown.envelope.data?.automation?.assistantTargetOverride, {
-      model: "gpt-6.1-sol",
+      model: "gpt-6.2-sol",
       modelProvider: "openai",
       reasoningEffort: "high",
     });
@@ -1032,7 +1032,7 @@ test("automation save and edit manage assistant target overrides from typed fiel
     assert.equal(editedShown.exitCode, null);
     assert.equal(editedShown.envelope.ok, true);
     assert.deepEqual(editedShown.envelope.data?.automation?.assistantTargetOverride, {
-      model: "gpt-6.1-sol",
+      model: "gpt-6.2-sol",
       modelProvider: "openai",
       reasoningEffort: "medium",
     });
@@ -1807,7 +1807,7 @@ test("automation compact list retains enumeration state and materially reduces a
     const record = automationRecordSchema.parse({
       activeUntil: "2026-12-31T23:59:59.000Z",
       assistantTargetOverride: {
-        model: "gpt-6.1-sol",
+        model: "gpt-6.2-sol",
         modelProvider: "openai",
         reasoningEffort: "low",
       },

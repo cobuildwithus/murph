@@ -30,7 +30,7 @@ it("retires idle resumes before snapshot and converges after a lost checkpoint o
   const vaultRoot = path.join(durableRoot, "vault");
   const operatorHomeRoot = path.join(durableRoot, "home");
   await initializeVault({ vaultRoot });
-  const target = createAssistantModelTarget({ provider: "codex-cli", model: "gpt-6.1-sol" });
+  const target = createAssistantModelTarget({ provider: "codex-cli", model: "gpt-6.2-sol" });
   const cases = [
     { alias: "old-notification", lastTurnAt: "2026-10-03T11:59:59.999Z", turnCount: 1, retire: true },
     { alias: "old-conversation", lastTurnAt: "2026-09-01T12:00:00.000Z", turnCount: 8, retire: true },

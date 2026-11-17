@@ -41,10 +41,10 @@ describe('fresh automation model routing', () => {
     const route = await resolveAssistantTurnRouteForMessage(
       createAutomationInput({}),
       null,
-      requireTarget('gpt-6-sol', 'high', 'openai'),
+      requireTarget('gpt-6.2-sol', 'high', 'openai'),
     )
     expect(route.providerOptions).toMatchObject({
-      model: 'gpt-6.1-sol',
+      model: 'gpt-6.2-sol',
       modelProvider: 'openai',
       reasoningEffort: 'high',
     })
@@ -59,7 +59,7 @@ describe('fresh automation model routing', () => {
     const backend = createAssistantModelTarget({
       approvalPolicy: 'never',
       codexCommand: '/opt/murph-codex',
-      model: 'gpt-6.1-sol',
+      model: 'gpt-6.2-sol',
       modelProvider: 'hosted-openai',
       profile: 'scheduled-policy',
       provider: 'codex-cli',

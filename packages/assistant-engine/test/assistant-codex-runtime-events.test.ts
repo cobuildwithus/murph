@@ -200,7 +200,7 @@ describe('assistant codex event shaping', () => {
     })
     const result = await executeCodexAppServerTurn({
       codexHome, workingDirectory, prompt: 'Reply once.',
-      model: 'gpt-6.1-sol', reasoningEffort: 'low', sandbox: 'workspace-write',
+      model: 'gpt-6.2-sol', reasoningEffort: 'low', sandbox: 'workspace-write',
       onTraceEvent: (event) => { traces.push(event) },
     })
     expect(result.finalMessage).toBe('Done.')
@@ -1018,7 +1018,7 @@ describe('assistant codex event shaping', () => {
           result: {
             approvalPolicy: 'never',
             cwd: workingDirectory,
-            model: 'gpt-6.1-sol',
+            model: 'gpt-6.2-sol',
             modelProvider: 'openai',
             sandbox: codexSandboxPolicyForMode('workspace-write'),
             serviceTier: 'flex',
@@ -1093,7 +1093,7 @@ describe('assistant codex event shaping', () => {
         child.stdout.write(jsonLine({
           id: metadataResume.id,
           result: {
-            model: 'gpt-6.1-sol',
+            model: 'gpt-6.2-sol',
             modelProvider: 'openai',
             reasoningEffort: 'high',
             serviceTier: childServiceTier,
@@ -1106,7 +1106,7 @@ describe('assistant codex event shaping', () => {
         approvalPolicy: 'never',
         codexHome,
         env: { PATH: '/custom/bin' },
-        model: 'gpt-6.1-sol',
+        model: 'gpt-6.2-sol',
         modelProvider: 'openai',
         onAdditionalUsage: async (usage) => {
           reportedUsage.resolve(usage)
@@ -1152,8 +1152,8 @@ describe('assistant codex event shaping', () => {
           providerName: 'openai',
           providerRequestId: null,
           reasoningTokens: 7,
-          requestedModel: 'gpt-6.1-sol',
-          servedModel: 'gpt-6.1-sol',
+          requestedModel: 'gpt-6.2-sol',
+          servedModel: 'gpt-6.2-sol',
           tokenPricingBasis: childServiceTier === 'flex' ? 'openai-flex' : 'standard',
           totalTokens: 150,
           usageExtractionSourcePath: 'subagent.turn.tokenUsage.total.delta',
@@ -1257,7 +1257,7 @@ describe('assistant codex event shaping', () => {
           result: {
             // Missing modelProvider: the parent identity is deliberately
             // not used as a billing fallback.
-            model: 'gpt-6.1-sol',
+            model: 'gpt-6.2-sol',
             reasoningEffort: 'high',
             serviceTier: null,
             thread: { id: 'thread-subagent-metadata-child' },
@@ -1275,7 +1275,7 @@ describe('assistant codex event shaping', () => {
         approvalPolicy: 'never',
         codexHome,
         env: { PATH: '/custom/bin' },
-        model: 'gpt-6.1-sol',
+        model: 'gpt-6.2-sol',
         modelProvider: 'openai',
         onAdditionalUsage,
         prompt: 'spawn a child with unavailable metadata',
@@ -1311,7 +1311,7 @@ describe('assistant codex event shaping', () => {
           approvalPolicy: 'never',
           cwd: workingDirectory,
           excludeTurns: true,
-          model: 'gpt-6.1-sol',
+          model: 'gpt-6.2-sol',
           modelProvider: 'openai',
           sandbox: 'workspace-write',
           threadId: 'thread-subagent-cold-parent',
@@ -1321,7 +1321,7 @@ describe('assistant codex event shaping', () => {
           result: {
             approvalPolicy: 'never',
             cwd: workingDirectory,
-            model: 'gpt-6.1-sol',
+            model: 'gpt-6.2-sol',
             modelProvider: 'openai',
             sandbox: codexSandboxPolicyForMode('workspace-write'),
             thread: { id: 'thread-subagent-cold-parent' },
@@ -1343,7 +1343,7 @@ describe('assistant codex event shaping', () => {
               status: 'completed',
               senderThreadId: 'thread-subagent-cold-parent',
               receiverThreadIds: ['thread-subagent-cold-child'],
-              model: 'gpt-6.1-sol-mini',
+              model: 'gpt-6.2-sol-mini',
             },
             threadId: 'thread-subagent-cold-parent',
             turnId: 'turn-subagent-cold-parent',
@@ -1387,7 +1387,7 @@ describe('assistant codex event shaping', () => {
         approvalPolicy: 'never',
         codexHome,
         env: { PATH: '/custom/bin' },
-        model: 'gpt-6.1-sol',
+        model: 'gpt-6.2-sol',
         modelProvider: 'openai',
         prompt: 'resume and meter a child cumulatively',
         resumeSessionId: 'thread-subagent-cold-parent',
@@ -1403,8 +1403,8 @@ describe('assistant codex event shaping', () => {
         outputTokens: 30,
         providerRequestId: null,
         reasoningTokens: 4,
-        requestedModel: 'gpt-6.1-sol',
-        servedModel: 'gpt-6.1-sol',
+        requestedModel: 'gpt-6.2-sol',
+        servedModel: 'gpt-6.2-sol',
         totalTokens: 100,
         usageExtractionSourcePath: 'subagent.turn.tokenUsage.total.delta',
       })
@@ -1570,7 +1570,7 @@ describe('assistant codex event shaping', () => {
           PATH: '/custom/bin',
         },
         modelProvider: 'local-test-provider',
-        model: 'gpt-6.1-sol',
+        model: 'gpt-6.2-sol',
         prompt: 'spawn a subagent and finish',
         sandbox: 'workspace-write',
         workingDirectory,
@@ -1588,8 +1588,8 @@ describe('assistant codex event shaping', () => {
           outputTokens: 1_000,
           providerName: 'local-test-provider',
           reasoningTokens: 120,
-          requestedModel: 'gpt-6.1-sol',
-          servedModel: 'gpt-6.1-sol',
+          requestedModel: 'gpt-6.2-sol',
+          servedModel: 'gpt-6.2-sol',
           totalTokens: 5_000,
         },
       })
@@ -1606,8 +1606,8 @@ describe('assistant codex event shaping', () => {
         usage: {
           inputTokens: 600,
           outputTokens: 100,
-          requestedModel: 'gpt-6.1-sol',
-          servedModel: 'gpt-6.1-sol',
+          requestedModel: 'gpt-6.2-sol',
+          servedModel: 'gpt-6.2-sol',
           totalTokens: 700,
         },
       })
@@ -1653,7 +1653,7 @@ describe('assistant codex event shaping', () => {
                       status: 'completed',
                       senderThreadId: 'thread-subagent-reset-parent',
                       receiverThreadIds: ['thread-subagent-reset-child'],
-                      model: 'gpt-6.1-sol-mini',
+                      model: 'gpt-6.2-sol-mini',
                     },
                     threadId: 'thread-subagent-reset-parent',
                     turnId: 'turn-subagent-reset-parent',
@@ -1778,7 +1778,7 @@ describe('assistant codex event shaping', () => {
             codexHome,
             env: { PATH: '/custom/bin' },
             modelProvider: 'local-test-provider',
-            model: 'gpt-6.1-sol',
+            model: 'gpt-6.2-sol',
             prompt: 'reuse one child across a usage reset',
             sandbox: 'workspace-write',
             workingDirectory,
@@ -1939,7 +1939,7 @@ describe('assistant codex event shaping', () => {
               status: 'completed',
               senderThreadId: 'thread-subagent-fail-parent',
               receiverThreadIds: ['thread-subagent-fail-child'],
-              model: 'gpt-6.1-sol-mini',
+              model: 'gpt-6.2-sol-mini',
             },
             threadId: 'thread-subagent-fail-parent',
             turnId: 'turn-subagent-fail-parent',
@@ -2404,7 +2404,7 @@ describe('assistant codex event shaping', () => {
                     { length: trackedThreadCount + 1 },
                     (_, index) => `thread-subagent-cap-${index + 1}`,
                   ),
-                  model: 'gpt-6.1-sol-mini',
+                  model: 'gpt-6.2-sol-mini',
                 },
                 threadId: 'thread-subagent-cap-parent',
                 turnId: 'turn-subagent-cap-parent',
@@ -2582,7 +2582,7 @@ describe('assistant codex event shaping', () => {
                   status: 'completed',
                   senderThreadId: 'thread-subagent-ordinal-parent',
                   receiverThreadIds: ['thread-subagent-ordinal-child'],
-                  model: 'gpt-6.1-sol-mini',
+                  model: 'gpt-6.2-sol-mini',
                 },
                 threadId: 'thread-subagent-ordinal-parent',
                 turnId: 'turn-subagent-ordinal-parent',

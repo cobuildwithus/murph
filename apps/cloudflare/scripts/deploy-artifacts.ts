@@ -1271,7 +1271,7 @@ async function resolveHostedRunnerSourceRoots(input: {
     path.join(input.repoRoot, "Dockerfile.cloudflare-hosted-runner-base"),
     path.join(input.repoRoot, "patches/codex-websocket-ack.patch"),
     path.join(input.appDir, ".dockerignore"),
-    path.join(input.appDir, "codex-model-catalog.terra.json"),
+    path.join(input.appDir, "codex-model-catalog.6.2.json"),
     path.join(input.appDir, "scripts"),
   ];
 

@@ -304,7 +304,7 @@ function readMurphDynamicToolAdvertisement(body: string): {
   const candidateToolLists: unknown[][] = [];
 
   // The murph namespace appears in the top-level `tools` array on the full
-  // Responses API. Responses Lite models (e.g. gpt-6.1-sol in Codex >= 0.144)
+  // Responses API. Responses Lite models (e.g. gpt-6.2-sol in Codex >= 0.144)
   // relocate the structured tool specs into an `additional_tools` input item
   // and null the top-level `tools`, so look in both places.
   const topLevelTools = request?.tools;
@@ -965,7 +965,7 @@ export async function startAssistantProviderStubServer(input: {
   responseState?: HostedLocalAssistantProviderStubState;
   usageMode?: HostedLocalAssistantProviderStubUsageMode;
 } = {}): Promise<ReturnType<typeof createServer>> {
-  const modelId = input.modelId ?? "gpt-6.1-sol";
+  const modelId = input.modelId ?? "gpt-6.2-sol";
   let responseSequence = 0;
   let responsesApiRequestBodyCount = 0;
 
@@ -1343,7 +1343,7 @@ export function resolveHostedAssistantLocalDevEnv(
 
     return {
       ...buildHostedAssistantStubEnvClearances(),
-      HOSTED_ASSISTANT_MODEL: "gpt-6.1-sol",
+      HOSTED_ASSISTANT_MODEL: "gpt-6.2-sol",
       HOSTED_ASSISTANT_PROVIDER: "openai",
       HOSTED_ASSISTANT_REASONING_EFFORT: "low",
       [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:

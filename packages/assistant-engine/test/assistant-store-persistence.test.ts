@@ -263,7 +263,7 @@ describe('assistant store persistence seams', () => {
     })
     expect(roundTrippedSession.providerOptions).toMatchObject({
       executionDriver: 'codex-app-server',
-      model: 'gpt-6.1-sol',
+      model: 'gpt-6.2-sol',
       modelProvider: 'hosted-openai',
       provider: 'codex-cli',
       reasoningEffort: 'medium',
@@ -2087,7 +2087,7 @@ function createCodexSession(input?: {
       approvalPolicy: 'never',
       codexCommand: null,
       codexHome: null,
-      model: 'gpt-6.1-sol',
+      model: 'gpt-6.2-sol',
       modelProvider: 'hosted-openai',
       oss: false,
       profile: null,
@@ -2136,7 +2136,7 @@ function createSession(input?: {
       approvalPolicy: 'never',
       codexCommand: null,
       codexHome: null,
-      model: 'gpt-6.1-sol',
+      model: 'gpt-6.2-sol',
       modelProvider: 'hosted-openai',
       oss: false,
       profile: null,

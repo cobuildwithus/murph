@@ -482,7 +482,7 @@ describe('Codex provider routing', () => {
 
   it('emits only the final provider reasoning effort after routing overrides resolve', async () => {
     const baseAutomationTarget = createAssistantModelTarget({
-      model: 'gpt-6.1-sol',
+      model: 'gpt-6.2-sol',
       modelProvider: 'hosted-openai',
       provider: 'codex-cli',
       reasoningEffort: 'low',
@@ -1423,6 +1423,8 @@ describe('Codex provider routing', () => {
   })
 
   it.each([
+    { name: 'scheduled Sol retains Flex', model: 'gpt-6.2-sol', ageMs: 1, scheduled: true, requested: 'flex', expected: 'flex' },
+    { name: 'scheduled Astra retains Flex', model: 'gpt-6.2-astra', ageMs: 1, scheduled: true, requested: 'flex', expected: 'flex' },
     { name: 'Flex stays Flex during onboarding', ageMs: 1, requested: 'flex', expected: 'flex' },
     { name: 'signup instant', ageMs: 0, expected: 'priority' },
     { name: 'just before 24 hours', ageMs: 86_399_999, expected: 'priority' },
@@ -1438,10 +1440,11 @@ describe('Codex provider routing', () => {
     const providerScopeEvents: string[] = []
     const now = Date.parse('2026-09-23T12:00:00Z')
     vi.spyOn(Date, 'now').mockReturnValue(now)
-    const flexCatalog = await createHostedCodexFlexCatalog({ model: 'gpt-6.1-sol', priority: !('catalogPriority' in scenario) || scenario.catalogPriority })
+    const model = scenario.model ?? 'gpt-6.1-terra'
+    const flexCatalog = await createHostedCodexFlexCatalog({ model, priority: !('catalogPriority' in scenario) || scenario.catalogPriority })
     const route = createRoute({
       providerOptions: {
-        model: 'gpt-6.1-sol',
+        model,
         modelProvider: HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
       },
     })
@@ -2031,7 +2034,7 @@ describe('Codex provider routing', () => {
   it('drops flex service tier for hosted OpenAI routes without catalog evidence', async () => {
     const route = createRoute({
       providerOptions: {
-        model: 'gpt-6.1-sol',
+        model: 'gpt-6.2-sol',
         modelProvider: 'hosted-openai',
       },
     })
@@ -2083,7 +2086,7 @@ describe('Codex provider routing', () => {
   it('drops flex service tier for hosted routes on unsupported model providers', async () => {
     const route = createRoute({
       providerOptions: {
-        model: 'gpt-6.1-sol',
+        model: 'gpt-6.2-sol',
         modelProvider: 'hosted-openai',
       },
     })

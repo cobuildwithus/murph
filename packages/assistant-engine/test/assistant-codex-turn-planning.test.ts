@@ -4317,7 +4317,7 @@ describe('assistant Codex turn planning', () => {
   it.each([
     { change: { modelProvider: 'hosted-openai' }, resumes: false },
     { change: { sandbox: 'read-only' as const }, resumes: false },
-    { change: { model: 'gpt-6.1-sol' }, resumes: true },
+    { change: { model: 'gpt-6.2-sol' }, resumes: true },
   ])('preserves only compatible native routes: $change', async ({ change, resumes }) => {
     const target = { provider: 'codex-cli' as const, model: 'gpt-6.1-terra', modelProvider: 'openai', sandbox: 'workspace-write' as const }
     const route = buildCodexThreadIdentity(normalizeAssistantProviderConfig(target))
@@ -6369,7 +6369,7 @@ describe('assistant Codex turn planning', () => {
 
     const switchedPlan = await planTurn({
       input: createMessageInput({
-        model: 'gpt-6.1-sol',
+        model: 'gpt-6.2-sol',
         reasoningEffort: 'high',
       }),
       route: switchedRoute,
@@ -6630,7 +6630,7 @@ describe('assistant Codex turn planning', () => {
 
       const plan = await planTurn({
         input: createMessageInput({
-          model: 'gpt-6.1-sol',
+          model: 'gpt-6.2-sol',
           prompt: 'Use medium reasoning now.',
           vault,
         }),

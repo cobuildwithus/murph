@@ -99,7 +99,7 @@ describe.skipIf(process.env.MURPH_MEASURE_USAGE_INPUT !== '1')('usage efficiency
         const tools = (phase === 'base' ? baselineCatalog.resolveMurphDynamicTools : resolveMurphDynamicTools)(availability)
         const configSource = await nativeDelegationSource(phase)
         const scenario = await prepareScriptedTurnScenario(stub, temporaryPaths, {
-          model: 'gpt-6.1-sol', additionalTomlLines: nativeDelegationConfig(configSource),
+          model: 'gpt-6.2-sol', additionalTomlLines: nativeDelegationConfig(configSource),
         })
         workingDirectory ??= scenario.turnInput.workingDirectory
         scenario.turnInput.workingDirectory = workingDirectory
@@ -140,7 +140,7 @@ describe.skipIf(process.env.MURPH_MEASURE_USAGE_INPUT !== '1')('usage efficiency
         assert.ok(capture)
         const body = readRecord(JSON.parse(capture.json))
         assert.ok(body)
-        expect(body.model).toBe('gpt-6.1-sol')
+        expect(body.model).toBe('gpt-6.2-sol')
         expect(capture.json).toContain('functions')
         if (groupAvailable) {
           const registered = tools.find((tool) => tool.namespace === 'murph' && tool.name === 'group_data')
@@ -169,11 +169,11 @@ describe.skipIf(process.env.MURPH_MEASURE_USAGE_INPUT !== '1')('usage efficiency
       const [before, after] = captures
       assert.ok(before && after)
       process.stdout.write(`[usage-input-proof] ${JSON.stringify({
-        fixture, scope, base, model: 'gpt-6.1-sol', provider: 'scripted-loopback', nativeDelegation: true, captures,
+        fixture, scope, base, model: 'gpt-6.2-sol', provider: 'scripted-loopback', nativeDelegation: true, captures,
         comparison: 'base/head assistant-engine source and native delegation text; identical fixture and workspace',
         sharedDependencies: 'candidate request adapter and public workspace packages, installed Codex and model catalog',
         deltaBytes: after.bytes - before.bytes, deltaPercent: (after.bytes - before.bytes) / before.bytes * 100,
-        tokens: null, tokenDelta: null, tokenLimitation: 'No exact GPT-6.1 Sol tokenizer is configured; no estimate is substituted.',
+        tokens: null, tokenDelta: null, tokenLimitation: 'No exact GPT-6.2 Sol tokenizer is configured; no estimate is substituted.',
       })}\n`)
     } finally {
       await stopWarmCodexAppServer()

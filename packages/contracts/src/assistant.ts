@@ -480,5 +480,14 @@ function isLeapYear(year: number): boolean {
 
 /** Legacy persisted selections are read through; execution and writes stay strict. */
 export function normalizeStoredAssistantModel(model: string | null): string | null {
-  return model === "gpt-5.6-sol" ? "gpt-6.1-sol" : model;
+  switch (model) {
+    case "gpt-5.6-sol":
+    case "gpt-6-sol":
+    case "gpt-6.1-sol":
+      return "gpt-6.2-sol";
+    case "gpt-6-astra":
+      return "gpt-6.2-astra";
+    default:
+      return model;
+  }
 }

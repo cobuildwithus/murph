@@ -8,7 +8,7 @@ import { createAssistantRuntimeStateService } from "@murphai/assistant-engine/as
 export async function prepareSyntheticFinalization(vault: string, now: string) {
   const target: AssistantSession["target"] = {
     adapter: "codex-cli", approvalPolicy: "never", codexCommand: null, codexHome: null,
-    model: "gpt-6.1-sol", modelProvider: "hosted-openai", oss: false, profile: null,
+    model: "gpt-6.2-sol", modelProvider: "hosted-openai", oss: false, profile: null,
     reasoningEffort: "medium", sandbox: "danger-full-access",
   };
   const session: AssistantSession = {

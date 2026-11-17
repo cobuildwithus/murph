@@ -41,7 +41,7 @@ describe.skipIf(process.env.MURPH_MEASURE_USAGE_ISOLATION_INPUT !== '1')('usage 
     const captures = []
     try {
       for (const phase of ['base', 'head'] as const) {
-        const { turnInput } = await prepareScriptedTurnScenario(stub, temporaryPaths, { model: 'gpt-6.1-sol', modelProvider: HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID, additionalTomlLines: [...behaviorWithoutHistory, ...buildMurphHostedPermissionProfileTomlLines()] })
+        const { turnInput } = await prepareScriptedTurnScenario(stub, temporaryPaths, { model: 'gpt-6.2-sol', modelProvider: HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID, additionalTomlLines: [...behaviorWithoutHistory, ...buildMurphHostedPermissionProfileTomlLines()] })
         const vault = turnInput.workingDirectory
         await initializeVault({ vaultRoot: vault, timezone: 'UTC' })
         const target = createAssistantModelTarget({ ...turnInput, approvalPolicy: 'never', provider: 'codex-cli' })
@@ -78,7 +78,7 @@ describe.skipIf(process.env.MURPH_MEASURE_USAGE_ISOLATION_INPUT !== '1')('usage 
       }
       const [before, after] = captures
       assert.ok(before && after)
-      process.stdout.write(`[usage-isolation-input] ${JSON.stringify({ scope, base, model: 'gpt-6.1-sol', captures,
+      process.stdout.write(`[usage-isolation-input] ${JSON.stringify({ scope, base, model: 'gpt-6.2-sol', captures,
         deltaBytes: after.bytes - before.bytes, deltaPercent: (after.bytes - before.bytes) / before.bytes * 100,
         tokens: null, tokenDelta: null, tokenLimitation: 'Exact Sol tokenizer unavailable; bytes are not token or billed-cost estimates.',
       })}\n`)

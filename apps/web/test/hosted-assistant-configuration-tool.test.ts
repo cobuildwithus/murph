@@ -129,7 +129,7 @@ describe("hosted runtime assistant configuration tool", () => {
   it("updates reasoning without rewriting a dormant model preference", async () => {
     mocks.updateConfiguration.mockResolvedValue({
       ...buildSnapshot({
-        model: "gpt-6.1-sol",
+        model: "gpt-6.2-sol",
         reasoningEffort: "high",
       }),
       hostedAssistantReasoningEffortOverride: "high",
@@ -147,7 +147,7 @@ describe("hosted runtime assistant configuration tool", () => {
     })).resolves.toMatchObject({
       action: "update",
       result: {
-        model: "gpt-6.1-sol",
+        model: "gpt-6.2-sol",
         reasoningEffort: "high",
         status: "updated",
       },
@@ -160,13 +160,13 @@ describe("hosted runtime assistant configuration tool", () => {
   });
 
   it.each([
-    ["gpt-6.1-sol", "ASSISTANT_MODEL_SOL_REQUIRES_SUBSCRIPTION"],
-    ["gpt-6-astra", "ASSISTANT_MODEL_ASTRA_REQUIRES_EDGE"],
+    ["gpt-6.2-sol", "ASSISTANT_MODEL_SOL_REQUIRES_SUBSCRIPTION"],
+    ["gpt-6.2-astra", "ASSISTANT_MODEL_ASTRA_REQUIRES_EDGE"],
   ] as const)("returns the appropriate subscription requirement for %s without changing the saved target", async (model, code) => {
     mocks.updateConfiguration.mockRejectedValue(hostedOnboardingError({
       code,
       httpStatus: 403,
-      message: "GPT-6.1 Sol requires an active paid Edge plan.",
+      message: "GPT-6.2 Sol requires an active paid Edge plan.",
     }));
 
     await expect(handleHostedRuntimeAssistantConfigurationTool({
@@ -182,7 +182,7 @@ describe("hosted runtime assistant configuration tool", () => {
       result: {
         ...buildSnapshot(),
         appliesAt: "next_turn",
-        requiredPlan: model === "gpt-6-astra" ? "edge" : "pulse",
+        requiredPlan: model === "gpt-6.2-astra" ? "edge" : "pulse",
         status: "upgrade_required",
       },
     });
@@ -191,15 +191,15 @@ describe("hosted runtime assistant configuration tool", () => {
 
 function buildSnapshot(overrides: {
   dormantSolPreference?: boolean;
-  model?: "gpt-5.6-luna" | "gpt-6.1-sol" | "gpt-6.1-sol";
+  model?: "gpt-5.6-luna" | "gpt-6.2-sol";
   reasoningEffort?: "low" | "medium" | "high" | "xhigh";
 } = {}) {
   return {
-    availableModels: ["gpt-5.6-luna", "gpt-6.1-sol"] as const,
+    availableModels: ["gpt-5.6-luna", "gpt-6.2-sol"] as const,
     availableReasoningEfforts: ["low", "medium", "high", "xhigh"] as const,
     configurationAvailable: true,
     dormantSolPreference: overrides.dormantSolPreference ?? false,
-    model: overrides.model ?? "gpt-6.1-sol",
+    model: overrides.model ?? "gpt-6.2-sol",
     reasoningEffort: overrides.reasoningEffort ?? "low",
     solAvailable: false,
   };

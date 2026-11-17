@@ -54,7 +54,7 @@ describe("hosted game recap notification", () => {
       await executeHostedAssistantNotificationWake({ executionContext: { hosted: { memberId: wake.userId, userEnvKeys: [] } },
         groupToolPort: { request: async () => ({ action: "read_game", result: { status: "ok", recapGame: {} } }) }, vaultRoot: "/synthetic-vault", wake });
       const input = mocks.sendAssistantNotification.mock.lastCall?.[0] as AssistantNotificationInput;
-      expect(input.assistantTargetOverride?.model).toBe(show ? "gpt-6.1-sol" : undefined);
+      expect(input.assistantTargetOverride?.model).toBe(show ? "gpt-6.2-sol" : undefined);
       expect(input.executionContext?.hosted?.gameRecapScope?.show).toBe(show ? true : undefined);
     }
   });

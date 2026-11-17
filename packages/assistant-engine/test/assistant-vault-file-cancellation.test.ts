@@ -181,7 +181,7 @@ describe('pending generated vault-file cancellation', () => {
       deliveryRequested: true,
       prompt: 'Prepare the generated report.',
       provider: 'codex-cli',
-      providerModel: 'gpt-6.1-sol',
+      providerModel: 'gpt-6.2-sol',
       sessionId,
       startedAt: '2026-08-06T18:00:00.000Z',
       turnId,

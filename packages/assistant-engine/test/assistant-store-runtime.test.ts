@@ -1022,7 +1022,7 @@ function createTarget(
 ): AssistantModelTarget {
   const target = createAssistantModelTarget({
     approvalPolicy: 'never',
-    model: 'gpt-6.1-sol',
+    model: 'gpt-6.2-sol',
     modelProvider: 'hosted-openai',
     provider: 'codex-cli',
     reasoningEffort: 'medium',

@@ -5,10 +5,10 @@
  * source review at the new commit rather than trusting one platform's binary layout.
  */
 export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
-  upstreamCommit: "0a94398fa60c4fac0e7659e4213a0a36e613dd46",
+  upstreamCommit: "d32063f96c2dff1dc96af839b3952abb6acfeda4",
   upstreamSourceRoot: "codex-rs",
-  upstreamTag: "rust-v0.167.1",
-  version: "0.167.1",
+  upstreamTag: "rust-v0.169.0",
+  version: "0.169.0",
   baseRelativeProviderRoutes: [
     "alpha/search",
     "guardian",
@@ -28,6 +28,8 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
     "codex-rs/responses-api-proxy/src/auth.rs",
     "codex-rs/login/src/auth/personal_access_token.rs",
     "codex-rs/agent-message-board-client/src/client.rs",
+    "codex-rs/agent-identity/src/lib.rs",
+    "codex-rs/codex-api/src/endpoint/realtime_websocket/methods/sideband.rs",
     "codex-rs/backend-client/src/client/turn_usage.rs",
     "codex-rs/ext/guardian-v2/src/async_scorer/decisions.rs",
     "codex-rs/codex-api/src/endpoint/images.rs",
@@ -220,6 +222,42 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
     },
   ],
   nonProviderBinaryCandidates: [
+    {
+      candidate: "/v1/agent/registerencrypted",
+      disposition: "binary_false_positive",
+      owner: "codex-auth",
+      reason: "agent-identity registers at the auth base plus /v1/agent/register. The Linux binary appends the adjacent encrypted label.",
+    },
+    {
+      candidate: "/v1/analytics/codex/turn-coststurn-errorusage-limitexecution-unavailableempty-responsediscarding",
+      disposition: "binary_false_positive",
+      owner: "codex-backend",
+      reason: "The backend turn_usage client sets /v1/analytics/codex/turn-costs. The Linux binary joins this to error and logging labels.",
+    },
+    {
+      candidate: "/v1/realtimewsquicksilverintentrealtime",
+      disposition: "binary_false_positive",
+      owner: "codex-realtime",
+      reason: "The realtime websocket client constructs /v1/realtime and sets intent as a query parameter. The Linux binary joins adjacent scheme and intent literals.",
+    },
+    {
+      candidate: "/v1/decisionshttps:",
+      disposition: "binary_false_positive",
+      owner: "codex-guardian",
+      reason: "The exact Decisions URL ends at /v1/decisions in guardian-v2 decisions.rs. The next URL scheme is adjacent binary text.",
+    },
+    {
+      candidate: "/v1/decisionstools/list",
+      disposition: "binary_false_positive",
+      owner: "codex-guardian",
+      reason: "The linker joins the Decisions URL to the separate MCP tools/list method.",
+    },
+    {
+      candidate: "/v1/user-auth-credential/whoamiurl::form_urlencoded::",
+      disposition: "binary_false_positive",
+      owner: "codex-auth",
+      reason: "The login client appends the exact WHOAMI_PATH to the auth base URL. The form_urlencoded module name is adjacent binary text.",
+    },
     {
       candidate: "/v1/analytics/codex/turn-costsinclude_settled_response_idsskipping",
       disposition: "binary_false_positive",

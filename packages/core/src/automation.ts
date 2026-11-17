@@ -604,11 +604,12 @@ function normalizeAutomationAssistantTargetOverride(
   const reasoningEffort = normalizeAutomationAssistantTargetOverrideReasoningEffort(
     object.reasoningEffort,
   );
-  if (!stored && model === "gpt-5.6-sol") {
-    throw new TypeError("assistantTargetOverride.model is retired; use gpt-6.1-sol.");
+  const currentModel = normalizeStoredAssistantModel(model);
+  if (!stored && model !== currentModel) {
+    throw new TypeError(`assistantTargetOverride.model is retired; use ${currentModel}.`);
   }
   const target: AutomationAssistantTargetOverride = {
-    ...(model ? { model: normalizeStoredAssistantModel(model) ?? model } : {}),
+    ...(currentModel ? { model: currentModel } : {}),
     ...(modelProvider ? { modelProvider } : {}),
     ...(reasoningEffort ? { reasoningEffort } : {}),
   };

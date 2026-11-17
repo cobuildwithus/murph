@@ -843,7 +843,7 @@ function createAssistantSession(input?: {
 }): AssistantSession {
   const providerOptions = serializeAssistantProviderSessionOptions({
     approvalPolicy: 'never',
-    model: 'gpt-6.1-sol',
+    model: 'gpt-6.2-sol',
     modelProvider: 'hosted-openai',
     reasoningEffort: 'medium',
     sandbox: 'danger-full-access',

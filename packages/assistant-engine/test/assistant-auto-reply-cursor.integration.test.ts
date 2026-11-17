@@ -29,7 +29,7 @@ vi.mock('../src/assistant/runtime-state-service.js', async (original) => {
 })
 
 const roots: string[] = []
-const target = createAssistantModelTarget({ provider: 'codex-cli', model: 'gpt-6.1-sol', reasoningEffort: 'medium',
+const target = createAssistantModelTarget({ provider: 'codex-cli', model: 'gpt-6.2-sol', reasoningEffort: 'medium',
   modelProvider: 'openai', approvalPolicy: 'never', sandbox: 'read-only' })
 if (!target) throw new Error('Expected test target')
 const executionContext = { hosted: { memberId: 'member_synthetic', userEnvKeys: [], defaultTarget: target } }

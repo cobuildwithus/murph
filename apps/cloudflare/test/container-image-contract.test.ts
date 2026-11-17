@@ -8,10 +8,9 @@ import {
 } from "../scripts/deploy-automation/wrangler-config.ts";
 const hostedRunnerProductModelSlugs = [
   "gpt-6.1-terra",
-  "gpt-6.1-sol",
-  "gpt-6-sol",
+  "gpt-6.2-sol",
   "gpt-6-luna",
-  "gpt-6-astra",
+  "gpt-6.2-astra",
   "gpt-5.6-luna",
 ] as const;
 
@@ -63,7 +62,7 @@ describe("hosted runner container image contract", () => {
     expect(baseDockerfile).toContain("export CODEX_BWRAP_SHA256=");
   });
 
-  it("publishes exactly the product Codex models with Flex and mixed Code Mode", async () => {
+  it("publishes exactly the product Codex models with supported service tiers and mixed Code Mode", async () => {
     const finalDockerfile = await readFile(
       new URL("../../../Dockerfile.cloudflare-hosted-runner", import.meta.url),
       "utf8",
@@ -71,11 +70,10 @@ describe("hosted runner container image contract", () => {
     const { patchFilter, standardFilter, validationFilter } = readFinalImageCodexModelCatalogJqFilters(finalDockerfile);
     const stockCatalogWithoutFlex: CodexModelCatalog = {
       models: [
-        { slug: "gpt-6.1-sol", context_window: 272_000, service_tiers: [{ id: "priority", name: "Priority" }] },
-        { slug: "gpt-6-sol", context_window: 272_000, service_tiers: [{ id: "priority", name: "Priority" }] },
+        { slug: "gpt-6.1-terra", context_window: 500_000, service_tiers: [{ id: "priority" }] },
         { slug: "gpt-6-luna", context_window: 272_000, service_tiers: [{ id: "priority", name: "Priority" }] },
         {
-          slug: "gpt-6-astra",
+          slug: "gpt-6.2-astra",
           context_window: 272_000,
           service_tiers: [{ id: "priority", name: "Priority" }],
         },
@@ -116,14 +114,14 @@ describe("hosted runner container image contract", () => {
 
     const standardCatalog = parseCodexModelCatalogJson(runJqFilter(standardFilter, patchedCatalog));
     expect(readCodexModelSlugs(standardCatalog)).toEqual([
-      "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-luna", "gpt-6.1-terra",
+      "gpt-6.1-terra", "gpt-6-luna", "gpt-5.6-luna", "gpt-6.2-sol",
     ]);
-    expect(standardCatalog.models).toEqual(patchedCatalog.models.filter((model) => model.slug !== "gpt-6-astra"));
+    expect(standardCatalog.models).toEqual(patchedCatalog.models.filter((model) => model.slug !== "gpt-6.2-astra"));
     expect(finalDockerfile).toContain('"${MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON}.astra"');
 
     expect(readCodexModelSlugs(patchedCatalog).sort()).toEqual([...hostedRunnerProductModelSlugs].sort());
     for (const slug of hostedRunnerProductModelSlugs) {
-      expect(readCodexModelServiceTierIds(patchedCatalog, slug)).toEqual(["priority", "flex"]);
+      expect(readCodexModelServiceTierIds(patchedCatalog, slug)).toEqual(expect.arrayContaining(["priority", "flex"]));
       expect(readCodexModel(patchedCatalog, slug).tool_mode).toBe("code_mode");
     }
     expect(readCodexModelSlugs(patchedCatalog)).not.toContain("gpt-5.6-sol");
@@ -133,13 +131,11 @@ describe("hosted runner container image contract", () => {
       display_name: "GPT-5.6-Luna",
     });
     expect(runJqFilter(validationFilter, patchedCatalog, { slurp: true }).trim()).toBe("true");
-    const legacyLinuxCatalog = parseCodexModelCatalogJson(runJqFilter(patchFilter, {
-      models: stockCatalogWithoutFlex.models.filter((model) => model.slug !== "gpt-6-astra"),
-    }));
-    expect(readCodexModelSlugs(legacyLinuxCatalog)).not.toContain("gpt-6-astra");
-    expect(runJqFilter(validationFilter, legacyLinuxCatalog, { slurp: true }).trim()).toBe("false");
     expect(runJqFilter(validationFilter, {
-      models: patchedCatalog.models.map((model) => model.slug === "gpt-6-astra"
+      models: patchedCatalog.models.filter((model) => model.slug !== "gpt-6.2-astra"),
+    }, { slurp: true }).trim()).toBe("false");
+    expect(runJqFilter(validationFilter, {
+      models: patchedCatalog.models.map((model) => model.slug === "gpt-6.2-astra"
         ? { ...model, context_window: 1_050_000 } : model),
     }, { slurp: true }).trim()).toBe("false");
 
@@ -152,7 +148,7 @@ describe("hosted runner container image contract", () => {
     const repatchedCatalog = parseCodexModelCatalogJson(
       runJqFilter(patchFilter, patchedCatalog),
     );
-    const repatchedTargetTierIds = readCodexModelServiceTierIds(repatchedCatalog, "gpt-6-sol");
+    const repatchedTargetTierIds = readCodexModelServiceTierIds(repatchedCatalog, "gpt-6.1-terra");
     const twicePatchedCatalog = parseCodexModelCatalogJson(
       runJqFilter(patchFilter, repatchedCatalog),
     );
@@ -164,7 +160,7 @@ describe("hosted runner container image contract", () => {
     }
     expect(runJqFilter(validationFilter, repatchedCatalog, { slurp: true }).trim()).toBe("true");
     expect(runJqFilter(validationFilter, {
-      models: patchedCatalog.models.filter((model) => model.slug !== "gpt-6-sol"),
+      models: patchedCatalog.models.filter((model) => model.slug !== "gpt-6.2-sol"),
     }, { slurp: true }).trim()).toBe("false");
     expect(runJqFilter(validationFilter, {
       models: [
@@ -174,14 +170,14 @@ describe("hosted runner container image contract", () => {
     }, { slurp: true }).trim()).toBe("false");
     expect(runJqFilter(validationFilter, {
       models: patchedCatalog.models.map((model) =>
-        model.slug === "gpt-6-sol"
+        model.slug === "gpt-6.2-sol"
           ? { ...model, tool_mode: "code_mode_only" }
           : model
       ),
     }, { slurp: true }).trim()).toBe("false");
   });
 
-  it("validates native product entries and the official Terra launch supplement", async () => {
+  it("validates native product entries and the official 6.2 launch supplement", async () => {
     const finalDockerfile = await readFile(
       new URL("../../../Dockerfile.cloudflare-hosted-runner", import.meta.url),
       "utf8",
@@ -193,23 +189,24 @@ describe("hosted runner container image contract", () => {
       { encoding: "utf8", maxBuffer: 10 * 1024 * 1024, timeout: 30_000 },
     );
     const nativeCatalog = parseCodexModelCatalogJson(nativeCatalogJson);
-    const terraCatalog = parseCodexModelCatalogJson(await readFile(new URL("../codex-model-catalog.terra.json", import.meta.url), "utf8"));
+    const launchCatalog = parseCodexModelCatalogJson(await readFile(new URL("../codex-model-catalog.6.2.json", import.meta.url), "utf8"));
     const productCatalog = parseCodexModelCatalogJson(runJqFilter(patchFilter, nativeCatalog));
     expect(runJqFilter(validationFilter, productCatalog, { slurp: true }).trim()).toBe("true");
     for (const slug of hostedRunnerProductModelSlugs) {
-      const expected = structuredClone(readCodexModel(slug === "gpt-6.1-terra" ? terraCatalog : nativeCatalog, slug));
+      const expected = structuredClone(readCodexModel(slug.startsWith("gpt-6.2-") ? launchCatalog : nativeCatalog, slug));
       if (typeof expected.model_messages === "object" && expected.model_messages !== null) {
         Reflect.deleteProperty(expected.model_messages, "collaboration_modes");
       }
       expect(readCodexModel(productCatalog, slug)).not.toHaveProperty("model_messages.collaboration_modes");
       expect(readCodexModel(productCatalog, slug)).toMatchObject({
         ...expected,
+        ...(slug === "gpt-6.2-sol" ? { context_window: 272_000 } : {}),
         service_tiers: expect.any(Array),
         tool_mode: "code_mode",
       });
     }
     expect(readCodexModelSlugs(parseCodexModelCatalogJson(runJqFilter(standardFilter, productCatalog))).sort())
-      .toEqual(["gpt-5.6-luna", "gpt-6-luna", "gpt-6-sol", "gpt-6.1-sol", "gpt-6.1-terra"]);
+      .toEqual(["gpt-5.6-luna", "gpt-6-luna", "gpt-6.1-terra", "gpt-6.2-sol"]);
   });
 
   it("keeps rendered container builds app-local with SSH disabled", () => {
@@ -231,7 +228,7 @@ describe("hosted runner container image contract", () => {
     const dockerignore = await readFile(new URL("../.dockerignore", import.meta.url), "utf8");
 
     expect(dockerignore).toContain("**");
-    expect(dockerignore).toContain("!codex-model-catalog.terra.json");
+    expect(dockerignore).toContain("!codex-model-catalog.6.2.json");
     expect(dockerignore).toContain("!.deploy/");
     expect(dockerignore).toContain("!.deploy/runner-bundle/");
     expect(dockerignore).toContain("!.deploy/runner-bundle/**");
@@ -273,7 +270,7 @@ function readFinalImageCodexModelCatalogJqFilters(dockerfile: string): {
   }
 
   return {
-    patchFilter: `${/jq --slurpfile terra \/tmp\/codex-model-catalog\.terra\.json '([^']+)'/u.exec(dockerfile)?.[1] ?? "."} | ${patchMatch[1]}`,
+    patchFilter: `${/jq --slurpfile launch \/tmp\/codex-model-catalog\.6\.2\.json '([^']+)'/u.exec(dockerfile)?.[1] ?? "."} | ${patchMatch[1]}`,
     standardFilter: standardMatch[1],
     validationFilter: validationMatch[1],
   };
@@ -286,7 +283,7 @@ function runJqFilter(
 ): string {
   return execFileSync("jq", [
     ...(options.slurp === true ? ["-s"] : []),
-    "--slurpfile", "terra", fileURLToPath(new URL("../codex-model-catalog.terra.json", import.meta.url)),
+    "--slurpfile", "launch", fileURLToPath(new URL("../codex-model-catalog.6.2.json", import.meta.url)),
     filter,
   ], {
     encoding: "utf8",

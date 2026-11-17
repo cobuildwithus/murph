@@ -12,7 +12,7 @@ export const MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION = {
   continuityPolicy: 'fresh',
   ownerScope: 'member',
   hostedRuntimeOnly: true,
-  assistantTargetOverride: { model: 'gpt-6.1-sol', reasoningEffort: 'medium' },
+  assistantTargetOverride: { model: 'gpt-6.2-sol', reasoningEffort: 'medium' },
   tags: ['murph-managed:weekly-usage-optimizer'],
   instructions: [
     'Run the private monthly usage review. This managed task authorizes appropriate automation model downgrades and one anonymous product usage report. Stay quiet; do not send a member message or ask the member to approve routine model changes.',

@@ -64,26 +64,28 @@ beforeEach(() => {
 
 describe('automation model continuity', () => {
   it.each(['automation-cron', 'automation-auto-reply'] as const)(
-    'upgrades an inherited GPT-6 Sol target only during %s', (turnTrigger) => {
-      const target = requireTarget('gpt-6-sol', 'high', 'openai')
+    'preserves inherited Sol reasoning during %s', (turnTrigger) => {
+      const target = requireTarget('gpt-6.2-sol', 'high', 'openai')
       const session = createGroupSession(target, null)
       const input = { prompt: 'Send the reminder.', turnTrigger, vault: '/vault' }
       const route = resolveAssistantTurnRoute(input, null, resolvedSession(session))
-      expect(route.providerOptions).toMatchObject({ model: 'gpt-6.1-sol', reasoningEffort: 'high' })
+      expect(route.providerOptions).toMatchObject({ model: 'gpt-6.2-sol', reasoningEffort: 'high' })
       const explicitEffort = resolveAssistantTurnRoute({ ...input, assistantTargetOverride: { reasoningEffort: 'medium' } }, null, resolvedSession(session))
-      expect(explicitEffort.providerOptions).toMatchObject({ model: 'gpt-6.1-sol', reasoningEffort: 'medium' })
+      expect(explicitEffort.providerOptions).toMatchObject({ model: 'gpt-6.2-sol', reasoningEffort: 'medium' })
       const reply = resolveAssistantTurnRoute({ prompt: 'Thanks.', vault: '/vault' }, null, resolvedSession(session))
-      expect(reply.providerOptions).toMatchObject({ model: 'gpt-6-sol', reasoningEffort: 'high' })
+      expect(reply.providerOptions).toMatchObject({ model: 'gpt-6.2-sol', reasoningEffort: 'high' })
       expect(session.target).toEqual(target)
     },
   )
 
 
   it.each([
-    ['gpt-6-sol', 'gpt-6.1-sol'],
+    ['gpt-6-sol', 'gpt-6.2-sol'],
+    ['gpt-6.1-sol', 'gpt-6.2-sol'],
+    ['gpt-6-astra', 'gpt-6.2-astra'],
     ['gpt-5.6-luna', 'gpt-6-luna'],
-    ['gpt-5.6-sol', 'gpt-6.1-sol'],
-    ['gpt-5.6-terra', 'gpt-6.1-sol'],
+    ['gpt-5.6-sol', 'gpt-6.2-sol'],
+    ['gpt-5.6-terra', 'gpt-6.2-sol'],
   ])('upgrades a saved %s pin only for its OpenAI execution', (storedModel, model) => {
     const preference = Object.freeze({ model: storedModel })
     const envelope = buildAssistantAutomationTurnEnvelope({
@@ -91,9 +93,9 @@ describe('automation model continuity', () => {
       scheduledOccurrenceAt: '2026-09-23T15:00:00.000Z',
       turnTrigger: 'automation-cron',
     })
-    expect(envelope.assistantTargetOverride).toEqual({ model: storedModel === 'gpt-5.6-sol' ? 'gpt-6.1-sol' : storedModel })
+    expect(envelope.assistantTargetOverride).toEqual({ model: storedModel === 'gpt-5.6-terra' || storedModel === 'gpt-5.6-luna' ? storedModel : model })
     for (const modelProvider of ['openai', 'hosted-openai', 'hosted-chatgpt-openai', 'openai-local-test']) {
-      const session = createGroupSession(requireTarget('gpt-6-sol', 'xhigh', modelProvider), null)
+      const session = createGroupSession(requireTarget('gpt-6.2-sol', 'xhigh', modelProvider), null)
       for (const serviceTier of ['flex', null] as const) {
         const route = resolveAssistantTurnRoute(
           { ...createAutomationInput(preference), ...envelope, serviceTier },
@@ -102,22 +104,22 @@ describe('automation model continuity', () => {
         )
         expect(route.providerOptions).toMatchObject({ model, modelProvider, reasoningEffort: 'low' })
       }
-      expect(session.target).toEqual(requireTarget('gpt-6-sol', 'xhigh', modelProvider))
+      expect(session.target).toEqual(requireTarget('gpt-6.2-sol', 'xhigh', modelProvider))
     }
     expect(preference).toEqual({ model: storedModel })
     expect(envelope.scheduledOccurrenceAt).toBe('2026-09-23T15:00:00.000Z')
   })
 
-  it.each(['gpt-6-luna', 'gpt-6.1-sol', 'gpt-6-astra', 'custom-openai-model'])(
+  it.each(['gpt-6-luna', 'gpt-6.2-sol', 'gpt-6.2-astra', 'custom-openai-model'])(
     'preserves a model without a replacement entry: %s', (model) => {
-      const session = createGroupSession(requireTarget('gpt-6-sol', 'low', 'openai'), null)
+      const session = createGroupSession(requireTarget('gpt-6.2-sol', 'low', 'openai'), null)
       const route = resolveAssistantTurnRoute(createAutomationInput({ model, reasoningEffort: 'medium' }), null, resolvedSession(session))
       expect(route.providerOptions).toMatchObject({ model, reasoningEffort: 'medium' })
     },
   )
 
   it('keeps an upgraded reminder scoped to its turn and returns to the conversation target', async () => {
-    const selected = requireTarget('gpt-6-sol', 'medium', 'openai')
+    const selected = requireTarget('gpt-6.2-sol', 'medium', 'openai')
     const session = createGroupSession(selected, createResumeState(selected, 'synthetic-existing-thread'))
     const turnInput = createAutomationInput({ model: 'gpt-5.6-luna' })
     const route = resolveAssistantTurnRoute(turnInput, null, resolvedSession(session))
@@ -125,27 +127,27 @@ describe('automation model continuity', () => {
     const saved = await persistAutomationTurn({ route, session, text: 'Time to put the recycling bin outside.', threadId: 'synthetic-existing-thread', turnInput })
     expect(saved.target).toEqual(selected)
     const reply = resolveAssistantTurnRoute({ prompt: 'Done, thanks.', vault: '/vault' }, null, resolvedSession(saved))
-    expect(reply.providerOptions).toMatchObject({ model: 'gpt-6-sol', reasoningEffort: 'medium' })
+    expect(reply.providerOptions).toMatchObject({ model: 'gpt-6.2-sol', reasoningEffort: 'medium' })
     expect(resolveAssistantRouteResumeBinding({ route: reply, sessionResumeState: saved.resumeState })?.threadId).toBe('synthetic-existing-thread')
   })
 
   it('upgrades a persisted Terra automation preference without mutating it', () => {
     const preference = Object.freeze({ model: 'gpt-5.6-terra' })
-    const session = createGroupSession(requireTarget('gpt-6-sol', 'low', 'openai'), null)
+    const session = createGroupSession(requireTarget('gpt-6.2-sol', 'low', 'openai'), null)
     const route = resolveAssistantTurnRoute(createAutomationInput(preference), null, resolvedSession(session))
-    expect(route.providerOptions).toMatchObject({ model: 'gpt-6.1-sol', reasoningEffort: 'low' })
+    expect(route.providerOptions).toMatchObject({ model: 'gpt-6.2-sol', reasoningEffort: 'low' })
     expect(preference.model).toBe('gpt-5.6-terra')
   })
 
 
 
   it.each([
-    ['gpt-6-sol', 'gpt-6.1-sol', 'low'],
+    ['gpt-6-sol', 'gpt-6.2-sol', 'low'],
     ['gpt-6-luna', 'gpt-6-luna', 'low'],
   ] as const)(
     'applies the canonical %s reasoning default to model-only stored overrides',
     (model, expectedModel, reasoningEffort) => {
-      const selectedTarget = requireTarget('gpt-6.1-sol', 'xhigh')
+      const selectedTarget = requireTarget('gpt-6.2-sol', 'xhigh')
       const session = createGroupSession(selectedTarget, null)
 
       const route = resolveAssistantTurnRoute(
@@ -162,7 +164,7 @@ describe('automation model continuity', () => {
   )
 
   it('returns a Luna reminder reply to Sol on the same compatible provider thread', async () => {
-    const solTarget = requireTarget('gpt-6.1-sol', 'low')
+    const solTarget = requireTarget('gpt-6.2-sol', 'low')
     const providerThreadId = 'provider-managed-thread'
     const session = createGroupSession(
       solTarget,
@@ -204,7 +206,7 @@ describe('automation model continuity', () => {
     )
     expect(saved.target).toEqual(solTarget)
     expect(saved.providerOptions).toMatchObject({
-      model: 'gpt-6.1-sol',
+      model: 'gpt-6.2-sol',
       reasoningEffort: 'low',
     })
     expect(saved.resumeState?.threadId).toBe(providerThreadId)
@@ -220,7 +222,7 @@ describe('automation model continuity', () => {
     )
 
     expect(replyRoute.providerOptions).toMatchObject({
-      model: 'gpt-6.1-sol',
+      model: 'gpt-6.2-sol',
       reasoningEffort: 'low',
     })
     expect(
@@ -232,7 +234,7 @@ describe('automation model continuity', () => {
   })
 
   it('keeps the selected-model thread after an isolated lower-tier turn', async () => {
-    const solTarget = requireTarget('gpt-6.1-sol', 'low')
+    const solTarget = requireTarget('gpt-6.2-sol', 'low')
     const session = createGroupSession(
       solTarget,
       createResumeState(solTarget, 'provider-sol-thread'),

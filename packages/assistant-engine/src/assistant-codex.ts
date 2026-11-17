@@ -1,3 +1,4 @@
+import { normalizeStoredAssistantModel } from '@murphai/contracts'
 import { resolveDailyNutritionIntroduction } from './assistant/nutrition-card-introduction.js'
 import {
   completeDynamicToolFailureDiagnostics,
@@ -937,8 +938,10 @@ function buildCodexFinalResponsePresentation(input: {
 export async function executeCodexAppServerTurn(
   input: CodexAppServerTurnInput,
 ): Promise<CodexAppServerTurnResult> {
-  if (input.model?.trim().toLowerCase() === 'gpt-5.6-sol') {
-    throw new TypeError('GPT-5.6 Sol is retired; use gpt-6.1-sol.')
+  const requestedModel = input.model?.trim().toLowerCase() ?? null
+  const currentModel = normalizeStoredAssistantModel(requestedModel)
+  if (currentModel !== requestedModel) {
+    throw new TypeError(`Model ${requestedModel} is retired; use ${currentModel}.`)
   }
   const providerStartCriticalPath = stampAssistantProviderStartCriticalPath(
     input.providerStartCriticalPath,

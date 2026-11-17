@@ -731,7 +731,7 @@ describe("assistant usage recording seam", () => {
       },
       providerResult: createProviderResult({
         providerOptions: createProviderOptions({
-          model: "gpt-6.1-sol-fallback",
+          model: "gpt-6.2-sol-fallback",
         }),
         usage: {
           apiKeyEnv: null,
@@ -760,7 +760,7 @@ describe("assistant usage recording seam", () => {
           memberId: "member-43",
           occurredAt: "2026-04-08T10:05:00.000Z",
           providerName: null,
-          requestedModel: "gpt-6.1-sol-fallback",
+          requestedModel: "gpt-6.2-sol-fallback",
         }),
     );
   });
@@ -3654,7 +3654,7 @@ describe("assistant execution context normalization", () => {
     const createScheduledGroupTools = vi.fn();
     const resolveScheduledLinqRoute = vi.fn();
     const defaultTarget = createAssistantModelTarget({
-      model: "gpt-6.1-sol",
+      model: "gpt-6.2-sol",
       modelProvider: "hosted-openai",
       provider: "codex-cli",
     });
@@ -3755,7 +3755,7 @@ describe("assistant execution context normalization", () => {
 
   it("falls back to the provided target when no hosted default target exists", () => {
     const fallbackTarget = createAssistantModelTarget({
-      model: "gpt-6.1-sol-mini",
+      model: "gpt-6.2-sol-mini",
       modelProvider: "hosted-openai",
       provider: "codex-cli",
     });
@@ -3778,7 +3778,7 @@ describe("assistant execution context normalization", () => {
 
   it("overlays the hosted default target onto operator defaults without dropping other defaults", () => {
     const hostedDefaultTarget = createAssistantModelTarget({
-      model: "gpt-6.1-sol-mini",
+      model: "gpt-6.2-sol-mini",
       modelProvider: "hosted-openai",
       provider: "codex-cli",
     });
@@ -3794,7 +3794,7 @@ describe("assistant execution context normalization", () => {
             approvalPolicy: "never",
             codexCommand: null,
             codexHome: null,
-            model: "gpt-6.1-sol",
+            model: "gpt-6.2-sol",
             modelProvider: "hosted-openai",
             oss: false,
             profile: null,
@@ -4408,7 +4408,7 @@ describe("assistant turn finalizer seam", () => {
 
     const session = createAssistantSession({
       providerOptions: createProviderOptions({
-        model: "gpt-6.1-sol",
+        model: "gpt-6.2-sol",
         modelProvider: "hosted-openai",
         reasoningEffort: "medium",
       }),
@@ -4421,7 +4421,7 @@ describe("assistant turn finalizer seam", () => {
 
     const saved = await persistAssistantTurnAndSession({
       input: {
-        model: "gpt-6.1-sol-mini",
+        model: "gpt-6.2-sol-mini",
         prompt: "Reply to the inbound message.",
         reasoningEffort: "low",
         turnTrigger: "automation-auto-reply",
@@ -4457,8 +4457,8 @@ describe("assistant turn finalizer seam", () => {
     );
     expect(saved.resumeState?.threadId).toBe("provider-session-stale");
     expect(saved.resumeState?.routeFingerprint).toBe("route-existing");
-    expect(saved.providerOptions.model).toBe("gpt-6.1-sol");
-    expect(saved.target.model).toBe("gpt-6.1-sol");
+    expect(saved.providerOptions.model).toBe("gpt-6.2-sol");
+    expect(saved.target.model).toBe("gpt-6.2-sol");
   });
 
   it("preserves existing provider resume state after active-turn fallback fork", async () => {
@@ -4642,7 +4642,7 @@ describe("assistant turn finalizer seam", () => {
 
     const session = createAssistantSession({
       providerOptions: createProviderOptions({
-        model: "gpt-6.1-sol",
+        model: "gpt-6.2-sol",
         modelProvider: "hosted-openai",
         reasoningEffort: "low",
       }),
@@ -4666,7 +4666,7 @@ describe("assistant turn finalizer seam", () => {
         codexThreadId: "provider-session-high",
         route: createRoute({
           providerOptions: createProviderOptions({
-            model: "gpt-6.1-sol",
+            model: "gpt-6.2-sol",
             modelProvider: "hosted-openai",
             reasoningEffort: "high",
           }),
@@ -4728,7 +4728,7 @@ function createProviderOptions(
   return serializeAssistantProviderSessionOptions({
     approvalPolicy: "never",
     provider: "codex-cli",
-    model: "gpt-6.1-sol",
+    model: "gpt-6.2-sol",
     modelProvider: "hosted-openai",
     reasoningEffort: "medium",
     sandbox: "danger-full-access",
