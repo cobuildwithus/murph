@@ -98,6 +98,30 @@ Read and apply this guide when touching any of these surfaces:
    - Do not send to purchased, scraped, or otherwise untrusted contact lists.
    - Only message people with a clear user/product relationship and an expected reason to hear from Murph.
 
+## Investigating delayed inbound iMessages
+
+Run the read-only timeline for the hour ending now. To investigate a past incident,
+pass `-v end_utc=<ISO-8601 timestamp with UTC offset>` before `-f`.
+
+```sh
+murph-prod-psql-ro -f apps/web/scripts/linq-webhook-timeline.sql
+```
+
+A long `message_to_event` places the delay before Linq created the webhook.
+A long `event_to_webhook` places it between event creation and Web intake.
+The mailbox uses Linq's `received_at`, then `sent_at`, then event creation time
+when both message timestamps are missing. In that last case the first interval
+is zero and the upstream delay is unknown. The Vercel route log
+`hosted-onboarding.route.linq-webhook.ingress` records which clock was available.
+
+Each timeline row is an accepted mailbox message with an exact provider-event
+match. A blank model or delivery timestamp means that trace lacks the stamp.
+Group replies can have a sent status without a delivery receipt. If the event
+count is zero, check production Vercel request logs for
+`/api/hosted-onboarding/linq/webhook` over the same window. Failed requests can
+leave no event row. If there are no requests either, check Linq's webhook
+delivery history and recheck after traffic resumes to catch late arrivals.
+
 ## Production conversation canary
 
 The hourly Linq canary uses one explicitly configured Photon identity that
