@@ -1,6 +1,6 @@
 import { recapAssetSchema, gameRecapDraftSchema, recapVideoDraftSchema, recapVideoPartSchema, type GameRecapEnvelope, type RecapAsset, type RecapVideoDraft } from '@murphai/contracts/recap-show'
 import * as z from '@murphai/contracts/zod-runtime'
-import { GAME_ACTIVITIES, type GameActivity, GAME_PRIZE_WORDS, hostedGameUpdateSchema, hostedGamePhotoSchema, hostedGameRecapWriterSchema, type HostedGameChatState, type HostedGameUpdate, type HostedGamePhoto, type HostedGameRecap, type HostedGameToolResponse } from '@murphai/hosted-execution/runtime-control'
+import { GAME_ACTIVITIES, type GameActivity, GAME_PRIZE_WORDS, hostedGameUpdateSchema, hostedGamePhotoSchema, hostedGameRecapWriterSchema, type HostedGameChatState, type HostedGameUpdate, type HostedGamePhoto, type HostedGameRecap, type HostedGameToolResponse, type HostedRuntimeGroupToolResponse } from '@murphai/hosted-execution/runtime-control'
 import type { AssistantHostedToolContext } from '../../assistant/hosted-tool-context.js'
 import { parseDynamicToolArguments } from './dynamic-tool-wrapper.js'
 import { toolTextResult } from '../tool-failure-diagnostics.js'
@@ -16,7 +16,7 @@ export const MURPH_READ_GAME_TOOL = {
 export const MURPH_MY_GAME_REMINDERS_TOOL = {
   deferLoading: true,
   namespace: 'murph', name: 'my_game_reminders',
-  description: "Read or set this person's own game reminders, only in their direct chat with Murph. operation=read returns their one reminder time, which covers all of their games, how reminders reach them, and each live game's days and when it reminds; read before you answer about a reminder, coach them or suggest a task. A game reminds them only on its days they haven't posted yet. operation=set changes the time in minutes after local midnight, which moves every game's reminder; whether reminders arrive by text or push; and for one gameId whether it reminds at all (on) and, for an any-N-days game only, whether it reminds every day they haven't posted (everyDay true) or only once every remaining day is needed. everyDay does nothing for a game on set weekdays. Confirm delivery only from reaches in the result: push is a Murph app notification at that time; text is a private text here an hour later if they still haven't posted. A game played in a group chat gets Murph's evening check-in in that chat instead of the private text. When reaches is none, ask them to turn on notifications in the Murph app. If they want help sticking to it, use the behavior-followthrough skill: one question at a time, a real time of day, a small first step and a plan for a bad day. Never state or guess another player's status or private words.",
+  description: "Read or set this person's own game reminders, only in their direct chat; read before you answer about one, coach them or suggest a task. One time covers all of their games, and a game reminds only on its days they haven't posted. Set minutes to the local time they ask for, in minutes after midnight; push or text; and for one gameId on, or for an any-N-days game everyDay: every unposted day instead of only when every remaining day is needed. Confirm delivery only from reaches: push is an app notification at that time; text adds a private text here an hour after it. A game in a group chat gets that chat's evening check-in instead. When reaches is none, ask them to turn on notifications in the Murph app. If they want help sticking to it, use the behavior-followthrough skill. Never state or guess another player's status or private words.",
   inputSchema: { type: 'object', additionalProperties: false, required: ['operation'], properties: {
     operation: { type: 'string', enum: ['read', 'set'] }, messageRef: { type: 'string' },
     minutes: { type: 'integer', minimum: 0, maximum: 1439 }, gameId: { type: 'string' },
@@ -526,19 +526,23 @@ function gameRefusalGuidance(payload: GameToolResult, action: 'update_game' | 'g
 
 const REMINDER_WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const
 
-/** The saved reminders in words: the one time for every game, each game's named days, and when each game reminds. */
-export function describeMyGameReminders(response: HostedGameToolResponse) {
-  const reminders = 'reminders' in response.result ? response.result.reminders : undefined
-  if (!reminders) return response
-  const { minutes, games, ...channels } = reminders
+function reminderClock(minutes: number): string {
   const hour = Math.floor(minutes / 60)
-  const time = `${hour % 12 || 12}:${String(minutes % 60).padStart(2, '0')} ${hour < 12 ? 'AM' : 'PM'}`
+  return `${hour % 12 || 12}:${String(minutes % 60).padStart(2, '0')} ${hour < 12 ? 'AM' : 'PM'}`
+}
+
+/** The saved reminders in words: the one time for every game, each game's named days, and when each game reminds. */
+export function describeMyGameReminders(response: HostedRuntimeGroupToolResponse) {
+  if (response.action !== 'my_game_reminders' || !('reminders' in response.result) || !response.result.reminders) return response
+  const reminders = response.result.reminders
+  const { minutes, games, ...channels } = reminders
+  const time = reminderClock(minutes)
   // everyDay changes only an any-N-days game, so a game on set weekdays never shows it.
-  const described = games.map(({ schedule, everyDay, ...game }) => 'count' in schedule
+  const described = games.map(({ schedule, everyDay, minutes: own, ...game }) => ({ ...(own === undefined ? {} : { minutes: own, time: reminderClock(own) }), ...('count' in schedule
     ? { ...game, days: `any ${schedule.count} days`, everyDay,
       reminds: !game.on ? 'off' : everyDay ? 'every day not posted yet' : `only once every remaining day is needed to reach ${schedule.count}` }
     : { ...game, days: schedule.days.length === 7 ? 'every day' : schedule.days.map(day => REMINDER_WEEKDAYS[day]).join(', '),
-      reminds: game.on ? 'each of these days not posted yet' : 'off' })
+      reminds: game.on ? 'each of these days not posted yet' : 'off' }) }))
   return { ...response, result: { ...response.result, reminders: { minutes, time, ...channels, games: described } } }
 }
 
@@ -554,7 +558,7 @@ export async function executeGameTool(input: { request: GameDynamicRequest; cont
     try {
       const { messageRef: _messageRef, ...request } = input.request
       const response = await tool.request({ ...request, origin: { kind: 'accepted_input', assistantInputId } })
-      return toolTextResult(true, JSON.stringify(response.action === 'my_game_reminders' ? describeMyGameReminders(response) : response))
+      return toolTextResult(true, JSON.stringify(describeMyGameReminders(response)))
     } catch (error) { return toolTextResult(false, `${setting} could not be confirmed.`, 'handler_exception', error) }
   }
   if (input.request.action === 'game_lore') return executeGameLoreTool({ ...input, request: input.request })

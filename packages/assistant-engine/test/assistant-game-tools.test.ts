@@ -111,13 +111,17 @@ describe('game dynamic tools', () => {
     expect(describeMyGameReminders(hostedGameToolResponseSchema.parse({ action: 'my_game_reminders', result: { status: 'ok', reaches: 'none', reminders: {
       ...reminders, minutes: 0, games: [{ ...reminders.games[2]!, everyDay: true }] } } }))).toMatchObject({ result: { reminders: { time: '12:00 AM',
       games: [{ everyDay: true, reminds: 'every day not posted yet' }] } } })
+    // A game's own time, once Web sends one, shows beside that game.
+    expect(describeMyGameReminders(hostedGameToolResponseSchema.parse({ action: 'my_game_reminders', result: { status: 'ok', reaches: 'push', reminders: {
+      ...reminders, games: [{ ...reminders.games[0]!, minutes: 1260 }] } } }))).toMatchObject({ result: { reminders: { time: '12:00 PM',
+      games: [{ minutes: 1260, time: '9:00 PM', days: 'Mon, Tue, Wed, Thu, Fri' }] } } })
     const refused = hostedGameToolResponseSchema.parse({ action: 'my_game_reminders', result: { status: 'unavailable', error: 'Private game reminders are unavailable.' } })
     expect(describeMyGameReminders(refused)).toBe(refused)
   })
   it('states the reminder facts the replies rely on, without the every-evening wording', () => {
-    expect(MURPH_MY_GAME_REMINDERS_TOOL.description).toContain('one reminder time, which covers all of their games')
-    expect(MURPH_MY_GAME_REMINDERS_TOOL.description).toContain('everyDay does nothing for a game on set weekdays')
-    expect(MURPH_MY_GAME_REMINDERS_TOOL.description).toContain("evening check-in in that chat instead of the private text")
+    expect(MURPH_MY_GAME_REMINDERS_TOOL.description).toContain('One time covers all of their games')
+    expect(MURPH_MY_GAME_REMINDERS_TOOL.description).toContain('for an any-N-days game everyDay')
+    expect(MURPH_MY_GAME_REMINDERS_TOOL.description).toContain("A game in a group chat gets that chat's evening check-in instead")
     expect(MURPH_MY_GAME_REMINDERS_TOOL.description).not.toMatch(/every evening/u)
     expect(GAME_REMINDER_GUIDANCE).toContain("One time covers all of that player's games")
     expect(GAME_REMINDER_GUIDANCE).toContain("this chat gets Murph's evening check-in on game days")
