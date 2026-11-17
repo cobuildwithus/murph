@@ -1,7 +1,8 @@
 import type { ClientUnits } from '../../companion/client-info';
 import { rungEntry, type RungDefinition } from './bank';
-import type { ShareView } from './contract';
-import { formatAmount, formatNumber, formatRungTime } from './format';
+import type { Rung, ShareView } from './contract';
+import { formatAmount, formatNumber } from './format';
+import { rungFor } from './goals';
 import { EXERCISES, type Candidate } from './registry';
 
 /** Saved identities only: neither task prose nor the display noun is a scene input. */
@@ -22,7 +23,7 @@ function routeCard(award: Candidate, units: ClientUnits, activity: string | null
   const walking = activity === 'walk' || activity === 'steps';
   const running = activity === 'run';
   const name = `${from} to ${to}`;
-  const valueText = formatAmount(distanceM, 'meters', 'full', units).text;
+  const valueText = formatAmount(distanceM, 'meters', 'full', units).text.replace(/ mi$/u, ' miles');
   const line = walking || running ? `${running ? 'run' : 'walked'} as far as ${name}`
     : activity === null ? `reached a new progress milestone` : `done ${activity} over the distance from ${name}`;
   const pose = running ? 'Running' : walking ? 'Walking' : `Doing ${activity}`;
@@ -30,21 +31,36 @@ function routeCard(award: Candidate, units: ClientUnits, activity: string | null
     prompt: activity === null ? null : scenePrompt(`${pose} at the destination of this journey, with a recognizable local setting. Appropriate exercise clothes and a complete activity pose.`, { destination: to }, heightCm) };
 }
 
+function rungValueText(award: Candidate, rung: Rung, activity: string | null): string {
+  if (award.kind === 'landmark') return `${formatNumber(Math.ceil(rung.at), 'full')} ${award.data.noun}`;
+  if (activity === null) return rung.atText;
+  const hours = award.measureId === 'sleep' || rung.at >= 10 * 3600;
+  const action = award.measureId === 'sleep' ? 'asleep' : activity === 'planks' ? 'planked' : `of ${activity}`;
+  return `${formatNumber(Math.floor(rung.at / (hours ? 3600 : 60)), 'full')} ${hours ? 'hours' : 'minutes'} ${action}`;
+}
+
 export function shareCard(award: Candidate, units: ClientUnits, heightCm: number | null = null): { card: ShareView['card']; prompt: string | null } {
+  const result = buildShareCard(award, units, heightCm);
+  for (const field of ['name', 'contextLine', 'valueText', 'messageText'] as const) {
+    result.card[field] = result.card[field].replace(/'/gu, '’');
+  }
+  return result;
+}
+
+function buildShareCard(award: Candidate, units: ClientUnits, heightCm: number | null): ReturnType<typeof shareCard> {
   const activity = shareActivity(award.measureId!);
   if (award.kind === 'route') return routeCard(award, units, activity, heightCm);
   const definition = award.data.rung as RungDefinition;
   const entry = rungEntry(definition);
+  const rung = rungFor(definition, 0, award.on, units);
   const facts = { name: entry.name, where: entry.where, blurb: entry.blurb, tagline: entry.tagline };
-  const valueText = entry.kind === 'height'
-    ? `${formatNumber(units === 'us' ? entry.at : entry.at * 0.3048, 'full')} ${units === 'us' ? 'ft' : 'm'}`
-    : 'timeText' in entry ? entry.timeText! : formatRungTime(entry.at);
-  const face = 'found' in definition.target ? { generic: true as const } : { drawing: entry.id };
+  const valueText = rungValueText(award, rung, activity);
+  const face = rung.drawing === null ? { generic: true as const } : { drawing: rung.drawing };
   const card = { name: entry.name, valueText, face, contextLine: 'A new milestone in your progress.', messageText: "I've reached a new progress milestone" };
   if (activity === null) return { card, prompt: null };
   if (entry.kind === 'height') {
     const verb = activity === 'pushups' ? 'scale' : 'climb';
-    card.contextLine = `You've done enough ${activity} to ${verb} all ${valueText}.`;
+    card.contextLine = `You've done enough ${activity} to ${verb} all ${rung.atText}.`;
     card.messageText = `I've done enough ${activity} to ${verb} ${entry.name}`;
     const pose = activity === 'pushups' ? 'Performing a pushup on a broad surface' : activity === 'pull-ups' ? 'Doing a pull-up on a simple exercise bar' : `Doing ${activity}`;
     return { card, prompt: scenePrompt(`${pose} at the top of the landmark. Make it recognizable using the scene facts. ${entry.id === 'mont-blanc' ? 'Snowy summit terrain in the Alps with warm sunrise light.' : 'Show the landmark and surroundings.'}`, facts, heightCm) };
