@@ -145,7 +145,7 @@ describe.skipIf(!enabled)("game reminders PostgreSQL", () => {
     await db.gamePlayer.updateMany({ where: { gameId: read }, data: { reminderMinutes: 1150 } });
     vi.setSystemTime(new Date("2026-11-06T19:10:00Z"));
     await sendDueGameReminders(new Date("2026-11-06T19:10:00Z"));
-    expect(m.send.mock.calls.map(([push]) => [(push as ApplePushRequest).data.gameId, (push as ApplePushRequest).message.title]).sort())
+    expect(m.send.mock.calls.map(([push]) => [(push as ApplePushRequest).data.gameId, ((push as ApplePushRequest).message as { title?: string }).title]).sort())
       .toEqual([[read, "Read"], [walk, "Walk"]].sort());
   });
   it("drops a game moved after its push was claimed, and reminds it at the new time", async () => {
@@ -223,7 +223,7 @@ describe.skipIf(!enabled)("game reminders PostgreSQL", () => {
     await post(id, labelled); await post(id, plain);
     await sendDueGameReminders(now);
     expect(m.send.mock.calls[0]![0].message).toMatchObject({ body: "Kat and Player posted. Share yours to see it." });
-    expect((await claims())[0]!.payload).toEqual({ v: 1, recipientMemberId: owner, day: "2026-11-06", outcome: "sent" });
+    expect((await claims())[0]!.payload).toEqual({ v: 1, recipientMemberId: owner, day: "2026-11-06", minutes: 1140, outcome: "sent" });
   });
   it("uses the effective task and a group seat override, capped at 120 characters", async () => {
     const owner = await member(), id = await game(owner, "Old task", undefined, true);
