@@ -7138,11 +7138,11 @@ paired with the rotated `APNS_KEY_ID`, and never consults the transitional PEM
 in that mode. Signing is shared across concurrent callers and tokens are reused
 for 40 minutes. A prepared send cannot trigger a later signing refresh.
 Reply claims and
-subject checks remain separate. The push body is exactly “New voice note on
-your post.” or “New note on your post.”, with data `{gameId, notification:
-"game_reply"}`. The sender's required title matches post pushes. Delivery is
-one best-effort attempt after the response, with expiry 24 hours after sending.
-No names, lengths, content, digests or media links enter events or pushes.
+subject checks remain separate. The push body is “Sam replied to your post.” or
+“Sam replied with a voice note.”, naming the replier as the recipient knows them,
+with data `{gameId, notification: "game_reply"}`. Delivery is one best-effort
+attempt after the response, with expiry 24 hours after sending. No lengths,
+content, digests or media links enter events or pushes, and names enter pushes only.
 
 Apply the additive migration before Web. This complete reply-aware Web release
 is the rollback floor once replies or reply reports exist. Recovery uses a
@@ -7192,8 +7192,12 @@ it rechecks the exact route/session, permission, suspension, game switch, active
 participation, real day, candidate, reporter mask, block mask and milestone.
 Group completion is suppressed if any eligible peer is blocked. A stale send,
 crash or uncertain provider result never releases its claims. Recipients are
-processed sequentially; provider work stays outside transactions. No names or
-content enter post pushes. Daily reminders may include the recipient's own task words. Pair copy continues to derive from permanent
+processed sequentially; provider work stays outside transactions. Every game
+push names the other person as the recipient knows them (`readNamesForViewer`:
+their private label, else that person's own first name). The name is opened
+after the delivery recheck passes, never stored in events, and a failed read
+falls back to the nameless wording. No other content enters post pushes; daily
+reminders may also include the recipient's own task words. Pair copy continues to derive from permanent
 `hasUnlockedDay`; group completion derives from live submitted artifacts.
 Missed-day chat uses the separate canonical room collector described below;
 it does not create additional push receipts.

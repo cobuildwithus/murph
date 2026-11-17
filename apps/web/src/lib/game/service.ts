@@ -137,6 +137,7 @@ import { inspectReplyAudio } from "./reply-audio";
 import { claimGameReplyNotification, sendGameReplyNotificationAfterResponse } from "./reply-notification";
 import { claimGamePostNotification, sendGamePostNotificationAfterResponse } from "./post-notification";
 import { prepareGameAcceptNotification, sendGameAcceptNotificationAfterResponse } from "./accept-notification";
+import { readNamesForViewer } from "./viewer-names";
 import {
   buildGameHistoryView,
   pendingInviteeLabel,
@@ -1545,7 +1546,7 @@ async function replyToPost(context: CommandContext, command: Extract<GameCommand
       if (refusal) reject(refusal, refusal === "REPLY_USED" ? "This post already has a reply." : "You can't reply to this post.");
       await tx.gameReply.create({ data: { id: replyId, entryId, authorMemberId: context.actor, kind, textEncrypted, audioEncrypted, durationMs,
         levels: kind === "voice" ? command.levels : [] } });
-      notification = await claimGameReplyNotification(tx, { gameId, entryId, replyId, kind,
+      notification = await claimGameReplyNotification(tx, { gameId, entryId, replyId, kind, actor: context.actor,
         memberId: loaded.entries.find(entry => entry.id === entryId)!.memberId });
       return [{ type: "reply_accepted", commandKey, payload: { entryId } }];
     });
@@ -3444,17 +3445,8 @@ async function readBlockedPeople(memberId: string): Promise<{ memberId: string; 
     select: { blockedMemberId: true }, take: GAME_BLOCK_LIMIT, where: { blockerMemberId: memberId } });
   if (rows.length === 0) return [];
   const ids = rows.map((row) => row.blockedMemberId);
-  const [profiles, labels] = await Promise.all([
-    prisma.gameProfile.findMany({ select: { firstNameEncrypted: true, memberId: true }, where: { memberId: { in: ids } } }),
-    prisma.gameContactLabel.findMany({ select: { nameEncrypted: true, subjectMemberId: true }, where: { ownerMemberId: memberId, subjectMemberId: { in: ids } } }),
-  ]);
-  const plain = await openGameTexts([
-    ...labels.map((label) => ({ ...labelTarget(memberId, "name"), value: label.nameEncrypted })),
-    ...profiles.map((profile) => ({ field: "first_name", memberId: profile.memberId, rowId: profile.memberId, table: "game_profile" as const, value: profile.firstNameEncrypted })),
-  ]);
-  const labelName = new Map(labels.map((label, index) => [label.subjectMemberId, plain[index]]));
-  const ownName = new Map(profiles.map((profile, index) => [profile.memberId, plain[labels.length + index]]));
-  return ids.map((id) => ({ firstName: labelName.get(id) || ownName.get(id) || "", memberId: id }));
+  const names = await readNamesForViewer(memberId, ids);
+  return ids.map((id) => ({ firstName: names.get(id) ?? "", memberId: id }));
 }
 
 /** Read-only recovery of the newest open invite addressed to a verified contact. */

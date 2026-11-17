@@ -11,10 +11,12 @@ import { isGameEnabled } from "./access";
 import { deliverGamePush, readGamePushRoutes } from "./push-delivery";
 import type { Schedule } from "./rules";
 import { addDays, daysBetween, dayStartInstant } from "./time";
+import { readPushName } from "./viewer-names";
 
 interface PreparedAcceptNotification {
   gameId: string;
   actor: string;
+  start: string;
   memberId: string;
   sessionId: string;
   request: ApplePushRequest;
@@ -41,10 +43,15 @@ export async function prepareGameAcceptNotification(tx: {
   const start = days === 0 ? "today" : days === 1 ? "tomorrow" : new Intl.DateTimeFormat("en-US", {
     timeZone: "UTC", ...(days >= 2 && days <= 6 ? { weekday: "long" } as const : { month: "short", day: "numeric" } as const),
   }).format(new Date(`${recipient.dayOne}T00:00:00Z`));
-  return { gameId: input.gameId, actor: input.actor, memberId: recipient.memberId, sessionId: route.gameSessionId,
+  return { gameId: input.gameId, actor: input.actor, start, memberId: recipient.memberId, sessionId: route.gameSessionId,
     request: { collapseId: sha256Hex(`game-accept-push:${input.gameId}`), data: { gameId: input.gameId, notification: "game_accepted" }, target: target.data,
       expiresAt: dayStartInstant(addDays(today, 1), recipient.timeZone),
-      message: { kind: "alert", title: "They shook on it.", body: `Your game starts ${start}.` } } };
+      message: acceptMessage(null, start) } };
+}
+
+/** Names the friend as the recipient knows them, once delivery has rechecked the game. */
+function acceptMessage(name: string | null, start: string) {
+  return { kind: "alert", title: `${name ?? "They"} shook on it.`, body: `Your game starts ${start}.` } as const;
 }
 
 export function sendGameAcceptNotificationAfterResponse(notification: PreparedAcceptNotification | null): void {
@@ -61,9 +68,11 @@ export async function deliverGameAcceptNotification(notification: PreparedAccept
     } });
     if (!row || row.status !== "live" || !isGameEnabled()
       || !row.players.some(player => player.memberId === notification.memberId && !player.leftAt)) return false;
-    return !await db.gameBlock.findFirst({ where: { OR: [
+    if (await db.gameBlock.findFirst({ where: { OR: [
       { blockerMemberId: notification.memberId, blockedMemberId: notification.actor },
       { blockerMemberId: notification.actor, blockedMemberId: notification.memberId },
-    ] }, select: { blockerMemberId: true } });
+    ] }, select: { blockerMemberId: true } })) return false;
+    notification.request.message = acceptMessage(await readPushName(notification.memberId, notification.actor), notification.start);
+    return true;
   });
 }

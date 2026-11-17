@@ -75,7 +75,7 @@ const voiceReply = (gameId: string, entryId: string): Extract<GameCommand, { typ
   ({ type: "replyToPost", gameId, entryId, replyId: randomUUID(), kind: "voice", audio: audio.toString("base64"), levels });
 
 async function latePush(gameId: string, entryId: string, replyId: string, memberId: string) {
-  await deliverGameReplyNotification({ gameId, replyId, memberId, sessionId: "synthetic-session", commandKey: `game-reply-push:${entryId}`,
+  await deliverGameReplyNotification({ gameId, replyId, memberId, actor: "synthetic-replier", kind: "voice", sessionId: "synthetic-session", commandKey: `game-reply-push:${entryId}`,
     request: { target: { token: "ab".repeat(32), environment: "development", topic: "ai.withmurph.app.dev" },
       collapseId: "synthetic", data: { gameId, notification: "game_reply" }, expiresAt: new Date(),
       message: { kind: "alert", title: "New game check-in", body: "New voice note on your post." } } });
