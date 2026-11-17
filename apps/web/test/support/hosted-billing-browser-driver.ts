@@ -361,7 +361,11 @@ export class HostedBillingBrowserDriver {
         ),
       ]);
       await assertSuccessfulResponse(response);
-      await actor.page.getByText("You're in. Welcome to Murph.", {
+      await actor.page.getByRole("heading", {
+        exact: true,
+        name: "You're in.",
+      }).waitFor();
+      await actor.page.getByText("Welcome to Murph.", {
         exact: true,
       }).waitFor();
     });
