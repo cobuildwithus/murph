@@ -274,6 +274,9 @@
       "@murphai/query/browser-overview": [
         "../../packages/query/src/browser-overview.ts"
       ],
+      "@murphai/query/browser-replica": [
+        "../../packages/query/src/browser-replica.ts"
+      ],
       "@murphai/query/browser-replica-client": [
         "../../packages/query/src/browser-replica-client.ts"
       ],
