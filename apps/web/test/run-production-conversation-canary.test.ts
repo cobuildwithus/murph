@@ -130,14 +130,41 @@ describe("production conversation canary runner", () => {
     expect(mocks.getToken).toHaveBeenCalledTimes(1);
   });
 
-  it("does not restart reset or resend messages when status token acquisition fails", async () => {
+  it("stops at the observation deadline without restarting reset or resending when status tokens keep failing", async () => {
     prepareCompleteConversation();
+    const clock = mockCanaryObservationClock();
     mocks.getToken.mockResolvedValueOnce("synthetic-reset-token")
       .mockRejectedValue(new Error("Synthetic refresh failure"));
-    await expect(runLinqProductionCanary(TEST_ENV)).rejects.toThrow("Synthetic refresh failure");
+    await expect(runLinqProductionCanary(TEST_ENV)).rejects.toMatchObject({
+      name: expect.stringMatching(/^outcome-not-ready; stage=runtime-identity;/u),
+    });
+    expect(clock.elapsedMs()).toBe(CANARY_OUTCOME_WAIT_MS);
     expect(fetch).toHaveBeenCalledTimes(1);
+    expect(mocks.getToken).toHaveBeenCalledTimes(1 + CANARY_OUTCOME_WAIT_MS / CANARY_OUTCOME_POLL_MS);
     expect(mocks.spaceSend).toHaveBeenCalledTimes(3);
     expect(mocks.stop).toHaveBeenCalledOnce();
+  });
+
+  it("treats one missed status token as a skipped poll", async () => {
+    prepareCompleteConversation();
+    mockCanaryObservationClock();
+    let statusMints = 0;
+    mocks.getToken.mockResolvedValueOnce("synthetic-reset-token").mockImplementation(async () => {
+      statusMints += 1;
+      if (statusMints === 2) throw new Error("Synthetic transient mint failure");
+      return `synthetic-status-token-${statusMints}`;
+    });
+    let stage = 0;
+    vi.mocked(fetch).mockResolvedValueOnce(resetResponse()).mockImplementation(async () => {
+      const count = stage++ < 2 ? 0 : 1;
+      return outcomeResponse({ ready: true, matchingGoalCount: count, matchingGoalIdCount: count });
+    });
+
+    const result = await runLinqProductionCanary(TEST_ENV);
+    expect(result.canonicalOutcome).toEqual({ baselineGoalCount: 0, savedGoalCount: 1, proposalGoalCount: 0 });
+    expect(vi.mocked(fetch).mock.calls.filter(([, options]) => options?.method === "POST")).toHaveLength(1);
+    expect(mocks.getToken).toHaveBeenCalledTimes(vi.mocked(fetch).mock.calls.length + 1);
+    expect(mocks.spaceSend).toHaveBeenCalledTimes(5);
   });
 
   it("does not retry a rejected OIDC reset", async () => {
