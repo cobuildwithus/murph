@@ -168,6 +168,21 @@ function packageCoverageMatrixFromPlan() {
   };
 }
 
+/**
+ * The package matrix limited to shards with at least one package a pull
+ * request's diff reaches (scripts/ci-diff-reach.mjs). Undefined reaches all.
+ * @param {string[] | undefined} reachedPackages
+ */
+export function reachedPackageCoverageMatrix(reachedPackages) {
+  const matrix = packageCoverageMatrixFromPlan();
+  if (reachedPackages === undefined) return matrix;
+  const reached = new Set(reachedPackages);
+  const shards = new Set(PACKAGE_COVERAGE_PLAN
+    .filter((entry) => reached.has(entry.dir))
+    .map((entry) => entry.shard));
+  return { include: matrix.include.filter((entry) => shards.has(entry.package_shard)) };
+}
+
 function hostedWebTestMatrixFromPlan() {
   return {
     include: Array.from({ length: HOSTED_WEB_TEST_SHARD_COUNT }, (_, index) => ({
@@ -318,6 +333,7 @@ function parseArgs(argv) {
     check: false,
     githubOutput: undefined,
     packageDirs: undefined,
+    reachedPackages: undefined,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -344,6 +360,21 @@ function parseArgs(argv) {
         index += 1;
         break;
       }
+      case "--reached-packages": {
+        const value = argv[index + 1];
+        let reached;
+        try {
+          reached = JSON.parse(value ?? "");
+        } catch {
+          reached = undefined;
+        }
+        if (!Array.isArray(reached) || reached.some((dir) => typeof dir !== "string")) {
+          throw new Error("--reached-packages requires a JSON array of package directories.");
+        }
+        parsed.reachedPackages = reached;
+        index += 1;
+        break;
+      }
       default:
         throw new Error(`Unknown argument '${arg}'.`);
     }
@@ -366,9 +397,13 @@ function main() {
     if (args.githubOutput.length === 0) {
       throw new Error("--github-output requires a path.");
     }
+    const packageMatrix = reachedPackageCoverageMatrix(args.reachedPackages);
+    const packageCoverage = packageMatrix.include.length > 0;
+    // A skipped job never expands its matrix; keep the output a valid matrix.
     appendFileSync(
       args.githubOutput,
-      `package_matrix=${JSON.stringify(packageCoverageMatrixFromPlan())}\n`,
+      `package_matrix=${JSON.stringify(packageCoverage ? packageMatrix : packageCoverageMatrixFromPlan())}\n`
+        + `package_coverage=${packageCoverage}\n`,
     );
     appendFileSync(
       args.githubOutput,

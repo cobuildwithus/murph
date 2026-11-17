@@ -76,7 +76,7 @@ describe('host support workflow guards', () => {
       'tsx e2e/smoke/verify-scenario-integrity.ts --coverage',
     )
     expect(workflow).toContain(
-      'MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_VITEST_MAX_WORKERS=50%',
+      'MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 MURPH_VITEST_FILE_PARALLELISM=1 MURPH_VITEST_MAX_WORKERS=4',
     )
     expect(workflow).not.toContain('run: pnpm release:check')
   })
@@ -128,7 +128,7 @@ describe('host support workflow guards', () => {
     const workflow = readFileSync(hostSupportWorkflowPath, 'utf8')
 
     expect(workflow).toContain(
-      'env MURPH_VITEST_MAX_WORKERS=50% pnpm --dir "$package_dir" test:coverage',
+      'env MURPH_VITEST_FILE_PARALLELISM=1 MURPH_VITEST_MAX_WORKERS=4 pnpm --dir "$package_dir" test:coverage',
     )
     expect(workflow).not.toContain('NODE_OPTIONS')
   })

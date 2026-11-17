@@ -43,6 +43,38 @@ test("release admission requires every actual shard to succeed", async () => {
   }
 });
 
+test("a pull request may skip only the shards its diff can't reach", async () => {
+  const source = await workflow("host-support.yml");
+  const name = "Require every release shard to succeed";
+  const success = Object.fromEntries([
+    "PLAN_RESULT", "BUILD_RESULT", "PACKAGE_RESULT", "WEB_BUILD_RESULT",
+    "WEB_TEST_RESULT", "WEB_POSTGRES_RESULT", "CLOUDFLARE_RESULT",
+    "BROWSER_SMOKE_RESULT", "FIXTURE_RESULT", "BUNDLE_RESULT",
+  ].map((key) => [key, "success"]));
+  const unreached = {
+    ...success, EVENT_NAME: "pull_request",
+    REACH_PACKAGES: "false", REACH_APPS: "false", REACH_RUNNER_BUNDLE: "false",
+    PACKAGE_RESULT: "skipped", WEB_BUILD_RESULT: "skipped", WEB_TEST_RESULT: "skipped",
+    WEB_POSTGRES_RESULT: "skipped", CLOUDFLARE_RESULT: "skipped", BUNDLE_RESULT: "skipped",
+  };
+  assert.equal(runStep(source, name, unreached).status, 0);
+  for (const [key, change] of Object.entries({
+    EVENT_NAME: "push",
+    PLAN_RESULT: "failure",
+    REACH_APPS: "true",
+    REACH_PACKAGES: "",
+    REACH_RUNNER_BUNDLE: "true",
+    WEB_TEST_RESULT: "failure",
+    PACKAGE_RESULT: "cancelled",
+    BROWSER_SMOKE_RESULT: "skipped",
+    BUILD_RESULT: "skipped",
+    FIXTURE_RESULT: "skipped",
+  })) {
+    assert.equal(runStep(source, name, { ...unreached, [key]: change }).status, 1,
+      `${key}=${change} must prevent release admission`);
+  }
+});
+
 test("a file-split package shard runs its own slice and nothing runs a split it cannot honor", async () => {
   const source = await workflow("host-support.yml");
   const name = "Run package coverage shard";
@@ -88,7 +120,7 @@ test("every PostgreSQL shard index the workflow starts selects against the same 
   const source = await workflow("host-support.yml");
   const job = source.split("  release-web-postgres-linux:\n")[1].split(/^  [a-z]/mu)[0];
   const indexes = JSON.parse(/^ {8}shard: (\[[0-9, ]+\])$/mu.exec(job)[1]);
-  const count = Number(/--shard \$\{\{ matrix\.shard \}\}\/([0-9]+)$/mu.exec(job)[1]);
+  const count = Number(/--shard \$\{\{ matrix\.shard \}\}\/([0-9]+)(?: --workers [1-8])?$/mu.exec(job)[1]);
   assert.deepEqual(indexes, Array.from({ length: count }, (_, index) => index + 1));
   assert.match(job, new RegExp(`^ {6}max-parallel: ${count}$`, "mu"));
   assert.match(job, new RegExp(`\\(\\$\\{\\{ matrix\\.shard \\}\\}/${count}\\)$`, "mu"));

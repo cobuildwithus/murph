@@ -39,8 +39,11 @@ function cloudflareNodePattern(pattern: string): string {
 }
 
 function createCloudflareNodeProject(name: string, fileNames: readonly string[]) {
+  // The platform bucket stays serial unless a caller opts in explicitly, as
+  // Host Support CI does on its own runner (MURPH_VITEST_FILE_PARALLELISM=1).
   const concurrency =
     name === "cloudflare-node-platform"
+    && process.env.MURPH_VITEST_FILE_PARALLELISM !== "1"
       ? {
         ...cloudflareNodeVitestConcurrency,
         fileParallelism: false,

@@ -31,3 +31,7 @@ export function packageCoverageMatrix(repoRoot?: string): {
 export function hostedWebTestMatrix(repoRoot?: string): {
   include: Array<{ shard: string }>;
 };
+
+export function reachedPackageCoverageMatrix(reachedPackages?: readonly string[]): {
+  include: Array<{ shard: string; package_shard: string; vitest_shard: string }>;
+};
