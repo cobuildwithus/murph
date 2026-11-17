@@ -22,18 +22,3 @@ export function ladderRungs({ measures }: AchievementContext): Candidate[] {
       } }] : [];
   }));
 }
-
-export function streakRuns({ days }: AchievementContext): Candidate[] {
-  let run = 0;
-  let best = 0;
-  const awards: Candidate[] = [];
-  for (const day of days) {
-    if (day.done) run++;
-    else if (day.ended) run = 0;
-    if (run <= best) continue;
-    best = run;
-    awards.push({ key: `streak:${run}`, kind: "streak", measureId: null, subjectMemberId: null, on: day.date,
-      data: { value: run, page: "streak", evaluator: 1 } });
-  }
-  return awards;
-}

@@ -143,7 +143,9 @@ run twice weekly, down from seven slots: 72/96-hour nominal gaps, with no DST
 shift or month-boundary reset. This approximates one-third of the former cadence.
 The controller reuses only the existing
 `temporal-compatibility` Environment's repository-scoped GitHub App authority:
-private Actions write and Contents read for `cobuildwithus/murph-cloud`. It never
+private Actions write and Contents read for `cobuildwithus/murph-cloud`.
+[GitHub App signing](github-app-kms.md) owns its OIDC/KMS credentials and
+renewable installation-token supplier. It never
 checks out private source, receives provider credentials, or downloads private
 logs/artifacts.
 

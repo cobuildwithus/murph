@@ -33,8 +33,10 @@ private versions. Public Murph contains no worker implementation, private
 reader policy, or second production deployment path.
 
 The compatibility controller persists no private SHA/tag pointer and imports no
-private code. After same-repository human and exact-public-head admission, it
-uses its repository-scoped GitHub App token to resolve private `main`, validates
+private code. App JWTs are signed through GitHub OIDC and Google KMS;
+[GitHub App signing](../operations/github-app-kms.md) owns IAM prerequisites,
+scoped token issuance and post-job revocation. After same-repository human and
+exact-public-head admission, it uses its repository-scoped GitHub App token to resolve private `main`, validates
 the fixed `public-murph-integration.yml` workflow identity, and dispatches that
 workflow at `main` with returned run details. It accepts only the returned first
 attempt whose workflow identity and `head_sha` match the pre-resolved private

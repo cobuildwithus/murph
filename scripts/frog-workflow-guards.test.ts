@@ -238,8 +238,8 @@ fi
     expect(jobs).toBeGreaterThan(topLevelPermissions);
     const jobPermissions = /^    permissions:\n(?<permissions>(?:      .+\n)+)/mu
       .exec(workflow)?.groups?.permissions;
-    expect(jobPermissions).toBe("      contents: read\n");
-    expect(workflow).not.toContain("id-token: write");
+    expect(jobPermissions).toBe("      id-token: write\n      contents: read\n");
+    expect(workflow).toContain("id-token: write");
     expect(workflow).toContain("persist-credentials: false");
     expect(workflow).toContain("ref: ${{ github.sha }}");
     expect(workflow).toContain(
@@ -252,16 +252,16 @@ fi
     expect(refs.length).toBeGreaterThan(0);
     expect(refs.every((ref) => /^[a-f0-9]{40}$/u.test(ref))).toBe(true);
     const appTokenInputs =
-      /^        uses: actions\/create-github-app-token@[^\n]+\n        with:\n(?<inputs>(?:          [^\n]+\n)+)/mu
+      /^        uses: \.\/\.github\/actions\/github-app-token\n        with:\n(?<inputs>(?:          [^\n]+\n)+)/mu
         .exec(workflow)?.groups?.inputs;
     expect(
       appTokenInputs?.trim().split("\n").map((line) => line.trim()),
     ).toEqual([
-      "client-id: ${{ vars.FROG_APP_CLIENT_ID }}",
-      "private-key: ${{ secrets.FROG_APP_PRIVATE_KEY }}",
-      "permission-contents: write",
-      "permission-issues: write",
-      "permission-pull-requests: write",
+      "app-id: ${{ vars.FROG_APP_CLIENT_ID }}",
+      "key-version: projects/murph-495013/locations/global/keyRings/github-apps/cryptoKeys/frog-app/cryptoKeyVersions/1",
+      "owner: ${{ github.repository_owner }}",
+      "repositories: murph",
+      `permissions: '{"contents":"write","issues":"write","pull_requests":"write"}'`,
     ]);
     for (const input of [
       "branch: frog/sync",

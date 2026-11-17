@@ -28,7 +28,7 @@ export function formatAmount(value: number, unit: MeasureSeries["unit"] | "bpm" 
 }
 
 export function formatHeight(feet: number, units: ClientUnits): string {
-  return `${formatNumber(units === "us" ? feet : feet * 0.3048, "compact")} ${units === "us" ? "ft" : "m"}`;
+  return `${formatNumber(units === "us" ? feet : feet * 0.3048, "full")} ${units === "us" ? "ft" : "m"}`;
 }
 
 /** Rungs retain seconds and longer durations that the compact measure label omits. */

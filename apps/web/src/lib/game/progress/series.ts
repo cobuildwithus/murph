@@ -11,12 +11,12 @@ import { openProgressMany, progressLookup, sealProgressMany } from "./crypto";
 import { inferTask, inferenceClient, normalizeTask, type InferredMeasure, type TaskInput } from "./infer";
 import { EXERCISES, READERS, type DayAmount } from "./registry";
 import type { BeforeProgressMutation, MeasureState } from "./state";
-import { gameDays, type StreakGame } from "./streak";
+import { gameDays, type GameDaysSource } from "./game-days";
 import { readAwards } from "./awards";
 
 export interface ProgressTask extends TaskInput { lookup: string; inferred: InferredMeasure | null }
 export interface PendingProgressTask extends ProgressTask { memberId: string }
-export interface ProgressGame extends StreakGame { tasks: Map<number, ProgressTask>; payloads: Map<string, GameEntryData> }
+export interface ProgressGame extends GameDaysSource { tasks: Map<number, ProgressTask>; payloads: Map<string, GameEntryData> }
 export interface MeasureSeries {
   id: string; name: string; label: string; noun: string; icon: string;
   unit: "reps" | "seconds" | "meters" | "steps" | "days";
@@ -153,7 +153,7 @@ export async function readGameSeries(memberId: string, clock: Date) {
       now: new Date(clock.getTime() + Number(game.devClockOffsetMs ?? 0)),
       settledAt: game.settledAt ? new Date(game.settledAt.getTime() + Number(game.devClockOffsetMs ?? 0)) : null,
       endedAt: game.status === "void" ? ending ? new Date(ending.createdAt.getTime() + Number(game.devClockOffsetMs ?? 0)) : departedAt : null,
-      state: { game: { id: game.id, createdBy: game.createdBy, seats: game.maxPlayers, status: game.status as StreakGame["state"]["game"]["status"],
+      state: { game: { id: game.id, createdBy: game.createdBy, seats: game.maxPlayers, status: game.status as GameDaysSource["state"]["game"]["status"],
         lengthDays: game.lengthDays, terms, startsOn: game.startsOn?.toISOString().slice(0, 10) ?? null, inviteExpiresAt: null },
       players: [{ ...player, dayOne: player.dayOne!.toISOString().slice(0, 10) }],
       entries: admittedEntries.filter(entry => entry.gameId === game.id).map(entry => ({ ...entry, kind: entry.kind as GameEntryKind, mediaKeys: [], blurHash: null })) },
@@ -191,7 +191,7 @@ export async function readGameSeries(memberId: string, clock: Date) {
     const name = id.split(".")[0];
     measures.push({ ...describeMeasure(id, name, name), pending: false, gameOn: false, needsPerDay: false, amounts: [] });
   }
-  return { games: facts, states, measures, awards, incomplete, pending };
+  return { states, measures, awards, incomplete, pending };
 }
 
 /** Deduplicated, sequential provider work after the response; one batched cache insert. */

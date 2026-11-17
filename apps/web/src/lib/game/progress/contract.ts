@@ -11,7 +11,7 @@ const person = z.object({ memberId: z.string(), firstName: z.string(), avatarUrl
 const shortText = z.string().min(1).max(40).regex(/^[^\d\r\n\u2014]+$/u);
 
 export const rungSchema = z.object({
-  id: z.string(), name: z.string(), short: shortText, tagline: shortText,
+  id: z.string(), name: z.string(), short: z.string().min(1).max(40).regex(/^[^\r\n\u2014]+$/u), tagline: shortText,
   drawing: z.string().nullable(), at: z.number(), atText: z.string(),
   blurb: z.string(), where: z.string().nullable(), on: day.nullable(), toGo: z.string().nullable(),
 });
@@ -43,25 +43,17 @@ export const measureSchema = z.object({
   ladder: ladder.nullable(), route: route.nullable(), pics: z.array(pic),
 });
 export type Measure = z.infer<typeof measureSchema>;
-const streak = z.object({
-  current: z.number(), best: z.object({ count: z.number(), from: day, to: day }).nullable(),
-  today: z.enum(["done", "pending", "none"]),
-  obligations: z.array(z.object({ id: z.string(), label: z.string(), icon: z.string(), done: z.boolean() })),
-  /** d done, m missed, . no game, t today, f future. */
-  months: z.array(z.object({ month: z.string(), days: z.string().regex(/^[dm.tf]*$/u) })),
-});
-export type Streak = z.infer<typeof streak>;
 const medalFace = z.union([
   z.object({ number: z.string() }), z.object({ drawing: z.string() }),
   z.object({ delta: z.object({ icon: z.string(), text: z.string() }) }),
-  z.object({ member: person }), z.object({ streak: z.number() }),
+  z.object({ member: person }),
   z.object({ generic: z.literal(true) }),
 ]);
 export type MedalFace = z.infer<typeof medalFace>;
 export const medalSchema = z.object({
   id: z.string(), kind: z.string(), gold: z.boolean(), face: medalFace,
   title: z.string(), detail: z.string(), earnedOn: day,
-  open: z.object({ page: z.enum(["totals", "health", "streak", "friends"]), measureId: z.string().nullable() }),
+  open: z.object({ page: z.enum(["totals", "health", "friends"]), measureId: z.string().nullable() }),
 });
 export type Medal = z.infer<typeof medalSchema>;
 const moment = z.object({
@@ -71,7 +63,7 @@ const moment = z.object({
 });
 export type Moment = z.infer<typeof moment>;
 export const progressSchema = z.object({
-  joinedOn: day, today: day, incomplete: z.boolean(), measures: z.array(measureSchema), streak,
+  joinedOn: day, today: day, incomplete: z.boolean(), measures: z.array(measureSchema),
   medals: z.array(medalSchema), shelf: z.array(z.string()).max(6), moments: z.array(moment), picCount: z.number(),
 });
 export type Progress = z.infer<typeof progressSchema>;

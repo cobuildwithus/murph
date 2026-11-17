@@ -136,6 +136,7 @@ test("trusted iOS controller is paused to manual dispatch, executed on every adm
     ["select-main", "production-canary"],
   );
   for (const line of workflow.split("\n").filter((value) => /^\s*uses:/u.test(value))) {
+    if (line.trim() === "uses: ./.github/actions/github-app-token") continue;
     assert.match(line, /uses: [^\s]+@[0-9a-f]{40}(?:\s|$)/u, line);
   }
 });

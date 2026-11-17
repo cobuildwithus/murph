@@ -4,14 +4,12 @@ import { formatTimeZoneDateTimeParts } from "@murphai/contracts";
 import { assertBrowserVaultMemberAuthority } from "../../browser-vault/authority";
 import { isHostedOnboardingError } from "../../hosted-onboarding/errors";
 import { getPrisma } from "../../prisma";
-import { termsForDay } from "../rules";
 import type { Medal, Moment, Progress } from "./contract";
 import { readAwards, settleAwards, markAwardsSeen, type StoredAward } from "./awards";
 import { ACHIEVEMENTS, HEALTH, type AchievementContext } from "./registry";
 import { measureLadder, measureRungs, projection, roundValues, rungFor } from "./goals";
 import { formatAmount, formatNumber } from "./format";
 import { cumulativePoints, readGameSeries, scheduleInference, type MeasureSeries } from "./series";
-import { bestRun, calendarMonths, currentRun, gameDays, obligationDays, type StreakDay } from "./streak";
 import type { BeforeProgressMutation, MeasureState } from "./state";
 import { BANK, type RungDefinition } from "./bank";
 import type { ClientUnits } from "../../companion/client-info";
@@ -20,14 +18,14 @@ import { resolveRoute } from "./mapbox";
 import { picturePin, readProgressPics } from "./pics";
 import { healthAgeTitle } from "./health";
 
-export function achievementContext(measures: readonly MeasureSeries[], states: ReadonlyMap<string, MeasureState>, days: readonly StreakDay[]): AchievementContext {
-  return { days, measures: measures.map(measure => {
+export function achievementContext(measures: readonly MeasureSeries[], states: ReadonlyMap<string, MeasureState>): AchievementContext {
+  return { measures: measures.map(measure => {
     const points = cumulativePoints(measure.amounts);
     const total = points.at(-1)?.[1] ?? 0;
     return { id: measure.id, unit: measure.unit, noun: measure.unit === "days" ? measure.label.toLowerCase() : measure.noun, pending: measure.pending, points,
       rungs: measureRungs(measure, states.get(measure.id) ?? {}),
       legs: states.get(measure.id)?.legs ?? [],
-      rounds: roundValues(total, measure.unit).filter(at => at <= total),
+      rounds: roundValues(total, measure).filter(at => at <= total),
     };
   }) };
 }
@@ -47,15 +45,13 @@ export function medalView(award: StoredAward, gold: boolean, units: ClientUnits)
     const value = award.data.value as number, unit = award.data.unit as MeasureSeries["unit"];
     const amount = formatAmount(value, unit, "compact", units);
     face = { number: amount.text };
-    title = unit === "seconds" ? `${formatNumber(value / 3600, "compact")} ${value === 3600 ? "hour" : "hours"}`
+    title = unit === "seconds" ? value < 3600 ? `${value / 60} ${value === 60 ? "minute" : "minutes"}`
+      : `${formatNumber(value / 3600, "compact")} ${value === 3600 ? "hour" : "hours"}`
       : unit === "days" ? `${amount.text} days` : amount.text;
     detail = award.data.noun as string;
   } else if (award.kind === "route") {
     face = { drawing: "route" }; title = award.data.to as string;
-    detail = `${formatAmount(award.data.distanceM as number, "meters", "compact", units).text} from ${award.data.from}`;
-  } else if (award.kind === "streak") {
-    const value = award.data.value as number;
-    face = { streak: value }; title = `${value} ${value === 1 ? "day" : "days"}`; detail = "your best run";
+    detail = `${formatAmount(award.data.distanceM as number, "meters", "full", units).text} from ${award.data.from}`;
   } else {
     face = award.data.face as Medal["face"];
     title = award.kind === "healthAge" ? healthAgeTitle(award.data.percentile as number) : award.data.title as string;
@@ -63,6 +59,23 @@ export function medalView(award: StoredAward, gold: boolean, units: ClientUnits)
   }
   return { id: award.id, kind: award.kind, gold, earnedOn: award.on, face, title, detail,
     open: { page: award.data.page as Medal["open"]["page"], measureId: award.measureId } };
+}
+
+/** Keep each exercise together; the first total is also its title-coin candidate. */
+export function medalsView(awards: readonly StoredAward[], units: ClientUnits): Medal[] {
+  const totals = new Map<string | null, StoredAward[]>();
+  for (const award of awards) if (award.kind === "total" || award.kind === "days") {
+    const group = totals.get(award.measureId) ?? [];
+    group.push(award); totals.set(award.measureId, group);
+  }
+  for (const group of totals.values()) group.sort((a, b) => b.on.localeCompare(a.on)
+    || (b.data.value as number) - (a.data.value as number));
+  return awards.flatMap(award => {
+    if (award.kind !== "total" && award.kind !== "days") return [medalView(award, award === awards[0], units)];
+    const group = totals.get(award.measureId) ?? [];
+    totals.delete(award.measureId);
+    return group.map((item, index) => medalView(item, award === awards[0] && index === 0, units));
+  });
 }
 
 function momentWords(kind: Moment["kind"], group: readonly StoredAward[], gold: boolean, units: ClientUnits): Pick<Moment, "title" | "line"> {
@@ -76,7 +89,6 @@ function momentWords(kind: Moment["kind"], group: readonly StoredAward[], gold: 
   if (kind === "route") return { title, line: detail };
   if (first.kind.startsWith("health")) return { title: `${title}${first.kind === "healthAge" && first.data.percentile === 50 ? " of" : ""} ${detail}`,
     line: gold ? "Your best since you joined. It's your newest medal, so it's the gold one on Prizes." : "Your best since you joined." };
-  if (first.kind === "streak") return { title: `${title} in a row`, line: "Your best run yet." };
   return { title: `${title} ${detail}`, line: null };
 }
 
@@ -128,7 +140,6 @@ export async function readProgress(memberId: string, units: ClientUnits, beforeM
   const snapshot = await readGameSeries(memberId, clock);
   const pictures = await readProgressPics(memberId);
   snapshot.incomplete ||= pictures.incomplete;
-  const days = obligationDays(snapshot.games, memberId) ?? [];
   if (!snapshot.incomplete) {
     const firstRoutes = snapshot.measures.filter(measure => !measure.pending
       && (measure.unit === "meters" || measure.unit === "steps") && !snapshot.states.get(measure.id)?.legs);
@@ -139,7 +150,7 @@ export async function readProgress(memberId: string, units: ClientUnits, beforeM
       if (route) for (const measure of firstRoutes) snapshot.states.set(measure.id,
         await setFirstRoute(memberId, measure.id, route, beforeMutationTx));
     }
-    const context = achievementContext(snapshot.measures, snapshot.states, days);
+    const context = achievementContext(snapshot.measures, snapshot.states);
     await settleAwards(memberId, ACHIEVEMENTS.flatMap(evaluate => evaluate(context)), beforeMutationTx);
     scheduleInference(snapshot.pending.map(task => ({ ...task, memberId })), beforeMutationTx);
   }
@@ -152,13 +163,7 @@ export async function readProgress(memberId: string, units: ClientUnits, beforeM
   });
   // Two units of the same exercise need distinct pills (row 15).
   for (const measure of measures) if (measure.format === "duration" && measures.some(other => other.id !== measure.id && other.label === measure.label)) measure.label += " minutes";
-  const obligations = snapshot.games.flatMap(game => {
-    const day = gameDays(game, memberId)?.find(day => !day.ended);
-    if (!day) return [];
-    const task = game.tasks.get(termsForDay(game.state.game.terms, day.dayIndex).n)!;
-    return [{ id: game.state.game.id, label: task.text, icon: "dumbbell", done: day.done }];
-  });
-  const medals = awards.map((award, index) => medalView(award, index === 0, units));
+  const medals = medalsView(awards, units);
   const shelf: string[] = [];
   const kinds = new Set<string>();
   for (const medal of medals) {
@@ -168,9 +173,6 @@ export async function readProgress(memberId: string, units: ClientUnits, beforeM
     if (shelf.length === 6) break;
   }
   return { joinedOn, today, incomplete: snapshot.incomplete, measures,
-    streak: { current: currentRun(days), best: bestRun(days),
-      today: obligations.length === 0 ? "none" : obligations.every(day => day.done) ? "done" : "pending",
-      obligations, months: calendarMonths(days, joinedOn, today) },
     medals, shelf, moments: momentsView(awards, measures, units), picCount: pictures.pics.length };
 }
 

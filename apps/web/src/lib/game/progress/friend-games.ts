@@ -92,7 +92,6 @@ export async function readFriendGameSeries(memberIds: string[]): Promise<FriendG
       const data = payload !== null && ["reps", "route"].includes(entry.kind) ? JSON.parse(payload) as GameEntryData : undefined;
       const contribution = entryContribution(entry.kind as GameEntryKind, data, task, states.get(entry.memberId) ?? new Map());
       if (contribution.pending) {
-        result.incomplete = true;
         pending.set(task.lookup, { ...task, memberId: entry.memberId });
         continue;
       }

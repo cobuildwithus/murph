@@ -122,9 +122,10 @@ describe("shared-host verification slots", () => {
     await expectNoLine(second, "started", 120);
     expect(second.exitCode).toBeNull();
 
+    // The slot is released before the first wrapper exits; stdout is already flowing.
     first.stdin?.end();
-    await waitForExit(first);
     await waitForLine(second, "started");
+    await waitForExit(first);
     expect(await waitForExit(second)).toBe(0);
   });
 
@@ -424,7 +425,7 @@ async function waitForStreamLine(
     };
     stream?.on("data", onData);
     child.once("error", reject);
-    child.once("exit", (code) => {
+    child.once("close", (code) => {
       if (!output.includes(line)) {
         clearTimeout(timeout);
         reject(new Error(`Child exited with ${code} before ${line}; output=${output}`));

@@ -9,7 +9,7 @@ import { gameNotFound } from "../http/errors";
 import { lockGamePair } from "../blocks";
 import type { Friends, FriendsQuery, SetSharingBody } from "./contract";
 import { friendCohortIds, readFriendCohort } from "./friend-cohort";
-import { friendMeasure, readFriendGameSeries } from "./friend-games";
+import { friendMeasure, readFriendGameSeries, type FriendGameSeries } from "./friend-games";
 import { readFriendHealthSeries } from "./friend-health";
 import { readFriendRooms, shareWithFriends, type FriendRoom } from "./friend-sharing";
 import { friendPasses, friendsView, type FriendSeries } from "./friends";
@@ -24,14 +24,8 @@ export async function readProgressFriends(auth: HostedNativeMemberAuth, query: F
     const ids = joined.map(person => person.memberId);
     if (query.with && !cohort.people.some(person => person.memberId === query.with)) throw gameNotFound();
     const games = await readFriendGameSeries(ids);
-    const mine = new Set((games.amounts.get(memberId) ?? []).map(day => day.measureId));
-    const shared = new Set(ids.filter(id => id !== memberId).flatMap(id => (games.amounts.get(id) ?? []).map(day => day.measureId)));
-    const exercises = [...mine].filter(id => ids.length === 1 || shared.has(id));
-    const pills = [...exercises.map(id => games.measures.get(id)!),
-      { id: "steps", label: "Steps", icon: "steps" }, { id: "sleep", label: "Sleep", icon: "sleep" }]
-      .map(({ id, label, icon }) => ({ id, label, icon }));
+    const pills = friendPills(games, memberId, ids, query.measure);
     const health = query.measure === "steps" || query.measure === "sleep";
-    if (!health && !mine.has(query.measure) && !games.incomplete) throw gameNotFound();
     const measure = friendMeasure(query.measure);
     const rooms = await readFriendRooms(memberId, ids.filter(id => id !== memberId));
     let incomplete = cohort.incomplete || (!health && games.incomplete) || rooms.incomplete;
@@ -51,7 +45,7 @@ export async function readProgressFriends(auth: HostedNativeMemberAuth, query: F
     incomplete ||= current.incomplete;
     people = incomplete ? [] : people.filter(person => person.invited
       ? current.invited.some(invitee => invitee.memberId === person.memberId) : current.ids.includes(person.memberId));
-    if (!incomplete && !health) {
+    if (!incomplete && !health && games.pending.length === 0) {
       const candidates = friendPasses({ measureId: query.measure, people });
       await settleAwards(memberId, candidates, async tx => {
         await assertGameMemberAuthCurrentTx(auth, tx);
@@ -76,6 +70,17 @@ export async function readProgressFriends(auth: HostedNativeMemberAuth, query: F
     throw hostedOnboardingError({ code: "PROGRESS_FRIENDS_UNAVAILABLE", httpStatus: 503, retryable: true,
       message: "Friends progress is temporarily unavailable." });
   }
+}
+
+/** Pending classifications must not remove the member's known exercise pills. */
+function friendPills(games: FriendGameSeries, memberId: string, ids: string[], selected: string): Friends["pills"] {
+  const mine = new Set((games.amounts.get(memberId) ?? []).map(day => day.measureId));
+  const shared = new Set(ids.filter(id => id !== memberId).flatMap(id => (games.amounts.get(id) ?? []).map(day => day.measureId)));
+  if (!["steps", "sleep"].includes(selected) && !mine.has(selected) && !games.incomplete && !games.pending.length) throw gameNotFound();
+  const exercises = [...mine].filter(id => ids.length === 1 || shared.has(id) || games.pending.length > 0);
+  return [...exercises.map(id => games.measures.get(id)!),
+    { id: "steps", label: "Steps", icon: "steps" }, { id: "sleep", label: "Sleep", icon: "sleep" }]
+    .map(({ id, label, icon }) => ({ id, label, icon }));
 }
 
 function sharingPreview(people: FriendSeries[], rooms: FriendRoom[], measure: string): Friends["shareAudience"] {

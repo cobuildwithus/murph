@@ -16,7 +16,7 @@ import { gameChatContextCurrent, readGameChatAudience, readGameChatAudienceRefus
 import { verifiedGameContactKeys } from "./audience";
 import { gameNotFound } from "./http/errors";
 import { BOARD_METRICS, boardCrowns, boardNumber, type BoardMetric, type BoardPerson, type PairBoard } from "./board-numbers";
-import { pairBoardStreak } from "./progress/streak";
+import { pairBoardStreak } from "./board-streak";
 import { parseStoredTerms, type RuleState } from "./rules";
 import { addDays } from "./time";
 

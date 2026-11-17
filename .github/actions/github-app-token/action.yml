@@ -1,0 +1,26 @@
+name: KMS GitHub App token
+description: Mint a scoped installation token with GitHub OIDC and revoke it after the job
+inputs:
+  app-id:
+    description: GitHub App ID or client ID
+    required: true
+  key-version:
+    description: Full Google KMS RSA signing key version
+    required: true
+  owner:
+    description: Installation repository owner
+    required: true
+  repositories:
+    description: Comma or newline separated repository names
+    required: true
+  permissions:
+    description: Explicit GitHub repository permissions as a JSON object
+    required: true
+outputs:
+  token:
+    description: Scoped installation token, revoked at job completion
+runs:
+  using: node24
+  main: main.mjs
+  post: post.mjs
+  post-if: always()

@@ -9,7 +9,7 @@ A directory of the durable docs. Find the row for your task and read that doc;
 | Path | Purpose | Source of truth | Criticality | Last verified |
 | --- | --- | --- | --- | --- |
 | `README.md` | Human-facing repo overview, install path, public package posture, local/hosted runtime tiers, and verification entrypoints. | Current repository state | High | 2026-05-02 |
-| `ARCHITECTURE.md` | Current runtime architecture: owners, boundaries and data flow for every app, service and package, including Progress sealed facts, share cleanup and consent, reader units, cited goals, game scoring and bounded reads. | Current runtime architecture | High | 2026-11-16 |
+| `ARCHITECTURE.md` | Current runtime architecture: owners, boundaries and data flow for every app, service and package, including Ops reset eligibility and Progress sealed facts, share cleanup and consent, reader units, cited goals, pending Friends totals, medal ordering and streak retirement. | Current runtime architecture | High | 2026-11-16 |
 | `agent-docs/ARCHITECTURE_GUIDANCE.md` | Architecture planning guidance. | Architecture planning guidance | High | 2026-08-24 |
 | `PRODUCT.md` | Strategic design context: register, users, Web Home setup and Settings, brand personality, anti-references, design principles. Loaded by the impeccable skill before any UI work. | Product/brand strategic context | High | 2026-04-24 |
 | `DESIGN.md` | Visual design system. | Visual design system | High | 2026-07-22 |
@@ -125,6 +125,7 @@ A directory of the durable docs. Find the row for your task and read that doc;
 | `agent-docs/operations/agent-workflow-routing.md` | Task scope, authority, member-outreach confirmation, checkout, commits, and instruction ownership. | Agent workflow routing | High | 2026-11-14 |
 | `agent-docs/operations/product-ux.md` | Product UX workflow. | Product UX workflow | High | 2026-08-31 |
 | `agent-docs/operations/live-provider-canaries.md` | Fresh native, Linq, Stripe and Garmin provider outcomes; bounded Linq observation retries, GitHub dispatch, protected execution, exact receipts and cross-repository rollout. UTC weekly cadence (nine Linq, five per native platform, two Garmin/Stripe) and unchanged manual/release proof. | Live provider proof | High | 2026-10-20 |
+| `agent-docs/operations/github-app-kms.md` | GitHub OIDC, KMS App signing, token renewal and post-job revocation. | CI GitHub App credential owner | High | 2026-11-16 |
 | `agent-docs/operations/native-android-hosted-e2e.md` | Native Android verification operations. | Native Android verification operations | High | 2026-09-01 |
 | `agent-docs/operations/verification-and-runtime.md` | Which checks to run for a change, where they run, the PR and direct-push paths, and what each verification command means. | Verification policy | High | 2026-11-14 |
 | `agent-docs/operations/database-transaction-starvation-audit.md` | Database critical-section reliability. | Database critical-section reliability | High | 2026-08-09 |

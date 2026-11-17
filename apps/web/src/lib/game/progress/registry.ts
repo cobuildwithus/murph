@@ -2,7 +2,7 @@ import type { GameRepsData, GameRouteData } from "../contract";
 import type { Day } from "./contract";
 import type { RungDefinition } from "./bank";
 import type { MeasureSeries } from "./series";
-import { ladderRungs, roundTotals, streakRuns } from "./achievements";
+import { ladderRungs, roundTotals } from "./achievements";
 import { routeLegs } from "./route-progress";
 import type { RouteLeg } from "./state";
 
@@ -61,11 +61,10 @@ export interface AchievementContext {
     rungs: readonly RungDefinition[];
     legs: readonly RouteLeg[];
   }[];
-  days: readonly { date: Day; done: boolean; ended: boolean }[];
 }
 
 // BE2 adds health/friend evaluators at their read boundaries.
 export const ACHIEVEMENTS: readonly Achievement<AchievementContext>[] = [roundTotals, ladderRungs,
   context => context.measures.filter(measure => !measure.pending).flatMap(measure => routeLegs({
     measureId: measure.id, legs: measure.legs, points: measure.points,
-  })), streakRuns];
+  }))];

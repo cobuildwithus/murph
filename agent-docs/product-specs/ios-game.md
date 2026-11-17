@@ -323,7 +323,7 @@ alerts and open the selected game through the existing authenticated refresh.
 
 Alongside `game_post`, `game_reply` and `game_reminder`, pair invite acceptance
 sends `{gameId, notification:"game_accepted"}` once to the other player, with
-"They shook on it." / "Your game starts today." (or tomorrow, weekday, short date).
+"Sam shook on it." / "Your game starts today." (or tomorrow, weekday, short date).
 It uses the recipient's written Day 1 and frozen-zone real calendar date, requires
 alerts but no reminders capability, and expires at the following date's 3am.
 Shipped builds show its system alert when closed and ignore the unknown kind in

@@ -1475,7 +1475,7 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
       expect(recipient.dayOne!.toISOString().slice(0, 10)).toBe(dayOne);
       for (const task of deferredResponse.tasks.splice(0)) await task();
       expect(push).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
-        data: { gameId, notification: "game_accepted" }, message: { kind: "alert", title: "They shook on it.", body: "Your game starts tomorrow." },
+        data: { gameId, notification: "game_accepted" }, message: { kind: "alert", title: "Leo shook on it.", body: "Your game starts tomorrow." },
       }), { providerToken: { issuedAt: expect.any(Number), value: "test-provider-token" } });
       await devStartNow(gameId, ava);
       expect(push).toHaveBeenCalledOnce();
@@ -1496,20 +1496,21 @@ describe.skipIf(!runPostgresProof)("weekly game service against PostgreSQL", () 
     expect(results.every((result) => result?.id === gameId)).toBe(true);
     expect(push).toHaveBeenCalledTimes(1);
     expect(push.mock.calls[0]?.[0].data).toEqual({ gameId, notification: "game_post" });
-    expect(push.mock.calls[0]?.[0].message.body).toBe("Someone posted. Share yours to see it.");
+    // The invitee knows the poster by their own name; the poster knows the invitee by the name they typed.
+    expect(push.mock.calls[0]?.[0].message).toEqual({ kind: "alert", title: "Poster posted a photo.", body: "Share yours to see it." });
     expect(await authorizeMediaRead(recipient, command.mediaKeys[0]!)).toBe(false);
     await ok(poster, await photo(poster, gameId, "notification-retake"));
     expect(push).toHaveBeenCalledTimes(1);
     await ok(recipient, await photo(recipient, gameId, "notification-other-direction"));
     expect(push).toHaveBeenCalledTimes(2);
-    expect(push.mock.calls[1]?.[0].message).toMatchObject({ title: "They're in too.", body: "Theirs develops when you open it." });
+    expect(push.mock.calls[1]?.[0].message).toMatchObject({ title: "Friend's in too.", body: "Theirs develops when you open it." });
     const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
     vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(tomorrow);
     expect((await runAndRespond({
       actorMemberId: poster, command: await photo(poster, gameId, "notification-next-day"), now: tomorrow,
     })).ok).toBe(true);
     expect(push).toHaveBeenCalledTimes(3);
-    expect(push.mock.calls[2]?.[0].message.body).toBe("Someone posted. Share yours to see it.");
+    expect(push.mock.calls[2]?.[0].message).toMatchObject({ title: "Poster posted a photo.", body: "Share yours to see it." });
     vi.useRealTimers();
     const receipts = await getPrisma().gameEvent.findMany({ where: { gameId, type: "post_notification" } });
     expect(receipts).toHaveLength(6);
