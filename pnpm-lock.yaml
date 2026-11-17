@@ -83,7 +83,7 @@ patchedDependencies:
     hash: 93a5da9afbb67979d9bd3628c67a396afd5cfe70d77c7ba22c44f83896a6d7f3
     path: patches/@cobuild__repo-tools@0.1.18.patch
   '@cobuild/review-gpt@0.5.157':
-    hash: fc9ed40b0390818a0e9ff74e6ad6b4b746b9cc8289fca7b95bfb97dbc1e74e0f
+    hash: 9a11a78b6a106c4e4e891c9feb26aefcf83ad66b9e0b9ae91efa9646bf8c4657
     path: patches/@cobuild__review-gpt@0.5.157.patch
   frog@1.1.0:
     hash: 753e3dd3975254bf8793addb8f0e8df9b2d0ede4f44603f0f876763171938f3a
@@ -113,7 +113,7 @@ importers:
         version: 0.1.18(patch_hash=93a5da9afbb67979d9bd3628c67a396afd5cfe70d77c7ba22c44f83896a6d7f3)
       '@cobuild/review-gpt':
         specifier: 0.5.157
-        version: 0.5.157(patch_hash=fc9ed40b0390818a0e9ff74e6ad6b4b746b9cc8289fca7b95bfb97dbc1e74e0f)(@cfworker/json-schema@4.1.6)(typescript@7.0.2)
+        version: 0.5.157(patch_hash=9a11a78b6a106c4e4e891c9feb26aefcf83ad66b9e0b9ae91efa9646bf8c4657)(@cfworker/json-schema@4.1.6)(typescript@7.0.2)
       '@elevenlabs/elevenlabs-js':
         specifier: 2.78.0
         version: 2.78.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
@@ -9142,7 +9142,7 @@ snapshots:
 
   '@cobuild/repo-tools@0.1.18(patch_hash=93a5da9afbb67979d9bd3628c67a396afd5cfe70d77c7ba22c44f83896a6d7f3)': {}
 
-  '@cobuild/review-gpt@0.5.157(patch_hash=fc9ed40b0390818a0e9ff74e6ad6b4b746b9cc8289fca7b95bfb97dbc1e74e0f)(@cfworker/json-schema@4.1.6)(typescript@7.0.2)':
+  '@cobuild/review-gpt@0.5.157(patch_hash=9a11a78b6a106c4e4e891c9feb26aefcf83ad66b9e0b9ae91efa9646bf8c4657)(@cfworker/json-schema@4.1.6)(typescript@7.0.2)':
     dependencies:
       '@cobuild/repo-tools': 0.1.18(patch_hash=93a5da9afbb67979d9bd3628c67a396afd5cfe70d77c7ba22c44f83896a6d7f3)
       incur: 0.4.25
