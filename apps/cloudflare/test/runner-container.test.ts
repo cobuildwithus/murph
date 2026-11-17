@@ -5904,6 +5904,83 @@ describe("RunnerContainer", () => {
     }
   });
 
+  it.each([
+    ["before", "activity-expired"], ["after", "activity-expired"],
+    ["before", "invoke-completed"], ["after", "invoke-completed"],
+  ] as const)(
+    "logs idle SIGKILL at info when onStop arrives %s %s destruction settles",
+    async (timing, trigger) => {
+      const { container, destroy } = createContainerDouble({ initialStatus: "running" });
+      container.onStart();
+      const request = createRunnerRequest("evt_idle_cleanup_logging");
+      if (trigger === "invoke-completed") {
+        await container.invoke({ job: { kind: "workspace-invocation", request }, userId: request.userId });
+      }
+      if (timing === "before") {
+        destroy.mockImplementation(async () => {
+          container.onStop({ exitCode: 137, reason: "exit" });
+        });
+      }
+
+      if (trigger === "activity-expired") await container.onActivityExpired();
+      else await container.onRuntimeCompletionRecorded({
+        attemptId: request.attemptId, leaseGeneration: request.leaseGeneration, userId: request.userId,
+      });
+      expect(destroy).toHaveBeenCalledOnce();
+      if (timing === "after") container.onStop({ exitCode: 137, reason: "exit" });
+
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          details: expect.objectContaining({
+            activeWorkspaceInvocationPresent: false,
+            destroyRequestPresent: true,
+            destroyRequestReason: trigger,
+            exitCode: 137,
+            stopAppliedToCurrentGeneration: timing === "before",
+            stopClassification: "requested-nonzero-stop",
+          }),
+          level: "info",
+          message: "Hosted execution container lifecycle hook reported stop.",
+          phase: "container.ready",
+        }),
+      );
+
+      // A consumed diagnostic receipt must not suppress another unrequested stop.
+      mocks.emitHostedExecutionStructuredLog.mockClear();
+      container.onStop({ exitCode: 137, reason: "exit" });
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({ level: "warn" }),
+      );
+    },
+  );
+
+  it.each(["different-exit", "explicit-destroy", "replacement-start", "unrequested"] as const)(
+    "keeps %s stop warnings after idle cleanup",
+    async (scenario) => {
+      const { container } = createContainerDouble({ initialStatus: "running" });
+      container.onStart();
+      if (scenario === "explicit-destroy") await container.destroyInstance();
+      else if (scenario !== "unrequested") await container.onActivityExpired();
+      if (scenario === "replacement-start") container.onStart();
+      mocks.emitHostedExecutionStructuredLog.mockClear();
+
+      container.onStop({ exitCode: scenario === "different-exit" ? 1 : 137, reason: "exit" });
+
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          details: expect.objectContaining({
+            destroyRequestReason: scenario === "explicit-destroy"
+              ? "destroy-instance"
+              : scenario === "different-exit" ? "activity-expired" : null,
+          }),
+          level: "warn",
+          message: "Hosted execution container lifecycle hook reported non-zero stop.",
+          phase: "failed",
+        }),
+      );
+    },
+  );
+
   it("logs container lifecycle errors without aborting active workspace invocations", async () => {
     let markRunnerRequestStarted!: () => void;
     const runnerRequestStarted = new Promise<void>((resolve) => {

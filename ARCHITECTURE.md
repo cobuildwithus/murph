@@ -4412,7 +4412,9 @@ existing domain owner; it reuses this auth, idempotency, mailbox, and wake path
 instead of adding another queue, state store, or generic mutation engine.
 
 The closed `measurement.add` V1 action admits `estimated-vo2-max` values from
-10 through 90, including tenths. Runtime writes a manual measurement with the
+10 through 90 and `body-height` from 50 through 272 cm, including decimals.
+One per-metric range table validates both the action and native request.
+Runtime writes a manual measurement with the
 catalog unit, envelope `requestedAt` as `occurredAt`, and an event id derived
 from the action id. Its opt-in keep-existing measurement write holds the existing
 canonical lock and returns without a revision or audit write when the id already
@@ -4420,12 +4422,34 @@ exists, including a corrected record or tombstone. Ordinary same-id measurement
 upserts retain their existing behavior. Created actions report `applied`; kept
 actions report `unchanged`. Neither outcome proves replica publication.
 
+About you reads `heightCm` from the existing companion Numbers response.
+`readCompanionBodyHeight` uses `metricsIndex`'s canonical `body-height`
+selection, so latest-valid source precedence and unit normalization stay at
+the metric owner. It returns null without a usable selection or when its date
+is more than the catalog's 365 days before today's vault-local date, even if
+the selection was fresh at publication. No extra bucket, profile field,
+projection generation or endpoint is added. The Numbers read retains native
+session and health-authority checks before and after loading private data.
+
+Height introduces no persisted fields. The existing measurement's metric,
+value, unit, source, title and occurrence time are private health content in
+the canonical vault; the hosted checkpoint and browser replica seal them.
+The queued action payload is encrypted member-action content. The opaque
+action/event identity and terminal status remain operational metadata, not
+health values or lookup keys derived from them. `heightCm` is an owner-only,
+no-store response field, never a profile column or friend-sharing field.
+
 Ship this decoder, canonical writer and runtime handler before enabling the
 companion measurement producer. Deploy and verify the Worker and runner first,
 including replacement of warm older bundles; deploy Web second and the native
 app last. Once a producer can enqueue `measurement.add`, both the decoder and
 handler are the rollback floor until all producers and retained requests drain.
 There is no measurement generation gate or feature flag.
+The same consumer-first order applies to enabling `body-height`: deploy its
+contracts decoder in Worker and runner (including warm bundle replacement)
+before Web can enqueue it, then ship the app. Old VO2 requests and manual
+measurement records retain their shapes; older apps ignore the additive
+Numbers field. Retain height-capable consumers while height requests remain.
 
 Production companion auth diagnostics remain hidden until `MURPH_COMPANION_AUTH_DIAGNOSTICS_ENABLED=1`; operators must install the exact-path Vercel WAF fixed-window limit before enabling that route in production.
 The authenticated companion overnight PRV ingress is one strict derived-data

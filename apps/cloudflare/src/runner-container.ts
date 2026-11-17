@@ -657,6 +657,9 @@ export class RunnerContainer extends Container {
   private lastActivityObservedAtMs: number | null = null;
   private lastActivityObservedStage: string | null = null;
   private lastDestroyRequest: RunnerContainerDestroyRequestRecord | null = null;
+  // Native destroy can settle before the SDK delivers onStop. Diagnostics only;
+  // lifecycle and wake fencing still clear at the native stop receipt.
+  private stoppedDestroyRequest: RunnerContainerDestroyRequestRecord | null = null;
   private recentReadinessProof: RunnerContainerReadinessProof | null = null;
   private stopGeneration = 0;
   private warmShellInvalidatedByUnsettledDestroy = false;
@@ -2487,11 +2490,13 @@ export class RunnerContainer extends Container {
     this.reportStandbySlotStopped();
     const context = this.currentLogContext;
     const cleanExit = params.exitCode === 0;
-    const lifecycleDetails = this.buildLifecycleDiagnosticDetails();
+    const lifecycleDetails = this.buildLifecycleDiagnosticDetails(
+      this.lastDestroyRequest ?? this.stoppedDestroyRequest,
+    );
     const stopClassification = classifyRunnerContainerStop({
       activeWorkspaceInvocationPresent: this.workspaceInvocationOperations.length > 0,
       cleanExit,
-      destroyRequestPresent: this.lastDestroyRequest !== null,
+      destroyRequestPresent: lifecycleDetails.destroyRequestPresent === true,
       idleTtlDeltaMs: readNullableNumber(lifecycleDetails.idleTtlDeltaMs),
     });
     // onStop has no start identity. Preserve a bounded replacement start until
@@ -2503,10 +2508,12 @@ export class RunnerContainer extends Container {
       && this.currentContainerStart !== null
     )
       && this.recordCurrentContainerStopped();
+    this.stoppedDestroyRequest = null;
     const expectedStop = cleanExit || (
       params.exitCode === 137
       && stopClassification === "requested-nonzero-stop"
-      && lifecycleDetails.destroyRequestReason === "invoke-completed"
+      && (lifecycleDetails.destroyRequestReason === "invoke-completed"
+        || lifecycleDetails.destroyRequestReason === "activity-expired")
     );
     emitHostedExecutionStructuredLog({
       component: "container",
@@ -3767,6 +3774,7 @@ export class RunnerContainer extends Container {
       this.recordContainerActivityObserved("onStart");
       this.lastActivityExpiryAtMs = null;
       this.lastDestroyRequest = null;
+      this.stoppedDestroyRequest = null;
       return existing;
     }
     return this.replaceCurrentContainerStart(startedAtMs, maxAgeMs, false);
@@ -3789,6 +3797,7 @@ export class RunnerContainer extends Container {
     this.recordContainerActivityObserved("onStart");
     this.lastActivityExpiryAtMs = null;
     this.lastDestroyRequest = null;
+    this.stoppedDestroyRequest = null;
     return currentStart;
   }
 
@@ -3812,6 +3821,7 @@ export class RunnerContainer extends Container {
     this.recordContainerActivityObserved(observedBy);
     this.lastActivityExpiryAtMs = null;
     this.lastDestroyRequest = null;
+    this.stoppedDestroyRequest = null;
     return currentStart;
   }
 
@@ -3841,6 +3851,7 @@ export class RunnerContainer extends Container {
     this.lastActivityExpiryAtMs = null;
     this.lastActivityObservedAtMs = null;
     this.lastActivityObservedStage = null;
+    this.stoppedDestroyRequest = this.lastDestroyRequest;
     this.lastDestroyRequest = null;
     return true;
   }
@@ -3869,14 +3880,16 @@ export class RunnerContainer extends Container {
     });
   }
 
-  private buildLifecycleDiagnosticDetails(): HostedExecutionStructuredLogDetails {
+  private buildLifecycleDiagnosticDetails(
+    destroyRequest = this.lastDestroyRequest,
+  ): HostedExecutionStructuredLogDetails {
     const nowMs = Date.now();
     const runnerIdleTtlMs = readRunnerContainerIdleTtlMs(this.environment);
     const containerUptimeMs = readElapsedMs(
       this.currentContainerStart?.startedAtMs ?? null,
       nowMs,
     );
-    const destroyRequestAgeMs = readElapsedMs(this.lastDestroyRequest?.requestedAtMs ?? null, nowMs);
+    const destroyRequestAgeMs = readElapsedMs(destroyRequest?.requestedAtMs ?? null, nowMs);
     const lastActivityExpiryAgeMs = readElapsedMs(this.lastActivityExpiryAtMs, nowMs);
     const lastActivityObservedAgeMs = readElapsedMs(this.lastActivityObservedAtMs, nowMs);
 
@@ -3886,10 +3899,10 @@ export class RunnerContainer extends Container {
         ?? (this.currentContainerStart ? "onStart" : null),
       containerUptimeMs,
       destroyRequestAgeMs,
-      destroyRequestFailClosed: this.lastDestroyRequest?.failClosed ?? null,
-      destroyRequestPresent: this.lastDestroyRequest !== null,
-      destroyRequestReason: this.lastDestroyRequest?.reason ?? null,
-      destroyRequestStatusBeforeDestroy: this.lastDestroyRequest?.statusBeforeDestroy ?? null,
+      destroyRequestFailClosed: destroyRequest?.failClosed ?? null,
+      destroyRequestPresent: destroyRequest !== null,
+      destroyRequestReason: destroyRequest?.reason ?? null,
+      destroyRequestStatusBeforeDestroy: destroyRequest?.statusBeforeDestroy ?? null,
       idleTtlDeltaMs: lastActivityObservedAgeMs === null ? null : lastActivityObservedAgeMs - runnerIdleTtlMs,
       lastActivityExpiryAgeMs,
       lastActivityObservedAgeMs,

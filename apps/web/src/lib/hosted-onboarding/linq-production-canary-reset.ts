@@ -1,4 +1,4 @@
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash } from "node:crypto";
 
 import type { PrismaClient } from "@prisma/client";
 import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from "jose";
@@ -22,9 +22,6 @@ const githubKeys = createRemoteJWKSet(new URL(`${GITHUB_OIDC_ISSUER}/.well-known
   timeoutDuration: 5_000,
   cacheMaxAge: 600_000,
 });
-
-const HOSTED_LINQ_PRODUCTION_CANARY_RESET_SECRET_ENV =
-  "HOSTED_ONBOARDING_LINQ_PRODUCTION_CANARY_RESET_SECRET";
 
 export type HostedLinqProductionCanaryResetResult = {
   accountDeleted: boolean;
@@ -76,9 +73,6 @@ export async function requireHostedLinqProductionCanaryResetRequest(
   source: HostedLinqProductionCanaryEnvironment = process.env,
   dependencies: { keyResolver?: JWTVerifyGetKey; nonceStore?: HostedWebInternalRequestNonceStore; now?: () => number } = {},
 ): Promise<string> {
-  const configuredSecret = normalizeNullableString(
-    source[HOSTED_LINQ_PRODUCTION_CANARY_RESET_SECRET_ENV],
-  );
   const phoneNumber = readHostedLinqProductionCanaryPhoneNumber(source);
   if (!phoneNumber) {
     throwHostedLinqProductionCanaryConfigurationError();
@@ -88,9 +82,6 @@ export async function requireHostedLinqProductionCanaryResetRequest(
     request.headers.get("authorization"),
   );
   if (!providedSecret || providedSecret.length > 16_384) throwUnauthorized();
-  // Explicit migration compatibility, selected before OIDC verification. A
-  // failed OIDC verification never retries with the static credential.
-  if (configuredSecret && timingSafeEquals(configuredSecret, providedSecret)) return phoneNumber;
 
   const now = dependencies.now ?? Date.now;
   const verified = await verifyCanaryToken(providedSecret, dependencies.keyResolver ?? githubKeys, now);
@@ -156,12 +147,6 @@ function readBearerToken(value: string | null): string | null {
     return null;
   }
   return normalizeNullableString(normalized.slice("Bearer ".length));
-}
-
-function timingSafeEquals(left: string, right: string): boolean {
-  const leftDigest = createHash("sha256").update(left, "utf8").digest();
-  const rightDigest = createHash("sha256").update(right, "utf8").digest();
-  return timingSafeEqual(leftDigest, rightDigest);
 }
 
 function throwHostedLinqProductionCanaryConfigurationError(): never {

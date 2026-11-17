@@ -39,7 +39,6 @@ import {
 
 const CONFIGURED_ENVIRONMENT = {
   HOSTED_ONBOARDING_LINQ_PRODUCTION_CANARY_PHONE_NUMBER: "+15551234567",
-  HOSTED_ONBOARDING_LINQ_PRODUCTION_CANARY_RESET_SECRET: "test-reset-secret",
 };
 
 function asCanaryResetPrismaClient(value: object): PrismaClient {
@@ -102,19 +101,7 @@ describe("Hosted Linq production canary reset authorization", () => {
     mocks.deleteAccountData.mockResolvedValue({});
   });
 
-  it("returns the fixed normalized target for the dedicated bearer secret", async () => {
-    const request = new Request("https://example.test/internal", {
-      headers: { authorization: "Bearer test-reset-secret" },
-      method: "POST",
-    });
-
-    await expect(requireHostedLinqProductionCanaryResetRequest(
-      request,
-      CONFIGURED_ENVIRONMENT,
-    )).resolves.toBe("+15551234567");
-  });
-
-  it("rejects an incorrect bearer secret without exposing the target", async () => {
+  it("rejects a non-OIDC bearer without exposing the target", async () => {
     const request = new Request("https://example.test/internal", {
       headers: { authorization: "Bearer incorrect-secret" },
       method: "POST",
@@ -290,7 +277,7 @@ describe("GitHub OIDC canary authorization", () => {
     expect(h.queryRaw).not.toHaveBeenCalled();
   });
 
-  it("rejects a bad signature even with legacy auth configured", async () => {
+  it("rejects a bad signature", async () => {
     const h = await harness();
     const other = await generateKeyPair("RS256");
     const token = await new SignJWT(claims).setProtectedHeader({ alg: "RS256", kid: "test-key" }).sign(other.privateKey);
@@ -338,9 +325,10 @@ describe("GitHub OIDC canary authorization", () => {
     await expect(h.authorize(await h.sign())).rejects.toThrow("Synthetic storage failure");
   });
 
-  it("disables the static path when its configuration is removed", async () => {
+  it("ignores the retired static reset secret even if it is configured again", async () => {
     const h = await harness();
-    await expect(h.authorize("test-reset-secret")).rejects.toMatchObject({ httpStatus: 401 });
+    const retired = { ...source, HOSTED_ONBOARDING_LINQ_PRODUCTION_CANARY_RESET_SECRET: "test-reset-secret" };
+    await expect(h.authorize("test-reset-secret", "POST", retired)).rejects.toMatchObject({ httpStatus: 401 });
     expect(h.queryRaw).not.toHaveBeenCalled();
   });
 });

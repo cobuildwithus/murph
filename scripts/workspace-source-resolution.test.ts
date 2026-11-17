@@ -29,6 +29,7 @@ describe("workspace source resolution", () => {
   });
 
   it.each([
+    { packageName: "query", entry: "browser-replica.ts", specifier: "@murphai/query/browser-replica", symbol: "createBrowserVaultMetricSelectionRows" },
     { packageName: "vault-usecases", entry: "health-cli-descriptors.ts", specifier: "@murphai/vault-usecases/health-cli-descriptors", symbol: "healthListResultSchema" },
     { packageName: "vault-usecases", entry: "option-utils.ts", specifier: "@murphai/vault-usecases/option-utils", symbol: "normalizeRepeatableFlagOption" },
     { packageName: "vault-usecases", entry: "json-input.ts", specifier: "@murphai/vault-usecases/json-input", symbol: "inputFileOptionSchema" },

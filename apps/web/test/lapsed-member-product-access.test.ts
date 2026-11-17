@@ -110,6 +110,7 @@ beforeEach(() => {
   edge.decode.mockResolvedValue({ client: {
     replica: { generation: 18, generatedAt: savedAt, demographics: null, entities: [], meals: { schemaVersion: 1, timeZone: "UTC", days: [] } },
     metrics: { series: () => [] },
+    metricSelections: { get: () => null },
   } });
 });
 
