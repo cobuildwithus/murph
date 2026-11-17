@@ -409,7 +409,6 @@ Required worker secrets:
 - `HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN_ID`
 - `HOSTED_LOG_FINGERPRINT_SECRET`
 - `HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET`
-- `HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET`
 - `HOSTED_R2_PRESIGN_ACCESS_KEY_ID`
 - `HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY`
 - `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK`
@@ -717,7 +716,7 @@ Optional execution vars and secrets:
 
 - `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID` for callback key rotation metadata on the required signed hosted-web path
 - `HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS` and `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` for execution-time secret forwarding
-- `HOSTED_ASSISTANT_PROVIDER=openai` for Codex hosted assistant execution through the Worker egress intercept. The standard deploy preflight requires Worker-owned `OPENAI_API_KEY` plus `HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET`; hosted Codex receives only an SDK placeholder, never the real OpenAI key. The existing signing secret remains required for Live resource references; provider credential minting is removed. Host Codex bridge/proxy env is not accepted
+- `HOSTED_ASSISTANT_PROVIDER=openai` for Codex hosted assistant execution through the Worker egress intercept. The standard deploy preflight requires Worker-owned `OPENAI_API_KEY`; hosted Codex receives only an SDK placeholder, never the real OpenAI key. Host Codex bridge/proxy env is not accepted
 - `HOSTED_R2_PRESIGN_ENDPOINT` can override the default account-scoped R2 S3 endpoint for direct snapshot URL generation. Production deploys must leave it as the account-scoped R2 HTTPS origin. Hosted-local dev, worker-only, and E2E profiles start a MinIO sidecar and inject local S3-compatible endpoints behind the local-only `HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT=1` guard; those local endpoint flags are not deploy vars.
 - `HOSTED_AI_USAGE_REPORTING_SECRET` is an optional Worker-owned platform
   secret. It must not be forwarded into the hosted runtime env; usage

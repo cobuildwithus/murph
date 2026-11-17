@@ -42,7 +42,7 @@ const REASONABLY_AVAILABLE_HOSTED_SECRET_KEYS = [
   "OPENAI_API_KEY",
   "HOSTED_AI_USAGE_REPORTING_SECRET",
   "HOSTED_LOG_FINGERPRINT_SECRET",
-  "HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET",
+  "HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET",
   "LINQ_API_TOKEN",
   "MAPBOX_ACCESS_TOKEN",
   "MURPH_DATA_API_KEY",
@@ -178,16 +178,16 @@ it("guards hosted runner job JSON and direct invocation surfaces against unrevie
   expect(serializedJobInput).not.toContain(runnerSecrets.HOSTED_LOG_FINGERPRINT_SECRET);
   expect(containerRequestBody).not.toContain(runnerSecrets.HOSTED_LOG_FINGERPRINT_SECRET);
   expect(serializedJobInput).not.toContain(
-    configSource.HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET,
+    configSource.HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET,
   );
   expect(containerRequestBody).not.toContain(
-    configSource.HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET,
+    configSource.HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET,
   );
   expect(serializedJobInput).not.toContain(
-    runnerSecrets.HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET,
+    runnerSecrets.HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET,
   );
   expect(containerRequestBody).not.toContain(
-    runnerSecrets.HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET,
+    runnerSecrets.HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET,
   );
   const scannedSurfaces = {
     "direct runtime.forwardedEnv": directRuntime.forwardedEnv ?? {},
@@ -221,8 +221,8 @@ function createReasonablyAvailableHostedConfigSource(): Record<string, string> {
     HOSTED_EXECUTION_RUNNER_HOST_ALIAS: "runner-callback.example.test",
     HOSTED_EXECUTION_RUNNER_ENV_PROFILES: "hosted-email,linq,mapbox,telegram",
     HOSTED_LOG_FINGERPRINT_SECRET: "fixture-log-fingerprint-secret",
-    HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
-      "fixture-provider-egress-signing-secret",
+    HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET:
+      "fixture-private-media-capability-secret",
     ELEVENLABS_API_KEY: "fixture-elevenlabs-token",
     HOSTED_WEB_BASE_URL: "https://web.example.test",
     HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK:

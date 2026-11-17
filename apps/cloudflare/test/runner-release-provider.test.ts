@@ -73,9 +73,27 @@ describe("native Worker secret retirement", () => {
     });
     expect(JSON.parse(String(request?.body))).toEqual({
       env: {
+        BRAVE_API_KEY: null,
+        CLOUDFLARE_IMAGES_API_KEY: null,
+        EXA_API_KEY: null,
+        GARMIN_CLIENT_ID: null,
+        GARMIN_CLIENT_SECRET: null,
+        HOSTED_AI_USAGE_GATE_ALLOW_SIGNING_KEY_ID: null,
+        HOSTED_AI_USAGE_GATE_ALLOW_SIGNING_SECRET: null,
         HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID: null,
+        HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK: null,
+        HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK: null,
+        HOSTED_EXECUTION_SMALL_RUNNER_MEMBER_SHA256: null,
+        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET: null,
+        OURA_CLIENT_ID: null,
+        OURA_CLIENT_SECRET: null,
+        STRAVA_CLIENT_ID: null,
+        STRAVA_CLIENT_SECRET: null,
+        STRAVA_WEBHOOK_SIGNING_SECRET: null,
         VENICE_API_KEY: null,
         VERCEL_AI_API_KEY: null,
+        WHOOP_CLIENT_ID: null,
+        WHOOP_CLIENT_SECRET: null,
       },
       annotations: { "workers/message": input.versionMessage, "workers/tag": input.versionTag },
     });

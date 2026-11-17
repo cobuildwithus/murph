@@ -1816,6 +1816,31 @@ message/tag. This follows the [official Wrangler version-secret owner](https://g
 version code and configuration; the deploy helper does not reconstruct them or
 write temporary Wrangler configs. A clean uploaded inventory skips the patch.
 
+The same retirement set removes unused search/image bindings (`BRAVE_API_KEY`,
+`EXA_API_KEY`, `CLOUDFLARE_IMAGES_API_KEY`), direct Garmin/Oura/Strava/WHOOP
+client IDs and secrets, `STRAVA_WEBHOOK_SIGNING_SECRET`, the former
+`HOSTED_AI_USAGE_GATE_ALLOW_SIGNING_KEY_ID`/`HOSTED_AI_USAGE_GATE_ALLOW_SIGNING_SECRET`,
+`HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK`,
+`HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK`,
+`HOSTED_EXECUTION_SMALL_RUNNER_MEMBER_SHA256`, and
+`HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET`. The egress signing key has
+no runtime reader and is no longer a preflight or local harness requirement.
+
+Merge this public contract before removing the matching Murph Cloud workflow
+inputs. The renderer only emits names in the selected public required/optional
+sets, so old private inputs are inert with this contract. The reverse order
+fails the old public required-secret contract. After the private change, select
+a public commit containing this retirement when deploying; older public commits
+are incompatible. Remove the unused GitHub entries only after the workflows
+stop supplying them. No new configuration is required.
+
+Keep `DEVICE_SYNC_SECRET`, `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK`,
+and `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY`; retained-data safety for the legacy
+private envelope keys is unproven. Worker binding retirement does not revoke
+provider credentials. `scripts/upload-design-proof-image.ts` and the exercise
+image uploader still use their own `CLOUDFLARE_IMAGES_API_KEY`; preserve those
+credentials and the active `CLOUDFLARE_IMAGES_SIGNING_KEY` mapping.
+
 The [raw versions API](https://developers.cloudflare.com/api/resources/workers/subresources/scripts/subresources/versions/methods/list/)
 returns newest first, including inactive uploads. Before upload, latest must be
 the original live version for staging or the verified stage for final promotion.
@@ -1884,7 +1909,6 @@ Set these in the selected GitHub environment as secrets:
 - `HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN`
 - `HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN_ID`
 - `HOSTED_LOG_FINGERPRINT_SECRET`
-- `HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET`
 - `HOSTED_R2_PRESIGN_ACCESS_KEY_ID`
 - `HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY`
 - `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK`
@@ -2469,7 +2493,6 @@ export HOSTED_ASSISTANT_REASONING_EFFORT=low
 # HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM,
 # HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK,
 # HOSTED_LOG_FINGERPRINT_SECRET,
-# HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET,
 # HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK, MURPH_DATA_API_KEY, OPENAI_API_KEY.
 pnpm --dir apps/cloudflare deploy:preflight
 pnpm --dir apps/cloudflare deploy:artifacts

@@ -15,14 +15,23 @@ import {
   readExpectedWorkerSecrets,
 } from "../scripts/deploy-retired-inference-secrets.ts";
 
+import {
+  buildHostedWorkerSecretsPayload,
+  HOSTED_WORKER_OPTIONAL_SECRET_NAMES,
+  HOSTED_WORKER_REQUIRED_SECRET_NAMES,
+} from "../scripts/deploy-automation/secrets.ts";
+
 const directories: string[] = [];
 const retained = [
   { name: "OPENAI_API_KEY", type: "secret_text" },
   { name: "OPTIONAL_UNDECLARED_SECRET", type: "secret_text" },
-  { name: "HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET", type: "secret_text" },
+  { name: "HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET", type: "secret_text" },
   { name: "CRYPTO_KEY", type: "secret_key" },
+  { name: "DEVICE_SYNC_SECRET", type: "secret_text" },
+  { name: "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK", type: "secret_text" },
+  { name: "HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY", type: "secret_text" },
 ];
-const retired = ["VENICE_API_KEY", "VERCEL_AI_API_KEY"].map(name => ({ name, type: "secret_text" }));
+const retired = RETIRED_WORKER_SECRET_NAMES.map(name => ({ name, type: "secret_text" }));
 const baseline = { id: "baseline-version", resources: { bindings: [...retained, ...retired] } };
 
 afterEach(async () => { await Promise.all(directories.splice(0).map(directory => rm(directory, { recursive: true, force: true }))); });
@@ -118,6 +127,28 @@ describe("known inactive Worker recovery", () => {
 });
 
 describe("retired inference secret upload", () => {
+  it("ignores stale private workflow inputs and keeps retired names out of the deploy contract", async () => {
+    const source = Object.fromEntries([
+      ...HOSTED_WORKER_REQUIRED_SECRET_NAMES,
+      ...HOSTED_WORKER_OPTIONAL_SECRET_NAMES,
+      ...RETIRED_WORKER_SECRET_NAMES,
+    ].map(name => [name, "synthetic-configured-value"]));
+    const payload = buildHostedWorkerSecretsPayload(source);
+    for (const name of RETIRED_WORKER_SECRET_NAMES) {
+      expect(HOSTED_WORKER_REQUIRED_SECRET_NAMES).not.toContain(name);
+      expect(HOSTED_WORKER_OPTIONAL_SECRET_NAMES).not.toContain(name);
+      expect(payload).not.toHaveProperty(name);
+    }
+    const input = await fixture();
+    await writeFile(input.secretsFilePath, JSON.stringify(payload));
+    const expected = await readExpectedWorkerSecrets({
+      ...input, currentVersion: baseline, currentVersionId: baseline.id,
+    });
+    expect(expected.has("DEVICE_SYNC_SECRET")).toBe(true);
+    expect(expected.has("HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK")).toBe(true);
+    expect(expected.has("HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY")).toBe(true);
+  });
+
   it.each([false, true])("preserves canonical config and every retained secret with synchronization=%s", async synchronize => {
     const input = await fixture();
     const payload = { OPENAI_API_KEY: "synthetic-rotation", NEW_SECRET: "synthetic-new" };
@@ -135,7 +166,7 @@ describe("retired inference secret upload", () => {
     const input = await fixture();
     const payload: Record<string, string> = mode === "disabled" || mode === "empty" ? {} : {
       OPENAI_API_KEY: "synthetic-rotation", NEW_SECRET: "synthetic-new",
-      ...(mode === "full" ? { HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET: "synthetic-signing-rotation" } : {}),
+      ...(mode === "full" ? { HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET: "synthetic-signing-rotation" } : {}),
     };
     if (mode === "full") input.config.secrets.required.push("NEW_SECRET");
     await writeFile(input.configPath, JSON.stringify(input.config));
@@ -234,7 +265,7 @@ async function fixture() {
     containers: [{ class_name: "RunnerContainer", image: "docker.io/library/alpine:3.23", max_instances: 1 }],
     durable_objects: { bindings: [{ name: "RUNNER", class_name: "RunnerContainer" }] },
     vars: { SOURCE_RECEIPT: "synthetic-source" },
-    secrets: { required: ["OPENAI_API_KEY", "HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET"] },
+    secrets: { required: ["OPENAI_API_KEY", "HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET"] },
     send_email: [{ name: "EMAIL", allowed_sender_addresses: ["sender@example.com"] }],
   };
   await writeFile(configPath, JSON.stringify(config));
