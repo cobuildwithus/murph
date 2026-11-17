@@ -89,9 +89,9 @@ beforeEach(() => {
   mocks.raw.mockResolvedValue(healthSnapshot());
   mocks.ownGames.mockResolvedValue({ incomplete: false, measures: [], states: new Map(), awards: [], pending: [] });
   mocks.cohort.mockResolvedValue({ incomplete: false, people: ["Ava", "Leo"].map(firstName => ({
-    memberId: firstName.toLowerCase(), firstName, avatarUrl: null, me: firstName === "Ava", invited: false, joinedOn, daily: null,
+    memberId: firstName.toLowerCase(), firstName, avatarUrl: null, me: firstName === "Ava", joinedOn, daily: null,
   })) });
-  mocks.ids.mockResolvedValue({ incomplete: false, ids: ["ava", "leo"], invited: [] });
+  mocks.ids.mockResolvedValue({ incomplete: false, ids: ["ava", "leo"] });
   mocks.rooms.mockResolvedValue({ incomplete: false, rooms: [] });
   const measures = ["pushups.reps", "planks.seconds"];
   const games: FriendGameSeries = { incomplete: false, pending: [], measures: new Map(measures.map(id => [id, friendMeasure(id)])),
@@ -205,10 +205,9 @@ it.each(["cohort", "games", "current", "pending"])("never settles Friends from %
   if (boundary === "pending") expect(mocks.inference).toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({ memberId: "leo" })]), expect.any(Function));
 });
 
-it.each([false, true])("skips background Friends input work without joined co-players (invited: %s)", async invited => {
+it("skips background Friends input work without co-players", async () => {
   const cohort = await mocks.cohort();
-  mocks.cohort.mockResolvedValue({ ...cohort, people: cohort.people.flatMap((person: { me: boolean }) =>
-    person.me ? [person] : invited ? [{ ...person, invited: true }] : []) });
+  mocks.cohort.mockResolvedValue({ ...cohort, people: cohort.people.filter((person: { me: boolean }) => person.me) });
   await GET(request()); await drain();
   expect(mocks.friendGames).not.toHaveBeenCalled();
   expect(mocks.rooms).not.toHaveBeenCalled();
@@ -306,11 +305,11 @@ it.each([{ peopleCount: 5000, measureCount: 2 }, { peopleCount: 2, measureCount:
     mocks.raw.mockResolvedValue(null);
     const people = Array.from({ length: peopleCount }, (_, index) => ({
       memberId: index === 0 ? "ava" : `friend-${index}`, firstName: index === 0 ? "Ava" : "Leo",
-      avatarUrl: null, me: index === 0, invited: false, joinedOn, daily: null,
+      avatarUrl: null, me: index === 0, joinedOn, daily: null,
     }));
     const measures = Array.from({ length: measureCount }, (_, index) => `exercise${index}.reps`);
     mocks.cohort.mockResolvedValue({ incomplete: false, people });
-    mocks.ids.mockResolvedValue({ incomplete: false, invited: [], ids: people.map(person => person.memberId) });
+    mocks.ids.mockResolvedValue({ incomplete: false, ids: people.map(person => person.memberId) });
     mocks.friendGames.mockResolvedValue({ incomplete: false, pending: [],
       measures: new Map(measures.map(id => [id, friendMeasure(id)])),
       amounts: new Map(people.map(person => [person.memberId, measures.map(measureId => ({
@@ -331,7 +330,7 @@ it.each(["session", "health", "friendship"])("rechecks %s at commit and leaves n
   const logs = vi.spyOn(console, "error").mockImplementation(() => {});
   if (boundary === "session") mocks.current.mockImplementation(async (_auth, db) => { if (db === tx) throw denied(); });
   if (boundary === "health") mocks.authority.mockImplementation(async ({ prisma }) => { if (prisma === tx) throw denied(); });
-  if (boundary === "friendship") mocks.ids.mockImplementation(async (_member, db) => ({ incomplete: false, invited: [], ids: db === tx ? ["ava"] : ["ava", "leo"] }));
+  if (boundary === "friendship") mocks.ids.mockImplementation(async (_member, db) => ({ incomplete: false, ids: db === tx ? ["ava"] : ["ava", "leo"] }));
   expect((await GET(request())).status).toBe(200); await drain();
   const earned = await readAwards("ava");
   if (boundary !== "friendship") expect(states).toEqual([]);

@@ -69,7 +69,7 @@ export const progressSchema = z.object({
 export type Progress = z.infer<typeof progressSchema>;
 
 const healthMetric = z.object({
-  id: z.enum(["restingHeartRate", "steps", "sleep", "vo2Max"]), label: z.string(), unit: z.string(),
+  id: z.enum(["restingHeartRate", "steps", "sleep"]), label: z.string(), unit: z.string(),
   access: z.enum(["ok", "off", "missing"]), direction: z.enum(["better", "worse", "flat"]), headline: z.string(),
   daily: z.array(z.tuple([day, z.number().nullable()])), baseline: amount.nullable(),
   wins: z.array(z.object({ medalId: z.string(), on: day, text: z.string(), face: medalFace, title: z.string(), detail: z.string() })),
@@ -106,7 +106,7 @@ export const friendsSchema = z.object({
   rows: z.array(friendRow),
   /** Every ranked person; private people have no line or gap. */
   chart: z.array(z.object({ memberId: z.string(), points: z.array(point) })),
-  next: z.object({ memberId: z.string(), text: z.string() }).nullable(), shareAsk: z.boolean(),
+  shareAsk: z.boolean(),
   departureNotice: z.string().nullable(),
   /** Exact two-person room recipients, shown before consent. */
   shareAudience: z.array(person),

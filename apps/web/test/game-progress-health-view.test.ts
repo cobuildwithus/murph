@@ -44,7 +44,6 @@ it.each([
   ["restingHeartRate", 74, 71, 1, -1, "↓1"],
   ["steps", 6000, 8000, 1000, 1, "+1,000"],
   ["sleep", 24600, 26400, 900, 1, "+15m"],
-  ["vo2Max", 30, 31, 1, 1, "31"],
 ] as const)("shares the %s face between the next medal and the earned award", (id, baseline, value, step, direction, text) => {
   const daily = metric.daily.map(point => ({ ...point, value }));
   const next = healthMetricView({ ...metric, id, baseline, daily, step, direction }, joinedOn, today, profile).next!;
@@ -54,14 +53,13 @@ it.each([
 });
 
 it.each([[1400, "+1,400"], [2000, "+2,000"], [12000, "+12k"]])("formats a %s Steps face through D20", (amount, text) => {
-  expect(healthMedalFace("steps", amount, 6000 + amount)).toEqual({ delta: { icon: "steps", text } });
+  expect(healthMedalFace("steps", amount)).toEqual({ delta: { icon: "steps", text } });
 });
 
 it.each([
   ["restingHeartRate", 74, 72, 1, -1, "Down 2 bpm", "71 bpm"],
   ["steps", 6000, 8000, 1000, 1, "Up 2,000 a day", "9,000 a day"],
   ["sleep", 24600, 26400, 900, 1, "Up 30 min", "7h 35"],
-  ["vo2Max", 30, 32, 1, 1, "Up 2", "33"],
 ] as const)("builds saved %s tiles and targets through the normal presenter", (id, baseline, value, step, direction, headline, detail) => {
   const daily = metric.daily.map(point => ({ ...point, value }));
   const wins = healthSteps({ metric: id, joinedOn, baseline, means: daily, profile, step, direction })
@@ -74,7 +72,7 @@ it.each([
   expect(savedHealthView(joinedOn, today, [{ ...input, daily: [], baseline: null }]).metrics[0].next).toBeNull();
 });
 
-it.each(["restingHeartRate", "steps", "vo2Max"] as const)("uses the same age/sex table's median for %s", id => {
+it.each(["restingHeartRate", "steps"] as const)("uses the same age/sex table's median for %s", id => {
   const result = healthMetricView({ ...metric, id }, joinedOn, today, profile);
   const rank = rankAge(id, result.age!.current.value, profile, "Apple Watch")!;
   expect(result.age!.typical!.value).toBe(rank.cuts.find(cut => cut.percentile === 50)!.value);
@@ -86,6 +84,9 @@ it("keeps missing health empty rather than a zero trend", () => {
   const result = healthMetricView({ ...metric, daily: [], baseline: null }, joinedOn, today, profile);
   expect(result).toMatchObject({ access: "missing", headline: "Not enough data yet", baseline: null, next: null, age: null });
   expect(result.daily.every(([, value]) => value === null)).toBe(true);
+  // The whole replica year, so a chart's span before joining has its history.
+  expect(result.daily).toHaveLength(365);
+  expect(result.daily[0][0]).toBe(addDaysToIsoDate(today, -364));
 });
 
 it("does not call an old complete window the current fourteen-day mean", () => {
@@ -99,7 +100,6 @@ it("does not call an old complete window the current fourteen-day mean", () => {
 it.each([
   ["phone only", "steps", "2026-11-16", null, "missing"],
   ["recent heart rate", "restingHeartRate", "2026-11-16", null, "off"],
-  ["recent VO2", "vo2Max", "2026-11-10", null, "off"],
   ["old wearable", "restingHeartRate", "2026-11-09", null, "missing"],
   ["future wearable", "restingHeartRate", "2026-11-17", null, "missing"],
   ["sleep at the boundary", "restingHeartRate", "2026-11-16", "2026-11-10", "ok"],

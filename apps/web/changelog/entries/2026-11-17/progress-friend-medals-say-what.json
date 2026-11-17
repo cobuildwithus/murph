@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-17",
+  "order": 210,
+  "item": {
+    "id": "progress-friend-medals-say-what",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Friend medals say what you passed them in",
+    "summary": "A Passed medal now names the exercise, friend boards show only people sharing that number, and Health charts show your saved history from before you joined.",
+    "details": "Steps medals open your Steps on Health. Health now covers resting heart rate, steps and sleep; hours-slept totals and VO2 max are no longer medals. Friend boards load faster on Steps and Sleep.",
+    "relevanceTags": ["progress", "games", "health"],
+    "sourcePullRequests": []
+  }
+}

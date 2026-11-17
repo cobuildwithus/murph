@@ -46,10 +46,15 @@ export async function readAwards(memberId: string): Promise<StoredAward[]> {
     select: { lookup: true, dataEncrypted: true, earnedOn: true, createdAt: true, seenAt: true },
   });
   const data = await openProgressMany<Candidate>(rows.map(row => ({ memberId, table: "game_progress_award", rowId: row.lookup, field: "data", value: row.dataEncrypted })));
-  // Streak rows wait for scripts/migrations/remove-progress-streak-awards; until
-  // it has run they are not awards. Delete this filter after it has.
-  return rows.flatMap((row, index) => data[index].kind === "streak" ? []
+  return rows.flatMap((row, index) => retiredAward(data[index]) ? []
     : [{ ...data[index], id: row.lookup, on: row.earnedOn.toISOString().slice(0, 10), createdAt: row.createdAt, seenAt: row.seenAt }]);
+}
+
+/** Kinds no longer earned: streaks, hours slept and VO2 max. Their rows wait for
+ * scripts/migrations/remove-retired-progress-awards; until it has run they are
+ * not awards. Delete this filter after it has. */
+export function retiredAward(award: Pick<Candidate, "kind" | "measureId">): boolean {
+  return award.kind === "streak" || award.measureId === "vo2Max" || (award.kind === "total" && award.measureId === "sleep");
 }
 
 /** The view resolves requested moment ids to their stored award ids. */

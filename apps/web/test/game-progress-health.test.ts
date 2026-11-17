@@ -57,7 +57,7 @@ it("keeps health sums inside the 365-day replica even for an older join", () => 
 describe("D4/D5 observed-date coverage", () => {
   it.each([{ count: 19, expected: null }, { count: 20, expected: 70.51 }, { count: 28, expected: 70.51 }])(
     "requires twenty of twenty-eight baseline dates: $count", ({ count, expected }) => {
-      const baseline = healthBaseline("restingHeartRate", [
+      const baseline = healthBaseline([
         ...days(addDaysToIsoDate(joinedOn, -29), 1, 999),
         ...days(addDaysToIsoDate(joinedOn, -28), count, 70.51),
         ...days(joinedOn, 3, 999),
@@ -67,7 +67,7 @@ describe("D4/D5 observed-date coverage", () => {
     });
 
   it.each([{ count: 9, mean: null }, { count: 10, mean: 69.53 }])("requires ten of fourteen mean dates: $count", ({ count, mean }) => {
-    const result = healthMeans("restingHeartRate", days(joinedOn, count, 69.53));
+    const result = healthMeans(days(joinedOn, count, 69.53));
     if (mean === null) expect(result).toEqual([]);
     else expect(result[0].value).toBeCloseTo(mean, 10);
   });
@@ -90,18 +90,10 @@ describe("D4/D5 observed-date coverage", () => {
   });
 
   it("does not round 70.51 to 69.53 into a whole bpm improvement", () => {
-    const baseline = healthBaseline("restingHeartRate", days(addDaysToIsoDate(joinedOn, -28), 28, 70.51), joinedOn)!;
-    const levels = healthMeans("restingHeartRate", days(joinedOn, 30, 69.53))
+    const baseline = healthBaseline(days(addDaysToIsoDate(joinedOn, -28), 28, 70.51), joinedOn)!;
+    const levels = healthMeans(days(joinedOn, 30, 69.53))
       .map(point => ({ ...point, value: Math.floor(baseline - point.value) }));
     expect(heldHealthLevels(levels, joinedOn).every(point => point.value === 0)).toBe(true);
   });
 });
 
-it.each([{ count: 9, expected: null }, { count: 10, expected: 26 }, { count: 11, expected: 26 }])(
-  "VO2 uses the median with the same coverage predicate: $count", ({ count, expected }) => {
-    const daily = days(joinedOn, count, 26).map((point, index) => ({ ...point, value: index === 0 ? 80 : point.value }));
-    const result = healthMeans("vo2Max", daily).at(-1)?.value ?? null;
-    expect(result).toBe(expected);
-    const baseline = days(addDaysToIsoDate(joinedOn, -28), 20, 26).map((point, index) => ({ ...point, value: index === 0 ? 80 : point.value }));
-    expect(healthBaseline("vo2Max", baseline, joinedOn)).toBe(26);
-  });

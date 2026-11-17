@@ -28,7 +28,6 @@ describe("Progress wire fixtures", () => {
       for (const row of decoded.rows.filter(row => row.private)) {
         expect(row.rank).toBeNull(); expect(row.total).toBeNull();
         expect(decoded.chart.some(line => line.memberId === row.memberId)).toBe(false);
-        expect(decoded.next?.memberId).not.toBe(row.memberId);
       }
     }
   });
@@ -42,8 +41,8 @@ describe("Progress wire fixtures", () => {
   });
   it("rejects a private friend carrying an amount or rank", () => {
     const fixture = friendsSchema.parse(JSON.parse(readFileSync(path.join(directory, "friends-row16-private.json"), "utf8")));
-    expect(() => friendsSchema.parse({ ...fixture, rows: fixture.rows.map(row => row.private
-      ? { ...row, rank: 6, total: { value: 88000, text: "88k", unit: "steps" } } : row) })).toThrow();
+    expect(() => friendsSchema.parse({ ...fixture, rows: [{ ...fixture.rows[0], private: true,
+      rank: 6, total: { value: 88000, text: "88k", unit: "steps" } }] })).toThrow();
   });
   it("requires the next face and a known recommendation icon", () => {
     const fixture = JSON.parse(readFileSync(path.join(directory, "health-row06-sleep.json"), "utf8"));

@@ -183,7 +183,7 @@ async function freezeAndScoreMetric(input: {
   const inRange = (value: number) => value >= minValue * scale && value <= maxValue * scale;
   const daily = input.daily.filter(point => inRange(point.value));
   let state = input.state;
-  const proposed = state.baseline?.value ?? healthBaseline(id, daily, joinedOn);
+  const proposed = state.baseline?.value ?? healthBaseline(daily, joinedOn);
   if (!state.baseline && proposed !== null) state = await patchMeasureState(memberId, id,
     { baseline: { value: proposed, from: addDaysToIsoDate(joinedOn, -28), to: addDaysToIsoDate(joinedOn, -1) } }, beforeMutationTx);
   const savedBaseline = state.baseline?.value ?? null;
@@ -191,7 +191,7 @@ async function freezeAndScoreMetric(input: {
   const model: HealthMetricInput = { id, daily, baseline, ...HEALTH[id], wins: [] };
   if (baseline === null) return { model, state, candidates: [] };
   const byDate = new Map(daily.map(point => [point.date, point]));
-  const means = healthMeans(id, daily).map(point => ({ ...byDate.get(point.date)!, value: point.value }));
+  const means = healthMeans(daily).map(point => ({ ...byDate.get(point.date)!, value: point.value }));
   const context = { metric: id, joinedOn, baseline, means, profile, ...HEALTH[id] };
   return { model, state, candidates: [...healthSteps(context), ...healthAgeShare(context)] };
 }

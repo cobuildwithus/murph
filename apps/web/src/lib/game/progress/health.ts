@@ -40,10 +40,6 @@ export const HEALTH_RECS: Record<HealthMetric["id"], Rec[]> = {
     { id: "morning-walk", metric: "sleep", title: "Morning walk", detail: "Daylight early helps sleep",
       task: "Walk 20 min every morning", category: "move", icon: "sun" },
   ],
-  vo2Max: [
-    { id: "run-mile", metric: "vo2Max", title: "Run a mile", detail: "Getting out of breath moves this",
-      task: "Run a mile every day", category: "move", icon: "run" },
-  ],
 };
 export interface HealthAchievementContext {
   metric: HealthMetric["id"];
@@ -67,7 +63,7 @@ export function healthSteps(context: HealthAchievementContext): Candidate[] {
         subjectMemberId: null, on: point.date,
         data: { level, baseline, value: baseline + direction * level * step,
           title: healthWinText(metric, level * step), amount: level * step,
-          face: healthMedalFace(metric, level * step, baseline + direction * level * step),
+          face: healthMedalFace(metric, level * step),
           detail: "held a week", page: "health", evaluator: 1 } });
     }
     best = Math.max(best, point.value);
@@ -105,33 +101,31 @@ export function healthWinText(metric: HealthMetric["id"], amount: number): strin
     case "restingHeartRate": return `Resting HR down ${formatNumber(amount, "compact")} bpm`;
     case "steps": return `Steps up ${formatNumber(amount, "compact")} a day`;
     case "sleep": return `Sleep up ${formatNumber(amount / 60, "compact")} min`;
-    case "vo2Max": return `VO2 max up ${formatNumber(amount, "compact", 1)}`;
   }
 }
 
 /** Earned and next medals use the same metric-specific face. */
-export function healthMedalFace(metric: HealthMetric["id"], amount: number, value: number): MedalFace {
-  const text = metric === "vo2Max" ? formatNumber(value, "compact", 1)
-    : metric === "sleep" ? `+${formatNumber(amount / 60, "compact")}m`
+export function healthMedalFace(metric: HealthMetric["id"], amount: number): MedalFace {
+  const text = metric === "sleep" ? `+${formatNumber(amount / 60, "compact")}m`
     : `${metric === "restingHeartRate" ? "↓" : "+"}${formatNumber(amount, "compact")}`;
   return { delta: { icon: metric === "restingHeartRate" ? "heart" : metric, text } };
 }
 
-/** D4: exactly the 28 dates before joining; VO2 retains its median statistic. */
-export function healthBaseline(metric: HealthMetric["id"], daily: readonly HealthDay[], joinedOn: string): number | null {
-  return coveredStatistic(metric, daily, addDaysToIsoDate(joinedOn, -28), addDaysToIsoDate(joinedOn, -1), 20);
+/** D4: exactly the 28 dates before joining. */
+export function healthBaseline(daily: readonly HealthDay[], joinedOn: string): number | null {
+  return coveredMean(daily, addDaysToIsoDate(joinedOn, -28), addDaysToIsoDate(joinedOn, -1), 20);
 }
 
 /** D5: only observed endpoints with ten of their fourteen dates have a mean. */
-export function healthMeans(metric: HealthMetric["id"], daily: readonly HealthDay[]): HealthDay[] {
+export function healthMeans(daily: readonly HealthDay[]): HealthDay[] {
   return daily.flatMap(point => {
-    const value = healthMean14(metric, daily, point.date);
+    const value = healthMean14(daily, point.date);
     return value === null ? [] : [{ date: point.date, value }];
   });
 }
 
-export function healthMean14(metric: HealthMetric["id"], daily: readonly HealthDay[], on: string): number | null {
-  return coveredStatistic(metric, daily, addDaysToIsoDate(on, -13), on, 10);
+export function healthMean14(daily: readonly HealthDay[], on: string): number | null {
+  return coveredMean(daily, addDaysToIsoDate(on, -13), on, 10);
 }
 
 /** Both step levels and age crossings must hold across five observed dates in a week. */
@@ -145,11 +139,7 @@ export function heldHealthLevels(levels: readonly HealthDay[], joinedOn: string)
   });
 }
 
-function coveredStatistic(metric: HealthMetric["id"], daily: readonly HealthDay[], from: string, through: string, minimum: number): number | null {
+function coveredMean(daily: readonly HealthDay[], from: string, through: string, minimum: number): number | null {
   const values = daily.filter(point => point.date >= from && point.date <= through).map(point => point.value);
-  if (values.length < minimum) return null;
-  if (metric !== "vo2Max") return values.reduce((sum, value) => sum + value, 0) / values.length;
-  values.sort((a, b) => a - b);
-  const middle = Math.floor(values.length / 2);
-  return values.length % 2 ? values[middle] : (values[middle - 1] + values[middle]) / 2;
+  return values.length < minimum ? null : values.reduce((sum, value) => sum + value, 0) / values.length;
 }
