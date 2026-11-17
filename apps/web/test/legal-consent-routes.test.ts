@@ -184,7 +184,7 @@ describe("legal consent routes", () => {
   it("cannot grant Progress likeness permission via the generic legal acceptance route", async () => {
     const response = await consentAcceptRoute.POST(new Request("https://join.example.test/api/legal/consent/accept", {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "feature.progress-share-images",
-        acceptedDocumentVersions: { "privacy-policy": "2026-11-16", "consumer-health-data-notice": "2026-11-12", "health-ai-safety-disclosure": "2026-11-12" } }),
+        acceptedDocumentVersions: { "privacy-policy": "2026-11-12", "consumer-health-data-notice": "2026-11-12", "health-ai-safety-disclosure": "2026-11-12" } }),
     }));
     expect(response.status).toBe(400);
     expect(mocks.grantHostedOptionalFeatureConsent).not.toHaveBeenCalled();
@@ -212,7 +212,7 @@ describe("legal consent routes", () => {
         body: JSON.stringify({
           acceptedDocumentVersions: {
             "health-ai-safety-disclosure": "2026-11-12",
-            "privacy-policy": "2026-11-16",
+            "privacy-policy": "2026-11-12",
             "terms-of-service": "2026-11-12",
           },
           scope: "launch.legal",
@@ -231,7 +231,7 @@ describe("legal consent routes", () => {
     expect(mocks.recordHostedLaunchRequiredConsent).toHaveBeenCalledWith({
       acceptedDocumentVersions: {
         "health-ai-safety-disclosure": "2026-11-12",
-        "privacy-policy": "2026-11-16",
+        "privacy-policy": "2026-11-12",
         "terms-of-service": "2026-11-12",
       },
       memberId: "member_123",
@@ -249,7 +249,7 @@ describe("legal consent routes", () => {
         body: JSON.stringify({
           acceptedDocumentVersions: {
             "health-ai-safety-disclosure": "2026-11-12",
-            "privacy-policy": "2026-11-16",
+            "privacy-policy": "2026-11-12",
             "terms-of-service": "2026-11-12",
           },
           inviteCode,
@@ -284,7 +284,7 @@ describe("legal consent routes", () => {
         body: JSON.stringify({
           acceptedDocumentVersions: {
             "health-ai-safety-disclosure": "2026-11-12",
-            "privacy-policy": "2026-11-16",
+            "privacy-policy": "2026-11-12",
             "terms-of-service": "2026-11-12",
           },
           inviteCode: "invite_123",
@@ -638,7 +638,7 @@ describe("legal consent routes", () => {
         body: JSON.stringify({
           acceptedDocumentVersions: {
             "health-ai-safety-disclosure": "2026-11-12",
-            "privacy-policy": "2026-11-16",
+            "privacy-policy": "2026-11-12",
             "terms-of-service": "2026-11-12",
           },
           scope: "launch.legal",
@@ -668,7 +668,7 @@ describe("legal consent routes", () => {
         body: JSON.stringify({
           acceptedDocumentVersions: {
             "health-ai-safety-disclosure": "2026-01-01",
-            "privacy-policy": "2026-11-16",
+            "privacy-policy": "2026-11-12",
             "terms-of-service": "2026-11-12",
           },
           scope: "launch.legal",
@@ -704,7 +704,7 @@ describe("legal consent routes", () => {
           acceptedDocumentVersions: {
             "consumer-health-data-notice": "2026-11-12",
             "health-ai-safety-disclosure": "2026-11-12",
-            "privacy-policy": "2026-11-16",
+            "privacy-policy": "2026-11-12",
           },
           scope: "feature.health-ai",
           source: "settings",
@@ -722,7 +722,7 @@ describe("legal consent routes", () => {
       acceptedDocumentVersions: {
         "consumer-health-data-notice": "2026-11-12",
         "health-ai-safety-disclosure": "2026-11-12",
-        "privacy-policy": "2026-11-16",
+        "privacy-policy": "2026-11-12",
       },
       memberId: "member_123",
       prisma: mocks.prismaClient,

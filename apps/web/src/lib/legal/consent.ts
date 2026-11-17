@@ -16,7 +16,7 @@ import {
 
 // Published versions: what every new acceptance records.
 export const HOSTED_TERMS_OF_SERVICE_VERSION = "2026-11-12";
-export const HOSTED_PRIVACY_POLICY_VERSION = "2026-11-16";
+export const HOSTED_PRIVACY_POLICY_VERSION = "2026-11-12";
 /** Shared by the Consumer Health Data Notice and the Health AI Safety Disclosure. */
 export const HOSTED_HEALTH_NOTICE_DOCUMENT_VERSION = "2026-11-12";
 

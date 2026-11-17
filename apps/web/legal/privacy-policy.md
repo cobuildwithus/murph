@@ -1,7 +1,7 @@
 # Murph Privacy Policy
 
 **Effective Date:** April 9, 2026  
-**Last Updated:** November 16, 2026
+**Last Updated:** November 12, 2026
 
 Murph (“**Murph**,” “**we**,” “**us**,” or “**our**”) provides software and services designed to help people understand their bodies and lives better through tools such as health journaling, meal tracking, wearable and device sync, messaging-based interactions, hosted onboarding, invite, import, export, and related local or hosted experiences.
 
@@ -256,25 +256,6 @@ Murph tries to limit the data shared with those systems or providers to what is 
 **No model training on health data.** Murph does not use health data, consumer health data, HealthKit data, wearable data, journal content, health files, health memories, prompts involving health data, assistant outputs based on health data, or derived health insights to train, fine-tune, or improve Murph's or any third party's general-purpose AI models. This commitment applies even if you provide feedback. Separate research consents, if offered, will be limited to the research or product-evaluation purpose described in that consent and will not authorize general-purpose AI model training on health data.
 
 **Third-party model providers.** Murph does not route health data to third-party model, search, parsing, transcription, embedding, or inference providers unless the relevant contract, service setting, or deployment control prohibits model training on Murph health data. We also require those providers to limit retention of Murph health data to what is necessary to provide, secure, and troubleshoot the requested service.
-
-**Progress share pictures.** Opening a passed landmark, time record or route
-drawer sends your game profile photo to OpenAI to make a picture of you
-celebrating it. Pictures are on unless you turn them off in Privacy. We remove photo metadata and send only the reference image,
-activity and scene context, including a custom route's destination label when
-needed. The image can identify you. We do not send your account or contact details,
-task text, health history, totals, award dates, friends or route coordinates for
-this feature. OpenAI does not use this content to train its models. It may keep
-content for safety checks for up to 30 days, or longer when required, including
-flagged-image review.
-
-Generated pictures stay private from other members until you choose to share
-them. Turning pictures off in Privacy deletes them and shows medal drawings
-instead. Changing your profile photo leaves made pictures alone. Murph keeps
-generated pictures encrypted until you turn pictures off or delete your account.
-Those actions remove Murph's generated copies and prevent pending work from
-publishing a new copy. A request already sent to OpenAI cannot be recalled.
-Copies you share through Messages or other services, recipient copies, and
-provider-retained copies follow those parties' controls.
 
 **Health memories and derived context.** If Murph creates persistent health memories, summaries, embeddings, trends, user preferences, or other derived context from your health data, we treat those derived items as health data. Health memories are used only to provide, personalize, secure, support, or troubleshoot Murph features you use. You may request access, correction, deletion, or disabling of health memories where required by law and supported by the feature.
 

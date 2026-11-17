@@ -52,8 +52,8 @@ test("legal manifest keeps the current PDF set versioned and deterministic", () 
     ["consumer-health-data-notice", "2026-11-12"],
     ["health-ai-safety-disclosure", "2026-11-12"],
     ["legal-documents", "2026-11-12"],
-    ["privacy-policy", "2026-11-16"],
-    ["subprocessors", "2026-11-16"],
+    ["privacy-policy", "2026-11-12"],
+    ["subprocessors", "2026-11-12"],
     ["terms-of-service", "2026-11-12"],
   ]);
 

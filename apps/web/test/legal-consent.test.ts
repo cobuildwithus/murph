@@ -21,7 +21,7 @@ describe("hosted legal consent registry", () => {
     );
     expect(legalVersions).toEqual({
       "health-ai-safety-disclosure": "2026-11-12",
-      "privacy-policy": "2026-11-16",
+      "privacy-policy": "2026-11-12",
       "terms-of-service": "2026-11-12",
     });
     expect(parseHostedConsentAcceptRequest({
@@ -141,7 +141,7 @@ describe("hosted legal consent registry", () => {
   it("marks stale grants as not currently granted", () => {
     const legalGrant: HostedConsentGrantSnapshot = {
       documentVersions: {
-        "privacy-policy": "2026-11-16",
+        "privacy-policy": "2026-11-12",
         "terms-of-service": "2026-11-12",
       },
       grantedAt: "2026-04-29T00:00:00.000Z",
@@ -215,7 +215,7 @@ describe("hosted legal consent registry", () => {
       "terms-of-service": "2026-07-23",
     })).toBe(false);
     expect(legalGranted({
-      "privacy-policy": "2026-11-16",
+      "privacy-policy": "2026-11-12",
       "terms-of-service": "2026-11-12",
     })).toBe(false);
   });
