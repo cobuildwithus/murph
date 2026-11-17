@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-17",
+  "order": 200,
+  "item": {
+    "id": "progress-health-friend-medals",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Health and Friends medals find their way to Prizes",
+    "summary": "Opening Progress now checks for health wins and friends you've passed, without needing to visit those pages first.",
+    "details": "Newly earned medals appear the next time you load Prizes. Health wins still require your health permissions and enough saved readings; medals you've earned stay yours.",
+    "relevanceTags": ["progress", "games", "health"],
+    "sourcePullRequests": []
+  }
+}

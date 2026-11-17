@@ -189,7 +189,7 @@ it.each([100_000_074, Number.MAX_VALUE, -Number.MAX_VALUE])("ignores an extreme 
   const metric = healthSchema.parse(await response.json()).metrics[0];
   expect(metric.baseline).toBeNull();
   expect(metric.wins.map(win => [win.medalId, win.on])).toEqual(wins.map(win => [win.id, win.on]));
-  expect(mocks.patch).not.toHaveBeenCalled();
+  expect(mocks.patch.mock.calls.map(call => Object.keys(call[2]))).toEqual([["healthSettlement"]]);
   expect(mocks.settle.mock.calls[0][1]).toEqual([]);
 });
 
@@ -202,7 +202,7 @@ it.each(["restingHeartRate", "steps", "sleep", "vo2Max"] as const)(
     const metric = healthSchema.parse(await response.json()).metrics.find(metric => metric.id === id)!;
     expect(metric.baseline).toBeNull();
     expect(metric.wins).toEqual([]);
-    expect(mocks.patch).not.toHaveBeenCalled();
+    expect(mocks.patch.mock.calls.map(call => Object.keys(call[2]))).toEqual([["healthSettlement"]]);
     expect(mocks.settle.mock.calls[0][1]).toEqual([]);
     expect(mocks.resolve).not.toHaveBeenCalled();
   });
