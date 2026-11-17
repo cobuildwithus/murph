@@ -9,6 +9,6 @@
     "summary": "Health, Friends and your games home do less repeated work per load, and a friend's drawer reads only that friend's numbers.",
     "details": "Friends reads game history and shared step or sleep numbers at the same time instead of one after the other. A first walk route finds its towns in half the round trips.",
     "relevanceTags": ["progress", "games", "health"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [5149]
   }
 }
