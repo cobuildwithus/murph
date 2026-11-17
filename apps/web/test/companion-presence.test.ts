@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { companionPresence, companionHeartbeatSchema } from "@murphai/hosted-execution/companion-presence";
-const m = vi.hoisted(() => ({ prisma: vi.fn(), access: vi.fn(), consent: vi.fn(), runtime: vi.fn(), pullForward: vi.fn() }));
-vi.mock("@/src/lib/device-sync/quiet-member-return", () => ({ pullForwardHostedDeviceSyncQuietDeferrals: m.pullForward }));
+const m = vi.hoisted(() => ({ prisma: vi.fn(), access: vi.fn(), consent: vi.fn(), runtime: vi.fn() }));
 vi.mock("@/src/lib/prisma", () => ({ getPrisma: m.prisma }));
 vi.mock("@/src/lib/hosted-onboarding/member-access", () => ({ assertActiveHostedMemberAccessAllowed: m.access }));
 vi.mock("@/src/lib/legal/consent", () => ({ assertHostedHistoricalLaunchConsentGranted: m.consent }));
@@ -35,11 +34,8 @@ describe("companion contact evidence", () => {
     m.prisma.mockReturnValue({ $transaction: async (run: (tx: unknown) => Promise<unknown>) => run(tx) });
     await recordCompanionHeartbeat("synthetic", "foreground");
     expect(tx.hostedMember.update).toHaveBeenLastCalledWith({ where: { id: "synthetic" }, data: { companionLastContactAt: expect.any(Date), companionLastForegroundAt: expect.any(Date) } });
-    // Opening the app pulls a quiet member's held device sync forward in the same transaction.
-    expect(m.pullForward).toHaveBeenCalledExactlyOnceWith({ now: tx.hostedMember.update.mock.calls[0][0].data.companionLastForegroundAt, prisma: tx, userId: "synthetic" });
     await recordCompanionHeartbeat("synthetic", "background");
     expect(tx.hostedMember.update).toHaveBeenLastCalledWith({ where: { id: "synthetic" }, data: { companionLastContactAt: expect.any(Date) } });
-    expect(m.pullForward).toHaveBeenCalledOnce();
     expect(await readRuntimeCompanionPresence("synthetic", null)).toEqual({ status: "unknown", lastContactAt: null, lastForegroundAt: null });
     expect(m.runtime).toHaveBeenCalledExactlyOnceWith(tx, "synthetic", null);
     tx.hostedMember.update.mockClear();

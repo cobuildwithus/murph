@@ -643,6 +643,7 @@ vi.mock("@/src/lib/device-sync/prisma-store", () => ({
 }));
 
 vi.mock("@/src/lib/device-sync/quiet-member", () => ({
+  HOSTED_DEVICE_SYNC_ROUTINE_WAKE_DEFER_MS: 30 * 60_000,
   resolveHostedDeviceSyncQuietDirtyReleaseAt: mocks.resolveHostedDeviceSyncQuietDirtyReleaseAt,
 }));
 

@@ -4,10 +4,10 @@ import { describe, expect, it, vi } from "vitest";
 import {
   postponeHostedDeviceSyncQuietReconcile,
   readHostedDeviceSyncMemberQuiet,
+  releaseHostedDeviceSyncReturnedQuietDeferrals,
   resolveHostedDeviceSyncQuietDirtyReleaseAt,
   resolveHostedDeviceSyncQuietWindow,
 } from "@/src/lib/device-sync/quiet-member";
-import { pullForwardHostedDeviceSyncQuietDeferrals } from "@/src/lib/device-sync/quiet-member-return";
 
 const NOW = new Date("2026-11-17T12:00:00.000Z");
 const LONG_AGO = new Date("2026-08-01T00:00:00.000Z");
@@ -207,16 +207,35 @@ describe("quiet member device sync", () => {
     }
   });
 
-  it("pulls only daily-window batches forward when the member comes back", async () => {
-    const prisma = { $executeRaw: vi.fn().mockResolvedValue(0) };
-    await pullForwardHostedDeviceSyncQuietDeferrals({
-      now: NOW,
-      prisma: prisma as never,
-      userId: "member_quiet",
-    });
-    const [query] = prisma.$executeRaw.mock.calls[0] as [{ sql: string; values: unknown[] }];
-    expect(query.sql).toContain("SET \"wake_deferred_until\" = ?");
-    expect(query.sql).toContain("\"wake_deferred_until\" > ?");
-    expect(query.values).toEqual([NOW, "member_quiet", new Date("2026-11-17T12:30:00.000Z")]);
+  it("releases held batches only for members who are no longer quiet", async () => {
+    const quiet = quietPrisma();
+    const returned = quietPrisma({ linqInbound: true });
+    const prisma = {
+      $executeRaw: vi.fn().mockResolvedValue(2),
+      $queryRaw: vi.fn().mockResolvedValue([{ userId: "member_quiet" }, { userId: "member_returned" }]),
+      hostedLinqDailyState: { findFirst: vi.fn(async ({ where }: { where: { memberId: string } }) => (
+        where.memberId === "member_returned" ? returned.hostedLinqDailyState.findFirst() : quiet.hostedLinqDailyState.findFirst()
+      )) },
+      hostedMailboxItem: quiet.hostedMailboxItem,
+      hostedMember: quiet.hostedMember,
+      hostedThreadContainerParticipant: quiet.hostedThreadContainerParticipant,
+    };
+
+    expect(await releaseHostedDeviceSyncReturnedQuietDeferrals({ now: NOW, prisma: prisma as never })).toBe(2);
+    const [held] = prisma.$queryRaw.mock.calls[0] as [{ sql: string; values: unknown[] }];
+    expect(held.sql).toContain("\"wake_deferred_until\" > ?");
+    expect(held.values[0]).toEqual(new Date("2026-11-17T12:30:00.000Z"));
+    expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
+    const [update] = prisma.$executeRaw.mock.calls[0] as [{ sql: string; values: unknown[] }];
+    expect(update.sql).toContain("SET \"wake_deferred_until\" = ?");
+    expect(update.values).toEqual([NOW, "member_returned", new Date("2026-11-17T12:30:00.000Z")]);
+
+    const stopped = new AbortController();
+    stopped.abort();
+    prisma.$executeRaw.mockClear();
+    expect(await releaseHostedDeviceSyncReturnedQuietDeferrals({
+      now: NOW, prisma: prisma as never, signal: stopped.signal,
+    })).toBe(0);
+    expect(prisma.$executeRaw).not.toHaveBeenCalled();
   });
 });

@@ -6,6 +6,10 @@ vi.mock("@/src/lib/prisma", () => ({
   }),
 }));
 
+vi.mock("@/src/lib/device-sync/quiet-member", () => ({
+  releaseHostedDeviceSyncReturnedQuietDeferrals: vi.fn(async () => 0),
+}));
+
 import { runHostedDeviceSyncDeferredWakeSweeper } from "@/src/lib/device-sync/deferred-wake-sweeper";
 
 const now = new Date("2026-03-26T12:15:00.000Z");
@@ -46,6 +50,26 @@ describe("hosted device-sync deferred wake sweeper", () => {
     expect(release).toHaveBeenCalledTimes(3);
     expect(release).toHaveBeenCalledWith({ abortSignal: expect.any(AbortSignal), connectionId: "dsc_0", now, userId: "user-0" });
     expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it("releases returned quiet members before listing due batches, and a failure does not block", async () => {
+    const order: string[] = [];
+    const listDueDeferredDirtyConnectionWakes = vi.fn(async () => { order.push("list"); return []; });
+    const store = { listDueDeferredDirtyConnectionWakes, postponeDeferredDirtyConnectionWake: vi.fn(async () => {}) };
+    const logger = { info: vi.fn(), warn: vi.fn() };
+    const releaseReturnedQuiet = vi.fn(async () => { order.push("returned"); return 2; });
+
+    await runHostedDeviceSyncDeferredWakeSweeper({ logger, now, releaseReturnedQuiet, store });
+    expect(order).toEqual(["returned", "list"]);
+    expect(releaseReturnedQuiet).toHaveBeenCalledWith({ now, signal: expect.any(AbortSignal) });
+    expect(logger.info).toHaveBeenCalledWith(
+      "Hosted device-sync deferred wake sweeper finished.", expect.objectContaining({ quietReturned: 2 }),
+    );
+
+    await expect(runHostedDeviceSyncDeferredWakeSweeper({
+      logger, now, store, releaseReturnedQuiet: vi.fn(async () => { throw new Error("synthetic"); }),
+    })).resolves.toMatchObject({ dueConnections: 0 });
+    expect(listDueDeferredDirtyConnectionWakes).toHaveBeenCalledTimes(2);
   });
 
   it("joins a cancelled release without counting failure or postponing it", async () => {

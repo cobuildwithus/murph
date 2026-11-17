@@ -1,8 +1,6 @@
 import type { HostedLinqDailyState, PrismaClient } from "@prisma/client";
 import type { Prisma } from "@prisma/client";
 
-import { pullForwardHostedDeviceSyncQuietDeferrals } from "../device-sync/quiet-member-return";
-
 type HostedLinqDailyStateClient = PrismaClient | Prisma.TransactionClient;
 
 export const HOSTED_LINQ_DAILY_TEXT_LIMIT = 100;
@@ -29,12 +27,6 @@ export async function incrementHostedLinqInboundDailyState(input: {
   const occurredAt = input.occurredAt instanceof Date ? input.occurredAt : new Date(input.occurredAt);
   const dayUtc = resolveHostedLinqDayUtc(occurredAt);
 
-  // A message ends any quiet-member device wait.
-  await pullForwardHostedDeviceSyncQuietDeferrals({
-    now: new Date(),
-    prisma: input.prisma,
-    userId: input.memberId,
-  });
   return input.prisma.hostedLinqDailyState.upsert({
     where: {
       memberId_dayUtc: {

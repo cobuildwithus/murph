@@ -112,8 +112,7 @@ import {
 import type { HostedDeviceConnectionSource } from "./prisma-store";
 import type { HostedDeviceSyncDirtyResource } from "./prisma-store";
 import type { HostedDeviceSyncDeferredDirtyWakeRecord } from "./prisma-store/dirty-connections";
-import { resolveHostedDeviceSyncQuietDirtyReleaseAt } from "./quiet-member";
-import { HOSTED_DEVICE_SYNC_ROUTINE_WAKE_DEFER_MS } from "./quiet-member-return";
+import { HOSTED_DEVICE_SYNC_ROUTINE_WAKE_DEFER_MS, resolveHostedDeviceSyncQuietDirtyReleaseAt } from "./quiet-member";
 import {
   buildHostedTokenRefreshStateUnknownError,
   classifyHostedTokenRefreshLease,

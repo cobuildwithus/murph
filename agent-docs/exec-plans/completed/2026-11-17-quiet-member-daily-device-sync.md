@@ -25,9 +25,10 @@ instead of about six. Everyone else is unchanged.
 - A quiet member's due scheduled reconcile outside the window moves
   `next_reconcile_at` to the next window start instead of waking.
 - Inside the window, a quiet member behaves exactly as today.
-- An inbound Linq message (direct, or the verified sender of a group message)
-  or an app foreground heartbeat pulls any quiet deferral more than 30
-  minutes out forward to now, so the next 5-minute recovery sweep wakes it.
+- When a quiet member comes back (any signal in the quiet predicate: Linq
+  message, group chat, app open, meal photo, Telegram, email, paid plan), the
+  next 5-minute recovery sweep releases their held batches. Message intake
+  and the app heartbeat are unchanged.
 - Non-quiet members: identical wakes, deadlines and mailbox items as today,
   except the bounded orphan-recovery ownership fix below.
 - Production check after deploy: device-sync mailbox wakes for the quiet
@@ -39,21 +40,14 @@ instead of about six. Everyone else is unchanged.
 - In scope (Web only, `apps/web`):
   - New module `src/lib/device-sync/quiet-member.ts`: the quiet predicate,
     the daily window, the webhook release time and the reconcile postponement.
-  - New leaf module `src/lib/device-sync/quiet-member-return.ts`: the
-    pull-forward (and the routine 30-minute constant it compares against), so
-    Linq daily state can import it without an import cycle.
+  - `deferred-wake-sweeper.ts`: release returned members' held batches
+    before listing due batches.
   - `wake-service.ts` `settleHostedDeviceSyncWebhookWakeDeferralTx`: quiet
     branch.
   - `due-reconcile-sweeper.ts`: quiet postponement before preflight.
   - `prisma-store/connections.ts` `listDueReconcileConnectionsForSweep`: a
     batch with a live `wake_deferred_until` is owned by the deferred-wake
     sweeper, so it is not orphaned dirt.
-  - Pull-forward calls in `hosted-onboarding/linq-daily-state.ts`
-    (`incrementHostedLinqInboundDailyState`, the owner of Linq inbound
-    accounting), the verified group sender in
-    `hosted-onboarding/webhook-provider-linq.ts` (group quota is charged to the
-    group, not the sender) and `companion/presence.ts`
-    (`recordCompanionHeartbeat`).
 - Out of scope: runner/Cloudflare changes, Temporal, schema migrations,
   runtime-scheduled continuation/retry wakes, scheduled assistant jobs (the
   2026-11-16 review advised against a member-wide block), manual reconcile,
@@ -146,30 +140,33 @@ deadline releases it within 30 minutes.
 
 ### Coming back
 
-`pullForwardHostedDeviceSyncQuietDeferrals({ userId, now, prisma|tx })`:
-`UPDATE device_sync_dirty_connection SET wake_deferred_until = now WHERE
-user_id = $1 AND wake_deferred_until > now + 30 minutes`. Only quiet-length
-deadlines move; routine 30-minute batches keep their timing. Called in
-`incrementHostedLinqInboundDailyState`, for the verified group sender, and in
-`recordCompanionHeartbeat` on foreground, each inside the caller's existing
-transaction and member lock. The next recovery sweep (every 5
-minutes) releases the batch through the existing release path. The member is
-no longer quiet from that moment, so every later webhook and reconcile follows
-today's rules. A postponed `next_reconcile_at` keeps its date (at most 24 h);
-the scheduled reconcile is the missed-webhook safety net, not the freshness
-path.
+`releaseHostedDeviceSyncReturnedQuietDeferrals({ now, prisma, signal })`
+runs at the start of the deferred-wake sweeper (every 5 minutes). It lists the
+distinct members with a `wake_deferred_until` beyond now + 30 minutes (only a
+quiet hold can be that far out; routine batches are at most 30 minutes), runs
+the same quiet predicate for each, and for a member who is no longer quiet
+sets those deadlines to now with a deadline-only raw UPDATE. The same sweep
+then releases them through the existing release path. A failure is caught:
+held batches still release at their own deadlines. From the moment the member
+is active again, every later webhook and reconcile follows today's rules. A
+postponed `next_reconcile_at` keeps its date (at most 24 h); the scheduled
+reconcile is the missed-webhook safety net, not the freshness path.
+
+First version (pushed as 610c71de) instead pulled deadlines forward from
+Linq inbound accounting, the verified group sender and the app heartbeat. CI's
+direct-admission round-trip budget test
+(`hosted-onboarding-linq-home-routing-postgres.test.ts`, 20 statements) caught
+the extra UPDATE on the hot reply path. The sweep-side release keeps intake
+untouched, uses the single quiet predicate (so Telegram, email and billing
+returns are covered too), and deletes the three hooks and the leaf module.
 
 Known limits:
 
-- The first reply to a returning member can run before the pulled-forward
-  sync lands (up to about 5 minutes plus the pass). Their later replies see
-  fresh data.
-- A quiet deadline already within 30 minutes is not pulled forward (it cannot
+- The first reply to a returning member can run before their held data
+  syncs (up to about 5 minutes plus the pass). Later replies see fresh data.
+- A quiet deadline already within 30 minutes is not released early (it cannot
   be told apart from a routine batch without new state), so the return bound
   is up to about 30 minutes plus the pass.
-- Telegram and email count as activity for future decisions but do not pull
-  an existing deferral forward; it lands at the next window. Three members
-  used those channels in the last 60 days (2026-11-17).
 
 ## Constraints
 
@@ -181,9 +178,10 @@ Known limits:
   sweeps service them at those times (at most about a day).
 - Minimal moving parts: reuse the existing deferral column and sweeper, the
   existing engagement and paid-billing predicates, no new config.
-- Database: the predicate adds at most three indexed reads inside the existing
-  webhook transaction, only on wake-producing events. The pull-forward is one
-  indexed UPDATE (`device_sync_dirty_connection (user_id, provider)` index).
+- Database: the predicate adds at most four small reads inside the existing
+  webhook transaction, only on wake-producing events. The return check adds,
+  per 5-minute sweep, one index scan of held deadlines plus the predicate for
+  each held member (about 40-60 members today, capped at 200).
 
 ## Risks and mitigations
 
@@ -197,17 +195,18 @@ Known limits:
    Mitigation: only rows with a deadline are excluded; the deferred sweeper
    owns them and retries every 5 minutes on failure; a cleared deadline
    restores orphan detection.
-4. Risk: pull-forward on every heartbeat adds DB load.
-   Mitigation: one indexed UPDATE that matches no rows for active members.
+4. Risk: the return check grows with the quiet cohort.
+   Mitigation: capped at 200 members per sweep, stops at the sweep deadline,
+   and only held members (not all members) are checked.
 
 ## Tasks
 
-1. `quiet-member.ts`: predicate, window, pull-forward, with unit tests.
+1. `quiet-member.ts`: predicate, window, return release, with unit tests.
 2. Webhook settle quiet branch; tests for transition, claim, inside-window and
    non-quiet unchanged.
 3. Due sweeper postponement + `quietPostponed` count; tests.
 4. Orphan predicate: exclude live deferrals; test.
-5. Pull-forward calls in Linq inbound and companion heartbeat; tests.
+5. Return release at the start of the deferred-wake sweeper; tests.
 6. Typecheck + focused tests; PR; ReviewGPT final round; merge; verify in
    production with the cohort wake query.
 
@@ -239,12 +238,11 @@ response was recovered by thread export (known frog
    the smallest option: keep the threshold and document the bound of up to
    about 30 minutes (Known limits).
 5. Group activity belongs to the group container. Accepted: participant
-   evidence counts as activity, and the verified group sender's deadlines are
-   pulled forward. Telegram and email return is documented, not built (three
-   members in 60 days).
-- Move the pull-forward into the dirty-connection store: rejected. The leaf
-  `quiet-member-return.ts` already breaks the import cycle, and the callers
-  hold a transaction client, not a store.
+   evidence counts as activity. Return is now detected by the sweep with the
+   same predicate, so group senders, Telegram and email are all covered.
+- Move the pull-forward into the dirty-connection store: superseded. There is
+  no ingress pull-forward any more; the sweep-side release lives with the
+  quiet policy in `quiet-member.ts`.
 - Orphan predicate: confirmed correct (in the CASE, not the WHERE); the
   bounded non-quiet change is now documented above.
 - Two-owner integration (scheduled ack before +10 minutes suppresses the

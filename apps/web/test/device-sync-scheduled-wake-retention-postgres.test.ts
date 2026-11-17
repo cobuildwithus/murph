@@ -12,8 +12,10 @@ import { buildHostedDeviceSyncWake } from "@/src/lib/device-sync/wake";
 import { runHostedDeviceSyncDueReconcileSweeper } from "@/src/lib/device-sync/due-reconcile-sweeper";
 import { runHostedDeviceSyncRecoverySweep } from "@/src/lib/device-sync/recovery-sweeper";
 import { runHostedDeviceSyncDeferredWakeSweeper } from "@/src/lib/device-sync/deferred-wake-sweeper";
-import { postponeHostedDeviceSyncQuietReconcile } from "@/src/lib/device-sync/quiet-member";
-import { pullForwardHostedDeviceSyncQuietDeferrals } from "@/src/lib/device-sync/quiet-member-return";
+import {
+  postponeHostedDeviceSyncQuietReconcile,
+  releaseHostedDeviceSyncReturnedQuietDeferrals,
+} from "@/src/lib/device-sync/quiet-member";
 import { appendHostedDeviceSyncScheduledReconcileWake } from "@/src/lib/device-sync/wake-service";
 import * as cryptoEnv from "@/src/lib/hosted-crypto/env";
 import * as runtimeSignal from "@/src/lib/hosted-orchestration/signal-runtime";
@@ -113,7 +115,7 @@ describe.skipIf(!runPostgresProof)(
       expect(await select()).toEqual([]);
     });
 
-    it("postpones a quiet member's reconcile under the admission lock and resumes on return", async () => {
+    it("postpones a quiet member's reconcile under the admission lock and releases on return", async () => {
       const f = await seedDueBudgetConnection();
       await f.client.hostedMember.update({
         where: { id: f.memberId }, data: { createdAt: new Date(f.now.getTime() - 90 * 86_400_000) },
@@ -137,13 +139,19 @@ describe.skipIf(!runPostgresProof)(
         connectionId: f.connectionId, userId: f.memberId, provider: "oura", dirtyRevision: 2n, processedRevision: 1n,
         firstDirtyAt: f.now, latestDirtyAt: f.now, wakeDeferredUntil: new Date("2026-09-05T11:10:00.000Z"),
       } });
-      await pullForwardHostedDeviceSyncQuietDeferrals({ now: f.now, prisma: f.client, userId: f.memberId });
+      const releaseReturned = () => releaseHostedDeviceSyncReturnedQuietDeferrals({ now: f.now, prisma: f.client });
+      // Still quiet: the batch keeps waiting for its window.
+      expect(await releaseReturned()).toBe(0);
+      expect((await f.read()).dirtyState?.wakeDeferredUntil).toEqual(new Date("2026-09-05T11:10:00.000Z"));
+      // Opening the app ends the wait on the next sweep.
+      await f.client.hostedMember.update({ where: { id: f.memberId }, data: { companionLastForegroundAt: f.now } });
+      expect(await releaseReturned()).toBe(1);
       expect((await f.read()).dirtyState?.wakeDeferredUntil).toEqual(f.now);
       // A routine 30-minute batch keeps its own timing.
       await f.client.deviceSyncDirtyConnection.update({
         where: { connectionId: f.connectionId }, data: { wakeDeferredUntil: routine },
       });
-      await pullForwardHostedDeviceSyncQuietDeferrals({ now: f.now, prisma: f.client, userId: f.memberId });
+      expect(await releaseReturned()).toBe(0);
       expect((await f.read()).dirtyState?.wakeDeferredUntil).toEqual(routine);
     });
 

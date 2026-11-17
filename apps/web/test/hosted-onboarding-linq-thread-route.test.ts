@@ -6752,12 +6752,6 @@ describe("Linq group chat auto-provision", () => {
       }),
       tx: prisma,
     });
-    // The sender's own quiet device wait ends; the group only owns the quota.
-    const deviceWaitMembers = prisma.$executeRaw.mock.calls
-      .map(([query]) => query as Prisma.Sql)
-      .filter((query) => query.sql?.includes("device_sync_dirty_connection"))
-      .map((query) => query.values[1]);
-    expect(deviceWaitMembers).toContain("member_owner_123");
   });
 
   it("fails closed as group when the pre-read route disappears before planning", async () => {

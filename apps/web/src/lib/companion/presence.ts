@@ -2,7 +2,6 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 import { companionPresence } from "@murphai/hosted-execution/companion-presence";
 import { getPrisma } from "../prisma";
-import { pullForwardHostedDeviceSyncQuietDeferrals } from "../device-sync/quiet-member-return";
 import { requireHostedRuntimeCallbackTx, type HostedRuntimeIdentity } from "../hosted-execution/runtime-owner";
 import { requirePersonalMember } from "./member-access";
 import type { CompanionClientInfo } from "./client-info";
@@ -31,10 +30,6 @@ export async function recordCompanionHeartbeat(
         } : {}),
       },
     });
-    // Opening the app ends any quiet-member device wait.
-    if (state === "foreground") {
-      await pullForwardHostedDeviceSyncQuietDeferrals({ now, prisma: tx, userId: memberId });
-    }
   }, transactionOptions);
 }
 

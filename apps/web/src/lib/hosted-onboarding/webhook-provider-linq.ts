@@ -105,7 +105,6 @@ import {
   readHostedMailboxSourceConversationEntriesTx,
   type HostedMailboxSourceConversationPreparation,
 } from "../hosted-mailbox/store";
-import { pullForwardHostedDeviceSyncQuietDeferrals } from "../device-sync/quiet-member-return";
 import {
   renewHostedThreadContainerParticipantAccessTx,
   observeHostedThreadContainerRosterParticipantTx,
@@ -3486,12 +3485,6 @@ async function planHostedLinqExplicitThreadRouteWebhook(input: {
       observedAt: new Date(occurredAt),
       participantMemberId: verifiedInboundParticipant.memberId,
       prisma: input.prisma,
-    });
-    // Group quota belongs to the group; the sender's own device wait ends here.
-    await pullForwardHostedDeviceSyncQuietDeferrals({
-      now: participantAccessNow,
-      prisma: input.prisma,
-      userId: verifiedInboundParticipant.memberId,
     });
     await associateGameChatInviteTx({ prepared: input.preparedGameInvite, isFromMe: summary.isFromMe,
       containerMemberId: input.route.containerMemberId, senderMemberId: verifiedInboundParticipant.memberId,

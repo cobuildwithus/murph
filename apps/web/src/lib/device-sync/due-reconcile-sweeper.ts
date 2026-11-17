@@ -3,7 +3,7 @@ import { getPrisma } from "../prisma";
 import {
   formatHostedExecutionSafeLogErrorDetails,
 } from "../hosted-execution/logging";
-import { PrismaDeviceSyncControlPlaneStore } from "./prisma-store";
+import { PrismaDeviceSyncControlPlaneStore, type HostedDeviceSyncDueReconcileConnectionRecord } from "./prisma-store";
 import { postponeHostedDeviceSyncQuietReconcile } from "./quiet-member";
 import { preflightHostedScheduledReconcile } from "./scheduled-reconcile-preflight";
 import {
@@ -96,10 +96,9 @@ export async function runHostedDeviceSyncDueReconcileSweeper(input: {
   };
 
   const stopProbes = abortAtHostedRecoveryDeadline(deadlineMs - PROBE_WAKE_RESERVE_MS);
-  const unstarted = await runHostedRecoveryBatch(
-    selectedDueConnections,
-    async (dueConnection) => {
-      // Quiet members reconcile once a day; recovery of orphaned dirt never waits.
+  // Quiet members reconcile once a day; recovery of orphaned dirt never waits.
+  const unlessQuiet = (reconcile: (connection: HostedDeviceSyncDueReconcileConnectionRecord) => Promise<void>) =>
+    async (dueConnection: HostedDeviceSyncDueReconcileConnectionRecord) => {
       if (
         dueConnection.orphanedDirtyRecoveryKey === undefined
         && !stop.aborted
@@ -109,6 +108,11 @@ export async function runHostedDeviceSyncDueReconcileSweeper(input: {
         quietPostponed += 1;
         return;
       }
+      await reconcile(dueConnection);
+    };
+  const unstarted = await runHostedRecoveryBatch(
+    selectedDueConnections,
+    unlessQuiet(async (dueConnection) => {
       const canProbe = dueConnection.provider === "junction"
         && dueConnection.orphanedDirtyRecoveryKey === undefined;
       if (canProbe && stopProbes.aborted) {
@@ -195,7 +199,7 @@ export async function runHostedDeviceSyncDueReconcileSweeper(input: {
         errorMessage: "Hosted device-sync due reconcile sweeper wake was not accepted.",
         reason: wake.reason ?? null,
       });
-    },
+    }),
     true,
     stop,
   );

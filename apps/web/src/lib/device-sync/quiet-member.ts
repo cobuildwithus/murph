@@ -1,5 +1,5 @@
 import { readJunctionHistoricalBackfillProgress } from "@murphai/device-syncd/hosted-runtime";
-import type { Prisma, PrismaClient } from "@prisma/client";
+import { Prisma, type PrismaClient } from "@prisma/client";
 
 import { hasHostedMailboxAutomationEngagementSince } from "../hosted-mailbox/store";
 import { hasHostedMemberOwnPaidBilling } from "../hosted-onboarding/entitlement";
@@ -13,6 +13,8 @@ type QuietMemberClient = PrismaClient | Prisma.TransactionClient;
 // Members with no message, group chat, app open or active paid plan for this
 // long sync their devices in one daily window. Their data still lands every day.
 export const HOSTED_DEVICE_SYNC_QUIET_AFTER_DAYS = 60;
+/** A routine Junction daily-total batch waits this long before its wake. */
+export const HOSTED_DEVICE_SYNC_ROUTINE_WAKE_DEFER_MS = 30 * 60_000;
 
 const DAY_MS = 24 * 60 * 60_000;
 // The recovery sweep runs every five minutes, so an hour always services a
@@ -21,6 +23,7 @@ const QUIET_WINDOW_MS = 60 * 60_000;
 // The window's scheduled reconcile drains held webhook dirt, so the batch
 // release waits behind it and normally clears without another container.
 const QUIET_DIRTY_RELEASE_DELAY_MS = 10 * 60_000;
+const QUIET_RETURN_CHECK_LIMIT = 200;
 
 export async function readHostedDeviceSyncMemberQuiet(input: {
   memberId: string;
@@ -160,6 +163,39 @@ export async function postponeHostedDeviceSyncQuietReconcile(input: {
     });
     return updated.count === 1;
   }, { memberRowLockTimeoutMs: HOSTED_RECOVERY_LOCK_TIMEOUT_MS, transaction: HOSTED_RECOVERY_TRANSACTION_OPTIONS });
+}
+
+/**
+ * Releases the held device batches of members who are no longer quiet: they
+ * texted, joined a group chat, opened the app or started paying. Only a
+ * deadline beyond the routine 30-minute batch can be a quiet hold. The sweep
+ * runs this before releasing due batches, so a returning member's data starts
+ * syncing in the same 5-minute sweep, with nothing added to message intake.
+ */
+export async function releaseHostedDeviceSyncReturnedQuietDeferrals(input: {
+  now: Date;
+  prisma?: PrismaClient;
+  signal?: AbortSignal;
+}): Promise<number> {
+  const prisma = input.prisma ?? getPrisma();
+  const heldBeyond = new Date(input.now.getTime() + HOSTED_DEVICE_SYNC_ROUTINE_WAKE_DEFER_MS);
+  const held = await prisma.$queryRaw<Array<{ userId: string }>>(Prisma.sql`
+    SELECT DISTINCT "user_id" AS "userId" FROM "device_sync_dirty_connection"
+    WHERE "wake_deferred_until" > ${heldBeyond}
+    LIMIT ${QUIET_RETURN_CHECK_LIMIT}
+  `);
+  let released = 0;
+  for (const { userId } of held) {
+    if (input.signal?.aborted) break;
+    if (await readHostedDeviceSyncMemberQuiet({ memberId: userId, now: input.now, prisma })) continue;
+    // Deadline-only write: the dirty content fence stays untouched.
+    released += await prisma.$executeRaw(Prisma.sql`
+      UPDATE "device_sync_dirty_connection"
+      SET "wake_deferred_until" = ${input.now}
+      WHERE "user_id" = ${userId} AND "wake_deferred_until" > ${heldBeyond}
+    `);
+  }
+  return released;
 }
 
 function jsonRecord(value: Prisma.JsonValue | undefined): Record<string, unknown> {
