@@ -98,17 +98,6 @@
       "private": false,
       "invited": false,
       "joinedOn": "2026-11-09"
-    },
-    {
-      "memberId": "member-4-jordan",
-      "firstName": "Jordan",
-      "avatarUrl": null,
-      "me": false,
-      "rank": null,
-      "total": null,
-      "private": true,
-      "invited": false,
-      "joinedOn": null
     }
   ],
   "chart": [
@@ -274,10 +263,6 @@
       ]
     }
   ],
-  "next": {
-    "memberId": "member-2-leo",
-    "text": "12k to pass Leo"
-  },
   "shareAsk": false,
   "shareAudience": [],
   "departureNotice": null,

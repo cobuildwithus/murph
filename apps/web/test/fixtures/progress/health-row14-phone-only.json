@@ -318,19 +318,6 @@
           "on": "2026-10-21"
         }
       }
-    },
-    {
-      "id": "vo2Max",
-      "label": "VO2 max",
-      "unit": "mL/kg/min",
-      "access": "missing",
-      "direction": "better",
-      "headline": "",
-      "daily": [],
-      "baseline": null,
-      "wins": [],
-      "next": null,
-      "age": null
     }
   ],
   "recs": [],

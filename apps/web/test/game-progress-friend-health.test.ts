@@ -11,7 +11,7 @@ import type { FriendSeries } from "@/src/lib/game/progress/friends";
 
 const request = new Request("https://example.test/progress/friends?measure=sleep");
 const people: FriendSeries[] = ["ava", "leo", "sam"].map((memberId, index) => ({ memberId,
-  firstName: ["Ava", "Leo", "Sam"][index], avatarUrl: null, me: memberId === "ava", invited: false,
+  firstName: ["Ava", "Leo", "Sam"][index], avatarUrl: null, me: memberId === "ava",
   joinedOn: "2026-10-21", daily: null }));
 const rooms = [{ gameId: "pair-game", groupId: "pair-group", runtimeMemberId: "pair-room", otherMemberId: "leo", membershipId: null, shared: [] }];
 const day = { date: "2026-11-15", value: 420.5, source: "Garmin", observedAt: "2026-11-15T12:00:00Z" };
@@ -56,7 +56,7 @@ it("marks the result incomplete if the post-decryption room read reaches its cap
   expect(await read()).toEqual({ people: [], incomplete: true });
 });
 
-it("reads each of 500 pair rooms once with one active shared read", async () => {
+it("reads each of 500 pair rooms once, six shared reads at a time", async () => {
   const friends = Array.from({ length: 500 }, (_, index) => ({ ...people[1], memberId: `friend-${index}` }));
   const maximumRooms = friends.map(person => ({ ...rooms[0], otherMemberId: person.memberId, runtimeMemberId: `room-${person.memberId}` }));
   mocks.rooms.mockResolvedValue({ rooms: maximumRooms, incomplete: false });
@@ -69,5 +69,5 @@ it("reads each of 500 pair rooms once with one active shared read", async () => 
   expect(mocks.raw).toHaveBeenCalledTimes(1);
   expect(mocks.shared).toHaveBeenCalledTimes(500);
   expect(mocks.rooms).toHaveBeenCalledTimes(1);
-  expect(peak).toBe(1);
+  expect(peak).toBe(6);
 });

@@ -11,11 +11,11 @@ it.each(readdirSync(directory).filter(name => name.startsWith("friends-")))("ren
   const people: FriendSeries[] = expected.rows.map(row => {
     const points = expected.chart.find(line => line.memberId === row.memberId)?.points;
     let previous = 0;
-    const daily = row.private || row.invited ? null : points ? points.map(([date, amount]) => {
+    const daily = row.private ? null : points ? points.map(([date, amount]) => {
       const delta = amount - previous; previous = amount; return { date, amount: delta };
     }) : row.total?.value ? [{ date: today, amount: row.total.value }] : [];
     return { memberId: row.memberId, firstName: row.firstName, avatarUrl: row.avatarUrl,
-      me: row.me, invited: row.invited, joinedOn: row.joinedOn, daily };
+      me: row.me, joinedOn: row.joinedOn, daily };
   });
   const pill = expected.pills.find(pill => pill.id === expected.pill)!;
   expect(friendsView({ units: "us", people, measure: { ...pill, noun: pill.label.toLowerCase(),

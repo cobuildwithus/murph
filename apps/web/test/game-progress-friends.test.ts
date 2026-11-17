@@ -3,7 +3,7 @@ import { friendAmount, friendPasses, friendsView, type FriendSeries } from "../s
 
 const measure = { id: "pushups.reps", label: "Pushups", icon: "pushups", format: "count" as const, noun: "pushups" };
 const person = (memberId: string, firstName: string, amount: number, me = false): FriendSeries => ({
-  memberId, firstName, avatarUrl: null, me, invited: false, joinedOn: "2026-10-21",
+  memberId, firstName, avatarUrl: null, me, joinedOn: "2026-10-21",
   daily: [{ date: "2026-11-01", amount }],
 });
 const view = (people: FriendSeries[]) => friendsView({ units: "us", people, measure, pills: [measure],
@@ -21,11 +21,12 @@ it("ranks the unrounded amount even when the displayed totals match", () => {
   expect(result.rows.map(row => row.total?.text)).toEqual(["100", "100"]);
 });
 
-it("a private friend has no rank, amount, line or gap", () => {
+it("a private friend is off the board; your own private row stays", () => {
   const result = view([person("ava", "Ava", 900, true), { ...person("leo", "Leo", 99999), daily: null }]);
-  expect(result.rows[1]).toMatchObject({ private: true, rank: null, total: null });
+  expect(result.rows.map(row => row.memberId)).toEqual(["ava"]);
   expect(result.chart.map(line => line.memberId)).toEqual(["ava"]);
-  expect(result.next).toBeNull();
+  expect(view([{ ...person("ava", "Ava", 900, true), daily: null }, person("leo", "Leo", 5)]).rows)
+    .toMatchObject([{ memberId: "leo", rank: null }, { memberId: "ava", private: true, rank: null, total: null }]);
   expect(friendPasses({ measureId: measure.id, people: [person("ava", "Ava", 900, true),
     { ...person("leo", "Leo", 1), daily: null }] })).toEqual([]);
 });

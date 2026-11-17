@@ -6,7 +6,7 @@ import { measureLadder, projection, roundValues, rungFor } from "../src/lib/game
 import { formatAmount, formatNumber } from "../src/lib/game/progress/format";
 import { ACHIEVEMENTS } from "../src/lib/game/progress/registry";
 import { achievementContext, medalView, medalsView, measureView, momentsView, visibleAwards } from "../src/lib/game/progress/view";
-import type { StoredAward } from "../src/lib/game/progress/awards";
+import { retiredAward, type StoredAward } from "../src/lib/game/progress/awards";
 import { game, memberId, post, task } from "./support/progress-games";
 
 const reps = task("40 pushups", { quantity: 40, unit: "reps", name: "pushups" });
@@ -276,4 +276,29 @@ describe("moment words", () => {
     const awards = stored([{ key: "one", kind, measureId: "pushups.reps", subjectMemberId: null, on: "2026-11-05", data: { ...data, page: "totals" } }]);
     expect(momentsView(awards, [], "us")[0]).toMatchObject({ kind: momentKind, title, line });
   });
+});
+
+describe("Medal words and pages", () => {
+  const award = (kind: string, measureId: string, data: Record<string, unknown>) => stored([{ key: `${kind}:${measureId}`, kind, measureId,
+    subjectMemberId: kind === "friend" ? "leo" : null, on: "2026-11-05", data: data as never }])[0];
+
+  it("says what a friend was passed in, all time", () => {
+    const passed = award("friend", "pullups.reps", { title: "Passed Leo", detail: "all-time total", page: "friends",
+      face: { member: { memberId: "leo", firstName: "Leo", avatarUrl: null } } });
+    expect(medalView(passed, false, "us", [{ id: "pullups.reps", label: "Pull-ups" }])).toMatchObject({ title: "Passed Leo",
+      detail: "in pull-ups, all time", open: { page: "friends", measureId: "pullups.reps" } });
+    expect(momentsView([passed], [{ id: "pullups.reps", label: "Pull-ups" } as never], "us")[0].title).toBe("Passed Leo in pull-ups, all time");
+  });
+
+  it("opens Health for a health number's totals and journeys, Totals for a game's", () => {
+    const total = (measureId: string) => award("total", measureId, { value: 10000, unit: "steps", noun: "steps", page: "totals" });
+    expect(medalView(total("steps"), false, "us").open).toEqual({ page: "health", measureId: "steps" });
+    expect(medalView(total("pushups.reps"), false, "us").open).toEqual({ page: "totals", measureId: "pushups.reps" });
+  });
+});
+
+it("retires streaks, hours slept and anything VO2 max; keeps steps totals and sleep journeys", () => {
+  expect(([["streak", null], ["total", "sleep"], ["health", "vo2Max"], ["healthAge", "vo2Max"],
+    ["total", "steps"], ["time", "sleep"], ["health", "sleep"]] as const).map(([kind, measureId]) => retiredAward({ kind, measureId })))
+    .toEqual([true, true, true, true, false, false, false]);
 });

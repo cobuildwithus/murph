@@ -9,7 +9,6 @@ export interface FriendSeries {
   firstName: string;
   avatarUrl: string | null;
   me: boolean;
-  invited: boolean;
   joinedOn: string | null;
   /** Null is private or unavailable; it never participates in totals or ranks. */
   daily: { date: string; amount: number }[] | null;
@@ -34,24 +33,20 @@ export function friendsView(input: {
       .map(day => [day.date, total += day.amount]);
     return { person, total, points };
   });
-  const ranked = series.filter(({ person }) => person.daily !== null && !person.invited)
+  const ranked = series.filter(({ person }) => person.daily !== null)
     .sort((a, b) => b.total - a.total || Number(b.person.me) - Number(a.person.me) || a.person.memberId.localeCompare(b.person.memberId));
-  const rows: Friends["rows"] = [...ranked, ...series.filter(({ person }) => person.daily === null || person.invited)].map(({ person, total }) => {
-    const visible = person.daily !== null && !person.invited;
+  // A friend who keeps this number private isn't on the board; your own row always is.
+  const mine = series.filter(({ person }) => person.me && person.daily === null);
+  const rows: Friends["rows"] = [...ranked, ...mine].map(({ person, total }) => {
     const identity = { memberId: person.memberId, firstName: person.firstName, avatarUrl: person.avatarUrl,
-      me: person.me, invited: person.invited, joinedOn: person.joinedOn };
-    return !visible && !person.invited ? { ...identity, private: true, rank: null, total: null }
-      : { ...identity, private: false, rank: visible && ranked.length > 1 ? ranked.findIndex(row => row.total === total) + 1 : null,
-        total: visible ? friendAmount(total, measure, input.units) : null };
+      me: person.me, invited: false, joinedOn: person.joinedOn };
+    return person.daily === null ? { ...identity, private: true, rank: null, total: null }
+      : { ...identity, private: false, rank: ranked.length > 1 ? ranked.findIndex(row => row.total === total) + 1 : null,
+        total: friendAmount(total, measure, input.units) };
   });
-  const me = ranked.find(row => row.person.me);
-  const ahead = me ? ranked.filter(row => row.total > me.total).at(-1) : undefined;
-  const gap = ahead && me ? ahead.total - me.total : null;
   const chart = ranked.map(row => ({ memberId: row.person.memberId, points: row.points }));
   return { incomplete: input.incomplete, departureNotice: input.departureNotice,
     pills: input.pills, pill: measure.id, range: query.range, rows, chart,
-    next: ahead && gap !== null ? { memberId: ahead.person.memberId,
-      text: `${measure.format === "duration" && gap < 3600 ? `${formatNumber(gap / 60, "compact")} min` : friendAmount(gap, measure, input.units).text} to pass ${ahead.person.firstName}` } : null,
     shareAsk: (measure.id === "steps" || measure.id === "sleep") && input.shareAudience.length > 0,
     shareAudience: input.shareAudience };
 }
@@ -69,7 +64,7 @@ export function friendPasses(input: { measureId: string; people: readonly Friend
   if (!me?.daily) return [];
   const candidates: Candidate[] = [];
   for (const friend of input.people) {
-    if (friend.me || friend.invited || friend.daily === null) continue;
+    if (friend.me || friend.daily === null) continue;
     const mine = new Map(me.daily.map(day => [day.date, day.amount]));
     const theirs = new Map(friend.daily.map(day => [day.date, day.amount]));
     const dates = [...new Set([...mine.keys(), ...theirs.keys()])].sort();
