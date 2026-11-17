@@ -2,14 +2,13 @@ import 'server-only';
 import { randomBytes, createHash } from 'node:crypto';
 import { formatTimeZoneDateTimeParts } from '@murphai/contracts';
 import type { PrismaClient } from '@prisma/client';
-import { hostedProgressPicObjectKey } from '@murphai/hosted-execution/storage-paths';
-import { readHostedExecutionControlClientIfConfigured } from '../../hosted-execution/control';
 import { openHostedUserSecureBoxBytes, sealHostedUserSecureBoxBytes } from '../../hosted-crypto/secure-box';
 import { hostedOnboardingError } from '../../hosted-onboarding/errors';
 import { getPrisma } from '../../prisma';
 import { openProgress, openProgressMany, sealProgress } from './crypto';
 import type { BeforeProgressMutation } from './state';
 import type { Day, Pic, PicUploadQuery } from './contract';
+import { progressMediaStore, purgeProgressMedia } from './media-store';
 
 export function picturePin(pic: { id: string; takenAt: Date }, points: readonly [Day, number][], timeZone: string): Pic {
   const takenOn = formatTimeZoneDateTimeParts(pic.takenAt, timeZone).dayKey;
@@ -22,26 +21,9 @@ const bytesTarget = (userId: string, key: string) => ({ userId, lane: 'hosted-me
   aad: { purpose: 'game-progress', table: 'game_progress_pic', rowId: key, field: 'bytes' } } as const);
 const notFound = () => hostedOnboardingError({ code: 'PROGRESS_PIC_NOT_FOUND', httpStatus: 404, message: 'That picture is not available.' });
 const conflict = () => hostedOnboardingError({ code: 'PROGRESS_PIC_CONFLICT', httpStatus: 409, message: 'That picture was already used or deleted.' });
-function storage() {
-  const control = readHostedExecutionControlClientIfConfigured();
-  if (!control) throw hostedOnboardingError({ code: 'PROGRESS_PIC_UNAVAILABLE', httpStatus: 503, retryable: true, message: 'Pictures could not load. Try again.' });
-  return control;
-}
-
-/** Account cleanup also crosses this boundary, outside the picture HTTP wrapper. */
-async function purgePicture(memberId: string, storageKey: string): Promise<void> {
-  try {
-    await storage().purgeRuntimeResource({ userId: memberId, resource: { kind: 'game_progress_pic',
-      objectKey: hostedProgressPicObjectKey({ userId: memberId, mediaId: storageKey }) } });
-  } catch {
-    throw hostedOnboardingError({ code: 'PROGRESS_PIC_UNAVAILABLE', httpStatus: 503, retryable: true,
-      message: 'Pictures could not be deleted. Try again.' });
-  }
-}
-
 /** Create ownership before uploading, under the same member fence as account deletion. */
 export async function putProgressPic(memberId: string, input: PicUploadQuery, bytes: Uint8Array, beforeMutationTx: BeforeProgressMutation): Promise<void> {
-  const db = getPrisma(), control = storage();
+  const db = getPrisma(), control = progressMediaStore();
   const storageKey = `progress/${randomBytes(16).toString('hex')}.jpg`;
   const metaEncrypted = await sealProgress(metaTarget(memberId, input.id), { measureId: input.measureId });
   const row = await db.$transaction(async tx => {
@@ -61,11 +43,13 @@ export async function readProgressPic(memberId: string, id: string): Promise<Uin
   const db = getPrisma();
   const row = await db.gameProgressPic.findFirst({ where: { id, memberId, retiredAt: null }, select: { storageKey: true } });
   if (!row) throw notFound();
-  const stored = await storage().readProgressPic({ userId: memberId, mediaId: row.storageKey });
+  const stored = await progressMediaStore().readProgressPic({ userId: memberId, mediaId: row.storageKey });
   if (!stored) throw notFound();
   const bytes = await openHostedUserSecureBoxBytes({ ...bytesTarget(memberId, row.storageKey), value: stored.envelope });
-  if (!await db.gameProgressPic.findFirst({ where: { id, memberId, retiredAt: null }, select: { id: true } })) throw notFound();
-  return bytes;
+  try {
+    if (!await db.gameProgressPic.findFirst({ where: { id, memberId, retiredAt: null }, select: { id: true } })) throw notFound();
+    return bytes;
+  } catch (error) { bytes.fill(0); throw error; }
 }
 
 export async function deleteProgressPic(memberId: string, id: string, beforeMutationTx: BeforeProgressMutation): Promise<void> {
@@ -77,7 +61,7 @@ export async function deleteProgressPic(memberId: string, id: string, beforeMuta
     await tx.gameProgressPic.updateMany({ where: { id, memberId, retiredAt: null }, data: { retiredAt: new Date() } });
     return owned;
   });
-  await purgePicture(memberId, row.storageKey);
+  await purgeProgressMedia(memberId, row.storageKey);
 }
 
 /** The view computes chart positions from its own cumulative points. No totals are persisted here. */
@@ -95,7 +79,7 @@ export async function deleteProgressPicsForAccount(memberIds: readonly string[],
     const rows = await db.gameProgressPic.findMany({ where: { memberId }, select: { id: true, storageKey: true }, orderBy: { id: 'asc' }, take: MAX_PROGRESS_PICS + 1 });
     if (rows.length > MAX_PROGRESS_PICS) throw hostedOnboardingError({ code: 'PROGRESS_PIC_DELETION_INCOMPLETE', httpStatus: 503,
       retryable: true, message: 'Picture cleanup could not load completely. Your account has not been deleted.' });
-    for (const row of rows) await purgePicture(memberId, row.storageKey);
+    for (const row of rows) await purgeProgressMedia(memberId, row.storageKey);
     if (rows.length) await db.gameProgressPic.deleteMany({ where: { memberId, id: { in: rows.map(row => row.id) } } });
   }
 }

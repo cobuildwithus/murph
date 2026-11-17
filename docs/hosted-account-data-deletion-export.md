@@ -1,6 +1,6 @@
 # Hosted account data deletion and vault export
 
-Last verified: 2026-09-10
+Last verified: 2026-11-16
 
 ## Purpose
 
@@ -53,7 +53,32 @@ owns its alias check and drain; it must not run in the predeploy Prisma lane.
 
 ## Export contract
 
-The Settings **Export vault** workflow downloads the browser-vault replica schema `murph.browser-vault-replica`.
+The Settings **Export vault** workflow downloads the browser-vault replica schema
+`murph.browser-vault-replica` with an additional `progressShares` array. Each share
+contains its opaque award ID, admission timestamp, current attempt status, closed
+failure code and a base64 JPEG only when ready. No storage key, source photo key,
+prompt or provider response is exported. Retired/failed/generating attempts export
+metadata only. Changing the profile photo does not remove a made share.
+
+The same authenticated, passkey-approved session endpoint emits newline-delimited
+JSON: the existing encrypted replica session first, followed by share records.
+The browser decrypts the replica as before and appends share records as Blob parts;
+it never assembles every image into one JavaScript string. No new endpoint,
+capability, stored export, provider call or upload path is added. This extends the
+current vault-only export; this checkout has no existing Progress-pic export.
+
+Progress selects at most 10,001 narrow share rows and refuses overflow before
+consuming the approval or loading media. Processing is serial, with one image in
+memory and one pooled transaction at a time. For N shares there is one collection
+query, N status reads and up to N post-decryption status reads; the existing
+session owner rechecks in a short transaction at each of those boundaries.
+There are at most N storage reads and N secure-box opens, outside transactions.
+Ready bytes use share-specific AAD and are cleared after encoding, including on
+failure. Privacy denial atomically retires rows, so a download racing denial or
+account deletion fails before releasing that image. Revoked health-processing
+consent still allows export of retained data without starting new processing,
+matching vault export. A missing object or failed read fails the download; it is
+never silently omitted. The route has a 300-second limit and no retry.
 
 The export includes:
 
