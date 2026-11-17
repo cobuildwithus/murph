@@ -6063,14 +6063,25 @@ identities survive corrections and route rollover. Friend awards, numerical
 health wins, streaks and unearned goals do not enter this share surface.
 
 The bearer-only `GET/POST /api/game/v1/progress/shares/:awardId`, image GET and
-`PUT /api/game/v1/progress/share-consent` routes parse once and use private,
+`GET/PUT /api/game/v1/progress/share-consent` routes parse once and use private,
 no-store responses. POST accepts no body. The native consent operation accepts
 only allow/deny with disclosure version 1 and uses the same atomic owner as Web
 withdrawal. The share view contains server copy, the existing MedalFace and one
 strict needs_photo/medal/available/generating/photo presentation. No recorded
-choice allows pictures; an explicit denial turns them off. No consent question
+choice allows pictures; an explicit denial turns them off. The consent GET uses
+the same reader as share admission and returns only `{ decision: "allowed" | "denied" }`,
+matching PUT, for the native Privacy choice. It reads one grant and, only if absent,
+one latest decision event, with no writes or provider calls. No consent question
 is part of the drawer. Missing profile photos use the existing profile upload. Failure, refusal,
 retirement and the fixed timeout present the medal; no failed wire state exists.
+
+Share card values use full exercise counts from the frozen award threshold and
+saved noun, plain miles/km in reader units, whole sleep hours, and whole exercise
+minutes (hours from ten hours). Opaque measures retain medal-only copy and the
+medal's plain amount. Context still describes the landmark height or journey.
+The card boundary converts apostrophes in its four text fields to U+2019.
+Share and medal faces use the same rung drawing id (the app adds the `time-`
+asset prefix from the medal kind); found goals retain a generic medal. No new state is persisted.
 
 Admission returns an existing row before budgets or source preparation. Otherwise
 it reads the GameProfile photo through the existing game media store, orients
@@ -6086,7 +6097,13 @@ Only the insertion winner schedules Next after(), with its own secure-box unwrap
 scope and prepared in-memory reference. The Node route declares maxDuration 300.
 One Web OpenAI images.edit call uses gpt-image-2.6-flare, one generic-named JPEG
 reference, medium quality, 1024x1536 and JPEG compression 90. SDK retries and
-logging are off. The operation owns a 240-second deadline from admission,
+logging are off. After admission, generation reads height once through the existing
+Companion replica loader and latest-valid body-height helper, outside transactions
+and under Browser Vault health authority. A height no older than 365 days is sent
+to OpenAI as whole centimeters in the prompt framing to preserve real proportions.
+Missing height or a failed read leaves the prompt unchanged; share authority is
+rechecked before provider dispatch. Height is never added to card or Messages
+text, persisted in share metadata, or logged. The operation owns a 240-second deadline from admission,
 independent of client disconnect. Output is decoded and encoded once at quality
 90, stripped of metadata and rejected above 2 MiB; no quality retry is made.
 The existing store enforces the 3 MiB envelope bound.

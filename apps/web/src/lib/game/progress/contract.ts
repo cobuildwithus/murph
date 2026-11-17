@@ -177,5 +177,7 @@ export const shareViewSchema = z.strictObject({
   ]),
 });
 export type ShareView = z.infer<typeof shareViewSchema>;
+/** GET and PUT /api/game/v1/progress/share-consent. */
+export type ShareConsentResponse = { decision: 'allowed' | 'denied' };
 const shareConsent = z.strictObject({ decision: z.enum(['allow', 'deny']), disclosureVersion: z.literal(1) });
 export const parseShareConsent = (value: unknown) => parse(shareConsent, value);

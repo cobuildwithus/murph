@@ -4,11 +4,12 @@ import { after } from 'next/server';
 import type { GameProgressShare, Prisma } from '@prisma/client';
 import type { ClientUnits } from '../../companion/client-info';
 import { assertBrowserVaultMemberAuthority } from '../../browser-vault/authority';
+import { readSavedCompanionBodyHeight } from '../../device-sync/companion-numbers';
 import { runWithFreshHostedDomainRootUnwrapCache } from '../../hosted-crypto/domain-root-unwrap-cache';
 import { openHostedUserSecureBoxBytes, sealHostedUserSecureBoxBytes } from '../../hosted-crypto/secure-box';
 import { hostedOnboardingError } from '../../hosted-onboarding/errors';
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS, lockHostedMemberRow } from '../../hosted-onboarding/shared';
-import { PROGRESS_SHARE_CONSENT_SCOPE, readHostedHealthDataConsentState } from '../../legal/consent';
+import { readHostedHealthDataConsentState } from '../../legal/consent';
 import { getPrisma } from '../../prisma';
 import type { ShareView } from './contract';
 import { openProgress } from './crypto';
@@ -17,6 +18,7 @@ import { progressMediaStore, purgeProgressMedia, progressShareBytesTarget } from
 import { readGameMedia } from '../media';
 import type { Candidate } from './registry';
 import { shareCard } from './share-card';
+import { readProgressShareConsent } from './share-consent';
 import { makeShareImage, prepareShareJpeg, SHARE_DEADLINE_MS, ShareImageError } from './share-image';
 import type { BeforeProgressMutation } from './state';
 
@@ -46,9 +48,7 @@ async function withAuthority<T>(input: ShareRequest, award: Candidate, run: (tx:
 
 async function readSelection(tx: Prisma.TransactionClient, input: ShareRequest): Promise<Selection> {
   const row = await tx.gameProgressShare.findUnique({ where: identity(input) });
-  const grant = await tx.hostedConsentGrant.findUnique({ where: { memberId_scope: { memberId: input.memberId, scope: PROGRESS_SHARE_CONSENT_SCOPE } }, select: { status: true } });
-  const event = grant ? null : await tx.hostedConsentEvent.findFirst({ where: { memberId: input.memberId, scope: PROGRESS_SHARE_CONSENT_SCOPE }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], select: { action: true } });
-  const consent = grant ? grant.status === 'granted' ? 'allowed' : 'denied' : event ? 'denied' : 'allowed';
+  const { decision: consent } = await readProgressShareConsent({ memberId: input.memberId, prisma: tx });
   const profile = row ? null : await tx.gameProfile.findUnique({ where: { memberId: input.memberId }, select: { photoKey: true } });
   const selection = { row, consent, photoKey: profile?.photoKey ?? null } satisfies Selection;
   if (row?.status === 'ready' && consent === 'allowed') await assertPhotoAuthority(tx, input, selection);
@@ -119,7 +119,7 @@ export async function startProgressShare(input: ShareRequest): Promise<ShareView
     });
     if (admission.inserted) {
       const reference = prepared;
-      after(() => runWithFreshHostedDomainRootUnwrapCache(() => progressEffect(() => generate(input, award, admission.selection.row!, reference, prompt))));
+      after(() => runWithFreshHostedDomainRootUnwrapCache(() => progressEffect(() => generate(input, award, admission.selection.row!, reference))));
       transferred = true;
     }
     return { awardId: input.awardId, card, presentation: presentation(admission.selection, input.awardId, true, Date.now()) };
@@ -133,11 +133,16 @@ async function liveAttempt(tx: Prisma.TransactionClient, input: ShareRequest, ad
   if (selection.row?.status !== 'generating') throw shareNotFound();
 }
 
-async function generate(input: ShareRequest, award: Candidate, row: GameProgressShare, reference: Buffer, prompt: string): Promise<void> {
+async function generate(input: ShareRequest, award: Candidate, row: GameProgressShare, reference: Buffer): Promise<void> {
   let output: Buffer | undefined;
   try {
     await withAuthority(input, award, tx => liveAttempt(tx, input, row));
-    output = await makeShareImage(reference, prompt, row.createdAt.getTime() + SHARE_DEADLINE_MS);
+    const deadline = row.createdAt.getTime() + SHARE_DEADLINE_MS;
+    // Optional likeness context: one replica read; failure keeps the original prompt.
+    const heightCm = await readSavedCompanionBodyHeight(input.memberId, AbortSignal.timeout(Math.max(0, deadline - Date.now()))).catch(() => null);
+    await withAuthority(input, award, tx => liveAttempt(tx, input, row));
+    const { prompt } = shareCard(award, input.units, heightCm);
+    output = await makeShareImage(reference, prompt!, deadline);
     await withAuthority(input, award, tx => liveAttempt(tx, input, row));
     const envelope = await sealHostedUserSecureBoxBytes({ ...progressShareBytesTarget(row.memberId, row.storageKey), value: output });
     await progressMediaStore().putProgressPic({ userId: input.memberId, mediaId: row.storageKey, envelope, hash: createHash('sha256').update(output).digest('hex') });

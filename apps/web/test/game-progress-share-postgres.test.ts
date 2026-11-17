@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 import sharp from 'sharp';
 import { beforeEach, afterEach, afterAll, describe, expect, it, vi } from 'vitest';
-const mocks = vi.hoisted(() => ({ after: vi.fn(), make: vi.fn(), read: vi.fn(), readProfile: vi.fn(), put: vi.fn(), purge: vi.fn() }));
+const mocks = vi.hoisted(() => ({ after: vi.fn(), make: vi.fn(), read: vi.fn(), readProfile: vi.fn(), put: vi.fn(), purge: vi.fn(), height: vi.fn() }));
+vi.mock('../src/lib/device-sync/companion-numbers', () => ({ readSavedCompanionBodyHeight: mocks.height }));
 vi.mock('next/server', async original => ({ ...await original<object>(), after: mocks.after }));
 vi.mock('../src/lib/game/progress/share-image', async original => ({ ...await original<object>(), makeShareImage: mocks.make }));
 vi.mock('../src/lib/game/media', () => ({ readGameMedia: mocks.readProfile }));
@@ -19,6 +20,7 @@ import { decideProgressShareConsent } from '../src/lib/game/progress/share-conse
 import { sealProgress, progressLookup } from '../src/lib/game/progress/crypto';
 import { ShareImageError } from '../src/lib/game/progress/share-image';
 import type { Candidate } from '../src/lib/game/progress/registry';
+import { lockHostedMemberRow } from '../src/lib/hosted-onboarding/shared';
 
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === '1';
 if (enabled && !/^postgres(?:ql)?:\/\/[^/]*@(?:127\.0\.0\.1|localhost):\d+\/murph_test_[a-z0-9_]+$/u.test(process.env.DATABASE_URL ?? '')) throw new Error('Share proof needs an isolated loopback test database.');
@@ -28,6 +30,7 @@ let tasks: (() => Promise<void>)[] = [], source: Buffer, reference: Uint8Array |
 const key = (userId: string, mediaId: string) => `${userId}:${mediaId}`;
 beforeEach(async () => {
   vi.resetAllMocks(); tasks = []; stored.clear(); tombstones.clear(); reference = undefined; output = undefined;
+  mocks.height.mockResolvedValue(null);
   // Keep real byte encryption/AAD; replace only the provider-backed root lookup.
   const root = async ({ userId, domain }: { userId: string; domain: HostedCryptoDomain }) => {
     const envelope: HostedDomainRootKeyEnvelopeV1 = { userId, domain, rootKeyId: 'synthetic-root', generation: 1,
@@ -82,6 +85,42 @@ async function fixture(measureId = 'pushups.reps') {
 }
 
 describe.skipIf(!enabled)('stored award share admission and publication', () => {
+  it.each(['height', 'missing', 'read failure'])('generates after admission with %s and keeps height out of the card', async state => {
+    const f = await fixture(), before = await readProgressShare(f.input);
+    const admitted = await startProgressShare(f.input);
+    expect(mocks.height).not.toHaveBeenCalled();
+    mocks.height.mockImplementationOnce(async () => {
+      expect(await f.share()).toMatchObject({ status: 'generating' });
+      // This lock can be acquired only after the share's authority transaction releases it.
+      await db.$transaction(tx => lockHostedMemberRow(tx, f.memberId), { timeout: 1000 });
+      if (state === 'read failure') throw new Error('PRIVATE_REPLICA_SENTINEL');
+      return state === 'height' ? 170.4 : null;
+    });
+    await tasks[0]();
+    expect(mocks.height).toHaveBeenCalledExactlyOnceWith(f.memberId, expect.any(AbortSignal));
+    expect(mocks.make).toHaveBeenCalledTimes(1);
+    const prompt = mocks.make.mock.calls[0][1] as string;
+    expect(prompt.includes('The person is 170 cm tall; keep their real height and build.')).toBe(state === 'height');
+    expect(prompt).not.toContain('PRIVATE_REPLICA_SENTINEL');
+    expect(await f.share()).toMatchObject({ status: 'ready', failureCode: null });
+    expect(admitted.card).toEqual(before.card);
+    expect((await readProgressShare(f.input)).card).toEqual(before.card);
+    await startProgressShare(f.input);
+    expect(mocks.height).toHaveBeenCalledTimes(1);
+  });
+  it.each(['session', 'health consent'])('rechecks %s after the height read before provider dispatch', async authority => {
+    const f = await fixture();
+    await recordHostedLaunchRequiredConsent({ memberId: f.memberId, prisma: db, scope: 'launch.health-data' });
+    await startProgressShare(f.input);
+    mocks.height.mockImplementationOnce(async () => {
+      if (authority === 'session') await db.hostedAuthRecord.delete({ where: { model_id: { model: 'session', id: f.sessionId } } });
+      else await revokeHostedConsentScope({ memberId: f.memberId, prisma: db, scope: 'launch.health-data' });
+      return 170;
+    });
+    await tasks[0]();
+    expect(mocks.make).not.toHaveBeenCalled();
+    expect(await f.share()).toMatchObject({ status: 'failed' });
+  });
   it('allows an unrecorded choice, serves the medal when off and never invents a grant', async () => {
     const f = await fixture();
     expect((await readProgressShare(f.input)).presentation).toEqual({ state: 'available' });

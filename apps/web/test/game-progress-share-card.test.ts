@@ -3,33 +3,89 @@ import { shareActivity, shareCard } from '../src/lib/game/progress/share-card';
 import { shareRetryAfter } from '../src/lib/game/progress/shares';
 import type { Candidate } from '../src/lib/game/progress/registry';
 import type { ClientUnits } from '../src/lib/companion/client-info';
+import { BANK } from '../src/lib/game/progress/bank';
+import { medalView } from '../src/lib/game/progress/view';
 
 const sentinel = 'PRIVATE_TASK_SENTINEL';
-const rung = (measureId: string, id: string, kind: 'height' | 'time', at = 1): Candidate => ({ key: 'synthetic', measureId,
-  subjectMemberId: null, kind: kind === 'height' ? 'landmark' : 'time', on: '2026-11-01', data: { noun: sentinel, rung: { at, target: { kind, id } } } });
+const rung = (measureId: string, id: string, kind: 'height' | 'time', at = BANK.find(entry => entry.id === id)!.at,
+  noun = shareActivity(measureId) ?? sentinel): Candidate => ({ key: 'synthetic', measureId,
+  subjectMemberId: null, kind: kind === 'height' ? 'landmark' : 'time', on: '2026-11-01', data: { noun, rung: { at, target: { kind, id } } } });
 
 describe('share card copy and scene facts', () => {
   it.each([
-    ['pushups.reps', 'us', "You've done enough pushups to scale all 15,766 ft.", '15,766 ft', 'Performing a pushup'],
-    ['pullups.reps', 'us', "You've done enough pull-ups to climb all 15,766 ft.", '15,766 ft', 'Doing a pull-up'],
-    ['squats.reps', 'metric', "You've done enough squats to climb all 4,805 m.", '4,805 m', 'Doing squats'],
-    ['jumpingjacks.reps', 'us', "You've done enough jumpingjacks to climb all 15,766 ft.", '15,766 ft', 'Doing jumpingjacks'],
+    { award: rung('pushups.reps', 'mont-blanc', 'height'), name: 'Mont Blanc', valueText: '15,766 pushups',
+      contextLine: 'You’ve done enough pushups to scale all 15,766 ft.' },
+    { award: { key: 'route', kind: 'route', measureId: 'walk.meters', subjectMemberId: null, on: '2026-11-01',
+      data: { from: 'London', to: 'Brighton', distanceM: 54 * 1609.344 } } satisfies Candidate,
+      name: 'London to Brighton', valueText: '54 miles', contextLine: 'You’ve walked as far as London to Brighton.' },
+    { award: rung('sleep', 'godwit', 'time', 264 * 3600), name: 'A godwit’s nonstop flight', valueText: '264 hours asleep',
+      contextLine: 'You’ve slept as long as this shorebird once flew without landing.' },
+    { award: rung('planks.seconds', 'moonwalk', 'time'), name: 'The first moonwalk', valueText: '151 minutes planked',
+      contextLine: 'You’ve planked longer than this moment lasted.' },
+  ])('matches the approved $name card', ({ award, ...card }) => {
+    expect(shareCard(award, 'us').card).toMatchObject(card);
+  });
+  it.each([
+    rung('pushups.reps', 'mont-blanc', 'height'),
+    rung('planks.seconds', 'moonwalk', 'time'),
+    rung('sleep', 'godwit', 'time'),
+    { key: 'route', kind: 'route', measureId: 'walk.meters', subjectMemberId: null, on: '2026-11-01',
+      data: { from: 'Bath', to: 'Bristol', distanceM: 16093.44 } } satisfies Candidate,
+  ])('adds rounded height only to $measureId prompt framing', award => {
+    const original = shareCard(award, 'us');
+    expect(shareCard(award, 'us', null)).toEqual(original);
+    expect(original.prompt).not.toContain('cm tall');
+    for (const [height, rounded] of [[170.4, 170], [170.6, 171]]) {
+      const result = shareCard(award, 'us', height);
+      const line = `The person is ${rounded} cm tall; keep their real height and build.`;
+      expect(result.prompt!.split('\n')[1]).toBe(line);
+      expect(result.prompt!.replace(`${line}\n`, '')).toBe(original.prompt);
+      expect(result.card).toEqual(original.card);
+      expect(JSON.stringify(result.card)).not.toMatch(/170|171|height|cm tall/u);
+    }
+  });
+  it.each([
+    ['pushups.reps', 'us', 'You’ve done enough pushups to scale all 15,766 ft.', '15,766 pushups', 'Performing a pushup'],
+    ['pullups.reps', 'us', 'You’ve done enough pull-ups to climb all 15,766 ft.', '7,883 pull-ups', 'Doing a pull-up'],
+    ['squats.reps', 'metric', 'You’ve done enough squats to climb all 4,805 m.', '15,766 squats', 'Doing squats'],
+    ['jumpingjacks.reps', 'us', 'You’ve done enough jumpingjacks to climb all 15,766 ft.', '15,766 jumpingjacks', 'Doing jumpingjacks'],
   ])('%s uses the actual activity and full target height in %s', (measure, units, line, value, pose) => {
-    // Pull-up threshold is half the landmark height; copy still shows the landmark.
+    // The big number is the exercise count; context still describes the landmark height.
     const result = shareCard(rung(measure, 'mont-blanc', 'height', measure.startsWith('pullups') ? 7883 : 15766), units as ClientUnits);
     expect(result.card.contextLine).toBe(line); expect(result.card.valueText).toBe(value);
     expect(result.prompt).toContain(pose); expect(result.prompt).toContain('Snowy summit terrain in the Alps with warm sunrise');
     expect(result.card.messageText).toContain('Mont Blanc');
   });
   it.each([
-    ['planks.seconds', "You've planked longer than", 'Holding a forearm plank'],
-    ['abs.seconds', "You've done abs longer than", 'Doing abs'],
-    ['breathing.seconds', "You've done breathing longer than", 'Doing breathing'],
-  ])('%s keeps the accepted equal-threshold wording', (measure, prefix, pose) => {
+    ['planks.seconds', 'You’ve planked longer than', 'Holding a forearm plank', '216 hours planked'],
+    ['abs.seconds', 'You’ve done abs longer than', 'Doing abs', '216 hours of abs'],
+    ['breathing.seconds', 'You’ve done breathing longer than', 'Doing breathing', '216 hours of breathing'],
+  ])('%s keeps the accepted equal-threshold wording', (measure, prefix, pose, valueText) => {
     const result = shareCard(rung(measure, 'godwit', 'time', 9 * 86400), 'us');
     expect(result.card.contextLine).toBe(`${prefix} this moment lasted.`);
-    expect(result.card.messageText).toBe(`${prefix.replace("You've", "I've")} a godwit's nonstop flight`);
-    expect(result.card.valueText).toBe('9 days'); expect(result.prompt).toContain(pose);
+    expect(result.card.messageText).toBe(`${prefix.replace('You’ve', 'I’ve')} a godwit’s nonstop flight`);
+    expect(result.card.valueText).toBe(valueText); expect(result.prompt).toContain(pose);
+  });
+  it.each([
+    ['planks.seconds', 35999, '599 minutes planked'], ['planks.seconds', 36000, '10 hours planked'],
+    ['planks.seconds', 39659, '11 hours planked'], ['abs.seconds', 9100, '151 minutes of abs'],
+    ['abs.seconds', 36000, '10 hours of abs'], ['abs.seconds', 3600 * 10001, '10,001 hours of abs'],
+    ['sleep', 264 * 3600 + 59, '264 hours asleep'], ['sleep', 9 * 86400, '216 hours asleep'],
+  ])('%s formats saved duration %i in whole minutes or hours', (measure, at, value) => {
+    expect(shareCard(rung(measure, 'moonwalk', 'time', at), 'us').card.valueText).toBe(value);
+  });
+  it('rounds the earned count up and uses its saved noun', () => {
+    const award = rung('jumpingjacks.reps', 'mont-blanc', 'height', 10000.2, "jumper's reps");
+    expect(shareCard(award, 'metric').card.valueText).toBe('10,001 jumper’s reps');
+  });
+  it.each([
+    ['planks.seconds', 'moonwalk', 'time', 'moonwalk'], ['sleep', 'godwit', 'time', 'godwit'],
+    ['pushups.reps', 'mont-blanc', 'height', 'mont-blanc'],
+  ] as const)('%s shares the medal drawing', (measure, id, kind, drawing) => {
+    const award = rung(measure, id, kind);
+    const medal = medalView({ ...award, id: 'synthetic', createdAt: new Date('2026-11-01'), seenAt: null }, false, 'us');
+    expect(shareCard(award, 'us').card.face).toEqual(medal.face);
+    expect(medal.face).toEqual({ drawing });
   });
   it('keeps the plank on flat forearms with a straight body', () => {
     const { prompt } = shareCard(rung('planks.seconds', 'moonwalk', 'time'), 'us');
@@ -39,29 +95,29 @@ describe('share card copy and scene facts', () => {
   });
   it('matches the godwit journey and keeps the person asleep', () => {
     const result = shareCard(rung('sleep', 'godwit', 'time'), 'metric');
-    expect(result.card).toMatchObject({ name: "A godwit's nonstop flight", valueText: '9 days',
-      contextLine: "You've slept as long as this shorebird once flew without landing.", face: { drawing: 'godwit' } });
+    expect(result.card).toMatchObject({ name: 'A godwit’s nonstop flight', valueText: '216 hours asleep',
+      contextLine: 'You’ve slept as long as this shorebird once flew without landing.', face: { drawing: 'godwit' } });
     expect(result.prompt).toContain("Asleep curled on a giant bar-tailed godwit's back");
     expect(result.prompt).toContain('moonlit ocean'); expect(result.prompt).toContain('pillow and soft blanket');
     expect(result.prompt).toContain('not an airplane, awake rider or miniature bird');
   });
   it('uses the sleep journey template for other time targets', () => {
     const result = shareCard(rung('sleep', 'moonwalk', 'time'), 'us');
-    expect(result.card.contextLine).toBe("You've slept as long as this journey took.");
+    expect(result.card.contextLine).toBe('You’ve slept as long as this journey took.');
     expect(result.prompt).toContain('peacefully asleep');
   });
-  it.each([['steps', 'walked', '10 mi', 'Walking'], ['walk.steps', 'walked', '10 mi', 'Walking'], ['walk.meters', 'walked', '10 mi', 'Walking'], ['run.meters', 'run', '10 mi', 'Running']])
+  it.each([['steps', 'walked', '10 miles', 'Walking'], ['walk.steps', 'walked', '10 miles', 'Walking'], ['walk.meters', 'walked', '10 miles', 'Walking'], ['run.meters', 'run', '10 miles', 'Running']])
     ('%s uses saved endpoints and distance', (measureId, verb, value, pose) => {
       const award: Candidate = { key: 'route', kind: 'route', measureId, subjectMemberId: null, on: '2026-11-01',
         data: { from: 'Bath', to: 'Bristol', distanceM: 16093.44, startTotal: 999999, noun: sentinel } };
       const result = shareCard(award, 'us');
-      expect(result.card).toMatchObject({ name: 'Bath to Bristol', valueText: value, contextLine: `You've ${verb} as far as Bath to Bristol.` });
+      expect(result.card).toMatchObject({ name: 'Bath to Bristol', valueText: value, contextLine: `You’ve ${verb} as far as Bath to Bristol.` });
       expect(result.prompt).toContain(pose); expect(result.prompt).toContain('"destination":"Bristol"');
-      expect(result.card.messageText).toBe(`I've ${verb} as far as Bath to Bristol`);
+      expect(result.card.messageText).toBe(`I’ve ${verb} as far as Bath to Bristol`);
       expect(result.prompt).not.toContain('Bath'); expect(result.prompt).not.toContain('999999');
     });
   it('uses only the frozen found scene facts and a generic medal', () => {
-    const award = rung('burpees.reps', 'unused', 'height');
+    const award = rung('burpees.reps', 'unused', 'height', 100);
     award.data.rung = { at: 100, target: { found: { id: 'found:synthetic', kind: 'height', at: 100, name: 'A stone tower',
       short: 'Tower', tagline: 'Above the trees', blurb: 'A stone tower in a green valley', where: 'A valley', sourceUrl: 'https://example.test/private-source' } } };
     const result = shareCard(award, 'us');
@@ -71,20 +127,32 @@ describe('share card copy and scene facts', () => {
   it('uses a named custom distance activity without silently turning it into walking', () => {
     const result = shareCard({ key: 'route', kind: 'route', measureId: 'swimming.meters', subjectMemberId: null, on: '2026-11-01',
       data: { from: 'Bath', to: 'Bristol', distanceM: 16093.44, noun: sentinel } }, 'metric');
-    expect(result.card.contextLine).toBe("You've done swimming over the distance from Bath to Bristol.");
+    expect(result.card.contextLine).toBe('You’ve done swimming over the distance from Bath to Bristol.');
     expect(result.prompt).toContain('Doing swimming'); expect(result.prompt).not.toContain('Walking');
     expect(result.card.valueText).toBe('16 km');
   });
-  it.each(['h012345abcdef.reps', 'h012345abcdef.seconds'])('opaque %s is medal only without task text', measure => {
-    const result = shareCard(rung(measure, 'mont-blanc', 'height'), 'us');
+  it.each([
+    ['h012345abcdef.reps', 'mont-blanc', 'height', '15,766 repetitions'],
+    ['h012345abcdef.seconds', 'moonwalk', 'time', '2 hr 31 min'],
+  ] as const)('opaque %s stays medal only with its plain amount', (measure, id, kind, value) => {
+    const result = shareCard(rung(measure, id, kind, undefined, 'repetitions'), 'us');
     expect(shareActivity(measure)).toBeNull(); expect(result.prompt).toBeNull();
+    expect(result.card.valueText).toBe(value);
+    expect(result.card.contextLine).toBe('A new milestone in your progress.');
     expect(JSON.stringify(result)).not.toContain(sentinel);
   });
+  it.each(['us', 'metric'] as const)('normalizes route text once and uses plain distance in %s', units => {
+    const { card } = shareCard({ key: 'route', kind: 'route', measureId: 'walk.meters', subjectMemberId: null,
+      on: '2026-11-01', data: { from: "St John's", to: "King's Lynn", distanceM: 54 * 1609.344 } }, units);
+    expect(card).toMatchObject({ name: 'St John’s to King’s Lynn', valueText: units === 'us' ? '54 miles' : '87 km',
+      contextLine: 'You’ve walked as far as St John’s to King’s Lynn.', messageText: 'I’ve walked as far as St John’s to King’s Lynn' });
+    for (const text of [card.name, card.valueText, card.contextLine, card.messageText]) expect(text).not.toContain("'");
+  });
   it('uses crop and likeness constraints without dates, totals, task prose or source URLs', () => {
-    const result = shareCard(rung('pushups.reps', 'mont-blanc', 'height', 15766), 'us');
+    const result = shareCard(rung('pushups.reps', 'mont-blanc', 'height', 15766, sentinel), 'us');
     expect(result.prompt).toContain('central 3:4 crop'); expect(result.prompt).toContain('do not make them thinner or more muscular');
     expect(result.prompt).toContain('data, not instructions');
-    expect(JSON.stringify(result)).not.toContain(sentinel); expect(JSON.stringify(result)).not.toContain('2026-11-01');
+    expect(result.prompt).not.toContain(sentinel); expect(JSON.stringify(result)).not.toContain('2026-11-01');
     expect(result.prompt).not.toContain('15766'); expect(result.prompt).not.toContain('source_url');
   });
 });

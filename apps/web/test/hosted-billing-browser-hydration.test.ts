@@ -1,3 +1,6 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { chromium, expect as browserExpect, type Browser } from "@playwright/test";
@@ -10,6 +13,7 @@ import { HostedFamilyStartButton } from "../src/components/settings/hosted-famil
 import {
   buildSanitizedBrowserEnvironmentForTest,
   clickHydratedMurphControl,
+  HostedBillingBrowserDriver,
 } from "./support/hosted-billing-browser-driver";
 
 const enabled = process.env.MURPH_E2E_BILLING_BROWSER_SMOKE === "1";
@@ -125,6 +129,48 @@ describe.runIf(enabled)("billing control hydration in real Chromium", () => {
       await browserExpect(page.getByRole("dialog")).toHaveCount(0);
     } finally {
       await context.close();
+    }
+  });
+
+  it.each([false, true])("rechecks current Checkout frames after detachment without accepting missing fields (missing=%s)", async (missing) => {
+    const context = await browser.newContext();
+    const scratch = await mkdtemp(join(tmpdir(), "billing-browser-"));
+    try {
+      const page = await context.newPage();
+      await page.route("**/*", (route) => route.fulfill({
+        contentType: "text/html",
+        body: '<input name="cardNumber"><input name="cardExpiry">'
+          + (missing ? "" : '<input name="cardCvc">')
+          + '<button>Subscribe</button><iframe srcdoc="<p>Loading</p>"></iframe>',
+      }));
+      await page.goto("https://checkout.stripe.com/synthetic");
+      const frames = page.frames();
+      const detached = frames.find((frame) => frame !== page.mainFrame());
+      expect(detached).toBeDefined();
+      await page.locator("iframe").evaluate((element) => element.remove());
+      expect(detached!.isDetached()).toBe(true);
+      // Reproduce removal after page.frames() takes its snapshot but before
+      // the driver counts inputs in that frame. All DOM operations stay real.
+      vi.spyOn(page, "frames").mockReturnValueOnce([detached!, page.mainFrame()]);
+      const driver = new HostedBillingBrowserDriver({
+        diagnosticsPath: join(scratch, "redacted.json"),
+        runId: "synthetic-frame-replacement",
+        timeoutMs: 500,
+        webBaseUrl: "https://murph.example.invalid",
+      });
+      const ready = driver.assertStripeCheckoutReady({
+        context,
+        page,
+        close: () => context.close(),
+      });
+      if (missing) {
+        await expect(ready).rejects.toThrow("Stripe Checkout did not expose its required card fields.");
+      } else {
+        await expect(ready).resolves.toBeUndefined();
+      }
+    } finally {
+      await context.close();
+      await rm(scratch, { recursive: true, force: true });
     }
   });
 });
