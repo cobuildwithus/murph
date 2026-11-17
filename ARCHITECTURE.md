@@ -6063,14 +6063,25 @@ identities survive corrections and route rollover. Friend awards, numerical
 health wins, streaks and unearned goals do not enter this share surface.
 
 The bearer-only `GET/POST /api/game/v1/progress/shares/:awardId`, image GET and
-`PUT /api/game/v1/progress/share-consent` routes parse once and use private,
+`GET/PUT /api/game/v1/progress/share-consent` routes parse once and use private,
 no-store responses. POST accepts no body. The native consent operation accepts
 only allow/deny with disclosure version 1 and uses the same atomic owner as Web
 withdrawal. The share view contains server copy, the existing MedalFace and one
 strict needs_photo/medal/available/generating/photo presentation. No recorded
-choice allows pictures; an explicit denial turns them off. No consent question
+choice allows pictures; an explicit denial turns them off. The consent GET uses
+the same reader as share admission and returns only `{ decision: "allowed" | "denied" }`,
+matching PUT, for the native Privacy choice. It reads one grant and, only if absent,
+one latest decision event, with no writes or provider calls. No consent question
 is part of the drawer. Missing profile photos use the existing profile upload. Failure, refusal,
 retirement and the fixed timeout present the medal; no failed wire state exists.
+
+Share card values use full exercise counts from the frozen award threshold and
+saved noun, plain miles/km in reader units, whole sleep hours, and whole exercise
+minutes (hours from ten hours). Opaque measures retain medal-only copy and the
+medal's plain amount. Context still describes the landmark height or journey.
+The card boundary converts apostrophes in its four text fields to U+2019.
+Share and medal faces use the same rung drawing, including the `time-` prefix;
+found goals retain a generic medal. No new state is persisted.
 
 Admission returns an existing row before budgets or source preparation. Otherwise
 it reads the GameProfile photo through the existing game media store, orients

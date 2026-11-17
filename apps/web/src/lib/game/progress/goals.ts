@@ -57,7 +57,7 @@ export function rungFor(definition: RungDefinition, total: number, on: string | 
   const atText = entry.kind === "height" ? formatHeight(entry.at, units)
     : "timeText" in entry ? entry.timeText! : formatRungTime(entry.at);
   return { id: entry.id, name: entry.name, short: entry.short, tagline: entry.tagline,
-    drawing: "found" in definition.target ? null : entry.id, at: definition.at, atText,
+    drawing: "found" in definition.target ? null : entry.kind === "time" ? `time-${entry.id}` : entry.id, at: definition.at, atText,
     blurb: units === "metric" && "blurbMetric" in entry ? entry.blurbMetric ?? entry.blurb : entry.blurb,
     where: entry.where, on, shareAwardId: null, toGo: on === null ? toGo : null };
 }

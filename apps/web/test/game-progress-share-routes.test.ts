@@ -1,17 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-const mocks = vi.hoisted(() => ({ auth: vi.fn(), current: vi.fn(), read: vi.fn(), start: vi.fn(), image: vi.fn(), decide: vi.fn() }));
+const mocks = vi.hoisted(() => ({ auth: vi.fn(), current: vi.fn(), read: vi.fn(), start: vi.fn(), image: vi.fn(), decide: vi.fn(), grant: vi.fn(), event: vi.fn() }));
 vi.mock('@/src/lib/game/http/auth', () => ({ requireGameMemberAuth: mocks.auth, assertGameMemberAuthCurrentTx: mocks.current }));
 vi.mock('@/src/lib/game/progress/shares', async original => ({ ...await original<object>(), readProgressShare: mocks.read, startProgressShare: mocks.start, readProgressShareImage: mocks.image }));
-vi.mock('@/src/lib/game/progress/share-consent', () => ({ decideProgressShareConsent: mocks.decide }));
+vi.mock('@/src/lib/game/progress/share-consent', async original => ({ ...await original<object>(), decideProgressShareConsent: mocks.decide }));
+vi.mock('@/src/lib/prisma', () => ({ getPrisma: () => ({ hostedConsentGrant: { findUnique: mocks.grant }, hostedConsentEvent: { findFirst: mocks.event } }) }));
 import { GET, POST, maxDuration } from '../app/api/game/v1/progress/shares/[awardId]/route';
 import { GET as imageGET } from '../app/api/game/v1/progress/shares/[awardId]/image/route';
-import { PUT } from '../app/api/game/v1/progress/share-consent/route';
+import { GET as consentGET, PUT } from '../app/api/game/v1/progress/share-consent/route';
 import { shareViewSchema, type ShareView } from '../src/lib/game/progress/contract';
 import { shareNotFound } from '../src/lib/game/progress/shares';
 import { hostedOnboardingError } from '../src/lib/hosted-onboarding/errors';
 const awardId = 'opaque:game-progress-award:v1:synthetic';
 const context = { params: Promise.resolve({ awardId }) };
-const card = { name: 'Mont Blanc', contextLine: "You've done enough pushups to scale all 15,766 ft.", valueText: '15,766 ft', face: { drawing: 'mont-blanc' }, messageText: "I've done enough pushups to scale Mont Blanc" };
+const card = { name: 'Mont Blanc', contextLine: 'You’ve done enough pushups to scale all 15,766 ft.', valueText: '15,766 pushups', face: { drawing: 'mont-blanc' }, messageText: 'I’ve done enough pushups to scale Mont Blanc' };
 const view = (presentation: ShareView['presentation']): ShareView => ({ awardId, card, presentation });
 const req = (method = 'GET', body?: string) => new Request(`https://example.test/api/game/v1/progress/shares/${awardId}`, { method, body });
 beforeEach(() => { vi.resetAllMocks(); mocks.auth.mockResolvedValue({ member: { id: 'member-ava' } }); });
@@ -73,6 +74,39 @@ describe('private Progress share HTTP contract', () => {
   });
 });
 describe('native face-use decision', () => {
+  const consentRequest = (method = 'GET') => new Request('https://example.test/api/game/v1/progress/share-consent', { method });
+  it.each([
+    { grant: null, event: null, decision: 'allowed' },
+    { grant: null, event: { action: 'declined' }, decision: 'denied' },
+    { grant: { status: 'granted' }, event: null, decision: 'allowed' },
+    { grant: { status: 'revoked' }, event: null, decision: 'denied' },
+    { grant: { status: 'granted' }, event: { action: 'declined' }, decision: 'allowed' },
+  ])('GET resolves $decision from the same consent owner as sharing', async ({ grant, event, decision }) => {
+    mocks.grant.mockResolvedValue(grant); mocks.event.mockResolvedValue(event);
+    const request = consentRequest();
+    const response = await consentGET(request);
+    expect(response.status).toBe(200); expect(response.headers.get('cache-control')).toBe('private, no-store');
+    expect(await response.json()).toEqual({ decision });
+    expect(mocks.auth).toHaveBeenCalledWith(request);
+    expect(mocks.grant).toHaveBeenCalledExactlyOnceWith({ where: { memberId_scope: { memberId: 'member-ava', scope: 'feature.progress-share-images' } }, select: { status: true } });
+    if (grant) expect(mocks.event).not.toHaveBeenCalled();
+    else expect(mocks.event).toHaveBeenCalledExactlyOnceWith({ where: { memberId: 'member-ava', scope: 'feature.progress-share-images' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], select: { action: true } });
+    expect(mocks.decide).not.toHaveBeenCalled(); expect(mocks.start).not.toHaveBeenCalled();
+  });
+  it.each([consentGET, PUT])('requires the same bearer auth before reading or changing consent', async handler => {
+    mocks.auth.mockRejectedValue(hostedOnboardingError({ code: 'AUTH_REQUIRED', httpStatus: 401, message: 'Sign in to continue.' }));
+    const response = await handler(consentRequest(handler === PUT ? 'PUT' : 'GET'));
+    expect(response.status).toBe(401); expect(response.headers.get('cache-control')).toBe('private, no-store');
+    expect(mocks.grant).not.toHaveBeenCalled(); expect(mocks.event).not.toHaveBeenCalled(); expect(mocks.decide).not.toHaveBeenCalled();
+  });
+  it('does not turn a failed consent read into permission', async () => {
+    mocks.grant.mockRejectedValue(new Error('PRIVATE_DATABASE_SENTINEL'));
+    const response = await consentGET(consentRequest());
+    expect(response.status).toBe(503); expect(response.headers.get('cache-control')).toBe('private, no-store');
+    expect(await response.text()).not.toContain('PRIVATE_DATABASE_SENTINEL');
+    expect(mocks.event).not.toHaveBeenCalled();
+  });
   it.each(['allow', 'deny'])('delegates %s to the same atomic owner as Web revoke', async decision => {
     mocks.decide.mockImplementation(async input => { await input.beforeMutationTx({ synthetic: true }); return { decision: decision === 'allow' ? 'allowed' : 'denied' }; });
     const response = await PUT(req('PUT', JSON.stringify({ decision, disclosureVersion: 1 })));
