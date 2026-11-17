@@ -7893,6 +7893,11 @@ first names and reminder settings. Settings and both chat tools write through
 remaining AI access and usage, and an already deliverable direct thread; the
 game never grants a private conversation. A per-seat `reminder_every_day` option
 changes count-game reminder urgency without changing posting eligibility.
+Both tools' `reaches` says `text` only when a selected game would get the
+private evening text: it has no group chat, or its players live hours apart, so
+no room check-in covers it. Otherwise the reminder at the member's time is the
+push. The runner shows the direct tool's result in words: one time for every
+game, named weekdays, and `everyDay` only on count games.
 Saving choices records the ordered per-seat facts first, then updates the member's
 live seats in one parameterized statement with the same live receipt predicate.
 Choice arrays determine assigned values rather than row-lookup membership, so a

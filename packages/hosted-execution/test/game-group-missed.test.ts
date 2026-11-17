@@ -78,6 +78,13 @@ describe("game evening check-in contract", () => {
       date: "2030-03-04", expiresAt: "2030-03-05T01:30:00.000Z", batch: [{ gameId: "game", termsVersion: 1, dayIndex: 0 }] };
     expect(gamePrivateEveningCheckInPolicySchema.parse(direct)).toEqual(direct);
     expect(gamePrivateEveningCheckInPolicySchema.parse({ ...direct, conversationLaneSeq: "7" })).toEqual({ ...direct, conversationLaneSeq: "7" });
+    // A text for one reminder time names it after the date.
+    for (const minutes of ["0", "720", "1439"]) {
+      expect(gamePrivateEveningCheckInPolicySchema.parse({ ...direct, eventId: `${direct.eventId}:${minutes}` }).eventId).toBe(`${direct.eventId}:${minutes}`);
+    }
+    for (const eventId of [`${direct.eventId}:1440`, `${direct.eventId}:07`, `${direct.eventId}:`, `${direct.eventId}:12:00`, "game-evening-private:two:2030-03-04:720"]) {
+      expect(() => gamePrivateEveningCheckInPolicySchema.parse({ ...direct, eventId })).toThrow();
+    }
   });
   it.each([{ eventId: "wrong" }, { batch: [] }, { conversationLaneSeq: "-1" }, { expiresAt: "wrong" },
     { batch: [evening.batch[0], evening.batch[0]] }, { batch: [{ ...evening.batch[0], memberIds: ["one", "one"] }] },

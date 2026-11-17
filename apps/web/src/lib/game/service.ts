@@ -396,8 +396,10 @@ async function setGameChatReminder(input: Parameters<typeof runGameChatUpdate>[0
     everyDayGameIds: seats.filter(seat => seat.reminderEveryDay).map(seat => seat.gameId) } });
   if (!result.ok) return result;
   const [route] = await readGamePushRoutes(getPrisma(), [input.actorMemberId], true);
-  const selectedOn = update.gameId ? !result.reminders?.offGameIds.includes(update.gameId) : seats.some(seat => !result.reminders?.offGameIds.includes(seat.gameId));
-  const reaches = result.reminders ? gameReminderReach(result.reminders, selectedOn, Boolean(route)) : "none";
+  const selected = (update.gameId ? [update.gameId] : seats.map(seat => seat.gameId)).filter(gameId => !result.reminders?.offGameIds.includes(gameId));
+  const { readPrivatelyTextedGameIds } = await import("./evening-check-in");
+  const texted = await readPrivatelyTextedGameIds(selected, new Date());
+  const reaches = result.reminders ? gameReminderReach(result.reminders, { on: selected.length > 0, textedPrivately: texted.size > 0 }, Boolean(route)) : "none";
   return { ...result, reaches };
 }
 

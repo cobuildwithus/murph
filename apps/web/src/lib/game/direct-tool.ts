@@ -8,6 +8,7 @@ import { readHostedMailboxConversationWakeByAssistantInputId } from "../hosted-m
 import { requireHostedRuntimeActiveAccessForUpdateTx } from "../hosted-mailbox/runtime-access";
 import { assertHostedDirectAssistantNotificationRouteAuthority } from "../hosted-routing/assistant-notification-destination";
 import { getPrisma } from "../prisma";
+import { readPrivatelyTextedGameIds } from "./evening-check-in";
 import { readGamePushRoutes } from "./push-delivery";
 import { gameReminderReach } from "./reminders";
 import { openGameTexts } from "./crypto";
@@ -79,9 +80,9 @@ export async function handleMyGameRemindersTool(input: { memberId: string; runti
   const reminders = await readMyGameReminderProjection(input.memberId);
   if (!reminders) return unavailable();
   const [route] = await readGamePushRoutes(getPrisma(), [input.memberId], true);
-  const selectedOn = input.request.gameId ? reminders.games.some(game => game.id === input.request.gameId && game.on)
-    : reminders.games.some(game => game.on);
-  const reaches = gameReminderReach(reminders, selectedOn, Boolean(route));
+  const selected = reminders.games.filter(game => game.on && (!input.request.gameId || game.id === input.request.gameId)).map(game => game.id);
+  const texted = await readPrivatelyTextedGameIds(selected, new Date());
+  const reaches = gameReminderReach(reminders, { on: selected.length > 0, textedPrivately: texted.size > 0 }, Boolean(route));
   return { action: "my_game_reminders", result: { status: "ok", reminders, reaches } };
 }
 

@@ -1189,10 +1189,14 @@ describe("decided pair endings", () => {
 describe("game reminder eligibility", () => {
   it("reports whether a selected saved reminder can actually reach its member", () => {
     const settings = { push: true, text: true, canText: true };
-    expect(gameReminderReach(settings, true, true)).toBe("text");
-    expect(gameReminderReach({ ...settings, canText: false }, true, true)).toBe("push");
-    expect(gameReminderReach({ ...settings, canText: false }, true, false)).toBe("none");
-    expect(gameReminderReach(settings, false, true)).toBe("none");
+    const texted = { on: true, textedPrivately: true };
+    expect(gameReminderReach(settings, texted, true)).toBe("text");
+    expect(gameReminderReach({ ...settings, canText: false }, texted, true)).toBe("push");
+    expect(gameReminderReach({ ...settings, canText: false }, texted, false)).toBe("none");
+    expect(gameReminderReach(settings, { ...texted, on: false }, true)).toBe("none");
+    // A game whose group chat carries the evening check-in gets no private text, so only the push reaches them.
+    expect(gameReminderReach(settings, { on: true, textedPrivately: false }, true)).toBe("push");
+    expect(gameReminderReach(settings, { on: true, textedPrivately: false }, false)).toBe("none");
   });
   it("uses the frozen game day, schedule and remaining seat", () => {
     const state = live();

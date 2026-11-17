@@ -69,6 +69,23 @@ export async function roomCoversEveningGame(roomId: string | null, gameId: strin
   return Boolean(room?.games.some(game => game.row.id === gameId));
 }
 
+/**
+ * The games that would get the private evening text, from stored facts only, for describing reminders: a game
+ * in a group chat whose players live close together gets that chat's check-in instead. Delivery still asks
+ * `roomCoversEveningGame`, which also proves the chat itself.
+ */
+export async function readPrivatelyTextedGameIds(gameIds: readonly string[], now: Date): Promise<Set<string>> {
+  if (!gameIds.length || process.env.MURPH_GAME_EVENING_CHECK_IN_ENABLED !== "true") return new Set(gameIds);
+  const prisma = getPrisma();
+  const games = await prisma.game.findMany({ where: { id: { in: [...gameIds] } }, select: { id: true, chatContainerMemberId: true,
+    players: { where: { leftAt: null, memberId: { not: null } }, select: { memberId: true } } } });
+  const memberIds = [...new Set(games.flatMap(game => game.players.map(player => player.memberId!)))];
+  const zones = new Map((await prisma.gameProfile.findMany({ where: { memberId: { in: memberIds } }, select: { memberId: true, timeZone: true } }))
+    .map(profile => [profile.memberId, profile.timeZone]));
+  return new Set(games.filter(game => !game.chatContainerMemberId
+    || gameZoneSpreadHours(game.players.map(player => zones.get(player.memberId!)), now) >= GAME_ROOM_FAR_APART_HOURS).map(game => game.id));
+}
+
 /** Each game's current players determine eligibility, independently of other games. */
 async function readEligibleRoomGames(roomId: string, ids: readonly string[], worthProving?: (games: Games) => boolean) {
   const prisma = getPrisma();
