@@ -51185,6 +51185,51 @@ describeRealCodex('private game reminder reply', () => {
       expect(reply).not.toMatch(/push notification|cannot|won't|automation|game_/iu)
     } finally { await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths]) }
   }, 360_000)
+
+  it('private game reminder question answers the time, weekdays and delivery for weekday games in group chats', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-game-direct-read-e2e-'))
+    const { MURPH_MY_GAME_REMINDERS_TOOL, GAME_PRIVATE_REMINDER_DIRECT_GUIDANCE } = await import('../src/assistant-codex/dynamic-tools/games.js')
+    const { hostedGameToolResponseSchema } = await import('@murphai/hosted-execution/runtime-control')
+    const inputId = 'ain_' + 'f'.repeat(32)
+    const calls: import('@murphai/hosted-execution/runtime-control').HostedGameToolRequest[] = []
+    // One noon time for both games; both play Monday to Friday in their own group chats, so the reminder is the app's push.
+    const reminders = { minutes: 720, push: true, text: true, canText: true, games: [
+      { id: 'game_synthetic_pullups', task: '20 pullups', schedule: { days: [0, 1, 2, 3, 4] }, today: 'upcoming' as const, otherFirstNames: ['Sam'], on: true, everyDay: false },
+      { id: 'game_synthetic_pushups', task: '50 pushups', schedule: { days: [0, 1, 2, 3, 4] }, today: 'posted' as const, otherFirstNames: ['Ava'], on: true, everyDay: true },
+    ] }
+    try {
+      await initializeVault({ timezone: 'UTC', vaultRoot: workingDirectory })
+      const result = await executeRealCodexAppServerTurn({
+        allowFinishWithoutReply: false, approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, env: config.env, model: config.model, modelProvider: config.modelProvider,
+        developerInstructions: [buildDirectConversationDeveloperInstructions(false,
+          'Previous Murph message in this direct conversation: Done. 9pm your time for your pushups with Ava, on days you haven\'t posted.',
+          [], '2030-03-06T12:00:00.000Z'), GAME_PRIVATE_REMINDER_DIRECT_GUIDANCE].join('\n\n'),
+        dynamicTools: [MURPH_MY_GAME_REMINDERS_TOOL],
+        hostedToolContext: { computerToolsAvailable: false, vaultFileSendAvailable: false,
+          currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+          sendVaultFile: async () => { throw new Error('No media') },
+          currentUserActionScope: () => ({ conversationId: 'synthetic-direct', inboundMailboxItemIds: [],
+            recipientKey: 'synthetic-member', acceptedInputIds: [inputId], originSessionId: 'synthetic-session', conversationScope: 'direct' }),
+          myGameRemindersTool: { request: async request => {
+            if (request.action !== 'my_game_reminders') throw new Error('Unexpected game request')
+            calls.push(request)
+            return hostedGameToolResponseSchema.parse({ action: 'my_game_reminders', result: { status: 'ok', reminders, reaches: 'push' } })
+          } },
+        },
+        prompt: 'What time do my reminders for pullups with Sam go out, and where do I get them?', reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const reply = result.finalMessage.trim()
+      process.stdout.write(`[private-game-reminder-read] ${JSON.stringify({ reply, calls: calls.map(call => call.action === 'my_game_reminders' ? call.operation : call.action) })}\n`)
+      expect(calls.map(call => call.action === 'my_game_reminders' ? call.operation : call.action)).toEqual(['read'])
+      expect(reply).toMatch(/noon|12/iu)
+      expect(reply).toMatch(/weekday|mon/iu)
+      expect(reply).toMatch(/notification|app/iu)
+      expect(reply).not.toMatch(/^yes|every (?:scheduled )?evening|not every|game_/iu)
+    } finally { await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths]) }
+  }, 360_000)
 })
 
 
