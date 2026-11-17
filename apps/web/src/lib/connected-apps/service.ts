@@ -1010,7 +1010,7 @@ async function executeConnectedAppsRead(input: {
   return wrapHostedConnectedAppsReadResult(await client.executeDirect({
     account: account.id, arguments: { ...args, ...policy.forcedArguments },
     toolSlug, userId: input.memberId, version: policy.version,
-  }));
+  }), policy.result);
 }
 
 async function searchConnectedApps(input: {
