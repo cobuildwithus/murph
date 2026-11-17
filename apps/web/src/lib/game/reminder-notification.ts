@@ -136,7 +136,8 @@ async function sendReminder(member: Awaited<ReturnType<typeof readOpenGames>>[nu
 
 /** Peers with a visible post today, in seat order. */
 async function postedPeers(game: Awaited<ReturnType<typeof readOpenGames>>[number]["open"][number], memberId: string) {
-  const peers = game.state.players.filter(player => player.memberId !== memberId && !player.leftAt && game.day >= eligibleFromDay(game.state, player)).map(player => player.memberId);
+  const peers = game.state.players.filter(player => player.memberId !== memberId && !player.leftAt && game.day >= eligibleFromDay(game.state, player))
+    .sort((a, b) => a.seat - b.seat).map(player => player.memberId);
   const [entries, blocks] = await Promise.all([
     getPrisma().gameEntry.findMany({ where: { gameId: game.row.id, memberId: { in: peers }, dayIndex: game.day, attempt: { gt: 0 }, withdrawnAt: null,
       reports: { none: { reporterMemberId: memberId } } }, select: entrySelect, take: 20 }),
