@@ -25,7 +25,7 @@ export const COMPANION_HEALTH_METRICS = {
   vo2Max: { key: "estimated-vo2-max", unit: "ml/kg/min", precision: 1 },
 } as const;
 const requestedShards = ["core", "metricsIndex"] as const;
-const emptyNumbers = { numbers: null, demographics: null, freshness: "stale" } as const;
+const emptyNumbers = { numbers: null, demographics: null, heightCm: null, freshness: "stale" } as const;
 
 function numbersUnavailable() {
   return hostedOnboardingError({
@@ -45,10 +45,10 @@ export async function readCompanionNumbers(request: Request) {
   }
   const snapshot = await readCompanionHealthSeries(auth, request.signal);
   if (!snapshot) return emptyNumbers;
-  const { timeZone, savedAt, freshness, window, demographics, numbers } = snapshot;
+  const { timeZone, savedAt, freshness, window, demographics, heightCm, numbers } = snapshot;
   const baselineFrom = addDaysToIsoDate(window.through, -89);
   return {
-    timeZone, savedAt, freshness, window, demographics,
+    timeZone, savedAt, freshness, window, demographics, heightCm,
     numbers: {
       restingHeartRate: presentNumber(numbers.restingHeartRate, COMPANION_HEALTH_METRICS.restingHeartRate, window, baselineFrom),
       sleep: presentNumber(numbers.sleep, COMPANION_HEALTH_METRICS.sleep, window, baselineFrom),
@@ -86,7 +86,7 @@ export async function readCompanionHealthSeries(auth: HostedNativeMemberAuth, si
   const stepsWindow = { ...window, through: lastSettledStepDay(now, timeZone) };
   return {
     timeZone, savedAt: client.replica.generatedAt, freshness, window, stepsWindow,
-    demographics,
+    demographics, heightCm: readCompanionBodyHeight(client, through),
     numbers: {
       restingHeartRate: readRawHealthNumber(client, COMPANION_HEALTH_METRICS.restingHeartRate, window),
       sleep: readRawHealthNumber(client, COMPANION_HEALTH_METRICS.sleep, window),
@@ -94,6 +94,17 @@ export async function readCompanionHealthSeries(auth: HostedNativeMemberAuth, si
       vo2Max: readRawHealthNumber(client, COMPANION_HEALTH_METRICS.vo2Max, window),
     },
   };
+}
+
+/** Canonical latest-valid selection, in cm; expires against today's local date. */
+export function readCompanionBodyHeight(
+  client: Pick<BrowserVaultMetricSeriesCapableQueryClient, "metricSelections">,
+  today: string,
+): number | null {
+  const height = client.metricSelections.get("body-height");
+  const staleAfterDays = resolveMetricDefinition("body-height")!.selectionPolicy.staleAfterDays!;
+  if (!height?.effectiveDate || height.effectiveDate < addDaysToIsoDate(today, -staleAfterDays)) return null;
+  return height.value;
 }
 
 async function loadSavedNumbers(memberId: string, signal: AbortSignal) {

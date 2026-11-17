@@ -757,13 +757,17 @@ it("validates display-name actions with the memory name contract", () => {
 });
 
 
-it("accepts only bounded typed VO2 readings in the closed measurement action", () => {
-  const action = { kind: "measurement.add", version: 1, metric: "estimated-vo2-max", value: 42.5 };
-  for (const value of [10, 42.5, 90]) {
+it.each([
+  ["estimated-vo2-max", 10, 42.5, 90],
+  ["body-height", 50, 170.2, 272],
+] as const)("accepts only bounded %s readings in the closed measurement action", (metric, min, middle, max) => {
+  const action = { kind: "measurement.add", version: 1, metric, value: middle };
+  for (const value of [min, middle, max]) {
     expect(parseMemberActionRequestV1({ ...validRequest(), action: { ...action, value } }).action)
       .toEqual({ ...action, value });
   }
-  for (const patch of [{ value: 9.9 }, { value: 90.1 }, { value: Infinity }, { value: NaN },
+  for (const patch of [{ value: min - 0.1 }, { value: max + 0.1 }, { value: Infinity }, { value: NaN },
+    { value: -Infinity }, { value: null }, { value: "170" },
     { metric: "weight" }, { unit: "ml/kg/min" }, { occurredAt: "2026-11-06" }, { version: 2 }]) {
     expect(memberActionRequestV1Schema.safeParse({ ...validRequest(), action: { ...action, ...patch } }).success).toBe(false);
   }
