@@ -276,14 +276,14 @@ export class HostedBillingBrowserDriver {
         this.timeoutMs,
         actor.page.getByRole("button", {
           exact: true,
-          name: "Choose Pulse",
+          name: "Switch to Pulse",
         }),
       );
       const dialog = actor.page.getByRole("dialog");
       await dialog.getByRole("heading", { name: "Switch to Pulse" }).waitFor();
       const [response] = await Promise.all([
         actor.page.waitForResponse(
-          isApiResponse("/api/settings/billing/switch-to-pulse", "POST"),
+          isApiResponse("/api/settings/billing/switch-plan", "POST"),
         ),
         clickHydratedMurphControl(
           this.timeoutMs,
