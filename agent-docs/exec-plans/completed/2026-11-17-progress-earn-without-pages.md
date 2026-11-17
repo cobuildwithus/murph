@@ -61,6 +61,11 @@ existing contract.
 - Candidate diff/privacy review passed. Architecture owns the new sealed receipt
   classification; changelog linked to PR #5142. No production input or deploy
   was exercised; the post-deploy check is the same Progress-then-Prizes journey.
+- First CI found one PostgreSQL fixture calling the real `after()` outside a
+  Next request scope (shard 5, exit 1). That found-goal fixture now mocks the
+  scheduler, as the other foreground fixtures do; the dedicated background
+  suite owns callback proof. Its five real PostgreSQL tests pass in an isolated
+  local database (exit 0), and the affected Web typecheck passes again (exit 0).
 - Local work complete. Final candidate goes through exact-head required CI
   before handoff; no merge or ReviewGPT. No open product questions.
 Completed: 2026-11-17

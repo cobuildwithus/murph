@@ -20,6 +20,7 @@ vi.mock("../src/lib/game/http/auth", () => ({
   assertGameMemberAuthCurrentTx: mocks.current,
 }));
 vi.mock("../src/lib/browser-vault/authority", () => ({ assertBrowserVaultMemberAuthority: async () => {} }));
+vi.mock("../src/lib/game/progress/settlement", () => ({ scheduleProgressSettlement: vi.fn() }));
 import { GET as goals } from "../app/api/game/v1/progress/goals/route";
 import { GET as progress } from "../app/api/game/v1/progress/route";
 import { PUT } from "../app/api/game/v1/progress/measures/[id]/route";
