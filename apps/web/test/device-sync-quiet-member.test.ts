@@ -115,11 +115,11 @@ describe("quiet member device sync", () => {
     })).toEqual({ inside: true });
   });
 
-  it("holds a quiet member's webhook batch until ten minutes into the next window", async () => {
+  it("holds a quiet member's webhook batch until twenty minutes into the next window", async () => {
     const quiet = quietPrisma();
     expect(await resolveHostedDeviceSyncQuietDirtyReleaseAt({
       connectedAt: CONNECTED_AT, memberId: "member_quiet", now: NOW, prisma: asClient(quiet),
-    })).toEqual(new Date("2026-11-17T15:40:00.000Z"));
+    })).toEqual(new Date("2026-11-17T15:50:00.000Z"));
 
     expect(await resolveHostedDeviceSyncQuietDirtyReleaseAt({
       connectedAt: CONNECTED_AT, memberId: "member_quiet", now: NOW, prisma: asClient(quietPrisma({ linqInbound: true })),

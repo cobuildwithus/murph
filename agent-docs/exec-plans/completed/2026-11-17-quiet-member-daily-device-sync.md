@@ -27,7 +27,7 @@ instead of about six. Everyone else is unchanged.
 - Inside the window, a quiet member behaves exactly as today.
 - When a quiet member comes back (any signal in the quiet predicate: Linq
   message, group chat, app open, meal photo, Telegram, email, paid plan), the
-  next 5-minute recovery sweep releases their held batches. Message intake
+  next recovery sweep (every 15 minutes) releases their held batches. Message intake
   and the app heartbeat are unchanged.
 - Non-quiet members: identical wakes, deadlines and mailbox items as today,
   except the bounded orphan-recovery ownership fix below.
@@ -85,7 +85,7 @@ and a due scheduled reconcile. No new table, column, flag or state owner.
 `{ inside: boolean; nextStart: Date }`. Each connection's window is one hour
 starting at its `connected_at` UTC time of day, which spreads quiet
 connections across the day with no stored state. The window is one hour
-because the recovery sweep runs every 5 minutes; a deadline at the window
+because the recovery sweep runs every 15 minutes; a deadline at the window
 start is always serviced inside the window.
 
 ### Webhook path (`settleHostedDeviceSyncWebhookWakeDeferralTx`)
@@ -97,7 +97,7 @@ event on an already-dirty connection claims a pending deferral and wakes now.
 New rule, applied only when the event would wake or claim and the member is
 quiet and the connection is outside its window:
 
-- `shouldRequestWake` true: `deferDirtyConnectionWakeTx` until 10 minutes
+- `shouldRequestWake` true: `deferDirtyConnectionWakeTx` until 20 minutes
   after the window's `nextStart`; return false. Any device-sync wake for a
   connection fetches and applies that connection's pending dirty state in the
   runtime (`applyHostedPendingDirtyDeviceSyncState`), so the window's
@@ -141,7 +141,7 @@ deadline releases it within 30 minutes.
 ### Coming back
 
 `releaseHostedDeviceSyncReturnedQuietDeferrals({ now, prisma, signal })`
-runs at the start of the deferred-wake sweeper (every 5 minutes). It lists the
+runs at the start of the deferred-wake sweeper (every 15 minutes). It lists the
 distinct members with a `wake_deferred_until` beyond now + 30 minutes (only a
 quiet hold can be that far out; routine batches are at most 30 minutes), runs
 the same quiet predicate for each, and for a member who is no longer quiet
@@ -163,7 +163,7 @@ returns are covered too), and deletes the three hooks and the leaf module.
 Known limits:
 
 - The first reply to a returning member can run before their held data
-  syncs (up to about 5 minutes plus the pass). Later replies see fresh data.
+  syncs (up to about 15 minutes plus the pass). Later replies see fresh data.
 - A quiet deadline already within 30 minutes is not released early (it cannot
   be told apart from a routine batch without new state), so the return bound
   is up to about 30 minutes plus the pass.
@@ -180,7 +180,7 @@ Known limits:
   existing engagement and paid-billing predicates, no new config.
 - Database: the predicate adds at most four small reads inside the existing
   webhook transaction, only on wake-producing events. The return check adds,
-  per 5-minute sweep, one index scan of held deadlines plus the predicate for
+  per 15-minute sweep, one index scan of held deadlines plus the predicate for
   each held member (about 40-60 members today, capped at 200).
 
 ## Risks and mitigations
@@ -193,7 +193,7 @@ Known limits:
    reads; measure with the existing webhook trace timing after deploy.
 3. Risk: the orphan predicate change hides real orphaned dirt.
    Mitigation: only rows with a deadline are excluded; the deferred sweeper
-   owns them and retries every 5 minutes on failure; a cleared deadline
+   owns them and retries on the next sweep after failure; a cleared deadline
    restores orphan detection.
 4. Risk: the return check grows with the quiet cohort.
    Mitigation: capped at 200 members per sweep, stops at the sweep deadline,
@@ -245,7 +245,7 @@ response was recovered by thread export (known frog
   quiet policy in `quiet-member.ts`.
 - Orphan predicate: confirmed correct (in the CASE, not the WHERE); the
   bounded non-quiet change is now documented above.
-- Two-owner integration (scheduled ack before +10 minutes suppresses the
+- Two-owner integration (scheduled ack before +20 minutes suppresses the
   release; failure keeps it): existing coverage in
   `device-sync-scheduled-wake-retention-postgres.test.ts` (acknowledgment
   clears `wake_deferred_until`; release failure postpones 5 minutes).
@@ -267,3 +267,13 @@ response was recovered by thread export (known frog
 - Expected outcomes: new tests prove each rule; existing device-sync wake
   tests pass unchanged for non-quiet members.
 Completed: 2026-11-17
+
+## Follow-up (2026-11-17, after deploy)
+
+Production logs showed the recovery sweep runs every 15 minutes, not 5
+(16:45-19:30 UTC, every quarter hour). With a 10-minute release delay, a
+window start in the first third of a quarter hour put the batch release in the
+same sweep as the window's reconcile (the deferred sweeper runs first), which
+can start two containers instead of one. The release delay is now 20 minutes,
+longer than the sweep interval, so the release always lands in a later sweep.
+Return latency is up to about 15 minutes (30 at the routine-batch edge).

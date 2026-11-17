@@ -17,12 +17,14 @@ export const HOSTED_DEVICE_SYNC_QUIET_AFTER_DAYS = 60;
 export const HOSTED_DEVICE_SYNC_ROUTINE_WAKE_DEFER_MS = 30 * 60_000;
 
 const DAY_MS = 24 * 60 * 60_000;
-// The recovery sweep runs every five minutes, so an hour always services a
+// The recovery sweep runs every 15 minutes, so an hour always services a
 // deadline at the window start inside the window.
 const QUIET_WINDOW_MS = 60 * 60_000;
 // The window's scheduled reconcile drains held webhook dirt, so the batch
 // release waits behind it and normally clears without another container.
-const QUIET_DIRTY_RELEASE_DELAY_MS = 10 * 60_000;
+// Longer than the 15-minute sweep interval, so the release always lands in a
+// later sweep than the reconcile it waits behind.
+const QUIET_DIRTY_RELEASE_DELAY_MS = 20 * 60_000;
 const QUIET_RETURN_CHECK_LIMIT = 200;
 
 export async function readHostedDeviceSyncMemberQuiet(input: {
@@ -170,7 +172,8 @@ export async function postponeHostedDeviceSyncQuietReconcile(input: {
  * texted, joined a group chat, opened the app or started paying. Only a
  * deadline beyond the routine 30-minute batch can be a quiet hold. The sweep
  * runs this before releasing due batches, so a returning member's data starts
- * syncing in the same 5-minute sweep, with nothing added to message intake.
+ * syncing in the same sweep (every 15 minutes), with nothing added to message
+ * intake.
  */
 export async function releaseHostedDeviceSyncReturnedQuietDeferrals(input: {
   now: Date;
