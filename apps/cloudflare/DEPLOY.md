@@ -84,6 +84,20 @@ forwards whatever it finds, which Web also ignores. Remove them only after older
 controllers and rollback readers have drained and Web's parser and live admission
 no longer require the boolean.
 
+### Codex 0.169.0 and GPT-6.2 model rollout
+
+First serve a Web revision that accepts and prices both GPT-6.2 models at
+standard and Flex rates while continuing to serve the previous model IDs.
+The signed Web protocol probe runs synthetic usage through the allowance
+calculator. The candidate Worker requires positive pricing evidence for
+both models before it can activate. Existing Sol and Astra preferences start
+using 6.2 as soon as the new runtime reads them.
+
+Publish the exact native image and compiler cache, then deploy and converge
+the 0.169.0 runner and Worker against that compatible Web revision. Enable
+the new Web model choices after convergence. Keep the pricing reader in
+service while any runner can submit 6.2 usage, including during rollback.
+
 ### Live Web protocol admission
 
 `deploy-worker-version.cli.ts` admits the **served** `HOSTED_WEB_BASE_URL` before

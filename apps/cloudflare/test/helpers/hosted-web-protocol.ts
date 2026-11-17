@@ -13,6 +13,7 @@ import {
 // the real log parser and authority response owner.
 export function syntheticHostedWebProtocolAdmission(nonce: string): HostedRuntimeWebProtocolAdmission {
   return {
+    pricedAssistantModels: ["gpt-6.2-sol", "gpt-6.2-astra"],
     recapScore: buildRecapScoreProtocolProbe(),
     recapVideo: buildRecapVideoProtocolProbe(),
     runtimeReplicaBatch: buildHostedRuntimeReplicaBatchProtocolProbe(),

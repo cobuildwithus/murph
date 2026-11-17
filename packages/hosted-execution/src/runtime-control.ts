@@ -3327,6 +3327,7 @@ export const HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_VERSION = 1;
 export const HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_MAX_BYTES = 16 * 1024;
 
 export interface HostedRuntimeWebProtocolAdmission {
+  pricedAssistantModels: readonly string[];
   recapScore: { upload: unknown; asset: unknown };
   recapVideo: { part: unknown; write: unknown; recover: unknown; result: unknown };
   kind: typeof HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_KIND;
