@@ -23,7 +23,9 @@ test("Linq production canary admits one verified serialized production journey n
   );
   assert.match(workflow, /workflow_dispatch:/u);
   assert.doesNotMatch(workflow, /pull_request:|\npush:|deployment_status:/u);
-  assert.match(workflow, /contents: read/u);
+  assert.match(workflow, /production-canary:[\s\S]*permissions:\n      contents: read\n      id-token: write/u);
+  assert.doesNotMatch(workflow.slice(0, workflow.indexOf("jobs:")), /id-token:/u);
+  assert.doesNotMatch(workflow, /MURPH_LINQ_PRODUCTION_CANARY_RESET_SECRET/u);
   assert.match(workflow, /environment: production/u);
   assert.match(workflow, /group: linq-production-canary/u);
   assert.match(workflow, /cancel-in-progress: false/u);
@@ -38,6 +40,15 @@ test("Linq production canary admits one verified serialized production journey n
   assert.match(workflow, /persist-credentials: false/u);
 });
 
+test("Linq production canary records the launch deployment without failing on a later promotion", async () => {
+  const workflow = await readFile(workflowPath, "utf8");
+  const record = workflow.slice(workflow.indexOf("- name: Record completed journey"));
+
+  assert.match(record, /DEPLOYED_SHA: \$\{\{ steps\.current-production\.outputs\.deployed_sha \}\}/u);
+  assert.match(record, /deployed_sha=\$\{DEPLOYED_SHA\}/u);
+  assert.doesNotMatch(record, /verify-current-vercel-production-deployment|exit 1/u);
+});
+
 test("Linq production canary keeps destructive and provider credentials in the live journey only", async () => {
   const workflow = await readFile(workflowPath, "utf8");
   const liveStep = workflow.slice(
@@ -49,7 +60,6 @@ test("Linq production canary keeps destructive and provider credentials in the l
   );
 
   for (const secret of [
-    "MURPH_LINQ_PRODUCTION_CANARY_RESET_SECRET",
     "MURPH_LINQ_PRODUCTION_CANARY_TARGET_PHONE_NUMBER",
     "MURPH_LINQ_PRODUCTION_CANARY_SPECTRUM_PROJECT_ID",
     "MURPH_LINQ_PRODUCTION_CANARY_SPECTRUM_PROJECT_SECRET",

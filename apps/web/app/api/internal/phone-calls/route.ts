@@ -1,10 +1,12 @@
+import { assertContract } from "@murphai/contracts";
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import { hostedPhoneCallStartRequestSchema } from "@murphai/hosted-execution/phone-calls";
 
 import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
-import { readRawBodyBuffer } from "@/src/lib/http";
+import { parseRequestJson, readRawBodyBuffer } from "@/src/lib/http";
 import {
   createHostedPhoneCall,
 } from "@/src/lib/phone-calls/service";
@@ -19,7 +21,7 @@ export const POST = withJsonError(async (request: Request) => {
     maxBodyBytes: HOSTED_PHONE_CALL_START_MAX_BODY_BYTES,
     payloadText: rawBody,
   });
-  const payload = hostedPhoneCallStartRequestSchema.parse(JSON.parse(rawBody));
+  const payload = parseInput(parseRequestJson(rawBody), (value) => assertContract(hostedPhoneCallStartRequestSchema, value, "Internal request"));
   const response = await createHostedPhoneCall({
     brief: payload.brief,
     ...(payload.groupRequester

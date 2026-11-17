@@ -4,6 +4,7 @@
  * and the shared worker request shape together.
  */
 
+import { RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import type { R2BucketLike } from "./bundle-store.ts";
 import { buildHostedStorageAad } from "./crypto-context.js";
 import {
@@ -403,7 +404,8 @@ async function readHostedEmailReadableStream(
             // best-effort stream cleanup only
           }
 
-          throw new RangeError(
+          throw new RequestBodyTooLargeError(
+            maxBytes,
             `Hosted email message exceeded the maximum accepted size of ${maxBytes} bytes.`,
           );
         }
@@ -428,7 +430,8 @@ function assertHostedEmailMessageSize(
   maxBytes: number,
 ): void {
   if (typeof size === "number" && Number.isFinite(size) && size > maxBytes) {
-    throw new RangeError(
+    throw new RequestBodyTooLargeError(
+      maxBytes,
       `Hosted email message exceeded the maximum accepted size of ${maxBytes} bytes.`,
     );
   }

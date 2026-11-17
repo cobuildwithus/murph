@@ -1,4 +1,8 @@
+// This lane exercises unblocked planning; real risk ingress has separate PostgreSQL proof.
+vi.mock("@/src/lib/hosted-onboarding/linq-sender-block", () => ({ readHostedLinqSenderBlockWebhookResponse: vi.fn(async () => null) }));
+vi.mock("@/src/lib/hosted-onboarding/linq-group-risk-webhook", () => ({ observeHostedLinqGroupRiskWebhook: vi.fn(async () => undefined), recordHostedLinqGroupRosterEvidenceAfterCommit: vi.fn(async () => undefined) }));
 import { linqRoster } from "./support/linq-roster";
+import { RequestInputError } from "@murphai/hosted-execution/request-input";
 import {
   HOSTED_DOMAIN_ROOT_KEY_ENVELOPE_SCHEMA,
   type HostedCryptoDomain,
@@ -388,6 +392,7 @@ function buildPrewarmPrisma() {
     },
   };
   return {
+    hostedLinqGroupLeave: { findFirst: vi.fn().mockResolvedValue(null) },
     $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => {
       calls.push("begin");
       rootKeyAtTransactionOpen = issuedRootKeys[0] ? [...issuedRootKeys[0]] : null;
@@ -1155,6 +1160,23 @@ describe("hosted Linq mailbox payload root prewarm", () => {
   // entry point so the composition is proven too: the resolver decides whether
   // a route exists, and that decision is what the warm hook acts on.
   describe("through handleHostedOnboardingLinqWebhook", () => {
+    it("explicitly rejects a routed group payload without its recipient when admission needs crypto", async () => {
+      const { hostedOnboardingError } = await import("@/src/lib/hosted-onboarding/errors");
+      const { planHostedOnboardingLinqWebhook } = await import("@/src/lib/hosted-onboarding/webhook-provider-linq");
+      vi.mocked(planHostedOnboardingLinqWebhook).mockRejectedValueOnce(hostedOnboardingError({
+        code: "HOSTED_THREAD_ROUTE_PREPARATION_REQUIRED", httpStatus: 503,
+        message: "Prepared route required.", retryable: true,
+      }));
+      const payload = JSON.parse(buildLinqMessageWebhookBody({ chatIsGroup: true }));
+      delete payload.data.chat.owner_handle;
+      const prisma = buildPrewarmPrisma();
+      await expect(handleHostedOnboardingLinqWebhook({
+        prisma: prisma as never, rawBody: JSON.stringify(payload), signature: null, timestamp: null,
+      })).rejects.toBeInstanceOf(RequestInputError);
+      expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+      expect(calls).not.toContain("prepare-route");
+    });
+
     it("re-prepares a changed direct member outside one fresh transaction", async () => {
       const { hostedOnboardingError } = await import(
         "@/src/lib/hosted-onboarding/errors"

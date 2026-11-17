@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { Prisma, type HostedAuthRecord } from "@prisma/client";
 import { APIError } from "better-auth/api";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -124,6 +125,7 @@ describe("session failure observations before Better Auth masking", () => {
   });
 
   it.each([
+    { label: "contract validation", error: new ContractValidationError("SYNTHETIC_PRIVATE_VALIDATION"), category: "native_type" },
     { label: "type", error: new TypeError(privateValue), category: "native_type" },
     { label: "range", error: new RangeError(privateValue), category: "native_range" },
     { label: "syntax", error: new SyntaxError(privateValue), category: "native_syntax" },
@@ -180,6 +182,17 @@ describe("session failure observations before Better Auth masking", () => {
       createdAt: new Date(), updatedAt: new Date(),
     }, configuration.prisma);
     db.hostedAuthRecord.findMany.mockResolvedValue([{ ...row, memberId: null }]);
+    await expectObserved(read(), undefined, "native_type");
+    expect(db.hostedAuthRecord.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("preserves the category and library mask for a record validation failure", async () => {
+    await seedSession();
+    const row = await sealAuthRecord("session", {
+      id: sessionId, userId: memberId, token, expiresAt: new Date(Date.now() + day),
+      createdAt: new Date(), updatedAt: new Date(),
+    }, configuration.prisma);
+    db.hostedAuthRecord.findMany.mockResolvedValue([{ ...row, model: "unsupported" }]);
     await expectObserved(read(), undefined, "native_type");
     expect(db.hostedAuthRecord.updateMany).not.toHaveBeenCalled();
   });

@@ -26,6 +26,8 @@ export interface ToolFailureDiagnostic {
   connectedAppsHttpStatus?: number
   vaultFileErrorCode?: VaultFileToolFailureCode
   productFeedbackAuditRejection?: HostedUsageOptimizationAuditRejection
+  /** What each refused recap scene reference looked like. Finite labels, never the value. */
+  recapRefusedReferences?: string[]
 }
 
 // Core patch/reconciliation owners called by the hosted automation adapter.

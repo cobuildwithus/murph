@@ -17,6 +17,12 @@ import { createHostedExecutionTestEnv } from "./hosted-execution-fixtures.ts";
 
 const replaySafeRequests = [
   {
+    action: "leave_group",
+    request: { action: "leave_group", reason: "bot_loop", origin: { kind: "accepted_input", assistantInputId: `ain_${"a".repeat(32)}` } },
+    response: { action: "leave_group", result: { status: "already_left" } },
+    wireRequest: undefined, wireResponse: undefined,
+  },
+  {
     action: "ask",
     request: {
       action: "ask",
@@ -185,7 +191,62 @@ const handoffReplay = replaySafeRequests.find(
   ({ request }) => request.action === "handoff",
 )!;
 
+const recapOrigin = { kind: "game_recap", gameId: "game_synthetic", eventId: "game-recap:game_synthetic" } as const;
+const recapRequests = [
+  { name: "write_recap", request: { action: "write_recap", origin: recapOrigin, recap: {
+    pages: ["paper", "slate", "sage"].map(() => ({ background: "paper" as const, blocks: [{ kind: "headline" as const, text: "Synthetic scene" }] })),
+    chatLine: "Player A won. The paper crown is ready.",
+  } } },
+  { name: "material", request: { action: "read_game", origin: recapOrigin } },
+  { name: "transcript", request: { action: "read_game", origin: recapOrigin, recapRead: { kind: "transcript", after: "12" } } },
+  { name: "reference", request: { action: "read_game", origin: recapOrigin, recapRead: { kind: "reference", id: "a".repeat(64) } } },
+  { name: "upload", request: { action: "read_game", origin: recapOrigin, recapRead: { kind: "upload", slot: "scene-0", mediaType: "image/jpeg", referenceIds: ["a".repeat(64)], bytes: "c3ludGhldGlj" } } },
+  { name: "recover", request: { action: "read_game", origin: recapOrigin, recapRead: { kind: "recover", failed: true } } },
+] satisfies { name: string; request: HostedRuntimeGroupToolRequest }[];
+
 describe("hosted group tool exact replay", () => {
+  describe.each(hostedGroupToolTransports)("recap $mode transport", ({ create, mode }) => {
+    it.each(recapRequests)("replays $name once after a 503 with fresh callback auth", async ({ request }) => {
+      const response: HostedRuntimeGroupToolResponse = request.action === "write_recap"
+        ? { action: "write_recap", result: { status: "ok", recapOutcome: "Saved." } }
+        : { action: "read_game", result: { status: "ok", recapGame: {} } };
+      const headers: Headers[] = [];
+      const bodies: unknown[] = [];
+      const fetchImpl = vi.fn<typeof fetch>(async (_url, init) => {
+        bodies.push(JSON.parse(String(init?.body)));
+        headers.push(new Headers(init?.headers));
+        return bodies.length === 1
+          ? createJsonResponse({ error: { code: "UPSTREAM_UNAVAILABLE", message: "Upstream request failed.", retryable: true } }, 503)
+          : createJsonResponse(response);
+      });
+      const port = createHostedRuntimeGroupToolPort({ boundUserId: "member-bound", fetchImpl, timeoutMs: 5_000, transport: create() });
+      await expect(port.request(request)).resolves.toEqual(response);
+      expect(bodies).toEqual([request, request]);
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+      if (mode === "direct") {
+        for (const name of ["x-hosted-execution-nonce", "x-hosted-execution-signature"]) {
+          expect(headers[0]!.get(name)).toBeTruthy();
+          expect(headers[1]!.get(name)).toBeTruthy();
+          expect(headers[1]!.get(name)).not.toBe(headers[0]!.get(name));
+        }
+      }
+    });
+
+    it.each([400, 503])("bounds a repeated recap failure at HTTP %s", async status => {
+      const fetchImpl = vi.fn<typeof fetch>(async () => createJsonResponse({ error: "unavailable" }, status));
+      const port = createHostedRuntimeGroupToolPort({ boundUserId: "member-bound", fetchImpl, timeoutMs: 5_000, transport: create() });
+      await expect(port.request(recapRequests[0]!.request)).rejects.toMatchObject({ status });
+      expect(fetchImpl).toHaveBeenCalledTimes(status === 503 ? 2 : 1);
+    });
+  });
+
+  it("does not replay a chat-origin read_game after a 503", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => createJsonResponse({ error: "unavailable" }, 503));
+    const port = createHostedRuntimeGroupToolPort({ boundUserId: "member-bound", fetchImpl, timeoutMs: 5_000, transport: { mode: "proxy" } });
+    await expect(port.request({ action: "read_game", origin: { kind: "accepted_input", assistantInputId: `ain_${"a".repeat(32)}` } })).rejects.toMatchObject({ status: 503 });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
   it.each(replaySafeRequests)(
     "exact-replays the same $action request when a successful response body is lost",
     async ({

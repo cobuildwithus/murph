@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
 import type { Prisma } from "@prisma/client";
@@ -68,7 +69,7 @@ export async function enqueueHostedGroupJoinOutreachTx(input: {
 }): Promise<EnqueueHostedGroupJoinOutreachTxResult> {
   const participantPhoneNumber = normalizePhoneNumber(input.participantPhoneNumber);
   if (!participantPhoneNumber) {
-    throw new TypeError("Hosted group join outreach requires a phone number.");
+    throw new ContractValidationError("Hosted group join outreach requires a phone number.");
   }
 
   const participantPhoneLookupKey = createHostedPhoneLookupKey(

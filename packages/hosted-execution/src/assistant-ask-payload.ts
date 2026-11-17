@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   HOSTED_EXECUTION_ASSISTANT_ASK_ANSWER_MAX_CODE_POINTS,
   HOSTED_EXECUTION_ASSISTANT_ASK_QUESTION_MAX_CODE_POINTS,
@@ -83,7 +84,7 @@ export function parseHostedExecutionAssistantAskRequestedPayload(
       "target",
     ], label);
     if (origin.kind !== "accepted_input") {
-      throw new TypeError(
+      throw new ContractValidationError(
         `${label}.origin must be an accepted input for the group sender.`,
       );
     }
@@ -109,7 +110,7 @@ export function parseHostedExecutionAssistantAskRequestedPayload(
     || target.kind === "group_sender_private"
   ) {
     if (origin.kind !== "accepted_input") {
-      throw new TypeError(
+      throw new ContractValidationError(
         `${label}.origin must be an accepted input for the group sender.`,
       );
     }
@@ -238,7 +239,7 @@ export function parseHostedExecutionAssistantAskOrigin(
       ),
     };
   }
-  throw new TypeError(`${label}.kind is invalid.`);
+  throw new ContractValidationError(`${label}.kind is invalid.`);
 }
 
 export function parseHostedExecutionAssistantAskResult(
@@ -270,7 +271,7 @@ export function parseHostedExecutionAssistantAskResult(
       outcome,
     };
   }
-  throw new TypeError(`${label}.outcome is invalid.`);
+  throw new ContractValidationError(`${label}.outcome is invalid.`);
 }
 
 export function parseHostedExecutionAssistantAskOriginInputId(
@@ -279,7 +280,7 @@ export function parseHostedExecutionAssistantAskOriginInputId(
 ): string {
   const originAssistantInputId = requireString(value, label);
   if (!HOSTED_EXECUTION_ASSISTANT_INPUT_ID_PATTERN.test(originAssistantInputId)) {
-    throw new TypeError(`${label} is invalid.`);
+    throw new ContractValidationError(`${label} is invalid.`);
   }
   return originAssistantInputId;
 }
@@ -292,7 +293,7 @@ export function parseHostedExecutionAssistantAskBoundedText(input: {
   const normalized = requireString(input.value, input.label).trim();
   const codePoints = [...normalized].length;
   if (codePoints === 0 || codePoints > input.maxCodePoints) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${input.label} must contain between 1 and ${input.maxCodePoints} Unicode code points.`,
     );
   }
@@ -306,7 +307,7 @@ export function parseHostedExecutionAssistantAskTimestamp(
   const timestamp = requireString(value, label);
   const timestampMs = Date.parse(timestamp);
   if (!Number.isFinite(timestampMs) || new Date(timestampMs).toISOString() !== timestamp) {
-    throw new TypeError(`${label} must be a canonical ISO timestamp.`);
+    throw new ContractValidationError(`${label} must be a canonical ISO timestamp.`);
   }
   return timestamp;
 }
@@ -395,7 +396,7 @@ function parseHostedExecutionAssistantAskTarget(
       ),
     };
   }
-  throw new TypeError(`${label}.kind is invalid.`);
+  throw new ContractValidationError(`${label}.kind is invalid.`);
 }
 
 function parseHostedExecutionAssistantAskResultDestination(
@@ -416,11 +417,11 @@ function parseHostedExecutionAssistantAskResultDestination(
     );
     const channel = requireString(destination.channel, `${label}.channel`);
     if (channel !== "linq" && channel !== "telegram") {
-      throw new TypeError(`${label}.channel is invalid.`);
+      throw new ContractValidationError(`${label}.channel is invalid.`);
     }
     return { channel, kind };
   }
-  throw new TypeError(`${label}.kind is invalid.`);
+  throw new ContractValidationError(`${label}.kind is invalid.`);
 }
 
 function parseHostedExecutionAssistantAskQuestion(
@@ -450,7 +451,7 @@ function assertHostedExecutionAssistantAskNullTargetLabel(
   label: string,
 ): void {
   if (value !== null) {
-    throw new TypeError(`${label}.targetLabel must be null.`);
+    throw new ContractValidationError(`${label}.targetLabel must be null.`);
   }
 }
 
@@ -462,7 +463,7 @@ function assertExactHostedExecutionAssistantAskKeys(
   const allowed = new Set(keys);
   for (const key of Object.keys(record)) {
     if (!allowed.has(key)) {
-      throw new TypeError(`${label} contains unsupported field ${JSON.stringify(key)}.`);
+      throw new ContractValidationError(`${label} contains unsupported field ${JSON.stringify(key)}.`);
     }
   }
 }

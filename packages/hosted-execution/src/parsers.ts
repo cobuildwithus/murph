@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { gameEveningCheckInPolicySchema, gameGroupMissedCheckInPolicySchema, gamePrivateEveningCheckInPolicySchema, gamePrivateKickoffPolicySchema } from "./game-group-missed.ts";
 import {
   parseHostedVaultShareDeliveryPayload,
@@ -171,6 +172,7 @@ export {
   readHostedExecutionSnapshotHotRef,
 } from "./parsers/cursor.ts";
 export {
+  parseHostedWorkspaceSnapshotV2Archive,
   parseHostedWorkspaceSnapshotV2Ref,
 } from "./parsers/workspace-snapshot-v2.ts";
 export {
@@ -249,7 +251,7 @@ function parseHostedClinicalEnrichmentWakeJobId(record: Record<string, unknown>)
     "Hosted execution wake clinical-records.enrichment-requested",
   );
   if (typeof record.jobId !== "string" || !/^[a-f0-9]{64}$/u.test(record.jobId)) {
-    throw new TypeError("Hosted clinical enrichment job identity is invalid.");
+    throw new ContractValidationError("Hosted clinical enrichment job identity is invalid.");
   }
   return record.jobId;
 }
@@ -560,7 +562,7 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
     case "meal-photo.captured": {
       const mealPhoto = parseHostedExecutionMealPhotoCapturedPayload(record.mealPhoto);
       if (mealPhoto.capturedAt !== occurredAt) {
-        throw new TypeError(
+        throw new ContractValidationError(
           "Hosted execution wake meal-photo.captured occurredAt must match capturedAt.",
         );
       }
@@ -587,7 +589,7 @@ export function parseHostedExecutionWake(value: unknown): HostedExecutionWake {
         userId: wireUserId,
       });
     default:
-      throw new TypeError(`Unsupported hosted execution wake kind: ${kind}`);
+      throw new ContractValidationError(`Unsupported hosted execution wake kind: ${kind}`);
   }
 }
 
@@ -602,7 +604,7 @@ export function parseHostedExecutionMealPhotoCapturedPayload(
     "Hosted execution meal-photo.captured captureId",
   );
   if (!/^[a-f0-9]{64}$/u.test(captureId)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted execution meal-photo.captured captureId must be a lowercase SHA-256 digest.",
     );
   }
@@ -615,7 +617,7 @@ export function parseHostedExecutionMealPhotoCapturedPayload(
     mealPhotoKey.length > 192
     || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(mealPhotoKey)
   ) {
-    throw new TypeError("Hosted execution meal-photo.captured mealPhotoKey is invalid.");
+    throw new ContractValidationError("Hosted execution meal-photo.captured mealPhotoKey is invalid.");
   }
 
   const capturedAt = requireString(
@@ -626,7 +628,7 @@ export function parseHostedExecutionMealPhotoCapturedPayload(
     !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/u.test(capturedAt)
     || !Number.isFinite(Date.parse(capturedAt))
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted execution meal-photo.captured capturedAt must be an ISO timestamp.",
     );
   }
@@ -638,7 +640,7 @@ export function parseHostedExecutionMealPhotoCapturedPayload(
     || byteLength <= 0
     || byteLength > HOSTED_EXECUTION_MEAL_PHOTO_MAX_BYTES
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Hosted execution meal-photo.captured byteLength must be between 1 and ${HOSTED_EXECUTION_MEAL_PHOTO_MAX_BYTES}.`,
     );
   }
@@ -648,7 +650,7 @@ export function parseHostedExecutionMealPhotoCapturedPayload(
     "Hosted execution meal-photo.captured sha256",
   );
   if (!/^[a-f0-9]{64}$/u.test(sha256)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted execution meal-photo.captured sha256 must be a lowercase SHA-256 digest.",
     );
   }
@@ -830,7 +832,7 @@ function parseHostedExecutionLinqConversationMessagePayload(
   let groupParticipantAdded: true | undefined;
   if (record.groupParticipantAdded !== undefined) {
     if (record.groupParticipantAdded !== true) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "Hosted execution conversation.message wake payload groupParticipantAdded must be true when present.",
       );
     }
@@ -849,7 +851,7 @@ function parseHostedExecutionLinqConversationMessagePayload(
       || groupReactionContext.length > HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_MAX_CHARS
     )
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted execution conversation.message wake payload groupReactionContext is invalid.",
     );
   }
@@ -927,7 +929,7 @@ function parseOptionalHostedExecutionGroupSenderMemberId(
     "Hosted execution conversation.message wake payload senderMemberId",
   );
   if (senderMemberId.trim().length === 0 || senderMemberId.trim() !== senderMemberId) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted execution conversation.message wake payload senderMemberId must be a non-empty normalized string.",
     );
   }
@@ -957,7 +959,7 @@ function parseOptionalHostedExecutionLinqExternalThreadRouteAuthority(
   }
 
   if (authority.channel !== "linq") {
-    throw new TypeError(`${label} channel must be linq.`);
+    throw new ContractValidationError(`${label} channel must be linq.`);
   }
 
   return {
@@ -975,7 +977,7 @@ function parseOptionalHostedExecutionTelegramExternalThreadRouteAuthority(
     return authority;
   }
   if (authority.channel !== "telegram") {
-    throw new TypeError(`${label} channel must be telegram.`);
+    throw new ContractValidationError(`${label} channel must be telegram.`);
   }
   return {
     ...authority,
@@ -1016,7 +1018,7 @@ function parseHostedExecutionExternalThreadRouteChannel(
     case "telegram":
       return channel;
     default:
-      throw new TypeError(`${label} is invalid.`);
+      throw new ContractValidationError(`${label} is invalid.`);
   }
 }
 
@@ -1025,7 +1027,7 @@ function parseHostedExecutionLinqConversationContactKind(
   label: string,
 ) {
   if (!isHostedLinqConversationContactKind(value)) {
-    throw new TypeError(`${label} must be phone or email.`);
+    throw new ContractValidationError(`${label} must be phone or email.`);
   }
 
   return value;
@@ -1036,7 +1038,7 @@ function parseHostedExecutionEmailAttachmentSummaries(
   label: string,
 ): HostedExecutionEmailAttachmentSummary[] {
   if (!Array.isArray(value)) {
-    throw new TypeError(`${label} must be an array.`);
+    throw new ContractValidationError(`${label} must be an array.`);
   }
 
   return value.map((entry, index) => {
@@ -1083,7 +1085,7 @@ function parseHostedExecutionOptionalTimeZone(
   const normalized = normalizeIanaTimeZone(timeZone);
 
   if (!normalized) {
-    throw new TypeError(`${label} must be a valid IANA timezone.`);
+    throw new ContractValidationError(`${label} must be a valid IANA timezone.`);
   }
 
   return normalized;
@@ -1098,7 +1100,7 @@ function parseHostedExecutionLinqConversationMessage(
     record.affirmativeReaction !== undefined
     && record.affirmativeReaction !== true
   ) {
-    throw new TypeError(`${label} affirmativeReaction must be true when present.`);
+    throw new ContractValidationError(`${label} affirmativeReaction must be true when present.`);
   }
   return {
     ...(record.affirmativeReaction === undefined
@@ -1172,7 +1174,7 @@ function parseHostedExecutionLinqEditedTextPartIndex(
 ): number {
   const index = requireNumber(value, label);
   if (!Number.isSafeInteger(index) || index < 0 || index > 2_147_483_647) {
-    throw new TypeError(`${label} must be a non-negative int32.`);
+    throw new ContractValidationError(`${label} must be a non-negative int32.`);
   }
   return index;
 }
@@ -1183,7 +1185,7 @@ function parseHostedExecutionLinqEditedSourceInputId(
 ): string {
   const inputId = requireString(value, label);
   if (!/^ain_[0-9a-f]{32}$/u.test(inputId)) {
-    throw new TypeError(`${label} must be an opaque assistant input id.`);
+    throw new ContractValidationError(`${label} must be an opaque assistant input id.`);
   }
   return inputId;
 }
@@ -1236,7 +1238,7 @@ function parseHostedExecutionLinqConversationMessagePart(
     };
   }
 
-  throw new TypeError(`${label} type must be "text", "link", "media", or "voice_memo".`);
+  throw new ContractValidationError(`${label} type must be "text", "link", "media", or "voice_memo".`);
 }
 
 function parseHostedExecutionRedactedLogEntry(
@@ -1272,7 +1274,7 @@ function parseHostedExecutionLogLevelValue(
   if (isHostedExecutionLogLevel(level)) {
     return level;
   }
-  throw new TypeError(`${label} must be a valid hosted execution log level.`);
+  throw new ContractValidationError(`${label} must be a valid hosted execution log level.`);
 }
 
 export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent {
@@ -1489,7 +1491,7 @@ export function parseHostedExecutionEvent(value: unknown): HostedExecutionEvent 
         userId,
       };
     default:
-      throw new TypeError(`Unsupported hosted execution event kind: ${kind}`);
+      throw new ContractValidationError(`Unsupported hosted execution event kind: ${kind}`);
   }
 }
 
@@ -1611,7 +1613,7 @@ function parseHostedExecutionOperatorTaskNotification(
   const expiresAt = requireString(record.expiresAt, `${label}.expiresAt`);
   const date = new Date(expiresAt);
   if (!Number.isFinite(date.getTime()) || date.toISOString() !== expiresAt) {
-    throw new TypeError(`${label}.expiresAt must be a canonical timestamp.`);
+    throw new ContractValidationError(`${label}.expiresAt must be a canonical timestamp.`);
   }
   return {
     expiresAt,
@@ -1638,7 +1640,7 @@ function parseHostedExecutionGroupContextHandoffNotification(
     || !membershipId
     || [...membershipId].length > 256
   ) {
-    throw new TypeError(`${label}.membershipId is invalid.`);
+    throw new ContractValidationError(`${label}.membershipId is invalid.`);
   }
   return {
     membershipId,
@@ -1671,7 +1673,7 @@ function parseHostedExecutionGroupContextHandoffDisplayName(
       > HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS
     || /[\p{Cc}\p{Cf}\p{Cs}\p{Co}\p{Cn}]/u.test(displayName)
   ) {
-    throw new TypeError(`${label} is invalid.`);
+    throw new ContractValidationError(`${label} is invalid.`);
   }
   return displayName;
 }
@@ -1684,7 +1686,7 @@ function parseHostedExecutionPrivateAssistantAskCompletionNotification(
   assertExactHostedExecutionKeys(record, ["expiresAt", "requestId"], label);
   const requestId = requireString(record.requestId, `${label}.requestId`);
   if (!/^aask_req_[0-9a-f]{64}$/u.test(requestId)) {
-    throw new TypeError(`${label}.requestId is invalid.`);
+    throw new ContractValidationError(`${label}.requestId is invalid.`);
   }
   return {
     expiresAt: parseHostedExecutionAssistantAskTimestamp(
@@ -1707,7 +1709,7 @@ function parseHostedExecutionAssistantNotificationPromptProfile(
   ) {
     return profile as HostedExecutionAssistantNotificationPromptProfile;
   }
-  throw new TypeError(
+  throw new ContractValidationError(
     `${label} must be one of ${HOSTED_EXECUTION_ASSISTANT_NOTIFICATION_PROMPT_PROFILES.join(", ")}.`,
   );
 }
@@ -1731,7 +1733,7 @@ function parseHostedExecutionAssistantNotificationDeliveryDispatchMode(
   const mode = requireString(value, label);
 
   if (mode !== "immediate" && mode !== "queue-only") {
-    throw new TypeError(`${label} is invalid.`);
+    throw new ContractValidationError(`${label} is invalid.`);
   }
 
   return mode;
@@ -1740,18 +1742,22 @@ function parseHostedExecutionAssistantNotificationDeliveryDispatchMode(
 function parseGameRecapResponsePolicy(record: Record<string, unknown>, label: string) {
       assertExactHostedExecutionKeys(
         record,
-        ["eventId", "gameId", "kind", "pairFingerprint", "loreAccess", "show"],
+        ["eventId", "gameId", "kind", "pairFingerprint", "loreAccess", "show", "video"],
         label,
       );
-      if (record.show !== undefined && record.show !== true) throw new TypeError(`${label}.show must be true.`);
-      if (record.show && record.loreAccess === "read") throw new TypeError(`${label}.show is pair-only.`);
+      if (record.show !== undefined && record.show !== true) throw new ContractValidationError(`${label}.show must be true.`);
+      if (record.show && record.loreAccess === "read") throw new ContractValidationError(`${label}.show is pair-only.`);
+      // The show may also become one video. A runtime that reads this and makes none carries on unchanged.
+      if (record.video !== undefined && record.video !== true) throw new ContractValidationError(`${label}.video must be true.`);
+      if (record.video && !record.show) throw new ContractValidationError(`${label}.video requires a show.`);
       if (record.loreAccess !== undefined && record.loreAccess !== "read") {
-        throw new TypeError(`${label}.loreAccess must be read.`);
+        throw new ContractValidationError(`${label}.loreAccess must be read.`);
       }
       return {
         kind: "require_game_recap" as const,
         ...(record.loreAccess === "read" ? { loreAccess: "read" as const } : {}),
         ...(record.show === true ? { show: true as const } : {}),
+        ...(record.video === true ? { video: true as const } : {}),
         eventId: requireString(record.eventId, `${label}.eventId`),
         gameId: requireString(record.gameId, `${label}.gameId`),
         pairFingerprint: requireString(
@@ -1774,7 +1780,7 @@ function parseHostedExecutionAssistantNotificationResponsePolicy(
       const gameId = requireString(record.gameId, `${label}.gameId`);
       const eventId = requireString(record.eventId, `${label}.eventId`);
       if (eventId !== `game-rematch:${gameId}` || !Number.isSafeInteger(record.termsVersion) || Number(record.termsVersion) < 1) {
-        throw new TypeError(`${label} has invalid rematch revision authority.`);
+        throw new ContractValidationError(`${label} has invalid rematch revision authority.`);
       }
       return { kind, gameId, eventId, termsVersion: Number(record.termsVersion) };
     }
@@ -1824,7 +1830,7 @@ function parseHostedExecutionAssistantNotificationResponsePolicy(
         ),
       };
     default:
-      throw new TypeError(`${label}.kind is invalid.`);
+      throw new ContractValidationError(`${label}.kind is invalid.`);
   }
 }
 
@@ -1890,7 +1896,7 @@ export function parseHostedExecutionPrivateAssistantAskCompletionDeliveryAuthori
     || completionId.trim() !== completionId
     || [...completionId].length > 256
   ) {
-    throw new TypeError(`${label}.answeredMailboxItemIds is invalid.`);
+    throw new ContractValidationError(`${label}.answeredMailboxItemIds is invalid.`);
   }
   const idempotencyKey = requireString(
     record.idempotencyKey,
@@ -1903,14 +1909,14 @@ export function parseHostedExecutionPrivateAssistantAskCompletionDeliveryAuthori
         completionId,
       )
   ) {
-    throw new TypeError(`${label}.idempotencyKey is invalid.`);
+    throw new ContractValidationError(`${label}.idempotencyKey is invalid.`);
   }
   const responseTextDigest = requireString(
     record.responseTextDigest,
     `${label}.responseTextDigest`,
   );
   if (!/^[0-9a-f]{64}$/u.test(responseTextDigest)) {
-    throw new TypeError(`${label}.responseTextDigest is invalid.`);
+    throw new ContractValidationError(`${label}.responseTextDigest is invalid.`);
   }
   return {
     answeredMailboxItemIds,
@@ -1952,7 +1958,7 @@ export function parseHostedExecutionDirectRoute(
     };
   }
 
-  throw new TypeError(`${label}.channel is invalid.`);
+  throw new ContractValidationError(`${label}.channel is invalid.`);
 }
 
 function parseHostedExecutionAssistantNotificationDelivery(
@@ -1963,7 +1969,7 @@ function parseHostedExecutionAssistantNotificationDelivery(
   const kind = requireString(record.kind, `${label}.kind`);
 
   if (kind !== "explicit" && kind !== "participant" && kind !== "thread" && kind !== "bootstrap") {
-    throw new TypeError(`${label}.kind is invalid.`);
+    throw new ContractValidationError(`${label}.kind is invalid.`);
   }
 
   return {
@@ -1990,7 +1996,7 @@ function parseHostedExecutionAssistantNotificationDeliverySource(
   const kind = requireString(record.kind, `${label}.kind`);
 
   if (kind !== "linq") {
-    throw new TypeError(`${label}.kind is invalid.`);
+    throw new ContractValidationError(`${label}.kind is invalid.`);
   }
 
   return {
@@ -2042,7 +2048,7 @@ function parseHostedExecutionMemberPreferences(
     && voice === undefined
     && personality === undefined
   ) {
-    throw new TypeError(`${label} must include persona, tone, voice, or personality.`);
+    throw new ContractValidationError(`${label} must include persona, tone, voice, or personality.`);
   }
 
   return {
@@ -2060,7 +2066,7 @@ function parseHostedExecutionMemberPersonalityPreferences(
   const record = requireObject(value, label);
   for (const key of Object.keys(record)) {
     if (!isAssistantPersonalitySettingId(key)) {
-      throw new TypeError(`${label}.${key} is not a personality setting.`);
+      throw new ContractValidationError(`${label}.${key} is not a personality setting.`);
     }
   }
 
@@ -2071,13 +2077,13 @@ function parseHostedExecutionMemberPersonalityPreferences(
       continue;
     }
     if (score !== null && !isAssistantPersonalityScore(score)) {
-      throw new TypeError(`${label}.${settingId} is invalid.`);
+      throw new ContractValidationError(`${label}.${settingId} is invalid.`);
     }
     personality[settingId] = score;
   }
 
   if (Object.keys(personality).length === 0) {
-    throw new TypeError(`${label} must include at least one setting.`);
+    throw new ContractValidationError(`${label} must include at least one setting.`);
   }
 
   return personality;
@@ -2090,7 +2096,7 @@ function parseHostedExecutionAssistantPersonaPreference(
   const persona = requireString(value, label);
   const normalizedPersona = normalizeStoredAssistantPersonaId(persona);
   if (!normalizedPersona) {
-    throw new TypeError(`${label} is invalid.`);
+    throw new ContractValidationError(`${label} is invalid.`);
   }
   return normalizedPersona;
 }
@@ -2101,7 +2107,7 @@ function parseHostedExecutionAssistantTonePreference(
 ): HostedExecutionMemberPreferences["tone"] {
   const tone = requireString(value, label);
   if (!isAssistantTonePreference(tone)) {
-    throw new TypeError(`${label} is invalid.`);
+    throw new ContractValidationError(`${label} is invalid.`);
   }
   return tone;
 }
@@ -2112,7 +2118,7 @@ function parseHostedExecutionAssistantVoicePreference(
 ): HostedExecutionMemberPreferences["voice"] {
   const voice = requireString(value, label);
   if (!isAssistantVoiceOptionId(voice)) {
-    throw new TypeError(`${label} is invalid.`);
+    throw new ContractValidationError(`${label} is invalid.`);
   }
   return voice;
 }
@@ -2129,7 +2135,7 @@ function parsePreferenceCausalMetadata(
     && causalOrigin !== "event"
     && causalOrigin !== "turn"
   ) {
-    throw new TypeError("Hosted preference causalOrigin is invalid.");
+    throw new ContractValidationError("Hosted preference causalOrigin is invalid.");
   }
   const preferenceCausalSeq = record.preferenceCausalSeq;
   if (
@@ -2139,7 +2145,7 @@ function parsePreferenceCausalMetadata(
       || !/^(0|[1-9]\d*)$/u.test(preferenceCausalSeq)
     )
   ) {
-    throw new TypeError("Hosted preference preferenceCausalSeq is invalid.");
+    throw new ContractValidationError("Hosted preference preferenceCausalSeq is invalid.");
   }
   return {
     ...(causalOrigin === undefined ? {} : { causalOrigin }),
@@ -2161,7 +2167,7 @@ function parsePreferenceRequestedFields(
     )
     || new Set(value).size !== value.length
   ) {
-    throw new TypeError("Hosted preference requestedFields is invalid.");
+    throw new ContractValidationError("Hosted preference requestedFields is invalid.");
   }
   return { requestedFields: [...value] };
 }
@@ -2169,7 +2175,7 @@ function parsePreferenceRequestedFields(
 function parseHostedExecutionWakeKind(value: unknown, label: string): HostedExecutionWakeKind {
   const kind = requireString(value, label);
   if (!isHostedExecutionWakeKind(kind)) {
-    throw new TypeError(`${label} is invalid.`);
+    throw new ContractValidationError(`${label} is invalid.`);
   }
   return kind;
 }
@@ -2177,7 +2183,7 @@ function parseHostedExecutionWakeKind(value: unknown, label: string): HostedExec
 function parseHostedExecutionPositiveGeneration(value: unknown, label: string): number {
   const generation = requireNumber(value, label);
   if (!Number.isSafeInteger(generation) || generation < 1) {
-    throw new TypeError(`${label} must be a positive safe integer.`);
+    throw new ContractValidationError(`${label} must be a positive safe integer.`);
   }
   return generation;
 }
@@ -2190,7 +2196,7 @@ function assertExactHostedClinicalRecordsKeys(
   const allowed = new Set(keys);
   for (const key of Object.keys(record)) {
     if (!allowed.has(key)) {
-      throw new TypeError(`${label} contains unsupported field ${JSON.stringify(key)}.`);
+      throw new ContractValidationError(`${label} contains unsupported field ${JSON.stringify(key)}.`);
     }
   }
 }
@@ -2203,7 +2209,7 @@ function assertExactHostedExecutionKeys(
   const allowed = new Set(keys);
   for (const key of Object.keys(record)) {
     if (!allowed.has(key)) {
-      throw new TypeError(`${label} contains unsupported field ${JSON.stringify(key)}.`);
+      throw new ContractValidationError(`${label} contains unsupported field ${JSON.stringify(key)}.`);
     }
   }
 }
@@ -2219,7 +2225,7 @@ function assertExactHostedMealPhotoKeys(record: Record<string, unknown>): void {
   ]);
   for (const key of Object.keys(record)) {
     if (!allowed.has(key)) {
-      throw new TypeError(
+      throw new ContractValidationError(
         `Hosted execution meal-photo.captured payload contains unsupported field ${JSON.stringify(key)}.`,
       );
     }
@@ -2233,7 +2239,7 @@ function parseHostedConversationMessageChannel(
   const channel = requireString(value, label);
 
   if (!isHostedConversationMessageChannel(channel)) {
-    throw new TypeError(`${label} is invalid.`);
+    throw new ContractValidationError(`${label} is invalid.`);
   }
 
   return channel;

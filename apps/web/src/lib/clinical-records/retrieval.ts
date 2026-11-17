@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
 import { renewClinicalAccess, CLEAR_CLINICAL_PERSISTENT_ACCESS, clinicalCredentialsAfterCheck } from "./persistent-access";
@@ -308,7 +309,7 @@ export async function fetchClinicalRetrievalPage(input: {
       requestRowId: claimed.requestRowId,
       run,
     });
-    if (error instanceof TypeError) return unavailable("provider-response-invalid", false);
+    if (isInvalidClinicalResponse(error)) return unavailable("provider-response-invalid", false);
     if (isClinicalRecordsControlPlaneError(error)) {
       if (error.code === "CLINICAL_RECORD_SMART_REAUTH_REQUIRED") {
         const marked = await markClinicalConnectionNeedsReauth({
@@ -393,7 +394,7 @@ export async function fetchClinicalRetrievalDocument(input: {
         : unavailable("credentials-updated-retry", true);
     }
     if (error instanceof ClinicalResponseBodyLimitError) return unavailable("document-size-exceeded", false);
-    if (error instanceof TypeError || error instanceof SyntaxError) return unavailable("document-response-invalid", false);
+    if (isInvalidClinicalResponse(error) || error instanceof SyntaxError) return unavailable("document-response-invalid", false);
     if (isClinicalRecordsControlPlaneError(error)) {
       return unavailable(error.code === "CLINICAL_RECORD_FHIR_FAMILY_UNAVAILABLE"
         ? "document-unavailable" : error.retryable ? "provider-temporarily-unavailable" : "document-response-invalid", error.retryable);
@@ -420,7 +421,7 @@ async function loadClinicalDocumentRequest(input: {
       tokenVersion: input.run.connection.tokenVersion });
     patientIdHash = hashClinicalFhirPatientId(requireFhirPatientId(patientId));
   } catch (error) {
-    const invalid = error instanceof TypeError || error instanceof SyntaxError
+    const invalid = isInvalidClinicalResponse(error) || error instanceof SyntaxError
       || (error instanceof DOMException && error.name === "OperationError");
     return invalid ? { unavailable: "document-ticket-invalid", retryable: false }
       : { unavailable: "document-ticket-temporarily-unavailable", retryable: true };
@@ -482,7 +483,7 @@ async function sanitizeClinicalPageResponse(input: {
     return await readSanitizedFhirPage({ fhirBaseUrl: input.fhirBaseUrl,
       resourceType: input.input.request.resourceType, response: input.response });
   } catch (error) {
-    if (!(error instanceof TypeError)) throw error;
+    if (!isInvalidClinicalResponse(error)) throw error;
     throw clinicalRecordsError({ cause: error, code: "CLINICAL_RECORD_FHIR_RESPONSE_INVALID", httpStatus: 502,
       message: "The provider returned an invalid FHIR response." });
   }
@@ -795,7 +796,7 @@ async function loadRunnableClinicalRun(input: {
     if (
       record.retrievalProtocol !== "query-slices-v2"
     ) {
-      throw new TypeError("Stored Clinical Records retrieval protocol is unsupported.");
+      throw new ContractValidationError("Stored Clinical Records retrieval protocol is unsupported.");
     }
     retrievalPlan = clinicalFhirRetrievalPlanSchema.parse(record.retrievalPlanJson);
     sourceSystem = clinicalSourceSystemSchema.parse(record.connection.sourceSystem);
@@ -840,7 +841,7 @@ function parsePageCursor(
   expectedSlice: ClinicalFhirRetrievalSlice,
 ): ValidatedFhirPageUrl {
   const parsed: unknown = JSON.parse(plaintext);
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new TypeError("Invalid cursor.");
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new ContractValidationError("Invalid cursor.");
   const record = parsed as Record<string, unknown>;
   if (
       Object.keys(record).sort().join(",")
@@ -850,12 +851,12 @@ function parsePageCursor(
       || record.queryScopeId !== expectedSlice.queryScopeId
       || record.resourceType !== expectedSlice.resourceType
       || record.sliceId !== expectedSlice.sliceId
-    ) throw new TypeError("Invalid cursor.");
+    ) throw new ContractValidationError("Invalid cursor.");
   if (
     typeof record.url !== "string"
     || hasSurroundingAsciiWhitespace(record.url)
     || record.url.length > FHIR_NEXT_URL_MAX_CHARS
-  ) throw new TypeError("Invalid cursor.");
+  ) throw new ContractValidationError("Invalid cursor.");
   return { raw: record.url, url: new URL(record.url) };
 }
 
@@ -905,7 +906,7 @@ function assertFhirPageUrlAllowed(input: {
     || input.candidate.password
     || input.candidate.hash
     || !pathAllowed
-  ) throw new TypeError("FHIR page URL escaped the configured endpoint.");
+  ) throw new ContractValidationError("FHIR page URL escaped the configured endpoint.");
 }
 
 async function requireCurrentAccessToken(input: {
@@ -1458,4 +1459,10 @@ function canonicalizeJson(
     );
   }
   return value;
+}
+
+// A provider response or document our validators reject. The native TypeError
+// branch is what these sites matched before validation had its own class.
+function isInvalidClinicalResponse(error: unknown): boolean {
+  return error instanceof ContractValidationError || error instanceof TypeError;
 }

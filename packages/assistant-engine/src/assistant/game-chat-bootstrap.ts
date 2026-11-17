@@ -1,8 +1,10 @@
+import { ContractValidationError } from '@murphai/contracts/validation-error'
 import { listAssistantTranscriptTailEntries } from './store.js'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import type { AssistantDeliveryOutcome } from './service-contracts.js'
 import type { AssistantSession } from '@murphai/operator-config/assistant-cli-contracts'
 import { createAssistantRuntimeStateService } from './runtime-state-service.js'
+import { readAssistantOutboxIntentByDeliveryIdempotencyKey } from './outbox.js'
 import { createHostedAssistantConversationIdentifierBlind, hashHostedAssistantConversationIdentifier } from '@murphai/hosted-execution/assistant-identifiers'
 import type { HostedGameChatBootstrapResult } from '@murphai/hosted-execution/runtime-control'
 
@@ -92,16 +94,30 @@ async function acceptAssistantGameBootstrapReceipt(input: {
   receipt: BootstrapReceipt
   memberId: string | null | undefined
   session: AssistantSession
+  turnId?: string
   vault: string
 }): Promise<AssistantDeliveryOutcome> {
   const { receipt } = input
   const session = await adoptAssistantGameBootstrapSession(input)
+  const delivery = { channel: 'linq', target: receipt.chatId, targetKind: 'thread' as const,
+    sentAt: receipt.acceptedAt, messageLength: receipt.message.length,
+    idempotencyKey: receipt.deliveryId, providerMessageId: receipt.providerMessageId,
+    providerThreadId: receipt.chatId }
+  // The trusted Web receipt is already sent. Persist it atomically as terminal
+  // so native replies and reactions can attest it without ever resending it.
+  const intent = input.turnId
+    ? await createAssistantRuntimeStateService(input.vault).outbox.createIntent({
+        ...session.binding, bindingDelivery: session.binding.delivery,
+        sessionId: session.sessionId, turnId: input.turnId,
+        message: receipt.message, createdAt: receipt.acceptedAt,
+        deliveryIdempotencyKey: receipt.deliveryId,
+        initialState: { status: 'sent', delivery },
+      })
+    : await readAssistantOutboxIntentByDeliveryIdempotencyKey({
+        vault: input.vault, deliveryIdempotencyKey: receipt.deliveryId,
+      })
   return {
-    kind: 'sent', intentId: null, media: [], session,
-    delivery: { channel: 'linq', target: receipt.chatId, targetKind: 'thread',
-      sentAt: receipt.acceptedAt, messageLength: receipt.message.length,
-      idempotencyKey: receipt.deliveryId, providerMessageId: receipt.providerMessageId,
-      providerThreadId: receipt.chatId },
+    kind: 'sent', intentId: intent?.intentId ?? null, media: [], session, delivery,
   }
 }
 
@@ -112,11 +128,12 @@ export async function deliverAssistantGameBootstrapMessage(input: {
   media?: readonly import('@murphai/operator-config/assistant-cli-contracts').AssistantResponseMedia[] | null
   message: string
   session: AssistantSession
+  turnId: string
   memberId: string | null | undefined
   vault: string
 }): Promise<AssistantDeliveryOutcome> {
   if ((input.media?.length ?? 0) > 0 || input.card || input.followUpRequest) {
-    throw new TypeError('Game bootstrap supports one text announcement only.')
+    throw new ContractValidationError('Game bootstrap supports one text announcement only.')
   }
   const receipt = await input.bootstrap.send(input.message)
   if (receipt.status === 'unavailable') {

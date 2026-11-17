@@ -3201,8 +3201,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("checkpoints
         deliveryChannel: "linq",
         executionInspection: expect.objectContaining({
           status: "available",
-          current: { phase: "idle", occurrenceAt: null, startedAt: null, retryAt: null, error: null },
-          delivery: null,
+          current: { phase: "idle" },
           recentRuns: [],
         }),
         contextReferences: [],

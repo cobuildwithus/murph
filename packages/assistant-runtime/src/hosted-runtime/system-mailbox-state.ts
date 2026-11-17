@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { parseGameRecapEventId } from "@murphai/hosted-execution/runtime-control";
 import { createHash } from "node:crypto";
 import path from "node:path";
@@ -223,7 +224,7 @@ export function resolveHostedSystemMailboxProgress(input: {
   state: HostedSystemMailboxState;
 }): HostedSystemMailboxProgress {
   if (!/^(?:0|[1-9]\d*)$/u.test(input.importedSeq)) {
-    throw new TypeError("Hosted system mailbox imported seq must be a non-negative decimal string.");
+    throw new ContractValidationError("Hosted system mailbox imported seq must be a non-negative decimal string.");
   }
 
   const importedSeq = BigInt(input.importedSeq);
@@ -867,12 +868,14 @@ export function isHostedPlainDeviceSyncWakeHint(item: HostedSystemMailboxPending
 }
 
 export function isHostedPlainDeviceSyncWakeHintReason(reason: string | null | undefined): boolean {
-  // These producers store their work in canonical dirty state, which the
-  // retained connection owner fetches on its admitted pass.
+  // Current producers store work in canonical dirty state. The retired Fitbit
+  // migration hint carried no jobs; its Web admission returned a retryable error
+  // after append, leaving the original event with the webhook transport.
   return reason == null
     || reason === "webhook_dirty_transition"
     || reason === "companion_health_metadata"
-    || reason === "companion_hrv_rmssd";
+    || reason === "companion_hrv_rmssd"
+    || reason === "fitbit_migration_successor_arrival";
 }
 
 export interface HostedDeviceHintCoverage {
@@ -1342,11 +1345,11 @@ function parseHostedSystemMailboxStateValue(value: unknown): HostedSystemMailbox
     });
   }
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("hosted system mailbox state must be an object.");
+    throw new ContractValidationError("hosted system mailbox state must be an object.");
   }
   const pending = (value as { pending?: unknown }).pending;
   if (!Array.isArray(pending)) {
-    throw new TypeError("hosted system mailbox state.pending must be an array.");
+    throw new ContractValidationError("hosted system mailbox state.pending must be an array.");
   }
 
   return {
@@ -1374,12 +1377,12 @@ function parseHostedSystemMailboxStateValue(value: unknown): HostedSystemMailbox
 
 function parseHostedSystemMailboxPendingItem(value: unknown): HostedSystemMailboxPendingItem {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("hosted system mailbox pending item must be an object.");
+    throw new ContractValidationError("hosted system mailbox pending item must be an object.");
   }
   const record = value as Record<string, unknown>;
   const wake = parseHostedExecutionWake(record.wake);
   if (wake.kind === "conversation.message") {
-    throw new TypeError("hosted system mailbox wake must be a system wake.");
+    throw new ContractValidationError("hosted system mailbox wake must be a system wake.");
   }
 
   const item: HostedSystemMailboxPendingItem = {
@@ -1457,14 +1460,14 @@ function parseHostedSystemMailboxRouteAction(value: unknown): HostedSystemMailbo
     return value;
   }
 
-  throw new TypeError("hosted system mailbox routeAction is invalid.");
+  throw new ContractValidationError("hosted system mailbox routeAction is invalid.");
 }
 
 function parseHostedSystemMailboxStatus(value: unknown): "pending" | "recording" | "sending" {
   if (value === "pending" || value === "recording" || value === "sending") {
     return value;
   }
-  throw new TypeError("hosted system mailbox status is invalid.");
+  throw new ContractValidationError("hosted system mailbox status is invalid.");
 }
 
 function parseHostedSystemMailboxRecordRequest(value: unknown): HostedSystemMailboxPostCheckpointRecord {
@@ -1472,9 +1475,9 @@ function parseHostedSystemMailboxRecordRequest(value: unknown): HostedSystemMail
   const record = value as Record<string, unknown>;
   if (record.kind === "game.recap-lore-checkpointed") {
     assertHostedSystemMailboxRecordKeys(record, ["kind", "gameId", "eventId", "generationIds", "resume"], "Recap lore checkpoint");
-    if (typeof record.gameId !== "string" || typeof record.eventId !== "string" || parseGameRecapEventId(record.eventId)?.gameId !== record.gameId) throw new TypeError("Invalid recap checkpoint identity.");
+    if (typeof record.gameId !== "string" || typeof record.eventId !== "string" || parseGameRecapEventId(record.eventId)?.gameId !== record.gameId) throw new ContractValidationError("Invalid recap checkpoint identity.");
     if (typeof record.resume !== "boolean" || !Array.isArray(record.generationIds) || record.generationIds.length < 1 || record.generationIds.length > 20
-      || record.generationIds.some(id => typeof id !== "string" || !parseGameRecapEventId(id))) throw new TypeError("Invalid recap checkpoint generations.");
+      || record.generationIds.some(id => typeof id !== "string" || !parseGameRecapEventId(id))) throw new ContractValidationError("Invalid recap checkpoint generations.");
     return { kind: "game.recap-lore-checkpointed", gameId: record.gameId, eventId: record.eventId, generationIds: record.generationIds, resume: record.resume };
   }
   return parseHostedSystemMailboxRecordRequestLegacy(value);
@@ -1484,7 +1487,7 @@ function parseHostedSystemMailboxRecordRequestLegacy(
   value: unknown,
 ): HostedSystemMailboxPostCheckpointRecord {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("hosted system mailbox postCheckpointRecord must be an object.");
+    throw new ContractValidationError("hosted system mailbox postCheckpointRecord must be an object.");
   }
   const record = value as Record<string, unknown>;
 
@@ -1504,7 +1507,7 @@ function parseHostedSystemMailboxRecordRequestLegacy(
       "hosted system mailbox Clinical Records postCheckpointRecord",
     );
     if (record.nextWakeAt !== undefined && record.nextWakeAt !== null) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "hosted system mailbox Clinical Records postCheckpointRecord nextWakeAt must be null.",
       );
     }
@@ -1527,7 +1530,7 @@ function parseHostedSystemMailboxRecordRequestLegacy(
 
   if (record.kind === "device-sync.dirty-processed-batch") {
     if (!Array.isArray(record.records)) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "hosted system mailbox postCheckpointRecord records must be an array.",
       );
     }
@@ -1536,12 +1539,12 @@ function parseHostedSystemMailboxRecordRequestLegacy(
       && record.nextWakeAt == null
       && record.retainMailboxItemUntil == null
     ) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "hosted system mailbox postCheckpointRecord empty records must include a wake.",
       );
     }
     if (record.records.length > HOSTED_DEVICE_SYNC_DIRTY_ACK_BATCH_MAX_RECORDS) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "hosted system mailbox postCheckpointRecord records exceeds the dirty ack batch limit.",
       );
     }
@@ -1589,7 +1592,7 @@ function parseHostedSystemMailboxRecordRequestLegacy(
     };
   }
 
-  throw new TypeError("hosted system mailbox postCheckpointRecord kind is invalid.");
+  throw new ContractValidationError("hosted system mailbox postCheckpointRecord kind is invalid.");
 }
 
 function parseHostedDeviceSyncRetainedWake(
@@ -1597,7 +1600,7 @@ function parseHostedDeviceSyncRetainedWake(
 ): Extract<HostedExecutionSystemWake, { kind: "device-sync.wake" }> {
   const wake = parseHostedExecutionWake(value);
   if (wake.kind !== "device-sync.wake") {
-    throw new TypeError(
+    throw new ContractValidationError(
       "hosted system mailbox postCheckpointRecord retainedWake must be a device-sync wake.",
     );
   }
@@ -1612,7 +1615,7 @@ function assertHostedSystemMailboxRecordKeys(
   const allowed = new Set(allowedKeys);
   const unsupported = Object.keys(record).find((key) => !allowed.has(key));
   if (unsupported) {
-    throw new TypeError(`${label} contains unsupported field ${unsupported}.`);
+    throw new ContractValidationError(`${label} contains unsupported field ${unsupported}.`);
   }
 }
 
@@ -1621,7 +1624,7 @@ function parseHostedDeviceSyncDirtyProcessedPostCheckpointRecord(
   label: string,
 ): HostedDeviceSyncDirtyProcessedPostCheckpointRecord {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object.`);
+    throw new ContractValidationError(`${label} must be an object.`);
   }
   const record = value as Record<string, unknown>;
   const processedDirtyPayloadIds = readOptionalStringArray(
@@ -1635,7 +1638,7 @@ function parseHostedDeviceSyncDirtyProcessedPostCheckpointRecord(
   if (completedImports) {
     const processedIds = new Set(processedDirtyPayloadIds ?? []);
     if (completedImports.some((receipt) => !processedIds.has(receipt.dirtyPayloadId))) {
-      throw new TypeError(`${label} completedImports must reference processed dirty payload ids.`);
+      throw new ContractValidationError(`${label} completedImports must reference processed dirty payload ids.`);
     }
   }
 
@@ -1663,10 +1666,10 @@ function readHostedDeviceSyncCompletedImports(
     return undefined;
   }
   if (!Array.isArray(value)) {
-    throw new TypeError(`${label} must be an array when present.`);
+    throw new ContractValidationError(`${label} must be an array when present.`);
   }
   if (value.length > HOSTED_DEVICE_SYNC_DIRTY_ACK_MAX_PAYLOAD_IDS) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} must contain at most ${HOSTED_DEVICE_SYNC_DIRTY_ACK_MAX_PAYLOAD_IDS} entries.`,
     );
   }
@@ -1674,7 +1677,7 @@ function readHostedDeviceSyncCompletedImports(
   const seenPayloadIds = new Set<string>();
   return value.map((entry, index) => {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
-      throw new TypeError(`${label}[${index}] must be an object.`);
+      throw new ContractValidationError(`${label}[${index}] must be an object.`);
     }
     const completedImport = parseHostedExecutionDeviceSyncCompletedImport(
       entry,
@@ -1682,7 +1685,7 @@ function readHostedDeviceSyncCompletedImports(
     );
     const dirtyPayloadId = completedImport.dirtyPayloadId;
     if (seenPayloadIds.has(dirtyPayloadId)) {
-      throw new TypeError(`${label} must not repeat a dirty payload id.`);
+      throw new ContractValidationError(`${label} must not repeat a dirty payload id.`);
     }
     seenPayloadIds.add(dirtyPayloadId);
     return completedImport;
@@ -1852,14 +1855,14 @@ function hostedSystemMailboxPendingItemsMatch(
 
 function readRequiredString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.length === 0) {
-    throw new TypeError(`${label} must be a non-empty string.`);
+    throw new ContractValidationError(`${label} must be a non-empty string.`);
   }
   return value;
 }
 
 function readRequiredTrue(value: unknown, label: string): true {
   if (value !== true) {
-    throw new TypeError(`${label} must be true when present.`);
+    throw new ContractValidationError(`${label} must be true when present.`);
   }
   return true;
 }
@@ -1870,7 +1873,7 @@ function readOptionalPositiveIntegerString(value: unknown, label: string): strin
   }
   const seq = readRequiredString(value, label);
   if (!/^[1-9]\d*$/u.test(seq)) {
-    throw new TypeError(`${label} must be a positive decimal string.`);
+    throw new ContractValidationError(`${label} must be a positive decimal string.`);
   }
   return seq;
 }
@@ -1880,10 +1883,10 @@ function readOptionalStringArray(value: unknown, label: string): string[] | unde
     return undefined;
   }
   if (!Array.isArray(value)) {
-    throw new TypeError(`${label} must be an array when present.`);
+    throw new ContractValidationError(`${label} must be an array when present.`);
   }
   if (value.length > HOSTED_DEVICE_SYNC_DIRTY_ACK_MAX_PAYLOAD_IDS) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} must contain at most ${HOSTED_DEVICE_SYNC_DIRTY_ACK_MAX_PAYLOAD_IDS} entries.`,
     );
   }
@@ -1892,7 +1895,7 @@ function readOptionalStringArray(value: unknown, label: string): string[] | unde
 
 function readNonNegativeInteger(value: unknown, label: string): number {
   if (!Number.isSafeInteger(value) || (value as number) < 0) {
-    throw new TypeError(`${label} must be a non-negative safe integer.`);
+    throw new ContractValidationError(`${label} must be a non-negative safe integer.`);
   }
   return value as number;
 }
@@ -1902,11 +1905,11 @@ function readNullableIsoTimestamp(value: unknown, label: string): string | null 
     return null;
   }
   if (typeof value !== "string") {
-    throw new TypeError(`${label} must be a string or null.`);
+    throw new ContractValidationError(`${label} must be a string or null.`);
   }
   const timestamp = Date.parse(value);
   if (!Number.isFinite(timestamp)) {
-    throw new TypeError(`${label} must be an ISO timestamp.`);
+    throw new ContractValidationError(`${label} must be an ISO timestamp.`);
   }
   return value;
 }

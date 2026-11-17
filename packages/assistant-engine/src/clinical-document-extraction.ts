@@ -1,3 +1,4 @@
+import { ContractValidationError } from '@murphai/contracts/validation-error'
 import { createHash } from 'node:crypto'
 import { readFile, realpath, stat } from 'node:fs/promises'
 import path from 'node:path'
@@ -243,12 +244,12 @@ async function recoverClinicalExtractionDates(
 async function validateClinicalExtractionSource(input: ClinicalDocumentExtractionInput) {
   const rawRef = clinicalRawPathSchema.parse(input.source.rawRef)
   if (input.source.clinicalOccurredAt !== undefined && !isWritableIsoDateTime(input.source.clinicalOccurredAt)) {
-    throw new TypeError('Clinical extraction source date is invalid.')
+    throw new ContractValidationError('Clinical extraction source date is invalid.')
   }
   if (!/^[a-f0-9]{64}$/u.test(input.source.sha256)
     || !input.source.mediaType || input.source.mediaType.length > 255
     || /[\r\n\x00]/u.test(input.source.mediaType)) {
-    throw new TypeError('Clinical extraction source identity is invalid.')
+    throw new ContractValidationError('Clinical extraction source identity is invalid.')
   }
   const workspaceRoot = await realpath(input.workspaceRoot)
   const documentPath = await realpath(input.documentPath)
@@ -259,7 +260,7 @@ async function validateClinicalExtractionSource(input: ClinicalDocumentExtractio
   }
   const documentStat = await stat(documentPath)
   if (!documentStat.isFile() || documentStat.size > CLINICAL_DOCUMENT_MAX_BYTES) {
-    throw new TypeError('Clinical extraction document exceeds supported bounds.')
+    throw new ContractValidationError('Clinical extraction document exceeds supported bounds.')
   }
   const bytes = await readFile(documentPath)
   if (bytes.length > CLINICAL_DOCUMENT_MAX_BYTES
@@ -268,7 +269,7 @@ async function validateClinicalExtractionSource(input: ClinicalDocumentExtractio
   }
   if (input.extractedText !== undefined
     && Buffer.byteLength(input.extractedText, 'utf8') > MAX_EXTRACTED_TEXT_BYTES) {
-    throw new TypeError('Clinical extraction text exceeds supported bounds.')
+    throw new ContractValidationError('Clinical extraction text exceeds supported bounds.')
   }
   const resourceText = validateClinicalResourceAssignment(input, bytes)
   return { rawRef, workspaceRoot, documentPath, resourceText }
@@ -278,7 +279,7 @@ function validateClinicalResourceAssignment(input: ClinicalDocumentExtractionInp
   const resource = input.source.resource
   if (!resource) return undefined
   if (input.family !== 'all' || input.source.mediaType !== 'application/fhir+json'
-    || !/^[a-f0-9]{64}$/u.test(resource.sha256)) throw new TypeError('Clinical resource assignment is invalid.')
+    || !/^[a-f0-9]{64}$/u.test(resource.sha256)) throw new ContractValidationError('Clinical resource assignment is invalid.')
   const selected = selectClinicalFhirResource(bytes.toString('utf8'), resource.resourceType, resource.resourceId)
   const originalText = clinicalFhirResourceText(selected)
   const resourceText = clinicalFhirResourceExtractionText(selected)
@@ -291,7 +292,7 @@ function validateClinicalResourceAssignment(input: ClinicalDocumentExtractionInp
 async function validateClinicalRenderedEvidence(input: ClinicalDocumentExtractionInput) {
   if ((input.scratchRoots?.length ?? 0) > MAX_RENDERED_PAGES
     || (input.renderedPages?.length ?? 0) > MAX_RENDERED_PAGES) {
-    throw new TypeError('Clinical extraction rendered evidence exceeds supported bounds.')
+    throw new ContractValidationError('Clinical extraction rendered evidence exceeds supported bounds.')
   }
   const scratchRoots = await Promise.all((input.scratchRoots ?? []).map(async (root) => {
     const resolved = await realpath(root)
@@ -304,7 +305,7 @@ async function validateClinicalRenderedEvidence(input: ClinicalDocumentExtractio
   const pageNumbers = new Set<number>()
   for (const page of input.renderedPages ?? []) {
     if (!Number.isSafeInteger(page.page) || page.page < 1 || pageNumbers.has(page.page)) {
-      throw new TypeError('Clinical extraction page identity is invalid.')
+      throw new ContractValidationError('Clinical extraction page identity is invalid.')
     }
     const resolved = await realpath(page.path)
     if (!scratchRoots.some((root) => isWithinRoot(resolved, root))

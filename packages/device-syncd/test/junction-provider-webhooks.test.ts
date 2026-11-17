@@ -33,7 +33,10 @@ import {
 } from "@murphai/contracts";
 import { test, vi } from "vitest";
 import { DeviceSyncError } from "../src/errors.ts";
+import { createDeviceSyncPublicIngress } from "../src/public-ingress.ts";
+import { createDeviceSyncRegistry } from "../src/registry.ts";
 import { SqliteDeviceSyncStore } from "../src/store.ts";
+import { InMemoryPublicIngressStore } from "./public-ingress-store-fixture.ts";
 import { seedStoredAccount } from "./store-test-helpers.ts";
 import {
   buildJunctionProviderSourceInstanceKey,
@@ -598,7 +601,113 @@ test("Junction historical sleep completion webhooks fetch the bounded summary wi
   }
 });
 
-test("Junction replays Google Health completion's original history window after Fitbit cutover", async () => {
+test("Junction fetches a summary record too large to carry inline instead of failing the webhook", async () => {
+  const requests: string[] = [];
+  const importedSnapshots: unknown[] = [];
+  const provider = createJunctionProvider(
+    async (input) => {
+      const url = readUrl(input);
+      requests.push(url);
+      if (url.includes("/v2/user/providers/junction-user-1")) {
+        return createJsonResponse({
+          providers: [{
+            slug: "apple_health_kit",
+            name: "Apple Health",
+            status: "connected",
+            resource_availability: { sleep: true },
+          }],
+        });
+      }
+      if (url.includes("/v2/summary/sleep/junction-user-1")) {
+        return createJsonResponse({
+          data: [{
+            date: "2026-04-02",
+            id: "apple-sleep-fetched-1",
+            source: { provider: "apple_health_kit" },
+            total_sleep_minutes: 420,
+          }],
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    },
+    {
+      summaryResources: ["sleep"],
+      timeseriesResources: [],
+      webhookSecret: "whsec_d2ViaG9vay10ZXN0LXNlY3JldA==",
+    },
+  );
+  const ingress = createDeviceSyncPublicIngress({
+    publicBaseUrl: "https://sync.example.test/device-sync",
+    registry: createDeviceSyncRegistry([provider]),
+    store: new InMemoryPublicIngressStore(),
+  });
+  const prepare = (stageCount: number, messageId: string) => {
+    const webhook = createJunctionSvixWebhook({
+      body: {
+        event_type: "daily.data.sleep.created",
+        user_id: "junction-user-1",
+        client_user_id: "murph_blinded",
+        data: {
+          date: "2026-04-02",
+          id: "apple-sleep-1",
+          resource: "sleep",
+          source: { provider: "apple_health_kit" },
+          sleep_stream: { hypnogram: Array.from({ length: stageCount }, () => 4) },
+          total_sleep_minutes: 420,
+        },
+      },
+      messageId,
+      timestamp: "1775174400",
+    });
+    return ingress.prepareWebhookForDurableEnqueue(
+      "junction",
+      webhook.headers,
+      webhook.rawBody,
+      new Date("2026-04-03T00:00:00.000Z"),
+    );
+  };
+
+  // 16,000 two-character stages stay under the 32,768-character carrier.
+  const inline = await prepare(16_000, "msg_apple_sleep_inline");
+  assert.equal(typeof inline.jobs[0]?.payload?.webhookDataJson, "string");
+  assert.equal(inline.acceptanceMode, "durable_webhook_work");
+
+  const oversized = await prepare(17_000, "msg_apple_sleep_oversized");
+  assert.equal(oversized.dataSourceProviderSlug, "apple_health_kit");
+  assert.equal(oversized.jobs.length, 1);
+  const job = oversized.jobs[0];
+  assert.equal(job?.kind, "resource");
+  assert.equal(job?.payload?.resource, "sleep");
+  assert.equal(job?.payload?.sourceProviderSlug, "apple_health_kit");
+  assert.equal(job?.payload?.windowStart, "2026-04-01T00:00:00.000Z");
+  assert.equal(job?.payload?.windowEnd, "2026-04-03T00:00:00.000Z");
+  assert.equal("webhookDataJson" in (job?.payload ?? {}), false);
+
+  await executeJunctionJob(
+    provider,
+    createJunctionJobContext({
+      importSnapshot: async (snapshot) => {
+        importedSnapshots.push(snapshot);
+        return { imported: true };
+      },
+    }),
+    createJob(job?.kind ?? "resource", job?.payload ?? {}),
+  );
+  assert.equal(
+    requests.some((url) =>
+      url.includes("/v2/summary/sleep/junction-user-1")
+      && url.includes("provider=apple_health_kit")
+    ),
+    true,
+    `the oversized record should be fetched for its window; requests=${JSON.stringify(requests)}`,
+  );
+  const snapshot = importedSnapshots[0] as {
+    summaries?: Record<string, Array<Record<string, unknown>>>;
+  };
+  assert.equal(snapshot.summaries?.sleep?.[0]?.id, "apple-sleep-fetched-1");
+});
+
+test("Junction admits Google Health completion's original window while Fitbit remains connected", async () => {
   const requests: URL[] = [];
   const snapshots: unknown[] = [];
   const provider = createJunctionProvider(async (input) => {
@@ -649,7 +758,6 @@ test("Junction replays Google Health completion's original history window after 
       sourceInstanceKey: requireValue(buildJunctionProviderSourceInstanceKey({
         connectionId: "acct-junction-1", sourceProviderSlug,
       }), "Source key should be available."),
-      // No Fitbit canonical sleep coverage: this history is not replaced by cutover backfill.
       resourceAvailabilitySummary: sourceProviderSlug === "fitbit" ? {} : { sleep: true },
     }),
     resourceCount: sourceProviderSlug === "fitbit" ? 0 : 1,
@@ -663,12 +771,6 @@ test("Junction replays Google Health completion's original history window after 
     },
   });
   const job = createJob(prepared.kind, prepared.payload ?? {});
-  await executeJunctionJob(provider, context(), job);
-  assert.equal(requests.length, 0, "Web must retain this work while execution is fenced.");
-  assert.equal(snapshots.length, 0);
-
-  sources[0]!.status = "disconnected";
-  sources[0]!.lastErrorCode = "SOURCE_USER_DISCONNECTED";
   await executeJunctionJob(provider, context(), job);
   const fetch = requests.find((url) => url.pathname === "/v2/summary/sleep/junction-user-1");
   assert.ok(fetch);
@@ -1740,7 +1842,7 @@ test("Junction polling updates source projection and imports bounded summary/tim
   assert.equal(typeof result.metadataPatch?.junctionTemporalSweepV1, "string");
   assert.deepEqual(result.metadataPatch, {
     junctionTemporalSweepV1: result.metadataPatch?.junctionTemporalSweepV1,
-    junctionHistoricalBackfillStatus: "coverage_v3_complete",
+    junctionHistoricalBackfillStatus: "coverage_v4_complete",
     junctionHistoricalBackfillEmptyAttempts: 0,
     junctionHistoricalBackfillLastEmptyAt: null,
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -3173,6 +3275,109 @@ test("Junction companion HRV jobs import the derived observation without Junctio
       observation,
     },
   }]);
+});
+
+test("Junction holds accepted webhook work while its source reconnect is still open", async () => {
+  const requests: string[] = [];
+  const provider = createJunctionProvider(
+    async (input) => {
+      const url = readUrl(input);
+      requests.push(url);
+      if (url.includes("/v2/user/providers/junction-user-1")) {
+        return createJsonResponse({
+          providers: [{
+            slug: "apple_health_kit",
+            name: "Apple Health",
+            status: "connected",
+            resource_availability: { activity: true },
+          }],
+        });
+      }
+      if (url.includes("/v2/summary/activity/junction-user-1")) {
+        return createJsonResponse({ data: [] });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    },
+    { summaryResources: ["activity"], timeseriesResources: [] },
+  );
+  type SourceLifecycle = {
+    lastErrorCode?: string | null;
+    status: "connected" | "disconnected";
+  };
+  const accountWith = (source: SourceLifecycle) => createAccount({
+    sources: [{
+      sourceProviderSlug: "apple_health_kit",
+      displayName: null,
+      resourceCount: 1,
+      lastErrorCode: null,
+      lastErrorMessage: null,
+      firstSeenAt: "2026-04-01T00:00:00.000Z",
+      lastSeenAt: "2026-04-03T00:00:00.000Z",
+      lastDataAt: null,
+      ...source,
+    }],
+  });
+  const inlinePayload = {
+    eventType: "daily.data.activity.created",
+    objectId: "apple-activity-1",
+    occurredAt: "2026-04-02T00:00:00.000Z",
+    resource: "activity",
+    resourceCategory: "summary",
+    sourceProviderSlug: "apple_health_kit",
+    webhookDataJson: JSON.stringify({
+      date: "2026-04-02",
+      id: "apple-activity-1",
+      sourceProviderSlug: "apple_health_kit",
+      steps: 4321,
+    }),
+    windowStart: "2026-04-01T00:00:00.000Z",
+    windowEnd: "2026-04-03T00:00:00.000Z",
+  };
+  const { webhookDataJson: _inline, ...fetchPayload } = inlinePayload;
+  // A scheduled read carries no webhook event: nothing was accepted for it.
+  const { eventType: _eventType, ...scheduledPayload } = fetchPayload;
+  let importedCount = 0;
+  const run = (source: SourceLifecycle, payload: Record<string, unknown>) =>
+    executeJunctionJob(
+      provider,
+      createJunctionJobContext({
+        account: accountWith(source),
+        importSnapshot: async () => {
+          importedCount += 1;
+          return { imported: true };
+        },
+      }),
+      createJob("resource", payload),
+    );
+  const pending = { status: "disconnected" as const, lastErrorCode: null };
+  const isPendingHold = (error: unknown) =>
+    error instanceof DeviceSyncError
+    && error.code === "JUNCTION_SOURCE_ADMISSION_PENDING"
+    && error.retryable;
+
+  // The reconnect is open: the next data webhook can re-admit the source, so
+  // inline data and a webhook's window fetch both wait for it.
+  await assert.rejects(run(pending, inlinePayload), isPendingHold);
+  await assert.rejects(run(pending, fetchPayload), isPendingHold);
+  // Inline data names its own source when the job payload does not.
+  const inlineSourceOnlyPayload = { ...inlinePayload, sourceProviderSlug: "" };
+  await assert.rejects(run(pending, inlineSourceOnlyPayload), isPendingHold);
+  assert.deepEqual(await run(pending, scheduledPayload), {});
+
+  // A member's disconnect is final: its accepted work is dropped, not held.
+  const userDisconnected = {
+    status: "disconnected" as const,
+    lastErrorCode: "SOURCE_USER_DISCONNECTED",
+  };
+  assert.deepEqual(await run(userDisconnected, inlinePayload), {});
+  assert.deepEqual(await run(userDisconnected, inlineSourceOnlyPayload), {});
+  assert.deepEqual(await run(userDisconnected, fetchPayload), {});
+  assert.equal(importedCount, 0);
+  assert.deepEqual(requests, []);
+
+  // Once the source is re-admitted the same held job imports its data.
+  await run({ status: "connected" }, inlinePayload);
+  assert.equal(importedCount, 1);
 });
 
 test("Junction companion jobs do not import through a disconnected exact source", async () => {

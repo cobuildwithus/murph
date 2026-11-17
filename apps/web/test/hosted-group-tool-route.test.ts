@@ -103,8 +103,8 @@ describe("hosted group tool route", () => {
     expect(response.headers.get('x-murph-recap-scope')).toBe(authorized ? body.origin.eventId : null);
   });
 
-  it("forwards the signed game runtime identity for the mutation transaction fence", async () => {
-    const body = { action: "read_game", origin: { kind: "accepted_input", assistantInputId: `ain_${"a".repeat(32)}` } };
+  it.each(["read_game", "leave_group", "my_game_reminders", "my_game_not_for_me"])("forwards the signed %s runtime identity for the mutation transaction fence", async action => {
+    const body = { action, ...(action === "leave_group" ? { reason: "bot_loop" } : {}), ...(action.startsWith("my_game_") ? { operation: "read" } : {}), origin: { kind: "accepted_input", assistantInputId: `ain_${"a".repeat(32)}` } };
     mocks.handleTool.mockResolvedValue({ action: "read_game", result: { status: "ok", state: { games: [] } } });
     const response = await route.POST(new Request(`https://web.example.test${HOSTED_RUNTIME_GROUP_TOOL_PATH}?runtimeAuthority=1&runtimeAttempt=attempt-synthetic&runtimeGeneration=7&runtimeWorkspaceVersion=3`, {
       method: "POST", body: JSON.stringify(body), headers: { "content-type": "application/json" },
@@ -605,6 +605,15 @@ describe("hosted group tool route", () => {
       await expect(response.json()).resolves.toEqual(expectedResponse);
     },
   );
+
+  it.each(["leave_group", "game_chat_bootstrap", "read_game"])("rejects malformed %s schema input before effects", async (action) => {
+    const response = await route.POST(new Request(`https://web.example.test${HOSTED_RUNTIME_GROUP_TOOL_PATH}`, {
+      method: "POST", body: JSON.stringify({ action }), headers: { "content-type": "application/json" },
+    }));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: { code: "INVALID_REQUEST", message: "Invalid request." } });
+    expect(mocks.handleTool).not.toHaveBeenCalled();
+  });
 
   it("rejects an unmarked legacy group request before admission", async () => {
     const request = new Request(

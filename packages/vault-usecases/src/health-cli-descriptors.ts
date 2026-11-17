@@ -1,11 +1,13 @@
 import {
   bloodTestImportPayloadSchema,
-  conditionImportPayloadSchema,
-  healthEntityDefinitions,
   immunizationImportPayloadSchema,
-  type JsonObject,
-  type HealthEntityDefinition,
-  type HealthEntityKind,
+} from "@murphai/contracts/zod";
+import { conditionImportPayloadSchema } from "@murphai/contracts/shares";
+import { healthEntityDefinitions } from "@murphai/contracts/health-entities";
+import type {
+  JsonObject,
+  HealthEntityDefinition,
+  HealthEntityKind,
 } from "@murphai/contracts";
 import * as z from "@murphai/contracts/zod-runtime";
 import type {
@@ -19,10 +21,10 @@ import type {
   HealthQueryShowServiceMethodName,
 } from "./health-cli-method-types.js";
 import {
-  listItemSchema,
   localDateSchema,
   pathSchema,
-  showResultSchema,
+  recordListEntitySchema,
+  recordShowResultSchema,
 } from "@murphai/operator-config/vault-cli-contracts";
 import {
   getHealthRegistryFamily,
@@ -113,7 +115,7 @@ export function createHealthScaffoldResultSchema<TNoun extends string>(noun: TNo
   });
 }
 
-export const healthShowResultSchema = showResultSchema;
+export const healthShowResultSchema = recordShowResultSchema;
 
 export const healthListFiltersSchema = z.object({
   from: localDateSchema.optional(),
@@ -127,7 +129,7 @@ export const healthListFiltersSchema = z.object({
 export const healthListResultSchema = z.object({
   vault: pathSchema,
   filters: healthListFiltersSchema,
-  items: z.array(listItemSchema),
+  items: z.array(recordListEntitySchema),
   count: z.number().int().nonnegative(),
   nextCursor: z.string().min(1).nullable(),
 });

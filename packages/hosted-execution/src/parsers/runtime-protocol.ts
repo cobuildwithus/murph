@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { buildHostedRuntimeReplicaBatchProtocolProbe, parseHostedRuntimeReplicaPutCommand } from "../runtime-resources.ts";
 import {
   HOSTED_RUNTIME_LOG_EVENT_CODES,
@@ -7,6 +8,8 @@ import {
 } from "../runtime-control.ts";
 import { requireObject } from "./assertions.ts";
 import { parseHostedRuntimeOwnerCommand } from "../runtime-owner.ts";
+import { buildRecapScoreProtocolProbe, buildRecapVideoProtocolProbe, hostedGameToolRequestSchema, hostedGameToolResponseSchema } from "../game-tools.ts";
+import { recapAssetSchema } from "@murphai/contracts/recap-show";
 
 // Preserve the legacy response for callers which do not need an audience.
 // Scheduled delivery still independently requires the live owner's boolean.
@@ -20,7 +23,7 @@ export function parseHostedExternalThreadRouteAuthorityResponse(
     || (assistantAskFallbackRequired !== undefined && typeof assistantAskFallbackRequired !== "boolean")
     || (threadIsDirect !== undefined && typeof threadIsDirect !== "boolean")
   ) {
-    throw new TypeError("Hosted external thread route authority response is invalid.");
+    throw new ContractValidationError("Hosted external thread route authority response is invalid.");
   }
   if (threadIsDirect === undefined && assistantAskFallbackRequired === undefined) return;
   return {
@@ -79,6 +82,33 @@ export function assertHostedRuntimeWebProtocolAdmission(
     throw new Error("Hosted Web protocol admission failed: thread_route_audience.");
   }
   assertRuntimeOwnerCompletionEvidence(record.runtimeOwnerCompletion);
+  assertRecapScoreEvidence(record.recapScore);
+  assertRecapVideoEvidence(record.recapVideo);
+}
+
+/** Web must read a video part, a candidate and an identity request before a runtime that sends them is activated. */
+function assertRecapVideoEvidence(value: unknown): void {
+  try {
+    const video = requireObject(value, "Recap video evidence");
+    const expected = buildRecapVideoProtocolProbe();
+    for (const field of ["part", "write", "recover"] as const) {
+      if (JSON.stringify(hostedGameToolRequestSchema.parse(video[field])) !== JSON.stringify(hostedGameToolRequestSchema.parse(expected[field]))) throw new Error("Video witness mismatch.");
+    }
+    if (JSON.stringify(hostedGameToolResponseSchema.parse(video.result)) !== JSON.stringify(hostedGameToolResponseSchema.parse(expected.result))) throw new Error("Video witness mismatch.");
+  } catch {
+    throw new Error("Hosted Web protocol admission failed: recap_video.");
+  }
+}
+
+function assertRecapScoreEvidence(value: unknown): void {
+  try {
+    const score = requireObject(value, "Recap score evidence");
+    const expected = buildRecapScoreProtocolProbe();
+    if (JSON.stringify(hostedGameToolRequestSchema.parse(score.upload)) !== JSON.stringify(hostedGameToolRequestSchema.parse(expected.upload))
+      || JSON.stringify(recapAssetSchema.parse(score.asset)) !== JSON.stringify(recapAssetSchema.parse(expected.asset))) throw new Error("Score witness mismatch.");
+  } catch {
+    throw new Error("Hosted Web protocol admission failed: recap_score.");
+  }
 }
 
 function assertRuntimeOwnerCompletionEvidence(value: unknown): void {

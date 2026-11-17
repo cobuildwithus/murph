@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
 import { normalizeIanaTimeZone } from "@murphai/contracts";
@@ -83,7 +84,7 @@ function parseSnapshotEnvelope(input: {
   try {
     value = JSON.parse(input.plaintext);
   } catch {
-    throw new TypeError("Hosted vault-share projection snapshot must be valid JSON.");
+    throw new ContractValidationError("Hosted vault-share projection snapshot must be valid JSON.");
   }
   const snapshot = requirePlainObject(
     value,
@@ -96,10 +97,10 @@ function parseSnapshotEnvelope(input: {
     "Hosted vault-share projection snapshot",
   );
   if (snapshot.schema !== HOSTED_VAULT_SHARE_PROJECTION_SNAPSHOT_SCHEMA) {
-    throw new TypeError("Hosted vault-share projection snapshot schema is invalid.");
+    throw new ContractValidationError("Hosted vault-share projection snapshot schema is invalid.");
   }
   if (!Array.isArray(snapshot.records)) {
-    throw new TypeError("Hosted vault-share projection snapshot records must be an array.");
+    throw new ContractValidationError("Hosted vault-share projection snapshot records must be an array.");
   }
   return {
     ...(snapshot.memberTimeZone === undefined ? {} : { memberTimeZone: requireMemberTimeZone(snapshot.memberTimeZone) }),
@@ -155,7 +156,7 @@ export async function decryptHostedVaultShareProjectionSnapshotsWithAgeGroups(in
     && entry.ciphertext !== undefined
     && entry.ciphertext.trim().length === 0
   )) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted vault-share projection snapshot ciphertext must not be blank.",
     );
   }
@@ -230,7 +231,7 @@ function parseHostedVaultShareProjectionSnapshotRecords(
     share.projectionScope,
   );
   if (value.length > maxRecords) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Hosted vault-share projection snapshot records must contain at most ${maxRecords} entries.`,
     );
   }
@@ -242,7 +243,7 @@ function parseHostedVaultShareProjectionSnapshotRecords(
       share.projectionScope,
     );
     if (seenRecordKeys.has(parsed.recordKey)) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "Hosted vault-share projection snapshot record keys must be unique.",
       );
     }
@@ -263,7 +264,7 @@ function assertHostedVaultShareProjectionSnapshotAuthority(
     || buildHostedVaultShareProjectionScopeKey(projectionScope)
       !== share.projectionScopeKey
   ) {
-    throw new TypeError("Hosted vault-share projection snapshot authority is invalid.");
+    throw new ContractValidationError("Hosted vault-share projection snapshot authority is invalid.");
   }
   for (const [label, value] of [
     ["id", share.id],
@@ -271,20 +272,20 @@ function assertHostedVaultShareProjectionSnapshotAuthority(
     ["destinationMemberId", share.destinationMemberId],
   ] as const) {
     if (!value.trim()) {
-      throw new TypeError(`Hosted vault-share projection snapshot ${label} is required.`);
+      throw new ContractValidationError(`Hosted vault-share projection snapshot ${label} is required.`);
     }
   }
 }
 
 function assertHostedVaultShareProjectionSnapshotSize(value: string): void {
   if (new TextEncoder().encode(value).byteLength > HOSTED_VAULT_SHARE_PROJECTION_SNAPSHOT_MAX_BYTES) {
-    throw new TypeError("Hosted vault-share projection snapshot is too large.");
+    throw new ContractValidationError("Hosted vault-share projection snapshot is too large.");
   }
 }
 
 function requirePlainObject(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object.`);
+    throw new ContractValidationError(`${label} must be an object.`);
   }
   return value as Record<string, unknown>;
 }
@@ -300,12 +301,12 @@ function assertExactKeys(
     actualKeys.length !== expectedKeys.length
     || actualKeys.some((key, index) => key !== expectedKeys[index])
   ) {
-    throw new TypeError(`${label} has unexpected fields.`);
+    throw new ContractValidationError(`${label} has unexpected fields.`);
   }
 }
 
 function requireMemberTimeZone(value: unknown): string {
   const timeZone = typeof value === "string" ? normalizeIanaTimeZone(value) : null;
-  if (!timeZone) throw new TypeError("Hosted vault-share snapshot member timezone is invalid.");
+  if (!timeZone) throw new ContractValidationError("Hosted vault-share snapshot member timezone is invalid.");
   return timeZone;
 }

@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 export interface OverviewWeeklyStat {
   currentWeekAvg: number | null;
   deltaPercent: number | null;
@@ -56,8 +57,7 @@ export function buildOverviewWeeklyStatDetailsFromDailySampleSummaries(
   options: { includeCurrentDay?: boolean } = {},
 ): OverviewWeeklyStatDetails[] {
   const today = formatOverviewDateTimeParts(resolveOverviewReferenceDate(referenceDate), timeZone);
-  const mondayOffset = today.dayOfWeek === 0 ? 6 : today.dayOfWeek - 1;
-  const thisWeekStart = addDaysToIsoDate(today.dayKey, -mondayOffset);
+  const thisWeekStart = addDaysToIsoDate(today.dayKey, -today.mondayOffset);
   const lastWeekStart = addDaysToIsoDate(thisWeekStart, -7);
 
   const thisWeekSamples = new Map<string, OverviewWeeklySampleAccumulator>();
@@ -117,8 +117,8 @@ export function buildOverviewWeeklyStatDetailsFromDailySampleSummaries(
       continue;
     }
 
-    const currentWeekAvg = averageValues(currentWeek ?? null);
-    const previousWeekAvg = averageValues(previousWeek ?? null);
+    const currentWeekAvg = averageValues(currentWeek);
+    const previousWeekAvg = averageValues(previousWeek);
     let deltaPercent: number | null = null;
 
     if (
@@ -155,7 +155,7 @@ function resolveOverviewReferenceDate(referenceDate: Date | string): Date {
   const parsed = new Date(referenceDate);
 
   if (Number.isNaN(parsed.valueOf())) {
-    throw new TypeError("Overview weekly stats referenceDate must be a valid datetime.");
+    throw new ContractValidationError("Overview weekly stats referenceDate must be a valid datetime.");
   }
 
   return parsed;
@@ -166,7 +166,7 @@ function buildWeeklyStatKey(stream: string, unit: string | null): string {
 }
 
 function averageValues(
-  value: { numericSampleCount: number; sumValue: number } | null,
+  value: OverviewWeeklySampleAccumulator | undefined,
 ): number | null {
   if (!value || value.numericSampleCount <= 0) {
     return null;
@@ -184,7 +184,7 @@ function addDaysToIsoDate(value: string, days: number): string {
 function formatOverviewDateTimeParts(
   value: Date,
   timeZone: string,
-): { dayKey: string; dayOfWeek: number } {
+): { dayKey: string; mondayOffset: number } {
   const formatter = new Intl.DateTimeFormat("en-CA", {
     timeZone,
     year: "numeric",
@@ -200,27 +200,6 @@ function formatOverviewDateTimeParts(
 
   return {
     dayKey: `${year}-${month}-${day}`,
-    dayOfWeek: mapWeekdayToIndex(weekday),
+    mondayOffset: Math.max(0, ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].indexOf(weekday)),
   };
-}
-
-function mapWeekdayToIndex(weekday: string): number {
-  switch (weekday) {
-    case "Sun":
-      return 0;
-    case "Mon":
-      return 1;
-    case "Tue":
-      return 2;
-    case "Wed":
-      return 3;
-    case "Thu":
-      return 4;
-    case "Fri":
-      return 5;
-    case "Sat":
-      return 6;
-    default:
-      return 1;
-  }
 }

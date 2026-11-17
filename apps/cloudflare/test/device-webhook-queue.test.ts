@@ -2,6 +2,9 @@ import {
   DEVICE_WEBHOOK_ADMISSION_MAX_BODY_BYTES,
   DEVICE_WEBHOOK_ADMISSION_RESULT_SCHEMA,
   DEVICE_WEBHOOK_TRANSPORT_USER_ID,
+  DEVICE_WEBHOOK_QUEUE_MAX_ENVELOPE_BYTES,
+  createDeviceWebhookTransportPrivateKeyringFromJson,
+  openDeviceWebhookQueueEnvelope,
   HOSTED_DEVICE_WEBHOOK_ADMISSION_PATH,
   sealDeviceWebhookQueueEnvelope,
   type DeviceWebhookQueueEnvelopeV1,
@@ -16,7 +19,8 @@ import { deviceWebhookEnqueueRoutes } from "../src/worker/route-handlers/device-
 import {
   asWorkerStringEnvironment,
 } from "../src/worker-contracts.ts";
-import type { WorkerEnvironmentSource } from "../src/worker-routes/shared.ts";
+import { mapWorkerRouteError } from "../src/worker/errors.ts";
+import type { WorkerRouteContext, WorkerEnvironmentSource } from "../src/worker-routes/shared.ts";
 import {
   createHostedExecutionTestEnv,
   TEST_AUTOMATION_RECIPIENT_PUBLIC_JWK,
@@ -29,6 +33,103 @@ afterEach(() => {
 });
 
 describe("hosted device webhook Queue consumer", () => {
+  it.each(["HOSTED_CRYPTO_ENV", "HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK"])(
+    "maps missing %s to a server error before enqueue", (key) => {
+      const env = { ...createWorkerEnv(), [key]: "" };
+      let failure: unknown;
+      try {
+        readHostedExecutionEnvironment(asWorkerStringEnvironment(env));
+      } catch (error) {
+        failure = error;
+      }
+      expect(failure).toBeInstanceOf(TypeError);
+      expect(mapWorkerRouteError(new Request("https://runner.example.test/internal/device-webhooks/enqueue"), failure).status).toBe(500);
+    },
+  );
+  it.each(["{", "{}", " ".repeat(DEVICE_WEBHOOK_QUEUE_MAX_ENVELOPE_BYTES + 1)])(
+    "keeps malformed JSON, shape, and oversized bodies as explicit rejections (%#)", async (body) => {
+      const env = createWorkerEnv();
+      const send = vi.fn(async () => createQueueSendResponse());
+      const request = new Request("https://runner.example.test/internal/device-webhooks/enqueue", { method: "POST", body });
+      const response = await handleEnqueue({
+        env: { ...env, DEVICE_WEBHOOK_QUEUE: createQueueBinding(send) },
+        environment: readHostedExecutionEnvironment(asWorkerStringEnvironment(env)),
+        request, url: new URL(request.url),
+      }, {});
+      expect(response.status).toBe(400);
+      expect(send).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([TypeError, RangeError, URIError, SyntaxError])("does not reject the caller for a body stream %s", async (ErrorClass) => {
+    const env = createWorkerEnv();
+    const request = new Request("https://runner.example.test/internal/device-webhooks/enqueue", {
+      method: "POST",
+      body: new ReadableStream({ start(controller) { controller.error(new ErrorClass("Synthetic read failure.")); } }),
+      duplex: "half",
+    } as RequestInit);
+    const response = await handleEnqueue({
+      env, environment: readHostedExecutionEnvironment(asWorkerStringEnvironment(env)), request, url: new URL(request.url),
+    }, {});
+    expect(response.status).toBe(500);
+  });
+
+  it("preserves prepared event identity after queue acceptance loses its response", async () => {
+    const envelope = await createEnvelope(0);
+    const env = createWorkerEnv();
+    const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(env));
+    const persisted: DeviceWebhookQueueEnvelopeV1[] = [];
+    const send = vi.fn(async (entry: DeviceWebhookQueueEnvelopeV1) => {
+      persisted.push(entry);
+      if (persisted.length === 1) throw new TypeError("Synthetic lost acceptance response.");
+      return createQueueSendResponse();
+    });
+    const deliver = () => {
+      const request = new Request("https://runner.example.test/internal/device-webhooks/enqueue", {
+        method: "POST", body: JSON.stringify(envelope),
+      });
+      return handleEnqueue({
+        env: { ...env, DEVICE_WEBHOOK_QUEUE: createQueueBinding(send) },
+        environment, request, url: new URL(request.url),
+      }, {});
+    };
+    expect((await deliver()).status).toBe(503);
+    expect((await deliver()).status).toBe(202);
+    const privateKeyring = createDeviceWebhookTransportPrivateKeyringFromJson({
+      activePrivateJwkJson: environment.hostedCryptoCloudflareAutomationPrivateJwk,
+      activeRecipientKeyId: environment.hostedCryptoCloudflareAutomationKeyId,
+      keyringJson: environment.hostedCryptoCloudflareAutomationPrivateKeyringJson,
+    });
+    const decoded = await Promise.all(persisted.map((entry) => openDeviceWebhookQueueEnvelope({
+      env: environment.hostedCryptoEnv, envelope: entry, privateKeyring,
+    })));
+    expect(persisted[0]?.transportId).not.toBe(persisted[1]?.transportId);
+    expect(decoded[0]?.preparedWebhook).toEqual(decoded[1]?.preparedWebhook);
+  });
+
+  it.each(["importKey", "decrypt", "encrypt"] as const)(
+    "retries a server crypto failure in %s before any queue write", async (operation) => {
+      const envelope = await createEnvelope(0);
+      const env = createWorkerEnv();
+      const environment = readHostedExecutionEnvironment(asWorkerStringEnvironment(env));
+      const send = vi.fn(async () => createQueueSendResponse());
+      const deliver = () => {
+        const request = new Request("https://runner.example.test/internal/device-webhooks/enqueue", {
+          method: "POST", body: JSON.stringify(envelope),
+        });
+        return handleEnqueue({
+          env: { ...env, DEVICE_WEBHOOK_QUEUE: createQueueBinding(send) },
+          environment, request, url: new URL(request.url),
+        }, {});
+      };
+      vi.spyOn(crypto.subtle, operation).mockRejectedValueOnce(new TypeError("Synthetic crypto implementation failure."));
+      expect((await deliver()).status).toBe(500);
+      expect(send).not.toHaveBeenCalled();
+      expect((await deliver()).status).toBe(202);
+      expect(send).toHaveBeenCalledOnce();
+    },
+  );
+
   it("keeps enqueue OIDC-only and returns success only after Queue.send resolves", async () => {
     const envelope = await createEnvelope(0);
     const send = vi.fn(async (_envelope: DeviceWebhookQueueEnvelopeV1) =>
@@ -38,7 +139,7 @@ describe("hosted device webhook Queue consumer", () => {
     expect(route.authorization).toBe("vercel-oidc");
     expect(route.authorizeBeforeMethod).toBe(true);
 
-    const response = await route.handle({
+    const response = await handleEnqueue({
       env: {
         ...env,
         DEVICE_WEBHOOK_QUEUE: createQueueBinding(send),
@@ -58,11 +159,28 @@ describe("hosted device webhook Queue consumer", () => {
     expect(response.status).toBe(202);
   });
 
+  it("rejects a short payload IV as malformed before queue persistence", async () => {
+    const envelope = await createEnvelope(0);
+    envelope.encryptedPayload.iv = "AA==";
+    const send = vi.fn(async () => createQueueSendResponse());
+    const env = createWorkerEnv();
+    const response = await handleEnqueue({
+      env: { ...env, DEVICE_WEBHOOK_QUEUE: createQueueBinding(send) },
+      environment: readHostedExecutionEnvironment(asWorkerStringEnvironment(env)),
+      request: new Request("https://runner.example.test/internal/device-webhooks/enqueue", {
+        body: JSON.stringify(envelope), method: "POST",
+      }),
+      url: new URL("https://runner.example.test/internal/device-webhooks/enqueue"),
+    }, {});
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ code: "invalid_request", error: "Malformed device webhook envelope." });
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it("returns a retryable service failure when Queue.send rejects", async () => {
     const envelope = await createEnvelope(0);
-    const route = deviceWebhookEnqueueRoutes[0]!;
     const env = createWorkerEnv();
-    const response = await route.handle({
+    const response = await handleEnqueue({
       env: {
         ...env,
         DEVICE_WEBHOOK_QUEUE: createQueueBinding(async () => {
@@ -84,6 +202,7 @@ describe("hosted device webhook Queue consumer", () => {
     const original = await createEnvelope(0);
     const mutations: Array<{
       code: string;
+      status?: number;
       mutate: (envelope: DeviceWebhookQueueEnvelopeV1) => void;
     }> = [
       { code: "transport_context_mismatch", mutate(envelope) {
@@ -92,25 +211,25 @@ describe("hosted device webhook Queue consumer", () => {
       { code: "transport_metadata_invalid", mutate(envelope) {
         envelope.encryptedPayload.rootKeyId = "plaintext-root-marker";
       } },
-      { code: "transport_recipient_key_unavailable", mutate(envelope) {
+      { code: "transport_recipient_key_unavailable", status: 500, mutate(envelope) {
         envelope.rootKeyWrap.recipientKeyId = "plaintext-key-marker";
       } },
       { code: "transport_metadata_invalid", mutate(envelope) {
         envelope.rootKeyWrap.iv = btoa("plaintext-marker");
       } },
-      { code: "transport_payload_open_failed", mutate(envelope) {
+      { code: "transport_payload_open_failed", status: 500, mutate(envelope) {
         envelope.encryptedPayload.ciphertext = replaceFirstBase64Character(
           envelope.encryptedPayload.ciphertext,
         );
       } },
     ];
 
-    for (const { code, mutate } of mutations) {
+    for (const { code, mutate, status = 400 } of mutations) {
       const envelope = structuredClone(original);
       mutate(envelope);
       const send = vi.fn(async () => createQueueSendResponse());
       const env = createWorkerEnv();
-      const response = await deviceWebhookEnqueueRoutes[0]!.handle({
+      const response = await handleEnqueue({
         env: {
           ...env,
           DEVICE_WEBHOOK_QUEUE: createQueueBinding(send),
@@ -123,12 +242,12 @@ describe("hosted device webhook Queue consumer", () => {
         url: new URL("https://runner.example.test/internal/device-webhooks/enqueue"),
       }, {});
 
-      expect(response.status).toBe(400);
+      expect(response.status).toBe(status);
       const body = await response.json();
-      expect(body).toEqual({
+      expect(body).toEqual(status === 400 ? {
         code,
         error: "Unauthenticated device webhook envelope.",
-      });
+      } : { error: "Internal error." });
       const visibleResponse = JSON.stringify(body);
       expect(visibleResponse).not.toContain("plaintext");
       expect(visibleResponse).not.toContain(envelope.transportId);
@@ -160,7 +279,7 @@ describe("hosted device webhook Queue consumer", () => {
         ...createWorkerEnv(),
         ...invalidEnvironment,
       };
-      const response = await deviceWebhookEnqueueRoutes[0]!.handle({
+      const response = await handleEnqueue({
         env: {
           ...env,
           DEVICE_WEBHOOK_QUEUE: createQueueBinding(send),
@@ -180,12 +299,9 @@ describe("hosted device webhook Queue consumer", () => {
         ),
       }, {});
 
-      expect(response.status).toBe(400);
+      expect(response.status).toBe(500);
       const body = await response.json();
-      expect(body).toEqual({
-        code: "persistence_key_unavailable",
-        error: "Unauthenticated device webhook envelope.",
-      });
+      expect(body).toEqual({ error: "Internal error." });
       const visibleResponse = JSON.stringify(body);
       expect(visibleResponse).not.toContain("private-jwk-marker");
       expect(visibleResponse).not.toContain("private-keyring-marker");
@@ -594,4 +710,12 @@ function createQueueSendResponse(): QueueSendResponse {
 
 function replaceFirstBase64Character(value: string): string {
   return `${value[0] === "A" ? "B" : "A"}${value.slice(1)}`;
+}
+
+async function handleEnqueue(context: WorkerRouteContext, params: Readonly<Record<string, string>>): Promise<Response> {
+  try {
+    return await deviceWebhookEnqueueRoutes[0]!.handle(context, params);
+  } catch (error) {
+    return mapWorkerRouteError(context.request, error);
+  }
 }

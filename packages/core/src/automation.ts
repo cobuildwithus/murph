@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { normalizeStoredAssistantModel } from "@murphai/contracts";
 import { isDeepStrictEqual } from "node:util";
 
@@ -606,7 +607,7 @@ function normalizeAutomationAssistantTargetOverride(
   );
   const currentModel = normalizeStoredAssistantModel(model);
   if (!stored && model !== currentModel) {
-    throw new TypeError(`assistantTargetOverride.model is retired; use ${currentModel}.`);
+    throw new ContractValidationError(`assistantTargetOverride.model is retired; use ${currentModel}.`);
   }
   const target: AutomationAssistantTargetOverride = {
     ...(currentModel ? { model: currentModel } : {}),

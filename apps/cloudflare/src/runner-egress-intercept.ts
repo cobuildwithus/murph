@@ -1,3 +1,4 @@
+import { handleHostedRunnerCustomConnectionsOutbound } from "./runner-custom-connections.ts";
 import { parseHostedRuntimeUsageRecordResponse } from "@murphai/hosted-execution/parsers";
 import { HOSTED_RUNTIME_DATA_API_PATHS } from "@murphai/hosted-execution/routes";
 import { readNativeRuntimeProviderAuthority, readNativeRuntimeProviderContainer, type RuntimeProviderCaller } from "./runtime-provider-authorization.ts";
@@ -153,6 +154,7 @@ const HOSTED_OPENAI_IMAGES_EDITS_MAX_BODY_BYTES = 36 * 1024 * 1024;
 export const HOSTED_DEPLOY_SMOKE_OPENAI_REQUEST_MAX_BODY_BYTES = 256 * 1024;
 
 export const HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS = {
+  customConnections: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.customConnections,
   artifactStore: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.artifactStore,
   browserVaultReplicaStore: CLOUDFLARE_HOSTED_RUNTIME_HOSTS.browserVaultReplicaStore,
   dataApi: HOSTED_DATA_API_RUNTIME_HOST,
@@ -274,6 +276,7 @@ const HOSTED_PLATFORM_METERED_PROVIDER_KINDS = new Set([
 ]);
 
 export const HOSTED_RUNNER_OUTBOUND_BY_HOST: Record<string, HostedRunnerOutboundHandler> = {
+  [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.customConnections]: handleHostedRunnerCustomConnectionsOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.artifactStore]: handleHostedRunnerInternalOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.browserVaultReplicaStore]: handleHostedRunnerInternalOutbound,
   [HOSTED_RUNNER_DEFAULT_OUTBOUND_HOSTS.dataApi]: handleHostedRunnerOpenInternetOutbound,
@@ -346,6 +349,9 @@ export async function handleHostedRunnerInternalOutbound(
 ): Promise<Response> {
   const startedAt = Date.now();
   const url = new URL(request.url);
+  if (url.hostname === CLOUDFLARE_HOSTED_RUNTIME_HOSTS.customConnections) {
+    return handleHostedRunnerCustomConnectionsOutbound(request, env, ctx);
+  }
   if (!CLOUDFLARE_HOSTED_RUNTIME_INTERNAL_HOSTNAMES.has(url.hostname)) {
     return disallowedProviderEgress();
   }
@@ -1347,7 +1353,7 @@ async function maybeHandleElevenLabsRequest(input: {
   }
 
   if (authorization.recapMediaScoped) {
-    if (providerRequest.kind !== 'music' || providerRequest.durationMs !== 20_000) return new Response('Recap music uses a twenty-second song.', { status: 400 });
+    if (providerRequest.kind !== 'music' || !(providerRequest.durationMs === 20_000 || providerRequest.durationMs >= 25_000 && providerRequest.durationMs <= 65_000 && providerRequest.durationMs % 5000 === 0)) return new Response('Recap music uses a twenty-second song or a score.', { status: 400 });
     const consumed = await consumeRecapMediaRequest(input.env, authorization);
     if (consumed instanceof Response) return consumed;
     authorization.platformAiUsageAllowed = true;

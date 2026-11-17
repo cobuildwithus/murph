@@ -946,17 +946,20 @@ describe("startAssistantProviderStubServer", () => {
 describe("expectAdvertisedMurphDynamicTools", () => {
   it("expects gated tools only when the scenario enables them", () => {
     const allToolNames = listMurphDynamicToolNames();
-    const ordinaryToolNames = allToolNames.filter((name) => name !== "murph.game_lore");
+    const ordinaryToolNames = allToolNames.filter((name) => name !== "murph.game_lore" && name !== "murph.journal_source_read");
     const baseToolNames = allToolNames.filter((name) =>
       name !== "murph.analyze_video"
       && name !== "murph.create_calendar_link"
       && !name.startsWith("murph.computer_")
       && !name.startsWith("murph.connected_apps_")
+      && name !== "murph.journal_source_read"
       && !hostedGroupFamilyToolNames.includes(name)
       && name !== "murph.group_room_model"
+      && name !== "murph.leave_group"
       && name !== "murph.read_game"
       && name !== "murph.update_game"
       && name !== "murph.my_game_reminders"
+      && name !== "murph.my_game_not_for_me"
       && name !== "murph.game_lore"
       && name !== "murph.game_photo"
       && name !== "murph.imessage_contact"
@@ -992,6 +995,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
       gamePhotosAvailable: true,
       myGameRemindersAvailable: true,
       groupRoomModelAvailable: true,
+      leaveGroupAvailable: true,
       imessageContactAvailable: true,
       messageTargetingAvailable: true,
       pendingVaultFilesAvailable: true,
@@ -1016,6 +1020,7 @@ describe("expectAdvertisedMurphDynamicTools", () => {
     expect(allToolNames)
       .toEqual(expect.arrayContaining(hostedGroupFamilyToolNames));
     expect(allToolNames).toContain("murph.group_room_model");
+    expect(allToolNames).toContain("murph.leave_group");
     expect(allToolNames).toContain("murph.read_game");
     expect(allToolNames).toContain("murph.update_game");
     expect(allToolNames).toContain("murph.game_lore");
@@ -1340,6 +1345,7 @@ function buildResponsesRequest(
         && name !== "murph.computer_pause_for_user"
         && name !== "murph.computer_finish_run"
         && name !== "murph.my_game_reminders"
+        && name !== "murph.my_game_not_for_me"
         && name !== "murph.attach_response_card"
         && name !== "murph.attach_sleep_card"
         && name !== "murph.attach_exercise_routine_card"

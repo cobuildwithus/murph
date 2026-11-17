@@ -1,3 +1,4 @@
+import { ContractValidationError } from '@murphai/contracts/validation-error'
 import { open, readFile } from 'node:fs/promises'
 import path from 'node:path'
 
@@ -912,7 +913,7 @@ function parseAssistantContextSnapshotState(
   value: unknown,
 ): AssistantContextSnapshotState {
   if (!isPlainRecord(value)) {
-    throw new TypeError('assistant context snapshot value must be an object.')
+    throw new ContractValidationError('assistant context snapshot value must be an object.')
   }
 
   return {
@@ -930,7 +931,7 @@ function parseCompletedSnapshot(
     return null
   }
   if (!isPlainRecord(value)) {
-    throw new TypeError('assistant context snapshot lastCompleted must be an object.')
+    throw new ContractValidationError('assistant context snapshot lastCompleted must be an object.')
   }
 
   const generatedAt = parseRequiredString(value.generatedAt)
@@ -951,7 +952,7 @@ function parseSectionPresence(
   value: unknown,
 ): AssistantContextSnapshotSectionPresence {
   if (!isPlainRecord(value)) {
-    throw new TypeError('assistant context snapshot sectionPresence must be an object.')
+    throw new ContractValidationError('assistant context snapshot sectionPresence must be an object.')
   }
 
   return {
@@ -969,11 +970,11 @@ function parseRefreshAttempt(
     return null
   }
   if (!isPlainRecord(value)) {
-    throw new TypeError('assistant context snapshot lastRefreshAttempt must be an object.')
+    throw new ContractValidationError('assistant context snapshot lastRefreshAttempt must be an object.')
   }
   const status = value.status
   if (status !== 'failed' && status !== 'succeeded') {
-    throw new TypeError('assistant context snapshot refresh status is invalid.')
+    throw new ContractValidationError('assistant context snapshot refresh status is invalid.')
   }
 
   return {
@@ -1021,7 +1022,7 @@ function compareDirtyDomains(
 
 function parseRequiredString(value: unknown): string {
   if (typeof value !== 'string' || value.trim().length === 0) {
-    throw new TypeError('assistant context snapshot field must be a string.')
+    throw new ContractValidationError('assistant context snapshot field must be a string.')
   }
   return value
 }
@@ -1717,7 +1718,7 @@ async function readBoundedTextFile(filePath: string, maxBytes: number): Promise<
   try {
     const stats = await handle.stat()
     if (stats.size > maxBytes) {
-      throw new TypeError('assistant context snapshot file is too large.')
+      throw new ContractValidationError('assistant context snapshot file is too large.')
     }
     const buffer = Buffer.alloc(stats.size)
     const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0)

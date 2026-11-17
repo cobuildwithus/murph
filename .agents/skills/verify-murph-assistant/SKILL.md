@@ -5,88 +5,64 @@ description: Add and run focused real-Codex journeys for changes that can alter 
 
 # Verify Murph Assistant
 
-Prove the real assistant journey, not only the surrounding TypeScript. Keep the
-live lane focused and synthetic, and treat excellent user experience as part of
-the acceptance result.
+Prove the real assistant journey as well as the TypeScript around it. Keep the
+live lane focused and synthetic, and count the member's experience as part of
+the result.
 
-## Required Workflow
+## Workflow
 
 1. Read `agent-docs/operations/verification-and-runtime.md` § Expensive And
-   Stochastic Proof Order and the relevant production prompt, tool, context,
-   and delivery builders.
-2. Add the cheapest deterministic regression first. Prove exact composed
-   instructions or tool schema, owned effects, and the absence of conflicting
-   guidance or forbidden calls. Live-model proof supplements this boundary; it
-   never replaces it.
+   Stochastic Proof Order and the production prompt, tool, context and delivery
+   builders the change touches.
+2. Add the cheapest deterministic regression first: the exact composed
+   instructions or tool schema, the owned effects, and the absence of
+   conflicting guidance or forbidden calls. The live run adds to this proof and
+   does not replace it.
 3. Add or extend one focused journey in
    `packages/assistant-engine/test/assistant-codex-real-e2e.test.ts`.
-   - Build from production prompt/instruction functions and real dynamic-tool
-     contracts. Do not retype a simplified substitute.
-   - Use private-free synthetic messages, state, ports, and provider results.
-     Never copy a member transcript, identity, health record, or production row.
-   - Assert exact required call counts, arguments, ordering when meaningful,
-     writes or suppression, and the absence of bad calls. Avoid assertions on
-     incidental reasoning steps.
-   - Assert the reply's scenario-specific truth and forbidden claims. Print a
-     compact synthetic scenario/reply line so the actual prose can be reviewed.
-   - Give the journey a unique test name. Keep unrelated live turns in separate
-     tests when they should be runnable independently.
-4. Run only that journey through the selected supported auth lane:
+   - Build it from the production prompt functions and real dynamic-tool
+     contracts, with synthetic messages, state, ports and provider results.
+     Never copy a member transcript, identity, health record or production row.
+   - Assert required call counts, arguments, ordering where it matters, writes
+     or suppression, and the absence of bad calls. Leave incidental reasoning
+     steps unasserted.
+   - Assert what the reply must say and must not claim, and print a compact
+     scenario/reply line so the prose can be read.
+   - Give the journey a unique test name so it runs on its own.
+4. Run only that journey:
 
    ```bash
    pnpm test:assistant:live -- --test "<unique test-name pattern>"
    ```
 
-   The command requires a focused name pattern and defaults to
-   `gpt-6.2-sol` with the authenticated local ChatGPT/Codex subscription. Use
-   `--model <model>` only when the product target differs. Use
-   `--auth provider` only for an explicitly configured supported provider-key
-   lane. Subscription runs keep personal configuration and global instructions;
-   report them as developer-local evidence. Isolated provider-mode runs own
-   canonical release evidence. Do not silently change auth modes or copy
-   credentials to obtain isolation. Never print, copy, or persist auth material.
-
-   If the default subscription home fails before any provider action, follow
-   the alternate-home retry contract in
-   `agent-docs/operations/verification-and-runtime.md` § Expensive And
-   Stochastic Proof Order. That section owns its authorization, path, retry,
-   and stopping rules.
-5. Read every printed member-visible reply and inspect the corresponding tool
-   assertions. Mark the journey `Ready` only when all are true:
-   - Murph fulfills the user's real purpose correctly and completely.
-   - The number and order of actions are right; no duplicate check-in, send,
-     write, question, or acknowledgement occurs.
-   - The reply is concise, warm, clear, and truthful about what happened.
-   - It respects user autonomy and saved preferences without nagging,
-     contradiction, invented certainty, or internal implementation language.
-   - Quiet paths stay quiet, and recovery copy gives the smallest useful next
-     step without blaming the user.
-6. If the prose or actions miss that bar, improve the owning production
-   instruction/tool/context boundary, strengthen deterministic proof, and rerun
-   the same focused live journey. Do not weaken an assertion to bless a poor
-   experience.
-7. In the PR evidence, name the command, model, auth class
-   (`local subscription, ambient configuration` or `provider, isolated home`,
-   never a secret), scenarios, exact effect
-   result, and `Ready`/`Hold` reply-review verdict. Summarize the UX evidence;
-   do not paste transcripts into the PR.
+   It defaults to `gpt-6.2-sol` on the authenticated local ChatGPT/Codex
+   subscription. Pass `--model <model>` only when the product target differs,
+   and `--auth provider` only for a configured provider-key lane. A
+   subscription run uses the developer's own Codex home and global
+   instructions, so report it as developer-local evidence; an isolated
+   provider run is the release evidence. Keep the auth mode you were given,
+   and never print, copy or persist auth material. If the default subscription
+   home fails before any provider action, the section named in step 1 owns the
+   alternate-home retry.
+5. Read every printed reply next to its tool assertions. The journey is
+   `Ready` when Murph did what the member wanted, correctly and completely;
+   took each action once and in the right order; replied concisely, warmly and
+   truthfully, without nagging, invented certainty or internal language; kept
+   quiet paths quiet; and, on a failure, gave the smallest useful next step
+   without blaming the member.
+6. If it misses that bar, fix the production instruction, tool or context that
+   owns the behavior, strengthen the deterministic proof and rerun the same
+   journey. Keep the assertion as strict as it was.
+7. In the PR evidence, give the command, model, auth class (`local
+   subscription, ambient configuration` or `provider, isolated home`), the
+   scenarios, the exact effect result and the `Ready` or `Hold` verdict.
+   Summarize the replies; transcripts stay out of the PR.
 
 ## Boundaries
 
-- Keep live journeys opt-in. Routine CI compiles them but must not call a paid
-  provider or depend on a developer's subscription.
-- The separate `Assistant Real Model` protected-main workflow runs exactly three
-  canonical journeys with a dedicated budgeted sandbox provider credential. It
-  never runs untrusted PR code with secrets, and missing credentials or skipped
-  journeys fail the gate. See the verification owner for its scope and setup.
-- The local subscription mode uses the normal local Codex home by default and
-  may try each available authenticated local home once under the owning retry
-  contract, but it never copies auth into a temporary home. It is
-  developer-local evidence with ambient personal configuration, not canonical
-  isolated release proof. Provider-key mode keeps its
-  isolated Codex home and minimal secret allowlist.
-- Do not call production databases, delivery providers, device providers, or
-  member-facing channels. Inject synthetic ports and fixtures.
-- A stochastic pass is evidence for the tested model and run, not a guarantee
-  for every future sample. Deterministic invariants and exact-head CI remain
-  authoritative.
+- Live journeys are opt-in. Routine CI compiles them and never calls a paid
+  provider or a developer's subscription, and no scheduled workflow runs them.
+- Journeys use injected synthetic ports and fixtures, never production
+  databases, delivery or device providers, or member-facing channels.
+- A pass is evidence for that model and run. Deterministic invariants and
+  required CI stay authoritative.

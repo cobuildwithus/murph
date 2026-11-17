@@ -9,6 +9,7 @@ import exerciseLibraryProject from "./packages/exercise-library/vitest.config.ts
 import gatewayCoreProject from "./packages/gateway-core/vitest.config.ts";
 import healthMetricsProject from "./packages/health-metrics/vitest.config.ts";
 import hostedExecutionProject from "./packages/hosted-execution/vitest.config.ts";
+import recapVideoProject from "./packages/recap-video/vitest.config.ts";
 import importersProject from "./packages/importers/vitest.config.ts";
 import inboxServicesProject from "./packages/inbox-services/vitest.config.ts";
 import inboxdProject from "./packages/inboxd/vitest.config.ts";
@@ -98,6 +99,11 @@ const ROOT_REPO_PROJECTS: RootRepoProject[] = [
   {
     config: healthMetricsProject,
     root: "packages/health-metrics",
+    include: ["test/**/*.test.ts"],
+  },
+  {
+    config: recapVideoProject,
+    root: "packages/recap-video",
     include: ["test/**/*.test.ts"],
   },
   {

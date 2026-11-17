@@ -37,6 +37,20 @@ describe("Telegram poll tally webhook", () => {
     await expect(handleHostedTelegramPollWebhook(JSON.stringify({ update_id: 10, poll }))).rejects.toMatchObject({ httpStatus: 503 });
     expect(m.updateMany).not.toHaveBeenCalled();
   });
+  it("keeps a stored binding failure as a server fault", async () => {
+    m.readResult.mockResolvedValue({ providerPollId: "wrong-poll" });
+    await expect(handleHostedTelegramPollWebhook(JSON.stringify({ update_id: 10, poll }))).rejects.toEqual(new TypeError("Poll update binding mismatch."));
+    expect(m.updateMany).not.toHaveBeenCalled();
+  });
+  it("retries notification after a committed tally without rewriting the tally", async () => {
+    vi.mocked(maybeNotifyPollResult).mockRejectedValueOnce(new TypeError("Synthetic notification fault"));
+    await expect(handleHostedTelegramPollWebhook(JSON.stringify({ update_id: 10, poll }))).rejects.toThrow("Synthetic notification fault");
+    m.findFirst.mockResolvedValue({ ...row, lastUpdateId: 10n, resultEncrypted: "encrypted-tally" });
+    await expect(handleHostedTelegramPollWebhook(JSON.stringify({ update_id: 10, poll }))).resolves.toEqual({ ok: true });
+    expect(m.updateMany).toHaveBeenCalledTimes(1);
+    expect(m.encrypt).toHaveBeenCalledTimes(1);
+    expect(maybeNotifyPollResult).toHaveBeenCalledTimes(2);
+  });
   it("keeps an immediate vote when creation commits between the two lookups", async () => {
     m.findFirst.mockResolvedValueOnce(null).mockResolvedValueOnce(null).mockResolvedValueOnce(row);
     expect(await handleHostedTelegramPollWebhook(JSON.stringify({ update_id: 10, poll }))).toEqual({ ok: true });

@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   BROWSER_VAULT_REPLICA_SCHEMA,
   type BrowserVaultCoreReplica,
@@ -249,11 +250,11 @@ export function assembleBrowserVaultMetricsReplica(
   const rowsByMetricKey = new Map<string, BrowserVaultMetricRow[]>();
   for (const bucketId of BROWSER_VAULT_METRIC_BUCKET_IDS) {
     const bucket = metricBuckets[bucketId];
-    if (!bucket) throw new TypeError(`Browser vault metric bucket ${bucketId} is required for full assembly.`);
+    if (!bucket) throw new ContractValidationError(`Browser vault metric bucket ${bucketId} is required for full assembly.`);
     requireMetricBucket(bucket, bucketId, core.identity);
     for (const entry of bucket.series) {
       if (rowsByMetricKey.has(entry.metricKey)) {
-        throw new TypeError(`Browser vault metric key ${entry.metricKey} appears in more than one bucket series.`);
+        throw new ContractValidationError(`Browser vault metric key ${entry.metricKey} appears in more than one bucket series.`);
       }
       rowsByMetricKey.set(entry.metricKey, entry.rows.map((row) => fromMetricBucketRow(entry.metricKey, row)));
     }
@@ -261,17 +262,17 @@ export function assembleBrowserVaultMetricsReplica(
   const metricRows = metrics.metricDirectory.flatMap((entry) => {
     const rows = rowsByMetricKey.get(entry.metricKey) ?? [];
     if (rows.length !== entry.rowCount) {
-      throw new TypeError(`Browser vault metric directory row count does not match ${entry.metricKey}.`);
+      throw new ContractValidationError(`Browser vault metric directory row count does not match ${entry.metricKey}.`);
     }
     const bucket = metricBuckets[entry.bucketId];
     if (!bucket.series.some((series) => series.metricKey === entry.metricKey)) {
-      throw new TypeError(`Browser vault metric directory bucket does not match ${entry.metricKey}.`);
+      throw new ContractValidationError(`Browser vault metric directory bucket does not match ${entry.metricKey}.`);
     }
     rowsByMetricKey.delete(entry.metricKey);
     return rows;
   });
   if (rowsByMetricKey.size > 0 || metricRows.length !== metrics.metricRowCount) {
-    throw new TypeError("Browser vault metric buckets do not match the metrics index directory.");
+    throw new ContractValidationError("Browser vault metric buckets do not match the metrics index directory.");
   }
   return { ...indexReplica, metricRows };
 }
@@ -288,15 +289,15 @@ export function assembleBrowserVaultLoadedMetricRows(
     const expectedEntries = metrics.metricDirectory.filter((entry) => entry.bucketId === bucketId);
     const seriesByMetricKey = new Map(bucket.series.map((series) => [series.metricKey, series]));
     if (seriesByMetricKey.size !== bucket.series.length) {
-      throw new TypeError(`Browser vault metric bucket ${bucketId} contains duplicate metric series.`);
+      throw new ContractValidationError(`Browser vault metric bucket ${bucketId} contains duplicate metric series.`);
     }
     if (seriesByMetricKey.size !== expectedEntries.length) {
-      throw new TypeError(`Browser vault metric bucket ${bucketId} does not match the metrics index directory.`);
+      throw new ContractValidationError(`Browser vault metric bucket ${bucketId} does not match the metrics index directory.`);
     }
     for (const entry of expectedEntries) {
       const series = seriesByMetricKey.get(entry.metricKey);
       if (!series || series.rows.length !== entry.rowCount) {
-        throw new TypeError(`Browser vault metric bucket ${bucketId} row count does not match ${entry.metricKey}.`);
+        throw new ContractValidationError(`Browser vault metric bucket ${bucketId} row count does not match ${entry.metricKey}.`);
       }
     }
     for (const series of bucket.series) {
@@ -351,7 +352,7 @@ function requireMetricBucket(
   identity: BrowserVaultReplicaShardIdentity,
 ): void {
   requireSchema(bucket.schema, BROWSER_VAULT_METRIC_BUCKET_SHARD_SCHEMA, `Browser vault metric bucket ${expectedBucketId}.schema`);
-  if (bucket.bucketId !== expectedBucketId) throw new TypeError(`Browser vault metric bucket id must be ${expectedBucketId}.`);
+  if (bucket.bucketId !== expectedBucketId) throw new ContractValidationError(`Browser vault metric bucket id must be ${expectedBucketId}.`);
   requireMatchingIdentity(identity, bucket.identity, `metric bucket ${expectedBucketId}`);
   if (!verifiedMetricBuckets.has(bucket)) {
     throw new TypeError(
@@ -360,7 +361,7 @@ function requireMetricBucket(
   }
   for (const series of bucket.series) {
     if (canonicalizeBrowserVaultMetricKey(series.metricKey).length === 0) {
-      throw new TypeError(`Browser vault metric bucket ${expectedBucketId} has an empty metric key.`);
+      throw new ContractValidationError(`Browser vault metric bucket ${expectedBucketId} has an empty metric key.`);
     }
   }
 }
@@ -380,9 +381,9 @@ function requireMatchingIdentity(
     || actual.generatedAt !== expected.generatedAt
     || actual.generation !== expected.generation
     || actual.sourceBundleHash !== expected.sourceBundleHash
-  ) throw new TypeError(`Browser vault ${shardName} shard identity must match the core shard identity.`);
+  ) throw new ContractValidationError(`Browser vault ${shardName} shard identity must match the core shard identity.`);
 }
 
 function requireSchema(actual: string, expected: string, label: string): void {
-  if (actual !== expected) throw new TypeError(`${label} must be ${expected}.`);
+  if (actual !== expected) throw new ContractValidationError(`${label} must be ${expected}.`);
 }

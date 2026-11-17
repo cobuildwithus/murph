@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   CLINICAL_FHIR_MAX_RETRIEVAL_SLICES,
 } from "@murphai/clinical-records/retrieval-limits";
@@ -73,7 +74,7 @@ export function parseHostedClinicalRecordsIdentifier(value: unknown): string {
     || value.length > HOSTED_CLINICAL_RECORDS_IDENTIFIER_MAX_CHARS
     || !HOSTED_CLINICAL_RECORDS_IDENTIFIER_PATTERN.test(value)
   ) {
-    throw new TypeError("Hosted clinical records identifier is invalid.");
+    throw new ContractValidationError("Hosted clinical records identifier is invalid.");
   }
   return value;
 }
@@ -121,7 +122,7 @@ export function parseHostedClinicalRecordsRecordOutcomeRequest(
       || retrievalSlices.length > CLINICAL_FHIR_MAX_RETRIEVAL_SLICES
     )
   ) {
-    throw new TypeError("Hosted clinical records outcome retrieval identity is invalid.");
+    throw new ContractValidationError("Hosted clinical records outcome retrieval identity is invalid.");
   }
   return {
     counts: {
@@ -168,7 +169,7 @@ function parseRetrievalSliceRef(
 function parseClinicalFhirPathId(value: unknown): string {
   const parsed = parseHostedClinicalRecordsIdentifier(value);
   if (parsed === "." || parsed === "..") {
-    throw new TypeError("Hosted clinical records retrieval identifier is invalid.");
+    throw new ContractValidationError("Hosted clinical records retrieval identifier is invalid.");
   }
   return parsed;
 }
@@ -179,26 +180,26 @@ function requireExactObject(
   label: string,
 ): object {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object.`);
+    throw new ContractValidationError(`${label} must be an object.`);
   }
   const allowed = new Set(allowedKeys);
   const unsupported = Object.keys(value).find((key) => !allowed.has(key));
   if (unsupported) {
-    throw new TypeError(`${label} contains an unsupported field.`);
+    throw new ContractValidationError(`${label} contains an unsupported field.`);
   }
   return value;
 }
 
 function parseNonNegativeCount(value: unknown): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0 || value > 1_000_000) {
-    throw new TypeError("Hosted clinical records outcome count is invalid.");
+    throw new ContractValidationError("Hosted clinical records outcome count is invalid.");
   }
   return value;
 }
 
 function parsePositiveSafeInteger(value: unknown): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
-    throw new TypeError("Hosted clinical records outcome generation is invalid.");
+    throw new ContractValidationError("Hosted clinical records outcome generation is invalid.");
   }
   return value;
 }
@@ -210,7 +211,7 @@ function parseErrorCode(value: unknown): string {
     || value.length > HOSTED_CLINICAL_RECORDS_ERROR_CODE_MAX_CHARS
     || !HOSTED_CLINICAL_RECORDS_ERROR_CODE_PATTERN.test(value)
   ) {
-    throw new TypeError("Hosted clinical records outcome error code is invalid.");
+    throw new ContractValidationError("Hosted clinical records outcome error code is invalid.");
   }
   return value;
 }
@@ -221,5 +222,5 @@ function parseOutcomeStatus(
   if (value === "completed" || value === "failed" || value === "partial" || value === "preempted") {
     return value;
   }
-  throw new TypeError("Hosted clinical records outcome status is invalid.");
+  throw new ContractValidationError("Hosted clinical records outcome status is invalid.");
 }

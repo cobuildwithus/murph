@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   assistantPersonaIdSchema,
   assistantPersonalityScoreSchema,
@@ -263,7 +264,7 @@ export function parseHostedRuntimeAssistantPersonalizationToolAuthority(
 ): HostedRuntimeAssistantPersonalizationToolAuthority {
   const parsed = hostedRuntimeAssistantPersonalizationToolAuthoritySchema.safeParse(value);
   if (!parsed.success) {
-    throw new TypeError("Hosted assistant personalization action authority is invalid.", {
+    throw new ContractValidationError("Hosted assistant personalization action authority is invalid.", {
       cause: parsed.error,
     });
   }

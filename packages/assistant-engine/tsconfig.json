@@ -17,6 +17,9 @@
       "path": "../runtime-state"
     },
     {
+      "path": "../recap-video"
+    },
+    {
       "path": "../inbox-services"
     },
     {

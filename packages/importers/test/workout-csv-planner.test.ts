@@ -20,6 +20,48 @@ const STRONG_HEADER = [
 
 describe("planWorkoutCsvImport", () => {
   test.each([
+    ["1", 1, 1],
+    ["0.1", 1, 0],
+    ["0:00.1", 1, 0],
+    ["0:29.9", 1, 30],
+    ["1:29.9", 1, 90],
+    ["1:30", 2, 90],
+    ["1:02:03", 62, 3723],
+    ["1 h 2 mins 3 secs", 62, 3723],
+    ["1.5 minutes", 2, 90],
+    ["24h", 1440, 86400],
+    ["24h 0.1s", undefined, 86400],
+  ] as const)("preserves session and set duration units and rounding for %s", (duration, minutes, seconds) => {
+    const plan = planWorkoutCsvImport({
+      text: [
+        "Workout Name,Date,Exercise Name,Duration,Seconds",
+        `Morning,2026-03-12 07:00:00,Hold,${duration},${duration}`,
+      ].join("\n"),
+      timeZone: "UTC",
+      source: "hevy",
+    });
+    assert.equal(plan.importable, true);
+    assert.equal(plan.sessions[0]?.durationMinutes, minutes);
+    assert.equal(plan.sessions[0]?.workout.exercises[0]?.sets[0]?.durationSeconds, seconds);
+  });
+
+  test.each(["1:30 trailing", "1h unexpected", "1:2:3:4", "-1s", "0s"])(
+    "rejects malformed or nonpositive explicit set durations %s",
+    (duration) => {
+      const plan = planWorkoutCsvImport({
+        text: [
+          "Workout Name,Date,Exercise Name,Seconds",
+          `Morning,2026-03-12 07:00:00,Hold,${duration}`,
+        ].join("\n"),
+        timeZone: "UTC",
+        source: "hevy",
+      });
+      assert.deepEqual(plan.sessions, []);
+      assert.deepEqual(plan.skipReasons, [{ reason: "invalid numeric set value", count: 1 }]);
+    },
+  );
+
+  test.each([
     { column: "Reps", value: "0", expected: { reps: 0 } },
     { column: "Weight", value: "0", expected: undefined },
     { column: "Weight Unit", value: "kg", expected: undefined },

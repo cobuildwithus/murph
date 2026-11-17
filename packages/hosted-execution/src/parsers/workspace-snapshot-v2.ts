@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   HOSTED_WORKSPACE_SNAPSHOT_COMPRESSION,
   HOSTED_WORKSPACE_SNAPSHOT_V2_AAD_PURPOSE,
@@ -27,13 +28,13 @@ export function parseHostedWorkspaceSnapshotV2Ref(
   const record = requireObject(value, label);
   const schema = requireString(record.schema, `${label}.schema`);
   if (schema !== HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA) {
-    throw new TypeError(`${label}.schema must be ${HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA}.`);
+    throw new ContractValidationError(`${label}.schema must be ${HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA}.`);
   }
 
   const userId = requireString(record.userId, `${label}.userId`);
   const upload = requireString(record.upload, `${label}.upload`);
   if (upload !== HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND) {
-    throw new TypeError(`${label}.upload must be ${HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND}.`);
+    throw new ContractValidationError(`${label}.upload must be ${HOSTED_WORKSPACE_SNAPSHOT_UPLOAD_KIND}.`);
   }
   const snapshotId = requireHostedWorkspaceSnapshotId(record.snapshotId, `${label}.snapshotId`);
   const objectKey = requireHostedWorkspaceSnapshotObjectKey(
@@ -67,14 +68,14 @@ export function parseHostedWorkspaceSnapshotV2Ref(
   };
 }
 
-function parseHostedWorkspaceSnapshotV2Archive(
+export function parseHostedWorkspaceSnapshotV2Archive(
   value: unknown,
-  label: string,
+  label = "Hosted workspace snapshot archive",
 ): HostedWorkspaceSnapshotV2ArchiveMetadata {
   const record = requireObject(value, label);
   const format = requireString(record.format, `${label}.format`);
   if (format !== "tar") {
-    throw new TypeError(`${label}.format must be tar.`);
+    throw new ContractValidationError(`${label}.format must be tar.`);
   }
 
   return {
@@ -106,7 +107,7 @@ function parseHostedWorkspaceSnapshotV2Compression(
 ): HostedWorkspaceSnapshotV2Compression {
   const compression = requireString(value, label);
   if (compression !== HOSTED_WORKSPACE_SNAPSHOT_COMPRESSION) {
-    throw new TypeError(`${label} must be ${HOSTED_WORKSPACE_SNAPSHOT_COMPRESSION}.`);
+    throw new ContractValidationError(`${label} must be ${HOSTED_WORKSPACE_SNAPSHOT_COMPRESSION}.`);
   }
   return compression;
 }
@@ -118,7 +119,7 @@ function parseHostedWorkspaceSnapshotV2Encryption(
   const record = requireObject(value, label);
   const scheme = requireString(record.scheme, `${label}.scheme`);
   if (scheme !== HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME) {
-    throw new TypeError(`${label}.scheme must be ${HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME}.`);
+    throw new ContractValidationError(`${label}.scheme must be ${HOSTED_WORKSPACE_SNAPSHOT_V2_ENCRYPTION_SCHEME}.`);
   }
 
   return {
@@ -139,10 +140,10 @@ function parseHostedWorkspaceSnapshotV2Aad(
   const schema = requireString(record.schema, `${label}.schema`);
 
   if (purpose !== HOSTED_WORKSPACE_SNAPSHOT_V2_AAD_PURPOSE) {
-    throw new TypeError(`${label}.purpose must be ${HOSTED_WORKSPACE_SNAPSHOT_V2_AAD_PURPOSE}.`);
+    throw new ContractValidationError(`${label}.purpose must be ${HOSTED_WORKSPACE_SNAPSHOT_V2_AAD_PURPOSE}.`);
   }
   if (schema !== HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA) {
-    throw new TypeError(`${label}.schema must be ${HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA}.`);
+    throw new ContractValidationError(`${label}.schema must be ${HOSTED_WORKSPACE_SNAPSHOT_V2_REF_SCHEMA}.`);
   }
 
   return {
@@ -157,7 +158,7 @@ function parseHostedWorkspaceSnapshotV2Aad(
 function requireHostedWorkspaceSnapshotId(value: unknown, label: string): string {
   const text = requireString(value, label);
   if (!HOSTED_WORKSPACE_SNAPSHOT_ID_PATTERN.test(text)) {
-    throw new TypeError(`${label} must be a valid hosted workspace snapshot id.`);
+    throw new ContractValidationError(`${label} must be a valid hosted workspace snapshot id.`);
   }
   return text;
 }
@@ -170,10 +171,10 @@ function requireHostedWorkspaceSnapshotObjectKey(
   const text = requireString(value, label);
   const match = HOSTED_WORKSPACE_SNAPSHOT_OBJECT_KEY_PATTERN.exec(text);
   if (!match) {
-    throw new TypeError(`${label} must be a user-scoped hosted workspace snapshot object key.`);
+    throw new ContractValidationError(`${label} must be a user-scoped hosted workspace snapshot object key.`);
   }
   if (match[1] !== snapshotId) {
-    throw new TypeError(`${label} must contain the hosted workspace snapshot id.`);
+    throw new ContractValidationError(`${label} must contain the hosted workspace snapshot id.`);
   }
   return text;
 }
@@ -182,14 +183,14 @@ function requireHostedWorkspaceSnapshotIv(value: unknown, label: string): string
   const text = requireString(value, label);
   const bytes = decodeBase64Url(text);
   if (bytes.byteLength !== 12) {
-    throw new TypeError(`${label} must decode to 12 bytes.`);
+    throw new ContractValidationError(`${label} must decode to 12 bytes.`);
   }
   return text;
 }
 
 function decodeBase64Url(value: string): Uint8Array {
   if (!/^[A-Za-z0-9_-]+$/u.test(value)) {
-    throw new TypeError("Hosted workspace snapshot base64url value is invalid.");
+    throw new ContractValidationError("Hosted workspace snapshot base64url value is invalid.");
   }
   const padded = value.replace(/-/gu, "+").replace(/_/gu, "/")
     .padEnd(Math.ceil(value.length / 4) * 4, "=");
@@ -205,7 +206,7 @@ function requireCanonicalIsoTimestampString(value: unknown, label: string): stri
   const text = requireString(value, label);
   const timestamp = Date.parse(text);
   if (Number.isNaN(timestamp) || new Date(timestamp).toISOString() !== text) {
-    throw new TypeError(`${label} must be a valid ISO-8601 timestamp in canonical UTC form.`);
+    throw new ContractValidationError(`${label} must be a valid ISO-8601 timestamp in canonical UTC form.`);
   }
 
   return text;
@@ -214,7 +215,7 @@ function requireCanonicalIsoTimestampString(value: unknown, label: string): stri
 function requireNonNegativeSafeInteger(value: unknown, label: string): number {
   const parsed = requireNumber(value, label);
   if (!Number.isSafeInteger(parsed) || parsed < 0) {
-    throw new TypeError(`${label} must be a non-negative safe integer.`);
+    throw new ContractValidationError(`${label} must be a non-negative safe integer.`);
   }
   return parsed;
 }
@@ -222,7 +223,7 @@ function requireNonNegativeSafeInteger(value: unknown, label: string): number {
 function requirePositiveSafeInteger(value: unknown, label: string): number {
   const parsed = requireNumber(value, label);
   if (!Number.isSafeInteger(parsed) || parsed <= 0) {
-    throw new TypeError(`${label} must be a positive safe integer.`);
+    throw new ContractValidationError(`${label} must be a positive safe integer.`);
   }
   return parsed;
 }
@@ -230,13 +231,13 @@ function requirePositiveSafeInteger(value: unknown, label: string): number {
 function requireSha256HexString(value: unknown, label: string): string {
   const text = requireString(value, label);
   if (!/^[a-f0-9]{64}$/u.test(text)) {
-    throw new TypeError(`${label} must be a lowercase SHA-256 hex digest.`);
+    throw new ContractValidationError(`${label} must be a lowercase SHA-256 hex digest.`);
   }
   return text;
 }
 
 function requireMatchingString(actual: string, expected: string, label: string): void {
   if (actual !== expected) {
-    throw new TypeError(`${label} must match the top-level hosted workspace snapshot ref.`);
+    throw new ContractValidationError(`${label} must match the top-level hosted workspace snapshot ref.`);
   }
 }

@@ -1,3 +1,5 @@
+import { parseInput } from "@murphai/hosted-execution/request-input";
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
@@ -52,7 +54,7 @@ import {
   buildWorkerRouteLogDetails,
 } from "../route-utils/log-details.ts";
 import {
-  parseJsonValue,
+  parseJsonInput,
   requireJsonRecord,
 } from "../route-utils/json-body.ts";
 import {
@@ -85,7 +87,7 @@ export async function handleBrowserVaultSessionRoute(
   const userId = decodeRouteParam(encodedUserId);
   let body;
   try {
-    body = parseBrowserVaultSessionRequest(parseJsonValue(await readCachedRequestText(context)));
+    body = parseInput(parseJsonInput(await readCachedRequestText(context)), parseBrowserVaultSessionRequest);
   } catch (error) {
     emitHostedExecutionStructuredLog({
       component: "worker",
@@ -291,7 +293,7 @@ export function parseBrowserVaultSessionRequest(value: unknown): {
   );
 
   if (!replicaRef) {
-    throw new TypeError("Browser vault session request replicaRef must not be null.");
+    throw new ContractValidationError("Browser vault session request replicaRef must not be null.");
   }
 
   const requestedShards = record.requestedShards === undefined
@@ -307,7 +309,7 @@ export function parseBrowserVaultSessionRequest(value: unknown): {
     sessionPurpose === "export"
     && (requestedMetricBuckets !== undefined || requestedShards !== undefined)
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Browser vault export session request must not include interactive selections.",
     );
   }
@@ -328,26 +330,26 @@ function parseBrowserVaultRequestedMetricBuckets(
   value: unknown,
 ): HostedBrowserVaultReplicaMetricBucketId[] {
   if (!Array.isArray(value) || value.length === 0) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Browser vault session request requestedMetricBuckets must be a non-empty array.",
     );
   }
   const allowed = new Set<unknown>(HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS);
   const requestedMetricBuckets = value.map((bucketId, index) => {
     if (!allowed.has(bucketId)) {
-      throw new TypeError(
+      throw new ContractValidationError(
         `Browser vault session request requestedMetricBuckets[${index}] must be a metric bucket id from 00 through 1f.`,
       );
     }
     return bucketId as HostedBrowserVaultReplicaMetricBucketId;
   });
   if (new Set(requestedMetricBuckets).size !== requestedMetricBuckets.length) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Browser vault session request requestedMetricBuckets must not contain duplicates.",
     );
   }
   if (requestedMetricBuckets.length === HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_COUNT) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Browser vault session request requestedMetricBuckets must not request all ${HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_COUNT} buckets from the interactive session route.`,
     );
   }
@@ -356,7 +358,7 @@ function parseBrowserVaultRequestedMetricBuckets(
 
 function parseBrowserVaultSessionPurpose(value: unknown): "export" {
   if (value !== "export") {
-    throw new TypeError("Browser vault session request sessionPurpose must be export.");
+    throw new ContractValidationError("Browser vault session request sessionPurpose must be export.");
   }
   return value;
 }
@@ -365,19 +367,19 @@ function parseBrowserVaultRequestedShards(
   value: unknown,
 ): HostedBrowserVaultReplicaShardKind[] {
   if (!Array.isArray(value) || value.length === 0) {
-    throw new TypeError("Browser vault session request requestedShards must be a non-empty array.");
+    throw new ContractValidationError("Browser vault session request requestedShards must be a non-empty array.");
   }
   const allowed = new Set<unknown>(HOSTED_BROWSER_VAULT_REPLICA_SHARD_KINDS);
   const requestedShards = value.map((shard, index) => {
     if (!allowed.has(shard)) {
-      throw new TypeError(
+      throw new ContractValidationError(
         `Browser vault session request requestedShards[${index}] must be core, labs, or metricsIndex.`,
       );
     }
     return shard as HostedBrowserVaultReplicaShardKind;
   });
   if (new Set(requestedShards).size !== requestedShards.length) {
-    throw new TypeError("Browser vault session request requestedShards must not contain duplicates.");
+    throw new ContractValidationError("Browser vault session request requestedShards must not contain duplicates.");
   }
   return requestedShards;
 }

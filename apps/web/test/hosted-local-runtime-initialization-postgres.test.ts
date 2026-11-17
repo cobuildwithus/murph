@@ -27,7 +27,7 @@ describe.skipIf(!enabled)("local Postgres runtime initialization", () => {
     environment = { NODE_ENV: "test", DATABASE_URL: url.toString() };
     db = new Client({ connectionString: url.toString() }); await db.connect();
     await db.query(await readFile(new URL("../prisma/migrations/20260915151000_hosted_runtime_owner/migration.sql", import.meta.url), "utf8"));
-    await db.query("ALTER TABLE hosted_runtime_owner ADD COLUMN migration_phase TEXT NOT NULL DEFAULT 'legacy'; CREATE TABLE hosted_member (id TEXT PRIMARY KEY)");
+    await db.query("CREATE TABLE hosted_member (id TEXT PRIMARY KEY)");
   });
   afterAll(async () => {
     await db?.end();
@@ -37,8 +37,8 @@ describe.skipIf(!enabled)("local Postgres runtime initialization", () => {
 
   it("injects and ages a stale attempt without replacing a retained physical target or a live attempt", async () => {
     await db.query("INSERT INTO hosted_member (id) VALUES ('synthetic-local-member')");
-    await db.query(`INSERT INTO hosted_runtime_owner (user_id, migration_phase, phase, generation, allocation_id, runner_container_name, updated_at)
-      VALUES ('synthetic-local-member', 'postgres', 'idle', 5, 'synthetic-existing-allocation', 'synthetic-retained-target', now())`);
+    await db.query(`INSERT INTO hosted_runtime_owner (user_id, phase, generation, allocation_id, runner_container_name, updated_at)
+      VALUES ('synthetic-local-member', 'idle', 5, 'synthetic-existing-allocation', 'synthetic-retained-target', now())`);
     const stuck = await startStuckPostgresRuntimeForTest(environment, "synthetic-local-member", 35_000);
     const [row] = (await db.query("SELECT generation::text, attempt_id, phase, runner_container_name, allocation_id FROM hosted_runtime_owner")).rows;
     expect(row).toEqual({ generation: "6", attempt_id: stuck.attemptId, phase: "starting", runner_container_name: "synthetic-retained-target", allocation_id: "synthetic-existing-allocation" });

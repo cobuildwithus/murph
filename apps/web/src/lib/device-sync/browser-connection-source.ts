@@ -1,13 +1,4 @@
-import {
-  countAvailableDeviceSyncSourceResources,
-  isDeviceSyncSourceHistoricalBackfillComplete,
-  isDeviceSyncSourceResourceAvailabilityMetadataKey,
-} from "@murphai/device-syncd/fitbit-migration";
-import {
-  JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
-  JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG,
-  normalizeJunctionProviderSlug,
-} from "@murphai/device-syncd/connect-config";
+import { isDeviceSyncSourceResourceAvailabilityMetadataKey } from "@murphai/device-syncd/fitbit-migration";
 import {
   requiresHistoricalResetDeviceSyncSource,
 } from "@murphai/device-syncd/public-account";
@@ -18,9 +9,7 @@ export type HostedBrowserDeviceSyncConnectionSourceRecoveryKind = "connection_re
 
 export interface HostedBrowserDeviceSyncConnectionSource {
   connectionId: string;
-  fitbitMigrationCoverageReady?: true;
   firstSeenAt: string;
-  historicalBackfillComplete?: true;
   lastErrorCode?: string | null;
   lastDataAt?: string | null;
   lastSeenAt: string;
@@ -34,19 +23,12 @@ export interface HostedBrowserDeviceSyncConnectionSource {
 export function toHostedBrowserDeviceSyncConnectionSource(
   source: HostedDeviceConnectionSource,
   browserConnectionId: string,
-  options: { fitbitMigrationCoverageReady?: boolean } = {},
 ): HostedBrowserDeviceSyncConnectionSource {
   const recoveryKind = resolveConnectionSourceRecoveryKind(source);
 
   return {
     connectionId: browserConnectionId,
-    ...(options.fitbitMigrationCoverageReady
-      ? { fitbitMigrationCoverageReady: true as const }
-      : {}),
     firstSeenAt: source.firstSeenAt,
-    ...(isDeviceSyncSourceHistoricalBackfillComplete(source)
-      ? { historicalBackfillComplete: true as const }
-      : {}),
     lastDataAt: source.lastDataAt,
     ...(source.lastErrorCode ? { lastErrorCode: source.lastErrorCode } : {}),
     lastSeenAt: source.lastSeenAt,
@@ -61,8 +43,7 @@ export function toHostedBrowserDeviceSyncConnectionSource(
 const CONNECTION_SOURCE_RECONNECT_ERROR_CODES = new Set(["TOKEN_REFRESH_FAILED"]);
 
 /**
- * Preserves the existing browser/companion interpretation of resource entries
- * while excluding migration bookkeeping from user-facing resource lists.
+ * Preserves the existing browser/companion interpretation of resource entries.
  */
 export function isAvailableConnectionSourceResource(
   key: string,
@@ -78,13 +59,6 @@ function countSourceResources(source: HostedDeviceConnectionSource): number {
   const summary = source.resourceAvailabilitySummary;
   if (!summary) {
     return 0;
-  }
-  const sourceProviderSlug = normalizeJunctionProviderSlug(source.sourceProviderSlug);
-  if (
-    sourceProviderSlug === JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG
-    || sourceProviderSlug === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG
-  ) {
-    return countAvailableDeviceSyncSourceResources(summary);
   }
   return Object.entries(summary).filter(([key, value]) =>
     isAvailableConnectionSourceResource(key, value)

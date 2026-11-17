@@ -1,6 +1,6 @@
 {
   "id": "memory-upsert",
-  "command": "vault-cli memory upsert <text> --vault <path> [--compact] --section <section>",
+  "command": "vault-cli memory upsert <text> --vault <path> [--full] --section <section>",
   "vaultFixture": "fixtures/minimal-vault",
   "inputs": [
     "fixtures/minimal-vault/CORE.md"

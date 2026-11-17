@@ -1,6 +1,4 @@
-import { readFile } from "node:fs/promises";
-
-import { resolveRuntimeAssetPath } from "@/app/runtime-asset-files";
+import { readAppReviewGamePhoto } from "@/app/app-review-game-photos";
 import { requireHostedOpsRequestAccess } from "@/src/lib/hosted-ops/access";
 import {
   seedHostedOpsAppReviewGame,
@@ -19,7 +17,7 @@ export const revalidate = 0;
 
 const HOSTED_OPS_APP_REVIEW_GAME_BODY_LIMIT_BYTES = 1024;
 
-/** Founder-only. Dry-run by default; `{ "mode": "apply" }` replaces the review account's fixture games. */
+/** Founder-only. Dry-run by default; an explicit `{ "mode": "apply" }` always replaces the fixture games. */
 export const POST = withJsonError(async (request: Request) => {
   await requireHostedOpsRequestAccess(request, {
     requireMutationOrigin: true,
@@ -35,7 +33,7 @@ export const POST = withJsonError(async (request: Request) => {
   }
   return jsonOk(await seedHostedOpsAppReviewGame({
     mode: readMode(body.mode),
-    readPhoto: async (publicPath) => new Uint8Array(await readFile(resolveRuntimeAssetPath(`public${publicPath}`))),
+    readPhoto: readAppReviewGamePhoto,
   }));
 });
 

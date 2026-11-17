@@ -959,7 +959,6 @@ describe('hosted domain dynamic tools', () => {
       occurrenceProjection: {
         status: 'resolved',
       },
-      routeBinding: 'current_conversation',
       schedule: {
         kind: 'cron',
         expression: '0 19 * * 0',
@@ -967,6 +966,8 @@ describe('hosted domain dynamic tools', () => {
       },
       status: 'active',
     })
+    // Binding a save to this conversation is the default and is not repeated.
+    expect(readResultPayload(result)).not.toHaveProperty('routeBinding')
   })
 
   it('keeps privileged and generic execution fields out of both schemas', () => {
@@ -1457,7 +1458,6 @@ describe('hosted domain dynamic tools', () => {
         nextOccurrenceAt: null,
         status: 'resolved' as const,
       },
-      routeBinding: 'current_conversation',
       schedule: {
         kind: 'dailyLocal',
         localTime: '22:30',
@@ -1560,7 +1560,6 @@ describe('hosted domain dynamic tools', () => {
         nextOccurrenceAt: '2026-08-11T03:30:00.000Z',
         status: 'resolved' as const,
       },
-      routeBinding: 'preserved',
       schedule: {
         kind: 'dailyLocal',
         localTime: '22:30',
@@ -1594,8 +1593,11 @@ describe('hosted domain dynamic tools', () => {
     expect(automationTool.request).toHaveBeenCalledWith({
       action: 'inspect', lookup: 'automation_synthetic', view: 'model_review',
     }, { signal: null })
-    const { lookupId: _lookupId, ...expected } = response
+    // The weekly usage optimizer needs managed, the override and references
+    // even when false or empty; only the always-preserved binding is omitted.
+    const { lookupId: _lookupId, routeBinding: _routeBinding, ...expected } = response
     expect(readResultPayload(result)).toEqual(expected)
+    expect(readResultPayload(result)).toMatchObject({ managed, contextReferences: [] })
   })
 
   it('batches model reviews once per id with whole-record byte bounds and explicit omissions', async () => {
@@ -1625,8 +1627,13 @@ describe('hosted domain dynamic tools', () => {
       { action: 'inspect', view: 'model_review', lookup: 'missing' },
     ])
     const payload = readResultPayload(result)
-    expect(payload).toMatchObject({ action: 'inspect_models', requiresIndividualInspection: ['large'],
-      results: [{ lookup: 'small', instructions: 'Keep this complete cue.' }, { lookup: 'missing', found: false }] })
+    expect(payload).toEqual({ action: 'inspect_models', requiresIndividualInspection: ['large'],
+      results: [{
+        automationId: 'small', assistantTargetOverride: null, managed: false, contextReferences: [],
+        instructions: 'Keep this complete cue.', title: 'Synthetic review',
+        schedule: { kind: 'dailyLocal', localTime: '09:00', timeZone: 'UTC' },
+        status: 'active', updatedAt: '2026-10-01T00:00:00.000Z',
+      }, { lookup: 'missing', found: false }] })
     expect(Buffer.byteLength(JSON.stringify(payload))).toBeLessThanOrEqual(24_000)
     expect(JSON.stringify(payload)).not.toContain('漢')
   })
@@ -1906,10 +1913,10 @@ describe('hosted domain dynamic tools', () => {
       action: 'connect',
       provider: 'whoop',
     }, { signal: abortController.signal })
+    // The Web route sends the same URL as authorizationUrl; only connectUrl is read.
     expect(readResultPayload(result)).toEqual({
       action: 'connect',
       link: {
-        authorizationUrl: 'https://connect.example.test/authorize',
         connectUrl: 'https://connect.example.test/start',
         expiresAt: '2026-07-16T12:05:00.000Z',
         provider: 'whoop',

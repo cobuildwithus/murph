@@ -498,12 +498,23 @@ export const displayNameSetMemberActionV1Schema = z.object({
   displayName: memoryDisplayNameSchema,
 }).strict();
 
-export const measurementAddMemberActionV1Schema = z.object({
+const measurementRanges = {
+  "estimated-vo2-max": { min: 10, max: 90 },
+  "body-height": { min: 50, max: 272 },
+} as const;
+
+const measurementFieldsSchema = z.object({
+  metric: z.enum(["estimated-vo2-max", "body-height"]),
+  value: z.number().finite(),
+}).strict().refine(({ metric, value }) => {
+  const range = measurementRanges[metric];
+  return value >= range.min && value <= range.max;
+}, { message: "Supply a value within the metric's range.", path: ["value"] });
+
+export const measurementAddMemberActionV1Schema = measurementFieldsSchema.safeExtend({
   kind: z.literal("measurement.add"),
   version: z.literal(1),
-  metric: z.enum(["estimated-vo2-max"]),
-  value: z.number().finite().min(10).max(90),
-}).strict();
+});
 
 export const memberActionV1Schema = z.discriminatedUnion("kind", [
   measurementAddMemberActionV1Schema,
@@ -525,6 +536,11 @@ export const memberActionIdV1Schema = z
   .regex(UUID_PATTERN, "Expected a UUID action identity.");
 
 export const companionDemographicsRequestSchema = memoryDemographicsPatchSchema.safeExtend({
+  actionId: memberActionIdV1Schema,
+  requestedAt: z.isoDateTime({ offset: true }),
+});
+
+export const companionMeasurementRequestSchema = measurementFieldsSchema.safeExtend({
   actionId: memberActionIdV1Schema,
   requestedAt: z.isoDateTime({ offset: true }),
 });

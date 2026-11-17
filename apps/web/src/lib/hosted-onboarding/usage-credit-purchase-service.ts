@@ -96,6 +96,7 @@ import {
   readHostedUsageCreditGrantCapacityTx,
 } from "../hosted-execution/usage-credit-grant-capacity";
 import {
+  HostedUsageCreditBeneficiaryMissingError,
   lockHostedUsageCreditBeneficiaryTx,
   type LockedHostedUsageCreditBeneficiary,
 } from "../hosted-execution/usage-credit-ledger";
@@ -514,9 +515,7 @@ async function createHostedUsageCreditCheckoutForTarget(input: {
       });
     } catch (error) {
       if (
-        error instanceof TypeError
-        && error.message
-          === "Hosted usage-credit beneficiary does not exist."
+        error instanceof HostedUsageCreditBeneficiaryMissingError
       ) {
         throw buildHostedUsageCreditNotEligibleError(input.target.kind);
       }

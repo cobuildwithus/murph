@@ -85,8 +85,8 @@ export function inspectRunnerBundleBudgetWorkflow(source) {
     requireText(
       budgetJob,
       "missing-budget-if",
-      "if: ${{ !cancelled() }}",
-      "The bundle budget must honor cancellation without skipping ordinary candidates.",
+      "if: ${{ !cancelled() && needs.release-verification-plan-linux.outputs.reach_runner_bundle == 'true' }}",
+      "The bundle budget must honor cancellation and skip only a pull request that can't reach the runner bundle.",
     );
     requireText(
       budgetJob,

@@ -1,3 +1,4 @@
+import { parseJunctionDiagnosticRequestedTimestamp } from "../src/providers/junction-config.ts";
 import {
   assertConnectBackfillRetryWake,
   assertJunctionWindowQuery,
@@ -591,6 +592,16 @@ test("Junction REST diagnostic matrix compares metadata, introspection, and data
     /junction-user-1|provider-garmin-1|source-device-1|device-row-1|garmin|Garmin|Fenix|97/u,
   );
 });
+
+for (const windowEnd of ["-271821-04-20T00:00:00.000Z", "+275760-09-13T00:00:00.000Z"]) {
+  test(`Junction diagnostic rejects overflowing caller window ${windowEnd}`, async () => {
+    const fetch = vi.fn(async () => { throw new Error("Unexpected provider call"); });
+    const provider = createJunctionProvider(fetch, { summaryResources: ["activity"], timeseriesResources: [] });
+    assert.ok(provider.diagnostics?.diagnoseBackfill);
+    await assert.rejects(() => provider.diagnostics!.diagnoseBackfill!({ account: createAccount(), now: "2026-04-03T00:00:00.000Z", windowEnd }), { code: "JUNCTION_DIAGNOSTIC_WINDOW_INVALID", httpStatus: 400 });
+    assert.equal(fetch.mock.calls.length, 0);
+  });
+}
 
 test("Junction backfill diagnostic rejects malformed requested windows without provider calls", async () => {
   const provider = createJunctionProvider(async () => {
@@ -1552,7 +1563,7 @@ for (const testCase of usefulHistoricalSummaryCompletionCases) {
     );
 
     assert.deepEqual(result.metadataPatch, {
-      junctionHistoricalBackfillStatus: "coverage_v3_complete",
+      junctionHistoricalBackfillStatus: "coverage_v4_complete",
       junctionHistoricalBackfillEmptyAttempts: 0,
       junctionHistoricalBackfillLastEmptyAt: null,
       junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -1726,7 +1737,7 @@ for (const testCase of [
     );
 
     assert.deepEqual(result.metadataPatch, {
-      junctionHistoricalBackfillStatus: "coverage_v3_complete",
+      junctionHistoricalBackfillStatus: "coverage_v4_complete",
       junctionHistoricalBackfillEmptyAttempts: 0,
       junctionHistoricalBackfillLastEmptyAt: null,
       junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -1783,7 +1794,7 @@ for (const summaryResource of ["sleep", "workouts", "body"] as const) {
     );
 
     assert.deepEqual(result.metadataPatch, {
-      junctionHistoricalBackfillStatus: "coverage_v3_complete",
+      junctionHistoricalBackfillStatus: "coverage_v4_complete",
       junctionHistoricalBackfillEmptyAttempts: 0,
       junctionHistoricalBackfillLastEmptyAt: null,
       junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -1847,7 +1858,7 @@ test("Junction sleep_cycle stage-count-only history stays pending without canoni
   );
 
   assert.deepEqual(result.metadataPatch, {
-    junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+    junctionHistoricalBackfillStatus: "coverage_v4_retrying",
     junctionHistoricalBackfillEmptyAttempts: 1,
     junctionHistoricalBackfillLastEmptyAt: "2026-04-03T00:00:00.000Z",
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -1909,7 +1920,7 @@ for (const summaryResource of ["activity", "sleep"] as const) {
     );
 
     assert.deepEqual(result.metadataPatch, {
-      junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+      junctionHistoricalBackfillStatus: "coverage_v4_retrying",
       junctionHistoricalBackfillEmptyAttempts: 1,
       junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
       junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -1976,7 +1987,7 @@ for (const summaryResource of ["sleep"] as const) {
     );
 
     assert.deepEqual(result.metadataPatch, {
-      junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+      junctionHistoricalBackfillStatus: "coverage_v4_retrying",
       junctionHistoricalBackfillEmptyAttempts: 1,
       junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
       junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -2031,7 +2042,7 @@ test("Junction useful summary without source linkage keeps the historical window
   );
 
   assert.deepEqual(result.metadataPatch, {
-    junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+    junctionHistoricalBackfillStatus: "coverage_v4_retrying",
     junctionHistoricalBackfillEmptyAttempts: 1,
     junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -2086,7 +2097,7 @@ test("Junction floating-provider metric-only summary keeps the historical window
   );
 
   assert.deepEqual(result.metadataPatch, {
-    junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+    junctionHistoricalBackfillStatus: "coverage_v4_retrying",
     junctionHistoricalBackfillEmptyAttempts: 1,
     junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -2143,7 +2154,7 @@ test("Junction source envelope summary historical backfill marks the historical 
   );
 
   assert.deepEqual(result.metadataPatch, {
-    junctionHistoricalBackfillStatus: "coverage_v3_complete",
+    junctionHistoricalBackfillStatus: "coverage_v4_complete",
     junctionHistoricalBackfillEmptyAttempts: 0,
     junctionHistoricalBackfillLastEmptyAt: null,
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -2220,7 +2231,7 @@ test("Junction compact timeseries-only historical backfill keeps the summary win
   const { junctionTemporalSweepV1, ...historicalProgress } = initialResult.metadataPatch ?? {};
   assert.equal(typeof junctionTemporalSweepV1, "string");
   assert.deepEqual(historicalProgress, {
-    junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+    junctionHistoricalBackfillStatus: "coverage_v4_retrying",
     junctionHistoricalBackfillEmptyAttempts: 1,
     junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -2316,7 +2327,7 @@ test("Junction connect-window timeseries continuation bypasses completed setup w
     "Yielded Junction backfill should schedule a continuation.",
   );
   assert.deepEqual(firstResult.metadataPatch, {
-    junctionHistoricalBackfillStatus: "coverage_v3_complete",
+    junctionHistoricalBackfillStatus: "coverage_v4_complete",
     junctionHistoricalBackfillEmptyAttempts: 0,
     junctionHistoricalBackfillLastEmptyAt: null,
     junctionHistoricalBackfillWindowStart: ownerWindowStart,
@@ -2453,7 +2464,7 @@ test("Junction profile-only historical backfill has no historical completion obl
   assert.deepEqual(result.metadataPatch, {
     junctionProfileSummaryCheckedAt: "2026-04-04T00:00:00.000Z",
     junctionProfileSummaryNormalizationRevision: 2,
-    junctionHistoricalBackfillStatus: "coverage_v3_complete",
+    junctionHistoricalBackfillStatus: "coverage_v4_complete",
     junctionHistoricalBackfillEmptyAttempts: 0,
     junctionHistoricalBackfillLastEmptyAt: null,
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -2838,7 +2849,7 @@ test("Junction unproven historical coverage saturates at a daily retry without a
   const context = createJunctionJobContext({
     account: createAccount({
       metadata: {
-        junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+        junctionHistoricalBackfillStatus: "coverage_v4_retrying",
         junctionHistoricalBackfillEmptyAttempts: 4,
         junctionHistoricalBackfillLastEmptyAt: "2026-04-02T00:00:00.000Z",
         junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -2862,7 +2873,7 @@ test("Junction unproven historical coverage saturates at a daily retry without a
   );
 
   assert.deepEqual(result.metadataPatch, {
-    junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+    junctionHistoricalBackfillStatus: "coverage_v4_retrying",
     junctionHistoricalBackfillEmptyAttempts: 4,
     junctionHistoricalBackfillLastEmptyAt: "2026-04-03T00:00:00.000Z",
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -2954,3 +2965,16 @@ test("Junction refresh preserves its outcome when the following source status re
   assert.equal((result.result.selectedSource as Record<string, unknown>).status, "unknown");
   assert.equal(typeof (result.result.selectedSource as Record<string, unknown>).errorCode, "string");
 });
+
+for (const value of ["-271821-04-20T00:00:00.000Z", "+275760-09-13T00:00:00.000Z", "0000-12-31T23:59:59.999Z", "9999-01-01T00:00:00.000Z"]) {
+  test(`diagnostic timestamp rejects unusable range ${value}`, () => {
+    assert.throws(() => parseJunctionDiagnosticRequestedTimestamp(value, "windowEnd"), { code: "JUNCTION_DIAGNOSTIC_WINDOW_INVALID", httpStatus: 400 });
+    assert.throws(() => parseJunctionDiagnosticRequestedTimestamp(value, "windowStart"), { code: "JUNCTION_DIAGNOSTIC_WINDOW_INVALID", httpStatus: 400 });
+  });
+}
+for (const value of ["0001-01-01T00:00:00.000Z", "9998-12-31T23:59:59.999Z"]) {
+  test(`diagnostic timestamp accepts usable bound ${value}`, () => {
+    assert.equal(parseJunctionDiagnosticRequestedTimestamp(value, "windowEnd"), value);
+    assert.equal(parseJunctionDiagnosticRequestedTimestamp(value, "windowStart"), value);
+  });
+}

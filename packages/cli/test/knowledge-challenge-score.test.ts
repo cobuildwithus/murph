@@ -3,13 +3,42 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
-import { afterEach, test } from 'vitest'
+import { afterEach, test, vi } from 'vitest'
+import { ContractValidationError } from '@murphai/contracts/validation-error'
+import * as scorecard from '@murphai/assistant-engine/group-challenge-scorecard'
+import { createKnowledgeChallengeScoreCommandDefinition } from '../src/commands/knowledge-challenge-score.js'
 import type { GroupChallengeScoreResult } from '@murphai/assistant-engine/group-challenge-scorecard'
 
 import { createVaultCli } from '../src/vault-cli.js'
 import { runInProcessJsonCli } from './cli-test-helpers.js'
 
 const cleanupPaths: string[] = []
+
+test.each([
+  [new ContractValidationError('Scorer failed.'), true],
+  [new TypeError('Scorer failed.'), true],
+  [new Error('Scorer failed.'), false],
+] as const)('knowledge scorer preserves native and contract rejection mapping: %s', async (error, invalidPayload) => {
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'murph-score-error-'))
+  cleanupPaths.push(tempRoot)
+  const inputPath = path.join(tempRoot, 'scorecard.json')
+  await writeFile(inputPath, JSON.stringify({
+    format: { kind: 'individual', objective: { kind: 'ranking' } },
+    participants: [{ participantId: 'participant_synthetic', components: [{ componentId: 'steps', quantity: 1, status: 'available' }] }],
+    scorecard: { components: [{ id: 'steps', label: 'Steps', perQuantity: 1, points: 1, quantityUnit: 'steps' }] },
+  }))
+  const score = vi.spyOn(scorecard, 'scoreGroupChallenge').mockImplementationOnce(() => { throw error })
+  try {
+    const run = createKnowledgeChallengeScoreCommandDefinition().run({ options: { input: `@${inputPath}` } })
+    if (invalidPayload) {
+      await assert.rejects(run, { code: 'invalid_payload' })
+    } else {
+      await assert.rejects(run, (caught) => caught === error)
+    }
+  } finally {
+    score.mockRestore()
+  }
+})
 
 afterEach(async () => {
   await Promise.all(

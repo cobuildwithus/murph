@@ -257,15 +257,27 @@ function buildOpenAiResponse(input: {
 function buildUsageResponse(
   serviceTier: "default" | "priority" = "priority",
 ): OpenAiResponse {
-  // This fixture supplies only fields read by usage accounting.
-  // @ts-expect-error -- deliberate narrow provider response fixture.
   return {
+    access_programs: null,
+    created_at: 0,
+    error: null,
     id: "resp_123",
+    incomplete_details: null,
+    instructions: null,
+    metadata: null,
     model: "gpt-5.6-luna-2026-08-01",
+    object: "response",
+    output: [],
+    output_text: "",
+    parallel_tool_calls: false,
     service_tier: serviceTier,
+    temperature: null,
+    tool_choice: "none",
+    tools: [],
+    top_p: null,
     usage: {
       input_tokens: 90,
-      input_tokens_details: { cached_tokens: 0 },
+      input_tokens_details: { cache_write_tokens: 0, cached_tokens: 0 },
       output_tokens: 22,
       output_tokens_details: { reasoning_tokens: 0 },
       total_tokens: 112,

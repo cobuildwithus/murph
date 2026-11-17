@@ -112,6 +112,17 @@ import { withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { POST as postHostedLinqEgressEngagement } from "../app/api/internal/hosted-runtime/linq-egress/engagement/route";
 
 describe("hosted Linq egress authority", () => {
+  it.each([256, 257])("bounds private Assistant Ask completion ids: %i", async length => {
+    mocks.getPrisma.mockReturnValue(createPrismaStub({ homeChatId: "chat-home" }));
+    const response = await postHostedLinqEgressEngagement(routeAuthorityRequest({ authorityCheckOnly: true,
+      target: "chat-home", idempotencyKey: "assistant-ask-private:x", answeredMailboxItemIds: ["x".repeat(length)] }));
+    if (length === 257) {
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: { code: "INVALID_REQUEST", message: "Invalid request." } });
+      expect(mocks.assertHostedAssistantAskCompletionDeliveryAuthorityTx).not.toHaveBeenCalled();
+    } else expect(mocks.assertHostedAssistantAskCompletionDeliveryAuthorityTx).toHaveBeenCalled();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.gameCurrentOverride = null;
@@ -2268,7 +2279,7 @@ describe("hosted Linq egress authority", () => {
     });
     vi.spyOn(await import("@/src/lib/hosted-routing/assistant-notification-destination"), "readHostedThreadContainerLinqRouteAuthorities").mockResolvedValue({
       authorities: new Map([["member-1", { channel: "linq", accountLookupKey: lineKey, containerMemberId: "member-1", threadId: "chat-after" }]]),
-      nonLinqContainerMemberIds: new Set(), unavailableContainerMemberIds: new Set(),
+      nonLinqContainerMemberIds: new Set(), missingContainerMemberIds: new Set(), unavailableContainerMemberIds: new Set(),
     });
     mocks.gameCurrentOverride = async () => true;
     mocks.getPrisma.mockReturnValue(prisma);

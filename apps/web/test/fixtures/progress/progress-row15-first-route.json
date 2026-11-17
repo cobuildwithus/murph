@@ -1,0 +1,89 @@
+{
+  "joinedOn": "2026-11-14",
+  "today": "2026-11-14",
+  "incomplete": false,
+  "measures": [
+    {
+      "id": "walk.meters",
+      "label": "Walk",
+      "noun": "walked",
+      "icon": "walk",
+      "format": "distance",
+      "source": "games",
+      "pending": false,
+      "gameOn": true,
+      "needsPerDay": false,
+      "total": {
+        "value": 4828.032,
+        "text": "3 mi",
+        "unit": "meters"
+      },
+      "today": null,
+      "points": [
+        [
+          "2026-11-14",
+          4828.032
+        ]
+      ],
+      "projection": null,
+      "ladder": null,
+      "route": {
+        "name": "Austin to San Antonio",
+        "distanceText": "80 mi",
+        "walkedText": "3 mi",
+        "progress": 0.0375,
+        "straightLine": false,
+        "finishedOn": null,
+        "map": "/api/game/v1/progress/map?measure=walk.meters&size=card",
+        "towns": [
+          {
+            "name": "Austin",
+            "atText": "mile 0",
+            "x": 0.7,
+            "y": 0.1,
+            "passedOn": "2026-11-14"
+          },
+          {
+            "name": "San Antonio",
+            "atText": "77 mi to go",
+            "x": 0.15,
+            "y": 0.8,
+            "passedOn": null
+          }
+        ],
+        "goalPicked": false,
+        "completed": [],
+        "drawerTowns": [
+          {
+            "name": "Austin",
+            "atText": "mile 0",
+            "x": 0.757143,
+            "y": 0.174554,
+            "passedOn": "2026-11-14"
+          },
+          {
+            "name": "San Antonio",
+            "atText": "77 mi to go",
+            "x": 0.05,
+            "y": 0.744085,
+            "passedOn": null
+          }
+        ],
+        "here": {
+          "x": 0.679375,
+          "y": 0.12625
+        },
+        "drawerHere": {
+          "x": 0.730625,
+          "y": 0.195911
+        },
+        "shareAwardId": null
+      },
+      "pics": []
+    }
+  ],
+  "medals": [],
+  "shelf": [],
+  "moments": [],
+  "picCount": 0
+}

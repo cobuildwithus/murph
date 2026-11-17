@@ -132,7 +132,7 @@ describe("visible secondary webhook outcomes", () => {
     const lookupHostedMemberIdentityByPhoneNumber = vi.fn(async () => null);
     const sendHostedLinqChatMessage = vi.fn();
     const dependencies: HostedVisibleSecondaryLinqDependencies = {
-      getPrisma: vi.fn(() => ({}) as never),
+      getPrisma: vi.fn(() => ({ hostedLinqGroupLeave: { findFirst: vi.fn().mockResolvedValue(null) } }) as never),
       lookupHostedMemberByVerifiedEmailAddress: vi.fn(async () => null),
       lookupHostedMemberIdentityByPhoneNumber,
       parseHostedLinqWebhookEvent: vi.fn(() => event),
@@ -155,7 +155,7 @@ describe("visible secondary webhook outcomes", () => {
     });
     expect(lookupHostedMemberIdentityByPhoneNumber).toHaveBeenCalledWith({
       phoneNumber: "+15551234567",
-      prisma: {},
+      prisma: expect.objectContaining({ hostedLinqGroupLeave: expect.any(Object) }),
     });
     expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
   });
@@ -193,7 +193,7 @@ describe("visible secondary webhook outcomes", () => {
       messageId: "msg_visible_reply",
     }));
     const dependencies: HostedVisibleSecondaryLinqDependencies = {
-      getPrisma: vi.fn(() => ({}) as never),
+      getPrisma: vi.fn(() => ({ hostedLinqGroupLeave: { findFirst: vi.fn().mockResolvedValue(null) } }) as never),
       lookupHostedMemberByVerifiedEmailAddress,
       lookupHostedMemberIdentityByPhoneNumber: vi.fn(async () => null),
       parseHostedLinqWebhookEvent: vi.fn(() => event),
@@ -215,7 +215,7 @@ describe("visible secondary webhook outcomes", () => {
     });
     expect(lookupHostedMemberByVerifiedEmailAddress).toHaveBeenCalledWith({
       address: "member@example.test",
-      prisma: {},
+      prisma: expect.objectContaining({ hostedLinqGroupLeave: expect.any(Object) }),
     });
     expect(sendHostedLinqChatMessage).toHaveBeenCalledWith(expect.objectContaining({
       chatId: "chat_visible_operational",
@@ -240,7 +240,7 @@ describe("visible secondary webhook outcomes", () => {
     }) as never);
     const sendHostedLinqChatMessage = vi.fn();
     const dependencies: HostedVisibleSecondaryLinqDependencies = {
-      getPrisma: vi.fn(() => ({}) as never),
+      getPrisma: vi.fn(() => ({ hostedLinqGroupLeave: { findFirst: vi.fn().mockResolvedValue(null) } }) as never),
       lookupHostedMemberByVerifiedEmailAddress: vi.fn(async () => null),
       lookupHostedMemberIdentityByPhoneNumber,
       parseHostedLinqWebhookEvent: vi.fn(() => event),
@@ -328,7 +328,7 @@ describe("visible secondary webhook outcomes", () => {
     const sendError = new Error("Linq reply failed");
     const sendHostedLinqChatMessage = vi.fn().mockRejectedValue(sendError);
     const dependencies: HostedVisibleSecondaryLinqDependencies = {
-      getPrisma: vi.fn(() => ({}) as never),
+      getPrisma: vi.fn(() => ({ hostedLinqGroupLeave: { findFirst: vi.fn().mockResolvedValue(null) } }) as never),
       lookupHostedMemberByVerifiedEmailAddress: vi.fn(async () => null),
       lookupHostedMemberIdentityByPhoneNumber: vi.fn(async () => null),
       parseHostedLinqWebhookEvent: vi.fn(() => event),
@@ -436,6 +436,7 @@ describe("visible secondary webhook outcomes", () => {
     }));
     const dependencies: HostedVisibleSecondaryLinqDependencies = {
       getPrisma: vi.fn(() => ({
+        hostedLinqGroupLeave: { findFirst: vi.fn().mockResolvedValue(null) },
         hostedLinqDailyState: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
       }) as never),
       lookupHostedMemberByVerifiedEmailAddress: vi.fn(async () => null),
@@ -791,7 +792,7 @@ describe("visible secondary webhook outcomes", () => {
       reason,
     }));
     const dependencies: HostedVisibleSecondaryLinqDependencies = {
-      getPrisma: vi.fn(() => ({}) as never),
+      getPrisma: vi.fn(() => ({ hostedLinqGroupLeave: { findFirst: vi.fn().mockResolvedValue(null) } }) as never),
       lookupHostedMemberByVerifiedEmailAddress: vi.fn(async () => null),
       lookupHostedMemberIdentityByPhoneNumber: vi.fn(async () => null),
       parseHostedLinqWebhookEvent,
@@ -814,6 +815,7 @@ describe("visible secondary webhook outcomes", () => {
 function buildSignupReminderFixture(missing?: "member" | "day", service = "iMessage") {
   const claimedDays = new Set<string>();
   const prisma = {
+    hostedLinqGroupLeave: { findFirst: vi.fn().mockResolvedValue(null) },
     hostedLinqDailyState: {
       updateMany: vi.fn(async (input: {
         where: { dayUtc: Date; memberId: string; signupLinkReminderSentAt: null | { not: null } };

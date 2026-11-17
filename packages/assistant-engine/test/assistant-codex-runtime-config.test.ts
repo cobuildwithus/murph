@@ -97,6 +97,13 @@ import {
 } from '../src/assistant/generated-delivery-files.ts'
 
 describe('assistant codex runtime', () => {
+  it('sends the cache opt-in only on the selected turn/start', () => {
+    const input = { dynamicTools: [], prompt: 'Synthetic reply', workingDirectory: '/synthetic' }
+    const reply = buildCodexTurnStartParams({ images: [], input: { ...input, promptCacheRetention: '12h' }, codexThreadId: 'thread-1' })
+    expect(reply.turnTrigger).toBe('murph_conversation_reply_12h')
+    const laterNotification = buildCodexTurnStartParams({ images: [], input, codexThreadId: 'thread-1' })
+    expect(laterNotification).not.toHaveProperty('turnTrigger')
+  })
   it('rejects retired Sol before starting a provider process', async () => {
     await expect(executeCodexAppServerTurn({
       model: 'gpt-5.6-sol', prompt: 'Synthetic retirement check',

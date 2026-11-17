@@ -5,9 +5,9 @@ import { generateHostedRandomPrefixedId } from "../primitives";
 import type { GameChange, GamePendingChange } from "./contract";
 import { parsePendingGameChange, type StoredGamePendingChange } from "./changes";
 import { openGameTexts, sealGameText } from "./crypto";
-import { parseTermWords, type TermWords } from "./rules";
+import { currentTerms, mergeStakeSlots, parseStoredTerms, parseTermWords, type TermWords } from "./rules";
 
-type WordsOwner = Pick<Game, "id" | "wordsOwnerMemberId" | "termsWordsEncrypted">;
+type WordsOwner = Pick<Game, "id" | "wordsOwnerMemberId" | "termsWordsEncrypted" | "terms">;
 const target = (row: Pick<Game, "id" | "wordsOwnerMemberId">) => ({ table: "game" as const, field: "terms_words", memberId: row.wordsOwnerMemberId, rowId: row.id });
 
 export interface PreparedGameChangeWords {
@@ -25,9 +25,11 @@ export async function prepareGameChangeWords(row: WordsOwner, change: GameChange
   const previous = [...words.versions].reverse().find((version) => version.n <= expectedVersion);
   if (!previous) throw new Error("Game terms words are missing.");
   const stakes = change.stakes?.map((stake) => ({ key: generateHostedRandomPrefixedId("gsk"), kind: stake.kind, item: stake.item }));
+  const currentStakes = currentTerms(parseStoredTerms(row.terms)).stakes.map(stake => ({ ...stake,
+    item: previous.stakes.find(word => word.key === stake.key)?.item ?? "" }));
   const nextWords = { ...previous, n: expectedVersion + 1, tasks: change.tasks ?? previous.tasks,
     ...(change.defaultTask === undefined ? {} : { defaultTask: change.defaultTask }),
-    stakes: stakes?.map(({ key, item }) => ({ key, item })) ?? previous.stakes };
+    stakes: stakes ? mergeStakeSlots(currentStakes, stakes).map(({ key, item }) => ({ key, item })) : previous.stakes };
   const encrypted = await sealGameText(target(row), JSON.stringify({ ...words, versions: [...words.versions, nextWords] }));
   if (!encrypted) throw new Error("Game encryption returned nothing.");
   return { baseWordsEncrypted: row.termsWordsEncrypted, termsWordsEncrypted: encrypted,

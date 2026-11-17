@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type {
   DeviceSyncJobInput,
   DeviceSyncWebhookAcceptanceMode,
@@ -13,7 +14,23 @@ const PREPARED_WEBHOOK_MAX_SERIALIZED_BYTES = 64 * 1024;
 const PREPARED_WEBHOOK_MAX_JOBS = 100;
 const PREPARED_WEBHOOK_MAX_PAYLOAD_FIELDS = 64;
 const PREPARED_WEBHOOK_MAX_STRING_LENGTH = 32 * 1024;
+// Room the rest of one event keeps beside its largest inline string.
+const PREPARED_WEBHOOK_INLINE_STRING_RESERVED_BYTES = 16 * 1024;
 const textEncoder = new TextEncoder();
+
+/**
+ * Whether one inline job-payload string fits a prepared event.
+ *
+ * A provider asks before it builds a job around inline data. An event that
+ * fails these limits can never be admitted, so the provider must emit a
+ * smaller job that fetches the data instead.
+ */
+export function fitsPreparedDeviceSyncWebhookInlineString(value: string): boolean {
+  return value.length <= PREPARED_WEBHOOK_MAX_STRING_LENGTH
+    && textEncoder.encode(JSON.stringify(value)).byteLength
+      <= PREPARED_WEBHOOK_MAX_SERIALIZED_BYTES
+        - PREPARED_WEBHOOK_INLINE_STRING_RESERVED_BYTES;
+}
 
 /**
  * Provider-authenticated webhook meaning frozen at public ingress.
@@ -66,7 +83,7 @@ export function parsePreparedDeviceSyncWebhook(
   const jobs = requireArray(record.jobs, "Prepared device webhook jobs")
     .map(parsePreparedJob);
   if (jobs.length > PREPARED_WEBHOOK_MAX_JOBS) {
-    throw new RangeError("Prepared device webhook has too many jobs.");
+    throw new ContractValidationError("Prepared device webhook has too many jobs.");
   }
 
   const prepared: PreparedDeviceSyncWebhookV1 = {
@@ -148,7 +165,7 @@ export function parsePreparedDeviceSyncWebhook(
     textEncoder.encode(JSON.stringify(prepared)).byteLength
       > PREPARED_WEBHOOK_MAX_SERIALIZED_BYTES
   ) {
-    throw new RangeError("Prepared device webhook is too large.");
+    throw new ContractValidationError("Prepared device webhook is too large.");
   }
   return prepared;
 }
@@ -191,7 +208,7 @@ function parsePreparedJobPayload(
   const record = requireRecord(value, label);
   const entries = Object.entries(record);
   if (entries.length > PREPARED_WEBHOOK_MAX_PAYLOAD_FIELDS) {
-    throw new RangeError(`${label} has too many fields.`);
+    throw new ContractValidationError(`${label} has too many fields.`);
   }
   return Object.fromEntries(entries.map(([key, fieldValue]) => [
     requireString(key, `${label} field name`),
@@ -210,7 +227,7 @@ function parsePreparedJobPayloadValue(
     return value.map((entry, index) =>
       requireString(entry, `${label}[${index}]`, true));
   }
-  throw new TypeError(`${label} has an unsupported value.`);
+  throw new ContractValidationError(`${label} has an unsupported value.`);
 }
 
 function parseExternalAccountDiagnostic(
@@ -252,13 +269,13 @@ function parseExternalAccountDiagnostic(
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object.`);
+    throw new ContractValidationError(`${label} must be an object.`);
   }
   return Object.fromEntries(Object.entries(value));
 }
 
 function requireArray(value: unknown, label: string): unknown[] {
-  if (!Array.isArray(value)) throw new TypeError(`${label} must be an array.`);
+  if (!Array.isArray(value)) throw new ContractValidationError(`${label} must be an array.`);
   return value;
 }
 
@@ -269,7 +286,7 @@ function assertExactKeys(
 ): void {
   const allowed = new Set(allowedKeys);
   const unexpected = Object.keys(record).find((key) => !allowed.has(key));
-  if (unexpected) throw new TypeError(`${label} contains unsupported field ${unexpected}.`);
+  if (unexpected) throw new ContractValidationError(`${label} contains unsupported field ${unexpected}.`);
 }
 
 function requireString(
@@ -282,7 +299,7 @@ function requireString(
     || (!allowEmpty && value.length === 0)
     || value.length > PREPARED_WEBHOOK_MAX_STRING_LENGTH
   ) {
-    throw new TypeError(`${label} must be a bounded string.`);
+    throw new ContractValidationError(`${label} must be a bounded string.`);
   }
   return value;
 }
@@ -295,7 +312,7 @@ function requireIsoTimestamp(value: unknown, label: string): string {
   const timestamp = requireString(value, label);
   const parsed = new Date(timestamp);
   if (Number.isNaN(parsed.valueOf()) || parsed.toISOString() !== timestamp) {
-    throw new TypeError(`${label} must be a canonical ISO timestamp.`);
+    throw new ContractValidationError(`${label} must be a canonical ISO timestamp.`);
   }
   return timestamp;
 }
@@ -303,7 +320,7 @@ function requireIsoTimestamp(value: unknown, label: string): string {
 function requireProvider(value: unknown): string {
   const provider = requireString(value, "Prepared device webhook provider");
   if (!PREPARED_WEBHOOK_PROVIDER_PATTERN.test(provider)) {
-    throw new TypeError("Prepared device webhook provider is invalid.");
+    throw new ContractValidationError("Prepared device webhook provider is invalid.");
   }
   return provider;
 }
@@ -311,7 +328,7 @@ function requireProvider(value: unknown): string {
 function requireTraceId(value: unknown): string {
   const traceId = requireString(value, "Prepared device webhook trace id");
   if (!PREPARED_WEBHOOK_TRACE_ID_PATTERN.test(traceId)) {
-    throw new TypeError("Prepared device webhook trace id is invalid.");
+    throw new ContractValidationError("Prepared device webhook trace id is invalid.");
   }
   return traceId;
 }
@@ -319,14 +336,14 @@ function requireTraceId(value: unknown): string {
 function requireHash(value: unknown, label: string): string {
   const hash = requireString(value, label);
   if (!PREPARED_WEBHOOK_TRACE_ID_PATTERN.test(hash)) {
-    throw new TypeError(`${label} must be a SHA-256 hash.`);
+    throw new ContractValidationError(`${label} must be a SHA-256 hash.`);
   }
   return hash;
 }
 
 function requireFiniteNumber(value: unknown, label: string): number {
   if (typeof value !== "number" || !Number.isFinite(value)) {
-    throw new TypeError(`${label} must be finite.`);
+    throw new ContractValidationError(`${label} must be finite.`);
   }
   return value;
 }
@@ -334,31 +351,31 @@ function requireFiniteNumber(value: unknown, label: string): number {
 function requirePositiveInteger(value: unknown, label: string): number {
   const number = requireFiniteNumber(value, label);
   if (!Number.isSafeInteger(number) || number < 1) {
-    throw new TypeError(`${label} must be a positive integer.`);
+    throw new ContractValidationError(`${label} must be a positive integer.`);
   }
   return number;
 }
 
 function requireBoolean(value: unknown, label: string): boolean {
-  if (typeof value !== "boolean") throw new TypeError(`${label} must be boolean.`);
+  if (typeof value !== "boolean") throw new ContractValidationError(`${label} must be boolean.`);
   return value;
 }
 
 function requireAcceptanceMode(value: unknown): DeviceSyncWebhookAcceptanceMode {
   if (value === "level_dirty_hint" || value === "durable_webhook_work") return value;
-  throw new TypeError("Prepared device webhook acceptance mode is invalid.");
+  throw new ContractValidationError("Prepared device webhook acceptance mode is invalid.");
 }
 
 function requireUnknownAccountAction(value: unknown): "accept" | "retry" {
   if (value === "accept" || value === "retry") return value;
-  throw new TypeError("Prepared device webhook unknown-account action is invalid.");
+  throw new ContractValidationError("Prepared device webhook unknown-account action is invalid.");
 }
 
 function requireDiagnosticCandidateKind(
   value: unknown,
 ): "client_user_id" | "external_account_id" {
   if (value === "client_user_id" || value === "external_account_id") return value;
-  throw new TypeError("Prepared device webhook diagnostic candidate kind is invalid.");
+  throw new ContractValidationError("Prepared device webhook diagnostic candidate kind is invalid.");
 }
 
 function requireLiteral<Literal extends string>(
@@ -366,6 +383,6 @@ function requireLiteral<Literal extends string>(
   expected: Literal,
   label: string,
 ): Literal {
-  if (value !== expected) throw new TypeError(`${label} is unsupported.`);
+  if (value !== expected) throw new ContractValidationError(`${label} is unsupported.`);
   return expected;
 }

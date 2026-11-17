@@ -1,3 +1,4 @@
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import {
   parseHostedRuntimeAssistantAskControlRequest,
 } from "@murphai/hosted-execution/parsers";
@@ -19,7 +20,7 @@ import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 import {
   handoffHostedMailboxWake,
 } from "@/src/lib/hosted-orchestration/mailbox-wake";
-import { readRawBodyBuffer } from "@/src/lib/http";
+import { parseRequestJson, readRawBodyBuffer } from "@/src/lib/http";
 
 export const dynamic = "force-dynamic";
 export const fetchCache = "force-no-store";
@@ -41,8 +42,9 @@ export const POST = withJsonError(async (request: Request) => {
     maxBodyBytes: HOSTED_RUNTIME_ASSISTANT_ASK_CONTROL_BODY_MAX_BYTES,
     payloadText,
   });
-  const requestBody = parseHostedRuntimeAssistantAskControlRequest(
-    payloadText.trim() ? JSON.parse(payloadText) : {},
+  const requestBody = parseInput(
+    payloadText.trim() ? parseRequestJson(payloadText) : {},
+    parseHostedRuntimeAssistantAskControlRequest,
   );
   const result = await tryHandleHostedOperatorDiagnosticControl({
     boundRuntimeMemberId,

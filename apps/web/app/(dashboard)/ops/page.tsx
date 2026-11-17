@@ -1,3 +1,4 @@
+import { BlockedNumbers } from "./blocked-numbers";
 import type { Metadata } from "next";
 import Link from "next/link";
 
@@ -97,6 +98,7 @@ export default async function HostedOpsPage() {
           </Link>
         ))}
       </section>
+      <BlockedNumbers />
     </div>
   );
 }

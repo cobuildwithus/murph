@@ -2,10 +2,13 @@ import path from 'node:path'
 
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 import { loadRuntimeModule } from '../runtime-import.js'
+import { readErrorCode } from '../runtime-errors.js'
 import {
   inferEntityKind,
   isQueryableRecordId,
 } from './shared.js'
+
+export { toVaultCliFilesystemError } from '../runtime-errors.js'
 
 const ISO_TIMESTAMP_WITH_OFFSET_PATTERN =
   /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/u
@@ -517,71 +520,6 @@ export function toImporterInputFileVaultCliError(error: unknown, inputFilePath: 
   return error
 }
 
-export function toVaultCliFilesystemError(
-  error: unknown,
-  input: {
-    message: string
-    fieldPath?: 'file' | 'out' | 'vault'
-  },
-) {
-  if (error instanceof VaultCliError) {
-    return error
-  }
-
-  const errorCode = readErrorCode(error)
-  const classification = (() => {
-    if (errorCode === 'ENOENT') {
-      return {
-        code: 'not_found',
-        issueCode: 'custom',
-      }
-    }
-    if (errorCode === 'EACCES' || errorCode === 'EPERM' || errorCode === 'EROFS') {
-      return {
-        code: 'permission_denied',
-        issueCode: 'custom',
-      }
-    }
-    if (
-      errorCode === 'EEXIST'
-      || errorCode === 'EISDIR'
-      || errorCode === 'ENOTDIR'
-      || errorCode === 'ELOOP'
-    ) {
-      return {
-        code: 'invalid_path',
-        issueCode: 'invalid_type',
-      }
-    }
-    if (errorCode === 'ENOSPC' || errorCode === 'EDQUOT') {
-      return {
-        code: 'storage_unavailable',
-        issueCode: 'custom',
-      }
-    }
-    return null
-  })()
-
-  if (!classification) {
-    return error
-  }
-
-  return new VaultCliError(
-    classification.code,
-    input.message,
-    {
-      retryable: false,
-      stage: 'filesystem',
-      issues: input.fieldPath
-          ? [{
-            publicPath: [input.fieldPath],
-            code: classification.issueCode,
-          }]
-        : [],
-    },
-  )
-}
-
 export function toAssessmentImportVaultCliError(error: unknown, inputFilePath: string) {
   const inputFileError = toImporterInputFileVaultCliError(error, inputFilePath)
   if (inputFileError !== error) {
@@ -635,14 +573,6 @@ export function toAssessmentProjectVaultCliError(error: unknown) {
       details: { stage: 'read' },
     },
   })
-}
-
-function readErrorCode(error: unknown): string | null {
-  if (!error || typeof error !== 'object' || !('code' in error)) {
-    return null
-  }
-
-  return typeof error.code === 'string' ? error.code : null
 }
 
 function errorTargetsInputFile(error: unknown, inputFilePath: string): boolean {

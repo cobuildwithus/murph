@@ -1,3 +1,4 @@
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import {
   buildHostedVaultShareProjectionScopeKey,
   HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE,
@@ -42,7 +43,7 @@ export const GET = withJsonError(async (request: Request) => {
   );
   const sourceWorkspaceVersion = requestedVersion === null
     ? undefined
-    : requireHostedVaultShareSourceWorkspaceVersion(requestedVersion);
+    : parseInput(requestedVersion, requireHostedVaultShareSourceWorkspaceVersion);
   const supportsDeferredProjectionWork =
     supportsHostedVaultShareDeferredProjectionWork(request);
   const supportsProjectionContentDigests =

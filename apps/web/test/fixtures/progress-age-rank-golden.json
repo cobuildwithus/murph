@@ -1,0 +1,877 @@
+[
+  {
+    "expected" : {
+      "cuts" : [
+        {
+          "percentile" : 1,
+          "value" : 51.799999999999997
+        },
+        {
+          "percentile" : 5,
+          "value" : 55.899999999999999
+        },
+        {
+          "percentile" : 10,
+          "value" : 58.299999999999997
+        },
+        {
+          "percentile" : 25,
+          "value" : 62.799999999999997
+        },
+        {
+          "percentile" : 50,
+          "value" : 68.400000000000006
+        },
+        {
+          "percentile" : 75,
+          "value" : 74.299999999999997
+        },
+        {
+          "percentile" : 90,
+          "value" : 79.900000000000006
+        },
+        {
+          "percentile" : 95,
+          "value" : 83.900000000000006
+        },
+        {
+          "percentile" : 99,
+          "value" : 91.5
+        }
+      ],
+      "group" : "Women 30 to 39",
+      "lower" : 51.799999999999997,
+      "position" : 0.47128463476070548,
+      "source" : "Apple Heart and Movement Study, Heart Health Trends (Brigham and Women's Hospital, Feb 2026), Table 4 and Figure 3, Apple Watch resting heart rate, n=207,609. Percentiles from scripts/resting-heart-rate-norms.py",
+      "top" : null,
+      "upper" : 91.5,
+      "value" : 70.510000000000005
+    },
+    "id" : "rhr-apple-female",
+    "metric" : "restingHeartRate",
+    "profile" : {
+      "age" : 35,
+      "sex" : "female"
+    },
+    "source" : "Apple Watch",
+    "value" : 70.510000000000005
+  },
+  {
+    "expected" : {
+      "cuts" : [
+        {
+          "percentile" : 1,
+          "value" : 47.600000000000001
+        },
+        {
+          "percentile" : 5,
+          "value" : 51.899999999999999
+        },
+        {
+          "percentile" : 10,
+          "value" : 54.5
+        },
+        {
+          "percentile" : 25,
+          "value" : 59.200000000000003
+        },
+        {
+          "percentile" : 50,
+          "value" : 65.200000000000003
+        },
+        {
+          "percentile" : 75,
+          "value" : 71.599999999999994
+        },
+        {
+          "percentile" : 90,
+          "value" : 77.599999999999994
+        },
+        {
+          "percentile" : 95,
+          "value" : 82.099999999999994
+        },
+        {
+          "percentile" : 99,
+          "value" : 90.5
+        }
+      ],
+      "group" : "Men 40 to 49",
+      "lower" : 47.600000000000001,
+      "position" : 0.28904428904428903,
+      "source" : "Apple Heart and Movement Study, Heart Health Trends (Brigham and Women's Hospital, Feb 2026), Table 4 and Figure 3, Apple Watch resting heart rate, n=207,609. Percentiles from scripts/resting-heart-rate-norms.py",
+      "top" : null,
+      "upper" : 90.5,
+      "value" : 60
+    },
+    "id" : "rhr-apple-male",
+    "metric" : "restingHeartRate",
+    "profile" : {
+      "age" : 45,
+      "sex" : "male"
+    },
+    "source" : "Apple Watch",
+    "value" : 60
+  },
+  {
+    "expected" : {
+      "cuts" : [
+        {
+          "percentile" : 1,
+          "value" : 43.5
+        },
+        {
+          "percentile" : 5,
+          "value" : 47.399999999999999
+        },
+        {
+          "percentile" : 10,
+          "value" : 49.700000000000003
+        },
+        {
+          "percentile" : 25,
+          "value" : 53.899999999999999
+        },
+        {
+          "percentile" : 50,
+          "value" : 59.299999999999997
+        },
+        {
+          "percentile" : 75,
+          "value" : 65
+        },
+        {
+          "percentile" : 90,
+          "value" : 70.400000000000006
+        },
+        {
+          "percentile" : 95,
+          "value" : 74.400000000000006
+        },
+        {
+          "percentile" : 99,
+          "value" : 81.900000000000006
+        }
+      ],
+      "group" : "Women 30 to 39",
+      "lower" : 43.5,
+      "position" : 0.29947916666666663,
+      "source" : "Oura, What Is the Average Resting Heart Rate? (updated Sep 30 2026), lowest sleeping heart rate by age and sex, 6 million members; spread from Apple Heart and Movement Study Figure 6. Percentiles from scripts/resting-heart-rate-norms.py",
+      "top" : null,
+      "upper" : 81.900000000000006,
+      "value" : 55
+    },
+    "id" : "rhr-overnight-garmin",
+    "metric" : "restingHeartRate",
+    "profile" : {
+      "age" : 35,
+      "sex" : "female"
+    },
+    "source" : "Garmin",
+    "value" : 55
+  },
+  {
+    "expected" : {
+      "cuts" : [
+        {
+          "percentile" : 1,
+          "value" : 39
+        },
+        {
+          "percentile" : 5,
+          "value" : 42.200000000000003
+        },
+        {
+          "percentile" : 10,
+          "value" : 44.200000000000003
+        },
+        {
+          "percentile" : 25,
+          "value" : 47.700000000000003
+        },
+        {
+          "percentile" : 50,
+          "value" : 52.100000000000001
+        },
+        {
+          "percentile" : 75,
+          "value" : 56.700000000000003
+        },
+        {
+          "percentile" : 90,
+          "value" : 61.100000000000001
+        },
+        {
+          "percentile" : 95,
+          "value" : 64.299999999999997
+        },
+        {
+          "percentile" : 99,
+          "value" : 70.299999999999997
+        }
+      ],
+      "group" : "Men 20 to 29",
+      "lower" : 39,
+      "position" : 0.67092651757188504,
+      "source" : "Oura, What Is the Average Resting Heart Rate? (updated Sep 30 2026), lowest sleeping heart rate by age and sex, 6 million members; spread from Apple Heart and Movement Study Figure 6. Percentiles from scripts/resting-heart-rate-norms.py",
+      "top" : null,
+      "upper" : 70.299999999999997,
+      "value" : 60
+    },
+    "id" : "rhr-overnight-whoop",
+    "metric" : "restingHeartRate",
+    "profile" : {
+      "age" : 25,
+      "sex" : "male"
+    },
+    "source" : " WHOOP\n",
+    "value" : 60
+  },
+  {
+    "expected" : {
+      "cuts" : [
+        {
+          "percentile" : 1,
+          "value" : 43.600000000000001
+        },
+        {
+          "percentile" : 5,
+          "value" : 47.299999999999997
+        },
+        {
+          "percentile" : 10,
+          "value" : 49.5
+        },
+        {
+          "percentile" : 25,
+          "value" : 53.600000000000001
+        },
+        {
+          "percentile" : 50,
+          "value" : 58.700000000000003
+        },
+        {
+          "percentile" : 75,
+          "value" : 64.099999999999994
+        },
+        {
+          "percentile" : 90,
+          "value" : 69.299999999999997
+        },
+        {
+          "percentile" : 95,
+          "value" : 73
+        },
+        {
+          "percentile" : 99,
+          "value" : 80.099999999999994
+        }
+      ],
+      "group" : "Women 60 to 69",
+      "lower" : 43.600000000000001,
+      "position" : 0.17534246575342466,
+      "source" : "Oura, What Is the Average Resting Heart Rate? (updated Sep 30 2026), lowest sleeping heart rate by age and sex, 6 million members; spread from Apple Heart and Movement Study Figure 6. Percentiles from scripts/resting-heart-rate-norms.py",
+      "top" : 25,
+      "upper" : 80.099999999999994,
+      "value" : 50
+    },
+    "id" : "rhr-overnight-oura",
+    "metric" : "restingHeartRate",
+    "profile" : {
+      "age" : 65,
+      "sex" : "female"
+    },
+    "source" : "Oura",
+    "value" : 50
+  },
+  {
+    "expected" : null,
+    "id" : "rhr-store-unknown",
+    "metric" : "restingHeartRate",
+    "profile" : {
+      "age" : 35,
+      "sex" : "female"
+    },
+    "source" : "Apple Health",
+    "value" : 60
+  },
+  {
+    "expected" : null,
+    "id" : "rhr-no-device",
+    "metric" : "restingHeartRate",
+    "profile" : {
+      "age" : 35,
+      "sex" : "female"
+    },
+    "source" : null,
+    "value" : 60
+  },
+  {
+    "expected" : {
+      "cuts" : [
+        {
+          "percentile" : 1,
+          "value" : 51.799999999999997
+        },
+        {
+          "percentile" : 5,
+          "value" : 55.899999999999999
+        },
+        {
+          "percentile" : 10,
+          "value" : 58.299999999999997
+        },
+        {
+          "percentile" : 25,
+          "value" : 62.799999999999997
+        },
+        {
+          "percentile" : 50,
+          "value" : 68.400000000000006
+        },
+        {
+          "percentile" : 75,
+          "value" : 74.299999999999997
+        },
+        {
+          "percentile" : 90,
+          "value" : 79.900000000000006
+        },
+        {
+          "percentile" : 95,
+          "value" : 83.900000000000006
+        },
+        {
+          "percentile" : 99,
+          "value" : 91.5
+        }
+      ],
+      "group" : "Women 30 to 39",
+      "lower" : 20,
+      "position" : 0,
+      "source" : "Apple Heart and Movement Study, Heart Health Trends (Brigham and Women's Hospital, Feb 2026), Table 4 and Figure 3, Apple Watch resting heart rate, n=207,609. Percentiles from scripts/resting-heart-rate-norms.py",
+      "top" : 1,
+      "upper" : 91.5,
+      "value" : 20
+    },
+    "id" : "rhr-low-tail",
+    "metric" : "restingHeartRate",
+    "profile" : {
+      "age" : 35,
+      "sex" : "female"
+    },
+    "source" : "Apple Watch",
+    "value" : 20
+  },
+  {
+    "expected" : {
+      "cuts" : [
+        {
+          "percentile" : 1,
+          "value" : 51.799999999999997
+        },
+        {
+          "percentile" : 5,
+          "value" : 55.899999999999999
+        },
+        {
+          "percentile" : 10,
+          "value" : 58.299999999999997
+        },
+        {
+          "percentile" : 25,
+          "value" : 62.799999999999997
+        },
+        {
+          "percentile" : 50,
+          "value" : 68.400000000000006
+        },
+        {
+          "percentile" : 75,
+          "value" : 74.299999999999997
+        },
+        {
+          "percentile" : 90,
+          "value" : 79.900000000000006
+        },
+        {
+          "percentile" : 95,
+          "value" : 83.900000000000006
+        },
+        {
+          "percentile" : 99,
+          "value" : 91.5
+        }
+      ],
+      "group" : "Women 30 to 39",
+      "lower" : 51.799999999999997,
+      "position" : 1,
+      "source" : "Apple Heart and Movement Study, Heart Health Trends (Brigham and Women's Hospital, Feb 2026), Table 4 and Figure 3, Apple Watch resting heart rate, n=207,609. Percentiles from scripts/resting-heart-rate-norms.py",
+      "top" : null,
+      "upper" : 160,
+      "value" : 160
+    },
+    "id" : "rhr-high-tail",
+    "metric" : "restingHeartRate",
+    "profile" : {
+      "age" : 35,
+      "sex" : "female"
+    },
+    "source" : "Apple Watch",
+    "value" : 160
+  },
+  {
+    "expected" : {
+      "cuts" : [
+        {
+          "percentile" : 1,
+          "value" : 2496
+        },
+        {
+          "percentile" : 5,
+          "value" : 3752
+        },
+        {
+          "percentile" : 10,
+          "value" : 4430
+        },
+        {
+          "percentile" : 25,
+          "value" : 6153
+        },
+        {
+          "percentile" : 50,
+          "value" : 8448
+        },
+        {
+          "percentile" : 75,
+          "value" : 10949
+        },
+        {
+          "percentile" : 90,
+          "value" : 13862
+        },
+        {
+          "percentile" : 95,
+          "value" : 15890
+        },
+        {
+          "percentile" : 99,
+          "value" : 18474
+        }
+      ],
+      "group" : "Women 30 to 39",
+      "lower" : 2496,
+      "position" : 0.30692201777443984,
+      "source" : "Koffman L, Crainiceanu C, Muschelli J. Med Sci Sports Exerc 2025;57(4):746-755; NHANES 2011-2014 wrist accelerometry, stepcount SSL steps per day, survey-weighted age and sex quantiles (github.com/lilykoff/nhanes_steps_mortality, results/age_sex_quantiles.csv.gz)",
+      "top" : null,
+      "upper" : 18474,
+      "value" : 7400
+    },
+    "id" : "steps-female",
+    "metric" : "steps",
+    "profile" : {
+      "age" : 35,
+      "sex" : "female"
+    },
+    "source" : "iPhone",
+    "value" : 7400
+  },
+  {
+    "expected" : {
+      "cuts" : [
+        {
+          "percentile" : 1,
+          "value" : 970
+        },
+        {
+          "percentile" : 5,
+          "value" : 4008
+        },
+        {
+          "percentile" : 10,
+          "value" : 4940
+        },
+        {
+          "percentile" : 25,
+          "value" : 7120
+        },
+        {
+          "percentile" : 50,
+          "value" : 10047
+        },
+        {
+          "percentile" : 75,
+          "value" : 12913
+        },
+        {
+          "percentile" : 90,
+          "value" : 16145
+        },
+        {
+          "percentile" : 95,
+          "value" : 19037
+        },
+        {
+          "percentile" : 99,
+          "value" : 24916
+        }
+      ],
+      "group" : "Men 50 to 59",
+      "lower" : 970,
+      "position" : 0.46061972772070492,
+      "source" : "Koffman L, Crainiceanu C, Muschelli J. Med Sci Sports Exerc 2025;57(4):746-755; NHANES 2011-2014 wrist accelerometry, stepcount SSL steps per day, survey-weighted age and sex quantiles (github.com/lilykoff/nhanes_steps_mortality, results/age_sex_quantiles.csv.gz)",
+      "top" : null,
+      "upper" : 24916,
+      "value" : 12000
+    },
+    "id" : "steps-male",
+    "metric" : "steps",
+    "profile" : {
+      "age" : 55,
+      "sex" : "male"
+    },
+    "source" : null,
+    "value" : 12000
+  },
+  {
+    "expected" : {
+      "cuts" : [
+        {
+          "percentile" : 1,
+          "value" : 0
+        },
+        {
+          "percentile" : 5,
+          "value" : 13
+        },
+        {
+          "percentile" : 10,
+          "value" : 94
+        },
+        {
+          "percentile" : 25,
+          "value" : 1383
+        },
+        {
+          "percentile" : 50,
+          "value" : 3386
+        },
+        {
+          "percentile" : 75,
+          "value" : 5424
+        },
+        {
+          "percentile" : 90,
+          "value" : 7868
+        },
+        {
+          "percentile" : 95,
+          "value" : 9571
+        },
+        {
+          "percentile" : 99,
+          "value" : 12660
+        }
+      ],
+      "group" : "Women 80 and over",
+      "lower" : 0,
+      "position" : 0.47393364928909953,
+      "source" : "Koffman L, Crainiceanu C, Muschelli J. Med Sci Sports Exerc 2025;57(4):746-755; NHANES 2011-2014 wrist accelerometry, stepcount SSL steps per day, survey-weighted age and sex quantiles (github.com/lilykoff/nhanes_steps_mortality, results/age_sex_quantiles.csv.gz)",
+      "top" : 25,
+      "upper" : 12660,
+      "value" : 6000
+    },
+    "id" : "steps-older",
+    "metric" : "steps",
+    "profile" : {
+      "age" : 90,
+      "sex" : "female"
+    },
+    "source" : null,
+    "value" : 6000
+  },
+  {
+    "expected" : {
+      "cuts" : [
+        {
+          "percentile" : 1,
+          "value" : 13
+        },
+        {
+          "percentile" : 5,
+          "value" : 16.399999999999999
+        },
+        {
+          "percentile" : 10,
+          "value" : 18.600000000000001
+        },
+        {
+          "percentile" : 25,
+          "value" : 23.100000000000001
+        },
+        {
+          "percentile" : 50,
+          "value" : 28.300000000000001
+        },
+        {
+          "percentile" : 75,
+          "value" : 35.200000000000003
+        },
+        {
+          "percentile" : 90,
+          "value" : 42.100000000000001
+        },
+        {
+          "percentile" : 95,
+          "value" : 46.100000000000001
+        },
+        {
+          "percentile" : 99,
+          "value" : 53.799999999999997
+        }
+      ],
+      "group" : "Women 30 to 39",
+      "lower" : 13,
+      "position" : 0.45343137254901966,
+      "source" : "Kaminsky LA, Arena R, Myers J, et al. Mayo Clin Proc 2022;97(2):285-293 (FRIEND), Table 3, treadmill, directly measured VO2peak, RER>=1.0. 10th, 50th and 90th as printed; 25th and 75th interpolated between printed deciles; 1st, 5th, 95th and 99th extended from each tail by scripts/friend-2022-vo2-norms.py",
+      "top" : null,
+      "upper" : 53.799999999999997,
+      "value" : 31.5
+    },
+    "id" : "vo2-female",
+    "metric" : "vo2Max",
+    "profile" : {
+      "age" : 35,
+      "sex" : "female"
+    },
+    "source" : "Garmin",
+    "value" : 31.5
+  },
+  {
+    "expected" : {
+      "cuts" : [
+        {
+          "percentile" : 1,
+          "value" : 18
+        },
+        {
+          "percentile" : 5,
+          "value" : 24.399999999999999
+        },
+        {
+          "percentile" : 10,
+          "value" : 28.600000000000001
+        },
+        {
+          "percentile" : 25,
+          "value" : 37.700000000000003
+        },
+        {
+          "percentile" : 50,
+          "value" : 46.5
+        },
+        {
+          "percentile" : 75,
+          "value" : 53.100000000000001
+        },
+        {
+          "percentile" : 90,
+          "value" : 58.600000000000001
+        },
+        {
+          "percentile" : 95,
+          "value" : 61.799999999999997
+        },
+        {
+          "percentile" : 99,
+          "value" : 67.900000000000006
+        }
+      ],
+      "group" : "Men 20 to 29",
+      "lower" : 18,
+      "position" : 0.6412825651302605,
+      "source" : "Kaminsky LA, Arena R, Myers J, et al. Mayo Clin Proc 2022;97(2):285-293 (FRIEND), Table 3, treadmill, directly measured VO2peak, RER>=1.0. 10th, 50th and 90th as printed; 25th and 75th interpolated between printed deciles; 1st, 5th, 95th and 99th extended from each tail by scripts/friend-2022-vo2-norms.py",
+      "top" : null,
+      "upper" : 67.900000000000006,
+      "value" : 50
+    },
+    "id" : "vo2-male",
+    "metric" : "vo2Max",
+    "profile" : {
+      "age" : 25,
+      "sex" : "male"
+    },
+    "source" : "Apple Watch",
+    "value" : 50
+  },
+  {
+    "expected" : null,
+    "id" : "vo2-young-boundary",
+    "metric" : "vo2Max",
+    "profile" : {
+      "age" : 18,
+      "sex" : "female"
+    },
+    "source" : null,
+    "value" : 40
+  },
+  {
+    "expected" : {
+      "cuts" : [
+        {
+          "percentile" : 1,
+          "value" : 14.6
+        },
+        {
+          "percentile" : 5,
+          "value" : 19.399999999999999
+        },
+        {
+          "percentile" : 10,
+          "value" : 22.5
+        },
+        {
+          "percentile" : 25,
+          "value" : 29.100000000000001
+        },
+        {
+          "percentile" : 50,
+          "value" : 36.600000000000001
+        },
+        {
+          "percentile" : 75,
+          "value" : 43.200000000000003
+        },
+        {
+          "percentile" : 90,
+          "value" : 49
+        },
+        {
+          "percentile" : 95,
+          "value" : 52.5
+        },
+        {
+          "percentile" : 99,
+          "value" : 58.899999999999999
+        }
+      ],
+      "group" : "Women 20 to 29",
+      "lower" : 14.6,
+      "position" : 0.57336343115124155,
+      "source" : "Kaminsky LA, Arena R, Myers J, et al. Mayo Clin Proc 2022;97(2):285-293 (FRIEND), Table 3, treadmill, directly measured VO2peak, RER>=1.0. 10th, 50th and 90th as printed; 25th and 75th interpolated between printed deciles; 1st, 5th, 95th and 99th extended from each tail by scripts/friend-2022-vo2-norms.py",
+      "top" : null,
+      "upper" : 58.899999999999999,
+      "value" : 40
+    },
+    "id" : "vo2-age-upper-boundary",
+    "metric" : "vo2Max",
+    "profile" : {
+      "age" : 29,
+      "sex" : "female"
+    },
+    "source" : null,
+    "value" : 40
+  },
+  {
+    "expected" : {
+      "cuts" : [
+        {
+          "percentile" : 1,
+          "value" : 13
+        },
+        {
+          "percentile" : 5,
+          "value" : 16.399999999999999
+        },
+        {
+          "percentile" : 10,
+          "value" : 18.600000000000001
+        },
+        {
+          "percentile" : 25,
+          "value" : 23.100000000000001
+        },
+        {
+          "percentile" : 50,
+          "value" : 28.300000000000001
+        },
+        {
+          "percentile" : 75,
+          "value" : 35.200000000000003
+        },
+        {
+          "percentile" : 90,
+          "value" : 42.100000000000001
+        },
+        {
+          "percentile" : 95,
+          "value" : 46.100000000000001
+        },
+        {
+          "percentile" : 99,
+          "value" : 53.799999999999997
+        }
+      ],
+      "group" : "Women 30 to 39",
+      "lower" : 13,
+      "position" : 0.66176470588235303,
+      "source" : "Kaminsky LA, Arena R, Myers J, et al. Mayo Clin Proc 2022;97(2):285-293 (FRIEND), Table 3, treadmill, directly measured VO2peak, RER>=1.0. 10th, 50th and 90th as printed; 25th and 75th interpolated between printed deciles; 1st, 5th, 95th and 99th extended from each tail by scripts/friend-2022-vo2-norms.py",
+      "top" : 25,
+      "upper" : 53.799999999999997,
+      "value" : 40
+    },
+    "id" : "vo2-next-age-band",
+    "metric" : "vo2Max",
+    "profile" : {
+      "age" : 30,
+      "sex" : "female"
+    },
+    "source" : null,
+    "value" : 40
+  },
+  {
+    "expected" : null,
+    "id" : "no-sleep-norm",
+    "metric" : "sleep",
+    "profile" : {
+      "age" : 35,
+      "sex" : "female"
+    },
+    "source" : "Garmin",
+    "value" : 28800
+  },
+  {
+    "expected" : null,
+    "id" : "minor",
+    "metric" : "steps",
+    "profile" : {
+      "age" : 17,
+      "sex" : "male"
+    },
+    "source" : null,
+    "value" : 8000
+  },
+  {
+    "expected" : null,
+    "id" : "unknown-age",
+    "metric" : "steps",
+    "profile" : {
+      "age" : null,
+      "sex" : "male"
+    },
+    "source" : null,
+    "value" : 8000
+  },
+  {
+    "expected" : null,
+    "id" : "unknown-sex",
+    "metric" : "steps",
+    "profile" : {
+      "age" : 35,
+      "sex" : null
+    },
+    "source" : null,
+    "value" : 8000
+  }
+]

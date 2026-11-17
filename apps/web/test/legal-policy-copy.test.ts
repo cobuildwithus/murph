@@ -196,7 +196,7 @@ test("Subprocessor register separates connected services and powers the public p
   );
 
   assert.match(register, /# Murph Subprocessors, Model Providers, and Connected Services/u);
-  assert.match(register, /\*\*Last Updated:\*\* September 3, 2026/u);
+  assert.match(register, /\*\*Last Updated:\*\* November 12, 2026/u);
   assert.match(
     register,
     /\| Google \(Gemini API\) \| On-demand analysis of one user-requested video attachment for the requested assistant response\./u,

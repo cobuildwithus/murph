@@ -37,6 +37,15 @@ function input(viewerSeat: number, sameTask: boolean, kind: GameStakeKind | null
 }
 
 describe("game history terms", () => {
+  it("takes Not for me from the visible opponent view", () => {
+    const fixture = input(0, false, "prize");
+    fixture.profileNotForMe = new Map([["player-1", ["yoga"]]]);
+    expect(buildGameHistoryView(fixture)).toMatchObject({ person: { notForMe: ["yoga"] } });
+    fixture.profileNotForMe = new Map([["player-1", []]]);
+    expect(buildGameHistoryView(fixture)).not.toHaveProperty("person.notForMe");
+    fixture.hiddenMemberIds = new Set(["player-1"]);
+    expect(buildGameHistoryView(fixture)).toBeNull();
+  });
   it.each([0, 1])("preserves pair history JSON for seat %s with either capability", seat => {
     const fixture = input(seat, false, "prize");
     const legacy = JSON.stringify(buildGameHistoryView(fixture));

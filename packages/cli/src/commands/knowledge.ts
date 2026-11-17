@@ -243,9 +243,23 @@ export function registerKnowledgeCommands(cli: Cli.Cli) {
       const result = await (options.ifExists === true
         ? getKnowledgePageIfExists(input)
         : getKnowledgePage(input))
-      if (options.raw === true || result.page === null) return result
-      const { markdown: _markdown, ...page } = result.page
-      return { ...result, page }
+      if (result.page === null) return { page: null }
+      const { page } = result
+      return {
+        ...(result.degradation === null ? {} : { degradation: result.degradation }),
+        page: {
+          slug: page.slug,
+          title: page.title,
+          pageType: page.pageType,
+          status: page.status,
+          ...(page.librarySlugs.length > 0 ? { librarySlugs: page.librarySlugs } : {}),
+          ...(page.relatedSlugs.length > 0 ? { relatedSlugs: page.relatedSlugs } : {}),
+          ...(page.sourcePaths.length > 0 ? { sourcePaths: page.sourcePaths } : {}),
+          body: page.body,
+          pageRevisionDigest: page.pageRevisionDigest,
+          ...(options.raw === true ? { markdown: page.markdown } : {}),
+        },
+      }
     },
   })
 

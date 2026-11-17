@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-13",
+  "order": 100,
+  "item": {
+    "id": "google-health-fitbit-switch",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Google Health works as soon as you connect it",
+    "summary": "If you used Fitbit, connecting Google Health now brings in your data right away instead of waiting on the old Fitbit link.",
+    "details": "Your earlier Fitbit records stay. Murph stops pulling from Fitbit once Google Health is connected. When one wearable stops reporting, the shared board shows the one that's still current.",
+    "relevanceTags": ["wearables", "google-health", "fitbit"],
+    "sourcePullRequests": [4930]
+  }
+}

@@ -1,3 +1,5 @@
+import * as purgeContracts from "@murphai/hosted-execution/runtime-resource-purge";
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createHash, Hash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createCloudflareHostedControlClient } from "@murphai/cloudflare-hosted-control/client";
@@ -296,6 +298,40 @@ describe("runtime resource cleanup diagnostics", () => {
     expectDiagnostic({ resourceKind, stage: "parse", errorCategory: "validation" }, row);
     expect(f.purge).not.toHaveBeenCalled();
     expect(f.fetchImpl).not.toHaveBeenCalled();
+    expect(f.orphanTable.updateMany.mock.calls).toEqual([[requeue(row)]]);
+  });
+
+  it.each([new ContractValidationError("Invalid value."), new TypeError("Invalid value.")])(
+    "preserves native parse-stage validation and explicitly classifies contract errors: %s", async error => {
+      const f = fixture();
+      const parse = vi.spyOn(purgeContracts, "parseHostedRuntimeResourcePurge").mockImplementationOnce(() => { throw error; });
+      try {
+        await expect(f.run()).resolves.toEqual({ configured: true, deleted: 0, failed: 1 });
+        expectDiagnostic({ resourceKind: "snapshot", stage: "parse", errorCategory: "validation" });
+        expect(f.purge).not.toHaveBeenCalled();
+      } finally { parse.mockRestore(); }
+    },
+  );
+
+  it.each([
+    [new ContractValidationError("Invalid value."), "validation"],
+    [new TypeError("Invalid value."), "other"],
+    [new Error("Invalid value."), "other"],
+  ] as const)("classifies cleanup failures by explicit validation", async (error, errorCategory) => {
+    const f = fixture();
+    f.purge.mockRejectedValueOnce(error);
+    await expect(f.run()).resolves.toEqual({ configured: true, deleted: 0, failed: 1 });
+    expectDiagnostic({ resourceKind: "snapshot", stage: "purge", errorCategory });
+  });
+
+  it.each([{}, { deleted: false }])("requeues a malformed purge acknowledgement without changing diagnostics: %j", async body => {
+    const row = orphan();
+    const f = fixture([row]);
+    f.fetchImpl.mockResolvedValueOnce(Response.json(body));
+
+    await expect(f.run()).resolves.toEqual({ configured: true, deleted: 0, failed: 1 });
+    expectDiagnostic({ resourceKind: "snapshot", stage: "purge", errorCategory: "other" });
+    expect(f.fetchImpl).toHaveBeenCalledTimes(1);
     expect(f.orphanTable.updateMany.mock.calls).toEqual([[requeue(row)]]);
   });
 

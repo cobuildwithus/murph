@@ -1,3 +1,5 @@
+import { HOSTED_CUSTOM_CONNECTIONS_MANIFEST_PATH } from "@murphai/hosted-execution";
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { HOSTED_RUNTIME_POLL_TOOL_PATH } from "@murphai/hosted-execution/routes";
 import {
   HOSTED_CONNECTED_APPS_PATH,
@@ -183,6 +185,10 @@ export const HOSTED_RUNNER_WEB_CONTROL_ROUTES = {
   clinicalRecordsRecordOutcome: defineHostedRunnerWebControlPostRoute(
     "clinical_records_record_outcome",
     HOSTED_CLINICAL_RECORDS_RUNTIME_RECORD_OUTCOME_PATH,
+  ),
+  customConnectionsManifest: defineHostedRunnerWebControlPostRoute(
+    "custom_connections_manifest",
+    HOSTED_CUSTOM_CONNECTIONS_MANIFEST_PATH,
   ),
   connectedApps: defineHostedRunnerWebControlPostRoute(
     "connected_apps",
@@ -444,7 +450,7 @@ export function createHostedRunnerDeviceSyncConnectLinkRoute(
 ): HostedRunnerWebControlRoute {
   const route = readHostedRunnerWebControlRoute(pathAndSearch);
   if (!HOSTED_DEVICE_SYNC_CONNECT_LINK_PATH.test(route.pathname)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runtime device-sync connect-link route is invalid.",
     );
   }
@@ -574,7 +580,7 @@ export function readHostedRunnerWebControlRoute(path: string): {
   const base = new URL("https://hosted-runtime.invalid/");
   const url = new URL(path, base);
   if (url.origin !== base.origin) {
-    throw new TypeError("Hosted runtime web-control route must be relative.");
+    throw new ContractValidationError("Hosted runtime web-control route must be relative.");
   }
 
   return {

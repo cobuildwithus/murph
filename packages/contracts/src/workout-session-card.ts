@@ -1,3 +1,4 @@
+import { ContractValidationError } from "./validation-error.ts";
 import * as z from "./zod-runtime.ts";
 
 import {
@@ -323,7 +324,7 @@ export function buildWorkoutSessionAppCardEnvelopeV6(input: {
   if (
     editor.exercises.length !== input.workout.exercises.length
   ) {
-    throw new TypeError("Workout editor projection does not match the card.");
+    throw new ContractValidationError("Workout editor projection does not match the card.");
   }
   return {
     schemaVersion: 6,
@@ -339,7 +340,7 @@ export function buildWorkoutSessionAppCardEnvelopeV6(input: {
           !editorExercise
           || editorExercise.sets.length !== exercise.sets.length
         ) {
-          throw new TypeError("Workout editor projection does not match the card sets.");
+          throw new ContractValidationError("Workout editor projection does not match the card sets.");
         }
         return [
           exercise.name,
@@ -350,7 +351,7 @@ export function buildWorkoutSessionAppCardEnvelopeV6(input: {
               !editorSet
               || editorSet.logged !== (set.status === "completed")
             ) {
-              throw new TypeError("Workout editor projection does not match set state.");
+              throw new ContractValidationError("Workout editor projection does not match set state.");
             }
             return [
               set.status === "completed" ? "c" : set.status === "skipped" ? "s" : "p",

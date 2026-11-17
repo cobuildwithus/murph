@@ -1,3 +1,4 @@
+import { RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import "server-only";
 
 import { randomUUID } from "node:crypto";
@@ -105,7 +106,7 @@ export async function queueCompanionMealRemoval(request: Request, id: string) {
   try {
     await readRawBodyBuffer(request, { limitBytes: 0 });
   } catch (error) {
-    if (!(error instanceof RangeError)) throw error;
+    if (!(error instanceof RequestBodyTooLargeError)) throw error;
     throw mealApiError("MEALS_INVALID_REQUEST", 400, "Meal removal does not accept a body.");
   }
   try {

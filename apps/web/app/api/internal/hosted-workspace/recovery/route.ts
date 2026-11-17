@@ -1,3 +1,4 @@
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import { parseHostedCheckpointRecoveryRequest } from "@murphai/hosted-execution/runtime-resources";
 import { after } from "next/server";
 import { requireHostedCloudflareCallbackJsonRequest } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
@@ -14,7 +15,7 @@ export const POST = withJsonError(async (request: Request) => {
   }
   const { userId, payload } = await requireHostedCloudflareCallbackJsonRequest(request, { maxBodyBytes: 64 * 1024 });
   const result = await recoverHostedWorkspaceCheckpoint({ prisma: getPrisma(), userId,
-    request: parseHostedCheckpointRecoveryRequest(payload) });
+    request: parseInput(payload, parseHostedCheckpointRecoveryRequest) });
   if (result.status === "published") {
     const signal = async () => {
       try {

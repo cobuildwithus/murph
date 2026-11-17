@@ -49,6 +49,14 @@ function buildEmailDeliveryContext(
 }
 
 describe("createHostedGroupToolWithCurrentTurnContext", () => {
+  it.each(["imessage", "sms", "rcs"])("forwards leave unchanged for %s", async service => {
+    const request = vi.fn().mockResolvedValue({ action: "leave_group", result: { status: "left" } });
+    const tool = createHostedGroupToolWithCurrentTurnContext({ groupToolPort: { request },
+      linqDeliveryContexts: [buildLinqDeliveryContext({ service, routeAuthority: ROUTE_AUTHORITY })] });
+    const body = { action: "leave_group" as const, reason: "bot_loop" as const, origin: { kind: "accepted_input" as const, assistantInputId: PRIVATE_ASSISTANT_INPUT_ID } };
+    await tool.request(body);
+    expect(request).toHaveBeenCalledExactlyOnceWith(body);
+  });
   it("forwards current-turn cancellation through the neutral current-sender request", async () => {
     const request = vi.fn().mockResolvedValue({
       action: "ask_current_sender",
@@ -1532,4 +1540,12 @@ it("preserves the marked game read without adding model-selected authority", asy
   const tool = createHostedGroupToolWithCurrentTurnContext({ groupToolPort: { request }, linqDeliveryContexts: [] });
   await tool.request(read);
   expect(request).toHaveBeenCalledExactlyOnceWith(read);
+});
+
+it.each(["my_game_reminders", "my_game_not_for_me"] as const)("refuses private action %s from email", async action => {
+  const request = vi.fn();
+  const tool = createHostedGroupToolWithCurrentTurnContext({ groupToolPort: { request }, linqDeliveryContexts: [], groupEmailIngress: true });
+  await expect(tool.request({ action, operation: "read", origin: { kind: "accepted_input", assistantInputId: PRIVATE_ASSISTANT_INPUT_ID } }))
+    .resolves.toEqual({ action, result: { status: "unavailable", error: "authenticated_sender_required" } });
+  expect(request).not.toHaveBeenCalled();
 });

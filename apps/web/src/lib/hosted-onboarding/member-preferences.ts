@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import {
@@ -105,7 +106,7 @@ export async function upsertHostedMemberAssistantPreferencesTx(input: {
   }
 
   if (!Number.isFinite(Date.parse(input.occurredAt))) {
-    throw new TypeError("Assistant preference logical ordering time is invalid.");
+    throw new ContractValidationError("Assistant preference logical ordering time is invalid.");
   }
   const currentOccurredAt =
     await readHostedAssistantPreferenceOccurredAtByCausalSeq({

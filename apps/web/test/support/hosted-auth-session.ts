@@ -5,6 +5,7 @@ import { openAuthRecord, sealAuthRecord } from "../../src/lib/better-auth/record
 import { prepareHostedAuthSessionSet } from "../../src/lib/better-auth/session-limit";
 import { runWithHostedDomainRootUnwrapCache } from "../../src/lib/hosted-crypto/domain-root-unwrap-cache";
 import { commitHostedAuthSession } from "../../src/lib/better-auth/verified-session";
+import type { HostedPrimaryAuthenticationFactor } from "../../src/lib/better-auth/primary-factor";
 import { requireHostedAppSessionFromRequest } from "../../src/lib/hosted-onboarding/app-session";
 import { assertHostedMemberNotSuspended } from "../../src/lib/hosted-onboarding/entitlement";
 import { readHostedMemberCoreState } from "../../src/lib/hosted-onboarding/hosted-member-store";
@@ -15,6 +16,7 @@ import { getPrisma } from "../../src/lib/prisma";
 export async function issueHostedAppSession(input: {
   memberId: string;
   primaryAuthenticatedAt?: Date | null;
+  primaryAuthenticationFactor?: HostedPrimaryAuthenticationFactor;
 }): Promise<{ cookie: string; sessionId: string; token: string }> {
   return runWithHostedDomainRootUnwrapCache(async () => {
     const prisma = getPrisma();
@@ -40,6 +42,8 @@ export async function issueHostedAppSession(input: {
     const issued = await commitHostedAuthSession({
       ...config, prisma, memberId: member.id,
       primaryAuthenticatedAt: input.primaryAuthenticatedAt ?? null,
+      // An email code by default: it cannot set up a first passkey.
+      primaryAuthenticationFactor: input.primaryAuthenticationFactor ?? "email",
       commitMember: async (tx) => {
         await lockHostedMemberRow(tx, member.id);
         await sessions.assertCurrentTx(tx);

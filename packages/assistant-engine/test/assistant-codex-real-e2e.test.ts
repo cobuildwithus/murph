@@ -1,3 +1,5 @@
+import { prepareJournalConnectedContext } from '../src/assistant/journal-connected-context-prepare.js'
+import { MURPH_JOURNAL_SOURCE_READ_TOOL } from '../src/assistant-codex/dynamic-tools/journal-source-read.js'
 import * as z from '@murphai/contracts/zod-runtime'
 import { notificationHistoryIntent } from './notification-history-fixtures.ts'
 import { HOSTED_MEDIA_REFS_SCHEMA, resolveHostedMediaReferenceCataloguePath } from '@murphai/runtime-state/node'
@@ -68,6 +70,7 @@ import {
   experimentProgressSnapshotSchema,
   getNutritionCardGoalStatus,
   goalMetricTargetSchema,
+  MURPH_PRODUCT_ORIGIN,
   parseCalendarEventPayload,
   regimenFrontmatterSchema,
   toLocalDayKey,
@@ -152,7 +155,7 @@ import {
   showWorkoutRecord,
   startLiveWorkout,
 } from '@murphai/vault-usecases/workouts'
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest'
 import { getKnowledgePage, upsertKnowledgePage } from '../src/knowledge/service.ts'
 import {
   markAssistantContextSnapshotDirty,
@@ -2310,26 +2313,31 @@ const FOCUSED_COMPOSED_ACTIVITY: readonly FocusedActivityDay[] = [
   { date: '2026-01-02', provider: 'oura', value: 6200 },
 ]
 
+function readFocusedStepsValue(steps: unknown): unknown {
+  return typeof steps === 'number' ? steps : readRecord(steps)?.value
+}
+
 function expectFocusedActivityProjectionOutput(
   output: string, expected: readonly FocusedActivityDay[] = FOCUSED_OURA_ACTIVITY,
 ): void {
   if (output.trimStart().startsWith('{')) {
     const document = readRecord(JSON.parse(output))
-    expect(document?.ok === true ? document.data : document).toMatchObject({
-      count: expected.length,
-      items: expected.map(({ date, provider, value }) => ({ date, steps: { value, unit: 'count', provider } })),
-    })
+    // A day carries its family provider once and units come from one legend.
+    // Steps are a bare number, or {value, confidence, conflictingProviders}
+    // when another provider disagreed; the losing value itself stays private.
+    const data = readRecord(document?.ok === true ? document.data : document)
+    expect(data).toMatchObject({ count: expected.length, units: { steps: 'count' } })
+    const items = Array.isArray(data?.items) ? data.items.map(item => readRecord(item)) : []
+    expect(items.map(item => [item?.date, item?.provider, readFocusedStepsValue(item?.steps)]))
+      .toEqual(expected.map(({ date, provider, value }) => [date, provider, value]))
   } else {
     expect(output).toMatch(new RegExp(`^\\s*count: ${expected.length}$`, 'mu'))
-    expect(output).toMatch(new RegExp(`^\\s*items\\[${expected.length}\\]:$`, 'mu'))
-    for (const { date } of expected) expect(output).toMatch(new RegExp(`^\\s*(?:- )?date: ${date}$`, 'mu'))
-    const steps = [...output.matchAll(/^([ \t]+)steps:\r?\n((?:\1[ \t]+[^\r\n]*(?:\r?\n|$))+)/gmu)].map(match => match[2]!)
-    expect(steps).toHaveLength(expected.length)
-    expected.forEach(({ provider, value }, index) => {
-      expect(steps[index]).toMatch(new RegExp(`^\\s*provider: ${provider}$`, 'mu'))
-      expect(steps[index]).toMatch(/^\s*unit: count$/mu)
-      expect(steps[index]).toMatch(new RegExp(`^\\s*value: ${value}$`, 'mu'))
-    })
+    expect(output).toMatch(/^\s*steps: count$/mu)
+    for (const { date, provider, value } of expected) {
+      expect(output).toContain(date)
+      expect(output).toMatch(new RegExp(`\\b${provider}\\b`, 'u'))
+      expect(output).toMatch(new RegExp(`\\b${value}\\b`, 'u'))
+    }
   }
   expect(output).not.toMatch(/\breasons\b|scored highest|daily cumulative lower-bound/iu)
   const absent = FOCUSED_ACTIVITY_STEP_VALUES.filter(value => !expected.some(day => day.value === value))
@@ -5950,6 +5958,16 @@ describe('onboarding policy read detection', () => {
 })
 
 describe('real Codex live fixture contracts', () => {
+  it('counts only host calendar window reads in the prepared Journal fixture', () => {
+    const windows = [1, 2].map(pass => ({ operation: 'read', input: { toolSlug: 'GOOGLECALENDAR_EVENTS_LIST', arguments: { pass } } }))
+    expect(journalCalendarWindowRequests([
+      { operation: 'manage', input: { action: 'list' } }, windows[0]!,
+      { operation: 'execute', input: { toolSlug: 'GOOGLECALENDAR_EVENTS_LIST' } },
+      { operation: 'read', input: { toolSlug: 'GOOGLECALENDAR_EVENTS_GET' } },
+      { operation: 'read', input: { toolSlug: 'OUTLOOK_GET_CALENDAR_VIEW' } }, windows[1]!,
+    ])).toEqual(windows)
+  })
+
   it('accepts an invitation question while rejecting an offer to write one', () => {
     assertConcreteInvitationReply('Would you like to meet us at the gallery this Saturday at 2 PM? Admission is $12, and we will stay indoors.')
     expect(() => assertConcreteInvitationReply('Would you like me to write this invite: Join us at the gallery on Saturday at 2 PM for $12?')).toThrow()
@@ -6002,7 +6020,8 @@ describe('real Codex live fixture contracts', () => {
       await materializeJournalConnectedContextVaultCli({ binDirectory, vaultRoot: root })
       const cli = (args: string[]) => execFileAsync(path.join(binDirectory, 'vault-cli'), args, { timeout: 60_000 })
       const ledger = JSON.parse((await cli(['knowledge', 'show', 'journal-connected-context', '--format', 'json'])).stdout)
-      expect(JSON.stringify(ledger)).toContain('calendar_old')
+      expect(ledger.page.body).toContain('"activeAccounts":[]')
+      expect(ledger.page.body).toContain('"legacy":{"marker":"baseline"}')
       await cli(['event', 'note', 'add', '--help'])
       expect((await readVaultRawTolerant(root)).events).toEqual([])
       await expect(cli(['nonexistent-journal-command'])).rejects.toThrow()
@@ -6160,8 +6179,8 @@ describe('real Codex live fixture contracts', () => {
       expect(imported.items).toHaveLength(1)
       expect(imported.items[0]).toMatchObject({
         activityTypes: ['running'],
-        sessionMinutes: { value: 24 },
-        distanceKm: { value: 3.8624256 },
+        sessionMinutes: 24,
+        distanceKm: 3.8624,
       })
     } finally {
       await removeRealCodexTemporaryPath(vaultRoot)
@@ -6315,7 +6334,7 @@ describe('real Codex live fixture contracts', () => {
           },
         },
       )).resolves.toMatchObject({
-        stdout: expect.stringContaining('"query"'),
+        stdout: expect.stringContaining('"candidates"'),
       })
     } finally {
       await removeRealCodexTemporaryPath(workingDirectory)
@@ -19100,6 +19119,53 @@ describeRealCodex('real Codex weekly digest natural recognition e2e', () => {
   }, 360_000)
 })
 
+describeRealCodex('real Codex scheduled recap plain numbers e2e', () => {
+  it('scheduled recap states disagreeing step counts plainly without source hedges', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(
+      path.join(tmpdir(), 'murph-scheduled-recap-plain-numbers-e2e-'),
+    )
+
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        developerInstructions: buildScheduledAutomationDeveloperInstructions('direct', 'none'),
+        dynamicTools: [],
+        env: config.env,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        prompt: [
+          'Saved member automation: "Every Monday, text me a recap of last week covering sleep, recovery, and movement."',
+          'Current synthetic evidence from the completed required reads for July 28 through August 3:',
+          '- Sleep: the ring recorded all 7 nights, averaging 7h 41m, mostly between 11:30 p.m. and 7:15 a.m.',
+          '- Recovery: readiness ran 62 to 71 all week; resting heart rate 52 to 55 bpm.',
+          '- Steps: the ring averaged 8,412 steps/day on 7 of 7 days. The phone averaged 9,950 steps/day over the same days. Wearable output notes: "Some metrics still conflict across providers: steps."',
+          '- Movement: two logged runs, 34 and 41 minutes.',
+          '- The evidence is complete and no follow-up information is needed. Do not repeat the reads; complete the terminal scheduled decision.',
+        ].join('\n\n'),
+        reasoningEffort: 'low',
+        sandbox: 'read-only',
+        workingDirectory,
+      })
+      const decision = parseAssistantNotificationDecision(result.finalMessage)
+      process.stdout.write(`[scheduled-recap-plain-numbers-e2e] ${JSON.stringify({ decision })}\n`)
+      expect(decision.kind).toBe('send_message')
+      if (decision.kind !== 'send_message') {
+        throw new Error('Expected the saved recap to send.')
+      }
+      expect(decision.text).toMatch(/\b(?:8,412|8,4\d\d|9,950|8\.4k|9\.9k)\b/iu)
+      expect(decision.text).not.toMatch(
+        /other sources?|counted differently|sources? (?:disagree|differ|conflict)|(?:7|seven) of (?:7|seven)|\babout (?:8|9)|\broughly\b|\bon the (?:ring|phone)\b|\bphone (?:counted|said|showed)/iu,
+      )
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+})
+
 describeRealCodex('real Codex weekly digest emerging behavior e2e', () => {
   it(
     'recognizes a repeated new cardio routine and suppresses an ordinary shortfall',
@@ -19551,6 +19617,81 @@ describeRealCodex('real Codex official weather-alert context e2e', () => {
   )
 })
 
+describeRealCodex('real Codex source silence visibility e2e', () => {
+  it.each(['stopped delivery', 'recent connection', 'daily source preference'] as const)(
+    'source silence visibility: %s', async (scenario) => {
+      const config = await resolveRealCodexE2eConfig()
+      const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-source-visibility-e2e-'))
+      const requests: AssistantHostedDeviceToolRequest[] = []
+      try {
+        const result = await executeRealCodexAppServerTurn({
+          approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          // The empty wearable read is supplied by the scenario; this turn tests the connection owner.
+          threadConfig: { 'features.shell_tool': false },
+          codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+          codexHome: config.codexHome, env: config.env,
+          developerInstructions: buildAssistantSystemPrompt({
+            assistantCliContract: null,
+            assistantHostedDeviceConnectProviders: [{ label: 'Fitbit', provider: 'fitbit' }],
+            channel: 'linq', cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'direct',
+            currentLocalDate: '2030-03-12', currentTimeZone: 'UTC',
+            hostedRuntime: true, onboardingGuidance: false, ordinaryInboundTurn: true,
+          }),
+          dynamicTools: [MURPH_DEVICE_TOOL],
+          hostedToolContext: {
+            computerToolsAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            currentInvocationScope: () => ({ conversationScope: 'direct',
+              origin: { kind: 'accepted_input', assistantInputId: 'ain_00000000000000000000000000000027', sessionId: 'source-visibility' },
+              originSessionId: 'source-visibility' }),
+            deviceTool: { request: async (request) => {
+              requests.push(request)
+              if (request.action === 'list_accounts') return {
+                action: 'list_accounts', provider: null, sourceProvider: null,
+                accounts: [{ accountId: 'synthetic-aggregator', provider: 'junction', status: 'active',
+                  displayName: null, lastErrorCode: null, lastSyncCompletedAt: '2030-03-12T12:00:00.000Z',
+                  sources: [{ sourceProvider: 'google_health', status: 'connected',
+                    firstSeenAt: scenario === 'recent connection' ? '2030-03-12T11:30:00.000Z' : '2030-02-01T00:00:00.000Z',
+                    lastDataAt: scenario === 'recent connection' ? null : '2030-03-05T00:00:00.000Z' }],
+                }],
+              }
+              if (request.action === 'configure_no_data_outreach' && scenario === 'daily source preference') return {
+                action: 'configure_no_data_outreach', effectiveAfterDays: 12, setting: 'custom',
+                sourceProvider: request.sourceProvider, status: 'saved',
+              }
+              throw new Error('Unexpected device effect')
+            } },
+            sendVaultFile: async () => { throw new Error('Unexpected file send') }, vaultFileSendAvailable: false,
+          },
+          model: config.model, modelProvider: config.modelProvider,
+          prompt: scenario === 'daily source preference'
+            ? 'Please wait twelve days before checking in about no data from my Fitbit. Check which source it uses and save that preference.'
+            : 'It is March 12, 2030 at noon UTC. My recent wearable read for March 11 returned no records. Check my device sources and explain why there may be no recent data. Do not refresh anything.',
+          reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+        })
+        expect(requests.filter((request) => request.action === 'list_accounts')).toHaveLength(1)
+        expect(requests.filter((request) => request.action !== 'list_accounts')).toEqual(
+          scenario === 'daily source preference' ? [{ action: 'configure_no_data_outreach',
+            mode: 'after_days', afterDays: 12, sourceProvider: 'google_health' }] : [],
+        )
+        const reply = result.finalMessage
+        expect(reply).not.toMatch(/permission error|permission denied|file-permission|command not found/iu)
+        expect(reply).not.toMatch(/(?:you are|you're|source is|account is) disconnected|you need to reconnect|cause (?:is )?unknown/iu)
+        if (scenario === 'stopped delivery') expect(reply).toMatch(/March 5|Mar(?:ch)?\.? 5|stopped|hasn.t sent|no new data|last (?:data|delivery|received|update)/iu)
+        if (scenario === 'recent connection') {
+          expect(reply).toMatch(/import|backfill|history/iu)
+          expect(reply).toMatch(/may|might|could|likely|still/iu)
+        }
+        if (scenario === 'daily source preference') expect(reply).toMatch(/12|twelve/iu)
+        process.stdout.write(`[source-silence-visibility] ${JSON.stringify({ scenario, reply })}\n`)
+      } finally {
+        await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+      }
+    }, 300_000,
+  )
+})
+
 describeRealCodex('real Codex adaptive wearable no-data outreach e2e', () => {
   it.each([
     { label: 'Apple Health', sourceProvider: 'apple_health_kit' },
@@ -19686,7 +19827,7 @@ describeRealCodex('real Codex adaptive wearable no-data outreach e2e', () => {
           conversationScope: 'direct',
           kind: 'unsupported-provider',
           prompt:
-            'My Fitbit is intentionally quiet sometimes. Save a ten-day no-data check-in preference for Fitbit.',
+            'My Strava is intentionally quiet sometimes. Save a ten-day no-data check-in preference for Strava.',
           scheduled: false,
         },
         {
@@ -19952,10 +20093,9 @@ describeRealCodex('real Codex adaptive wearable no-data outreach e2e', () => {
 
 describeRealCodex('real Codex Journal GPT-6 Luna xhigh connected account eligibility e2e', () => {
   it.each([
-    { name: 'reads a newly connected mailbox silently on its first pass', accountId: 'gmail_new', toolkit: 'gmail', optedOut: false, ledgerText: '# Journal connected context' },
-    { name: 'reads an undated baseline calendar silently in the same pass', accountId: 'calendar_old', toolkit: 'googlecalendar', optedOut: false, ledgerText: '# Journal connected context\n\n- account: calendar_old\n  toolkit: googlecalendar\n  state: baseline' },
-    { name: 'respects a global opt-out without reading provider content', accountId: 'calendar_ready', toolkit: 'googlecalendar', optedOut: true,
-      ledgerText: '# Journal connected context\n\nGlobal opt-out: all automatic Journal capture is disabled.\n\n- account: calendar_ready\n  toolkit: googlecalendar\n  state: notice-sent' },
+    { name: 'reads a newly connected mailbox silently on its first pass', accountId: 'gmail_new', toolkit: 'gmail', optedOut: false },
+    { name: 'reads an undated baseline calendar silently in the same pass', accountId: 'calendar_old', toolkit: 'googlecalendar', optedOut: false },
+    { name: 'respects a global opt-out without reading provider content', accountId: 'calendar_ready', toolkit: 'googlecalendar', optedOut: true },
   ])('$name', async (scenario) => {
     const config = await resolveRealCodexE2eConfig()
     const automation = MURPH_MANAGED_AUTOMATIONS.find(
@@ -19974,7 +20114,7 @@ describeRealCodex('real Codex Journal GPT-6 Luna xhigh connected account eligibi
       await materializeJournalConnectedContextVaultCli({
         binDirectory,
         vaultRoot: workingDirectory,
-        ledgerText: scenario.ledgerText,
+        ledgerText: JSON.stringify({ version: 1, optOuts: { global: scenario.optedOut, accounts: [], providers: [], categories: [], calendars: [] }, activeAccounts: [], legacy: { marker: 'baseline' } }),
       })
       if (scenario.optedOut) {
         await upsertEvent({ vaultRoot: workingDirectory, payload: {
@@ -19984,6 +20124,8 @@ describeRealCodex('real Codex Journal GPT-6 Luna xhigh connected account eligibi
         } })
       }
       const connectedAppRequests: Array<{ operation: string, input: Record<string, unknown> }> = []
+      const preparedJournal = await prepareJournalE2eContext({ vaultRoot: workingDirectory, now: '2026-08-31T06:00:00Z',
+        accounts: [{ id: scenario.accountId, toolkit: scenario.toolkit }], requests: connectedAppRequests })
       const result = await executeRealCodexAppServerTurn({
         allowFinishWithoutReply: false,
         approvalPolicy: 'never',
@@ -20002,9 +20144,7 @@ describeRealCodex('real Codex Journal GPT-6 Luna xhigh connected account eligibi
           scheduledOccurrenceAt: '2026-08-31T06:00:00.000Z',
         }),
         dynamicTools: [
-          MURPH_CONNECTED_APPS_MANAGE_TOOL,
-          MURPH_CONNECTED_APPS_SEARCH_TOOL,
-          MURPH_CONNECTED_APPS_EXECUTE_TOOL,
+          MURPH_JOURNAL_SOURCE_READ_TOOL,
         ],
         env: {
           ...config.env,
@@ -20013,39 +20153,7 @@ describeRealCodex('real Codex Journal GPT-6 Luna xhigh connected account eligibi
         },
         hostedToolContext: {
           computerToolsAvailable: false,
-          connectedApps: {
-            request: async (request) => {
-              connectedAppRequests.push({ operation: request.operation, input: request.input })
-              if (request.operation !== 'manage') {
-                if (scenario.optedOut) throw new Error('An opted-out run must not read provider content.')
-                if (request.operation === 'search') return { result: { success: true, tool_schemas: {
-                  [scenario.toolkit === 'gmail' ? 'GMAIL_SEARCH_EMAILS' : 'GOOGLECALENDAR_LIST_EVENTS']: {
-                    input_schema: { type: 'object', additionalProperties: false,
-                      properties: scenario.toolkit === 'gmail'
-                        ? { query: { type: 'string' } }
-                        : { timeMin: { type: 'string' }, timeMax: { type: 'string' } },
-                      required: scenario.toolkit === 'gmail' ? ['query'] : ['timeMin', 'timeMax'],
-                    },
-                  },
-                } } }
-                if (request.operation === 'execute') return { result: scenario.toolkit === 'gmail' ? { messages: [] } : { items: [] } }
-                throw new Error('Unexpected provider operation.')
-              }
-              return {
-                result: {
-                  accounts: [
-                    {
-                      alias: 'Personal',
-                      connectedAt: scenario.accountId === 'calendar_old' ? null : '2026-08-31T05:30:00.000Z',
-                      id: scenario.accountId,
-                      status: 'ACTIVE',
-                      toolkit: scenario.toolkit,
-                    },
-                  ],
-                },
-              }
-            },
-          },
+          preparedJournal,
           currentHostedDeliveryContext: () => null,
           currentHostedMailboxItemIds: () => [],
           sendVaultFile: async () => {
@@ -20056,7 +20164,7 @@ describeRealCodex('real Codex Journal GPT-6 Luna xhigh connected account eligibi
         model: config.model,
         modelProvider: config.modelProvider,
         prompt: [
-          automation.instructions,
+          automation.instructions, preparedJournal.instructions,
           'Scheduled occurrence context:',
           '- Current local date: 2026-08-31.',
           '- Current local time: 08:00 Europe/Warsaw.',
@@ -20075,9 +20183,10 @@ describeRealCodex('real Codex Journal GPT-6 Luna xhigh connected account eligibi
         expect(connectedAppRequests).toEqual([])
         expect((await readConnectedContextPolicy(workingDirectory))?.optOuts.global).toBe(true)
       } else {
-        expect(connectedAppRequests.map(request => request.operation)).toEqual(expect.arrayContaining(['manage', 'search', 'execute']))
-        expect(connectedAppRequests.filter(request => request.operation === 'execute').every(request => request.input.account === scenario.accountId)).toBe(true)
+        expect(connectedAppRequests.map(request => request.operation)).toEqual(expect.arrayContaining(['manage', 'read']))
+        expect(connectedAppRequests.filter(request => request.operation === 'read').every(request => request.input.account === scenario.accountId)).toBe(true)
       }
+      expect(connectedAppRequests.some(request => ['search', 'execute'].includes(request.operation))).toBe(false)
       const upcoming = await refreshJournalTestContext(workingDirectory, '2026-08-31T06:00:00Z')
       expect(upcoming.entries).toEqual([])
       process.stdout.write(
@@ -20119,13 +20228,7 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
         binDirectory,
         commandLogPath,
         vaultRoot: workingDirectory,
-        ledgerText: [
-          '# Journal connected context',
-          '',
-          '- account: calendar_ready',
-          '  toolkit: googlecalendar',
-          '  state: notice-sent',
-        ].join('\n'),
+        ledgerText: null,
       })
       if (partialSave) {
         const saved = await upsertEvent({ vaultRoot: workingDirectory, payload: {
@@ -20145,7 +20248,31 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
         operation: string
       }> = []
       const automationRequests: AssistantHostedAutomationToolRequest[] = []
-      const runTurn = (retry: boolean) => executeRealCodexAppServerTurn({
+      const runTurn = async (retry: boolean) => {
+      const preparedJournal = await prepareJournalE2eContext({ vaultRoot: workingDirectory, now: '2026-08-31T06:00:00Z',
+        accounts: [{ id: 'calendar_ready', toolkit: 'googlecalendar' }], requests: connectedAppRequests, calendarItems: [
+                      {
+                        end: { dateTime: '2026-08-31T19:00:00+02:00' },
+                        id: 'calendar_evt_tennis',
+                        organizer: { self: true },
+                        attendees: [{ self: true, responseStatus: 'accepted' }],
+                        start: { dateTime: '2026-08-31T18:00:00+02:00' },
+                        summary: 'Tennis training',
+                      },
+                      {
+                        end: { dateTime: '2026-09-01T10:00:00+02:00' },
+                        id: 'calendar_evt_dentist',
+                        start: { dateTime: '2026-09-01T09:00:00+02:00' },
+                        summary: 'Dentist appointment',
+                      },
+                      {
+                        end: { dateTime: '2026-08-31T21:00:00+02:00' },
+                        id: 'calendar_evt_dinner',
+                        start: { dateTime: '2026-08-31T20:00:00+02:00' },
+                        summary: 'Dinner with Alex',
+                      },
+                    ] })
+      return executeRealCodexAppServerTurn({
         allowFinishWithoutReply: false,
         approvalPolicy: 'never',
         baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
@@ -20165,9 +20292,7 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
         }),
         dynamicTools: [
           MURPH_AUTOMATION_TOOL,
-          MURPH_CONNECTED_APPS_MANAGE_TOOL,
-          MURPH_CONNECTED_APPS_SEARCH_TOOL,
-          MURPH_CONNECTED_APPS_EXECUTE_TOOL,
+          MURPH_JOURNAL_SOURCE_READ_TOOL,
         ],
         env: {
           ...config.env,
@@ -20209,76 +20334,7 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
             },
           },
           computerToolsAvailable: false,
-          connectedApps: {
-            request: async (request) => {
-              connectedAppRequests.push({
-                input: request.input,
-                operation: request.operation,
-              })
-              if (request.operation === 'manage') {
-                return {
-                  result: {
-                    accounts: [{
-                      alias: 'Personal',
-                      connectedAt: '2026-08-30T06:30:00.000Z',
-                      id: 'calendar_ready',
-                      status: 'ACTIVE',
-                      toolkit: 'googlecalendar',
-                    }],
-                  },
-                }
-              }
-              if (request.operation === 'search') {
-                return {
-                  result: {
-                    success: true,
-                    tool_schemas: {
-                      GOOGLECALENDAR_LIST_EVENTS: {
-                        input_schema: {
-                          additionalProperties: false,
-                          properties: {
-                            timeMax: { type: 'string' },
-                            timeMin: { type: 'string' },
-                          },
-                          required: ['timeMin', 'timeMax'],
-                          type: 'object',
-                        },
-                      },
-                    },
-                  },
-                }
-              }
-              if (request.operation === 'execute') {
-                return {
-                  result: {
-                    items: [
-                      {
-                        end: { dateTime: '2026-08-31T19:00:00+02:00' },
-                        id: 'calendar_evt_tennis',
-                        organizer: { self: true },
-                        attendees: [{ self: true, responseStatus: 'accepted' }],
-                        start: { dateTime: '2026-08-31T18:00:00+02:00' },
-                        summary: 'Tennis training',
-                      },
-                      {
-                        end: { dateTime: '2026-09-01T10:00:00+02:00' },
-                        id: 'calendar_evt_dentist',
-                        start: { dateTime: '2026-09-01T09:00:00+02:00' },
-                        summary: 'Dentist appointment',
-                      },
-                      {
-                        end: { dateTime: '2026-08-31T21:00:00+02:00' },
-                        id: 'calendar_evt_dinner',
-                        start: { dateTime: '2026-08-31T20:00:00+02:00' },
-                        summary: 'Dinner with Alex',
-                      },
-                    ],
-                  },
-                }
-              }
-              throw new Error('Unexpected connected-app operation.')
-            },
-          },
+          preparedJournal,
           currentHostedDeliveryContext: () => null,
           currentHostedMailboxItemIds: () => [],
           sendVaultFile: async () => {
@@ -20290,7 +20346,7 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
         modelProvider: config.modelProvider,
         prompt: [
           automation.instructions,
-          buildMurphManagedJournalCalendarWindowInstructions(automation.automationId, '2026-08-31T06:00:00.000Z'),
+          preparedJournal.instructions,
           'Scheduled occurrence context:',
           '- Current local date: 2026-08-31.',
           retry ? '- Retry the same morning occurrence; preserve its existing effects.' : '- Current local time: 08:00 Europe/Warsaw.',
@@ -20304,6 +20360,7 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
         sandbox: 'workspace-write',
         workingDirectory,
       })
+      }
 
       const result = await runTurn(false)
       process.stdout.write(`[journal-calendar-decision] ${JSON.stringify({ finalMessage: result.finalMessage, automationWrites: automationRequests.length })}\n`)
@@ -20312,10 +20369,11 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
         (request) => request.operation,
       )
       expect(providerOperations).toContain('manage')
-      expect(providerOperations).toContain('search')
-      expect(providerOperations).toContain('execute')
+      expect(providerOperations).not.toContain('search')
+      expect(providerOperations).not.toContain('execute')
+      expect(providerOperations).toContain('read')
       const executeRequest = connectedAppRequests.find(
-        (request) => request.operation === 'execute',
+        (request) => request.operation === 'read',
       )
       expect(executeRequest?.input.account).toBe('calendar_ready')
       const vaultCommands = (await readFile(commandLogPath, 'utf8'))
@@ -20324,6 +20382,7 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
       const journalWrites = vaultCommands.filter((command) =>
         command.includes('event note add') && !isRecordedVaultHelpCommand(command)
       )
+      if (!partialSave) expect(journalWrites[0]).toContain('googlecalendar:calendar_ready:primary:calendar_evt_tennis')
       const savedNotes = (await readVaultRawTolerant(workingDirectory)).events.filter(event => event.kind === 'note')
       process.stdout.write(`[journal-capture-diagnostic] ${JSON.stringify({ commands: vaultCommands, reply: result.finalMessage })}\n`)
       expect(savedNotes).toMatchObject([{ kind: 'note', attributes: { noteType: 'journal-plan' }, tags: expect.arrayContaining(['planned']) }])
@@ -20374,10 +20433,10 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
       expect(repeatedNotes.map(event => event.entityId)).toEqual(savedNotes.map(event => event.entityId))
       expect((await listAutomations({ vaultRoot: workingDirectory })).items).toHaveLength(requestedReview ? 1 : 0)
       expect(automationRequests).toHaveLength(requestedReview ? 1 : 0)
-      const executedWindows = connectedAppRequests.filter(request => request.operation === 'execute')
-      process.stdout.write(`[journal-calendar-windows] ${JSON.stringify(executedWindows.map(request => request.input.arguments))}\n`)
-      expect(executedWindows).toHaveLength(2)
-      for (const request of executedWindows) {
+      const readWindows = journalCalendarWindowRequests(connectedAppRequests)
+      process.stdout.write(`[journal-calendar-windows] ${JSON.stringify(readWindows.map(request => request.input.arguments))}\n`)
+      expect(readWindows).toHaveLength(2)
+      for (const request of readWindows) {
         expect(request.input.account).toBe('calendar_ready')
         const args = readRecord(request.input.arguments)
         expect(Date.parse(String(args?.timeMax)) - Date.parse(String(args?.timeMin))).toBe(14 * 24 * 60 * 60 * 1_000)
@@ -20389,6 +20448,53 @@ describeRealCodex('real Codex Journal connected calendar capture e2e', () => {
           providerOperations,
         })}\n`,
       )
+    } finally {
+      await removeRealCodexTemporaryPath(workingDirectory)
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 720_000)
+})
+
+// A tool result past the model's output limit is shown with its middle cut out.
+// The claim: the model still answers from every record, not only the ones it was shown.
+describeRealCodex('real Codex oversized tool result e2e', () => {
+  it('answers from every record of a connected-app result larger than the model is shown', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-oversized-result-e2e-'))
+    // Opaque codes: none can be guessed from its neighbours, and each must be paired with its own order.
+    const codes = Array.from({ length: 24 }, (_, index) => `PICKUP-${createHash('sha256').update(`synthetic-order-${index}`).digest('hex').slice(0, 6).toUpperCase()}`)
+    const filler = 'Thank you for shopping at Synthetic Depot. Your order is being prepared by our team and will be ready soon. '
+    const messages = codes.map((code, index) => ({ id: `mail_synthetic_${index + 1}`, subject: `Order ${index + 1} is ready`,
+      from: 'orders@synthetic-depot.example', body: `${filler.repeat(13)}Your pickup code is ${code}. ${filler.repeat(13)}` }))
+    const executes: unknown[] = []
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        allowFinishWithoutReply: false, approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined, codexHome: config.codexHome,
+        abortSignal: AbortSignal.timeout(600_000),
+        dynamicTools: [MURPH_CONNECTED_APPS_MANAGE_TOOL, MURPH_CONNECTED_APPS_SEARCH_TOOL, MURPH_CONNECTED_APPS_EXECUTE_TOOL],
+        env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot() },
+        hostedToolContext: {
+          computerToolsAvailable: false,
+          connectedApps: { request: async request => {
+            if (request.operation === 'manage') return { result: { accounts: [{ alias: 'Personal', id: 'gmail_synthetic', status: 'ACTIVE', toolkit: 'gmail' }] } }
+            if (request.operation === 'search') return { result: { success: true, tool_schemas: { GMAIL_FETCH_EMAILS: {
+              description: 'Fetch emails matching a query, with their full bodies.',
+              input_schema: { type: 'object', additionalProperties: false, properties: { query: { type: 'string' }, max_results: { type: 'integer' } }, required: ['query'] } } } } }
+            if (request.operation !== 'execute') throw new Error('Unexpected provider operation.')
+            executes.push(request.input.arguments)
+            return { result: { messages } }
+          } },
+          currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+          sendVaultFile: async () => { throw new Error('Unexpected file send.') }, vaultFileSendAvailable: false,
+        },
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: 'I have 24 order emails from Synthetic Depot in my Gmail. Read them and list the pickup code from every one, numbered by order.',
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const missing = codes.flatMap((code, index) => new RegExp(`(^|\\D)${index + 1}\\D[^\\n]*${code}`, 'mu').test(result.finalMessage) ? [] : [index + 1])
+      process.stdout.write(`[oversized-result-proof] ${JSON.stringify({ model: config.model, resultBytes: Buffer.byteLength(JSON.stringify({ messages })), executes: executes.length, missing })}\n`)
+      expect(missing).toEqual([])
     } finally {
       await removeRealCodexTemporaryPath(workingDirectory)
       await removeRealCodexTemporaryPaths(config.temporaryPaths)
@@ -20432,6 +20538,20 @@ describeRealCodex('real Codex lodging destination evidence e2e', () => {
           ].join('\n') })
         }
         const memoryBefore = await readMemoryDocument(workingDirectory)
+        const preparedJournal = await prepareJournalE2eContext({ vaultRoot: workingDirectory, now: '2026-11-01T07:00:00Z',
+          accounts: [{ id: 'gmail_lodging', toolkit: 'gmail' }], requests,
+          mailItems: [{ id: 'mail_lodging_synthetic', subject: 'Confirmed lodging: November 10–12',
+            snippet: 'Palm Bay Hideaway. Your stay is confirmed. Open the reservation for details.',
+                body: [
+                  'Reservation confirmed. Listing name: Palm Bay Hideaway.',
+                  'Check-in date: 2026-11-10. Checkout date: 2026-11-12.',
+                  'Booking calendar timezone: Europe/Lisbon. Check-in and checkout clock times are not supplied.',
+                  ...(scenario !== 'unknown destination'
+                    ? ['Property address: 41 Example Lane, Porto, Portugal.']
+                    : ['Property address and destination details are not supplied in this confirmation.']),
+                  'Provider corporate office: Miami, Florida, USA. Booking reference SYNTH-782.',
+                ].join('\n'),
+          }] })
         const result = await executeRealCodexAppServerTurn({
           allowFinishWithoutReply: false,
           approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
@@ -20442,8 +20562,8 @@ describeRealCodex('real Codex lodging destination evidence e2e', () => {
             currentLocalDate: '2026-11-01', currentTimeZone: 'Europe/Warsaw',
             hostedAutomationAvailable: true, scheduledOccurrenceAt: '2026-11-01T07:00:00Z',
           }),
-          dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_CONNECTED_APPS_MANAGE_TOOL,
-            MURPH_CONNECTED_APPS_SEARCH_TOOL, MURPH_CONNECTED_APPS_EXECUTE_TOOL],
+          dynamicTools: [MURPH_AUTOMATION_TOOL,
+          MURPH_JOURNAL_SOURCE_READ_TOOL,],
           env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot(),
             PATH: `${binDirectory}:${config.env.PATH ?? ''}` },
           hostedToolContext: {
@@ -20452,42 +20572,12 @@ describeRealCodex('real Codex lodging destination evidence e2e', () => {
               throw new Error('Date-only lodging must not create a timed follow-up.')
             } },
             computerToolsAvailable: false,
-            connectedApps: { request: async request => {
-              requests.push({ operation: request.operation, input: request.input })
-              if (request.operation === 'manage') return { result: { accounts: [{
-                alias: 'Personal', id: 'gmail_lodging', status: 'ACTIVE', toolkit: 'gmail',
-              }] } }
-              if (request.operation === 'search') return { result: { success: true, tool_schemas: {
-                GMAIL_SEARCH_EMAILS: { input_schema: { type: 'object', additionalProperties: false,
-                  properties: { query: { type: 'string' } }, required: ['query'] } },
-                GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID: { input_schema: { type: 'object', additionalProperties: false,
-                  properties: { message_id: { type: 'string' } }, required: ['message_id'] } },
-              } } }
-              if (request.operation !== 'execute') throw new Error('Unexpected provider operation.')
-              expect(request.input.account).toBe('gmail_lodging')
-              if (request.input.toolSlug === 'GMAIL_SEARCH_EMAILS') return { result: { messages: [{
-                id: 'mail_lodging_synthetic', subject: 'Confirmed lodging: November 10–12',
-                snippet: 'Palm Bay Hideaway. Your stay is confirmed. Open the reservation for details.',
-              }] } }
-              expect(request.input.toolSlug).toBe('GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID')
-              expect(request.input.arguments).toEqual({ message_id: 'mail_lodging_synthetic' })
-              return { result: { id: 'mail_lodging_synthetic', subject: 'Confirmed lodging: November 10–12',
-                body: [
-                  'Reservation confirmed. Listing name: Palm Bay Hideaway.',
-                  'Check-in date: 2026-11-10. Checkout date: 2026-11-12.',
-                  'Booking calendar timezone: Europe/Lisbon. Check-in and checkout clock times are not supplied.',
-                  ...(scenario !== 'unknown destination'
-                    ? ['Property address: 41 Example Lane, Porto, Portugal.']
-                    : ['Property address and destination details are not supplied in this confirmation.']),
-                  'Provider corporate office: Miami, Florida, USA. Booking reference SYNTH-782.',
-                ].join('\n'),
-              } }
-            } },
-            currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+            preparedJournal,
+          currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
             sendVaultFile: async () => { throw new Error('Unexpected file send.') }, vaultFileSendAvailable: false,
           },
           model: config.model, modelProvider: config.modelProvider,
-          prompt: [automation.instructions, 'Scheduled occurrence context:',
+          prompt: [automation.instructions, preparedJournal.instructions, 'Scheduled occurrence context:',
             '- Current local date: 2026-11-01.', '- Current local time: 08:00 Europe/Warsaw.',
             '- Complete the normal scheduled decision.'].join('\n\n'),
           reasoningEffort: resolveMurphManagedAutomationSeed(automation.automationId)?.assistantTargetOverride?.reasoningEffort ?? 'low',
@@ -20495,9 +20585,10 @@ describeRealCodex('real Codex lodging destination evidence e2e', () => {
         })
         const decision = parseAssistantNotificationDecision(result.finalMessage)
         expect(decision.kind, result.finalMessage).toBe('skip')
-        const fullReads = requests.filter(request => request.operation === 'execute'
+        const fullReads = requests.filter(request => request.operation === 'read'
           && request.input.toolSlug === 'GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID')
         expect(fullReads).toHaveLength(1)
+        expect(requests.some(request => ['search', 'execute'].includes(request.operation))).toBe(false)
         expect(automationRequests).toHaveLength(0)
         const vault = await readVaultRawTolerant(workingDirectory)
         const notes = vault.events.filter(event => event.kind === 'note')
@@ -20528,6 +20619,7 @@ describeRealCodex('real Codex lodging destination evidence e2e', () => {
         expect(localDate(trip.endsAt)).toBe('2026-11-12')
         const commands = (await readFile(commandLogPath, 'utf8')).split('\n').filter(Boolean)
         expect(commands.filter(command => command.includes('event note add') && !isRecordedVaultHelpCommand(command))).toHaveLength(existingEventId ? 0 : 1)
+        if (!existingEventId) expect(commands.find(command => command.includes('event note add') && !isRecordedVaultHelpCommand(command))).toContain('gmail:gmail_lodging:mail:mail_lodging_synthetic')
         expect(commands.filter(command => command.includes('event edit') && !isRecordedVaultHelpCommand(command))).toHaveLength(existingEventId ? 1 : 0)
         expect(commands.some(command => /memory (?:upsert|append|add)|habitat (?:upsert|add)/u.test(command))).toBe(false)
         expect((await getKnowledgePage({ vault: workingDirectory, slug: 'journal-connected-context' })).page.body).toContain('mail_lodging_synthetic')
@@ -20559,13 +20651,7 @@ describeRealCodex('real Codex Journal connected email travel capture e2e', () =>
         binDirectory,
         commandLogPath,
         vaultRoot: workingDirectory,
-        ledgerText: [
-          '# Journal connected context',
-          '',
-          '- account: gmail_ready',
-          '  toolkit: gmail',
-          '  state: notice-sent',
-        ].join('\n'),
+        ledgerText: null,
       })
       const seeded: Array<Awaited<ReturnType<typeof upsertAutomation>>['record']> = []
       for (const [title, instructions] of [
@@ -20586,7 +20672,26 @@ describeRealCodex('real Codex Journal connected email travel capture e2e', () =>
         operation: string
       }> = []
       const automationRequests: AssistantHostedAutomationToolRequest[] = []
-      const runTurn = () => executeRealCodexAppServerTurn({
+      const runTurn = async () => {
+      const preparedJournal = await prepareJournalE2eContext({ vaultRoot: workingDirectory, now: '2026-08-31T06:00:00Z',
+        accounts: [{ id: 'gmail_ready', toolkit: 'gmail' }], requests: connectedAppRequests, mailItems: [
+                      {
+                        id: 'mail_flight_out',
+                        snippet: 'Warsaw to Lisbon, 12 Sep, arrive 13:00. Booking code ZX9Q. Price PLN 1200.',
+                        subject: 'Flight confirmation to Lisbon',
+                      },
+                      {
+                        id: 'mail_hotel',
+                        snippet: 'Lisbon stay 12-15 Sep at 18 Rua Example. Confirmation HTL-4431.',
+                        subject: 'Hotel confirmation Lisbon',
+                      },
+                      {
+                        id: 'mail_flight_back',
+                        snippet: 'Lisbon to Warsaw, 15 Sep, depart 18:00.',
+                        subject: 'Return flight confirmation',
+                      },
+                    ] })
+      return executeRealCodexAppServerTurn({
         allowFinishWithoutReply: false,
         approvalPolicy: 'never',
         baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
@@ -20606,9 +20711,7 @@ describeRealCodex('real Codex Journal connected email travel capture e2e', () =>
         }),
         dynamicTools: [
           MURPH_AUTOMATION_TOOL,
-          MURPH_CONNECTED_APPS_MANAGE_TOOL,
-          MURPH_CONNECTED_APPS_SEARCH_TOOL,
-          MURPH_CONNECTED_APPS_EXECUTE_TOOL,
+          MURPH_JOURNAL_SOURCE_READ_TOOL,
         ],
         env: {
           ...config.env,
@@ -20672,68 +20775,7 @@ describeRealCodex('real Codex Journal connected email travel capture e2e', () =>
             },
           },
           computerToolsAvailable: false,
-          connectedApps: {
-            request: async (request) => {
-              connectedAppRequests.push({
-                input: request.input,
-                operation: request.operation,
-              })
-              if (request.operation === 'manage') {
-                return {
-                  result: {
-                    accounts: [{
-                      alias: 'Personal',
-                      connectedAt: '2026-08-30T06:30:00.000Z',
-                      id: 'gmail_ready',
-                      status: 'ACTIVE',
-                      toolkit: 'gmail',
-                    }],
-                  },
-                }
-              }
-              if (request.operation === 'search') {
-                return {
-                  result: {
-                    success: true,
-                    tool_schemas: {
-                      GMAIL_SEARCH_EMAILS: {
-                        input_schema: {
-                          additionalProperties: false,
-                          properties: { query: { type: 'string' } },
-                          required: ['query'],
-                          type: 'object',
-                        },
-                      },
-                    },
-                  },
-                }
-              }
-              if (request.operation === 'execute') {
-                return {
-                  result: {
-                    messages: [
-                      {
-                        id: 'mail_flight_out',
-                        snippet: 'Warsaw to Lisbon, 12 Sep, arrive 13:00. Booking code ZX9Q. Price PLN 1200.',
-                        subject: 'Flight confirmation to Lisbon',
-                      },
-                      {
-                        id: 'mail_hotel',
-                        snippet: 'Lisbon stay 12-15 Sep at 18 Rua Example. Confirmation HTL-4431.',
-                        subject: 'Hotel confirmation Lisbon',
-                      },
-                      {
-                        id: 'mail_flight_back',
-                        snippet: 'Lisbon to Warsaw, 15 Sep, depart 18:00.',
-                        subject: 'Return flight confirmation',
-                      },
-                    ],
-                  },
-                }
-              }
-              throw new Error('Unexpected connected-app operation.')
-            },
-          },
+          preparedJournal,
           currentHostedDeliveryContext: () => null,
           currentHostedMailboxItemIds: () => [],
           sendVaultFile: async () => {
@@ -20744,7 +20786,7 @@ describeRealCodex('real Codex Journal connected email travel capture e2e', () =>
         model: config.model,
         modelProvider: config.modelProvider,
         prompt: [
-          automation.instructions,
+          automation.instructions, preparedJournal.instructions,
           'Scheduled occurrence context:',
           '- Current local date: 2026-08-31.',
           '- Current local time: 08:00 Europe/Warsaw.',
@@ -20755,6 +20797,7 @@ describeRealCodex('real Codex Journal connected email travel capture e2e', () =>
         sandbox: 'workspace-write',
         workingDirectory,
       })
+      }
 
       const result = await runTurn()
       expect(parseAssistantNotificationDecision(result.finalMessage).kind, result.finalMessage).toBe('skip')
@@ -20762,10 +20805,11 @@ describeRealCodex('real Codex Journal connected email travel capture e2e', () =>
         (request) => request.operation,
       )
       expect(providerOperations).toContain('manage')
-      expect(providerOperations).toContain('search')
-      expect(providerOperations).toContain('execute')
+      expect(providerOperations).not.toContain('search')
+      expect(providerOperations).not.toContain('execute')
+      expect(providerOperations).toContain('read')
       const executeRequests = connectedAppRequests.filter(
-        (request) => request.operation === 'execute',
+        (request) => request.operation === 'read',
       )
       expect(executeRequests.every((request) =>
         request.input.account === 'gmail_ready'
@@ -20796,6 +20840,7 @@ describeRealCodex('real Codex Journal connected email travel capture e2e', () =>
       expect(upcomingText).not.toMatch(/ZX9Q|HTL-4431|1200|Rua Example/iu)
       expect(await readAssistantContextSnapshotPrompt({ vaultRoot: workingDirectory, now: new Date('2026-08-31T06:00:00Z') })).toContain('Lisbon')
       expect(journalWrites).toHaveLength(1)
+      expect(journalWrites[0]).toMatch(/gmail:gmail_ready:mail:mail_(?:flight_out|hotel|flight_back)/u)
       expect((await listAutomations({ vaultRoot: workingDirectory })).items.length).toBeLessThanOrEqual(4)
       expect(automationRequests.filter(request => request.action === 'patch')).toHaveLength(1)
       const repaired = await showAutomation({ vaultRoot: workingDirectory, automationId: seeded[0]!.automationId })
@@ -21580,20 +21625,20 @@ function readFocusedSleepCommand(command: string): string {
 function expectFocusedSleepReadOutput(output: string): void {
   if (output.trimStart().startsWith('{')) {
     const document = readRecord(JSON.parse(output))
-    expect(document?.ok === true ? document.data : document).toMatchObject({ count: 1, items: [{
-      date: '2026-01-03', provider: 'oura',
-      totalSleepMinutes: { value: 450, unit: 'minutes', provider: 'oura' },
-    }] })
+    // The night carries its family provider once; units come from one legend.
+    expect(document?.ok === true ? document.data : document).toMatchObject({
+      count: 1,
+      units: { totalSleepMinutes: 'minutes' },
+      items: [{ date: '2026-01-03', provider: 'oura', totalSleepMinutes: 450 }],
+    })
     return
   }
-  // Default TOON: bind provenance and duration to the same metric, not another field.
+  // Default TOON keeps the same facts: date, the family provider, the value and its unit.
   expect(output).toMatch(/^\s*count: 1$/mu)
-  expect(output).toMatch(/^\s*items\[1\]:$/mu)
-  expect(output).toMatch(/^\s*- date: 2026-01-03$/mu)
-  const totalSleep = output.match(/^([ \t]+)totalSleepMinutes:\r?\n((?:\1[ \t]+[^\r\n]*(?:\r?\n|$))+)/mu)?.[2] ?? ''
-  expect(totalSleep).toMatch(/^\s*provider: oura$/mu)
-  expect(totalSleep).toMatch(/^\s*unit: minutes$/mu)
-  expect(totalSleep).toMatch(/^\s*value: 450$/mu)
+  expect(output).toContain('2026-01-03')
+  expect(output).toMatch(/\boura\b/u)
+  expect(output).toMatch(/\b450\b/u)
+  expect(output).toMatch(/^\s*totalSleepMinutes: minutes$/mu)
 }
 
 describe('focused sleep read production contract', () => {
@@ -21646,8 +21691,7 @@ describe('focused sleep read production contract', () => {
       const json = await execFileAsync(path.join(binDirectory, 'vault-cli'), [...args, '--format', 'json'])
       expectFocusedSleepReadOutput(json.stdout)
       expect(JSON.parse(json.stdout)).toMatchObject({ count: 1, items: [{
-        date: '2026-01-03', totalSleepMinutes: { value: 450, unit: 'minutes', provider: 'oura' },
-        timeInBedMinutes: { value: 480 },
+        date: '2026-01-03', provider: 'oura', totalSleepMinutes: 450, timeInBedMinutes: { value: 480 },
       }] })
       const toon = await execFileAsync(path.join(binDirectory, 'vault-cli'), args)
       expectFocusedSleepReadOutput(toon.stdout)
@@ -22245,6 +22289,48 @@ describeRealCodex('real Codex member runtime troubleshooting e2e', () => {
 })
 
 describeRealCodex('real Codex direct operator diagnostic e2e', () => {
+  it('source silence visibility diagnostic uses canonical records over stale projections', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-canonical-diagnostic-e2e-'))
+    let permissionHomePaths: string[] = []
+    const observer = vi.spyOn(clinicalExtractionCodex, 'executeCodexAppServerTurn')
+    try {
+      await initializeVault({ timezone: 'UTC', vaultRoot })
+      await importWearableArrivalFixture(vaultRoot)
+      const projectionPath = path.join(vaultRoot, '.runtime', 'projections', 'synthetic-coverage.json')
+      await mkdir(path.dirname(projectionPath), { recursive: true })
+      const staleProjection = JSON.stringify({ builtAt: '2026-07-14T00:00:00.000Z', workouts: [] })
+      await writeFile(projectionPath, staleProjection)
+      const canonicalBefore = await snapshotRealCodexCanonicalVault(vaultRoot)
+      const permissionConfig = await materializeRealCodexHostedPermissionHome(config)
+      permissionHomePaths = permissionConfig.temporaryPaths
+      const result = await executeOperatorDiagnostic({
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: permissionConfig.codexHome, env: config.env, model: config.model,
+        modelProvider: config.modelProvider, feedbackDiagnostic: true,
+        question: 'Does the vault contain any workout records for July 15, 2026? A cached coverage file in runtime projections lists no workouts. Establish whether records are actually missing. Report only the count and evidence basis, without record contents or identifiers.',
+        reasoningEffort: 'low', workspaceRoot: vaultRoot,
+        onProviderUsage: ({ usage }) => recordRealCodexProviderUsage(usage.usage),
+      })
+      expect(observer).toHaveBeenCalledTimes(1)
+      const turn = await observer.mock.results[0]!.value
+      const commands = readCapabilityRoutingActions(turn.jsonEvents)
+        .filter((action) => action.kind === 'command')
+      expect(commands.some((action) => /vault-cli/iu.test(action.command))).toBe(false)
+      expect(result.answer).toMatch(/(?:1|one) (?:canonical )?workout|workout(?:s| records?)?[^.]{0,30}(?:1|one)/iu)
+      expect(result.answer).toMatch(/canonical/iu)
+      expect(result.answer).toMatch(/stale|cache|projection/iu)
+      expect(result.answer).not.toMatch(/command not found|permission denied|no workout records|records are missing/iu)
+      expect(result.answer).not.toContain(vaultRoot)
+      expect(await snapshotRealCodexCanonicalVault(vaultRoot)).toEqual(canonicalBefore)
+      expect(await readFile(projectionPath, 'utf8')).toBe(staleProjection)
+      process.stdout.write('[source-silence-visibility diagnostic] ' + result.answer.replaceAll(/\s+/gu, ' ').trim() + '\n')
+    } finally {
+      observer.mockRestore()
+      await removeRealCodexTemporaryPaths([vaultRoot, ...permissionHomePaths, ...config.temporaryPaths])
+    }
+  }, 360_000)
+
   it('returns de-identified feedback reproduction from private synthetic evidence', async () => {
     const config = await resolveRealCodexE2eConfig()
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-feedback-diagnostic-e2e-'))
@@ -24652,7 +24738,7 @@ describeRealCodex('real Codex morning reminder reconciliation e2e', () => {
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-reminder-reconciliation-e2e-'))
     const now = new Date('2026-11-12T07:00:00Z')
     const requests: AssistantHostedAutomationToolRequest[] = []
-    const providerOperations: string[] = []
+    const connectedRequests: Array<{ operation: string; input: Record<string, unknown> }> = []
     const inspected = new Map<string, string>()
     try {
       const binDirectory = path.join(workingDirectory, 'bin')
@@ -24709,7 +24795,9 @@ describeRealCodex('real Codex morning reminder reconciliation e2e', () => {
         })).record)
       }
       expect((await listAutomations({ vaultRoot: workingDirectory })).items).toHaveLength(12 + maintenanceRecords.length)
-      const runTurn = async () => executeRealCodexAppServerTurn({
+      const runTurn = async () => {
+        const preparedJournal = await prepareJournalE2eContext({ vaultRoot: workingDirectory, now: now.toISOString(), accounts: [], requests: connectedRequests })
+        return await executeRealCodexAppServerTurn({
         approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         abortSignal: AbortSignal.timeout(600_000),
         onProgress: event => {
@@ -24720,16 +24808,12 @@ describeRealCodex('real Codex morning reminder reconciliation e2e', () => {
         fixtureBinDirectory: binDirectory,
         env: { ...config.env, [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot(), PATH: `${binDirectory}:${config.env.PATH ?? ''}` },
         developerInstructions: buildWeeklyHealthInsightDeveloperInstructions({ currentLocalDate: '2026-11-12', currentTimeZone: 'Europe/Warsaw', scheduledOccurrenceAt: now.toISOString(), hostedAutomationAvailable: true }),
-        dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_CONNECTED_APPS_MANAGE_TOOL, MURPH_CONNECTED_APPS_SEARCH_TOOL, MURPH_CONNECTED_APPS_EXECUTE_TOOL],
+        dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_JOURNAL_SOURCE_READ_TOOL],
         hostedToolContext: {
           computerToolsAvailable: false, currentHostedDeliveryContext: () => null,
           currentHostedMailboxItemIds: () => [], vaultFileSendAvailable: false,
           sendVaultFile: async () => { throw new Error('No file sends in this synthetic journey.') },
-          connectedApps: { request: async request => {
-            providerOperations.push(request.operation)
-            if (request.operation !== 'manage') throw new Error('There are no connected accounts to read.')
-            return { result: { accounts: [], toolkits: [] } }
-          } },
+          preparedJournal,
           automationTool: { request: async request => {
             requests.push(request)
             if (request.action !== 'inspect' && request.action !== 'patch') throw new Error('Existing reminder repair must not create new automations.')
@@ -24763,20 +24847,19 @@ describeRealCodex('real Codex morning reminder reconciliation e2e', () => {
           } },
         },
         prompt: resolveAssistantProviderPrompt({
-          dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_CONNECTED_APPS_MANAGE_TOOL, MURPH_CONNECTED_APPS_SEARCH_TOOL, MURPH_CONNECTED_APPS_EXECUTE_TOOL],
+          dynamicTools: [MURPH_AUTOMATION_TOOL, MURPH_JOURNAL_SOURCE_READ_TOOL],
           providerConfig: normalizeAssistantProviderConfig({ provider: 'codex-cli' }), workingDirectory,
           turnContextPrompt: await readAssistantCurrentStatePrompt({ vaultRoot: workingDirectory }),
-          prompt: seed.instructions,
+          prompt: [seed.instructions, preparedJournal.instructions].join('\n\n'),
         }),
         reasoningEffort: resolveMurphManagedAutomationSeed(seed.automationId)?.assistantTargetOverride?.reasoningEffort ?? 'high',
         sandbox: 'workspace-write', workingDirectory,
-      })
+        })
+      }
       const first = await runTurn()
-      // The pass reads the narrow reading reference, never the whole connected-apps skill.
+      // Prepared reminder review has no generic provider authority.
       const skillReadCommands = readCapabilityRoutingActions(first.jsonEvents)
         .flatMap(action => action.kind === 'command' ? [action] : [])
-      expect(skillReadCommands.some(action => action.ok
-        && action.command.includes('connected-apps/references/reading.md'))).toBe(true)
       expect(skillReadCommands.some(action => action.command.includes('connected-apps/SKILL.md')
         || action.output.includes('name: connected-apps'))).toBe(false)
       expect(parseAssistantNotificationDecision(first.finalMessage).kind).toBe('skip')
@@ -24821,7 +24904,8 @@ describeRealCodex('real Codex morning reminder reconciliation e2e', () => {
         expect(record?.route).toEqual(records[index]?.route)
         expect(record?.assistantTargetOverride).toEqual(records[index]?.assistantTargetOverride)
       }
-      expect(providerOperations.every(operation => operation === 'manage')).toBe(true)
+      expect(connectedRequests.map(request => request.operation)).toEqual(['manage'])
+      expect(readCapabilityRoutingActions(first.jsonEvents).filter(action => action.kind === 'dynamic' && action.tool.startsWith('connected_apps_'))).toEqual([])
       expect((await readEvent({ vaultRoot: workingDirectory, eventId: session.eventId })).event).toEqual(session.event)
       expect((await readEvent({ vaultRoot: workingDirectory, eventId: collection.eventId })).event).toEqual(collection.event)
       process.stdout.write(`[morning-reminder-reconciliation] ${JSON.stringify({ pass: 'first', decision: first.finalMessage, repairs: 4, preserved: 7 })}\n`)
@@ -43247,6 +43331,45 @@ async function materializeHealthCommonsKnowledgeVaultCli(input: {
   await chmod(executablePath, 0o700)
 }
 
+function journalCalendarWindowRequests(requests: Array<{ operation: string; input: Record<string, unknown> }>) {
+  return requests.filter(request => request.operation === 'read' && request.input.toolSlug === 'GOOGLECALENDAR_EVENTS_LIST')
+}
+
+async function prepareJournalE2eContext(input: {
+  vaultRoot: string
+  now: string
+  accounts: Array<{ id: string; toolkit: string }>
+  requests: Array<{ operation: string; input: Record<string, unknown> }>
+  calendarItems?: Array<Record<string, unknown>>
+  mailItems?: Array<Record<string, unknown>>
+}) {
+  const prepared = await prepareJournalConnectedContext({
+    vaultRoot: input.vaultRoot, now: new Date(input.now), connectedApps: { request: async request => {
+      input.requests.push({ operation: request.operation, input: request.input })
+      if (request.operation === 'manage') return { result: { toolkits: [], accounts: input.accounts.map(account => ({
+        ...account, alias: null, connectedAt: null, status: 'ACTIVE', toolkitConfigured: true, toolkitLabel: account.toolkit, wordId: null,
+      })) } }
+      if (request.operation !== 'read') throw new Error('Prepared runs cannot search or execute connected apps.')
+      const args = request.input.arguments
+      switch (request.input.toolSlug) {
+        case 'GOOGLECALENDAR_LIST_CALENDARS': return { result: { data: { items: [{ id: 'primary', primary: true, accessRole: 'owner' }] } } }
+        case 'GOOGLECALENDAR_EVENTS_LIST': return { result: { data: { items: input.calendarItems ?? [] } } }
+        case 'GOOGLECALENDAR_EVENTS_GET': return { result: { data: input.calendarItems?.find(item => item.id === args.event_id) ?? {} } }
+        case 'GMAIL_FETCH_EMAILS': return { result: { data: { messages: (input.mailItems ?? []).map(item => ({
+          messageId: item.id, subject: item.subject, snippet: item.snippet, sender: 'Travel <travel@example.test>', messageTimestamp: input.now,
+        })) } } }
+        case 'GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID': {
+          const item = input.mailItems?.find(item => item.id === args.message_id)
+          return { result: { data: item ? { ...item, body: item.body ?? item.snippet } : {} } }
+        }
+        default: throw new Error('Unexpected prepared read tool.')
+      }
+    } },
+  })
+  expect(prepared.issues).toEqual([])
+  return prepared
+}
+
 async function materializeJournalConnectedContextVaultCli(input: {
   binDirectory: string
   commandLogPath?: string
@@ -43257,7 +43380,7 @@ async function materializeJournalConnectedContextVaultCli(input: {
   if (input.ledgerText !== null) {
     await upsertKnowledgePage({
       vault: input.vaultRoot, slug: 'journal-connected-context', title: 'Journal connected context',
-      body: input.ledgerText ?? '# Journal connected context\n\n- account: calendar_old\n  toolkit: googlecalendar\n  state: baseline',
+      body: input.ledgerText ?? JSON.stringify({ version: 1, optOuts: { global: false, accounts: [], providers: [], categories: [] }, activeAccounts: [], legacy: { marker: 'baseline' } }),
     })
   }
   await materializeRealWorkoutVaultCli({
@@ -45919,7 +46042,7 @@ async function materializeRealCodexHostedPermissionHome(
     await writeFile(
       path.join(codexHome, 'config.toml'),
       [
-        buildRealCodexHostedPermissionConfigToml(config).trimEnd(),
+        buildRealCodexHostedPermissionConfigToml(config, codexHome).trimEnd(),
         ...(options?.trustedProjectRoot
           ? [
               '',
@@ -45955,6 +46078,7 @@ async function materializeRealCodexHostedPermissionHome(
 
 function buildRealCodexHostedPermissionConfigToml(
   config: RealCodexE2eConfig,
+  codexHome = config.codexHome ?? path.join(homedir(), '.codex'),
 ): string {
   const providerApiKeyEnv = config.providerApiKeyEnv
   let baseConfig: string
@@ -45985,7 +46109,7 @@ function buildRealCodexHostedPermissionConfigToml(
   return [
     baseConfig.trimEnd(),
     '',
-    ...buildMurphHostedPermissionProfileTomlLines(),
+    ...buildMurphHostedPermissionProfileTomlLines(codexHome),
   ].join('\n')
 }
 
@@ -47373,6 +47497,7 @@ describeRealCodex('bounded reaction routing journeys', () => {
         { name: 'rhetorical-amusement', reaction: 'Reacted with 😂.', targetMessage: 'Who knew socks could be such escape artists?', expected: 'quiet' },
         { name: 'explanation-appreciation', reaction: 'Reacted with ❤️.', targetMessage: 'A kilometer is 1,000 meters.', expected: 'quiet' },
         { name: 'closed-question', reaction: 'Reacted with a like reaction.', targetMessage: 'Would you like me to explain easy versus tempo runs?', expected: 'escalate' },
+        { name: 'heart-game-agreement', reaction: 'Reacted with a heart reaction.', targetMessage: 'Ava wants the prize to be Choose brunch. Sam, still good with that?', expected: 'escalate' },
         { name: 'heart-proposal', reaction: 'Reacted with a heart reaction.', targetMessage: 'I can show you a shorter version if you want.', expected: 'escalate' },
         { name: 'implicit-proposal', reaction: 'Reacted with 👍.', targetMessage: 'I can take care of that.', expected: 'escalate' },
         { name: 'two-options', reaction: 'Reacted with a like reaction.', targetMessage: 'Would morning or evening work better?', expected: 'escalate' },
@@ -47427,6 +47552,105 @@ describeRealCodex('bounded reaction routing journeys', () => {
       await removeRealCodexTemporaryPaths(config.temporaryPaths)
     }
   }, 600_000)
+})
+
+describeRealCodex('custom connection native tool journey', () => {
+  it('custom connections live reads approved Notes through a native MCP mount', async () => {
+    const { startCustomConnectionsGateway } = await import('./support/custom-connections-gateway.js')
+    const gateway = await startCustomConnectionsGateway()
+    onTestFinished(() => gateway.close())
+    const entry = { id: 'cc_notes', slug: 'notes', generation: 3, catalog: 'a'.repeat(43) }
+    gateway.state.connection = entry
+    const config = await resolveRealCodexE2eConfig()
+    onTestFinished(() => removeRealCodexTemporaryPaths(config.temporaryPaths))
+    const catalogRoot = await mkdtemp(path.join(tmpdir(), 'murph-connections-catalog-'))
+    onTestFinished(() => removeRealCodexTemporaryPaths([catalogRoot]))
+    const codexCommand = normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+      ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../node_modules/.bin/codex')
+    config.env[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV] = await writeHostedOpenAiMixedModeModelCatalogJson({ codexCommand, directory: catalogRoot })
+    const fixture = await createCanonicalLiveFixture(config, 'linq', { capabilities: 'production-hosted' })
+    const nativeExecute = clinicalExtractionCodex.executeCodexAppServerTurn
+    let observedMount = false
+    const observer = vi.spyOn(clinicalExtractionCodex, 'executeCodexAppServerTurn').mockImplementation(async input => {
+      const mounts = input.threadConfig?.mcp_servers as Record<string, { url: string }> | undefined
+      expect(mounts?.notes?.url).toBe(`http://connections.worker/v1/cc_notes/3/${entry.catalog}/mcp`)
+      observedMount = true
+      // Preserve the production-built config, changing only virtual-host routing for the local fake Web.
+      return nativeExecute({ ...input, threadConfig: { ...input.threadConfig, mcp_servers: {
+        ...mounts, notes: { ...mounts!.notes, url: mounts!.notes!.url.replace('http://connections.worker', gateway.origin) },
+      } } })
+    })
+    const readManifest = vi.fn(async () => [entry])
+    try {
+      const before = await listCanonicalWriteEvidence(fixture.vault)
+      const result = await fixture.message('Check my Notes connection and tell me what my saved note says to bring. Do not change anything or contact anyone.', {
+        executionContext: { hosted: { memberId: 'synthetic-member', userEnvKeys: [], customConnections: { readManifest } } },
+      })
+      expect(observedMount).toBe(true)
+      expect(readManifest).toHaveBeenCalledTimes(1)
+      expect(gateway.state.calls).toHaveLength(1)
+      expect(gateway.state.calls[0]?.query).toEqual(expect.any(String))
+      expect(result.response).toMatch(/blue notebook/iu)
+      expect(result.response).toMatch(/pencil/iu)
+      expect(result.response).not.toMatch(/MCP|gateway|token|I(?:'ve| have) (?:saved|updated|sent)/iu)
+      expect(result.response.length).toBeLessThan(600)
+      expect(await listCanonicalWriteEvidence(fixture.vault)).toEqual(before)
+      process.stdout.write(`[custom-connections-live] ${JSON.stringify({ calls: gateway.state.calls.length, reply: result.response })}\n`)
+    } finally {
+      observer.mockRestore()
+      await fixture.close()
+    }
+  }, 240_000)
+
+  it('MCP servers live name the connected server and link the connections page', async () => {
+    const { startCustomConnectionsGateway } = await import('./support/custom-connections-gateway.js')
+    const gateway = await startCustomConnectionsGateway()
+    onTestFinished(() => gateway.close())
+    const entry = { id: 'cc_notes', slug: 'notes', generation: 3, catalog: 'a'.repeat(43) }
+    gateway.state.connection = entry
+    const config = await resolveRealCodexE2eConfig()
+    onTestFinished(() => removeRealCodexTemporaryPaths(config.temporaryPaths))
+    const catalogRoot = await mkdtemp(path.join(tmpdir(), 'murph-connections-catalog-'))
+    onTestFinished(() => removeRealCodexTemporaryPaths([catalogRoot]))
+    const codexCommand = normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND)
+      ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../node_modules/.bin/codex')
+    config.env[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV] = await writeHostedOpenAiMixedModeModelCatalogJson({ codexCommand, directory: catalogRoot })
+    const fixture = await createCanonicalLiveFixture(config, 'linq', { capabilities: 'production-hosted' })
+    const settingsLink = `${MURPH_PRODUCT_ORIGIN}/settings/connections`
+    const nativeExecute = clinicalExtractionCodex.executeCodexAppServerTurn
+    const observer = vi.spyOn(clinicalExtractionCodex, 'executeCodexAppServerTurn').mockImplementation(async input => {
+      expect(input.developerInstructions).toContain(settingsLink)
+      const mounts = input.threadConfig?.mcp_servers as Record<string, { url: string }> | undefined
+      // Preserve the production-built config, changing only virtual-host routing for the local fake Web.
+      // A local ChatGPT login also mounts the developer's own app connectors as MCP tools, and one of
+      // them can be named Notes; production's provider-key runner never has them, so they stay off.
+      return nativeExecute({ ...input, threadConfig: { ...input.threadConfig, 'features.apps': false, mcp_servers: {
+        ...mounts, notes: { ...mounts!.notes, url: mounts!.notes!.url.replace('http://connections.worker', gateway.origin) },
+      } } })
+    })
+    const executionContext = { hosted: { memberId: 'synthetic-member', userEnvKeys: [], customConnections: { readManifest: async () => [entry] } } }
+    try {
+      const before = await listCanonicalWriteEvidence(fixture.vault)
+      const listed = await fixture.message('What MCP servers do you have?', { executionContext })
+      expect(listed.response).toMatch(/notes/iu)
+      // Murph's own tools are never presented as an MCP server, and namespaces stay internal.
+      expect(listed.response).not.toMatch(/mcp__|(?<![A-Za-z])murph(?![A-Za-z])/u)
+      expect(listed.response).not.toMatch(/\bMurph(?:['’]s)?(?:\s+(?:own|built-in|itself|is|as|an?|the))*\s+MCP\b/iu)
+      const serverLink = 'https://mcp.recipes.example/mcp'
+      const connect = await fixture.message(`Can you add my recipes MCP server too? Its link is ${serverLink}`, {
+        executionContext, sessionId: listed.session.sessionId,
+      })
+      const sent = connect.response.match(/https:\/\/\S+/gu)?.find(link => link.startsWith(`${settingsLink}?`))?.replace(/[.,)]+$/u, '')
+      expect(sent, connect.response).toBeDefined()
+      expect(new URL(sent!).searchParams.get('url')).toBe(serverLink)
+      expect(connect.response).not.toMatch(/I(?:'|’)?(?:ve| have) (?:connected|added)|(?:is|it(?:'|’)s) now (?:connected|added)/iu)
+      expect(await listCanonicalWriteEvidence(fixture.vault)).toEqual(before)
+      process.stdout.write(`[mcp-servers-live] ${JSON.stringify({ listed: listed.response, connect: connect.response })}\n`)
+    } finally {
+      observer.mockRestore()
+      await fixture.close()
+    }
+  }, 300_000)
 })
 
 describeRealCodex('production reaction routing turn journey', () => {
@@ -48680,6 +48904,248 @@ Jordan (player_unjoined): the glitter throne bit from room conversation.
       throw error;
     } finally { await removeRealCodexTemporaryPaths([vault, ...permissionHome.temporaryPaths, ...config.temporaryPaths]); }
   }, 600_000)
+  // Production instructions and tools, a real model, synthetic Web and media.
+  // The claim is about the tool surface: nothing the model sends for a scene is refused.
+  it('pair recap show scene requests are accepted on the first try', async () => {
+    const config = await resolveRealCodexE2eConfig();
+    const permissionHome = await materializeRealCodexHostedPermissionHome(config);
+    const vault = await mkdtemp(path.join(tmpdir(), 'murph-recap-scenes-'));
+    const { buildGameRecapInstructions } = await import('@murphai/hosted-execution/runtime-control');
+    const { createRecapShowLiveProviders } = await import('../src/recap-show-testkit.ts');
+    const gameId = 'synthetic-scenes', eventId = `game-recap:${gameId}`, pairFingerprint = '0123456789abcdef0123456789abcdef';
+    const players = [{ memberId: 'synthetic-a', name: 'Player A' }, { memberId: 'synthetic-b', name: 'Player B' }];
+    const posts: [string, string, string][] = [
+      ['Player A', 'mon', 'Twenty push-ups before coffee'], ['Player B', 'mon', 'Twenty push-ups, counted by the dog'],
+      ['Player A', 'tue', 'Push-ups on the purple mat'], ['Player B', 'tue', 'Did them in the hallway at 11:58pm'],
+      ['Player A', 'wed', 'Push-ups next to the laundry basket'],
+      ['Player A', 'thu', 'Twenty more, the basket is still full'], ['Player B', 'thu', 'Back at it, hallway again'],
+      ['Player A', 'fri', 'Last set, mat retired with honors'],
+    ];
+    const entries = posts.map(([playerName, day, text]) => ({ entryId: `synthetic-${day}-${playerName.slice(-1).toLowerCase()}`, playerName, kind: 'photo', text, visibleToBoth: true }));
+    const chat = [
+      { playerName: 'Player B', text: 'I am not missing a single day this week, write that down.' },
+      { playerName: 'Player A', text: 'Written down.' },
+      { playerName: 'Player B', text: 'Wednesday does not count, the hallway was being painted.' },
+      { playerName: 'Player A', text: 'The laundry basket saw everything.' },
+      // A real week of chat is long. Keep the tool result past Codex's output limit.
+      ...Array.from({ length: Number(process.env.MURPH_RECAP_JOURNEY_CHAT_LINES ?? 110) }, (_, index) => ({ playerName: index % 2 ? 'Player A' : 'Player B',
+        text: [`Did you post yet or are you stalling again, it is nearly ${7 + index % 5} already`, 'Posted. Check the app before you start making accusations',
+          `That does not look like twenty to me, I counted maybe ${11 + index % 8}`, 'Count again with your glasses on, the dog is my witness',
+          'Fine. Tomorrow I am going first and you will see how it is done'][index % 5]! })),
+    ];
+    const providers = await createRecapShowLiveProviders({
+      // A real game record is large: every post carries its time, place and numbers.
+      game: { id: gameId, maxPlayers: 2, recapShow: true, task: 'Twenty push-ups a day, with a photo', prize: 'Loser folds the winner’s laundry', lengthDays: 5,
+        days: ['mon', 'tue', 'wed', 'thu', 'fri'].map((day, dayIndex) => ({ day, posts: posts.filter(post => post[1] === day).map(([player, , text], postIndex) => ({
+          player, text, postedAt: `2026-11-0${2 + dayIndex}T${postIndex ? '23:58' : '07:12'}:00-05:00`, incomplete: false, proveIt: null,
+          data: { reps: 20, durationSeconds: 61 + dayIndex * 7 + postIndex, place: postIndex ? 'hallway' : 'bedroom',
+            heartRate: Array.from({ length: 24 }, (_, second) => ({ second: second * 3, beatsPerMinute: 92 + (second * 7 + dayIndex * 5 + postIndex * 11) % 41 })) } })) })) },
+      players, entries, chat, result: players.map((player, index) => ({ ...player, score: index ? 3 : 5 })),
+    });
+    const events: unknown[] = [];
+    try {
+      await initializeVault({ timezone: 'UTC', vaultRoot: vault });
+      await mkdir(path.join(vault, 'games'), { recursive: true });
+      await writeFile(path.join(vault, `games/lore-${pairFingerprint}.md`), '# Synthetic pair lore\nThe laundry basket is a running bit.\n');
+      const target = createAssistantModelTarget({ approvalPolicy: 'never', codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND), codexHome: permissionHome.codexHome,
+        model: config.model, modelProvider: config.modelProvider, provider: 'codex-cli', reasoningEffort: 'low', sandbox: 'workspace-write' });
+      if (!target) throw new Error('Expected real Codex target.');
+      await sendAssistantNotificationLocal({ channel: 'linq', deliveryTarget: 'synthetic-game-room', threadId: 'synthetic-game-room', threadIsDirect: false,
+        deliveryDispatchMode: 'queue-only', deliveryIdempotencyKey: eventId, deliveryDedupeToken: eventId,
+        executionContext: { hosted: { defaultTarget: target, memberId: 'synthetic-room', userEnvKeys: [],
+          gameRecapScope: { gameId, eventId, pairFingerprint, show: true },
+          groupTool: { request: providers.control }, providerFetch: providers.providerFetch } },
+        instructions: buildGameRecapInstructions([], undefined, false, true),
+        responsePolicy: { kind: 'require_game_recap', gameId, eventId, pairFingerprint, show: true },
+        onTraceEvent: event => events.push(event.rawEvent),
+        turnEnvironment: { currentWorkingDirectory: vault, env: { ...config.env, OPENAI_API_KEY: 'synthetic', ELEVENLABS_API_KEY: 'synthetic' } },
+        turnTrigger: 'manual-deliver', vault, workingDirectory: vault,
+      });
+    } finally {
+      const ids = new Set(providers.material.references.map(reference => reference.id));
+      const media = readCapabilityRoutingActions(events).flatMap(action => action.kind === 'dynamic' && ['generate_image', 'generate_song', 'write_recap'].includes(action.tool) ? [action] : []);
+      const actions = readCapabilityRoutingActions(events);
+      const deliveries = await listAssistantOutboxIntents(vault);
+      const proof = { model: config.model, saved: providers.saved.length, providerCalls: providers.providerCalls,
+        replies: deliveries.map(delivery => ({ text: delivery.message, mediaCount: delivery.media?.length ?? 0 })),
+        workingFilesInVault: existsSync(path.join(vault, 'tmp/recap')),
+        readGame: actions.flatMap(action => action.kind === 'dynamic' && action.tool === 'read_game' ? [{ bytes: Buffer.byteLength(action.output) }] : []),
+        commands: actions.flatMap(action => action.kind === 'command' ? [action.command.replace(/[a-f0-9]{32,64}/gu, '<hex>').slice(0, 140)] : []).slice(0, 20),
+        failedCommands: actions.flatMap(action => action.kind === 'command' && !action.ok
+          ? [{ command: action.command.replace(/[a-f0-9]{32,64}/gu, '<hex>').slice(0, 400), output: action.output.replace(/[a-f0-9]{32,64}/gu, '<hex>').slice(-300) }] : []),
+        calls: media.map(call => ({ tool: call.tool, success: call.success, output: call.success ? '' : call.output.slice(0, 300),
+          keys: Object.keys(call.argumentsValue).sort(),
+          ...(call.tool === 'generate_image' ? { references: (Array.isArray(call.argumentsValue.referenceImageRefs) ? call.argumentsValue.referenceImageRefs : []).map(ref =>
+            typeof ref !== 'string' ? typeof ref : ids.has(ref) ? 'id' : ids.has(path.basename(ref, '.jpg')) ? 'path' : ref.slice(0, 60)) } : {}) })) };
+      process.stdout.write(`[recap scene proof] ${JSON.stringify(proof).replace(/\/Users\/[^/\s"]+/gu, '<HOME_DIR>')}\n`);
+      await removeRealCodexTemporaryPaths([vault, ...permissionHome.temporaryPaths, ...config.temporaryPaths]);
+      expect(proof.calls.filter(call => call.tool !== 'write_recap' && !call.success)).toEqual([]);
+      expect(proof.calls.some(call => call.tool === 'generate_image')).toBe(true);
+      expect(proof.saved).toBe(1);
+      const songCalls = media.filter(call => call.tool === 'generate_song');
+      expect(songCalls).toHaveLength(1);
+      expect(Object.keys(songCalls[0]!.argumentsValue).sort()).toEqual(['draftPath', 'voice']);
+      const song = providers.assets.find(asset => asset.slot === 'song');
+      expect(song?.songStartMs).toBeGreaterThan(0);
+      expect(song?.durationMs).toBeGreaterThan(20_000);
+      expect(song?.wordsTimestamps?.length).toBeGreaterThan(0);
+      expect(media.at(-1)?.tool).toBe('write_recap');
+      expect(providers.providerCalls.filter(call => call.kind === 'song')).toHaveLength(1);
+      expect(proof.replies).toEqual([{ text: `${providers.saved[0]!.chatLine}\nWatch the recap: https://recaps.murph.test/recap/synthetic-game`, mediaCount: 0 }]);
+      // What read_game returns fits in what the model is shown, so nothing is cut out of it.
+      for (const read of proof.readGame) expect(read.bytes).toBeLessThan(10_000 * 4);
+      // Photos, media and the chat copy live in runtime scratch, which the room's saved workspace never includes.
+      expect(proof.workingFilesInVault).toBe(false);
+    }
+  }, 900_000)
+
+  // A fictional, sparse week. Its best material is a running bit told in plain lines that are funny
+  // only together, among ordinary talk, app chatter and Murph's own notices, as real chats are.
+  // A remake is the same game made again: the lore then lists what the earlier take used.
+  // A next game's lore lists a bit and a world an earlier game's show used; neither comes back.
+  // It prints the show so the writing can be read; humour is judged by reading it.
+  it.each(['first show', 'remake', 'next game'] as const)('pair recap show writes the week from what the players said: %s', async take => {
+    const startedAt = Date.now()
+    const config = await resolveRealCodexE2eConfig()
+    const permissionHome = await materializeRealCodexHostedPermissionHome(config)
+    const vault = await mkdtemp(path.join(tmpdir(), 'murph-recap-humour-'))
+    const { buildGameRecapInstructions } = await import('@murphai/hosted-execution/runtime-control')
+    const { createRecapShowLiveProviders } = await import('../src/recap-show-testkit.ts')
+    const gameId = 'synthetic-stretch', eventId = `game-recap:${gameId}`, pairFingerprint = 'fedcba9876543210fedcba9876543210'
+    const players = [{ memberId: 'synthetic-iris', name: 'Iris' }, { memberId: 'synthetic-mateo', name: 'Mateo' }]
+    // The last Monday-to-Friday week that is over, on New York's clock with its own offset each day.
+    const friday = Date.now() - ((new Date().getUTCDay() + 1) % 7 + 1) * 86_400_000
+    const dates = Array.from({ length: 5 }, (_, day) => new Date(friday - (4 - day) * 86_400_000).toISOString().slice(0, 10))
+    const offset = (date: string) => new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', timeZoneName: 'longOffset' })
+      .formatToParts(new Date(`${date}T12:00:00Z`)).find(part => part.type === 'timeZoneName')!.value.replace('GMT', '')
+    const at = (day: number, time: string) => `${dates[day]}T${time}:00${offset(dates[day]!)}`
+    const posts: [string, number, string, string | null][] = [
+      ['Iris', 0, '06:50', null], ['Mateo', 0, '22:41', null], ['Iris', 1, '06:45', null], ['Mateo', 2, '23:57', 'made it'],
+      ['Iris', 3, '07:11', null], ['Iris', 4, '06:41', null], ['Mateo', 4, '08:06', null],
+    ]
+    const entries = posts.map(([playerName, day, , text]) => ({ entryId: `synthetic-${playerName.toLowerCase()}-${day}`, playerName, kind: 'photo', text, visibleToBoth: true }))
+    const evening = 'Iris is done for today. Mateo, you have until midnight.'
+    const chat: [number, string, string, string][] = [
+      [0, '08:00', 'Murph', 'Day one. Iris and Mateo, ten minutes of stretching each, with a photo, by midnight. The winner gets dinner cooked by the loser.'],
+      [0, '08:02', 'Iris', 'did mine'], [0, '12:30', 'Mateo', 'murph how do i post from my camera roll'], [0, '12:31', 'Murph', 'On the post screen, tap the photo icon, then Library.'],
+      [0, '18:02', 'Mateo', 'murph doing it now'], [0, '19:30', 'Mateo', 'ok now'], [0, '20:00', 'Murph', evening],
+      [0, '21:16', 'Mateo', 'about to start'], [0, '22:41', 'Mateo', 'done'], [0, '22:42', 'Iris', 'nice'],
+      [1, '06:46', 'Iris', 'done'], [1, '13:00', 'Mateo', 'what are you making for dinner tonight'], [1, '13:10', 'Iris', 'leftovers. you?'], [1, '13:11', 'Mateo', 'cereal probably'],
+      [1, '17:00', 'Mateo', 'murph starting in 5'], [1, '17:40', 'Mateo', 'murph 5 more min'], [1, '20:00', 'Murph', evening],
+      [1, '20:15', 'Mateo', 'starting for real'], [1, '20:16', 'Iris', 'i believe you'],
+      [2, '07:00', 'Murph', 'Mateo missed Tuesday, so Iris leads 2 to 1.'], [2, '07:05', 'Mateo', 'murph today im doing it first thing'],
+      [2, '09:30', 'Mateo', 'the app logged me out again'], [2, '09:32', 'Murph', 'Sorry about that. Signing back in keeps your posts.'],
+      [2, '15:00', 'Iris', 'first thing was 8 hours ago'], [2, '15:05', 'Mateo', 'yeah yeah'], [2, '20:00', 'Murph', 'Neither of you has posted today. You both have until midnight.'],
+      [2, '21:40', 'Iris', 'long day, im out tonight'], [2, '23:58', 'Mateo', 'murph first thing'], [2, '23:59', 'Iris', 'is that from monday'],
+      [3, '07:00', 'Murph', 'Iris missed Wednesday, so it is 2 to 2.'], [3, '07:10', 'Mateo', 'same room different day'], [3, '07:12', 'Iris', 'done'],
+      [3, '12:00', 'Mateo', 'murph doing it now'], [3, '12:01', 'Iris', 'which now'],
+      [3, '18:30', 'Mateo', 'murph can we make the next one 7 days'], [3, '18:31', 'Murph', 'Either of you can set that up when this one ends.'], [3, '20:00', 'Murph', evening],
+      [3, '23:59', 'Mateo', 'murph is it too late'],
+      [4, '06:42', 'Iris', 'done'], [4, '07:00', 'Murph', 'Mateo missed Thursday, so Iris leads 3 to 2. Last day.'],
+      [4, '08:05', 'Mateo', 'doing it now. actually now'], [4, '08:10', 'Iris', '?? its 8am'], [4, '18:00', 'Iris', 'im thinking pasta'], [4, '18:02', 'Mateo', 'noted'],
+    ]
+    // A real week's chat is mostly about other things, and its file runs past what one read shows.
+    // Each line of talk is said once, so the filler holds no pattern of its own.
+    const talk = ['did you see the match last night', 'only the second half', 'traffic was so bad today', 'my 4pm got moved to 5', 'are you coming saturday',
+      'probably, what time', 'send me that recipe', 'the noodle one?', 'my sister is visiting this weekend', 'what are you watching these days', 'rewatching the office',
+      'is it supposed to rain tomorrow', 'grabbing coffee want anything', 'oat latte', 'running late', 'the train is stuck again', 'work is slow today', 'lunch?',
+      'cant today, tomorrow?', 'have you talked to sam', 'not since tuesday', 'my laptop died in the middle of a call', 'did you book the flights', 'not yet, prices went up',
+      'the new place on 5th is good', 'the taco place?', 'yeah get the fish one', 'my landlord finally fixed the heat', 'took him long enough',
+      'what time does the game start sunday', 'i think 1', 'can you send me the photos from the party', 'sending now', 'my mom says hi', 'tell her hi back',
+      'i locked myself out again', 'the spare is under the plant', 'are we still doing trivia', 'yes, same team name', 'i finished that book', 'was the ending good',
+      'kind of rushed', 'do you have a screwdriver i can borrow', 'yeah come grab it', 'the dishwasher is making a noise', 'call the guy from last time',
+      'parking here is impossible', 'just got home', 'my cousin got engaged', 'to the guy from the wedding?']
+    const filler = ['lol', 'same', 'ok', 'yeah', 'true', 'haha', 'nice', 'ya', 'sure', 'right']
+    const banter: [number, string, string, string][] = Array.from({ length: 5 * 30 }, (_, index) => {
+      const minutes = 9 * 60 + 10 + (index % 30) * 25
+      return [Math.floor(index / 30), `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`, index % 2 ? 'Mateo' : 'Iris',
+        index % 3 ? filler[index % filler.length]! : talk[index / 3]!]
+    })
+    const providers = await createRecapShowLiveProviders({
+      game: { id: gameId, recapShow: true, players: players.map(player => ({ ...player, task: 'Ten minutes of stretching, with a photo' })), lengthDays: 5,
+        schedule: { days: [0, 1, 2, 3, 4] }, stakes: [{ kind: 'winner_gets', item: 'Dinner cooked by the loser' }], score: [{ name: 'Iris', score: 4 }, { name: 'Mateo', score: 3 }],
+        days: dates.map((date, day) => ({ dayNumber: day + 1, dates: { Iris: date, Mateo: date }, posts: Object.fromEntries(players.map(({ name }) => {
+          const post = posts.find(([who, postDay]) => who === name && postDay === day)
+          return [name, post ? { entryId: `synthetic-${name.toLowerCase()}-${day}`, postedAt: { local: at(day, post[2]), timeZone: 'America/New_York', instant: new Date(at(day, post[2])).toISOString() },
+            kind: 'photo', text: post[3], data: null, ...(name === 'Mateo' && day === 2 ? { proveIt: { by: 'Iris' } } : {}) } : 'missed']
+        })) })) },
+      players, entries, result: [{ ...players[0]!, score: 4 }, { ...players[1]!, score: 3 }], startedAt: new Date(at(0, '00:00')).toISOString(),
+      chat: [...chat, ...banter].sort((a, b) => a[0] - b[0] || a[1].localeCompare(b[1]))
+        .map(([day, time, who, text]) => ({ playerName: who, text, at: new Date(at(day, time)).toISOString(), source: who === 'Murph' ? 'assistant' as const : 'player' as const })),
+    })
+    const earlierGame = { treatment: 'a 1920s silent railway melodrama', bit: 'the human alarm clock' }
+    const earlier = { treatment: 'a 1920s silent-film clock caper', title: 'Ten minutes. Eventually.',
+      chatLine: 'Iris wins 4–3, Mateo: Thursday’s missing stretch turned Friday’s early start into dinner duty. Iris is thinking pasta; you’re cooking.' }
+    // Which comedy skill the writer reads: the managed one only when the run points the skills root at it.
+    const comedySkill = (await readFile(path.join(config.env[MURPH_ASSISTANT_SKILLS_ROOT_ENV]!, 'groupchat-comedy/SKILL.md'), 'utf8'))
+      .includes('This public fallback intentionally contains no managed') ? 'public fallback' : 'managed'
+    const events: unknown[] = []
+    let tokens: unknown = null
+    try {
+      await initializeVault({ timezone: 'UTC', vaultRoot: vault })
+      await mkdir(path.join(vault, 'games'), { recursive: true })
+      // The remake's lore is what an earlier take of this game wrote after its show.
+      await writeFile(path.join(vault, `games/lore-${pairFingerprint}.md`), take === 'first show' ? '# Synthetic pair lore\nTheir first game together.\n' : take === 'next game' ? [
+        '# Pair lore', `2026-10-16, their first game: 20 squats a day, Mateo won 5–4. Used treatment: ${earlierGame.treatment}.`,
+        `Used bits: calling Iris ${earlierGame.bit} for posting before 7am; Mateo's squats "counted by the dog".`,
+        'Used chat line: Mateo wins 5–4: Iris, the dog has been told about Tuesday.', ''].join('\n') : [
+        '# Pair lore', 'First game together. Iris won stretching 4–3. Mateo owes dinner; Iris said “im thinking pasta”.', `Used treatment: ${earlier.treatment}.`,
+        'Used moments: three Tuesday starts with no post; Wednesday 11:57 stretching questioned as Monday’s; four Iris posts before 7:12am; Thursday miss then Friday “actually now” one minute before posting; “cereal probably” versus cooking dinner.',
+        `Used title: ${earlier.title}`, `Used chat line: ${earlier.chatLine}`, ''].join('\n'))
+      const target = createAssistantModelTarget({ approvalPolicy: 'never', codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND), codexHome: permissionHome.codexHome,
+        model: config.model, modelProvider: config.modelProvider, provider: 'codex-cli', reasoningEffort: 'low', sandbox: 'workspace-write' })
+      if (!target) throw new Error('Expected real Codex target.')
+      await sendAssistantNotificationLocal({ channel: 'linq', deliveryTarget: 'synthetic-game-room', threadId: 'synthetic-game-room', threadIsDirect: false,
+        deliveryDispatchMode: 'queue-only', deliveryIdempotencyKey: eventId, deliveryDedupeToken: eventId,
+        executionContext: { hosted: { defaultTarget: target, memberId: 'synthetic-room', userEnvKeys: [],
+          gameRecapScope: { gameId, eventId, pairFingerprint, show: true },
+          groupTool: { request: providers.control }, providerFetch: providers.providerFetch } },
+        instructions: buildGameRecapInstructions([], undefined, false, true),
+        responsePolicy: { kind: 'require_game_recap', gameId, eventId, pairFingerprint, show: true },
+        onTraceEvent: event => {
+          events.push(event.rawEvent)
+          const raw = readRecord(event.rawEvent)
+          if (raw?.method === 'thread/tokenUsage/updated') tokens = readRecord(readRecord(raw.params)?.tokenUsage)?.total ?? tokens
+        },
+        // Media goes through the synthetic transport; a provider-auth run keeps its own model key.
+        turnEnvironment: { currentWorkingDirectory: vault, env: { ...config.env, OPENAI_API_KEY: config.env.OPENAI_API_KEY ?? 'synthetic', ELEVENLABS_API_KEY: 'synthetic' } },
+        turnTrigger: 'manual-deliver', vault, workingDirectory: vault,
+      })
+    } finally {
+      const story = providers.saved[0]
+      // How the writer read its files: each shell command and how much it printed.
+      const reads = readCapabilityRoutingActions(events).flatMap(action => action.kind === 'command'
+        ? [{ command: action.command.replace(/[a-f0-9]{32,64}/gu, '<hex>').slice(0, 160), bytes: Buffer.byteLength(action.output) }] : [])
+      const lore = await readFile(path.join(vault, `games/lore-${pairFingerprint}.md`), 'utf8').catch(() => null)
+      process.stdout.write(`[recap humour show] ${JSON.stringify({ take, comedySkill, model: config.model, wallTimeMs: Date.now() - startedAt, tokens, reads, lore, story: story && {
+        treatment: story.treatment, pages: story.pages, superlatives: story.superlatives, song: story.song && { title: story.song.title, lyrics: story.song.lyrics }, chatLine: story.chatLine } })
+        .replace(/\/Users\/[^/\s"]+/gu, '<HOME_DIR>')}\n`)
+      await removeRealCodexTemporaryPaths([vault, ...permissionHome.temporaryPaths, ...config.temporaryPaths])
+    }
+    expect(providers.saved).toHaveLength(1)
+    // A quote is a player's own words, copied exactly: never Murph's, never what they said about the app.
+    const said = new Set([...chat, ...banter].filter(([, , who]) => who !== 'Murph').map(([, , who, text]) => `${who}: ${text}`)
+      .concat(posts.flatMap(([who, , , text]) => text ? [`${who}: ${text}`] : [])))
+    const appChatter = /camera roll|logged me out|7 days/u
+    const quotes = providers.saved[0]!.pages.flatMap(page => page.blocks.flatMap(block => block.quote ? [block.quote] : []))
+    for (const quote of quotes) {
+      expect(said.has(`${quote.who}: ${quote.text}`), `${quote.who}: ${quote.text}`).toBe(true)
+      expect(quote.text).not.toMatch(appChatter)
+    }
+    // A bit and a world an earlier game's show used stay spent.
+    if (take === 'next game') {
+      const story = providers.saved[0]!
+      expect(story.treatment?.toLowerCase()).not.toBe(earlierGame.treatment)
+      expect(JSON.stringify({ pages: story.pages, superlatives: story.superlatives, song: story.song, chatLine: story.chatLine })).not.toMatch(/alarm clock/iu)
+    }
+    // A remake retells the week in a new world, under a new title, with a new chat line.
+    if (take === 'remake') {
+      const story = providers.saved[0]!
+      expect(story.treatment?.toLowerCase()).not.toBe(earlier.treatment)
+      expect(story.pages[0]!.blocks.find(block => block.kind === 'headline')?.text).not.toBe(earlier.title)
+      expect(story.chatLine).not.toBe(earlier.chatLine)
+    }
+  }, 900_000)
 
 })
 
@@ -49450,6 +49916,122 @@ describeRealCodex('real Codex game incomplete day e2e', () => {
   }, 360_000)
 })
 
+describeRealCodex('real Codex finished game day correction e2e', () => {
+  const corrected = "Maya's check-in for Tuesday, March 5 now counts. That changes the result. The game ended in a 6–6 tie."
+  it.each([
+    { name: 'finished game counts a missed day and says the result changed', message: 'Murph, the game is over but I never posted last Tuesday, March 5. I did read my chapter. Count it, and make my post say: Finished chapter nine on the train',
+      rematch: false, listsDays: true, outcome: 'changed' as const },
+    { name: 'finished game beside a live rematch counts the day in the finished game', message: 'Murph, I never posted on Tuesday March 5 in our last game, but I did read. Count it, and make my post say: Finished chapter nine on the train',
+      rematch: true, listsDays: true, outcome: 'same' as const },
+    { name: 'finished game past its seven days says the result is final', message: 'Murph, I never posted on Tuesday March 5 in our last game, but I did read. Count it, and make my post say: Finished chapter nine on the train',
+      rematch: false, listsDays: false, outcome: 'final' as const },
+    // A second game that is still live also has March 5 unposted, so the date alone cannot pick a game.
+    { name: 'finished game and a live game on the same date asks which game', message: 'Murph, I never posted on Tuesday March 5 but I did it. Count that day for me.',
+      rematch: false, overlapping: true, listsDays: true, outcome: 'ask' as const },
+  ])('$name', async (scenario) => {
+    const { outcome } = scenario
+    const occurredAt = '2030-03-13T16:00:00.000Z'
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-game-finished-e2e-'))
+    const { MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL } = await import('../src/assistant-codex/dynamic-tools/games.js')
+    const inputId = 'ain_' + 'c'.repeat(32)
+    const calls: Array<import('@murphai/hosted-execution/runtime-control').HostedRuntimeGroupToolRequest> = []
+    const players = [{ memberId: 'player_maya', seat: 0, firstName: 'Maya', dayOne: '2030-03-04', timeZone: 'America/New_York' }, { memberId: 'player_sam', seat: 1, firstName: 'Sam', dayOne: '2030-03-04', timeZone: 'America/New_York' }]
+    const terms = { n: 1, fromDay: 0, checkInKind: 'any' as const, tasks: [{ seat: 0, text: 'Read a chapter' }, { seat: 1, text: 'Walk' }], schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, stakes: [{ kind: 'prize' as const, item: 'Pick movie night' }] }
+    const closed = { canStartNow: false, canEdit: false, canEditSchedule: false, canEditStartDate: false, editableFromDay: null }
+    const days = (memberId: string, missed: number) => ({ memberId, score: 6, target: 7, currentDayIndex: null, currentEntryId: null, attemptsRemaining: 0,
+      days: Array.from({ length: 7 }, (_, dayIndex) => ({ dayIndex, date: `2030-03-${String(4 + dayIndex).padStart(2, '0')}`, status: dayIndex === missed ? 'missed' as const : 'posted' as const })) })
+    // Sam won 6 to 5 with Maya's March 5 and March 8 missing. The app lists a finished game's days only while they can be corrected.
+    const finished = (maya: number) => ({ id: 'game_done', status: 'settled' as const, lengthDays: 7, startsOn: '2030-03-04', terms, players, pendingChange: null, changeControls: closed,
+      ...(scenario.listsDays ? { progress: { checkedAt: occurredAt, players: [{ ...days('player_maya', 1), score: maya }, days('player_sam', 5)] } } : {}),
+      result: { scores: [{ memberId: 'player_maya', seat: 0, score: maya, misses: 7 - maya }, { memberId: 'player_sam', seat: 1, score: 6, misses: 1 }],
+        tickets: maya === 6 ? [] : [{ owedByMemberId: 'player_maya', owedToMemberId: 'player_sam', what: 'Pick movie night', status: 'open' as const, count: 1 }] } })
+    const rematch = { id: 'game_live', status: 'live' as const, lengthDays: 7, startsOn: '2030-03-12', terms,
+      players: players.map(player => ({ ...player, dayOne: '2030-03-12' })), pendingChange: null,
+      changeControls: { canStartNow: false, canEdit: true, canEditSchedule: true, canEditStartDate: false, canEditTasks: false, canEditStakes: true, editableFromDay: 2 },
+      progress: { checkedAt: occurredAt, players: ['player_maya', 'player_sam'].map(memberId => ({ memberId, score: 1, target: 7, currentDayIndex: 1, currentEntryId: null, attemptsRemaining: 2,
+        days: [{ dayIndex: 0, date: '2030-03-12', status: 'posted' as const }, { dayIndex: 1, date: '2030-03-13', status: 'due' as const }] })) } }
+    const plank = { ...rematch, id: 'game_plank', lengthDays: 14, startsOn: '2030-03-04', players, terms: { ...terms, tasks: [{ seat: 0, text: 'Plank for a minute' }, { seat: 1, text: 'Plank for a minute' }] },
+      progress: { checkedAt: occurredAt, players: ['player_maya', 'player_sam'].map(memberId => ({ memberId, score: 8, target: 14, currentDayIndex: 9, currentEntryId: null, attemptsRemaining: 2,
+        days: Array.from({ length: 10 }, (_, dayIndex) => ({ dayIndex, date: `2030-03-${String(4 + dayIndex).padStart(2, '0')}`, status: dayIndex === 9 ? 'due' as const : dayIndex === 1 && memberId === 'player_maya' ? 'missed' as const : 'posted' as const })) })) } }
+    const games = (maya: number) => [...(scenario.rematch ? [rematch] : []), ...('overlapping' in scenario ? [plank] : []), finished(maya)]
+    const promptResult = buildAssistantAutoReplyPrompt([{
+      actorIsSelf: false, attachmentDescriptors: [],
+      attachmentEvidence: { attachments: [], optionalInboxCaptureId: null, reasonCode: null, source: 'manual', status: 'available', updatedAt: occurredAt },
+      conversation: { accountId: null, actorId: 'player_maya', actorIsSelf: false, source: 'linq', threadId: 'synthetic-game-chat', threadIsDirect: false },
+      inputId, occurredAt, receivedAt: occurredAt, projection: null, replyTarget: null, source: 'linq',
+      sourceMetadata: null, telegramMetadata: null, text: scenario.message,
+      linqSpeakerLabel: { displayName: 'Maya', source: 'profile-name' },
+    }], { timeZone: 'America/New_York' })
+    if (promptResult.kind !== 'ready') throw new Error('Expected a ready synthetic group prompt.')
+    try {
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined, codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({ assistantDynamicContextPrompts: [GAME_RESIDENT_GROUP_POINTER],
+          assistantCliContract: null, channel: 'linq',
+          cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group',
+          currentLocalDate: '2030-03-13', currentInstant: occurredAt, currentTimeZone: 'America/New_York',
+          hostedRuntime: true, onboardingGuidance: false, turnTrigger: null,
+        }),
+        dynamicTools: [MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL], env: config.env,
+        hostedToolContext: {
+          computerToolsAvailable: false, vaultFileSendAvailable: false,
+          groupTool: { request: async (request) => {
+            calls.push(request)
+            if (request.action === 'read_game') return { action: 'read_game', result: { status: 'ok', state: { games: games(5) } } }
+            if (request.action !== 'update_game') throw new Error('No other game action is authorized for this journey.')
+            expect(request.origin.assistantInputId).toBe(inputId)
+            // The app decides: a game past its seven days refuses with the plain reason, whatever Murph tried.
+            if (outcome === 'final') return { action: 'update_game', result: { status: 'rejected', error: 'GAME_NOT_LIVE: This game ended more than 7 days ago, so its result is final.' } }
+            const { text, ...update } = request.update as typeof request.update & { text?: string }
+            expect(update).toEqual({ operation: 'mark_complete', gameId: 'game_done', date: '2030-03-05' })
+            expect(text?.replace(/[.!]$/u, '')).toBe('Finished chapter nine on the train')
+            return { action: 'update_game', result: { status: 'ok', state: { games: games(6) }, dayOutcome: { date: '2030-03-05', status: 'credited' as const },
+              ...(outcome === 'changed' ? { chatLine: corrected } : {}) } }
+          } },
+          currentUserActionScope: () => ({ conversationId: 'synthetic-game-chat', inboundMailboxItemIds: [], recipientKey: 'synthetic-game-recipient', acceptedInputIds: [inputId], originSessionId: 'synthetic-game-session', conversationScope: 'group' }),
+          currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [], sendVaultFile: async () => { throw new Error('No file send authorized.') },
+        },
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: promptResult.prompt,
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const reply = result.finalMessage ?? ''
+      const writes = calls.filter(call => call.action === 'update_game')
+      process.stdout.write(`[game-finished] ${JSON.stringify({ scenario: scenario.name, outcome, reply, actions: calls.map((call) => call.action) })}\n`)
+      expect(calls[0]?.action).toBe('read_game')
+      expect(reply).not.toMatch(/game_done|game_live|game_plank|dayIndex|\u2014/u)
+      if (outcome === 'ask') {
+        // Two games fit the date, so Murph asks once which one, by task, and changes nothing.
+        expect(writes).toHaveLength(0)
+        expect(reply.match(/\?/gu)).toHaveLength(1)
+        expect(reply).toMatch(/read|chapter/iu)
+        expect(reply).toMatch(/plank/iu)
+        expect(reply).not.toMatch(/now counts|is counted|counted it/iu)
+      } else if (outcome === 'final') {
+        // Nothing is counted and nobody is told it was: the result stands, in plain words.
+        expect(writes.length).toBeLessThanOrEqual(1)
+        expect(reply).toMatch(/final|7 days|seven days|ended|can[’']?t|cannot|no longer/iu)
+        expect(reply).not.toMatch(/now counts|is counted|counted it|I(?:[’']ve| have) counted/iu)
+      } else {
+        expect(writes).toHaveLength(1)
+        expect(calls.length).toBeLessThanOrEqual(3)
+        expect(reply.trim().split('\n')).toHaveLength(1)
+        // The changed result is the app's exact line. An unchanged one gets the usual one-line confirmation, with no result talk.
+        if (outcome === 'changed') expect(reply.trim()).toBe(corrected)
+        else {
+          expect(reply).toMatch(/March 5|Mar(?:ch)?\.? 5|5 March|Tuesday/iu)
+          expect(reply).toMatch(/count|posted|done|complete/iu)
+          expect(reply).not.toMatch(/tie|won|wins|score|6|result|Sam|\?/iu)
+        }
+      }
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+})
+
 describeRealCodex('Bluetooth wearable help', () => {
   it.each([
     {
@@ -49541,8 +50123,9 @@ describeRealCodex('Bluetooth wearable help', () => {
       expect(reply).toMatch(expected)
       expect(reply).not.toMatch(/(?:I|we)(?:[’']ve| have)? (?:can see|checked|detected|reset|connected|fixed|opened a ticket|notified|emailed)|your Bluetooth is (?:off|disabled)|your (?:band|WHOOP) is (?:uncharged|connected to another)/iu)
       expect(reply).not.toMatch(/(?:enable|turn on) (?:the )?(?:Heart Rate Broadcast|HR Broadcast)|Settings\s*>\s*Devices|factory reset|reinstall|sign out|https?:/iu)
+      expect(reply).not.toMatch(/invite.only|allowlist/iu)
       if (scenario.startsWith('app handoff')) expect(reply).toContain('?')
-      // The game is invite only: Murph names it only after the member does.
+      // Keep Bluetooth help focused on the screen the member has named.
       if (!/\bgames?\b/iu.test(prompt)) expect(reply).not.toMatch(/\bgames?\b/iu)
       if (scenario.startsWith('older band')) expect(reply).not.toMatch(/try again|restart|toggle|open Settings/iu)
       if (scenario.startsWith('exhausted')) expect(reply).not.toMatch(/tap.*Forget|I(?:[’']ve| have) (?:sent|saved|recorded|escalated)|will (?:contact|reply|get back)/iu)
@@ -49559,17 +50142,19 @@ describeRealCodex('real Codex game chat setup', () => {
     const { MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL } = await import('../src/assistant-codex/dynamic-tools/games.js')
     const { MURPH_POLL_TOOL } = await import('../src/assistant-codex/dynamic-tools/conversation-polls.js')
     const { hostedGameToolResponseSchema } = await import('@murphai/hosted-execution/runtime-control')
+    const { buildAssistantAutoReplyReactionTurnContext } = await import('../src/assistant/automation/reply.js')
     const inputId = 'ain_' + 'a'.repeat(32)
     const origin = { kind: 'accepted_input' as const, assistantInputId: inputId }
     const calls: import('@murphai/hosted-execution/runtime-control').HostedRuntimeGroupToolRequest[] = []
     const polls: import('@murphai/hosted-execution/conversation-polls').ConversationPollRequest[] = []
     type SharedGame = import('@murphai/hosted-execution/runtime-control').HostedGameChatState['games'][number]
     const game: SharedGame = {
+      ...(scenario.groupGame ? { maxPlayers: 10 as const } : {}),
       id: 'game_existing', status: scenario.state === 'waiting' ? 'negotiating' : scenario.state === 'settled' ? 'settled' : scenario.state === 'invited' ? 'invited' : 'live',
       lengthDays: 7, startsOn: scenario.change?.kind === 'start_now' ? '2030-03-07' : null,
-      terms: { schedule: SETUP_TERMS.schedule, stakes: SETUP_TERMS.stakes, n: 1, fromDay: 0, tasks: SETUP_TERMS.tasks.map((task, seat) => ({ seat, text: task.text })) },
+      terms: { ...(scenario.groupGame ? { defaultTask: 'Walk twenty minutes' } : {}), schedule: SETUP_TERMS.schedule, stakes: SETUP_TERMS.stakes, n: 1, fromDay: 0, tasks: SETUP_TERMS.tasks.map((task, seat) => ({ seat, text: task.text })) },
       players: SETUP_PLAYERS.slice(0, scenario.state === 'invited' ? 1 : 2).map((player, seat) => ({ ...player, seat, dayOne: ['waiting', 'invited'].includes(scenario.state ?? '') ? null : scenario.change?.kind === 'start_now' ? '2030-03-07' : '2030-03-04' })),
-      pendingChange: scenario.pendingCallOff ? { id: 'proposal_call_off', proposedByMemberId: 'player_ava', expectedTermsVersion: 1, change: { kind: 'call_off' }, effectiveFromDay: 2, origin: 'chat', deliveryStatus: 'conversation', startsOn: null } : null, changeControls: { canStartNow: scenario.state !== 'invited' && scenario.change?.kind === 'start_now', canEdit: scenario.state !== 'invited', canEditSchedule: scenario.state !== 'invited', canEditStartDate: scenario.state !== 'invited', canEditTasks: scenario.state === 'waiting', canEditStakes: scenario.state === 'waiting', editableFromDay: 0 },
+      pendingChange: scenario.pendingChange ?? (scenario.pendingCallOff ? { id: 'proposal_call_off', proposedByMemberId: 'player_ava', expectedTermsVersion: 1, change: { kind: 'call_off' }, effectiveFromDay: 2, origin: 'chat', deliveryStatus: 'conversation', startsOn: null } : null), changeControls: { canStartNow: scenario.state !== 'invited' && scenario.change?.kind === 'start_now', canEdit: scenario.state !== 'invited', canEditSchedule: scenario.state !== 'invited', canEditStartDate: scenario.state !== 'invited', canEditTasks: scenario.state === 'waiting', canEditStakes: scenario.state === 'waiting', editableFromDay: 0 },
     }
     const existingGames: SharedGame[] = scenario.state ? [game] : []
     if (scenario.otherLiveGame) existingGames.push({ ...game, id: 'game_other_existing', terms: { ...game.terms, tasks: [{ seat: 0, text: 'Stretch' }, { seat: 1, text: 'Drink water' }] } })
@@ -49579,7 +50164,7 @@ describeRealCodex('real Codex game chat setup', () => {
         allowFinishWithoutReply: true, groupConversation: true, approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
         codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
         codexHome: config.codexHome, env: config.env, model: config.model, modelProvider: config.modelProvider,
-        developerInstructions: buildAssistantSystemPrompt({ assistantDynamicContextPrompts: [GAME_RESIDENT_GROUP_POINTER],
+        developerInstructions: buildAssistantSystemPrompt({ assistantDynamicContextPrompts: [GAME_RESIDENT_GROUP_POINTER, ...(scenario.reactionTarget ? [buildAssistantAutoReplyReactionTurnContext(scenario.reactionTarget)!] : [])],
           assistantCliContract: null, assistantPollsAvailable: true, assistantHostedGroupToolSurface: 'families',
           channel: 'linq', cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group',
           currentLocalDate: '2030-03-06', currentInstant: '2030-03-06T12:00:00.000Z', currentTimeZone: 'UTC',
@@ -49591,11 +50176,14 @@ describeRealCodex('real Codex game chat setup', () => {
           groupTool: { request: async request => {
             calls.push(request)
             if (request.action !== 'read_game' && request.action !== 'update_game') throw new Error('Unexpected game effect')
+            const referencedSpeaker = request.origin.kind === 'accepted_input' && request.origin.assistantInputId === scenario.earlierMessage?.ref ? scenario.earlierMessage.speaker : scenario.speaker ?? 'Ava'
             if (scenario.unavailable) return { action: request.action, result: { status: 'unavailable', error: 'Games are one-on-one. Use a chat with just the two players and Murph, or the app.' } }
             if (request.action === 'update_game') {
               if (scenario.error) return { action: request.action, result: { status: 'rejected', error: scenario.error } }
               const update = request.update
-              if (update.operation === 'approve' && !update.proposalId && scenario.speaker !== 'Sam') return { action: request.action, result: { status: 'rejected', error: 'NOT_A_PLAYER: That is your own invite.' } }
+              if (scenario.rejectedChange && calls.filter(c => c.action === 'update_game').length === 1) return { action: request.action, result: { status: 'rejected', error: 'INVALID_REQUEST: Tasks lock once Day 1 begins.' } }
+              if (scenario.actionMessageRef) expect(request.origin).toEqual({ kind: 'accepted_input', assistantInputId: scenario.actionMessageRef })
+              if (update.operation === 'approve' && !update.proposalId && referencedSpeaker !== 'Sam') return { action: request.action, result: { status: 'rejected', error: 'NOT_A_PLAYER: That is your own invite.' } }
               if (update.operation === 'create' && update.terms.startsOn && update.terms.startsOn > '2030-05-05') return { action: request.action, result: { status: 'rejected', error: 'INVALID_REQUEST: Pick a start from tomorrow through 60 days out.' } }
               if (update.operation === 'create') {
                 if (scenario.poll === 'read') expect(polls.map(p => p.request.action)).toEqual(['read'])
@@ -49606,10 +50194,11 @@ describeRealCodex('real Codex game chat setup', () => {
                   players: players.map((p, seat) => ({ ...p, seat, dayOne: null })), pendingChange: null }]
               } else if (update.operation === 'approve') games = [scenario.pendingCallOff ? { ...game, status: 'void', pendingChange: null } : { ...game, status: 'live', players: SETUP_PLAYERS.map((p, seat) => ({ ...p, seat, dayOne: '2030-03-06' })), pendingChange: null }]
               else if (update.operation === 'cancel_game') games = [{ ...game, status: 'void', pendingChange: null }]
-              else if (update.operation === 'propose') games = [{ ...game, status: game.status === 'invited' ? 'negotiating' : game.status, players: SETUP_PLAYERS.map((p, seat) => ({ ...p, seat, dayOne: null })), pendingChange: { id: update.proposalId, proposedByMemberId: scenario.speaker === 'Sam' ? 'player_sam' : 'player_ava', expectedTermsVersion: 1, change: update.change, effectiveFromDay: 0, origin: 'chat', deliveryStatus: 'conversation', startsOn: null } }]
+              else if (update.operation === 'cancel' || update.operation === 'decline') games = [{ ...game, pendingChange: null }]
+              else if (update.operation === 'propose' || update.operation === 'edit_terms') games = [{ ...game, status: game.status === 'invited' ? 'negotiating' : game.status, players: SETUP_PLAYERS.map((p, seat) => ({ ...p, seat, dayOne: null })), pendingChange: { id: update.proposalId!, proposedByMemberId: scenario.speaker === 'Sam' ? 'player_sam' : 'player_ava', expectedTermsVersion: 1, change: update.operation === 'edit_terms' ? { kind: 'edit', schedule: update.terms.schedule, stakes: update.terms.stakes } : update.change, effectiveFromDay: 0, origin: 'chat', deliveryStatus: 'conversation', startsOn: null } }]
               else throw new Error('Unexpected game operation')
             }
-            return hostedGameToolResponseSchema.parse({ action: request.action, result: { status: 'ok', state: { games, ...(request.action === 'read_game' ? { players: SETUP_PLAYERS.map(p => ({ ...p, firstName: scenario.error?.startsWith('PROFILE_REQUIRED') && p.firstName === 'Sam' ? null : p.firstName, isSender: p.firstName === (scenario.speaker ?? 'Ava') })) } : {}) } } })
+            return hostedGameToolResponseSchema.parse({ action: request.action, result: { status: 'ok', state: { games, ...(request.action === 'read_game' ? { players: SETUP_PLAYERS.map(p => ({ ...p, firstName: scenario.error?.startsWith('PROFILE_REQUIRED') && p.firstName === 'Sam' ? null : p.firstName, isSender: p.firstName === referencedSpeaker })) } : {}) } } })
           } },
           pollTool: { request: async request => {
             polls.push(request)
@@ -49625,7 +50214,7 @@ describeRealCodex('real Codex game chat setup', () => {
           currentInvocationScope: () => ({ origin: { ...origin, sessionId: 'synthetic-session' }, conversationScope: 'group' }),
           currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [], sendVaultFile: async () => { throw new Error('No file send authorized') },
         },
-        prompt: `Group participants: Ava (ava@example.test), Sam (sam@example.test)${scenario.unavailable ? ', Lee (player_lee)' : ''}, and Murph.\n${scenario.history ?? ''}\nCurrent accepted message from ${scenario.speaker ?? 'Ava'} (Message ref: ${inputId}, Occurred at: 2030-03-06T12:00:00.000Z): ${scenario.message}`,
+        prompt: `Group participants: Ava (ava@example.test), Sam (sam@example.test)${scenario.unavailable ? ', Lee (player_lee)' : ''}, and Murph.\n${scenario.earlierMessage ? `Earlier message from ${scenario.earlierMessage.speaker} (Message ref: ${scenario.earlierMessage.ref}, Occurred at: ${scenario.earlierMessage.occurredAt}): ${scenario.earlierMessage.text}\n` : ''}${scenario.history ?? ''}\nCurrent accepted message from ${scenario.speaker ?? 'Ava'} (Message ref: ${inputId}, Occurred at: 2030-03-06T12:00:00.000Z): ${scenario.message}`,
         reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
       })
       const reply = result.finalMessage.trim()
@@ -49633,11 +50222,16 @@ describeRealCodex('real Codex game chat setup', () => {
       const rawCalls = readCapabilityRoutingActions(result.jsonEvents).filter(action => action.kind === 'dynamic' && ['read_game', 'update_game', 'poll'].includes(action.tool))
       expect(rawCalls).toHaveLength(calls.length + polls.length)
       const writes = calls.filter(c => c.action === 'update_game')
-      expect(writes).toHaveLength(scenario.create || scenario.operation ? 1 : 0)
+      expect(writes).toHaveLength(scenario.replacePending || scenario.rejectedChange ? 2 : scenario.create || scenario.operation ? 1 : 0)
+      if (scenario.replacePending) expect(writes[0]?.update).toEqual({ operation: scenario.replacePending, gameId: game.id, proposalId: scenario.pendingChange!.id })
+      if (scenario.rejectedChange) expect(writes[0]?.update).toMatchObject({ operation: 'propose', gameId: game.id, change: scenario.rejectedChange })
+      if (scenario.reactionTarget && scenario.operation) expect(reply.length).toBeLessThan(200)
       expect(calls.filter(c => c.action === 'read_game').length).toBeLessThanOrEqual(1)
       for (const call of calls) {
-        expect(call).toMatchObject({ origin })
-        if (call.action === 'read_game') expect(call).toEqual({ action: 'read_game', origin, includePlayers: true })
+        const expectedOrigin = call.action === 'update_game' && scenario.actionMessageRef ? { kind: 'accepted_input', assistantInputId: scenario.actionMessageRef } : origin
+        if (call.action === 'read_game' && scenario.earlierMessage) expect([inputId, scenario.earlierMessage.ref]).toContain(call.origin.kind === 'accepted_input' ? call.origin.assistantInputId : null)
+        else expect(call).toMatchObject({ origin: expectedOrigin })
+        if (call.action === 'read_game') expect(call).toMatchObject({ action: 'read_game', includePlayers: true })
       }
       expect(calls.filter(c => c.action !== 'read_game' && c.action !== 'update_game')).toHaveLength(0)
       if (scenario.create && !scenario.error) {
@@ -49652,7 +50246,8 @@ describeRealCodex('real Codex game chat setup', () => {
       }
       if (writes.length) {
         expect(calls.filter(c => c.action !== 'read_current')[0]?.action).toBe('read_game')
-        const update = writes[0]!.update
+        const update = writes.at(-1)!.update
+        if (scenario.replacePending && 'proposalId' in update) expect(update.proposalId).not.toBe(scenario.pendingChange!.id)
         if (scenario.create) {
           expect(update.operation).toBe('create')
           if (update.operation !== 'create') throw new Error('Expected create')
@@ -49667,9 +50262,10 @@ describeRealCodex('real Codex game chat setup', () => {
           })
           expect(normalize(update.terms)).toEqual(normalize(scenario.create))
           expect(update.previousGameId).toBe(scenario.previousGameId)
-        } else if (scenario.operation === 'approve') expect(update).toEqual(scenario.pendingCallOff ? { operation: 'approve', gameId: game.id, proposalId: 'proposal_call_off' } : { operation: 'approve', gameId: game.id, expectedTermsVersion: 1 })
+        } else if (scenario.operation === 'approve') expect(update).toEqual(scenario.pendingChange ? { operation: 'approve', gameId: game.id, proposalId: scenario.pendingChange.id } : scenario.pendingCallOff ? { operation: 'approve', gameId: game.id, proposalId: 'proposal_call_off' } : { operation: 'approve', gameId: game.id, expectedTermsVersion: 1 })
         else if (scenario.operation === 'cancel_game') expect(update).toEqual({ operation: 'cancel_game', gameId: game.id })
-        else expect(update).toEqual({ operation: 'propose', gameId: game.id, proposalId: expect.stringMatching(/^[A-Za-z0-9_-]{8,64}$/u), expectedTermsVersion: 1, change: scenario.change })
+        else if (scenario.editTerms) expect(update).toEqual({ operation: 'edit_terms', gameId: game.id, proposalId: expect.stringMatching(/^[A-Za-z0-9_-]{8,64}$/u), expectedTermsVersion: 1, terms: scenario.editTerms })
+        else expect(update).toEqual({ operation: scenario.operation ?? 'propose', gameId: game.id, proposalId: expect.stringMatching(/^[A-Za-z0-9_-]{8,64}$/u), expectedTermsVersion: 1, change: scenario.change })
       }
       expect(polls).toHaveLength(scenario.poll ? 1 : 0)
       if (scenario.poll === 'create') {
@@ -50216,7 +50812,7 @@ function hostingGame(extra: Partial<HostingGame> = {}): HostingGame {
     pendingChange: null, changeControls: { canStartNow: false, canEdit: true, canEditSchedule: true, canEditStartDate: true, canEditTasks: true, canEditStakes: true, editableFromDay: 0 }, ...extra }
 }
 
-async function runHostingTurn(input: { name: string; prompt: string; state: HostingState; actor?: number; update?: (update: HostingUpdate) => void }) {
+async function runHostingTurn(input: { name: string; prompt: string; state: HostingState; actor?: number; update?: (update: HostingUpdate) => void | string }) {
   const config = await resolveRealCodexE2eConfig()
   const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-hosting-proof-'))
   const { MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL } = await import('../src/assistant-codex/dynamic-tools/games.js')
@@ -50228,7 +50824,8 @@ async function runHostingTurn(input: { name: string; prompt: string; state: Host
     calls.push(request)
     if (request.action === 'update_game') {
       if (!input.update) throw new Error('No game mutation authorized')
-      input.update(request.update)
+      const refusal = input.update(request.update)
+      if (refusal) return hostedGameToolResponseSchema.parse({ action: 'update_game', result: { status: 'rejected', error: refusal } })
       if (request.update.operation === 'set_reminder') return hostedGameToolResponseSchema.parse({ action: 'update_game', result: { status: 'ok', reaches: 'push' } })
     }
     else if (request.action !== 'read_game') throw new Error('No other game effect authorized')
@@ -50236,7 +50833,7 @@ async function runHostingTurn(input: { name: string; prompt: string; state: Host
   } }
   try {
     await initializeVault({ timezone: 'UTC', vaultRoot: workingDirectory })
-    const prompt = `${input.prompt}\nCurrent accepted speaker: ${input.actor === 1 ? 'Sam' : 'Alex'}. Message ref: ${hostingInputId}. Occurred at: 2030-03-06T12:00:00Z.`
+    const prompt = `${input.prompt}\nCurrent accepted speaker: ${input.state.games[0]?.players[input.actor ?? 0]?.firstName ?? 'Ava'}. Message ref: ${hostingInputId}. Occurred at: 2030-03-06T12:00:00Z.`
     const result = await executeRealCodexAppServerTurn({
       allowFinishWithoutReply: true, groupConversation: true, approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
       codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
@@ -50497,6 +51094,48 @@ describeRealCodex('real Codex isolated notification thread continuity', () => {
 })
 
 describeRealCodex('private game reminder reply', () => {
+  it('private game Not for me preserves existing exclusions and leaves surfing available', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-game-not-for-me-e2e-'))
+    const { MURPH_MY_GAME_NOT_FOR_ME_TOOL } = await import('../src/assistant-codex/dynamic-tools/games.js')
+    const { hostedGameToolResponseSchema } = await import('@murphai/hosted-execution/runtime-control')
+    const inputId = 'ain_' + 'e'.repeat(32)
+    const calls: import('@murphai/hosted-execution/runtime-control').HostedGameToolRequest[] = []
+    let activities = ['lifting']
+    try {
+      await initializeVault({ timezone: 'UTC', vaultRoot: workingDirectory })
+      const result = await executeRealCodexAppServerTurn({
+        allowFinishWithoutReply: false, approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, env: config.env, model: config.model, modelProvider: config.modelProvider,
+        developerInstructions: buildDirectConversationDeveloperInstructions(false, '', [], '2030-03-06T12:00:00.000Z'),
+        dynamicTools: [MURPH_MY_GAME_NOT_FOR_ME_TOOL],
+        hostedToolContext: { computerToolsAvailable: false, vaultFileSendAvailable: false,
+          currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+          sendVaultFile: async () => { throw new Error('No media') },
+          currentUserActionScope: () => ({ conversationId: 'synthetic-direct', inboundMailboxItemIds: [],
+            recipientKey: 'synthetic-member', acceptedInputIds: [inputId], originSessionId: 'synthetic-session', conversationScope: 'direct' }),
+          myGameRemindersTool: { request: async request => {
+            if (request.action !== 'my_game_not_for_me') throw new Error('Unexpected game request')
+            calls.push(request)
+            if (request.operation === 'set') activities = request.activities!
+            return hostedGameToolResponseSchema.parse({ action: request.action, result: { status: 'ok', activities } })
+          } },
+        },
+        prompt: 'Add swimming, yoga and dance to Not for me in my games. Keep anything already there. Surfing and beach days are still fine.',
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const reply = result.finalMessage.trim()
+      process.stdout.write(`[not-for-me-reply] ${JSON.stringify({ reply, activities })}\n`)
+      expect(calls.map(call => call.action === 'my_game_not_for_me' ? call.operation : call.action)).toEqual(['read', 'set'])
+      expect(activities).toEqual(['swimming', 'yoga', 'dance', 'lifting'])
+      expect(reply).toMatch(/swim/iu)
+      expect(reply).toMatch(/yoga/iu)
+      expect(reply).toMatch(/danc/iu)
+      expect(reply).not.toMatch(/cannot|unable|failed|game_|my_game|API/iu)
+    } finally { await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths]) }
+  }, 360_000)
+
   it('private game reply saves an evening reminder through the direct tool', async () => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-game-direct-e2e-'))
@@ -50544,6 +51183,98 @@ describeRealCodex('private game reminder reply', () => {
       expect(reply).toMatch(/evening|daily|every day|game days/iu)
       expect(reply).toMatch(/if|when|on days|haven.t posted|unfinished/iu)
       expect(reply).not.toMatch(/push notification|cannot|won't|automation|game_/iu)
+    } finally { await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths]) }
+  }, 360_000)
+
+  it('private game reminder question answers the time, weekdays and delivery for weekday games in group chats', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-game-direct-read-e2e-'))
+    const { MURPH_MY_GAME_REMINDERS_TOOL, GAME_PRIVATE_REMINDER_DIRECT_GUIDANCE } = await import('../src/assistant-codex/dynamic-tools/games.js')
+    const { hostedGameToolResponseSchema } = await import('@murphai/hosted-execution/runtime-control')
+    const inputId = 'ain_' + 'f'.repeat(32)
+    const calls: import('@murphai/hosted-execution/runtime-control').HostedGameToolRequest[] = []
+    // One noon time for both games; both play Monday to Friday in their own group chats, so the reminder is the app's push.
+    const reminders = { minutes: 720, push: true, text: true, canText: true, games: [
+      { id: 'game_synthetic_pullups', task: '20 pullups', schedule: { days: [0, 1, 2, 3, 4] }, today: 'upcoming' as const, otherFirstNames: ['Sam'], on: true, everyDay: false },
+      { id: 'game_synthetic_pushups', task: '50 pushups', schedule: { days: [0, 1, 2, 3, 4] }, today: 'posted' as const, otherFirstNames: ['Ava'], on: true, everyDay: true },
+    ] }
+    try {
+      await initializeVault({ timezone: 'UTC', vaultRoot: workingDirectory })
+      const result = await executeRealCodexAppServerTurn({
+        allowFinishWithoutReply: false, approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, env: config.env, model: config.model, modelProvider: config.modelProvider,
+        developerInstructions: [buildDirectConversationDeveloperInstructions(false,
+          'Previous Murph message in this direct conversation: Done. 9pm your time for your pushups with Ava, on days you haven\'t posted.',
+          [], '2030-03-06T12:00:00.000Z'), GAME_PRIVATE_REMINDER_DIRECT_GUIDANCE].join('\n\n'),
+        dynamicTools: [MURPH_MY_GAME_REMINDERS_TOOL],
+        hostedToolContext: { computerToolsAvailable: false, vaultFileSendAvailable: false,
+          currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+          sendVaultFile: async () => { throw new Error('No media') },
+          currentUserActionScope: () => ({ conversationId: 'synthetic-direct', inboundMailboxItemIds: [],
+            recipientKey: 'synthetic-member', acceptedInputIds: [inputId], originSessionId: 'synthetic-session', conversationScope: 'direct' }),
+          myGameRemindersTool: { request: async request => {
+            if (request.action !== 'my_game_reminders') throw new Error('Unexpected game request')
+            calls.push(request)
+            return hostedGameToolResponseSchema.parse({ action: 'my_game_reminders', result: { status: 'ok', reminders, reaches: 'push' } })
+          } },
+        },
+        prompt: 'What time do my reminders for pullups with Sam go out, and where do I get them?', reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const reply = result.finalMessage.trim()
+      process.stdout.write(`[private-game-reminder-read] ${JSON.stringify({ reply, calls: calls.map(call => call.action === 'my_game_reminders' ? call.operation : call.action) })}\n`)
+      expect(calls.map(call => call.action === 'my_game_reminders' ? call.operation : call.action)).toEqual(['read'])
+      expect(reply).toMatch(/noon|12/iu)
+      expect(reply).toMatch(/weekday|mon/iu)
+      expect(reply).toMatch(/notification|app/iu)
+      expect(reply).not.toMatch(/^yes|every (?:scheduled )?evening|not every|game_/iu)
+    } finally { await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths]) }
+  }, 360_000)
+
+  it('private game reminder moves one game to its own time and leaves the other', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-game-direct-own-time-e2e-'))
+    const { MURPH_MY_GAME_REMINDERS_TOOL, GAME_PRIVATE_REMINDER_DIRECT_GUIDANCE } = await import('../src/assistant-codex/dynamic-tools/games.js')
+    const { hostedGameToolResponseSchema } = await import('@murphai/hosted-execution/runtime-control')
+    const inputId = 'ain_' + 'e'.repeat(32)
+    const calls: import('@murphai/hosted-execution/runtime-control').HostedGameToolRequest[] = []
+    let reminders = { minutes: 720, push: true, text: false, canText: false, games: [
+      { id: 'game_synthetic_pullups', task: '20 pullups', schedule: { days: [0, 1, 2, 3, 4] }, today: 'open' as const, otherFirstNames: ['Sam'], on: true, everyDay: false, minutes: 720 },
+      { id: 'game_synthetic_pushups', task: '50 pushups', schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, today: 'open' as const, otherFirstNames: ['Ava'], on: true, everyDay: false, minutes: 720 },
+    ] }
+    try {
+      await initializeVault({ timezone: 'UTC', vaultRoot: workingDirectory })
+      const result = await executeRealCodexAppServerTurn({
+        allowFinishWithoutReply: false, approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, env: config.env, model: config.model, modelProvider: config.modelProvider,
+        developerInstructions: [buildDirectConversationDeveloperInstructions(false, null, [], '2030-03-06T12:00:00.000Z'), GAME_PRIVATE_REMINDER_DIRECT_GUIDANCE].join('\n\n'),
+        dynamicTools: [MURPH_MY_GAME_REMINDERS_TOOL],
+        hostedToolContext: { computerToolsAvailable: false, vaultFileSendAvailable: false,
+          currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+          sendVaultFile: async () => { throw new Error('No media') },
+          currentUserActionScope: () => ({ conversationId: 'synthetic-direct', inboundMailboxItemIds: [],
+            recipientKey: 'synthetic-member', acceptedInputIds: [inputId], originSessionId: 'synthetic-session', conversationScope: 'direct' }),
+          myGameRemindersTool: { request: async request => {
+            if (request.action !== 'my_game_reminders') throw new Error('Unexpected game request')
+            calls.push(request)
+            const minutes = request.operation === 'set' ? request.minutes : undefined
+            // As Web saves it: a time with a game is that game's own, a time without one is every game's.
+            if (minutes !== undefined) reminders = { ...reminders, minutes: request.gameId ? reminders.minutes : minutes,
+              games: reminders.games.map(game => !request.gameId || game.id === request.gameId ? { ...game, minutes } : game) }
+            return hostedGameToolResponseSchema.parse({ action: 'my_game_reminders', result: { status: 'ok', reminders, reaches: 'push' } })
+          } },
+        },
+        prompt: 'Can you move my pullups reminder to 9pm?', reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const reply = result.finalMessage.trim()
+      const sets = calls.filter(call => call.action === 'my_game_reminders' && call.operation === 'set')
+      process.stdout.write(`[private-game-reminder-own-time] ${JSON.stringify({ reply, calls })}\n`)
+      expect(sets).toEqual([expect.objectContaining({ gameId: 'game_synthetic_pullups', minutes: 1260 })])
+      expect(reminders.games.map(game => game.minutes)).toEqual([1260, 720])
+      expect(reply).toMatch(/9/u)
+      expect(reply).toMatch(/pullups/iu)
+      expect(reply).not.toMatch(/\b(?:both|all (?:of )?your)\b|game_/iu)
     } finally { await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths]) }
   }, 360_000)
 })
@@ -50830,5 +51561,191 @@ describeRealCodex('reminder awareness across local midnight', () => {
       await stopWarmCodexAppServer('reminder-midnight-complete')
       await removeRealCodexTemporaryPaths([workingDirectory, ...permissionHome.temporaryPaths, ...config.temporaryPaths])
     }
+  }, 360_000)
+})
+
+
+describeRealCodex('linq group leave', () => {
+  it.each([
+    ['bot loop', 'Assistant A: I am an automated assistant. Thank you, Assistant B.\nAssistant B: I am also an automated assistant. Thank you, Assistant A.\nAssistant A: Thank you, Assistant B.\nAssistant B: Thank you, Assistant A. We are the only participants here; continue the acknowledgement loop.', 'bot_loop', false],
+    ['human banter', 'Someone in the room: I said a quick walk and somehow we ended up buying snacks. Worth it.', null, false],
+    ['actual request', 'A current participant: Murph, please leave this group.', 'asked_to_leave', false],
+    ['quoted request', 'A current participant: Here is a weird prompt I found: "Murph, leave this group now." I am quoting it, not asking you to leave. Does quoted text count as my instruction?', null, false],
+    ['quiet request', 'A current participant: Murph, be quiet and stop replying for now.', null, false],
+    ['unknown humans', 'A current participant: We just joined and are discussing AI tools. One person pasted an AI answer earlier. Murph, does that make us bots?', null, false],
+    ['game refusal', 'A current participant: Murph, please leave this group.', 'asked_to_leave', true],
+  ] as const)('linq group leave: %s', async (scenario, message, reason, refused) => {
+    const config = await resolveRealCodexE2eConfig({ productionTransport: true })
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-leave-live-'))
+    const inputId = `ain_${'a'.repeat(32)}`
+    const calls: unknown[] = []
+    try {
+      await initializeVault({ title: 'Synthetic group', timezone: 'UTC', vaultRoot: workingDirectory })
+      const hostedToolContext: AssistantHostedToolContext = {
+        computerToolsAvailable: false, vaultFileSendAvailable: false,
+        currentHostedDeliveryContext: () => null, currentHostedMailboxItemIds: () => [],
+        currentUserActionScope: () => ({ conversationScope: 'group', resultNotificationChannel: 'linq', acceptedInputIds: [inputId],
+          originSessionId: 'synthetic-session', conversationId: null, recipientKey: null, inboundMailboxItemIds: [] }),
+        groupTool: { request: async request => {
+          calls.push(request)
+          if (request.action !== 'leave_group') throw new Error('Unexpected external action')
+          return { action: 'leave_group', result: refused ? { status: 'unavailable', reason: 'game_bound' } : { status: 'left' } }
+        } },
+        sendVaultFile: async () => { throw new Error('No private delivery is available') },
+      }
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome, model: config.model, modelProvider: config.modelProvider,
+        env: config.env, workingDirectory, vaultRoot: workingDirectory, sandbox: 'workspace-write',
+        groupConversation: true, allowFinishWithoutReply: true, hostedToolContext,
+        developerInstructions: buildAssistantSystemPrompt({ assistantCliContract: null, assistantHostedDeviceConnectProviders: [],
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group',
+          currentLocalDate: '2026-11-12', currentTimeZone: 'UTC', hostedRuntime: true, onboardingGuidance: false,
+          ordinaryInboundTurn: true, turnTrigger: 'automation-auto-reply' }),
+        dynamicTools: resolveMurphDynamicTools({ leaveGroupAvailable: true, allowFinishWithoutReply: true, imageGenerationAvailable: false }),
+        prompt: `Current group message (Message ref: ${inputId}):\n${message}`, reasoningEffort: 'low',
+      })
+      process.stdout.write('[linq-group-leave-journey] ' + JSON.stringify({ scenario, calls: calls.length, reply: result.finalMessage }) + '\n')
+      expect(calls).toEqual(reason ? [{ action: 'leave_group', reason, origin: { kind: 'accepted_input', assistantInputId: inputId } }] : [])
+      expect(result.responseMedia ?? []).toEqual([])
+      if (reason && !refused || scenario === 'quiet request') {
+        expect(result.finalMessage).toBe('')
+        expect(result.finalAction).toEqual({ kind: 'none' })
+      } else if (refused) {
+        expect(result.finalMessage).toMatch(/game/iu)
+        expect(result.finalMessage).not.toMatch(/(?:have|has) left|removed|goodbye/iu)
+      } else {
+        expect(result.finalMessage).not.toMatch(/(?:have|has) left|leaving (?:this|the) group|goodbye/iu)
+      }
+    } finally { await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths]) }
+  }, 300_000)
+})
+
+
+describeRealCodex('both-win settled reader', () => {
+  it('both-win settled read says both earned the prize without a debt', async () => {
+    const game = hostingGame({ maxPlayers: undefined, pendingInviteeCount: undefined, status: 'settled',
+      players: ['Ava', 'Leo'].map((firstName, seat) => ({ memberId: `player_${seat}`, firstName, seat, dayOne: '2030-03-01', timeZone: 'UTC' })),
+      result: { scores: [0, 1].map(seat => ({ seat, memberId: `player_${seat}`, score: 7, misses: 0 })),
+        tickets: [0, 1].map(seat => ({ owedToMemberId: `player_${seat}`, owedByMemberId: `player_${1 - seat}`,
+          what: 'Dinner out together', count: 1, status: 'open' })) } });
+    game.terms.stakes.push({ kind: 'both_get', item: 'Dinner out together' });
+    const result = await runHostingTurn({ name: 'both-win settled read', state: { games: [game] },
+      prompt: 'Ava and Leo finished their game. Ava asks Murph: What did we win?' });
+    expect(result.calls.map(call => call.action)).toEqual(['read_game']);
+    expect(result.saves).toHaveLength(0);
+    expect(result.reply).toMatch(/both/iu); expect(result.reply).toMatch(/dinner/iu);
+    expect(result.reply).toMatch(/earn|get|won|win/iu);
+    expect(result.reply).not.toMatch(/owe|debt|ticket|stake|wager|bet|—/iu);
+  }, 360_000);
+});
+
+
+describeRealCodex('both-win player agreement', () => {
+  it('both-win agree proposes only the named shared prize and approves the other player yes', async () => {
+    const game = hostingGame({ id: 'both_win_agreement', maxPlayers: undefined, pendingInviteeCount: undefined, startsOn: '2030-03-01',
+      players: ['Ava', 'Leo'].map((firstName, seat) => ({ memberId: `player_${seat}`, firstName, seat, dayOne: '2030-03-01', timeZone: 'UTC' })) })
+    const state = { games: [game] }
+    const asked = await runHostingTurn({ name: 'both-win agree ask', state, prompt: 'Ava: Murph, add dinner out together as a prize we both get if we both do every day.',
+      update: update => {
+        expect(update).toMatchObject({ operation: 'propose', gameId: game.id, expectedTermsVersion: 1,
+          change: { kind: 'edit', stakes: [{ kind: 'both_get', item: expect.stringMatching(/dinner/iu) }] } })
+        if (update.operation !== 'propose') throw new Error('Expected a proposal')
+        expect(update.change).toEqual({ kind: 'edit', stakes: [{ kind: 'both_get', item: expect.any(String) }] })
+        game.pendingChange = { id: 'both_win_ask', proposedByMemberId: 'player_0', expectedTermsVersion: 1,
+          origin: 'chat', deliveryStatus: 'conversation', startsOn: null, effectiveFromDay: 6, change: update.change }
+      } })
+    expect(asked.calls.map(call => call.action)).toEqual(['read_game', 'update_game'])
+    expect(asked.reply).toMatch(/Leo/u); expect(asked.reply).toMatch(/\?/u)
+    expect(asked.saves).toHaveLength(0)
+    const approved = await runHostingTurn({ name: 'both-win agree yes', actor: 1, state,
+      prompt: `Murph just said: ${asked.reply}\nLeo: Yes, Murph.`, update: update => {
+        expect(update).toMatchObject({ operation: 'approve', gameId: game.id, proposalId: 'both_win_ask' })
+        game.pendingChange = null; game.terms.n = 2
+        game.terms.stakes.push({ kind: 'both_get', item: 'Dinner out together' })
+      } })
+    expect(approved.calls.map(call => call.action)).toEqual(['read_game', 'update_game'])
+    expect(approved.reply).not.toMatch(/\?|\bstake\b|owe/iu); expect(approved.saves).toHaveLength(0)
+  }, 360_000)
+
+  it('both-win bare yes asks what the prize should be without proposing one', async () => {
+    const game = hostingGame({ id: 'both_win_bare_yes', maxPlayers: undefined, pendingInviteeCount: undefined, startsOn: '2030-03-01',
+      players: ['Ava', 'Leo'].map((firstName, seat) => ({ memberId: `player_${seat}`, firstName, seat, dayOne: '2030-03-01', timeZone: 'UTC' })) })
+    const result = await runHostingTurn({ name: 'both-win bare yes', state: { games: [game] },
+      prompt: 'Murph offered Ava and Leo a prize they both get if they both finish every day, and said one names it and the other says yes. Nobody has named a prize. Ava: Sure, Murph.' })
+    expect(result.calls.map(call => call.action)).toEqual(['read_game']); expect(result.saves).toHaveLength(0)
+    expect(result.reply.match(/\?/gu)).toHaveLength(1)
+    expect(result.reply).toMatch(/prize|what.*(?:like|want|should|choose)/iu)
+    expect(result.reply).not.toMatch(/added|dinner|\bstake\b/iu)
+  }, 360_000)
+
+  it('both-win after-miss refusal says it cannot be earned once and does not retry', async () => {
+    const game = hostingGame({ id: 'both_win_refusal', maxPlayers: undefined, pendingInviteeCount: undefined, startsOn: '2030-03-01',
+      players: ['Ava', 'Leo'].map((firstName, seat) => ({ memberId: `player_${seat}`, firstName, seat, dayOne: '2030-03-01', timeZone: 'UTC' })) })
+    const result = await runHostingTurn({ name: 'both-win after-miss refusal', state: { games: [game] },
+      prompt: 'Ava: Murph, add dinner out together as a prize we both get for doing every day.', update: update => {
+        expect(update).toMatchObject({ operation: 'propose', change: { kind: 'edit', stakes: [{ kind: 'both_get', item: expect.any(String) }] } })
+        return 'A day has been missed, so a prize you both get can no longer be earned in this game.'
+      } })
+    expect(result.calls.map(call => call.action)).toEqual(['read_game', 'update_game']); expect(result.saves).toHaveLength(0)
+    expect(result.reply).toMatch(/missed/iu); expect(result.reply).toMatch(/no longer|can.t|cannot|can no longer/iu)
+    expect(result.reply).not.toMatch(/\?|\bstake\b|try again|(?<!no longer be )added/iu)
+  }, 360_000)
+})
+
+
+describeRealCodex('both-win host offer', () => {
+  async function offer(name: string, fixture: { currentPrize: string; earlierPrizes: string[]; transcript: Array<{ playerName: string; text: string }> }): Promise<string> {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-both-win-offer-'))
+    const permissionHome = await materializeRealCodexHostedPermissionHome(config)
+    const { buildGameBothWinOfferInstructions } = await import('@murphai/hosted-execution/runtime-control')
+    try {
+      await initializeVault({ timezone: 'UTC', vaultRoot: workingDirectory })
+      const modelTarget = createAssistantModelTarget({ approvalPolicy: 'never', codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND),
+        codexHome: permissionHome.codexHome, model: config.model, modelProvider: config.modelProvider, provider: 'codex-cli', reasoningEffort: 'low', sandbox: 'workspace-write' })
+      if (!modelTarget) throw new Error('Expected real Codex target.')
+      const events: unknown[] = []
+      const result = await sendAssistantNotificationLocal({ actorId: null, bindingDeliveryTarget: 'both-win-room', channel: 'linq',
+        deliveryDispatchMode: 'queue-only', deliveryTarget: 'both-win-room', deliveryIdempotencyKey: 'game-both-win:synthetic', deliveryDedupeToken: 'game-both-win:synthetic',
+        responsePolicy: { kind: 'require_send' }, executionContext: { hosted: { defaultTarget: modelTarget, memberId: 'both-win-room', userEnvKeys: [] } },
+        identityId: null, instructions: buildGameBothWinOfferInstructions({ players: [{ firstName: 'Ava', task: 'Read a chapter' }, { firstName: 'Leo', task: 'Walk outside' }], dayReached: 5, lengthDays: 7, ...fixture }),
+        threadId: 'both-win-room', threadIsDirect: false, onTraceEvent: event => events.push(event.rawEvent),
+        turnEnvironment: { currentWorkingDirectory: workingDirectory, env: config.env }, turnTrigger: 'manual-deliver', vault: workingDirectory, workingDirectory })
+      const reply = result.response ?? ''
+      process.stdout.write(`[both-win offer ${name}] ${reply}\n`)
+      expect(readCapabilityRoutingActions(events)).toEqual([])
+      expect(result.decision.kind).toBe('send_message'); expect(result.deliveryOutcome?.kind).toBe('queued')
+      expect(await listAssistantOutboxIntents(workingDirectory)).toHaveLength(1)
+      expect(reply).toMatch(/Ava/u); expect(reply).toMatch(/Leo/u); expect(reply).toMatch(/prize/iu)
+      expect(reply).toMatch(/every day|each day/iu); expect(reply).toMatch(/both/iu)
+      expect(reply).toMatch(/yes|agree/iu)
+      expect((reply.match(/\?/gu) ?? []).length).toBeLessThanOrEqual(1)
+      expect(reply).not.toMatch(/—|\s-\s|\b(?:score|scores|stake|bet|wager|winnings|ticket|dare|miss|missed|reminder|reminders)\b|I.ve (?:added|chosen)|your prize is/iu)
+      expect(reply).not.toMatch(/\$|\b(?:cash|money|beer|wine|drinks?|cocktails?)\b/iu)
+      expect(reply.length).toBeLessThan(700)
+      return reply
+    } finally { await removeRealCodexTemporaryPaths([workingDirectory, ...permissionHome.temporaryPaths, ...config.temporaryPaths]) }
+  }
+
+  it('both-win offer draws its one example from the room and the pair\'s prizes', async () => {
+    const reply = await offer('rich', { currentPrize: 'Breakfast in bed', earlierPrizes: ['Pick the next movie', 'A coffee run'], transcript: [
+      { playerName: 'Leo', text: 'walked to the ramen place and back, counts double' },
+      { playerName: 'Ava', text: 'you only walk when noodles are involved' },
+      { playerName: 'Ava', text: 'chapter 12 done. we are still doing the lake trail on Saturday right' },
+      { playerName: 'Leo', text: 'yes if you stop reading on the trail' },
+      { playerName: 'Ava', text: 'the noodle tax is real' },
+      { playerName: 'Leo', text: 'finished my walk in the rain. I deserve soup' },
+    ] })
+    expect(reply).toMatch(/ramen|noodle|soup|lake|trail|movie|coffee/iu)
+    expect(reply).not.toMatch(/breakfast in bed/iu)
+  }, 360_000)
+
+  it('both-win offer falls back to a small plain example when the room gives nothing', async () => {
+    const reply = await offer('thin', { currentPrize: 'Bragging rights', earlierPrizes: [], transcript: [
+      { playerName: 'Leo', text: 'done' }, { playerName: 'Ava', text: 'done' },
+    ] })
+    expect(reply).not.toMatch(/bragging/iu)
   }, 360_000)
 })

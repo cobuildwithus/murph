@@ -1,3 +1,6 @@
+import { parseInput, RequestInputError } from "@murphai/hosted-execution/request-input";
+import { parseHostedRuntimeSnapshotCommand, parseHostedRuntimeReplicaPutCommand } from "@murphai/hosted-execution/runtime-resources";
+import { createJsonErrorResponse } from "@/src/lib/http";
 import { runWithPrismaOperationTimings, type PrismaOperationTiming } from "@/src/lib/prisma-operation-timing";
 import { reconcileHostedRuntimeUploads } from "@/src/lib/hosted-execution/runtime-upload-recovery";
 const uploadRecovery = vi.hoisted(() => ({ purge: vi.fn(), ensure: vi.fn() }));
@@ -99,6 +102,97 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     if (result.status === "blocked") throw new Error(`Unexpected admission rejection: ${result.reason}`);
     return result;
   }
+
+  it.each([false, true])("charges a first claim with no prior debt (idle row: %s)", async idleRow => {
+    const userId = await member();
+    if (idleRow) await observer.hostedRuntimeOwner.create({ data: { userId } });
+    const now = new Date("2030-01-01T12:00:00Z");
+    const result = await claimHostedRuntime({ prisma: first, userId, processingMode: "default", now });
+    expect(result).toMatchObject({ status: "claimed", owner: {
+      startDebtUntil: new Date("2030-01-01T12:03:00Z"), generation: 1n,
+    } });
+  });
+
+  it("admits twelve fresh attempts, blocks without writes, and refills exactly at retryAt", async () => {
+    const userId = await member();
+    const now = new Date("2030-01-01T12:00:00Z");
+    for (let attempt = 1; attempt <= 12; attempt += 1) {
+      const result = await claimHostedRuntime({ prisma: first, userId, processingMode: "default", now });
+      expect(result.status).toBe("claimed");
+      if (result.status === "blocked") throw new Error("Unexpected budget rejection");
+      expect(result.owner.generation).toBe(BigInt(attempt));
+      const runtime = identity(result.owner);
+      expect(await retireHostedRuntime({ prisma: first, identity: runtime })).toBe(true);
+      expect(await releaseHostedRuntimeAfterRetirement({ prisma: first, identity: runtime, runnerContainerName: null })).toBe(true);
+    }
+    const before = await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } });
+    expect(before.startDebtUntil).toEqual(new Date("2030-01-01T12:36:00Z"));
+    for (const processingMode of ["default", "system_mailbox", "inbox_media_retention"] as const) {
+      expect(await claimHostedRuntime({ prisma: second, userId, processingMode, now })).toEqual({
+        cutover: "postgres", status: "blocked", reason: "start_budget", retryAt: "2030-01-01T12:03:00.000Z",
+      });
+    }
+    expect(await claimHostedRuntime({ prisma: first, userId, processingMode: "default",
+      now: new Date("2030-01-01T12:02:59.999Z") })).toMatchObject({ status: "blocked" });
+    expect(await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).toEqual(before);
+    expect(await claimHostedRuntime({ prisma: first, userId, processingMode: "default",
+      now: new Date("2030-01-01T12:03:00Z") })).toMatchObject({ status: "claimed", owner: {
+      generation: 13n, startDebtUntil: new Date("2030-01-01T12:39:00Z"),
+    } });
+  });
+
+  it("lets concurrent callers share one newly charged attempt at the budget boundary", async () => {
+    const userId = await member();
+    const now = new Date("2030-01-01T12:00:00Z");
+    await observer.hostedRuntimeOwner.create({ data: { userId, startDebtUntil: new Date("2030-01-01T12:33:00Z") } });
+    const results = await Promise.all([first, second].map(prisma =>
+      claimHostedRuntime({ prisma, userId, processingMode: "default", now })));
+    expect(results.map(result => result.status).sort()).toEqual(["claimed", "existing"]);
+    expect(await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).toMatchObject({
+      generation: 1n, startDebtUntil: new Date("2030-01-01T12:36:00Z"),
+    });
+  });
+
+  it.each([
+    ["starting", "default"], ["active", "default"], ["retiring", "default"], ["starting", "system_mailbox"],
+  ] as const)("does not charge an existing %s / %s owner with exhausted debt", async (phase, processingMode) => {
+    // An active owner needs its launched target; the other phases are set directly.
+    const userId = phase === "active" ? (await launchedRuntime()).userId : await member();
+    if (phase !== "active") await claim(userId);
+    const startDebtUntil = new Date("2030-01-01T12:36:00Z");
+    await observer.hostedRuntimeOwner.update({ where: { userId },
+      data: phase === "active" ? { startDebtUntil } : { phase, processingMode, startDebtUntil } });
+    expect(await claimHostedRuntime({ prisma: first, userId, processingMode: "default",
+      now: new Date("2030-01-01T12:00:00Z") })).toMatchObject({ status: "existing", owner: { startDebtUntil } });
+    expect((await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).startDebtUntil).toEqual(startDebtUntil);
+  });
+
+  it.each(["cold", "warm", "target_retired"])("preserves exhausted debt through %s release and account deletion", async path => {
+    const { userId, runtime, target, send } = await launchedRuntime();
+    const startDebtUntil = new Date(Date.now() + 36 * 60_000);
+    await observer.hostedRuntimeOwner.update({ where: { userId }, data: { startDebtUntil } });
+    if (path === "target_retired") {
+      expect(await send({ operation: "target_retired", runnerContainerName: target })).toMatchObject({ status: "updated" });
+    } else {
+      expect(await send({ operation: "retire", ...runtime, completed: path === "warm" })).toMatchObject({ status: "updated" });
+      expect((await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).startDebtUntil).toEqual(startDebtUntil);
+      expect(await send({ operation: path === "warm" ? "release_completed" : "release", ...runtime,
+        runnerContainerName: target })).toMatchObject({ status: "updated" });
+    }
+    const before = await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } });
+    expect(before).toMatchObject({ phase: "idle", startDebtUntil });
+    expect(await send({ operation: "claim", processingMode: "default" })).toEqual({
+      cutover: "postgres", status: "blocked", owner: null, blockedReason: "start_budget",
+      retryAt: new Date(startDebtUntil.getTime() - 33 * 60_000).toISOString(),
+    });
+    expect(await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).toEqual(before);
+    if (path === "warm") {
+      expect(await send({ operation: "target_retired", runnerContainerName: target })).toMatchObject({ status: "updated" });
+    }
+    await observer.hostedMember.delete({ where: { id: userId } });
+    expect(await isHostedRuntimeDeletionReady({ prisma: first, userId })).toBe(true);
+    expect((await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).startDebtUntil).toEqual(startDebtUntil);
+  });
 
   async function launchedRuntime() {
     const userId = await member();
@@ -251,7 +345,6 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
 
   it("freezes shared game funding for one invocation and recomputes only after release", async () => {
     vi.stubEnv("MURPH_GAME_ENABLED", "true");
-    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "");
     const now = new Date("2030-01-15T12:00:00Z");
     try {
       const { primary, duplicate, firstPlayer, game } = await gameFundingRooms(now);
@@ -313,7 +406,6 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
     { frozenSpent: 0n, sourceSpent: 0n, sourceDenied: true, allowed: false },
   ])("checks frozen funding before first launch ($frozenSpent / $sourceSpent / $sourceDenied)", async scenario => {
     vi.stubEnv("MURPH_GAME_ENABLED", "true");
-    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "");
     const now = new Date();
     try {
       const { primary, duplicate, firstPlayer, game } = await gameFundingRooms(now);
@@ -829,10 +921,18 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
       .toMatchObject({ status: "updated" });
     const idle = await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } });
     expect(idle).toMatchObject({ phase: "idle", runnerContainerName: target, allocationId: owner.allocationId });
+    expect(await send({ operation: "complete", ...runtime, settledRunnerContainerName: null, immediateRecheckRequested: false }))
+      .toMatchObject({ status: "stale", owner: {
+        generation: runtime.generation, attemptId: null, phase: "idle", completedAt: expect.any(String),
+      } });
     expect(await send({ operation: "retire", ...runtime, completed: false })).toMatchObject({ status: "stale" });
     expect(await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).toEqual(idle);
     const successor = (await claim(userId, second)).owner;
     expect(successor).toMatchObject({ generation: owner.generation + 1n, runnerContainerName: target, allocationId: owner.allocationId });
+    expect(await send({ operation: "complete", ...runtime, settledRunnerContainerName: null, immediateRecheckRequested: false }))
+      .toMatchObject({ status: "stale", owner: {
+        generation: successor.generation.toString(), attemptId: successor.attemptId, phase: "starting", completedAt: null,
+      } });
     expect(await send({ operation: "retire", ...runtime, completed: false })).toMatchObject({ status: "stale" });
     expect(await send({ operation: "release", ...runtime, runnerContainerName: target })).toMatchObject({ status: "stale" });
     expect(await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).toEqual(successor);
@@ -1070,6 +1170,111 @@ describe.skipIf(!enabled)("Postgres runtime ownership", () => {
       ...command, settledRunnerContainerName: null,
     } })).toMatchObject({ status: "stale" });
     expect(await observer.hostedRuntimeOwner.findUniqueOrThrow({ where: { userId } })).toEqual(successor);
+  });
+
+  it.each(["snapshot_create", "snapshot_record_replaced"] as const)("rejects a replaced snapshot outside the caller namespace on %s", async operation => {
+    const userId = await member();
+    const runtime = identity((await claim(userId)).owner);
+    const session = await snapshotSession(runtime);
+    const objectKey = `users/zzzz/workspace-snapshots/${session.snapshotId}.snapshot.enc`;
+    const ref = { schema: HOSTED_WORKSPACE_SNAPSHOT_REF_SCHEMA, userId, snapshotId: session.snapshotId,
+      objectKey, createdAt: session.createdAt, upload: "direct-r2-presigned-put" as const,
+      encryption: { ...session.encryption, aad: { ...session.encryption.aad, objectKey }, ivBase64: Buffer.alloc(12).toString("base64url") },
+      archive: { compression: "zstd" as const, format: "tar" as const, encryptedByteSize: 128,
+        encryptedObjectSha256: "a".repeat(64), plaintextArchiveSha256: "b".repeat(64), fileCount: 2, totalPlainBytes: 256 } };
+    if (operation === "snapshot_record_replaced") await executeHostedRuntimeSnapshotCommand({ prisma: first, userId, command: { operation: "snapshot_create", session } });
+    const before = await observer.hostedRuntimeSnapshotUpload.findUnique({ where: { userId } });
+    const command = operation === "snapshot_create" ? { operation, session: { ...session, replacedSnapshotRef: ref } }
+      : { operation, expectedSession: session, replacedSnapshotRef: ref };
+    const error = await executeHostedRuntimeSnapshotCommand({ prisma: first, userId, command }).catch(error => error);
+    const response = createJsonErrorResponse(error, { internalMessage: "Snapshot failed.", logMessage: "Snapshot failed." });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: { code: "INVALID_REQUEST", message: "Invalid request." } });
+    expect(await observer.hostedRuntimeSnapshotUpload.findUnique({ where: { userId } })).toEqual(before);
+  });
+
+  it.each(["snapshot_create", "snapshot_admit_put"] as const)("rejects malformed snapshot ids on %s", async operation => {
+    const userId = await member();
+    const runtime = identity((await claim(userId)).owner);
+    const session = await snapshotSession(runtime);
+    session.snapshotId = "bad:id";
+    session.encryption.aad.snapshotId = "bad:id";
+    const command = operation === "snapshot_create" ? { operation, session } : { operation, expectedSession: session, expiresAt: session.expiresAt, drainUntil: session.expiresAt };
+    const error = await Promise.resolve().then(() => executeHostedRuntimeSnapshotCommand({ prisma: first, userId, command: parseInput(command, parseHostedRuntimeSnapshotCommand) })).catch(error => error);
+    expect(error).toBeInstanceOf(RequestInputError);
+    const response = createJsonErrorResponse(error, { internalMessage: "Snapshot failed.", logMessage: "Snapshot failed." });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: { code: "INVALID_REQUEST", message: "Invalid request." } });
+    expect(await observer.hostedRuntimeSnapshotUpload.findUnique({ where: { userId } })).toBeNull();
+  });
+
+  it.each(["admit", "admit_batch"] as const)("rejects replica keys without a root suffix on %s", async operation => {
+    const userId = await member();
+    const runtime = identity((await claim(userId)).owner);
+    const objectKey = `${await hostedBrowserVaultReplicaUserPrefix({ userId })}replica`;
+    const upload = { objectKey, writeId: "synthetic-write", uploadId: "synthetic-upload" };
+    const command = operation === "admit_batch" ? { operation, ...runtime, objectKey, uploads: [upload] }
+      : { operation, ...runtime, objectKey, writeId: upload.writeId, multipart: upload };
+    const error = await Promise.resolve().then(() => executeHostedRuntimeReplicaPutCommand({ prisma: first, userId, command: parseInput(command, parseHostedRuntimeReplicaPutCommand) })).catch(error => error);
+    expect(error).toBeInstanceOf(RequestInputError);
+    const response = createJsonErrorResponse(error, { internalMessage: "Replica failed.", logMessage: "Replica failed." });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: { code: "INVALID_REQUEST", message: "Invalid request." } });
+    expect(await observer.hostedRuntimePutDrain.count({ where: { userId } })).toBe(0);
+  });
+
+  it.each(["snapshot", "replica"])("keeps %s transaction failures as server errors", async kind => {
+    const userId = await member();
+    const runtime = identity((await claim(userId)).owner);
+    const session = await snapshotSession(runtime);
+    const objectKey = `${await hostedBrowserVaultReplicaUserPrefix({ userId })}replica.json`;
+    const failure = new TypeError("Synthetic database failure.");
+    const prisma = { $transaction: vi.fn(async () => { throw failure; }) } as never;
+    const error = await (kind === "snapshot"
+      ? executeHostedRuntimeSnapshotCommand({ prisma, userId, command: { operation: "snapshot_create", session } })
+      : executeHostedRuntimeReplicaPutCommand({ prisma, userId, command: { operation: "admit_batch", ...runtime, objectKey, uploads: [{ objectKey, writeId: "synthetic-write", uploadId: "synthetic-upload" }] } })).catch(error => error);
+    expect(error).toBe(failure);
+    expect(createJsonErrorResponse(error, { internalMessage: "Resource failed.", logMessage: "Resource failed." }).status).toBe(500);
+  });
+
+  it.each(["snapshot_create", "snapshot_record_replaced", "stored"] as const)("distinguishes %s replaced-snapshot identity from stored corruption", async (operation) => {
+    const userId = await member();
+    const runtime = identity((await claim(userId)).owner);
+    const session = await snapshotSession(runtime);
+    const foreign = await snapshotSession({ ...runtime, userId: "synthetic_other_member" });
+    const replacedSnapshotRef = {
+      schema: HOSTED_WORKSPACE_SNAPSHOT_REF_SCHEMA,
+      userId: foreign.userId, snapshotId: foreign.snapshotId, objectKey: foreign.objectKey,
+      createdAt: foreign.createdAt,
+      encryption: { ...foreign.encryption, aad: { ...foreign.encryption.aad }, ivBase64: Buffer.alloc(12).toString("base64url") },
+      upload: "direct-r2-presigned-put" as const,
+      archive: { compression: "zstd" as const, format: "tar" as const,
+        encryptedByteSize: 128, encryptedObjectSha256: "a".repeat(64),
+        plaintextArchiveSha256: "b".repeat(64), fileCount: 5, totalPlainBytes: 256 },
+    };
+    if (operation !== "snapshot_create") {
+      await executeHostedRuntimeSnapshotCommand({ prisma: first, userId,
+        command: { operation: "snapshot_create", session } });
+    }
+    if (operation === "stored") {
+      await observer.hostedRuntimeSnapshotUpload.update({ where: { userId }, data: { replacedSnapshotRef } });
+    }
+    const before = await observer.hostedRuntimeSnapshotUpload.findUnique({ where: { userId } });
+    const orphansBefore = await observer.hostedRuntimeOrphan.count({ where: { userId } });
+    const command = operation === "snapshot_create"
+      ? { operation, session: { ...session, replacedSnapshotRef } }
+      : operation === "snapshot_record_replaced"
+        ? { operation, expectedSession: session, replacedSnapshotRef }
+        : { operation: "snapshot_delete" as const, ...runtime, snapshotId: session.snapshotId };
+    const error = await Promise.resolve().then(() => executeHostedRuntimeSnapshotCommand({ prisma: first, userId, command: parseInput(command, parseHostedRuntimeSnapshotCommand) }))
+      .then(() => { throw new Error("Expected snapshot rejection."); }, error => error);
+    const response = createJsonErrorResponse(error, { internalMessage: "snapshot failed", logMessage: "snapshot failed" });
+    expect(response.status).toBe(operation === "stored" ? 500 : 400);
+    expect(await response.json()).toEqual({ error: operation === "stored"
+      ? { code: "INTERNAL_ERROR", message: "Internal error." }
+      : { code: "INVALID_REQUEST", message: "Invalid request." } });
+    expect(await observer.hostedRuntimeSnapshotUpload.findUnique({ where: { userId } })).toEqual(before);
+    expect(await observer.hostedRuntimeOrphan.count({ where: { userId } })).toBe(orphansBefore);
   });
 
   it("keeps an upload capability drain and orphan obligation after session and member deletion", async () => {

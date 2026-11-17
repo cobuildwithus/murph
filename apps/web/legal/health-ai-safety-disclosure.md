@@ -2,7 +2,7 @@
 
 **Effective Date:** April 29, 2026
 
-**Last Updated:** July 23, 2026
+**Last Updated:** November 12, 2026
 
 Murph is an artificial intelligence system. Messages, summaries, calls, recommendations, and other outputs or actions may be generated automatically and may not be reviewed by a human before they are shown, sent, or used in a workflow.
 
@@ -51,6 +51,8 @@ Murph may use model, search, parsing, transcription, embedding, retrieval, voice
 Murph does not use health data, consumer health data, HealthKit data, wearable data, journal content, health files, health memories, health prompts, assistant outputs based on health data, or derived health insights to train, fine-tune, or improve Murph's or any third party's general-purpose AI models.
 
 Murph does not route Murph-managed health data to third-party model providers unless the relevant contract, service setting, or deployment control prohibits model training on Murph health data.
+
+**Games.** Murph's AI hosts the games you play. It reads what players post in a game, including photos, and the game's group chat, to run the game and make its recap, and a recap can include pictures made by AI that show the players. The Privacy Policy names the providers and says what they receive.
 
 Some Connected Services do not permit their data to be supplied to or used in the operation of AI systems, or permit AI use only through a provider-controlled interface or separate written authorization. Connecting a source does not override those restrictions. Data from such a source may be unavailable to Murph's AI features, persistent memories, embeddings, retrieval, cross-source analysis, experiments, group features, or newsletters. Murph may disable or limit an integration when a permitted processing path is unavailable.
 

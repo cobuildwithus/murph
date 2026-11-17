@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createHash } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import { access, mkdtemp, readFile, rm } from "node:fs/promises";
@@ -544,14 +545,14 @@ function normalizeHostedReplayOptions(
 } {
   const size = input.replaySize ?? "smoke";
   if (size !== "smoke" && size !== "full") {
-    throw new TypeError("replaySize must be smoke or full.");
+    throw new ContractValidationError("replaySize must be smoke or full.");
   }
   if (
     size === "full"
     && input.maxRecordsPerProviderResource !== undefined
     && input.maxRecordsPerProviderResource !== null
   ) {
-    throw new TypeError("full replay cannot set maxRecordsPerProviderResource.");
+    throw new ContractValidationError("full replay cannot set maxRecordsPerProviderResource.");
   }
 
   const recordLimitPerProviderResource = normalizeHostedReplayRecordLimit(
@@ -576,7 +577,7 @@ function normalizeHostedReplayRecordLimit(
     return size === "full" ? null : DEFAULT_HOSTED_REPLAY_RECORD_LIMIT_PER_PROVIDER_RESOURCE;
   }
   if (!Number.isInteger(value) || value < 1) {
-    throw new TypeError("maxRecordsPerProviderResource must be a positive integer or null.");
+    throw new ContractValidationError("maxRecordsPerProviderResource must be a positive integer or null.");
   }
   return value;
 }
@@ -690,7 +691,7 @@ function readReplayArtifactRecords(artifact: FixtureArtifact): Record<string, un
   const root = readRecord(artifact.content);
   if (!root) {
     if (hasNonEmptyPrimitive(artifact.content)) {
-      throw new TypeError(
+      throw new ContractValidationError(
         `Hosted Junction replay artifact ${artifact.relativePath} must contain record objects.`,
       );
     }
@@ -703,7 +704,7 @@ function readReplayArtifactRecords(artifact: FixtureArtifact): Record<string, un
     }
     const value = root[key];
     if (!Array.isArray(value)) {
-      throw new TypeError(
+      throw new ContractValidationError(
         `Hosted Junction replay artifact ${artifact.relativePath} wrapper field ${key} must be an array.`,
       );
     }

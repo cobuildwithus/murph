@@ -1,3 +1,4 @@
+import { ContractValidationError } from '@murphai/contracts/validation-error'
 import {
   challengeStandingsResponseCardV1Schema,
   type ChallengeStandingsCoverage,
@@ -110,7 +111,7 @@ function readParticipantLabels(input: {
   scoreInput: GroupChallengeScoreInput
 }): ReadonlyMap<string, string> {
   if (input.labels.length !== input.scoreInput.participants.length) {
-    throw new TypeError('Expected one room-facing label per participant.')
+    throw new ContractValidationError('Expected one room-facing label per participant.')
   }
   const participantIds = new Set(
     input.scoreInput.participants.map((participant) => participant.participantId),
@@ -121,7 +122,7 @@ function readParticipantLabels(input: {
       !participantIds.has(entry.participantId)
       || labels.has(entry.participantId)
     ) {
-      throw new TypeError('Expected exactly one label for each scored participant.')
+      throw new ContractValidationError('Expected exactly one label for each scored participant.')
     }
     labels.set(entry.participantId, entry.label)
   }
@@ -143,7 +144,7 @@ function requireNoParticipantLabels(
   labels: readonly { label: string; participantId: string }[],
 ): void {
   if (labels.length > 0) {
-    throw new TypeError(
+    throw new ContractValidationError(
       'Participant labels are accepted only for individual challenge cards.',
     )
   }

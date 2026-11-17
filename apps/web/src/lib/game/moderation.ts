@@ -24,7 +24,7 @@ export const GAME_CONTENT_REJECTED = "This can't be posted.";
 
 /** Rejects the command when anything it shares fails the check. */
 export function moderateGameCommand(command: GameCommand): void {
-  if (gameCommandTexts(command).some(({ kind, text }) => isRefused(kind, text))) reject("CONTENT_NOT_ALLOWED", GAME_CONTENT_REJECTED);
+  if (gameCommandTexts(command).some(({ kind, text }) => isGameTextRefused(kind, text))) reject("CONTENT_NOT_ALLOWED", GAME_CONTENT_REJECTED);
 }
 
 /** What a command shares with the other player. Private labels and report notes aren't shared. */
@@ -101,7 +101,7 @@ const ABUSE = [
   /\b(?:porn\w*|blowjobs?|handjobs?|dildos?|masturbat\w*|orgasms?|cumshots?|send nudes|sex tape|jerk off)\b/u,
 ];
 
-function isRefused(kind: GameTextKind, text: string): boolean {
+export function isGameTextRefused(kind: GameTextKind, text: string): boolean {
   const words = text.normalize("NFKC").toLowerCase().replace(/[’‘]/gu, "'").replace(/\s+/gu, " ");
   const matches = (patterns: readonly RegExp[]) => patterns.some((pattern) => pattern.test(words));
   if (matches(ABUSE)) return true;

@@ -365,16 +365,32 @@ test('Junction body data composes from provider jobs through canonical vault rea
       vault: vaultRoot,
     })
     assert.equal(body.count, 1, JSON.stringify(body.items))
-    const bodyItem = requireRecord(body.items[0])
-    assert.equal(requireRecord(bodyItem.weightKg).value, 72.4)
-    assert.equal(requireRecord(bodyItem.bodyFatPercentage).value, 18.4)
-    assert.equal(requireRecord(bodyItem.bmi).value, 23.7)
-    assert.equal(requireRecord(bodyItem.leanBodyMassKg).value, 59.1)
-    assert.equal(requireRecord(bodyItem.waistCircumference).value, 83.9)
-    assert.equal(requireRecord(bodyItem.bodyWaterPercentage).value, 51.8)
-    assert.equal(requireRecord(bodyItem.boneMassPercentage).value, 4.2)
-    assert.equal(requireRecord(bodyItem.muscleMassPercentage).value, 63.4)
-    assert.equal(requireRecord(bodyItem.visceralFatIndex).value, 7)
+    // High-confidence values from the day's provider are bare numbers whose
+    // units come from the list-level legend.
+    assert.deepEqual(body.items[0], {
+      bmi: 23.7,
+      bodyFatPercentage: 18.4,
+      bodyWaterPercentage: 51.8,
+      boneMassPercentage: 4.2,
+      date: body.items[0]?.date,
+      leanBodyMassKg: 59.1,
+      muscleMassPercentage: 63.4,
+      provider: 'withings',
+      visceralFatIndex: 7,
+      waistCircumference: 83.9,
+      weightKg: 72.4,
+    })
+    assert.deepEqual(body.units, {
+      bmi: 'kg/m^2',
+      bodyFatPercentage: '%',
+      bodyWaterPercentage: '%',
+      boneMassPercentage: '%',
+      leanBodyMassKg: 'kg',
+      muscleMassPercentage: '%',
+      visceralFatIndex: 'index',
+      waistCircumference: 'cm',
+      weightKg: 'kg',
+    })
 
     const bmiLatest = await services.query.showWearableMetricLatest({
       metric: 'bmi',
@@ -417,18 +433,12 @@ test('Junction body data composes from provider jobs through canonical vault rea
     cli.use(incurErrorBridge)
     registerWearablesCommands(cli, services)
     const bodyCli = await runInProcessJsonCli<{
-      items: Array<Record<string, { value?: number | null }>>
+      items: Array<Record<string, unknown>>
+      units?: Record<string, string>
     }>(cli, ['wearables', 'body', 'list', '--vault', vaultRoot])
-    const bodyCliItem = requireData(bodyCli.envelope).items[0]
-    assert.equal(bodyCliItem?.weightKg?.value, 72.4)
-    assert.equal(bodyCliItem?.bodyFatPercentage?.value, 18.4)
-    assert.equal(bodyCliItem?.bmi?.value, 23.7)
-    assert.equal(bodyCliItem?.leanBodyMassKg?.value, 59.1)
-    assert.equal(bodyCliItem?.waistCircumference?.value, 83.9)
-    assert.equal(bodyCliItem?.bodyWaterPercentage?.value, 51.8)
-    assert.equal(bodyCliItem?.boneMassPercentage?.value, 4.2)
-    assert.equal(bodyCliItem?.muscleMassPercentage?.value, 63.4)
-    assert.equal(bodyCliItem?.visceralFatIndex?.value, 7)
+    const bodyCliData = requireData(bodyCli.envelope)
+    assert.deepEqual(bodyCliData.items[0], body.items[0])
+    assert.deepEqual(bodyCliData.units, body.units)
 
     const metricCli = await runInProcessJsonCli<{
       summary: { provider: string | null; unit: string | null; value: number | null } | null

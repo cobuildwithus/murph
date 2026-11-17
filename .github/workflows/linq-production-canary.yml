@@ -26,6 +26,9 @@ jobs:
     name: Exercise scheduled production iMessage journey
     runs-on: ubuntu-24.04
     environment: production
+    permissions:
+      contents: read
+      id-token: write
     # Reset (5m), three checkpoint observations (12m each), replies, and setup/checks.
     timeout-minutes: 55
     steps:
@@ -90,21 +93,14 @@ jobs:
       - name: Run production iMessage journey
         env:
           HOSTED_WEB_PRODUCTION_BASE_URL: ${{ vars.HOSTED_WEB_PRODUCTION_BASE_URL }}
-          MURPH_LINQ_PRODUCTION_CANARY_RESET_SECRET: ${{ secrets.MURPH_LINQ_PRODUCTION_CANARY_RESET_SECRET }}
           MURPH_LINQ_PRODUCTION_CANARY_TARGET_PHONE_NUMBER: ${{ secrets.MURPH_LINQ_PRODUCTION_CANARY_TARGET_PHONE_NUMBER }}
           SPECTRUM_PROJECT_ID: ${{ secrets.MURPH_LINQ_PRODUCTION_CANARY_SPECTRUM_PROJECT_ID }}
           SPECTRUM_PROJECT_SECRET: ${{ secrets.MURPH_LINQ_PRODUCTION_CANARY_SPECTRUM_PROJECT_SECRET }}
         run: pnpm --filter @murphai/hosted-web linq:production-canary
 
-      - name: Record completed journey for the exercised deployment
+      # The SHA names the deployment selected at launch. A normal promotion
+      # during the journey does not undo what the journey proved.
+      - name: Record completed journey for the launch deployment
         env:
           DEPLOYED_SHA: ${{ steps.current-production.outputs.deployed_sha }}
-          HOSTED_WEB_PRODUCTION_BASE_URL: ${{ vars.HOSTED_WEB_PRODUCTION_BASE_URL }}
-          HOSTED_WEB_VERCEL_PROJECT_ID: ${{ vars.HOSTED_WEB_VERCEL_PROJECT_ID }}
-          HOSTED_WEB_VERCEL_TEAM_ID: ${{ vars.HOSTED_WEB_VERCEL_TEAM_ID }}
-          HOSTED_WEB_VERCEL_TOKEN: ${{ secrets.HOSTED_WEB_VERCEL_TOKEN }}
-        run: |
-          set -euo pipefail
-          verified_sha="$(pnpm --dir apps/web exec tsx scripts/verify-current-vercel-production-deployment.ts)"
-          [[ "${verified_sha}" == "${DEPLOYED_SHA}" ]] || { echo "::error::Production changed during the journey."; exit 1; }
-          echo "::notice::linq-canary result=passed journey_executed=true deployed_sha=${verified_sha} completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        run: echo "::notice::linq-canary result=passed journey_executed=true deployed_sha=${DEPLOYED_SHA} completed_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"

@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { normalizeCliTiming } from "@murphai/runtime-state/cli-timing";
 import { createHash, createHmac, randomUUID } from "node:crypto";
 
@@ -140,7 +141,8 @@ export function buildAssistantTurnProfileToolIdentityLabel(input: {
 }): string {
   const genericLabel = input.kind;
   if (
-    input.tool === null
+    input.kind === "mcp_tool"
+    || input.tool === null
     || !isAssistantTurnProfileIdentifierComponent(input.tool)
   ) {
     return genericLabel;
@@ -1067,7 +1069,7 @@ export function resolveAssistantUsageCredentialSource(input: {
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be a JSON object.`);
+    throw new ContractValidationError(`${label} must be a JSON object.`);
   }
 
   return value as Record<string, unknown>;
@@ -1077,7 +1079,7 @@ function normalizeUsageSchema(value: unknown): typeof ASSISTANT_USAGE_SCHEMA {
   const schema = normalizeRequiredString(value, "schema");
 
   if (schema !== ASSISTANT_USAGE_SCHEMA) {
-    throw new TypeError(`assistant usage record schema must be ${ASSISTANT_USAGE_SCHEMA}.`);
+    throw new ContractValidationError(`assistant usage record schema must be ${ASSISTANT_USAGE_SCHEMA}.`);
   }
 
   return ASSISTANT_USAGE_SCHEMA;
@@ -1087,7 +1089,7 @@ function normalizeCredentialSource(value: unknown): AssistantUsageCredentialSour
   const normalized = normalizeRequiredString(value, "credentialSource");
 
   if (normalized !== "member" && normalized !== "platform" && normalized !== "unknown") {
-    throw new TypeError("credentialSource must be 'member', 'platform', or 'unknown'.");
+    throw new ContractValidationError("credentialSource must be 'member', 'platform', or 'unknown'.");
   }
 
   return normalized;
@@ -1111,7 +1113,7 @@ function normalizeProviderRequestOutcome(value: unknown): AssistantProviderReque
     return normalized;
   }
 
-  throw new TypeError(
+  throw new ContractValidationError(
     "providerRequestOutcome must be succeeded, failed, aborted, or partial.",
   );
 }
@@ -1133,7 +1135,7 @@ export function normalizeAssistantUsageTokenPricingBasis(
     return normalized;
   }
 
-  throw new TypeError(
+  throw new ContractValidationError(
     "tokenPricingBasis must be 'standard', 'openai-flex', or 'openai-priority' when provided.",
   );
 }
@@ -1142,7 +1144,7 @@ function normalizeRequiredString(value: unknown, label: string): string {
   const normalized = normalizeOptionalString(value, label);
 
   if (!normalized) {
-    throw new TypeError(`${label} must be a non-empty string.`);
+    throw new ContractValidationError(`${label} must be a non-empty string.`);
   }
 
   return normalized;
@@ -1154,7 +1156,7 @@ function normalizeOptionalString(value: unknown, label: string): string | null {
   }
 
   if (typeof value !== "string") {
-    throw new TypeError(`${label} must be a string when provided.`);
+    throw new ContractValidationError(`${label} must be a string when provided.`);
   }
 
   const normalized = value.trim();
@@ -1167,7 +1169,7 @@ function normalizeOptionalStringArray(value: unknown, label: string): string[] {
   }
 
   if (!Array.isArray(value)) {
-    throw new TypeError(`${label} must be an array of strings when provided.`);
+    throw new ContractValidationError(`${label} must be an array of strings when provided.`);
   }
 
   const seen = new Set<string>();
@@ -1187,42 +1189,15 @@ function normalizeOptionalStringArray(value: unknown, label: string): string[] {
   return normalizedValues;
 }
 
-function normalizeOptionalJsonRecord(
-  value: unknown,
-  label: string,
-): Record<string, unknown> | null {
-  if (value === null || value === undefined) {
-    return null;
-  }
-
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be a JSON object when provided.`);
-  }
-
-  const serialized = JSON.stringify(value);
-
-  if (serialized === undefined) {
-    throw new TypeError(`${label} must be JSON-serializable when provided.`);
-  }
-
-  const normalized: unknown = JSON.parse(serialized);
-
-  if (!normalized || typeof normalized !== "object" || Array.isArray(normalized)) {
-    throw new TypeError(`${label} must be a JSON object when provided.`);
-  }
-
-  return normalized as Record<string, unknown>;
-}
-
 function normalizeOptionalRawUsageJsonRecord(
   value: unknown,
   label: string,
 ): Record<string, unknown> | null {
-  const record = normalizeOptionalJsonRecord(value, label);
-
-  if (record === null) {
-    return null;
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new ContractValidationError(`${label} must be a JSON object when provided.`);
   }
+  const record = value;
 
   const normalized: Record<string, unknown> = {};
 
@@ -1234,7 +1209,7 @@ function normalizeOptionalRawUsageJsonRecord(
       ASSISTANT_USAGE_RAW_COST_KEYS.has(key)
     ) {
       if (!isNonNegativeInteger(entry)) {
-        throw new TypeError(`${label}.${key} must be a non-negative integer.`);
+        throw new ContractValidationError(`${label}.${key} must be a non-negative integer.`);
       }
       normalized[key] = entry;
       continue;
@@ -1243,16 +1218,16 @@ function normalizeOptionalRawUsageJsonRecord(
     const allowedDetailKeys = ASSISTANT_USAGE_RAW_DETAIL_TOKEN_KEYS.get(key);
     if (allowedDetailKeys) {
       if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
-        throw new TypeError(`${label}.${key} must be a token detail object.`);
+        throw new ContractValidationError(`${label}.${key} must be a token detail object.`);
       }
 
       const normalizedDetails: Record<string, number> = {};
       for (const [detailKey, detailEntry] of Object.entries(entry)) {
         if (!allowedDetailKeys.has(detailKey)) {
-          throw new TypeError(`${label}.${key}.${detailKey} is not allowed.`);
+          throw new ContractValidationError(`${label}.${key}.${detailKey} is not allowed.`);
         }
         if (!isNonNegativeInteger(detailEntry)) {
-          throw new TypeError(`${label}.${key}.${detailKey} must be a non-negative integer.`);
+          throw new ContractValidationError(`${label}.${key}.${detailKey} must be a non-negative integer.`);
         }
         normalizedDetails[detailKey] = detailEntry;
       }
@@ -1261,7 +1236,7 @@ function normalizeOptionalRawUsageJsonRecord(
       continue;
     }
 
-    throw new TypeError(`${label}.${key} is not allowed.`);
+    throw new ContractValidationError(`${label}.${key} is not allowed.`);
   }
 
   return Object.keys(normalized).length > 0 ? normalized : null;
@@ -1300,26 +1275,26 @@ function requireValidTurnProfileJson(
     record.schema !== ASSISTANT_TURN_PROFILE_SCHEMA_V1
     && record.schema !== ASSISTANT_TURN_PROFILE_SCHEMA
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label}.schema must be ${ASSISTANT_TURN_PROFILE_SCHEMA_V1} or ${ASSISTANT_TURN_PROFILE_SCHEMA}.`,
     );
   }
   if (!isNonNegativeInteger(record.requestCount)) {
-    throw new TypeError(`${label}.requestCount must be a non-negative integer.`);
+    throw new ContractValidationError(`${label}.requestCount must be a non-negative integer.`);
   }
   if (record.modelContextWindow !== null && !isNonNegativeInteger(record.modelContextWindow)) {
-    throw new TypeError(`${label}.modelContextWindow must be null or a non-negative integer.`);
+    throw new ContractValidationError(`${label}.modelContextWindow must be null or a non-negative integer.`);
   }
   if (typeof record.requestsTruncated !== "boolean" || typeof record.toolsTruncated !== "boolean") {
-    throw new TypeError(`${label} truncation flags must be booleans.`);
+    throw new ContractValidationError(`${label} truncation flags must be booleans.`);
   }
   if (!Array.isArray(record.requests) || record.requests.length > ASSISTANT_TURN_PROFILE_MAX_REQUESTS) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label}.requests must be an array of at most ${ASSISTANT_TURN_PROFILE_MAX_REQUESTS} entries.`,
     );
   }
   if (!Array.isArray(record.tools) || record.tools.length > ASSISTANT_TURN_PROFILE_MAX_TOOLS) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label}.tools must be an array of at most ${ASSISTANT_TURN_PROFILE_MAX_TOOLS} entries.`,
     );
   }
@@ -1338,7 +1313,7 @@ function requireValidTurnProfileJson(
       )
     )
   ) {
-    throw new TypeError(`${label} request count and truncation fields are inconsistent.`);
+    throw new ContractValidationError(`${label} request count and truncation fields are inconsistent.`);
   }
 
   const seenV2Tools = new Set<string>();
@@ -1352,7 +1327,7 @@ function requireValidTurnProfileJson(
         || tool.label.length > ASSISTANT_TURN_PROFILE_MAX_TOOL_LABEL_LENGTH
         || !ASSISTANT_TURN_PROFILE_TOOL_LABEL_PATTERN.test(tool.label)
       ) {
-        throw new TypeError(`${toolLabel}.label must be a short sanitized tool label.`);
+        throw new ContractValidationError(`${toolLabel}.label must be a short sanitized tool label.`);
       }
       return normalizeTurnProfileV1Tool(tool, toolLabel);
     }
@@ -1360,7 +1335,7 @@ function requireValidTurnProfileJson(
     const normalized = normalizeTurnProfileV2Tool(tool, toolLabel);
     const identity = JSON.stringify([normalized.kind, normalized.label]);
     if (seenV2Tools.has(identity)) {
-      throw new TypeError(`${toolLabel} duplicates an existing kind and label.`);
+      throw new ContractValidationError(`${toolLabel} duplicates an existing kind and label.`);
     }
     seenV2Tools.add(identity);
     return normalized;
@@ -1413,13 +1388,13 @@ function normalizeTurnProfileV2Tool(
     typeof tool.kind !== "string"
     || !ASSISTANT_TURN_PROFILE_TOOL_KINDS.has(tool.kind)
   ) {
-    throw new TypeError(`${label}.kind must be a supported tool kind.`);
+    throw new ContractValidationError(`${label}.kind must be a supported tool kind.`);
   }
   if (
     tool.kind === "command"
     && !isAssistantTurnProfileCommandFamily(tool.label)
   ) {
-    throw new TypeError(`${label}.label must be a supported command family.`);
+    throw new ContractValidationError(`${label}.label must be a supported command family.`);
   }
   if (
     (tool.kind === "dynamic_tool" || tool.kind === "mcp_tool")
@@ -1430,7 +1405,7 @@ function normalizeTurnProfileV2Tool(
       || !isAssistantTurnProfileToolIdentityLabel(tool.kind, tool.label)
     )
   ) {
-    throw new TypeError(`${label}.label must be a canonical tool identity label.`);
+    throw new ContractValidationError(`${label}.label must be a canonical tool identity label.`);
   }
   validateTurnProfileFailedCalls(tool, label, true);
   const normalized = normalizeTurnProfileIntegerRecord(tool, label, [
@@ -1442,16 +1417,16 @@ function normalizeTurnProfileV2Tool(
     "outputBytesTotal",
   ]);
   if (normalized.durationKnownCalls > normalized.calls) {
-    throw new TypeError(`${label}.durationKnownCalls must not exceed calls.`);
+    throw new ContractValidationError(`${label}.durationKnownCalls must not exceed calls.`);
   }
   if (normalized.calls < 1) {
-    throw new TypeError(`${label}.calls must be at least one.`);
+    throw new ContractValidationError(`${label}.calls must be at least one.`);
   }
   if (normalized.durationKnownCalls === 0 && normalized.durationMs !== 0) {
-    throw new TypeError(`${label}.durationMs must be zero when no durations are known.`);
+    throw new ContractValidationError(`${label}.durationMs must be zero when no durations are known.`);
   }
   if (normalized.outputBytesMax > normalized.outputBytesTotal) {
-    throw new TypeError(`${label}.outputBytesMax must not exceed outputBytesTotal.`);
+    throw new ContractValidationError(`${label}.outputBytesMax must not exceed outputBytesTotal.`);
   }
   if (
     normalized.outputBytesMax > 0
@@ -1459,11 +1434,11 @@ function normalizeTurnProfileV2Tool(
       Number.MAX_SAFE_INTEGER / normalized.outputBytesMax,
     )
   ) {
-    throw new TypeError(`${label} output byte capacity must be a safe integer.`);
+    throw new ContractValidationError(`${label} output byte capacity must be a safe integer.`);
   }
   const outputByteCapacity = normalized.calls * normalized.outputBytesMax;
   if (normalized.outputBytesTotal > outputByteCapacity) {
-    throw new TypeError(`${label}.outputBytesTotal exceeds calls times outputBytesMax.`);
+    throw new ContractValidationError(`${label}.outputBytesTotal exceeds calls times outputBytesMax.`);
   }
 
   return {
@@ -1481,7 +1456,7 @@ function normalizeTurnProfileKnowledgeCounts(
   label: string,
 ): AssistantTurnProfileKnowledgeCounts {
   if (tool.kind !== "command" || tool.label !== "vault-cli knowledge") {
-    throw new TypeError(`${label}.knowledgeCounts requires the knowledge command family.`);
+    throw new ContractValidationError(`${label}.knowledgeCounts requires the knowledge command family.`);
   }
   const counts = normalizeTurnProfileIntegerRecord(
     tool.knowledgeCounts,
@@ -1493,7 +1468,7 @@ function normalizeTurnProfileKnowledgeCounts(
   const failures = counts.notFoundFailures + counts.invalidFailures
     + counts.conflictFailures + counts.otherFailures;
   if (calls !== tool.calls || failures !== tool.failedCalls) {
-    throw new TypeError(`${label}.knowledgeCounts must reconcile with calls and failedCalls.`);
+    throw new ContractValidationError(`${label}.knowledgeCounts must reconcile with calls and failedCalls.`);
   }
   return counts;
 }
@@ -1507,14 +1482,14 @@ function validateTurnProfileFailedCalls(
     (required && tool.failedCalls === undefined)
     || (tool.failedCalls !== undefined && !isNonNegativeInteger(tool.failedCalls))
   ) {
-    throw new TypeError(`${label}.failedCalls must be a non-negative integer.`);
+    throw new ContractValidationError(`${label}.failedCalls must be a non-negative integer.`);
   }
   if (
     typeof tool.failedCalls === "number"
     && typeof tool.calls === "number"
     && tool.failedCalls > tool.calls
   ) {
-    throw new TypeError(`${label}.failedCalls must not exceed calls.`);
+    throw new ContractValidationError(`${label}.failedCalls must not exceed calls.`);
   }
 }
 
@@ -1529,7 +1504,7 @@ function normalizeTurnProfileIntegerRecord(
   for (const key of keys) {
     const entry = record[key];
     if (!isNonNegativeInteger(entry)) {
-      throw new TypeError(`${label}.${key} must be a non-negative integer.`);
+      throw new ContractValidationError(`${label}.${key} must be a non-negative integer.`);
     }
     normalized[key] = entry;
   }
@@ -1545,7 +1520,7 @@ function normalizeRequiredInteger(value: unknown, label: string): number {
   const normalized = normalizeOptionalInteger(value, label);
 
   if (normalized === null) {
-    throw new TypeError(`${label} must be a whole number.`);
+    throw new ContractValidationError(`${label} must be a whole number.`);
   }
 
   return normalized;
@@ -1564,7 +1539,7 @@ function normalizeCanonicalAssistantUsageId(input: {
   });
 
   if (input.usageId !== canonicalUsageId) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `usageId must match the canonical turnId/providerRequestOrdinal/attemptCount-derived value ${canonicalUsageId}.`,
     );
   }
@@ -1578,7 +1553,7 @@ function normalizeOptionalInteger(value: unknown, label: string): number | null 
   }
 
   if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
-    throw new TypeError(`${label} must be a non-negative integer when provided.`);
+    throw new ContractValidationError(`${label} must be a non-negative integer when provided.`);
   }
 
   return value;
@@ -1629,7 +1604,7 @@ function hasNonEmptyAssistantEnvValue(
 function normalizeOptionalOperatorTaskId(value: unknown): string | null {
   if (value == null) return null;
   if (typeof value !== "string" || !/^opt_[a-f0-9]{64}$/u.test(value)) {
-    throw new TypeError("Assistant usage operator task identity is invalid.");
+    throw new ContractValidationError("Assistant usage operator task identity is invalid.");
   }
   return value;
 }

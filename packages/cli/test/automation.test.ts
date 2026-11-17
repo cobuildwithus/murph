@@ -1592,7 +1592,6 @@ test("automation compact list preserves empty page semantics", async () => {
     registerAutomationCommands(cli);
 
     const listed = await runInProcessJsonCli<{
-      compact: true;
       count: number;
       items: unknown[];
       nextCursor: string | null;
@@ -1609,7 +1608,12 @@ test("automation compact list preserves empty page semantics", async () => {
 
     assert.equal(listed.exitCode, null);
     assert.equal(listed.envelope.ok, true);
-    assert.equal(listed.envelope.data?.compact, true);
+    assert.deepEqual(Object.keys(listed.envelope.data ?? {}).sort(), [
+      "count",
+      "items",
+      "nextCursor",
+      "totalCount",
+    ]);
     assert.equal(listed.envelope.data?.count, 0);
     assert.equal(listed.envelope.data?.totalCount, 0);
     assert.equal(listed.envelope.data?.nextCursor, null);
@@ -1729,9 +1733,9 @@ test("automation maintenance exclusion preserves real reminder pages and removes
       })).record);
     }
     type Page = { vault: string; count: number; totalCount: number; nextCursor: string | null;
-      filters: { excludeMaintenance?: boolean }; items: Array<{ automationId: string; instructions: string | null; status: string; supportKind: string | null }> };
+      filters?: { excludeMaintenance?: boolean }; items: Array<{ automationId: string; instructions: string | null; status: string; supportKind: string | null }> };
     for (const options of [[], ["--compact"]]) {
-      const result = await runInProcessJsonCli<Omit<Page, "items"> & { compact?: true; items: Array<{ automationId: string }> }>(cli,
+      const result = await runInProcessJsonCli<Omit<Page, "items"> & { items: Array<{ automationId: string }> }>(cli,
         ["automation", "list", ...options, "--exclude-maintenance", "--limit", "200", "--vault", vaultRoot]);
       assert.equal(result.envelope.ok, true);
       const page = result.envelope.data;
@@ -1739,8 +1743,9 @@ test("automation maintenance exclusion preserves real reminder pages and removes
       assert.equal(page.count, reminders.length);
       assert.equal(page.totalCount, reminders.length);
       assert.equal(page.nextCursor, null);
-      assert.equal(page.filters.excludeMaintenance, true);
-      assert.equal(page.compact, options.length ? true : undefined);
+      // Compact inventory reads drop the filter echo; the full list keeps it.
+      assert.equal(page.filters?.excludeMaintenance, options.length ? undefined : true);
+      assert.equal("compact" in page, false);
       assert.deepEqual(page.items.map(item => item.automationId).sort(), reminders.map(item => item.automationId).sort());
       for (const item of page.items) {
         assert.equal("instructions" in item, false);
@@ -1760,7 +1765,7 @@ test("automation maintenance exclusion preserves real reminder pages and removes
         const page = result.envelope.data;
         assert.ok(page);
         assert.equal(page.totalCount, reminders.length + (exclude ? 0 : seeds.length));
-        assert.equal(page.filters.excludeMaintenance, exclude ? true : undefined);
+        assert.equal(page.filters?.excludeMaintenance, exclude ? true : undefined);
         bytes += Buffer.byteLength(JSON.stringify({ ...page, vault: "<synthetic-vault>" }), "utf8");
         items.push(...page.items);
         cursor = page.nextCursor;
@@ -1918,9 +1923,8 @@ test("automation compact list retains enumeration state and materially reduces a
   });
 
   type ListEnvelope = {
-    compact?: true;
     count: number;
-    filters: {
+    filters?: {
       cursor: string | null;
       limit: number;
       status: string[] | null;
@@ -1963,11 +1967,12 @@ test("automation compact list retains enumeration state and materially reduces a
     compact: ListEnvelope,
   ): void => {
     assert.equal("compact" in full, false);
-    assert.equal(compact.compact, true);
+    assert.equal("compact" in compact, false);
+    assert.equal("filters" in compact, false);
+    assert.equal(full.filters?.supportSeriesId, seriesId);
     assert.equal(compact.count, full.count);
     assert.equal(compact.totalCount, full.totalCount);
     assert.equal(compact.nextCursor, full.nextCursor);
-    assert.deepEqual(compact.filters, full.filters);
     assert.deepEqual(
       compact.items.map((item) => item.automationId),
       full.items.map((item) => item.automationId),
@@ -1995,18 +2000,7 @@ test("automation compact list retains enumeration state and materially reduces a
   const fullItem = full.items[0];
   assert.ok(compactItem);
   assert.ok(fullItem);
-  assert.deepEqual(Object.keys(compactItem).sort(), [
-    "activeUntil",
-    "automationId",
-    "schedule",
-    "slug",
-    "status",
-    "summary",
-    "supportKind",
-    "title",
-    "updatedAt",
-  ]);
-  for (const retainedField of [
+  const retainedFields = [
     "automationId",
     "slug",
     "title",
@@ -2016,8 +2010,18 @@ test("automation compact list retains enumeration state and materially reduces a
     "schedule",
     "supportKind",
     "updatedAt",
-  ]) {
-    assert.deepEqual(compactItem[retainedField], fullItem[retainedField]);
+  ];
+  // Compact items omit retained fields that are null in the full record.
+  assert.deepEqual(
+    Object.keys(compactItem).sort(),
+    retainedFields.filter((field) => fullItem[field] !== null).sort(),
+  );
+  for (const retainedField of retainedFields) {
+    if (fullItem[retainedField] === null) {
+      assert.equal(retainedField in compactItem, false, retainedField);
+    } else {
+      assert.deepEqual(compactItem[retainedField], fullItem[retainedField]);
+    }
   }
   for (const omittedField of [
     "route",

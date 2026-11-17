@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 const LOCAL_UNIX_PATH_ROOTS = [
   "Users",
   "Volumes",
@@ -127,13 +128,15 @@ const ISO_TIMESTAMP_ZONE_SUFFIX = /(?:[Zz]|[+-]\d{2}:?\d{2})$/u;
 
 export function toIsoTimestamp(value: Date | string | number): string {
   if (typeof value === "string" && !ISO_TIMESTAMP_ZONE_SUFFIX.test(value)) {
-    throw new TypeError(`Invalid ISO timestamp: ${value} (missing time zone)`);
+    throw new ContractValidationError(`Invalid ISO timestamp: ${value} (missing time zone)`);
   }
 
   const date = value instanceof Date ? value : new Date(value);
 
-  if (Number.isNaN(date.valueOf())) {
-    throw new TypeError(`Invalid ISO timestamp: ${String(value)}`);
+  // Past year 9999 the ISO form changes shape and date arithmetic can leave the
+  // representable range, so no such provider time is accepted.
+  if (Number.isNaN(date.valueOf()) || date.getUTCFullYear() > 9999) {
+    throw new ContractValidationError(`Invalid ISO timestamp: ${String(value)}`);
   }
 
   return date.toISOString();

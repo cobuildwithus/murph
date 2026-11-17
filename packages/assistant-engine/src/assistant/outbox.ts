@@ -99,6 +99,7 @@ import {
   assistantOutboxIntentMatchesDispatchOwner,
   persistAssistantOutboxIntentDeliveryPendingConfirmation,
   persistAssistantOutboxIntentLinqAppCardTextFallback,
+  persistAssistantOutboxIntentRecapVideo,
   preserveAssistantOutboxAcceptedMediaDeliveryOrder,
   resetAssistantOutboxPreparedDispatch,
   rescheduleAssistantOutboxConfirmationRetry,
@@ -312,10 +313,13 @@ export type AssistantOutboxCreateIntentInput = {
   initialState?:
     | { status: 'pending' }
     | { nextAttemptAt: string; status: 'awaiting_approval' }
+    | { delivery: AssistantChannelDelivery; status: 'sent' }
   card?: AssistantResponseCard | null
   media?: readonly AssistantResponseMedia[] | null
   message: string
   nativeReplyRequested?: AssistantOutboxIntent['nativeReplyRequested']
+  /** The accepted recap video and its host-owned file, for a recap's line and link. */
+  recapVideo?: AssistantOutboxIntent['recapVideo'] | null
   groupEmailAuthorizationProof?: string | null
   operation?: AssistantOutboxOperation | null
   privateCompletionContinuitySessionId?: string | null
@@ -338,7 +342,6 @@ export async function createAssistantOutboxIntent(
     timing.turnTimingOutboxLockWaitMs = performance.now() - lockRequestedAt
     await ensureAssistantState(paths)
     const createdAt = input.createdAt ?? new Date().toISOString()
-    const initialState = input.initialState ?? { status: 'pending' as const }
     const media = stripAssistantResponseMediaPlacement(
       normalizeAssistantResponseMediaList(input.media ?? []),
     )
@@ -528,6 +531,9 @@ export async function createAssistantOutboxIntent(
       return upgradedExisting
     }
 
+    const { diagnostic, ...initialState } = buildAssistantOutboxInitialState(
+      input.initialState ?? { status: 'pending' }, createdAt, persistedTarget.channel,
+    )
     const intent = assistantOutboxIntentSchema.parse({
       schema: ASSISTANT_OUTBOX_INTENT_SCHEMA,
       intentId: `outbox_${randomUUID().replace(/-/gu, '')}`,
@@ -536,13 +542,8 @@ export async function createAssistantOutboxIntent(
       createdAt,
       updatedAt: createdAt,
       lastAttemptAt: null,
-      nextAttemptAt:
-        initialState.status === 'awaiting_approval'
-          ? initialState.nextAttemptAt
-          : createdAt,
-      sentAt: null,
+      ...initialState,
       attemptCount: 0,
-      status: initialState.status,
       message,
       emailHtml: input.emailHtml ?? null,
       media,
@@ -559,12 +560,12 @@ export async function createAssistantOutboxIntent(
       plannedOccurrenceAt: input.plannedOccurrenceAt ?? null,
       scheduledOccurrenceAt: input.scheduledOccurrenceAt ?? null,
       externalThreadRouteAuthority: input.externalThreadRouteAuthority ?? null,
-      delivery: null,
       deliveryConfirmationPending: false,
       deliveryIdempotencyKey,
       deliveryTransportIdempotent,
       groupEmailAuthorizationProof: input.groupEmailAuthorizationProof ?? null,
       answeredMailboxItemIds,
+      ...recapVideoIntentField({ channel: persistedTarget.channel, card, media, operation, recapVideo: input.recapVideo }),
       reviewedAssistantAskCompletionExpiresAt:
         input.reviewedAssistantAskCompletionExpiresAt ?? undefined,
       ...(input.privateCompletionContinuitySessionId === undefined
@@ -608,14 +609,10 @@ export async function createAssistantOutboxIntent(
     await recordAssistantDiagnosticEvent({
       vault: input.vault,
       component: 'outbox',
-      kind: 'delivery.queued',
-      message: `Queued outbound delivery for ${intent.channel ?? 'unknown'} channel.`,
+      ...diagnostic,
       sessionId: intent.sessionId,
       turnId: intent.turnId,
       intentId: intent.intentId,
-      counterDeltas: {
-        deliveriesQueued: 1,
-      },
     })
 
     timing.turnTimingOutboxDiagnosticMs = performance.now() - diagnosticStartedAt
@@ -623,6 +620,23 @@ export async function createAssistantOutboxIntent(
   })
   reportHostedAssistantPersistenceTiming(input.onPersistenceTiming, timing)
   return result
+}
+
+function buildAssistantOutboxInitialState(
+  state: NonNullable<AssistantOutboxCreateIntentInput['initialState']>,
+  createdAt: string,
+  channel: string | null,
+) {
+  const delivery = state.status === 'sent' ? state.delivery : null
+  return {
+    status: state.status,
+    delivery,
+    sentAt: delivery?.sentAt ?? null,
+    nextAttemptAt: state.status === 'awaiting_approval' ? state.nextAttemptAt : delivery ? null : createdAt,
+    diagnostic: delivery
+      ? { kind: 'delivery.sent' as const, message: 'Recorded an accepted outbound delivery.', counterDeltas: { deliveriesSent: 1 } }
+      : { kind: 'delivery.queued' as const, message: `Queued outbound delivery for ${channel ?? 'unknown'} channel.`, counterDeltas: { deliveriesQueued: 1 } },
+  }
 }
 
 export async function readAssistantOutboxIntent(
@@ -1239,7 +1253,17 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
     preparedDispatchReserved = input.dispatchHooks?.prepareDispatchIntent !== undefined
 
     const dispatchDependencies = withAssistantOutboxSignal(
-      input.dependencies,
+      withAssistantOutboxRecapVideo(input.dependencies, dispatchIntent.recapVideo, async (next) => {
+        const persisted = await persistAssistantOutboxIntentRecapVideo({
+          intentPath: dispatchIntentPath,
+          next,
+          persistedAt: new Date(),
+          sending: effectiveDispatchIntent,
+          vault: input.vault,
+        })
+        effectiveDispatchIntent = persisted
+        dispatchFailureOwnerIntent = persisted
+      }),
       input.signal,
     )
     const delivered = await sendAssistantOutboxDispatchIntent({
@@ -1429,6 +1453,25 @@ async function dispatchAssistantOutboxIntentInternal(input: DispatchAssistantOut
       session: null,
     }
   }
+}
+
+/** A recap video rides only a text-only Linq message: its first send is where the video goes. A replayed
+ * create reuses the stored intent and never adds or replaces its video. */
+function recapVideoIntentField(input: {
+  channel: string | null; card: AssistantResponseCard | null; media: readonly AssistantResponseMedia[]
+  operation: AssistantOutboxOperation | null; recapVideo: AssistantOutboxIntent['recapVideo'] | null | undefined
+}): { recapVideo?: NonNullable<AssistantOutboxIntent['recapVideo']> } {
+  const textOnlyLinq = input.channel === 'linq' && input.card === null && input.media.length === 0 && !input.operation
+  return input.recapVideo && textOnlyLinq ? { recapVideo: input.recapVideo } : {}
+}
+
+/** The Linq sender's view of an intent's recap video, and how it saves its one decision. */
+function withAssistantOutboxRecapVideo(
+  dependencies: AssistantChannelDependencies | undefined,
+  video: AssistantOutboxIntent['recapVideo'],
+  persist: NonNullable<AssistantChannelDependencies['linqRecapVideo']>['persist'],
+): AssistantChannelDependencies | undefined {
+  return video ? { ...(dependencies ?? {}), linqRecapVideo: { video, persist } } : dependencies
 }
 
 export function assistantOutboxIntentIntrinsicallyRequiresTerminalConfirmation(intent: AssistantOutboxIntent): boolean {
@@ -1707,6 +1750,7 @@ export async function deliverAssistantOutboxMessage(input: {
   message: string
   nativeReplyRequested?: AssistantOutboxIntent['nativeReplyRequested']
   privateCompletionContinuitySessionId?: string | null
+  recapVideo?: AssistantOutboxIntent['recapVideo'] | null
   subject?: string | null
   replyToMessageId?: string | null
   signal?: AbortSignal
@@ -1746,6 +1790,7 @@ export async function deliverAssistantOutboxMessage(input: {
     identityId: input.identityId,
     media: input.media,
     message: input.message,
+    recapVideo: input.recapVideo,
     ...(input.privateCompletionContinuitySessionId === undefined
       ? {}
       : {

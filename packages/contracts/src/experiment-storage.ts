@@ -1,3 +1,4 @@
+import { ContractValidationError } from "./validation-error.ts";
 import {
   EXPERIMENTS_DIRECTORY,
   EXPERIMENT_OUTCOMES_DIRECTORY,
@@ -9,7 +10,7 @@ export type ExperimentStorageFileKind = "document" | "outcome" | "unsupported";
 
 export function experimentDocumentRelativePath(slug: string): string {
   if (!EXPERIMENT_SLUG_PATTERN.test(slug)) {
-    throw new TypeError("Experiment document slugs must use lowercase kebab-case.");
+    throw new ContractValidationError("Experiment document slugs must use lowercase kebab-case.");
   }
 
   return `${EXPERIMENTS_DIRECTORY}/${slug}.md`;

@@ -76,12 +76,18 @@ async function main(): Promise<void> {
       );
     }
 
-    // Verify the same patch the deployment build applies to this exact release.
+    // Verify the same ordered patches the deployment build applies to this exact release.
     // The commit pins every tree. The shallow fetch includes all blobs, so
     // checking against the index needs neither lazy fetches nor a checkout.
     runGit(["read-tree", "FETCH_HEAD"], upstreamRepository);
     runGit([
       "apply", "--cached", "--check", path.join(repoRoot, "patches/codex-websocket-ack.patch"),
+    ], upstreamRepository);
+    runGit([
+      "apply", "--cached", path.join(repoRoot, "patches/codex-websocket-ack.patch"),
+    ], upstreamRepository);
+    runGit([
+      "apply", "--cached", "--check", path.join(repoRoot, "patches/codex-prompt-cache-retention.patch"),
     ], upstreamRepository);
 
     const sourceFiles = new Set(runGit([

@@ -826,6 +826,15 @@ Required for the hosted device-sync lane in addition:
 - `JUNCTION_ENV`
 - `JUNCTION_REGION`
 
+The production Linq canary's reset and outcome endpoints authenticate GitHub
+Actions OIDC for the trusted main-branch canary workflow. The audience is
+`https://www.withmurph.ai/linq-production-canary`; the fixed target stays in
+`HOSTED_ONBOARDING_LINQ_PRODUCTION_CANARY_PHONE_NUMBER`. Reset tokens are
+single-use; status tokens are not consumed. The controller requests a fresh
+short-lived token per request and requires job-scoped `id-token: write`.
+There is no static bearer path. See
+[production canary operations](../../agent-docs/operations/live-provider-canaries.md).
+
 Required for hosted Linq ingress:
 
 - `LINQ_WEBHOOK_SECRET`
@@ -2401,12 +2410,19 @@ their saved counts and confirm both columns are absent after contraction.
 
 ## Workflow SDK v5
 
-Web uses `workflow@5.2.3`, including Core and Vercel World 5.2.3, Next
-5.0.6, World 5.0.5 and Local World 5.1.2. Keep the Zod 4.6.6 security
-override. Web also declares Zod 4.6.6 explicitly so removing the old SDK tree
+Web uses `workflow@5.5.0`, including Core and Vercel World 5.5.0, Next
+5.1.0, World 5.2.0 and Local World 5.3.0. Keep the Zod 4.6.7 security
+override. Web also declares Zod 4.6.7 explicitly so removing the old SDK tree
 does not downgrade unrelated optional peers to Zod 3. The schema regression
 test resolves Zod from the installed World
 and accepts unfinished runs with omitted terminal fields.
+
+New runs stay on the default spec; spec 9 (`WORKFLOW_SPEC_VERSION=9`) is
+opt-in and needs every deployment that shares the World upgraded first. Since
+Local World 5.3, each process writes a fresh `queue-auth-key` (and a
+`.gitignore`) into the local data directory in the background and refuses
+deliveries without it. A test World with a mocked queue should pass
+`queueAuthKey: "read"` so that write cannot race its cleanup.
 
 The Next wrapper uses v5 defaults; `workflows.lazyDiscovery` was removed.
 The generated flow route now handles steps as well as orchestration; there
@@ -2476,7 +2492,10 @@ and workout editor failures share `workout-card-editor`. Reported
 failures also count when their finite category is `unavailable`, `timeout`,
 `rate_limited`, or service HTTP `authority_rejected`. Schema rejections,
 validation-stage failures and routine invalid-input/not-found/conflict results
-do not; purely reported `unknown` results remain excluded. Unknown operations
+do not. Deliberate `limit_reached` refusals do not either, including a
+connected-app read the web tier rejects as larger than the model can read
+(`CONNECTED_APPS_RESULT_TOO_LARGE`); the model is told to narrow that read.
+Purely reported `unknown` results remain excluded. Unknown operations
 share a redacted `other_tool` bucket. SQL permits only
 registered operation labels, finite error categories and 40-character hex release
 SHAs; no member identifiers, summaries, private JSON or phone content leave SQL.
@@ -2778,6 +2797,38 @@ Dev-only helpers for iterating on UI. All guarded by `process.env.NODE_ENV !== "
 - `/join/<inviteCode>?preview=<stage>` and `/join/<inviteCode>/success?preview=<stage>` render any signup-flow stage without a real invite. Stages: `invalid`, `expired`, `verify`, `checkout`, `messaging-setup`, `blocked`, `active`, `active-pending`. Disables the status-refresh poll so the mocked status is not overwritten.
 - CSP allows `https://ui.sh` only in development so the `ui-picker` toolbar can load during design iteration. Production CSP is unchanged.
 
+## APNs provider signing
+
+`APNS_TEAM_ID` and `APNS_KEY_ID` identify the Apple provider. Set the non-secret
+`APNS_KMS_KEY_VERSION` to the full KMS version resource name to sign ES256
+provider tokens through the existing hosted-crypto Vercel OIDC / Google KMS
+client. That mode never reads `APNS_PRIVATE_KEY`, including on signing failure.
+Without a KMS version, the transitional `APNS_PRIVATE_KEY` PEM path remains.
+Missing credentials or failed signing produce `failed`, with no static-key
+fallback. Tokens are reused for 40 minutes; concurrent refreshes share signing.
+
+Game delivery and Apple Health reopen reminders prepare the provider token
+outside transactions, before their final route/session or eligibility checks.
+Apple Health still checks configuration before claiming a reminder. Once claimed,
+a failed or superseded send consumes that step; there is no retry queue.
+
+This rollout rotates the Apple key, not just its storage:
+
+1. Create a **new** APNs key in Apple Developer and retain its new key ID.
+2. After the separate import-tool PR lands, import the new `.p8` using
+   `scripts/import-signing-key-to-kms.sh projects/murph-495013/locations/global/keyRings/murph-hosted/cryptoKeys/apns-provider-token ec-sign-p256-sha256 <AuthKey.p8>`.
+   The key is import-only `EC_SIGN_P256_SHA256`; its initial imported version is 1.
+3. Set `APNS_KMS_KEY_VERSION` to
+   `projects/murph-495013/locations/global/keyRings/murph-hosted/cryptoKeys/apns-provider-token/cryptoKeyVersions/1`
+   and `APNS_KEY_ID` to that **new Apple key ID** together in Vercel production.
+   Keep `APNS_TEAM_ID`. The existing `vercel-hosted-crypto` service account
+   already holds `roles/cloudkms.signer` on this key.
+4. Deploy and verify a push. A missing import, mismatched key ID/version, or
+   federation/signing failure stops pushes; the old PEM cannot rescue KMS mode.
+5. Delete `APNS_PRIVATE_KEY`. After all old deployments drain, revoke the **old**
+   Apple key, never the new key imported into KMS. Remove the transitional PEM
+   code in a follow-up after rotation is verified.
+
 ## Local verification
 
 - `pnpm --dir apps/web lint`
@@ -2800,6 +2851,12 @@ Notes:
   generated local artifacts that must stay out of commits and raw source bundles.
 - Hosted internal cron paths accept only Vercel cron bearer auth via
   `CRON_SECRET`.
+- `/api/internal/device-sync/apple-health-reopen-push/cron` runs every 15
+  minutes and sends the "Open Murph" push to members whose phone stopped
+  delivering Apple Health data. It reads Web-owned facts only, sends through the
+  existing Apple push sender, and does not signal Temporal or wake Cloudflare.
+  Count sends with `SELECT outcome, count(*) FROM apple_health_reopen_push
+  WHERE created_at > now() - interval '1 day' GROUP BY outcome`.
 - `/api/internal/hosted-runtime/latency-alert/cron` scans existing Web-owned
   latency and durable mailbox-progress facts every five minutes. It does not
   signal Temporal, wake Cloudflare, or participate in message processing.
@@ -2900,6 +2957,7 @@ Internal hosted maintenance and Cloudflare callback routes:
 - `GET /api/internal/hosted-onboarding/stripe/cron`
 - `GET /api/internal/hosted-growth/usage-referral/cron`
 - `GET /api/internal/hosted-runtime/latency-alert/cron`
+- `GET /api/internal/device-sync/apple-health-reopen-push/cron`
 
 The signed device-sync reconcile request includes only `connectionId`. Web
 places the request on the existing manual-reconcile wake and carries no

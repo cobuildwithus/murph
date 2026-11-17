@@ -49,7 +49,7 @@ Integrate the supplied AssistantD P0 local-runtime extraction into the current r
 
 ## Working Notes
 
-- `git apply --check /Users/willhay/Downloads/0000-murph-assistantd-p0-unified.patch` succeeds against the current tree, so the supplied patch is a viable integration base.
+- `git apply --check ~/Downloads/0000-murph-assistantd-p0-unified.patch` succeeds against the current tree, so the supplied patch is a viable integration base.
 - The migration guide explicitly stages daemon routing so progress-hooked turns remain in-process for now; that compatibility must stay intact.
 - Repo policy requires documenting new runtime entrypoints and verification expectations alongside the code change, even if the supplied patch did not include every doc update.
 - Mandatory `simplify` and `task-finish-review` audit passes both ran via spawned subagents; the final pass surfaced four real follow-ups that were fixed in-scope:

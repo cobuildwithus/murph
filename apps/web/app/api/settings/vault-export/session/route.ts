@@ -1,3 +1,5 @@
+import { CloudflareHostedControlMalformedResponseError } from "@murphai/cloudflare-hosted-control/client";
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import {
   assessBrowserVaultReplicaFreshness,
 } from "@murphai/hosted-execution";
@@ -13,11 +15,10 @@ import { after } from "next/server";
 
 import { PrismaHostedDirtyConnectionStore } from "@/src/lib/device-sync/prisma-store/dirty-connections";
 import { readHostedExecutionControlClientIfConfigured } from "@/src/lib/hosted-execution/control";
-import { requireHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
+import { assertHostedAppSessionCurrentTx, requireHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
-  jsonOk,
   readHostedOnboardingJsonObject,
   withJsonError,
 } from "@/src/lib/hosted-onboarding/http";
@@ -37,6 +38,10 @@ import {
   verifySensitiveActionChallenge,
 } from "@/src/lib/sensitive-actions/server";
 
+import { prepareProgressShareExport } from '@/src/lib/game/progress/share-export';
+import { progressEffect } from '@/src/lib/game/progress/http';
+
+export const maxDuration = 300;
 const SETTINGS_VAULT_EXPORT_BODY_LIMIT_BYTES = 16 * 1024;
 
 export const POST = withJsonError(async (request: Request) => {
@@ -59,9 +64,12 @@ export const POST = withJsonError(async (request: Request) => {
     tooLargeErrorCode: "BROWSER_VAULT_SESSION_BODY_TOO_LARGE",
     tooLargeErrorMessage: "Browser vault session request body is too large.",
   });
-  const browserPublicKeyJwk = parseHostedUserRecipientPublicKeyJwk(
+  const browserPublicKeyJwk = parseInput(
     body.browserPublicKeyJwk,
-    "Settings vault export browserPublicKeyJwk",
+    (value) => parseHostedUserRecipientPublicKeyJwk(
+      value,
+      "Settings vault export browserPublicKeyJwk",
+    ),
   );
   const acceptsBucketedReplica = readSettingsVaultExportBucketCapability({
     requestedMetricBuckets: body.requestedMetricBuckets,
@@ -103,16 +111,7 @@ export const POST = withJsonError(async (request: Request) => {
   // newest retained replica even when newer source changes are still being
   // processed. Active members also request a refresh; withdrawn members never
   // restart processing.
-  let workspace: Awaited<ReturnType<typeof readHostedWorkspace>>;
-  try {
-    workspace = await readHostedWorkspace({ userId: auth.member.id });
-  } catch {
-    if (healthDataProcessingRevoked) {
-      throw browserVaultRetainedReplicaUnavailableError();
-    }
-    scheduleBrowserVaultRefreshAfterResponse({ userId: auth.member.id });
-    throw browserVaultSessionNotFreshError();
-  }
+  const workspace = await readHostedWorkspace({ userId: auth.member.id });
 
   let deviceSyncImportPending = true;
   try {
@@ -158,12 +157,12 @@ export const POST = withJsonError(async (request: Request) => {
   let session:
     | Awaited<ReturnType<typeof client.createBrowserVaultExportSession>>
     | Awaited<ReturnType<typeof client.createBrowserVaultSession>>;
+  const sessionInput = {
+    browserPublicKeyJwk,
+    replicaRef,
+    userId: auth.member.id,
+  };
   try {
-    const sessionInput = {
-      browserPublicKeyJwk,
-      replicaRef,
-      userId: auth.member.id,
-    };
     session = acceptsBucketedReplica
       ? await client.createBrowserVaultExportSession(sessionInput)
       : await client.createBrowserVaultSession(sessionInput);
@@ -176,7 +175,7 @@ export const POST = withJsonError(async (request: Request) => {
       throw browserVaultSessionNotFreshError();
     }
 
-    if (error instanceof TypeError) {
+    if (error instanceof CloudflareHostedControlMalformedResponseError) {
       throw hostedOnboardingError({
         code: "HOSTED_EXECUTION_CONTROL_INVALID_RESPONSE",
         httpStatus: 502,
@@ -191,19 +190,33 @@ export const POST = withJsonError(async (request: Request) => {
     scheduleBrowserVaultRefreshAfterResponse({ userId: auth.member.id });
   }
 
+  const shareRecords = await progressEffect(() => prepareProgressShareExport(auth.member.id, () =>
+    prisma.$transaction(tx => assertHostedAppSessionCurrentTx({ memberId: auth.member.id, prisma: tx,
+      request, sessionId: auth.sessionId, authProof: auth.authProof }))));
+
   // Consume the challenge atomically only once the encrypted replica is in
   // hand. A failure here aborts the response without releasing the session.
   await consumeSensitiveActionChallenge({
     challenge, prisma, session: { request, sessionId: auth.sessionId, authProof: auth.authProof },
   });
 
-  return jsonOk({
-    ...session,
-    deviceSyncImportPending,
-    freshness: freshness.freshness,
-    refreshPending,
-    workspaceVersion: workspace?.version ?? null,
-  });
+  // One record at a time keeps image bytes out of the bulk replica response buffer.
+  const encoder = new TextEncoder();
+  const records = shareRecords();
+  return new Response(new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode(JSON.stringify({ ...session, deviceSyncImportPending,
+        freshness: freshness.freshness, refreshPending, workspaceVersion: workspace?.version ?? null }) + '\n'));
+    },
+    async pull(controller) {
+      try {
+        const next = await records.next();
+        if (next.done) controller.close();
+        else controller.enqueue(encoder.encode(next.value));
+      } catch { controller.error(new Error('Picture export could not finish. Try again.')); }
+    },
+    async cancel() { await records.return(); },
+  }), { headers: { 'Content-Type': 'application/x-ndjson', 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' } });
 });
 
 function browserVaultSessionNotFreshError() {

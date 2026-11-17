@@ -13,7 +13,7 @@ vi.mock("../src/lib/hosted-routing/assistant-notification-destination", () => ({
 vi.mock("../src/lib/hosted-onboarding/linq-client", () => ({ getHostedLinqChatSummary: m.chat }));
 vi.mock("../src/lib/hosted-onboarding/linq-line-store", () => ({ readHostedLinqIncomingLineState: async () => ({ kind: "assignable" }) }));
 
-import { addressedGameRematchWhere, gamePairWhere, readGameChatAudience, readGameChatAuthority, gameChatContextCurrent, readGameChatCandidateIds, requireExactGameChat } from "../src/lib/game/chat-membership";
+import { GameChatAudienceError, exactChat, addressedGameRematchWhere, gamePairWhere, readGameChatAudience, readGameChatAuthority, gameChatContextCurrent, readGameChatCandidateIds, requireExactGameChat } from "../src/lib/game/chat-membership";
 
 const players = ["player-a", "player-b"];
 const phones = ["+15555550101", "+15555550102"];
@@ -57,17 +57,16 @@ describe("game pair discovery", () => {
     expect(m.games).not.toHaveBeenCalled(); expect(m.chat).not.toHaveBeenCalled();
   });
 
-  it("has no game chat when neither player is on the game list", async () => {
-    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "player-c");
+  it("does not discover group games from an empty room roster", async () => {
+    expect(await readGameChatCandidateIds([], true, "room")).toEqual([]);
+    expect(m.games).not.toHaveBeenCalled();
+  });
+
+  it("has no game chat when the global switch is off", async () => {
+    vi.stubEnv("MURPH_GAME_ENABLED", "false");
     await expect(requireExactGameChat("room")).rejects.toThrow("2 to 10");
     await expect(readGameChatCandidateIds(players)).resolves.toEqual([]);
     expect(m.chat).not.toHaveBeenCalled(); expect(m.games).not.toHaveBeenCalled();
-  });
-
-  it.each(["player-a", "player-b"])("opens the pair's game chat when one player is listed (%s only)", async (only) => {
-    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", only);
-    await expect(requireExactGameChat("room")).resolves.toEqual(players);
-    await expect(readGameChatCandidateIds(players)).resolves.toEqual(["active-game", "finished-game"]);
   });
 
   it("rejects stale local membership when the provider has an additional person", async () => {
@@ -128,6 +127,22 @@ describe("current game room authority through the provider reader", () => {
       status: "live", previousGameId: null, createdBy: members[0], invitees: [],
       players: members.map((memberId, seat) => ({ memberId, seat, leftAt: null })) };
   }
+  it.each(["missing", "unreadable", "non-linq"])("classifies a %s route without reading the provider", async kind => {
+    m.route.mockResolvedValue({ authorities: new Map(),
+      missingContainerMemberIds: new Set(kind === "missing" ? ["room"] : []),
+      unavailableContainerMemberIds: new Set(kind === "unreadable" ? ["room"] : []),
+      nonLinqContainerMemberIds: new Set(kind === "non-linq" ? ["room"] : []),
+    });
+    const failure = await readGameChatAudience("room").catch(error => error);
+    expect(failure).toBeInstanceOf(Error);
+    if (kind === "unreadable") expect(failure).not.toBeInstanceOf(GameChatAudienceError);
+    else {
+      expect(failure).toBeInstanceOf(GameChatAudienceError);
+      expect(failure.reason).toBe(kind === "missing" ? "route_removed" : "route_unavailable");
+    }
+    expect(await exactChat("room", phones)).toBeNull();
+    expect(m.chat).not.toHaveBeenCalled();
+  });
   it.each([false, true])("admits bound pairs and ten-player games with bystanders (registered: %s)", async registered => {
     for (const [size, extras] of [[2, 1], [2, 9], [10, 1]]) {
       const game = room(size, extras, registered);

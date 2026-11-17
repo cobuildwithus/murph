@@ -1,6 +1,6 @@
 # Hosted Contact-Privacy Rotation
 
-Last verified: 2026-08-11
+Last verified: 2026-11-15
 
 ## Goal
 
@@ -34,6 +34,35 @@ Do not stage future or extra historical versions in the runtime keyring. Rotate 
 
 ## Future Rotation Coverage
 
+`HostedLinqGroupLeave` retains its own purpose-separated chat identity envelope,
+independent of containers. Its `rotateHostedLinqGroupLeaveBatch` owner reads at
+most 100 old markers, authenticates their row-bound envelopes, and re-derives
+and reseals each under the new current key. Each short transaction takes the
+same chat lock as departure and compares the old key and ciphertext. Repeat
+while current plus prior are configured, drain old writers, and verify no
+prior-version markers remain before retiring the old key. A dormant unbound
+group must rotate too; webhook-driven lazy rotation is insufficient. This
+bounded helper is a rotation seam, not a background runner or a complete
+rotation command for the other owners below.
+
+`HostedLinqHandleBlock` retains a purpose-separated, row-and-kind-bound contact
+envelope. Repeat `rotateHostedLinqHandleBlockBatch` (at most 100 rows per call)
+with current plus prior configured. It authenticates and re-derives each contact
+under the same stable participant lock used by add/remove. Drain old writers,
+repeat until no prior-key blocks remain, then verify a dormant block under the
+current key before retiring the prior key. Reads and removal search both
+readable versions throughout overlap; do not create a second block.
+
+`HostedLinqGroupSighting` and `HostedLinqGroupHandle` are **deleted, not
+re-derived**. They have no contact or chat envelope. After old writers drain,
+delete prior-version handle/chat lookup rows in bounded batches, then delete
+sightings with prior-version chat or line lookup keys. Foreign-key cascading
+removes their remaining handle evidence, without deleting or changing any
+leave marker. Verify neither table retains a prior-version lookup before key
+retirement. Cross-room linkage is limited to one contact-key epoch; deleting
+this evidence early is deliberate, not a migration failure. Rotate leave
+markers and blocks independently before retiring their old key.
+
 The encrypted owner-table fields already preserve the raw values needed to re-derive these canonical lookup-key columns in a future rotation-specific migration:
 
 - `HostedMemberIdentity.phoneLookupKey`
@@ -60,6 +89,10 @@ The encrypted owner-table fields already preserve the raw values needed to re-de
   match could incorrectly classify a previously accepted payment as a loser.
 - `HostedGroupDisclosurePermission.permissionDigest`, re-derived from the
   group-owned encrypted permission text and owning group id
+- `HostedLinqHandleBlock.contactLookupKey`, re-derived from its authenticated
+  `contactEncrypted` envelope and resealed in the same update
+- `HostedLinqGroupLeave.threadIdentityLookupKey`, re-derived from its
+  authenticated `chatIdEncrypted` envelope and resealed in the same update
 
 ## Current Guidance
 

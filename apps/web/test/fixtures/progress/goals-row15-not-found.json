@@ -1,0 +1,64 @@
+{
+  "tiles": [],
+  "match": null,
+  "suggestions": [
+    {
+      "id": "mount-st-helens",
+      "name": "Mount St. Helens",
+      "drawing": "mount-st-helens",
+      "at": 8363,
+      "atText": "8,363 ft",
+      "blurb": "The Washington volcano that blew its top off in 1980, losing about 1,300 feet.",
+      "where": "Washington",
+      "on": null,
+      "toGo": "6,963 to go",
+      "short": "Mount St. Helens",
+      "tagline": "A volcano with a changed summit",
+      "shareAwardId": null
+    },
+    {
+      "id": "mount-etna",
+      "name": "Mount Etna",
+      "drawing": "mount-etna",
+      "at": 11165,
+      "atText": "11,165 ft",
+      "blurb": "Sicily's giant volcano, one of the most active in the world, erupting often.",
+      "where": "Sicily",
+      "on": null,
+      "toGo": "9,765 to go",
+      "short": "Mount Etna",
+      "tagline": "A volcano high above the sea",
+      "shareAwardId": null
+    },
+    {
+      "id": "mount-fuji",
+      "name": "Mount Fuji",
+      "drawing": "mount-fuji",
+      "at": 12389,
+      "atText": "12,389 ft",
+      "blurb": "Japan's highest mountain, a snowcapped volcano and national symbol.",
+      "where": "Japan",
+      "on": null,
+      "toGo": "11k to go",
+      "short": "Mount Fuji",
+      "tagline": "A familiar cone against the sky",
+      "shareAwardId": null
+    },
+    {
+      "id": "mount-rainier",
+      "name": "Mount Rainier",
+      "drawing": "mount-rainier",
+      "at": 14406,
+      "atText": "14,406 ft",
+      "blurb": "The glacier-covered volcano that towers over Seattle, the highest peak in Washington.",
+      "where": "Washington",
+      "on": null,
+      "toGo": "13k to go",
+      "short": "Mount Rainier",
+      "tagline": "A great volcano beneath the snow",
+      "shareAwardId": null
+    }
+  ],
+  "route": null,
+  "note": "These real volcanoes are the closest match."
+}

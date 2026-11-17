@@ -691,6 +691,10 @@ describe("scheduleHostedBillingPlanSwitchToPulse", () => {
       now: new Date("2026-05-06T00:00:00.000Z"),
     })).rejects.toMatchObject({
       code,
+      httpStatus: code === "HOSTED_BILLING_STRIPE_CUSTOMER_MISMATCH"
+          || code === "HOSTED_BILLING_STRIPE_SUBSCRIPTION_ITEMS_UNSUPPORTED"
+        ? 500
+        : 409,
     });
 
     expect(mocks.stripe.subscriptionSchedules.create).not.toHaveBeenCalled();

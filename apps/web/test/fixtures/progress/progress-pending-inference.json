@@ -1,0 +1,38 @@
+{
+  "joinedOn": "2026-11-14",
+  "today": "2026-11-14",
+  "incomplete": false,
+  "measures": [
+    {
+      "id": "h112233445566.days",
+      "label": "Pushups",
+      "noun": "pushups",
+      "icon": "pushups",
+      "format": "days",
+      "source": "games",
+      "pending": true,
+      "gameOn": true,
+      "needsPerDay": false,
+      "total": {
+        "value": 1,
+        "text": "1",
+        "unit": "days"
+      },
+      "today": null,
+      "points": [
+        [
+          "2026-11-14",
+          1
+        ]
+      ],
+      "projection": null,
+      "ladder": null,
+      "route": null,
+      "pics": []
+    }
+  ],
+  "medals": [],
+  "shelf": [],
+  "moments": [],
+  "picCount": 0
+}

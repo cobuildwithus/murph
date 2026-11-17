@@ -162,7 +162,8 @@ describe('assistant store persistence seams', () => {
     await expect(
       loadResolvedSession({
         maxSessionAgeMs: 1,
-        now: new Date('2027-01-01T00:00:00.000Z'),
+        // The session was just written at the real clock; read it a minute later.
+        now: new Date(Date.now() + 60_000),
         paths,
         persistenceInput: {
           alias: null,

@@ -1,3 +1,4 @@
+import { ContractValidationError } from '@murphai/contracts/validation-error'
 import { createHash } from 'node:crypto'
 import type { Dirent } from 'node:fs'
 import { readdir, unlink } from 'node:fs/promises'
@@ -322,7 +323,7 @@ export async function claimAssistantAutoReplyRouteContext(
   assertAssistantAutoReplyRouteDigest(input.routeDigest)
   const turnId = normalizeNullableString(input.turnId)
   if (!turnId) {
-    throw new TypeError('Assistant auto-reply route claim requires a turn id.')
+    throw new ContractValidationError('Assistant auto-reply route claim requires a turn id.')
   }
 
   await withAssistantRuntimeWriteLock(input.vault, async (paths) => {
@@ -1017,7 +1018,7 @@ function parseAssistantAutoReplyRouteStateValue(
   value: unknown,
 ): AssistantAutoReplyRouteStateValue {
   if (!isPlainObject(value) || !hasOnlyKeys(value, ['pending', 'settledThrough'])) {
-    throw new TypeError('Assistant auto-reply route state must be an object.')
+    throw new ContractValidationError('Assistant auto-reply route state must be an object.')
   }
   return {
     pending: value.pending === null
@@ -1038,11 +1039,11 @@ function parseAssistantAutoReplyPendingClaim(value: unknown): {
     !isPlainObject(value) ||
     !hasOnlyKeys(value, ['acceptedThrough', 'order', 'turnId'])
   ) {
-    throw new TypeError('Assistant auto-reply pending route claim must be an object.')
+    throw new ContractValidationError('Assistant auto-reply pending route claim must be an object.')
   }
   const turnId = normalizeUnknownNullableString(value.turnId)
   if (!turnId) {
-    throw new TypeError('Assistant auto-reply pending route claim requires a turn id.')
+    throw new ContractValidationError('Assistant auto-reply pending route claim requires a turn id.')
   }
   const order = parseAssistantAutoReplyDeliveryOrder(value.order)
   const acceptedThrough = value.acceptedThrough === null
@@ -1052,7 +1053,7 @@ function parseAssistantAutoReplyPendingClaim(value: unknown): {
     acceptedThrough !== null &&
     compareAssistantAutoReplyDeliveryOrders(acceptedThrough, order) > 0
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       'Assistant auto-reply pending route claim cannot accept beyond its current order.',
     )
   }
@@ -1078,7 +1079,7 @@ function parseAssistantAutoReplyDeliveryOrder(
   value: unknown,
 ): AssistantAutoReplyDeliveryOrder {
   if (!isPlainObject(value) || !hasOnlyKeys(value, ['intentId', 'sentAt'])) {
-    throw new TypeError('Assistant auto-reply delivery order must be an object.')
+    throw new ContractValidationError('Assistant auto-reply delivery order must be an object.')
   }
   const order = {
     intentId: normalizeUnknownNullableString(value.intentId),
@@ -1089,7 +1090,7 @@ function parseAssistantAutoReplyDeliveryOrder(
     !order.sentAt ||
     !Number.isFinite(Date.parse(order.sentAt))
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       'Assistant auto-reply delivery order requires a valid intent id and sentAt timestamp.',
     )
   }
@@ -1103,13 +1104,13 @@ function parseAssistantAutoReplyRouteMigrationValue(
   value: unknown,
 ): AssistantAutoReplyRouteMigrationValue {
   if (!isPlainObject(value) || !hasOnlyKeys(value, ['completedAt'])) {
-    throw new TypeError(
+    throw new ContractValidationError(
       'Assistant auto-reply route migration value must be an object.',
     )
   }
   const completedAt = normalizeUnknownNullableString(value.completedAt)
   if (!completedAt || !Number.isFinite(Date.parse(completedAt))) {
-    throw new TypeError(
+    throw new ContractValidationError(
       'Assistant auto-reply route migration requires a valid completion timestamp.',
     )
   }
@@ -1196,7 +1197,7 @@ function assertAssistantAutoReplyDeliveryOrder(
 
 function assertAssistantAutoReplyRouteDigest(routeDigest: string): void {
   if (!ASSISTANT_AUTO_REPLY_ROUTE_DIGEST_PATTERN.test(routeDigest)) {
-    throw new TypeError('Assistant auto-reply route digest must be a SHA-256 hex digest.')
+    throw new ContractValidationError('Assistant auto-reply route digest must be a SHA-256 hex digest.')
   }
 }
 

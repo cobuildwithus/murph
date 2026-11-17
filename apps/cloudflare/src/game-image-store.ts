@@ -21,6 +21,13 @@ export interface GameImagesBinding {
   };
 }
 
+export class GameImageInvalidError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "GameImageInvalidError";
+  }
+}
+
 export const GAME_IMAGE_DELIVERY_SECONDS = 300;
 export type GameImageVariant = "face" | "thumb" | "avatar" | "photo";
 const VARIANTS: Record<GameImageVariant, string> = { face: "gameface", thumb: "gamethumb", avatar: "gameavatar", photo: "gamephoto" };
@@ -58,7 +65,7 @@ export function createGameImageStore(input: {
       if (bytes.length === 0 || bytes.length > 4 * 1024 * 1024) throw new RangeError("Game image size is invalid.");
       const hash = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new Uint8Array(bytes))),
         (byte) => byte.toString(16).padStart(2, "0")).join("");
-      if (hash !== mediaId.split(".")[0]) throw new TypeError("Game image content key does not match.");
+      if (hash !== mediaId.split(".")[0]) throw new GameImageInvalidError("Game image content key does not match.");
       // Inspect while looking for a stored copy, which returns without needing
       // the answer. Inspect before durable upload admission: invalid input and
       // inspection outages cannot leave a receipt that blocks account cleanup.
@@ -131,7 +138,7 @@ async function requireValidImage(images: GameImagesBinding, bytes: Uint8Array, m
   try { info = await images.info(new Blob([new Uint8Array(bytes)]).stream()); }
   catch (error) {
     if (typeof error === "object" && error !== null && "code" in error && error.code === 9412) {
-      throw new TypeError("Game image content is invalid.");
+      throw new GameImageInvalidError("Game image content is invalid.");
     }
     throw new Error("Game image inspection failed.");
   }
@@ -141,7 +148,7 @@ async function requireValidImage(images: GameImagesBinding, bytes: Uint8Array, m
   if (!formats.includes(info.format) || typeof info.width !== "number" || typeof info.height !== "number"
     || !Number.isSafeInteger(info.width) || !Number.isSafeInteger(info.height)
     || info.width <= 0 || info.height <= 0 || info.width > 12_000 || info.height > 12_000
-    || info.width * info.height > 100_000_000) throw new TypeError("Game image content is invalid.");
+    || info.width * info.height > 100_000_000) throw new GameImageInvalidError("Game image content is invalid.");
 }
 
 function isImageId(value: string): boolean {

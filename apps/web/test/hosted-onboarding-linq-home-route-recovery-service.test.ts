@@ -1,3 +1,6 @@
+// This lane exercises unblocked planning; real risk ingress has separate PostgreSQL proof.
+vi.mock("@/src/lib/hosted-onboarding/linq-sender-block", () => ({ readHostedLinqSenderBlockWebhookResponse: vi.fn(async () => null) }));
+vi.mock("@/src/lib/hosted-onboarding/linq-group-risk-webhook", () => ({ observeHostedLinqGroupRiskWebhook: vi.fn(async () => undefined), recordHostedLinqGroupRosterEvidenceAfterCommit: vi.fn(async () => undefined) }));
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -66,6 +69,7 @@ function buildPrismaStub(): never {
   });
 
   return new Proxy({
+    hostedLinqGroupLeave: { findFirst: vi.fn().mockResolvedValue(null) },
     $transaction: async (run: (tx: unknown) => unknown) => run(delegate),
   }, {
     get: (target: Record<string, unknown>, property: string) =>

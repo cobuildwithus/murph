@@ -9,7 +9,6 @@ import {
 
 import {
   json,
-  readOptionalJsonObject,
 } from "../../json.ts";
 import type {
   WorkerRouteContext,
@@ -25,6 +24,7 @@ import {
 } from "../route-utils/log-details.ts";
 import {
   INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
+  readOptionalJsonInput,
 } from "../route-utils/json-body.ts";
 import {
   decodeRouteParam,
@@ -53,7 +53,7 @@ export async function handleUserDataDeleteRoute(
 ): Promise<Response> {
   const userId = decodeRouteParam(encodedUserId);
   try {
-    await readOptionalJsonObject(context.request, {
+    await readOptionalJsonInput(context.request, {
       limitBytes: INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
     });
   } catch (error) {

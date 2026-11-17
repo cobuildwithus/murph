@@ -75,7 +75,10 @@ describe("native companion signup token route", () => {
       platform: "ios",
       timeZone: "America/Denver",
     });
-    mocks.validateCompanionSignInRequestBody.mockReturnValue("connect");
+    mocks.validateCompanionSignInRequestBody.mockReturnValue({
+      connectionIntent: "connect",
+      sourceProviderSlug: "apple_health_kit",
+    });
     mocks.requireHostedCompanionMemberIdFromRequest.mockResolvedValue(
       "member_native",
     );
@@ -114,6 +117,7 @@ describe("native companion signup token route", () => {
       "member_native",
       "junction",
       "connect",
+      "apple_health_kit",
     );
   });
 

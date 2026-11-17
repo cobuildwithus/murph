@@ -1,3 +1,4 @@
+import { parseInput, RequestInputError } from "@murphai/hosted-execution/request-input";
 import {
   parseHostedBrowserVaultReplicaPublishRequest,
   parseHostedBrowserVaultReplicaPublishResponse,
@@ -25,7 +26,7 @@ export const POST = withJsonError(async (request: Request) => {
   });
   const writeFence = readHostedRuntimeWriteFenceHeaders(request);
   const rawBody = await readOptionalJsonObject(request);
-  const body = parseHostedBrowserVaultReplicaPublishRequest(rawBody);
+  const body = parseInput(rawBody, parseHostedBrowserVaultReplicaPublishRequest);
   const result = await publishHostedRuntimeBrowserVaultReplica({
     runtimeAuthority: readHostedRuntimeCallbackAuthority(request, writeFence),
     expectedWorkspaceVersion: writeFence.workspaceVersion,
@@ -74,7 +75,7 @@ function readHostedRuntimeWriteFenceHeaders(request: Request): {
   const workspaceVersion = request.headers.get(HOSTED_RUNTIME_WORKSPACE_VERSION_HEADER);
 
   if (!attemptId || !leaseGeneration || !workspaceVersion) {
-    throw new TypeError("Hosted browser-vault replica publish requires runtime write-fence headers.");
+    throw new RequestInputError("Hosted browser-vault replica publish requires runtime write-fence headers.");
   }
 
   return {

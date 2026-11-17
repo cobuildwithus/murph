@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { GameSchedule } from "@/src/lib/game/contract";
 import { decideJoin, type RuleChallenge, type RuleEntry, type RuleState, type TermWords } from "@/src/lib/game/rules";
 import { addDays, dayStartInstant } from "@/src/lib/game/time";
-import { buildGameView, gameMediaUrl, ticketView, visibleEntryIds, type GameViewInput } from "@/src/lib/game/views";
+import { buildGameView, gameMediaUrl, ticketView, visibleEntryIds, type GameTicketRow, type GameViewInput } from "@/src/lib/game/views";
 
 const LEO = "hbm_leo";
 const AVA = "hbm_ava";
@@ -63,8 +63,8 @@ function entry(memberId: string, dayIndex: number, attempt: number, overrides: P
   };
 }
 
-function view(state: RuleState, viewerId: string, now: Date, overrides: Partial<GameViewInput> = {}) {
-  return buildGameView({
+function viewInput(state: RuleState, viewerId: string, now: Date, overrides: Partial<GameViewInput> = {}): GameViewInput {
+  return {
     avatarKeys: new Map(),
     entryWords: new Map(state.entries.map((item) => [item.id, { text: `caption ${item.id}` }])),
     invitee: null,
@@ -83,7 +83,11 @@ function view(state: RuleState, viewerId: string, now: Date, overrides: Partial<
     viewerId,
     words: WORDS,
     ...overrides,
-  });
+  };
+}
+
+function view(state: RuleState, viewerId: string, now: Date, overrides: Partial<GameViewInput> = {}) {
+  return buildGameView(viewInput(state, viewerId, now, overrides));
 }
 
 /** `hour` o'clock local on a player's game day (defaults to noon). */
@@ -93,6 +97,43 @@ function noonOnDay(state: RuleState, memberId: string, dayIndex: number, hour = 
 }
 
 describe("weekly game views: tickets", () => {
+  it.each([
+    "eligible", "owed by viewer", "redeemed", "expired", "deleted player", "left player",
+    "hidden owing player", "hidden holder", "group", "unverified phone", "missing phone", "own number",
+  ])("projects the ticket message address only when eligible: %s", scenario => {
+    const state = liveState();
+    const phones = new Map([[AVA, "+12125550181"], [LEO, "+12125550182"]]);
+    const input = viewInput(state, LEO, JOIN_AT, { verifiedPhones: phones });
+    const row: GameTicketRow = {
+      id: "gtk_address", gameId: state.game.id, stakeKey: "gsk_breakfast",
+      owedBySeats: [1], owedToSeats: [0], players: state.players,
+      createdAt: JOIN_AT, redeemedAt: null, status: "open",
+    };
+    switch (scenario) {
+      case "owed by viewer": input.viewerId = AVA; break;
+      case "redeemed": row.status = "redeemed"; row.redeemedAt = JOIN_AT; break;
+      case "expired": input.now = new Date(JOIN_AT.getTime() + 14 * 86_400_000 + 1); break;
+      case "deleted player": row.players = [{ seat: 0, memberId: LEO }, { seat: 1, memberId: null }]; break;
+      case "left player": state.players[1].leftAt = JOIN_AT; break;
+      case "hidden owing player": input.hiddenMemberIds = new Set([AVA]); break;
+      case "hidden holder": input.hiddenMemberIds = new Set([LEO]); break;
+      case "group": state.game.seats = 10; input.multiplayer = true; break;
+      // The store admits only verified non-null phones to this map.
+      case "unverified phone": phones.delete(AVA); break;
+      case "missing phone": input.verifiedPhones = undefined; break;
+      case "own number": row.owedBySeats = [0]; break;
+    }
+    const ticket = ticketView(row, WORDS, input.viewerId, input.now, state.game.terms, input.hiddenMemberIds, input);
+    if (scenario === "eligible") {
+      expect(ticket).toMatchObject({ owedByPhone: phones.get(AVA), youHold: true, status: "open" });
+      const useBy = new Date(JOIN_AT.getTime() + 14 * 86_400_000);
+      expect(ticketView(row, WORDS, LEO, useBy, state.game.terms, undefined, input).owedByPhone).toBe(phones.get(AVA));
+      expect(ticketView(row, WORDS, LEO, JOIN_AT)).not.toHaveProperty("owedByPhone");
+    } else {
+      expect(ticket).not.toHaveProperty("owedByPhone");
+    }
+  });
+
   it.each([2, 10] as const)("keeps case budget but omits entry case state at maxPlayers=%s", seats => {
     const state = liveState();
     state.game.seats = seats;
@@ -187,6 +228,21 @@ describe("weekly game views: tickets", () => {
     expect(view(state, LEO, now).days[0]?.others[0]).toMatchObject({
       status: "posted", entry: { kind: "heart_rate", mediaUrls: expect.arrayContaining([expect.stringContaining(".jpg")]) },
     });
+  });
+
+  it("shows Not for me only for visible current players and bound invitees", () => {
+    const state = liveState();
+    const input = { profileNotForMe: new Map([[AVA, ["swimming", "yoga"]]]) };
+    expect(view(state, LEO, JOIN_AT, input).players[1].notForMe).toEqual(["swimming", "yoga"]);
+    expect(view(state, LEO, JOIN_AT, { profileNotForMe: new Map([[AVA, []]]) }).players[1]).not.toHaveProperty("notForMe");
+    expect(view(state, LEO, JOIN_AT, { ...input, hiddenMemberIds: new Set([AVA]) }).players[1]).not.toHaveProperty("notForMe");
+    state.players[1].leftAt = JOIN_AT;
+    expect(view(state, LEO, JOIN_AT, input).players[1]).not.toHaveProperty("notForMe");
+    state.players = [state.players[0]];
+    state.game.status = "invited";
+    const invitee = { memberId: AVA, name: "Opponent", photoKey: null, relationship: null };
+    expect(view(state, LEO, JOIN_AT, { ...input, invitee }).players[1].notForMe).toEqual(["swimming", "yoga"]);
+    expect(view(state, LEO, JOIN_AT, { ...input, invitee: { ...invitee, memberId: null } }).players[1]).not.toHaveProperty("notForMe");
   });
 
   it("prefers canonical profile photos and keeps private fallbacks out of shared exports", () => {

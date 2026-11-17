@@ -22,6 +22,7 @@ const HOSTED_BLIND_INDEX_PATTERN =
 
 export type HostedBlindIndexKind =
   | "assistant-input"
+  | "custom-connection-action"
   | "email"
   | "external-thread"
   | "external-thread-identity"
@@ -90,6 +91,14 @@ export function createHostedPhoneLookupKey(value: string | null | undefined): st
 /** Exact normalized handle set, serialized by the game audience owner. */
 export function createHostedGameAudienceLookupKeys(value: string): { current: string; candidates: string[] } {
   return { current: createHostedLookupKey("game-audience", value)!, candidates: createHostedLookupKeyReadCandidates("game-audience", value) };
+}
+
+/** One custom connection action's identity, canonically serialized by the custom connection owner. */
+export function createHostedCustomConnectionActionLookupKeys(value: string): { current: string; candidates: string[] } {
+  return {
+    current: createHostedLookupKey("custom-connection-action", value)!,
+    candidates: createHostedLookupKeyReadCandidates("custom-connection-action", value),
+  };
 }
 
 export function createHostedPhoneLookupKeyReadCandidates(

@@ -1097,8 +1097,9 @@ async function executeAutomationModelReviewBatch(
         requiresIndividualInspection.push(lookup)
         continue
       }
-      const result: Record<string, unknown> = JSON.parse(serialized)
-      results.push({ lookup, ...result })
+      // The batch already names its action and view; an id lookup repeats automationId.
+      const { action: _action, view: _view, ...result }: Record<string, unknown> = JSON.parse(serialized)
+      results.push(result.automationId === lookup ? result : { lookup, ...result })
       if (Buffer.byteLength(JSON.stringify(payload()), 'utf8') > resultBudget) {
         results.pop()
         requiresIndividualInspection.push(lookup)
@@ -1141,45 +1142,52 @@ function serializeAutomationToolResponse(
       break
     case 'patch':
     case 'save':
+      // Omit only what the action's default already says: ordinary records,
+      // no references, patches never create, and the action's own binding.
       payload = {
         action: response.action,
         automationId: response.automationId,
         assistantTargetOverride: response.assistantTargetOverride,
-        managed: response.managed,
-        contextReferences: response.contextReferences,
-        created: response.created,
+        managed: response.managed === true ? true : undefined,
+        contextReferences: response.contextReferences?.length ? response.contextReferences : undefined,
+        created: response.action === 'save' ? response.created : undefined,
         instructions: response.instructions,
         title: response.title,
         deliveryChannel: response.deliveryChannel,
         effectiveTimeZone: response.effectiveTimeZone,
         occurrenceProjection: response.occurrenceProjection,
-        routeBinding: response.routeBinding,
+        routeBinding: response.routeBinding === (response.action === 'save' ? 'current_conversation' : 'preserved')
+          ? undefined
+          : response.routeBinding,
         schedule: response.schedule,
         status: response.status,
         updatedAt: response.updatedAt,
       }
       break
-    case 'inspect':
+    case 'inspect': {
+      // Host-managed instructions are code-owned and reseeded on maintenance,
+      // so no edit flow needs them; the model-review view already omits them.
+      const managedInstructions = response.managed === true && response.instructions !== undefined
       payload = {
         action: response.action,
         view: response.view,
-        instructionsOmitted: response.instructionsOmitted,
+        instructionsOmitted: managedInstructions ? 'managed_model_preserved' : response.instructionsOmitted,
         executionInspection: response.executionInspection,
         automationId: response.automationId,
         assistantTargetOverride: response.assistantTargetOverride,
         managed: response.managed,
         contextReferences: response.contextReferences,
-        instructions: response.instructions,
+        instructions: managedInstructions ? undefined : response.instructions,
         title: response.title,
         deliveryChannel: response.deliveryChannel,
         effectiveTimeZone: response.effectiveTimeZone,
         occurrenceProjection: response.occurrenceProjection,
-        routeBinding: response.routeBinding,
         schedule: response.schedule,
         status: response.status,
         updatedAt: response.updatedAt,
       }
       break
+    }
   }
   try {
     const text = JSON.stringify(payload) ?? 'null'

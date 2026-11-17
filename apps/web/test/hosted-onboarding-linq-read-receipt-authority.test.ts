@@ -1,3 +1,6 @@
+// This lane exercises unblocked planning; real risk ingress has separate PostgreSQL proof.
+vi.mock("@/src/lib/hosted-onboarding/linq-sender-block", () => ({ readHostedLinqSenderBlockWebhookResponse: vi.fn(async () => null) }));
+vi.mock("@/src/lib/hosted-onboarding/linq-group-risk-webhook", () => ({ observeHostedLinqGroupRiskWebhook: vi.fn(async () => undefined), recordHostedLinqGroupRosterEvidenceAfterCommit: vi.fn(async () => undefined) }));
 import { linqRoster } from "./support/linq-roster";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -176,7 +179,7 @@ describe("hosted Linq read receipt route authority", () => {
     });
 
     await expect(handleHostedOnboardingLinqWebhook({
-      prisma: {} as never,
+      prisma: { hostedLinqGroupLeave: { findFirst: vi.fn().mockResolvedValue(null) } } as never,
       rawBody: "{}",
       signature: null,
       timestamp: null,
@@ -188,7 +191,7 @@ describe("hosted Linq read receipt route authority", () => {
     expect(mocks.assertHostedLinqRouteEgressAuthority).not.toHaveBeenCalled();
     expect(mocks.readHostedThreadRouteByThreadIdentity).toHaveBeenCalledWith({
       channel: "linq",
-      prisma: {},
+      prisma: expect.objectContaining({ hostedLinqGroupLeave: expect.any(Object) }),
       threadId: "chat_123",
     });
     expect(mocks.getHostedLinqChatSummary).toHaveBeenCalledWith({
@@ -238,7 +241,7 @@ describe("hosted Linq read receipt route authority", () => {
     const webhookReceivedAt = new Date("2026-11-05T12:00:00.000Z");
 
     await expect(handleHostedOnboardingLinqWebhook({
-      prisma: {} as never,
+      prisma: { hostedLinqGroupLeave: { findFirst: vi.fn().mockResolvedValue(null) } } as never,
       rawBody: "{}",
       scheduleAfterResponse: (task) => { scheduled.push(task); },
       signature: null,

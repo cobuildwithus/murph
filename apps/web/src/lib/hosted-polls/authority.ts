@@ -32,17 +32,17 @@ export async function authorizePollConversation(input: {
   });
   if (wake && isHostedLinqConversationMessageWake(wake)) {
     const message = wake.message.linqMessage;
-    if (message.isFromMe || message.service?.toLowerCase() !== "imessage") throw new TypeError("Native polls require an incoming iMessage.");
+    if (message.isFromMe || message.service?.toLowerCase() !== "imessage") throw hostedOnboardingError({ code: "INVALID_REQUEST", httpStatus: 400, message: "Native polls require an incoming iMessage." });
     const assertion = await assertHostedLinqRecentInboundEngagementForRuntime({
       authorityCheckOnly: true, memberId: input.memberId, prisma, target: message.chatId,
     });
-    if (assertion.resolvedRoute.target !== message.chatId) throw new TypeError("Poll conversation changed.");
+    if (assertion.resolvedRoute.target !== message.chatId) throw hostedOnboardingError({ code: "INVALID_REQUEST", httpStatus: 400, message: "Poll conversation changed." });
     if (input.request.request.action === "create" || input.request.request.action === "vote") {
       const { policy } = await resolveHostedLinqEgressPolicyForRuntime({
         prisma, target: message.chatId, fromPhoneNumber: assertion.resolvedRoute.fromPhoneNumber,
         linePhoneNumberLookupKey: assertion.linePhoneNumberLookupKey, targetKind: "thread",
       });
-      if (policy.kind === "block") throw new TypeError("Poll delivery is blocked for this conversation.");
+      if (policy.kind === "block") throw hostedOnboardingError({ code: "INVALID_REQUEST", httpStatus: 400, message: "Poll delivery is blocked for this conversation." });
     }
     return { channel: "linq", target: message.chatId };
   }
@@ -50,13 +50,13 @@ export async function authorizePollConversation(input: {
     const message = wake.message.telegramMessage;
     if (message.threadIsDirect === true) {
       const routing = await readHostedMemberRoutingState({ memberId: input.memberId, prisma });
-      if (routing?.telegramThreadId !== message.threadId) throw new TypeError("Poll conversation changed.");
+      if (routing?.telegramThreadId !== message.threadId) throw hostedOnboardingError({ code: "INVALID_REQUEST", httpStatus: 400, message: "Poll conversation changed." });
     } else {
       if (!wake.message.routeAuthority || wake.message.routeAuthority.containerMemberId !== input.memberId) {
-        throw new TypeError("Poll conversation is not authorized.");
+        throw hostedOnboardingError({ code: "INVALID_REQUEST", httpStatus: 400, message: "Poll conversation is not authorized." });
       }
       await assertHostedThreadRouteEgressAuthority({ authority: wake.message.routeAuthority, prisma });
-      if (wake.message.routeAuthority.threadId !== message.threadId) throw new TypeError("Poll conversation changed.");
+      if (wake.message.routeAuthority.threadId !== message.threadId) throw hostedOnboardingError({ code: "INVALID_REQUEST", httpStatus: 400, message: "Poll conversation changed." });
     }
     return { channel: "telegram", target: message.threadId };
   }
@@ -74,7 +74,7 @@ async function authorizeScheduledPollConversation(input: {
     const assertion = await assertHostedLinqRecentInboundEngagementForRuntime({
       authorityCheckOnly: true, memberId: input.memberId, prisma, target: route.target,
     });
-    if (assertion.resolvedRoute.target !== route.target) throw new TypeError("Poll conversation changed.");
+    if (assertion.resolvedRoute.target !== route.target) throw hostedOnboardingError({ code: "INVALID_REQUEST", httpStatus: 400, message: "Poll conversation changed." });
     const { policy, service } = await resolveHostedLinqEgressPolicyForRuntime({
       prisma, target: route.target, fromPhoneNumber: assertion.resolvedRoute.fromPhoneNumber,
       linePhoneNumberLookupKey: assertion.linePhoneNumberLookupKey, targetKind: "thread",
@@ -83,7 +83,7 @@ async function authorizeScheduledPollConversation(input: {
       throw hostedOnboardingError({ code: "HOSTED_POLL_UNSUPPORTED_SERVICE", message: "Native polls require a confirmed iMessage conversation.", httpStatus: 400, retryable: false });
     }
     if ((request.action === "create" || request.action === "vote") && policy.kind === "block") {
-      throw new TypeError("Poll delivery is blocked for this conversation.");
+      throw hostedOnboardingError({ code: "INVALID_REQUEST", httpStatus: 400, message: "Poll delivery is blocked for this conversation." });
     }
   } else {
     await assertHostedAssistantNotificationRouteAuthority({

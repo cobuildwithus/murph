@@ -1,7 +1,9 @@
+import { RequestInputError } from "@murphai/hosted-execution/request-input";
+import { classifyPublicRouteError } from "../src/worker/errors.ts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildRuntimeProcessingSummaryEntry, type RuntimeProcessingDiagnostics } from "../src/user-runner/diagnostics.ts";
 import type { HostedRuntimeEnsureProcessingResponse } from "@murphai/hosted-execution/orchestration-control";
-import type { HostedRuntimeOwnerResponse, HostedRuntimeOwnerSnapshot } from "@murphai/hosted-execution/runtime-owner";
+import { HOSTED_RUNTIME_START_BUDGET_INTERVAL_MS, type HostedRuntimeOwnerResponse, type HostedRuntimeOwnerSnapshot } from "@murphai/hosted-execution/runtime-owner";
 import { ensurePostgresRuntimeProcessing, HOSTED_RUNTIME_ADMISSION_BLOCKED_RETRY_MS } from "../src/runtime-processing.ts";
 import { commandHostedRuntimeOwner } from "../src/runtime-owner-client.ts";
 import { recordHostedRuntimeOwnerCompletion } from "../src/runtime-owner-completion.ts";
@@ -15,7 +17,7 @@ import { RuntimeInvocationPreparation } from "../src/runtime-invocation-preparat
 import type { WorkerActiveRuntimeUserFenceResult } from "../src/worker-contracts.ts";
 
 vi.mock("../src/runtime-owner-client.ts", () => ({ commandHostedRuntimeOwner: vi.fn() }));
-vi.mock("../src/runtime-owner-completion.ts", () => ({ recordHostedRuntimeOwnerCompletion: vi.fn(async () => true) }));
+vi.mock("../src/runtime-owner-completion.ts", () => ({ recordHostedRuntimeOwnerCompletion: vi.fn(async () => ({ completed: true })) }));
 vi.mock("../src/runtime-invocation-preparation.ts", () => ({
   RuntimeInvocationPreparation: class {
     constructor(private readonly input: ConstructorParameters<typeof RuntimeInvocationPreparation>[0]) {}
@@ -64,6 +66,22 @@ function harness() {
 }
 
 describe("Postgres runtime orchestration", () => {
+  it.each(["request", "canonical"] as const)("classifies a mismatched %s admission by its source", async sourceKind => {
+    const { source, container } = harness();
+    const admission = response(owner({ userId: "synthetic-other" }));
+    if (sourceKind === "canonical") vi.mocked(commandHostedRuntimeOwner).mockResolvedValueOnce(admission);
+    const error = await ensurePostgresRuntimeProcessing(source, {
+      ...request, ...(sourceKind === "request" ? { admission } : {}),
+    }).then(() => { throw new Error("Expected rejection."); }, error => error);
+    expect(error).toBeInstanceOf(sourceKind === "request" ? RequestInputError : TypeError);
+    expect(classifyPublicRouteError(error)).toEqual(sourceKind === "request"
+      ? { status: 400, error: "Invalid request." }
+      : { status: 500, error: "Internal error." });
+    expect(commandHostedRuntimeOwner).toHaveBeenCalledTimes(sourceKind === "request" ? 0 : 1);
+    expect(container.ensureProcessing).not.toHaveBeenCalled();
+    expect(container.startSupervisedInvocation).not.toHaveBeenCalled();
+  });
+
   it("wakes a retained small target without selecting the primary namespace", async () => {
     const h = harness();
     const retainedTarget = `runner-small--v-release_1--${"1".repeat(32)}`;
@@ -85,7 +103,7 @@ describe("Postgres runtime orchestration", () => {
   });
 
   it.each([
-    "resolve_retained_target", "container_readiness", "prepare_invocation",
+    "resolve_retained_target", "prepare_invocation",
     "start_invocation", "owner_accepted",
   ] as const)("summarizes the observed %s rejection without changing the thrown object", async operation => {
     const { source, container } = harness();
@@ -101,7 +119,6 @@ describe("Postgres runtime orchestration", () => {
       ? privateDetails : Object.assign(new Error(privateDetails.message), privateDetails));
     vi.mocked(commandHostedRuntimeOwner).mockResolvedValue(response(starting, "updated"));
     if (operation === "resolve_retained_target") container.resolveRetainedStandbySlot.mockRejectedValueOnce(failure);
-    else if (operation === "container_readiness") container.ensureReadyForProcessing.mockRejectedValueOnce(failure);
     else if (operation === "prepare_invocation") {
       vi.spyOn(RuntimeInvocationPreparation.prototype, "prepareForFreshStart")
         .mockReturnValueOnce(async () => { throw failure; });
@@ -183,8 +200,10 @@ describe("Postgres runtime orchestration", () => {
     const secondFailure = Object.freeze(new Error("Synthetic second failure"));
     const enteredAt = Date.now();
     // Capture at command settlement, as the route's finally does.
+    // Background work: its readiness rejection still throws, so either sibling can settle first.
     const finished = ensurePostgresRuntimeProcessing(source, {
-      ...request, admission: response(owner({ phase: "starting" }), "claimed"),
+      ...request, processingMode: "system_mailbox",
+      admission: response(owner({ phase: "starting", processingMode: "system_mailbox" }), "claimed"),
     }, diagnostics).then(
       () => { throw new Error("Expected synthetic processing rejection."); },
       error => ({ error, entry: buildRuntimeProcessingSummaryEntry(diagnostics, undefined, enteredAt) }),
@@ -299,7 +318,7 @@ describe("Postgres runtime orchestration", () => {
     const successor = owner({ attemptId: "attempt-b", generation: "2", phase: status === "claimed" ? "starting" : "active" });
     container.readSupervisedInvocation.mockResolvedValue({ attemptId: "attempt-a", generation: "1", state: "completed" });
     // Another completion caller may already have released the old generation.
-    vi.mocked(recordHostedRuntimeOwnerCompletion).mockResolvedValueOnce(false);
+    vi.mocked(recordHostedRuntimeOwnerCompletion).mockResolvedValueOnce({ completed: false });
     vi.mocked(commandHostedRuntimeOwner)
       .mockResolvedValueOnce(response(completed))
       .mockImplementation(async ({ command }) => command.operation === "claim"
@@ -465,7 +484,7 @@ describe("Postgres runtime orchestration", () => {
     const { source, container } = harness();
     const completed = owner({ processingMode: "system_mailbox", phase: "retiring", completedAt: new Date().toISOString() });
     container.readSupervisedInvocation.mockResolvedValue({ attemptId: "attempt-a", generation: "1", state: "completed" });
-    vi.mocked(recordHostedRuntimeOwnerCompletion).mockResolvedValueOnce(false);
+    vi.mocked(recordHostedRuntimeOwnerCompletion).mockResolvedValueOnce({ completed: false });
     vi.mocked(commandHostedRuntimeOwner).mockResolvedValueOnce(response(completed))
       .mockResolvedValue(state === "blocked" ? response(null, "blocked")
         : response(state === "foreign" ? { ...completed, userId: "other-member", generation: "2" } : completed));
@@ -514,7 +533,7 @@ describe("Postgres runtime orchestration", () => {
     const { source, container } = harness();
     vi.mocked(commandHostedRuntimeOwner).mockResolvedValue(response(owner({ phase: "retiring", completedAt: new Date().toISOString() })));
     container.readSupervisedInvocation.mockResolvedValue({ attemptId: "attempt-a", generation: "1", state: "completed" });
-    let complete!: (value: boolean) => void;
+    let complete!: (value: { completed: true }) => void;
     vi.mocked(recordHostedRuntimeOwnerCompletion).mockImplementationOnce(() => new Promise(resolve => { complete = resolve; }));
     const diagnostics: RuntimeProcessingDiagnostics = { stage: "admission", details: {} };
     const result = ensurePostgresRuntimeProcessing(source, { ...request, commandTimeoutMs: 2_000 }, diagnostics);
@@ -522,7 +541,7 @@ describe("Postgres runtime orchestration", () => {
     expect(await result).toMatchObject({ kind: "retry_later" });
     expect(diagnostics.details.runtimeProcessingRetryReason).toBe("command_budget_exhausted");
     expect(diagnostics.details.runtimeProcessingLastObservedFailedOperation).toBe("complete_invocation");
-    complete(true);
+    complete({ completed: true });
     await vi.advanceTimersByTimeAsync(0);
     expect(commandHostedRuntimeOwner).toHaveBeenCalledOnce();
     expect(container.startSupervisedInvocation).not.toHaveBeenCalled();
@@ -595,6 +614,82 @@ describe("Postgres runtime orchestration", () => {
     expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command.operation)).toEqual(["claim"]);
   });
 
+  it("retires a foreground start whose readiness rejects before launch and starts its successor in the same command", async () => {
+    const { source, container, binding } = harness();
+    container.ensureReadyForProcessing.mockRejectedValueOnce(new Error("Synthetic readiness failure"));
+    container.readStandbySlotBinding.mockResolvedValueOnce({ ...binding, state: "retired", claimId: null, userId: null });
+    // Release clears the assignment, so the successor carries a new allocation and no target.
+    const successorAllocationId = "standby-claim-22222222-2222-4222-8222-222222222222";
+    const successor = owner({ attemptId: "attempt-b", generation: "2", phase: "starting", workspaceVersion: null,
+      allocationId: successorAllocationId, runnerContainerName: null });
+    let claims = 0;
+    vi.mocked(commandHostedRuntimeOwner).mockImplementation(async ({ command }) => {
+      if (command.operation === "claim") return response((claims += 1) === 1 ? owner({ phase: "starting", workspaceVersion: null }) : successor, "claimed");
+      return response(command.operation === "select_target" ? { ...successor, runnerContainerName: command.runnerContainerName } : null, "updated");
+    });
+    const diagnostics: RuntimeProcessingDiagnostics = { stage: "admission", details: {} };
+    const enteredAt = Date.now();
+    const result = await ensurePostgresRuntimeProcessing(source, request, diagnostics);
+    expect(result).toMatchObject({ kind: "runtime_processing_accepted", action: "started", runtimeAttemptId: "attempt-b" });
+    // The failed attempt launched nothing; only its exact target is stopped.
+    expect(container.retireStandbySlot).toHaveBeenCalledExactlyOnceWith({ claimId: allocationId, target: { slotName: target, userId: request.userId } });
+    expect(container.startSupervisedInvocation).toHaveBeenCalledTimes(1);
+    const successorTarget = `runner--v-release_1--${successorAllocationId.slice("standby-claim-".length).replaceAll("-", "")}`;
+    expect(successorTarget).not.toBe(target);
+    expect(container.bindStandbySlot).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ claimId: successorAllocationId, slotName: successorTarget }));
+    expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command))
+      .toMatchObject([{ operation: "claim" }, { operation: "retire", attemptId: "attempt-a", generation: "1", completed: false },
+        { operation: "release", attemptId: "attempt-a", generation: "1", runnerContainerName: target },
+        { operation: "claim" }, { operation: "select_target", attemptId: "attempt-b", runnerContainerName: successorTarget },
+        { operation: "accepted", attemptId: "attempt-b", generation: "2" }]);
+    expect(buildRuntimeProcessingSummaryEntry(diagnostics, result, enteredAt)).toMatchObject({ level: "info", redactedJson: {
+      runtimeProcessingOutcome: "runtime_processing_accepted", runtimeProcessingLastObservedFailedOperation: "container_readiness" } });
+  });
+
+  it("keeps a failed foreground start pinned when its target stop is not proven", async () => {
+    const { source, container } = harness();
+    container.ensureReadyForProcessing.mockRejectedValueOnce(new Error("Synthetic readiness failure"));
+    vi.mocked(commandHostedRuntimeOwner)
+      .mockResolvedValueOnce(response(owner({ phase: "starting", workspaceVersion: null }), "claimed"))
+      .mockResolvedValue(response(null, "updated"));
+    const diagnostics: RuntimeProcessingDiagnostics = { stage: "admission", details: {} };
+    // The harness slot still reads as bound after the retirement request.
+    await expect(ensurePostgresRuntimeProcessing(source, request, diagnostics)).resolves.toMatchObject({ kind: "retry_later" });
+    expect(diagnostics.details.runtimeProcessingRetryReason).toBe("retirement_pending");
+    expect(container.startSupervisedInvocation).not.toHaveBeenCalled();
+    expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command.operation)).toEqual(["claim", "retire"]);
+  });
+
+  it.each([
+    ["a background start, which foreground priority may have rejected", "system_mailbox", "claimed_here", new Error("Synthetic readiness failure")],
+    ["a supplied claim, which another command may have launched", "default", "supplied", new Error("Synthetic readiness failure")],
+    ["a readiness deadline, which leaves the start in flight", "default", "claimed_here", Object.assign(new Error("Synthetic readiness deadline"), { name: "TimeoutError" })],
+  ] as const)("leaves %s to the startup deadline", async (_label, processingMode, admission, failure) => {
+    const { source, container } = harness();
+    container.ensureReadyForProcessing.mockRejectedValueOnce(failure);
+    const claimed = response(owner({ phase: "starting", processingMode, workspaceVersion: null }), "claimed");
+    vi.mocked(commandHostedRuntimeOwner).mockResolvedValue(claimed);
+    const diagnostics: RuntimeProcessingDiagnostics = { stage: "admission", details: {} };
+    const enteredAt = Date.now();
+    const settled = await ensurePostgresRuntimeProcessing(source, {
+      ...request, processingMode, ...(admission === "supplied" ? { admission: claimed } : {}),
+    }, diagnostics).then(result => ({ result }), (error: unknown) => ({ error }));
+    if (failure.name === "TimeoutError") {
+      expect(settled).toMatchObject({ result: { kind: "retry_later" } });
+      expect(diagnostics.details.runtimeProcessingRetryReason).toBe("container_rpc_timeout");
+    } else {
+      // The thrown object and its redacted summary are unchanged.
+      expect(settled).toEqual({ error: failure });
+      expect(buildRuntimeProcessingSummaryEntry(diagnostics, undefined, enteredAt).redactedJson).toEqual({
+        runtimeProcessingActiveMode: processingMode, runtimeProcessingLastObservedFailedOperation: "container_readiness",
+        runtimeProcessingStage: "fresh_start", runtimeProcessingOutcome: "threw", runtimeProcessingElapsedMs: expect.any(Number) });
+    }
+    expect(container.retireStandbySlot).not.toHaveBeenCalled();
+    expect(container.startSupervisedInvocation).not.toHaveBeenCalled();
+    expect(vi.mocked(commandHostedRuntimeOwner).mock.calls.map(([input]) => input.command.operation))
+      .toEqual(admission === "supplied" ? [] : ["claim"]);
+  });
+
   it("always lets the slot prepare launch, whatever readiness advertises", async () => {
     const { source, container } = harness();
     container.ensureReadyForProcessing.mockResolvedValue({ kind: "ready" });
@@ -626,6 +721,27 @@ describe("Postgres runtime orchestration", () => {
     await expect(ensurePostgresRuntimeProcessing(source, request, diagnostics)).resolves.toMatchObject({ kind: "retry_later" });
     expect(diagnostics.details.runtimeProcessingRetryReason).toBe(reason);
     if (scenario === "uncertain-wake") expect(diagnostics).toMatchObject({ attemptId: "attempt-a", leaseGeneration: "1", stage: "active_wake" });
+  });
+
+  it.each([
+    ["2026-01-01T00:01:05.000Z", 60_000],
+    [undefined, HOSTED_RUNTIME_START_BUDGET_INTERVAL_MS],
+    ["unreadable", HOSTED_RUNTIME_START_BUDGET_INTERVAL_MS],
+  ] as const)("defers an exhausted start budget (%s)", async (retryAt, delayMs) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:05Z"));
+    const { source, container } = harness();
+    const diagnostics: RuntimeProcessingDiagnostics = { stage: "admission", details: {} };
+    vi.mocked(commandHostedRuntimeOwner).mockResolvedValue({
+      ...response(null, "blocked"), blockedReason: "start_budget", retryAt,
+    });
+    await expect(ensurePostgresRuntimeProcessing(source, request, diagnostics)).resolves.toEqual({
+      kind: "retry_later", retryAt: new Date(Date.now() + delayMs).toISOString(),
+    });
+    expect(diagnostics.details.runtimeProcessingRetryReason).toBe("start_budget_exhausted");
+    expect(commandHostedRuntimeOwner).toHaveBeenCalledOnce();
+    expect(container.startSupervisedInvocation).not.toHaveBeenCalled();
+    expect(container.bindStandbySlot).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -830,7 +946,7 @@ describe("Postgres runtime orchestration", () => {
     container.ensureProcessing.mockResolvedValue({ kind: "start-required", reason: "no-active-child" });
     container.readSupervisedInvocation.mockResolvedValue({ attemptId: "attempt-a", generation: "1", state: "completed" });
     vi.mocked(commandHostedRuntimeOwner).mockResolvedValue(response(owner()));
-    vi.mocked(recordHostedRuntimeOwnerCompletion).mockResolvedValueOnce(false);
+    vi.mocked(recordHostedRuntimeOwnerCompletion).mockResolvedValueOnce({ completed: false });
     expect(await ensurePostgresRuntimeProcessing(source, request)).toMatchObject({ kind: "retry_later" });
     expect(commandHostedRuntimeOwner).toHaveBeenCalledTimes(2);
     expect(recordHostedRuntimeOwnerCompletion).toHaveBeenCalledOnce();
@@ -1012,6 +1128,20 @@ describe("completed demand recovery deadline", () => {
     expect(h.commands.map(c => c.operation)).toEqual(["claim"]);
     expect(h.container.retireStandbySlot).not.toHaveBeenCalled();
     expect(h.container.ensureProcessing).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { age: 1_000, phase: "retiring", delayMs: 500 },
+    { age: 4_999, phase: "retiring", delayMs: 500 },
+    { age: 5_000, phase: "retiring", delayMs: 3_000 },
+    { age: 1_000, phase: "active", delayMs: 3_000 },
+  ] as const)("rechecks an unsettled completion after $delayMs ms at age $age ($phase)", async ({ age, phase, delayMs }) => {
+    const h = await completedHarness({ age, phase });
+    const diagnostics: RuntimeProcessingDiagnostics = { stage: "admission", details: {} };
+    expect(await ensurePostgresRuntimeProcessing(h.source, request, diagnostics))
+      .toEqual({ kind: "retry_later", retryAt: new Date(Date.now() + delayMs).toISOString() });
+    expect(diagnostics.details.runtimeProcessingRetryReason).toBe("completion_unconfirmed");
+    expect(h.container.retireStandbySlot).not.toHaveBeenCalled();
   });
 
   it.each(["active", "unknown", "mismatch"] as const)("retires warm completion past the deadline with %s liveness before fresh admission", async fence => {

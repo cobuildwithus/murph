@@ -1,0 +1,386 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`every shape a recap can take > draws card-initial 1`] = `
+[
+  "face -42,152.9 486x312",
+  "name 20,400.9 362x50.3",
+  "lead 20,449.1 362x49",
+  "title 20,496.1 362x112",
+  "rule 20,606.1 362x23",
+  "line 20,627.1 362x74",
+]
+`;
+
+exports[`every shape a recap can take > draws card-long-title 1`] = `
+[
+  "face -42,68.4 486x312",
+  "name 20,316.4 362x50.3",
+  "lead 20,364.6 362x49",
+  "title 20,411.6 362x250",
+  "rule 20,659.6 362x23",
+  "line 20,680.6 362x105",
+]
+`;
+
+exports[`every shape a recap can take > draws card-photo 1`] = `
+[
+  "face -42,175.9 486x312",
+  "name 20,423.9 362x50.3",
+  "lead 20,472.1 362x49",
+  "title 20,519.1 362x66",
+  "rule 20,583.1 362x23",
+  "line 20,604.1 362x74",
+]
+`;
+
+exports[`every shape a recap can take > draws cards-none 1`] = `
+[
+  "song 0,0 402x874",
+]
+`;
+
+exports[`every shape a recap can take > draws cards-two 1`] = `
+[
+  "face -42,175.9 486x312",
+  "name 20,423.9 362x50.3",
+  "lead 20,472.1 362x49",
+  "title 20,519.1 362x66",
+  "rule 20,583.1 362x23",
+  "line 20,604.1 362x74",
+]
+`;
+
+exports[`every shape a recap can take > draws cover 1`] = `
+[
+  "words 0,0 402x874",
+]
+`;
+
+exports[`every shape a recap can take > draws cover-failed-photo 1`] = `
+[
+  "picture -38,13.9 478x598.7",
+  "words 0,0 402x874",
+]
+`;
+
+exports[`every shape a recap can take > draws cover-failed-words 1`] = `
+[
+  "words 0,0 402x874",
+]
+`;
+
+exports[`every shape a recap can take > draws cover-label 1`] = `
+[
+  "words 0,0 402x874",
+]
+`;
+
+exports[`every shape a recap can take > draws cover-long-title 1`] = `
+[
+  "words 0,0 402x874",
+]
+`;
+
+exports[`every shape a recap can take > draws emoji-cover-card 1`] = `
+[
+  "face -42,152.9 486x312",
+  "name 20,400.9 362x50.3",
+  "lead 20,449.1 362x49",
+  "title 20,496.1 362x112",
+  "rule 20,606.1 362x23",
+  "line 20,627.1 362x74",
+]
+`;
+
+exports[`every shape a recap can take > draws emoji-quote-name 1`] = `
+[
+  "setup 14,132.1 374x99",
+  "picture -48,165.1 498x612",
+  "payoff 14,711.1 374x80.8",
+]
+`;
+
+exports[`every shape a recap can take > draws kicker-sage 1`] = `
+[
+  "setup 14,116.5 374x36.3",
+  "setup 14,154.8 374x99",
+  "picture -38,181.8 478x598.7",
+  "payoff 14,708.5 374x99",
+]
+`;
+
+exports[`every shape a recap can take > draws pair-missed 1`] = `
+[
+  "setup 14,232.5 374x99",
+  "picture -60,259.5 338x405",
+  "second picture 124,259.5 338x405",
+  "payoff 14,592.5 374x99",
+]
+`;
+
+exports[`every shape a recap can take > draws pair-slate 1`] = `
+[
+  "setup 14,232.5 374x99",
+  "picture -60,259.5 338x405",
+  "second picture 124,305 338x314",
+  "payoff 14,592.5 374x99",
+]
+`;
+
+exports[`every shape a recap can take > draws photo-wide 1`] = `
+[
+  "setup 14,241.3 374x99",
+  "picture -38,268.3 478x429.5",
+  "payoff 14,625.8 374x57",
+]
+`;
+
+exports[`every shape a recap can take > draws print 1`] = `
+[
+  "setup 14,135.7 374x99",
+  "picture -38,162.7 478x598.7",
+  "payoff 14,689.3 374x99",
+]
+`;
+
+exports[`every shape a recap can take > draws print-missed 1`] = `
+[
+  "setup 14,135.7 374x99",
+  "picture -38,162.7 478x598.7",
+  "payoff 14,689.3 374x99",
+]
+`;
+
+exports[`every shape a recap can take > draws print-unfinished 1`] = `
+[
+  "setup 14,135.7 374x99",
+  "picture -38,162.7 478x598.7",
+  "payoff 14,689.3 374x99",
+]
+`;
+
+exports[`every shape a recap can take > draws quote-long 1`] = `
+[
+  "setup 14,103.1 374x99",
+  "picture -48,136.1 498x612",
+  "payoff 14,682.1 374x138.8",
+]
+`;
+
+exports[`every shape a recap can take > draws result-long-names 1`] = `
+[
+  "score 14,312 374x118",
+  "title 14,430 374x128",
+  "stake 57,568 288x202",
+  "footer -8,786 418x32",
+]
+`;
+
+exports[`every shape a recap can take > draws result-no-cover 1`] = `
+[
+  "score 14,355.4 374x118",
+  "title 14,473.4 374x74",
+  "stake 57,557.4 288x202",
+  "footer -8,786 418x32",
+]
+`;
+
+exports[`every shape a recap can take > draws result-two-digit-score 1`] = `
+[
+  "score 14,355.4 374x118",
+  "title 14,473.4 374x74",
+  "stake 57,557.4 288x202",
+  "footer -8,786 418x32",
+]
+`;
+
+exports[`every shape a recap can take > draws scene-failed-photo 1`] = `
+[
+  "setup 14,177.7 374x57",
+  "picture -38,162.7 478x598.7",
+  "payoff 14,689.3 374x57",
+]
+`;
+
+exports[`every shape a recap can take > draws scene-failed-words 1`] = `
+[
+  "setup 14,371.1 374x99",
+  "next 14,472.1 374x80.8",
+]
+`;
+
+exports[`every shape a recap can take > draws scene-night 1`] = `
+[
+  "setup 14,165 374x57",
+  "picture -48,156 498x612",
+  "payoff 14,702 374x57",
+]
+`;
+
+exports[`every shape a recap can take > draws scene-quote-sienna 1`] = `
+[
+  "setup 14,132.1 374x99",
+  "picture -48,165.1 498x612",
+  "payoff 14,711.1 374x80.8",
+]
+`;
+
+exports[`every shape a recap can take > draws sheet-3 1`] = `
+[
+  "setup 14,319 374x99",
+  "picture -54,346 510x274",
+  "payoff 14,548 374x57",
+]
+`;
+
+exports[`every shape a recap can take > draws sheet-4 1`] = `
+[
+  "setup 14,142 374x99",
+  "picture -54,169 510x628",
+  "payoff 14,725 374x57",
+]
+`;
+
+exports[`every shape a recap can take > draws sheet-5 1`] = `
+[
+  "setup 14,230.5 374x99",
+  "picture -54,257.5 510x451",
+  "payoff 14,636.5 374x57",
+]
+`;
+
+exports[`every shape a recap can take > draws sheet-6 1`] = `
+[
+  "setup 14,260 374x99",
+  "picture -54,287 510x392",
+  "payoff 14,607 374x57",
+]
+`;
+
+exports[`every shape a recap can take > draws sheet-7 1`] = `
+[
+  "setup 14,100 374x99",
+  "picture -54,127 510x712",
+  "payoff 14,767 374x57",
+]
+`;
+
+exports[`every shape a recap can take > draws sheet-9 1`] = `
+[
+  "setup 14,201 374x99",
+  "picture -54,228 510x510",
+  "payoff 14,666 374x57",
+]
+`;
+
+exports[`every shape a recap can take > draws song-long-title 1`] = `
+[
+  "song 0,0 402x874",
+]
+`;
+
+exports[`every shape a recap can take > draws song-timed 1`] = `
+[
+  "song 0,0 402x874",
+]
+`;
+
+exports[`every shape a recap can take > draws song-untimed 1`] = `
+[
+  "song 0,0 402x874",
+]
+`;
+
+exports[`every shape a recap can take > draws stake-both-win 1`] = `
+[
+  "score 14,335.8 374x118",
+  "title 14,453.8 374x74",
+  "stake 57,537.8 288x202",
+  "caption 14,745.8 374x38.2",
+  "footer -8,786 418x32",
+]
+`;
+
+exports[`every shape a recap can take > draws stake-even 1`] = `
+[
+  "score 14,355.4 374x118",
+  "title 14,473.4 374x74",
+  "stake 14,537.4 374x40.8",
+  "footer -8,786 418x32",
+]
+`;
+
+exports[`every shape a recap can take > draws stake-even-every-day 1`] = `
+[
+  "score 14,355.4 374x118",
+  "title 14,473.4 374x74",
+  "stake 14,537.4 374x61.6",
+  "footer -8,786 418x32",
+]
+`;
+
+exports[`every shape a recap can take > draws stake-prize 1`] = `
+[
+  "score 14,355.4 374x118",
+  "title 14,473.4 374x74",
+  "stake 57,557.4 288x202",
+  "footer -8,786 418x32",
+]
+`;
+
+exports[`every shape a recap can take > draws stake-prize-long 1`] = `
+[
+  "score 14,355.4 374x118",
+  "title 14,473.4 374x74",
+  "stake 57,557.4 288x202",
+  "footer -8,786 418x32",
+]
+`;
+
+exports[`every shape a recap can take > draws stake-prize-own-words 1`] = `
+[
+  "score 14,355.4 374x118",
+  "title 14,473.4 374x74",
+  "stake 57,557.4 288x202",
+  "footer -8,786 418x32",
+]
+`;
+
+exports[`every shape a recap can take > draws stake-punishment 1`] = `
+[
+  "score 14,327 374x118",
+  "title 14,445 374x74",
+  "stake -10,493 422x313",
+  "footer -8,786 418x32",
+]
+`;
+
+exports[`every shape a recap can take > draws stake-punishment-long 1`] = `
+[
+  "score 14,269.5 374x118",
+  "title 14,387.5 374x74",
+  "stake -10,435.5 422x370.5",
+  "footer -8,786 418x32",
+]
+`;
+
+exports[`every shape a recap can take > draws stat-long 1`] = `
+[
+  "setup 14,396 374x132",
+]
+`;
+
+exports[`every shape a recap can take > draws stat-paper 1`] = `
+[
+  "setup 14,330.5 374x162.1",
+  "next 14,494.6 374x99",
+]
+`;
+
+exports[`every shape a recap can take > draws words-alone-paper 1`] = `
+[
+  "setup 14,341.6 374x57",
+  "next 14,400.6 374x80.8",
+  "next 14,483.4 374x99",
+]
+`;

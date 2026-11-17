@@ -41,3 +41,4 @@ apps/cloudflare/.deploy/*
 *.zip
 *.patch
 !patches/codex-websocket-ack.patch
+!patches/codex-prompt-cache-retention.patch

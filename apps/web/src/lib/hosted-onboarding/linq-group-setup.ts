@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
 import { createCipheriv, createDecipheriv, createHmac } from "node:crypto";
@@ -102,7 +103,7 @@ export function buildHostedLinqGroupSetupEffectId(input: {
   const chatId = normalizeHostedLinqGroupChatId(input.chatId);
   const dayUtc = resolveHostedLinqDayUtc(input.occurredAt);
   if (!chatId || Number.isNaN(dayUtc.getTime())) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted Linq group setup requires a non-empty chat id and a valid occurrence time.",
     );
   }
@@ -135,7 +136,7 @@ export function buildHostedLinqGroupEmailRecoveryEffectId(input: {
     || participantContact.kind !== "email"
     || !recipientPhone
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted Linq group email recovery requires a valid chat, occurrence time, email, and recipient line.",
     );
   }
@@ -209,7 +210,7 @@ export function issueHostedLinqGroupEmailRecoveryToken(input: {
     || Number.isNaN(observedAt.getTime())
     || Number.isNaN(issuedAt.getTime())
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted Linq group email recovery requires valid observed provider authority.",
     );
   }
@@ -300,13 +301,11 @@ export function openHostedLinqGroupEmailRecoveryToken(input: {
       + HOSTED_LINQ_GROUP_EMAIL_RECOVERY_TAG_BYTES,
   );
 
+  // A missing or malformed key is our configuration, not the caller's token.
+  const key = deriveHostedLinqGroupEmailRecoveryEncryptionKey();
   let payload: unknown;
   try {
-    const decipher = createDecipheriv(
-      "aes-256-gcm",
-      deriveHostedLinqGroupEmailRecoveryEncryptionKey(),
-      iv,
-    );
+    const decipher = createDecipheriv("aes-256-gcm", key, iv);
     decipher.setAAD(
       Buffer.from(HOSTED_LINQ_GROUP_EMAIL_RECOVERY_TOKEN_DOMAIN),
     );

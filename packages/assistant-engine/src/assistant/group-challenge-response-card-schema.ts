@@ -1,3 +1,4 @@
+import { ContractValidationError } from '@murphai/contracts/validation-error'
 import { createHash } from 'node:crypto'
 
 import {
@@ -177,23 +178,23 @@ export function readGroupChallengeDefinitionSnapshot(
     || body.indexOf(DEFINITION_START, start + DEFINITION_START.length) !== -1
     || body.indexOf(DEFINITION_END, end + DEFINITION_END.length) !== -1
   ) {
-    throw new TypeError('Expected exactly one complete challenge definition section.')
+    throw new ContractValidationError('Expected exactly one complete challenge definition section.')
   }
   const section = body.slice(start + DEFINITION_START.length, end).trim()
   const match = /^## Challenge definition\n\nDefinition digest: `([0-9a-f]{64})`\n\n```json\n([\s\S]+)\n```$/u.exec(section)
   if (!match?.[1] || !match[2]) {
-    throw new TypeError('Expected one closed JSON challenge definition block.')
+    throw new ContractValidationError('Expected one closed JSON challenge definition block.')
   }
   let value: unknown
   try {
     value = JSON.parse(match[2])
   } catch {
-    throw new TypeError('Expected valid JSON in the challenge definition section.')
+    throw new ContractValidationError('Expected valid JSON in the challenge definition section.')
   }
   const definition = groupChallengeDefinitionSchema.parse(value)
   const definitionDigest = digestGroupChallengeDefinition(definition)
   if (match[1] !== definitionDigest) {
-    throw new TypeError('Challenge definition digest does not match its JSON.')
+    throw new ContractValidationError('Challenge definition digest does not match its JSON.')
   }
   return { definition, definitionDigest }
 }
@@ -223,7 +224,7 @@ export function upsertGroupChallengeStandingsSnapshot(
     || body.indexOf(SNAPSHOT_START, start + SNAPSHOT_START.length) !== -1
     || body.indexOf(SNAPSHOT_END, end + SNAPSHOT_END.length) !== -1
   ) {
-    throw new TypeError('Expected at most one complete challenge snapshot section.')
+    throw new ContractValidationError('Expected at most one complete challenge snapshot section.')
   }
   const suffix = body.slice(end + SNAPSHOT_END.length).trim()
   return [

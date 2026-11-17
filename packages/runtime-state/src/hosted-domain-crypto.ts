@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 const HOSTED_DOMAIN_ROOT_KEY_BYTES = 32;
 const HOSTED_SECURE_BOX_IV_BYTES = 12;
 const HOSTED_ECDH_WRAP_IV_BYTES = 12;
@@ -311,7 +312,7 @@ export function parseHostedDomainRootKeyEnvelope(
     `${label}.authoritySignature.alg`,
   );
   if (alg !== "GCP-KMS-EC-P256-SHA256") {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label}.authoritySignature.alg must be GCP-KMS-EC-P256-SHA256.`,
     );
   }
@@ -463,11 +464,7 @@ export async function openHostedSecureBox(input: {
       {
         additionalData: toArrayBuffer(input.aad),
         iv: toArrayBuffer(
-          decodeFixedBase64(
-            envelope.iv,
-            HOSTED_SECURE_BOX_IV_BYTES,
-            "Hosted secure-box IV",
-          ),
+          decodeBase64(envelope.iv),
         ),
         name: "AES-GCM",
       },
@@ -504,9 +501,10 @@ export function parseHostedSecureBoxEnvelope(
     schema: requireLiteral(record.schema, HOSTED_SECURE_BOX_ENVELOPE_SCHEMA, `${label}.schema`),
     scope: requireNonEmptyString(record.scope, `${label}.scope`),
   };
+  decodeFixedBase64(envelope.iv, HOSTED_SECURE_BOX_IV_BYTES, "Hosted secure-box IV");
   const expectedDomain = getHostedCryptoDomainForLane(envelope.lane);
   if (expectedDomain !== envelope.domain) {
-    throw new TypeError(`${label}.lane belongs to ${expectedDomain}, not ${envelope.domain}.`);
+    throw new ContractValidationError(`${label}.lane belongs to ${expectedDomain}, not ${envelope.domain}.`);
   }
   return envelope;
 }
@@ -794,7 +792,7 @@ function parseHostedDomainRootKeyWrap(
   if (kind === "p256-ecdh-aesgcm") {
     return parseHostedEcdhWrappedDomainRootKey(record, label);
   }
-  throw new TypeError(`${label}.kind must be gcp-kms or p256-ecdh-aesgcm.`);
+  throw new ContractValidationError(`${label}.kind must be gcp-kms or p256-ecdh-aesgcm.`);
 }
 
 function parseHostedGcpKmsWrappedDomainRootKey(
@@ -821,7 +819,7 @@ export function parseHostedEcdhWrappedDomainRootKey(
   const record = requireRecord(value, label);
   const recipient = requireHostedCryptoEcdhRecipientKind(record.recipient, `${label}.recipient`);
   if ("teePolicyId" in record && typeof record.teePolicyId !== "string") {
-    throw new TypeError(`${label}.teePolicyId must be a string when present.`);
+    throw new ContractValidationError(`${label}.teePolicyId must be a string when present.`);
   }
   const teePolicyId = normalizeHostedTeePolicyId(
     "teePolicyId" in record ? (record.teePolicyId as string) : null,
@@ -851,7 +849,7 @@ function assertUniqueHostedRecipients(
   for (const wrap of wraps) {
     const key = wrap.recipient;
     if (seen.has(key)) {
-      throw new TypeError(`${label} contains duplicate recipient ${key}.`);
+      throw new ContractValidationError(`${label} contains duplicate recipient ${key}.`);
     }
     seen.add(key);
   }
@@ -862,7 +860,7 @@ function assertHostedDomainRootEnvelopeWrapPolicy(
   label: string,
 ): void {
   if (body.wraps.length === 0) {
-    throw new TypeError(`${label} must contain at least one recipient wrap.`);
+    throw new ContractValidationError(`${label} must contain at least one recipient wrap.`);
   }
   for (const wrap of body.wraps) {
     assertHostedCryptoRecipientAllowedForDomain({
@@ -880,7 +878,7 @@ function assertHostedCryptoRecipientAllowedForDomain(input: {
   recipient: HostedCryptoRecipientKind;
 }): void {
   if (!isHostedCryptoRecipientAllowedForDomain(input)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${input.label} ${input.recipient} is not allowed for hosted ${input.domain} domain roots.`,
     );
   }
@@ -903,7 +901,7 @@ function assertHostedDomainRootWrapContextMatchesEnvelope(input: {
   };
   for (const [key, value] of Object.entries(expected)) {
     if (context[key] !== value) {
-      throw new TypeError(
+      throw new ContractValidationError(
         `${input.label}.${input.wrap.recipient}.encryptionContext.${key} mismatch.`,
       );
     }
@@ -916,7 +914,7 @@ function assertHostedDomainRootWrapContextMatchesEnvelope(input: {
     input.wrap.kind === "gcp-kms"
     && input.wrap.additionalAuthenticatedData !== serializeAdditionalAuthenticatedData(context)
   ) {
-    throw new TypeError(`${input.label}.${input.wrap.recipient}.additionalAuthenticatedData mismatch.`);
+    throw new ContractValidationError(`${input.label}.${input.wrap.recipient}.additionalAuthenticatedData mismatch.`);
   }
 }
 
@@ -927,7 +925,7 @@ function requireDomainRootEnvelopeSchema(value: unknown, label: string) {
 function requireHostedCryptoDomain(value: unknown, label: string): HostedCryptoDomain {
   const text = requireNonEmptyString(value, label);
   if (!isHostedCryptoDomain(text)) {
-    throw new TypeError(`${label} must be a hosted crypto domain.`);
+    throw new ContractValidationError(`${label} must be a hosted crypto domain.`);
   }
   return text;
 }
@@ -935,7 +933,7 @@ function requireHostedCryptoDomain(value: unknown, label: string): HostedCryptoD
 function requireHostedCryptoLane(value: unknown, label: string): HostedCryptoLane {
   const text = requireNonEmptyString(value, label);
   if (!isHostedCryptoLane(text)) {
-    throw new TypeError(`${label} must be a hosted crypto lane.`);
+    throw new ContractValidationError(`${label} must be a hosted crypto lane.`);
   }
   return text;
 }
@@ -947,7 +945,7 @@ function requireHostedCryptoRecipientKind(value: unknown, label: string): Hosted
       text as HostedCryptoRecipientKind,
     )
   ) {
-    throw new TypeError(`${label} must be a hosted crypto recipient.`);
+    throw new ContractValidationError(`${label} must be a hosted crypto recipient.`);
   }
   return text as HostedCryptoRecipientKind;
 }
@@ -958,7 +956,7 @@ function requireHostedCryptoKmsRecipientKind(
 ): HostedCryptoKmsRecipientKind {
   const text = requireNonEmptyString(value, label);
   if (!(HOSTED_CRYPTO_KMS_RECIPIENT_KINDS as readonly string[]).includes(text)) {
-    throw new TypeError(`${label} must be a hosted KMS recipient.`);
+    throw new ContractValidationError(`${label} must be a hosted KMS recipient.`);
   }
   return text as HostedCryptoKmsRecipientKind;
 }
@@ -969,7 +967,7 @@ function requireHostedCryptoEcdhRecipientKind(
 ): HostedCryptoEcdhRecipientKind {
   const text = requireNonEmptyString(value, label);
   if (!(HOSTED_CRYPTO_ECDH_RECIPIENT_KINDS as readonly string[]).includes(text)) {
-    throw new TypeError(`${label} must be a hosted ECDH recipient.`);
+    throw new ContractValidationError(`${label} must be a hosted ECDH recipient.`);
   }
   return text as HostedCryptoEcdhRecipientKind;
 }
@@ -983,14 +981,14 @@ function requireRootKey(value: Uint8Array, label: string): Uint8Array {
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object.`);
+    throw new ContractValidationError(`${label} must be an object.`);
   }
   return value as Record<string, unknown>;
 }
 
 function requireArray(value: unknown, label: string): unknown[] {
   if (!Array.isArray(value)) {
-    throw new TypeError(`${label} must be an array.`);
+    throw new ContractValidationError(`${label} must be an array.`);
   }
   return value;
 }
@@ -1003,7 +1001,7 @@ function normalizeStringRecord(value: Record<string, unknown>, label: string): R
   const out: Record<string, string> = {};
   for (const [key, entry] of Object.entries(value)) {
     if (typeof entry !== "string" || entry.length === 0) {
-      throw new TypeError(`${label}.${key} must be a non-empty string.`);
+      throw new ContractValidationError(`${label}.${key} must be a non-empty string.`);
     }
     out[key] = entry;
   }
@@ -1012,7 +1010,7 @@ function normalizeStringRecord(value: Record<string, unknown>, label: string): R
 
 function requireNonEmptyString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.length === 0) {
-    throw new TypeError(`${label} must be a non-empty string.`);
+    throw new ContractValidationError(`${label} must be a non-empty string.`);
   }
   return value;
 }
@@ -1023,14 +1021,14 @@ function normalizeOptionalString(value: unknown): string | null {
 
 function requirePositiveInteger(value: unknown, label: string): number {
   if (!Number.isInteger(value) || (value as number) <= 0) {
-    throw new TypeError(`${label} must be a positive integer.`);
+    throw new ContractValidationError(`${label} must be a positive integer.`);
   }
   return value as number;
 }
 
 function requireLiteral<T extends string>(value: unknown, expected: T, label: string): T {
   if (value !== expected) {
-    throw new TypeError(`${label} must be ${expected}.`);
+    throw new ContractValidationError(`${label} must be ${expected}.`);
   }
   return expected;
 }
@@ -1049,7 +1047,7 @@ function normalizeP256PublicJwk(jwk: JsonWebKey, label: string): JsonWebKey {
     || jwk.y.length === 0
     || jwk.d !== undefined
   ) {
-    throw new TypeError(`${label} must be a public P-256 EC JWK.`);
+    throw new ContractValidationError(`${label} must be a public P-256 EC JWK.`);
   }
   return {
     crv: "P-256",
@@ -1095,7 +1093,7 @@ function normalizeHostedTeePolicyId(
     return requireNonEmptyString(normalized, label);
   }
   if (normalized !== null) {
-    throw new TypeError(`${label} is only valid for tee-runtime-attested recipients.`);
+    throw new ContractValidationError(`${label} is only valid for tee-runtime-attested recipients.`);
   }
   return null;
 }
@@ -1119,19 +1117,19 @@ function normalizeP256EcdsaSignature(signature: Uint8Array): Uint8Array {
     return signature;
   }
   if (signature[0] !== 0x30) {
-    throw new TypeError("ECDSA signature must be DER sequence or P-1363 raw signature.");
+    throw new ContractValidationError("ECDSA signature must be DER sequence or P-1363 raw signature.");
   }
   let offset = 1;
   const sequenceLength = readDerLength(signature, offset);
   offset = sequenceLength.nextOffset;
   if (sequenceLength.length + offset !== signature.byteLength) {
-    throw new TypeError("ECDSA DER signature has invalid length.");
+    throw new ContractValidationError("ECDSA DER signature has invalid length.");
   }
   const r = readDerInteger(signature, offset);
   offset = r.nextOffset;
   const s = readDerInteger(signature, offset);
   if (s.nextOffset !== signature.byteLength) {
-    throw new TypeError("ECDSA DER signature contains trailing bytes.");
+    throw new ContractValidationError("ECDSA DER signature contains trailing bytes.");
   }
   return concatBytes(leftPadTo32(r.value), leftPadTo32(s.value));
 }
@@ -1149,20 +1147,20 @@ function tryNormalizeHostedDomainRootEnvelopeAuthoritySignature(
 function readDerLength(bytes: Uint8Array, offset: number): { length: number; nextOffset: number } {
   const first = bytes[offset];
   if (first === undefined) {
-    throw new TypeError("Missing DER length.");
+    throw new ContractValidationError("Missing DER length.");
   }
   if ((first & 0x80) === 0) {
     return { length: first, nextOffset: offset + 1 };
   }
   const count = first & 0x7f;
   if (count <= 0 || count > 2) {
-    throw new TypeError("Unsupported DER length encoding.");
+    throw new ContractValidationError("Unsupported DER length encoding.");
   }
   let length = 0;
   for (let index = 0; index < count; index += 1) {
     const byte = bytes[offset + 1 + index];
     if (byte === undefined) {
-      throw new TypeError("Truncated DER length.");
+      throw new ContractValidationError("Truncated DER length.");
     }
     length = (length << 8) | byte;
   }
@@ -1171,13 +1169,13 @@ function readDerLength(bytes: Uint8Array, offset: number): { length: number; nex
 
 function readDerInteger(bytes: Uint8Array, offset: number): { value: Uint8Array; nextOffset: number } {
   if (bytes[offset] !== 0x02) {
-    throw new TypeError("Expected DER integer.");
+    throw new ContractValidationError("Expected DER integer.");
   }
   const length = readDerLength(bytes, offset + 1);
   const start = length.nextOffset;
   const end = start + length.length;
   if (end > bytes.byteLength) {
-    throw new TypeError("Truncated DER integer.");
+    throw new ContractValidationError("Truncated DER integer.");
   }
   let value = bytes.slice(start, end);
   while (value.byteLength > 0 && value[0] === 0x00) {
@@ -1188,7 +1186,7 @@ function readDerInteger(bytes: Uint8Array, offset: number): { value: Uint8Array;
 
 function leftPadTo32(value: Uint8Array): Uint8Array {
   if (value.byteLength > 32) {
-    throw new TypeError("ECDSA integer is larger than P-256 size.");
+    throw new ContractValidationError("ECDSA integer is larger than P-256 size.");
   }
   const out = new Uint8Array(32);
   out.set(value, 32 - value.byteLength);
@@ -1201,7 +1199,7 @@ function canonicalJson(value: unknown): string {
   }
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
     if (typeof value === "number" && !Number.isFinite(value)) {
-      throw new TypeError("Cannot canonicalize non-finite number.");
+      throw new ContractValidationError("Cannot canonicalize non-finite number.");
     }
     return JSON.stringify(value);
   }
@@ -1216,7 +1214,7 @@ function canonicalJson(value: unknown): string {
       .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`)
       .join(",")}}`;
   }
-  throw new TypeError("Cannot canonicalize unsupported JSON value.");
+  throw new ContractValidationError("Cannot canonicalize unsupported JSON value.");
 }
 
 function utf8(value: string): Uint8Array {
@@ -1241,9 +1239,12 @@ function decodeBase64(value: string): Uint8Array {
 }
 
 function decodeFixedBase64(value: string, expectedBytes: number, label: string): Uint8Array {
+  if (value.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/u.test(value)) {
+    throw new ContractValidationError(`${label} must be base64.`);
+  }
   const decoded = decodeBase64(value);
   if (decoded.byteLength !== expectedBytes) {
-    throw new TypeError(`${label} must decode to ${expectedBytes} bytes.`);
+    throw new ContractValidationError(`${label} must decode to ${expectedBytes} bytes.`);
   }
   return decoded;
 }

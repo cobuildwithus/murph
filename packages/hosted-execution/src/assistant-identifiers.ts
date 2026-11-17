@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createHash, createHmac } from "node:crypto";
 
 import { parseHostedEmailThreadTarget } from "@murphai/runtime-state";
@@ -53,7 +54,7 @@ export function createHostedExecutionPrivateAssistantAskCompletionDeliveryKey(
 ): string {
   const normalized = completionId.trim();
   if (!normalized || [...normalized].length > 256) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted private Assistant Ask completion ID is invalid.",
     );
   }
@@ -106,26 +107,32 @@ export function readHostedConversationAssistantIdentifierSecret(
   }
 
   if (isHostedEmailConversationMessageWake(wake)) {
-    const threadTarget = parseHostedEmailThreadTarget(wake.message.threadTarget);
-    if (threadTarget?.targetKind === "group") {
-      return resolveHostedEmailConversationThreadIdentity({
-        message: wake.message,
-        threadTarget,
-      });
-    }
-
-    return (
-      wake.message.identityId
-      ?? wake.message.selfAddress
-      ?? wake.message.threadKey
-      ?? wake.message.threadTarget
-      ?? wake.message.rawMessageKey
-    );
+    return readHostedEmailConversationAssistantIdentifierSecret(wake.message);
   }
 
   if (wake.message.channel === "voice") return wake.message.callId;
 
   return wake.eventId;
+}
+
+export function readHostedEmailConversationAssistantIdentifierSecret(
+  message: HostedExecutionEmailConversationMessagePayload,
+): string {
+  const threadTarget = parseHostedEmailThreadTarget(message.threadTarget);
+  if (threadTarget?.targetKind === "group") {
+    return resolveHostedEmailConversationThreadIdentity({
+      message,
+      threadTarget,
+    });
+  }
+
+  return (
+    message.identityId
+    ?? message.selfAddress
+    ?? message.threadKey
+    ?? message.threadTarget
+    ?? message.rawMessageKey
+  );
 }
 
 export function createHostedMailboxAssistantInputId(input: {

@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { observeWriteOperations } from "./helpers/observed-write-operations.ts";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
@@ -1519,7 +1520,7 @@ test("raw manifest helpers reject missing directories and reserved provenance me
   assert.throws(
     () => resolveRawManifestPath({ artifacts: [] }),
     (error: unknown) =>
-      error instanceof TypeError &&
+      error instanceof ContractValidationError &&
       error.message === "raw import manifest requires either a rawDirectory or at least one raw artifact",
   );
   assert.throws(
@@ -1546,7 +1547,7 @@ test("raw manifest helpers reject missing directories and reserved provenance me
         },
       }),
     (error: unknown) =>
-      error instanceof TypeError &&
+      error instanceof ContractValidationError &&
       error.message.includes("does not match owner"),
   );
 
@@ -1587,7 +1588,7 @@ test("raw manifest helpers reject missing directories and reserved provenance me
       });
     },
     (error: unknown) =>
-      error instanceof TypeError &&
+      error instanceof ContractValidationError &&
       error.message.includes('reserves "operatorMetadata"'),
   );
 });

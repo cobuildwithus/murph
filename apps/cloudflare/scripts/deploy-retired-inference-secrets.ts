@@ -2,7 +2,38 @@ import { readFile } from "node:fs/promises";
 
 import { isObjectRecord } from "./deploy-automation/shared.ts";
 
-const retiredSecrets = new Set(["VENICE_API_KEY", "VERCEL_AI_API_KEY"]);
+/**
+ * Worker secrets each deploy removes from the uploaded version. Named for the
+ * retired inference keys it first covered; any secret listed here is deleted
+ * even though omitted optional secrets otherwise stay live.
+ * HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID: operator pages run with the
+ * primary chat only. To restore a second operator, drop it from this list, put
+ * it back in HOSTED_WORKER_OPTIONAL_SECRET_NAMES, and set the secret.
+ */
+export const RETIRED_WORKER_SECRET_NAMES = [
+  "BRAVE_API_KEY",
+  "CLOUDFLARE_IMAGES_API_KEY",
+  "EXA_API_KEY",
+  "GARMIN_CLIENT_ID",
+  "GARMIN_CLIENT_SECRET",
+  "HOSTED_AI_USAGE_GATE_ALLOW_SIGNING_KEY_ID",
+  "HOSTED_AI_USAGE_GATE_ALLOW_SIGNING_SECRET",
+  "HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK",
+  "HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK",
+  "HOSTED_EXECUTION_SMALL_RUNNER_MEMBER_SHA256",
+  "HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET",
+  "OURA_CLIENT_ID",
+  "OURA_CLIENT_SECRET",
+  "STRAVA_CLIENT_ID",
+  "STRAVA_CLIENT_SECRET",
+  "STRAVA_WEBHOOK_SIGNING_SECRET",
+  "WHOOP_CLIENT_ID",
+  "WHOOP_CLIENT_SECRET",
+  "HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID",
+  "VENICE_API_KEY",
+  "VERCEL_AI_API_KEY",
+] as const;
+const retiredSecrets: ReadonlySet<string> = new Set(RETIRED_WORKER_SECRET_NAMES);
 
 /** Omitted optional secrets remain live configuration; deletion is a native version patch. */
 export async function readExpectedWorkerSecrets(input: {

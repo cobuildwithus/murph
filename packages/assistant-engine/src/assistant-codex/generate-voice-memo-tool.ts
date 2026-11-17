@@ -1,4 +1,3 @@
-import type { GeneratedMediaFileArgs, GeneratedMediaFileRuntime } from './generated-media-file.js'
 import { toolFailureDiagnostic, type ToolFailureDiagnostic } from './tool-failure-diagnostics.js'
 import { randomUUID } from 'node:crypto'
 
@@ -17,7 +16,6 @@ import {
   type AssistantVoiceMemoGeneration,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import {
-  generateElevenLabsMusic,
   resolveElevenLabsApiKey,
   resolveElevenLabsModelId,
   resolveElevenLabsVoiceId,
@@ -35,7 +33,7 @@ export interface GenerateVoiceMemoToolArgs {
   userRequestedVoiceOptionId?: AssistantVoiceOptionId | null
 }
 
-export interface GenerateSongToolArgs extends GeneratedMediaFileArgs {
+export interface GenerateSongToolArgs {
   durationSeconds: number
   instrumental: boolean
   prompt: string
@@ -247,26 +245,10 @@ export async function executeGenerateSongTool(input: {
   abortSignal?: AbortSignal | null
   args: GenerateSongToolArgs
   env?: NodeJS.ProcessEnv
-  fileRuntime?: GeneratedMediaFileRuntime | null
   currentResponseMedia?: readonly AssistantResponseMedia[] | null
   recordPhaseTiming?: VoiceMemoPhaseTimingRecorder | null
   runtime?: VoiceMemoToolRuntime | null
 }): Promise<GenerateVoiceMemoToolResult> {
-  if (input.args.output === 'file') {
-    const runtime = input.fileRuntime
-    const apiKey = runtime?.elevenLabsApiKey ?? resolveElevenLabsApiKey(input.env ?? {})
-    if (!runtime || !apiKey) return unavailableVoiceMemoResult('song')
-    try {
-      const result = await generateElevenLabsMusic({ apiKey, durationMs: input.args.durationSeconds * 1000,
-        forceInstrumental: input.args.instrumental, modelId: assistantVoiceMemoMusicModelId,
-        outputFormat: assistantVoiceMemoMusicOutputFormat, prompt: input.args.prompt,
-        fetchImplementation: async (url, init) => runtime.fetchImpl(url, init),
-        ...(input.abortSignal ? { signal: input.abortSignal } : {}) })
-      return { rpcSuccess: true, rpcText: JSON.stringify({ path: await runtime.save(result.bytes, 'audio/mpeg') }) }
-    } catch (error) {
-      return { rpcSuccess: false, rpcText: error instanceof Error ? error.message : 'Song generation failed.', failureDiagnostic: toolFailureDiagnostic('handler_exception', error) }
-    }
-  }
   const mediaConflict = rejectIfResponseMediaConflicts(
     input.currentResponseMedia ?? [],
     'song',

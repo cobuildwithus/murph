@@ -60,7 +60,14 @@ describe('private usage diagnostics', () => {
     const result = await execute(hosted, { days: 7, limit: 10 })
     expect(hosted.usageDiagnostics?.read).toHaveBeenCalledExactlyOnceWith({ days: 7, limit: 10 })
     expect(result.rpcResult.success).toBe(true)
+    // Zero counts stay explicit: the usage review reads a missing count as unknown.
     expect(JSON.parse(result.rpcResult.contentItems[0]?.text ?? '')).toEqual(syntheticUsageDiagnostics())
+  })
+  it('reads five turns unless the caller passes a limit', async () => {
+    const hosted = context()
+    expect((await execute(hosted, { days: 30 })).rpcResult.success).toBe(true)
+    expect(hosted.usageDiagnostics?.read).toHaveBeenCalledExactlyOnceWith({ days: 30, limit: 5 })
+    expect(MURPH_USAGE_DIAGNOSTICS_TOOL.description).toContain('covers 7 days and 5 turns')
   })
   it.each(['group', 'unverified-external', null] as const)('rejects non-private invocation scope %s', async (conversationScope) => {
     const hosted = context({ currentInvocationScope: () => ({ conversationScope, origin: {

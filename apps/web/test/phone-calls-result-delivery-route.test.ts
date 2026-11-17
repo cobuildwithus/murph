@@ -1,3 +1,4 @@
+import * as requestParsers from "@murphai/hosted-execution/phone-calls";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
@@ -35,6 +36,32 @@ describe("hosted phone-call result delivery route", () => {
       recorded: true,
       status: "delivered",
     });
+  });
+
+  it.each(["stream", "limit", "json"])("classifies %s body failures", async kind => {
+    const request = buildRequest({ padding: "x".repeat(kind === "limit" ? 4096 : 0) });
+    if (kind === "stream") vi.spyOn(request, "body", "get").mockReturnValue(new ReadableStream({
+      start(controller) { controller.error(new TypeError("Body stream failed.")); },
+    }));
+    const response = await route.POST(kind === "json"
+      ? new Request(request.url, { method: "POST", body: "{" }) : request);
+    expect(response.status).toBe(kind === "stream" ? 500 : kind === "limit" ? 413 : 400);
+    expect(await response.json()).toMatchObject({ error: { code: kind === "stream"
+      ? "INTERNAL_ERROR" : kind === "limit" ? "REQUEST_BODY_TOO_LARGE"
+      : "HOSTED_PHONE_CALL_RESULT_DELIVERY_REQUEST_INVALID" } });
+    expect(mocks.recordOutcome).not.toHaveBeenCalled();
+  });
+
+  it("reports unexpected parser faults as server failures", async () => {
+    const parser = vi.spyOn(requestParsers, "parseHostedPhoneCallResultDeliveryOutcomeRequest")
+      .mockImplementationOnce(() => { throw new TypeError("Parser invariant failed."); });
+    try {
+      const response = await route.POST(buildRequest({}));
+      expect(response.status).toBe(500);
+      expect(parser).toHaveBeenCalledOnce();
+    } finally {
+      parser.mockRestore();
+    }
   });
 
   it("authenticates and records one bounded exact-generation outcome", async () => {
@@ -88,6 +115,7 @@ describe("hosted phone-call result delivery route", () => {
     const response = await route.POST(request);
 
     expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: { code: "HOSTED_PHONE_CALL_RESULT_DELIVERY_REQUEST_INVALID" } });
     expect(mocks.requireCallback).toHaveBeenCalledOnce();
     expect(mocks.recordOutcome).not.toHaveBeenCalled();
   });

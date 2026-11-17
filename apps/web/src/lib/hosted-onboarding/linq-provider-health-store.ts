@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { Prisma, type PrismaClient } from "@prisma/client";
 
 import {
@@ -259,7 +260,7 @@ export function prepareHostedLinqChatHealthInventoryProjection(
       || !providerStatus
       || Number.isNaN(chat.providerUpdatedAt.getTime())
     ) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "Hosted Linq chat-health inventory requires valid parsed chat records.",
       );
     }

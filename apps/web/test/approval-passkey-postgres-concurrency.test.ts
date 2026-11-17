@@ -61,7 +61,8 @@ describe.skipIf(!enabled)("approval passkey PostgreSQL commit boundary", () => {
       verifiedEmail: { address: email, verifiedAt: now } });
     await hostedAuthAdapter(prisma)({}).create({ model: "user", forceAllowId: true,
       data: { id: memberId, email, emailVerified: true, name: "", createdAt: now, updatedAt: now } });
-    const issued = await issueHostedAppSession({ memberId, primaryAuthenticatedAt: new Date() });
+    // A fresh phone sign-in, the proof a first passkey needs.
+    const issued = await issueHostedAppSession({ memberId, primaryAuthenticatedAt: new Date(), primaryAuthenticationFactor: "phone" });
     const request = new Request("https://www.withmurph.ai/api/settings/approval-passkeys/register", {
       headers: { cookie: issued.cookie.split(";")[0] ?? "", origin: "https://www.withmurph.ai" },
     });
@@ -88,7 +89,7 @@ describe.skipIf(!enabled)("approval passkey PostgreSQL commit boundary", () => {
     await registerInitialApprovalEnrollment(initial.input);
     vi.stubEnv("HOSTED_APPROVAL_PASSKEY_ENROLLMENT_ENABLED", "false");
     const challenge = await f.challenge("vault.export");
-    const other = await issueHostedAppSession({ memberId: f.memberId, primaryAuthenticatedAt: new Date() });
+    const other = await issueHostedAppSession({ memberId: f.memberId, primaryAuthenticatedAt: new Date(), primaryAuthenticationFactor: "phone" });
     const headers = { cookie: f.request.headers.get("cookie") ?? "", origin: "https://www.withmurph.ai" };
     async function options(customHeaders: Record<string, string>) {
       return authenticationOptionsRoute(new Request("https://www.withmurph.ai/api/settings/approval-passkeys/authenticate", {

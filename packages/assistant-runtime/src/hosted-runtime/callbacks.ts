@@ -137,6 +137,8 @@ import {
   buildHostedTelegramChannelEnv,
   buildHostedTelegramVoiceMemoChannelEnv,
 } from "./channel-activity.ts";
+import { uploadLinqAttachment } from "@murphai/operator-config/linq-runtime";
+import { guardHostedRecapVideoFetch, RECAP_VIDEO_LINQ_ATTACHMENT, resolveHostedRecapVideoAttachment } from "./recap-video-attachment.ts";
 import {
   looksLikeHostedProviderRedactedLinqTarget,
   sendHostedProviderLinqMessage,
@@ -4894,8 +4896,9 @@ function createHostedAssistantLinqSendDependency(input: {
   threadIsDirect?: boolean | null;
   vaultRoot?: string | null;
 }): NonNullable<AssistantHostedProgressDeliveryDependencies["sendLinq"]> {
+  const { effectsPort = null, intentId = null, vaultRoot = null } = input;
   const onAppCardFallbackError = createHostedLinqAppCardFallbackErrorObserver({
-    intentId: input.intentId ?? null,
+    intentId,
     platform: input.platform ?? null,
   });
   return async (request) => {
@@ -4918,13 +4921,25 @@ function createHostedAssistantLinqSendDependency(input: {
     const candidateFromPhoneNumber =
       normalizeHostedLinqDirectRecipient(request.fromPhoneNumber)
       ?? normalizeHostedLinqDirectRecipient(deliveryContext?.fromPhoneNumber);
-    const signal = mergeHostedAssistantLinqSignals(input.signal, request.signal);
+    const signal = mergeHostedAssistantLinqSignals(input.signal, request.signal) ?? null;
     const persistAppCardTextFallback = request.persistAppCardTextFallback;
     const reviewedAssistantAskCompletion = idempotencyKey?.startsWith(
       HOSTED_EXECUTION_REVIEWED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX,
     ) === true;
-    const includesVaultFile =
-      request.media?.some((media) => media.kind === "vault_file") === true;
+    const media = request.media ?? [];
+    const answeredMailboxItemIds = request.answeredMailboxItemIds ?? [];
+    const includesVaultFile = media.some((item) => item.kind === "vault_file");
+    // A reply anchored to an inbound goes to that inbound's chat. Web never
+    // re-homes a claiming call, so a home-route fallback flag changes nothing here.
+    const claimBeforeBuild = !!deliveryContext?.target
+      && !!request.replyToMessageId?.trim()
+      && request.card == null
+      // Media is fetched or loaded before the first provider request. Claiming
+      // ahead of that work could leave a dispatch fence with no provider entry.
+      && media.length === 0
+      && !reviewedAssistantAskCompletion
+      && !privateAssistantAskCompletion
+      && !input.deliveryPurpose;
     const assertPrivateAssistantAskCompletionRoute = async (route: {
       fromPhoneNumber: string | null;
       kind: HostedExecutionAssistantNotificationRoute["delivery"]["kind"];
@@ -4961,13 +4976,13 @@ function createHostedAssistantLinqSendDependency(input: {
           threadId: routeContext.threadId,
           threadIsDirect: routeContext.threadIsDirect,
         },
-        effectsPort: input.effectsPort ?? null,
-        intentId: input.intentId ?? null,
-        media: request.media ?? [],
+        effectsPort,
+        intentId,
+        media,
         message: request.message,
         now: new Date(),
-        signal: signal ?? null,
-        vaultRoot: input.vaultRoot ?? null,
+        signal,
+        vaultRoot,
       });
     };
     if (privateAssistantAskCompletion) {
@@ -4980,28 +4995,29 @@ function createHostedAssistantLinqSendDependency(input: {
     const routeAuthorityStartedAtMonotonicMs = performance.now();
     const engagement =
       await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
-        answeredMailboxItemIds: request.answeredMailboxItemIds,
+        answeredMailboxItemIds,
         assistantAskFallback:
           reviewedAssistantAskCompletion
             ? isHostedReviewedAssistantAskFallbackPayload({
-                media: request.media,
+                media,
                 message: request.message,
               })
             : undefined,
-        authorityCheckOnly: true,
+        authorityCheckOnly: !claimBeforeBuild,
         directRecipientPhoneNumber: candidateDirectRecipientPhoneNumber,
-        effectsPort: input.effectsPort ?? null,
+        effectsPort,
         fromPhoneNumber: candidateFromPhoneNumber,
         homeRouteFallbackAllowed: request.homeRouteFallbackAllowed === true,
         idempotencyKey,
-        intentId: input.intentId ?? null,
+        intentId,
+        providerDispatchRetrySafe: true,
         replyToMessageId: request.replyToMessageId ?? null,
-        signal: signal ?? null,
+        signal,
         target: deliveryContext?.target ?? request.target,
         targetKind: request.targetKind ?? null,
       });
-    const routeAuthorityCheckMs =
-      performance.now() - routeAuthorityStartedAtMonotonicMs;
+    const routeAuthorityCheckMs = claimBeforeBuild
+      ? 0 : performance.now() - routeAuthorityStartedAtMonotonicMs;
     const resolvedRoute = requireHostedAssistantLinqResolvedRoute(engagement);
     const directRecipientPhoneNumber = resolvedRoute.directRecipientPhoneNumber;
     const fromPhoneNumber = resolvedRoute.fromPhoneNumber;
@@ -5033,17 +5049,17 @@ function createHostedAssistantLinqSendDependency(input: {
     const verifiedVaultFiles = await preloadApprovedHostedAssistantVaultFiles({
       actionApprovalPort: input.actionApprovalPort ?? null,
       expectedDedupeKey: input.expectedDedupeKey ?? null,
-      intentId: input.intentId ?? null,
-      media: request.media ?? [],
+      intentId,
+      media,
       signal: input.signal,
       materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
-      vaultRoot: input.vaultRoot ?? null,
+      vaultRoot,
     });
     const verifiedVaultImages = await preloadHostedAssistantVaultImages({
       materializeWorkspaceArtifacts: input.materializeWorkspaceArtifacts,
       signal: input.signal,
-      media: request.media ?? [],
-      vaultRoot: input.vaultRoot ?? null,
+      media,
+      vaultRoot,
     });
     let providerAttempt: {
       attemptedAt: Date;
@@ -5053,22 +5069,22 @@ function createHostedAssistantLinqSendDependency(input: {
       verifiedVaultFiles.size > 0 || verifiedVaultImages.size > 0;
     const readProviderAttempt = () => providerAttempt;
     const readResolvedEngagementInput = () => ({
-      answeredMailboxItemIds: request.answeredMailboxItemIds,
+      answeredMailboxItemIds,
       deliveryPurpose: input.deliveryPurpose ?? null,
       assistantAskFallback: reviewedAssistantAskCompletion
         ? isHostedReviewedAssistantAskFallbackPayload({
-            media: request.media,
+            media,
             message: request.message,
           })
         : undefined,
       directRecipientPhoneNumber,
-      effectsPort: input.effectsPort ?? null,
+      effectsPort,
       expectedResolvedRoute: resolvedRoute,
       fromPhoneNumber,
       homeRouteFallbackAllowed: false,
-      intentId: input.intentId ?? null,
+      intentId,
       replyToMessageId: request.replyToMessageId ?? null,
-      signal: signal ?? null,
+      signal,
       target: providerTarget,
       targetKind: providerTargetKind,
     });
@@ -5091,19 +5107,20 @@ function createHostedAssistantLinqSendDependency(input: {
         }
       },
       onProviderDispatchEntered: async () => {
-        const providerEntryFenceStartedAtMonotonicMs = performance.now();
+        const providerEntryFenceStartedAtMonotonicMs = claimBeforeBuild
+          ? routeAuthorityStartedAtMonotonicMs : performance.now();
         try {
           const reviewedCompletionExpiresAt = reviewedAssistantAskCompletion
             ? await prepareHostedReviewedAssistantAskProviderEntry({
-                intentId: input.intentId ?? null,
-                media: request.media ?? [],
+                intentId,
+                media,
                 message: request.message,
                 now: new Date(),
-                vaultRoot: input.vaultRoot ?? null,
+                vaultRoot,
               })
             : undefined;
-          const providerEntry =
-            await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
+          const providerEntry = claimBeforeBuild ? engagement
+            : await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
               ...readResolvedEngagementInput(),
               assistantAskCompletionExpiresAt: reviewedCompletionExpiresAt,
               authorityCheckOnly: false,
@@ -5174,6 +5191,15 @@ function createHostedAssistantLinqSendDependency(input: {
       operation: "Hosted assistant Linq capability lookup",
       providerFetch: input.providerFetch,
     });
+    // A recap's accepted video: decided and saved before this message's first request.
+    const recapAttachmentIds = await prepareHostedLinqRecapVideoAttachment({
+      request, mediaCount: media.length, signal,
+      check: (recapVideo) => assertHostedAssistantLinqRecentInboundEngagementForDelivery({
+        ...readResolvedEngagementInput(), authorityCheckOnly: true, idempotencyKey, recapVideo,
+      }),
+      assertCanEnter: () => assertHostedDeliveryCanEnterProvider(input),
+      linqEnv: input.linqEnv, providerFetch: input.providerFetch, publicInternetFetch: input.publicInternetFetch,
+    });
     const fallbackIdempotencyKey = idempotencyKey
       ? `${idempotencyKey}:fallback`
       : null;
@@ -5186,7 +5212,16 @@ function createHostedAssistantLinqSendDependency(input: {
               createMessageFetchBoundary(fallbackIdempotencyKey),
           }),
       env: input.linqEnv,
-      fetchImplementation: createMessageFetchBoundary(idempotencyKey),
+      fetchImplementation: guardHostedRecapVideoFetch({
+        fetchImplementation: createMessageFetchBoundary(idempotencyKey),
+        attachmentIds: recapAttachmentIds,
+        isCurrent: async () => hostedRecapVideoMayGo(await assertHostedAssistantLinqRecentInboundEngagementForDelivery({
+          ...readResolvedEngagementInput(), authorityCheckOnly: true, idempotencyKey,
+          recapVideo: request.recapVideo ? { generationId: request.recapVideo.video.generationId, hash: request.recapVideo.video.hash } : undefined,
+        })),
+        chooseLine: async () => { if (request.recapVideo) await request.recapVideo.persist({ ...hostedRecapVideoIdentity(request.recapVideo.video), form: "line" }); },
+        markPreProvider: markHostedDeliveryPreProvider,
+      }),
       ...(signal ? { signal } : {}),
     }, "Hosted assistant Linq delivery");
     const buildDeliveryOutcome = (outcome: Omit<
@@ -5202,7 +5237,7 @@ function createHostedAssistantLinqSendDependency(input: {
       ...outcome,
       directRecipientPhoneNumber: originalParticipantRecipientPhoneNumber,
       fromPhoneNumber,
-      intentId: input.intentId ?? null,
+      intentId,
       providerTarget,
       target: providerTarget,
       targetKind: providerTargetKind,
@@ -5220,6 +5255,8 @@ function createHostedAssistantLinqSendDependency(input: {
         media: request.media ?? null,
         message: request.message,
         ...(request.nativeReplyRequested === true ? { nativeReplyRequested: true } : {}),
+        // Exactly today's request unless a recap video goes with it.
+        ...preparedLinqAttachmentField(recapAttachmentIds),
         replyToMessageId: request.replyToMessageId ?? null,
         target: providerTarget,
         targetKind: providerTargetKind,
@@ -5276,7 +5313,7 @@ function createHostedAssistantLinqSendDependency(input: {
                   && providerAttempt.idempotencyKey !== fallback.idempotencyKey
                 ) {
                   await recordHostedAssistantLinqDeliveryOutcomeRequired({
-                    effectsPort: input.effectsPort ?? null,
+                    effectsPort,
                     outcome: buildDeliveryOutcome({
                       attemptedAt: providerAttempt.attemptedAt,
                       answeredMailboxItemIds: [],
@@ -5305,7 +5342,7 @@ function createHostedAssistantLinqSendDependency(input: {
         readHostedAssistantLinqRichLinkPartialDeliveryResult(error);
       if (partialRichLinkResult) {
         await recordHostedAssistantLinqDeliveryOutcomeOrQueueBestEffort({
-          effectsPort: input.effectsPort ?? null,
+          effectsPort,
           outcome: buildDeliveryOutcome({
             attemptedAt: failedProviderAttempt.attemptedAt,
             answeredMailboxItemIds: [],
@@ -5329,10 +5366,10 @@ function createHostedAssistantLinqSendDependency(input: {
         });
       }
       queueHostedAssistantLinqDeliveryOutcomeWrite({
-        effectsPort: input.effectsPort ?? null,
+        effectsPort,
         outcome: buildDeliveryOutcome({
           attemptedAt: failedProviderAttempt.attemptedAt,
-          answeredMailboxItemIds: request.answeredMailboxItemIds ?? [],
+          answeredMailboxItemIds,
           failedAt: new Date(),
           failureCode: readHostedAssistantLinqDeliveryFailureCode(error),
           failureReason: readTrustedHostedAssistantLinqDeliveryFailureReason(error),
@@ -5354,13 +5391,13 @@ function createHostedAssistantLinqSendDependency(input: {
       acceptedAt,
     });
     await recordHostedAssistantLinqDeliveryOutcomeOrQueueBestEffort({
-      effectsPort: input.effectsPort ?? null,
+      effectsPort,
       outcome: buildDeliveryOutcome({
         acceptedAt,
         attemptedAt: requireHostedLinqProviderAttemptedAt(
           acceptedProviderAttempt?.attemptedAt ?? null,
         ),
-        answeredMailboxItemIds: request.answeredMailboxItemIds ?? [],
+        answeredMailboxItemIds,
         idempotencyKey: acceptedIdempotencyKey,
         providerThreadId: result.providerThreadId ?? null,
         result,
@@ -6351,6 +6388,67 @@ function readTrustedHostedAssistantLinqDeliveryFailureReason(
   return message ? message.slice(0, 500) : null;
 }
 
+function hostedRecapVideoIdentity(video: { generationId: string; hash: string; byteLength: number }) {
+  return { generationId: video.generationId, hash: video.hash, byteLength: video.byteLength };
+}
+
+/** Web allows this video with the message: its exact yes, and no delivery block on the chat. */
+function hostedRecapVideoMayGo(answer: HostedRuntimeLinqRecentInboundEngagementResult): boolean {
+  return answer.recapVideoCurrent === true && !answer.deliveryBlockCode;
+}
+
+function preparedLinqAttachmentField(ids: string[]): { preparedAttachmentIds?: string[] } {
+  return ids.length > 0 ? { preparedAttachmentIds: ids } : {};
+}
+
+/**
+ * The prepared attachment ids a recap message's first send carries: none, or its accepted video's.
+ * Web is asked before the upload and before every send; the upload goes through an authority-only
+ * provider boundary, so it claims no dispatch fence of its own.
+ */
+async function prepareHostedLinqRecapVideoAttachment(input: {
+  request: { recapVideo?: Parameters<typeof resolveHostedRecapVideoAttachment>[0]["recapVideo"]; card?: unknown };
+  mediaCount: number;
+  check(recapVideo?: { generationId: string; hash: string }): Promise<HostedRuntimeLinqRecentInboundEngagementResult>;
+  assertCanEnter(): Promise<void>;
+  linqEnv: NodeJS.ProcessEnv;
+  providerFetch: Parameters<typeof createHostedProviderFetchBoundary>[0]["providerFetch"];
+  publicInternetFetch?: typeof fetch | null;
+  signal: AbortSignal | null;
+}): Promise<string[]> {
+  // A recap is a text-only message; anything else is sent exactly as before.
+  if (!input.request.recapVideo || input.request.card != null || input.mediaCount > 0) return [];
+  const attachmentId = await resolveHostedRecapVideoAttachment({
+    recapVideo: input.request.recapVideo,
+    // Loaded only for a recap that carries a video.
+    fileFor: async (identity) => (await import("@murphai/assistant-engine/recap-video-render")).recapVideoHandoffPath(identity),
+    isCurrent: async ({ generationId, hash }) => hostedRecapVideoMayGo(await input.check({ generationId, hash })),
+    upload: async (bytes) => (await uploadLinqAttachment({ bytes, ...RECAP_VIDEO_LINQ_ATTACHMENT }, {
+      env: input.linqEnv,
+      fetchImplementation: createHostedProviderFetchBoundary({
+        assertProviderEntryLive: async () => {
+          try {
+            await input.assertCanEnter();
+            // An authority-only answer reports a delivery block instead of throwing it: honor it before any bytes leave.
+            const answer = await input.check();
+            if (answer.deliveryBlockCode) {
+              throw new VaultCliError("ASSISTANT_RECAP_VIDEO_DELIVERY_BLOCKED", "Delivery to this chat is blocked.", { retryable: true });
+            }
+          } catch (error) {
+            throw markHostedDeliveryPreProvider(error);
+          }
+        },
+        operation: "Hosted recap video attachment",
+        providerFetch: input.providerFetch,
+      }),
+      ...(input.publicInternetFetch ? { publicFetchImplementation: input.publicInternetFetch } : {}),
+      ...(input.signal ? { signal: input.signal } : {}),
+    })).attachmentId,
+    signal: input.signal,
+  });
+  return attachmentId ? [attachmentId] : [];
+}
+
 async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input: {
   answeredMailboxItemIds?: readonly string[] | null;
   assistantAskCompletionExpiresAt?: string;
@@ -6365,6 +6463,7 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
   idempotencyKey: string | null;
   intentId: string | null;
   providerDispatchRetrySafe?: boolean;
+  recapVideo?: { generationId: string; hash: string };
   replyToMessageId: string | null;
   signal: AbortSignal | null;
   target: string;
@@ -6404,6 +6503,7 @@ async function assertHostedAssistantLinqRecentInboundEngagementForDelivery(input
       homeRouteFallbackAllowed: input.homeRouteFallbackAllowed,
       idempotencyKey: input.idempotencyKey,
       intentId: input.intentId,
+      recapVideo: input.recapVideo,
       replyToMessageId: input.replyToMessageId,
       target: input.target,
       targetKind,

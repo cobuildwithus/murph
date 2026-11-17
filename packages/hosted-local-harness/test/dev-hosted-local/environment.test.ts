@@ -253,9 +253,7 @@ describe("mergeCloudflareLocalEnv", () => {
     );
     expect(merged.HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY).toBe("generated-envelope");
     expect(merged.HOSTED_LOG_FINGERPRINT_SECRET).toBe("generated-envelope");
-    expect(merged.HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET).toBe(
-      "generated-envelope",
-    );
+    expect(merged.HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET).toBeUndefined();
     expect(merged.HOSTED_WEB_CALLBACK_SIGNING_PUBLIC_KEYRING_JSON).toBe(
       JSON.stringify({
         v1: {
@@ -294,22 +292,6 @@ describe("mergeCloudflareLocalEnv", () => {
     );
   });
 
-  it("preserves an existing hosted-local provider egress credential signing secret", () => {
-    const merged = mergeCloudflareLocalEnv({
-      config: localConfig,
-      existing: {
-        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
-          "persisted-provider-egress-signing-secret",
-      },
-      oidcIdentity,
-      createEnvelopeKey: () => "generated-envelope",
-    });
-
-    expect(merged.HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET).toBe(
-      "persisted-provider-egress-signing-secret",
-    );
-  });
-
   it("generates the Worker log fingerprint secret for hosted-local E2E isolation", () => {
     const merged = mergeCloudflareLocalEnv({
       config: localConfig,
@@ -325,19 +307,15 @@ describe("mergeCloudflareLocalEnv", () => {
     const workerConfig = buildWranglerLocalDevConfig(merged);
 
     expect(merged.HOSTED_LOG_FINGERPRINT_SECRET).toBe("generated-envelope");
-    expect(merged.HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET).toBe(
-      "generated-envelope",
-    );
+    expect(merged.HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET).toBeUndefined();
     expect(workerEnvText).toContain(
       'HOSTED_LOG_FINGERPRINT_SECRET="generated-envelope"',
     );
-    expect(workerEnvText).toContain(
-      'HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET="generated-envelope"',
-    );
+    expect(workerEnvText).not.toContain("HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET");
     expect(readRequiredSecretNames(workerConfig)).toContain(
       "HOSTED_LOG_FINGERPRINT_SECRET",
     );
-    expect(readRequiredSecretNames(workerConfig)).toContain(
+    expect(readRequiredSecretNames(workerConfig)).not.toContain(
       "HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET",
     );
   });
@@ -1474,9 +1452,7 @@ describe("buildWranglerEnvFileText", () => {
         HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
           "local-provider-egress-signing-secret",
       }),
-    ).toContain(
-      'HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET="local-provider-egress-signing-secret"',
-    );
+    ).not.toContain("HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET");
     expect(
       buildWranglerEnvFileText({
         HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK: "automation-private",
@@ -1613,9 +1589,7 @@ describe("buildWranglerEnvFileText", () => {
     expect(text).toContain('HOSTED_CRYPTO_ENV="local"');
     expect(text).toContain('HOSTED_CRYPTO_LOCAL_KMS_WRAP_KEY="local-wrap-key"');
     expect(text).toContain('HOSTED_LOG_FINGERPRINT_SECRET="local-log-fingerprint-secret"');
-    expect(text).toContain(
-      'HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET="local-provider-egress-signing-secret"',
-    );
+    expect(text).not.toContain("HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET");
     expect(text).toContain("HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK=");
     expect(text).not.toContain("LINQ_API_TOKEN");
   });

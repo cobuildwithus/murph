@@ -276,14 +276,14 @@ export class HostedBillingBrowserDriver {
         this.timeoutMs,
         actor.page.getByRole("button", {
           exact: true,
-          name: "Choose Pulse",
+          name: "Switch to Pulse",
         }),
       );
       const dialog = actor.page.getByRole("dialog");
       await dialog.getByRole("heading", { name: "Switch to Pulse" }).waitFor();
       const [response] = await Promise.all([
         actor.page.waitForResponse(
-          isApiResponse("/api/settings/billing/switch-to-pulse", "POST"),
+          isApiResponse("/api/settings/billing/switch-plan", "POST"),
         ),
         clickHydratedMurphControl(
           this.timeoutMs,
@@ -361,7 +361,11 @@ export class HostedBillingBrowserDriver {
         ),
       ]);
       await assertSuccessfulResponse(response);
-      await actor.page.getByText("You're in. Welcome to Murph.", {
+      await actor.page.getByRole("heading", {
+        exact: true,
+        name: "You're in.",
+      }).waitFor();
+      await actor.page.getByText("Welcome to Murph.", {
         exact: true,
       }).waitFor();
     });
@@ -753,7 +757,15 @@ async function findVisibleEditable(
 ): Promise<Locator | null> {
   for (const selector of selectors) {
     const locators = frame.locator(selector);
-    for (let index = 0; index < await locators.count(); index += 1) {
+    const count = await locators.count().catch((error: unknown) => {
+      // Stripe can remove a frame after page.frames() snapshots it. The
+      // existing readiness poll will inspect the replacement frame.
+      if (frame.isDetached()) {
+        return 0;
+      }
+      throw error;
+    });
+    for (let index = 0; index < count; index += 1) {
       const locator = locators.nth(index);
       if (
         await locator.isVisible().catch(() => false)

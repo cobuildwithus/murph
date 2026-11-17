@@ -1,0 +1,35 @@
+{
+  "name": "@murphai/recap-video",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "license": "Apache-2.0",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "assets",
+    "dist"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/rm-paths.mjs dist .tsbuildinfo && node ../../scripts/run-typescript.mjs package -b tsconfig.json --pretty false",
+    "typecheck": "node ../../scripts/run-typescript.mjs check -p tsconfig.typecheck.json --pretty false",
+    "test": "pnpm exec vitest run --config vitest.config.ts --no-coverage",
+    "test:coverage": "pnpm exec vitest run --config vitest.config.ts --coverage",
+    "measure": "pnpm --dir ../.. exec tsx packages/recap-video/scripts/measure.ts",
+    "frames": "pnpm --dir ../.. exec tsx packages/recap-video/scripts/frames.ts",
+    "proof": "pnpm --dir ../.. exec tsx packages/recap-video/scripts/proof.ts"
+  },
+  "dependencies": {
+    "@napi-rs/canvas": "1.1.0"
+  },
+  "engines": {
+    "node": ">=24.22.1"
+  }
+}

@@ -1,3 +1,5 @@
+import { parseRequestJson } from "@/src/lib/http";
+import { RequestInputError } from "@murphai/hosted-execution/request-input";
 import { requireHostedCloudflareCallbackRequest } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import {
   isHostedDomainRootEnvelopeUnavailableError,
@@ -14,7 +16,7 @@ export const POST = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request, {
     maxBodyBytes: HOSTED_RUNTIME_CRYPTO_ROOT_CALLBACK_BODY_LIMIT_BYTES,
   });
-  const body = parseHostedRuntimeCryptoRootRequest(await request.json());
+  const body = parseHostedRuntimeCryptoRootRequest(parseRequestJson(await request.text()));
   const prisma = getPrisma();
   const workspace = await prisma.hostedWorkspace.findUnique({
     select: { userId: true },
@@ -59,7 +61,7 @@ function parseHostedRuntimeCryptoRootRequest(value: unknown): {
   rootKeyId: string;
 } {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("Hosted runtime crypto root request must be an object.");
+    throw new RequestInputError("Hosted runtime crypto root request must be an object.");
   }
 
   const record = value as Record<string, unknown>;
@@ -67,11 +69,11 @@ function parseHostedRuntimeCryptoRootRequest(value: unknown): {
   const rootKeyId = record.rootKeyId;
 
   if (domain !== "ingress" && domain !== "runtime") {
-    throw new TypeError("Hosted runtime crypto root request domain must be ingress or runtime.");
+    throw new RequestInputError("Hosted runtime crypto root request domain must be ingress or runtime.");
   }
 
   if (typeof rootKeyId !== "string" || rootKeyId.trim().length === 0) {
-    throw new TypeError("Hosted runtime crypto root request rootKeyId must be a non-empty string.");
+    throw new RequestInputError("Hosted runtime crypto root request rootKeyId must be a non-empty string.");
   }
 
   return {

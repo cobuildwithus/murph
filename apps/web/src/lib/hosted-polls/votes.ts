@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 import * as z from "@murphai/contracts/zod-runtime";
 import type { HostedConversationPoll } from "@prisma/client";
@@ -30,7 +31,7 @@ export async function recordTelegramPollAnswer(row: HostedConversationPoll, answ
   });
   if (existing && existing.lastUpdateId >= BigInt(updateId)) return;
   const voterKey = existing?.voterKey ?? createHostedTelegramUserLookupKey(identity);
-  if (!voterKey) throw new TypeError("Invalid poll voter.");
+  if (!voterKey) throw new ContractValidationError("Invalid poll voter.");
   const displayName = answer.user
     ? [answer.user.first_name, answer.user.last_name].filter(Boolean).join(" ").slice(0, 256)
     : answer.voter_chat?.title;

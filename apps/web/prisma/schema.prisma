@@ -583,18 +583,44 @@ model CompanionPushRoute {
   alertsAllowed  Boolean      @map("alerts_allowed")
   gameSessionId  String?      @map("game_session_id")
   gameReminders  Boolean      @default(false) @map("game_reminders")
+  // The phone's "Reopen reminders" switch. null: this build has not reported it; treated as on.
+  reopenReminders Boolean?    @map("reopen_reminders")
   updatedAt      DateTime     @map("updated_at")
   member         HostedMember @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("companion_push_route")
 }
 
+// One row per "Open Murph" push claimed for a member whose phone stopped
+// sending Apple Health data. The key is the idempotency key. Holds no content.
+model AppleHealthReopenPush {
+  userId           String       @map("user_id")
+  // The member's last Apple Health delivery: the start of this silence.
+  episodeStartedAt DateTime     @map("episode_started_at")
+  step             Int
+  // claimed | sent | failed | unregistered | superseded
+  outcome          String
+  createdAt        DateTime     @default(now()) @map("created_at")
+  member           HostedMember @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, episodeStartedAt, step])
+  @@map("apple_health_reopen_push")
+}
+
 model HostedMember {
+  customConnections HostedMcpConnection[]
+  customConnectionActions HostedMcpActionRequest[]
   gameInvitations GameInvitee[] @relation("GameInviteeMember")
   chatHostedGames Game[] @relation("GameChatContainer")
   companionLastContactAt         DateTime?                       @map("companion_last_contact_at")
+  companionAppPlatform           String?                         @map("companion_app_platform")
+  companionAppVersion            String?                         @map("companion_app_version")
+  companionAppBuild              String?                         @map("companion_app_build")
+  companionOsVersion             String?                         @map("companion_os_version")
+  companionDeviceModel           String?                         @map("companion_device_model")
   companionLastForegroundAt      DateTime?                       @map("companion_last_foreground_at")
   companionPushRoute             CompanionPushRoute?
+  appleHealthReopenPushes        AppleHealthReopenPush[]
   authRecords                    HostedAuthRecord[]
   id                             String                          @id
   billingStatus                  HostedBillingStatus             @default(not_started) @map("billing_status")
@@ -626,6 +652,9 @@ model HostedMember {
   groupJournalCaptureEnabled      Boolean?                       @map("group_journal_capture_enabled")
   groupJournalCaptureConsentRequestedAt DateTime?                @map("group_journal_capture_consent_requested_at")
   suspendedAt                    DateTime?                       @map("suspended_at")
+  /// How the first-party account was first signed in to: email, phone or telegram. Written once by the sign-in
+  /// that claims the member; later sign-in method changes never touch it. Null: not known to be phone or Telegram.
+  firstSignInMethod              String?                         @map("first_sign_in_method")
   createdAt                      DateTime                        @default(now()) @map("created_at")
   updatedAt                      DateTime                        @updatedAt @map("updated_at")
   invites                        HostedInvite[]                 @relation("HostedInviteMember")
@@ -684,6 +713,12 @@ model HostedMember {
   computerHandoffs               HostedComputerHandoff[]
   conversationPolls              HostedConversationPoll[]
   gameProfile                    GameProfile?
+  progressAwards                 GameProgressAward[] @relation("ProgressAwardOwner")
+  progressAwardsAbout            GameProgressAward[] @relation("ProgressAwardSubject")
+  progressMeasures               GameProgressMeasure[]
+  progressPics                   GameProgressPic[]
+  progressShares                 GameProgressShare[]
+  progressTaskMeasures           GameProgressTaskMeasure[]
   phoneCalls                     HostedPhoneCall[]
   physicalNotes                  HostedPhysicalNote[]
   physicalNoteRecoveries         HostedPhysicalNoteRecovery[]
@@ -1317,6 +1352,8 @@ model HostedRuntimeOwner {
   platformAiUsageAllowed    Boolean  @default(false) @map("platform_ai_usage_allowed")
   // Server-owned allowance attribution, frozen for this exact invocation.
   allowanceBeneficiaryMemberId String? @map("allowance_beneficiary_member_id")
+  // Fresh-attempt debt survives release and retirement.
+  startDebtUntil            DateTime? @map("start_debt_until")
   startedAt                 DateTime? @map("started_at")
   acceptedAt                DateTime? @map("accepted_at")
   completedAt               DateTime? @map("completed_at")
@@ -2191,6 +2228,66 @@ model HostedThreadRoute {
   @@map("hosted_thread_route")
 }
 
+// Routing-control authority survives deletion of any former container.
+model HostedLinqGroupLeave {
+  threadIdentityLookupKey String   @id @map("thread_identity_lookup_key")
+  chatIdEncrypted         String   @map("chat_id_encrypted")
+  leftAt                  DateTime @default(now()) @map("left_at")
+  reason                  String   @db.VarChar(32)
+  providerLeaveAttempts Int @default(0) @map("provider_leave_attempts")
+  providerLeaveLastAttemptAt DateTime? @map("provider_leave_last_attempt_at")
+  providerRemovedAt DateTime? @map("provider_removed_at")
+  providerLeaveTerminalCode String? @map("provider_leave_terminal_code") @db.VarChar(32)
+  sightings HostedLinqGroupSighting[]
+
+  @@map("hosted_linq_group_leave")
+}
+
+// Global blinded evidence. Linkage is limited to one contact-key epoch.
+model HostedLinqGroupSighting {
+  chatLookupKey String @id @map("chat_lookup_key")
+  lineLookupKey String? @map("line_lookup_key")
+  firstObservedAt DateTime @map("first_observed_at")
+  lastObservedAt DateTime @map("last_observed_at")
+  providerChatCreatedAt DateTime? @map("provider_chat_created_at")
+  service String? @db.VarChar(16)
+  rosterHandleCount Int? @map("roster_handle_count")
+  rosterComplete Boolean @default(false) @map("roster_complete")
+  rosterObservedAt DateTime? @map("roster_observed_at")
+  leaveMarkerKey String? @map("leave_marker_key")
+  leaveMarker HostedLinqGroupLeave? @relation(fields: [leaveMarkerKey], references: [threadIdentityLookupKey], onDelete: SetNull, onUpdate: Cascade)
+  handles HostedLinqGroupHandle[]
+
+  @@index([leaveMarkerKey])
+  @@index([lastObservedAt])
+  @@map("hosted_linq_group_sighting")
+}
+
+model HostedLinqGroupHandle {
+  chatLookupKey String @map("chat_lookup_key")
+  handleLookupKey String @map("handle_lookup_key")
+  firstSeenAt DateTime @map("first_seen_at")
+  lastSeenAt DateTime @map("last_seen_at")
+  firstSeenVia String @map("first_seen_via") @db.VarChar(24)
+  firstSentAt DateTime? @map("first_sent_at")
+  sighting HostedLinqGroupSighting @relation(fields: [chatLookupKey], references: [chatLookupKey], onDelete: Cascade, onUpdate: Cascade)
+
+  @@id([chatLookupKey, handleLookupKey])
+  @@index([handleLookupKey, chatLookupKey])
+  @@index([lastSeenAt])
+  @@map("hosted_linq_group_handle")
+}
+
+model HostedLinqHandleBlock {
+  contactLookupKey String @id @map("contact_lookup_key")
+  contactKind String @map("contact_kind") @db.VarChar(8)
+  contactEncrypted String @map("contact_encrypted")
+  reason String @db.VarChar(16)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("hosted_linq_handle_block")
+}
+
 model HostedLinqGroupLineMove {
   id                          String @id
   containerMemberId           String @map("container_member_id")
@@ -2732,6 +2829,8 @@ model GameProfile {
   reminderMinutes Int @default(1140) @map("reminder_minutes")
   reminderPush Boolean @default(true) @map("reminder_push")
   reminderText Boolean @default(false) @map("reminder_text")
+  /// Activities never to suggest in their games, by `GAME_ACTIVITIES` key.
+  notForMe String[] @default([]) @map("not_for_me")
   chatPhotoIntroducedAt DateTime? @map("chat_photo_introduced_at")
   chatPhotoOffer Json? @map("chat_photo_offer")
   photoKey           String?            @map("photo_key")
@@ -2840,6 +2939,8 @@ model GameInvitee {
 model GamePlayer {
   reminderOff        Boolean     @default(false) @map("reminder_off")
   reminderEveryDay   Boolean     @default(false) @map("reminder_every_day")
+  /// This game's own reminder time; null follows the profile time.
+  reminderMinutes    Int?        @map("reminder_minutes")
   gameId             String      @map("game_id")
   memberId           String?     @map("member_id")
   seat               Int
@@ -3002,4 +3103,142 @@ model GameEvent {
   @@index([gameId, id])
   @@index([actor, type])
   @@map("game_event")
+}
+
+model HostedMcpConnection {
+  id String @id
+  memberId String @map("member_id")
+  member HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  slug String
+  name String
+  serverUrl String @map("server_url")
+  status String @default("off")
+  auth String @default("none")
+  generation Int @default(1)
+  revision Int @default(0)
+  tools Json @default("[]")
+  catalog String
+  credentialsEncrypted String? @map("credentials_encrypted")
+  tokenVersion Int @default(0) @map("token_version")
+  refreshClaim String? @map("refresh_claim")
+  refreshExpiresAt DateTime? @map("refresh_expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  lastUsedAt DateTime? @map("last_used_at")
+  pending HostedMcpPendingAuthorization?
+  actionRequests HostedMcpActionRequest[]
+
+  @@unique([memberId, slug])
+  @@map("hosted_mcp_connection")
+}
+
+/// A change Murph asked to make with an approved tool. It runs only after the member confirms it on a
+/// signed-in Murph page, and at most once: confirming consumes it as unknown before anything is sent.
+model HostedMcpActionRequest {
+  id String @id
+  memberId String @map("member_id")
+  member HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  connectionId String @map("connection_id")
+  connection HostedMcpConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  generation Int
+  toolName String @map("tool_name")
+  /// The approved remote definition's digest when Murph asked.
+  digest String
+  /// Keyed identity of member, connection, generation, tool, digest and canonical arguments.
+  lookupKey String @map("lookup_key")
+  argumentsEncrypted String @map("arguments_encrypted")
+  /// waiting | declined | done | failed | unknown. Expiry is derived from expiresAt.
+  status String @default("waiting")
+  resultEncrypted String? @map("result_encrypted")
+  createdAt DateTime @default(now()) @map("created_at")
+  expiresAt DateTime @map("expires_at")
+  decidedAt DateTime? @map("decided_at")
+
+  @@index([memberId, lookupKey])
+  @@index([memberId, status, expiresAt])
+  @@index([connectionId])
+  @@index([createdAt])
+  @@map("hosted_mcp_action_request")
+}
+
+model HostedMcpPendingAuthorization {
+  connectionId String @id @map("connection_id")
+  connection HostedMcpConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  memberId String @map("member_id")
+  sessionBinding String @map("session_binding")
+  generation Int
+  stateHash String @unique @map("state_hash")
+  payloadEncrypted String @map("payload_encrypted")
+  expiresAt DateTime @map("expires_at")
+
+  @@index([expiresAt])
+  @@map("hosted_mcp_pending_authorization")
+}
+
+// Progress content is sealed; lookup keys reveal neither a task nor a measure.
+model GameProgressAward {
+  memberId        String       @map("member_id")
+  lookup          String
+  subjectMemberId String?      @map("subject_member_id")
+  earnedOn        DateTime     @db.Date @map("earned_on")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  dataEncrypted   String       @map("data_encrypted")
+  seenAt          DateTime?    @map("seen_at")
+  member          HostedMember @relation("ProgressAwardOwner", fields: [memberId], references: [id], onDelete: Cascade)
+  subject         HostedMember? @relation("ProgressAwardSubject", fields: [subjectMemberId], references: [id], onDelete: Cascade)
+  share           GameProgressShare?
+
+  @@id([memberId, lookup])
+  @@index([memberId, earnedOn(sort: Desc), createdAt(sort: Desc), lookup(sort: Desc)])
+  @@index([subjectMemberId])
+  @@map("game_progress_award")
+}
+
+model GameProgressMeasure {
+  memberId       String       @map("member_id")
+  lookup         String
+  stateEncrypted String       @map("state_encrypted")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+  member         HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@id([memberId, lookup])
+  @@map("game_progress_measure")
+}
+
+model GameProgressPic {
+  id            String       @id @db.Uuid
+  memberId      String       @map("member_id")
+  storageKey    String       @unique @map("storage_key")
+  takenAt       DateTime     @map("taken_at")
+  metaEncrypted String       @map("meta_encrypted")
+  retiredAt     DateTime?    @map("retired_at")
+  member        HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([memberId, retiredAt, takenAt])
+  @@map("game_progress_pic")
+}
+
+model GameProgressShare {
+  memberId    String       @map("member_id")
+  awardLookup String       @map("award_lookup")
+  storageKey  String       @unique @map("storage_key")
+  status      String
+  createdAt   DateTime     @default(now()) @map("created_at")
+  failureCode String?      @map("failure_code")
+  member      HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  award       GameProgressAward @relation(fields: [memberId, awardLookup], references: [memberId, lookup], onDelete: Cascade)
+
+  @@id([memberId, awardLookup])
+  @@index([memberId, createdAt])
+  @@map("game_progress_share")
+}
+
+model GameProgressTaskMeasure {
+  memberId         String       @map("member_id")
+  lookup           String
+  measureEncrypted String       @map("measure_encrypted")
+  createdAt        DateTime     @default(now()) @map("created_at")
+  member           HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@id([memberId, lookup])
+  @@map("game_progress_task_measure")
 }

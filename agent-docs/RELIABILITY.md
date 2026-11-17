@@ -135,8 +135,14 @@ Current product admission, delivery and native runtime safety rules remain.
   pre-provider instant-reply claim, then invokes the canonical account-deletion owner.
   Completed delivery evidence is preserved, and any provider-entered or
   ambiguous claim blocks the reset. The route has no target input and accepts
-  only its dedicated constant-time bearer secret. Provider, reset, target, and
-  Vercel credentials are exposed only to their owning workflow steps, and the
+  GitHub Actions OIDC under the shared verifier's fixed claims, with atomic
+  one-time reset admission in the existing nonce store. The controller obtains
+  a fresh token for every reset or status request, within the request deadline;
+  a token failure never repeats reset or provider messages. Legacy static
+  bearer acceptance lasts only while its Web environment variable is set
+  (see Security and the live-provider canary rollout order). Provider, target,
+  and Vercel credentials remain in their owning workflow steps; OIDC minting
+  permission belongs only to the trusted production-canary job, and the
   journey emits counts and latency only. The final two turns save and read back
   one fixed synthetic goal. A read-only observer requires the current checkpoint's
   published replica and no pending conversation input, then checks canonical
@@ -991,8 +997,12 @@ Current product admission, delivery and native runtime safety rules remain.
   primary POST and keep the page pending; after configuration is corrected,
   stable provider
   idempotency deduplicates that primary replay while the actual secondary
-  receives the page. Delivery otherwise uses Linq's no-`from` auto-selection
-  route separately for each chat. The primary retains the persisted Linq
+  receives the page. Delivery otherwise posts into each configured chat, so
+  the page leaves from the line preflight checked. Linq answers a key whose
+  message it deleted or expired with 404 and never resends it, so a 404 earns
+  one resend under a key bound to that chat; a chat Linq cannot find 404s
+  again and the page stays pending. The secondary chat is optional and is
+  currently retired by the deploy, so pages go to the primary only. The primary retains the persisted Linq
   idempotency key and the secondary uses a stable derived key. A
   transport-ambiguous or rejected send keeps the exact persisted body and both
   destination keys for the next eligible cycle; only acknowledged entry to both
@@ -1902,6 +1912,11 @@ Current product admission, delivery and native runtime safety rules remain.
   Different deadlines, fresh/due hints, authority or ordering barriers, and
   invalid continuation projections remain independent pending work. Exact
   provider retry jobs remain intact until their existing deadline.
+  The retired `fitbit_migration_successor_arrival` webhook hint carried no jobs
+  or scopes and its Web producer returned a retryable admission after append.
+  It may retire as a plain hint only through the existing pristine, same-epoch,
+  exact-owner, equal-retry coverage path; the webhook transport retains the
+  original event for re-admission. Unknown hint reasons remain barriers.
   The retained wake's job hints suppress provider scheduling,
   and each local job keeps its own `availableAt`, so these bounded passes neither
   run the later mailbox item out of order nor bypass provider backoff.
@@ -3296,6 +3311,30 @@ Current product admission, delivery and native runtime safety rules remain.
   drain through exact-source private admission. The undeployed dual URL marker
   and destination dialect are rejected. Caller cancellation, exhausted
   deadlines, authority failures, and other `4xx` responses do not replay.
+- Cloudflare also exact-replays one game-recap group-tool request (`write_recap`,
+  and `read_game` with a `game_recap` origin: material, transcript, reference,
+  upload, recover) under the same deadline and failure rule. Each is safe to
+  send twice: the save and the fallback first return an already-sealed recap,
+  and an upload reuses its content-addressed key. This is the recap's only
+  transport retry; Web's save path and the tool handlers add none.
+- Request boundaries can translate neutral `ContractValidationError` failures through
+  `parseInput` into `RequestInputError`. Web, Worker and container request-decode
+  mappers recognize that explicit rejection as 400 using their existing envelopes.
+  Stage 1 of the explicit-request-rejection plan retains native error inference
+  and the neutral error's temporary `TypeError` base; Web marks native-inferred
+  invalid requests with `nativeErrorInference: true` in its existing warning.
+  Parser bugs pass through unchanged, and retry policy stays with each owner.
+- Bounded Web, Worker and container request readers throw `RequestBodyTooLargeError`
+  from `@murphai/hosted-execution/request-input` at the byte-limit branch.
+  Size adapters recognize that class, never a message prefix or an arbitrary
+  `RangeError`, and retain each endpoint's status, envelope and headers.
+  Body-prohibited endpoints keep their existing 400 contracts. The signal's
+  temporary `RangeError` base preserves unmigrated native 400 inference until
+  stage 6 of the explicit-request-rejection plan removes that compatibility.
+- Hosted Web JSON routes answer a failed outbound fetch (Node's `TypeError`
+  whose message is exactly `fetch failed`) with a retryable `503
+  UPSTREAM_UNAVAILABLE`, never `400 INVALID_REQUEST`, so a caller's existing
+  `5xx` replay rule applies to a network failure behind the route.
 - Assistant Ask request and completion appends first signal the existing Temporal
   workflow, then may issue the shared payloadless, no-retry direct
   `ensure-processing` latency hint. Temporal acceptance failure starts no direct
@@ -4049,6 +4088,24 @@ canonical rewrite after full binding validation, while generic structural edits
 remain fail-closed against saved-set loss.
 
 ## Hosted operator tasks
+
+The assistant group tool returns local `left` or `already_left` only after
+validated source authority. The engine interrupts while its tool RPC is pending,
+using terminal no-reply rather than allowing another provider request. Refusals
+remain answerable. Marker-backed transport replay cannot repeat the Linq attempt.
+Web and its widened reason constraint precede the runtime producer; unchanged
+terminal route-loss consumers keep older runners compatible with new Web.
+
+Linq group departure commits its marker and exact route deletion together under
+chat-ownership then route-row locks. Assistant calls reject all game history;
+Ops keeps its active-only guard. First game bindings take their container member
+foreign-key lock before the route, then pair/audience/game locks. Assistant leave
+takes chat ownership before member/runtime locks, matching webhook admission.
+Leave takes no game row locks. Only the winning marker insert requests one
+post-commit provider attempt; failure or a crash between commit and dispatch
+does not undo local silence or create a retry obligation. Web admission and
+unbound notice/source-group recovery fences follow `ARCHITECTURE.md`; runtime
+typing, poll-notification locking and game-room binding remain Phase 2 work.
 
 One Web transaction writes the operator-task audit row and its encrypted
 mailbox item. Stable caller idempotency maps to one task and mailbox identity;

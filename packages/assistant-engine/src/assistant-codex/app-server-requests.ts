@@ -167,6 +167,9 @@ export function buildCodexTurnStartParams(input: {
       ? { ...input.input.outputSchema }
       : undefined,
     model: normalizeNullableString(input.input.model),
+    turnTrigger: input.input.promptCacheRetention === '12h'
+      ? 'murph_conversation_reply_12h'
+      : undefined,
     threadId: input.codexThreadId,
   })
 

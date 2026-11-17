@@ -193,12 +193,12 @@ declare module 'incur' {
       'measurement manifest': { args: { id: string }; options: { requestId?: string } }
       'measurement show': { args: { id: string }; options: { requestId?: string } }
       'medication history add': { args: { title: string }; options: { requestId?: string; id?: string; slug?: string; stoppedOn?: string; schedule?: string; substance?: string; dose?: number; unit?: string; group?: string; note?: string; relatedGoalId?: string[]; relatedConditionId?: string[]; relatedRegimenId?: string[]; startedOn: string } }
-      'memory forget': { args: { memoryId: string }; options: { compact?: boolean } }
+      'memory forget': { args: { memoryId: string }; options: { compact?: boolean; full?: boolean } }
       'memory set-demographics': { args: {}; options: { compact?: boolean; birthYear?: number; age?: number; asOf?: string; biologicalSex?: "female" | "male"; clearBirth?: boolean; clearSex?: boolean } }
-      'memory set-name': { args: { displayName: string }; options: { compact?: boolean } }
+      'memory set-name': { args: { displayName: string }; options: { compact?: boolean; full?: boolean } }
       'memory show': { args: { memoryId?: string }; options: { recordOnly?: boolean; compact?: boolean } }
-      'memory update': { args: { memoryId: string; text: string }; options: { compact?: boolean; section?: "Identity" | "Preferences" | "Instructions" | "Context" } }
-      'memory upsert': { args: { text: string }; options: { compact?: boolean; section: "Identity" | "Preferences" | "Instructions" | "Context" } }
+      'memory update': { args: { memoryId: string; text: string }; options: { compact?: boolean; full?: boolean; section?: "Identity" | "Preferences" | "Instructions" | "Context" } }
+      'memory upsert': { args: { text: string }; options: { compact?: boolean; full?: boolean; section: "Identity" | "Preferences" | "Instructions" | "Context" } }
       'profile set': { args: {}; options: { requestId?: string; bloodType: string; occurredAt?: string | string | string; source?: "manual" | "import" | "device" | "derived"; note?: string; rawRef?: string[] } }
       'profile show': { args: {}; options: { requestId?: string } }
       'protocol import-json': { args: {}; options: { requestId?: string; input: string } }
@@ -275,17 +275,17 @@ declare module 'incur' {
       'vitals payload-schema': { args: {}; options: {} }
       'vitals save': { args: {}; options: { requestId?: string; occurredAt?: string | string | string; source?: "manual" | "import" | "device" | "derived"; title?: string; note?: string; timeZone?: string; systolic?: number; diastolic?: number; heartRate?: number; respiratoryRate?: number; temperatureF?: number; temperatureC?: number; spo2?: number; weightLb?: number; heightIn?: number } }
       'vitals scaffold': { args: {}; options: { requestId?: string } }
-      'wearables activity list': { args: {}; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit: number; includeWorkoutSummaries: boolean; includeWorkoutDetails: boolean } }
-      'wearables body list': { args: {}; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit: number } }
+      'wearables activity list': { args: {}; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit?: number; includeWorkoutSummaries: boolean; includeWorkoutDetails: boolean } }
+      'wearables body list': { args: {}; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit?: number } }
       'wearables day': { args: { date: string }; options: { requestId?: string; provider?: string[] } }
       'wearables drift': { args: {}; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; windowDays: number } }
       'wearables latest': { args: {}; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[] } }
       'wearables metric latest': { args: { metric: string }; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; windowDays: number } }
       'wearables metric trend': { args: { metric: string }; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; windowDays: number } }
-      'wearables recovery list': { args: {}; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit: number } }
-      'wearables sleep list': { args: {}; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit: number } }
+      'wearables recovery list': { args: {}; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit?: number } }
+      'wearables sleep list': { args: {}; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit?: number } }
       'wearables sleep pattern': { args: {}; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; timeZone?: string; windowDays: number } }
-      'wearables sources list': { args: {}; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit: number } }
+      'wearables sources list': { args: {}; options: { requestId?: string; date?: string; from?: string; to?: string; provider?: string[]; limit?: number } }
       'workout add': { args: { text?: string }; options: { requestId?: string; note?: string; title?: string; duration?: number; type?: string; distanceKm?: number; occurredAt?: string | string | string; source?: "manual" | "import" | "device" | "derived"; media?: string[]; workoutSourceApp?: string; workoutSourceWorkoutId?: string; workoutStartedAt?: string | string; workoutEndedAt?: string | string; workoutRoutineId?: string; workoutRoutineName?: string; workoutSessionNote?: string; workoutMedia?: string[]; workoutExercise?: string[]; workoutSet?: string[] } }
       'workout defaults set': { args: {}; options: { requestId?: string; duration?: number; clearDuration?: boolean; recordedAt?: string | string } }
       'workout defaults show': { args: {}; options: { requestId?: string } }

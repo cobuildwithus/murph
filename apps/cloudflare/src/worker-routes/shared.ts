@@ -1,3 +1,4 @@
+import { RequestInputError } from "@murphai/hosted-execution/request-input";
 import type {
   HostedCryptoDomain,
 } from "@murphai/runtime-state";
@@ -63,7 +64,12 @@ export async function resolveHostedExecutionUserCryptoContext(input: {
 }
 
 export function decodeRouteParam(value: string): string {
-  return decodeURIComponent(value);
+  try {
+    return decodeURIComponent(value);
+  } catch (error) {
+    if (error instanceof URIError) throw new RequestInputError(error.message, { cause: error });
+    throw error;
+  }
 }
 
 export async function readCachedRequestText(

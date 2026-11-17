@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
@@ -144,21 +145,25 @@ describe("reconciliation facts route timing", () => {
     });
   });
 
-  it("closes the failing canonical stage and preserves existing failure classification", async () => {
+  it.each([
+    [new TypeError("Synthetic private mailbox failure."), "type_error"],
+    [new ContractValidationError("Synthetic private mailbox failure."), "error"],
+    [new Error("Synthetic private mailbox failure."), "error"],
+  ])("closes the failing canonical stage and reports a server failure", async (failure, errorClass) => {
     mocks.readFacts.mockImplementation(async (_request, reportStage) => {
       elapsedMs += 30;
       reportStage?.("canonical_mailbox");
       elapsedMs += 50;
-      throw new TypeError("Synthetic private mailbox failure.");
+      throw failure;
     });
 
     const response = await requestFacts();
 
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(500);
     expect(console.error).toHaveBeenCalledWith(
       "Hosted runtime reconciliation facts failed.",
       {
-        errorClass: "type_error",
+        errorClass,
         schema: "murph.hosted-runtime.reconciliation-facts.failure.v1",
         stage: "canonical_mailbox",
       },

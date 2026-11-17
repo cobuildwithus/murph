@@ -1,3 +1,6 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
+import { RequestInputError } from "@murphai/hosted-execution/request-input";
+import * as executionLogging from "@murphai/hosted-execution";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { HostedRuntimeEnsureProcessingResponse } from "@murphai/hosted-execution/orchestration-control";
 import { parseHostedRuntimeLogRequest } from "@murphai/hosted-execution/parsers";
@@ -31,6 +34,50 @@ function harness() {
 
 describe("Postgres processing summaries", () => {
   beforeEach(() => { vi.clearAllMocks(); });
+
+  it.each([
+    ["starting_fence_preserved", undefined, "info"],
+    ["starting_fence_preserved", "read_invocation", "warn"],
+    ["command_budget_exhausted", "container_readiness", "warn"],
+    ["wake_unconfirmed", undefined, "warn"],
+  ] as const)("classifies %s with failed operation %s as %s", (reason, failedOperation, level) => {
+    const diagnostics: RuntimeProcessingDiagnostics = {
+      stage: "liveness",
+      details: {
+        runtimeProcessingRetryReason: reason,
+        ...(failedOperation ? { runtimeProcessingLastObservedFailedOperation: failedOperation } : {}),
+      },
+    };
+    const result: HostedRuntimeEnsureProcessingResponse = {
+      kind: "retry_later", retryAt: new Date(Date.now() + 3_000).toISOString(),
+    };
+    const entry = buildRuntimeProcessingSummaryEntry(diagnostics, result, Date.now());
+    expect(entry.level).toBe(level);
+    expect(entry.redactedJson).toMatchObject({
+      runtimeProcessingOutcome: "retry_later", runtimeProcessingRetryReason: reason,
+      runtimeProcessingRetryAtEpochMs: Date.parse(result.retryAt),
+    });
+    expect(parseHostedRuntimeLogRequest({ entries: [entry] }).entries[0]).toEqual(entry);
+    // A previous retry reason cannot hide a later thrown failure.
+    expect(buildRuntimeProcessingSummaryEntry(diagnostics, undefined, Date.now()).level).toBe("warn");
+  });
+
+  it.each([
+    [new RequestInputError("Synthetic rejection."), 400, "warn"],
+    [new TypeError("Synthetic server failure."), 500, "error"],
+  ] as const)("logs the classified orchestration failure at %s severity", async (failure, status, level) => {
+    const { context, pending } = harness();
+    const log = vi.spyOn(executionLogging, "emitHostedExecutionStructuredLog");
+    vi.mocked(ensurePostgresRuntimeProcessing).mockRejectedValueOnce(failure);
+    try {
+      const response = await handleRuntimeEnsureProcessingRoute(context, "synthetic-owner");
+      expect(response.status).toBe(status);
+      expect(log).toHaveBeenCalledWith(expect.objectContaining({
+        error: failure, level, message: "Hosted worker direct runtime ensure-processing failed.",
+      }));
+      await Promise.all(pending);
+    } finally { log.mockRestore(); }
+  });
 
   it("keeps one detached operation summary stable while telemetry is pending", async () => {
     const { context, pending } = harness();
@@ -75,7 +122,7 @@ describe("Postgres processing summaries", () => {
     const entry = buildRuntimeProcessingSummaryEntry({
       stage: "fresh_start", details: { [key]: value },
     }, undefined, Date.now());
-    expect(() => parseHostedRuntimeLogRequest({ entries: [entry] })).toThrow(TypeError);
+    expect(() => parseHostedRuntimeLogRequest({ entries: [entry] })).toThrow(ContractValidationError);
   });
 
   it("does not schedule a summary callback for a successful warm wake", async () => {

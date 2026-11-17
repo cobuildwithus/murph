@@ -95,6 +95,29 @@ describe('native poll dynamic tool', () => {
     expect(result.rpcResult.success).toBe(true)
     expect(result.rpcResult.contentItems[0]?.text).toContain('provider_update')
   })
+  it.each([
+    ['linq', 'imessage_handle', 'imessage_handle'],
+    ['telegram', 'telegram_user', 'telegram_chat'],
+  ] as const)('omits per-voter repeats on %s and keeps an unusual voter kind', async (channel, ordinary, unusual) => {
+    const voters = [
+      { kind: ordinary, id: '1001', displayName: 'Synthetic A', optionIndexes: [0], observedAt: '2026-09-21T11:00:00.000Z' },
+      { kind: unusual, id: '1002', optionIndexes: [0, 1], observedAt: '2026-09-21T11:30:00.000Z' },
+    ]
+    const named = { ...snapshot, channel, anonymous: false, voters, voterSource: 'provider_read' as const, nextVoterCursor: '50' }
+    const request = parse({ action: 'read', pollRef })
+    if (!request) throw new Error('Expected poll request')
+    const result = await executeMurphDynamicToolRequest({ request, env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null,
+      hostedToolContext: { ...context(), pollTool: { request: async () => ({ status: 'results' as const, polls: [named] }) } } })
+    const { voters: _voters, ...pollFields } = named
+    expect(JSON.parse(result.rpcResult.contentItems[0]?.text ?? '')).toEqual({ status: 'results', polls: [{
+      ...pollFields,
+      // The poll keeps its observedAt; each voter's copy and the channel's ordinary kind are dropped.
+      voters: [
+        { id: '1001', displayName: 'Synthetic A', optionIndexes: [0] },
+        unusual === ordinary ? { id: '1002', optionIndexes: [0, 1] } : { kind: unusual, id: '1002', optionIndexes: [0, 1] },
+      ],
+    }] })
+  })
   it('denies detached requests without invocation authority', async () => {
     port.mockClear()
     const request = parse({ action: 'list' })

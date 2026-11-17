@@ -37,7 +37,7 @@ Replace the `regimen` noun with `protocol` across the repo's command surfaces, c
 - Switched the canonical protocol id prefix from `reg_*` to `prot_*` and aligned generated schema/catalog output.
 - Direct scenario evidence:
   - `node packages/cli/dist/bin.js protocol scaffold --vault fixtures/minimal-vault --format json`
-  - local web inspection at desktop and mobile sizes via headless Chrome against `packages/web` with `VAULT=/Users/willhay/startup1/healthybob/fixtures/demo-web-vault`
+  - local web inspection at desktop and mobile sizes via headless Chrome against `packages/web` with `VAULT=~/startup1/healthybob/fixtures/demo-web-vault`
 - Verification:
   - `pnpm typecheck` passed
   - `pnpm test` passed

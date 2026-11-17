@@ -3,22 +3,14 @@
 ## Status
 
 MVP backend implemented and dark: off in production unless
-`MURPH_GAME_ENABLED=true`. Unset means on outside production only. A non-empty
-`MURPH_GAME_MEMBER_ALLOWLIST` makes it invite only (`isGameOn` in
-`apps/web/src/lib/game/access.ts`): a game is on when at least one of its people
-is listed, its players or a rematch's addressee, so an open invite is on when its
-creator is listed. Listed members can do everything. Anyone else can accept an
-invite to a game that is on, play it fully (posts, changes, settle, tickets,
-Murph's chat and pushes), see it on Home, and rematch its other player in either
-direction, but can't start a fresh game (`GAME_DISABLED`); Home's
-`canStartGames` says which. A game that is off is invisible to everyone. The
-HTTP door admits an unlisted member only when they're in a game that is on
-(settled included) or hold an open invite to one: the accept and negotiate routes
-vouch with their path token, and other routes may carry the held token in the
-`X-Murph-Game-Invite` header so a new invitee can load Home and set a name before
-accepting. Everyone else sees every game route as missing. Removing a listed
-member turns their unlisted opponents' games off, mid-game included. The iOS
-client is the Murph app.
+`MURPH_GAME_ENABLED=true`. Unset means on outside production only.
+`isGameEnabled()` in `apps/web/src/lib/game/access.ts` is the access switch:
+when on, every signed-in member can start, accept and play games. Each command
+and read still checks the player's roster and content access. When off, game
+routes and game content are invisible to everyone. Home retains the boolean
+`canStartGames`, which follows this switch, and multiplayer Home retains
+`canStartGroups`, which follows `areGameGroupsEnabled()` alone. Installed apps'
+`X-Murph-Game-Invite` header is ignored. The iOS client is the Murph app.
 
 With `MURPH_GAME_REQUIRE_CURRENT_TERMS=true` (unset or anything else is off, and
 off changes nothing), the HTTP door also refuses creating, accepting,
@@ -34,6 +26,39 @@ shows Murph's Terms step, records the grant, and sends the write again. Clients
 that predate the code see an ordinary refusal, so turn it on only once a build
 that handles it is out. Pair moves made in Murph's chat retain that behavior. Group chat mutations
 apply the same current-terms check before calling the canonical command.
+
+Game-only members can play with the Terms grant and no health grant, without
+companion admission, starter usage or a personal runtime. Only `heart_rate`
+posts and `reps` posts carrying `data.heartRate` require
+`launch.health-data = granted`. The canonical post mutation locks the member
+before the game and reads the grant inside that transaction, so a withdrawal
+committed during preparation wins. Missing and revoked grants return HTTP 403
+with `HEALTH_DATA_REQUIRED`, `Allow health data to post a heart rate.`, and
+`retryable: false` in the ordinary error envelope. Older clients receive an
+ordinary refusal. Photos, words, routes and plain rep counts require no health
+grant. Shared-room funding and the existing explicit-withdrawal restrictions
+on chat and recaps stay unchanged.
+
+### App Review demo games
+
+The configured review member gets a fixture opponent, a settled game with an
+open IOU, and a live 30-day game on Day 3 with the opponent's photo today locked.
+Home checks review membership in parallel with its normal read. Only that
+member refreshes the seed when there is no live game shared with the fixture
+opponent whose Day 1 matches the seed's current Pacific game day minus two.
+Freshness uses PostgreSQL's clock, as normal Home reads do, without development
+time travel. The seed uses that same instant, with the 3 AM Pacific boundary.
+
+The existing seed apply path rechecks freshness under the pair lock, so
+concurrent Home requests create one replacement pair. Home reads again after a
+refresh, including when another request refreshed after its initial read.
+A block, unavailable storage or another seed failure leaves the initial Home
+available and logs only an error code or name. Ordinary members never reseed.
+No daily operator rerun is needed; an explicit Ops apply still always replaces
+the fixture games. Rows are written directly with no push, chat, Linq or email,
+and the opponent stays unreachable. Without refresh, a seed one game day old
+still shows the live game on Day 4, yesterday's locked photo and the settled
+IOU; there is no opponent post for today.
 
 ## Group lifecycle staging
 
@@ -220,8 +245,8 @@ Open capable previews include `maxPlayers`, `group`, nullable `expiresAt` and
 `alreadyIn` is authenticated-only: joined nonstarter count, at most two own
 profile names and the first named player's signed own photo. Block and report
 masks apply before signing; private contact labels never enter this preview.
-Home computes `canStartGroups` per request from the admission switch and member
-allowlist. Both server create and join retain the admission gate.
+Home computes `canStartGroups` per request from the group admission switch.
+Both server create and join retain the admission gate.
 
 The public Web invite page and its metadata/image renderer opt into multiplayer
 without a member identity. An open group headline is "<Starter> started a
@@ -263,19 +288,41 @@ page opens on the Web. Builds before the game send the link to the app without
 the game until they update. The page's Open in Murph
 button opens `ai.withmurph.app://invite/<token>`; `MURPH_GAME_APP_URL_SCHEME`
 overrides the scheme (local stacks use the Debug app's `ai.withmurph.app.dev`).
+For a picked contact whose invite is not bound to a member, a one-on-one invite
+stores the contact's hashed lookup key on its unbound seat, never the address.
+Typed-name invites have no key. Accepting or claiming the seat through Talk it
+over clears the key, as does calling off, blocking or expiring the game.
+An unread expired invite keeps its key until the existing settlement path runs.
+Account deletion clears keys matching the member's currently verified contacts,
+including rotation read candidates, without changing contact-only invitations,
+labels, seats or events. A contact match alone does not make them a participant.
+Group invitation keys keep their existing lifetime.
+
+`GET /api/game/v1/me/invite` requires a bearer session and the game switch,
+like every game route, and returns `{ ok: true, token: string | null }` with private/no-store
+headers. It finds the newest open one-on-one invite matching a verified contact,
+ordered by creation time then id descending. Before limiting candidates to five,
+it excludes games that are off, expired on the normal clock, called off, created
+by the caller or a deleted challenger, already played by the caller, or blocked
+either way. Development clock offsets are checked after the query. Stored live
+or negotiating games with the challenger also exclude a candidate; reports do
+not. The lookup never settles or writes anything, and returns null when games
+are disabled or no candidate qualifies. Preview and acceptance repeat their own
+checks. The app can pass the token through its existing held-invite path after
+sign-in; typed-name invitations still need the original link.
+
 Its link preview (`/g/<token>/opengraph-image`) shows an open invite as a ticket
 with the challenger's first name against "You", both tasks, the days, and the
 stake, titled "<Name> challenged you"; the name the challenger typed for the
 invitee is their private label and never appears, there or in the public
 invite preview (`GET /api/game/v1/invites/<token>`). A used, expired, or missing
 invite share-card previews as "This invite isn't available" and names nobody.
-The API keeps cancellation compatible with older clients: a void game with a
-`cancelled` event returns `{ status: "expired", reason: "cancelled", inviterFirstName }`.
-The optional reason and inviter name are absent for real expiry. The inviter name
-is included only when the cancellation actor is the inviter; other cancellations
-use neutral wording. The opened web
-page names the inviter for cancellation, with a neutral empty-name fallback;
-terms and private invitee labels stay absent. A game's
+Anonymous closed previews return the same null result as missing tokens, so
+the public API returns the same 404 shape and the page and Open Graph image show
+generic unavailable content. Closed previews never decrypt names or terms.
+Authenticated readers retain used/expired status and their own Talk delivery
+receipt; cancellation adds only `reason: "cancelled"`, never an inviter name.
+Public open invite previews are unchanged. A game's
 players keep its invite token after it goes live (a spent token can't be
 accepted again), so reopening your own link is recognized as yours.
 Either seated player can cancel an invited or negotiating game with
@@ -361,6 +408,22 @@ memory update; time-zone-only changes do not. Existing game profiles remain
 authoritative. See [first-name persistence](ios-game.md#first-name-persistence)
 for validation, authority, timeout and concurrent-save behavior.
 
+The profile also owns `notForMe`, the closed activity list from
+`GAME_ACTIVITIES` in hosted-execution. `PUT /me/profile` replaces the whole list;
+omission keeps it and `[]` clears it. Unknown activity keys are invalid. Lists
+are deduplicated in canonical activity order. A list-only write requires an
+existing profile (`PROFILE_REQUIRED` otherwise). The profile reply and home
+`me.notForMe` always carry an array. Visible players, bound invitees and history
+people carry `notForMe` only when nonempty; hidden, reported and departed people
+never expose it. Unbound contacts stay unknown; there is no contact lookup.
+
+`murph.my_game_not_for_me` reads or sets this same list in a current direct chat,
+using the private reminders tool's wake and route authority, port and availability.
+`operation: set` requires `activities` and replaces the list through `setProfile`;
+read first to add or remove one. No profile is created. Results carry the saved
+`activities` or a refusal. Surfing, kayaking and beach days are not swimming.
+The separate action preserves compatibility with older strict tool readers.
+
 Each member may also upload, replace or remove their own profile photo. It syncs
 across devices and becomes their default when creating or joining a game. Inside
 the app, the person's own profile photo wins, then the viewer's private contact
@@ -370,8 +433,13 @@ Private photos stay stored while hidden and appear again if the person removes
 their own photo. Shared recap exports use only each person's own profile photo,
 never private contact overrides. Daily challenge photos remain separate.
 Profile media is authenticated: the owner, existing game participants and an
-addressed rematch's participants can read the current profile photo. Public
-invite previews never include profile photos. Removing a profile photo clears
+addressed rematch's participants can read the current profile photo.
+Public invite previews never include profile photos. A signed-in member reading
+an open one-on-one invite gets the challenger's current profile photo through
+optional `inviterAvatarUrl`, a short-lived signed link. Invitation, profile,
+expiry, blocks and reports are rechecked before signing; no photo or unavailable
+signed media returns null. Public pages and share cards keep the initial.
+Removing a profile photo clears
 this default without deleting other people's private contact choices.
 
 Either player can set or change their private photo of someone they play or
@@ -424,28 +492,39 @@ resulting avatar. No private photo is shared with the subject or other players.
   Relative dates use the acting message’s occurrence time in that player’s
   game timezone, including its 3am boundary; delayed processing cannot shift
   the chosen day. Missing or ambiguous occurrence timestamps need clarification.
+- **Accept notifications.** An invite acceptance that activates a pair game sends
+  the other player one push per game: "Sam shook on it." / "Your game starts
+  today.", "tomorrow.", a weekday (2–6 days away), or a short date (7+ days away).
+  Words use the written Day 1 and real calendar date in the recipient's frozen
+  zone; expiry is the following date's 3am. `game_accepted` requires alerts,
+  not reminders; live game, participation, blocks and route are rechecked.
+  The activating accept runs once under the game lock, so no separate receipt
+  is kept; a send never retries. Kickoff chat and private kickoff are unchanged.
 - **Post notifications.** One notifier owns two recipient-local daily slots:
   the first eligible peer artifact, then completion ("Everyone's in but you."
   or "Everyone's in."). Incomplete artifacts count as submitted; excuses do
   not. The posting actor is excluded. Simultaneous milestones consume both
-  claims and send one message. Pairs always coincide: a pair recipient who
-  hasn't posted that day gets the generic "Someone posted. Share yours to see
-  it."; one who already has (permanent unlock) gets "They're in too." /
-  "Theirs develops when you open it.", because the app develops a post the
-  first time its viewer sees it on Home. Claims use `GameEvent.commandKey`
+  claims and send one message. The title names the poster: "Sam posted a
+  photo." (any other kind: "Sam checked in."). Pairs always coincide: a pair
+  recipient who hasn't posted that day gets "Share yours to see it."; one who
+  already has (permanent unlock) gets "Sam's in too." / "Theirs develops when
+  you open it.", because the app develops a post the first time its viewer
+  sees it on Home. Claims use `GameEvent.commandKey`
   over game, recipient and the real 03:00-to-03:00 day in their frozen zone;
   legacy daily receipts consume both slots. Candidate posts participate in the
   calculation. Retakes, retries, corrections and excuses create no new slots.
   Sending happens after commit, with route/session, active participation, block,
   report, real-day and milestone rechecks. Stale or uncertain sends keep claims
-  consumed. A blocked peer suppresses completion wording. No content or names
-  enter pushes except the recipient's own task words in a daily reminder.
+  consumed. A blocked peer suppresses completion wording. Pushes name people
+  the way the recipient sees them in the app (their private label, else the
+  person's first name) and fall back to "They"/"Someone" when no name reads.
+  No other content enters pushes except the recipient's own task words in a
+  daily reminder, whose single-game body names who posted ("Sam posted. Share
+  yours to see it.").
   Missed-day chat is separate from these push milestones.
-- **Excuses.** An excuse explains a missed day in a few words: the phone
-  transcribes the voice note on-device and sends only the transcript (1-500
-  characters); no audio is uploaded or stored, and it's never replayed. It
-  applies to the player's most recent past scheduled day with no photo and no
-  excuse yet, never today. It neither scores nor unlocks.
+- **Excuses.** An excuse explains a missed day in a few words (1-500
+  characters). It applies to the player's most recent past scheduled day with
+  no photo and no excuse yet, never today. It neither scores nor unlocks.
 - **Post to unlock.** A posted partner day exposes only its posting time and
   optional device-rendered blur preview until you post that day. No words,
   summary data or entry id is exposed while locked. On the viewer's today
@@ -522,6 +601,12 @@ resulting avatar. No private photo is shared with the subject or other players.
   pair or group check-in collector, including mixed rooms and count schedules.
   Due pairs get no check-ins while awaiting morning. Unbound games still settle
   on a foreground read.
+  A settled pair is not frozen at once: for 7 days each player can still count
+  or uncount their own days through Murph in the game's chat, and the result,
+  record and prize are settled again from the same rules. The game stays
+  settled with the same end time, the recap is left as made, and nothing is
+  re-announced beyond Murph's reply. After 7 days, and for every group game,
+  the result is final.
 - **Missed-day host check-ins.** Around 9am in a player's frozen game time zone,
   after a scheduled day has closed without a post, Murph may address that player
   with one short line in the pair's already-bound group. Consecutive missed days
@@ -552,8 +637,9 @@ resulting avatar. No private photo is shared with the subject or other players.
   and group facts from up to twenty games; pair-only timing and copy stay the
   same. Pre-join, off/open, any-N and incomplete days do not qualify. Corrected
   misses, terms or room changes, unsafe audiences and any new departure suppress
-  an already-prepared message. Any conversation received since transcript capture
-  also suppresses it, even unrelated chatter. Quiet and suppressed turns consume
+  an already-prepared message. Chat never does: Murph reads the day's chat when it
+  writes the message and stays quiet about anything a player already explained,
+  at its own judgment. Quiet and suppressed turns consume
   the daily claim; replay never creates a replacement message. Earlier historical
   departures do not stop future eligible dates. A check-in that cannot go out
   within two hours of its claim is dropped, never sent late.
@@ -594,14 +680,30 @@ resulting avatar. No private photo is shared with the subject or other players.
   source authority; writing preferences stay in the craft guide. An accepted
   event replays its canonical result through the existing outbox.
 
-  Initial generation failure publishes a plain result from canonical facts.
+  Only the show-writing notification runs on OpenAI Flex. Its first attempt
+  starts a twenty-minute capacity budget, retained with the generation's native
+  Codex binding in an unbound assistant execution session. Flex capacity refusals
+  keep that notification pending on the existing five-minute mailbox retry; the first
+  attempt starting at or after twenty minutes uses standard service. If that
+  standard attempt also fails for capacity, it takes the existing failed-recap
+  settlement path rather than extending capacity retries. Retries resume the
+  same native thread and recover an accepted story before provider work. Media
+  provenance and song timing remain in per-turn host memory. After a failure,
+  the next attempt cannot submit files generated by the earlier attempt and
+  must regenerate the media it uses; retaining the thread does not retain media
+  authority. No durable media provenance receipts are stored in the vault.
+  The budget never interrupts a slow generation. Images and songs retain their
+  separate provider settings, and writing keeps default prompt-cache retention.
+
+  Non-capacity initial generation failure, or capacity failure on the standard
+  fallback attempt, publishes a plain result from canonical facts.
   An interrupted initial generation also has a read-only result projection after
   the existing UI wait. Failed regeneration preserves the prior recap and assets,
   silently retires the queued generation and permits a later regeneration ID.
 
   Recap media funding comes from authenticated Web game authority, installed in
   the current native invocation. Model arguments and request headers cannot grant
-  it. One in-memory egress counter allows six total forwarded media requests;
+  it. One in-memory egress counter allows seven total forwarded media requests;
   forwarded failures consume the count, and a container restart may reset it.
   Bounded recap image/song requests bypass ordinary subscription/allowance vetoes.
   There are no reservations, per-kind limits, pricing estimates or recap deadlines.
@@ -613,6 +715,12 @@ resulting avatar. No private photo is shared with the subject or other players.
   The presentation payload and decoder fixtures remain compatible with iOS build
   96. MURPH_GAME_RECAP_SHOW_ENABLED remains the producer flag;
   MURPH_GAME_RECAP_MEDIA_VISIBLE=false hides generated media and cover previews.
+  MURPH_GAME_RECAP_VIDEO_ENABLED=true lets Web store one recap video with a pair
+  show; it is off. With it on, the recap turn renders the show as one video
+  and stores it with the recap, and Murph's recap message in the pair's chat
+  carries it beside the line, real photos included, while the link still goes
+  alone. A video that cannot be made, stored or sent leaves the message as it
+  was. A sent copy cannot be recalled, like any message.
   MURPH_GAME_RECAP_MEDIA_DIR is local-test storage only. No production regeneration
   is part of implementation or local proof.
 
@@ -751,14 +859,54 @@ resulting avatar. No private photo is shared with the subject or other players.
   answers the terminal value for them. Keep compatible Web and runtime readers while
   any remains. Accepted replacements
   are canonical: old ciphertext is not retained, and sent messages cannot be undone.
+- **Both-win offer.** A live pair on a set-days schedule, with a prize or dare
+  and no shared prize, qualifies when neither has a closed scheduled miss, both
+  have completed at least `ceil(2 * S / 3)` of the game's `S` scheduled days, and
+  each still has an unfinished scheduled day that is not closed. There is no
+  Day 3 floor and no automatic offer on any-N-days schedules. A post, counted
+  day or restored day reserves one `game-both-win:<gameId>` receipt when the
+  chat is bound and no change is waiting. The receipt keeps the game id as its
+  source reference, including for block cleanup. It waits until the later
+  player's `morningAfter` time: now within 09:00 to 21:00, otherwise their next
+  09:00, falling back to now if a time cannot be resolved. The cron checks the
+  held time; delivery does not repeat the time-window check. Generation, queued
+  wake recovery and final dispatch rejudge currentness. A miss, finish, waiting
+  change, accepted shared prize or lost chat skips it permanently. Murph names
+  both players and offers the choice; it never chooses or records a prize by
+  itself. This adds no timer, sweep, feature flag or provider policy.
 - **Tickets.** A prize or dare makes the loser owe the winner one ticket; a tie
-  or all-perfect game owes nothing. Each ticket carries its stake kind. The
+  or all-perfect game owes nothing for that prize or dare. A pair can also carry
+  a `both_get` prize: a perfect result issues two tickets for it, one each way.
+  Murph says both earned it; if either missed a day, it lapses without a ticket.
+  Terms and views keep the prize or dare first. Prize edits preserve the unnamed
+  both-win slot and its key; legacy kinds retain whole-list replacement. Rematches
+  compare the original prize or dare and never copy the both-win prize. A player
+  names a both-win prize in chat and the other agrees through the existing change
+  path. A delta names at most one prize or dare and one both-win prize. Group and
+  legacy-kind games cannot add one; create still accepts only one prize or dare.
+  Proposal and approval both reject a requested both-win prize after a closed
+  scheduled miss, using each player's clock and grace hour. An ask approved after
+  a miss expires; an ordinary prize edit remains valid after the shared prize
+  lapses. Any-N-days games can accept a requested prize until the game ends.
+  Readers
+  accept this kind before any writer is enabled, including pending asks. Recap
+  fallback names the earned prize when available, otherwise says both get their
+  prize. Each ticket carries its stake kind. The
   winner marks a dare done with the same redeem action, without proof. Legacy
   "winner gets" retains winner/loser settlement. "Per miss" makes each player owe every
   better player the difference in misses. A ticket is good for 14 days: the
   holder redeems it after sending it through Messages, and after its use-by
   date it shows as expired and can't be redeemed. In dev time travel, issuance
   and expiry both use the game's shifted clock, including long games.
+  An open, unexpired pair ticket held by the viewer includes optional
+  `owedByPhone` for addressing Messages to the owing player. It is their current
+  verified E.164 phone from the hosted identity store, and is absent for a
+  departed or hidden/blocked player, a group ticket, an owed or redeemed ticket,
+  or an unverified/missing phone. It never contains the viewer's own number.
+  View hydration loads distinct eligible owing members in one identity query,
+  skips that query for an empty set, and opens only their phone fields through
+  the existing batch identity codec, once per member. Phones stay in the
+  request-local view map and response, never logs or telemetry.
   Players read a ticket as a prize: the app and Murph's game texts say who
   owes whom ("Ava owes you breakfast in bed") and never ticket, bet, wager,
   winnings or cash in, and Murph's texts also avoid stake. `ticket` stays the
@@ -856,9 +1004,9 @@ even after failure or a newly closed day.
 
 One private evening check-in may follow an hour after the member's reminder time
 on an open day, within a 30-minute window, when text is on and no room check-in
-covers that game. It uses only the member's own unfinished tasks, a frozen batch
-and direct-conversation watermark, and the room check-in's unanswered-evening
-pause. It remains subject to the 90-day engagement pause. On activation, the
+covers that game. It uses only the member's own unfinished tasks, a frozen batch,
+and the room check-in's unanswered-evening pause. A new message from the member
+does not cancel it. It remains subject to the 90-day engagement pause. On activation, the
 member's reminder opt-out and count-game cadence carry from a validated previous
 game, then the latest same-people game if there is no lineage. An explicit choice
 for the new game wins over carry-over, including a delayed activation retry.
@@ -934,6 +1082,53 @@ Deploy the additive migration, then the complete Web backend, then the native
 client. Once a reply or reply report exists, this Web release is the rollback
 floor. Disable new replies with a forward fix that preserves reads, playback,
 delete and report review. Privacy Policy/version changes ship separately.
+
+## Typed-word game ideas
+
+Ordinary game-creation suggestions stay in the native app's bundled bank.
+Typing in More ideas can call `POST /api/game/v1/ideas` for fresh task, prize or
+dare suggestions. It requires game member auth and a valid request of at most
+16 KiB. The request carries step, optional category, relationship kind, apart,
+up to six direction labels, required trimmed words (1-120 characters), optional
+chosen task (up to 120 characters for stakes), up to 24 skipped texts, and optional
+`notForMe` activity keys. Unknown activity keys are invalid. The caller sends the
+applicable list; the endpoint does not look up players.
+Labels are at most 30 characters and skipped texts at most 40 characters.
+It returns `{ ok: true, ideas: [{ text, schedule }] }`, zero to nine ideas,
+with private/no-store caching. Schedules are `every_day`, `weekdays` or
+`three_days`; stakes always use `every_day`.
+
+OpenAI receives those fields only. Neither the app nor the server attaches
+names, numbers, private relationship labels or member identifiers. Typed words
+can contain anything a member writes, including personal details; the task and
+skipped texts can also contain member-authored text. This optional action sends
+creation context before a stake is agreed. The route does not save that context
+or its suggestions. Writing uses `store: false` and shares the existing
+`OPENAI_API_KEY`; `HOSTED_GAME_IDEAS=off` disables provider work, default on.
+
+The app keeps bank ideas while waiting and on any failure, including missing
+route, rate limit, offline, malformed response and server error. The server
+returns empty ideas on provider error, malformed output or its shared eight-
+second deadline. Auth, input and rate-limit errors keep their normal statuses.
+One budget of 30 requests per member per 10 minutes covers all steps. At most
+two writes and two checks occur, outside database transactions. The live check
+copies the rule text in `murph-ios/scripts/game-ideas/build.mjs`; update both.
+With a nonempty `notForMe`, the brief names excluded activity descriptions and
+Decisions adds one activity choice per idea. A listed activity at probability
+0.5 or higher drops the idea before fit sorting, even below four survivors.
+Malformed or incomplete choice answers return no ideas. Absent or empty lists
+leave both provider bodies unchanged. Deploy this backend before the native
+filtering feature; rolling Web back below it loses typed-word exclusions while
+the native bank remains filtered.
+Manual-entry acceptance remains unchanged, including ordinary alcohol-related
+wording. Suggestions have stricter rules and are checked after cleanup.
+
+`GET /api/game/v1/home` adds optional caller-only `me.areaCode`, three digits
+from the caller's verified NANP phone. Missing means unknown. It is never the
+other player's phone or area code. Native distance inference can compare this
+hint with a locally picked contact and fall back to near when either is absent.
+Old clients ignore the new field. No migration or coordinated deployment is
+needed; new clients retain bank ideas when talking to an older server.
 
 ## Prove it
 
@@ -1091,6 +1286,33 @@ Native clients render and capture artifacts; there is no server map or dare bank
 
 ## Changes agreed in chat
 
+During a live group turn, game reads, updates and photo actor refs may use a
+player's own message from this same chat received at most 24 hours ago. Web
+resolves the sender and rechecks the cutoff before mutation. The words must
+clearly request or agree to exactly the action: a request made before another
+player proposes that identical change counts as the first player's yes.
+Another player's report of what someone said never supplies consent. Expired
+refs require that player to say it again. Photo source, day and offer rules
+still apply.
+
+In Linq iMessage, a like or heart from the player being asked on Murph's exact
+waiting ask or an invitation they can accept counts as their yes. The runtime
+attests the target as a sent Murph message, and Web derives the actor from the
+reaction's own synthetic message. The asker, other people, unrelated targets,
+negative reactions and question reactions do not approve. Telegram group
+reactions remain context only and cannot trigger this path.
+The first message that creates a game chat records its accepted Web delivery
+receipt as a terminal outbox entry, so it supports the same reaction attestation
+without queuing another send.
+
+Several requested fields travel together in one pair proposal or group terms
+edit. An addition to the asker's own waiting ask cancels it and replaces it with
+one ask containing the earlier and new changes; the latest requested value wins
+for an overlapping field. Another player's counteroffer declines the old ask
+and proposes that player's new request. Combined edits validate atomically: a
+locked task rejects the entire edit, even with an otherwise allowed schedule.
+Murph explains the named rule and proposes the requested fields still allowed.
+
 Before Day 1, either player can propose Start now. Until anyone checks in
 (any post, words or excuse), either player can propose a different start date,
 even after Day 1 has begun, from the latest player's today to 60 days out. That
@@ -1222,8 +1444,8 @@ its eligible groups the normal included group usage allowance without granting
 the players personal AI access. Duplicate rooms share the primary game allowance;
 they do not create more included credit. An expanded duplicate room proves eligibility
 from its own bound pair game, then derives its allowance beneficiary from the
-same primary-pair selector as an exact room. Suspension, withdrawn health-data consent, the game
-feature flag and member allowlist still apply. Tasks can change, with the other player's yes, until either player's Day 1
+same primary-pair selector as an exact room. Suspension, withdrawn health-data
+consent and the global game switch still apply. Tasks can change, with the other player's yes, until either player's Day 1
 begins, including on a live game that has not reached Day 1. The prize or dare
 can change the same way until the game is due: the new one counts for the whole
 game, and a stake-only change needs no future unstarted day, so it works on the
@@ -1330,7 +1552,7 @@ cancellation use the existing moves. A poll vote never starts a game. Chat moves
 continue to bypass the HTTP `MURPH_GAME_REQUIRE_CURRENT_TERMS` door.
 
 Fresh-game access, moderation, ten-open-games cap and settled same-pair rematch
-chain rules are the app's rules, including the unlisted-player rematch exception.
+chain rules are the app's rules.
 New game IDs are game_ followed by at least 20 random lowercase letters and
 digits, never names, dates or terms. Creation retries reuse that ID; a waiting
 duplicate is not another game. Creating
@@ -1338,7 +1560,8 @@ a new game leaves other games alone. Ambiguous new-versus-change asks need one
 clarification.
 
 Setup and poll guidance is returned by the engine on each successful ordinary
-`read_game`, alongside the existing multiple-game selection guidance. Shared setup
+`read_game`, alongside the existing multiple-game selection guidance; a later
+read in the same provider turn points back to the blocks it already returned. Shared setup
 and the poll paragraph appear once, followed by scoped rules for every pair/group
 mode present, including settled groups. Rules apply to the selected game's
 maxPlayers, never the number currently seated. The initial

@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
 import { Prisma } from "@prisma/client";
@@ -41,6 +42,21 @@ import {
 
 const HOSTED_LINQ_GROUP_REACTION_CONTEXT_FIELD =
   "pending-group-reaction-context";
+
+export type HostedLinqExactThreadRoute = Pick<Prisma.HostedThreadRouteGetPayload<object>,
+  "containerMemberId" | "threadIdentityLookupKey" | "threadLookupKey" | "accountLookupKey" | "deliveryRouteEncrypted" | "updatedAt">;
+
+/** Compare and delete only; the caller owns locking and lifecycle policy. */
+export async function deleteExactHostedLinqThreadRouteTx(input: {
+  expected: HostedLinqExactThreadRoute; prisma: Prisma.TransactionClient;
+}): Promise<boolean> {
+  const { expected } = input;
+  const deleted = await input.prisma.hostedThreadRoute.deleteMany({ where: { channel: "linq",
+    threadIdentityLookupKey: expected.threadIdentityLookupKey, containerMemberId: expected.containerMemberId,
+    threadLookupKey: expected.threadLookupKey, accountLookupKey: expected.accountLookupKey,
+    deliveryRouteEncrypted: expected.deliveryRouteEncrypted, updatedAt: expected.updatedAt } });
+  return deleted.count === 1;
+}
 const HOSTED_LINQ_GROUP_REACTION_CRYPTO_TIMEOUT_MS = 500;
 
 interface HostedLinqThreadRoutePendingContext {
@@ -564,7 +580,7 @@ function requireHostedLinqGroupReactionContextText(value: unknown): string {
     !normalized
     || normalized.length > HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_ITEM_MAX_CHARS
   ) {
-    throw new TypeError("Hosted Linq group reaction context text is invalid.");
+    throw new ContractValidationError("Hosted Linq group reaction context text is invalid.");
   }
   return normalized;
 }
@@ -572,7 +588,7 @@ function requireHostedLinqGroupReactionContextText(value: unknown): string {
 function parseHostedLinqGroupReactionContextItems(value: unknown): string[] {
   const serialized = typeof value === "string" ? value.trim() : "";
   if (!serialized) {
-    throw new TypeError("Hosted Linq group reaction context is invalid.");
+    throw new ContractValidationError("Hosted Linq group reaction context is invalid.");
   }
   if (!serialized.startsWith("[")) {
     return [requireHostedLinqGroupReactionContextText(serialized)];
@@ -584,7 +600,7 @@ function parseHostedLinqGroupReactionContextItems(value: unknown): string[] {
     || parsed.length === 0
     || parsed.length > HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_MAX_ITEMS
   ) {
-    throw new TypeError("Hosted Linq group reaction context is invalid.");
+    throw new ContractValidationError("Hosted Linq group reaction context is invalid.");
   }
   return parsed.map((item: unknown) =>
     requireHostedLinqGroupReactionContextText(item));

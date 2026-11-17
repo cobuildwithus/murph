@@ -1,5 +1,7 @@
+import { parseInput } from "@murphai/hosted-execution/request-input";
+
 import { withJsonError } from "@/src/lib/hosted-onboarding/http";
-import { readRawBodyBuffer } from "@/src/lib/http";
+import { parseRequestJson, readRawBodyBuffer } from "@/src/lib/http";
 import {
   retellWebhookPayloadSchema,
 } from "@/src/lib/phone-calls/retell-payloads";
@@ -25,7 +27,7 @@ export const POST = withJsonError(async (request: Request) => {
     signature: request.headers.get("x-retell-signature"),
   });
 
-  const payload = retellWebhookPayloadSchema.parse(JSON.parse(rawBody));
+  const payload = parseInput(parseRequestJson(rawBody), retellWebhookPayloadSchema.parse);
   switch (payload.event) {
     case "call_ended":
       await settleRetellWebhookBranches([

@@ -27,6 +27,7 @@ vi.mock("@/src/lib/hosted-onboarding/linq-participant-contact", async (importOri
 });
 
 import {
+  buildHostedLinqFirstContactAdmissionClassifierUnavailableDecision,
   classifyHostedLinqFirstContactAdmission,
   claimHostedLinqFirstContactAdmissionBudget,
   readHostedLinqFirstContactAdmissionMode,
@@ -507,7 +508,7 @@ describe("Linq first-contact admission", () => {
     });
   });
 
-  it("admits first contacts when OpenAI reports exhausted credits", async () => {
+  it("reports exhausted OpenAI credits as classifier unavailable", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({
       error: {
         code: "insufficient_quota",
@@ -521,9 +522,14 @@ describe("Linq first-contact admission", () => {
       status: 429,
     })));
 
+    // The webhook owns the classifier-unavailable fallback for every cause.
     await expect(classifyHostedLinqFirstContactAdmission({
       request: BASE_REQUEST,
-    })).resolves.toMatchObject({
+    })).rejects.toMatchObject({
+      code: "LINQ_FIRST_CONTACT_ADMISSION_CLASSIFIER_UNAVAILABLE",
+      httpStatus: 503,
+    });
+    expect(buildHostedLinqFirstContactAdmissionClassifierUnavailableDecision()).toMatchObject({
       confidence: 1,
       kind: "allow",
       source: "deterministic",

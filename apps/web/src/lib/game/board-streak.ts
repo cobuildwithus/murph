@@ -1,28 +1,33 @@
-import { currentTerms, completedEntry, dayIndexAt, eligibleFromDay, indexGameEntries, isScheduledDay, type RuleState } from "./rules";
-import { addDays } from "./time";
+import { gameDays, type GameDaysSource } from "./progress/game-days";
+import type { Day } from "./progress/contract";
 
-/** Current run across all obligations on each date, using each frozen game clock. */
-export function pairBoardStreak(states: readonly { state: RuleState; now: Date; settledAt?: Date | null }[], memberId: string): number | null {
-  const dates = new Map<string, { complete: boolean; ended: boolean }>();
-  for (const { state, now, settledAt } of states) {
-    const player = state.players.find(player => player.memberId === memberId);
-    if (!player?.dayOne || !player.timeZone) return null;
-    const today = dayIndexAt(player, now)!;
-    const lastDay = state.game.status === "settled" && settledAt && "count" in currentTerms(state.game.terms).schedule
-      ? Math.min(today, dayIndexAt(player, settledAt)!) : today;
-    const entries = indexGameEntries(state.entries);
-    for (let day = eligibleFromDay(state, player); day < state.game.lengthDays && day <= lastDay; day++) {
-      if (!isScheduledDay(state, day)) continue;
-      const date = addDays(player.dayOne, day);
-      const previous = dates.get(date);
-      dates.set(date, { complete: (previous?.complete ?? true) && completedEntry(entries, memberId, day) !== null,
-        ended: (previous?.ended ?? true) && day < today });
+interface StreakDay { date: Day; done: boolean; ended: boolean }
+
+/** One date succeeds only when every game obligation on it succeeds. */
+function obligationDays(games: readonly GameDaysSource[], memberId: string): StreakDay[] | null {
+  const dates = new Map<Day, StreakDay>();
+  for (const game of games) {
+    const days = gameDays(game, memberId);
+    if (days === null) return null;
+    for (const day of days) {
+      const previous = dates.get(day.date);
+      dates.set(day.date, { date: day.date, done: (previous?.done ?? true) && day.done,
+        ended: (previous?.ended ?? true) && day.ended });
     }
   }
-  let streak = 0;
-  for (const [, day] of [...dates].sort(([a], [b]) => b.localeCompare(a))) {
-    if (day.complete) streak++;
-    else if (day.ended) break;
+  return [...dates.values()].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function currentRun(days: readonly StreakDay[]): number {
+  let count = 0;
+  for (let i = days.length - 1; i >= 0; i--) {
+    if (days[i].done) count++;
+    else if (days[i].ended) break;
   }
-  return streak;
+  return count;
+}
+
+export function pairBoardStreak(games: readonly GameDaysSource[], memberId: string): number | null {
+  const days = obligationDays(games, memberId);
+  return days === null ? null : currentRun(days);
 }

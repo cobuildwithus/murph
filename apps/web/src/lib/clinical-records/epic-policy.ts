@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createHash } from "node:crypto";
 
 import registrationEvidence from "./epic-registration.v1.json";
@@ -667,7 +668,7 @@ function registrationApi(
 function requireActiveQueriesForResource(resourceType: string): EpicQuery[] {
   const queries = QUERIES.filter((candidate) => candidate.resourceType === resourceType);
   if (queries.length === 0) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `FHIR resource type ${resourceType} is outside the active Epic beta acquisition policy.`,
     );
   }
@@ -677,7 +678,7 @@ function requireActiveQueriesForResource(resourceType: string): EpicQuery[] {
 function requireActiveQueryForScope(queryScopeId: string): EpicQuery {
   const query = QUERIES.find((candidate) => candidate.queryScopeId === queryScopeId);
   if (!query) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `FHIR query scope ${queryScopeId} is outside the active Epic beta acquisition policy.`,
     );
   }
@@ -706,7 +707,7 @@ function buildActiveRetrievalSlice(input: {
 
 function requireEpicBetaResourceType(value: string): EpicBetaResourceType {
   if (!isEpicBetaResourceType(value)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `FHIR resource type ${value} is outside the active Epic beta acquisition policy.`,
     );
   }
@@ -716,7 +717,7 @@ function requireEpicBetaResourceType(value: string): EpicBetaResourceType {
 
 function assertValidFrozenAt(value: Date): void {
   if (!Number.isFinite(value.getTime()))
-    throw new TypeError("Epic retrieval plan requires a valid frozen timestamp.");
+    throw new ContractValidationError("Epic retrieval plan requires a valid frozen timestamp.");
 }
 
 function scopeGrantsEpicOperation(

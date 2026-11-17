@@ -8,6 +8,16 @@ vi.mock("@/src/lib/hosted-execution/runtime-owner", () => ({ requireHostedRuntim
 import { recordCompanionHeartbeat, readRuntimeCompanionPresence } from "@/src/lib/companion/presence";
 
 describe("companion contact evidence", () => {
+  it("rejects a sponsored thread target after runtime and access checks", async () => {
+    const tx = { $queryRaw: vi.fn().mockResolvedValue([]), hostedThreadContainer: { findUnique: vi.fn().mockResolvedValue({ memberId: "hbm_room_synthetic" }) } };
+    m.prisma.mockReturnValue({ $transaction: async (run: (tx: unknown) => Promise<unknown>) => run(tx) });
+    await expect(readRuntimeCompanionPresence("hbm_room_synthetic", { userId: "hbm_room_synthetic", attemptId: "run_synthetic", generation: "1" }))
+      .rejects.toMatchObject({ code: "INVALID_REQUEST", httpStatus: 400, message: "Companion access requires a private member conversation." });
+    expect(m.runtime).toHaveBeenCalled();
+    expect(m.access).toHaveBeenCalled();
+    expect(m.consent).not.toHaveBeenCalled();
+  });
+
   beforeEach(() => vi.resetAllMocks());
   it("keeps missing, expired, future and background contact separate from foreground evidence", () => {
     const now = new Date("2026-10-01T12:00:00.000Z");
@@ -32,5 +42,24 @@ describe("companion contact evidence", () => {
     m.consent.mockRejectedValue(new Error("consent withdrawn"));
     await expect(recordCompanionHeartbeat("synthetic", "background")).rejects.toThrow("consent withdrawn");
     expect(tx.hostedMember.update).not.toHaveBeenCalled();
+  });
+  it("writes client info in the contact update, preserves it for legacy heartbeats, and clears absent optional values", async () => {
+    const tx = { $queryRaw: vi.fn().mockResolvedValue([]), hostedThreadContainer: { findUnique: vi.fn().mockResolvedValue(null) },
+      hostedMember: { update: vi.fn() } };
+    m.prisma.mockReturnValue({ $transaction: async (run: (tx: unknown) => Promise<unknown>) => run(tx) });
+    const clientInfo = { platform: "ios" as const, version: "1.1.22", build: "109", osVersion: "18.1.0", deviceModel: "iPhone16,2" };
+    await recordCompanionHeartbeat("synthetic", "foreground", clientInfo);
+    expect(tx.hostedMember.update).toHaveBeenCalledExactlyOnceWith({ where: { id: "synthetic" }, data: {
+      companionLastContactAt: expect.any(Date), companionLastForegroundAt: expect.any(Date),
+      companionAppPlatform: "ios", companionAppVersion: "1.1.22", companionAppBuild: "109",
+      companionOsVersion: "18.1.0", companionDeviceModel: "iPhone16,2",
+    } });
+    await recordCompanionHeartbeat("synthetic", "background", null);
+    expect(tx.hostedMember.update).toHaveBeenLastCalledWith({ where: { id: "synthetic" }, data: { companionLastContactAt: expect.any(Date) } });
+    await recordCompanionHeartbeat("synthetic", "background", { ...clientInfo, osVersion: null, deviceModel: null });
+    expect(tx.hostedMember.update).toHaveBeenLastCalledWith({ where: { id: "synthetic" }, data: {
+      companionLastContactAt: expect.any(Date), companionAppPlatform: "ios", companionAppVersion: "1.1.22", companionAppBuild: "109",
+      companionOsVersion: null, companionDeviceModel: null,
+    } });
   });
 });

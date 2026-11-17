@@ -1,3 +1,4 @@
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import {
   recordHostedAiUsageRecordsAndSendLimitNotices,
 } from "@/src/lib/hosted-execution/usage";
@@ -14,7 +15,7 @@ export const POST = withJsonError(async (request: Request) => {
     runtimeAuthority: "caller_transaction",
     maxBodyBytes: HOSTED_USAGE_RECORD_BODY_LIMIT_BYTES,
   });
-  const body = parseHostedRuntimeUsageRecordRequest(payload);
+  const body = parseInput(payload, parseHostedRuntimeUsageRecordRequest);
 
   const usage = body.usage;
   const authority = readHostedRuntimeCallbackAuthority(request);

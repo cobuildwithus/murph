@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 export const HOSTED_EXECUTION_GROUP_REACTION_EVENT_SCHEMA =
   "murph.hosted-group-reaction.v1";
 export const HOSTED_EXECUTION_GROUP_REACTION_EVENT_TEXT_PREFIX =
@@ -134,17 +135,17 @@ function normalizeHostedExecutionGroupReactionEvent(
   value: unknown,
 ): HostedExecutionGroupReactionEvent {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("Hosted group reaction event must be an object.");
+    throw new ContractValidationError("Hosted group reaction event must be an object.");
   }
   const record = value as Record<string, unknown>;
   if (record.schema !== HOSTED_EXECUTION_GROUP_REACTION_EVENT_SCHEMA) {
-    throw new TypeError("Hosted group reaction event schema is invalid.");
+    throw new ContractValidationError("Hosted group reaction event schema is invalid.");
   }
   if (record.channel !== "linq" && record.channel !== "telegram") {
-    throw new TypeError("Hosted group reaction event channel is invalid.");
+    throw new ContractValidationError("Hosted group reaction event channel is invalid.");
   }
   if (record.mode !== "delta" && record.mode !== "snapshot") {
-    throw new TypeError("Hosted group reaction event mode is invalid.");
+    throw new ContractValidationError("Hosted group reaction event mode is invalid.");
   }
   const channel = record.channel;
   const mode = record.mode;
@@ -167,13 +168,13 @@ function normalizeHostedExecutionGroupReactionEvent(
     !Array.isArray(record.changes)
     || record.changes.length > HOSTED_EXECUTION_GROUP_REACTION_CHANGE_MAX_COUNT
   ) {
-    throw new TypeError("Hosted group reaction event changes are invalid.");
+    throw new ContractValidationError("Hosted group reaction event changes are invalid.");
   }
   const changes = record.changes.map((change) =>
     normalizeHostedExecutionGroupReactionChange(change, mode),
   );
   if (mode === "delta" && changes.length === 0) {
-    throw new TypeError("Hosted group reaction delta must contain a change.");
+    throw new ContractValidationError("Hosted group reaction delta must contain a change.");
   }
 
   return {
@@ -192,7 +193,7 @@ function normalizeHostedExecutionGroupReactionChange(
   mode: HostedExecutionGroupReactionMode,
 ): HostedExecutionGroupReactionChange {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("Hosted group reaction change must be an object.");
+    throw new ContractValidationError("Hosted group reaction change must be an object.");
   }
   const record = value as Record<string, unknown>;
   const reaction = normalizeHostedExecutionGroupReactionRequiredText(
@@ -203,7 +204,7 @@ function normalizeHostedExecutionGroupReactionChange(
 
   if (mode === "snapshot") {
     if (record.operation !== "snapshot") {
-      throw new TypeError("Hosted group reaction snapshot operation is invalid.");
+      throw new ContractValidationError("Hosted group reaction snapshot operation is invalid.");
     }
     if (
       typeof record.count !== "number"
@@ -211,7 +212,7 @@ function normalizeHostedExecutionGroupReactionChange(
       || record.count < 0
       || record.count > HOSTED_EXECUTION_GROUP_REACTION_COUNT_MAX
     ) {
-      throw new TypeError("Hosted group reaction snapshot count is invalid.");
+      throw new ContractValidationError("Hosted group reaction snapshot count is invalid.");
     }
     return {
       count: record.count,
@@ -221,10 +222,10 @@ function normalizeHostedExecutionGroupReactionChange(
   }
 
   if (record.operation !== "added" && record.operation !== "removed") {
-    throw new TypeError("Hosted group reaction delta operation is invalid.");
+    throw new ContractValidationError("Hosted group reaction delta operation is invalid.");
   }
   if (record.count !== undefined) {
-    throw new TypeError("Hosted group reaction delta must not include count.");
+    throw new ContractValidationError("Hosted group reaction delta must not include count.");
   }
   return {
     operation: record.operation,
@@ -239,7 +240,7 @@ function normalizeHostedExecutionGroupReactionRequiredText(
 ): string {
   const normalized = normalizeHostedExecutionGroupReactionText(value, maxChars);
   if (!normalized) {
-    throw new TypeError(`Hosted group reaction ${field} is required.`);
+    throw new ContractValidationError(`Hosted group reaction ${field} is required.`);
   }
   return normalized;
 }
@@ -254,7 +255,7 @@ function normalizeHostedExecutionGroupReactionOptionalText(
   }
   const normalized = normalizeHostedExecutionGroupReactionText(value, maxChars);
   if (!normalized) {
-    throw new TypeError(`Hosted group reaction ${field} is invalid.`);
+    throw new ContractValidationError(`Hosted group reaction ${field} is invalid.`);
   }
   return normalized;
 }

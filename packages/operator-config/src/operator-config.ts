@@ -1,5 +1,4 @@
 import { normalizeStoredAssistantModel } from '@murphai/contracts'
-import path from 'node:path'
 import * as z from '@murphai/contracts/zod-runtime'
 import {
   type AssistantSelfDeliveryTarget,
@@ -11,7 +10,6 @@ import {
   sanitizeAssistantBackendTargetForPersistence,
   type AssistantBackendTarget,
 } from './assistant-backend.js'
-import { readEnvValue } from './env-values.js'
 import {
   type AssistantProviderDefaultsConfig,
   serializeAssistantProviderOperatorDefaults,
@@ -31,8 +29,10 @@ import {
   type AssistantSelfDeliveryTargetLookupInput,
 } from './operator-config/self-delivery-targets.js'
 import {
-  expandConfiguredVaultPath,
-  pathExists,
+  invalidOperatorConfigError,
+  operatorConfigSchema,
+  readStrictRawOperatorConfig,
+  type RawOperatorConfig,
   readOperatorConfigFile,
   resolveOperatorConfigPath,
   resolveOperatorHomeDirectory,
@@ -44,14 +44,13 @@ export {
 } from './command-helpers.js'
 export {
   expandConfiguredVaultPath,
+  resolveDefaultVault,
+  VAULT_ENV,
+  VAULT_ENV_KEYS,
   resolveOperatorConfigPath,
   resolveOperatorHomeDirectory,
 } from './operator-config/storage.js'
 export type { AssistantSelfDeliveryTargetLookupInput } from './operator-config/self-delivery-targets.js'
-
-const OPERATOR_CONFIG_SCHEMA = 'murph.operator-config.v1'
-export const VAULT_ENV = 'VAULT'
-export const VAULT_ENV_KEYS = [VAULT_ENV] as const
 
 const assistantOperatorSharedFields = {
   identityId: z.string().min(1).nullable().default(null),
@@ -97,16 +96,6 @@ const assistantOperatorDefaultsSchema = z.object({
   backend: assistantBackendTargetSchema.nullable().default(null),
   ...assistantOperatorSharedFields,
 }).strict()
-
-const operatorConfigSchema = z.object({
-  schema: z.literal(OPERATOR_CONFIG_SCHEMA),
-  defaultVault: z.string().min(1).nullable(),
-  assistant: z.unknown().nullable().default(null),
-  hostedAssistant: z.unknown().nullable().optional(),
-  updatedAt: z.isoDateTime({ offset: true }),
-})
-
-type RawOperatorConfig = z.infer<typeof operatorConfigSchema>
 
 export interface OperatorConfig extends Omit<RawOperatorConfig, 'assistant' | 'hostedAssistant'> {
   assistant: AssistantOperatorDefaults | null
@@ -168,24 +157,6 @@ async function readOperatorConfigForPatch(
   })
 }
 
-async function readStrictRawOperatorConfig(
-  homeDirectory: string,
-): Promise<RawOperatorConfig | null> {
-  const raw = await readOperatorConfigFile(resolveOperatorConfigPath(homeDirectory))
-  if (raw === null) {
-    return null
-  }
-
-  try {
-    return operatorConfigSchema.parse(JSON.parse(raw))
-  } catch (error) {
-    if (error instanceof z.ZodError || error instanceof SyntaxError) {
-      throw invalidOperatorConfigError()
-    }
-    throw error
-  }
-}
-
 function normalizeAssistantOperatorDefaultsForPatch(
   defaults: unknown,
 ): AssistantOperatorDefaults | null {
@@ -220,17 +191,6 @@ function normalizeAssistantOperatorDefaultsForPatch(
   }
 
   throw invalidOperatorConfigError()
-}
-
-function invalidOperatorConfigError(): VaultCliError {
-  return new VaultCliError(
-    'operator_config_invalid',
-    'Operator config is malformed. Repair or restore it before retrying.',
-    {
-      retryable: false,
-      stage: 'configuration',
-    },
-  )
 }
 
 function stripUnsupportedAssistantBackend(value: unknown): unknown {
@@ -299,7 +259,7 @@ function buildOperatorConfig(
   if (patch.hostedAssistant) prepareHostedAssistantConfigForWrite(patch.hostedAssistant)
   return normalizeParsedOperatorConfig(
     operatorConfigSchema.parse({
-      schema: OPERATOR_CONFIG_SCHEMA,
+      schema: operatorConfigSchema.shape.schema.value,
       defaultVault:
         patch.defaultVault !== undefined
           ? patch.defaultVault
@@ -335,7 +295,7 @@ function normalizeParsedOperatorConfig(
   const assistant = normalizeAssistantOperatorDefaults(config.assistant)
 
   return {
-    schema: OPERATOR_CONFIG_SCHEMA,
+    schema: operatorConfigSchema.shape.schema.value,
     defaultVault: config.defaultVault ?? null,
     assistant,
     hostedAssistant,
@@ -358,34 +318,6 @@ function serializeOperatorConfigForWrite(config: OperatorConfig): unknown {
         : null,
     updatedAt: config.updatedAt,
   }
-}
-
-export async function resolveDefaultVault(
-  homeDirectory = resolveOperatorHomeDirectory(),
-  env: NodeJS.ProcessEnv = process.env,
-): Promise<string | null> {
-  const envVault = readEnvValue(env, VAULT_ENV_KEYS)
-  if (envVault) {
-    return expandConfiguredVaultPath(envVault, homeDirectory)
-  }
-
-  const config = await readStrictRawOperatorConfig(homeDirectory)
-  if (config?.defaultVault) {
-    const configuredDefaultVault = expandConfiguredVaultPath(
-      config.defaultVault,
-      homeDirectory,
-    )
-    if (await pathExists(configuredDefaultVault)) {
-      return configuredDefaultVault
-    }
-  }
-
-  const cwdVault = path.resolve(process.cwd(), 'vault')
-  if (await pathExists(cwdVault)) {
-    return cwdVault
-  }
-
-  return null
 }
 
 export async function resolveAssistantOperatorDefaults(

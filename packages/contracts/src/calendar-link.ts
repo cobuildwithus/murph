@@ -1,3 +1,4 @@
+import { ContractValidationError } from "./validation-error.ts";
 import * as z from "./zod-runtime.ts";
 
 import { MURPH_PRODUCT_ORIGIN } from "./constants.ts";
@@ -159,7 +160,7 @@ export function buildCalendarEventUrl(event: CalendarEventV1): string {
   }));
   const url = `${CALENDAR_LINK_URL_PREFIX}${payload}`;
   if (url.length >= CALENDAR_LINK_URL_MAX_LENGTH) {
-    throw new TypeError("The calendar event exceeds the Messages link limit.");
+    throw new ContractValidationError("The calendar event exceeds the Messages link limit.");
   }
   return url;
 }

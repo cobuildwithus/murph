@@ -1,4 +1,6 @@
-import { parseHostedUsageDiagnosticsRequest } from "@murphai/hosted-execution/usage-diagnostics";
+import { assertContract } from "@murphai/contracts";
+import { parseInput } from "@murphai/hosted-execution/request-input";
+import { hostedUsageDiagnosticsRequestSchema } from "@murphai/hosted-execution/usage-diagnostics";
 import { requireHostedCloudflareCallbackJsonRequest } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
 import { readHostedUsageDiagnostics } from "@/src/lib/hosted-execution/usage-diagnostics";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
@@ -8,6 +10,6 @@ export const POST = withJsonError(async (request: Request) => {
     maxBodyBytes: 512,
   });
   return jsonOk(await readHostedUsageDiagnostics({
-    memberId, request: parseHostedUsageDiagnosticsRequest(payload),
+    memberId, request: parseInput(payload, (value) => assertContract(hostedUsageDiagnosticsRequestSchema, value, "Internal request")),
   }));
 });

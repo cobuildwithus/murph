@@ -12,6 +12,7 @@ import {
   isSourceRecoveryNoticeEligible,
   readSourceRecoveryNoticePolicy,
 } from "../src/source-staleness.ts";
+import { DEVICE_CONNECT_SOURCES, listJunctionDeviceConnectRouteEntries } from "../src/config/connect-routes.ts";
 import { makeTempDirectory } from "./helpers.ts";
 
 const CONNECTED = "connected" as const;
@@ -101,10 +102,47 @@ test("push-primary staleness ignores pull-capable sources and non-connected rows
   );
 });
 
+test("catalog daily sources derive recovery policy without a provider allowlist", () => {
+  assert.deepEqual(DEVICE_CONNECT_SOURCES.filter((source) => source.expectsDailyData)
+    .map((source) => source.connectSourceId).sort(), [
+      "apple-health", "coros", "eight-sleep", "fitbit", "garmin", "google-fit",
+      "health-connect", "huawei-health", "oura", "polar", "ringconn",
+      "samsung-health", "suunto", "ultrahuman", "whoop", "xiaomi-mi-fitness", "zepp",
+    ]);
+  for (const { source, route } of listJunctionDeviceConnectRouteEntries()) {
+    const policy = readSourceRecoveryNoticePolicy(route.sourceProviderSlug);
+    if (!source.expectsDailyData) {
+      assert.equal(policy, null, source.label);
+    } else {
+      assert.equal(policy?.providerDisplayName, source.label);
+      if (!["garmin", "apple_health_kit"].includes(route.sourceProviderSlug)) {
+        assert.deepEqual(policy, {
+          messageKey: "linq.device_connection_check",
+          providerDisplayName: source.label,
+          silentHours: 120,
+        });
+      }
+    }
+  }
+  for (const sourceProviderSlug of ["google_health", "fitbit", "oura", "ultrahuman"]) {
+    const input = { sourceProviderSlug, status: CONNECTED,
+      lastDataAt: "2030-01-01T00:00:00.000Z", now: "2030-01-06T00:00:00.000Z" };
+    assert.equal(isSourceRecoveryNoticeEligible(input), true);
+    assert.equal(isSourceRecoveryNoticeEligible({ ...input, now: "2030-01-05T23:59:59.999Z" }), false);
+    assert.equal(isSourceRecoveryNoticeEligible({ ...input, lastDataAt: null }), false);
+    assert.equal(isSourceRecoveryNoticeEligible({ ...input, status: "error", lastErrorCode: "TOKEN_REFRESH_FAILED" }), false);
+  }
+  assert.equal(readSourceRecoveryNoticePolicy("unknown"), null);
+  assert.equal(readSourceRecoveryNoticePolicy("apple_health_kit")?.silentHours, 72);
+  // An alias has no policy: preferences and notices use the canonical slug only.
+  assert.equal(readSourceRecoveryNoticePolicy("apple_health"), null);
+});
+
 test("Garmin recovery notices start after five days of established delivery silence", () => {
   assert.deepEqual(readSourceRecoveryNoticePolicy("GARMIN"), {
     companionAppName: "Garmin Connect",
     deviceDisplayName: "Garmin device",
+    messageKey: "linq.device_delivery_stalled",
     providerDisplayName: "Garmin",
     silentHours: 120,
   });
@@ -175,7 +213,7 @@ test("Apple Health recovery starts at three days without changing push-primary c
   assert.equal(isSourceRecoveryNoticeEligible({ ...input, silentHours: 240 }), false);
 });
 
-test("recovery notices require prior delivery, a connected source, and explicit provider policy", () => {
+test("recovery notices require prior delivery, a connected source, and a daily-source policy", () => {
   for (const input of [
     { lastDataAt: null, sourceProviderSlug: "garmin", status: CONNECTED },
     {
@@ -185,7 +223,7 @@ test("recovery notices require prior delivery, a connected source, and explicit 
     },
     {
       lastDataAt: "2026-07-01T00:00:00.000Z",
-      sourceProviderSlug: "oura",
+      sourceProviderSlug: "strava",
       status: CONNECTED,
     },
   ] as const) {

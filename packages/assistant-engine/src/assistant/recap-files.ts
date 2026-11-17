@@ -1,12 +1,19 @@
+import { ContractValidationError } from '@murphai/contracts/validation-error'
 import { createHash } from 'node:crypto'
 import { constants } from 'node:fs'
 import { lstat, mkdir, open, realpath } from 'node:fs/promises'
 import path from 'node:path'
-import { gameRecapDraftSchema } from '@murphai/contracts/recap-show'
+import { gameRecapDraftSchema, recapMusicPageKinds, type GameRecapStory } from '@murphai/contracts/recap-show'
+
+export const RECAP_SCORE_MISMATCH = 'The song was made for different pages, lyrics or style. Generate it again from this draft, or remove it from files and submit without a song.'
+
+export function recapScoreSignature(story: GameRecapStory): string {
+  return createHash('sha256').update(JSON.stringify([recapMusicPageKinds(story), story.song?.style, story.song?.lyrics])).digest('hex')
+}
 
 /** Refuse symlinks, including intermediate components, before trusted file IO. */
 export async function recapDirectory(vault: string, relative: string): Promise<string> {
-  if (path.isAbsolute(relative) || relative.split('/').some(part => !part || part === '.' || part === '..')) throw new TypeError('Invalid recap directory.')
+  if (path.isAbsolute(relative) || relative.split('/').some(part => !part || part === '.' || part === '..')) throw new ContractValidationError('Invalid recap directory.')
   let current = await realpath(vault)
   for (const part of relative.split('/')) {
     current = path.join(current, part)
@@ -34,12 +41,12 @@ export async function readRecapDraftFile(input: { vault: string; relativeRoot: s
 
 export async function readRecapFile(input: { vault: string; relativeRoot: string; file: string; maxBytes: number }): Promise<Buffer> {
   const prefix = `${input.relativeRoot}/`
-  if (!input.file.startsWith(prefix) || path.isAbsolute(input.file) || input.file.split('/').some(part => !part || part === '..' || part === '.')) throw new TypeError('File is outside the recap workspace.')
+  if (!input.file.startsWith(prefix) || path.isAbsolute(input.file) || input.file.split('/').some(part => !part || part === '..' || part === '.')) throw new ContractValidationError('File is outside the recap workspace.')
   const parent = await recapDirectory(input.vault, path.dirname(input.file))
   const handle = await open(path.join(parent, path.basename(input.file)), constants.O_RDONLY | constants.O_NOFOLLOW)
   try {
     const metadata = await handle.stat()
-    if (!metadata.isFile() || metadata.size > input.maxBytes) throw new TypeError('Recap file exceeds its byte limit.')
+    if (!metadata.isFile() || metadata.size > input.maxBytes) throw new ContractValidationError('Recap file exceeds its byte limit.')
     // Read a bounded buffer even if the file grows while open.
     const bytes = Buffer.alloc(input.maxBytes + 1)
     let count = 0
@@ -48,7 +55,7 @@ export async function readRecapFile(input: { vault: string; relativeRoot: string
       if (!bytesRead) break
       count += bytesRead
     }
-    if (count > input.maxBytes) throw new TypeError('Recap file exceeds its byte limit.')
+    if (count > input.maxBytes) throw new ContractValidationError('Recap file exceeds its byte limit.')
     return bytes.subarray(0, count)
   } finally { await handle.close() }
 }

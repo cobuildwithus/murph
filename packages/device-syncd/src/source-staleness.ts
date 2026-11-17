@@ -20,6 +20,7 @@
  * which providers belong here and why.
  */
 
+import { resolveJunctionDeviceConnectRouteByProviderSlug } from "./config/connect-routes.ts";
 import type { DeviceConnectionSourceStatus } from "./types.ts";
 
 export interface PushPrimarySourcePolicy {
@@ -40,8 +41,9 @@ export interface PushPrimarySourcePolicy {
 }
 
 export interface SourceRecoveryNoticePolicy {
-  companionAppName: string;
-  deviceDisplayName: string;
+  companionAppName?: string;
+  deviceDisplayName?: string;
+  messageKey: "linq.device_connection_check" | "linq.device_delivery_stalled" | "linq.apple_health_delivery_stalled";
   providerDisplayName: string;
   silentHours: number;
 }
@@ -61,24 +63,17 @@ const PUSH_PRIMARY_SOURCE_POLICIES: ReadonlyMap<string, PushPrimarySourcePolicy>
 ]);
 
 // Receipt-based recovery must not change a provider's polling strategy.
-const SOURCE_RECOVERY_NOTICE_POLICIES: ReadonlyMap<string, SourceRecoveryNoticePolicy> = new Map([
+const SOURCE_RECOVERY_NOTICE_OVERRIDES: ReadonlyMap<string, Partial<Omit<SourceRecoveryNoticePolicy, "providerDisplayName">>> = new Map([
   ["garmin", {
     companionAppName: "Garmin Connect",
     deviceDisplayName: "Garmin device",
-    providerDisplayName: "Garmin",
-    silentHours: 5 * 24,
+    messageKey: "linq.device_delivery_stalled",
   }],
   ["apple_health_kit", {
     companionAppName: "Murph",
     deviceDisplayName: "iPhone",
-    providerDisplayName: "Apple Health",
+    messageKey: "linq.apple_health_delivery_stalled",
     silentHours: 3 * 24,
-  }],
-  ["whoop_v2", {
-    companionAppName: "WHOOP",
-    deviceDisplayName: "WHOOP",
-    providerDisplayName: "WHOOP",
-    silentHours: 5 * 24,
   }],
 ]);
 
@@ -119,7 +114,19 @@ export function isPushPrimarySourceProvider(sourceProviderSlug: string): boolean
 export function readSourceRecoveryNoticePolicy(
   sourceProviderSlug: string,
 ): SourceRecoveryNoticePolicy | null {
-  return SOURCE_RECOVERY_NOTICE_POLICIES.get(sourceProviderSlug.trim().toLowerCase()) ?? null;
+  // Preferences and notices are keyed by the stored canonical slug, so an alias
+  // must not resolve here: a preference saved under one would never be read.
+  const slug = sourceProviderSlug.trim().toLowerCase();
+  const entry = resolveJunctionDeviceConnectRouteByProviderSlug(slug);
+  if (!entry?.source.expectsDailyData || entry.route.sourceProviderSlug !== slug) {
+    return null;
+  }
+  return {
+    messageKey: "linq.device_connection_check",
+    providerDisplayName: entry.source.label,
+    silentHours: 5 * 24,
+    ...SOURCE_RECOVERY_NOTICE_OVERRIDES.get(entry.route.sourceProviderSlug),
+  };
 }
 
 export function isSourceRecoveryNoticeEligible(input: {

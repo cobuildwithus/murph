@@ -190,7 +190,7 @@ test("Junction sleep-cycle historical backfill uses canonical importer evidence 
   });
 
   assert.deepEqual(result.metadataPatch, {
-    junctionHistoricalBackfillStatus: "coverage_v3_complete",
+    junctionHistoricalBackfillStatus: "coverage_v4_complete",
     junctionHistoricalBackfillEmptyAttempts: 0,
     junctionHistoricalBackfillLastEmptyAt: null,
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -207,7 +207,7 @@ test("Junction sleep-cycle id-only historical backfill keeps retrying", async ()
   });
 
   assert.deepEqual(result.metadataPatch, {
-    junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+    junctionHistoricalBackfillStatus: "coverage_v4_retrying",
     junctionHistoricalBackfillEmptyAttempts: 1,
     junctionHistoricalBackfillLastEmptyAt: "2026-04-03T00:00:00.000Z",
     junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -224,7 +224,7 @@ test("Junction sleep-cycle stage duration without a canonical interval keeps ret
     stages: [{ stage: "deep", durationMinutes: 40 }],
   });
 
-  assert.equal(result.metadataPatch?.junctionHistoricalBackfillStatus, "coverage_v3_retrying");
+  assert.equal(result.metadataPatch?.junctionHistoricalBackfillStatus, "coverage_v4_retrying");
   assertConnectBackfillRetryWake(result);
   assert.equal(importedSnapshots.length, 1);
 });
@@ -238,7 +238,7 @@ for (const stageCount of [4, 0, -1]) {
     });
 
     assert.deepEqual(result.metadataPatch, {
-      junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+      junctionHistoricalBackfillStatus: "coverage_v4_retrying",
       junctionHistoricalBackfillEmptyAttempts: 1,
       junctionHistoricalBackfillLastEmptyAt: "2026-04-03T00:00:00.000Z",
       junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",

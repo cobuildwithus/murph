@@ -1,3 +1,4 @@
+import { RequestInputError } from "@murphai/hosted-execution/request-input";
 import { describe, expect, it, vi } from 'vitest'
 
 import { importHostedAssistantRuntimeIssues } from '@/src/lib/hosted-execution/runtime-issues'
@@ -14,6 +15,24 @@ const TEST_FINGERPRINT = 'abcdef123456abcdef123456'
 const TEST_ISSUE_ID = 'ari_0123456789abcdef_abcdef123456abcdef123456'
 
 describe('importHostedAssistantRuntimeIssues', () => {
+  it("rejects the deeply nested issue request before persistence", async () => {
+    const createMany = vi.fn();
+    prismaMocks.getPrisma.mockReturnValue({ hostedAssistantRuntimeIssue: { createMany } });
+    const details = JSON.parse('{"a":'.repeat(10000) + 'true' + '}'.repeat(10000));
+    await expect(importHostedAssistantRuntimeIssues({ issues: [{
+      schema: "murph.assistant-runtime-issue.v1", issueId: TEST_ISSUE_ID, fingerprint: TEST_FINGERPRINT,
+      occurredAt: "2026-11-14T00:00:00.000Z", environment: "hosted", phase: "tool_call", severity: "warning", issueKind: "tool_error", component: "synthetic", summary: "Synthetic issue", details,
+    }] })).rejects.toBeInstanceOf(RequestInputError);
+    expect(createMany).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed issue records before persistence", async () => {
+    const createMany = vi.fn();
+    prismaMocks.getPrisma.mockReturnValue({ hostedAssistantRuntimeIssue: { createMany } });
+    await expect(importHostedAssistantRuntimeIssues({ issues: [null] })).rejects.toBeInstanceOf(RequestInputError);
+    expect(createMany).not.toHaveBeenCalled();
+  });
+
   it('stores anonymized issue rows with retention metadata and no member relation', async () => {
     const createMany = vi.fn<
       (input: {

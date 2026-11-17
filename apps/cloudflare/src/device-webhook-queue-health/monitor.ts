@@ -1,3 +1,4 @@
+import { classifyOperatorLinqAlertFailure } from "../operator-alert/linq.js";
 import type { DurableObjectStorageLike } from "../user-runner/types.js";
 import {
   DeviceWebhookQueueHealthStore,
@@ -207,9 +208,9 @@ export class DeviceWebhookQueueHealthMonitor {
         outcome: "alert_sent",
         observationStatus: observation.status,
       };
-    } catch {
+    } catch (error) {
       console.warn("Device webhook Queue health alert failed.", {
-        failureCode: "alert_sender_failed",
+        failureCode: classifyOperatorLinqAlertFailure(error),
       });
       return {
         conditions: observation.conditions,

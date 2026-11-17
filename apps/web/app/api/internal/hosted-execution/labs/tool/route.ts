@@ -1,3 +1,4 @@
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import {
   parseHostedRuntimeLabsToolRequest,
 } from "@murphai/hosted-execution/labs";
@@ -14,7 +15,7 @@ export const POST = withJsonError(async (request: Request) => {
   const { payload } = await requireHostedCloudflareCallbackJsonRequest(request, {
     maxBodyBytes: BODY_LIMIT_BYTES,
   });
-  const toolRequest = parseHostedRuntimeLabsToolRequest(payload);
+  const toolRequest = parseInput(payload, parseHostedRuntimeLabsToolRequest);
 
   return jsonOk(await executeJunctionLabsTool(toolRequest, {
     signal: request.signal,

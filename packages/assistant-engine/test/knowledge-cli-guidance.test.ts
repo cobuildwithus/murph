@@ -102,7 +102,7 @@ describe('knowledge CLI guidance matches the shipped CLI', () => {
     const vault = await createVault()
     for (const slug of new Set(reads.map((read) => read.slug))) {
       const optional = await runCli(vault, ['knowledge', 'show', slug, '--if-exists'])
-      expect(optional).toEqual({ exitCode: 0, json: { degradation: null, page: null, slug, vault } })
+      expect(optional).toEqual({ exitCode: 0, json: { page: null } })
       const strict = await runCli(vault, ['knowledge', 'show', slug])
       expect(strict.exitCode).toBe(1)
       expect(strict.json).toMatchObject({ code: 'knowledge_page_not_found', retryable: false, stage: 'read' })

@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 
 import { LinkPageFrame } from "@/src/components/link-page/link-page-shell";
+import { isAppleMobileUserAgent } from "@/src/lib/apple-mobile";
 import { gameRecapAppUrl } from "@/src/lib/game/app-links";
 import { createMurphOgImageRef, createMurphPageMetadata, MURPH_NOINDEX_PAGE_ROBOTS } from "@/src/lib/site-metadata";
 
@@ -37,10 +38,7 @@ export default async function GameRecapPage(props: { params: Promise<{ gameId: s
   const { gameId } = await props.params;
   // Same 8–64 character ID shape accepted by game commands. No existence lookup.
   if (!/^[A-Za-z0-9_-]{8,64}$/u.test(gameId)) notFound();
-  const userAgent = (await headers()).get("user-agent") ?? "";
-  const isAppleMobile = /iPhone|iPad|iPod/i.test(userAgent)
-    || (/Macintosh/i.test(userAgent) && /Mobile\//i.test(userAgent));
-  if (isAppleMobile) {
+  if (isAppleMobileUserAgent((await headers()).get("user-agent"))) {
     return (
       <LinkPageFrame>
         <GameRecapView appUrl={gameRecapAppUrl(gameId)} />

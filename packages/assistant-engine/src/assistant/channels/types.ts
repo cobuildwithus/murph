@@ -11,6 +11,7 @@ import {
   type AssistantChannelDeliveryTargetKind,
   type AssistantDeliverySource,
   type AssistantMessageReaction,
+  type AssistantOutboxRecapVideo,
   type AssistantProviderMessageEffect,
   type AssistantResponseMedia,
   type AssistantResponseMediaKind,
@@ -94,6 +95,13 @@ export interface LinqRuntimeDependencies {
   }) => Promise<void>
   refreshMs?: number
   signal?: AbortSignal
+}
+
+/** A recap video the hosted Linq sender may attach to the message's first send, and how it records its one decision. */
+export interface AssistantLinqRecapVideo {
+  video: AssistantOutboxRecapVideo
+  /** Persist the decision (the prepared attachment, or the line alone) before the message request that uses it. */
+  persist(next: AssistantOutboxRecapVideo): Promise<void>
 }
 
 export interface AssistantChannelDependencies {
@@ -226,6 +234,7 @@ export interface AssistantChannelDependencies {
     persistAppCardTextFallback?: (input: {
       idempotencyKey: string
     }) => Promise<void>
+    recapVideo?: AssistantLinqRecapVideo
   }) => Promise<
     | {
         idempotencyKey?: string | null
@@ -241,6 +250,8 @@ export interface AssistantChannelDependencies {
   persistLinqAppCardTextFallback?: (input: {
     idempotencyKey: string
   }) => Promise<void>
+  /** Set by the outbox for a recap message that carries an accepted video. */
+  linqRecapVideo?: AssistantLinqRecapVideo
   sendLinqVoiceMemo?: (input: {
     answeredMailboxItemIds?: readonly string[] | null
     attachmentId: string

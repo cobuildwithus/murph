@@ -24,7 +24,7 @@ export interface BoardComparison {
   baseline: BoardWindowValue; current: BoardWindowValue; delta: number;
   improvement: number; sinceFirstGame: boolean;
 }
-export type BoardNumber = { state: "not_shared" | "hidden" } | { state: "pending"; reason?: "no_readings" } | {
+export type BoardNumber = { state: "not_shared" } | { state: "pending"; reason?: "no_readings" } | {
   state: "available"; unit: string; source?: string; latest: BoardDayValue; stale: boolean;
   daily: BoardDayValue[]; comparison: BoardComparison | null;
 };
@@ -41,13 +41,25 @@ export interface PairBoard {
 
 export function boardNumber(metric: BoardMetric, projection: HostedGroupBoardProjection,
   window: PairBoard["window"], firstGameOn: string): BoardNumber {
-  if (projection.state === "hidden") return { state: "hidden" };
+  const number = rawBoardNumber(metric, projection, window, firstGameOn);
+  if (number.state !== "available") return number;
+  const round = (value: number) => Number(value.toFixed(POLICY[metric].precision));
+  return { ...number, daily: number.daily.map(point => ({ ...point, value: round(point.value) })),
+    latest: { ...number.latest, value: round(number.latest.value) } };
+}
+
+/** The same selected, grant-authorized series before the board's display rounding. */
+export function rawBoardNumber(metric: BoardMetric, projection: HostedGroupBoardProjection,
+  window: PairBoard["window"], firstGameOn: string): BoardNumber {
   if (projection.state === "not_granted") return { state: "not_shared" };
   if (projection.state === "missing") return { state: "pending", reason: "no_readings" };
   if (projection.state !== "available") return { state: "pending" };
   const policy = POLICY[metric];
   const intermittent = metric === "vo2Max" ? resolveMetricDefinition(policy.key)?.trendPolicy : undefined;
   const minimumPoints = intermittent?.minimumPoints ?? 4;
+  const freshThrough = addDays(window.through, -(metric === "vo2Max"
+    ? resolveMetricDefinition(policy.key)!.selectionPolicy.staleAfterDays!
+    : 7));
   // Only the baseline reads past `window`; `daily` and `latest` never do.
   const retained = { ...window, from: addDays(window.from, HOSTED_VAULT_SHARE_DEFAULT_HISTORY_DAYS - HOSTED_VAULT_SHARE_BOARD_HISTORY_DAYS) };
   const preGame = { from: laterDate(addDays(firstGameOn, -PRE_GAME_BASELINE_DAYS), retained.from), through: addDays(firstGameOn, -1) };
@@ -85,20 +97,19 @@ export function boardNumber(metric: BoardMetric, projection: HostedGroupBoardPro
     // Worn this week, not merely owned: a spare device's older history must not outrank the one on the wrist.
     const worn = metric === "steps" && Boolean(source) && !NOT_WORN_STEP_SOURCES.has(source)
       && points.filter(point => point.date >= addDays(window.through, -6)).length >= minimumPoints;
-    return [{ source, points, latest, result, comparable, dates, worn, baselineFrom, baselineThrough, currentFrom,
+    return [{ source, points, latest, result, comparable, dates, worn, fresh: latest.date >= freshThrough, baselineFrom, baselineThrough, currentFrom,
       sinceFirstGame: usesPreGame || baselineFrom === firstGameOn }];
   });
-  candidates.sort((a, b) => Number(b.worn) - Number(a.worn) || Number(b.comparable) - Number(a.comparable) || b.dates - a.dates
+  candidates.sort((a, b) => Number(b.fresh) - Number(a.fresh) || Number(b.worn) - Number(a.worn) || Number(b.comparable) - Number(a.comparable) || b.dates - a.dates
     || b.latest.date.localeCompare(a.latest.date) || a.source.localeCompare(b.source));
   const selected = candidates[0];
   if (!selected) return { state: "pending", reason: "no_readings" };
   const { result } = selected;
-  const round = (value: number) => Number(value.toFixed(policy.precision));
   const daily = selected.points.filter(point => point.date >= window.from)
-    .map(point => ({ date: point.date, value: round(point.value!) }));
+    .map(point => ({ date: point.date, value: point.value! }));
   const delta = result.delta;
   return { state: "available", unit: policy.unit, ...sourceField(selected.source), daily, latest: daily.at(-1)!,
-    stale: selected.latest.date < addDays(window.through, -(metric === "vo2Max" ? resolveMetricDefinition(policy.key)!.selectionPolicy.staleAfterDays! : 7)),
+    stale: !selected.fresh,
     comparison: selected.comparable && delta !== null && result.baseline.value !== null && result.comparison.value !== null ? {
       baseline: { from: selected.baselineFrom, through: selected.baselineThrough, value: result.baseline.value, days: result.baseline.daysWithData },
       current: { from: selected.currentFrom, through: selected.latest.date, value: result.comparison.value, days: result.comparison.daysWithData },
@@ -133,9 +144,11 @@ export function boardCrowns(people: readonly BoardPerson[]): PairBoard["crowns"]
       .filter(person => person.value > 0).sort((a, b) => b.value - a.value);
     return ranked[0] && ranked[0].value !== ranked[1]?.value ? ranked[0].memberId : null;
   };
+  // A crown needs a change its row can show: the app hides one that rounds to zero.
   const metricWinner = (metric: BoardMetric) => winner(person => {
     const number = person.numbers[metric];
-    return number.state === "available" ? number.comparison?.improvement ?? null : null;
+    const improvement = number.state === "available" ? number.comparison?.improvement ?? null : null;
+    return improvement !== null && improvement * 10 ** POLICY[metric].precision > 0.5 ? improvement : null;
   });
   return { restingHeartRate: metricWinner("restingHeartRate"), sleep: metricWinner("sleep"),
     steps: metricWinner("steps"), vo2Max: metricWinner("vo2Max"), inARow: winner(person => person.inARow) };

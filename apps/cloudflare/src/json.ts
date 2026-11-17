@@ -1,3 +1,16 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
+import { parseInput, RequestInputError, RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
+export class InvalidJsonInputError extends RequestInputError {}
+
+export function parseJsonInput(value: string): unknown {
+  try {
+    return JSON.parse(value);
+  } catch (error) {
+    if (error instanceof SyntaxError) throw new InvalidJsonInputError(error.message, { cause: error });
+    throw error;
+  }
+}
+
 export function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     headers: {
@@ -31,7 +44,7 @@ export async function readJsonObject(
   request: Request,
   options: JsonBodyReadOptions = {},
 ): Promise<Record<string, unknown>> {
-  return requireJsonObject(JSON.parse(await readRequestBodyText(request, options)));
+  return parseInput(parseJsonInput(await readRequestBodyText(request, options)), requireJsonObject);
 }
 
 export async function readOptionalJsonObject(
@@ -44,7 +57,7 @@ export async function readOptionalJsonObject(
     return {};
   }
 
-  return requireJsonObject(JSON.parse(payload));
+  return parseInput(parseJsonInput(payload), requireJsonObject);
 }
 
 export async function readRequestBodyText(
@@ -66,7 +79,7 @@ export async function readRequestBodyBytes(
   if (declaredContentLength) {
     const parsedContentLength = Number.parseInt(declaredContentLength, 10);
     if (Number.isFinite(parsedContentLength) && parsedContentLength > options.limitBytes) {
-      throw new RangeError(`Request body exceeded ${options.limitBytes} bytes.`);
+      throw new RequestBodyTooLargeError(options.limitBytes);
     }
   }
 
@@ -93,7 +106,7 @@ export async function readRequestBodyBytes(
       totalBytes += value.byteLength;
       if (totalBytes > options.limitBytes) {
         await reader.cancel();
-        throw new RangeError(`Request body exceeded ${options.limitBytes} bytes.`);
+        throw new RequestBodyTooLargeError(options.limitBytes);
       }
 
       chunks.push(value);
@@ -114,7 +127,7 @@ export async function readRequestBodyBytes(
 
 export function requireJsonObject(parsed: unknown): Record<string, unknown> {
   if (!isJsonObject(parsed)) {
-    throw new TypeError("Request body must be a JSON object.");
+    throw new ContractValidationError("Request body must be a JSON object.");
   }
 
   return parsed;

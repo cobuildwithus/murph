@@ -39,7 +39,8 @@ export const QUERY_PROJECTION_SCHEMA_ID = "murph.query-projection";
 // 37: Rebuild device-first wearable selections and their daily metric provenance.
 // 38: Certify entities, metrics and wearables separately; drop the manifest table.
 // 39: One write-once SQLite file per section, replaced by rename.
-export const QUERY_PROJECTION_SQLITE_VERSION = 39;
+// 40: Rebuild steps selections with each stored total's day-end freshness.
+export const QUERY_PROJECTION_SQLITE_VERSION = 40;
 
 /** The absolute vault root whose projection section files are read or published. */
 export interface QueryProjectionLocation {

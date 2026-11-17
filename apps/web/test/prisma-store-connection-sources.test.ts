@@ -173,6 +173,24 @@ function createSourceStore(
     values: readonly unknown[];
   }) => {
     const sql = query.strings.join("?");
+    if (sql.includes("FROM device_sync_signal")) {
+      // One source's receipts: the latest of each event type per connection,
+      // bound as member, source, then its connections and receipt kinds.
+      const latest = new Map<string, MutableSignalRecord>();
+      for (const signal of signals) {
+        if (signal.userId !== query.values[0] || signal.sourceProviderSlug !== query.values[1]
+          || !query.values.includes(signal.connectionId) || !query.values.includes(signal.kind)
+          || signal.eventType === null) {
+          continue;
+        }
+        const key = `${signal.connectionId}:${signal.kind}:${signal.eventType}`;
+        const kept = latest.get(key);
+        if (!kept || signal.id > kept.id) {
+          latest.set(key, signal);
+        }
+      }
+      return [...latest.values()].map((signal) => ({ ...signal }));
+    }
     const connectionId = requireString(query.values[0]);
     const sourceProviderSlug = requireString(query.values[1]);
     const sourceInstanceKey = sql.includes('"source_instance_key" =')
@@ -461,7 +479,7 @@ describe("PrismaDeviceSyncControlPlaneStore connection source projection", () =>
     });
   });
 
-  it("resets an explicitly restarted source epoch and preserves canonical coverage markers", async () => {
+  it("resets an explicitly restarted source epoch and drops obsolete coverage markers", async () => {
     const { store } = createSourceStore();
 
     await store.upsertConnectionSource({
@@ -514,8 +532,6 @@ describe("PrismaDeviceSyncControlPlaneStore connection source projection", () =>
 
     expect(covered.resourceAvailabilitySummary).toEqual({
       activity: true,
-      canonicalCoverageBoundary_activity: "2026-08-12",
-      canonicalCoverageFinalizedAt_activity: "2026-08-13T01:00:00.000Z",
     });
   });
 

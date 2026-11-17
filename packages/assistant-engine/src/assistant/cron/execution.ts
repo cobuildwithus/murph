@@ -72,6 +72,9 @@ import {
 } from '../onboarding-goal-checkin-automation.js'
 import { canSkipManagedAutomaticMealCloseout } from '../automatic-meal-closeout-eligibility.js'
 import { canSkipManagedJournalConnectedContext } from '../journal-connected-context-eligibility.js'
+import { prepareJournalConnectedContext, type PreparedJournalContext } from '../journal-connected-context-prepare.js'
+import { MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID } from '../managed-automations.js'
+import { recordAssistantRuntimeIssueInputsBestEffort, resolveAssistantDiagnosticsPolicy } from '../issue-reporting.js'
 import {
   buildAssistantLinqDeliveryPosturePrompt,
 } from '../linq-delivery-posture.js'
@@ -604,6 +607,7 @@ export async function executeClaimedAssistantCronJob(
     kind: 'unmanaged',
   }
   let managedOwnerSkipReason: string | null = null
+  let preparedJournal: PreparedJournalContext | null = null
   let notificationDecisionKind: string | null = null
   let notificationDeliveryOutcomeKind: string | null = null
   let onboardingFollowupDiagnostic:
@@ -711,6 +715,13 @@ export async function executeClaimedAssistantCronJob(
       }
     }
 
+    const staleError = resolveStaleAssistantCronNotificationError({
+      job: input.job,
+      trigger: input.trigger,
+      nowIso: startedAt,
+      occurrenceAt,
+    })
+
     // Lifecycle-owned writes happen before notification expiry so a cleanup
     // failure remains retryable even when its next attempt crosses the stale
     // delivery window. Expiry may suppress the outbound, never the owner work.
@@ -743,7 +754,16 @@ export async function executeClaimedAssistantCronJob(
             ASSISTANT_CRON_ONBOARDING_FOLLOWUP_COMPLETED_ERROR
         }
       }
+      if (staleError === null) {
+        preparedJournal = await prepareCronJournal({
+          automationId: input.job.source.automationId, skipReason: lifecycleSkipReason,
+          executionContext: input.executionContext, channel: claimedJob.target.channel,
+          vault: input.vault, occurrenceAt, signal: yieldCancellation.signal,
+        })
+      }
       lifecycleSkipReason = await runAssistantCronAutomationPreconditions({
+        preparedJournal,
+        notificationExpired: staleError !== null,
         trigger: input.trigger,
         source: input.job.source,
         occurrenceAt,
@@ -753,16 +773,6 @@ export async function executeClaimedAssistantCronJob(
         skipReason: lifecycleSkipReason,
       })
     }
-
-    const staleError =
-      input.trigger === 'scheduled' &&
-        !assistantCronJobIsPreemptibleBackgroundMaintenance(input.job)
-        ? resolveStaleAssistantCronNotificationError({
-            job: input.job,
-            nowIso: startedAt,
-            occurrenceAt,
-          })
-        : null
 
     if (canonicalSourceSkipReason !== null) {
       outcome = 'skipped_gate'
@@ -911,12 +921,13 @@ export async function executeClaimedAssistantCronJob(
               routeAuthorityVerified: !maintenanceJob,
               scheduledInvocationAuthority,
             })
-          const notificationExecutionContext = scopeAssistantCronAutomationTool({
+          const scopedNotificationExecutionContext = scopeAssistantCronAutomationTool({
             executionContext: groupScopedExecutionContext,
             target: claimedJob.target,
             authorizedDelivery,
             routeAuthorityVerified: !maintenanceJob,
           })
+          const notificationExecutionContext = withPreparedJournal(scopedNotificationExecutionContext, preparedJournal)
           const assertNotificationStillAuthorized = async (
             authorityGate: AssistantCronOnboardingFollowupDiagnostic['authorityGate'],
           ): Promise<void> => {
@@ -1044,6 +1055,7 @@ export async function executeClaimedAssistantCronJob(
               input.job,
               deviceActivityAuthority,
               occurrenceAt,
+              preparedJournal,
             ),
             scheduledAutomationScheduleKind:
               input.job.kind === 'canonical'
@@ -1904,6 +1916,7 @@ export function buildAssistantCronExecutionInstructions(
     contextReferences: readonly AutomationContextReference[]
   },
   occurrenceAt: string | null = null,
+  preparedJournal: PreparedJournalContext | null = null,
 ): string {
   const lastFailedAt = job.job.state.lastFailedAt
   const retryEvidence =
@@ -1922,7 +1935,7 @@ export function buildAssistantCronExecutionInstructions(
     retryEvidence,
   ].filter((fact): fact is string => fact !== null)
   const overlays = [
-    buildMurphManagedJournalCalendarWindowInstructions(
+    preparedJournal?.instructions ?? buildMurphManagedJournalCalendarWindowInstructions(
       job.kind === 'canonical' && job.source.kind === 'automation' ? job.source.automationId : null,
       occurrenceAt,
     ),
@@ -2075,6 +2088,8 @@ function assistantCronTimestampIsLater(
 }
 
 async function runAssistantCronAutomationPreconditions(input: {
+  preparedJournal: PreparedJournalContext | null
+  notificationExpired: boolean
   trigger: AssistantCronTrigger
   source: CanonicalAutomationAssistantCronJobRecord
   occurrenceAt: string
@@ -2116,10 +2131,11 @@ async function runAssistantCronAutomationPreconditions(input: {
     })) {
     lifecycleSkipReason = 'No captured meals are awaiting closeout.'
   }
-  if (lifecycleSkipReason === null && input.trigger === 'scheduled'
+  // Expired runs still perform lifecycle cleanup, but must not probe inventory.
+  if (lifecycleSkipReason === null && input.trigger === 'scheduled' && !input.notificationExpired
     && await canSkipManagedJournalConnectedContext({
+      preparedAdmission: input.preparedJournal?.admission,
       automationId: input.source.automationId,
-      connectedApps: input.executionContext?.hosted?.connectedApps,
       signal: input.signal,
       vaultRoot: input.vault,
     })) {
@@ -2652,10 +2668,11 @@ function normalizeAssistantCronRunReason(reason: string): string {
 
 function resolveStaleAssistantCronNotificationError(input: {
   job: ResolvedAssistantCronJob
+  trigger: AssistantCronTrigger
   nowIso: string
   occurrenceAt: string
 }): { latenessMinutes: number; message: string } | null {
-  if (input.job.job.scheduledLog) {
+  if (input.trigger !== 'scheduled' || assistantCronJobIsPreemptibleBackgroundMaintenance(input.job) || input.job.job.scheduledLog) {
     return null
   }
 
@@ -2900,9 +2917,11 @@ async function resolveAssistantCronManagedOwnerAuthorization(input: {
           target: input.target,
         })
     } catch (error) {
+      // Web refuses a Linq route this runtime no longer owns (no private
+      // chat, or a group thread it left). The refusal is permanent, so skip
+      // the occurrence; retrying would pin maintenance to it forever.
       if (
-        ownerScope === 'member'
-        && input.target.channel === 'linq'
+        input.target.channel === 'linq'
         && readAssistantCronErrorCode(error)
           === HOSTED_LINQ_EGRESS_ROUTE_AUTHORITY_MISMATCH
       ) {
@@ -3259,15 +3278,24 @@ async function preemptAssistantCronNotificationCommitForForeground(input: {
   }
 
   if (deliveryOutcome?.kind === 'queued') {
-    const abandonedIntent = await markAssistantOutboxIntentMirrorTerminalById({
-      error: buildAssistantCronForegroundYieldedError(input.jobName),
-      intentId: deliveryOutcome.intentId,
-      onlyCurrentStatuses: ['pending', 'retryable', 'awaiting_approval'],
-      status: 'abandoned',
-      vault: input.vault,
-    })
-    if (abandonedIntent !== null && abandonedIntent.status !== 'abandoned') {
-      return
+    // A multi-bubble message counts as sent once its first bubble is past
+    // pending; otherwise every bubble is abandoned with it.
+    const intentIds = deliveryOutcome.bubbleIntentIds ?? [deliveryOutcome.intentId]
+    for (const [index, intentId] of intentIds.entries()) {
+      const abandonedIntent = await markAssistantOutboxIntentMirrorTerminalById({
+        error: buildAssistantCronForegroundYieldedError(input.jobName),
+        intentId,
+        onlyCurrentStatuses: ['pending', 'retryable', 'awaiting_approval'],
+        status: 'abandoned',
+        vault: input.vault,
+      })
+      if (
+        index === 0 &&
+        abandonedIntent !== null &&
+        abandonedIntent.status !== 'abandoned'
+      ) {
+        return
+      }
     }
   }
 
@@ -3593,4 +3621,23 @@ async function releaseClaimedAssistantCronJobAfterBackgroundMaintenanceYield(inp
     })
     await writeAssistantCronCanonicalRuntimeStore(input.paths, runtimeStore)
   })
+}
+
+async function prepareCronJournal(input: {
+  automationId: string; skipReason: string | null; executionContext: AssistantExecutionContext | null | undefined;
+  channel: AssistantCronJob['target']['channel']; vault: string; occurrenceAt: string; signal: AbortSignal;
+}): Promise<PreparedJournalContext | null> {
+  if (input.skipReason !== null || input.automationId !== MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID) return null
+  const prepared = await prepareJournalConnectedContext({
+    vaultRoot: input.vault, connectedApps: input.executionContext?.hosted?.connectedApps,
+    now: new Date(input.occurrenceAt), signal: input.signal,
+  })
+  recordAssistantRuntimeIssueInputsBestEffort({ issues: prepared.issues, vault: input.vault,
+    policy: resolveAssistantDiagnosticsPolicy({ channel: input.channel, executionContext: input.executionContext }) })
+  return prepared
+}
+
+function withPreparedJournal(context: AssistantExecutionContext | null, preparedJournal: PreparedJournalContext | null): AssistantExecutionContext | null {
+  if (!preparedJournal || !context?.hosted) return context
+  return { ...context, hosted: { ...context.hosted, connectedApps: null, preparedJournal } }
 }

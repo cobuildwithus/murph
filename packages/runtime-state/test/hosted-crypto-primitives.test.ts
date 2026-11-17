@@ -11,6 +11,7 @@ import {
   buildHostedDomainRootWrapContext,
   createHostedAuthorityVerifyKeyring,
   createHostedDataKeyEnvelopeWithDomainRoot,
+  decodeHostedDataKeyEnvelopeWrap,
   createHostedRecipientPrivateKeyring,
   createHostedRecipientPublicKeyring,
   generateHostedUserRecipientKeyPair,
@@ -63,17 +64,15 @@ test("hosted data-key envelopes wrap and unwrap random data keys with a domain r
 
   await expect(
     unwrapHostedDataKeyWithDomainRoot({
-      envelope,
+      decoded: decodeHostedDataKeyEnvelopeWrap({ envelope, rootKeyId: "udrk:runtime:root-1" }),
       rootKey: ROOT_KEY,
-      rootKeyId: "udrk:runtime:root-1",
     }),
   ).resolves.toEqual(dataKey);
 
   await expect(
     unwrapHostedDataKeyWithDomainRoot({
-      envelope,
+      decoded: decodeHostedDataKeyEnvelopeWrap({ envelope, rootKeyId: "udrk:runtime:root-1" }),
       rootKey: OTHER_ROOT_KEY,
-      rootKeyId: "udrk:runtime:root-1",
     }),
   ).rejects.toThrow();
 });
@@ -111,13 +110,9 @@ test("hosted data-key envelopes fail closed on lane/domain and root mismatches",
     rootKeyId: "udrk:runtime:root-1",
   });
 
-  await expect(
-    unwrapHostedDataKeyWithDomainRoot({
-      envelope,
-      rootKey: ROOT_KEY,
-      rootKeyId: "udrk:runtime:root-2",
-    }),
-  ).rejects.toThrow(/missing domain-root wrap udrk:runtime:root-2/u);
+  expect(() =>
+    decodeHostedDataKeyEnvelopeWrap({ envelope, rootKeyId: "udrk:runtime:root-2" }),
+  ).toThrow(/missing domain-root wrap udrk:runtime:root-2/u);
 });
 
 test("hosted crypto keyrings select old verify and decrypt keys by id", async () => {

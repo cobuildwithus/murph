@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { Prisma, type PrismaClient } from "@prisma/client";
 
 import { createHostedLinqChatLookupKey, createHostedLinqChatLookupKeyReadCandidates } from "./contact-privacy";
@@ -484,7 +485,7 @@ export async function shareMurphHostedLinqContactCardVcfToChat(
   let personalized: { imageUrl: string; shareKey: string } | null = null;
   if (input.imageUrl !== undefined || input.shareKey !== undefined) {
     if (input.imageUrl === undefined || input.shareKey === undefined) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "Personalized contact-card imageUrl and shareKey must be provided together.",
       );
     }

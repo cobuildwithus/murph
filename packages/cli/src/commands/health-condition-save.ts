@@ -3,18 +3,15 @@ import {
   CONDITION_CLINICAL_STATUSES,
   CONDITION_SEVERITIES,
   CONDITION_VERIFICATION_STATUSES,
-} from "@murphai/contracts";
+} from "@murphai/contracts/constants";
 import type { upsertCondition } from "@murphai/core";
 import { withBaseOptions } from "@murphai/operator-config/command-helpers";
 import { localDateSchema, pathSchema } from "@murphai/operator-config/vault-cli-contracts";
-import {
-  normalizeRepeatableFlagOption,
-  type VaultServices,
-} from "@murphai/vault-usecases";
+import { normalizeRepeatableFlagOption } from "@murphai/vault-usecases/option-utils";
+import type { VaultServices } from "@murphai/vault-usecases";
 import {
   createHealthEntityCrudGroup,
 } from "./health-entity-command-registry.js";
-import { suggestedCommandsCta } from "./command-factory-primitives.js";
 
 const conditionSlugSchema = z
   .string()
@@ -169,27 +166,7 @@ export function registerConditionSaveCommand(condition: Cli.Cli) {
       );
       const saved = toConditionSaveResult(context.options.vault, result);
 
-      return context.ok(saved, {
-        cta: suggestedCommandsCta([
-          {
-            command: "condition show",
-            args: {
-              id: saved.conditionId,
-            },
-            description: "Show the saved condition record.",
-            options: {
-              vault: true,
-            },
-          },
-          {
-            command: "condition list",
-            description: "List conditions.",
-            options: {
-              vault: true,
-            },
-          },
-        ]),
-      });
+      return saved;
     },
   });
 }

@@ -109,11 +109,12 @@ describe.skipIf(!enabled)("self-reported game days against PostgreSQL", () => {
     expect((await f.correct(true, f.yesterday, f.a, f.room, { credit: true })).ok).toBe(false);
     expect((await f.correct(false, f.yesterday, f.a, f.room, { text: "Read a chapter" })).ok).toBe(false);
     expect(await db.gameEntry.count({ where: { gameId: f.gameId } })).toBe(0);
+    // The end of the game does not close it at once: game-settled-correction-postgres covers the 7 days after.
     await devSettleNow(f.gameId, f.a);
-    expect(await count()).toMatchObject({ ok: false, error: { code: "GAME_NOT_LIVE" } });
+    expect(await count()).toMatchObject({ ok: true, dayOutcome: { status: "credited" } });
   });
 
-  it("refuses future, pre-game, unbound, outsider and settled mutations", async () => {
+  it("refuses future, pre-game, unbound and outsider mutations, and a game that ended more than 7 days ago", async () => {
     const f = await setup();
     await f.post();
     for (const date of [addDays(f.today, 1), addDays(f.yesterday, -1)]) expect(await f.correct(true, date)).toMatchObject({ ok: false, error: { code: "INVALID_REQUEST" } });
@@ -121,6 +122,7 @@ describe.skipIf(!enabled)("self-reported game days against PostgreSQL", () => {
     expect(await f.correct(true, f.yesterday, f.room)).toMatchObject({ ok: false, error: { code: "NOT_A_PLAYER" } });
     expect(await runGameCommand({ actorMemberId: f.a, command: { type: "setDayCompletion", gameId: f.gameId, date: f.yesterday, incomplete: true } })).toMatchObject({ ok: false });
     await devSettleNow(f.gameId, f.a);
+    await getPrisma().game.update({ where: { id: f.gameId }, data: { settledAt: new Date(Date.now() - 8 * 86_400_000) } });
     expect(await f.correct()).toMatchObject({ ok: false, error: { code: "GAME_NOT_LIVE" } });
     expect(await f.correct(false)).toMatchObject({ ok: false, error: { code: "GAME_NOT_LIVE" } });
   });

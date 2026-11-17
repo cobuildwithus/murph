@@ -42,6 +42,19 @@ for (const strict of [false, true]) {
   });
 }
 
+// The builders reject an unsupported resource with a validation error, which
+// must stay a final construction failure rather than a retried request.
+test("Junction answers an unsupported summary resource as a final request-construction failure", async () => {
+  const fetchImpl = vi.fn(async () => createJsonResponse({}));
+  const client = new JunctionClient({ apiKey: "sk_us_synthetic", environment: "sandbox", region: "us", fetchImpl });
+  await assert.rejects(client.listSummary({
+    resource: "synthetic_unsupported", userId: "synthetic-user",
+    windowStart: "2026-04-02T00:00:00.000Z", windowEnd: "2026-04-03T00:00:00.000Z",
+  }), (error) => error instanceof DeviceSyncError
+    && error.code === "JUNCTION_SDK_REQUEST_INVALID" && error.retryable === false);
+  assert.equal(fetchImpl.mock.calls.length, 0);
+});
+
 test("Junction createLinkToken accepts documented Link web URL hosts", async () => {
   const linkWebUrl = "https://link.tryvital.io/?token=link-token-1&env=sandbox&region=us";
   const client = new JunctionClient({
@@ -141,6 +154,33 @@ test("Junction historical-pull introspection matches the exact user without SDK 
       data: [{ user_id: "junction-user-other", provider: {} }],
     }, "junction-user-1"),
     { matchedUser: false, sources: [] },
+  );
+});
+
+test("Junction historical-pull introspection keeps a listed resource whose statistics are malformed", () => {
+  const snapshot = parseJunctionHistoricalPullSnapshot({
+    data: [{
+      user_id: "junction-user-1",
+      provider: {
+        garmin: {
+          not_pulled: [],
+          pulled: {
+            activity: { days_with_data: 0, status: "success" },
+            sleep: null,
+            sleep_cycle: { days_with_data: 2 },
+          },
+        },
+      },
+    }],
+  }, "junction-user-1");
+
+  assert.deepEqual(
+    snapshot.sources[0]?.pulledResources.map(({ resource, status }) => ({ resource, status })),
+    [
+      { resource: "activity", status: "success" },
+      { resource: "sleep", status: "unknown" },
+      { resource: "sleep_cycle", status: "unknown" },
+    ],
   );
 });
 

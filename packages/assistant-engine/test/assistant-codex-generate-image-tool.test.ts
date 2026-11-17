@@ -694,14 +694,12 @@ describe('executeGenerateImageTool', () => {
 })
 
 describe('murph.generate_image dynamic tool execution', () => {
-  it.each([
-    { output: 'file', quality: 'high', size: '1024x1536' },
-    { output: 'chat', quality: 'medium', size: '1024x1024' },
-  ])('defaults $output image settings without changing explicit choices', ({ output, quality, size }) => {
+  it('defaults image settings without changing explicit choices, and takes no output mode from the model', () => {
     const request = (settings: Record<string, string>) => readTestMurphDynamicToolRequest({ id: 24, method: 'item/tool/call',
-      params: { namespace: 'murph', tool: 'generate_image', arguments: { output, prompt: 'A synthetic paper stage.', ...settings } } })
-    expect(request({})).toMatchObject({ args: { quality, size } })
+      params: { namespace: 'murph', tool: 'generate_image', arguments: { prompt: 'A synthetic paper stage.', ...settings } } })
+    expect(request({})).toMatchObject({ args: { quality: 'medium', size: '1024x1024' } })
     expect(request({ quality: 'low', size: '1536x1024' })).toMatchObject({ args: { quality: 'low', size: '1536x1024' } })
+    expect(request({ output: 'file' })).toMatchObject({ kind: 'invalid-tool-arguments' })
   })
 
   it('advertises finish_without_reply', () => {

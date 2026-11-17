@@ -381,6 +381,7 @@ function projectWearableResolvedMetricPublicSources(
     ...resolved,
     candidates: resolved.candidates.map((candidate) => {
       const {
+        partialCountOfFinishedDay: _partialCountOfFinishedDay,
         reconciliationDurationConsistent: _reconciliationDurationConsistent,
         reconciliationExactKey: _reconciliationExactKey,
         workoutMetricContributors: _workoutMetricContributors,

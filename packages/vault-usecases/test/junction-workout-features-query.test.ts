@@ -160,12 +160,8 @@ test("wearables activity list associates corrected Junction features with same-d
       date: "2026-08-15",
       limit: 10,
     })
-    expect(afterCorrection.items[0]?.sessionCount).toEqual(
-      expect.objectContaining({ value: 2 }),
-    )
-    expect(afterCorrection.items[0]?.sessionMinutes).toEqual(
-      expect.objectContaining({ value: 60 }),
-    )
+    expect(afterCorrection.items[0]?.sessionCount).toBe(2)
+    expect(afterCorrection.items[0]?.sessionMinutes).toBe(60)
     expect(afterCorrection.items[0]?.workoutFeatures).toBeUndefined()
 
     const detailed = await services.listWearableActivity({
@@ -349,9 +345,7 @@ test("wearables activity list preserves provider and vault-local workout days", 
       limit: 10,
     })
 
-    expect(explicitDay.items[0]?.sessionCount).toEqual(
-      expect.objectContaining({ value: 1 }),
-    )
+    expect(explicitDay.items[0]?.sessionCount).toBe(1)
     expect(explicitDay.items[0]?.workoutFeatures).toEqual([
       expect.objectContaining({
         activityType: "cycling",
@@ -360,9 +354,7 @@ test("wearables activity list preserves provider and vault-local workout days", 
         startedAt: "2026-08-15T04:30:00.000Z",
       }),
     ])
-    expect(localDay.items[0]?.sessionCount).toEqual(
-      expect.objectContaining({ value: 2 }),
-    )
+    expect(localDay.items[0]?.sessionCount).toBe(2)
     expect(localDay.items[0]?.workoutFeatures).toEqual([
       expect.objectContaining({
         activityType: "running",

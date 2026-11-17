@@ -12,16 +12,17 @@ import {
   HOSTED_ONBOARDING_TRANSACTION_OPTIONS,
   lockHostedMemberRow,
 } from "@/src/lib/hosted-onboarding/shared";
-import { resolveHostedPublicOrigin } from "@/src/lib/hosted-web/public-url";
 import {
   buildSensitiveActionMessage,
   buildSettingsSensitiveActionBinding,
   consumeSensitiveActionChallengeTx,
+  requireSensitiveActionOrigin,
   verifySensitiveActionChallenge,
 } from "./server";
 import { prepareApprovalPasskeyWrite } from "./passkey-store";
 import { parseSensitiveActionAuthorization } from "./shared";
 import {
+  MAX_APPROVAL_PASSKEYS,
   approvalPasskeyRegistrationOptions,
   verifyApprovalPasskeyRegistration,
 } from "./webauthn";
@@ -37,10 +38,10 @@ interface EnrollmentInput {
 async function verifyEnrollmentAuthorization(input: EnrollmentInput) {
   requireApprovalPasskeyEnrollmentEnabled();
   const authorization = parseSensitiveActionAuthorization(input.authorization);
-  const origin = resolveHostedPublicOrigin();
-  if (!authorization || !origin) {
+  if (!authorization) {
     throw hostedOnboardingError({ code: "SENSITIVE_ACTION_AUTHORIZATION_REQUIRED", httpStatus: 403, message: "Secure approval is required to add a passkey." });
   }
+  const origin = requireSensitiveActionOrigin();
   const proof = await verifySensitiveActionChallenge({
     authorization,
     bindingHash: buildSettingsSensitiveActionBinding({
@@ -95,6 +96,9 @@ export async function registerApprovalPasskey(input: EnrollmentInput & {
   });
   if (verified.state.credentials.some(({ id }) => id === credential.id)) {
     throw hostedOnboardingError({ code: "SENSITIVE_ACTION_REGISTRATION_DUPLICATE", httpStatus: 409, message: "This passkey is already registered." });
+  }
+  if (verified.state.credentials.length >= MAX_APPROVAL_PASSKEYS) {
+    throw hostedOnboardingError({ code: "SENSITIVE_ACTION_PASSKEY_LIMIT", httpStatus: 409, message: "This account already has eight approval passkeys." });
   }
   const prepared = await prepareApprovalPasskeyWrite({
     credentials: [...verified.state.credentials, credential],

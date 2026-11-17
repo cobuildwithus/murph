@@ -1,3 +1,4 @@
+import { parseInput, RequestInputError, RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import {
   CLOUDFLARE_HOSTED_CONTROL_GAME_MEDIA_ID_HEADER,
   CLOUDFLARE_HOSTED_CONTROL_USER_ROUTE_SPECS,
@@ -57,10 +58,11 @@ export async function handleGameMediaRoute(
 ): Promise<Response> {
   let mediaId: string;
   try {
-    mediaId = requireHostedGameMediaId(
+    mediaId = parseInput(context.request.headers, () => requireHostedGameMediaId(
       context.request.headers.get(CLOUDFLARE_HOSTED_CONTROL_GAME_MEDIA_ID_HEADER) ?? "",
-    );
-  } catch {
+    ));
+  } catch (error) {
+    if (!(error instanceof RequestInputError)) throw error;
     return jsonError("Game media id is invalid.", 400);
   }
   const store = createHostedGameMediaStore({
@@ -73,12 +75,11 @@ export async function handleGameMediaRoute(
 async function stageGameMedia(context: WorkerRouteContext, store: HostedGameMediaStore, mediaId: string) {
   let envelope: string;
   try {
-    envelope = requireHostedGameMediaEnvelope(
-      await readRequestBodyText(context.request, { limitBytes: HOSTED_GAME_MEDIA_MAX_ENVELOPE_BYTES }),
-    );
+    const body = await readRequestBodyText(context.request, { limitBytes: HOSTED_GAME_MEDIA_MAX_ENVELOPE_BYTES });
+    envelope = parseInput(body, () => requireHostedGameMediaEnvelope(body));
   } catch (error) {
-    if (error instanceof RangeError) return jsonError("Game media is too large.", 413);
-    if (error instanceof TypeError) return jsonError("Game media must be sealed.", 400);
+    if (error instanceof RequestBodyTooLargeError) return jsonError("Game media is too large.", 413);
+    if (error instanceof RequestInputError) return jsonError("Game media must be sealed.", 400);
     throw error;
   }
   return json({ stored: true, ...(await store.write(mediaId, envelope)) });

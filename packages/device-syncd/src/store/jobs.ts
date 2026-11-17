@@ -3,6 +3,7 @@
  * the main sqlite store can focus on account lifecycle rather than job state.
  */
 
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type { DatabaseSync } from "node:sqlite";
 
 import { COMPANION_HRV_RMSSD_RESOURCE } from "@murphai/contracts";
@@ -133,7 +134,7 @@ function requireJobRowString(
 ): string {
   const value = row[field];
   if (typeof value !== "string") {
-    throw new TypeError(`Expected device_job.${field} to be a string.`);
+    throw new ContractValidationError(`Expected device_job.${field} to be a string.`);
   }
   return value;
 }
@@ -144,7 +145,7 @@ function requireJobRowNumber(
 ): number {
   const value = row[field];
   if (typeof value !== "number" || !Number.isFinite(value)) {
-    throw new TypeError(`Expected device_job.${field} to be a number.`);
+    throw new ContractValidationError(`Expected device_job.${field} to be a number.`);
   }
   return value;
 }
@@ -155,7 +156,7 @@ function readJobRowNullableString(
 ): string | null {
   const value = row[field];
   if (value !== null && typeof value !== "string") {
-    throw new TypeError(`Expected device_job.${field} to be a string or null.`);
+    throw new ContractValidationError(`Expected device_job.${field} to be a string or null.`);
   }
   return value;
 }
@@ -168,7 +169,7 @@ function decodeStoredJobRow(row: Record<string, unknown>): StoredJobRow {
     && status !== "succeeded"
     && status !== "dead"
   ) {
-    throw new TypeError("Expected device_job.status to be a supported job status.");
+    throw new ContractValidationError("Expected device_job.status to be a supported job status.");
   }
 
   return {
@@ -294,7 +295,7 @@ export function findActiveDeviceSyncJobDedupeKeys(input: {
 }): ReadonlySet<string> {
   const dedupeKeys = [...new Set(input.dedupeKeys)];
   if (dedupeKeys.length > DEVICE_SYNC_ACTIVE_DEDUPE_KEY_LOOKUP_LIMIT) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Active device-sync dedupe lookup exceeds ${DEVICE_SYNC_ACTIVE_DEDUPE_KEY_LOOKUP_LIMIT} keys.`,
     );
   }

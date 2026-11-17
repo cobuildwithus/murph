@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   HostedBillingStatus,
   Prisma,
@@ -239,7 +240,7 @@ export async function ensureHostedMemberForPendingLinqParticipantContactTx(input
   member: HostedMemberCoreState;
 }> {
   if (Number.isNaN(input.observedAt.getTime())) {
-    throw new TypeError("Hosted Linq participant contact observed timestamp must be valid.");
+    throw new ContractValidationError("Hosted Linq participant contact observed timestamp must be valid.");
   }
 
   await acquireHostedLinqParticipantContactLockTx({

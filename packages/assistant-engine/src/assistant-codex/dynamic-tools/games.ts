@@ -1,6 +1,6 @@
-import { recapAssetSchema, gameRecapDraftSchema } from '@murphai/contracts/recap-show'
+import { recapAssetSchema, gameRecapDraftSchema, recapVideoDraftSchema, recapVideoPartSchema, type GameRecapEnvelope, type RecapAsset, type RecapVideoDraft } from '@murphai/contracts/recap-show'
 import * as z from '@murphai/contracts/zod-runtime'
-import { GAME_PRIZE_WORDS, hostedGameUpdateSchema, hostedGamePhotoSchema, hostedGameRecapWriterSchema, type HostedGameUpdate, type HostedGamePhoto, type HostedGameRecap, type HostedGameToolResponse } from '@murphai/hosted-execution/runtime-control'
+import { GAME_ACTIVITIES, type GameActivity, GAME_PRIZE_WORDS, hostedGameUpdateSchema, hostedGamePhotoSchema, hostedGameRecapWriterSchema, type HostedGameChatState, type HostedGameUpdate, type HostedGamePhoto, type HostedGameRecap, type HostedGameToolResponse, type HostedRuntimeGroupToolResponse } from '@murphai/hosted-execution/runtime-control'
 import type { AssistantHostedToolContext } from '../../assistant/hosted-tool-context.js'
 import { parseDynamicToolArguments } from './dynamic-tool-wrapper.js'
 import { toolTextResult } from '../tool-failure-diagnostics.js'
@@ -10,17 +10,26 @@ import { toolTextResult } from '../tool-failure-diagnostics.js'
 // are read on the turns that are about a game. Each rule is stated once.
 export const MURPH_READ_GAME_TOOL = {
   namespace: 'murph', name: 'read_game',
-  description: 'Read the app games shared by the 2 to 10 players in this group chat: players, tasks, prize or dare, schedule, start, check-in status by day, any change waiting for a yes, and the settled result. Call it first, with the messageRef of the person who spoke, whenever someone asks about a game, asks to start one (people may call it a challenge), answers a game ask, or pastes a game invite link. The result ends with the rules for the games in this chat; follow them. It never includes private labels, photos, captions or excuses.',
-  inputSchema: { type: 'object', additionalProperties: false, properties: { messageRef: { type: 'string', description: 'The current message of the player you are answering; it decides isSender and photoCheckIn. Leave it out in a scheduled turn.' } }, required: [] },
+  description: 'Read the app games shared by the 2 to 10 players in this group chat: players, tasks, prize or dare, schedule, start, check-in status by day, any change waiting for a yes, and the settled result. Call it first with the player\'s own messageRef whenever someone asks about a game, asks to start one (people may call it a challenge), answers a game ask, or pastes a game invite link. The result ends with the rules for the games in this chat; follow them. It never includes private labels, photos, captions or excuses.',
+  inputSchema: { type: 'object', additionalProperties: false, properties: { messageRef: { type: 'string', description: "The player's own message in this chat from the last 24 hours; it decides isSender and photoCheckIn. Leave it out in a scheduled turn." } }, required: [] },
 } as const
 export const MURPH_MY_GAME_REMINDERS_TOOL = {
   deferLoading: true,
   namespace: 'murph', name: 'my_game_reminders',
-  description: "Read or set this person's own game reminders, only in their direct chat with Murph. operation=read returns their reminder time, how reminders reach them, and their live games; read before you coach them about a reminder or suggest a task. operation=set changes their local time, whether reminders arrive by text or push, and for one gameId whether reminders are on and whether they come every evening. Every evening covers only the open game days they have not posted on. Confirm delivery only from reaches in the result; when it is none, ask them to turn on notifications in the Murph app. If they want help sticking to it, use the behavior-followthrough skill: one question at a time, a real time of day, a small first step and a plan for a bad day. Never state or guess another player's status or private words.",
+  description: "Read or set this person's own game reminders, only in their direct chat; read before you answer about one, coach them or suggest a task. Each game has its own time and reminds only on its days they haven't posted. Set minutes to the local time they ask for, after midnight, with gameId for that game only or without for all games; push or text; and for one gameId on, or for an any-N-days game everyDay: every unposted day, not only when behind. Confirm delivery only from reaches: push is an app notification at that time; text adds a private text here an hour after it. A game in a group chat gets that chat's evening check-in instead. When reaches is none, ask them to turn on notifications in the Murph app. If they want help sticking to it, use the behavior-followthrough skill. Never state or guess another player's status or private words.",
   inputSchema: { type: 'object', additionalProperties: false, required: ['operation'], properties: {
     operation: { type: 'string', enum: ['read', 'set'] }, messageRef: { type: 'string' },
     minutes: { type: 'integer', minimum: 0, maximum: 1439 }, gameId: { type: 'string' },
     on: { type: 'boolean' }, everyDay: { type: 'boolean' }, text: { type: 'boolean' }, push: { type: 'boolean' },
+  } },
+} as const
+export const MURPH_MY_GAME_NOT_FOR_ME_TOOL = {
+  deferLoading: true,
+  namespace: 'murph', name: 'my_game_not_for_me',
+  description: "Read or set the app's About you, Not for me: activities Murph never suggests in this person's games. Direct chat only. Set replaces the whole list, so read first to add or remove one. Water that isn't swimming (surfing, kayaking, a beach day) is not swimming.",
+  inputSchema: { type: 'object', additionalProperties: false, required: ['operation'], properties: {
+    operation: { type: 'string', enum: ['read', 'set'] }, messageRef: { type: 'string' },
+    activities: { type: 'array', items: { type: 'string', enum: GAME_ACTIVITIES }, description: 'The whole list; required for set. An empty list clears it.' },
   } },
 } as const
 export const GAME_PRIVATE_REMINDER_DIRECT_GUIDANCE = 'For game reminders, use murph.my_game_reminders.'
@@ -28,6 +37,23 @@ export const MURPH_READ_GAME_RECAP_TOOL = {
   namespace: 'murph', name: 'read_game',
   description: 'Read the finished game, shared chat, pair lore, photo reference IDs and writing guide bound to this recap turn. Call first.',
   inputSchema: { type: 'object', additionalProperties: false, properties: {}, required: [] },
+} as const
+export const MURPH_GENERATE_IMAGE_RECAP_TOOL = {
+  namespace: 'murph', name: 'generate_image',
+  description: 'Generate one scene for the show from the cast\'s photos. Returns the path of the picture, a portrait JPEG, for the draft\'s files.',
+  inputSchema: { type: 'object', additionalProperties: false, required: ['prompt', 'referenceImageRefs'], properties: {
+    prompt: { type: 'string', minLength: 1, maxLength: 4000 },
+    referenceImageRefs: { type: 'array', minItems: 1, maxItems: 16, items: { type: 'string', minLength: 1, maxLength: 1024 },
+      description: 'Paths of photos listed under references in game.json, in the order the prompt names them.' },
+  } },
+} as const
+export const MURPH_GENERATE_SONG_RECAP_TOOL = {
+  namespace: 'murph', name: 'generate_song',
+  description: "Generate the show's music from the draft: the band under each page, then the sung theme song. Returns the path of the song for the draft's files.",
+  inputSchema: { type: 'object', additionalProperties: false, required: ['draftPath', 'voice'], properties: {
+    draftPath: { type: 'string', minLength: 1, maxLength: 512, description: "The draft's path." },
+    voice: { type: 'string', minLength: 1, maxLength: 220, description: 'The singer, in a few words: the kind of voice and how it sings.' },
+  } },
 } as const
 export const MURPH_WRITE_RECAP_TOOL = {
   namespace: 'murph', name: 'write_recap',
@@ -48,11 +74,13 @@ export const MURPH_GAME_LORE_TOOL = {
 } as const
 
 /** How to read the returned state. Every successful read carries it, including a scheduled one. */
-export const GAME_READ_FACTS_GUIDANCE = `Reading this result: a game day ends at 3 AM the next morning in each player's own timeZone, and dayOne is that player's first day. An open day with no post yet is not a miss: the player has until 3 AM. With an any-N-days schedule the target is a total for the whole game, so no single day is owed. Answer questions about progress from progress and result as returned, and do not guess why someone did not post. ${GAME_PRIZE_WORDS}`
+export const GAME_READ_FACTS_GUIDANCE = `Reading this result: a game day ends at 3 AM the next morning in each player's own timeZone, and dayOne is that player's first day. An open day with no post yet is not a miss: the player has until 3 AM. With an any-N-days schedule the target is a total for the whole game, so no single day is owed. Answer questions about progress from progress and result as returned, and do not guess why someone did not post. ${GAME_PRIZE_WORDS} A both_get stake is a prize both players get if both do every scheduled day. After such a game the result lists it once each way: say they both earned it, never that one owes the other. If either missed a day it lapsed; leave it out.`
 /** How to act on a player's message and how to start a game. Every read for a player carries it. */
 export const GAME_SHARED_SETUP_GUIDANCE = [
-  "Every game turn: act only for the player whose message you are answering, and pass that message's messageRef. Use the memberIds and names returned here. A yes counts only from that player's own message: a poll vote, or being in the chat, is never a yes. Say that a game was created, changed, counted or ended only when a tool result shows it; a successful call does not prove that a message was delivered. Each update_game and game_photo result ends with what to say next. When a call is refused, explain the rule and the next step once, and do not retry or read again. Call a requested change an ask. Keep internal IDs, private contact labels, captions, photos and the tasks of people who have not joined out of the chat. Do not ask one player to push another, shame a missing post, or joke about bodies or weight.",
-  'Starting a game: start one only when someone asks for it now; talk of maybe playing sometime is not a request. In a chat of two players it is a pair game, played for one prize for the winner or one dare for the loser. In a larger chat it is a group game, with one task for each person you address and one prize for the winner. A game needs those tasks and that prize or dare, and nothing else has to be asked. Unless they say otherwise it runs 7 days, every day, with any kind of check-in, and starts when the others agree. If a task or the prize or dare is missing, ask for just that, and say it will otherwise run 7 days, every day. A length outside 3 to 365 days, or a picked start that is not between tomorrow and 60 days out, cannot be saved: say the limit and ask again without calling update_game. If a game already exists here and the request could be either a new game or a change to that one, ask which, once. If the same game is already waiting for a yes, say so and do not create it again. Otherwise call update_game create once with the complete terms; creating is the creator\'s yes and nobody else\'s. Write each task as a short command without the player\'s name, starting with the plain verb: "Jo runs a mile" becomes "Run a mile". Write the prize or dare the same way, without names or the words winner and loser: "winner picks dinner" becomes the prize "Pick dinner", and "loser buys the coffee" becomes the dare "Buy the coffee".',
+  "Every game turn: use a player's own message in this chat from the last 24 hours when it clearly asks for or agrees to exactly this action, and pass its messageRef. The speaker below means that message's sender. Use the memberIds and names returned here. Another player's account of what someone said, a poll vote, or being in the chat never counts as their yes. If a player already asked for a change and another player later proposes that same change, the first player's earlier message is their yes: approve with its ref, even though it came before the ask. Say that a game was created, changed, counted or ended only when a tool result shows it; a successful call does not prove that a message was delivered. Each update_game and game_photo result ends with what to say next. When a call is refused, explain the rule and the next step once, and do not repeat the refused call or read again. Call a requested change an ask. Keep internal IDs, private contact labels, captions, photos and the tasks of people who have not joined out of the chat. Do not ask one player to push another, shame a missing post, or joke about bodies or weight.",
+  "Reactions: a like or heart from the player being asked, on Murph's message asking them to agree to the waiting ask or a game invitation they can accept, is their yes. Call update_game approve with gameId and the reaction's own messageRef and pendingChange.id as proposalId for a waiting ask; for an invitation use expectedTermsVersion instead. The asker's own reaction, anyone else's, a reaction on any other message, and a negative or question reaction are not a yes. Follow the result's reply guidance in a few words.",
+  "Several changes: put every field requested in one message into one propose for a pair game or one edit_terms for a group game. When the asker adds to their own waiting ask, cancel it, then make one new ask combining its earlier changes with the new ones, and say it replaces the earlier ask. The new words win if they change the same field. If a combined edit is refused, nothing changed: explain the named rule and propose only the requested parts that can still change.",
+  'Starting a game: start one only when the referenced message asks for it; talk of maybe playing sometime is not a request. In a chat of two players it is a pair game, played for one prize for the winner or one dare for the loser. In a larger chat it is a group game, with one task for each person you address and one prize for the winner. A game needs those tasks and that prize or dare, and nothing else has to be asked. Unless they say otherwise it runs 7 days, every day, with any kind of check-in, and starts when the others agree. If a task or the prize or dare is missing, ask for just that, and say it will otherwise run 7 days, every day. A length outside 3 to 365 days, or a picked start that is not between tomorrow and 60 days out, cannot be saved: say the limit and ask again without calling update_game. If a game already exists here and the request could be either a new game or a change to that one, ask which, once. If the same game is already waiting for a yes, say so and do not create it again. Otherwise call update_game create once with the complete terms; creating is the creator\'s yes and nobody else\'s. Write each task as a short command without the player\'s name, starting with the plain verb: "Jo runs a mile" becomes "Run a mile". Write the prize or dare the same way, without names or the words winner and loser: "winner picks dinner" becomes the prize "Pick dinner", and "loser buys the coffee" becomes the dare "Buy the coffee".',
 ].join('\n')
 /** Carried unless every open game is already live. */
 export const GAME_SHARED_CHOICE_POLL_GUIDANCE = "Polls: when the players ask for a vote, or are split between concrete options for something they share (a shared task, the prize or dare, the length, the start or the schedule), create one murph.poll with 2 to 4 options, keeping their labels word for word, and do not repeat the options in your reply. Later, read the poll's results before you propose terms from the winner; if it is tied, say so and ask them to choose. Run one poll at a time. Do not poll one person's own task or a yes-or-no question."
@@ -64,30 +92,33 @@ export const GAME_PLAY_AGAIN_GUIDANCE = "Playing again: pass the finished game's
 export const GAME_PAIR_AGREE_GUIDANCE = "Agreeing to a pair game: seat 0 created the game and seat 1 is the other player; match the speaker's memberId to a seat. Only seat 1 can agree, and any plain yes counts: call update_game approve with expectedTermsVersion set to terms.n and no proposalId. Never approve for the creator. If the terms changed after the offer they answered, say what changed and ask again first. If seat 1 says no, or the creator changes their mind, call cancel_game. A game with status invited is a Play again request addressed to the other player: only that player can approve it, or ask for a change with propose, which takes their seat without accepting. Until they have done one of those they cannot decline or cancel it; the creator can cancel it but cannot approve it. An invitation sent as a link to nobody in particular can only be accepted in the Murph app. Until a game is live, nobody owes a post."
 /** Added while a pair game is waiting or live. */
 export const GAME_PAIR_CHAT_GUIDANCE = [
-  "Changing a pair game (a game without maxPlayers): the player who asks calls update_game propose with only what they want changed now, and that call is their yes. The other player answers with approve or decline, using pendingChange.id as proposalId, and the asker can withdraw the ask with cancel. One ask waits at a time, and only the returned pendingChange is open. For a counter-offer, first decline the waiting ask (or cancel it when it is the speaker's own), then propose only the new request and say it replaces the earlier one. If a player comes round to an ask they just declined, propose that same change for them.",
+  "Changing a pair game (a game without maxPlayers): the player who asks calls update_game propose with the requested changes, and that call is their yes. Use the other player's own message for approve or decline, using pendingChange.id as proposalId, and the asker can withdraw the ask with cancel. One ask waits at a time, and only the returned pendingChange is open. For the other player's counter-offer, first decline the waiting ask, then propose their new request and say it replaces the earlier one. If a player comes round to an ask they just declined, propose that same change for them.",
   'What can change: tasks lock when either player reaches Day 1, and a task change sends both seats, keeping the unchanged words. The prize or dare can change until the game ends and covers the whole game. Length and schedule changes affect only days that have not started, and posts are kept. If someone asks to change a locked task, say no once and offer what can still change: the prize or dare, the length or schedule of the days ahead, their own unfinished days, or the tasks of the next game. Offer an early start only when changeControls.canStartNow is true, with propose and kind start_now.',
   "Ending early: a live game ends early only when a player clearly asks to stop the whole game. A joke, a missed day or venting is not that request. Call propose with kind call_off: the other player's yes ends it with no winner and nothing owed, and their no keeps it going.",
+  "A both-win prize: a pair game can also carry one prize both players get if both do every scheduled day (kind both_get). It sits beside the prize or dare and never replaces it. When a player names one, call propose with change.stakes holding only that both_get entry; the other player's yes is approve. Never propose one from your own idea or from a bare yes to your offer: ask what it should be. A refusal means a day has already been missed: say once, plainly, that it can no longer be earned in this game.",
 ].join('\n')
 /** Added while a group game still has people who can join. */
 export const GAME_GROUP_JOIN_GUIDANCE = 'Joining a group game: the starter is seated when the game is created, and game.players lists who has joined. pendingInviteeCount is only a number, so never name or guess who has not joined. Each invited person joins for themselves: any plain yes counts, and you call update_game approve with expectedTermsVersion set to terms.n and no proposalId. If the terms changed after the offer they answered, say what changed and ask again first; when the change is to a task you cannot show, say only that the terms changed and that their invitation in the Murph app shows their own task. The second person to join starts the game, and people who join later play on the same calendar. A note someone sent before joining (Talk it over) can be attributed to its author, but it is not a yes and changes nothing. An invitation sent as a link to nobody in particular can only be accepted in the Murph app.'
 /** Added while a group game is waiting or live. */
 export const GAME_GROUP_MODE_GUIDANCE = [
-  "Changing a group game (maxPlayers is 10, even with only two players): any seated player asks with update_game edit_terms. Pass the full terms with defaultTask, one task for each seated memberId, expectedTermsVersion and a new proposalId. Send tasks only for seated players; the server keeps the private tasks of people who have not joined. While only the starter has joined, the starter's edit applies at once. After that an edit applies when more than half of the remaining players agree, and the asker counts as a yes. The others answer for themselves with approve or decline and that proposalId. A yes or no is final for that ask, only the asker can cancel it, and one ask waits at a time. pendingChange.yesNeeded is already the number of further yeses needed, so say that number as it is. Use votes to say who has answered, and never say that everyone agreed or that someone who has not joined did. If someone joined between a Play again create and the starter's edit, read the game again, because the edit is now an ask that needs a majority; never create a second game to fix it. When a refusal needs a legal or profile step, give the one next step in the Murph app.",
+  "Changing a group game (maxPlayers is 10, even with only two players): any seated player asks with update_game edit_terms. Pass the full terms with defaultTask, one task for each seated memberId, expectedTermsVersion and a new proposalId. Send tasks only for seated players; the server keeps the private tasks of people who have not joined. While only the starter has joined, the starter's edit applies at once. After that an edit applies when more than half of the remaining players agree, and the asker counts as a yes. Use each other player's own message for approve or decline with that proposalId. A yes or no is final for that ask, only the asker can cancel it, and one ask waits at a time. pendingChange.yesNeeded is already the number of further yeses needed, so say that number as it is. Use votes to say who has answered, and never say that everyone agreed or that someone who has not joined did. If someone joined between a Play again create and the starter's edit, read the game again, because the edit is now an ask that needs a majority; never create a second game to fix it. When a refusal needs a legal or profile step, give the one next step in the Murph app.",
   'What can change: tasks lock at Day 1, the start date locks at the first post, the prize can change until the end, length and weekday changes affect only days that have not started, and an any-N-days target locks at the start. When changeControls.canStartNow is true, a remaining player can ask for an earlier start with propose and kind start_now. That is their yes only, so the others still vote.',
   'Ending early: only the starter can call cancel_game, and only before any check-in and before a post is due, even if the game is already live. Otherwise a live game ends early only when a player clearly asks to stop the whole game; a joke, a missed day or venting is not that request. A remaining player calls propose with kind call_off, every remaining player must say yes (yesNeeded counts everyone left), and one no closes the ask.',
   'Prove it: only the challenged player can concede their own day. Do not judge the evidence or ask the group for a verdict.',
 ].join('\n')
-/** Added while a game is live: how a player corrects one of their own days. */
-export const GAME_DAY_CORRECTION_GUIDANCE = "Correcting a day: when a player says they did not finish a day, call update_game mark_incomplete with that date. When a player says they did a day, or asks you to count it, call mark_complete with that date. Take their word: do not ask for proof, do not put it to the other players, and do not offer this unasked. The post for a counted day is the player's own words, so leave text out unless they give the words for the post (for example \"make my post say: ...\") or are answering your question about what it should say; then pass their words exactly as written. Both calls act only on the speaker's own days in a live game in this chat, and need gameId and date but no proposalId and nobody's approval. Work out the date from the message's Occurred at time, converted to the speaker's timeZone: before 3 AM, today is the previous calendar date and yesterday is the day before that; from 3 AM on, today is that calendar date. Do not use progress.checkedAt or the current time. If there is no timestamp, or the message covers a range of times, ask once which day. A refusal names its rule: an open day is still theirs to post, and a day off, or a game that requires a photo or heart rate, cannot be counted this way."
+/** Added while a game is live, or finished and still listing its days: how a player corrects one of their own days. */
+export const GAME_DAY_CORRECTION_GUIDANCE = "Correcting a day: when a player says they did not finish a day, call update_game mark_incomplete with that date. When a player says they did a day, or asks you to count it, call mark_complete with that date. Take their word: do not ask for proof, do not put it to the other players, and do not offer this unasked. The post for a counted day is the player's own words, so leave text out unless they give the words for the post (for example \"make my post say: ...\") or are answering your question about what it should say; then pass their words exactly as written. Both calls act only on the speaker's own days, in a live game in this chat or a finished one that still lists its days, and need gameId and date but no proposalId and nobody's approval. A finished game lists its days for 7 days after it ends; after that its result is final. While it lists them it is one of the games a day correction can apply to. Work out the date from the message's Occurred at time, converted to the speaker's timeZone: before 3 AM, today is the previous calendar date and yesterday is the day before that; from 3 AM on, today is that calendar date. Do not use the current time. If there is no timestamp, or the message covers a range of times, ask once which day. A refusal names its rule: an open day is still theirs to post, and a day off, or a game that requires a photo or heart rate, cannot be counted this way."
 /** Added while a game is waiting or live. */
-export const GAME_REMINDER_GUIDANCE = "Reminders: when a player asks for a reminder for their own game, call update_game set_reminder with minutes after midnight in their local time. It is never a new room automation, and an older scheduled room reminder is left to finish on its own. Leave on out for a change of time; pass on together with gameId only when they ask to switch one game's reminders on or off. Ask which task only when several games could fit. A reminder belongs to the player who asked: never set another player's reminder from someone else's words or a group vote."
+export const GAME_REMINDER_GUIDANCE = "Reminders: when a player asks for a reminder for their own game, call update_game set_reminder with minutes after midnight in their local time. It is never a new room automation, and an older scheduled room reminder is left to finish on its own. Leave on out for a change of time; pass on together with gameId only when they ask to switch one game's reminders on or off. Ask which task only when several games could fit. A reminder belongs to the player who asked: never set another player's reminder from someone else's words or a group vote. The time is for this chat's game only, and the reminder comes just to them. Separately, this chat gets Murph's evening check-in on game days for anyone who hasn't posted, unless the players live hours apart."
 /** What a read carries when the room's only games are group games that people are still joining. */
 export const GAME_GROUP_CHAT_GUIDANCE = [GAME_SETUP_CHAT_GUIDANCE, GAME_GROUP_JOIN_GUIDANCE, GAME_GROUP_MODE_GUIDANCE, GAME_REMINDER_GUIDANCE].join('\n')
 /** With several games in one room, a move acts on the one game it can mean, or asks once. */
-export const GAME_SELECTION_GUIDANCE = "\nSeveral games are open in this chat, and each update_game or game_photo call acts on exactly one gameId. First work out which games the message can apply to. For marking a day not done: games where the speaker has a post on that date. For counting a day as done: games where that date does not show as posted (a missed day and a day marked not done both show as unposted). For a change: games it would actually change. For a yes or no: the asks waiting on the speaker. For a photo nobody asked you to save: the speaker's games whose task it shows. For a photo they ask you to save: the game they name, or the photo offer waiting on them. Then choose among those only from the speaker's own words: task words in this message or the one they just sent, or their answer to your question. Do not choose by which game came up last, a recent notice, another player's messages, or the newest or first game. If exactly one game fits, act on it. If several fit, make no update_game or game_photo call and ask one short question that names only those games by their tasks, such as \"Which game, steps or plank?\", then act on the answer. The photo rules still decide whether a photo gets any reply or save. Talk about progress one named task at a time. Lore is shared by everyone who plays in this chat."
+export const GAME_SELECTION_GUIDANCE = "Several games are open in this chat, and each update_game or game_photo call acts on exactly one gameId. First work out which games the message can apply to. For marking a day not done: games where the speaker has a post on that date. For counting a day as done: games where that date does not show as posted (a missed day and a day marked not done both show as unposted). For a change: games it would actually change. For a yes or no: the asks waiting on the speaker. For a photo nobody asked you to save: the speaker's games whose task it shows. For a photo they ask you to save: the game they name, or the photo offer waiting on them. Then choose among those only from the speaker's own words: task words in this message or the one they just sent, or their answer to your question. Do not choose by which game came up last, a recent notice, another player's messages, or the newest or first game. If exactly one game fits, act on it. If several fit, make no update_game or game_photo call and ask one short question that names only those games by their tasks, such as \"Which game, steps or plank?\", then act on the answer. The photo rules still decide whether a photo gets any reply or save. Talk about progress one named task at a time. Lore is shared by everyone who plays in this chat."
+/** Stands in for rule blocks an earlier read_game already returned in this provider turn. */
+export const GAME_RULES_REPEAT_POINTER = 'The rules in the earlier read_game result in this turn still apply.'
 /** What to say after a successful update_game, appended to the result of the call it describes. */
 export const GAME_UPDATE_RESULT_GUIDANCE = {
-  created: "The game is created and waiting. Reply with one short invitation that names each task, the prize or dare, the schedule (say \"every day\" when it is every day), the length and the start, and asks each other player to agree for themselves. With no picked date, the yes that starts the game sets the start: that same day when it arrives from 3 AM up to 3 PM, otherwise the next game day. So do not promise a start today. If another player's own message in this turn already says yes to these same terms, call update_game approve now with that message's messageRef and expectedTermsVersion set to terms.n, and do not ask them again.",
+  created: "The game is created and waiting. Reply with one short invitation that names each task, the prize or dare, the schedule (say \"every day\" when it is every day), the length and the start, and asks each other player to agree for themselves. With no picked date, the yes that starts the game sets the start: that same day when it arrives from 3 AM up to 3 PM, otherwise the next game day. So do not promise a start today. If another player's own message in this chat from the last 24 hours already says yes to these same terms, call update_game approve now with that message's messageRef and expectedTermsVersion set to terms.n, and do not ask them again.",
   joined: 'Their yes is saved. Confirm it in a few words, without repeating the terms, offering reminders or asking a question. When this yes starts the game, a separate kickoff message introduces it.',
   ended: 'The game has ended. Send no message, because the app posts the one announcement.',
   waiting: 'The ask is waiting. Say who asked and what would change compared with the current terms, and ask the other players to answer for themselves. This reply is the only notice they get.',
@@ -96,6 +127,8 @@ export const GAME_UPDATE_RESULT_GUIDANCE = {
   declined: 'The ask is declined and the terms stay as they were. Say so in a few words.',
 } as const
 const GAME_DAY_REPLY_GUIDANCE = ' Reply in one plain line that names the date or weekday, with no day number, score change or remark about another player.'
+/** A day correction that changed a finished game's outcome returns the one line to send. */
+export const GAME_RESULT_CORRECTED_GUIDANCE = 'This day is in a finished game, and the change altered its result. Reply with the chatLine text exactly as written and nothing else.'
 /** What a counted or uncounted day came back as. */
 export const GAME_DAY_OUTCOME_GUIDANCE = {
   marked_incomplete: 'The day is now marked not done.' + GAME_DAY_REPLY_GUIDANCE,
@@ -127,9 +160,9 @@ export const GAME_REFUSAL_GUIDANCE = {
 } as const
 export const MURPH_UPDATE_GAME_TOOL = {
   namespace: 'murph', name: 'update_game',
-  description: "Create or change an app game for the player who spoke. Call murph.read_game first in the same turn and follow the rules in its result; they cover starting, agreeing, changing, correcting a day, ending early and reminders. Pass the messageRef of the player whose own words you are acting on, and never act for another player. An ordinary yes or no in conversation counts, so do not ask for special words. Operations: create starts a game. approve and decline are the speaker's answer to an invitation or to a waiting ask. propose asks for a change in a pair game, and for start_now or call_off in any game. edit_terms asks for a change in a group game. cancel withdraws the speaker's own waiting ask. cancel_game calls off a game. mark_incomplete and mark_complete uncount or count one of the speaker's own days. set_reminder sets the speaker's own reminder.",
+  description: "Create or change an app game for the referenced message's sender. Call murph.read_game first in the same turn and follow the rules in its result; they cover starting, agreeing, changing, correcting a day, ending early and reminders. Pass the messageRef of the player whose own words you are acting on, and never act for another player. An ordinary yes or no in conversation counts, so do not ask for special words. Operations: create starts a game. approve and decline are the speaker's answer to an invitation or to a waiting ask. propose asks for a change in a pair game, and for start_now or call_off in any game. edit_terms asks for a change in a group game. cancel withdraws the speaker's own waiting ask. cancel_game calls off a game. mark_incomplete and mark_complete uncount or count one of the speaker's own days. set_reminder sets the speaker's own reminder.",
   inputSchema: { type: 'object', additionalProperties: false, properties: {
-    messageRef: { type: 'string', description: 'Message ref of the current message from the player asking for or agreeing to this change.' },
+    messageRef: { type: 'string', description: "The player's own message in this chat from the last 24 hours asking for or agreeing to exactly this change." },
     operation: { type: 'string', enum: ['create', 'propose', 'approve', 'decline', 'cancel', 'mark_incomplete', 'mark_complete', 'cancel_game', 'edit_terms', 'set_reminder'] },
     minutes: { type: 'integer', minimum: 0, maximum: 1439, description: "set_reminder only: the speaker's local minutes after midnight." },
     on: { type: 'boolean', description: 'set_reminder only: pass with gameId only when the speaker asks to switch that game on or off. Leave out for a change of time.' },
@@ -146,10 +179,10 @@ export const MURPH_UPDATE_GAME_TOOL = {
       lengthDays: { type: 'integer', minimum: 3, maximum: 365, description: 'Leave out for 7.' }, startsOn: { type: 'string', description: 'YYYY-MM-DD. Leave out to start when the others agree.' },
       schedule: { type: 'object', additionalProperties: false, description: 'Either days or count.', properties: { days: { type: 'array', items: { type: 'integer', minimum: 0, maximum: 6 }, description: 'Monday 0 through Sunday 6; every day is 0 through 6.' }, count: { type: 'integer', minimum: 1, maximum: 365, description: 'Any N days across the whole game.' } } },
     }, required: ['tasks', 'stakes', 'schedule'] },
-    change: { type: 'object', additionalProperties: false, description: 'Only the fields the acting message asks to change now; omit every other field, including requests from earlier messages.', properties: {
+    change: { type: 'object', additionalProperties: false, description: "All fields the referenced message asks to change, plus the earlier fields when adding to that player's own waiting ask.", properties: {
       kind: { type: 'string', enum: ['start_now', 'edit', 'call_off'], description: 'call_off asks to end a live game early with no winner.' },
       tasks: { type: 'array', minItems: 2, maxItems: 2, items: { type: 'object', additionalProperties: false, properties: { seat: { type: 'integer', minimum: 0, maximum: 1 }, text: { type: 'string', minLength: 1, maxLength: 200 } }, required: ['seat', 'text'] } },
-      stakes: { type: 'array', minItems: 1, maxItems: 1, items: { type: 'object', additionalProperties: false, properties: { kind: { type: 'string', enum: ['prize', 'dare'] }, item: { type: 'string', minLength: 1, maxLength: 200 } }, required: ['kind', 'item'] } },
+      stakes: { type: 'array', minItems: 1, maxItems: 1, items: { type: 'object', additionalProperties: false, properties: { kind: { type: 'string', enum: ['prize', 'dare', 'both_get'] }, item: { type: 'string', minLength: 1, maxLength: 200 } }, required: ['kind', 'item'] } },
       lengthDays: { type: 'integer', minimum: 3, maximum: 365 }, startsOn: { type: ['string', 'null'], description: 'YYYY-MM-DD, or null to reset the default start before play begins.' },
       schedule: { type: 'object', additionalProperties: false, properties: { days: { type: 'array', minItems: 1, maxItems: 7, items: { type: 'integer', minimum: 0, maximum: 6 }, description: 'Monday 0 through Sunday 6.' }, count: { type: 'integer', minimum: 1, maximum: 365, description: 'Any N days across the whole game.' } } },
     }, required: ['kind'] },
@@ -163,13 +196,13 @@ export const GAME_PHOTO_CHAT_GUIDANCE = "In this iMessage game chat, a player's 
 export const MURPH_GAME_PHOTO_TOOL = {
   namespace: 'murph', name: 'game_photo',
   description: [
-    "Save a player's photo as their game check-in. iMessage only. Call murph.read_game first with the sender's messageRef, and pass that messageRef here.",
+    "Save a player's photo as their game check-in. iMessage only. Call murph.read_game first with this messageRef.",
     "A photo nobody asked you to save: call operation=offer only when it is a clear, current photo of the sender's own task, read_game shows photoCheckIn.introductionAvailable, and that player has no post today. Each player gets this introduction once; after it, their later unasked photos get no game reply. Unrelated photos, and conversation that is clearly between other people, get no game reply either.",
     'A request to save a photo: call operation=save without asking again. A yes to the waiting offer: call save and leave out sourceMessageRef and attachmentOrdinal, so the server uses the offered photo and nothing else. A no: call dismiss. An offer covers that one photo and never means later photos are saved automatically.',
     "For a new photo, sourceMessageRef and attachmentOrdinal pick one attachment that sender sent in this chat today. Never save another person's photo, save for an earlier day, or say the photo proves the task was done. If the player already posted today, saving replaces that post and uses their one retake: ask first unless they asked for the replacement, then pass that post's currentEntryId as replaceEntryId. A game whose check-in kind is any accepts photos; if an older game requires another kind, explain that the game does not take photos. If the photo cannot be fetched, ask them to resend it as a JPEG or HEIC photo or to post from the app. The result ends with what to say. Never mention internal IDs, flags or where the photo is stored.",
   ].join('\n'),
   inputSchema: { type: 'object', additionalProperties: false, properties: {
-    messageRef: { type: 'string' }, operation: { type: 'string', enum: ['offer', 'save', 'dismiss'] },
+    messageRef: { type: 'string', description: "The player's own message in this chat from the last 24 hours asking for or agreeing to this photo action." }, operation: { type: 'string', enum: ['offer', 'save', 'dismiss'] },
     gameId: { type: 'string', minLength: 8, maxLength: 64 },
     sourceMessageRef: { type: 'string' }, attachmentOrdinal: { type: 'integer', minimum: 1, maximum: 32 },
     replaceEntryId: { type: 'string', description: 'Exact currentEntryId from read_game, only after explicit replacement consent.' },
@@ -188,8 +221,15 @@ const rawUpdateArguments = z.object({ messageRef: z.string().min(1).max(128), op
   }
   return { messageRef, update: parsed.data }
 })
-export type GameDynamicRequest = { action: 'my_game_reminders'; operation: 'read' | 'set'; messageRef?: string; minutes?: number; gameId?: string; on?: boolean; everyDay?: boolean; text?: boolean; push?: boolean } | { action: 'read_game'; messageRef?: string } | { action: 'update_game'; messageRef: string; update: HostedGameUpdate } | { action: 'game_photo'; messageRef: string; photo: HostedGamePhoto } | { action: 'write_recap'; recap: HostedGameRecap } | { action: 'write_recap_file'; draftPath: string } | { action: 'game_lore'; operation: 'read' | 'replace'; content?: string }
+export type GameDynamicRequest = { action: 'my_game_not_for_me'; operation: 'read' | 'set'; messageRef?: string; activities?: GameActivity[] } | { action: 'my_game_reminders'; operation: 'read' | 'set'; messageRef?: string; minutes?: number; gameId?: string; on?: boolean; everyDay?: boolean; text?: boolean; push?: boolean } | { action: 'read_game'; messageRef?: string } | { action: 'update_game'; messageRef: string; update: HostedGameUpdate } | { action: 'game_photo'; messageRef: string; photo: HostedGamePhoto } | { action: 'write_recap'; recap: HostedGameRecap } | { action: 'write_recap_file'; draftPath: string } | { action: 'game_lore'; operation: 'read' | 'replace'; content?: string }
 export function readGameDynamicToolRequest(input: { arguments: unknown; tool: string | null }) {
+  if (input.tool === 'my_game_not_for_me') {
+    const schema = z.object({ operation: z.enum(['read', 'set']), messageRef: z.string().min(1).max(128).optional(),
+      activities: z.array(z.enum(GAME_ACTIVITIES)).transform(values => GAME_ACTIVITIES.filter(value => values.includes(value))).optional() }).strict()
+      .refine(value => value.operation !== 'set' || value.activities !== undefined, 'Set requires activities.')
+    const parsed = parseDynamicToolArguments({ schema, value: input.arguments, schemaRootKeys: ['operation', 'messageRef', 'activities'], toolName: 'murph.my_game_not_for_me' })
+    return parsed.ok ? { kind: 'game' as const, request: { action: 'my_game_not_for_me' as const, ...parsed.args } } : { kind: 'invalid-tool-arguments' as const, errorCode: 'invalid_game_arguments', validationDigest: parsed.validationDigest }
+  }
   if (input.tool === 'my_game_reminders') {
     const schema = z.object({ operation: z.enum(['read', 'set']), messageRef: z.string().min(1).max(128).optional(),
       minutes: z.number().int().min(0).max(1439).optional(), gameId: z.string().min(8).max(64).optional(),
@@ -289,8 +329,19 @@ async function executeTrustedGameRecapWrite(input: {
   return toolTextResult(true, output)
 }
 
-export async function recordAcceptedRecap(input: { context: AssistantHostedToolContext | null; origin: { gameId: string; eventId: string } }, payload: HostedGameToolResponse['result'], show: boolean): Promise<void> {
-  if (payload.status === 'ok' && 'chatLine' in payload && typeof payload.chatLine === 'string') input.context?.recordSavedGameRecapChatLine?.(payload.chatLine)
+/**
+ * The one place an accepted recap is recorded for delivery: its chat line and, when Web accepted a
+ * video for it, that identity with the host-owned file whose bytes Web accepted. A rendered file is
+ * handed over only when its hash, length and generation equal the identity Web returned; a recovery
+ * finds a file handed over by an earlier attempt of this turn by the same identity, or none.
+ */
+export async function recordAcceptedRecap(input: { context: AssistantHostedToolContext | null; origin: { gameId: string; eventId: string } }, payload: HostedGameToolResponse['result'], show: boolean,
+  candidate?: { draft: RecapVideoDraft; file: string } | null): Promise<void> {
+  if (payload.status === 'ok' && 'chatLine' in payload && typeof payload.chatLine === 'string') {
+    // Without a video the call is exactly today's.
+    const video = await acceptedRecapVideo(input.context, payload, candidate)
+    input.context?.recordSavedGameRecapChatLine?.(payload.chatLine, ...video)
+  }
   if (payload.status === 'ok' && 'recap' in payload && payload.recap) {
     try {
       if (!show && input.context?.currentGameRecapScope?.()?.loreAccess === 'read') await input.context.appendGameRecapChatLine?.(payload.recap.chatLine)
@@ -298,6 +349,15 @@ export async function recordAcceptedRecap(input: { context: AssistantHostedToolC
       // Lore is optional; canonical acceptance owns the delivery.
     }
   }
+}
+
+async function acceptedRecapVideo(context: AssistantHostedToolContext | null, payload: HostedGameToolResponse['result'],
+  candidate?: { draft: RecapVideoDraft; file: string } | null): Promise<[] | [NonNullable<Awaited<ReturnType<typeof import('../../assistant/recap-video-render.js').handOverRecapVideo>>>]> {
+  const accepted = 'recapVideo' in payload ? payload.recapVideo : undefined
+  if (!accepted || !context?.currentGameRecapScope?.()?.video) return []
+  const { handOverRecapVideo } = await import('../../assistant/recap-video-render.js')
+  const video = await handOverRecapVideo(accepted, candidate ?? null).catch(() => undefined)
+  return video ? [video] : []
 }
 
 async function executeGameLoreTool(input: {
@@ -320,43 +380,103 @@ async function executeGameLoreTool(input: {
 async function executeOrdinaryGameTool(input: {
   request: Extract<GameDynamicRequest, { action: 'read_game' | 'update_game' | 'game_photo' }>
   context: AssistantHostedToolContext | null
+  turnState: GameRulesTurnState | null
 }) {
   const tool = input.context?.groupTool
   const scope = input.context?.currentUserActionScope?.()
   if (!tool || scope?.conversationScope !== 'group' || !scope.acceptedInputIds.length) return toolTextResult(false, 'Game tools require current player input in the game group chat.', 'authority_rejected')
   const assistantInputId = input.request.messageRef ?? scope.acceptedInputIds[scope.acceptedInputIds.length - 1]!
-  if (!scope.acceptedInputIds.includes(assistantInputId)) return toolTextResult(false, 'Use a Message ref from this group turn.', 'authority_rejected')
   const origin = { kind: 'accepted_input' as const, assistantInputId }
   try {
     const result = await tool.request(input.request.action === 'read_game' ? { action: 'read_game', origin, includePlayers: true } : input.request.action === 'game_photo' ? { action: 'game_photo', origin, photo: input.request.photo } : { action: 'update_game', origin, update: input.request.update })
-    return toolTextResult(true, JSON.stringify(result) + gameResultGuidance(result.result, input.request))
+    return toolTextResult(true, JSON.stringify(gameResultForModel(result, input.request)) + gameResultGuidance(result.result, input.request, input.turnState))
   } catch (error) {
     return toolTextResult(false, 'The game action could not be confirmed. Read the game to check its current state before claiming a change applied.', 'handler_exception', error)
   }
 }
 
-type GameToolResult = Awaited<ReturnType<NonNullable<AssistantHostedToolContext["groupTool"]>["request"]>>["result"]
+type GameToolResponse = Awaited<ReturnType<NonNullable<AssistantHostedToolContext["groupTool"]>["request"]>>
+type GameToolResult = GameToolResponse["result"]
 type OrdinaryGameRequest = Extract<GameDynamicRequest, { action: 'read_game' | 'update_game' | 'game_photo' }>
+type ChatGame = HostedGameChatState['games'][number]
+/** The rule blocks read_game has returned in this provider turn, kept on the dynamic tools' per-turn state. */
+export type GameRulesTurnState = { gameRulesSent?: Set<string> }
+const OPEN_GAME_STATUSES: readonly string[] = ['live', 'negotiating', 'invited']
+
+/**
+ * What the model sees of a game result. The lore keys feed the turn prompt, not the model. A read
+ * returns every game, and a finished one only its terms, players and result. A write returns only
+ * the game it acted on, without its days, because the read before it in this turn has the rest.
+ */
+function gameResultForModel(response: GameToolResponse, request: OrdinaryGameRequest) {
+  if (!('state' in response.result)) return response
+  const { loreGuidance: _guidance, loreFingerprint: _fingerprint, ...result } = response.result
+  if (!result.state) return { ...response, result }
+  const actedOn = request.action === 'read_game' ? null : request.action === 'game_photo' ? request.photo.gameId : request.update.gameId
+  // set_reminder may name no game, in which case every game it can apply to stays.
+  const state = actedOn === null ? { ...result.state, games: result.state.games.map(game => gameForModel(game, true)) }
+    : { games: result.state.games.filter(game => actedOn === undefined || game.id === actedOn).map(game => gameForModel(game, false)) }
+  return { ...response, result: { ...result, state } }
+}
+
+/**
+ * Stake keys are app bookkeeping. A finished game has no asks or controls left to act on, and
+ * it keeps its days only while the app still sends them: that is how long they can be corrected.
+ */
+function gameForModel(game: ChatGame, withDays: boolean) {
+  const terms = { ...game.terms, stakes: game.terms.stakes.map(({ key: _key, ...stake }) => stake) }
+  if (!OPEN_GAME_STATUSES.includes(game.status)) {
+    const { progress, changeControls: _changeControls, pendingChange: _pendingChange, ...finished } = game
+    return { ...finished, terms, ...(withDays && isCorrectableFinishedGame(game) && progress ? { progress: progressForModel(progress) } : {}) }
+  }
+  const { progress, ...open } = game
+  return { ...open, terms, ...(withDays && progress ? { progress: progressForModel(progress) } : {}) }
+}
+
+/** Each player's started days as date to status. Days ahead are known from the terms. */
+function progressForModel(progress: NonNullable<ChatGame['progress']>) {
+  return { players: progress.players.map(({ days, ...player }) => ({ ...player, days: Object.fromEntries(days
+    .filter(day => day.status !== 'upcoming' && day.dayIndex <= (player.currentDayIndex ?? Infinity))
+    .map(day => [day.date, day.status])) })) }
+}
 
 /**
  * The rules a result carries. A read carries the rules for what the room holds right now, so a room
  * with no game carries only how to start one. A write carries what to say about what it returned.
  */
-function gameResultGuidance(payload: GameToolResult, request: OrdinaryGameRequest): string {
+function gameResultGuidance(payload: GameToolResult, request: OrdinaryGameRequest, turnState: GameRulesTurnState | null): string {
   const games = ('state' in payload ? payload.state?.games : undefined) ?? []
-  const open = games.filter(game => ['live', 'negotiating', 'invited'].includes(game.status))
-  const selection = open.length > 1 ? GAME_SELECTION_GUIDANCE : ''
-  if (request.action === 'read_game') return payload.status === 'ok' ? selection + '\n' + gameReadGuidance(games, open) : selection
+  if (request.action === 'read_game') {
+    if (payload.status !== 'ok') return ''
+    const open = games.filter(game => OPEN_GAME_STATUSES.includes(game.status))
+    // A finished game whose days can still be corrected is one more game a message can mean.
+    const actable = open.length + games.filter(isCorrectableFinishedGame).length
+    return '\n' + unsentGameRules([...(actable > 1 ? [GAME_SELECTION_GUIDANCE] : []), ...gameReadGuidance(games, open)], turnState).join('\n')
+  }
   const said = payload.status !== 'ok' ? gameRefusalGuidance(payload, request.action)
     : request.action === 'game_photo' ? ('photoOutcome' in payload && payload.photoOutcome ? GAME_PHOTO_OUTCOME_GUIDANCE[payload.photoOutcome] : '')
     : gameUpdateGuidance(payload, request.update, games)
-  return selection + (said ? '\n' + said : '')
+  return said ? '\n' + said : ''
 }
 
-type GameRuleFacts = { status: string; maxPlayers?: number | null; pendingInviteeCount?: number | null }
+/** Rule blocks an earlier read in this provider turn returned are replaced by one pointer to it. */
+function unsentGameRules(rules: readonly string[], turnState: GameRulesTurnState | null): readonly string[] {
+  if (!turnState) return rules
+  const sent = turnState.gameRulesSent ??= new Set()
+  const unsent = rules.filter(rule => !sent.has(rule))
+  for (const rule of unsent) sent.add(rule)
+  return unsent.length < rules.length ? [GAME_RULES_REPEAT_POINTER, ...unsent] : unsent
+}
+
+type GameRuleFacts = { status: string; maxPlayers?: number | null; pendingInviteeCount?: number | null; progress?: unknown }
+
+/** A finished pair game whose days the app still sends: its players can still correct their own days. */
+function isCorrectableFinishedGame(game: GameRuleFacts): boolean {
+  return game.status === 'settled' && game.maxPlayers !== 10 && game.progress != null
+}
 
 /** The rules for what the room holds right now. `open` is the subset of `games` still in play. */
-function gameReadGuidance(games: readonly GameRuleFacts[], open: readonly GameRuleFacts[]): string {
+function gameReadGuidance(games: readonly GameRuleFacts[], open: readonly GameRuleFacts[]): string[] {
   const pair = open.filter(game => game.maxPlayers !== 10)
   const group = open.filter(game => game.maxPlayers === 10)
   const live = open.some(game => game.status === 'live')
@@ -367,13 +487,13 @@ function gameReadGuidance(games: readonly GameRuleFacts[], open: readonly GameRu
     ...(pair.length ? [GAME_PAIR_CHAT_GUIDANCE] : []),
     ...(group.some(game => game.status === 'invited' || (game.pendingInviteeCount ?? 0) > 0) ? [GAME_GROUP_JOIN_GUIDANCE] : []),
     ...(group.length ? [GAME_GROUP_MODE_GUIDANCE] : []),
-    ...(live ? [GAME_DAY_CORRECTION_GUIDANCE] : []),
-    ...(open.length ? [GAME_REMINDER_GUIDANCE] : [])].join('\n')
+    ...(live || games.some(isCorrectableFinishedGame) ? [GAME_DAY_CORRECTION_GUIDANCE] : []),
+    ...(open.length ? [GAME_REMINDER_GUIDANCE] : [])]
 }
 
 /** What to say after a successful update, worked out from the operation and the state it returned. */
 function gameUpdateGuidance(payload: GameToolResult, update: HostedGameUpdate, games: readonly { id: string; status: string; pendingChange?: unknown }[]): string {
-  if ('dayOutcome' in payload && payload.dayOutcome) return GAME_DAY_OUTCOME_GUIDANCE[payload.dayOutcome.status]
+  if ('dayOutcome' in payload && payload.dayOutcome) return 'chatLine' in payload && payload.chatLine ? GAME_RESULT_CORRECTED_GUIDANCE : GAME_DAY_OUTCOME_GUIDANCE[payload.dayOutcome.status]
   if (update.operation === 'set_reminder') return 'reaches' in payload && payload.reaches ? GAME_REMINDER_OUTCOME_GUIDANCE[payload.reaches] : ''
   if (update.operation === 'create') return GAME_UPDATE_RESULT_GUIDANCE.created
   if (update.operation === 'cancel_game') return GAME_UPDATE_RESULT_GUIDANCE.ended
@@ -404,32 +524,57 @@ function gameRefusalGuidance(payload: GameToolResult, action: 'update_game' | 'g
   return code === 'PROFILE_REQUIRED' || code === 'CONTENT_NOT_ALLOWED' ? GAME_REFUSAL_GUIDANCE[code] : ''
 }
 
-export async function executeGameTool(input: { request: GameDynamicRequest; context: AssistantHostedToolContext | null }) {
-  if (input.request.action === 'write_recap_file') return executeRecapFileWrite({ context: input.context, draftPath: input.request.draftPath })
-  if (input.request.action === 'my_game_reminders') {
+const REMINDER_WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const
+
+function reminderClock(minutes: number): string {
+  const hour = Math.floor(minutes / 60)
+  return `${hour % 12 || 12}:${String(minutes % 60).padStart(2, '0')} ${hour < 12 ? 'AM' : 'PM'}`
+}
+
+/** The saved reminders in words: the one time for every game, each game's named days, and when each game reminds. */
+export function describeMyGameReminders(response: HostedRuntimeGroupToolResponse) {
+  if (response.action !== 'my_game_reminders' || !('reminders' in response.result) || !response.result.reminders) return response
+  const reminders = response.result.reminders
+  const { minutes, games, ...channels } = reminders
+  const time = reminderClock(minutes)
+  // everyDay changes only an any-N-days game, so a game on set weekdays never shows it.
+  const described = games.map(({ schedule, everyDay, minutes: own, ...game }) => ({ ...(own === undefined ? {} : { minutes: own, time: reminderClock(own) }), ...('count' in schedule
+    ? { ...game, days: `any ${schedule.count} days`, everyDay,
+      reminds: !game.on ? 'off' : everyDay ? 'every day not posted yet' : `only once every remaining day is needed to reach ${schedule.count}` }
+    : { ...game, days: schedule.days.length === 7 ? 'every day' : schedule.days.map(day => REMINDER_WEEKDAYS[day]).join(', '),
+      reminds: game.on ? 'each of these days not posted yet' : 'off' }) }))
+  return { ...response, result: { ...response.result, reminders: { minutes, time, ...channels, games: described } } }
+}
+
+export async function executeGameTool(input: { request: GameDynamicRequest; context: AssistantHostedToolContext | null; turnState?: GameRulesTurnState | null; signal?: AbortSignal }) {
+  if (input.request.action === 'write_recap_file') return executeRecapFileWrite({ context: input.context, draftPath: input.request.draftPath, signal: input.signal })
+  if (input.request.action === 'my_game_reminders' || input.request.action === 'my_game_not_for_me') {
+    const setting = { my_game_reminders: 'Game reminders', my_game_not_for_me: 'Not for me' }[input.request.action]
     const scope = input.context?.currentUserActionScope?.()
     const tool = input.context?.myGameRemindersTool
-    if (!tool || scope?.conversationScope !== 'direct' || !scope.acceptedInputIds.length) return toolTextResult(false, 'Private game reminders require your current direct message.', 'authority_rejected')
+    if (!tool || scope?.conversationScope !== 'direct' || !scope.acceptedInputIds.length) return toolTextResult(false, `${setting} requires your current direct message.`, 'authority_rejected')
     const assistantInputId = input.request.messageRef ?? scope.acceptedInputIds[scope.acceptedInputIds.length - 1]!
-    if (!scope.acceptedInputIds.includes(assistantInputId)) return toolTextResult(false, 'Use this direct message to change reminders.', 'authority_rejected')
+    if (!scope.acceptedInputIds.includes(assistantInputId)) return toolTextResult(false, `Use this direct message to change ${setting.toLowerCase()}.`, 'authority_rejected')
     try {
       const { messageRef: _messageRef, ...request } = input.request
-      return toolTextResult(true, JSON.stringify(await tool.request({ ...request, origin: { kind: 'accepted_input', assistantInputId } })))
-    } catch (error) { return toolTextResult(false, 'Game reminders could not be confirmed.', 'handler_exception', error) }
+      const response = await tool.request({ ...request, origin: { kind: 'accepted_input', assistantInputId } })
+      return toolTextResult(true, JSON.stringify(describeMyGameReminders(response)))
+    } catch (error) { return toolTextResult(false, `${setting} could not be confirmed.`, 'handler_exception', error) }
   }
   if (input.request.action === 'game_lore') return executeGameLoreTool({ ...input, request: input.request })
   const recapResult = await executeTrustedGameRecapTool(input)
   if (recapResult) return recapResult
   if (input.request.action === 'write_recap') return toolTextResult(false, 'write_recap is available only in the bound game recap turn.', 'authority_rejected')
+  const turnState = input.turnState ?? null
   if (input.request.action === 'read_game') {
-    const scheduledRead = await executeScheduledGameRead(input.context)
+    const scheduledRead = await executeScheduledGameRead(input.context, turnState)
     if (scheduledRead) return scheduledRead
   }
-  return executeOrdinaryGameTool({ ...input, request: input.request })
+  return executeOrdinaryGameTool({ context: input.context, request: input.request, turnState })
 }
 
 /** A verified scheduled occurrence reads the bound room's shared game state; it never acts for a player. */
-async function executeScheduledGameRead(context: AssistantHostedToolContext | null) {
+async function executeScheduledGameRead(context: AssistantHostedToolContext | null, turnState: GameRulesTurnState | null) {
   const tool = context?.groupTool
   if (!tool || context?.currentUserActionScope?.()?.acceptedInputIds.length) return null
   const invocation = context?.currentInvocationScope?.()
@@ -437,34 +582,92 @@ async function executeScheduledGameRead(context: AssistantHostedToolContext | nu
   const { automationId, occurrenceAt } = invocation.origin
   try {
     const result = await tool.request({ action: 'read_game', origin: { kind: 'automation_occurrence', automationId, occurrenceAt }, includePlayers: true })
-    return toolTextResult(true, JSON.stringify(result) + (result.result.status === 'ok' ? '\n' + GAME_READ_FACTS_GUIDANCE : ''))
+    return toolTextResult(true, JSON.stringify(gameResultForModel(result, { action: 'read_game' }))
+      + (result.result.status === 'ok' ? '\n' + unsentGameRules([GAME_READ_FACTS_GUIDANCE], turnState).join('\n') : ''))
   } catch (error) {
     return toolTextResult(false, 'The game state could not be read.', 'handler_exception', error)
   }
 }
 
 
-async function executeRecapFileWrite(input: { context: AssistantHostedToolContext | null; draftPath: string }) {
+async function executeRecapFileWrite(input: { context: AssistantHostedToolContext | null; draftPath: string; signal?: AbortSignal }) {
   const context = input.context
   const scope = context?.currentGameRecapScope?.()
   const tool = context?.groupTool
   if (!scope?.show || !tool || !context?.readGameRecapDraft || !context.readGameRecapMedia) return toolTextResult(false, 'File submission requires a bound pair show.', 'authority_rejected')
+  let video: RecapVideoCandidate | null = null
   try {
     const draft = gameRecapDraftSchema.parse(await context.readGameRecapDraft(input.draftPath))
     const origin = { kind: 'game_recap' as const, gameId: scope.gameId, eventId: scope.eventId }
-    const assets = []
-    for (const file of draft.files) {
-      const media = await context.readGameRecapMedia(file.path)
-      const uploaded = await tool.request({ action: 'read_game', origin, recapRead: { kind: 'upload', slot: file.slot, ...media } })
-      if (uploaded.result.status !== 'ok' || !('recapGame' in uploaded.result)) throw new Error('Media upload failed.')
-      assets.push(recapAssetSchema.parse(uploaded.result.recapGame))
+    // Validate every selection against the final draft before uploading any bytes.
+    const selections = await Promise.all(draft.files.map(async file => ({ file, media: await context.readGameRecapMedia!(file.path, draft.story) })))
+    const assets = await uploadRecapAssets(tool, origin, selections)
+    // Only a wake that asked for a video makes one; without it the write is exactly today's.
+    if (scope.video && context.renderGameRecapVideo) {
+      video = await prepareRecapVideoCandidate({ context, tool, origin, story: draft.story, assets, signal: input.signal,
+        media: new Map(selections.map(({ file, media }) => [file.slot, Buffer.from(media.bytes, 'base64')])) })
     }
-    const accepted = await tool.request({ action: 'write_recap', origin, recap: draft.story, assets })
+    const accepted = await tool.request({ action: 'write_recap', origin, recap: draft.story, assets, ...(video ? { video: video.draft } : {}) })
     if (accepted.action !== 'write_recap') throw new Error('Unexpected recap response.')
-    await recordAcceptedRecap({ context, origin }, accepted.result, true)
+    await recordAcceptedRecap({ context, origin }, accepted.result, true, video)
     return toolTextResult(accepted.result.status === 'ok', 'recapOutcome' in accepted.result ? accepted.result.recapOutcome ?? JSON.stringify(accepted.result) : JSON.stringify(accepted.result))
   } catch (error) {
     return toolTextResult(false, error instanceof Error ? error.message : 'Recap submission failed.', 'handler_exception', error)
+  } finally {
+    await video?.dispose()
+  }
+}
+
+async function uploadRecapAssets(tool: NonNullable<AssistantHostedToolContext['groupTool']>, origin: { kind: 'game_recap'; gameId: string; eventId: string },
+  selections: readonly { file: { slot: string }; media: Awaited<ReturnType<NonNullable<AssistantHostedToolContext['readGameRecapMedia']>>> }[]): Promise<RecapAsset[]> {
+  const assets: RecapAsset[] = []
+  for (const { file, media } of selections) {
+    const uploaded = await tool.request({ action: 'read_game', origin, recapRead: { kind: 'upload', slot: file.slot, ...media } })
+    if (uploaded.result.status !== 'ok' || !('recapGame' in uploaded.result)) throw new Error('Media upload failed.')
+    assets.push(recapAssetSchema.parse(uploaded.result.recapGame))
+  }
+  return assets
+}
+
+type RecapVideoCandidate = { draft: RecapVideoDraft; file: string; dispose(): Promise<void> }
+
+/**
+ * Render the show and stage its parts, or null for "no video": a refusal, a timeout, an upload Web
+ * refuses (the flag off answers `recap_video_unavailable`) or one that fails all leave the recap as it
+ * is today. The candidate has no authority of its own: Web's first acceptance decides the video.
+ */
+async function prepareRecapVideoCandidate(input: {
+  context: AssistantHostedToolContext; tool: NonNullable<AssistantHostedToolContext['groupTool']>
+  origin: { kind: 'game_recap'; gameId: string; eventId: string }
+  story: GameRecapEnvelope['story']; assets: readonly RecapAsset[]; media: ReadonlyMap<string, Buffer>; signal?: AbortSignal
+}): Promise<RecapVideoCandidate | null> {
+  const { RECAP_VIDEO_BUDGET_MS, recapVideoParts } = await import('../../assistant/recap-video-render.js')
+  // One deadline for all of it: photo fetches, the render and the part uploads.
+  const deadlineAt = Date.now() + RECAP_VIDEO_BUDGET_MS
+  const budget = AbortSignal.timeout(RECAP_VIDEO_BUDGET_MS)
+  const signal = input.signal ? AbortSignal.any([input.signal, budget]) : budget
+  let rendered: Awaited<ReturnType<NonNullable<AssistantHostedToolContext['renderGameRecapVideo']>>> | null = null
+  try {
+    rendered = await input.context.renderGameRecapVideo!({ story: input.story, assets: input.assets, media: input.media, signal: input.signal, deadlineAt })
+    if (rendered.kind !== 'rendered') return null
+    const { readFile } = await import('node:fs/promises')
+    const parts = []
+    for (const [index, bytes] of recapVideoParts(await readFile(rendered.file)).entries()) {
+      const uploaded = await input.tool.request({ action: 'read_game', origin: input.origin,
+        recapRead: { kind: 'upload', slot: `video-${index}`, mediaType: 'video/mp4', referenceIds: [], bytes: bytes.toString('base64') } }, { signal })
+      const part = uploaded.result.status === 'ok' && 'recapGame' in uploaded.result ? recapVideoPartSchema.safeParse(uploaded.result.recapGame).data : undefined
+      if (!part) throw new Error('A video part was not staged.')
+      parts.push(part)
+    }
+    if (input.signal?.aborted) throw input.signal.reason
+    const draft = recapVideoDraftSchema.safeParse({ hash: rendered.hash, byteLength: rendered.byteLength, referenceIds: rendered.referenceIds, parts }).data
+    if (!draft) throw new Error('The video candidate is not one Web can read.')
+    return { draft, file: rendered.file, dispose: rendered.dispose }
+  } catch (error) {
+    if (rendered?.kind === 'rendered') await rendered.dispose()
+    // A cancelled turn stops here; every other failure, the deadline included, is the recap without a video.
+    if (input.signal?.aborted) throw input.signal.reason ?? error
+    return null
   }
 }
 

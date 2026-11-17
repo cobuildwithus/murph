@@ -87,61 +87,29 @@ const contractPath = fileURLToPath(
 
 interface ScopedImportSurfaceProbe {
   readonly args: readonly string[]
-  // Total resolved-module ceiling (file URLs + node: builtins) so graph creep
-  // WITHIN already-allowed packages is bounded too. Measured against the
-  // built CLI on 2026-06-11 (post-#131 scoped collapse), ceiling = measured
-  // + ~30% headroom.
+  // Exact measured resolved-module ceiling (file URLs + node: builtins),
+  // including growth within already-allowed packages.
   readonly maxResolvedModules: number
 }
 
+// Remeasured on 2026-11-14 after narrowing contract imports, separating vault
+// selection from assistant configuration, and avoiding the usecases barrel.
 const scopedImportSurfaceProbes: readonly ScopedImportSurfaceProbe[] = [
   {
     args: ['wearables', 'day', '2026-01-01', '--format', 'json'],
-    // Measured 297 resolved modules on 2026-06-11.
-    maxResolvedModules: 390,
+    maxResolvedModules: 223,
   },
   {
     args: ['meal', 'totals', '--from', '2026-01-01', '--to', '2026-01-01', '--format', 'json'],
-    // Measured 311 resolved modules on 2026-06-11 (down from 430 after the
-    // occurred-at-option @murphai/core import went lazy).
-    maxResolvedModules: 405,
+    maxResolvedModules: 293,
   },
   {
     args: ['list', '--kind', 'meal', '--format', 'json'],
-    // Measured 280 resolved modules on 2026-06-11.
-    maxResolvedModules: 365,
+    maxResolvedModules: 199,
   },
   {
     args: ['condition', 'list', '--format', 'json'],
-    // Measured 222 resolved modules on 2026-07-10 after scoping the family
-    // and deferring its typed-save core import. Compose that 30% ratchet with
-    // the one reviewed CLI-owned domain-projector module; the exact candidate
-    // resolved 290 modules locally and on Linux CI without adding a package.
-    // Remeasured 300 modules on 2026-09-01 after Incur 0.5.1 added nine
-    // modules to its deliberate scoped import graph without adding a package.
-    // PR #2872 CI measured 303: runtime-state/dist/{cli-timing,node/cli-timing}.js
-    // and node:dgram are the complete added timing subtree. node:async_hooks
-    // was already loaded by vault-cli-vault-context. Admit only those three;
-    // the package allowlist and startup-byte budgets remain unchanged.
-    // PR #4026 measured 305: operator-config/dist/{assistant-delivery-contracts,
-    // primitive-schemas}.js are leaf splits of contract modules this probe
-    // already loads (same schemas, two more files), letting the Cloudflare
-    // Worker skip the CLI contracts. Admit only those two.
-    // PR #4211 measured base 305 / candidate 319 in built CLI probes. Zod 4.5.4
-    // adds five internal modules and ten locales; Environment removal drops
-    // contracts/dist/environment-interview.js. No new package is loaded.
-    // Native runner startup and emitted-byte budgets pass independently.
-    // PR #4255 measured base 317 / candidate 320. The only added modules are
-    // contracts/dist/{experiment-outcome,schema-primitives,sleep-session}.js:
-    // verbatim schema moves that let the Worker skip the broad schema module.
-    // Admit the measured count only; no package or byte-budget change.
-    // PR #4397 measured 320 with Zod 4.5.4 and 321 with patched Zod 4.6.6.
-    // The sole added module is zod/v4/locales/tg.js; no package is added.
-    // PR #4420 measured 322 locally and on Linux CI. The sole added module is
-    // contracts/dist/companion-meals.js, shared by the member-action schema and
-    // public contracts entrypoint. Isolating that module restores 321; no new
-    // package or transitive subtree is loaded. Admit only the measured count.
-    maxResolvedModules: 322,
+    maxResolvedModules: 204,
   },
 ]
 
@@ -412,9 +380,23 @@ test(
       )
       assertResolvedModuleFilesAbsent(
         result.resolvedModuleUrls,
-        ['assistant-codex.js'],
+        [
+          'assistant-codex.js',
+          'assistant-cli-contracts.js',
+          'operator-config.js',
+          'vault-usecases/dist/index.js',
+        ],
         probeLabel,
       )
+
+      // Meal registration still needs the broader nutrition-card contracts.
+      if (probe.args[0] !== 'meal') {
+        assertResolvedModuleFilesAbsent(
+          result.resolvedModuleUrls,
+          ['contracts/dist/index.js'],
+          probeLabel,
+        )
+      }
 
       // Normalize before the ceiling assertion so a ceiling failure can say
       // WHICH packages grew, not just by how much.
@@ -548,7 +530,12 @@ test(
     )
     assertResolvedModuleFilesAbsent(
       jsonResult.resolvedModuleUrls,
-      ['assistant-codex.js'],
+      [
+        'assistant-codex.js',
+        'assistant-cli-contracts.js',
+        'operator-config.js',
+        'vault-usecases/dist/index.js',
+      ],
       '--no-config exercise facets --format json',
     )
     const eagerlyResolvedLazyPackages = lazyOptionalDependencyPackageNames.filter(

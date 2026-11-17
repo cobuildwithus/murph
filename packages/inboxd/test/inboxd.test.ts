@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { resolveRuntimePaths } from "@murphai/runtime-state/node";
 import assert from "node:assert/strict";
 import { promises as fs } from "node:fs";
@@ -53,11 +54,11 @@ async function readJsonlRecordsIfPresent(vaultRoot: string, relativePath: string
   }
 }
 
-test("toIsoTimestamp rejects invalid values with the inbox-specific TypeError", () => {
+test("toIsoTimestamp rejects invalid values with the inbox-specific validation message", () => {
   assert.throws(
     () => toIsoTimestamp("not-a-timestamp"),
     (error) =>
-      error instanceof TypeError &&
+      error instanceof ContractValidationError &&
       error.message === "Invalid ISO timestamp: not-a-timestamp",
   );
 });

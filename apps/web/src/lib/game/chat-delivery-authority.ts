@@ -51,8 +51,22 @@ export async function assertGameProposalDeliveryCurrentTx(input: {
   if (key.startsWith("game-rematch:")) return stale();
   const lifecycle = /^game-started:([^:]+)$/.exec(key);
   if (lifecycle) return assertGameStartedDeliveryCurrentTx(input, lifecycle[1]);
+  if (key.startsWith("game-both-win:")) return assertGameBothWinDeliveryCurrentTx(input, key);
   if (!key.startsWith("game-change:")) return false;
   return assertGameChangeProposalDeliveryCurrentTx(input, key);
+}
+
+async function assertGameBothWinDeliveryCurrentTx(input: Parameters<typeof assertGameProposalDeliveryCurrentTx>[0], key: string): Promise<true> {
+  const match = /^game-both-win:([^:]+)$/u.exec(key);
+  if (!match) return stale();
+  await input.tx.$queryRaw`SELECT id FROM game WHERE id = ${match[1]} FOR UPDATE`;
+  const receipt = await input.tx.hostedLinqDelivery.findUnique({ where: { idempotencyKey: createHostedLinqDeliveryIdempotencyLookupKey(key) ?? "" }, select: { skippedAt: true } });
+  if (!receipt || receipt.skippedAt) return stale();
+  const { isBothWinOfferCurrent } = await import("./service");
+  const current = await isBothWinOfferCurrent(input.tx, match[1], input.now ?? new Date());
+  if (!current || current.row.chatContainerMemberId !== input.containerMemberId
+    || !await deliveryAudienceCurrent(input, current.row)) return stale();
+  return true;
 }
 
 async function assertPrivateEveningDeliveryCurrentTx(input: Parameters<typeof assertGameProposalDeliveryCurrentTx>[0], key: string): Promise<true> {

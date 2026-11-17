@@ -1,3 +1,4 @@
+import { withJsonError } from "@/src/lib/hosted-onboarding/http";
 import {
   HostedBillingStatus,
   type Prisma,
@@ -111,7 +112,8 @@ vi.mock("@/src/lib/hosted-onboarding/runtime", () => ({
   requireHostedStripeBillingPlanConfig: runtimeMocks.requireHostedStripeBillingPlanConfig,
   requireHostedStripeFamilyPlanConfig: runtimeMocks.requireHostedStripeFamilyPlanConfig,
 }));
-vi.mock("next/server", () => ({
+vi.mock("next/server", async (importOriginal) => ({
+  ...await importOriginal<typeof import("next/server")>(),
   after: nextServerMocks.after,
 }));
 
@@ -1688,6 +1690,7 @@ describe("hosted Family plan", () => {
       tx,
     })).rejects.toMatchObject({
       code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
+      httpStatus: 409,
     });
 
     const memberLocks = tx.$queryRaw.mock.calls.map((args, index) => ({ args, order: tx.$queryRaw.mock.invocationCallOrder[index] }))
@@ -2031,6 +2034,7 @@ describe("hosted Family plan", () => {
       tx,
     })).rejects.toMatchObject({
       code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
+      httpStatus: 409,
     });
   });
 
@@ -2048,6 +2052,7 @@ describe("hosted Family plan", () => {
       tx,
     })).rejects.toMatchObject({
       code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
+      httpStatus: 409,
     });
 
     expect(tx.hostedAccountGroupInvite.findFirst).not.toHaveBeenCalled();
@@ -3784,6 +3789,7 @@ describe("hosted Family plan", () => {
       prisma: prisma as never,
     })).rejects.toMatchObject({
       code: "HOSTED_FAMILY_SUBSCRIPTION_INVALID",
+      httpStatus: 500,
     });
 
     expect(stripeUpdate).not.toHaveBeenCalled();
@@ -4387,8 +4393,8 @@ describe("hosted Family plan", () => {
 
   it("does not abandon an inert draft when the paid invite later fails validation", async () => {
     const tx = createTxMock({
-      activeMembershipCount: 1,
-      pulseCapacity: 1,
+      activeMembershipCount: 2,
+      pulseCapacity: 2,
       pendingInviteCountExcludingCurrent: 0,
     });
     tx.hostedAccountGroupInvite.findUnique.mockResolvedValueOnce(
@@ -4409,6 +4415,7 @@ describe("hosted Family plan", () => {
       tx,
     })).rejects.toMatchObject({
       code: "HOSTED_FAMILY_SEAT_LIMIT_REACHED",
+      httpStatus: 409,
     });
 
     expect(tx.hostedAccountGroup.deleteMany).not.toHaveBeenCalled();
@@ -4428,11 +4435,13 @@ describe("hosted Family plan", () => {
     tx.hostedAccountGroupMembership.findFirst
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce(createNeverPaidFamilyDraftMembership({
+        ownerMemberId: "member_fixture",
         checkoutAttemptId: "hbfca_live_draft",
         stripeCheckoutSessionId: "cs_test_live_draft",
       }));
     tx.hostedAccountGroup.findUnique.mockResolvedValueOnce(
       createNeverPaidFamilyDraftRecord({
+        ownerMemberId: "member_fixture",
         checkoutAttemptId: "hbfca_live_draft",
         checkoutCreatedAt: new Date("2026-08-01T12:00:00.000Z"),
         checkoutSeatCount: 2,
@@ -4441,11 +4450,12 @@ describe("hosted Family plan", () => {
     );
 
     await expect(acceptHostedFamilyInviteTx({
-      acceptedMemberId: "member_mom",
+      acceptedMemberId: "member_fixture",
       inviteCode: "invite_phone",
       tx,
     })).rejects.toMatchObject({
       code: "HOSTED_FAMILY_DRAFT_CHECKOUT_ACTIVE",
+      httpStatus: 409,
       details: { inviteCode: "invite_phone" },
       message: expect.stringContaining(
         "familyInviteReturn=%2Ffamily%2Faccept%2Finvite_phone",
@@ -4875,6 +4885,57 @@ describe("hosted Family plan", () => {
     },
   );
 
+  it.each(["lookup_mismatch", "provider_status"])(
+    "reports unreadable or unsupported Family checkout state as a server error: %s",
+    async (failure) => {
+      const draft = createNeverPaidFamilyDraftRecord({
+        ownerMemberId: "member_owner", checkoutAttemptId: "hbfca_current",
+        checkoutCreatedAt: new Date("2026-08-01T11:00:00Z"),
+        checkoutSeatCount: 2,
+        stripeCheckoutSessionId: "cs_test_draft123",
+      });
+      if (failure === "lookup_mismatch") draft.billingRef.stripeCheckoutSessionLookupKey = "invalid_lookup";
+      const tx = createTxMock();
+      tx.hostedAccountGroup.findUnique.mockResolvedValueOnce(draft);
+      const prisma = createPrismaMock(tx);
+      runtimeMocks.requireHostedStripeApi.mockReturnValue({ checkout: { sessions: {
+        retrieve: vi.fn().mockResolvedValue({
+          ...makeFamilyStripeCheckoutSession({
+            checkoutAttemptId: "hbfca_current", sessionId: "cs_test_draft123", subscriptionId: null,
+          }),
+          metadata: { kind: "hosted_family_plan", billingPlanCode: "launch_family_monthly", accountGroupId: "hbag_draft", ownerMemberId: "member_owner", checkoutAttemptId: "hbfca_current" },
+          status: null,
+        }),
+      } } });
+      const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        const response = await withJsonError(async () => {
+          await abandonHostedFamilyDraftForOwner({
+            expectedDraftClaim: { checkoutAttemptId: "hbfca_current", groupId: "hbag_draft" },
+            now: new Date("2026-08-01T12:00:00Z"), ownerMemberId: "member_owner", prisma: prisma as never,
+          });
+          return new Response();
+        })();
+        expect(response.status).toBe(500);
+        await expect(response.json()).resolves.toMatchObject({ error: { code: "INTERNAL_ERROR" } });
+        expect(tx.hostedAccountGroup.deleteMany).not.toHaveBeenCalled();
+      } finally {
+        errorLog.mockRestore();
+      }
+    },
+  );
+
+  it("keeps future-dated draft timestamps renderable as Settings recovery state", async () => {
+    const tx = createTxMock();
+    tx.hostedAccountGroup.findUnique.mockResolvedValueOnce(createNeverPaidFamilyDraftRecord({
+      ownerMemberId: "member_fixture", checkoutAttemptId: "hbfca_current", checkoutSeatCount: 2,
+      checkoutCreatedAt: new Date("2026-08-02T12:00:00Z"),
+    }));
+    await expect(readHostedFamilyDraftRecoveryStateForOwner({
+      ownerMemberId: "member_fixture", now: new Date("2026-08-01T12:00:00Z"), prisma: tx as never,
+    })).resolves.toEqual({ state: "recovery_required" });
+  });
+
   it("preserves a stale unbound Checkout claim without provider proof", async () => {
     const staleDraft = createNeverPaidFamilyDraftRecord({
       checkoutAttemptId: "hbfca_stale_unbound",
@@ -4895,6 +4956,7 @@ describe("hosted Family plan", () => {
       prisma: prisma as never,
     })).rejects.toMatchObject({
       code: "HOSTED_FAMILY_DRAFT_RECOVERY_REQUIRED",
+      httpStatus: 409,
       retryable: false,
     });
 
@@ -7600,7 +7662,7 @@ describe("hosted Family plan", () => {
     );
   });
 
-  it("keeps unsupported direct paid subscription items as a non-retryable owner transfer error", async () => {
+  it("reports unsupported direct paid subscription items as a server failure", async () => {
     const group = createFamilyGroup(HostedBillingStatus.not_started);
     const tx = createTxMock({
       pulseCapacity: null,
@@ -7640,10 +7702,101 @@ describe("hosted Family plan", () => {
       seatCount: 2,
     })).rejects.toMatchObject({
       code: "HOSTED_FAMILY_DIRECT_PAID_SUBSCRIPTION_ITEMS_UNSUPPORTED",
-      httpStatus: 409,
+      httpStatus: 500,
       retryable: false,
     });
     expect(subscriptionUpdate).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["customer mismatch", "cus_other", false, 500, "HOSTED_FAMILY_DIRECT_PAID_STRIPE_CUSTOMER_MISMATCH"],
+    ["scheduled cancellation", "cus_direct", true, 409, "HOSTED_FAMILY_DIRECT_PAID_SUBSCRIPTION_STATE_UNSUPPORTED"],
+  ] as const)("classifies direct-paid Family %s", async (_label, customerId, cancelAtPeriodEnd, httpStatus, code) => {
+    const group = createFamilyGroup(HostedBillingStatus.not_started);
+    const tx = createTxMock({ pulseCapacity: null, group });
+    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(null);
+    tx.hostedMember.findUnique.mockResolvedValue({ billingStatus: HostedBillingStatus.active, suspendedAt: null });
+    tx.hostedMemberBillingRef.findUnique.mockResolvedValue(createMemberBillingRefMock());
+    const update = vi.fn();
+    runtimeMocks.requireHostedStripeApi.mockReturnValue({ subscriptions: {
+      retrieve: vi.fn().mockResolvedValue({
+        ...makeFamilyStripeSubscription({ customerId, itemQuantity: 1, priceId: "price_pulse", subscriptionId: "sub_direct" }),
+        cancel_at_period_end: cancelAtPeriodEnd,
+      }), update,
+    } });
+    await expect(createHostedFamilyBillingCheckout({
+      groupId: group.id, ownerMemberId: group.ownerMemberId, prisma: createPrismaMock(tx) as never, seatCount: 2,
+    })).rejects.toMatchObject({ code, httpStatus });
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])("classifies an open checkout without URL, stale claim: %s", async (stale) => {
+    const sessionId = "cs_test_resumeNoUrl123";
+    const { group, prisma, tx } = createCheckoutFixture(HostedBillingStatus.not_started, {
+      checkoutAttemptId: "hbfca_current", checkoutSeatCount: 2,
+      stripeCheckoutSessionIdEncrypted: `encrypted:${sessionId}`, stripeSubscriptionIdEncrypted: null,
+    });
+    runtimeMocks.requireHostedStripeApi.mockReturnValue({ checkout: { sessions: {
+      retrieve: vi.fn().mockResolvedValue(makeFamilyStripeCheckoutSession({
+        checkoutAttemptId: stale ? "hbfca_other" : "hbfca_current", sessionId,
+        status: "open", subscriptionId: null, url: null,
+      })),
+    } } });
+    await expect(createHostedFamilyBillingCheckout({
+      groupId: group.id, ownerMemberId: group.ownerMemberId, prisma: prisma as never, seatCount: 2,
+    })).rejects.toMatchObject({
+      code: stale ? "HOSTED_FAMILY_CHECKOUT_ATTEMPT_STALE" : "HOSTED_FAMILY_CHECKOUT_SESSION_UNAVAILABLE",
+      httpStatus: stale ? 409 : 502, retryable: true,
+    });
+    expect(tx.hostedAccountGroupBillingRef.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("reports an unsupported Family checkout resume status as a server error without writes", async () => {
+    const sessionId = "cs_test_resumeUnsupported123";
+    const { group, prisma, tx } = createCheckoutFixture(HostedBillingStatus.not_started, {
+      checkoutAttemptId: "hbfca_current",
+      checkoutSeatCount: 2,
+      stripeCheckoutSessionIdEncrypted: `encrypted:${sessionId}`,
+      stripeSubscriptionIdEncrypted: null,
+    });
+    const create = vi.fn();
+    const expire = vi.fn();
+    const retrieve = vi.fn().mockResolvedValue({
+      ...makeFamilyStripeCheckoutSession({
+        checkoutAttemptId: "hbfca_current",
+        sessionId,
+        subscriptionId: null,
+      }),
+      status: null,
+    });
+    runtimeMocks.requireHostedStripeApi.mockReturnValue({
+      checkout: { sessions: { create, expire, retrieve } },
+    });
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const response = await withJsonError(async () => {
+        await createHostedFamilyBillingCheckout({
+          groupId: group.id,
+          ownerMemberId: group.ownerMemberId,
+          prisma: prisma as never,
+          seatCount: 2,
+        });
+        return new Response();
+      })();
+
+      expect(response.status).toBe(500);
+      await expect(response.json()).resolves.toMatchObject({ error: { code: "INTERNAL_ERROR" } });
+      expect(retrieve).toHaveBeenCalledWith(sessionId);
+      expect(create).not.toHaveBeenCalled();
+      expect(expire).not.toHaveBeenCalled();
+      expect(tx.hostedAccountGroupBillingRef.update).not.toHaveBeenCalled();
+      expect(tx.hostedAccountGroupBillingRef.updateMany).not.toHaveBeenCalled();
+      expect(tx.hostedAccountGroupBillingRef.upsert).not.toHaveBeenCalled();
+      expect(tx.hostedAccountGroup.update).not.toHaveBeenCalled();
+      expect(tx.hostedAccountGroup.deleteMany).not.toHaveBeenCalled();
+    } finally {
+      errorLog.mockRestore();
+    }
   });
 
   it("reuses a pending Family checkout attempt for duplicate checkout starts", async () => {
@@ -8410,6 +8563,36 @@ describe("hosted Family plan", () => {
     expect(tx.hostedAccountGroupBillingRef.updateMany).not.toHaveBeenCalled();
   });
 
+  it("reports an out-of-range stored checkout seat count as a server error", async () => {
+    const { group, prisma, tx } = createCheckoutFixture(HostedBillingStatus.not_started, {
+      checkoutAttemptId: "hbfca_current",
+      checkoutCreatedAt: new Date("2026-08-01T11:00:00Z"),
+      checkoutSeatCount: 7,
+      stripeCheckoutSessionIdEncrypted: null,
+      stripeSubscriptionIdEncrypted: null,
+    });
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const response = await withJsonError(async () => {
+        await createHostedFamilyBillingCheckout({
+          groupId: group.id,
+          ownerMemberId: group.ownerMemberId,
+          prisma: prisma as never,
+          seatCount: 2,
+          now: new Date("2026-08-01T12:00:00Z"),
+          requiredCheckoutAttemptId: "hbfca_current",
+        });
+        return new Response();
+      })();
+      expect(response.status).toBe(500);
+      await expect(response.json()).resolves.toMatchObject({ error: { code: "INTERNAL_ERROR" } });
+      expect(runtimeMocks.requireHostedStripeApi).not.toHaveBeenCalled();
+      expect(tx.hostedAccountGroupBillingRef.updateMany).not.toHaveBeenCalled();
+    } finally {
+      errorLog.mockRestore();
+    }
+  });
+
   it("keeps a delivered Family Checkout owned when Session retrieval fails", async () => {
     const { tx, prisma } = createCheckoutFixture(
       HostedBillingStatus.not_started,
@@ -8784,7 +8967,7 @@ describe("hosted Family plan", () => {
         sessionId,
       })).rejects.toMatchObject({
         code: "HOSTED_FAMILY_CHECKOUT_SESSION_UNAVAILABLE",
-        httpStatus: 409,
+        httpStatus: 502,
         retryable: true,
       });
       await runOnlyScheduledFamilyStripeAlert();
@@ -8834,13 +9017,40 @@ describe("hosted Family plan", () => {
       sessionId,
     })).rejects.toMatchObject({
       code: "HOSTED_FAMILY_CHECKOUT_SESSION_UNAVAILABLE",
-      httpStatus: 409,
+      httpStatus: 502,
       retryable: true,
     });
     consoleErrorMock.mockRestore();
 
     expect(nextServerMocks.after).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["resource_missing", Object.assign(new Error("Session absent"), { type: "StripeInvalidRequestError", code: "resource_missing" }), 409],
+    ["configuration", Object.assign(new Error("Invalid provider key"), { type: "StripeAuthenticationError" }), 500],
+    ["internal", new TypeError("Unexpected provider adapter failure"), 500],
+  ] as const)("classifies a redirect retrieval %s", async (_label, error, status) => {
+    const tx = createTxMock({ pulseCapacity: null });
+    tx.hostedAccountGroupBillingRef.findUnique.mockResolvedValue(null);
+    runtimeMocks.requireHostedStripeApi.mockReturnValue({ checkout: { sessions: {
+      retrieve: vi.fn().mockRejectedValue(error),
+    } } });
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    const warnLog = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const response = await withJsonError(async () => {
+        await resolveHostedFamilyCheckoutRedirectUrl({ prisma: tx as never, sessionId: "cs_test_absent123" });
+        return new Response();
+      })();
+      expect(response.status).toBe(status);
+      await expect(response.json()).resolves.toMatchObject({ error: {
+        code: status === 409 ? "HOSTED_FAMILY_CHECKOUT_SESSION_UNAVAILABLE" : "INTERNAL_ERROR",
+      } });
+    } finally {
+      errorLog.mockRestore();
+      warnLog.mockRestore();
+    }
   });
 
   it("validates an exact invite return on a current Family redirect", async () => {
@@ -8875,6 +9085,50 @@ describe("hosted Family plan", () => {
     })).resolves.toBe(checkoutUrl);
 
     expect(nextServerMocks.after).not.toHaveBeenCalled();
+  });
+
+  it("reports an unsupported Family checkout redirect status as a server error without writes", async () => {
+    const sessionId = "cs_test_redirectUnsupported123";
+    const { prisma, tx } = createCheckoutFixture(HostedBillingStatus.not_started, {
+      checkoutAttemptId: "hbfca_current",
+      checkoutSeatCount: 2,
+      stripeCheckoutSessionIdEncrypted: `encrypted:${sessionId}`,
+      stripeSubscriptionIdEncrypted: null,
+    });
+    const create = vi.fn();
+    const expire = vi.fn();
+    const retrieve = vi.fn().mockResolvedValue({
+      ...makeFamilyStripeCheckoutSession({
+        checkoutAttemptId: "hbfca_current",
+        sessionId,
+        subscriptionId: null,
+      }),
+      status: null,
+    });
+    runtimeMocks.requireHostedStripeApi.mockReturnValue({
+      checkout: { sessions: { create, expire, retrieve } },
+    });
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const response = await withJsonError(async () => {
+        await resolveHostedFamilyCheckoutRedirectUrl({ prisma: prisma as never, sessionId });
+        return new Response();
+      })();
+
+      expect(response.status).toBe(500);
+      await expect(response.json()).resolves.toMatchObject({ error: { code: "INTERNAL_ERROR" } });
+      expect(retrieve).toHaveBeenCalledWith(sessionId);
+      expect(create).not.toHaveBeenCalled();
+      expect(expire).not.toHaveBeenCalled();
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+      expect(tx.hostedAccountGroupBillingRef.update).not.toHaveBeenCalled();
+      expect(tx.hostedAccountGroupBillingRef.updateMany).not.toHaveBeenCalled();
+      expect(tx.hostedAccountGroupBillingRef.upsert).not.toHaveBeenCalled();
+      expect(tx.hostedAccountGroup.update).not.toHaveBeenCalled();
+      expect(tx.hostedAccountGroup.deleteMany).not.toHaveBeenCalled();
+    } finally {
+      errorLog.mockRestore();
+    }
   });
 
   it("routes a completed URL-less Family Session to verified success without clearing it", async () => {
@@ -9067,7 +9321,7 @@ describe("hosted Family plan", () => {
       sessionId,
     })).rejects.toMatchObject({
       code: "HOSTED_FAMILY_CHECKOUT_SESSION_UNAVAILABLE",
-      httpStatus: 409,
+      httpStatus: 502,
       retryable: true,
     });
 
@@ -10206,6 +10460,7 @@ function makeFamilyStripeSubscription(input: {
       flexible: null,
       type: "classic",
     },
+    billing_schedules: [],
     billing_thresholds: null,
     cancel_at: input.cancelAt ?? null,
     cancel_at_period_end: input.cancelAtPeriodEnd ?? false,
@@ -10231,6 +10486,9 @@ function makeFamilyStripeSubscription(input: {
     id: subscriptionId,
     invoice_settings: {
       account_tax_ids: null,
+      custom_fields: null,
+      description: null,
+      footer: null,
       issuer: {
         type: "self",
       },

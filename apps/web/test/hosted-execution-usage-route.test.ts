@@ -1,4 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { ContractValidationError } from "@murphai/contracts/validation-error";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { ASSISTANT_USAGE_SCHEMA } from "@murphai/hosted-execution/assistant-usage";
 import { HOSTED_USAGE_RECORD_BODY_LIMIT_BYTES } from "@murphai/hosted-execution/runtime-control";
 import { readRawBodyBuffer } from "../src/lib/http";
@@ -25,6 +27,29 @@ type HostedExecutionUsageRecordRouteModule = typeof import(
 let hostedExecutionUsageRecordRoute: HostedExecutionUsageRecordRouteModule;
 
 describe("hosted execution usage record route", () => {
+  it.each([
+    { provider: "elevenlabs", requestedModel: "eleven_multilingual_v2", usageExtractionSourcePath: "elevenlabs.text_to_speech", rawUsageJson: { characterCount: 0 } },
+    { provider: "elevenlabs", requestedModel: "eleven_multilingual_v2", usageExtractionSourcePath: "elevenlabs.text_to_speech", rawUsageJson: null },
+    { provider: "workers-ai", featureKey: "audio-transcription", requestedModel: "@cf/openai/whisper-large-v3-turbo", usageExtractionSourcePath: "workers-ai.transcribe", rawUsageJson: { audioBytes: 0, durationMs: 1000 } },
+    { provider: "workers-ai", featureKey: "audio-transcription", requestedModel: "@cf/openai/whisper-large-v3-turbo", usageExtractionSourcePath: "workers-ai.transcribe", rawUsageJson: { durationMs: 1000 } },
+    { provider: "elevenlabs", featureKey: "music-generation", requestedModel: "music_v2_5", usageExtractionSourcePath: "elevenlabs.music.compose", rawUsageJson: null },
+  ])("rejects incomplete special metering at admission: %j", async fields => {
+    const usage = { schema: ASSISTANT_USAGE_SCHEMA, attemptCount: 1, credentialSource: "platform",
+      occurredAt: "2026-11-14T12:00:00.000Z", sessionId: "session_synthetic", turnId: "turn_synthetic", usageId: "turn_synthetic.attempt-1", ...fields };
+    const response = await hostedExecutionUsageRecordRoute.POST(new Request("https://example.test/api/internal/hosted-execution/usage/record", { method: "POST", body: JSON.stringify({ usage }) }));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: { code: "INVALID_REQUEST", message: "Invalid request." } });
+    expect(mocks.recordHostedAiUsageRecordsAndSendLimitNotices).not.toHaveBeenCalled();
+  });
+  it("rejects deeply nested token details without overflowing the parser", async () => {
+    const usage = { schema: ASSISTANT_USAGE_SCHEMA, attemptCount: 1, credentialSource: "platform", provider: "codex-cli",
+      occurredAt: "2026-11-14T00:00:00.000Z", sessionId: "session_synthetic", turnId: "turn_synthetic", usageId: "turn_synthetic.attempt-1" };
+    const body = JSON.stringify({ usage }).slice(0, -2) + ',"rawUsageJson":{"input_tokens_details":' + "[".repeat(7500) + "0" + "]".repeat(7500) + "}}}";
+    const response = await hostedExecutionUsageRecordRoute.POST(new Request("https://example.test/api/internal/hosted-execution/usage/record", { method: "POST", body }));
+    expect(response.status).toBe(400);
+    expect(mocks.recordHostedAiUsageRecordsAndSendLimitNotices).not.toHaveBeenCalled();
+  });
+
   beforeAll(async () => {
     hostedExecutionUsageRecordRoute = await import(
       "../app/api/internal/hosted-execution/usage/record/route"
@@ -105,6 +130,22 @@ describe("hosted execution usage record route", () => {
       recorded: true,
       usageId: "turn_123.attempt-1",
     });
+  });
+
+  it.each([false, true])("preserves domain refusals without reclassifying dependency failures: %s", async dependencyFails => {
+    mocks.recordHostedAiUsageRecordsAndSendLimitNotices.mockRejectedValueOnce(dependencyFails
+      ? new ContractValidationError("Synthetic stored record failure.")
+      : hostedOnboardingError({ code: "INVALID_REQUEST", httpStatus: 400, message: "Invalid request." }));
+    const usage = { schema: ASSISTANT_USAGE_SCHEMA, provider: "codex-cli", credentialSource: "platform",
+      occurredAt: "2026-09-01T12:00:00.000Z", sessionId: "synthetic-session", turnId: "synthetic-turn",
+      usageId: "synthetic-turn.attempt-1", attemptCount: 1 };
+    const response = await hostedExecutionUsageRecordRoute.POST(new Request("https://example.test/api/internal/hosted-execution/usage/record", {
+      method: "POST", body: JSON.stringify({ usage }), headers: { "content-type": "application/json" },
+    }));
+    expect(response.status).toBe(dependencyFails ? 500 : 400);
+    expect(await response.json()).toEqual({ error: dependencyFails
+      ? { code: "INTERNAL_ERROR", message: "Internal error." }
+      : { code: "INVALID_REQUEST", message: "Invalid request.", retryable: false } });
   });
 
   it.each([

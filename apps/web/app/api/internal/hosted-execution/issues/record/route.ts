@@ -1,3 +1,4 @@
+import { RequestInputError } from "@murphai/hosted-execution/request-input";
 import { importHostedAssistantRuntimeIssues } from "@/src/lib/hosted-execution/runtime-issues";
 import {
   requireHostedCloudflareCallbackRequest,
@@ -13,7 +14,7 @@ export const POST = withJsonError(async (request: Request) => {
   });
   const body = await readOptionalJsonObject(request);
   if (!Array.isArray(body.issues)) {
-    throw new TypeError("issues must be an array.");
+    throw new RequestInputError("issues must be an array.");
   }
 
   const result = await importHostedAssistantRuntimeIssues({

@@ -44,14 +44,14 @@ it.each([false, true])('accepts a recap show through the production hosted Linux
   const home = await mkdtemp(path.join(tmpdir(), 'recap-linux-codex-'));
   const eventId = 'game-recap:synthetic-linux';
   const gameId = 'synthetic-linux';
-  const relativeRoot = `tmp/recap/${createHash('sha256').update(eventId).digest('hex').slice(0, 32)}`;
+  const relativeRoot = `.runtime/tmp/recap/${createHash('sha256').update(eventId).digest('hex').slice(0, 32)}`;
   const command = `printf NORMAL_GROUP_WORKSPACE_OK; pwd`;
   const fixture = await createHostedRecapFixture(gameId, mediaFails);
   const draftPath = `${relativeRoot}/drafts/show.json`;
   const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
-  const draftCommand = () => {
+  const draftCommand = (final: boolean) => {
     const story = structuredClone(fixture.story);
-    if (mediaFails) delete story.song;
+    if (mediaFails && final) delete story.song;
     const draft = { story, files: fixture.files.map(file => ({ ...file, path: `${relativeRoot}/${file.path}` })) };
     return buildAssistantProviderShellCommandCall(`printf '%s' ${quote(JSON.stringify(draft))} > ${draftPath}`);
   };
@@ -63,12 +63,15 @@ it.each([false, true])('accepts a recap show through the production hosted Linux
   ].join('\n');
   const responses: HostedLocalAssistantProviderScriptedResponse[] = [
     buildAssistantProviderMurphToolCall('read_game', {}),
+    buildAssistantProviderShellCommandCall(`cat ${relativeRoot}/game.json ${relativeRoot}/chat.jsonl ${relativeRoot}/lore.md`),
     buildAssistantProviderShellCommandCall(command),
     buildAssistantProviderShellCommandCall(confinement),
-    buildAssistantProviderMurphToolCall('generate_image', { output: 'file', outputFormat: 'jpeg',
-      prompt: fixture.story.pages[0]!.blocks[1]!.scene!.prompt, referenceImageRefs: fixture.material.references.filter(ref => ref.kind === 'profile').map(ref => ref.id) }),
-    buildAssistantProviderMurphToolCall('generate_song', { output: 'file', durationSeconds: 20, prompt: 'Warm acoustic pop about a synthetic laundry space mission.' }),
-    { deriveResponse: () => draftCommand() },
+    // One reference by its photo path and one by its id: the recap takes either.
+    buildAssistantProviderMurphToolCall('generate_image', { prompt: fixture.story.pages[0]!.blocks[1]!.scene!.prompt,
+      referenceImageRefs: fixture.material.references.filter(ref => ref.kind === 'profile').map((ref, index) => index ? ref.id : `${relativeRoot}/refs/${ref.id}.jpg`) }),
+    { deriveResponse: () => draftCommand(false) },
+    buildAssistantProviderMurphToolCall('generate_song', { draftPath, voice: 'Warm baritone' }),
+    { deriveResponse: () => draftCommand(true) },
     buildAssistantProviderMurphToolCall('write_recap', { draftPath }),
     'Synthetic recap submitted.',
   ];
@@ -92,6 +95,7 @@ it.each([false, true])('accepts a recap show through the production hosted Linux
     await writeFile(path.join(home, 'config.toml'), [
       `model_catalog_json = "/usr/local/share/murph/codex-model-catalog.openai-flex.json"`,
       buildHostedCodexConfigToml({
+        codexHome: home,
         exposeSpawnAgentModelOverrides: false, model: 'gpt-6.2-sol', reasoningEffort: 'low',
         provider: { id: 'hosted-openai', name: 'Synthetic loopback', baseUrl: `http://127.0.0.1:${address.port}/v1`, envKey: 'OPENAI_API_KEY', wireApi: 'responses', supportsWebSockets: false },
       }),

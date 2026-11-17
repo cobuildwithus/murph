@@ -1,6 +1,7 @@
 import { readMaterializeVaultMediaToolRequest, materializeVaultMedia } from './dynamic-tools/materialize-vault-media.js'
 import { sleepSummaryCardRequestSchema } from '@murphai/contracts'
 import { resolveTrustedSleepSummaryCard } from './dynamic-tools/sleep-summary-card.js'
+import { readLeaveGroupDynamicToolRequest, executeLeaveGroupTool } from './dynamic-tools/leave-group.js'
 import { readGameDynamicToolRequest, executeGameTool, type GameDynamicRequest } from './dynamic-tools/games.js'
 import { types } from 'node:util'
 import { executeGetSenderContactDynamicTool, readSenderContactDynamicToolRequest, type SenderContactDynamicToolRequest } from './dynamic-tools/sender-contact.js'
@@ -8,6 +9,7 @@ import { type ConversationPollAction } from '@murphai/hosted-execution/conversat
 import { readConversationPollDynamicToolRequest, executeConversationPollTool } from './dynamic-tools/conversation-polls.js'
 import { nutritionCardAttachmentGuidance } from '../assistant/nutrition-card-introduction.js'
 import { parseDynamicToolArguments } from './dynamic-tools/dynamic-tool-wrapper.js'
+import { readJournalSourceToolRequest } from './dynamic-tools/journal-source-read.js'
 import {
   completeDynamicToolFailureDiagnostics,
   isAlreadyActiveVaultFileSendError,
@@ -100,6 +102,7 @@ import {
   parseHostedUsageDiagnosticsResponse,
   type HostedUsageDiagnosticsRequest,
 } from '@murphai/hosted-execution/usage-diagnostics'
+import { withUsageDiagnosticsDefaults } from './dynamic-tools/usage-diagnostics.js'
 import {
   HOSTED_GROUP_MEMBER_PLAN_DISPLAY_NAME,
   HOSTED_PLAN_USAGE_DIRECT_BILLING_PLAN_CODES,
@@ -180,6 +183,7 @@ import {
   scoreGroupChallengeJson,
 } from '../assistant/group-challenge-scorecard-schema.js'
 import type { AssistantRuntimeIssueInput } from '../assistant/issue-reporting.js'
+import { RecapReferenceRefusal } from '../assistant/recap-workspace.js'
 import {
   createAssistantHostedDeviceActivityRequestKey,
   createAssistantHostedScheduledRequestKey,
@@ -319,6 +323,7 @@ import {
   MURPH_GENERATE_SONG_TOOL,
   parseGenerateSongArguments,
 } from './dynamic-tools/generate-song.js'
+import { executeGenerateRecapSongFile } from './recap-song.js'
 import {
   executeAskGrokDynamicTool,
   MURPH_ASK_GROK_TOOL,
@@ -473,7 +478,6 @@ const sendProgressUpdateArgumentsSchema = z
 
 const generateImageArgumentsSchema = z
   .object({
-    output: z.enum(['chat', 'file']).optional(),
     alt: z.string().trim().min(1).max(500).nullable().default(null),
     outputFormat: z.enum(['webp', 'png', 'jpeg']).default('webp'),
     prompt: z.string().trim().min(1).max(4000),
@@ -1229,7 +1233,7 @@ export type MurphDynamicToolResponseMediaPatch = {
 export type MurphDynamicToolFinalActionPatch =
   | {
       kind: 'none'
-      owner?: 'current-sender-ask' | 'group-email' | 'vault-file'
+      owner?: 'leave-group' | 'current-sender-ask' | 'group-email' | 'vault-file'
     }
   | {
       kind: 'reply-required'
@@ -1311,6 +1315,8 @@ export interface MurphGroupSharedReadTurnState {
     string,
     CurrentSenderTurnDecisionClaim
   >
+  /** Game rule blocks read_game already returned in this provider turn. */
+  gameRulesSent?: Set<string>
   invalid: boolean
   readProjectionScopeKeyBatches: string[][]
   roster: Array<{
@@ -1454,6 +1460,7 @@ type MurphGroupToolRequest =
     }
 
 export type MurphDynamicToolRequest =
+  | { kind: 'journal-source-read'; locator: string }
   | {
       kind: 'invalid-tool-arguments'
       errorCode: string
@@ -1492,7 +1499,7 @@ export type MurphDynamicToolRequest =
     }
   | {
       kind: 'generate-song'
-      args: GenerateSongToolArgs
+      args: GenerateSongToolArgs | import('./dynamic-tools/generate-song.js').GenerateRecapSongToolArgs
     }
   | {
       kind: 'conversation-attachments'
@@ -1566,6 +1573,7 @@ export type MurphDynamicToolRequest =
       validationDigest: SafeToolCallValidationDigest
     }
   | { kind: 'poll'; request: ConversationPollAction }
+  | { kind: 'leave-group'; request: Parameters<typeof executeLeaveGroupTool>[0]['request'] }
   | { kind: 'game'; request: GameDynamicRequest }
   | {
       kind: 'family-plan'
@@ -1732,8 +1740,10 @@ export function readMurphDynamicToolRequest(
   }
 
   for (const readRequest of [
+    readJournalSourceToolRequest,
     readMaterializeVaultMediaToolRequest,
     readConversationPollDynamicToolRequest,
+    readLeaveGroupDynamicToolRequest,
     readGameDynamicToolRequest,
     readDeviceDynamicToolRequest,
     readLabsDynamicToolRequest,
@@ -2241,6 +2251,7 @@ type ExecuteMurphDynamicToolRequestInput = {
   authorizeAcceptedMessageTarget?: AssistantAcceptedMessageTargetAuthorizer | null
   assistantStyleSettingsOverlay?: AssistantStyleTurnSettingsOverlay | null
   groupRoomModelMaintenanceAuthorized?: boolean | null
+  groupRoomModelInjectedDigest?: string | null
   memberMemoryMaintenanceAuthorized?: boolean | null
   abortSignal?: AbortSignal | null
   codexHome?: string | null
@@ -3660,19 +3671,17 @@ function currentAcceptedInputIds(
   return context?.currentUserActionScope?.()?.acceptedInputIds
 }
 
+type CurrentConversationToolRequest = Extract<MurphDynamicToolRequest, { kind: 'leave-group' | 'game' | 'poll' | 'plan-usage' | 'usage-diagnostics' | 'imessage-contact' }>
+function isCurrentConversationToolRequest(request: MurphDynamicToolRequest): request is CurrentConversationToolRequest {
+  return ['leave-group', 'game', 'poll', 'plan-usage', 'usage-diagnostics', 'imessage-contact'].includes(request.kind)
+}
+
 async function dispatchMurphDynamicToolRequest(
   input: ExecuteMurphDynamicToolRequestInput,
 ): Promise<MurphDynamicToolExecutionResult> {
   const hostedContext = input.hostedToolContext ?? null
-  const hostedImageCompletionEffectScope =
-    input.hostedToolContext?.currentHostedImageCompletionEffectScope?.() ?? null
-  if (
-    hostedImageCompletionEffectScope !== null &&
-    !isHostedImageCompletionToolRequestAllowed({
-      request: input.request,
-      scope: hostedImageCompletionEffectScope,
-    })
-  ) {
+  const { hostedImageCompletionEffectScope, rejected } = hostedImageCompletionToolAuthority(input)
+  if (rejected) {
     return toolTextResult(
       false,
       'this hosted image completion carries no authority for that tool action',
@@ -3696,6 +3705,7 @@ async function dispatchMurphDynamicToolRequest(
     )
   }
 
+  if (isCurrentConversationToolRequest(input.request)) return executeCurrentConversationTool(input, input.request)
   switch (input.request.kind) {
     case 'invalid-automation-arguments':
       return executeInvalidAutomationArgumentsDynamicTool(input.request)
@@ -3744,6 +3754,7 @@ async function dispatchMurphDynamicToolRequest(
     }
     case 'group-room-model':
       return await executeGroupRoomModelDynamicTool({
+        injectedDigest: input.groupRoomModelInjectedDigest,
         managedMaintenanceAuthorized:
           input.groupRoomModelMaintenanceAuthorized === true,
         request: input.request,
@@ -3831,12 +3842,6 @@ async function dispatchMurphDynamicToolRequest(
         hostedToolContext: hostedContext,
         request: input.request.request,
       })
-    case 'usage-diagnostics':
-    case 'plan-usage':
-    case 'poll':
-    case 'game':
-    case 'imessage-contact':
-      return await executeCurrentConversationTool(input, input.request)
     case 'subscription':
       return await executeSubscriptionTool({
         hostedToolContext: hostedContext,
@@ -3951,6 +3956,8 @@ async function dispatchMurphDynamicToolRequest(
         askGrokTurnState: input.askGrokTurnState,
       })
     }
+    case 'journal-source-read':
+      return await executeJournalSourceRead(input, input.request)
     case 'connected-apps-manage':
     case 'connected-apps-search':
     case 'connected-apps-execute': {
@@ -4262,7 +4269,9 @@ async function executeUsageDiagnosticsTool(
     return toolTextResult(false, 'usage diagnostics require a private conversation', 'authority_rejected')
   }
   try {
-    const result = parseHostedUsageDiagnosticsResponse(await context.usageDiagnostics.read(request))
+    const result = parseHostedUsageDiagnosticsResponse(
+      await context.usageDiagnostics.read(withUsageDiagnosticsDefaults(request)),
+    )
     return toolTextResult(true, safeToolPayloadText(result))
   } catch (error) {
     return toolTextResult(false, 'usage diagnostics could not be read', 'handler_exception', error)
@@ -4337,6 +4346,10 @@ function projectHostedPlanUsageForAssistant(input: HostedPlanUsageStatus) {
     recommendedAction,
     scheduledPlan,
     subscriptionActionQuote,
+    // The quote and recommended action carry the target plan, and the usage
+    // skill reads remainingPercent; usedPercent is always 100 minus it.
+    recommendedPlanCode: undefined,
+    usedPercent: undefined,
   }
 }
 
@@ -4346,12 +4359,13 @@ function projectHostedGroupPlanLabel(label: string): string {
 
 async function executeCurrentConversationTool(
   input: ExecuteMurphDynamicToolRequestInput,
-  request: Extract<MurphDynamicToolRequest, { kind: 'game' | 'poll' | 'plan-usage' | 'usage-diagnostics' | 'imessage-contact' }>,
+  request: CurrentConversationToolRequest,
 ): Promise<MurphDynamicToolExecutionResult> {
   const hostedToolContext = input.hostedToolContext ?? null
   switch (request.kind) {
     case 'usage-diagnostics': return executeUsageDiagnosticsTool(hostedToolContext, request.request)
-    case 'game': return executeGameTool({ request: request.request, context: hostedToolContext })
+    case 'leave-group': return executeLeaveGroupTool({ request: request.request, context: hostedToolContext })
+    case 'game': return executeGameTool({ request: request.request, context: hostedToolContext, turnState: input.groupSharedReadTurnState ?? null, signal: input.abortSignal ?? undefined })
     case 'poll': return executeConversationPollTool({ request: request.request, context: hostedToolContext })
     case 'plan-usage': return executePlanUsageTool({ request: request.request, hostedToolContext })
     case 'imessage-contact': return executeIMessageContactTool({ hostedToolContext })
@@ -4636,14 +4650,17 @@ function groupSharedUnavailableToolResult(
 }
 
 /**
- * One read returns every member crossed with every requested scope. At the model
+ * One read returns every member crossed with every requested scope, and the
+ * result stays in the turn's context for every later model call. At the model
  * boundary, every projection is keyed by its exact scope and its grant/data pair
- * is collapsed to one four-state status. Non-workout record arrays remain
- * byte-identical. `workouts.v0` additionally compacts repeated day identity,
- * time semantics, completion watermark, and activity kinds because its
- * per-workout lists are the one record payload dense enough to need that extra
- * reduction. Encrypted stored records and the complete Web response retain
- * their validated shapes.
+ * is collapsed to one four-state status. Each record is its data fields plus its
+ * source label: the envelope's recordKey and occurredAt only restate the date
+ * and source, metricKey is fixed by the scope, and a unit shared by every record
+ * is stated once on the projection. `workouts.v0` additionally compacts
+ * repeated day identity, time semantics, completion watermark, and activity
+ * kinds because its per-workout lists are the densest record payload.
+ * Encrypted stored records and the complete Web response retain their
+ * validated shapes.
  * The model reads the four collapsed states from one field instead of decoding
  * the grant/data pair.
  */
@@ -4654,6 +4671,91 @@ function groupSharedProjectionStatus(
     return 'not_granted'
   }
   return projection.dataStatus
+}
+
+interface GroupSharedModelSource {
+  label: string
+  source: string
+}
+
+function isGroupSharedModelSource(
+  value: unknown,
+): value is GroupSharedModelSource {
+  return typeof value === 'object'
+    && value !== null
+    && 'label' in value
+    && typeof value.label === 'string'
+    && 'source' in value
+    && typeof value.source === 'string'
+}
+
+/**
+ * A source is named by its public label. The provider key is added only when
+ * two keys in the same projection share a label (Apple Health has two), so
+ * their values can still be told apart. No record data field is named
+ * `source` or `sourceKey`, so these never shadow one.
+ */
+function groupSharedModelSourceNamer(
+  sources: readonly (GroupSharedModelSource | undefined)[],
+): (source: GroupSharedModelSource | undefined) => {
+  source?: string
+  sourceKey?: string
+} {
+  const keysByLabel = new Map<string, Set<string>>()
+  for (const source of sources) {
+    if (source) {
+      keysByLabel.set(
+        source.label,
+        (keysByLabel.get(source.label) ?? new Set()).add(source.source),
+      )
+    }
+  }
+  return (source) => source === undefined
+    ? {}
+    : {
+        source: source.label,
+        ...((keysByLabel.get(source.label)?.size ?? 0) > 1
+          ? { sourceKey: source.source }
+          : {}),
+      }
+}
+
+interface GroupSharedModelWorkout {
+  fields: Record<string, unknown>
+  source?: GroupSharedModelSource
+}
+
+/**
+ * Activity kinds repeat on every workout and can be up to 80 characters, which
+ * made them the largest remaining budget dimension. A member's week uses only a
+ * handful of distinct kinds, so they are listed once and referenced by index.
+ */
+function parseGroupSharedModelWorkout(
+  workout: unknown,
+  kinds: string[],
+): GroupSharedModelWorkout | null {
+  const workoutEntries = Object.entries(workout as Record<string, unknown>)
+  const kind = workoutEntries.find(([key]) => key === 'kind')?.[1]
+  const source = workoutEntries.find(([key]) => key === 'source')?.[1]
+  if (
+    typeof kind !== 'string'
+    || (source !== undefined && !isGroupSharedModelSource(source))
+  ) {
+    return null
+  }
+  let kindIndex = kinds.indexOf(kind)
+  if (kindIndex === -1) {
+    kindIndex = kinds.push(kind) - 1
+  }
+  return {
+    fields: {
+      kindIndex,
+      ...Object.fromEntries(
+        workoutEntries.filter(([key]) => key !== 'kind' && key !== 'source'),
+      ),
+    },
+    ...(source === undefined ? {} : { source }),
+  }
 }
 
 function groupSharedWorkoutsModelProjection(
@@ -4668,10 +4770,7 @@ function groupSharedWorkoutsModelProjection(
   // always the day's workout array: a value that is sometimes an array and
   // sometimes a wrapper object would break the `days[date].some(...)` the
   // referee is instructed to run on an open local date.
-  const days: Record<string, unknown> = {}
-  // Activity kinds repeat on every workout and can be up to 80 characters, which
-  // made them the largest remaining budget dimension. A member's week uses only a
-  // handful of distinct kinds, so they are listed once and referenced by index.
+  const parsedDays: [string, GroupSharedModelWorkout[]][] = []
   const kinds: string[] = []
   let calendarClosedThroughDate: string | undefined
   let timeSemantics: string | undefined
@@ -4700,28 +4799,26 @@ function groupSharedWorkoutsModelProjection(
       return null
     }
     calendarClosedThroughDate = closedThrough
-    const dayWorkouts: unknown[] = []
+    const dayWorkouts: GroupSharedModelWorkout[] = []
     for (const workout of workouts) {
-      const workoutEntries = Object.entries(
-        workout as Record<string, unknown>,
-      )
-      const kind = workoutEntries.find(([key]) => key === 'kind')?.[1]
-      if (typeof kind !== 'string') {
+      const parsed = parseGroupSharedModelWorkout(workout, kinds)
+      if (!parsed) {
         return null
       }
-      let kindIndex = kinds.indexOf(kind)
-      if (kindIndex === -1) {
-        kindIndex = kinds.push(kind) - 1
-      }
-      dayWorkouts.push({
-        kindIndex,
-        ...Object.fromEntries(
-          workoutEntries.filter(([key]) => key !== 'kind'),
-        ),
-      })
+      dayWorkouts.push(parsed)
     }
-    days[date] = dayWorkouts
+    parsedDays.push([date, dayWorkouts])
   }
+  const nameSource = groupSharedModelSourceNamer(parsedDays.flatMap(
+    ([, dayWorkouts]) => dayWorkouts.map((workout) => workout.source),
+  ))
+  const days = Object.fromEntries(parsedDays.map(([date, dayWorkouts]) => [
+    date,
+    dayWorkouts.map((workout) => ({
+      ...workout.fields,
+      ...nameSource(workout.source),
+    })),
+  ]))
   return {
     ...(calendarClosedThroughDate === undefined
       ? {}
@@ -4735,6 +4832,55 @@ function groupSharedWorkoutsModelProjection(
     status: groupSharedProjectionStatus(projection),
     ...(timeSemantics === undefined ? {} : { timeSemantics }),
   }
+}
+
+function groupSharedRecordsModelProjection(
+  projection: AssistantHostedGroupSharedProjection,
+  reportingGaps: ReturnType<typeof getHostedGroupWearableReportingGaps>,
+): Record<string, unknown> {
+  const nameSource = groupSharedModelSourceNamer([
+    ...projection.records.map((record) => record.source),
+    ...reportingGaps.map((gap) => gap.source),
+  ])
+  const units = new Set(projection.records.map((record) =>
+    'unit' in record.data ? record.data.unit : undefined
+  ))
+  const [firstUnit] = units
+  // Every daily metric record restates its scope's unit; mixed units stay on
+  // each record.
+  const sharedUnit = units.size === 1 ? firstUnit : undefined
+  return {
+    ...(typeof projection.grantedAt === 'string'
+      ? { grantedAt: projection.grantedAt }
+      : {}),
+    records: projection.records.map((record) => ({
+      ...Object.fromEntries(Object.entries(record.data).filter(([key, value]) =>
+        key !== 'metricKey'
+        && (key !== 'unit' || (sharedUnit === undefined && value !== null))
+      )),
+      ...nameSource(record.source),
+    })),
+    ...(reportingGaps.length === 0
+      ? {}
+      : {
+          reportingGaps: reportingGaps.map(({ source, ...gap }) => ({
+            ...gap,
+            ...nameSource(source),
+          })),
+        }),
+    status: groupSharedProjectionStatus(projection),
+    ...(sharedUnit == null ? {} : { unit: sharedUnit }),
+  }
+}
+
+/** The returned records already show which dates have data. */
+function groupSharedDateCoverageModelResult(
+  coverage: NonNullable<
+    Extract<AssistantHostedGroupSharedReadResponse, { status: 'ok' }>['dateCoverage']
+  >,
+) {
+  const { availableDates, ...rest } = coverage
+  return { ...rest, availableDateCount: availableDates.length }
 }
 
 function groupSharedModelResult(
@@ -4757,9 +4903,11 @@ function groupSharedModelResult(
   const checkedAtMs = result.freshness ? Date.parse(result.freshness.checkedAt) : Date.now()
   return {
     ...(result.freshness ? { freshness: result.freshness } : {}),
-    ...(result.dateCoverage ? { dateCoverage: result.dateCoverage } : {}),
+    ...(result.dateCoverage
+      ? { dateCoverage: groupSharedDateCoverageModelResult(result.dateCoverage) }
+      : {}),
     members: result.members.map((member) => ({
-      // Empty handles and a null name carried no information but were
+      // Empty handles and null fields carried no information but were
       // serialized for every member on every read.
       ...(member.currentTurnHandles.length === 0
         ? {}
@@ -4768,21 +4916,20 @@ function groupSharedModelResult(
         ? {}
         : { displayName: member.displayName }),
       participantId: member.participantId,
-      ...(member.companionLastContactAt === undefined ? {} : { companionLastContactAt: member.companionLastContactAt }),
+      ...(member.companionLastContactAt == null
+        ? {}
+        : { companionLastContactAt: member.companionLastContactAt }),
       // Keyed by scope so each projection no longer restates its own key, and
       // the scope reads as a heading rather than a field to hunt for.
       projections: Object.fromEntries(member.projections.map((projection) => [
         projection.projectionScopeKey,
-        groupSharedWorkoutsModelProjection(projection) ?? {
-          ...(typeof projection.grantedAt === 'string'
-            ? { grantedAt: projection.grantedAt }
-            : {}),
-          records: projection.records,
-          ...(requirements ? {
-            reportingGaps: getHostedGroupWearableReportingGaps(projection, requirements, checkedAtMs),
-          } : {}),
-          status: groupSharedProjectionStatus(projection),
-        },
+        groupSharedWorkoutsModelProjection(projection)
+          ?? groupSharedRecordsModelProjection(
+            projection,
+            requirements
+              ? getHostedGroupWearableReportingGaps(projection, requirements, checkedAtMs)
+              : [],
+          ),
       ])),
     })),
     requestedProjectionScopeKeys: result.requestedProjectionScopeKeys,
@@ -5056,21 +5203,65 @@ async function executeGroupChallengeResponseCardAttachment(input: {
   }
 }
 
+/**
+ * Members are anonymous at the model boundary, so identical rows say nothing
+ * apart and are listed once with a `count`. A member with a disclosure grant
+ * keeps its own row: a group runtime cannot list memberships, so this is the
+ * only place ask_member can take its exact grantId from, and each grant stays
+ * on its one member beside the permission it covers. profile-name.v0 comes
+ * with membership itself, so it is not listed as a granted scope.
+ */
+function groupSummaryModelMembers(
+  members: HostedRuntimeGroupSummary['members'],
+) {
+  const rows: {
+    count?: number
+    disclosureGrants?: { grantId: string; permissionText: string }[]
+    grantedVaultShareProjectionScopes:
+      HostedRuntimeGroupSummary['members'][number]['grantedVaultShareProjectionScopes']
+    role: string
+  }[] = []
+  const anonymousRows = new Map<string, (typeof rows)[number]>()
+  for (const member of members) {
+    const row = {
+      grantedVaultShareProjectionScopes:
+        member.grantedVaultShareProjectionScopes.filter(
+          (scope) => scope.projectionKind !== 'profile-name.v0',
+        ),
+      role: member.role,
+    }
+    if (member.disclosureGrants?.length) {
+      rows.push({
+        disclosureGrants: member.disclosureGrants.map((grant) => ({
+          grantId: grant.grantId,
+          permissionText: grant.permissionText,
+        })),
+        ...row,
+      })
+      continue
+    }
+    const shape = JSON.stringify(row)
+    const existing = anonymousRows.get(shape)
+    if (existing) {
+      existing.count = (existing.count ?? 1) + 1
+      continue
+    }
+    anonymousRows.set(shape, row)
+    rows.push(row)
+  }
+  return rows
+}
+
+/**
+ * The internal group id and the kind lists that duplicate the scope lists are
+ * left out. The scope objects stay: offer_access takes them as they are.
+ */
 function groupSummaryModelResult(group: HostedRuntimeGroupSummary) {
   return {
     displayName: group.displayName,
-    id: group.id,
     kind: group.kind,
     memberCount: group.memberCount,
-    members: group.members.map((member) => ({
-      grantedVaultShareProjectionKinds:
-        member.grantedVaultShareProjectionKinds,
-      grantedVaultShareProjectionScopes:
-        member.grantedVaultShareProjectionScopes,
-      role: member.role,
-    })),
-    requestedVaultShareProjectionKinds:
-      group.requestedVaultShareProjectionKinds,
+    members: groupSummaryModelMembers(group.members),
     requestedVaultShareProjectionScopes:
       group.requestedVaultShareProjectionScopes,
     status: group.status,
@@ -5107,6 +5298,32 @@ function groupToolModelResult(response: HostedRuntimeGroupToolResponse) {
                 displayName: participant.ownerAdvisoryName,
               }),
         })),
+      },
+    }
+  }
+  // A rename is only a provider request; the group summary it echoed back
+  // told the model nothing about the new title.
+  if (response.action === 'update_display_name') {
+    return {
+      action: response.action,
+      result: response.result.status === 'ok'
+        ? { status: response.result.status }
+        : {
+            status: response.result.status,
+            unavailableReason: response.result.unavailableReason,
+          },
+    }
+  }
+  // The model just sent this setup; only the outcome and its expiry are new.
+  if (
+    response.action === 'prepare_next_group'
+    && response.result.status === 'prepared'
+  ) {
+    return {
+      action: response.action,
+      result: {
+        expiresAt: response.result.expiresAt,
+        status: response.result.status,
       },
     }
   }
@@ -6621,17 +6838,19 @@ async function executeGroupEmailEffect(input: {
         return toolTextResult(false, 'group email send could not be accepted', 'action_result_mismatch')
       }
       input.hostedToolContext?.recordGroupEmailSendResult?.(result)
-      const skippedNoEmailMemberIds =
-        'skippedNoEmailMemberIds' in result.result
-          ? result.result.skippedNoEmailMemberIds
-          : []
+      // Skipped member ids are internal identifiers: the recorder above keeps
+      // them for private diagnostics, and the model gets only their count.
+      const { skippedNoEmailMemberIds, ...sendResult } = {
+        skippedNoEmailMemberIds: [] as readonly string[],
+        ...result.result,
+      }
       return {
         ...toolTextResult(
           !isGroupEmailAllRecipientSendFailure(result),
           safeToolPayloadText({
             action: 'send_email',
             result: {
-              ...result.result,
+              ...sendResult,
               missingVerifiedEmailCount: skippedNoEmailMemberIds.length,
             },
           }),
@@ -7506,8 +7725,7 @@ function parseGenerateImageArguments(
   }
   const { message_ref: messageRef, ...args } = parsed.args
   return {
-    args: { ...args, quality: args.quality ?? (args.output === 'file' ? 'high' : 'medium'),
-      size: args.size ?? (args.output === 'file' ? '1024x1536' : '1024x1024') },
+    args: { ...args, quality: args.quality ?? 'medium', size: args.size ?? '1024x1024' },
     ...(messageRef ? { messageRef } : {}),
     ok: true,
   }
@@ -8624,43 +8842,68 @@ function readAnalyzeVideoDynamicToolRequest(value: unknown): MurphDynamicToolReq
     : { kind: 'invalid-tool-arguments', errorCode: 'invalid_analyze_video_arguments', validationDigest: parsed.validationDigest }
 }
 
+/** In a recap show the turn, not the model, decides that media is a file and what kind. */
 async function maybeExecuteRecapImage(input: ExecuteMurphDynamicToolRequestInput,
   request: Extract<MurphDynamicToolRequest, { kind: 'generate-image' }>): Promise<MurphDynamicToolExecutionResult | null> {
-  if (request.args.output === 'file') {
-    try {
-      const fileRuntime = await input.hostedToolContext?.prepareRecapMedia?.({ kind: 'image', args: request.args }, input.fetchImpl)
-      if (!fileRuntime) return toolTextResult(false, 'File output requires an authorized recap.', 'authority_rejected')
-      const result = await executeGenerateImageTool({ args: request.args, fileRuntime,
-        abortSignal: input.abortSignal, env: input.env, fetchImpl: input.fetchImpl,
-        providerRequestOrdinal: input.nextUsageOrdinal() })
-      return { ...toolTextResult(result.rpcSuccess, result.rpcText), ...toolFailureMetadata(result), usageDraft: result.usageDraft ?? null }
-    } catch (error) { return recapMediaToolFailure(error) }
-  }
-  if (input.hostedToolContext?.currentGameRecapScope?.()?.show) return toolTextResult(false, 'Recap media requires output=file.', 'authority_rejected')
-  return null
+  const prepare = recapMediaPreparer(input)
+  if (!prepare) return null
+  try {
+    const args = { ...request.args, outputFormat: 'jpeg' as const, quality: 'high' as const, size: '1024x1536' as const }
+    const result = await executeGenerateImageTool({ args, fileRuntime: await prepare({ kind: 'image', args }, input.fetchImpl),
+      abortSignal: input.abortSignal, env: input.env, fetchImpl: input.fetchImpl,
+      providerRequestOrdinal: input.nextUsageOrdinal() })
+    return { ...toolTextResult(result.rpcSuccess, result.rpcText), ...toolFailureMetadata(result), usageDraft: result.usageDraft ?? null }
+  } catch (error) { return recapMediaToolFailure(error) }
 }
 
 async function executeSongToolRequest(input: ExecuteMurphDynamicToolRequestInput & { request: Extract<MurphDynamicToolRequest, { kind: 'generate-song' }> }): Promise<MurphDynamicToolExecutionResult> {
-      if (input.request.args.output === 'file') {
-        try {
-          const fileRuntime = await input.hostedToolContext?.prepareRecapMedia?.({ kind: 'song', args: input.request.args }, input.fetchImpl)
-          if (!fileRuntime) return toolTextResult(false, 'File output requires an authorized recap.', 'authority_rejected')
-          return await executeGenerateSongDynamicTool({ args: input.request.args, env: input.env, fileRuntime, abortSignal: input.abortSignal })
-        } catch (error) { return recapMediaToolFailure(error) }
-      }
-      if (input.hostedToolContext?.currentGameRecapScope?.()?.show) return toolTextResult(false, 'Recap media requires output=file.', 'authority_rejected')
-      if (input.currentResponseCard !== null && input.currentResponseCard !== undefined) {
-        return toolTextResult(false, 'song generation cannot be combined with a response card', 'conflict')
-      }
-      return await executeGenerateSongDynamicTool({
-        abortSignal: input.abortSignal ?? null,
-        args: input.request.args,
-        currentResponseMedia: input.currentResponseMedia ?? [],
-        recordPhaseTiming: input.voiceMemoPhaseTimingRecorder ?? null,
-        voiceMemoRuntime: input.voiceMemoRuntime ?? null,
-      })
+  const prepare = recapMediaPreparer(input)
+  if (prepare) {
+    try {
+      const args = input.request.args
+      if (!('draftPath' in args) || !input.hostedToolContext?.readGameRecapDraft) return toolTextResult(false, 'Use the draft path and voice to generate recap music.', 'invalid_input')
+      const result = await executeGenerateRecapSongFile({ draft: await input.hostedToolContext.readGameRecapDraft(args.draftPath), voice: args.voice,
+        env: input.env, abortSignal: input.abortSignal, fileRuntime: await prepare({ kind: 'song', args }, input.fetchImpl) })
+      return { ...toolTextResult(result.rpcSuccess, result.rpcText), ...toolFailureMetadata(result) }
+    } catch (error) {
+      if (input.abortSignal?.aborted) throw input.abortSignal.reason ?? error
+      return recapMediaToolFailure(error)
+    }
+  }
+  if ('draftPath' in input.request.args) return toolTextResult(false, 'Draft music is available only in a recap show.', 'authority_rejected')
+  if (input.currentResponseCard !== null && input.currentResponseCard !== undefined) {
+    return toolTextResult(false, 'song generation cannot be combined with a response card', 'conflict')
+  }
+  return await executeGenerateSongDynamicTool({
+    abortSignal: input.abortSignal ?? null,
+    args: input.request.args,
+    currentResponseMedia: input.currentResponseMedia ?? [],
+    recordPhaseTiming: input.voiceMemoPhaseTimingRecorder ?? null,
+    voiceMemoRuntime: input.voiceMemoRuntime ?? null,
+  })
 }
 
-function recapMediaToolFailure(error: unknown) {
+function recapMediaPreparer(input: ExecuteMurphDynamicToolRequestInput) {
+  const context = input.hostedToolContext
+  return context?.currentGameRecapScope?.()?.show ? context.prepareRecapMedia : undefined
+}
+
+function recapMediaToolFailure(error: unknown): MurphDynamicToolExecutionResult {
+  // A reference the recap does not have is the model's input, not a backend failure.
+  if (error instanceof RecapReferenceRefusal) {
+    return { ...toolTextResult(false, error.message), failureDiagnostic: { ...toolFailureDiagnostic('invalid_input'), recapRefusedReferences: error.shapes } }
+  }
   return toolTextResult(false, error instanceof Error ? error.message : 'Media generation failed.', 'handler_exception', error)
+}
+
+async function executeJournalSourceRead(input: ExecuteMurphDynamicToolRequestInput, request: Extract<MurphDynamicToolRequest, { kind: 'journal-source-read' }>) {
+  const readSource = input.hostedToolContext?.preparedJournal?.readSource
+  if (!readSource) return toolTextResult(false, 'prepared Journal source reads are unavailable', 'unavailable')
+  return toolTextResult(true, JSON.stringify(await readSource(request.locator, input.abortSignal)))
+}
+
+function hostedImageCompletionToolAuthority(input: ExecuteMurphDynamicToolRequestInput) {
+  const scope = input.hostedToolContext?.currentHostedImageCompletionEffectScope?.() ?? null
+  return { hostedImageCompletionEffectScope: scope,
+    rejected: scope !== null && !isHostedImageCompletionToolRequestAllowed({ request: input.request, scope }) }
 }

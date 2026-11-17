@@ -16,9 +16,13 @@ export const PACKAGE_COVERAGE_PLAN = Object.freeze([
   // and set the Host Support critical path.
   // Contracts stays off the CLI checkout because its coverage rewrites dist
   // files imported by CLI built-runtime tests.
-  { dir: "packages/cli", shard: "cli" },
-  { dir: "packages/assistant-engine", shard: "assistant-engine" },
-  { dir: "packages/assistant-runtime", shard: "assistant-runtime" },
+  // `vitestShards` splits one package's test files across that many runners
+  // with `vitest --shard i/n`. Every file still runs exactly once, with the
+  // same isolation and worker settings; only the wall time per runner drops.
+  // Host Support run 43359763057 measured 652s, 504s, and 328s unsplit.
+  { dir: "packages/cli", shard: "cli", vitestShards: 2 },
+  { dir: "packages/assistant-engine", shard: "assistant-engine", vitestShards: 3 },
+  { dir: "packages/assistant-runtime", shard: "assistant-runtime", vitestShards: 2 },
 
   // Package timings from Host Support run 41704908795 total ~361s per platform-b
   // group, including startup and artifact checks; smaller owners fill platform-a.
@@ -40,6 +44,7 @@ export const PACKAGE_COVERAGE_PLAN = Object.freeze([
   { dir: "packages/inboxd", shard: "platform-b2" },
   { dir: "packages/messaging-ingress", shard: "platform-b1" },
   { dir: "packages/operator-config", shard: "platform-a" },
+  { dir: "packages/recap-video", shard: "platform-a" },
   { dir: "packages/parsers", shard: "platform-b2" },
   { dir: "packages/query", shard: "platform-b2" },
   { dir: "packages/runtime-state", shard: "platform-b2" },
@@ -141,9 +146,41 @@ function packageCoverageMatrixFromPlan() {
     }
   }
 
+  // `shard` labels the runner, `package_shard` selects its packages, and
+  // `vitest_shard` is empty unless the package's files are split.
   return {
-    include: shardNames.map((shard) => ({ shard })),
+    include: shardNames.flatMap((packageShard) => {
+      const vitestShards = PACKAGE_COVERAGE_PLAN.find(
+        (entry) => entry.shard === packageShard,
+      )?.vitestShards;
+      if (vitestShards === undefined) {
+        return [{ shard: packageShard, package_shard: packageShard, vitest_shard: "" }];
+      }
+      return Array.from({ length: vitestShards }, (_, index) => {
+        const vitestShard = `${index + 1}/${vitestShards}`;
+        return {
+          shard: `${packageShard} ${vitestShard}`,
+          package_shard: packageShard,
+          vitest_shard: vitestShard,
+        };
+      });
+    }),
   };
+}
+
+/**
+ * The package matrix limited to shards with at least one package a pull
+ * request's diff reaches (scripts/ci-diff-reach.mjs). Undefined reaches all.
+ * @param {string[] | undefined} reachedPackages
+ */
+export function reachedPackageCoverageMatrix(reachedPackages) {
+  const matrix = packageCoverageMatrixFromPlan();
+  if (reachedPackages === undefined) return matrix;
+  const reached = new Set(reachedPackages);
+  const shards = new Set(PACKAGE_COVERAGE_PLAN
+    .filter((entry) => reached.has(entry.dir))
+    .map((entry) => entry.shard));
+  return { include: matrix.include.filter((entry) => shards.has(entry.package_shard)) };
 }
 
 function hostedWebTestMatrixFromPlan() {
@@ -152,6 +189,30 @@ function hostedWebTestMatrixFromPlan() {
       shard: `${index + 1}/${HOSTED_WEB_TEST_SHARD_COUNT}`,
     })),
   };
+}
+
+function packageFileSplitErrors(shardCounts) {
+  const errors = [];
+
+  for (const entry of PACKAGE_COVERAGE_PLAN) {
+    if (entry.vitestShards === undefined) {
+      continue;
+    }
+    if (
+      !Number.isSafeInteger(entry.vitestShards)
+      || entry.vitestShards < 2
+      || entry.vitestShards > 8
+    ) {
+      errors.push(`invalid vitestShards '${entry.vitestShards}' for ${entry.dir}`);
+    }
+    // A file split is one Vitest run divided by file; a shard that runs
+    // several packages has no single run to divide.
+    if (shardCounts.get(entry.shard) !== 1) {
+      errors.push(`${entry.dir} must be the only package in a file-split release shard`);
+    }
+  }
+
+  return errors;
 }
 
 export function validateReleaseVerificationPlan(repoRoot = defaultRepoRoot) {
@@ -172,6 +233,8 @@ export function validateReleaseVerificationPlan(repoRoot = defaultRepoRoot) {
     plannedDirs.add(entry.dir);
     shardCounts.set(entry.shard, (shardCounts.get(entry.shard) ?? 0) + 1);
   }
+
+  errors.push(...packageFileSplitErrors(shardCounts));
 
   const exclusionEntries = Object.entries(PACKAGE_COVERAGE_EXCLUSIONS);
   const excludedDirs = new Set();
@@ -270,6 +333,7 @@ function parseArgs(argv) {
     check: false,
     githubOutput: undefined,
     packageDirs: undefined,
+    reachedPackages: undefined,
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -296,6 +360,21 @@ function parseArgs(argv) {
         index += 1;
         break;
       }
+      case "--reached-packages": {
+        const value = argv[index + 1];
+        let reached;
+        try {
+          reached = JSON.parse(value ?? "");
+        } catch {
+          reached = undefined;
+        }
+        if (!Array.isArray(reached) || reached.some((dir) => typeof dir !== "string")) {
+          throw new Error("--reached-packages requires a JSON array of package directories.");
+        }
+        parsed.reachedPackages = reached;
+        index += 1;
+        break;
+      }
       default:
         throw new Error(`Unknown argument '${arg}'.`);
     }
@@ -318,9 +397,13 @@ function main() {
     if (args.githubOutput.length === 0) {
       throw new Error("--github-output requires a path.");
     }
+    const packageMatrix = reachedPackageCoverageMatrix(args.reachedPackages);
+    const packageCoverage = packageMatrix.include.length > 0;
+    // A skipped job never expands its matrix; keep the output a valid matrix.
     appendFileSync(
       args.githubOutput,
-      `package_matrix=${JSON.stringify(packageCoverageMatrixFromPlan())}\n`,
+      `package_matrix=${JSON.stringify(packageCoverage ? packageMatrix : packageCoverageMatrixFromPlan())}\n`
+        + `package_coverage=${packageCoverage}\n`,
     );
     appendFileSync(
       args.githubOutput,

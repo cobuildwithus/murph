@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 export function requireCloudflareHostedControlUserId(
   value: string,
   label = "Cloudflare hosted control userId",
@@ -5,7 +6,7 @@ export function requireCloudflareHostedControlUserId(
   const normalized = typeof value === "string" ? value.trim() : "";
 
   if (!normalized) {
-    throw new TypeError(`${label} must not be blank.`);
+    throw new ContractValidationError(`${label} must not be blank.`);
   }
 
   return normalized;

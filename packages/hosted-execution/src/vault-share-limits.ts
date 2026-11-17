@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 /** Maximum serialized request for one complete vault-share projection. */
 export const HOSTED_VAULT_SHARE_SERIALIZED_PROJECTION_MAX_BYTES = 4 * 1024 * 1024;
 export const HOSTED_VAULT_SHARE_SINGLE_SOURCE_MAX_RECORDS = 8;
@@ -17,11 +18,11 @@ export function parseHostedVaultShareEffectDeadlineAtEpochMs(
   value: string | null,
 ): number {
   if (!value || !/^\d{13}$/u.test(value)) {
-    throw new TypeError("Hosted vault-share effect deadline header is invalid.");
+    throw new ContractValidationError("Hosted vault-share effect deadline header is invalid.");
   }
   const deadlineAtEpochMs = Number(value);
   if (!Number.isSafeInteger(deadlineAtEpochMs)) {
-    throw new TypeError("Hosted vault-share effect deadline header is invalid.");
+    throw new ContractValidationError("Hosted vault-share effect deadline header is invalid.");
   }
   return deadlineAtEpochMs;
 }

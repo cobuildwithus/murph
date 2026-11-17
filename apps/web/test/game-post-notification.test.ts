@@ -2,11 +2,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sha256Hex } from "@/src/lib/primitives";
 import type { RuleEntry, RuleState } from "@/src/lib/game/rules";
 
-const m = vi.hoisted(() => ({ replyAccess: vi.fn(), routes: vi.fn(), route: vi.fn(), claims: vi.fn(), previous: vi.fn(), blocks: vi.fn(), game: vi.fn(), report: vi.fn(), update: vi.fn(), send: vi.fn(), forget: vi.fn() }));
-vi.mock("@/src/lib/apple-push/send", async original => ({ ...await original<typeof import("@/src/lib/apple-push/send")>(), sendApplePush: m.send }));
+const m = vi.hoisted(() => ({ replyAccess: vi.fn(), routes: vi.fn(), route: vi.fn(), claims: vi.fn(), previous: vi.fn(), blocks: vi.fn(), game: vi.fn(), report: vi.fn(), update: vi.fn(), send: vi.fn(), forget: vi.fn(),
+  profiles: vi.fn(), labels: vi.fn(), open: vi.fn() }));
+vi.mock("@/src/lib/apple-push/send", async original => ({ ...await original<typeof import("@/src/lib/apple-push/send")>(), prepareApplePushProviderToken: async () => ({ issuedAt: Date.now(), value: "test-provider-token" }), sendApplePush: m.send }));
 vi.mock("@/src/lib/companion/push-route", async original => ({ ...await original<typeof import("@/src/lib/companion/push-route")>(), forgetCompanionPushRoute: m.forget }));
-vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({ companionPushRoute: { findFirst: m.route }, gameEvent: { updateMany: m.update }, game: { findUnique: m.game }, gameBlock: { findMany: m.blocks }, gameReport: { findFirst: m.report } }) }));
+vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({ companionPushRoute: { findFirst: m.route }, gameEvent: { updateMany: m.update }, game: { findUnique: m.game }, gameBlock: { findMany: m.blocks }, gameReport: { findFirst: m.report },
+  gameProfile: { findMany: m.profiles }, gameContactLabel: { findMany: m.labels } }) }));
+vi.mock("@/src/lib/game/crypto", async original => ({ ...await original<typeof import("@/src/lib/game/crypto")>(), openGameTexts: m.open }));
 vi.mock("@/src/lib/game/service", () => ({ canReadGameReply: m.replyAccess }));
+import { applePushWireAps } from "./support/apple-push-wire";
 import { claimGameReplyNotification, deliverGameReplyNotification } from "@/src/lib/game/reply-notification";
 import { claimGamePostNotification, deliverGamePostNotification } from "@/src/lib/game/post-notification";
 
@@ -23,6 +27,13 @@ function stored(s: RuleState) {
     terms: s.game.terms, invitees: s.game.invitees, entries: s.entries, players: s.players.map(player => ({ ...player, entries: s.entries.filter(entry => entry.memberId === player.memberId), dayOne: player.dayOne ? new Date(`${player.dayOne}T00:00:00Z`) : null })) };
 }
 const tx = { companionPushRoute: { findMany: m.routes }, gameEvent: { findMany: m.previous, createMany: m.claims }, gameBlock: { findMany: m.blocks } };
+const NAMES: Record<string, string> = { p0: "Kat", p1: "Zach", p2: "Ava", owner: "Owen", replier: "Rae" };
+function namesReadable() {
+  m.profiles.mockImplementation(async ({ where }: { where: { memberId: { in: string[] } } }) =>
+    where.memberId.in.map(memberId => ({ memberId, firstNameEncrypted: NAMES[memberId] ?? null })));
+  m.labels.mockResolvedValue([]);
+  m.open.mockImplementation(async (entries: { value: string | null }[]) => entries.map(entry => entry.value));
+}
 async function claim(s = state(), at = clock, actor = "p0") {
   m.game.mockResolvedValue(stored(s));
   m.routes.mockResolvedValue(s.players.filter(player => player.memberId !== actor).map(player => ({ userId: player.memberId, ...target, gameSessionId: "session-one" })));
@@ -32,31 +43,50 @@ async function claim(s = state(), at = clock, actor = "p0") {
 describe("one daily game notifier", () => {
   beforeEach(() => {
     vi.resetAllMocks(); vi.useFakeTimers(); vi.setSystemTime(clock);
-    vi.stubEnv("MURPH_GAME_ENABLED", "true"); vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "");
+    vi.stubEnv("MURPH_GAME_ENABLED", "true");
     m.previous.mockResolvedValue([]); m.blocks.mockResolvedValue([]); m.report.mockResolvedValue(null);
     m.claims.mockImplementation(async ({ data }) => ({ count: data.length }));
     m.route.mockResolvedValue({ userId: "p1" }); m.send.mockResolvedValue("sent"); m.update.mockResolvedValue({ count: 1 });
+    namesReadable();
   });
   afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); });
 
-  it("claims coinciding slots once and preserves pair copy", async () => {
+  it("claims coinciding slots once and names the poster in pair copy", async () => {
     const notifications = await claim();
     expect(notifications).toHaveLength(1);
     expect(notifications[0].claims.map(claim => claim.slot)).toEqual(["first", "completion"]);
+    // Nothing is opened under the game lock; the name arrives at delivery.
+    expect(notifications[0].request.message).toEqual({ kind: "alert", title: "New game check-in", body: "Someone posted. Share yours to see it." });
+    expect(m.open).not.toHaveBeenCalled();
     await deliverGamePostNotification(notifications[0]);
     expect(m.send).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ data: { gameId: "game-a", notification: "game_post" },
-      message: { kind: "alert", title: "New game check-in", body: "Someone posted. Share yours to see it." } }));
+      message: { kind: "alert", title: "Kat posted a photo.", body: "Share yours to see it." } }), { providerToken: { issuedAt: Date.now(), value: "test-provider-token" } });
+    expect(await applePushWireAps(m.send.mock.calls[0][0])).toMatchObject({ sound: "default" });
+  });
+  it("names the poster as the recipient labelled them, says checked in for other kinds, and falls back without a name", async () => {
+    m.labels.mockResolvedValue([{ subjectMemberId: "p0", nameEncrypted: "Kitty" }]);
+    await deliverGamePostNotification((await claim())[0]);
+    expect(m.labels).toHaveBeenCalledWith(expect.objectContaining({ where: { ownerMemberId: "p1", subjectMemberId: { in: ["p0"] } } }));
+    m.labels.mockResolvedValue([]);
+    const words = state(); words.entries[0] = post("p0", { kind: "words" });
+    await deliverGamePostNotification((await claim(words))[0]);
+    m.profiles.mockResolvedValue([]);
+    await deliverGamePostNotification((await claim())[0]);
+    namesReadable(); m.open.mockRejectedValueOnce(new Error("kms unavailable"));
+    await deliverGamePostNotification((await claim())[0]);
+    expect(m.send.mock.calls.map(call => call[0].message.title)).toEqual(["Kitty posted a photo.", "Kat checked in.", "New game check-in", "New game check-in"]);
+    expect(m.send.mock.calls[3][0].message.body).toBe("Someone posted. Share yours to see it.");
   });
   it.each([null, clock])("tells a pair's first poster theirs develops, even after withdrawal %s", async withdrawnAt => {
     const s = state(); s.entries.push(post("p1", { withdrawnAt }));
     const [notification] = await claim(s); await deliverGamePostNotification(notification);
-    expect(m.send.mock.calls[0][0].message).toEqual({ kind: "alert", title: "They're in too.", body: "Theirs develops when you open it." });
+    expect(m.send.mock.calls[0][0].message).toEqual({ kind: "alert", title: "Kat's in too.", body: "Theirs develops when you open it." });
   });
   it("keeps group copy for a recipient who already posted", async () => {
     const s = state(3); s.entries.push(post("p1"));
     const n = (await claim(s)).find(n => n.memberId === "p1")!;
     await deliverGamePostNotification(n);
-    expect(m.send.mock.calls[0][0].message).toEqual({ kind: "alert", title: "New game check-in", body: "There's a new post in your game. Take a look." });
+    expect(m.send.mock.calls[0][0].message).toEqual({ kind: "alert", title: "Kat posted a photo.", body: "Take a look." });
   });
   it("claims first then completion and includes incomplete artifacts", async () => {
     const s = state(3); const first = (await claim(s)).find(n => n.memberId === "p2")!;
@@ -66,7 +96,7 @@ describe("one daily game notifier", () => {
     const final = (await claim(s, clock, "p1")).find(n => n.memberId === "p2")!;
     expect(final.claims.map(claim => claim.slot)).toEqual(["completion"]);
     await deliverGamePostNotification(final);
-    expect(m.send.mock.calls[0][0].message.body).toBe("Everyone's in but you.");
+    expect(m.send.mock.calls[0][0].message).toEqual({ kind: "alert", title: "Zach posted a photo.", body: "Everyone's in but you." });
   });
   it("sends Everyone's in to a recipient who posted and combines both slots", async () => {
     const s = state(3); s.entries.push(post("p1"), post("p2"));
@@ -119,6 +149,8 @@ describe("one daily game notifier", () => {
     if (reason === "milestone") s.entries.push(post("p1"));
     m.game.mockResolvedValue(stored(s)); await deliverGamePostNotification(n);
     expect(m.send).not.toHaveBeenCalled(); expect(m.update.mock.calls[0][0].data.payload.outcome).toBe("superseded");
+    // Only the final route check runs after the name is read.
+    if (reason !== "route") expect(m.open).not.toHaveBeenCalled();
   });
   it("revalidates session and exact token, preserves uncertain claims, and forgets only rejected tokens", async () => {
     const [n] = await claim(); m.send.mockRejectedValueOnce(new Error("uncertain")); await deliverGamePostNotification(n);
@@ -126,14 +158,14 @@ describe("one daily game notifier", () => {
     expect(m.update.mock.calls[0][0].data.payload.outcome).toBe("failed");
     m.send.mockResolvedValue("unregistered"); await deliverGamePostNotification(n); expect(m.forget).toHaveBeenCalledExactlyOnceWith("p1", target.token);
   });
-  it("honors rollout and invalid or unenrolled routes", async () => {
-    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "unrelated"); expect(await claim()).toEqual([]);
-    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "p1"); expect(await claim()).toHaveLength(1);
-    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "p2");
-    const invited = state(); invited.game.invitees = [{ memberId: "p2", seat: 2 }];
-    const [notification] = await claim(invited); await deliverGamePostNotification(notification);
-    expect(m.send).toHaveBeenCalledOnce();
-    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "p1");
+  it("honors the switch at claim and delivery, and refuses unenrolled routes", async () => {
+    vi.stubEnv("MURPH_GAME_ENABLED", "false"); expect(await claim()).toEqual([]);
+    vi.stubEnv("MURPH_GAME_ENABLED", "true");
+    const [notification] = await claim();
+    vi.stubEnv("MURPH_GAME_ENABLED", "false");
+    await deliverGamePostNotification(notification);
+    expect(m.send).not.toHaveBeenCalled();
+    vi.stubEnv("MURPH_GAME_ENABLED", "true");
     m.routes.mockResolvedValue([{ userId: "p1", ...target, gameSessionId: null }]);
     expect(await claimGamePostNotification(tx, { state: state(), clock, actor: "p0", entryId: "post-p0", dayIndex: 0 })).toEqual([]);
   });
@@ -146,17 +178,20 @@ describe("one reply push per post", () => {
     m.claims.mockResolvedValue({ count: 1 });
     m.routes.mockResolvedValue([{ userId: "owner", ...target, gameSessionId: "reply-session" }]);
     m.route.mockResolvedValue({ userId: "owner" }); m.replyAccess.mockResolvedValue(true); m.send.mockResolvedValue("sent");
+    namesReadable();
   });
   afterEach(() => vi.useRealTimers());
-  const input = { gameId: "game-reply", entryId: "post-reply", replyId: "reply-first", memberId: "owner", kind: "text" as const };
-  it.each(["text", "voice"] as const)("sends content-free %s copy through the shared session and delivery checks", async kind => {
+  const input = { gameId: "game-reply", entryId: "post-reply", replyId: "reply-first", actor: "replier", memberId: "owner", kind: "text" as const };
+  it.each(["text", "voice"] as const)("sends named, content-free %s copy through the shared session and delivery checks", async kind => {
     const notification = await claimGameReplyNotification(tx, { ...input, kind });
     expect(notification).not.toBeNull();
     await deliverGameReplyNotification(notification!);
     expect(m.send).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
       data: { gameId: "game-reply", notification: "game_reply" }, expiresAt: new Date(clock.getTime() + 24 * 60 * 60 * 1000),
-      message: { kind: "alert", body: kind === "voice" ? "New voice note on your post." : "New note on your post." },
-    }));
+      message: { kind: "alert", body: kind === "voice" ? "Rae replied with a voice note." : "Rae replied to your post." },
+    }), { providerToken: { issuedAt: Date.now(), value: "test-provider-token" } });
+    expect(m.labels).toHaveBeenCalledWith(expect.objectContaining({ where: { ownerMemberId: "owner", subjectMemberId: { in: ["replier"] } } }));
+    expect(await applePushWireAps(m.send.mock.calls[0][0])).toMatchObject({ sound: "default" });
     expect(m.claims.mock.calls[0][0].data[0]).toEqual({ gameId: "game-reply", actor: "system", type: "reply_notification",
       commandKey: "game-reply-push:post-reply", payload: { entryId: "post-reply" } });
     expect(m.replyAccess).toHaveBeenCalledWith(input.gameId, input.replyId, input.memberId);
@@ -175,6 +210,12 @@ describe("one reply push per post", () => {
     m.replyAccess.mockResolvedValue(false);
     await deliverGameReplyNotification(notification!);
     expect(m.send).not.toHaveBeenCalled();
+    expect(m.open).not.toHaveBeenCalled();
+  });
+  it.each(["text", "voice"] as const)("keeps the nameless %s copy when the name can't be read", async kind => {
+    m.open.mockRejectedValueOnce(new Error("kms unavailable"));
+    await deliverGameReplyNotification((await claimGameReplyNotification(tx, { ...input, kind }))!);
+    expect(m.send.mock.calls[0][0].message).toEqual({ kind: "alert", body: kind === "voice" ? "New voice note on your post." : "New note on your post." });
   });
   it("suppresses revoked sessions and cleans up unregistered tokens", async () => {
     const notification = await claimGameReplyNotification(tx, input);

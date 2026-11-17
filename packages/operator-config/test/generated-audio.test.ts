@@ -1,11 +1,34 @@
 import { readFileSync } from 'node:fs'
 import { afterEach, expect, test, vi } from 'vitest'
 
-import { assertGeneratedMp3Audio, inspectGeneratedMp3Audio } from '../src/generated-audio.ts'
+import { assertGeneratedMp3Audio, inspectGeneratedMp3Audio, inspectMp3Frames } from '../src/generated-audio.ts'
 import { generateElevenLabsSpeech } from '../src/elevenlabs-runtime.ts'
 import { sendLinqVoiceMemo, uploadLinqAttachment } from '../src/linq-runtime.ts'
 
 afterEach(() => vi.restoreAllMocks())
+
+test('walks real-shaped headers, ID3 and variable padding without assuming 576-byte frames', () => {
+  const frame = (padding: number) => { const b = Buffer.alloc(417 + padding); b.set([0xff, 0xfb, 0x90 | padding << 1, 0]); return b }
+  const id3 = Buffer.from([0x49, 0x44, 0x33, 4, 0, 0, 0, 0, 0, 2, 0, 0])
+  const tag = Buffer.alloc(128); tag.write('TAG')
+  const bytes = Buffer.concat([id3, frame(0), frame(1), frame(0), tag])
+  const stream = inspectMp3Frames(bytes)
+  expect(stream.frames.map(f => f.byteOffset)).toEqual([12, 429, 847])
+  expect(stream.frames[2]!.timeMs).toBeCloseTo(1152 * 2000 / 44100)
+  expect(stream.endOffset).toBe(1264)
+  const real = inspectMp3Frames(readFileSync(new URL('../../../fixtures/generated-audio/recap-synthetic-20s.mp3', import.meta.url)))
+  expect(real.durationMs).toBeGreaterThan(20_000)
+  expect(real.durationMs).toBeLessThan(20_500)
+})
+
+test('rejects malformed frames, truncated tags, mixed sample rates, layers and bitrate, and unknown trailing bytes', () => {
+  const frame = Buffer.alloc(576); frame.set([0xff, 0xfb, 0xb4, 0])
+  const mutate = (index: number, value: number) => { const b = Buffer.from(frame); b[index] = value; return Buffer.concat([frame, b]) }
+  for (const bytes of [Buffer.alloc(0), frame.subarray(0, 575), Buffer.concat([frame, Buffer.from([0])]),
+    mutate(1, 0xfd), mutate(2, 0xb0), mutate(2, 0xa4), mutate(2, 0xf4), mutate(0, 0),
+    Buffer.from([0x49, 0x44, 0x33, 4, 0, 0, 0x80, 0, 0, 0]), Buffer.from([0x49, 0x44, 0x33]),
+    Buffer.from([0x49, 0x44, 0x33, 4, 0, 0, 0, 0, 0, 127])]) expect(() => inspectMp3Frames(bytes)).toThrow()
+})
 
 test('derives bounded duration from playable samples and rejects a forged MP3 header', async () => {
   const bytes = new Uint8Array(readFileSync(new URL('../../../fixtures/generated-audio/music.mp3', import.meta.url)))

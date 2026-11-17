@@ -12,10 +12,11 @@ import { importDeviceProviderSnapshot, normalizeJunctionSnapshot } from "@murpha
 import type { CanonicalEntity } from "../src/canonical-entities.ts";
 import { buildMetricProjection } from "../src/metrics/projection.ts";
 import { createVaultReadModel, listEntities, readVault } from "../src/model.ts";
-import { listMetricPointsRuntime, searchVaultRuntime } from "../src/query-projection.ts";
+import { listMetricPointsRuntime, searchVaultRuntime, summarizeWearableLatestRuntime } from "../src/query-projection.ts";
 import { searchVault } from "../src/search.ts";
 import {
   explainWearableDrift,
+  buildWearableAssistantSummary,
   listWearableBodyStateDays,
   summarizeWearableLatest,
   summarizeWearableMetricLatest,
@@ -2556,4 +2557,84 @@ test("Junction Fitbit and Withings evidence is queryable by its public source pr
   assert.equal(withings?.activity, null);
   assert.equal(absent, null);
   assert.equal(internal, null);
+});
+
+test("canonical Fitbit and Google Health days select one activity value for MetricPoints and assistant", async () => {
+  const vaultRoot = await mkdtemp(path.join(os.tmpdir(), "murph-junction-overlap-query-"));
+  const snapshot = {
+    accountId: "junction-overlap-test",
+    importedAt: "2026-08-12T12:00:00.000Z",
+    summaries: {
+      activity: [
+        { date: "2026-08-11", id: "fitbit-activity", sourceProviderSlug: "fitbit", steps: 6_000 },
+        { date: "2026-08-11", id: "google-activity", sourceProviderSlug: "google_health", steps: 4_100 },
+      ],
+    },
+  };
+  try {
+    await coreRuntime.initializeVault({
+      createdAt: "2026-08-11T00:00:00.000Z",
+      timezone: "UTC",
+      vaultRoot,
+    });
+    await importDeviceProviderSnapshot<Awaited<ReturnType<typeof coreRuntime.importDeviceBatch>>>(
+      {
+        provider: "junction",
+        vaultRoot,
+        snapshot,
+      },
+      { corePort: coreRuntime },
+    );
+    const activity = (await summarizeWearableLatestRuntime(vaultRoot))?.activity;
+    const assistantActivity = buildWearableAssistantSummary(makeVaultFromJunctionSnapshot(snapshot)).activity;
+    const stepPoints = await listMetricPointsRuntime(vaultRoot, { metricKey: "steps", limit: null });
+
+    assert.equal((await summarizeWearableLatestRuntime(vaultRoot, { providers: ["fitbit"] }))?.activity?.steps.selection.value, 6_000);
+    assert.equal((await summarizeWearableLatestRuntime(vaultRoot, { providers: ["google-health"] }))?.activity?.steps.selection.value, 4_100);
+    assert.ok(activity?.steps.selection.value === 6_000 || activity?.steps.selection.value === 4_100);
+    assert.equal(assistantActivity?.steps.selection.value, activity.steps.selection.value);
+    assert.deepEqual(stepPoints.map((point) => point.value), [activity.steps.selection.value]);
+    assert.notEqual(activity.steps.selection.value, 10_100);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
+test("wearable metric summaries distinguish absent observations from observed zero", () => {
+  const empty = summarizeWearableMetricTrend(makeVault([]), "skin-temp", { windowDays: 1 });
+  assert.ok(empty);
+  assert.equal(empty.value, null);
+  assert.equal(empty.provider, null);
+  assert.equal(empty.unit, null);
+  assert.equal(empty.recordedAt, null);
+  assert.deepEqual(empty.paths, []);
+  assert.deepEqual(empty.recordIds, []);
+  assert.deepEqual(empty.points, []);
+  assert.deepEqual(empty.recentWindow, {
+    average: null, count: 0, from: null, max: null, min: null, to: null,
+  });
+  assert.deepEqual(empty.priorWindow, empty.recentWindow);
+  assert.equal(empty.delta, null);
+  assert.equal(empty.percentChange, null);
+  assert.equal(empty.confidence.level, "none");
+
+  const vault = makeVault([makeObservation({
+    entityId: "evt_temperature_zero",
+    metric: "temperature-deviation",
+    value: 0,
+    unit: "celsius",
+    dayKey: "2026-04-04",
+    occurredAt: "2026-04-04T06:00:00Z",
+    recordedAt: "2026-04-04T06:05:00Z",
+  })]);
+  const zero = summarizeWearableMetricTrend(vault, "skin-temp", { windowDays: 1 });
+  assert.ok(zero);
+  assert.equal(zero.value, 0);
+  assert.deepEqual(zero.points.map((point) => point.value), [0]);
+  assert.deepEqual(zero.recentWindow, {
+    average: 0, count: 1, from: "2026-04-04", max: 0, min: 0, to: "2026-04-04",
+  });
+  assert.deepEqual(zero.priorWindow, empty.priorWindow);
+  assert.equal(zero.delta, null);
+  assert.equal(zero.percentChange, null);
 });

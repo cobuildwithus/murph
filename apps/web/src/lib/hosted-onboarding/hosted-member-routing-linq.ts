@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { activeHostedPersonAccessWhere } from "./member-access-projections";
 import {
   HostedBillingStatus,
@@ -92,7 +93,7 @@ export async function demoteHostedMemberLinqGroupChatBindingsTx(input: {
     input.linqChatId,
   );
   if (linqChatLookupKeys.length === 0) {
-    throw new TypeError("Hosted Linq group routing requires a non-empty chat id.");
+    throw new ContractValidationError("Hosted Linq group routing requires a non-empty chat id.");
   }
 
   await acquireHostedLinqRoutingWriteLockTx({
@@ -252,7 +253,7 @@ export async function upsertHostedMemberPendingLinqParticipantContactTx(input: {
   prisma: Prisma.TransactionClient;
 }): Promise<void> {
   if (Number.isNaN(input.observedAt.getTime())) {
-    throw new TypeError("Hosted Linq participant contact observed timestamp must be valid.");
+    throw new ContractValidationError("Hosted Linq participant contact observed timestamp must be valid.");
   }
 
   const contactLookupKeys = readHostedLinqParticipantContactLookupKeys(input.contact);
@@ -323,7 +324,7 @@ export async function tryCreateHostedMemberPendingLinqParticipantContactTx(input
   prisma: Prisma.TransactionClient;
 }): Promise<boolean> {
   if (Number.isNaN(input.observedAt.getTime())) {
-    throw new TypeError("Hosted Linq participant contact observed timestamp must be valid.");
+    throw new ContractValidationError("Hosted Linq participant contact observed timestamp must be valid.");
   }
 
   const contactLookupKeys = readHostedLinqParticipantContactLookupKeys(input.contact);
@@ -420,7 +421,7 @@ export async function finalizeHostedMemberActivationLinqRouteTx(input: {
   const chatLookupKey = createHostedLinqChatLookupKey(chatId);
   const chatLookupKeys = createHostedLinqChatLookupKeyReadCandidates(chatId);
   if (!chatId || !chatLookupKey || chatLookupKeys.length === 0) {
-    throw new TypeError("Hosted Linq activation routing requires a non-empty chat id.");
+    throw new ContractValidationError("Hosted Linq activation routing requires a non-empty chat id.");
   }
 
   const recipientPhone = normalizePhoneNumber(input.recipientPhone);
@@ -529,7 +530,7 @@ export async function upsertHostedMemberHomeLinqRecipientPhoneTx(input: {
   const recipientPhoneLookupKey = createHostedPhoneLookupKey(recipientPhone);
 
   if (!recipientPhone || !recipientPhoneLookupKey) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted Linq home-line assignment requires a non-empty recipient phone.",
     );
   }
@@ -826,7 +827,7 @@ async function writeHostedMemberLinqBindingTx(input: {
   const linqChatLookupKeys = createHostedLinqChatLookupKeyReadCandidates(input.linqChatId);
 
   if (!linqChatLookupKey || linqChatLookupKeys.length === 0) {
-    throw new TypeError("Hosted Linq routing requires a non-empty chat id.");
+    throw new ContractValidationError("Hosted Linq routing requires a non-empty chat id.");
   }
 
   const recipientPhone = normalizePhoneNumber(input.recipientPhone);
@@ -1234,7 +1235,7 @@ async function tryAcquireHostedMemberHomeLinqRouteLockTx(input: {
 }): Promise<boolean> {
   const memberId = input.memberId.trim();
   if (!memberId) {
-    throw new TypeError("Hosted Linq member routing lock requires a non-empty member id.");
+    throw new ContractValidationError("Hosted Linq member routing lock requires a non-empty member id.");
   }
 
   const rows = await input.prisma.$queryRaw<Array<{ id: string }>>`
@@ -1290,7 +1291,7 @@ async function acquireHostedLinqRoutingWriteLockTx(input: {
 }): Promise<void> {
   const lockValue = input.lockValue?.trim() ?? "";
   if (!lockValue) {
-    throw new TypeError("Hosted Linq routing lock requires a non-empty value.");
+    throw new ContractValidationError("Hosted Linq routing lock requires a non-empty value.");
   }
 
   await acquireHostedLinqChatOwnershipLockTx({
@@ -1308,7 +1309,7 @@ function readHostedLinqParticipantContactLookupKeys(
   });
 
   if (lookupKeys.length === 0) {
-    throw new TypeError("Hosted Linq participant contact requires a valid contact value.");
+    throw new ContractValidationError("Hosted Linq participant contact requires a valid contact value.");
   }
 
   return lookupKeys;

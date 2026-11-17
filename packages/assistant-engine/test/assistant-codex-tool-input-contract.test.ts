@@ -30,6 +30,7 @@ import {
   prepareScriptedTurnScenario,
   readRecord,
   startScriptedResponsesStub,
+  type ScriptedProviderRequestSummary,
   type ScriptedStub,
   type ScriptedResponse,
 } from './support/codex-scripted-provider.ts'
@@ -555,4 +556,71 @@ describe('Codex canonical tool input contract upgrade guard', () => {
     ]) expect(parseGenerateSongArguments(args).ok).toBe(false)
     expect(parseGenerateSongArguments({ prompt: 'x' })).toMatchObject({ ok: true, args: { durationSeconds: schema.durationSeconds.default, instrumental: schema.instrumental.default, prompt: 'x' } })
   })
+
+  // Optional, free, synthetic measurement for a PR body. The base is the same
+  // fixture with only the MCP server line removed from the private block.
+  it.skipIf(process.env.MURPH_MEASURE_MCP_CONNECT_INPUT !== '1').each(['direct', 'group'] as const)(
+    'MCP connect guidance: complete first provider input (%s)', { timeout: 180_000 }, async (scope) => {
+      const groupConversation = scope === 'group'
+      const scripted = stub ??= await startScriptedResponsesStub()
+      const scenario = await prepareScriptedTurnScenario(scripted, temporaryPaths)
+      const tools = resolveMurphDynamicTools({
+        allowFinishWithoutReply: true, assistantConfigurationAvailable: !groupConversation,
+        automationAvailable: true, groupAssistantConfigurationAvailable: groupConversation,
+        groupAvailable: !groupConversation, groupChallengeResponseCardsAvailable: groupConversation,
+        groupSharedReadAvailable: groupConversation, imageGenerationAvailable: false,
+        progressUpdatesAvailable: false, responseCardsAvailable: !groupConversation,
+      })
+      const layers = buildAssistantSystemPromptLayers({
+        assistantCliContract: null, assistantHostedAutomationAvailable: true,
+        assistantHostedGroupToolSurface: groupConversation ? 'shared_read' : 'families',
+        channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
+        conversationScope: scope, currentLocalDate: '2026-11-16',
+        currentInstant: '2026-11-16T16:00:00.000Z', currentTimeZone: 'America/New_York',
+        hostedRuntime: true, onboardingGuidance: false, ordinaryInboundTurn: true,
+      })
+      const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({
+        codexCommand: scenario.turnInput.codexCommand, directory: scenario.turnInput.codexHome,
+      })
+      const headInstructions = [layers.staticCacheableCorePrompt, layers.stableRouteCapabilityPrompt, layers.threadContextPrompt].join('\n\n')
+      const mcpLine = layers.blocks.find((block) => block.id === 'route.connected-apps.direct')?.text
+        .split('\n').find((line) => line.startsWith('- MCP servers:'))
+      // A group prompt never carries the line, so its base and head match.
+      assert.equal(mcpLine === undefined, groupConversation)
+      const baseInstructions = mcpLine ? headInstructions.replace(`\n${mcpLine}`, '') : headInstructions
+      assert.equal(baseInstructions === headInstructions, groupConversation)
+      assert.ok(!baseInstructions.includes('/settings/connections'))
+      const prompt = [layers.dynamicTurnContextPrompt, 'Can you connect my notes MCP server?'].filter(Boolean).join('\n\n')
+      const measurements: Record<string, unknown>[] = []
+      for (const phase of ['base', 'head'] as const) {
+        await stopWarmCodexAppServer()
+        scripted.markRequestBaseline()
+        scripted.captureProviderRequestDiagnostics({ completeInput: true })
+        scripted.queue({ text: CONTRACT_CAPTURE_DONE })
+        const developerInstructions = phase === 'base' ? baseInstructions : headInstructions
+        const result = await executeCodexAppServerTurn({
+          ...scenario.turnInput, baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+          dynamicTools: tools, developerInstructions, prompt, groupConversation,
+          env: { ...scenario.turnInput.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: catalog },
+        })
+        assert.equal(result.finalMessage, CONTRACT_CAPTURE_DONE)
+        assert.equal(scripted.requestCountSinceBaseline(), 1)
+        const captured: ScriptedProviderRequestSummary['completeProviderInput'] = scripted.requestSummariesSinceBaseline()[0]?.completeProviderInput
+        assert.ok(captured)
+        assert.equal(captured.json.includes('/settings/connections'), phase === 'head' && !groupConversation)
+        const body = readRecord(JSON.parse(captured.json))
+        assert.ok(body)
+        delete body.prompt_cache_key
+        measurements.push({ phase, decodedRequestUtf8Bytes: Buffer.byteLength(JSON.stringify(body)),
+          registeredToolsUtf8Bytes: Buffer.byteLength(JSON.stringify(tools)),
+          instructionsUtf8Bytes: Buffer.byteLength([developerInstructions, prompt].join('\n\n')),
+          exclusions: [...new Set([...captured.excludedTransportFields, 'prompt_cache_key'])],
+        })
+      }
+      process.stdout.write('[mcp-connect-input-proof] ' + JSON.stringify({ scope, model: scenario.turnInput.model, measurements,
+        tokens: null, tokenLimitation: 'No exact target tokenizer configured; scripted usage is not tokenization.',
+        baseline: 'origin/main; in-fixture removal of the one MCP server line; same tools and synthetic history',
+      }) + '\n')
+    },
+  )
 })

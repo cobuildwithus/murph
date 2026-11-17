@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 export interface RetellCallAnalysisPayload {
   call_summary?: string | null;
   custom_analysis_data?: Record<string, unknown> | null;
@@ -173,7 +174,7 @@ function readOptionalCallAnalysis(value: unknown): RetellCallAnalysisPayload | n
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {
   if (!isRecord(value)) {
-    throw new TypeError(`${label} must be an object.`);
+    throw new ContractValidationError(`${label} must be an object.`);
   }
   return value;
 }
@@ -186,7 +187,7 @@ function readOptionalRecord(
     return value;
   }
   if (!isRecord(value)) {
-    throw new TypeError(`${label} must be an object.`);
+    throw new ContractValidationError(`${label} must be an object.`);
   }
   return value;
 }
@@ -194,10 +195,10 @@ function readOptionalRecord(
 function requireTrimmedString(value: unknown, label: string, maxLength: number): string {
   const text = readOptionalString(value, label)?.trim();
   if (!text) {
-    throw new TypeError(`${label} is required.`);
+    throw new ContractValidationError(`${label} is required.`);
   }
   if (text.length > maxLength) {
-    throw new RangeError(`${label} exceeds ${maxLength} characters.`);
+    throw new ContractValidationError(`${label} exceeds ${maxLength} characters.`);
   }
   return text;
 }
@@ -207,7 +208,7 @@ function readOptionalString(value: unknown, label: string): string | null | unde
     return value;
   }
   if (typeof value !== "string") {
-    throw new TypeError(`${label} must be a string.`);
+    throw new ContractValidationError(`${label} must be a string.`);
   }
   return value;
 }
@@ -222,7 +223,7 @@ function readOptionalTimestamp(value: unknown): number | string | null | undefin
   if (typeof value === "number" && Number.isFinite(value)) {
     return value;
   }
-  throw new TypeError("Retell timestamp must be a string or finite number.");
+  throw new ContractValidationError("Retell timestamp must be a string or finite number.");
 }
 
 function readOptionalNonNegativeInteger(value: unknown): number | null | undefined {

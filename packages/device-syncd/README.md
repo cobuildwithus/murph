@@ -258,6 +258,17 @@ The shared ingress owns:
 - provider-owned webhook preflight plus webhook parsing
 - webhook dedupe and account lookup hooks
 
+Hosted webhook HTTP errors use explicit request rejections. Junction signature
+and payload refusals retain their domain status; configuration, stored-state,
+crypto and unexpected failures are server errors. Junction retries every
+non-2xx response ([retry policy](https://docs.junction.com/webhooks/retry-policy)).
+Prepared-event trace identity, rather than the Queue transport ID, owns
+duplicate admission. The Worker rejects malformed envelopes and incompatible
+visible metadata explicitly; unavailable keys and ambiguous crypto failures
+remain server errors so a deployment or key configuration fault cannot discard
+an event. GET uses the registered provider's preflight, if any; the current
+Junction-only registry has no subscription verification challenge.
+
 When a provider's verified webhook envelope includes a signed send timestamp,
 the provider parser exposes it as `providerSentAt`. This is distinct from the
 provider event's `occurredAt` and the shared ingress receipt time. Generic
@@ -309,6 +320,15 @@ such as workouts or body measurements do not become failed-export signals.
 that performs canonical import emits bounded source/resource normalization
 evidence for fallback coverage checks. `device-syncd` does not maintain a
 second raw-payload metric parser.
+
+Junction records reach `@murphai/importers` in one shape whether a webhook
+delivered them inline or `device-syncd` fetched them: Junction's wire
+(snake_case) field names. The official SDK builds and sends every request, but
+its parsed copy of a response (camelCase names, `Date` timestamps) never leaves
+`JunctionClient`. The one thing kept from that copy is each timestamp the SDK
+decoded, handed on as a UTC ISO string, because Junction writes instants as
+`+00:00` and local-day ownership would read that offset as the member's wall
+clock.
 
 Junction summary continuations call the canonical importer only when the prepared
 summary map contains a resource. A completed summary phase does not manufacture
@@ -401,10 +421,12 @@ job's segment; a continuation resumes after the completed prefix. Blood pressure
 keeps exact per-reading completion, and note history keeps complete-fetch
 semantics. All extended timeseries completion shares one fixed-width,
 source-by-resource matrix in an existing blood-pressure or note metadata slot.
-Its existing envelope generation advances to `m2` for this rollout because the
-packed bits do not carry per-resource policy versions: pre-180-day `m1` bits are
-structurally readable but stale and writable, while future envelopes remain
-opaque. Unsupported route identities fail before history egress rather than
+The packed bits do not carry per-resource policy versions, so the envelope
+generation is what retires them. The current envelope is `m3`. Pre-180-day `m1`
+bits are structurally readable but stale and writable. An `m2` matrix is read
+without its `weight` column, because `m2` certified weight history while fetched
+weight rows were being dropped, and every other `m2` bit stands. Every write is
+`m3`, and future envelopes remain opaque. Unsupported route identities fail before history egress rather than
 advancing an unretainable checkpoint. Every date-mode
 timeseries fetch preserves one complete provider
 calendar date during both migration and normal reconcile; a provider-bearing
@@ -413,19 +435,91 @@ date on the existing bounded ladder. Historical-pull status is re-read before
 coverage, with supported connect-route aliases canonicalized on both sides:
 matching pulled state takes precedence, success permits terminal empty history,
 nonterminal state waits, and explicit failure remains uncovered. Explicit
-`not_pulled` is no obligation only without a pulled entry, while unavailable
-status requires canonical history evidence. Delayed work derives
-the live reconcile boundary after every completed segment and continues until
-no middle gap remains. An explicit timeseries backfill override still governs
+`not_pulled` is no obligation only without a pulled entry. A resource that a
+provider entry leaves out of both lists is no obligation once every pull that
+entry lists has finished. Unavailable status requires canonical history
+evidence. Delayed work derives the live reconcile boundary after every
+completed segment and continues until no middle gap remains. An explicit timeseries backfill override still governs
 only the generic bounded timeseries policy; it does not shorten the fixed
 extended-history horizon.
+
+### Re-reading history after an importer fix
+
+History that an importer bug stored incompletely is read again by advancing a
+generation, never by a one-off job. Two generations exist, and each re-reads a
+different thing.
+
+- **Summaries.** Advancing `JUNCTION_HISTORICAL_BACKFILL_COVERAGE_VERSION`
+  re-queues the connect-window backfill of every connection whose stored status
+  carries an older generation, on that connection's next scheduled reconcile.
+  A window that had already settled (`complete` or `exhausted`) is re-read, not
+  re-opened: the job fetches each summary over the connect window and then on
+  to the start of the reconcile window, in spans no longer than the backfill's
+  own, because a source added or reconnected after the connection date had its
+  history fetched then. It reads no timeseries and queues no timeseries or
+  temporal jobs, it keeps the stored outcome (an exhausted window can become
+  complete, and nothing re-enters the retry ladder), and it writes the status
+  under the current generation when it finishes. A re-read that yields to the
+  foreground leaves the older status in place and is queued again by the next
+  scheduled pass. A window that was still `retrying`, or has no status, runs
+  the ordinary full backfill and restarts its ladder.
+- **Weight.** The envelope generation of the extended-history matrix, above.
+  `m3` re-opens weight for each source whose weight bit sat in an `m2` matrix;
+  the existing one-history-job-per-connection-per-interval selector queues it.
+  The scan covers the 180 days before the day it is scheduled. The per-resource
+  generation in `JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_VERSIONS` does
+  not re-read anything on its own: it fences which in-flight job may certify a
+  bit. It advances with the envelope (weight is generation 3), so a scan that
+  kept its cursor from before the fix can finish importing but cannot certify
+  the re-read, and the full scan is queued under its own identity.
+
+`fat`, `body_mass_index`, `lean_body_mass` and `waist_circumference` timeseries
+have no extended history, so neither generation reaches their readings older
+than the reconcile window; the daily `body` summary carries weight, fat and BMI.
+
+Progress is the stored state per connection. These read-only aggregates count
+connections and name none:
+
+```sql
+-- Summaries: rows move from coverage_v<old>_* to coverage_v<current>_*.
+select coalesce(metadata_json->>'junctionHistoricalBackfillStatus', '(none)') as connect_window,
+       count(*) as connections
+from device_connection
+where provider = 'junction' and status = 'active'
+group by 1 order by 1;
+
+-- Weight: source-by-weight bits set per envelope. A bit under m2 is waiting
+-- for its re-read; the same bit under m3 has had it. An m3 prefix alone does
+-- not mean weight is done, since any completion rewrites the envelope.
+select left(matrix, 2) as envelope, sum(weight_bit) as weight_bits,
+       count(distinct id) filter (where weight_bit = 1) as connections
+from (
+  select c.id, m.matrix,
+         (get_byte(decode(substr(m.matrix, 4), 'hex'), (13 * s + 12) / 8) >> ((13 * s + 12) % 8)) & 1 as weight_bit
+  from device_connection c
+  cross join lateral (values (c.metadata_json->>'junctionBloodPressureHistoryBackfillCoverage'),
+                             (c.metadata_json->>'junctionNoteHistoryBackfillCoverage')) as m(matrix)
+  cross join generate_series(0, 63) as s
+  where c.provider = 'junction' and c.status = 'active' and m.matrix ~ '^m[23][|][0-9a-f]{208}$'
+) bits
+group by 1 order by 1;
+```
+
+The weight query hard-codes the matrix layout: 13 resource columns per source
+with `weight` in column 12. Update it with
+`JUNCTION_EXTENDED_TIMESERIES_HISTORY_RESOURCE_SLOTS`.
 
 Junction's historical-pull status is authoritative when available. A `success`
 completes its source/resource obligation even when the provider reports zero
 rows, and Murph does not compare provider-specific history ranges with its own
-connect window. `not_pulled` is not an obligation. Scheduled, in-progress,
-retrying, unknown, malformed, or unavailable status remains pending on the
-existing daily retry cadence; none of those states can request a reset.
+connect window. `not_pulled` is not an obligation. Junction lists a pull under
+`pulled` from the moment it is scheduled. So once a provider entry lists
+something and every pull it lists is `success` or `failure`, a resource it
+leaves out of both lists has no pull coming and is not an obligation either;
+Garmin, for example, never lists `sleep_cycle`. While any listed pull is
+unfinished, or the entry lists nothing, that resource waits. Scheduled,
+in-progress, retrying, unknown, malformed, or unavailable status remains pending
+on the existing daily retry cadence; none of those states can request a reset.
 Canonical normalization evidence and authenticated old-window push evidence
 provide the bounded fallback when introspection is unavailable.
 
@@ -436,6 +530,11 @@ Junction `failure` for every still-pending Garmin obligation can mark Garmin
 reconnect-required while aggregate metadata remains `retrying` for another
 provider. Successful Garmin coverage clears that source marker without waiting
 for the other provider. Current ingestion remains active throughout.
+
+Connect-window history is owed only while a wearable is linked. A connection
+with no source, or only disconnected sources, queues no connect-window job; its
+stored status stays as it is, and the first scheduled pass after a wearable
+links resumes the check where it left off.
 
 Restarting the Garmin export requires the member to confirm the existing
 connection-wide disconnect and then reconnect Garmin. The reset can disconnect
@@ -479,9 +578,17 @@ establishes only when zero provider rows exist, and rejects terminal or
 ambiguous state. Only a future visible hosted-health/Junction Reconnect action
 may send `connect` and create/reactivate the shared lane. Resume, omitted intent,
 data ingress, and retry work cannot undo an explicit disconnect.
-That explicit Apple Health connect captures the current source epoch before SDK
-token mint and opens one pending epoch afterward only if the proof remains
-current. A signed Junction source-registration event reconciles that unchanged
+That explicit connect touches only the calling platform's own source (Apple
+Health for iOS, Health Connect for Android). It captures the current source
+epoch before SDK token mint and opens one pending epoch afterward only if the
+proof remains current. A source already connected without a disconnect fence
+keeps its epoch: signing a phone back in does not close it or re-read its
+history, while disconnecting it and connecting again does. While a pending
+epoch is open, a queued job for data a webhook already accepted from that
+source fails retryably (`JUNCTION_SOURCE_ADMISSION_PENDING`) on the ordinary
+five-attempt budget, about 36 minutes, and imports once the source is
+re-admitted; a fenced source still drops its queued work. A signed Junction
+source-registration event reconciles that unchanged
 pending epoch against the live provider list and commits it connected; the same
 event target-cleans a fenced source or disconnected parent.
 Apple Health companion metadata, WHOOP overnight summaries, and their queued

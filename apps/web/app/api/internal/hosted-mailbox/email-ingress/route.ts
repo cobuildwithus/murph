@@ -1,3 +1,4 @@
+import { parseInput, RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import { Buffer } from "node:buffer";
 
 import {
@@ -26,7 +27,7 @@ export const POST = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(boundedRequest, {
     maxBodyBytes: HOSTED_EMAIL_INGRESS_CALLBACK_MAX_BODY_BYTES,
   });
-  const body = parseHostedEmailIngressWakeAppendRequest(await readOptionalJsonObject(boundedRequest));
+  const body = parseInput(await readOptionalJsonObject(boundedRequest), parseHostedEmailIngressWakeAppendRequest);
   const envelope = buildHostedExecutionEmailConversationMessageWake({
     ...(body.assistantStyleSettingsAuthorized === undefined
       ? {}
@@ -75,7 +76,7 @@ async function readBoundedHostedEmailIngressRequest(request: Request): Promise<R
       limitBytes: HOSTED_EMAIL_INGRESS_CALLBACK_MAX_BODY_BYTES,
     });
   } catch (error) {
-    if (error instanceof RangeError) {
+    if (error instanceof RequestBodyTooLargeError) {
       throw hostedOnboardingError({
         code: "HOSTED_EMAIL_INGRESS_CALLBACK_BODY_TOO_LARGE",
         message: "Hosted email ingress callback body is too large.",

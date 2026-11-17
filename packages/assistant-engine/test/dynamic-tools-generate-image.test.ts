@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 
 import { initializeVault } from '@murphai/core'
+import { RecapReferenceRefusal } from '../src/assistant/recap-workspace.ts'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
@@ -327,6 +328,56 @@ describe('murph.generate_image dynamic tool schema', () => {
       }),
     }))
     releaseUsage()
+  })
+
+  it('fixes the media format in a recap show, whatever the model sent, and passes the recap refusal through', async () => {
+    const prepared: unknown[] = []
+    const hostedToolContext = {
+      computerToolsAvailable: false,
+      currentHostedDeliveryContext: () => null,
+      currentHostedMailboxItemIds: () => [],
+      currentGameRecapScope: () => ({ gameId: 'game_synthetic', eventId: 'game-recap:game_synthetic', pairFingerprint: 'a'.repeat(32), show: true }),
+      readGameRecapDraft: async () => ({}),
+      prepareRecapMedia: async (request) => { prepared.push(request); throw new Error('Synthetic recap refusal.') },
+      sendVaultFile: async () => ({ filename: 'unused', status: 'denied' as const }),
+      vaultFileSendAvailable: false,
+    } satisfies AssistantHostedToolContext
+    const run = (request: Parameters<typeof executeMurphDynamicToolRequest>[0]['request']) => executeMurphDynamicToolRequest({
+      deliveryContextOrdinal: 0, env: {}, fetchImpl: fetch, hostedToolContext, nextUsageOrdinal: () => 1, progressDelivery: null, request })
+    const results = [
+      await run({ kind: 'generate-image', args: { alt: null, outputFormat: 'webp', prompt: 'A synthetic stage.', quality: 'low', referenceImageRefs: [], size: '1024x1024' } }),
+      await run({ kind: 'generate-song', args: { draftPath: 'draft.json', voice: 'Warm baritone' } }),
+    ]
+    expect(prepared).toEqual([
+      { kind: 'image', args: expect.objectContaining({ outputFormat: 'jpeg', quality: 'high', size: '1024x1536' }) },
+      { kind: 'song', args: expect.objectContaining({ draftPath: 'draft.json', voice: 'Warm baritone' }) },
+    ])
+    for (const result of results) {
+      expect(result.rpcResult).toEqual({ success: false, contentItems: [{ type: 'inputText', text: 'Synthetic recap refusal.' }] })
+      expect(result.failureDiagnostic).toMatchObject({ failureReason: 'handler_exception' })
+    }
+  })
+
+  it('records a refused recap reference as the model\'s input, with what it looked like and not its value', async () => {
+    const material = { game: {}, players: ['Player A', 'Player B'], entries: [{ entryId: 'entry-a', kind: 'photo', playerName: 'Player A', text: null, visibleToBoth: true }],
+      result: [{ memberId: 'a', name: 'Player A', score: 1 }, { memberId: 'b', name: 'Player B', score: 0 }],
+      startedAt: '2026-11-01T00:00:00Z', settledAt: '2026-11-08T00:00:00Z', references: [] }
+    const refs = ['skill-assets/murph-character-sheet-v1.png', 'raw/inbox/synthetic.jpg', 'entry-a', 'tmp/recap/x/refs/' + 'c'.repeat(64) + '.jpg', 'synthetic']
+    const hostedToolContext = {
+      computerToolsAvailable: false,
+      currentHostedDeliveryContext: () => null,
+      currentHostedMailboxItemIds: () => [],
+      currentGameRecapScope: () => ({ gameId: 'game_synthetic', eventId: 'game-recap:game_synthetic', pairFingerprint: 'a'.repeat(32), show: true }),
+      prepareRecapMedia: async () => { throw new RecapReferenceRefusal(material, refs) },
+      sendVaultFile: async () => ({ filename: 'unused', status: 'denied' as const }),
+      vaultFileSendAvailable: false,
+    } satisfies AssistantHostedToolContext
+    const result = await executeMurphDynamicToolRequest({ deliveryContextOrdinal: 0, env: {}, fetchImpl: fetch, hostedToolContext, nextUsageOrdinal: () => 1, progressDelivery: null,
+      request: { kind: 'generate-image', args: { alt: null, outputFormat: 'webp', prompt: 'A synthetic stage.', quality: 'low', referenceImageRefs: refs, size: '1024x1024' } } })
+    expect(result.rpcResult.success).toBe(false)
+    expect(result.failureDiagnostic).toEqual({ failureStage: 'validation', failureReason: 'invalid_input',
+      recapRefusedReferences: ['skill_asset', 'vault_path', 'entry_id', 'unlisted_reference', 'other'] })
+    expect(JSON.stringify(result.failureDiagnostic)).not.toMatch(/synthetic|skill-assets|raw\//u)
   })
 
   it('binds an irreversible continuation to its exact accepted group input', async () => {

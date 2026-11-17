@@ -1,4 +1,5 @@
 import {
+  isHostedAiUsageAllowanceElevenLabsMusicPricedModelId,
   normalizeHostedAiUsageAllowanceElevenLabsMusicModelId,
   normalizeHostedAiUsageAllowanceElevenLabsTtsModelId,
   type HostedAiUsageAllowanceElevenLabsMusicPricedModel,
@@ -55,7 +56,7 @@ function requiredOutputFormatFor(pathnameSuffix: string): string | null {
     || /^\/v1\/text-to-speech\/[^/]+$/u.test(pathnameSuffix)) {
     return "mp3_44100_128";
   }
-  if (pathnameSuffix === "/v1/music") {
+  if (pathnameSuffix === "/v1/music" || pathnameSuffix === "/v1/music/detailed") {
     return "mp3_48000_192";
   }
   return null;
@@ -86,6 +87,9 @@ export function parseHostedElevenLabsRequestBody(input: {
   }
   if (input.pathnameSuffix === "/v1/music") {
     return parseHostedElevenLabsMusicRequestBody(record);
+  }
+  if (input.pathnameSuffix === "/v1/music/detailed") {
+    return parseHostedElevenLabsDetailedMusicRequestBody(record);
   }
   return null;
 }
@@ -202,6 +206,58 @@ function parseHostedElevenLabsMusicRequestBody(
       prompt,
     }),
   };
+}
+
+function parseHostedElevenLabsDetailedMusicRequestBody(record: Record<string, unknown>): HostedElevenLabsMusicRequestBody | null {
+  const modelId = record.model_id;
+  if (!hasExactKeys(record, ["composition_plan", "model_id", "with_timestamps"])
+    || typeof modelId !== "string" || !isHostedAiUsageAllowanceElevenLabsMusicPricedModelId(modelId)
+    || record.with_timestamps !== true) return null;
+  const plan = asRecord(record.composition_plan);
+  if (!plan || !hasExactKeys(plan, ["chunks"]) || !Array.isArray(plan.chunks) || !plan.chunks.length || plan.chunks.length > 10) return null;
+  const values = plan.chunks;
+  const chunks = values.length === 1 ? [parseDetailedMusicChunk(values[0])]
+    : values.map((value, index) => parseScoreMusicChunk(value, index === values.length - 1));
+  if (chunks.some(chunk => !chunk)) return null;
+  const valid = chunks.filter((chunk): chunk is NonNullable<typeof chunk> => chunk !== null);
+  return { kind: "music", modelId, durationMs: valid.reduce((sum, chunk) => sum + chunk.duration_ms, 0), upstreamBody: JSON.stringify({
+    model_id: modelId, with_timestamps: true, composition_plan: { chunks: valid },
+  }) };
+}
+
+function parseScoreMusicChunk(value: unknown, sung: boolean) {
+  const chunk = asRecord(value);
+  if (!chunk || !hasExactKeys(chunk, ["text", "duration_ms", "positive_styles", "negative_styles", "context_adherence"])
+    || chunk.context_adherence !== "high" || chunk.duration_ms !== (sung ? 20_000 : 5000)
+    || typeof chunk.text !== "string" || !chunk.text.trim() || chunk.text.length > 4120
+    || chunk.text.split("\n").length > 21 || chunk.text.split("\n").some(line => !line.trim() || line.length > 200 || line.includes("\r"))) return null;
+  const positive = boundedStyles(chunk.positive_styles), negative = boundedStyles(chunk.negative_styles);
+  if (!positive || !negative) return null;
+  return { text: chunk.text, duration_ms: sung ? 20_000 : 5000, positive_styles: positive, negative_styles: negative, context_adherence: "high" };
+}
+
+function boundedStyles(value: unknown): string[] | null {
+  if (!Array.isArray(value) || !value.length || value.length > 12) return null;
+  const styles = value.map(style => normalizeHostedElevenLabsString(style, 2000));
+  return styles.every((style): style is string => style !== null) ? styles : null;
+}
+
+function parseDetailedMusicChunk(value: unknown) {
+  const chunk = asRecord(value);
+  if (!chunk || !hasExactKeys(chunk, ["text", "duration_ms", "positive_styles", "negative_styles"])) return null;
+  const durationMs = chunk.duration_ms;
+  if (typeof durationMs !== "number" || !Number.isSafeInteger(durationMs) || durationMs < 3000 || durationMs > 120_000
+    || typeof chunk.text !== "string" || chunk.text.length > 4019
+    || !Array.isArray(chunk.positive_styles) || chunk.positive_styles.length !== 1
+    || !Array.isArray(chunk.negative_styles) || chunk.negative_styles.length !== 0) return null;
+  const prompt = normalizeHostedElevenLabsString(chunk.positive_styles[0], HOSTED_ELEVENLABS_MUSIC_MAX_PROMPT_CHARS);
+  const lines = chunk.text.split("\n");
+  if (!prompt || lines.length > 20 || lines.some(line => !line.trim() || line.length > 200 || line.includes("\r"))) return null;
+  return { text: chunk.text, duration_ms: durationMs, positive_styles: [prompt], negative_styles: [] };
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
 }
 
 function parseJsonRecord(body: ArrayBuffer): Record<string, unknown> | null {

@@ -6,10 +6,33 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parseHostedRuntimeGroupToolRequest, parseHostedRuntimeGroupToolResponse } from "../src/parsers/runtime-control.ts";
 import { hostedGameToolRequestSchema, hostedGameToolResponseSchema } from "../src/game-tools.ts";
+import { recapVideoDraftSchema } from "@murphai/contracts/recap-show";
 import { parseHostedExecutionEvent } from "../src/parsers.ts";
 import { buildGamePrivateEveningInstructions, buildGamePrivateKickoffInstructions } from "../src/runtime-control.ts";
 
 const origin = { kind: "accepted_input", assistantInputId: "ain_synthetic" };
+
+it.skipIf(process.env.MURPH_VERIFY_RECAP_SKEW !== "1")("base runners accept show receipts while new Web accepts historical long replay requests", async () => {
+  const root = fileURLToPath(new URL("../../../", import.meta.url));
+  const suffix = randomUUID();
+  const oldStory = new URL(`../../contracts/src/.recap-skew-${suffix}.ts`, import.meta.url);
+  const oldTools = new URL(`../src/.recap-skew-${suffix}.ts`, import.meta.url);
+  const base = "9d0adef6908eb2b99521615ac33d5347fbff0f0c";
+  const source = (file: string) => execFileSync("git", ["show", `${base}:${file}`], { cwd: root, encoding: "utf8" });
+  await writeFile(oldStory, source("packages/contracts/src/recap-show.ts"), { flag: "wx" });
+  await writeFile(oldTools, source("packages/hosted-execution/src/game-tools.ts").replaceAll('"@murphai/contracts/recap-show"', JSON.stringify(`../../contracts/src/.recap-skew-${suffix}.ts`)), { flag: "wx" });
+  try {
+    const old = await import(oldTools.href) as typeof import("../src/game-tools.ts");
+    const story = { pages: [{ background: "paper", blocks: [{ kind: "scene", scene: { cast: ["Leo", "Ava"], prompt: "Synthetic train scene.", faceY: 0.3 } }] }], chatLine: "The train arrived." };
+    for (const action of ["read_game", "write_recap"]) {
+      const receipt = { action, result: { status: "ok", chatLine: story.chatLine } };
+      expect(old.hostedGameToolResponseSchema.parse(receipt)).toEqual(receipt);
+      expect(old.hostedGameToolResponseSchema.safeParse({ ...receipt, result: { ...receipt.result, recap: story } }).success).toBe(false);
+    }
+    const request = { action: "write_recap", origin: { kind: "game_recap", gameId: "game_synthetic", eventId: "game-recap:game_synthetic" }, recap: { ...story, treatment: "x".repeat(60) } };
+    expect(hostedGameToolRequestSchema.parse(request)).toEqual(request);
+  } finally { await Promise.all([rm(oldStory, { force: true }), rm(oldTools, { force: true })]); }
+});
 
 const rematchNotice = (termsVersion: unknown = 1) => ({ kind: "assistant.notification.requested", userId: "synthetic_room", notification: {
   instructions: "Synthetic compact comparison", responsePolicy: { kind: "require_game_rematch", gameId: "game_synthetic", eventId: "game-rematch:game_synthetic", termsVersion },
@@ -38,6 +61,37 @@ it.skipIf(process.env.MURPH_VERIFY_GAME_SKEW !== "1")("old runners reject revisi
     expect(legacy.parseHostedExecutionEvent(legacyPair)).toEqual(parseHostedExecutionEvent(legacyPair));
   } finally { await rm(target, { force: true }); }
 });
+// What Web returns after a day correction changes a finished game's outcome: an existing receipt status, the
+// existing optional chatLine, and a settled game that lists its days only while they can still be corrected.
+const settledCorrection = (progress?: object) => ({ action: "update_game", result: { status: "ok", dayOutcome: { date: "2030-04-03", status: "credited" },
+  chatLine: "Alex's check-in for Wednesday, April 3 now counts. That changes the result. The game ended in a 6–6 tie.",
+  state: { games: [{ ...game, status: "settled", ...(progress ? { progress } : {}),
+    result: { scores: [{ memberId: "player_first", seat: 0, score: 6, misses: 1 }, { memberId: "player_second", seat: 1, score: 6, misses: 1 }], tickets: [] } }] } } });
+const settledDays = { checkedAt: "2030-04-09T12:00:00Z", players: [{ memberId: "player_first", score: 6, target: 7, currentDayIndex: null, currentEntryId: null, attemptsRemaining: 0,
+  days: [{ dayIndex: 2, date: "2030-04-03", status: "posted" }] }] };
+
+it("reads a finished game's day correction with no new field", () => {
+  for (const payload of [settledCorrection(settledDays), settledCorrection()]) {
+    expect(hostedGameToolResponseSchema.parse(payload)).toEqual(payload);
+    expect(parseHostedRuntimeGroupToolResponse(payload)).toEqual(payload);
+  }
+});
+
+it.skipIf(process.env.MURPH_VERIFY_GAME_SKEW !== "1")("the runner deployed before this change reads a finished game's day correction", async () => {
+  const root = fileURLToPath(new URL("../../../", import.meta.url));
+  const suffix = randomUUID();
+  const oldTools = new URL(`../src/.settled-correction-skew-${suffix}.ts`, import.meta.url);
+  // The public main commit the hosted runner was built from when this change was written.
+  await writeFile(oldTools, execFileSync("git", ["show", "ebf25597213aca48a42f216018f6dfc6d5b2ab32:packages/hosted-execution/src/game-tools.ts"], { cwd: root, encoding: "utf8" }), { flag: "wx" });
+  try {
+    const old = await import(oldTools.href) as typeof import("../src/game-tools.ts");
+    for (const payload of [settledCorrection(settledDays), settledCorrection()]) expect(old.hostedGameToolResponseSchema.parse(payload)).toEqual(payload);
+    // And new Web still reads what that runner sends for the same request.
+    const request = { action: "update_game", origin, update: { operation: "mark_complete", gameId: game.id, date: "2030-04-03", text: "Read a chapter" } };
+    expect(old.hostedGameToolRequestSchema.parse(request)).toEqual(hostedGameToolRequestSchema.parse(request));
+  } finally { await rm(oldTools, { force: true }); }
+});
+
 const game = {
   id: "game_synthetic", status: "live", lengthDays: 7, startsOn: "2030-04-01",
   terms: { n: 1, fromDay: 0, tasks: [{ seat: 0, text: "Walk" }, { seat: 1, text: "Read" }], schedule: { days: [0, 1, 2, 3, 4] }, stakes: [{ kind: "winner_gets", item: "Choose the next game" }] },
@@ -193,6 +247,84 @@ it.skipIf(process.env.MURPH_VERIFY_GAME_SKEW !== "1")("keeps old-runtime respons
 });
 
 
+describe("recap video tool contract", () => {
+  const recapOrigin = { kind: "game_recap", gameId: "game_synthetic", eventId: "game-recap:game_synthetic" };
+  const generation = "a".repeat(32), hash = (char: string) => char.repeat(64);
+  const video = { hash: hash("c"), byteLength: 3_000_000, referenceIds: [hash("d")], parts: [
+    { storageKey: `recap/${generation}/${hash("e")}.mp4`, hash: hash("e"), byteLength: 2_000_000 },
+    { storageKey: `recap/${generation}/${hash("f")}.mp4`, hash: hash("f"), byteLength: 1_000_000 }] };
+  const recap = { pages: [{ background: "paper", blocks: [{ kind: "headline", text: "The mat stayed put" }] }], chatLine: "The mat stayed put." };
+  const write = { action: "write_recap", origin: recapOrigin, recap, assets: [] };
+  const upload = (file: object) => ({ action: "read_game", origin: recapOrigin, recapRead: { kind: "upload", referenceIds: [], bytes: "AAAA", ...file } });
+  const part = { slot: "video-0", mediaType: "video/mp4" };
+
+  it("keeps every request and result without a video exactly as it was", () => {
+    for (const request of [write, { action: "read_game", origin: recapOrigin, recapRead: { kind: "recover" } }, { action: "read_game", origin: recapOrigin, recapRead: { kind: "recover", failed: true } },
+      upload({ slot: "scene-0", mediaType: "image/jpeg", referenceIds: [hash("d")] }), upload({ slot: "song", mediaType: "audio/mpeg" })]) {
+      expect(hostedGameToolRequestSchema.parse(request)).toEqual(request);
+    }
+    const result = { action: "write_recap", result: { status: "ok", chatLine: recap.chatLine } };
+    expect(hostedGameToolResponseSchema.parse(result)).toEqual(result);
+    expect(hostedGameToolResponseSchema.parse(result).result).not.toHaveProperty("recapVideo");
+  });
+
+  it("accepts a part upload only as an MP4 slice in a video slot with no sources of its own", () => {
+    for (const slot of ["video-0", "video-3"]) expect(hostedGameToolRequestSchema.parse(upload({ ...part, slot }))).toEqual(upload({ ...part, slot }));
+    for (const file of [{ ...part, slot: "video-4" }, { ...part, slot: "scene-0" }, { slot: "video-0", mediaType: "image/jpeg" }, { slot: "song", mediaType: "video/mp4" },
+      { ...part, referenceIds: [hash("d")] }, { ...part, wordsTimestamps: [] }]) {
+      expect(hostedGameToolRequestSchema.safeParse(upload(file)).success).toBe(false);
+    }
+    // The largest part still fits the upload's base64 bound.
+    const largest = Buffer.alloc(2_000_000).toString("base64");
+    expect(largest.length).toBeLessThanOrEqual(2_800_000);
+    expect(hostedGameToolRequestSchema.safeParse(upload({ ...part, bytes: largest })).success).toBe(true);
+  });
+
+  it("carries a video candidate with a write and the accepted identity, or none, in a result", () => {
+    expect(hostedGameToolRequestSchema.parse({ ...write, video })).toEqual({ ...write, video });
+    expect(recapVideoDraftSchema.parse(video)).toEqual(video);
+    // The candidate is optional: one Web cannot read is left for selection to drop, and the recap's write still parses.
+    for (const candidate of [{ ...video, durationMs: 51_033 }, { ...video, byteLength: 3_000_001 }, { ...video, parts: [] }, null, "not a candidate"]) {
+      expect(recapVideoDraftSchema.safeParse(candidate).success).toBe(false);
+      expect(hostedGameToolRequestSchema.parse({ ...write, video: candidate })).toEqual({ ...write, video: candidate });
+    }
+    expect(hostedGameToolRequestSchema.safeParse({ ...write, videos: video }).success).toBe(false);
+    const recover = { action: "read_game", origin: recapOrigin, recapRead: { kind: "recover", video: true } };
+    expect(hostedGameToolRequestSchema.parse(recover)).toEqual(recover);
+    expect(hostedGameToolRequestSchema.safeParse({ ...recover, recapRead: { kind: "recover", video: false } }).success).toBe(false);
+    for (const recapVideo of [null, { generationId: generation, hash: video.hash, byteLength: video.byteLength }]) {
+      for (const action of ["write_recap", "read_game"]) {
+        const result = { action, result: { status: "ok", chatLine: recap.chatLine, recapVideo } };
+        expect(parseHostedRuntimeGroupToolResponse(result)).toEqual(result);
+      }
+    }
+    expect(hostedGameToolResponseSchema.safeParse({ action: "write_recap", result: { status: "ok", recapVideo: { hash: video.hash, byteLength: video.byteLength } } }).success).toBe(false);
+    expect(hostedGameToolResponseSchema.safeParse({ action: "write_recap", result: { status: "ok", recapVideo: { generationId: generation, hash: video.hash, byteLength: video.byteLength, storageKey: "recap/forged.mp4" } } }).success).toBe(false);
+  });
+
+  it.skipIf(process.env.MURPH_VERIFY_RECAP_SKEW !== "1")("is refused whole by the previous release, so Web answers with an identity only when asked", async () => {
+    const root = fileURLToPath(new URL("../../../", import.meta.url));
+    const suffix = randomUUID(), base = "fa02b3ce62e03f5c7469d46bcf677f0faad41dcb";
+    const oldStory = new URL(`../../contracts/src/.recap-video-skew-${suffix}.ts`, import.meta.url);
+    const oldTools = new URL(`../src/.recap-video-skew-${suffix}.ts`, import.meta.url);
+    const source = (file: string) => execFileSync("git", ["show", `${base}:${file}`], { cwd: root, encoding: "utf8" });
+    await writeFile(oldStory, source("packages/contracts/src/recap-show.ts"), { flag: "wx" });
+    await writeFile(oldTools, source("packages/hosted-execution/src/game-tools.ts").replaceAll('"@murphai/contracts/recap-show"', JSON.stringify(`../../contracts/src/.recap-video-skew-${suffix}.ts`)), { flag: "wx" });
+    try {
+      const old = await import(oldTools.href) as typeof import("../src/game-tools.ts");
+      const result = { action: "write_recap", result: { status: "ok", chatLine: recap.chatLine } };
+      // An older runner reads today's result and refuses one that carries the identity, even as null.
+      expect(old.hostedGameToolResponseSchema.parse(result)).toEqual(result);
+      expect(old.hostedGameToolResponseSchema.safeParse({ ...result, result: { ...result.result, recapVideo: null } }).success).toBe(false);
+      // An older Web refuses the part, the candidate and the identity request; requests without them are unchanged.
+      expect(old.hostedGameToolRequestSchema.parse(write)).toEqual(write);
+      expect(old.hostedGameToolRequestSchema.safeParse(upload(part)).success).toBe(false);
+      expect(old.hostedGameToolRequestSchema.safeParse({ ...write, video }).success).toBe(false);
+      expect(old.hostedGameToolRequestSchema.safeParse({ action: "read_game", origin: recapOrigin, recapRead: { kind: "recover", video: true } }).success).toBe(false);
+    } finally { await Promise.all([rm(oldStory, { force: true }), rm(oldTools, { force: true })]); }
+  });
+});
+
 it("accepts legacy bare lines and composed recap messages", () => {
   const bare = "x".repeat(160);
   for (const chatLine of [bare, `${bare}\nWatch the recap: https://recaps.murph.test/r/game_synthetic`]) {
@@ -346,4 +478,38 @@ it("accepts durable recap retirement in the existing error field", () => {
   const response = { action: "read_game", result: { status: "unavailable", error: GAME_RECAP_GENERATION_RETIRED } };
   expect(GAME_RECAP_GENERATION_RETIRED).toBe("recap_generation_retired");
   expect(hostedGameToolResponseSchema.parse(response)).toEqual(response);
+});
+
+
+it("both-win rollback-floor readers accept waiting asks, terms and reciprocal settled tickets", () => {
+  const base = { ...game, players: game.players.map((player, seat) => ({ ...player, firstName: seat ? "Leo" : "Ava" })),
+    terms: { ...game.terms, stakes: [{ kind: "prize", item: "Choose lunch" }, { kind: "both_get", item: "Dinner out together" }] } };
+  const pendingChange = { id: "proposal_both", proposedByMemberId: "player_first", expectedTermsVersion: 1,
+    origin: "chat", deliveryStatus: "conversation", effectiveFromDay: 5, startsOn: null,
+    change: { kind: "edit", stakes: [{ kind: "both_get", item: "Dinner out together" }] } };
+  const result = { scores: base.players.map(player => ({ memberId: player.memberId, seat: player.seat, score: 5, misses: 0 })),
+    tickets: base.players.map((player, seat) => ({ owedToMemberId: player.memberId,
+      owedByMemberId: base.players[1 - seat].memberId, what: "Dinner out together", count: 1, status: "open" })) };
+  for (const fixture of [{ ...base, pendingChange }, base, { ...base, status: "settled", result }]) {
+    const wire = response(fixture);
+    expect(parseHostedRuntimeGroupToolResponse(wire)).toEqual(wire);
+  }
+  expect(parseHostedRuntimeGroupToolRequest({ action: "update_game", origin,
+    update: { operation: "propose", gameId: game.id, proposalId: "proposal_both", expectedTermsVersion: 1, change: pendingChange.change } })).toMatchObject({ action: "update_game" });
+  expect(hostedGameToolRequestSchema.safeParse({ action: "update_game", origin,
+    update: { operation: "create", gameId: game.id, terms: { tasks: base.players.map(player => ({ memberId: player.memberId, text: "Walk" })),
+      schedule: game.terms.schedule, stakes: pendingChange.change.stakes } } }).success).toBe(false);
+});
+
+it("parses private Not for me reads, replacements and results through runtime control", () => {
+  const action = "my_game_not_for_me";
+  expect(parseHostedRuntimeGroupToolRequest({ action, origin, operation: "read" })).toEqual({ action, origin, operation: "read" });
+  expect(parseHostedRuntimeGroupToolRequest({ action, origin, operation: "set", activities: ["dance", "yoga", "dance"] }))
+    .toEqual({ action, origin, operation: "set", activities: ["yoga", "dance"] });
+  expect(parseHostedRuntimeGroupToolRequest({ action, origin, operation: "set", activities: [] })).toMatchObject({ activities: [] });
+  for (const activities of [undefined, ["water"], [1], null]) {
+    expect(() => parseHostedRuntimeGroupToolRequest({ action, origin, operation: "set", activities })).toThrow();
+  }
+  const response = { action, result: { status: "ok", activities: ["swimming", "yoga"] } };
+  expect(parseHostedRuntimeGroupToolResponse(response)).toEqual(response);
 });

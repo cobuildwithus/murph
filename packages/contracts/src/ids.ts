@@ -1,3 +1,4 @@
+import { ContractValidationError } from "./validation-error.ts";
 import { CONTRACT_ID_FORMAT, ID_PREFIXES } from "./constants.ts";
 
 export const ULID_BODY_LENGTH = 26 as const;
@@ -36,7 +37,7 @@ export function isContractId(value: unknown, prefix?: string): boolean {
 export function assertContractId(value: unknown, prefix?: string, fieldName = "id"): string {
   if (!isContractId(value, prefix)) {
     const detail = prefix ? `${prefix}_<ULID>` : `${CONTRACT_ID_FORMAT}`;
-    throw new TypeError(`${fieldName} must match ${detail}`);
+    throw new ContractValidationError(`${fieldName} must match ${detail}`);
   }
 
   return value as string;

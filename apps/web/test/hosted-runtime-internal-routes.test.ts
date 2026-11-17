@@ -1,3 +1,4 @@
+import * as requestParsers from "@murphai/hosted-execution/routes";
 import {
   parseHostedBrowserVaultReplicaPublishResponse,
   parseHostedMailboxFetchResponse,
@@ -114,7 +115,8 @@ vi.mock("@/src/lib/hosted-orchestration/runtime-usage-decision", async (importOr
   resolveHostedRuntimeAiUsageGate: mocks.resolveHostedRuntimeAiUsageGate,
 }));
 
-vi.mock("@/src/lib/hosted-workspace/store", () => ({
+vi.mock("@/src/lib/hosted-workspace/store", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/src/lib/hosted-workspace/store")>(),
   checkpointHostedWorkspace: mocks.checkpointHostedWorkspace,
   publishLatestBrowserVaultReplicaRef: mocks.publishLatestBrowserVaultReplicaRef,
   readHostedWorkspace: mocks.readHostedWorkspace,
@@ -202,6 +204,18 @@ describe("hosted runtime internal web routes", () => {
     expect((await runtimeLatencyRoute.POST(request(atLimit))).status).toBe(200);
     expect((await runtimeLatencyRoute.POST(request(atLimit + " "))).status).toBe(413);
     expect(mocks.recordHostedIngressAssistantMilestone).toHaveBeenCalledOnce();
+  });
+
+  it("reports unexpected parser faults as server failures", async () => {
+    const parser = vi.spyOn(requestParsers, "parseHostedRuntimeOwnerReleaseSearch")
+      .mockImplementationOnce(() => { throw new TypeError("Parser invariant failed."); });
+    try {
+      const response = await runtimeOwnerReleasedRoute.POST(new Request("https://example.test/api/internal/hosted-runtime/owner-released", { method: "POST" }));
+      expect(response.status).toBe(500);
+      expect(parser).toHaveBeenCalledOnce();
+    } finally {
+      parser.mockRestore();
+    }
   });
 
   it("records milestone batches serially with per-event results and immediate typing alerts", async () => {
@@ -406,6 +420,7 @@ describe("hosted runtime internal web routes", () => {
     const response = await runtimeOwnerReleasedRoute.POST(request);
 
     expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: { code: "HOSTED_RUNTIME_OWNER_RELEASE_QUERY_INVALID" } });
     expect(mocks.requireHostedCloudflareCallbackRequest).toHaveBeenCalledWith(
       request,
       { maxBodyBytes: 0 },
@@ -1542,7 +1557,7 @@ describe("hosted runtime internal web routes", () => {
       });
     });
 
-    it("distinguishes independent schema and publication failures with identical HTTP 400 responses", async () => {
+    it("distinguishes caller schema rejection from a server publication failure", async () => {
       const malformed = await workspaceCheckpointRoute.POST(checkpointRequest({
         reason: UNSAFE_SENTINEL,
       }));
@@ -1551,7 +1566,7 @@ describe("hosted runtime internal web routes", () => {
       const publication = await workspaceCheckpointRoute.POST(checkpointRequest());
 
       expect(malformed.status).toBe(400);
-      expect(publication.status).toBe(malformed.status);
+      expect(publication.status).toBe(500);
       expect([...malformed.headers]).toEqual([
         ["cache-control", "no-store"],
         ["content-type", "application/json"],
@@ -1560,13 +1575,15 @@ describe("hosted runtime internal web routes", () => {
       expect(await malformed.clone().json()).toEqual({
         error: { code: "INVALID_REQUEST", message: "Invalid request." },
       });
-      expect(await publication.text()).toBe(await malformed.text());
+      expect(await publication.json()).toEqual({
+        error: { code: "INTERNAL_ERROR", message: "Internal error." },
+      });
       expect(mocks.checkpointHostedWorkspace).toHaveBeenCalledOnce();
       expect(mocks.after).not.toHaveBeenCalled();
       // A later successful request must not inherit or overwrite either observation.
       expect((await workspaceCheckpointRoute.POST(checkpointRequest())).status).toBe(200);
       expect(diagnostics()).toEqual([
-        [failureMessage, { schema: failureSchema, stage: "request_schema", errorClass: "type_error" }],
+        [failureMessage, { schema: failureSchema, stage: "request_schema", errorClass: "request_input" }],
         [failureMessage, { schema: failureSchema, stage: "publication", errorClass: "type_error" }],
       ]);
     });
@@ -1627,7 +1644,7 @@ describe("hosted runtime internal web routes", () => {
         });
         expect(diagnostics()).toEqual([
           [failureMessage, {
-            schema: failureSchema, stage: "publication", errorClass: "type_error", errorCode,
+            schema: failureSchema, stage: "publication", errorClass: "error", errorCode,
           }],
         ]);
       } else {
@@ -1687,12 +1704,15 @@ describe("hosted runtime internal web routes", () => {
       }],
     ] as const)("observes %s at %s", async (_case, stage, request) => {
       const response = await workspaceCheckpointRoute.POST(request());
-      expect(response.status).toBe(400);
+      const callerRejection = stage === "request_body" || stage === "runtime_authority";
+      expect(response.status).toBe(callerRejection ? 400 : 500);
       expect(await response.json()).toEqual({
-        error: { code: "INVALID_REQUEST", message: "Invalid request." },
+        error: callerRejection
+          ? { code: "INVALID_REQUEST", message: "Invalid request." }
+          : { code: "INTERNAL_ERROR", message: "Internal error." },
       });
       expect(diagnostics()).toEqual([
-        [failureMessage, { schema: failureSchema, stage, errorClass: "type_error" }],
+        [failureMessage, { schema: failureSchema, stage, errorClass: callerRejection ? "request_input" : _case === "response schema after publication" ? "validation" : "type_error" }],
       ]);
       expect(mocks.checkpointHostedWorkspace).toHaveBeenCalledTimes(
         stage === "publication" || stage === "response" ? 1 : 0,
@@ -1709,14 +1729,14 @@ describe("hosted runtime internal web routes", () => {
       expect(response.status).toBe(400);
       expect(await response.json()).toEqual({ error: { code: "INVALID_JSON", message: "Invalid JSON." } });
       expect(diagnostics()).toEqual([
-        [failureMessage, { schema: failureSchema, stage: "request_body", errorClass: "error" }],
+        [failureMessage, { schema: failureSchema, stage: "request_body", errorClass: "request_input" }],
       ]);
       expect(mocks.checkpointHostedWorkspace).not.toHaveBeenCalled();
     });
 
     it.each([
-      ["type_error", new TypeError(UNSAFE_SENTINEL), 400],
-      ["range_error", new RangeError(UNSAFE_SENTINEL), 400],
+      ["type_error", new TypeError(UNSAFE_SENTINEL), 500],
+      ["range_error", new RangeError(UNSAFE_SENTINEL), 500],
       ["error", new Error(UNSAFE_SENTINEL), 500],
       ["non_error", { message: UNSAFE_SENTINEL }, 500],
     ] as const)("logs only the %s error class", async (errorClass, error, status) => {
@@ -1780,9 +1800,9 @@ describe("hosted runtime internal web routes", () => {
         new TypeError(UNSAFE_SENTINEL), code ? { code } : {},
       ));
       const response = await workspaceCheckpointRoute.POST(checkpointRequest());
-      expect(response.status).toBe(400);
+      expect(response.status).toBe(500);
       expect(await response.json()).toEqual({
-        error: { code: "INVALID_REQUEST", message: "Invalid request." },
+        error: { code: "INTERNAL_ERROR", message: "Internal error." },
       });
       expect(diagnostics()).toEqual([
         [failureMessage, {
@@ -2331,6 +2351,33 @@ describe("hosted runtime internal web routes", () => {
       replicaRef,
       userId: "member_routes_1",
     });
+  });
+
+  it.each([1024, 1025])("bounds signed log member ids at admission: %i", async length => {
+    mocks.requireHostedCloudflareCallbackRequest.mockResolvedValueOnce("x".repeat(length));
+    mocks.recordHostedRuntimeLogs.mockResolvedValue(1);
+    const response = await runtimeLogRoute.POST(jsonRequest("/api/internal/hosted-runtime/log", {
+      entries: [{ at: FIXED_NOW, component: "mailbox", eventCode: "mailbox.imported", level: "info", phase: "import" }],
+    }));
+    expect(response.status).toBe(length === 1025 ? 400 : 200);
+    if (length === 1025) {
+      expect(await response.json()).toEqual({ error: { code: "INVALID_REQUEST", message: "Invalid request." } });
+      expect(mocks.recordHostedRuntimeLogs).not.toHaveBeenCalled();
+    }
+  });
+
+  it("rejects a checkpoint snapshot outside its signed member namespace", async () => {
+    const objectKey = "users/bbbb/workspace-snapshots/snap_synthetic.snapshot.enc";
+    const response = await workspaceCheckpointRoute.POST(jsonRequest("/api/internal/hosted-workspace/checkpoint", {
+      attemptId: "run_synthetic", leaseGeneration: "1", expectedWorkspaceVersion: "7", reason: "idle_shutdown",
+      snapshotRef: { schema: "murph.hosted-workspace-snapshot.v2", userId: "member_routes_1", snapshotId: "snap_synthetic",
+        objectKey, createdAt: FIXED_NOW, upload: "direct-r2-presigned-put",
+        encryption: { scheme: "murph.hosted-workspace-snapshot-single-object.v1", aad: { schema: "murph.hosted-workspace-snapshot.v2", purpose: "workspace-snapshot", userId: "member_routes_1", snapshotId: "snap_synthetic", objectKey }, ivBase64: "AAAAAAAAAAAAAAAA", rootKeyId: "root_synthetic", wrappedDataKey: "wrapped_synthetic" },
+        archive: { compression: "zstd", format: "tar", encryptedByteSize: 128, encryptedObjectSha256: "a".repeat(64), plaintextArchiveSha256: "b".repeat(64), fileCount: 2, totalPlainBytes: 256 } },
+    }));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: { code: "INVALID_REQUEST", message: "Invalid request." } });
+    expect(mocks.checkpointHostedWorkspace).not.toHaveBeenCalled();
   });
 
   it("acknowledges stale runtime telemetry without persistence or a runtime signal", async () => {

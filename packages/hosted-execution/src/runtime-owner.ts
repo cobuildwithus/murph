@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { isHostedRuntimeFailurePhaseCode, HOSTED_WORKSPACE_INVOCATION_PROCESSING_MODES, type HostedWorkspaceInvocationProcessingMode } from "./runtime-control.ts";
 import { parseAllowedString, readNullableString, requireBoolean, requireNonNegativeBigIntString, requireNonNegativeInteger, requireObject, requireString } from "./parsers/assertions.ts";
 
@@ -5,8 +6,10 @@ export const HOSTED_RUNTIME_OWNER_PATH = "/api/internal/hosted-runtime/owner";
 export const HOSTED_RUNTIME_OWNER_PHASES = ["idle", "starting", "active", "retiring"] as const;
 // Terminal wire field retained for deployed Worker readers. No backend selection.
 export const HOSTED_RUNTIME_CUTOVER_PHASES = ["postgres"] as const;
-/** `admission`: the member is inactive, suspended or withdrew health-data consent. */
-export const HOSTED_RUNTIME_OWNER_BLOCKED_REASONS = ["admission"] as const;
+/** `admission`: inactive, suspended or consent withdrawn; `start_budget`: fresh attempt budget exhausted. */
+export const HOSTED_RUNTIME_OWNER_BLOCKED_REASONS = ["admission", "start_budget"] as const;
+export const HOSTED_RUNTIME_START_BUDGET_INTERVAL_MS = 3 * 60_000;
+export const HOSTED_RUNTIME_START_BUDGET_BURST = 12;
 
 export interface HostedRuntimeOwnerIdentity {
   attemptId: string;
@@ -54,6 +57,13 @@ export interface HostedRuntimeOwnerResponse {
   owner: HostedRuntimeOwnerSnapshot | null;
   /** Advisory claim detail; absent from older Web releases and other commands. */
   blockedReason?: (typeof HOSTED_RUNTIME_OWNER_BLOCKED_REASONS)[number];
+  /** ISO retry time for a blocked start_budget claim; unreadable values are omitted. */
+  retryAt?: string;
+}
+
+export function isHostedStandbyClaimId(value: unknown): value is string {
+  return typeof value === "string"
+    && /^standby-claim-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(value);
 }
 
 export function parseHostedRuntimeOwnerCommand(value: unknown): HostedRuntimeOwnerCommand {
@@ -69,10 +79,10 @@ export function parseHostedRuntimeOwnerCommand(value: unknown): HostedRuntimeOwn
 function parseProviderAuthorization(r: Record<string, unknown>): HostedRuntimeOwnerCommand {
     const runnerContainerName = readNullableString(r.runnerContainerName, "Runtime target");
     const providerEgressTokenHash = readNullableString(r.providerEgressTokenHash, "Provider token hash");
-    if (Boolean(runnerContainerName) === Boolean(providerEgressTokenHash)) throw new TypeError("Provider authorization requires exactly one credential identity.");
-    if (providerEgressTokenHash && !/^[a-f0-9]{64}$/u.test(providerEgressTokenHash)) throw new TypeError("Provider token hash is invalid.");
+    if (Boolean(runnerContainerName) === Boolean(providerEgressTokenHash)) throw new ContractValidationError("Provider authorization requires exactly one credential identity.");
+    if (providerEgressTokenHash && !/^[a-f0-9]{64}$/u.test(providerEgressTokenHash)) throw new ContractValidationError("Provider token hash is invalid.");
     const providerKind = requireString(r.providerKind, "Provider kind");
-    if (!/^[a-z][a-z0-9_]{0,63}$/u.test(providerKind)) throw new TypeError("Provider kind is invalid.");
+    if (!/^[a-z][a-z0-9_]{0,63}$/u.test(providerKind)) throw new ContractValidationError("Provider kind is invalid.");
     return { operation: "authorize_provider", runnerContainerName, providerEgressTokenHash, providerKind };
 }
 
@@ -91,7 +101,7 @@ function parseInvocationCommand(r: Record<string, unknown>, operation: string): 
     case "accepted":
     case "revoke_ai_usage": return { operation, ...identity };
     case "record_failure": {
-      if (r.errorCode !== "runtime_error" && !isHostedRuntimeFailurePhaseCode(r.errorCode)) throw new TypeError("Unsupported runtime failure code.");
+      if (r.errorCode !== "runtime_error" && !isHostedRuntimeFailurePhaseCode(r.errorCode)) throw new ContractValidationError("Unsupported runtime failure code.");
       return { operation, ...identity, errorCode: r.errorCode };
     }
     case "complete": return { operation, ...identity,
@@ -103,10 +113,10 @@ function parseInvocationCommand(r: Record<string, unknown>, operation: string): 
     case "authorize_effect": {
       const runnerContainerName = readNullableString(r.runnerContainerName, "Runtime target");
       const managedAi = requireBoolean(r.managedAi, "Managed AI effect");
-      if (managedAi && !runnerContainerName) throw new TypeError("Managed AI authorization requires a native target.");
+      if (managedAi && !runnerContainerName) throw new ContractValidationError("Managed AI authorization requires a native target.");
       return { operation, ...identity, runnerContainerName, managedAi };
     }
-    default: throw new TypeError("Unsupported runtime ownership operation.");
+    default: throw new ContractValidationError("Unsupported runtime ownership operation.");
   }
 }
 
@@ -123,6 +133,8 @@ export function parseHostedRuntimeOwnerResponse(value: unknown): HostedRuntimeOw
     status,
     owner,
     ...(blockedReason ? { blockedReason } : {}),
+    ...(blockedReason === "start_budget" && typeof r.retryAt === "string" && Number.isFinite(Date.parse(r.retryAt))
+      ? { retryAt: r.retryAt } : {}),
   };
 }
 
@@ -131,7 +143,7 @@ export function parseHostedRuntimeOwnerIdentity(value: unknown): HostedRuntimeOw
   const attemptId = requireString(record.attemptId, "Runtime attempt");
   const generation = requireNonNegativeBigIntString(record.generation, "Runtime generation");
   if (!/^[A-Za-z0-9._:-]{1,200}$/u.test(attemptId) || BigInt(generation) > 9_223_372_036_854_775_807n) {
-    throw new TypeError("Runtime ownership identity is invalid.");
+    throw new ContractValidationError("Runtime ownership identity is invalid.");
   }
   return { attemptId, generation };
 }
@@ -155,7 +167,7 @@ function parseOwner(value: unknown): HostedRuntimeOwnerSnapshot {
     lastErrorCode: readNullableString(r.lastErrorCode, "Runtime error code"),
   };
   if (owner.phase !== "idle" && (!owner.attemptId || !owner.allocationId || !owner.processingMode)) {
-    throw new TypeError("Claimed runtime ownership is incomplete.");
+    throw new ContractValidationError("Claimed runtime ownership is incomplete.");
   }
   return owner;
 }

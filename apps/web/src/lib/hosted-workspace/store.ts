@@ -1,3 +1,5 @@
+import { parseInput } from "@murphai/hosted-execution/request-input";
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   HOSTED_CANONICAL_WRITE_RECEIPT_REDACTED_STATUS_KEYS,
   HOSTED_WORKSPACE_CHECKPOINT_HANDLED_CONVERSATION_ITEM_MAX_IDS,
@@ -215,7 +217,7 @@ export async function checkpointHostedWorkspaceTx(input: {
     progressProjectionKeyCount !== 0
     && progressProjectionKeyCount !== progressProjectionKeys.length
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted workspace checkpoint system progress projection must include generation, wake, and reason together.",
     );
   }
@@ -233,10 +235,7 @@ export async function checkpointHostedWorkspaceTx(input: {
       || input.nextDefaultProcessingWakeAt === undefined
       || input.nextDefaultProcessingWakeAt === null
       ? null
-      : requireDate(
-          input.nextDefaultProcessingWakeAt,
-          "Hosted workspace nextDefaultProcessingWakeAt",
-        );
+      : parseInput(input.nextDefaultProcessingWakeAt, (value) => requireDate(value, "Hosted workspace nextDefaultProcessingWakeAt"));
   const requestedNextDefaultProcessingWakeReason =
     progressProjectionKeyCount === 0
       ? null
@@ -249,7 +248,7 @@ export async function checkpointHostedWorkspaceTx(input: {
       || requestedNextDefaultProcessingWakeReason !== null
     )
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted workspace checkpoint disabled system progress projection must be entirely null.",
     );
   }
@@ -265,7 +264,7 @@ export async function checkpointHostedWorkspaceTx(input: {
     workspaceAssignments.push(Prisma.sql`next_wake_at = ${
       input.nextWakeAt === undefined || input.nextWakeAt === null
         ? null
-        : requireDate(input.nextWakeAt, "Hosted workspace nextWakeAt")
+        : parseInput(input.nextWakeAt, (value) => requireDate(value, "Hosted workspace nextWakeAt"))
     }::timestamp`);
   }
   if ("nextWakeReason" in input) {
@@ -284,7 +283,7 @@ export async function checkpointHostedWorkspaceTx(input: {
     workspaceAssignments.push(Prisma.sql`inbox_media_retention_wake_at = ${
       input.inboxMediaRetentionWakeAt === undefined || input.inboxMediaRetentionWakeAt === null
         ? null
-        : requireDate(input.inboxMediaRetentionWakeAt, "Hosted workspace inboxMediaRetentionWakeAt")
+        : parseInput(input.inboxMediaRetentionWakeAt, (value) => requireDate(value, "Hosted workspace inboxMediaRetentionWakeAt"))
     }::timestamp`);
   }
   if ("redactedStatusJson" in input) {
@@ -558,21 +557,21 @@ function normalizeCheckpointHandledConversationMailboxItemIds(
     value.length
       > HOSTED_WORKSPACE_CHECKPOINT_HANDLED_CONVERSATION_ITEM_MAX_IDS
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Hosted workspace checkpoint handled conversation mailbox item ids must contain at most ${HOSTED_WORKSPACE_CHECKPOINT_HANDLED_CONVERSATION_ITEM_MAX_IDS} entries.`,
     );
   }
   const itemIds = value.map((itemId) => {
     const normalized = normalizeNullableString(itemId);
     if (!normalized || !/^[A-Za-z0-9][A-Za-z0-9_.:+-]{0,191}$/u.test(normalized)) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "Hosted workspace checkpoint handled conversation mailbox item id must be a bounded opaque token.",
       );
     }
     return normalized;
   });
   if (new Set(itemIds).size !== itemIds.length) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted workspace checkpoint handled conversation mailbox item ids must not contain duplicates.",
     );
   }
@@ -634,7 +633,7 @@ async function publishBrowserVaultReplicaRefTx(input: {
   );
 
   if (!replicaRef) {
-    throw new TypeError("Hosted browser-vault replica publish replicaRef must not be null.");
+    throw new ContractValidationError("Hosted browser-vault replica publish replicaRef must not be null.");
   }
 
   let current = await input.tx.hostedWorkspace.findUnique({
@@ -782,7 +781,7 @@ function browserVaultReplicaRefsMatch(
 function parseBrowserVaultReplicaGeneratedAt(value: string, label: string): number {
   const timestamp = Date.parse(value);
   if (Number.isNaN(timestamp) || new Date(timestamp).toISOString() !== value) {
-    throw new TypeError(`${label} must be a valid ISO-8601 timestamp.`);
+    throw new ContractValidationError(`${label} must be a valid ISO-8601 timestamp.`);
   }
 
   return timestamp;
@@ -834,6 +833,18 @@ export function projectHostedWorkspace(record: HostedWorkspaceRow): HostedWorksp
   };
 }
 
+export class HostedWorkspaceProgressError extends Error {
+  readonly httpStatus = 400;
+  readonly code: string;
+
+  constructor(current: bigint | null, requested: bigint) {
+    super("Hosted workspace systemMailboxProgressGeneration must stay equal or advance by one.");
+    this.code = current === null ? "HOSTED_WORKSPACE_PROGRESS_INVALID_INITIAL"
+      : requested < current ? "HOSTED_WORKSPACE_PROGRESS_REGRESSED"
+      : "HOSTED_WORKSPACE_PROGRESS_SKIPPED_INCREMENT";
+  }
+}
+
 function assertHostedSystemMailboxProgressGenerationTransition(input: {
   current: bigint | null;
   requested: bigint;
@@ -842,13 +853,7 @@ function assertHostedSystemMailboxProgressGenerationTransition(input: {
     ? input.requested === 0n || input.requested === 1n
     : input.requested === input.current || input.requested === input.current + 1n;
   if (!transitionAllowed) {
-    throw Object.assign(new TypeError(
-      "Hosted workspace systemMailboxProgressGeneration must stay equal or advance by one.",
-    ), {
-      code: input.current === null ? "HOSTED_WORKSPACE_PROGRESS_INVALID_INITIAL"
-        : input.requested < input.current ? "HOSTED_WORKSPACE_PROGRESS_REGRESSED"
-        : "HOSTED_WORKSPACE_PROGRESS_SKIPPED_INCREMENT",
-    });
+    throw new HostedWorkspaceProgressError(input.current, input.requested);
   }
 }
 
@@ -904,7 +909,7 @@ function normalizeBigInt(
     return BigInt(value);
   }
 
-  throw new TypeError(`${label} must be a non-negative integer.`);
+  throw new ContractValidationError(`${label} must be a non-negative integer.`);
 }
 
 function requireAllowedString<const Value extends string>(
@@ -918,24 +923,24 @@ function requireAllowedString<const Value extends string>(
     return normalized as Value;
   }
 
-  throw new TypeError(`${label} is invalid: ${normalized}`);
+  throw new ContractValidationError(`${label} is invalid: ${normalized}`);
 }
 
 function requireNonEmptyString(value: string, label: string): string {
   const normalized = normalizeNullableString(value);
 
   if (!normalized) {
-    throw new TypeError(`${label} must not be blank.`);
+    throw new ContractValidationError(`${label} must not be blank.`);
   }
 
   return normalized;
 }
 
-function requireDate(value: Date | string, label: string): Date {
-  const date = value instanceof Date ? value : new Date(value);
+function requireDate(value: unknown, label: string): Date {
+  const date = value instanceof Date ? value : new Date(typeof value === "string" ? value : NaN);
 
   if (Number.isNaN(date.getTime())) {
-    throw new TypeError(`${label} must be a valid ISO-8601 timestamp.`);
+    throw new ContractValidationError(`${label} must be a valid ISO-8601 timestamp.`);
   }
 
   return date;

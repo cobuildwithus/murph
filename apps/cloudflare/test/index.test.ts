@@ -2440,6 +2440,34 @@ describe("cloudflare worker routes", () => {
     ]);
   });
 
+  it.each(["object-key", "iv-size", "iv-encoding", "ciphertext-encoding", "missing", "storage", "crypto"])("classifies browser-vault envelope failure: %s", async kind => {
+    const env = createWorkerEnv();
+    const runtimeRoot = await resolveHostedUserCryptoContextForTest(env, "member_123");
+    const replicaRef = await createStoredBrowserVaultReplicaRefForTest(env, "member_123", {
+      rootKey: runtimeRoot.rootKey, rootKeyId: runtimeRoot.rootKeyId,
+    });
+    const envelope = replicaRef.dataKeyEnvelope!;
+    expect(envelope).toBeDefined();
+    if (kind === "object-key") envelope.resource.objectKey = `${replicaRef.objectKey}.other`;
+    if (kind === "iv-size" || kind === "missing") envelope.wraps[0]!.iv = "AA==";
+    if (kind === "missing") await env.BUNDLES.delete!(replicaRef.objectKey);
+    if (kind === "iv-encoding") envelope.wraps[0]!.iv = "!";
+    if (kind === "ciphertext-encoding") envelope.wraps[0]!.ciphertext = "!";
+    if (kind === "crypto") envelope.wraps[0]!.ciphertext = Buffer.alloc(48).toString("base64");
+    if (kind === "storage") vi.spyOn(env.BUNDLES, "get").mockRejectedValueOnce(new TypeError("Synthetic storage failure."));
+    const response = await worker.fetch(await signControlRequest(new Request(
+      "https://runner.example.test/internal/users/member_123/browser-vault/session", {
+        body: JSON.stringify({ browserPublicKeyJwk: await createBrowserSessionPublicKeyJwk(), replicaRef }),
+        headers: { "content-type": "application/json" }, method: "POST",
+      },
+    )), env);
+    const serverFault = kind === "storage" || kind === "crypto";
+    expect(response.status).toBe(kind === "missing" ? 404 : serverFault ? 500 : 400);
+    expect(await response.json()).toEqual(kind === "missing"
+      ? { code: CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE, error: "Browser vault replica was not found." }
+      : { error: serverFault ? "Internal error." : "Invalid request." });
+  });
+
   it("returns browser-vault sessions keyed by the replica storage key id", async () => {
     const env = createWorkerEnv();
     const runtimeRoot = await resolveHostedUserCryptoContextForTest(env, "member_123");
@@ -2853,13 +2881,14 @@ describe("cloudflare worker routes", () => {
     })).toThrow("export session request must not include interactive selections");
   });
 
-  it("returns the stable browser-vault missing-replica code when the replica runtime root is unavailable", async () => {
+  it.each(["valid", "invalid-iv", "lookup-failure"])("preserves root lookup precedence over browser-vault encoding: %s", async kind => {
     const env = createWorkerEnv();
     const unavailableRootKeyId = "udrk:runtime:retired-root";
     const replicaRef = await createStoredBrowserVaultReplicaRefForTest(env, "member_123", {
       rootKey: Uint8Array.from({ length: 32 }, (_, index) => 201 - index),
       rootKeyId: unavailableRootKeyId,
     });
+    if (kind !== "valid") replicaRef.dataKeyEnvelope!.wraps[0]!.iv = "AA==";
     const signedRequest = await signControlRequest(new Request(
       "https://runner.example.test/internal/users/member_123/browser-vault/session",
       {
@@ -2881,13 +2910,14 @@ describe("cloudflare worker routes", () => {
       }
 
       rootFetches.push(JSON.parse(String(init?.body)));
+      if (kind === "lookup-failure") throw new TypeError("Synthetic root lookup failure.");
       return Response.json({ error: "Runtime root not found." }, { status: 404 });
     });
 
     const response = await worker.fetch(signedRequest, env);
 
-    expect(response.status).toBe(404);
-    await expect(response.json()).resolves.toEqual({
+    expect(response.status).toBe(kind === "lookup-failure" ? 500 : 404);
+    await expect(response.json()).resolves.toEqual(kind === "lookup-failure" ? { error: "Internal error." } : {
       code: CLOUDFLARE_HOSTED_CONTROL_BROWSER_VAULT_REPLICA_NOT_FOUND_CODE,
       error: "Browser vault replica was not found.",
     });
@@ -3136,12 +3166,42 @@ describe("cloudflare worker routes", () => {
       expect(reconcileRuntimeHealthDataConsentForUser).not.toHaveBeenCalled();
     });
 
+    it.each(["timestamp", "userId", "allocationId"])("rejects unusable supplied runtime admission: %s", async field => {
+      const userId = field === "userId" ? "x".repeat(257) : "test-user";
+      const admission = { cutover: "postgres", status: field === "userId" ? "claimed" : "existing", owner: {
+        userId, attemptId: "attempt-test", generation: "1", phase: field === "timestamp" ? "starting" : field === "allocationId" ? "retiring" : "starting", processingMode: "default",
+        allocationId: field === "allocationId" ? "invalid" : "standby-claim-00000000-0000-4000-8000-000000000000", runnerContainerName: "runner-test", workspaceVersion: "0", platformAiUsageAllowed: true,
+        startedAt: field === "timestamp" ? "+275760-09-13T00:00:00.000Z" : "2026-01-01T00:00:00.000Z", acceptedAt: null, completedAt: null, failureCount: 0, lastErrorCode: null,
+      } };
+      const ensure = vi.spyOn(runtimeProcessing, "ensurePostgresRuntimeProcessing");
+      const env = createWorkerEnv(createUserRunnerStub());
+      const request = new Request(`https://runner.example.test/internal/users/${userId}/runtime/ensure-processing`, {
+        method: "POST", body: JSON.stringify({ admission, orchestrationAttemptId: "orchestration_synthetic" }), headers: { "content-type": "application/json" },
+      });
+      const response = await worker.fetch(await signControlRequest(request), env);
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ code: "invalid_request", error: "Invalid request." });
+      expect(ensure).not.toHaveBeenCalled();
+    });
+
+    it("accepts the runner user id length boundary", async () => {
+      const userId = "x".repeat(256);
+      const ensure = vi.spyOn(runtimeProcessing, "ensurePostgresRuntimeProcessing")
+        .mockResolvedValue({ kind: "retry_later", retryAt: "2026-01-01T00:00:01.000Z" });
+      const request = new Request(`https://runner.example.test/internal/users/${userId}/runtime/ensure-processing`, {
+        method: "POST", body: JSON.stringify({ orchestrationAttemptId: "orchestration_synthetic" }), headers: { "content-type": "application/json" },
+      });
+      const response = await worker.fetch(await signControlRequest(request), createWorkerEnv(createUserRunnerStub()));
+      expect(response.status).toBe(200);
+      expect(ensure).toHaveBeenCalled();
+    });
+
     it.each(["oidc", "signed"] as const)("only accepts supplied Web admission through OIDC (%s)", async (authorization) => {
       const admission = {
       cutover: "postgres" as const, status: "existing" as const,
       owner: {
         userId: "test-user", attemptId: "attempt-test", generation: "1", phase: "active" as const,
-        processingMode: "default" as const, allocationId: "allocation-test",
+        processingMode: "default" as const, allocationId: "standby-claim-00000000-0000-4000-8000-000000000000",
         runnerContainerName: "runner-test", workspaceVersion: "0",
         platformAiUsageAllowed: true,
         startedAt: "2026-01-01T00:00:00.000Z", acceptedAt: null, completedAt: null,
@@ -4148,6 +4208,18 @@ describe("cloudflare worker routes", () => {
     expect(serializedWarnLogs).toContain("wrong-method");
     expect(serializedWarnLogs).toContain("/internal/users/<REDACTED_USER>/status");
     expect(serializedWarnLogs).not.toContain("/internal/users/member_123/status");
+  });
+
+  it("rejects an authenticated malformed path before reading runtime state", async () => {
+    const env = createWorkerEnv();
+    const ensure = vi.spyOn(runtimeProcessing, "ensurePostgresRuntimeProcessing");
+    const response = await worker.fetch(await signControlRequest(new Request(
+      "https://runner.example.test/internal/users/%E0%A4%A/runtime/ensure-processing",
+      { method: "POST", body: "{}", headers: { "content-type": "application/json" } },
+    )), env);
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error: "Invalid request." });
+    expect(ensure).not.toHaveBeenCalled();
   });
 
   it("keeps malformed encoded route params behind existing auth and hidden-method boundaries", async () => {

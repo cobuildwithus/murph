@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   parseHostedExecutionBundleRef as parseRuntimeHostedExecutionBundleRef,
 } from "@murphai/runtime-state";
@@ -158,7 +159,7 @@ function requireHostedExecutionLayeredSnapshotField(
   label: string,
 ): void {
   if (!Object.prototype.hasOwnProperty.call(record, field)) {
-    throw new TypeError(`${label}.${field} is required for layered snapshot refs.`);
+    throw new ContractValidationError(`${label}.${field} is required for layered snapshot refs.`);
   }
 }
 
@@ -168,7 +169,7 @@ function requireHostedExecutionWorkingSnapshotField(
   label: string,
 ): void {
   if (!Object.prototype.hasOwnProperty.call(record, field)) {
-    throw new TypeError(`${label}.${field} is required for working snapshot refs.`);
+    throw new ContractValidationError(`${label}.${field} is required for working snapshot refs.`);
   }
 }
 
@@ -178,7 +179,7 @@ function parseRequiredHostedExecutionBundleRef(
 ): NonNullable<HostedExecutionBundleRefState> {
   const parsed = parseRuntimeHostedExecutionBundleRef(value, label);
   if (!parsed) {
-    throw new TypeError(`${label} must be a hosted execution bundle ref.`);
+    throw new ContractValidationError(`${label} must be a hosted execution bundle ref.`);
   }
   return parsed;
 }

@@ -1,3 +1,4 @@
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import {
   parseHostedRuntimeReconciliationFactsRequest,
 } from "@murphai/hosted-execution/parsers";
@@ -71,9 +72,9 @@ export const GET = withJsonError(async (
       routeUserId,
     });
 
-    const factsRequest = parseHostedRuntimeReconciliationFactsRequest({
+    const factsRequest = parseInput({
       userId: routeUserId,
-    });
+    }, parseHostedRuntimeReconciliationFactsRequest);
 
     let failureStage: HostedRuntimeReconciliationFactsProcessingStage =
       "canonical_access_workspace";

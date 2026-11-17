@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-14",
+  "order": 100,
+  "item": {
+    "id": "finished-day-steps",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "A finished day's steps no longer stop at your device's last sync",
+    "summary": "If your watch or ring stopped reporting partway through a day, that day's steps now come from Apple Health once the day is over, instead of staying at the device's earlier count.",
+    "details": "When the device reports that day again, Murph goes back to the device's own total. Today's steps and group boards work as before.",
+    "relevanceTags": ["wearables"],
+    "sourcePullRequests": [4959]
+  }
+}

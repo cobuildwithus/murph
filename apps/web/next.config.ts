@@ -33,6 +33,37 @@ interface HostedWebWebpackContext {
 }
 
 const HOSTED_WEB_HEADER_SOURCE = "/(.*)";
+
+/**
+ * Search engines may index only the public pages the sitemap lists, the home
+ * page, and the files that describe the site. Every other path, including every
+ * private link Murph sends (recaps, invites, approvals, shares) and every route
+ * added later, answers with `X-Robots-Tag: noindex` without having to opt in.
+ */
+export const HOSTED_WEB_INDEXABLE_PAGES = [
+  "about",
+  "changelog",
+  "clubs",
+  "compare",
+  "consumer-health-data-privacy-policy",
+  "contact",
+  "legal",
+  "measurement-methods",
+  "refer",
+  "security",
+  "subprocessors",
+] as const;
+/** Public pages whose child pages are public too (no tokens below them). */
+export const HOSTED_WEB_INDEXABLE_SECTIONS = ["compare", "legal", "measurement-methods"] as const;
+const HOSTED_WEB_INDEXABLE_FILES = ["llms\\.txt", "robots\\.txt", "sitemap\\.xml", "icon\\.svg", "opengraph-image"];
+export const HOSTED_WEB_NOINDEX_HEADER_SOURCE = `/:path((?!(?:${[
+  ...HOSTED_WEB_INDEXABLE_PAGES,
+  ...HOSTED_WEB_INDEXABLE_FILES,
+].join("|")})$|(?:${HOSTED_WEB_INDEXABLE_SECTIONS.join("|")})/|_next/).+)`;
+export const HOSTED_WEB_NOINDEX_HEADER = {
+  key: "X-Robots-Tag",
+  value: "noindex, nofollow, noarchive, nosnippet, noimageindex",
+};
 const HOSTED_PUBLIC_BASE_URL_ENV_KEYS = [
   "HOSTED_ONBOARDING_PUBLIC_BASE_URL",
   "HOSTED_WEB_BASE_URL",
@@ -62,6 +93,12 @@ const TURNSTILE_SOURCES = ["https://challenges.cloudflare.com"] as const;
 const OG_SHARE_ASSET_TRACE_INCLUDES = [
   "app/fonts/*.ttf",
   "public/logo.svg",
+];
+// The connect link's preview joins the Murph icon and a source's own icon,
+// both read from public/ at render time.
+const CONNECT_LINK_OG_ICON_TRACE_INCLUDES = [
+  "public/brand-logos/connect/**/*.png",
+  "public/brand-logos/murph-logo-avatar-light.png",
 ];
 // The App Review game seed posts these synthetic site images as its opponent's photos.
 const APP_REVIEW_GAME_PHOTO_TRACE_INCLUDES = [
@@ -306,9 +343,11 @@ export function buildHostedWebNextConfig(
       // dynamic invite/group/biomarker unfurls that are never
       // prerendered. Share-card route handlers are keyed explicitly.
       "/opengraph-image": OG_SHARE_ASSET_TRACE_INCLUDES,
+      "/connect/*/opengraph-image": CONNECT_LINK_OG_ICON_TRACE_INCLUDES,
       "/changelog/card/v1/[items]": OG_SHARE_ASSET_TRACE_INCLUDES,
       "/api/murph-contact-card": MURPH_CONTACT_CARD_AVATAR_TRACE_INCLUDES,
       "/api/ops/app-review-game": APP_REVIEW_GAME_PHOTO_TRACE_INCLUDES,
+      "/api/game/v1/home": APP_REVIEW_GAME_PHOTO_TRACE_INCLUDES,
       "/imessage/card/v1/[payload]": OG_SHARE_ASSET_TRACE_INCLUDES,
     },
     outputFileTracingRoot: path.resolve(appDir, "../.."),
@@ -335,6 +374,7 @@ export function buildHostedWebNextConfig(
         source: HOSTED_WEB_HEADER_SOURCE,
         headers: buildHostedWebSecurityHeaders(environment),
       },
+      { source: HOSTED_WEB_NOINDEX_HEADER_SOURCE, headers: [HOSTED_WEB_NOINDEX_HEADER] },
     ],
   };
 }

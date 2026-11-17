@@ -1,5 +1,8 @@
 import "server-only";
 
+import { ZodError } from "@murphai/contracts/zod-runtime";
+import { ContractValidationError } from "@murphai/contracts/validation-error";
+
 import {
   normalizeIanaTimeZone,
   parseCompanionHrvRmssdObservation,
@@ -41,6 +44,8 @@ export const COMPANION_DEVICE_SYNC_PROVIDER = "junction";
 export const COMPANION_DEVICE_SYNC_STATUS_CONNECTION_LIMIT = 32;
 /** Canonical connection-source slug for the companion's Apple Health SDK lane. */
 export const COMPANION_APPLE_HEALTH_SOURCE_PROVIDER = "apple_health_kit";
+/** Canonical connection-source slug for the Android companion's Health Connect SDK lane. */
+export const COMPANION_HEALTH_CONNECT_SOURCE_PROVIDER = "health_connect";
 export const COMPANION_HRV_SOURCE_PROVIDER = JUNCTION_COMPANION_HRV_SOURCE_PROVIDER;
 
 const COMPANION_METADATA_STRING_MAX_LENGTH = 200;
@@ -169,6 +174,12 @@ interface CompanionAuthDiagnosticLog {
 
 export type CompanionConnectionIntent = "connect" | "resume";
 
+export interface CompanionSignInRequest {
+  connectionIntent: CompanionConnectionIntent | null;
+  /** The phone health source this platform's SDK signs in. */
+  sourceProviderSlug: string;
+}
+
 /** Maximum body size for the admission-only companion contract. */
 export const COMPANION_ADMISSION_BODY_LIMIT_BYTES = 256;
 
@@ -214,7 +225,10 @@ export function parseCompanionAdmissionV1RequestBody(
 }
 
 /**
- * Validates the companion sign-in request and returns its lifecycle intent.
+ * Validates the companion sign-in request and returns its lifecycle intent
+ * with the phone health source the calling platform owns. An explicit connect
+ * may reopen only that source: an Android sign-in never touches Apple Health.
+ * Clients that send no platform are older iOS builds.
  *
  * A `companion_installations` record was considered in the MVP spec and is
  * deliberately deferred until operationally needed: installation metadata
@@ -223,7 +237,7 @@ export function parseCompanionAdmissionV1RequestBody(
  */
 export function validateCompanionSignInRequestBody(
   body: Record<string, unknown>,
-): CompanionConnectionIntent | null {
+): CompanionSignInRequest {
   const connectionIntent = body.connectionIntent;
   if (
     connectionIntent !== undefined
@@ -241,10 +255,16 @@ export function validateCompanionSignInRequestBody(
   }
   readOptionalBoundedString(body, "appInstallationId");
   readOptionalBoundedString(body, "appVersion");
+  const request: CompanionSignInRequest = {
+    connectionIntent: connectionIntent ?? null,
+    sourceProviderSlug: platform === "android"
+      ? COMPANION_HEALTH_CONNECT_SOURCE_PROVIDER
+      : COMPANION_APPLE_HEALTH_SOURCE_PROVIDER,
+  };
 
   const sdkVersions = body.sdkVersions;
   if (sdkVersions === undefined || sdkVersions === null) {
-    return connectionIntent ?? null;
+    return request;
   }
 
   if (typeof sdkVersions !== "object" || Array.isArray(sdkVersions)) {
@@ -262,7 +282,7 @@ export function validateCompanionSignInRequestBody(
     }
   }
 
-  return connectionIntent ?? null;
+  return request;
 }
 
 export function readCompanionStatusSourceProviderSlug(requestUrl: string): string | null {
@@ -287,7 +307,8 @@ export function parseCompanionHrvRmssdObservationRequestBody(
 ): CompanionHrvRmssdObservation {
   try {
     return parseCompanionHrvRmssdObservation(body);
-  } catch {
+  } catch (error) {
+    if (!(error instanceof ContractValidationError) && !(error instanceof ZodError)) throw error;
     throw companionRequestInvalid("HRV observation payload is invalid.");
   }
 }
@@ -565,8 +586,10 @@ export interface CompanionDeviceSyncStatusResponse {
  *   first receipt, so the app can render honest "waiting for first data"
  *   states per resource.
  *
- * Receipt evidence is bounded to the most recent status signals. No health
- * values are ever included - timestamps and resource names only.
+ * Scoped to one source, receipt evidence is each event type's latest signal,
+ * so a quiet kind keeps its time beside busy ones; unscoped, it is bounded to
+ * the most recent status signals. No health values are ever included -
+ * timestamps and resource names only.
  */
 export async function readCompanionDeviceSyncStatus(input: {
   memberId: string;
@@ -687,9 +710,7 @@ export async function readCompanionDeviceSyncStatus(input: {
         }
       }
 
-      const resource = signal.eventType
-        ? readJunctionWebhookResourceName(signal.eventType)
-        : null;
+      const resource = readCompanionReceiptResource(signal);
 
       if (!resource) {
         continue;
@@ -706,6 +727,25 @@ export async function readCompanionDeviceSyncStatus(input: {
     observedAt: (input.now?.() ?? new Date()).toISOString(),
     resources,
   };
+}
+
+/**
+ * The resource one status signal is a data receipt for, if any. Lifecycle
+ * events carry no resource. A historical completion says a pull finished, not
+ * that data arrived, so it names no data source and is not a receipt; the
+ * scoped read never matches such a row.
+ */
+function readCompanionReceiptResource(signal: {
+  eventType: string | null;
+  sourceProviderSlug: string | null;
+}): string | null {
+  if (
+    !signal.eventType
+    || (signal.eventType.startsWith("historical.data.") && !signal.sourceProviderSlug)
+  ) {
+    return null;
+  }
+  return readJunctionWebhookResourceName(signal.eventType);
 }
 
 function maxIsoTimestamp(current: string | null, candidate: string | null): string | null {

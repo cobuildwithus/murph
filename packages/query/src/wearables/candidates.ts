@@ -22,6 +22,7 @@ import {
   dedupeExactMetricCandidates,
   dedupeSleepWindowCandidates,
 } from "./dedupe.ts";
+import { isPartialCountOfFinishedDay, resolveLocalDayEndMs } from "./metric-policies.ts";
 import {
   inferJunctionWearableDataOriginFromExternalRef,
   normalizeWearableOriginSourceSlug,
@@ -108,6 +109,7 @@ export function collectWearableDataset(
   const provenanceDiagnostics = new Map<string, WearableProvenanceDiagnostic>();
   const sleepStageCandidates: WearableMetricCandidate[] = [];
   const sleepWindows: WearableSleepWindowCandidate[] = [];
+  const stepsFreshness = trackStepsFreshness();
   const providerSet = filters.providers
     ? new Set(
         filters.providers
@@ -153,6 +155,9 @@ export function collectWearableDataset(
       }
       continue;
     }
+
+    // A fact about the whole vault, read before a provider or date filter narrows this call.
+    stepsFreshness.noteRecord(entity, provider, externalRef);
 
     if (providerSet && !providerSet.has(publicProvider)) {
       continue;
@@ -223,23 +228,149 @@ export function collectWearableDataset(
   const filteredSleepWindows = dedupedSleepWindows.filter((candidate) => matchesDateFilters(candidate.date, filters));
   const sleepStageAggregates = buildSleepStageAggregateCandidates(sleepStageCandidates, dedupedSleepWindows)
     .filter((candidate) => matchesDateFilters(candidate.date, filters));
-  const sanitizedMetricCandidates = sanitizeWearableMetricCandidates(rawMetricCandidates, dedupedSleepWindows);
+  const timeseriesTotals = dropJunctionTimeseriesTotalsBesideActivitySummary(rawMetricCandidates);
+  const sanitizedMetricCandidates = sanitizeWearableMetricCandidates(
+    timeseriesTotals.candidates,
+    dedupedSleepWindows,
+  );
   const metricCandidates = [
     ...dedupeExactMetricCandidates(sanitizedMetricCandidates.candidates).candidates,
     ...dedupeExactMetricCandidates(sleepStageAggregates).candidates,
   ].sort(compareMetricCandidateByDateDesc);
+  stepsFreshness.markPartialCounts(metricCandidates);
 
   return {
     activitySessionCandidates: activitySessions,
     activitySessionAggregates: buildActivitySessionAggregates(activitySessions),
     activitySessionDayRollups: buildActivitySessionDayRollups(activitySessions),
-    metricSuppressionEvidence: sanitizedMetricCandidates.suppressionEvidence,
+    metricSuppressionEvidence: [
+      ...sanitizedMetricCandidates.suppressionEvidence,
+      ...timeseriesTotals.suppressionEvidence,
+    ],
     metricCandidates,
     provenanceDiagnostics: [...provenanceDiagnostics.values()].sort(compareWearableProvenanceDiagnostics),
     rawMetricCandidates,
     sleepWindows: filteredSleepWindows,
     workoutFeatures: collectJunctionWorkoutFeatures(vault.events, filters),
   };
+}
+
+/**
+ * Tells a steps total that covers its whole day from one last recorded partway
+ * through a day the vault has since seen finish. Both facts come from the steps
+ * totals themselves: each one's own day end, and the latest time any of them
+ * was recorded. Other records do not count as proof that time has passed,
+ * because some carry a time that stands for a day rather than an instant.
+ */
+function trackStepsFreshness() {
+  const dayEndMsByCandidateId = new Map<string, number>();
+  let evidenceThroughMs = Number.NEGATIVE_INFINITY;
+
+  return {
+    noteRecord(entity: CanonicalEntity, provider: string, externalRef: WearableExternalRef | null): void {
+      if (
+        entity.family !== "event"
+        || entity.kind !== "observation"
+        || mapScalarMetric(normalizeLowercaseString(entity.attributes.metric) ?? "", 0, null)?.metric !== "steps"
+      ) {
+        return;
+      }
+
+      for (const candidate of buildObservationMetricCandidates(entity, provider, externalRef)) {
+        const recordedMs = Date.parse(candidate.recordedAt ?? "");
+        if (recordedMs > evidenceThroughMs) {
+          evidenceThroughMs = recordedMs;
+        }
+        const dayEndMs = resolveLocalDayEndMs(
+          candidate.date,
+          normalizeNullableString(entity.attributes.timeZone),
+          candidate.dataOrigin?.timeZoneOffsetMinutes,
+        );
+        if (dayEndMs !== null) {
+          dayEndMsByCandidateId.set(candidate.candidateId, dayEndMs);
+        }
+      }
+    },
+    markPartialCounts(candidates: readonly WearableMetricCandidate[]): void {
+      for (const candidate of candidates) {
+        if (isPartialCountOfFinishedDay({
+          dayEndMs: dayEndMsByCandidateId.get(candidate.candidateId) ?? null,
+          evidenceThroughMs,
+          recordedAt: candidate.recordedAt,
+        })) {
+          candidate.partialCountOfFinishedDay = true;
+        }
+      }
+    },
+  };
+}
+
+// The timeseries whose day sum is a quantity the activity summary also
+// reports, with the metric point key each one is stored under.
+const JUNCTION_ACTIVITY_TIMESERIES_RESOURCES = ["steps", "distance", "floors-climbed"] as const;
+const JUNCTION_ACTIVITY_TIMESERIES_SUPPRESSION_KEYS = new Map<WearableMetricKey, string>([
+  ["steps", "steps"],
+  ["distanceKm", "distance-km"],
+  ["floorsClimbed", "floors-climbed"],
+]);
+
+/**
+ * A day total summed from one source's own timeseries stands in for a day that
+ * source sent no activity summary for. Beside that summary it is a partial
+ * copy of the same quantity (one device's samples, over a UTC day), not a
+ * second opinion, so it is not a candidate. Its raw observation is suppressed
+ * as a metric point the same way a losing candidate's is, so goals and
+ * experiments still see one point for the day.
+ */
+export function dropJunctionTimeseriesTotalsBesideActivitySummary(
+  candidates: readonly WearableMetricCandidate[],
+): {
+  candidates: WearableMetricCandidate[];
+  suppressionEvidence: WearableMetricSuppressionEvidence[];
+} {
+  // Junction names a record's resource type `junction-<source>-<resource>`.
+  const describe = (candidate: WearableMetricCandidate) => {
+    const source = normalizeWearableOriginSourceSlug(candidate.dataOrigin?.sourceProviderSlug);
+    const resourceType = normalizeLowercaseString(candidate.externalRef?.resourceType);
+    if (
+      candidate.sourceFamily !== "event"
+      || candidate.externalRef?.system !== "junction"
+      || !source
+      || !resourceType?.startsWith(`junction-${source}-`)
+    ) {
+      return null;
+    }
+    return {
+      key: `${source}|${candidate.date}|${candidate.metric}`,
+      resource: resourceType.slice(`junction-${source}-`.length),
+    };
+  };
+  const summarized = new Set<string>();
+  for (const candidate of candidates) {
+    const described = describe(candidate);
+    if (described?.resource === "activity") {
+      summarized.add(described.key);
+    }
+  }
+  const kept: WearableMetricCandidate[] = [];
+  const suppressionEvidence: WearableMetricSuppressionEvidence[] = [];
+  for (const candidate of candidates) {
+    const described = describe(candidate);
+    const metricKey = JUNCTION_ACTIVITY_TIMESERIES_SUPPRESSION_KEYS.get(
+      candidate.metric as WearableMetricKey,
+    );
+    if (
+      !described
+      || !metricKey
+      || !summarized.has(described.key)
+      || !(JUNCTION_ACTIVITY_TIMESERIES_RESOURCES as readonly string[]).includes(described.resource)
+    ) {
+      kept.push(candidate);
+      continue;
+    }
+    suppressionEvidence.push({ date: candidate.date, metricKey, recordIds: candidate.recordIds });
+  }
+  return { candidates: kept, suppressionEvidence };
 }
 
 function sanitizeWearableMetricCandidates(

@@ -423,11 +423,42 @@ full accepted window and intentionally retaining new-format rows for one extra
 
 ### Hosted companion routes
 
+- `GET /api/device-sync/companion/connect-sources` — first-party member bearer
+  auth; read-only schema version 1 with resolver-ordered source IDs, names,
+  relative PNG logos, native/web paths, and shared Apple Health setup copy.
+  Active access and health consent gate optional connection states and last-data
+  timestamps; either refusal returns the same unconnected list. Unknown query
+  parameters are ignored. No health values are returned. A connected source
+  that signs in on its own website lists `actions`: `sync` while the connection
+  is active, and `remove` only where removing stops that one source (never
+  during a Fitbit migration or when the source needs a reset that would
+  disconnect the shared account).
+- `POST /api/device-sync/companion/connect-sources/:sourceId/start` — bearer
+  auth with active access. Body `{ "appReturn": "ios" | "ios-dev" }`, a name
+  from a closed set and never a URL. Same checks as the browser start (offered,
+  health grant, WHOOP cap), with the reconnect target taken from the server's
+  own row. Returns `{ authorizationUrl, provider, completionProof }`.
+- `GET /api/device-sync/companion/connect-return/:app` — the provider's return
+  for an app-started connection. No session, no state read, no writes: a 302 to
+  the app's URL scheme carrying the provider's query when it is at most 2,048
+  characters.
+- `POST /api/device-sync/companion/connect-sources/complete` — bearer auth with
+  active access. Body `{ provider, query, completionProof }`, at most 4 KB. The
+  proof is checked first and a failed proof changes nothing; then the shared
+  callback runs with the member as owner. Returns the list.
+- `POST /api/device-sync/companion/connect-sources/:sourceId/disconnect` —
+  bearer auth; needs no active access or health grant because it only reduces
+  authority. Takes only the source id. Stops that one source or answers
+  `COMPANION_CONNECT_REFRESH_REQUIRED` (409) and changes nothing; it never
+  widens to the whole connection. Returns the list.
+- `POST /api/device-sync/companion/connect-sources/:sourceId/sync` — bearer
+  auth with active access. Queues the manual reconcile wake for the source's
+  active connection, bucketed to the minute.
 - `POST /api/device-sync/companion/admission`
 - `POST /api/device-sync/companion/sign-in-token`
 - `POST /api/device-sync/companion/hrv-rmssd`
 
-All are Privy-bearer-authenticated and consent-gated. Admission validates its
+The POST routes are bearer-authenticated and consent-gated. Admission validates its
 complete bounded optional-time-zone body before canonical member mutation and
 uses the canonical signup-welcome route without suppressing trial activation;
 it does not enter device sync. Sign-in honors the
@@ -435,6 +466,16 @@ resume, omitted-intent inference, and future explicit-connect authority split
 above. The derived route accepts only the closed overnight summary contract,
 reuses one active member-owned Junction connection, and never establishes or
 reactivates a lane from data ingress.
+
+Each `connect-sources` row may carry `sourceProviderSlug`, the slug
+`GET /api/device-sync/companion/status?sourceProviderSlug=` takes for that
+source's own receipt times; a wearable that comes in through Apple Health has
+none. A `needs_attention` connection carries `reason`: `reconnect` (sign in
+again), `fitbit_migration` (sign in to Google Health), `connection_reset` (the
+old connection must go first, which removes the shared account, so only the
+website does it) or `reset_unfinished` (an earlier reset left the old
+connection in the wearable's own account). Both are additive; older app builds
+ignore them.
 
 ### Hosted agent sessions
 
@@ -654,11 +695,13 @@ Local responsibilities:
 - Junction-backed reconcile of Garmin summaries, timeseries, sleep, activity, and other configured resources
 - local imports into the vault
 
-## Fitbit migration continuation
+## Fitbit to Google Health source cutover
 
-The browser owns presentation and explicit Google authorization only. Its persisted Google source `firstSeenAt` is also the authorization epoch used by both exact Google and Fitbit proof jobs. That existing epoch participates in their current job identity; stale queued, leased, retry, timeseries, or workout lineages cannot certify a later authorization. The wake-local hosted device-sync pass drains scheduled and webhook work, publishes source state, and then asks Web to attempt cutover. Web re-enters the existing connection mutation lock, rejects pending dirty state, evaluates importer-owned canonical evidence, and calls targeted provider revoke outside the transaction. A crash is recovered by probing that exact Fitbit provider source; only provider-confirmed inactivity is finalized locally. No migration table, queue, or second state owner exists.
+The browser presents one Fitbit / Pixel Watch connection card and requires explicit Google Health authorization. Web persists separate Fitbit and Google Health source rows. Google Health imports as an ordinary connected Junction source, including its original historical windows; no Fitbit coverage, resource parity, or fresh-data proof gates it. The Google Health source `firstSeenAt` is the authorization epoch for exact-source historical jobs. Jobs bound to an older epoch fail their next admission or lifecycle check.
 
-Deploy importer, Device Sync, and hosted-runtime consumers before the Web bundle so every cutover caller understands source-scoped evidence, per-resource fences, retry identity, and Google Health admission. Then deploy Web and smoke one explicit Google authorization. Temporary version skew leaves legacy Fitbit active rather than cutting over without complete evidence.
+After Google Health connects, the existing wake-local pass and bounded hosted maintenance ask Web to attempt the Fitbit cutover. The wake-local pass drains dirty work first, and Web refuses cutover while dirty work remains. Web claims the exact Fitbit source under the connection lock, calls targeted provider revoke outside the transaction, and finalizes only confirmed inactivity. An uncertain revoke keeps the claim fenced until an exact provider check resolves it. Jobs admitted after Fitbit is terminal start no source-scoped Fitbit pull; earlier admitted fetches may finish, and canonical import filters terminal-source data. Already prepared Fitbit facts may commit as ordinary overlapping source evidence.
+
+Before merge, establish and verify the Vercel Web build hold. Deploy the exact merged Cloudflare runner with immediate container rollout, verify its fingerprint and warm-image convergence, then restore Web builds and deploy the matching Web revision. The new runner is the rollback floor once Web admits previously held work. Web-first activation can admit Google Health jobs that the old runner silently filters. Release operations require their own authorization.
 
 ## Retired member-owned provider applications
 

@@ -1,5 +1,7 @@
+import { readOptionalJsonInput } from "../route-utils/json-body.ts";
+import { parseInput, RequestInputError } from "@murphai/hosted-execution/request-input";
 import { workspaceSnapshotBucket } from "../../workspace-snapshot-local-s3.ts";
-import { retireRecapMediaObject } from "../../recap-media-store.ts";
+import { retireRecapMediaObject, retireProgressPicObject } from "../../recap-media-store.ts";
 import { abortRuntimeMultipartUpload } from "../../runtime-object-upload.ts";
 import { parseHostedRuntimeResourcePurge } from "@murphai/hosted-execution/runtime-resource-purge";
 import { readHostedExecutionSnapshotBaseRef, readHostedExecutionSnapshotDeltaRef, readHostedExecutionSnapshotHotRef } from "@murphai/hosted-execution/parsers";
@@ -8,7 +10,7 @@ import { hostedPrivateMediaUserPrefix, hostedBrowserVaultReplicaUserPrefix, host
 import { listHostedBrowserVaultReplicaSiblingObjectKeys } from "../../browser-vault-store.ts";
 import { deleteLegacyHostedBundle } from "../../bundle-gc.ts";
 import { loadRunnerStores } from "../../user-runner/runner-stores.ts";
-import { json, readOptionalJsonObject } from "../../json.ts";
+import { json } from "../../json.ts";
 import { readHostedExecutionEnvironment } from "../../env.ts";
 import { asWorkerStringEnvironment } from "../../worker-contracts.ts";
 import type { WorkerRouteContext } from "../../worker-routes/shared.ts";
@@ -21,7 +23,7 @@ export const runtimeResourcePurgeRoutes: readonly DeclarativeRoute<WorkerRouteCo
   beforeMethod(context, params) { return requireBoundInternalRouteUser(context, params, "runtime-resource-purge"); },
   async handle(context, params) {
     const userId = decodeRouteParam(params.userId);
-    const resource = parseHostedRuntimeResourcePurge(await readOptionalJsonObject(context.request, { limitBytes: 16 * 1024 }));
+    const resource = parseInput(await readOptionalJsonInput(context.request, { limitBytes: 16 * 1024 }), parseHostedRuntimeResourcePurge);
     await purgeHostedRuntimeResource({ source: context.env, userId, resource });
     return json({ deleted: true });
   },
@@ -35,6 +37,10 @@ export async function purgeHostedRuntimeResource(input: {
   const bucket = workspaceSnapshotBucket(input.source);
   if (!bucket.delete) throw new Error("Runtime resource deletion is unavailable.");
   const resource = parseHostedRuntimeResourcePurge(input.resource);
+  if (resource.kind === "game_progress_pic") {
+    await retireProgressPicObject({ bucket: input.source.BUNDLES, userId: input.userId, objectKey: resource.objectKey });
+    return;
+  }
   if (resource.kind === "game_recap") {
     await retireRecapMediaObject({ bucket: input.source.BUNDLES, userId: input.userId, objectKey: resource.objectKey });
     return;
@@ -42,7 +48,7 @@ export async function purgeHostedRuntimeResource(input: {
   if (resource.kind === "multipart") {
     if (!bucket.resumeMultipartUpload) throw new Error("Runtime multipart recovery is unavailable.");
     const prefixes = await Promise.all([hostedMediaUserPrefix({ userId: input.userId }), hostedPrivateMediaUserPrefix({ userId: input.userId }), hostedBrowserVaultReplicaUserPrefix({ userId: input.userId }), hostedWorkspaceSnapshotUserPrefix({ userId: input.userId })]);
-    if (!prefixes.some(prefix => resource.objectKey.startsWith(prefix) && !resource.objectKey.slice(prefix.length).includes("/"))) throw new TypeError("Multipart upload is outside the member namespace.");
+    if (!prefixes.some(prefix => resource.objectKey.startsWith(prefix) && !resource.objectKey.slice(prefix.length).includes("/"))) throw new RequestInputError("Multipart upload is outside the member namespace.");
     await abortRuntimeMultipartUpload(bucket.resumeMultipartUpload(resource.objectKey, resource.uploadId));
     return;
   }
@@ -66,7 +72,7 @@ export async function purgeHostedRuntimeResource(input: {
     return;
   }
   const prefix = await (resource.kind === "snapshot" ? hostedWorkspaceSnapshotUserPrefix : resource.kind === "media" ? hostedMediaUserPrefix : hostedBrowserVaultReplicaUserPrefix)({ userId: input.userId });
-  if (!resource.objectKey.startsWith(prefix) || resource.objectKey.slice(prefix.length).includes("/")) throw new TypeError("Runtime resource purge is outside the member namespace.");
-  const keys = resource.kind === "replica" ? [resource.objectKey, ...listHostedBrowserVaultReplicaSiblingObjectKeys(resource.objectKey)] : resource.objectKey;
+  if (!resource.objectKey.startsWith(prefix) || resource.objectKey.slice(prefix.length).includes("/")) throw new RequestInputError("Runtime resource purge is outside the member namespace.");
+  const keys = resource.kind === "replica" ? [resource.objectKey, ...parseInput(resource.objectKey, () => listHostedBrowserVaultReplicaSiblingObjectKeys(resource.objectKey))] : resource.objectKey;
   await bucket.delete(keys);
 }

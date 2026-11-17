@@ -994,8 +994,6 @@ export interface ProviderSnapshotImportReceipt {
 }
 
 export interface ProviderSnapshotCanonicalCoverageEvidence {
-  coverageBoundary: string;
-  coverageFinalizedAt?: string;
   resource: string;
   sourceProviderSlug: string;
 }
@@ -1226,9 +1224,26 @@ export interface DeviceSyncRegistry extends NamedDeviceProviderRegistry<DeviceSy
   list(): DeviceSyncProvider[];
 }
 
+/**
+ * Where the provider sends the person after sign-in. The website's callback
+ * route is the default; the Murph app names one of its own fixed return
+ * bridges. A caller picks a name from this closed set and never supplies a URL.
+ */
+export const DEVICE_SYNC_APP_CONNECT_RETURN_PATHS = {
+  ios: "/companion/connect-return/ios",
+  "ios-dev": "/companion/connect-return/ios-dev",
+} as const;
+
+export type DeviceSyncAppConnectReturn = keyof typeof DEVICE_SYNC_APP_CONNECT_RETURN_PATHS;
+
+export function isDeviceSyncAppConnectReturn(value: unknown): value is DeviceSyncAppConnectReturn {
+  return typeof value === "string" && Object.hasOwn(DEVICE_SYNC_APP_CONNECT_RETURN_PATHS, value);
+}
+
 export interface StartConnectionInput {
   provider: string;
   returnTo?: string | null;
+  appReturn?: DeviceSyncAppConnectReturn | null;
   ownerId?: string | null;
   sourceProviderSlug?: string | null;
   sourceLifecycleProof?: StartConnectionSourceLifecycleProof | null;

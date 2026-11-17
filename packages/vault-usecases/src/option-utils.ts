@@ -1,9 +1,11 @@
 import {
   experimentMeasurementAnchorsSchema,
   experimentPlannedMeasurementsSchema,
-  type ExperimentAnalysisPlan,
-  type ExperimentMeasurementAnchor,
-  type ExperimentPlannedMeasurement,
+} from '@murphai/contracts/zod'
+import type {
+  ExperimentAnalysisPlan,
+  ExperimentMeasurementAnchor,
+  ExperimentPlannedMeasurement,
 } from '@murphai/contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
 

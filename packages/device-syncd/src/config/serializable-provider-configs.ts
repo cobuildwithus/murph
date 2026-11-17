@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { configuredDeviceSyncProviderKeys } from "./provider-keys.ts";
 
 import type {
@@ -74,7 +75,7 @@ export function parseSerializableConfiguredDeviceSyncProviderConfigs(
 
 export function requireSerializableConfigObject(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object.`);
+    throw new ContractValidationError(`${label} must be an object.`);
   }
 
   return value as Record<string, unknown>;
@@ -82,7 +83,7 @@ export function requireSerializableConfigObject(value: unknown, label: string): 
 
 export function requireSerializableString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.length === 0) {
-    throw new TypeError(`${label} must be a non-empty string.`);
+    throw new ContractValidationError(`${label} must be a non-empty string.`);
   }
 
   return value;
@@ -150,7 +151,7 @@ function requireSerializableConfiguredDeviceSyncProviderConfigsRecord(
 
   for (const key of Object.keys(record)) {
     if (!supportedProviders.has(key) && !RETIRED_DIRECT_DEVICE_SYNC_PROVIDER_KEYS.has(key)) {
-      throw new TypeError(`${label}.${key} is not a supported device-sync provider config.`);
+      throw new ContractValidationError(`${label}.${key} is not a supported device-sync provider config.`);
     }
   }
 
@@ -166,13 +167,13 @@ function requireSerializableProviderConfigRecord(
 
   for (const [key, message] of Object.entries(JUNCTION_SERIALIZABLE_PROVIDER_CONFIG_SCHEMA.disallowedSerializableFields)) {
     if (record[key] !== undefined) {
-      throw new TypeError(`${label}.${key} ${message}`);
+      throw new ContractValidationError(`${label}.${key} ${message}`);
     }
   }
 
   for (const key of Object.keys(record)) {
     if (!supportedKeys.has(key)) {
-      throw new TypeError(`${label}.${key} is not a supported serialized provider config field.`);
+      throw new ContractValidationError(`${label}.${key} is not a supported serialized provider config field.`);
     }
   }
 
@@ -198,7 +199,7 @@ function parseSerializableFieldValue(
 
 function requireSerializableBoolean(value: unknown, label: string): boolean {
   if (typeof value !== "boolean") {
-    throw new TypeError(`${label} must be a boolean.`);
+    throw new ContractValidationError(`${label} must be a boolean.`);
   }
 
   return value;
@@ -206,7 +207,7 @@ function requireSerializableBoolean(value: unknown, label: string): boolean {
 
 function requireSerializableNumber(value: unknown, label: string): number {
   if (typeof value !== "number" || !Number.isFinite(value)) {
-    throw new TypeError(`${label} must be a finite number.`);
+    throw new ContractValidationError(`${label} must be a finite number.`);
   }
 
   return value;
@@ -214,7 +215,7 @@ function requireSerializableNumber(value: unknown, label: string): number {
 
 function requireSerializableStringArray(value: unknown, label: string): string[] {
   if (!Array.isArray(value)) {
-    throw new TypeError(`${label} must be an array of strings.`);
+    throw new ContractValidationError(`${label} must be an array of strings.`);
   }
 
   return value.map((entry, index) => requireSerializableString(entry, `${label}[${index}]`));

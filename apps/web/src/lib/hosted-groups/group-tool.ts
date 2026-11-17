@@ -1,7 +1,9 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { handleGameChatBootstrapControl } from "../game/chat-bootstrap";
 import { handleGameChatTool } from "../game/chat-tool";
 import type { HostedRuntimeIdentity } from "../hosted-execution/runtime-owner";
 import "server-only";
+import { handleHostedLinqGroupLeaveTool } from "./linq-group-leave-tool";
 import { sharesCompanionContact } from "@murphai/hosted-execution/vault-share";
 
 import {
@@ -249,7 +251,7 @@ export function buildHostedGroupJoinOfferProviderIdempotencyKey(input: {
     buildHostedVaultShareProjectionScopeKey,
   );
   if (projectionScopeKeys.length !== input.projectionScopes.length) {
-    throw new TypeError("Hosted group join-offer idempotency input is invalid.");
+    throw new ContractValidationError("Hosted group join-offer idempotency input is invalid.");
   }
   const digest = sha256Hex(JSON.stringify({
     groupId: input.groupId,
@@ -275,6 +277,8 @@ export type HostedRuntimeGroupToolAccessClassification =
 
 export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   my_game_reminders: "personal_active",
+  my_game_not_for_me: "personal_active",
+  leave_group: "participant_aware",
   read_game: "participant_aware",
   update_game: "participant_aware",
   game_photo: "participant_aware",
@@ -455,8 +459,13 @@ async function recordHostedRuntimeGroupJournalFact(
 export async function handleHostedRuntimeConversationTool(
   input: HostedRuntimeGroupToolHandlerInput,
 ): Promise<HostedRuntimeGroupToolResponse> {
+  if (input.request.action === "leave_group") return handleHostedLinqGroupLeaveTool({ memberId: input.memberId, runtimeIdentity: input.runtimeIdentity ?? null, request: input.request });
   if (input.request.action === "game_chat_bootstrap") {
     return handleGameChatBootstrapControl({ memberId: input.memberId, runtimeIdentity: input.runtimeIdentity ?? null, request: input.request });
+  }
+  if (input.request.action === "my_game_not_for_me") {
+    const { handleMyGameNotForMeTool } = await import("../game/direct-tool");
+    return handleMyGameNotForMeTool({ memberId: input.memberId, runtimeIdentity: input.runtimeIdentity ?? null, request: input.request });
   }
   if (input.request.action === "my_game_reminders") {
     const { handleMyGameRemindersTool } = await import("../game/direct-tool");
@@ -469,7 +478,7 @@ export async function handleHostedRuntimeConversationTool(
 }
 
 type HostedRuntimeNonGameToolHandlerInput = Omit<HostedRuntimeGroupToolHandlerInput, "request"> & {
-  request: Exclude<HostedRuntimeGroupToolRequest, { action: "read_game" | "update_game" | "game_photo" | "write_recap" | "game_chat_bootstrap" | "my_game_reminders" }>;
+  request: Exclude<HostedRuntimeGroupToolRequest, { action: "leave_group" | "read_game" | "update_game" | "game_photo" | "write_recap" | "game_chat_bootstrap" | "my_game_reminders" | "my_game_not_for_me" }>;
 };
 
 export async function handleHostedRuntimeGroupTool(

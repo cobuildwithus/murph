@@ -304,14 +304,13 @@ test('search returns lexical hits and excludes raw sample rows by default', asyn
 
   try {
     const result = await runCli<{
-      hits: Array<{
+      hits: Array<Record<string, unknown> & {
+        aliasIds?: string[]
         recordId: string
         recordType: string
         snippet: string
       }>
-      query: string
       total: number
-      filters: Record<string, unknown>
     }>([
       'search',
       'query',
@@ -324,19 +323,26 @@ test('search returns lexical hits and excludes raw sample rows by default', asyn
 
     assert.equal(result.ok, true)
     assert.equal(result.meta?.command, 'search query')
-    assert.equal(requireData(result).query, 'afternoon crash pasta')
+    assert.deepEqual(Object.keys(requireData(result)).sort(), ['hits', 'total'])
     assert.equal(requireData(result).total, 2)
-    assert.deepEqual(requireData(result).filters, {
-      text: 'afternoon crash pasta',
-      recordTypes: [],
-      kinds: [],
-      streams: [],
-      experiment: null,
-      from: null,
-      to: null,
-      tags: [],
-      limit: 10,
-    })
+    for (const hit of requireData(result).hits) {
+      for (const omitted of ['citation', 'matchedTerms', 'path', 'score']) {
+        assert.equal(Object.hasOwn(hit, omitted), false, omitted)
+      }
+      for (const kept of ['date', 'kind', 'occurredAt', 'recordId', 'recordType', 'snippet', 'tags', 'title']) {
+        assert.equal(Object.hasOwn(hit, kept), true, kept)
+      }
+      for (const nullable of ['experimentSlug', 'stream']) {
+        assert.notEqual(hit[nullable], null, nullable)
+      }
+      if (hit.aliasIds) {
+        assert.ok(hit.aliasIds.some((id) => id !== hit.recordId))
+      }
+    }
+    assert.equal(
+      requireData(result).hits.find((hit) => hit.recordId === 'journal:2026-03-12')?.experimentSlug,
+      'retrieval-study',
+    )
     assert.deepEqual(
       new Set(requireData(result).hits.map((hit) => hit.recordId)),
       new Set(['journal:2026-03-12', fixture.mealId]),
@@ -378,7 +384,6 @@ test('search query accepts matching positional and named text on the built CLI',
 
   try {
     const result = await runCli<{
-      query: string
       total: number
     }>([
       'search',
@@ -394,7 +399,6 @@ test('search query accepts matching positional and named text on the built CLI',
 
     assert.equal(result.ok, true)
     assert.equal(result.meta?.command, 'search query')
-    assert.equal(requireData(result).query, 'afternoon crash pasta')
     assert.equal(requireData(result).total, 2)
   } finally {
     await rm(fixture.vaultRoot, { recursive: true, force: true })
@@ -426,7 +430,7 @@ test('search query rejects blank and conflicting input through the real CLI', as
   }
 })
 
-test('search applies date bounds and echoes renamed filter keys', async () => {
+test('search applies date bounds', async () => {
   const fixture = await makeSourceRetrievalFixture()
 
   try {
@@ -455,7 +459,6 @@ Afternoon crash after pasta lunch returned.
     )
 
     const bounded = await runSourceCli<{
-      filters: Record<string, unknown>
       hits: Array<{
         recordId: string
       }>
@@ -487,10 +490,6 @@ Afternoon crash after pasta lunch returned.
     ])
 
     assert.equal(bounded.ok, true)
-    assert.equal(requireData(bounded).filters.from, '2026-03-12')
-    assert.equal(requireData(bounded).filters.to, '2026-03-12')
-    assert.equal('dateFrom' in requireData(bounded).filters, false)
-    assert.equal('dateTo' in requireData(bounded).filters, false)
     assert.equal(requireData(bounded).total, 2)
     assert.deepEqual(
       new Set(requireData(bounded).hits.map((hit) => hit.recordId)),
@@ -550,10 +549,11 @@ test('timeline merges journals, events, and metric sample summaries into one des
 
   try {
     const result = await runCli<{
-      items: Array<{
+      items: Array<Record<string, unknown> & {
         entryType: string
         id: string
-        stream: string | null
+        relatedIds?: string[]
+        stream?: string
       }>
     }>([
       'timeline',
@@ -567,6 +567,20 @@ test('timeline merges journals, events, and metric sample summaries into one des
 
     assert.equal(result.ok, true)
     assert.equal(result.meta?.command, 'timeline')
+    assert.deepEqual(Object.keys(requireData(result)), ['items'])
+    for (const item of requireData(result).items) {
+      assert.equal(Object.hasOwn(item, 'path'), false)
+      for (const nullable of ['experimentSlug', 'stream']) {
+        assert.notEqual(item[nullable], null, nullable)
+      }
+      if (item.relatedIds) {
+        assert.ok(item.relatedIds.some((id) => id !== item.id))
+      }
+    }
+    assert.equal(
+      requireData(result).items.find((item) => item.id === 'journal:2026-03-12')?.experimentSlug,
+      'retrieval-study',
+    )
     assert.deepEqual(
       requireData(result).items.slice(0, 3).map((item) => [item.entryType, item.id]),
       [
@@ -596,7 +610,7 @@ test('timeline merges journals, events, and metric sample summaries into one des
       { flags: ['--entry-type', 'journal', '--experiment', 'unrelated-experiment'], expectedIds: [] },
       { flags: ['--limit', '1'], expectedIds: ['sample-summary:2026-03-12:heart_rate:bpm'] },
     ]) {
-      const filtered = await runCli<{ items: Array<{ id: string }> }>([
+      const filtered = await runCli<{ items: Array<{ id: string }>; limit?: number }>([
         'timeline', '--from', '2026-03-12', '--to', '2026-03-12',
         ...flags, '--vault', fixture.vaultRoot,
       ])
@@ -606,6 +620,8 @@ test('timeline merges journals, events, and metric sample summaries into one des
         expectedIds,
         flags.join(' '),
       )
+      // Only a full page names its limit, so a truncated read is visible.
+      assert.equal(requireData(filtered).limit, flags.includes('--limit') ? 1 : undefined, flags.join(' '))
       for (const item of requireData(filtered).items) {
         assert.equal(Object.hasOwn(item, 'data'), false)
       }
@@ -866,9 +882,6 @@ test('search accepts projected health record families', async () => {
 
   try {
     const result = await runCli<{
-      filters: {
-        recordTypes: string[]
-      }
       hits: Array<{
         recordId: string
         recordType: string
@@ -890,11 +903,6 @@ test('search accepts projected health record families', async () => {
     ])
 
     assert.equal(result.ok, true)
-    assert.deepEqual(requireData(result).filters.recordTypes, [
-      'assessment',
-      'event',
-      'goal',
-    ])
     assert.deepEqual(
       new Set(requireData(result).hits.map((hit) => hit.recordType)),
       new Set(['assessment', 'event', 'goal']),
@@ -910,9 +918,6 @@ test('timeline exposes projected health entry types', async () => {
 
   try {
     const result = await runCli<{
-      filters: {
-        entryTypes: string[]
-      }
       items: Array<{
         entryType: string
       }>
@@ -931,10 +936,6 @@ test('timeline exposes projected health entry types', async () => {
     ])
 
     assert.equal(result.ok, true)
-    assert.deepEqual(requireData(result).filters.entryTypes, [
-      'assessment',
-      'event',
-    ])
     assert.deepEqual(
       requireData(result).items.map((item) => item.entryType),
       ['assessment', 'event'],

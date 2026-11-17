@@ -56,30 +56,23 @@ function normalizeFoodStatus(value: unknown): FoodStatus {
 
 function buildBody(record: FoodRecord): string {
   const relations = canonicalizeFoodRelations(record);
+  const { perServing = {}, provenance } = record.nutrition ?? {};
   const nutritionLines = [
-    record.nutrition?.perServing?.calories !== undefined
-      ? `Calories: ${record.nutrition.perServing.calories}`
-      : null,
-    record.nutrition?.perServing?.proteinGrams !== undefined
-      ? `Protein: ${record.nutrition.perServing.proteinGrams} g`
-      : null,
-    record.nutrition?.perServing?.carbsGrams !== undefined
-      ? `Carbs: ${record.nutrition.perServing.carbsGrams} g`
-      : null,
-    record.nutrition?.perServing?.fatGrams !== undefined
-      ? `Fat: ${record.nutrition.perServing.fatGrams} g`
-      : null,
-    record.nutrition?.perServing?.fiberGrams !== undefined
-      ? `Fiber: ${record.nutrition.perServing.fiberGrams} g`
-      : null,
-    record.nutrition?.provenance?.source ? `Source: ${record.nutrition.provenance.source}` : null,
-    record.nutrition?.provenance?.confidence
-      ? `Confidence: ${record.nutrition.provenance.confidence}`
-      : null,
-    record.nutrition?.provenance?.sourceDetail
-      ? `Source detail: ${record.nutrition.provenance.sourceDetail}`
-      : null,
-  ].filter((line): line is string => Boolean(line));
+    ...([
+      ["Calories", perServing.calories, ""],
+      ["Protein", perServing.proteinGrams, " g"],
+      ["Carbs", perServing.carbsGrams, " g"],
+      ["Fat", perServing.fatGrams, " g"],
+      ["Fiber", perServing.fiberGrams, " g"],
+    ] as const).flatMap(([label, value, unit]) =>
+      value === undefined ? [] : [`${label}: ${value}${unit}`],
+    ),
+    ...([
+      ["Source", provenance?.source],
+      ["Confidence", provenance?.confidence],
+      ["Source detail", provenance?.sourceDetail],
+    ] as const).flatMap(([label, value]) => value ? [`${label}: ${value}`] : []),
+  ];
   const sections = [
     record.summary ? section("Summary", record.summary) : null,
     record.aliases?.length ? listSection("Aliases", record.aliases) : null,

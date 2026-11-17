@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type { DatabaseSync } from "node:sqlite";
 
 import { withImmediateTransaction } from "@murphai/runtime-state/node";
@@ -207,7 +208,7 @@ function requireEncryptedProviderAuthTokens(
     return tokens;
   }
 
-  throw new TypeError(message);
+  throw new ContractValidationError(message);
 }
 
 function getHostedHydrationTokenInput(
@@ -249,7 +250,7 @@ function buildCredentialColumnsFromCredential(
   if (credential.kind === "provider_config") {
     const providerConfigKey = credential.providerConfigKey.trim();
     if (!providerConfigKey) {
-      throw new TypeError("Hosted provider-config hydration requires providerConfigKey.");
+      throw new ContractValidationError("Hosted provider-config hydration requires providerConfigKey.");
     }
 
     return {

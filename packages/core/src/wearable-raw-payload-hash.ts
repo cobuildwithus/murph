@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createHash } from "node:crypto";
 
 export type WearableRawPayloadJsonValue =
@@ -21,7 +22,7 @@ export function hashWearableRawPayload(value: unknown): string {
 function normalizeWearableRawPayload(value: unknown): WearableRawPayloadJsonValue {
   if (value instanceof Date) {
     if (!Number.isFinite(value.getTime())) {
-      throw new TypeError("Wearable raw ingest payload must contain only valid Dates.");
+      throw new ContractValidationError("Wearable raw ingest payload must contain only valid Dates.");
     }
     return value.toISOString();
   }
@@ -36,7 +37,7 @@ function normalizeWearableRawPayload(value: unknown): WearableRawPayloadJsonValu
 
   if (typeof value === "number") {
     if (!Number.isFinite(value)) {
-      throw new TypeError("Wearable raw ingest payload must contain only finite JSON numbers.");
+      throw new ContractValidationError("Wearable raw ingest payload must contain only finite JSON numbers.");
     }
     return value;
   }
@@ -55,7 +56,7 @@ function normalizeWearableRawPayload(value: unknown): WearableRawPayloadJsonValu
     return Object.fromEntries(normalized) as { [key: string]: WearableRawPayloadJsonValue };
   }
 
-  throw new TypeError("Wearable raw ingest payload must be JSON-serializable.");
+  throw new ContractValidationError("Wearable raw ingest payload must be JSON-serializable.");
 }
 
 function sortWearableRawPayloadValue(

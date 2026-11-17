@@ -626,7 +626,7 @@ export function toListEntity(input: {
   links: ListEntity["links"]
   excerpt?: string | null
 }): ListEntity {
-  const data = compactListEntityData(input.data)
+  const data = compactListEntityData(summarizeListEntityData(input.data, input.id))
   if (input.links.length > LIST_LINK_MAX_ITEMS && data.linksCount === undefined) {
     data.linksCount = input.links.length
   }
@@ -659,19 +659,73 @@ export function toListEntity(input: {
   return entity
 }
 
+// A record's link to itself and a supplement ingredient object are the two
+// nested values a list summary would otherwise reduce to a bare count.
+function summarizeListEntityData(
+  data: Record<string, unknown>,
+  id: string,
+): Record<string, unknown> {
+  const summary = { ...data }
+  if (Array.isArray(data.links)) {
+    summary.links = data.links.filter(
+      (link) => !isPlainObject(link) || link.targetId !== id,
+    )
+  }
+  if (Array.isArray(data.ingredients)) {
+    summary.ingredients = data.ingredients.map(summarizeSupplementIngredient)
+  }
+  return summary
+}
+
+function summarizeSupplementIngredient(value: unknown): unknown {
+  if (!isPlainObject(value) || typeof value.compound !== "string") {
+    return value
+  }
+  const label =
+    typeof value.label === "string" && value.label !== value.compound
+      ? ` (${value.label})`
+      : ""
+  const amount =
+    typeof value.amount === "number"
+      ? ` ${value.amount}${typeof value.unit === "string" ? ` ${value.unit}` : ""}`
+      : ""
+  return [
+    `${value.compound}${label}${amount}`,
+    value.active === false ? "inactive" : null,
+    typeof value.note === "string" ? value.note : null,
+  ].filter((part) => part !== null).join("; ")
+}
+
 export function compactListEntityData(data: Record<string, unknown>): Record<string, unknown> {
   const compact: Record<string, unknown> = {}
 
   for (const [key, value] of Object.entries(data)) {
-    const compactValue = compactListEntityValue(value)
-    if (compactValue !== undefined) {
-      compact[key] = compactValue
-    } else {
-      addListEntityCollectionSummary(compact, key, value)
-    }
+    addCompactListEntityField(compact, key, compactListEntityValue(value), value)
   }
 
   return compact
+}
+
+// Empty collections are absent, and a shortened array keeps its full length.
+function addCompactListEntityField(
+  compact: Record<string, unknown>,
+  key: string,
+  compactValue: unknown,
+  value: unknown,
+): void {
+  if (compactValue !== undefined) {
+    compact[key] = compactValue
+  }
+  const shownItems = Array.isArray(compactValue) ? compactValue.length : 0
+  if (Array.isArray(value) && value.length > shownItems) {
+    compact[`${key}Count`] = value.length
+  } else if (
+    compactValue === undefined &&
+    isPlainObject(value) &&
+    Object.keys(value).length > 0
+  ) {
+    compact[`${key}KeyCount`] = Object.keys(value).length
+  }
 }
 
 function compactListEntityValue(value: unknown, depth = 0): unknown {
@@ -712,12 +766,12 @@ function compactListEntityValue(value: unknown, depth = 0): unknown {
     const compactObject: Record<string, unknown> = {}
 
     for (const [key, child] of Object.entries(value)) {
-      const compactChild = compactListEntityValue(child, depth + 1)
-      if (compactChild !== undefined) {
-        compactObject[key] = compactChild
-      } else {
-        addListEntityCollectionSummary(compactObject, key, child)
-      }
+      addCompactListEntityField(
+        compactObject,
+        key,
+        compactListEntityValue(child, depth + 1),
+        child,
+      )
     }
 
     if (Object.keys(compactObject).length === 0) {
@@ -756,21 +810,6 @@ function compactListEntityScalarValue(
   return normalized.length <= maxStringLength
     ? normalized
     : `${normalized.slice(0, maxStringLength - 3).trimEnd()}...`
-}
-
-function addListEntityCollectionSummary(
-  compact: Record<string, unknown>,
-  key: string,
-  value: unknown,
-): void {
-  if (Array.isArray(value)) {
-    compact[`${key}Count`] = value.length
-    return
-  }
-
-  if (isPlainObject(value)) {
-    compact[`${key}KeyCount`] = Object.keys(value).length
-  }
 }
 
 export function toGenericShowEntity(entity: QueryEntity) {

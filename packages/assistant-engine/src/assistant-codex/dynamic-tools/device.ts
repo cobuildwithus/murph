@@ -26,7 +26,9 @@ const deviceProviderSchema = z
   .max(120)
   .regex(/^[a-z0-9][a-z0-9_-]*$/u)
 
-const deviceArgumentsSchema = z.union([
+// Discriminated so an invalid call gets only its own action's issues back,
+// not every branch's.
+const deviceArgumentsSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('companion_status') }).strict(),
   z.object({
     action: z.literal('list_accounts'),
@@ -41,17 +43,19 @@ const deviceArgumentsSchema = z.union([
     accountId: z.string().trim().min(1).max(191),
     action: z.literal('reconcile'),
   }).strict(),
-  z.object({
-    action: z.literal('configure_no_data_outreach'),
-    afterDays: z.number().int().min(5).max(30),
-    mode: z.literal('after_days'),
-    sourceProvider: deviceProviderSchema,
-  }).strict(),
-  z.object({
-    action: z.literal('configure_no_data_outreach'),
-    mode: z.enum(['default', 'off']),
-    sourceProvider: deviceProviderSchema,
-  }).strict(),
+  z.discriminatedUnion('mode', [
+    z.object({
+      action: z.literal('configure_no_data_outreach'),
+      afterDays: z.number().int().min(5).max(30),
+      mode: z.literal('after_days'),
+      sourceProvider: deviceProviderSchema,
+    }).strict(),
+    z.object({
+      action: z.literal('configure_no_data_outreach'),
+      mode: z.enum(['default', 'off']),
+      sourceProvider: deviceProviderSchema,
+    }).strict(),
+  ]),
 ])
 
 export const MURPH_DEVICE_TOOL = {
@@ -60,12 +64,13 @@ export const MURPH_DEVICE_TOOL = {
   deferLoading: true,
   description: [
     "Manage the member's wearable and health-device connections.",
-    "list_accounts returns each account's accountId, provider, status, last sync, and error code.",
+    "list_accounts returns each account's accountId, provider, status, last sync, error code, and sources. A source's lastDataAt is when it last delivered any data, and its firstSeenAt is when it was connected.",
+    'After an empty recent read, an old lastDataAt means that source stopped sending, and a firstSeenAt minutes or hours ago means its history may still be importing.',
     'connect returns a short-lived connectUrl for a supported provider. Send only that returned URL.',
     'reconcile queues a refresh for one accountId. A queued refresh has not finished yet.',
     "companion_status reports the iPhone app's lastContactAt and lastForegroundAt. Use it with list_accounts when debugging Apple Health.",
     'recently_active means only that the app made contact. It does not show that Health synced, that Health permissions are granted, or that the app keeps running in the background. unknown includes older app versions that do not report.',
-    'configure_no_data_outreach sets when Murph checks in after a source goes quiet, for sourceProvider garmin, apple_health_kit, or whoop_v2. Use mode after_days with afterDays from 5 to 30, or mode off, or mode default.',
+    'configure_no_data_outreach sets when Murph checks in after a source goes quiet. Pass a sourceProvider from list_accounts. Use mode after_days with afterDays from 5 to 30, or mode off, or mode default.',
     "Call it once, and only when the member's current private message asks for or agrees to that change.",
     'off stops only these check-ins and leaves the connection and syncing unchanged.',
     'Missing data does not show that a source is disconnected or that the app is closed, so suggest reconnecting only after an authentication failure.',
@@ -474,6 +479,14 @@ function serializeDeviceToolResponse(
           lastSyncCompletedAt: account.lastSyncCompletedAt,
           provider: account.provider,
           status: account.status,
+          ...(account.sources?.length ? {
+            sources: account.sources.map((source) => ({
+              sourceProvider: source.sourceProvider,
+              status: source.status,
+              firstSeenAt: source.firstSeenAt,
+              ...(source.lastDataAt ? { lastDataAt: source.lastDataAt } : {}),
+            })),
+          } : {}),
         })),
         action: response.action,
         provider: response.provider,
@@ -482,8 +495,9 @@ function serializeDeviceToolResponse(
     : response.action === 'connect'
       ? {
           action: response.action,
+          // The Web route sets authorizationUrl to the same connectUrl that
+          // the description and skills tell the model to send.
           link: {
-            authorizationUrl: response.link.authorizationUrl,
             connectUrl: response.link.connectUrl,
             expiresAt: response.link.expiresAt,
             provider: response.link.provider,

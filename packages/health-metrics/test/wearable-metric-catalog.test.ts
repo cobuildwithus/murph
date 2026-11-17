@@ -179,3 +179,30 @@ test("metric catalog rejects unsupported metrics and non-finite values", () => {
     value: 1234,
   });
 });
+
+test("calorie normalization preserves metric identity, unit aliases, and absent-unit defaults", () => {
+  for (const [metric, key] of [
+    ["active_calories", "activeCalories"],
+    ["total_calories", "totalCalories"],
+    ["energy-burned", "totalCalories"],
+    [" ENERGY_BURNED ", "totalCalories"],
+  ] as const) {
+    for (const unit of ["kcal", "kilocalorie", "kilocalories"]) {
+      assert.deepEqual(normalizeWearableMetricValue(metric, 418.4, unit), {
+        key, unit: "kcal", value: 418.4,
+      });
+    }
+    for (const unit of [" kJ ", "kilojoule", "kilojoules"]) {
+      assert.deepEqual(normalizeWearableMetricValue(metric, 418.4, unit), {
+        key, unit: "kcal", value: 100,
+      });
+    }
+    for (const unit of [null, undefined, " "]) {
+      assert.deepEqual(
+        normalizeWearableMetricValue(metric, 418.4, unit),
+        { key, unit: "kcal", value: 418.4 },
+      );
+    }
+    assert.equal(normalizeWearableMetricValue(metric, 418.4, "joules"), null);
+  }
+});

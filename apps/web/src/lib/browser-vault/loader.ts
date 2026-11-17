@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   buildHostedStorageAad,
   decryptHostedStoragePayload,
@@ -530,13 +531,13 @@ function assertValidBrowserVaultMetricBucketDemand(
 ): void {
   const allowed = new Set<string>(HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS);
   if (bucketIds.some((bucketId) => !allowed.has(bucketId))) {
-    throw new TypeError("Browser vault metric bucket demand contains an unsupported bucket.");
+    throw new ContractValidationError("Browser vault metric bucket demand contains an unsupported bucket.");
   }
   if (new Set(bucketIds).size !== bucketIds.length) {
-    throw new TypeError("Browser vault metric bucket demand must not contain duplicates.");
+    throw new ContractValidationError("Browser vault metric bucket demand must not contain duplicates.");
   }
   if (bucketIds.length >= HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_COUNT) {
-    throw new TypeError("Interactive Browser Vault requests cannot load every metric bucket.");
+    throw new ContractValidationError("Interactive Browser Vault requests cannot load every metric bucket.");
   }
 }
 
@@ -750,7 +751,7 @@ export function parseBrowserVaultSessionResponse(value: unknown): BrowserVaultSe
   }
 
   if (state !== "ready") {
-    throw new TypeError("Browser vault session response state must be empty, not_modified, or ready.");
+    throw new ContractValidationError("Browser vault session response state must be empty, not_modified, or ready.");
   }
 
   const shared = {
@@ -772,12 +773,12 @@ export function parseBrowserVaultSessionResponse(value: unknown): BrowserVaultSe
 
   if (record.shards !== undefined || record.metricBuckets !== undefined) {
     if (record.encryptedReplica !== undefined && record.encryptedReplica !== null) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "Browser vault sharded session response.encryptedReplica must be null or omitted.",
       );
     }
     if (record.replicaAad !== undefined && record.replicaAad !== null) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "Browser vault sharded session response.replicaAad must be null or omitted.",
       );
     }
@@ -974,10 +975,10 @@ function parseBrowserVaultReplicaAad(value: unknown, label: string): BrowserVaul
   const schema = requireNonEmptyString(record.schema, `${label}.schema`);
 
   if (purpose !== "browser-vault-replica") {
-    throw new TypeError(`${label}.purpose must be browser-vault-replica.`);
+    throw new ContractValidationError(`${label}.purpose must be browser-vault-replica.`);
   }
   if (schema !== "murph.browser-vault-replica") {
-    throw new TypeError(`${label}.schema must be murph.browser-vault-replica.`);
+    throw new ContractValidationError(`${label}.schema must be murph.browser-vault-replica.`);
   }
 
   return {
@@ -1014,7 +1015,7 @@ function parseBrowserVaultEncryptedShards(
   const record = requireRecord(value, "Browser vault session response.shards");
   const supportedShards = new Set<string>(BROWSER_VAULT_REPLICA_SHARDS);
   if (Object.keys(record).some((shard) => !supportedShards.has(shard))) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Browser vault session response.shards contains an unsupported shard.",
     );
   }
@@ -1035,7 +1036,7 @@ function parseBrowserVaultEncryptedShards(
       `Browser vault session response.shards.${shard}.shardAad`,
     );
     if (shardAad.shard !== shard) {
-      throw new TypeError(
+      throw new ContractValidationError(
         `Browser vault session response.shards.${shard}.shardAad.shard must be ${shard}.`,
       );
     }
@@ -1057,7 +1058,7 @@ function parseBrowserVaultEncryptedMetricBuckets(
   const record = requireRecord(value, "Browser vault session response.metricBuckets");
   const supported = new Set<string>(HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS);
   if (Object.keys(record).some((bucketId) => !supported.has(bucketId))) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Browser vault session response.metricBuckets contains an unsupported bucket.",
     );
   }
@@ -1074,7 +1075,7 @@ function parseBrowserVaultEncryptedMetricBuckets(
       `${label}.metricBucketAad`,
     );
     if (metricBucketAad.metricBucketId !== bucketId) {
-      throw new TypeError(`${label}.metricBucketAad.metricBucketId must be ${bucketId}.`);
+      throw new ContractValidationError(`${label}.metricBucketAad.metricBucketId must be ${bucketId}.`);
     }
     parsed[bucketId] = {
       encryptedMetricBucket: parseHostedCipherEnvelope(
@@ -1099,7 +1100,7 @@ function parseBrowserVaultReplicaShardAad(
     `${label}.contentEncoding`,
   );
   if (contentEncoding !== "gzip" && contentEncoding !== "identity") {
-    throw new TypeError(`${label}.contentEncoding must be gzip or identity.`);
+    throw new ContractValidationError(`${label}.contentEncoding must be gzip or identity.`);
   }
   const shardSchema = requireNonEmptyString(
     record.shardSchema,
@@ -1107,7 +1108,7 @@ function parseBrowserVaultReplicaShardAad(
   );
   const expectedShardSchema = getBrowserVaultShardSchema(shard);
   if (shardSchema !== expectedShardSchema) {
-    throw new TypeError(`${label}.shardSchema must be ${expectedShardSchema}.`);
+    throw new ContractValidationError(`${label}.shardSchema must be ${expectedShardSchema}.`);
   }
   return {
     ...base,
@@ -1143,10 +1144,10 @@ function parseBrowserVaultReplicaMetricBucketAad(
     `${label}.contentEncoding`,
   );
   if (contentEncoding !== "gzip" && contentEncoding !== "identity") {
-    throw new TypeError(`${label}.contentEncoding must be gzip or identity.`);
+    throw new ContractValidationError(`${label}.contentEncoding must be gzip or identity.`);
   }
   if (record.metricBucketCount !== HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_COUNT) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label}.metricBucketCount must be ${HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_COUNT}.`,
     );
   }
@@ -1178,7 +1179,7 @@ function parseRequiredReplicaRef(value: unknown, label: string): HostedBrowserVa
   const ref = parseHostedBrowserVaultReplicaRef(value, label);
 
   if (!ref) {
-    throw new TypeError(`${label} must not be null.`);
+    throw new ContractValidationError(`${label} must not be null.`);
   }
 
   return ref;
@@ -1205,7 +1206,7 @@ function assertBrowserVaultSessionPayloadFieldsNull(
 
 function requireNull(value: unknown, label: string): null {
   if (value !== null) {
-    throw new TypeError(`${label} must be null.`);
+    throw new ContractValidationError(`${label} must be null.`);
   }
 
   return null;
@@ -1213,7 +1214,7 @@ function requireNull(value: unknown, label: string): null {
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object.`);
+    throw new ContractValidationError(`${label} must be an object.`);
   }
 
   return value as Record<string, unknown>;
@@ -1221,7 +1222,7 @@ function requireRecord(value: unknown, label: string): Record<string, unknown> {
 
 function requireNonEmptyString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.length === 0) {
-    throw new TypeError(`${label} must be a non-empty string.`);
+    throw new ContractValidationError(`${label} must be a non-empty string.`);
   }
 
   return value;
@@ -1229,14 +1230,14 @@ function requireNonEmptyString(value: unknown, label: string): string {
 
 function requirePositiveSafeInteger(value: unknown, label: string): number {
   if (!Number.isSafeInteger(value) || (value as number) <= 0) {
-    throw new TypeError(`${label} must be a positive safe integer.`);
+    throw new ContractValidationError(`${label} must be a positive safe integer.`);
   }
   return value as number;
 }
 
 function requireNonNegativeSafeInteger(value: unknown, label: string): number {
   if (!Number.isSafeInteger(value) || (value as number) < 0) {
-    throw new TypeError(`${label} must be a non-negative safe integer.`);
+    throw new ContractValidationError(`${label} must be a non-negative safe integer.`);
   }
   return value as number;
 }
@@ -1247,7 +1248,7 @@ function requireExactString<const Expected extends string>(
   label: string,
 ): Expected {
   if (value !== expected) {
-    throw new TypeError(`${label} must be ${expected}.`);
+    throw new ContractValidationError(`${label} must be ${expected}.`);
   }
   return expected;
 }
@@ -1259,7 +1260,7 @@ function parseBrowserVaultMetricBucketId(
   if (!HOSTED_BROWSER_VAULT_REPLICA_METRIC_BUCKET_IDS.includes(
     value as BrowserVaultMetricBucketId,
   )) {
-    throw new TypeError(`${label} must be a metric bucket id from 00 through 1f.`);
+    throw new ContractValidationError(`${label} must be a metric bucket id from 00 through 1f.`);
   }
   return value as BrowserVaultMetricBucketId;
 }
@@ -1269,7 +1270,7 @@ function parseBrowserVaultReplicaShard(
   label: string,
 ): BrowserVaultReplicaShard {
   if (!BROWSER_VAULT_REPLICA_SHARDS.includes(value as BrowserVaultReplicaShard)) {
-    throw new TypeError(`${label} must be core, labs, or metricsIndex.`);
+    throw new ContractValidationError(`${label} must be core, labs, or metricsIndex.`);
   }
   return value as BrowserVaultReplicaShard;
 }
@@ -1292,7 +1293,7 @@ function parseBrowserVaultFreshness(
     return value;
   }
 
-  throw new TypeError("Browser vault session response freshness must be fresh or stale.");
+  throw new ContractValidationError("Browser vault session response freshness must be fresh or stale.");
 }
 
 function readOptionalBoolean(value: unknown, fallback: boolean, fieldName: string): boolean {
@@ -1301,7 +1302,7 @@ function readOptionalBoolean(value: unknown, fallback: boolean, fieldName: strin
   }
 
   if (typeof value !== "boolean") {
-    throw new TypeError(`Browser vault session response ${fieldName} must be a boolean.`);
+    throw new ContractValidationError(`Browser vault session response ${fieldName} must be a boolean.`);
   }
 
   return value;

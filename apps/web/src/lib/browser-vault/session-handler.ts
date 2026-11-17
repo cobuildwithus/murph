@@ -1,4 +1,5 @@
 import {
+  CloudflareHostedControlMalformedResponseError,
   isCloudflareHostedControlBrowserVaultReplicaNotFoundError,
 } from "@murphai/cloudflare-hosted-control/client";
 import {
@@ -14,6 +15,7 @@ import {
 import {
   parseHostedBrowserVaultReplicaRef,
 } from "@murphai/hosted-execution/parsers";
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import { parseHostedUserRecipientPublicKeyJwk } from "@murphai/runtime-state";
 import { after } from "next/server";
 
@@ -54,13 +56,17 @@ export function createBrowserVaultSessionRoute() {
       tooLargeErrorCode: "BROWSER_VAULT_SESSION_BODY_TOO_LARGE",
       tooLargeErrorMessage: "Browser vault session request body is too large.",
     });
-    const browserPublicKeyJwk = parseHostedUserRecipientPublicKeyJwk(
-      body.browserPublicKeyJwk,
-      "Browser vault session request browserPublicKeyJwk",
+    const browserPublicKeyJwk = parseInput(body.browserPublicKeyJwk, (value) =>
+      parseHostedUserRecipientPublicKeyJwk(
+        value,
+        "Browser vault session request browserPublicKeyJwk",
+      ),
     );
-    const knownReplicaRef = parseHostedBrowserVaultReplicaRef(
-      body.knownReplicaRef ?? null,
-      "Browser vault session request knownReplicaRef",
+    const knownReplicaRef = parseInput(body.knownReplicaRef ?? null, (value) =>
+      parseHostedBrowserVaultReplicaRef(
+        value,
+        "Browser vault session request knownReplicaRef",
+      ),
     );
     const requestedShards = readOptionalBrowserVaultShards(
       body.requestedShards,
@@ -227,28 +233,21 @@ export function createBrowserVaultSessionRoute() {
       });
     }
 
+    let session: Awaited<ReturnType<typeof client.createBrowserVaultSession>>;
     try {
-      return jsonOk(
-        {
-          ...(await client.createBrowserVaultSession({
-            browserPublicKeyJwk,
-            replicaRef,
-            ...(missingRequestedShards === undefined
-              || missingRequestedShards.length === 0
-              ? {}
-              : { requestedShards: missingRequestedShards }),
-            ...(missingRequestedMetricBuckets === undefined
-              || missingRequestedMetricBuckets.length === 0
-              ? {}
-              : { requestedMetricBuckets: missingRequestedMetricBuckets }),
-            userId: auth.member.id,
-          })),
-          deviceSyncImportPending,
-          freshness,
-          refreshPending: freshnessAssessment.shouldRefresh,
-          workspaceVersion,
-        },
-      );
+      session = await client.createBrowserVaultSession({
+        browserPublicKeyJwk,
+        replicaRef,
+        ...(missingRequestedShards === undefined
+          || missingRequestedShards.length === 0
+          ? {}
+          : { requestedShards: missingRequestedShards }),
+        ...(missingRequestedMetricBuckets === undefined
+          || missingRequestedMetricBuckets.length === 0
+          ? {}
+          : { requestedMetricBuckets: missingRequestedMetricBuckets }),
+        userId: auth.member.id,
+      });
     } catch (error) {
       if (isCloudflareHostedControlBrowserVaultReplicaNotFoundError(error)) {
         if (!refreshObservationOnly) {
@@ -275,7 +274,7 @@ export function createBrowserVaultSessionRoute() {
         });
       }
 
-      if (error instanceof TypeError) {
+      if (error instanceof CloudflareHostedControlMalformedResponseError) {
         throw hostedOnboardingError({
           code: "HOSTED_EXECUTION_CONTROL_INVALID_RESPONSE",
           message: "Hosted execution control plane returned an invalid browser vault session.",
@@ -285,6 +284,14 @@ export function createBrowserVaultSessionRoute() {
 
       throw error;
     }
+
+    return jsonOk({
+      ...session,
+      deviceSyncImportPending,
+      freshness,
+      refreshPending: freshnessAssessment.shouldRefresh,
+      workspaceVersion,
+    });
   });
 }
 

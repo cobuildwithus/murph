@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -13,7 +13,8 @@ import {
 } from './run-assistant-real-codex-e2e.ts'
 
 it('selects complete live titles while preserving ordinary display and ambiguous-name admission', async () => {
-  const root = await mkdtemp(path.join(tmpdir(), 'murph-live-title-'))
+  // macOS's temp directory is a symlink; Vitest matches the fixture by its real path.
+  const root = await realpath(await mkdtemp(path.join(tmpdir(), 'murph-live-title-')))
   const configPath = path.join(root, 'vitest.config.mts')
   const fixturePath = path.join(root, 'journey.test.mjs')
   const receiptPath = path.join(root, 'receipt.txt')

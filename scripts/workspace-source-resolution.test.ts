@@ -29,14 +29,26 @@ describe("workspace source resolution", () => {
   });
 
   it.each([
+    { packageName: "query", entry: "browser-replica.ts", specifier: "@murphai/query/browser-replica", symbol: "createBrowserVaultMetricSelectionRows" },
+    { packageName: "vault-usecases", entry: "health-cli-descriptors.ts", specifier: "@murphai/vault-usecases/health-cli-descriptors", symbol: "healthListResultSchema" },
+    { packageName: "vault-usecases", entry: "option-utils.ts", specifier: "@murphai/vault-usecases/option-utils", symbol: "normalizeRepeatableFlagOption" },
+    { packageName: "vault-usecases", entry: "json-input.ts", specifier: "@murphai/vault-usecases/json-input", symbol: "inputFileOptionSchema" },
+    { packageName: "contracts", entry: "health-entities.ts", specifier: "@murphai/contracts/health-entities", symbol: "healthEntityDefinitions" },
+    { packageName: "contracts", entry: "shares.ts", specifier: "@murphai/contracts/shares", symbol: "foodUpsertPayloadSchema" },
+    { packageName: "contracts", entry: "time.ts", specifier: "@murphai/contracts/time", symbol: "toLocalDayKey" },
+    { packageName: "contracts", entry: "zod.ts", specifier: "@murphai/contracts/zod", symbol: "jsonObjectSchema" },
+    { packageName: "contracts", entry: "constants.ts", specifier: "@murphai/contracts/constants", symbol: "CONDITION_CLINICAL_STATUSES" },
     { packageName: "core", entry: "event-read.ts", specifier: "@murphai/core/event-read", symbol: "readEvent" },
     { packageName: "contracts", entry: "recap-show.ts", specifier: "@murphai/contracts/recap-show", symbol: "gameRecapDraftSchema" },
     { packageName: "contracts", entry: "recap-material.ts", specifier: "@murphai/contracts/recap-material", symbol: "recapMaterialSchema" },
     { packageName: "contracts", entry: "recap-validation.ts", specifier: "@murphai/contracts/recap-validation", symbol: "withValidGameSuperlatives" },
     { packageName: "contracts", entry: "zod-runtime.ts", specifier: "@murphai/contracts/zod-runtime", symbol: "object" },
+    { packageName: "contracts", entry: "validation-error.ts", specifier: "@murphai/contracts/validation-error", symbol: "ContractValidationError" },
+    { packageName: "contracts", entry: "elevenlabs-music.ts", specifier: "@murphai/contracts/elevenlabs-music", symbol: "elevenLabsMusicModelIds" },
     { packageName: "operator-config", entry: "generated-audio.ts", specifier: "@murphai/operator-config/generated-audio", symbol: "inspectGeneratedMp3Audio" },
     { packageName: "device-syncd", entry: "service.ts", specifier: "@murphai/device-syncd/service", symbol: "SqliteDeviceSyncStore" },
     { packageName: "hosted-execution", entry: "usage-diagnostics.ts", specifier: "@murphai/hosted-execution/usage-diagnostics", symbol: "parseHostedUsageDiagnosticsRequest" },
+    { packageName: "hosted-execution", entry: "request-input.ts", specifier: "@murphai/hosted-execution/request-input", symbol: "parseInput" },
     { packageName: "importers", entry: "clinical-records/index.ts", specifier: "@murphai/importers/clinical-records", symbol: "readClinicalAttachmentText" },
   ])("resolves $specifier through Web source when package dist is absent", ({ packageName, entry, specifier, symbol }) => {
     const fixtureRoot = fs.mkdtempSync(path.join(tmpdir(), "murph-web-source-"));
@@ -203,6 +215,9 @@ describe("workspace source resolution", () => {
     );
     expect(resolveAliasReplacement(aliases, "@murphai/hosted-execution/usage-diagnostics")).toBe(
       path.join(repoRoot, "packages/hosted-execution/src/usage-diagnostics.ts"),
+    );
+    expect(resolveAliasReplacement(aliases, "@murphai/operator-config/operator-config/storage")).toBe(
+      path.join(repoRoot, "packages/operator-config/src/operator-config/storage.ts"),
     );
     expect(resolveAliasReplacement(aliases, "@murphai/vault-usecases/testing")).toBe(
       path.join(repoRoot, "packages/vault-usecases/src/testing.ts"),

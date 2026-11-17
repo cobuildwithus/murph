@@ -1772,7 +1772,7 @@ describe("hosted device-sync runtime", () => {
       junctionHistoricalBackfillEmptyAttempts: 1,
       junctionHistoricalBackfillEvidence: `e2|${windowStart}|${windowEnd}|garmin:1`,
       junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
-      junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+      junctionHistoricalBackfillStatus: "coverage_v4_retrying",
       junctionHistoricalBackfillWindowEnd: windowEnd,
       junctionHistoricalBackfillWindowStart: windowStart,
     };
@@ -2019,7 +2019,7 @@ describe("hosted device-sync runtime", () => {
       assert.equal(
         getStore(service).getAccountById(localAccountId)?.metadata
           .junctionHistoricalBackfillStatus,
-        "coverage_v3_retrying",
+        "coverage_v4_retrying",
       );
       const reconnectedMetadata = getStore(service).getAccountById(localAccountId)?.metadata ?? {};
       assert.equal(
@@ -2210,7 +2210,7 @@ describe("hosted device-sync runtime", () => {
       junctionHistoricalBackfillEmptyAttempts: 1,
       junctionHistoricalBackfillEvidence: `e2|${windowStart}|${windowEnd}|apple-health:1`,
       junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
-      junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+      junctionHistoricalBackfillStatus: "coverage_v4_retrying",
       junctionHistoricalBackfillWindowEnd: windowEnd,
       junctionHistoricalBackfillWindowStart: windowStart,
     };
@@ -13575,7 +13575,7 @@ describe("hosted device-sync runtime", () => {
           connectionId,
           externalAccountId: "junction-exact-recovery",
           hostedUpdatedAt: occurredAt,
-          metadata: { junctionHistoricalBackfillStatus: "coverage_v3_complete", junctionHistoricalBackfillWindowStart: "2026-04-03T00:00:00.000Z", junctionHistoricalBackfillWindowEnd: "2026-04-04T00:00:00.000Z" },
+          metadata: { junctionHistoricalBackfillStatus: "coverage_v4_complete", junctionHistoricalBackfillWindowStart: "2026-04-03T00:00:00.000Z", junctionHistoricalBackfillWindowEnd: "2026-04-04T00:00:00.000Z" },
           localState: {
             nextReconcileAt: occurredAt,
           },
@@ -13814,7 +13814,7 @@ describe("hosted device-sync runtime", () => {
           const port: HostedRuntimeDeviceSyncPort = {
             ...createNoDirtyStateDeviceSyncPortMethods(),
             async fetchSnapshot() {
-              return buildRuntimeSnapshot({ connectionId, provider: "junction", credential: { kind: "provider_config", providerConfigKey: "junction", credentialMetadata: {} }, externalAccountId: "retained-cadence", metadata: { junctionHistoricalBackfillStatus: "coverage_v3_complete", junctionHistoricalBackfillWindowStart: "2026-04-03T00:00:00.000Z", junctionHistoricalBackfillWindowEnd: "2026-04-04T00:00:00.000Z" }, localState: { nextReconcileAt: publishedCadence } });
+              return buildRuntimeSnapshot({ connectionId, provider: "junction", credential: { kind: "provider_config", providerConfigKey: "junction", credentialMetadata: {} }, externalAccountId: "retained-cadence", metadata: { junctionHistoricalBackfillStatus: "coverage_v4_complete", junctionHistoricalBackfillWindowStart: "2026-04-03T00:00:00.000Z", junctionHistoricalBackfillWindowEnd: "2026-04-04T00:00:00.000Z" }, localState: { nextReconcileAt: publishedCadence } });
             },
             async applyUpdates(input) {
               for (const update of input.updates) {
@@ -13902,7 +13902,7 @@ describe("hosted device-sync runtime", () => {
             const snapshot = buildRuntimeSnapshot({ connectionId, externalAccountId: "synthetic-junction-user", provider: "junction",
               credential: { kind: "provider_config", providerConfigKey: "junction", credentialMetadata: {} },
               metadata: { [JUNCTION_RECONCILE_PROOF_METADATA_KEY]: contentProof,
-                junctionHistoricalBackfillStatus: "coverage_v3_complete",
+                junctionHistoricalBackfillStatus: "coverage_v4_complete",
                 junctionHistoricalBackfillWindowStart: "2026-04-02T00:00:00.000Z",
                 junctionHistoricalBackfillWindowEnd: "2026-04-04T00:00:00.000Z" },
               localState: { nextReconcileAt: cadence, lastSyncCompletedAt: now },
@@ -14110,7 +14110,7 @@ describe("hosted device-sync runtime", () => {
           localState: { nextReconcileAt: "2026-04-04T15:00:00.000Z" },
           metadata: {
             hosted: true,
-            junctionHistoricalBackfillStatus: "coverage_v3_complete",
+            junctionHistoricalBackfillStatus: "coverage_v4_complete",
             junctionHistoricalBackfillWindowEnd: "2026-04-04T00:00:00.000Z",
             junctionHistoricalBackfillWindowStart: "2026-04-04T00:00:00.000Z",
           },
@@ -14465,7 +14465,7 @@ describe("hosted device-sync runtime", () => {
         {
           junctionHistoricalBackfillEmptyAttempts: 1,
           junctionHistoricalBackfillLastEmptyAt: executedAt,
-          junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+          junctionHistoricalBackfillStatus: "coverage_v4_retrying",
           junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
           junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
         },
@@ -14506,7 +14506,7 @@ describe("hosted device-sync runtime", () => {
         hosted: true,
         junctionHistoricalBackfillEmptyAttempts: 1,
         junctionHistoricalBackfillLastEmptyAt: executedAt,
-        junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+        junctionHistoricalBackfillStatus: "coverage_v4_retrying",
         junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
         junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
       });
@@ -14525,7 +14525,7 @@ describe("hosted device-sync runtime", () => {
         hosted: true,
         junctionHistoricalBackfillEmptyAttempts: 1,
         junctionHistoricalBackfillLastEmptyAt: executedAt,
-        junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+        junctionHistoricalBackfillStatus: "coverage_v4_retrying",
         junctionHistoricalBackfillWindowEnd: "2026-04-03T00:00:00.000Z",
         junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
       });
@@ -14625,7 +14625,7 @@ describe("hosted device-sync runtime", () => {
           junctionHistoricalBackfillEvidence:
             `e2|${originalWindowStart}|${originalWindowEnd}|garmin:1`,
           junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
-          junctionHistoricalBackfillStatus: "coverage_v3_exhausted",
+          junctionHistoricalBackfillStatus: "coverage_v4_exhausted",
           junctionHistoricalBackfillWindowEnd: originalWindowEnd,
           junctionHistoricalBackfillWindowStart: originalWindowStart,
         },
@@ -14654,6 +14654,20 @@ describe("hosted device-sync runtime", () => {
           hostedConnectionEpoch: "fresh",
         },
         provider: "junction",
+        // Connect-window history is owed only while a wearable is linked.
+        sources: [{
+          displayName: "Garmin",
+          firstSeenAt: reconnectedAt,
+          lastDataAt: null,
+          lastErrorCode: null,
+          lastErrorMessage: null,
+          lastSeenAt: reconnectedAt,
+          resourceCount: 1,
+          resourceAvailabilitySummary: { activity: true },
+          sourceInstanceKey: "hosted_garmin_source",
+          sourceProviderSlug: "garmin",
+          status: "connected",
+        }],
       });
 
       await syncHostedDeviceSyncControlPlaneState({
@@ -15956,7 +15970,7 @@ describe("hosted device-sync runtime", () => {
       hostedUpdatedAt: initialNow,
       localState: { nextReconcileAt: null },
       metadata: {
-        junctionHistoricalBackfillStatus: "coverage_v3_complete",
+        junctionHistoricalBackfillStatus: "coverage_v4_complete",
         junctionHistoricalBackfillEmptyAttempts: 0,
         junctionHistoricalBackfillLastEmptyAt: null,
         junctionHistoricalBackfillWindowStart: "2026-03-01T00:00:00.000Z",
@@ -16634,7 +16648,7 @@ describe("hosted device-sync runtime", () => {
     const [first, replay, retained, hourly] = workspaces;
     assert.ok(first && replay && retained && hourly);
     let metadata: Record<string, unknown> = {
-      junctionHistoricalBackfillStatus: "coverage_v3_complete",
+      junctionHistoricalBackfillStatus: "coverage_v4_complete",
       junctionHistoricalBackfillWindowStart: "2026-03-01T00:00:00.000Z",
       junctionHistoricalBackfillWindowEnd: connectedAt,
     };
@@ -16851,7 +16865,7 @@ describe("hosted device-sync runtime", () => {
       hostedUpdatedAt: now,
       localState: { nextReconcileAt: null },
       metadata: {
-        junctionHistoricalBackfillStatus: "coverage_v3_complete",
+        junctionHistoricalBackfillStatus: "coverage_v4_complete",
         junctionHistoricalBackfillEmptyAttempts: 0,
         junctionHistoricalBackfillLastEmptyAt: null,
         junctionHistoricalBackfillWindowStart: "2026-03-01T00:00:00.000Z",
@@ -17143,7 +17157,7 @@ describe("hosted device-sync runtime", () => {
     });
     assert.ok(sourceInstanceKey);
     const metadata = {
-      junctionHistoricalBackfillStatus: "coverage_v3_complete",
+      junctionHistoricalBackfillStatus: "coverage_v4_complete",
       junctionHistoricalBackfillEmptyAttempts: 0,
       junctionHistoricalBackfillLastEmptyAt: null,
       junctionHistoricalBackfillWindowStart: "2026-03-31T00:00:00.000Z",

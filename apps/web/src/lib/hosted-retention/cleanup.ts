@@ -1,6 +1,12 @@
+import { expireHostedLinqGroupRiskBatch } from "../hosted-routing/linq-group-risk-ledger";
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { hostedConnectedAppStartedIntentOwnerCutoff } from "../connected-apps/connect-intent-ownership";
+import {
+  HOSTED_SOURCE_DELIVERY_STALL_MAILBOX_DEDUPE_PREFIX,
+  HOSTED_SOURCE_DELIVERY_STALL_MAILBOX_KIND,
+} from "../device-sync/source-delivery-stall-episode";
 import { hostedRuntimeMemberEligibleSql } from "../hosted-onboarding/member-access";
 import { getPrisma } from "../prisma";
 import { HOSTED_OPERATOR_TASK_RESULT_RETENTION_MS } from "../hosted-ops/operator-task-retention";
@@ -23,6 +29,8 @@ export const HOSTED_MAILBOX_STRUCTURAL_RETENTION_MS = 30 * DAY_MS;
 export const HOSTED_INGRESS_LATENCY_TRACE_RETENTION_MS = 7 * DAY_MS;
 export const HOSTED_TYPING_ALERT_RETENTION_MS = 30 * DAY_MS;
 export const HOSTED_DEVICE_WEBHOOK_TRACE_RETENTION_MS = 30 * DAY_MS;
+// Requests expire after an hour and answer repeat calls for an hour after their decision; the rest is record.
+export const HOSTED_CUSTOM_CONNECTION_ACTION_RETENTION_MS = 30 * DAY_MS;
 export const HOSTED_LINQ_PROVIDER_EVENT_DIAGNOSTIC_RETENTION_MS = 7 * DAY_MS;
 export const HOSTED_RUNTIME_LEDGER_RETENTION_MS = 30 * DAY_MS;
 // Every batched retention category uses ordered work with an explicit per-run
@@ -35,8 +43,8 @@ export const HOSTED_RETENTION_MAX_BATCHES = 4;
 export const HOSTED_CALLBACK_REQUEST_NONCE_RETENTION_MAX_BATCHES =
   HOSTED_RETENTION_MAX_BATCHES * 100;
 // Short-lived control artifacts are normally tiny and should never inherit the
-// high-volume diagnostic drain budget. Across the ten categories below this caps
-// one hourly pass at 20 statements and 5,000 deleted or compacted rows.
+// high-volume diagnostic drain budget. Across the eleven categories below this caps
+// one hourly pass at 22 statements and 5,500 deleted or compacted rows.
 export const HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE = 250;
 export const HOSTED_CONTROL_ARTIFACT_RETENTION_MAX_BATCHES = 2;
 // Clinical Records started intents remain the completion owner after their
@@ -55,6 +63,7 @@ type HostedRuntimeRecheckSignal = (input: {
 
 export interface HostedControlPlaneRetentionCleanupResult {
   compactedLinqProviderEventDiagnostics: number;
+  expiredLinqGroupRisk: { handles: number; sightings: number };
   expiredAssistantRuntimeIssuesDeleted: number;
   expiredAuthRecordsDeleted: number;
   expiredClinicalRecordConnectIntentsDeleted: number;
@@ -63,6 +72,8 @@ export interface HostedControlPlaneRetentionCleanupResult {
   expiredConversationPolicyNonRepliesRecorded: number;
   expiredDeviceConnectIntentsDeleted: number;
   expiredDeviceOauthSessionsDeleted: number;
+  expiredCustomConnectionAuthorizationsDeleted: number;
+  expiredCustomConnectionActionRequestsDeleted: number;
   expiredDeviceWebhookTracesDeleted: number;
   expiredEmailPublicBootstrapAttemptsDeleted: number;
   expiredGroupParticipantObservationsDeleted: number;
@@ -134,13 +145,17 @@ export async function runHostedControlPlaneRetentionCleanup(input: {
     now,
     prisma,
   });
+  const expiredLinqGroupRisk = await expireHostedLinqGroupRiskBatch({ now, prisma });
   const compactedLinqProviderEventDiagnostics = await compactOldLinqProviderEventDiagnostics({
     now,
     prisma,
   });
   const expiredRuntimePutDrainsDeleted = await deleteExpiredRuntimePutDrains({ now, prisma });
 
+  const expiredCustomConnectionAuthorizationsDeleted = await deleteExpiredCustomConnectionAuthorizations({ now, prisma });
+  const expiredCustomConnectionActionRequestsDeleted = await deleteExpiredCustomConnectionActionRequests({ now, prisma });
   return {
+    expiredLinqGroupRisk,
     compactedLinqProviderEventDiagnostics,
     expiredAssistantRuntimeIssuesDeleted,
     expiredAuthRecordsDeleted,
@@ -151,6 +166,8 @@ export async function runHostedControlPlaneRetentionCleanup(input: {
       expiredMailboxItems.policyNonReplies,
     expiredDeviceConnectIntentsDeleted,
     expiredDeviceOauthSessionsDeleted,
+    expiredCustomConnectionAuthorizationsDeleted,
+    expiredCustomConnectionActionRequestsDeleted,
     expiredDeviceWebhookTracesDeleted,
     expiredEmailPublicBootstrapAttemptsDeleted,
     expiredGroupParticipantObservationsDeleted,
@@ -422,7 +439,10 @@ export async function retireExpiredMailboxContent(input: {
   // constraint was installed, so retention deletes that already-handled legacy
   // tombstone directly instead of inventing a causal sequence. Both content
   // retirement and later structural pruning are bounded so an hourly cleanup
-  // cannot monopolize the production pool while a backlog drains.
+  // cannot monopolize the production pool while a backlog drains. A wearable
+  // no-data check-in keeps its retired row: that row's dedupe key is the only
+  // record that its silence episode was already asked about, and pruning it
+  // let the same months-old episode be asked about again every 30 days.
   return await runMailboxRetentionBatches(async () => {
     const rows = await input.prisma.$queryRaw<
       Array<{
@@ -583,6 +603,10 @@ export async function retireExpiredMailboxContent(input: {
         WHERE item."content_retired_at" IS NOT NULL
           AND item."retention_disposition" IS NULL
           AND item."created_at" < ${structuralCutoff}
+          AND NOT (
+            item."kind" = ${HOSTED_SOURCE_DELIVERY_STALL_MAILBOX_KIND}
+            AND starts_with(item."dedupe_key", ${HOSTED_SOURCE_DELIVERY_STALL_MAILBOX_DEDUPE_PREFIX})
+          )
           AND NOT EXISTS (
             SELECT 1
             FROM "hosted_member" AS member
@@ -1104,8 +1128,46 @@ export function normalizeHostedRetentionDate(value: Date | string): Date {
   const date = value instanceof Date ? value : new Date(value);
 
   if (Number.isNaN(date.getTime())) {
-    throw new TypeError("Hosted retention cleanup date must be valid.");
+    throw new ContractValidationError("Hosted retention cleanup date must be valid.");
   }
 
   return date;
+}
+
+export async function deleteExpiredCustomConnectionAuthorizations(input: {
+  now: Date;
+  prisma: Pick<PrismaClient, "$executeRaw">;
+}): Promise<number> {
+  return runControlArtifactRetentionBatches(() => input.prisma.$executeRaw`
+    WITH doomed AS MATERIALIZED (
+      SELECT pending."connection_id"
+      FROM "hosted_mcp_pending_authorization" AS pending
+      WHERE pending."expires_at" <= ${input.now}
+      ORDER BY pending."expires_at", pending."connection_id"
+      LIMIT ${HOSTED_CONTROL_ARTIFACT_RETENTION_BATCH_SIZE}
+      FOR UPDATE OF pending SKIP LOCKED
+    )
+    DELETE FROM "hosted_mcp_pending_authorization" AS pending
+    USING doomed WHERE pending."connection_id" = doomed."connection_id"
+  `);
+}
+
+/** A request older than 30 days can no longer be confirmed or reused. A confirmation holding its row is skipped. */
+export async function deleteExpiredCustomConnectionActionRequests(input: {
+  now: Date;
+  prisma: Pick<PrismaClient, "$executeRaw">;
+}): Promise<number> {
+  const cutoff = new Date(input.now.getTime() - HOSTED_CUSTOM_CONNECTION_ACTION_RETENTION_MS);
+  return runRetentionBatches(() => input.prisma.$executeRaw`
+    WITH doomed AS MATERIALIZED (
+      SELECT request."id"
+      FROM "hosted_mcp_action_request" AS request
+      WHERE request."created_at" < ${cutoff}
+      ORDER BY request."created_at", request."id"
+      LIMIT ${HOSTED_RETENTION_BATCH_SIZE}
+      FOR UPDATE OF request SKIP LOCKED
+    )
+    DELETE FROM "hosted_mcp_action_request" AS request
+    USING doomed WHERE request."id" = doomed."id"
+  `);
 }

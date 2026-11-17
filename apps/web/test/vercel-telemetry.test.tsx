@@ -177,6 +177,7 @@ test("VercelTelemetry does not mount outside the explicit page allowlist", () =>
     "/screenshots",
     "/settings/accounts",
     "/settings/accounts?companion=ios#security",
+    "/settings/connections/confirm/private-request",
     "/test/better-auth-settings",
     "/test/better-auth-settings?email=none",
     "/voice",

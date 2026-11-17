@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 const USER_PATH_PATTERNS = [
   /^\/Users\/[^/]+/u,
   /^\/home\/[^/]+/u,
@@ -85,7 +86,7 @@ export function toIsoTimestamp(value: Date | string | number): string {
   const date = value instanceof Date ? value : new Date(value);
 
   if (Number.isNaN(date.valueOf())) {
-    throw new TypeError(`Invalid ISO timestamp: ${String(value)}`);
+    throw new ContractValidationError(`Invalid ISO timestamp: ${String(value)}`);
   }
 
   return date.toISOString();

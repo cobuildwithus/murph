@@ -1,3 +1,5 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
+import { readHostedLinqGroupLeave } from "../hosted-routing/linq-group-leave";
 import type {
   Prisma,
   PrismaClient,
@@ -1136,7 +1138,7 @@ function parseHostedAiUsageCreditLedgerVersion(value: unknown): bigint {
     return 0n;
   }
   if (typeof value !== "string" || !/^(?:0|[1-9][0-9]*)$/u.test(value)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted AI usage-limit claim ledger version must be a non-negative integer.",
     );
   }
@@ -1148,13 +1150,13 @@ function parseHostedAiUsagePlanResetAt(value: unknown): Date | null {
     return null;
   }
   if (typeof value !== "string") {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted AI usage-limit claim plan reset must be an ISO timestamp.",
     );
   }
   const parsed = new Date(value);
   if (!Number.isFinite(parsed.getTime())) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted AI usage-limit claim plan reset must be an ISO timestamp.",
     );
   }
@@ -1369,6 +1371,10 @@ async function assertHostedLinqSideEffectRouteAuthority(
     });
   }
 
+  if (effect.payload.chatId && await readHostedLinqGroupLeave({ chatId: effect.payload.chatId, prisma })) {
+    throw hostedOnboardingError({ code: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED", httpStatus: 403,
+      retryable: false, message: "External thread route egress is no longer authorized." });
+  }
   const route = await readHostedThreadRouteByThreadIdentity({
     channel: "linq",
     prisma,
@@ -1465,6 +1471,7 @@ async function prepareHostedLinqSideEffectProviderDispatch(input: {
     || groupEmailRecoveryEffect !== null;
 
   return await runHostedLinqTransportTransaction(input.prisma, async (prisma) => {
+    await assertHostedLinqRecoverySourceGroupTx(input.effect, prisma);
     let dispatchEffect = input.effect;
     let dispatchSourceRef = input.effect.effectId;
     let recoveryCapacityClaimed = false;
@@ -1698,6 +1705,15 @@ async function prepareHostedLinqSideEffectProviderDispatch(input: {
       status: "in_flight",
     };
   });
+}
+
+async function assertHostedLinqRecoverySourceGroupTx(effect: HostedLinqMessageSideEffect, prisma: Prisma.TransactionClient): Promise<void> {
+  if (!("threadId" in effect.payload)) return;
+  await acquireHostedLinqChatOwnershipLockTx({ chatId: effect.payload.threadId, tx: prisma });
+  if (await readHostedLinqGroupLeave({ chatId: effect.payload.threadId, prisma })) {
+    throw hostedOnboardingError({ code: "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED", httpStatus: 403,
+      retryable: false, message: "External thread route egress is no longer authorized." });
+  }
 }
 
 async function resolveHostedLinqGroupLineRecoveryDispatchIntentTx(input: {
@@ -2570,7 +2586,7 @@ function buildHostedLinqAiUsageQuotaPayload(
 
   if (isHostedRuntimeAiAccessNoticeCode(input.noticeCode)) {
     if (input.claimToken) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "Hosted Linq access notices must not include AI usage claim metadata.",
       );
     }
@@ -2596,7 +2612,7 @@ function buildHostedLinqAiUsageQuotaPayload(
   }
 
   if (!input.claimToken) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted Linq AI usage-limit notices require AI usage claim metadata.",
     );
   }

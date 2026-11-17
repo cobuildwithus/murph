@@ -1014,7 +1014,7 @@ Invariant: one member-wide daily reminder attempt, including failed/ambiguous/su
 
 Sources: `apps/web/src/lib/game/{private-kickoff,private-notification,direct-tool,service,chat-lifecycle,reminder-preferences}.ts`; existing `GameEvent`, `GamePlayer`, `HostedLinqDelivery` and mailbox owners.
 States: each preference field implicit default/explicitly chosen (append-only event fact); per-player activation unmarked/marked (`messageKind` none/new_person/new_rhythm); optional kickoff awaiting_generation/generation_queued/delivery/skipped-expired; profile-private text disabled/enabled/unavailable; per-member/date evening opportunity unclaimed/awaiting_generation/generation_queued/delivery with derived paused state.
-Invariant: activation is idempotent under the game lock; carry-over comes from explicit rematch lineage or the latest earlier same audience and matches member identity, independently of seat order. Explicit current-game choices survive activation recovery: saves record per-field immutable facts set-wise before player writes; activation holds the game lock before checking those facts and copies only untouched fields. The off fact also bounds affected seats to admitted preference authority; newly admitted seats are not caught by a later broad update. These preference facts remain separate from activation/kickoff completion. Kickoff is reserved only for new-person/rhythm notice within 24 hours and delivered 09:00–21:00 local. Private text never grants AI access or creates a direct route; it requires current existing direct Linq authority, consent/funding/usage and applicable reminder opt-in. Private evening excludes games that an eligible room evening can cover; exact terms/day batch and conversation watermark must still match at egress.
+Invariant: activation is idempotent under the game lock; carry-over comes from explicit rematch lineage or the latest earlier same audience and matches member identity, independently of seat order. Explicit current-game choices survive activation recovery: saves record per-field immutable facts set-wise before player writes; activation holds the game lock before checking those facts and copies only untouched fields. The off fact also bounds affected seats to admitted preference authority; newly admitted seats are not caught by a later broad update. These preference facts remain separate from activation/kickoff completion. Kickoff is reserved only for new-person/rhythm notice within 24 hours and delivered 09:00–21:00 local. Private text never grants AI access or creates a direct route; it requires current existing direct Linq authority, consent/funding/usage and applicable reminder opt-in. Private evening excludes games that an eligible room evening can cover; exact terms/day batch must still match at egress; new conversation does not stop it.
 
 | From | Event / guard | To / effect |
 | --- | --- | --- |
@@ -1026,7 +1026,7 @@ Invariant: activation is idempotent under the game lock; carry-over comes from e
 | Kickoff awaiting_generation | 24-hour deadline / game missing | Skipped expired |
 | Private text disabled | Authorized app/direct reminder command + canText | Enabled; other current preferences retained according to command |
 | Unclaimed member/date opportunity | Text opt-in, +60-minute local reminder window, open-day need, not covered by room, not paused | One private evening receipt |
-| Private evening awaiting_generation | Exact current batch and causal watermark, direct route revalidated | Atomic mailbox append and generation_queued |
+| Private evening awaiting_generation | Exact current batch, direct route revalidated | Atomic mailbox append and generation_queued |
 | Private evening awaiting_generation | Unpublished after bounded deadline | Skipped expired |
 | Queued notification | Current batch/seat/access/route/expiry fails egress check | Send rejected as stale; no private disclosure |
 | Three accepted private evenings within prior 28 dates, no later inbound | Derived pause | Further private evening reservation blocked until inbound/new policy evidence |
@@ -1034,6 +1034,22 @@ Invariant: activation is idempotent under the game lock; carry-over comes from e
 Confirmed reproduction: settle earlier rematch with both per-seat flags false (repeat with true), create live rematch, inject one activation transaction failure, call production `runGameCommand(setReminders)` with opposite flags, then `reconcilePrivateGameActivations`. Both flags revert to the settled game's values. Regression executes real PostgreSQL and real activation/save/sweep owners; baseline 2 failures/6 existing passes in `game-private-activation-postgres.test.ts`. Fixed activation suite: 14 passed, including both toggle directions, four PostgreSQL-observed activation-first/save-first cases with absent or partially existing facts, feature-off to enabled, omitted every-day inheritance, and preserved new-rhythm kickoff. Existing ordinary reminder suite: 28 passed. Issue: [#4732](https://github.com/cobuildwithus/murph/issues/4732).
 
 Load proof: saving 1,000 live games has the same operation/query count as one game, at most 12 SQL statements, one pool acquisition, and at most two preference facts per seat (2,000 total after repeated saves). The added save work is one set-based insert; activation adds one bounded two-key fact read. The separate player-lock query was removed as redundant. Added work has no provider/crypto calls or per-game loop, and imposes no new product cap. Insert facts before player updates: their game foreign-key lock coordinates with activation's existing game FOR UPDATE lock; reversing this order could deadlock.
+
+### B30 — Apple Health reopen push
+
+Sources: `apps/web/src/lib/device-sync/apple-health-reopen-push.ts`; `AppleHealthReopenPush`, `CompanionPushRoute`, `DeviceConnectionSource.lastDataAt`, `HostedMember.companionLastContactAt`; the 15-minute Vercel cron `/api/internal/device-sync/apple-health-reopen-push/cron`.
+States: per member, the silence episode (newest `lastDataAt` across connected `apple_health_kit` sources on active connections) and its schedule step (days 1, 2, 3, 10, 17, 24); per step unclaimed/claimed/terminal outcome (`sent`, `failed`, `unregistered`, `superseded`).
+Invariant: one push per member, episode and step, and one per member per 24 hours, including failed and superseded attempts. The receipt's primary key is the claim, taken under the member row lock. Nomination, the locked recheck and the last look before Apple run the same statement. Never-delivered sources are out of scope. Evaluation only observes: it changes no source status.
+
+| From | Event / guard | To / effect |
+| --- | --- | --- |
+| Delivering | 24 hours with no delivery and no app contact | Episode due at step 1 |
+| Due step | Alerts allowed, switch not off, daytime in the member's zone (17:00 to 19:00 UTC when unknown), not suspended, hosted access, health consent not revoked, text check-ins not stopped | Durable claim before the external send |
+| Claimed | Route address, episode, step and every gate unchanged at the last look | One APNs attempt; outcome recorded |
+| Claimed | Data arrived, app made contact, switch turned off, address replaced or window closed | `superseded`; the claim still consumes the step |
+| Claimed | Apple reports the token gone | `unregistered`; that exact token is forgotten |
+| Any step | New delivery | New episode; the schedule starts over after 24 hours of silence |
+| Step for day 24 terminal | Continued silence | Nothing further until data arrives |
 
 ## Native iOS machines
 

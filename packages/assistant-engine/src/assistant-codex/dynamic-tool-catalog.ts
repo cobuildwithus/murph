@@ -1,12 +1,15 @@
 import { MURPH_MATERIALIZE_VAULT_MEDIA_TOOL, VAULT_MEDIA_EXPORT_GUIDANCE } from './dynamic-tools/materialize-vault-media.js'
 export { MURPH_MATERIALIZE_VAULT_MEDIA_TOOL } from './dynamic-tools/materialize-vault-media.js'
-import { MURPH_WRITE_RECAP_FILE_TOOL, MURPH_READ_GAME_TOOL, MURPH_READ_GAME_RECAP_TOOL, MURPH_UPDATE_GAME_TOOL, MURPH_GAME_PHOTO_TOOL, MURPH_WRITE_RECAP_TOOL, MURPH_GAME_LORE_TOOL, MURPH_MY_GAME_REMINDERS_TOOL } from './dynamic-tools/games.js'
+import { MURPH_GENERATE_IMAGE_RECAP_TOOL, MURPH_GENERATE_SONG_RECAP_TOOL, MURPH_WRITE_RECAP_FILE_TOOL, MURPH_READ_GAME_TOOL, MURPH_READ_GAME_RECAP_TOOL, MURPH_UPDATE_GAME_TOOL, MURPH_GAME_PHOTO_TOOL, MURPH_WRITE_RECAP_TOOL, MURPH_GAME_LORE_TOOL, MURPH_MY_GAME_REMINDERS_TOOL, MURPH_MY_GAME_NOT_FOR_ME_TOOL } from './dynamic-tools/games.js'
+import { MURPH_LEAVE_GROUP_TOOL } from './dynamic-tools/leave-group.js'
+export { MURPH_LEAVE_GROUP_TOOL } from './dynamic-tools/leave-group.js'
 import { MURPH_GET_SENDER_CONTACT_TOOL } from './dynamic-tools/sender-contact.js'
 import { MURPH_POLL_TOOL } from './dynamic-tools/conversation-polls.js'
 export { MURPH_POLL_TOOL } from './dynamic-tools/conversation-polls.js'
 import { MURPH_CONVERSATION_ATTACHMENTS_TOOL } from './dynamic-tools/conversation-attachments.js'
 export { MURPH_CONVERSATION_ATTACHMENTS_TOOL } from './dynamic-tools/conversation-attachments.js'
 import * as z from '@murphai/contracts/zod-runtime'
+import { MURPH_JOURNAL_SOURCE_READ_TOOL } from './dynamic-tools/journal-source-read.js'
 import {
   HOSTED_EXECUTION_MEMBER_REPORTED_DAILY_METRIC_KEYS,
 } from '@murphai/hosted-execution'
@@ -381,12 +384,11 @@ export const MURPH_GENERATE_IMAGE_TOOL = {
   name: 'generate_image',
   deferLoading: true,
   description:
-    `Generate one image. Use it when the member asks for an image, when a saved preference says visuals help them, or when a skill says an image is welcome and privacy-safe here. Describe the image in prompt. Pass member photos or earlier generated images as referenceImageRefs and say in the prompt what each one is for. Include ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}, Murph's character sheet, whenever Murph appears. In a conversation turn the image is generated in the background and delivered when it is ready. In a scheduled run it is attached to this run's reply and uses one of its ${ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS} image slots, so leave one free before calling. For a graph, chart, or trend line that no card or chart tool can show, put the chart type, the axis labels, and the values in the prompt, and ask for this style: cream paper (#f5f0e8), slate text (#2d3436), solid sage data lines (#7a8c6e), dashed sand reference lines (#d4c4a8), a second series in slate told apart by markers, Fraunces-style serif titles and numbers, DM Sans body text, DM Mono labels, flat with no gradients or shadows, sparse rounded axis ticks, a compact legend, and no number labels on points or bars unless the member asked for them. In an authorized recap, output=file writes the image to a local file and returns its path; nothing is attached. Use the recap's reference IDs.`,
+    `Generate one image. Use it when the member asks for an image, when a saved preference says visuals help them, or when a skill says an image is welcome and privacy-safe here. Describe the image in prompt. Pass member photos or earlier generated images as referenceImageRefs and say in the prompt what each one is for. Include ${MURPH_CHARACTER_SHEET_REFERENCE_IMAGE_REF}, Murph's character sheet, whenever Murph appears. In a conversation turn the image is generated in the background and delivered when it is ready. In a scheduled run it is attached to this run's reply and uses one of its ${ASSISTANT_AUTHORED_RESPONSE_MEDIA_MAX_ITEMS} image slots, so leave one free before calling. For a graph, chart, or trend line that no card or chart tool can show, put the chart type, the axis labels, and the values in the prompt, and ask for this style: cream paper (#f5f0e8), slate text (#2d3436), solid sage data lines (#7a8c6e), dashed sand reference lines (#d4c4a8), a second series in slate told apart by markers, Fraunces-style serif titles and numbers, DM Sans body text, DM Mono labels, flat with no gradients or shadows, sparse rounded axis ticks, a compact legend, and no number labels on points or bars unless the member asked for them.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
     properties: {
-      output: { type: 'string', enum: ['chat', 'file'] },
       prompt: {
         type: 'string',
         minLength: 1,
@@ -395,12 +397,12 @@ export const MURPH_GENERATE_IMAGE_TOOL = {
       size: {
         type: 'string',
         enum: ['1024x1024', '1024x1536', '1536x1024'],
-        description: 'Defaults to 1024x1536 portrait for file output and 1024x1024 for chat output.',
+        default: '1024x1024',
       },
       quality: {
         type: 'string',
         enum: ['low', 'medium', 'high'],
-        description: 'Defaults to high for file output and medium for chat output.',
+        default: 'medium',
       },
       outputFormat: {
         type: 'string',
@@ -576,7 +578,7 @@ export const MURPH_USAGE_DIAGNOSTICS_TOOL = {
   name: 'usage_diagnostics',
   deferLoading: true,
   description:
-    `Read this member's recent AI usage: cost by model and workflow, the most expensive turns, and tool output sizes. It is read-only and covers 7 days and 10 turns unless you pass days or limit. Costs are amounts of usage allowance and say nothing about card charges. Tool sizes are in bytes and only approximate tokens and cost. The result includes rough model rates.`,
+    `Read this member's recent AI usage: cost by model and workflow, the most expensive turns, and tool output sizes. It is read-only and covers 7 days and 5 turns unless you pass days or limit. Costs are amounts of usage allowance and say nothing about card charges. Tool sizes are in bytes and only approximate tokens and cost. The result includes rough model rates.`,
   inputSchema: {
     type: 'object',
     additionalProperties: false,
@@ -1808,7 +1810,9 @@ const MURPH_BASE_DYNAMIC_TOOLS = [
   MURPH_USAGE_DIAGNOSTICS_TOOL,
   MURPH_POLL_TOOL,
   MURPH_READ_GAME_TOOL,
+  MURPH_LEAVE_GROUP_TOOL,
   MURPH_MY_GAME_REMINDERS_TOOL,
+  MURPH_MY_GAME_NOT_FOR_ME_TOOL,
   MURPH_UPDATE_GAME_TOOL,
   MURPH_GAME_PHOTO_TOOL,
   MURPH_GAME_LORE_TOOL,
@@ -1847,18 +1851,22 @@ const MURPH_COMPUTER_DYNAMIC_TOOLS = [
 ] as const
 
 export const MURPH_DYNAMIC_TOOLS = [
+  MURPH_JOURNAL_SOURCE_READ_TOOL,
   ...MURPH_BASE_DYNAMIC_TOOLS,
   ...MURPH_COMPUTER_DYNAMIC_TOOLS,
   ...MURPH_CONNECTED_APPS_DYNAMIC_TOOLS,
 ] as const
 
 export type MurphDynamicTool =
+  | typeof MURPH_LEAVE_GROUP_TOOL
   | (typeof MURPH_DYNAMIC_TOOLS)[number]
   | typeof MURPH_EXPRESSIVE_VOICE_MEMO_TOOL
   | typeof MURPH_GROUP_DATA_EAGER_TOOL
   | typeof MURPH_ATTACH_FOLLOW_UP_TOOL
   | typeof MURPH_MEMBER_MEMORY_TOOL
   | typeof MURPH_READ_GAME_RECAP_TOOL
+  | typeof MURPH_GENERATE_IMAGE_RECAP_TOOL
+  | typeof MURPH_GENERATE_SONG_RECAP_TOOL
   | typeof MURPH_WRITE_RECAP_TOOL
   | typeof MURPH_WRITE_RECAP_FILE_TOOL
   | typeof MURPH_GROUP_ASSISTANT_CONFIGURATION_TOOL
@@ -1868,6 +1876,7 @@ export type MurphDynamicTool =
   | typeof MURPH_GROUP_SHARED_READ_PERMISSION_OFFER_TOOL
 
 export interface MurphDynamicToolAvailability {
+  journalSourceReadAvailable?: boolean | null
   assistantStyleSettingsAvailable?: boolean | null
   assistantConfigurationAvailable?: boolean | null
   allowFinishWithoutReply?: boolean | null
@@ -1885,6 +1894,7 @@ export interface MurphDynamicToolAvailability {
   usageDiagnosticsAvailable?: boolean | null
   pollsAvailable?: boolean | null
   gameReadAvailable?: boolean | null
+  leaveGroupAvailable?: boolean | null
   myGameRemindersAvailable?: boolean | null
   gamesAvailable?: boolean | null
   gamePhotosAvailable?: boolean | null
@@ -1960,7 +1970,9 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     [MURPH_USAGE_DIAGNOSTICS_TOOL, defaultOff((a) => a.usageDiagnosticsAvailable)],
     [MURPH_POLL_TOOL, defaultOff((a) => a.pollsAvailable)],
     [MURPH_READ_GAME_TOOL, defaultOff((a) => a.gameReadAvailable)],
+    [MURPH_LEAVE_GROUP_TOOL, defaultOff((a) => a.leaveGroupAvailable)],
     [MURPH_MY_GAME_REMINDERS_TOOL, defaultOff((a) => a.myGameRemindersAvailable)],
+    [MURPH_MY_GAME_NOT_FOR_ME_TOOL, defaultOff((a) => a.myGameRemindersAvailable)],
     [MURPH_UPDATE_GAME_TOOL, defaultOff((a) => a.gamesAvailable)],
     [MURPH_GAME_PHOTO_TOOL, defaultOff((a) => a.gamePhotosAvailable)],
     [MURPH_GAME_LORE_TOOL, defaultOff((a) => a.gameLoreAvailable)],
@@ -1995,6 +2007,7 @@ const TOOL_AVAILABILITY: ReadonlyMap<MurphDynamicTool, AvailabilityPredicate> =
     ),
     [MURPH_CONNECTED_APPS_MANAGE_TOOL, defaultOff((a) =>
       a.connectedAppsAvailable && a.connectedAppsManageAvailable !== false)],
+    [MURPH_JOURNAL_SOURCE_READ_TOOL, defaultOff((a) => a.journalSourceReadAvailable)],
     [MURPH_CONNECTED_APPS_SEARCH_TOOL, defaultOff((a) => a.connectedAppsAvailable)],
     [MURPH_CONNECTED_APPS_EXECUTE_TOOL, defaultOff((a) => a.connectedAppsAvailable)],
     [MURPH_CREATE_CLINICAL_RECORDS_CONNECT_LINK_TOOL, defaultOff((a) =>

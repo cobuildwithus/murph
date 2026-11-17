@@ -108,7 +108,8 @@ export async function verifyHostedTelegramLogin(request: Request): Promise<Respo
       headers: request.headers, occurredAt: new Date(), surface: "website", timeZone,
     }) : undefined;
     const issued = await commitHostedAuthSession({
-      ...config, prisma, memberId: prepared.memberId, primaryAuthenticatedAt: verified.authenticatedAt,
+      ...config, prisma, memberId: prepared.memberId,
+      primaryAuthenticatedAt: verified.authenticatedAt, primaryAuthenticationFactor: "telegram",
       commitMember: async (tx) => {
         await proof.consume(tx);
         await prepared.commitMember(tx);

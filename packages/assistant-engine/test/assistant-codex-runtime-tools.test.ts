@@ -1546,7 +1546,8 @@ describe('assistant codex runtime', () => {it('fails closed on unexpected app-se
           contentItems: [
             {
               type: 'inputText',
-              text: '{"error":"invalid_progress_update_arguments","validationIssues":[{"origin":"string","code":"too_small","minimum":1,"inclusive":true,"path":["text"],"message":"Too small: expected string to have >=1 characters"}]}',
+              // Zod's built-in message only restated origin, minimum and path.
+              text: '{"error":"invalid_progress_update_arguments","validationIssues":[{"origin":"string","code":"too_small","minimum":1,"inclusive":true,"path":["text"]}]}',
             },
           ],
         },
@@ -1749,7 +1750,8 @@ describe('assistant codex runtime', () => {it('fails closed on unexpected app-se
           success: false,
           contentItems: [{
             type: 'inputText',
-            text: '{"error":"invalid_pending_vault_files_arguments","validationIssues":[{"origin":"string","code":"invalid_format","format":"regex","pattern":"/^outbox_[0-9a-f]{32}$/u","path":["intentIds",0],"message":"Invalid string: must match pattern /^outbox_[0-9a-f]{32}$/u"}]}',
+            // The built-in message only restated the returned pattern.
+            text: '{"error":"invalid_pending_vault_files_arguments","validationIssues":[{"origin":"string","code":"invalid_format","format":"regex","pattern":"/^outbox_[0-9a-f]{32}$/u","path":["intentIds",0]}]}',
           }],
         },
       })

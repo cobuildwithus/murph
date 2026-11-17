@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { IncomingHttpHeaders } from "node:http";
 
@@ -196,6 +197,7 @@ const DEFAULT_LINQ_WEBHOOK_TIMESTAMP_TOLERANCE_MS = 5 * 60_000;
 const LINQ_WEBHOOK_SIGNATURE_HEX_PATTERN = /^[a-f0-9]{64}$/iu;
 const LINQ_WEBHOOK_TIMESTAMP_TIMEZONE_PATTERN = /(?:[zZ]|[+-]\d\d(?::?\d\d)?)$/u;
 const LINQ_MESSAGE_EDITED_MAX_TEXT_CHARS = 10_000;
+const LINQ_CHAT_HANDLE_MAX_CHARS = 320;
 
 export class LinqWebhookVerificationError extends Error {
   constructor(message: string) {
@@ -391,7 +393,7 @@ export function parseRawLinqMessageReceivedEvent(
   event: LinqWebhookEvent,
 ): LinqMessageReceivedEvent {
   if (event.event_type !== "message.received") {
-    throw new TypeError("Linq webhook event does not contain a supported message.received payload.");
+    throw new ContractValidationError("Linq webhook event does not contain a supported message.received payload.");
   }
 
   const data = toLinqObjectRecord(event.data, "Linq message.received data");
@@ -458,7 +460,7 @@ export function parseLinqMessageReceivedEvent(
   event: LinqWebhookEvent,
 ): LinqMessageReceivedEvent {
   if (event.event_type !== "message.received") {
-    throw new TypeError("Linq webhook event does not contain a supported message.received payload.");
+    throw new ContractValidationError("Linq webhook event does not contain a supported message.received payload.");
   }
 
   const data = toLinqObjectRecord(event.data, "Linq message.received data");
@@ -473,10 +475,10 @@ export function parseLinqMessageEditedEvent(
   event: LinqWebhookEvent,
 ): LinqMessageEditedEvent {
   if (event.event_type !== "message.edited") {
-    throw new TypeError("Linq webhook event does not contain a supported message.edited payload.");
+    throw new ContractValidationError("Linq webhook event does not contain a supported message.edited payload.");
   }
   if (event.webhook_version !== "2026-02-03") {
-    throw new TypeError('Linq message.edited webhook_version must be "2026-02-03".');
+    throw new ContractValidationError('Linq message.edited webhook_version must be "2026-02-03".');
   }
 
   const data = toLinqObjectRecord(event.data, "Linq message.edited data");
@@ -484,14 +486,14 @@ export function parseLinqMessageEditedEvent(
   const part = toLinqObjectRecord(data.part, "Linq message.edited part");
   const partIndex = normalizeNullableInteger(part.index);
   if (partIndex === null || partIndex < 0 || partIndex > 2_147_483_647) {
-    throw new TypeError("Linq message.edited part.index must be a non-negative int32.");
+    throw new ContractValidationError("Linq message.edited part.index must be a non-negative int32.");
   }
   if (
     typeof part.text !== "string"
     || part.text.length === 0
     || part.text.length > LINQ_MESSAGE_EDITED_MAX_TEXT_CHARS
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Linq message.edited part.text must contain 1-${LINQ_MESSAGE_EDITED_MAX_TEXT_CHARS} characters.`,
     );
   }
@@ -539,7 +541,7 @@ export function parseLinqTypingIndicatorStartedEvent(
   event: LinqWebhookEvent,
 ): LinqTypingIndicatorStartedEvent {
   if (event.event_type !== "chat.typing_indicator.started") {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Linq webhook event does not contain a supported chat.typing_indicator.started payload.",
     );
   }
@@ -552,7 +554,7 @@ export function parseLinqTypingIndicatorStartedEvent(
     ? data.chat_id.trim()
     : "";
   if (!chatId) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Linq chat.typing_indicator.started chat_id is required.",
     );
   }
@@ -579,7 +581,7 @@ export function parseLinqParticipantChangedEvent(
     event.event_type !== "participant.added"
     && event.event_type !== "participant.removed"
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Linq webhook event does not contain a supported participant change payload.",
     );
   }
@@ -588,7 +590,7 @@ export function parseLinqParticipantChangedEvent(
   const participant = parseOptionalChatHandle(data.participant)
     ?? parseDeprecatedLinqParticipantHandle(data.handle, data.service);
   if (!participant) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Linq ${event.event_type} participant or deprecated handle is required.`,
     );
   }
@@ -679,7 +681,7 @@ export function resolveLinqWebhookOccurredAt(event: LinqMessageReceivedEvent): s
   const occurredAt = normalizeTextValue(event.data.received_at ?? event.created_at);
 
   if (!occurredAt) {
-    throw new TypeError("Linq webhook occurredAt is required.");
+    throw new ContractValidationError("Linq webhook occurredAt is required.");
   }
 
   return occurredAt;
@@ -912,7 +914,7 @@ function readLinqWebhookHeaderValues(
 
 function toLinqObjectRecord(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object.`);
+    throw new ContractValidationError(`${label} must be an object.`);
   }
 
   return value as Record<string, unknown>;
@@ -921,7 +923,7 @@ function toLinqObjectRecord(value: unknown, label: string): Record<string, unkno
 function normalizeRequiredTimestamp(value: unknown, label: string): string {
   const normalized = normalizeNullableString(value);
   if (!normalized) {
-    throw new TypeError(`${label} is required.`);
+    throw new ContractValidationError(`${label} is required.`);
   }
 
   return toIsoTimestamp(normalized);
@@ -935,7 +937,7 @@ function normalizeOptionalTimestamp(value: unknown, label: string): string | nul
 function normalizeRequiredTimezoneTimestamp(value: unknown, label: string): string {
   const normalized = normalizeRequiredString(value, label);
   if (!LINQ_WEBHOOK_TIMESTAMP_TIMEZONE_PATTERN.test(normalized)) {
-    throw new TypeError(`${label} must include a timezone.`);
+    throw new ContractValidationError(`${label} must include a timezone.`);
   }
   return toIsoTimestamp(normalized);
 }
@@ -947,7 +949,7 @@ function normalizeRequiredDirection(
   const normalized = normalizeRequiredString(value, label);
 
   if (normalized !== "inbound" && normalized !== "outbound") {
-    throw new TypeError(`${label} must be "inbound" or "outbound".`);
+    throw new ContractValidationError(`${label} must be "inbound" or "outbound".`);
   }
 
   return normalized;
@@ -999,7 +1001,7 @@ function parseLinqMessagePart(part: unknown, index: number): LinqMessagePart {
     };
   }
 
-  throw new TypeError(
+  throw new ContractValidationError(
     `Linq message.received message.parts[${index}] type must be "text", "media", "link", "voice_memo", or "imessage_app".`,
   );
 }
@@ -1009,7 +1011,7 @@ function parseLinqMessageParts(value: unknown): unknown[] {
     return [];
   }
   if (!Array.isArray(value)) {
-    throw new TypeError("Linq message.received message.parts must be an array, null, or absent.");
+    throw new ContractValidationError("Linq message.received message.parts must be an array, null, or absent.");
   }
   return value;
 }
@@ -1146,7 +1148,7 @@ function parseCanonicalLinqIsFromMe(data: Record<string, unknown>): boolean {
     if (direction === "outbound") {
       return true;
     }
-    throw new TypeError('Linq message.received is_from_me must be a boolean.');
+    throw new ContractValidationError('Linq message.received is_from_me must be a boolean.');
   }
 
   return data.is_from_me;
@@ -1166,7 +1168,7 @@ function parseCanonicalLinqDirection(
     "Linq message.received direction",
   );
   if ((normalizedDirection === "outbound") !== isFromMe) {
-    throw new TypeError("Linq message.received is_from_me must match direction.");
+    throw new ContractValidationError("Linq message.received is_from_me must match direction.");
   }
 
   return normalizedDirection;
@@ -1176,7 +1178,7 @@ function parseRequiredChatInfo(value: unknown): LinqChatInfo {
   const chat = parseOptionalChatInfo(value);
 
   if (!chat) {
-    throw new TypeError("Linq message.received chat is required.");
+    throw new ContractValidationError("Linq message.received chat is required.");
   }
 
   return chat;
@@ -1188,9 +1190,14 @@ function parseOptionalChatHandle(value: unknown): LinqChatHandle | null {
   }
 
   const record = toLinqObjectRecord(value, "Linq chat handle");
+  const handle = normalizeRequiredString(record.handle, "Linq chat handle.handle");
+  // A phone number or email address; nothing valid is longer.
+  if (handle.length > LINQ_CHAT_HANDLE_MAX_CHARS) {
+    throw new ContractValidationError(`Linq chat handle.handle must be at most ${LINQ_CHAT_HANDLE_MAX_CHARS} characters.`);
+  }
   return {
     id: normalizeNullableString(record.id) ?? undefined,
-    handle: normalizeRequiredString(record.handle, "Linq chat handle.handle"),
+    handle,
     is_me: typeof record.is_me === "boolean" ? record.is_me : undefined,
     joined_at: normalizeOptionalTimestamp(record.joined_at, "Linq chat handle.joined_at") ?? undefined,
     left_at: normalizeOptionalTimestamp(record.left_at, "Linq chat handle.left_at") ?? undefined,
@@ -1203,7 +1210,7 @@ function parseRequiredChatHandle(value: unknown, label: string): LinqChatHandle 
   const handle = parseOptionalChatHandle(value);
 
   if (!handle) {
-    throw new TypeError(`${label} is required.`);
+    throw new ContractValidationError(`${label} is required.`);
   }
 
   return handle;

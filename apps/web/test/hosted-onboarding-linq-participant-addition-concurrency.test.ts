@@ -1440,6 +1440,60 @@ async function runVisibleAccessRace<T>(input: {
 describe.skipIf(!runPostgresConcurrencyProof)(
   "Linq group PostgreSQL ordering",
   () => {
+    it.each(["direct", "group"] as const)(
+      "rolls back partial %s admission and dedupes post-commit failure and lost-response redelivery",
+      async (audience) => {
+        const fixture = await createRouteFixture();
+        let directRoute: ActiveLinqDirectRoute | null = null;
+        try {
+          const route = audience === "direct"
+            ? (directRoute = await activateLinqDirectRoute(fixture))
+            : await activateLinqGroupRoute(fixture);
+          const common = {
+            createdAt: "2026-08-09T12:00:00.000Z",
+            eventId: `synthetic-redelivery-${randomUUID()}`,
+            messageId: `synthetic-message-${randomUUID()}`,
+            participantPhone: route.participantPhone,
+            text: "Synthetic redelivery proof",
+            threadId: fixture.threadId,
+          };
+          const event = audience === "direct"
+            ? buildRoutedDirectMessageEvent({ ...common, recipientPhone: route.canonicalRecipientPhone })
+            : buildRoutedGroupMessageEvent({ ...common, ownerPhone: route.canonicalRecipientPhone });
+          const admit = (failBeforeCommit = false) => fixture.messageClient.$transaction(async (tx) => {
+            const plan = await planHostedOnboardingLinqWebhook({
+              event, prisma: tx,
+              ...(audience === "group" ? { preparedThreadDeliveryRoute: route.canonicalPreparedDeliveryRoute } : {}),
+            });
+            expect(await tx.hostedMailboxItem.count({ where: { dedupeKey: event.event_id } })).toBe(1);
+            if (failBeforeCommit) throw new TypeError("Synthetic failure after mailbox append");
+            return plan;
+          });
+          await expect(admit(true)).rejects.toThrow("Synthetic failure after mailbox append");
+          expect(await fixture.observer.hostedMailboxItem.count({ where: { dedupeKey: event.event_id } })).toBe(0);
+          await expect((async () => {
+            await admit();
+            throw new RangeError("Synthetic post-commit failure");
+          })()).rejects.toThrow("Synthetic post-commit failure");
+          const stored = await fixture.observer.hostedMailboxItem.findMany({ where: { dedupeKey: event.event_id } });
+          // Direct and group admissions count against different members; read both.
+          const dailyWhere = { memberId: { in: [fixture.ownerMemberId, fixture.containerMemberId] } };
+          const daily = await fixture.observer.hostedLinqDailyState.findMany({ where: dailyWhere, orderBy: { memberId: "asc" } });
+          expect(stored).toHaveLength(1);
+          expect(daily.reduce((sum, row) => sum + row.inboundCount, 0)).toBe(1);
+          // The successful retry response can also be lost: replay it again.
+          for (let delivery = 0; delivery < 2; delivery += 1) {
+            await expect(admit()).resolves.toMatchObject({ response: { ok: true, duplicate: true } });
+            expect(await fixture.observer.hostedMailboxItem.findMany({ where: { dedupeKey: event.event_id } })).toEqual(stored);
+            expect(await fixture.observer.hostedLinqDailyState.findMany({ where: dailyWhere, orderBy: { memberId: "asc" } })).toEqual(daily);
+          }
+        } finally {
+          if (directRoute) await fixture.observer.hostedLinqLine.deleteMany({ where: { phoneNumberLookupKey: directRoute.recipientPhoneLookupKey } });
+          await cleanupRouteFixture(fixture);
+        }
+      },
+    );
+
     it.each([
       { startOrder: "operation-first" },
       { startOrder: "reconciliation-first" },

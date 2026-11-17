@@ -25,7 +25,7 @@ import type {
 
 const NOW = "2026-08-17T18:00:00.000Z";
 const CONNECTION_ID = "dsc_fitbit_migration";
-const USER_ID = "member_fitbit_migration";
+const USER_ID = "test-user";
 
 function connection(): PublicDeviceSyncAccount {
   return {
@@ -70,17 +70,7 @@ function source(input: {
     lastErrorMessage: null,
     lifecycleEpoch: 1,
     lastSeenAt: input.lastSeenAt ?? "2026-08-17T17:59:00.000Z",
-    resourceAvailabilitySummary: legacy
-      ? {
-          activity: true,
-          canonicalCoverageBoundary_activity: "2026-08-16",
-          canonicalCoverageFinalizedAt_activity: NOW,
-          historicalBackfillCompletedAt: "2026-08-17T17:00:00.000Z",
-        }
-      : {
-          activity: true,
-          historicalBackfillCompletedAt: "2026-08-17T17:00:00.000Z",
-        },
+    resourceAvailabilitySummary: { activity: true },
     sourceInstanceKey: `${CONNECTION_ID}:${input.provider}`,
     sourceProviderSlug: input.provider,
     status: input.status ?? "connected",
@@ -329,6 +319,24 @@ describe("hosted Google Health Fitbit cutover", () => {
     });
     expect(legacy(value)).toMatchObject({
       lastErrorCode: DEVICE_SYNC_GOOGLE_HEALTH_FITBIT_CUTOVER_FAILED_ERROR_CODE,
+      status: "connected",
+    });
+    expect(value.signals).toEqual([]);
+  });
+
+  it("keeps the claim fenced when revoke and the definitive access check both fail", async () => {
+    const value = new FakeCutoverStore();
+    const valueRegistry = registry({
+      active: () => { throw new Error("provider status unavailable"); },
+      revoke: () => { throw new Error("revoke outcome unavailable"); },
+    });
+
+    await expect(complete(value, valueRegistry)).resolves.toEqual({
+      connectionId: CONNECTION_ID,
+      status: "pending",
+    });
+    expect(legacy(value)).toMatchObject({
+      lastErrorCode: DEVICE_SYNC_SOURCE_DISCONNECT_IN_PROGRESS_ERROR_CODE,
       status: "connected",
     });
     expect(value.signals).toEqual([]);

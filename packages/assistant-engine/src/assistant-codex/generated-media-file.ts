@@ -1,4 +1,5 @@
 import type { ResolvedGenerateImageReference } from './image-reference-resolver.js'
+import type { SongWordTimestamp } from '@murphai/contracts/recap-show'
 
 /** Supplied by the owning flow, never by model arguments or an editable manifest. */
 export interface GeneratedMediaFileRuntime {
@@ -6,9 +7,5 @@ export interface GeneratedMediaFileRuntime {
   elevenLabsApiKey?: string
   fetchImpl: typeof fetch
   resolveReferences(refs: readonly string[]): Promise<ResolvedGenerateImageReference[]>
-  save(bytes: Uint8Array, mediaType: 'image/jpeg' | 'audio/mpeg'): Promise<string>
-}
-
-export interface GeneratedMediaFileArgs {
-  output?: 'chat' | 'file'
+  save(bytes: Uint8Array, mediaType: 'image/jpeg' | 'audio/mpeg', wordsTimestamps?: SongWordTimestamp[], score?: { songStartMs: number; signature: string }): Promise<string>
 }

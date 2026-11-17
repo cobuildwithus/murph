@@ -103,6 +103,10 @@
       "types": "./dist/outbound-channel.d.ts",
       "default": "./dist/outbound-channel.js"
     },
+    "./recap-video-render": {
+      "types": "./dist/assistant/recap-video-render.d.ts",
+      "default": "./dist/assistant/recap-video-render.js"
+    },
     "./recap-show-testkit": {
       "types": "./dist/recap-show-testkit.d.ts",
       "default": "./dist/recap-show-testkit.js"
@@ -130,9 +134,10 @@
     "@murphai/operator-config": "workspace:*",
     "@murphai/parsers": "workspace:*",
     "@murphai/query": "workspace:*",
+    "@murphai/recap-video": "workspace:*",
     "@murphai/runtime-state": "workspace:*",
     "@murphai/vault-usecases": "workspace:*",
-    "openai": "6.45.0",
+    "openai": "7.55.0",
     "sharp": "0.35.5"
   },
   "engines": {
@@ -140,10 +145,10 @@
   },
   "devDependencies": {
     "@openai/codex": "0.169.0",
-    "@types/ws": "8.18.1",
+    "@types/ws": "8.18.2",
     "ajv": "8.20.0",
     "ajv-formats": "3.0.1",
-    "ws": "8.21.0",
+    "ws": "8.22.2",
     "zod": "^4.5.4"
   }
 }

@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   type EventSource,
   type ExternalRef,
@@ -82,7 +83,7 @@ export async function prepareMealImport(input: unknown): Promise<MealImportPaylo
   const hasNutrition = hasMealNutritionContent(request.nutrition);
 
   if (!request.photoPath && !request.audioPath && !request.note && !hasIngredients && !hasNutrition) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "meal import input requires at least one of photoPath, audioPath, note, ingredients, or nutrition",
     );
   }

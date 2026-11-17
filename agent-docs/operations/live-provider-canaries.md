@@ -46,10 +46,21 @@ restore its cron entries (`17 0 * * 0,3,6` and `17 12 * * 1,4`) in
   deployment selected at launch, not an assertion that production stays frozen
   for the entire native journey. Ordinary promotions do not invalidate successful
   native business assertions; the canary emits no per-commit acceptance status.
-- Linq resolves the actual production alias before its scheduled journey, verifies
-  protected-main ancestry and exact deployment, and repeats deployment validation
-  after execution. A manual requested SHA must match the deployed revision.
+- Linq resolves the actual production alias before its scheduled journey and
+  verifies protected-main ancestry and exact deployment. Like the native
+  journeys, its recorded SHA is the deployment selected at launch: the journey
+  takes about 22 minutes, and an ordinary promotion during it does not fail a
+  run whose assertions passed. A manual requested SHA must match the deployed
+  revision.
   The fixed canary account is reset through its existing input-free owner.
+  Reset and outcome requests use fresh GitHub Actions OIDC tokens with audience
+  `https://www.withmurph.ai/linq-production-canary`. Only the protected-main
+  canary workflow's scheduled or manual runs are admitted; only reset consumes
+  the token's `jti`. The production-canary job alone has `id-token: write`.
+  There is no static reset secret: the rollout bearer and both of its secrets
+  were removed on 2026-11-17 after an OIDC journey passed (run 44008496024).
+  A missed status-token mint skips that poll; the stage deadline still bounds
+  the wait, and reset fails closed on any token failure.
   Phone-account creation saves an explicit GPT-6 Luna preference only for the
   server-configured Linq canary number. Each reset recreates that preference;
   ordinary member defaults and existing saved model choices are unchanged.
@@ -127,7 +138,9 @@ run twice weekly, down from seven slots: 72/96-hour nominal gaps, with no DST
 shift or month-boundary reset. This approximates one-third of the former cadence.
 The controller reuses only the existing
 `temporal-compatibility` Environment's repository-scoped GitHub App authority:
-private Actions write and Contents read for `cobuildwithus/murph-cloud`. It never
+private Actions write and Contents read for `cobuildwithus/murph-cloud`.
+[GitHub App signing](github-app-kms.md) owns its OIDC/KMS credentials and
+renewable installation-token supplier. It never
 checks out private source, receives provider credentials, or downloads private
 logs/artifacts.
 

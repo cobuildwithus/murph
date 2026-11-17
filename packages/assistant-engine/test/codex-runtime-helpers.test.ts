@@ -890,7 +890,7 @@ describe('Codex assistant registry helpers', () => {
           durationMs: 900,
           failedCalls: 0,
           kind: 'mcp_tool',
-          label: 't_generate',
+          label: 'mcp_tool',
           outputBytesMax: 40,
           outputBytesTotal: 40,
         },
@@ -1233,7 +1233,7 @@ describe('Codex assistant registry helpers', () => {
         toolEvent('item_2', 'tenant_two_private', 'search'),
         toolEvent('item_3', 'safe_namespace', 'member.private'),
         mcpEvent('item_4', 'member_acme_private', 'generate'),
-        mcpEvent('item_5', 'tenant_two_private', 'generate'),
+        mcpEvent('item_5', 'tenant_two_private', 'remote_chosen_name'),
       ],
       turnId: 'turn_tool_identity',
     })
@@ -1252,7 +1252,7 @@ describe('Codex assistant registry helpers', () => {
       expect.objectContaining({
         calls: 2,
         kind: 'mcp_tool',
-        label: 't_generate',
+        label: 'mcp_tool',
       }),
     ]))
     const persisted = parseAssistantUsageRecord({
@@ -1274,6 +1274,8 @@ describe('Codex assistant registry helpers', () => {
     expect(serialized).not.toContain('tenant_two_private')
     expect(serialized).not.toContain('safe_namespace')
     expect(serialized).not.toContain('member.private')
+    expect(serialized).not.toContain('remote_chosen_name')
+    expect(serialized).not.toContain('generate')
   })
 
   it('counts every canonical structural failure signal without reading error text', () => {
@@ -3709,6 +3711,35 @@ describe('Codex assistant registry helpers', () => {
     expect(serializedDiagnostic).not.toContain('thread-private')
   })
 
+  it.each([
+    { show: true, serviceTier: 'flex' as const, codexErrorInfo: 'flexUnavailable', basis: 'openai-flex' },
+    { show: true, serviceTier: null, codexErrorInfo: 'serverOverloaded', basis: 'standard' },
+    { show: false, serviceTier: 'flex' as const, codexErrorInfo: 'flexUnavailable', basis: null },
+    { show: false, serviceTier: null, codexErrorInfo: 'serverOverloaded', basis: null },
+  ])('retains unbilled capacity refusal pricing only for recap show attempts: $show / $serviceTier', async ({ show, serviceTier, codexErrorInfo, basis }) => {
+    codexAppServerMocks.executeCodexAppServerTurn.mockRejectedValue(new VaultCliError(
+      'ASSISTANT_CODEX_FAILED', 'Synthetic capacity refusal', { codexErrorInfo, retryable: true },
+    ))
+    codexAppServerMocks.readCodexAppServerTurnFailureContext.mockReturnValue(null)
+    const attempt = await executeCodexAssistantTurnAttempt({
+      providerConfig: normalizeAssistantProviderConfig({ model: 'gpt-6.2-sol', modelProvider: 'hosted-openai' }),
+      serviceTier, systemPrompt: 'Synthetic recap.', userPrompt: 'Finish the game recap.', workingDirectory: '/tmp/provider-tests',
+      hostedToolContext: {
+        currentHostedDeliveryContext: () => null,
+        currentHostedMailboxItemIds: () => [],
+        computerToolsAvailable: false,
+        vaultFileSendAvailable: false,
+        sendVaultFile: async () => { throw new Error('Unexpected file delivery') },
+        currentGameRecapScope: () => ({ gameId: 'game_synthetic', eventId: 'game-recap:game_synthetic', pairFingerprint: 'synthetic-pair', ...(show ? { show: true } : {}) }),
+      },
+    })
+    expect(codexAppServerMocks.executeCodexAppServerTurn).toHaveBeenCalledWith(expect.objectContaining({ serviceTier }))
+    expect(attempt.ok).toBe(false)
+    if (attempt.ok) throw new Error('Expected refusal')
+    if (show) expect(attempt.usage).toMatchObject({ requestedModel: 'gpt-6.2-sol', tokenPricingBasis: basis, inputTokens: null, outputTokens: null })
+    else expect(attempt.usage).toBeUndefined()
+  })
+
   it('merges progress activity labels into successful delegated execution attempts', async () => {
     const executionResult: AssistantProviderTurnExecutionResult = {
       provider: 'codex-cli',
@@ -4185,6 +4216,37 @@ describe('Codex assistant registry helpers', () => {
       runtimeWorkspaceRoots: ['/tmp/provider-tests'],
     })
     expect(appServerInput?.sandbox).toBeUndefined()
+  })
+
+  it('forwards the digest of the room-model body already in the turn', async () => {
+    codexAppServerMocks.executeCodexAppServerTurn.mockResolvedValueOnce({
+      finalMessage: 'Done.',
+      precedingAgentMessageSegments: [],
+      responseDeliveryContextOrdinal: 0,
+      transcriptMessage: 'Done.',
+      jsonEvents: [],
+      providerActionCount: 0,
+      sessionId: 'room-model-in-context-thread',
+      stderr: '',
+      threadId: 'room-model-in-context-thread',
+      turnId: 'turn-room-model-in-context',
+    })
+
+    const attempt = await executeCodexAssistantTurnAttemptFromInput({
+      providerConfig: { provider: 'codex-cli', sandbox: 'read-only' },
+      turn: {
+        dynamicTools: [],
+        groupRoomModelInjectedDigest: 'd'.repeat(64),
+        prompt: 'Remember the new running bit.',
+        workingDirectory: '/tmp/provider-tests',
+      },
+    })
+
+    expect(attempt.ok).toBe(true)
+    expect(
+      codexAppServerMocks.executeCodexAppServerTurn.mock.calls[0]?.[0]
+        ?.groupRoomModelInjectedDigest,
+    ).toBe('d'.repeat(64))
   })
 
   it('forwards resident member-workspace permissions through start and resume inputs', async () => {

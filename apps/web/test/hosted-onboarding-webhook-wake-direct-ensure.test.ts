@@ -809,7 +809,7 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
     const unsafeRead = vi.fn((): never => { throw new Error("synthetic private accessor or coercion"); });
     const error = buildError(unsafeRead);
     let orchestrationAttemptId: string | undefined;
-    mocks.ensureRuntimeProcessing.mockImplementationOnce((input: DirectEnsureInput) => {
+    mocks.ensureRuntimeProcessing.mockImplementation((input: DirectEnsureInput) => {
       orchestrationAttemptId = input.orchestrationAttemptId;
       if (synchronous) throw error;
       return Promise.reject(error);
@@ -830,7 +830,10 @@ describe("maybeHandoffHostedExecutionWebhookWake direct ensure fast path", () =>
       await expect(Promise.all(tasks.map((task) => task()))).resolves.toEqual([undefined, undefined]);
 
       expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledOnce();
-      expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledOnce();
+      // Only a dropped pooled socket is resent, once, under the same attempt id.
+      expect(mocks.ensureRuntimeProcessing).toHaveBeenCalledTimes(
+        transportErrorCode === "ECONNRESET" || transportErrorCode === "UND_ERR_SOCKET" ? 2 : 1,
+      );
       expect(mocks.recordHostedIngressDirectEnsureTiming).not.toHaveBeenCalled();
       expect(orchestrationAttemptId).toEqual(expect.stringMatching(/^web-ingress-[0-9a-f-]{36}$/u));
       expect(consoleWarn).toHaveBeenCalledExactlyOnceWith("Hosted direct ensure wake failed.", {

@@ -1,6 +1,6 @@
 # Device Sync Ingestion Invariants
 
-Last verified: 2026-09-20
+Last verified: 2026-11-16
 
 ## Purpose
 
@@ -464,8 +464,11 @@ snapshot is already reconciled; it does not need an empty Web callback.
    matrix in an existing blood-pressure or note coverage slot. Its append-only
    route slots cover every configured Junction source within the 256-character
    scalar bound, and deployed blood-pressure and note values remain legacy read
-   inputs. An unrepresentable route fails before history egress instead of
-   advancing coverage. Blood pressure retains exact per-reading repair and notes
+   inputs. The packed bits carry no resource generation, so the matrix
+   envelope generation retires them: the previous envelope stays a read input
+   without its weight column, which it certified while fetched weight rows
+   were being dropped, and every other bit it holds stands. An unrepresentable
+   route fails before history egress instead of advancing coverage. Blood pressure retains exact per-reading repair and notes
    retain complete-fetch semantics. No second queue, retry store, or persisted
    lifecycle owns this history.
 
@@ -481,7 +484,17 @@ snapshot is already reconciled; it does not need an empty Web callback.
 
    The versioned scalar in connection metadata owns aggregate coverage status,
    attempt count, and the daily observation cadence across every unresolved
-   source; there is no per-source retry state or second retry store. A
+   source; there is no per-source retry state or second retry store.
+   Advancing its generation re-reads history; it does not re-open a settled
+   outcome. A connect window that reached `complete` or `exhausted` under an
+   older generation runs one summary re-read, over the connect window and on
+   to the start of the reconcile window, because a source that joined after
+   the connection date had its history fetched then. That run reads no
+   timeseries, queues no timeseries or temporal work, leaves the temporal
+   sweep marker alone, keeps the stored outcome unless current evidence proves
+   an exhausted window complete, and preserves an exhausted window's reconnect
+   markers until it finishes. A window still `retrying` under an older
+   generation restarts its ladder with the ordinary full backfill. A
    nonterminal source keeps that aggregate status `retrying` at the saturated
    daily cadence even when another source has reached a provider-specific
    recovery outcome. The durable reset-required fact belongs to the Garmin
@@ -789,6 +802,24 @@ and authority exclusions separately. Pull frequency is unchanged by this feature
   per-resource job fan-out, or another retry store. The exact-window job,
   scalar connection metadata, and provider-owned bounded ladder are the one
   recovery path.
+- Every import path for one timeseries resource must stamp the same source
+  instance id, because every canonical id hashes it. A reconcile or backfill
+  that stamps a different one than the data-webhook fetch stores each sample
+  twice. `packages/device-syncd/test/junction-timeseries-source-identity.test.ts`
+  runs every resource through both paths.
+- A sleep session's total and stage minutes are owned by the provider's session
+  id, which a sleep cycle names as `sleep_id`. The coverage window is the key
+  only for a record that carries no session id. A superseded window ref moves a
+  stored record across once, to one session: when an import holds several
+  sessions for one window, the session whose values the record holds takes it
+  (the first when none or several do) and the others start their own. The
+  window a session claims first moves through the session's first event in the
+  import, even when that copy names a rewritten window, but only in place of a
+  new record: an event that already reaches a record keeps it. Any other window
+  the session owns stays a stale copy, and no other session takes it. A record
+  the member deleted stays deleted, and each session imports as a new record.
+  Once the session owns a record, a window ref names at most a stale copy and
+  must not merge two live records.
 
 ## Related docs
 
@@ -799,13 +830,7 @@ and authority exclusions separately. Pull frequency is unchanged by this feature
 
 ## Fitbit to Google Health authority replacement
 
-- `fitbit` and `google_health` remain distinct persisted authorities while the browser projects one Fitbit / Pixel Watch card.
-- Legacy Fitbit stays active until Google Health has explicit authorization, both exact-source historical pulls are terminal, Google Health has a fresh supported fact, and its normalized capabilities cover every canonical resource actually produced by Fitbit. An advertised sparse resource whose exact Fitbit pull finishes empty creates no transfer obligation.
-- Accepted Fitbit daily facts remain canonically visible during verification but are provisional cutover evidence until an accepted provider pull reaches the close of that provider day. The committed event's valid IANA timezone owns the close, followed by its fixed offset; the latest close wins when one source/resource/day contains multiple accepted provenances. Invalid or absent provenance uses the existing globally closed UTC-12 boundary, never the member's mutable vault timezone. Interval resources fence on their accepted canonical end. Successor admission is strictly after each per-resource boundary.
-- Every source-bearing Fitbit or Google Health summary, daily aggregate, precise timeseries, and workout import uses the same provider-local canonical commit boundary. That boundary forwards the durable Fitbit fence, distinguishes provider pulls from inline deliveries, and records accepted Fitbit coverage from the committed import receipt; companion-only imports remain outside it.
-- Reauthorizing the same Google Health source advances its Web-owned source epoch and clears prior arrival, coverage, error, and lifecycle evidence in hosted state. Delayed runtime output from the prior epoch cannot restore those fields or satisfy migration freshness.
-- Google Health migration freshness is a first logical provider fact, not a transport-trace or retry-attempt timestamp. Web derives the existing successor-arrival mailbox identity from the prepared provider-job dedupe keys and exact connection epoch, independently of the Svix trace. It advances `lastDataAt` to the provider occurrence only for the first insertion whose frozen acceptance time and provider occurrence are both strictly after the effective exact-source `firstSeenAt`. When the same delivery confirms that source, its acceptance time also participates in the effective epoch. Duplicate, delayed, pre-epoch, and source-confirming deliveries therefore cannot certify a later authorization, whether the mailbox item is pending or consumed.
-- Exact-source history jobs bind their proof to that existing Web epoch. The authorization source slug and `firstSeenAt` participate in job deduplication and survive deferred retries and timeseries/workout continuations. A queued or running job whose binding no longer matches may leave already accepted canonical imports in place, but it is superseded before further provider work and cannot continue or write a terminal marker. Unbound legacy jobs likewise cannot certify migration completion.
-- Mixed or source-unknown migration data is retryable: ingress must not acknowledge the trace or create canonical dirty work by guessing.
-- Data-less historical completion is not a data-arrival fact. Its prepared resource fetch may be admitted while legacy Fitbit remains active only for Fitbit or unrelated sources, when every job has the same explicit admitted source, a bounded window, and no inline data carrier. Google Health history remains retryable until legacy Fitbit is terminal; admitting it earlier would let the migration-fenced executor consume its original window without fetching it. Keep data-arrival attribution absent; the existing provider read and canonical import boundaries still prove provenance and migration authority.
-- Cutover reuses the connection lock and source row. Pending dirty work must be drained and acknowledged before the exact Fitbit revoke claim or finalization; provider failure restores active legacy state and a bounded retry marker.
+- `fitbit` and `google_health` remain distinct persisted Junction authorities while the browser projects one Fitbit / Pixel Watch card. Google Health imports as an ordinary connected source without a legacy-history, resource-parity, fresh-fact, day-close, or canonical-coverage gate. Retained Fitbit and Google Health base facts may overlap; the generic wearable, metric, and board readers resolve the displayed day or series.
+- Exact-source historical jobs keep their existing authorization source slug and `firstSeenAt` binding through retries and continuations. Reauthorization advances the Web-owned source epoch. Jobs bound to an older epoch fail their next admission or lifecycle check; a source-bearing, bounded, data-less historical fetch is admitted for any connected source, including Google Health. Neither it nor a source-unknown webhook is a data-arrival fact. Inline data whose source cannot be established stays retryable when multiple live sources could have written it.
+- The runner checks current source and lifecycle authority at job admission. No job admitted after Fitbit is terminal starts a source-scoped Fitbit provider pull; a job already past admission may finish its fetch, and canonical import filters the terminal source. Runner source projection cannot restore Fitbit. A Fitbit fact prepared before Web confirms revocation may commit afterward as source-specific overlap without blocking Google Health. Accepted canonical imports retain source/resource receipts for import signals. A later complete-day temporal import may replace derived facets from either source while retaining base facts.
+- Google Health authorization starts the existing Fitbit revoke attempt, and bounded hosted maintenance revisits authorized pairs. The wake-local pass drains pending dirty work; Web refuses cutover while dirty work remains, then uses the existing connection lock, exact claim, provider revoke, definitive access check, and terminal source update. If revoke fails and a definitive check confirms Fitbit remains active, restore its active row for retry. If that check fails, keep the claim fenced for recovery. Once Fitbit is terminal, a later Google Health disconnect does not reactivate it; reconnect Google Health instead.

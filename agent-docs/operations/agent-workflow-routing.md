@@ -1,6 +1,6 @@
 # Agent Workflow Routing
 
-Last verified: 2026-09-11
+Last verified: 2026-11-14
 
 This document owns task classification, action authority, checkout choice, and
 plan/commit routing. `AGENTS.md` owns precedence and baseline constraints.
@@ -36,9 +36,8 @@ can hold implementation, Product UX, and verification decisions.
   executor boundaries, and current commands. Read the delivery-path section
   first, then the relevant matrix row or runtime procedure.
 - `pr-reviewgpt-loop.md`: only for a required or explicitly requested final
-  ReviewGPT run; owns capture, finding disposition, retries, and merge readiness.
-  Prefer `--wait` or paced polling in the original Codex session/thread; reserve
-  detached wake for deliberate handoffs under its Wait And Wake Ownership rule.
+  ReviewGPT run; owns launch, waiting, capture, finding disposition, retries,
+  and merge readiness.
 - `product-ux.md`: plan and replay materially different affected journeys for
   user-facing behavior as part of the parent's review.
 - `local-storage-lifecycle.md`: worktree and build/test residue ownership.
@@ -82,9 +81,10 @@ The parent owns this evidence and its review.
 
 ### Developer Friction Logging
 
-For every edit-authorized repository task, read `.agents/skills/frog/SKILL.md`
-and run `scripts/frog list` before a workaround. Reuse a matching entry; for new
-reproducible repository friction, record it through `scripts/frog log`.
+When repository tooling, docs or conventions force a workaround in an
+edit-authorized task, read `.agents/skills/frog/SKILL.md` and run
+`scripts/frog list` first. Reuse a matching entry; for new reproducible
+repository friction, record it through `scripts/frog log`.
 Creating or updating a tracked plan file is edit-authorized repository work.
 Review-only and planning-only no-edit tasks report friction in the handoff.
 Include public-safe task-owned entries in the scoped commit. A task is not
@@ -114,9 +114,11 @@ requires explicit cleanup authorization. Report any retirement blocker.
 
 Same-turn completion permits a scoped commit unless the user says `review first`
 or `do not commit`. Use `scripts/committer "summary" <file>...` for work without
-an active plan or an intermediate candidate commit. Use
-`scripts/finish-task <active-plan> "summary" <path>...` for the final plan-bearing
-commit; it archives the plan and expands directory arguments. Preserve task-owned
+an active plan or an intermediate commit. Use
+`scripts/finish-task <active-plan> "summary" <path>...` for the candidate commit
+of plan-bearing work, before the PR is marked Ready; it archives the plan and
+expands directory arguments. A separate closeout push after CI has run costs
+another full CI run. Preserve task-owned
 Frog entries. When overlapping edits block a safe final commit, archive a done
 or abandoned plan with `scripts/close-exec-plan.sh` and report the blocker.
 
@@ -171,3 +173,10 @@ recommends auditing accessible instructions for conflicts and calibrating
 verification. This workflow applies that advice by keeping authority explicit,
 loading relevant context, and avoiding redundant checks. It does not change
 Murph's runtime model selection or weaken independent safety boundaries.
+
+When editing `AGENTS.md`, these docs or a skill: state each rule once, in its
+owner, with its reason; delete what a reader would not miss; and keep incident
+history in the PR and the plan. A tracked skill under `.agents/skills/` holds
+what is specific to Murph. General framework, vendor or style guides stay out
+of the repository, because the models already know them and a second copy
+drifts.

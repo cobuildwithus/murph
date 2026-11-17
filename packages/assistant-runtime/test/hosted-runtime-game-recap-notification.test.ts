@@ -55,8 +55,30 @@ describe("hosted game recap notification", () => {
         groupToolPort: { request: async () => ({ action: "read_game", result: { status: "ok", recapGame: {} } }) }, vaultRoot: "/synthetic-vault", wake });
       const input = mocks.sendAssistantNotification.mock.lastCall?.[0] as AssistantNotificationInput;
       expect(input.assistantTargetOverride?.model).toBe(show ? "gpt-6.2-sol" : undefined);
+      expect(input.serviceTier ?? null).toBe(show ? "flex" : null);
       expect(input.executionContext?.hosted?.gameRecapScope?.show).toBe(show ? true : undefined);
     }
+  });
+  it("runs a recap wake that asks for a video exactly as one that does not, and hands the request to the turn", async () => {
+    const inputs: AssistantNotificationInput[] = [];
+    for (const video of [false, true]) {
+      const wake = recapWake();
+      if (wake.notification.responsePolicy?.kind !== "require_game_recap") throw new Error("Expected recap policy");
+      wake.notification.responsePolicy.show = true;
+      if (video) wake.notification.responsePolicy.video = true;
+      mocks.sendAssistantNotification.mockResolvedValue({ decision: { kind: "skip", privateSummary: "Synthetic recap." }, deliveryOutcome: null, response: "", session: { sessionId: "synthetic" } });
+      await executeHostedAssistantNotificationWake({ executionContext: { hosted: { memberId: wake.userId, userEnvKeys: [] } },
+        groupToolPort: { request: async () => ({ action: "read_game", result: { status: "ok", recapGame: {} } }) }, vaultRoot: "/synthetic-vault", wake });
+      inputs.push(mocks.sendAssistantNotification.mock.lastCall?.[0] as AssistantNotificationInput);
+    }
+    const [plain, asked] = inputs;
+    expect(plain!.executionContext?.hosted?.gameRecapScope).toEqual({ gameId: GAME_ID, eventId: EVENT_ID, pairFingerprint: PAIR_FINGERPRINT, show: true });
+    expect(asked!.executionContext?.hosted?.gameRecapScope).toEqual({ gameId: GAME_ID, eventId: EVENT_ID, pairFingerprint: PAIR_FINGERPRINT, show: true, video: true });
+    // Nothing else about the turn differs: same model, tier, instructions and delivery.
+    const rest = (input: AssistantNotificationInput) => JSON.stringify({ ...input, responsePolicy: undefined, executionContext: undefined, wake: undefined }, (key, value) => typeof value === "function" ? "fn" : value);
+    expect(rest(asked!)).toBe(rest(plain!));
+    expect(asked!.assistantTargetOverride).toEqual(plain!.assistantTargetOverride);
+    expect(asked!.serviceTier).toBe(plain!.serviceTier);
   });
   it("binds group missed-day scope to the room with writable lore and no group control port", async () => {
     const wake = recapWake();
@@ -69,6 +91,7 @@ describe("hosted game recap notification", () => {
     const input = mocks.sendAssistantNotification.mock.calls[0]![0] as AssistantNotificationInput;
     expect(input.executionContext?.hosted?.gameMissedCheckInScope).toEqual(policy);
     expect(input.executionContext?.hosted?.gameRecapScope).toBeUndefined();
+    expect(input.serviceTier ?? null).toBeNull();
     expect(input.executionContext?.hosted?.groupTool).toBeUndefined();
     expect(input.responsePolicy).toEqual(policy);
     mocks.sendAssistantNotification.mockClear();

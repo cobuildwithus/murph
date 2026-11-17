@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { Buffer } from "node:buffer";
 
@@ -450,7 +451,7 @@ class ManagedHostedGcpKmsClient implements HostedGcpKmsClient {
         plaintext.byteLength + additionalAuthenticatedData.byteLength
         > GCP_KMS_MAX_PLAINTEXT_AND_AAD_BYTES
       ) {
-        throw new TypeError(
+        throw new ContractValidationError(
           "GCP KMS Encrypt plaintext and additionalAuthenticatedData exceed 65536 bytes.",
         );
       }
@@ -922,7 +923,7 @@ class HostedLocalGcpKmsClient implements HostedGcpKmsClient {
         keyName,
       });
       if (plaintext.byteLength + aad.byteLength > GCP_KMS_MAX_PLAINTEXT_AND_AAD_BYTES) {
-        throw new TypeError(
+        throw new ContractValidationError(
           "Local KMS Encrypt plaintext and additionalAuthenticatedData exceed 65536 bytes.",
         );
       }
@@ -974,7 +975,7 @@ class HostedLocalGcpKmsClient implements HostedGcpKmsClient {
 
     try {
       if (packed.byteLength <= LOCAL_KMS_IV_BYTES) {
-        throw new TypeError("Local KMS ciphertext is malformed.");
+        throw new ContractValidationError("Local KMS ciphertext is malformed.");
       }
       iv = packed.slice(0, LOCAL_KMS_IV_BYTES);
       ciphertext = packed.slice(LOCAL_KMS_IV_BYTES);
@@ -1250,7 +1251,7 @@ async function readKmsRestResponse(
       if (chunk.done) break;
       size += chunk.value.byteLength;
       chunks.push(chunk.value);
-      if (size > 128 * 1024) throw new TypeError("Google Cloud KMS response is too large.");
+      if (size > 128 * 1024) throw new ContractValidationError("Google Cloud KMS response is too large.");
     }
     const bytes = Buffer.concat(chunks);
     let payload: unknown;
@@ -1259,7 +1260,7 @@ async function readKmsRestResponse(
     } finally {
       bytes.fill(0);
     }
-    if (!isRecord(payload)) throw new TypeError("Google Cloud KMS response is invalid.");
+    if (!isRecord(payload)) throw new ContractValidationError("Google Cloud KMS response is invalid.");
     return payload;
   } finally {
     void reader.cancel().catch(() => undefined);
@@ -2324,7 +2325,7 @@ function normalizeKmsCryptoKeyName(value: string, label: string): string {
   if (versionMatch?.[1]) {
     return versionMatch[1];
   }
-  throw new TypeError(`${label} must be an exact CryptoKey or CryptoKeyVersion resource name.`);
+  throw new ContractValidationError(`${label} must be an exact CryptoKey or CryptoKeyVersion resource name.`);
 }
 
 function requireKmsCryptoKeyName(value: unknown, label: string): string {
@@ -2360,7 +2361,7 @@ function requireResponseKmsCryptoKeyVersionName(
 function cryptoKeyParentName(versionName: string): string {
   const match = GCP_KMS_CRYPTO_KEY_VERSION_NAME_PATTERN.exec(versionName);
   if (!match?.[1]) {
-    throw new TypeError("GCP KMS CryptoKeyVersion resource name is invalid.");
+    throw new ContractValidationError("GCP KMS CryptoKeyVersion resource name is invalid.");
   }
   return match[1];
 }
@@ -2424,11 +2425,11 @@ function requireOpaqueCredential(value: string, label: string): string {
 
 function requireCompactJwt(value: unknown, label: string): string {
   if (typeof value !== "string") {
-    throw new TypeError(`${label} is invalid.`);
+    throw new ContractValidationError(`${label} is invalid.`);
   }
   const exact = requireOpaqueCredential(value, label);
   if (!COMPACT_JWT_PATTERN.test(exact)) {
-    throw new TypeError(`${label} must be a compact JWT.`);
+    throw new ContractValidationError(`${label} must be a compact JWT.`);
   }
   return exact;
 }
@@ -2468,20 +2469,20 @@ function requirePort(value: string, label: string): number {
 
 function encodeBoundedUtf8(value: unknown, maxBytes: number, label: string): OwnedBytes {
   if (typeof value !== "string") {
-    throw new TypeError(`${label} must be a string.`);
+    throw new ContractValidationError(`${label} must be a string.`);
   }
   if (Buffer.byteLength(value, "utf8") > maxBytes) {
-    throw new TypeError(`${label} exceeds ${maxBytes} bytes.`);
+    throw new ContractValidationError(`${label} exceeds ${maxBytes} bytes.`);
   }
   return new TextEncoder().encode(value);
 }
 
 function copyBoundedBytes(value: unknown, maxBytes: number, label: string): OwnedBytes {
   if (!(value instanceof Uint8Array)) {
-    throw new TypeError(`${label} must be bytes.`);
+    throw new ContractValidationError(`${label} must be bytes.`);
   }
   if (value.byteLength > maxBytes) {
-    throw new TypeError(`${label} exceeds ${maxBytes} bytes.`);
+    throw new ContractValidationError(`${label} exceeds ${maxBytes} bytes.`);
   }
   return new Uint8Array(value);
 }
@@ -2492,22 +2493,22 @@ function encodeBase64(value: Uint8Array): string {
 
 function decodeBoundedBase64(value: unknown, maxBytes: number, label: string): OwnedBytes {
   if (typeof value !== "string" || value.length === 0) {
-    throw new TypeError(`${label} must be canonical base64.`);
+    throw new ContractValidationError(`${label} must be canonical base64.`);
   }
   if (value.length > Math.ceil(maxBytes / 3) * 4) {
-    throw new TypeError(`${label} exceeds ${maxBytes} bytes.`);
+    throw new ContractValidationError(`${label} exceeds ${maxBytes} bytes.`);
   }
   if (!BASE64_PATTERN.test(value)) {
-    throw new TypeError(`${label} must be canonical base64.`);
+    throw new ContractValidationError(`${label} must be canonical base64.`);
   }
   const decoded = new Uint8Array(Buffer.from(value, "base64"));
   if (decoded.byteLength === 0 || decoded.byteLength > maxBytes) {
     decoded.fill(0);
-    throw new TypeError(`${label} exceeds ${maxBytes} bytes.`);
+    throw new ContractValidationError(`${label} exceeds ${maxBytes} bytes.`);
   }
   if (encodeBase64(decoded) !== value) {
     decoded.fill(0);
-    throw new TypeError(`${label} must be canonical base64.`);
+    throw new ContractValidationError(`${label} must be canonical base64.`);
   }
   return decoded;
 }

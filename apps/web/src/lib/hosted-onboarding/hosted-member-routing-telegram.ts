@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { Prisma } from "@prisma/client";
 import { parseTelegramThreadTarget } from "@murphai/messaging-ingress/telegram-webhook";
 
@@ -23,7 +24,7 @@ export async function upsertHostedMemberTelegramRoutingBindingTx(input: {
   const telegramUserLookupKey = createHostedTelegramUserLookupKey(input.telegramUserId);
 
   if (!telegramUserLookupKey) {
-    throw new TypeError("Hosted Telegram routing requires a non-empty Telegram user id.");
+    throw new ContractValidationError("Hosted Telegram routing requires a non-empty Telegram user id.");
   }
 
   await lockHostedMemberRow(input.prisma, input.memberId);
@@ -116,7 +117,7 @@ async function assertHostedMemberTelegramRoutingBindingAvailableTx(input: {
   );
 
   if (telegramUserLookupKeys.length === 0) {
-    throw new TypeError("Hosted Telegram routing requires a non-empty Telegram user id.");
+    throw new ContractValidationError("Hosted Telegram routing requires a non-empty Telegram user id.");
   }
 
   const existingBindings = await input.prisma.hostedMemberRouting.findMany({

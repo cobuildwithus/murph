@@ -111,7 +111,7 @@ describe("device-sync root route", () => {
   });
 
   it("does not advertise providers when authoritative provider config is invalid", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     vi.stubEnv("JUNCTION_RECONCILE_DAYS", "soon");
 
     try {
@@ -119,23 +119,23 @@ describe("device-sync root route", () => {
         new Request("https://join.example.test/api/device-sync"),
       );
 
-      expect(response.status).toBe(400);
+      expect(response.status).toBe(500);
       expect(response.headers.get("Cache-Control")).toBe("no-store");
       expect(mocks.createHostedDeviceSyncControlPlane).not.toHaveBeenCalled();
       expect(mocks.describeProviders).not.toHaveBeenCalled();
       await expect(response.json()).resolves.toEqual({
         error: {
-          code: "INVALID_REQUEST",
-          message: "Invalid request.",
+          code: "INTERNAL_ERROR",
+          message: "Internal error.",
         },
       });
     } finally {
-      warn.mockRestore();
+      error.mockRestore();
     }
   });
 
-  it("maps route wrapper request errors to a no-store JSON error", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  it("maps server configuration errors to a no-store JSON error", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     vi.stubEnv("JUNCTION_CLIENT_USER_ID_SECRET", "");
 
     try {
@@ -143,17 +143,17 @@ describe("device-sync root route", () => {
         new Request("https://join.example.test/api/device-sync"),
       );
 
-      expect(response.status).toBe(400);
+      expect(response.status).toBe(500);
       expect(response.headers.get("Cache-Control")).toBe("no-store");
       expect(mocks.createHostedDeviceSyncControlPlane).not.toHaveBeenCalled();
       await expect(response.json()).resolves.toEqual({
         error: {
-          code: "INVALID_REQUEST",
-          message: "Invalid request.",
+          code: "INTERNAL_ERROR",
+          message: "Internal error.",
         },
       });
     } finally {
-      warn.mockRestore();
+      error.mockRestore();
     }
   });
 });

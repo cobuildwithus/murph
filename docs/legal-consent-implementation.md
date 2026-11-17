@@ -1,6 +1,6 @@
 # Legal Consent Implementation
 
-Last verified: 2026-10-26
+Last verified: 2026-11-12
 
 ## Purpose
 
@@ -166,14 +166,18 @@ route stays mounted but the browser-vault provider exposes an empty context,
 starts no session request, and clears any decrypted warm snapshot that may have
 loaded before the server check. The layout places the current consent card in a
 non-dismissible modal over the inert dashboard, except on `/records/connect`
-and on `/settings` for an explicitly withdrawn member.
+and `/settings`, whatever the consent state. The app's Delete account URL,
+`/settings/data-privacy`, is a standalone page outside the dashboard layout,
+so the modal never covers it; it requires a session and does not redirect.
 
 A member with both historical launch grants and stale document versions sees
 update-specific copy; members with zero or partial launch consent see generic
 recovery copy. The reminder does not replace or block the device-connect page.
 Accepting the required launch scopes reloads that exact route and restores
-protected vault-backed features. Settings remains reachable so an explicitly
-withdrawn member can renew consent, export data, or delete the account. If the
+protected vault-backed features. Settings remains reachable with missing or
+revoked grants so a member can manage consent or delete the account. Each
+protected action retains its own consent check: a game-only member without a
+health grant cannot export a health vault. If the
 reminder status cannot be read, the layout omits
 the reminder and leaves the ordinary provider path enabled instead of taking
 device connection down. The public `/design` catalog injects an in-memory
@@ -211,6 +215,23 @@ Account export is the withdrawal exception described above. Strava remains
 disabled for new connections and reconnect offers as a separate provider
 product gate.
 
+A game-only member can play with `launch.legal` granted and no health grant,
+billing `not_started`, no starter usage grant, no personal runtime, and no
+welcome delivery. Game routes use the signed-in session, without companion
+admission. The shared game room has its own runtime and allowance; it grants
+neither player private assistant access. Companion admission still requires
+both launch grants and enrolls the member through the existing path.
+
+Only a `heart_rate` post or a `reps` post carrying `data.heartRate` needs
+`launch.health-data = granted`. The canonical game write path checks that
+state inside the mutation transaction, after locking the member row and before
+locking the game. This serializes with withdrawal; a revocation committed
+during payload preparation prevents both entry and history writes. Missing or
+revoked grants return non-retryable `403 HEALTH_DATA_REQUIRED` with
+`Allow health data to post a heart rate.` Photos, words, routes and plain rep
+counts remain available without that grant. Existing game chat and recap
+restrictions on explicit withdrawal remain unchanged.
+
 The weekly game's app routes can require the published Terms. With
 `MURPH_GAME_REQUIRE_CURRENT_TERMS=true`, creating, accepting, negotiating,
 posting, proposing a change and marking a prize done return `403
@@ -218,7 +239,7 @@ TERMS_REQUIRED` until `launch.legal` recorded the published versions, not just
 the minimum, naming the scope's documents and versions; reads, reports, blocks, the profile, and withdrawing a member's own
 post, invite or change stay available. The app answers with the Terms step
 alone, records `launch.legal` through the companion consent route, and retries.
-Health-data consent and the historical boundaries above are unchanged.
+The historical assistant and health-processing boundaries above are unchanged.
 
 If a companion health-data action encounters zero or partial historical launch
 consent, the native app keeps the Privy member session, closes Junction and

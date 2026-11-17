@@ -1,3 +1,4 @@
+import { createHostedWebCustomConnectionsPort } from "./custom-connections-port.ts";
 import { createHostedRuntimePollToolPort } from "./poll-tool-port.ts";
 import {
   readHostedRunnerCommitTimeoutMs,
@@ -172,6 +173,9 @@ export function buildHostedExecutionRuntimePlatform(input: {
               timeoutMs,
               transport,
             }),
+          customConnections: createHostedWebCustomConnectionsPort({
+            boundUserId: input.boundUserId, fetchImpl, timeoutMs, transport,
+          }),
           connectedApps: createHostedWebConnectedAppsPort({
             boundUserId: input.boundUserId,
             fetchImpl,

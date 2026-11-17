@@ -499,6 +499,7 @@ function parseHostedRuntimeLinqRecentInboundEngagementResult(
     ackReaction?: unknown;
     ackCovered?: unknown;
     providerDispatchClaimed?: unknown;
+    recapVideoCurrent?: unknown;
     resolvedRoute?: unknown;
   };
   if (response.gameRematchAuthorityChecked === true) result.gameRematchAuthorityChecked = true;
@@ -528,6 +529,7 @@ function parseHostedRuntimeLinqRecentInboundEngagementResult(
     result.progressUpdateSuppressed = true;
   }
   if (typeof response.ackCovered === "boolean") result.ackCovered = response.ackCovered;
+  if (response.recapVideoCurrent === true) result.recapVideoCurrent = true;
   const ackReaction = typeof response.ackReaction === "string" ? response.ackReaction.trim() : "";
   if (ackReaction && ackReaction.length <= 16) {
     result.ackReaction = ackReaction;

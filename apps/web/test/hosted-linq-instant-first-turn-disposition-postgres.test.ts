@@ -90,7 +90,7 @@ async function seed() {
   const reply = (attemptedAt: Date): HostedLinqInstantFirstTurnGeneration => ({
     kind: "reply", attemptedAt, message, usage: { requestedModel: "synthetic-model", response: {
       id: `synthetic-response-${nonce}`, model: "synthetic-model", object: "response",
-      created_at: 0, output_text: message, output: [], error: null,
+      access_programs: null, created_at: 0, output_text: message, output: [], error: null,
       incomplete_details: null, instructions: null, metadata: null,
       parallel_tool_calls: false, temperature: null, tool_choice: "none", tools: [], top_p: null,
     } satisfies OpenAiResponse },

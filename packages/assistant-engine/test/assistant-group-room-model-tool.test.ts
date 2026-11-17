@@ -23,6 +23,7 @@ import {
   ASSISTANT_GROUP_ROOM_MODEL_SLUG,
   assistantRouteSupportsGroupRoomModel,
   readAssistantGroupRoomModelBody,
+  readAssistantGroupRoomModelPrompt,
 } from '../src/assistant/group-room-model.js'
 import {
   buildKnowledgeMarkdown,
@@ -334,6 +335,82 @@ describe('authenticated group room-model tool', () => {
     }
   })
 
+  it('omits a body the turn already carries and returns it once it changes', async () => {
+    const { parentRoot, vaultRoot } = await createTempVaultContext(
+      'murph-group-room-model-tool-in-context-',
+    )
+    cleanupPaths.push(parentRoot)
+    await initializeVault({ vaultRoot })
+    const firstBody = '## People\n- Casey likes dry rulings.'
+    const missing = await executeRequest({
+      args: { action: 'show' },
+      scope: createUserActionScope('group'),
+      vaultRoot,
+    })
+    await executeRequest({
+      args: {
+        action: 'upsert',
+        body: firstBody,
+        expectedDigest: readShowResult(missing).digest,
+      },
+      scope: createUserActionScope('group'),
+      vaultRoot,
+    })
+    // What planning injects into an ordinary group turn.
+    const { bodyDigest: injectedDigest } =
+      await readAssistantGroupRoomModelPrompt({ vaultRoot })
+    expect(injectedDigest).toMatch(/^[a-f0-9]{64}$/u)
+
+    const inContext = await executeRequest({
+      args: { action: 'show' },
+      injectedDigest,
+      scope: createUserActionScope('group'),
+      vaultRoot,
+    })
+    expect(readShowResult(inContext)).toEqual({
+      bodyInContext: true,
+      bodyUtf8Bytes: Buffer.byteLength(firstBody),
+      digest: injectedDigest,
+      status: 'active',
+    })
+
+    // The digest from that show still authorizes the write.
+    const updatedBody = '## What to avoid\n- Retire the combine nickname.'
+    const write = await executeRequest({
+      args: {
+        action: 'upsert',
+        body: updatedBody,
+        expectedDigest: readShowResult(inContext).digest,
+      },
+      injectedDigest,
+      scope: createUserActionScope('group'),
+      vaultRoot,
+    })
+    expect(write.rpcResult.success).toBe(true)
+
+    // The injected copy is now stale, so show sends the current body.
+    const changed = await executeRequest({
+      args: { action: 'show' },
+      injectedDigest,
+      scope: createUserActionScope('group'),
+      vaultRoot,
+    })
+    expect(readShowResult(changed)).toMatchObject({
+      body: updatedBody,
+      status: 'active',
+    })
+    expect(readShowResult(changed)).not.toHaveProperty('bodyInContext')
+
+    // A maintenance turn has no injected page and always gets the body.
+    const maintenance = await executeGroupRoomModelDynamicTool({
+      managedMaintenanceAuthorized: true,
+      request: requireGroupRoomModelRequest({ action: 'show' }),
+      userActionScope: null,
+      vaultRoot,
+    })
+    expect(readShowResult(maintenance)).toMatchObject({ body: updatedBody })
+  })
+
   it('accepts large bodies and rejects selector-bearing arguments', () => {
     expect(readRequest({
       action: 'upsert',
@@ -526,8 +603,19 @@ function readRequest(args: unknown) {
   })
 }
 
+function readShowResult(
+  result: Awaited<ReturnType<typeof executeMurphDynamicToolRequest>>,
+): Record<string, unknown> & { digest: string } {
+  const item = result.rpcResult.contentItems[0]
+  if (!item || item.type !== 'inputText') {
+    throw new Error('Expected a text show result.')
+  }
+  return JSON.parse(item.text) as Record<string, unknown> & { digest: string }
+}
+
 async function executeRequest(input: {
   args: unknown
+  injectedDigest?: string | null
   scope: AssistantHostedUserActionScope | null
   vaultRoot: string
 }) {
@@ -538,6 +626,7 @@ async function executeRequest(input: {
   return await executeMurphDynamicToolRequest({
     env: {},
     fetchImpl: fetch,
+    groupRoomModelInjectedDigest: input.injectedDigest ?? null,
     hostedToolContext: createHostedToolContext(input.scope),
     nextUsageOrdinal: () => 0,
     progressDelivery: null,

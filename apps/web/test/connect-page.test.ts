@@ -11,12 +11,13 @@ import { JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG } from "@murphai/device-syncd/fitb
 
 import { renderClientComponent } from "./render-client-component";
 
-import ConnectPage, {
+import ConnectPage from "../app/(dashboard)/connect/connect-page-content";
+import {
   resolveConfiguredConnectSources,
   resolveConnectSourceConnectionStates,
   resolveConnectedConnectSourceConnections,
   resolveHistoricalResetIncompleteConnectSourceIds,
-} from "../app/(dashboard)/connect/connect-page-content";
+} from "../src/lib/device-sync/connect-sources";
 import {
   filterConnectSourcesForSearch,
   ConnectSourcesGrid,
@@ -793,7 +794,7 @@ test("connect source card screenshot study makes its focused dialog inert", asyn
 
 test("sortConnectSourcesByConnectionState keeps connected sources first, then popularity order", async () => {
   const { sortConnectSourcesByConnectionState } = await import(
-    "../app/(dashboard)/connect/connect-source-order"
+    "../src/lib/device-sync/connect-source-order"
   );
   const logo = {
     className: "size-11 object-contain",
@@ -917,6 +918,7 @@ test("sortConnectSourcesByConnectionState keeps connected sources first, then po
     sortConnectSourcesByConnectionState(sources).map((source) => source.id),
     [
       "oura",
+      "whoop",
       "garmin",
       "fitbit",
       "google-fit",
@@ -925,7 +927,6 @@ test("sortConnectSourcesByConnectionState keeps connected sources first, then po
       "xiaomi-mi-fitness",
       "zepp",
       "withings",
-      "whoop",
       "coros",
       "suunto",
       "ringconn",
@@ -5069,15 +5070,14 @@ test("Vital disclosure follows reconnect and fresh providers across local discon
       { id: "whoop", name: "Whoop", description: "Recovery.", logo },
     ],
     {
-      reconnectProviderBySourceId: new Map([
-        ["oura", "junction"],
-        ["whoop", "junction"],
-      ]),
-      reconnectSourceIds: new Set(["oura", "whoop"]),
-      reconnectTargetBySourceId: new Map([
-        ["oura", "oura"],
-        ["whoop", "whoop"],
-      ]),
+      connectionStates: ["oura", "whoop"].map((sourceId) => ({
+        connectionId: null,
+        connectProvider: "junction",
+        connectTarget: sourceId,
+        requiresReconnect: true,
+        sourceId,
+        state: "reauthorization_required",
+      })),
     },
   );
   const oura = resolved.find((source) => source.id === "oura");
@@ -5314,9 +5314,7 @@ test("ConnectPage projects one truthful Fitbit and Pixel Watch migration card", 
     status: "connected" as const,
   };
   const successor = {
-    fitbitMigrationCoverageReady: true as const,
     firstSeenAt: "2026-08-11T10:00:00.000Z",
-    historicalBackfillComplete: true as const,
     lastDataAt: "2026-08-11T10:05:00.000Z",
     lastSeenAt: "2026-08-11T10:06:00.000Z",
     providerLabel: "Google Health",
@@ -5338,12 +5336,13 @@ test("ConnectPage projects one truthful Fitbit and Pixel Watch migration card", 
       expected: {
         connectProvider: null,
         connectTarget: null,
-        migrationState: "verifying_successor",
+        disconnectSourceProviderSlug: JUNCTION_FITBIT_LEGACY_PROVIDER_SLUG,
+        migrationState: "cutover_ready",
       },
-      name: "legacy stays active while successor proof is incomplete",
+      name: "connected successor needs no fresh data or coverage marker",
       upstreamSources: [
         legacy,
-        { ...successor, fitbitMigrationCoverageReady: undefined },
+        { ...successor, lastDataAt: null },
       ],
     },
     {
@@ -5383,7 +5382,8 @@ test("ConnectPage projects one truthful Fitbit and Pixel Watch migration card", 
       }],
     );
     assert.equal(states.length, 1, value.name);
-    assert.deepEqual(states[0], {
+    // Settings may also carry unrelated source metadata such as lastDataAt.
+    assert.partialDeepStrictEqual(states[0], {
       connectionId: "dsc_junction_fitbit",
       requiresReconnect: false,
       sourceId: "fitbit",

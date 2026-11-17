@@ -105,6 +105,17 @@ can take it back with
 no new view field. An open day, a day off and a photo or heart-rate game are
 refused, and nobody can count a day for someone else.
 
+A two-player game keeps taking both corrections for 7 days after it ends, in
+the same chat and under the same rules. The result, the won/lost/tied record
+and the prize follow the corrected days: a prize that is no longer owed leaves
+the Prizes wallet, a newly owed one appears, and a prize already marked done
+stays as it was. The app needs no change, because Home, past games, records
+and the wallet already show the server's result and tickets, and the day rows
+change with them. The recap is left as made: its score and prize pages follow
+the new result, while Murph's written pages and song may still name the old
+winner. Murph says so in the one chat line that reports a changed result. After
+7 days the result is final. Group games do not have this window.
+
 Authenticated group invite previews include optional `canTalk`; absence means
 unavailable. Submit the existing `/invites/:token/negotiate` request with
 `{proposalId, termsVersion, timeZone, note}` and reuse its ID on retry. Success
@@ -220,7 +231,7 @@ and four `numbers`, always in this order:
 | `steps` | `steps-days.v0` | steps | increase |
 | `vo2Max` | `vo2-max-days.v0` | ml/kg/min | increase |
 
-A number is `{ state: "not_shared" | "hidden" }`,
+A number is `{ state: "not_shared" }`,
 `{ state: "pending", reason?: "no_readings" }`, or
 `{ state: "available", unit, source?, latest: { date, value }, stale, daily, comparison }`.
 `source` is the selected series' public key and is omitted for an empty key.
@@ -232,10 +243,12 @@ to integers except VO2 (one decimal); window means retain their precision.
 `stale` means the latest date precedes `window.through` by more than seven days,
 except VO2 uses its catalog freshness limit (45 days). A readable grant with
 zero usable readings returns pending with `reason: "no_readings"`; unreadable
-or legacy publications remain plain pending. The state vocabulary stays fixed
-for shipped clients, which ignore the additive reason key. A viewer outside the sharing
-group sees the other person's numbers as hidden and may intentionally enroll.
-Both people's numbers come only from the same authorized shared snapshots.
+or legacy publications remain plain pending. Shipped clients accept these states
+and ignore the additive reason key. The pair seat authorizes reading the other
+person's granted numbers even before the viewer joins the sharing group or
+shares anything. Unshared numbers remain `not_shared`. Both people's numbers
+come only from the same authorized shared snapshots. If the viewer's membership
+changes during the read, the board returns null for that read.
 
 Each metric selects one public source for both windows, preferring sufficient
 coverage, then more distinct dates across the windows, later latest date, and
@@ -269,8 +282,9 @@ window. `comparison` contains `baseline` and `current`, each
 or one starting on `firstGameOn`, and false otherwise, when the app names
 `baseline.from` instead. `firstGameOn` itself is never clipped or inferred from
 capped history. Crowns name the unique largest positive improvement (or positive
-streak); ties and all-nonpositive values give null. They are recomputed, not
-stored holders.
+streak); ties and all-nonpositive values give null. A metric improvement that
+rounds to zero at the metric's shown precision earns no crown, because the app
+hides that change. They are recomputed, not stored holders.
 
 Steps alone use the last settled day (the viewer-local date eight hours ago,
 minus one day) as their cutoff and stale reference, so daily values, latest,
@@ -306,3 +320,11 @@ keeps capability only for the same complete address. A reminder carries
 `{gameId, notification:"game_reminder"}`, default sound, and the member's own
 tasks as its title (at most 120 characters). Request sound permission alongside
 alerts and open the selected game through the existing authenticated refresh.
+
+Alongside `game_post`, `game_reply` and `game_reminder`, pair invite acceptance
+sends `{gameId, notification:"game_accepted"}` once to the other player, with
+"Sam shook on it." / "Your game starts today." (or tomorrow, weekday, short date).
+It uses the recipient's written Day 1 and frozen-zone real calendar date, requires
+alerts but no reminders capability, and expires at the following date's 3am.
+Shipped builds show its system alert when closed and ignore the unknown kind in
+the foreground; no existing navigation kind is reused.

@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
 import { createHmac, timingSafeEqual } from "node:crypto";
@@ -335,7 +336,7 @@ export async function readHostedRuntimeRecoveryFacts(input: {
   userIds: readonly string[];
 }): Promise<HostedRuntimeRecoveryFactRow[]> {
   if (input.userIds.length === 0 || input.userIds.length > HOSTED_RUNTIME_RECOVERY_MAX_BATCH) {
-    throw new TypeError("Runtime recovery fact reads require one to three member ids.");
+    throw new ContractValidationError("Runtime recovery fact reads require one to three member ids.");
   }
   const prisma: HostedRuntimeRecoveryFactReadClient =
     input.prisma ?? getPrisma();

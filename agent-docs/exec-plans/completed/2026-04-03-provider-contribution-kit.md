@@ -58,7 +58,7 @@
 - `docs/templates/README.md`
 - `docs/templates/device-sync-provider.template.md`
 - `docs/templates/device-provider-adapter.template.md`
-- `/Users/willhay/Downloads/murph-provider-contribution-kit.patch`
+- `~/Downloads/murph-provider-contribution-kit.patch`
 - `pnpm typecheck`
 - `pnpm test`
 Status: completed

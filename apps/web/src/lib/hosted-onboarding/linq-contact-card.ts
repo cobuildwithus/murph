@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
 import type { Prisma, PrismaClient } from "@prisma/client";
@@ -410,7 +411,7 @@ function requireHostedLinqContactCard(
 function requireNonEmptyText(value: unknown, label: string): string {
   const normalized = normalizeNullableString(value);
   if (!normalized) {
-    throw new TypeError(`Linq ${label} must be a non-empty string.`);
+    throw new ContractValidationError(`Linq ${label} must be a non-empty string.`);
   }
 
   return normalized;
@@ -467,7 +468,7 @@ export function buildMurphHostedLinqContactCardVcf(input: {
 }): string {
   const phoneNumber = normalizePhoneNumber(input.phoneNumber);
   if (!phoneNumber) {
-    throw new TypeError("Murph contact-card vCard requires a line phone number.");
+    throw new ContractValidationError("Murph contact-card vCard requires a line phone number.");
   }
   const backupPhoneNumber = normalizePhoneNumber(input.backupPhoneNumber ?? null);
 

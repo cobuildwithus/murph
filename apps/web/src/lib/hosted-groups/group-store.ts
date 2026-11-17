@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 import { createHash } from "node:crypto";
 import { HOSTED_GROUP_BOARD_SCOPES } from "./board-scopes";
@@ -1141,7 +1142,7 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: HostedGr
 }
 
 export interface HostedGroupBoardProjection {
-  state: "hidden" | "not_granted" | "pending" | "missing" | "available";
+  state: "not_granted" | "pending" | "missing" | "available";
   records: HostedRuntimeGroupSharedRecord[];
 }
 
@@ -1191,17 +1192,19 @@ export async function readHostedGroupBoardData(input: {
   const capture: Extract<HostedGroupSharedReadCapture, { status: "ok" }> = {
     status: "ok", connections: [], grants,
     members: captured.members.map(member => ({ memberId: member.memberId, participantId: member.id, currentTurnHandles: [] })),
-    shares: grants.filter(grant => captured.readableIds.has(grant.id)
-      && (viewerMembership !== null || grant.grantorMemberId === input.viewerId))
+    shares: grants.filter(grant => captured.readableIds.has(grant.id))
       .map(grant => ({ ...grant, ciphertext: undefined })),
   };
   // Key access and decryption stay outside both authority transactions.
   const snapshots = await readHostedGroupSharedSnapshots({ capture, prisma, now: input.now,
-    options: {}, retainedHistory: true, boardAgeGroups: true, runtimeMemberId: input.runtimeMemberId }).catch(() => null);
+    options: {}, retainedHistory: true, boardAgeGroups: true, runtimeMemberId: input.runtimeMemberId }).catch(() => {
+    throw hostedOnboardingError({ code: "BOARD_PROJECTION_UNAVAILABLE", httpStatus: 503, retryable: true,
+      message: "Shared numbers are temporarily unavailable." });
+  });
   const current = await captureAuthority();
   if (!current) return null;
   const membershipId = current.members.find(member => member.memberId === input.viewerId)?.id ?? null;
-  const viewerCurrent = viewerMembership !== null && viewerMembership === membershipId;
+  if (viewerMembership !== membershipId) return null;
   return {
     membershipId,
     myScopes: current.grants.filter(grant => grant.grantorMemberId === input.viewerId).map(grant => grant.projectionScopeKey),
@@ -1212,8 +1215,7 @@ export async function readHostedGroupBoardData(input: {
       const projections = scopeKeys.map(projectionScopeKey => {
         let projection: HostedGroupBoardProjection;
         const grant = current.grants.find(grant => grant.grantorMemberId === memberId && grant.projectionScopeKey === projectionScopeKey);
-        if (memberId !== input.viewerId && !viewerCurrent) projection = { state: "hidden", records: [] };
-        else if (!grant) projection = { state: "not_granted", records: [] };
+        if (!grant) projection = { state: "not_granted", records: [] };
         else {
           const exact = grants.some(previous => previous.id === grant.id && previous.grantedAt.getTime() === grant.grantedAt.getTime());
           const records = exact && sameMembership && current.readableIds.has(grant.id)
@@ -1379,7 +1381,7 @@ function parseHostedGroupSharedReadProjectionScopes(
   projectionScopes: readonly HostedVaultShareSelectableProjectionScope[],
 ): HostedVaultShareSelectableProjectionScope[] {
   if (projectionScopes.length > 3) {
-    throw new TypeError("Hosted group shared read projection scope count is invalid.");
+    throw new ContractValidationError("Hosted group shared read projection scope count is invalid.");
   }
   const seen = new Set<string>();
   return projectionScopes.map((value) => {
@@ -1389,7 +1391,7 @@ function parseHostedGroupSharedReadProjectionScopes(
     );
     const key = buildHostedVaultShareProjectionScopeKey(scope);
     if (!HOSTED_GROUP_SHARED_READ_SELECTABLE_SCOPE_KEYS.has(key) || seen.has(key)) {
-      throw new TypeError("Hosted group shared read projection scope is invalid.");
+      throw new ContractValidationError("Hosted group shared read projection scope is invalid.");
     }
     seen.add(key);
     return scope;
@@ -1409,7 +1411,7 @@ function projectHostedGroupSourceAwareSleepRecordsToLegacy(
       || !("unit" in record.data)
       || !("value" in record.data)
     ) {
-      throw new TypeError("Source-aware sleep fallback record is invalid.");
+      throw new ContractValidationError("Source-aware sleep fallback record is invalid.");
     }
     const parsed = parseHostedVaultShareDeliveryRecord({
       data: {
@@ -1500,7 +1502,7 @@ function buildHostedGroupSharedDeviceSyncSources(
     for (const source of sourceRows) {
       const label = source.label.trim();
       if (!label || label.toLocaleLowerCase("en-US") === "junction") {
-        throw new TypeError("Hosted group shared device source label is invalid.");
+        throw new ContractValidationError("Hosted group shared device source label is invalid.");
       }
       const key = label.toLocaleLowerCase("en-US");
       const candidate: HostedVaultShareDeviceSyncSource = {
@@ -1524,7 +1526,7 @@ function buildHostedGroupSharedDeviceSyncSources(
     left.label.localeCompare(right.label, "en-US")
   );
   if (sources.length > HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_MAX_SOURCES) {
-    throw new TypeError("Hosted group shared device source count exceeds the limit.");
+    throw new ContractValidationError("Hosted group shared device source count exceeds the limit.");
   }
   return sources;
 }
@@ -2476,6 +2478,39 @@ export async function saveHostedGroupBoardSharingTx(input: {
   return acceptHostedGroupJoinTx({
     ...input, additiveOnly: false, confirmationPublicBaseUrl: null,
     joinOrigin: "web", policyProjectionScopes: HOSTED_GROUP_BOARD_SCOPES,
+  });
+}
+
+/** Add only the Progress metrics after the caller proves the current provider audience. */
+export async function addHostedGroupPairBoardSharingTx(input: {
+  groupId: string;
+  runtimeMemberId: string;
+  memberId: string;
+  otherMemberId: string;
+  expectedMembershipId: string | null;
+  metrics: readonly ("steps" | "sleep")[];
+  now: Date;
+  tx: Prisma.TransactionClient;
+}): Promise<HostedGroupJoinAcceptanceTxResult> {
+  await lockHostedGroupRow(input.tx, input.groupId);
+  await input.tx.$queryRaw`SELECT member_id FROM hosted_thread_container
+    WHERE member_id = ${input.runtimeMemberId} FOR UPDATE`;
+  const group = await input.tx.hostedGroup.findUnique({ where: { id: input.groupId },
+    select: { runtimeMemberId: true, members: { take: 3, select: { memberId: true } } } });
+  const container = await input.tx.hostedThreadContainer.findUnique({ where: { memberId: input.runtimeMemberId },
+    select: { participants: { where: { removedAt: null }, take: 3, select: { participantMemberId: true } } } });
+  const pair = [input.memberId, input.otherMemberId];
+  const participants = container?.participants.map(person => person.participantMemberId) ?? [];
+  if (group?.runtimeMemberId !== input.runtimeMemberId || participants.length !== 2
+    || !pair.every(id => participants.includes(id)) || group.members.some(person => !pair.includes(person.memberId))) {
+    throw hostedOnboardingError({ code: "PROGRESS_SHARING_AUDIENCE_CHANGED", httpStatus: 409,
+      message: "The people in this room changed. Reload before sharing." });
+  }
+  return acceptHostedGroupJoinTx({
+    ...input, additiveOnly: true, confirmationPublicBaseUrl: null, joinOrigin: "web",
+    policyProjectionScopes: HOSTED_GROUP_BOARD_SCOPES,
+    selectedVaultShareProjectionScopes: HOSTED_GROUP_BOARD_SCOPES.filter((_, index) =>
+      index === 1 && input.metrics.includes("sleep") || index === 2 && input.metrics.includes("steps")),
   });
 }
 

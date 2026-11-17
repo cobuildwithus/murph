@@ -9,6 +9,7 @@ import {
   ASSISTANT_TURN_PROFILE_MAX_TOOLS,
   ASSISTANT_USAGE_SCHEMA,
   buildAssistantMaintenanceUsageRecord,
+  buildAssistantTurnProfileToolIdentityLabel,
   buildHostedElevenLabsMusicUsageRecord,
   buildHostedElevenLabsTtsUsageRecord,
   buildHostedGeminiVideoAnalysisUsageRecord,
@@ -420,17 +421,19 @@ test("hosted ElevenLabs TTS usage records carry character cost basis and dedupe 
   );
 });
 
-test("hosted ElevenLabs music usage retains the provider request start", () => {
+test.each(["music_v2", "music_v2_5"] as const)("hosted ElevenLabs %s usage retains the provider request start and model", (model) => {
   const record = buildHostedElevenLabsMusicUsageRecord({
     durationMs: 45_000,
     memberId: "member_123",
-    model: "music_v2",
+    model,
     occurredAt: PROVIDER_REQUEST_STARTED_AT,
     providerRequestId: "music_request_123",
   });
 
   assert.equal(record.occurredAt, PROVIDER_REQUEST_STARTED_AT);
   assert.equal(record.providerRequestId, "music_request_123");
+  assert.equal(record.requestedModel, model);
+  assert.deepEqual(parseAssistantUsageRecord({ ...record }), record);
   assert.deepEqual(record.rawUsageJson, { durationMs: 45_000 });
 });
 
@@ -1370,4 +1373,11 @@ test("optional finite CLI failures survive both profile versions and malformed d
     }
     assert.deepEqual(parseAssistantUsageRecord(baseline), baseline);
   }
+});
+
+test("remote MCP names always use a constant usage label while dynamic labels remain intact", () => {
+  for (const tool of [null, "read_notes", "remote_chosen_identity", "private.value", "x".repeat(500)]) {
+    assert.equal(buildAssistantTurnProfileToolIdentityLabel({ kind: "mcp_tool", tool }), "mcp_tool");
+  }
+  assert.equal(buildAssistantTurnProfileToolIdentityLabel({ kind: "dynamic_tool", tool: "read_notes" }), "t_read_notes");
 });

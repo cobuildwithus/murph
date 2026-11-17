@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createHash } from "node:crypto";
 
 import {
@@ -44,14 +45,14 @@ type ClinicalDocumentIntegrity = z.infer<typeof documentIntegritySchema>;
 
 /** A dependency URL cannot confer arbitrary provider or network authority. */
 export function resolveClinicalDocumentUrl(value: string, fhirBaseUrl: string, sourceKind: "binary" | "media" = "binary"): URL {
-  if (value !== value.trim() || /[\\%\u0000-\u0020]/u.test(value)) throw new TypeError("Invalid document URL.");
+  if (value !== value.trim() || /[\\%\u0000-\u0020]/u.test(value)) throw new ContractValidationError("Invalid document URL.");
   const base = new URL(fhirBaseUrl);
   const url = new URL(value, `${base.href.replace(/\/+$/u, "")}/`);
   const prefix = `${base.pathname.replace(/\/+$/u, "")}/${sourceKind === "media" ? "Media" : "Binary"}/`;
   if (url.protocol !== "https:" || url.origin !== base.origin || url.username || url.password
     || url.search || url.hash || !url.pathname.startsWith(prefix)
     || !/^[A-Za-z0-9.-]{1,512}(?:\/_history\/[A-Za-z0-9.-]{1,64})?$/u.test(url.pathname.slice(prefix.length))) {
-    throw new TypeError("Document URL escaped the configured FHIR document endpoint.");
+    throw new ContractValidationError("Document URL escaped the configured FHIR document endpoint.");
   }
   return url;
 }
@@ -167,11 +168,11 @@ async function issueClinicalDocumentTicket(input: {
 export function decodeClinicalDocumentBase64(value: string): Buffer {
   const canonical = value.replace(/\s+/gu, "");
   if (!isCanonicalClinicalBase64(canonical)) {
-    throw new TypeError("Invalid document base64.");
+    throw new ContractValidationError("Invalid document base64.");
   }
   const bytes = Buffer.from(canonical, "base64");
   if (bytes.length === 0 || bytes.length > HOSTED_CLINICAL_RECORDS_MAX_DOCUMENT_BYTES || bytes.toString("base64") !== canonical) {
-    throw new TypeError("Invalid document bytes.");
+    throw new ContractValidationError("Invalid document bytes.");
   }
   return bytes;
 }
@@ -205,7 +206,7 @@ export async function readClinicalDocumentResponse(input: {
   const decoded = isBinaryJson ? decodeDocumentBody(received, input.url, input.ticket.mediaType ?? input.attachmentIntegrity?.mediaType) : { bytes: Buffer.from(received), mediaType };
   const bytes = decoded.bytes;
   mediaType = decoded.mediaType;
-  if (bytes.length === 0 || bytes.length > HOSTED_CLINICAL_RECORDS_MAX_DOCUMENT_BYTES) throw new TypeError("Invalid document size.");
+  if (bytes.length === 0 || bytes.length > HOSTED_CLINICAL_RECORDS_MAX_DOCUMENT_BYTES) throw new ContractValidationError("Invalid document size.");
   for (const integrity of [input.ticket, input.attachmentIntegrity]) {
     if (!integrity) continue;
     if (integrity.mediaType && normalizeMediaType(integrity.mediaType) !== normalizeMediaType(mediaType)) throw new TypeError("Document media type changed.");
@@ -222,14 +223,14 @@ function decodeDocumentBody(received: Uint8Array, url: URL, declaredMediaType: s
   if (isObject(binary) && binary.resourceType === "Binary") {
     const expectedId = url.pathname.split("/Binary/")[1]?.split("/")[0];
     if (binary.id !== expectedId || typeof binary.data !== "string" || typeof binary.contentType !== "string") {
-      throw new TypeError("Invalid FHIR Binary response.");
+      throw new ContractValidationError("Invalid FHIR Binary response.");
     }
     return { bytes: decodeClinicalDocumentBase64(binary.data), mediaType: boundedMediaType(binary.contentType) };
   }
   if (declaredMediaType && normalizeMediaType(declaredMediaType) === "application/json") {
     return { bytes: Buffer.from(received), mediaType: declaredMediaType };
   }
-  throw new TypeError("Invalid FHIR Binary response.");
+  throw new ContractValidationError("Invalid FHIR Binary response.");
 }
 
 /** Media is only an attested bridge from a patient-bound DiagnosticReport to Binary. */
@@ -242,7 +243,7 @@ export async function readClinicalMediaResponse(input: {
 }): Promise<{ binaryUrl: URL; attachmentIntegrity: ClinicalDocumentIntegrity; receivedBytes: number }> {
   const contentType = normalizeMediaType((input.response.headers.get("content-type") ?? "application/fhir+json").split(";", 1)[0] ?? "");
   if (contentType !== "application/fhir+json" && contentType !== "application/json") {
-    throw new TypeError("Invalid FHIR Media response content type.");
+    throw new ContractValidationError("Invalid FHIR Media response content type.");
   }
   let received: Uint8Array;
   try {
@@ -255,17 +256,17 @@ export async function readClinicalMediaResponse(input: {
   const value = JSON.parse(decodeClinicalResponseUtf8(received));
   if (!isObject(value) || value.resourceType !== "Media" || value.id !== input.mediaUrl.pathname.split("/Media/")[1]?.split("/")[0]
     || !isObject(value.content) || typeof value.content.url !== "string") {
-    throw new TypeError("Invalid FHIR Media response.");
+    throw new ContractValidationError("Invalid FHIR Media response.");
   }
   validateClinicalMediaPatient({ subject: value.subject, fhirBaseUrl: input.fhirBaseUrl, patientIdHash: input.patientIdHash });
   const parsedIntegrity = documentIntegritySchema.safeParse({
     mediaType: value.content.contentType, size: value.content.size, hash: value.content.hash,
   });
-  if (!parsedIntegrity.success) throw new TypeError("Invalid FHIR Media attachment integrity.");
+  if (!parsedIntegrity.success) throw new ContractValidationError("Invalid FHIR Media attachment integrity.");
   const attachmentIntegrity = parsedIntegrity.data;
   if (attachmentIntegrity.mediaType !== undefined) boundedMediaType(attachmentIntegrity.mediaType);
   if (attachmentIntegrity.size !== undefined && attachmentIntegrity.size > HOSTED_CLINICAL_RECORDS_MAX_DOCUMENT_BYTES) {
-    throw new TypeError("Invalid document size.");
+    throw new ContractValidationError("Invalid document size.");
   }
   return {
     binaryUrl: resolveClinicalDocumentUrl(value.content.url, input.fhirBaseUrl, "binary"),
@@ -286,14 +287,14 @@ function validateClinicalMediaPatient(input: { subject: unknown; fhirBaseUrl: st
 }
 
 function boundedMediaType(value: string): string {
-  if (!value || value.length > 255 || /[\r\n\u0000]/u.test(value)) throw new TypeError("Invalid document media type.");
+  if (!value || value.length > 255 || /[\r\n\u0000]/u.test(value)) throw new ContractValidationError("Invalid document media type.");
   normalizeMediaType(value);
   return value.trim();
 }
 
 function normalizeMediaType(value: string): string {
   const mediaType = value.split(";", 1)[0]?.trim().toLowerCase() ?? "";
-  if (mediaType.length > 255 || !/^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/u.test(mediaType)) throw new TypeError("Invalid document media type.");
+  if (mediaType.length > 255 || !/^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/u.test(mediaType)) throw new ContractValidationError("Invalid document media type.");
   return mediaType;
 }
 

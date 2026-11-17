@@ -4,7 +4,7 @@ import {
 import { deviceSyncError } from "@murphai/device-syncd/errors";
 import { createHostedDeviceSyncPublicIngressService } from "@/src/lib/device-sync/public-ingress-service";
 import { jsonOk, withJsonError } from "@/src/lib/device-sync/settings-http";
-import { readJsonObject } from "@/src/lib/http";
+import { InvalidJsonBodyError, readJsonObject } from "@/src/lib/http";
 import { requireActiveHostedMemberAuthFromBearerToken } from "@/src/lib/hosted-onboarding/request-auth";
 import { assertHostedHistoricalLaunchConsentGranted } from "@/src/lib/legal/consent";
 import { getPrisma } from "@/src/lib/prisma";
@@ -47,7 +47,7 @@ async function readCompanionHrvRmssdBody(request: Request): Promise<Record<strin
       limitBytes: COMPANION_HRV_REQUEST_BODY_LIMIT_BYTES,
     });
   } catch (error) {
-    if (error instanceof SyntaxError) {
+    if (error instanceof InvalidJsonBodyError) {
       throw deviceSyncError({
         code: "COMPANION_REQUEST_INVALID",
         httpStatus: 400,

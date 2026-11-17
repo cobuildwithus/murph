@@ -1,0 +1,20 @@
+{
+  "publishedOn": "2026-11-12",
+  "order": 100,
+  "item": {
+    "id": "quiet-group-departure",
+    "kind": "feature",
+    "priority": 3,
+    "title": "Ask Murph to leave a group",
+    "summary": "Ask Murph to leave a group chat and it stops replying there, with no goodbye and no private message.",
+    "details": "Murph also leaves on its own when a group is clearly bots talking to each other or spam. It won't leave a group that has had a game. Asking Murph to be quiet is not the same as asking it to leave. Murph may still show in the group's member list after it leaves.",
+    "relevanceTags": [
+      "groups",
+      "messaging"
+    ],
+    "sourcePullRequests": [
+      4890,
+      4891
+    ]
+  }
+}

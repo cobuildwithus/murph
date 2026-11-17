@@ -158,6 +158,11 @@
       "types": "./dist/generated-audio.d.ts",
       "import": "./dist/generated-audio.js",
       "default": "./dist/generated-audio.js"
+    },
+    "./operator-config/storage": {
+      "types": "./dist/operator-config/storage.d.ts",
+      "import": "./dist/operator-config/storage.js",
+      "default": "./dist/operator-config/storage.js"
     }
   },
   "files": [
@@ -171,7 +176,7 @@
     "test:coverage": "pnpm exec vitest run --config vitest.config.ts --coverage"
   },
   "dependencies": {
-    "@elevenlabs/elevenlabs-js": "2.62.0",
+    "@elevenlabs/elevenlabs-js": "2.78.0",
     "@linqapp/sdk": "0.34.0",
     "@murphai/contracts": "workspace:*",
     "@murphai/device-syncd": "workspace:*",

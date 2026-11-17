@@ -5,8 +5,10 @@ import { Prisma } from "@prisma/client";
 import { hostedThreadContainerParticipantAccessCutoff } from "../hosted-groups/thread-container-participant-access";
 import { HOSTED_HEALTH_DATA_CONSENT_SCOPE } from "../legal/consent";
 import { gameOnSql, isGameEnabled } from "./access";
+import { GAME_SETTLED_OPEN_MS } from "./rules";
 
-export const GAME_CHAT_SETTLED_ACCESS_MS = 7 * 86_400_000;
+/** The same window in which a finished game's days can still be corrected in this chat. */
+export const GAME_CHAT_SETTLED_ACCESS_MS = GAME_SETTLED_OPEN_MS;
 
 /** Admission only. Game tools and message delivery independently verify the
  * complete current provider roster before sharing game content. */
@@ -161,7 +163,7 @@ export async function readGameChatFundingRooms(input: {
         ))
         AND NOT EXISTS (SELECT 1 FROM game_block blocked
           WHERE blocked.blocker_member_id = ANY(${restrictedMembers}) AND blocked.blocked_member_id = ANY(${restrictedMembers}))
-        AND ${gameOnSql("game")}
+        AND ${gameOnSql()}
         AND NOT EXISTS (
           SELECT 1 FROM hosted_member person
           WHERE person.id = ANY(${restrictedMembers}) AND (

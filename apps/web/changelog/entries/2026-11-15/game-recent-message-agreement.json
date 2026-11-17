@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-11-15",
+  "order": 200,
+  "item": {
+    "id": "game-recent-message-agreement",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Agree to game changes with fewer messages",
+    "summary": "Murph can count your matching request from the last 24 hours as your yes, or a like or heart on a game ask addressed to you in iMessage.",
+    "details": "Ask for several changes together. Adding to your own waiting ask keeps the earlier changes too. Only your own words or reaction count; after 24 hours, say it again.",
+    "relevanceTags": [
+      "games"
+    ],
+    "sourcePullRequests": [
+      5040
+    ]
+  }
+}

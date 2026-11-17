@@ -1,3 +1,4 @@
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import { parseCompanionSyncDiagnostic, COMPANION_SYNC_DIAGNOSTIC_BODY_LIMIT } from "@/src/lib/device-sync/companion-sync-diagnostics";
 import { jsonOk, withJsonError } from "@/src/lib/device-sync/settings-http";
 import { requireActiveHostedMemberAuthFromBearerToken } from "@/src/lib/hosted-onboarding/request-auth";
@@ -8,7 +9,7 @@ import { getPrisma } from "@/src/lib/prisma";
 
 export const POST = withJsonError(async (request: Request) => {
   const body = await readOptionalJsonObject(request, { limitBytes: COMPANION_SYNC_DIAGNOSTIC_BODY_LIMIT });
-  const entry = parseCompanionSyncDiagnostic(body);
+  const entry = parseInput(body, parseCompanionSyncDiagnostic);
   const prisma = getPrisma();
   const auth = await requireActiveHostedMemberAuthFromBearerToken(request, prisma);
   await assertHostedHistoricalLaunchConsentGranted({ memberId: auth.member.id, prisma });

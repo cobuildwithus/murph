@@ -118,3 +118,20 @@ it("rejects invalid status IDs and missing native auth before reading private ou
   expect((await GET(statusRequest(), context())).status).toBe(401);
   expect(mocks.status).not.toHaveBeenCalled();
 });
+
+it("lets unexpected demographic parser faults reach the server mapper", async () => {
+  const parser = vi.spyOn(Date.prototype, "getUTCFullYear")
+    .mockImplementationOnce(() => { throw new TypeError("Parser invariant failed."); });
+  try {
+    expect((await PUT(request({ actionId, requestedAt, birthYear: 2000 }))).status).toBe(500);
+    expect(parser).toHaveBeenCalledOnce();
+    expect(mocks.submit).not.toHaveBeenCalled();
+  } finally { parser.mockRestore(); }
+});
+
+it("preserves the future birth-year refusal", async () => {
+  const response = await PUT(request({ actionId, requestedAt, birthYear: new Date().getUTCFullYear() + 1 }));
+  expect(response.status).toBe(400);
+  expect(await response.json()).toMatchObject({ error: { code: "DEMOGRAPHICS_INVALID_REQUEST", message: "The demographic fields are invalid." } });
+  expect(mocks.submit).not.toHaveBeenCalled();
+});

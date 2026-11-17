@@ -23,7 +23,7 @@ export const POST = withJsonError(async (request: Request) => {
   // spec's `companion_installations` record is deferred until operationally
   // needed.
   const body = await readOptionalJsonObject(request);
-  const connectionIntent = validateCompanionSignInRequestBody(body);
+  const signIn = validateCompanionSignInRequestBody(body);
   const timeZone = resolveHostedSignupTimeZone({
     clientTimeZone: body.timeZone,
     headers: request.headers,
@@ -39,7 +39,8 @@ export const POST = withJsonError(async (request: Request) => {
   const session = await publicIngress.createSdkSignInSession(
     memberId,
     COMPANION_DEVICE_SYNC_PROVIDER,
-    connectionIntent,
+    signIn.connectionIntent,
+    signIn.sourceProviderSlug,
   );
 
   return jsonOk({

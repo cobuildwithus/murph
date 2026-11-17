@@ -53,6 +53,7 @@ export interface HostedAssistantNotificationBoundDestination {
 export interface HostedThreadContainerLinqRouteAuthorities {
   authorities: ReadonlyMap<string, HostedExecutionExternalThreadRouteAuthority>;
   nonLinqContainerMemberIds: ReadonlySet<string>;
+  missingContainerMemberIds: ReadonlySet<string>;
   unavailableContainerMemberIds: ReadonlySet<string>;
 }
 
@@ -89,11 +90,13 @@ export async function readHostedThreadContainerLinqRouteAuthorities(input: {
 
   const authorities = new Map<string, HostedExecutionExternalThreadRouteAuthority>();
   const nonLinqContainerMemberIds = new Set<string>();
+  const missingContainerMemberIds = new Set<string>();
   const unavailableContainerMemberIds = new Set<string>();
   const candidates = containerMemberIds.flatMap((containerMemberId) => {
     const ownedRows = rowsByContainer.get(containerMemberId) ?? [];
     if (ownedRows.length !== 1) {
-      unavailableContainerMemberIds.add(containerMemberId);
+      const unavailable = ownedRows.length === 0 ? missingContainerMemberIds : unavailableContainerMemberIds;
+      unavailable.add(containerMemberId);
       return [];
     }
     const row = ownedRows[0]!;
@@ -147,6 +150,7 @@ export async function readHostedThreadContainerLinqRouteAuthorities(input: {
   return {
     authorities,
     nonLinqContainerMemberIds,
+    missingContainerMemberIds,
     unavailableContainerMemberIds,
   };
 }
@@ -435,31 +439,15 @@ async function resolveHostedThreadContainerNotificationDestination(input: {
 
   const row = rows[0]!;
   if (!isHostedThreadDeliveryRouteChannel(row.channel)) {
-    throw hostedOnboardingError({
-      code: "HOSTED_THREAD_NOTIFICATION_ROUTE_INVALID",
-      httpStatus: 409,
-      message: "Hosted thread delivery route material is unavailable or invalid.",
-      retryable: true,
-    });
+    throw new Error("Stored thread delivery route channel is invalid.");
   }
-  let deliveryRoute: HostedThreadDeliveryRouteV1;
-  try {
-    deliveryRoute = await openHostedThreadDeliveryRoute({
-      channel: row.channel,
-      containerMemberId: input.containerMemberId,
-      encrypted: row.deliveryRouteEncrypted,
-      prisma: input.prisma,
-      signal: input.signal,
-    });
-  } catch (cause) {
-    throw hostedOnboardingError({
-      cause,
-      code: "HOSTED_THREAD_NOTIFICATION_ROUTE_INVALID",
-      httpStatus: 409,
-      message: "Hosted thread delivery route material is unavailable or invalid.",
-      retryable: true,
-    });
-  }
+  const deliveryRoute = await openHostedThreadDeliveryRoute({
+    channel: row.channel,
+    containerMemberId: input.containerMemberId,
+    encrypted: row.deliveryRouteEncrypted,
+    prisma: input.prisma,
+    signal: input.signal,
+  });
 
   assertHostedThreadDeliveryRouteMatchesRow({
     containerMemberId: input.containerMemberId,
@@ -566,11 +554,6 @@ function assertHostedThreadDeliveryRouteMatchesRow(input: {
     || !identityLookupKeys.includes(input.row.threadIdentityLookupKey)
     || !authorityLookupKeys.includes(input.row.threadLookupKey)
   ) {
-    throw hostedOnboardingError({
-      code: "HOSTED_THREAD_NOTIFICATION_ROUTE_MISMATCH",
-      httpStatus: 409,
-      message: "Hosted thread delivery route material does not match route authority.",
-      retryable: true,
-    });
+    throw new Error("Stored thread delivery route material does not match route authority.");
   }
 }

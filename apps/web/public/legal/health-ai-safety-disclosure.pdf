@@ -6,11 +6,11 @@ endobj
 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>
 endobj
 3 0 obj
-<< /Length 4586 >>
+<< /Length 4590 >>
 stream
 BT /F2 19 Tf 1 0 0 1 54.00 738.00 Tm (Murph Health AI Safety Disclosure) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 706.00 Tm (Effective Date: April 29, 2026) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 688.00 Tm (Last Updated: July 23, 2026) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 688.00 Tm (Last Updated: November 12, 2026) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 670.00 Tm (Murph is an artificial intelligence system. Messages, summaries, calls, recommendations, and other) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 656.00 Tm (outputs or actions may be generated automatically and may not be reviewed by a human before they are) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 642.00 Tm (shown, sent, or used in a workflow.) Tj ET
@@ -49,7 +49,7 @@ BT /F1 10 Tf 1 0 0 1 54.00 78.00 Tm (immediate in-person care.) Tj ET
 endstream
 endobj
 4 0 obj
-<< /Length 4984 >>
+<< /Length 5023 >>
 stream
 BT /F2 14 Tf 1 0 0 1 54.00 728.00 Tm (5. No medication or clinical decision authority) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 704.00 Tm (Do not use Murph to determine whether to start, stop, change, time, increase, decrease, combine, or) Tj ET
@@ -73,41 +73,44 @@ BT /F1 10 Tf 1 0 0 1 54.00 406.00 Tm (health files, health memories, health prom
 BT /F1 10 Tf 1 0 0 1 54.00 392.00 Tm (insights to train, fine-tune, or improve Murph's or any third party's general-purpose AI models.) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 374.00 Tm (Murph does not route Murph-managed health data to third-party model providers unless the relevant) Tj ET
 BT /F1 10 Tf 1 0 0 1 54.00 360.00 Tm (contract, service setting, or deployment control prohibits model training on Murph health data.) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 342.00 Tm (Some Connected Services do not permit their data to be supplied to or used in the operation of AI) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 328.00 Tm (systems, or permit AI use only through a provider-controlled interface or separate written) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 314.00 Tm (authorization. Connecting a source does not override those restrictions. Data from such a source may) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 300.00 Tm (be unavailable to Murph's AI features, persistent memories, embeddings, retrieval, cross-source) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 286.00 Tm (analysis, experiments, group features, or newsletters. Murph may disable or limit an integration when a) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 272.00 Tm (permitted processing path is unavailable.) Tj ET
-BT /F2 14 Tf 1 0 0 1 54.00 244.00 Tm (8. AI calls and user-directed actions) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 220.00 Tm (At your request, Murph may use an automated or AI-generated voice, send messages, use browser) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 206.00 Tm (tools, make bookings or purchases, submit information, or take other actions. These actions may fail, be) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 192.00 Tm (delayed, be sent to the wrong recipient if information is incorrect, execute differently than intended, or) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 178.00 Tm (not execute at all.) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 160.00 Tm (Murph has only the task-specific authority you give it. Murph is not your general agent, healthcare) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 146.00 Tm (proxy, attorney-in-fact, clinician, or fiduciary. Murph may not consent to treatment, modify a) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 132.00 Tm (prescription, authorize emergency care, or make another clinical decision on your behalf.) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 114.00 Tm (Review material terms, recipients, information being transmitted, and confirmations before relying on) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 100.00 Tm (an action. Third parties may independently record, retain, or process communications and transaction) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 86.00 Tm (information under their own terms and privacy notices.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 342.00 Tm (Games. Murph's AI hosts the games you play. It reads what players post in a game, including photos, and) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 328.00 Tm (the game's group chat, to run the game and make its recap, and a recap can include pictures made by AI) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 314.00 Tm (that show the players. The Privacy Policy names the providers and says what they receive.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 296.00 Tm (Some Connected Services do not permit their data to be supplied to or used in the operation of AI) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 282.00 Tm (systems, or permit AI use only through a provider-controlled interface or separate written) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 268.00 Tm (authorization. Connecting a source does not override those restrictions. Data from such a source may) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 254.00 Tm (be unavailable to Murph's AI features, persistent memories, embeddings, retrieval, cross-source) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 240.00 Tm (analysis, experiments, group features, or newsletters. Murph may disable or limit an integration when a) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 226.00 Tm (permitted processing path is unavailable.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 198.00 Tm (8. AI calls and user-directed actions) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 174.00 Tm (At your request, Murph may use an automated or AI-generated voice, send messages, use browser) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 160.00 Tm (tools, make bookings or purchases, submit information, or take other actions. These actions may fail, be) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 146.00 Tm (delayed, be sent to the wrong recipient if information is incorrect, execute differently than intended, or) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 132.00 Tm (not execute at all.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 114.00 Tm (Murph has only the task-specific authority you give it. Murph is not your general agent, healthcare) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 100.00 Tm (proxy, attorney-in-fact, clinician, or fiduciary. Murph may not consent to treatment, modify a) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 86.00 Tm (prescription, authorize emergency care, or make another clinical decision on your behalf.) Tj ET
 endstream
 endobj
 5 0 obj
-<< /Length 1635 >>
+<< /Length 2028 >>
 stream
-BT /F2 14 Tf 1 0 0 1 54.00 728.00 Tm (9. Human review and support) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 704.00 Tm (Murph personnel do not review the contents of your hosted health data except where needed to provide) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 690.00 Tm (support you request, investigate security or abuse issues, debug service problems, comply with law,) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 676.00 Tm (enforce our Terms, or protect the rights, safety, privacy, or property of Murph, users, or others.) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 658.00 Tm (Hosted Murph is not zero-knowledge, operator-blind, or end-to-end encrypted unless Murph expressly) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 644.00 Tm (says otherwise for a specific feature. Hosted Murph may need to decrypt content to run requested) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 630.00 Tm (tasks, operate hosted features, troubleshoot user-reported issues, investigate abuse, or comply with) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 616.00 Tm (law.) Tj ET
-BT /F2 14 Tf 1 0 0 1 54.00 588.00 Tm (10. Your control) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 564.00 Tm (You can choose whether to use optional integrations and optional AI-powered features. Some features) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 550.00 Tm (may require authorization, permission, or consent to process Consumer Health Data or use specific) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 536.00 Tm (providers. You may disconnect optional integrations, withdraw optional feature permissions for future) Tj ET
-BT /F1 10 Tf 1 0 0 1 54.00 522.00 Tm (processing where supported or required by law, and request deletion through available privacy controls.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 738.00 Tm (Review material terms, recipients, information being transmitted, and confirmations before relying on) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 724.00 Tm (an action. Third parties may independently record, retain, or process communications and transaction) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 710.00 Tm (information under their own terms and privacy notices.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 682.00 Tm (9. Human review and support) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 658.00 Tm (Murph personnel do not review the contents of your hosted health data except where needed to provide) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 644.00 Tm (support you request, investigate security or abuse issues, debug service problems, comply with law,) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 630.00 Tm (enforce our Terms, or protect the rights, safety, privacy, or property of Murph, users, or others.) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 612.00 Tm (Hosted Murph is not zero-knowledge, operator-blind, or end-to-end encrypted unless Murph expressly) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 598.00 Tm (says otherwise for a specific feature. Hosted Murph may need to decrypt content to run requested) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 584.00 Tm (tasks, operate hosted features, troubleshoot user-reported issues, investigate abuse, or comply with) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 570.00 Tm (law.) Tj ET
+BT /F2 14 Tf 1 0 0 1 54.00 542.00 Tm (10. Your control) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 518.00 Tm (You can choose whether to use optional integrations and optional AI-powered features. Some features) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 504.00 Tm (may require authorization, permission, or consent to process Consumer Health Data or use specific) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 490.00 Tm (providers. You may disconnect optional integrations, withdraw optional feature permissions for future) Tj ET
+BT /F1 10 Tf 1 0 0 1 54.00 476.00 Tm (processing where supported or required by law, and request deletion through available privacy controls.) Tj ET
 endstream
 endobj
 6 0 obj
@@ -134,16 +137,16 @@ xref
 0000000009 00000 n 
 0000000079 00000 n 
 0000000154 00000 n 
-0000004792 00000 n 
-0000009828 00000 n 
-0000011515 00000 n 
-0000011651 00000 n 
-0000011787 00000 n 
-0000011923 00000 n 
-0000011992 00000 n 
-0000012146 00000 n 
+0000004796 00000 n 
+0000009871 00000 n 
+0000011951 00000 n 
+0000012087 00000 n 
+0000012223 00000 n 
+0000012359 00000 n 
+0000012428 00000 n 
+0000012582 00000 n 
 trailer
 << /Size 12 /Root 11 0 R /Info 10 0 R >>
 startxref
-12196
+12632
 %%EOF

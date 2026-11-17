@@ -1,3 +1,5 @@
+import { mapWorkerRouteError } from "../src/worker/errors.ts";
+import * as storageCrypto from "../src/crypto.ts";
 import { createHash } from "node:crypto";
 import { createHostedMediaStore } from "../src/bundle-store.ts";
 import {
@@ -130,6 +132,22 @@ describe("hosted private media", () => {
       expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes);
     },
   );
+
+  it.each([undefined, "too-short"])("answers 503 for a valid link when the server capability secret is %s", async (secret) => {
+    const bucket = createPrivateMediaBucket();
+    const staged = await stageHostedPrivateMedia({
+      bucket: bucket.api, bytes: JPEG_BYTES, capabilitySecret: CAPABILITY_SECRET,
+      contentType: "image/jpeg", deliveryOrigin: HOSTED_PRIVATE_MEDIA_DELIVERY_ORIGIN, userId: USER_ID,
+    });
+    const url = new URL(staged.url);
+    const response = await handleDeclarativeRoute(privateMediaRoutes, {
+      env: { BUNDLES: bucket.api, ...(secret === undefined ? {} : { HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET: secret }) },
+      request: new Request(url), url,
+    });
+    // The server's own configuration is missing; the link is not.
+    expect(response?.status).toBe(503);
+    await expect(response?.json()).resolves.toEqual({ error: "Private media delivery is unavailable." });
+  });
 
   it("caps a late retry at the existing object's R2 lifecycle boundary", async () => {
     const nowMs = Date.parse("2026-07-27T12:00:00.000Z");
@@ -449,6 +467,56 @@ describe("hosted private media", () => {
     expect(tamperedResponse).toBeNull();
   });
 
+  it.each(["read", "envelope", "decryption", "content"])(
+    "reports private-media %s failures as server errors while invalid capabilities stay 404",
+    async (failure) => {
+      const bucket = createPrivateMediaBucket();
+      const staged = await stageHostedPrivateMedia({ bucket: bucket.api, bytes: PNG_BYTES,
+        capabilitySecret: CAPABILITY_SECRET, contentType: "image/png",
+        deliveryOrigin: HOSTED_PRIVATE_MEDIA_DELIVERY_ORIGIN, userId: USER_ID });
+      const env = { BUNDLES: bucket.api, HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET: CAPABILITY_SECRET };
+      const get = vi.spyOn(bucket.api, "get");
+      const read = vi.spyOn(storageCrypto, "readEncryptedR2Payload");
+      try {
+        if (failure === "read") get.mockRejectedValue(new TypeError("Synthetic storage outage."));
+        if (failure === "envelope") await bucket.api.put(staged.objectKey, "{");
+        if (failure === "decryption") {
+          const envelope = JSON.parse(new TextDecoder().decode(bucket.objects[0]![1]));
+          envelope.ciphertext = Buffer.from(new Uint8Array(32)).toString("base64");
+          await bucket.api.put(staged.objectKey, JSON.stringify(envelope));
+        }
+        if (failure === "content") read.mockResolvedValue(new Uint8Array([1, 2, 3]));
+        const request = new Request(staged.url);
+        let response: Response | null;
+        try { response = await handleDeclarativeRoute(privateMediaRoutes, { env, request, url: new URL(request.url) }); }
+        catch (error) { response = mapWorkerRouteError(request, error); }
+        expect(response?.status).toBe(500);
+        await expect(response?.json()).resolves.toEqual({ error: "Internal error." });
+
+        env.HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET = CAPABILITY_SECRET;
+        const expired = new URL(staged.url);
+        expired.searchParams.set("exp", "1");
+        const refusal = await handleDeclarativeRoute(privateMediaRoutes, { env, request: new Request(expired), url: expired });
+        expect(refusal?.status).toBe(404);
+        expect(await refusal?.text()).toBe("");
+      } finally { get.mockRestore(); read.mockRestore(); }
+    },
+  );
+
+  it("keeps absent private media as an empty 404", async () => {
+    const bucket = createPrivateMediaBucket();
+    const staged = await stageHostedPrivateMedia({ bucket: bucket.api, bytes: PNG_BYTES,
+      capabilitySecret: CAPABILITY_SECRET, contentType: "image/png",
+      deliveryOrigin: HOSTED_PRIVATE_MEDIA_DELIVERY_ORIGIN, userId: USER_ID });
+    await bucket.api.delete(staged.objectKey);
+    const response = await handleDeclarativeRoute(privateMediaRoutes, {
+      env: { BUNDLES: bucket.api, HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET: CAPABILITY_SECRET },
+      request: new Request(staged.url), url: new URL(staged.url),
+    });
+    expect(response?.status).toBe(404);
+    expect(await response?.text()).toBe("");
+  });
+
   it("leaves no object when the encrypted R2 write fails before URL return", async () => {
     const bucket = createPrivateMediaBucket({
       putError: new Error("fixture write failure"),
@@ -631,4 +699,18 @@ it("serves an existing encrypted meal thumbnail only through its owner-bound fiv
   expect(readRuntimeMedia).toHaveBeenCalledOnce();
   await store.deleteMedia(descriptor.mediaId);
   expect(await readHostedPrivateMedia(read)).toBeNull();
+});
+
+it("keeps malformed capability-secret configuration outside capability rejection", async () => {
+  const request = new Request("https://runner.example.test/private-media/v1/synthetic/group-avatar.png");
+  let response: Response;
+  try {
+    await readHostedPrivateMedia({ bucket: createPrivateMediaBucket().api, capability: "invalid",
+      capabilitySecret: "short", expiresAtUnixSeconds: 1 });
+    throw new Error("Expected configuration rejection.");
+  } catch (error) {
+    expect(error).toBeInstanceOf(TypeError);
+    response = mapWorkerRouteError(request, error);
+  }
+  expect(response.status).toBe(500);
 });

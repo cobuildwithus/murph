@@ -32,6 +32,7 @@ export type HostedExecutionErrorCode =
   | "uri_error";
 
 const HOSTED_EXECUTION_SAFE_ERROR_NAMES = new Set([
+  "ContractValidationError",
   "AbortError",
   "Error",
   "EvalError",

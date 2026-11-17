@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import path from "node:path";
 
 import {
@@ -225,12 +226,12 @@ function parseHostedMailboxWatermarks(value: unknown): Record<HostedMailboxLane,
 
   for (const lane of HOSTED_MAILBOX_LANES) {
     if (!Object.prototype.hasOwnProperty.call(watermarks, lane)) {
-      throw new TypeError(`hosted mailbox watermarks.${lane} is required.`);
+      throw new ContractValidationError(`hosted mailbox watermarks.${lane} is required.`);
     }
   }
 
   if (keys.length !== HOSTED_MAILBOX_LANES.length) {
-    throw new TypeError("hosted mailbox watermarks must contain only supported lanes.");
+    throw new ContractValidationError("hosted mailbox watermarks must contain only supported lanes.");
   }
 
   return {
@@ -256,7 +257,7 @@ function parseHostedMailboxImportStatusRecords(
   value: unknown,
 ): HostedMailboxImportStatusRecord[] {
   if (!Array.isArray(value)) {
-    throw new TypeError("hosted mailbox import state recentStatuses must be an array.");
+    throw new ContractValidationError("hosted mailbox import state recentStatuses must be an array.");
   }
 
   return value.map((record, index) =>
@@ -304,7 +305,7 @@ function normalizeHostedMailboxImportStatusInput(
   };
 
   if (record.status === "quarantined" && record.reasonCode === null) {
-    throw new TypeError("hosted mailbox quarantined status requires a reasonCode.");
+    throw new ContractValidationError("hosted mailbox quarantined status requires a reasonCode.");
   }
 
   return record;
@@ -312,7 +313,7 @@ function normalizeHostedMailboxImportStatusInput(
 
 function parseHostedMailboxLane(value: unknown, label: string): HostedMailboxLane {
   if (typeof value !== "string" || !isHostedMailboxLane(value)) {
-    throw new TypeError(`${label} must be one of: conversation, system.`);
+    throw new ContractValidationError(`${label} must be one of: conversation, system.`);
   }
 
   return value;
@@ -320,7 +321,7 @@ function parseHostedMailboxLane(value: unknown, label: string): HostedMailboxLan
 
 function parseHostedMailboxSeq(value: unknown, label: string): string {
   if (typeof value !== "string" || !DECIMAL_SEQUENCE_PATTERN.test(value)) {
-    throw new TypeError(`${label} must be a non-negative decimal string.`);
+    throw new ContractValidationError(`${label} must be a non-negative decimal string.`);
   }
 
   return value;
@@ -331,7 +332,7 @@ function parseHostedMailboxImportStatus(
   label: string,
 ): HostedMailboxImportStatus {
   if (typeof value !== "string" || !isHostedMailboxImportStatus(value)) {
-    throw new TypeError(`${label} must be one of: imported, quarantined, skipped.`);
+    throw new ContractValidationError(`${label} must be one of: imported, quarantined, skipped.`);
   }
 
   return value;
@@ -343,12 +344,12 @@ function parseNullableStatusCode(value: unknown, label: string): string | null {
   }
 
   if (typeof value !== "string") {
-    throw new TypeError(`${label} must be a compact status code or null.`);
+    throw new ContractValidationError(`${label} must be a compact status code or null.`);
   }
 
   const normalized = value.trim();
   if (!STATUS_CODE_PATTERN.test(normalized)) {
-    throw new TypeError(`${label} must be a compact status code or null.`);
+    throw new ContractValidationError(`${label} must be a compact status code or null.`);
   }
 
   return normalized;
@@ -356,7 +357,7 @@ function parseNullableStatusCode(value: unknown, label: string): string | null {
 
 function parseIsoInstant(value: unknown, label: string): string {
   if (typeof value !== "string") {
-    throw new TypeError(`${label} must be an ISO instant string.`);
+    throw new ContractValidationError(`${label} must be an ISO instant string.`);
   }
 
   const normalized = value.trim();
@@ -365,7 +366,7 @@ function parseIsoInstant(value: unknown, label: string): string {
     !Number.isFinite(timestampMs)
     || new Date(timestampMs).toISOString() !== normalized
   ) {
-    throw new TypeError(`${label} must be an ISO instant string.`);
+    throw new ContractValidationError(`${label} must be an ISO instant string.`);
   }
 
   return normalized;
@@ -388,7 +389,7 @@ function compareHostedMailboxSeq(left: string, right: string): number {
 
 function assertPlainObject(value: unknown, label: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object.`);
+    throw new ContractValidationError(`${label} must be an object.`);
   }
 
   return value as Record<string, unknown>;
@@ -401,7 +402,7 @@ function assertObjectKeys(
 ): void {
   for (const key of Object.keys(value)) {
     if (!allowedKeys.has(key)) {
-      throw new TypeError(`${label} contains unsupported field ${key}.`);
+      throw new ContractValidationError(`${label} contains unsupported field ${key}.`);
     }
   }
 }

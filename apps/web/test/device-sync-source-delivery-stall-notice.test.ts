@@ -59,6 +59,8 @@ const BASE_INPUT = {
 
 const MAILBOX_ITEM = {
   consumedAt: null,
+  payloadInlineCiphertext: "encrypted-notice",
+  payloadRef: null,
   id: "mailbox-1",
   kind: "assistant.notification.requested",
   lane: "system",
@@ -145,7 +147,7 @@ describe("hosted source delivery-stall notice identity", () => {
     })).toBeNull();
     expect(resolveHostedSourceDeliveryStallNoticeCandidate({
       ...BASE_INPUT,
-      sourceProviderSlug: "oura",
+      sourceProviderSlug: "strava",
     })).toBeNull();
     expect(resolveHostedSourceDeliveryStallNoticeCandidate({
       ...BASE_INPUT,
@@ -173,6 +175,22 @@ describe("hosted source delivery-stall notice identity", () => {
 });
 
 describe("hosted source delivery-stall notice materialization", () => {
+  it.each(["google_health", "fitbit", "oura", "ultrahuman"])("uses neutral catalog copy for daily %s", async (sourceProviderSlug) => {
+    const input = { ...BASE_INPUT, sourceProviderSlug };
+    const candidate = resolveHostedSourceDeliveryStallNoticeCandidate(input);
+    if (!candidate) throw new Error("Expected daily-source candidate");
+    mocks.findDeviceConnectionSource.mockResolvedValue({
+      ...input,
+      connection: { status: "active", userId: "member-1" },
+      lastDataAt: new Date(input.lastDataAt),
+    });
+    await materializeHostedSourceDeliveryStallNotice({ candidate, now: input.now, userId: "member-1" });
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).toHaveBeenCalledOnce();
+    const text = mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx.mock.calls[0]?.[0]?.envelope.notification.responsePolicy.text;
+    expect(text).toMatch(/(?:Fitbit|Oura|Ultrahuman).*\?.*wait 5–30 days or stop these check-ins/su);
+    expect(text).not.toMatch(/Garmin|reconnect|expired|revoked|charged|Junction|OAuth/iu);
+  });
+
   it.each(["connected", "error"] as const)("offers help once for a WHOOP %s silence episode", async (status) => {
     const input = {
       ...BASE_INPUT,
@@ -363,6 +381,25 @@ describe("hosted source delivery-stall notice materialization", () => {
     );
     expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).not.toHaveBeenCalled();
     expect(mocks.signalHostedMailboxAppendRuntime).toHaveBeenCalledTimes(consumedAt ? 0 : 1);
+  });
+
+  it("asks once per episode after retention has retired the check-in's content", async () => {
+    const candidate = resolveHostedSourceDeliveryStallNoticeCandidate(BASE_INPUT);
+    if (!candidate) throw new Error("Expected recovery candidate");
+    // Retention removed the payload and kept the row, sent or not.
+    const retired = { ...MAILBOX_ITEM, payloadInlineCiphertext: null };
+    const later = { candidate, now: "2026-10-30T00:00:00.000Z", userId: "member-1" };
+
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValue(retired);
+    await materializeHostedSourceDeliveryStallNotice(later);
+    expect(mocks.runWithPreparedHostedMailboxItemAppendCrypto).not.toHaveBeenCalled();
+
+    // Retired between the first lookup and the locked one.
+    mocks.readHostedMailboxItemByDedupeKey.mockResolvedValueOnce(MAILBOX_ITEM).mockResolvedValueOnce(retired);
+    await materializeHostedSourceDeliveryStallNotice(later);
+
+    expect(mocks.appendHostedMailboxEnvelopeWithPreparedCryptoTx).not.toHaveBeenCalled();
+    expect(mocks.signalHostedMailboxAppendRuntime).not.toHaveBeenCalled();
   });
 
   it("rejects a queued episode identity belonging to another mailbox kind", async () => {

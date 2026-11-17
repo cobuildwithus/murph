@@ -1,3 +1,4 @@
+import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import "server-only";
 
 import { createHash } from "node:crypto";
@@ -343,7 +344,7 @@ async function resolveHostedRuntimeAssistantPreferenceWriteAuthority(input: {
       prisma: input.prisma,
     });
   if (!inputAuthority) {
-    throw new TypeError("Assistant personalization input authority is invalid.");
+    throw hostedOnboardingError({ code: "INVALID_REQUEST", httpStatus: 400, message: "Assistant personalization input authority is invalid." });
   }
   return {
     occurredAt: inputAuthority.occurredAt,
@@ -396,12 +397,12 @@ async function requireHostedAssistantStyleInputAuthority(input: {
     prisma: input.prisma,
   });
   if (!wake) {
-    throw new TypeError("Assistant personalization input authority is invalid.");
+    throw hostedOnboardingError({ code: "INVALID_REQUEST", httpStatus: 400, message: "Assistant personalization input authority is invalid." });
   }
 
   if (!container) {
     if (!isHostedDirectAssistantStyleWake(wake)) {
-      throw new TypeError("Assistant personalization input authority is invalid.");
+      throw hostedOnboardingError({ code: "INVALID_REQUEST", httpStatus: 400, message: "Assistant personalization input authority is invalid." });
     }
     return;
   }
@@ -416,7 +417,7 @@ async function requireHostedAssistantStyleInputAuthority(input: {
     || authority.containerMemberId !== input.memberId
     || authority.threadId !== wake.message.linqMessage.chatId
   ) {
-    throw new TypeError("Assistant personalization input authority is invalid.");
+    throw hostedOnboardingError({ code: "INVALID_REQUEST", httpStatus: 400, message: "Assistant personalization input authority is invalid." });
   }
 
   const route = await assertHostedLinqRouteEgressAuthority({
@@ -424,7 +425,7 @@ async function requireHostedAssistantStyleInputAuthority(input: {
     prisma: input.prisma,
   });
   if (route.containerMemberId !== input.memberId) {
-    throw new TypeError("Assistant personalization input authority is invalid.");
+    throw hostedOnboardingError({ code: "INVALID_REQUEST", httpStatus: 400, message: "Assistant personalization input authority is invalid." });
   }
 }
 

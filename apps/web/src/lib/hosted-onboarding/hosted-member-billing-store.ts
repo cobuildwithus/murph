@@ -1,6 +1,7 @@
 /**
  * Owns hosted member Stripe billing-reference lookup and write surfaces.
  */
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   type HostedMember,
   type HostedMemberBillingRef,
@@ -1079,7 +1080,7 @@ export async function prepareHostedMemberStripeCheckoutCompletion(input: {
   const stripeSubscriptionLookupKey =
     createHostedStripeSubscriptionLookupKey(input.stripeSubscriptionId);
   if (!stripeCustomerLookupKey || !stripeSubscriptionLookupKey) {
-    throw new TypeError("Completed Stripe Checkout identifiers are invalid.");
+    throw new ContractValidationError("Completed Stripe Checkout identifiers are invalid.");
   }
   const {
     stripeCustomerIdEncrypted,

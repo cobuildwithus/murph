@@ -3,6 +3,7 @@ export type {
   HostedBlindIndexParts,
 } from "./contact-privacy-core";
 export {
+  createHostedCustomConnectionActionLookupKeys,
   createHostedGameAudienceLookupKeys,
   createHostedAssistantInputLookupKey,
   createHostedAssistantInputLookupKeyReadCandidates,

@@ -1,0 +1,70 @@
+name: Recap Video Runner Image
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review]
+    paths:
+      - ".github/workflows/recap-video-runner-image.yml"
+      - "Dockerfile.cloudflare-hosted-runner-base"
+      - "apps/cloudflare/scripts/runner-base-image*"
+      - "packages/recap-video/**"
+      - "packages/contracts/fixtures/recap-show/score-show.json"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/recap-video-runner-image.yml"
+      - "Dockerfile.cloudflare-hosted-runner-base"
+      - "apps/cloudflare/scripts/runner-base-image*"
+      - "packages/recap-video/**"
+      - "packages/contracts/fixtures/recap-show/score-show.json"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  recap-video-runner-image:
+    name: Recap video in the runner image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Reject draft pull request proof
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
+        run: |
+          echo "::error::Mark the pull request ready for review to run exact-head CI."
+          exit 1
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Prepare runner base image
+        run: pnpm --dir apps/cloudflare runner:docker:base
+
+      # The ordinary test lanes have no ffmpeg, so they check layout, timing and fonts and skip the encode.
+      # This runs the whole suite where the video will be made: the hosted runner's own image, with its
+      # Debian ffmpeg and no fonts of its own, at the runner's two CPUs and six gigabytes, with no network.
+      - name: Draw and encode a recap video in the runner image
+        run: |
+          image=$(node --input-type=module -e 'import { hostedLocalRunnerBaseImageTag } from "./apps/cloudflare/scripts/runner-base-image-contract.ts"; process.stdout.write(hostedLocalRunnerBaseImageTag)')
+          docker run --rm --network none --cpus 2 --memory 6g \
+            --user "$(id -u):$(id -g)" --env HOME=/tmp --env RECAP_VIDEO_REQUIRE_FFMPEG=1 \
+            --volume "$PWD:/repo" --workdir /repo/packages/recap-video \
+            "$image" node ../../node_modules/vitest/vitest.mjs run --config vitest.config.ts --no-coverage

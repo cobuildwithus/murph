@@ -1,8 +1,10 @@
+import { parseInput, RequestInputError } from "@murphai/hosted-execution/request-input";
 import { readHostedExecutionRuntimeAuthority } from "@murphai/hosted-execution/auth";
 import {
   parseHostedRuntimeGroupToolRequest,
 } from "@murphai/hosted-execution/parsers";
 import {
+  GAME_TOOL_ACTIONS,
   HOSTED_RUNTIME_ASSISTANT_ASK_DIAGNOSTIC_CODE_HEADER,
   HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_HEADER,
   HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER,
@@ -53,9 +55,10 @@ export const POST = withJsonError(async (request: Request) => {
   });
   const runtimeAuthority = readHostedExecutionRuntimeAuthority(new URL(request.url), request.headers);
   const currentSenderWire = readHostedCurrentSenderWire(payload);
-  const body = parseHostedRuntimeGroupToolRequest(currentSenderWire.payload, {
-    privateMediaDeliveryOrigin: readHostedExecutionControlOrigin(),
-  });
+  const privateMediaDeliveryOrigin = readHostedExecutionControlOrigin();
+  const body = parseInput(currentSenderWire.payload, (value) =>
+    parseHostedRuntimeGroupToolRequest(value, { privateMediaDeliveryOrigin }),
+  );
   const supportedProjectionScopeKeys =
     readHostedVaultShareSupportedProjectionScopeKeysFromRequest(request);
   const membershipInventoryProtocol = new URL(request.url).searchParams.get(
@@ -73,7 +76,7 @@ export const POST = withJsonError(async (request: Request) => {
         || membershipInventoryProtocol
           === HOSTED_RUNTIME_GROUP_MEMBERSHIP_INVENTORY_PROTOCOL_LEGACY_VALUE,
       memberId,
-      ...(body.action === "read_game" || body.action === "update_game" || body.action === "game_photo" || body.action === "write_recap" || body.action === "game_chat_bootstrap" || body.action === "my_game_reminders"
+      ...(body.action === "leave_group" || body.action === "game_chat_bootstrap" || GAME_TOOL_ACTIONS.some(action => action === body.action)
         ? { runtimeIdentity: runtimeAuthority ? { ...runtimeAuthority, userId: memberId } : null }
         : {}),
       request: body,
@@ -172,7 +175,7 @@ function readHostedCurrentSenderWire(
       ) !== HOSTED_RUNTIME_GROUP_CURRENT_SENDER_PROTOCOL_MARKER_VALUE
       || readHostedCurrentSenderWireAction(payload) !== "ask_current_sender"
     ) {
-      throw new TypeError("Hosted current-sender protocol is invalid.");
+      throw new RequestInputError("Hosted current-sender protocol is invalid.");
     }
     return {
       compatibility: null,
@@ -185,7 +188,7 @@ function readHostedCurrentSenderWire(
 
   const action = readHostedCurrentSenderWireAction(payload);
   if (action === "ask_current_sender") {
-    throw new TypeError("Hosted current-sender group protocol marker is required.");
+    throw new RequestInputError("Hosted current-sender group protocol marker is required.");
   }
   if (action === "message_current_sender") {
     assertHostedCurrentSenderLegacyWireShape(payload);
@@ -203,7 +206,7 @@ function assertHostedCurrentSenderLegacyWireShape(payload: unknown): void {
     || payload === null
     || Object.keys(payload).some((key) => key !== "action" && key !== "origin")
   ) {
-    throw new TypeError("Hosted current-sender legacy protocol is invalid.");
+    throw new RequestInputError("Hosted current-sender legacy protocol is invalid.");
   }
 }
 

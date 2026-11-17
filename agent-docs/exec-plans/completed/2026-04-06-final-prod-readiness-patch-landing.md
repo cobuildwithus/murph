@@ -41,7 +41,7 @@
 - `apps/web/src/lib/hosted-share/link-service.ts`
 - `apps/web/src/lib/hosted-share/acceptance-service.ts`
 - `apps/web/test/hosted-share-service.test.ts`
-- `/Users/willhay/Downloads/final-prod-readiness.patch`
+- `~/Downloads/final-prod-readiness.patch`
 Status: completed
 Updated: 2026-04-06
 Completed: 2026-04-06

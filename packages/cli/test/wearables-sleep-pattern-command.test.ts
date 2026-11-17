@@ -177,3 +177,102 @@ test('wearables sleep pattern rejects an invalid IANA fallback before invoking t
   assert.notEqual(result.exitCode, null)
   assert.equal(showWearableSleepPattern.mock.calls.length, 0)
 })
+
+test('wearables sleep pattern omits constants, zero counters, empty stat blocks, and repeated window fields', async () => {
+  const { cli, services } = createSleepPatternCli()
+  const empty = createSleepPatternResult()
+  const clock = {
+    count: 5,
+    medianLocalMinutes: 1338.5,
+    medianLocalTime: '22:19',
+    standardDeviationMinutes: 18.8,
+  }
+  const populated = {
+    ...empty,
+    filters: { ...empty.filters, from: null, to: null },
+    summary: {
+      ...empty.summary,
+      bedtime: clock,
+      lateArrivingNightCount: 2,
+      totalSleepMinutes: { average: 433, count: 5, median: 430, standardDeviation: 8.1 },
+      validNightCount: 5,
+      weekdayWeekendMidpointSampleCounts: { weekday: 4, weekend: 1 },
+    },
+  }
+  Object.defineProperty(services.query, 'showWearableSleepPattern', {
+    configurable: true,
+    value: vi.fn(async () => populated),
+    writable: true,
+  })
+
+  const result = await runInProcessJsonCli(cli, [
+    'wearables',
+    'sleep',
+    'pattern',
+    '--vault',
+    '/tmp/wearables-sleep-pattern-vault',
+  ])
+
+  assert.equal(result.exitCode, null)
+  const data = wearablesSleepPatternResultSchema.parse(requireData(result.envelope))
+  assert.equal(data.filters.windowDays, 28)
+  assert.deepEqual(data.filters.providers, ['oura'])
+  const summary = data.summary
+  for (const omitted of [
+    'asOfInstant',
+    'timingTimeZoneMode',
+    'awakeMinutes',
+    'midpoint',
+    'wakeTime',
+    'conflictingNightCount',
+    'overlappingNightCount',
+    'suppressedExactDuplicateCount',
+    'latestNightDate',
+    'reportingTimeZone',
+    'timeZones',
+  ]) {
+    assert.equal(omitted in summary, false, omitted)
+  }
+  assert.deepEqual(summary.bedtime, {
+    count: 5,
+    medianLocalTime: '22:19',
+    standardDeviationMinutes: 18.8,
+  })
+  assert.deepEqual(summary.totalSleepMinutes, populated.summary.totalSleepMinutes)
+  assert.equal(summary.lateArrivingNightCount, 2)
+  assert.equal(summary.missingNightCount, 28)
+  assert.equal(summary.expectedNightCount, 28)
+  assert.equal(summary.validNightCount, 5)
+  assert.equal(summary.coveragePercent, 0)
+  assert.equal(summary.allSourcesStale, true)
+  assert.equal(summary.from, '2026-06-13')
+  assert.equal(summary.to, '2026-07-10')
+  assert.deepEqual(summary.sourceFreshness, empty.summary.sourceFreshness)
+  assert.deepEqual(summary.notes, empty.summary.notes)
+  assert.deepEqual(summary.weekdayWeekendMidpointSampleCounts, { weekday: 4, weekend: 1 })
+
+  Object.defineProperty(services.query, 'showWearableSleepPattern', {
+    configurable: true,
+    value: vi.fn(async () => empty),
+    writable: true,
+  })
+  const explicitWindow = await runInProcessJsonCli(cli, [
+    'wearables',
+    'sleep',
+    'pattern',
+    '--vault',
+    '/tmp/wearables-sleep-pattern-vault',
+    '--from',
+    '2026-06-13',
+    '--to',
+    '2026-07-10',
+  ])
+  const explicit = wearablesSleepPatternResultSchema.parse(requireData(explicitWindow.envelope))
+  for (const repeated of ['from', 'to', 'windowDays']) {
+    assert.equal(repeated in explicit.filters, false, repeated)
+  }
+  for (const block of ['sessionDurationMinutes', 'sleepLatencyMinutes', 'totalSleepMinutes', 'bedtime']) {
+    assert.equal(block in explicit.summary, false, block)
+  }
+  assert.equal('weekdayWeekendMidpointSampleCounts' in explicit.summary, false)
+})

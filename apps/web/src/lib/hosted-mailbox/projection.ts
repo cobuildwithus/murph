@@ -1,3 +1,5 @@
+import { parseInput } from "@murphai/hosted-execution/request-input";
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   HOSTED_MAILBOX_KINDS,
   HOSTED_MAILBOX_LANES,
@@ -65,7 +67,7 @@ export async function tryMarkHostedMailboxConversationAiUsageDenied(input: {
       input.afterConversationLaneSeq < 0n
       || input.throughConversationLaneSeq < 0n
     ) {
-      throw new TypeError("Hosted mailbox conversation sequence window is invalid.");
+      throw new ContractValidationError("Hosted mailbox conversation sequence window is invalid.");
     }
     if (
       input.throughConversationLaneSeq <= input.afterConversationLaneSeq
@@ -227,10 +229,10 @@ export async function fetchHostedRuntimeMailboxProjection(input: {
   );
   const retainedAt = new Date(fetchedAt.getTime() - HOSTED_MAILBOX_RETENTION_MS);
   const seenLanes = new Set<HostedMailboxLane>();
-  const lanes = input.lanes.map((cursor, ordinal) => {
+  const lanes = parseInput(input.lanes, () => input.lanes.map((cursor, ordinal) => {
     const lane = requireHostedMailboxLane(cursor.lane);
     if (seenLanes.has(lane)) {
-      throw new TypeError(`Hosted mailbox lane ${JSON.stringify(lane)} was requested more than once.`);
+      throw new ContractValidationError(`Hosted mailbox lane ${JSON.stringify(lane)} was requested more than once.`);
     }
     seenLanes.add(lane);
 
@@ -242,7 +244,7 @@ export async function fetchHostedRuntimeMailboxProjection(input: {
       lane,
       ordinal,
     };
-  });
+  }));
 
   if (lanes.length === 0) {
     return {
@@ -469,7 +471,7 @@ export const HOSTED_MAILBOX_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 
 export function normalizeHostedMailboxFetchLimit(value: number): number {
   if (!Number.isSafeInteger(value) || value < 1) {
-    throw new TypeError("Hosted mailbox fetch limit must be a positive integer.");
+    throw new ContractValidationError("Hosted mailbox fetch limit must be a positive integer.");
   }
 
   return Math.min(value, HOSTED_MAILBOX_FETCH_LIMIT_MAX);
@@ -489,7 +491,7 @@ export function normalizeHostedMailboxDate(value: Date | string, label: string):
   const date = value instanceof Date ? value : new Date(value);
 
   if (Number.isNaN(date.getTime())) {
-    throw new TypeError(`${label} must be valid.`);
+    throw new ContractValidationError(`${label} must be valid.`);
   }
 
   return date;
@@ -511,7 +513,7 @@ export function normalizeHostedMailboxSeq(
     return BigInt(value);
   }
 
-  throw new TypeError(`${label} must be a non-negative integer.`);
+  throw new ContractValidationError(`${label} must be a non-negative integer.`);
 }
 
 export function requireHostedMailboxLane(value: string): HostedMailboxLane {
@@ -521,7 +523,7 @@ export function requireHostedMailboxLane(value: string): HostedMailboxLane {
     return normalized;
   }
 
-  throw new TypeError(`Hosted mailbox lane is invalid: ${normalized}`);
+  throw new ContractValidationError(`Hosted mailbox lane is invalid: ${normalized}`);
 }
 
 export function requireHostedMailboxKind(value: string): HostedMailboxKind {
@@ -531,7 +533,7 @@ export function requireHostedMailboxKind(value: string): HostedMailboxKind {
     return normalized;
   }
 
-  throw new TypeError(
+  throw new ContractValidationError(
     `Hosted mailbox kind must be one of ${HOSTED_MAILBOX_KINDS.join(", ")}.`,
   );
 }
@@ -540,7 +542,7 @@ export function requireNonEmptyString(value: string, label: string): string {
   const normalized = normalizeNullableString(value);
 
   if (!normalized) {
-    throw new TypeError(`${label} must not be blank.`);
+    throw new ContractValidationError(`${label} must not be blank.`);
   }
 
   return normalized;

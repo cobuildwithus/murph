@@ -1,0 +1,456 @@
+{
+  "joinedOn": "2026-10-21",
+  "today": "2026-11-14",
+  "incomplete": false,
+  "measures": [
+    {
+      "id": "pushups.reps",
+      "label": "Pushups",
+      "noun": "pushups",
+      "icon": "pushups",
+      "format": "count",
+      "source": "games",
+      "pending": false,
+      "gameOn": true,
+      "needsPerDay": false,
+      "total": {
+        "value": 1400,
+        "text": "1,400",
+        "unit": "reps"
+      },
+      "today": {
+        "value": 100,
+        "text": "+100",
+        "unit": "reps"
+      },
+      "points": [
+        [
+          "2026-10-21",
+          0
+        ],
+        [
+          "2026-10-22",
+          100
+        ],
+        [
+          "2026-10-24",
+          100
+        ],
+        [
+          "2026-10-25",
+          200
+        ],
+        [
+          "2026-10-27",
+          400
+        ],
+        [
+          "2026-10-29",
+          500
+        ],
+        [
+          "2026-11-01",
+          500
+        ],
+        [
+          "2026-11-02",
+          600
+        ],
+        [
+          "2026-11-04",
+          800
+        ],
+        [
+          "2026-11-06",
+          900
+        ],
+        [
+          "2026-11-08",
+          900
+        ],
+        [
+          "2026-11-09",
+          1000
+        ],
+        [
+          "2026-11-10",
+          1100
+        ],
+        [
+          "2026-11-12",
+          1300
+        ],
+        [
+          "2026-11-13",
+          1300
+        ],
+        [
+          "2026-11-14",
+          1400
+        ]
+      ],
+      "projection": {
+        "value": 2000,
+        "label": "2,000 by Nov 23",
+        "on": "2026-11-23"
+      },
+      "ladder": {
+        "kind": "height",
+        "passed": [
+          {
+            "id": "empire-state-building",
+            "name": "Empire State Building",
+            "drawing": "empire-state-building",
+            "at": 1250,
+            "atText": "1,250 ft",
+            "blurb": "New York's 1931 Art Deco tower, the world's tallest for nearly 40 years.",
+            "where": "New York City, USA",
+            "on": "2026-11-12",
+            "toGo": null,
+            "short": "Empire State",
+            "tagline": "An old favorite in the skyline",
+            "shareAwardId": "award:pushups.reps:empire-state-building"
+          },
+          {
+            "id": "eiffel-tower",
+            "name": "Eiffel Tower",
+            "drawing": "eiffel-tower",
+            "at": 1083,
+            "atText": "1,083 ft",
+            "blurb": "Paris's iron tower, built for the 1889 World's Fair and meant to be temporary.",
+            "where": "Paris, France",
+            "on": "2026-11-10",
+            "toGo": null,
+            "short": "Eiffel Tower",
+            "tagline": "An iron tower above the rooftops",
+            "shareAwardId": "award:pushups.reps:eiffel-tower"
+          },
+          {
+            "id": "golden-gate-bridge-towers",
+            "name": "Golden Gate Bridge towers",
+            "drawing": "golden-gate-bridge-towers",
+            "at": 746,
+            "atText": "746 ft",
+            "blurb": "The towers of San Francisco's orange suspension bridge, opened in 1937.",
+            "where": "San Francisco, USA",
+            "on": "2026-11-04",
+            "toGo": null,
+            "short": "Golden Gate towers",
+            "tagline": "Orange towers above the bay",
+            "shareAwardId": "award:pushups.reps:golden-gate-bridge-towers"
+          },
+          {
+            "id": "washington-monument",
+            "name": "Washington Monument",
+            "drawing": "washington-monument",
+            "at": 555,
+            "atText": "555 ft",
+            "blurb": "Washington, D.C.'s marble obelisk, the world's tallest structure until the Eiffel Tower.",
+            "where": "Washington, D.C., USA",
+            "on": "2026-11-02",
+            "toGo": null,
+            "short": "Washington Monument",
+            "tagline": "A stone needle above the capital",
+            "shareAwardId": "award:pushups.reps:washington-monument"
+          },
+          {
+            "id": "statue-of-liberty",
+            "name": "Statue of Liberty",
+            "drawing": "statue-of-liberty",
+            "at": 305,
+            "atText": "305 ft",
+            "blurb": "The copper statue France gave the US, holding her torch in New York Harbor since 1886.",
+            "where": "New York City, USA",
+            "on": "2026-10-27",
+            "toGo": null,
+            "short": "Statue of Liberty",
+            "tagline": "A torch above the harbor",
+            "shareAwardId": "award:pushups.reps:statue-of-liberty"
+          }
+        ],
+        "next": {
+          "id": "one-world-trade-center",
+          "name": "One World Trade Center",
+          "drawing": "one-world-trade-center",
+          "at": 1776,
+          "atText": "1,776 ft",
+          "blurb": "New York's tallest tower, its height a nod to 1776, the year of independence.",
+          "where": "New York City, USA",
+          "on": null,
+          "toGo": "376 to go",
+          "short": "One World Trade",
+          "tagline": "A bright point above the harbor",
+          "shareAwardId": null
+        },
+        "goalPicked": false
+      },
+      "route": null,
+      "pics": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "takenOn": "2026-10-24",
+          "at": 100
+        },
+        {
+          "id": "10000000-0000-4000-8000-000000000002",
+          "takenOn": "2026-11-02",
+          "at": 600
+        },
+        {
+          "id": "10000000-0000-4000-8000-000000000003",
+          "takenOn": "2026-11-12",
+          "at": 1300
+        }
+      ]
+    },
+    {
+      "id": "pushups.seconds",
+      "label": "Pushup minutes",
+      "noun": "of pushups",
+      "icon": "pushups",
+      "format": "duration",
+      "source": "games",
+      "pending": false,
+      "gameOn": true,
+      "needsPerDay": false,
+      "total": {
+        "value": 9600,
+        "text": "2h 40m",
+        "unit": "seconds"
+      },
+      "today": null,
+      "points": [
+        [
+          "2026-10-21",
+          0.0
+        ],
+        [
+          "2026-10-22",
+          738.462
+        ],
+        [
+          "2026-10-24",
+          1476.923
+        ],
+        [
+          "2026-10-26",
+          2215.385
+        ],
+        [
+          "2026-10-28",
+          2953.846
+        ],
+        [
+          "2026-10-30",
+          3692.308
+        ],
+        [
+          "2026-11-01",
+          4430.769
+        ],
+        [
+          "2026-11-02",
+          5169.231
+        ],
+        [
+          "2026-11-04",
+          5907.692
+        ],
+        [
+          "2026-11-06",
+          6646.154
+        ],
+        [
+          "2026-11-08",
+          7384.615
+        ],
+        [
+          "2026-11-10",
+          8123.077
+        ],
+        [
+          "2026-11-12",
+          8861.538
+        ],
+        [
+          "2026-11-14",
+          9600.0
+        ]
+      ],
+      "projection": {
+        "value": 10800,
+        "label": "3h by Nov 24",
+        "on": "2026-11-24"
+      },
+      "ladder": {
+        "kind": "time",
+        "passed": [
+          {
+            "id": "moonwalk",
+            "name": "The first moonwalk",
+            "drawing": "moonwalk",
+            "at": 9100,
+            "atText": "2 hr 31 min",
+            "blurb": "The first walk on the Moon, Apollo 11, 1969.",
+            "where": null,
+            "on": "2026-11-13",
+            "toGo": null,
+            "short": "The first moonwalk",
+            "tagline": "The first walk on another world",
+            "shareAwardId": "award:pushups.seconds:moonwalk"
+          },
+          {
+            "id": "marathon",
+            "name": "The marathon world record",
+            "drawing": "marathon",
+            "at": 7170,
+            "atText": "1 hr 59 min",
+            "blurb": "The fastest anyone has run 26.2 miles, and the first record under 2 hours.",
+            "where": null,
+            "on": "2026-11-09",
+            "toGo": null,
+            "short": "A marathon",
+            "tagline": "A new mark for the marathon",
+            "shareAwardId": "award:pushups.seconds:marathon"
+          },
+          {
+            "id": "gagarin",
+            "name": "Yuri Gagarin's flight",
+            "drawing": "gagarin",
+            "at": 6480,
+            "atText": "1 hr 48 min",
+            "blurb": "The first person in space, once around the Earth, 1961.",
+            "where": null,
+            "on": "2026-11-06",
+            "toGo": null,
+            "short": "Yuri Gagarin's flight",
+            "tagline": "The first person in space",
+            "shareAwardId": "award:pushups.seconds:gagarin"
+          },
+          {
+            "id": "iss-lap",
+            "name": "Space station lap",
+            "drawing": "iss-lap",
+            "at": 5574.0,
+            "atText": "1 hr 33 min",
+            "blurb": "How long the space station takes to circle the whole Earth once.",
+            "where": null,
+            "on": "2026-11-02",
+            "toGo": null,
+            "short": "Space station lap",
+            "tagline": "Once around Earth from orbit",
+            "shareAwardId": "award:pushups.seconds:iss-lap"
+          },
+          {
+            "id": "orville-hour",
+            "name": "The first hour in the air",
+            "drawing": "orville-hour",
+            "at": 3735,
+            "atText": "1 hr 2 min",
+            "blurb": "The first airplane flight to stay up a whole hour, 1908.",
+            "where": null,
+            "on": "2026-10-27",
+            "toGo": null,
+            "short": "The first hour in the air",
+            "tagline": "A flight that stayed up longer",
+            "shareAwardId": "award:pushups.seconds:orville-hour"
+          }
+        ],
+        "next": {
+          "id": "concorde",
+          "name": "Concorde to London",
+          "drawing": "concorde",
+          "at": 10379,
+          "atText": "2 hr 53 min",
+          "blurb": "The fastest a passenger jet has flown New York to London, 1996.",
+          "where": null,
+          "on": null,
+          "toGo": "13 min to go",
+          "short": "Concorde's cruising altitude",
+          "tagline": "Above the ordinary flight path",
+          "shareAwardId": null
+        },
+        "goalPicked": false
+      },
+      "route": null,
+      "pics": []
+    }
+  ],
+  "medals": [
+    {
+      "id": "total-1000",
+      "kind": "total",
+      "gold": true,
+      "face": {
+        "number": "1,000"
+      },
+      "title": "1,000",
+      "detail": "pushups",
+      "earnedOn": "2026-11-14",
+      "open": {
+        "page": "totals",
+        "measureId": "pushups.reps"
+      }
+    },
+    {
+      "id": "pull-golden",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "golden-gate-bridge-towers"
+      },
+      "title": "Golden Gate",
+      "detail": "380 pull-ups",
+      "earnedOn": "2026-11-12",
+      "open": {
+        "page": "totals",
+        "measureId": "pullups.reps"
+      }
+    },
+    {
+      "id": "hr-2",
+      "kind": "health",
+      "gold": false,
+      "face": {
+        "delta": {
+          "icon": "heart",
+          "text": "↓2"
+        }
+      },
+      "title": "Heart rate",
+      "detail": "down 2 bpm",
+      "earnedOn": "2026-11-12",
+      "open": {
+        "page": "health",
+        "measureId": "restingHeartRate"
+      }
+    },
+    {
+      "id": "friend-leo",
+      "kind": "friend",
+      "gold": false,
+      "face": {
+        "member": {
+          "memberId": "member-leo",
+          "firstName": "Leo",
+          "avatarUrl": null
+        }
+      },
+      "title": "Passed Leo",
+      "detail": "in total pushups",
+      "earnedOn": "2026-11-08",
+      "open": {
+        "page": "friends",
+        "measureId": "pushups.reps"
+      }
+    }
+  ],
+  "shelf": [
+    "total-1000",
+    "pull-golden",
+    "hr-2",
+    "friend-leo"
+  ],
+  "moments": [],
+  "picCount": 3
+}

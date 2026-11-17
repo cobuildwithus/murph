@@ -1,3 +1,4 @@
+import { RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import assert from "node:assert/strict";
 import { test } from "vitest";
 import { readHostedUsageRecordRequestForTest } from "#hosted-web-testing";
@@ -136,7 +137,7 @@ async function send(body: HostedRuntimeUsageRecordRequest): Promise<string> {
         }));
         assert.deepEqual(withoutTiming(received), withoutTiming(body));
       } catch (error) {
-        if (!(error instanceof RangeError)) throw error;
+        if (!(error instanceof RequestBodyTooLargeError)) throw error;
         return Response.json({ error: { message: error.message } }, { status: 413 });
       }
       return Response.json({ platformAiUsageAllowedAfter: true, recorded: true, usageId: body.usage.usageId });

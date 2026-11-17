@@ -1,3 +1,4 @@
+import { parseInput, RequestInputError, RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import {
   CLOUDFLARE_HOSTED_CONTROL_DEVICE_WEBHOOK_ENQUEUE_PATH,
   createDeviceWebhookTransportPrivateKeyringFromJson,
@@ -14,7 +15,7 @@ import {
 } from "../../worker-routes/shared.ts";
 import type { DeclarativeRoute } from "../routes.ts";
 import { matchExactPath } from "../routes.ts";
-import { parseJsonValue } from "../route-utils/json-body.ts";
+import { parseJsonInput } from "../route-utils/json-body.ts";
 
 export const deviceWebhookEnqueueRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] = [
   {
@@ -35,13 +36,17 @@ async function handleDeviceWebhookEnqueueRoute(
 ): Promise<Response> {
   let envelope;
   try {
-    envelope = parseDeviceWebhookQueueEnvelope(
-      parseJsonValue(await readCachedRequestText(context, {
+    envelope = parseInput(
+      parseJsonInput(await readCachedRequestText(context, {
         limitBytes: DEVICE_WEBHOOK_QUEUE_MAX_ENVELOPE_BYTES,
       })),
+      parseDeviceWebhookQueueEnvelope,
     );
-  } catch {
-    return json({ code: "invalid_request", error: "Malformed device webhook envelope." }, 400);
+  } catch (error) {
+    if (error instanceof RequestInputError || error instanceof RequestBodyTooLargeError) {
+      return json({ code: "invalid_request", error: "Malformed device webhook envelope." }, 400);
+    }
+    throw error;
   }
   if (!context.env.DEVICE_WEBHOOK_QUEUE) {
     return json({ code: "queue_unavailable", error: "Device webhook queue is unavailable." }, 503);
@@ -62,10 +67,14 @@ async function handleDeviceWebhookEnqueueRoute(
       }),
     });
   } catch (error) {
+    const code = readDeviceWebhookQueuePersistenceFailureCode(error);
+    if (code !== "transport_context_mismatch" && code !== "transport_metadata_invalid") {
+      // Decrypt failures cannot distinguish bad ciphertext from unavailable or
+      // inconsistent server keys. Preserve the event for retry in either case.
+      throw error;
+    }
     return json({
-      code:
-        readDeviceWebhookQueuePersistenceFailureCode(error)
-        ?? "persistence_failure_unclassified",
+      code,
       error: "Unauthenticated device webhook envelope.",
     }, 400);
   }

@@ -37,5 +37,5 @@ Updated: 2026-04-23
 - Outcomes:
 - Focused `device-syncd` store/service Vitest run passed.
 - `git diff --check --` on the task paths passed.
-- `pnpm typecheck` failed for an unrelated pre-existing dirty-tree error in [execution.ts](/Users/willhay/startup1/murph/packages/assistant-runtime/src/hosted-runtime/execution.ts:328): `vaultSyncImportResult` is not a known property on `HostedRunDrainMetrics`. This follow-up only touched `packages/device-syncd/test/{store,service}.test.ts`.
+- `pnpm typecheck` failed for an unrelated pre-existing dirty-tree error in [execution.ts](~/startup1/murph/packages/assistant-runtime/src/hosted-runtime/execution.ts:328): `vaultSyncImportResult` is not a known property on `HostedRunDrainMetrics`. This follow-up only touched `packages/device-syncd/test/{store,service}.test.ts`.
 Completed: 2026-04-23

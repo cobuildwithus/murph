@@ -24,6 +24,7 @@ describe("hosted workspace snapshot enumeration races", () => {
     const excluded = [
       ".env", "journal/.env.local", ".git/config", "exports/packs/private.zip",
       ".runtime/cache/secret.json", ".runtime/tmp/scratch.json",
+      ".runtime/tmp/recap/synthetic-event/refs/photo.jpg", "tmp/recap/synthetic-event/refs/photo.jpg",
       ".runtime/projections/query.sqlite", ".runtime/projections/query-entities.sqlite.tmp",
       ".runtime/operations/assistant/secrets/token.json",
       ".runtime/operations/assistant/outbox/.quarantine/rejected.json",

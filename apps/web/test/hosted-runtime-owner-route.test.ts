@@ -50,7 +50,7 @@ beforeEach(() => {
   vi.resetModules();
   vi.resetAllMocks();
   edges.authenticate.mockResolvedValue({ userId: identity.userId, payload: command });
-  edges.complete.mockResolvedValue(true);
+  edges.complete.mockResolvedValue({ applied: true, owner: null });
   edges.retire.mockResolvedValue(true);
   edges.release.mockResolvedValue(true);
   edges.authorize.mockResolvedValue({ cutover: "postgres", owner: null });
@@ -59,7 +59,7 @@ afterEach(() => { vi.restoreAllMocks(); });
 
 describe("runtime ownership response", () => {
   it("waits for committed release, then responds before loading or waiting for the advisory hint", async () => {
-    const release = createDeferred<boolean>();
+    const release = createDeferred<{ applied: boolean; owner: null }>();
     const releasing = createDeferred<void>();
     // Completion and its final release now commit in one owner transaction.
     edges.complete.mockImplementationOnce(() => { releasing.resolve(); return release.promise; });
@@ -69,7 +69,7 @@ describe("runtime ownership response", () => {
     expect(edges.after).not.toHaveBeenCalled();
     expect(edges.loaded).not.toHaveBeenCalled();
 
-    release.resolve(true);
+    release.resolve({ applied: true, owner: null });
     await expect((await response).json()).resolves.toEqual({ cutover: "postgres", status: "updated", owner: null });
     expect(edges.after).toHaveBeenCalledOnce();
     expect(edges.loaded).not.toHaveBeenCalled();
@@ -99,7 +99,7 @@ describe("runtime ownership response", () => {
       ...command, immediateRecheckRequested: false,
     } });
     await expect((await post()).json()).resolves.toMatchObject({ status: "updated" });
-    edges.complete.mockResolvedValueOnce(false);
+    edges.complete.mockResolvedValueOnce({ applied: false, owner: null });
     await expect((await post()).json()).resolves.toMatchObject({ status: "stale" });
     expect(edges.after).toHaveBeenCalledOnce();
     await edges.after.mock.calls[0]![0]();
@@ -128,7 +128,7 @@ describe("runtime ownership response", () => {
       operation: stage, attemptId: command.attemptId, generation: command.generation,
       ...(stage === "retire" ? { completed: false } : { runnerContainerName: "synthetic-slot" }),
     } });
-    edges[stage].mockResolvedValueOnce(false);
+    edges[stage].mockResolvedValueOnce(stage === "complete" ? { applied: false, owner: null } : false);
     await expect((await post()).json()).resolves.toMatchObject({ status: "stale" });
     expect(edges.after).not.toHaveBeenCalled();
     expect(edges.loaded).not.toHaveBeenCalled();
@@ -166,13 +166,14 @@ describe("runtime ownership response", () => {
     expect(edges.loaded).not.toHaveBeenCalled();
   });
 
-  it.each(["admission"] as const)("tells the Worker why a claim was blocked (%s)", async (reason) => {
+  it.each(["admission", "start_budget"] as const)("tells the Worker why a claim was blocked (%s)", async (reason) => {
     edges.authenticate.mockResolvedValueOnce({ userId: identity.userId,
       payload: { operation: "claim", processingMode: "system_mailbox" } });
     const cutover = "postgres";
-    edges.claim.mockResolvedValueOnce({ cutover, status: "blocked", reason });
+    const retry = reason === "start_budget" ? { retryAt: "2026-11-12T14:03:00.000Z" } : {};
+    edges.claim.mockResolvedValueOnce({ cutover, status: "blocked", reason, ...retry });
     await expect((await post()).json()).resolves.toEqual({
-      cutover, status: "blocked", owner: null, blockedReason: reason,
+      cutover, status: "blocked", owner: null, blockedReason: reason, ...retry,
     });
     expect(edges.claim).toHaveBeenCalledExactlyOnceWith({ prisma: {}, userId: identity.userId, processingMode: "system_mailbox" });
   });

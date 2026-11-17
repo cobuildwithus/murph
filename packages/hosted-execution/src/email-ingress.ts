@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   requireBoolean,
   requireObject,
@@ -9,6 +10,8 @@ import {
 } from "./parsers/assertions.ts";
 import type { HostedExecutionEmailAttachmentSummary } from "./contracts.ts";
 import { HOSTED_EMAIL_THREAD_TARGET_MAX_LENGTH } from "@murphai/runtime-state";
+
+import { readHostedEmailConversationAssistantIdentifierSecret } from "./assistant-identifiers.ts";
 
 const HOSTED_EMAIL_PROMPT_ADDRESS_MAX_COUNT = 8;
 const HOSTED_EMAIL_PROMPT_ATTACHMENT_MAX_COUNT = 12;
@@ -47,7 +50,7 @@ export function parseHostedEmailIngressWakeAppendRequest(
 ): HostedEmailIngressWakeAppendRequest {
   const record = requireObject(value, "Hosted email ingress wake append request");
 
-  return {
+  const request: HostedEmailIngressWakeAppendRequest = {
     ...(record.assistantStyleSettingsAuthorized === undefined
       ? {}
       : {
@@ -172,6 +175,11 @@ export function parseHostedEmailIngressWakeAppendRequest(
           ),
         }),
   };
+  const identity = readHostedEmailConversationAssistantIdentifierSecret({ ...request, channel: "email" });
+  if (!request.eventId.trim() || !identity.trim()) {
+    throw new ContractValidationError("Hosted email ingress event and conversation identity must not be blank.");
+  }
+  return request;
 }
 
 function parseHostedEmailIngressAttachmentSummaries(
@@ -180,10 +188,10 @@ function parseHostedEmailIngressAttachmentSummaries(
   maxCount: number,
 ): HostedExecutionEmailAttachmentSummary[] {
   if (!Array.isArray(value)) {
-    throw new TypeError(`${label} must be an array.`);
+    throw new ContractValidationError(`${label} must be an array.`);
   }
   if (value.length > maxCount) {
-    throw new TypeError(`${label} must include at most ${maxCount} items.`);
+    throw new ContractValidationError(`${label} must include at most ${maxCount} items.`);
   }
 
   return value.map((entry, index) => {
@@ -230,7 +238,7 @@ function readBoundedOptionalStringArray(
     return undefined;
   }
   if (values.length > maxCount) {
-    throw new TypeError(`${label} must include at most ${maxCount} items.`);
+    throw new ContractValidationError(`${label} must include at most ${maxCount} items.`);
   }
   for (const [index, entry] of values.entries()) {
     assertBoundedHostedEmailPromptString(entry, `${label}[${index}]`, maxChars);
@@ -256,6 +264,6 @@ function assertBoundedHostedEmailPromptString(
   maxChars: number,
 ): void {
   if (value.length > maxChars) {
-    throw new TypeError(`${label} must be at most ${maxChars} characters.`);
+    throw new ContractValidationError(`${label} must be at most ${maxChars} characters.`);
   }
 }

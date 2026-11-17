@@ -10,7 +10,7 @@ import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboardi
 
 export const GAME_CHAT_BLOCKED = "game_blocked";
 
-export type GameChatLifecycleKind = "started" | "rematch" | "change_cancelled" | "change_expired" | "change_resolved" | "cancelled" | "recap" | "missed" | "challenge" | "talk";
+export type GameChatLifecycleKind = "both_win" | "started" | "rematch" | "change_cancelled" | "change_expired" | "change_resolved" | "cancelled" | "recap" | "missed" | "challenge" | "talk";
 
 export function gameChatLifecycleEventId(gameId: string, kind: GameChatLifecycleKind, proposalId?: string, regenerationId?: string): string {
   if (kind === "challenge") {
@@ -23,7 +23,7 @@ export function gameChatLifecycleEventId(gameId: string, kind: GameChatLifecycle
     if (!proposalId) throw new Error("Game change resolution requires its proposal identity.");
     return `game-${kind.replace("_", "-")}:${gameId}:${proposalId}`;
   }
-  return `game-${kind}:${gameId}`;
+  return `game-${kind.replace("_", "-")}:${gameId}`;
 }
 
 /** Reserved from the accepted event draft in the same game write transaction. */
@@ -46,6 +46,7 @@ export async function reserveGameChatLifecycleTx(input: {
   regenerationId?: string;
   groupTalk?: boolean;
   now: Date;
+  retryAfterAt?: Date;
   tx: Pick<Prisma.TransactionClient, "hostedLinqDelivery">;
 }): Promise<void> {
   const key = createHostedLinqDeliveryIdempotencyLookupKey(gameChatLifecycleEventId(input.gameId, input.kind, input.proposalId, input.regenerationId));
@@ -53,7 +54,7 @@ export async function reserveGameChatLifecycleTx(input: {
   await input.tx.hostedLinqDelivery.createMany({
     data: [{ id: buildHostedLinqDeliveryId(key), idempotencyKey: key,
       source: "game_lifecycle", sourceRef: (input.kind === "change_cancelled" || input.kind === "change_expired" || input.kind === "change_resolved" || input.kind === "talk" && input.groupTalk) ? `${input.gameId}:${input.proposalId}` : input.regenerationId ? `${input.gameId}:${input.regenerationId}` : input.gameId, template: `game_${input.kind}`,
-      status: "awaiting_generation", targetKind: "thread", attemptedAt: input.now }],
+      status: "awaiting_generation", targetKind: "thread", attemptedAt: input.now, retryAfterAt: input.retryAfterAt }],
     skipDuplicates: true,
   });
 }

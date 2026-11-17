@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -77,7 +78,7 @@ describe("group tool dispatch wire contracts", () => {
     "unknown_action",
   ])("retains the shared unsupported-status diagnostic for %s", (action) => {
     expect(() => parseHostedRuntimeGroupToolResponse({ action, result: { status: "unknown_status" } }))
-      .toThrow(new TypeError("Hosted runtime group tool response action/status is not supported."));
+      .toThrow(new ContractValidationError("Hosted runtime group tool response action/status is not supported."));
   });
 
   it.each([
@@ -86,7 +87,7 @@ describe("group tool dispatch wire contracts", () => {
     ["arm_usage_referral", "Hosted runtime group tool arm_usage_referral response result status is not supported."],
   ])("retains the action-specific unsupported-status diagnostic for %s", (action, message) => {
     expect(() => parseHostedRuntimeGroupToolResponse({ action, result: { status: "unknown_status" } }))
-      .toThrow(new TypeError(message));
+      .toThrow(new ContractValidationError(message));
   });
 
   it("normalizes the legacy sender response without admitting its extra fields", () => {
@@ -113,6 +114,23 @@ describe("group tool dispatch wire contracts", () => {
 
   it("rejects unknown request actions at the public boundary", () => {
     expect(() => parseHostedRuntimeGroupToolRequest({ action: "unknown_action" }))
-      .toThrow(new TypeError("Hosted runtime group tool action is not supported."));
+      .toThrow(new ContractValidationError("Hosted runtime group tool action is not supported."));
+  });
+});
+
+
+describe("leave group wire contract", () => {
+  const request = { action: "leave_group", reason: "bot_loop", origin: { kind: "accepted_input", assistantInputId: `ain_${"a".repeat(32)}` } };
+  it("accepts only bounded reasons and accepted input", () => {
+    expect(parseHostedRuntimeGroupToolRequest(request)).toEqual(request);
+    for (const extra of ["target", "line", "force", "text", "linqThread"]) expect(() => parseHostedRuntimeGroupToolRequest({ ...request, [extra]: "untrusted" })).toThrow();
+    for (const kind of ["automation_occurrence", "game_recap", "system", "unknown"]) expect(() => parseHostedRuntimeGroupToolRequest({ ...request, origin: { ...request.origin, kind } })).toThrow();
+    for (const origin of [{ ...request.origin, extra: true }, { ...request.origin, assistantInputId: "" }, { ...request.origin, assistantInputId: "x".repeat(129) }]) expect(() => parseHostedRuntimeGroupToolRequest({ ...request, origin })).toThrow();
+    expect(() => parseHostedRuntimeGroupToolRequest({ ...request, reason: "free text" })).toThrow();
+  });
+  it.each(["left", "already_left", "unavailable"])("parses %s without provider claims", status => {
+    const result = { status, ...(status === "unavailable" ? { reason: "game_bound" } : {}) };
+    expect(parseHostedRuntimeGroupToolResponse({ action: "leave_group", result })).toEqual({ action: "leave_group", result });
+    expect(() => parseHostedRuntimeGroupToolResponse({ action: "leave_group", result: { ...result, removed: true } })).toThrow();
   });
 });

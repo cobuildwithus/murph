@@ -15,10 +15,10 @@ import {
 } from "../hosted-onboarding/shared";
 
 // Published versions: what every new acceptance records.
-export const HOSTED_TERMS_OF_SERVICE_VERSION = "2026-10-26";
-export const HOSTED_PRIVACY_POLICY_VERSION = "2026-10-26";
+export const HOSTED_TERMS_OF_SERVICE_VERSION = "2026-11-12";
+export const HOSTED_PRIVACY_POLICY_VERSION = "2026-11-12";
 /** Shared by the Consumer Health Data Notice and the Health AI Safety Disclosure. */
-export const HOSTED_HEALTH_NOTICE_DOCUMENT_VERSION = "2026-07-23";
+export const HOSTED_HEALTH_NOTICE_DOCUMENT_VERSION = "2026-11-12";
 
 /**
  * The oldest recorded version of each document that a grant still satisfies.
@@ -66,6 +66,7 @@ export const HOSTED_CONSENT_DOCUMENTS = [
 ] as const;
 
 export const HOSTED_HEALTH_DATA_CONSENT_SCOPE = "launch.health-data" as const;
+export const PROGRESS_SHARE_CONSENT_SCOPE = "feature.progress-share-images" as const;
 
 // Launch scopes preserve historical acceptance of the required documents. The
 // legal agreement remains immutable, while health-data consent can be withdrawn
@@ -117,6 +118,12 @@ export const HOSTED_CONSENT_SCOPES = [
       "privacy-policy",
       "consumer-health-data-notice",
     ],
+  },
+  {
+    scope: PROGRESS_SHARE_CONSENT_SCOPE,
+    label: "Progress share pictures",
+    revocable: true,
+    documentIds: ["privacy-policy", "consumer-health-data-notice", "health-ai-safety-disclosure"],
   },
 ] as const;
 
@@ -440,49 +447,8 @@ export async function revokeHostedConsentScope(input: {
     // serialization fence. Once this lock is acquired, every later admission
     // must observe the committed revocation before it can persist new work.
     await lockHostedMemberRow(tx, input.memberId);
-    const existingGrant = await tx.hostedConsentGrant.findUnique({
-      where: {
-        memberId_scope: {
-          memberId: input.memberId,
-          scope: input.scope,
-        },
-      },
-    });
-    const documentVersions = existingGrant
-      ? parseDocumentVersionsJson(existingGrant.documentVersionsJson)
-      : buildCurrentHostedConsentDocumentVersions(input.scope);
-
-    const event = await tx.hostedConsentEvent.create({
-      data: {
-        action: "revoked",
-        createdAt: now,
-        documentVersionsJson: documentVersions,
-        id: generateHostedConsentEventId(),
-        memberId: input.memberId,
-        scope: input.scope,
-        source,
-      },
-    });
-
-    if (existingGrant) {
-      await tx.hostedConsentGrant.update({
-        data: {
-          documentVersionsJson: documentVersions,
-          grantedAt: existingGrant.grantedAt,
-          lastEventId: event.id,
-          revokedAt: now,
-          source,
-          status: "revoked",
-          updatedAt: now,
-        },
-        where: {
-          memberId_scope: {
-            memberId: input.memberId,
-            scope: input.scope,
-          },
-        },
-      });
-    }
+    await recordHostedConsentDecisionTx({ tx, memberId: input.memberId, scope: input.scope,
+      decision: "deny", source, now, metadata: null });
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 
   return readHostedConsentStatus({
@@ -490,6 +456,48 @@ export async function revokeHostedConsentScope(input: {
     now,
     prisma: input.prisma,
   });
+}
+
+/** Caller holds the member lock so consent and the feature's effects commit together. */
+export async function recordHostedConsentDecisionTx(input: {
+  tx: Prisma.TransactionClient;
+  memberId: string;
+  scope: HostedConsentScope;
+  decision: "allow" | "deny";
+  source: string;
+  now: Date;
+  metadata: Prisma.InputJsonObject | null;
+}): Promise<void> {
+  const { tx, memberId, scope, decision, source, now } = input;
+  const where = { memberId_scope: { memberId, scope } };
+  const grant = await tx.hostedConsentGrant.findUnique({ where });
+  const prior = grant ? null : await tx.hostedConsentEvent.findFirst({
+    where: { memberId, scope }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], select: { action: true },
+  });
+  const allowed = grant?.status === "granted";
+  if (decision === "allow" ? allowed : (grant?.status === "revoked" || prior?.action === "declined" || prior?.action === "revoked")) return;
+  const documentVersions = decision === "deny" && grant
+    ? grant.documentVersionsJson as Prisma.InputJsonObject
+    : buildCurrentHostedConsentDocumentVersions(scope);
+  const event = await tx.hostedConsentEvent.create({ data: {
+    id: generateHostedConsentEventId(), memberId, scope, source, createdAt: now,
+    action: decision === "allow" ? "granted" : grant ? "revoked" : "declined",
+    documentVersionsJson: documentVersions,
+    ...(input.metadata === null ? {} : { metadataJson: input.metadata }),
+  } });
+  if (decision === "allow") {
+    await tx.hostedConsentGrant.upsert({ where,
+      create: { memberId, scope, source, status: "granted", grantedAt: now, createdAt: now, updatedAt: now,
+        lastEventId: event.id, documentVersionsJson: documentVersions },
+      update: { source, status: "granted", grantedAt: now, revokedAt: null, updatedAt: now,
+        lastEventId: event.id, documentVersionsJson: documentVersions },
+    });
+  } else if (grant) {
+    await tx.hostedConsentGrant.update({ where, data: {
+      source, status: "revoked", revokedAt: now, updatedAt: now, lastEventId: event.id,
+      documentVersionsJson: documentVersions,
+    } });
+  }
 }
 
 export async function assertHostedConsentScopeGranted(input: {

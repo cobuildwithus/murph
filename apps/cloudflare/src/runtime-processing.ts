@@ -1,9 +1,10 @@
+import { RequestInputError } from "@murphai/hosted-execution/request-input";
 import { observeRuntimeProcessingFence, type RuntimeProcessingDiagnostics } from "./user-runner/diagnostics.ts";
 import type { HostedRuntimeEnsureProcessingResponse } from "@murphai/hosted-execution/orchestration-control";
 import { emitHostedExecutionStructuredLog } from "@murphai/hosted-execution";
 import { parseHostedWorkspaceReadResponse } from "@murphai/hosted-execution/parsers";
 import { HOSTED_RUNTIME_WORKSPACE_PATH } from "@murphai/hosted-execution/routes";
-import type { HostedRuntimeOwnerCommand, HostedRuntimeOwnerSnapshot } from "@murphai/hosted-execution/runtime-owner";
+import { HOSTED_RUNTIME_START_BUDGET_INTERVAL_MS, type HostedRuntimeOwnerCommand, type HostedRuntimeOwnerSnapshot } from "@murphai/hosted-execution/runtime-owner";
 import { readHostedExecutionEnvironment } from "./env.ts";
 import { asWorkerStringEnvironment } from "./worker-contracts.ts";
 import type { WorkerEnvironmentSource } from "./worker-routes/shared.ts";
@@ -93,15 +94,24 @@ async function ensureRuntimeProcessing(context: ReturnType<typeof createProcessi
   const ctx = { ...context, namespace: context.namespace };
   let claim = await readRuntimeAdmission(ctx);
   let previousGeneration: string | undefined;
-  // One completed owner, one expired retained target, then its fresh successor.
-  // Contention beyond these bounded transitions belongs to the existing retry owner.
+  // One completed owner, one expired retained target or failed readiness, then its
+  // fresh successor. Contention beyond these bounded transitions belongs to the
+  // existing retry owner.
   for (let admission = 0; admission < 3; admission += 1) {
     const owner = claim.owner;
     if (claim.blockedReason === "admission") {
       return retryProcessing(ctx, "admission_blocked", Date.now() + HOSTED_RUNTIME_ADMISSION_BLOCKED_RETRY_MS);
     }
+    if (claim.blockedReason === "start_budget") {
+      const retryAt = Date.parse(claim.retryAt ?? "");
+      return retryProcessing(ctx, "start_budget_exhausted",
+        Number.isFinite(retryAt) ? retryAt : Date.now() + HOSTED_RUNTIME_START_BUDGET_INTERVAL_MS);
+    }
     if (!owner || (claim.status !== "claimed" && claim.status !== "existing")) return retryProcessing(ctx, "claim_blocked");
-    if (owner.userId !== ctx.input.userId) throw new TypeError("Runtime admission belongs to a different member.");
+    if (owner.userId !== ctx.input.userId) {
+      const message = "Runtime admission belongs to a different member.";
+      throw claim === ctx.input.admission ? new RequestInputError(message) : new TypeError(message);
+    }
     if (owner.generation === previousGeneration) return retryProcessing(ctx, "claim_blocked");
     previousGeneration = owner.generation;
     if (owner.attemptId && owner.processingMode) observeRuntimeProcessingFence(diagnostics, {
@@ -170,7 +180,7 @@ function createProcessingContext(source: RuntimeProcessingSource, input: Runtime
 }
 
 function retryProcessing(ctx: { diagnostics: RuntimeProcessingDiagnostics }, reason:
-  | "missing_container_binding" | "admission_blocked"
+  | "missing_container_binding" | "admission_blocked" | "start_budget_exhausted"
   | "claim_blocked" | "retirement_pending" | "completion_unconfirmed" | "starting_fence_preserved"
   | "processing_mode_conflict" | "wake_unconfirmed" | "container_not_ready"
   | "command_budget_exhausted" | "container_rpc_timeout",
@@ -233,6 +243,14 @@ function retirementAttemptAtEpochMs(since: string | null): number {
   return since ? Date.parse(since) + 30_000 : 0;
 }
 
+// A finished run's container normally proves stopped about a second after
+// completion, so recheck quickly at first. One that stays up keeps the normal
+// pace, which bounds retries before the retirement deadline.
+function completionSettleRetryAtEpochMs(completedAt: string | null): number | undefined {
+  const completedAtMs = completedAt ? Date.parse(completedAt) : Number.NaN;
+  return Date.now() < completedAtMs + 5_000 ? Date.now() + 500 : undefined;
+}
+
 async function reconcileCompletedRuntime(ctx: ProcessingContext, owner: HostedRuntimeOwnerSnapshot, runnerContainerName: string): Promise<HostedRuntimeEnsureProcessingResponse | null> {
   const identity = requireIdentity(owner);
   const live = await readRuntimeFenceLivenessBestEffort({ commandBudget: ctx.budget,
@@ -242,7 +260,8 @@ async function reconcileCompletedRuntime(ctx: ProcessingContext, owner: HostedRu
     // Active, mismatched or unknown liveness settles nothing. A completed attempt has no
     // outcome left to preserve, so past the window a confirmed stop is the way through.
     return retirementAttemptAtEpochMs(owner.completedAt ?? owner.startedAt) > Date.now()
-      ? retryProcessing(ctx, "completion_unconfirmed") : retireRuntime(ctx, owner);
+      ? retryProcessing(ctx, "completion_unconfirmed", completionSettleRetryAtEpochMs(owner.completedAt))
+      : retireRuntime(ctx, owner);
   }
   await ctx.step("complete_invocation", () => recordHostedRuntimeOwnerCompletion({
     source: ctx.source, userId: ctx.input.userId, ...identity,
@@ -291,11 +310,21 @@ async function startClaimedRuntime(ctx: ProcessingContext, initialOwner: HostedR
     || binding.slotName !== owner.runnerContainerName) throw new Error("Hosted runtime target binding mismatch.");
   const container = ctx.namespace.getByName(binding.slotName);
   if (!container.ensureReadyForProcessing || !container.startSupervisedInvocation) throw new Error("Native runtime supervision is unavailable.");
+  const readiness = ctx.step("container_readiness", () => container.ensureReadyForProcessing!({ userId: ctx.input.userId, orchestrationAttemptId: ctx.input.orchestrationAttemptId,
+    timeoutMs: readRuntimeProcessingCommandStepTimeoutMs({ budget: ctx.budget, stepTimeoutMs: 15_000 }) }), 15_000);
+  // Recover in place only when a rejection is this command's own failure. Foreground
+  // priority rejects a background start's readiness on purpose, and a supplied claim
+  // can reach a second command that launches meanwhile.
+  const ownsStart = ctx.mode === "default" && ctx.input.admission?.owner?.attemptId !== owner.attemptId;
   const [ready, prepared] = await Promise.all([
-    ctx.step("container_readiness", () => container.ensureReadyForProcessing!({ userId: ctx.input.userId, orchestrationAttemptId: ctx.input.orchestrationAttemptId,
-      timeoutMs: readRuntimeProcessingCommandStepTimeoutMs({ budget: ctx.budget, stepTimeoutMs: 15_000 }) }), 15_000),
+    // A deadline leaves readiness in flight and keeps the existing recovery.
+    !ownsStart ? readiness
+      : readiness.catch((error: unknown) => { if (isProcessingTimeout(error)) throw error; return null; }),
     ctx.step("prepare_invocation", () => prepare(ownerToken(owner), binding)),
   ]);
+  // Nothing has launched. Prove the exact target stopped now and re-admit, rather
+  // than leave the owner to its startup deadline.
+  if (!ready) return retireRuntime(ctx, owner);
   if (ready.kind !== "ready") return retryProcessing(ctx, "container_not_ready");
   // The slot submits `prepare_launch` itself, immediately before its receipt.
   await ctx.step("start_invocation", () => container.startSupervisedInvocation!({ userId: ctx.input.userId, job: prepared.job,

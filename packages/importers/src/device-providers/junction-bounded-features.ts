@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { resolveJunctionTimeseriesResourcePolicy } from "@murphai/contracts";
 
 import { stripUndefined } from "../shared.ts";
@@ -1021,5 +1022,5 @@ function round(value: number): number {
 }
 
 function invalid(message: string): never {
-  throw new TypeError(`Junction ${message}.`);
+  throw new ContractValidationError(`Junction ${message}.`);
 }

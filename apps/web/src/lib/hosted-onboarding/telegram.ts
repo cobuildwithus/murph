@@ -1,4 +1,5 @@
 import { timingSafeEqual } from "node:crypto";
+import { parseInput } from "@murphai/hosted-execution/request-input";
 
 import {
   HOSTED_EXECUTION_TELEGRAM_MESSAGE_SCHEMA,
@@ -64,7 +65,7 @@ export function assertHostedTelegramWebhookSecret(secretToken: string | null): v
 }
 
 export function parseHostedTelegramWebhookUpdate(rawBody: string): TelegramUpdateLike {
-  return parseTelegramWebhookUpdate(rawBody);
+  return parseInput(rawBody, () => parseTelegramWebhookUpdate(rawBody));
 }
 
 export function buildHostedTelegramMessagePayload(
@@ -99,10 +100,10 @@ export function buildHostedTelegramMessagePayload(
 export async function summarizeHostedTelegramWebhook(
   update: TelegramUpdateLike,
 ): Promise<HostedTelegramWebhookSummary | null> {
-  const summary = summarizeTelegramUpdate({
+  const summary = parseInput(update, () => summarizeTelegramUpdate({
     inferBotUserIdFromMessage: true,
     update,
-  });
+  }));
 
   if (!summary) {
     return null;

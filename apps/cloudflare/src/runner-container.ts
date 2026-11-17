@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { HOSTED_EXECUTION_DEFAULT_RUNNER_IDLE_TTL_MS } from "@murphai/hosted-execution/contracts";
 import type { HostedRuntimeOwnerCommand } from "@murphai/hosted-execution/runtime-owner";
 import type { HostedWorkspaceInvocationResult } from "@murphai/hosted-execution/runtime-control";
@@ -113,6 +114,8 @@ const DEFAULT_RUNNER_ABORT_WORKSPACE_INVOCATION_TIMEOUT_MS = 1_000;
 const DEFAULT_RUNNER_ACTIVE_LIVENESS_TIMEOUT_MS = 1_000;
 const DEFAULT_RUNNER_RUNTIME_WAKE_TIMEOUT_MS = 5_000;
 const RUNNER_RECENT_READINESS_PROOF_MAX_AGE_MS = 5_000;
+// Media forwards one recap may make: four scenes and up to three takes of its song.
+const RECAP_MEDIA_REQUESTS = 7;
 const RUNNER_READINESS_ABORT_SETTLEMENT_TIMEOUT_MS = 5_000;
 export const RUNNER_CONTAINER_STARTUP_FAILURE_ELAPSED_MAX_MS = 60_000;
 const RUNNER_METADATA_RESPONSE_BODY_MAX_BYTES = 64 * 1024;
@@ -654,6 +657,9 @@ export class RunnerContainer extends Container {
   private lastActivityObservedAtMs: number | null = null;
   private lastActivityObservedStage: string | null = null;
   private lastDestroyRequest: RunnerContainerDestroyRequestRecord | null = null;
+  // Native destroy can settle before the SDK delivers onStop. Diagnostics only;
+  // lifecycle and wake fencing still clear at the native stop receipt.
+  private stoppedDestroyRequest: RunnerContainerDestroyRequestRecord | null = null;
   private recentReadinessProof: RunnerContainerReadinessProof | null = null;
   private stopGeneration = 0;
   private warmShellInvalidatedByUnsettledDestroy = false;
@@ -1032,7 +1038,7 @@ export class RunnerContainer extends Container {
         generation: payload.job.request.leaseGeneration,
         settledRunnerContainerName: target.slotName,
       });
-      if (recorded) await this.onRuntimeCompletionRecorded({
+      if (recorded.completed) await this.onRuntimeCompletionRecorded({
         attemptId: payload.job.request.attemptId,
         leaseGeneration: payload.job.request.leaseGeneration,
         userId: payload.userId,
@@ -1056,8 +1062,8 @@ export class RunnerContainer extends Container {
     const completed = await recordHostedRuntimeOwnerCompletion({
       source: this.environment, userId: input.userId, attemptId: input.attemptId, generation: input.generation,
     });
-    if (completed) await this.onRuntimeCompletionRecorded({ userId: input.userId, attemptId: input.attemptId, leaseGeneration: input.generation });
-    return completed ? { completed: true } : { completed: false, reason: "canonical_completion_rejected" };
+    if (completed.completed) await this.onRuntimeCompletionRecorded({ userId: input.userId, attemptId: input.attemptId, leaseGeneration: input.generation });
+    return completed;
   }
 
   async readSupervisedInvocation(input: { userId: string }): Promise<RunnerInvocationReceipt | null> {
@@ -1097,7 +1103,7 @@ export class RunnerContainer extends Container {
     const invocation = this.requireInvocationReceiptStore().readProviderInvocation();
     const scope = this.recapMedia;
     if (!invocation || !scope?.active || invocation.attemptId !== input.attemptId || invocation.generation !== input.generation
-      || scope.attemptId !== input.attemptId || scope.generation !== input.generation || scope.count >= 6) return false;
+      || scope.attemptId !== input.attemptId || scope.generation !== input.generation || scope.count >= RECAP_MEDIA_REQUESTS) return false;
     scope.count += 1;
     return true;
   }
@@ -2484,11 +2490,13 @@ export class RunnerContainer extends Container {
     this.reportStandbySlotStopped();
     const context = this.currentLogContext;
     const cleanExit = params.exitCode === 0;
-    const lifecycleDetails = this.buildLifecycleDiagnosticDetails();
+    const lifecycleDetails = this.buildLifecycleDiagnosticDetails(
+      this.lastDestroyRequest ?? this.stoppedDestroyRequest,
+    );
     const stopClassification = classifyRunnerContainerStop({
       activeWorkspaceInvocationPresent: this.workspaceInvocationOperations.length > 0,
       cleanExit,
-      destroyRequestPresent: this.lastDestroyRequest !== null,
+      destroyRequestPresent: lifecycleDetails.destroyRequestPresent === true,
       idleTtlDeltaMs: readNullableNumber(lifecycleDetails.idleTtlDeltaMs),
     });
     // onStop has no start identity. Preserve a bounded replacement start until
@@ -2500,6 +2508,13 @@ export class RunnerContainer extends Container {
       && this.currentContainerStart !== null
     )
       && this.recordCurrentContainerStopped();
+    this.stoppedDestroyRequest = null;
+    const expectedStop = cleanExit || (
+      params.exitCode === 137
+      && stopClassification === "requested-nonzero-stop"
+      && (lifecycleDetails.destroyRequestReason === "invoke-completed"
+        || lifecycleDetails.destroyRequestReason === "activity-expired")
+    );
     emitHostedExecutionStructuredLog({
       component: "container",
       details: {
@@ -2511,11 +2526,11 @@ export class RunnerContainer extends Container {
         stopClassification,
         stopReason: params.reason,
       },
-      level: cleanExit ? "info" : "warn",
-      message: cleanExit
+      level: expectedStop ? "info" : "warn",
+      message: expectedStop
         ? "Hosted execution container lifecycle hook reported stop."
         : "Hosted execution container lifecycle hook reported non-zero stop.",
-      phase: cleanExit ? "container.ready" : "failed",
+      phase: expectedStop ? "container.ready" : "failed",
       userId: context?.userId,
     });
   }
@@ -3759,6 +3774,7 @@ export class RunnerContainer extends Container {
       this.recordContainerActivityObserved("onStart");
       this.lastActivityExpiryAtMs = null;
       this.lastDestroyRequest = null;
+      this.stoppedDestroyRequest = null;
       return existing;
     }
     return this.replaceCurrentContainerStart(startedAtMs, maxAgeMs, false);
@@ -3781,6 +3797,7 @@ export class RunnerContainer extends Container {
     this.recordContainerActivityObserved("onStart");
     this.lastActivityExpiryAtMs = null;
     this.lastDestroyRequest = null;
+    this.stoppedDestroyRequest = null;
     return currentStart;
   }
 
@@ -3804,6 +3821,7 @@ export class RunnerContainer extends Container {
     this.recordContainerActivityObserved(observedBy);
     this.lastActivityExpiryAtMs = null;
     this.lastDestroyRequest = null;
+    this.stoppedDestroyRequest = null;
     return currentStart;
   }
 
@@ -3833,6 +3851,7 @@ export class RunnerContainer extends Container {
     this.lastActivityExpiryAtMs = null;
     this.lastActivityObservedAtMs = null;
     this.lastActivityObservedStage = null;
+    this.stoppedDestroyRequest = this.lastDestroyRequest;
     this.lastDestroyRequest = null;
     return true;
   }
@@ -3861,14 +3880,16 @@ export class RunnerContainer extends Container {
     });
   }
 
-  private buildLifecycleDiagnosticDetails(): HostedExecutionStructuredLogDetails {
+  private buildLifecycleDiagnosticDetails(
+    destroyRequest = this.lastDestroyRequest,
+  ): HostedExecutionStructuredLogDetails {
     const nowMs = Date.now();
     const runnerIdleTtlMs = readRunnerContainerIdleTtlMs(this.environment);
     const containerUptimeMs = readElapsedMs(
       this.currentContainerStart?.startedAtMs ?? null,
       nowMs,
     );
-    const destroyRequestAgeMs = readElapsedMs(this.lastDestroyRequest?.requestedAtMs ?? null, nowMs);
+    const destroyRequestAgeMs = readElapsedMs(destroyRequest?.requestedAtMs ?? null, nowMs);
     const lastActivityExpiryAgeMs = readElapsedMs(this.lastActivityExpiryAtMs, nowMs);
     const lastActivityObservedAgeMs = readElapsedMs(this.lastActivityObservedAtMs, nowMs);
 
@@ -3878,10 +3899,10 @@ export class RunnerContainer extends Container {
         ?? (this.currentContainerStart ? "onStart" : null),
       containerUptimeMs,
       destroyRequestAgeMs,
-      destroyRequestFailClosed: this.lastDestroyRequest?.failClosed ?? null,
-      destroyRequestPresent: this.lastDestroyRequest !== null,
-      destroyRequestReason: this.lastDestroyRequest?.reason ?? null,
-      destroyRequestStatusBeforeDestroy: this.lastDestroyRequest?.statusBeforeDestroy ?? null,
+      destroyRequestFailClosed: destroyRequest?.failClosed ?? null,
+      destroyRequestPresent: destroyRequest !== null,
+      destroyRequestReason: destroyRequest?.reason ?? null,
+      destroyRequestStatusBeforeDestroy: destroyRequest?.statusBeforeDestroy ?? null,
       idleTtlDeltaMs: lastActivityObservedAgeMs === null ? null : lastActivityObservedAgeMs - runnerIdleTtlMs,
       lastActivityExpiryAgeMs,
       lastActivityObservedAgeMs,
@@ -4738,7 +4759,7 @@ function assertRunnerContainerEnsureProcessingUserIds(
   input: RunnerContainerEnsureProcessingInput,
 ): void {
   if (input.activeRuntime && input.activeRuntime.userId !== input.userId) {
-    throw new TypeError("Hosted runner container ensureProcessing activeRuntime userId must match input userId.");
+    throw new ContractValidationError("Hosted runner container ensureProcessing activeRuntime userId must match input userId.");
   }
 
   if (!input.invoke) {
@@ -4746,12 +4767,12 @@ function assertRunnerContainerEnsureProcessingUserIds(
   }
 
   if (input.invoke.userId !== input.userId) {
-    throw new TypeError("Hosted runner container ensureProcessing invoke userId must match input userId.");
+    throw new ContractValidationError("Hosted runner container ensureProcessing invoke userId must match input userId.");
   }
 
   const jobUserId = readHostedExecutionRunnerJobUserId(input.invoke.job);
   if (jobUserId !== input.userId) {
-    throw new TypeError("Hosted runner container ensureProcessing job userId must match input userId.");
+    throw new ContractValidationError("Hosted runner container ensureProcessing job userId must match input userId.");
   }
 }
 
@@ -4794,7 +4815,7 @@ function parseHostedExecutionContainerInvokeInput(
   const jobUserId = readHostedExecutionRunnerJobUserId(job);
 
   if (userId !== jobUserId) {
-    throw new TypeError("Hosted runner container invoke userId must match workspace job userId.");
+    throw new ContractValidationError("Hosted runner container invoke userId must match workspace job userId.");
   }
 
   return {
@@ -4807,7 +4828,7 @@ function parseHostedExecutionContainerInvokeInput(
 
 function requireString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.length === 0) {
-    throw new TypeError(`${label} must be a non-empty string.`);
+    throw new ContractValidationError(`${label} must be a non-empty string.`);
   }
 
   return value;
@@ -4819,7 +4840,7 @@ function readTimeoutMs(value: unknown, fallback: number): number {
   }
 
   if (typeof value !== "number" || !Number.isFinite(value) || value < 1) {
-    throw new TypeError("timeoutMs must be a positive number.");
+    throw new ContractValidationError("timeoutMs must be a positive number.");
   }
 
   return Math.trunc(value);
@@ -5480,7 +5501,7 @@ function readHostedExecutionErrorNameForCode(code: string | null): string | null
 
 function requireRunnerSlotTimeout(value: number): number {
   if (!Number.isSafeInteger(value) || value <= 0 || value > 120_000) {
-    throw new TypeError("Hosted standby readiness timeout is invalid.");
+    throw new ContractValidationError("Hosted standby readiness timeout is invalid.");
   }
   return value;
 }

@@ -141,6 +141,7 @@ function buildStoredActivityMetricCandidates(
           candidate.dataOrigin?.sourceType,
         ),
       },
+      ...(candidate.partialCountOfFinishedDay ? { partialCountOfFinishedDay: true as const } : {}),
       provider,
       publicProvider,
       recordedAt: candidate.recordedAt,

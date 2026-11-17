@@ -11,8 +11,8 @@ import {
   exerciseFacetsResultSchema,
   exerciseListResultSchema,
   exerciseShowResultSchema,
-  listResultSchema,
-  showResultSchema,
+  recordListResultSchema,
+  recordShowResultSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
 import type { InboxServices } from '@murphai/inbox-services'
 import type { VaultServices } from '@murphai/vault-usecases'
@@ -1621,13 +1621,13 @@ export const vaultCliCommandDescriptors = [
         path: ['show'],
         description:
           'Read one canonical vault record through the query layer when you already know the exact canonical read id. Generic `show` accepts canonical family ids such as `meal_*` and `doc_*`; use family-specific manifest commands for import provenance reads.',
-        output: showResultSchema,
+        output: recordShowResultSchema,
       },
       {
         path: ['list'],
         description:
           'List canonical vault records through the query layer when you need structured filtering by family, kind, status, stream, tag, or date range.',
-        output: listResultSchema,
+        output: recordListResultSchema,
       },
     ],
     directVaultServiceBindings: {

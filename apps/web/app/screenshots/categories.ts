@@ -35,7 +35,7 @@ export const SCREENSHOT_CATEGORIES = [
   {
     id: "ops",
     label: "Operations",
-    description: "Internal usage, growth, changelog, and presentation studies.",
+    description: "Internal usage, free idle members, growth, changelog, and presentation studies.",
   },
 ] as const;
 

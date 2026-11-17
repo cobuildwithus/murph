@@ -1,3 +1,4 @@
+import { ContractValidationError } from "./validation-error.ts";
 import * as z from "./zod-runtime.ts";
 
 export const telegramRichContentCardV1Bounds = {
@@ -338,5 +339,5 @@ function normalizeFallback(value: string): string {
 }
 
 function invalid(): never {
-  throw new TypeError("Invalid Telegram rich content.");
+  throw new ContractValidationError("Invalid Telegram rich content.");
 }

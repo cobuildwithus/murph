@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   HOSTED_EXECUTION_NONCE_HEADER,
   HOSTED_EXECUTION_SIGNING_KEY_ID_HEADER,
@@ -30,18 +31,18 @@ export function readHostedExecutionRuntimeAuthority(
   const query = url.searchParams;
   if (!query.has(RUNTIME_AUTHORITY_QUERY)) {
     if (RUNTIME_AUTHORITY_FIELDS.some(([name]) => query.has(name))) {
-      throw new TypeError("Hosted runtime authority is incomplete.");
+      throw new ContractValidationError("Hosted runtime authority is incomplete.");
     }
     return null;
   }
   if (query.getAll(RUNTIME_AUTHORITY_QUERY).length !== 1
     || query.get(RUNTIME_AUTHORITY_QUERY) !== "1") {
-    throw new TypeError("Hosted runtime authority version is invalid.");
+    throw new ContractValidationError("Hosted runtime authority version is invalid.");
   }
   for (const [name, header] of RUNTIME_AUTHORITY_FIELDS) {
     if (query.getAll(name).length > 1
       || (headers.has(header) && headers.get(header) !== query.get(name))) {
-      throw new TypeError("Hosted runtime authority identities conflict.");
+      throw new ContractValidationError("Hosted runtime authority identities conflict.");
     }
   }
   const attemptId = query.get("runtimeAttempt") ?? "";
@@ -50,7 +51,7 @@ export function readHostedExecutionRuntimeAuthority(
   if (!/^[A-Za-z0-9._:-]{1,200}$/u.test(attemptId)
     || !isRuntimeAuthorityCounter(generation)
     || (workspaceVersion !== null && !isRuntimeAuthorityCounter(workspaceVersion))) {
-    throw new TypeError("Hosted runtime authority identity is invalid.");
+    throw new ContractValidationError("Hosted runtime authority identity is invalid.");
   }
   return { attemptId, generation, workspaceVersion };
 }

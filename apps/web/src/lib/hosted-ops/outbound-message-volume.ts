@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
 import { createHash } from "node:crypto";
@@ -36,10 +37,10 @@ export async function recordHostedOutboundMessageVolumeReceipt(input: {
   const authenticatedUserId = input.authenticatedUserId.trim();
   const dedupeKey = input.dedupeKey.trim();
   if (!authenticatedUserId) {
-    throw new TypeError("Hosted outbound message-volume receipt requires a user.");
+    throw new ContractValidationError("Hosted outbound message-volume receipt requires a user.");
   }
   if (!ASSISTANT_OUTBOX_DEDUPE_KEY_PATTERN.test(dedupeKey)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted outbound message-volume receipt requires an outbox dedupe key.",
     );
   }

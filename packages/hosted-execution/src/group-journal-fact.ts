@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   HOSTED_EXECUTION_GROUP_JOURNAL_FACT_MAX_NOTE_LENGTH,
   HOSTED_EXECUTION_GROUP_JOURNAL_FACT_MAX_TITLE_LENGTH,
@@ -11,7 +12,7 @@ export function parseHostedExecutionGroupJournalFactPayload(
   value: unknown,
 ): HostedExecutionGroupJournalFactPayload {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new TypeError("Hosted execution group Journal fact payload must be an object.");
+    throw new ContractValidationError("Hosted execution group Journal fact payload must be an object.");
   }
   const record = value as Record<string, unknown>;
   const keys = Object.keys(record).sort();
@@ -20,11 +21,11 @@ export function parseHostedExecutionGroupJournalFactPayload(
     keys.length !== expectedKeys.length
     || keys.some((key, index) => key !== expectedKeys[index])
   ) {
-    throw new TypeError("Hosted execution group Journal fact payload has invalid fields.");
+    throw new ContractValidationError("Hosted execution group Journal fact payload has invalid fields.");
   }
   const date = requireBoundedString(record.date, "date", 10);
   if (!STRICT_ISO_DATE.test(date) || Number.isNaN(Date.parse(`${date}T00:00:00.000Z`))) {
-    throw new TypeError("Hosted execution group Journal fact date is invalid.");
+    throw new ContractValidationError("Hosted execution group Journal fact date is invalid.");
   }
   if (
     !Number.isInteger(record.factIndex)
@@ -32,13 +33,13 @@ export function parseHostedExecutionGroupJournalFactPayload(
     || record.factIndex < 1
     || record.factIndex > 8
   ) {
-    throw new TypeError("Hosted execution group Journal fact index is invalid.");
+    throw new ContractValidationError("Hosted execution group Journal fact index is invalid.");
   }
   const noteType = requireBoundedString(record.noteType, "noteType", 40);
   if (!HOSTED_EXECUTION_GROUP_JOURNAL_FACT_NOTE_TYPES.includes(
     noteType as HostedExecutionGroupJournalFactPayload["noteType"],
   )) {
-    throw new TypeError("Hosted execution group Journal fact note type is invalid.");
+    throw new ContractValidationError("Hosted execution group Journal fact note type is invalid.");
   }
   return {
     date,
@@ -59,11 +60,11 @@ export function parseHostedExecutionGroupJournalFactPayload(
 
 function requireBoundedString(value: unknown, label: string, maxLength: number): string {
   if (typeof value !== "string") {
-    throw new TypeError(`Hosted execution group Journal fact ${label} must be a string.`);
+    throw new ContractValidationError(`Hosted execution group Journal fact ${label} must be a string.`);
   }
   const normalized = value.trim();
   if (normalized.length === 0 || Array.from(normalized).length > maxLength) {
-    throw new TypeError(`Hosted execution group Journal fact ${label} is out of bounds.`);
+    throw new ContractValidationError(`Hosted execution group Journal fact ${label} is out of bounds.`);
   }
   return normalized;
 }

@@ -542,7 +542,7 @@ describe("hosted assistant delivery contracts", () => {
     ).toEqual(payload);
   });
 
-  it("parses Telegram assistant-delivery song media via the music generation transport", () => {
+  it.each(["music_v2", "music_v2_5"] as const)("preserves %s in saved Telegram music side effects", (modelId) => {
     const payload = createHostedAssistantDeliveryPayload({
       media: [{
         filename: "song.mp3",
@@ -553,7 +553,7 @@ describe("hosted assistant delivery contracts", () => {
             durationMs: 30_000,
             forceInstrumental: true,
             kind: "elevenlabs_music",
-            modelId: "music_v2",
+            modelId,
             outputFormat: "mp3_48000_192",
             prompt: "Upbeat lo-fi piano motif",
           },
@@ -570,6 +570,23 @@ describe("hosted assistant delivery contracts", () => {
         payload,
       }).payload,
     ).toEqual(payload);
+  });
+
+  it.each(["music_v1", "unknown-model"])("rejects saved music side effects naming %s", modelId => {
+    expect(() => parseHostedAssistantDeliverySideEffect({
+      ...buildHostedAssistantDeliveryEffect({
+        dedupeKey: "dedupe-1", effectId: "intent-1", payload: createHostedAssistantDeliveryPayload(),
+      }),
+      payload: {
+        ...createHostedAssistantDeliveryPayload(),
+        media: [{ kind: "voice_memo", filename: "song.mp3", transcript: null,
+          transport: { kind: "telegram_generation", generation: {
+            kind: "elevenlabs_music", durationMs: 30_000, forceInstrumental: true,
+            modelId, outputFormat: "mp3_48000_192", prompt: "Synthetic piano motif",
+          } },
+        }],
+      },
+    })).toThrow(/modelId must be a supported ElevenLabs music model/);
   });
 
   it("rejects assistant-delivery voice memo media with an unknown transport kind", () => {

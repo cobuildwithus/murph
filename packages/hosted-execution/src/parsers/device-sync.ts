@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { parseHostedExecutionDeviceSyncWakeHint as parseOwnedHostedExecutionDeviceSyncWakeHint } from "@murphai/device-syncd/hosted-runtime";
 
 import type {
@@ -13,7 +14,7 @@ export function parseHostedExecutionDeviceSyncExpectedConnectedAt(
   const timestamp = requireString(value, label);
   const parsed = Date.parse(timestamp);
   if (Number.isNaN(parsed) || new Date(parsed).toISOString() !== timestamp) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} must be a valid ISO-8601 timestamp in canonical UTC form.`,
     );
   }
@@ -42,5 +43,5 @@ export function parseHostedExecutionDeviceSyncReason(
     return reason;
   }
 
-  throw new TypeError(`Unsupported hosted execution device-sync.wake reason: ${reason}`);
+  throw new ContractValidationError(`Unsupported hosted execution device-sync.wake reason: ${reason}`);
 }

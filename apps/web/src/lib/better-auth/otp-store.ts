@@ -3,7 +3,7 @@ import type { Prisma } from "@prisma/client";
 import { authLookupKey } from "./record-crypto";
 
 export function hostedAuthOtpIdentifier(contact: { kind: "email" | "phone"; value: string }): string {
-  // Pinned Better Auth 1.7.3 emailOTP and phoneNumber identifier contracts.
+  // Better Auth emailOTP sign-in key; raw phone keys belong to our SMS challenge owner.
   return contact.kind === "email" ? `sign-in-otp-${contact.value}` : contact.value;
 }
 

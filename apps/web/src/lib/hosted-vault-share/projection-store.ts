@@ -1,3 +1,5 @@
+import { parseInput } from "@murphai/hosted-execution/request-input";
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
 import { createHash } from "node:crypto";
@@ -69,7 +71,7 @@ export async function findActiveHostedVaultSharePage(input: {
   sourceWorkspaceVersion: string;
 }): Promise<ActiveHostedVaultSharePage> {
   const prisma = input.prisma ?? getPrisma();
-  const continuation = parseHostedVaultShareDeliveryContinuation(input.continuation);
+  const continuation = parseInput(input.continuation, parseHostedVaultShareDeliveryContinuation);
   const projectionScopeKey = buildHostedVaultShareProjectionScopeKey(
     input.projectionScope,
   );
@@ -339,7 +341,7 @@ function parseHostedVaultShareDeliveryContinuation(value: unknown): string | nul
     return null;
   }
   if (!isHostedRuntimeVaultShareDeliverContinuation(value)) {
-    throw new TypeError("Hosted vault-share delivery continuation is invalid.");
+    throw new ContractValidationError("Hosted vault-share delivery continuation is invalid.");
   }
   return value;
 }

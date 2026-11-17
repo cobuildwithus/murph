@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   buildTelegramThreadId,
   extractTelegramMessage,
@@ -89,7 +90,7 @@ export async function normalizeTelegramUpdate({
   const message = extractTelegramMessage(update);
 
   if (!message) {
-    throw new TypeError("Telegram update does not contain a supported message payload.");
+    throw new ContractValidationError("Telegram update does not contain a supported message payload.");
   }
 
   return normalizeTelegramMessage({

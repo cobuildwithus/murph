@@ -1,11 +1,16 @@
-import { buildRecapFallback } from './recap-fallback';
-import { gameRecapEnvelopeSchema, type GameRecapEnvelope, type RecapAsset } from '@murphai/contracts/recap-show';
-import { recapGenerationId, readRecapMedia } from './recap-media';
+import { isHostedOnboardingError } from "../hosted-onboarding/errors";
+import { gameAreaCode } from "./area-code";
+import { readHostedMemberIdentity, readHostedMemberVerifiedPhoneNumbers } from "../hosted-onboarding/hosted-member-identity-store";
+import { isBothWinOfferDue, mergeStakeSlots } from "./rules";
+import { buildRecapFallback, gameResultCorrectionLine } from './recap-fallback';
+import { gameRecapEnvelopeSchema, recapStorageObjects, type GameRecapEnvelope, type RecapAsset, type RecapVideoIdentity } from '@murphai/contracts/recap-show';
+import { recapGenerationId, readRecapGenerationObject } from './recap-media';
+import { recapPosterField, selectRecapVideo } from './recap-video';
 import { retainRecapAssetTx } from './recap-retirement';
 import { recapReferencesCurrent } from './recap-asset-access';
 import { recapPostedAt } from "./time";
 import { isPairRecapShowEnabled, isRecapMediaVisible } from "./access";
-import { presentGameRecap, storedGameRecapSchema, readGameRecapStory } from "@murphai/contracts/recap-show";
+import { presentGameRecap, storedGameRecapSchema } from "@murphai/contracts/recap-show";
 import { retireGameRecapAssetsTx } from "./recap-retirement";
 import "server-only";
 import { after } from "next/server";
@@ -24,7 +29,7 @@ import { assertBrowserVaultMemberAuthority } from "../browser-vault/authority";
 import { submitMemberAction } from "../member-actions/submit";
 import { adoptVaultGameProfile } from "./vault-profile";
 
-import { Prisma, type Game, type GameEntry, type GameProfile, type GameReport } from "@prisma/client";
+import { Prisma, type Game, type GameEntry, type GameProfile, type GameReport, type GameTicket } from "@prisma/client";
 
 import { toPrismaJsonObject } from "../device-sync/prisma-store/prisma-json";
 import { isUniqueViolation } from "../device-sync/prisma-store/prisma-errors";
@@ -38,7 +43,7 @@ import { gameReminderReach } from "./reminders";
 import { GAME_REMINDER_OFF_CHOICE_EVENT, recordGameReminderPreferencesTx } from "./reminder-preferences";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboarding/linq-observability-identifiers";
 import { createHostedLinqParticipantContact } from "../hosted-onboarding/linq-participant-contact";
-import { areGameDevToolsAllowed, areGameGroupsEnabled, gameOnSql, gameOnWhere, isGameEnabled, isGameEnabledFor, isGameOn, mediaKeyOwner, mediaKeyPrefixFor } from "./access";
+import { areGameDevToolsAllowed, areGameGroupsEnabled, gameOnSql, gameOnWhere, isGameEnabled, mediaKeyOwner, mediaKeyPrefixFor } from "./access";
 import { parseGameAcceptance, parseGameCommand, type GameCommand } from "./command";
 import type { GameReminders } from "./contract";
 import { addressedGameInvite, lockGameAudience, prepareGameAudience, readGameVerifiedContacts, verifiedGameContactKeys } from "./audience";
@@ -56,7 +61,6 @@ import {
   type GameHomeView,
   type GameProfileView,
   type GameInvitePreview,
-  type GameInviteRecipient,
   type GameView,
   type CreateGameView,
 } from "./contract";
@@ -90,6 +94,8 @@ import {
   gameChallengeStatus,
   type RuleChallenge,
   decideSettle,
+  outcomeFor,
+  type SettleDecision,
   decideStartNow,
   decideWithdraw,
   GAME_ERROR_STATUS,
@@ -99,6 +105,8 @@ import {
   gameOffDayMessage,
   isGameDue,
   isGameDecided,
+  isSettledGameCorrectable,
+  settledGameEnd,
   isGameInviteExpired,
   isTicketExpired,
   GAME_MAX_OPEN_PER_PAIR,
@@ -116,7 +124,7 @@ import {
   type GameTerms,
   type TermWords,
 } from "./rules";
-import { addDays, daysBetween, gameLocalDate } from "./time";
+import { addDays, daysBetween, gameLocalDate, morningAfter } from "./time";
 import { agreedDayOne, gameChangeCancellationNeedsNotice, decideApprovedGameChange, pendingGameChangeView, decideGameChange, gameChangeControls, gameChangeMajority, normalizeGroupGameChange, gameChangeRefusal, isGameChangeExpired, isGameChangeOutdated, isSameGameChange, parsePendingGameChange, type StoredGamePendingChange } from "./changes";
 import { prepareGameChangeWords, readPendingGameChanges, type PreparedGameChangeWords } from "./change-words";
 import { deliverGameChangeProposal } from "./chat-delivery";
@@ -128,13 +136,18 @@ import { deleteEntryReplyTx, readReplyReportedMembers, replyEligibility, replyMe
 import { inspectReplyAudio } from "./reply-audio";
 import { claimGameReplyNotification, sendGameReplyNotificationAfterResponse } from "./reply-notification";
 import { claimGamePostNotification, sendGamePostNotificationAfterResponse } from "./post-notification";
+import { prepareGameAcceptNotification, sendGameAcceptNotificationAfterResponse } from "./accept-notification";
+import { readNamesForViewer } from "./viewer-names";
 import {
   buildGameHistoryView,
+  pendingInviteeLabel,
   buildGameView,
   GAME_HISTORY_PREVIEW_LIMIT,
   gameMediaUrl,
+  stakeItem,
   termsView,
   ticketView,
+  ticketMessageRecipient,
   visibleEntryIds,
   type BuiltGameHistoryView,
   type GameTicketRow,
@@ -143,6 +156,7 @@ import {
 import { parseGameTalkPayload, readGroupTalkInvitation } from "./talk";
 import { GAME_ENDED_CHANGE_REASON, GAME_ROSTER_CHANGE_REASON, resolveGroupGameChangeTx } from "./change-resolution";
 import { lockHostedMemberRow, readHostedMemberSuspensionAfterLockTx } from "../hosted-onboarding/shared";
+import { readHostedHealthDataConsentState } from "../legal/consent";
 import { departedLabels } from "./account-deletion";
 import { gameMemberIds, hasGameIdentity } from "./roster";
 import { areGamePlayersBlocked, GAME_BLOCK_LIMIT, isHiddenBy, lockGamePair, readGameBlocks, type GameBlocks } from "./blocks";
@@ -158,7 +172,9 @@ interface LoadedGame {
   state: RuleState;
 }
 export type GameCommandResult =
-  | { ok: true; game: CreateGameView | null; profile?: GameProfileView; reminders?: GameReminders; reaches?: "push" | "text" | "none"; dayOutcome?: GameDayOutcome }
+  | { ok: true; game: CreateGameView | null; profile?: GameProfileView; reminders?: GameReminders; reaches?: "push" | "text" | "none"; dayOutcome?: GameDayOutcome;
+    /** Set only when a day correction changed a finished game's outcome: the one line that says so. */
+    chatLine?: string }
   | { ok: false; error: GameError; status: number };
 
 export const GAME_RECAP_UI_WAIT_MS = 10 * 60 * 1000;
@@ -183,11 +199,13 @@ const BLOCK_GAME_LIMIT = 50;
 export async function readGameReminders(memberId: string, db: Db = getPrisma()): Promise<GameReminders> {
   const [profile, seats] = await Promise.all([
     db.gameProfile.findUnique({ where: { memberId }, select: { reminderMinutes: true, reminderPush: true, reminderText: true } }),
-    db.gamePlayer.findMany({ where: { memberId, reminderOff: true, game: { status: "live" } }, select: { gameId: true }, orderBy: { gameId: "asc" } }),
+    db.gamePlayer.findMany({ where: { memberId, OR: [{ reminderOff: true }, { reminderMinutes: { not: null } }], game: { status: "live" } },
+      select: { gameId: true, reminderOff: true, reminderMinutes: true }, orderBy: { gameId: "asc" } }),
   ]);
   const canText = await canTextGameReminders(memberId, db);
   return { minutes: profile?.reminderMinutes ?? 1140, push: profile?.reminderPush ?? true, text: profile?.reminderText ?? false,
-    canText, offGameIds: seats.map(seat => seat.gameId) };
+    canText, offGameIds: seats.filter(seat => seat.reminderOff).map(seat => seat.gameId),
+    gameMinutes: Object.fromEntries(seats.flatMap(seat => seat.reminderMinutes === null ? [] : [[seat.gameId, seat.reminderMinutes]])) };
 }
 
 /** A game never grants private AI access or creates a new direct route. Linq only: its egress holds the final game and pause checks. */
@@ -206,7 +224,10 @@ export async function canTextGameReminders(memberId: string, db: Db = getPrisma(
       channel: destination.route.channel, containerMemberId: memberId, threadId: destination.route.delivery.target,
     }, prisma: db, requireThreadDelivery: true });
     return true;
-  } catch { return false; }
+  } catch (error) {
+    if (isHostedOnboardingError(error) && error.code === "HOSTED_THREAD_ROUTE_EGRESS_UNAUTHORIZED") return false;
+    throw error;
+  }
 }
 
 // ------------------------------------------------------------------- writes
@@ -247,11 +268,11 @@ export async function runGameCommand(input: {
     // A recap receipt is the viewer's own; it touches no game state, so it skips the game write path.
     const applied = command.type === "watchRecap" ? await watchRecap({ actor, beforeMutationTx: input.beforeMutationTx }, command.gameId)
       : await runCommand({ chatAudience, actor, now: input.now, chatContainerMemberId: input.chatContainerMemberId, chatPlayerMemberIds: input.chatPlayerMemberIds, beforeMutationTx: input.beforeMutationTx, postGuard: input.postGuard }, command);
-    const { gameId, dayOutcome, composer } = typeof applied === "object" && applied !== null ? applied : { gameId: applied };
+    const { gameId, dayOutcome, composer, chatLine } = typeof applied === "object" && applied !== null ? applied : { gameId: applied };
     await deliverAppGameEffectsAfterResponse(command, gameId, input.chatContainerMemberId);
     await activatePrivateAfterGameCommand(command, gameId, input.now ?? new Date());
     const game = gameId && !input.chatContainerMemberId ? await readGame(gameId, actor, input.multiplayer) : null;
-    return { game: game && composer ? { ...game, composer } : game, ok: true, ...(dayOutcome ? { dayOutcome } : {}) };
+    return { game: game && composer ? { ...game, composer } : game, ok: true, ...(dayOutcome ? { dayOutcome } : {}), ...(chatLine ? { chatLine } : {}) };
   } catch (error) {
     if (error instanceof GameRuleError) {
       return { error: error.error, ok: false, status: GAME_ERROR_STATUS[error.error.code] };
@@ -270,11 +291,13 @@ async function saveGameReminders(input: Parameters<typeof runGameCommand>[0], co
   return commandTransaction(input, async tx => {
     const actor = input.actorMemberId;
     if (command.text && !await canTextGameReminders(actor, tx)) reject("INVALID_REQUEST", "Private texts aren't available for this account right now.");
+    // A time for some games is theirs alone: the default time and every other game stay.
     const saved = await tx.gameProfile.updateMany({ where: { memberId: actor }, data: {
-      reminderMinutes: command.minutes, reminderPush: command.push, reminderText: command.text,
+      ...(command.timeForGameIds ? {} : { reminderMinutes: command.minutes }), reminderPush: command.push, reminderText: command.text,
     } });
     if (!saved.count) reject("PROFILE_REQUIRED", "Add your first name and time zone first.");
-    await recordGameReminderPreferencesTx(tx, actor, command.everyDayGameIds !== undefined);
+    await recordGameReminderPreferencesTx(tx, actor, { everyDay: command.everyDayGameIds !== undefined,
+      minutes: command.gameMinutes !== undefined || (command.timeForGameIds ?? false) });
     // A seat admitted after the recorded choice keeps its own activation defaults.
     // Keep choice lists out of the row lookup: sparse event statistics can otherwise
     // make PostgreSQL repeat a large ID-list bitmap scan for every admitted seat.
@@ -283,7 +306,11 @@ async function saveGameReminders(input: Parameters<typeof runGameCommand>[0], co
       SET reminder_off = seat.game_id = ANY(${command.offGameIds}::text[]),
         reminder_every_day = CASE WHEN ${command.everyDayGameIds !== undefined}
           THEN seat.game_id = ANY(${command.everyDayGameIds ?? []}::text[])
-          ELSE seat.reminder_every_day END
+          ELSE seat.reminder_every_day END,
+        reminder_minutes = CASE WHEN ${command.gameMinutes !== undefined}
+            THEN (${JSON.stringify(command.gameMinutes ?? {})}::jsonb ->> seat.game_id)::int
+          WHEN seat.game_id = ANY(${command.timeForGameIds ?? []}::text[]) THEN ${command.minutes}::int
+          ELSE seat.reminder_minutes END
       FROM game
       WHERE game.id = seat.game_id AND game.status = 'live' AND seat.member_id = ${actor}
         AND EXISTS (SELECT 1 FROM game_event choice WHERE choice.game_id = game.id
@@ -367,18 +394,24 @@ async function setGameChatReminder(input: Parameters<typeof runGameChatUpdate>[0
   await requireSelectedGameChatReminder(input, update);
   const current = await readGameReminders(input.actorMemberId);
   const seats = await getPrisma().gamePlayer.findMany({ where: { memberId: input.actorMemberId, leftAt: null, game: { status: "live" } },
-    select: { gameId: true, reminderEveryDay: true }, take: 1001 });
+    select: { gameId: true, reminderEveryDay: true, game: { select: { chatContainerMemberId: true } } }, take: 1001 });
   if (seats.length > 1000) reject("INVALID_REQUEST", "Too many open games to save reminders.");
+  // A time set in a group chat is for that chat's games only, never the player's other games.
+  const chatGames = update.gameId ? [update.gameId]
+    : seats.filter(seat => input.chatContainerMemberId && seat.game.chatContainerMemberId === input.chatContainerMemberId).map(seat => seat.gameId);
+  if (!chatGames.length) reject("NOT_A_PLAYER", "Choose one of your live games in this chat.");
   const off = new Set(current.offGameIds);
   if (update.gameId && update.on !== undefined) update.on ? off.delete(update.gameId) : off.add(update.gameId);
   const { update: _update, ...context } = input;
   const result = await runGameCommand({ ...context, command: { type: "setReminders", minutes: update.minutes ?? current.minutes,
-    push: current.push, text: current.text && current.canText, offGameIds: [...off],
+    timeForGameIds: update.minutes === undefined ? [] : chatGames, push: current.push, text: current.text && current.canText, offGameIds: [...off],
     everyDayGameIds: seats.filter(seat => seat.reminderEveryDay).map(seat => seat.gameId) } });
   if (!result.ok) return result;
   const [route] = await readGamePushRoutes(getPrisma(), [input.actorMemberId], true);
-  const selectedOn = update.gameId ? !result.reminders?.offGameIds.includes(update.gameId) : seats.some(seat => !result.reminders?.offGameIds.includes(seat.gameId));
-  const reaches = result.reminders ? gameReminderReach(result.reminders, selectedOn, Boolean(route)) : "none";
+  const selected = chatGames.filter(gameId => !result.reminders?.offGameIds.includes(gameId));
+  const { readPrivatelyTextedGameIds } = await import("./evening-check-in");
+  const texted = await readPrivatelyTextedGameIds(selected, new Date());
+  const reaches = result.reminders ? gameReminderReach(result.reminders, { on: selected.length > 0, textedPrivately: texted.size > 0 }, Boolean(route)) : "none";
   return { ...result, reaches };
 }
 
@@ -451,7 +484,7 @@ async function gameChatCreateCommand(input: Parameters<typeof runGameChatUpdate>
 /** The app uses join for a yes, negotiate for an unseated invitee's counter. */
 async function gameChatTermsCommand(input: Parameters<typeof runGameChatUpdate>[0], update: Extract<HostedGameUpdate, { operation: "approve" | "propose" }>): Promise<{ command: unknown } | { result: GameCommandResult }> {
   const row = await getPrisma().game.findUnique({ where: { id: update.gameId }, include: { invitees: true, players: true } });
-  if (!row || !await gameChatContextCurrent(row, input) || !isGameOn(row)) reject("NOT_A_PLAYER", "This game belongs to its players.");
+  if (!row || !await gameChatContextCurrent(row, input) || !isGameEnabled()) reject("NOT_A_PLAYER", "This game belongs to its players.");
   if (row.maxPlayers === 10 && update.operation === "propose" && update.change.kind === "edit") reject("INVALID_REQUEST", "Ask for group changes with edit_terms and a new proposalId.");
   if (update.operation === "propose" && (row.status !== "invited" || row.maxPlayers === 10)) {
     return { command: { type: "proposeChange", gameId: update.gameId, proposalId: update.proposalId, expectedTermsVersion: update.expectedTermsVersion, change: update.change } };
@@ -508,7 +541,7 @@ interface CommandContext {
 }
 
 /** Applies one command; returns the game to show back, if any. */
-async function runCommand(context: CommandContext, command: Exclude<GameCommand, { type: "setProfile" | "setReminders" | "watchRecap" }>): Promise<string | null | { gameId: string; dayOutcome?: GameDayOutcome; composer?: { murphPhoneNumber: string } }> {
+async function runCommand(context: CommandContext, command: Exclude<GameCommand, { type: "setProfile" | "setReminders" | "watchRecap" }>): Promise<string | null | { gameId: string; dayOutcome?: GameDayOutcome; chatLine?: string; composer?: { murphPhoneNumber: string } }> {
   switch (command.type) {
     case "replyToPost": return replyToPost(context, command);
     case "deleteReply": return deleteReply(context, command);
@@ -567,7 +600,7 @@ interface LockedStep {
   clock: Date;
 }
 
-type GameEventType = "reply_accepted" | "talk_requested" | "recap_watched" | "challenged" | "left" | "terms_edited" | "day_marked_incomplete" | "day_restored" | "day_credited" | "cancelled" | "blocked" | "removed" | "negotiation_joined" | "created" | "joined" | "started" | "posted" | "withdrew" | "settled" | "redeemed" | "expired" | "time_shifted" | "change_proposed" | "change_voted" | "change_applied" | "change_declined" | "change_cancelled" | "change_expired";
+type GameEventType = "reply_accepted" | "talk_requested" | "recap_watched" | "challenged" | "left" | "terms_edited" | "day_marked_incomplete" | "day_restored" | "day_credited" | "result_corrected" | "cancelled" | "blocked" | "removed" | "negotiation_joined" | "created" | "joined" | "started" | "posted" | "withdrew" | "settled" | "redeemed" | "expired" | "time_shifted" | "change_proposed" | "change_voted" | "change_applied" | "change_declined" | "change_cancelled" | "change_expired";
 /** History holds metadata and sealed words, never plaintext. */
 interface GameEventDraft {
   createdAt?: Date;
@@ -614,8 +647,9 @@ async function runLocked(
     const locked = await tx.$queryRaw<{ id: string }[]>`SELECT id FROM game WHERE id = ${gameId} FOR UPDATE`;
     if (locked.length === 0) reject("GAME_NOT_FOUND", "Game not found.");
     const [loaded] = await loadGames(tx, [gameId]);
-    // Nobody acts on a game that is off, whatever they hold.
-    if (context.actor !== SYSTEM_ACTOR && !isGameOn(loaded.row)) reject("GAME_NOT_FOUND", "Game not found.");
+    // A held invite cannot revive an identity-less game or bypass the switch.
+    if (context.actor !== SYSTEM_ACTOR && (!isGameEnabled()
+      || ![...loaded.row.players, ...loaded.row.invitees].some(person => person.memberId !== null))) reject("GAME_NOT_FOUND", "Game not found.");
     if (context.chatContainerMemberId && !await gameChatContextCurrent(loaded.row, context, tx)) {
       reject("NOT_A_PLAYER", "This game belongs to the players in this chat.");
     }
@@ -655,6 +689,7 @@ async function setProfile(context: CommandContext, command: Extract<GameCommand,
     ...(firstNameEncrypted === undefined ? {} : { firstNameEncrypted }),
     ...(command.timeZone === undefined ? {} : { timeZone: command.timeZone }),
     ...(command.photoKey === undefined ? {} : { photoKey: command.photoKey }),
+    ...(command.notForMe === undefined ? {} : { notForMe: command.notForMe }),
   };
   const prisma = getPrisma();
   const previous = command.firstName === undefined ? null
@@ -694,6 +729,7 @@ async function setProfile(context: CommandContext, command: Extract<GameCommand,
     }
   }
   return {
+    notForMe: profile.notForMe,
     avatarUrl: profile.photoKey ? gameMediaUrl(profile.photoKey) : null,
     firstName: firstName ?? "",
     memberId: actor,
@@ -701,24 +737,8 @@ async function setProfile(context: CommandContext, command: Extract<GameCommand,
   };
 }
 
-interface PendingLabel {
-  nameEncrypted: string | null;
-  relationshipEncrypted: string | null;
-  photoKey: string | null;
-}
-
-function parsePendingLabel(value: Prisma.JsonValue | null): PendingLabel {
-  const label = isRecord(value) ? value : {};
-  const text = (field: unknown) => (typeof field === "string" ? field : null);
-  return {
-    nameEncrypted: text(label.nameEncrypted),
-    photoKey: text(label.photoKey),
-    relationshipEncrypted: text(label.relationshipEncrypted),
-  };
-}
-
 async function createGame(context: CommandContext, command: Extract<GameCommand, { type: "createGame" }>): Promise<string | { gameId: string; composer?: { murphPhoneNumber: string } }> {
-  if (command.maxPlayers === 10 && command.inviteeRecipient) reject("INVALID_REQUEST", "Group invites address each person in invitees.");
+  if (command.maxPlayers === 10 && (command.inviteeRecipient || command.inviteeMemberId)) reject("INVALID_REQUEST", "Group invites address each person in invitees.");
   if (command.maxPlayers === 10) return createGroupGame(context, command);
   if (command.invitees || command.groupWord || command.terms.defaultTask) reject("INVALID_REQUEST", "Group terms require maxPlayers 10.");
   const { actor } = context;
@@ -731,8 +751,9 @@ async function createGame(context: CommandContext, command: Extract<GameCommand,
   if (await isGameCreationReplay(prisma, actor, gameId, chatOther ? chatPlayers : undefined)) return gameId;
   const rematch = await readGameCreationRematch(context, command, chatOther);
   if (chatOther) await maintainPair(actor, chatOther);
-  const addressed = chatOther || rematch ? null : await knownInvitee(actor, command.inviteeRecipient);
-  const data = await prepareGameCreateData(context, command, rematch, chatOther, profile.timeZone, addressed);
+  const contact = pickedContact(command);
+  const addressed = chatOther || rematch ? null : await knownInvitee(actor, command, contact);
+  const data = await prepareGameCreateData(context, command, rematch, chatOther, profile.timeZone, addressed, contact);
   try {
     await commandTransaction(context, async (tx) => {
       const now = context.now ?? await databaseNow(tx);
@@ -757,25 +778,40 @@ async function createGame(context: CommandContext, command: Extract<GameCommand,
 
 /**
  * Someone you already play one-on-one, by the number or email you picked for
- * them: the invite is theirs, on their Home, and only they can accept it. An
- * address that isn't a member's, a member you've never played, yourself, or a
- * blocked pair stays an open link, so an address never says whether a stranger
- * is on Murph.
+ * them, or by who they are when you picked them from the people you've played:
+ * the invite is theirs, on their Home, and only they can accept it. An address
+ * that isn't a member's, a member you've never played, yourself, or a blocked
+ * pair stays an open link, so an address never says whether a stranger is on
+ * Murph.
  */
-async function knownInvitee(actor: string, recipient: GameInviteRecipient | undefined): Promise<string | null> {
-  const contact = recipient ? createHostedLinqParticipantContact(recipient) : null;
-  if (!contact) return null;
-  const prisma = getPrisma();
-  const resolved = await lookupHostedGroupParticipantMemberIdsByHandles({ ambiguityPolicy: "unresolved", handles: [contact.value], prisma });
-  const member = resolved.get(contact.value) ?? null;
+async function knownInvitee(actor: string, { inviteeMemberId }: Extract<GameCommand, { type: "createGame" }>, contact: ReturnType<typeof createHostedLinqParticipantContact>): Promise<string | null> {
+  const member = inviteeMemberId ?? await memberByAddress(contact);
   if (!member || member === actor) return null;
-  const played = await prisma.game.findFirst({ where: gamePairWhere([actor, member]), select: { id: true } });
+  const prisma = getPrisma();
+  // A one-on-one game: a group of just the two of them isn't one.
+  const played = await prisma.game.findFirst({ where: { ...gamePairWhere([actor, member]), maxPlayers: 2 }, select: { id: true } });
   if (!played || await areGamePlayersBlocked(prisma, actor, member)) return null;
   return member;
 }
 
+/** The number or email picked for the invitee, normalized once; never stored. */
+function pickedContact({ inviteeRecipient }: Extract<GameCommand, { type: "createGame" }>) {
+  return inviteeRecipient ? createHostedLinqParticipantContact(inviteeRecipient) : null;
+}
+
+/** An invite bound to nobody keeps only the picked contact's lookup key, so its owner can find it after signing in. */
+function unboundInviteKey(opponentMemberId: string | null | undefined, contact: ReturnType<typeof pickedContact>): string | null {
+  return opponentMemberId ? null : contact?.lookupKey ?? null;
+}
+
+async function memberByAddress(contact: ReturnType<typeof createHostedLinqParticipantContact>): Promise<string | null> {
+  if (!contact) return null;
+  const resolved = await lookupHostedGroupParticipantMemberIdsByHandles({ ambiguityPolicy: "unresolved", handles: [contact.value], prisma: getPrisma() });
+  return resolved.get(contact.value) ?? null;
+}
+
 /** Prepare encrypted words and immutable row data before taking database locks. */
-async function prepareGameCreateData(context: CommandContext, command: Extract<GameCommand, { type: "createGame" }>, rematch: Awaited<ReturnType<typeof readGameCreationRematch>>, chatOther: string | undefined, timeZone: string, addressed: string | null) {
+async function prepareGameCreateData(context: CommandContext, command: Extract<GameCommand, { type: "createGame" }>, rematch: Awaited<ReturnType<typeof readGameCreationRematch>>, chatOther: string | undefined, timeZone: string, addressed: string | null, contact: ReturnType<typeof pickedContact>) {
   const { actor } = context;
   const { gameId, inviteeLabel } = command;
   const newTerms = decideNewTerms(command.terms, {
@@ -795,7 +831,8 @@ async function prepareGameCreateData(context: CommandContext, command: Extract<G
     createdBy: actor, wordsOwnerMemberId: actor, id: gameId,
     chatContainerMemberId: context.chatContainerMemberId ?? (opponentMemberId ? rematch?.chatContainerMemberId ?? null : null),
     inviteTokenEncrypted, inviteTokenHash: sha256Hex(token),
-    invitees: { create: { seat: 1, memberId: opponentMemberId, pendingLabel: chatOther ? Prisma.DbNull : { nameEncrypted, photoKey: inviteeLabel?.photoKey ?? null, relationshipEncrypted } } },
+    invitees: { create: { seat: 1, memberId: opponentMemberId, recipientLookupKey: unboundInviteKey(opponentMemberId, contact),
+      pendingLabel: chatOther ? Prisma.DbNull : { nameEncrypted, photoKey: inviteeLabel?.photoKey ?? null, relationshipEncrypted } } },
     lengthDays: newTerms.lengthDays, startsOn: newTerms.startsOn ? toDbDate(newTerms.startsOn) : null,
     previousGameId: command.previousGameId ?? null, round: rematch?.round ?? 1,
     status: chatOther ? "negotiating" as const : "invited" as const,
@@ -831,7 +868,7 @@ async function createGroupGame(context: CommandContext, command: Extract<GameCom
   const chat = await prepareGameChat({ actor, members: [actor, ...prepared.invitees.map(invitee => invitee.memberId)],
     handles: prepared.handles, room: context.chatContainerMemberId ?? prepared.room ?? undefined, audienceKeys: prepared.keys.candidates });
 
-  if (!isGameOn({ players: [{ memberId: actor }], invitees: prepared.invitees })) reject("GAME_DISABLED", "Starting a game is invite only for now.");
+  if (!isGameEnabled()) reject("GAME_DISABLED", "Games are unavailable right now.");
   const open = await prisma.game.findMany({ where: { audienceKey: { in: prepared.keys.candidates }, status: "live" }, select: { id: true }, take: GAME_MAX_OPEN_PER_PAIR });
   await loadCurrent(open.map(game => game.id), true, actor);
   const token = randomBytes(24).toString("base64url");
@@ -840,10 +877,10 @@ async function createGroupGame(context: CommandContext, command: Extract<GameCom
   const inviteTokenEncrypted = await seal(gameTarget(target, "invite_token"), token);
   try {
     await commandTransaction(context, async tx => {
+      await chat.revalidate?.(tx);
       await lockGameAudience(tx, prepared.keys.candidates);
       if (await isGameCreationReplay(tx, actor, command.gameId)) return;
       await prepared.revalidate(tx);
-      await chat.revalidate?.(tx);
       const existing = await tx.game.findFirst({ where: { audienceKey: { in: prepared.keys.candidates } }, select: { audienceKey: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] });
       const audienceKey = existing?.audienceKey ?? prepared.keys.current;
       const count = await tx.game.count({ where: { audienceKey: { in: prepared.keys.candidates }, status: { in: ACTIVE_STATUSES } } });
@@ -937,8 +974,7 @@ async function isGameCreationReplay(tx: Pick<Tx, "game">, actor: string, gameId:
 
 async function readGameCreationRematch(context: CommandContext, command: Extract<GameCommand, { type: "createGame" }>, chatOther?: string) {
   const rematch = command.previousGameId ? await readRematch(context.actor, command.previousGameId) : null;
-  // A listed creator starts fresh games; an unlisted player may rematch an on-game.
-  if (!isGameOn({ players: [{ memberId: context.actor }], invitees: [{ memberId: rematch?.opponentMemberId ?? null }] })) reject("GAME_DISABLED", "Starting a game is invite only for now.");
+  if (!isGameEnabled()) reject("GAME_DISABLED", "Games are unavailable right now.");
   if (chatOther && rematch && rematch.opponentMemberId !== chatOther) reject("NOT_A_PLAYER", "Rematch a settled game with the other person in this chat.");
   if (rematch && command.previousGameId) await assertLatestInChain(context.actor, rematch.opponentMemberId, command.previousGameId, context.now ?? new Date());
   return rematch;
@@ -1082,8 +1118,9 @@ async function accept(context: CommandContext, command: AcceptInviteBody, gameId
   const row = await getPrisma().game.findUniqueOrThrow({ where: { id: gameId }, select: { maxPlayers: true } });
   const contacts = row.maxPlayers === 10 ? await readGameVerifiedContacts(actor) : [];
   let expired = false;
+  let notification: Awaited<ReturnType<typeof prepareGameAcceptNotification>> = null;
   await runLocked(gameId, row.maxPlayers === 2 ? withPairLock(context, creator!) : context, async locked => {
-    const { loaded, now, tx } = locked;
+    const { clock, loaded, now, tx } = locked;
     const { row } = loaded;
     if (row.maxPlayers === 10 && !areGameGroupsEnabled()) reject("GAME_DISABLED", "Group games aren't available yet.");
     if (row.maxPlayers === 2) await rejectBlockedJoin(tx, creator!, actor);
@@ -1103,12 +1140,14 @@ async function accept(context: CommandContext, command: AcceptInviteBody, gameId
     const activates = decision.activates ?? true;
     if (activates) await tx.game.update({ data: { startedAt: decision.startedAt, status: "live" }, where: { id: row.id } });
     await acceptInvitation(tx, row, actor, decision.seat);
+    if (activates) notification = await prepareGameAcceptNotification(tx, { gameId, maxPlayers: row.maxPlayers, actor, schedule: decision, clock });
     return [
       ...(!claimed ? [{ payload: { seat: decision.seat }, type: "joined" as const }] : []),
       ...(activates ? [{ payload: { startNow: false }, type: "started" as const }] : []),
     ];
   });
   if (expired) reject("INVITE_EXPIRED", "This invite isn't open anymore.");
+  sendGameAcceptNotificationAfterResponse(notification);
 }
 
 /** Everyone's time zone freezes at go-live, from their profile as of now. */
@@ -1143,8 +1182,9 @@ async function writeSchedule(tx: Tx, gameId: string, schedule: Schedule): Promis
 async function acceptInvitation(tx: Tx, row: GameRow, joinerId: string, seat: number): Promise<void> {
   const invitation = row.invitees.find(invitee => invitee.seat === seat);
   if (!invitation) return;
-  const label = parsePendingLabel(invitation.pendingLabel);
-  await tx.gameInvitee.update({ where: { gameId_seat: { gameId: row.id, seat } }, data: { memberId: joinerId, pendingLabel: Prisma.DbNull } });
+  const label = pendingInviteeLabel(invitation.pendingLabel);
+  await tx.gameInvitee.update({ where: { gameId_seat: { gameId: row.id, seat } }, data: { memberId: joinerId, pendingLabel: Prisma.DbNull,
+    ...(row.maxPlayers === 2 ? { recipientLookupKey: null } : {}) } });
   if (!row.createdBy || (!label.nameEncrypted && !label.relationshipEncrypted && !label.photoKey)) return;
   await tx.$executeRaw`
     INSERT INTO game_contact_label
@@ -1369,6 +1409,16 @@ async function endGame(tx: Tx, gameId: string, data: Prisma.GameUpdateInput): Pr
   const game = await tx.game.findUniqueOrThrow({ where: { id: gameId } });
   await resolveGroupGameChangeTx({ tx, game, actor: SYSTEM_ACTOR, now: new Date(), outcome: "change_expired", reason: GAME_ENDED_CHANGE_REASON });
   await tx.game.update({ data: { ...data, pendingChange: Prisma.DbNull }, where: { id: gameId } });
+  if (game.maxPlayers === 2 && data.status === "void") {
+    await tx.gameInvitee.updateMany({ where: { gameId }, data: { recipientLookupKey: null } });
+  }
+}
+
+/** One receipt per game, held until the later player's morning. */
+async function reserveBothWinOfferTx({ clock, loaded, now, tx }: LockedStep, state: RuleState): Promise<void> {
+  if (loaded.row.pendingChange || !loaded.row.chatContainerMemberId || !isBothWinOfferDue(state, now)) return;
+  const retryAfterAt = new Date(Math.max(...state.players.map(player => (morningAfter(clock, player.timeZone) ?? clock).getTime())));
+  await reserveGameChatLifecycleTx({ gameId: loaded.row.id, kind: "both_win", now: clock, retryAfterAt, tx });
 }
 
 async function post(context: CommandContext, command: Extract<GameCommand, { type: "post" }>): Promise<string> {
@@ -1381,7 +1431,18 @@ async function post(context: CommandContext, command: Extract<GameCommand, { typ
   ]);
   const captureAgeMs = command.captureAgeMs ?? null;
   let notification: Awaited<ReturnType<typeof claimGamePostNotification>> = [];
-  await runLocked(gameId, context, async ({ clock, loaded, now, tx }) => {
+  const needsHealthData = kind === "heart_rate"
+    || kind === "reps" && command.data && "heartRate" in command.data && command.data.heartRate !== undefined;
+  const postContext = needsHealthData ? { ...context, beforeMutationTx: async (tx: Tx) => {
+    await context.beforeMutationTx?.(tx);
+    // Member before game, as in account deletion. NO KEY UPDATE excludes the
+    // revocation lock without blocking unrelated game foreign-key checks.
+    await lockHostedMemberRow(tx, actor, { noKeyUpdate: true });
+    if (await readHostedHealthDataConsentState({ memberId: actor, prisma: tx }) !== "granted") {
+      reject("HEALTH_DATA_REQUIRED", "Allow health data to post a heart rate.");
+    }
+  } } : context;
+  await runLocked(gameId, postContext, async ({ clock, loaded, now, tx }) => {
     // A repeat of a post that already landed (a retry, or the same tap twice) changes nothing.
     const existing = await tx.gameEntry.findUnique({ select: { memberId: true, gameId: true }, where: { id: entryId } });
     if (existing) {
@@ -1410,7 +1471,7 @@ async function post(context: CommandContext, command: Extract<GameCommand, { typ
         where: { id: decision.withdrawEntryId },
       });
     }
-    await tx.gameEntry.create({
+    const created = await tx.gameEntry.create({
       data: {
         attempt: decision.attempt,
         captureAgeMs,
@@ -1427,12 +1488,13 @@ async function post(context: CommandContext, command: Extract<GameCommand, { typ
         incomplete: kind !== "excuse" && loaded.state.entries.some((entry) => entry.memberId === actor && entry.dayIndex === decision.dayIndex && entry.incomplete) ? true : null,
       },
     });
+    const nextState = toRuleState(loaded.row, [...loaded.entries.filter(entry => entry.id !== decision.withdrawEntryId), created]);
+    if (kind !== "excuse") await reserveBothWinOfferTx({ clock, loaded, now, tx }, nextState);
     const { attempt, dayIndex, graceUsed } = decision;
     if (kind !== "excuse" && attempt === 1) {
       notification = await claimGamePostNotification(tx, {
         actor, clock, entryId, dayIndex,
-        state: { ...loaded.state, entries: [...loaded.state.entries, { id: entryId, memberId: actor, attempt, dayIndex, kind,
-          mediaKeys, receivedAt: clock, withdrawnAt: null, blurHash: command.blurHash ?? null }] },
+        state: nextState,
       });
     }
     return [{ payload: { attempt, dayIndex, entryId, graceUsed, kind }, type: "posted" }];
@@ -1460,7 +1522,7 @@ async function readableReply(gameId: string, replyId: string, viewer: string) {
     select: { id: true, entryId: true, authorMemberId: true, kind: true } });
   if (!reply) return null;
   const [loaded] = await loadGames(db, [gameId]);
-  if (!loaded || !isGameOn(loaded.row) || !replyReadAccess(viewer, reply, await readReplyContext(db, loaded, viewer))) return null;
+  if (!loaded || !isGameEnabled() || !replyReadAccess(viewer, reply, await readReplyContext(db, loaded, viewer))) return null;
   return reply;
 }
 
@@ -1498,7 +1560,7 @@ async function replyToPost(context: CommandContext, command: Extract<GameCommand
       if (refusal) reject(refusal, refusal === "REPLY_USED" ? "This post already has a reply." : "You can't reply to this post.");
       await tx.gameReply.create({ data: { id: replyId, entryId, authorMemberId: context.actor, kind, textEncrypted, audioEncrypted, durationMs,
         levels: kind === "voice" ? command.levels : [] } });
-      notification = await claimGameReplyNotification(tx, { gameId, entryId, replyId, kind,
+      notification = await claimGameReplyNotification(tx, { gameId, entryId, replyId, kind, actor: context.actor,
         memberId: loaded.entries.find(entry => entry.id === entryId)!.memberId });
       return [{ type: "reply_accepted", commandKey, payload: { entryId } }];
     });
@@ -1561,27 +1623,89 @@ async function challenge(context: CommandContext, command: Extract<GameCommand, 
   return command.gameId;
 }
 
-async function setDayCompletion(context: CommandContext, command: Extract<GameCommand, { type: "setDayCompletion" }>): Promise<{ gameId: string; dayOutcome: GameDayOutcome }> {
+async function setDayCompletion(context: CommandContext, command: Extract<GameCommand, { type: "setDayCompletion" }>): Promise<{ gameId: string; dayOutcome: GameDayOutcome; chatLine?: string }> {
   let dayOutcome: GameDayOutcome | undefined;
+  let outcomeChange: { result: StoredResult; row: Game } | undefined;
   // A counted day is a words post saying what its player told Murph; the line is sealed before the game lock.
   const creditEntryId = randomUUID();
   const creditText = command.text ? await seal({ memberId: context.actor, rowId: creditEntryId, table: "game_entry", field: "text" }, command.text) : null;
-  await runLocked(command.gameId, context, async ({ clock, loaded, now, tx }) => {
-    if (!context.chatContainerMemberId || loaded.row.chatContainerMemberId !== context.chatContainerMemberId) reject("NOT_A_PLAYER", "Use the group chat bound to this game.");
-    const decision = decideDayCompletion(loaded.state, { memberId: context.actor, date: command.date, incomplete: command.incomplete, credit: command.credit, hasWords: creditText !== null, now });
+  await runLocked(command.gameId, context, async (locked) => {
+    const { clock, now, tx } = locked;
+    if (!context.chatContainerMemberId || locked.loaded.row.chatContainerMemberId !== context.chatContainerMemberId) reject("NOT_A_PLAYER", "Use the group chat bound to this game.");
+    // A pair game that has ended but is still stored as live is settled here first, so the finished game takes the correction.
+    const loaded = locked.loaded.row.status === "live" && locked.loaded.row.maxPlayers === 2 && await settleLoaded(locked, context.actor)
+      ? (await loadGames(tx, [command.gameId]))[0] : locked.loaded;
+    const decision = decideDayCompletion(loaded.state, { memberId: context.actor, date: command.date, incomplete: command.incomplete, credit: command.credit, hasWords: creditText !== null, now, clock });
     dayOutcome = decision.outcome;
     if (!decision.changed) return [];
+    const settledResult = loaded.row.status === "settled" ? parseStoredResult(loaded.row.result) : null;
+    if (settledResult && !storedResultStands(loaded.state, settledResult)) reject("GAME_NOT_LIVE", "This game's result can't be changed anymore.");
+    const mine = (entry: GameEntry) => entry.memberId === context.actor && entry.dayIndex === decision.dayIndex && entry.attempt > 0;
+    let entries: GameEntry[];
+    let event: GameEventDraft;
     if (decision.outcome.status === "credited") {
       // No push: the request and Murph's answer are already in the game's own chat.
-      await tx.gameEntry.create({ data: { id: creditEntryId, gameId: command.gameId, memberId: context.actor, dayIndex: decision.dayIndex,
+      const created = await tx.gameEntry.create({ data: { id: creditEntryId, gameId: command.gameId, memberId: context.actor, dayIndex: decision.dayIndex,
         attempt: 1, kind: "words", mediaKeys: [], textEncrypted: creditText, receivedAt: clock } });
-      return [{ type: "day_credited", payload: { dayIndex: decision.dayIndex, entryId: creditEntryId } }];
+      entries = [...loaded.entries, created];
+      event = { type: "day_credited", payload: { dayIndex: decision.dayIndex, entryId: creditEntryId } };
+    } else {
+      await tx.gameEntry.updateMany({ where: { gameId: command.gameId, memberId: context.actor, dayIndex: decision.dayIndex, attempt: { gt: 0 } }, data: { incomplete: command.incomplete ? true : null } });
+      entries = loaded.entries.map(entry => mine(entry) ? { ...entry, incomplete: command.incomplete ? true : null } : entry);
+      event = { type: command.incomplete ? "day_marked_incomplete" : "day_restored", payload: { dayIndex: decision.dayIndex } };
     }
-    await tx.gameEntry.updateMany({ where: { gameId: command.gameId, memberId: context.actor, dayIndex: decision.dayIndex, attempt: { gt: 0 } }, data: { incomplete: command.incomplete ? true : null } });
-    return [{ type: command.incomplete ? "day_marked_incomplete" : "day_restored", payload: { dayIndex: decision.dayIndex } }];
+    const state = toRuleState(loaded.row, entries);
+    if (!settledResult) {
+      if (!command.incomplete) await reserveBothWinOfferTx({ clock, loaded, now, tx }, state);
+      return [event];
+    }
+    const corrected = await correctSettledResultTx({ clock, loaded, now, tx }, state, settledResult, decision.dayIndex);
+    if (corrected.outcomeChanged) outcomeChange = { result: corrected.result, row: loaded.row };
+    return [event, corrected.event];
   });
   if (!dayOutcome) throw new Error("Game day correction produced no outcome.");
-  return { gameId: command.gameId, dayOutcome };
+  // The correction is committed. A line that cannot be built (names or words unreadable) must not fail it:
+  // the returned state still carries the new result.
+  const chatLine = outcomeChange ? await settledCorrectionLine(context.actor, command, outcomeChange).catch(() => undefined) : undefined;
+  return { gameId: command.gameId, dayOutcome, ...(chatLine ? { chatLine } : {}) };
+}
+
+/**
+ * A finished game's result is decided again from its posts when a day is
+ * corrected, so it must still be what those posts decide. After an Ops takedown
+ * or a deleted account it is not, and a correction would move the other
+ * player's score: the write refuses and Murph is not shown the days.
+ */
+function storedResultStands(state: RuleState, stored: StoredResult): boolean {
+  const flat = (result: StoredResult) => JSON.stringify(result.scores.map(({ seat, memberId, score, misses }) => [seat, memberId, score, misses]).sort());
+  return flat(stored) === flat(decideSettle(state).result);
+}
+
+/**
+ * A day changed after the end. Settles the result again from the same decision
+ * as the first time; the game stays the same finished game, so its status and
+ * end time, and everything that keys on them, do not move.
+ */
+async function correctSettledResultTx({ loaded: { row }, now, tx }: LockedStep, state: RuleState, before: StoredResult, dayIndex: number): Promise<{ event: GameEventDraft; result: StoredResult; outcomeChanged: boolean }> {
+  const decision = decideSettle(state);
+  const tickets = await settleTicketsTx(tx, row, decision.tickets, now);
+  await tx.game.update({ where: { id: row.id }, data: { result: toPrismaJsonObject(decision.result) } });
+  const scores = (result: StoredResult) => result.scores.map(({ score, seat }) => ({ score, seat }));
+  return { result: decision.result,
+    outcomeChanged: decision.result.scores.some(score => outcomeFor(decision.result, score.memberId) !== outcomeFor(before, score.memberId)),
+    event: { type: "result_corrected", payload: { dayIndex, before: scores(before), after: scores(decision.result), ticketsAdded: tickets.added,
+      ticketsRemoved: tickets.removed.map(ticket => ({ id: ticket.id, stakeKey: ticket.stakeKey, owedBySeats: ticket.owedBySeats, owedToSeats: ticket.owedToSeats, createdAt: ticket.createdAt.toISOString() })) } } };
+}
+
+/** The one line that tells the chat a finished game's outcome changed. Names are the players' own Game profiles. */
+async function settledCorrectionLine(actor: string, command: { date: string; incomplete: boolean }, { result, row }: { result: StoredResult; row: Game }): Promise<string> {
+  const names = new Map((await readGameChatProfiles(result.scores.map(score => score.memberId))).map(player => [player.memberId, player.firstName ?? "Player"]));
+  const bothWin = currentTerms(parseStoredTerms(row.terms)).stakes.find(stake => stake.kind === "both_get");
+  const [words] = bothWin && result.scores.every(score => score.misses === 0)
+    ? await openGameTexts([{ ...gameTarget(row, "terms_words"), value: row.termsWordsEncrypted }]) : [null];
+  return gameResultCorrectionLine({ name: names.get(actor) ?? "Player", date: command.date, counts: !command.incomplete,
+    result: result.scores.map(score => ({ name: names.get(score.memberId) ?? "Player", score: score.score })),
+    earnedBothWinPrize: words && bothWin ? stakeItem(parseTermWords(words), bothWin.key) : undefined, recapMade: row.recapEncrypted !== null });
 }
 
 async function withdraw(context: CommandContext, command: Extract<GameCommand, { type: "withdraw" }>): Promise<string> {
@@ -1602,7 +1726,9 @@ async function redeem(context: CommandContext, command: Extract<GameCommand, { t
   const ticket = await getPrisma().gameTicket.findUnique({ select: { gameId: true }, where: { id: ticketId } });
   if (!ticket) reject("TICKET_NOT_HELD", "That prize isn't yours to mark done.");
   await runLocked(ticket.gameId, context, async ({ clock, now, tx, loaded }) => {
-    const current = await tx.gameTicket.findUniqueOrThrow({ where: { id: ticketId } });
+    // A day correction on the finished game can remove an open ticket that is no longer owed.
+    const current = await tx.gameTicket.findUnique({ where: { id: ticketId } });
+    if (!current) reject("TICKET_NOT_HELD", "That prize isn't yours to mark done.");
     const holder = loaded.row.players.find(player => player.memberId === actor);
     const group = loaded.row.maxPlayers === 10;
     const authorized = group ? canRedeemGroupTicket(current, loaded.row.players, loaded.row.result ? parseStoredResult(loaded.row.result) : null, actor)
@@ -1995,14 +2121,35 @@ async function settleLoaded({ loaded: { row, state }, tx, clock, now }: LockedSt
     return true;
   }
   const decision = decideSettle(state);
-  const tickets = decision.tickets.map(ticket => ({ ...ticket, gameId, id: generateHostedRandomPrefixedId("gtk"),
-    ...(row.devClockOffsetMs === null ? {} : { createdAt: now }) }));
-  await tx.gameTicket.createMany({ data: tickets });
+  const tickets = await settleTicketsTx(tx, row, decision.tickets, now);
   await endGame(tx, gameId, { result: toPrismaJsonObject(decision.result), settledAt: clock, status: "settled" });
   if (row.chatContainerMemberId) await reserveGameChatLifecycleTx({ gameId, kind: "recap", now: clock, tx });
   const scores = decision.result.scores.map(({ score, seat }) => ({ score, seat }));
-  await writeEvents(tx, gameId, actor, [{ payload: { scores, ticketIds: tickets.map(ticket => ticket.id) }, type: "settled" }]);
+  await writeEvents(tx, gameId, actor, [{ payload: { scores, ticketIds: tickets.added }, type: "settled" }]);
   return true;
+}
+
+/**
+ * Makes a game's tickets match a settle decision, under the game lock.
+ * Settlement starts with none, so it issues them all. A later day correction
+ * keeps every ticket that is still owed (a done one before an open one, so a
+ * prize already given is not issued twice), issues what is missing, and removes
+ * an open ticket that is no longer owed; the caller keeps its content in the
+ * correction's event. A ticket already marked done is history and always stays.
+ * Tickets are matched by stake and by who owes whom, counting duplicates.
+ */
+async function settleTicketsTx(tx: Tx, row: Pick<Game, "id" | "devClockOffsetMs">, owed: SettleDecision["tickets"], now: Date): Promise<{ added: string[]; removed: GameTicket[] }> {
+  const key = (ticket: SettleDecision["tickets"][number]) => JSON.stringify([ticket.stakeKey, ticket.owedBySeats, ticket.owedToSeats]);
+  const unmatched = await tx.gameTicket.findMany({ where: { gameId: row.id }, orderBy: [{ status: "desc" }, { createdAt: "asc" }, { id: "asc" }] });
+  const missing = owed.filter(ticket => {
+    const index = unmatched.findIndex(existing => key(existing) === key(ticket));
+    if (index >= 0) unmatched.splice(index, 1);
+    return index < 0;
+  }).map(ticket => ({ ...ticket, gameId: row.id, id: generateHostedRandomPrefixedId("gtk"), ...(row.devClockOffsetMs === null ? {} : { createdAt: now }) }));
+  const removed = unmatched.filter(ticket => ticket.status === "open");
+  if (removed.length) await tx.gameTicket.deleteMany({ where: { id: { in: removed.map(ticket => ticket.id) }, status: "open" } });
+  if (missing.length) await tx.gameTicket.createMany({ data: missing });
+  return { added: missing.map(ticket => ticket.id), removed };
 }
 
 // --------------------------------------------------------------------- dev
@@ -2376,7 +2523,7 @@ async function applyChangeTermsTx({ tx, loaded }: LockedStep, gameId: string, pr
   const previous = currentTerms(loaded.state.game.terms);
   const next = { ...previous, n: previous.n + 1, fromDay: decision.effectiveFromDay,
     ...(proposal.change.kind === "edit" && proposal.change.schedule ? { schedule: proposal.change.schedule } : {}),
-    ...(proposal.stakes ? { stakes: proposal.stakes } : {}) };
+    ...(proposal.stakes ? { stakes: mergeStakeSlots(previous.stakes, proposal.stakes) } : {}) };
   const terms = { v: 1 as const, versions: [...loaded.state.game.terms.versions.filter((version) => version.fromDay < next.fromDay), next] };
   const lengthDays = proposal.change.kind === "edit" ? proposal.change.lengthDays : undefined;
   await tx.game.update({ where: { id: gameId }, data: {
@@ -2429,7 +2576,7 @@ async function readPairGameRematchNotice(gameId: string, previousGameId: string 
       checkInKind: terms.checkInKind ?? "photo",
       lengthDays: game.row.lengthDays,
       schedule: terms.schedule,
-      stakes: terms.stakes.map((stake) => ({ item: stake.item, kind: stake.kind })),
+      stakes: terms.stakes.filter(stake => stake.kind !== "both_get").map((stake) => ({ item: stake.item, kind: stake.kind })),
       tasksByMember: Object.fromEntries(tasks.map((task) => [task.memberId!, task.text]).sort(([a], [b]) => a.localeCompare(b))),
     };
   };
@@ -2520,11 +2667,11 @@ export async function readGameChatState(containerMemberId: string, playerMemberI
     orderBy: { createdAt: "desc" }, include: { invitees: true, players: true } });
   const audience = prepared ?? (candidates.some(row => row.maxPlayers === 10) ? await readGameChatAudience(containerMemberId) : undefined);
   const context = { chatContainerMemberId: containerMemberId, chatPlayerMemberIds: playerMemberIds, chatAudience: audience };
-  const allowed = await Promise.all(candidates.map(async row => isGameOn(row) && await gameChatContextCurrent(row, context) ? row.id : null));
+  const allowed = await Promise.all(candidates.map(async row => isGameEnabled() && await gameChatContextCurrent(row, context) ? row.id : null));
   const current = await loadCurrent(allowed.filter((id): id is string => id !== null), true, actorMemberId, actorMemberId ? containerMemberId : undefined);
   const loadedById = new Map(current.games.map((game) => [game.row.id, game]));
   const rows = [];
-  for (const { row } of current.games) if (isGameOn(row) && await gameChatContextCurrent(row, context)) rows.push(row);
+  for (const { row } of current.games) if (isGameEnabled() && await gameChatContextCurrent(row, context)) rows.push(row);
   const profiles = await prisma.gameProfile.findMany({ where: { memberId: { in: [...new Set(rows.flatMap(row => row.maxPlayers === 10 ? row.players.filter(player => !player.leftAt).filter(hasGameIdentity).map(player => player.memberId) : gameChatPlayerIds(row)))] } },
     select: { memberId: true, firstNameEncrypted: true } });
   const plain = await openGameTexts([
@@ -2559,7 +2706,10 @@ export async function readGameChatState(containerMemberId: string, playerMemberI
     // Chat exposes unjoined invitees only as a count, never their task overrides.
     if (row.maxPlayers === 10) terms.tasks = terms.tasks.filter(task => row.players.some(player => player.seat === task.seat && !player.leftAt));
     return { ...(row.maxPlayers === 10 ? { maxPlayers: 10 as const, pendingInviteeCount: row.invitees.filter(invitee => !row.players.some(player => player.seat === invitee.seat)).length } : {}), id: row.id, status: state.game.status, terms: { ...terms, ...(checkInKind === "any" ? {} : { checkInKind }) },
-      progress: gameChatProgress(state, gameNow(clock, row)),
+      // A finished game carries its days only while its players can still correct them, as they stood when it ended.
+      ...(row.status !== "settled" ? { progress: gameChatProgress(state, gameNow(clock, row)) }
+        : result && isSettledGameCorrectable(state, clock) && storedResultStands(state, result)
+          ? { progress: gameChatProgress(state, gameNow(clock, row), settledGameEnd(state, clock, gameNow(clock, row))) } : {}),
       result: result ? { scores: result.scores.filter(score => row.maxPlayers !== 10 || players.some(player => player.memberId === score.memberId)), tickets: [...ticketGroups.values()] } : null,
       startsOn: gameDayOne(calendarPlayers(state)) ?? fromDbDate(row.startsOn), lengthDays: row.lengthDays,
       players: players.map((player) => ({ memberId: player.memberId, seat: player.seat, firstName: gameNames.get(player.memberId) ?? "", dayOne: fromDbDate(player.dayOne), timeZone: player.timeZone })),
@@ -2672,6 +2822,7 @@ export type GameRecapMaterial = {
   players: string[];
   entries: Array<{ entryId: string; kind: string; playerName: string; text: string | null; visibleToBoth: boolean }>;
   validation: {
+    earnedBothWinPrize?: string;
     group?: boolean;
     show?: boolean;
     startedAt: Date;
@@ -2739,10 +2890,12 @@ export async function readGameRecapMaterial(gameId: string, containerMemberId: s
   }));
   return {
     players: recapPlayers.map((player) => names.get(player.memberId) ?? ""), entries,
-    validation: { group: row.maxPlayers === 10, show: isPairRecapShowEnabled(row.maxPlayers), startedAt: row.startedAt ?? row.createdAt, settledAt: row.settledAt,
+    validation: { earnedBothWinPrize: terms.stakes.filter(stake => stake.kind === "both_get" && scores.every(score => score.misses === 0)).map(stake => stake.item)[0], group: row.maxPlayers === 10, show: isPairRecapShowEnabled(row.maxPlayers), startedAt: row.startedAt ?? row.createdAt, settledAt: row.settledAt,
       playerNamesByMemberId: recapPlayers.map((player) => ({ memberId: player.memberId, name: names.get(player.memberId) ?? "" })),
       result: scores.filter(score => score.eligible !== false).map((score) => ({ memberId: score.memberId, name: names.get(score.memberId) ?? "", score: score.score })) },
-    game: { id: row.id, ...(isPairRecapShowEnabled(row.maxPlayers) ? { recapShow: true } : {}), ...(row.maxPlayers === 10 ? { maxPlayers: 10 } : {}), players: recapPlayers.map((player) => ({ memberId: player.memberId, name: names.get(player.memberId) ?? "", task: terms.tasks.find((task) => task.seat === player.seat)?.text ?? "" })),
+    game: { id: row.id, ...(isPairRecapShowEnabled(row.maxPlayers) ? { recapShow: true } : {}),
+      ...recapPosterField(row.maxPlayers, { result, terms: state.game.terms, words, tickets: row.tickets }),
+      ...(row.maxPlayers === 10 ? { maxPlayers: 10 } : {}), players: recapPlayers.map((player) => ({ memberId: player.memberId, name: names.get(player.memberId) ?? "", task: terms.tasks.find((task) => task.seat === player.seat)?.text ?? "" })),
       lengthDays: row.lengthDays, schedule: terms.schedule, stakes: terms.stakes, score: scores.map((score) => ({ name: names.get(score.memberId) ?? "", score: score.score })), days: postsByDay },
   };
 }
@@ -2753,7 +2906,7 @@ async function readRecapDoubters(db: Db, gameId: string, names: ReadonlyMap<stri
   return new Map(cases.map(item => [item.entryId, names.get(item.actor)]));
 }
 
-export async function sealGameRecap(input: {
+type SealGameRecapInput = {
   beforeMutationTx: (tx: Prisma.TransactionClient) => Promise<void>;
   containerMemberId: string;
   eventId: string;
@@ -2761,7 +2914,17 @@ export async function sealGameRecap(input: {
   playerMemberIds: readonly string[];
   recap: HostedGameRecap | null;
   assets?: RecapAsset[];
-}): Promise<HostedGameRecap | null> {
+  /** A candidate only, as the request carried it: it is validated, measured and checked here, and left off when it fails. */
+  video?: { draft: unknown; material: GameRecapMaterial };
+};
+
+export async function sealGameRecap(input: SealGameRecapInput): Promise<HostedGameRecap | null> {
+  return (await acceptGameRecap(input))?.recap ?? null;
+}
+
+/** The stored recap after this call, whoever wrote it: the first acceptance wins, and
+ * a retry or replay gets that story and that video's identity, never its own draft's. */
+export async function acceptGameRecap(input: SealGameRecapInput): Promise<{ recap: HostedGameRecap; video: RecapVideoIdentity | null } | null> {
   const prisma = getPrisma();
   const row = await prisma.game.findFirst({ where: { id: input.gameId, chatContainerMemberId: input.containerMemberId, status: "settled" } });
   if (!row || row.maxPlayers !== 10 && !sameGamePlayers(input.playerMemberIds, input.playerMemberIds)) return null;
@@ -2793,22 +2956,26 @@ export async function sealGameRecap(input: {
   });
   if (!stored) return null;
   const [plain] = await openGameTexts([{ ...gameTarget(row, "recap"), value: stored }]);
-  return readGameRecapStory(JSON.parse(plain ?? "null"));
+  const accepted = storedGameRecapSchema.parse(JSON.parse(plain ?? "null"));
+  const video = "version" in accepted ? accepted.video : undefined;
+  return { recap: "version" in accepted ? accepted.story : accepted,
+    video: "version" in accepted && video ? { generationId: accepted.generationId, hash: video.hash, byteLength: video.byteLength } : null };
 }
 
-async function selectedRecapEnvelope(row: Game, input: Parameters<typeof sealGameRecap>[0]) {
-  const generation = input.recap && input.assets ? gameRecapEnvelopeSchema.parse({ version: 1,
-    generationId: recapGenerationId(input.eventId), story: input.recap, assets: input.assets, acceptedAt: new Date().toISOString(),
-    preview: { token: randomBytes(32).toString('base64url'), expiresAt: new Date(Date.now() + 30 * 86400_000).toISOString() } }) : null;
-  for (const asset of generation?.assets ?? []) {
-    if (asset.storageKey !== `recap/${generation!.generationId}/${asset.hash}.${asset.mediaType === 'image/jpeg' ? 'jpg' : 'mp3'}`) throw new Error('Wrong recap media identity.');
-    const stored = await readRecapMedia({ storageKey: asset.storageKey, ownerMemberId: row.wordsOwnerMemberId });
-    if (!stored || stored.hash !== asset.hash) throw new Error('Selected media is unavailable.');
+async function selectedRecapEnvelope(row: Game, input: SealGameRecapInput) {
+  if (!input.recap || !input.assets) return null;
+  const generationId = recapGenerationId(input.eventId), ownerMemberId = row.wordsOwnerMemberId;
+  const video = input.video && await selectRecapVideo({ ...input.video, gameId: row.id, eventId: input.eventId, generationId, ownerMemberId, assets: input.assets });
+  const generation = gameRecapEnvelopeSchema.parse({ version: 1,
+    generationId, story: input.recap, assets: input.assets, ...(video ? { video } : {}), acceptedAt: new Date().toISOString(),
+    preview: { token: randomBytes(32).toString('base64url'), expiresAt: new Date(Date.now() + 30 * 86400_000).toISOString() } });
+  for (const asset of generation.assets) {
+    if (!await readRecapGenerationObject({ generationId, ownerMemberId, object: asset })) throw new Error('Selected media is unavailable.');
   }
   return generation;
 }
 
-async function acceptGameRecapTx(tx: Prisma.TransactionClient, input: Parameters<typeof sealGameRecap>[0], current: Game, recapEncrypted: string | null, regenerationId?: string, generation?: GameRecapEnvelope | null): Promise<string | null> {
+async function acceptGameRecapTx(tx: Prisma.TransactionClient, input: SealGameRecapInput, current: Game, recapEncrypted: string | null, regenerationId?: string, generation?: GameRecapEnvelope | null): Promise<string | null> {
   const acceptedKey = `${input.eventId}:accepted`;
   if (regenerationId) {
     const requested = await tx.gameEvent.findUnique({ where: { commandKey: input.eventId }, select: { gameId: true, type: true } });
@@ -2827,9 +2994,11 @@ async function acceptGameRecapTx(tx: Prisma.TransactionClient, input: Parameters
     if (changed.count !== 1) return null;
   }
   if (generation) {
+    // The video's own sources were checked when it was selected and are checked again on every read and
+    // send, so a source that changes in between leaves a video nobody can open, never a recap that fails.
     if (!await recapReferencesCurrent(tx, input.gameId, generation.assets)) throw new Error('A selected source was revoked.');
-    for (const asset of generation.assets) if (!await retainRecapAssetTx(tx, { gameId: input.gameId,
-      generationId: generation.generationId, ownerMemberId: current.wordsOwnerMemberId, storageKey: asset.storageKey, now: new Date() })) throw new Error('Selected media was retired.');
+    for (const object of recapStorageObjects(generation)) if (!await retainRecapAssetTx(tx, { gameId: input.gameId,
+      generationId: generation.generationId, ownerMemberId: current.wordsOwnerMemberId, storageKey: object.storageKey, now: new Date() })) throw new Error('Selected media was retired.');
   }
   return recapEncrypted;
 }
@@ -2898,6 +3067,13 @@ export async function readGameChallengeCase(db: Db, gameId: string, entryId: str
       || !visibleEntryIds(loaded.state, challenge.actor, new Set(reports.flatMap(report => report.entryId ? [report.entryId] : []))).has(entryId)) return null;
   }
   return { ...loaded, challenge, status: gameChallengeStatus(loaded.state, challenge, gameNow(clock, loaded.row)) };
+}
+
+/** Current offer facts, shared by generation and the locked final dispatch check. */
+export async function isBothWinOfferCurrent(db: Db, gameId: string, clock: Date) {
+  const [loaded] = await loadGames(db, [gameId]);
+  return loaded && !loaded.row.pendingChange && loaded.row.chatContainerMemberId
+    && isBothWinOfferDue(loaded.state, gameNow(clock, loaded.row)) ? loaded : null;
 }
 
 /** Database-only change state shared by generation and the final dispatch claim. */
@@ -3059,39 +3235,12 @@ export async function readGame(gameId: string, memberId: string, multiplayer = f
  * while it's still an invite (only they can accept it).
  */
 function canView(game: LoadedGame, memberId: string): boolean {
-  if (!isGameOn(game.row)) return false;
+  if (!isGameEnabled()) return false;
   const player = playerFor(game.state, memberId);
   if (player) return !player.leftAt;
   // Also after its challenger left: the invitee sees it called off.
   return game.row.invitees.some(invitee => invitee.memberId === memberId)
     && (game.row.status === "invited" || game.row.players.some(player => player.leftAt !== null));
-}
-
-/**
- * The HTTP door. A listed member may use every route. Anyone else enters only
- * for a game that is on: one they play or are the addressed rematch invitee
- * of, or the open invite they're holding, so a new invitee can set up and
- * accept. Owners of outgoing blocks or reports may also enter to unblock or
- * retry an accepted report after the source is gone. Each command still checks
- * its own game, so this grants no game access.
- */
-export async function canEnterGame(memberId: string, inviteToken: string | null): Promise<boolean> {
-  if (isGameEnabledFor(memberId)) return true;
-  if (!isGameEnabled()) return false;
-  const prisma = getPrisma();
-  const yours = await prisma.game.findFirst({ select: { id: true }, where: { AND: [
-    { OR: [{ players: { some: { memberId } } }, { invitees: { some: { memberId } } }] },
-    { status: { in: ["invited", "negotiating", "live", "settled"] } },
-    gameOnWhere(),
-  ] } });
-  if (yours) return true;
-  if (await prisma.gameBlock.findFirst({ select: { blockedMemberId: true }, where: { blockerMemberId: memberId } })) return true;
-  if (await prisma.gameReport.findFirst({ select: { id: true }, where: { reporterMemberId: memberId } })) return true;
-  if (!inviteToken) return false;
-  const invite = await prisma.game.findUnique({ include: { invitees: true, players: true }, where: { inviteTokenHash: sha256Hex(inviteToken) } });
-  if (!invite || !(invite.status === "invited" || invite.maxPlayers === 10 && invite.status === "live") || !isGameOn(invite)) return false;
-  if (invite.maxPlayers === 2 && invite.invitees.some(invitee => invitee.memberId !== null) && !invite.invitees.some(invitee => invitee.memberId === memberId)) return false;
-  return invite.inviteExpiresAt === null || invite.inviteExpiresAt.getTime() > gameNow(await databaseNow(prisma), invite).getTime();
 }
 
 /**
@@ -3152,7 +3301,7 @@ async function readHomeProfile(memberId: string, auth?: HostedNativeMemberAuth):
 
 export async function readHome(memberId: string, multiplayer = false, auth?: HostedNativeMemberAuth): Promise<GameHomeView> {
   const prisma = getPrisma();
-  const [profile, seats, addressed, tickets, usualEntry] = await Promise.all([
+  const [profile, seats, addressed, tickets, usualEntry, identity] = await Promise.all([
     readHomeProfile(memberId, auth),
     // Apply active-game priority before the bounded history window, so new
     // invitations and completed games cannot displace an older live game.
@@ -3162,7 +3311,7 @@ export async function readHome(memberId: string, multiplayer = false, auth?: Hos
       WHERE seat.member_id = ${memberId} AND seat.left_at IS NULL
         AND game.status IN ('invited', 'negotiating', 'live', 'settled', 'void')
         AND ${multiplayer ? Prisma.sql`TRUE` : Prisma.sql`game.max_players = 2`}
-        AND ${gameOnSql("game")}
+        AND ${gameOnSql()}
         AND NOT EXISTS (SELECT 1 FROM game_event event WHERE event.game_id = game.id AND event.type = 'cancelled')
       ORDER BY CASE game.status WHEN 'live' THEN 0 WHEN 'negotiating' THEN 1 WHEN 'invited' THEN 2 ELSE 3 END,
         seat.joined_at DESC, seat.game_id DESC
@@ -3178,6 +3327,9 @@ export async function readHome(memberId: string, multiplayer = false, auth?: Hos
     }),
     prisma.gameEntry.findFirst({ where: { memberId, attempt: { gt: 0 }, withdrawnAt: null },
       orderBy: [{ receivedAt: "desc" }, { id: "desc" }], select: { kind: true } }),
+    // Only for the optional area-code hint: an identity that can't be read
+    // leaves it unknown instead of failing home.
+    readHostedMemberIdentity({ memberId, prisma }).catch(() => null),
   ]);
   const current = await loadCurrent([...new Set([...seats.map((seat) => seat.gameId), ...addressed.map((game) => game.id)])], true, memberId);
   const visible = current.games.filter((game) => canView(game, memberId));
@@ -3202,12 +3354,13 @@ export async function readHome(memberId: string, multiplayer = false, auth?: Hos
     return ticketView(toTicketRow(ticket, ticket.game.players), input.words, memberId, input.now,
       input.state.game.terms, input.hiddenMemberIds, input);
   });
+  const areaCode = gameAreaCode(identity);
   return {
     blocked,
     games: views,
-    canStartGames: isGameEnabledFor(memberId),
-    ...(multiplayer ? { canStartGroups: areGameGroupsEnabled() && isGameEnabledFor(memberId) } : {}),
-    me: { usualKind: usualEntry ? toEntryKind(usualEntry.kind) : null, avatarUrl: profile?.photoKey ? gameMediaUrl(profile.photoKey) : null, firstName: profile?.firstName ?? null, memberId, timeZone: profile?.timeZone ?? null },
+    canStartGames: isGameEnabled(),
+    ...(multiplayer ? { canStartGroups: areGameGroupsEnabled() } : {}),
+    me: { notForMe: profile?.notForMe ?? [], ...(areaCode ? { areaCode } : {}), usualKind: usualEntry ? toEntryKind(usualEntry.kind) : null, avatarUrl: profile?.photoKey ? gameMediaUrl(profile.photoKey) : null, firstName: profile?.firstName ?? null, memberId, timeZone: profile?.timeZone ?? null },
     wallet: {
       // Expired tickets stay where they were, marked expired.
       held: wallet.filter((ticket) => ticket.status !== "redeemed" && ticket.youHold),
@@ -3240,7 +3393,7 @@ export async function readHistory(memberId: string, multiplayer = false): Promis
         ON game.max_players = 2 AND opponent.game_id = game.id AND opponent.member_id <> ${memberId}
       WHERE game.status = 'settled'
         AND game.settled_at IS NOT NULL
-        AND ${gameOnSql("game")}
+        AND ${gameOnSql()}
         AND ${multiplayer ? Prisma.sql`TRUE` : Prisma.sql`game.max_players = 2`}
         AND (game.max_players = 10 OR (opponent.member_id IS NOT NULL
         AND (SELECT count(*) FROM game_player roster WHERE roster.game_id = game.id) = 2
@@ -3306,20 +3459,45 @@ async function readBlockedPeople(memberId: string): Promise<{ memberId: string; 
     select: { blockedMemberId: true }, take: GAME_BLOCK_LIMIT, where: { blockerMemberId: memberId } });
   if (rows.length === 0) return [];
   const ids = rows.map((row) => row.blockedMemberId);
-  const [profiles, labels] = await Promise.all([
-    prisma.gameProfile.findMany({ select: { firstNameEncrypted: true, memberId: true }, where: { memberId: { in: ids } } }),
-    prisma.gameContactLabel.findMany({ select: { nameEncrypted: true, subjectMemberId: true }, where: { ownerMemberId: memberId, subjectMemberId: { in: ids } } }),
-  ]);
-  const plain = await openGameTexts([
-    ...labels.map((label) => ({ ...labelTarget(memberId, "name"), value: label.nameEncrypted })),
-    ...profiles.map((profile) => ({ field: "first_name", memberId: profile.memberId, rowId: profile.memberId, table: "game_profile" as const, value: profile.firstNameEncrypted })),
-  ]);
-  const labelName = new Map(labels.map((label, index) => [label.subjectMemberId, plain[index]]));
-  const ownName = new Map(profiles.map((profile, index) => [profile.memberId, plain[labels.length + index]]));
-  return ids.map((id) => ({ firstName: labelName.get(id) || ownName.get(id) || "", memberId: id }));
+  const names = await readNamesForViewer(memberId, ids);
+  return ids.map((id) => ({ firstName: names.get(id) ?? "", memberId: id }));
 }
 
-/** Anyone with the link sees an open invite's details; a used or expired one shows only its status. */
+/** Read-only recovery of the newest open invite addressed to a verified contact. */
+export async function readGameInviteForMember(memberId: string): Promise<string | null> {
+  if (!isGameEnabled()) return null;
+  const prisma = getPrisma();
+  const contacts = await readGameVerifiedContacts(memberId);
+  const keys = await verifiedGameContactKeys(prisma, memberId, contacts);
+  if (keys.length === 0) return null;
+  const clock = await databaseNow(prisma);
+  const candidates = await prisma.game.findMany({
+    where: {
+      maxPlayers: 2, status: "invited", createdBy: { not: memberId },
+      AND: [gameOnWhere(), { createdBy: { not: null } }],
+      creator: { blocksMade: { none: { blockedMemberId: memberId } }, blocksReceived: { none: { blockerMemberId: memberId } } },
+      players: { none: { memberId } },
+      invitees: { some: { seat: 1, memberId: null, recipientLookupKey: { in: keys } } },
+      // Prisma cannot compare expiry to a per-row dev clock offset. Normal
+      // clocks filter before the cap; time-travel rows repeat expiry below.
+      OR: [{ inviteExpiresAt: null }, { devClockOffsetMs: null, inviteExpiresAt: { gt: clock } }, { devClockOffsetMs: { not: null } }],
+    },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }], take: 5,
+    select: { id: true, status: true, createdBy: true, wordsOwnerMemberId: true, inviteTokenEncrypted: true, inviteExpiresAt: true, devClockOffsetMs: true },
+  });
+  for (const row of candidates) {
+    if (!row.createdBy || isGameInviteExpired(row, gameNow(clock, row))) continue;
+    const existing = await prisma.game.findFirst({ where: {
+      ...gamePairWhere([memberId, row.createdBy]), maxPlayers: 2, status: { in: ["live", "negotiating"] },
+    }, select: { id: true } });
+    if (existing) continue;
+    const [token] = await openGameTexts([{ ...gameTarget(row, "invite_token"), value: row.inviteTokenEncrypted }]);
+    if (token) return token;
+  }
+  return null;
+}
+
+/** Only open invites expose details publicly; closed links look like missing ones. */
 export async function readInvitePreview(token: string, multiplayer = false, memberId?: string): Promise<GameInvitePreview | null> {
   if (!isGameEnabled() || typeof token !== "string" || !token) return null;
   const row = await getPrisma().game.findUnique({
@@ -3328,13 +3506,12 @@ export async function readInvitePreview(token: string, multiplayer = false, memb
   });
   if (!row || (!multiplayer && row.maxPlayers !== 2)) return null;
   if (memberId && row.players.some(player => player.memberId === memberId && player.leftAt)) return null;
-  // Its challenger deleted their account: never open again.
-  if (!row.creator && row.maxPlayers === 2) return { status: "expired" };
-  if (!isGameOn(row)) return null;
+  if (![...row.players, ...row.invitees].some(person => person.memberId !== null)) return null;
   const blocks = memberId ? await readGameBlocks(getPrisma(), memberId, gameMemberIds(row.players)) : null;
   if (row.createdBy && blocks && isHiddenBy(blocks, row.createdBy)) return null;
   const now = gameNow(await databaseNow(getPrisma()), row);
   const closed = await closedInvitePreview(row, now);
+  if (closed && !memberId) return null;
   const preview = closed ?? await openInvitePreview(row, multiplayer, memberId, blocks);
   if (row.maxPlayers !== 10) return preview;
   return withGroupTalkPreview(row, preview, memberId, now);
@@ -3367,20 +3544,17 @@ async function canSendGroupTalk(row: GameRow, actor: string, now: Date): Promise
   return Boolean(audience?.memberIds.includes(actor) && (await verifiedGameContactKeys(db, actor, audience.contacts)).length);
 }
 
-type PreviewGame = GameRow & { creator: { memberId: string; firstNameEncrypted: string } | null; events: { actor: string }[] };
+type PreviewGame = GameRow & { creator: { memberId: string; firstNameEncrypted: string; photoKey: string | null } | null; events: { actor: string }[] };
 
 async function closedInvitePreview(row: PreviewGame, now: Date): Promise<GameInvitePreview | null> {
+  // Its challenger deleted their account: never open again.
+  if (!row.creator && row.maxPlayers === 2) return { status: "expired" };
   // Expired means nobody took it: a void game, or an open invite past its
   // expiry. A taken one stays "used" however long ago that was.
   const expired = row.status === "void"
-    || (row.status === "invited" && row.inviteExpiresAt !== null && row.inviteExpiresAt.getTime() < now.getTime());
+    || (row.status === "invited" && row.inviteExpiresAt !== null && row.inviteExpiresAt.getTime() <= now.getTime());
   if (row.status === "void" && row.events.length > 0) {
-    if (row.events[0].actor !== row.createdBy) return { status: "expired", reason: "cancelled" };
-    if (!row.creator) return { status: "expired", reason: "cancelled" };
-    const [inviterFirstName] = await openGameTexts([
-      { field: "first_name", memberId: row.creator.memberId, rowId: row.creator.memberId, table: "game_profile", value: row.creator.firstNameEncrypted },
-    ]);
-    return { status: "expired", reason: "cancelled", inviterFirstName: inviterFirstName ?? "" };
+    return { status: "expired", reason: "cancelled" };
   }
   const groupOpen = await groupInviteOpen(row, now);
   if ((row.status !== "invited" && !groupOpen) || expired) return { status: expired ? "expired" : "used" };
@@ -3411,6 +3585,7 @@ async function openInvitePreview(row: PreviewGame, multiplayer: boolean, memberI
     ...additions,
     expiresAt: row.maxPlayers === 10 ? row.inviteExpiresAt?.toISOString() ?? null : (row.inviteExpiresAt ?? row.createdAt).toISOString(),
     inviterFirstName: inviterFirstName ?? "",
+    ...(memberId !== undefined && row.maxPlayers === 2 ? { inviterAvatarUrl: await inviterAvatar(row, memberId) } : {}),
     startsOn: game.startsOn,
     status: "open",
     supportsNegotiation: row.maxPlayers === 2,
@@ -3418,6 +3593,26 @@ async function openInvitePreview(row: PreviewGame, multiplayer: boolean, memberI
     lengthDays: row.lengthDays,
     terms: previewTerms,
   };
+}
+
+/**
+ * The challenger's current profile photo for a signed-in reader of their open
+ * one-on-one invite. The public preview never carries it.
+ */
+async function inviterAvatar(row: PreviewGame, memberId: string): Promise<string | null> {
+  const photoKey = row.creator?.photoKey;
+  if (!row.createdBy || !photoKey || !servesSignedGameMedia()) return null;
+  const prisma = getPrisma();
+  // Recheck the invitation, current profile and viewer masks before signing.
+  const current = await prisma.game.findFirst({ where: {
+    id: row.id, inviteTokenHash: row.inviteTokenHash, status: "invited", maxPlayers: 2, createdBy: row.createdBy,
+    AND: [gameOnWhere()], players: { none: { memberId, leftAt: { not: null } } },
+    creator: { photoKey, reportsReceived: { none: { reporterMemberId: memberId, about: "player" } } },
+  }, select: { status: true, inviteExpiresAt: true, devClockOffsetMs: true } });
+  const currentBlocks = await readGameBlocks(prisma, memberId, [row.createdBy]);
+  if (!current || isHiddenBy(currentBlocks, row.createdBy)
+    || isGameInviteExpired(current, gameNow(await databaseNow(prisma), current))) return null;
+  return (await gameMediaDelivery(photoKey, "avatar").catch(() => null))?.url ?? null;
 }
 
 async function capableInvitePreview(row: PreviewGame, words: TermWords, memberId: string | undefined, blocks: GameBlocks | null) {
@@ -3515,7 +3710,7 @@ async function authorizeReads(memberId: string, mediaKeys: readonly string[], mo
               AND report.reported_member_id = requested.owner)
           AND EXISTS (
             SELECT 1 FROM game
-            WHERE ${gameOnSql("game")} AND ${mode.multiplayer ? Prisma.sql`TRUE` : Prisma.sql`game.max_players = 2`}
+            WHERE ${gameOnSql()} AND ${mode.multiplayer ? Prisma.sql`TRUE` : Prisma.sql`game.max_players = 2`}
               AND NOT EXISTS (SELECT 1 FROM game_player departed
                 WHERE departed.game_id = game.id AND departed.member_id = ${memberId} AND departed.left_at IS NOT NULL)
               AND (EXISTS (SELECT 1 FROM game_player player
@@ -3531,7 +3726,7 @@ async function authorizeReads(memberId: string, mediaKeys: readonly string[], mo
         JOIN game_player viewer ON viewer.game_id = game.id AND viewer.member_id = ${memberId} AND viewer.left_at IS NULL
         WHERE entry.member_id = requested.owner AND entry.media_keys @> ARRAY[requested.key]::text[]
           AND entry.attempt > 0 AND entry.withdrawn_at IS NULL
-          AND ${gameOnSql("game")} AND ${mode.multiplayer ? Prisma.sql`TRUE` : Prisma.sql`game.max_players = 2`}
+          AND ${gameOnSql()} AND ${mode.multiplayer ? Prisma.sql`TRUE` : Prisma.sql`game.max_players = 2`}
           AND NOT EXISTS (SELECT 1 FROM game_report report
             WHERE report.entry_id = entry.id AND report.reporter_member_id = ${memberId})
           AND (${mode.unlocked ? Prisma.sql`(game.status = 'settled' OR EXISTS (
@@ -3713,7 +3908,7 @@ async function buildViewInputs(
     const invitation = row.invitees.find(invitee => !row.players.some(player => player.seat === invitee.seat));
     if (!invitation) return null;
     if (row.createdBy === viewerId) {
-      const pending = parsePendingLabel(invitation.pendingLabel);
+      const pending = pendingInviteeLabel(invitation.pendingLabel);
       return {
         memberId: invitation.memberId,
         name: ask(labelTarget(viewerId, "name"), pending.nameEncrypted),
@@ -3738,6 +3933,7 @@ async function buildViewInputs(
   }
   // Only the viewer's own invite photos and relationships: nobody else ever sees them.
   const avatarKeys = new Map(labels.map((label) => [label.subjectMemberId, reported.players.has(label.subjectMemberId) ? null : label.photoKey]));
+  const profileNotForMe = new Map(profiles.map(profile => [profile.memberId, reported.players.has(profile.memberId) ? [] : profile.notForMe]));
   const profileAvatarKeys = new Map(profiles.map((profile) => [profile.memberId, reported.players.has(profile.memberId) ? null : profile.photoKey]));
   const relationships = new Map([...labelRelationshipAt].map(([memberId, at]) => [memberId, plain[at]]));
   /** The invite's own typed relationship, else the viewer's existing label for an addressed rematch. */
@@ -3749,7 +3945,7 @@ async function buildViewInputs(
   const entryWords = new Map([...entryAt].map(([entryId, at]) => [entryId, {
     text: plain[at.text], data: parseStoredGameEntryData(at.kind, plain[at.payload]),
   }]));
-  return games.map((game, index) => {
+  const inputs: GameViewInput[] = games.map((game, index) => {
     const invite = inviteAt[index];
     const tokenIndex = tokenAt[index];
     const result: StoredResult | null = game.row.result ? parseStoredResult(game.row.result) : null;
@@ -3763,6 +3959,7 @@ async function buildViewInputs(
         && game.row.settledAt !== null && clock.getTime() - game.row.settledAt.getTime() < GAME_RECAP_UI_WAIT_MS,
       avatarKeys,
       profileAvatarKeys,
+      profileNotForMe,
       entryWords, ...(history ? {} : { entryReplies, replyEligibleEntryIds }),
       inviteExpiresAt: game.row.inviteExpiresAt,
       inviteToken: tokenIndex === null ? null : plain[tokenIndex],
@@ -3798,6 +3995,20 @@ async function buildViewInputs(
       words: parseTermWords(plain[wordsAt[index]] ?? ""),
     };
   });
+  const verifiedPhones = await ticketRecipientPhones(inputs, prisma);
+  return inputs.map(input => ({ ...input, verifiedPhones }));
+}
+
+/** The verified numbers of everyone owing a ticket a viewer can text about; no read when nobody qualifies. */
+async function ticketRecipientPhones(
+  inputs: readonly GameViewInput[],
+  prisma: Parameters<typeof readHostedMemberVerifiedPhoneNumbers>[0]["prisma"],
+): Promise<ReadonlyMap<string, string>> {
+  const memberIds = inputs.flatMap(input => input.tickets.flatMap(ticket => {
+    const recipient = ticketMessageRecipient(ticket, input);
+    return recipient ? [recipient] : [];
+  }));
+  return memberIds.length === 0 ? new Map() : await readHostedMemberVerifiedPhoneNumbers({ memberIds, prisma });
 }
 
 function isHomeEntry(game: LoadedGame, viewerId: string, clock: Date, entry: Pick<GameEntry, "memberId" | "dayIndex">): boolean {
@@ -3876,5 +4087,5 @@ function unwrittenRecapPresentation(game: Game & { players: { leftAt: Date | nul
   if (history || !isPairRecapShowEnabled(game.maxPlayers) || game.status !== 'settled' || game.recapEncrypted
     || !result || game.players.some(player => player.leftAt) || !game.settledAt
     || clock.getTime() - game.settledAt.getTime() < GAME_RECAP_UI_WAIT_MS) return null;
-  return presentGameRecap({ stored: buildRecapFallback(result.scores.map(player => ({ name: names.get(player.memberId) ?? 'Player', score: player.score }))), permittedPhotoIds: new Set(), mediaUrl: () => '' });
+  return presentGameRecap({ stored: buildRecapFallback(result.scores.map(player => ({ name: names.get(player.memberId) ?? 'Player', score: player.score })), result.scores.every(player => player.misses === 0) && currentTerms(parseStoredTerms(game.terms)).stakes.some(stake => stake.kind === 'both_get') ? 'your prize' : undefined), permittedPhotoIds: new Set(), mediaUrl: () => '' });
 }

@@ -2,6 +2,7 @@ import { after } from "next/server";
 
 import {
   HOSTED_HEALTH_DATA_CONSENT_SCOPE,
+  PROGRESS_SHARE_CONSENT_SCOPE,
   parseHostedConsentRevokeRequest,
   readHostedConsentStatus,
   revokeHostedConsentScope,
@@ -11,7 +12,9 @@ import {
   readJsonObject,
   withJsonError,
 } from "@/src/lib/hosted-onboarding/http";
-import { requireHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
+import { assertHostedAppSessionCurrentTx, requireHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
+import { decideProgressShareConsent } from "@/src/lib/game/progress/share-consent";
+import { progressEffect } from "@/src/lib/game/progress/http";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
 import {
   cleanupWithdrawnHostedHealthDataConsent,
@@ -27,6 +30,13 @@ export const POST = withJsonError(async (request: Request) => {
   const auth = await requireHostedAppSessionFromRequest(request);
   const body = await readJsonObject(request);
   const consent = parseHostedConsentRevokeRequest(body);
+
+  if (consent.scope === PROGRESS_SHARE_CONSENT_SCOPE) {
+    await progressEffect(() => decideProgressShareConsent({ memberId: auth.member.id, decision: 'deny', prisma,
+      beforeMutationTx: tx => assertHostedAppSessionCurrentTx({ memberId: auth.member.id, prisma: tx,
+        request, sessionId: auth.sessionId, authProof: auth.authProof }) }));
+    return jsonOk(await readHostedConsentStatus({ memberId: auth.member.id, prisma }));
+  }
 
   if (consent.scope === HOSTED_HEALTH_DATA_CONSENT_SCOPE) {
     await withdrawHostedHealthDataConsent({

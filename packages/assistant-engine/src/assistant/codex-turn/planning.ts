@@ -1,6 +1,6 @@
-import { MURPH_GENERATE_SONG_TOOL } from '../../assistant-codex/dynamic-tools/generate-song.js'
-import { MURPH_GENERATE_IMAGE_TOOL } from '../../assistant-codex/dynamic-tool-catalog.js'
-import { MURPH_WRITE_RECAP_FILE_TOOL } from '../../assistant-codex/dynamic-tools/games.js'
+import type { HostedCustomConnectionManifestEntry } from "@murphai/hosted-execution"
+import { resolveCodexAttemptCapabilities } from "../codex-attempt-capabilities.js"
+import { MURPH_GENERATE_IMAGE_RECAP_TOOL, MURPH_GENERATE_SONG_RECAP_TOOL, MURPH_WRITE_RECAP_FILE_TOOL } from '../../assistant-codex/dynamic-tools/games.js'
 import { GAME_PHOTO_CHAT_GUIDANCE, GAME_RESIDENT_GROUP_POINTER, GAME_PRIVATE_REMINDER_DIRECT_GUIDANCE, MURPH_GAME_LORE_TOOL, MURPH_READ_GAME_RECAP_TOOL, MURPH_WRITE_RECAP_TOOL } from "../../assistant-codex/dynamic-tools/games.js"
 import { resolveUsageOptimizerFeedbackScope } from '../weekly-usage-optimizer.js'
 import { supportsCodexTurnDeveloperInstructions } from '../../assistant-codex/config.js'
@@ -32,6 +32,7 @@ import { readAssistantCurrentStatePrompt } from '../current-state.js'
 import {
   assistantRouteSupportsGroupRoomModel,
   readAssistantGroupRoomModelPrompt,
+  type AssistantGroupRoomModelPrompt,
 } from '../group-room-model.js'
 import {
   MURPH_GROUP_ROOM_MODEL_CONSOLIDATION_AUTOMATION_ID,
@@ -148,6 +149,7 @@ import {
 const ASSISTANT_CONTEXT_SNAPSHOT_FOREGROUND_REFRESH_MAX_STEPS = 64
 
 export interface AssistantRouteTurnPlan {
+  customConnections?: readonly HostedCustomConnectionManifestEntry[]
   followUpAttachmentAllowed?: boolean
   followUpInvocation?: boolean
   assistantContractFingerprint: string
@@ -161,6 +163,8 @@ export interface AssistantRouteTurnPlan {
   conversationHistoryMessages?: readonly AssistantProviderConversationMessage[]
   diagnosticsPolicy: AssistantDiagnosticsPolicy
   onboardingGuidanceInjected: boolean
+  /** Digest of the room-model page whose body this turn's context carries. */
+  groupRoomModelInjectedDigest?: string | null
   codexContinuation: AssistantCodexContinuation
   planningDiagnostics: AssistantRoutePlanningDiagnostics
   resume: AssistantRouteCodexResumePlan | null
@@ -460,6 +464,10 @@ function isConversationGameReadAvailable(
   scheduledInvocationScope: ReturnType<typeof resolveAssistantHostedScheduledInvocationScope>,
 ): boolean {
   return input.hostedToolContext?.groupTool != null && scope === 'group' && (acceptedInputIds.length > 0 || scheduledInvocationScope !== null)
+}
+
+function isLeaveGroupAvailable(input: AssistantRouteTurnPlanInput, acceptedInputIds: readonly string[], authenticatedGroupTurn: boolean, ordinaryInboundTurn: boolean, channel: string | null): boolean {
+  return authenticatedGroupTurn && ordinaryInboundTurn && channel === 'linq' && input.hostedToolContext?.groupTool != null && acceptedInputIds.length > 0
 }
 
 function areConversationGamesAvailable(input: AssistantRouteTurnPlanInput, acceptedInputIds: readonly string[], scope: string): boolean {
@@ -835,6 +843,7 @@ function resolveRouteNativeResumeThreadId({
   assistantContractFingerprint,
   threadStartDeveloperInstructions,
   dynamicTools,
+  customConnections,
   transcriptEntries,
 }: {
   input: AssistantRouteTurnPlanInput
@@ -842,6 +851,7 @@ function resolveRouteNativeResumeThreadId({
   assistantContractFingerprint: string
   threadStartDeveloperInstructions: string | null
   dynamicTools: readonly MurphDynamicTool[]
+  customConnections: readonly HostedCustomConnectionManifestEntry[]
   transcriptEntries: readonly AssistantTranscriptEntry[] | null
 }): { resumeCodexThreadId: string | null; threadRotationReason: AssistantRoutePlanningDiagnostics['threadRotationReason'] } {
   const storedAssistantContractFingerprint = normalizeNullableString(
@@ -850,6 +860,7 @@ function resolveRouteNativeResumeThreadId({
   const assistantContractMatches =
     storedAssistantContractFingerprint === assistantContractFingerprint ||
     (
+      customConnections.length === 0 &&
       resumeBinding !== null &&
       [readCodexThreadCompatibilityFingerprint(input.route), resumeBinding.routeFingerprint]
         .some((routeFingerprint) =>
@@ -861,7 +872,7 @@ function resolveRouteNativeResumeThreadId({
         )
     )
   const nativeResumeEnabled =
-    input.profile.threadScope === 'session-thread'
+    input.profile.threadScope === 'session-thread' || input.executionContext?.hosted?.gameRecapScope?.show === true
   const resumeCodexThreadId =
     nativeResumeEnabled &&
     resumeBinding !== null &&
@@ -880,6 +891,26 @@ function resolveRouteNativeResumeThreadId({
         : assistantContractMatches ? 'transcript_bookmark_missing'
         : 'contract_mismatch',
   }
+}
+
+/** Only a page body that really reached this turn's context lets show omit it. */
+function resolveGroupRoomModelInjectedDigest(
+  groupRoomModel: AssistantGroupRoomModelPrompt | null,
+  turnContextPrompt: string | null,
+): string | null {
+  return groupRoomModel?.bodyDigest
+    && turnContextPrompt?.includes(groupRoomModel.prompt)
+    ? groupRoomModel.bodyDigest
+    : null
+}
+
+async function readEligibleCustomConnections(
+  input: AssistantRouteTurnPlanInput,
+  followUpInvocation: boolean,
+): Promise<readonly HostedCustomConnectionManifestEntry[]> {
+  const capabilities = resolveCodexAttemptCapabilities({ route: input.route, routePlan: { followUpInvocation } }, input)
+  if (!capabilities.customConnectionsEligible) return []
+  return await input.executionContext?.hosted?.customConnections?.readManifest() ?? []
 }
 
 export async function resolveAssistantRouteTurnPlan(
@@ -1100,7 +1131,7 @@ export async function resolveAssistantRouteTurnPlan(
             : []),
           ...optionalPrompt(gameLoreGuidance),
         ]
-  const groupRoomModelPrompt = authenticatedGroupProviderTurn
+  const groupRoomModel = authenticatedGroupProviderTurn
     ? await readAssistantGroupRoomModelPrompt({
         vaultRoot: input.input.vault,
       })
@@ -1115,7 +1146,7 @@ export async function resolveAssistantRouteTurnPlan(
   })
   const assistantDynamicContextPrompts = [
     ...hostedDynamicContextPrompts,
-    ...(groupRoomModelPrompt ? [groupRoomModelPrompt] : []),
+    ...(groupRoomModel ? [groupRoomModel.prompt] : []),
     ...gameGroupPointerPrompts(input, userActionAcceptedInputIds, conversationScope),
     ...gamePhotoContextPrompts(input, userActionAcceptedInputIds, conversationScope),
     ...privateGameReminderPrompts(input, conversationScope, userActionAcceptedInputIds),
@@ -1319,6 +1350,7 @@ export async function resolveAssistantRouteTurnPlan(
   let dynamicTools = specializedDynamicTools ?? resolveMurphDynamicTools({
         gameReadAvailable: isConversationGameReadAvailable(input, userActionAcceptedInputIds, conversationScope, scheduledInvocationScope),
         myGameRemindersAvailable: privateGameReminderAvailable(input, conversationScope, userActionAcceptedInputIds),
+        leaveGroupAvailable: isLeaveGroupAvailable(input, userActionAcceptedInputIds, authenticatedGroupProviderTurn, ordinaryInboundTurn, resolvedChannel),
         gamesAvailable: areConversationGamesAvailable(input, userActionAcceptedInputIds, conversationScope),
         gameLoreAvailable: isGameLoreToolDeclared(input, userActionAcceptedInputIds, conversationScope, authenticatedGroupProviderTurn, gameLoreGuidance),
         gamePhotosAvailable: gamePhotoContextPrompts(input, userActionAcceptedInputIds, conversationScope).length > 0,
@@ -1348,7 +1380,7 @@ export async function resolveAssistantRouteTurnPlan(
         progressUpdatesAvailable: input.progressDelivery != null,
         progressUpdateMode:
           conversationScope === 'group' ? 'group' : 'direct',
-        connectedAppsAvailable: input.hostedToolContext?.connectedApps != null,
+        ...connectedToolAvailability(input.hostedToolContext),
         connectedAppsManageAvailable: privateInteractiveAudience,
         productFeedbackAvailable:
           productFeedbackAuthorized &&
@@ -1383,7 +1415,9 @@ export async function resolveAssistantRouteTurnPlan(
     dynamicTools.some(
       (tool) => tool.namespace === 'murph' && tool.name === 'react_to_message',
     )
+  const customConnections = await readEligibleCustomConnections(input, followUpInvocation)
   const assistantContractFingerprint = buildAssistantCodexContractFingerprint({
+    customConnections,
     developerInstructions: supportsCodexTurnDeveloperInstructions({ env: input.sharedPlan.cliAccess.env })
       ? undefined
       : threadStartDeveloperInstructions,
@@ -1395,9 +1429,11 @@ export async function resolveAssistantRouteTurnPlan(
     resumeBinding,
     transcriptEntries: routeTranscript.entries,
     assistantContractFingerprint,
+    customConnections,
     threadStartDeveloperInstructions,
     dynamicTools,
   })
+  assertRecapContinuationCompatible(input, resumeCodexThreadId)
   const conversationHistoryMessages =
     await resolveCommittedTranscriptHistoryMessages(resumeCodexThreadId)
   const shouldPrepareBootstrapContext = resumeCodexThreadId === null
@@ -1438,6 +1474,7 @@ export async function resolveAssistantRouteTurnPlan(
     resolveRoutePlanningSlowestSpan(routePlanningSpans)
 
   return {
+    customConnections,
     followUpInvocation,
     followUpAttachmentAllowed,
     assistantContractFingerprint,
@@ -1457,6 +1494,10 @@ export async function resolveAssistantRouteTurnPlan(
         : undefined,
     diagnosticsPolicy,
     onboardingGuidanceInjected: shouldInjectOnboardingGuidance,
+    groupRoomModelInjectedDigest: resolveGroupRoomModelInjectedDigest(
+      groupRoomModel,
+      turnContextPrompt,
+    ),
     codexContinuation: resolveAssistantCodexContinuation({
       resumeCodexThreadId,
     }),
@@ -1957,10 +1998,24 @@ function hasProductFeedbackAuthority(
       messageInput: input.input }) !== null
 }
 
+function assertRecapContinuationCompatible(input: AssistantRouteTurnPlanInput, threadId: string | null): void {
+  if (input.executionContext?.hosted?.gameRecapScope?.show
+    && readAssistantCodexResume(input.session) !== null && threadId === null) {
+    throw new Error('Recap continuation is incompatible with the current provider thread.')
+  }
+}
+
 function recapShowTools(dynamicTools: ReturnType<typeof resolveMurphDynamicTools>, context: AssistantHostedToolContext | null | undefined): ReturnType<typeof resolveMurphDynamicTools> {
   if (!context?.currentGameRecapScope?.()?.show) return dynamicTools;
   return [
     ...dynamicTools.filter(tool => !['read_game', 'write_recap', 'game_lore', 'generate_image', 'generate_song'].includes(tool.name)),
-    MURPH_READ_GAME_RECAP_TOOL, MURPH_WRITE_RECAP_FILE_TOOL, MURPH_GAME_LORE_TOOL, MURPH_GENERATE_IMAGE_TOOL, MURPH_GENERATE_SONG_TOOL,
+    MURPH_READ_GAME_RECAP_TOOL, MURPH_WRITE_RECAP_FILE_TOOL, MURPH_GAME_LORE_TOOL, MURPH_GENERATE_IMAGE_RECAP_TOOL, MURPH_GENERATE_SONG_RECAP_TOOL,
   ];
+}
+
+function connectedToolAvailability(context: AssistantHostedToolContext | null | undefined) {
+  return {
+    connectedAppsAvailable: context?.connectedApps != null && !context.preparedJournal,
+    journalSourceReadAvailable: context?.preparedJournal != null,
+  }
 }

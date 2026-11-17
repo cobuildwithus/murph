@@ -65,6 +65,45 @@ test('vault context hides vault from command schemas and injects it at execution
   assert.equal(result.envelope.ok, true)
 })
 
+test('vault context projects write results and their declared output schema', async () => {
+  const { parentRoot, vaultRoot } = await createInitializedVault('murph-vault-projection-')
+  cleanupPaths.push(parentRoot)
+  const cli = createVaultCli()
+
+  const added = await runInProcessJsonCli(cli, [
+    'measurement',
+    'add',
+    '--vault',
+    vaultRoot,
+    '--metric',
+    'weight',
+    '--value',
+    '80.5',
+    '--unit',
+    'kg',
+  ])
+  assert.equal(added.exitCode, null)
+  assert.equal(added.envelope.ok, true)
+  const data = added.envelope.ok ? added.envelope.data : {}
+  for (const key of ['vault', 'lookupId', 'ledgerFile', 'manifestFile']) {
+    assert.equal(Object.hasOwn(data, key), false, key)
+  }
+  assert.equal(typeof data.eventId, 'string')
+  assert.equal(data.created, true)
+  assert.equal(JSON.stringify(data).includes(vaultRoot), false)
+
+  const schema = await captureJson(cli, ['measurement', 'add', '--schema', '--format', 'json'])
+  const output = getRecord(schema, 'output')
+  const properties = getRecord(output, 'properties')
+  assert.equal(Object.hasOwn(properties, 'vault'), false)
+  assert.equal(Object.hasOwn(properties, 'ledgerFile'), false)
+  assert.equal(Object.hasOwn(properties, 'eventId'), true)
+  assert.deepEqual(
+    getArray(output, 'required').filter((key) => key === 'lookupId' || key === 'manifestFile'),
+    [],
+  )
+})
+
 test('vault context injects vault for fetch transport without command-level vault schema', async () => {
   const { parentRoot, vaultRoot } = await createInitializedVault('murph-vault-fetch-')
   cleanupPaths.push(parentRoot)
@@ -74,7 +113,7 @@ test('vault context injects vault for fetch transport without command-level vaul
     new Request(`http://localhost/measurement/list?vault=${encodeURIComponent(vaultRoot)}`),
   )
   assert.equal(queryResponse.status, 200)
-  assert.equal(await readFetchDataVault(queryResponse), vaultRoot)
+  assert.equal(await readFetchListCount(queryResponse), 0)
 
   const headerResponse = await cli.fetch(
     new Request('http://localhost/measurement/list', {
@@ -84,7 +123,7 @@ test('vault context injects vault for fetch transport without command-level vaul
     }),
   )
   assert.equal(headerResponse.status, 200)
-  assert.equal(await readFetchDataVault(headerResponse), vaultRoot)
+  assert.equal(await readFetchListCount(headerResponse), 0)
 
   const duplicateResponse = await cli.fetch(
     new Request(`http://localhost/measurement/list?vault=${encodeURIComponent(vaultRoot)}`, {
@@ -128,11 +167,11 @@ test('vault context keeps overlapping serve invocations isolated', async () => {
       vault: z.string().min(1),
     }),
     output: z.object({
-      vault: z.string(),
+      resolvedVault: z.string(),
     }),
     run(context) {
       return {
-        vault: context.options.vault,
+        resolvedVault: context.options.vault,
       }
     },
   })
@@ -160,12 +199,12 @@ test('vault context keeps overlapping serve invocations isolated', async () => {
   firstMiddlewareGate.resolve()
   const firstResult = await first
   assert.ok(isRecord(firstResult))
-  assert.equal(firstResult.vault, '/vaults/first')
+  assert.equal(firstResult.resolvedVault, '/vaults/first')
 
   secondMiddlewareGate.resolve()
   const secondResult = await second
   assert.ok(isRecord(secondResult))
-  assert.equal(secondResult.vault, '/vaults/second')
+  assert.equal(secondResult.resolvedVault, '/vaults/second')
 })
 
 test('vault context installation is idempotent and preserves active invocation context', async () => {
@@ -188,7 +227,7 @@ test('vault context installation is idempotent and preserves active invocation c
     new Request(`http://localhost/measurement/list?vault=${encodeURIComponent(vaultRoot)}`),
   )
   assert.equal(response.status, 200)
-  assert.equal(await readFetchDataVault(response), vaultRoot)
+  assert.equal(await readFetchListCount(response), 0)
 })
 
 test('nested serve and fetch calls inherit the active vault invocation context', async () => {
@@ -199,11 +238,11 @@ test('nested serve and fetch calls inherit the active vault invocation context',
       vault: z.string().min(1),
     }),
     output: z.object({
-      vault: z.string(),
+      resolvedVault: z.string(),
     }),
     run(context) {
       return {
-        vault: context.options.vault,
+        resolvedVault: context.options.vault,
       }
     },
   })
@@ -213,12 +252,12 @@ test('nested serve and fetch calls inherit the active vault invocation context',
       vault: z.string().min(1),
     }),
     output: z.object({
-      vault: z.string(),
+      resolvedVault: z.string(),
     }),
     async run() {
       const result = await captureJson(cli, ['read-vault', '--format', 'json'])
       return {
-        vault: getString(result, 'vault'),
+        resolvedVault: getString(result, 'resolvedVault'),
       }
     },
   })
@@ -228,13 +267,13 @@ test('nested serve and fetch calls inherit the active vault invocation context',
       vault: z.string().min(1),
     }),
     output: z.object({
-      vault: z.string(),
+      resolvedVault: z.string(),
     }),
     async run() {
       const response = await cli.fetch(new Request('http://localhost/read-vault'))
       assert.equal(response.status, 200)
       return {
-        vault: await readFetchDataVault(response),
+        resolvedVault: await readFetchResolvedVault(response),
       }
     },
   })
@@ -249,7 +288,7 @@ test('nested serve and fetch calls inherit the active vault invocation context',
     'json',
   ])
   assert.ok(isRecord(serveResult))
-  assert.equal(serveResult.vault, '/vaults/outer')
+  assert.equal(serveResult.resolvedVault, '/vaults/outer')
 
   const fetchResult = await captureJson(cli, [
     'nested-fetch',
@@ -259,7 +298,7 @@ test('nested serve and fetch calls inherit the active vault invocation context',
     'json',
   ])
   assert.ok(isRecord(fetchResult))
-  assert.equal(fetchResult.vault, '/vaults/outer')
+  assert.equal(fetchResult.resolvedVault, '/vaults/outer')
 })
 
 test('vault override parsing is a single boundary option, not a command option', () => {
@@ -419,10 +458,23 @@ function createDeferred(): {
   }
 }
 
-async function readFetchDataVault(response: Response): Promise<string> {
+async function readFetchResolvedVault(response: Response): Promise<string> {
   const envelope = await response.json() as unknown
   const data = getRecord(envelope, 'data')
-  return getString(data, 'vault')
+  return getString(data, 'resolvedVault')
+}
+
+// Vault-scoped results no longer echo the vault root; a list result proves
+// the injected vault was read.
+async function readFetchListCount(response: Response): Promise<number> {
+  const envelope = await response.json() as unknown
+  const data = getRecord(envelope, 'data')
+  assert.equal(Object.hasOwn(data, 'vault'), false)
+  const count = data.count
+  if (typeof count !== 'number') {
+    assert.fail('Expected a list count.')
+  }
+  return count
 }
 
 async function readFetchErrorCode(response: Response): Promise<string> {

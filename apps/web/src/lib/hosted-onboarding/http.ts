@@ -1,3 +1,4 @@
+import { RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import { Prisma } from "@prisma/client";
 
 import {
@@ -114,6 +115,10 @@ function mapHostedOnboardingError(error: unknown) {
   }
 
   const mapping = mapDomainJsonError(error);
+  // The delivery owner already records expected projection deferrals.
+  if (error.code === "HOSTED_VAULT_SHARE_DELIVERY_DEFERRED") {
+    return { ...mapping, log: null };
+  }
   // Result-size attribution is log-only; preserve the existing response body.
   if (error.code === "CONNECTED_APPS_RESULT_TOO_LARGE") {
     delete mapping.error.details;
@@ -140,7 +145,7 @@ function mapHostedOnboardingBodyReadError(
   error: unknown,
   options: HostedOnboardingBoundedBodyOptions,
 ): unknown {
-  if (!(error instanceof RangeError)) {
+  if (!(error instanceof RequestBodyTooLargeError)) {
     return error;
   }
 

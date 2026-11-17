@@ -1,59 +1,3 @@
-import { JUNCTION_ALLOWED_TIMESERIES_RESOURCES } from "@murphai/contracts";
-
-const JUNCTION_DAILY_CANONICAL_COVERAGE_RESOURCES: ReadonlySet<string> = new Set([
-  "activity",
-  "body",
-  "menstrual_cycle",
-  ...JUNCTION_ALLOWED_TIMESERIES_RESOURCES.filter((resource) =>
-    resource !== "blood_pressure" && resource !== "note"
-  ),
-]);
-
-export function isJunctionDailyCanonicalCoverageResource(resource: string): boolean {
-  return JUNCTION_DAILY_CANONICAL_COVERAGE_RESOURCES.has(resource);
-}
-
-export function normalizeJunctionCanonicalCoverageBoundary(
-  resource: string,
-  value: unknown,
-): string | null {
-  if (typeof value !== "string") {
-    return null;
-  }
-  if (isJunctionDailyCanonicalCoverageResource(resource)) {
-    if (!/^\d{4}-\d{2}-\d{2}$/u.test(value)) {
-      return null;
-    }
-    const timestampMs = Date.parse(`${value}T00:00:00.000Z`);
-    return Number.isFinite(timestampMs)
-        && new Date(timestampMs).toISOString().slice(0, 10) === value
-      ? value
-      : null;
-  }
-
-  const timestampMs = Date.parse(value);
-  return Number.isFinite(timestampMs)
-      && new Date(timestampMs).toISOString() === value
-    ? value
-    : null;
-}
-
-export function maxJunctionCanonicalCoverageBoundary(
-  resource: string,
-  left: string,
-  right: string,
-): string {
-  const normalizedLeft = normalizeJunctionCanonicalCoverageBoundary(resource, left);
-  const normalizedRight = normalizeJunctionCanonicalCoverageBoundary(resource, right);
-  if (!normalizedLeft) {
-    return normalizedRight ?? left;
-  }
-  if (!normalizedRight) {
-    return normalizedLeft;
-  }
-  return normalizedRight > normalizedLeft ? normalizedRight : normalizedLeft;
-}
-
 export {
   JUNCTION_ALLOWED_SUMMARY_RESOURCES,
   JUNCTION_ALLOWED_TIMESERIES_RESOURCES,
@@ -342,22 +286,41 @@ export const JUNCTION_SLEEP_STAGE_VALUE_PATHS = Object.freeze([
   "value",
 ] as const);
 export type JunctionSleepStageValue = "awake" | "light" | "deep" | "rem" | "asleep_unspecified";
+const JUNCTION_SLEEP_STAGE_ALIASES = new Map<string, JunctionSleepStageValue>([
+  ["1", "deep"],
+  ["2", "light"],
+  ["3", "rem"],
+  ["4", "awake"],
+  ["asleep", "asleep_unspecified"],
+  ["asleep_unspecified", "asleep_unspecified"],
+  ["sleep", "asleep_unspecified"],
+  ["sleeping", "asleep_unspecified"],
+  ["awake", "awake"],
+  ["wake", "awake"],
+  ["waking", "awake"],
+  ["wakefulness", "awake"],
+  ["light", "light"],
+  ["light_sleep", "light"],
+  ["core", "light"],
+  ["core_sleep", "light"],
+  ["n1", "light"],
+  ["n2", "light"],
+  ["deep", "deep"],
+  ["deep_sleep", "deep"],
+  ["slow_wave", "deep"],
+  ["slow_wave_sleep", "deep"],
+  ["sws", "deep"],
+  ["n3", "deep"],
+  ["rem", "rem"],
+  ["rem_sleep", "rem"],
+  ["rapid_eye_movement", "rem"],
+  ["rapid_eye_movement_sleep", "rem"],
+]);
+
 export function normalizeJunctionSleepStageValue(value: unknown): JunctionSleepStageValue | null {
   if (typeof value === "number" && Number.isInteger(value)) {
-    switch (value) {
-      case 1:
-        return "deep";
-      case 2:
-        return "light";
-      case 3:
-        return "rem";
-      case 4:
-        return "awake";
-      default:
-        return null;
-    }
+    return JUNCTION_SLEEP_STAGE_ALIASES.get(String(value)) ?? null;
   }
-
   if (typeof value !== "string") {
     return null;
   }
@@ -371,48 +334,7 @@ export function normalizeJunctionSleepStageValue(value: unknown): JunctionSleepS
     .toLowerCase()
     .replace(/[^a-z0-9]+/gu, "_")
     .replace(/^_+|_+$/gu, "");
-
-  switch (normalized) {
-    case "asleep":
-    case "asleep_unspecified":
-    case "sleep":
-    case "sleeping":
-      return "asleep_unspecified";
-    case "1":
-      return "deep";
-    case "2":
-      return "light";
-    case "3":
-      return "rem";
-    case "4":
-      return "awake";
-    case "awake":
-    case "wake":
-    case "waking":
-    case "wakefulness":
-      return "awake";
-    case "light":
-    case "light_sleep":
-    case "core":
-    case "core_sleep":
-    case "n1":
-    case "n2":
-      return "light";
-    case "deep":
-    case "deep_sleep":
-    case "slow_wave":
-    case "slow_wave_sleep":
-    case "sws":
-    case "n3":
-      return "deep";
-    case "rem":
-    case "rem_sleep":
-    case "rapid_eye_movement":
-    case "rapid_eye_movement_sleep":
-      return "rem";
-    default:
-      return null;
-  }
+  return JUNCTION_SLEEP_STAGE_ALIASES.get(normalized) ?? null;
 }
 export const JUNCTION_SLEEP_STAGE_ARRAY_PATHS = Object.freeze([
   "stages",

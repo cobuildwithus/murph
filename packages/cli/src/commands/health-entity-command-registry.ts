@@ -10,16 +10,24 @@ import {
   healthEntityDescriptorByCommandName,
   healthListResultSchema,
   healthShowResultSchema,
-  type HealthCoreScaffoldServiceMethodName,
-  type HealthCoreServiceMethods,
-  type HealthCoreUpsertServiceMethodName,
-  type HealthCommandDescriptorEntry,
-  type HealthQueryListServiceMethodName,
-  type HealthQueryServiceMethods,
-  type HealthQueryShowServiceMethodName,
+} from "@murphai/vault-usecases/health-cli-descriptors";
+import type {
+  HealthCoreScaffoldServiceMethodName,
+  HealthCoreServiceMethods,
+  HealthCoreUpsertServiceMethodName,
+  HealthCommandDescriptorEntry,
+  HealthEntityEnvelope,
+  HealthListEnvelope,
+  HealthQueryListServiceMethodName,
+  HealthQueryServiceMethods,
+  HealthQueryShowServiceMethodName,
 } from "@murphai/vault-usecases";
 import { pathSchema } from "@murphai/operator-config/vault-cli-contracts";
 import type { VaultServices } from "@murphai/vault-usecases";
+import {
+  projectRecordListResult,
+  projectRecordShowResult,
+} from "./record-read-projection.js";
 
 type DescriptorBackedVaultServices = VaultServices & {
   core: VaultServices["core"] & HealthCoreServiceMethods;
@@ -82,12 +90,24 @@ function bindCrudServices(
     upsert: HealthCoreUpsertServiceMethodName;
   };
 
-  return bindHealthCrudServices(descriptorBackedServices, {
+  const bound = bindHealthCrudServices(descriptorBackedServices, {
     list: methodNames.list,
     scaffold: methodNames.scaffold,
     show: methodNames.show,
     upsert: methodNames.upsert,
   });
+
+  return {
+    ...bound,
+    async list(input: Parameters<typeof bound.list>[0]) {
+      const result: HealthListEnvelope = await bound.list(input);
+      return projectRecordListResult(result);
+    },
+    async show(input: Parameters<typeof bound.show>[0]) {
+      const result: HealthEntityEnvelope = await bound.show(input);
+      return projectRecordShowResult(result);
+    },
+  };
 }
 
 function createHealthEntityCrudConfig(
@@ -138,14 +158,7 @@ function createHealthEntityCrudConfig(
     payloadFile: descriptor.command.payloadFile,
     pluralNoun: descriptor.plural,
     services: bindCrudServices(services, descriptor),
-    showId: {
-      ...descriptor.command.showId,
-      fromImportJsonResult(result: object) {
-        return String(
-          (result as Record<string, unknown>)[descriptor.core.resultIdField] ?? "",
-        );
-      },
-    },
+    showId: descriptor.command.showId,
   };
 }
 

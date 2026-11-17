@@ -12,7 +12,7 @@ import { assertHostedAssistantNotificationRouteAuthority, bindHostedAssistantNot
 import { getPrisma } from "../prisma";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { readPendingGameChange } from "./change-words";
-import { isGameOn } from "./access";
+import { isGameEnabled } from "./access";
 import type { GamePendingChange } from "./contract";
 import { buildGameProposalInstructions } from "@murphai/hosted-execution/runtime-control";
 export { buildGameProposalInstructions } from "@murphai/hosted-execution/runtime-control";
@@ -36,7 +36,7 @@ export async function deliverGameChangeProposal(gameId: string, proposalId: stri
   const proposal = game ? await readPendingGameChange(game) : null;
   if (!game || !["live", "negotiating"].includes(game.status) || isGameInviteExpired(game, now)
     || !proposal || proposal.id !== proposalId || !isPairRoster(game.players)) return false;
-  if (!isGameOn(game)) return false;
+  if (!isGameEnabled()) return false;
   if (proposal.origin === "chat") return false;
   const { phones, message } = await prepareGameChatPlayers(game, proposal);
   const players = gameMemberIds(game.players);
@@ -53,7 +53,7 @@ async function deliverGroupChangeProposal(gameId: string, proposalId: string, no
   const prisma = getPrisma();
   const { readCurrentGameChange, readGameChatProfiles, readGameNoticeRoom } = await import("./service");
   const current = await readCurrentGameChange(prisma, gameId, proposalId, now);
-  if (!current || !isGameOn(current.row)) return false;
+  if (!current || !isGameEnabled()) return false;
   const game = current.row;
   const proposal = await readPendingGameChange(game);
   if (!proposal || proposal.origin === "chat") return false;
@@ -103,7 +103,7 @@ export async function readGameProposalDeliveryPlayers(key: string | null, contai
     if (!authority) throw new Error("Game missed-day authority is unavailable.");
     return authority;
   }
-  const match = /^(game-talk|game-change|game-started|game-rematch|game-change-cancelled|game-change-expired|game-change-resolved|game-cancelled|game-recap|game-missed|game-challenge):([^:]+)/.exec(key ?? "");
+  const match = /^(game-both-win|game-talk|game-change|game-started|game-rematch|game-change-cancelled|game-change-expired|game-change-resolved|game-cancelled|game-recap|game-missed|game-challenge):([^:]+)/.exec(key ?? "");
   if (!match) return undefined;
   const game = await getPrisma().game.findUnique({ where: { id: match[2] }, include: { invitees: { select: { memberId: true, recipientLookupKey: true } }, players: { take: 11 } } });
   const audience = game ? await readGroupGameNoticeAuthority(game, containerMemberId) : null;

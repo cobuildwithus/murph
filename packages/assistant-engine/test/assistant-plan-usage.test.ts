@@ -87,8 +87,10 @@ describe("assistant plan usage tool", () => {
     });
     expect(result.rpcResult.success).toBe(true);
     const resultText = result.rpcResult.contentItems[0]?.text;
-    expect(resultText).toContain('"usedPercent":76');
+    // usedPercent is always 100 - remainingPercent; the skill reads remainingPercent.
+    expect(resultText).not.toContain('usedPercent');
     expect(resultText).toContain('"remainingPercent":24');
+    expect(resultText).toContain('"quoteId":"quote_test_edge"');
     expect(resultText).not.toContain('"included');
     expect(resultText).not.toContain('"usageCredit');
     expect(resultText).not.toContain('"purchase');
@@ -176,7 +178,9 @@ describe("assistant plan usage tool", () => {
     expect(result.rpcResult.success).toBe(true);
     expect(resultText).toContain('"planName":"Starter"');
     expect(resultText).toContain('"displayName":"Core"');
-    expect(resultText).toContain('"recommendedPlanCode":"launch_group_monthly"');
+    // The recommended action and quote carry the target plan.
+    expect(resultText).not.toContain('recommendedPlanCode');
+    expect(resultText).toContain('"targetPlanCode":"launch_group_monthly"');
     expect(resultText).toContain(
       '"label":"Start Core now ($3.50/month)"',
     );

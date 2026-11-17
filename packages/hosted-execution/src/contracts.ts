@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type { HostedGameEveningCheckInPolicy, HostedGameGroupMissedCheckInPolicy, HostedGamePrivateEveningCheckInPolicy, HostedGamePrivateKickoffPolicy } from "./game-group-missed.ts";
 import type {
   HostedDataKeyEnvelopeV1,
@@ -270,6 +271,8 @@ export type HostedExecutionAssistantNotificationResponsePolicy =
       pairFingerprint: string;
       loreAccess?: "read";
       show?: true;
+      /** Web asks for the show as one video too. Durable in queued wakes and saved pending state. */
+      video?: true;
     }
   | {
       kind: "game_missed_check_in";
@@ -1170,7 +1173,7 @@ export function assertHostedRuntimeProcessingTimeoutMs(
     !Number.isSafeInteger(value)
     || value < MIN_HOSTED_RUNTIME_PROCESSING_TIMEOUT_MS
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} must be greater than ${HOSTED_RUNTIME_PROCESSING_COMMAND_RESPONSE_MARGIN_MS}.`,
     );
   }

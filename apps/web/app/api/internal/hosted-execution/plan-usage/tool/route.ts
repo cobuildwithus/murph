@@ -1,5 +1,7 @@
+import { assertContract } from "@murphai/contracts";
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import {
-  parseHostedPlanUsageToolRequest,
+  hostedPlanUsageToolRequestSchema,
 } from "@murphai/hosted-execution/plan-usage";
 
 import {
@@ -16,7 +18,7 @@ export const POST = withJsonError(async (request: Request) => {
   const { payload, userId: memberId } = await requireHostedCloudflareCallbackJsonRequest(request, {
     maxBodyBytes: BODY_LIMIT_BYTES,
   });
-  const toolRequest = parseHostedPlanUsageToolRequest(payload);
+  const toolRequest = parseInput(payload, (value) => assertContract(hostedPlanUsageToolRequestSchema, value, "Internal request"));
 
   return jsonOk(await readHostedPersonalAiUsageStatus({
     includeScheduledPlan: true,

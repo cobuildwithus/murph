@@ -539,6 +539,11 @@ function createTelegramVoiceMemoPartialDeliveryFailure(input: {
   })
 }
 
+/** Only the hosted sender can prepare a recap attachment; a local send is the line alone. Absent otherwise. */
+function linqRecapVideoField(dependencies: AssistantChannelDependencies): { recapVideo?: NonNullable<AssistantChannelDependencies['linqRecapVideo']> } {
+  return dependencies.linqRecapVideo ? { recapVideo: dependencies.linqRecapVideo } : {}
+}
+
 const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
   channel: 'linq',
   canAutoReply(eligibility) {
@@ -655,6 +660,7 @@ const LINQ_CHANNEL_ADAPTER = createAssistantChannelAdapter({
               threadIsDirect,
             }),
             ...(mediaInput ? { media: mediaInput } : {}),
+            ...linqRecapVideoField(dependencies),
           })
         : await sendLinqMessage(request, {
             ...(request.persistAppCardTextFallback

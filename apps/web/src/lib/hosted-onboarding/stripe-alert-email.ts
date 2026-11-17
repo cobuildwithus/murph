@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
 import { after } from "next/server";
@@ -297,7 +298,7 @@ function readHostedStripeAlertRequestId(value: string | null): string | null {
 
 function readHostedStripeOperationCorrelationId(value: string): string {
   if (!HOSTED_STRIPE_ALERT_OPERATION_CORRELATION_PATTERN.test(value)) {
-    throw new TypeError("Stripe alert operation correlation is invalid.");
+    throw new ContractValidationError("Stripe alert operation correlation is invalid.");
   }
   return value;
 }

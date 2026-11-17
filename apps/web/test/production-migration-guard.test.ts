@@ -684,6 +684,24 @@ describe("hosted web production migration guard", () => {
     }
   });
 
+  test("limits the group departure reason expansion to constraint replacement", async () => {
+    const migrationsDir = await mkdtemp(path.join(tmpdir(), "hosted-web-prisma-migrations-"));
+    const migrationId = "20261112080000_linq_group_leave_assistant_reason";
+    try {
+      const sql = await readFile(path.join(appRoot, "prisma", "migrations", migrationId, "migration.sql"), "utf8");
+      await writeMigrationSql(migrationsDir, migrationId, sql);
+      assert.deepEqual(await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir), []);
+      await writeMigrationSql(migrationsDir, migrationId, `${sql}\nALTER TABLE hosted_linq_group_leave DROP COLUMN left_at;`);
+      assert.deepEqual(
+        (await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir))
+          .map(({ migrationId: id, reason }) => ({ migrationId: id, reason })),
+        [{ migrationId, reason: "DROP COLUMN" }],
+      );
+    } finally {
+      await rm(migrationsDir, { force: true, recursive: true });
+    }
+  });
+
   test("limits many-game compatibility to the two obsolete roster guards", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "game-many-migration-"));
     const migrationId = "20261101230000_game_many_per_pair";
@@ -1132,6 +1150,18 @@ describe("hosted web production migration guard", () => {
       assert.deepEqual(await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir), []);
       await writeMigrationSql(migrationsDir, "20261107010001_unreviewed_cadence", sql);
       assert.equal((await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir)).length, 1);
+    } finally {
+      await rm(migrationsDir, { recursive: true, force: true });
+    }
+  });
+
+  test("permits the additive Not for me list", async () => {
+    const migrationsDir = await mkdtemp(path.join(tmpdir(), "game-not-for-me-migration-"));
+    const migrationId = "20261116210000_game_profile_not_for_me";
+    const sql = await readFile(new URL(`../prisma/migrations/${migrationId}/migration.sql`, import.meta.url), "utf8");
+    try {
+      await writeMigrationSql(migrationsDir, migrationId, sql);
+      assert.deepEqual(await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir), []);
     } finally {
       await rm(migrationsDir, { recursive: true, force: true });
     }
@@ -2735,6 +2765,7 @@ fi
     const cronPaths = (vercelJson.crons ?? []).map((cron) => cron.path).sort();
 
     assert.deepEqual(cronPaths, [
+      "/api/internal/device-sync/apple-health-reopen-push/cron",
       "/api/internal/hosted-execution/product-feedback/digest/cron",
       "/api/internal/hosted-execution/retention/control-plane/cron",
       "/api/internal/hosted-execution/retention/external/cron",

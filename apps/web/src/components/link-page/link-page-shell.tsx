@@ -147,15 +147,25 @@ function LinkPageScreen({
       <div
         className={cn(
           "flex flex-1 flex-col",
-          // Enough for a list to stay usable. Past that the page scrolls, so the
-          // actions below can never sit on top of a choice.
-          fill ? "min-h-[14.5rem] pb-2" : "justify-center py-6",
+          // Enough for a list to stay usable. In a one-screen frame a longer list
+          // scrolls here; otherwise the page grows. Either way the actions below
+          // never sit on top of a choice.
+          fill
+            ? "min-h-[14.5rem] overflow-y-auto overscroll-contain pb-6 [mask-image:linear-gradient(to_bottom,transparent,black_1rem)]"
+            : "justify-center py-6",
         )}
       >
         {children}
       </div>
       {actions ? (
-        <div className="flex shrink-0 flex-col items-center gap-1">
+        <div
+          className={cn(
+            "relative flex shrink-0 flex-col items-center gap-1",
+            // A list scrolling underneath fades out instead of ending in a hard line.
+            fill &&
+              "pt-2 before:pointer-events-none before:absolute before:inset-x-0 before:-top-6 before:h-6 before:bg-gradient-to-t before:from-[#1C1915] before:to-transparent",
+          )}
+        >
           {actions}
         </div>
       ) : null}

@@ -19,8 +19,9 @@ import {
   deleteResultSchema,
   occurredAtOptionSchema,
   isoTimestampSchema,
-  listResultSchema,
   pathSchema,
+  recordListResultSchema,
+  recordShowResultSchema,
   showResultSchema,
   workoutAddResultSchema,
   workoutCapturePreferencesResultSchema,
@@ -88,6 +89,10 @@ import {
   buildWorkoutFromParsedOptions,
 } from './workout-typed-options.js'
 import { publicValidationIssue } from './public-validation-issue.js'
+import {
+  projectRecordListResult,
+  projectRecordShowResult,
+} from './record-read-projection.js'
 const workoutSlugPattern = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u
 const workoutListLimitOptionSchema = z
   .number()
@@ -697,9 +702,9 @@ export function registerWorkoutCommands(
       id: workoutLookupSchema,
     }),
     options: withBaseOptions(),
-    output: showResultSchema,
+    output: recordShowResultSchema,
     async run({ args, options }) {
-      return showWorkoutRecord(options.vault, args.id)
+      return projectRecordShowResult(await showWorkoutRecord(options.vault, args.id))
     },
   })
 
@@ -718,14 +723,14 @@ export function registerWorkoutCommands(
         },
         limit: workoutListLimitOptionSchema,
       },
-      output: listResultSchema,
-      run(input) {
-        return listWorkoutRecords({
+      output: recordListResultSchema,
+      async run(input) {
+        return projectRecordListResult(await listWorkoutRecords({
           vault: input.vault,
           from: input.from,
           to: input.to,
           limit: input.limit,
-        })
+        }))
       },
     }),
   )

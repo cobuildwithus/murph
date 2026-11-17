@@ -1,3 +1,4 @@
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import {
   HOSTED_EMAIL_ROUTE_RESOLUTION_CALLBACK_USER_ID,
   parseHostedEmailRouteResolutionCallbackRequest,
@@ -37,8 +38,9 @@ export const POST = withJsonError(async (request: Request) => {
     });
   }
 
-  const body = parseHostedEmailRouteResolutionCallbackRequest(
+  const body = parseInput(
     await readOptionalJsonObject(request),
+    parseHostedEmailRouteResolutionCallbackRequest,
   );
 
   const senderAddress = resolveHostedEmailDirectSenderLookupAddress({

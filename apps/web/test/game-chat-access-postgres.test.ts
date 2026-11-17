@@ -36,7 +36,7 @@ if (enabled) {
 
 describe.skipIf(!enabled)("game chat access PostgreSQL", () => {
   it("keeps an expanded duplicate pair room on the exhausted primary allowance", async () => {
-    vi.stubEnv("MURPH_GAME_ENABLED", "true"); vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "");
+    vi.stubEnv("MURPH_GAME_ENABLED", "true");
     const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl }) });
     const [first, second, bystander, primary, alternate] = Array.from({ length: 5 }, () => randomUUID());
     const members = [first, second, bystander, primary, alternate];
@@ -80,7 +80,7 @@ describe.skipIf(!enabled)("game chat access PostgreSQL", () => {
   });
 
   it.each([2, 10])("funds only the bound expanded room with all %i players fresh and unrestricted", async maxPlayers => {
-    vi.stubEnv("MURPH_GAME_ENABLED", "true"); vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "");
+    vi.stubEnv("MURPH_GAME_ENABLED", "true");
     const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl }) });
     const suffix = randomUUID();
     const room = `room_${suffix}`, otherRoom = `other_${suffix}`;
@@ -141,7 +141,7 @@ describe.skipIf(!enabled)("game chat access PostgreSQL", () => {
     }
   });
   it.each(["cancelled", "change_expired"] as const)("funds only an ended game's bound room while its %s notice awaits dispatch", async (kind) => {
-    vi.stubEnv("MURPH_GAME_ENABLED", "true"); vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "");
+    vi.stubEnv("MURPH_GAME_ENABLED", "true");
     const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl }) });
     const ids = Array.from({length: 5}, () => randomUUID());
     const [room, alternate, first, second, stranger] = ids;
@@ -190,7 +190,7 @@ describe.skipIf(!enabled)("game chat access PostgreSQL", () => {
     }
   });
   it("funds only the inherited room while a rematch notice awaits generation", async () => {
-    vi.stubEnv("MURPH_GAME_ENABLED", "true"); vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "");
+    vi.stubEnv("MURPH_GAME_ENABLED", "true");
     const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl }) });
     const [room, first, second] = Array.from({ length: 3 }, () => randomUUID());
     const gameId = randomUUID();
@@ -224,7 +224,6 @@ describe.skipIf(!enabled)("game chat access PostgreSQL", () => {
   });
   it("funds the bound negotiating or live room without personal access or an extra allowance", async () => {
     vi.stubEnv("MURPH_GAME_ENABLED", "true");
-    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "");
     const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl }) });
     const suffix = randomUUID();
     const room = `game_room_${suffix}`;
@@ -392,14 +391,6 @@ describe.skipIf(!enabled)("game chat access PostgreSQL", () => {
       await prisma.hostedConsentGrant.delete({ where: {
         memberId_scope: { memberId: second, scope: HOSTED_HEALTH_DATA_CONSENT_SCOPE },
       } });
-      // Invite-only: one listed player turns the pair's game on; neither listed turns it off.
-      vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "game_access_unlisted_synthetic");
-      await assertRoom(false);
-      vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", first);
-      await assertRoom(true);
-      vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", second);
-      await assertRoom(true);
-      vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", `${first},${second}`);
       await assertRoom(true);
       vi.stubEnv("MURPH_GAME_ENABLED", "false");
       await assertRoom(false);

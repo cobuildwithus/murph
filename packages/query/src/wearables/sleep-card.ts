@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { isStrictIsoDate, isValidIanaTimeZone } from "@murphai/contracts";
 
 import { listMetricPointsRuntime, summarizeWearableRecoveryRuntime, summarizeWearableSleepRuntime } from "../query-projection.ts";
@@ -17,7 +18,7 @@ export async function resolveWearableSleepCardNight(
   vaultRoot: string,
   { wakeDate }: { wakeDate: string },
 ): Promise<WearableSleepCardNight | null> {
-  if (!isStrictIsoDate(wakeDate)) throw new TypeError("Invalid sleep wake date.");
+  if (!isStrictIsoDate(wakeDate)) throw new ContractValidationError("Invalid sleep wake date.");
   const metadata = await readVaultMetadataSource(vaultRoot);
   const reportingZone = typeof metadata?.timezone === "string" && isValidIanaTimeZone(metadata.timezone)
     ? metadata.timezone : null;

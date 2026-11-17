@@ -1,6 +1,6 @@
 import * as z from "@murphai/contracts/zod-runtime";
 import { requireHostedOpsRequestAccess } from "@/src/lib/hosted-ops/access";
-import { operateHostedLinqGroupLineMove, releaseHostedLinqRemovedLineRoute, startHostedLinqGroupLineMove } from "@/src/lib/hosted-ops/linq-group-line-move";
+import { leaveHostedLinqGroup, operateHostedLinqGroupLineMove, releaseHostedLinqRemovedLineRoute, startHostedLinqGroupLineMove } from "@/src/lib/hosted-ops/linq-group-line-move";
 import { readHostedLinqGroupLineMoveOverview } from "@/src/lib/hosted-ops/linq-group-line-move-overview";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { jsonOk, readHostedOnboardingJsonObject, withJsonError } from "@/src/lib/hosted-onboarding/http";
@@ -12,6 +12,7 @@ const opaque = z.string().min(1).max(256);
 const operation = z.discriminatedUnion("operation", [
   z.object({ operation: z.literal("start"), containerRef: opaque, targetLineLookupKey: opaque }).strict(),
   z.object({ operation: z.literal("release_removed_line_route"), containerRef: opaque }).strict(),
+  z.object({ operation: z.literal("leave_group"), containerRef: opaque }).strict(),
   z.object({ operation: z.enum(["resume", "cancel", "retry_leave", "adopt"]), moveId: z.string().uuid() }).strict(),
 ]);
 const overview = z.object({ status: z.enum(["reserved", "adopted", "left", "cancelled"]).optional(),
@@ -35,6 +36,7 @@ export const POST = withJsonError(async (request: Request) => {
   if (!parsed.success) invalidRequest();
   const data = parsed.data;
   if (data.operation === "start") return jsonOk(await startHostedLinqGroupLineMove(data));
+  if (data.operation === "leave_group") return jsonOk(await leaveHostedLinqGroup(data));
   if (data.operation === "release_removed_line_route") return jsonOk(await releaseHostedLinqRemovedLineRoute(data));
   return jsonOk(await operateHostedLinqGroupLineMove(data));
 });

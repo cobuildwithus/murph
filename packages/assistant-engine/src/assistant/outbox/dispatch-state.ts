@@ -4,6 +4,7 @@ import {
   type AssistantChannelDelivery,
   type AssistantDeliveryError,
   type AssistantOutboxIntent,
+  type AssistantOutboxRecapVideo,
   type AssistantProviderMessageEffect,
 } from '@murphai/operator-config/assistant-cli-contracts'
 import { VaultCliError } from '@murphai/operator-config/vault-cli-errors'
@@ -171,6 +172,42 @@ export async function persistAssistantOutboxIntentDeliveryPendingConfirmation(in
       intentPath: input.intentPath,
       paths,
     })
+    return persistedIntent
+  })
+}
+
+/**
+ * The recap video's one decision, persisted by the sender before the message request that
+ * uses it: the prepared attachment, or the line alone. A decision only ever moves toward the
+ * line alone, for the same accepted video, and drops the handed-over file's path.
+ */
+export async function persistAssistantOutboxIntentRecapVideo(input: {
+  intentPath: string
+  next: AssistantOutboxRecapVideo
+  persistedAt: Date
+  sending: AssistantOutboxIntent
+  vault: string
+}): Promise<AssistantOutboxIntent> {
+  return withAssistantRuntimeWriteLock(input.vault, async (paths) => {
+    await ensureAssistantState(paths)
+    const current = await readAssistantOutboxIntentAtPath(input.intentPath, { vault: input.vault })
+    if (!current || !assistantOutboxIntentMatchesDispatchOwner(current, input.sending)) {
+      throw new VaultCliError('ASSISTANT_RECAP_VIDEO_OWNERSHIP_CHANGED',
+        'The recap message\'s outbox owner changed before its video decision was saved.', { retryable: true })
+    }
+    const previous = current.recapVideo
+    const next = input.next
+    const allowed = previous !== undefined && previous.generationId === next.generationId && previous.hash === next.hash
+      && previous.byteLength === next.byteLength && next.form !== undefined
+      && (previous.form === undefined || next.form === 'line' || previous.attachmentId === next.attachmentId)
+    if (!allowed) {
+      throw new VaultCliError('ASSISTANT_RECAP_VIDEO_DECISION_CONFLICT',
+        'The recap message\'s video decision does not follow the saved one.', { retryable: true })
+    }
+    const persistedIntent = assistantOutboxIntentSchema.parse(sanitizeAssistantOutboxIntentForPersistence({
+      ...current, recapVideo: next, updatedAt: input.persistedAt.toISOString(),
+    }))
+    await persistAssistantOutboxIntentAtPath({ intent: persistedIntent, intentPath: input.intentPath, paths })
     return persistedIntent
   })
 }

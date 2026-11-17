@@ -1,3 +1,9 @@
+import { RequestInputError } from "@murphai/hosted-execution/request-input";
+import { observeHostedLinqGroupRiskWebhook, recordHostedLinqGroupRosterEvidenceAfterCommit } from "./linq-group-risk-webhook";
+import { hasHostedLinqBlockedHandle } from "../hosted-routing/linq-handle-block";
+import { readHostedLinqSenderBlockWebhookResponse } from "./linq-sender-block";
+import { readHostedLinqGroupLeftWebhookResponse, scheduleHostedLinqGroupLeaveAfterCommit } from "./linq-group-leave-webhook";
+import { readHostedLinqGroupLeave, type HostedLinqGroupRosterRejection } from "../hosted-routing/linq-group-leave";
 import { prepareHostedLinqGroupMoveIngress, type PreparedHostedLinqGroupMoveIngress } from "../hosted-routing/linq-group-line-move-ingress";
 import { prepareGameChatInvite } from "../game/chat-membership";
 import { queueHostedLinqHomeContactCardAfterDelivery } from "./linq-contact-card-delivery";
@@ -271,7 +277,15 @@ function isModelAllowedFirstContactAdmission(
   return decision?.kind === "allow" && decision.source === "model";
 }
 
-export async function handleHostedOnboardingLinqWebhook(input: {
+export async function handleHostedOnboardingLinqWebhook(input: Parameters<typeof handleHostedOnboardingLinqWebhookInternal>[0]): Promise<HostedOnboardingLinqWebhookResponse> {
+  try { return await handleHostedOnboardingLinqWebhookInternal(input); }
+  catch (error) {
+    if (isHostedOnboardingError(error) && error.code === "HOSTED_LINQ_GROUP_LEFT") return { ok: true, ignored: true, reason: "group-left" };
+    throw error;
+  }
+}
+
+async function handleHostedOnboardingLinqWebhookInternal(input: {
   rawBody: string;
   webhookReceivedAt?: Date;
   scheduleAfterResponse?: HostedWebhookPostResponseScheduler;
@@ -318,9 +332,12 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       signature: input.signature,
       timestamp: input.timestamp,
     });
+    input.signal?.throwIfAborted();
     eventId = event.event_id;
     eventType = event.event_type;
     eventWebhookVersion = event.webhook_version ?? null;
+    await observeHostedLinqGroupRiskWebhook({ event, prisma: input.prisma, signal: input.signal });
+    const earlyResponse = await handleHostedLinqEarlyWebhook(event, input.prisma);
     messagePartsInspection = inspectHostedLinqMessageReceivedParts(event);
     let affirmativeReaction = false;
     finishHostedOnboardingTiming(verifyTiming, "completed", {
@@ -329,7 +346,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       signalAbortedAfterVerify: input.signal?.aborted ?? false,
     });
 
-    const earlyResponse = await handleHostedLinqNonMessageWebhook(event);
     if (earlyResponse) {
       const response = earlyResponse;
       responseReason = response.reason ?? null;
@@ -402,7 +418,6 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       return result.response;
     }
 
-    input.signal?.throwIfAborted();
     const prisma = input.prisma ?? getPrisma();
     if (event.event_type === "message.edited") {
       const { editPlan, wakeHandoffResult } = await handleHostedLinqMessageEditWebhook({
@@ -586,6 +601,8 @@ export async function handleHostedOnboardingLinqWebhook(input: {
                 preparedGameInvite: preparation.preparedGameInvite,
                 pendingGroupParticipantMemberIds:
                   planningResolution.pendingGroupParticipantMemberIds ?? null,
+                pendingGroupRosterRejection:
+                  planningResolution.pendingGroupRosterRejection,
                 pendingGroupRosterUnavailable:
                   (planningResolution.pendingGroupRosterUnavailable ?? false)
                   || (planningResolution.requestLocalGroupRoster?.observation.handlesComplete === false
@@ -659,6 +676,8 @@ export async function handleHostedOnboardingLinqWebhook(input: {
               event: planningEvent,
               participantMemberIds:
                 planningResolution.pendingGroupParticipantMemberIds ?? [],
+              pendingGroupRosterRejection:
+                planningResolution.pendingGroupRosterRejection,
               pendingGroupRosterUnavailable:
                 planningResolution.pendingGroupRosterUnavailable ?? false,
               prisma,
@@ -933,11 +952,15 @@ export async function handleHostedOnboardingLinqWebhook(input: {
       wakeUserPresent: Boolean(plan.wakeHandoffs?.some((handoff) => handoff.userId)),
     });
 
+    scheduleHostedLinqGroupLeaveAfterCommit({ target: plan.postCommitLinqGroupLeave, scheduleAfterResponse: input.scheduleAfterResponse });
     finishHostedLinqGroupMoveAdoption({ plan, prisma, scheduleAfterResponse: input.scheduleAfterResponse });
     await reconcileHostedLinqGroupRostersAfterCommitBestEffort({
       reconciles: plan.postCommitGroupRosterReconciles ?? [],
       requestLocalRoster: planningResolution.requestLocalGroupRoster,
       scheduleAfterResponse: input.scheduleAfterResponse,
+    });
+    await recordHostedLinqGroupRosterEvidenceAfterCommit({
+      event, requestLocalRoster: planningResolution.requestLocalGroupRoster, scheduleAfterResponse: input.scheduleAfterResponse,
     });
     await reconcileHostedUsageReferralRewardsAfterCommitBestEffort({
       prisma,
@@ -1447,10 +1470,11 @@ interface HostedLinqPlanningEventResolution {
   event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
   initialGroupDisplayName?: string;
   pendingGroupParticipantMemberIds?: readonly string[];
+  pendingGroupRosterRejection?: HostedLinqGroupRosterRejection;
   pendingGroupRosterUnavailable?: boolean;
   requestLocalGroupRoster?: {
     chatId: string;
-    observation: HostedLinqChatRosterObservation;
+    observation: HostedLinqChatSummary;
   };
   /** The route the resolver already read, reused so warming costs no query. */
   threadRoute: HostedThreadRouteSnapshot | null;
@@ -1566,9 +1590,7 @@ async function resolveHostedLinqPlanningEvent(input: {
           pendingGroupParticipantMemberIds:
             pendingGroupRoster.participantMemberIds,
         }),
-    ...(pendingGroupRoster?.unavailable === true
-      ? { pendingGroupRosterUnavailable: true }
-      : {}),
+    ...readHostedLinqPendingGroupRosterFlags(pendingGroupRoster),
     ...(pendingGroupRoster?.observation == null
       ? {}
       : {
@@ -1581,14 +1603,27 @@ async function resolveHostedLinqPlanningEvent(input: {
   };
 }
 
+function readHostedLinqPendingGroupRosterFlags(
+  roster: { rejection: HostedLinqGroupRosterRejection | null; unavailable: boolean } | null,
+): Pick<
+  HostedLinqPlanningEventResolution,
+  "pendingGroupRosterRejection" | "pendingGroupRosterUnavailable"
+> {
+  return {
+    ...(roster?.rejection ? { pendingGroupRosterRejection: roster.rejection } : {}),
+    ...(roster?.unavailable === true ? { pendingGroupRosterUnavailable: true } : {}),
+  };
+}
+
 async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
   chatId: string;
   summary?: HostedLinqChatSummary | null;
   prisma: PrismaClient;
   signal?: AbortSignal;
 }): Promise<{
-  observation: HostedLinqChatRosterObservation | null;
+  observation: HostedLinqChatSummary | null;
   initialGroupDisplayName: string | null;
+  rejection: HostedLinqGroupRosterRejection | null;
   participantMemberIds: string[] | null;
   unavailable: boolean;
 }> {
@@ -1604,6 +1639,7 @@ async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
       return {
         observation: null,
         initialGroupDisplayName: null,
+        rejection: null,
         participantMemberIds: null,
         unavailable: false,
       };
@@ -1616,6 +1652,7 @@ async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
       return {
         observation: summary,
         initialGroupDisplayName,
+        rejection: null,
         participantMemberIds: null,
         unavailable: true,
       };
@@ -1637,6 +1674,17 @@ async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
       return {
         observation: summary,
         initialGroupDisplayName,
+        rejection: "oversized",
+        participantMemberIds: null,
+        unavailable: false,
+      };
+    }
+    if (await hasHostedLinqBlockedHandle(participantHandles, input.prisma)) {
+      logHostedLinqPendingGroupRoster("blocked_roster");
+      return {
+        observation: summary,
+        initialGroupDisplayName,
+        rejection: "blocked_participant",
         participantMemberIds: null,
         unavailable: false,
       };
@@ -1653,6 +1701,7 @@ async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
     return {
       observation: summary,
       initialGroupDisplayName,
+      rejection: null,
       participantMemberIds: memberIds,
       unavailable: false,
     };
@@ -1664,6 +1713,7 @@ async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
     return {
       observation: null,
       initialGroupDisplayName: null,
+      rejection: null,
       participantMemberIds: null,
       unavailable: true,
     };
@@ -1672,6 +1722,7 @@ async function resolveHostedLinqPendingGroupParticipantMemberIds(input: {
 
 function logHostedLinqPendingGroupRoster(
   outcome:
+    | "blocked_roster"
     | "empty_roster"
     | "oversized_roster"
     | "provider_not_group"
@@ -2035,7 +2086,7 @@ async function ingestHostedLinqParticipantEventDirect(input: {
         return providerResult;
       }
 
-      if (!chatId) {
+      if (!chatId || await readHostedLinqGroupLeave({ chatId, prisma: transaction })) {
         return providerResult;
       }
 
@@ -2477,6 +2528,7 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
   directPreparationMemberId?: string;
   event: Parameters<typeof requireHostedLinqMessageReceivedEvent>[0];
   participantMemberIds: readonly string[];
+  pendingGroupRosterRejection?: HostedLinqGroupRosterRejection;
   pendingGroupRosterUnavailable: boolean;
   prisma: PrismaClient;
   reusableDirectCryptoDomainRoots?: {
@@ -2506,7 +2558,7 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
   if (preparedGroupLineMove && preparedGroupLineMove.action !== "continue") return { preparedGroupLineMove };
   if (threadRoute) {
     if (!accountLookupKey) {
-      throw new TypeError(
+      throw new RequestInputError(
         "Hosted Linq thread crypto preparation requires a recipient account lookup key.",
       );
     }
@@ -2535,6 +2587,7 @@ async function prepareHostedLinqThreadRoutingCrypto(input: {
     const admission = await prepareHostedLinqThreadContainerAdmission({
       event: input.event,
       participantMemberIds: input.participantMemberIds,
+      pendingGroupRosterRejection: input.pendingGroupRosterRejection,
       pendingGroupRosterUnavailable: input.pendingGroupRosterUnavailable,
       prisma: input.prisma,
     });
@@ -3408,6 +3461,10 @@ export async function runHostedOnboardingWebhookTransaction<TResult>(
       ...buildHostedWebhookDbTimingLogDetails(operations),
     });
   }
+}
+
+async function handleHostedLinqEarlyWebhook(event: HostedLinqWebhookEvent, prisma?: PrismaClient): Promise<HostedOnboardingLinqWebhookResponse | null> {
+  return await readHostedLinqSenderBlockWebhookResponse(event, prisma) ?? await readHostedLinqGroupLeftWebhookResponse(event, prisma) ?? await handleHostedLinqNonMessageWebhook(event);
 }
 
 async function handleHostedLinqNonMessageWebhook(event: HostedLinqWebhookEvent): Promise<HostedOnboardingLinqWebhookResponse | null> {

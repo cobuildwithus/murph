@@ -1,5 +1,8 @@
+import { assertContract } from "@murphai/contracts";
+import { ContractValidationError } from "@murphai/contracts/validation-error";
+import { hostedLeaveGroupRequestSchema, hostedLeaveGroupResponseSchema } from "../leave-group.ts";
 import { hostedGameChatBootstrapRequestSchema, hostedGameChatBootstrapResponseSchema } from "../game-bootstrap-control.ts";
-import { hostedGameToolRequestSchema, hostedGameToolResponseSchema } from "../game-tools.ts";
+import { GAME_TOOL_ACTIONS, hostedGameToolRequestSchema, hostedGameToolResponseSchema } from "../game-tools.ts";
 import { parseHostedMailboxLane, parseHostedMailboxKind } from "./mailbox.ts";
 export {
   parseHostedMailboxItem,
@@ -501,6 +504,22 @@ export function parseHostedRuntimeUsageRecordRequest(
     "Hosted runtime usage record request",
   );
 
+  const usage = parseAssistantUsageRecord(record.usage);
+  const raw = usage.rawUsageJson;
+  if (usage.provider === "elevenlabs" && usage.usageExtractionSourcePath === "elevenlabs.text_to_speech"
+    && !(typeof raw?.characterCount === "number" && raw.characterCount > 0)) {
+    throw new ContractValidationError("Text-to-speech usage requires a positive character count.");
+  }
+  if (usage.provider === "workers-ai" && usage.featureKey === "audio-transcription"
+    && usage.usageExtractionSourcePath === "workers-ai.transcribe"
+    && !(typeof raw?.audioBytes === "number" && raw.audioBytes > 0)) {
+    throw new ContractValidationError("Transcription usage requires a positive audio byte count.");
+  }
+  if (usage.provider === "elevenlabs" && usage.featureKey === "music-generation"
+    && usage.usageExtractionSourcePath === "elevenlabs.music.compose"
+    && typeof raw?.durationMs !== "number") {
+    throw new ContractValidationError("Music usage requires a duration.");
+  }
   return {
     ...(record.noticeDeliveryTarget === undefined
       ? {}
@@ -512,7 +531,7 @@ export function parseHostedRuntimeUsageRecordRequest(
                   record.noticeDeliveryTarget,
                 ),
         }),
-    usage: parseAssistantUsageRecord(record.usage),
+    usage,
   };
 }
 
@@ -560,7 +579,7 @@ function parseHostedRuntimeUsageNoticeDeliveryTarget(
     };
   }
 
-  throw new TypeError(`${label} channel is not supported.`);
+  throw new ContractValidationError(`${label} channel is not supported.`);
 }
 
 export function parseHostedRuntimeUsageRecordResponse(
@@ -610,7 +629,7 @@ export function parseHostedRuntimeProductFeedbackRecordRequest(
     "Hosted runtime product feedback idempotencyKey",
   );
   if (!/^[a-f0-9]{64}$/u.test(idempotencyKey)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runtime product feedback idempotencyKey must be a SHA-256 hex digest.",
     );
   }
@@ -700,7 +719,7 @@ export function parseHostedRuntimeAssistantAskControlRequest(
       ),
     };
   }
-  throw new TypeError(
+  throw new ContractValidationError(
     "Hosted runtime assistant ask control request action is invalid.",
   );
 }
@@ -743,7 +762,7 @@ export function parseHostedRuntimeAssistantAskControlResponse(
         label,
       );
       if (record.feedbackDiagnostic !== undefined && record.feedbackDiagnostic !== true) {
-        throw new TypeError("Feedback diagnostic marker must be true when present.");
+        throw new ContractValidationError("Feedback diagnostic marker must be true when present.");
       }
       return { action, question, status, targetLabel,
         ...(record.feedbackDiagnostic === true ? { feedbackDiagnostic: true } : {}),
@@ -794,7 +813,7 @@ export function parseHostedRuntimeAssistantAskControlResponse(
       terminalReason !== "expired" &&
       terminalReason !== "unavailable"
     ) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "Hosted runtime assistant ask terminalReason is invalid.",
       );
     }
@@ -819,7 +838,7 @@ export function parseHostedRuntimeAssistantAskControlResponse(
     );
     return { action, status };
   }
-  throw new TypeError(
+  throw new ContractValidationError(
     "Hosted runtime assistant ask control response action/status is invalid.",
   );
 }
@@ -841,7 +860,7 @@ function parseHostedRuntimeGroupJournalRequest(
       `${label} origin`,
     );
     if (origin.kind !== "accepted_input") {
-      throw new TypeError(`${label} origin must be an accepted input.`);
+      throw new ContractValidationError(`${label} origin must be an accepted input.`);
     }
     return {
       action,
@@ -870,7 +889,7 @@ function parseHostedRuntimeGroupJournalRequest(
       `${label} origin`,
     );
     if (origin.kind !== "accepted_input") {
-      throw new TypeError(`${label} origin must be an accepted input.`);
+      throw new ContractValidationError(`${label} origin must be an accepted input.`);
     }
     return {
       action,
@@ -902,7 +921,7 @@ function parseHostedRuntimeGroupJournalRequest(
       `${label} origin`,
     );
     if (origin.kind !== "accepted_input") {
-      throw new TypeError(`${label} origin must be an accepted input.`);
+      throw new ContractValidationError(`${label} origin must be an accepted input.`);
     }
     return {
       action,
@@ -936,8 +955,9 @@ export function parseHostedRuntimeGroupToolRequest(
     record.action,
     "Hosted runtime group tool request action",
   );
-  if (action === "game_chat_bootstrap") return hostedGameChatBootstrapRequestSchema.parse(record);
-  if (["read_game", "update_game", "game_photo", "write_recap", "my_game_reminders"].includes(action)) return hostedGameToolRequestSchema.parse(record);
+  if (action === "leave_group") return assertContract(hostedLeaveGroupRequestSchema, record, "Hosted runtime group tool request");
+  if (action === "game_chat_bootstrap") return assertContract(hostedGameChatBootstrapRequestSchema, record, "Hosted runtime group tool request");
+  if (GAME_TOOL_ACTIONS.some(value => value === action)) return assertContract(hostedGameToolRequestSchema, record, "Hosted runtime group tool request");
   const parsed =
     parseHostedRuntimeGroupConsultationRequest(record, action) ??
     parseHostedRuntimeGroupJournalRequest(record, action) ??
@@ -950,7 +970,7 @@ export function parseHostedRuntimeGroupToolRequest(
   if (parsed) {
     return parsed;
   }
-  throw new TypeError("Hosted runtime group tool action is not supported.");
+  throw new ContractValidationError("Hosted runtime group tool action is not supported.");
 }
 
 function parseHostedRuntimeGroupConsultationRequest(
@@ -1028,7 +1048,7 @@ function parseHostedRuntimeGroupConsultationRequest(
       (mode === "clarification" && audience !== undefined) ||
       (mode !== "clarification" && audience === undefined)
     ) {
-      throw new TypeError(
+      throw new ContractValidationError(
         `${label} audience must be omitted only for clarification.`,
       );
     }
@@ -1037,7 +1057,7 @@ function parseHostedRuntimeGroupConsultationRequest(
       `${label} origin`,
     );
     if (origin.kind !== "accepted_input") {
-      throw new TypeError(`${label} origin must be an accepted input.`);
+      throw new ContractValidationError(`${label} origin must be an accepted input.`);
     }
     return {
       action,
@@ -1055,7 +1075,7 @@ function parseHostedRuntimeGroupConsultationRequest(
       `${label} origin`,
     );
     if (origin.kind !== "accepted_input") {
-      throw new TypeError(`${label} origin must be an accepted input.`);
+      throw new ContractValidationError(`${label} origin must be an accepted input.`);
     }
     return {
       action: "ask_current_sender",
@@ -1180,7 +1200,7 @@ function parseHostedRuntimeGroupSharedDataRequest(
       "Hosted runtime group tool read_shared request",
     );
     if (record.includeCompanionPresence !== undefined && record.includeCompanionPresence !== true) {
-      throw new TypeError("Invalid companion presence capability.");
+      throw new ContractValidationError("Invalid companion presence capability.");
     }
     const senderHandles = parseHostedRuntimeGroupSenderHandlesRequest(record);
     const projectionScopes = parseHostedRuntimeGroupSharedRequestedProjectionScopes(
@@ -1225,7 +1245,7 @@ function parseHostedRuntimeGroupSharedDataRequest(
       record.selfOptOut !== undefined &&
       record.selfOptOut !== null
     ) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "Hosted runtime group tool revoke_own_email_share request has conflicting participant authorities.",
       );
     }
@@ -1338,7 +1358,7 @@ function parseHostedRuntimeGroupUsageReferralRequest(
       policyCodeValues.length < 1 ||
       policyCodeValues.length > HOSTED_USAGE_REFERRAL_POLICY_CODES.length
     ) {
-      throw new TypeError(
+      throw new ContractValidationError(
         `Hosted runtime group tool arm_usage_referral request policyCodes must contain between 1 and ${HOSTED_USAGE_REFERRAL_POLICY_CODES.length} entries.`,
       );
     }
@@ -1349,7 +1369,7 @@ function parseHostedRuntimeGroupUsageReferralRequest(
       ),
     );
     if (new Set(policyCodes).size !== policyCodes.length) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "Hosted runtime group tool arm_usage_referral request policyCodes must have unique entries.",
       );
     }
@@ -1457,7 +1477,7 @@ function parseHostedRuntimeGroupMembershipRequest(
       "Hosted runtime group tool leave_membership request membershipId",
     ).trim();
     if (!membershipId) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "Hosted runtime group tool leave_membership request membershipId must not be blank.",
       );
     }
@@ -1647,7 +1667,7 @@ function parseHostedRuntimeGroupContactCardRequest(
     }
 
     if (personalizedFieldCount !== 3 || hasLinqThread) {
-      throw new TypeError(
+      throw new ContractValidationError(
         `${label} must be either canonical with optional linqThread, or personalized with contactCardImageUrl, contactCardShareKey, and directLinqChatId only.`,
       );
     }
@@ -1695,12 +1715,12 @@ function parseHostedRuntimeGroupUpdateDisplayNameRequest(
     .trim()
     .replace(/\s+/gu, " ");
   if (displayName.length === 0) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runtime group tool update_display_name displayName must not be blank.",
     );
   }
   if (displayName.length > HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runtime group tool update_display_name displayName is too long.",
     );
   }
@@ -1717,16 +1737,16 @@ function parseHostedRuntimeGroupChatIconUrl(
     iconUrl.length === 0 ||
     iconUrl.length > HOSTED_RUNTIME_GROUP_CHAT_ICON_URL_MAX_LENGTH
   ) {
-    throw new TypeError(`${label} is invalid.`);
+    throw new ContractValidationError(`${label} is invalid.`);
   }
   let parsed: URL;
   try {
     parsed = new URL(iconUrl);
   } catch {
-    throw new TypeError(`${label} is invalid.`);
+    throw new ContractValidationError(`${label} is invalid.`);
   }
   if (parsed.protocol !== "https:" || parsed.username || parsed.password) {
-    throw new TypeError(`${label} must be HTTPS.`);
+    throw new ContractValidationError(`${label} must be HTTPS.`);
   }
   if (
     !isHostedRuntimePrivateImageDeliveryUrl(
@@ -1734,7 +1754,7 @@ function parseHostedRuntimeGroupChatIconUrl(
       privateMediaDeliveryOrigin ?? undefined,
     )
   ) {
-    throw new TypeError(`${label} is invalid.`);
+    throw new ContractValidationError(`${label} is invalid.`);
   }
   return parsed.toString();
 }
@@ -1809,7 +1829,7 @@ function parseHostedRuntimeGroupJoinOfferMessageTemplate(
     template.length >
       HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Hosted runtime group tool post_join_offer messageTemplate must be between 1 and ${HOSTED_RUNTIME_GROUP_JOIN_OFFER_MESSAGE_TEMPLATE_MAX_LENGTH} characters.`,
     );
   }
@@ -1828,7 +1848,7 @@ function parseHostedRuntimeGroupToolParticipant(
   );
   const source = requireString(record.source, `${label} source`);
   if (source !== "linq" && source !== "telegram") {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runtime group tool participant source is not supported.",
     );
   }
@@ -1837,7 +1857,7 @@ function parseHostedRuntimeGroupToolParticipant(
     `${label} assistantInputId`,
   );
   if (!/^ain_[0-9a-f]{32}$/u.test(assistantInputId)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runtime group tool participant assistantInputId is invalid.",
     );
   }
@@ -1846,7 +1866,7 @@ function parseHostedRuntimeGroupToolParticipant(
     `${label} senderHandle`,
   ).trim();
   if (senderHandle.length === 0 || senderHandle.length > 512) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runtime group tool participant senderHandle is invalid.",
     );
   }
@@ -1865,7 +1885,7 @@ function parseHostedRuntimeGroupToolSelfOptOutContext(
   assertAllowedObjectKeys(record, new Set(["senderHandle", "source"]), label);
   const source = requireString(record.source, `${label} source`);
   if (source !== "email" && source !== "linq") {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runtime group tool self opt-out source is not supported.",
     );
   }
@@ -1895,7 +1915,7 @@ function parseHostedRuntimeUsageReferralSourceContext(
     "Hosted runtime usage referral source conversation channel",
   );
   if (channel !== "linq" && channel !== "telegram") {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runtime usage referral source conversation channel is invalid.",
     );
   }
@@ -1913,7 +1933,7 @@ function parseHostedRuntimeUsageReferralSourceContext(
         linqService !== "rcs" &&
         linqService !== "sms"))
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runtime usage referral source conversation linqService is invalid.",
     );
   }
@@ -1939,7 +1959,7 @@ function parseHostedRuntimeUsageReferralBlindedIdentifier(
 ): string {
   const identifier = requireString(value, label);
   if (!/^hid_[a-f0-9]{32}$/u.test(identifier)) {
-    throw new TypeError(`${label} is invalid.`);
+    throw new ContractValidationError(`${label} is invalid.`);
   }
   return identifier;
 }
@@ -1954,7 +1974,7 @@ function parseHostedRuntimeUsageReferralPolicyCode(
       return policyCode;
     }
   }
-  throw new TypeError(`${label} is not supported.`);
+  throw new ContractValidationError(`${label} is not supported.`);
 }
 
 /**
@@ -1975,7 +1995,7 @@ function parseHostedRuntimeGroupSenderHandlesRequest(
     record.telegramSenderHandles !== undefined &&
     record.telegramSenderHandles !== null;
   if (linqPresent && telegramPresent) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runtime group tool read_shared request must not supply sender handles for more than one channel.",
     );
   }
@@ -2026,7 +2046,7 @@ function parseHostedRuntimeGroupBoundedHandles(
     (!allowEmpty && entries.length === 0) ||
     entries.length > HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} must contain between ${
         allowEmpty ? 0 : 1
       } and ${HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX} entries.`,
@@ -2040,7 +2060,7 @@ function parseHostedRuntimeGroupBoundedHandles(
     }),
   );
   if (new Set(handles).size !== handles.length) {
-    throw new TypeError(`${label} must contain unique entries.`);
+    throw new ContractValidationError(`${label} must contain unique entries.`);
   }
   return handles;
 }
@@ -2094,13 +2114,13 @@ function parseHostedRuntimeGroupDisplayName(
 ): string | null {
   const displayName = readNullableString(value, label);
   if (displayName !== null && displayName.trim().length === 0) {
-    throw new TypeError(`${label} must not be blank.`);
+    throw new ContractValidationError(`${label} must not be blank.`);
   }
   if (
     displayName !== null &&
     displayName.length > HOSTED_RUNTIME_GROUP_DISPLAY_NAME_MAX_LENGTH
   ) {
-    throw new TypeError(`${label} is too long.`);
+    throw new ContractValidationError(`${label} is too long.`);
   }
   return displayName;
 }
@@ -2130,7 +2150,7 @@ function parseHostedRuntimeGroupParticipantDisplayNamesResult(
     };
   }
   if (status !== "ok") {
-    throw new TypeError(`${label} status is invalid.`);
+    throw new ContractValidationError(`${label} status is invalid.`);
   }
   assertAllowedObjectKeys(
     result,
@@ -2139,7 +2159,7 @@ function parseHostedRuntimeGroupParticipantDisplayNamesResult(
   );
   const entries = requireArray(result.participants, `${label} participants`);
   if (entries.length > HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} participants must contain at most ${HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX} entries.`,
     );
   }
@@ -2157,7 +2177,7 @@ function parseHostedRuntimeGroupParticipantDisplayNamesResult(
       `${participantLabel} displayName`,
     );
     if (displayName === null) {
-      throw new TypeError(`${participantLabel} displayName must not be null.`);
+      throw new ContractValidationError(`${participantLabel} displayName must not be null.`);
     }
     const senderHandle = parseHostedRuntimeGroupAskBoundedText({
       label: `${participantLabel} senderHandle`,
@@ -2165,7 +2185,7 @@ function parseHostedRuntimeGroupParticipantDisplayNamesResult(
       value: participant.senderHandle,
     });
     if (senderHandles.has(senderHandle)) {
-      throw new TypeError(`${label} senderHandles must be unique.`);
+      throw new ContractValidationError(`${label} senderHandles must be unique.`);
     }
     senderHandles.add(senderHandle);
     const displayNameSource =
@@ -2189,7 +2209,7 @@ function parseHostedRuntimeGroupParticipantDisplayNamesResult(
       senderHandles.has(senderHandle),
     )
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} nameMissSenderHandles must not overlap participants.`,
     );
   }
@@ -2207,7 +2227,7 @@ function parseHostedRuntimeGroupParticipantDisplayNameSource(
   if (value === "profile-name" || value === "unverified-owner-contact") {
     return value;
   }
-  throw new TypeError(`${label} is invalid.`);
+  throw new ContractValidationError(`${label} is invalid.`);
 }
 
 function readHostedRuntimeGroupKind(
@@ -2217,7 +2237,7 @@ function readHostedRuntimeGroupKind(
   for (const kind of HOSTED_RUNTIME_GROUP_KINDS) {
     if (value === kind) return kind;
   }
-  throw new TypeError(
+  throw new ContractValidationError(
     "Hosted runtime group tool create_join_link kind is not supported.",
   );
 }
@@ -2255,7 +2275,7 @@ function parseHostedRuntimeGroupSharedReadResult(
     };
   }
   if (status !== "ok" && status !== "none") {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runtime group tool read_shared response status is invalid.",
     );
   }
@@ -2275,10 +2295,10 @@ function parseHostedRuntimeGroupSharedReadResult(
   );
   if (status === "none") {
     if (result.freshness !== undefined || result.dateCoverage !== undefined) {
-      throw new TypeError("Shared freshness requires an authorized ok response.");
+      throw new ContractValidationError("Shared freshness requires an authorized ok response.");
     }
     if (rawMembers.length !== 0) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "Hosted runtime group tool read_shared none response members must be empty.",
       );
     }
@@ -2291,7 +2311,7 @@ function parseHostedRuntimeGroupSharedReadResult(
     };
   }
   if (rawMembers.length > HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Hosted runtime group tool read_shared response members must contain at most ${HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_MEMBERS} entries.`,
     );
   }
@@ -2306,20 +2326,20 @@ function parseHostedRuntimeGroupSharedReadResult(
       index,
     );
     if (seenMemberIds.has(member.memberId)) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "Hosted runtime group tool read_shared response memberIds must be unique.",
       );
     }
     seenMemberIds.add(member.memberId);
     if (seenParticipantIds.has(member.participantId)) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "Hosted runtime group tool read_shared response participantIds must be unique.",
       );
     }
     seenParticipantIds.add(member.participantId);
     for (const handle of member.currentTurnHandles) {
       if (seenCurrentTurnHandles.has(handle)) {
-        throw new TypeError(
+        throw new ContractValidationError(
           "Hosted runtime group tool read_shared response currentTurnHandles must be unique across members.",
         );
       }
@@ -2327,7 +2347,7 @@ function parseHostedRuntimeGroupSharedReadResult(
       if (
         seenCurrentTurnHandles.size > HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX
       ) {
-        throw new TypeError(
+        throw new ContractValidationError(
           `Hosted runtime group tool read_shared response currentTurnHandles must contain at most ${HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX} entries across all members.`,
         );
       }
@@ -2340,14 +2360,14 @@ function parseHostedRuntimeGroupSharedReadResult(
   if (dateCoverage && (requestedScopes.length !== 1 || members.length > 1
     || result.freshness !== undefined
     || !isHostedVaultShareRecentDateProjectionKind(requestedScopes[0]!.projectionScope.projectionKind))) {
-    throw new TypeError("Shared history coverage requires one health scope and at most one participant.");
+    throw new ContractValidationError("Shared history coverage requires one health scope and at most one participant.");
   }
   if (dateCoverage) {
     const dates = [...new Set(members.flatMap((member) => member.projections.flatMap((projection) =>
       projection.records.map((record) => record.occurredAt.slice(0, 10))
     )))].sort();
     if (JSON.stringify(dates) !== JSON.stringify(dateCoverage.availableDates)) {
-      throw new TypeError("Shared history coverage must describe exactly the returned observations.");
+      throw new ContractValidationError("Shared history coverage must describe exactly the returned observations.");
     }
   }
   return {
@@ -2373,7 +2393,7 @@ function parseHostedRuntimeGroupSharedRequestedProjectionScopeKeys(
     rawScopeKeys.length === 0 ||
     rawScopeKeys.length > HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} must contain between 1 and ${HOSTED_RUNTIME_GROUP_SHARED_READ_MAX_PROJECTION_SCOPES} entries.`,
     );
   }
@@ -2390,12 +2410,12 @@ function parseHostedRuntimeGroupSharedRequestedProjectionScopeKeys(
         projectionScopeKey,
       );
     if (!projectionScope) {
-      throw new TypeError(
+      throw new ContractValidationError(
         `${label} contains an unsupported projection scope key.`,
       );
     }
     if (seen.has(projectionScopeKey)) {
-      throw new TypeError(`${label} must not contain duplicates.`);
+      throw new ContractValidationError(`${label} must not contain duplicates.`);
     }
     seen.add(projectionScopeKey);
     return { projectionScope, projectionScopeKey };
@@ -2451,7 +2471,7 @@ function parseHostedRuntimeGroupSharedMember(
     `${label}.projections`,
   );
   if (rawProjections.length !== requestedScopes.length) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label}.projections must contain exactly the requested projection scopes.`,
     );
   }
@@ -2466,12 +2486,12 @@ function parseHostedRuntimeGroupSharedMember(
       `${label}.projections[${projectionIndex}]`,
     );
     if (!requestedScopeKeys.has(projection.projectionScopeKey)) {
-      throw new TypeError(
+      throw new ContractValidationError(
         `${label}.projections contains a projection that was not requested.`,
       );
     }
     if (projectionByKey.has(projection.projectionScopeKey)) {
-      throw new TypeError(
+      throw new ContractValidationError(
         `${label}.projections must not contain duplicate projection scopes.`,
       );
     }
@@ -2481,7 +2501,7 @@ function parseHostedRuntimeGroupSharedMember(
   const projections = requestedScopes.map(({ projectionScopeKey }) => {
     const projection = projectionByKey.get(projectionScopeKey);
     if (!projection) {
-      throw new TypeError(
+      throw new ContractValidationError(
         `${label}.projections must contain exactly the requested projection scopes.`,
       );
     }
@@ -2532,7 +2552,7 @@ function parseHostedRuntimeGroupSharedProjection(
     value: projection.projectionScopeKey,
   });
   if (projectionScopeKey !== expectedProjectionScopeKey) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label}.projectionScopeKey must match projectionScope.`,
     );
   }
@@ -2542,7 +2562,7 @@ function parseHostedRuntimeGroupSharedProjection(
     `${label}.grantStatus`,
   );
   if (grantStatus !== "granted" && grantStatus !== "not_granted") {
-    throw new TypeError(`${label}.grantStatus is invalid.`);
+    throw new ContractValidationError(`${label}.grantStatus is invalid.`);
   }
   const dataStatus = requireString(
     projection.dataStatus,
@@ -2553,7 +2573,7 @@ function parseHostedRuntimeGroupSharedProjection(
     dataStatus !== "missing" &&
     dataStatus !== "pending"
   ) {
-    throw new TypeError(`${label}.dataStatus is invalid.`);
+    throw new ContractValidationError(`${label}.dataStatus is invalid.`);
   }
   const grantedAt =
     projection.grantedAt === undefined
@@ -2569,12 +2589,12 @@ function parseHostedRuntimeGroupSharedProjection(
     grantedAt !== undefined &&
     grantedAt !== null
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} not_granted projections cannot have grantedAt.`,
     );
   }
   if (grantStatus === "granted" && grantedAt === null) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} granted projections cannot have null grantedAt.`,
     );
   }
@@ -2582,22 +2602,22 @@ function parseHostedRuntimeGroupSharedProjection(
   const rawRecords = requireArray(projection.records, `${label}.records`);
   const maxRecords = getHostedVaultShareProjectionMaxRecords(projectionScope);
   if (rawRecords.length > maxRecords) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label}.records must contain at most ${maxRecords} entries.`,
     );
   }
   if (grantStatus === "not_granted" && dataStatus !== "missing") {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} not_granted projections must have missing data.`,
     );
   }
   if (dataStatus === "available" && rawRecords.length === 0) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} available projections must contain at least one record.`,
     );
   }
   if (dataStatus !== "available" && rawRecords.length !== 0) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} pending or missing projections must not contain records.`,
     );
   }
@@ -2617,7 +2637,7 @@ function parseHostedRuntimeGroupSharedProjection(
         projectionScope,
       );
       if (seenRecordKeys.has(parsed.recordKey)) {
-        throw new TypeError(`${label}.records must have unique recordKeys.`);
+        throw new ContractValidationError(`${label}.records must have unique recordKeys.`);
       }
       seenRecordKeys.add(parsed.recordKey);
       return {
@@ -2649,7 +2669,7 @@ function parseHostedRuntimeGroupCanonicalTimestamp(
     !Number.isFinite(parsed) ||
     new Date(parsed).toISOString() !== timestamp
   ) {
-    throw new TypeError(`${label} must be a canonical UTC timestamp.`);
+    throw new ContractValidationError(`${label} must be a canonical UTC timestamp.`);
   }
   return timestamp;
 }
@@ -2683,7 +2703,7 @@ function parseHostedRuntimeGroupCurrentSenderDirectResult(
       ),
     };
   }
-  throw new TypeError(`${label} status is invalid.`);
+  throw new ContractValidationError(`${label} status is invalid.`);
 }
 
 function parseHostedRuntimeGroupDailyMetricReportResult(
@@ -2710,7 +2730,7 @@ function parseHostedRuntimeGroupDailyMetricReportResult(
       ),
     };
   }
-  throw new TypeError(`${label} status is invalid.`);
+  throw new ContractValidationError(`${label} status is invalid.`);
 }
 
 function parseHostedRuntimeGroupJournalActionResult(
@@ -2739,7 +2759,7 @@ function parseHostedRuntimeGroupJournalActionResult(
       ),
     };
   }
-  throw new TypeError(`${label} status is invalid.`);
+  throw new ContractValidationError(`${label} status is invalid.`);
 }
 
 function parseHostedRuntimeGroupJournalResponse(
@@ -2807,7 +2827,7 @@ function parseHostedRuntimeGroupJournalResponse(
       },
     };
   }
-  throw new TypeError(`${label} result status is invalid.`);
+  throw new ContractValidationError(`${label} result status is invalid.`);
 }
 
 function parseHostedRuntimeGroupMemberAskResult(
@@ -2849,7 +2869,7 @@ function parseHostedRuntimeGroupMemberAskResult(
       ),
     };
   }
-  throw new TypeError(`${label} status is invalid.`);
+  throw new ContractValidationError(`${label} status is invalid.`);
 }
 
 export function parseHostedRuntimeGroupToolResponse(
@@ -2861,8 +2881,9 @@ export function parseHostedRuntimeGroupToolResponse(
     "Hosted runtime group tool response action",
   );
 
+  if (action === "leave_group") return hostedLeaveGroupResponseSchema.parse(record);
   if (action === "game_chat_bootstrap") return hostedGameChatBootstrapResponseSchema.parse(record);
-  if (["read_game", "update_game", "game_photo", "write_recap", "my_game_reminders"].includes(action)) return hostedGameToolResponseSchema.parse(record);
+  if (GAME_TOOL_ACTIONS.some(value => value === action)) return hostedGameToolResponseSchema.parse(record);
   if (action === "ask_current_sender") {
     const label = "Hosted runtime group tool ask_current_sender response";
     assertAllowedObjectKeys(record, new Set(["action", "result"]), label);
@@ -2912,7 +2933,7 @@ export function parseHostedRuntimeGroupToolResponse(
   if (parsed) {
     return parsed;
   }
-  throw new TypeError(
+  throw new ContractValidationError(
     "Hosted runtime group tool response action/status is not supported.",
   );
 }
@@ -2967,7 +2988,7 @@ function parseHostedRuntimeGroupConsultationResponse(
         groupLabels.length === 0 ||
         groupLabels.length > HOSTED_RUNTIME_GROUP_CLARIFICATION_LABELS_MAX
       ) {
-        throw new TypeError(
+        throw new ContractValidationError(
           `Hosted runtime group tool ask clarification groupLabels must contain between 1 and ${HOSTED_RUNTIME_GROUP_CLARIFICATION_LABELS_MAX} entries.`,
         );
       }
@@ -3216,12 +3237,12 @@ function parseHostedRuntimeGroupCurrentGroupResponse(
           offerState !== "existing" &&
           offerState !== "posted"
         ) {
-          throw new TypeError(
+          throw new ContractValidationError(
             "Hosted runtime group tool post_join_offer offerState is invalid.",
           );
         }
         if (offeredAt !== undefined && offerState === undefined) {
-          throw new TypeError(
+          throw new ContractValidationError(
             "Hosted runtime group tool post_join_offer offeredAt requires offerState.",
           );
         }
@@ -3293,7 +3314,7 @@ function parseHostedRuntimeGroupPendingGroupResponse(
         !Number.isFinite(expiresAtDate.getTime()) ||
         expiresAtDate.toISOString() !== expiresAt
       ) {
-        throw new TypeError(
+        throw new ContractValidationError(
           `${label} expiresAt must be a canonical timestamp.`,
         );
       }
@@ -3334,7 +3355,7 @@ function parseHostedRuntimeGroupPendingGroupResponse(
         },
       };
     }
-    throw new TypeError(`${label} status is invalid.`);
+    throw new ContractValidationError(`${label} status is invalid.`);
   }
   return null;
 }
@@ -3361,7 +3382,7 @@ function parseHostedRuntimeGroupChatNameResponse(
         "Hosted runtime group tool read_chat_name displayName",
       );
       if (displayName === null) {
-        throw new TypeError(
+        throw new ContractValidationError(
           "Hosted runtime group tool read_chat_name ok displayName must be present.",
         );
       }
@@ -3374,7 +3395,7 @@ function parseHostedRuntimeGroupChatNameResponse(
         `${label} none`,
       );
       if (result.displayName !== null) {
-        throw new TypeError(
+        throw new ContractValidationError(
           "Hosted runtime group tool read_chat_name none displayName must be null.",
         );
       }
@@ -3387,7 +3408,7 @@ function parseHostedRuntimeGroupChatNameResponse(
         `${label} unavailable`,
       );
       if (result.displayName !== null) {
-        throw new TypeError(
+        throw new ContractValidationError(
           "Hosted runtime group tool read_chat_name unavailable displayName must be null.",
         );
       }
@@ -3403,7 +3424,7 @@ function parseHostedRuntimeGroupChatNameResponse(
         },
       };
     }
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runtime group tool read_chat_name response status is invalid.",
     );
   }
@@ -3469,13 +3490,13 @@ function parseHostedRuntimeGroupUsageResponse(
           legacySponsorshipStatus !== "not_sponsored" &&
           legacySponsorshipStatus !== "sponsored"
         ) {
-          throw new TypeError(
+          throw new ContractValidationError(
             "Hosted runtime group tool read_usage sponsorshipStatus is invalid.",
           );
         }
       }
       if (typeof usage.fundingNeeded !== "boolean") {
-        throw new TypeError(
+        throw new ContractValidationError(
           "Hosted runtime group tool read_usage fundingNeeded must be boolean.",
         );
       }
@@ -3491,7 +3512,7 @@ function parseHostedRuntimeGroupUsageResponse(
         includedUsageUsedPercent !== undefined &&
         includedUsageUsedPercent > 100
       ) {
-        throw new TypeError(
+        throw new ContractValidationError(
           "Hosted runtime group tool read_usage includedUsageUsedPercent must be at most 100.",
         );
       }
@@ -3519,7 +3540,7 @@ function parseHostedRuntimeGroupUsageResponse(
         "Hosted runtime group tool read_usage unavailable response result",
       );
       if (result.usage !== null) {
-        throw new TypeError(
+        throw new ContractValidationError(
           "Hosted runtime group tool read_usage unavailable usage must be null.",
         );
       }
@@ -3561,7 +3582,7 @@ function parseHostedRuntimeGroupLegacyUsageProjection(
     capacityState !== "low" &&
     capacityState !== "exhausted"
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runtime group tool read_usage legacy capacityState is invalid.",
     );
   }
@@ -3574,7 +3595,7 @@ function parseHostedRuntimeGroupLegacyUsageProjection(
     !Number.isFinite(periodEndDate.getTime()) ||
     periodEndDate.toISOString() !== periodEnd
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runtime group tool read_usage legacy periodEnd must be canonical.",
     );
   }
@@ -3586,7 +3607,7 @@ function parseHostedRuntimeGroupLegacyUsageProjection(
           "Hosted runtime group tool read_usage legacy remainingPercent",
         );
   if (remainingPercent !== undefined && remainingPercent > 100) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runtime group tool read_usage legacy remainingPercent must be at most 100.",
     );
   }
@@ -3624,7 +3645,7 @@ function parseHostedRuntimeGroupSharedDataResponse(
       result: record.result,
     });
     if (parsed.action !== "prepare_email") {
-      throw new TypeError(
+      throw new ContractValidationError(
         "Hosted runtime group tool prepare_email response action is invalid.",
       );
     }
@@ -3652,7 +3673,7 @@ function parseHostedRuntimeGroupUsageReferralResponse(
         label,
       );
       if (result.referral !== null) {
-        throw new TypeError(`${label} referral must be null when unavailable.`);
+        throw new ContractValidationError(`${label} referral must be null when unavailable.`);
       }
       return {
         action,
@@ -3680,7 +3701,7 @@ function parseHostedRuntimeGroupUsageReferralResponse(
           ? "canceled"
           : "read";
       if (outcome !== expectedOutcome) {
-        throw new TypeError(`${label} outcome does not match its action.`);
+        throw new ContractValidationError(`${label} outcome does not match its action.`);
       }
       return {
         action,
@@ -3694,7 +3715,7 @@ function parseHostedRuntimeGroupUsageReferralResponse(
         },
       };
     }
-    throw new TypeError(`${label} status is not supported.`);
+    throw new ContractValidationError(`${label} status is not supported.`);
   }
   return null;
 }
@@ -3780,7 +3801,7 @@ function parseHostedRuntimeGroupMembershipResponse(
         "Hosted runtime group tool list_memberships unavailable response result",
       );
       if (result.memberships !== null) {
-        throw new TypeError(
+        throw new ContractValidationError(
           "Hosted runtime group tool list_memberships unavailable memberships must be null.",
         );
       }
@@ -4013,7 +4034,7 @@ function parseHostedRuntimeGroupChatAvatarResponse(
           providerErrorCode < 1_000 ||
           providerErrorCode > 9_999)
       ) {
-        throw new TypeError(
+        throw new ContractValidationError(
           "Hosted runtime group tool set_chat_avatar providerErrorCode must be a four-digit integer.",
         );
       }
@@ -4023,7 +4044,7 @@ function parseHostedRuntimeGroupChatAvatarResponse(
         providerErrorCode !== undefined &&
         expectedProviderErrorMessage === null
       ) {
-        throw new TypeError(
+        throw new ContractValidationError(
           "Hosted runtime group tool set_chat_avatar providerErrorCode must be allowlisted.",
         );
       }
@@ -4035,7 +4056,7 @@ function parseHostedRuntimeGroupChatAvatarResponse(
         unavailableReason !== "provider_unavailable" &&
         providerErrorCode !== undefined
       ) {
-        throw new TypeError(
+        throw new ContractValidationError(
           "Hosted runtime group tool set_chat_avatar provider diagnostics require provider_unavailable.",
         );
       }
@@ -4174,7 +4195,7 @@ function parseHostedRuntimeUsageReferralSnapshot(
     `${label} activeMissions`,
   );
   if (activeMissionValues.length > HOSTED_USAGE_REFERRAL_POLICY_CODES.length) {
-    throw new TypeError(`${label} activeMissions has too many entries.`);
+    throw new ContractValidationError(`${label} activeMissions has too many entries.`);
   }
   const activePolicies = new Set<HostedUsageReferralPolicyCode>();
   const activeMissions = activeMissionValues.map((value, index) => {
@@ -4183,7 +4204,7 @@ function parseHostedRuntimeUsageReferralSnapshot(
       `${label} activeMissions[${index}]`,
     );
     if (activePolicies.has(mission.policyCode)) {
-      throw new TypeError(`${label} activeMissions must have unique policies.`);
+      throw new ContractValidationError(`${label} activeMissions must have unique policies.`);
     }
     activePolicies.add(mission.policyCode);
     return mission;
@@ -4196,7 +4217,7 @@ function parseHostedRuntimeUsageReferralSnapshot(
   if (
     availablePolicyValues.length > HOSTED_USAGE_REFERRAL_POLICY_CODES.length
   ) {
-    throw new TypeError(`${label} availablePolicies has too many entries.`);
+    throw new ContractValidationError(`${label} availablePolicies has too many entries.`);
   }
   const seenPolicies = new Set<HostedUsageReferralPolicyCode>();
   const availablePolicies = availablePolicyValues.map((value, index) => {
@@ -4212,10 +4233,10 @@ function parseHostedRuntimeUsageReferralSnapshot(
       `${policyLabel} code`,
     );
     if (seenPolicies.has(code)) {
-      throw new TypeError(`${label} availablePolicies must be unique.`);
+      throw new ContractValidationError(`${label} availablePolicies must be unique.`);
     }
     if (activePolicies.has(code)) {
-      throw new TypeError(
+      throw new ContractValidationError(
         `${label} policy cannot be both active and available.`,
       );
     }
@@ -4264,11 +4285,11 @@ function parseHostedRuntimeUsageReferralMissionSnapshot(
     `${label} destinationKind`,
   );
   if (destinationKind !== "group" && destinationKind !== "personal") {
-    throw new TypeError(`${label} destinationKind is invalid.`);
+    throw new ContractValidationError(`${label} destinationKind is invalid.`);
   }
   const state = requireString(mission.state, `${label} state`);
   if (state !== "armed" && state !== "target_bound") {
-    throw new TypeError(`${label} state is invalid.`);
+    throw new ContractValidationError(`${label} state is invalid.`);
   }
   const expiresAt = requireString(mission.expiresAt, `${label} expiresAt`);
   const expiresAtDate = new Date(expiresAt);
@@ -4276,7 +4297,7 @@ function parseHostedRuntimeUsageReferralMissionSnapshot(
     !Number.isFinite(expiresAtDate.getTime()) ||
     expiresAtDate.toISOString() !== expiresAt
   ) {
-    throw new TypeError(`${label} expiresAt must be a canonical timestamp.`);
+    throw new ContractValidationError(`${label} expiresAt must be a canonical timestamp.`);
   }
 
   return {
@@ -4351,22 +4372,22 @@ export function parseHostedRuntimeGroupEmailEffectRequest(
         "Hosted runtime group email effect text",
       ) ?? null;
     if (subject.trim().length === 0) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "Hosted runtime group email effect subject must not be blank.",
       );
     }
     if (subject.length > HOSTED_RUNTIME_GROUP_EMAIL_SUBJECT_MAX_LENGTH) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "Hosted runtime group email effect subject is too long.",
       );
     }
     if (html.trim().length === 0) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "Hosted runtime group email effect html must not be blank.",
       );
     }
     if (html.length > HOSTED_RUNTIME_GROUP_EMAIL_HTML_MAX_LENGTH) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "Hosted runtime group email effect html is too long.",
       );
     }
@@ -4374,7 +4395,7 @@ export function parseHostedRuntimeGroupEmailEffectRequest(
       text !== null &&
       text.length > HOSTED_RUNTIME_GROUP_EMAIL_TEXT_MAX_LENGTH
     ) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "Hosted runtime group email effect text is too long.",
       );
     }
@@ -4386,7 +4407,7 @@ export function parseHostedRuntimeGroupEmailEffectRequest(
     };
   }
 
-  throw new TypeError(
+  throw new ContractValidationError(
     "Hosted runtime group email effect action is not supported.",
   );
 }
@@ -4494,7 +4515,7 @@ export function parseHostedRuntimeGroupEmailEffectResponse(
         "Hosted runtime group email effect participantCount",
       );
       if (!Number.isInteger(participantCount) || participantCount < 0) {
-        throw new TypeError(
+        throw new ContractValidationError(
           "Hosted runtime group email effect participantCount must be a non-negative integer.",
         );
       }
@@ -4504,7 +4525,7 @@ export function parseHostedRuntimeGroupEmailEffectResponse(
       );
       if (status === "no_recipients") {
         if (participantCount !== 0) {
-          throw new TypeError(
+          throw new ContractValidationError(
             "Hosted runtime group email effect no_recipients participantCount must be 0.",
           );
         }
@@ -4543,7 +4564,7 @@ export function parseHostedRuntimeGroupEmailEffectResponse(
         "Hosted runtime group email effect participantCount",
       );
       if (!Number.isInteger(participantCount) || participantCount < 0) {
-        throw new TypeError(
+        throw new ContractValidationError(
           "Hosted runtime group email effect participantCount must be a non-negative integer.",
         );
       }
@@ -4560,12 +4581,12 @@ export function parseHostedRuntimeGroupEmailEffectResponse(
         "Hosted runtime group email effect failedRecipientCount",
       );
       if (!Number.isInteger(sentRecipientCount) || sentRecipientCount < 0) {
-        throw new TypeError(
+        throw new ContractValidationError(
           "Hosted runtime group email effect sentRecipientCount must be a non-negative integer.",
         );
       }
       if (!Number.isInteger(failedRecipientCount) || failedRecipientCount < 0) {
-        throw new TypeError(
+        throw new ContractValidationError(
           "Hosted runtime group email effect failedRecipientCount must be a non-negative integer.",
         );
       }
@@ -4599,7 +4620,7 @@ export function parseHostedRuntimeGroupEmailEffectResponse(
     }
   }
 
-  throw new TypeError(
+  throw new ContractValidationError(
     "Hosted runtime group email effect response action/status is not supported.",
   );
 }
@@ -4608,7 +4629,7 @@ function requireHostedRuntimeGroupEmailAuthorizationProof(
   value: unknown,
 ): string {
   if (!isHostedRuntimeGroupEmailAuthorizationProof(value)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runtime group email effect authorizationProof must be a SHA-256 hex digest.",
     );
   }
@@ -4621,7 +4642,7 @@ function parseHostedRuntimeGroupEmailParticipants(
 ): HostedRuntimeGroupEmailParticipantSummary[] {
   const entries = requireArray(value, label);
   if (entries.length > HOSTED_RUNTIME_GROUP_EMAIL_PARTICIPANTS_MAX) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} must contain at most ${HOSTED_RUNTIME_GROUP_EMAIL_PARTICIPANTS_MAX} entries.`,
     );
   }
@@ -4652,7 +4673,7 @@ function parseHostedRuntimeGroupEmailAuthorizedShares(
     entries.length >
     HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} must contain at most ${HOSTED_RUNTIME_GROUP_EMAIL_AUTHORIZED_SHARES_PER_PARTICIPANT_MAX} entries.`,
     );
   }
@@ -4687,7 +4708,7 @@ function parseHostedRuntimeGroupChatParticipants(
   const label = "Hosted runtime group tool read_chat_participants participants";
   const entries = requireArray(value, label);
   if (entries.length > HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} must contain at most ${HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX} entries.`,
     );
   }
@@ -4724,7 +4745,7 @@ function parseHostedRuntimeGroupMembershipSummaries(
   const label = "Hosted runtime group tool list_memberships memberships";
   const entries = requireArray(value, label);
   if (entries.length > HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} must contain at most ${HOSTED_RUNTIME_GROUP_MEMBERSHIPS_MAX} entries.`,
     );
   }
@@ -4754,7 +4775,7 @@ function parseHostedRuntimeGroupMembershipSummaries(
         HOSTED_RUNTIME_GROUP_SUMMARY_PROJECTION_SCOPES,
       );
     if (!grantedVaultShareProjectionScopes) {
-      throw new TypeError(
+      throw new ContractValidationError(
         `${label} entry grantedVaultShareProjectionScopes must be an array.`,
       );
     }
@@ -4765,7 +4786,7 @@ function parseHostedRuntimeGroupMembershipSummaries(
         HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES,
       );
     if (!requestedVaultShareProjectionScopes) {
-      throw new TypeError(
+      throw new ContractValidationError(
         `${label} entry requestedVaultShareProjectionScopes must be an array.`,
       );
     }
@@ -4774,7 +4795,7 @@ function parseHostedRuntimeGroupMembershipSummaries(
       `${label} entry memberCount`,
     );
     if (!Number.isInteger(memberCount) || memberCount < 0) {
-      throw new TypeError(
+      throw new ContractValidationError(
         `${label} entry memberCount must be a non-negative integer.`,
       );
     }
@@ -4783,7 +4804,7 @@ function parseHostedRuntimeGroupMembershipSummaries(
       `${label} entry membershipId`,
     ).trim();
     if (!membershipId) {
-      throw new TypeError(`${label} entry membershipId must not be blank.`);
+      throw new ContractValidationError(`${label} entry membershipId must not be blank.`);
     }
     return {
       ...(record.availability === undefined
@@ -4847,11 +4868,11 @@ function parseHostedRuntimeGroupMembershipAvailability(
       `${label} unavailableReason`,
     ).trim();
     if (!unavailableReason) {
-      throw new TypeError(`${label} unavailableReason must not be blank.`);
+      throw new ContractValidationError(`${label} unavailableReason must not be blank.`);
     }
     return { status, unavailableReason };
   }
-  throw new TypeError(`${label} status is invalid.`);
+  throw new ContractValidationError(`${label} status is invalid.`);
 }
 
 function parseHostedRuntimeGroupProjectionKindArray<
@@ -4860,14 +4881,14 @@ function parseHostedRuntimeGroupProjectionKindArray<
   if (value === undefined || value === null) return null;
   const requested = requireArray(value, label);
   if (requested.length > allowedKinds.length) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} must contain at most ${allowedKinds.length} entries.`,
     );
   }
   const seen = new Set<K>();
   for (const entry of requested) {
     if (!isAllowedProjectionKind(allowedKinds, entry)) {
-      throw new TypeError(`${label} contains an unsupported projection kind.`);
+      throw new ContractValidationError(`${label} contains an unsupported projection kind.`);
     }
     seen.add(entry);
   }
@@ -4896,7 +4917,7 @@ function parseHostedRuntimeGroupSharedRequestedProjectionScopes(
 ): HostedVaultShareSelectableProjectionScope[] {
   const requested = requireArray(value, label);
   if (requested.length === 0 || requested.length > maxEntries) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} must contain between 1 and ${maxEntries} entries.`,
     );
   }
@@ -4911,7 +4932,7 @@ function parseHostedRuntimeGroupSharedRequestedProjectionScopes(
     const projectionScopeKey =
       buildHostedVaultShareProjectionScopeKey(projectionScope);
     if (seen.has(projectionScopeKey)) {
-      throw new TypeError(
+      throw new ContractValidationError(
         `${label} must not contain duplicate projection scopes.`,
       );
     }
@@ -4928,7 +4949,7 @@ function parseHostedRuntimeGroupSharedSelectableProjectionScope(
   try {
     parsed = parseHostedVaultShareProjectionScope(value, label);
   } catch (error) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} must be a supported selectable projection scope.`,
       {
         cause: error,
@@ -4941,7 +4962,7 @@ function parseHostedRuntimeGroupSharedSelectableProjectionScope(
       projectionScopeKey,
     );
   if (!canonical) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} must be a supported selectable projection scope.`,
     );
   }
@@ -4980,7 +5001,7 @@ function parseHostedRuntimeGroupProjectionScopeArray<
   if (value === undefined || value === null) return null;
   const requested = requireArray(value, label);
   if (requested.length > allowedScopes.length) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} must contain at most ${allowedScopes.length} entries.`,
     );
   }
@@ -4996,14 +5017,14 @@ function parseHostedRuntimeGroupProjectionScopeArray<
     try {
       scope = parseHostedVaultShareProjectionScope(entry, `${label} entry`);
     } catch (error) {
-      throw new TypeError(
+      throw new ContractValidationError(
         `${label} contains an unsupported projection scope.`,
         { cause: error },
       );
     }
     const scopeKey = buildHostedVaultShareProjectionScopeKey(scope);
     if (!allowedScopeByKey.has(scopeKey)) {
-      throw new TypeError(`${label} contains an unsupported projection scope.`);
+      throw new ContractValidationError(`${label} contains an unsupported projection scope.`);
     }
     seen.add(scopeKey);
   }
@@ -5054,7 +5075,7 @@ function parseHostedRuntimeGroupParticipantRoster(
     };
   }
   if (status !== "available") {
-    throw new TypeError(`${label} status is invalid.`);
+    throw new ContractValidationError(`${label} status is invalid.`);
   }
   assertAllowedObjectKeys(
     record,
@@ -5070,7 +5091,7 @@ function parseHostedRuntimeGroupParticipantRoster(
     participantCount < 1 ||
     participantCount > HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} participantCount must be an integer between 1 and ${HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX}.`,
     );
   }
@@ -5082,7 +5103,7 @@ function parseHostedRuntimeGroupParticipantRoster(
     participantValues.length > participantCount ||
     participantValues.length > HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} participantLabels cannot exceed participantCount or ${HOSTED_RUNTIME_GROUP_CHAT_PARTICIPANTS_MAX} entries.`,
     );
   }
@@ -5101,7 +5122,7 @@ function parseHostedRuntimeGroupParticipantRoster(
         "phoneHint",
       ].filter((key) => participantLabel[key] !== undefined);
       if (presentKeys.length !== 1) {
-        throw new TypeError(
+        throw new ContractValidationError(
           `${entryLabel} must contain exactly one safe label.`,
         );
       }
@@ -5119,13 +5140,13 @@ function parseHostedRuntimeGroupParticipantRoster(
         (/\b[^\s@]+@[^\s@]+\.[^\s@]+\b/u.test(displayName) ||
           /(?:^|\D)\+?\d[\d\s().-]{6,}\d(?:\D|$)/u.test(displayName))
       ) {
-        throw new TypeError(
+        throw new ContractValidationError(
           `${entryLabel} displayName must not contain a full phone number or email address.`,
         );
       }
       const emailParticipant = participantLabel.emailParticipant;
       if (emailParticipant !== undefined && emailParticipant !== true) {
-        throw new TypeError(
+        throw new ContractValidationError(
           `${entryLabel} emailParticipant must be true when present.`,
         );
       }
@@ -5146,12 +5167,12 @@ function parseHostedRuntimeGroupParticipantRoster(
           areaCode !== undefined &&
           (typeof areaCode !== "string" || !/^\d{3}$/u.test(areaCode))
         ) {
-          throw new TypeError(
+          throw new ContractValidationError(
             `${entryLabel} phoneHint areaCode must contain three digits.`,
           );
         }
         if (typeof lastFour !== "string" || !/^\d{4}$/u.test(lastFour)) {
-          throw new TypeError(
+          throw new ContractValidationError(
             `${entryLabel} phoneHint lastFour must contain four digits.`,
           );
         }
@@ -5167,7 +5188,7 @@ function parseHostedRuntimeGroupParticipantRoster(
         return { emailParticipant };
       }
       if (!phoneHint) {
-        throw new TypeError(`${entryLabel} is invalid.`);
+        throw new ContractValidationError(`${entryLabel} is invalid.`);
       }
       return { phoneHint };
     },
@@ -5316,7 +5337,7 @@ function parseHostedRuntimeGroupDisclosureGrantEntries(
 ): unknown[] {
   const entries = requireArray(value, label);
   if (entries.length > HOSTED_RUNTIME_GROUP_DISCLOSURE_GRANTS_MAX) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} must contain at most ${HOSTED_RUNTIME_GROUP_DISCLOSURE_GRANTS_MAX} entries.`,
     );
   }
@@ -5401,7 +5422,7 @@ function parseHostedRuntimeGroupMemberSummaries(
   }
   const entries = requireArray(value, "Hosted runtime group summary members");
   if (entries.length > HOSTED_RUNTIME_GROUP_MEMBER_SUMMARY_MAX_ENTRIES) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runtime group summary members has too many entries.",
     );
   }
@@ -5501,7 +5522,7 @@ export function parseHostedRuntimeFamilyPlanToolRequest(
     };
   }
   if (action !== "create_invite") {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runtime family plan tool action is not supported.",
     );
   }
@@ -5539,7 +5560,7 @@ export function parseHostedRuntimeIMessageContactToolRequest(
     "Hosted runtime iMessage contact tool assistantInputId",
   );
   if (!/^ain_[0-9a-f]{32}$/u.test(assistantInputId)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runtime iMessage contact tool assistantInputId is invalid.",
     );
   }
@@ -5567,7 +5588,7 @@ export function parseHostedRuntimeIMessageContactToolResponse(
       record.phoneNumber !== null ||
       record.verifiedSenderPhoneHint !== null
     ) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "Hosted runtime iMessage contact response without a number requires null phoneNumber and verifiedSenderPhoneHint.",
       );
     }
@@ -5578,7 +5599,7 @@ export function parseHostedRuntimeIMessageContactToolResponse(
     };
   }
   if (status !== "assigned" && status !== "existing") {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runtime iMessage contact tool response status is invalid.",
     );
   }
@@ -5587,7 +5608,7 @@ export function parseHostedRuntimeIMessageContactToolResponse(
     "Hosted runtime iMessage contact tool response phoneNumber",
   );
   if (!/^\+[1-9][0-9]{7,14}$/u.test(phoneNumber)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runtime iMessage contact tool response phoneNumber is invalid.",
     );
   }
@@ -5596,7 +5617,7 @@ export function parseHostedRuntimeIMessageContactToolResponse(
     "Hosted runtime iMessage contact tool response verifiedSenderPhoneHint",
   );
   if (!/^\*{3} [0-9]{4}$/u.test(verifiedSenderPhoneHint)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runtime iMessage contact tool response verifiedSenderPhoneHint is invalid.",
     );
   }
@@ -5642,7 +5663,7 @@ function parseHostedRuntimeFamilyPlanInviteRequest(
     "Hosted runtime family plan invite targetTelegramUsername",
   );
   if (!targetPhoneNumber && !targetTelegramUsername && !targetEmail) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runtime family plan invite requires a phone number, Telegram username, or email.",
     );
   }
@@ -5720,7 +5741,7 @@ export function parseHostedRuntimeFamilyPlanToolResponse(
       result: parseHostedRuntimeFamilyPlanStartCheckoutResponse(record.result),
     };
   }
-  throw new TypeError(
+  throw new ContractValidationError(
     "Hosted runtime family plan tool response action is not supported.",
   );
 }
@@ -5737,7 +5758,7 @@ function parseHostedRuntimeLinqExternalThreadRouteAuthority(
   );
   const channel = requireString(record.channel, `${label} channel`);
   if (channel !== "linq") {
-    throw new TypeError(`${label} channel must be linq.`);
+    throw new ContractValidationError(`${label} channel must be linq.`);
   }
 
   // Phase 1 deploy skew: readers tolerate missing accountLookupKey while
@@ -5767,7 +5788,7 @@ function parseHostedProductFeedbackKind(
   if (
     !HOSTED_PRODUCT_FEEDBACK_KINDS.includes(kind as HostedProductFeedbackKind)
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runtime product feedback kind is not supported.",
     );
   }
@@ -5782,7 +5803,7 @@ function parseHostedProductFeedbackSummary(value: unknown): string {
     summary.length === 0 ||
     summary.length > HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Hosted runtime product feedback summary must be between 1 and ${HOSTED_PRODUCT_FEEDBACK_SUMMARY_MAX_LENGTH} characters.`,
     );
   }
@@ -5803,12 +5824,12 @@ function parseHostedProductFeedbackSlugArray(
       !/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(slug) ||
       slug.length > options.maxLength
     ) {
-      throw new TypeError(`${options.itemLabel} must be a lowercase slug.`);
+      throw new ContractValidationError(`${options.itemLabel} must be a lowercase slug.`);
     }
     return slug;
   });
   if (entries.length > 7 || new Set(entries).size !== entries.length) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${options.label} must contain at most seven unique items.`,
     );
   }
@@ -5903,7 +5924,7 @@ function parseHostedRuntimeFamilyPlanActiveTrialConversion(
     monthlyAmountUsdCents !==
     includedPulseSeats * perSeatMonthlyAmountUsdCents
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runtime family plan active trial conversion monthly amount must match its included seats.",
     );
   }
@@ -5945,7 +5966,7 @@ function parseHostedRuntimeFamilyPlanStartCheckoutResponse(
   // inert null keys when checkout carries no invite; accept only that legacy
   // shape until the old build has drained.
   if (record.preparedInvite !== undefined && record.preparedInvite !== null) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runtime family plan start_checkout preparedInvite must be null.",
     );
   }
@@ -5953,7 +5974,7 @@ function parseHostedRuntimeFamilyPlanStartCheckoutResponse(
     record.preparedInviteReplyText !== undefined &&
     record.preparedInviteReplyText !== null
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runtime family plan start_checkout preparedInviteReplyText must be null.",
     );
   }
@@ -5962,7 +5983,7 @@ function parseHostedRuntimeFamilyPlanStartCheckoutResponse(
     "Hosted runtime family plan start_checkout unavailableReason",
   );
   if (unavailableReason !== null && unavailableReason !== "already_sponsored") {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runtime family plan start_checkout unavailableReason is not supported.",
     );
   }
@@ -6113,7 +6134,7 @@ function parseHostedRuntimeFamilyPlanCode(
     return planCode as HostedFamilyPlanCode;
   }
 
-  throw new TypeError("Hosted runtime Family plan code is not supported.");
+  throw new ContractValidationError("Hosted runtime Family plan code is not supported.");
 }
 
 function parseHostedRuntimeFamilyPlanMember(value: unknown) {
@@ -6202,7 +6223,17 @@ export function parseHostedRuntimeIssueExportRequest(
     issues: requireArray(
       record.issues,
       "Hosted runtime issue export request issues",
-    ).map((entry) => parseAssistantRuntimeIssueRecord(entry)),
+    ).map((entry) => {
+      const issue = requireObject(entry, "Hosted runtime issue");
+      const pending: { value: unknown; depth: number }[] = [{ value: issue.details, depth: 0 }];
+      while (pending.length > 0) {
+        const item = pending.pop()!;
+        if (item.value === null || typeof item.value !== "object") continue;
+        if (item.depth > 128) throw new ContractValidationError("Runtime issue details exceed the maximum nesting depth.");
+        for (const child of Object.values(item.value)) pending.push({ value: child, depth: item.depth + 1 });
+      }
+      return parseAssistantRuntimeIssueRecord(issue);
+    }),
   };
 }
 
@@ -6244,7 +6275,7 @@ export function parseHostedRuntimeLatencyTraceEvent(
       const mailboxItemIds = requireArray(record.mailboxItemIds, "Hosted runtime delivery mailboxItemIds")
         .map((id) => requireString(id, "Hosted runtime delivery mailbox item id"));
       if (mailboxItemIds.length === 0 || mailboxItemIds.length > HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS) {
-        throw new TypeError("Hosted runtime delivery mailbox item count is invalid.");
+        throw new ContractValidationError("Hosted runtime delivery mailbox item count is invalid.");
       }
       return {
         type, mailboxItemIds, source: parseHostedIngressLatencySource(record.source),
@@ -6262,7 +6293,7 @@ export function parseHostedRuntimeLatencyTraceEvent(
     case "runtime_milestone":
       return parseHostedRuntimeLatencyTraceMilestoneEvent(record);
     default:
-      throw new TypeError(
+      throw new ContractValidationError(
         "Hosted runtime latency trace event type is not supported.",
       );
   }
@@ -6290,12 +6321,12 @@ export function parseHostedRuntimeLatencyTraceBatchRequest(
   assertAllowedObjectKeys(record, new Set(["events"]), "Hosted runtime latency batch request");
   const events = requireArray(record.events, "Hosted runtime latency batch events");
   if (events.length === 0 || events.length > HOSTED_RUNTIME_LATENCY_TRACE_BATCH_MAX_EVENTS) {
-    throw new TypeError("Hosted runtime latency batch event count is invalid.");
+    throw new ContractValidationError("Hosted runtime latency batch event count is invalid.");
   }
   return { events: events.map((value) => {
     const event = parseHostedRuntimeLatencyTraceEvent(value);
     if (event.type !== "assistant_milestone" && event.type !== "runtime_milestone") {
-      throw new TypeError("Hosted runtime latency batches require milestone events.");
+      throw new ContractValidationError("Hosted runtime latency batches require milestone events.");
     }
     return event;
   }) };
@@ -6307,7 +6338,7 @@ export function parseHostedRuntimeLatencyTraceBatchResponse(
   const record = requireObject(value, "Hosted runtime latency batch response");
   const results = requireArray(record.results, "Hosted runtime latency batch results");
   if (results.length === 0 || results.length > HOSTED_RUNTIME_LATENCY_TRACE_BATCH_MAX_EVENTS) {
-    throw new TypeError("Hosted runtime latency batch result count is invalid.");
+    throw new ContractValidationError("Hosted runtime latency batch result count is invalid.");
   }
   return { results: results.map((result) => result === null
     ? null : parseHostedRuntimeLatencyTraceResponse(result)) };
@@ -7070,7 +7101,7 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       inspectHostedRuntimeMailboxToAssistantTimingSubdivision(parsedPreProvider)
         .kind === "invalid"
     ) {
-      throw new TypeError(
+      throw new ContractValidationError(
         `${preProviderLabel} mailbox-to-assistant timing subdivision must be absent or contain all four leaves summing to mailboxImportDoneToAssistantPhaseMs`,
       );
     }
@@ -7078,7 +7109,7 @@ function parseHostedRuntimeLatencyPhaseBreakdown(
       inspectHostedRuntimeAutomationLaneTimingSubdivision(parsedPreProvider)
         .kind === "invalid"
     ) {
-      throw new TypeError(
+      throw new ContractValidationError(
         `${preProviderLabel} automation lane timing subdivision must be absent or contain all ten leaves summing to automationLaneToAssistantServiceMs`,
       );
     }
@@ -7254,7 +7285,7 @@ function requireOptionalDirectEnsureOrchestrationAttemptId<
     return {};
   }
   if (!isHostedRuntimeDirectEnsureOrchestrationAttemptId(value)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label}.${key} must be a direct-wake orchestration attempt id.`,
     );
   }
@@ -7277,7 +7308,7 @@ function requireOptionalDirectEnsureOutcome(
       record.directEnsureAction !== undefined ||
       record.directEnsureRuntimeAttemptId !== undefined
     ) {
-      throw new TypeError(
+      throw new ContractValidationError(
         `${label} accepted direct ensure metadata requires directEnsureResultKind.`,
       );
     }
@@ -7294,7 +7325,7 @@ function requireOptionalDirectEnsureOutcome(
       record.directEnsureAction !== undefined ||
       record.directEnsureRuntimeAttemptId !== undefined
     ) {
-      throw new TypeError(
+      throw new ContractValidationError(
         `${label} accepted direct ensure metadata is only allowed for runtime_processing_accepted.`,
       );
     }
@@ -7314,7 +7345,7 @@ function requireOptionalDirectEnsureOutcome(
     directEnsureRuntimeAttemptId.length > 192 ||
     !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(directEnsureRuntimeAttemptId)
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label}.directEnsureRuntimeAttemptId must be a bounded opaque identifier.`,
     );
   }
@@ -7388,7 +7419,7 @@ function parseHostedRuntimeLatencyTraceAssistantMilestoneEvent(
     checkpointPublicationExpectedBy !== null &&
     milestone !== "terminal_non_reply_committed" && milestone !== "terminal_reply_committed"
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runtime latency trace checkpointPublicationExpectedBy requires a terminal completion milestone.",
     );
   }
@@ -7427,7 +7458,7 @@ function parseHostedRuntimeLatencyTraceAssistantInputIds(
   );
 
   if (assistantInputIds.length === 0) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runtime latency trace assistantInputIds must not be empty.",
     );
   }
@@ -7435,7 +7466,7 @@ function parseHostedRuntimeLatencyTraceAssistantInputIds(
     assistantInputIds.length >
     HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Hosted runtime latency trace assistantInputIds must contain at most ${HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS} ids.`,
     );
   }
@@ -7493,7 +7524,7 @@ export function parseHostedWorkspaceState(
     progressProjectionKeyCount !== 0 &&
     progressProjectionKeyCount !== progressProjectionKeys.length
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted workspace state system progress projection must include generation, wake, and reason together.",
     );
   }
@@ -7502,7 +7533,7 @@ export function parseHostedWorkspaceState(
     (record.nextDefaultProcessingWakeAt !== null ||
       record.nextDefaultProcessingWakeReason !== null)
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted workspace state disabled system progress projection must be entirely null.",
     );
   }
@@ -7678,7 +7709,7 @@ export function parseHostedWorkspaceCheckpointRequest(
     progressProjectionKeyCount !== 0 &&
     progressProjectionKeyCount !== progressProjectionKeys.length
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted workspace checkpoint request system progress projection must include generation, wake, and reason together.",
     );
   }
@@ -7796,7 +7827,7 @@ function parseHostedWorkspaceCheckpointHandledConversationMailboxItemIds(
       `Hosted workspace checkpoint handledConversationMailboxItemIds[${index}]`,
     );
     if (!/^[A-Za-z0-9][A-Za-z0-9_.:+-]{0,191}$/u.test(itemId)) {
-      throw new TypeError(
+      throw new ContractValidationError(
         `Hosted workspace checkpoint handledConversationMailboxItemIds[${index}] must be a mailbox item id.`,
       );
     }
@@ -7806,12 +7837,12 @@ function parseHostedWorkspaceCheckpointHandledConversationMailboxItemIds(
     itemIds.length >
     HOSTED_WORKSPACE_CHECKPOINT_HANDLED_CONVERSATION_ITEM_MAX_IDS
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Hosted workspace checkpoint handledConversationMailboxItemIds must contain at most ${HOSTED_WORKSPACE_CHECKPOINT_HANDLED_CONVERSATION_ITEM_MAX_IDS} ids.`,
     );
   }
   if (new Set(itemIds).size !== itemIds.length) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted workspace checkpoint handledConversationMailboxItemIds must not contain duplicates.",
     );
   }
@@ -7875,7 +7906,7 @@ export function parseHostedBrowserVaultReplicaPublishRequest(
   );
 
   if (!replicaRef) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted browser-vault replica publish request replicaRef must not be null.",
     );
   }
@@ -7910,7 +7941,7 @@ export function parseHostedRunnerNudgeResult(
 ): HostedRunnerNudgeResult {
   const record = requireObject(value, "Hosted runner nudge result");
   if ("leaseGeneration" in record) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runner nudge result leaseGeneration has been removed.",
     );
   }
@@ -7976,7 +8007,7 @@ function parseHostedRunnerNudgeResultKindValue(
   ) {
     return value;
   }
-  throw new TypeError("Hosted runner nudge result kind is invalid.");
+  throw new ContractValidationError("Hosted runner nudge result kind is invalid.");
 }
 
 export function parseHostedRunnerStatusResponse(
@@ -7994,12 +8025,12 @@ export function parseHostedRunnerStatusResponse(
     ),
   );
   if ("leaseGeneration" in record) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runner status response leaseGeneration has been removed.",
     );
   }
   if ("lastRunAt" in record) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runner status response lastRunAt has been renamed to lastInvocationAt.",
     );
   }
@@ -8092,12 +8123,12 @@ export function parseHostedRuntimeWebStatusResponse(
     ),
   );
   if ("leaseGeneration" in record) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runtime web status response leaseGeneration has been removed.",
     );
   }
   if ("lastRunAt" in record) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runtime web status response lastRunAt has been renamed to lastInvocationAt.",
     );
   }
@@ -8171,7 +8202,7 @@ export function parseHostedWorkspaceInvocationRequest(
   if (record.voiceCallId !== undefined
     && ((record.processingMode != null && record.processingMode !== "default")
       || record.assistantExecutionBlocked === true)) {
-    throw new TypeError("Voice reservation requires default processing mode.");
+    throw new ContractValidationError("Voice reservation requires default processing mode.");
   }
 
   for (const field of HOSTED_WORKSPACE_INVOCATION_REMOVED_FIELDS) {
@@ -8300,7 +8331,7 @@ export function parseHostedWorkspaceInvocationResult(
     record.immediateRecheckRequested !== undefined &&
     record.immediateRecheckRequested !== true
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted workspace invocation result immediateRecheckRequested must be true when present.",
     );
   }
@@ -8361,7 +8392,7 @@ function parseHostedWorkspaceInvocationBudget(
     typeof maxMailboxItems === "number" &&
     maxMailboxItems > HOSTED_WORKSPACE_INVOCATION_MAX_MAILBOX_ITEMS
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label}.maxMailboxItems must not exceed ${HOSTED_WORKSPACE_INVOCATION_MAX_MAILBOX_ITEMS}.`,
     );
   }
@@ -8402,7 +8433,7 @@ function rejectHostedWorkspaceInvocationRemovedField(
   label: string,
 ): void {
   if (record[field] !== undefined) {
-    throw new TypeError(`${label}.${field} is no longer supported.`);
+    throw new ContractValidationError(`${label}.${field} is no longer supported.`);
   }
 }
 
@@ -8473,11 +8504,11 @@ function assertPayloadOrUnavailable(
   label: string,
 ): void {
   if (payload === null && unavailable === null) {
-    throw new TypeError(`${label} requires payload or unavailable.`);
+    throw new ContractValidationError(`${label} requires payload or unavailable.`);
   }
 
   if (payload !== null && unavailable !== null) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} must not include both payload and unavailable.`,
     );
   }
@@ -8504,7 +8535,7 @@ function parseHostedRuntimeRecordExportResponse(
   );
 
   if (recorded !== ids.length) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Hosted runtime record export response recorded must equal ${idsFieldName}.length.`,
     );
   }
@@ -8529,7 +8560,7 @@ function parseNullableAllowedString<T extends string>(
 
 function requireExactTrue(value: unknown, label: string): true {
   if (requireBoolean(value, label) !== true) {
-    throw new TypeError(`${label} must be true.`);
+    throw new ContractValidationError(`${label} must be true.`);
   }
   return true;
 }
@@ -8541,7 +8572,7 @@ function requireExactInteger(
 ): number {
   const parsed = requireNonNegativeInteger(value, label);
   if (parsed !== expected) {
-    throw new TypeError(`${label} must be ${expected}.`);
+    throw new ContractValidationError(`${label} must be ${expected}.`);
   }
   return parsed;
 }
@@ -8552,7 +8583,7 @@ function requireCanonicalRuntimeLeaseGeneration(
 ): string {
   const text = requireString(value, label);
   if (text.length > 20 || !/^(?:0|[1-9]\d*)$/u.test(text)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} must be a canonical runtime lease generation.`,
     );
   }
@@ -8575,7 +8606,7 @@ function parseHostedGroupSharedFreshnessResult(value: unknown): { checkedAt: str
   assertAllowedObjectKeys(record, new Set(["checkedAt", "refreshStatus"]), "Shared freshness response");
   const refreshStatus = record.refreshStatus;
   if (refreshStatus !== "requested" && refreshStatus !== "not_needed" && refreshStatus !== "unavailable") {
-    throw new TypeError("Shared freshness refreshStatus is invalid.");
+    throw new ContractValidationError("Shared freshness refreshStatus is invalid.");
   }
   return {
     checkedAt: parseHostedRuntimeGroupCanonicalTimestamp(record.checkedAt, "Shared freshness checkedAt"),

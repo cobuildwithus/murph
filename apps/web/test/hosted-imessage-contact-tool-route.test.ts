@@ -1,4 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { ContractValidationError } from "@murphai/contracts/validation-error";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
   handleTool: vi.fn(),
@@ -61,6 +63,20 @@ describe("hosted iMessage contact tool route", () => {
       memberId: "member_bound",
       request: body,
     });
+  });
+
+  it.each([false, true])("preserves domain refusals without reclassifying dependency failures: %s", async dependencyFails => {
+    mocks.handleTool.mockRejectedValueOnce(dependencyFails
+      ? new ContractValidationError("Synthetic stored record failure.")
+      : hostedOnboardingError({ code: "INVALID_REQUEST", httpStatus: 400, message: "Invalid request." }));
+    const response = await route.POST(new Request("https://example.test/api/internal/hosted-execution/imessage-contact/tool", {
+      method: "POST", body: JSON.stringify({ assistantInputId: ASSISTANT_INPUT_ID }),
+      headers: { "content-type": "application/json" },
+    }));
+    expect(response.status).toBe(dependencyFails ? 500 : 400);
+    expect(await response.json()).toEqual({ error: dependencyFails
+      ? { code: "INTERNAL_ERROR", message: "Internal error." }
+      : { code: "INVALID_REQUEST", message: "Invalid request.", retryable: false } });
   });
 
   it.each([

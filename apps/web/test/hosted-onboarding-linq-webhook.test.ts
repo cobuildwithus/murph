@@ -1,9 +1,45 @@
-import { expect, it } from "vitest";
+import * as ingress from "@murphai/messaging-ingress/linq-webhook";
+import { afterEach, expect, it, vi } from "vitest";
 
 import {
   requireHostedLinqMessageReceivedEvent,
+  requireHostedLinqMessageEditedEvent,
+  requireHostedLinqParticipantChangedEvent,
+  requireHostedLinqTypingIndicatorStartedEvent,
   resolveHostedLinqRecipientPhoneNumber,
 } from "@/src/lib/hosted-onboarding/linq-webhook";
+
+afterEach(() => vi.restoreAllMocks());
+
+const parsers = [
+  ["parseLinqMessageReceivedEvent", requireHostedLinqMessageReceivedEvent],
+  ["parseLinqMessageEditedEvent", requireHostedLinqMessageEditedEvent],
+  ["parseLinqParticipantChangedEvent", requireHostedLinqParticipantChangedEvent],
+  ["parseLinqTypingIndicatorStartedEvent", requireHostedLinqTypingIndicatorStartedEvent],
+] as const;
+const invalidEvent = {
+  api_version: "v3", event_id: "synthetic-event", created_at: "invalid",
+  event_type: "unsupported", data: null,
+};
+
+it.each(parsers)("keeps declared payload rejections from %s at 400", (_name, parse) => {
+  expect(() => parse(invalidEvent)).toThrow(expect.objectContaining({
+    code: "LINQ_PAYLOAD_INVALID", httpStatus: 400,
+  }));
+});
+
+it.each(parsers)("propagates implementation faults from %s", (name, parse) => {
+  const fault = new TypeError("Synthetic parser failure");
+  vi.spyOn(ingress, name).mockImplementation(() => { throw fault; });
+  expect(() => parse(invalidEvent)).toThrow(fault);
+  expect(() => parse(invalidEvent)).not.toThrow(expect.objectContaining({ httpStatus: 400 }));
+});
+
+it("maps missing nested required fields to the existing payload rejection", () => {
+  expect(() => requireHostedLinqMessageReceivedEvent({
+    ...invalidEvent, event_type: "message.received", data: { chat: {} },
+  })).toThrow(expect.objectContaining({ code: "LINQ_PAYLOAD_INVALID", httpStatus: 400 }));
+});
 
 it("prefers explicit raw recipient fields over chat owner data", () => {
   const event = requireHostedLinqMessageReceivedEvent({

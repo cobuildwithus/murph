@@ -121,6 +121,7 @@ export interface AssistantProviderTurn {
   followUpAttachmentAllowed?: boolean | null
   groupConversation?: boolean | null
   groupRoomModelMaintenanceAuthorized?: boolean | null
+  groupRoomModelInjectedDigest?: string | null
   memberMemoryMaintenanceAuthorized?: boolean | null
   onFinishWithoutReplyAccepted?: ((
     event: AssistantProviderFinishWithoutReplyAcceptedEvent
@@ -145,6 +146,7 @@ export interface AssistantProviderTurn {
   runtimeWorkspaceRoots?: readonly string[] | null
   resume?: AssistantProviderCodexResume | null
   serviceTier?: AssistantProviderServiceTier | null
+  promptCacheRetention?: '12h' | null
   turnTrigger?: AssistantTurnTrigger | null
   sessionContext?: {
     binding?: AssistantSessionBinding | null

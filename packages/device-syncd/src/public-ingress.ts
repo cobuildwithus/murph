@@ -32,11 +32,16 @@ import {
   toIsoTimestamp,
 } from "./shared.ts";
 
+import {
+  DEVICE_SYNC_APP_CONNECT_RETURN_PATHS,
+  isDeviceSyncAppConnectReturn,
+} from "./types.ts";
 import type {
   BeginConnectionResult,
   CompleteConnectionResult,
   DeviceAccountCredential,
   DeviceConnectionHandler,
+  DeviceSyncAppConnectReturn,
   DeviceSyncAccountSetupPhase,
   DeviceSyncAccount,
   DeviceSyncIngressWebhook,
@@ -574,6 +579,30 @@ export class DeviceSyncPublicIngress {
     };
   }
 
+  /**
+   * The provider's return URL is the provider's own callback path, or one of
+   * the app's fixed return bridges chosen by name. No caller-supplied URL
+   * reaches the provider. Only link flows may return to the app: their
+   * completion never replays the return URL to the provider.
+   */
+  private resolveConnectionStartCallbackUrl(
+    descriptor: PublicProviderDescriptor,
+    appReturn: DeviceSyncAppConnectReturn | null,
+  ): string {
+    if (appReturn === null) {
+      return descriptor.callbackUrl ?? "";
+    }
+    if (descriptor.connectionKind !== "external_link" || !isDeviceSyncAppConnectReturn(appReturn)) {
+      throw deviceSyncError({
+        code: "CONNECTION_APP_RETURN_NOT_SUPPORTED",
+        message: `Device sync provider ${descriptor.provider} cannot return a connection to the app.`,
+        retryable: false,
+        httpStatus: 400,
+      });
+    }
+    return joinUrl(this.publicBaseUrl, DEVICE_SYNC_APP_CONNECT_RETURN_PATHS[appReturn]);
+  }
+
   async startConnection(input: StartConnectionInput): Promise<BeginConnectionResult> {
     const provider = this.requireProvider(input.provider);
     return await this.runConnectionMutation(provider.provider, () =>
@@ -612,7 +641,7 @@ export class DeviceSyncPublicIngress {
     await this.store.deleteExpiredOAuthStates(now);
     const started = await beginProviderConnection(provider, {
       state,
-      callbackUrl: descriptor.callbackUrl ?? "",
+      callbackUrl: this.resolveConnectionStartCallbackUrl(descriptor, input.appReturn ?? null),
       publicBaseUrl: this.publicBaseUrl,
       scopes: descriptor.defaultScopes,
       now,

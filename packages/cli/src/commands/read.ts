@@ -2,10 +2,14 @@ import { Cli, z } from 'incur'
 import { requestIdFromOptions, withBaseOptions } from '@murphai/operator-config/command-helpers'
 import {
   listFilterSchema,
-  listResultSchema,
-  showResultSchema,
+  recordListResultSchema,
+  recordShowResultSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
 import type { VaultServices } from '@murphai/vault-usecases'
+import {
+  projectRecordListResult,
+  projectRecordShowResult,
+} from './record-read-projection.js'
 
 export function registerReadCommands(cli: Cli.Cli, services: VaultServices) {
   cli.command(
@@ -33,13 +37,13 @@ export function registerReadCommands(cli: Cli.Cli, services: VaultServices) {
       ],
       hint:
         'Use generic `show` with canonical read ids such as `meal_*`, `doc_*`, `evt_*`, or `journal:*`. Prefer family-specific `manifest` commands when you need import provenance rather than the canonical read-model record.',
-      output: showResultSchema,
+      output: recordShowResultSchema,
       async run({ args, options }) {
-        return services.query.show({
+        return projectRecordShowResult(await services.query.show({
           id: args.id,
           vault: options.vault,
           requestId: requestIdFromOptions(options),
-        })
+        }))
       },
     },
   )
@@ -83,9 +87,9 @@ export function registerReadCommands(cli: Cli.Cli, services: VaultServices) {
       ],
       hint:
         'Use `list` for family/kind/status/tag/date filtering, `search query` for fuzzy text recall, and `timeline` for chronology across record types.',
-      output: listResultSchema,
+      output: recordListResultSchema,
       async run({ options }) {
-        return services.query.list({
+        return projectRecordListResult(await services.query.list({
           vault: options.vault,
           requestId: requestIdFromOptions(options),
           recordType: options.recordType,
@@ -97,7 +101,7 @@ export function registerReadCommands(cli: Cli.Cli, services: VaultServices) {
           to: options.to,
           tag: options.tag,
           limit: options.limit,
-        })
+        }))
       },
     },
   )

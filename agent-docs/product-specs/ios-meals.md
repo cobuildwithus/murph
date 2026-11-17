@@ -364,14 +364,14 @@ the same selection to session creation and decoding. It never wakes or refreshes
 the runtime and adds no persisted projection.
 
 The response has exactly `timeZone`, `savedAt` (replica generation timestamp),
-`freshness`, `window: { from, through }`, `demographics`, and `numbers`. The window is 365 inclusive
+`freshness`, `window: { from, through }`, `demographics`, `heightCm`, and `numbers`. The window is 365 inclusive
 local dates ending today (all the replica keeps, `METRIC_LOOKBACK_DAYS`), so the
 app's charts can show up to a year, in the vault's canonical zone, already saved in core's
 `meals.timeZone` even for members with no meals. Legacy replicas without that zone
 return retryable 503 `NUMBERS_PROJECTION_UNAVAILABLE`; there is no UTC fallback.
 `freshness` uses the same age/generation assessment as Journal. A missing replica,
 missing legacy replica object or legacy empty session returns exactly
-`{ "numbers": null, "demographics": null, "freshness": "stale" }`. Missing requested buckets or unreadable
+`{ "numbers": null, "demographics": null, "heightCm": null, "freshness": "stale" }`. Missing requested buckets or unreadable
 saved data return the same retryable 503. A known generation-18 reference with a
 missing object or empty session also returns 503 instead of implying absence. Unknown query parameters return 400
 `NUMBERS_INVALID_REQUEST` before replica I/O.
@@ -415,7 +415,19 @@ for heart rate, sleep and steps, and one decimal for VO2. Delta keeps the raw
 current-minus-baseline direction. No source IDs, labels, health context, meals,
 notes, lab rows or metric-selection metadata appear in this response.
 
-### Typed VO2 readings
+`heightCm` serves About you independently of memory demographics. It is the
+canonical latest-valid `body-height` selection from the already-loaded
+`metricsIndex`, in cm, or null. All sources participate, including manual,
+WHOOP, Junction and clinical measurements; canonical same-date source
+precedence and observation ordering remain unchanged. The selection expires
+when its effective date is more than 365 days before today's vault-local date.
+This is evaluated at read time even for an old snapshot. No height history,
+source metadata or additional bucket is returned. `readCompanionBodyHeight`
+is the server helper for an already-authorized replica; the shared
+`readCompanionHealthSeries` result also includes `heightCm` under its existing
+authority checks. Reads do not wake publication after an accepted save.
+
+### Typed measurements
 
 `POST /api/device-sync/companion/measurements` uses the native bearer session,
 active member access and Browser Vault consent. It accepts at most 1 KiB of JSON
@@ -430,8 +442,9 @@ and no query parameters:
 }
 ```
 
-The metric is closed to `estimated-vo2-max`; value must be finite and within
-10–90 inclusive. `requestedAt` is the real time of entry and may be at most
+The metric is closed to `estimated-vo2-max` (10–90 inclusive, mL/kg/min) and
+`body-height` (50–272 inclusive, cm). Values must be finite; decimals are
+accepted. One range table owns validation for both. `requestedAt` is the real time of entry and may be at most
 24 hours ahead of server time. A delayed retry keeps its original timestamp and
 action id. A new entry uses a new id and time. Invalid input returns 400
 `MEASUREMENT_INVALID_REQUEST`; oversized bodies return 413. There is no caller

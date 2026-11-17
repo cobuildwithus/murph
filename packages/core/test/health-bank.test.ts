@@ -1398,6 +1398,27 @@ test("providers surface renamed slug and frontmatter validation codes", async ()
   );
 });
 
+test("food nutrition markdown preserves zero values and omits absent nutrients", async () => {
+  const vaultRoot = await makeTempDirectory("murph-food-nutrition");
+  try {
+    await initializeVault({ vaultRoot });
+    const food = await upsertFood({
+      vaultRoot,
+      title: "Plain water",
+      nutrition: { perServing: { calories: 0, fiberGrams: 0 } },
+    });
+    const markdown = await fs.readFile(path.join(vaultRoot, food.record.relativePath), "utf8");
+    assert.ok(markdown.includes("## Nutrition per serving\n\n- Calories: 0\n- Fiber: 0 g"));
+    assert.doesNotMatch(markdown, /Protein:|Carbs:|Fat:|Source:|Confidence:/u);
+
+    const unmeasured = await upsertFood({ vaultRoot, title: "Unmeasured snack" });
+    const unmeasuredMarkdown = await fs.readFile(path.join(vaultRoot, unmeasured.record.relativePath), "utf8");
+    assert.doesNotMatch(unmeasuredMarkdown, /## Nutrition per serving/u);
+  } finally {
+    await fs.rm(vaultRoot, { recursive: true, force: true });
+  }
+});
+
 test("foods use first-class markdown registry reads for regular meals and staples", async () => {
   const vaultRoot = await makeTempDirectory("murph-food-registry");
   await initializeVault({ vaultRoot });
@@ -1491,7 +1512,18 @@ test("foods use first-class markdown registry reads for regular meals and staple
   assert.match(foodMarkdown, /nutrition:/u);
   assert.match(foodMarkdown, /## Aliases/u);
   assert.match(foodMarkdown, /## Ingredients/u);
-  assert.match(foodMarkdown, /## Nutrition per serving/u);
+  assert.ok(foodMarkdown.includes([
+    "## Nutrition per serving",
+    "",
+    "- Calories: 540",
+    "- Protein: 11 g",
+    "- Carbs: 68 g",
+    "- Fat: 24 g",
+    "- Fiber: 11 g",
+    "- Source: label",
+    "- Confidence: medium",
+    "- Source detail: Menu board plus saved toppings.",
+  ].join("\n")));
   assert.doesNotMatch(foodMarkdown, /Auto-log daily/u);
   assert.doesNotMatch(foodMarkdown, /^attachedRegimenRefs:/mu);
 

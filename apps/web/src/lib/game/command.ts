@@ -1,6 +1,8 @@
+import { normalizeGameText as words } from "./text";
 import { isStrictIsoDate, normalizeIanaTimeZone } from "@murphai/contracts";
 
 import {
+  GAME_ACTIVITIES,
   GAME_ENTRY_KINDS,
   GAME_CHECK_IN_KINDS,
   GAME_REPORT_ABOUT,
@@ -95,7 +97,17 @@ function reminders(input: Record<string, unknown>): Extract<GameCommand, { type:
   return { type: "setReminders", minutes: integer(input.minutes, "minutes", 0, 1439), push: input.push, text: input.text,
     offGameIds: [...new Set(list(input.offGameIds, "offGameIds", 1000).map(id => clientId(id, "gameId")))],
     ...(input.everyDayGameIds === undefined ? {} : { everyDayGameIds: [...new Set(list(input.everyDayGameIds, "everyDayGameIds", 1000).map(id => clientId(id, "gameId")))] }),
+    ...(input.gameMinutes === undefined ? {} : { gameMinutes: gameMinutes(input.gameMinutes) }),
+    ...(input.timeForGameIds === undefined ? {} : { timeForGameIds: [...new Set(list(input.timeForGameIds, "timeForGameIds", 1000).map(id => clientId(id, "gameId")))] }),
+    ...(input.gameMinutes !== undefined && input.timeForGameIds !== undefined ? reject("INVALID_REQUEST", "Send gameMinutes or timeForGameIds, not both.") : {}),
   };
+}
+
+/** Each game's own time. Left out, every game keeps the time it has. */
+function gameMinutes(value: unknown): Record<string, number> {
+  const entries = Object.entries(record(value, "gameMinutes"));
+  if (entries.length > 1000) reject("INVALID_REQUEST", "gameMinutes has more than 1000 games.");
+  return Object.fromEntries(entries.map(([id, minutes]) => [clientId(id, "gameId"), integer(minutes, "gameMinutes", 0, 1439)]));
 }
 
 /** Shared acceptance body for public token joins and addressed chat acceptance. */
@@ -151,6 +163,7 @@ function create(input: Record<string, unknown>): Extract<GameCommand, { type: "c
     ...optional(input.invitees, value => ({ invitees: inviteTargets(value) })),
     ...optional(input.inviteeLabel, (label) => ({ inviteeLabel: inviteeLabel(record(label, "inviteeLabel")) })),
     ...optional(input.inviteeRecipient, value => ({ inviteeRecipient: recipient(value) })),
+    ...optional(input.inviteeMemberId, id => ({ inviteeMemberId: opaque(id, "inviteeMemberId") })),
     ...optional(input.previousGameId, (id) => ({ previousGameId: clientId(id, "previousGameId") })),
   };
 }
@@ -160,7 +173,6 @@ function recipient(value: unknown): GameInviteRecipient {
   return { kind: oneOf(input.kind, "recipient.kind", ["phone", "email"] as const), value: string(input.value, "recipient.value", 320) };
 }
 
-const WORDS_MAX = 200;
 const POST_TEXT_MAX = 2000;
 const MEDIA_KEYS_MAX = 4;
 const CAPTURE_AGE_MAX_MS = 7 * 24 * 60 * 60 * 1000;
@@ -172,8 +184,7 @@ const TRANSCRIPT_MAX = 500;
 
 /**
  * A photo post carries 1-4 photo uploads (and optional words). An excuse is
- * only words: the transcript the phone made on-device, 1-500 characters; no
- * audio is ever uploaded.
+ * only words, 1-500 characters; no audio is uploaded.
  */
 function post(input: Record<string, unknown>): GameCommand {
   const kind = oneOf(input.kind, "kind", GAME_ENTRY_KINDS);
@@ -229,11 +240,16 @@ function oneLineWords(value: unknown): string {
 }
 
 function profile(input: Record<string, unknown>): Extract<GameCommand, { type: "setProfile" }> {
-  if (input.firstName === undefined && input.timeZone === undefined && input.photoKey === undefined) {
+  if (input.firstName === undefined && input.timeZone === undefined && input.photoKey === undefined && input.notForMe === undefined) {
     reject("INVALID_REQUEST", "Choose a profile field to update.");
   }
   return {
     type: "setProfile",
+    ...optional(input.notForMe, value => {
+      if (!Array.isArray(value)) reject("INVALID_REQUEST", "notForMe must be a list of activities.");
+      const activities = value.map(item => oneOf(item, "notForMe", GAME_ACTIVITIES));
+      return { notForMe: GAME_ACTIVITIES.filter(activity => activities.includes(activity)) };
+    }),
     ...optional(input.firstName, (value) => ({ firstName: words(value, "firstName") })),
     ...optional(input.timeZone, (value) => ({ timeZone: timeZone(value) })),
     ...optional(input.photoKey, (value) => ({ photoKey: nullable(value, mediaKey) })),
@@ -321,20 +337,6 @@ function string(value: unknown, field: string, max: number): string {
   if (typeof value !== "string") reject("INVALID_REQUEST", `${field} must be a string.`);
   if (value.length > max) reject("INVALID_REQUEST", `${field} is too long.`);
   return value;
-}
-
-/** People's words: trimmed, 1 to 200 characters. */
-/**
- * People's words: invisible format and control characters dropped (a
- * zero-width space can't make a name), trimmed, 1 to 200 characters. The
- * zero-width joiner stays inside emoji sequences.
- */
-function words(value: unknown, field: string): string {
-  const cleaned = string(value, field, WORDS_MAX * 2).replace(INVISIBLE, (char) => (char === ZWJ ? char : "")).trim();
-  if (!cleaned.replaceAll(ZWJ, "").trim() || cleaned.length > WORDS_MAX) {
-    reject("INVALID_REQUEST", `${field} must be 1 to ${WORDS_MAX} characters.`);
-  }
-  return cleaned;
 }
 
 function transcript(value: unknown): string {
@@ -460,10 +462,10 @@ function parseChangedTasks(value: unknown): { tasks: GameTask[] } {
   return { tasks };
 }
 function parseChangedStakes(value: unknown): { stakes: GameStake[] } {
-  const stakes = list(value, "stakes", 3).map((item) => {
-    const stake = record(item, "stake");
-    return { kind: oneOf(stake.kind, "stake.kind", GAME_STAKE_KINDS), item: words(stake.item, "stake.item") };
+  if (Array.isArray(value) && (value.length === 0 || value.length > 2)) reject("INVALID_REQUEST", "A game can have one prize or dare and one prize you both get.");
+  const stakes = list(value, "prizes", 2).map((item) => {
+    const stake = record(item, "prize");
+    return { kind: oneOf(stake.kind, "prize.kind", GAME_STAKE_KINDS), item: words(stake.item, "prize.item") };
   });
-  if (!stakes.length) reject("INVALID_REQUEST", "Choose at least one stake.");
   return { stakes };
 }

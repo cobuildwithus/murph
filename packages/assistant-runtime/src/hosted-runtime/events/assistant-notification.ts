@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { isHostedRetiredAssistantNotificationProfile } from "@murphai/hosted-execution/contracts";
 import { GAME_RECAP_GENERATION_RETIRED, gameGroupMissedCheckInPolicySchema, parseGameRecapEventId } from "@murphai/hosted-execution/runtime-control";
 import { buildHostedGameChatBootstrapPolicy, isHostedGameBootstrapUnavailable } from "./game-chat-bootstrap.ts";
@@ -832,7 +833,8 @@ function gameRecapHostedScope(
   }
   return {
     gameRecapScope: { gameId: policy.gameId, eventId: policy.eventId, pairFingerprint: policy.pairFingerprint,
-      ...(policy.loreAccess ? { loreAccess: policy.loreAccess } : {}), ...(policy.show ? { show: true as const } : {}) },
+      ...(policy.loreAccess ? { loreAccess: policy.loreAccess } : {}), ...(policy.show ? { show: true as const } : {}),
+      ...(policy.video ? { video: true as const } : {}) },
     groupTool: groupToolPort,
   };
 }
@@ -957,6 +959,7 @@ function buildAssistantNotificationInput(
 
 function withPairShowTarget(notificationInput: AssistantNotificationInput, wake: HostedExecutionAssistantNotificationRequestedWake, executionContext: AssistantExecutionContext): void {
   if (wake.notification.responsePolicy?.kind === "require_game_recap" && wake.notification.responsePolicy.show) {
+    notificationInput.serviceTier = "flex";
     notificationInput.assistantTargetOverride = { model: HOSTED_ASSISTANT_SOL_MODEL,
       modelProvider: resolveHostedOperatorModelProvider(executionContext.hosted?.defaultTarget?.modelProvider) };
   }
@@ -1138,6 +1141,8 @@ function requireHostedGroupContextHandoffNotification(
     || wake.notification.deliveryIdempotencyKey !== wake.eventId
     || wake.notification.deliveryDispatchMode !== "queue-only"
     || wake.notification.firstContact != null
+    || wake.notification.operatorTask != null
+    || wake.notification.gameChatBootstrap != null
     || wake.notification.privateAssistantAskCompletion != null
     || wake.notification.responsePolicy?.kind !== "require_send"
     || authority == null
@@ -1147,15 +1152,15 @@ function requireHostedGroupContextHandoffNotification(
     || route.delivery.kind !== "thread"
     || route.threadIsDirect !== false
   ) {
-    throw new TypeError(
+    throw Object.assign(new ContractValidationError(
       "Hosted group context handoff notification proof is invalid.",
-    );
+    ), { retryable: false });
   }
   const occurredAtMs = Date.parse(wake.occurredAt);
   if (!Number.isFinite(occurredAtMs)) {
-    throw new TypeError(
+    throw Object.assign(new ContractValidationError(
       "Hosted group context handoff occurrence time is invalid.",
-    );
+    ), { retryable: false });
   }
   return occurredAtMs + HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_TTL_MS;
 }
@@ -1198,7 +1203,7 @@ function requireHostedOperatorMessageNotification(
     || !operatorTask.taskId.startsWith("opt_")
     || Date.parse(operatorTask.expiresAt) <= Date.parse(wake.occurredAt)
   ) {
-    throw new TypeError("Hosted operator message notification proof is invalid.");
+    throw new ContractValidationError("Hosted operator message notification proof is invalid.");
   }
   return operatorTask;
 }
@@ -1284,7 +1289,7 @@ function requireHostedPrivateAssistantAskCompletionNotification(
     )
     || wake.notification.responsePolicy?.kind !== "require_send_exact_text"
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted private Assistant Ask completion notification proof is invalid.",
     );
   }

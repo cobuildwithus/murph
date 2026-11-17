@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createHash } from "node:crypto";
 
 import type { Prisma } from "@prisma/client";
@@ -125,7 +126,7 @@ function clinicalPageCursorBinding(input: {
     || typeof input.queryFingerprint !== "string"
     || typeof input.sliceId !== "string"
   ) {
-    throw new TypeError("Clinical Records page cursor retrieval identity is incomplete.");
+    throw new ContractValidationError("Clinical Records page cursor retrieval identity is incomplete.");
   }
   return createHash("sha256").update([
     input.queryScopeId,

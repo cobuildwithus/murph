@@ -41,7 +41,7 @@ describe.skipIf(process.env.MURPH_MEASURE_USAGE_ISOLATION_INPUT !== '1')('usage 
     const captures = []
     try {
       for (const phase of ['base', 'head'] as const) {
-        const { turnInput } = await prepareScriptedTurnScenario(stub, temporaryPaths, { model: 'gpt-6.2-sol', modelProvider: HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID, additionalTomlLines: [...behaviorWithoutHistory, ...buildMurphHostedPermissionProfileTomlLines()] })
+        const { turnInput } = await prepareScriptedTurnScenario(stub, temporaryPaths, { model: 'gpt-6.2-sol', modelProvider: HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID, additionalTomlLines: codexHome => [...behaviorWithoutHistory, ...buildMurphHostedPermissionProfileTomlLines(codexHome)] })
         const vault = turnInput.workingDirectory
         await initializeVault({ vaultRoot: vault, timezone: 'UTC' })
         const target = createAssistantModelTarget({ ...turnInput, approvalPolicy: 'never', provider: 'codex-cli' })

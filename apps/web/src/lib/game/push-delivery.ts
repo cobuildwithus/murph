@@ -1,7 +1,7 @@
 import "server-only";
 
 import type { Prisma } from "@prisma/client";
-import { sendApplePush, type ApplePushRequest } from "../apple-push/send";
+import { prepareApplePushProviderToken, sendApplePush, type ApplePushRequest } from "../apple-push/send";
 import { forgetCompanionPushRoute } from "../companion/push-route";
 import { getPrisma } from "../prisma";
 
@@ -15,6 +15,9 @@ export function readGamePushRoutes(db: { companionPushRoute: Pick<Prisma.Transac
 /** One best-effort attempt; each notification owner supplies its current subject authority. */
 export async function deliverGamePush(notification: { memberId: string; sessionId: string; request: ApplePushRequest; requireGameReminders?: true }, stillValid: () => Promise<boolean>): Promise<string> {
   try {
+    if (notification.request.expiresAt.getTime() <= Date.now()) return "superseded";
+    const providerToken = await prepareApplePushProviderToken();
+    if (!providerToken) return "failed";
     if (notification.request.expiresAt.getTime() <= Date.now() || !await stillValid()) return "superseded";
     // Last, so a route replaced or signed out during the content recheck gets nothing.
     const current = await getPrisma().companionPushRoute.findFirst({
@@ -24,7 +27,7 @@ export async function deliverGamePush(notification: { memberId: string; sessionI
       select: { userId: true },
     });
     if (!current || notification.request.expiresAt.getTime() <= Date.now()) return "superseded";
-    const outcome = await sendApplePush(notification.request);
+    const outcome = await sendApplePush(notification.request, { providerToken });
     if (outcome === "unregistered") await forgetCompanionPushRoute(notification.memberId, notification.request.target.token);
     return outcome;
   } catch { return "failed"; }

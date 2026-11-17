@@ -1,6 +1,8 @@
+import { RequestInputError } from "@murphai/hosted-execution/request-input";
 import { readGameProposalDeliveryPlayers } from "@/src/lib/game/chat-delivery";
 import { assertGameProposalDeliveryCurrentTx, readGameRematchDeliveryRevision } from "@/src/lib/game/chat-delivery-authority";
 import { readPrivateEveningDeliveryAuthority } from "@/src/lib/game/private-notification";
+import { readRecapVideoDeliveryCurrent } from "@/src/lib/game/recap-asset-access";
 import { readPrivateKickoffDeliveryAuthority } from "@/src/lib/game/private-kickoff";
 import { HOSTED_EXECUTION_REVIEWED_ASSISTANT_ASK_COMPLETION_DELIVERY_KEY_PREFIX } from "@murphai/hosted-execution";
 import { parseHostedExecutionResolvedLinqDeliveryRoute } from "@murphai/hosted-execution/routes";
@@ -140,6 +142,10 @@ export const POST = withJsonError(async (request: Request) => {
     ? await readPrivateEveningDeliveryAuthority(idempotencyKey, userId) : null;
   const privateKickoffPolicy = idempotencyKey?.startsWith("game-dm:")
     ? await readPrivateKickoffDeliveryAuthority(idempotencyKey, userId) : null;
+
+  // A recap message's accepted video: whether it may still go with the line. Read before the
+  // claim's transaction, which never reads media or decrypts anything.
+  const recapVideoCurrent = await readRecapVideoDeliveryCurrent(idempotencyKey, body.recapVideo);
 
   const gameAuthority = gameChatAuthority && "policy" in gameChatAuthority
     ? "memberIds" in gameChatAuthority
@@ -331,6 +337,7 @@ export const POST = withJsonError(async (request: Request) => {
     ...(assertion.providerDispatchClaimed === null
       ? {}
       : { providerDispatchClaimed: assertion.providerDispatchClaimed }),
+    ...(recapVideoCurrent === null ? {} : { recapVideoCurrent }),
     ...readHostedLinqAckEngagementResponseFields(assertion),
   });
 });
@@ -624,6 +631,7 @@ function parseAnsweredMailboxItemIds(value: unknown): string[] {
         retryable: false,
       });
     }
+    if ([...itemId].length > 256) throw new RequestInputError("Answered mailbox item id is too long.");
     if (seen.has(itemId)) {
       continue;
     }

@@ -4,6 +4,7 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import type { RegistrationResponseJSON } from "@simplewebauthn/server";
 import { hostedAuthTransactionAdapter } from "../better-auth/adapter";
 import { prepareHostedBoundLogin } from "../better-auth/bound-reauthentication";
+import { readHostedPrimaryAuthenticationFactor, type HostedPrimaryAuthenticationFactor } from "../better-auth/primary-factor";
 import { assertHostedBetterAuthIssuanceEnabled } from "../better-auth/config";
 import { credentialRecordOptions } from "../better-auth/credential-change";
 import { prepareHostedAuthSessionSet } from "../better-auth/session-limit";
@@ -11,11 +12,10 @@ import { runWithFreshHostedDomainRootUnwrapCache, runWithHostedDomainRootProvide
 import { assertHostedAppSessionCurrentTx, type HostedAppSession } from "../hosted-onboarding/app-session";
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { lockHostedMemberRow, HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
-import { resolveHostedPublicOrigin } from "../hosted-web/public-url";
 import { prepareApprovalPasskeyWrite } from "./passkey-store";
 import { requireApprovalPasskeyEnrollmentEnabled } from "./passkey-rollout";
 import { isSensitiveActionToken } from "./shared";
-import { buildSensitiveActionMessage, consumeSensitiveActionChallengeTx, createSensitiveActionChallengeMaterial } from "./server";
+import { buildSensitiveActionMessage, consumeSensitiveActionChallengeTx, createSensitiveActionChallengeMaterial, requireSensitiveActionOrigin } from "./server";
 import { approvalPasskeyRegistrationOptions, verifyApprovalPasskeyRegistration } from "./webauthn";
 
 export const INITIAL_APPROVAL_ENROLLMENT_KIND = "approval.passkey.initial-enrollment";
@@ -38,9 +38,15 @@ function requireFreshPrimary(session: HostedAppSession, credentialsChangedAt?: u
   const age = Date.now() - (session.primaryAuthenticatedAt?.getTime() ?? Number.NaN);
   if (!session.authProof || !Number.isFinite(age) || age < 0 || age > 5 * 60_000
     || (credentialsChangedAt instanceof Date && credentialsChangedAt > session.primaryAuthenticatedAt!)) {
-    throw hostedOnboardingError({ code: "SENSITIVE_ACTION_FRESH_LOGIN_REQUIRED", httpStatus: 403,
-      message: "Sign in again with a method already linked to this account, then add your Murph passkey." });
+    throw freshPhoneOrTelegramRequired();
   }
+}
+
+// The assistant can read a connected inbox, so an email code alone never
+// establishes the first passkey: the fresh sign-in must be by phone or Telegram.
+// Missing or unrecognized factor evidence (older sessions) is ineligible.
+function requirePhoneOrTelegram(factor: HostedPrimaryAuthenticationFactor | null) {
+  if (factor !== "phone" && factor !== "telegram") throw freshPhoneOrTelegramRequired();
 }
 
 async function prepareRepair(input: Input) {
@@ -48,15 +54,16 @@ async function prepareRepair(input: Input) {
   if (!await isInitialApprovalEnrollmentEligible(input.prisma, input.session)) throw changed();
   requireFreshPrimary(input.session);
   const bound = await prepareHostedBoundLogin(input.prisma, input.session.member.id);
+  const factor = await readHostedPrimaryAuthenticationFactor(input.prisma, input.session.sessionId);
+  requirePhoneOrTelegram(factor);
   requireFreshPrimary(input.session, bound.current.user.credentialsChangedAt);
-  const origin = resolveHostedPublicOrigin();
-  if (!origin) throw new Error("Hosted approval origin is not configured.");
+  const origin = requireSensitiveActionOrigin();
   const bindingHash = digest(JSON.stringify([
-    "murph-initial-approval-enrollment-v1", input.session.member.id, input.session.sessionId,
-    input.session.primaryAuthenticatedAt!.toISOString(), bound.fingerprint,
+    "murph-initial-approval-enrollment-v2", input.session.member.id, input.session.sessionId,
+    input.session.primaryAuthenticatedAt!.toISOString(), factor, bound.fingerprint,
   ]));
   const sessions = await prepareHostedAuthSessionSet(input.prisma, input.session.member.id);
-  return { bound, origin, bindingHash, sessions };
+  return { bound, origin, bindingHash, factor, sessions };
 }
 
 async function assertRepairCurrentTx(input: Input, prepared: Awaited<ReturnType<typeof prepareRepair>>, tx: Prisma.TransactionClient) {
@@ -64,6 +71,7 @@ async function assertRepairCurrentTx(input: Input, prepared: Awaited<ReturnType<
   await assertHostedAppSessionCurrentTx({ memberId: input.session.member.id, prisma: tx,
     request: input.request, sessionId: input.session.sessionId, authProof: input.session.authProof });
   requireFreshPrimary(input.session);
+  requirePhoneOrTelegram(prepared.factor);
   await prepared.bound.assertCurrentTx(tx);
   await prepared.sessions.assertCurrentTx(tx);
   if (!await isInitialApprovalEnrollmentEligible(tx, input.session)) throw changed();
@@ -129,5 +137,7 @@ export async function registerInitialApprovalEnrollment(input: Input & { token: 
 }
 
 function digest(value: string) { return createHash("sha256").update(value).digest("hex"); }
+function freshPhoneOrTelegramRequired() { return hostedOnboardingError({ code: "SENSITIVE_ACTION_FRESH_LOGIN_REQUIRED", httpStatus: 403,
+  message: "Sign in with your phone or Telegram, then add your Murph passkey." }); }
 function changed() { return hostedOnboardingError({ code: "SENSITIVE_ACTION_CREDENTIALS_CHANGED", httpStatus: 409,
   message: "Passkey setup changed or expired. Try again; an existing Murph passkey cannot be replaced this way." }); }

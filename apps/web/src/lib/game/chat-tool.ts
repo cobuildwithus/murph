@@ -1,9 +1,9 @@
-import { uploadRecapMedia } from './recap-media';
+import { uploadRecapMedia, uploadRecapVideoPart } from './recap-media';
 import { retireGameRecapGenerationTx } from './recap-witness';
 import { buildRecapFallback } from './recap-fallback';
 import { readRecapTranscriptPage } from "./recap-transcript";
 import { readRecapSourceReferences, readRecapReferenceBytes, publicRecapReferences } from "./recap-inputs";
-import { gameRecapWriterSchema, recapShowWriterSchema } from "@murphai/contracts/recap-show";
+import { recapMusicPageKinds, recapSongLines, recapScorePageCount, gameRecapWriterSchema, recapShowWriterSchema } from "@murphai/contracts/recap-show";
 import "server-only";
 
 import { isGameMemberSet } from "./roster";
@@ -17,20 +17,32 @@ import { requireHostedRuntimeCallbackTx, type HostedRuntimeIdentity } from "../h
 import { buildHostedMailboxLiveItemWhere, decodeHostedMailboxStoredPayloads, readHostedMailboxConversationWakeByAssistantInputId } from "../hosted-mailbox/store";
 import { requireHostedRuntimeActiveAccessForUpdateTx } from "../hosted-mailbox/runtime-access";
 import { resolveHostedGroupMessageSenderMemberId } from "../hosted-groups/group-message-sender";
-import { assertHostedThreadRouteEgressAuthority } from "../hosted-routing/thread-route-store";
+import { lockHostedThreadRouteByThreadIdentityTx, assertHostedThreadRouteEgressAuthority } from "../hosted-routing/thread-route-store";
 import { getPrisma } from "../prisma";
-import { readGameChatState, readGameChatProfiles, readGameRecapMaterial, runGameCommand, runGameChatUpdate, sealGameRecap } from "./service";
+import { readGameChatState, readGameChatProfiles, readGameRecapMaterial, runGameCommand, runGameChatUpdate, acceptGameRecap } from "./service";
 import { isGameRecapGenerationRetired } from "./recap-witness";
 import { acceptedGameRecapMessage, gameRecapMessage } from "./recap-message";
 import { gameRecapToolResult, validateGameRecap, withValidGameSuperlatives, type GameRecapChatMessage } from "./recap";
 import { addressedGameRematchWhere, gameChatPlayerIds, gamePairWhere, readGameChatPlayerIds, readGameChatAudience, readGameChatAuthority, type GameChatAudience, hasGameChatRestriction, requireExactGameChat, sameGamePlayers } from "./chat-membership";
-import { isGameEnabled, isGameOn } from "./access";
+import { isGameEnabled } from "./access";
 import { gameGroupLoreFingerprint, gamePairLoreFingerprint } from "./audience";
+import { GameRuleError, reject } from "./rules";
+
+const GAME_CHAT_MESSAGE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 type Input = { audience?: GameChatAudience; multiplayer?: boolean; memberId: string; runtimeIdentity: HostedRuntimeIdentity | null; request: HostedGameToolRequest; playerMemberIds?: readonly string[] };
 
 /** The signed runtime selects only a game and accepted Message ref, never an actor. */
 export async function handleGameChatTool(input: Input): Promise<HostedGameToolResponse> {
+  try {
+    return await handleGameChatRequest(input);
+  } catch (error) {
+    if (error instanceof GameRuleError) return { action: input.request.action, result: { status: "rejected", error: `${error.error.code}: ${error.message}` } };
+    throw error;
+  }
+}
+
+async function handleGameChatRequest(input: Input): Promise<HostedGameToolResponse> {
   if (!isGameEnabled()) return { action: input.request.action, result: { status: "unavailable", error: "GAME_DISABLED: Games are unavailable right now." } };
   if (input.request.origin.kind !== "accepted_input") return handleNonPlayerOriginGameTool(input);
   const prisma = getPrisma();
@@ -44,8 +56,8 @@ export async function handleGameChatTool(input: Input): Promise<HostedGameToolRe
   try { playerMemberIds = input.audience?.memberIds ?? await requireExactGameChat(input.memberId, input.multiplayer); }
   catch { return { action: input.request.action, result: { status: "unavailable", error: "Use the game’s exact group chat with Murph, or start in the app." } }; }
   if (!supportsGameChatRoster(input, playerMemberIds) || !playerMemberIds.includes(actor)) return { action: input.request.action, result: { status: "unavailable", error: "game_player_unavailable" } };
-  if (!isGameOn({ players: playerMemberIds.map(memberId => ({ memberId })) })) return { action: input.request.action, result: { status: "unavailable", error: "GAME_DISABLED: Games are invite-only for now." } };
   let dayOutcome: Extract<Awaited<ReturnType<typeof runGameCommand>>, { ok: true }>["dayOutcome"];
+  let chatLine: string | undefined;
   let photoResult: Awaited<ReturnType<typeof handleGameChatPhoto>> | null = null;
   if (input.request.action === "game_photo") {
     const photo = input.request.photo;
@@ -79,13 +91,16 @@ export async function handleGameChatTool(input: Input): Promise<HostedGameToolRe
     if (!result.ok) return { action: input.request.action, result: { status: "rejected", error: `${result.error.code}: ${result.error.message}`.slice(0, 128) } };
     if (update.operation === "set_reminder") return { action: "update_game", result: { status: "ok", reaches: result.reaches ?? "none" } };
     dayOutcome = result.dayOutcome;
+    chatLine = result.chatLine;
   }
   if (input.request.action !== "read_game") {
     const refreshed = await refreshGameChatAudience(input, playerMemberIds);
     if (!refreshed) throw new TypeError("Game chat participants changed.");
     input = refreshed;
   }
-  return gameChatToolResponse(input, playerMemberIds, actor, dayOutcome, photoResult);
+  const response = await gameChatToolResponse(input, playerMemberIds, actor, dayOutcome, photoResult);
+  // A day correction that changed a finished game's outcome carries the one line that says so.
+  return chatLine ? { ...response, result: { ...response.result, chatLine } } : response;
 }
 
 /** Preserve the fresh complete handle proof through the post-mutation projection. */
@@ -162,8 +177,7 @@ async function handleScheduledGameRead(input: Input): Promise<HostedGameToolResp
     players = input.audience?.memberIds ?? await requireExactGameChat(input.memberId);
   }
   catch { return { action: "read_game", result: { status: "unavailable", error: "Use the game’s exact group chat with Murph, or start in the app." } }; }
-  if (!input.multiplayer && players.length !== 2) return { action: "read_game", result: { status: "unavailable", error: "game_player_unavailable" } };
-  if (!isGameOn({ players: players.map(memberId => ({ memberId })) })) return { action: "read_game", result: { status: "unavailable", error: "GAME_DISABLED: Games are invite-only for now." } };
+  if (players.length === 0 || !input.multiplayer && players.length !== 2) return { action: "read_game", result: { status: "unavailable", error: "game_player_unavailable" } };
   const state = await readGameToolState(input, players);
   const lore = await readGameToolLore(state, input.audience);
   return { action: "read_game", result: { status: "ok", state, ...lore } };
@@ -174,12 +188,18 @@ export async function authorizeGameChatActorTx(input: Input, tx: Prisma.Transact
   if (input.request.origin.kind !== "accepted_input") return null;
   await requireHostedRuntimeCallbackTx(tx, input.memberId, input.runtimeIdentity);
   await requireHostedRuntimeActiveAccessForUpdateTx(input.memberId, { prisma: tx });
+  const now = new Date();
   const wake = await readHostedMailboxConversationWakeByAssistantInputId({
-    assistantInputId: input.request.origin.assistantInputId, availableAt: new Date(), memberId: input.memberId, prisma: tx,
+    assistantInputId: input.request.origin.assistantInputId, availableAt: now, memberId: input.memberId, prisma: tx,
   });
   if (!wake || wake.userId !== input.memberId) return null;
+  const receivedAt = Date.parse(wake.occurredAt);
+  if (!Number.isFinite(receivedAt) || receivedAt > now.getTime() || now.getTime() - receivedAt > GAME_CHAT_MESSAGE_MAX_AGE_MS) {
+    reject("INVALID_REQUEST", "Use that player's own message in this chat from the last 24 hours, or ask them to say it again.");
+  }
   const route = readGameIncomingRoute(wake, input.memberId);
   if (!route) return null;
+  await lockHostedThreadRouteByThreadIdentityTx({ authority: route, prisma: tx });
   await assertHostedThreadRouteEgressAuthority({ authority: route, prisma: tx });
   const actor = await resolveHostedGroupMessageSenderMemberId({ prisma: tx, routeAuthority: route, wake });
   if (!actor) return null;
@@ -198,7 +218,7 @@ async function canRunGameChatRequestTx(input: Input, players: readonly string[],
     where: { OR: [{ ...gamePairWhere(players), status: { in: ["negotiating", "live", "settled", ...(replayableApproval ? ["void" as const] : [])] } }, addressedGameRematchWhere(players), ...(input.multiplayer ? [{ chatContainerMemberId: input.memberId }] : [])], ...(input.request.action === "update_game" ? { id: input.request.update.gameId } : input.request.action === "game_photo" ? { id: input.request.photo.gameId } : {}) },
     include: { invitees: true, players: { take: 11 } },
   });
-  if (!game || !isGameOn(game)) return false;
+  if (!game || !isGameEnabled()) return false;
   if (input.multiplayer) {
     if (!input.audience || !await readGameChatAuthority(game, input.memberId, input.audience, tx)) return false;
   } else if (game.maxPlayers === 10 || !areGamePlayersAllowed(game, players)) return false;
@@ -246,8 +266,9 @@ async function recoverGameRecap(input: RecapToolInput, context: RecapToolContext
   const prisma = getPrisma();
     if (!material.validation.show) return unavailable();
     const scope = { beforeMutationTx: authorizeMutation, containerMemberId: input.memberId, eventId, gameId, playerMemberIds: players };
-    let saved = await sealGameRecap({ ...scope, recap: null });
-    if (!saved && input.request.action === 'read_game' && input.request.recapRead?.kind === 'recover' && input.request.recapRead.failed) {
+    const read = input.request.action === 'read_game' && input.request.recapRead?.kind === 'recover' ? input.request.recapRead : null;
+    let saved = await acceptGameRecap({ ...scope, recap: null });
+    if (!saved && read?.failed) {
       if (parseGameRecapEventId(eventId)?.regenerationId) {
         await prisma.$transaction(async tx => {
           await authorizeMutation(tx);
@@ -255,43 +276,62 @@ async function recoverGameRecap(input: RecapToolInput, context: RecapToolContext
           const accepted = await tx.gameEvent.findUnique({ where: { commandKey: `${eventId}:accepted` }, select: { id: true } });
           if (!accepted) await retireGameRecapGenerationTx(tx, eventId);
         });
-        saved = await sealGameRecap({ ...scope, recap: null });
+        saved = await acceptGameRecap({ ...scope, recap: null });
         if (!saved) return { action: 'read_game', result: { status: 'unavailable', error: GAME_RECAP_GENERATION_RETIRED } };
-      } else saved = await sealGameRecap({ ...scope, recap: buildRecapFallback(material.validation.result) });
+      } else saved = await acceptGameRecap({ ...scope, recap: buildRecapFallback(material.validation.result, material.validation.earnedBothWinPrize) });
     }
     if (!saved) return { action: 'read_game', result: { status: 'ok', recapGame: { recovered: false } } };
-    return { action: 'read_game', result: { status: 'ok', recap: saved, chatLine: await acceptedGameRecapMessage(gameId, saved.chatLine) } };
+    return { action: 'read_game', result: { status: 'ok', chatLine: await acceptedGameRecapMessage(gameId, saved.recap.chatLine),
+      ...(read?.video ? { recapVideo: saved.video } : {}) } };
 }
 async function handleAuthorizedRecapRead(input: RecapToolInput & { request: Extract<RecapToolInput['request'], { action: 'read_game' }> }, context: RecapToolContext): Promise<HostedGameToolResponse> {
   const { gameId, eventId, players, material, authorizeMutation, unavailable } = context;
   if (input.request.recapRead?.kind === "recover") return recoverGameRecap(input, context);
   if (input.request.recapRead?.kind === 'upload') {
     if (!material.validation.show) return unavailable();
-    return { action: 'read_game', result: { status: 'ok', recapGame: await uploadRecapMedia({
-      gameId, eventId, memberId: input.memberId, material, beforeMutationTx: authorizeMutation, file: input.request.recapRead }) } };
+    const file = input.request.recapRead, upload = { gameId, eventId, memberId: input.memberId, material, beforeMutationTx: authorizeMutation };
+    const uploaded = file.mediaType === 'video/mp4' ? await uploadRecapVideoPart({ ...upload, file: { ...file, mediaType: file.mediaType } })
+      : await uploadRecapMedia({ ...upload, file: { ...file, mediaType: file.mediaType } });
+    return { action: 'read_game', result: uploaded ? { status: 'ok', recapGame: uploaded } : { status: 'unavailable', error: 'recap_video_unavailable' } };
   }
   return readRecapForWriter({ material, request: input.request, containerMemberId: input.memberId, playerMemberIds: players, beforeMutationTx: authorizeMutation });
 }
+export function recapShowWriteError(request: Extract<HostedGameToolRequest, { action: 'write_recap' }>, material: Pick<RecapToolContext['material'], 'entries'>, players: string[]): string | null {
+  const parsed = recapShowWriterSchema.safeParse(request.recap);
+  const ids = new Set(material.entries.filter(entry => entry.kind === 'photo' && entry.visibleToBoth).map(entry => entry.entryId));
+  const invalidPhoto = request.recap.pages.some(page => page.blocks.some(block => (block.entryIds ?? []).some(id => !ids.has(id))));
+  const invalidCard = request.recap.superlatives?.some(card => !players.includes(card.memberId));
+  const assets = request.assets ?? [];
+  const invalidSlot = new Set(assets.map(asset => asset.slot)).size !== assets.length || assets.some(asset => asset.slot === 'song'
+    ? asset.kind !== 'song' || !request.recap.song
+    : asset.kind !== 'image' || !/^scene-[0-6]$/u.test(asset.slot) || !request.recap.pages[Number(asset.slot.slice(6))]?.blocks.some(block => block.kind === 'scene'));
+  const musicPages = recapMusicPageKinds(request.recap).length;
+  if (assets.some(asset => asset.songStartMs !== undefined && recapScorePageCount(asset.durationMs ?? 0) !== musicPages)) return 'The song was made for different pages, lyrics or style. Generate it again from this draft, or remove it from files and submit without a song.';
+  const invalidTiming = assets.some(asset => asset.wordsTimestamps && (asset.slot !== 'song' || !asset.durationMs || !request.recap.song
+    || !recapSongLines(request.recap.song.lyrics, asset, musicPages * 5000)));
+  if (invalidTiming) return 'Song timings must match the final lyrics and belong to a song with a measured duration.';
+  if (!parsed.success || invalidPhoto || invalidCard || invalidSlot) return !parsed.success ? parsed.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`).join('; ')
+      : 'Use this game’s visible photo IDs and player IDs, and select one image per scene slot or the song slot.';
+  return null;
+}
+
 async function handleAuthorizedRecapWrite(input: RecapToolInput & { request: Extract<RecapToolInput['request'], { action: 'write_recap' }> }, context: RecapToolContext): Promise<HostedGameToolResponse> {
   const { gameId, eventId, players, material, authorizeMutation, unavailable, audience } = context;
   const prisma = getPrisma();
 
-  const replay = await sealGameRecap({ beforeMutationTx: authorizeMutation, containerMemberId: input.memberId,
+  // Whatever is stored is the answer: the story, the delivery text and, for a runtime that
+  // sent a video, the identity of the video Web accepted (or null), never this request's own.
+  const accepted = async (saved: NonNullable<Awaited<ReturnType<typeof acceptGameRecap>>>): Promise<HostedGameToolResponse> => ({ action: "write_recap", result: {
+    status: "ok", recapOutcome: gameRecapToolResult([]), ...(!material.validation.show ? { recap: saved.recap } : {}),
+    chatLine: material.validation.show ? await acceptedGameRecapMessage(gameId, saved.recap.chatLine) : gameRecapMessage(gameId, saved.recap.chatLine),
+    ...(input.request.video !== undefined ? { recapVideo: saved.video } : {}) } });
+  const replay = await acceptGameRecap({ beforeMutationTx: authorizeMutation, containerMemberId: input.memberId,
     eventId, gameId, playerMemberIds: players, recap: null });
-  if (replay) return { action: "write_recap", result: { status: "ok", recapOutcome: gameRecapToolResult([]), recap: replay, chatLine: material.validation.show ? await acceptedGameRecapMessage(gameId, replay.chatLine) : gameRecapMessage(gameId, replay.chatLine) } };
+  if (replay) return accepted(replay);
   if (await isGameRecapGenerationRetired(prisma, eventId, input.memberId)) return { action: "write_recap", result: { status: "unavailable", error: GAME_RECAP_GENERATION_RETIRED } };
   if (material.validation.show) {
-    const parsed = recapShowWriterSchema.safeParse(input.request.recap);
-    const ids = new Set(material.entries.filter(entry => entry.kind === 'photo' && entry.visibleToBoth).map(entry => entry.entryId));
-    const invalidPhoto = input.request.recap.pages.some(page => page.blocks.some(block => (block.entryIds ?? []).some(id => !ids.has(id))));
-    const invalidCard = input.request.recap.superlatives?.some(card => !players.includes(card.memberId));
-    const assets = input.request.assets ?? [];
-    const invalidSlot = new Set(assets.map(asset => asset.slot)).size !== assets.length || assets.some(asset => asset.slot === 'song'
-      ? asset.kind !== 'song' || !input.request.recap.song
-      : asset.kind !== 'image' || !/^scene-[0-6]$/u.test(asset.slot) || !input.request.recap.pages[Number(asset.slot.slice(6))]?.blocks.some(block => block.kind === 'scene'));
-    if (!parsed.success || invalidPhoto || invalidCard || invalidSlot) return { action: 'write_recap', result: { status: 'rejected', recapOutcome:
-      !parsed.success ? parsed.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`).join('; ')
-        : 'Use this game’s visible photo IDs and player IDs, and select one image per scene slot or the song slot.' } };
+    const error = recapShowWriteError(input.request, material, players);
+    if (error) return { action: 'write_recap', result: { status: 'rejected', recapOutcome: error } };
   } else {
     gameRecapWriterSchema.parse(input.request.recap);
     const chatMessages = await readGameRecapChatMessages({ containerMemberId: input.memberId, material });
@@ -300,10 +340,9 @@ async function handleAuthorizedRecapWrite(input: RecapToolInput & { request: Ext
     if (errors.length) return { action: 'write_recap', result: { status: 'rejected', recapOutcome: gameRecapToolResult(errors) } };
   }
   if (!await refreshGameChatAudience({ ...input, audience }, players)) return { action: "write_recap", result: { status: "unavailable", error: "recap_authority_unavailable" } };
-  const saved = await sealGameRecap({ beforeMutationTx: authorizeMutation, containerMemberId: input.memberId, eventId, gameId, playerMemberIds: players, assets: material.validation.show ? input.request.assets ?? [] : undefined, recap: material.validation.show ? input.request.recap : withValidGameSuperlatives(input.request.recap, material.validation.result.map(player => player.memberId), material.validation.group) });
-  return saved
-    ? { action: "write_recap", result: { status: "ok", recapOutcome: gameRecapToolResult([]), recap: saved, chatLine: material.validation.show ? await acceptedGameRecapMessage(gameId, saved.chatLine) : gameRecapMessage(gameId, saved.chatLine) } }
-    : unavailable();
+  const saved = await acceptGameRecap({ beforeMutationTx: authorizeMutation, containerMemberId: input.memberId, eventId, gameId, playerMemberIds: players, assets: material.validation.show ? input.request.assets ?? [] : undefined, recap: material.validation.show ? input.request.recap : withValidGameSuperlatives(input.request.recap, material.validation.result.map(player => player.memberId), material.validation.group),
+    ...(material.validation.show && input.request.video !== undefined ? { video: { draft: input.request.video, material } } : {}) });
+  return saved ? accepted(saved) : unavailable();
 }
 
 export async function readGameRecapChatMessages(input: {
@@ -326,14 +365,12 @@ export async function readGameChatTranscript(input: {
   playerNamesByMemberId: readonly { memberId: string; name: string }[];
   since: Date;
   until?: Date;
-  throughConversationLaneSeq?: string;
 }): Promise<GameRecapChatMessage[]> {
   const prisma = getPrisma();
   const availableAt = new Date();
   const rows = await prisma.hostedMailboxItem.findMany({
     orderBy: { laneSeq: "desc" }, take: 100,
     where: { ...buildHostedMailboxLiveItemWhere(availableAt), userId: input.containerMemberId,
-      ...(input.throughConversationLaneSeq === undefined ? {} : { laneSeq: { lte: BigInt(input.throughConversationLaneSeq) } }),
       kind: "conversation.message", lane: "conversation", occurredAt: { gte: input.since, ...(input.until ? { lte: input.until } : {}) } },
     select: { id: true, userId: true, dedupeKey: true, kind: true, lane: true, laneSeq: true, occurredAt: true,
       payloadInlineCiphertext: true, payloadSchema: true, payload: { select: { payloadCiphertext: true } } },
@@ -391,7 +428,7 @@ function readGameIncomingRoute(wake: HostedExecutionConversationMessageWake, con
 
 function areGamePlayersAllowed(game: Parameters<typeof gameChatPlayerIds>[0], expected: readonly string[]): boolean {
   const players = gameChatPlayerIds(game);
-  if (!isGameMemberSet(players) || !isGameOn(game)) return false;
+  if (!isGameMemberSet(players) || !isGameEnabled()) return false;
   return sameGamePlayers(players, expected);
 }
 

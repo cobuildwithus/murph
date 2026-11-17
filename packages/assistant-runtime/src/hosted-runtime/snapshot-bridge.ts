@@ -526,8 +526,7 @@ async function createHostedWorkspaceV2Snapshot(
           },
           level:
             generatedDeliveryCleanupSkipped ||
-            generatedDeliveryActiveFilesMissing ||
-            generatedDeliveryNestedEntriesRetained
+            generatedDeliveryActiveFilesMissing
               ? "warn"
               : "info",
           message: generatedDeliveryCleanupSkipped

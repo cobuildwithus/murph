@@ -37,6 +37,18 @@ describe("shared companion address game enrollment", () => {
     expect(m.upsert.mock.calls[0]?.[0].update.gameSessionId).toBeNull();
     expect(m.upsert.mock.calls[0]?.[0].update.gameReminders).toBe(false);
   });
+  it("keeps the same phone's reopen reminders choice when a registration does not report it", async () => {
+    m.read.mockResolvedValue({ ...address, userId: "member-one", gameSessionId: "session-a", gameReminders: true, reopenReminders: false });
+    await registerCompanionPushRoute("member-one", address);
+    expect(m.upsert.mock.calls[0]?.[0].update.reopenReminders).toBe(false);
+  });
+  it("records a reported reopen reminders choice and forgets it for a changed address", async () => {
+    m.read.mockResolvedValue({ ...address, userId: "member-one", gameSessionId: "session-a", gameReminders: true, reopenReminders: false });
+    await registerCompanionPushRoute("member-one", { ...address, reopenReminders: true });
+    expect(m.upsert.mock.calls[0]?.[0].update.reopenReminders).toBe(true);
+    await registerCompanionPushRoute("member-one", { ...address, token: "cd".repeat(32) });
+    expect(m.upsert.mock.calls[1]?.[0].update.reopenReminders).toBeNull();
+  });
   it("does not enroll games through a new wearable-only address", async () => {
     m.read.mockResolvedValue(null);
     await registerCompanionPushRoute("member-one", address);

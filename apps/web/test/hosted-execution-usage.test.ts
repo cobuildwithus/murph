@@ -1,3 +1,5 @@
+import { jsonError } from "@/src/lib/hosted-onboarding/http";
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { emptyCliTiming } from "@murphai/runtime-state/cli-timing";
 
@@ -1159,6 +1161,16 @@ describe("recordHostedAiUsageRecords", () => {
     expect(hostedAiUsageUpsert).not.toHaveBeenCalled();
   });
 
+  it.each([false, true])("maps replay conflict and stored lookup failure separately: %s", async dependencyFails => {
+    const upsert = vi.fn(async (args: { create: Record<string, unknown> }) => ({ ...args.create, outputTokens: 999 }));
+    if (dependencyFails) upsert.mockRejectedValueOnce(new ContractValidationError("Synthetic stored usage failure."));
+    const prisma = makeUsagePrismaClient(upsert);
+    const error = await recordHostedAiUsageRecords({ prisma: prisma as never, trustedUserId: "member_123", usage: [BASE_USAGE_RECORD] }).catch(error => error);
+    const response = jsonError(error);
+    expect(response.status).toBe(dependencyFails ? 500 : 400);
+    expect(await response.json()).toMatchObject({ error: { code: dependencyFails ? "INTERNAL_ERROR" : "INVALID_REQUEST" } });
+  });
+
   it("rejects an existing usage row when immutable fields do not match", async () => {
     const prisma = makeUsagePrisma(
       vi.fn(async (args: { create: Record<string, unknown> }) => ({
@@ -1174,7 +1186,7 @@ describe("recordHostedAiUsageRecords", () => {
         usage: [BASE_USAGE_RECORD],
       }),
     ).rejects.toThrow(
-      "Hosted AI usage already exists with different immutable fields: totalTokens.",
+      "Invalid request.",
     );
   });
 
@@ -1193,7 +1205,7 @@ describe("recordHostedAiUsageRecords", () => {
         usage: [BASE_USAGE_RECORD],
       }),
     ).rejects.toThrow(
-      "Hosted AI usage already exists with different immutable fields: providerRequestOrdinal.",
+      "Invalid request.",
     );
   });
 
@@ -1251,7 +1263,7 @@ describe("recordHostedAiUsageRecords", () => {
         usage: [BASE_USAGE_RECORD],
       }),
     ).rejects.toThrow(
-      "Hosted AI usage already exists with different immutable fields: rawUsageJson.",
+      "Invalid request.",
     );
   });
 
@@ -1273,7 +1285,7 @@ describe("recordHostedAiUsageRecords", () => {
         }],
       }),
     ).rejects.toThrow(
-      "Hosted AI usage already exists with different immutable fields: tokenPricingBasis.",
+      "Invalid request.",
     );
   });
 

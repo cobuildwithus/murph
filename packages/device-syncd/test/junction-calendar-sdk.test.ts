@@ -41,7 +41,7 @@ for (const offsetHours of [8, -8]) {
     });
   }
 }
-test("grouped interval transport uses SDK Date endpoints", async () => {
+test("grouped interval transport hands on SDK-decoded endpoints as UTC strings", async () => {
   const client = new JunctionClient({
     apiKey: "sk_us_synthetic", environment: "sandbox", region: "us",
     fetchImpl: async () => createJsonResponse({ groups: { garmin: [{
@@ -50,9 +50,10 @@ test("grouped interval transport uses SDK Date endpoints", async () => {
     }] } }),
   });
   const records = await client.listTimeseries({ resource: "mindfulness_minutes", userId: "synthetic-user", windowStart: "2026-04-02T00:00:00Z", windowEnd: "2026-04-03T00:00:00Z", requireStructurallyCompleteCollection: true });
-  const row = records[0] as { start: unknown; end: unknown };
-  assert.ok(row.start instanceof Date);
-  assert.ok(row.end instanceof Date);
+  const row = records[0] as { start: unknown; end: unknown; timezone_offset: unknown };
+  assert.equal(row.start, "2026-04-02T12:00:00.000Z");
+  assert.equal(row.end, "2026-04-02T12:01:00.000Z");
+  assert.equal(row.timezone_offset, 3600);
 });
 
 test("calendar selection preserves malformed SDK intervals for strict rejection", () => {

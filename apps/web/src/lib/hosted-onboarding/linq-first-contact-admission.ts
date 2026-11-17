@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import OpenAI, { APIError } from "openai";
 import type { ResponseCreateParamsNonStreaming } from "openai/resources/responses/responses";
 
@@ -265,21 +266,6 @@ export async function classifyHostedLinqFirstContactAdmission(input: {
     const errorResponse = requestState.errorResponse;
     if (errorResponse) {
       const providerError = await readHostedLinqFirstContactAdmissionProviderError(errorResponse);
-      if (isHostedLinqFirstContactAdmissionQuotaExhausted({
-        providerError,
-        status: errorResponse.status,
-      })) {
-        const decision = buildHostedLinqFirstContactAdmissionAllow({
-          confidence: 1,
-          source: "deterministic",
-        });
-        logHostedLinqFirstContactAdmissionDecision(input.request, {
-          ...decision,
-          model: environment.linqFirstContactAdmissionModel,
-        });
-        return decision;
-      }
-
       throw buildHostedLinqFirstContactAdmissionUnavailableError({
         cause: providerError.message
           ? new Error(`OpenAI Responses API error: ${providerError.message}`)
@@ -293,21 +279,6 @@ export async function classifyHostedLinqFirstContactAdmission(input: {
 
     if (error instanceof APIError && typeof error.status === "number") {
       const providerError = readHostedLinqFirstContactAdmissionApiError(error);
-      if (isHostedLinqFirstContactAdmissionQuotaExhausted({
-        providerError,
-        status: error.status,
-      })) {
-        const decision = buildHostedLinqFirstContactAdmissionAllow({
-          confidence: 1,
-          source: "deterministic",
-        });
-        logHostedLinqFirstContactAdmissionDecision(input.request, {
-          ...decision,
-          model: environment.linqFirstContactAdmissionModel,
-        });
-        return decision;
-      }
-
       throw buildHostedLinqFirstContactAdmissionUnavailableError({
         cause: providerError.message
           ? new Error(`OpenAI Responses API error: ${providerError.message}`)
@@ -423,7 +394,7 @@ export async function claimHostedLinqFirstContactAdmissionBudget(input: {
     value: input.participantContact.value,
   });
   if (lookupKeyCandidates.length === 0) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted Linq first-contact admission budget requires at least one readable lookup key.",
     );
   }
@@ -433,7 +404,7 @@ export async function claimHostedLinqFirstContactAdmissionBudget(input: {
     value: input.participantContact.value,
   });
   if (!currentLookupKey) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted Linq first-contact admission budget requires a current contact lookup key.",
     );
   }
@@ -506,7 +477,7 @@ export async function resetHostedLinqFirstContactAdmissionForCanaryTx(input: {
       value: input.participantContact.value,
     });
   if (lookupKeyCandidates.length === 0) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted Linq first-contact canary reset requires at least one readable lookup key.",
     );
   }
@@ -1028,35 +999,6 @@ function createHostedLinqFirstContactAdmissionOpenAiFetch(
 function readBoundedProviderErrorString(value: unknown): string | undefined {
   const text = readString(value);
   return text ? text.slice(0, 240) : undefined;
-}
-
-function isHostedLinqFirstContactAdmissionQuotaExhausted(input: {
-  providerError: {
-    code?: string;
-    message?: string;
-    type?: string;
-  };
-  status: number;
-}): boolean {
-  if (input.status !== 429) {
-    return false;
-  }
-
-  const code = input.providerError.code?.toLowerCase();
-  const type = input.providerError.type?.toLowerCase();
-  const message = input.providerError.message?.toLowerCase() ?? "";
-  return code === "insufficient_quota"
-    || code === "billing_hard_limit_reached"
-    || type === "insufficient_quota"
-    || type === "billing_hard_limit_reached"
-    || (
-      message.includes("exceeded your current quota")
-      && message.includes("billing")
-    )
-    || message.includes("insufficient quota")
-    || message.includes("billing hard limit")
-    || message.includes("out of credits")
-    || message.includes("credit balance");
 }
 
 function buildHostedLinqFirstContactAdmissionUnavailableError(input: {

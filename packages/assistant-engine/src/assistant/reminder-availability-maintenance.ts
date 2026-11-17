@@ -1,6 +1,4 @@
-import type {
-  HostedConnectedAppsRequest,
-} from '@murphai/hosted-execution/connected-apps'
+import { buildCalendarWindowRead, parseCalendarPage } from './connected-calendar-read.js'
 import {
   listAutomations,
   parseAutomationAvailabilityConflictBlock,
@@ -20,8 +18,6 @@ const REMINDER_AVAILABILITY_WINDOW_MS = 7 * 24 * 60 * 60 * 1_000
 const REMINDER_AVAILABILITY_REFRESH_INTERVAL_MS = 23 * 60 * 60 * 1_000
 const REMINDER_AVAILABILITY_MAX_BUSY_INTERVALS = 256
 const REMINDER_AVAILABILITY_MAX_REFRESHES_PER_PASS = 100
-const GOOGLE_CALENDAR_READ_TOOL = 'GOOGLECALENDAR_EVENTS_LIST'
-const OUTLOOK_CALENDAR_READ_TOOL = 'OUTLOOK_GET_CALENDAR_VIEW'
 
 interface ReminderAvailabilityWindow {
   endIso: string
@@ -140,10 +136,10 @@ async function refreshOneReminderAvailability(input: {
     input.now,
   )
   const response = await input.connectedApps.request(
-    buildReminderAvailabilityCalendarRequest({
-      account: authorization.account,
-      toolkit: authorization.toolkit,
-      window: input.window,
+    buildCalendarWindowRead({
+      account: authorization.account, provider: authorization.toolkit,
+      start: input.window.startIso, end: input.window.endIso,
+      limit: REMINDER_AVAILABILITY_MAX_BUSY_INTERVALS,
     }),
     { signal: input.signal },
   )
@@ -273,66 +269,14 @@ function buildReminderAvailabilityWindow(
   }
 }
 
-function buildReminderAvailabilityCalendarRequest(input: {
-  account: string
-  toolkit: 'googlecalendar' | 'outlook'
-  window: ReminderAvailabilityWindow
-}): HostedConnectedAppsRequest {
-  return input.toolkit === 'googlecalendar'
-    ? {
-        input: {
-          account: input.account,
-          arguments: {
-            calendarId: 'primary',
-            maxResults: REMINDER_AVAILABILITY_MAX_BUSY_INTERVALS,
-            orderBy: 'startTime',
-            showDeleted: false,
-            singleEvents: true,
-            timeMax: input.window.endIso,
-            timeMin: input.window.startIso,
-          },
-          toolSlug: GOOGLE_CALENDAR_READ_TOOL,
-        },
-        operation: 'execute',
-      }
-    : {
-        input: {
-          account: input.account,
-          arguments: {
-            endDateTime: input.window.endIso,
-            startDateTime: input.window.startIso,
-          },
-          toolSlug: OUTLOOK_CALENDAR_READ_TOOL,
-        },
-        operation: 'execute',
-      }
-}
-
 function readReminderAvailabilityBusyIntervals(input: {
   result: unknown
   toolkit: 'googlecalendar' | 'outlook'
   window: ReminderAvailabilityWindow
 }): Array<{ end: string; start: string }> | null {
-  const envelope = asRecord(input.result)
-  const data = asRecord(envelope?.data)
-  if (!envelope || !data) {
-    return null
-  }
-  if (
-    typeof data.nextPageToken === 'string'
-    || typeof data['@odata.nextLink'] === 'string'
-  ) {
-    return null
-  }
-  const items = input.toolkit === 'googlecalendar'
-    ? data.items
-    : data.value
-  if (
-    !Array.isArray(items)
-    || items.length > REMINDER_AVAILABILITY_MAX_BUSY_INTERVALS
-  ) {
-    return null
-  }
+  const page = parseCalendarPage({ result: input.result }, input.toolkit)
+  const items = page.items
+  if (page.next || page.incomplete || items.length > REMINDER_AVAILABILITY_MAX_BUSY_INTERVALS) return null
 
   const intervals: Array<{ endMs: number; startMs: number }> = []
   for (const item of items) {

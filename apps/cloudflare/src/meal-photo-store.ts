@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   HOSTED_EXECUTION_MEAL_PHOTO_MAX_BYTES,
 } from "@murphai/hosted-execution/contracts";
@@ -80,13 +81,7 @@ export function createHostedMealPhotoStore(input: {
       });
     },
     async stageMealPhoto(stageInput) {
-      const bytes = requireHostedMealPhotoBytes(stageInput.bytes);
-      const captureId = requireHostedMealPhotoCaptureId(stageInput.captureId);
-      const sha256 = requireHostedMealPhotoSha256(stageInput.sha256);
-      const actualSha256 = await sha256Hex(bytes);
-      if (actualSha256 !== sha256) {
-        throw new TypeError("Hosted meal photo sha256 must match the JPEG bytes.");
-      }
+      const { bytes, captureId, sha256 } = await requireHostedMealPhotoStageInput(stageInput);
       const mealPhotoKey = await deriveHostedMealPhotoKey({
         attemptId: crypto.randomUUID(),
         captureId,
@@ -121,6 +116,21 @@ export function createHostedMealPhotoStore(input: {
   }
 }
 
+export async function requireHostedMealPhotoStageInput(input: {
+  bytes: Uint8Array;
+  captureId: string;
+  sha256: string;
+}): Promise<{ bytes: Uint8Array; captureId: string; sha256: string }> {
+  const bytes = requireHostedMealPhotoBytes(input.bytes);
+  const captureId = requireHostedMealPhotoCaptureId(input.captureId);
+  const sha256 = requireHostedMealPhotoSha256(input.sha256);
+  const actualSha256 = await sha256Hex(bytes);
+  if (actualSha256 !== sha256) {
+    throw new ContractValidationError("Hosted meal photo sha256 must match the JPEG bytes.");
+  }
+  return { bytes, captureId, sha256 };
+}
+
 export async function deleteHostedMealPhotoObject(input: {
   bucket: R2BucketLike;
   mealPhotoKey: string;
@@ -140,7 +150,7 @@ export async function deleteHostedMealPhotoObject(input: {
 export function requireHostedMealPhotoKey(value: string): string {
   const normalized = requireNonEmptyString(value, "Hosted meal photo key");
   if (!HOSTED_MEAL_PHOTO_KEY_PATTERN.test(normalized)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted meal photo key must be a 40-character lowercase hexadecimal string.",
     );
   }
@@ -150,7 +160,7 @@ export function requireHostedMealPhotoKey(value: string): string {
 export function requireHostedMealPhotoSha256(value: string): string {
   const normalized = requireNonEmptyString(value, "Hosted meal photo sha256");
   if (!HOSTED_SHA256_PATTERN.test(normalized)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted meal photo sha256 must be a 64-character lowercase hexadecimal string.",
     );
   }
@@ -160,7 +170,7 @@ export function requireHostedMealPhotoSha256(value: string): string {
 export function requireHostedMealPhotoCaptureId(value: string): string {
   const normalized = requireNonEmptyString(value, "Hosted meal photo captureId");
   if (!HOSTED_MEAL_PHOTO_CAPTURE_ID_PATTERN.test(normalized)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted meal photo captureId must be a 64-character lowercase hexadecimal string.",
     );
   }
@@ -169,10 +179,10 @@ export function requireHostedMealPhotoCaptureId(value: string): string {
 
 export function requireHostedMealPhotoBytes(value: Uint8Array): Uint8Array {
   if (!(value instanceof Uint8Array)) {
-    throw new TypeError("Hosted meal photo bytes must be a Uint8Array.");
+    throw new ContractValidationError("Hosted meal photo bytes must be a Uint8Array.");
   }
   if (value.byteLength === 0 || value.byteLength > HOSTED_MEAL_PHOTO_MAX_BYTES) {
-    throw new RangeError(
+    throw new ContractValidationError(
       `Hosted meal photo must contain between 1 and ${HOSTED_MEAL_PHOTO_MAX_BYTES} bytes.`,
     );
   }
@@ -183,7 +193,7 @@ export function requireHostedMealPhotoBytes(value: Uint8Array): Uint8Array {
     || value[value.byteLength - 2] !== 0xff
     || value[value.byteLength - 1] !== 0xd9
   ) {
-    throw new TypeError("Hosted meal photo must be a complete JPEG image.");
+    throw new ContractValidationError("Hosted meal photo must be a complete JPEG image.");
   }
   return Uint8Array.from(value);
 }
@@ -219,11 +229,11 @@ async function deriveHostedMealPhotoKey(input: {
 
 function requireNonEmptyString(value: string, label: string): string {
   if (typeof value !== "string") {
-    throw new TypeError(`${label} must be a string.`);
+    throw new ContractValidationError(`${label} must be a string.`);
   }
   const normalized = value.trim();
   if (!normalized) {
-    throw new TypeError(`${label} must not be blank.`);
+    throw new ContractValidationError(`${label} must not be blank.`);
   }
   return normalized;
 }

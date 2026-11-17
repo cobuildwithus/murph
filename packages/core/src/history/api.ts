@@ -1522,14 +1522,6 @@ function canonicalEventContainsBodyMeasurement(
   return false;
 }
 
-function isReadableCanonicalBodyMeasurement(
-  metric: string,
-  value: number,
-  unit: string | null | undefined,
-): boolean {
-  return readableCanonicalBodyMeasurementMetricKey(metric, value, unit) !== null;
-}
-
 function readableCanonicalBodyMeasurementMetricKey(
   metric: string,
   value: number,

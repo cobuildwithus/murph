@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
 import { randomUUID } from "node:crypto";
@@ -559,7 +560,7 @@ export async function recordHostedIngressDeliveryCommitted(input: {
 }): Promise<HostedIngressLatencyWriteResult> {
   const prisma = input.prisma ?? getPrisma();
   if (input.mailboxItemIds.length > HOSTED_RUNTIME_LATENCY_TRACE_ASSISTANT_INPUT_MAX_IDS) {
-    throw new TypeError("Hosted ingress delivery exceeds the mailbox item bound.");
+    throw new ContractValidationError("Hosted ingress delivery exceeds the mailbox item bound.");
   }
   const ids = [...new Set(input.mailboxItemIds.map((id) =>
     requireSafeLatencyIdentifier(id, "Hosted ingress delivery mailboxItemId")
@@ -617,7 +618,7 @@ export async function recordHostedIngressAssistantMilestone(input: {
     checkpointPublicationExpectedBy
     && terminalLeaf === null
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted ingress latency checkpoint publication expectation requires a terminal completion milestone.",
     );
   }
@@ -2204,7 +2205,7 @@ function normalizeHostedIngressLatencySource(
     return source;
   }
 
-  throw new TypeError("Hosted ingress latency source is not supported.");
+  throw new ContractValidationError("Hosted ingress latency source is not supported.");
 }
 
 async function readTraceMailboxItem(
@@ -2790,7 +2791,7 @@ function normalizeDate(value: Date | string | null | undefined, label: string): 
   }
   const date = value instanceof Date ? value : new Date(value);
   if (!Number.isFinite(date.getTime())) {
-    throw new TypeError(`${label} must be a valid date.`);
+    throw new ContractValidationError(`${label} must be a valid date.`);
   }
   return date;
 }
@@ -2840,13 +2841,13 @@ function readPhaseBreakdownMergeUpdate(
 
 function normalizeHostedRuntimeLeaseGeneration(value: string): string {
   if (typeof value !== "string") {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted ingress latency runtime lease generation must be a string.",
     );
   }
   const normalized = value.trim();
   if (!/^(?:0|[1-9]\d{0,19})$/u.test(normalized)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted ingress latency runtime lease generation is invalid.",
     );
   }
@@ -2860,18 +2861,18 @@ function normalizeNullableLatencyIdentifier(value: string | null | undefined): s
 
 function requireSafeLatencyIdentifier(value: string, label: string): string {
   if (typeof value !== "string") {
-    throw new TypeError(`${label} must be a string.`);
+    throw new ContractValidationError(`${label} must be a string.`);
   }
   const normalized = value.trim();
   if (!/^[A-Za-z0-9_.:-]{1,256}$/u.test(normalized)) {
-    throw new TypeError(`${label} is invalid.`);
+    throw new ContractValidationError(`${label} is invalid.`);
   }
   return normalized;
 }
 
 function normalizeProviderRequestOrdinal(value: number): number {
   if (!Number.isSafeInteger(value) || value < 0 || value > 1000) {
-    throw new TypeError("Hosted ingress latency provider request ordinal is invalid.");
+    throw new ContractValidationError("Hosted ingress latency provider request ordinal is invalid.");
   }
   return value;
 }
@@ -2879,7 +2880,7 @@ function normalizeProviderRequestOrdinal(value: number): number {
 function normalizeEpochMs(value: bigint | number | string): number {
   const epochMs = typeof value === "bigint" ? Number(value) : Number(value);
   if (!Number.isSafeInteger(epochMs)) {
-    throw new TypeError("Hosted ingress latency mailbox accepted timestamp is invalid.");
+    throw new ContractValidationError("Hosted ingress latency mailbox accepted timestamp is invalid.");
   }
   return epochMs;
 }
@@ -2889,7 +2890,7 @@ function normalizeDashboardWindowHours(value: number | null | undefined): number
     return HOSTED_INGRESS_LATENCY_DEFAULT_WINDOW_HOURS;
   }
   if (!Number.isSafeInteger(value) || value < 1) {
-    throw new TypeError("Hosted ingress latency dashboard window must be a positive integer.");
+    throw new ContractValidationError("Hosted ingress latency dashboard window must be a positive integer.");
   }
   return Math.min(value, HOSTED_INGRESS_LATENCY_MAX_WINDOW_HOURS);
 }
@@ -2899,7 +2900,7 @@ function normalizeDashboardSlowLimit(value: number | null | undefined): number {
     return HOSTED_INGRESS_LATENCY_DEFAULT_SLOW_LIMIT;
   }
   if (!Number.isSafeInteger(value) || value < 1) {
-    throw new TypeError("Hosted ingress latency dashboard limit must be a positive integer.");
+    throw new ContractValidationError("Hosted ingress latency dashboard limit must be a positive integer.");
   }
   return Math.min(value, HOSTED_INGRESS_LATENCY_MAX_SLOW_LIMIT);
 }
@@ -2909,7 +2910,7 @@ function normalizeDashboardInFlightGraceMs(value: number | null | undefined): nu
     return HOSTED_INGRESS_LATENCY_IN_FLIGHT_GRACE_MS;
   }
   if (!Number.isSafeInteger(value) || value < 0) {
-    throw new TypeError("Hosted ingress latency in-flight grace must be non-negative.");
+    throw new ContractValidationError("Hosted ingress latency in-flight grace must be non-negative.");
   }
   return Math.min(value, 15 * 60_000);
 }

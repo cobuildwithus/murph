@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   isHostedAssistantReasoningEffort,
   type HostedAssistantReasoningEffort,
@@ -316,7 +317,7 @@ export function parseHostedRuntimeLogRequest(
   );
 
   if (entries.length > HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Hosted runtime log request entries must contain at most ${HOSTED_RUNTIME_LOG_REQUEST_MAX_ENTRIES} entries.`,
     );
   }
@@ -393,7 +394,7 @@ export function parseHostedRuntimeRedactedJson(
     ? entries.filter(([key]) => !reservedKeys.has(key)).length
     : entries.length;
   if (ordinaryEntryCount > maxKeys) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} must contain at most ${maxKeys} fields.`,
     );
   }
@@ -451,14 +452,14 @@ function parseHostedRuntimeRedactedValue(
       ? HOSTED_RUNTIME_DEVICE_SYNC_CONTINUATION_OWNER_MAX_COUNT
       : HOSTED_RUNTIME_REDACTED_ARRAY_MAX_LENGTH;
     if (value.length > maxLength) {
-      throw new TypeError(
+      throw new ContractValidationError(
         `${label} must contain at most ${maxLength} redacted values.`,
       );
     }
 
     if (value.some((entry) => entry && typeof entry === "object")) {
       if (!HOSTED_RUNTIME_REDACTED_OBJECT_ARRAY_KEYS.has(key)) {
-        throw new TypeError(
+        throw new ContractValidationError(
           `${label} must be a shallow redacted scalar or scalar array.`,
         );
       }
@@ -490,7 +491,7 @@ function parseHostedRuntimeRedactedBoolean(
     return value;
   }
 
-  throw new TypeError(`${label} must be a boolean.`);
+  throw new ContractValidationError(`${label} must be a boolean.`);
 }
 
 function parseHostedRuntimeRedactedElapsedMs(
@@ -507,7 +508,7 @@ function parseHostedRuntimeRedactedElapsedMs(
     }
   }
 
-  throw new TypeError(`${label} must be a nonnegative finite number or null.`);
+  throw new ContractValidationError(`${label} must be a nonnegative finite number or null.`);
 }
 
 function parseHostedRuntimeRedactedRoutePlanningStage(
@@ -522,7 +523,7 @@ function parseHostedRuntimeRedactedRoutePlanningStage(
     return value;
   }
 
-  throw new TypeError(`${label} must be a known route-planning stage or null.`);
+  throw new ContractValidationError(`${label} must be a known route-planning stage or null.`);
 }
 
 function parseHostedRuntimeRedactedReasoningEffort(
@@ -537,7 +538,7 @@ function parseHostedRuntimeRedactedReasoningEffort(
     return value;
   }
 
-  throw new TypeError(`${label} must be a known reasoning effort or null.`);
+  throw new ContractValidationError(`${label} must be a known reasoning effort or null.`);
 }
 
 function parseHostedRuntimeRedactedObject(
@@ -546,12 +547,12 @@ function parseHostedRuntimeRedactedObject(
   maxKeys = HOSTED_RUNTIME_REDACTED_OBJECT_MAX_KEYS,
 ): HostedRuntimeRedactedObject {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be a redacted object.`);
+    throw new ContractValidationError(`${label} must be a redacted object.`);
   }
 
   const entries = Object.entries(value);
   if (entries.length > maxKeys) {
-    throw new TypeError(`${label} must contain at most ${maxKeys} fields.`);
+    throw new ContractValidationError(`${label} must contain at most ${maxKeys} fields.`);
   }
 
   const parsed: HostedRuntimeRedactedObject = {};
@@ -575,7 +576,7 @@ function parseHostedRuntimeRedactedScalar(
     typeof value === "number"
   ) {
     if (typeof value === "number" && !Number.isFinite(value)) {
-      throw new TypeError(`${label} must be a finite redacted value.`);
+      throw new ContractValidationError(`${label} must be a finite redacted value.`);
     }
 
     return value;
@@ -586,7 +587,7 @@ function parseHostedRuntimeRedactedScalar(
     return value;
   }
 
-  throw new TypeError(
+  throw new ContractValidationError(
     `${label} must be a shallow redacted scalar or scalar array.`,
   );
 }
@@ -610,12 +611,12 @@ function normalizeHostedRuntimeFailureLogEntry(
   }
 
   if (!normalized.errorCode) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runtime warn/error failure log entries must include a machine-readable errorCode.",
     );
   }
   if (!hasHostedRuntimeFailureSummary(normalized.redactedJson ?? null)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runtime warn/error failure log entries must include a redacted safe error message, detail, cause, or summary.",
     );
   }
@@ -715,7 +716,7 @@ function assertAllowedRedactedKey(key: string, label: string): void {
     key.startsWith("routePlanning") &&
     !ROUTE_PLANNING_REDACTED_KEY_NAMES.has(key)
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} is not an allowed route-planning diagnostic key.`,
     );
   }
@@ -724,7 +725,7 @@ function assertAllowedRedactedKey(key: string, label: string): void {
 
   for (const forbidden of FORBIDDEN_RAW_REDACTED_KEY_NAMES) {
     if (normalized.includes(forbidden) && !isSafeRedactedMetadataKey(key)) {
-      throw new TypeError(
+      throw new ContractValidationError(
         `${label} is not allowed in hosted runtime redacted JSON.`,
       );
     }
@@ -751,7 +752,7 @@ function assertNoForbiddenRuntimeLogKeys(
 ): void {
   for (const key of Object.keys(record)) {
     if (!HOSTED_RUNTIME_LOG_ENTRY_KEYS.has(key)) {
-      throw new TypeError(
+      throw new ContractValidationError(
         `${label}.${key} is not allowed in hosted runtime log entries.`,
       );
     }
@@ -760,7 +761,7 @@ function assertNoForbiddenRuntimeLogKeys(
 
 function assertSafeRedactedString(value: string, label: string): void {
   if (value.length > HOSTED_RUNTIME_REDACTED_STRING_MAX_LENGTH) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} must be at most ${HOSTED_RUNTIME_REDACTED_STRING_MAX_LENGTH} characters.`,
     );
   }
@@ -770,27 +771,27 @@ function assertSafeRedactedString(value: string, label: string): void {
       value,
     )
   ) {
-    throw new TypeError(`${label} must not contain a local filesystem path.`);
+    throw new ContractValidationError(`${label} must not contain a local filesystem path.`);
   }
   if (/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/iu.test(value)) {
-    throw new TypeError(`${label} must not contain an email address.`);
+    throw new ContractValidationError(`${label} must not contain an email address.`);
   }
   if (/\bhttps?:\/\//iu.test(value)) {
-    throw new TypeError(`${label} must not contain a URL.`);
+    throw new ContractValidationError(`${label} must not contain a URL.`);
   }
   if (
     /(?:\+\d[\d().\s-]{7,}\d|\(\d{3}\)\s*\d{3}[-.\s]\d{4}\b|\b\d{3}[-.\s]\d{3}[-.\s]\d{4}\b)/u.test(
       value,
     )
   ) {
-    throw new TypeError(`${label} must not contain a phone number.`);
+    throw new ContractValidationError(`${label} must not contain a phone number.`);
   }
   if (
     HOSTED_RUNTIME_DIRECT_ID_TEXT_PATTERNS.some((pattern) =>
       pattern.test(value),
     )
   ) {
-    throw new TypeError(`${label} must not contain a direct identifier.`);
+    throw new ContractValidationError(`${label} must not contain a direct identifier.`);
   }
   if (
     /(["']?(?:authorization|secret|token|password|cookie|set-cookie|api[-_]?key)["']?\s*[:=]\s*)(?!(?:(?:Basic|Bearer)\s+)?\[redacted\](?=$|\s|[,.;:)}\]](?=$|\s)))["']?([^"',\s}]+)/iu.test(
@@ -800,7 +801,7 @@ function assertSafeRedactedString(value: string, label: string): void {
     /\b(?:sk|pk|rk)_(?:live|test)_[A-Z0-9]+\b/iu.test(value) ||
     /\bwhsec_[A-Z0-9]+\b/iu.test(value)
   ) {
-    throw new TypeError(`${label} must not contain secret-shaped content.`);
+    throw new ContractValidationError(`${label} must not contain secret-shaped content.`);
   }
 }
 
@@ -823,7 +824,7 @@ function assertSafeHostedRuntimeLogString(value: string, label: string): void {
   assertSafeRedactedString(value, label);
 
   if (value.length > 128 || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(value)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} must be a bounded opaque identifier or code.`,
     );
   }

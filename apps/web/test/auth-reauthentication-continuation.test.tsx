@@ -5,8 +5,8 @@ const mocks = vi.hoisted(() => ({ navigate: vi.fn(), reload: vi.fn(), pathname: 
 vi.mock("next/navigation", () => ({ usePathname: () => mocks.pathname, useSelectedLayoutSegment: () => "approve" }));
 vi.mock("@/src/components/hosted-onboarding/hosted-auth-navigation", () => ({ navigateHostedAuthRedirect: mocks.navigate, reloadCurrentHostedAuthDocument: mocks.reload }));
 vi.mock("@/src/components/hosted-onboarding/auth-dialog", () => ({ AuthDialog: (props: {
-  open: boolean; reauthenticate: boolean; onReauthenticated: () => void; onOpenChange: (open: boolean) => void;
-}) => props.open ? createElement("div", { "data-reauthenticate": props.reauthenticate },
+  open: boolean; reauthenticate: boolean; onReauthenticated: () => void; onOpenChange: (open: boolean) => void; methods?: readonly string[];
+}) => props.open ? createElement("div", { "data-reauthenticate": props.reauthenticate, "data-methods": props.methods?.join(",") ?? "default" },
   createElement("button", { onClick: props.onReauthenticated }, "Complete primary proof"),
   createElement("button", { onClick: () => props.onOpenChange(false) }, "Cancel sign-in")) : null }));
 import { AuthProvider, useAuth } from "@/src/components/hosted-onboarding/auth-dialog-provider";
@@ -29,6 +29,8 @@ test.each([true, false])("inline primary proof continues only on success (comple
   try {
     await click("Approve");
     expect(view.container.querySelector('[data-reauthenticate="true"]')).not.toBeNull();
+    // Signing in again sets up a passkey, which an email code alone cannot do.
+    expect(view.container.querySelector('[data-reauthenticate="true"]')?.getAttribute("data-methods")).toBe("phone,telegram");
     expect(view.container.querySelector("[data-result]")?.textContent).toBe("waiting");
     await click(completed ? "Complete primary proof" : "Cancel sign-in");
     expect(view.container.querySelector("[data-result]")?.textContent).toBe(completed ? "continued" : "canceled");

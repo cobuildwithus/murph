@@ -2,6 +2,7 @@ import { parseDynamicToolArguments } from './dynamic-tool-wrapper.js'
 import {
   conversationPollActionSchema,
   type ConversationPollAction,
+  type ConversationPollResponse,
 } from '@murphai/hosted-execution/conversation-polls'
 import type { AssistantHostedToolContext } from '../../assistant/hosted-tool-context.js'
 import { toolTextResult } from '../tool-failure-diagnostics.js'
@@ -67,12 +68,28 @@ export async function executeConversationPollTool(input: {
       route: route!,
       request: input.request,
     })
-    return toolTextResult(true, JSON.stringify(result))
+    return toolTextResult(true, JSON.stringify(projectConversationPollResponse(result)))
   } catch (error) {
     if (error && typeof error === 'object' && 'code' in error && error.code === 'HOSTED_POLL_UNSUPPORTED_SERVICE') {
       return toolTextResult(false, 'Native polls require a confirmed iMessage conversation. This conversation’s service is unknown or unsupported; no poll action was sent.', 'authority_rejected', error)
     }
     return toolTextResult(false, pollFailureText(input.request.action), 'handler_exception', error)
+  }
+}
+
+// Each voter repeats the poll's observedAt, and every iMessage voter or named
+// Telegram user has the channel's ordinary kind. Keep only a kind that differs,
+// such as a Telegram chat-level vote.
+const ORDINARY_POLL_VOTER_KIND = { linq: 'imessage_handle', telegram: 'telegram_user' } as const
+
+function projectConversationPollResponse(response: ConversationPollResponse) {
+  return {
+    ...response,
+    polls: response.polls.map((poll) => poll.voters === undefined ? poll : {
+      ...poll,
+      voters: poll.voters.map(({ kind, observedAt: _observedAt, ...voter }) =>
+        kind === ORDINARY_POLL_VOTER_KIND[poll.channel] ? voter : { kind, ...voter }),
+    }),
   }
 }
 

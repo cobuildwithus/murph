@@ -356,6 +356,21 @@ function admitJunctionWorkoutStreamSource(
   });
 }
 
+// Connect-window history is owed only while a wearable is linked.
+function linkJunctionGarminSource(
+  store: SqliteDeviceSyncStore,
+  connectionId: string,
+): void {
+  store.upsertConnectionSource({
+    connectionId,
+    firstSeenAt: "2026-04-01T00:00:00.000Z",
+    lastSeenAt: "2026-04-01T00:00:00.000Z",
+    sourceInstanceKey: "garmin",
+    sourceProviderSlug: "garmin",
+    status: "connected",
+  });
+}
+
 function assertJunctionWorkoutStreamRetryCoordinate(
   jobKind: JunctionWorkoutStreamServiceJobKind,
   job: DeviceSyncJobRecord,
@@ -2537,6 +2552,125 @@ test("Junction lifecycle supersession retries one webhook resource job with norm
   }
 });
 
+test("accepted Junction webhook data waits a bounded time for its source to be re-admitted", async () => {
+  let now = new Date("2030-04-03T12:00:00.000Z");
+  const vaultRoot = await makeTempDirectory("murph-device-syncd-junction-pending-source");
+  let importCount = 0;
+  const { service, store, close } = createServiceFixture({
+    secret: "secret-for-tests",
+    clock: { now: () => now },
+    config: {
+      vaultRoot,
+      stateDatabasePath: path.join(vaultRoot, ".runtime", "device-syncd.sqlite"),
+    },
+    importer: {
+      async importDeviceProviderSnapshot() {
+        importCount += 1;
+        return { events: [{ kind: "measurement" }] };
+      },
+    },
+    providers: [createJunctionDeviceSyncProvider({
+      apiKey: "sk_us_test_123",
+      clientUserIdSecret: "junction-client-user-id-secret",
+      environment: "sandbox",
+      region: "us",
+      summaryResources: ["activity"],
+      timeseriesResources: [],
+      fetchImpl: async (input) => {
+        throw new Error(`Unexpected Junction request: ${readUrl(input)}`);
+      },
+    })],
+  });
+
+  try {
+    const account = seedStoredAccount(store, {
+      provider: "junction",
+      externalAccountId: "junction-pending-source",
+      displayName: "Junction",
+      scopes: [],
+      status: "active",
+      credential: {
+        kind: "provider_config",
+        providerConfigKey: "junction",
+        credentialMetadata: {},
+      },
+      connectedAt: "2026-04-01T00:00:00.000Z",
+    });
+    const source = {
+      connectionId: account.id,
+      sourceInstanceKey: "apple_health_kit",
+      sourceProviderSlug: "apple_health_kit",
+      resourceAvailabilitySummary: { activity: true },
+      firstSeenAt: "2026-04-01T00:00:00.000Z",
+      lastSeenAt: "2030-04-03T11:59:00.000Z",
+    };
+    // An explicit reconnect has opened: disconnected with no error.
+    store.upsertConnectionSource({ ...source, status: "disconnected" });
+    const enqueue = (objectId: string) => store.enqueueJob({
+      accountId: account.id,
+      provider: "junction",
+      kind: "resource",
+      payload: {
+        eventType: "daily.data.activity.created",
+        objectId,
+        occurredAt: "2030-04-02T00:00:00.000Z",
+        resource: "activity",
+        resourceCategory: "summary",
+        sourceProviderSlug: "apple_health_kit",
+        webhookDataJson: JSON.stringify({
+          date: "2030-04-02",
+          id: objectId,
+          sourceProviderSlug: "apple_health_kit",
+          steps: 4321,
+        }),
+        windowEnd: "2030-04-03T00:00:00.000Z",
+        windowStart: "2030-04-02T00:00:00.000Z",
+      },
+      availableAt: now.toISOString(),
+    });
+    const runDue = async (jobId: string) => {
+      now = new Date(requireJob(jobId).availableAt);
+      assert.equal((await service.runWorkerOnce())?.id, jobId);
+      return requireJob(jobId);
+    };
+    const requireJob = (jobId: string) => {
+      const job = store.getJobById(jobId);
+      assert.ok(job);
+      return job;
+    };
+
+    // Held, then imported once the next data webhook re-admits the source.
+    const held = enqueue("activity-held");
+    const heldOnce = await runDue(held.id);
+    assert.equal(heldOnce.status, "queued");
+    assert.equal(heldOnce.lastErrorCode, "JUNCTION_SOURCE_ADMISSION_PENDING");
+    assert.equal(
+      heldOnce.availableAt,
+      new Date(now.getTime() + computeRetryDelayMs(1)).toISOString(),
+    );
+    assert.equal(importCount, 0);
+    store.upsertConnectionSource({ ...source, status: "connected", lastSeenAt: now.toISOString() });
+    assert.equal((await runDue(held.id)).status, "succeeded");
+    assert.equal(importCount, 1);
+
+    // A source that never returns ends the hold on the ordinary job budget.
+    store.upsertConnectionSource({ ...source, status: "disconnected", lastSeenAt: now.toISOString() });
+    const abandoned = enqueue("activity-abandoned");
+    const startedAt = now.getTime();
+    for (let attempt = 1; attempt <= abandoned.maxAttempts; attempt += 1) {
+      const job = await runDue(abandoned.id);
+      assert.equal(job.attempts, attempt);
+      assert.equal(job.status, attempt < abandoned.maxAttempts ? "queued" : "dead");
+    }
+    assert.equal(abandoned.maxAttempts, 5);
+    // 15s + 60s + 5m + 30m: well inside the webhook queue's retry horizon.
+    assert.equal(now.getTime() - startedAt, 36 * 60_000 + 15_000);
+    assert.equal(importCount, 1);
+  } finally {
+    close();
+  }
+});
+
 test.each(["resource"] as const)(
   "Junction workout-stream %s failures keep exact progress on one cumulatively retried job",
   async (jobKind: JunctionWorkoutStreamServiceJobKind) => {
@@ -3381,7 +3515,7 @@ test("Junction stale metadata backfill cannot suppress the current closed-day op
       },
       connectedAt: "2026-04-03T00:00:00.000Z",
       metadata: {
-        junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+        junctionHistoricalBackfillStatus: "coverage_v4_retrying",
         junctionHistoricalBackfillEmptyAttempts: 1,
         junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
         junctionHistoricalBackfillWindowStart: "2026-04-01T00:00:00.000Z",
@@ -3389,6 +3523,7 @@ test("Junction stale metadata backfill cannot suppress the current closed-day op
       },
       nextReconcileAt: now.toISOString(),
     });
+    linkJunctionGarminSource(store, account.id);
 
     await service.runSchedulerOnce();
     const dueJobs = readJobsForAccountForTesting(store, account.id)
@@ -8222,6 +8357,7 @@ test("manual reconcile boosts Junction reconcile priority without promoting hist
       connectedAt: "2026-04-01T00:00:00.000Z",
       nextReconcileAt: null,
     });
+    linkJunctionGarminSource(store, account.id);
 
     const reconcile = service.queueManualReconcile(account.id);
     const queuedByKind = new Map(reconcile.jobs.map((job) => [job.kind, job]));
@@ -8397,7 +8533,7 @@ test("manual reconcile preserves delayed Junction retry metadata timing", async 
       },
       connectedAt: ownerWindowEnd,
       metadata: {
-        junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+        junctionHistoricalBackfillStatus: "coverage_v4_retrying",
         junctionHistoricalBackfillEmptyAttempts: 1,
         junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
         junctionHistoricalBackfillWindowStart: ownerWindowStart,
@@ -8508,7 +8644,7 @@ test("device sync service wakes Junction retrying historical backfill at the ret
     assert.equal(processedJob?.kind, "backfill");
 
     const afterEmptyBackfill = store.getAccountById(account.id);
-    assert.equal(afterEmptyBackfill?.metadata.junctionHistoricalBackfillStatus, "coverage_v3_retrying");
+    assert.equal(afterEmptyBackfill?.metadata.junctionHistoricalBackfillStatus, "coverage_v4_retrying");
     assert.equal(afterEmptyBackfill?.metadata.junctionHistoricalBackfillEmptyAttempts, 1);
     assert.equal(afterEmptyBackfill?.metadata.junctionHistoricalBackfillLastEmptyAt, executedAt);
     assert.equal(afterEmptyBackfill?.nextReconcileAt, retryDueAt);
@@ -8656,6 +8792,7 @@ test("device sync scheduler immediately repairs legacy Junction coverage progres
       },
       nextReconcileAt: scheduledAt,
     });
+    linkJunctionGarminSource(store, account.id);
 
     await service.runSchedulerOnce();
     const queuedJobs = readJobsForAccountForTesting(store, account.id).filter((job) => job.status === "queued");
@@ -8685,7 +8822,7 @@ test("device sync scheduler immediately repairs legacy Junction coverage progres
 
     assert.equal(repairJob?.id, queuedBackfill.id);
     assert.equal(store.getJobById(queuedBackfill.id)?.status, "succeeded");
-    assert.equal(repairedAccount?.metadata.junctionHistoricalBackfillStatus, "coverage_v3_retrying");
+    assert.equal(repairedAccount?.metadata.junctionHistoricalBackfillStatus, "coverage_v4_retrying");
     assert.equal(repairedAccount?.metadata.junctionHistoricalBackfillEmptyAttempts, 1);
     assert.equal(repairedAccount?.metadata.junctionHistoricalBackfillLastEmptyAt, scheduledAt);
     assert.equal(repairedAccount?.nextReconcileAt, repairRetryDueAt);
@@ -8741,7 +8878,7 @@ test("device sync scheduler rematerializes dead Junction metadata retries", asyn
       },
       connectedAt: ownerWindowEnd,
       metadata: {
-        junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+        junctionHistoricalBackfillStatus: "coverage_v4_retrying",
         junctionHistoricalBackfillEmptyAttempts: 1,
         junctionHistoricalBackfillLastEmptyAt: "2026-04-04T00:00:00.000Z",
         junctionHistoricalBackfillWindowStart: ownerWindowStart,
@@ -8749,6 +8886,7 @@ test("device sync scheduler rematerializes dead Junction metadata retries", asyn
       },
       nextReconcileAt: scheduledAt,
     });
+    linkJunctionGarminSource(store, account.id);
     const expectedDedupeKey = createHash("sha256")
       .update(JSON.stringify(["junction", "backfill", ownerWindowStart, ownerWindowEnd]))
       .digest("hex");
@@ -10370,6 +10508,7 @@ test("Junction default reconcile keeps ordinary blood-oxygen coverage ahead of t
       connectedAt: "2026-08-01T00:00:00.000Z",
       nextReconcileAt: now.toISOString(),
     });
+    linkJunctionGarminSource(fixture.store, account.id);
 
     const scheduledJobs = await fixture.service.runSchedulerOnce(account.id);
     assert.equal(scheduledJobs.some((job) => job.kind === "reconcile"), true);
@@ -12664,7 +12803,7 @@ test("sqlite store prioritizes metadataPatch entries when capped metadata is ful
       metadataPatch: {
         junctionHistoricalBackfillEmptyAttempts: 1,
         junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:00:00.000Z",
-        junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+        junctionHistoricalBackfillStatus: "coverage_v4_retrying",
         junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
         junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
       },
@@ -12684,7 +12823,7 @@ test("sqlite store prioritizes metadataPatch entries when capped metadata is ful
     {
       junctionHistoricalBackfillEmptyAttempts: 1,
       junctionHistoricalBackfillLastEmptyAt: "2026-03-20T12:00:00.000Z",
-      junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+      junctionHistoricalBackfillStatus: "coverage_v4_retrying",
       junctionHistoricalBackfillWindowEnd: "2026-03-20T00:00:00.000Z",
       junctionHistoricalBackfillWindowStart: "2025-12-20T00:00:00.000Z",
     },

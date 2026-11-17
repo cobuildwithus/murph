@@ -680,6 +680,22 @@ describe('assistant CLI delivery contracts', () => {
     ).toThrow()
   })
 
+  it.each(['music_v2', 'music_v2_5'])('preserves %s in a saved music descriptor', modelId => {
+    const descriptor = {
+      kind: 'voice_memo', filename: 'song.mp3', transcript: null,
+      transport: { kind: 'telegram_generation', generation: {
+        kind: 'elevenlabs_music', durationMs: 30_000, forceInstrumental: true,
+        modelId, outputFormat: 'mp3_48000_192', prompt: 'Synthetic piano motif',
+      } },
+    }
+    expect(assistantResponseMediaSchema.parse(descriptor)).toEqual(descriptor)
+    for (const unsupported of ['music_v1', 'unknown-model']) {
+      expect(assistantResponseMediaSchema.safeParse({ ...descriptor, transport: {
+        ...descriptor.transport, generation: { ...descriptor.transport.generation, modelId: unsupported },
+      } }).success).toBe(false)
+    }
+  })
+
   it('keeps assistant ask results backward compatible when response disposition is absent', () => {
     const session = {
       schema: 'murph.assistant-conversation.v2',

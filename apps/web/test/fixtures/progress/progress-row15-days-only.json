@@ -1,0 +1,112 @@
+{
+  "joinedOn": "2026-10-21",
+  "today": "2026-11-14",
+  "incomplete": false,
+  "measures": [
+    {
+      "id": "habcdef012345.days",
+      "label": "Pushups",
+      "noun": "days",
+      "icon": "pushups",
+      "format": "days",
+      "source": "games",
+      "pending": false,
+      "gameOn": true,
+      "needsPerDay": true,
+      "total": {
+        "value": 23,
+        "text": "23",
+        "unit": "days"
+      },
+      "today": null,
+      "points": [
+        [
+          "2026-10-21",
+          0.0
+        ],
+        [
+          "2026-10-22",
+          1.769
+        ],
+        [
+          "2026-10-24",
+          3.538
+        ],
+        [
+          "2026-10-26",
+          5.308
+        ],
+        [
+          "2026-10-28",
+          7.077
+        ],
+        [
+          "2026-10-30",
+          8.846
+        ],
+        [
+          "2026-11-01",
+          10.615
+        ],
+        [
+          "2026-11-02",
+          12.385
+        ],
+        [
+          "2026-11-04",
+          14.154
+        ],
+        [
+          "2026-11-06",
+          15.923
+        ],
+        [
+          "2026-11-08",
+          17.692
+        ],
+        [
+          "2026-11-10",
+          19.462
+        ],
+        [
+          "2026-11-12",
+          21.231
+        ],
+        [
+          "2026-11-14",
+          23.0
+        ]
+      ],
+      "projection": {
+        "value": 30,
+        "label": "30 by Nov 22",
+        "on": "2026-11-22"
+      },
+      "ladder": null,
+      "route": null,
+      "pics": []
+    }
+  ],
+  "medals": [
+    {
+      "id": "push-days20",
+      "kind": "days",
+      "gold": true,
+      "face": {
+        "number": "20"
+      },
+      "title": "20 days",
+      "detail": "pushups",
+      "earnedOn": "2026-11-14",
+      "open": {
+        "page": "totals",
+        "measureId": "habcdef012345.days"
+      }
+    }
+  ],
+  "shelf": [
+    "push-days20"
+  ],
+  "moments": [],
+  "picCount": 0
+}

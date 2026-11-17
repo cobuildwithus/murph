@@ -95,9 +95,8 @@ import type {
   StoredDeviceSyncAccount,
 } from "../src/types.ts";
 
-// A payload comfortably larger than the old 64KB inline cap. The cap was
-// removed in P3; large inline payloads now import inline instead of dropping
-// to a REST fallback or being chunked into durable jobs.
+// A queued inline payload larger than a prepared webhook event can carry. The
+// runner imports it inline; only webhook preparation bounds inline size.
 const DIRECT_WEBHOOK_JOB_LARGE_BYTES_FOR_TEST = 64_001;
 
 function createAccount(overrides: Partial<Omit<DeviceSyncAccount, "credential">> & {

@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 export const CLINICAL_RECORD_MAX_SOURCES = 20;
 
 export const CLINICAL_RECORD_CONNECTION_STATUSES = [
@@ -328,11 +329,11 @@ function requireCount(value: unknown): number {
   return value;
 }
 
-function invalidContract(): TypeError {
-  return new TypeError("Clinical Records response did not match the client contract.");
+function invalidContract(): ContractValidationError {
+  return new ContractValidationError("Clinical Records response did not match the client contract.");
 }
 
 function parseBoolean(value: unknown): boolean {
-  if (typeof value !== "boolean") throw new TypeError("Clinical Records boolean is invalid.");
+  if (typeof value !== "boolean") throw new ContractValidationError("Clinical Records boolean is invalid.");
   return value;
 }

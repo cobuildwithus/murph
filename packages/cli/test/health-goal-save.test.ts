@@ -53,8 +53,8 @@ interface GoalSaveResult {
 
 interface GoalShowResult {
   entity: {
+    title: string;
     data: {
-      title: string;
       status: string;
       commonsGoalRef?: {
         key: string;
@@ -264,7 +264,8 @@ test("goal save and fresh-service readback preserve one exact canonical record",
       "goal", "show", goalId, "--vault", vaultRoot,
     ]);
     assert.equal(shown.exitCode, null);
-    assert.equal(requireData(shown.envelope).entity.data.title, title);
+    assert.equal(requireData(shown.envelope).entity.title, title);
+    assert.equal("title" in requireData(shown.envelope).entity.data, false);
     assert.equal(requireData(shown.envelope).entity.data.status, "active");
     const listed = await runInProcessJsonCli<GoalListResult>(reader, [
       "goal", "list", "--limit", "200", "--vault", vaultRoot,
@@ -816,7 +817,7 @@ test("goal save executes the documented titleless pause and resume commands with
       assert.equal(shown.exitCode, null, JSON.stringify(shown.envelope));
       assert.equal(requireData(shown.envelope).entity.data.status, status);
       assert.equal(
-        requireData(shown.envelope).entity.data.title,
+        requireData(shown.envelope).entity.title,
         "Improve sleep depth",
       );
       assert.deepEqual(

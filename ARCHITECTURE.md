@@ -298,6 +298,44 @@ already concise records remain unchanged. This policy uses the existing memory
 format and tool, with no schema migration or second profile store.
 
 The morning Journal connected-context automation writes canonical Journal plans.
+Before inference, the engine prepares Gmail, Outlook and visible calendar
+metadata on a pinned read lane, within one 60-second deadline and 40 requests.
+Canonical authority, delivery, managed-owner and occurrence-expiry gates run
+before acquisition; an expired occurrence cannot consume its first backfill.
+Mail query tiers are greedily packed once into stable batches of at most 1,800
+characters, including date bounds and exclusions. Each batch gets two pages of
+25 results per partition; merged message IDs are ordered newest first, and any
+batch cap or exhausted shared request budget produces incomplete coverage.
+Web returns mail search results as metadata only. Gmail asks for no payload,
+and Outlook search hits, which have no field selector, keep only the subject,
+sender, received time and preview, so a busy mailbox fits the read cap.
+It reconciles `activeAccounts` after acquisition from a complete inventory:
+retain previously active accounts that are still listed, add new Gmail/Outlook
+accounts only after complete or partial mail acquisition (calendar-only accounts
+use their calendar result), and remove disconnected accounts. Malformed account
+entries leave valid neighbors readable but mark inventory partial and suppress
+account reconciliation for that run.
+A failed initial read therefore retries the 90-day backfill. Reconciliation uses guarded
+Knowledge writes that preserve controls and source mappings. Malformed provider
+items are skipped with partial coverage; malformed Sources entries do not
+discard successful reads. Reconciliation or alias lookup failure retains the
+prepared candidates and reports an aggregate issue. Controls are re-read before
+the digest: unreadable controls or global opt-out clear candidates and fail account
+coverage with `controls_changed`; scoped opt-outs remove affected candidates and
+locators. The digest carries current controls. An initial global opt-out
+prevents even account listing. Explicit cancellation tombstones may omit event
+times in both windows and exact reads; missing times on other events are malformed.
+Non-owned calendar events require the member's
+participation; provider calendar-owner flags alone do not establish it.
+The fenced, untrusted digest is at most 48 KiB and carries coverage and read
+times. Overflow removes the lowest-priority item from the candidate kind using
+more bytes, retaining a share of both mail and calendar evidence. Failed or
+capped coverage cannot establish absence. The prepared turn
+has no generic connected-app tools; `murph.journal_source_read` confirms exact
+eligible calendar sources or opens only mail matched during this run, with
+current opt-out checks and at most 20 reads. Existing plan identities are
+preserved through exact aliases. There is no seen-state, diff gate or fallback
+provider browse. Reminder review continues when acquisition fails.
 Connected plans alone do not authorize attendance or logistics check-ins. New
 follow-ups require an explicit member request or a concrete health purpose;
 scheduled execution applies this rule to legacy instructions too. Morning
@@ -430,7 +468,8 @@ pass deterministically scans active private automations that explicitly store
 `skip-when-busy`, `calendar-only`, and one exact Google Calendar or Outlook
 account binding; exact-time automations are ineligible. When the stored snapshot
 is missing or reaches its 23-hour refresh deadline,
-host code derives the exact account and current seven-day provider request,
+host code derives the exact account and current seven-day provider request
+through the calendar read adapter shared with Journal preparation,
 caps the result, reduces it to normalized busy timestamps, rereads the
 automation, and performs a version-fenced suffix replacement. Complete empty
 reads persist an empty snapshot so the same canonical `generatedAt` field also
@@ -884,6 +923,15 @@ persisted audience. This adds no fan-out, scheduler, policy engine, result
 table, or second service.
 
 ## Hosted Connected Apps
+
+Engine-owned `read` is a separate allowlisted operation on the same signed
+boundary, unavailable in model-facing schemas. Web verifies active member
+ownership and toolkit, forces provider identity arguments and pins Gmail
+`20261105_00`, Google Calendar `20261111_00` and Outlook `20261112_00`.
+Direct JSON-string data is decoded before the ordinary result compaction and
+413 budget checks, then returned in `{data: ...}`. Deploy this Web contract
+before the runtime; `CONNECTED_APPS_REQUEST_INVALID` reports old Web coverage
+failure without changing acquisition paths.
 
 Connected apps expose exactly three assistant tools: account management, semantic tool search, and execution. `apps/web` owns the Composio API key, durable per-member Tool Router session id, short-lived member-bound connect intents, account verification, server-owned built-in service tool allowlist, server-held OpenWeather authority, server-owned fixed-write allowlist for primary-calendar creation and bounded Gmail/Outlook email sending, and branded OAuth completion UX. The hosted runner reaches that authority only through the existing signed `web-control.worker` boundary; Composio credentials, session ids, OAuth state, OpenWeather credentials, and connected-account provider tokens never enter Codex env or prompts. Composio owns provider schemas and raw execution results for its tools. Murph applies a session-level read-only/non-destructive policy, explicit multi-account selection for connected-account tools, and accountless execution only for server-allowlisted built-in service tools. The existing current-weather tools use direct custom-auth execution through Composio. One fixed web-owned One Call read accepts only bounded latitude and longitude, requests only official national alerts, and returns a small normalized alert projection. It adds no scheduler, state, cache, or user-defined weather threshold. The direct and scheduled alert guidance must not deploy until One Call 3 is active for the exact production key and a signed Web-control smoke read returns a normalized success, including a valid empty alert list. Deploy Web first when activation and assistant deployment cannot happen together. Primary-calendar creation and bounded Gmail/Outlook email sends share one exact server-owned direct-execute policy table. Every route pins its toolkit and provider version, requires agent approval plus an active owned account from that toolkit, rejects missing, blank, unsupported, or server-owned model arguments before egress, and forces provider-owned fields such as the primary calendar, sender, and Outlook Sent-copy behavior. Email sends additionally require current accepted user input in a private direct turn at the assistant runtime boundary; scheduled, group, maintenance, system-notification, and output-only turns fail closed before provider egress. Failed or ambiguous writes are non-retryable; ambiguous email outcomes are reconciled only against a narrow recent Sent-mail window matching the primary recipient, subject, and substantive body, and uncertain results remain unknown.
 
@@ -2727,10 +2775,11 @@ read failures use existing cron retry handling. Explicit manual runs bypass
 this automatic suppression. No additional persisted queue or marker is used.
 
 The scheduled morning Journal connected-context pass uses the same precondition
-path when the active/paused non-maintenance reminder inventory is empty and either
-global capture is opted out, or an absent/empty-account ledger plus the live
-connected-apps list proves no supported active accounts; stale accounts and any
-uncertain read keep the model turn eligible. Manual runs bypass this check.
+path when the active/paused non-maintenance reminder inventory is empty and
+preparation proves capture is globally opted out or no eligible accounts remain.
+Stale accounts and uncertain reads keep the model turn eligible. The admission
+check reuses preparation's result; it never repeats the account list. Manual
+runs bypass idle suppression and still use prepared acquisition.
 
 ### Clinical Records retrieval
 
@@ -2871,6 +2920,8 @@ Wire contracts live in [iOS Meals and private numbers](agent-docs/product-specs/
 
 ## Trust Boundaries
 
+- Linq production-canary reset and outcome share one GitHub Actions OIDC verifier with fixed workflow, repository, branch, event and audience claims. Only destructive reset consumes an issuer-namespaced `jti` hash through the existing internal-request nonce store until token expiry; its fixed service identity survives canary-account deletion. Read-only outcomes do not consume tokens. The controller requests a fresh token for each HTTP request, so long observations never restart reset or provider sends to refresh auth. The Web static bearer remains a configuration-gated rollout bridge only; see Security and `agent-docs/operations/live-provider-canaries.md` for claims and removal order.
+
 - Web owns four authenticated, staggered hourly Vercel retention routes instead of one cross-domain sweep: nonce retention at minute 5, ordinary primary-database retention at minute 20, external account/computer provider cleanup at minute 35, and runtime-signal plus diagnostic-log maintenance at minute 50. Only the nonce route has an 800-second duration; the other three are capped at 300 seconds. No route invokes another owner, so a Kernel/browser, account-provider, runtime-signal, or diagnostic-database failure cannot prevent callback nonce catch-up.
 - Every verified Cloudflare-to-Web execution callback consumes one SHA-256 nonce row with a single primary-Postgres insert. The `nonce_hash` primary key is the replay linearization point: one concurrent exact nonce wins and every exact-nonce conflict replay loses. A raw-query uniqueness failure from the PostgreSQL adapter is also a replay rejection only when its SQLSTATE is `23505` and its constraint fields are exactly `nonce_hash`; this covers concurrent unique-index rebuilding without retries, additional statements, or swallowing unrelated database failures. The insert uses the database clock to refuse a delayed first admission after the callback's inclusive expiry boundary while retaining that row as a replay tombstone. The callback path owns no expiry sweep, transaction callback, or application-visible lock orchestration. The dedicated nonce-retention route finishes the small browser-assertion nonce lane before selecting strictly expired callback nonce rows in `expires_at`, `nonce_hash` order, locking at most 5,000 candidates per statement with PostgreSQL `FOR UPDATE SKIP LOCKED`, and deleting those exact rows in the same statement. Callback nonces alone use a 100-times-higher max-batch ceiling to drain sustained control-plane volume; browser assertion nonces and all ordinary retention categories keep the shared four-batch ceiling. A caught-up hour stops after the first short batch. Account deletion independently retains its per-member nonce delete.
 - Short-lived hosted control-plane creation is likewise cleanup-free. Connected-app intents, unbound sensitive-action challenges, device-connect intents, device OAuth sessions, Clinical Records connect intents, and Clinical Records OAuth sessions are created or consumed only through their exact owner rows; an exact expired read or consume fails closed. A member-bound device OAuth consumer reads only an owner hint before its transaction, then locks the member before the exact state row and revalidates the owner; credential replacement and account deletion use the same member-before-state order. An unowned device state and a Clinical Records OAuth consumer lock only their exact state row before classification. If retention removes an expired unconsumed device state before the callback obtains its row lock, the locked reread fails missing rather than fabricating replay or provider authority. Public expiry is not terminal ownership: consumed device OAuth claims remain with exact callback finalization and recovery, while consumed Clinical OAuth claims remain until no incomplete linked connect intent exists. Started connected-app, device-connect, and Clinical Records intents retain their exact completion row for one bounded 30-minute continuation grace. The ordinary control-plane retention route serially claims only owner-dead expired rows from each expiry-indexed table in expiry-and-primary-key order, under a smaller control-artifact batch and max-batch ceiling, with PostgreSQL `FOR UPDATE SKIP LOCKED`. The unbound sensitive-action lane uses a partial expiry-and-token index so durable approval history cannot enlarge its transient claim scan. Overlapping retention runs skip already-claimed mailbox, Linq diagnostic, session, and transient-control rows instead of waiting or repeating work. Approval-backed sensitive-action rows stay outside this transient cleanup because their approval lifecycle remains authoritative.
@@ -2961,12 +3012,13 @@ Wire contracts live in [iOS Meals and private numbers](agent-docs/product-specs/
   compatible older producers simply externalize sooner using the same formats.
 - Hosted conversation startup performs no integration-ingest archive recovery sweep. Canonical source resolution repairs only an encountered duplicate closed shard, re-enumerating it under the existing write lock and retaining full content validation. The idle archive owner still handles global maintenance; unrelated historical conflicts do not block a plain conversation. Initial target selection and the first mailbox import reuse the configuration already resolved by the operator-config owner. Later wake imports read current configuration through their existing path. Web sidecar payload reads similarly receive the immutable item already read by admission, while the payload query retains its live retention relation predicate.
 - Closed event-ledger and audit archiving precede the integration-ingest archive action in that same `idle_shutdown` maintenance step. All three share the existing total 30-second archive budget: a foreground wake aborts the work, while valid closed event and audit months are streamed into verified Brotli archives before the snapshot. Event and audit storage share the core-owned directory-bound JSONL archive implementation, including content-receipt append, rollback and exact duplicate repair. Audit queries and document provenance retain logical paths; independent audit receipt replay retains identity-based reconciliation. Archive-aware readers and writers ship together, and older plain-only audit readers are not a supported rollback after archival. Remaining plain months are the durable continuation, so this adds no queue, cursor, or second maintenance owner.
-- Native Codex Responses requests use the provider's default prompt-cache lifetime
-  without a custom retention policy or scheduled-turn label. Historical
-  twelve-hour cache-write counts remain readable as a subset of aggregate writes
-  through the TypeScript usage readers and Web allowance owner, which applies
-  their longer write rate once. Missing lifetime evidence retains legacy pricing.
-  Rollout ordering lives in `apps/cloudflare/DEPLOY.md`.
+- Native Codex Responses requests opt into twelve-hour prompt-cache retention
+  only for session conversation reply turns. The per-turn label applies to their
+  tool continuations, silence closing calls, and same-thread reconsideration.
+  Scheduled, notification, operator, recap, and compaction requests retain the
+  provider's thirty-minute default. Native usage preserves twelve-hour writes as
+  a subset of aggregate writes; TypeScript and Web price that subset once at the
+  longer rate. Rollout ordering lives in `apps/cloudflare/DEPLOY.md`.
 - OpenAI Responses HTTP bodies enforce the same subscription-access decision as Images API egress when a native image tool is requested. A Responses WebSocket handshake cannot inspect later frames, so it is admitted only when that access is allowed; otherwise the Worker answers 426 and native Codex uses HTTPS for the session. The Worker passes admitted upgrades through unaccepted and never relays frames. See [Starter image access](agent-docs/product-specs/starter-usage.md#text-entry-and-image-access).
 - Foreground assistant automation-directory receipts include an immediate assistant wake in the same status-only `canonical_runtime_commit` that publishes the receipt-log ref and retains the prior snapshot ref. The committed workspace wake is durable product truth. Web checkpoints send no Temporal signal; a successful final ownership release emits an attempt-ended hint after the response, without an actionability pre-read. Temporal invalidates its wait for every ended attempt and clears accepted ownership only for a matching identity.
 - Browser-vault replica refresh is normal hosted runtime work, not a detached container side path. Web owns browser-session freshness backstops for missing, unreadable, age-expired, generation-mismatched, or client-known-outdated replica refs and represents refreshes as low-priority system-mailbox runtime work after the browser response; source-hash freshness belongs to the assistant runtime because it can restore and hash canonical query sources. The shared browser-replica contract owns one current projection generation carried by both the encrypted payload and its published ref. Missing or mismatched generations remain readable for deploy compatibility but are always stale; any projection-shape or interpretation change that makes old sidecars incomplete must bump the shared generation instead of adding route-specific checks. Generation 10 atomically names one legacy compatibility monolith, fixed encrypted `core`, `labs`, and `metrics-index` children, and 32 deterministic encrypted metric buckets under that one ref and data-key envelope. Core carries canonical experiment entities but no derived experiment cards or saved outcomes; the metrics index retains saved outcomes for complete private export. The retired card array remains empty in the core wire payload for older Web readers. Each child independently chooses bounded gzip or identity encoding before encryption; shared replica readers request only their required fixed children and metric buckets, and distinguish unloaded series from genuinely empty series. Complete export is the only all-bucket consumer and processes buckets sequentially. Cloudflare stays a thin runner: it selects authenticated ciphertext objects but never decrypts health data or owns route interpretation. The assistant runtime builds the replica from one strict canonical snapshot under the restored `vaultRoot`, derives metrics in memory without touching the local SQLite projection, uses a stable canonical query-source hash that excludes mtimes and runtime paths, checks the hash again before publish, and may publish an empty current replica when query-visible content was deleted. Replica writes must use the runtime browser-vault store under the active write fence, and the old container `/internal/browser-vault-refresh` path is removed; deploy-skew callers receive an explicit removed response instead of executing a half-removed write path. Before publication, the per-user runner records one top-level planned ref as the durable delayed-cleanup obligation, admits the complete bounded-concurrency object set under the active write fence, and waits for every object write to settle. Account deletion stops the runner and drains or expires that exact admitted publication before its final prefix sweep. The orphan-cleanup alarm waits 65 minutes, re-reads the Web-owned current workspace ref, and deletes the non-current top-level object plus its deterministic children while retaining failed deletions for retry; current replicas therefore cannot use a blanket age-based R2 lifecycle rule. Browser-vault replica writes remain capped at 50 MiB. Wake or host preemption retains the current mailbox item only after every started local child settles; timeout, source change, publication conflict, generic failure, and oversized output terminally advance it so unchanged maintenance cannot block shared runtime control. A later browser freshness request can enqueue fresh work. These outcomes do not block foreground assistant work, outbox delivery, runtime-owned idle checkpoints, or runner alarms. Web and Worker/runner skew stays fail-soft by serving readable stale replicas during the documented reader-first rollout, while the first bucketed publication establishes the bucket-aware Worker/runner as a hard rollback floor.
@@ -3046,10 +3098,11 @@ or public Live provider forwarding. Historical voice mailbox and usage records
 retain their existing readers; pending voice delivery fails terminally without
 provider entry or a fallback to another channel. Messaging voice memos remain
 supported. Codex uses the pinned 0.169.0 release with `patches/codex-websocket-ack.patch`
-only for a 15-second first-frame WebSocket acknowledgement bound. Later frames
-retain the native stream idle timeout. Prompt caching uses provider defaults;
-historical twelve-hour usage remains readable through the existing accounting
-readers.
+for a 15-second first-frame WebSocket acknowledgement bound. Later frames
+retain the native stream idle timeout. The separate
+`patches/codex-prompt-cache-retention.patch` opts conversation reply turns into
+twelve-hour caching; other turns and compaction use provider defaults. Existing
+accounting readers price the native twelve-hour write subset.
 
 For established hosted conversation work, the first fresh auto-reply-enabled
 pre-pass Linq or Telegram input candidate staged after restore and final Codex
@@ -4149,6 +4202,23 @@ delivered without its initiating-browser proof consumes only the OAuth state
 and returns to Connect, so its transferable provider URL cannot be relayed
 later. This proof adds no durable state owner and never crosses hosts.
 
+The Murph app starts the same connection with its member bearer credential and
+never loads Murph's website to do it. The provider returns to a fixed bridge
+(`/api/device-sync/companion/connect-return/{ios|ios-dev}`) that reads no
+session or state, writes nothing, and only redirects the provider's short query
+to the app's own URL scheme. Junction keeps no return-URL allowlist, so the
+closed choice in shared ingress is the guard: a start names `ios` or `ios-dev`
+and ingress maps the name to a path under the public base; no caller-supplied
+URL reaches the provider, and only link flows may return to the app. Start
+returns a completion proof from the same authenticator under its own signing
+domain and token prefix, bound to the provider, OAuth state, member and app
+session. The app holds it in memory and posts it with the returned query to
+`connect-sources/complete`, which checks bearer and proof before the state is
+read, consumed or discarded, then runs the same shared-ingress callback with
+the member as `expectedOwnerId`. A failed proof changes nothing. A browser
+cookie proof cannot finish an app-started state, nor an app proof a
+browser-started one. The bridge URL alone finishes nothing.
+
 Before constructing shared ingress or starting provider authorization, Web
 rejects a callback hostname that differs from the authenticated start request.
 Hosted Web build validation applies the runtime precedence to both explicit
@@ -4240,9 +4310,16 @@ metadata and WHOOP overnight summaries are admitted only when the exact source
 is absent for first use or connected without a disconnect fence, and the hosted
 runtime rereads that durable source immediately before canonical import; a
 queued job never treats its cached account snapshot as current authorization.
-An explicit Apple Health SDK connect captures the exact source epoch before
-token mint and opens a pending epoch only if that proof is still current after
-mint; an older Connect therefore cannot clear a newer Disconnect. An
+An explicit companion SDK connect touches only the calling platform's own
+source: Apple Health for iOS, Health Connect for Android. It captures the exact
+source epoch before token mint and opens a pending epoch only if that proof is
+still current after mint; an older Connect therefore cannot clear a newer
+Disconnect. A source that is already connected without a disconnect fence keeps
+its epoch, so signing a phone back in neither closes it nor re-reads its
+history; disconnecting the source and connecting again does. While a pending
+epoch is open, runtime work a webhook already accepted for that source retries
+on the ordinary bounded job budget and imports once the source is re-admitted;
+work for a fenced source is dropped. An
 authenticated source-attributed Junction event can trigger reconciliation of a
 prepared native or Link source against Junction's live provider list. Only the
 live provider read can mark it connected without inventing a timestamp. If the
@@ -4335,7 +4412,9 @@ existing domain owner; it reuses this auth, idempotency, mailbox, and wake path
 instead of adding another queue, state store, or generic mutation engine.
 
 The closed `measurement.add` V1 action admits `estimated-vo2-max` values from
-10 through 90, including tenths. Runtime writes a manual measurement with the
+10 through 90 and `body-height` from 50 through 272 cm, including decimals.
+One per-metric range table validates both the action and native request.
+Runtime writes a manual measurement with the
 catalog unit, envelope `requestedAt` as `occurredAt`, and an event id derived
 from the action id. Its opt-in keep-existing measurement write holds the existing
 canonical lock and returns without a revision or audit write when the id already
@@ -4343,12 +4422,34 @@ exists, including a corrected record or tombstone. Ordinary same-id measurement
 upserts retain their existing behavior. Created actions report `applied`; kept
 actions report `unchanged`. Neither outcome proves replica publication.
 
+About you reads `heightCm` from the existing companion Numbers response.
+`readCompanionBodyHeight` uses `metricsIndex`'s canonical `body-height`
+selection, so latest-valid source precedence and unit normalization stay at
+the metric owner. It returns null without a usable selection or when its date
+is more than the catalog's 365 days before today's vault-local date, even if
+the selection was fresh at publication. No extra bucket, profile field,
+projection generation or endpoint is added. The Numbers read retains native
+session and health-authority checks before and after loading private data.
+
+Height introduces no persisted fields. The existing measurement's metric,
+value, unit, source, title and occurrence time are private health content in
+the canonical vault; the hosted checkpoint and browser replica seal them.
+The queued action payload is encrypted member-action content. The opaque
+action/event identity and terminal status remain operational metadata, not
+health values or lookup keys derived from them. `heightCm` is an owner-only,
+no-store response field, never a profile column or friend-sharing field.
+
 Ship this decoder, canonical writer and runtime handler before enabling the
 companion measurement producer. Deploy and verify the Worker and runner first,
 including replacement of warm older bundles; deploy Web second and the native
 app last. Once a producer can enqueue `measurement.add`, both the decoder and
 handler are the rollback floor until all producers and retained requests drain.
 There is no measurement generation gate or feature flag.
+The same consumer-first order applies to enabling `body-height`: deploy its
+contracts decoder in Worker and runner (including warm bundle replacement)
+before Web can enqueue it, then ship the app. Old VO2 requests and manual
+measurement records retain their shapes; older apps ignore the additive
+Numbers field. Retain height-capable consumers while height requests remain.
 
 Production companion auth diagnostics remain hidden until `MURPH_COMPANION_AUTH_DIAGNOSTICS_ENABLED=1`; operators must install the exact-path Vercel WAF fixed-window limit before enabling that route in production.
 The authenticated companion overnight PRV ingress is one strict derived-data
@@ -4934,6 +5035,91 @@ the join-offer owner before that path runs, so a participant the outreach
 feature declines cannot have their phone and reaction persisted into
 group-owned context.
 
+Hosted Linq local group departure is owned by
+`apps/web/src/lib/hosted-routing/linq-group-leave.ts`. The independent
+`HostedLinqGroupLeave` marker holds a blind thread identity, purpose-separated
+encrypted identity, server timestamp and bounded reason. It survives container
+deletion; contact-privacy rotation re-derives and reseals it before prior-key
+retirement. Chat ownership precedes the route row lock, game/move checks,
+marker insertion and exact route deletion in one transaction. The removed-line
+repair action keeps its separate policy. Only the winning insert returns an
+ephemeral provider target. Every local-departure caller and the external
+retention owner use the same atomic marker claim, reserving at most five
+three-second attempts, at least one hour apart. A null attempt time is eligible.
+A queued response never proves removal; provider code 2013 or a self-removal
+webhook records that evidence, and code 2015 terminates attempts as
+`fewer_than_four`. The next eligible tick after the fifth reservation claims
+one bounded roster read, classifying `verified_still_active` or `unconfirmed`.
+Interrupted claims count toward the limit. Provider work stays outside database
+transactions, and rotation-safe completion never overwrites removal evidence.
+The external retention tick examines at most ten eligible markers.
+
+Authenticated webhook ingress records eligible group sightings before its
+marker fence, then applies the sender block before model, edit, reaction or
+mailbox work. A marked room records only the sender/participant event and never
+fetches a roster, polls, joins, wakes or requests departure again. It returns
+`group-left`; a blocked sender returns `sender-blocked`. A sender-block read
+failure retries the webhook. Evidence writes are fail-open: they log a bounded
+code and never stop message handling.
+`HostedLinqGroupSighting` and `HostedLinqGroupHandle` retain only blinded,
+idempotent min/max evidence, without message text, inviter attribution or
+counters. Sightings link to departure markers with an update-cascading,
+delete-null foreign key; deleting evidence cannot revoke departure.
+Each handle expires 90 days after its own last sighting, and empty sightings
+expire 90 days after their last observation. Linkage is within one contact-key
+epoch; rotation deletes prior-key evidence. The database-only retention owner
+removes at most 1,000 expired handles and 1,000 empty sightings per tick.
+
+`HostedLinqHandleBlock` owns non-member handle ingress policy, separate from
+member suspension. Current-plus-prior reads and contact-lock-serialized writes,
+removal and rotation preserve dormant blocks. Only this table retains an
+authenticated purpose-separated contact envelope; ordinary Ops responses omit
+it. Blocks and departure markers do not expire or belong to an account export
+or deletion. The Ops landing page uses the same operator and mutation-origin
+authority as group departure for block, unblock and bounded list requests.
+Admission checks blocks on the roster it already reads for every unbound group
+message, right after the size cap, and shares that rejection path
+(`pendingGroupRosterRejection`: `oversized` | `blocked_participant`). Only an
+unbound room on a managed line is left; bound rooms and their games remain
+intact. The early observer never reads a provider roster. Roster evidence is
+that admission roster, written after commit and ordered by its own
+observation time.
+Ordinary message/edit admission and route creation, refresh and move adoption
+recheck under chat ownership. Game bootstrap attachment rechecks after its
+existing binding demotion takes chat ownership, immediately before it creates
+the route, so a replayed bootstrap for a closed game cannot recreate a left
+room. Attested 1:1 chats skip the marker read. Unbound notices and private
+recovery check the source group before dispatch; bound egress keeps existing
+route authority. Oversized unbound groups on a managed recipient line and the
+Ops `leave_group` action are the deterministic producers. Ops uses a full opaque route
+ref and reports local and provider outcomes separately. Departure sends no
+announcement or private message. Same-chat re-add remains left.
+
+The additive migration must precede Web deployment, and older route writers
+must drain before the first marker. That first write establishes the compatible
+Web rollback floor. The assistant `leave_group` producer deploys after Web.
+It accepts only a bounded reason and a current accepted-input reference from an
+authenticated Linq group conversation. Web fences the callback runtime, decodes
+the persisted container-scoped non-self/non-direct input outside the mutation
+transaction, and derives the exact route from it. No caller-selected room or
+Linq room-context injection is accepted. A validated replay reads the marker
+without needing the deleted route. Any participant may request departure.
+
+Assistant departure refuses every bound game status, including retained history;
+Ops retains its active-only game guard. Both refuse active line moves. New game
+bindings take the container member's foreign-key lock before the route, then
+pair/audience/game locks. Assistant leave takes chat ownership before its
+member/runtime locks, matching webhook admission; the leave owner reads
+game existence without taking a game row lock. Historical rematch/bootstrap reuse
+is unchanged. The stored reason is `assistant`; the model reason is a bounded
+log code only. `left` and `already_left` interrupt the pending tool RPC through
+the host-authorized terminal no-reply path. `unavailable` stays answerable.
+
+Typing start/refresh and an already-running poll notification can still race
+departure. The early webhook fence prevents new turns; existing route-authority
+egress rejects output and settles accepted work durably. This does not cancel
+already-authorized provider calls or guarantee provider removal.
+
 Hosted Linq unknown first-contact admission is a web-owned classifier gate on
 the first-contact path. It runs after cheap deterministic ingress filters and
 before member/invite mutation, calls OpenAI through an env-only key with bounded
@@ -5053,6 +5239,15 @@ path for already-consented historical or interrupted states; authentication
 proof is not activation authority and do not replace the
 consent-owned continuation.
 
+Ops usage person rows can suspend or restore the canonical member through the
+Ops-authenticated, same-origin `POST /api/ops/member-suspension`. Both operations
+are idempotent; suspension preserves its original timestamp on retry, and group
+containers are excluded. Identity routing retains suspended people so Linq,
+Telegram and email cannot reinterpret them as first contacts. Suspended inbound
+and queued-message recovery are silent, including signup-link and access-notice
+fallbacks. No runtime signal is sent: queued work is re-read against current
+access when the runtime next reconciles.
+
 Operator recovery is not acquisition: an exhausted canonical
 Starter member may receive one fresh policy-sized grant from `/ops/usage` under
 the same beneficiary ledger lock. Each reset is keyed to the displayed ledger
@@ -5093,7 +5288,16 @@ append-only receipt keyed by that UUID and member ID; the receipt freezes every
 stable outcome so replay cannot clear included usage that accrued after the
 first reset or append another Starter grant after the first was consumed.
 The same member-locked serializable owner resolves the live gate and exact
-period existence before choosing that outcome. A valid included allowance with
+period existence before choosing that outcome. Reset-all also checks the shared
+`hostedOpsFreeIdleMemberSql` predicate inside that transaction: free,
+unsuspended people with no game, device, meal-photo enrollment, group membership
+or thread participation receive a skipped receipt with no runtime recheck.
+The same predicate owns the free-idle usage list; spend, ranking and its top-20
+limit remain list-only. Deliberate single-member resets keep their existing
+eligibility. The check adds one SQL read per fresh transaction attempt (at most
+20 per 10-member batch with the existing single retry), with one transaction at
+a time and no external work inside it.
+A valid included allowance with
 no materialized zero-usage period records a skipped receipt and advances the
 walk without manufacturing a period; canonical accounting that wins the lock
 first instead leaves a real period for the reset to observe and clear.
@@ -5724,7 +5928,7 @@ removal condition are defined in
 
 ### Fitbit / Google Health source replacement
 
-Fitbit migration is a boundary transition inside the existing Junction connection. Importers own canonical daily/interval evidence, device-syncd owns source identities and provider calls, hosted runtime owns continuation, and Web owns the persisted connection lock and one-card projection. The public card may combine Fitbit and Pixel Watch, but stored authorities remain truthful as `fitbit` and `google_health`.
+Fitbit and Google Health are ordinary, distinct Junction source authorities inside one connection. Importers retain source-specific canonical facts and accepted source/resource receipts; the existing wearable, metric, and board readers select or partition overlapping facts. Web presents one Fitbit / Pixel Watch card while storing truthful `fitbit` and `google_health` rows. Google Health imports as soon as its source is connected. Web owns the existing lock and exactly-once attempt to revoke active Fitbit after Google Health authorization; the hosted runner owns bounded retry and source-epoch checks. A Fitbit import prepared before revocation may finish afterward, but terminal source authority prevents later Fitbit provider pulls and cannot be resurrected by runner projection. There is no migration coverage fence, resource-parity gate, or additional backfill requirement.
 
 ## Feedback diagnostic tasks
 
@@ -5786,6 +5990,583 @@ core `setMemoryDisplayName`; its locked `changed` result selects `applied` or
 without a model turn or a new dispatch event. Deploy this consumer before the
 Web producer; keep it while accepted actions can remain queued or restored.
 
+## Progress contract and storage
+
+`apps/web/src/lib/game/progress/contract.ts` owns the additive Progress wire
+types and request parsers. Routes parse once; persistence accepts typed input.
+The response schemas also decode the synthetic board fixtures; stored sealed
+JSON is authenticated and decoded without revalidation. The games reader and
+four BE1 routes compose these primitives; health/friends and media/maps retain
+their separate lane owners.
+
+Progress persists awards, measure choices, picture and share ownership, and task
+inference. The following classification covers every column of exactly
+`GameProgressAward`, `GameProgressMeasure`, `GameProgressPic` and
+`GameProgressTaskMeasure`, plus `GameProgressShare`; it is not an audit of other game tables.
+
+| Table | Encrypted content | Keyed lookup | Approved operational metadata |
+| --- | --- | --- | --- |
+| `game_progress_award` | `data_encrypted`: candidate key, kind, measure, subject, crossing day and numeric/content facts | `lookup`: member-bound award identity | `member_id`: owner FK; `subject_member_id`: nullable friend FK; `earned_on`: local calendar date for ordering; `created_at`: insertion order; `seen_at`: drawer acknowledgement |
+| `game_progress_measure` | `state_encrypted`: goal, latest checked found goal, frozen route legs/geometry/towns, per-day amount, frozen baseline, health settlement receipt | `lookup`: member-bound measure identity | `member_id`: owner FK; `updated_at`: mutation time |
+| `game_progress_pic` | `meta_encrypted`: measure identity | None | `id`: client UUID; `member_id`: owner FK; `storage_key`: random exclusive Progress object identity; `taken_at`: capture ordering; `retired_at`: permanent retirement time |
+| `game_progress_task_measure` | `measure_encrypted`: inferred name, quantity and unit | `lookup`: member-bound normalized task text plus check-in kind | `member_id`: owner FK; `created_at`: insertion time |
+| `game_progress_share` | None in the row; generated JPEG bytes are sealed in the Progress store | `award_lookup`: existing member-bound award identity | `member_id`: owner FK; `storage_key`: unique random Progress object identity; `status`: generating, ready, failed or retired; `created_at`: admission time; `failure_code`: nullable generation_failed, timeout or refused |
+
+Share ownership uses the member/award composite primary and foreign key. No
+source photo identity is persisted: nothing reads it after admission. The member
+GameProfile owns the current photo key; changing it leaves admitted shares alone.
+An index covers member/admission time. Share
+bytes use the member-private-field lane, `game-progress` scope and purpose,
+`game_progress_share` table, storage key row AAD and `bytes` field. They are
+private health-related content, including likeness and activity, and never enter
+the Progress album or game media. The existing Progress R2 record classification
+also covers shares: encrypted envelope, operational version/hash/retired marker,
+random object identity and keyed owner namespace.
+
+`feature.progress-share-images` is a revocable scope in the existing legal
+consent owner, referencing the current Privacy, Consumer Health Data Notice and
+Health AI Safety Disclosure. Its member/event IDs, scope, status, action, fixed
+`ios-progress-share` source, decision timestamps and grant event link are approved
+operational consent metadata. Document versions and `metadata_json.disclosureVersion`
+(1) are approved public disclosure metadata. No image, award, prompt, health value,
+provider response or free-form reason is stored in those fields. This classification
+covers the new values in `HostedConsentGrant` and `HostedConsentEvent` only.
+
+The Progress consent operation holds the existing member lock and commits the
+legal decision and share retirement together. First denial records a declined
+event without fabricating a grant. Identical decisions add no audit event; a
+repeated denial still purges retained keys. The existing Web Privacy revoke route
+uses this owner; the generic accept route cannot grant this separate disclosure.
+Regrant never revives a retired share. Progress picture deletion has no share
+coupling. Account suspension fences new work before
+share cleanup, picture cleanup and row/key cascades, in that order. Failures block
+successful deletion and retain cleanup identities. Each share collection reads
+at most 10,001 keys, rejects more than 10,000 before effects, and purges serially
+outside transactions (one connection at a time, no decryption or provider calls).
+
+Account export includes every attempt's metadata and ready JPEG through the
+existing passkey-approved Settings export. It reads at most 10,001 rows, rejects
+overflow before effects, and opens pictures serially under share AAD with session
+and status rechecks. No source key or prompt is exported; plaintext buffers are
+cleared. The full export contract and maximum query counts live in
+`docs/hosted-account-data-deletion-export.md`.
+
+Deploy this additive table and deletion-aware Web consumer before exposing any
+share producer, verify the exact deployment, and drain predecessor functions.
+That Web release and schema are the rollback floor once share objects exist.
+No backfill, Worker API change, queue, retry worker or flag is required.
+
+Share drawers read one exact stored owner award; they never settle, recompute
+health or query games. Rungs and the current route carry nullable `shareAwardId`;
+each completed route carries its actual stored award ID. Earned dates and
+identities survive corrections and route rollover. Friend awards, numerical
+health wins, streaks and unearned goals do not enter this share surface.
+
+The bearer-only `GET/POST /api/game/v1/progress/shares/:awardId`, image GET and
+`GET/PUT /api/game/v1/progress/share-consent` routes parse once and use private,
+no-store responses. POST accepts no body. The native consent operation accepts
+only allow/deny with disclosure version 1 and uses the same atomic owner as Web
+withdrawal. The share view contains server copy, the existing MedalFace and one
+strict needs_photo/medal/available/generating/photo presentation. No recorded
+choice allows pictures; an explicit denial turns them off. The consent GET uses
+the same reader as share admission and returns only `{ decision: "allowed" | "denied" }`,
+matching PUT, for the native Privacy choice. It reads one grant and, only if absent,
+one latest decision event, with no writes or provider calls. No consent question
+is part of the drawer. Missing profile photos use the existing profile upload. Failure, refusal,
+retirement and the fixed timeout present the medal; no failed wire state exists.
+
+Share card values use full exercise counts from the frozen award threshold and
+saved noun, plain miles/km in reader units, whole sleep hours, and whole exercise
+minutes (hours from ten hours). Opaque measures retain medal-only copy and the
+medal's plain amount. Context still describes the landmark height or journey.
+The card boundary converts apostrophes in its four text fields to U+2019.
+Share and medal faces use the same rung drawing id (the app adds the `time-`
+asset prefix from the medal kind); found goals retain a generic medal. No new state is persisted.
+
+Admission returns an existing row before budgets or source preparation. Otherwise
+it reads the GameProfile photo through the existing game media store, orients
+and strips metadata outside locks, then rechecks that photo key under the member
+fence. Neither a missing profile photo nor unreadable bytes spends an attempt. One
+31-row rolling-window read limits admission to five attempts per 24 hours,
+thirty per 30 days and one unexpired generation. Failed and retired attempts
+still count. A pre-admission source failure returns a sanitized 503 without a
+row or quota use; a limit returns 429 and bounded retryAfterSeconds. Losing
+prepared buffers are cleared. No attempt is restarted or regenerated.
+
+Only the insertion winner schedules Next after(), with its own secure-box unwrap
+scope and prepared in-memory reference. The Node route declares maxDuration 300.
+One Web OpenAI images.edit call uses gpt-image-2.6-flare, one generic-named JPEG
+reference, medium quality, 1024x1536 and JPEG compression 90. SDK retries and
+logging are off. After admission, generation reads height once through the existing
+Companion replica loader and latest-valid body-height helper, outside transactions
+and under Browser Vault health authority. A height no older than 365 days is sent
+to OpenAI as whole centimeters in the prompt framing to preserve real proportions.
+Missing height or a failed read leaves the prompt unchanged; share authority is
+rechecked before provider dispatch. Height is never added to card or Messages
+text, persisted in share metadata, or logged. The operation owns a 240-second deadline from admission,
+independent of client disconnect. Output is decoded and encoded once at quality
+90, stripped of metadata and rejected above 2 MiB; no quality retry is made.
+The existing store enforces the 3 MiB envelope bound.
+
+Native session/account authority and the Privacy choice are checked
+at admission, before provider dispatch, before staging and at ready commit.
+The existing explicit-withdrawal health consent policy blocks all photo effects
+and reads after launch health permission is revoked; missing historical grants
+retain the owner's existing compatibility policy. Steps/Sleep additionally use
+Browser Vault authority for card and image reads, even for cached pictures.
+Only a generating row before its deadline can become ready. Permanent tombstones
+beat late staging. Failure stores a closed code, purges the reserved key and
+clears reference/output buffers. Cleanup errors remain visible and retain the
+row/key. An expired generating row reads as a medal without a GET mutation.
+Image GET checks authority before retrieval and after decryption, returns JPEG
+bytes with nosniff, and clears decrypted bytes after the response copy.
+
+Source preparation, KMS, OpenAI and storage effects stay outside database
+transactions. Domain reads are serial: one award, at most four selection queries,
+one profile-key recheck, then at most eight admission queries including the
+bounded budget and insertion. Each generation authority phase adds at most five
+domain queries; ready publication adds one conditional update. Existing native,
+health and crypto owners retain their own bounded queries; only one pooled
+transaction is active at a time. No collection fanout or external work occurs
+under a lock. There is at most one image provider call and output stage per
+admitted attempt.
+
+Copy and prompts derive activity only from the saved measure identity: registry
+label or normalized custom activity name. Opaque hashed activities are medal
+only. Task prose and saved display nouns never enter either output. Scene facts
+come from the checked bank/frozen found target; a route sends only its saved
+destination label. No member identifier, award date, total, source URL, friend
+content, route coordinates or token is sent. The only scene-specific branches
+are the approved Mont Blanc summit and sleeping godwit. Share heights use full
+digits and target height, not a repetition count; planks retain the approved
+"You've planked longer than this moment lasted." wording even at equality. The plank pose specifies flat
+forearms, elbows under shoulders and a straight body. Walking card copy and
+distances omit "about". Loading is native-only;
+there are no streamed partial images. iOS owns rendering and native
+sharing and must ship after the deployed, drained PR A floor and PR B producer.
+
+Every owner FK cascades from `HostedMember`. Award subjects also cascade, so
+deleting a friend removes awards about that friend without deleting unrelated
+awards. Task inference cannot arrive after its owner is deleted. Pictures have
+a unique random storage key, never a shared content hash; BE3 owns sealed bytes,
+retirement and account-deletion object cleanup. These rows live in Postgres,
+outside workspace snapshots, for the member's lifetime. Retired picture rows
+remain until account deletion. There is no recurring backfill or expiry sweep.
+
+`crypto.ts` reuses secure-box's member-private-field lane with `game-progress`
+scope/purpose, owner key, table, row and field AAD. Batch sealing unwraps one
+owner root; batch opening uses the existing root batch reader. The keyed lookup
+uses `createHostedOpaqueIdentifier` and JSON-framed owner/value parts under
+separate Progress award, measure and task purposes. No content is logged.
+
+The games award envelope seals facts, not rendered text: `data.value`, `unit`,
+`noun`, `rung`, `page` and `evaluator`; route awards also seal `from`, `to`,
+`distanceM` and `startTotal`. A rung seals its earned threshold `at` and either
+`target.{kind,id}` for the bank or `target.found` for the complete checked found
+definition. All are private content: even public landmark text identifies an
+owner's accomplishment when attached to an award. Reader units never enter
+settlement or award identity. The evaluator version is evidence, never part of
+its key. Health/friend award content remains with its lane owner.
+The inference envelope contains only `{quantity, unit, name}`; task words stay
+in their existing sealed game owner. The keyed cache input is NFKC-normalized,
+trimmed, whitespace-collapsed, lowercase text plus check-in kind. Member identity
+is included by the keyed lookup owner. The internal goal is `{rungId}`, `{route}`
+or `{found}`; the public pick still accepts only a bank/found id or two route
+places. The latest lookup occupies one `found` slot. Every found field (`id`,
+`kind`, `name`, `short`, `tagline`, `at`, `where`, `blurb`, `sourceUrl`) is sealed
+private content in cache, selected goal and earned award. Heights normalize once
+to feet; durations use seconds. The found id hashes kind, normalized name and
+location, canonical value and cited URL; prose and reader units are excluded.
+It remains inside the existing member-keyed state/award owners. `perDay` stays
+sealed; no plaintext activity identity or amount is added.
+
+The request parser admits integer `perDay` values from 1 through 10,000.
+The inference provider boundary caps positive quantities at 10,000 while
+preserving fractional units. Typed rep counts already have a safe-integer
+bound; the route-summary boundary also caps `distanceM` at
+`Number.MAX_SAFE_INTEGER`, preserving fractional and long-distance posts.
+These bounds keep totals finite across the admitted 10,000 entries. Reducers
+do not validate the same input again.
+
+`patchMeasureState` is the sole writer of `state_encrypted`: one exact read,
+open and shallow field merge, then seal outside the transaction. Its short
+transaction rechecks caller authority and writes only against the observed
+ciphertext; first creation uses the composite unique key. A loser throws
+`GAME_PROGRESS_STATE_CONFLICT` (503, retryable); it does not retry. Patches replace
+whole fields, including the legs array. A computed patch runs against that same
+observed state, so route rollover cannot overwrite a newer legs array from a
+separate caller read. Found picks check the requested id and measure kind in
+this transform and copy the complete definition into the goal. Replacing the
+lookup slot cannot change an already selected goal or earned award. BE2 must only propose a baseline while
+it is absent and include current health authority in the transaction callback.
+
+All three mutation helpers require `beforeMutationTx`: route owners pass the
+existing native-session assertion, plus current health/share authority when
+applicable. It runs after crypto preparation and inside the committing
+transaction, with no external work. This required callback is the refinement
+of the locked plan's abbreviated persistence signatures.
+
+`settleAwards` reads the profile timezone once, seals the candidate batch, then
+performs one `createMany` with `skipDuplicates` in one transaction. Its only
+later mutation is `seen_at`; a corrected total cannot revoke or rewrite an
+award. Awards strictly older than seven member-local calendar days at insertion
+start seen. `readAwards` opens a single owner-scoped ordered result, newest by
+`(earned_on, created_at, lookup)` descending. View owners filter health awards
+under live authority before choosing one gold medal. Moment ids resolve to
+award ids at the view owner; `markAwardsSeen` updates only those owner-bound,
+unseen rows and preserves the first acknowledgement time.
+
+The input readers in BE1/BE2 own the plan's limit-plus-one admission (500 games,
+10,000 entries); an incomplete input settles nothing. Persistence adds no
+per-item queries or transactions. Award reads deliberately have no pagination
+or materialized totals, per the locked plan. The award sort index serves the
+Medals page, the subject index serves cascading deletion, the picture index
+serves owner/live/capture-order reads, and measure/task reads use composite keys.
+
+`series.ts` loads at most 501 games and 10,001 own entries, admits 500/10,000,
+and opens admitted task words and typed reps/route payloads in one batch. It
+loads task classifications and measure state in two owner-scoped batch reads.
+Typed entries emit their own measure immediately; untyped entries use the day's
+terms revision and the seat override or group default. Retakes contribute once;
+withdrawn, incomplete and excuse entries contribute nothing. Unresolved entries
+are pending days; the games read settles no awards until all credited tasks have
+classifications, while still scheduling inference. A per-day choice applies to all
+completed history while previously earned day medals remain stored.
+
+`game-days.ts` owns credited game dates: each game's frozen clock, join,
+departure, settlement and end bound its contributions. Void games end at their
+canonical cancellation event or the latest player's departure that voided a
+two-player group. Event times receive the game's dev-clock offset; player
+departure times already use that clock. The terminal day's completed post
+remains history. The separate pair-board current-run contract continues through
+`game/board-streak.ts`; Progress has no streak payload, page, face or evaluator.
+Total days posted remain an ordinary measure.
+
+`achievements.ts` holds the round-total and ladder evaluators used by
+`registry.ts`, alongside route-leg evaluation. Round and ladder candidates use
+the first cumulative crossing date; all rungs crossed together are inserted.
+Game-duration rounds begin at ten, fifteen and thirty minutes,
+then one, two and five hours per decade. Existing hour awards remain valid.
+Wearable Sleep keeps its existing hour rounds. Totals medals group by exercise,
+largest amount first regardless of saved earned dates. The first total
+medal's `open.measureId` identifies the exercise for its title coin; an exercise
+with no total medal uses its projection. Shelf picks use that same order, and
+the largest total gets the gold face when that group owns the newest award.
+No new persisted fields are introduced.
+
+Retired streak awards are the explicit exception to append-only retention.
+`apps/web/scripts/migrations/remove-progress-streak-awards.ts` opens at most 100
+sealed awards at a time, deletes only authenticated `kind: streak` rows, and
+advances by the owner/lookup key even when the last row was deleted. It is
+idempotent; no permanent read-time filter or migration marker is added.
+Release requires murph-ios build 112 uploaded first. Keep Progress traffic
+quiesced while old writers drain, run this data migration in the hosted
+environment with the existing database and crypto configuration, and promote
+the new backend before reopening Progress. Do not run it locally against
+production or restore an old streak writer after cleanup. The hosted command is
+`NODE_OPTIONS=--conditions=react-server pnpm exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/migrations/remove-progress-streak-awards.ts`.
+Check that a second pass deletes zero rows and that Progress has no streak
+fields, faces or awards before restoring traffic. Non-streak awards, their
+earned dates and acknowledgement timestamps are unchanged.
+
+The reader preserves measures with saved ladder or route awards even when their final
+contribution is removed; their total becomes zero and their goals stay editable.
+`view.ts` takes passed rungs from stored awards, filters health-derived awards
+under current Postgres browser-vault authority, then chooses gold and moments.
+Moments group unseen awards by earned date; the seen route resolves their ids
+to owner-bound rows. The four routes return private, non-cacheable responses.
+
+`format.ts` owns the exported number and amount formatters for all lanes.
+Progress handlers read `X-Murph-Client-Units` once with `clientUnits` and pass
+`us`, `uk` or `metric` explicitly to text builders; missing/unknown means `us`.
+Distance is miles for US/UK and kilometers for metric; height is feet for US
+and meters for UK/metric. Metric bank prose uses `blurb_metric` where present;
+UK retains imperial prose. Award renderers resolve bank references by `(kind,id)`
+or use the complete stored found definition. The same one-mile award therefore
+reads `1.6 km` to a metric reader without earning a different award.
+Hero totals and named-place heights/distances use full digits with thousands
+separators. Other small labels, including to-go amounts, compact from 10,000,
+with one decimal below 100,000. Signed friend gaps can compact from 1,000. Distances use
+whole numbers from ten displayed units and one decimal below. Projections include an
+explicit nullable `on` date; without a live game or recent pace they retain
+the next round number with a dateless label. Route-map projections stay null.
+Moment `title` and nullable `line` are response-only words derived from the
+shown awards; shelf titles and details remain the medal's own. Grouped
+moments describe an earned day, without inventing a post or time of day.
+
+An ordinary complete games read uses eleven domain queries including new award
+settlement (profile twice, games, entries, task cache, measure state, existing award lookups, award insert,
+award reads before and after settlement and live picture metadata), plus existing batched crypto and native/health
+authority owners. Settlement reads candidate lookups once for the member and seals
+only missing awards; when all exist it skips the profile read, sealing and write
+transaction. Inserts still skip duplicates to preserve concurrent append-only
+settlement. There are no per-game or per-entry database calls and at most
+one domain transaction/pooled connection at a time. First distance reads resolve
+one default route for all missing legs (11 provider requests total), then add
+two domain queries per new route through sequential state CAS writes. Native
+authority runs inside each short write transaction. Incomplete reads skip
+settlement and inference. Crypto and provider work stay outside transactions;
+each write rechecks current native-session authority inside its transaction.
+
+After a complete `readProgress`, the authenticated `GET /progress` boundary
+registers `scheduleProgressSettlement` with `after()`. Health and Friends settle
+sequentially after the response, each in a fresh domain-root unwrap-cache scope.
+Neither phase builds its page response. A failure does not stop the other phase
+or change Prizes; the batch logs only `PROGRESS_BACKGROUND_SETTLEMENT_FAILED`
+once, with no exception, member, task or health content. New medals appear on
+the next read. Incomplete main reads schedule neither phase. There is no queue,
+retry, new route or wire change; the next ordinary read can try unfinished work.
+
+Uncached untyped phrases are deduplicated and classified sequentially in
+`after()`, with one Responses and one Decisions call sharing an eight-second
+deadline per phrase, no retries, then one sealed cache batch insert. The source
+caps bound distinct credited phrases by 10,000. Provider failure leaves the
+phrase uncached; interrupted background work can remain pending on a later read.
+The classifier uses the existing ideas model/client configuration. The live
+synthetic eval runs with `pnpm exec tsx --tsconfig apps/web/tsconfig.json
+apps/web/scripts/progress-inference-eval.ts` and an already-provisioned key.
+
+`bank.ts` exposes only checked entries, including the supplied 70 height rungs
+and separate 30-rung plank/sleep ladders. `ladderUse` is public bank metadata
+needed by the two time screens, not member persistence. `Rung.short` and
+`Rung.tagline` are required single-line strings up to 40 characters. Curated
+short names retain digits in real names such as Taipei 101 and Apollo 11.
+Taglines and model-written lookup prose keep the number-free boundary.
+Found rungs have no drawing; their medal uses the explicit `{generic:true}` face.
+Typing searches only the bank. `GET /progress/goals?measure=...&q=...&find=1`
+admits one explicit lookup through the existing persisted auth rate limiter:
+20 calls per member per 24-hour window, across measures. Its selector is keyed
+and its counter stays in the existing sealed auth owner; no Progress preference
+or table is added. Exhaustion returns 429 without a provider call.
+The lookup uses `gpt-6.1-sol`, low reasoning, required `web_search`, strict JSON,
+`store:false`, a 30-second deadline and no retry. Input contains only kind,
+search words and eligible bank ids/names. A found source must occur in an
+`output_text` URL citation, with a height in 1–400,000,000 meters or duration in
+1–31,536,000 seconds. Closest ids must be eligible. Invalid semantic evidence
+returns no found goal; malformed/provider failures return 503 without provider
+content. `Goals.note` and suggestions are response-only. A successful found
+write rechecks native-session authority inside `patchMeasureState`, outside
+the provider catch, preserving authority and conflict errors. Goals and per-day
+choices use `patchMeasureState`. Distance goals call `setRouteGoal` with the
+complete canonical series, stored awards and current mutation authority. Typed
+and checked two-place bank routes use the same resolver; other long bank entries
+are excluded. No new table, endpoint, flag or preference is introduced.
+
+Fixtures cover new, established, year-long, mixed-unit, no-game, gap, privacy,
+tie and moment states. They are presentation examples, not expected engine
+outputs: mock historical amounts sometimes differ from the checked bank and
+the approved health step sizes. Friend avatars use the existing nullable
+`avatarUrl` wire field; fixtures use initials rather than real photos. The wire
+adds `incomplete` from the plan, health dates for its independent chart,
+friend invite/join metadata for rows 02/05/07, and exact sharing recipients for
+row 16 and decision D8. Row 16 also needs `departureNotice`; its fixture contains
+the drawn footer, but BE2 must resolve the surviving source after account deletion.
+Streak obligations serve row 11; route completion history
+and `goalPicked` serve rows 09/15. Health medal faces and age-chart amounts serve
+rows 02/06 without requiring the client to parse labels or calculate health
+results. No endpoint, table, flag or registry is added beyond the plan. Deploy
+the additive migration before any Progress caller.
+
+### Progress health and friends inputs
+
+`device-sync/companion-numbers.ts` owns `readCompanionHealthSeries`: canonical,
+unrounded daily values, original source labels, units, freshness and settled
+step dates. The existing numbers route applies its original display rounding
+after this shared read. Session and health authority are checked after vault
+decryption as well as before the read. A transport/decryption failure returns
+one retryable 503; Progress loads this input before proposing any baseline or
+health award. No source values or provider bodies enter error logs.
+`settleProgressHealth` owns baseline freeze, health/age scoring, journey and
+first-route initialization, and award settlement for both the Health page and
+the main read's background phase. The background phase checks the current
+session and browser-vault/health authority before reading saved input; absent
+authority or a missing replica produces no health writes. All effects keep the
+page's session and health checks in their committing transactions.
+
+The background cost gate reads the published replica pointer, profile and four
+health measure states before any Cloudflare session or replica decryption.
+After a successful entire batch, the sole state writer saves `healthSettlement`
+on the existing `restingHeartRate` measure. The receipt matches the replica's
+`generatedAt`, profile time zone, both member/vault local dates, and the vault's
+existing settled-step date (eight hours after day end). Repeated opens with
+unchanged inputs perform no Cloudflare session/decryption or health writes.
+Each successful load is reused for that publication/date-window tuple; the
+three existing date boundaries or a new publication make it eligible again. Failed or overlapping reads may repeat input work: this is a
+completion receipt, not a lease. A baseline's `updated_at` alone cannot prove
+that the later route and award writes succeeded. No new table or column is
+needed. The Health page always loads its chart input but never writes the
+receipt; only the background phase records its completion.
+An eligible batch has one saved-replica session, four metric evaluations, at
+most four baseline CAS writes, one first-route CAS, one award insert and one
+receipt CAS, sequentially. First-route resolution retains its eleven bounded
+Mapbox calls; later passes use frozen geometry. Crypto/provider work stays
+outside transactions, with at most one health transaction at a time.
+When that live read returns `NUMBERS_PROJECTION_UNAVAILABLE`, its retryable 503
+includes `error.details.health`, decoded by `savedHealthSchema`. This read-only
+payload holds join/today dates, win count and metric id/label/unit, baseline,
+wins, headline and next target. Saved tiles and next faces use the same metric
+presenter as the live response. The headline is the highest saved held-step
+improvement, not a current trend; without a step award it is null. Without a
+frozen baseline, next is null. Chart, current direction/access, age comparison,
+recommendations, sums and snapshot timestamp require live input and are absent
+from this saved-only contract. Saved age tile audiences come from the sealed
+award detail. Native session and health authority are checked before opening
+saved state and again before returning it. The path performs one four-measure
+set read and one award read, with existing batched decryption, no parallel
+database work, no writes and no additional live read. Other failures retain
+their ordinary error response; failure of the saved read is not swallowed.
+
+`progress/health.ts` derives the 28 days before the profile's local creation
+date (20 observed dates), 14-day statistics (10 observed dates), and seven-day holds
+(five observed endpoints after a complete week since joining). Missing dates
+stay absent. Each newly held whole level is a separate candidate dated on the
+hold day. Age lines are 25%, one third and 50%, crossed only from a baseline
+below the line and held under the same coverage rule. Award comparisons use the
+join-date age bracket, so changing brackets does not issue an award. Sleep has
+no age wins. VO2 retains the existing median statistic; the other metrics use
+the mean.
+`freezeAndScoreMetric` applies the existing group-report daily metric projection
+ranges to readings before baseline/statistic calculation and to any frozen
+baseline before scoring. Sleep scales those canonical-minute ranges to seconds.
+Out-of-range values are omitted, never clamped; an invalid frozen baseline stays
+stored but cannot issue new wins. Existing earned awards are unchanged. These
+shared ranges bound held-step enumeration to 230 HR, 1,000 Steps, 96 Sleep and
+100 VO2 levels per metric, independent of imported numeric magnitude.
+The current headline uses the current fourteen-day window, not an older
+complete window. Sleep converts canonical minutes to seconds once. All sums
+and scoring inputs remain inside the 365-day replica window.
+Metric access uses the last seven member-local dates, including today. Recent
+resting-HR or VO2 samples establish wearable evidence; a wearable metric with no
+sample in that window is `off` when that evidence exists. Phone-only missing
+metrics remain `missing`; Steps does not infer wearable access. Historical
+values, baselines and earned wins remain intact. This is a data-derived hint,
+not an OS permission fact.
+
+`norms.ts` ports the iOS age ranking, including the original-device HR rule.
+`age-norms.json` is byte-identical to the iOS resource. The shared synthetic
+fixture at `apps/web/test/fixtures/progress-age-rank-golden.json` contains Swift
+results for the same metric, value, demographics and source inputs; no member
+data is used. Recommendations are the fixed map in `health.ts` and appear only
+for a sufficiently observed flat or worsening metric.
+
+Health labels use `progress/format.ts`, including full digits below 10,000,
+clock-style sleep amounts and one-decimal VO2 values. `healthMedalFace` owns
+both earned and next faces. Age `typical` is the median cutoff from the same
+age, sex and device table as the percentile. Recommendations carry a fixed
+glyph from the contract's closed list, assigned in the existing curated map.
+These response fields add no stored state; earned faces stay sealed in award
+content under the classification below.
+Age medal titles are derived from the saved percentile for both old and new
+awards, with the audience only in detail; moments join those words once.
+
+The Steps map reads `readCompanionHealthSeries` and `healthSums`, exactly as the
+Health page does, and rechecks health authority before rendering. It never
+adds game Steps or measured walk distance. Route `here` and `drawerHere` are
+derived unit image coordinates from the same geometry cut and respective
+viewports as the card and drawer PNGs; neither is persisted. Sleep journeys
+retain the shared `projection()` result, including its nullable `on` date.
+
+The following nested fields are encrypted content under the existing Progress
+owners; no additional table or plaintext private field is introduced:
+
+| Owner | Fields |
+| --- | --- |
+| Measure `state_encrypted.baseline` | `value`, `from`, `to`: frozen health statistic and its observed-date window |
+| Measure `state_encrypted.healthSettlement` | `savedAt`, `checkedAt`, `timeZone`, `profileTimeZone`: sealed replica publication/evaluation timestamps and vault/member zones for the completed health batch; never exposed on the wire |
+| Health award `data_encrypted.data` | `level`, `baseline`, `value`, `amount`: held step facts; common `face`, `title`, `detail`, `page`, `evaluator`: medal presentation and scoring evidence |
+| Age award `data_encrypted.data` | `percentile`: held age crossing; common medal presentation and scoring evidence |
+| Friend award `data_encrypted.data` | `amount`, `otherAmount`: crossing facts; `face.member` contains subject id, name and avatar; common medal presentation and scoring evidence |
+| Route award `data_encrypted.data` | `from`, `to`, `distanceM`, `startTotal`: frozen journey facts; common medal presentation and scoring evidence |
+
+`friend-cohort.ts` admits current, unblocked players from games already played,
+plus unjoined invitees from the viewer's current created games. Invited and
+negotiating games use the existing invitation deadline; cancelled and closed
+invitations disappear. Pending names use Home's `pendingInviteeLabel` and the
+creator-owned sealed name, never another name source. A pending row has
+`invited: true`, null total/rank/join date, and no chart line, award or sharing
+audience. Invitations without a member use the existing game id and seat as an
+opaque row identity; no contact identifier is exposed or persisted. A joined
+friend wins over duplicate pending invitations. The cohort is rechecked after
+opening names and again before returning data. Deleted-member notices use the
+existing viewer-owned `GamePlayer.departedLabel` and `leftAt`; no former member
+identifier or separate deletion ledger is retained. `friend-games.ts` reads
+500 games / 10,000 entries as limit-plus-one batches, including each friend's
+other games, and exposes only exercise aggregates. Typed quantities use the
+shared series contribution function; untyped quantities use the existing member-scoped
+inference cache, per-day measure state and the entry's terms version and seat.
+Only typed quantity payloads are decrypted; untyped photos/text stay sealed.
+Unresolved inference excludes only those check-ins from displayed totals.
+Current friends still appear, and known own exercise pills remain available
+while classifications are pending. Pass-award settlement waits for all pending
+tasks so a partial opponent total cannot mint an irreversible pass. Friends reads return the
+deduplicated unresolved tasks with their source-member ids to `scheduleInference`,
+the same deferred cache writer used by own Progress. It classifies sequentially,
+seals each owner's batch under that owner's key outside the transaction, then
+inserts all resolved rows once. The committing transaction rechecks the requesting
+session and current friendship while holding the affected pair locks; authority
+loss writes nothing. The next complete read settles awards idempotently.
+Duplicate attempts count once and same-date contributions add together. Friends rank raw amounts with competition
+ranks; private rows have no rank, amount, chart line or gap. Caps set
+`Friends.incomplete` and settle nothing. Friend award commits recheck friendship
+and blocks while holding the affected pair locks. Health pills never produce
+friend awards.
+The main read's background Friends phase returns before game-series loading
+when no co-player has joined. Otherwise it uses one cohort and one game-series
+load for every exercise pill offered by the Friends page, without reading sharing
+rooms. It reuses the page's pill selection, pending-inference writer and guarded
+award commit, scheduling only other members' pending tasks because the foreground
+read already schedules the viewer's. Candidates for all exercise pills share one
+award insert; subject pair locks are deduplicated and sorted, then the complete
+audience is rechecked once at commit. Cohort/game caps and any pending
+classification prevent pass settlement. Steps/Sleep never enter health reads
+or friend awards in this phase. Collection bounds and crypto batches below
+apply once to the batch, rather than once per exercise; authority checks remain
+at their read and effect boundaries.
+The chart includes every ranked row within the existing reader cap, in ranking
+order. A ranked person with no points in the selected range has an empty point
+array; private and invited rows never have a chart entry.
+
+Friend Steps/Sleep reads use the existing pair-board projection grants and its
+180-day retained history, not another member's private replica. Pair rooms must
+have exactly two humans and no extra group membership. The consent preview
+names every recipient; `SetSharingBody.audience` echoes those ids so a changed
+audience cannot silently receive a grant. Every granting transaction rechecks
+the live-provider-backed route, current pair, verified contacts, block/consent/
+session state and room roster. `addHostedGroupPairBoardSharingTx` adds only Steps/Sleep through the
+existing sharing owner, preserving HR/VO2 and every other grant. Declining
+removes nothing. Success and partial-failure responses list committed
+`sharedWith` recipients; no retry loop or alternate sharing state exists.
+
+Progress collection bounds are 500 games, 10,000 entries and at most 5,000
+current player identities. Deferred friend inference admits at most 10,000
+member-bound phrases, each with at most two sequential provider calls. Sealing
+runs one owner batch at a time, then one transaction takes at most 4,999 pair
+locks, two cohort queries, the existing native-session check and one cache insert.
+No provider or key work runs inside that transaction. Cohort reads use two set queries each (games and
+blocks), repeated at the post-decryption and award-commit authority boundaries.
+Game inputs use four set queries (games, entries, task cache, measure state); at most 10,500
+source fields, 10,000 cached task fields and 10,000 measure states are opened in batches, outside
+transactions. Names are one batch of at most 5,001 fields including pending invite labels
+and a departure label. The same 501-game admission query selects at most ten
+player seats and nine invitation seats per game; occupied invitation seats are
+excluded. Pending identities never enter game-amount or pair-health reads. Room discovery uses four set queries, with at most three concurrent
+queries. Pair health reads deduplicate by friend and choose one room; at most
+500 existing board-owner reads run sequentially. Each board owner reads at most
+eight scope snapshots in batches of four with its pre/post grant checks; no
+per-room reads or transactions overlap. Sharing likewise has at most 500
+sequential provider observations, transactions and post-commit wakes; verified
+contact checks run twice per room. The existing board/sharing owners retain
+their internal database and key-access bounds. Maximum-room tests assert one
+active shared read or transaction, exact provider/contact call counts, and
+commit-boundary authority checks. The health reader opens four measure states,
+freezes at most four baselines sequentially, initializes at most one Steps route
+and performs one award settlement. Steps uses the shared route owner; Sleep uses
+the shared time ladder in canonical seconds. Existing awards retain passed
+journeys after corrections. A new route resolves at most eleven provider calls,
+at most two concurrently, before its authority-checked state write. Award reads
+before and after settlement preserve historical presentation. All vault,
+provider and cryptographic work stays outside committing transactions.
+
 ## Weekly Game
 
 Recap media retirement receipts live in the additive, FK-free `game_recap_asset`
@@ -5796,20 +6577,43 @@ The runtime-orphan kind constraint is unchanged.
 
 
 Pair shows use the existing recap notification on GPT-6.2 Sol with the normal
-hosted group turn sandbox, cwd and tool surface. `read_game` returns scoped game
-material, shared chat and lore directly; the host resolves reference-photo IDs.
+hosted group turn sandbox, cwd and tool surface. Writing uses Flex with a
+twenty-minute capacity budget in an unbound per-generation assistant session;
+the system mailbox retries Flex capacity failures at five-minute intervals,
+resuming that session's native binding. The next attempt at or after twenty
+minutes uses standard service, without interrupting active generation.
+Standard-tier capacity failure settles through existing template or
+remake-retirement recovery. The room session owns context and delivery.
+Media provenance and song timing stay in the per-turn host-memory map. A retry
+resumes the native thread but must regenerate media from an earlier failed
+attempt: existing files and writer-writable metadata cannot confer media
+authority. No durable media provenance receipts are written or read.
+`read_game` writes the scoped game material, shared chat and lore to files in
+the recap task directory and returns only the craft guide and their paths. Its
+result therefore never grows with the game: Codex cuts the middle out of a tool
+result past the model's output limit, and the model cannot recover it, while a
+file can be read in parts. The host resolves reference photos named by path or ID.
 Pair recap identity references include each player's own profile photo and the
 contact photo saved by the other player, attributed only to the pictured subject.
 Contact photos follow the same current-key revocation and game-wide retirement
 as profiles; private label words and the owner are never exposed.
-Available player reference photos are materialized in the recap task directory
-with vault-relative paths so native `view_image` can inform casting. Failed
-reference fetches omit the path without blocking the recap.
-The agent generates JPEG scenes and an optional twenty-second song in file mode,
-then calls `write_recap` once. The host uploads selected bytes and Web publishes
+Every available reference photo, Murph's character sheet included, is
+materialized in the recap task directory with a vault-relative path so native
+`view_image` can inform casting and the same path can name the reference. Failed
+reference fetches omit the path without blocking the recap. The recap task
+directory is runtime scratch under `.runtime/tmp`, which a saved workspace never
+includes, so players' photos, generated media and the chat copy last only as
+long as the container. A resumed attempt reads the game again.
+The recap turn, never a model argument, makes media a file and fixes its format:
+the agent supplies a prompt and reference photos for each JPEG scene and a
+draft path plus singer description for the continuous score, then calls
+`write_recap` once. The host derives five-second page cues and a twenty-second
+sung chunk from that draft. One song asset serves the full score and a
+frame-aligned song slice; the native contract owns their clocks. The host uploads selected bytes and Web publishes
 through the canonical transaction, retaining the current source authorization,
 asset retirement and replay owners. One accepted story owns one chat line plus
-link with no chat media. Groups retain their existing writer rules and payload.
+link, and with an accepted recap video that video beside the line (below).
+Groups retain their existing writer rules and payload.
 Runner-to-Web requests share one cap equal to Vercel’s request ceiling.
 The cover capability serves a no-store 1200x630 JPEG crop for link previews;
 the accepted portrait remains unchanged in the show.
@@ -5817,7 +6621,7 @@ The [native contract](agent-docs/references/recap-show-contract.md) owns decoder
 fixtures; the iOS presentation is unchanged.
 
 An authenticated material response sets a tiny native in-memory recap scope.
-The existing egress boundary counts up to six forwarded media requests in that
+The existing egress boundary counts up to seven forwarded media requests in that
 scope and skips ordinary subscription/allowance vetoes for that media. Neither
 model arguments nor request headers can grant scope. Container restart may reset
 the count. Ordinary Responses, websocket upgrades and Live add no recap calls.
@@ -5837,6 +6641,101 @@ permanent retirement tombstones prevent late uploads from restoring access.
 A refreshed fallback selection derives a fresh cover key from its frozen deadline
 and content, retaining the current cover atomically with acceptance; expired
 receipts and tombstones remain terminal across mailbox retries.
+
+A pair show's envelope may also hold one recap `video`: a single MP4 stored as
+up to four sealed parts of at most 2,000,000 bytes on the same receipts, keys
+(`recap/<generation>/<sha256>.mp4`) and tombstones as scenes and the song. Only
+the whole file has a hash, a length, a duration, a frame size and one
+deduplicated source list, which includes every source of the scenes it shows;
+parts are not assets and the limit of five assets is unchanged. A write brings a
+candidate. Web joins the staged parts outside the transaction, checks the
+declared hash, walks the MP4's boxes for its duration and frame size, resolves
+the declared sources itself, and leaves a candidate that fails any test off the
+accepted recap. The request carries the candidate unparsed, so one Web cannot
+read costs the video and never the recap. The video's own sources are checked
+when it is selected and again on every read; the accepting transaction rechecks
+only the assets' sources, so a source that changes in between leaves a video
+nobody can open, not a failed recap. The first acceptance decides the video: a retried or replayed
+write gets the stored recap, and write and recovery results name the accepted
+video (generation, hash, length) or `null` only to a runtime that asked, so an
+older runtime never sees the field. `recapStorageObjects` lists a recap's
+stored objects for receipt retention and serving; a part is served as
+`video-<index>` through the asset route under its parent video's sources, the
+media switch and the generation. Retirement is by game and generation, so
+regeneration, a post removed for everyone and account deletion retire parts
+with no code of their own. `MURPH_GAME_RECAP_VIDEO_ENABLED=true` (pair shows
+only) lets Web stage parts, accept a candidate and add `game.poster` to the
+recap material; stored videos stay readable while it is off. With it on, Web
+also writes `video: true` on a pair recap wake, regenerations included. The
+envelope reader is the Web rollback floor
+once a video is stored: the previous release refuses an envelope with `video`.
+Live Web protocol admission carries a `recapVideo` witness, so a runtime is not
+activated against a Web that cannot read these requests.
+
+The runtime reads the same feature before anything writes it. A recap wake's
+response policy may carry `video: true`, for a pair show only; the parser, the
+saved pending state and the recap scope accept it, and the turn runs unchanged.
+A stored outbox intent may carry `recapVideo`: the accepted identity plus
+whatever the delivery owner records beside it. The intent reader keeps extra
+keys, drops a value that is not an identity instead of quarantining the intent,
+keeps the field across ownership-checked rewrites and sends the text alone.
+Tool results may name the accepted video. A runtime before this release refuses
+a wake with `video` and quarantines an intent with `recapVideo`, so this release
+is the runtime's rollback floor once Web queues such a wake or a later release
+stores such an intent.
+
+On a wake that asks, the file variant of `write_recap` renders the show after
+its scenes and song upload and before the write. The host presents the draft
+with `presentGameRecap`, as the app's payload is made, and writes the verified
+scene and score bytes, the photos fetched again by reference, and the result's
+names, scores and `game.poster` into a render directory under the runner's
+own home (`.murph-recap-video/`), never under a temporary directory or the
+vault: the model's permission profile writes both of those, and a link planted
+there could make ffmpeg overwrite a file outside the sandbox. The model's
+`game.json` never carries `poster`, so its input is the same with the flag on
+or off. The installed renderer's own `child.js` runs as a separate Node process
+in a new process group, with a 512 MB heap and an environment of `PATH`, `HOME`
+and `LANG` only. One 180 s budget covers the photo fetches, the render and the
+part uploads; when it runs out the recap is written without a video. A
+cancelled turn kills the whole group (the drawing process and ffmpeg) and
+writes nothing; the child removes its directory and kills its group itself when
+the runner's pipe closes or its own deadline passes, and each render sweeps
+render directories a dead runner left. One render runs per runner at a time; a
+second recap meanwhile makes no video. The file goes up as `video-N` parts of at most 2,000,000 bytes and rides
+the write as a candidate. Every refusal, timeout, crash, oversized file, part
+Web refuses (`recap_video_unavailable` while the flag is off) or failed upload is
+"no video": the write is then byte-for-byte today's, and the candidate and the
+temporary directory are removed whatever the write returns. Web's first
+acceptance decides the stored video.
+
+Delivery. When the write or a recovery names the accepted video and this
+runner holds exactly those bytes (hash, length and generation), the file moves
+to `accepted-<generation>-<hash>.mp4` beside the renders and the turn queues
+the line and link with `recapVideo` (the identity only) on the outbox intent;
+otherwise the intent has none and the recap goes as today. The intent never
+names a file: the model's shell can edit an intent, so the sender derives the
+one possible path from a well-formed identity inside the runner's directory. Only a
+text-only Linq intent carries it, and a replayed create keeps the stored
+intent and its decision. The outbox hands it to the hosted Linq sender, which
+makes one decision before the message's first request and saves it with the
+outbox's ownership-checked compare-and-set: Web's authority-only egress check
+says the video may still go (`recapVideoCurrent`, `isRecapVideoCurrent` for
+the delivery key's own game, read before the claim's transaction), the file is
+the accepted bytes, and Linq takes it as an attachment (an authority-only
+provider boundary, no dispatch fence), saved as `form: "attachment"` with its
+id, then asks Web once more now the upload is done; any failure saves
+`form: "line"`. An answer that carries a delivery block counts as "no". The
+file is removed once a decision is saved. Every send asks Web again, and so
+does each request whose body carries the attachment (the client's own retries
+included): when the video may no longer go the request does not leave and the
+outbox's next attempt sends the line alone; when Linq refuses that request
+outright (400, 413, 415, 422) the decision becomes the line alone and the
+attempt fails as retryable, so the line and link still go once. While allowed,
+the saved attachment rides the first send after the line's text and the link
+goes alone as today; once not, the decision moves to the line alone for good. A decision only ever
+moves toward the line alone. A restarted runner has no file and sends the line
+and link. The message keys are unchanged, so the video can be sent at most
+once with its message; a regeneration is a new message with its own video.
 Accepted media uses private generation URLs; a thirty-day opaque cover capability
 exposes only a composed cover. Failed scenes retain their text, failed songs are
 omitted, and exhausted generation uses a validated three-page plain fallback.
@@ -6034,6 +6933,10 @@ words, route and reps, and stores per-poster sealed summaries in nullable
 decryption. New writes require 3–365 days (default seven) and one prize
 or dare; legacy lengths and stakes keep their read/settlement semantics. Both
 new pair stake kinds issue one loser-to-winner ticket, none for a tie or perfect game.
+An optional pair `both_get` entry issues two single-seat reciprocal tickets only
+when both players have zero misses. The prize or dare remains first; slot merges
+preserve an unnamed entry and its key in structural terms and encrypted words.
+Compatible stored and hosted readers precede the change writer and offer trigger.
 Ticket views derive kind from the existing stake key; no duplicate kind is stored.
 Pair tasks lock when either player's Day 1 begins; the prize or dare stays
 changeable by mutual agreement until settlement is due. Acceptance/approval uses the actor's local
@@ -6082,6 +6985,43 @@ that predate it. Deploy Web before the runtime: an older Web rejects the new
 operation, and only the new operation returns the new receipt status. Rollback
 is safe because the entry is ordinary data.
 
+Both day corrections stay open on a settled pair game for
+`GAME_SETTLED_OPEN_MS` (7 days) after `settledAt`, the same window its game
+chat stays admitted (`GAME_CHAT_SETTLED_ACCESS_MS` is that constant); after it
+the refusal is `GAME_NOT_LIVE` with the plain reason, and a group game keeps
+its refusal from the moment it ends. `decideDayCompletion` applies the live
+rules unchanged, except that a finished game has no open day and its days are
+the ones that had started when it ended (`settledGameEnd`), so a date after an
+early finish is refused. A pair game that has ended by its clock but is still
+stored as live is settled first, inside the same lock, by `settleLoaded`, so
+the correction never depends on a read having come first. `setDayCompletion`
+then settles the result again from the same `decideSettle`: it replaces
+`game.result` and calls `settleTicketsTx`, the one ticket writer first
+settlement also uses. That writer matches tickets by stake and by who owes
+whom, counting duplicates; it keeps a ticket that is still owed (a done one
+before an open one), issues one that is newly owed, and removes an open ticket
+that is no longer owed. A ticket already marked done is never touched, and
+`redeem` answers a ticket that is gone under the lock with `TICKET_NOT_HELD`.
+`status` and `settledAt` do not change, so chat admission, billing, the recap
+reservation and rematches are untouched, and nothing is announced or pushed.
+The correction is refused when the stored result no longer equals what the
+current posts decide (`storedResultStands`: an Ops takedown or a deleted
+account since the end), so one player's correction cannot move the other's
+score. One `result_corrected` event records the day, the scores before and
+after, the ids of tickets added and the id, stake, seats and created time of
+each ticket removed; the existing day event records who and when. When the
+outcome changes, the `update_game` response carries the exact line to say in
+the existing optional `chatLine`, with "The recap was made before this
+change." appended once a recap exists: the recap is left as made. Web sends a
+settled game's `progress` to the runtime only while the write would accept a
+correction (inside the window and with a stored result that still stands), as
+the days stood when the game ended. The runtime shows those days, sends the
+day-correction rule for exactly those games, and counts each toward the
+several-games rule so a date that fits two games gets a question. No schema or
+contract field is new, so Web and the runtime deploy in either order: an older
+runtime confirms the day without the result line, and an older Web refuses
+with "This game has ended."
+
 `runGameCommand` is the single write path, for the routes now and Murph's tools
 later. It validates the command (`command.ts`), checks uploads, seals words,
 then locks the game row, reads the database clock, asks a pure rule, and writes
@@ -6120,10 +7060,9 @@ that just ended, with the existing clock slack at both boundaries.
 `PUT /blocks/:memberId`, `DELETE /blocks/:memberId`, and `POST /media`. Reads: `GET /home`,
 `GET /games/:id`, `GET /invites/:token`, `GET /media/:key`. They use a plain
 Better Auth bearer session, not the paid-member check, because invitees play
-free; the global flag hides every route. During allowlisted rollout, members
-may also enter through their enabled game or a valid invite. Owners of outgoing
-blocks retain admission to reach their own unblock controls after their last
-game ends; creation and individual game authorization remain unchanged. The invite preview and
+free; the global flag hides every route while off. When on, every signed-in
+member can enter and start games; individual game and content authorization
+still follow the roster and visibility rules. The invite preview and
 `/g/<token>` page are unauthenticated and honor only the global flag. Dev
 time-travel routes return 404 in real production; they move a per-game clock
 (`game.dev_clock_offset_ms`, added to the database clock as that game's "now"
@@ -6161,6 +7100,82 @@ hash and preserves conditional pointer creation and account-deletion fencing.
 Web clears decrypted bytes after upload and retains the encrypted source for
 retries and rollback. No new Worker route or crypto authority is needed. Local
 stacks keep plain files on disk.
+
+Progress pictures have a separate owner-only Web route and random
+`progress/<random-id>.jpg` identity. Web seals JPEG bytes under the member's
+control key with `game-progress` scope and table/key/field AAD before the
+Worker stores them. They never use game photo, avatar or recap keys. The
+member-bound `progress-pics/{stage,read}` control routes share recap's
+conditional-create storage primitive. Progress validates uploads once at the
+Worker route and decodes its own typed records directly. Recap retains its
+existing envelope normalization, stored-record validation and error responses;
+the shared primitive does not change that shipped contract.
+`game_progress_pic` purge replaces the
+same object with a permanent content-free tombstone outside account-prefix
+removal; neither a delayed upload nor legacy recovery can replace it.
+
+Picture reads require the requesting owner's live row both before retrieval
+and after decryption. Deletion retires the row before awaiting the Worker
+purge and reports failure if that purge fails. Account deletion, after its
+existing suspension fence, reads at most 10,001 picture rows per member and
+rejects an incomplete collection before any purge. An admitted collection has
+at most 10,000 serial object retirements and one bulk row deletion, all outside
+database transactions; failures preserve the rows and block account deletion.
+There is no pagination recovery or automatic retry. Upload admission
+rechecks native auth under the member lock before registering the random key,
+so account cleanup also fences uploads still in flight. Live picture lists read
+10,001 rows; more than 10,000 marks the input incomplete and yields no truncated
+pins or award evidence.
+
+The JPEG upload route admits at most 2 MiB and 2048 pixels per dimension before
+storage effects. It reuses the five-query game-series reader and reads the
+profile timezone alongside it (at most two pooled connections), then registers
+ownership with two domain queries in one transaction and performs one final
+liveness read. Crypto and the single Worker stage request remain outside the
+transaction; existing auth/root-key readers retain their own query bounds.
+Pins use the cumulative value on or before the capture's member-local day;
+they persist no health total. The games view admits the complete picture list
+before route initialization or award settlement and attaches pins by measure.
+
+For this object store, `version`, the plaintext-byte integrity `hash`, random
+object identity and `retired` marker are approved operational metadata.
+`envelope` is encrypted content; the owner namespace is keyed. The picture's
+exercise association is sealed in `meta_encrypted`; no health amount or image
+content is stored in operational metadata. Route endpoints, geometry, towns,
+distance and starting total are private content inside the existing sealed
+measure state. Route award data seals those endpoints, distance, starting total,
+and the medal's face, title, detail and destination page. Mapbox receives only
+requested places or sampled coordinates,
+never a member identity, health total or provider token in a client response.
+Route award identity includes the retained leg's position and frozen route
+facts. Replacing an unfinished route cannot inherit another goal's award, and
+repeating a completed route after a correction cannot reuse the prior leg's key.
+
+Progress maps resolve two permanent geocodes, one simplified driving route and
+eight sequential place reverse-geocodes for road routes. Only the provider's explicit NoRoute
+permits a great circle, with no reverse-geocodes or towns; all other provider failures return retryable 503 with
+no retry or raw provider diagnostics. Maps use the constant Murph style,
+explicit Mercator bounds and two path overlays. Map requests require `size=card`
+(708 by 405 pixels, the 354pt 7:4 card at 2x rounded to a pixel) or `size=drawer`
+(708 by 640 pixels, the 354 by 320pt drawer at 2x). Free dimensions are rejected.
+`Route.map` links the card; `Route.towns` and `Route.drawerTowns` carry coordinates
+for their respective viewports. The drawer changes only the map query's size.
+Clients display the PNG without cropping. `Goals.route` adds the same town shape
+for its card preview, with null crossing dates, and `detail` from the current
+measure total and remaining route distance. Ocean previews explain the straight
+line and have no towns. These fields are private response-only content, never
+persisted. All route amounts use `format.ts`. Maps stream private PNGs;
+no map object or cache is persisted. Keep Mapbox attribution visible.
+The map handler reads frozen game legs and canonical points, preserves awarded
+finishes after corrections, and rechecks native authority in a short database-only
+transaction before the image fetch. Preview requests resolve the two requested
+places without state writes. The fixed style identifier in `routes.ts` must name
+the uploaded Murph style before rollout; the draft placeholder is not deployable.
+
+Deploy the compatible Worker before Web emits Progress storage requests or
+purges, after the shared Progress migration. Existing recap producers remain
+compatible. Once picture retirement has been used, do not roll back to a Worker
+that cannot honor the new resource kind. There are no warm-runner changes.
 
 History keeps `mediaUrls` as stable cache identities and adds optional
 `delivery: { url, expiresAt }` to the previews in each person's or group's latest
@@ -6205,6 +7220,17 @@ image content or capabilities. An ambiguous provider/write result retains its
 receipt and blocks deletion acknowledgement until operator reconciliation;
 elapsed time alone does not authorize clearing it. Deployment and recovery are
 owned by `apps/cloudflare/DEPLOY.md` § Private weekly game images.
+
+The game profile's `not_for_me` array stores the closed activity keys declared in
+hosted-execution. `setProfile` replaces it only when supplied; omission preserves
+it and an empty array clears it. Profile replies and home `me` always include
+`notForMe`; the existing batched profile read supplies nonempty lists to visible
+players, bound invitees and history people, applying report and member masks.
+Departed players never expose it. The private `my_game_not_for_me` action reuses
+the direct reminders port and authority and writes through `setProfile` without
+creating a profile. `GAME_TOOL_ACTIONS` owns runtime parsing and signed identity
+forwarding; per-action authority remains explicit. The weekly game spec owns the
+ideas exclusion contract and deployment floor.
 
 The game profile's nullable `photo_key` references an owned, completed upload.
 `PUT /me/profile` accepts partial updates: absent fields remain unchanged, and
@@ -6343,12 +7369,18 @@ are unchanged. Evidence outlives the author's account and follows the reporter's
 existing report lifetime.
 
 `push-delivery.ts` shares route/session, permission, suspension, APNs delivery
-and unregistered-token cleanup with post notifications. Reply claims and
-subject checks remain separate. The push body is exactly “New voice note on
-your post.” or “New note on your post.”, with data `{gameId, notification:
-"game_reply"}`. The sender's required title matches post pushes. Delivery is
-one best-effort attempt after the response, with expiry 24 hours after sending.
-No names, lengths, content, digests or media links enter events or pushes.
+and unregistered-token cleanup with post notifications. It prepares the APNs
+provider token before the final subject and route/session checks. The sender
+uses the existing hosted-crypto KMS client when `APNS_KMS_KEY_VERSION` is set,
+paired with the rotated `APNS_KEY_ID`, and never consults the transitional PEM
+in that mode. Signing is shared across concurrent callers and tokens are reused
+for 40 minutes. A prepared send cannot trigger a later signing refresh.
+Reply claims and
+subject checks remain separate. The push body is “Sam replied to your post.” or
+“Sam replied with a voice note.”, naming the replier as the recipient knows them,
+with data `{gameId, notification: "game_reply"}`. Delivery is one best-effort
+attempt after the response, with expiry 24 hours after sending. No lengths,
+content, digests or media links enter events or pushes, and names enter pushes only.
 
 Apply the additive migration before Web. This complete reply-aware Web release
 is the rollback floor once replies or reply reports exist. Recovery uses a
@@ -6358,7 +7390,13 @@ assistant or legal-version change is part of this release.
 ### Daily game reminders
 
 `setReminders` in the game command owner stores profile timing/channel preferences
-and live-seat opt-outs in one database-only transaction. The separate bearer
+and live-seat opt-outs in one database-only transaction. A live seat may also have
+its own `reminder_minutes`; null follows the profile time. The app's `gameMinutes`
+map replaces every live seat's own time, and leaving it out keeps them. The chat
+tools send `timeForGameIds` instead: `minutes` becomes the own time of only those
+seats (none for an empty list), the profile time is not written, and only those
+seats get the minutes choice fact. A direct-chat time with no game sets the profile
+time and clears every own time. The separate bearer
 settings endpoint keeps Home unchanged; `canText` is false. Push registration
 owns `game_reminders` capability, default false and cleared by old game clients.
 Wearable refreshes preserve it only for the same address.
@@ -6371,11 +7409,15 @@ Each projection admits at most 20 live seats per member and 1,095 own attempts
 per seat, skipping overflow. Reads batch seats and own histories; peer posts
 and blocks need two bounded reads only for single-game wording. Only final own
 task words are opened, at most 20 fields per attempt, outside transactions.
-`reminderOpenDay` composes game rules and score credit; profile time controls the
-30-minute window while frozen seat time controls game days.
+`reminderOpenDay` composes game rules and score credit; profile time zone and each
+seat's effective time control the 30-minute window, while frozen seat time controls
+game days. The page query returns each member's distinct effective times; each due
+time is a slot that reads only its own games.
 
-The unique `game-reminder:<sha256(member, localDate)>` event key owns a daily
-member-wide claim, regardless of its anchor game. A fresh projection after the
+The unique `game-reminder:<sha256(member, localDate, minutes)>` event key owns a
+daily claim per member and time, regardless of its anchor game. Games at one time
+share one push; a game moved after its claim drops out of that push and reminds at
+its new time. A fresh projection after the
 claim builds task title, body and target immediately before `deliverGamePush`.
 That owner rechecks current route, session, permission, capability and expiry.
 No retry releases the claim; only content-free outcomes are recorded. The push
@@ -6398,8 +7440,12 @@ it rechecks the exact route/session, permission, suspension, game switch, active
 participation, real day, candidate, reporter mask, block mask and milestone.
 Group completion is suppressed if any eligible peer is blocked. A stale send,
 crash or uncertain provider result never releases its claims. Recipients are
-processed sequentially; provider work stays outside transactions. No names or
-content enter post pushes. Daily reminders may include the recipient's own task words. Pair copy continues to derive from permanent
+processed sequentially; provider work stays outside transactions. Every game
+push names the other person as the recipient knows them (`readNamesForViewer`:
+their private label, else that person's own first name). The name is opened
+after the delivery recheck passes, never stored in events, and a failed read
+falls back to the nameless wording. No other content enters post pushes; daily
+reminders may also include the recipient's own task words. Pair copy continues to derive from permanent
 `hasUnlockedDay`; group completion derives from live submitted artifacts.
 Missed-day chat uses the separate canonical room collector described below;
 it does not create additional push receipts.
@@ -6413,6 +7459,22 @@ installation deletion. Legacy wearable-only registrations remain unenrolled. A c
 keeps game enrollment only when its installation and complete push target are
 unchanged; replacing the address clears the old session binding under the same
 member lock.
+Both registration routes accept an optional `reopenReminders` boolean, the
+phone's "Reopen reminders" switch, stored as nullable
+`companion_push_route.reopen_reminders`. A build that predates the field sends
+nothing, which reads as on: the game route stores null, and the companion route
+keeps the stored value only for an unchanged address. The Apple Health reopen
+push (`apps/web/src/lib/device-sync/apple-health-reopen-push.ts`,
+`docs/device-provider-compatibility-matrix.md`) is the one reader. It needs no
+game session, because its copy is generic and a member whose session expired
+is who needs to reopen the app; it marks the push Time Sensitive only for a
+route that reported the switch, since only those builds are known to hold the
+entitlement. Web must deploy before an app that sends the field: the
+registration schemas are strict, so an older Web rejects it.
+The sweep checks APNs configuration before claiming, then prepares the provider
+token after the claim transaction and before its final eligibility read, using
+the clock after signing. Signing failure consumes the claim as a failed send;
+neither failure nor supersession releases it.
 Companion installation-scoped deletion still owns sign-out. Native
 uses the existing notification delegate; the alert's structural game id selects
 an authenticated game after refresh. No entry content leaves the game reader.
@@ -6596,7 +7658,11 @@ settle a shared choice, never consent; the game tool owns the short setup/poll
 guidance and the generic challenge fallback explicitly defers to these tools.
 Only brief setup/poll triggers enter the initial tool catalog. The engine appends
 the full setup guidance to each successful accepted-input read_game result,
-alongside GAME_SELECTION_GUIDANCE when several games are active. Recap reads
+alongside GAME_SELECTION_GUIDANCE when several games are active. Within one
+provider turn each rule block is appended once; a later read points back to it,
+and a context compaction resets that. The model's copy omits lore keys, stake
+keys, finished games' days, asks and controls, and days not yet started; a write
+result shows only the game it acted on, without days. Recap reads
 remain isolated and retain their own memberId-keyed superlatives contract.
 
 Reads request `includePlayers: true` and receive two profile references for pairs
@@ -6839,18 +7905,19 @@ settlement and uncertain sends.
 
 The encrypted mailbox policy `game_group_missed_check_in` freezes room/date,
 at most twenty game IDs and terms versions, each full remaining-player set and
-canonical misses, the original group lore digest, and a conversation-lane
-watermark. Transcript reads stop at that watermark and include remaining-player
-authors only. Preparation decrypts public names and their task words outside
+canonical misses, and the original group lore digest. The same-day transcript
+is read at preparation and includes remaining-player authors only. Preparation decrypts public names and their task words outside
 transactions; private labels, unjoined overrides, captions and media are absent.
 Publication and final egress acquire contributing game rows in ID order, reload
 structural evidence, and call `readGameChatAuthority`. These locks span
 mailbox publication/receipt advancement or the existing provider-dispatch claim.
 Any new departure, corrected miss, terms/binding change or unsafe audience
 suppresses frozen output. Historical departures before the snapshot are valid.
-The mailbox causal-append lock also protects a conversation watermark recheck:
-new conversation conservatively suppresses the notice, including unrelated
-chatter; notification-lane writes do not. The daily claim remains consumed.
+Chat never suppresses a check-in. Whether a player's words already cover a miss
+or a task is the model's call from that transcript, and it may stay quiet. A
+message that lands after preparation is not in the transcript, so that person
+may still be asked. The policy's `conversationLaneSeq` is retired: Web writes
+`"0"` until every runner accepts its absence. The daily claim remains consumed.
 Recovery reuses the exact mailbox pointer and room batch, never an arbitrary game.
 A pair or group check-in retries while fresh. Two hours after its receipt was
 created it ends, whatever held it up and without a provider read: an unpublished
@@ -6868,9 +7935,10 @@ room/date owns the claim, with the room as payload owner. Its immutable event
 key survives delivery metadata rewrites and identifies each of the previous
 three accepted evenings for the unanswered-send pause. The encrypted
 `game_evening_check_in` policy freezes addressed game/day/member sets, terms
-versions, expiry and conversation watermark. The bounded same-day transcript
-stops at that watermark. Publication and dispatch recheck the frozen witness
-under game and mailbox locks; an expired or changed witness is stale. Recovery
+versions and expiry. The bounded same-day transcript is read at preparation.
+Publication and dispatch recheck the frozen game witness under game locks; an
+expired or changed witness is stale. New chat is not a change, as for the
+missed-day notice. Recovery
 signals an existing mailbox item without replacing it. The runner parses this
 policy and allows a skip, with no game host tools or lore. Egress checks the
 90-day inactivity pause separately after validating evening currentness.
@@ -6883,18 +7951,28 @@ first names and reminder settings. Settings and both chat tools write through
 remaining AI access and usage, and an already deliverable direct thread; the
 game never grants a private conversation. A per-seat `reminder_every_day` option
 changes count-game reminder urgency without changing posting eligibility.
+Both tools' `reaches` says `text` only when a selected game would get the
+private evening text: it has no group chat, or its players live hours apart, so
+no room check-in covers it. Otherwise the reminder at the member's time is the
+push. The runner shows the direct tool's result in words: each game's own time, named
+weekdays, and `everyDay` only on count games. A group `set_reminder` time changes
+only that chat's games.
 Saving choices records the ordered per-seat facts first, then updates the member's
 live seats in one parameterized statement with the same live receipt predicate.
 Choice arrays determine assigned values rather than row-lookup membership, so a
 large choice list does not become a repeated bitmap-index probe. Omitted cadence
 preserves its prior value; newly admitted seats without a choice fact are untouched.
 
-The minute drain reserves one `game_private_evening` receipt per member and
-local date, one hour after their saved reminder time, for open games no room
-check-in covers. Its typed policy freezes game/day/terms and conversation
-watermark; publication and egress recheck text consent, access, the witness,
-expiry and unanswered-evening pause. Each player's live-game activation copies
-opt-out and cadence from validated lineage or the latest exact cohort, then
+The minute drain reserves one `game_private_evening` receipt per member, local
+date and effective reminder time (`game-evening-private:<member>:<date>:<minutes>`),
+one hour after that time, for that time's open games no room check-in covers. The
+unanswered pause reads the member's published private-evening wakes from 28 days
+and their receipts by idempotency key, since dispatch rewrites a receipt's template
+and source. After its 30 minutes, unsent work is skipped and published work leaves
+the lifecycle sweep. Its typed policy freezes game/day/terms; publication and
+egress recheck text consent, access, the witness, expiry and unanswered-evening
+pause. A new direct message does not stop it. Each player's live-game activation copies
+opt-out, cadence and own time from validated lineage or the latest exact cohort, then
 records an idempotent activation event. A new-person or changed-rhythm offer
 gets one `game_private_kickoff` receipt per game and member. It waits overnight
 until 09:00 local, expires 24 hours after start, and rechecks live seating and

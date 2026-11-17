@@ -66,6 +66,21 @@
     "./workouts": {
       "types": "./dist/workouts.d.ts",
       "default": "./dist/workouts.js"
+    },
+    "./json-input": {
+      "types": "./dist/json-input.d.ts",
+      "import": "./dist/json-input.js",
+      "default": "./dist/json-input.js"
+    },
+    "./option-utils": {
+      "types": "./dist/option-utils.d.ts",
+      "import": "./dist/option-utils.js",
+      "default": "./dist/option-utils.js"
+    },
+    "./health-cli-descriptors": {
+      "types": "./dist/health-cli-descriptors.d.ts",
+      "import": "./dist/health-cli-descriptors.js",
+      "default": "./dist/health-cli-descriptors.js"
     }
   },
   "files": [

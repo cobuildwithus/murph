@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { sha256Hex } from "../primitives";
 import { normalizePhoneNumber } from "./phone";
 
@@ -85,7 +86,7 @@ export function buildHostedLinqGroupLineRecoveryEffectId(input: {
   const pendingGroupSetupId = input.pendingGroupSetupId?.trim() || null;
   const threadId = input.threadId.trim();
   if (!incomingRecipientPhone || !memberId || !threadId) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted Linq group-line recovery requires a valid member, thread, and incoming line.",
     );
   }
@@ -113,7 +114,7 @@ export function buildHostedLinqGroupLineRecoveryAttemptEffectId(input: {
     || input.attempt < 1
     || input.attempt > HOSTED_LINQ_GROUP_LINE_RECOVERY_MAX_ATTEMPTS
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted Linq group-line recovery requires a valid bounded attempt.",
     );
   }
@@ -130,7 +131,7 @@ export function readHostedLinqGroupLineRecoveryInstructionSeed(
     effectId,
   );
   if (!match) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted Linq group-line recovery requires a valid attempt identity.",
     );
   }
@@ -146,7 +147,7 @@ export function buildHostedLinqGroupLineRecoverySourceRef(input: {
   );
   const sourceEventId = input.sourceEventId.trim();
   if (!effectMatch || !sourceEventId) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted Linq group-line recovery requires a valid intent and source event.",
     );
   }
@@ -238,7 +239,7 @@ export function readHostedLinqGroupLineRecoveryVariantTemplates():
 function formatHostedLinqGroupLineRecoveryPhoneNumber(value: string): string {
   const normalized = normalizePhoneNumber(value);
   if (!normalized) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted Linq group line recovery requires a valid backup phone number.",
     );
   }

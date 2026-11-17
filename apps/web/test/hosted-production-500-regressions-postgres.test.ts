@@ -45,6 +45,7 @@ describe.skipIf(!runPostgresProof)(
             "causal_seq" BIGINT,
             "lane" TEXT NOT NULL,
             "lane_seq" BIGINT NOT NULL,
+            "dedupe_key" TEXT,
             "kind" TEXT NOT NULL,
             "payload_inline_ciphertext" TEXT,
             "payload_ref" TEXT,

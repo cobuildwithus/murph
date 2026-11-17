@@ -1,6 +1,6 @@
 # Completion Workflow
 
-Last verified: 2026-11-06
+Last verified: 2026-11-14
 
 Use `agent-workflow-routing.md` for task scope, checkout, and plan/commit choice.
 Use `verification-and-runtime.md` for checks. This document owns completion;
@@ -32,46 +32,63 @@ alone does not authorize a narrower product or another state owner.
 3. Make the changelog decision. Use `.agents/skills/write-changelog/SKILL.md`
    for a member-visible outcome; internal-only changes record a concrete reason.
    Write the complete PR body using the contract below.
-4. Commit and push the candidate; open the PR as draft. For an intermediate
-   plan-bearing commit, keep the plan active. `scripts/committer` takes explicit
-   files and rejects directory targets; `scripts/finish-task` expands directories
-   and closes the plan for the final commit. A PR with known edits still needed
-   stays draft. Before every subsequent push to an existing owned PR, follow
-   the verification guide's Draft-before-push sequence. The author owns
-   Draft/Ready and no background controller changes that state.
-5. Once focused proof and parent candidate review pass and the pushed head is
-   the intended candidate, mark the PR Ready. Start final ReviewGPT immediately
-   when eligible, concurrently with CI. Follow the review loop's exact-head
-   preflight and one completion owner; do not wait for CI before starting it.
-6. Triage findings against real evidence. Fix accepted issues at the smallest
-   correct boundary, rerun affected checks, mark Draft, and push. For a final
-   ReviewGPT `FINDINGS` result, follow its Finding Disposition Boundary before mutation;
-   continue in-scope remediation without requesting user resumption. Re-establish
-   readiness after any new push. Never rerun a review only to obtain agreement on a rejected finding.
-7. Perform the parent's final review after remediation. Close the active plan
-   and commit through `scripts/finish-task`; mark Draft before pushing and verify
-   the resulting head.
-   Include every public-safe Frog entry created or modified during the task in that same scoped commit.
-   A behavior-changing final edit needs the applicable checks and follows the review loop's step 7;
-   explanatory docs and isolated proof additions follow the review loop's exemptions.
-8. Refresh and verify the remote-tracking base using the explicit-refspec
-   procedure in `verification-and-runtime.md`, then prove mergeability with
+4. Commit and push the candidate; open the PR as draft. Close the plan in the
+   candidate commit with `scripts/finish-task`, which expands directory
+   arguments and archives the plan, so no closeout push follows. Keep the plan
+   active only for an intermediate commit that is not yet the candidate;
+   `scripts/committer` makes that commit, takes explicit files, and rejects
+   directories. Push anything that needs the PR number, such as a changelog
+   item's `sourcePullRequests`, while the PR is still draft. A PR with known
+   edits still needed stays draft. The author owns Draft and Ready. Before
+   every later push to the PR, follow the verification guide's
+   Draft-before-push sequence, because every push to a Ready PR costs a full
+   required CI run on the new head. For the same reason, do not push a commit
+   whose only content is plan closure, a wording touch-up, or a base update the
+   merge path does not need.
+5. Once focused proof and your candidate review pass and the pushed head is
+   the intended candidate, mark the PR Ready. When the change is eligible
+   below, start final ReviewGPT immediately, concurrently with CI, with one
+   completion owner.
+6. Triage findings against real evidence under Review-Resolution Loop before
+   changing code; a final ReviewGPT `FINDINGS` result follows the review loop's
+   Finding Disposition Boundary. Fix accepted issues at the smallest correct
+   boundary, rerun affected checks, mark Draft, and push.
+   Continue in-scope remediation without asking the user to resume. Re-establish
+   readiness after any new push. Never rerun a review only to obtain agreement
+   on a rejected finding.
+7. Review the final state yourself after remediation. When a fix changes what
+   the archived plan records, correct the plan in that fix commit; until the PR
+   merges it is still the task's record. If the plan is still active here,
+   close it with `scripts/finish-task`, mark Draft before pushing, and verify
+   the resulting head. Include every public-safe Frog entry
+   created or modified during the task in a scoped commit that carries task
+   work. A behavior-changing final edit needs the applicable checks, and the
+   review loop's After A Fix section decides whether it needs another round.
+8. Refresh and verify the remote-tracking base with the verification guide's
+   base refresh procedure, then prove mergeability with
    `git merge-tree --write-tree HEAD origin/<base>`. Keep green required CI on
-   the PR-authored head. Reconcile the base when the authorized merge path
-   needs it, following the review loop's Base-Update-Only Exception.
-9. Report the outcome, evidence, and remaining risks or blockers. For a feature
-   or fix, give the shortest practical verification steps and expected result.
-   Keep an open PR's worktree. After confirmed merge or closure, retire it using
-   the routing doc's guarded cleanup path.
+   the PR-authored head. The branch rules do not require an up-to-date branch.
+   Reconcile the base only for a real conflict, or when the base has since
+   changed code this PR calls or is called by or a test its required checks
+   run, following the review loop's Base-Update-Only Exception. A PR run tests
+   GitHub's test merge of the head with the base. That merge can stay on an
+   older base after the base moves, and marking the PR Ready again does not
+   reliably refresh it; a push does.
+9. Report the outcome, evidence, and remaining risks or blockers. Name the
+   exact failing check and why a pre-existing failure is unrelated. For a
+   feature or fix, give the shortest practical verification steps and expected
+   result. If deployment skew can degrade production, include
+   `DEPLOYMENT CONCERNS:` with safe order, compatibility window, and
+   post-deploy checks. Keep an open PR's worktree. After confirmed merge or
+   closure, retire it using the routing doc's guarded cleanup path.
 
 ## Product and Rendered Evidence
 
-The parent owns these checks as part of candidate and final review. Specialist
-passes are retired, including preliminary ReviewGPT specialists, local audit
-subagents, and separate coverage, security/privacy, frontend, prompt, Product UX,
-simplify, or task-finish passes. Do not schedule them from older plans, skills,
-or handoffs. Apply the relevant domain guidance directly and use Final ReviewGPT
-Eligibility below for the external completion gate.
+You own these checks as part of candidate and final review. Separate specialist
+passes (preliminary ReviewGPT specialists, local audit subagents, and coverage,
+security/privacy, frontend, prompt, Product UX, simplify, or task-finish
+passes) are retired; do not schedule them from older plans, skills, or
+handoffs. Apply the relevant domain guidance directly.
 
 | Changed behavior | Required evidence |
 | --- | --- |
@@ -81,10 +98,16 @@ Eligibility below for the external completion gate.
 | Tests or proof infrastructure | Check that proof exercises the actual invariant and composed owners, not a copy of the implementation. |
 | Internal docs or meaning-preserving typo | Readback, reference checks, and relevant focused checks. |
 
-A mock or internal success proves only its boundary. Trace a composed change
-through the final user-visible or external effect that defines its promise.
-Use synthetic evidence and report unavailable proof. Match viewports and
-screenshots to material claims; there is no screenshot quota.
+A mock or internal success proves only its boundary, and green tests do not
+replace direct proof at a changed user or operational boundary. Trace a
+composed change through the final user-visible or external effect that defines
+its promise. Use synthetic evidence and report unavailable proof. Match
+viewports and screenshots to material claims; there is no screenshot quota.
+
+The typo row covers a small static typo, punctuation, grammar, or equivalent
+localization correction that preserves meaning and changes no layout, state,
+interaction, or product promise. Semantic copy follows Product UX; security,
+billing, medical, or guarantee claims follow their risk route.
 
 ## Final ReviewGPT Eligibility
 
@@ -103,11 +126,12 @@ content, prompt-primary work, and frontend-only presentation/interaction, at
 any size. Size alone is never a reason to run it.
 Prompt and frontend exemptions do not cover independently sensitive behavior,
 server actions/routes, backend changes, persistence, or production configuration.
-They also do not waive the parent-owned evidence above.
+They also do not waive the evidence above.
 
-An explicit user opt-out preserves focused proof and parent review without a
-replacement mandatory subagent. Use local `deep-review` only when requested,
-and follow the review loop's rule against duplicating the final cross-cutting gate.
+This is the one cross-cutting review gate. An explicit user opt-out keeps
+focused proof and parent review and adds no replacement subagent. Run a local
+deep review only when asked, and never in addition to final ReviewGPT on the
+same change.
 
 ## PR Description
 
@@ -131,15 +155,22 @@ Add `## Design proof` for user-facing hosted Web UI: `Design page`, `Evidence`,
 and `Coverage`. Use a reviewer-openable absolute anchored URL to the real
 production component on `/design?tab=components`, consent surface on
 `/design?tab=consent`, or composed section under `/screenshots/<category>`.
-The parent verifies origin, currentness, reachability, and representation;
-the guard validates shape only. Add a representation only when one does not
-already cover the changed state. Refresh inaccessible previews.
+You verify origin, currentness, reachability, and representation; the guard
+validates shape only. Add a representation only when one does not already cover
+the changed state. Refresh inaccessible previews.
 
 Content-only changelog entries/edition metadata follow the no-preview route in
 `apps/web/changelog/README.md`. Existing page/layout metadata-only changes are
 exempt only when the guard proves the unreferenced static metadata export is the
 sole runtime change and contains no viewport or theme metadata. Renderer,
 component, style, and interaction changes need ordinary design proof.
+
+The optional `ReviewGPT context sensitivity` line is explained in
+`pr-reviewgpt-loop.md` § Run A Round. PR-body content never blocks or
+invalidates a review round; the PR-body CI checks are a separate gate.
+
+Add a Risks section only for material issues or deliberately deferred work not
+already covered. Do not repeat the work plan or every possible review lens.
 
 ### Applicable risk evidence
 
@@ -156,30 +187,9 @@ component, style, and interaction changes need ordinary design proof.
   other provider-visible fields. Use the target tokenizer; report absolute and
   delta tokens, signed percentage, UTF-8 bytes and delta, method, and exclusions.
   Authored-text counts alone are not full-input measurements.
-- **Deployment:** state supported skew, consumer-first safe order, rollback floor,
-  expected exposure at current scale, reversibility, mixed-version convergence
-  proof, and post-deploy checks. Consider Web/Worker and Worker/warm-container
-  skew. A current/current test alone does not prove mixed-version compatibility.
-
-Add a Risks section only for material issues or deliberately deferred work not
-already covered. Do not repeat the work plan or every possible review lens.
-
-### Review launch preflight
-
-A review round needs the stable pushed candidate; PR-description content cannot
-block or invalidate it. PR-body CI checks remain separate completion gates.
-
-`ReviewGPT context sensitivity: routine` or
-`ReviewGPT context sensitivity: sensitive` is optional. Any sensitive trigger
-above makes the context sensitive regardless of size. Missing, malformed, or
-duplicate declarations default to a full snapshot; an explicit routine
-declaration retains the small-correction path when eligible.
-
-Use `pr-reviewgpt-loop.md` for packaging and later rounds. Round 1 derives the
-first-reviewed head from the pushed head; later rounds carry the first and
-previous reviewed heads through environment variables. Launch concurrently
-with CI. A PR-body edit may retrigger evidence validation without changing the
-reviewed commit baseline.
+- **Deployment:** fill every field in the applicable example below at current
+  scale. Consider Web/Worker and Worker/warm-container skew. A current/current
+  test alone does not prove mixed-version compatibility.
 
 ### Changelog examples
 
@@ -218,45 +228,19 @@ reviewed commit baseline.
 ## Review-Resolution Loop
 
 Treat review findings as claims to verify, not implementation instructions.
-Read the actual path and dependency contract. Accept bugs only with a realistic
-trigger, serious harm, and code-path evidence. Accept Complexity Collapse only
-with concrete removable complexity and proof of preserved behavior/invariants.
-This includes pre-existing complexity in the touched flow's connected owners,
-state, and recovery paths when the correction and its verification fit the PR's
-scope. Assess the surrounding design, not only added lines; reject unrelated
-rewrites and cleanup whose migration cost outweighs the simplification.
-Reject wrong, speculative,
-already-handled, disproportionate, or out-of-scope findings with a reason.
-Rejected findings need no reviewer agreement.
+Read the actual path and dependency contract. Accept a bug only with a
+realistic trigger, serious harm, and code-path evidence. Accept a
+simplification only when it names removable complexity and preserves behavior
+and invariants. Reject wrong, speculative, already-handled, disproportionate,
+or out-of-scope findings with a reason; a rejection needs no reviewer
+agreement.
 
 For accepted issues, prefer deletion, reordering, derivation, or correction at
-the current owner. Prove a real deployed/legacy consumer or persisted shape
-before adding compatibility machinery. A hypothetical future rollout is not
-sufficient. If fixes repeatedly grow the same mechanism, reconsider the
-smallest correction at its current owner.
+the current owner. Prove a real deployed or legacy consumer or persisted shape
+before adding compatibility machinery; a hypothetical future rollout is not
+enough. If fixes keep growing the same mechanism, reconsider the smallest
+correction at its current owner. Rerun affected proof after remediation.
 
-The final ReviewGPT Finding Disposition Boundary remains authoritative:
-`FINDINGS` requires evidence-backed disposition, then authorized remediation
-continues without a user-resume pause; `PASS` continues to completion checks.
-Rerun affected proof after remediation. The review loop determines whether a
-new substantive round is required; isolated tests, explanatory docs, rejected
-findings, and base-only movement do not by themselves require one.
-
-## When To Run Cross-Cutting Review
-
-Use Final ReviewGPT Eligibility above. This is one gate, not a second review.
-
-## Tiny Copy-Only Fast Path
-
-A small static typo, punctuation, grammar, or equivalent localization correction
-may use readback and focused checks when it preserves meaning and changes no
-layout, state, interaction, or product promise. Semantic copy follows Product
-UX; security, billing, medical, or guarantee claims follow their risk route.
-
-## Safety Rules
-
-Preserve unrelated work, privacy, and authority under `AGENTS.md`. Report the
-exact failing check and why a pre-existing failure is unrelated. Green tests
-do not substitute for direct proof at a changed user or operational boundary.
-If deployment skew can degrade production, include `DEPLOYMENT CONCERNS:` in
-the handoff with safe order, compatibility window, and post-deploy checks.
+For a final ReviewGPT result, `pr-reviewgpt-loop.md` § Finding Disposition
+Boundary owns the full triage bar and what to report, and its After A Fix
+section decides whether another round is needed.

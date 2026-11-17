@@ -52,6 +52,10 @@ import {
 } from '@murphai/vault-usecases'
 import { commonListLimitOptionSchema } from './command-factory-primitives.js'
 import {
+  experimentProgressResultSchema,
+  toPublicExperimentProgress,
+} from './experiment-progress-output.js'
+import {
   renderAndSaveExperimentProgressCard,
 } from './experiment-progress-card-image.js'
 import { normalizeOccurredAtOption } from './occurred-at-option.js'
@@ -995,15 +999,6 @@ const experimentContextLogResultSchema = z.object({
   kind: z.enum(['note', 'supplement_intake', 'experiment_context']),
 })
 
-const experimentProgressResultSchema = z.object({
-  vault: pathSchema,
-  experimentId: z.string().min(1),
-  lookupId: z.string().min(1),
-  slug: slugSchema,
-  asOf: localDateSchema,
-  progress: experimentProgressSnapshotSchema,
-})
-
 const experimentProgressCardResultSchema = z.object({
   experimentId: z.string().min(1),
   slug: slugSchema,
@@ -1759,12 +1754,12 @@ export function registerExperimentCommands(
     }),
     output: experimentProgressResultSchema,
     async run({ args, options }) {
-      return services.query.showExperimentProgress({
+      return toPublicExperimentProgress(await services.query.showExperimentProgress({
         vault: options.vault,
         requestId: requestIdFromOptions(options),
         lookup: args.id,
         asOf: options.asOf,
-      })
+      }))
     },
   })
 

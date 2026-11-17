@@ -842,9 +842,11 @@ describe.skipIf(!runPostgresProof)(
       { label: "partly used", remainingUsdMicros: 500_000n, referralUsdMicros: 0n },
       { label: "unused", remainingUsdMicros: HOSTED_STARTER_USAGE_GRANT_USD_MICROS, referralUsdMicros: 0n },
       { label: "partly used with referral credit", remainingUsdMicros: 500_000n, referralUsdMicros: 1_200_000n },
+      { label: "free idle partly used", remainingUsdMicros: 500_000n, referralUsdMicros: 0n, freeIdle: true },
+      { label: "free idle unused", remainingUsdMicros: HOSTED_STARTER_USAGE_GRANT_USD_MICROS, referralUsdMicros: 0n, freeIdle: true },
     ])(
-      "reset everyone restores $label Starter capacity and preserves later usage on replay",
-      async ({ remainingUsdMicros, referralUsdMicros }) => {
+      "reset everyone handles $label Starter capacity and preserves later usage on replay",
+      async ({ remainingUsdMicros, referralUsdMicros, freeIdle }) => {
         const fixtureId = randomUUID();
         const memberId = `hbm_reset_partial_${fixtureId}`;
         const grantId = `huce_partial_${fixtureId}`;
@@ -902,7 +904,29 @@ describe.skipIf(!runPostgresProof)(
           const historyBefore = await prisma.hostedUsageCreditEntry.findMany({
             where: { beneficiaryMemberId: memberId }, orderBy: { beneficiarySequence: "asc" },
           });
+          if (!freeIdle) await createResetTestGame(prisma, memberId, resetAt);
+          const periodBefore = await prisma.hostedAiUsagePeriod.findUniqueOrThrow({
+            where: { memberId_periodStart: { memberId, periodStart: period.periodStart } },
+          });
           const result = await resetHostedOpsMemberUsageForResetAll({ memberId, now: resetAt, operationId }, prisma);
+          if (freeIdle) {
+            expect(result).toMatchObject({ outcome: "skipped", resetMode: null, runtimeRecheckRequired: false });
+            await expect(prisma.hostedOpsUsageResetReceipt.findUniqueOrThrow({
+              where: { operationId_memberId: { memberId, operationId } },
+            })).resolves.toMatchObject({
+              outcome: "skipped", resetMode: null, runtimeRecheckRequired: false, usageCreditGrantedUsdMicros: 0n,
+            });
+            await expect(prisma.hostedUsageCreditEntry.findMany({
+              where: { beneficiaryMemberId: memberId }, orderBy: { beneficiarySequence: "asc" },
+            })).resolves.toEqual(historyBefore);
+            await expect(prisma.hostedAiUsagePeriod.findUniqueOrThrow({
+              where: { memberId_periodStart: { memberId, periodStart: period.periodStart } },
+            })).resolves.toEqual(periodBefore);
+            await expect(resetHostedOpsMemberUsageForResetAll({
+              memberId, now: new Date(resetAt.getTime() + 1_000), operationId,
+            }, prisma)).resolves.toEqual(result);
+            return;
+          }
           expect(result).toMatchObject({
             outcome: spentUsdMicros > 0n ? "reset" : "unchanged", resetMode: "starter_allowance",
           });
@@ -939,13 +963,14 @@ describe.skipIf(!runPostgresProof)(
           });
           await prisma.hostedUsageCreditEntry.deleteMany({ where: { beneficiaryMemberId: memberId } });
           await prisma.hostedUsageReferral.deleteMany({ where: { id: referralId } });
+          await prisma.game.deleteMany({ where: { id: memberId } });
           await prisma.hostedMember.deleteMany({ where: { id: memberId } });
           await prisma.$disconnect();
         }
       },
     );
 
-    it("restores exhausted Starter capacity without rewriting prior credit history", async () => {
+    it("skips free idle members in reset-all but allows a deliberate single-member Starter reset", async () => {
       const fixtureId = randomUUID();
       const memberId = `hbm_ops_starter_reset_${fixtureId}`;
       const originalGrantEntryId = `huce_starter_${fixtureId}`;
@@ -1023,6 +1048,24 @@ describe.skipIf(!runPostgresProof)(
           orderBy: { beneficiarySequence: "asc" },
           where: { beneficiaryMemberId: memberId },
         });
+
+        const skippedOperationId = randomUUID();
+        const skipped = await resetHostedOpsMemberUsageForResetAll({
+          memberId, now: resetAt, operationId: skippedOperationId,
+        }, prisma);
+        expect(skipped).toMatchObject({
+          outcome: "skipped", resetMode: null, runtimeRecheckRequired: false,
+        });
+        await expect(prisma.hostedOpsUsageResetReceipt.findUniqueOrThrow({
+          where: { operationId_memberId: { operationId: skippedOperationId, memberId } },
+        })).resolves.toMatchObject({
+          outcome: "skipped", resetMode: null, runtimeRecheckRequired: false,
+          usageCreditGrantedUsdMicros: 0n,
+        });
+        await expect(prisma.hostedUsageCreditEntry.findMany({
+          orderBy: { beneficiarySequence: "asc" },
+          where: { beneficiaryMemberId: memberId },
+        })).resolves.toEqual(historyBefore);
 
         const result = await resetHostedOpsMemberUsage({
           expectedPeriodUpdatedAt: periodBefore.updatedAt,
@@ -1107,6 +1150,11 @@ describe.skipIf(!runPostgresProof)(
         if (!firstRecoveryGrantEntryId) {
           throw new Error("Expected the first Ops recovery grant.");
         }
+        await createResetTestGame(prisma, memberId, resetAt);
+        // Participation changes future operations, not the frozen skipped receipt.
+        await expect(resetHostedOpsMemberUsageForResetAll({
+          memberId, now: resetAt, operationId: skippedOperationId,
+        }, prisma)).resolves.toEqual(skipped);
         const exhaustedAgainAt = new Date(resetAt.getTime() + 2_000);
         await prisma.$transaction(async (tx) => {
           await tx.hostedUsageCreditGrant.update({
@@ -1256,12 +1304,24 @@ describe.skipIf(!runPostgresProof)(
         await prisma.hostedUsageCreditEntry.deleteMany({
           where: { beneficiaryMemberId: memberId },
         });
+        await prisma.game.deleteMany({ where: { id: memberId } });
         await prisma.hostedMember.deleteMany({ where: { id: memberId } });
         await prisma.$disconnect();
       }
     });
   },
 );
+
+async function createResetTestGame(prisma: PrismaClient, memberId: string, joinedAt: Date) {
+  await prisma.gameProfile.create({ data: {
+    memberId, firstNameEncrypted: "synthetic", timeZone: "UTC",
+  } });
+  await prisma.game.create({ data: {
+    id: memberId, wordsOwnerMemberId: memberId, status: "settled",
+    terms: {}, termsWordsEncrypted: "synthetic",
+    players: { create: { memberId, seat: 1, joinedAt, timeZone: "UTC", leftAt: joinedAt } },
+  } });
+}
 
 function makeIncludedUsageRecord(input: {
   fixtureId: string;

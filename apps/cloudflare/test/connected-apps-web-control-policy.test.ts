@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { HOSTED_CONNECTED_APPS_PATH } from "@murphai/hosted-execution/connected-apps";
@@ -93,21 +94,20 @@ describe("connected-app web-control policy", () => {
       return;
     }
 
-    expect(result).toBeInstanceOf(TypeError);
-    if (!(result instanceof TypeError)) throw new Error("Expected the port's TypeError");
-    expect(Object.getPrototypeOf(result)).toBe(TypeError.prototype);
-    expect(result.name).toBe("TypeError");
+    expect(result).toBeInstanceOf(ContractValidationError);
+    if (!(result instanceof ContractValidationError)) throw new Error("Expected a response validation error");
+    expect(result.name).toBe("ContractValidationError");
     expect(result.message).toBe("Hosted connected apps returned an invalid response.");
-    expect(Reflect.ownKeys(result).sort()).toEqual(["code", "message", "stack"]);
+    expect(Reflect.ownKeys(result).sort()).toEqual(["code", "message", "name", "stack"]);
     expect(Object.getOwnPropertyDescriptor(result, "code")).toEqual({
       value: "CONNECTED_APPS_RESPONSE_SCHEMA_INVALID",
       enumerable: false,
       configurable: false,
       writable: false,
     });
-    expect(Object.keys(result)).toEqual([]);
-    expect({ ...result }).toEqual({});
-    expect(JSON.stringify(result)).toBe("{}");
+    expect(Object.keys(result)).toEqual(["name"]);
+    expect({ ...result }).toEqual({ name: "ContractValidationError" });
+    expect(JSON.stringify(result)).toBe('{"name":"ContractValidationError"}');
   });
 
   it("keeps the control-plane error code, status, and message readable by the caller", async () => {

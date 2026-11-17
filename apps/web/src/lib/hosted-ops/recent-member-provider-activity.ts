@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 import { Prisma, type PrismaClient } from "@prisma/client";
 
@@ -16,7 +17,7 @@ export async function readHostedRecentMemberProviderActivity(input: {
   prisma: Pick<PrismaClient, "$queryRaw">;
 }): Promise<HostedRecentMemberProviderActivity[]> {
   if (input.memberIds.length === 0) return [];
-  if (input.memberIds.length > 20) throw new TypeError("Recent member activity is limited to 20 accounts.");
+  if (input.memberIds.length > 20) throw new ContractValidationError("Recent member activity is limited to 20 accounts.");
   // Only currently owned private home/pending chats are eligible. A provider
   // message that already has a mailbox receipt contributes through that owner.
   // No private payloads are read and no analytics-only mailbox work is created.

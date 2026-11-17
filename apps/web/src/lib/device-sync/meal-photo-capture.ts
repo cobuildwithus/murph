@@ -1,3 +1,4 @@
+import { RequestInputError, RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import { assertHostedNativeMemberAuthCurrentTx, type HostedNativeMemberAuth } from "../better-auth/native-auth";
 import "server-only";
 
@@ -992,7 +993,7 @@ export async function assertMealPhotoCaptureRequestHasNoBody(request: Request): 
   try {
     body = await readRawBodyBuffer(request, { limitBytes: 1 });
   } catch (error) {
-    if (error instanceof RangeError) {
+    if (error instanceof RequestBodyTooLargeError) {
       throw mealPhotoCaptureRequestInvalid(
         "Scoped meal-photo authority changes do not accept a request body.",
       );
@@ -1073,7 +1074,7 @@ async function readAndValidateMealPhotoUploadWithCaptureId(input: {
       limitBytes: MEAL_PHOTO_CAPTURE_MAX_JPEG_BYTES,
     });
   } catch (error) {
-    if (error instanceof RangeError) {
+    if (error instanceof RequestBodyTooLargeError) {
       throw hostedOnboardingError({
         code: "MEAL_PHOTO_BODY_TOO_LARGE",
         httpStatus: 413,
@@ -1208,7 +1209,11 @@ function parseCapturedAt(value: string | null): string {
   ) {
     throw mealPhotoCaptureUploadInvalid("Meal photo capture time is invalid.");
   }
-  return new Date(capturedAt).toISOString();
+  const normalized = new Date(capturedAt).toISOString();
+  if (!/^\d{4}-/u.test(normalized)) {
+    throw new RequestInputError("Meal photo capture time is out of range.");
+  }
+  return normalized;
 }
 
 function validateJpegStructure(bytes: Buffer): { height: number; width: number } {

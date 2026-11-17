@@ -1,6 +1,7 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { redactHostedRuntimeDiagnosticText } from "@murphai/hosted-execution";
 import { isObjectRecord } from "./deploy-automation/shared.ts";
+import { RETIRED_WORKER_SECRET_NAMES } from "./deploy-retired-inference-secrets.ts";
 import { runnerApplicationMatches, runnerApplicationResources, type RunnerApplicationSpecification } from "./runner-release-application.ts";
 
 /** Native admission and release evidence. Provider failures never permit a Worker switch. */
@@ -151,7 +152,7 @@ export function createRunnerReleaseProvider(input: {
     async removeRetiredInferenceSecrets(input: { workerName: string; versionMessage: string; versionTag: string }): Promise<string> {
       const response = await request("Retire inference secrets",
         `/workers/workers/${encodeURIComponent(input.workerName)}/versions/latest`, "PATCH", {
-          env: { VENICE_API_KEY: null, VERCEL_AI_API_KEY: null },
+          env: Object.fromEntries(RETIRED_WORKER_SECRET_NAMES.map(name => [name, null])),
           annotations: { "workers/message": input.versionMessage, "workers/tag": input.versionTag },
         }, [input.workerName, input.versionMessage, input.versionTag], "application/merge-patch+json");
       const version = response.result;

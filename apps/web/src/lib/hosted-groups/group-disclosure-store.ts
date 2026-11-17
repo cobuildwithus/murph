@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
 import { createHash } from "node:crypto";
@@ -121,7 +122,7 @@ export function digestHostedGroupDisclosurePermissionText(input: {
 }): string {
   const groupId = input.groupId.trim();
   if (!groupId) {
-    throw new TypeError("Disclosure permission digest group authority is required.");
+    throw new ContractValidationError("Disclosure permission digest group authority is required.");
   }
   const permissionText = canonicalizeHostedGroupDisclosurePermissionText(
     input.permissionText,
@@ -139,7 +140,7 @@ export function createHostedGroupDisclosurePermissionRequestId(input: {
   const groupId = input.groupId.trim();
   const originAssistantInputId = input.originAssistantInputId.trim();
   if (!groupId || !originAssistantInputId) {
-    throw new TypeError("Disclosure permission request authority is required.");
+    throw new ContractValidationError("Disclosure permission request authority is required.");
   }
   const digest = createHash("sha256")
     .update(HOSTED_GROUP_DISCLOSURE_PERMISSION_REQUEST_DOMAIN, "utf8")
@@ -158,7 +159,7 @@ export function createHostedGroupDisclosurePermissionProviderIdempotencyKey(inpu
   const groupId = input.groupId.trim();
   const originAssistantInputId = input.originAssistantInputId.trim();
   if (!consentMessage.trim() || !groupId || !originAssistantInputId) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Disclosure permission provider idempotency input is required.",
     );
   }
@@ -424,9 +425,6 @@ export async function acceptHostedGroupDisclosurePermissionReactionTx(input: {
     prisma: input.tx,
     runtimeMemberId: groupRuntimeMemberId,
   });
-  if (!permissionText) {
-    return { kind: "not_found" };
-  }
 
   // Spent before the no-op check below: a tap that changes nothing is still an
   // accepted decision, and its redelivery must not grant after a revocation.
@@ -658,9 +656,6 @@ export async function readHostedGroupDisclosureGrantAuthorityTx(input: {
     prisma: input.tx,
     runtimeMemberId: groupRuntimeMemberId,
   });
-  if (!permissionText) {
-    return null;
-  }
 
   return {
     grantId: grant.id,
@@ -898,7 +893,7 @@ async function openHostedGroupDisclosurePermissionText(input: {
   permissionTextEncrypted: string;
   prisma: HostedGroupDisclosureReadClient;
   runtimeMemberId: string;
-}): Promise<string | null> {
+}): Promise<string> {
   const permissionText = await openHostedUserSecureBoxString({
     aad: buildHostedGroupDisclosurePermissionTextAad(input.permissionId),
     lane: "hosted-member-private-field",
@@ -915,7 +910,7 @@ async function openHostedGroupDisclosurePermissionText(input: {
       permissionText,
     })
   ) {
-    return null;
+    throw new Error("Stored group disclosure permission digest is invalid.");
   }
   return permissionText;
 }

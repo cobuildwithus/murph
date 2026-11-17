@@ -18,6 +18,7 @@ const BUILD_ARTIFACTS = {
   "packages/health-commons": ".tsbuildinfo",
   "packages/exercise-library": ".tsbuildinfo",
   "packages/health-metrics": ".tsbuildinfo",
+  "packages/recap-video": ".tsbuildinfo",
   "packages/core": "tsconfig.build.tsbuildinfo",
   "packages/importers": [
     ".tsbuildinfo",
@@ -51,6 +52,7 @@ const CLEAN_GROUPS = {
     "packages/health-commons",
     "packages/exercise-library",
     "packages/health-metrics",
+    "packages/recap-video",
     "packages/core",
     "packages/importers",
     "packages/device-syncd",
@@ -76,6 +78,7 @@ const CLEAN_GROUPS = {
     "packages/health-commons",
     "packages/exercise-library",
     "packages/health-metrics",
+    "packages/recap-video",
     "packages/core",
     "packages/importers",
     "packages/device-syncd",

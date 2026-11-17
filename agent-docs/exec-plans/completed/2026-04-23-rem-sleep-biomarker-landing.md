@@ -49,8 +49,8 @@ Updated: 2026-04-23
 ## Verification
 
 - Commands to run:
-  - `git apply --check /Users/willhay/Downloads/rem-sleep-biomarker.patch`
-  - `git apply /Users/willhay/Downloads/rem-sleep-biomarker.patch` or equivalent minimal manual port
+  - `git apply --check ~/Downloads/rem-sleep-biomarker.patch`
+  - `git apply ~/Downloads/rem-sleep-biomarker.patch` or equivalent minimal manual port
   - `pnpm --dir packages/health-commons generate`
   - `pnpm --dir packages/health-commons verify`
   - `git diff --check`

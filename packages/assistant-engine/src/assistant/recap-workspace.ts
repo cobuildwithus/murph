@@ -1,5 +1,6 @@
 import { RECAP_SHOW_CRAFT } from '@murphai/hosted-execution/runtime-control'
 import { recapDirectory } from './recap-files.js'
+import { resolveRuntimePaths } from '@murphai/runtime-state/node'
 import { createHash } from 'node:crypto'
 import { constants, createReadStream } from 'node:fs'
 import { access, writeFile } from 'node:fs/promises'
@@ -12,11 +13,16 @@ import type { AssistantHostedGroupTool } from './execution-context.js'
 import { resolveAssistantStatePaths } from './store/paths.js'
 import { resolveAssistantTranscriptPath } from './store/persistence.js'
 
+/** Runtime scratch is never saved with the workspace, so a recap's photos, media and chat copy last only as long as the container. */
 export function recapTaskDirectory(vault: string, eventId: string): string {
-  return path.join(vault, 'tmp/recap', createHash('sha256').update(eventId).digest('hex').slice(0, 32))
+  return path.join(resolveRuntimePaths(vault).tempRoot, 'recap', createHash('sha256').update(eventId).digest('hex').slice(0, 32))
 }
 
-/** The trusted context owns material in memory; editable JSON cannot authorize a write. */
+/**
+ * The model reads the game from files, so what read_game returns never grows with the game:
+ * a tool result past the model's output limit loses its middle, and a file can be paged.
+ * The trusted context owns material in memory; the editable files cannot authorize a write.
+ */
 export async function materializeRecapWorkspace(input: {
   vault: string; eventId: string; gameId: string; sessionId: string;
   material: unknown; lore: string; tool: AssistantHostedGroupTool;
@@ -48,24 +54,53 @@ export async function materializeRecapWorkspace(input: {
   const replies = await readCommittedRecapReplies(input.vault, input.sessionId, material.startedAt, material.settledAt)
   chat.push(...replies.messages)
   chat.sort((a, b) => Date.parse(a.at) - Date.parse(b.at) || (a.laneSeq && b.laneSeq ? Number(BigInt(a.laneSeq) - BigInt(b.laneSeq)) : a.id.localeCompare(b.id)))
+  const write = async (file: string, bytes: string | Uint8Array) => {
+    const directory = await recapDirectory(input.vault, path.dirname(`${relativeRoot}/${file}`))
+    await writeFile(path.join(directory, path.basename(file)), bytes, {
+      flag: constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW, mode: 0o600,
+    })
+    return `${relativeRoot}/${file}`
+  }
   const references: (RecapMaterial['references'][number] & { path?: string })[] = []
   for (const reference of material.references) {
-    let photoPath: string | undefined
-    if (reference.kind !== 'murph') {
-      try {
-        const { bytes } = await fetchRecapReference({ ...input, material, id: reference.id })
-        const directory = await recapDirectory(input.vault, `${relativeRoot}/refs`)
-        await writeFile(path.join(directory, `${reference.id}.jpg`), bytes, {
-          flag: constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW, mode: 0o600,
-        })
-        photoPath = `${relativeRoot}/refs/${reference.id}.jpg`
-      } catch { /* An unavailable photo must not prevent the recap. */ }
-    }
-    references.push({ ...reference, ...(photoPath ? { path: photoPath } : {}) })
+    try {
+      const { bytes } = await fetchRecapReference({ ...input, material, id: reference.id })
+      references.push({ ...reference, path: await write(`refs/${reference.id}.jpg`, bytes) })
+    } catch { references.push(reference) /* An unavailable photo must not prevent the recap. */ }
   }
-  const manifest = { directory: relativeRoot, instructions: RECAP_SHOW_CRAFT,
-    material: { ...material, references }, chat, lore: input.lore, coverage: { retainedSince, throughConversationLaneSeq: through, incomplete: incomplete || replies.incomplete } }
+  const manifest = { directory: relativeRoot, instructions: RECAP_SHOW_CRAFT, files: {
+    game: await write('game.json', JSON.stringify({ ...material, game: modelVisibleGame(material.game), references }, null, 1)),
+    chat: await write('chat.jsonl', chat.map(message => `${JSON.stringify(message)}\n`).join('')),
+    lore: await write('lore.md', input.lore),
+  }, coverage: { retainedSince, throughConversationLaneSeq: through, incomplete: incomplete || replies.incomplete } }
   return { root, material, chat, manifest }
+}
+
+/** The game as the model reads it. `poster` holds the last screen's facts for the recap
+ * video: only the host draws them, so the model's input is the same with the video on or off. */
+function modelVisibleGame(game: unknown): unknown {
+  if (!game || typeof game !== 'object' || Array.isArray(game) || !('poster' in game)) return game
+  const { poster: _poster, ...visible } = game as Record<string, unknown>
+  return visible
+}
+
+/** A reference is named by its ID. The path of its photo, refs/<id>.jpg, names it too. */
+export function recapReferenceId(material: RecapMaterial, ref: string): string | null {
+  const id = path.basename(ref, '.jpg')
+  return material.references.some(reference => reference.id === id) ? id : null
+}
+
+/** The model named something that is not one of this recap's references. Carries what each looked like, never the value. */
+export class RecapReferenceRefusal extends Error {
+  readonly shapes: string[]
+  constructor(material: RecapMaterial, refs: readonly string[]) {
+    super(`Nothing was generated and no media request was used. referenceImageRefs takes the path of a photo listed under references in game.json. Not one of them: ${refs.map(ref => JSON.stringify(ref.slice(0, 120))).join(', ')}.`)
+    this.shapes = refs.map(ref => ref.startsWith('skill-assets/') ? 'skill_asset'
+      : ref.startsWith('raw/') ? 'vault_path'
+      : material.entries.some(entry => entry.entryId === ref) ? 'entry_id'
+      : /^[a-f0-9]{64}$/u.test(path.basename(ref, '.jpg')) ? 'unlisted_reference'
+      : 'other')
+  }
 }
 
 const referenceBytesSchema = z.object({
@@ -76,10 +111,11 @@ const referenceBytesSchema = z.object({
 }).strict()
 
 export async function fetchRecapReference(input: {
-  eventId: string; gameId: string; material: RecapMaterial; id: string; tool: AssistantHostedGroupTool;
+  eventId: string; gameId: string; material: RecapMaterial; id: string; tool: AssistantHostedGroupTool; signal?: AbortSignal;
 }) {
   if (!input.material.references.some(reference => reference.id === input.id)) throw new Error('Use an authorized recap reference ID.')
-  const response = await input.tool.request({ action: 'read_game', origin: { kind: 'game_recap', eventId: input.eventId, gameId: input.gameId }, recapRead: { kind: 'reference', id: input.id } })
+  const request = { action: 'read_game' as const, origin: { kind: 'game_recap' as const, eventId: input.eventId, gameId: input.gameId }, recapRead: { kind: 'reference' as const, id: input.id } }
+  const response = await (input.signal ? input.tool.request(request, { signal: input.signal }) : input.tool.request(request))
   if (response.result.status !== 'ok' || !('recapGame' in response.result)) throw new Error('Recap reference is no longer available.')
   const value = referenceBytesSchema.parse(response.result.recapGame)
   const bytes = Buffer.from(value.bytes, 'base64')

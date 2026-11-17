@@ -31,6 +31,29 @@ notification and Ask continuation turns keep the provider's local ordinal sequen
 The immutable hosted usage ledger and pending-settlement guard remain authoritative;
 this producer rule neither rewrites historical usage nor clears failed settlement.
 
+Recap show notifications request Flex on GPT-6.1 Sol. The existing session store
+holds one unbound execution session per recap event: `createdAt` anchors its
+twenty-minute capacity budget and `codexResume` retains the native thread through
+workspace checkpoints and rollout pruning. The room session still owns context,
+transcript and delivery; the execution session has no route binding. A retry
+resumes that thread or uses canonical recap recovery if continuity is unavailable,
+without starting another provider thread. Flex capacity refusals leave
+the same system-mailbox item pending with the existing five-minute capacity delay. An
+attempt beginning at or after twenty minutes sends `serviceTier: null` (standard,
+including during onboarding); earlier attempts send `flex`. A capacity failure on
+that standard attempt takes the existing failed-recap settlement path: initial
+recaps publish the canonical template, while remakes retire and keep the prior
+recap. It does not extend the capacity retry budget. Active writing has
+no Flex-specific abort deadline. Actual per-attempt service tier drives usage
+extraction and recording: `openai-flex` on Flex and `standard` after fallback.
+Unbilled recap capacity refusals retain their pricing basis even without token counters.
+Generated media provenance and song timing stay in the per-turn `recapSources`
+map. A retried attempt rejects media from earlier attempts, even when the native
+thread and files survive, and must regenerate the media it uses. There is no
+durable media authority in writer-writable vault state. Accepted recap recovery
+still avoids further provider work. Image/song provider settings and default
+recap prompt-cache retention are unchanged.
+
 ## Route-planning telemetry
 
 Provider-plan diagnostics time follow-up context resolution as
@@ -806,3 +829,14 @@ authority. Never substitute another game or schedule for someone else's request.
 Group missed-day batches and change-resolution notifications have separate
 producers; batch lore writes require room-only evidence and final room authority,
 while group recap lore stays read-only.
+
+
+`murph.leave_group` is available only for authenticated Linq group-container
+conversation turns with current accepted input. Its strict reason/messageRef
+arguments become an accepted-input origin over the group-tool port. Web owns
+the departure decision and refuses all bound game history and active line moves.
+Local `left`/`already_left` apply the host-authorized terminal no-reply patch and
+interrupt before returning the pending tool RPC, preventing model continuation.
+An unavailable result remains answerable. The social-role prompt distinguishes
+actual departure requests and clear bot loops from human banter, AI discussion,
+quoted instructions and requests to be quiet.

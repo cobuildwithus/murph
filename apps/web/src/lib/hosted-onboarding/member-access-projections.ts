@@ -1,4 +1,17 @@
 import { Prisma } from "@prisma/client";
+import { HOSTED_STANDARD_CHECKOUT_OFFER } from "./billing-plans";
+
+/** SQL equivalent of hasHostedPaidBillingRefEvidence, independent of billing status. */
+export function hostedPaidBillingRefEvidenceSql(billingRef: Prisma.Sql): Prisma.Sql {
+  return Prisma.sql`(
+    ${billingRef}."current_billing_phase" = 'paid'
+    OR (${billingRef}."current_billing_phase" IS NULL
+      AND ${billingRef}."stripe_subscription_lookup_key" IS NOT NULL
+      AND ${billingRef}."stripe_subscription_lookup_key" <> ''
+      AND (${billingRef}."current_checkout_offer" IS NULL
+        OR ${billingRef}."current_checkout_offer" = ${HOSTED_STANDARD_CHECKOUT_OFFER}))
+  )`;
+}
 
 /** Set-based equivalent of hasHostedMemberActivationProof; no subscription ref is proof. */
 export function hostedMemberActivationProofWhere(): Prisma.HostedMemberWhereInput {

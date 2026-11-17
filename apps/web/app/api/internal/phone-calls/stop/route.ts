@@ -1,3 +1,5 @@
+import { assertContract } from "@murphai/contracts";
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import {
   hostedPhoneCallStopRequestSchema,
 } from "@murphai/hosted-execution/phone-calls";
@@ -15,7 +17,7 @@ export const POST = withJsonError(async (request: Request) => {
     await requireHostedCloudflareCallbackJsonRequest(request, {
       maxBodyBytes: HOSTED_PHONE_CALL_STOP_MAX_BODY_BYTES,
     });
-  const parsed = hostedPhoneCallStopRequestSchema.parse(payload);
+  const parsed = parseInput(payload, (value) => assertContract(hostedPhoneCallStopRequestSchema, value, "Internal request"));
   const response = await stopHostedPhoneCall({
     memberId,
     phoneCallId: parsed.phoneCallId,

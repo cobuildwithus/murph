@@ -1,3 +1,4 @@
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import {
   parseHostedMailboxFetchRequest,
   parseHostedMailboxFetchResponse,
@@ -45,7 +46,7 @@ export async function POST(request: Request): Promise<Response> {
     timing.start("parse");
     const prisma = getPrisma();
     const rawBody = await readOptionalJsonObject(request);
-    const body = parseHostedMailboxFetchRequest(rawBody);
+    const body = parseInput(rawBody, parseHostedMailboxFetchRequest);
     const authority = readHostedRuntimeCallbackAuthority(request);
     timing.start("transaction_acquire");
     const mailbox = await prisma.$transaction(async (tx) => {

@@ -1,3 +1,4 @@
+import { withJsonError } from "../src/lib/hosted-onboarding/http";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { HostedGameChatBootstrapRequest } from "@murphai/hosted-execution/runtime-control";
 
@@ -24,7 +25,7 @@ vi.mock("../src/lib/hosted-onboarding/linq-delivery-store", () => ({ buildHosted
 vi.mock("../src/lib/hosted-onboarding/linq-observability-identifiers", () => ({ createHostedLinqDeliveryIdempotencyLookupKey: (key: string) => `hash:${key}` }));
 vi.mock("../src/lib/hosted-onboarding/linq-participant-contact", () => ({ createHostedLinqParticipantContactLookupKey: () => "phone-key" }));
 vi.mock("../src/lib/hosted-routing/thread-container-service", () => ({ prepareHostedThreadContainerBootstrap: m.prepareContainer, createHostedGameThreadContainerTx: m.createContainer, prepareHostedThreadContainerDeliveryRoute: m.prepareRoute, attachHostedThreadContainerBootstrapRouteTx: m.attachRoute }));
-vi.mock("../src/lib/game/access", () => ({ isGameOn: () => true }));
+vi.mock("../src/lib/game/access", () => ({ isGameEnabled: () => true }));
 vi.mock("../src/lib/game/chat-membership", () => ({ bindPairGameChat: async () => null, readPairGameChatTx: async () => null, isExactGameChat: (chat: { exact: boolean }) => chat.exact }));
 import { handleGameChatBootstrapControl, prepareGameChatBootstrap, reconcileFrozenGameChatBootstrap, reconcileFrozenGameChatBootstrapReceipt } from "../src/lib/game/chat-bootstrap";
 const gameId = "game_sample";
@@ -34,6 +35,15 @@ const game = (container: string | null = "room") => ({ id: gameId, status: "live
 const call = (operation: "recover" | "send", text?: string) => handleGameChatBootstrapControl({ memberId: "room", runtimeIdentity: null, request: { action: "game_chat_bootstrap", gameId, eventId, operation, ...(text ? { text } : {}) } as HostedGameChatBootstrapRequest });
 
 describe("generated game chat bootstrap", () => {
+  it.each(["Please visit https://example.test now.", "https://example.test"])("rejects first-message link placement before freezing: %s", async text => {
+    const response = await withJsonError(async () => { await call("send", text); return Response.json({}); })();
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: { code: "INVALID_REQUEST", message: "Invalid request." } });
+    expect(m.saveReceipt).not.toHaveBeenCalled();
+    expect(m.create).not.toHaveBeenCalled();
+    expect(m.runtime).toHaveBeenCalled();
+  });
+
   beforeEach(() => {
     vi.resetAllMocks(); m.sequence.length = 0; m.frozen = null; m.attached = false; m.skipped = false;
     m.prepareMailbox.mockResolvedValue({}); m.enqueue.mockResolvedValue({ mailboxItemId: "new_kickoff" }); m.pendingMailbox.mockResolvedValue(null); m.mailbox.mockResolvedValue(null);
@@ -254,6 +264,15 @@ describe("generated game chat bootstrap", () => {
     expect(await call("send", "Do not send")).toMatchObject({ result: { status: "unavailable" } });
     expect(m.create).not.toHaveBeenCalled(); expect(m.claim).not.toHaveBeenCalled();
   });
+  it("refuses dispatch if the frozen pair loses all member identities before the final lock", async () => {
+    m.lines.mockImplementation(async () => {
+      if (m.frozen) m.game.mockResolvedValue({ ...game(), players: game().players.map(player => ({ ...player, memberId: null })) });
+      return [{ phoneNumber: "+15555550100", phoneNumberLookupKey: "line", maxNewConversationsPerDay: 10 }];
+    });
+    await expect(call("send", "Synthetic kickoff")).rejects.toThrow("Game chat delivery is unavailable.");
+    expect(m.create).not.toHaveBeenCalled();
+  });
+
   it("rejects current runtime authority loss before frozen message dispatch", async () => {
     m.runtime.mockRejectedValue(new Error("Stale runtime"));
     await expect(call("send", "Do not send")).rejects.toThrow("Stale runtime");

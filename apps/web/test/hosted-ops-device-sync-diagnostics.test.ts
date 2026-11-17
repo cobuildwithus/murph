@@ -64,6 +64,31 @@ const originalDeviceSyncBackfillDiagnosticEnabled =
 const originalNodeEnv = process.env.NODE_ENV;
 
 describe("hosted ops Junction diagnostics", () => {
+  it("rejects an explicit extreme window before invoking diagnostics", async () => {
+    const response = await hostedOpsJunctionDiagnosticsRoute.POST(createJsonPostRequest(
+      "https://example.test/api/ops/device-sync/junction-diagnostics", {
+        memberId: "member_synthetic", sourceProvider: "oura",
+        windowStart: "-271821-04-20T00:00:00.000Z", windowEnd: "-271821-04-21T00:00:00.000Z",
+      },
+    ));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: { code: "INVALID_REQUEST", message: "Invalid request." } });
+    expect(mocks.diagnoseBackfill).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])("distinguishes date overflow from a diagnostic dependency failure: %s", async dependencyFails => {
+    if (dependencyFails) mocks.createHostedDeviceSyncControlPlane.mockImplementationOnce(() => { throw new RangeError("Synthetic configuration failure."); });
+    const response = await hostedOpsJunctionDiagnosticsRoute.POST(createJsonPostRequest(
+      "https://example.test/api/ops/device-sync/junction-diagnostics", {
+        memberId: "hbm_example", sourceProvider: "oura",
+        windowEnd: dependencyFails ? "2026-11-14T00:00:00.000Z" : "-271821-04-20T00:00:00.000Z",
+      },
+    ));
+    expect(response.status).toBe(dependencyFails ? 500 : 400);
+    expect(await response.json()).toMatchObject({ error: { code: dependencyFails ? "INTERNAL_ERROR" : "INVALID_REQUEST" } });
+    expect(mocks.diagnoseBackfill).not.toHaveBeenCalled();
+  });
+
   beforeAll(async () => {
     hostedOpsJunctionDiagnosticsRoute =
       await import("../app/api/ops/device-sync/junction-diagnostics/route");

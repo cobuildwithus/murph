@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { isHostedRuntimeGroupEmailAuthorizationProof } from "@murphai/hosted-execution/runtime-control";
 
 export const hostedEmailSendTargetKindValues = ["explicit", "group", "thread"] as const;
@@ -32,7 +33,7 @@ export interface HostedEmailSendResult {
 export function parseHostedEmailSendRequest(value: unknown): HostedEmailSendRequest {
   const record = requireHostedEmailSendRequestObject(value, "Hosted email send request");
   if (record.newsletterAuthorizationProof !== undefined) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted email send request uses a retired newsletter authorization proof field.",
     );
   }
@@ -88,7 +89,7 @@ function readOptionalHostedEmailGroupEmailAuthorizationProof(
     return null;
   }
   if (!isHostedRuntimeGroupEmailAuthorizationProof(value)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted email send request groupEmailAuthorizationProof must be a SHA-256 hex digest.",
     );
   }
@@ -103,7 +104,7 @@ function readOptionalHostedEmailSendRequestBoolean(
     return null;
   }
   if (typeof value !== "boolean") {
-    throw new TypeError(`${label} must be a boolean.`);
+    throw new ContractValidationError(`${label} must be a boolean.`);
   }
   return value;
 }
@@ -113,7 +114,7 @@ function requireHostedEmailSendRequestObject(
   label: string,
 ): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object.`);
+    throw new ContractValidationError(`${label} must be an object.`);
   }
 
   return value as Record<string, unknown>;
@@ -124,7 +125,7 @@ function requireHostedEmailSendRequestString(
   label: string,
 ): string {
   if (typeof value !== "string") {
-    throw new TypeError(`${label} must be a string.`);
+    throw new ContractValidationError(`${label} must be a string.`);
   }
 
   return value;
@@ -152,5 +153,5 @@ function requireHostedEmailSendTargetKind(
     return targetKind as HostedEmailSendTargetKind;
   }
 
-  throw new TypeError(`${label} must be explicit, group, or thread.`);
+  throw new ContractValidationError(`${label} must be explicit, group, or thread.`);
 }

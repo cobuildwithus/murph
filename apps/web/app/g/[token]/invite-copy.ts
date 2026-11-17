@@ -46,13 +46,12 @@ export function describeCheckIn(kind: GameCheckInKind | undefined): string | nul
   return kind === "heart_rate" ? "Prove it with heart rate from a wearable." : "Prove it with a photo.";
 }
 
-/** A closed link, in the app's words. It names nobody but whoever called it off. */
+/** A closed link, in the app's words. It never names anyone. */
 export function closedInviteCopy(preview: Exclude<GameInvitePreview, { status: "open" }> | null): { title: string; detail: string } {
   if (preview?.status === "used") return { detail: "Someone already shook on it. Ask for a new one.", title: "This link is used up." };
   if (preview?.status === "expired") {
     if (preview.reason !== "cancelled") return { detail: "It wasn't shaken on in time. Ask for a new one.", title: "This invite ran out." };
-    const name = preview.inviterFirstName?.trim();
-    return { detail: "Ask for a new one.", title: name ? `${name} called this one off.` : "This invite was called off." };
+    return { detail: "Ask for a new one.", title: "This invite was called off." };
   }
   return { detail: "Check the link, or ask for a new one.", title: "This link isn't available." };
 }

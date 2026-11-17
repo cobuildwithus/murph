@@ -1,3 +1,4 @@
+import * as requestParsers from "@murphai/hosted-execution/clinical-records";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
@@ -48,6 +49,24 @@ let recordOutcomeRoute: RecordOutcomeRoute;
 let fetchDocumentRoute: typeof import("../app/api/internal/clinical-records/runtime/fetch-document/route");
 
 describe("Clinical Records internal runtime routes", () => {
+  it.each([" ", "bogus", "{}", JSON.stringify({
+    alg: "AES-256-GCM-HKDF-SHA256", schema: "murph.hosted-secure-box.v1",
+    domain: "device", lane: "clinical-records-page-cursor", rootKeyId: "root_synthetic",
+    scope: "cursor_synthetic", ciphertext: "AA==", iv: "AA==",
+  })]) ("rejects malformed caller cursors before retrieval: %s", async cursor => {
+    const response = await fetchPageRoute.POST(jsonRequest("/api/internal/clinical-records/runtime/fetch-page", {
+      cursor, generation: 1, requestId: "request_example", runId: "run_example",
+      resourceType: "Observation", queryFingerprint: "d66cc398ce9224292aee420a8b5268ea4f17adbe4b3c0d3378a26fc9fe707d91",
+      queryScopeId: "laboratory-observations", retrievalProtocol: "query-slices-v2", sliceId: "whole",
+    }, runtimeWriteFenceHeaders()));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: {
+      code: cursor === "bogus" ? "INVALID_JSON" : "INVALID_REQUEST",
+      message: cursor === "bogus" ? "Invalid JSON." : "Invalid request.",
+    } });
+    expect(mocks.fetchClinicalRetrievalPage).not.toHaveBeenCalled();
+  });
+
   beforeAll(async () => {
     fetchDocumentRoute = await import("../app/api/internal/clinical-records/runtime/fetch-document/route");
     [connectLinkRoute, readRunRoute, fetchPageRoute, recordOutcomeRoute] = await Promise.all([
@@ -81,6 +100,32 @@ describe("Clinical Records internal runtime routes", () => {
       status: "unavailable",
     });
     mocks.recordClinicalRetrievalOutcome.mockResolvedValue(undefined);
+  });
+
+  it.each(["stream", "limit"])("keeps outcome %s failures distinct from invalid input", async kind => {
+    const request = jsonRequest("/api/internal/clinical-records/runtime/record-outcome", {}, runtimeWriteFenceHeaders());
+    if (kind === "stream") {
+      vi.spyOn(request, "body", "get").mockReturnValue(new ReadableStream({
+        start(controller) { controller.error(new TypeError("Body stream failed.")); },
+      }));
+    } else {
+      request.headers.set("content-length", String(requestParsers.HOSTED_CLINICAL_RECORDS_RECORD_OUTCOME_REQUEST_MAX_BYTES + 1));
+    }
+    const response = await recordOutcomeRoute.POST(request);
+    expect(response.status).toBe(kind === "stream" ? 500 : 413);
+    expect(mocks.recordClinicalRetrievalOutcome).not.toHaveBeenCalled();
+  });
+
+  it("reports unexpected parser faults as server failures", async () => {
+    const parser = vi.spyOn(requestParsers, "parseHostedClinicalRecordsRecordOutcomeRequest")
+      .mockImplementationOnce(() => { throw new TypeError("Parser invariant failed."); });
+    try {
+      const response = await recordOutcomeRoute.POST(jsonRequest("/api/internal/clinical-records/runtime/record-outcome", {}, runtimeWriteFenceHeaders()));
+      expect(response.status).toBe(500);
+      expect(parser).toHaveBeenCalledOnce();
+    } finally {
+      parser.mockRestore();
+    }
   });
 
   it("requires a signed active runtime fence and permits only a bound document ticket", async () => {
@@ -266,6 +311,7 @@ describe("Clinical Records internal runtime routes", () => {
     expect(pageResponse.status).toBe(200);
     expect(outcomeResponse.status).toBe(200);
     expect(invalidOutcomeResponse.status).toBe(400);
+    expect(await invalidOutcomeResponse.json()).toMatchObject({ error: { code: "CLINICAL_RECORD_RUNTIME_REQUEST_INVALID" } });
     expect(mocks.fetchClinicalRetrievalPage).toHaveBeenCalledWith({
       memberId: "member_clinical_1",
       request: page,

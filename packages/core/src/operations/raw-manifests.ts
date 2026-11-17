@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { promises as fs } from "node:fs";
@@ -116,7 +117,7 @@ function resolveRawArtifactDirectory(
       return normalizedRawDirectory;
     }
 
-    throw new TypeError("raw import manifest requires either a rawDirectory or at least one raw artifact");
+    throw new ContractValidationError("raw import manifest requires either a rawDirectory or at least one raw artifact");
   }
 
   const [firstDirectory, ...remainingDirectories] = artifacts.map((artifact) =>
@@ -129,12 +130,12 @@ function resolveRawArtifactDirectory(
 
   for (const directory of remainingDirectories) {
     if (directory !== firstDirectory) {
-      throw new TypeError("raw import manifest artifacts must share a single raw directory");
+      throw new ContractValidationError("raw import manifest artifacts must share a single raw directory");
     }
   }
 
   if (normalizedRawDirectory && normalizedRawDirectory !== firstDirectory) {
-    throw new TypeError("raw import manifest rawDirectory must match the staged raw artifacts");
+    throw new ContractValidationError("raw import manifest rawDirectory must match the staged raw artifacts");
   }
 
   return firstDirectory;
@@ -162,11 +163,11 @@ function sanitizeManifestJsonObject(provenance: Record<string, unknown>): JsonOb
     serialized = JSON.stringify(provenance);
   } catch (error) {
     const detail = error instanceof Error ? `: ${error.message}` : "";
-    throw new TypeError(`raw import manifest provenance must be JSON-serializable${detail}`);
+    throw new ContractValidationError(`raw import manifest provenance must be JSON-serializable${detail}`);
   }
 
   if (serialized === undefined) {
-    throw new TypeError("raw import manifest provenance must be JSON-serializable");
+    throw new ContractValidationError("raw import manifest provenance must be JSON-serializable");
   }
 
   return jsonObjectSchema.parse(JSON.parse(serialized));
@@ -179,7 +180,7 @@ function composeManifestProvenance(input: {
   const provenance = sanitizeManifestJsonObject(input.provenance);
 
   if (RAW_MANIFEST_OPERATOR_METADATA_KEY in provenance) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `raw import manifest provenance reserves "${RAW_MANIFEST_OPERATOR_METADATA_KEY}" for caller metadata`,
     );
   }
@@ -215,7 +216,7 @@ export function buildRawImportManifest({
   const resolvedRawDirectory = resolveRawArtifactDirectory(normalizedArtifacts, rawDirectory);
 
   if (!rawDirectoryMatchesOwner(resolvedRawDirectory, owner)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `raw import manifest rawDirectory "${resolvedRawDirectory}" does not match owner ${owner.kind}:${owner.id}.`,
     );
   }

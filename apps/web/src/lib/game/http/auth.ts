@@ -6,30 +6,25 @@ import { hasHostedConsentAtPublishedVersions, readHostedConsentStatus } from "..
 import { getPrisma } from "../../prisma";
 import { areGameDevToolsAllowed } from "../access";
 import type { GameCommand } from "../contract";
-import { canEnterGame } from "../service";
+import { isGameEnabled } from "../access";
 import { gameHttpError } from "./errors";
-
-/** The invite an app is holding while its member signs up to accept it. */
-export const GAME_INVITE_HEADER = "x-murph-game-invite";
 
 /**
  * A signed-in bearer session is enough: invitees play free, so this skips the
- * paid-member check. Members the game isn't on for see the routes as missing.
- * An invite route passes its own token; any other route may carry the invite
- * the app is holding in `GAME_INVITE_HEADER`.
+ * paid-member check. The global switch hides every game route while off.
  */
-export async function requireGameMember(request: Request, inviteToken?: string): Promise<string> {
-  return (await requireGameMemberAuth(request, inviteToken)).member.id;
+export async function requireGameMember(request: Request): Promise<string> {
+  return (await requireGameMemberAuth(request)).member.id;
 }
 
-export async function requireGameMemberAuth(request: Request, inviteToken?: string) {
+export async function requireGameMemberAuth(request: Request) {
   let auth: Awaited<ReturnType<typeof requireHostedMemberAuthFromBearerToken>>;
   try {
     auth = await requireHostedMemberAuthFromBearerToken(request, getPrisma());
   } catch (error) {
     throwGameAuthError(error);
   }
-  if (!(await canEnterGame(auth.member.id, inviteToken || request.headers.get(GAME_INVITE_HEADER) || null))) throw gameDisabled();
+  if (!isGameEnabled()) throw gameDisabled();
   return auth;
 }
 

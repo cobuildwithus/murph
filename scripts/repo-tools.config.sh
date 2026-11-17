@@ -112,6 +112,7 @@ repo_tools_join_lines COBUILD_AUDIT_CONTEXT_ALWAYS_PATHS \
   "Dockerfile.cloudflare-hosted-runner" \
   "Dockerfile.cloudflare-hosted-runner-base" \
   "patches/codex-websocket-ack.patch" \
+  "patches/codex-prompt-cache-retention.patch" \
   "patches/@cloudflare__containers@0.3.7.patch" \
   "README.md" \
   "PRODUCT.md" \

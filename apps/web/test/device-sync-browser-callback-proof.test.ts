@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  buildHostedDeviceSyncAppCompletionProof,
   buildHostedDeviceSyncCallbackProof,
+  readHostedDeviceSyncAppCompletionProofError,
   readHostedDeviceSyncCallbackState,
   readHostedDeviceSyncCallbackProofError,
 } from "@/src/lib/device-sync/browser-callback-proof";
@@ -52,6 +54,51 @@ describe("hosted device-sync browser callback proof", () => {
       ...common,
       state: "different_state_12345678",
     })).toBe("CALLBACK_PROOF_MISMATCH");
+  });
+
+  it("keeps the app's completion proof and the browser cookie from standing in for each other", () => {
+    const binding = {
+      memberId: "member_a",
+      now: NOW,
+      provider: "junction",
+      sessionId: "session_a",
+      state: STATE,
+    };
+    const appProof = buildHostedDeviceSyncAppCompletionProof(binding);
+    const { cookie } = buildHostedDeviceSyncCallbackProof(binding);
+    const cookieValue = decodeURIComponent(cookie.slice(cookie.indexOf("=") + 1, cookie.indexOf(";")));
+    const check = { ...binding, now: new Date("2026-07-28T12:14:59.000Z") };
+
+    expect(appProof.startsWith("murph_device_sync_app_completion_v1.")).toBe(true);
+    expect(cookieValue.startsWith("murph_device_sync_callback_v1.")).toBe(true);
+    expect(readHostedDeviceSyncAppCompletionProofError({ ...check, completionProof: appProof })).toBeNull();
+    expect(readHostedDeviceSyncAppCompletionProofError({ ...check, completionProof: cookieValue }))
+      .toBe("CALLBACK_PROOF_MALFORMED");
+    // The same authenticator under the other prefix still fails: the signing domain differs.
+    expect(readHostedDeviceSyncAppCompletionProofError({
+      ...check,
+      completionProof: cookieValue.replace("murph_device_sync_callback_v1", "murph_device_sync_app_completion_v1"),
+    })).toBe("CALLBACK_PROOF_MISMATCH");
+    expect(readHostedDeviceSyncCallbackProofError({
+      ...check,
+      request: requestWithCookie(cookie.replace(encodeURIComponent(cookieValue), encodeURIComponent(appProof))),
+    })).toBe("CALLBACK_PROOF_MALFORMED");
+    expect(readHostedDeviceSyncCallbackProofError({
+      ...check,
+      request: requestWithCookie(cookie.replace(
+        encodeURIComponent(cookieValue),
+        encodeURIComponent(appProof.replace("murph_device_sync_app_completion_v1", "murph_device_sync_callback_v1")),
+      )),
+    })).toBe("CALLBACK_PROOF_MISMATCH");
+    expect(readHostedDeviceSyncAppCompletionProofError({ ...check, completionProof: null }))
+      .toBe("CALLBACK_PROOF_MISSING");
+    expect(readHostedDeviceSyncAppCompletionProofError({ ...check, completionProof: appProof, sessionId: "session_b" }))
+      .toBe("CALLBACK_PROOF_MISMATCH");
+    expect(readHostedDeviceSyncAppCompletionProofError({
+      ...check,
+      completionProof: appProof,
+      now: new Date("2026-07-28T12:15:00.000Z"),
+    })).toBe("CALLBACK_PROOF_EXPIRED");
   });
 
   it("keeps concurrent browser sessions bound to their independent callback states", () => {

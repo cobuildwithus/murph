@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 export const HOSTED_OPERATOR_TASK_CONTROL_ACTIONS = [
   "authorize",
   "complete",
@@ -38,7 +39,7 @@ export function parseHostedOperatorTaskControlRequest(
   if (!HOSTED_OPERATOR_TASK_CONTROL_ACTIONS.includes(
     action as HostedOperatorTaskControlAction,
   )) {
-    throw new TypeError("Hosted operator task control action is invalid.");
+    throw new ContractValidationError("Hosted operator task control action is invalid.");
   }
   const expiresAt = requireCanonicalTimestamp(record.expiresAt, "expiresAt");
   return {
@@ -61,7 +62,7 @@ export function parseHostedOperatorTaskControlResponse(
     && status !== "expired"
     && status !== "failed"
   ) {
-    throw new TypeError("Hosted operator task control status is invalid.");
+    throw new ContractValidationError("Hosted operator task control status is invalid.");
   }
   return { status };
 }
@@ -71,20 +72,20 @@ function requireExactRecord(
   keys: readonly string[],
 ): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("Hosted operator task control payload must be an object.");
+    throw new ContractValidationError("Hosted operator task control payload must be an object.");
   }
   const record = value as Record<string, unknown>;
   const actual = Object.keys(record).sort();
   const expected = [...keys].sort();
   if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) {
-    throw new TypeError("Hosted operator task control payload shape is invalid.");
+    throw new ContractValidationError("Hosted operator task control payload shape is invalid.");
   }
   return record;
 }
 
 function requireString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.length === 0 || value !== value.trim()) {
-    throw new TypeError(`Hosted operator task control ${label} is invalid.`);
+    throw new ContractValidationError(`Hosted operator task control ${label} is invalid.`);
   }
   return value;
 }
@@ -93,7 +94,7 @@ function requireCanonicalTimestamp(value: unknown, label: string): string {
   const timestamp = requireString(value, label);
   const parsed = new Date(timestamp);
   if (!Number.isFinite(parsed.getTime()) || parsed.toISOString() !== timestamp) {
-    throw new TypeError(`Hosted operator task control ${label} is invalid.`);
+    throw new ContractValidationError(`Hosted operator task control ${label} is invalid.`);
   }
   return timestamp;
 }

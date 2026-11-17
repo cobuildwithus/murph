@@ -1,4 +1,5 @@
 import { MURPH_PRODUCT_ORIGIN } from "@murphai/contracts";
+import { RequestInputError } from "@murphai/hosted-execution/request-input";
 
 import {
   CHANGELOG_CARD_VERSION,
@@ -16,58 +17,29 @@ const DEFAULT_DAYS = 7;
 const MAX_DAYS = 155;
 const CACHE_CONTROL = "public, s-maxage=300, stale-while-revalidate=3600";
 
-class ChangelogQueryError extends TypeError {}
-
 export async function GET(request: Request): Promise<Response> {
+  let window: { from: string; to: string };
+  let featureLimit: number;
+  let improvementLimit: number;
   try {
     const url = new URL(request.url);
-    const window = readWindow(url.searchParams);
-    const featureLimit = readBoundedInteger(
+    window = readWindow(url.searchParams);
+    featureLimit = readBoundedInteger(
       url.searchParams.get("featureLimit"),
       CHANGELOG_FEATURE_LIMIT_MAX,
       0,
       CHANGELOG_FEATURE_LIMIT_MAX,
       "featureLimit",
     );
-    const improvementLimit = readBoundedInteger(
+    improvementLimit = readBoundedInteger(
       url.searchParams.get("improvementLimit"),
       CHANGELOG_IMPROVEMENT_LIMIT_MAX,
       0,
       CHANGELOG_IMPROVEMENT_LIMIT_MAX,
       "improvementLimit",
     );
-    const origin = (
-      resolveHostedPublicBaseUrl(process.env) ?? MURPH_PRODUCT_ORIGIN
-    ).replace(/\/+$/u, "");
-    const items = queryChangelogItems({
-      featureLimit,
-      from: window.from,
-      improvementLimit,
-      to: window.to,
-    });
-
-    return Response.json(
-      {
-        schema: CHANGELOG_FEED_SCHEMA,
-        window,
-        items: items.map((item) => ({
-          ...item,
-          url: buildAbsoluteChangelogUrl(buildChangelogItemPath(item.id), origin),
-        })),
-        links: {
-          digestCardTemplate:
-            `${origin}/changelog/card/${CHANGELOG_CARD_VERSION}/{ids}.png`,
-          fullChangelog: `${origin}/changelog`,
-        },
-      },
-      {
-        headers: {
-          "Cache-Control": CACHE_CONTROL,
-        },
-      },
-    );
   } catch (error) {
-    if (error instanceof ChangelogQueryError || error instanceof TypeError) {
+    if (error instanceof RequestInputError) {
       return Response.json(
         {
           error: {
@@ -83,17 +55,48 @@ export async function GET(request: Request): Promise<Response> {
     }
     throw error;
   }
+
+  const origin = (
+    resolveHostedPublicBaseUrl(process.env) ?? MURPH_PRODUCT_ORIGIN
+  ).replace(/\/+$/u, "");
+  const items = queryChangelogItems({
+    featureLimit,
+    from: window.from,
+    improvementLimit,
+    to: window.to,
+  });
+
+  return Response.json(
+    {
+      schema: CHANGELOG_FEED_SCHEMA,
+      window,
+      items: items.map((item) => ({
+        ...item,
+        url: buildAbsoluteChangelogUrl(buildChangelogItemPath(item.id), origin),
+      })),
+      links: {
+        digestCardTemplate:
+          `${origin}/changelog/card/${CHANGELOG_CARD_VERSION}/{ids}.png`,
+        fullChangelog: `${origin}/changelog`,
+      },
+    },
+    {
+      headers: {
+        "Cache-Control": CACHE_CONTROL,
+      },
+    },
+  );
 }
 
 function readWindow(searchParams: URLSearchParams): { from: string; to: string } {
   const from = searchParams.get("from");
   const to = searchParams.get("to");
   if ((from === null) !== (to === null)) {
-    throw new ChangelogQueryError("from and to must be supplied together.");
+    throw new RequestInputError("from and to must be supplied together.");
   }
   if (from !== null && to !== null) {
     if (!isChangelogDate(from) || !isChangelogDate(to) || from >= to) {
-      throw new ChangelogQueryError(
+      throw new RequestInputError(
         "from and to must be strict YYYY-MM-DD dates with from before to.",
       );
     }
@@ -126,11 +129,11 @@ function readBoundedInteger(
     return fallback;
   }
   if (!/^\d+$/u.test(raw)) {
-    throw new ChangelogQueryError(`${label} must be an integer.`);
+    throw new RequestInputError(`${label} must be an integer.`);
   }
   const value = Number.parseInt(raw, 10);
   if (value < minimum || value > maximum) {
-    throw new ChangelogQueryError(
+    throw new RequestInputError(
       `${label} must be between ${minimum} and ${maximum}.`,
     );
   }

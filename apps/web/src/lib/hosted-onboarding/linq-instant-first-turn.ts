@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
 import { createHash } from "node:crypto";
@@ -1378,7 +1379,7 @@ function requireNonEmptyString(
 ): string {
   const normalized = value?.trim() ?? "";
   if (!normalized) {
-    throw new TypeError(`${label} is required.`);
+    throw new ContractValidationError(`${label} is required.`);
   }
   return normalized;
 }

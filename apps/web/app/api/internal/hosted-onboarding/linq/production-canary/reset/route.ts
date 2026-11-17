@@ -13,7 +13,7 @@ import { getPrisma } from "@/src/lib/prisma";
 export const maxDuration = 300;
 
 export const POST = withJsonError(async (request: Request) => {
-  const phoneNumber = requireHostedLinqProductionCanaryResetRequest(request);
+  const phoneNumber = await requireHostedLinqProductionCanaryResetRequest(request);
   if (new URL(request.url).search) {
     throwInvalidProductionCanaryResetRequest();
   }

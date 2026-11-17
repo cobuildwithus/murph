@@ -642,7 +642,7 @@ describe('executeGenerateSongTool', () => {
         durationMs: 15_000,
         forceInstrumental: false,
         kind: 'elevenlabs_music',
-        modelId: 'music_v2',
+        modelId: 'music_v2_5',
         outputFormat: 'mp3_48000_192',
         prompt: 'A bright, original group theme.',
       },

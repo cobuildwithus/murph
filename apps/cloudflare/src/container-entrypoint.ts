@@ -1,3 +1,5 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
+import { isRequestInputError, parseInput, RequestInputError, RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import {
   createServer,
   type IncomingMessage,
@@ -287,13 +289,6 @@ type HostedAbortResponseLike = HostedAbortEmitterLike & {
   writableEnded: boolean;
 };
 
-class HostedContainerRequestBodyTooLargeError extends RangeError {
-  constructor(limitBytes: number) {
-    super(`Hosted container runner request body exceeds ${limitBytes} bytes.`);
-    this.name = "HostedContainerRequestBodyTooLargeError";
-  }
-}
-
 class HostedContainerArchitectureVersionMismatchError extends Error {
   readonly actualVersion: string | null;
   readonly expectedVersion: string;
@@ -492,14 +487,14 @@ export async function startHostedContainerEntrypoint(input: {
     try {
       wakeRequest = await readHostedContainerRuntimeWakeRequest(request);
     } catch (error) {
+      const classified = classifyRequestDecodeError(error);
       emitHostedExecutionStructuredLog({
         component: "container",
         error,
-        level: "warn",
+        level: classified.level,
         message: "Hosted container entrypoint rejected the runtime wake request body.",
         phase: "failed",
       });
-      const classified = classifyRequestDecodeError(error);
       writeJsonResponse(response, classified.statusCode, classified.payload);
       return;
     }
@@ -659,18 +654,19 @@ export async function startHostedContainerEntrypoint(input: {
       if (isWorkspaceInvocationAbortRequest) {
         let abortRequest: HostedContainerWorkspaceInvocationAbortRequest;
         try {
-          abortRequest = parseHostedContainerWorkspaceInvocationAbortRequest(
-            JSON.parse(await readHostedContainerInvocationRequestBody(request)),
+          abortRequest = parseInput(
+            parseHostedContainerRequestJson(await readHostedContainerInvocationRequestBody(request)),
+            parseHostedContainerWorkspaceInvocationAbortRequest,
           );
         } catch (error) {
+          const classified = classifyRequestDecodeError(error);
           emitHostedExecutionStructuredLog({
             component: "container",
             error,
-            level: "warn",
+            level: classified.level,
             message: "Hosted container entrypoint rejected the workspace invocation abort request body.",
             phase: "failed",
           });
-          const classified = classifyRequestDecodeError(error);
           writeJsonResponse(response, classified.statusCode, classified.payload);
           return;
         }
@@ -810,18 +806,19 @@ export async function startHostedContainerEntrypoint(input: {
         claimedRunnerSlot = true;
         let smokeRequest: HostedContainerDirectR2PresignedPutSmokeRequest;
         try {
-          smokeRequest = parseHostedContainerDirectR2PresignedPutSmokeRequest(
-            JSON.parse(await readHostedContainerInvocationRequestBody(request)),
+          smokeRequest = parseInput(
+            parseHostedContainerRequestJson(await readHostedContainerInvocationRequestBody(request)),
+            parseHostedContainerDirectR2PresignedPutSmokeRequest,
           );
         } catch (error) {
+          const classified = classifyRequestDecodeError(error);
           emitHostedExecutionStructuredLog({
             component: "container",
             error,
-            level: "warn",
+            level: classified.level,
             message: "Hosted container entrypoint rejected the direct R2 presigned PUT smoke request body.",
             phase: "failed",
           });
-          const classified = classifyRequestDecodeError(error);
           writeJsonResponse(response, classified.statusCode, classified.payload);
           return;
         }
@@ -854,19 +851,19 @@ export async function startHostedContainerEntrypoint(input: {
       claimedRunnerSlot = true;
 
       try {
-        const requestBody: unknown = JSON.parse(await readHostedContainerInvocationRequestBody(request));
-        const requestEnvelope = parseHostedExecutionContainerInvocationEnvelope(requestBody);
-        job = runtime.parseRunnerJobInput(requestEnvelope.job);
+        const requestBody: unknown = parseHostedContainerRequestJson(await readHostedContainerInvocationRequestBody(request));
+        const requestEnvelope = parseInput(requestBody, parseHostedExecutionContainerInvocationEnvelope);
+        job = parseInput(requestEnvelope.job, runtime.parseRunnerJobInput);
         requestDiagnostics.workspaceAttemptId = job.request.attemptId;
       } catch (error) {
+        const classified = classifyRequestDecodeError(error);
         emitHostedExecutionStructuredLog({
           component: "container",
           error,
-          level: "warn",
+          level: classified.level,
           message: "Hosted container entrypoint rejected the request body.",
           phase: "failed",
         });
-        const classified = classifyRequestDecodeError(error);
         writeJsonResponse(response, classified.statusCode, classified.payload);
         return;
       }
@@ -1212,7 +1209,7 @@ function parseHostedExecutionContainerInvocationEnvelope(
   value: unknown,
 ): { job: unknown } {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("Hosted container runner request must be an object.");
+    throw new ContractValidationError("Hosted container runner request must be an object.");
   }
 
   const record = value as Record<string, unknown>;
@@ -1335,6 +1332,19 @@ async function startHostedContainerEntrypointCli(): Promise<void> {
   }
 }
 
+class InvalidJsonRequestError extends RequestInputError {}
+
+function parseHostedContainerRequestJson(body: string): unknown {
+  try {
+    return JSON.parse(body);
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      throw new InvalidJsonRequestError("Invalid JSON.", { cause: error });
+    }
+    throw error;
+  }
+}
+
 async function readHostedContainerInvocationRequestBody(
   request: IncomingMessage,
   limitBytes = HOSTED_CONTAINER_RUN_REQUEST_BODY_LIMIT_BYTES,
@@ -1345,7 +1355,7 @@ async function readHostedContainerInvocationRequestBody(
     declaredLength !== null
     && declaredLength > limitBytes
   ) {
-    throw new HostedContainerRequestBodyTooLargeError(limitBytes);
+    throw new RequestBodyTooLargeError(limitBytes);
   }
 
   const chunks: Buffer[] = [];
@@ -1356,7 +1366,7 @@ async function readHostedContainerInvocationRequestBody(
     totalBytes += buffer.byteLength;
 
     if (totalBytes > limitBytes) {
-      throw new HostedContainerRequestBodyTooLargeError(limitBytes);
+      throw new RequestBodyTooLargeError(limitBytes);
     }
 
     chunks.push(buffer);
@@ -1427,7 +1437,7 @@ function parseHostedContainerDirectR2PresignedPutSmokeRequest(
   value: unknown,
 ): HostedContainerDirectR2PresignedPutSmokeRequest {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("Direct R2 presigned PUT smoke request must be an object.");
+    throw new ContractValidationError("Direct R2 presigned PUT smoke request must be an object.");
   }
 
   const record = value as Record<string, unknown>;
@@ -1435,33 +1445,43 @@ function parseHostedContainerDirectR2PresignedPutSmokeRequest(
     ? record.presignedPutUrl.trim()
     : "";
   if (!presignedPutUrl) {
-    throw new TypeError("Direct R2 presigned PUT smoke request requires presignedPutUrl.");
+    throw new ContractValidationError("Direct R2 presigned PUT smoke request requires presignedPutUrl.");
   }
 
-  const parsedUrl = new URL(presignedPutUrl);
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(presignedPutUrl);
+  } catch (error) {
+    if (error instanceof TypeError) throw new RequestInputError(error.message, { cause: error });
+    throw error;
+  }
   if (parsedUrl.protocol !== "https:" && parsedUrl.protocol !== "http:") {
-    throw new TypeError("Direct R2 presigned PUT smoke URL must use HTTP or HTTPS.");
+    throw new ContractValidationError("Direct R2 presigned PUT smoke URL must use HTTP or HTTPS.");
   }
 
   const rawByteLength = Object.hasOwn(record, "byteLength")
     ? record.byteLength
     : HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_DEFAULT_BYTES;
-  const byteLength = typeof rawByteLength === "number"
-    ? rawByteLength
-    : Number(rawByteLength);
+  let byteLength: number;
+  try {
+    byteLength = Number(rawByteLength);
+  } catch (error) {
+    if (error instanceof TypeError) throw new RequestInputError(error.message, { cause: error });
+    throw error;
+  }
   if (
     !Number.isSafeInteger(byteLength)
     || byteLength <= 0
     || byteLength > HOSTED_CONTAINER_DIRECT_R2_PRESIGNED_PUT_MAX_BYTES
   ) {
-    throw new RangeError("Direct R2 presigned PUT smoke byteLength is outside the supported range.");
+    throw new ContractValidationError("Direct R2 presigned PUT smoke byteLength is outside the supported range.");
   }
 
   const tlsCaCertificatePem = typeof record.tlsCaCertificatePem === "string"
     ? record.tlsCaCertificatePem.trim()
     : "";
   if (tlsCaCertificatePem && tlsCaCertificatePem.length > 8 * 1024) {
-    throw new RangeError("Direct R2 presigned PUT smoke CA certificate is too large.");
+    throw new ContractValidationError("Direct R2 presigned PUT smoke CA certificate is too large.");
   }
 
   return {
@@ -1475,7 +1495,7 @@ function parseHostedContainerWorkspaceInvocationAbortRequest(
   value: unknown,
 ): HostedContainerWorkspaceInvocationAbortRequest {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("Workspace invocation abort request must be an object.");
+    throw new ContractValidationError("Workspace invocation abort request must be an object.");
   }
 
   const record = value as Record<string, unknown>;
@@ -1490,13 +1510,13 @@ function parseHostedContainerWorkspaceInvocationAbortRequest(
     : "";
 
   if (!attemptId) {
-    throw new TypeError("Workspace invocation abort request requires attemptId.");
+    throw new ContractValidationError("Workspace invocation abort request requires attemptId.");
   }
   if (!leaseGeneration) {
-    throw new TypeError("Workspace invocation abort request requires leaseGeneration.");
+    throw new ContractValidationError("Workspace invocation abort request requires leaseGeneration.");
   }
   if (!userId) {
-    throw new TypeError("Workspace invocation abort request requires userId.");
+    throw new ContractValidationError("Workspace invocation abort request requires userId.");
   }
 
   return {
@@ -1517,14 +1537,14 @@ async function readHostedContainerRuntimeWakeRequest(
     return null;
   }
 
-  return parseHostedContainerRuntimeWakeRequest(JSON.parse(body));
+  return parseInput(parseHostedContainerRequestJson(body), parseHostedContainerRuntimeWakeRequest);
 }
 
 function parseHostedContainerRuntimeWakeRequest(
   value: unknown,
 ): HostedContainerRuntimeWakeRequest {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("Runtime wake request must be an object.");
+    throw new ContractValidationError("Runtime wake request must be an object.");
   }
 
   const record = value as Record<string, unknown>;
@@ -1539,13 +1559,13 @@ function parseHostedContainerRuntimeWakeRequest(
     : "";
 
   if (!attemptId) {
-    throw new TypeError("Runtime wake request requires attemptId.");
+    throw new ContractValidationError("Runtime wake request requires attemptId.");
   }
   if (!leaseGeneration) {
-    throw new TypeError("Runtime wake request requires leaseGeneration.");
+    throw new ContractValidationError("Runtime wake request requires leaseGeneration.");
   }
   if (!userId) {
-    throw new TypeError("Runtime wake request requires userId.");
+    throw new ContractValidationError("Runtime wake request requires userId.");
   }
   const requestedProcessingMode = readHostedContainerRequestedProcessingMode(
     record.requestedProcessingMode,
@@ -1575,7 +1595,7 @@ function readHostedContainerRequestedProcessingMode(
   ) {
     return value;
   }
-  throw new TypeError("Runtime wake request processing mode is unsupported.");
+  throw new ContractValidationError("Runtime wake request processing mode is unsupported.");
 }
 
 function readHostedContainerRuntimeWakeOrchestration(
@@ -1919,11 +1939,13 @@ function hasNonEmptyHostedContainerString(value: unknown): boolean {
 }
 
 function classifyRequestDecodeError(error: unknown): {
+  level: "warn" | "error";
   payload: Record<string, unknown>;
   statusCode: number;
 } {
   if (error instanceof HostedContainerArchitectureVersionMismatchError) {
     return {
+      level: "warn",
       payload: {
         actualVersion: error.actualVersion,
         code: "runtime_architecture_mismatch",
@@ -1934,8 +1956,9 @@ function classifyRequestDecodeError(error: unknown): {
     };
   }
 
-  if (error instanceof HostedContainerRequestBodyTooLargeError) {
+  if (error instanceof RequestBodyTooLargeError) {
     return {
+      level: "warn",
       payload: {
         code: "request_body_too_large",
         error: "Request body too large.",
@@ -1944,40 +1967,30 @@ function classifyRequestDecodeError(error: unknown): {
     };
   }
 
-  const details = buildHostedExecutionSafeErrorDetails(error);
-  const errorName = readHostedExecutionSafeErrorName(error);
+  const rejection = isRequestInputError(error);
+  const diagnosticError = rejection ? error.cause ?? error : error;
+  const details = buildHostedExecutionSafeErrorDetails(diagnosticError);
+  const errorName = readHostedExecutionSafeErrorName(diagnosticError);
+  const diagnostics = {
+    code: deriveHostedExecutionErrorCode(diagnosticError),
+    ...(details ? { details } : {}),
+    ...(errorName ? { errorName } : {}),
+  };
 
-  if (error instanceof SyntaxError) {
+  if (rejection) {
     return {
+      level: "warn",
       payload: {
-        code: deriveHostedExecutionErrorCode(error),
-        ...(details ? { details } : {}),
-        error: "Invalid JSON.",
-        ...(errorName ? { errorName } : {}),
-      },
-      statusCode: 400,
-    };
-  }
-
-  if (error instanceof TypeError || error instanceof RangeError || error instanceof URIError) {
-    return {
-      payload: {
-        code: deriveHostedExecutionErrorCode(error),
-        ...(details ? { details } : {}),
-        error: "Invalid request.",
-        ...(errorName ? { errorName } : {}),
+        ...diagnostics,
+        error: error instanceof InvalidJsonRequestError ? "Invalid JSON." : "Invalid request.",
       },
       statusCode: 400,
     };
   }
 
   return {
-    payload: {
-      code: deriveHostedExecutionErrorCode(error),
-      ...(details ? { details } : {}),
-      error: "Internal error.",
-      ...(errorName ? { errorName } : {}),
-    },
+    level: "error",
+    payload: { ...diagnostics, error: "Internal error." },
     statusCode: 500,
   };
 }

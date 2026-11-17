@@ -112,6 +112,49 @@ describe('list summary surfaces', () => {
     })
   })
 
+  it('treats empty collections as absent and counts shortened arrays', () => {
+    const item = toListEntity({
+      id: 'meal_01',
+      kind: 'meal',
+      title: 'Lunch',
+      occurredAt: '2026-04-08T12:00:00Z',
+      path: 'ledger/events/2026/2026-04.jsonl',
+      data: {
+        relatedGoalIds: [],
+        metadata: {},
+        workout: { exercises: [], sport: 'running' },
+        tags: ['a', 'b', 'c', 'd', 'e', 'f', 'g'],
+        links: [{ type: 'related_to', targetId: 'meal_01' }],
+      },
+      links: [],
+    })
+
+    expect(item.data).toEqual({
+      workout: { sport: 'running' },
+      tags: ['a', 'b', 'c', 'd', 'e', 'f'],
+      tagsCount: 7,
+    })
+  })
+
+  it('keeps a link to another record but not a record linking to itself', () => {
+    const item = toListEntity({
+      id: 'evt_01',
+      kind: 'note',
+      title: 'Note',
+      occurredAt: '2026-04-08T12:00:00Z',
+      path: 'ledger/events/2026/2026-04.jsonl',
+      data: {
+        links: [
+          { type: 'related_to', targetId: 'evt_01' },
+          { type: 'related_to', targetId: 'goal_01' },
+        ],
+      },
+      links: [],
+    })
+
+    expect(item.data).toEqual({ linksCount: 1 })
+  })
+
   it('keeps list item links bounded with an explicit count', () => {
     const item = toListEntity({
       id: 'exp_01',

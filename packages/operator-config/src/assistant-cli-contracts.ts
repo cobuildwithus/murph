@@ -699,6 +699,32 @@ export const assistantInputCursorSchema = z
   })
   .strict()
 
+/**
+ * A recap video the outbox may attach to its message's first send: the identity
+ * Web accepted for the recap, and the one decision the sender persists before its
+ * first message request: the line with this prepared attachment, or the line
+ * alone. It names no file: the sender derives the host's own path from the
+ * identity, since the model's shell can edit an intent. Any other shape is
+ * dropped, so the message is sent as its text alone and an optional video never
+ * costs it.
+ * The identity fields are `recapVideoIdentitySchema`'s, restated here so this
+ * widely loaded module does not pull in the recap contracts.
+ */
+export const assistantOutboxRecapVideoSchema = z
+  .object({
+    generationId: z.string().min(1).max(128),
+    hash: z.string().regex(/^[a-f0-9]{64}$/u),
+    byteLength: z.number().int().positive().max(8_000_000),
+    form: z.enum(['attachment', 'line']).optional(),
+    attachmentId: z.string().min(1).max(256).optional(),
+  })
+  .strict()
+  .refine(
+    (video) => (video.form === 'attachment') === (video.attachmentId !== undefined),
+    'A recap video attachment names its prepared attachment, and only then.',
+  )
+export type AssistantOutboxRecapVideo = z.infer<typeof assistantOutboxRecapVideoSchema>
+
 export const assistantOutboxIntentSchema = z
   .object({
     schema: z.literal('murph.assistant-outbox-intent.v1'),
@@ -780,6 +806,7 @@ export const assistantOutboxIntentSchema = z
       .max(ASSISTANT_ANSWERED_MAILBOX_ITEM_ID_LIMIT)
       .default([]),
     preparedDispatchToken: z.string().min(1).nullable().default(null),
+    recapVideo: assistantOutboxRecapVideoSchema.optional().catch(undefined),
     lastError: assistantDeliveryErrorSchema.nullable(),
   })
   .strict()

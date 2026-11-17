@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
 import { createHash, randomBytes } from "node:crypto";
@@ -226,7 +227,7 @@ export function buildSensitiveActionMessage(input: {
 }): string {
   assertBindingHash(input.bindingHash);
   if (!isSensitiveActionToken(input.token)) {
-    throw new TypeError("Sensitive-action challenge token is invalid.");
+    throw new ContractValidationError("Sensitive-action challenge token is invalid.");
   }
 
   return [
@@ -240,7 +241,7 @@ export function buildSensitiveActionMessage(input: {
   ].join("\n");
 }
 
-function requireSensitiveActionOrigin(): string {
+export function requireSensitiveActionOrigin(): string {
   const origin = resolveHostedPublicOrigin();
   if (!origin) {
     throw hostedOnboardingError({
@@ -253,7 +254,7 @@ function requireSensitiveActionOrigin(): string {
 
 function assertBindingHash(value: string): void {
   if (!SHA256_HEX_PATTERN.test(value)) {
-    throw new TypeError("Sensitive-action binding must be a SHA-256 hex digest.");
+    throw new ContractValidationError("Sensitive-action binding must be a SHA-256 hex digest.");
   }
 }
 

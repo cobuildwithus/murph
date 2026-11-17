@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   isHostedWorkspaceSnapshotV2Ref,
 } from "@murphai/hosted-execution/parsers";
@@ -139,7 +140,7 @@ export function parseHostedWorkspaceSnapshotPreparedRestore(
   label = "Hosted workspace snapshot prepared restore",
 ): HostedWorkspaceSnapshotPreparedRestore {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object.`);
+    throw new ContractValidationError(`${label} must be an object.`);
   }
 
   const record = value as Record<string, unknown>;
@@ -155,7 +156,7 @@ export function parseHostedWorkspaceSnapshotPreparedRestore(
     `${label}.snapshotFingerprint`,
   );
   if (!HOSTED_WORKSPACE_SNAPSHOT_SHA256_PATTERN.test(snapshotFingerprint)) {
-    throw new TypeError(`${label}.snapshotFingerprint must be a lowercase SHA-256 hex digest.`);
+    throw new ContractValidationError(`${label}.snapshotFingerprint must be a lowercase SHA-256 hex digest.`);
   }
 
   const getUrlText = requirePreparedRestoreString(record.getUrl, `${label}.getUrl`);
@@ -163,7 +164,7 @@ export function parseHostedWorkspaceSnapshotPreparedRestore(
   try {
     getUrl = new URL(getUrlText);
   } catch {
-    throw new TypeError(`${label}.getUrl must be a valid URL.`);
+    throw new ContractValidationError(`${label}.getUrl must be a valid URL.`);
   }
   if (
     (getUrl.protocol !== "https:" && getUrl.protocol !== "http:")
@@ -171,7 +172,7 @@ export function parseHostedWorkspaceSnapshotPreparedRestore(
     || getUrl.password.length > 0
     || getUrl.hash.length > 0
   ) {
-    throw new TypeError(`${label}.getUrl must be an HTTP(S) URL without credentials or a fragment.`);
+    throw new ContractValidationError(`${label}.getUrl must be an HTTP(S) URL without credentials or a fragment.`);
   }
   readHostedR2PresignedGetUrlExpiresAtMs(getUrl, label);
 
@@ -232,15 +233,15 @@ function readHostedR2PresignedGetUrlExpiresAtMs(
   const expires = getUrl.searchParams.get("X-Amz-Expires");
   const dateMatch = amzDate?.match(HOSTED_R2_PRESIGNED_AMZ_DATE_PATTERN) ?? null;
   if (!dateMatch) {
-    throw new TypeError(`${label}.getUrl must include a valid X-Amz-Date query parameter.`);
+    throw new ContractValidationError(`${label}.getUrl must include a valid X-Amz-Date query parameter.`);
   }
   if (!expires || !/^\d+$/u.test(expires)) {
-    throw new TypeError(`${label}.getUrl must include a valid X-Amz-Expires query parameter.`);
+    throw new ContractValidationError(`${label}.getUrl must include a valid X-Amz-Expires query parameter.`);
   }
 
   const expiresSeconds = Number.parseInt(expires, 10);
   if (!Number.isSafeInteger(expiresSeconds) || expiresSeconds <= 0) {
-    throw new TypeError(`${label}.getUrl X-Amz-Expires must be a positive safe integer.`);
+    throw new ContractValidationError(`${label}.getUrl X-Amz-Expires must be a positive safe integer.`);
   }
 
   const [
@@ -261,7 +262,7 @@ function readHostedR2PresignedGetUrlExpiresAtMs(
     Number.parseInt(secondText ?? "", 10),
   );
   if (!Number.isFinite(issuedAtMs) || formatHostedR2AmzDate(issuedAtMs) !== amzDate) {
-    throw new TypeError(`${label}.getUrl must include a valid X-Amz-Date query parameter.`);
+    throw new ContractValidationError(`${label}.getUrl must include a valid X-Amz-Date query parameter.`);
   }
 
   return issuedAtMs + expiresSeconds * 1000;
@@ -275,7 +276,7 @@ function formatHostedR2AmzDate(timestampMs: number): string {
 
 function requirePreparedRestoreString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.length === 0 || value !== value.trim()) {
-    throw new TypeError(`${label} must be a non-empty trimmed string.`);
+    throw new ContractValidationError(`${label} must be a non-empty trimmed string.`);
   }
   return value;
 }

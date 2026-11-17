@@ -855,15 +855,16 @@ letting that runner consume the row. The converged token- and deferred-capable
 runner bundle, including first-materialization mode acknowledgment, is therefore
 the hard rollback floor before Web promotion.
 
-The existing `murph.hosted-vault-share-delivery-deferred.v1` warning retains
-its route-level reason. A `replacement_no_active_share` warning may additionally
+The `murph.hosted-vault-share-delivery-deferred.v1` info event retains
+its route-level reason. A `replacement_no_active_share` event may additionally
 include the first settled store `replacementDeferralReason`: `inactive_access`,
 `source_workspace_changed`, or `conditional_update_not_applied`. The last value
 does not distinguish a revoked grant from a first-materialization race already
 completed by another writer. The store invokes its optional observer only after
 the transaction settles and isolates observer exceptions. The route emits at
-most its existing single warning, with no identities, payloads, versions, error
-objects, new queries, or response changes. Group the fixed reason fields in
+most one info event; the HTTP mapper suppresses the duplicate error log for this
+expected retryable deferral. No identities, payloads, versions, error objects,
+new queries, or response changes are added. Group the fixed reason fields in
 natural production failures; a quiet window does not prove delivery recovery.
 
 The rollout is consumer-first and reader-before-backfill. First deploy the
@@ -4946,14 +4947,14 @@ The existing `foreground-delivery-phase-started` row adds fixed optional
 numeric attribution for the interval after the most recent automation lane
 returns: `turnTimingPreForegroundMs` is the monotonic total,
 `turnTimingPreForegroundPreludeMs` covers the intervening foreground/maintenance
-classification, `turnTimingDeviceWakeProjectionMs` covers follow-up wake selection
-(including nested `turnTimingDeviceWakeModuleLoadMs` when configured),
+classification, `turnTimingDeviceWakeProjectionMs` covers follow-up wake selection,
 `turnTimingSystemMailboxWakeProjectionMs` covers the existing mailbox next-wake
 read, and `turnTimingProviderCleanupPlanningMs` covers the existing cleanup plan.
-The total includes adjacent unlabelled work; children are non-exhaustive and the
-module duration is nested within device projection. These numbers do not move
-the existing milestone or delivery anchors, add calls, flush logs, or change
-wake/cleanup behavior. A skipped module load is absent, not zero. The timings
+The total includes adjacent unlabelled work; children are non-exhaustive. Wake
+selection reads the local job store through a module that stays out of the
+deferred device-sync maintenance graph, so it never loads provider code on the
+reply path. These numbers do not move the existing milestone or delivery
+anchors, add calls, flush logs, or change wake/cleanup behavior. The timings
 are emitted only on the existing foreground milestone through its queued log
 owner. They are diagnostic attribution, not a latency improvement.
 

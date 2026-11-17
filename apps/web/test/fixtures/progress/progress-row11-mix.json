@@ -1,0 +1,475 @@
+{
+  "joinedOn": "2026-10-21",
+  "today": "2026-11-14",
+  "incomplete": false,
+  "measures": [
+    {
+      "id": "planks.seconds",
+      "label": "Planks",
+      "noun": "planked",
+      "icon": "planks",
+      "format": "duration",
+      "source": "games",
+      "pending": false,
+      "gameOn": true,
+      "needsPerDay": false,
+      "total": {
+        "value": 15120,
+        "text": "4h 12m",
+        "unit": "seconds"
+      },
+      "today": null,
+      "points": [
+        [
+          "2026-10-21",
+          0.0
+        ],
+        [
+          "2026-10-22",
+          1163.077
+        ],
+        [
+          "2026-10-24",
+          2326.154
+        ],
+        [
+          "2026-10-26",
+          3489.231
+        ],
+        [
+          "2026-10-28",
+          4652.308
+        ],
+        [
+          "2026-10-30",
+          5815.385
+        ],
+        [
+          "2026-11-01",
+          6978.462
+        ],
+        [
+          "2026-11-02",
+          8141.538
+        ],
+        [
+          "2026-11-04",
+          9304.615
+        ],
+        [
+          "2026-11-06",
+          10467.692
+        ],
+        [
+          "2026-11-08",
+          11630.769
+        ],
+        [
+          "2026-11-10",
+          12793.846
+        ],
+        [
+          "2026-11-12",
+          13956.923
+        ],
+        [
+          "2026-11-14",
+          15120.0
+        ]
+      ],
+      "projection": {
+        "value": 18000,
+        "label": "5h by Nov 20",
+        "on": "2026-11-20"
+      },
+      "ladder": {
+        "kind": "time",
+        "passed": [
+          {
+            "id": "whale-dive",
+            "name": "A whale's longest dive",
+            "drawing": "whale-dive",
+            "at": 13320,
+            "atText": "3 hr 42 min",
+            "blurb": "The longest dive by any mammal: a deep-diving whale, tracked in 2020.",
+            "where": null,
+            "on": "2026-11-13",
+            "toGo": null,
+            "short": "A whale's longest dive",
+            "tagline": "A long journey beneath the waves",
+            "shareAwardId": "award:planks.seconds:whale-dive"
+          },
+          {
+            "id": "concorde",
+            "name": "Concorde to London",
+            "drawing": "concorde",
+            "at": 10379,
+            "atText": "2 hr 53 min",
+            "blurb": "The fastest a passenger jet has flown New York to London, 1996.",
+            "where": null,
+            "on": "2026-11-09",
+            "toGo": null,
+            "short": "Concorde's cruising altitude",
+            "tagline": "Above the ordinary flight path",
+            "shareAwardId": "award:planks.seconds:concorde"
+          },
+          {
+            "id": "moonwalk",
+            "name": "The first moonwalk",
+            "drawing": "moonwalk",
+            "at": 9100,
+            "atText": "2 hr 31 min",
+            "blurb": "The first walk on the Moon, Apollo 11, 1969.",
+            "where": null,
+            "on": "2026-11-07",
+            "toGo": null,
+            "short": "The first moonwalk",
+            "tagline": "The first walk on another world",
+            "shareAwardId": "award:planks.seconds:moonwalk"
+          },
+          {
+            "id": "marathon",
+            "name": "The marathon world record",
+            "drawing": "marathon",
+            "at": 7170,
+            "atText": "1 hr 59 min",
+            "blurb": "The fastest anyone has run 26.2 miles, and the first record under 2 hours.",
+            "where": null,
+            "on": "2026-11-03",
+            "toGo": null,
+            "short": "A marathon",
+            "tagline": "A new mark for the marathon",
+            "shareAwardId": "award:planks.seconds:marathon"
+          },
+          {
+            "id": "gagarin",
+            "name": "Yuri Gagarin's flight",
+            "drawing": "gagarin",
+            "at": 6480,
+            "atText": "1 hr 48 min",
+            "blurb": "The first person in space, once around the Earth, 1961.",
+            "where": null,
+            "on": "2026-11-02",
+            "toGo": null,
+            "short": "Yuri Gagarin's flight",
+            "tagline": "The first person in space",
+            "shareAwardId": "award:planks.seconds:gagarin"
+          }
+        ],
+        "next": {
+          "id": "womens-plank",
+          "name": "Women's plank record",
+          "drawing": "womens-plank",
+          "at": 16211,
+          "atText": "4 hr 30 min",
+          "blurb": "The longest plank ever held by a woman, set in 2024 at age 58.",
+          "where": null,
+          "on": null,
+          "toGo": "18 min to go",
+          "short": "Women's plank record",
+          "tagline": "A remarkable hold from start to finish",
+          "shareAwardId": null
+        },
+        "goalPicked": false
+      },
+      "route": null,
+      "pics": []
+    },
+    {
+      "id": "squats.reps",
+      "label": "Squats",
+      "noun": "squats",
+      "icon": "squats",
+      "format": "count",
+      "source": "games",
+      "pending": false,
+      "gameOn": true,
+      "needsPerDay": false,
+      "total": {
+        "value": 1184,
+        "text": "1,184",
+        "unit": "reps"
+      },
+      "today": null,
+      "points": [
+        [
+          "2026-10-21",
+          0.0
+        ],
+        [
+          "2026-10-22",
+          91.077
+        ],
+        [
+          "2026-10-24",
+          182.154
+        ],
+        [
+          "2026-10-26",
+          273.231
+        ],
+        [
+          "2026-10-28",
+          364.308
+        ],
+        [
+          "2026-10-30",
+          455.385
+        ],
+        [
+          "2026-11-01",
+          546.462
+        ],
+        [
+          "2026-11-02",
+          637.538
+        ],
+        [
+          "2026-11-04",
+          728.615
+        ],
+        [
+          "2026-11-06",
+          819.692
+        ],
+        [
+          "2026-11-08",
+          910.769
+        ],
+        [
+          "2026-11-10",
+          1001.846
+        ],
+        [
+          "2026-11-12",
+          1092.923
+        ],
+        [
+          "2026-11-14",
+          1184.0
+        ]
+      ],
+      "projection": null,
+      "ladder": {
+        "kind": "height",
+        "passed": [
+          {
+            "id": "empire-state-building",
+            "name": "Empire State Building",
+            "drawing": "empire-state-building",
+            "at": 1250,
+            "atText": "1,250 ft",
+            "blurb": "New York's 1931 Art Deco tower, the world's tallest for nearly 40 years.",
+            "where": "New York City, USA",
+            "on": "2026-11-12",
+            "toGo": null,
+            "short": "Empire State",
+            "tagline": "An old favorite in the skyline",
+            "shareAwardId": "award:squats.reps:empire-state-building"
+          },
+          {
+            "id": "eiffel-tower",
+            "name": "Eiffel Tower",
+            "drawing": "eiffel-tower",
+            "at": 1083,
+            "atText": "1,083 ft",
+            "blurb": "Paris's iron tower, built for the 1889 World's Fair and meant to be temporary.",
+            "where": "Paris, France",
+            "on": "2026-11-10",
+            "toGo": null,
+            "short": "Eiffel Tower",
+            "tagline": "An iron tower above the rooftops",
+            "shareAwardId": "award:squats.reps:eiffel-tower"
+          },
+          {
+            "id": "golden-gate-bridge-towers",
+            "name": "Golden Gate Bridge towers",
+            "drawing": "golden-gate-bridge-towers",
+            "at": 746,
+            "atText": "746 ft",
+            "blurb": "The towers of San Francisco's orange suspension bridge, opened in 1937.",
+            "where": "San Francisco, USA",
+            "on": "2026-11-04",
+            "toGo": null,
+            "short": "Golden Gate towers",
+            "tagline": "Orange towers above the bay",
+            "shareAwardId": "award:squats.reps:golden-gate-bridge-towers"
+          }
+        ],
+        "next": {
+          "id": "one-world-trade-center",
+          "name": "One World Trade Center",
+          "drawing": "one-world-trade-center",
+          "at": 1776,
+          "atText": "1,776 ft",
+          "blurb": "New York's tallest tower, its height a nod to 1776, the year of independence.",
+          "where": "New York City, USA",
+          "on": null,
+          "toGo": "376 to go",
+          "short": "One World Trade",
+          "tagline": "A bright point above the harbor",
+          "shareAwardId": null
+        },
+        "goalPicked": false
+      },
+      "route": null,
+      "pics": []
+    },
+    {
+      "id": "h0123456789ab.days",
+      "label": "Lights out",
+      "noun": "nights",
+      "icon": "sleep",
+      "format": "days",
+      "source": "games",
+      "pending": false,
+      "gameOn": true,
+      "needsPerDay": false,
+      "total": {
+        "value": 17,
+        "text": "17",
+        "unit": "days"
+      },
+      "today": null,
+      "points": [
+        [
+          "2026-10-21",
+          0.0
+        ],
+        [
+          "2026-10-22",
+          1.308
+        ],
+        [
+          "2026-10-24",
+          2.615
+        ],
+        [
+          "2026-10-26",
+          3.923
+        ],
+        [
+          "2026-10-28",
+          5.231
+        ],
+        [
+          "2026-10-30",
+          6.538
+        ],
+        [
+          "2026-11-01",
+          7.846
+        ],
+        [
+          "2026-11-02",
+          9.154
+        ],
+        [
+          "2026-11-04",
+          10.462
+        ],
+        [
+          "2026-11-06",
+          11.769
+        ],
+        [
+          "2026-11-08",
+          13.077
+        ],
+        [
+          "2026-11-10",
+          14.385
+        ],
+        [
+          "2026-11-12",
+          15.692
+        ],
+        [
+          "2026-11-14",
+          17.0
+        ]
+      ],
+      "projection": {
+        "value": 20,
+        "label": "20 by Nov 17",
+        "on": "2026-11-17"
+      },
+      "ladder": null,
+      "route": null,
+      "pics": []
+    }
+  ],
+  "medals": [
+    {
+      "id": "plank-4h",
+      "kind": "total",
+      "gold": true,
+      "face": {
+        "number": "4h"
+      },
+      "title": "4 hours",
+      "detail": "planked",
+      "earnedOn": "2026-11-14",
+      "open": {
+        "page": "totals",
+        "measureId": "planks.seconds"
+      }
+    },
+    {
+      "id": "squat-1000",
+      "kind": "total",
+      "gold": false,
+      "face": {
+        "number": "1,000"
+      },
+      "title": "1,000",
+      "detail": "squats",
+      "earnedOn": "2026-11-14",
+      "open": {
+        "page": "totals",
+        "measureId": "squats.reps"
+      }
+    },
+    {
+      "id": "lights-15",
+      "kind": "days",
+      "gold": false,
+      "face": {
+        "delta": {
+          "icon": "sleep",
+          "text": "15"
+        }
+      },
+      "title": "15 nights",
+      "detail": "lights out by 11",
+      "earnedOn": "2026-11-14",
+      "open": {
+        "page": "totals",
+        "measureId": "h0123456789ab.days"
+      }
+    },
+    {
+      "id": "squat-world",
+      "kind": "landmark",
+      "gold": false,
+      "face": {
+        "drawing": "one-world-trade-center"
+      },
+      "title": "One World Trade",
+      "detail": "1,184 squats",
+      "earnedOn": "2026-11-14",
+      "open": {
+        "page": "totals",
+        "measureId": "squats.reps"
+      }
+    }
+  ],
+  "shelf": [
+    "plank-4h",
+    "squat-1000",
+    "lights-15",
+    "squat-world"
+  ],
+  "moments": [],
+  "picCount": 0
+}

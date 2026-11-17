@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { promises as fs } from "node:fs";
@@ -42,7 +43,7 @@ export function normalizeStoredAttachments<T extends StoredAttachment>(
   context = `stored attachments for capture "${captureId}"`,
 ): T[] {
   if (!Array.isArray(attachments)) {
-    throw new TypeError(`Expected canonical attachment array in ${context}.`);
+    throw new ContractValidationError(`Expected canonical attachment array in ${context}.`);
   }
 
   const normalized: T[] = [];
@@ -63,19 +64,19 @@ export function normalizeStoredAttachments<T extends StoredAttachment>(
         : null;
 
     if (!attachmentId) {
-      throw new TypeError(`Missing canonical "attachmentId" in ${attachmentContext}.`);
+      throw new ContractValidationError(`Missing canonical "attachmentId" in ${attachmentContext}.`);
     }
 
     if (!ordinal) {
-      throw new TypeError(`Missing canonical "ordinal" in ${attachmentContext}.`);
+      throw new ContractValidationError(`Missing canonical "ordinal" in ${attachmentContext}.`);
     }
 
     if (seenAttachmentIds.has(attachmentId)) {
-      throw new TypeError(`Duplicate canonical "attachmentId" "${attachmentId}" in ${context}.`);
+      throw new ContractValidationError(`Duplicate canonical "attachmentId" "${attachmentId}" in ${context}.`);
     }
 
     if (seenOrdinals.has(ordinal)) {
-      throw new TypeError(`Duplicate canonical "ordinal" ${ordinal} in ${context}.`);
+      throw new ContractValidationError(`Duplicate canonical "ordinal" ${ordinal} in ${context}.`);
     }
 
     seenAttachmentIds.add(attachmentId);

@@ -1,3 +1,4 @@
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import {
   parseHostedExecutionDeviceSyncNoDataOutreachRequest,
 } from "@murphai/device-syncd/hosted-runtime";
@@ -18,6 +19,6 @@ export const POST = withJsonError(async (request: Request) => {
   });
   return jsonOk(await configureHostedSourceNoDataOutreach({
     memberId: userId,
-    request: parseHostedExecutionDeviceSyncNoDataOutreachRequest(payload),
+    request: parseInput(payload, parseHostedExecutionDeviceSyncNoDataOutreachRequest),
   }));
 });

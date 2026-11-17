@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   requireObject,
   readNullableStringValue,
@@ -420,7 +421,7 @@ export function parseHostedEmailPublicBootstrapCallbackRequest(
     normalizeHostedEmailCallbackString(record.candidateAddress),
   );
   if (!isHostedEmailAddress(candidateAddress)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted email public bootstrap callback requires a valid candidateAddress.",
     );
   }
@@ -460,7 +461,7 @@ export function parseHostedEmailReplyAliasRegistrationCallbackResponse(
     normalizeHostedEmailCallbackString(record.aliasKey),
   );
   if (!address || !aliasKey) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted email reply alias registration callback response requires a valid address and alias key.",
     );
   }
@@ -491,7 +492,7 @@ export function parseHostedEmailRouteResolutionCallbackResponse(
 ): HostedEmailRouteResolutionCallbackResponse {
   const record = requireObject(value, "Hosted email route resolution callback response");
   if (!("userId" in record)) {
-    throw new TypeError("Hosted email route resolution callback response userId must be present.");
+    throw new ContractValidationError("Hosted email route resolution callback response userId must be present.");
   }
 
   return {
@@ -508,10 +509,10 @@ export function parseHostedEmailGroupRecipientsCallbackRequest(
   const record = requireObject(value, "Hosted email group recipients callback request");
   const groupId = normalizeHostedEmailCallbackString(record.groupId);
   if (!groupId) {
-    throw new TypeError("Hosted email group recipients callback request groupId must be present.");
+    throw new ContractValidationError("Hosted email group recipients callback request groupId must be present.");
   }
   if (record.expectedNewsletterAuthorizationProof !== undefined) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted email group recipients callback request uses a retired proof field.",
     );
   }
@@ -522,7 +523,7 @@ export function parseHostedEmailGroupRecipientsCallbackRequest(
     expectedGroupEmailAuthorizationProof !== null
     && !isHostedRuntimeGroupEmailAuthorizationProof(expectedGroupEmailAuthorizationProof)
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted email group recipients callback request expectedGroupEmailAuthorizationProof must be a SHA-256 hex digest.",
     );
   }
@@ -541,7 +542,7 @@ export function parseHostedEmailGroupRecipientsCallbackResponse(
   const record = requireObject(value, "Hosted email group recipients callback response");
   const entries = Array.isArray(record.recipients) ? record.recipients : null;
   if (!entries) {
-    throw new TypeError("Hosted email group recipients callback response recipients must be an array.");
+    throw new ContractValidationError("Hosted email group recipients callback response recipients must be an array.");
   }
 
   return {
@@ -552,7 +553,7 @@ export function parseHostedEmailGroupRecipientsCallbackResponse(
         normalizeHostedEmailCallbackString(recipient.address),
       );
       if (!memberId || !address) {
-        throw new TypeError("Hosted email group recipient must include a memberId and address.");
+        throw new ContractValidationError("Hosted email group recipient must include a memberId and address.");
       }
       return { address, memberId };
     }),
@@ -607,7 +608,7 @@ function normalizeHostedEmailCallbackString(value: unknown): string | null {
 
 function requireHostedEmailReplyAliasGeneration(value: number): number {
   if (!Number.isSafeInteger(value) || value < 0 || value > 2_147_483_647) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted email reply alias generation must be a non-negative 32-bit integer.",
     );
   }
@@ -618,7 +619,7 @@ function requireHostedEmailReplyAliasGeneration(value: number): number {
 function requireHostedEmailReplyAliasLookupKey(value: string): string {
   const aliasKey = normalizeHostedEmailReplyAliasLookupKey(value);
   if (!aliasKey) {
-    throw new TypeError("Hosted email reply alias lookup key must be 128-bit lowercase hex.");
+    throw new ContractValidationError("Hosted email reply alias lookup key must be 128-bit lowercase hex.");
   }
 
   return aliasKey;
@@ -627,7 +628,7 @@ function requireHostedEmailReplyAliasLookupKey(value: string): string {
 function requireHostedEmailGroupReplyAliasGroupId(value: string): string {
   const groupId = normalizeHostedEmailGroupReplyAliasGroupId(value);
   if (!groupId) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted email group reply alias group id must be a supported hosted group id.",
     );
   }
@@ -760,7 +761,7 @@ function encodeFixedBase36HexSegment(
 ): string {
   const normalized = normalizeFixedHexSegment(hex, hexLength);
   if (!normalized) {
-    throw new TypeError("Hosted email fixed-width hex segment is invalid.");
+    throw new ContractValidationError("Hosted email fixed-width hex segment is invalid.");
   }
 
   return BigInt(`0x${normalized}`)
@@ -936,7 +937,7 @@ function readHostedEmailCallbackBoolean(
   }
 
   if (typeof value !== "boolean") {
-    throw new TypeError(`${label} must be a boolean.`);
+    throw new ContractValidationError(`${label} must be a boolean.`);
   }
 
   return value;

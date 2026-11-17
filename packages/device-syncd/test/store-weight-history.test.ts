@@ -18,7 +18,7 @@ function fixture() {
       resource: "weight", resourceCategory: "timeseries", historicalBackfill: true,
       historicalUnresolvedProviderRecordIdentitiesJson: JSON.stringify({ v: 1, i: [] }),
       historicalUnresolvedProviderRecordCount: 0,
-      historicalBackfillVersion: 2, sourceProviderSlug: "apple_health_kit", sourceLifecycleEpoch: 1,
+      historicalBackfillVersion: 3, sourceProviderSlug: "apple_health_kit", sourceLifecycleEpoch: 1,
       historicalWindowStart: "2026-01-01T00:00:00.000Z", windowStart: "2026-01-01T00:00:00.000Z",
       windowEnd: "2026-06-01T00:00:00.000Z", historicalPullPending: true,
       ...overrides,
@@ -52,7 +52,7 @@ test.each([
     assert.equal(earlier.payload.historicalPullPending, true);
     assert.equal(store.listPendingJobsForAccount(account.id, 10).length, 1);
     const key = buildJunctionScheduleTimeHistoryDedupeKey({
-      sourceProviderSlug: "apple_health_kit", resource: "weight", sourceLifecycleEpoch: 1, coverageVersion: 2,
+      sourceProviderSlug: "apple_health_kit", resource: "weight", sourceLifecycleEpoch: 1, coverageVersion: 3,
     });
     assert.equal(earlier.dedupeKey, key);
     assert.deepEqual([...store.findActiveJobDedupeKeys({ accountId: account.id, provider: "junction", dedupeKeys: [key] })], [key]);
@@ -68,7 +68,7 @@ for (const [label, payload] of [
   ["malformed encoding", { historicalUnresolvedProviderRecordIdentitiesJson: '{' }],
   ["unknown encoding version", { historicalUnresolvedProviderRecordIdentitiesJson: '{"v":2,"i":[]}' }],
   ["unknown encoded evidence", { historicalUnresolvedProviderRecordIdentitiesJson: '{"v":1,"i":[],"cursor":"pending"}' }],
-  ["older generation", { historicalBackfillVersion: 1 }],
+  ["older generation", { historicalBackfillVersion: 2 }],
   ["unrecognized continuation state", { providerCursor: "synthetic-cursor" }],
   ["another lifecycle", { sourceLifecycleEpoch: 2 }],
   ["another source", { sourceProviderSlug: "garmin" }],

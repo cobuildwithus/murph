@@ -115,6 +115,10 @@ reply echoes that nonce and contains executable evidence from existing owners:
   still accepts legacy authorized responses for callers that do not need an
   audience; the runtime's scheduled-delivery boolean requirement and independent
   callback reauthorization are unchanged.
+- The group tool's request and result schemas parse synthetic recap video
+  witnesses: one part upload, a write that brings a candidate, a recovery that
+  asks for the accepted identity, and a result that names it. A Web that
+  predates the recap video fails closed with `recap_video`.
 
 Worker-only releases run both checks too: retaining an image does not prove that
 it lacks the audience requirement. Without an attested contract for that retained
@@ -812,9 +816,10 @@ Before deploying the Worker version that introduces
 - secrets `HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN_ID` and
   `HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN` for a dedicated PlanetScale
   token with only the organization-level `read_metrics_endpoints` permission;
-- secrets `HOSTED_DATABASE_ALERT_LINQ_CHAT_ID` and
-  `HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID` for two separate existing
-  direct operator chats whose sole external recipients are different; and
+- secret `HOSTED_DATABASE_ALERT_LINQ_CHAT_ID` for an existing direct operator
+  chat. A second operator chat (`HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID`,
+  a different recipient) is optional and currently retired: the deploy strips
+  it from the Worker (see `RETIRED_WORKER_SECRET_NAMES`); and
 - the already-required `LINQ_API_TOKEN`.
 
 Deploy Cloudflare only; no Web or database migration is involved. Wrangler
@@ -844,8 +849,8 @@ and production config must land together with the
 `OPENAI_AUTHORIZATION_ALERT_MONITOR` binding, and append-only SQLite migration
 `v6`. Do not alter the existing `*/5 * * * *` cron: this owner uses native
 Durable Object alarms. It adds no secret or recipient and reuses the existing
-`LINQ_API_TOKEN`, `HOSTED_DATABASE_ALERT_LINQ_CHAT_ID`, and
-`HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID`.
+`LINQ_API_TOKEN` and `HOSTED_DATABASE_ALERT_LINQ_CHAT_ID`, plus the optional
+secondary chat when one is configured.
 
 The trigger is limited to an authorized OpenAI upstream HTTP 401 or 403 after
 Worker key injection, and the singleton RPC contains only `{ status,
@@ -1731,20 +1736,30 @@ identity compatibility floor described in the migration section.
 
 The production smoke also runs one real `gpt-6-luna` model turn inside the deployed runner container (`HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN=true`, set by the deploy workflow's `live_model_turn` input, default on). The container runs a single non-interactive `codex exec` in a scratch workspace with the injected-credential placeholder; the Worker egress intercept authorizes exactly one deploy-smoke fenced `POST /v1/responses` request for `gpt-6-luna` and injects the real Worker-owned `OPENAI_API_KEY`, so the smoke proves the rollout target's OpenAI auth, account availability, quota, request compatibility, and network path without the raw key ever entering the container. The container accepts the smoke only when Codex JSONL reports the final agent output as exactly `OK`. Cost posture: each enabled behavioral smoke phase runs one bounded model turn per attempt, and a retried attempt (a container that never started, or a pre-rollout container) can run it again; an image release checks the isolated artifact before serving replacement and retains the existing post-rollout checks; the flag remains disabled in per-PR CI and hosted-local E2E.
 
-## Native prompt-cache defaults
+## Native prompt-cache retention
 
-Codex requests use the provider's default prompt-cache policy for every turn and
-compaction. No custom lifetime selection or scheduling label is sent. Supported
-current models default to thirty-minute cache writes; implicit caching and native
-cache keys remain unchanged. This removes the optional twelve-hour write premium
-and the native lifetime-accounting extension.
+The runner's separate prompt-cache patch sends `prompt_cache_options.ttl = "12h"`
+only for opted-in session conversation reply turns on supported managed-key
+models. The label is per turn, so tool continuations, the closing call after
+`finish_without_reply`, and same-thread reconsideration retain twelve hours.
+Scheduled (`automation-cron`), notification, operator, recap, idle and in-turn
+compaction, and unrecognized turns omit the option and use the provider's
+thirty-minute default. Implicit caching, native cache keys, and thread identity
+remain unchanged.
 
-Keep the existing Web and TypeScript twelve-hour usage readers: older runners and
-persisted usage records can still carry that subset during convergence or replay.
-No migration or historical repricing is needed. Stock native aggregate cache-write
-counts price new default-lifetime requests correctly. Deploy the matching runner
-image and verify the request diagnostics no longer contain an explicit cache TTL.
-Long-gap cache hits may change; no cache-hit or latency guarantee is made.
+The existing Web and TypeScript readers already preserve and price the native
+twelve-hour write subset; Web needs no change for this rollout. Build the patched
+runner base, then deploy the runner application with its TypeScript opt-in and
+both native patches. During mixed versions, an old native binary ignores the
+label and an old application omits it; both retain provider-default behavior.
+Rollback to the previous runner is compatible with the existing usage readers.
+After deploy, confirm the deployed image fingerprint and compare bounded usage
+aggregates: fresh reply rows with twelve-hour writes should carry
+`rawUsageJson.cacheWrite12hInputTokens` within aggregate `cacheWriteTokens`;
+cron rows should have no twelve-hour subset. Cache-hit-only reply rows may have
+no writes. No historical repricing or migration is needed. A thirty-minute request can read
+a twelve-hour prefix, while a twelve-hour request rewrites a thirty-minute
+prefix; compaction replaces that prefix.
 See the [OpenAI cache lifetime contract](https://developers.openai.com/api/docs/guides/prompt-caching#cache-lifetime).
 
 ## OpenAI-only inference cutover
@@ -1793,13 +1808,38 @@ Once the OpenAI-only Worker and runner consumers have converged, retire
 `VENICE_API_KEY` and `VERCEL_AI_API_KEY` through the existing protected Murph
 Cloud deployment. The ordinary Wrangler upload uses the canonical generated
 config and existing secret payload. If its binding inventory still contains a
-retired name, the existing deployment owner makes one native merge PATCH with
-`env: { VENICE_API_KEY: null, VERCEL_AI_API_KEY: null }` and the deployment's
+retired name, the existing deployment owner makes one native merge PATCH that
+nulls every name in `RETIRED_WORKER_SECRET_NAMES` and carries the deployment's
 message/tag. This follows the [official Wrangler version-secret owner](https://github.com/cloudflare/workers-sdk/blob/c82d96ba63a3b343b520e781a070889251868d9a/packages/wrangler/src/versions/secrets/index.ts#L74-L112):
 `PATCH /accounts/{accountId}/workers/workers/{name}/versions/latest` with
 `Content-Type: application/merge-patch+json`. Cloudflare preserves the remaining
 version code and configuration; the deploy helper does not reconstruct them or
 write temporary Wrangler configs. A clean uploaded inventory skips the patch.
+
+The same retirement set removes unused search/image bindings (`BRAVE_API_KEY`,
+`EXA_API_KEY`, `CLOUDFLARE_IMAGES_API_KEY`), direct Garmin/Oura/Strava/WHOOP
+client IDs and secrets, `STRAVA_WEBHOOK_SIGNING_SECRET`, the former
+`HOSTED_AI_USAGE_GATE_ALLOW_SIGNING_KEY_ID`/`HOSTED_AI_USAGE_GATE_ALLOW_SIGNING_SECRET`,
+`HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PUBLIC_JWK`,
+`HOSTED_EXECUTION_RECOVERY_RECIPIENT_PUBLIC_JWK`,
+`HOSTED_EXECUTION_SMALL_RUNNER_MEMBER_SHA256`, and
+`HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET`. The egress signing key has
+no runtime reader and is no longer a preflight or local harness requirement.
+
+Merge this public contract before removing the matching Murph Cloud workflow
+inputs. The renderer only emits names in the selected public required/optional
+sets, so old private inputs are inert with this contract. The reverse order
+fails the old public required-secret contract. After the private change, select
+a public commit containing this retirement when deploying; older public commits
+are incompatible. Remove the unused GitHub entries only after the workflows
+stop supplying them. No new configuration is required.
+
+Keep `DEVICE_SYNC_SECRET`, `HOSTED_EXECUTION_AUTOMATION_RECIPIENT_PRIVATE_JWK`,
+and `HOSTED_EXECUTION_PLATFORM_ENVELOPE_KEY`; retained-data safety for the legacy
+private envelope keys is unproven. Worker binding retirement does not revoke
+provider credentials. `scripts/upload-design-proof-image.ts` and the exercise
+image uploader still use their own `CLOUDFLARE_IMAGES_API_KEY`; preserve those
+credentials and the active `CLOUDFLARE_IMAGES_SIGNING_KEY` mapping.
 
 The [raw versions API](https://developers.cloudflare.com/api/resources/workers/subresources/scripts/subresources/versions/methods/list/)
 returns newest first, including inactive uploads. Before upload, latest must be
@@ -1866,11 +1906,9 @@ Set these in the selected GitHub environment as secrets:
 - `CLOUDFLARE_IMAGES_SIGNING_KEY`
 - `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK`
 - `HOSTED_DATABASE_ALERT_LINQ_CHAT_ID`
-- `HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID`
 - `HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN`
 - `HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN_ID`
 - `HOSTED_LOG_FINGERPRINT_SECRET`
-- `HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET`
 - `HOSTED_R2_PRESIGN_ACCESS_KEY_ID`
 - `HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY`
 - `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK`
@@ -2455,7 +2493,6 @@ export HOSTED_ASSISTANT_REASONING_EFFORT=low
 # HOSTED_CRYPTO_AUTHORITY_SIGN_PUBLIC_KEY_PEM,
 # HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK,
 # HOSTED_LOG_FINGERPRINT_SECRET,
-# HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET,
 # HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK, MURPH_DATA_API_KEY, OPENAI_API_KEY.
 pnpm --dir apps/cloudflare deploy:preflight
 pnpm --dir apps/cloudflare deploy:artifacts
@@ -2480,17 +2517,18 @@ which is also the final app-layer Dockerfile default. Using the pullable GHCR
 name avoids BuildKit treating the prepared base as a Docker Hub `library/*`
 image during local Wrangler container builds.
 The base Dockerfile builds the CLI from checksum-pinned Codex 0.169.0 source
-with `patches/codex-websocket-ack.patch`, preserving the matching release's Code Mode
-host and sandbox resources. The sole patch adds a 15-second first-frame
+with `patches/codex-websocket-ack.patch` and
+`patches/codex-prompt-cache-retention.patch`, preserving the matching release's Code Mode
+host and sandbox resources. The WebSocket patch adds a 15-second first-frame
 WebSocket timeout; subsequent frames retain the native stream idle timeout. Browser live voice and its native adapter
 are retired. The Web page, public and internal call admission, invocation media
 retention and Worker Live forwarding are removed; historical mailbox/usage
 readers remain. Roll out Web retirement before the new runner so old browser
 clients cannot start calls against the retired native interface.
 
-Both Dockerfile and patch enter the source fingerprint. The native package records
-the upstream revision and patch digest in `murph-source-revision`. Regenerate the
-patch against the exact source tag, run affected upstream
+The Dockerfile and both patches enter the source fingerprint. The native package records
+the upstream revision and combined patch digest in `murph-source-revision`. Regenerate the
+patches against the exact source tag, run affected upstream
 Rust tests and `pnpm --dir apps/cloudflare verify:codex-upstream-source`, and keep
 the npm helper checksum aligned. The permission-sandbox lane verifies the image's
 websocket fallback, provider conformance and sandbox boundaries. Cold builds need
@@ -2504,7 +2542,16 @@ Murph keeps permanent HTTP rejections terminal while preserving recovery for
 transport failures, timeouts, throttling, and server failures. The new
 `flexUnavailable`, `serverOverloaded`, and `policyCapacityUnavailable`
 classifications use Murph's existing five-minute capacity retry; none triggers
-connection recovery or a higher-priced service-tier fallback. `modelNotFound`
+connection recovery. Recap show writing is the owner-authorized exception to
+remaining on Flex indefinitely: its retained first-attempt time permits standard
+service on the next attempt at or after twenty minutes. A standard-tier capacity
+failure settles through existing failed-recap recovery instead of extending the
+retry budget. The existing system mailbox owns re-wakes, and existing session
+snapshots retain the recap's native binding. Media authority remains in the
+per-turn host-memory map, so a new attempt regenerates earlier media rather than
+trusting files or metadata retained in the writable vault. There is no durable
+media provenance receipt, in-process capacity wait or new invocation deadline.
+Other turns keep their existing tier policy. No Web schema or wire change is required. `modelNotFound`
 remains terminal even when provider prose contains a retry or rate-limit hint.
 Codex 0.169.0 defaults fresh native memory profiles to v2, but the shared hosted
 config still disables the memory feature, generation, and use. Its newly stable

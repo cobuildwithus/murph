@@ -10,7 +10,10 @@ import { setWorld } from "workflow/runtime";
 
 it("v5 resumes a v4 hook using its run's protocol and original deployment", async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "workflow-compatibility-"));
-  const world = createWorld({ dataDir: directory, recoverActiveRuns: false });
+  // The queue is mocked, so this World never authenticates a delivery. "read"
+  // skips the key file the default mode writes in the background, which would
+  // race the directory removal below.
+  const world = createWorld({ dataDir: directory, recoverActiveRuns: false, queueAuthKey: "read" });
   const now = new Date("2026-10-30T00:00:00.000Z");
   const run = WorkflowRunSchema.parse({
     runId: "wrun_synthetic_legacy",

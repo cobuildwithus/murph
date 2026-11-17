@@ -1,3 +1,4 @@
+import { RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import { after } from "next/server";
 
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
@@ -106,7 +107,7 @@ async function readHostedLinqWebhookRawBody(request: Request): Promise<string> {
       limitBytes: HOSTED_LINQ_WEBHOOK_MAX_BODY_BYTES,
     })).toString("utf8");
   } catch (error) {
-    if (error instanceof RangeError) {
+    if (error instanceof RequestBodyTooLargeError) {
       throw hostedOnboardingError({
         code: "LINQ_WEBHOOK_BODY_TOO_LARGE",
         httpStatus: 413,

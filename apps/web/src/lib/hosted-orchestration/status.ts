@@ -1,4 +1,7 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
+
+import { CloudflareHostedControlMalformedResponseError } from "@murphai/cloudflare-hosted-control/client";
 
 import {
   HOSTED_RUNTIME_CURRENT_WAIT_REASONS,
@@ -250,7 +253,9 @@ async function readHostedRunnerStatusIfAvailable(
   } catch (error) {
     return {
       runnerStatus: null,
-      unavailableReason: readCloudflareRunnerStatusUnavailableReason(error),
+      unavailableReason: error instanceof CloudflareHostedControlMalformedResponseError
+        ? "status_invalid"
+        : "request_failed",
     };
   }
 }
@@ -259,23 +264,6 @@ function readTemporalWorkflowQueryUnavailableReason(
   error: unknown,
 ): HostedTemporalStatusUnavailableReason {
   return isNotFoundErrorLike(error) ? "not_found" : "query_failed";
-}
-
-function readCloudflareRunnerStatusUnavailableReason(
-  error: unknown,
-): HostedCloudflareStatusUnavailableReason {
-  if (error instanceof SyntaxError) {
-    return "status_invalid";
-  }
-
-  if (
-    error instanceof TypeError
-    && error.message.startsWith("Hosted runner status")
-  ) {
-    return "status_invalid";
-  }
-
-  return "request_failed";
 }
 
 function isNotFoundErrorLike(error: unknown): boolean {
@@ -345,7 +333,7 @@ function readNullableMailboxPointer(
   const record = requireRecord(value);
   const lane = requireString(record.lane);
   if (!isHostedMailboxLane(lane)) {
-    throw new TypeError("Hosted runtime workflow mailbox pointer lane is invalid.");
+    throw new ContractValidationError("Hosted runtime workflow mailbox pointer lane is invalid.");
   }
 
   return {
@@ -474,7 +462,7 @@ function readNullableString(value: unknown): string | null {
 
 function requireSafeInteger(value: unknown): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value)) {
-    throw new TypeError("Hosted runtime workflow status integer is invalid.");
+    throw new ContractValidationError("Hosted runtime workflow status integer is invalid.");
   }
 
   return value;
@@ -482,7 +470,7 @@ function requireSafeInteger(value: unknown): number {
 
 function requireBoolean(value: unknown): boolean {
   if (typeof value !== "boolean") {
-    throw new TypeError("Hosted runtime workflow status boolean is invalid.");
+    throw new ContractValidationError("Hosted runtime workflow status boolean is invalid.");
   }
 
   return value;
@@ -490,7 +478,7 @@ function requireBoolean(value: unknown): boolean {
 
 function requireString(value: unknown): string {
   if (typeof value !== "string") {
-    throw new TypeError("Hosted runtime workflow status string is invalid.");
+    throw new ContractValidationError("Hosted runtime workflow status string is invalid.");
   }
 
   return value;
@@ -498,7 +486,7 @@ function requireString(value: unknown): string {
 
 function requireRecord(value: unknown): Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("Hosted runtime workflow status object is invalid.");
+    throw new ContractValidationError("Hosted runtime workflow status object is invalid.");
   }
 
   return value as Record<string, unknown>;

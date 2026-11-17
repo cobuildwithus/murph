@@ -1,3 +1,4 @@
+import { RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import {
   beforeAll,
   beforeEach,
@@ -96,7 +97,7 @@ describe("hosted labs internal callback route", () => {
 
   it("passes the small callback body cap and maps an oversize rejection to 413", async () => {
     mocks.requireHostedCloudflareCallbackJsonRequest.mockRejectedValueOnce(
-      new RangeError("Request body exceeded 2048 bytes."),
+      new RequestBodyTooLargeError(2048),
     );
     const request = jsonRequest(
       "https://join.example.test/api/internal/hosted-execution/labs/tool",

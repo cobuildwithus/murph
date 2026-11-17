@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createHmac, hkdfSync } from "node:crypto";
 
 import { normalizeNullableString } from "./shared";
@@ -47,7 +48,7 @@ export function buildHostedProviderAccountBlindIndex(input: {
   const normalizedExternalAccountId = normalizeNullableString(input.externalAccountId);
 
   if (!normalizedProvider || !normalizedExternalAccountId) {
-    throw new TypeError("Hosted provider account blind indexes require a provider and external account id.");
+    throw new ContractValidationError("Hosted provider account blind indexes require a provider and external account id.");
   }
 
   return `${BLIND_INDEX_PREFIX}_${createHmac(

@@ -1,4 +1,5 @@
 import "server-only";
+import { hostedOnboardingError } from "../hosted-onboarding/errors";
 
 import {
   isHostedTelegramConversationMessageWake,
@@ -55,9 +56,7 @@ export async function handleHostedRuntimeIMessageContactTool(input: {
       || !isHostedTelegramConversationMessageWake(wake)
       || wake.message.telegramMessage.threadIsDirect !== true
     ) {
-      throw new TypeError(
-        "iMessage contact assignment requires current direct Telegram input.",
-      );
+      throw hostedOnboardingError({ code: "INVALID_REQUEST", httpStatus: 400, message: "Invalid request." });
     }
     const identity = await readHostedMemberIdentity({
       memberId: input.memberId,

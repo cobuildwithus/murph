@@ -1,0 +1,19 @@
+{
+  "publishedOn": "2026-11-12",
+  "order": 300,
+  "item": {
+    "id": "recap-song-timing",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Recap songs sing your story",
+    "summary": "The theme song sings the lyrics Murph wrote for your week, and each word lights up on screen as it's sung. Shared links to a show keep both faces in the middle of the picture.",
+    "details": "Shows made before today keep their songs and light whole lines.",
+    "relevanceTags": [
+      "games",
+      "recaps"
+    ],
+    "sourcePullRequests": [
+      4888
+    ]
+  }
+}

@@ -1,3 +1,4 @@
+import { RequestInputError } from "@murphai/hosted-execution/request-input";
 import { emitHostedExecutionStructuredLog } from "@murphai/hosted-execution";
 import type {
   HostedCryptoDomain,
@@ -143,5 +144,10 @@ function trimRunnerOutboundCryptoContextPendingLoads(): void {
 }
 
 export function decodeRouteParam(value: string): string {
-  return decodeURIComponent(value);
+  try {
+    return decodeURIComponent(value);
+  } catch (error) {
+    if (error instanceof URIError) throw new RequestInputError("Invalid route parameter encoding.", { cause: error });
+    throw error;
+  }
 }

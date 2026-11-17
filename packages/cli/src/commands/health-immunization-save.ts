@@ -13,7 +13,6 @@ import {
 } from "@murphai/vault-usecases";
 import { Cli, z } from "incur";
 
-import { suggestedCommandsCta } from "./command-factory-primitives.js";
 import { createHealthEntityCrudGroup } from "./health-entity-command-registry.js";
 
 type ImmunizationAppendInput = Parameters<typeof appendImmunization>[0];
@@ -178,27 +177,7 @@ export function registerImmunizationCommands(
       });
       const saved = toImmunizationSaveResult(context.options.vault, result);
 
-      return context.ok(saved, {
-        cta: suggestedCommandsCta([
-          {
-            command: "immunization show",
-            args: {
-              id: saved.eventId,
-            },
-            description: "Show the saved immunization.",
-            options: {
-              vault: true,
-            },
-          },
-          {
-            command: "immunization list",
-            description: "List immunizations.",
-            options: {
-              vault: true,
-            },
-          },
-        ]),
-      });
+      return saved;
     },
   });
 

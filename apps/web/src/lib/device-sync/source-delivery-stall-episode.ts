@@ -7,6 +7,14 @@ import {
 import { readHostedSourceNoDataOutreachPolicy } from "./source-no-data-outreach-policy";
 
 const NOTICE_IDENTITY_PREFIX = "device-delivery-stalled:v1:";
+const NOTICE_MAILBOX_KIND = "assistant.notification.requested";
+/**
+ * Every episode's mailbox dedupe key starts with this. The mailbox row is the
+ * only record that an episode was already asked about, so retention expires
+ * its content as usual but keeps the row's identity.
+ */
+export const HOSTED_SOURCE_DELIVERY_STALL_MAILBOX_KIND = NOTICE_MAILBOX_KIND;
+export const HOSTED_SOURCE_DELIVERY_STALL_MAILBOX_DEDUPE_PREFIX = `${NOTICE_MAILBOX_KIND}:${NOTICE_IDENTITY_PREFIX}`;
 const SOURCE_ID_PATTERN = /^dcs_[A-Za-z0-9_-]{1,120}$/u;
 const EPISODE_DIGEST_PATTERN = /^[a-f0-9]{32}$/u;
 
@@ -63,6 +71,12 @@ export function buildHostedSourceDeliveryStallNoticeKey(
     .digest("hex")
     .slice(0, 32);
   return `${NOTICE_IDENTITY_PREFIX}${candidate.sourceId}:${digest}`;
+}
+
+export function buildHostedSourceDeliveryStallMailboxDedupeKey(
+  candidate: HostedSourceDeliveryStallNoticeCandidate,
+): string {
+  return `${NOTICE_MAILBOX_KIND}:${buildHostedSourceDeliveryStallNoticeKey(candidate)}`;
 }
 
 /**

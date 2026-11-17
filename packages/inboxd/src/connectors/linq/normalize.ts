@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import path from "node:path";
 
 import {
@@ -136,12 +137,12 @@ export async function toLinqChatMessage(input: {
   const createdAt = normalizeTextValue(event.created_at);
   const messageId = normalizeTextValue(data.message.id);
   if (!messageId) {
-    throw new TypeError("Linq message.received event is missing a stable message id.");
+    throw new ContractValidationError("Linq message.received event is missing a stable message id.");
   }
 
   const chatId = normalizeTextValue(data.chat_id);
   if (!chatId) {
-    throw new TypeError("Linq message.received event is missing a stable chat id.");
+    throw new ContractValidationError("Linq message.received event is missing a stable chat id.");
   }
 
   return {
@@ -222,12 +223,12 @@ async function toHostedLinqChatMessage(input: {
   const { message, downloadDriver = null, occurredAt, signal, attachmentDownloadTimeoutMs = null } = input;
   const messageId = normalizeTextValue(message.messageId);
   if (!messageId) {
-    throw new TypeError("Hosted Linq conversation wake is missing a stable message id.");
+    throw new ContractValidationError("Hosted Linq conversation wake is missing a stable message id.");
   }
 
   const chatId = normalizeTextValue(message.chatId);
   if (!chatId) {
-    throw new TypeError("Hosted Linq conversation wake is missing a stable chat id.");
+    throw new ContractValidationError("Hosted Linq conversation wake is missing a stable chat id.");
   }
 
   const parts = message.parts.map((part) => {
@@ -249,7 +250,7 @@ async function toHostedLinqChatMessage(input: {
       };
     }
 
-    throw new TypeError(`Unsupported hosted Linq part type: ${String((part as { type: unknown }).type)}`);
+    throw new ContractValidationError(`Unsupported hosted Linq part type: ${String((part as { type: unknown }).type)}`);
   }) as LinqMessagePart[];
 
   return {

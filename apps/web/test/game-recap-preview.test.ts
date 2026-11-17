@@ -11,10 +11,22 @@ function envelope() { return gameRecapEnvelopeSchema.parse({ version: 1, generat
   assets: [{ slot: "scene-0", kind: "image", recipeId: "synthetic-recipe", storageKey: "synthetic-key", references: [], hash: "b".repeat(64), mediaType: "image/jpeg", byteLength: 3 }] }); }
 afterEach(() => { vi.clearAllMocks(); vi.unstubAllEnvs(); });
 describe("cover-only preview capability", () => {
+  it("reads only the accepted cover hint and preserves historical long premises", async () => {
+    const current = envelope();
+    current.story.treatment = 'A historical show premise with more than sixty characters remains readable';
+    current.story.pages[0]!.blocks.push({ kind: 'scene', scene: { cast: ['Leo', 'Ava'], prompt: 'Synthetic scene', faceY: 0.35 } });
+    current.story.pages.push({ background: 'paper', blocks: [{ kind: 'scene', scene: { cast: ['Leo'], prompt: 'Synthetic scene', faceY: 0.8 } }] });
+    mocks.read.mockResolvedValue({ row: { wordsOwnerMemberId: 'synthetic-owner' }, envelope: current });
+    mocks.references.mockResolvedValue(true);
+    mocks.media.mockResolvedValue({ bytes: new Uint8Array([1, 2, 3]), hash: 'b'.repeat(64) });
+    expect(await readRecapCoverPreview('synthetic-game', token, now)).toEqual({ bytes: new Uint8Array([1, 2, 3]), faceY: 0.35 });
+    mocks.media.mockResolvedValue({ bytes: new Uint8Array([1, 2, 3]), hash: 'c'.repeat(64) });
+    expect(await readRecapCoverPreview('synthetic-game', token, now)).toBeNull();
+  });
   it("serves exactly the generated cover and denies wrong, expired, stale-source and hidden capabilities", async () => {
     const current = envelope(); mocks.read.mockResolvedValue({ row: { wordsOwnerMemberId: "synthetic-owner" }, envelope: current }); mocks.references.mockResolvedValue(true);
     mocks.media.mockResolvedValue({ bytes: new Uint8Array([1, 2, 3]), hash: "b".repeat(64) });
-    expect(await readRecapCoverPreview("synthetic-game", token, now)).toEqual(new Uint8Array([1, 2, 3]));
+    expect(await readRecapCoverPreview("synthetic-game", token, now)).toEqual({ bytes: new Uint8Array([1, 2, 3]) });
     expect(await readRecapCoverPreview("synthetic-game", "c".repeat(43), now)).toBeNull();
     expect(await readRecapCoverPreview("synthetic-game", token, new Date(current.preview.expiresAt))).toBeNull();
     current.preview.token = "c".repeat(43);

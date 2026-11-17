@@ -452,6 +452,23 @@ describe("hosted group usage funding", () => {
     expect(readHostedGroupUsageFundingLocatorRuntimeMemberId(null)).toBeNull();
   });
 
+  it("treats a missing or malformed signing key as our fault, not a foreign locator", () => {
+    const locator =
+      buildHostedGroupUsageFundingLocatorForRuntimeMember("member_group_runtime");
+
+    for (const key of [undefined, "not-a-key"]) {
+      if (key === undefined) delete process.env.HOSTED_APP_SESSION_HMAC_KEY;
+      else process.env.HOSTED_APP_SESSION_HMAC_KEY = key;
+      expect(() => readHostedGroupUsageFundingLocatorRuntimeMemberId(locator))
+        .toThrow("HOSTED_APP_SESSION_HMAC_KEY must be configured");
+      expect(() => normalizeHostedGroupUsageFundingLocator(locator))
+        .toThrow("HOSTED_APP_SESSION_HMAC_KEY must be configured");
+    }
+    // A locator signed under another valid key is still just not ours.
+    process.env.HOSTED_APP_SESSION_HMAC_KEY = Buffer.alloc(32, 8).toString("base64url");
+    expect(readHostedGroupUsageFundingLocatorRuntimeMemberId(locator)).toBeNull();
+  });
+
   it("resolves a verified locator to its exact container without a group row", async () => {
     const locator =
       buildHostedGroupUsageFundingLocatorForRuntimeMember("member_group_runtime");

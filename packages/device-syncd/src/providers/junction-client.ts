@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { ActivityClient, type GetActivityRequest } from "@junction-api/sdk/activity";
 import { BodyClient } from "@junction-api/sdk/body";
 import { ElectrocardiogramClient } from "@junction-api/sdk/electrocardiogram";
@@ -351,7 +352,7 @@ export class JunctionClient {
         && candidate.providerSlugRewrite === undefined
       )
     ) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "Junction provider filters cannot combine a compatibility provider with its legacy transport placeholder.",
       );
     }
@@ -413,7 +414,7 @@ export class JunctionClient {
   ): Promise<JunctionSignInToken> {
     const normalizedUserId = normalizeString(userId);
     if (!normalizedUserId) {
-      throw new TypeError("Junction sign-in token creation requires a Junction user id.");
+      throw new ContractValidationError("Junction sign-in token creation requires a Junction user id.");
     }
 
     const payload = await this.requestSdkResource<Record<string, unknown>>(
@@ -471,11 +472,11 @@ export class JunctionClient {
   }): Promise<void> {
     const providerSlug = normalizeJunctionProviderSlug(input.providerSlug);
     if (!providerSlug) {
-      throw new TypeError("Junction provider deregistration requires a provider slug.");
+      throw new ContractValidationError("Junction provider deregistration requires a provider slug.");
     }
     const userId = normalizeString(input.userId);
     if (!userId) {
-      throw new TypeError("Junction provider deregistration requires a Junction user id.");
+      throw new ContractValidationError("Junction provider deregistration requires a Junction user id.");
     }
     const providerTransport = requireJunctionSdkProviderTransport(providerSlug);
 
@@ -587,7 +588,7 @@ export class JunctionClient {
       canonicalizeJunctionProviderSlug(input.sourceProviderSlug),
     );
     if (!recordingId || !sourceProviderSlug) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "Junction ECG voltage requires summary recording and source identity.",
       );
     }
@@ -632,7 +633,7 @@ export class JunctionClient {
   async getWorkoutStream(input: JunctionWorkoutStreamInput): Promise<unknown> {
     const workoutId = normalizeString(input.workoutId);
     if (!workoutId) {
-      throw new TypeError("Junction workout stream requires a workout id.");
+      throw new ContractValidationError("Junction workout stream requires a workout id.");
     }
     return this.requestSdkResource<unknown>(
       "GET",
@@ -727,13 +728,13 @@ export class JunctionClient {
   ): Promise<JunctionBulkTriggerHistoricalPullResult> {
     const sourceProviderSlug = normalizeJunctionProviderSlug(input.sourceProviderSlug);
     if (!sourceProviderSlug) {
-      throw new TypeError("Junction historical pull triggers require a provider slug.");
+      throw new ContractValidationError("Junction historical pull triggers require a provider slug.");
     }
     const userIds = [...new Set(input.userIds
       .map((userId) => normalizeString(userId))
       .filter((userId): userId is string => typeof userId === "string"))];
     if (userIds.length === 0) {
-      throw new TypeError("Junction historical pull triggers require at least one user id.");
+      throw new ContractValidationError("Junction historical pull triggers require at least one user id.");
     }
 
     try {
@@ -807,7 +808,7 @@ export class JunctionClient {
       const payload = await requestPage(cursor);
       const maxRecords = input.maxRecords ?? MAX_COLLECTION_RECORDS;
       if (!Number.isSafeInteger(maxRecords) || maxRecords < 1) {
-        throw new TypeError("Junction collection record limit must be a positive integer.");
+        throw new ContractValidationError("Junction collection record limit must be a positive integer.");
       }
       for (const record of extractRecords(payload, input.resource)) {
         if (records.length >= maxRecords) {
@@ -874,7 +875,7 @@ export class JunctionClient {
           case "meal": return new MealClient(clientOptions).get(request, requestOptions);
           case "menstrual_cycle": return new MenstrualCycleClient(clientOptions).get(request, requestOptions);
           case "electrocardiogram": return new ElectrocardiogramClient(clientOptions).get(request, requestOptions);
-          default: throw new TypeError(`Unsupported Junction summary resource: ${input.resource}`);
+          default: throw new ContractValidationError(`Unsupported Junction summary resource: ${input.resource}`);
         }
       },
     );
@@ -966,7 +967,7 @@ export class JunctionClient {
           case "workout_duration": return client.workoutDurationGrouped(request, requestOptions);
           case "workout_swimming_stroke": return client.workoutSwimmingStrokeGrouped(request, requestOptions);
           case "electrocardiogram_voltage": return client.electrocardiogramVoltageGrouped(request, requestOptions);
-          default: throw new TypeError(`Unsupported Junction timeseries resource: ${input.resource}`);
+          default: throw new ContractValidationError(`Unsupported Junction timeseries resource: ${input.resource}`);
         }
       },
     );
@@ -1075,13 +1076,13 @@ export class JunctionClient {
       };
 
       try {
-        const payload = await invoke(clientOptions, {
+        const sdkPayload = await invoke(clientOptions, {
           abortSignal: requestAbort.signal,
           maxRetries: 0,
           timeoutInSeconds,
         });
         throwIfProviderRequestAborted(requestAbort.signal);
-        return payload as T;
+        return readJunctionWirePayload(observation.capturedResponse, sdkPayload) as T;
       } catch (error) {
         const providerError = unwrapJunctionSdkErrorCause(error);
         lastError = providerError;
@@ -1165,10 +1166,7 @@ export class JunctionClient {
           throw invalidJunctionSdkResponseError(legacyPayload.body);
         }
 
-        if (
-          error instanceof TypeError
-          || (error instanceof Error && error.name === "JsonError")
-        ) {
+        if (isJunctionSdkRequestConstructionError(error)) {
           throw deviceSyncError({
             code: "JUNCTION_SDK_REQUEST_INVALID",
             message: `Junction SDK could not construct ${options.endpointKind}.`,
@@ -1224,6 +1222,64 @@ function buildProviderApiError(input: {
       diagnostics: input.diagnostics,
     },
   );
+}
+
+/**
+ * Returns a fetched Junction response in the shape webhooks deliver: the wire
+ * (snake_case) keys every reader and importer knows, not the camelCase keys of
+ * the SDK's parsed copy.
+ *
+ * The parsed copy is consulted for one thing. Where the SDK decoded a
+ * timestamp, the value is that instant as a UTC ISO string. Junction writes
+ * instants as `+00:00`, which local-day ownership would read as the member's
+ * wall clock; the fetch path has always handed on the UTC form.
+ */
+function readJunctionWirePayload(
+  capture: JunctionSdkResponseCapture | null,
+  parsed: unknown,
+): unknown {
+  // A response without a body has nothing to rename.
+  if (!capture) {
+    return parsed;
+  }
+  const wire = readCapturedJunctionSdkSuccess(capture);
+  if (!wire.present) {
+    throw invalidJunctionSdkResponseError(wire.body);
+  }
+  return restoreJunctionWireKeys(wire.payload, parsed);
+}
+
+/** Walks both copies together: keys and values from the wire, timestamps from the parsed copy. */
+function restoreJunctionWireKeys(wire: unknown, parsed: unknown): unknown {
+  if (parsed instanceof Date) {
+    return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : wire;
+  }
+  if (Array.isArray(wire)) {
+    return Array.isArray(parsed)
+      ? wire.map((entry, index) => restoreJunctionWireKeys(entry, parsed[index]))
+      : wire;
+  }
+  const wireRecord = readPlainObject(wire);
+  const parsedRecord = readPlainObject(parsed);
+  if (!wireRecord || !parsedRecord) {
+    return wire;
+  }
+
+  let parsedByFoldedKey: Map<string, unknown> | undefined;
+  return Object.fromEntries(Object.entries(wireRecord).map(([key, value]) => {
+    if (Object.hasOwn(parsedRecord, key)) {
+      return [key, restoreJunctionWireKeys(value, parsedRecord[key])];
+    }
+    parsedByFoldedKey ??= new Map(Object.entries(parsedRecord).map(
+      ([parsedKey, parsedValue]) => [foldJunctionKeyCase(parsedKey), parsedValue],
+    ));
+    return [key, restoreJunctionWireKeys(value, parsedByFoldedKey.get(foldJunctionKeyCase(key)))];
+  }));
+}
+
+/** `calories_active` and `caloriesActive` fold to the same name. */
+function foldJunctionKeyCase(key: string): string {
+  return key.toLowerCase().replace(/[^a-z0-9]+/gu, "");
 }
 
 function unwrapJunctionSdkErrorCause(error: unknown): unknown {
@@ -1563,12 +1619,12 @@ function rewriteJunctionSdkProviderRequest(
 function normalizeRequiredProviderSlug(value: unknown): string {
   const provider = normalizeJunctionProviderSlug(value);
   if (!provider) {
-    throw new TypeError("Junction provider value is invalid.");
+    throw new ContractValidationError("Junction provider value is invalid.");
   }
   return provider;
 }
 
-function optionalJunctionSdkProviderTransport(
+export function optionalJunctionSdkProviderTransport(
   value: unknown,
 ): JunctionSdkProviderTransport | undefined {
   const normalized = normalizeJunctionProviderSlug(value);
@@ -1607,7 +1663,7 @@ function requireJunctionSdkProvider(value: string): JunctionSdkProvider {
   if (provider) {
     return provider;
   }
-  throw new TypeError(`Unsupported Junction provider slug: ${value}`);
+  throw new ContractValidationError(`Unsupported Junction provider slug: ${value}`);
 }
 
 function requireJunctionSdkOAuthProvider(value: string): JunctionSdkOAuthProvider {
@@ -1618,7 +1674,7 @@ function requireJunctionSdkOAuthProvider(value: string): JunctionSdkOAuthProvide
   if (provider) {
     return provider;
   }
-  throw new TypeError(`Unsupported Junction OAuth provider slug: ${value}`);
+  throw new ContractValidationError(`Unsupported Junction OAuth provider slug: ${value}`);
 }
 
 export function isAllowedJunctionLinkHost(
@@ -1771,11 +1827,14 @@ export function parseJunctionHistoricalPullSnapshot(
       const pulledResources = pulled
         ? Object.entries(pulled).flatMap(([rawResource, rawStatistics]) => {
             const resource = normalizeJunctionProviderSlug(rawResource);
-            const statistics = readPlainObject(rawStatistics);
-            const status = normalizeString(statistics?.status)?.toLowerCase();
-            if (!resource || !statistics || !status) {
+            if (!resource) {
               return [];
             }
+            // A listed resource stays listed when its statistics are
+            // malformed, so coverage waits on it instead of reading it as
+            // a resource Junction never pulls.
+            const statistics = readPlainObject(rawStatistics) ?? {};
+            const status = normalizeString(statistics.status)?.toLowerCase() ?? "unknown";
 
             const rawDaysWithData = statistics.days_with_data ?? statistics.daysWithData;
             const daysWithData = typeof rawDaysWithData === "number"
@@ -2050,7 +2109,7 @@ function extractBoundElectrocardiogramVoltageRecords(
     || !Number.isFinite(sessionEndMs)
     || sessionEndMs < sessionStartMs
   ) {
-    throw new TypeError("Junction ECG summary window was invalid.");
+    throw new ContractValidationError("Junction ECG summary window was invalid.");
   }
 
   const records: unknown[] = [];
@@ -2388,4 +2447,11 @@ function parseRetryAfterMs(value: string): number | null {
   }
 
   return Math.max(parsed - Date.now(), 0);
+}
+
+// The request could not be built: an unsupported resource our builders reject,
+// or a TypeError or JsonError the SDK raises before sending anything.
+function isJunctionSdkRequestConstructionError(error: unknown): boolean {
+  return error instanceof ContractValidationError || error instanceof TypeError
+    || (error instanceof Error && error.name === "JsonError");
 }

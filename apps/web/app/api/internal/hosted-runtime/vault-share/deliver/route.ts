@@ -1,3 +1,4 @@
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import {
   HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_FIELD,
 } from "@murphai/hosted-execution/routes";
@@ -70,9 +71,10 @@ export const POST = withJsonError(async (request: Request) => {
   const grantorMemberId = await requireHostedCloudflareCallbackRequest(request, {
     maxBodyBytes: HOSTED_VAULT_SHARE_DELIVER_BODY_LIMIT_BYTES,
   });
+  const effectDeadlineHeader = request.headers.get(HOSTED_VAULT_SHARE_EFFECT_DEADLINE_HEADER);
   const effectDeadlineAtEpochMs = Math.min(
-    parseHostedVaultShareEffectDeadlineAtEpochMs(
-      request.headers.get(HOSTED_VAULT_SHARE_EFFECT_DEADLINE_HEADER),
+    parseInput(effectDeadlineHeader, () =>
+      parseHostedVaultShareEffectDeadlineAtEpochMs(effectDeadlineHeader),
     ),
     Date.now() + HOSTED_VAULT_SHARE_DELIVERY_EFFECT_TIMEOUT_MS,
   );
@@ -91,7 +93,7 @@ export const POST = withJsonError(async (request: Request) => {
       retryable: true,
     });
   }
-  const body = parseHostedVaultShareDeliverRequest(rawBody);
+  const body = parseInput(rawBody, parseHostedVaultShareDeliverRequest);
 
   const continuation = rawBody[
     HOSTED_RUNTIME_VAULT_SHARE_DELIVER_CONTINUATION_FIELD
@@ -256,7 +258,7 @@ function createHostedVaultShareDeliveryDeferredError(
   replacementDeferralReason?: HostedVaultShareReplacementDeferralReason,
 ): Error {
   try {
-    console.warn("Hosted vault-share delivery deferred.", {
+    console.info("Hosted vault-share delivery deferred.", {
       schema: "murph.hosted-vault-share-delivery-deferred.v1",
       reason,
       ...(replacementDeferralReason === undefined ? {} : { replacementDeferralReason }),

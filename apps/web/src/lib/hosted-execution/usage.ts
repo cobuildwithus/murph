@@ -1,3 +1,5 @@
+import { parseInput, RequestInputError } from "@murphai/hosted-execution/request-input";
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   Prisma,
   type PrismaClient,
@@ -10,6 +12,7 @@ import type {
   HostedRuntimeUsageNoticeDeliveryTarget,
 } from "@murphai/hosted-execution/runtime-control";
 
+import { hostedOnboardingError } from "../hosted-onboarding/errors";
 import { getPrisma } from "../prisma";
 import { lockHostedMemberRow } from "../hosted-onboarding/shared";
 import {
@@ -149,6 +152,7 @@ export async function recordHostedRetellPhoneCallUsageTx(input: {
 }): Promise<void> {
   const record = buildHostedRetellPhoneCallUsageRecord(input);
   await persistHostedAiUsageRecordTx({
+    create: buildHostedAiUsageCreateData(record, input.memberId),
     memberId: input.memberId,
     record,
     tx: input.tx,
@@ -168,18 +172,18 @@ async function recordHostedAiUsageRecordsForAccounting(input: {
   usage: readonly unknown[];
 }): Promise<RecordHostedAiUsageAccountingResult> {
   const prisma = input.prisma ?? getPrisma();
-  const records = dedupeHostedAiUsageRecords(parseHostedAiUsageRecords(input.usage));
+  const records = parseInput(input.usage, () => dedupeHostedAiUsageRecords(parseHostedAiUsageRecords(input.usage)));
   const recordedIds: string[] = [];
   const limitNoticeCandidates: HostedAiUsageLimitNoticeCandidate[] = [];
   let platformAiUsageAllowedAfter: boolean | null = null;
 
   for (const record of records) {
-    const memberId = requireHostedAiUsageMemberId(record, input.trustedUserId ?? null);
+    const memberId = parseInput(record, () => requireHostedAiUsageMemberId(record, input.trustedUserId ?? null));
     const settlement = await runHostedAiUsageRecordTransaction(prisma, async (tx) => {
       let allowanceBeneficiaryMemberId: string | null = null;
       if (input.runtimeIdentity !== undefined) {
         if (input.runtimeIdentity !== null && input.runtimeIdentity.userId !== memberId) {
-          throw new TypeError("Hosted runtime usage member does not match its authority.");
+          throw new RequestInputError("Hosted runtime usage member does not match its authority.");
         }
         if (input.runtimeIdentity) {
           const [funding, recordedFunding] = await Promise.all([
@@ -201,6 +205,7 @@ async function recordHostedAiUsageRecordsForAccounting(input: {
         allowanceBeneficiaryMemberId = owner?.allowanceBeneficiaryMemberId ?? null;
       }
       const recordedBeneficiary = await persistHostedAiUsageRecordTx({
+        create: parseInput(record, () => buildHostedAiUsageCreateData(record, memberId)),
         allowanceBeneficiaryMemberId,
         memberId,
         record,
@@ -422,6 +427,7 @@ function logHostedAiUsageLimitNoticeDelivery(
 
 async function persistHostedAiUsageRecordTx(input: {
   allowanceBeneficiaryMemberId?: string | null;
+  create: Prisma.HostedAiUsageUncheckedCreateInput;
   memberId: string;
   record: AssistantUsageRecord;
   tx: Prisma.TransactionClient;
@@ -430,7 +436,7 @@ async function persistHostedAiUsageRecordTx(input: {
     where: {
       id: input.record.usageId,
     },
-    create: { ...buildHostedAiUsageCreateData(input.record, input.memberId), allowanceBeneficiaryMemberId: input.allowanceBeneficiaryMemberId ?? null },
+    create: { ...input.create, allowanceBeneficiaryMemberId: input.allowanceBeneficiaryMemberId ?? null },
     // Keep this identity-only branch non-empty so Prisma delegates the upsert
     // to PostgreSQL. Exact concurrent replays then serialize on the usage id
     // without changing any immutable usage data.
@@ -474,7 +480,7 @@ function dedupeHostedAiUsageRecords(
     const existing = recordsByUsageId.get(record.usageId);
 
     if (existing && !sameAssistantUsageRecord(existing, record)) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "Hosted AI usage recording contains conflicting records for one usage id.",
       );
     }
@@ -490,8 +496,9 @@ function parseHostedAiUsageRecords(
 ): AssistantUsageRecord[] {
   try {
     return usage.map((entry) => parseAssistantUsageRecord(entry));
-  } catch {
-    throw new TypeError("Hosted AI usage recording contains an invalid usage record.");
+  } catch (error) {
+    if (!(error instanceof ContractValidationError)) throw error;
+    throw new ContractValidationError("Hosted AI usage recording contains an invalid usage record.", { cause: error });
   }
 }
 
@@ -652,9 +659,7 @@ function assertStoredHostedAiUsageMatchesRecord(input: {
   ].filter((field): field is string => field !== null);
 
   if (mismatchedFields.length > 0) {
-    throw new TypeError(
-      `Hosted AI usage already exists with different immutable fields: ${mismatchedFields.join(", ")}.`,
-    );
+    throw hostedOnboardingError({ code: "INVALID_REQUEST", httpStatus: 400, message: "Invalid request." });
   }
 }
 
@@ -746,7 +751,7 @@ function normalizeHostedAiUsageJsonValue(
 
   if (typeof value === "number") {
     if (!Number.isFinite(value)) {
-      throw new TypeError(`Hosted AI usage ${label} must be a finite JSON number.`);
+      throw new ContractValidationError(`Hosted AI usage ${label} must be a finite JSON number.`);
     }
 
     return value;
@@ -766,14 +771,14 @@ function normalizeHostedAiUsageJsonValue(
     return normalizeHostedAiUsageJsonObject(value as Record<string, unknown>, label);
   }
 
-  throw new TypeError(`Hosted AI usage ${label} must be JSON-serializable.`);
+  throw new ContractValidationError(`Hosted AI usage ${label} must be JSON-serializable.`);
 }
 
 function normalizeHostedAiUsageDate(value: Date | string, label: string): Date {
   const date = value instanceof Date ? value : new Date(value);
 
   if (!Number.isFinite(date.getTime())) {
-    throw new TypeError(`Hosted AI usage ${label} must be a valid date.`);
+    throw new ContractValidationError(`Hosted AI usage ${label} must be a valid date.`);
   }
 
   return date;
@@ -784,13 +789,13 @@ function requireHostedAiUsageMemberId(
   trustedUserId: string | null,
 ): string {
   if (!record.memberId) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted AI usage is missing memberId and cannot be recorded into the hosted usage ledger.",
     );
   }
 
   if (trustedUserId && record.memberId !== trustedUserId) {
-    throw new TypeError(
+    throw new RequestInputError(
       "Hosted AI usage memberId does not match the authenticated hosted execution user.",
     );
   }

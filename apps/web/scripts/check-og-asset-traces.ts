@@ -41,6 +41,7 @@ const contactCardRouteTraceMarker =
 const requiredOgRouteTraceMarkers = [
   "server/app/approve/[approvalId]/opengraph-image",
   "server/app/connect/opengraph-image",
+  "server/app/connect/[source]/opengraph-image",
   "server/app/groups/fund/[joinCode]/opengraph-image",
   "server/app/r/[referralCode]/opengraph-image",
   "server/app/join/[inviteCode]/opengraph-image",

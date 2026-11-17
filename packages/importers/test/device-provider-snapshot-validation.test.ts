@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { ZodError } from "@murphai/contracts/zod-runtime";
 import { describe, expect, it } from "vitest";
 
@@ -33,7 +34,7 @@ describe("prepareDeviceProviderSnapshotImport", () => {
       });
       expect.unreachable("expected validation to fail");
     } catch (error) {
-      expect(error).toBeInstanceOf(TypeError);
+      expect(error).toBeInstanceOf(ContractValidationError);
       expect((error as Error).message).toBe("provider must be a string");
       expect((error as Error).cause).toBeInstanceOf(ZodError);
       expect(((error as Error).cause as ZodError).issues[0]).toMatchObject({
@@ -62,7 +63,7 @@ describe("prepareDeviceProviderSnapshotImport", () => {
       },
       provider: "whoop",
       snapshot,
-    })).rejects.toBeInstanceOf(TypeError);
+    })).rejects.toBeInstanceOf(ContractValidationError);
     await expect(prepareDeviceProviderSnapshotImport({
       completeSourceDay: {
         connectionId: "connection-test",
@@ -73,7 +74,7 @@ describe("prepareDeviceProviderSnapshotImport", () => {
       },
       provider: "whoop",
       snapshot,
-    })).rejects.toBeInstanceOf(TypeError);
+    })).rejects.toBeInstanceOf(ContractValidationError);
   });
 
   it("rejects malformed Oura collection fields instead of silently dropping them", async () => {

@@ -257,6 +257,18 @@ describe("hosted execution email callback routes", () => {
     });
   });
 
+  it("answers 500 when opening stored recipient authority fails", async () => {
+    mocks.readHostedGroupEmailRecipients.mockRejectedValue(new Error("Stored group email authorization grants are invalid."));
+    const response = await groupRecipientsRoute.POST(await createSignedCallbackRequest({
+      body: JSON.stringify({ groupId: "synthetic-group" }),
+      path: HOSTED_EMAIL_GROUP_RECIPIENTS_CALLBACK_PATH,
+      privateJwkJson: currentPrivateJwkJson,
+      userId: "synthetic-runtime",
+    }));
+    expect(response.status).toBe(500);
+    expect(await response.json()).toMatchObject({ error: { code: "INTERNAL_ERROR" } });
+  });
+
   it("keeps transient group-recipient authority unavailability retryable by status", async () => {
     mocks.readHostedGroupEmailRecipients.mockResolvedValue({
       status: "unavailable",

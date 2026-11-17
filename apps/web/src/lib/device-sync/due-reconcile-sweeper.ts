@@ -3,7 +3,8 @@ import { getPrisma } from "../prisma";
 import {
   formatHostedExecutionSafeLogErrorDetails,
 } from "../hosted-execution/logging";
-import { PrismaDeviceSyncControlPlaneStore } from "./prisma-store";
+import { PrismaDeviceSyncControlPlaneStore, type HostedDeviceSyncDueReconcileConnectionRecord } from "./prisma-store";
+import { postponeHostedDeviceSyncQuietReconcile } from "./quiet-member";
 import { preflightHostedScheduledReconcile } from "./scheduled-reconcile-preflight";
 import {
   appendHostedDeviceSyncScheduledReconcileWake,
@@ -37,6 +38,7 @@ export async function runHostedDeviceSyncDueReconcileSweeper(input: {
   deadlineMs?: number;
   logger?: HostedDeviceSyncDueReconcileSweeperLogger;
   now?: Date;
+  postponeQuiet?: typeof postponeHostedDeviceSyncQuietReconcile;
   requestWake?: HostedDeviceSyncScheduledReconcileWakeRequest;
   preflight?: typeof preflightHostedScheduledReconcile;
   store?: Pick<PrismaDeviceSyncControlPlaneStore, "listDueReconcileConnectionsForSweep">;
@@ -56,6 +58,7 @@ export async function runHostedDeviceSyncDueReconcileSweeper(input: {
     prisma: getPrisma(),
   });
   const requestWake = input.requestWake ?? appendHostedDeviceSyncScheduledReconcileWake;
+  const postponeQuiet = input.postponeQuiet ?? postponeHostedDeviceSyncQuietReconcile;
   const dueConnections = await store.listDueReconcileConnectionsForSweep({
     dueAt: now,
     limit: wakeLimit + 1,
@@ -80,6 +83,7 @@ export async function runHostedDeviceSyncDueReconcileSweeper(input: {
   let wakeAttempted = 0;
   let wakeFailed = 0;
   let wakeNotAccepted = 0;
+  let quietPostponed = 0;
   const preflightTotals = {
     attempted: 0, eligible: 0, avoidedWakes: 0, logicalCollectionReads: 0,
     decodedRecordCount: 0, decodedRecordBytes: 0, elapsedMs: 0,
@@ -92,9 +96,23 @@ export async function runHostedDeviceSyncDueReconcileSweeper(input: {
   };
 
   const stopProbes = abortAtHostedRecoveryDeadline(deadlineMs - PROBE_WAKE_RESERVE_MS);
+  // Quiet members reconcile once a day; recovery of orphaned dirt never waits.
+  const unlessQuiet = (reconcile: (connection: HostedDeviceSyncDueReconcileConnectionRecord) => Promise<void>) =>
+    async (dueConnection: HostedDeviceSyncDueReconcileConnectionRecord) => {
+      if (
+        dueConnection.orphanedDirtyRecoveryKey === undefined
+        && !stop.aborted
+        // A failed optional check keeps today's ordinary wake.
+        && await postponeQuiet({ connection: dueConnection, now }).catch(() => false)
+      ) {
+        quietPostponed += 1;
+        return;
+      }
+      await reconcile(dueConnection);
+    };
   const unstarted = await runHostedRecoveryBatch(
     selectedDueConnections,
-    async (dueConnection) => {
+    unlessQuiet(async (dueConnection) => {
       const canProbe = dueConnection.provider === "junction"
         && dueConnection.orphanedDirtyRecoveryKey === undefined;
       if (canProbe && stopProbes.aborted) {
@@ -181,7 +199,7 @@ export async function runHostedDeviceSyncDueReconcileSweeper(input: {
         errorMessage: "Hosted device-sync due reconcile sweeper wake was not accepted.",
         reason: wake.reason ?? null,
       });
-    },
+    }),
     true,
     stop,
   );
@@ -203,6 +221,7 @@ export async function runHostedDeviceSyncDueReconcileSweeper(input: {
     wakeNotAccepted,
     hasMoreDueConnections,
     preflight: preflightTotals,
+    quietPostponed,
   });
 
   return {

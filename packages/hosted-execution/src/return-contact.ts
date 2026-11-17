@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 export const HOSTED_RETURN_CONTACT_KINDS = [
   "text",
   "telegram",
@@ -26,5 +27,5 @@ export function parseHostedReturnContactKind(
   if (isHostedReturnContactKind(value)) {
     return value;
   }
-  throw new TypeError(`${label} must be null or one of text, telegram, email.`);
+  throw new ContractValidationError(`${label} must be null or one of text, telegram, email.`);
 }

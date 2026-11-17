@@ -66,6 +66,12 @@ import {
 import {
   createAssistantProductFeedbackRecorder,
 } from '../src/assistant/turn-progress.ts'
+import type { AssistantHostedToolContext } from '../src/assistant/hosted-tool-context.ts'
+import {
+  GAME_RULES_REPEAT_POINTER,
+  GAME_SETUP_CHAT_GUIDANCE,
+  MURPH_READ_GAME_TOOL,
+} from '../src/assistant-codex/dynamic-tools/games.ts'
 import {
   CODEX_CONTEXT_COMPACTION_PROGRESS_TEXTS,
   extractAssistantMessageFallback,
@@ -271,6 +277,52 @@ describe('assistant codex runtime', () => {it('rejects alternate current-turn id
 
     expect(firstPersistCanonicalWrite).not.toHaveBeenCalled()
     expect(secondPersistCanonicalWrite).toHaveBeenCalled()
+  })
+
+  it('returns game rules once per provider turn and again after an in-turn compaction', async () => {
+    const workingDirectory = await createTempDir('assistant-codex-game-rules-work-')
+    const groupTool: NonNullable<AssistantHostedToolContext['groupTool']> = {
+      request: vi.fn(async () => ({ action: 'read_game' as const, result: { status: 'ok' as const, state: { games: [] } } })),
+    }
+    const hostedToolContext: AssistantHostedToolContext = {
+      ...createHostedToolContext({ groupTool }),
+      currentUserActionScope: () => ({
+        acceptedInputIds: [`ain_${'a'.repeat(32)}`],
+        conversationId: 'conversation_group',
+        conversationScope: 'group',
+        inboundMailboxItemIds: ['mailbox_group'],
+        originSessionId: 'session_group',
+        recipientKey: 'recipient_group',
+      }),
+    }
+    const guidance: string[] = []
+    mockCodexProcess(async (child) => {
+      await initializeWarmTurn(child, 'thread-game-rules', 'turn-game-rules')
+      const read = async (id: number) => {
+        child.stdout.write(jsonLine({
+          id,
+          method: 'item/tool/call',
+          params: { arguments: {}, namespace: 'murph', tool: 'read_game', threadId: 'thread-game-rules', turnId: 'turn-game-rules' },
+        }))
+        const response = await waitForRpcResponse(child, id)
+        const items = asRecord(asRecord(response).result).contentItems
+        const text = Array.isArray(items) ? String(asRecord(items[0]).text) : ''
+        guidance.push(text.slice(text.indexOf('\n') + 1))
+      }
+      await read(91)
+      await read(92)
+      child.stdout.write(jsonLine({ method: 'thread/compacted', params: { threadId: 'thread-game-rules', turnId: 'turn-game-rules' } }))
+      await read(93)
+      writeCodexV2AssistantEventTurn({ child, finalMessage: 'Game read', threadId: 'thread-game-rules', turnId: 'turn-game-rules' })
+    })
+
+    await expect(executeCodexAppServerTurn({
+      dynamicTools: [MURPH_READ_GAME_TOOL],
+      hostedToolContext,
+      prompt: 'read the game',
+      workingDirectory,
+    })).resolves.toMatchObject({ finalMessage: 'Game read' })
+    expect(guidance).toEqual([GAME_SETUP_CHAT_GUIDANCE, GAME_RULES_REPEAT_POINTER, GAME_SETUP_CHAT_GUIDANCE])
   })
 
   it('trusts tagged starts and retains first notification timing across duplicates', async () => {

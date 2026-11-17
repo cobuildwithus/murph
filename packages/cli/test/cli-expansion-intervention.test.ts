@@ -15,8 +15,6 @@ import { requireData, runCli } from './cli-test-helpers.js'
 
 interface InterventionAddEnvelope {
   eventId: string
-  lookupId: string
-  ledgerFile: string
   created: boolean
   occurredAt: string
   kind: 'intervention_session'
@@ -43,7 +41,7 @@ interface ShowEnvelope {
     title: string | null
     occurredAt: string | null
     data: Record<string, unknown>
-    links: Array<{
+    links?: Array<{
       id: string
       kind: string
       queryable: boolean
@@ -135,7 +133,7 @@ function assertEntityExperimentLink(
   assert.equal(entity.data.experimentId, expectedExperimentId ?? undefined)
   assert.equal(entity.data.experimentSlug, expectedExperimentSlug)
   assert.equal(
-    entity.links.some((link) => link.id === expectedExperimentId),
+    (entity.links ?? []).some((link) => link.id === expectedExperimentId),
     expectedExperimentId !== null,
   )
 }
@@ -182,7 +180,7 @@ test.sequential(
       assert.equal(sauna.ok, true)
       assert.equal(sauna.meta?.command, 'intervention add')
       assert.match(requireData(sauna).eventId, /^evt_/u)
-      assert.equal(requireData(sauna).lookupId, requireData(sauna).eventId)
+      assert.equal('lookupId' in requireData(sauna), false)
       assert.equal(requireData(sauna).kind, 'intervention_session')
       assert.equal(requireData(sauna).interventionType, 'sauna')
       assert.equal(requireData(sauna).durationMinutes, 20)
@@ -193,7 +191,7 @@ test.sequential(
       const showSauna = await runCli<ShowEnvelope>([
         'event',
         'show',
-        requireData(sauna).lookupId,
+        requireData(sauna).eventId,
         '--vault',
         vaultRoot,
       ])
@@ -231,7 +229,7 @@ test.sequential(
       const showHbot = await runCli<ShowEnvelope>([
         'event',
         'show',
-        requireData(hbot).lookupId,
+        requireData(hbot).eventId,
         '--vault',
         vaultRoot,
       ])
@@ -242,7 +240,7 @@ test.sequential(
         requireData(showHbot).entity.data.regimenId,
         'reg_01JNV422Y2M5ZBV64ZP4N1DRB1',
       )
-      assert.deepEqual(requireData(showHbot).entity.links.map((link) => link.id), [
+      assert.deepEqual(requireData(showHbot).entity.links?.map((link) => link.id), [
         'reg_01JNV422Y2M5ZBV64ZP4N1DRB1',
       ])
 
@@ -827,7 +825,7 @@ test.sequential(
         experiments['sauna-two'],
       )
       assert.deepEqual(
-        new Set(requireData(editedRegimen).entity.links.map((link) => link.id)),
+        new Set(requireData(editedRegimen).entity.links?.map((link) => link.id)),
         new Set([
           experiments['sauna-two'],
           'reg_01JNV422Y2M5ZBV64ZP4N1DRB2',
@@ -855,7 +853,7 @@ test.sequential(
       assert.equal(shown.ok, true)
       assert.equal(requireData(shown).entity.data.experimentId, undefined)
       assert.equal(requireData(shown).entity.data.experimentSlug, undefined)
-      assert.deepEqual(requireData(shown).entity.links.map((link) => link.id), [
+      assert.deepEqual(requireData(shown).entity.links?.map((link) => link.id), [
         'reg_01JNV422Y2M5ZBV64ZP4N1DRB2',
       ])
     } finally {
@@ -1030,7 +1028,7 @@ test.sequential(
         vaultRoot,
       ])
       assert.equal(edited.ok, true)
-      assert.deepEqual(requireData(edited).entity.links.map((link) => link.id), [])
+      assert.deepEqual(requireData(edited).entity.links?.map((link) => link.id) ?? [], [])
       assert.equal(requireData(edited).entity.data.regimenId, undefined)
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })

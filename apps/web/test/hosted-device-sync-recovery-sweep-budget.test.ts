@@ -159,16 +159,24 @@ async function fixture({ wakeMs = 10, handoffMs = 10 } = {}) {
   const config = cryptoEnv.getHostedWebCryptoConfig();
   vi.spyOn(cryptoEnv, "getHostedWebCryptoConfig").mockReturnValue(config);
   const decrypt = config.gcpKms.decrypt.bind(config.gcpKms);
+  // Local KMS decrypts with WebCrypto on the thread pool, in real time. The
+  // drive loop waits for it, so a busy machine can't push the fake clock on.
+  let realWork = 0;
   vi.spyOn(config.gcpKms, "decrypt").mockImplementation(async (input) => {
     expect(input.signal).toBeInstanceOf(AbortSignal);
     events.push({ kind: "deferred-unwrap", id: "deferred", at: elapsed() });
-    return decrypt(input);
+    realWork++;
+    try {
+      return await decrypt(input);
+    } finally {
+      realWork--;
+    }
   });
   leaves.unwrap.mockImplementation(async ({ userId, signal }) => {
     await work("unwrap", userId, 40_000, signal);
     throw new Error("Synthetic unwrap unavailable");
   });
-  return { events, active, rows, writes, elapsed };
+  return { events, active, rows, writes, elapsed, realWork: () => realWork };
 }
 
 beforeAll(() => {
@@ -202,7 +210,11 @@ async function runRoute(f: Awaited<ReturnType<typeof fixture>>) {
   let responseAt = 0;
   const run = POST(new Request("https://example.test/recovery", { method: "POST", body: "{}" }))
     .then((value) => { response = value; activeAtResponse = { ...f.active }; responseAt = f.elapsed(); });
-  for (let t = 0; t < CALLER_HTTP_TIMEOUT_MS && !response; t += 25) await vi.advanceTimersByTimeAsync(25);
+  for (let t = 0; t < CALLER_HTTP_TIMEOUT_MS && !response; t += 25) {
+    // setImmediate is real here: it lets thread-pool callbacks land.
+    while (f.realWork() > 0) await new Promise((resolve) => setImmediate(resolve));
+    await vi.advanceTimersByTimeAsync(25);
+  }
   expect(response, "handler must join and return before the caller aborts").toBeDefined();
   expect(responseAt).toBeLessThan(CALLER_HTTP_TIMEOUT_MS);
   expect(responseAt).toBeLessThanOrEqual(BUDGET_MS + 100);

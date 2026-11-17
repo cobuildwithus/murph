@@ -1,3 +1,6 @@
+// This lane exercises unblocked planning; real risk ingress has separate PostgreSQL proof.
+vi.mock("@/src/lib/hosted-onboarding/linq-sender-block", () => ({ readHostedLinqSenderBlockWebhookResponse: vi.fn(async () => null) }));
+vi.mock("@/src/lib/hosted-onboarding/linq-group-risk-webhook", () => ({ observeHostedLinqGroupRiskWebhook: vi.fn(async () => undefined), recordHostedLinqGroupRosterEvidenceAfterCommit: vi.fn(async () => undefined) }));
 import { linqRoster } from "./support/linq-roster";
 import { HostedBillingStatus, Prisma } from "@prisma/client";
 import {
@@ -320,6 +323,7 @@ vi.mock("../src/lib/hosted-onboarding/linq-client", async (importOriginal) => {
   return {
     ...actual,
     getHostedLinqChatSummary: vi.fn(),
+    leaveHostedLinqChat: vi.fn().mockResolvedValue(undefined),
     sendHostedLinqChatMessage: vi.fn(),
   };
 });
@@ -417,6 +421,7 @@ beforeEach(() => {
     handles: [],
     isGroup: null,
   }));
+  vi.mocked(linqClient.leaveHostedLinqChat).mockReset().mockResolvedValue(undefined);
   vi.mocked(mailboxStore.readHostedMailboxItemByDedupeKey).mockReset();
   vi.mocked(mailboxStore.appendHostedMailboxEnvelopeTx).mockReset();
   vi.mocked(mailboxStore.appendHostedMailboxEnvelopeWithSourceMessageTx).mockReset();
@@ -649,6 +654,21 @@ function createAcceptedEditSourceInputId(
     secret: readHostedConversationAssistantIdentifierSecret(originalWake),
     userId: originalWake.userId,
   });
+}
+
+function groupLeaveFixture() {
+  const keys = new Set<string>();
+  return {
+    updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+    findFirst: vi.fn(async ({ where }: { where: { threadIdentityLookupKey: { in: string[] } } }) => {
+      const key = where.threadIdentityLookupKey.in.find(key => keys.has(key));
+      return key ? { threadIdentityLookupKey: key } : null;
+    }),
+    createMany: vi.fn(async ({ data }: { data: { threadIdentityLookupKey: string } }) => {
+      const count = keys.has(data.threadIdentityLookupKey) ? 0 : 1;
+      keys.add(data.threadIdentityLookupKey); return { count };
+    }),
+  };
 }
 
 function createPrisma(input: {
@@ -1130,6 +1150,9 @@ function createPrisma(input: {
     }
   });
   const prisma = {
+    hostedLinqGroupSighting: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
+    hostedLinqHandleBlock: { findFirst: vi.fn().mockResolvedValue(null) },
+    hostedLinqGroupLeave: groupLeaveFixture(),
     $executeRaw: vi.fn().mockResolvedValue(0),
     $queryRaw: vi.fn().mockImplementation(async (query: Prisma.Sql | TemplateStringsArray) => ("sql" in query ? query.sql : query.join("")).includes("complete_roster_observed_at") ? [{ completeRosterObservedAt: null }] : []),
     $transaction: transaction,
@@ -1554,6 +1577,9 @@ function createStatefulThreadRoutePrisma() {
     upsert: vi.fn().mockResolvedValue({}),
   };
   const prisma = {
+    hostedLinqGroupSighting: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
+    hostedLinqHandleBlock: { findFirst: vi.fn().mockResolvedValue(null) },
+    hostedLinqGroupLeave: groupLeaveFixture(),
     $executeRaw: executeRaw,
     $queryRaw: vi.fn().mockImplementation(async (query: Prisma.Sql | TemplateStringsArray) => ("sql" in query ? query.sql : query.join("")).includes("complete_roster_observed_at") ? [{ completeRosterObservedAt: null }] : []),
     $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) => callback(prisma)),
@@ -1905,6 +1931,17 @@ function planHostedLinqMessageEditedWebhookForTest(
 }
 
 describe("Linq message edit correction planning", () => {
+  it("rechecks departure under the chat lock before appending a prepared edit", async () => {
+    const prisma = createPrisma();
+    prisma.hostedLinqGroupLeave.findFirst.mockImplementation(async () => {
+      expect(prisma.$executeRaw).toHaveBeenCalled();
+      return { threadIdentityLookupKey: "synthetic-marker" };
+    });
+    await expect(planHostedLinqMessageEditedWebhookForTest({ event: buildLinqMessageEditedEvent(), prisma: prisma as never }))
+      .rejects.toMatchObject({ code: "HOSTED_LINQ_GROUP_LEFT" });
+    expect(mailboxStore.appendHostedMailboxEnvelopeWithSourceMessageTx).not.toHaveBeenCalled();
+  });
+
   it("reprepares once when the locked mailbox lineage changed", async () => {
     const prisma = createPrisma({
       routeContainerMemberId: "member_thread_container_123",
@@ -2799,6 +2836,19 @@ function restoreEnvValue(key: string, value: string | undefined): void {
 }
 
 describe("Linq explicit external-thread routing", () => {
+  it.each([false, true])("rechecks departure under the chat lock before message admission (reaction=%s)", async affirmativeReaction => {
+    const prisma = createPrisma();
+    prisma.hostedLinqGroupLeave.findFirst.mockImplementation(async () => {
+      expect(prisma.$executeRaw).toHaveBeenCalled();
+      return { threadIdentityLookupKey: "synthetic-marker" };
+    });
+    await expect(planHostedOnboardingLinqWebhookWithoutPreparedCrypto({
+      event: buildLinqMessageReceivedEvent({}), affirmativeReaction, prisma: prisma as never,
+    })).rejects.toMatchObject({ code: "HOSTED_LINQ_GROUP_LEFT" });
+    expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+    expect(prisma.hostedThreadRoute.update).not.toHaveBeenCalled();
+  });
+
   it("locks and rejects a suspended owner before creating a thread container", async () => {
     const prisma = createStatefulThreadRoutePrisma();
     vi.mocked(hostedMemberStore.readHostedMemberCoreState).mockResolvedValue({
@@ -3002,7 +3052,7 @@ describe("Linq explicit external-thread routing", () => {
       expect(domainRootStore.provisionHostedCryptoDomainRootsForUserTx).not.toHaveBeenCalled();
       expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
       expect(prisma.hostedThreadRoute.create).not.toHaveBeenCalled();
-      expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
+      expect(prisma.$executeRaw).toHaveBeenCalledTimes(2);
       expect(prisma.hostedThreadRoute.findMany).toHaveBeenCalledTimes(1);
       expect(prisma.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
         prisma.hostedThreadRoute.findMany.mock.invocationCallOrder[0]!,
@@ -3303,7 +3353,7 @@ describe("Linq explicit external-thread routing", () => {
     expect(domainRootStore.provisionPreparedHostedCryptoDomainRootsTx).not.toHaveBeenCalled();
     expect(prisma.hostedThreadContainer.create).not.toHaveBeenCalled();
     expect(prisma.hostedThreadRoute.create).not.toHaveBeenCalled();
-    expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
+    expect(prisma.$executeRaw).toHaveBeenCalledTimes(2);
   });
 
   it("creates and reuses a route container before routing Linq ingress", async () => {
@@ -3356,7 +3406,7 @@ describe("Linq explicit external-thread routing", () => {
       containerMemberId: "member_thread_container_123",
       created: true,
     });
-    expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
+    expect(prisma.$executeRaw).toHaveBeenCalledTimes(2);
 
     await expect(
       ensureHostedThreadContainerRouteTx({
@@ -3376,7 +3426,7 @@ describe("Linq explicit external-thread routing", () => {
     expect(hostedMemberStore.createHostedMember).toHaveBeenCalledTimes(1);
     expect(domainRootStore.provisionPreparedHostedCryptoDomainRootsTx).toHaveBeenCalledTimes(1);
     expect(domainRootStore.provisionHostedCryptoDomainRootsForUserTx).not.toHaveBeenCalled();
-    expect(prisma.$executeRaw).toHaveBeenCalledTimes(2);
+    expect(prisma.$executeRaw).toHaveBeenCalledTimes(4);
     expect(prisma.hostedThreadContainer.create).toHaveBeenCalledTimes(1);
     expect(prisma.hostedThreadContainer.create).toHaveBeenCalledWith({
       data: {
@@ -4655,6 +4705,30 @@ describe("Linq explicit external-thread routing", () => {
     expect(
       memberRoutingStore.readHostedMemberRoutingState,
     ).not.toHaveBeenCalled();
+    expect(hostedMemberStore.createHostedMember).not.toHaveBeenCalled();
+    expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
+  });
+
+  it("stays silent in an unbound Linq group larger than the setup cap", async () => {
+    const prisma = createPrisma();
+    vi.mocked(memberIdentityStore.lookupHostedMemberIdentityByPhoneNumber)
+      .mockResolvedValue(null);
+
+    const plan = await planHostedOnboardingLinqWebhook({
+      event: buildLinqMessageReceivedEvent({}),
+      pendingGroupRosterRejection: "oversized",
+      prisma: prisma as never,
+    });
+
+    // The same sender in a normal-sized group gets the setup offer above. An
+    // oversized room gets nothing: no room notice, no private recovery (its
+    // response reason is outside the visible-secondary set), and no route.
+    expect(plan.response).toMatchObject({
+      ignored: true,
+      ok: true,
+      reason: "group-roster-oversized",
+    });
+    expect(plan.desiredSideEffects).toEqual([]);
     expect(hostedMemberStore.createHostedMember).not.toHaveBeenCalled();
     expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
@@ -8453,7 +8527,7 @@ describe("Linq group chat auto-provision", () => {
       ok: true,
       reason: "wake-appended-thread-route",
     });
-    expect(prismaModule.getPrisma).toHaveBeenCalledTimes(1);
+    expect(prismaModule.getPrisma).toHaveBeenCalledTimes(2);
     expect(linqClient.getHostedLinqChatSummary).toHaveBeenCalledTimes(1);
     expect(linqClient.getHostedLinqChatSummary).toHaveBeenCalledWith({
       chatId: "chat_group_123",
@@ -8486,7 +8560,7 @@ describe("Linq group chat auto-provision", () => {
     for (const task of scheduledTasks) {
       await task();
     }
-    expect(prismaModule.getPrisma).toHaveBeenCalledTimes(2);
+    expect(prismaModule.getPrisma).toHaveBeenCalledTimes(3);
 
     expect(
       usageReferralMocks.reconcileHostedUsageReferralRewardAfterCommit,
@@ -8543,8 +8617,16 @@ describe("Linq group chat auto-provision", () => {
     });
   });
 
-  it("limits oversized-roster setup matching to the authenticated sender", async () => {
+  it.each([
+    { count: 32, outcome: "not_needed", failure: null, blocked: false },
+    { count: 33, outcome: "accepted", failure: null, blocked: false },
+    { count: 33, outcome: "unconfirmed", failure: hostedOnboardingError({ code: "LINQ_GROUP_LEAVE_UNCONFIRMED", httpStatus: 409, retryable: false, message: "synthetic conflict" }), blocked: false },
+    { count: 33, outcome: "timeout", failure: hostedOnboardingError({ code: "LINQ_GROUP_LEAVE_UNCONFIRMED", httpStatus: 504, retryable: false, message: "synthetic timeout" }), blocked: false },
+    { count: 3, outcome: "blocked participant", failure: null, blocked: true },
+  ])("enforces the setup cap at $count with provider outcome $outcome", async ({ count, failure, blocked }) => {
     const prisma = createStatefulThreadRoutePrisma();
+    // A small roster with a blocked handle is rejected exactly like an oversized one.
+    if (blocked) prisma.hostedLinqHandleBlock.findFirst.mockResolvedValue({ contactLookupKey: "synthetic-blocked" });
     let transactionOpen = false;
     prisma.$transaction.mockImplementation(async (callback: (tx: unknown) => Promise<unknown>) => {
       transactionOpen = true;
@@ -8582,7 +8664,7 @@ describe("Linq group chat auto-provision", () => {
       return linqRoster({
         handles: [
           { handle: "+15550000000", isMe: true, status: "active" },
-          ...Array.from({ length: 33 }, (_, index) => ({
+          ...Array.from({ length: count }, (_, index) => ({
             handle: `+1555${String(index).padStart(7, "0")}`,
             isMe: false,
             status: "active",
@@ -8591,44 +8673,47 @@ describe("Linq group chat auto-provision", () => {
         isGroup: true,
       });
     });
+    const tasks: Array<() => Promise<void>> = [];
     const response = await handleHostedOnboardingLinqWebhook({
+      scheduleAfterResponse: task => { tasks.push(task); },
       rawBody: "{}",
       signature: null,
       timestamp: null,
     });
 
+    if (count === 32) {
+      expect(response.reason).toBe("wake-appended-thread-route");
+      expect(prisma.hostedLinqGroupLeave.createMany).not.toHaveBeenCalled();
+      expect(linqClient.leaveHostedLinqChat).not.toHaveBeenCalled();
+      return;
+    }
+    if (failure) vi.mocked(linqClient.leaveHostedLinqChat).mockRejectedValue(failure);
+    expect(linqClient.leaveHostedLinqChat).not.toHaveBeenCalled();
+    for (const task of tasks) await task();
+    expect(linqClient.leaveHostedLinqChat).toHaveBeenCalledOnce();
+    vi.mocked(linqClient.getHostedLinqChatSummary).mockClear();
+    expect(await handleHostedOnboardingLinqWebhook({ rawBody: "{}", signature: null, timestamp: null }))
+      .toEqual({ ok: true, ignored: true, reason: "group-left" });
+    expect(linqClient.getHostedLinqChatSummary).not.toHaveBeenCalled();
+    expect(linqClient.leaveHostedLinqChat).toHaveBeenCalledOnce();
+    // Big mixed iMessage/RCS rooms reappear under a new chat id on each roster
+    // change, so a bound assistant or setup notice would repeat in every copy.
     expect(response).toMatchObject({
-      ignored: false,
+      ignored: true,
       ok: true,
-      reason: "wake-appended-thread-route",
+      reason: blocked ? "group-roster-blocked" : "group-roster-oversized",
     });
+    expect(prisma.hostedLinqGroupLeave.createMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ reason: blocked ? "blocked_participant" : "oversized" }),
+    }));
     expect(
       preparedThreadMocks.ensureHostedPreparedLinqThreadContainerRouteTx,
-    ).toHaveBeenCalledWith(expect.objectContaining({
-      participantMemberIds: ["member_owner_123"],
-      senderMemberId: "member_owner_123",
-    }));
+    ).not.toHaveBeenCalled();
+    // The oversized roster is detected before any per-handle member lookup.
     const rosterPhoneReads = prisma.hostedMemberIdentity.findMany.mock.calls
       .filter(([query]) => query.select?.phoneLookupKey === true);
-    expect(rosterPhoneReads).toHaveLength(1);
-    expect(rosterPhoneReads[0]?.[0]).toEqual({
-      select: {
-        memberId: true,
-        phoneLookupKey: true,
-      },
-      where: {
-        phoneLookupKey: { in: expect.any(Array) },
-      },
-    });
-    expect(prisma.hostedMemberIdentity.findMany).toHaveBeenCalledTimes(1);
-    expect(prisma.hostedMemberEmailAuthorization.findMany).not.toHaveBeenCalled();
-    const participantReconciles = prisma.$executeRaw.mock.calls
-      .map(([query]) => query as Prisma.Sql)
-      .filter((query) => typeof query.sql === "string" && query.sql.includes(
-        "input_participant(participant_member_id, handle_lookup_key)",
-      ));
-    expect(participantReconciles).toHaveLength(1);
-    expect(prisma.hostedThreadContainerParticipant.updateMany.mock.calls.filter(([query]) => query.data?.removedAt instanceof Date)).toHaveLength(0);
+    expect(rosterPhoneReads).toHaveLength(0);
+    expect(mailboxStore.appendHostedMailboxEnvelopeTx).not.toHaveBeenCalled();
   });
 
   it("retries the first group message when roster authority is unavailable", async () => {
@@ -9489,6 +9574,7 @@ describe("game bootstrap route attachment", () => {
     const tx = {
       $executeRaw: vi.fn(), $queryRaw: vi.fn(), hostedMember: {}, hostedThreadContainer: {},
       game: { findFirst: vi.fn().mockResolvedValue({ id: "game_sample" }) },
+      hostedLinqGroupLeave: { findFirst: vi.fn().mockResolvedValue(null) },
       hostedThreadRoute: { findMany: vi.fn().mockResolvedValue([]), create: vi.fn() },
     };
     const containerMemberId = "game_group_runtime";
@@ -9513,6 +9599,13 @@ describe("game bootstrap route attachment", () => {
     const { tx, prepared } = fixture();
     vi.mocked(tx.game.findFirst).mockResolvedValue(null);
     await expect(attachHostedThreadContainerBootstrapRouteTx({ gameId: "game_sample", prepared, prisma: tx })).rejects.toThrow("no longer owns");
+    expect(tx.hostedThreadRoute.create).not.toHaveBeenCalled();
+  });
+  it("rejects a prepared bootstrap receipt after local departure", async () => {
+    const { tx, prepared } = fixture();
+    tx.hostedLinqGroupLeave.findFirst.mockResolvedValue({ threadIdentityLookupKey: "synthetic-marker" } as never);
+    await expect(attachHostedThreadContainerBootstrapRouteTx({ gameId: "game_sample", prepared, prisma: tx }))
+      .rejects.toMatchObject({ code: "HOSTED_LINQ_GROUP_LEFT" });
     expect(tx.hostedThreadRoute.create).not.toHaveBeenCalled();
   });
 });

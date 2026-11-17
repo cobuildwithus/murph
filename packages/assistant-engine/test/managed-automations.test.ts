@@ -48,6 +48,7 @@ const managedAutomationMocks = vi.hoisted(() => ({
   getAssistantChannelAdapter: vi.fn(),
   listAutomations: vi.fn(),
   loadVault: vi.fn(),
+  readAssistantCronCanonicalRuntimeStore: vi.fn(),
   patchAutomation: vi.fn(),
   prepareExperimentLifecycleAutomations: vi.fn(),
   reconcileAutomationSupportSeriesNamespace: vi.fn(),
@@ -70,6 +71,10 @@ vi.mock('@murphai/core', () => ({
 vi.mock('../src/assistant/experiment-support-automations.ts', () => ({
   prepareExperimentLifecycleAutomations:
     managedAutomationMocks.prepareExperimentLifecycleAutomations,
+}))
+
+vi.mock('../src/assistant/cron/runtime-state.ts', () => ({
+  readAssistantCronCanonicalRuntimeStore: managedAutomationMocks.readAssistantCronCanonicalRuntimeStore,
 }))
 
 vi.mock('../src/assistant/cron/authoring.ts', () => ({
@@ -189,6 +194,7 @@ const legacyOnboardingFollowupInstructions = [
 ].join('\n')
 
 beforeEach(() => {
+  managedAutomationMocks.readAssistantCronCanonicalRuntimeStore.mockReset().mockResolvedValue({ version: 1, jobs: [] })
   managedAutomationMocks.prepareExperimentLifecycleAutomations
     .mockReset()
     .mockResolvedValue({ processedCount: 0, seeds: [] })
@@ -3344,5 +3350,82 @@ describe('managed Journal calendar read window', () => {
     for (const occurrence of [null, 'invalid']) {
       expect(buildMurphManagedJournalCalendarWindowInstructions(MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID, occurrence)).toBeNull()
     }
+  })
+})
+
+
+describe('morning Journal schedule spread', () => {
+  const seed = resolveMurphManagedAutomationSeed(MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID)!
+  const options = {
+    defaultRoute,
+    now: new Date('2026-11-17T07:00:00.000Z'),
+    runtimeEnv: { [HOSTED_RUNTIME_PROCESS_ENV]: '1' },
+    seeds: [seed],
+    vaultRoot,
+  }
+
+  it('uses a stable vault slot across dates and moved paths and reaches all 30 minute slots', async () => {
+    await applyMurphManagedAutomations(options)
+    expect(managedAutomationMocks.records.get(seed.automationId)?.schedule)
+      .toEqual({ kind: 'dailyLocal', localTime: '08:10' })
+    managedAutomationMocks.records.clear()
+    await applyMurphManagedAutomations({ ...options, vaultRoot: `${vaultRoot}-moved`, now: new Date('2026-11-18T07:00:00Z') })
+    expect(managedAutomationMocks.records.get(seed.automationId)?.schedule)
+      .toEqual({ kind: 'dailyLocal', localTime: '08:10' })
+
+    const slots = new Set<string>()
+    for (let index = 0; index < 600; index += 1) {
+      managedAutomationMocks.records.clear()
+      managedAutomationMocks.loadVault.mockResolvedValue({ metadata: { vaultId: `vault_journal_synthetic_${index}` } })
+      await applyMurphManagedAutomations(options)
+      const schedule = managedAutomationMocks.records.get(seed.automationId)?.schedule
+      expect(schedule?.kind).toBe('dailyLocal')
+      if (schedule?.kind !== 'dailyLocal') throw new Error('Expected daily Journal schedule')
+      expect(schedule.localTime).toMatch(/^08:[0-2][0-9]$/u)
+      slots.add(schedule.localTime)
+    }
+    expect(slots.size).toBe(30)
+  })
+
+  it('migrates an existing 08:00 record once without flapping', async () => {
+    await applyMurphManagedAutomations(options)
+    const record = managedAutomationMocks.records.get(seed.automationId)!
+    managedAutomationMocks.records.set(seed.automationId, { ...record, schedule: { kind: 'dailyLocal', localTime: '08:00' } })
+    managedAutomationMocks.upsertAutomation.mockClear()
+    await expect(applyMurphManagedAutomations(options)).resolves.toMatchObject({ updated: 1 })
+    expect(managedAutomationMocks.records.get(seed.automationId)?.schedule).toEqual(record.schedule)
+    await expect(applyMurphManagedAutomations(options)).resolves.toMatchObject({ updated: 0, skipped: 1 })
+    expect(managedAutomationMocks.upsertAutomation).toHaveBeenCalledTimes(1)
+  })
+
+  it.each(['paused', 'archived'] as const)('leaves %s records untouched even without a stable key', async (status) => {
+    await applyMurphManagedAutomations(options)
+    const record = { ...managedAutomationMocks.records.get(seed.automationId)!, status, schedule: { kind: 'dailyLocal' as const, localTime: '08:00' } }
+    managedAutomationMocks.records.set(seed.automationId, record)
+    managedAutomationMocks.loadVault.mockClear().mockRejectedValue(new Error('metadata unavailable'))
+    managedAutomationMocks.upsertAutomation.mockClear()
+    await expect(applyMurphManagedAutomations(options)).resolves.toEqual({ created: 0, updated: 0, skipped: 1 })
+    expect(managedAutomationMocks.records.get(seed.automationId)).toEqual(record)
+    expect(managedAutomationMocks.upsertAutomation).not.toHaveBeenCalled()
+    expect(managedAutomationMocks.loadVault).not.toHaveBeenCalled()
+  })
+
+  it.each([false, true])('skips and requests retry without a vault id (existing: %s)', async (existing) => {
+    if (existing) {
+      await applyMurphManagedAutomations(options)
+      const record = managedAutomationMocks.records.get(seed.automationId)!
+      managedAutomationMocks.records.set(seed.automationId, { ...record, schedule: { kind: 'dailyLocal', localTime: '08:00' } })
+    }
+    const before = managedAutomationMocks.records.get(seed.automationId)
+    for (const metadata of [{}, { vaultId: '   ' }]) {
+      managedAutomationMocks.loadVault.mockResolvedValue({ metadata })
+      managedAutomationMocks.upsertAutomation.mockClear()
+      await expect(applyMurphManagedAutomations(options)).resolves.toEqual({ created: 0, updated: 0, skipped: 1, stableKeyRetryNeeded: true })
+      expect(managedAutomationMocks.records.get(seed.automationId)).toEqual(before)
+      expect(managedAutomationMocks.upsertAutomation).not.toHaveBeenCalled()
+    }
+    const error = new Error('metadata unavailable')
+    managedAutomationMocks.loadVault.mockRejectedValue(error)
+    await expect(applyMurphManagedAutomations(options)).resolves.toMatchObject({ skipped: 1, stableKeyRetryNeeded: true, stableKeyFailure: error })
   })
 })

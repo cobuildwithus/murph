@@ -121,6 +121,14 @@ runtime consumers omit their unused JSON Schema conversion work.
 
 ## Route Surface
 
+Every HTTP fetch response, including private media, redirects, HEAD, missing
+routes and mapped errors, receives `X-Robots-Tag: noindex, nofollow, noarchive,
+nosnippet, noimageindex` at the outer Worker boundary. WebSocket upgrades pass
+through untouched. There is deliberately no `robots.txt` disallow: a crawler
+must be able to fetch a URL to see its noindex, and a disallowed URL can still
+be listed bare from a link elsewhere. These directives do not replace
+capability checks.
+
 Public routes:
 
 - `GET /`
@@ -213,6 +221,9 @@ Full Codex and CLI validation stays in deployment smoke. Its health receipt rema
 compatible with preceding Workers that still request a per-slot preflight; their
 legacy readiness query is ignored and runs the full smoke. Global eligibility
 imposes no ENAM health requirement.
+The coordinator checks every preparation and reproof's reported image pair against
+its own environment for that slot's release; a mismatch uses the existing drain
+and refill path, even if the slot's older Worker still considers the image ready.
 Periodic health rechecks leave ready slots claimable, including a target of one.
 They observe the existing process directly without the binding lifecycle lock or
 SDK auto-start. The coordinator advances the existing check deadline and applies
@@ -289,6 +300,27 @@ container records identify their application through `$containers.applicationId`
 An absent field is unknown, not `missing`; zero matches do not establish health.
 
 The phone-call start port is one bounded `web-control.worker` callback into `apps/web`; its protocol floor is 45 seconds even when the generic web-control timeout is 30 seconds, so the web-owned 40-second aggregate deadline finishes before the caller gives up. Deploy and prove convergence of this 45-second Cloudflare caller before deploying a web build with the 40-second deadline. The longer caller is backward compatible with older web builds; an old 30-second caller is not compatible with the 40-second web deadline, so Cloudflare cannot be rolled back below 45 seconds while that web build is active. Retell credentials and provider calls remain web-owned and are never forwarded into the runner.
+
+Custom connections use `connections.worker/v1/<id>/<generation>/<catalog>/mcp`.
+The POST-only relay reads member and write-fence authority from ContainerProxy,
+rejects absent or retiring authority, bounds request bodies to 256 KiB, and
+signs the matching Web gateway callback. Caller headers are discarded; only
+response status, body and content type return to the container. Web owns
+credentials, approval and current member/version admission.
+
+The invocation-local `customConnections` port lazily reads the allowlisted
+`POST /api/internal/custom-connections/manifest` once, at the first eligible
+personal ordinary hosted turn; old-Web 404 means an empty manifest. The
+non-empty manifest joins the assistant contract fingerprint, so catalog, generation
+and connection changes use the existing fresh-thread path; empty manifests preserve
+pre-feature thread identity. Only eligible non-empty manifests add MCP mounts.
+The hosted workspace permission profile denies the resolved Codex home, carving
+host-owned config out of writable temp roots. Empty MCP maps cannot clear ambient
+Codex configuration. Unknown manifest fields are stripped for Web/runtime deploy
+skew; all known-field bounds remain enforced. Public fetch rejects internal hosts on its
+initial URL and every redirect hop. Deploy compatible Web routes first, then
+Worker/runtime; keep the feature allowlist disabled until both converge.
+
 `murph.plan_usage` uses one allowlisted signed `web-control.worker` callback.
 Cloudflare transports and validates the strict result but owns no billing or
 usage truth and has no billing mutation authority. The current runner opts into
@@ -373,12 +405,10 @@ Required worker secrets:
 
 - `HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PRIVATE_JWK`
 - `HOSTED_DATABASE_ALERT_LINQ_CHAT_ID`
-- `HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID`
 - `HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN`
 - `HOSTED_DATABASE_ALERT_PLANETSCALE_SERVICE_TOKEN_ID`
 - `HOSTED_LOG_FINGERPRINT_SECRET`
 - `HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET`
-- `HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET`
 - `HOSTED_R2_PRESIGN_ACCESS_KEY_ID`
 - `HOSTED_R2_PRESIGN_SECRET_ACCESS_KEY`
 - `HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK`
@@ -635,8 +665,8 @@ resolved, neither operation posts; if only the secondary is unavailable, the
 healthy primary can still post. If the primary identity is known but its chat
 or line health is unsafe or indeterminate, a healthy distinct secondary can
 still post. A duplicate resolved recipient allows the primary operation only
-and leaves the alert pending. Distinct healthy recipients are sent through
-Linq's no-`from` auto-selection endpoint so a newly flagged line can fail over.
+and leaves the alert pending. Each healthy destination is sent into its
+configured chat, so the page leaves from the line preflight checked.
 Unhealthy or indeterminate delivery health suppresses that destination's POST
 and leaves the alert pending for the next paced attempt. This path does not
 share state or fallback behavior with the Resend-only hosted reply-latency
@@ -686,7 +716,7 @@ Optional execution vars and secrets:
 
 - `HOSTED_WEB_CALLBACK_SIGNING_KEY_ID` for callback key rotation metadata on the required signed hosted-web path
 - `HOSTED_EXECUTION_ALLOWED_RUNNER_SECRET_KEYS` and `HOSTED_EXECUTION_RUNNER_ENV_PROFILES` for execution-time secret forwarding
-- `HOSTED_ASSISTANT_PROVIDER=openai` for Codex hosted assistant execution through the Worker egress intercept. The standard deploy preflight requires Worker-owned `OPENAI_API_KEY` plus `HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET`; hosted Codex receives only an SDK placeholder, never the real OpenAI key. The existing signing secret remains required for Live resource references; provider credential minting is removed. Host Codex bridge/proxy env is not accepted
+- `HOSTED_ASSISTANT_PROVIDER=openai` for Codex hosted assistant execution through the Worker egress intercept. The standard deploy preflight requires Worker-owned `OPENAI_API_KEY`; hosted Codex receives only an SDK placeholder, never the real OpenAI key. Host Codex bridge/proxy env is not accepted
 - `HOSTED_R2_PRESIGN_ENDPOINT` can override the default account-scoped R2 S3 endpoint for direct snapshot URL generation. Production deploys must leave it as the account-scoped R2 HTTPS origin. Hosted-local dev, worker-only, and E2E profiles start a MinIO sidecar and inject local S3-compatible endpoints behind the local-only `HOSTED_R2_PRESIGN_ALLOW_LOCAL_ENDPOINT=1` guard; those local endpoint flags are not deploy vars.
 - `HOSTED_AI_USAGE_REPORTING_SECRET` is an optional Worker-owned platform
   secret. It must not be forwarded into the hosted runtime env; usage
@@ -994,6 +1024,21 @@ aggregates for 24 hours for known socket/DNS/connection/timeout codes versus
 unavailable; do not induce production failures or replay. Retain the field only
 while it has diagnostic value under that policy.
 
+### Internal OIDC rejections
+
+A Worker route that rejects Web's Vercel OIDC credential logs
+`reason = vercel-oidc-verification-failed` with `verificationFailure`: jose's
+stable error code, plus the failed claim for claim checks (for example
+`ERR_JWT_EXPIRED:exp`), or `missing_token`. A signed token that failed a claim
+check also logs `issuedSecondsAgo`, which separates a stale credential from
+clock skew. The token, its claims and the error message are never logged. The
+401 response is unchanged.
+
+`ERR_JWKS_TIMEOUT` means the Worker could not download Vercel's signing keys in
+time. Each Worker instance keeps the keys it downloaded for 24 hours, and
+fetches again early only when a token names a key it does not have, so only a
+fresh instance's first download can hit this.
+
 ### Web-control preflight rejections
 
 Ordinary runtime callers select a branded route descriptor from the same
@@ -1114,6 +1159,14 @@ or wait for a later `onStop` hook after that promise resolves. A native
 already-stopped target without another status read or destruction request.
 The immutable slot still enters retirement before cleanup and is scrubbed only
 after stop proof; ambiguous or failed cleanup keeps the existing target pinned.
+
+The SDK can deliver `onStop` after native destruction has cleared the current
+generation. Keep the destroy request for that diagnostic callback only, clearing
+it when consumed or a new start is observed. Exit 137 from `activity-expired` or
+`invoke-completed` cleanup with no active invocation logs at info; other nonzero
+stops remain warnings. Idle cleanup verifies drained child health and canonical
+ownership before `destroy()` sends SIGKILL; it does not rely on SIGTERM to save
+work after the invocation has returned.
 
 The native Cloudflare container is a warm per-user shell. Startup readiness is
 allowed up to 15 wall-clock seconds, including lifecycle-lock queue time. Once
@@ -1249,23 +1302,26 @@ See [DEPLOY.md](./DEPLOY.md) for the exact GitHub environment surface, lifecycle
 
 The runner base image owns the native Codex build. Its Dockerfile pins the upstream
 release archive, Rust builder, and matching npm helper package, applies
-`patches/codex-websocket-ack.patch`, and replaces only the CLI. The bundled Code Mode
-host, shell resources, and sandbox helper remain from the same release. The image
-records the upstream revision and patch SHA-256 in `murph-source-revision`.
+`patches/codex-websocket-ack.patch` and
+`patches/codex-prompt-cache-retention.patch`, and replaces only the CLI. The bundled
+Code Mode host, shell resources, and sandbox helper remain from the same release. The image
+records the upstream revision and combined patch SHA-256 in `murph-source-revision`.
 Cargo concurrency is capped at two jobs so a high CPU count does not expand the
 native build's memory demand; the upstream release optimization profile is kept.
 
-The sole native customization bounds the first WebSocket response frame to
+The WebSocket customization bounds the first WebSocket response frame to
 15 seconds while preserving the normal stream idle timeout after acknowledgement.
 This recovers silently dropped warm sockets without interrupting valid slow
-reasoning or compaction. Config loading and prompt caching use upstream defaults.
+reasoning or compaction. The separate cache patch opts conversation reply turns
+into twelve-hour retention and preserves lifetime usage; other turns and
+compaction keep provider defaults. Config loading uses upstream defaults.
 Isolated provider fixtures prove hosted behavior; local subscription journeys
 reuse personal configuration and are developer evidence, not isolated proof.
 
 Browser live voice and its native wire adapter are retired; the Worker denies
 public Live creation and attachment. Historical usage remains readable.
 
-`runner:docker:base` fingerprints both the complete Dockerfile and patch. Native
+`runner:docker:base` fingerprints the complete Dockerfile and both patches. Native
 helpers come directly from the matching checksum-pinned npm platform archive;
 neither helper extraction nor Rust compilation depends on the runtime Node image.
 A Node-only refresh changes the final image fingerprint while leaving native

@@ -1,6 +1,6 @@
 # Hosted account data deletion and vault export
 
-Last verified: 2026-09-10
+Last verified: 2026-11-16
 
 ## Purpose
 
@@ -53,7 +53,32 @@ owns its alias check and drain; it must not run in the predeploy Prisma lane.
 
 ## Export contract
 
-The Settings **Export vault** workflow downloads the browser-vault replica schema `murph.browser-vault-replica`.
+The Settings **Export vault** workflow downloads the browser-vault replica schema
+`murph.browser-vault-replica` with an additional `progressShares` array. Each share
+contains its opaque award ID, admission timestamp, current attempt status, closed
+failure code and a base64 JPEG only when ready. No storage key, source photo key,
+prompt or provider response is exported. Retired/failed/generating attempts export
+metadata only. Changing the profile photo does not remove a made share.
+
+The same authenticated, passkey-approved session endpoint emits newline-delimited
+JSON: the existing encrypted replica session first, followed by share records.
+The browser decrypts the replica as before and appends share records as Blob parts;
+it never assembles every image into one JavaScript string. No new endpoint,
+capability, stored export, provider call or upload path is added. This extends the
+current vault-only export; this checkout has no existing Progress-pic export.
+
+Progress selects at most 10,001 narrow share rows and refuses overflow before
+consuming the approval or loading media. Processing is serial, with one image in
+memory and one pooled transaction at a time. For N shares there is one collection
+query, N status reads and up to N post-decryption status reads; the existing
+session owner rechecks in a short transaction at each of those boundaries.
+There are at most N storage reads and N secure-box opens, outside transactions.
+Ready bytes use share-specific AAD and are cleared after encoding, including on
+failure. Privacy denial atomically retires rows, so a download racing denial or
+account deletion fails before releasing that image. Revoked health-processing
+consent still allows export of retained data without starting new processing,
+matching vault export. A missing object or failed read fails the download; it is
+never silently omitted. The route has a 300-second limit and no retry.
 
 The export includes:
 
@@ -141,7 +166,7 @@ The Settings vault export does not include:
 | Store | Delete mode | Export mode | Notes |
 | --- | --- | --- | --- |
 | Weekly game replies (`game_reply`) | Cascade from author profile or parent entry/game | Not included in the vault-only Settings export | Encrypted text or inline AAC audio, no transcript. Report evidence is reporter-owned and follows report lifetime. |
-| `prisma.hosted_member` | Live delete | Metadata/counts | Deletes the member row after explicit child cleanup. Prisma cascade remains a safety net. |
+| `prisma.hosted_member` | Live delete | Metadata/counts | Deletes the member row, including companion contact timestamps and latest client platform/version/build/OS/model, after explicit child cleanup. These diagnostics are omitted from the vault-only Settings export. Prisma cascade remains a safety net. |
 | `prisma.hosted_auth_record` | Member cascade | Not exported secret | Deletes member-bound login users, accounts and sessions. Independent pre-member verification/rate-limit records expire through bounded retention. No login record or bearer is exported. |
 | `prisma.hosted_member_approval_credentials` | Member cascade | Not exported secret | Deletes the encrypted approval credential aggregate and saved recovery-key digest. |
 | `prisma.hosted_sensitive_action_challenge` | Live delete | Not exported secret | Deletes hashed authorization challenges and durable Assistant approval decisions stored in the same member-scoped table. Raw tokens, signatures, action hashes, and approval material are never exported. |
@@ -184,6 +209,7 @@ The Settings vault export does not include:
 | `prisma.device_oauth_session` | Live delete | Metadata/counts | Deletes pending provider OAuth state. Admission-expiry, invalid-browser-proof, definitive first-delivery no-provider callbacks, and inactive-owner cleanup apply only to exact unconsumed rows. Every consumed callback state is retained across expiry, replay, suspension, and ambiguous provider outcomes until the exact epoch transfers atomically into a successful connection, durable cleanup owner, or confirmed no-authority terminal outcome. Terminal erasure fails closed while such a claim remains. |
 | `prisma.device_agent_session` | Live delete | Metadata/counts | Deletes local agent bearer-token hashes and agent session metadata. |
 | `prisma.companion_push_route` | Live delete | Not exported secret | Deletes the Apple push token, installation id, environment, and alert preference used for companion app and game notifications. Browser-vault export omits the route and token. |
+| `prisma.apple_health_reopen_push` | Live delete | Metadata/counts | Deletes the record of each "Open Murph" push sent after the phone stopped delivering Apple Health data: when data last arrived, the schedule step, the outcome, and when it was sent. Rows hold no health values or message content. |
 | `prisma.device_browser_assertion_nonce` | Live delete | Metadata/counts | Deletes outstanding browser assertion nonces. |
 | `prisma.clinical_record_connect_intent` | Live delete | Metadata/counts | Deletes short-lived member-bound Clinical Records claims; raw claims are never stored or exported. |
 | `prisma.clinical_record_oauth_session` | Live delete | Not exported secret | Deletes SMART state rows and encrypted PKCE verifiers; state, verifier, endpoint, and scope details are omitted from export. |

@@ -1,3 +1,4 @@
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import {
   parseHostedRuntimeIMessageContactToolRequest,
 } from "@murphai/hosted-execution/parsers";
@@ -19,6 +20,6 @@ export const POST = withJsonError(async (request: Request) => {
     });
   return jsonOk(await handleHostedRuntimeIMessageContactTool({
     memberId,
-    request: parseHostedRuntimeIMessageContactToolRequest(payload),
+    request: parseInput(payload, parseHostedRuntimeIMessageContactToolRequest),
   }));
 });

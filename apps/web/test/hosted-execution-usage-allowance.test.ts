@@ -1,3 +1,7 @@
+import { buildHostedLobPhysicalNoteUsageRecord } from "@/src/lib/hosted-execution/usage-lob";
+import { buildHostedLiveUsageRecord } from "@murphai/hosted-execution/assistant-usage";
+import { jsonError } from "@/src/lib/hosted-onboarding/http";
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { readHostedImageGenerationAccess } from "@/src/lib/hosted-onboarding/image-generation-access";
 import { HostedBillingStatus } from "@prisma/client";
 import {
@@ -5,6 +9,7 @@ import {
 } from "@murphai/hosted-execution/runtime-control";
 import {
   buildHostedGeminiVideoAnalysisUsageRecord,
+  buildHostedElevenLabsMusicUsageRecord,
   buildHostedTranscriptionUsageRecord,
   buildHostedXaiSearchUsageRecord,
   parseAssistantUsageRecord,
@@ -1514,6 +1519,29 @@ describe("hosted AI usage allowance pricing", () => {
       expect(() => priceHostedAiUsageForAllowance(malformed)).toThrow(
         "pricing is missing",
       );
+    }
+  });
+
+  it.each(["music_v2", "music_v2_5"] as const)("prices %s by generated duration without changing the rate or pricing version", model => {
+    const record = buildHostedElevenLabsMusicUsageRecord({
+      memberId: "member_123", model, durationMs: 45_000,
+      occurredAt: "2026-11-14T12:00:00.000Z", providerRequestId: "synthetic-music-request",
+    });
+    for (const modelSource of ["requested", "served"] as const) {
+      const usage = modelSource === "served" ? { ...record, requestedModel: null, servedModel: model } : record;
+      expect(priceHostedAiUsageForAllowance(parseAssistantUsageRecord(usage))).toMatchObject({
+        costUsdMicros: 112_500n, counted: true,
+        pricingSnapshot: {
+          model, modelSource,
+          audio: { durationMs: "45000", usdMicrosPerGeneratedMinute: "150000" },
+        },
+        pricingVersion: "elevenlabs-music-pricing-2026-06-24",
+      });
+      for (const unsupported of ["music_v1", "unknown-model"]) {
+        expect(() => priceHostedAiUsageForAllowance({
+          ...usage, requestedModel: unsupported, servedModel: unsupported,
+        })).toThrow("pricing is missing");
+      }
     }
   });
 
@@ -5075,7 +5103,7 @@ describe("operator-funded allowance accounting", () => {
     const tx = { hostedOperatorTask: { findUnique: vi.fn().mockResolvedValue({ memberId: "member_other" }) } };
     await expect(settleHostedAiUsageForAllowanceTx({
       memberId: "member_123", record: { ...BASE_USAGE_RECORD, operatorTaskId: `opt_${"a".repeat(64)}` }, tx: tx as never,
-    })).rejects.toThrow("authorized task");
+    })).rejects.toThrow("Invalid request.");
   });
 });
 
@@ -5100,8 +5128,84 @@ it.each([
   expect(priceHostedAiUsageForAllowance({ ...record, rawUsageJson: null }).costUsdMicros)
     .toBe(240_000n * numerator / denominator);
 });
+// Matches the two native Responses completions in assistant-codex-scripted-runtime:
+// native usage -> helpers.ts -> parseAssistantUsageRecord -> allowance pricing.
+it("prices the native reply lifetime record at the twelve-hour rate", () => {
+  const record = parseAssistantUsageRecord({
+    ...BASE_USAGE_RECORD, requestedModel: "gpt-6.1-sol", servedModel: "gpt-6.1-sol",
+    inputTokens: 200_000, cachedInputTokens: 100_000, cacheWriteTokens: 60_000,
+    outputTokens: 14, totalTokens: 200_014,
+    rawUsageJson: { cacheWriteInputTokens: 60_000, cacheWrite12hInputTokens: 40_000 },
+  });
+  expect(priceHostedAiUsageForAllowance(record).costUsdMicros).toBe(340_140n);
+});
+
 it("rejects a twelve-hour write subset exceeding aggregate writes", () => {
   expect(() => priceHostedAiUsageForAllowance({
     ...BASE_USAGE_RECORD, cacheWriteTokens: 10, rawUsageJson: { cacheWrite12hInputTokens: 11 },
   })).toThrow("Twelve-hour cache writes exceed total cache writes");
+});
+
+it.each([
+  { ...BASE_USAGE_RECORD, cacheWriteTokens: 10, rawUsageJson: { cacheWrite12hInputTokens: 11 } },
+  { ...BASE_USAGE_RECORD, providerName: "anthropic", tokenPricingBasis: "openai-flex" as const },
+])("marks settlement consistency checks after the member read: %#", async record => {
+  const update = vi.fn(async () => ({ count: 1 }));
+  const tx = createAllowanceTx({ executeRaw: vi.fn(async () => 1), hostedAiUsageUpdateMany: update });
+  const error = await settleHostedAiUsageForAllowanceTx({ memberId: "member_123", record, tx: tx as never }).catch(error => error);
+  const response = jsonError(error);
+  expect(response.status).toBe(400);
+  expect(await response.json()).toMatchObject({ error: { code: "INVALID_REQUEST", message: "Invalid request." } });
+  expect(tx.hostedMember.findUnique).toHaveBeenCalledOnce();
+  expect(update).not.toHaveBeenCalled();
+});
+
+it.each(["storage", "pricing", "operator-missing", "operator-storage"])("preserves settlement failure ownership: %s", async kind => {
+  const tx = { ...createAllowanceTx({ executeRaw: vi.fn(async () => 1), hostedAiUsageUpdateMany: vi.fn() }),
+    hostedOperatorTask: { findUnique: vi.fn().mockResolvedValue(null) } };
+  const failure = new ContractValidationError("Synthetic stored state failure.");
+  if (kind === "storage") tx.hostedMember.findUnique.mockRejectedValueOnce(failure);
+  if (kind === "operator-storage") tx.hostedOperatorTask.findUnique.mockRejectedValueOnce(failure);
+  const record = { ...BASE_USAGE_RECORD,
+    ...(kind.startsWith("operator") ? { operatorTaskId: `opt_${"a".repeat(64)}` } : {}),
+    ...(kind === "pricing" ? { requestedModel: "synthetic-unpriced", servedModel: "synthetic-unpriced" } : {}),
+  };
+  const error = await settleHostedAiUsageForAllowanceTx({ memberId: "member_123", record, tx: tx as never }).catch(error => error);
+  const response = jsonError(error);
+  expect(response.status).toBe(kind === "operator-missing" ? 400 : 500);
+  expect(await response.json()).toMatchObject({ error: { code: kind === "operator-missing" ? "INVALID_REQUEST" : "INTERNAL_ERROR" } });
+  expect(tx.hostedAiUsage.updateMany).not.toHaveBeenCalled();
+});
+
+it.each(["audio", "image", "lob", "tts", "music", "retell", "xai", "gemini", "live", "live-interval", "denied"])("rejects caller pricing inconsistency in %s settlement", async kind => {
+  const nullTokens = { cacheWriteTokens: null, cachedInputTokens: null, inputTokens: null,
+    outputTokens: null, reasoningTokens: null, totalTokens: null };
+  const memberId = "member_123", occurredAt = BASE_USAGE_RECORD.occurredAt;
+  let record: AssistantUsageRecord;
+  switch (kind) {
+    case "audio": record = { ...BASE_USAGE_RECORD, ...nullTokens, provider: "workers-ai", featureKey: "audio-transcription", requestedModel: "@cf/openai/whisper-large-v3-turbo", servedModel: null, usageExtractionSourcePath: "workers-ai.transcribe", usageExtractionVersion: "workers-ai-transcribe-v1", rawUsageJson: { durationMs: 60_000, audioBytes: 1024 } }; break;
+    case "image": record = buildAggregateOnlyOpenAiImageUsageRecord(); break;
+    case "lob": record = buildHostedLobPhysicalNoteUsageRecord({ memberId, occurredAt: new Date(occurredAt), physicalNoteId: "synthetic-note", providerLetterId: "synthetic-letter", providerCostUsdMicros: 100, providerPricingVersion: "synthetic-pricing" }); break;
+    case "tts": record = { ...BASE_USAGE_RECORD, ...nullTokens, provider: "elevenlabs", requestedModel: "eleven_multilingual_v2", servedModel: null, usageExtractionSourcePath: "elevenlabs.text_to_speech", rawUsageJson: { characterCount: 4 } }; break;
+    case "music": record = buildHostedElevenLabsMusicUsageRecord({ memberId, occurredAt, model: "music_v2", durationMs: 45_000, providerRequestId: "synthetic-music" }); break;
+    case "retell": record = buildHostedRetellPhoneCallUsageRecord({ memberId, occurredAt: new Date(occurredAt), combinedCostUsdMicros: 100, phoneCallId: "synthetic-call", providerCallId: "synthetic-provider-call" }); break;
+    case "xai": record = parseAssistantUsageRecord(HOSTED_XAI_SEARCH_USAGE_WIRE_FIXTURE.usage); break;
+    case "gemini": record = buildHostedGeminiVideoAnalysisUsageRecord({ memberId, occurredAt, model: "gemini-3.8-flash", providerRequestId: "synthetic-video", usage: { promptTokenCount: 320, candidatesTokenCount: 80, totalTokenCount: 400 } }); break;
+    case "live":
+    case "live-interval": record = buildHostedLiveUsageRecord({ memberId, occurredAt, sessionId: "synthetic-live", startDurationMs: 0, endDurationMs: 60_000 }); break;
+    default: record = { ...BASE_USAGE_RECORD, providerName: "anthropic" };
+  }
+  record = { ...record, tokenPricingBasis: "openai-flex" };
+  if (kind === "live-interval") record = { ...record, tokenPricingBasis: "standard", rawUsageJson: { startDurationMs: 1000, endDurationMs: 999 } };
+  const update = vi.fn(async () => ({ count: 1 }));
+  const tx = createAllowanceTx({ executeRaw: vi.fn(async () => 1), hostedAiUsageUpdateMany: update });
+  if (kind === "denied") tx.hostedMember.findUnique.mockResolvedValueOnce({ billingRef: null, billingStatus: HostedBillingStatus.not_started, suspendedAt: null, threadContainer: null } as never);
+  // The route's structural parser accepts these records; settlement owns the remaining constraints.
+  if (kind !== "lob" && kind !== "retell") record = parseAssistantUsageRecord(record);
+  const error = await settleHostedAiUsageForAllowanceTx({ memberId, record, tx: tx as never }).catch(error => error);
+  const response = jsonError(error);
+  expect(response.status).toBe(400);
+  expect(await response.json()).toMatchObject({ error: { code: "INVALID_REQUEST", message: "Invalid request." } });
+  expect(tx.hostedMember.findUnique).toHaveBeenCalledOnce();
+  expect(update).not.toHaveBeenCalled();
 });

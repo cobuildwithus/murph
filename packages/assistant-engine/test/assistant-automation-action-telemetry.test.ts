@@ -252,7 +252,11 @@ describe('private automation discriminant attribution', () => {
     expect(result.rpcResult.success).toBe(true)
     expect(result.runtimeIssueInputs ?? []).toEqual([])
     const { lookupId: _lookupId, ...payload } = response
-    expect(JSON.parse(result.rpcResult.contentItems[0]!.text!)).toEqual(payload)
+    // Inspect and patch keep the stored route and patches never create, so
+    // those defaults are omitted; a save keeps its non-default binding.
+    const { routeBinding: _routeBinding, created: _created, ...defaultsOmitted } = { created: false, ...payload }
+    expect(JSON.parse(result.rpcResult.contentItems[0]!.text!))
+      .toEqual(args.action === 'save' ? payload : defaultsOmitted)
     expect(JSON.stringify(result)).not.toContain('semanticRejection')
   })
 

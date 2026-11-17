@@ -7,6 +7,7 @@
  */
 
 export * from './assistant-automation.js'
+export { computeAssistantAutoReplyRetryAt, isAssistantProviderCapacityError } from './assistant/automation/auto-reply-retry.js'
 export * from './assistant-ask.js'
 export type {
   AssistantAutomationOperationScope,

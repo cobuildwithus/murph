@@ -1,3 +1,4 @@
+import { RequestInputError } from "@murphai/hosted-execution/request-input";
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 
@@ -18,6 +19,16 @@ const INSTALLATION_ID = "F47AC10B-58CC-4372-A567-0E02B2C3D479";
 const CAPTURE_ID = "a".repeat(64);
 
 describe("meal photo capture validation", () => {
+  it.each(["0000-01-01T00:00:00Z", "9999-12-31T23:59:59Z", "9999-12-31T23:59:59-01:00", "0000-01-01T00:00:00+01:00"])("bounds the normalized capture year before staging: %s", async capturedAt => {
+    const request = createUploadRequest(createMinimalJpeg());
+    request.headers.set("x-murph-captured-at", capturedAt);
+    if (capturedAt.endsWith("Z")) {
+      expect((await readAndValidateMealPhotoUpload(request)).capturedAt).toBe(new Date(capturedAt).toISOString());
+    } else {
+      await expect(readAndValidateMealPhotoUpload(request)).rejects.toBeInstanceOf(RequestInputError);
+    }
+  });
+
   it("normalizes the native UUID while keeping the enrollment body closed", () => {
     expect(parseMealPhotoCaptureEnrollmentRequest({
       appInstallationId: INSTALLATION_ID,
@@ -112,6 +123,22 @@ describe("meal photo capture validation", () => {
     ))).rejects.toMatchObject({
       code: "MEAL_PHOTO_CAPTURE_REQUEST_INVALID",
       httpStatus: 400,
+    });
+  });
+
+  it.each([assertMealPhotoCaptureRequestHasNoBody, readAndValidateMealPhotoUpload])("preserves unrelated body-reader RangeErrors: %s", async read => {
+    const error = new RangeError("Invalid array length");
+    const request = createUploadRequest(Buffer.from([0]));
+    Object.defineProperty(request, "body", { value: new ReadableStream({ start(controller) { controller.error(error); } }) });
+    await expect(read(request)).rejects.toBe(error);
+  });
+
+  it.each(["declared", "streamed", "under-reported"])("keeps body-prohibited errors distinct for %s overflow", async mode => {
+    const headers: HeadersInit = mode === "streamed" ? {} : { "content-length": mode === "declared" ? "2" : "0" };
+    const request = new Request("https://example.test/enrollment", { method: "PUT", body: "xx", headers });
+    await expect(assertMealPhotoCaptureRequestHasNoBody(request)).rejects.toMatchObject({
+      code: "MEAL_PHOTO_CAPTURE_REQUEST_INVALID", httpStatus: 400,
+      message: "Scoped meal-photo authority changes do not accept a request body.", retryable: false,
     });
   });
 

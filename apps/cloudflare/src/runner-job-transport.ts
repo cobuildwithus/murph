@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type {
   HostedAssistantWorkspaceRuntimeJobInput,
   HostedAssistantWorkspaceRuntimeJobResult,
@@ -86,7 +87,7 @@ function requireHostedExecutionWorkspaceJobKind(
     return HOSTED_EXECUTION_WORKSPACE_INVOCATION_JOB_KIND;
   }
 
-  throw new TypeError("Hosted execution runner job input.kind must be workspace-invocation.");
+  throw new ContractValidationError("Hosted execution runner job input.kind must be workspace-invocation.");
 }
 
 function parseHostedExecutionWorkspaceInvocationDiagnostics(
@@ -116,7 +117,7 @@ function parseHostedExecutionWorkspaceInvocationDiagnostics(
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object.`);
+    throw new ContractValidationError(`${label} must be an object.`);
   }
 
   return value as Record<string, unknown>;
@@ -128,7 +129,7 @@ function requireOptionalDerivedDiagnosticsKey(value: unknown, label: string): st
   }
 
   if (typeof value !== "string") {
-    throw new TypeError(`${label} must be a string.`);
+    throw new ContractValidationError(`${label} must be a string.`);
   }
 
   const normalized = value.trim();
@@ -137,7 +138,7 @@ function requireOptionalDerivedDiagnosticsKey(value: unknown, label: string): st
   }
 
   if (!HOSTED_WORKSPACE_SNAPSHOT_PATH_HASH_SECRET_PATTERN.test(normalized)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} must be a 64-character lowercase hexadecimal derived diagnostics key.`,
     );
   }

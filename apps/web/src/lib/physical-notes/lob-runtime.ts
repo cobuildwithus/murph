@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
 import { Buffer } from "node:buffer";
@@ -184,7 +185,7 @@ export function createLobPhysicalNoteRuntime(input: {
 export function renderPhysicalNoteHtml(artworkUrl: string): string {
   const url = new URL(artworkUrl);
   if (url.protocol !== "https:") {
-    throw new TypeError("Physical-note artwork URL must use HTTPS.");
+    throw new ContractValidationError("Physical-note artwork URL must use HTTPS.");
   }
   const escapedUrl = escapeHtmlAttribute(url.toString());
   return [
@@ -326,11 +327,11 @@ function appendLobRequestParams(url: URL, value: unknown): void {
     return;
   }
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("Lob request params must be an object.");
+    throw new ContractValidationError("Lob request params must be an object.");
   }
   for (const [key, entry] of Object.entries(value)) {
     if (typeof entry !== "string") {
-      throw new TypeError("Lob request params must be strings.");
+      throw new ContractValidationError("Lob request params must be strings.");
     }
     url.searchParams.append(key, entry);
   }
@@ -342,16 +343,16 @@ function rewriteLobPhysicalNoteMetadataFilter(url: URL): void {
     return;
   }
   if (values.length !== 1) {
-    throw new TypeError("Lob metadata filter must be unique.");
+    throw new ContractValidationError("Lob metadata filter must be unique.");
   }
   let metadata: unknown;
   try {
     metadata = JSON.parse(values[0] ?? "");
   } catch {
-    throw new TypeError("Lob metadata filter must be serialized JSON.");
+    throw new ContractValidationError("Lob metadata filter must be serialized JSON.");
   }
   if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
-    throw new TypeError("Lob metadata filter must be an object.");
+    throw new ContractValidationError("Lob metadata filter must be an object.");
   }
   const entries = Object.entries(metadata);
   if (
@@ -359,7 +360,7 @@ function rewriteLobPhysicalNoteMetadataFilter(url: URL): void {
     || entries[0]?.[0] !== PHYSICAL_NOTE_METADATA_KEY
     || typeof entries[0][1] !== "string"
   ) {
-    throw new TypeError("Lob metadata filter must select one physical note.");
+    throw new ContractValidationError("Lob metadata filter must select one physical note.");
   }
   url.searchParams.delete("metadata");
   url.searchParams.append(
@@ -394,7 +395,7 @@ function readLobRequestBody(value: unknown): string | undefined {
     return undefined;
   }
   if (typeof value !== "string") {
-    throw new TypeError("Lob request body must be serialized JSON.");
+    throw new ContractValidationError("Lob request body must be serialized JSON.");
   }
   return value;
 }
@@ -603,7 +604,7 @@ function escapeHtmlAttribute(value: string): string {
 function requireValue(value: string, label: string): string {
   const normalized = value.trim();
   if (!normalized) {
-    throw new TypeError(`${label} is required.`);
+    throw new ContractValidationError(`${label} is required.`);
   }
   return normalized;
 }

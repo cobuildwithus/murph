@@ -1,5 +1,7 @@
 import "server-only";
 
+import { readHostedLinqGroupLeave } from "../hosted-routing/linq-group-leave";
+
 import {
   buildTelegramThreadTarget,
   extractTelegramMessage,
@@ -25,13 +27,15 @@ import {
   parseHostedLinqWebhookEvent,
   sendHostedLinqChatMessage,
 } from "./linq";
-import { getHostedLinqChatSummary } from "./linq-client";
+import {
+  getHostedLinqChatSummary,
+  isHostedLinqIdempotencyKeyReuseFailure,
+} from "./linq-client";
 import {
   claimHostedLinqSignupLinkReminderNotice,
   releaseHostedLinqSignupLinkReminderNoticeClaim,
   resolveHostedLinqDayUtc,
 } from "./linq-daily-state";
-import { buildHostedLinqGroupSetupEffectId } from "./linq-group-setup";
 import {
   createHostedLinqParticipantContactLookupKeyReadCandidates,
   normalizeHostedLinqParticipantContactValue,
@@ -197,20 +201,15 @@ export function withHostedVisibleSecondaryLinqOutcomes(
     }
 
     const prisma = input.prisma ?? dependencies.getPrisma();
-    const recognizedSender = (
-      groupSetupAlreadySent
-      || HOSTED_LINQ_REASONS_REQUIRING_RECOGNIZED_SENDER.has(reason)
-    )
-      ? await readHostedLinqSender({
-          participantContact: context.participantContact,
-          prisma,
-          dependencies,
-        })
-      : null;
+    if (await readHostedLinqGroupLeave({ chatId: context.summary.chatId, prisma })) return { ok: true, ignored: true, reason: "group-left" };
+    const recognizedSender = await readVisibleSecondarySender({ groupSetupAlreadySent, reason, context, prisma, dependencies });
     const privateRecoveryReason = groupSetupAlreadySent ? "group-chat" : reason;
-    const privateRecoverySeed = groupSetupAlreadySent && recognizedSender
-      ? buildHostedLinqPrivateGroupSetupRecoverySeed({
-          chatId: context.summary.chatId,
+    // One private recovery per person per UTC day, whichever group or message
+    // triggered it. Keying on the chat or the event let a busy group, or one
+    // that Linq re-creates under a new chat id on every roster change, send
+    // the same setup nag once per message.
+    const privateRecoverySeed = recognizedSender
+      ? buildHostedLinqPrivateGroupRecoverySeed({
           memberId: recognizedSender.id,
           occurredAt: context.occurredAt,
         })
@@ -230,32 +229,20 @@ export function withHostedVisibleSecondaryLinqOutcomes(
             ...(input.signal ? { signal: input.signal } : {}),
           })
         : null;
-    if (privateRecovery) {
-      try {
-        await dependencies.sendHostedLinqChatMessage({
-          chatId: privateRecovery.chatId,
-          idempotencyKey: groupSetupAlreadySent
-            ? buildHostedLinqPrivateGroupSetupRecoveryId({
-                recoveryKind: privateRecovery.recoveryKind,
-                recoverySeed: privateRecoverySeed,
-              })
-            : `visible-secondary-private:${event.event_id}`,
-          message: privateRecovery.message,
-          replyToMessageId: null,
-          ...(input.signal ? { signal: input.signal } : {}),
-        });
-
-        return groupSetupAlreadySent
-          ? response
-          : buildVisibleSecondaryResponse(response, reason);
-      } catch (error) {
-        if (!isHostedOnboardingError(error) || error.retryable) {
-          throw error;
-        }
-        // A provider-confirmed permanent rejection means the private message
-        // did not land. Continue to the neutral room response instead of
-        // retrying a stale private route forever.
-      }
+    if (await readHostedLinqGroupLeave({ chatId: context.summary.chatId, prisma })) return { ok: true, ignored: true, reason: "group-left" };
+    if (privateRecovery && await deliverHostedLinqPrivateGroupRecovery(dependencies.sendHostedLinqChatMessage({
+      chatId: privateRecovery.chatId,
+      idempotencyKey: buildHostedLinqPrivateGroupRecoveryId({
+        recoveryKind: privateRecovery.recoveryKind,
+        recoverySeed: privateRecoverySeed,
+      }),
+      message: privateRecovery.message,
+      replyToMessageId: null,
+      ...(input.signal ? { signal: input.signal } : {}),
+    }))) {
+      return groupSetupAlreadySent
+        ? response
+        : buildVisibleSecondaryResponse(response, reason);
     }
 
     // The primary handler already sent the account-neutral setup guidance to
@@ -276,6 +263,40 @@ export function withHostedVisibleSecondaryLinqOutcomes(
       signal: input.signal,
     });
   };
+}
+
+/**
+ * True once today's private recovery is in the member's chat. The key names one
+ * recovery per member per day, so Linq refusing that key with different text
+ * (a re-minted invite link) means an earlier send already landed. False only
+ * when Linq refused the send for good, so the caller falls back to the room
+ * instead of retrying a stale private route forever. Anything else rethrows.
+ */
+async function deliverHostedLinqPrivateGroupRecovery(send: Promise<unknown>): Promise<boolean> {
+  try {
+    await send;
+    return true;
+  } catch (error) {
+    if (isHostedLinqIdempotencyKeyReuseFailure(error)) return true;
+    if ([400, 404, 410, 415, 422].includes(readHostedLinqPermanentRejectionStatus(error))) return false;
+    throw error;
+  }
+}
+
+// The provider status of a Linq request Linq refused for good; 0 for anything
+// else, including our own credential or configuration faults.
+function readHostedLinqPermanentRejectionStatus(error: unknown): number {
+  if (!isHostedOnboardingError(error) || error.code !== "LINQ_SEND_FAILED" || error.retryable) return 0;
+  return typeof error.details?.status === "number" ? error.details.status : 0;
+}
+
+async function readVisibleSecondarySender(input: {
+  groupSetupAlreadySent: boolean; reason: string;
+  context: ReturnType<typeof resolveHostedOnboardingLinqMessageContext>;
+  prisma: PrismaClient; dependencies: HostedVisibleSecondaryLinqDependencies;
+}) {
+  return input.groupSetupAlreadySent || HOSTED_LINQ_REASONS_REQUIRING_RECOGNIZED_SENDER.has(input.reason)
+    ? readHostedLinqSender({ participantContact: input.context.participantContact, prisma: input.prisma, dependencies: input.dependencies }) : null;
 }
 
 async function sendHostedLinqVisibleSecondaryReply(input: {
@@ -311,6 +332,7 @@ async function sendHostedLinqVisibleSecondaryReply(input: {
     }
   }
 
+  if (await readHostedLinqGroupLeave({ chatId: context.summary.chatId, prisma })) return { ok: true, ignored: true, reason: "group-left" };
   try {
     await dependencies.sendHostedLinqChatMessage({
       chatId: context.summary.chatId,
@@ -576,23 +598,19 @@ async function resolveHostedLinqPrivateGroupRecovery(input: {
   };
 }
 
-function buildHostedLinqPrivateGroupSetupRecoverySeed(input: {
-  chatId: string;
+function buildHostedLinqPrivateGroupRecoverySeed(input: {
   memberId: string;
   occurredAt: string;
 }): string {
-  const groupSetupEffectId = buildHostedLinqGroupSetupEffectId({
-    chatId: input.chatId,
-    occurredAt: input.occurredAt,
-  });
+  const dayUtc = resolveHostedLinqDayUtc(input.occurredAt);
 
   return `linq-group-private-recovery-seed:${sha256Hex(JSON.stringify({
-    groupSetupEffectId,
+    dayUtc: Number.isNaN(dayUtc.getTime()) ? null : dayUtc.toISOString(),
     memberId: input.memberId,
   })).slice(0, 32)}`;
 }
 
-function buildHostedLinqPrivateGroupSetupRecoveryId(input: {
+function buildHostedLinqPrivateGroupRecoveryId(input: {
   recoveryKind: string;
   recoverySeed: string;
 }): string {
@@ -699,7 +717,7 @@ async function isHostedLinqPrivateRecoveryChatAttested(input: {
   try {
     const privateChat = await readChatSummary({
       chatId: input.chatId,
-      ...(input.signal ? { signal: input.signal } : {}),
+      signal: input.signal,
     });
     const expectedParticipantValue =
       normalizeHostedLinqParticipantContactValue(participantContact);
@@ -722,7 +740,10 @@ async function isHostedLinqPrivateRecoveryChatAttested(input: {
         (handle) => handle === expectedParticipantValue,
       )
     );
-  } catch {
+  } catch (error) {
+    if (![404, 410].includes(readHostedLinqPermanentRejectionStatus(error))) {
+      throw error;
+    }
     return false;
   }
 }

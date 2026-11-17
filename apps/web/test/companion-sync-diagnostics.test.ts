@@ -61,6 +61,13 @@ beforeEach(() => {
 });
 
 describe("native sync diagnostic admission", () => {
+  it.each(["appVersion", "osVersion"])("rejects a version rejected by the log privacy contract: %s", async field => {
+    const response = await post({ ...observation(), [field]: "123.456.7890" });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: { code: "INVALID_REQUEST", message: "Invalid request." } });
+    expect(mocks.write).not.toHaveBeenCalled();
+  });
+
   it("round-trips a native observation through the real hosted log parser", () => {
     const now = new Date();
     const entry = parseCompanionSyncDiagnostic(observation(), now);

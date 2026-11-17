@@ -20,9 +20,9 @@ describe("hosted legal consent registry", () => {
       "launch.legal",
     );
     expect(legalVersions).toEqual({
-      "health-ai-safety-disclosure": "2026-07-23",
-      "privacy-policy": "2026-10-26",
-      "terms-of-service": "2026-10-26",
+      "health-ai-safety-disclosure": "2026-11-12",
+      "privacy-policy": "2026-11-12",
+      "terms-of-service": "2026-11-12",
     });
     expect(parseHostedConsentAcceptRequest({
       acceptedDocumentVersions: legalVersions,
@@ -38,7 +38,7 @@ describe("hosted legal consent registry", () => {
       "launch.health-data",
     );
     expect(healthDataVersions).toEqual({
-      "consumer-health-data-notice": "2026-07-23",
+      "consumer-health-data-notice": "2026-11-12",
     });
     expect(parseHostedConsentAcceptRequest({
       acceptedDocumentVersions: healthDataVersions,
@@ -78,7 +78,7 @@ describe("hosted legal consent registry", () => {
   it("rejects accepted document versions outside the requested scope", () => {
     const acceptedDocumentVersions = {
       ...buildCurrentHostedConsentDocumentVersions("feature.health-ai"),
-      "terms-of-service": "2026-10-26",
+      "terms-of-service": "2026-11-12",
     };
 
     expect(() => parseHostedConsentAcceptRequest({
@@ -141,8 +141,8 @@ describe("hosted legal consent registry", () => {
   it("marks stale grants as not currently granted", () => {
     const legalGrant: HostedConsentGrantSnapshot = {
       documentVersions: {
-        "privacy-policy": "2026-10-26",
-        "terms-of-service": "2026-10-26",
+        "privacy-policy": "2026-11-12",
+        "terms-of-service": "2026-11-12",
       },
       grantedAt: "2026-04-29T00:00:00.000Z",
       lastEventId: "hbce_test_legal",
@@ -215,8 +215,8 @@ describe("hosted legal consent registry", () => {
       "terms-of-service": "2026-07-23",
     })).toBe(false);
     expect(legalGranted({
-      "privacy-policy": "2026-10-26",
-      "terms-of-service": "2026-10-26",
+      "privacy-policy": "2026-11-12",
+      "terms-of-service": "2026-11-12",
     })).toBe(false);
   });
 

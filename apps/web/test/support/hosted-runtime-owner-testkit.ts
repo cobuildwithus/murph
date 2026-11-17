@@ -32,8 +32,8 @@ export async function startStuckPostgresRuntimeForTest(environment: NodeJS.Proce
   try {
     await client.connect();
     const result = await client.query(`INSERT INTO hosted_runtime_owner
-      (user_id, migration_phase, generation, attempt_id, phase, processing_mode, allocation_id, started_at, updated_at)
-      SELECT $1, 'postgres', 1, $2, 'starting', 'default', $3, $4, now()
+      (user_id, generation, attempt_id, phase, processing_mode, allocation_id, started_at, updated_at)
+      SELECT $1, 1, $2, 'starting', 'default', $3, $4, now()
       WHERE EXISTS (SELECT 1 FROM hosted_member WHERE id = $1)
       ON CONFLICT (user_id) DO UPDATE SET generation = hosted_runtime_owner.generation + 1,
         attempt_id = EXCLUDED.attempt_id, phase = 'starting', processing_mode = 'default',

@@ -54,7 +54,9 @@ export async function fetchHostedResponse(input: {
         responseOrigin: input.redactedResponseOrigin ?? input.url.origin,
         ...buildHostedRuntimeSafeErrorMetadata(wrappedError),
       },
-      level: "warn",
+      level: callerSignal?.aborted && error === callerSignal.reason
+        ? "info"
+        : "warn",
       message: "Hosted runtime upstream request failed.",
       phase: "outbox",
       userId: null,
@@ -224,21 +226,28 @@ export async function fetchHostedProviderEffectJson(input: {
     url: input.url,
   });
 
-  const text = input.boundedResponseBody === true
-    ? await readHostedResponseText({
+  const readText = () => input.boundedResponseBody === true
+    ? readHostedResponseText({
         description: input.description,
         response,
         signal: input.signal ?? null,
         timeoutMs: input.timeoutMs,
       })
-    : await response.text();
+    : response.text();
   if (!response.ok) {
+    // The status is the answer; losing its optional error body must not turn a
+    // known refusal into a transport failure or invent no-effect evidence.
+    const text = await readText().catch((error: unknown) => {
+      if (input.signal?.aborted) throw input.signal.reason ?? error;
+      return "";
+    });
     throw createHostedProviderEffectError({
       description: input.description,
       payload: parseJsonObjectOrNull(text),
       status: response.status,
     });
   }
+  const text = await readText();
 
   if (!text.trim()) {
     return null;

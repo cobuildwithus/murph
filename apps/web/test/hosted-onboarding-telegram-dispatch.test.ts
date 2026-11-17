@@ -4434,10 +4434,23 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         }),
         secretToken: "telegram-secret",
       }),
-    ).rejects.toThrowError(new TypeError("message.chat must be a JSON object."));
+    ).rejects.toMatchObject({ name: "RequestInputError", message: "message.chat must be a JSON object." });
 
     expect(hostedWebhookReceiptCreate).not.toHaveBeenCalled();
     expect(hostedMemberRoutingFindUnique).not.toHaveBeenCalled();
+    expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
+  });
+
+  it("rejects an out-of-range provider timestamp before admission", async () => {
+    mocks.runtimeEnv.telegramWebhookSecret = "telegram-secret";
+    await expect(handleHostedOnboardingTelegramWebhook({
+      prisma: withPrismaTransaction({}),
+      rawBody: JSON.stringify({ update_id: 1, message: {
+        chat: { id: 42, type: "private" }, date: Number.MAX_SAFE_INTEGER,
+        from: { id: 42, first_name: "Synthetic" }, message_id: 17, text: "hello",
+      } }),
+      secretToken: "telegram-secret",
+    })).rejects.toMatchObject({ name: "RequestInputError", message: expect.stringContaining("Invalid ISO timestamp") });
     expect(mocks.enqueueHostedExecutionOutbox).not.toHaveBeenCalled();
   });
 
@@ -4481,7 +4494,7 @@ describe("handleHostedOnboardingTelegramWebhook", () => {
         }),
         secretToken: "telegram-secret",
       }),
-    ).rejects.toThrowError(new TypeError("message.direct_messages_topic.topic_id must be an integer."));
+    ).rejects.toMatchObject({ name: "RequestInputError", message: "message.direct_messages_topic.topic_id must be an integer." });
 
     expect(hostedWebhookReceiptCreate).not.toHaveBeenCalled();
     expect(hostedMemberRoutingFindUnique).not.toHaveBeenCalled();

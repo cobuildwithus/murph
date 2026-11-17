@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   buildHostedDomainRootWrapContext,
   buildHostedSecureBoxAad,
@@ -316,14 +317,14 @@ export function parseDeviceWebhookQueueEnvelope(
     || encryptedPayload.lane !== "device-webhook-transport"
     || encryptedPayload.scope !== transportId
   ) {
-    throw new TypeError("Device webhook queue envelope encrypted payload scope is invalid.");
+    throw new ContractValidationError("Device webhook queue envelope encrypted payload scope is invalid.");
   }
   const rootKeyWrap = parseHostedEcdhWrappedDomainRootKey(
     record.rootKeyWrap,
     "Device webhook queue envelope rootKeyWrap",
   );
   if (rootKeyWrap.recipient !== "cloudflare-automation-secret") {
-    throw new TypeError("Device webhook queue envelope recipient is invalid.");
+    throw new ContractValidationError("Device webhook queue envelope recipient is invalid.");
   }
   const envelope: DeviceWebhookQueueEnvelopeV1 = {
     encryptedPayload,
@@ -420,7 +421,7 @@ export function parseDeviceWebhookAdmissionBatch(
     "Device webhook admission batch entries",
   ).map(parseDeviceWebhookQueuePayload);
   if (entries.length === 0 || entries.length > DEVICE_WEBHOOK_ADMISSION_MAX_BATCH_SIZE) {
-    throw new RangeError(
+    throw new ContractValidationError(
       `Device webhook admission batch must contain between 1 and ${DEVICE_WEBHOOK_ADMISSION_MAX_BATCH_SIZE} entries.`,
     );
   }
@@ -482,7 +483,7 @@ function createDeviceWebhookTransportAad(transportId: string): Uint8Array {
 function requireTransportId(value: unknown): string {
   const transportId = requireNonEmptyString(value, "Device webhook transport id");
   if (!DEVICE_WEBHOOK_QUEUE_TRANSPORT_ID_PATTERN.test(transportId)) {
-    throw new TypeError("Device webhook transport id must be a lowercase UUID v4.");
+    throw new ContractValidationError("Device webhook transport id must be a lowercase UUID v4.");
   }
   return transportId;
 }
@@ -491,14 +492,14 @@ function requireDisposition(value: unknown): DeviceWebhookAdmissionDisposition {
   if (value === "accepted" || value === "duplicate" || value === "retry") {
     return value;
   }
-  throw new TypeError("Device webhook admission disposition is invalid.");
+  throw new ContractValidationError("Device webhook admission disposition is invalid.");
 }
 
 function assertUniqueTransportIds(
   entries: readonly { transportId: string }[],
 ): void {
   if (new Set(entries.map((entry) => entry.transportId)).size !== entries.length) {
-    throw new TypeError("Device webhook batch transport ids must be unique.");
+    throw new ContractValidationError("Device webhook batch transport ids must be unique.");
   }
 }
 
@@ -512,7 +513,7 @@ function assertSafeVisibleEnvelopeMetadata(
   envelope: DeviceWebhookQueueEnvelopeV1,
 ): void {
   if (!DEVICE_WEBHOOK_QUEUE_ROOT_KEY_ID_PATTERN.test(envelope.encryptedPayload.rootKeyId)) {
-    throw new TypeError("Device webhook queue root key id is invalid.");
+    throw new ContractValidationError("Device webhook queue root key id is invalid.");
   }
   requireCanonicalBase64Bytes(
     envelope.encryptedPayload.iv,
@@ -542,7 +543,7 @@ function requireCanonicalBase64Bytes(
 ): void {
   const decoded = requireCanonicalBase64(value, label);
   if (decoded.byteLength !== expectedBytes) {
-    throw new TypeError(`${label} must decode to ${expectedBytes} bytes.`);
+    throw new ContractValidationError(`${label} must decode to ${expectedBytes} bytes.`);
   }
 }
 
@@ -551,31 +552,31 @@ function requireCanonicalBase64(value: string, label: string): Uint8Array {
   try {
     decoded = decodeBase64(value);
   } catch {
-    throw new TypeError(`${label} must be valid base64.`);
+    throw new ContractValidationError(`${label} must be valid base64.`);
   }
   if (encodeBase64(decoded) !== value) {
-    throw new TypeError(`${label} must use canonical base64.`);
+    throw new ContractValidationError(`${label} must use canonical base64.`);
   }
   return decoded;
 }
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object.`);
+    throw new ContractValidationError(`${label} must be an object.`);
   }
   return Object.fromEntries(Object.entries(value));
 }
 
 function requireArray(value: unknown, label: string): unknown[] {
   if (!Array.isArray(value)) {
-    throw new TypeError(`${label} must be an array.`);
+    throw new ContractValidationError(`${label} must be an array.`);
   }
   return value;
 }
 
 function requireNonEmptyString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.length === 0 || value.trim() !== value) {
-    throw new TypeError(`${label} must be a non-empty trimmed string.`);
+    throw new ContractValidationError(`${label} must be a non-empty trimmed string.`);
   }
   return value;
 }
@@ -586,7 +587,7 @@ function requireLiteral<const T extends string>(
   label: string,
 ): T {
   if (value !== expected) {
-    throw new TypeError(`${label} must be ${expected}.`);
+    throw new ContractValidationError(`${label} must be ${expected}.`);
   }
   return expected;
 }
@@ -599,7 +600,7 @@ function assertExactKeys(
   const actual = Object.keys(record).sort();
   const sortedExpected = [...expected].sort();
   if (actual.length !== sortedExpected.length || actual.some((key, index) => key !== sortedExpected[index])) {
-    throw new TypeError(`${label} contains unexpected fields.`);
+    throw new ContractValidationError(`${label} contains unexpected fields.`);
   }
 }
 
@@ -614,11 +615,11 @@ function decodeBase64(value: string): Uint8Array {
   try {
     binary = atob(value);
   } catch {
-    throw new TypeError("Device webhook transport body must be valid base64.");
+    throw new ContractValidationError("Device webhook transport body must be valid base64.");
   }
   const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
   if (encodeBase64(bytes) !== value) {
-    throw new TypeError("Device webhook transport body must use canonical base64.");
+    throw new ContractValidationError("Device webhook transport body must use canonical base64.");
   }
   return bytes;
 }

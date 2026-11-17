@@ -5,8 +5,8 @@ import {
   geneticsRegistryEntityDefinition,
   goalRegistryEntityDefinition,
   regimenRegistryEntityDefinition,
-  type HealthEntityDefinitionWithRegistry,
-} from "@murphai/contracts";
+} from "@murphai/contracts/health-entities";
+import type { HealthEntityDefinitionWithRegistry } from "@murphai/contracts";
 
 import {
   getHealthRegistryCommandMetadata,

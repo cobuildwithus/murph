@@ -1,3 +1,5 @@
+import { parseInput } from "@murphai/hosted-execution/request-input";
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { Buffer } from "node:buffer";
 import { randomUUID } from "node:crypto";
 
@@ -1229,7 +1231,7 @@ export async function fetchHostedMailboxItemsAfterLaneCursors(input: {
     const lane = requireHostedMailboxLane(cursor.lane);
 
     if (seenLanes.has(lane)) {
-      throw new TypeError(`Hosted mailbox lane ${JSON.stringify(lane)} was requested more than once.`);
+      throw new ContractValidationError(`Hosted mailbox lane ${JSON.stringify(lane)} was requested more than once.`);
     }
 
     seenLanes.add(lane);
@@ -1334,7 +1336,7 @@ export async function readHostedMailboxMaxSeqByLane(input: {
     const lane = requireHostedMailboxLane(rawLane);
 
     if (seenLanes.has(lane)) {
-      throw new TypeError(`Hosted mailbox lane ${JSON.stringify(lane)} was requested more than once.`);
+      throw new ContractValidationError(`Hosted mailbox lane ${JSON.stringify(lane)} was requested more than once.`);
     }
 
     seenLanes.add(lane);
@@ -1490,7 +1492,7 @@ export async function advanceHostedMailboxConsumedSeqByLane(input: {
   for (const entry of input.lanes) {
     const lane = requireHostedMailboxLane(entry.lane);
     if (seenLanes.has(lane)) {
-      throw new TypeError(`Hosted mailbox lane ${JSON.stringify(lane)} was consumed more than once.`);
+      throw new ContractValidationError(`Hosted mailbox lane ${JSON.stringify(lane)} was consumed more than once.`);
     }
     seenLanes.add(lane);
     const requestedSeq = normalizeHostedMailboxSeq(
@@ -2143,7 +2145,7 @@ export async function readHostedMailboxRecentLiveConversationItemIds(input: {
     input.limit <= 0 ||
     input.limit > 100
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted mailbox recent conversation limit must be between 1 and 100.",
     );
   }
@@ -2806,7 +2808,7 @@ function normalizeHostedMailboxAppendInput(
   );
   const kind = requireHostedMailboxWritableKind(input.kind);
   const occurredAt = new Date(
-    requireDate(input.occurredAt, "Hosted mailbox occurredAt").getTime(),
+    parseInput(input.occurredAt, () => requireDate(input.occurredAt, "Hosted mailbox occurredAt")).getTime(),
   );
   const expiresAt = input.expiresAt === undefined || input.expiresAt === null
     ? null
@@ -3161,7 +3163,7 @@ function requireHostedMailboxWritableKind(value: string): HostedMailboxKind {
   const kind = requireHostedMailboxKind(value);
 
   if (isHostedRetiredMailboxKind(kind)) {
-    throw new TypeError("Hosted mailbox retired kinds are read-only.");
+    throw new ContractValidationError("Hosted mailbox retired kinds are read-only.");
   }
 
   return kind;
@@ -3170,7 +3172,7 @@ function requireHostedMailboxWritableKind(value: string): HostedMailboxKind {
 function requireHostedMailboxItemId(value: string): string {
   const itemId = requireNonEmptyString(value, "Hosted mailbox item id");
   if (itemId.length > 200 || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(itemId)) {
-    throw new TypeError("Hosted mailbox item id is invalid.");
+    throw new ContractValidationError("Hosted mailbox item id is invalid.");
   }
   return itemId;
 }
@@ -3179,7 +3181,7 @@ function requireDate(value: Date | string, label: string): Date {
   const date = value instanceof Date ? value : new Date(value);
 
   if (Number.isNaN(date.getTime())) {
-    throw new TypeError(`${label} must be a valid ISO-8601 timestamp.`);
+    throw new ContractValidationError(`${label} must be a valid ISO-8601 timestamp.`);
   }
 
   return date;

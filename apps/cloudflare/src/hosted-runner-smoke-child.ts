@@ -680,7 +680,7 @@ async function runHostedCodexConfigShellEnvironmentPolicySmoke(input: {
   await chmod(codexHome, 0o700);
 
   const codexConfigPath = path.join(codexHome, "config.toml");
-  await writeFile(codexConfigPath, buildHostedRunnerSmokeCodexConfigToml(), { mode: 0o600 });
+  await writeFile(codexConfigPath, buildHostedRunnerSmokeCodexConfigToml(codexHome), { mode: 0o600 });
   await chmod(codexConfigPath, 0o600);
 
   const config = await readFile(codexConfigPath, "utf8");
@@ -758,7 +758,7 @@ async function runHostedCodexConfigShellEnvironmentPolicySmoke(input: {
   };
 }
 
-function buildHostedRunnerSmokeCodexConfigToml(): string {
+function buildHostedRunnerSmokeCodexConfigToml(codexHome: string): string {
   const modelCatalogJson = readHostedCodexModelCatalogJsonPath();
 
   return [
@@ -775,7 +775,7 @@ function buildHostedRunnerSmokeCodexConfigToml(): string {
     // exercises the same PATH semantics as production turns.
     "allow_login_shell = false",
     "",
-    ...buildMurphHostedPermissionProfileTomlLines(),
+    ...buildMurphHostedPermissionProfileTomlLines(codexHome),
     "[skills]",
     "include_instructions = false",
     "",
@@ -1950,7 +1950,6 @@ async function runCodexVaultCliProof(input: {
         permissionProfile: MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE,
       },
     ),
-    input.vaultRoot,
   );
   assertVaultShow(
     await runVaultJson("vault-show-explicit", [
@@ -2149,13 +2148,14 @@ async function runCodexVaultCliProof(input: {
   };
 }
 
-function assertMemoryShowProof(value: unknown, expectedVaultRoot: string): void {
+// vault-cli no longer echoes the vault root. vault-show-default proves which
+// vault resolved; this read proves the member workspace can read its memory.
+function assertMemoryShowProof(value: unknown): void {
   const result = readObject(value, "memory-show");
   const document = readObject(result.document, "memory-show.document");
   const records = readArray(document.records, "memory-show.document.records");
 
   if (
-    result.vault !== expectedVaultRoot ||
     document.exists !== true ||
     records.length === 0 ||
     result.memory !== null
@@ -2479,8 +2479,9 @@ async function runHealthCommonsCliSmoke(): Promise<{
   ]);
   const serializedKnowledgeSearch = JSON.stringify(JSON.parse(knowledgeSearchOutput));
 
+  // The search adds `warning` only when its generated index is unavailable.
   if (
-    !serializedKnowledgeSearch.includes('"available":true') ||
+    serializedKnowledgeSearch.includes('"warning":') ||
     !serializedKnowledgeSearch.includes(HEALTH_COMMONS_SMOKE_KNOWLEDGE_TOPIC_KEY)
   ) {
     throw new Error(

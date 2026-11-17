@@ -1,4 +1,6 @@
 import { recordAcceptedRecap } from '../assistant-codex/dynamic-tools/games.js'
+import { prepareRecapExecution } from './recap-execution.js'
+import { isAssistantProviderCapacityError } from './automation/auto-reply-retry.js'
 import { deliverAssistantGameBootstrapMessage, prepareAssistantGameBootstrap, recoverAssistantGameBootstrapResult } from './game-chat-bootstrap.js'
 import type { HostedGameChatBootstrapResult, HostedGameEveningCheckInPolicy, HostedGameGroupMissedCheckInPolicy, HostedGamePrivateEveningCheckInPolicy, HostedGamePrivateKickoffPolicy } from '@murphai/hosted-execution/runtime-control'
 import { resolveUsageOptimizerFeedbackScope } from './weekly-usage-optimizer.js'
@@ -81,11 +83,19 @@ import type {
   ResolvedAssistantSession,
 } from './service-contracts.js'
 import {
+  buildAssistantReplyBubbleDeliveryIdempotencyKey,
   dropUnsupportedAssistantResponseMediaForChannel,
   finalizeAssistantTurnFromDeliveryOutcome,
   resolveAssistantCurrentAudienceDeliveryFields,
   resolveAssistantHostedDeliveryIdempotency,
+  resolveHostedAssistantDeliveryTransportIdempotentOverride,
 } from './delivery-service.js'
+import {
+  assistantChannelSupportsReplyBubbles,
+  placeAssistantResponseMediaInReplyBubbles,
+  splitAssistantReplyBubbles,
+  stripAssistantReplyBubbleDelimiters,
+} from './reply-bubbles.js'
 import { normalizeAssistantResponseMediaList } from './response-media.js'
 import {
   hasAssistantSeenFirstContact,
@@ -95,7 +105,7 @@ import {
 import {
   emitHostedAssistantContextSessionResolvedTrace,
 } from './hosted-context-diagnostics.js'
-import { createAssistantHostedToolContext } from './hosted-tool-context.js'
+import { createAssistantHostedToolContext, type AssistantSavedGameRecapVideo } from './hosted-tool-context.js'
 import {
   assistantDeliveryOutcomeSupersedesTypingIndicator,
   startAssistantChannelTypingIndicator,
@@ -217,7 +227,7 @@ export type AssistantNotificationResponsePolicy =
   | { kind: 'allow_send_or_skip' }
   | { kind: 'require_send' }
   | { kind: 'require_send_exact_text'; text: string }
-  | { kind: 'require_game_recap'; eventId: string; gameId: string; pairFingerprint: string; loreAccess?: 'read'; show?: true }
+  | { kind: 'require_game_recap'; eventId: string; gameId: string; pairFingerprint: string; loreAccess?: 'read'; show?: true; video?: true }
   | { kind: 'require_game_rematch'; eventId: string; gameId: string; termsVersion: number }
   | { kind: 'game_missed_check_in'; eventId: string; firstMissedDate: string; gameId: string; memberId: string; pairFingerprint: string }
 
@@ -448,6 +458,7 @@ export async function sendAssistantNotificationLocal(
       )
       const route = resolveAssistantTurnRoute(messageInput, defaults, resolved)
       let savedGameRecapChatLine: string | null = null
+      let savedGameRecapVideo: AssistantSavedGameRecapVideo | undefined
       const gameRecapTurn = hostedExecutionContext?.gameRecapScope != null
       const groupMissedTurn = responsePolicy.kind === 'game_group_missed_check_in'
       const textOnlyGameTurn = textOnlyGameNotification(gameRecapTurn, responsePolicy)
@@ -477,8 +488,9 @@ export async function sendAssistantNotificationLocal(
             },
             ...buildAssistantGameRecapToolContextFields({
               enabled: gameRecapTurn,
-              recordSavedChatLine: (chatLine) => {
+              recordSavedChatLine: (chatLine, video) => {
                 savedGameRecapChatLine = chatLine
+                savedGameRecapVideo = video
               },
             }),
             route,
@@ -494,6 +506,9 @@ export async function sendAssistantNotificationLocal(
         const recapPreparation = await prepareRecapNotification(hostedExecutionContext, hostedToolContext)
         if (recapPreparation.kind !== 'continue') return withPostTurnDeliveryExpectations(await completePreparedRecapNotification(recapPreparation, {
           firstContactDocIds, input, messageInput, resolved, sharedPlan }))
+        const recapExecution = await prepareRecapExecution({ vault: input.vault,
+          hosted: hostedExecutionContext, session: resolved.session, serviceTier: messageInput.serviceTier })
+        messageInput.serviceTier = recapExecution.serviceTier
         const notificationProviderRequestStarted =
           messageInput.onProviderRequestStarted ?? null
         let notificationProviderRequestStartedAt: string | undefined
@@ -521,12 +536,13 @@ export async function sendAssistantNotificationLocal(
           plan: sharedPlan,
           progressDelivery,
           profile: notificationTurnProfile,
-          resolvedSession: resolved.session,
+          resolvedSession: recapExecution.providerSession,
           route,
           turnCreatedAt,
           turnId,
           hostedToolContext,
         })
+        recapExecution.restoreRoomSession(providerOutcome)
         if (providerOutcome.kind === 'failed_terminal') {
           const nonReplayableProviderWork =
             resolveAssistantNotificationProviderNonReplayableWork({
@@ -557,6 +573,7 @@ export async function sendAssistantNotificationLocal(
             providerResult: failedProviderResult,
             turnId,
           })
+          await recapExecution.retain(providerOutcome)
           throw annotateAssistantNotificationError(
             providerOutcome.error,
             {
@@ -594,6 +611,7 @@ export async function sendAssistantNotificationLocal(
           providerResult,
           turnId,
         })
+        await recapExecution.retain(providerOutcome)
         const providerValidationErrorDetails = {
           ...buildAssistantNotificationObservabilityDetails({
             stage: 'provider',
@@ -758,6 +776,7 @@ export async function sendAssistantNotificationLocal(
             card: textOnlyGameTurn ? null : providerResult.responseCard ?? null,
             media: textOnlyGameTurn ? [] : responseMedia,
             message: responseText,
+            recapVideo: savedGameRecapVideo,
             session: savedSession,
             sharedPlan,
             turnId,
@@ -820,6 +839,7 @@ export async function sendAssistantNotificationLocal(
           card: textOnlyGameTurn ? null : providerResult.responseCard ?? null,
           media: textOnlyGameTurn ? [] : responseMedia,
           message: responseText,
+          recapVideo: savedGameRecapVideo,
           session: providerResult.session,
           sharedPlan,
           turnId,
@@ -908,7 +928,8 @@ export async function sendAssistantNotificationLocal(
           session: committedDeliveryOutcome.session,
         })
       } catch (error) {
-        const completed = await completeFailedRecap(error, hostedExecutionContext, hostedToolContext, savedGameRecapChatLine)
+        const completed = await completeFailedRecap(error, hostedExecutionContext, hostedToolContext, savedGameRecapChatLine,
+          messageInput.serviceTier === 'flex')
         return withPostTurnDeliveryExpectations(await completePreparedRecapNotification(completed, {
           firstContactDocIds, input, messageInput, resolved, sharedPlan }))
       } finally {
@@ -1067,11 +1088,16 @@ function resolveAssistantNotificationHostedExecutionContext(
   return executionContext?.hosted ?? null
 }
 
+/** The outbox keeps the accepted identity only; the sender finds the host's file from it. */
+function outboxRecapVideo(video: AssistantSavedGameRecapVideo | undefined) {
+  return video ? { generationId: video.generationId, hash: video.hash, byteLength: video.byteLength } : undefined
+}
+
 function buildAssistantGameRecapToolContextFields(input: {
   enabled: boolean
-  recordSavedChatLine(chatLine: string): void
+  recordSavedChatLine(chatLine: string, video?: AssistantSavedGameRecapVideo): void
 }): {
-  recordSavedGameRecapChatLine?: (chatLine: string) => void
+  recordSavedGameRecapChatLine?: (chatLine: string, video?: AssistantSavedGameRecapVideo) => void
 } {
   if (!input.enabled) return {}
   return {
@@ -1121,6 +1147,7 @@ async function sendAssistantExactTextNotificationLocal(input: {
   input: AssistantNotificationInput
   messageInput: AssistantMessageInput
   privateCompletionContinuitySessionId: string | null
+  recapVideo?: AssistantSavedGameRecapVideo
   responseText: string
   session: AssistantSession
   sharedPlan: Awaited<ReturnType<typeof resolveAssistantTurnSharedPlan>>
@@ -1177,6 +1204,7 @@ async function sendAssistantExactTextNotificationLocal(input: {
       deferPrivateCompletionContinuity
         ? input.privateCompletionContinuitySessionId
         : undefined,
+    recapVideo: outboxRecapVideo(input.recapVideo),
     session: input.session,
     sharedPlan: input.sharedPlan,
     turnId,
@@ -1331,13 +1359,17 @@ async function abandonQueuedNotificationDeliveryAfterCommitFailure(input: {
     return
   }
 
-  await markAssistantOutboxIntentMirrorTerminalById({
-    error: input.error,
-    intentId: input.deliveryOutcome.intentId,
-    onlyCurrentStatuses: ['pending', 'retryable', 'awaiting_approval'],
-    status: 'abandoned',
-    vault: input.vault,
-  })
+  for (const intentId of input.deliveryOutcome.bubbleIntentIds ?? [
+    input.deliveryOutcome.intentId,
+  ]) {
+    await markAssistantOutboxIntentMirrorTerminalById({
+      error: input.error,
+      intentId,
+      onlyCurrentStatuses: ['pending', 'retryable', 'awaiting_approval'],
+      status: 'abandoned',
+      vault: input.vault,
+    })
+  }
 }
 
 function assistantNotificationDeliveryAcceptedFirstContact(input: {
@@ -1662,6 +1694,7 @@ async function deliverAssistantNotificationMessage(input: {
   media?: readonly AssistantResponseMedia[] | null
   message: string
   privateCompletionContinuitySessionId?: string | null
+  recapVideo?: AssistantSavedGameRecapVideo
   session: AssistantSession
   sharedPlan: Awaited<ReturnType<typeof resolveAssistantTurnSharedPlan>>
   turnId: string
@@ -1671,7 +1704,7 @@ async function deliverAssistantNotificationMessage(input: {
       bootstrap: input.gameChatBootstrap, card: input.card, media: input.media,
       followUpRequest: input.followUpRequest, message: input.message,
       memberId: input.input.executionContext?.hosted?.memberId,
-      session: input.session, vault: input.input.vault,
+      session: input.session, turnId: input.turnId, vault: input.input.vault,
     })
   }
   const state = createAssistantRuntimeStateService(input.input.vault)
@@ -1704,36 +1737,180 @@ async function deliverAssistantNotificationMessage(input: {
     channel: deliveryFields.channel,
     media: requestedMedia,
   })
-  const outcome = await state.outbox.deliverMessage({
-    answeredMailboxItemIds: input.input.answeredMailboxItemIds ?? [],
-    reviewedAssistantAskCompletionExpiresAt:
-      input.input.reviewedAssistantAskCompletionExpiresAt ?? null,
-    followUpRequest: input.followUpRequest ?? undefined,
-    followUpEvaluatedThrough: input.input.outboxFollowUpEvaluatedThrough,
-    automationAuthority: input.input.outboxAutomationAuthority ?? null,
-    automationContextReferences:
-      input.input.outboxAutomationContextReferences ?? null,
-    plannedOccurrenceAt: input.input.outboxPlannedOccurrenceAt ?? null,
-    scheduledOccurrenceAt: input.input.scheduledOccurrenceAt ?? null,
-    externalThreadRouteAuthority:
-      input.input.outboxExternalThreadRouteAuthority ?? null,
-    turnId: input.turnId,
+  // Scheduled turns get the same `---` texting-rhythm prompt as replies, so
+  // they split into bubbles the same way `deliverAssistantReply` does.
+  const bubbles = resolveAssistantNotificationBubbles({
+    card: input.card,
+    channel: deliveryFields.channel,
     message: input.message,
-    dedupeToken: input.dedupeToken,
-    deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
-    deliveryTransportIdempotent: hostedDelivery.deliveryTransportIdempotent,
-    signal: input.input.abortSignal,
-    ...deliveryFields,
-    card: input.card ?? null,
-    media,
-    ...(input.privateCompletionContinuitySessionId === undefined
-      ? {}
-      : {
-          privateCompletionContinuitySessionId:
-            input.privateCompletionContinuitySessionId,
-        }),
-    dispatchMode: input.input.deliveryDispatchMode,
+    reviewedAskCompletion: Boolean(
+      input.input.reviewedAssistantAskCompletionExpiresAt,
+    ),
   })
+  const bubbleMedia = placeAssistantResponseMediaInReplyBubbles({
+    bubbleCount: bubbles.length,
+    media,
+  })
+  const sharedFields = buildAssistantNotificationOutboxSharedFields({
+    card: input.card,
+    deliveryFields,
+    input: input.input,
+    turnId: input.turnId,
+  })
+  const bubbleKeyPrefix = hostedDelivery.deliveryIdempotencyKey ?? input.dedupeToken
+  const leading = await deliverAssistantNotificationLeadingBubbles({
+    count: bubbles.length - 1,
+    send: async (index, session) => {
+      const bubbleKey = buildAssistantReplyBubbleDeliveryIdempotencyKey({
+        deliveryIdempotencyKey: bubbleKeyPrefix,
+        index,
+        turnId: input.turnId,
+      })
+      return toAssistantNotificationDeliveryOutcome({
+        media: bubbleMedia[index]!,
+        outcome: await state.outbox.deliverMessage({
+          ...sharedFields,
+          answeredMailboxItemIds: [],
+          message: bubbles[index]!,
+          media: bubbleMedia[index]!,
+          dedupeToken: bubbleKey,
+          deliveryIdempotencyKey: bubbleKey,
+          deliveryTransportIdempotent:
+            resolveHostedAssistantDeliveryTransportIdempotentOverride({
+              channel: deliveryFields.channel,
+              deliveryIdempotencyKey: bubbleKey,
+              executionContext: input.input.executionContext,
+              media: bubbleMedia[index]!,
+            }),
+        }),
+        session,
+      })
+    },
+    session: input.session,
+  })
+  if (leading.failed) {
+    return leading.failed
+  }
+  const finalOutcome = toAssistantNotificationDeliveryOutcome({
+    media: bubbleMedia.at(-1)!,
+    outcome: await state.outbox.deliverMessage({
+      ...sharedFields,
+      answeredMailboxItemIds: input.input.answeredMailboxItemIds ?? [],
+      followUpRequest: input.followUpRequest ?? undefined,
+      message: bubbles.at(-1)!,
+      media: bubbleMedia.at(-1)!,
+      dedupeToken: input.dedupeToken,
+      deliveryIdempotencyKey: hostedDelivery.deliveryIdempotencyKey,
+      deliveryTransportIdempotent: hostedDelivery.deliveryTransportIdempotent,
+      recapVideo: outboxRecapVideo(input.recapVideo),
+      ...(input.privateCompletionContinuitySessionId === undefined
+        ? {}
+        : {
+            privateCompletionContinuitySessionId:
+              input.privateCompletionContinuitySessionId,
+          }),
+    }),
+    session: leading.session,
+  })
+  return withAssistantNotificationBubbleIntentIds({
+    media: bubbleMedia.flat(),
+    outcome: finalOutcome,
+    precedingIntentIds: leading.intentIds,
+  })
+}
+
+function resolveAssistantNotificationBubbles(input: {
+  card: AssistantResponseCard | null | undefined
+  channel: string | null
+  message: string
+  reviewedAskCompletion: boolean
+}): string[] {
+  if (input.card || !assistantChannelSupportsReplyBubbles(input.channel)) {
+    return [input.message]
+  }
+  return input.reviewedAskCompletion
+    ? [stripAssistantReplyBubbleDelimiters(input.message)]
+    : splitAssistantReplyBubbles(input.message)
+}
+
+function buildAssistantNotificationOutboxSharedFields<
+  DeliveryFields extends object,
+>(input: {
+  card: AssistantResponseCard | null | undefined
+  deliveryFields: DeliveryFields
+  input: AssistantMessageInput
+  turnId: string
+}) {
+  const message = input.input
+  return {
+    reviewedAssistantAskCompletionExpiresAt:
+      message.reviewedAssistantAskCompletionExpiresAt ?? null,
+    followUpEvaluatedThrough: message.outboxFollowUpEvaluatedThrough,
+    automationAuthority: message.outboxAutomationAuthority ?? null,
+    automationContextReferences:
+      message.outboxAutomationContextReferences ?? null,
+    plannedOccurrenceAt: message.outboxPlannedOccurrenceAt ?? null,
+    scheduledOccurrenceAt: message.scheduledOccurrenceAt ?? null,
+    externalThreadRouteAuthority:
+      message.outboxExternalThreadRouteAuthority ?? null,
+    turnId: input.turnId,
+    signal: message.abortSignal,
+    ...input.deliveryFields,
+    card: input.card ?? null,
+    dispatchMode: message.deliveryDispatchMode,
+  }
+}
+
+// Sends every bubble but the last, stopping at the first failure.
+async function deliverAssistantNotificationLeadingBubbles(input: {
+  count: number
+  send: (index: number, session: AssistantSession) => Promise<AssistantDeliveryOutcome>
+  session: AssistantSession
+}): Promise<{
+  failed: AssistantDeliveryOutcome | null
+  intentIds: string[]
+  session: AssistantSession
+}> {
+  let session = input.session
+  const intentIds: string[] = []
+  for (let index = 0; index < input.count; index += 1) {
+    const outcome = await input.send(index, session)
+    if (outcome.kind === 'failed') {
+      return { failed: outcome, intentIds, session }
+    }
+    if ('intentId' in outcome && outcome.intentId) {
+      intentIds.push(outcome.intentId)
+    }
+    session = outcome.session
+  }
+  return { failed: null, intentIds, session }
+}
+
+function withAssistantNotificationBubbleIntentIds(input: {
+  media: AssistantResponseMedia[]
+  outcome: AssistantDeliveryOutcome
+  precedingIntentIds: readonly string[]
+}): AssistantDeliveryOutcome {
+  const { media, outcome } = input
+  return outcome.kind === 'queued' && input.precedingIntentIds.length > 0
+    ? {
+        ...outcome,
+        bubbleIntentIds: [...input.precedingIntentIds, outcome.intentId],
+        media,
+      }
+    : { ...outcome, media }
+}
+
+function toAssistantNotificationDeliveryOutcome(input: {
+  media: AssistantResponseMedia[]
+  outcome: Awaited<
+    ReturnType<
+      ReturnType<typeof createAssistantRuntimeStateService>['outbox']['deliverMessage']
+    >
+  >
+  session: AssistantSession
+}): AssistantDeliveryOutcome {
+  const { media, outcome } = input
   switch (outcome.kind) {
     case 'sent':
       return {
@@ -2276,38 +2453,49 @@ function assertVerifiedNotificationAudience(scope: ReturnType<typeof resolveAssi
     'ASSISTANT_AUDIENCE_UNVERIFIED', 'Notification audience could not be verified as direct or group.')
 }
 
-async function completePreparedRecapNotification(prepared: { kind: 'retired' } | { kind: 'recovered'; text: string },
+async function completePreparedRecapNotification(prepared: { kind: 'retired' } | { kind: 'recovered'; text: string; video?: AssistantSavedGameRecapVideo },
   input: Omit<Parameters<typeof sendAssistantExactTextNotificationLocal>[0], 'responseText' | 'session' | 'privateCompletionContinuitySessionId'> & {
     resolved: { session: AssistantSession; privateCompletionContinuitySessionId?: string | null }
   }): Promise<AssistantNotificationResult> {
   if (prepared.kind === 'retired') return {
     decision: { kind: 'skip', privateSummary: 'Recap generation retired.' },
     deliveryOutcome: null, response: null, session: input.resolved.session }
-  return sendAssistantExactTextNotificationLocal({ ...input, responseText: prepared.text,
+  return sendAssistantExactTextNotificationLocal({ ...input, responseText: prepared.text, recapVideo: prepared.video,
     session: input.resolved.session, privateCompletionContinuitySessionId: input.resolved.privateCompletionContinuitySessionId ?? null })
 }
 
 async function prepareRecapNotification(hosted: AssistantHostedExecutionContext | null | undefined,
   context: ReturnType<typeof createAssistantHostedToolContext> | null,
-  failed = false): Promise<{ kind: 'continue' } | { kind: 'retired' } | { kind: 'recovered'; text: string }> {
+  failed = false): Promise<{ kind: 'continue' } | { kind: 'retired' } | { kind: 'recovered'; text: string; video?: AssistantSavedGameRecapVideo }> {
   const scope = hosted?.gameRecapScope
   if (!scope?.show || !hosted?.groupTool) return { kind: 'continue' }
   const origin = { kind: 'game_recap' as const, gameId: scope.gameId, eventId: scope.eventId }
-  const recovered = await hosted.groupTool.request({ action: 'read_game', origin, recapRead: { kind: 'recover', ...(failed ? { failed: true } : {}) } })
+  // A wake that asked for a video asks which one Web accepted, so a retried turn can still send it.
+  const recovered = await hosted.groupTool.request({ action: 'read_game', origin, recapRead: { kind: 'recover', ...(failed ? { failed: true } : {}), ...(scope.video ? { video: true } : {}) } })
   if (recovered.result.status !== 'ok') {
     if ('error' in recovered.result && recovered.result.error === 'recap_generation_retired') return { kind: 'retired' }
     throw new Error('Recap completion is unavailable.')
   }
   if ('chatLine' in recovered.result && recovered.result.chatLine) {
-    await recordAcceptedRecap({ context, origin: scope }, recovered.result, true)
-    return { kind: 'recovered', text: recovered.result.chatLine }
+    let video: AssistantSavedGameRecapVideo | undefined
+    const recording = context ? { ...context, recordSavedGameRecapChatLine: (_line: string, accepted?: AssistantSavedGameRecapVideo) => {
+      video = accepted
+      context.recordSavedGameRecapChatLine?.(_line, accepted)
+    } } : null
+    await recordAcceptedRecap({ context: recording, origin: scope }, recovered.result, true)
+    return { kind: 'recovered', text: recovered.result.chatLine, ...(video ? { video } : {}) }
   }
   return { kind: 'continue' }
 }
 
 async function completeFailedRecap(error: unknown, hosted: AssistantHostedExecutionContext | null | undefined,
-  context: ReturnType<typeof createAssistantHostedToolContext> | null, savedChatLine: string | null) {
+  context: ReturnType<typeof createAssistantHostedToolContext> | null, savedChatLine: string | null,
+  onFlex: boolean) {
   if (!hosted?.gameRecapScope?.show || savedChatLine !== null) throw error
+  // Inside the Flex budget, keep unfinished writing on the exact generation
+  // instead of sealing a template (or retiring a remake), so the mailbox can
+  // retry capacity. Once on the standard tier, failures settle as before.
+  if (onFlex && isAssistantProviderCapacityError(error)) throw error
   const completed = await prepareRecapNotification(hosted, context, true)
   if (completed.kind === 'continue') throw error
   return completed

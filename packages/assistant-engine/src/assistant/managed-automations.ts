@@ -35,8 +35,11 @@ import {
 } from './cron/targets.js'
 import {
   computeAssistantCronFirstRunAfterCurrentLocalDay,
+  computeAssistantCronNextRunAt,
 } from './cron/schedule.js'
 import { upsertAssistantCronAutomation } from './cron/authoring.js'
+import { readAssistantCronCanonicalRuntimeStore } from './cron/runtime-state.js'
+import { resolveAssistantStatePaths } from './store/paths.js'
 import {
   prepareExperimentLifecycleAutomations,
 } from './experiment-support-automations.js'
@@ -243,6 +246,11 @@ export const MURPH_AUTOMATIC_MEAL_CLOSEOUT_AUTOMATION = {
     'If the skill selects neither a retained photo nor a same-occurrence removal revision, return `{"kind":"skip","privateSummary":"No captured meals are awaiting closeout."}`. A review-completion failure or any selected pending photo attachment remaining fails the run. Reviewed full photos and thumbnails follow the meal retention policy. After successful cleanup, follow the skill\'s presentation rules: historical-only work returns its required `skip`, and historical captures never contribute to a current-date response. For eligible current-date work, return the compact unresolved-capture question when required. If a response card is attached, return a `send_message` decision whose text contains no nutrition values because the runtime replaces it with deterministic card text. Otherwise return the ordinary compact closeout. Do not expose images, internal paths, or automation details.',
   ].join('\n'),
 } satisfies MurphManagedAutomationSeed
+
+const MURPH_JOURNAL_MORNING_SCHEDULE_SPREAD = {
+  startMinuteOfDay: 8 * 60,
+  slots: 30,
+} as const
 
 interface MurphManagedWeeklyScheduleSpread {
   daysOfWeek: readonly number[]
@@ -901,14 +909,27 @@ export async function applyMurphManagedAutomations(
   )
   let scheduleStableKey: string | null | undefined
   let scheduleStableKeyUnavailable = false
-  const resolveScheduleStableKey = async (): Promise<string | null> => {
-    if (scheduleStableKey !== undefined) {
-      return scheduleStableKey
+  const resolveScheduleSeed = async (
+    seed: MurphManagedAutomationSeed,
+    existing: AutomationRecord | null,
+  ): Promise<MurphManagedAutomationSeed | null> => {
+    const spreadJournal = seed.automationId === MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID
+    if (existing && (!spreadJournal || existing.status !== 'active')) return seed
+    if (!spreadJournal && !shouldSpreadMurphManagedAutomationSchedule(seed)) return seed
+    if (scheduleStableKeyUnavailable) return null
+    try {
+      if (scheduleStableKey === undefined) {
+        scheduleStableKey = await resolveMurphManagedScheduleStableKey({ vaultRoot: input.vaultRoot })
+      }
+    } catch (error) {
+      scheduleStableKeyUnavailable = true
+      result.stableKeyFailure = error
     }
-    scheduleStableKey = await resolveMurphManagedScheduleStableKey({
-      vaultRoot: input.vaultRoot,
-    })
-    return scheduleStableKey
+    if (!scheduleStableKey) {
+      result.stableKeyRetryNeeded = true
+      return null
+    }
+    return resolveMurphManagedAutomationSpreadSeed({ seed, stableKey: scheduleStableKey })
   }
   let createRoute: AutomationRoute | null | undefined
   const resolveCreateRoute = async (): Promise<AutomationRoute | null> => {
@@ -957,34 +978,19 @@ export async function applyMurphManagedAutomations(
       continue
     }
 
-    if (!existing) {
-      let stableKey: string | null = null
-      if (shouldSpreadMurphManagedAutomationSchedule(rawSeed)) {
-        if (scheduleStableKeyUnavailable) {
-          result.skipped += 1
-          result.stableKeyRetryNeeded = true
-          continue
-        }
-        try {
-          stableKey = await resolveScheduleStableKey()
-        } catch (error) {
-          scheduleStableKeyUnavailable = true
-          result.skipped += 1
-          result.stableKeyFailure = error
-          result.stableKeyRetryNeeded = true
-          continue
-        }
-        if (shouldYield()) {
-          return { ...result, yielded: true }
-        }
-      }
+    const seed = await resolveScheduleSeed(rawSeed, existing)
+    if (shouldYield()) return { ...result, yielded: true }
+    if (!seed) {
+      result.skipped += 1
+      continue
+    }
 
+    if (!existing) {
       const outcome = await createMurphManagedAutomation({
         input,
         now,
-        rawSeed,
+        seed,
         resolveCreateRoute,
-        stableKey,
       })
       if (outcome === 'yielded') {
         return { ...result, yielded: true }
@@ -999,7 +1005,7 @@ export async function applyMurphManagedAutomations(
       existing,
       input,
       now,
-      rawSeed,
+      rawSeed: seed,
     })
     if (outcome === 'yielded') {
       return { ...result, yielded: true }
@@ -1135,24 +1141,14 @@ export async function reconcileMurphManagedOnboardingFollowup(
 async function createMurphManagedAutomation({
   input,
   now,
-  rawSeed,
+  seed,
   resolveCreateRoute,
-  stableKey,
 }: {
   input: ApplyMurphManagedAutomationsInput
   now: Date
-  rawSeed: MurphManagedAutomationSeed
+  seed: MurphManagedAutomationSeed
   resolveCreateRoute: () => Promise<AutomationRoute | null>
-  stableKey: string | null
 }): Promise<'created' | 'skipped' | 'yielded' | null> {
-  const seed = resolveMurphManagedAutomationCreateSeed({
-    seed: rawSeed,
-    stableKey,
-  })
-  if (!seed) {
-    return 'skipped'
-  }
-
   if (isStaleMurphManagedOneShotSeed(seed, now)) {
     return 'skipped'
   }
@@ -1272,6 +1268,11 @@ async function reconcileMurphManagedAutomation({
     reconciledStatus = 'archived'
   }
 
+  const journalScheduleAnchor = await resolveMurphManagedJournalScheduleAnchor({
+    existing, now, seed, vaultRoot: input.vaultRoot,
+  })
+  if (journalScheduleAnchor === null) return 'skipped'
+
   const summary = normalizeMurphManagedAutomationSummary(seed)
   if (input.shouldYield?.() === true) {
     return 'yielded'
@@ -1286,6 +1287,7 @@ async function reconcileMurphManagedAutomation({
     // point where this module chooses one.
     route: existing.route,
     schedule: reconciledSchedule,
+    ...journalScheduleAnchor,
     slug: existing.slug,
     status: reconciledStatus,
     vaultRoot: input.vaultRoot,
@@ -1446,17 +1448,24 @@ function shouldSpreadMurphManagedAutomationSchedule(
     MURPH_MANAGED_WEEKLY_SCHEDULE_SPREADS[seed.automationId] !== undefined
 }
 
-function resolveMurphManagedAutomationCreateSeed(input: {
+function resolveMurphManagedAutomationSpreadSeed(input: {
   seed: MurphManagedAutomationSeed
-  stableKey: string | null
-}): MurphManagedAutomationSeed | null {
+  stableKey: string
+}): MurphManagedAutomationSeed {
+  if (input.seed.automationId === MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID) {
+    const minuteOfDay = MURPH_JOURNAL_MORNING_SCHEDULE_SPREAD.startMinuteOfDay
+      + stableHashToIndex(`murph-journal-morning:${input.stableKey}`, MURPH_JOURNAL_MORNING_SCHEDULE_SPREAD.slots)
+    return {
+      ...input.seed,
+      schedule: {
+        kind: 'dailyLocal',
+        localTime: `${String(Math.floor(minuteOfDay / 60)).padStart(2, '0')}:${String(minuteOfDay % 60).padStart(2, '0')}`,
+      },
+    }
+  }
   const spread = MURPH_MANAGED_WEEKLY_SCHEDULE_SPREADS[input.seed.automationId]
   if (!spread || input.seed.schedule.kind !== 'cron') {
     return input.seed
-  }
-
-  if (input.stableKey === null) {
-    return null
   }
 
   return {
@@ -1498,6 +1507,41 @@ function resolveMurphManagedWeeklySpreadSchedule(input: {
     kind: 'cron',
     expression: `${minute} ${hour} * * ${dayOfWeek}`,
   }
+}
+
+// Null defers a schedule migration until the old occurrence finishes; otherwise
+// use core's normal change anchor, with a floor only for a consumed local day.
+async function resolveMurphManagedJournalScheduleAnchor(input: {
+  existing: AutomationRecord
+  now: Date
+  seed: MurphManagedAutomationSeed
+  vaultRoot: string
+}): Promise<{ scheduleNotBefore?: Date } | null> {
+  if (input.seed.automationId !== MURPH_JOURNAL_CONNECTED_CONTEXT_MORNING_AUTOMATION_ID
+    || input.seed.schedule.kind !== 'dailyLocal'
+    || murphManagedAutomationValuesEqual(input.existing.schedule, input.seed.schedule)) return {}
+
+  const runtime = (await readAssistantCronCanonicalRuntimeStore(
+    resolveAssistantStatePaths(input.vaultRoot),
+    { reclaimStaleRunningClaims: false },
+  )).jobs.find((job) => job.jobId === input.existing.automationId)?.state
+  if (!runtime) return {}
+  if (runtime.pendingOccurrenceAt || runtime.runningAt || runtime.pendingDeliveryIntentId) return null
+
+  const vault = await loadVault({ vaultRoot: input.vaultRoot })
+  const timeZone = normalizeIanaTimeZone(vault.metadata.timezone) ?? 'UTC'
+  const next = computeAssistantCronNextRunAt({ ...input.seed.schedule, timeZone }, input.now)
+  // Core resets scheduleAnchorAt on a schedule change. If today's old
+  // occurrence was consumed, anchor past today's new slot to avoid a rerun.
+  const consumedAt = [
+    runtime.lastSucceededAt,
+    runtime.consecutiveFailures === 0 ? runtime.lastFailedAt : null,
+  ]
+  return next && consumedAt.some((at) => at !== null
+    && formatTimeZoneDateTimeParts(at, timeZone).dayKey
+      === formatTimeZoneDateTimeParts(next, timeZone).dayKey)
+    ? { scheduleNotBefore: new Date(next) }
+    : {}
 }
 
 function stableHashToIndex(material: string, length: number): number {

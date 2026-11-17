@@ -100,6 +100,9 @@ const PROVIDER_AUTHORIZATION_DOMAINS = {
 const REQUIRED_CONSENT_PATTERN = /\b(?:authorization|required|privacy|terms)\b/iu;
 const OPTIONAL_MARKETING_PATTERN = /\b(?:marketing|newsletter|offers?|promotions?)\b/iu;
 const GARMIN_PARTNER_CONSENT_CHECKBOX_COUNT = 3;
+// Since 2026-11-02 Garmin serves the same three-box consent on its OAuth 2
+// partner route; the OAuth 1 route stays accepted while it is still served.
+const GARMIN_PARTNER_CONSENT_PATHS = new Set(["/partner/oauthConfirm", "/partner/oauth2Confirm"]);
 const PROVIDER_AUTOMATION_BLOCKED_GRACE_MS = 15_000;
 const KERNEL_TUNNEL_SETUP_TIMEOUT_MS = 60_000;
 const KERNEL_TUNNEL_STOP_GRACE_MS = 5_000;
@@ -763,7 +766,7 @@ function readGarminPartnerConsentStep(
   const url = new URL(value);
   if (
     url.hostname !== "connect.garmin.com"
-    || url.pathname !== "/partner/oauthConfirm"
+    || !GARMIN_PARTNER_CONSENT_PATHS.has(url.pathname)
   ) {
     return null;
   }
@@ -1089,18 +1092,25 @@ async function describeAuthorizationSurface(page: Page): Promise<string> {
     const countActions = async (controls: Locator) => {
       let actions = 0;
       let enabledActions = 0;
+      const labels: string[] = [];
       for (let index = 0; index < await controls.count(); index += 1) {
-        const state = await readAuthorizationActionState(controls.nth(index));
-        if (state !== null) actions += 1;
+        const control = controls.nth(index);
+        const state = await readAuthorizationActionState(control);
+        if (state !== null) {
+          actions += 1;
+          labels.push(safeActionLabel(await readAuthorizationActionText(control)));
+        }
         if (state === "enabled") enabledActions += 1;
       }
-      return { actions, enabledActions };
+      return { actions, enabledActions, labels };
     };
     let actions = 0;
     let allActions = 0;
     let enabledActions = 0;
+    const labels: string[] = [];
     for (const role of ["button", "link"] as const) {
       const all = await countActions(scope.getByRole(role));
+      labels.push(...all.labels);
       const recognized = await countActions(
         scope.getByRole(role, { name: AUTH_ACTION_PATTERN }),
       );
@@ -1122,6 +1132,7 @@ async function describeAuthorizationSurface(page: Page): Promise<string> {
     return {
       actions,
       enabledActions,
+      labels,
       otherActions: Math.max(0, allActions - actions),
       uncheckedCheckboxes,
     };
@@ -1154,8 +1165,22 @@ async function describeAuthorizationSurface(page: Page): Promise<string> {
     `childEnabledActions=${child.enabledActions}`,
     `childOtherActions=${child.otherActions}`,
     `mainUncheckedCheckboxes=${main.uncheckedCheckboxes}`,
-    `childUncheckedCheckboxes=${child.uncheckedCheckboxes}.`,
+    `childUncheckedCheckboxes=${child.uncheckedCheckboxes}`,
+    `mainActionWords=${main.labels.join("|") || "none"}.`,
   ].join(" ");
+}
+
+// Failures stay content-free: an action is reported only as one of these
+// fixed words when its whole label matches, otherwise as "other".
+const DIAGNOSTIC_ACTION_WORDS = [
+  "accept", "agree", "allow", "approve", "authorize", "back", "cancel",
+  "confirm", "continue", "decline", "deny", "done", "grant", "help", "log in",
+  "next", "proceed", "save", "sign in", "skip", "submit",
+] as const;
+
+function safeActionLabel(text: string): string {
+  const label = text.replace(/\s+/gu, " ").trim().toLowerCase();
+  return DIAGNOSTIC_ACTION_WORDS.find((word) => word === label) ?? "other";
 }
 
 async function requirePersistedWearableConnection(
@@ -1441,6 +1466,19 @@ function readOrigin(value: string): string | null {
   }
 }
 
+// Garmin route names are product words such as "oauth2Confirm"; a segment
+// that could be an identifier (three or more digits, longer than 32
+// characters, or other characters) is masked as ":id".
+function garminRouteShape(pathname: string): string {
+  const segments = pathname.split("/").slice(1);
+  if (segments.length === 0 || segments.length > 5) return "other";
+  return `other:/${segments.map((segment) =>
+    /^[A-Za-z][A-Za-z0-9_-]{0,31}$/u.test(segment) && !/[0-9].*[0-9].*[0-9]/u.test(segment)
+      ? segment
+      : ":id"
+  ).join("/")}`;
+}
+
 function safePageLocation(page: Pick<Page, "url"> | null): string {
   try {
     const url = new URL(page?.url() ?? "");
@@ -1453,9 +1491,13 @@ function safePageLocation(page: Pick<Page, "url"> | null): string {
       ...PROVIDER_AUTHORIZATION_DOMAINS.whoop,
     ].find((domain) => url.hostname === domain || url.hostname.endsWith(`.${domain}`));
     if (!host) return "other";
-    const route = host === "garmin.com" && url.pathname === "/partner/oauthConfirm"
-      ? "partner_consent"
-      : "other";
+    const route = host !== "garmin.com"
+      ? "other"
+      : url.pathname === "/partner/oauthConfirm"
+        ? "partner_consent"
+        : url.pathname === "/partner/oauth2Confirm"
+          ? "oauth2_consent"
+          : garminRouteShape(url.pathname);
     return `${host}/${route}`;
   } catch {
     return "unavailable";

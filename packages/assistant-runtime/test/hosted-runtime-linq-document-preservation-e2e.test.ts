@@ -80,12 +80,6 @@ describe("hosted Linq document preservation", () => {
     });
 
     await initializeVault({ vaultRoot, createdAt: "2026-04-29T00:00:00.000Z" });
-    await services.init({
-      rebuild: false,
-      rebuildParserJobs: false,
-      requestId: "req_init_cold_inbox_runtime",
-      vault: vaultRoot,
-    });
     mocks.createHostedLinqAttachmentDownloadDriver.mockReturnValue({
       downloadPart: vi.fn(async (part: { url?: string | null }) => {
         assert.equal(part.url, "https://cdn.example.test/attachments/lab-results.pdf");

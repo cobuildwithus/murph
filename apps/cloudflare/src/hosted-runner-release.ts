@@ -40,11 +40,17 @@ export function readHostedRunnerDeployment(source: Environment): HostedRunnerDep
 
 /** Admit whole image pairs, never independent fingerprint halves. */
 export function hostedRunnerImageMatches(source: Environment, bundle: unknown, fingerprint: unknown): boolean {
+  return hostedRunnerReleaseImageMatches(source, readHostedRunnerActiveReleaseId(source), bundle, fingerprint);
+}
+
+/** Use the release identity even when the caller's environment is not bank-scoped. */
+export function hostedRunnerReleaseImageMatches(
+  source: Environment, releaseId: string | null, bundle: unknown, fingerprint: unknown,
+): boolean {
   const deployment = readHostedRunnerDeployment(source);
-  const scopedId = readHostedRunnerActiveReleaseId(source);
-  if (deployment?.candidate && deployment.candidate.bank === deployment.active.bank && scopedId === deployment.active.id) {
-    return [deployment.active, deployment.candidate].some(release =>
-      release.bundleFingerprint === bundle && release.sourceFingerprint === fingerprint);
+  if (deployment) {
+    return [deployment.active, deployment.candidate, deployment.previous].some(release =>
+      release?.id === releaseId && release.bundleFingerprint === bundle && release.sourceFingerprint === fingerprint);
   }
   return source.HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT === bundle
     && source.HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT === fingerprint;

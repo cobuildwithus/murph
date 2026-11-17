@@ -9,12 +9,34 @@ projection does not replace the parent environment or change its working directo
 Email retention uses the trusted mailbox occurrence time as receipt time; the
 sender-controlled message Date header is message metadata only.
 
+The optional `customConnections` platform port supplies only approved mount
+identity (id, slug, generation, catalog). It is passed into hosted execution
+context without reading it. The engine reads it when an eligible personal
+ordinary hosted turn plans; the Cloudflare implementation memoizes that read
+for the invocation. Web owns all connection credentials and admission checks.
+
 Background notifications yield at the existing delivery checkpoint before
 another automation decision or managed-automation setup. Queue-only cron work
 also yields after creating pending output. The existing outbox dispatch and
 retry owners record acceptance; later notifications derive bounded context
 from those receipts. Pending text never counts as a prior send, and a failed
 send creates no indefinite scheduling barrier.
+
+Ordinary Linq text sends to the current delivery context claim Web
+egress authority once, before building the provider request. A reply must carry
+its matching inbound message ID; sends without one retain route/alias resolution
+through the existing two calls. The matching context accepts thread and explicit
+targets; participant targets cannot match.
+A direct reply carries the home-route fallback flag, and it does not change
+this: Web resolves an anchored reply to its inbound's chat and never re-homes a
+claiming call, so a chat the member no longer owns is rejected before any claim.
+Unanchored home-route fallback sends, cards, any media, reviewed/private Assistant Ask
+completions, progress updates, reactions and voice memos keep their existing
+authority ordering. Web must return the resolved route even for an already
+started claim; legacy already-started errors without a route fail closed.
+Provider-entry liveness checks and attempt stamping remain at every fetch.
+Dispatch-fence timing begins with the claim; ordinary sends report zero
+route-authority-check time. The direct iMessage turn-commit probe is unchanged.
 
 Stopping the active mailbox watcher cancels its system HTTP fetch, preserving
 the system watermark for retry. Conversation imports keep their completion
@@ -453,3 +475,14 @@ alongside the original phase signal, including provider cleanup. A batch carryin
 a current-turn reply preserves its delivery priority across scheduling wakes.
 Cancellation before provider entry releases only exact prepared claims; provider
 entry uncertainty and accepted receipts continue to prevent blind resend.
+
+
+Group departure uses the existing group-tool port with accepted-input origin;
+the runtime adds no Linq room context, including on RCS. Web derives the room
+from the persisted input. The marker makes transport replay safe with only one
+provider leave attempt. Deploy Web and its additive reason expansion before
+Cloudflare enables the tool. Older runners already deny revoked route egress
+and durably settle stale notifications; no new egress error is introduced.
+Typing already in flight and poll notifications admitted before the leave can
+still run, but route loss denies their output. See `ARCHITECTURE.md` for the
+sticky local-departure and game-history contracts.

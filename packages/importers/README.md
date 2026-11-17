@@ -43,11 +43,10 @@ If a provider adapter returns a non-empty snapshot without any provider-owned ra
 
 Built-in providers now share one descriptor surface in `device-providers/provider-descriptors.ts`. That descriptor is the single source for provider key, transport modes, OAuth paths/scopes, webhook support, default sync windows, metric families, and source-priority hints, so importers and `device-syncd` no longer drift on provider metadata.
 
-Junction's `device-providers/junction-canonical-coverage.ts` owns accepted-event
-coverage, provider-day finalization, and migration fence admission. The snapshot
-import bridge derives coverage from the canonical writer's returned events.
-Normalization applies the fence to its original event array before finalizing
-authoritative sets; device-sync continues to own persisted migration progress.
+Junction's `device-providers/junction-canonical-coverage.ts` derives accepted
+source/resource receipts from the canonical writer's returned events. These
+receipts drive device-sync import signals. Source admission and lifecycle state
+remain with device-sync; overlapping sources keep separate canonical base facts.
 
 The iOS companion's direct WHOOP overnight-HRV path is a deliberately narrower
 Junction-account ingress rather than a fourth transport provider. It accepts

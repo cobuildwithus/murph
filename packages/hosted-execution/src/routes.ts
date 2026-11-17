@@ -4,6 +4,7 @@ export const HOSTED_MACHINE_ROUTE_PREFIX = "/api/internal/";
 export const HOSTED_RUNTIME_DATA_API_PATHS: readonly string[] = ["/api/foods", "/api/supplements"];
 
 export const HOSTED_RUNTIME_POLL_TOOL_PATH = "/api/internal/hosted-execution/polls/tool";
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type { HostedExecutionResolvedLinqDeliveryRoute } from "./contracts.ts";
 
 export const HOSTED_RUNTIME_MAILBOX_FETCH_PATH = "/api/internal/hosted-mailbox/fetch";
@@ -76,7 +77,7 @@ export function parseHostedRuntimeOwnerReleaseSearch(
       && !immediateRecheckRequested
     )
   ) {
-    throw new TypeError("Hosted runtime owner-release query is invalid.");
+    throw new ContractValidationError("Hosted runtime owner-release query is invalid.");
   }
 
   const canonical = runtimeAttemptId === null
@@ -86,7 +87,7 @@ export function parseHostedRuntimeOwnerReleaseSearch(
         runtimeAttemptId,
       });
   if (value !== canonical) {
-    throw new TypeError("Hosted runtime owner-release query is invalid.");
+    throw new ContractValidationError("Hosted runtime owner-release query is invalid.");
   }
 
   return {
@@ -101,7 +102,7 @@ function requireHostedRuntimeOwnerReleaseAttemptId(value: string): string {
     || value.length > 192
     || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(value)
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runtime owner-release runtimeAttemptId must be a bounded opaque identifier.",
     );
   }

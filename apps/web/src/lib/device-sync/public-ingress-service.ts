@@ -1,3 +1,4 @@
+import { RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import { createHostedDeviceSyncRegistry } from "./providers";
 import {
   createDeviceSyncPublicIngress,
@@ -5,8 +6,6 @@ import {
 } from "@murphai/device-syncd/public-ingress";
 import {
   canonicalizeJunctionProviderSlug,
-  JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG,
-  normalizeJunctionProviderSlug,
   type DeviceSyncConnectTarget,
 } from "@murphai/device-syncd/connect-config";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
@@ -19,6 +18,7 @@ import {
   DEVICE_SYNC_WEBHOOK_TRACE_COMPLETED,
   type BeginConnectionResult,
   type CompleteConnectionResult,
+  type DeviceSyncAppConnectReturn,
   type HandleWebhookResult,
   type DeviceSyncWebhookPreflightResponse,
   type PublicDeviceSyncAccount,
@@ -37,7 +37,6 @@ import type { HostedDeviceSyncControlPlaneContext } from "./control-plane-contex
 import { createHostedDeviceSyncControlPlaneContext } from "./control-plane-context";
 import {
   assertCompanionHrvRmssdObservationFresh,
-  COMPANION_APPLE_HEALTH_SOURCE_PROVIDER,
   COMPANION_DEVICE_SYNC_STATUS_CONNECTION_LIMIT,
   resolveCompanionHrvRmssdConnection,
   type CompanionConnectionIntent,
@@ -51,7 +50,6 @@ import {
   acceptHostedCompanionHrvRmssdObservation,
   beginHostedDeviceSyncConnectionSourceReconnect,
   buildHostedCompanionHrvRmssdDirtyResource,
-  buildHostedJunctionSourceEstablishmentWork,
   captureHostedDeviceSyncConnectionSourceReconnect,
   cleanupRejectedHostedDeviceSyncConnectionSource,
   disconnectHostedDeviceSyncConnection,
@@ -59,10 +57,10 @@ import {
   handleHostedDeviceSyncConnectionEstablished,
   handleHostedDeviceSyncUnknownWebhook,
   handleHostedDeviceSyncWebhookAccepted,
-  hasAuthorizedHostedGoogleHealthFitbitLegacyBackfillSource,
   prepareHostedDeviceSyncConnectionSourceStart,
 } from "./wake-service";
 import { completeHostedGoogleHealthFitbitMigration } from "./fitbit-migration-cutover";
+import { queueHostedDeviceSyncManualReconcile } from "./hosted-runtime-reconcile";
 import { readRawBodyBuffer } from "./http";
 import { HostedDeviceSyncWebhookAdminService } from "./webhook-admin-service";
 export class HostedDeviceSyncPublicIngressService {
@@ -112,29 +110,9 @@ export class HostedDeviceSyncPublicIngressService {
             });
           }
 
-          const isGoogleHealthSource =
-            account.provider === "junction"
-            && normalizeJunctionProviderSlug(sourceProviderSlug)
-              === JUNCTION_GOOGLE_HEALTH_PROVIDER_SLUG;
-          const legacySources = isGoogleHealthSource
-            ? await this.context.store.listConnectionSources(account.id)
-            : [];
-          const buildSourceConnectionWork =
-            provider.connectionHandler?.buildSourceConnectionWork;
-          const connectionWork = isGoogleHealthSource && buildSourceConnectionWork
-            ? buildHostedJunctionSourceEstablishmentWork({
-                buildSourceConnectionWork,
-                connectionWork: connection,
-                hasAuthorizedLegacyFitbitBackfillSource:
-                  hasAuthorizedHostedGoogleHealthFitbitLegacyBackfillSource(legacySources),
-                now,
-                sourceProviderSlug,
-              })
-            : connection;
-
           await handleHostedDeviceSyncConnectionEstablished({
             account,
-            connection: connectionWork,
+            connection,
             connectionStartedAt: connectionStartedAt ?? null,
             now,
             sourceProviderSlug: sourceProviderSlug ?? null,
@@ -211,6 +189,7 @@ export class HostedDeviceSyncPublicIngressService {
     provider: string,
     returnTo: string | null,
     options: {
+      appReturn?: DeviceSyncAppConnectReturn | null;
       sourceProviderSlug?: string | null;
       connectSourceId?: string | null;
       connectTarget?: string | null;
@@ -228,6 +207,7 @@ export class HostedDeviceSyncPublicIngressService {
   private startConnectionWithIngress(input: {
     ingress: ReturnType<typeof createDeviceSyncPublicIngress>;
     options: {
+      appReturn?: DeviceSyncAppConnectReturn | null;
       sourceProviderSlug?: string | null;
       connectSourceId?: string | null;
       connectTarget?: string | null;
@@ -251,6 +231,7 @@ export class HostedDeviceSyncPublicIngressService {
     return input.ingress.startConnection({
       provider: input.provider,
       returnTo: input.returnTo,
+      appReturn: input.options.appReturn ?? null,
       ownerId: input.userId,
       sourceProviderSlug: input.options.sourceProviderSlug ?? null,
       sourceLifecycleProof,
@@ -300,11 +281,15 @@ export class HostedDeviceSyncPublicIngressService {
     return this.handleConnectionCallback(provider, options);
   }
 
-  /** Companion SDK sign-in. Only an explicit connect may change lifecycle state. */
+  /**
+   * Companion SDK sign-in. Only an explicit connect may change lifecycle
+   * state, and only for the calling platform's own phone health source.
+   */
   async createSdkSignInSession(
     userId: string,
     provider: string,
     connectionIntent: CompanionConnectionIntent | null,
+    sourceProviderSlug: string,
   ): Promise<SdkSignInSessionResult> {
     const providerConnections = await this.context.store.listMemberConnectionStatuses({
       limit: COMPANION_DEVICE_SYNC_STATUS_CONNECTION_LIMIT,
@@ -329,7 +314,7 @@ export class HostedDeviceSyncPublicIngressService {
       const capturedReconnectProof = establishedConnection
         ? await captureHostedDeviceSyncConnectionSourceReconnect({
             connectionId: establishedConnection.id,
-            sourceProviderSlug: COMPANION_APPLE_HEALTH_SOURCE_PROVIDER,
+            sourceProviderSlug,
             store: this.context.store,
             userId,
           })
@@ -352,7 +337,7 @@ export class HostedDeviceSyncPublicIngressService {
       const reconnectProof = capturedReconnectProof
         ?? await captureHostedDeviceSyncConnectionSourceReconnect({
           connectionId: session.account.id,
-          sourceProviderSlug: COMPANION_APPLE_HEALTH_SOURCE_PROVIDER,
+          sourceProviderSlug,
           store: this.context.store,
           userId,
         });
@@ -467,13 +452,16 @@ export class HostedDeviceSyncPublicIngressService {
     });
   }
 
+  /**
+   * `query` is the provider's return query when it did not arrive on this
+   * request's own URL: the app forwards it in a body after its return bridge.
+   */
   async handleConnectionCallback(
     provider: string,
-    options: { expectedOwnerId: string },
+    options: { expectedOwnerId: string; query?: URLSearchParams },
   ): Promise<CompleteConnectionResult> {
-    const url = new URL(this.context.request.url);
-    const state = url.searchParams.get("murph_state")
-      ?? url.searchParams.get("state");
+    const query = options.query ?? new URL(this.context.request.url).searchParams;
+    const state = query.get("murph_state") ?? query.get("state");
     const ingress = this.ingress;
     const handleConnectionCallback =
       typeof Reflect.get(ingress, "handleConnectionCallback") === "function"
@@ -482,13 +470,13 @@ export class HostedDeviceSyncPublicIngressService {
 
     return handleConnectionCallback({
       provider,
-      query: url.searchParams,
-      code: url.searchParams.get("code"),
+      query,
+      code: query.get("code"),
       expectedOwnerId: options.expectedOwnerId,
       state,
-      scope: url.searchParams.get("scope"),
-      error: url.searchParams.get("error"),
-      errorDescription: url.searchParams.get("error_description"),
+      scope: query.get("scope"),
+      error: query.get("error"),
+      errorDescription: query.get("error_description"),
     });
   }
 
@@ -498,7 +486,7 @@ export class HostedDeviceSyncPublicIngressService {
         limitBytes: DEFAULT_DEVICE_SYNC_HTTP_BODY_LIMIT_BYTES,
       });
     } catch (error) {
-      if (error instanceof RangeError) {
+      if (error instanceof RequestBodyTooLargeError) {
         throw deviceSyncError({
           code: "PAYLOAD_TOO_LARGE",
           message: error.message,
@@ -609,6 +597,21 @@ export class HostedDeviceSyncPublicIngressService {
       connectionId: connection.id,
       registry,
       sourceProviderSlug,
+      store: this.context.store,
+      userId,
+    });
+  }
+
+  /** Queues a member-requested re-sync of a connection named by its public id. */
+  async queueConnectionManualReconcile(
+    userId: string,
+    publicConnectionId: string,
+    occurredAt: (connectedAt: string) => string,
+  ): Promise<void> {
+    const connection = await this.requireOwnedBrowserConnection(userId, publicConnectionId);
+    await queueHostedDeviceSyncManualReconcile({
+      connectionId: connection.id,
+      occurredAt,
       store: this.context.store,
       userId,
     });

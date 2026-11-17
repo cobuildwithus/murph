@@ -43,11 +43,11 @@ test("deleted generic Commons commands are no longer registered", async () => {
 test("commons knowledge search returns a bounded source-backed biomarker packet", async () => {
   const cli = createCommonsSliceCli();
   const result = await runInProcessJsonCli<{
-    available: boolean;
     candidates: Array<{ key: string; title: string }>;
-    items: Array<{
-      entityKey: string;
-      sources: Array<{ pmid: string | null; url: string | null }>;
+    items: Array<Record<string, unknown> & {
+      kind: string;
+      sources: Array<Record<string, unknown>>;
+      text: string;
     }>;
     safety: { kind: string } | null;
     topic: { key: string; title: string } | null;
@@ -62,12 +62,21 @@ test("commons knowledge search returns a bounded source-backed biomarker packet"
 
   assert.equal(result.envelope.ok, true);
   const data = requireData(result.envelope);
-  assert.equal(data.available, true);
+  assert.deepEqual(Object.keys(data).sort(), ["candidates", "items", "safety", "topic"]);
   assert.equal(data.topic?.key, "biomarker:deep-sleep-minutes");
   assert.deepEqual(data.candidates, []);
   assert.ok(data.items.length > 0 && data.items.length <= 3);
-  assert.ok(data.items.some((item) =>
-    item.sources.some((source) => source.pmid !== null || source.url !== null)
+  for (const item of data.items) {
+    assert.deepEqual(
+      Object.keys(item).sort(),
+      ["caveat", "kind", "sources", "strength", "text"],
+    );
+    for (const source of item.sources) {
+      assert.deepEqual(Object.keys(source).sort(), ["designKind", "title", "url", "year"]);
+    }
+  }
+  assert.ok(data.items.every((item) =>
+    item.sources.every((source) => typeof source.url === "string")
   ));
 });
 
@@ -107,11 +116,10 @@ test("commons knowledge search stays non-blocking when its generated index is mi
   );
   try {
     const result = await runInProcessJsonCli<{
-      available: boolean;
       candidates: unknown[];
       items: unknown[];
       topic: unknown;
-      warning: string | null;
+      warning?: string;
     }>(createCommonsSliceCli(), [
       "commons",
       "knowledge",
@@ -121,7 +129,6 @@ test("commons knowledge search stays non-blocking when its generated index is mi
 
     assert.equal(result.envelope.ok, true);
     const data = requireData(result.envelope);
-    assert.equal(data.available, false);
     assert.deepEqual(data.candidates, []);
     assert.deepEqual(data.items, []);
     assert.equal(data.topic, null);
@@ -165,18 +172,14 @@ test("commons goal commands fail closed when their compact index is unavailable"
   }
 });
 
-test("commons goal list and show expose an outcome guide with exact lineage", async () => {
+test("commons goal list returns match rows and show exposes the guide with exact lineage", async () => {
   const cli = createCommonsSliceCli();
   const listResult = await runInProcessJsonCli<{
-    goals: Array<{
-      category: string;
+    goals: Array<Record<string, unknown> & {
+      aliases: string[];
+      goalPhrase: string;
       key: string;
-      revision: {
-        pageRevisionId: string;
-        workflowSpecRevisionId: string;
-      };
-      sources: Array<{ label: string; url: string }>;
-      startPrompt: string;
+      title: string;
     }>;
     total: number;
   }>(cli, [
@@ -193,17 +196,22 @@ test("commons goal list and show expose an outcome guide with exact lineage", as
 
   assert.equal(listResult.envelope.ok, true);
   const list = requireData(listResult.envelope);
+  assert.deepEqual(Object.keys(list).sort(), ["goals", "total"]);
   assert.ok(list.total > 0);
+  assert.ok(list.goals.every((goal) =>
+    JSON.stringify(Object.keys(goal).sort())
+      === JSON.stringify(["aliases", "goalPhrase", "key", "title"])
+  ));
   const summary = list.goals.find((goal) =>
     goal.key === "goal_template:improve-deep-sleep"
   );
-  assert.equal(summary?.category, "sleep");
-  assert.match(summary?.revision.pageRevisionId ?? "", /^sha256:/u);
-  assert.match(summary?.revision.workflowSpecRevisionId ?? "", /^sha256:/u);
-  assert.equal(summary?.startPrompt, "Hey Murph, help me improve my deep sleep.");
+  assert.equal(summary?.goalPhrase, "improve my deep sleep");
+  assert.ok(Array.isArray(summary?.aliases));
+  assert.ok((summary?.title.length ?? 0) > 0);
 
   const showResult = await runInProcessJsonCli<{
     goal: {
+      category: string;
       indexable: true;
       key: string;
       revision: {
@@ -212,6 +220,7 @@ test("commons goal list and show expose an outcome guide with exact lineage", as
       };
       safetyTier: string;
       sources: Array<{ label: string; url: string }>;
+      startPrompt: string;
     };
   }>(cli, ["commons", "goal", "show", "improve-deep-sleep"]);
 
@@ -219,11 +228,14 @@ test("commons goal list and show expose an outcome guide with exact lineage", as
   const shown = requireData(showResult.envelope).goal;
   assert.equal(shown.key, "goal_template:improve-deep-sleep");
   assert.equal(shown.indexable, true);
+  assert.equal(shown.category, "sleep");
+  assert.equal(shown.startPrompt, "Hey Murph, help me improve my deep sleep.");
   assert.ok(shown.sources.length >= 2);
   assert.ok(shown.sources.every((source) => source.label.length > 0));
   assert.ok(shown.sources.every((source) => /^https:\/\//u.test(source.url)));
   assert.ok(shown.safetyTier.length > 0);
-  assert.deepEqual(shown.revision, summary?.revision);
+  assert.match(shown.revision.pageRevisionId, /^sha256:/u);
+  assert.match(shown.revision.workflowSpecRevisionId, /^sha256:/u);
   assert.equal(Object.hasOwn(shown, "body"), false);
   assert.equal(Object.hasOwn(shown, "evidenceSourceKeys"), false);
   assert.equal(Object.hasOwn(shown, "sourceSnippets"), false);

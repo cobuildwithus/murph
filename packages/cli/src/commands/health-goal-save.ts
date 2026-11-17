@@ -16,7 +16,6 @@ import {
 import {
   createHealthEntityCrudGroup,
 } from "./health-entity-command-registry.js";
-import { suggestedCommandsCta } from "./command-factory-primitives.js";
 
 const goalSlugSchema = z
   .string()
@@ -316,27 +315,7 @@ export function registerGoalCommands(
       );
       const saved = toGoalSaveResult(context.options.vault, result);
 
-      return context.ok(saved, {
-        cta: suggestedCommandsCta([
-          {
-            command: "goal show",
-            args: {
-              id: saved.goalId,
-            },
-            description: "Show the saved goal record.",
-            options: {
-              vault: true,
-            },
-          },
-          {
-            command: "goal list",
-            description: "List goals.",
-            options: {
-              vault: true,
-            },
-          },
-        ]),
-      });
+      return saved;
     },
   });
 

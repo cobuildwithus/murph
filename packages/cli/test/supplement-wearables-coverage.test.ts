@@ -159,7 +159,8 @@ test('supplement commands exercise typed save, read, compound, and stop paths in
     count: number
     items: Array<{
       excerpt?: string | null
-      slug: string
+      title?: string
+      data: Record<string, unknown>
       markdown?: string | null
     }>
   }>(cli, [
@@ -175,10 +176,13 @@ test('supplement commands exercise typed save, read, compound, and stop paths in
   assert.equal(listed.exitCode, null)
   assert.equal(requireData(listed.envelope).count >= 1, true)
   assert.equal('markdown' in (requireData(listed.envelope).items[0] ?? {}), false)
-  assert.match(
-    requireData(listed.envelope).items[0]?.excerpt ?? '',
-    /Liposomal Vitamin C/u,
-  )
+  // The generated body adds nothing the summary fields lack.
+  assert.equal('excerpt' in (requireData(listed.envelope).items[0] ?? {}), false)
+  assert.equal(requireData(listed.envelope).items[0]?.title, 'Liposomal Vitamin C')
+  assert.deepEqual(requireData(listed.envelope).items[0]?.data.ingredients, [
+    'Vitamin C (Ascorbic acid) 500 mg',
+  ])
+  assert.equal(requireData(listed.envelope).items[0]?.data.brand, 'LivOn Labs')
 
   const listedDefault = await runInProcessJsonCli<{
     filters: {
@@ -660,12 +664,8 @@ test('real wearable CLI provider filters select Fitbit and Withings evidence', a
   type DayResult = {
     filters: { providers: string[] }
     summary: {
-      activity?: {
-        steps?: { provider?: string | null; value: number | null }
-      } | null
-      bodyState?: {
-        weightKg?: { provider?: string | null; value: number | null }
-      } | null
+      activity?: { provider?: string; steps?: number } | null
+      bodyState?: { provider?: string; weightKg?: number } | null
     } | null
   }
 
@@ -681,8 +681,8 @@ test('real wearable CLI provider filters select Fitbit and Withings evidence', a
   assert.equal(fitbit.exitCode, null)
   const fitbitData = requireData(fitbit.envelope)
   assert.deepEqual(fitbitData.filters.providers, ['fitbit'])
-  assert.equal(fitbitData.summary?.activity?.steps?.provider, 'fitbit')
-  assert.equal(fitbitData.summary?.activity?.steps?.value, 4_321)
+  assert.equal(fitbitData.summary?.activity?.provider, 'fitbit')
+  assert.equal(fitbitData.summary?.activity?.steps, 4_321)
   assert.equal(fitbitData.summary?.bodyState ?? null, null)
 
   const withings = await runInProcessJsonCli<DayResult>(cli, [
@@ -697,8 +697,8 @@ test('real wearable CLI provider filters select Fitbit and Withings evidence', a
   assert.equal(withings.exitCode, null)
   const withingsData = requireData(withings.envelope)
   assert.deepEqual(withingsData.filters.providers, ['withings'])
-  assert.equal(withingsData.summary?.bodyState?.weightKg?.provider, 'withings')
-  assert.equal(withingsData.summary?.bodyState?.weightKg?.value, 72.4)
+  assert.equal(withingsData.summary?.bodyState?.provider, 'withings')
+  assert.equal(withingsData.summary?.bodyState?.weightKg, 72.4)
   assert.equal(withingsData.summary?.activity ?? null, null)
 
   const absent = await runInProcessJsonCli<DayResult>(cli, [

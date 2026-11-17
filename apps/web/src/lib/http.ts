@@ -1,8 +1,10 @@
+import { isRequestInputError, RequestBodyTooLargeError, RequestInputError } from "@murphai/hosted-execution/request-input";
 import { Buffer } from "node:buffer";
 
 import { NextResponse } from "next/server";
 
 import { isRecord } from "./primitives";
+import { readCompanionClientInfo, type CompanionClientInfo } from "./companion/client-info";
 
 export function jsonOk(payload: unknown, status = 200): NextResponse {
   return NextResponse.json(payload, { status });
@@ -109,19 +111,39 @@ export interface JsonRouteHelpers {
 
 interface JsonRouteLogContext {
   requestMethod?: string;
+  clientPlatform?: CompanionClientInfo["platform"];
+  clientVersion?: string;
+  clientBuild?: string;
+  clientOsVersion?: string | null;
+  clientDeviceModel?: string | null;
 }
 
-export class InvalidRouteParamEncodingError extends TypeError {
+export class InvalidRouteParamEncodingError extends RequestInputError {
   constructor(key: string) {
     super(`Route parameter ${key} contained an invalid encoding.`);
     this.name = "InvalidRouteParamEncodingError";
   }
 }
 
-export class InvalidJsonObjectBodyError extends TypeError {
+export class InvalidJsonObjectBodyError extends RequestInputError {
   constructor() {
     super("Request body must be a JSON object.");
     this.name = "InvalidJsonObjectBodyError";
+  }
+}
+
+export class InvalidJsonBodyError extends RequestInputError {
+  override name = "InvalidJsonBodyError";
+}
+
+export function parseRequestJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      throw new InvalidJsonBodyError("Request body is not valid JSON.", { cause: error });
+    }
+    throw error;
   }
 }
 
@@ -133,7 +155,7 @@ export async function readJsonObject(
   request: Request,
   options: JsonBodyReadOptions = {},
 ): Promise<Record<string, unknown>> {
-  return requireJsonObject(JSON.parse(await readRequestBodyText(request, options)));
+  return requireJsonObject(parseRequestJson(await readRequestBodyText(request, options)));
 }
 
 export async function readOptionalJsonObject(
@@ -146,7 +168,7 @@ export async function readOptionalJsonObject(
     return {};
   }
 
-  return requireJsonObject(JSON.parse(text));
+  return requireJsonObject(parseRequestJson(text));
 }
 
 async function readRequestBodyText(
@@ -170,7 +192,7 @@ export async function readRawBodyBuffer(
     const parsedContentLength = Number.parseInt(declaredContentLength, 10);
 
     if (Number.isFinite(parsedContentLength) && parsedContentLength > limitBytes) {
-      throw new RangeError(`Request body exceeded ${limitBytes} bytes.`);
+      throw new RequestBodyTooLargeError(limitBytes);
     }
   }
 
@@ -198,7 +220,7 @@ export async function readRawBodyBuffer(
 
       if (totalBytes > limitBytes) {
         await reader.cancel();
-        throw new RangeError(`Request body exceeded ${limitBytes} bytes.`);
+        throw new RequestBodyTooLargeError(limitBytes);
       }
 
       chunks.push(Buffer.from(value));
@@ -224,10 +246,12 @@ export async function resolveDecodedRouteParam<
   key: TKey,
 ): Promise<string> {
   const resolvedParams = await resolveRouteParams(params);
+  const value = resolvedParams[key];
 
   try {
-    return decodeURIComponent(resolvedParams[key]);
-  } catch {
+    return decodeURIComponent(value);
+  } catch (error) {
+    if (!(error instanceof URIError)) throw error;
     throw new InvalidRouteParamEncodingError(key);
   }
 }
@@ -277,22 +301,17 @@ export function createJsonErrorResponse(
     );
   }
 
-  if (error instanceof SyntaxError) {
-    logJsonError("warn", error, options, {
-      errorResponseCode: "INVALID_JSON",
-    });
+  if (isRequestInputError(error)) {
+    const invalidJson = error instanceof InvalidJsonBodyError;
+    const code = invalidJson ? "INVALID_JSON" : "INVALID_REQUEST";
+    logJsonError("warn", error, options, { errorResponseCode: code });
     return NextResponse.json(
-      {
-        error: {
-          code: "INVALID_JSON",
-          message: "Invalid JSON.",
-        },
-      },
+      { error: { code, message: invalidJson ? "Invalid JSON." : "Invalid request." } },
       buildJsonResponseInit(options, 400),
     );
   }
 
-  if (isRequestBodyTooLargeError(error)) {
+  if (error instanceof RequestBodyTooLargeError) {
     logJsonError("warn", error, options, {
       errorResponseCode: "REQUEST_BODY_TOO_LARGE",
     });
@@ -304,21 +323,6 @@ export function createJsonErrorResponse(
         },
       },
       buildJsonResponseInit(options, 413),
-    );
-  }
-
-  if (error instanceof TypeError || error instanceof RangeError || error instanceof URIError) {
-    logJsonError("warn", error, options, {
-      errorResponseCode: "INVALID_REQUEST",
-    });
-    return NextResponse.json(
-      {
-        error: {
-          code: "INVALID_REQUEST",
-          message: "Invalid request.",
-        },
-      },
-      buildJsonResponseInit(options, 400),
     );
   }
 
@@ -334,10 +338,6 @@ export function createJsonErrorResponse(
     },
     buildJsonResponseInit(options, 500),
   );
-}
-
-function isRequestBodyTooLargeError(error: unknown): error is RangeError {
-  return error instanceof RangeError && error.message.startsWith("Request body exceeded ");
 }
 
 export function createJsonRouteHelpers(
@@ -549,8 +549,16 @@ function describeJsonRouteLogContext(args: readonly unknown[]): JsonRouteLogCont
     return null;
   }
 
+  const clientInfo = readCompanionClientInfo(request.headers);
   return {
     requestMethod: request.method,
+    ...(clientInfo ? {
+      clientPlatform: clientInfo.platform,
+      clientVersion: clientInfo.version,
+      clientBuild: clientInfo.build,
+      clientOsVersion: clientInfo.osVersion,
+      clientDeviceModel: clientInfo.deviceModel,
+    } : {}),
   };
 }
 

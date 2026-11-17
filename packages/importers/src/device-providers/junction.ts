@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 
@@ -149,18 +150,12 @@ import type {
   DeviceProviderNormalizationContext,
   NormalizedDeviceBatch,
 } from "./types.ts";
-import {
-  applyJunctionCanonicalCoverageFence,
-  type JunctionCanonicalCoverageFence,
-} from "./junction-canonical-coverage.ts";
 import { JUNCTION_DEVICE_PROVIDER_DESCRIPTOR } from "./provider-descriptors.ts";
 
 export {
   deriveJunctionCanonicalCoverageEvidence,
-  type JunctionCanonicalCoverageDerivationOptions,
   type JunctionCanonicalCoverageEvent,
   type JunctionCanonicalCoverageEvidence,
-  type JunctionCanonicalCoverageFence,
 } from "./junction-canonical-coverage.ts";
 
 export {
@@ -207,8 +202,6 @@ export interface JunctionSnapshotInput {
   summaries?: Record<string, unknown>;
   timeseries?: Record<string, unknown>;
   companionHrvRmssd?: JunctionCompanionHrvRmssdSnapshotEntry;
-  canonicalCoverageFence?: JunctionCanonicalCoverageFence;
-  canonicalCoverageProviderPulledAt?: string;
 }
 
 export type JunctionTimeseriesWindowKind = "calendar_day" | "precise";
@@ -322,11 +315,6 @@ const junctionSnapshotSchema = z.object({
   summaries: z.record(z.string(), z.unknown()).optional(),
   timeseries: z.record(z.string(), z.unknown()).optional(),
   companionHrvRmssd: z.unknown().optional(),
-  canonicalCoverageFence: z.object({
-    coverageBoundaryByResource: z.record(z.string(), z.string().nullable()),
-    sourceProviderSlug: z.string(),
-  }).strict().optional(),
-  canonicalCoverageProviderPulledAt: z.string().optional(),
 }).catchall(z.unknown());
 
 const junctionCompanionHrvRmssdSnapshotEntrySchema = z.object({
@@ -543,6 +531,7 @@ const JUNCTION_GENERIC_SUMMARY_ID_PATHS = [
   "providerId",
   "provider_id",
 ] as const;
+const JUNCTION_SLEEP_CYCLE_SLEEP_ID_PATHS = ["sleep_id", "sleepId"] as const;
 const JUNCTION_RECORD_POINT_TIMESTAMP_PATHS = [
   "observedAtRaw",
   "observed_at_raw",
@@ -1123,6 +1112,7 @@ interface JunctionSleepStageAggregate {
   parentResourceId: string;
   recordedAt?: string;
   resourceContext: ResourceContext;
+  sleepId?: string;
   stage: JunctionSleepStage;
   startAt: string;
   timestamp: ReturnType<typeof resolveRecordTimestamp>;
@@ -1138,6 +1128,7 @@ interface JunctionSleepTotalAggregate {
   parentResourceId: string;
   recordedAt?: string;
   resourceContext: ResourceContext;
+  sleepId?: string;
   startAt: string;
   timestamp: ReturnType<typeof resolveRecordTimestamp>;
   timeZone?: string;
@@ -1173,6 +1164,7 @@ interface JunctionSleepStageAggregateBucket {
   parentResourceId: string;
   recordedAt?: string;
   resourceContext: ResourceContext;
+  sleepId?: string;
   startAt: string;
   timestamp: ReturnType<typeof resolveRecordTimestamp>;
   timeZone?: string;
@@ -1181,6 +1173,7 @@ interface JunctionSleepStageAggregateBucket {
 interface JunctionSleepSummaryStageMetricOwner {
   endAt: string;
   metric: string;
+  sleepId?: string;
   sourceInstanceId?: string;
   sourceProviderSlug: string;
   sourceType?: string;
@@ -1207,7 +1200,7 @@ function parseJunctionCompanionHrvRmssdSnapshotEntry(
     .update(serializeCompanionHrvRmssdObservation(observation))
     .digest("hex");
   if (admissionId !== expectedAdmissionId) {
-    throw new TypeError("Companion HRV admission identity did not match its observation.");
+    throw new ContractValidationError("Companion HRV admission identity did not match its observation.");
   }
 
   return { admissionId, observation };
@@ -1251,10 +1244,6 @@ export function normalizeJunctionSnapshot(
   normalizeSummaries(snapshot.summaries, context);
   normalizeTimeseries(snapshot.timeseries, context);
   normalizeCompanionHrvRmssd(companionHrvRmssd, context);
-  applyJunctionCanonicalCoverageFence(
-    events,
-    snapshot.canonicalCoverageFence,
-  );
   finalizeJunctionTemporalAuthoritativeSets(context);
   assertJunctionTimeseriesOutputBounds({
     eventCount: events.length,
@@ -1786,6 +1775,7 @@ function collectJunctionSleepSummaryMetricOwners(
       owners.push(stripUndefined({
         endAt,
         metric: metric.metric,
+        sleepId: firstStringFromPaths(entry, JUNCTION_GENERIC_SUMMARY_ID_PATHS),
         sourceInstanceId: resourceContext.origin.sourceInstanceId ?? undefined,
         sourceProviderSlug: resourceContext.sourceProviderSlug,
         sourceType: resourceContext.origin.sourceType,
@@ -6449,13 +6439,9 @@ function sanitizeJunctionRawSnapshot(snapshot: JunctionSnapshotInput): unknown {
   ].every((records) => Array.isArray(records) && records.length === 0);
 
   const {
-    canonicalCoverageFence: _canonicalCoverageFence,
-    canonicalCoverageProviderPulledAt: _canonicalCoverageProviderPulledAt,
     strictSparseCalendarRepair: _strictSparseCalendarRepair,
     ...sanitizedSnapshot
   } = sanitized;
-  void _canonicalCoverageFence;
-  void _canonicalCoverageProviderPulledAt;
   void _strictSparseCalendarRepair;
 
   return stripUndefined({
@@ -6724,6 +6710,7 @@ function pushSleepSummaryStageMetrics(
   const dayKey = startAt && endAt
     ? resolveSleepStageAnchorDayKey(endAt, timeZone, timestamp)
     : timestamp.dayKey ?? extractIsoDatePrefix(occurredAt) ?? undefined;
+  const sleepId = firstStringFromPaths(entry, JUNCTION_GENERIC_SUMMARY_ID_PATHS);
   for (const metric of SLEEP_STAGE_METRICS) {
     if (zeroedSummary && SLEEP_ASLEEP_STAGE_METRIC_NAMES.has(metric.metric)) {
       continue;
@@ -6732,17 +6719,21 @@ function pushSleepSummaryStageMetrics(
     if (!resolved) {
       continue;
     }
-    const externalRef = startAt && endAt
-      ? makeJunctionCanonicalSleepStageExternalRef(resourceContext, {
+    const sleepStageRefs = startAt && endAt
+      ? makeJunctionSleepStageExternalRefs(resourceContext, {
           coverageEndAt: endAt,
           coverageStartAt: startAt,
-          dayKey,
           metric: metric.metric,
-          timeZone,
+          sleepId,
         })
-      : makeJunctionExternalRef(resourceContext, entry, timestamp, metric.metric);
-    const legacyExternalRef = startAt && endAt
-      ? makeJunctionExternalRef(resourceContext, entry, timestamp, metric.metric)
+      : undefined;
+    const externalRef = sleepStageRefs?.externalRef
+      ?? makeJunctionExternalRef(resourceContext, entry, timestamp, metric.metric);
+    const legacyExternalRefs = sleepStageRefs
+      ? [
+          ...sleepStageRefs.legacyExternalRefs,
+          makeJunctionExternalRef(resourceContext, entry, timestamp, metric.metric),
+        ]
       : undefined;
 
     context.events.push(stripUndefined({
@@ -6755,7 +6746,7 @@ function pushSleepSummaryStageMetrics(
       title: metric.title,
       evidenceRoles: resourceContext.evidenceRoles,
       externalRef,
-      legacyExternalRefs: legacyExternalRef ? [legacyExternalRef] : undefined,
+      legacyExternalRefs,
       dataOrigin: buildDataOrigin(entry, resourceContext, timestamp, {
         normalizerVersion: JUNCTION_SLEEP_STAGE_SUMMARY_NORMALIZER_VERSION,
       }),
@@ -6822,11 +6813,7 @@ function pushSleepCycleEntries(
       source: "device",
       title: "Junction total sleep",
       evidenceRoles: aggregate.resourceContext.evidenceRoles,
-      externalRef: makeJunctionSleepAggregateExternalRef(
-        aggregate.resourceContext,
-        aggregate,
-        "sleep-total-minutes",
-      ),
+      ...makeJunctionSleepAggregateExternalRefs(aggregate, "sleep-total-minutes"),
       dataOrigin: buildDataOrigin(aggregate.dataOriginEntry, aggregate.resourceContext, aggregate.timestamp, {
         normalizerVersion: JUNCTION_SLEEP_UNSPECIFIED_TOTAL_NORMALIZER_VERSION,
       }),
@@ -6854,11 +6841,7 @@ function pushSleepCycleEntries(
       source: "device",
       title: metric.title,
       evidenceRoles: aggregate.resourceContext.evidenceRoles,
-      externalRef: makeJunctionSleepAggregateExternalRef(
-        aggregate.resourceContext,
-        aggregate,
-        metric.metric,
-      ),
+      ...makeJunctionSleepAggregateExternalRefs(aggregate, metric.metric),
       dataOrigin: buildDataOrigin(aggregate.dataOriginEntry, aggregate.resourceContext, aggregate.timestamp, {
         normalizerVersion: JUNCTION_SLEEP_STAGE_CYCLE_FALLBACK_NORMALIZER_VERSION,
       }),
@@ -6880,7 +6863,12 @@ function isSleepMetricOwnedBySleepSummary(
   return sleepSummaryStageMetricOwners.some((owner) =>
     owner.metric === metric &&
     sleepStageOwnerSourceMatchesAggregate(owner, aggregate) &&
-    sleepStageOwnerWindowMatchesAggregate(owner, aggregate)
+    (
+      sleepStageOwnerWindowMatchesAggregate(owner, aggregate)
+      // The provider can move a session's start or end between the summary
+      // and its stages; the session id still names one owner.
+      || (owner.sleepId !== undefined && owner.sleepId === aggregate.sleepId)
+    )
   );
 }
 
@@ -6923,6 +6911,8 @@ function collectJunctionSleepStageAggregates(
   if (!parentResourceId || !covered) {
     return;
   }
+  // The cycle names the sleep session its stages belong to.
+  const sleepId = firstStringFromPaths(entry, JUNCTION_SLEEP_CYCLE_SLEEP_ID_PATHS);
 
   const buckets = new Map<string, JunctionSleepStageAggregateBucket>();
   const entryAggregates = new Map<string, JunctionSleepStageAggregate>();
@@ -6959,6 +6949,7 @@ function collectJunctionSleepStageAggregates(
         parentResourceId,
         recordedAt: stageTimestamp.recordedAt,
         resourceContext,
+        sleepId,
         startAt: covered.coverageWindow.startAt,
         timestamp: stageTimestamp,
         timeZone: interval.timeZone,
@@ -6984,6 +6975,7 @@ function collectJunctionSleepStageAggregates(
         parentResourceId,
         recordedAt: stageTimestamp.recordedAt,
         resourceContext,
+        sleepId,
         startAt: covered.coverageWindow.startAt,
         timestamp: stageTimestamp,
         timeZone: interval.timeZone,
@@ -7015,6 +7007,7 @@ function collectJunctionSleepStageAggregates(
       parentResourceId,
       recordedAt: stageTimestamp.recordedAt,
       resourceContext,
+      sleepId,
       stage: interval.stage,
       startAt: covered.coverageWindow.startAt,
       timestamp: stageTimestamp,
@@ -7043,6 +7036,7 @@ function collectJunctionSleepStageAggregates(
         parentResourceId: bucket.parentResourceId,
         recordedAt: bucket.recordedAt,
         resourceContext: bucket.resourceContext,
+        sleepId: bucket.sleepId,
         stage,
         startAt: bucket.startAt,
         timestamp: bucket.timestamp,
@@ -7170,6 +7164,8 @@ function mergeSleepStageAggregateCandidate(
   aggregates.set(aggregateKey, {
     ...preferred,
     recordedAt,
+    // Two records covering one window keep a session id only when they agree.
+    sleepId: existing.sleepId === candidate.sleepId ? preferred.sleepId : undefined,
     timestamp: withTimestampOverride(preferred.timestamp, { recordedAt }),
   });
 }
@@ -7194,6 +7190,8 @@ function mergeSleepTotalAggregateCandidate(
   aggregates.set(aggregateKey, {
     ...preferred,
     recordedAt,
+    // Two records covering one window keep a session id only when they agree.
+    sleepId: existing.sleepId === candidate.sleepId ? preferred.sleepId : undefined,
     timestamp: withTimestampOverride(preferred.timestamp, { recordedAt }),
   });
 }
@@ -7554,43 +7552,55 @@ function hasSleepCycleCompactParentIdentity(entry: PlainObject, sourceProviderSl
     );
 }
 
-function makeJunctionSleepAggregateExternalRef(
-  resourceContext: ResourceContext,
+function makeJunctionSleepAggregateExternalRefs(
   aggregate: JunctionSleepStageAggregate | JunctionSleepTotalAggregate,
   metric: string,
-): DeviceExternalRefPayload {
-  return makeJunctionCanonicalSleepStageExternalRef(resourceContext, {
+): { externalRef: DeviceExternalRefPayload; legacyExternalRefs?: DeviceExternalRefPayload[] } {
+  const refs = makeJunctionSleepStageExternalRefs(aggregate.resourceContext, {
     coverageEndAt: aggregate.coverageEndAt,
     coverageStartAt: aggregate.coverageStartAt,
-    dayKey: aggregate.timestamp.dayKey,
     metric,
-    timeZone: aggregate.timeZone,
+    sleepId: aggregate.sleepId,
   });
+  return refs.legacyExternalRefs.length > 0
+    ? refs
+    : { externalRef: refs.externalRef };
 }
 
-function makeJunctionCanonicalSleepStageExternalRef(
+/**
+ * One owner for a sleep session's total and stage minutes, shared by the sleep
+ * summary and its sleep cycle. The provider's session id names it, so a
+ * session whose start or end is later rewritten revises the same records. The
+ * coverage window named it before, and still does when no session id came
+ * with the record; it stays as a legacy ref so stored records move across.
+ */
+function makeJunctionSleepStageExternalRefs(
   resourceContext: ResourceContext,
   input: {
     coverageEndAt: string;
     coverageStartAt: string;
-    dayKey?: string;
     metric: string;
-    timeZone?: string;
+    sleepId?: string;
   },
-): DeviceExternalRefPayload {
-  return makeProviderExternalRef(
+): { externalRef: DeviceExternalRefPayload; legacyExternalRefs: DeviceExternalRefPayload[] } {
+  const makeRef = (prefix: string, identity: readonly string[]) => makeProviderExternalRef(
     "junction",
     buildJunctionResourceType(resourceContext.sourceProviderSlug, "sleep"),
-    `sleep-stage-${shortHash([
+    `${prefix}-${shortHash([
       resourceContext.sourceProviderSlug,
       resourceContext.origin.sourceType,
       resourceContext.origin.sourceInstanceId,
-      input.coverageStartAt,
-      input.coverageEndAt,
+      ...identity,
     ])}`,
     undefined,
     slugify(input.metric, "value"),
   );
+  const windowRef = makeRef("sleep-stage", [input.coverageStartAt, input.coverageEndAt]);
+  // Core reads these two prefixes to tell a session ref from the window ref
+  // it supersedes.
+  return input.sleepId
+    ? { externalRef: makeRef("sleep-session", [input.sleepId]), legacyExternalRefs: [windowRef] }
+    : { externalRef: windowRef, legacyExternalRefs: [] };
 }
 
 function sleepStageMetricDescriptor(stage: JunctionSleepStage): Pick<MetricDescriptor, "metric" | "title"> {

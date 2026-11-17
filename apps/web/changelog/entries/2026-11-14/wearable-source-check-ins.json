@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-14",
+  "order": 100,
+  "item": {
+    "id": "wearable-source-check-ins",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "A check-in when wearable data goes quiet",
+    "summary": "Murph now tells you when a wearable you wear every day stops sending data, including Fitbit, Oura and Ultrahuman.",
+    "details": "If a daily wearable goes quiet for five days, or three for Apple Health, Murph sends you one private message about it. You can ask Murph to wait longer or to stop these messages, and your wearable stays connected either way. Workout apps, scales and glucose monitors are not included.",
+    "relevanceTags": ["wearables", "reliability"],
+    "sourcePullRequests": [4963]
+  }
+}

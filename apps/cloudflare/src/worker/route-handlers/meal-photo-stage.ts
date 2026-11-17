@@ -1,3 +1,5 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
+import { parseInput, RequestInputError, RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import {
   CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_CAPTURE_ID_HEADER,
   CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_KEY_HEADER,
@@ -19,6 +21,7 @@ import {
   requireHostedMealPhotoCaptureId,
   requireHostedMealPhotoKey,
   requireHostedMealPhotoSha256,
+  requireHostedMealPhotoStageInput,
 } from "../../meal-photo-store.ts";
 import {
   resolveHostedExecutionUserCryptoContext,
@@ -74,10 +77,11 @@ export async function handleMealPhotoDeleteRoute(
   const userId = decodeRouteParam(encodedUserId);
   let mealPhotoKey: string;
   try {
-    mealPhotoKey = requireHostedMealPhotoKey(
+    mealPhotoKey = parseInput(context.request.headers, () => requireHostedMealPhotoKey(
       context.request.headers.get(CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_KEY_HEADER) ?? "",
-    );
-  } catch {
+    ));
+  } catch (error) {
+    if (!(error instanceof RequestInputError)) throw error;
     return jsonError("Meal photo key is invalid.", 400);
   }
 
@@ -105,17 +109,18 @@ export async function handleMealPhotoStageRoute(
   let captureId: string;
   let sha256: string;
   try {
-    captureId = requireHostedMealPhotoCaptureId(
+    captureId = parseInput(context.request.headers, () => requireHostedMealPhotoCaptureId(
       context.request.headers.get(
         CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_CAPTURE_ID_HEADER,
       ) ?? "",
-    );
-    sha256 = requireHostedMealPhotoSha256(
+    ));
+    sha256 = parseInput(context.request.headers, () => requireHostedMealPhotoSha256(
       context.request.headers.get(
         CLOUDFLARE_HOSTED_CONTROL_MEAL_PHOTO_SHA256_HEADER,
       ) ?? "",
-    );
-  } catch {
+    ));
+  } catch (error) {
+    if (!(error instanceof RequestInputError)) throw error;
     return jsonError("Meal photo request metadata is invalid.", 400);
   }
 
@@ -125,22 +130,23 @@ export async function handleMealPhotoStageRoute(
       limitBytes: HOSTED_MEAL_PHOTO_MAX_BYTES,
     });
   } catch (error) {
-    if (error instanceof RangeError) {
+    if (error instanceof RequestBodyTooLargeError) {
       return jsonError("Meal photo exceeds the 4 MiB limit.", 413);
     }
     throw error;
   }
 
-  const store = await createMealPhotoStore(context, userId);
-
+  let stageInput: Awaited<ReturnType<typeof requireHostedMealPhotoStageInput>>;
   try {
-    return json(await store.stageMealPhoto({ bytes, captureId, sha256 }));
+    stageInput = await requireHostedMealPhotoStageInput({ bytes, captureId, sha256 });
   } catch (error) {
-    if (error instanceof TypeError || error instanceof RangeError) {
+    if (error instanceof ContractValidationError) {
       return jsonError("Meal photo payload is invalid.", 400);
     }
     throw error;
   }
+  const store = await createMealPhotoStore(context, userId);
+  return json(await store.stageMealPhoto(stageInput));
 }
 
 async function createMealPhotoStore(context: WorkerRouteContext, userId: string) {

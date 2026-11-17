@@ -1,4 +1,5 @@
 import { type HostedBillingStatus, Prisma, type PrismaClient } from "@prisma/client";
+import { revokeCustomConnectionsBestEffort } from "../custom-connections/service";
 
 import { sanitizeHostedRuntimeErrorCode } from "@murphai/device-syncd/hosted-runtime";
 import { isDeviceSyncError } from "@murphai/device-syncd/errors";
@@ -103,6 +104,8 @@ import {
   type PreparedHostedAccountDeletionCleanup,
 } from "./account-deletion-cleanup";
 import { sha256Hex } from "../primitives";
+import { deleteProgressPicsForAccount } from "../game/progress/pics";
+import { deleteProgressSharesForAccount } from "../game/progress/share-cleanup";
 import { applyGameAccountDeletionTx, prepareGameAccountDeletion } from "../game/account-deletion";
 
 export type {
@@ -137,6 +140,12 @@ export interface HostedAccountDataStoreCoverageEntry {
 
 export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
   {
+    slug: "prisma.game_progress_share",
+    label: "Private Progress share pictures",
+    deletion: "live-delete",
+    note: "After suspension, retires share rows and permanently tombstones generated objects before source pictures or member rows cascade. Failed cleanup retains identities and blocks deletion. The approved account export includes share attempt metadata and ready JPEGs; it omits storage keys and private prompts.",
+  },
+  {
     slug: "prisma.hosted_member",
     label: "Prisma hosted member record",
     deletion: "live-delete",
@@ -159,6 +168,24 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     label: "Short-lived group roster attribution evidence",
     deletion: "documented-retention",
     note: "Global blinded roster evidence is not member-owned authority, is omitted from user exports, and expires no later than 14 days after its latest observation.",
+  },
+  {
+    slug: "prisma.hosted_linq_group_sighting",
+    label: "Global Linq group sightings",
+    deletion: "documented-retention",
+    note: "Independently retained global blinded evidence, omitted from member exports. Expires after 90 days without observation once no handle rows remain; prior-key evidence is deleted on rotation.",
+  },
+  {
+    slug: "prisma.hosted_linq_group_handle",
+    label: "Global Linq group handle evidence",
+    deletion: "documented-retention",
+    note: "Independently retained global blinded evidence, omitted from member exports. Each handle expires 90 days after its own last observation; prior-key evidence is deleted on rotation.",
+  },
+  {
+    slug: "prisma.hosted_linq_handle_block",
+    label: "Global Linq handle blocks",
+    deletion: "documented-retention",
+    note: "Independently retained global ingress policy, omitted from member exports. Blocks do not expire; protected contacts rotate before key retirement and are removed only by an operator.",
   },
   {
     slug: "prisma.hosted_address_book_projection",
@@ -479,6 +506,24 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Deletes bounded operational replay metadata, including capture-key and envelope hashes, before device connection rows; receipts expire after 30 days and are capped at 1,024 per connection.",
   },
   {
+    slug: "prisma.hosted_mcp_connection",
+    label: "Custom connections and their sign-in tokens",
+    deletion: "live-delete",
+    note: "Best-effort revocation at each service runs first; connection rows and their encrypted tokens are deleted with the member.",
+  },
+  {
+    slug: "prisma.hosted_mcp_pending_authorization",
+    label: "Custom connection sign-ins in progress",
+    deletion: "live-delete",
+    note: "Encrypted ten-minute sign-in state is deleted with the member; expired rows are also removed by retention cleanup.",
+  },
+  {
+    slug: "prisma.hosted_mcp_action_request",
+    label: "Changes Murph asked to make in MCP servers",
+    deletion: "live-delete",
+    note: "Each request's encrypted inputs and result are deleted with the member or the connection; retention cleanup removes requests older than 30 days.",
+  },
+  {
     slug: "prisma.hosted_connected_apps_session",
     label: "Connected-app Tool Router sessions",
     deletion: "live-delete",
@@ -569,6 +614,12 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     note: "Deletes the Apple push token, installation id, environment, and alert preference used for the member's companion app and game notifications. Browser-vault export omits the route and token.",
   },
   {
+    slug: "prisma.apple_health_reopen_push",
+    label: "Apple Health reopen reminder receipts",
+    deletion: "live-delete",
+    note: "Deletes the record of each \"Open Murph\" push sent after the phone stopped delivering Apple Health data: the time data last arrived, the schedule step, the outcome, and when. Rows hold no health values or message content.",
+  },
+  {
     slug: "prisma.device_browser_assertion_nonce",
     label: "Device browser assertion nonces",
     deletion: "live-delete",
@@ -615,6 +666,12 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     label: "Composio connected-app provider revocation",
     deletion: "best-effort-delete",
     note: "Lists connected accounts owned by the hosted member and calls Composio provider revocation before local ownership state is deleted.",
+  },
+  {
+    slug: "providers.custom_connections",
+    label: "Custom connection revocation",
+    deletion: "best-effort-delete",
+    note: "Asks each connected service to revoke Murph's token where it publishes a revocation endpoint, within ten seconds; local deletion never waits on or depends on the answer.",
   },
   {
     slug: "providers.linq_telegram_email_messages",
@@ -996,6 +1053,7 @@ async function deleteHostedAccountDataInternal(input: {
     now: deletionStartedAt,
     prisma: input.prisma,
   });
+  await revokeCustomConnectionsBestEffort({ memberId: input.memberId, prisma: input.prisma });
   const providerRevocations = [
     ...deviceProviderRevocations,
     ...connectedAppRevocations,
@@ -1019,6 +1077,9 @@ async function deleteHostedAccountDataInternal(input: {
       prisma: input.prisma,
     });
   }
+
+  await deleteProgressSharesForAccount(deletionMemberIds, input.prisma);
+  await deleteProgressPicsForAccount(deletionMemberIds, input.prisma);
 
   const preparedHostedGroupIds = await listHostedAccountDeletionTargetGroupIds({
     memberIds: deletionMemberIds,
@@ -3097,6 +3158,11 @@ async function deleteHostedAccountPrismaRows(input: {
           DELETE FROM companion_push_route AS route
           WHERE route.user_id IN (SELECT id FROM target_members)
           RETURNING 1
+        ),
+        deleted_apple_health_reopen_pushes AS (
+          DELETE FROM apple_health_reopen_push AS reopen_push
+          WHERE reopen_push.user_id IN (SELECT id FROM target_members)
+          RETURNING 1
         )
         SELECT
           (SELECT count(*) FROM deleted_mailbox_lane_counters)
@@ -3170,7 +3236,9 @@ async function deleteHostedAccountPrismaRows(input: {
           (SELECT count(*) FROM deleted_web_internal_nonces)
             AS "prisma.hosted_web_internal_request_nonce",
           (SELECT count(*) FROM deleted_companion_push_routes)
-            AS "prisma.companion_push_route"
+            AS "prisma.companion_push_route",
+          (SELECT count(*) FROM deleted_apple_health_reopen_pushes)
+            AS "prisma.apple_health_reopen_push"
       `,
     ),
   );

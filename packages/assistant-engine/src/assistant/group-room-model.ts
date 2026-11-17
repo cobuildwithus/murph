@@ -81,6 +81,15 @@ interface AssistantGroupRoomModelReadDependencies {
   }>
 }
 
+export interface AssistantGroupRoomModelPrompt {
+  /**
+   * The digest of the page whose whole body `prompt` carries, so `show` can
+   * skip resending an unchanged body. Null when the prompt is only a status.
+   */
+  bodyDigest: string | null
+  prompt: string
+}
+
 /**
  * Reads the one fixed group-local advisory page without walking the full derived
  * knowledge graph on every chat turn. Missing, inactive, malformed, or oversized
@@ -88,15 +97,21 @@ interface AssistantGroupRoomModelReadDependencies {
  */
 export async function readAssistantGroupRoomModelPrompt(input: {
   vaultRoot: string
-}): Promise<string | null> {
+}): Promise<AssistantGroupRoomModelPrompt> {
   const state = await readAssistantGroupRoomModelState(input)
   if (state.kind === 'present' && state.status === 'active') {
-    return renderAssistantGroupRoomModelPrompt(state.body)
+    return {
+      bodyDigest: state.digest,
+      prompt: renderAssistantGroupRoomModelPrompt(state.body),
+    }
   }
 
-  return renderAssistantGroupRoomModelStatusPrompt(
-    state.kind === 'present' ? 'inactive' : state.kind,
-  )
+  return {
+    bodyDigest: null,
+    prompt: renderAssistantGroupRoomModelStatusPrompt(
+      state.kind === 'present' ? 'inactive' : state.kind,
+    ),
+  }
 }
 
 export async function readAssistantGroupRoomModelBody(input: {

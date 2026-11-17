@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   parseConfiguredDeviceSyncRuntimeConfig,
 } from "@murphai/device-syncd/runtime-config";
@@ -58,7 +59,7 @@ export function parseHostedAssistantRuntimeConfig(
   rejectRemovedHostedAssistantRuntimeField(record, "webControlPlane");
 
   if (record.parserToolchain === null) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted assistant runtime config.parserToolchain:null is not supported; omit parserToolchain to use the runner image toolchain.",
     );
   }
@@ -153,7 +154,7 @@ function parseHostedAssistantRuntimeParserToolConfig(
       `${label}.authorizationHeader`,
     ).trim();
     if (config.authorizationHeader.length === 0) {
-      throw new TypeError(`${label}.authorizationHeader must be a non-empty string.`);
+      throw new ContractValidationError(`${label}.authorizationHeader must be a non-empty string.`);
     }
   }
   if (record.command !== undefined) {
@@ -172,10 +173,10 @@ function parseHostedAssistantRuntimeParserToolConfig(
 function parseAbsoluteToolPath(value: unknown, label: string): string {
   const parsed = requireString(value, label).trim();
   if (parsed.length === 0) {
-    throw new TypeError(`${label} must be a non-empty absolute path.`);
+    throw new ContractValidationError(`${label} must be a non-empty absolute path.`);
   }
   if (!parsed.startsWith("/")) {
-    throw new TypeError(`${label} must be an absolute path.`);
+    throw new ContractValidationError(`${label} must be an absolute path.`);
   }
 
   return parsed;
@@ -186,11 +187,12 @@ function parseHttpToolEndpoint(value: unknown, label: string): string {
   let url: URL;
   try {
     url = new URL(parsed);
-  } catch {
-    throw new TypeError(`${label} must be an absolute http(s) URL.`);
+  } catch (error) {
+    if (!(error instanceof TypeError)) throw error;
+    throw new ContractValidationError(`${label} must be an absolute http(s) URL.`);
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new TypeError(`${label} must be an absolute http(s) URL.`);
+    throw new ContractValidationError(`${label} must be an absolute http(s) URL.`);
   }
 
   return parsed;
@@ -268,7 +270,7 @@ function parseStringRecord(value: unknown, label: string): Record<string, string
 
   for (const [key, entryValue] of Object.entries(record)) {
     if (typeof entryValue !== "string") {
-      throw new TypeError(`${label}.${key} must be a string.`);
+      throw new ContractValidationError(`${label}.${key} must be a string.`);
     }
 
     parsed[key] = entryValue;
@@ -284,13 +286,13 @@ function rejectRemovedHostedAssistantRuntimeField(
   label = "Hosted assistant runtime config",
 ): void {
   if (record[field] !== undefined) {
-    throw new TypeError(`${label}.${field} is no longer supported.`);
+    throw new ContractValidationError(`${label}.${field} is no longer supported.`);
   }
 }
 
 function requireObject(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object.`);
+    throw new ContractValidationError(`${label} must be an object.`);
   }
 
   return value as Record<string, unknown>;
@@ -298,7 +300,7 @@ function requireObject(value: unknown, label: string): Record<string, unknown> {
 
 function requireArray(value: unknown, label: string): unknown[] {
   if (!Array.isArray(value)) {
-    throw new TypeError(`${label} must be an array.`);
+    throw new ContractValidationError(`${label} must be an array.`);
   }
 
   return value;
@@ -306,7 +308,7 @@ function requireArray(value: unknown, label: string): unknown[] {
 
 function requireString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.length === 0) {
-    throw new TypeError(`${label} must be a non-empty string.`);
+    throw new ContractValidationError(`${label} must be a non-empty string.`);
   }
 
   return value;
@@ -314,7 +316,7 @@ function requireString(value: unknown, label: string): string {
 
 function requireBoolean(value: unknown, label: string): boolean {
   if (typeof value !== "boolean") {
-    throw new TypeError(`${label} must be a boolean.`);
+    throw new ContractValidationError(`${label} must be a boolean.`);
   }
 
   return value;
@@ -322,7 +324,7 @@ function requireBoolean(value: unknown, label: string): boolean {
 
 function requireNumber(value: unknown, label: string): number {
   if (typeof value !== "number" || !Number.isFinite(value)) {
-    throw new TypeError(`${label} must be a finite number.`);
+    throw new ContractValidationError(`${label} must be a finite number.`);
   }
 
   return value;

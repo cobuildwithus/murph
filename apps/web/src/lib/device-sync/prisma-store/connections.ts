@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { activeHostedPersonAccessSql } from "../../hosted-onboarding/member-access-projections";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { deviceSyncError } from "@murphai/device-syncd/errors";
@@ -811,10 +812,10 @@ export class PrismaHostedConnectionStore {
     const provider = normalizeNullableString(input.provider);
     const userId = normalizeNullableString(input.userId);
     if (!provider || !userId) {
-      throw new TypeError("Hosted device-sync member connection status query requires member and provider ids.");
+      throw new ContractValidationError("Hosted device-sync member connection status query requires member and provider ids.");
     }
     if (!Number.isSafeInteger(input.limit) || input.limit < 1) {
-      throw new TypeError("Hosted device-sync member connection status query requires a positive safe limit.");
+      throw new ContractValidationError("Hosted device-sync member connection status query requires a positive safe limit.");
     }
 
     const records = await this.prisma.deviceConnection.findMany({
@@ -1260,6 +1261,8 @@ export class PrismaHostedConnectionStore {
         case when
           counters.consumed_seq = counters.next_seq - 1
           and dirty.connection_id is not null
+          -- A deferred batch is owned by the deferred-wake sweeper, not orphaned.
+          and dirty.wake_deferred_until is null
           and workspace.redacted_status_json->>'hostedMailboxSystemHandledThroughSeq' = counters.consumed_seq::text
           and workspace.redacted_status_json->'hostedMailboxSystemDeviceSyncContinuationSeqs' = '[]'::jsonb
           and workspace.redacted_status_json->'hostedMailboxSystemFirstPendingSeq' = 'null'::jsonb

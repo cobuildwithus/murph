@@ -28,6 +28,7 @@ import {
   type HostedRuntimeLatencyTraceRequest,
   type HostedRuntimeLogRequest,
 } from "@murphai/hosted-execution/runtime-control";
+import { parseHostedExecutionDeviceSyncRuntimeSnapshotResponse, type HostedExecutionDeviceSyncRuntimeConnectionSnapshot } from "@murphai/device-syncd/hosted-runtime";
 import { parseHostedRuntimeLogRequest } from "@murphai/hosted-execution/parsers";
 import {
   HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON,
@@ -1352,7 +1353,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("skips syste
     const fetchSnapshotRequests: Array<Parameters<RuntimeDeviceSyncPort["fetchSnapshot"]>[0]> = [];
     const reconcileRequests: Array<Parameters<NonNullable<RuntimeDeviceSyncPort["reconcileAccount"]>>[0]> = [];
     const logRequests: HostedRuntimeLogRequest[] = [];
-    const accountSnapshots = Array.from({ length: 33 }, (_, index) => ({
+    const accountSnapshots: HostedExecutionDeviceSyncRuntimeConnectionSnapshot[] = Array.from({ length: 33 }, (_, index) => ({
       connection: {
         accessTokenExpiresAt: "2026-05-01T00:00:00.000Z",
         connectedAt: "2026-04-28T00:00:00.000Z",
@@ -1382,6 +1383,17 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("skips syste
         nextReconcileAt: null,
       },
     }));
+    accountSnapshots[0]!.sources = [{
+      sourceProviderSlug: "google_health", status: "connected",
+      firstSeenAt: "2026-04-28T23:58:00.000Z", lastSeenAt: "2026-04-29T00:00:00.000Z",
+      lastDataAt: null, displayName: "not-for-assistant", resourceCount: 0,
+      lastErrorCode: null, lastErrorMessage: "not-for-assistant",
+    }, {
+      sourceProviderSlug: "fitbit", status: "connected",
+      firstSeenAt: "2026-04-01T00:00:00.000Z", lastSeenAt: "2026-04-29T00:00:00.000Z",
+      lastDataAt: "2026-04-20T00:00:00.000Z", displayName: "not-for-assistant", resourceCount: 1,
+      lastErrorCode: null, lastErrorMessage: "not-for-assistant",
+    }];
     const accountCursor = {
       createdAt: accountSnapshots[31]!.connection.createdAt,
       id: accountSnapshots[31]!.connection.id,
@@ -1426,14 +1438,14 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("skips syste
       async fetchSnapshot(request) {
         const pageIndex = fetchSnapshotRequests.length;
         fetchSnapshotRequests.push(request);
-        return {
+        return parseHostedExecutionDeviceSyncRuntimeSnapshotResponse({
           connections: pageIndex === 0
             ? accountSnapshots.slice(0, 32)
             : accountSnapshots.slice(32),
           generatedAt: "2026-04-29T00:00:00.000Z",
           nextCursor: pageIndex === 0 ? accountCursor : null,
           userId: "member_synthetic_phase",
-        };
+        });
       },
       async reconcileAccount(request) {
         reconcileRequests.push(request);
@@ -1482,7 +1494,11 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("skips syste
       provider: " whoop ",
       sourceProvider: " whoop_v2 ",
     }, { signal: abortController.signal })).resolves.toEqual({
-      accounts: accountSnapshots.map(({ connection, localState }) => ({
+      accounts: accountSnapshots.map(({ connection, localState, sources }) => ({
+        sources: (sources ?? []).map((source) => ({
+          sourceProvider: source.sourceProviderSlug, status: source.status,
+          firstSeenAt: source.firstSeenAt, lastDataAt: source.lastDataAt,
+        })),
         accountId: connection.id,
         displayName: connection.displayName,
         lastErrorCode: localState.lastErrorCode,

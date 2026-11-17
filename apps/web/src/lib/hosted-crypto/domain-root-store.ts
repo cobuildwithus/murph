@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createHash } from "node:crypto";
 
 import { Prisma, type PrismaClient } from "@prisma/client";
@@ -444,7 +445,7 @@ export async function prepareHostedCryptoDomainRootCandidates(input: {
   }
   const maxConcurrency = input.maxConcurrency ?? missing.length;
   if (!Number.isSafeInteger(maxConcurrency) || maxConcurrency <= 0) {
-    throw new TypeError("Hosted domain-root preparation concurrency must be a positive integer.");
+    throw new ContractValidationError("Hosted domain-root preparation concurrency must be a positive integer.");
   }
   let firstError: unknown;
   let hasError = false;

@@ -33,6 +33,9 @@ interface ScriptedResponseRoute {
   requestExcludes?: readonly string[]
   requestIncludes?: readonly string[]
   usageInputTokens?: number
+  usageCachedTokens?: number
+  usageCacheWriteTokens?: number
+  usageCacheWrite12hTokens?: number
 }
 
 export type ScriptedResponseBody = (
@@ -116,7 +119,7 @@ export async function prepareScriptedTurnScenario(
   temporaryPaths: string[],
   options: {
     websocket?: { streamIdleTimeoutMs: number }
-    additionalTomlLines?: readonly string[]
+    additionalTomlLines?: readonly string[] | ((codexHome: string) => readonly string[])
     // The patched Codex build applies hosted prompt-cache retention only when
     // the provider key env is the platform one.
     apiKeyEnv?: string
@@ -149,6 +152,9 @@ export async function prepareScriptedTurnScenario(
     path.join(codexHome, 'config.toml'),
     buildScriptedCodexConfigToml(scriptedStub.baseUrl, {
       ...options,
+      additionalTomlLines: typeof options.additionalTomlLines === 'function'
+        ? options.additionalTomlLines(codexHome)
+        : options.additionalTomlLines,
       modelProvider,
     }),
     {
@@ -417,6 +423,9 @@ export async function startScriptedResponsesStub(): Promise<ScriptedStub> {
       response,
       responseId,
       usageInputTokens: scripted.usageInputTokens,
+      usageCachedTokens: scripted.usageCachedTokens,
+      usageCacheWriteTokens: scripted.usageCacheWriteTokens,
+      usageCacheWrite12hTokens: scripted.usageCacheWrite12hTokens,
       delayAfterCreatedMs: scripted.delayAfterCreatedMs,
       reasoningIntervalMs: scripted.reasoningIntervalMs,
     })
@@ -641,13 +650,20 @@ async function writeScriptedSseResponse(input: {
   response: ServerResponse
   responseId: string
   usageInputTokens?: number
+  usageCachedTokens?: number
+  usageCacheWriteTokens?: number
+  usageCacheWrite12hTokens?: number
   delayAfterCreatedMs?: number
   reasoningIntervalMs?: number
 }): Promise<boolean> {
   const inputTokens = input.usageInputTokens ?? 12
   const usage = {
     input_tokens: inputTokens,
-    input_tokens_details: { cached_tokens: 0 },
+    input_tokens_details: {
+      cached_tokens: input.usageCachedTokens ?? 0,
+      cache_write_tokens: input.usageCacheWriteTokens ?? 0,
+      cache_write_tokens_details: { ttl_12h_tokens: input.usageCacheWrite12hTokens ?? 0 },
+    },
     output_tokens: 7,
     output_tokens_details: { reasoning_tokens: 0 },
     total_tokens: inputTokens + 7,

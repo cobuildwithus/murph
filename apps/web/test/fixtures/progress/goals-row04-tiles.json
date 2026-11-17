@@ -1,0 +1,92 @@
+{
+  "tiles": [
+    {
+      "id": "willis-tower",
+      "name": "Willis Tower",
+      "drawing": "willis-tower",
+      "at": 1451,
+      "atText": "1,451 ft",
+      "blurb": "Chicago's black skyscraper, formerly the Sears Tower, with glass boxes on its sky deck.",
+      "where": "Chicago",
+      "on": null,
+      "toGo": "51 to go",
+      "short": "Willis Tower",
+      "tagline": "A high view over the lake",
+      "shareAwardId": null
+    },
+    {
+      "id": "taipei-101",
+      "name": "Taipei 101",
+      "drawing": "taipei-101",
+      "at": 1667,
+      "atText": "1,667 ft",
+      "blurb": "Taiwan's bamboo-shaped skyscraper, the world's tallest from 2004 to 2010.",
+      "where": "Taipei",
+      "on": null,
+      "toGo": "267 to go",
+      "short": "Taipei 101",
+      "tagline": "A stepped tower above the city",
+      "shareAwardId": null
+    },
+    {
+      "id": "cn-tower",
+      "name": "CN Tower",
+      "drawing": "cn-tower",
+      "at": 1815,
+      "atText": "1,815 ft",
+      "blurb": "Toronto's needle-like tower, the world's tallest freestanding structure for over 30 years.",
+      "where": "Toronto",
+      "on": null,
+      "toGo": "415 to go",
+      "short": "CN Tower",
+      "tagline": "A tall view above the lake",
+      "shareAwardId": null
+    },
+    {
+      "id": "burj-khalifa",
+      "name": "Burj Khalifa",
+      "drawing": "burj-khalifa",
+      "at": 2717,
+      "atText": "2,717 ft",
+      "blurb": "Dubai's needle-like skyscraper, the tallest building in the world since 2010.",
+      "where": "Dubai",
+      "on": null,
+      "toGo": "1,317 to go",
+      "short": "Burj Khalifa",
+      "tagline": "A tower reaching beyond the rest",
+      "shareAwardId": null
+    },
+    {
+      "id": "el-capitan",
+      "name": "El Capitan",
+      "drawing": "el-capitan",
+      "at": 3000,
+      "atText": "3,000 ft",
+      "blurb": "Yosemite's giant granite wall, a climbing legend, scaled with no ropes in 2017.",
+      "where": "Yosemite",
+      "on": null,
+      "toGo": "1,600 to go",
+      "short": "El Capitan",
+      "tagline": "A great wall above the valley",
+      "shareAwardId": null
+    },
+    {
+      "id": "mount-everest",
+      "name": "Mount Everest",
+      "drawing": "mount-everest",
+      "at": 29032,
+      "atText": "29,032 ft",
+      "blurb": "The highest mountain on Earth, first climbed by Edmund Hillary and Tenzing Norgay in 1953.",
+      "where": "Nepal",
+      "on": null,
+      "toGo": "27.6k to go",
+      "short": "Mount Everest",
+      "tagline": "The highest summit on Earth",
+      "shareAwardId": null
+    }
+  ],
+  "match": null,
+  "suggestions": [],
+  "route": null,
+  "note": null
+}

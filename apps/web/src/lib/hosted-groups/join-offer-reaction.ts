@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
 import { createHash } from "node:crypto";
@@ -437,7 +438,7 @@ async function appendHostedGroupOfferReactionRoomEvidenceTx(input: {
       })?.value ?? null;
   const threadId = input.event.linqChatId;
   if (!threadId) {
-    throw new TypeError("Hosted group offer reaction thread is missing.");
+    throw new ContractValidationError("Hosted group offer reaction thread is missing.");
   }
   const route = await readHostedThreadRouteByThreadIdentity({
     channel: "linq",

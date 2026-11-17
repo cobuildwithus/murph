@@ -1,7 +1,9 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { DurableObject } from "cloudflare:workers";
 
 import {
   classifyOperatorLinqAlertFailure,
+  readOperatorLinqChatIds,
   sendOperatorLinqAlert,
 } from "../operator-alert/linq.js";
 import type {
@@ -648,14 +650,14 @@ function ensureOpenAiAuthorizationAlertSchema(
 
 function parseFailureReport(input: unknown): OpenAiAuthorizationFailureReport {
   if (!isObjectRecord(input)) {
-    throw new TypeError("OpenAI authorization failure report is invalid.");
+    throw new ContractValidationError("OpenAI authorization failure report is invalid.");
   }
   const keys = Reflect.ownKeys(input);
   if (
     keys.length !== 2
     || !keys.every((key) => key === "observedAtMs" || key === "status")
   ) {
-    throw new TypeError("OpenAI authorization failure report is invalid.");
+    throw new ContractValidationError("OpenAI authorization failure report is invalid.");
   }
 
   const status = input.status;
@@ -664,7 +666,7 @@ function parseFailureReport(input: unknown): OpenAiAuthorizationFailureReport {
     (status !== 401 && status !== 403)
     || !isValidTimestamp(observedAtMs)
   ) {
-    throw new TypeError("OpenAI authorization failure report is invalid.");
+    throw new ContractValidationError("OpenAI authorization failure report is invalid.");
   }
   return { observedAtMs, status };
 }
@@ -770,16 +772,7 @@ function createOperatorAlertSender(
     environment.LINQ_API_TOKEN,
     "LINQ_API_TOKEN",
   );
-  const chatIds: readonly [primary: string, secondary: string] = [
-    readRequiredEnvironmentValue(
-      environment.HOSTED_DATABASE_ALERT_LINQ_CHAT_ID,
-      "HOSTED_DATABASE_ALERT_LINQ_CHAT_ID",
-    ),
-    readRequiredEnvironmentValue(
-      environment.HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID,
-      "HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID",
-    ),
-  ];
+  const chatIds = readOperatorLinqChatIds(environment);
   return {
     async send(input): Promise<void> {
       await sendOperatorLinqAlert({

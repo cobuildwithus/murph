@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   getHostedCryptoDomainForLane,
   isHostedCryptoDomain,
@@ -119,25 +120,39 @@ export async function createHostedDataKeyEnvelopeWithDomainRoot(input: {
   };
 }
 
-export async function unwrapHostedDataKeyWithDomainRoot(input: {
+export function decodeHostedDataKeyEnvelopeWrap(input: {
   envelope: HostedDataKeyEnvelopeV1;
-  rootKey: Uint8Array;
   rootKeyId: string;
-}): Promise<Uint8Array> {
+}) {
   const envelope = parseHostedDataKeyEnvelope(input.envelope);
-  const rootKeyId = requireNonEmptyString(
-    input.rootKeyId,
-    "Hosted data-key unwrap rootKeyId",
-  );
+  const rootKeyId = requireNonEmptyString(input.rootKeyId, "Hosted data-key unwrap rootKeyId");
   const wrap = envelope.wraps.find(
     (entry) => entry.kind === "domain-root" && entry.rootKeyId === rootKeyId,
   );
   if (!wrap) {
-    throw new Error(
-      `Hosted data-key envelope is missing domain-root wrap ${rootKeyId}.`,
-    );
+    throw new Error(`Hosted data-key envelope is missing domain-root wrap ${rootKeyId}.`);
   }
+  try {
+    return {
+      envelope,
+      wrap,
+      iv: decodeFixedBase64(wrap.iv, HOSTED_DATA_KEY_IV_BYTES, "Hosted data-key wrap IV"),
+      ciphertext: decodeBase64(wrap.ciphertext),
+    };
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "InvalidCharacterError") {
+      throw new ContractValidationError("Hosted data-key encoding must be valid base64.");
+    }
+    throw error;
+  }
+}
 
+export async function unwrapHostedDataKeyWithDomainRoot(input: {
+  decoded: ReturnType<typeof decodeHostedDataKeyEnvelopeWrap>;
+  rootKey: Uint8Array;
+}): Promise<Uint8Array> {
+  const { envelope, wrap, iv, ciphertext } = input.decoded;
+  const rootKeyId = wrap.rootKeyId;
   const wrapContext = {
     alg: envelope.alg,
     dataKeyId: envelope.dataKeyId,
@@ -152,17 +167,11 @@ export async function unwrapHostedDataKeyWithDomainRoot(input: {
     await crypto.subtle.decrypt(
       {
         additionalData: toArrayBuffer(buildHostedDataKeyRootWrapAad(wrapContext)),
-        iv: toArrayBuffer(
-          decodeFixedBase64(
-            wrap.iv,
-            HOSTED_DATA_KEY_IV_BYTES,
-            "Hosted data-key wrap IV",
-          ),
-        ),
+        iv: toArrayBuffer(iv),
         name: "AES-GCM",
       },
       wrapKey,
-      toArrayBuffer(decodeBase64(wrap.ciphertext)),
+      toArrayBuffer(ciphertext),
     ),
   );
 
@@ -201,7 +210,7 @@ export function parseHostedDataKeyEnvelope(
     ),
   };
   if (!envelope.wraps.some((wrap) => wrap.rootKeyId === rootKeyId)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label}.wraps must include a domain-root wrap for rootKeyId.`,
     );
   }
@@ -322,7 +331,7 @@ function assertDataKeyLaneDomain(input: {
 }): void {
   const expectedDomain = getHostedCryptoDomainForLane(input.lane);
   if (expectedDomain !== input.domain) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Hosted data-key lane ${input.lane} belongs to ${expectedDomain}, not ${input.domain}.`,
     );
   }
@@ -335,7 +344,7 @@ function requireHostedDataKeyDomain(
   if (typeof value === "string" && isHostedCryptoDomain(value)) {
     return value;
   }
-  throw new TypeError(`${label} must be a hosted crypto domain.`);
+  throw new ContractValidationError(`${label} must be a hosted crypto domain.`);
 }
 
 function requireHostedDataKeyLane(
@@ -345,7 +354,7 @@ function requireHostedDataKeyLane(
   if (typeof value === "string" && isHostedCryptoLane(value)) {
     return value;
   }
-  throw new TypeError(`${label} must be a hosted crypto lane.`);
+  throw new ContractValidationError(`${label} must be a hosted crypto lane.`);
 }
 
 function requireDataKeyBytes(value: Uint8Array, label: string): Uint8Array {
@@ -367,21 +376,21 @@ function requireDataKeyRootKeyBytes(
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object.`);
+    throw new ContractValidationError(`${label} must be an object.`);
   }
   return value as Record<string, unknown>;
 }
 
 function requireArray(value: unknown, label: string): unknown[] {
   if (!Array.isArray(value)) {
-    throw new TypeError(`${label} must be an array.`);
+    throw new ContractValidationError(`${label} must be an array.`);
   }
   return value.slice();
 }
 
 function requireNonEmptyString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.trim().length === 0) {
-    throw new TypeError(`${label} must be a non-empty string.`);
+    throw new ContractValidationError(`${label} must be a non-empty string.`);
   }
   return value.trim();
 }
@@ -392,7 +401,7 @@ function requireLiteral<TLiteral extends string>(
   label: string,
 ): TLiteral {
   if (value !== literal) {
-    throw new TypeError(`${label} must be ${literal}.`);
+    throw new ContractValidationError(`${label} must be ${literal}.`);
   }
   return literal;
 }
@@ -451,7 +460,7 @@ function decodeFixedBase64(
 ): Uint8Array {
   const decoded = decodeBase64(value);
   if (decoded.byteLength !== expectedBytes) {
-    throw new TypeError(`${label} must decode to ${expectedBytes} bytes.`);
+    throw new ContractValidationError(`${label} must decode to ${expectedBytes} bytes.`);
   }
   return decoded;
 }

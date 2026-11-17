@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 export interface HostedUserRecipientPublicKeyJwk {
   crv: "P-256";
   ext?: boolean;
@@ -45,7 +46,7 @@ export function parseHostedUserRecipientPublicKeyJwk(
   const crv = requireString(record.crv, `${label}.crv`);
 
   if (kty !== "EC" || crv !== "P-256") {
-    throw new TypeError(`${label} must be an EC P-256 public JWK.`);
+    throw new ContractValidationError(`${label} must be an EC P-256 public JWK.`);
   }
 
   return {
@@ -77,7 +78,7 @@ export function parseHostedUserRecipientPrivateKeyJwk(
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object.`);
+    throw new ContractValidationError(`${label} must be an object.`);
   }
 
   return value as Record<string, unknown>;
@@ -85,7 +86,7 @@ function requireRecord(value: unknown, label: string): Record<string, unknown> {
 
 function requireString(value: unknown, label: string): string {
   if (typeof value !== "string" || value.length === 0) {
-    throw new TypeError(`${label} must be a non-empty string.`);
+    throw new ContractValidationError(`${label} must be a non-empty string.`);
   }
 
   return value;
@@ -93,7 +94,7 @@ function requireString(value: unknown, label: string): string {
 
 function requireBoolean(value: unknown, label: string): boolean {
   if (typeof value !== "boolean") {
-    throw new TypeError(`${label} must be a boolean.`);
+    throw new ContractValidationError(`${label} must be a boolean.`);
   }
 
   return value;
@@ -101,7 +102,7 @@ function requireBoolean(value: unknown, label: string): boolean {
 
 function readArray(value: unknown, label: string): unknown[] {
   if (!Array.isArray(value)) {
-    throw new TypeError(`${label} must be an array.`);
+    throw new ContractValidationError(`${label} must be an array.`);
   }
 
   return value;

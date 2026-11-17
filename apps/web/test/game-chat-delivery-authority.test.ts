@@ -228,3 +228,31 @@ it("retains a redacted group's accepted-note quota metadata and rejects unsuppor
   expect(parseGameTalkPayload(payload)).toEqual(payload);
   for (const change of [{ v: 3 }, { invitationSeat: 10 }, { termsVersion: 0 }, { noteEncrypted: "" }]) expect(parseGameTalkPayload({ ...payload, ...change })).toBeNull();
 });
+
+
+it("both-win final claims fail closed without a receipt and rejudge every first or retry dispatch", async () => {
+  const { input, receipt, setGame } = setup();
+  const game = { ...row(), pendingChange: null, lengthDays: 3,
+    terms: { v: 1, versions: [{ n: 1, fromDay: 0, schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, stakes: [{ kind: "prize", key: "prize" }] }] },
+    players: row().players.map(player => ({ ...player, dayOne: new Date("2030-03-03"), leftAt: null })) };
+  setGame(game);
+  const entries = game.players.flatMap(player => [0, 1].map(dayIndex => ({ id: `${player.memberId}_${dayIndex}`, gameId: game.id,
+    memberId: player.memberId, dayIndex, attempt: 1, kind: "words", mediaKeys: [], receivedAt: now, withdrawnAt: null,
+    incomplete: false, blurHash: null, textEncrypted: null, payloadEncrypted: null, captureAgeMs: null, withdrawnReason: null })));
+  vi.mocked(input.tx.gameEntry.findMany).mockResolvedValue(entries);
+  const offer = { ...input, deliveryIdempotencyKey: "game-both-win:game" };
+  await expect(assertGameProposalDeliveryCurrentTx(offer)).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+  vi.mocked(receipt, { partial: true }).mockResolvedValue({ skippedAt: null });
+  for (const retry of [false, true]) {
+    setGame(game); vi.mocked(input.tx.gameEntry.findMany).mockResolvedValue(entries);
+    expect(await assertGameProposalDeliveryCurrentTx(offer), `current retry=${retry}`).toBe(true);
+    for (const changed of [{ ...game, status: "void" }, { ...game, status: "settled" }, { ...game, chatContainerMemberId: null },
+      { ...game, pendingChange: row().pendingChange }, { ...game, terms: { ...game.terms, versions: [{ ...game.terms.versions[0], stakes: [{ kind: "prize", key: "prize" }, { kind: "both_get", key: "both" }] }] } }]) {
+      setGame(changed);
+      await expect(assertGameProposalDeliveryCurrentTx(offer)).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+    }
+    setGame(game); vi.mocked(input.tx.gameEntry.findMany).mockResolvedValue(entries.slice(1));
+    await expect(assertGameProposalDeliveryCurrentTx(offer)).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
+  }
+  expect(input.tx.$queryRaw).toHaveBeenCalled();
+});

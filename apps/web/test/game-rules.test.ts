@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { gameReminderReach, gameReminderWindow, reminderOpenDay } from "@/src/lib/game/reminders";
 import { gameChatProgress } from "@/src/lib/game/chat-progress";
 import type { GameEntryKind, GameSchedule } from "@/src/lib/game/contract";
-import { areGameDevToolsAllowed, gameOnSql, gameOnWhere, isGameEnabled, isGameEnabledFor, isGameOn, mediaKeyOwner, mediaKeyPrefixFor } from "@/src/lib/game/access";
+import { areGameDevToolsAllowed, gameOnSql, gameOnWhere, isGameEnabled, mediaKeyOwner, mediaKeyPrefixFor } from "@/src/lib/game/access";
 import {
   assertGroupTermsOpen,
   decideCancelInvite,
@@ -22,6 +22,9 @@ import {
   GameRuleError,
   isGameDue,
   isGameDecided,
+  isSettledGameCorrectable,
+  settledGameEnd,
+  GAME_SETTLED_OPEN_MS,
   canChallengeGame,
   decideChallenge,
   gameChallengeStatus,
@@ -675,65 +678,18 @@ describe("weekly game: dev time travel and start now", () => {
 });
 
 describe("weekly game: access", () => {
-  it("ships dark: on outside production, off in production unless enabled, allowlist narrows", () => {
-    expect(isGameEnabledFor(LEO, { NODE_ENV: "development" })).toBe(true);
-    expect(isGameEnabledFor(LEO, { NODE_ENV: "production" })).toBe(false);
-    expect(isGameEnabledFor(LEO, { MURPH_GAME_ENABLED: "true", NODE_ENV: "production" })).toBe(true);
-    expect(isGameEnabledFor(LEO, { MURPH_GAME_ENABLED: "false", NODE_ENV: "development" })).toBe(false);
-    const allowlisted = { MURPH_GAME_ENABLED: "true", MURPH_GAME_MEMBER_ALLOWLIST: `${AVA}, hbm_other`, NODE_ENV: "production" };
-    expect(isGameEnabledFor(AVA, allowlisted)).toBe(true);
-    expect(isGameEnabledFor(LEO, allowlisted)).toBe(false);
-    expect(isGameEnabled(allowlisted)).toBe(true);
+  it("ships dark: on outside production, off in production unless enabled", () => {
+    expect(isGameEnabled({ NODE_ENV: "development" })).toBe(true);
+    expect(isGameEnabled({ NODE_ENV: "production" })).toBe(false);
+    expect(isGameEnabled({ MURPH_GAME_ENABLED: "true", NODE_ENV: "production" })).toBe(true);
     expect(isGameEnabled({ MURPH_GAME_ENABLED: "false", NODE_ENV: "development" })).toBe(false);
   });
 
-  describe("invite-only: a game is on when one of its people is listed", () => {
-    const SAM = "hbm_sam";
-    const listedAva = { MURPH_GAME_ENABLED: "true", MURPH_GAME_MEMBER_ALLOWLIST: AVA, NODE_ENV: "production" };
-    const seats = (...memberIds: string[]) => memberIds.map((memberId) => ({ memberId }));
-
-    it("turns on a listed creator's game, invite and all, for the unlisted invitee", () => {
-      expect(isGameOn({ players: seats(AVA) }, listedAva)).toBe(true);
-      expect(isGameOn({ players: seats(AVA, LEO) }, listedAva)).toBe(true);
-      expect(isGameOn({ players: seats(LEO, AVA) }, listedAva)).toBe(true);
-    });
-
-    it("keeps a game between two unlisted members off", () => {
-      expect(isGameOn({ players: seats(LEO, SAM) }, listedAva)).toBe(false);
-      expect(isGameOn({ players: seats(LEO), invitees: [{ memberId: SAM }] }, listedAva)).toBe(false);
-      expect(isGameOn({ players: [] }, listedAva)).toBe(false);
-    });
-
-    it("refuses an unlisted member's fresh game, which has no one else in it", () => {
-      expect(isGameOn({ players: seats(LEO), invitees: [{ memberId: null }] }, listedAva)).toBe(false);
-      expect(isGameOn({ players: seats(LEO) }, listedAva)).toBe(false);
-    });
-
-    it("lets an unlisted member rematch the listed player, who is that invite's addressee", () => {
-      expect(isGameOn({ players: seats(LEO), invitees: [{ memberId: AVA }] }, listedAva)).toBe(true);
-    });
-
-    it("is off for everyone when the global switch is off, and on for every game with an empty list", () => {
-      const off = { MURPH_GAME_ENABLED: "false", MURPH_GAME_MEMBER_ALLOWLIST: AVA, NODE_ENV: "production" };
-      expect(isGameOn({ players: seats(AVA, LEO) }, off)).toBe(false);
-      expect(isGameOn({ players: seats(AVA), invitees: [{ memberId: AVA }] }, off)).toBe(false);
-      expect(gameOnWhere(off)).toEqual({ id: { in: [] } });
-      expect(gameOnSql("game", off).sql).toBe("FALSE");
-      const everyone = { MURPH_GAME_ENABLED: "true", NODE_ENV: "production" };
-      expect(isGameOn({ players: seats(LEO, SAM) }, everyone)).toBe(true);
-      expect(gameOnWhere(everyone)).toEqual({});
-      expect(gameOnSql("game", everyone).sql).toBe("TRUE");
-    });
-
-    it("states the same rule for database reads: a listed player or a listed addressee", () => {
-      expect(gameOnWhere(listedAva)).toEqual({ OR: [
-        { players: { some: { memberId: { in: [AVA] } } } },
-        { invitees: { some: { memberId: { in: [AVA] } } } },
-      ] });
-      const sql = gameOnSql("game", listedAva);
-      expect(sql.sql.replace(/\s+/gu, " ")).toBe("(EXISTS (SELECT 1 FROM game_invitee invited WHERE invited.game_id = game.id AND invited.member_id IN (?)) OR EXISTS (SELECT 1 FROM game_player listed WHERE listed.game_id = game.id AND listed.member_id IN (?)))");
-      expect(sql.values).toEqual([AVA, AVA]);
-    });
+  it.each([true, false])("keeps database filters in step with the switch (%s)", (enabled) => {
+    const env = { MURPH_GAME_ENABLED: String(enabled), NODE_ENV: "production" };
+    expect(gameOnWhere(env)).toEqual(enabled ? {} : { id: { in: [] } });
+    expect(gameOnSql(env).sql).toBe(enabled ? "TRUE" : "FALSE");
+    expect(gameOnSql(env).values).toEqual([]);
   });
 
   it("allows time travel everywhere except real production", () => {
@@ -907,6 +863,105 @@ describe("a missed day counted on the player's word", () => {
     expect(scorePlayer(state, player, 2)).toMatchObject({ score: 3, misses: 0 });
     expect(playerStreak(state, player, now)).toBe(3);
     expect(count(state, 1, now).outcome.status).toBe("already_complete");
+  });
+});
+
+describe("a finished pair game's days can still be corrected for 7 days", () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  const entry = (memberId: string, dayIndex: number): RuleState["entries"][number] => ({ attempt: 1, dayIndex, id: `entry_${memberId}_${dayIndex}`, kind: "words",
+    mediaKeys: [], memberId, receivedAt: new Date("2026-10-20T12:00:00Z"), blurHash: null, withdrawnAt: null });
+  /** Every day through `lastDay` is posted except the listed misses; the game then ended at `endedAt`. */
+  function settled(options: { schedule?: GameSchedule; lastDay?: number; missed?: [number[], number[]]; endedAt?: (state: RuleState) => Date } = {}): RuleState {
+    const state = live(invited(options.schedule), NYC);
+    state.game.terms.versions[0] = { ...state.game.terms.versions[0], checkInKind: "any" };
+    const [leo, ava] = options.missed ?? [[2], []];
+    for (let day = 0; day <= (options.lastDay ?? 6); day += 1) {
+      if (!leo.includes(day)) state.entries.push(entry(LEO, day));
+      if (!ava.includes(day)) state.entries.push(entry(AVA, day));
+    }
+    // By default it settled on the morning after its last day.
+    return { ...state, game: { ...state.game, status: "settled", settledAt: (options.endedAt ?? ((game) => at(game, LEO, 7, 9)))(state) } };
+  }
+  const correct = (state: RuleState, dayIndex: number, after: number, input: { memberId?: string; incomplete?: boolean; hasWords?: boolean } = {}) => {
+    const now = new Date(state.game.settledAt!.getTime() + after);
+    return decideDayCompletion(state, { memberId: input.memberId ?? LEO, date: addDays(playerFor(state, LEO)!.dayOne!, dayIndex),
+      incomplete: input.incomplete ?? false, credit: input.incomplete ? undefined : true, hasWords: input.hasWords ?? true, now, clock: now });
+  };
+
+  it("counts or uncounts the speaker's own day exactly as a live game would", () => {
+    const state = settled();
+    expect(correct(state, 2, DAY)).toMatchObject({ dayIndex: 2, changed: true, outcome: { status: "credited" } });
+    expect(correct(state, 2, DAY, { hasWords: false })).toMatchObject({ changed: false, outcome: { status: "words_needed" } });
+    expect(correct(state, 3, DAY, { incomplete: true })).toMatchObject({ dayIndex: 3, changed: true, outcome: { status: "marked_incomplete" } });
+    expect(correct(state, 3, DAY)).toMatchObject({ changed: false, outcome: { status: "already_complete" } });
+    // The last day is closed too: a finished game has no open day left to post on.
+    expect(correct(settled({ missed: [[6], []] }), 6, 60_000)).toMatchObject({ changed: true, outcome: { status: "credited" } });
+    // The live refusals still apply.
+    expect(() => correct(state, 7, DAY)).toThrow("already started");
+    expect(() => correct(state, -1, DAY)).toThrow("already started");
+    state.game.terms.versions[0].checkInKind = "photo";
+    expect(() => correct(state, 2, DAY)).toThrow("requires a photo check-in");
+    expect(codeOf(() => correct(state, 2, DAY, { memberId: "hbm_stranger" }))).toBe("NOT_A_PLAYER");
+  });
+
+  it("is final once 7 days have passed since it ended", () => {
+    const state = settled();
+    expect(isSettledGameCorrectable(state, new Date(state.game.settledAt!.getTime() + GAME_SETTLED_OPEN_MS - 1))).toBe(true);
+    expect(correct(state, 2, GAME_SETTLED_OPEN_MS - 1).outcome.status).toBe("credited");
+    for (const incomplete of [false, true]) {
+      expect(codeOf(() => correct(state, incomplete ? 3 : 2, GAME_SETTLED_OPEN_MS, { incomplete }))).toBe("GAME_NOT_LIVE");
+      expect(() => correct(state, incomplete ? 3 : 2, GAME_SETTLED_OPEN_MS, { incomplete })).toThrow("This game ended more than 7 days ago, so its result is final.");
+    }
+    expect(isSettledGameCorrectable(state, new Date(state.game.settledAt!.getTime() + GAME_SETTLED_OPEN_MS))).toBe(false);
+  });
+
+  it("stays closed for a group game, a changed roster and a game that is not settled", () => {
+    const group = settled();
+    group.game.seats = 10;
+    expect(codeOf(() => correct(group, 2, DAY))).toBe("GAME_NOT_LIVE");
+    expect(isSettledGameCorrectable(group, group.game.settledAt!)).toBe(false);
+    const departed = settled();
+    departed.players[1].leftAt = departed.game.settledAt;
+    expect(() => correct(departed, 2, DAY)).toThrow("This game has ended.");
+    expect(isSettledGameCorrectable(departed, departed.game.settledAt!)).toBe(false);
+    expect(codeOf(() => correct(departed, 2, DAY, { memberId: AVA }))).toBe("NOT_A_PLAYER");
+    const liveGame = settled();
+    liveGame.game.status = "live";
+    expect(isSettledGameCorrectable(liveGame, liveGame.game.settledAt!)).toBe(false);
+    const voided = settled();
+    voided.game.status = "void";
+    expect(codeOf(() => correct(voided, 2, DAY))).toBe("GAME_NOT_LIVE");
+  });
+
+  it("treats only the days that had started when the game ended as its days", () => {
+    // Any 3 of 7 days: Leo reached 3 on the third day, Ava on the fourth, and the game ended that evening.
+    const early = settled({ schedule: { count: 3 }, lastDay: 3, missed: [[3], [0]], endedAt: (state) => at(state, LEO, 3, 20) });
+    expect(isGameDecided({ ...early, game: { ...early.game, status: "live" } })).toBe(true);
+    // Days before the end are closed, and so is the day it ended on.
+    expect(correct(early, 0, 3 * DAY, { memberId: AVA }).outcome.status).toBe("credited");
+    expect(correct(early, 3, 3 * DAY).outcome.status).toBe("credited");
+    // The calendar ran on for three more days; none of them is a day of this game.
+    for (const day of [4, 5, 6]) expect(() => correct(early, day, 6 * DAY)).toThrow("already started");
+  });
+
+  it("lists a finished game's days for Murph as they stood when it ended", () => {
+    const early = settled({ schedule: { count: 3 }, lastDay: 3, missed: [[3], [0]], endedAt: (state) => at(state, LEO, 3, 20) });
+    const read = new Date(early.game.settledAt!.getTime() + 3 * DAY);
+    const statuses = (asOf?: Date) => gameChatProgress(early, read, asOf).players[0].days.map(day => day.status);
+    // Read three days later, the calendar days after the end are not days anyone missed.
+    expect(statuses(settledGameEnd(early, read, read))).toEqual(["posted", "posted", "posted", "not_posted", "upcoming", "upcoming", "upcoming"]);
+    expect(statuses()).toEqual(["posted", "posted", "posted", "not_posted", "not_posted", "not_posted", "not_posted"]);
+    expect(gameChatProgress(early, read, settledGameEnd(early, read, read)).checkedAt).toBe(read.toISOString());
+  });
+
+  it("follows the game's own clock when it differs from the database clock", () => {
+    // Dev time travel: the game's clock runs 30 days ahead, so its week is over while the real clock is still on day 2.
+    const state = settled({ endedAt: (game) => at(game, LEO, 1, 9) });
+    const clock = new Date(state.game.settledAt!.getTime() + DAY);
+    const input = { memberId: LEO, date: addDays(playerFor(state, LEO)!.dayOne!, 2), incomplete: false, credit: true as const, hasWords: true };
+    expect(decideDayCompletion(state, { ...input, clock, now: new Date(clock.getTime() + 30 * DAY) }).outcome.status).toBe("credited");
+    // Without the shift the same game ended on its second day, so day 3 never started.
+    expect(() => decideDayCompletion(state, { ...input, clock, now: clock })).toThrow("already started");
   });
 });
 
@@ -1134,10 +1189,14 @@ describe("decided pair endings", () => {
 describe("game reminder eligibility", () => {
   it("reports whether a selected saved reminder can actually reach its member", () => {
     const settings = { push: true, text: true, canText: true };
-    expect(gameReminderReach(settings, true, true)).toBe("text");
-    expect(gameReminderReach({ ...settings, canText: false }, true, true)).toBe("push");
-    expect(gameReminderReach({ ...settings, canText: false }, true, false)).toBe("none");
-    expect(gameReminderReach(settings, false, true)).toBe("none");
+    const texted = { on: true, textedPrivately: true };
+    expect(gameReminderReach(settings, texted, true)).toBe("text");
+    expect(gameReminderReach({ ...settings, canText: false }, texted, true)).toBe("push");
+    expect(gameReminderReach({ ...settings, canText: false }, texted, false)).toBe("none");
+    expect(gameReminderReach(settings, { ...texted, on: false }, true)).toBe("none");
+    // A game whose group chat carries the evening check-in gets no private text, so only the push reaches them.
+    expect(gameReminderReach(settings, { on: true, textedPrivately: false }, true)).toBe("push");
+    expect(gameReminderReach(settings, { on: true, textedPrivately: false }, false)).toBe("none");
   });
   it("uses the frozen game day, schedule and remaining seat", () => {
     const state = live();

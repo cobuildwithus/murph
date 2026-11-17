@@ -40,6 +40,7 @@ import { ClubsPageStudy } from "./clubs-page-study";
 import { WearableConnectLinkStudy } from "./wearable-connect-link-study";
 import { ComputerHandoffStudy } from "./computer-handoff-study";
 import { ConnectedAppAuthorizationStudy } from "./connected-app-authorization-study";
+import { CustomConnectionConfirmStudy, CustomConnectionsStudy } from "./custom-connections-study";
 import {
   AppleHealthRelaySetupStudy,
   ConnectSourceCardStudy,
@@ -47,6 +48,7 @@ import {
 } from "./connect-source-card-study";
 import { DataExportFlowStudy } from "./data-export-study";
 import { FamilyInviteJoinStudy } from "./family-invite-join-study";
+import { ConnectLinkStudy } from "./connect-link-study";
 import { GameInviteStudy } from "./game-invite-study";
 import { GroupJoinStudy } from "./group-join-study";
 import { GroupStartStudy } from "./group-start-study";
@@ -54,6 +56,7 @@ import { GroupMemberPlanStudy } from "./group-member-plan-study";
 import { GrowthScorecardStudy } from "./growth-scorecard-study";
 import { HealthDataConsentWithdrawalFlowStudy } from "./health-data-consent-study";
 import { JoinInviteStudy } from "./join-invite-study";
+import { OpsBlockedNumbersStudy } from "./ops-blocked-numbers-study";
 import { OpsUsageStudy } from "./ops-usage-study";
 import { OpsGameReportsStudy } from "./ops-game-reports-study";
 import { OpsOperatorTaskStudy } from "./ops-operator-task-study";
@@ -252,6 +255,18 @@ export function SectionsContent({
 
       {category === "settings" ? (
         <>
+          <Separator />
+
+          <StudySection title="MCP servers Murph can use: add, sign in, choose, manage">
+            <CustomConnectionsStudy />
+          </StudySection>
+
+          <Separator />
+
+          <StudySection title="Murph asks first: confirm a change in an MCP server">
+            <CustomConnectionConfirmStudy />
+          </StudySection>
+
           <Separator />
 
           <StudySection title="Settings retained export while newer data is processing">
@@ -567,6 +582,12 @@ export function SectionsContent({
 
           <Separator />
 
+          <StudySection title="Connect in the app link: an iPhone, a computer, and the link preview">
+            <ConnectLinkStudy />
+          </StudySection>
+
+          <Separator />
+
           <StudySection title="Connect a wearable link">
             <WearableConnectLinkStudy />
           </StudySection>
@@ -659,7 +680,7 @@ export function SectionsContent({
           <Separator />
 
           <StudySection title="Weekly game challenge invite link">
-            {/* Prize, dare, variable-duration, free daily artifact and legacy invite states. */}
+            {/* Prize, dare, variable-duration, free daily artifact, legacy and on-a-computer invite states. */}
             <GameInviteStudy />
           </StudySection>
         </>
@@ -706,8 +727,14 @@ export function SectionsContent({
 
           <Separator />
 
-          <StudySection title="Ops usage search and recovery">
+          <StudySection title="Ops usage, free idle members, and recovery">
             <OpsUsageStudy />
+          </StudySection>
+
+          <Separator />
+
+          <StudySection id="ops-blocked-numbers" title="Blocked numbers">
+            <OpsBlockedNumbersStudy />
           </StudySection>
 
           <Separator />

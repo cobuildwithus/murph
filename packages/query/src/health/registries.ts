@@ -723,10 +723,6 @@ export function providerRecordFromEntity(
   return projectRegistryRecordFromEntity(entity, "provider", providerRegistryDefinition);
 }
 
-export function habitatRecordFromEntity(entity: CanonicalEntity): HabitatQueryRecord | null {
-  return projectRegistryRecordFromEntity(entity, "habitat", habitatRegistryDefinition);
-}
-
 export function workoutFormatRecordFromEntity(
   entity: CanonicalEntity,
 ): WorkoutFormatQueryRecord | null {

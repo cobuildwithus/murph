@@ -1,7 +1,9 @@
+import { assertContract } from "@murphai/contracts";
+import { parseInput, RequestInputError } from "@murphai/hosted-execution/request-input";
 import {
   HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,
   parseHostedRuntimeAssistantPersonalizationToolAuthority,
-  parseHostedRuntimeAssistantPersonalizationToolRequest,
+  hostedRuntimeAssistantPersonalizationToolRequestSchema,
   type HostedRuntimeAssistantPersonalizationToolAuthority,
 } from "@murphai/hosted-execution/assistant-personalization";
 import { after } from "next/server";
@@ -24,11 +26,11 @@ export const POST = withJsonError(async (request: Request) => {
   });
   const authority = readAssistantUpdateAuthority(request);
   if (isAssistantPreferenceCausalSeqRequest(payload)) {
-    throw new TypeError(
+    throw new RequestInputError(
       "Direct-vault assistant preference sequence resolution is retired.",
     );
   }
-  const body = parseHostedRuntimeAssistantPersonalizationToolRequest(payload);
+  const body = parseInput(payload, (value) => assertContract(hostedRuntimeAssistantPersonalizationToolRequestSchema, value, "Internal request"));
   if (
     (
       body.action === "update"
@@ -36,7 +38,7 @@ export const POST = withJsonError(async (request: Request) => {
     )
     && authority === null
   ) {
-    throw new TypeError(
+    throw new RequestInputError(
       "Assistant personalization update requires accepted-input or scheduled-occurrence authority.",
     );
   }
@@ -78,10 +80,10 @@ function readAssistantUpdateAuthority(request: Request):
     && occurrenceAt === null
   ) {
     return {
-      authority: parseHostedRuntimeAssistantPersonalizationToolAuthority({
+      authority: parseInput({
         assistantInputId,
         ...(toolCallId ? { toolCallId } : {}),
-      }),
+      }, parseHostedRuntimeAssistantPersonalizationToolAuthority),
     };
   }
   if (
@@ -90,14 +92,14 @@ function readAssistantUpdateAuthority(request: Request):
     && occurrenceAt !== null
   ) {
     return {
-      authority: parseHostedRuntimeAssistantPersonalizationToolAuthority({
+      authority: parseInput({
         automationId,
         occurrenceAt,
         ...(toolCallId ? { toolCallId } : {}),
-      }),
+      }, parseHostedRuntimeAssistantPersonalizationToolAuthority),
     };
   }
-  throw new TypeError(
+  throw new RequestInputError(
     "Hosted assistant personalization action authority is invalid.",
   );
 }

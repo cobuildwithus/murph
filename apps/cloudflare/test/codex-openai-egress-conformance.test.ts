@@ -31,8 +31,6 @@ import {
   createHostedExecutionTestEnv,
 } from "./hosted-execution-fixtures.ts";
 
-const PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET =
-  "codex-route-conformance-signing-secret";
 const RUNNER_CONTAINER_NAME = "member_123--v-version_1";
 const TEST_USER_ID = "member_123";
 const SCRIPTED_MODEL = "gpt-6.2-sol";
@@ -667,8 +665,6 @@ function createOpenAiInterceptEnv(input: {
   return {
     ...createHostedExecutionTestEnv(),
     BUNDLES: {} as RunnerOutboundEnvironmentSource["BUNDLES"],
-    HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
-      PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET,
     OPENAI_API_KEY: "openai-worker-secret",
     USER_RUNNER: forbiddenLegacyRuntime,
     RUNNER_CONTAINER: nativeProviderTestNamespace(async () => {

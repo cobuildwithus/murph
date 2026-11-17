@@ -255,6 +255,7 @@ export function expectAdvertisedMurphDynamicTools(
     telegramPresentationResponseCardAvailable?: boolean;
     vaultFileSendAvailable?: boolean;
     askGrokAvailable?: boolean;
+    leaveGroupAvailable?: boolean;
   } = {},
 ): void {
   const lastResponsesRequest = [...requests]

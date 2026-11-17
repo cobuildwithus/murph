@@ -19,6 +19,55 @@ const BILLING_INACTIVE_MESSAGE =
 const SIGNUP_MESSAGE =
   "Murph isn't fully set up on this account yet. Finish setup here:\nhttps://withmurph.ai/join/invite-123";
 const GROUP_SENDER_PHONE = "+15551234567";
+const PRIVATE_RECOVERY_KEY = /^visible-secondary-private:[0-9a-f]{32}$/u;
+const PRIVATE_RECOVERY_SEED = /^linq-group-private-recovery-seed:[0-9a-f]{32}$/u;
+
+const PRIVATE_RECOVERY_FAILURES = [
+  ...[401, 403, 408, 409, 429, 500, 503].map((status) => ({
+    label: `HTTP ${status}`,
+    error: hostedOnboardingError({
+      code: "LINQ_SEND_FAILED",
+      details: { status },
+      httpStatus: 502,
+      message: "Synthetic provider failure.",
+      retryable: status >= 429,
+    }),
+  })),
+  {
+    label: "configuration error",
+    error: hostedOnboardingError({
+      code: "HOSTED_ONBOARDING_CONFIG_MISSING",
+      details: { status: 404 },
+      httpStatus: 500,
+      message: "Synthetic configuration failure.",
+      retryable: false,
+    }),
+  },
+  {
+    label: "native error",
+    error: new Error("Synthetic network failure."),
+  },
+  ...[undefined, "404"].map((status) => ({
+    label: `invalid provider status ${status}`,
+    error: hostedOnboardingError({
+      code: "LINQ_SEND_FAILED",
+      details: { status },
+      httpStatus: 404,
+      message: "Synthetic failure without a numeric provider status.",
+      retryable: false,
+    }),
+  })),
+  {
+    label: "retryable rejection",
+    error: hostedOnboardingError({
+      code: "LINQ_SEND_FAILED",
+      details: { status: 404 },
+      httpStatus: 502,
+      message: "Synthetic retryable rejection.",
+      retryable: true,
+    }),
+  },
+];
 
 const GROUP_SENDER_CONTACT = requireTestLinqParticipantContact({
   kind: "phone",
@@ -51,6 +100,30 @@ function requireTestLinqParticipantContact(
 }
 
 describe("Linq group-chat visible access recovery", () => {
+  it("suppresses a prepared private recovery when its source group leaves", async () => {
+    const event = buildGroupLinqEvent("synthetic-held-recovery");
+    let marked = false;
+    const send = vi.fn();
+    const dependencies = buildLinqDependencies({ event,
+      readHostedMemberRoutingState: vi.fn(async () => ({ linqChatId: "synthetic-private", linqIsGroup: false,
+        linqRecipientPhone: "+15550000000", linqRecipientPhoneIsAuthoritative: true }) as never),
+      getHostedLinqChatSummary: vi.fn(async () => linqRoster({ handles: MATCHING_PRIVATE_HANDLES, isGroup: false })),
+      resolveHostedRecognizedInboundAccess: vi.fn(async () => {
+        marked = true;
+        return { kind: "access_notice" as const, message: BILLING_INACTIVE_MESSAGE,
+          noticeCode: "billing_inactive" as const, responseReason: "sent-billing-inactive-notice" };
+      }), sendHostedLinqChatMessage: send,
+    });
+    const findFirst = vi.fn(async () => marked ? { threadIdentityLookupKey: "synthetic-marker" } : null);
+    dependencies.getPrisma = () => ({ hostedLinqGroupLeave: { findFirst } }) as never;
+    const response = await withHostedVisibleSecondaryLinqOutcomes(async () => ({ ok: true, ignored: true, reason: "group-chat" }), dependencies)({
+      rawBody: JSON.stringify(event), signature: "synthetic", timestamp: "synthetic",
+    });
+    expect(marked).toBe(true);
+    expect(response).toEqual({ ok: true, ignored: true, reason: "group-left" });
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it("privately explains inactive access after neutral setup guidance is sent", async () => {
     const event = buildGroupLinqEvent("evt_group_setup_private");
     const sendHostedLinqChatMessage = vi.fn(async () => ({
@@ -206,20 +279,134 @@ describe("Linq group-chat visible access recovery", () => {
     }
   });
 
-  it("retries private recovery with the same provider key after room completion", async () => {
+  it("sends one private recovery per member per day across group chats and messages", async () => {
+    const idempotencyKeys: string[] = [];
+    const run = async (input: {
+      chatId: string;
+      createdAt: string;
+      eventId: string;
+      handlerReason: "group-chat" | "sent-group-setup";
+    }) => {
+      const event = buildGroupLinqEvent(
+        input.eventId,
+        GROUP_SENDER_PHONE,
+        input.createdAt,
+        input.chatId,
+      );
+      const dependencies = buildLinqDependencies({
+        event,
+        getHostedLinqChatSummary: vi.fn(async () => linqRoster({
+          handles: MATCHING_PRIVATE_HANDLES,
+          isGroup: false,
+        })),
+        readHostedMemberRoutingState: vi.fn(async () => ({
+          linqChatId: "chat_private_member",
+          linqRecipientPhone: "+15550000000",
+        }) as never),
+        resolveHostedRecognizedInboundAccess: vi.fn(async () => ({
+          inviteCode: "invite-123",
+          inviteId: "invite_123",
+          joinUrl: "https://withmurph.ai/join/invite-123",
+          kind: "signup" as const,
+          message: SIGNUP_MESSAGE,
+          responseReason: "sent-signup-link" as const,
+        })),
+        sendHostedLinqChatMessage: vi.fn(async (sendInput) => {
+          idempotencyKeys.push(sendInput.idempotencyKey ?? "");
+          return { chatId: "chat_private_member", messageId: "msg_private" };
+        }),
+      });
+      const handler: HostedOnboardingLinqWebhookHandler = vi.fn(async () =>
+        input.handlerReason === "sent-group-setup"
+          ? {
+              joinUrl: "https://withmurph.ai/groups/start",
+              ok: true as const,
+              reason: "sent-group-setup",
+            }
+          : { ignored: true, ok: true as const, reason: "group-chat" });
+
+      await withHostedVisibleSecondaryLinqOutcomes(handler, dependencies)({
+        rawBody: JSON.stringify(event),
+        signature: "signature",
+        timestamp: "timestamp",
+      });
+    };
+
+    // A big mixed iMessage/RCS group reappears under a new chat id on each
+    // roster change, and every message in it reaches this path.
+    await run({ chatId: "chat_group_fork_a", createdAt: "2026-07-27T03:00:00.000Z", eventId: "evt_fork_a", handlerReason: "sent-group-setup" });
+    await run({ chatId: "chat_group_fork_b", createdAt: "2026-07-27T03:05:00.000Z", eventId: "evt_fork_b", handlerReason: "sent-group-setup" });
+    await run({ chatId: "chat_group_fork_b", createdAt: "2026-07-27T03:06:00.000Z", eventId: "evt_fork_b_again", handlerReason: "group-chat" });
+    await run({ chatId: "chat_group_fork_c", createdAt: "2026-07-28T03:00:00.000Z", eventId: "evt_fork_next_day", handlerReason: "group-chat" });
+
+    expect(idempotencyKeys).toHaveLength(4);
+    expect(new Set(idempotencyKeys.slice(0, 3)).size).toBe(1);
+    expect(idempotencyKeys[3]).not.toBe(idempotencyKeys[0]);
+    for (const idempotencyKey of idempotencyKeys) {
+      expect(idempotencyKey).toMatch(PRIVATE_RECOVERY_KEY);
+    }
+  });
+
+  it("treats a reused daily recovery key with changed text as today's recovery already sent", async () => {
+    const event = buildGroupLinqEvent("evt_private_key_reuse");
+    // Linq's answer when today's key comes back with a re-minted invite link.
+    const sendHostedLinqChatMessage = vi.fn(async () => {
+      throw hostedOnboardingError({
+        code: "LINQ_SEND_FAILED",
+        details: { failureStage: "http", idempotencyKeyReuseConflict: true, status: 409 },
+        httpStatus: 502,
+        message: "Linq outbound reply failed with HTTP 409.",
+        retryable: false,
+      });
+    });
+    const dependencies = buildLinqDependencies({
+      event,
+      getHostedLinqChatSummary: vi.fn(async () => linqRoster({
+        handles: MATCHING_PRIVATE_HANDLES,
+        isGroup: false,
+      })),
+      readHostedMemberRoutingState: vi.fn(async () => ({
+        linqChatId: "chat_private_member",
+        linqRecipientPhone: "+15550000000",
+      }) as never),
+      resolveHostedRecognizedInboundAccess: vi.fn(async () => ({
+        kind: "access_notice" as const,
+        message: BILLING_INACTIVE_MESSAGE,
+        noticeCode: "billing_inactive" as const,
+        responseReason: "sent-billing-inactive-notice",
+      })),
+      sendHostedLinqChatMessage,
+    });
+    const handler: HostedOnboardingLinqWebhookHandler = vi.fn(async () => ({
+      ignored: true,
+      ok: true as const,
+      reason: "group-chat",
+    }));
+
+    await expect(withHostedVisibleSecondaryLinqOutcomes(handler, dependencies)({
+      rawBody: JSON.stringify(event),
+      signature: "signature",
+      timestamp: "timestamp",
+    })).resolves.toMatchObject({
+      ignored: false,
+      reason: "visible-secondary-reply:group-chat",
+    });
+    // One private attempt and no neutral room reply.
+    expect(sendHostedLinqChatMessage).toHaveBeenCalledOnce();
+    expect(sendHostedLinqChatMessage).toHaveBeenCalledWith(expect.objectContaining({
+      chatId: "chat_private_member",
+      idempotencyKey: expect.stringMatching(PRIVATE_RECOVERY_KEY),
+    }));
+  });
+
+  it.each(PRIVATE_RECOVERY_FAILURES)("retries $label with the same provider key after room completion", async ({ error }) => {
     const event = buildGroupLinqEvent(
       "evt_group_setup_private_retry",
       GROUP_SENDER_PHONE,
       "2026-07-27T12:00:00.000Z",
     );
-    const retryableError = hostedOnboardingError({
-      code: "LINQ_SEND_FAILED",
-      httpStatus: 502,
-      message: "Linq outbound reply failed with HTTP 503.",
-      retryable: true,
-    });
     const sendHostedLinqChatMessage = vi.fn()
-      .mockRejectedValueOnce(retryableError)
+      .mockRejectedValueOnce(error)
       .mockResolvedValueOnce({
         chatId: "chat_private_member",
         messageId: "msg_private_retry",
@@ -256,7 +443,7 @@ describe("Linq group-chat visible access recovery", () => {
     await expect(withHostedVisibleSecondaryLinqOutcomes(
       handler,
       dependencies,
-    )(input)).rejects.toBe(retryableError);
+    )(input)).rejects.toBe(error);
     await expect(withHostedVisibleSecondaryLinqOutcomes(
       handler,
       dependencies,
@@ -265,6 +452,9 @@ describe("Linq group-chat visible access recovery", () => {
       reason: "sent-group-setup",
     });
 
+    expect(handler).toHaveBeenCalledTimes(2);
+    expect(sendHostedLinqChatMessage.mock.calls.map(([sendInput]) => sendInput.chatId))
+      .toEqual(["chat_private_member", "chat_private_member"]);
     const providerKeys = sendHostedLinqChatMessage.mock.calls.map(
       ([sendInput]) => sendInput.idempotencyKey,
     );
@@ -359,14 +549,14 @@ describe("Linq group-chat visible access recovery", () => {
         id: "member_group_sender",
         suspendedAt: null,
       },
-      noticeSeed: `evt_private_${reason}`,
-      prisma: {},
+      noticeSeed: expect.stringMatching(PRIVATE_RECOVERY_SEED),
+      prisma: expect.objectContaining({ hostedLinqGroupLeave: expect.any(Object) }),
     });
     expect(readHostedMemberRoutingState).toHaveBeenCalledTimes(2);
     expect(sendHostedLinqChatMessage).toHaveBeenCalledTimes(1);
     expect(sendHostedLinqChatMessage).toHaveBeenCalledWith(expect.objectContaining({
       chatId: "chat_private_member",
-      idempotencyKey: `visible-secondary-private:evt_private_${reason}`,
+      idempotencyKey: expect.stringMatching(PRIVATE_RECOVERY_KEY),
       message: `${BILLING_INACTIVE_MESSAGE}\n\nOnce that's sorted, send me another message in the group and I'll try again.`,
       replyToMessageId: null,
     }));
@@ -474,7 +664,7 @@ describe("Linq group-chat visible access recovery", () => {
     expect(sendHostedLinqChatMessage).toHaveBeenCalledOnce();
     expect(sendHostedLinqChatMessage).toHaveBeenCalledWith(expect.objectContaining({
       chatId: "chat_private_email_member",
-      idempotencyKey: "visible-secondary-private:evt_matching_email",
+      idempotencyKey: expect.stringMatching(PRIVATE_RECOVERY_KEY),
     }));
   });
 
@@ -692,8 +882,7 @@ describe("Linq group-chat visible access recovery", () => {
     expect(sendHostedLinqChatMessage).toHaveBeenCalledOnce();
     expect(sendHostedLinqChatMessage).toHaveBeenCalledWith(expect.objectContaining({
       chatId: "chat_pending_member",
-      idempotencyKey:
-        "visible-secondary-private:evt_matching_pending_after_stale_committed",
+      idempotencyKey: expect.stringMatching(PRIVATE_RECOVERY_KEY),
     }));
   });
 
@@ -1070,15 +1259,9 @@ describe("Linq group-chat visible access recovery", () => {
     }));
   });
 
-  it("preserves webhook retry ownership for a retryable private-route failure", async () => {
+  it.each(PRIVATE_RECOVERY_FAILURES)("propagates $label without a room fallback", async ({ error }) => {
     const event = buildGroupLinqEvent("evt_retryable_private_route");
-    const retryableError = hostedOnboardingError({
-      code: "LINQ_SEND_FAILED",
-      httpStatus: 502,
-      message: "Linq outbound reply failed with HTTP 503.",
-      retryable: true,
-    });
-    const sendHostedLinqChatMessage = vi.fn().mockRejectedValue(retryableError);
+    const sendHostedLinqChatMessage = vi.fn().mockRejectedValue(error);
     const readHostedMemberRoutingState = vi.fn()
       .mockResolvedValueOnce({
         linqChatId: "chat_private_member",
@@ -1116,23 +1299,84 @@ describe("Linq group-chat visible access recovery", () => {
       rawBody: JSON.stringify(event),
       signature: "signature",
       timestamp: "timestamp",
-    })).rejects.toBe(retryableError);
+    })).rejects.toBe(error);
 
     expect(sendHostedLinqChatMessage).toHaveBeenCalledOnce();
     expect(sendHostedLinqChatMessage).toHaveBeenCalledWith(expect.objectContaining({
       chatId: "chat_private_member",
-      idempotencyKey: "visible-secondary-private:evt_retryable_private_route",
+      idempotencyKey: expect.stringMatching(PRIVATE_RECOVERY_KEY),
       replyToMessageId: null,
     }));
   });
 
-  it("falls back to the neutral group reply after a definite private-route rejection", async () => {
+  it.each([
+    ...[400, 404, 410, 415, 422].map((status) => ({
+      label: `HTTP ${status}`,
+      error: hostedOnboardingError({
+        code: "LINQ_SEND_FAILED",
+        details: { status },
+        httpStatus: 502,
+        message: "Synthetic roster rejection.",
+        retryable: false,
+      }),
+      gone: status === 404 || status === 410,
+    })),
+    ...PRIVATE_RECOVERY_FAILURES.map((failure) => ({ ...failure, gone: false })),
+  ])("treats only a missing roster as not attested: $label", async ({ error, gone }) => {
+    const event = buildGroupLinqEvent("evt_private_roster_failure");
+    const sendHostedLinqChatMessage = vi.fn().mockResolvedValue({
+      chatId: "chat_group_visible",
+      messageId: "msg_group_fallback",
+    });
+    const getHostedLinqChatSummary = vi.fn().mockRejectedValue(error);
+    const resolveHostedRecognizedInboundAccess = vi.fn();
+    const dependencies = buildLinqDependencies({
+      event,
+      getHostedLinqChatSummary,
+      readHostedMemberRoutingState: vi.fn(async () => ({
+        linqChatId: "chat_private_member",
+        linqRecipientPhone: "+15550000000",
+      }) as never),
+      resolveHostedRecognizedInboundAccess,
+      sendHostedLinqChatMessage,
+    });
+    const handler: HostedOnboardingLinqWebhookHandler = async () => ({
+      ignored: true,
+      ok: true,
+      reason: "group-chat",
+    });
+    const result = withHostedVisibleSecondaryLinqOutcomes(handler, dependencies)({
+      rawBody: JSON.stringify(event),
+      signature: "signature",
+      timestamp: "timestamp",
+    });
+
+    if (gone) {
+      await expect(result).resolves.toMatchObject({
+        ignored: false,
+        reason: "visible-secondary-reply:group-chat",
+      });
+      expect(sendHostedLinqChatMessage).toHaveBeenCalledOnce();
+      expect(sendHostedLinqChatMessage).toHaveBeenCalledWith(expect.objectContaining({
+        chatId: "chat_group_visible",
+        idempotencyKey: "visible-secondary:evt_private_roster_failure",
+      }));
+    } else {
+      await expect(result).rejects.toBe(error);
+      expect(sendHostedLinqChatMessage).not.toHaveBeenCalled();
+    }
+    expect(getHostedLinqChatSummary).toHaveBeenCalledOnce();
+    expect(resolveHostedRecognizedInboundAccess).not.toHaveBeenCalled();
+  });
+
+  it.each([400, 404, 410, 415, 422])("falls back to the neutral group reply after HTTP %i", async (status) => {
     const event = buildGroupLinqEvent("evt_stale_private_route");
     const sendHostedLinqChatMessage = vi.fn()
       .mockRejectedValueOnce(hostedOnboardingError({
         code: "LINQ_SEND_FAILED",
         httpStatus: 502,
-        message: "Linq outbound reply failed with HTTP 404.",
+        message: `Linq outbound reply failed with HTTP ${status}.`,
+        details: { status },
         retryable: false,
       }))
       .mockResolvedValueOnce({
@@ -1243,7 +1487,7 @@ function buildLinqDependencies(input: {
     ...(input.getHostedLinqChatSummary
       ? { getHostedLinqChatSummary: input.getHostedLinqChatSummary }
       : {}),
-    getPrisma: vi.fn(() => ({}) as never),
+    getPrisma: vi.fn(() => ({ hostedLinqGroupLeave: { findFirst: vi.fn().mockResolvedValue(null) } }) as never),
     lookupHostedMemberByVerifiedEmailAddress:
       input.lookupHostedMemberByVerifiedEmailAddress
       ?? vi.fn(async () => null),
@@ -1267,13 +1511,14 @@ function buildGroupLinqEvent(
   eventId: string,
   senderHandle = GROUP_SENDER_PHONE,
   createdAt = "2026-07-27T12:00:00.000Z",
+  chatId = "chat_group_visible",
 ): ReturnType<typeof requireHostedLinqMessageReceivedEvent> {
   return requireHostedLinqMessageReceivedEvent({
     api_version: "v3",
     created_at: createdAt,
     data: {
       chat: {
-        id: "chat_group_visible",
+        id: chatId,
         is_group: true,
         owner_handle: {
           handle: "+15550000000",

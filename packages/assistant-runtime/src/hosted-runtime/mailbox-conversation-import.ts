@@ -1,5 +1,5 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createHash } from "node:crypto";
-import path from "node:path";
 
 import type { HostedAssistantBootstrapResult } from "@murphai/operator-config/hosted-assistant-config";
 
@@ -55,7 +55,7 @@ import {
 import type {
   AssistantModelTarget,
 } from "@murphai/operator-config/assistant-cli-contracts";
-import { isActiveCanonicalWriteLockError } from "@murphai/core";
+import { isActiveCanonicalWriteLockError, loadVault } from "@murphai/core";
 import { createIntegratedInboxServices } from "@murphai/inbox-services";
 
 import type {
@@ -1297,16 +1297,11 @@ async function loadHostedConversationAttachmentEvidenceCapture(input: {
   requestId: string | null;
   vaultRoot: string;
 }): Promise<HostedConversationMailboxAttachmentEvidenceCapture> {
-  const inboxServices = createIntegratedInboxServices();
-  const result = await inboxServices.show({
+  return createIntegratedInboxServices().listAttachments({
     captureId: input.captureId,
     requestId: input.requestId,
     vault: input.vaultRoot,
   });
-  return {
-    attachments: result.capture.attachments,
-    captureId: result.capture.captureId,
-  };
 }
 
 function createHostedConversationAttachmentEvidenceFromCapture(input: {
@@ -1730,7 +1725,7 @@ function createHostedConversationAssistantInputText(
     readHostedExecutionConversationMessageText(wake.message) ?? "",
   );
   if (wake.message.channel === "voice") {
-    if (!authoredText) throw new TypeError("Voice input requires normalized speech text.");
+    if (!authoredText) throw new ContractValidationError("Voice input requires normalized speech text.");
     return authoredText;
   }
   if (isHostedLinqConversationMessageWake(wake)) {
@@ -2498,21 +2493,10 @@ function requiresHostedConversationInboxProjection(input: {
 }
 
 async function prepareHostedConversationMailboxWakeContext(input: {
-  runtime: Pick<
-    NormalizedHostedAssistantRuntimeConfig,
-    "forwardedEnv" | "resolvedConfig" | "userEnv"
-  >;
   vaultRoot: string;
-  wake: HostedExecutionConversationMessageWake;
 }): Promise<void> {
-  void input.runtime;
-  const inboxServices = createIntegratedInboxServices();
-  await inboxServices.init({
-    rebuild: false,
-    rebuildParserJobs: false,
-    requestId: input.wake.eventId,
-    vault: path.resolve(input.vaultRoot),
-  });
+  // Validate before downloading media. The importer opens and initializes its own database.
+  await loadVault({ vaultRoot: input.vaultRoot });
 }
 
 function normalizeConversationMailboxReasonCode(

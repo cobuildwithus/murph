@@ -1,3 +1,5 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
+import { parseInput, RequestInputError } from "../src/request-input.ts";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -440,7 +442,7 @@ describe("hosted orchestration control contracts", () => {
       cutover: "postgres" as const, status: "existing" as const,
       owner: {
         userId: "test-user", attemptId: "attempt-test", generation: "1", phase: "active" as const,
-        processingMode: "default" as const, allocationId: "allocation-test",
+        processingMode: "default" as const, allocationId: "standby-claim-00000000-0000-4000-8000-000000000000",
         runnerContainerName: "runner-test", workspaceVersion: "0",
         platformAiUsageAllowed: true,
         startedAt: "2026-01-01T00:00:00.000Z", acceptedAt: null, completedAt: null,
@@ -460,7 +462,10 @@ describe("hosted orchestration control contracts", () => {
       { ...admission, status: "blocked" },
       { ...admission, status: "claimed" },
       { ...admission, status: "claimed", owner: { ...admission.owner, phase: "starting", processingMode: "system_mailbox" } },
-    ]) expect(() => parse(invalid)).toThrow();
+    ]) {
+      expect(() => parse(invalid)).toThrow(ContractValidationError);
+      expect(() => parseInput(invalid, parse)).toThrow(RequestInputError);
+    }
   });
 
   it("parses ensure-processing request and response variants", () => {

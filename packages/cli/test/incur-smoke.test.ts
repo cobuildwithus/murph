@@ -1533,9 +1533,9 @@ test('root config file can provide command option defaults', async () => {
               requestId: 'config-smoke',
             },
           },
-          search: {
+          knowledge: {
             commands: {
-              query: {
+              list: {
                 options: {
                   limit: 1,
                 },
@@ -1548,40 +1548,34 @@ test('root config file can provide command option defaults', async () => {
 
     const showResult = requireData(
       await runSourceEntrypointJsonCliFromCwd<{
-        filters: {
-          limit: number
-        }
+        limit: number
       }>(
-        ['--config', configPath, 'search', 'query', '--vault', vaultRoot, '--text', 'no-match'],
+        ['--config', configPath, 'knowledge', 'list', '--vault', vaultRoot],
         {
           cwd: tempRoot,
           env: isolatedEnv,
         },
       ),
     )
-    assert.equal(showResult.filters.limit, 1)
+    assert.equal(showResult.limit, 1)
 
     const withoutConfig = await runSourceEntrypointJsonCliFromCwd<{
-      filters: {
-        limit: number
-      }
+      limit: number
     }>([
       '--config',
       configPath,
       '--no-config',
-      'search',
-      'query',
+      'knowledge',
+      'list',
       '--vault',
       vaultRoot,
-      '--text',
-      'no-match',
     ], {
       cwd: tempRoot,
       env: isolatedEnv,
     })
     assert.equal(withoutConfig.ok, true)
     if (withoutConfig.ok) {
-      assert.equal(withoutConfig.data.filters.limit, 10)
+      assert.equal(withoutConfig.data.limit, 10)
     }
   } finally {
     await rm(tempRoot, { recursive: true, force: true })
@@ -1601,9 +1595,9 @@ test('root config autodiscovery resolves ~/.config/murph/config.json', async () 
       path.join(configDir, 'config.json'),
       JSON.stringify({
         commands: {
-          search: {
+          knowledge: {
             commands: {
-              query: {
+              list: {
                 options: {
                   limit: 1,
                 },
@@ -1616,16 +1610,14 @@ test('root config autodiscovery resolves ~/.config/murph/config.json', async () 
 
     const output = await runSourceEntrypointRawFromCwd(
       [
-        'search',
-        'query',
+        'knowledge',
+        'list',
         '--vault',
         homeVaultRoot,
-        '--text',
-        'no-match',
         '--format',
         'json',
         '--filter-output',
-        'filters.limit',
+        'limit',
       ],
       {
         cwd: tempRoot,
@@ -1635,11 +1627,7 @@ test('root config autodiscovery resolves ~/.config/murph/config.json', async () 
         },
       },
     )
-    assert.deepEqual(JSON.parse(output), {
-      filters: {
-        limit: 1,
-      },
-    })
+    assert.equal(JSON.parse(output), 1)
   } finally {
     await rm(tempRoot, { recursive: true, force: true })
   }
@@ -3101,7 +3089,14 @@ for (const kind of ['provider', 'food', 'recipe'] as const) {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), `murph-${kind}-lifecycle-`))
     const runFreshCli = <TData = Record<string, unknown>>(args: string[]) =>
       runCli<TData>(args, { env: { MURPH_CLI_TEST_PERSISTENT_HARNESS: '0' } })
-    type SavedRecord = { lookupId: string; path: string; created: boolean }
+    // Save results name the id once; the duplicate lookupId is projected away.
+    type SavedRecord = Partial<Record<`${typeof kind}Id`, string>> & { path: string; created: boolean }
+    const savedId = (record: SavedRecord): string => {
+      const id = record[`${kind}Id`]
+      assert.ok(id)
+      assert.equal('lookupId' in record, false)
+      return id
+    }
     type ShownRecord = { entity: { id: string; path: string; data: { title: string } } }
     try {
       requireData(await runFreshCli(['init', '--vault', vaultRoot]))
@@ -3110,37 +3105,38 @@ for (const kind of ['provider', 'food', 'recipe'] as const) {
         '--vault', vaultRoot,
       ]))
       assert.equal(created.created, true)
+      const createdId = savedId(created)
       const shown = requireData(await runFreshCli<ShownRecord>([
-        kind, 'show', created.lookupId, '--vault', vaultRoot,
+        kind, 'show', createdId, '--vault', vaultRoot,
       ]))
-      assert.equal(shown.entity.id, created.lookupId)
+      assert.equal(shown.entity.id, createdId)
       assert.equal(shown.entity.data.title, 'Synthetic initial record')
 
       const updated = requireData(await runFreshCli<SavedRecord>([
         ...(kind === 'food'
-          ? [kind, 'rename', created.lookupId, '--title', 'Synthetic updated record']
-          : [kind, 'save', 'Synthetic updated record', '--id', created.lookupId]),
+          ? [kind, 'rename', createdId, '--title', 'Synthetic updated record']
+          : [kind, 'save', 'Synthetic updated record', '--id', createdId]),
         '--slug', 'synthetic-updated', '--vault', vaultRoot,
       ]))
       assert.equal(updated.created, false)
-      assert.equal(updated.lookupId, created.lookupId)
+      assert.equal(savedId(updated), createdId)
       assert.notEqual(updated.path, created.path)
       const persisted = await readFile(path.join(vaultRoot, updated.path), 'utf8')
       assert.match(persisted, /Synthetic updated record/u)
       await assert.rejects(readFile(path.join(vaultRoot, created.path), 'utf8'), { code: 'ENOENT' })
 
       const reopened = requireData(await runFreshCli<ShownRecord>([
-        kind, 'show', created.lookupId, '--vault', vaultRoot,
+        kind, 'show', createdId, '--vault', vaultRoot,
       ]))
       assert.equal(reopened.entity.path, updated.path)
       assert.equal(reopened.entity.data.title, 'Synthetic updated record')
       const listed = requireData(await runFreshCli<{ items: Array<{ id: string }> }>([
         kind, 'list', '--vault', vaultRoot,
       ]))
-      assert.deepEqual(listed.items.map((item) => item.id), [created.lookupId])
+      assert.deepEqual(listed.items.map((item) => item.id), [createdId])
 
       const rejected = await runFreshCli([
-        kind, 'save', 'Rejected update', '--id', created.lookupId,
+        kind, 'save', 'Rejected update', '--id', createdId,
         '--slug', '../outside', '--vault', vaultRoot,
       ])
       assert.equal(rejected.ok, false)

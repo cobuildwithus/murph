@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { initializeVault, showAutomation, upsertAutomation, upsertEvent } from '@murphai/core'
+import type { HostedConnectedAppsRequest } from '@murphai/hosted-execution/connected-apps'
 import { completeAssistantOnboarding, MURPH_MANAGED_AUTOMATIONS } from '@murphai/assistant-engine'
 import { processDueAssistantCronJobs } from '@murphai/assistant-engine/assistant-cron'
 import { executeCodexAppServerTurn } from '@murphai/assistant-engine/assistant-codex'
@@ -26,7 +27,7 @@ it('binds the normal automation tool through hosted morning cron and real turn p
   const now = new Date('2026-11-10T08:00:00Z')
   const route = { channel: 'telegram', deliveryTarget: 'private-thread', threadId: 'private-thread',
     threadIsDirect: true, identityId: null, participantId: null }
-  const connectedRequest = vi.fn(async () => ({ result: { accounts: [], toolkits: [] } }))
+  const connectedRequest = vi.fn(async (_request: HostedConnectedAppsRequest) => ({ result: { accounts: [], toolkits: [] } }))
   let repairs = 0
   try {
     vi.useFakeTimers({ toFake: ['Date'] })
@@ -96,6 +97,9 @@ it('binds the normal automation tool through hosted morning cron and real turn p
     }))
     await runHostedWorkspaceAssistantPhase(phaseInput)
     expect(executeCodexAppServerTurn).toHaveBeenCalledTimes(1)
+    expect(connectedRequest.mock.calls.map(([request]) => request)).toEqual([
+      { operation: 'manage', input: { action: 'list' } },
+    ])
     const after = await showAutomation({ vaultRoot, automationId: reminder.automationId })
     expect(after?.schedule).toEqual({ kind: 'at', at: '2026-11-12T10:00:00.000Z' })
     expect(after?.route).toEqual(reminder.route)
@@ -105,7 +109,10 @@ it('binds the normal automation tool through hosted morning cron and real turn p
     expect(executeCodexAppServerTurn).toHaveBeenCalledTimes(2)
     expect(repairs).toBe(1)
     expect(await showAutomation({ vaultRoot, automationId: reminder.automationId })).toEqual(after)
-    expect(connectedRequest).not.toHaveBeenCalled()
+    expect(connectedRequest.mock.calls.map(([request]) => request)).toEqual([
+      { operation: 'manage', input: { action: 'list' } },
+      { operation: 'manage', input: { action: 'list' } },
+    ])
   } finally {
     await rm(root, { recursive: true, force: true })
   }

@@ -130,7 +130,6 @@ export async function executeMemberMemoryDynamicTool(input: {
               updatedAt,
             })),
           },
-          memory: null,
         }),
       )
     }
@@ -145,12 +144,7 @@ export async function executeMemberMemoryDynamicTool(input: {
         true,
         JSON.stringify({
           created: result.created,
-          memory: {
-            id: result.record.id,
-            section: result.record.section,
-            text: result.record.text,
-            updatedAt: result.record.updatedAt,
-          },
+          memory: projectWrittenMemory(result.record, input.request.args),
         }),
       )
     }
@@ -166,13 +160,7 @@ export async function executeMemberMemoryDynamicTool(input: {
       return memberMemoryTextResult(
         true,
         JSON.stringify({
-          created: false,
-          memory: {
-            id: result.record.id,
-            section: result.record.section,
-            text: result.record.text,
-            updatedAt: result.record.updatedAt,
-          },
+          memory: projectWrittenMemory(result.record, input.request.args),
         }),
       )
     }
@@ -186,7 +174,6 @@ export async function executeMemberMemoryDynamicTool(input: {
       true,
       JSON.stringify({
         forgotten: result.existed,
-        memory: null,
       }),
     )
   } catch (error) {
@@ -202,5 +189,20 @@ export async function executeMemberMemoryDynamicTool(input: {
       'member-memory maintenance could not be completed',
       'handler_exception', error,
     )
+  }
+}
+
+// A write reports the stored id and version. Section and text are echoed only
+// when the stored record differs from what was sent, such as normalized text,
+// a canonical demographic fact, or an existing record the upsert matched.
+function projectWrittenMemory(
+  record: { id: string; section: string; text: string; updatedAt: string },
+  request: { section?: string; text: string },
+) {
+  return {
+    id: record.id,
+    ...(request.section !== undefined && record.section !== request.section ? { section: record.section } : {}),
+    ...(record.text === request.text ? {} : { text: record.text }),
+    updatedAt: record.updatedAt,
   }
 }

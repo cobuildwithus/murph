@@ -4,7 +4,10 @@ import { MURPH_WEEKLY_USAGE_OPTIMIZER_AUTOMATION } from '../src/assistant/weekly
 import { readTestMurphDynamicToolRequest } from './support/codex-app-server.ts'
 import assert from 'node:assert/strict'
 import path from 'node:path'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { extractCodexAssistantProviderUsage } from '../src/assistant/providers/helpers.js'
+import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assistant/provider-config'
+import { pruneHostedCodexHomeToSessionReferencedRollouts, resolveAssistantStatePaths } from '@murphai/runtime-state/node'
 import { tmpdir } from 'node:os'
 
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
@@ -1860,7 +1863,7 @@ test('an organic same-route reply supersedes the exact-text signup welcome throu
   }
 })
 
-test('sendAssistantNotificationLocal derives hosted Linq deterministic delivery keys centrally', async () => {
+async function sendHostedLinqNotificationText(text: string) {
   const linqSession = createAssistantSession({
     binding: {
       actorId: 'actor-linq',
@@ -1879,11 +1882,11 @@ test('sendAssistantNotificationLocal derives hosted Linq deterministic delivery 
     response: JSON.stringify({
       kind: 'send_message',
       privateSummary: 'summary',
-      text: 'Hosted Linq notification',
+      text,
     }),
     session: linqSession,
   })
-  const deliverMessage = vi.fn(async () => ({
+  const deliverMessage = vi.fn(async (_input: Record<string, unknown>) => ({
     delivery: null,
     intent: {
       intentId: 'intent-hosted-linq-notification',
@@ -2011,14 +2014,44 @@ test('sendAssistantNotificationLocal derives hosted Linq deterministic delivery 
     vault: '/vaults/test',
   })
 
-  expect(deliverMessage).toHaveBeenCalledWith(
+  return deliverMessage.mock.calls.map(([call]) => call)
+}
+
+test('sendAssistantNotificationLocal derives hosted Linq deterministic delivery keys centrally', async () => {
+  const calls = await sendHostedLinqNotificationText('Hosted Linq notification')
+
+  expect(calls).toEqual([
     expect.objectContaining({
       channel: 'linq',
       deliveryIdempotencyKey: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
       deliveryTransportIdempotent: true,
+      message: 'Hosted Linq notification',
     }),
-  )
+  ])
 })
+
+test('sendAssistantNotificationLocal sends each --- bubble of a Linq notification as its own message', async () => {
+  const calls = await sendHostedLinqNotificationText(
+    'Sleep held steady all week.\n---\nRecovery bounced back by Sunday.',
+  )
+
+  expect(calls.map((call) => call.message)).toEqual([
+    'Sleep held steady all week.',
+    'Recovery bounced back by Sunday.',
+  ])
+  const finalKey = String(calls[1]!.deliveryIdempotencyKey)
+  expect(finalKey).toMatch(/^sha256:[0-9a-f]{64}$/u)
+  expect(calls[0]).toEqual(expect.objectContaining({
+    answeredMailboxItemIds: [],
+    dedupeToken: `${finalKey}:bubble:0`,
+    deliveryIdempotencyKey: `${finalKey}:bubble:0`,
+    deliveryTransportIdempotent: true,
+  }))
+  expect(calls[1]).toEqual(expect.objectContaining({
+    deliveryTransportIdempotent: true,
+  }))
+})
+
 
 test('sendAssistantNotificationLocal derives hosted notification keys from resolved delivery target', async () => {
   const linqSession = createAssistantSession({
@@ -4447,6 +4480,159 @@ test.each(['send_message', 'skip'] as const)('group missed-day notifications iso
   } }))
 })
 
+test('recap capacity retries retain the generation, native thread and usage basis across the twenty-minute boundary', async () => {
+  const vault = await mkdtemp(path.join(tmpdir(), 'recap-capacity-'))
+  vi.useFakeTimers({ toFake: ['Date'] })
+  const start = Date.parse('2036-08-25T18:00:00Z')
+  vi.setSystemTime(start)
+  try {
+    const scope = { eventId: 'game-recap:game_synthetic', gameId: 'game_synthetic', pairFingerprint: '0123456789abcdef0123456789abcdef', show: true as const }
+    const request = vi.fn().mockResolvedValue({ result: { status: 'ok', recapGame: { recovered: false } } })
+    const recordUsage = vi.fn(async (_record: import('@murphai/hosted-execution/assistant-usage').AssistantUsageRecord) => undefined)
+    const providerResult = createProviderResult()
+    const nativeThreadId = '00000000-0000-4000-8000-000000000001'
+    const rolloutRelativePath = `sessions/2036/08/25/rollout-2036-08-25T18-00-00-${nativeThreadId}.jsonl`
+    const error = new VaultCliError('ASSISTANT_CODEX_FAILED', 'Synthetic capacity refusal', { codexErrorInfo: 'flexUnavailable', retryable: true })
+    const nativeThreads: Array<string | null> = []
+    let complete = false
+    const tiers: Array<string | null | undefined> = []
+    const { mocks, deliverMessage, sendAssistantNotificationLocal } = await loadNotificationTurnHarness({
+      providerResult, realUsage: true, turnId: 'recap-attempt',
+      onExecuteCodexTurnWithRecovery: async input => {
+        tiers.push(input.input.serviceTier)
+        nativeThreads.push(input.resolvedSession.codexResume?.threadId ?? null)
+        const usage = extractCodexAssistantProviderUsage({
+          providerConfig: normalizeAssistantProviderConfig({ model: 'gpt-6.2-sol', modelProvider: 'hosted-openai' }),
+          rawEvents: complete ? [{ method: 'thread/tokenUsage/updated', params: { threadId: 'recap-native-thread', turnId: 'recap-turn',
+            tokenUsage: { total: { inputTokens: 100, outputTokens: 20, totalTokens: 120, cachedInputTokens: 0, reasoningOutputTokens: 0 },
+              last: { inputTokens: 100, outputTokens: 20, totalTokens: 120, cachedInputTokens: 0, reasoningOutputTokens: 0 } } } },
+            { method: 'turn/completed', params: { threadId: 'recap-native-thread', turn: { id: 'recap-turn', status: 'completed' } } }] : [],
+          serviceTier: input.input.serviceTier,
+        })
+        if (complete) {
+          input.hostedToolContext?.recordSavedGameRecapChatLine?.('Leo and Ava finished their game.')
+          return { kind: 'succeeded', providerTurn: { ...providerResult, codexThreadId: nativeThreadId, codexRolloutRelativePath: rolloutRelativePath, transcriptBoundary: 'start', usage } }
+        }
+        return { kind: 'failed_terminal', error, providerRequestOutcome: 'failed',
+          assistantContractFingerprint: 'a'.repeat(64), codexContinuation: { kind: 'explicit-structured-history' },
+          codexThreadId: nativeThreadId, codexRolloutRelativePath: rolloutRelativePath, transcriptBoundary: 'start',
+          acceptedNoReplyDeliveryContextOrdinals: [], reactions: [], rawEvents: [],
+          route: providerResult.route, session: input.resolvedSession, additionalUsages: [], usageAttribution: null,
+          usage,
+        }
+      },
+    })
+    const notification: AssistantNotificationInput = {
+      channel: 'linq', deliveryIdempotencyKey: scope.eventId, deliveryTarget: 'synthetic-game-thread',
+      threadId: 'synthetic-game-thread', threadIsDirect: false, serviceTier: 'flex',
+      executionContext: { hosted: { gameRecapScope: scope, groupTool: { request }, memberId: 'synthetic-group', userEnvKeys: [], usageRecorder: { recordUsage } } },
+      instructions: 'Make the game recap.', responsePolicy: { kind: 'require_game_recap', ...scope }, vault,
+    }
+    for (const elapsed of [0, 5 * 60_000, 20 * 60_000 - 1]) {
+      vi.setSystemTime(start + elapsed)
+      await expect(sendAssistantNotificationLocal(notification)).rejects.toBe(error)
+      if (elapsed === 0) {
+        const operatorHomeRoot = path.join(vault, 'synthetic-operator')
+        const rollout = path.join(operatorHomeRoot, '.codex-hosted', rolloutRelativePath)
+        await mkdir(path.dirname(rollout), { recursive: true })
+        await writeFile(rollout, 'synthetic native history\n')
+        await pruneHostedCodexHomeToSessionReferencedRollouts({ operatorHomeRoot,
+          assistantStateRoot: resolveAssistantStatePaths(vault).assistantStateRoot, nativeMemoryRetention: 'read-artifacts' })
+        expect(await readFile(rollout, 'utf8')).toBe('synthetic native history\n')
+        const { listAssistantSessions } = await import('../src/assistant/store.js')
+        expect(await listAssistantSessions(vault)).toEqual([expect.objectContaining({
+          createdAt: new Date(start).toISOString(), binding: expect.objectContaining({ channel: null, threadId: null }),
+          codexResume: expect.objectContaining({ threadId: nativeThreadId }),
+        })])
+      }
+    }
+    expect(tiers).toEqual(['flex', 'flex', 'flex'])
+    expect(nativeThreads).toEqual([null, nativeThreadId, nativeThreadId])
+    expect(recordUsage.mock.calls.map(call => call[0])).toEqual([
+      ...Array.from({ length: 3 }, () => expect.objectContaining({ tokenPricingBasis: 'openai-flex', providerRequestOutcome: 'failed' })),
+    ])
+    expect(request.mock.calls.every(call => call[0].recapRead.failed === undefined)).toBe(true)
+    expect(deliverMessage).not.toHaveBeenCalled()
+    expect(providerResult.session.codexResume).toBeNull()
+    complete = true
+    vi.setSystemTime(start + 20 * 60_000)
+    await sendAssistantNotificationLocal(notification)
+    expect(tiers).toEqual(['flex', 'flex', 'flex', null])
+    expect(nativeThreads).toEqual([null, nativeThreadId, nativeThreadId, nativeThreadId])
+    expect(recordUsage).toHaveBeenLastCalledWith(expect.objectContaining({ tokenPricingBasis: 'standard', inputTokens: 100, outputTokens: 20, providerRequestOutcome: 'succeeded' }))
+    request.mockResolvedValue({ result: { status: 'ok', chatLine: 'Leo and Ava finished their game.' } })
+    await sendAssistantNotificationLocal(notification)
+    expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledTimes(4)
+    expect(nativeThreads).toHaveLength(4)
+    // A genuinely new generation has its own budget and native thread.
+    request.mockResolvedValue({ result: { status: 'ok', recapGame: { recovered: false } } })
+    const remake = { ...scope, eventId: `${scope.eventId}:synthetic_request` }
+    await sendAssistantNotificationLocal({ ...notification, deliveryIdempotencyKey: remake.eventId,
+      responsePolicy: { kind: 'require_game_recap', ...remake },
+      executionContext: { hosted: { ...notification.executionContext!.hosted!, gameRecapScope: remake } } })
+    expect(recordUsage).toHaveBeenLastCalledWith(expect.objectContaining({ tokenPricingBasis: 'openai-flex', inputTokens: 100, outputTokens: 20, providerRequestOutcome: 'succeeded' }))
+    expect(new Set(recordUsage.mock.calls.map(([record]) => record.usageId)).size).toBe(5)
+    expect(nativeThreads).toEqual([null, nativeThreadId, nativeThreadId, nativeThreadId, null])
+  } finally {
+    vi.useRealTimers()
+    await rm(vault, { recursive: true, force: true })
+  }
+})
+
+test.each(['initial', 'remake'] as const)('standard-tier recap capacity failure settles the %s generation after the Flex budget', async generation => {
+  const vault = await mkdtemp(path.join(tmpdir(), 'recap-standard-capacity-'))
+  vi.useFakeTimers({ toFake: ['Date'] })
+  const start = Date.parse('2036-08-25T18:00:00Z')
+  vi.setSystemTime(start)
+  try {
+    const eventId = `game-recap:game_synthetic${generation === 'remake' ? ':synthetic_request' : ''}`
+    const scope = { eventId, gameId: 'game_synthetic', pairFingerprint: '0123456789abcdef0123456789abcdef', show: true as const }
+    const chatLine = 'Leo and Ava finished their game.'
+    const request = vi.fn().mockResolvedValue({ result: { status: 'ok', recapGame: { recovered: false } } })
+    const flexError = new VaultCliError('ASSISTANT_CODEX_FAILED', 'Synthetic Flex capacity refusal', { codexErrorInfo: 'flexUnavailable', retryable: true })
+    const standardError = new VaultCliError('ASSISTANT_CODEX_FAILED', 'Synthetic standard capacity refusal', { codexErrorInfo: 'serverOverloaded', retryable: true })
+    const tiers: Array<string | null | undefined> = []
+    const { deliverMessage, mocks, sendAssistantNotificationLocal } = await loadNotificationTurnHarness({
+      providerResult: createProviderResult(), turnId: 'recap-standard-capacity',
+      onExecuteCodexTurnWithRecovery: async input => {
+        tiers.push(input.input.serviceTier)
+        throw input.input.serviceTier === 'flex' ? flexError : standardError
+      },
+    })
+    const notification: AssistantNotificationInput = {
+      channel: 'linq', deliveryIdempotencyKey: eventId, deliveryTarget: 'synthetic-game-thread',
+      threadId: 'synthetic-game-thread', threadIsDirect: false, serviceTier: 'flex',
+      executionContext: { hosted: { gameRecapScope: scope, groupTool: { request }, memberId: 'synthetic-group', userEnvKeys: [] } },
+      instructions: 'Make the game recap.', responsePolicy: { kind: 'require_game_recap', ...scope }, vault,
+    }
+    await expect(sendAssistantNotificationLocal(notification)).rejects.toBe(flexError)
+    expect(request).toHaveBeenCalledTimes(1)
+    expect(deliverMessage).not.toHaveBeenCalled()
+    vi.setSystemTime(start + 20 * 60_000)
+    request.mockResolvedValueOnce({ result: { status: 'ok', recapGame: { recovered: false } } })
+      .mockResolvedValueOnce(generation === 'initial'
+        ? { result: { status: 'ok', chatLine } }
+        : { result: { status: 'unavailable', error: 'recap_generation_retired' } })
+    const result = await sendAssistantNotificationLocal(notification)
+    expect(tiers).toEqual(['flex', null])
+    expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledTimes(2)
+    expect(request).toHaveBeenCalledTimes(3)
+    expect(request).toHaveBeenLastCalledWith({ action: 'read_game',
+      origin: { kind: 'game_recap', gameId: scope.gameId, eventId }, recapRead: { kind: 'recover', failed: true } })
+    if (generation === 'initial') {
+      expect(result.response).toBe(chatLine)
+      expect(deliverMessage).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ message: chatLine }))
+    } else {
+      expect(result.decision.kind).toBe('skip')
+      expect(result.response).toBeNull()
+      expect(deliverMessage).not.toHaveBeenCalled()
+    }
+  } finally {
+    vi.useRealTimers()
+    await rm(vault, { recursive: true, force: true })
+  }
+})
+
 test('recap recovery delivers one accepted fallback line and link without another model turn', async () => {
   const eventId = 'game-recap:game_synthetic'
   const chatLine = 'The morning walks made the week.\nWatch the recap: https://recaps.murph.test/recap/game_synthetic'
@@ -4472,6 +4658,8 @@ test('recap recovery delivers one accepted fallback line and link without anothe
 })
 
 test('failed recap regeneration completes silently using the normal turn profile', async () => {
+  const vault = await mkdtemp(path.join(tmpdir(), 'recap-failure-'))
+  try {
   const scope = { eventId: 'game-recap:game_synthetic:replacement', gameId: 'game_synthetic', pairFingerprint: '0123456789abcdef0123456789abcdef', show: true as const }
   const request = vi.fn().mockResolvedValueOnce({ result: { status: 'ok', recapGame: { recovered: false } } })
     .mockResolvedValueOnce({ result: { status: 'unavailable', error: 'recap_generation_retired' } })
@@ -4482,7 +4670,7 @@ test('failed recap regeneration completes silently using the normal turn profile
   const result = await sendAssistantNotificationLocal({ channel: 'linq', deliveryIdempotencyKey: scope.eventId,
     deliveryTarget: 'synthetic-game-thread', threadId: 'synthetic-game-thread', threadIsDirect: false,
     executionContext: { hosted: { gameRecapScope: scope, groupTool: { request }, memberId: 'synthetic-group', userEnvKeys: [] } },
-    instructions: 'Make the game recap.', responsePolicy: { kind: 'require_game_recap', ...scope }, vault: '/synthetic-vault' })
+    instructions: 'Make the game recap.', responsePolicy: { kind: 'require_game_recap', ...scope }, vault })
   expect(result.decision.kind).toBe('skip')
   expect(result.response).toBeNull()
   expect(deliverMessage).not.toHaveBeenCalled()
@@ -4490,6 +4678,7 @@ test('failed recap regeneration completes silently using the normal turn profile
   expect(mocks.executeCodexTurnWithRecovery).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
     profile: { promptProfile: 'conversation', threadScope: 'isolated-thread', toolProfile: 'provider-turn' },
   }))
+  } finally { await rm(vault, { recursive: true, force: true }) }
 })
 
 test.each(['game-recap:game_synthetic', 'game-recap:game_synthetic:synthetic_request'])('game recap notifications deliver and persist the accepted chat line exactly: %s', async (eventId) => {
@@ -4833,6 +5022,71 @@ test('sendAssistantNotificationLocal abandons queued delivery when deferred comm
   )
 })
 
+test('sendAssistantNotificationLocal abandons every queued bubble when deferred commit fails', async () => {
+  const providerSession = createAssistantSession({
+    binding: {
+      actorId: 'actor-linq-bubbles',
+      channel: 'linq',
+      conversationKey: null,
+      delivery: { kind: 'thread', target: 'thread-linq-bubbles' },
+      identityId: 'identity-linq-bubbles',
+      threadId: 'thread-linq-bubbles',
+      threadIsDirect: true,
+    },
+  })
+  const providerResult = createProviderResult({
+    response: JSON.stringify({
+      kind: 'send_message',
+      privateSummary: 'Queued two-bubble recap.',
+      text: 'Sleep held steady.\n---\nRecovery bounced back.',
+    }),
+    session: providerSession,
+  })
+  const { deliverMessage, mocks, sendAssistantNotificationLocal } =
+    await loadNotificationTurnHarness({
+      providerResult,
+      turnId: 'turn-notification-deferred-bubbles-commit-failure',
+    })
+  for (const intentId of ['intent-bubble-first', 'intent-bubble-final']) {
+    deliverMessage.mockResolvedValueOnce({
+      delivery: null,
+      deliveryError: null,
+      intent: { intentId },
+      kind: 'queued',
+      session: providerSession,
+    })
+  }
+  const commitError = new Error('durable notification commit failed')
+  mocks.persistAssistantTurnAndSession.mockRejectedValueOnce(commitError)
+
+  await expect(
+    sendAssistantNotificationLocal({
+      deferCommitUntilDeliveryAccepted: true,
+      deliveryDispatchMode: 'queue-only',
+      executionContext: {
+        hosted: null,
+      },
+      instructions: 'Queue this scheduled recap.',
+      vault: '/vaults/deferred-bubbles-commit-failure',
+    }),
+  ).rejects.toBe(commitError)
+
+  expect(deliverMessage).toHaveBeenCalledTimes(2)
+  expect(deliverMessage).toHaveBeenNthCalledWith(1, expect.objectContaining({
+    message: 'Sleep held steady.',
+  }))
+  expect(deliverMessage).toHaveBeenNthCalledWith(2, expect.objectContaining({
+    message: 'Recovery bounced back.',
+  }))
+  expect(mocks.markAssistantOutboxIntentMirrorTerminalById).toHaveBeenCalledTimes(2)
+  for (const [index, intentId] of ['intent-bubble-first', 'intent-bubble-final'].entries()) {
+    expect(mocks.markAssistantOutboxIntentMirrorTerminalById).toHaveBeenNthCalledWith(
+      index + 1,
+      expect.objectContaining({ intentId, status: 'abandoned' }),
+    )
+  }
+})
+
 test('sendAssistantNotificationLocal keeps a queued model reply when the terminal diagnostic write fails', async () => {
   const providerSession = createAssistantSession()
   const providerResult = createProviderResult({
@@ -4865,6 +5119,7 @@ test('sendAssistantNotificationLocal keeps a queued model reply when the termina
     transcripts: { append: vi.fn(async () => undefined) },
     sessions: { save: vi.fn(async (session: AssistantSession) => session), resolve: vi.fn(async () => ({ session: providerSession })) },
     outbox: {
+      createIntent: vi.fn(async () => ({ intentId: 'intent-bootstrap' })),
       deliverMessage,
     },
 
@@ -6271,6 +6526,7 @@ function createSharedPlan(): AssistantTurnSharedPlan {
 }
 
 async function loadNotificationTurnHarness(input: {
+  realUsage?: boolean
   priorDeliveries?: ReturnType<typeof notificationHistoryIntent>[]
   realChannelTyping?: boolean
   onExecuteCodexTurnWithRecovery?: (
@@ -6300,6 +6556,7 @@ async function loadNotificationTurnHarness(input: {
       transcripts: { append: vi.fn(async () => undefined) },
       sessions: { save: vi.fn(async (session: AssistantSession) => session), resolve: vi.fn(async () => ({ session: input.providerResult.session })) },
       outbox: {
+        createIntent: vi.fn(async () => ({ intentId: 'intent-bootstrap' })),
         deliverMessage,
       },
 
@@ -6364,7 +6621,8 @@ async function loadNotificationTurnHarness(input: {
   vi.doMock('@murphai/operator-config/operator-config', () => ({
     resolveAssistantOperatorDefaults: mocks.resolveAssistantOperatorDefaults,
   }))
-  vi.doMock('@murphai/operator-config/assistant-backend', () => ({
+  vi.doMock('@murphai/operator-config/assistant-backend', async (importOriginal) => ({
+    ...await importOriginal<typeof import('@murphai/operator-config/assistant-backend')>(),
     createDefaultLocalAssistantModelTarget: () => createCodexTarget(),
   }))
   vi.doMock('../src/assistant/runtime-state-service.js', () => ({
@@ -6396,7 +6654,8 @@ async function loadNotificationTurnHarness(input: {
   vi.doMock('../src/assistant/codex-turn-runner.js', () => ({
     executeCodexTurnWithRecovery: mocks.executeCodexTurnWithRecovery,
   }))
-  vi.doMock('../src/assistant/service-usage.js', () => ({
+  vi.doMock('../src/assistant/service-usage.js', async (importOriginal) => input.realUsage
+    ? await importOriginal<typeof import('../src/assistant/service-usage.js')>() : ({
     recordAdditionalAssistantUsageEvents: mocks.recordAdditionalAssistantUsageEvents,
     recordAssistantUsageEvent: mocks.recordAssistantUsageEvent,
   }))
@@ -6412,7 +6671,7 @@ async function loadNotificationTurnHarness(input: {
     const actual = await importOriginal<typeof import('../src/assistant/turns.js')>()
     return {
       ...actual,
-      createAssistantTurnId: () => input.turnId,
+      createAssistantTurnId: input.realUsage ? actual.createAssistantTurnId : () => input.turnId,
     }
   })
   vi.doMock('../src/assistant/channel-typing.js', async (importOriginal) => input.realChannelTyping
@@ -6562,7 +6821,11 @@ describe('game bootstrap notification delivery', () => {
     expect(send).toHaveBeenCalledOnce()
     expect(harness.mocks.executeCodexTurnWithRecovery).toHaveBeenCalledOnce()
     expect(harness.deliverMessage).not.toHaveBeenCalled()
-    expect(result.deliveryOutcome).toMatchObject({ kind: 'sent', intentId: null, delivery: { target: 'provider-chat', providerThreadId: 'provider-chat', sentAt: receipt.acceptedAt } })
+    expect(result.deliveryOutcome).toMatchObject({ kind: 'sent', intentId: 'intent-bootstrap', delivery: { target: 'provider-chat', providerThreadId: 'provider-chat', sentAt: receipt.acceptedAt } })
+    const createdIntents = harness.mocks.createAssistantRuntimeStateService.mock.results.flatMap(result => result.value.outbox.createIntent.mock.calls)
+    expect(createdIntents).toEqual([[expect.objectContaining({
+      turnId: 'turn-bootstrap', message, initialState: { status: 'sent', delivery: expect.objectContaining({ providerMessageId: receipt.providerMessageId }) },
+    })]])
     expect(harness.mocks.persistAssistantTurnAndSession).toHaveBeenCalledOnce()
   })
 

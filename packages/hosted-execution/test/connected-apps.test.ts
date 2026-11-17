@@ -214,3 +214,155 @@ describe("hosted connected-app contracts", () => {
     ).toBe("execute");
   });
 });
+
+type CompactedPart = { body: { attachmentId?: string; data?: string }; parts: CompactedPart[] };
+type CompactedMessage = {
+  attachmentList: { attachmentId: string }[];
+  messageText: string;
+  payload: { headers: { name: string; value: string }[]; parts: CompactedPart[] };
+};
+
+describe("connected-app result compaction beyond markup", () => {
+  const encode = (text: string) => Buffer.from(text, "utf8").toString("base64url");
+  const encodeBytes = (bytes: Uint8Array) => Buffer.from(bytes).toString("base64url");
+  const segment = "Departs Monday 7:05am, gate B12. ".repeat(30);
+  const htmlBody = `<html><body><p>Your flight to Denver is confirmed.</p><p>${segment}</p></body></html>`;
+  const plainBody = `Your flight to Denver is confirmed.\n${segment}`;
+  const duplicate = "[omitted: same text as messageText]";
+  const binary = Buffer.from(Uint8Array.from({ length: 900 }, (_, index) => index % 256)).toString("base64");
+  const longAttachmentId = "ANGjdJ8" + "x".repeat(700);
+  const transportHeaders = [
+    ...Array.from({ length: 6 }, (_, index) => ({ name: "Received", value: `from relay${index}.example.test by mx.example.test` })),
+    { name: "DKIM-Signature", value: "v=1; a=rsa-sha256; d=example.test; b=" + "a".repeat(300) },
+    { name: "ARC-Seal", value: "i=1; a=rsa-sha256; b=" + "b".repeat(300) },
+    { name: "X-Google-Smtp-Source", value: "c".repeat(120) },
+    { name: "Return-Path", value: "<bounce@example.test>" },
+    { name: "MIME-Version", value: "1.0" },
+  ];
+  const readableHeaders = [
+    { name: "From", value: "Example Air <trips@example.test>" },
+    { name: "To", value: "member@example.test" },
+    { name: "Subject", value: "Your trip is confirmed" },
+    { name: "Date", value: "Fri, 13 Nov 2026 08:00:00 -0500" },
+  ];
+  const textPart = (mimeType: string, data: string, filename = "") => ({ mimeType, filename, body: { size: data.length, data } });
+  const message = (input: { messageText?: string; parts: unknown[]; mimeType?: string }) => ({
+    messageId: "msg-1",
+    ...(input.messageText === undefined ? {} : { messageText: input.messageText }),
+    subject: "Your trip is confirmed",
+    attachmentList: [{ attachmentId: longAttachmentId, filename: "itinerary.pdf" }],
+    payload: {
+      mimeType: input.mimeType ?? "multipart/mixed",
+      headers: [...transportHeaders, ...readableHeaders],
+      parts: input.parts,
+    },
+  });
+  const compactMessage = (value: unknown) => {
+    const compacted = compactHostedConnectedAppsResult({ data: { messages: [value] } }) as { data: { messages: CompactedMessage[] } };
+    const serialized = serializeHostedConnectedAppsResult(compacted);
+    if (serialized === null) throw new Error("Expected a result inside the budget.");
+    return { compacted: compacted.data.messages[0]!, serialized };
+  };
+
+  it("drops a proven duplicate body, transport headers and declared binary from a full Gmail message", () => {
+    const raw = message({
+      messageText: htmlBody,
+      parts: [
+        { mimeType: "multipart/alternative", parts: [textPart("text/plain", encode(plainBody)), textPart("text/html", encode(htmlBody))] },
+        { mimeType: "image/png", filename: "logo.png", body: { size: 900, data: binary } },
+        { mimeType: "application/pdf", filename: "itinerary.pdf", body: { attachmentId: longAttachmentId, size: 52_000 } },
+      ],
+    });
+    const result = { data: { messages: [raw], nextPageToken: encode("p".repeat(600)) } };
+    const compacted = compactHostedConnectedAppsResult(result) as { data: { messages: CompactedMessage[]; nextPageToken: string } };
+    const [compactedMessage] = compacted.data.messages;
+    const [alternative, image, pdf] = compactedMessage!.payload.parts;
+
+    expect(compactedMessage!.payload.headers).toEqual(readableHeaders);
+    // Both alternatives render to text found verbatim in the retained messageText.
+    expect(alternative!.parts.map((part) => part.body.data)).toEqual([duplicate, duplicate]);
+    expect(image!.body.data).toBe("[binary data omitted: 900 bytes]");
+    expect(pdf!.body.attachmentId).toBe(longAttachmentId);
+    expect(compactedMessage!.attachmentList[0]!.attachmentId).toBe(longAttachmentId);
+    expect(compacted.data.nextPageToken).toBe(result.data.nextPageToken);
+    expect(compactedMessage!.messageText).toContain("Your flight to Denver is confirmed.");
+    expect(compactedMessage!.messageText).not.toContain("<p>");
+    expect(serializeHostedConnectedAppsResult(compacted)!.length)
+      .toBeLessThan(serializeHostedConnectedAppsResult(result)!.length / 2);
+  });
+
+  it("keeps a distinct text part of a multipart/mixed message", () => {
+    const returnLeg = "Return flight Friday 6:40pm, Denver to Boston, seat 14C. ".repeat(12);
+    const { compacted, serialized } = compactMessage(message({
+      messageText: plainBody,
+      parts: [textPart("text/plain", encode(plainBody)), textPart("text/plain", encode(returnLeg))],
+    }));
+    expect(compacted.payload.parts.map((part) => part.body.data)).toEqual([duplicate, returnLeg]);
+    expect(serialized).toContain("Return flight Friday 6:40pm");
+  });
+
+  it("keeps an HTML alternative whose link is missing from the plain messageText", () => {
+    const linkedHtml = `<html><body><p>${plainBody}</p>`
+      + `<p><a href="https://book.example.test/manage/ABC123">Manage booking</a></p></body></html>`;
+    const { compacted, serialized } = compactMessage(message({
+      messageText: plainBody,
+      mimeType: "multipart/alternative",
+      parts: [textPart("text/plain", encode(plainBody)), textPart("text/html", encode(linkedHtml))],
+    }));
+    expect(compacted.payload.parts[0]!.body.data).toBe(duplicate);
+    expect(compacted.payload.parts[1]!.body.data).toContain("Manage booking (https://book.example.test/manage/ABC123)");
+    expect(serialized).toContain("https://book.example.test/manage/ABC123");
+  });
+
+  it("decodes an encoded UTF-8 body that has no messageText copy", () => {
+    const { compacted } = compactMessage(message({
+      mimeType: "multipart/alternative",
+      parts: [textPart("text/plain", encode(plainBody)), textPart("text/html", encode(htmlBody))],
+    }));
+    expect(compacted.payload.parts[0]!.body.data).toBe(plainBody);
+    expect(compacted.payload.parts[1]!.body.data).toContain("Your flight to Denver is confirmed.");
+    expect(compacted.payload.parts[1]!.body.data).not.toContain("<p>");
+  });
+
+  it("keeps non-UTF-8 text bodies and named text attachments encoded instead of discarding them", () => {
+    const latin1 = encodeBytes(Uint8Array.from(Buffer.from("Réservation confirmée, départ à 7h05. ".repeat(30), "latin1")));
+    const utf16 = encodeBytes(Uint8Array.from(Buffer.from("Booking confirmed, departs 7:05am. ".repeat(20), "utf16le")));
+    const { compacted } = compactMessage(message({
+      parts: [
+        textPart("text/plain", latin1),
+        textPart("text/plain", utf16),
+        textPart("text/plain", latin1, "notes.txt"),
+        { mimeType: "application/octet-stream", filename: "blob.bin", body: { data: latin1 } },
+      ],
+    }));
+    expect(compacted.payload.parts.map((part) => part.body.data)).toEqual([
+      latin1, utf16, latin1, `[binary data omitted: ${Buffer.from(latin1, "base64url").byteLength} bytes]`,
+    ]);
+  });
+
+  it("leaves calendar events and name/value lists without mail transport headers alone", () => {
+    const events = {
+      kind: "calendar#events",
+      etag: "\"p33c9\"",
+      items: [{
+        kind: "calendar#event",
+        etag: "\"3381\"",
+        id: "evt1",
+        summary: "Long run",
+        start: { dateTime: "2026-11-14T08:00:00-05:00" },
+        attendees: [{ email: "member@example.test", self: true, responseStatus: "accepted" }],
+        fields: [{ name: "Pace", value: "8:30" }, { name: "From", value: "Coach" }],
+      }],
+    };
+    expect(compactHostedConnectedAppsResult(events)).toEqual(events);
+  });
+
+  it("decodes only encoded-content keys, never identifiers or base64-looking text", () => {
+    const opaque = "A".repeat(800);
+    const kebab = "private-synthetic-provider-data".repeat(40);
+    const value = {
+      description: "word ".repeat(200), syncToken: opaque, threadIds: [opaque], note: kebab, attachmentId: kebab,
+    };
+    expect(compactHostedConnectedAppsResult(value)).toEqual(value);
+  });
+});

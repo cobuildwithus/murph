@@ -21,7 +21,6 @@ if (enabled) {
 describe.skipIf(!enabled)("shared game allowance PostgreSQL", () => {
   it("charges concurrent rooms once to their frozen primary even after the game ends, and preserves later paid room funding", async () => {
     vi.stubEnv("MURPH_GAME_ENABLED", "true");
-    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "");
     const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl }) });
     const suffix = randomUUID();
     const [primary, alternate, first, second] = ["primary", "alternate", "first", "second"].map(role => `funding_${role}_${suffix}`);

@@ -48,7 +48,6 @@ const brief: HostedPhoneCallBrief = {
 describe.skipIf(!enabled)("game room phone-call allowance PostgreSQL", () => {
   it.each(["webhook", "reconciliation"] as const)("denies game-only calls and keeps paid calls self-funded through %s replay", async terminal => {
     vi.stubEnv("MURPH_GAME_ENABLED", "true");
-    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "");
     const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl }) });
     edges.db = db;
     const suffix = randomUUID();

@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
 import { createHash } from "node:crypto";
@@ -245,7 +246,7 @@ export async function requestHostedGroupCurrentSenderAssistantAsk(input: {
     (input.mode === "clarification" && input.audience !== undefined)
     || (input.mode !== "clarification" && input.audience === undefined)
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted current-sender audience must be omitted only for clarification.",
     );
   }
@@ -1677,7 +1678,7 @@ export function buildHostedGroupCurrentSenderPrivateResponseText(
     !text
     || [...text].length > HOSTED_EXECUTION_ASSISTANT_ASK_ANSWER_MAX_CODE_POINTS
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted current-sender private response is out of bounds.",
     );
   }
@@ -1859,7 +1860,7 @@ function normalizeHostedCurrentSenderOrigin(
   origin: HostedExecutionAssistantAskAcceptedInputOrigin,
 ): HostedExecutionAssistantAskAcceptedInputOrigin {
   if (origin.kind !== "accepted_input") {
-    throw new TypeError("Hosted current-sender origin must be an accepted input.");
+    throw new ContractValidationError("Hosted current-sender origin must be an accepted input.");
   }
   return {
     assistantInputId: normalizeHostedCurrentSenderAssistantInputId(
@@ -1876,7 +1877,7 @@ function normalizeHostedCurrentSenderOrigin(
 function normalizeHostedCurrentSenderAssistantInputId(value: unknown): string {
   const normalized = typeof value === "string" ? value.trim() : "";
   if (!HOSTED_EXECUTION_ASSISTANT_INPUT_ID_PATTERN.test(normalized)) {
-    throw new TypeError("Hosted current-sender assistant input ID is invalid.");
+    throw new ContractValidationError("Hosted current-sender assistant input ID is invalid.");
   }
   return normalized;
 }
@@ -1890,7 +1891,7 @@ function normalizeHostedCurrentSenderOpaqueId(
     normalized.length === 0
     || [...normalized].length > HOSTED_ASSISTANT_ASK_OPAQUE_ID_MAX_CODE_POINTS
   ) {
-    throw new TypeError(`${label} is invalid.`);
+    throw new ContractValidationError(`${label} is invalid.`);
   }
   return normalized;
 }

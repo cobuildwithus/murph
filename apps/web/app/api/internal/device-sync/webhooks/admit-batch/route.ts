@@ -1,3 +1,4 @@
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import {
   DEVICE_WEBHOOK_ADMISSION_HANDLER_MAX_DURATION_SECONDS,
   DEVICE_WEBHOOK_ADMISSION_MAX_BODY_BYTES,
@@ -32,7 +33,7 @@ export const POST = withJsonError(async (request: Request) => {
       retryable: false,
     });
   }
-  const batch = parseDeviceWebhookAdmissionBatch(authenticated.payload);
+  const batch = parseInput(authenticated.payload, parseDeviceWebhookAdmissionBatch);
   const ingress = createHostedDeviceSyncPublicIngressService(request);
   const result = await admitHostedDeviceWebhookBatch({
     entries: batch.entries,

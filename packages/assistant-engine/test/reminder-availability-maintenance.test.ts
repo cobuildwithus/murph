@@ -86,16 +86,17 @@ describe('reminder availability maintenance', () => {
         account: 'calendar-account',
         arguments: {
           calendarId: 'primary',
+          fields: 'items(id,status,summary,start,end,organizer(self,email),attendees(self,email,responseStatus),location,eventType,updated,transparency),nextPageToken',
           maxResults: 256,
           orderBy: 'startTime',
-          showDeleted: false,
+          showDeleted: true,
           singleEvents: true,
           timeMax: '2026-08-06T00:00:00.000Z',
           timeMin: '2026-07-30T00:00:00.000Z',
         },
         toolSlug: 'GOOGLECALENDAR_EVENTS_LIST',
       },
-      operation: 'execute',
+      operation: 'read',
     }, {
       signal: null,
     })
@@ -272,12 +273,14 @@ describe('reminder availability maintenance', () => {
       input: {
         account: 'outlook-account',
         arguments: {
-          endDateTime: '2026-08-06T00:00:00.000Z',
-          startDateTime: '2026-07-30T00:00:00.000Z',
+          end_datetime: '2026-08-06T00:00:00.000Z',
+          timezone: 'UTC', top: 256, orderby: 'start/dateTime asc',
+          select: ['id', 'subject', 'start', 'end', 'isAllDay', 'isCancelled', 'isOrganizer', 'organizer', 'attendees', 'responseStatus', 'location', 'lastModifiedDateTime', 'showAs'],
+          start_datetime: '2026-07-30T00:00:00.000Z',
         },
         toolSlug: 'OUTLOOK_GET_CALENDAR_VIEW',
       },
-      operation: 'execute',
+      operation: 'read',
     }, {
       signal: null,
     })

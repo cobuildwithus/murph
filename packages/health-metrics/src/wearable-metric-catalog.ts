@@ -286,14 +286,12 @@ export function normalizeWearableMetricValue(
     return null;
   }
 
-  const normalizedMetric = normalizeMetricName(metric);
   const normalizedUnit = normalizeUnit(unit);
 
   switch (key) {
     case "activeCalories":
-      return normalizeActiveCaloriesMetricValue(normalizedMetric, value, normalizedUnit);
     case "totalCalories":
-      return normalizeTotalCaloriesMetricValue(value, normalizedUnit);
+      return normalizeCaloriesMetricValue(key, value, normalizedUnit);
     case "distanceKm":
       return {
         key,
@@ -347,55 +345,22 @@ function camelToSnakeCase(value: string): string {
   return value.replace(/([a-z0-9])([A-Z])/gu, "$1_$2").toLowerCase();
 }
 
-function normalizeMetricName(metric: string): string {
-  return metric.trim().toLowerCase().replace(/[\s_]+/gu, "-");
-}
-
 function normalizeUnit(unit: string | null | undefined): string | null {
   const normalized = unit?.trim().toLowerCase();
   return normalized && normalized.length > 0 ? normalized : null;
 }
 
-function normalizeActiveCaloriesMetricValue(
-  normalizedMetric: string,
+function normalizeCaloriesMetricValue(
+  key: "activeCalories" | "totalCalories",
   value: number,
   unit: string | null,
 ): NormalizedWearableMetricValue | null {
-  if (isKilocalorieUnit(unit)) {
-    return { key: "activeCalories", unit: "kcal", value };
+  if (unit === null || ["kcal", "kilocalorie", "kilocalories"].includes(unit)) {
+    return { key, unit: "kcal", value };
   }
-
-  if (normalizedMetric !== "energy-burned" && unit === null) {
-    return { key: "activeCalories", unit: "kcal", value };
+  if (["kj", "kilojoule", "kilojoules"].includes(unit)) {
+    return { key, unit: "kcal", value: Number((value / 4.184).toFixed(4)) };
   }
-
-  if (isKilojouleUnit(unit)) {
-    return {
-      key: "activeCalories",
-      unit: "kcal",
-      value: Number((value / 4.184).toFixed(4)),
-    };
-  }
-
-  return null;
-}
-
-function normalizeTotalCaloriesMetricValue(
-  value: number,
-  unit: string | null,
-): NormalizedWearableMetricValue | null {
-  if (isKilocalorieUnit(unit) || unit === null) {
-    return { key: "totalCalories", unit: "kcal", value };
-  }
-
-  if (isKilojouleUnit(unit)) {
-    return {
-      key: "totalCalories",
-      unit: "kcal",
-      value: Number((value / 4.184).toFixed(4)),
-    };
-  }
-
   return null;
 }
 
@@ -463,27 +428,5 @@ function normalizeMeters(value: number, unit: string | null): number {
       return Number((value * 1609.344).toFixed(4));
     default:
       return value;
-  }
-}
-
-function isKilocalorieUnit(unit: string | null): boolean {
-  switch (unit) {
-    case "kcal":
-    case "kilocalorie":
-    case "kilocalories":
-      return true;
-    default:
-      return false;
-  }
-}
-
-function isKilojouleUnit(unit: string | null): boolean {
-  switch (unit) {
-    case "kj":
-    case "kilojoule":
-    case "kilojoules":
-      return true;
-    default:
-      return false;
   }
 }

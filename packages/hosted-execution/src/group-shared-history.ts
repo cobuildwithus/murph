@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   isHostedVaultShareRecentDateProjectionKind,
   type HostedVaultShareProjectionScope,
@@ -32,7 +33,7 @@ export function parseHostedGroupSharedReadOptions(
   const result: HostedGroupSharedReadOptions = {};
   if (value.participantId !== undefined) {
     if (!isParticipantId(value.participantId)) {
-      throw new TypeError("Shared read participantId is invalid.");
+      throw new ContractValidationError("Shared read participantId is invalid.");
     }
     result.participantId = value.participantId;
   }
@@ -48,7 +49,7 @@ export function parseHostedGroupSharedReadOptions(
     || !result.participantId || value.freshness !== undefined
     || scopes.length !== 1
     || !isHostedVaultShareRecentDateProjectionKind(scopes[0]!.projectionKind)) {
-    throw new TypeError("History reads require one health scope, one participant, at most 90 civil dates, and no freshness request.");
+    throw new ContractValidationError("History reads require one health scope, one participant, at most 90 civil dates, and no freshness request.");
   }
   result.history = { fromDate: history.fromDate, throughDate: history.throughDate };
   return result;
@@ -103,7 +104,7 @@ export function pageHostedGroupSharedHistory<T extends { occurredAt: string }>(
 
 export function parseHostedGroupSharedDateCoverage(value: unknown): HostedGroupSharedDateCoverage {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("Shared date coverage is invalid.");
+    throw new ContractValidationError("Shared date coverage is invalid.");
   }
   const record = value as Record<string, unknown>;
   const keys = ["requestedFromDate", "requestedThroughDate", "returnedFromDate", "returnedThroughDate", "availableDates", "nextFromDate"];
@@ -114,7 +115,7 @@ export function parseHostedGroupSharedDateCoverage(value: unknown): HostedGroupS
     || record.availableDates.length > 90
     || !record.availableDates.every(isDate)
     || (record.nextFromDate !== undefined && !isDate(record.nextFromDate))) {
-    throw new TypeError("Shared date coverage is invalid.");
+    throw new ContractValidationError("Shared date coverage is invalid.");
   }
   const coverage: HostedGroupSharedDateCoverage = {
     requestedFromDate: record.requestedFromDate,
@@ -140,7 +141,7 @@ function assertConsistentDateCoverage(coverage: HostedGroupSharedDateCoverage): 
       ? coverage.returnedThroughDate !== coverage.requestedThroughDate
       : Date.parse(coverage.nextFromDate) - Date.parse(coverage.returnedThroughDate) !== 86_400_000
         || coverage.nextFromDate > coverage.requestedThroughDate)) {
-    throw new TypeError("Shared date coverage bounds are inconsistent.");
+    throw new ContractValidationError("Shared date coverage bounds are inconsistent.");
   }
 }
 

@@ -6,10 +6,8 @@ import {
 } from "@murphai/contracts";
 import {
   selectMetricGoalProgress,
-  selectMetricValue,
   type MetricGoalProgress,
   type MetricPoint,
-  type MetricSelection,
 } from "@murphai/health-metrics";
 
 import type {
@@ -19,7 +17,6 @@ import type {
   QueryProjectionStatus,
   RebuildQueryProjectionResult,
 } from "./query-projection-types.ts";
-import { isDefaultProjectedQueryEntity } from "./query-visibility.ts";
 import {
   explainWearableDriftFromBundle,
   summarizeWearableActivityFromBundle,
@@ -51,7 +48,6 @@ import {
   listCanonicalSourceManifest,
   readCanonicalEntityFamilySource,
   readVaultMetadataSource,
-  readVaultSourceTolerant,
   type VaultSourceSnapshot,
 } from "./vault-source.ts";
 import type {
@@ -241,16 +237,6 @@ export async function listCanonicalEventEntitiesRuntime(
   } finally {
     endWait();
   }
-}
-
-export async function loadProjectedVaultSourceTolerant(
-  vaultRoot: string,
-): Promise<VaultSourceSnapshot> {
-  const snapshot = await readVaultSourceTolerant(vaultRoot);
-  return {
-    metadata: snapshot.metadata,
-    entities: snapshot.entities.filter(isDefaultProjectedQueryEntity),
-  };
 }
 
 export async function searchVaultRuntime(
@@ -472,25 +458,6 @@ export async function summarizeWearableSourceHealthRuntime(
     sourceHealthOnly: true,
   });
   return summarizeWearableSourceHealthFromBundle(bundle, filters);
-}
-
-export async function selectMetricRuntime(input: {
-  biomarkerKey?: string;
-  metricKey?: string;
-  now?: string;
-  vaultRoot: string;
-}): Promise<MetricSelection> {
-  const filters = normalizeMetricPointFilters({
-    biomarkerKey: input.biomarkerKey,
-    metricKey: input.metricKey,
-  });
-  const points = await listMetricPointsRuntime(input.vaultRoot, filters);
-  return selectMetricValue({
-    biomarkerKey: filters.biomarkerKey,
-    metricKey: filters.metricKey,
-    now: input.now,
-    points,
-  });
 }
 
 export async function listMetricTargetsRuntime(vaultRoot: string): Promise<QueryMetricTargetRow[]> {

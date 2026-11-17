@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
+import { parseInput } from "@murphai/hosted-execution/request-input";
 
 import { withJsonError } from "@/src/lib/hosted-onboarding/http";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
-import { readRawBodyBuffer } from "@/src/lib/http";
+import { parseRequestJson, readRawBodyBuffer } from "@/src/lib/http";
 import {
   consultPhoneCall,
   getHostedPhoneCallForConsultation,
@@ -26,7 +27,7 @@ export const POST = withJsonError(async (request: Request) => {
     signature: request.headers.get("x-retell-signature"),
   });
 
-  const payload = retellAskMurphPayloadSchema.parse(JSON.parse(rawBody));
+  const payload = parseInput(parseRequestJson(rawBody), retellAskMurphPayloadSchema.parse);
   const storageMode = payload.call.data_storage_setting?.trim().toLowerCase() || null;
   if (storageMode !== null && !hasRetellBasicAttributesOnlyStorage(payload.call)) {
     throw hostedOnboardingError({

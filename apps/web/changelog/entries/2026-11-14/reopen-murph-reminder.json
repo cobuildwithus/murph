@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-14",
+  "order": 100,
+  "item": {
+    "id": "reopen-murph-reminder",
+    "kind": "feature",
+    "priority": 3,
+    "title": "A reminder when your phone stops sending Apple Health data",
+    "summary": "If Murph has heard nothing from Apple Health for a day and the app has been closed, your iPhone gets an Open Murph notification.",
+    "details": "It arrives during your daytime, at most once a day: daily for three days, then weekly, and it stops after about three weeks or as soon as data arrives. Opening Murph clears it. After the next app update, the Reopen reminders switch in Settings turns it off.",
+    "relevanceTags": ["apple-health", "notifications", "ios-app"],
+    "sourcePullRequests": [4961]
+  }
+}

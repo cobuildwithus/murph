@@ -715,12 +715,14 @@ describe("handleHostedRuntimeGroupTool", () => {
 
   it("classifies group-tool actions by access authority", () => {
     expect(HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION).toEqual({
+      leave_group: "participant_aware",
       read_game: "participant_aware",
       update_game: "participant_aware",
       write_recap: "participant_aware",
       game_photo: "participant_aware",
       game_chat_bootstrap: "participant_aware",
       my_game_reminders: "personal_active",
+      my_game_not_for_me: "personal_active",
       ask: "personal_active",
       handoff: "personal_active",
       ask_current_sender: "participant_aware",

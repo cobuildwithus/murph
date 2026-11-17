@@ -1,9 +1,10 @@
+import { isRequestInputError, RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import {
   emitHostedExecutionStructuredLog,
 } from "@murphai/hosted-execution";
 
 import {
-  json,
+  json, InvalidJsonInputError,
 } from "../json.ts";
 
 import {
@@ -12,26 +13,24 @@ import {
 
 export function mapWorkerRouteError(request: Request, error: unknown): Response {
 
+  const classified = classifyPublicRouteError(error);
   emitHostedExecutionStructuredLog({
     component: "worker",
-    details: buildWorkerRouteLogDetails({
-      reason: "route-handler-threw",
-    }, request),
+    details: buildWorkerRouteLogDetails({ reason: "route-handler-threw" }, request),
     error,
-    level: "error",
+    level: classified.status >= 500 ? "error" : "warn",
     message: "Hosted worker route failed.",
     phase: "failed",
   });
-  const classified = classifyPublicRouteError(error);
   return json({ error: classified.error }, classified.status);
 }
 
 export function classifyPublicRouteError(error: unknown): { error: string; status: number } {
 
-  if (error instanceof SyntaxError) {
+  if (error instanceof InvalidJsonInputError) {
     return { error: "Invalid JSON.", status: 400 };
   }
-  if (error instanceof TypeError || error instanceof RangeError || error instanceof URIError) {
+  if (isRequestInputError(error) || error instanceof RequestBodyTooLargeError) {
     return { error: "Invalid request.", status: 400 };
   }
   return { error: "Internal error.", status: 500 };

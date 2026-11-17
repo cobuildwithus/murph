@@ -19,7 +19,7 @@ export function localRosterCrypto() {
     HOSTED_CRYPTO_GCP_WEB_WRAP_KEY_NAME: "projects/example/locations/global/keyRings/test/cryptoKeys/web-wrap",
     HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_KEY_ID: "synthetic-automation",
     HOSTED_CRYPTO_CLOUDFLARE_AUTOMATION_PUBLIC_JWK: JSON.stringify(automation.publicKey),
-    MURPH_GAME_ENABLED: "true", MURPH_GAME_MEMBER_ALLOWLIST: "",
+    MURPH_GAME_ENABLED: "true",
     HOSTED_ONBOARDING_LINQ_FIRST_CONTACT_ADMISSION_MODE: "off",
     HOSTED_ONBOARDING_LINQ_LOCAL_ALLOWED_INBOUND_PHONE_NUMBERS: "",
     HOSTED_ONBOARDING_PUBLIC_BASE_URL: "https://www.withmurph.ai",

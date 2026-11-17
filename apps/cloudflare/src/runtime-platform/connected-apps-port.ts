@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type { HostedRuntimePlatform } from "@murphai/assistant-runtime/hosted-runtime-contracts";
 import {
   hostedConnectedAppsResponseSchema,
@@ -29,7 +30,7 @@ export function createHostedWebConnectedAppsPort(input: {
       });
       const parsed = hostedConnectedAppsResponseSchema.safeParse(response);
       if (!parsed.success) {
-        const error = new TypeError("Hosted connected apps returned an invalid response.");
+        const error = new ContractValidationError("Hosted connected apps returned an invalid response.");
         // Private diagnostics read own data; RPC recovery spreads enumerable fields.
         Object.defineProperty(error, "code", {
           value: "CONNECTED_APPS_RESPONSE_SCHEMA_INVALID",

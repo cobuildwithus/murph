@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createHash } from "node:crypto";
 import { createReadStream, createWriteStream, promises as fs } from "node:fs";
 import { StringDecoder } from "node:string_decoder";
@@ -930,7 +931,7 @@ export function createJsonlShardStorage(relativeDirectory: string, errorPrefix: 
     input.signal?.throwIfAborted();
     const now = input.now ?? new Date();
     if (!Number.isFinite(now.getTime())) {
-      throw new TypeError("Ledger archive time must be a valid Date.");
+      throw new ContractValidationError("Ledger archive time must be a valid Date.");
     }
     const currentMonth = now.toISOString().slice(0, 7);
     return await withCanonicalWriteLock(input.vaultRoot, async () => {

@@ -2,6 +2,7 @@ import { abortAtHostedRecoveryDeadline, HOSTED_RECOVERY_BUDGET_MS, runHostedReco
 import { formatHostedExecutionSafeLogErrorDetails } from "../hosted-execution/logging";
 import { getPrisma } from "../prisma";
 import { PrismaDeviceSyncControlPlaneStore } from "./prisma-store";
+import { releaseHostedDeviceSyncReturnedQuietDeferrals } from "./quiet-member";
 import { releaseHostedDeviceSyncDeferredDirtyWake } from "./wake-service";
 
 const DEFAULT_RELEASE_LIMIT = 100;
@@ -24,6 +25,7 @@ export async function runHostedDeviceSyncDeferredWakeSweeper(input: {
   now?: Date;
   release?: typeof releaseHostedDeviceSyncDeferredDirtyWake;
   releaseLimit?: number;
+  releaseReturnedQuiet?: typeof releaseHostedDeviceSyncReturnedQuietDeferrals;
   store?: Pick<
     PrismaDeviceSyncControlPlaneStore,
     "listDueDeferredDirtyConnectionWakes" | "postponeDeferredDirtyConnectionWake"
@@ -36,6 +38,11 @@ export async function runHostedDeviceSyncDeferredWakeSweeper(input: {
   const releaseLimit = input.releaseLimit ?? DEFAULT_RELEASE_LIMIT;
   const release = input.release ?? releaseHostedDeviceSyncDeferredDirtyWake;
   const store = input.store ?? new PrismaDeviceSyncControlPlaneStore({ prisma: getPrisma() });
+  // A member who came back no longer waits for their daily window. This is
+  // optional: on failure the held batches still release at their deadlines.
+  const quietReturned = await (input.releaseReturnedQuiet ?? releaseHostedDeviceSyncReturnedQuietDeferrals)({
+    now, signal: stop,
+  }).catch(() => 0);
   const due = await store.listDueDeferredDirtyConnectionWakes({
     dueAt: now,
     limit: releaseLimit + 1,
@@ -76,6 +83,6 @@ export async function runHostedDeviceSyncDeferredWakeSweeper(input: {
     releaseLimit,
     released,
   };
-  logger.info("Hosted device-sync deferred wake sweeper finished.", result);
+  logger.info("Hosted device-sync deferred wake sweeper finished.", { ...result, quietReturned });
   return result;
 }

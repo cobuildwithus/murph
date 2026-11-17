@@ -1,3 +1,5 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
+import { leaveHostedLinqGroupTx, prepareHostedLinqGroupLeave, assertHostedLinqGroupNotLeft, type HostedLinqGroupRosterRejection } from "../hosted-routing/linq-group-leave";
 import { applyHostedLinqGroupMoveIngressTx, type PreparedHostedLinqGroupMoveIngress } from "../hosted-routing/linq-group-line-move-ingress";
 import { replaceHostedLinqGroupLineMoveRouteTx } from "../hosted-routing/thread-container-service";
 import { associateGameChatInviteTx, type prepareGameChatInvite } from "../game/chat-membership";
@@ -374,6 +376,16 @@ export async function resolveHostedLinqDirectPreparationMemberId(input: {
   return memberId;
 }
 
+// Container preparation needs a usable roster: an unreadable one retries,
+// and one above the setup cap is never admitted.
+function hasHostedLinqGroupAdmissionRoster(input: {
+  pendingGroupRosterRejection?: HostedLinqGroupRosterRejection;
+  pendingGroupRosterUnavailable?: boolean;
+}): boolean {
+  return input.pendingGroupRosterRejection === undefined
+    && input.pendingGroupRosterUnavailable !== true;
+}
+
 /**
  * Prepares the request-local pending-setup authority package before BEGIN and
  * independently decides whether this attempt also needs new-container crypto.
@@ -382,6 +394,7 @@ export async function resolveHostedLinqDirectPreparationMemberId(input: {
 export async function prepareHostedLinqThreadContainerAdmission(input: {
   event: HostedLinqWebhookEvent;
   participantMemberIds: readonly string[];
+  pendingGroupRosterRejection?: HostedLinqGroupRosterRejection;
   pendingGroupRosterUnavailable?: boolean;
   prisma: PrismaClient;
 }): Promise<{
@@ -390,7 +403,7 @@ export async function prepareHostedLinqThreadContainerAdmission(input: {
 }> {
   if (
     input.event.event_type !== "message.received"
-    || input.pendingGroupRosterUnavailable === true
+    || !hasHostedLinqGroupAdmissionRoster(input)
   ) {
     return { shouldPrepareThreadContainer: false };
   }
@@ -561,6 +574,7 @@ export async function prepareHostedLinqThreadContainerAdmission(input: {
 export async function shouldPrepareHostedLinqThreadContainerCrypto(input: {
   event: HostedLinqWebhookEvent;
   participantMemberIds: readonly string[];
+  pendingGroupRosterRejection?: HostedLinqGroupRosterRejection;
   pendingGroupRosterUnavailable?: boolean;
   prisma: PrismaClient;
 }): Promise<boolean> {
@@ -938,6 +952,7 @@ export async function planHostedLinqMessageEditedWebhook(input: {
     tx: input.prisma,
   });
 
+  await assertHostedLinqGroupNotLeft({ chatId: event.data.chat.id, prisma: input.prisma });
   const sourceMessageLookupKey = requireHostedLinqSourceMessageLookupKey(
     event.data.id,
   );
@@ -1323,6 +1338,7 @@ type HostedOnboardingLinqWebhookPlannerInput = {
   initialGroupDisplayName?: string | null;
   instantStartAllowed?: boolean;
   pendingGroupParticipantMemberIds?: readonly string[] | null;
+  pendingGroupRosterRejection?: HostedLinqGroupRosterRejection;
   pendingGroupRosterUnavailable?: boolean;
   preparedPendingGroupSetup?: HostedPreparedPendingGroupSetupPackage;
   directMailboxPreparationFailure?: unknown;
@@ -1403,6 +1419,7 @@ export async function planHostedOnboardingLinqWebhook(
   }
 
   await lockHostedLinqMessageChatOwnershipTx({ context, prisma: input.prisma });
+  await assertHostedLinqMessageChatNotLeftTx({ messageEvent, prisma: input.prisma });
 
   const directMailboxPreparationProvided = Object.prototype.hasOwnProperty.call(
     input,
@@ -1445,7 +1462,7 @@ export async function planHostedOnboardingLinqWebhook(
   }
 
   if (isHostedLinqGroupChat(messageEvent)) {
-    return planHostedLinqGroupChatWebhook({
+    return planHostedLinqUnboundGroupChatWebhook({
       preparedGameInvite: input.preparedGameInvite,
       ...(input.affirmativeReaction ? { affirmativeReaction: true } : {}),
       context,
@@ -1456,6 +1473,7 @@ export async function planHostedOnboardingLinqWebhook(
       preparedPendingGroupSetup: input.preparedPendingGroupSetup,
       preparedThreadContainerCreation: input.preparedThreadContainerCreation,
       preparedThreadDeliveryRoute: input.preparedThreadDeliveryRoute,
+      rosterRejection: input.pendingGroupRosterRejection,
       rosterUnavailable: input.pendingGroupRosterUnavailable ?? false,
       prisma: input.prisma,
       requireFirstContactAdmission: input.requireFirstContactAdmission,
@@ -3807,6 +3825,8 @@ type HostedLinqNewGroupAdmissionIgnoreReason =
   | "blocked-first-contact-content"
   | "contentless-first-contact"
   | "empty-message-parts"
+  | "group-roster-blocked"
+  | "group-roster-oversized"
   | "local-inbound-not-allowlisted"
   | "own-message"
   | "provision-unavailable"
@@ -3822,6 +3842,29 @@ type HostedLinqNewGroupAdmissionIgnoreReason =
   | "sender-identity-unresolved"
   | "sender-inactive"
   | "suspended-member";
+
+/**
+ * Murph never starts a group above the setup cap or one with a blocked
+ * participant, whoever messages. Big mixed
+ * iMessage/RCS rooms reappear under a new chat id on each roster change, so a
+ * setup notice, private nudge or bound assistant would repeat in every copy.
+ * The distinct response reason also keeps private recovery out.
+ */
+async function planHostedLinqUnboundGroupChatWebhook(
+  input: Parameters<typeof planHostedLinqGroupChatWebhook>[0],
+): Promise<HostedOnboardingLinqDirectPlan> {
+  const rejection = input.rosterRejection;
+  if (rejection === undefined) return planHostedLinqGroupChatWebhook(input);
+  const reason = rejection === "oversized" ? "group-roster-oversized" : "group-roster-blocked";
+  const plan = buildHostedLinqIgnoredPlan(input.event, input.context, {
+    existingMemberMatch: "none", reason, routeStage: "new-group-admission-ignored",
+  }, reason);
+  const line = await readHostedLinqIncomingLineState({ phoneNumberLookupKeys: input.threadRouteAccountLookupKeys, prisma: input.prisma });
+  if (!("phoneNumberLookupKey" in line)) return plan;
+  const result = await leaveHostedLinqGroupTx({ expected: null, prisma: input.prisma,
+    prepared: prepareHostedLinqGroupLeave(input.context.summary.chatId, rejection) });
+  return result.status === "left" ? { ...plan, postCommitLinqGroupLeave: result.postCommitLinqGroupLeave } : plan;
+}
 
 /**
  * An unbound group can be admitted by either one roster-matched pending setup
@@ -3845,6 +3888,7 @@ async function planHostedLinqGroupChatWebhook(input: {
   preparedPendingGroupSetup?: HostedPreparedPendingGroupSetupPackage;
   preparedThreadContainerCreation?: PreparedHostedThreadContainerCreation;
   preparedThreadDeliveryRoute?: PreparedHostedThreadContainerDeliveryRoute;
+  rosterRejection?: HostedLinqGroupRosterRejection;
   rosterUnavailable: boolean;
   prisma: Prisma.TransactionClient;
   requireFirstContactAdmission?: boolean;
@@ -4572,7 +4616,7 @@ function sanitizeHostedOnboardingPlannerLogValue(
 function requireHostedLinqSourceMessageLookupKey(messageId: string): string {
   const lookupKey = createHostedLinqMessageLookupKey(messageId);
   if (!lookupKey) {
-    throw new TypeError("Hosted Linq message id must produce a source lookup key.");
+    throw new ContractValidationError("Hosted Linq message id must produce a source lookup key.");
   }
   return lookupKey;
 }
@@ -5011,6 +5055,16 @@ function isLocalHostedDomainRootAuthorityMismatch(error: unknown): boolean {
     && error instanceof Error
     && error.message === "Hosted domain root envelope authority signature verification failed."
   );
+}
+
+// Locked recheck for groups only: markers are never written for 1:1 chats,
+// so the direct reply path skips the read.
+async function assertHostedLinqMessageChatNotLeftTx(input: {
+  messageEvent: HostedLinqMessageReceivedEvent;
+  prisma: Prisma.TransactionClient;
+}): Promise<void> {
+  if (isHostedLinqDirectChatAttested(input.messageEvent)) return;
+  await assertHostedLinqGroupNotLeft({ chatId: input.messageEvent.data.chat_id, prisma: input.prisma });
 }
 
 function isHostedLinqGroupChat(messageEvent: HostedLinqMessageReceivedEvent): boolean {

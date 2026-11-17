@@ -659,9 +659,10 @@ test.each([
 });
 
 test("Junction queued large direct resource payloads import inline without REST fallback", async () => {
-  // The 64KB inline-payload size cap was removed (P3). A large direct summary
-  // payload now imports inline rather than dropping to a REST summary read; the
-  // normalizer downstream decides meaning. No Junction HTTP request is made.
+  // The runner has no inline size cap of its own: a queued job that carries a
+  // large direct summary payload imports it inline rather than dropping to a
+  // REST summary read; the normalizer downstream decides meaning. No Junction
+  // HTTP request is made.
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];
   const provider = createJunctionProvider(async (input) => {
@@ -1356,10 +1357,10 @@ test("Junction imports a metric-free direct payload inline once the usefulness g
   assert.deepEqual(snapshot.timeseries, {});
 });
 
-test("Junction large daily summary webhook payloads import inline without REST fallback", async () => {
-  // The 64KB inline-payload size cap was removed in P3. A large daily summary
-  // webhook now attaches its inline payload to the resource job and imports it
-  // inline instead of stripping `webhookDataJson` and falling back to REST.
+test("Junction large daily summary webhook payloads that fit the prepared event import inline", async () => {
+  // A large daily summary record that still fits the prepared event stays on
+  // its resource job and imports inline, with no REST read. A record past that
+  // limit becomes a window fetch; junction-provider-webhooks.test.ts owns it.
   const requests: string[] = [];
   const importedSnapshots: unknown[] = [];
   const provider = createJunctionProvider(async (input) => {
@@ -1379,7 +1380,7 @@ test("Junction large daily summary webhook payloads import inline without REST f
         end_date: "2026-04-02",
         date: "2026-04-02",
         id: "activity-inline-large",
-        memo: "x".repeat(DIRECT_WEBHOOK_JOB_LARGE_BYTES_FOR_TEST),
+        memo: "x".repeat(30_000),
         source: {
           provider: "garmin",
           type: "watch",
@@ -2634,7 +2635,7 @@ test("Junction direct-Link body data stays in the bounded history owner", async 
     );
     assert.equal(
       connectResult.metadataPatch?.junctionHistoricalBackfillStatus,
-      "coverage_v3_complete",
+      "coverage_v4_complete",
     );
     assert.equal(
       connectResult.metadataPatch?.junctionExtendedTimeseriesHistoryBackfillCoverage,
@@ -2658,7 +2659,7 @@ test("Junction direct-Link body data stays in the bounded history owner", async 
       createStoredAccount({
         metadata: {
           ...terminalMetadata,
-          junctionHistoricalBackfillStatus: "coverage_v3_retrying",
+          junctionHistoricalBackfillStatus: "coverage_v4_retrying",
         },
         nextReconcileAt: now,
         sources: [sourceSummary],

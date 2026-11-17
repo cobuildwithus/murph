@@ -1,3 +1,5 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
+import { RequestBodyTooLargeError, RequestInputError } from "@murphai/hosted-execution/request-input";
 import {
   HOSTED_EXECUTION_USER_ID_HEADER,
 } from "@murphai/hosted-execution/contracts";
@@ -8,7 +10,7 @@ import {
 } from "@murphai/hosted-execution/auth";
 
 import { hostedOnboardingError } from "../hosted-onboarding/errors";
-import { readRawBodyBuffer } from "../http";
+import { parseRequestJson, readRawBodyBuffer } from "../http";
 import { getPrisma } from "../prisma";
 import { requireHostedRuntimeCallback } from "./runtime-owner";
 import {
@@ -153,7 +155,8 @@ async function requireHostedCloudflareSignedRequest(
   }
   try {
     readHostedExecutionRuntimeAuthority(url, request.headers);
-  } catch {
+  } catch (error) {
+    if (!(error instanceof ContractValidationError || error instanceof RequestInputError)) throw error;
     throw unauthorizedCloudflareCallbackError();
   }
 
@@ -193,7 +196,7 @@ export async function requireHostedCloudflareCallbackJsonRequest(
   });
 
   return {
-    payload: payloadText.trim() ? JSON.parse(payloadText) : {},
+    payload: payloadText.trim() ? parseRequestJson(payloadText) : {},
     userId,
   };
 }
@@ -207,7 +210,7 @@ async function readHostedCloudflareCallbackPayload(
 ): Promise<string> {
   if (input.payloadText !== undefined) {
     if (new TextEncoder().encode(input.payloadText).byteLength > input.maxBodyBytes) {
-      throw new RangeError(`Request body exceeded ${input.maxBodyBytes} bytes.`);
+      throw new RequestBodyTooLargeError(input.maxBodyBytes);
     }
 
     return input.payloadText;

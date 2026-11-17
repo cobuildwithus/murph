@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS,
 } from "@murphai/hosted-execution/contracts";
@@ -27,13 +28,13 @@ export function normalizeHostedGroupTargetSelector(
   }
   const normalized = sanitizeHostedGroupTargetDisplayLabel(value);
   if (!normalized) {
-    throw new TypeError("Hosted assistant ask group label must not be blank.");
+    throw new ContractValidationError("Hosted assistant ask group label must not be blank.");
   }
   if (
     [...normalized].length
     > HOSTED_EXECUTION_ASSISTANT_ASK_TARGET_LABEL_MAX_CODE_POINTS
   ) {
-    throw new TypeError("Hosted assistant ask group label is too long.");
+    throw new ContractValidationError("Hosted assistant ask group label is too long.");
   }
   return normalized.toLocaleLowerCase("und");
 }

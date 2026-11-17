@@ -82,6 +82,9 @@
     "test": "pnpm exec vitest run --config vitest.config.ts --no-coverage",
     "test:coverage": "pnpm exec vitest run --config vitest.config.ts --coverage"
   },
+  "dependencies": {
+    "@murphai/contracts": "workspace:*"
+  },
   "engines": {
     "node": ">=24.22.1"
   }

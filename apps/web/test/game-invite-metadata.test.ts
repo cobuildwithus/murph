@@ -6,6 +6,8 @@ import type { GameInvitePreview } from "@/src/lib/game/contract";
 
 const mocks = vi.hoisted(() => ({ readInvitePreview: vi.fn() }));
 
+// The page reads the device from the request; these tests are an iPhone.
+vi.mock("next/headers", () => ({ headers: async () => new Headers({ "user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Mobile/15E148" }) }));
 vi.mock("@/src/lib/game/service", () => ({ readInvitePreview: mocks.readInvitePreview }));
 vi.mock("@/app/_og/og-shared", () => ({
   loadMurphHeroOgAssets: async () => ({ fonts: [] }),
@@ -107,7 +109,7 @@ describe("weekly game invite link preview", () => {
   it.each<[string, GameInvitePreview | null]>([
     ["used", { status: "used" }],
     ["expired", { status: "expired" }],
-    ["cancelled", { status: "expired", reason: "cancelled", inviterFirstName: "Leo" }],
+    ["cancelled", { status: "expired", reason: "cancelled" }],
     ["missing or turned off", null],
   ])("names nobody for a %s invite", async (_label, preview) => {
     const metadata = await metadataFor(preview);

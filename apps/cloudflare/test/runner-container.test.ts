@@ -188,8 +188,8 @@ describe("RunnerContainer", () => {
       env: {
         HOSTED_AI_USAGE_REPORTING_SECRET: "fixture-usage-reporting-secret",
         HOSTED_LOG_FINGERPRINT_SECRET: "fixture-log-fingerprint-secret",
-        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
-          "fixture-provider-egress-signing-secret",
+        HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET:
+          "fixture-private-media-capability-secret",
       },
     });
 
@@ -197,7 +197,7 @@ describe("RunnerContainer", () => {
     expect(container.envVars).not.toHaveProperty("HOSTED_LOG_FINGERPRINT_SECRET");
     expect(container.envVars).not.toHaveProperty("HOSTED_AI_USAGE_REPORTING_SECRET");
     expect(container.envVars).not.toHaveProperty(
-      "HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET",
+      "HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET",
     );
   });
 
@@ -5904,6 +5904,83 @@ describe("RunnerContainer", () => {
     }
   });
 
+  it.each([
+    ["before", "activity-expired"], ["after", "activity-expired"],
+    ["before", "invoke-completed"], ["after", "invoke-completed"],
+  ] as const)(
+    "logs idle SIGKILL at info when onStop arrives %s %s destruction settles",
+    async (timing, trigger) => {
+      const { container, destroy } = createContainerDouble({ initialStatus: "running" });
+      container.onStart();
+      const request = createRunnerRequest("evt_idle_cleanup_logging");
+      if (trigger === "invoke-completed") {
+        await container.invoke({ job: { kind: "workspace-invocation", request }, userId: request.userId });
+      }
+      if (timing === "before") {
+        destroy.mockImplementation(async () => {
+          container.onStop({ exitCode: 137, reason: "exit" });
+        });
+      }
+
+      if (trigger === "activity-expired") await container.onActivityExpired();
+      else await container.onRuntimeCompletionRecorded({
+        attemptId: request.attemptId, leaseGeneration: request.leaseGeneration, userId: request.userId,
+      });
+      expect(destroy).toHaveBeenCalledOnce();
+      if (timing === "after") container.onStop({ exitCode: 137, reason: "exit" });
+
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          details: expect.objectContaining({
+            activeWorkspaceInvocationPresent: false,
+            destroyRequestPresent: true,
+            destroyRequestReason: trigger,
+            exitCode: 137,
+            stopAppliedToCurrentGeneration: timing === "before",
+            stopClassification: "requested-nonzero-stop",
+          }),
+          level: "info",
+          message: "Hosted execution container lifecycle hook reported stop.",
+          phase: "container.ready",
+        }),
+      );
+
+      // A consumed diagnostic receipt must not suppress another unrequested stop.
+      mocks.emitHostedExecutionStructuredLog.mockClear();
+      container.onStop({ exitCode: 137, reason: "exit" });
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({ level: "warn" }),
+      );
+    },
+  );
+
+  it.each(["different-exit", "explicit-destroy", "replacement-start", "unrequested"] as const)(
+    "keeps %s stop warnings after idle cleanup",
+    async (scenario) => {
+      const { container } = createContainerDouble({ initialStatus: "running" });
+      container.onStart();
+      if (scenario === "explicit-destroy") await container.destroyInstance();
+      else if (scenario !== "unrequested") await container.onActivityExpired();
+      if (scenario === "replacement-start") container.onStart();
+      mocks.emitHostedExecutionStructuredLog.mockClear();
+
+      container.onStop({ exitCode: scenario === "different-exit" ? 1 : 137, reason: "exit" });
+
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          details: expect.objectContaining({
+            destroyRequestReason: scenario === "explicit-destroy"
+              ? "destroy-instance"
+              : scenario === "different-exit" ? "activity-expired" : null,
+          }),
+          level: "warn",
+          message: "Hosted execution container lifecycle hook reported non-zero stop.",
+          phase: "failed",
+        }),
+      );
+    },
+  );
+
   it("logs container lifecycle errors without aborting active workspace invocations", async () => {
     let markRunnerRequestStarted!: () => void;
     const runnerRequestStarted = new Promise<void>((resolve) => {
@@ -8966,6 +9043,35 @@ describe("RunnerContainer", () => {
     expectRunnerContainerStructuredLogsToOmitInvalidRequestDetails();
   });
 
+  it.each([
+    ["runtime_error", "ContractValidationError"],
+    ["type_error", "TypeError"],
+  ])("preserves validation wire diagnostics for %s", async (code, errorName) => {
+    const { container } = createContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return new Response(JSON.stringify(createRunnerHealthResult()), {
+            headers: {
+              "content-type": "application/json; charset=utf-8",
+            },
+            status: 200,
+          });
+        }
+
+        return Response.json({ code, error: "Invalid request.", errorName }, { status: 400 });
+      }),
+    });
+
+    const thrown = await container.invoke({
+      job: createRunnerInvocationJob("evt_invalid_request_diagnostics"),
+      timeoutMs: 10_000,
+      userId: "member_123",
+    }).catch((error: unknown) => error);
+
+    expect(thrown).toMatchObject({ code, name: errorName, status: 400, statusCode: 400 });
+    expect(deriveHostedExecutionErrorCode(thrown)).toBe("invalid_request");
+  });
+
   it("omits raw body previews from non-json runner failure responses", async () => {
     const hiddenBody = "hidden non-json runner body with provider text and OPENAI_API_KEY=placeholder";
     const { container } = createContainerDouble({
@@ -9953,6 +10059,9 @@ describe("RunnerContainer", () => {
         ), { headers: { "content-type": "application/json" } })),
       });
       const request = createRunnerRequest("evt_previous_release_completion");
+      destroy.mockImplementation(async () => {
+        container.onStop({ exitCode: 137, reason: "exit" });
+      });
       await container.invoke({ job: { kind: "workspace-invocation", request }, timeoutMs: 30_000, userId: request.userId });
       expect(destroy).not.toHaveBeenCalled();
       await container.onRuntimeCompletionRecorded({ attemptId: "attempt_unrelated", leaseGeneration: request.leaseGeneration, userId: request.userId });
@@ -9960,6 +10069,17 @@ describe("RunnerContainer", () => {
       await container.onRuntimeCompletionRecorded({ attemptId: request.attemptId, leaseGeneration: request.leaseGeneration, userId: request.userId });
       expect(destroy).toHaveBeenCalledOnce();
       expect(startAndWaitForPorts).not.toHaveBeenCalled();
+      expect(mocks.emitHostedExecutionStructuredLog).toHaveBeenCalledWith(expect.objectContaining({
+        level: "info",
+        phase: "container.ready",
+        message: "Hosted execution container lifecycle hook reported stop.",
+        details: expect.objectContaining({
+          exitCode: 137,
+          destroyRequestReason: "invoke-completed",
+          stopClassification: "requested-nonzero-stop",
+          activeWorkspaceInvocationPresent: false,
+        }),
+      }));
     },
   );
 

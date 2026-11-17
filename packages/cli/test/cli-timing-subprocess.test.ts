@@ -208,8 +208,7 @@ for (const sample of cases) test(`real subprocess: ${sample.name}`, async () => 
       assert.equal(output.mediaType, 'application/jsonl')
       assert.equal(output.schema.type, 'object')
     } else if (sample.command === 'automation list') {
-      assert.deepEqual(output, { vault: path.join(directory, 'vault'),
-        filters: { status: null, text: null, supportSeriesId: null, cursor: null, limit: 1 },
+      assert.deepEqual(output, { filters: { limit: 1 },
         count: 0, totalCount: 0, nextCursor: null, items: [] })
     } else if (sample.requests) {
       assert.deepEqual(output, { source: 'murph-data-api', query: 'synthetic oats', limit: 1,

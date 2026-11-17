@@ -1,3 +1,5 @@
+import { RequestInputError } from "@murphai/hosted-execution/request-input";
+
 import { reconcileHostedBillingCheckoutSuccess } from "@/src/lib/hosted-onboarding/billing-success-service";
 import { requireHostedAppSessionFromRequest } from "@/src/lib/hosted-onboarding/app-session";
 import { assertHostedOnboardingMutationOrigin } from "@/src/lib/hosted-onboarding/csrf";
@@ -13,11 +15,11 @@ export const POST = withJsonError(async (request: Request) => {
   const sessionId = typeof body.sessionId === "string" ? body.sessionId : null;
 
   if (!inviteCode) {
-    throw new TypeError("inviteCode is required.");
+    throw new RequestInputError("inviteCode is required.");
   }
 
-  if (!sessionId) {
-    throw new TypeError("sessionId is required.");
+  if (!sessionId || /[\uD800-\uDFFF]/u.test(sessionId)) {
+    throw new RequestInputError("sessionId is required.");
   }
 
   return jsonOk(await reconcileHostedBillingCheckoutSuccess({

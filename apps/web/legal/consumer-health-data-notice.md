@@ -2,7 +2,7 @@
 
 **Effective Date:** April 29, 2026
 
-**Last Updated:** July 23, 2026
+**Last Updated:** November 12, 2026
 
 **Company:** Just Cobuild, Co. ("**Murph**," "**we**," "**us**," or "**our**")
 
@@ -35,6 +35,7 @@ Depending on the features you use and the choices you make, Murph may collect:
 
 - **Health, wellness, and lifestyle records**, such as symptoms, observations, routines, habits, meals, foods, recipes, supplements, protocols, goals, health history, medications you choose to log, and other wellness notes.
 - **Wearable, device, and activity data**, such as sleep, recovery, readiness, activity, heart rate, heart-rate variability, temperature, respiration, blood oxygen, movement, workout, body-state, or similar measurements from connected services or devices.
+- **Game data**, such as a heart rate summary you post as proof in a Murph game (its duration and average, low and peak beats per minute). Murph also collects game photos, rep counts with each rep's time and depth, and route distance and time. We name them here even though we do not treat them as Consumer Health Data.
 - **User-generated content**, such as journals, prompts, messages, conversations, assistant requests, files, attachments, photos, audio, transcripts, parsed content, and metadata that may identify or describe your health status.
 - **Derived, inferred, and generated information**, such as trends, summaries, classifications, recommendations, reminders, before-and-after analyses, experiment results, protocol outputs, and other outputs generated from your data.
 - **Connected-service and integration information**, such as connection status, authorization metadata, provider account identifiers or privacy-preserving lookup values, sync timestamps, webhook traces, reconciliation records, error metadata, and routing information needed to operate an integration.
@@ -67,6 +68,7 @@ Murph may collect, use, and process Consumer Health Data to:
 - operate connected-service, wearable, device, messaging, invite, import, export, group, newsletter, and automation features;
 - generate assistant responses, reminders, insights, experiment results, before-and-after analyses, protocol outputs, and other requested outputs;
 - make user-directed calls, send messages, use browser tools, book appointments, purchase items, cancel services, submit forms, and carry out other actions you request;
+- run the games you play, show your posts to the other players, and write game messages and recaps with our AI model providers;
 - process prompts, messages, attachments, files, transcripts, and related context;
 - communicate with you about service, security, support, onboarding, billing, account, legal, and privacy matters;
 - secure Murph, prevent misuse, detect fraud or abuse, debug issues, monitor reliability, maintain audit records, and protect users and the service;
@@ -76,6 +78,8 @@ Murph may collect, use, and process Consumer Health Data to:
 - handle other purposes disclosed to you with any consent required by law.
 
 Murph does not use Consumer Health Data you submit through Murph to train, fine-tune, or improve Murph's or any third party's general-purpose AI models. This commitment applies even if you provide feedback. Separate research consents, if offered, will be limited to the research or product-evaluation purpose described in that consent and will not authorize general-purpose AI model training on Consumer Health Data. We also require third-party AI model providers that process Consumer Health Data for the Hosted Service not to use that data to train their models.
+
+**When we ask.** In the Murph app, Murph asks for your consent the first time you use a feature that needs Consumer Health Data, such as connecting Apple Health, posting a heart rate, or using Meals. Playing a game with photos, words, rep counts or routes does not need this consent; we collect those because they are necessary to provide the game you asked for.
 
 Murph collects Consumer Health Data from an optional connected source only after you take an affirmative step to enable the source and authorize the available permissions through Murph, the source, the device, or the platform. You can stop future collection from that source by disconnecting it, revoking provider or platform permissions, or contacting us. Disconnection does not automatically delete Consumer Health Data already stored by Murph or an independent third party.
 
@@ -160,6 +164,8 @@ Where permitted by law, you may use an authorized agent to submit a request. Mur
 For Consumer Health Data requests covered by applicable law, Murph will respond within the time required by law, including within 45 days where Washington law requires it. When allowed by law, Murph may use one 45-day extension if reasonably necessary and will tell you why.
 
 Where Murph relies on your consent to collect or share Consumer Health Data, you may withdraw consent for future processing by contacting **legal@justco.build** or by using available product controls, such as disconnecting an integration, changing settings, revoking a provider authorization, deleting an invite, or closing your account.
+
+Withdrawing consent does not end your games or close your account. While your consent is withdrawn, you cannot post a heart rate, and Murph's AI stops writing messages and recaps for a game you are in.
 
 Withdrawal of consent does not affect processing that occurred before withdrawal. Some Murph features may stop working or become unavailable if you withdraw consent, disconnect an integration, or ask Murph to stop collecting or sharing Consumer Health Data needed to provide a requested feature. Withdrawal cannot recall or delete copies already delivered to another person, an email inbox, a messaging service, or another independent recipient.
 

@@ -1,3 +1,5 @@
+import { hostedOnboardingError } from "../hosted-onboarding/errors";
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
 import { createHash, randomUUID } from "node:crypto";
@@ -141,7 +143,7 @@ export async function createHostedPhysicalNote(input: HostedPhysicalNoteSendRequ
 
   const artworkExpiresAt = new Date(input.artwork.expiresAt);
   if (artworkExpiresAt.getTime() <= Date.now() + 60_000) {
-    throw new TypeError("Physical-note artwork URL expires too soon.");
+    throw hostedOnboardingError({ code: "INVALID_REQUEST", httpStatus: 400, message: "Physical-note artwork URL expires too soon." });
   }
   await reassertActionOrigin();
   input.signal?.throwIfAborted();

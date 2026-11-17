@@ -1,3 +1,4 @@
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import type { Prisma } from "@prisma/client";
 import { getPrisma } from "@/src/lib/prisma";
 import { requireHostedRuntimeCallbackTx } from "@/src/lib/hosted-execution/runtime-owner";
@@ -46,7 +47,7 @@ export const POST = withJsonError(async (request: Request) => {
     runtimeAuthority: "caller_transaction",
     maxBodyBytes: HOSTED_MAILBOX_PAYLOAD_FETCH_CALLBACK_BODY_LIMIT_BYTES,
   });
-  const body = parseHostedMailboxPayloadFetchRequest(await readOptionalJsonObject(request));
+  const body = parseInput(await readOptionalJsonObject(request), parseHostedMailboxPayloadFetchRequest);
   const authority = readHostedRuntimeCallbackAuthority(request);
   const response = await getPrisma().$transaction(async (tx) => {
     await requireHostedRuntimeCallbackTx(tx, userId, authority ? { ...authority, userId } : null);

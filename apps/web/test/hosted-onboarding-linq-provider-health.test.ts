@@ -8,6 +8,7 @@ import {
   createHostedPhoneLookupKey,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
+  HOSTED_LINQ_CHAT_HEALTH_PAGE_MAX_BYTES,
   HOSTED_LINQ_CHAT_HEALTH_SYNC_LIMIT,
   listHostedLinqChatHealthInventory,
   parseHostedLinqChatHealthInventoryRecord,
@@ -238,6 +239,25 @@ describe("listHostedLinqChatHealthInventory", () => {
       2,
       { cursor: "page-2", limit: 100 },
       { signal: undefined },
+    );
+  });
+
+  it("reads chat pages under a cap that fits large group rosters", async () => {
+    inventoryMocks.listChats.mockResolvedValueOnce({
+      chats: [buildChatInventoryRecord("chat-1")],
+      next_cursor: null,
+    });
+
+    await listHostedLinqChatHealthInventory({ maxChats: 1 });
+
+    expect(inventoryMocks.runLinqApiRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        maxResponseBytes: HOSTED_LINQ_CHAT_HEALTH_PAGE_MAX_BYTES,
+      }),
+    );
+    // A full page of 100-person chats at about 210 bytes per handle.
+    expect(HOSTED_LINQ_CHAT_HEALTH_PAGE_MAX_BYTES).toBeGreaterThan(
+      100 * 100 * 210,
     );
   });
 

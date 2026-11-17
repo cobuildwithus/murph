@@ -1,5 +1,6 @@
 import { emitHostedExecutionStructuredLog } from "@murphai/hosted-execution";
 import { commandHostedRuntimeOwner } from "./runtime-owner-client.ts";
+import { obsoleteRuntimeCompletionReason, type HostedRuntimeCompletionReceipt } from "./runtime-completion-receipt.ts";
 
 export async function recordHostedRuntimeOwnerCompletion(input: {
   source: Readonly<Record<string, unknown>>;
@@ -9,7 +10,7 @@ export async function recordHostedRuntimeOwnerCompletion(input: {
   /** Set only after the native invocation operation itself has settled. A
    * runtime callback alone does not prove that the outer operation is gone. */
   settledRunnerContainerName?: string;
-}): Promise<boolean> {
+}): Promise<HostedRuntimeCompletionReceipt> {
   let outcome: "updated" | "not_updated" | "unconfirmed" = "unconfirmed";
   try {
     const completed = await commandHostedRuntimeOwner({
@@ -22,7 +23,12 @@ export async function recordHostedRuntimeOwnerCompletion(input: {
     const updated = completed.status === "updated";
     // Canonical acknowledgment only, not proof of downstream delivery.
     outcome = updated ? "updated" : "not_updated";
-    return updated;
+    return updated ? { completed: true } : {
+      completed: false,
+      reason: completed.status === "stale"
+        ? obsoleteRuntimeCompletionReason(completed.owner, input.generation) ?? "canonical_completion_rejected"
+        : "canonical_completion_rejected",
+    };
   } finally {
     try {
       const caller: "runtime_callback" | "native_invocation" =
@@ -38,7 +44,7 @@ export async function recordHostedRuntimeOwnerCompletion(input: {
         },
       });
     } catch {
-      // Diagnostics cannot replace the boolean result or the original failure.
+      // Diagnostics cannot replace the receipt or the original failure.
     }
   }
 }

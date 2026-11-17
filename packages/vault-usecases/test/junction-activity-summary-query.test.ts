@@ -6,6 +6,7 @@ import * as coreRuntime from '@murphai/core'
 import { importDeviceProviderSnapshot } from '@murphai/importers'
 import {
   listMetricPoints,
+  summarizeWearableActivityRuntime,
   summarizeWearableLatestRuntime,
   summarizeWearableMetricLatestRuntime,
   summarizeWearableMetricTrendRuntime,
@@ -139,4 +140,60 @@ test('Junction Apple Health source tags reach RHR number labels without inferrin
     expect(watch?.provenance.sourceLabel).toBe('Apple Watch')
     expect(points.filter(point => point !== watch).every(point => point.provenance.sourceLabel !== 'Apple Watch')).toBe(true)
   } finally { await rm(vaultRoot, { recursive: true, force: true }) }
+})
+
+
+test('Junction daily steps take the merged total once a day finishes without a later device report', async () => {
+  const parentRoot = await mkdtemp(path.join(tmpdir(), 'junction-steps-day-end-'))
+  const vaultRoot = path.join(parentRoot, 'vault')
+  // New York, UTC-5: 2026-11-10 ends at 05:00 UTC on the 11th.
+  const day = '2026-11-10'
+  const activity = (source: { provider: string; type: string }, calendarDate: string, steps: number, updatedAt: string) => ({
+    id: `activity-${source.provider}-${calendarDate}`,
+    calendar_date: calendarDate,
+    date: `${calendarDate}T00:00:00+00:00`,
+    timezone_offset: -18_000,
+    steps,
+    created_at: `${calendarDate}T12:00:00+00:00`,
+    updated_at: updatedAt,
+    source,
+  })
+  const whoop = { provider: 'whoop_v2', type: 'watch' }
+  const appleHealth = { provider: 'apple_health_kit', type: 'multiple_sources' }
+  const importActivity = (importedAt: string, rows: readonly object[]) => importDeviceProviderSnapshot({
+    provider: 'junction', sourceKind: 'poll', deliveryMode: 'scheduled_reconcile', vaultRoot,
+    snapshot: { importedAt, summaries: { activity: rows } },
+  }, { corePort: coreRuntime })
+  const readDay = async () => ({
+    selected: (await summarizeWearableActivityRuntime(vaultRoot, { date: day }))[0]?.steps.selection.value,
+    whoopOnly: (await summarizeWearableActivityRuntime(vaultRoot, { date: day, providers: ['whoop'] }))[0]
+      ?.steps.selection.value,
+    points: (await listMetricPoints(vaultRoot, { metricKey: 'steps', limit: null }))
+      .filter(point => point.effectiveDate.startsWith(day)).map(point => point.value),
+  })
+
+  try {
+    await coreRuntime.initializeVault({ vaultRoot, timezone: 'America/New_York' })
+
+    // 9 pm local: the device last reported at 3 pm, the phone just now. The day is still open.
+    await importActivity('2026-11-11T02:05:00Z', [
+      activity(whoop, day, 6_000, '2026-11-10T20:00:00+00:00'),
+      activity(appleHealth, day, 11_000, '2026-11-11T02:00:00+00:00'),
+    ])
+    expect(await readDay()).toEqual({ selected: 6_000, whoopOnly: 6_000, points: [6_000] })
+
+    // The next morning's first record shows the day finished; the device never reported after 3 pm.
+    await importActivity('2026-11-11T13:05:00Z', [
+      activity(appleHealth, '2026-11-11', 1_200, '2026-11-11T13:00:00+00:00'),
+    ])
+    expect(await readDay()).toEqual({ selected: 11_000, whoopOnly: 6_000, points: [11_000] })
+
+    // The device then reports the finished day: its own total is the day's count again.
+    await importActivity('2026-11-11T14:05:00Z', [
+      activity(whoop, day, 6_400, '2026-11-11T14:00:00+00:00'),
+    ])
+    expect(await readDay()).toEqual({ selected: 6_400, whoopOnly: 6_400, points: [6_400] })
+  } finally {
+    await rm(parentRoot, { recursive: true, force: true })
+  }
 })

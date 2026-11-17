@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
 import { Buffer } from "node:buffer";
@@ -217,21 +218,21 @@ function requireStore(): Store {
 /** A hosted photo lives under its uploader, named by its last key segment. */
 function hostedName(key: string): { mediaId: string; owner: string } {
   const owner = isGameMediaKey(key) ? mediaKeyOwner(key) : null;
-  if (!owner) throw new TypeError("Game media key is invalid.");
+  if (!owner) throw new ContractValidationError("Game media key is invalid.");
   return { mediaId: key.slice(key.lastIndexOf("/") + 1), owner };
 }
 
 function contentTypeOf(key: string): GameMediaContentType {
   const extension = key.slice(key.lastIndexOf(".") + 1);
   const type = CONTENT_TYPES.find((candidate) => EXTENSIONS[candidate] === extension);
-  if (!type) throw new TypeError("Game media key is invalid.");
+  if (!type) throw new ContractValidationError("Game media key is invalid.");
   return type;
 }
 
 function requireFile(root: string, key: string): string {
-  if (!isGameMediaKey(key)) throw new TypeError("Game media key is invalid.");
+  if (!isGameMediaKey(key)) throw new ContractValidationError("Game media key is invalid.");
   const file = path.resolve(root, key);
-  if (!file.startsWith(`${root}${path.sep}`)) throw new TypeError("Game media key is invalid.");
+  if (!file.startsWith(`${root}${path.sep}`)) throw new ContractValidationError("Game media key is invalid.");
   return file;
 }
 

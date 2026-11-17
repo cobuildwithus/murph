@@ -110,11 +110,17 @@ export default {
     env: WorkerEnvironmentSource,
     ctx?: WorkerExecutionContext,
   ): Promise<Response> {
+    let response: Response;
     try {
-      return await handleWorkerFetch(request, env, ctx);
+      response = await handleWorkerFetch(request, env, ctx);
     } catch (error) {
-      return mapWorkerRouteError(request, error);
+      response = mapWorkerRouteError(request, error);
     }
+    // Upgrades retain their WebSocket; every HTTP response is private to crawlers.
+    if (response.status === 101) return response;
+    const privateResponse = new Response(response.body, response);
+    privateResponse.headers.set("X-Robots-Tag", "noindex, nofollow, noarchive, nosnippet, noimageindex");
+    return privateResponse;
   },
   async email(
     message: ForwardableEmailMessage,

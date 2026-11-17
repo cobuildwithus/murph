@@ -1,0 +1,66 @@
+{
+  "joinedOn": "2026-11-14",
+  "today": "2026-11-14",
+  "incomplete": false,
+  "measures": [
+    {
+      "id": "pushups.reps",
+      "label": "Pushups",
+      "noun": "pushups",
+      "icon": "pushups",
+      "format": "count",
+      "source": "games",
+      "pending": false,
+      "gameOn": true,
+      "needsPerDay": false,
+      "total": {
+        "value": 40,
+        "text": "40",
+        "unit": "reps"
+      },
+      "today": null,
+      "points": [
+        [
+          "2026-11-14",
+          40
+        ]
+      ],
+      "projection": {
+        "value": 100,
+        "label": "100 by Nov 17",
+        "on": "2026-11-17"
+      },
+      "ladder": {
+        "kind": "height",
+        "passed": [],
+        "next": {
+          "id": "hollywood-sign",
+          "name": "Hollywood Sign",
+          "drawing": "hollywood-sign",
+          "at": 45,
+          "atText": "45 ft",
+          "blurb": "The giant white letters above Los Angeles, first put up in 1923 as a real estate ad.",
+          "where": "Los Angeles, USA",
+          "on": null,
+          "toGo": "5 to go",
+          "short": "Hollywood Sign",
+          "tagline": "Letters high above the city",
+          "shareAwardId": null
+        },
+        "goalPicked": false
+      },
+      "route": null,
+      "pics": [
+        {
+          "id": "10000000-0000-4000-8000-000000000001",
+          "takenOn": "2026-11-14",
+          "at": 40
+        }
+      ]
+    }
+  ],
+  "medals": [],
+  "shelf": [],
+  "moments": [],
+  "picCount": 1
+}

@@ -1,4 +1,5 @@
 import "server-only";
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type { HostedAuthRecord, Prisma, PrismaClient } from "@prisma/client";
 import type { BetterAuthOptions } from "better-auth";
 import { createAdapterFactory, type CleanedWhere, type CustomAdapter, type DBAdapter } from "better-auth/adapters";
@@ -63,7 +64,7 @@ function exactRow(row: HostedAuthRecord): Prisma.HostedAuthRecordWhereInput {
 }
 
 async function replaceRecord(client: Client, opened: OpenRecord, update: unknown): Promise<AuthRecord> {
-  if (!update || typeof update !== "object" || Array.isArray(update)) throw new TypeError("Invalid authentication update.");
+  if (!update || typeof update !== "object" || Array.isArray(update)) throw new ContractValidationError("Invalid authentication update.");
   const record = { ...opened.record, ...update };
   const model = requireAuthModel(opened.row.model);
   if (record.id !== opened.record.id || authRecordOwner(model, record) !== opened.row.memberId) {
@@ -83,7 +84,7 @@ async function deleteRecord(client: Client, opened: OpenRecord): Promise<void> {
 function sortRecords(records: OpenRecord[], sortBy?: { field: string; direction: "asc" | "desc" }): OpenRecord[] {
   if (!sortBy) return records;
   if (!["id", "createdAt", "updatedAt", "expiresAt"].includes(sortBy.field)) {
-    throw new TypeError("Unsupported authentication sort field.");
+    throw new ContractValidationError("Unsupported authentication sort field.");
   }
   return records.sort((a, b) => {
     const left = a.record[sortBy.field]; const right = b.record[sortBy.field];
@@ -106,13 +107,13 @@ function makeOperations(root: PrismaClient, client: Client, inTransaction: boole
       return data;
     },
     findOne: async <T>({ model, where, join }: Parameters<CustomAdapter["findOne"]>[0]) => {
-      if (join) throw new TypeError("Authentication joins are disabled.");
+      if (join) throw new ContractValidationError("Authentication joins are disabled.");
       return (await readRecords(client, requireAuthModel(model), where))[0]?.record as T ?? null;
     },
     findMany: async <T>({ model, where = [], limit, offset = 0, sortBy, join }: Parameters<CustomAdapter["findMany"]>[0]) => {
       if (join || !Number.isSafeInteger(limit) || limit < 1 || limit > AUTH_RECORD_LIMIT
         || !Number.isSafeInteger(offset) || offset < 0 || offset > AUTH_RECORD_LIMIT) {
-        throw new TypeError("Unsupported authentication collection query.");
+        throw new ContractValidationError("Unsupported authentication collection query.");
       }
       const records = sortRecords(await readRecords(client, requireAuthModel(model), where), sortBy);
       return records.slice(offset, offset + limit).map(({ record }) => record as T);

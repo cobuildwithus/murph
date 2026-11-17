@@ -1,3 +1,7 @@
+import { requireRunnerSlotUserId } from "../../runner-slot-binding.ts";
+import { parseJsonInput } from "../route-utils/json-body.ts";
+import { parseInput, RequestInputError } from "@murphai/hosted-execution/request-input";
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { buildRuntimeProcessingSummaryEntry, recordRuntimeProcessingSummary, type RuntimeProcessingDiagnostics } from "../../user-runner/diagnostics.ts";
 import { readPostgresRunnerStatus, reconcilePostgresRuntimeConsent } from "../../runtime-user-control.ts";
 import {
@@ -170,16 +174,18 @@ export async function handleRuntimeEnsureProcessingRoute(
     cloudflareRouteReceivedAtEpochMs,
   };
   try {
+    parseInput(userId, requireRunnerSlotUserId);
     const payload = await readCachedRequestText(context, {
       limitBytes: INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
     });
-    ensureRequest = parseHostedRuntimeEnsureProcessingRequest(
-      requireJsonObject(payload.trim() ? JSON.parse(payload) : {}),
+    ensureRequest = parseInput(payload.trim() ? parseJsonInput(payload) : {}, value =>
+      parseHostedRuntimeEnsureProcessingRequest(requireJsonObject(value)),
     );
-    commandTimeoutMs = readRuntimeEnsureProcessingCommandTimeoutMs(context.request.headers);
+    commandTimeoutMs = parseInput(context.request.headers, () =>
+      readRuntimeEnsureProcessingCommandTimeoutMs(context.request.headers));
     const authorizationKind = readPresentedWorkerRouteAuthorization(context.request);
     if ((ensureRequest.admission || ensureRequest.voiceCallId) && authorizationKind !== "vercel-oidc") {
-      throw new TypeError("Runtime admission may only be supplied by authenticated Web requests.");
+      throw new RequestInputError("Runtime admission may only be supplied by authenticated Web requests.");
     }
     orchestration = readRuntimeEnsureProcessingOrchestrationDiagnostics(
       context.request.headers,
@@ -247,6 +253,7 @@ export async function handleRuntimeEnsureProcessingRoute(
         );
         return response;
       } catch (error) {
+        const classified = classifyPublicRouteError(error);
         emitHostedExecutionStructuredLog({
           component: "worker",
           details: {
@@ -257,12 +264,11 @@ export async function handleRuntimeEnsureProcessingRoute(
             orchestrationAttemptId: ensureRequest.orchestrationAttemptId,
           },
           error,
-          level: "error",
+          level: classified.status >= 500 ? "error" : "warn",
           message: "Hosted worker direct runtime ensure-processing failed.",
           phase: "failed",
           userId,
         });
-        const classified = classifyPublicRouteError(error);
         return json({
           code: "runtime_ensure_processing_failed",
           error: classified.error,
@@ -270,6 +276,7 @@ export async function handleRuntimeEnsureProcessingRoute(
       }
     }
   } catch (error) {
+    const classified = classifyPublicRouteError(error);
     emitHostedExecutionStructuredLog({
       component: "worker",
       details: buildWorkerRouteLogDetails({
@@ -277,12 +284,11 @@ export async function handleRuntimeEnsureProcessingRoute(
         routeName: "runtime-ensure-processing",
       }, context.request, userId),
       error,
-      level: "warn",
+      level: classified.status >= 500 ? "error" : "warn",
       message: "Hosted worker runtime ensure-processing route rejected an invalid request.",
       phase: "failed",
       userId,
     });
-    const classified = classifyPublicRouteError(error);
     return json({
       code: "invalid_request",
       error: classified.error,
@@ -307,9 +313,9 @@ export async function handleRuntimeHealthDataConsentRoute(
   const payload = await readCachedRequestText(context, {
     limitBytes: INTERNAL_CONTROL_JSON_BODY_LIMIT_BYTES,
   });
-  const body = requireJsonObject(payload.trim() ? JSON.parse(payload) : {});
+  const body = parseInput(payload.trim() ? parseJsonInput(payload) : {}, requireJsonObject);
   if (Object.keys(body).length > 0) {
-    throw new TypeError(
+    throw new RequestInputError(
       "Hosted runtime health-data consent request must be empty.",
     );
   }
@@ -370,12 +376,12 @@ export function readRuntimeEnsureProcessingCommandTimeoutMs(headers: Headers): n
 
   const normalized = value.trim();
   if (!/^[0-9]+$/u.test(normalized)) {
-    throw new TypeError("Hosted runtime ensure-processing command timeout header must be a positive integer.");
+    throw new ContractValidationError("Hosted runtime ensure-processing command timeout header must be a positive integer.");
   }
 
   const parsed = Number(normalized);
   if (!Number.isSafeInteger(parsed) || parsed <= 0) {
-    throw new TypeError("Hosted runtime ensure-processing command timeout header must be a positive integer.");
+    throw new ContractValidationError("Hosted runtime ensure-processing command timeout header must be a positive integer.");
   }
   assertHostedRuntimeProcessingTimeoutMs(
     parsed,

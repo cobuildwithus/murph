@@ -1,16 +1,22 @@
+export { buildRecapScoreProtocolProbe, buildRecapVideoProtocolProbe } from './game-tools.ts';
 export { RECAP_SHOW_CRAFT } from "./recap-show-craft.ts";
 export { GAME_MISSED_ROOM_MAX_GAMES, gameGroupMissedCheckInPolicySchema, type HostedGameGroupMissedCheckInPolicy } from "./game-group-missed.ts";
 export { gameEveningCheckInPolicySchema, gamePrivateEveningCheckInPolicySchema, gamePrivateKickoffPolicySchema,
   buildGamePrivateEveningInstructions, buildGamePrivateKickoffInstructions,
   type HostedGameEveningCheckInPolicy, type HostedGamePrivateEveningCheckInPolicy, type HostedGamePrivateKickoffPolicy } from "./game-group-missed.ts";
+import { ContractValidationError } from "@murphai/contracts/validation-error";
+import { elevenLabsMusicModelIds } from "@murphai/contracts/elevenlabs-music";
 import type { HostedGameChatBootstrapRequest, HostedGameChatBootstrapResponse } from "./game-bootstrap-control.ts";
 export { hostedGameChatBootstrapRequestSchema, hostedGameChatBootstrapResponseSchema } from "./game-bootstrap-control.ts";
 export type { HostedGameChatBootstrapRequest, HostedGameChatBootstrapResponse, HostedGameChatBootstrapResult } from "./game-bootstrap-control.ts";
-export { GAME_PRIZE_WORDS, GAME_LIVE_LORE_GUIDANCE, GAME_ROOM_FAR_APART_HOURS, gameZoneSpreadHours, buildGameProposalInstructions, buildGameTalkInstructions, buildGameKickoffInstructions, buildGameRematchInstructions, buildGameChangeCancelledInstructions, buildGameChangeExpiredInstructions, buildGameChangeResolvedInstructions, buildGameInviteCancelledInstructions, buildGameCalledOffInstructions, buildGameMissedDayInstructions, buildGameEveningCheckInInstructions, buildGameRecapInstructions } from "./game-chat-notifications.ts";
+export { GAME_PRIZE_WORDS, GAME_LIVE_LORE_GUIDANCE, GAME_ROOM_FAR_APART_HOURS, gameZoneSpreadHours, buildGameBothWinOfferInstructions, buildGameProposalInstructions, buildGameTalkInstructions, buildGameKickoffInstructions, buildGameRematchInstructions, buildGameChangeCancelledInstructions, buildGameChangeExpiredInstructions, buildGameChangeResolvedInstructions, buildGameInviteCancelledInstructions, buildGameCalledOffInstructions, buildGameMissedDayInstructions, buildGameEveningCheckInInstructions, buildGameRecapInstructions } from "./game-chat-notifications.ts";
 export type { GameNoticeRoom } from "./game-chat-notifications.ts";
+import type { HostedLeaveGroupRequest, HostedLeaveGroupResponse } from "./leave-group.ts";
+export { hostedLeaveGroupReasonSchema, hostedLeaveGroupRequestSchema, hostedLeaveGroupResponseSchema } from "./leave-group.ts";
+export type { HostedLeaveGroupRequest, HostedLeaveGroupResponse } from "./leave-group.ts";
 import type { HostedGameToolRequest, HostedGameToolResponse } from "./game-tools.ts";
-export { GAME_RECAP_GENERATION_RETIRED, parseGameRecapEventId, hostedGameToolRequestSchema, hostedGameToolResponseSchema, hostedGameUpdateSchema, hostedGameChatStateSchema, hostedGamePhotoSchema, hostedGameRecapSchema, hostedGameRecapWriterSchema } from "./game-tools.ts";
-export type { HostedGameToolRequest, HostedGameToolResponse, HostedGameUpdate, HostedGamePhoto, HostedGameChatState, HostedGameRecap } from "./game-tools.ts";
+export { GAME_ACTIVITIES, GAME_TOOL_ACTIONS, GAME_RECAP_GENERATION_RETIRED, parseGameRecapEventId, hostedGameToolRequestSchema, hostedGameToolResponseSchema, hostedGameUpdateSchema, hostedGameChatStateSchema, hostedGamePhotoSchema, hostedGameRecapSchema, hostedGameRecapWriterSchema } from "./game-tools.ts";
+export type { GameActivity, HostedGameToolRequest, HostedGameToolResponse, HostedGameUpdate, HostedGamePhoto, HostedGameChatState, HostedGameRecap } from "./game-tools.ts";
 import {
   HOSTED_MAILBOX_LANES,
   type HostedMailboxLane,
@@ -264,9 +270,7 @@ export const HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_TTS_PRICED_MODELS = [
 export type HostedAiUsageAllowanceElevenLabsTtsPricedModel =
   (typeof HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_TTS_PRICED_MODELS)[number];
 
-export const HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_MUSIC_PRICED_MODELS = [
-  "music_v2",
-] as const;
+export const HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_MUSIC_PRICED_MODELS = elevenLabsMusicModelIds;
 
 export type HostedAiUsageAllowanceElevenLabsMusicPricedModel =
   (typeof HOSTED_AI_USAGE_ALLOWANCE_ELEVENLABS_MUSIC_PRICED_MODELS)[number];
@@ -530,7 +534,7 @@ function requireHostedMailboxPayloadAadString(value: string, label: string): str
   const normalized = value.trim();
 
   if (!normalized) {
-    throw new TypeError(`Hosted mailbox payload AAD ${label} must be a non-empty string.`);
+    throw new ContractValidationError(`Hosted mailbox payload AAD ${label} must be a non-empty string.`);
   }
 
   return normalized;
@@ -1314,6 +1318,7 @@ export type HostedRuntimeGroupParticipantDisplayNamesResult =
 
 export type HostedRuntimeGroupToolRequest =
   | HostedGameChatBootstrapRequest
+  | HostedLeaveGroupRequest
   | HostedGameToolRequest
   | {
       action: "ask";
@@ -1515,6 +1520,7 @@ export type HostedRuntimeGroupJournalActionResult =
 
 export type HostedRuntimeGroupToolResponse =
   | HostedGameChatBootstrapResponse
+  | HostedLeaveGroupResponse
   | HostedGameToolResponse
   | {
       action: "ask";
@@ -2887,7 +2893,7 @@ export function mergeHostedRuntimeLatencyPhaseBreakdownJson(input: {
   phases: readonly HostedRuntimeLatencyPhaseBreakdownPhase[];
 }): HostedRuntimeLatencyPhaseBreakdownJsonMergeResult {
   if (!isHostedRuntimeLatencyPhaseBreakdownRecord(input.incoming)) {
-    throw new TypeError("Hosted runtime latency phaseBreakdown must be an object.");
+    throw new ContractValidationError("Hosted runtime latency phaseBreakdown must be an object.");
   }
   assertHostedRuntimeLatencyPhaseBreakdownLeavesSafe(input.incoming);
 
@@ -2935,7 +2941,7 @@ export function mergeHostedRuntimeLatencyPhaseBreakdownJson(input: {
         continue;
       }
       if (!isHostedRuntimeLatencyPhaseBreakdownLeafSafe(phase, leafKey, leaf)) {
-        throw new TypeError(
+        throw new ContractValidationError(
           `Hosted runtime latency phaseBreakdown ${phase}.${leafKey} must match the latency schema type.`,
         );
       }
@@ -3018,27 +3024,27 @@ function assertHostedRuntimeLatencyPhaseBreakdownLeavesSafe(
   for (const [key, entry] of Object.entries(value)) {
     if (key === "schemaVersion") {
       if (!isSafeHostedRuntimeLatencyPhaseBreakdownNumber(entry)) {
-        throw new TypeError("Hosted runtime latency phaseBreakdown schemaVersion must be a non-negative safe integer.");
+        throw new ContractValidationError("Hosted runtime latency phaseBreakdown schemaVersion must be a non-negative safe integer.");
       }
       continue;
     }
     if (!isHostedRuntimeLatencyPhaseBreakdownRecord(entry)) {
-      throw new TypeError(`Hosted runtime latency phaseBreakdown ${key} must be an object.`);
+      throw new ContractValidationError(`Hosted runtime latency phaseBreakdown ${key} must be an object.`);
     }
     if (!HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_PHASE_KEY_SET.has(key)) {
-      throw new TypeError(`Hosted runtime latency phaseBreakdown ${key} is not allowed.`);
+      throw new ContractValidationError(`Hosted runtime latency phaseBreakdown ${key} is not allowed.`);
     }
 
     const phase = key as HostedRuntimeLatencyPhaseBreakdownPhase;
     const allowedLeafKeys = HOSTED_RUNTIME_LATENCY_PHASE_BREAKDOWN_LEAF_KEY_SETS[phase];
     for (const [leafKey, leaf] of Object.entries(entry)) {
       if (!allowedLeafKeys.has(leafKey)) {
-        throw new TypeError(
+        throw new ContractValidationError(
           `Hosted runtime latency phaseBreakdown ${key}.${leafKey} is not allowed.`,
         );
       }
       if (!isHostedRuntimeLatencyPhaseBreakdownLeafSafe(phase, leafKey, leaf)) {
-        throw new TypeError(
+        throw new ContractValidationError(
           `Hosted runtime latency phaseBreakdown ${key}.${leafKey} must match the latency schema type.`,
         );
       }
@@ -3047,7 +3053,7 @@ function assertHostedRuntimeLatencyPhaseBreakdownLeavesSafe(
       key === "orchestration"
       && !isHostedRuntimeDirectEnsureOutcomeConsistent(entry)
     ) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "Hosted runtime latency phaseBreakdown orchestration direct ensure outcome is inconsistent.",
       );
     }
@@ -3321,6 +3327,8 @@ export const HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_VERSION = 1;
 export const HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_MAX_BYTES = 16 * 1024;
 
 export interface HostedRuntimeWebProtocolAdmission {
+  recapScore: { upload: unknown; asset: unknown };
+  recapVideo: { part: unknown; write: unknown; recover: unknown; result: unknown };
   kind: typeof HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_KIND;
   schemaVersion: typeof HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_VERSION;
   nonce: string;
@@ -3667,7 +3675,7 @@ function readHostedRuntimeRetryableMailboxBlockedCount(value: unknown): bigint {
   if (typeof rawCount === "string" && /^[0-9]+$/u.test(rawCount)) {
     return BigInt(rawCount);
   }
-  throw new TypeError(
+  throw new ContractValidationError(
     "Hosted runtime retryable mailbox blocked count must be a non-negative integer.",
   );
 }

@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { sha256Hex } from "../primitives";
 import { resolveHostedLinqDayUtc } from "./linq-daily-state";
 
@@ -45,7 +46,7 @@ function resolveHostedLinqInviteSignupSourceEventDigest(input: {
   const suppliedDigest = input.sourceEventDigest?.trim() ?? "";
   if (suppliedDigest) {
     if (!/^[0-9a-f]{32}$/u.test(suppliedDigest)) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "Hosted Linq signup source-event digest must be 32 lowercase hex characters.",
       );
     }
@@ -60,7 +61,7 @@ function resolveHostedLinqInviteSignupSourceEventDigest(input: {
   }
   const sourceEventId = input.sourceEventId?.trim() ?? "";
   if (!sourceEventId) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted Linq group-aware signup identity requires a source event id.",
     );
   }

@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 
 import type {
@@ -254,7 +255,7 @@ function projectHostedUsageMissionStatus(
       ? "checking_final_activity"
       : "in_progress";
   }
-  throw new TypeError(`Unsupported usage mission status: ${row.status}`);
+  throw new ContractValidationError(`Unsupported usage mission status: ${row.status}`);
 }
 
 function projectHostedUsageMissionStatusLabel(

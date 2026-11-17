@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type { Prisma } from "@prisma/client";
 
 import { normalizeHostedOpaqueInput } from "../hosted-onboarding/contact-privacy";
@@ -13,7 +14,7 @@ export async function acquireHostedLinqChatOwnershipLockTx(input: {
 }): Promise<void> {
   const chatId = normalizeHostedOpaqueInput(input.chatId);
   if (!chatId) {
-    throw new TypeError("Hosted Linq chat ownership lock requires a non-empty chat id.");
+    throw new ContractValidationError("Hosted Linq chat ownership lock requires a non-empty chat id.");
   }
 
   if (input.participantContact) {

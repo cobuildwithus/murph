@@ -80,13 +80,6 @@ function findHeldCanonicalResource(
   return context.heldResources.find((resource) => resource.key === resourceKey);
 }
 
-function getHeldCanonicalResourceDepth(
-  context: CanonicalResourceLockContext,
-  resourceKey: string,
-): number {
-  return context.heldResourceStates.get(resourceKey)?.depth ?? 0;
-}
-
 function trackHeldCanonicalResource(
   context: CanonicalResourceLockContext,
   resource: CanonicalMutationResource,

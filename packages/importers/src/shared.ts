@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { readFile, stat } from "node:fs/promises";
 import { basename, extname, resolve } from "node:path";
 import { eventSourceSchema, normalizeStrictIsoTimestamp, type EventSource } from "@murphai/contracts";
@@ -41,7 +42,7 @@ function parseValue<T>(schema: z.ZodType<T>, value: unknown): T {
   const result = schema.safeParse(value);
 
   if (!result.success) {
-    throw new TypeError(result.error.issues[0]?.message ?? "Invalid value", {
+    throw new ContractValidationError(result.error.issues[0]?.message ?? "Invalid value", {
       cause: result.error,
     });
   }
@@ -135,7 +136,7 @@ export function optionalTimestampSchema(
       const normalized = normalizeStrictIsoTimestamp(value);
 
       if (!normalized) {
-        throw new TypeError(`${label} must be a valid timestamp`);
+        throw new ContractValidationError(`${label} must be a valid timestamp`);
       }
 
       return normalized;

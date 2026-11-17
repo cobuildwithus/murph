@@ -125,6 +125,31 @@ Warm containers keep their existing media HTTP protocol unchanged.
 
 ## Claim, launch, completion, and recovery
 
+Fresh runtime attempts consume one per-member start-budget unit in the existing
+claim transaction, including attempts that fail before execution. The owner row's
+nullable `start_debt_until` holds the debt; existing claims, release, retirement
+and target-retired updates never charge or clear it. With interval three minutes,
+burst twelve and allowance `(burst - 1) * interval`, claim computes
+`tat = max(start_debt_until ?? now, now)` under the existing locks. It blocks when
+`tat > now + allowance`, returning `start_budget` and ISO `retryAt = tat - allowance`
+without writing. Otherwise its existing write stores `tat + interval`. `now` is
+the application time sampled after the member lock; host clock skew shifts the
+allowance by that skew. No extra read, transaction or external call is added.
+
+The Worker returns `retry_later` with reason `start_budget_exhausted` at that time,
+falling back to one interval for missing or unreadable times. All processing modes
+share the budget. A retired-target successor is another charged attempt. This
+limits minted attempts, not loop lifetime, all container boots or claim-call
+traffic: signals and other scheduler deadlines can re-ask before `retryAt`.
+New messages and other work needing a fresh attempt wait together; deletion,
+consent withdrawal, retirement, upload draining and completion do not claim.
+
+Deploy the compatible Worker first, then the additive nullable-column migration,
+then enforcing Web. The limit holds after older Web claim servers drain; older
+Web does not charge. Older Workers drop the unknown reason and retry after three
+seconds without minting attempts. Web rollback removes enforcement and leaves
+the column. No backfill, index, flag or Temporal workflow change is needed.
+
 Runtime admission keeps the member lock before one composed eligibility read
 (suspension, explicit consent withdrawal, and canonical direct or sponsored
 access; retention still skips only the access requirement). Game-only group
@@ -252,6 +277,16 @@ preemption can discard partial background cold-start work in that case.
 While a system-mailbox starting fence remains, foreground rechecks after at most
 one second. Other startup waits keep the 30-second startup deadline. Expiry starts ordinary exact
 retirement proof; it does not establish stoppedness or release authority.
+A foreground start whose native readiness rejects before launch does not wait
+for that deadline, provided the command made the claim itself: the same command
+enters exact retirement, and after confirmed stop and release it re-admits on a
+fresh target. Nothing preempts a foreground claim, only one command receives
+it, and no invocation exists yet, so the rejection is that command's own
+failure. A supplied claimed snapshot keeps the deadline because a second command
+holding the same snapshot may have launched. So do a readiness deadline, a busy
+result, a failed preparation or launch, and every background start, because
+their start may still be in flight or deliberately cancelled by foreground
+priority.
 Deploy cancellation-capable Cloudflare before the Web claim change. Old Web keeps
 the startup fence until launch or expiry; old Cloudflare still retires safely but
 can wait for preparation before stopping. Existing state and RPC shapes remain
@@ -263,6 +298,13 @@ receipt and either a settled native invocation or an inactive runtime fence
 proved during reconciliation. Successful release retains the member's
 warm target. Failed or ambiguous retirement requires exact native stop proof
 before clearing its assignment. Bound slots never return to shared inventory.
+Rejected completion commands return the already-locked owner snapshot. The
+callback uses that snapshot to classify a released, completed generation or a
+newer generation as obsolete, including when release races its routing read.
+Only those proven obsolete callbacks log at info; unknown or cold-retirement
+rejections remain warnings. The receipt remains `completed: false` and grants
+no cleanup or delivery authority. Older Web responses omit the snapshot and
+retain the warning; either deployment order is compatible.
 Without a completed native invocation receipt, idle cleanup first checks native
 status, active jobs, and the trusted conversation receipt deadline. Those local
 vetoes need no owner callback; a future receipt deadline schedules cleanup directly
@@ -607,6 +649,9 @@ The request-local Postgres ensure path emits the same detached
 outcome, elapsed time, observed fence and a finite retry reason. Telemetry cannot
 delay the control response or change its result; orchestration correlation uses
 the existing domain-separated hash rather than retaining the raw attempt ID.
+Waiting for an existing starting fence logs at info when the command observed
+no failed operation. Failed steps, uncertain wakes and other retry reasons
+retain warning summaries; the retry timing and ownership rules are unchanged.
 
 Runtime log uploads still authenticate the signed callback, consume its nonce,
 and check runtime ownership. When that admission rejects a stale owner with

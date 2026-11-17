@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type { ConversationPollSnapshot } from "@murphai/hosted-execution/conversation-polls";
 import { parseTelegramThreadTarget } from "@murphai/messaging-ingress/telegram-webhook";
 import * as z from "@murphai/contracts/zod-runtime";
@@ -38,7 +39,7 @@ export async function readPollCompletion(input: {
     return classifyPollCompletion({ closed: false, eligibleCount: eligible.size, totalVoters: new Set(votes.flatMap((v) => [...v])).size, votes: votes.map((v) => v.size) });
   }
   const target = parseTelegramThreadTarget(input.target);
-  if (!target) throw new TypeError("Invalid Telegram poll target.");
+  if (!target) throw new ContractValidationError("Invalid Telegram poll target.");
   const response = z.object({ ok: z.literal(true), result: z.number().int().positive().safe() }).parse(
     await callHostedTelegramApi({ method: "getChatMemberCount", body: { chat_id: target.chatId }, readJson: true }),
   );

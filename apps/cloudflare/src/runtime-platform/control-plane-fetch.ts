@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   deriveHostedExecutionErrorCode,
   type HostedExecutionErrorCode,
@@ -210,6 +211,7 @@ function classifyHostedRuntimeFetchCause(
   error: unknown,
   signalState: HostedRuntimeControlPlaneFetchSignalState,
 ): HostedRuntimeControlPlaneFetchCauseKind {
+  if (error instanceof ContractValidationError) return "unknown";
   const message = readHostedRuntimeFetchCauseMessage(error).toLowerCase();
   const causeName = error instanceof Error ? error.name : "";
 
@@ -250,7 +252,7 @@ function classifyHostedRuntimeFetchCause(
 }
 
 export function shouldPreserveHostedRuntimeFetchError(error: unknown): boolean {
-  if (isHostedRuntimeInternalAuthorityRejectedError(error)) {
+  if (error instanceof ContractValidationError || isHostedRuntimeInternalAuthorityRejectedError(error)) {
     return true;
   }
 
@@ -273,6 +275,7 @@ function readHostedRuntimeFetchCauseMessage(error: unknown): string {
 }
 
 function readHostedRuntimeFetchCauseName(error: unknown): string | null {
+  if (error instanceof ContractValidationError) return null;
   return error instanceof Error
     ? readHostedRuntimeFetchCauseNameValue(error.name)
     : null;
@@ -404,7 +407,7 @@ export function shouldRetryHostedRuntimeReplaySafeRead(input: {
 export function isRetryableHostedRuntimeReplaySafeReadTransportError(
   error: unknown,
 ): boolean {
-  if (isHostedRuntimeInternalAuthorityRejectedError(error)) {
+  if (error instanceof ContractValidationError || isHostedRuntimeInternalAuthorityRejectedError(error)) {
     return false;
   }
 
@@ -448,7 +451,7 @@ export function isRetryableHostedRuntimeReplaySafeReadTransportError(
 }
 
 export function isRetryableHostedWebControlReadError(error: unknown): boolean {
-  if (isHostedRuntimeInternalAuthorityRejectedError(error)) {
+  if (error instanceof ContractValidationError || isHostedRuntimeInternalAuthorityRejectedError(error)) {
     return false;
   }
 

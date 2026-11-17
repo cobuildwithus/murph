@@ -64,6 +64,13 @@ import {
 import { addDays, gameLocalDate } from "./time";
 import { pendingGameChangeView, gameChangeControls } from "./changes";
 import { firstOpenSeat, isPairRoster } from "./roster";
+import type { Prisma } from "@prisma/client";
+
+/** The creator's sealed label is the name Home shows until an invitee joins. */
+export function pendingInviteeLabel(value: Prisma.JsonValue | null) {
+  return value as { nameEncrypted: string | null; relationshipEncrypted: string | null; photoKey: string | null } | null
+    ?? { nameEncrypted: null, relationshipEncrypted: null, photoKey: null };
+}
 
 const GAME_MEDIA_PATH = "/api/game/v1/media/";
 export const GAME_HISTORY_PREVIEW_LIMIT = 6;
@@ -95,6 +102,8 @@ export interface GameTicketRow {
 }
 
 export interface GameViewInput {
+  /** Request-local verified phones, loaded only for eligible ticket counterparties. */
+  verifiedPhones?: ReadonlyMap<string, string>;
   entryReplies?: ReadonlyMap<string, import("./contract").GameReplyView>;
   replyEligibleEntryIds?: ReadonlySet<string>;
   challenges?: readonly RuleChallenge[];
@@ -117,6 +126,7 @@ export interface GameViewInput {
   names: ReadonlyMap<string, string>;
   /** Per member: the photo the viewer attached when they invited them, if any. */
   avatarKeys: ReadonlyMap<string, string | null>;
+  profileNotForMe?: ReadonlyMap<string, string[]>;
   /** Canonical photos, separate from viewer-private overrides for shared exports. */
   profileAvatarKeys?: ReadonlyMap<string, string | null>;
   /** Per member: the relationship the viewer typed for them, if any. */
@@ -182,7 +192,7 @@ export function termsView(state: RuleState, words: TermWords, multiplayer = fals
     fromDay: version.fromDay,
     n: version.n,
     schedule: version.schedule,
-    stakes: version.stakes.map((stake) => ({ item: stakeItem(words, stake.key), key: stake.key, kind: stake.kind })),
+    stakes: [...version.stakes].sort((a, b) => Number(a.kind === "both_get") - Number(b.kind === "both_get")).map((stake) => ({ item: stakeItem(words, stake.key), key: stake.key, kind: stake.kind })),
     tasks: state.game.seats === 10 && versionWords.defaultTask !== undefined ? groupTasksView(state, versionWords)
       : versionWords.tasks.map((task) => ({ seat: task.seat, text: task.text })),
   };
@@ -215,7 +225,7 @@ export function ticketView(row: GameTicketRow, words: TermWords | null, viewerId
     const hidden = memberId !== null && hiddenMembers.has(memberId);
     return { seat, memberId: hidden ? null : memberId,
       firstName: hidden ? "" : memberId ? input?.names.get(memberId) ?? "" : input?.departed?.find(player => player.seat === seat)?.name ?? "",
-      avatarUrl: memberId && input && !hidden ? playerAvatars(input, memberId).avatarUrl : null };
+      avatarUrl: memberId && input && !hidden ? playerProfile(input, memberId).avatarUrl : null };
   });
   return {
     ...(input?.multiplayer ? { parties: { owedBy: parties(row.owedBySeats), owedTo: parties(row.owedToSeats) },
@@ -225,6 +235,7 @@ export function ticketView(row: GameTicketRow, words: TermWords | null, viewerId
     kind: terms?.versions.flatMap((version) => version.stakes).find((stake) => stake.key === row.stakeKey)?.kind,
     ...(!group && (owedBy === null || owedTo === null) ? { left: true as const } : {}),
     owedByMemberId: group ? "" : owedBy ?? "",
+    ...ticketPhoneView(row, viewerId, now, hiddenMembers, input),
     owedToMemberId: group ? "" : owedTo ?? "",
     redeemedAt: row.redeemedAt?.toISOString() ?? null,
     status: isTicketExpired(row, now) ? "expired" : row.status,
@@ -232,6 +243,24 @@ export function ticketView(row: GameTicketRow, words: TermWords | null, viewerId
     what: words ? stakeItem(words, row.stakeKey) : "",
     youHold: group ? row.players.some(player => player.memberId === viewerId && row.owedToSeats.includes(player.seat)) : owedTo === viewerId,
   };
+}
+
+function ticketPhoneView(row: GameTicketRow, viewerId: string, now: Date, hiddenMemberIds: ReadonlySet<string>, input?: GameViewInput): Pick<GameTicketView, "owedByPhone"> {
+  if (!input) return {};
+  const recipient = ticketMessageRecipient(row, { state: input.state, viewerId, now, hiddenMemberIds });
+  const owedByPhone = recipient ? input.verifiedPhones?.get(recipient) : undefined;
+  return owedByPhone ? { owedByPhone } : {};
+}
+
+/** Shared admission for the identity read and the final phone projection. */
+export function ticketMessageRecipient(row: GameTicketRow, input: Pick<GameViewInput, "state" | "viewerId" | "now" | "hiddenMemberIds">): string | null {
+  if (input.state.game.seats !== 2 || row.status !== "open" || isTicketExpired(row, input.now)
+    || row.owedBySeats.length !== 1 || row.owedToSeats.length !== 1) return null;
+  const owedBy = row.players.find(player => player.seat === row.owedBySeats[0])?.memberId;
+  const owedTo = row.players.find(player => player.seat === row.owedToSeats[0])?.memberId;
+  if (!owedBy || owedBy === input.viewerId || owedTo !== input.viewerId
+    || input.hiddenMemberIds?.has(owedBy) || input.hiddenMemberIds?.has(owedTo)) return null;
+  return remainingPlayers(input.state).some(player => player.memberId === owedBy) ? owedBy : null;
 }
 
 function canRedeemTicketView(row: GameTicketRow, input: GameViewInput, owedBy: string | null, owedTo: string | null): boolean {
@@ -257,7 +286,7 @@ function entryView(entry: RuleEntry, input: GameViewInput): GameEntryView {
 
 export type BuiltGameHistoryView = {
   game: GameHistoryGameView;
-  person: Pick<GameHistoryPersonView, "memberId" | "firstName" | "avatarUrl" | "profileAvatarUrl">;
+  person: Pick<GameHistoryPersonView, "memberId" | "firstName" | "avatarUrl" | "profileAvatarUrl" | "notForMe">;
 } | { game: GameHistoryGroupGameView; group: Pick<GameHistoryGroupView, "id" | "word" | "task" | "prize"> };
 
 /** The bounded history projection, built from the same viewer-scoped inputs as a recap. */
@@ -321,6 +350,7 @@ export function buildGameHistoryView(input: GameViewInput): BuiltGameHistoryView
     person: {
       ...(theirs!.avatarUrl ? { avatarUrl: theirs!.avatarUrl } : {}),
       ...(theirs!.profileAvatarUrl ? { profileAvatarUrl: theirs!.profileAvatarUrl } : {}),
+      ...(theirs!.notForMe ? { notForMe: theirs!.notForMe } : {}),
       firstName: theirs!.firstName,
       memberId: other!.memberId,
     },
@@ -439,7 +469,7 @@ function playerView(input: GameViewInput, player: RulePlayer, entries: GameEntry
   const isMe = player.memberId === input.viewerId;
   return {
     ...(input.multiplayer ? { participation: participationView(input, player) } : {}),
-    ...playerAvatars(input, player.memberId),
+    ...playerProfile(input, player.memberId, player.leftAt),
     ...(player.leftAt ? { left: true as const } : {}),
     dayIndex: !player.leftAt && started && today < game.lengthDays ? today : null,
     firstName: input.names.get(player.memberId) ?? "",
@@ -459,12 +489,14 @@ function participationView(input: GameViewInput, player: RulePlayer): NonNullabl
     canWin: input.result ? input.result.scores.some(score => score.seat === player.seat && score.eligible !== false) : !player.leftAt && input.state.game.status !== "void" };
 }
 
-/** Resolve private/canonical photos only after the symmetric member mask. */
-function playerAvatars(input: GameViewInput, memberId: string): Pick<GamePlayerView, "avatarUrl" | "profileAvatarUrl"> {
+/** Resolve profile details only after the symmetric member mask. */
+function playerProfile(input: GameViewInput, memberId: string, leftAt?: Date | null): Pick<GamePlayerView, "avatarUrl" | "profileAvatarUrl" | "notForMe"> {
   if (input.hiddenMemberIds?.has(memberId)) return { avatarUrl: null, profileAvatarUrl: null };
   const profileKey = input.profileAvatarKeys?.get(memberId) ?? null;
   const avatarKey = profileKey ?? input.avatarKeys.get(memberId);
-  return { avatarUrl: avatarKey ? gameMediaUrl(avatarKey) : null, profileAvatarUrl: profileKey ? gameMediaUrl(profileKey) : null };
+  const notForMe = input.profileNotForMe?.get(memberId);
+  return { avatarUrl: avatarKey ? gameMediaUrl(avatarKey) : null, profileAvatarUrl: profileKey ? gameMediaUrl(profileKey) : null,
+    ...(!leftAt && notForMe?.length ? { notForMe } : {}) };
 }
 
 /** A player who deleted their account: only their seat, final score and the viewer's name for them remain. */
@@ -491,6 +523,8 @@ function inviteeView(input: GameViewInput, invitee: NonNullable<GameViewInput["i
   const profileKey = invitee.memberId ? input.profileAvatarKeys?.get(invitee.memberId) ?? null : null;
   const avatarKey = profileKey ?? invitee.photoKey ?? (invitee.memberId ? input.avatarKeys.get(invitee.memberId) : null);
   return {
+    ...(invitee.memberId && !input.hiddenMemberIds?.has(invitee.memberId) && input.profileNotForMe?.get(invitee.memberId)?.length
+      ? { notForMe: input.profileNotForMe.get(invitee.memberId) } : {}),
     avatarUrl: avatarKey ? gameMediaUrl(avatarKey) : null,
     profileAvatarUrl: profileKey ? gameMediaUrl(profileKey) : null,
     dayIndex: null,

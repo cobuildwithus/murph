@@ -1,3 +1,4 @@
+import { withJsonError } from "@/src/lib/hosted-onboarding/http";
 import type { HostedPhoneCall } from "@prisma/client";
 import type {
   HostedPhoneCallBrief,
@@ -2262,16 +2263,15 @@ describe("createHostedPhoneCall", () => {
     });
     const runtime = createPhoneCallRuntime({ providerCallId: "retell_unused" });
 
-    await expect(createHostedPhoneCallDirect({
+    const failure = await createHostedPhoneCallDirect({
       brief: VALID_BRIEF,
       memberId: pending.memberId,
       prisma: store.prisma,
       requestKey: "phone_call_request_new",
       runtime: runtime.runtime,
-    })).rejects.toMatchObject({
-      code: "HOSTED_PHONE_CALL_START_PENDING",
-      retryable: true,
-    });
+    }).catch(error => error);
+    expect(failure).toBeInstanceOf(Error);
+    expect((await withJsonError(async () => { throw failure; })()).status).toBe(500);
 
     expect(store.createCalls).toEqual([]);
     expect(runtime.startCalls).toEqual([]);
@@ -2300,6 +2300,7 @@ describe("createHostedPhoneCall", () => {
       runtime: runtime.runtime,
     })).rejects.toMatchObject({
       code: "HOSTED_PHONE_CALL_START_PENDING",
+      httpStatus: 409,
       retryable: true,
     });
 

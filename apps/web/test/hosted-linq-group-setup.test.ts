@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
@@ -159,6 +160,26 @@ describe("Hosted Linq group setup", () => {
     })).toBeNull();
   });
 
+  it("treats a missing or malformed recovery key as our fault, not an invalid token", () => {
+    const token = issueHostedLinqGroupEmailRecoveryToken({
+      chatId: "chat_group_123",
+      now: new Date("2026-07-31T04:00:00.000Z"),
+      observedAt: "2026-07-31T04:00:00.000Z",
+      participantEmail: "person@icloud.com",
+      recipientPhone: "+15550000000",
+    });
+    const open = () => openHostedLinqGroupEmailRecoveryToken({ now: new Date("2026-07-31T05:00:00.000Z"), token });
+
+    for (const key of [undefined, "not-a-key"]) {
+      if (key === undefined) delete process.env.HOSTED_APP_SESSION_HMAC_KEY;
+      else process.env.HOSTED_APP_SESSION_HMAC_KEY = key;
+      expect(open).toThrow("HOSTED_APP_SESSION_HMAC_KEY must be configured");
+    }
+    // A different but valid key is a token we did not seal: still a refusal.
+    process.env.HOSTED_APP_SESSION_HMAC_KEY = Buffer.alloc(32, 8).toString("base64url");
+    expect(open()).toBeNull();
+  });
+
   it("uses stable opaque setup and recovery identities within one UTC day", () => {
     const setupId = buildHostedLinqGroupSetupEffectId({
       chatId: "chat_group_123",
@@ -215,7 +236,7 @@ describe("Hosted Linq group setup", () => {
     expect(() => buildHostedLinqGroupSetupEffectId({
       chatId: "chat_group_123",
       occurredAt: "not-a-time",
-    })).toThrow(TypeError);
+    })).toThrow(ContractValidationError);
   });
 });
 

@@ -32,7 +32,7 @@ Updated: 2026-10-19
 - Technical constraints: short database-only transactions with encryption
   before them; additive schema only; no new infrastructure.
 - Product/process constraints: off in production unless `MURPH_GAME_ENABLED`
-  is set, then limited by `MURPH_GAME_MEMBER_ALLOWLIST`; synthetic fixtures only.
+  is set, then open to every signed-in member; synthetic fixtures only.
 
 ## Risks and mitigations
 

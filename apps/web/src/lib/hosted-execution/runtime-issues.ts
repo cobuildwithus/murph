@@ -1,9 +1,10 @@
+import { parseHostedRuntimeIssueExportRequest } from "@murphai/hosted-execution/parsers";
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import {
   Prisma,
   type PrismaClient,
 } from "@prisma/client";
 import {
-  parseAssistantRuntimeIssueRecord,
   type AssistantRuntimeIssueRecord,
 } from "@murphai/runtime-state/node/assistant-runtime-issues";
 
@@ -26,7 +27,7 @@ export async function importHostedAssistantRuntimeIssues(input: {
   const prisma = input.prisma ?? getPrisma();
   const now = input.now ?? new Date();
   const expiresAt = new Date(now.getTime() + HOSTED_ASSISTANT_RUNTIME_ISSUE_RETENTION_MS);
-  const records = input.issues.map((entry) => parseAssistantRuntimeIssueRecord(entry));
+  const records = parseInput({ issues: input.issues }, parseHostedRuntimeIssueExportRequest).issues;
 
   if (records.length > 0) {
     // Issue ids are already stable and an existing row was never updated, so

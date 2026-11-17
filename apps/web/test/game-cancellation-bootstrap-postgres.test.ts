@@ -75,7 +75,7 @@ async function fixture() {
 }
 
 describe.skipIf(!enabled)("cancellation bootstrap ordering PostgreSQL", () => {
-  beforeEach(() => { m.published.length = 0; vi.stubEnv("MURPH_GAME_ENABLED", "true"); vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", ""); });
+  beforeEach(() => { m.published.length = 0; vi.stubEnv("MURPH_GAME_ENABLED", "true"); });
   afterAll(async () => {
     await cleanupGameFixtures(getPrisma(), members);
     await getPrisma().hostedThreadContainer.deleteMany({ where: { memberId: { in: members } } });

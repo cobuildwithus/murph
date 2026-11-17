@@ -1,7 +1,11 @@
+import { parseInput, RequestInputError, RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
+import { decodeRouteParam } from "../route-utils/route-params.ts";
+import { parseJsonInput } from "../route-utils/json-body.ts";
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { matchCloudflareHostedControlUserRoutePath } from "@murphai/cloudflare-hosted-control/routes";
 import { createHostedMediaStore } from "../../bundle-store.ts";
 import { json, jsonError, readRequestBodyText } from "../../json.ts";
-import { createHostedMealThumbnailDelivery, matchHostedPrivateMediaCapabilityPath, readHostedPrivateMedia, readHostedPrivateMediaCapabilitySecret, readHostedPrivateMediaDeliveryOrigin } from "../../private-media.ts";
+import { createHostedMealThumbnailDelivery, requireHostedPrivateMediaUserId, matchHostedPrivateMediaCapabilityPath, readHostedPrivateMedia, readHostedPrivateMediaCapabilitySecret, readHostedPrivateMediaDeliveryOrigin } from "../../private-media.ts";
 import { resolveHostedExecutionUserCryptoContext, type WorkerRouteContext } from "../../worker-routes/shared.ts";
 import { requireBoundInternalRouteUser } from "../auth.ts";
 import type { DeclarativeRoute } from "../routes.ts";
@@ -16,9 +20,15 @@ export const mealThumbnailRoutes: readonly DeclarativeRoute<WorkerRouteContext>[
     if (!secret) return jsonError("Private media delivery is unavailable.", 503);
     let photos: Array<{ mediaId: string; sha256: string; byteSize: number }>;
     try {
-      photos = parsePhotos(JSON.parse(await readRequestBodyText(context.request, { limitBytes: 2 * 1024 * 1024 })));
-    } catch { return jsonError("Meal thumbnail request is invalid.", 400); }
-    const userId = decodeURIComponent(params.userId!);
+      photos = parseInput(parseJsonInput(await readRequestBodyText(context.request, { limitBytes: 2 * 1024 * 1024 })), parsePhotos);
+    } catch (error) {
+      if (error instanceof RequestInputError || error instanceof RequestBodyTooLargeError) {
+        return jsonError("Meal thumbnail request is invalid.", 400);
+      }
+      throw error;
+    }
+    const userId = decodeRouteParam(params.userId!);
+    if (photos.length > 0) parseInput(userId, requireHostedPrivateMediaUserId);
     const deliveryOrigin = readHostedPrivateMediaDeliveryOrigin(context.env);
     return json(await Promise.all(photos.map(photo => createHostedMealThumbnailDelivery({
       ...photo, userId, capabilitySecret: secret, deliveryOrigin,
@@ -33,9 +43,10 @@ export const mealThumbnailRoutes: readonly DeclarativeRoute<WorkerRouteContext>[
   methods: ["GET", "HEAD"], name: "meal-thumbnail-read", wrongMethodResponse: "not-found",
   async handle(context, params) {
     const secret = readHostedPrivateMediaCapabilitySecret(context.env);
+    if (!secret) return jsonError("Private media delivery is unavailable.", 503);
     const entries = [...context.url.searchParams.entries()];
     const exp = entries.length === 1 && entries[0]?.[0] === "exp" && /^[1-9][0-9]*$/u.test(entries[0][1]) ? Number(entries[0][1]) : NaN;
-    const media = secret && Number.isSafeInteger(exp) ? await readHostedPrivateMedia({
+    const media = Number.isSafeInteger(exp) ? await readHostedPrivateMedia({
       bucket: context.env.BUNDLES, capability: params.capability!, capabilitySecret: secret, expiresAtUnixSeconds: exp, runtimeMediaOnly: true,
       async readRuntimeMedia(descriptor) {
         const crypto = await resolveHostedExecutionUserCryptoContext({ bucket: context.env.BUNDLES, domain: "runtime", environment: context.environment, userId: descriptor.userId });
@@ -53,12 +64,12 @@ export const mealThumbnailRoutes: readonly DeclarativeRoute<WorkerRouteContext>[
 }];
 
 function parsePhotos(value: unknown): Array<{ mediaId: string; sha256: string; byteSize: number }> {
-  if (!value || typeof value !== "object" || !("photos" in value) || !Array.isArray(value.photos) || value.photos.length > 5000) throw new TypeError("Invalid photos.");
+  if (!value || typeof value !== "object" || !("photos" in value) || !Array.isArray(value.photos) || value.photos.length > 5000) throw new ContractValidationError("Invalid photos.");
   return value.photos.map((item: unknown) => {
     if (!item || typeof item !== "object" || !("mediaId" in item) || !("sha256" in item) || !("byteSize" in item)
       || typeof item.mediaId !== "string" || !/^[a-f0-9]{64}$/u.test(item.mediaId)
       || typeof item.sha256 !== "string" || !/^[a-f0-9]{64}$/u.test(item.sha256)
-      || typeof item.byteSize !== "number" || !Number.isSafeInteger(item.byteSize) || item.byteSize < 1 || item.byteSize > 1024 * 1024) throw new TypeError("Invalid photo.");
+      || typeof item.byteSize !== "number" || !Number.isSafeInteger(item.byteSize) || item.byteSize < 1 || item.byteSize > 1024 * 1024) throw new ContractValidationError("Invalid photo.");
     return { mediaId: item.mediaId, sha256: item.sha256, byteSize: item.byteSize };
   });
 }

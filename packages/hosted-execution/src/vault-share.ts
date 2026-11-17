@@ -1,3 +1,5 @@
+import { assertContract } from "@murphai/contracts";
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { sleepSessionTypeSchema, sleepSessionStateSchema } from "@murphai/contracts/sleep-session";
 import {
   activityKindAliasGroups,
@@ -821,13 +823,13 @@ export function memberAgeGroupFromBirthYear(input: {
 
 export function parseHostedVaultShareAgeGroup(value: unknown, projectionKind: HostedVaultShareProjectionKind): HostedVaultShareAgeGroup {
   if (projectionKind !== "resting-heart-rate-days.v0" && projectionKind !== "vo2-max-days.v0") {
-    throw new TypeError("Vault share member age group is invalid for this projection kind.");
+    throw new ContractValidationError("Vault share member age group is invalid for this projection kind.");
   }
   const group = requireObject(value, "Vault share member age group");
   if (Object.keys(group).sort().join(",") !== "ageFrom,biologicalSex"
     || (group.biologicalSex !== "female" && group.biologicalSex !== "male")
     || ![18, 20, 30, 40, 50, 60, 70, 80, 90].includes(group.ageFrom as number)) {
-    throw new TypeError("Vault share member age group is invalid.");
+    throw new ContractValidationError("Vault share member age group is invalid.");
   }
   return { biologicalSex: group.biologicalSex, ageFrom: group.ageFrom as HostedVaultShareAgeGroup["ageFrom"] };
 }
@@ -940,7 +942,7 @@ function parseHostedVaultShareProjectionKind(
     return value;
   }
 
-  throw new TypeError(`${label} must be a known vault-share projection kind.`);
+  throw new ContractValidationError(`${label} must be a known vault-share projection kind.`);
 }
 
 function parseHostedVaultShareFixedProjectionKind(
@@ -949,7 +951,7 @@ function parseHostedVaultShareFixedProjectionKind(
 ): HostedVaultShareFixedProjectionKind {
   const projectionKind = parseHostedVaultShareProjectionKind(value, label);
   if (isHostedVaultShareActivitySelectorProjectionKind(projectionKind)) {
-    throw new TypeError(`${label} requires a vault-share projection selector.`);
+    throw new ContractValidationError(`${label} requires a vault-share projection selector.`);
   }
   return projectionKind;
 }
@@ -1089,7 +1091,7 @@ export function parseHostedVaultShareProjectionScopeKey(
     (scope) => buildHostedVaultShareProjectionScopeKey(scope) === scopeKey,
   );
   if (!projectionScope) {
-    throw new TypeError(`${label} must be a known vault-share projection scope key.`);
+    throw new ContractValidationError(`${label} must be a known vault-share projection scope key.`);
   }
   return projectionScope;
 }
@@ -1165,7 +1167,7 @@ export function parseHostedVaultShareProjectionScope(
   }
 
   if (scope.selector !== undefined) {
-    throw new TypeError(`${label} selector is not supported for ${projectionKind}.`);
+    throw new ContractValidationError(`${label} selector is not supported for ${projectionKind}.`);
   }
 
   return { projectionKind };
@@ -1185,7 +1187,7 @@ function parseHostedVaultShareActivitySelectorActivityKind(
 ): HostedVaultShareActivitySelectorActivityKind {
   const activityKind = requireString(value, label);
   if (!isHostedVaultShareActivitySelectorActivityKind(activityKind)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} must be a recognized normalized activity alias.`,
     );
   }
@@ -1198,7 +1200,7 @@ function parseHostedVaultShareActivityDistanceSelectorActivityKind(
 ): HostedVaultShareActivityDistanceSelectorActivityKind {
   const activityKind = requireString(value, label);
   if (!isHostedVaultShareActivityDistanceSelectorActivityKind(activityKind)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} must be a recognized normalized distance activity alias.`,
     );
   }
@@ -1211,7 +1213,7 @@ function parseHostedVaultShareActivitySessionCountSelectorActivityKind(
 ): HostedVaultShareActivitySessionCountSelectorActivityKind {
   const activityKind = requireString(value, label);
   if (!isHostedVaultShareActivitySessionCountSelectorActivityKind(activityKind)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} must be a recognized normalized activity-session alias.`,
     );
   }
@@ -1226,7 +1228,7 @@ function assertObjectKeys(
   const allowed = new Set(allowedKeys);
   for (const key of Object.keys(value)) {
     if (!allowed.has(key)) {
-      throw new TypeError(`${label} must not include ${key}.`);
+      throw new ContractValidationError(`${label} must not include ${key}.`);
     }
   }
 }
@@ -1250,7 +1252,7 @@ function parseHostedVaultShareRequestProjectionScope(
       `${label} projectionKind`,
     );
     if (projectionKind !== scope.projectionKind) {
-      throw new TypeError(`${label} projectionKind must match projectionScope projectionKind.`);
+      throw new ContractValidationError(`${label} projectionKind must match projectionScope projectionKind.`);
     }
   }
 
@@ -1319,7 +1321,7 @@ export function parseHostedVaultShareDeliveryRecord(
     || projectionScope.projectionKind === "rem-sleep-days.v0"
     || projectionScope.projectionKind === "rem-sleep-sources-days.v1";
   if (provisional !== undefined && (provisional !== true || !completedDateScope)) {
-    throw new TypeError(`Vault share ${projectionScope.projectionKind} data provisional is invalid.`);
+    throw new ContractValidationError(`Vault share ${projectionScope.projectionKind} data provisional is invalid.`);
   }
   const data = parseHostedVaultShareDeliveryRecordData(record.data, {
     occurredAt,
@@ -1333,7 +1335,7 @@ export function parseHostedVaultShareDeliveryRecord(
       ? `${data.date}.${source.source}`
       : data.date;
     if (recordKey !== expectedRecordKey) {
-      throw new TypeError(
+      throw new ContractValidationError(
         `Vault share ${projectionScope.projectionKind} recordKey must identify its date and public source.`,
       );
     }
@@ -1358,7 +1360,7 @@ function parseHostedVaultShareDataSource(
   const sourceKey = requireString(source.source, `${label} source`).trim();
   const canonicalSource = resolveHostedVaultShareDataSource(sourceKey);
   if (!canonicalSource) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} source keys must be canonical public provider slugs.`,
     );
   }
@@ -1369,10 +1371,10 @@ function parseHostedVaultShareDataSource(
     || sourceLabel.length > HOSTED_VAULT_SHARE_DATA_SOURCE_LABEL_MAX_LENGTH
     || /[\u0000-\u001f\u007f]/u.test(sourceLabel)
   ) {
-    throw new TypeError(`${label} label must be bounded text without control characters.`);
+    throw new ContractValidationError(`${label} label must be bounded text without control characters.`);
   }
   if (sourceLabel !== canonicalSource.label) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} must use canonical public provider keys and labels.`,
     );
   }
@@ -1393,7 +1395,7 @@ function parseHostedVaultShareSourceRevision(value: unknown): { sourceRevision?:
     sourceRevision.length > HOSTED_VAULT_SHARE_SOURCE_REVISION_MAX_LENGTH
     || !HOSTED_VAULT_SHARE_SOURCE_REVISION_PATTERN.test(sourceRevision)
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Vault share delivery record sourceRevision must be an opaque base64url string.",
     );
   }
@@ -1457,7 +1459,7 @@ function parseHostedVaultShareDeliveryRecordData(
       return parseHostedVaultShareWorkoutsDayData(value, context);
   }
 
-  throw new TypeError(
+  throw new ContractValidationError(
     `Vault share ${context.projectionKind} data parser is not implemented.`,
   );
 }
@@ -1484,7 +1486,7 @@ function parseHostedVaultShareDeviceSyncStatusData(
   );
 
   if (context.recordKey !== HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_RECORD_KEY) {
-    throw new TypeError(
+    throw new ContractValidationError(
       'Vault share device-sync-status recordKey must be "device-sync-status".',
     );
   }
@@ -1497,7 +1499,7 @@ function parseHostedVaultShareDeviceSyncStatusData(
     observedAt !== context.occurredAt
     || !/^\d{4}-\d{2}-\d{2}T00:00:00\.000Z$/u.test(observedAt)
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Vault share device-sync-status observedAt and occurredAt must equal the UTC day bucket.",
     );
   }
@@ -1507,7 +1509,7 @@ function parseHostedVaultShareDeviceSyncStatusData(
     "Vault share device-sync-status data sources",
   );
   if (rawSources.length > HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_MAX_SOURCES) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Vault share device-sync-status sources must contain at most ${HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_MAX_SOURCES} entries.`,
     );
   }
@@ -1517,7 +1519,7 @@ function parseHostedVaultShareDeviceSyncStatusData(
     const parsed = parseHostedVaultShareDeviceSyncSource(source, index);
     const normalizedLabel = parsed.label.toLocaleLowerCase("en-US");
     if (seenLabels.has(normalizedLabel)) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "Vault share device-sync-status source labels must be unique.",
       );
     }
@@ -1540,7 +1542,7 @@ function parseHostedVaultShareDeviceSyncSource(
     ["connectionSyncJobCompletedAt", "label", "status", "statusObservedAt"],
   );
   if (!Object.prototype.hasOwnProperty.call(source, "connectionSyncJobCompletedAt")) {
-    throw new TypeError(`${label} connectionSyncJobCompletedAt must be a timestamp or null.`);
+    throw new ContractValidationError(`${label} connectionSyncJobCompletedAt must be a timestamp or null.`);
   }
 
   const publicLabel = parseHostedVaultShareBoundedText(
@@ -1549,12 +1551,12 @@ function parseHostedVaultShareDeviceSyncSource(
     HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_SOURCE_LABEL_MAX_LENGTH,
   );
   if (publicLabel.toLocaleLowerCase("en-US") === "junction") {
-    throw new TypeError(`${label} label must identify the public health source.`);
+    throw new ContractValidationError(`${label} label must identify the public health source.`);
   }
 
   const status = requireString(source.status, `${label} status`);
   if (!isHostedVaultShareDeviceSyncSourceStatus(status)) {
-    throw new TypeError(`${label} status is invalid.`);
+    throw new ContractValidationError(`${label} status is invalid.`);
   }
 
   const statusObservedAt = requireHostedVaultShareNonFutureTimestamp(
@@ -1595,7 +1597,7 @@ function requireHostedVaultShareNonFutureTimestamp(
     Date.parse(timestamp)
     > Date.now() + HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_MAX_FUTURE_SKEW_MS
   ) {
-    throw new TypeError(`${label} must not be in the future.`);
+    throw new ContractValidationError(`${label} must not be in the future.`);
   }
   return timestamp;
 }
@@ -1609,7 +1611,7 @@ function parseHostedVaultShareTimeZoneData(
   // One logical record per grantor, so a delivery replaces the previous
   // timezone rather than accumulating a travel history.
   if (context.recordKey !== HOSTED_VAULT_SHARE_TIME_ZONE_RECORD_KEY) {
-    throw new TypeError(
+    throw new ContractValidationError(
       'Vault share time-zone recordKey must be "time-zone".',
     );
   }
@@ -1618,7 +1620,7 @@ function parseHostedVaultShareTimeZoneData(
     requireString(data.timeZone, "Vault share time-zone data timeZone"),
   );
   if (!timeZone) {
-    throw new TypeError("Vault share time-zone data timeZone is invalid.");
+    throw new ContractValidationError("Vault share time-zone data timeZone is invalid.");
   }
 
   return { timeZone };
@@ -1633,7 +1635,7 @@ function parseHostedVaultShareProfileNameData(
   // One logical record per grantor: the fixed recordKey makes every delivery a
   // replacement of the previous name instead of an accumulating history.
   if (context.recordKey !== HOSTED_VAULT_SHARE_PROFILE_NAME_RECORD_KEY) {
-    throw new TypeError(
+    throw new ContractValidationError(
       'Vault share profile-name recordKey must be "profile-name".',
     );
   }
@@ -1648,7 +1650,7 @@ function parseHostedVaultShareProfileNameData(
     || displayName.length > HOSTED_VAULT_SHARE_PROFILE_NAME_MAX_LENGTH
     || /[\u0000-\u001f\u007f]/u.test(displayName)
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Vault share profile-name displayName must be 1-120 characters with no control characters.",
     );
   }
@@ -1681,7 +1683,7 @@ function parseHostedVaultShareDailyMetricData(
   );
 
   if (metricKey !== spec.metricKey) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Vault share ${spec.projectionKind} metricKey must be ${spec.metricKey}.`,
     );
   }
@@ -1691,12 +1693,12 @@ function parseHostedVaultShareDailyMetricData(
     `Vault share ${spec.projectionKind} data unit`,
   );
   if (unit !== null && (unit.length > 40 || /[\u0000-\u001f\u007f]/u.test(unit))) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Vault share ${spec.projectionKind} unit must be at most 40 characters with no control characters.`,
     );
   }
   if (spec.expectedUnit !== undefined && unit !== spec.expectedUnit) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Vault share ${spec.projectionKind} unit must be ${spec.expectedUnit}.`,
     );
   }
@@ -1706,7 +1708,7 @@ function parseHostedVaultShareDailyMetricData(
     `Vault share ${spec.projectionKind} data value`,
   );
   if (valueNumber < spec.minValue || valueNumber > spec.maxValue) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Vault share ${spec.projectionKind} value must be between ${spec.minValue} and ${spec.maxValue}.`,
     );
   }
@@ -1724,7 +1726,7 @@ function parseHostedVaultShareDailyMetricData(
       || metricSemantics !== HOSTED_VAULT_SHARE_BROAD_ACTIVITY_MINUTES_SEMANTICS
     )
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Vault share ${spec.projectionKind} data metricSemantics is invalid.`,
     );
   }
@@ -1760,7 +1762,7 @@ function parseHostedVaultShareDailyMetricData(
       || data.sources !== undefined
       || data.sourcesDisagree !== undefined
     ) {
-      throw new TypeError(
+      throw new ContractValidationError(
         `Vault share ${spec.projectionKind} does not accept source-aware sleep data.`,
       );
     }
@@ -1769,12 +1771,12 @@ function parseHostedVaultShareDailyMetricData(
     sourceTaggedSleepStage
     && !Object.prototype.hasOwnProperty.call(data, "recordedAt")
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Vault share ${spec.projectionKind} source-tagged data recordedAt must be a timestamp or null.`,
     );
   }
   if (!sourceTaggedSleepStage && data.recordedAt !== undefined) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Vault share ${spec.projectionKind} does not accept recordedAt.`,
     );
   }
@@ -1811,11 +1813,11 @@ export function parseHostedVaultShareSleepClassification(
   context: Record<string, unknown> | undefined,
   metricKey: string,
 ): Pick<HostedVaultShareDailyMetricData, "sleepType" | "sleepState"> {
-  const sleepType = sleepSessionTypeSchema.optional().parse(context?.sleepType);
-  const sleepState = sleepSessionStateSchema.optional().parse(context?.sleepState);
+  const sleepType = assertContract(sleepSessionTypeSchema.optional(), context?.sleepType, "Vault-share sleepType");
+  const sleepState = assertContract(sleepSessionStateSchema.optional(), context?.sleepState, "Vault-share sleepState");
   const sleepMetric = ["total-sleep-minutes", "deep-sleep-minutes", "rem-sleep-minutes"].includes(metricKey);
   if (!sleepMetric && (sleepType !== undefined || sleepState !== undefined)) {
-    throw new TypeError(`Vault share ${metricKey} does not accept sleep classification.`);
+    throw new ContractValidationError(`Vault share ${metricKey} does not accept sleep classification.`);
   }
   return {
     ...(sleepType === undefined ? {} : { sleepType }),
@@ -1843,7 +1845,7 @@ function parseHostedVaultShareSleepMetricSources(
     rawSources.length === 0
     || rawSources.length > HOSTED_VAULT_SHARE_SLEEP_METRIC_MAX_SOURCES
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Vault share ${spec.projectionKind} sources must contain 1-${HOSTED_VAULT_SHARE_SLEEP_METRIC_MAX_SOURCES} entries.`,
     );
   }
@@ -1853,20 +1855,20 @@ function parseHostedVaultShareSleepMetricSources(
   );
   const sourceKeys = new Set(sources.map((source) => source.source));
   if (sourceKeys.size !== sources.length) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Vault share ${spec.projectionKind} source keys must be unique.`,
     );
   }
   const wearableSourceCount = sources.filter((source) => source.source !== "manual").length;
   if (wearableSourceCount > HOSTED_VAULT_SHARE_SLEEP_METRIC_MAX_WEARABLE_SOURCES) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Vault share ${spec.projectionKind} sources must contain at most ${HOSTED_VAULT_SHARE_SLEEP_METRIC_MAX_WEARABLE_SOURCES} wearable entries.`,
     );
   }
 
   const selectedSources = sources.filter((source) => source.selected === true);
   if (selectedSources.length !== 1) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Vault share ${spec.projectionKind} sources must contain exactly one selected source.`,
     );
   }
@@ -1876,7 +1878,7 @@ function parseHostedVaultShareSleepMetricSources(
     || selectedSource.unit !== selectedMetric.unit
     || selectedSource.value !== selectedMetric.value
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Vault share ${spec.projectionKind} selected source must match the canonical value and unit.`,
     );
   }
@@ -1892,7 +1894,7 @@ function parseHostedVaultShareSleepMetricSources(
       )
     : false;
   if (sourcesDisagree !== computedSourcesDisagree) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Vault share ${spec.projectionKind} sourcesDisagree must match the source values.`,
     );
   }
@@ -1933,20 +1935,20 @@ function parseHostedVaultShareSleepMetricSource(
   let selected: true | undefined;
   if (source.selected !== undefined) {
     if (source.selected !== true) {
-      throw new TypeError(`${label} selected must be true when present.`);
+      throw new ContractValidationError(`${label} selected must be true when present.`);
     }
     selected = true;
   }
   const unit = readNullableStringValue(source.unit, `${label} unit`);
   if (unit !== null && (unit.length > 40 || /[\u0000-\u001f\u007f]/u.test(unit))) {
-    throw new TypeError(`${label} unit must be bounded text without control characters.`);
+    throw new ContractValidationError(`${label} unit must be bounded text without control characters.`);
   }
   if (spec.expectedUnit !== undefined && unit !== spec.expectedUnit) {
-    throw new TypeError(`${label} unit must be ${spec.expectedUnit}.`);
+    throw new ContractValidationError(`${label} unit must be ${spec.expectedUnit}.`);
   }
   const metricValue = requireNumber(source.value, `${label} value`);
   if (metricValue < spec.minValue || metricValue > spec.maxValue) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} value must be between ${spec.minValue} and ${spec.maxValue}.`,
     );
   }
@@ -1982,12 +1984,12 @@ function parseHostedVaultShareWorkoutDayData(
   );
 
   if (!Number.isInteger(workoutCount) || workoutCount < 0 || workoutCount > 100) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Vault share workout-days workoutCount must be an integer between 0 and 100.",
     );
   }
   if (workoutMinutes < 0 || workoutMinutes > HOSTED_VAULT_SHARE_DAY_MAX_MINUTES) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Vault share workout-days workoutMinutes must be between 0 and 1440.",
     );
   }
@@ -2002,7 +2004,7 @@ function parseHostedVaultShareWorkoutDayData(
     metricSemantics !== undefined
     && metricSemantics !== HOSTED_VAULT_SHARE_CANONICAL_WORKOUT_DAY_SEMANTICS
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Vault share workout-days data metricSemantics is invalid.",
     );
   }
@@ -2030,7 +2032,7 @@ function parseHostedVaultShareWorkoutsDayData(
     "Vault share workouts data calendarClosedThroughDate",
   );
   if (!isStrictIsoDate(calendarClosedThroughDate)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Vault share workouts data calendarClosedThroughDate is invalid.",
     );
   }
@@ -2048,7 +2050,7 @@ function parseHostedVaultShareWorkoutsDayData(
     rawWorkouts.length
       > HOSTED_VAULT_SHARE_SOURCE_TAGGED_WORKOUTS_MAX_PER_DAY
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Vault share workouts data workouts must contain at most ${HOSTED_VAULT_SHARE_SOURCE_TAGGED_WORKOUTS_MAX_PER_DAY} source-tagged entries.`,
     );
   }
@@ -2056,7 +2058,7 @@ function parseHostedVaultShareWorkoutsDayData(
     parseHostedVaultShareWorkout(workout, index)
   );
   if (!hostedVaultShareWorkoutsFitDailyCapacity(workouts)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Vault share workouts data workouts must contain at most ${HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY} entries per public source, across at most ${HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES} sources; legacy unsourced data remains limited to ${HOSTED_VAULT_SHARE_WORKOUTS_MAX_PER_DAY} entries.`,
     );
   }
@@ -2068,7 +2070,7 @@ function parseHostedVaultShareWorkoutsDayData(
     timeSemantics
     !== HOSTED_VAULT_SHARE_WORKOUT_TIME_SEMANTICS
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Vault share workouts data timeSemantics is invalid.",
     );
   }
@@ -2090,14 +2092,14 @@ function parseHostedVaultShareWorkout(
     || kind.length > HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH
     || normalizeActivityKindToken(kind) !== kind
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} kind must be a normalized activity token of at most ${HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH} characters.`,
     );
   }
 
   const minutes = requireNumber(workout.minutes, `${label} minutes`);
   if (minutes <= 0 || minutes > HOSTED_VAULT_SHARE_DAY_MAX_MINUTES) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} minutes must be greater than 0 and at most ${HOSTED_VAULT_SHARE_DAY_MAX_MINUTES}.`,
     );
   }
@@ -2111,7 +2113,7 @@ function parseHostedVaultShareWorkout(
     || startLocalMs < 0
     || startLocalMs >= 24 * 60 * 60 * 1_000
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} startLocalMs must be an integer between 0 and 86399999.`,
     );
   }
@@ -2157,17 +2159,17 @@ function parseHostedVaultShareActivityMinutesDayData(
   );
 
   if (activityKind !== spec.activityKind) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Vault share ${spec.projectionKind} activityKind must be ${spec.activityKind}.`,
     );
   }
   if (!Number.isInteger(sessionCount) || sessionCount < 0 || sessionCount > 100) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Vault share ${spec.projectionKind} sessionCount must be an integer between 0 and 100.`,
     );
   }
   if (sessionMinutes < 0 || sessionMinutes > HOSTED_VAULT_SHARE_DAY_MAX_MINUTES) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Vault share ${spec.projectionKind} sessionMinutes must be between 0 and 1440.`,
     );
   }
@@ -2209,7 +2211,7 @@ function parseHostedVaultShareActivityDistanceDayData(
   );
 
   if (activityKind !== spec.activityKind) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Vault share ${spec.projectionKind} activityKind must be ${spec.activityKind}.`,
     );
   }
@@ -2218,7 +2220,7 @@ function parseHostedVaultShareActivityDistanceDayData(
     || sessionCount < 0
     || sessionCount > HOSTED_VAULT_SHARE_DAY_MAX_SESSIONS
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Vault share ${spec.projectionKind} sessionCount must be an integer between 0 and ${HOSTED_VAULT_SHARE_DAY_MAX_SESSIONS}.`,
     );
   }
@@ -2227,7 +2229,7 @@ function parseHostedVaultShareActivityDistanceDayData(
     || sessionDistanceMeters < 0
     || sessionDistanceMeters > HOSTED_VAULT_SHARE_DAY_MAX_DISTANCE_METERS
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Vault share ${spec.projectionKind} sessionDistanceMeters must be an integer between 0 and ${HOSTED_VAULT_SHARE_DAY_MAX_DISTANCE_METERS}.`,
     );
   }
@@ -2265,7 +2267,7 @@ function parseHostedVaultShareActivitySessionCountDayData(
   );
 
   if (activityKind !== spec.activityKind) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Vault share ${spec.projectionKind} activityKind must be ${spec.activityKind}.`,
     );
   }
@@ -2274,7 +2276,7 @@ function parseHostedVaultShareActivitySessionCountDayData(
     || sessionCount < 0
     || sessionCount > HOSTED_VAULT_SHARE_DAY_MAX_SESSIONS
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Vault share ${spec.projectionKind} sessionCount must be an integer between 0 and ${HOSTED_VAULT_SHARE_DAY_MAX_SESSIONS}.`,
     );
   }
@@ -2304,7 +2306,7 @@ function parseHostedVaultShareHeartRateZoneDayData(
     zones.length === 0
     || zones.length > HOSTED_VAULT_SHARE_HEART_RATE_ZONES_MAX_PER_DAY
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Vault share heart-rate-zones-days zones must contain 1-${HOSTED_VAULT_SHARE_HEART_RATE_ZONES_MAX_PER_DAY} entries.`,
     );
   }
@@ -2337,12 +2339,12 @@ function parseHostedVaultShareHeartRateZoneBucket(
   );
 
   if (zone !== undefined && (!Number.isInteger(zone) || zone < 0 || zone > 20)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Vault share ${projectionKind} zones[${index}] zone must be an integer between 0 and 20.`,
     );
   }
   if (durationMinutes < 0 || durationMinutes > HOSTED_VAULT_SHARE_DAY_MAX_MINUTES) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Vault share ${projectionKind} zones[${index}] durationMinutes must be between 0 and 1440.`,
     );
   }
@@ -2350,7 +2352,7 @@ function parseHostedVaultShareHeartRateZoneBucket(
     zone === undefined
     && label === undefined
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Vault share ${projectionKind} zones[${index}] must identify the zone.`,
     );
   }
@@ -2374,7 +2376,7 @@ function parseHostedVaultShareDailyDate(
   const date = requireString(value, `${context.dataLabel} date`);
 
   if (!isStrictIsoDate(date)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${context.dataLabel} date must be a real calendar day formatted YYYY-MM-DD.`,
     );
   }
@@ -2383,13 +2385,13 @@ function parseHostedVaultShareDailyDate(
     context.recordKey !== date
     && !context.recordKey.startsWith(`${date}.`)
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${context.dataLabel.replace(" data", "")} recordKey must equal the data date.`,
     );
   }
 
   if (context.occurredAt !== `${date}T00:00:00.000Z`) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${context.dataLabel.replace(" data", "")} occurredAt must be the ${context.occurredAtDescription}.`,
     );
   }
@@ -2404,7 +2406,7 @@ function parseHostedVaultShareBoundedText(
 ): string {
   const text = requireString(value, label).trim();
   if (text.length === 0 || text.length > maxLength || /[\u0000-\u001f\u007f]/u.test(text)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} must be 1-${maxLength} characters with no control characters.`,
     );
   }
@@ -2421,7 +2423,7 @@ function parseHostedVaultShareSleepTimesData(
   const date = requireString(data.date, "Vault share sleep-times data date");
 
   if (!isStrictIsoDate(date)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Vault share sleep-times data date must be a real calendar day formatted YYYY-MM-DD.",
     );
   }
@@ -2432,7 +2434,7 @@ function parseHostedVaultShareSleepTimesData(
     context.recordKey !== date
     && !context.recordKey.startsWith(`${date}.`)
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Vault share sleep-times recordKey must equal the data date.",
     );
   }
@@ -2441,7 +2443,7 @@ function parseHostedVaultShareSleepTimesData(
   // Pinning it to the night-date midnight keeps exact sleep times out of Postgres and
   // anchors server-side recency filtering on the night itself, not a runtime-chosen time.
   if (context.occurredAt !== `${date}T00:00:00.000Z`) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Vault share sleep-times occurredAt must be the night date at UTC midnight.",
     );
   }
@@ -2459,7 +2461,7 @@ function parseHostedVaultShareSleepTimesData(
   // Fails closed on corrupted projections: a sleep window must be a positive interval of
   // plausible length, not reversed and not spanning multiple days.
   if (!(windowMs > 0) || windowMs > HOSTED_VAULT_SHARE_SLEEP_MAX_WINDOW_MS) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Vault share sleep-times window must end after it starts and span at most 24 hours.",
     );
   }
@@ -2474,9 +2476,9 @@ export function parseHostedVaultShareDeliverRequest(
   const memberTimeZone = request.memberTimeZone === undefined
     ? undefined
     : normalizeIanaTimeZone(requireString(request.memberTimeZone, "Vault share member timezone"));
-  if (memberTimeZone === null) throw new TypeError("Vault share member timezone is invalid.");
+  if (memberTimeZone === null) throw new ContractValidationError("Vault share member timezone is invalid.");
   if (new TextEncoder().encode(JSON.stringify(request)).byteLength > HOSTED_VAULT_SHARE_SERIALIZED_PROJECTION_MAX_BYTES) {
-    throw new TypeError("Vault share complete projection exceeds the byte limit.");
+    throw new ContractValidationError("Vault share complete projection exceeds the byte limit.");
   }
   const sourceWorkspaceVersion = requireHostedVaultShareSourceWorkspaceVersion(
     request.sourceWorkspaceVersion,
@@ -2489,7 +2491,7 @@ export function parseHostedVaultShareDeliverRequest(
   const memberAgeGroup = request.memberAgeGroup === undefined ? undefined
     : parseHostedVaultShareAgeGroup(request.memberAgeGroup, projectionKind);
   if (projectionKind === HOSTED_VAULT_SHARE_DEVICE_SYNC_STATUS_PROJECTION_KIND) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Vault share deliver request does not accept device-sync-status.v0 because Web reads it live.",
     );
   }
@@ -2503,14 +2505,14 @@ export function parseHostedVaultShareDeliverRequest(
     "Vault share deliver request projectionMode",
   );
   if (!HOSTED_VAULT_SHARE_GENERATION_TOKEN_PATTERN.test(expectedGenerationToken)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Vault share deliver request expectedGenerationToken must be a SHA-256 base64url digest.",
     );
   }
 
   const maxRecords = getHostedVaultShareProjectionMaxRecords(projectionScope);
   if (records.length > maxRecords) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Vault share deliver request records must contain at most ${maxRecords} records.`,
     );
   }
@@ -2529,7 +2531,7 @@ export function parseHostedVaultShareDeliverRequest(
         calendarClosedThroughDate !== undefined
         && record.data.calendarClosedThroughDate !== calendarClosedThroughDate
       ) {
-        throw new TypeError(
+        throw new ContractValidationError(
           "Vault share workouts records must use one calendarClosedThroughDate.",
         );
       }
@@ -2605,7 +2607,7 @@ function assertHostedVaultSharePublicSourceCapacity(parsedRecords: readonly Host
     }
   }
   if (publicSources.size > HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Vault share deliver request must contain at most ${HOSTED_VAULT_SHARE_DATA_SOURCE_MAX_SOURCES} public sources.`,
     );
   }
@@ -2620,7 +2622,7 @@ export function requireHostedVaultShareSourceWorkspaceVersion(value: unknown): s
     !/^(?:0|[1-9]\d{0,18})$/u.test(sourceWorkspaceVersion)
     || BigInt(sourceWorkspaceVersion) > 9_223_372_036_854_775_807n
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Vault share deliver request sourceWorkspaceVersion must be a canonical PostgreSQL bigint version.",
     );
   }
@@ -2634,7 +2636,7 @@ export function parseHostedVaultShareDeliverResponse(
   const status = requireString(record.status, "Vault share deliver response status");
 
   if (status !== "delivered" && status !== "no-active-share") {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Vault share deliver response status must be delivered or no-active-share.",
     );
   }
@@ -2663,7 +2665,7 @@ export function parseHostedVaultShareActiveProjectionKindsResponse(
         "Vault share active projection kinds response projectionKinds",
       );
   if (projectionKinds.length > HOSTED_VAULT_SHARE_PROJECTION_KINDS.length) {
-    throw new TypeError("Vault share active projection kinds response has too many kinds.");
+    throw new ContractValidationError("Vault share active projection kinds response has too many kinds.");
   }
   const uniqueProjectionKinds: HostedVaultShareProjectionKind[] = [];
 
@@ -2688,7 +2690,7 @@ export function parseHostedVaultShareActiveProjectionKindsResponse(
         "Vault share active projection kinds response projectionScopes",
       );
   if (scopeValues.length > HOSTED_VAULT_SHARE_KNOWN_PROJECTION_SCOPES.length) {
-    throw new TypeError("Vault share active projection kinds response has too many scopes.");
+    throw new ContractValidationError("Vault share active projection kinds response has too many scopes.");
   }
   const uniqueProjectionScopes: HostedVaultShareProjectionScope[] = [];
   const uniqueScopeKeys = new Set<string>();
@@ -2744,7 +2746,7 @@ function parseHostedVaultShareProjectionMode(
   }
   const mode = requireString(value, label);
   if (mode !== HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE) {
-    throw new TypeError(`${label} must be ${HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE}.`);
+    throw new ContractValidationError(`${label} must be ${HOSTED_VAULT_SHARE_FIRST_MATERIALIZATION_MODE}.`);
   }
   return mode;
 }
@@ -2760,7 +2762,7 @@ function parseHostedVaultShareGenerationTokensByProjectionScopeKey(
   const result: Record<string, string> = {};
   for (const [scopeKey, generationToken] of Object.entries(record)) {
     if (!activeScopeKeys.has(scopeKey)) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "Vault share active projection generation tokens contain an inactive scope key.",
       );
     }
@@ -2769,7 +2771,7 @@ function parseHostedVaultShareGenerationTokensByProjectionScopeKey(
       "Vault share active projection generation token",
     );
     if (!HOSTED_VAULT_SHARE_GENERATION_TOKEN_PATTERN.test(token)) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "Vault share active projection generation token must be a SHA-256 base64url digest.",
       );
     }
@@ -2789,7 +2791,7 @@ function parseHostedVaultSharePublishedSourceWorkspaceVersionByProjectionScopeKe
   const result: Record<string, string> = {};
   for (const [scopeKey, sourceWorkspaceVersion] of Object.entries(record)) {
     if (!activeScopeKeys.has(scopeKey)) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "Vault share active projection published source version map contains an inactive scope key.",
       );
     }
@@ -2807,7 +2809,7 @@ export function parseHostedVaultShareDeliveryPayload(
   const schema = requireString(payload.schema, "Vault share delivery payload schema");
 
   if (schema !== HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Vault share delivery payload schema must be ${HOSTED_VAULT_SHARE_DELIVERY_PAYLOAD_SCHEMA}.`,
     );
   }
@@ -2838,7 +2840,7 @@ export function parseHostedVaultShareRevokePayload(
   const schema = requireString(payload.schema, "Vault share revoke payload schema");
 
   if (schema !== HOSTED_VAULT_SHARE_REVOKE_PAYLOAD_SCHEMA) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `Vault share revoke payload schema must be ${HOSTED_VAULT_SHARE_REVOKE_PAYLOAD_SCHEMA}.`,
     );
   }
@@ -2872,7 +2874,7 @@ function requireRecordKey(value: unknown, label: string): string {
     || text.includes("..")
     || !HOSTED_VAULT_SHARE_RECORD_KEY_PATTERN.test(text)
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       `${label} must be at most ${HOSTED_VAULT_SHARE_RECORD_KEY_MAX_LENGTH} path-safe characters (A-Z, a-z, 0-9, '.', '_', '-') without '..'.`,
     );
   }
@@ -2884,7 +2886,7 @@ function requireIsoTimestamp(value: unknown, label: string): string {
   const text = requireString(value, label);
 
   if (!isStrictIsoDateTime(text)) {
-    throw new TypeError(`${label} must be an ISO-8601 timestamp.`);
+    throw new ContractValidationError(`${label} must be an ISO-8601 timestamp.`);
   }
 
   return text;

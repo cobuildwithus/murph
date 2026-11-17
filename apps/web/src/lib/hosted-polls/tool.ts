@@ -1,3 +1,5 @@
+import { hostedOnboardingError } from "../hosted-onboarding/errors";
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { requireHostedRuntimeCallbackTx, type HostedRuntimeIdentity } from "../hosted-execution/runtime-owner";
 import "server-only";
 import { createHash } from "node:crypto";
@@ -41,13 +43,13 @@ export async function handleHostedConversationPollTool(input: {
     return { status: "listed", polls };
   }
   const row = rows[0];
-  if (!row) throw new TypeError("Poll not found in this conversation. Use list to find its pollRef.");
+  if (!row) throw hostedOnboardingError({ code: "INVALID_REQUEST", httpStatus: 400, message: "Poll not found in this conversation. Use list to find its pollRef." });
   const definition = await readPollDefinition(row);
   if (definition.target !== route.target) throw new TypeError("Poll conversation changed.");
   const result = await readPollResult(row);
   if (!result) return { status: "unknown", polls: [] };
   if (action.action === "close") {
-    if (route.channel !== "telegram") throw new TypeError("iMessage does not support closing polls.");
+    if (route.channel !== "telegram") throw hostedOnboardingError({ code: "INVALID_REQUEST", httpStatus: 400, message: "iMessage does not support closing polls." });
     if (result.snapshot.closed) return { status: "closed", polls: [result.snapshot] };
     await authorizePollConversation(input);
     const closed = await callTelegramPoll({ action: "close", target: route.target, pollRef: row.id, messageId: result.messageId });
@@ -66,12 +68,12 @@ export async function handleHostedConversationPollTool(input: {
 async function voteInPoll(input: Parameters<typeof handleHostedConversationPollTool>[0], route: PollRoute, poll: { pollRef: string; question: string; messageId: string }): Promise<ConversationPollResponse> {
   const action = input.request.request;
   if (action.action !== "vote") throw new TypeError("Expected poll vote.");
-  if (route.channel !== "linq") throw new TypeError("Telegram bots cannot vote. State a pick in text without changing the tally.");
+  if (route.channel !== "linq") throw hostedOnboardingError({ code: "INVALID_REQUEST", httpStatus: 400, message: "Telegram bots cannot vote. State a pick in text without changing the tally." });
   const fresh = await callLinqPoll({ action: "read", chatId: route.target, ...poll });
   const optionId = fresh.optionIds[action.optionIndex];
-  if (!optionId) throw new TypeError("Poll option is unavailable. Read the current poll before voting.");
+  if (!optionId) throw hostedOnboardingError({ code: "INVALID_REQUEST", httpStatus: 400, message: "Poll option is unavailable. Read the current poll before voting." });
   const currentRoute = await authorizePollConversation(input);
-  if (currentRoute.channel !== route.channel || currentRoute.target !== route.target) throw new TypeError("Poll conversation changed.");
+  if (currentRoute.channel !== route.channel || currentRoute.target !== route.target) throw hostedOnboardingError({ code: "INVALID_REQUEST", httpStatus: 400, message: "Poll conversation changed." });
   const submitted = await callLinqPoll({ action: "vote", chatId: route.target, ...poll, optionId, operation: action.operation });
   return { status: "vote_submitted", polls: [submitted.snapshot] };
 }
@@ -79,7 +81,7 @@ async function voteInPoll(input: Parameters<typeof handleHostedConversationPollT
 async function createPoll(input: { memberId: string; runtimeIdentity: HostedRuntimeIdentity | null; request: ConversationPollRequest }, route: PollRoute): Promise<ConversationPollResponse> {
   const action = input.request.request;
   if (action.action !== "create") throw new TypeError("Expected poll creation.");
-  if (route.channel === "linq" && action.anonymous === true) throw new TypeError("iMessage polls cannot be anonymous.");
+  if (route.channel === "linq" && action.anonymous === true) throw hostedOnboardingError({ code: "INVALID_REQUEST", httpStatus: 400, message: "iMessage polls cannot be anonymous." });
   const prisma = getPrisma();
   // One logical creation per accepted input or scheduled occurrence, including retries.
   const identity = "assistantInputId" in input.request
@@ -89,7 +91,7 @@ async function createPoll(input: { memberId: string; runtimeIdentity: HostedRunt
   const definition = { schema: "murph.conversation-poll.v1" as const, target: route.target, question: action.question, options: action.options, anonymous: route.channel === "telegram" ? action.anonymous ?? true : false };
   const encrypted = await encryptPoll({ id, memberId: input.memberId }, "definition", definition);
   const conversationKey = createHostedExternalThreadIdentityLookupKey({ channel: route.channel, threadId: route.target });
-  if (!conversationKey) throw new TypeError("Invalid poll conversation.");
+  if (!conversationKey) throw new ContractValidationError("Invalid poll conversation.");
   const row = await prisma.$transaction(async (tx) => {
     await requireHostedRuntimeCallbackTx(tx, input.memberId, input.runtimeIdentity);
     await requireHostedRuntimeActiveAccessForUpdateTx(input.memberId, { prisma: tx });
@@ -100,7 +102,7 @@ async function createPoll(input: { memberId: string; runtimeIdentity: HostedRunt
     });
   });
   const original = await readPollDefinition(row);
-  if (row.channel !== route.channel || JSON.stringify(original) !== JSON.stringify(definition)) throw new TypeError("This input already created a different poll. Do not send another.");
+  if (row.channel !== route.channel || JSON.stringify(original) !== JSON.stringify(definition)) throw hostedOnboardingError({ code: "INVALID_REQUEST", httpStatus: 400, message: "This input already created a different poll. Do not send another." });
   const existing = await readPollResult(row);
   if (existing) return { status: "sent", polls: [existing.snapshot] };
   await authorizePollConversation(input);

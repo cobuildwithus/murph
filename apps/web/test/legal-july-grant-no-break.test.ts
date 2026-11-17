@@ -4,7 +4,7 @@ vi.mock("server-only", () => ({}));
 
 // A member who agreed before the games Terms: the exact launch grants most
 // production members hold, recorded against the July documents. Publishing the
-// October Terms and Privacy Policy must leave them working everywhere except
+// November legal documents must leave them working everywhere except
 // the game's own Terms gate. Everything here runs the real consent registry
 // against those rows; only the database, sign-in and downstream work are
 // stubbed.
@@ -155,9 +155,9 @@ describe("a July launch.legal grant after the games Terms are published", () => 
     expect(legal).toMatchObject({ current: true, granted: true, missingDocuments: [] });
     // The documents shown and recorded from now on are the published ones.
     expect(legal?.documents.map((document) => [document.id, document.version])).toEqual([
-      ["terms-of-service", "2026-10-26"],
-      ["privacy-policy", "2026-10-26"],
-      ["health-ai-safety-disclosure", "2026-07-23"],
+      ["terms-of-service", "2026-11-12"],
+      ["privacy-policy", "2026-11-12"],
+      ["health-ai-safety-disclosure", "2026-11-12"],
     ]);
     expect(legal && hasHostedConsentAtPublishedVersions(legal)).toBe(false);
     await expect(readHostedHealthDataConsentState({
@@ -195,9 +195,9 @@ describe("a July launch.legal grant after the games Terms are published", () => 
   it("records the published versions for anyone agreeing from now on", () => {
     const current = buildCurrentHostedConsentDocumentVersions("launch.legal");
     expect(current).toEqual({
-      "health-ai-safety-disclosure": "2026-07-23",
-      "privacy-policy": "2026-10-26",
-      "terms-of-service": "2026-10-26",
+      "health-ai-safety-disclosure": "2026-11-12",
+      "privacy-policy": "2026-11-12",
+      "terms-of-service": "2026-11-12",
     });
     expect(parseHostedConsentAcceptRequest({
       acceptedDocumentVersions: current,
@@ -288,9 +288,9 @@ describe("the game's Terms gate with a July launch.legal grant", () => {
       code: "TERMS_REQUIRED",
       details: {
         documents: [
-          expect.objectContaining({ id: "terms-of-service", version: "2026-10-26" }),
-          expect.objectContaining({ id: "privacy-policy", version: "2026-10-26" }),
-          expect.objectContaining({ id: "health-ai-safety-disclosure", version: "2026-07-23" }),
+          expect.objectContaining({ id: "terms-of-service", version: "2026-11-12" }),
+          expect.objectContaining({ id: "privacy-policy", version: "2026-11-12" }),
+          expect.objectContaining({ id: "health-ai-safety-disclosure", version: "2026-11-12" }),
         ],
         scope: "launch.legal",
       },

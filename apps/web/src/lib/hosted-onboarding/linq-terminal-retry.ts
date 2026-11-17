@@ -18,7 +18,7 @@ import { readHostedLinqFailedMessage, resendHostedLinqMessage } from "./linq-cli
 import { recordHostedLinqTerminalRetryAcceptedTx } from "./linq-delivery-store";
 import { evaluateHostedLinqEgressPolicy } from "./linq-egress-policy";
 import { readHostedRuntimeAiAccessDecision } from "./member-access";
-import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "./shared";
+import { HOSTED_LINQ_TERMINAL_RETRY_WINDOW_MS, HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "./shared";
 import {
   readHostedThreadRouteByThreadIdentity,
 } from "../hosted-routing/thread-route-store";
@@ -29,7 +29,6 @@ import { logHostedOnboardingDiagnostic, logHostedOnboardingWarning, toHostedOnbo
 import type { ParsedHostedLinqProviderEvent } from "./linq-provider-events";
 
 // Five total sends, including the original, within three minutes of acceptance.
-const RETRY_MAX_AGE_MS = 180_000;
 const RETRY_DELAYS_MS = [10_000, 20_000, 40_000, 80_000] as const;
 type RetryClient = PrismaClient | Prisma.TransactionClient;
 
@@ -174,7 +173,7 @@ async function readRetryCandidate(input: {
   if (!delivery.phoneNumberLookupKey || !delivery.acceptedAt || delivery.threadIsDirect === null) {
     return { candidate: null, reason: "delivery_authority_incomplete" } as const;
   }
-  if (delivery.acceptedAt.getTime() < input.now.getTime() - RETRY_MAX_AGE_MS) {
+  if (delivery.acceptedAt.getTime() < input.now.getTime() - HOSTED_LINQ_TERMINAL_RETRY_WINDOW_MS) {
     return { candidate: null, reason: "delivery_expired" } as const;
   }
   if (delivery.messages.length > 10) return { candidate: null, reason: "delivery_message_limit" } as const;
@@ -395,7 +394,7 @@ async function runTerminalRetry(input: {
   const attempt = (result.candidate.message?.terminalRetryCount ?? 0) + 1;
   diagnostic.attempt = attempt;
   const expiresAt = result.candidate.message?.terminalRetryExpiresAt
-    ?? new Date(delivery.acceptedAt!.getTime() + RETRY_MAX_AGE_MS);
+    ?? new Date(delivery.acceptedAt!.getTime() + HOSTED_LINQ_TERMINAL_RETRY_WINDOW_MS);
   if (Date.now() + 8_000 >= expiresAt.getTime()) { diagnostic.reason = "delivery_expired"; return; }
   if (!input.execute || !result.candidate.message?.terminalRetryNextAt) {
     diagnostic.stage = "schedule";

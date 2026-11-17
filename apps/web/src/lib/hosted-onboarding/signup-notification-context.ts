@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { normalizeHostedSignupTimeZone } from "./time-zone-hint";
 
 const HOSTED_SIGNUP_NOTIFICATION_CONTEXT_SCHEMA =
@@ -80,20 +81,20 @@ export function parseHostedSignupNotificationContext(
     "surface",
     "timeZone",
   ])) {
-    throw new TypeError("Hosted signup notification context is invalid.");
+    throw new ContractValidationError("Hosted signup notification context is invalid.");
   }
   if (candidate.schema !== HOSTED_SIGNUP_NOTIFICATION_CONTEXT_SCHEMA) {
-    throw new TypeError("Hosted signup notification context schema is invalid.");
+    throw new ContractValidationError("Hosted signup notification context schema is invalid.");
   }
   if (!isHostedSignupSurface(candidate.surface)) {
-    throw new TypeError("Hosted signup notification surface is invalid.");
+    throw new ContractValidationError("Hosted signup notification surface is invalid.");
   }
   const occurredAt = normalizeIsoInstant(candidate.occurredAt);
   const timeZone = candidate.timeZone === undefined
     ? null
     : normalizeHostedSignupTimeZone(candidate.timeZone);
   if (candidate.timeZone !== undefined && !timeZone) {
-    throw new TypeError("Hosted signup notification time zone is invalid.");
+    throw new ContractValidationError("Hosted signup notification time zone is invalid.");
   }
   const location = parseHostedSignupLocation(candidate.location);
 
@@ -142,7 +143,7 @@ function parseHostedSignupLocation(
     "country",
     "countryRegion",
   ])) {
-    throw new TypeError("Hosted signup notification location is invalid.");
+    throw new ContractValidationError("Hosted signup notification location is invalid.");
   }
 
   const city = value.city === undefined ? null : normalizeHostedSignupCity(value.city);
@@ -157,10 +158,10 @@ function parseHostedSignupLocation(
     || (value.country !== undefined && !country)
     || (value.countryRegion !== undefined && !countryRegion)
   ) {
-    throw new TypeError("Hosted signup notification location is invalid.");
+    throw new ContractValidationError("Hosted signup notification location is invalid.");
   }
   if (!city && !country && !countryRegion) {
-    throw new TypeError("Hosted signup notification location is empty.");
+    throw new ContractValidationError("Hosted signup notification location is empty.");
   }
 
   return {
@@ -215,11 +216,11 @@ function normalizeHostedSignupCountryRegion(value: unknown): string | null {
 
 function normalizeIsoInstant(value: unknown): string {
   if (typeof value !== "string") {
-    throw new TypeError("Hosted signup notification timestamp is invalid.");
+    throw new ContractValidationError("Hosted signup notification timestamp is invalid.");
   }
   const parsed = new Date(value);
   if (!Number.isFinite(parsed.getTime()) || parsed.toISOString() !== value) {
-    throw new TypeError("Hosted signup notification timestamp is invalid.");
+    throw new ContractValidationError("Hosted signup notification timestamp is invalid.");
   }
   return value;
 }
@@ -235,7 +236,7 @@ function parseJson(value: string): unknown {
   try {
     return JSON.parse(value);
   } catch {
-    throw new TypeError("Hosted signup notification context JSON is invalid.");
+    throw new ContractValidationError("Hosted signup notification context JSON is invalid.");
   }
 }
 

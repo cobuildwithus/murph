@@ -1,3 +1,6 @@
+import { parseInput } from "@murphai/hosted-execution/request-input";
+import { hostedOnboardingError } from "../hosted-onboarding/errors";
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   HostedBillingStatus,
   Prisma,
@@ -1059,7 +1062,7 @@ function readTwelveHourCacheWrites(record: AssistantUsageRecord, totalWrites: bi
       ? record.rawUsageJson.cacheWrite12hInputTokens : null,
   );
   if (tokens > totalWrites) {
-    throw new TypeError("Twelve-hour cache writes exceed total cache writes.");
+    throw new ContractValidationError("Twelve-hour cache writes exceed total cache writes.");
   }
   return {
     tokens,
@@ -1232,7 +1235,7 @@ export async function settleHostedAiUsageForAllowanceTx(input: {
     };
   }
 
-  const pricingDecision = resolveHostedAiUsageAllowancePricingDecision(input.record);
+  const pricingDecision = parseInput(input.record, () => resolveHostedAiUsageAllowancePricingDecision(input.record));
   if (
     period.planResetAt
     && at.getTime() < period.planResetAt.getTime()
@@ -1422,7 +1425,7 @@ async function markHostedAiUsageAllowanceDeniedTx(input: {
   tx: Prisma.TransactionClient;
 }): Promise<void> {
   const tokenPricingBasis =
-    validateHostedAiUsageAllowanceDeniedTokenPricingBasis(input.record);
+    parseInput(input.record, () => validateHostedAiUsageAllowanceDeniedTokenPricingBasis(input.record));
 
   await input.tx.hostedAiUsage.updateMany({
     where: {
@@ -2841,7 +2844,7 @@ function resolveHostedAiUsageAllowanceTokenPricingBasis(input: {
 
   if (config.requiredProviderKind === "openai") {
     if (!isHostedAiUsageOpenAiTokenPricingProviderName(input.record.providerName)) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "OpenAI token pricing adjustments require OpenAI provider evidence.",
       );
     }
@@ -2857,7 +2860,7 @@ function assertHostedAiUsageAllowanceAudioTokenPricingBasis(
   basis: AssistantUsageTokenPricingBasis,
 ): void {
   if (basis !== "standard") {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Audio-priced hosted AI usage must use standard token pricing basis.",
     );
   }
@@ -2867,7 +2870,7 @@ function assertHostedAiUsageAllowanceOpenAiImageTokenPricingBasis(
   basis: AssistantUsageTokenPricingBasis,
 ): void {
   if (basis !== "standard") {
-    throw new TypeError(
+    throw new ContractValidationError(
       "OpenAI image hosted AI usage must use standard token pricing basis.",
     );
   }
@@ -2877,7 +2880,7 @@ function assertHostedAiUsageLobPhysicalNoteTokenPricingBasis(
   basis: AssistantUsageTokenPricingBasis,
 ): void {
   if (basis !== "standard") {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Lob physical-note hosted usage must use standard token pricing basis.",
     );
   }
@@ -2888,7 +2891,7 @@ function assertHostedAiUsageAllowanceElevenLabsTokenPricingBasis(
   feature: "TTS" | "Music",
 ): void {
   if (basis !== "standard") {
-    throw new TypeError(
+    throw new ContractValidationError(
       `ElevenLabs ${feature} hosted AI usage must use standard token pricing basis.`,
     );
   }
@@ -3132,7 +3135,7 @@ function assertHostedAiUsageRetellTokenPricingBasis(
   tokenPricingBasis: AssistantUsageTokenPricingBasis,
 ): void {
   if (tokenPricingBasis !== "standard") {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Retell phone-call hosted usage must use standard token pricing basis.",
     );
   }
@@ -3188,7 +3191,7 @@ function assertHostedAiUsageXaiSearchTokenPricingBasis(
   tokenPricingBasis: AssistantUsageTokenPricingBasis,
 ): void {
   if (tokenPricingBasis !== "standard") {
-    throw new TypeError(
+    throw new ContractValidationError(
       "xAI x_search hosted usage must use standard token pricing basis.",
     );
   }
@@ -3310,7 +3313,7 @@ function assertHostedAiUsageGeminiVideoTokenPricingBasis(
   tokenPricingBasis: AssistantUsageTokenPricingBasis,
 ): void {
   if (tokenPricingBasis !== "standard") {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Gemini video-analysis hosted AI usage must use standard token pricing basis.",
     );
   }
@@ -4055,7 +4058,7 @@ function normalizeHostedAiUsageAllowanceDate(value: Date | string): Date {
 
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) {
-    throw new TypeError("Hosted AI usage allowance date is invalid.");
+    throw new ContractValidationError("Hosted AI usage allowance date is invalid.");
   }
 
   return parsed;
@@ -4106,7 +4109,7 @@ export async function isVerifiedOperatorTaskUsage(input: {
     || !["diagnostic", "member_message"].includes(task.kind)
     || !["running", "completed", "failed"].includes(task.status)
     || occurredAt < task.createdAt || occurredAt > task.expiresAt) {
-    throw new TypeError("Operator-funded usage does not match an authorized task.");
+    throw hostedOnboardingError({ code: "INVALID_REQUEST", httpStatus: 400, message: "Invalid request." });
   }
   return true;
 }

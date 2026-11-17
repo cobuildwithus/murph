@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { gunzipSync, gzipSync } from "node:zlib";
@@ -340,12 +341,12 @@ function decodeStrictBase64(value: string, errorMessage: string): Uint8Array {
     normalized.length % 4 !== 0
     || !isCanonicalBase64Text(normalized)
   ) {
-    throw new TypeError(errorMessage);
+    throw new ContractValidationError(errorMessage);
   }
 
   const decoded = Buffer.from(normalized, "base64");
   if (decoded.toString("base64") !== normalized) {
-    throw new TypeError(errorMessage);
+    throw new ContractValidationError(errorMessage);
   }
 
   return Uint8Array.from(decoded);

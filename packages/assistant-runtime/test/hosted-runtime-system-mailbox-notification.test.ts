@@ -321,6 +321,51 @@ describe("game recap generation retirement", () => {
     } finally { await workspace.cleanup(); }
   });
 
+  it.each([false, true])("carries a recap wake through saved pending state whole: video=%s", async video => {
+    const workspace = await createHostedRuntimeWorkspace("recap-video-wake-");
+    const responsePolicy = { kind: "require_game_recap" as const, gameId: "synthetic_game", eventId, pairFingerprint: "synthetic-pair", show: true as const, ...(video ? { video: true as const } : {}) };
+    // The real builder, the real enqueue (which parses before it writes) and the real reload.
+    const queued = buildHostedExecutionAssistantNotificationRequestedWake({ eventId, memberId: "member_123", occurredAt: FIXED_NOW,
+      notification: { instructions: "Write the synthetic recap.", responsePolicy,
+        route: { channel: "linq", delivery: { kind: "thread", target: "synthetic-chat" }, actorId: null, identityId: null, threadId: null, threadIsDirect: false } } });
+    try {
+      await enqueueHostedSystemMailboxItem({ item: createResolvedNotificationItem({ dedupeKey: eventId }), wake: queued, vaultRoot: workspace.vaultRoot });
+      const [saved] = (await readHostedSystemMailboxState(workspace.vaultRoot)).pending;
+      assert.ok(saved);
+      if (saved.wake.kind !== "assistant.notification.requested") throw new Error("Expected the recap wake");
+      expect(saved.wake.notification.responsePolicy).toEqual(responsePolicy);
+      expect("video" in (saved.wake.notification.responsePolicy ?? {})).toBe(video);
+    } finally { await workspace.cleanup(); }
+  });
+
+  it("durably re-wakes the same recap at the capacity backoff without consuming it", async () => {
+    const workspace = await createHostedRuntimeWorkspace("recap-capacity-");
+    const notification = wake();
+    if (notification.notification.responsePolicy?.kind !== "require_game_recap") throw new Error("Expected recap");
+    notification.notification.responsePolicy.show = true;
+    const runtime = createRuntime({ groupToolPort: { request: async () => response() } });
+    mocks.executeHostedMailboxEvent.mockRejectedValue(new VaultCliError("ASSISTANT_CODEX_FAILED", "Synthetic capacity refusal", { codexErrorInfo: "flexUnavailable" }));
+    vi.spyOn(Date, "now").mockReturnValue(Date.parse(FIXED_NOW));
+    try {
+      await enqueueHostedSystemMailboxItem({ item: createResolvedNotificationItem({ dedupeKey: eventId }), wake: notification, vaultRoot: workspace.vaultRoot });
+      const result = await prepareHostedSystemMailboxItemForCheckpoint({ executionContext: null, now: () => FIXED_NOW,
+        runtime, runtimeEnv: {}, vaultRoot: workspace.vaultRoot });
+      const retryAt = "2026-04-27T00:05:00.000Z";
+      expect(result).toMatchObject({ status: "retryable_failed", nextWakeAt: retryAt });
+      const [retained] = (await readHostedSystemMailboxState(workspace.vaultRoot)).pending;
+      expect(retained).toMatchObject({ wake: notification, status: "pending", attemptCount: 1, nextAttemptAt: retryAt });
+      expect(await prepareHostedSystemMailboxItemForCheckpoint({ executionContext: null, now: () => "2026-04-27T00:04:59.999Z",
+        runtime, runtimeEnv: {}, vaultRoot: workspace.vaultRoot })).toBeNull();
+      vi.mocked(Date.now).mockReturnValue(Date.parse(retryAt));
+      await prepareHostedSystemMailboxItemForCheckpoint({ executionContext: null, now: () => retryAt,
+        runtime, runtimeEnv: {}, vaultRoot: workspace.vaultRoot });
+      expect((await readHostedSystemMailboxState(workspace.vaultRoot)).pending).toEqual([
+        expect.objectContaining({ itemId: retained.itemId, wake: notification, attemptCount: 2, nextAttemptAt: "2026-04-27T00:10:00.000Z" }),
+      ]);
+      expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledTimes(2);
+    } finally { vi.restoreAllMocks(); await workspace.cleanup(); }
+  });
+
   it.each(["retired", "unavailable", "ok", "missing", "other", "mismatch"] as const)("prepares %s recap work before model execution", async scenario => {
     const request = vi.fn<NonNullable<HostedRuntimePlatform["groupToolPort"]>["request"]>().mockResolvedValue(
       response(scenario === "retired" ? "recap_generation_retired" : scenario === "unavailable" ? "recap_authority_unavailable" : undefined));
@@ -553,6 +598,119 @@ describe("hosted system mailbox notification execution context", () => {
         "assistantNotificationValidationFailureReason",
       );
       expect(JSON.stringify(state)).not.toContain(privateResponseMarker);
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
+  it.each([
+    { label: "fresh", occurredAt: FIXED_NOW, expected: [...Array<number>(10).fill(1), 15, 15] },
+    // A late import is old before it fails; it still gets ten fast retries.
+    { label: "late-imported", occurredAt: "2026-04-26T23:00:00.000Z", expected: [...Array<number>(9).fill(1), 15, 15, 15] },
+  ])("slows a persistently failing $label notification only after ten attempts and ten minutes", async ({ occurredAt, expected }) => {
+    const workspace = await createHostedRuntimeWorkspace(
+      "murph-hosted-system-mailbox-retry-backoff-",
+    );
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "assistant.notification.requested:retry-backoff",
+      memberId: "member_123",
+      notification: {
+        instructions: "Send the prepared group update.",
+        route: DIRECT_LINQ_NOTIFICATION_ROUTE,
+      },
+      occurredAt,
+    });
+    mocks.executeHostedMailboxEvent.mockRejectedValue(
+      new Error("Hosted group tool failed with HTTP 500."),
+    );
+
+    try {
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedNotificationItem({
+          dedupeKey: wake.eventId,
+          id: "mailbox_notification_retry_backoff",
+          occurredAt,
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake,
+      });
+      const runtime = createRuntime({});
+      let attemptAt = FIXED_NOW;
+      const delaysMinutes: number[] = [];
+      for (let attempt = 1; attempt <= expected.length; attempt += 1) {
+        const startedAt = attemptAt;
+        const preparation = await prepareHostedSystemMailboxItemForCheckpoint({
+          executionContext: null,
+          now: () => startedAt,
+          runtime,
+          runtimeEnv: {},
+          vaultRoot: workspace.vaultRoot,
+        });
+        expect(preparation).toMatchObject({
+          attemptCount: attempt,
+          errorCode: "HOSTED_SYSTEM_MAILBOX_AMBIGUOUS",
+          status: "retryable_failed",
+        });
+        const [pending] = (await readHostedSystemMailboxState(workspace.vaultRoot)).pending;
+        expect(pending).toMatchObject({ attemptCount: attempt, status: "pending" });
+        delaysMinutes.push((Date.parse(pending!.nextAttemptAt!) - Date.parse(startedAt)) / 60_000);
+        // The item stays asleep until its own retry time.
+        await expect(prepareHostedSystemMailboxItemForCheckpoint({
+          executionContext: null,
+          now: () => new Date(Date.parse(pending!.nextAttemptAt!) - 1).toISOString(),
+          runtime,
+          runtimeEnv: {},
+          vaultRoot: workspace.vaultRoot,
+        })).resolves.toBeNull();
+        attemptAt = pending!.nextAttemptAt!;
+      }
+      expect(delaysMinutes).toEqual(expected);
+      expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledTimes(expected.length);
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
+  it("delivers a ten-minute notification that recovers at minute eight", async () => {
+    const workspace = await createHostedRuntimeWorkspace(
+      "murph-hosted-system-mailbox-retry-window-",
+    );
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "assistant.notification.requested:retry-window",
+      memberId: "member_123",
+      notification: {
+        instructions: "Send the operator message.",
+        route: DIRECT_LINQ_NOTIFICATION_ROUTE,
+      },
+      occurredAt: FIXED_NOW,
+    });
+    const outage = new Error("Temporary provider failure.");
+    for (let failure = 0; failure < 8; failure += 1) {
+      mocks.executeHostedMailboxEvent.mockRejectedValueOnce(outage);
+    }
+
+    try {
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedNotificationItem({
+          dedupeKey: wake.eventId,
+          id: "mailbox_notification_retry_window",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake,
+      });
+      const runtime = createRuntime({});
+      // Failures at minutes 0 through 7; service is back for minute 8.
+      for (let minute = 0; minute <= 8; minute += 1) {
+        const preparation = await prepareHostedSystemMailboxItemForCheckpoint({
+          executionContext: null,
+          now: () => new Date(Date.parse(FIXED_NOW) + minute * 60_000).toISOString(),
+          runtime,
+          runtimeEnv: {},
+          vaultRoot: workspace.vaultRoot,
+        });
+        expect(preparation?.status).toBe(minute < 8 ? "retryable_failed" : "processed");
+      }
+      expect((await readHostedSystemMailboxState(workspace.vaultRoot)).pending).toEqual([]);
     } finally {
       await workspace.cleanup();
     }
@@ -1356,7 +1514,17 @@ describe("hosted system mailbox notification execution context", () => {
     }
   });
 
-  it("persists the context handoff two-attempt fuse across mailbox state reload", async () => {
+  it.each([
+    ["retryable provider error", Object.assign(new Error("Temporary provider failure."), {
+      code: "ASSISTANT_PROVIDER_UNAVAILABLE",
+      retryable: true,
+    })],
+    ["network TypeError", new TypeError("fetch failed")],
+    ["bug TypeError", new TypeError("Cannot read properties of undefined (reading 'result')")],
+    ["explicitly retryable TypeError", Object.assign(new TypeError("fetch failed"), {
+      retryable: true,
+    })],
+  ])("persists the context handoff two-attempt fuse across mailbox state reload for %s", async (_case, transientError) => {
     const workspace = await createHostedRuntimeWorkspace(
       "murph-hosted-system-mailbox-context-handoff-fuse-",
     );
@@ -1365,10 +1533,6 @@ describe("hosted system mailbox notification execution context", () => {
       Date.parse(firstAttemptAt) + 60_000,
     ).toISOString();
     const wake = createGroupContextHandoffWake("d", firstAttemptAt);
-    const transientError = Object.assign(new Error("Temporary provider failure."), {
-      code: "ASSISTANT_PROVIDER_UNAVAILABLE",
-      retryable: true,
-    });
     mocks.executeHostedMailboxEvent
       .mockRejectedValueOnce(transientError)
       .mockRejectedValueOnce(transientError);
@@ -1434,17 +1598,22 @@ describe("hosted system mailbox notification execution context", () => {
     }
   });
 
-  it("terminally removes a context handoff after a non-retryable first failure", async () => {
+  it.each([
+    ["context retryability", new VaultCliError(
+      "invalid_payload",
+      "Synthetic permanent output failure.",
+      { retryable: false },
+    )],
+    ["top-level retryability", Object.assign(new TypeError("Synthetic permanent validation failure."), {
+      retryable: false,
+    })],
+  ])("terminally removes a context handoff after a non-retryable first failure with %s", async (_case, error) => {
     const workspace = await createHostedRuntimeWorkspace(
       "murph-hosted-system-mailbox-context-handoff-terminal-",
     );
     const attemptedAt = new Date().toISOString();
     const wake = createGroupContextHandoffWake("e", attemptedAt);
-    mocks.executeHostedMailboxEvent.mockRejectedValueOnce(new VaultCliError(
-      "invalid_payload",
-      "Synthetic permanent output failure.",
-      { retryable: false },
-    ));
+    mocks.executeHostedMailboxEvent.mockRejectedValueOnce(error);
 
     try {
       await enqueueHostedSystemMailboxItem({
@@ -1472,6 +1641,115 @@ describe("hosted system mailbox notification execution context", () => {
       expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledTimes(1);
       await expect(readHostedSystemMailboxState(workspace.vaultRoot)).resolves
         .toEqual({ pending: [] });
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
+  it.each([
+    "direct route",
+    "mismatched authority",
+    "invalid occurrence time",
+    "operator-task authority",
+    "game-bootstrap authority",
+  ])("terminally removes a context handoff with %s on its first attempt", async (failure) => {
+    const workspace = await createHostedRuntimeWorkspace(
+      "murph-hosted-system-mailbox-context-handoff-invalid-",
+    );
+    const attemptedAt = new Date().toISOString();
+    const wake = createGroupContextHandoffWake("a", attemptedAt);
+    if (failure === "direct route") {
+      wake.notification.route.threadIsDirect = true;
+    } else if (failure === "mismatched authority") {
+      wake.notification.externalThreadRouteAuthority!.threadId = "thread_other";
+    } else if (failure === "invalid occurrence time") {
+      wake.occurredAt = "invalid-time";
+    } else if (failure === "operator-task authority") {
+      wake.notification.operatorTask = {
+        taskId: "opt_synthetic",
+        expiresAt: new Date(Date.parse(attemptedAt) + 60_000).toISOString(),
+      };
+    } else {
+      wake.notification.gameChatBootstrap = {
+        eventId: wake.eventId,
+        gameId: "game_synthetic",
+      };
+    }
+
+    try {
+      await expect(prepareHostedAssistantNotificationSystemMailboxWake({
+        assertExternalThreadRouteAuthority: undefined,
+        executionContext: { hosted: null },
+        mailboxDedupeKey: wake.eventId,
+        signal: null,
+        wake,
+      })).rejects.toMatchObject({
+        name: "ContractValidationError",
+        retryable: false,
+        message: failure === "invalid occurrence time"
+          ? "Hosted group context handoff occurrence time is invalid."
+          : "Hosted group context handoff notification proof is invalid.",
+      });
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedNotificationItem({
+          dedupeKey: wake.eventId,
+          id: "mailbox_context_handoff_invalid",
+        }),
+        vaultRoot: workspace.vaultRoot,
+        wake,
+      });
+      await expect(prepareHostedSystemMailboxItemForCheckpoint({
+        executionContext: null,
+        now: () => attemptedAt,
+        runtime: createRuntime({}),
+        runtimeEnv: {},
+        vaultRoot: workspace.vaultRoot,
+      })).resolves.toMatchObject({
+        item: { attemptCount: 1, itemId: "mailbox_context_handoff_invalid" },
+        status: "processed",
+      });
+      expect(mocks.executeHostedMailboxEvent).not.toHaveBeenCalled();
+      await expect(readHostedSystemMailboxState(workspace.vaultRoot)).resolves
+        .toEqual({ pending: [] });
+    } finally {
+      await workspace.cleanup();
+    }
+  });
+
+  it("keeps ordinary notifications pending beyond the handoff limit even for an explicitly non-retryable TypeError", async () => {
+    const workspace = await createHostedRuntimeWorkspace(
+      "murph-hosted-system-mailbox-ordinary-type-error-",
+    );
+    const wake = buildHostedExecutionAssistantNotificationRequestedWake({
+      eventId: "assistant.notification.requested:ordinary-type-error",
+      memberId: "member_synthetic",
+      notification: {
+        instructions: "Send the synthetic update.",
+        route: DIRECT_LINQ_NOTIFICATION_ROUTE,
+      },
+      occurredAt: FIXED_NOW,
+    });
+    mocks.executeHostedMailboxEvent.mockRejectedValue(Object.assign(
+      new TypeError("Synthetic validation failure."), { retryable: false },
+    ));
+    try {
+      await enqueueHostedSystemMailboxItem({
+        item: createResolvedNotificationItem({ dedupeKey: wake.eventId }),
+        vaultRoot: workspace.vaultRoot,
+        wake,
+      });
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        await expect(prepareHostedSystemMailboxItemForCheckpoint({
+          executionContext: null,
+          now: () => new Date(Date.parse(FIXED_NOW) + (attempt - 1) * 60_000).toISOString(),
+          runtime: createRuntime({}),
+          runtimeEnv: {},
+          vaultRoot: workspace.vaultRoot,
+        })).resolves.toMatchObject({ attemptCount: attempt, status: "retryable_failed" });
+        await expect(readHostedSystemMailboxState(workspace.vaultRoot)).resolves
+          .toMatchObject({ pending: [{ attemptCount: attempt, status: "pending" }] });
+      }
+      expect(mocks.executeHostedMailboxEvent).toHaveBeenCalledTimes(3);
     } finally {
       await workspace.cleanup();
     }

@@ -1,3 +1,5 @@
+import { parseRequestJson } from "@/src/lib/http";
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import { createHostedDeviceSyncPublicIngressService } from "@/src/lib/device-sync/public-ingress-service";
 import { jsonOk, withJsonError } from "@/src/lib/device-sync/settings-http";
 import {
@@ -28,8 +30,9 @@ export const POST = withJsonError(async (request: Request) => {
   const userId = await requireHostedCloudflareCallbackRequest(request, {
     maxBodyBytes: HOSTED_DEVICE_SYNC_FITBIT_CUTOVER_BODY_LIMIT_BYTES,
   });
-  const parsed = parseHostedExecutionDeviceSyncFitbitMigrationCutoverRequest(
-    await request.json(),
+  const parsed = parseInput(
+    parseRequestJson(await request.text()),
+    parseHostedExecutionDeviceSyncFitbitMigrationCutoverRequest,
   );
   return jsonOk(
     await createHostedDeviceSyncPublicIngressService(request)

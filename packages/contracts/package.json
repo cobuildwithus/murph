@@ -59,6 +59,11 @@
       "import": "./dist/recap-show.js",
       "default": "./dist/recap-show.js"
     },
+    "./elevenlabs-music": {
+      "types": "./dist/elevenlabs-music.d.ts",
+      "import": "./dist/elevenlabs-music.js",
+      "default": "./dist/elevenlabs-music.js"
+    },
     "./recap-validation": {
       "types": "./dist/recap-validation.d.ts",
       "import": "./dist/recap-validation.js",
@@ -68,6 +73,36 @@
       "types": "./dist/recap-material.d.ts",
       "import": "./dist/recap-material.js",
       "default": "./dist/recap-material.js"
+    },
+    "./validation-error": {
+      "types": "./dist/validation-error.d.ts",
+      "import": "./dist/validation-error.js",
+      "default": "./dist/validation-error.js"
+    },
+    "./constants": {
+      "types": "./dist/constants.d.ts",
+      "import": "./dist/constants.js",
+      "default": "./dist/constants.js"
+    },
+    "./zod": {
+      "types": "./dist/zod.d.ts",
+      "import": "./dist/zod.js",
+      "default": "./dist/zod.js"
+    },
+    "./time": {
+      "types": "./dist/time.d.ts",
+      "import": "./dist/time.js",
+      "default": "./dist/time.js"
+    },
+    "./shares": {
+      "types": "./dist/shares.d.ts",
+      "import": "./dist/shares.js",
+      "default": "./dist/shares.js"
+    },
+    "./health-entities": {
+      "types": "./dist/health-entities.d.ts",
+      "import": "./dist/health-entities.js",
+      "default": "./dist/health-entities.js"
     }
   },
   "scripts": {

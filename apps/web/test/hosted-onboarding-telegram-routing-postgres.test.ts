@@ -151,6 +151,25 @@ describe.skipIf(!runPostgresConcurrencyProof)(
       });
     });
 
+    it.each([TypeError, RangeError, URIError, SyntaxError])(
+      "rolls back partial admission on %s and admits redelivery once",
+      async (Fault) => withTelegramReplayFixture(async (f) => {
+        const before = await readHostedMemberRoutingState({ memberId: f.memberA, prisma: f.prisma });
+        await expect(f.plan(f.memberA, f.update, {
+          onPlanned: async () => { throw new Fault("Synthetic admission failure"); },
+        })).rejects.toThrow("Synthetic admission failure");
+        expect(await f.rows()).toEqual([]);
+        expect(await readHostedMemberRoutingState({ memberId: f.memberA, prisma: f.prisma })).toEqual(before);
+        const accepted = await f.plan(f.memberA);
+        const rows = await f.rows();
+        expect(rows).toHaveLength(1);
+        // Discard the committed response, then deliver the same update again.
+        const replay = await f.plan(f.memberA);
+        expect(replay.wakeHandoffs?.[0]?.mailboxItemId).toBe(accepted.wakeHandoffs?.[0]?.mailboxItemId);
+        expect(await f.rows()).toEqual(rows);
+      }),
+    );
+
     it("serializes the same update on the event lock while its identity moves", async () => {
       await withTelegramReplayFixture(async (f) => {
         const contender = createPrismaClient({ databaseUrl, poolMax: 1 });

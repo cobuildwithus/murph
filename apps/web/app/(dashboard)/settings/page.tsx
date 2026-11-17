@@ -21,7 +21,7 @@ import { SettingsAuthRequired } from "./settings-auth-required";
 import { HostedFamilySettings } from "@/src/components/settings/hosted-family-settings";
 import { HostedPasskeySettings } from "@/src/components/settings/hosted-passkey-settings";
 import { HostedPlanUpdateReturn } from "@/src/components/settings/hosted-plan-update-return";
-import { Watch } from "lucide-react";
+import { Plug, Watch } from "lucide-react";
 import Link from "next/link";
 import { PageHeader } from "@/src/components/ui/page-header";
 import {
@@ -479,6 +479,19 @@ function renderAuthenticatedSettingsPage(input: {
         >
           <Watch className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />
           Manage wearables
+        </Link>
+      </section>
+
+      <section className="flex flex-col gap-4">
+        <div className="font-mono text-[10px] uppercase tracking-[0.12em] text-muted-foreground">
+          MCP servers
+        </div>
+        <Link
+          href="/settings/connections"
+          className="relative inline-flex items-center gap-2.5 self-start text-sm font-medium text-primary underline-offset-4 hover:underline before:absolute before:-inset-x-2 before:-inset-y-2.5 before:content-['']"
+        >
+          <Plug className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />
+          Connect an MCP server
         </Link>
       </section>
 

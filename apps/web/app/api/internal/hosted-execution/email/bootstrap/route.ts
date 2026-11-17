@@ -1,3 +1,4 @@
+import { parseInput, RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import {
   HOSTED_EMAIL_PUBLIC_BOOTSTRAP_CALLBACK_USER_ID,
   parseHostedEmailPublicBootstrapCallbackRequest,
@@ -6,7 +7,7 @@ import {
 import {
   requireHostedCloudflareCallbackRequest,
 } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
-import { jsonOk, readRawBodyBuffer } from "@/src/lib/http";
+import { parseRequestJson, jsonOk, readRawBodyBuffer } from "@/src/lib/http";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import {
   sendHostedEmailPublicBootstrapChallenge,
@@ -29,8 +30,9 @@ export const POST = withJsonError(async (request: Request) => {
     });
   }
 
-  const body = parseHostedEmailPublicBootstrapCallbackRequest(
-    payloadText.trim() ? JSON.parse(payloadText) : {},
+  const body = parseInput(
+    payloadText.trim() ? parseRequestJson(payloadText) : {},
+    parseHostedEmailPublicBootstrapCallbackRequest,
   );
   try {
     await sendHostedEmailPublicBootstrapChallenge({
@@ -55,7 +57,7 @@ async function readHostedEmailPublicBootstrapPayloadText(
       limitBytes: HOSTED_EMAIL_PUBLIC_BOOTSTRAP_MAX_BODY_BYTES,
     })).toString("utf8");
   } catch (error) {
-    if (error instanceof RangeError) {
+    if (error instanceof RequestBodyTooLargeError) {
       throw hostedOnboardingError({
         code: "HOSTED_EMAIL_PUBLIC_BOOTSTRAP_BODY_TOO_LARGE",
         message: "Hosted email public bootstrap body is too large.",

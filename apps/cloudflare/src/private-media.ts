@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_ORIGIN,
   HOSTED_RUNTIME_PRIVATE_MEDIA_DELIVERY_PATH_PREFIX,
@@ -118,7 +119,7 @@ export async function stageHostedPrivateMedia(input: {
     input.deliveryOrigin,
   );
   if (!privateImageBytesMatchContentType(bytes, input.contentType)) {
-    throw new TypeError("Hosted private media content type is invalid.");
+    throw new ContractValidationError("Hosted private media content type is invalid.");
   }
   const sha256 = await sha256Hex(bytes);
   const objectKey = await hostedPrivateMediaObjectKey({ sha256, userId });
@@ -267,10 +268,9 @@ export async function readHostedPrivateMedia(input: {
   bytes: Uint8Array;
   contentType: HostedPrivateMediaContentType;
 } | null> {
+  const capabilitySecret = requireHostedPrivateMediaCapabilitySecret(input.capabilitySecret);
+  let payload: HostedPrivateMediaCapabilityPayload;
   try {
-    const capabilitySecret = requireHostedPrivateMediaCapabilitySecret(
-      input.capabilitySecret,
-    );
     const expiresAtUnixSeconds = requirePositiveSafeInteger(
       input.expiresAtUnixSeconds,
       "Hosted private media URL expiry",
@@ -279,58 +279,62 @@ export async function readHostedPrivateMedia(input: {
     if (expiresAtUnixSeconds <= nowUnixSeconds) {
       return null;
     }
-    const payload = await openHostedPrivateMediaCapability({
+    payload = await openHostedPrivateMediaCapability({
       capability: input.capability,
       capabilitySecret,
     });
     if ((input.runtimeMediaOnly && payload.version !== 2) || payload.expiresAtUnixSeconds !== expiresAtUnixSeconds) {
       return null;
     }
-    if (payload.version === 2) {
-      if (!payload.mediaId || !input.readRuntimeMedia) return null;
-      const bytes = await input.readRuntimeMedia({ userId: payload.userId, mediaId: payload.mediaId,
-        sha256: payload.sha256, byteSize: payload.sizeBytes });
-      return bytes && bytes.byteLength === payload.sizeBytes && await sha256Hex(bytes) === payload.sha256
-        && privateImageBytesMatchContentType(bytes, "image/jpeg") ? { bytes, contentType: "image/jpeg" } : null;
-    }
-    const objectKey = await hostedPrivateMediaObjectKey({
-      sha256: payload.sha256,
-      userId: payload.userId,
-    });
-    const storageKey = await deriveHostedPrivateMediaStorageKey({
-      capabilitySecret,
-      userId: payload.userId,
-    });
-    const bytes = await readEncryptedR2Payload({
-      aad: createHostedPrivateMediaAad({
-        contentType: payload.contentType,
-        objectKey,
-        sha256: payload.sha256,
-        sizeBytes: payload.sizeBytes,
-        userId: payload.userId,
-      }),
-      bucket: input.bucket,
-      callerLabel: "Hosted private media envelope",
-      cryptoKey: storageKey,
-      expectedKeyId: HOSTED_PRIVATE_MEDIA_STORAGE_KEY_ID,
-      key: objectKey,
-      scope: "private-media",
-    });
-    if (
-      !bytes
-      || bytes.byteLength !== payload.sizeBytes
-      || await sha256Hex(bytes) !== payload.sha256
-      || !privateImageBytesMatchContentType(bytes, payload.contentType)
-    ) {
-      return null;
-    }
-    return {
-      bytes,
-      contentType: payload.contentType,
-    };
   } catch {
     return null;
   }
+  if (payload.version === 2) {
+    if (!payload.mediaId || !input.readRuntimeMedia) return null;
+    const bytes = await input.readRuntimeMedia({ userId: payload.userId, mediaId: payload.mediaId,
+      sha256: payload.sha256, byteSize: payload.sizeBytes });
+    if (!bytes) return null;
+    if (bytes.byteLength !== payload.sizeBytes || await sha256Hex(bytes) !== payload.sha256
+      || !privateImageBytesMatchContentType(bytes, "image/jpeg")) {
+      throw new Error("Hosted runtime media content is corrupt.");
+    }
+    return { bytes, contentType: "image/jpeg" };
+  }
+  const objectKey = await hostedPrivateMediaObjectKey({
+    sha256: payload.sha256,
+    userId: payload.userId,
+  });
+  const storageKey = await deriveHostedPrivateMediaStorageKey({
+    capabilitySecret,
+    userId: payload.userId,
+  });
+  const bytes = await readEncryptedR2Payload({
+    aad: createHostedPrivateMediaAad({
+      contentType: payload.contentType,
+      objectKey,
+      sha256: payload.sha256,
+      sizeBytes: payload.sizeBytes,
+      userId: payload.userId,
+    }),
+    bucket: input.bucket,
+    callerLabel: "Hosted private media envelope",
+    cryptoKey: storageKey,
+    expectedKeyId: HOSTED_PRIVATE_MEDIA_STORAGE_KEY_ID,
+    key: objectKey,
+    scope: "private-media",
+  });
+  if (!bytes) return null;
+  if (
+    bytes.byteLength !== payload.sizeBytes
+    || await sha256Hex(bytes) !== payload.sha256
+    || !privateImageBytesMatchContentType(bytes, payload.contentType)
+  ) {
+    throw new Error("Hosted private media content is corrupt.");
+  }
+  return {
+    bytes,
+    contentType: payload.contentType,
+  };
 }
 
 export function matchHostedPrivateMediaCapabilityPath(
@@ -414,13 +418,13 @@ async function openHostedPrivateMediaCapability(input: {
   capabilitySecret: string;
 }): Promise<HostedPrivateMediaCapabilityPayload> {
   if (!HOSTED_PRIVATE_MEDIA_TOKEN_PATTERN.test(input.capability)) {
-    throw new TypeError("Hosted private media capability is invalid.");
+    throw new ContractValidationError("Hosted private media capability is invalid.");
   }
   const [, encodedIv, encodedCiphertext] = input.capability.split(".");
   const iv = decodeBase64Url(encodedIv ?? "");
   const ciphertext = decodeBase64Url(encodedCiphertext ?? "");
   if (iv.byteLength !== AES_GCM_IV_BYTES) {
-    throw new TypeError("Hosted private media capability is invalid.");
+    throw new ContractValidationError("Hosted private media capability is invalid.");
   }
   const key = await deriveHostedPrivateMediaCapabilityKey(
     input.capabilitySecret,
@@ -525,9 +529,9 @@ function requireHostedPrivateMediaCapabilitySecret(value: string): string {
   return normalized;
 }
 
-function requireHostedPrivateMediaUserId(value: unknown): string {
+export function requireHostedPrivateMediaUserId(value: unknown): string {
   if (typeof value !== "string") {
-    throw new TypeError("Hosted private media userId is invalid.");
+    throw new ContractValidationError("Hosted private media userId is invalid.");
   }
   const normalized = value.trim();
   if (
@@ -535,7 +539,7 @@ function requireHostedPrivateMediaUserId(value: unknown): string {
     || normalized.length > HOSTED_PRIVATE_MEDIA_USER_ID_MAX_LENGTH
     || /[\u0000-\u001f\u007f]/u.test(normalized)
   ) {
-    throw new TypeError("Hosted private media userId is invalid.");
+    throw new ContractValidationError("Hosted private media userId is invalid.");
   }
   return normalized;
 }
@@ -557,7 +561,7 @@ function requirePositiveSafeInteger(value: unknown, label: string): number {
     || !Number.isSafeInteger(value)
     || value <= 0
   ) {
-    throw new TypeError(`${label} is invalid.`);
+    throw new ContractValidationError(`${label} is invalid.`);
   }
   return value;
 }
@@ -618,7 +622,7 @@ function encodeBase64Url(bytes: Uint8Array): string {
 
 function decodeBase64Url(value: string): Uint8Array {
   if (!/^[A-Za-z0-9_-]+$/u.test(value)) {
-    throw new TypeError("Hosted private media capability is invalid.");
+    throw new ContractValidationError("Hosted private media capability is invalid.");
   }
   const padding = (4 - (value.length % 4)) % 4;
   const normalized = value

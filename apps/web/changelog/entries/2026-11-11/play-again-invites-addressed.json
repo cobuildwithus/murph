@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-11",
+  "order": 100,
+  "item": {
+    "id": "play-again-invites-addressed",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Invites to people you've played reach them",
+    "summary": "A new challenge started by picking someone you've already played now goes to that person, keeps their photo on your home, and opens Messages to their number.",
+    "details": "Before, picking them sent an open link with no number, so Messages opened with no one in To.",
+    "relevanceTags": ["games"],
+    "sourcePullRequests": [4885]
+  }
+}

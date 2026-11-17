@@ -68,3 +68,5 @@ export * from "./return-contact.ts";
 export * from "./side-effects.ts";
 
 export { createHostedMediaReferenceId } from "./media-reference.ts";
+
+export * from "./custom-connections.ts";

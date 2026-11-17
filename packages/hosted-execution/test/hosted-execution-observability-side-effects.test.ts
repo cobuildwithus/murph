@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -175,6 +176,8 @@ describe("hosted execution observability", () => {
       ],
       [Object.assign(new Error("aborted"), { name: "AbortError" }), "timeout"],
       [new TypeError("wrong type"), "type_error"],
+      [new ContractValidationError("wrong type"), "runtime_error"],
+      [new Error("wrong type"), "runtime_error"],
       ["plain failure", "runtime_error"],
     ];
 
@@ -1186,4 +1189,13 @@ describe("hosted execution side-effects", () => {
     expect(isHostedAssistantDeliveryKind(HOSTED_ASSISTANT_DELIVERY_KIND)).toBe(true);
     expect(isHostedAssistantDeliveryKind("other")).toBe(false);
   });
+});
+
+it.each([
+  [new ContractValidationError("Invalid value."), "ContractValidationError", "runtime_error"],
+  [new TypeError("Invalid value."), "TypeError", "type_error"],
+  [new Error("Invalid value."), "Error", "runtime_error"],
+])("emits a semantic wire name and code", (error, name, code) => {
+  expect(readHostedExecutionSafeErrorName(error)).toBe(name);
+  expect(deriveHostedExecutionErrorCode(error)).toBe(code);
 });

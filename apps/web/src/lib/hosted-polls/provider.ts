@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 import * as z from "@murphai/contracts/zod-runtime";
 import { CONVERSATION_POLL_VOTER_PAGE_SIZE, type ConversationPollVoter, type ConversationPollSnapshot } from "@murphai/hosted-execution/conversation-polls";
@@ -38,7 +39,7 @@ export function telegramPollSnapshot(raw: unknown, pollRef: string, freshness: C
 
 function linqPollVoters(poll: z.infer<typeof linqPollSchema>["poll"], voterCursor?: string) {
   const offset = voterCursor === undefined ? 0 : Number(voterCursor);
-  if (!Number.isSafeInteger(offset) || offset < 0) throw new TypeError("Invalid voter cursor.");
+  if (!Number.isSafeInteger(offset) || offset < 0) throw new ContractValidationError("Invalid voter cursor.");
   const voters = new Map<string, ConversationPollVoter>();
   poll.options.forEach((option, index) => {
     for (const { handle } of option.voters) {
@@ -109,8 +110,8 @@ export async function callTelegramPoll(input: {
   messageId?: string;
 }) {
   const target = parseTelegramThreadTarget(input.target);
-  if (!target) throw new TypeError("Invalid Telegram poll target.");
-  if (target.directMessagesTopicId) throw new TypeError("Telegram channel direct messages do not support polls.");
+  if (!target) throw new ContractValidationError("Invalid Telegram poll target.");
+  if (target.directMessagesTopicId) throw new ContractValidationError("Telegram channel direct messages do not support polls.");
   const body = {
     chat_id: target.chatId,
     ...(target.businessConnectionId ? { business_connection_id: target.businessConnectionId } : {}),
@@ -127,9 +128,9 @@ export async function callTelegramPoll(input: {
   const message = input.action === "create"
     ? z.object({ message_id: z.number().int().positive(), chat: z.object({ id: z.union([z.number(), z.string()]) }), poll: telegramPollSchema }).parse(response.result)
     : null;
-  if (message && String(message.chat.id) !== String(target.chatId)) throw new TypeError("Poll response route mismatch.");
+  if (message && String(message.chat.id) !== String(target.chatId)) throw new ContractValidationError("Poll response route mismatch.");
   const poll = telegramPollSchema.parse(message?.poll ?? response.result);
-  if (input.action === "create" && poll.is_anonymous !== (input.anonymous ?? true)) throw new TypeError("Poll anonymity response mismatch.");
+  if (input.action === "create" && poll.is_anonymous !== (input.anonymous ?? true)) throw new ContractValidationError("Poll anonymity response mismatch.");
   return {
     messageId: message ? String(message.message_id) : input.messageId!,
     providerPollId: poll.id,

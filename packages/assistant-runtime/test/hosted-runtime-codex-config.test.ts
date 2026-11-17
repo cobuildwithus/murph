@@ -175,6 +175,7 @@ testHostedCliTimingE2e("shared CLI timing: built entry uses hosted permissions a
   });
   try {
     const config = buildHostedCodexConfigToml({
+      codexHome,
       exposeSpawnAgentModelOverrides: false,
       model: "gpt-6.2-sol",
       reasoningEffort: "low",
@@ -426,6 +427,7 @@ test("hosted Codex provider transport diagnostics expose only safe config metada
 
 test("hosted Codex uses one WebSocket attempt before native HTTPS fallback", () => {
   const config = buildHostedCodexConfigToml({
+    codexHome: "/tmp/synthetic-codex-home",
     exposeSpawnAgentModelOverrides: false,
     model: "gpt-5.2",
     provider: {
@@ -2243,6 +2245,7 @@ test("hosted Codex runtime config rejects non-Codex provider env", async () => {
 
 test("hosted Codex config TOML omits credential values and runtime authority headers", () => {
   const config = buildHostedCodexConfigToml({
+    codexHome: "/tmp/synthetic-codex-home",
     exposeSpawnAgentModelOverrides: true,
     model: null,
     provider: {
@@ -2351,6 +2354,7 @@ test("hosted Codex config TOML omits credential values and runtime authority hea
       '"/app" = "read"',
       '":tmpdir" = "write"',
       '":slash_tmp" = "write"',
+      '"/tmp/synthetic-codex-home" = "deny"',
       "glob_scan_max_depth = 64",
       "",
       `[permissions.${MURPH_MEMBER_WORKSPACE_PERMISSION_PROFILE}.filesystem.":workspace_roots"]`,
@@ -2436,6 +2440,7 @@ test("hosted Codex shell policy includes the image-pinned Health Commons package
 
 test("hosted Codex config keeps skill instructions and native memory disabled", () => {
   const config = buildHostedCodexConfigToml({
+    codexHome: "/tmp/synthetic-codex-home",
     exposeSpawnAgentModelOverrides: true,
     model: "gpt-6.2-sol",
     provider: {
@@ -2486,6 +2491,7 @@ test("hosted Codex config keeps skill instructions and native memory disabled", 
 
 test("hosted Codex config promotes permitted leaf delegation with native per-spawn model selection", () => {
   const config = buildHostedCodexConfigToml({
+    codexHome: "/tmp/synthetic-codex-home",
     exposeSpawnAgentModelOverrides: true,
     model: "gpt-6.2-sol",
     provider: {
@@ -2557,8 +2563,13 @@ test("hosted Codex runtime exposes a stable package-owned assistant skill root",
   const configA = await readFile(resultA.codexConfigPath, "utf8");
   const configB = await readFile(resultB.codexConfigPath, "utf8");
 
-  assert.doesNotMatch(configA, /murph-test-a/u);
-  assert.doesNotMatch(configB, /murph-test-b/u);
+  // Per-wake paths belong only to sandbox protection, never skill instructions.
+  for (const result of [resultA, resultB]) {
+    const config = result === resultA ? configA : configB;
+    const deny = `${JSON.stringify(result.codexHome)} = "deny"`;
+    assert.ok(config.includes(deny));
+    assert.doesNotMatch(config.replace(deny, ""), /murph-test-[ab]/u);
+  }
   assert.match(configA, /"MURPH_ASSISTANT_SKILLS_ROOT"/u);
   assert.match(configB, /"MURPH_ASSISTANT_SKILLS_ROOT"/u);
 });

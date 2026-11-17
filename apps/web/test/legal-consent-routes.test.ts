@@ -6,6 +6,8 @@ import { hostedOnboardingError } from "../src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
   after: vi.fn(),
+  decideProgressShareConsent: vi.fn(),
+  assertHostedAppSessionCurrentTx: vi.fn(),
   assertHostedOnboardingMutationOrigin: vi.fn(),
   cleanupWithdrawnHostedHealthDataConsent: vi.fn(),
   continueHostedJoinInviteAfterLaunchConsent: vi.fn(),
@@ -32,12 +34,15 @@ vi.mock("next/server", async (importOriginal) => ({
   after: mocks.after,
 }));
 
+vi.mock("@/src/lib/game/progress/share-consent", () => ({ decideProgressShareConsent: mocks.decideProgressShareConsent }));
+
 vi.mock("@/src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/app-session", () => ({
   requireHostedAppSessionFromRequest: mocks.requirePrivyMemberAuth,
+  assertHostedAppSessionCurrentTx: mocks.assertHostedAppSessionCurrentTx,
   revokeHostedAppSessionFromRequest: mocks.revokeHostedAppSessionFromRequest,
 }));
 
@@ -159,6 +164,32 @@ describe("legal consent routes", () => {
     mocks.signalHostedRuntimeRecheckRuntime.mockResolvedValue(undefined);
   });
 
+  it("routes Progress withdrawal through the atomic owner and exposes sanitized cleanup failure", async () => {
+    const request = () => new Request("https://join.example.test/api/legal/consent/revoke", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "feature.progress-share-images" }),
+    });
+    expect((await consentRevokeRoute.POST(request())).status).toBe(200);
+    expect(mocks.decideProgressShareConsent).toHaveBeenCalledWith(expect.objectContaining({
+      memberId: "member_123", decision: "deny", prisma: mocks.prismaClient,
+    }));
+    await mocks.decideProgressShareConsent.mock.calls[0]![0].beforeMutationTx(mocks.prismaClient);
+    expect(mocks.assertHostedAppSessionCurrentTx).toHaveBeenCalled();
+    expect(mocks.revokeHostedConsentScope).not.toHaveBeenCalled();
+    mocks.decideProgressShareConsent.mockRejectedValueOnce(new Error("private provider sentinel"));
+    const response = await consentRevokeRoute.POST(request());
+    expect(response.status).toBe(503);
+    expect(await response.text()).not.toContain("private provider sentinel");
+  });
+
+  it("cannot grant Progress likeness permission via the generic legal acceptance route", async () => {
+    const response = await consentAcceptRoute.POST(new Request("https://join.example.test/api/legal/consent/accept", {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ scope: "feature.progress-share-images",
+        acceptedDocumentVersions: { "privacy-policy": "2026-11-12", "consumer-health-data-notice": "2026-11-12", "health-ai-safety-disclosure": "2026-11-12" } }),
+    }));
+    expect(response.status).toBe(400);
+    expect(mocks.grantHostedOptionalFeatureConsent).not.toHaveBeenCalled();
+  });
+
   it("returns the current consent status for the authenticated hosted member", async () => {
     const response = await consentStatusRoute.GET(
       new Request("https://join.example.test/api/legal/consent/status", {
@@ -180,9 +211,9 @@ describe("legal consent routes", () => {
       new Request("https://join.example.test/api/legal/consent/accept", {
         body: JSON.stringify({
           acceptedDocumentVersions: {
-            "health-ai-safety-disclosure": "2026-07-23",
-            "privacy-policy": "2026-10-26",
-            "terms-of-service": "2026-10-26",
+            "health-ai-safety-disclosure": "2026-11-12",
+            "privacy-policy": "2026-11-12",
+            "terms-of-service": "2026-11-12",
           },
           scope: "launch.legal",
           source: "  hosted   onboarding  ",
@@ -199,9 +230,9 @@ describe("legal consent routes", () => {
     expect(mocks.assertHostedOnboardingMutationOrigin).toHaveBeenCalledWith(expect.any(Request));
     expect(mocks.recordHostedLaunchRequiredConsent).toHaveBeenCalledWith({
       acceptedDocumentVersions: {
-        "health-ai-safety-disclosure": "2026-07-23",
-        "privacy-policy": "2026-10-26",
-        "terms-of-service": "2026-10-26",
+        "health-ai-safety-disclosure": "2026-11-12",
+        "privacy-policy": "2026-11-12",
+        "terms-of-service": "2026-11-12",
       },
       memberId: "member_123",
       prisma: mocks.prismaClient,
@@ -210,6 +241,30 @@ describe("legal consent routes", () => {
     });
     expect(mocks.grantHostedOptionalFeatureConsent).not.toHaveBeenCalled();
     await expect(response.json()).resolves.toEqual(currentStatus);
+  });
+
+  it.each([null, "", 12])("rejects a malformed optional invite before recording consent %#", async (inviteCode) => {
+    const response = await consentAcceptRoute.POST(
+      new Request("https://example.test/api/legal/consent/accept", {
+        body: JSON.stringify({
+          acceptedDocumentVersions: {
+            "health-ai-safety-disclosure": "2026-11-12",
+            "privacy-policy": "2026-11-12",
+            "terms-of-service": "2026-11-12",
+          },
+          inviteCode,
+          scope: "launch.legal",
+          source: "hosted onboarding",
+        }),
+        method: "POST",
+      }),
+    );
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: { code: "INVALID_REQUEST", message: "Invalid request." },
+    });
+    expect(mocks.recordHostedLaunchRequiredConsent).not.toHaveBeenCalled();
+    expect(mocks.continueHostedJoinInviteAfterLaunchConsent).not.toHaveBeenCalled();
   });
 
   it("waits for every launch scope before continuing invited Starter enrollment", async () => {
@@ -228,9 +283,9 @@ describe("legal consent routes", () => {
       new Request("https://join.example.test/api/legal/consent/accept", {
         body: JSON.stringify({
           acceptedDocumentVersions: {
-            "health-ai-safety-disclosure": "2026-07-23",
-            "privacy-policy": "2026-10-26",
-            "terms-of-service": "2026-10-26",
+            "health-ai-safety-disclosure": "2026-11-12",
+            "privacy-policy": "2026-11-12",
+            "terms-of-service": "2026-11-12",
           },
           inviteCode: "invite_123",
           scope: "launch.legal",
@@ -269,7 +324,7 @@ describe("legal consent routes", () => {
       new Request("https://join.example.test/api/legal/consent/accept", {
         body: JSON.stringify({
           acceptedDocumentVersions: {
-            "consumer-health-data-notice": "2026-07-23",
+            "consumer-health-data-notice": "2026-11-12",
           },
           inviteCode: "invite_123",
           scope: "launch.health-data",
@@ -333,7 +388,7 @@ describe("legal consent routes", () => {
       new Request("https://join.example.test/api/legal/consent/accept", {
         body: JSON.stringify({
           acceptedDocumentVersions: {
-            "consumer-health-data-notice": "2026-07-23",
+            "consumer-health-data-notice": "2026-11-12",
           },
           inviteCode: "invite_123",
           scope: "launch.health-data",
@@ -368,7 +423,7 @@ describe("legal consent routes", () => {
       new Request("https://join.example.test/api/legal/consent/accept", {
         body: JSON.stringify({
           acceptedDocumentVersions: {
-            "consumer-health-data-notice": "2026-07-23",
+            "consumer-health-data-notice": "2026-11-12",
           },
           inviteCode: "invite_123",
           scope: "launch.health-data",
@@ -398,7 +453,7 @@ describe("legal consent routes", () => {
       new Request("https://join.example.test/api/legal/consent/accept", {
         body: JSON.stringify({
           acceptedDocumentVersions: {
-            "consumer-health-data-notice": "2026-07-23",
+            "consumer-health-data-notice": "2026-11-12",
           },
           scope: "launch.health-data",
           source: "hosted onboarding",
@@ -414,7 +469,7 @@ describe("legal consent routes", () => {
     expect(response.status).toBe(200);
     expect(mocks.recordHostedLaunchRequiredConsent).toHaveBeenCalledWith({
       acceptedDocumentVersions: {
-        "consumer-health-data-notice": "2026-07-23",
+        "consumer-health-data-notice": "2026-11-12",
       },
       memberId: "member_123",
       prisma: mocks.prismaClient,
@@ -433,7 +488,7 @@ describe("legal consent routes", () => {
       new Request("https://join.example.test/api/legal/consent/accept", {
         body: JSON.stringify({
           acceptedDocumentVersions: {
-            "consumer-health-data-notice": "2026-07-23",
+            "consumer-health-data-notice": "2026-11-12",
           },
           scope: "launch.health-data",
           source: "settings-health-data-resume",
@@ -582,9 +637,9 @@ describe("legal consent routes", () => {
       new Request("https://join.example.test/api/legal/consent/accept", {
         body: JSON.stringify({
           acceptedDocumentVersions: {
-            "health-ai-safety-disclosure": "2026-07-23",
-            "privacy-policy": "2026-10-26",
-            "terms-of-service": "2026-10-26",
+            "health-ai-safety-disclosure": "2026-11-12",
+            "privacy-policy": "2026-11-12",
+            "terms-of-service": "2026-11-12",
           },
           scope: "launch.legal",
         }),
@@ -613,8 +668,8 @@ describe("legal consent routes", () => {
         body: JSON.stringify({
           acceptedDocumentVersions: {
             "health-ai-safety-disclosure": "2026-01-01",
-            "privacy-policy": "2026-10-26",
-            "terms-of-service": "2026-10-26",
+            "privacy-policy": "2026-11-12",
+            "terms-of-service": "2026-11-12",
           },
           scope: "launch.legal",
         }),
@@ -647,9 +702,9 @@ describe("legal consent routes", () => {
       new Request("https://join.example.test/api/legal/consent/accept", {
         body: JSON.stringify({
           acceptedDocumentVersions: {
-            "consumer-health-data-notice": "2026-07-23",
-            "health-ai-safety-disclosure": "2026-07-23",
-            "privacy-policy": "2026-10-26",
+            "consumer-health-data-notice": "2026-11-12",
+            "health-ai-safety-disclosure": "2026-11-12",
+            "privacy-policy": "2026-11-12",
           },
           scope: "feature.health-ai",
           source: "settings",
@@ -665,9 +720,9 @@ describe("legal consent routes", () => {
     expect(response.status).toBe(200);
     expect(mocks.grantHostedOptionalFeatureConsent).toHaveBeenCalledWith({
       acceptedDocumentVersions: {
-        "consumer-health-data-notice": "2026-07-23",
-        "health-ai-safety-disclosure": "2026-07-23",
-        "privacy-policy": "2026-10-26",
+        "consumer-health-data-notice": "2026-11-12",
+        "health-ai-safety-disclosure": "2026-11-12",
+        "privacy-policy": "2026-11-12",
       },
       memberId: "member_123",
       prisma: mocks.prismaClient,

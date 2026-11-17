@@ -20,14 +20,16 @@ import {
   listResultSchema,
   mealAddResultSchema,
   pathSchema,
+  recordListResultSchema,
+  recordShowResultSchema,
   showResultSchema,
   timeZoneSchema,
 } from '@murphai/operator-config/vault-cli-contracts'
 import {
   inputFileOptionSchema,
   loadJsonInputObject,
-  normalizeRepeatableFlagOption,
-} from '@murphai/vault-usecases'
+} from '@murphai/vault-usecases/json-input'
+import { normalizeRepeatableFlagOption } from '@murphai/vault-usecases/option-utils'
 import {
   deleteMealRecord,
   editMealRecord,
@@ -55,6 +57,10 @@ import {
 } from './command-factory-primitives.js'
 import { normalizeOccurredAtOption } from './occurred-at-option.js'
 import { publicValidationIssue } from './public-validation-issue.js'
+import {
+  projectRecordListResult,
+  projectRecordShowResult,
+} from './record-read-projection.js'
 
 const mealNameGuidance = MEAL_NAME_GUIDANCE
 const mealNameSchema = z.string().trim().describe(mealNameGuidance)
@@ -258,28 +264,21 @@ function buildMealNutritionFromOptions(
   const totals: NonNullable<MealNutrition['totals']> = {
     ...(payloadNutrition?.totals ?? {}),
   }
-  if (options.nutritionCalories !== undefined) {
-    totals.calories = options.nutritionCalories
-  }
-  if (options.nutritionProteinGrams !== undefined) {
-    totals.proteinGrams = options.nutritionProteinGrams
-  }
-  if (options.nutritionCarbsGrams !== undefined) {
-    totals.carbsGrams = options.nutritionCarbsGrams
-  }
-  if (options.nutritionFatGrams !== undefined) {
-    totals.fatGrams = options.nutritionFatGrams
-  }
-  if (options.nutritionFiberGrams !== undefined) {
-    totals.fiberGrams = options.nutritionFiberGrams
+  for (const [key, value] of [
+    ['calories', options.nutritionCalories],
+    ['proteinGrams', options.nutritionProteinGrams],
+    ['carbsGrams', options.nutritionCarbsGrams],
+    ['fatGrams', options.nutritionFatGrams],
+    ['fiberGrams', options.nutritionFiberGrams],
+  ] as const) {
+    if (value !== undefined) totals[key] = value
   }
 
-  const provenanceSource =
-    options.nutritionSource ?? payloadNutrition?.provenance?.source
-  const provenanceConfidence =
-    options.nutritionConfidence ?? payloadNutrition?.provenance?.confidence
-  const provenanceSourceDetail =
-    options.nutritionSourceDetail ?? payloadNutrition?.provenance?.sourceDetail
+  const payloadProvenance: Partial<NonNullable<MealNutrition['provenance']>> =
+    payloadNutrition?.provenance ?? {}
+  const provenanceSource = options.nutritionSource ?? payloadProvenance.source
+  const provenanceConfidence = options.nutritionConfidence ?? payloadProvenance.confidence
+  const provenanceSourceDetail = options.nutritionSourceDetail ?? payloadProvenance.sourceDetail
   const typedProvenanceProvided =
     options.nutritionSource !== undefined ||
     options.nutritionConfidence !== undefined ||
@@ -747,22 +746,22 @@ export function registerMealCommands(cli: Cli.Cli, services: VaultServices) {
       description: 'Show one meal by meal id.',
       argName: 'id',
       argSchema: mealLookupSchema,
-      output: showResultSchema,
+      output: recordShowResultSchema,
       async run(input) {
-        return showMealRecord(input.vault, input.id)
+        return projectRecordShowResult(await showMealRecord(input.vault, input.id))
       },
     },
     list: {
       description: 'List meal events with optional date bounds.',
       limitOption: commonListLimitOptionSchema,
-      output: listResultSchema,
+      output: recordListResultSchema,
       async run(input) {
-        return listMealRecords({
+        return projectRecordListResult(await listMealRecords({
           vault: input.vault,
           from: input.from,
           limit: input.limit,
           to: input.to,
-        })
+        }))
       },
     },
     manifest: {

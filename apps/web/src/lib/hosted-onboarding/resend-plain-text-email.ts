@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   Resend,
   type CreateBatchOptions,
@@ -146,7 +147,7 @@ function normalizeHostedResendReplyTo(value: string | null | undefined): string 
     return null;
   }
   if (normalized.length > 254 || /[\r\n]/u.test(normalized)) {
-    throw new TypeError("Hosted Resend reply-to address is invalid.");
+    throw new ContractValidationError("Hosted Resend reply-to address is invalid.");
   }
   return normalized;
 }

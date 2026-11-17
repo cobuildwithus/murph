@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createHash } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
 import { appendFile, lstat, open as openFile, readFile, stat, unlink } from "node:fs/promises";
@@ -1197,18 +1198,6 @@ async function readIntegrationIngestEntriesFromSources(
   return entries;
 }
 
-async function readIntegrationIngestEntriesByIdFromPaths(
-  vaultRoot: string,
-  paths: readonly string[],
-  ids: ReadonlySet<string>,
-): Promise<StoredIntegrationIngestEntry[]> {
-  return readIntegrationIngestEntriesByIdFromSources(
-    vaultRoot,
-    await listIntegrationIngestRowSourcesForLogicalPaths(vaultRoot, paths),
-    ids,
-  );
-}
-
 async function readIntegrationIngestEntriesByIdFromSources(
   vaultRoot: string,
   sources: readonly IntegrationIngestRowSource[],
@@ -1635,7 +1624,7 @@ export async function inspectArchivedIntegrationIngestShardAppend(
 function resolveIntegrationIngestArchiveCurrentMonth(now: Date | undefined): string {
   const resolved = now ?? new Date();
   if (!Number.isFinite(resolved.getTime())) {
-    throw new TypeError("Integration ingest archive time must be a valid Date.");
+    throw new ContractValidationError("Integration ingest archive time must be a valid Date.");
   }
   return resolved.toISOString().slice(0, 7);
 }

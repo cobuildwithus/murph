@@ -238,7 +238,9 @@ async function expectDeferredDelivery(
       retryable: true,
     },
   }));
-  expect(console.warn).toHaveBeenCalledExactlyOnceWith(
+  expect(console.error).not.toHaveBeenCalled();
+  expect(console.warn).not.toHaveBeenCalled();
+  expect(console.info).toHaveBeenCalledExactlyOnceWith(
     "Hosted vault-share delivery deferred.",
     {
       schema: "murph.hosted-vault-share-delivery-deferred.v1",
@@ -392,6 +394,13 @@ function heartRateZonesDeliveryBody(): HostedVaultShareDeliverRequest {
 }
 
 describe("vault-share deliver route", () => {
+  it("rejects group-email records without a supported data contract", async () => {
+    const response = await deliverRoute.POST(buildRequest({ ...VALID_BODY, projectionKind: "group-email.v0", records: [{ recordKey: "synthetic", occurredAt: "2026-11-14T00:00:00.000Z", data: {} }] }));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: { code: "INVALID_REQUEST", message: "Invalid request." } });
+    expect(mocks.findActiveHostedVaultShares).not.toHaveBeenCalled();
+  });
+
   it("forwards an age group only on a ranking delivery", async () => {
     const scope = hostedVaultShareProjectionKindToScope("resting-heart-rate-days.v0");
     const share = { ...ACTIVE_SHARE, projectionKind: scope.projectionKind, projectionScope: scope,
@@ -412,6 +421,8 @@ describe("vault-share deliver route", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
     mocks.isHostedRuntimeInactiveAccessError.mockReturnValue(false);
     mocks.requireHostedRuntimeMembersActiveAccessForUpdateTx.mockResolvedValue(undefined);
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_grantor");
@@ -657,6 +668,18 @@ describe("vault-share deliver route", () => {
     });
   });
 
+  it.each(["sleepType", "sleepState"])("rejects malformed %s before reading or writing shares", async (field) => {
+    const body = sourceAwareSleepDeliveryBody(1);
+    const response = await deliverRoute.POST(buildRequest({
+      ...body,
+      records: body.records.map((record) => ({ ...record, data: { ...record.data, [field]: 123 } })),
+    }));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: { code: "INVALID_REQUEST", message: "Invalid request." } });
+    expect(mocks.findActiveHostedVaultShares).not.toHaveBeenCalled();
+    expect(mocks.replaceHostedVaultShareProjectionSnapshot).not.toHaveBeenCalled();
+  });
+
   it("preserves source-recorded sleep times through the deliver route", async ({ onTestFinished }) => {
     // Keep this fixed-date fixture inside the route's history window.
     const clock = vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-07-25T12:00:00.000Z"));
@@ -823,7 +846,7 @@ describe("vault-share deliver route", () => {
 
 	it.each([false, true])("retries when a destination becomes inactive during replacement (logger throws: %s)", async (loggerThrows) => {
 		if (loggerThrows) {
-			vi.mocked(console.warn).mockImplementation(() => {
+			vi.mocked(console.info).mockImplementation(() => {
 				throw new Error("synthetic private logger failure");
 			});
 		}
@@ -884,7 +907,7 @@ describe("vault-share deliver route", () => {
       share,
       sourceWorkspaceVersion: body.sourceWorkspaceVersion,
     });
-    expect(JSON.stringify(vi.mocked(console.warn).mock.calls)).not.toContain("synthetic-private");
+    expect(JSON.stringify(vi.mocked(console.info).mock.calls)).not.toContain("synthetic-private");
   });
 
   it.each([
@@ -985,7 +1008,7 @@ describe("vault-share deliver route", () => {
         retryable: false,
       },
     });
-    expect(console.warn).not.toHaveBeenCalledWith(
+    expect(console.info).not.toHaveBeenCalledWith(
       "Hosted vault-share delivery deferred.",
       expect.anything(),
     );

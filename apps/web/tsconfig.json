@@ -166,6 +166,9 @@
       "@murphai/hosted-execution/usage-diagnostics": [
         "../../packages/hosted-execution/src/usage-diagnostics.ts"
       ],
+      "@murphai/hosted-execution/request-input": [
+        "../../packages/hosted-execution/src/request-input.ts"
+      ],
       "@murphai/hosted-execution/plan-usage": [
         "../../packages/hosted-execution/src/plan-usage.ts"
       ],
@@ -270,6 +273,9 @@
       ],
       "@murphai/query/browser-overview": [
         "../../packages/query/src/browser-overview.ts"
+      ],
+      "@murphai/query/browser-replica": [
+        "../../packages/query/src/browser-replica.ts"
       ],
       "@murphai/query/browser-replica-client": [
         "../../packages/query/src/browser-replica-client.ts"
@@ -400,11 +406,41 @@
       "@murphai/contracts/recap-material": [
         "../../packages/contracts/src/recap-material.ts"
       ],
+      "@murphai/contracts/validation-error": [
+        "../../packages/contracts/src/validation-error.ts"
+      ],
+      "@murphai/contracts/elevenlabs-music": [
+        "../../packages/contracts/src/elevenlabs-music.ts"
+      ],
       "@murphai/contracts/recap-validation": [
         "../../packages/contracts/src/recap-validation.ts"
       ],
       "@murphai/operator-config/generated-audio": [
         "../../packages/operator-config/src/generated-audio.ts"
+      ],
+      "@murphai/contracts/constants": [
+        "../../packages/contracts/src/constants.ts"
+      ],
+      "@murphai/contracts/zod": [
+        "../../packages/contracts/src/zod.ts"
+      ],
+      "@murphai/contracts/time": [
+        "../../packages/contracts/src/time.ts"
+      ],
+      "@murphai/contracts/shares": [
+        "../../packages/contracts/src/shares.ts"
+      ],
+      "@murphai/contracts/health-entities": [
+        "../../packages/contracts/src/health-entities.ts"
+      ],
+      "@murphai/vault-usecases/json-input": [
+        "../../packages/vault-usecases/src/json-input.ts"
+      ],
+      "@murphai/vault-usecases/option-utils": [
+        "../../packages/vault-usecases/src/option-utils.ts"
+      ],
+      "@murphai/vault-usecases/health-cli-descriptors": [
+        "../../packages/vault-usecases/src/health-cli-descriptors.ts"
       ]
     },
     "sourceMap": false,

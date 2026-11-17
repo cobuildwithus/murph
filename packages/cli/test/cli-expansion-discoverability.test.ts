@@ -5,7 +5,6 @@ import { test } from 'vitest'
 import { createVaultCli } from '../src/index.js'
 
 interface ScaffoldResult {
-  vault: string
   noun: string
   kind?: string
   payload: Record<string, unknown>
@@ -141,7 +140,7 @@ test.each(scaffoldCases)(
     }
 
     const scaffold = await readScaffold(command)
-    assert.equal(scaffold.vault, './vault')
+    assert.equal('vault' in scaffold, false)
     assert.equal(scaffold.noun, noun)
     assertPayloadFields(scaffold.payload, payloadFields)
   },

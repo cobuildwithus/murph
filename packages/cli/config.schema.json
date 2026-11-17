@@ -3776,7 +3776,11 @@
                       "additionalProperties": false,
                       "properties": {
                         "compact": {
-                          "description": "Return the mutation outcome and exact affected record without the full memory document.",
+                          "description": "Accepted for compatibility; memory writes are already compact.",
+                          "type": "boolean"
+                        },
+                        "full": {
+                          "description": "Also return the full memory document and the affected record's storage metadata.",
                           "type": "boolean"
                         }
                       }
@@ -3792,7 +3796,7 @@
                       "additionalProperties": false,
                       "properties": {
                         "compact": {
-                          "description": "Return the mutation outcome and exact affected record without the full memory document.",
+                          "description": "Accepted for compatibility; memory writes are already compact.",
                           "type": "boolean"
                         },
                         "birthYear": {
@@ -3841,7 +3845,11 @@
                       "additionalProperties": false,
                       "properties": {
                         "compact": {
-                          "description": "Return the mutation outcome and exact affected record without the full memory document.",
+                          "description": "Accepted for compatibility; memory writes are already compact.",
+                          "type": "boolean"
+                        },
+                        "full": {
+                          "description": "Also return the full memory document and the affected record's storage metadata.",
                           "type": "boolean"
                         },
                         "section": {
@@ -3867,7 +3875,11 @@
                       "additionalProperties": false,
                       "properties": {
                         "compact": {
-                          "description": "Return the mutation outcome and exact affected record without the full memory document.",
+                          "description": "Accepted for compatibility; memory writes are already compact.",
+                          "type": "boolean"
+                        },
+                        "full": {
+                          "description": "Also return the full memory document and the affected record's storage metadata.",
                           "type": "boolean"
                         },
                         "section": {
@@ -3893,7 +3905,11 @@
                       "additionalProperties": false,
                       "properties": {
                         "compact": {
-                          "description": "Return the mutation outcome and exact affected record without the full memory document.",
+                          "description": "Accepted for compatibility; memory writes are already compact.",
+                          "type": "boolean"
+                        },
+                        "full": {
+                          "description": "Also return the full memory document and the affected record's storage metadata.",
                           "type": "boolean"
                         }
                       }
@@ -10662,8 +10678,7 @@
                                   }
                                 },
                                 "limit": {
-                                  "default": 3,
-                                  "description": "Maximum number of daily summaries to return. Defaults to 3.",
+                                  "description": "Maximum number of daily summaries to return. Defaults to the whole --date/--from/--to range up to 14 days, or the newest 3 without a date filter. A cut result sets `truncated` and `remaining`.",
                                   "type": "integer",
                                   "exclusiveMinimum": 0,
                                   "maximum": 200
@@ -10773,8 +10788,7 @@
                                   }
                                 },
                                 "limit": {
-                                  "default": 3,
-                                  "description": "Maximum number of daily summaries to return. Defaults to 3.",
+                                  "description": "Maximum number of daily summaries to return. Defaults to the whole --date/--from/--to range up to 14 days, or the newest 3 without a date filter. A cut result sets `truncated` and `remaining`.",
                                   "type": "integer",
                                   "exclusiveMinimum": 0,
                                   "maximum": 200
@@ -10842,8 +10856,7 @@
                                   }
                                 },
                                 "limit": {
-                                  "default": 3,
-                                  "description": "Maximum number of daily summaries to return. Defaults to 3.",
+                                  "description": "Maximum number of daily summaries to return. Defaults to the whole --date/--from/--to range up to 14 days, or the newest 3 without a date filter. A cut result sets `truncated` and `remaining`.",
                                   "type": "integer",
                                   "exclusiveMinimum": 0,
                                   "maximum": 200
@@ -10901,8 +10914,7 @@
                                   }
                                 },
                                 "limit": {
-                                  "default": 3,
-                                  "description": "Maximum number of daily summaries to return. Defaults to 3.",
+                                  "description": "Maximum number of daily summaries to return. Defaults to the whole --date/--from/--to range up to 14 days, or the newest 3 without a date filter. A cut result sets `truncated` and `remaining`.",
                                   "type": "integer",
                                   "exclusiveMinimum": 0,
                                   "maximum": 200
@@ -10960,8 +10972,7 @@
                                   }
                                 },
                                 "limit": {
-                                  "default": 3,
-                                  "description": "Maximum number of daily summaries to return. Defaults to 3.",
+                                  "description": "Maximum number of daily summaries to return. Defaults to the whole --date/--from/--to range up to 14 days, or the newest 3 without a date filter. A cut result sets `truncated` and `remaining`.",
                                   "type": "integer",
                                   "exclusiveMinimum": 0,
                                   "maximum": 200
@@ -15128,7 +15139,7 @@
                         },
                         "includeDetails": {
                           "default": false,
-                          "description": "Include all typed fields and the complete narrative body without repeating frontmatter or truncating list summaries.",
+                          "description": "Include every typed field without truncating list summaries.",
                           "type": "boolean"
                         }
                       }

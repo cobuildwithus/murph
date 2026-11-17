@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   hostedRunnerImageMatches,
+  hostedRunnerReleaseImageMatches,
   readHostedRunnerDeployment,
   scopeHostedRunnerReleaseEnvironment,
 } from "../src/hosted-runner-release.ts";
@@ -38,6 +39,8 @@ describe("staged runner release", () => {
         expect(readHostedStandbyTarget({ ...env, HOSTED_EXECUTION_STANDBY_TARGET: "0" })).toBe(0);
         expect(hostedRunnerImageMatches(env, active.bundleFingerprint, active.sourceFingerprint)).toBe(true);
         expect(hostedRunnerImageMatches(env, candidate.bundleFingerprint, candidate.sourceFingerprint)).toBe(true);
+        expect(hostedRunnerReleaseImageMatches(source, active.id, active.bundleFingerprint, active.sourceFingerprint)).toBe(true);
+        expect(hostedRunnerReleaseImageMatches(source, active.id, candidate.bundleFingerprint, candidate.sourceFingerprint)).toBe(true);
         for (const [bundle, fingerprint] of [
           [active.bundleFingerprint, candidate.sourceFingerprint],
           [candidate.bundleFingerprint, active.sourceFingerprint],
@@ -46,7 +49,10 @@ describe("staged runner release", () => {
           [undefined, undefined],
           [candidate.bundleFingerprint, undefined],
           [null, candidate.sourceFingerprint],
-        ]) expect(hostedRunnerImageMatches(env, bundle, fingerprint)).toBe(false);
+        ]) {
+          expect(hostedRunnerImageMatches(env, bundle, fingerprint)).toBe(false);
+          expect(hostedRunnerReleaseImageMatches(source, active.id, bundle, fingerprint)).toBe(false);
+        }
         for (const invalid of [null, -1, 33, 1.5, "invalid"]) {
           expect(() => readHostedStandbyTarget({ ...env, HOSTED_EXECUTION_STANDBY_TARGET: invalid }))
             .toThrow("must be an integer");
@@ -65,6 +71,31 @@ describe("staged runner release", () => {
       }
     },
   );
+
+  it("matches bank-scoped slot admission from an unscoped environment across promotion", () => {
+    for (const promoted of [false, true]) {
+      for (const release of [primary, next]) {
+        const env = scopeHostedRunnerReleaseEnvironment(source(promoted), release.bank as "primary" | "next");
+        for (const image of [primary, next]) {
+          const matches = hostedRunnerReleaseImageMatches(source(promoted), release.id, image.bundleFingerprint, image.sourceFingerprint);
+          expect(matches).toBe(image === release);
+          expect(matches).toBe(hostedRunnerImageMatches(env, image.bundleFingerprint, image.sourceFingerprint));
+        }
+      }
+      expect(hostedRunnerReleaseImageMatches(source(promoted), "unknown-release", primary.bundleFingerprint, primary.sourceFingerprint)).toBe(false);
+    }
+  });
+
+  it("uses configured fingerprints when there is no deployment record", () => {
+    const env = {
+      HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT: primary.bundleFingerprint,
+      HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT: primary.sourceFingerprint,
+    };
+    for (const image of [primary, next]) {
+      expect(hostedRunnerReleaseImageMatches(env, primary.id, image.bundleFingerprint, image.sourceFingerprint)).toBe(image === primary);
+      expect(hostedRunnerImageMatches(env, image.bundleFingerprint, image.sourceFingerprint)).toBe(image === primary);
+    }
+  });
 
   it("keeps an exact warm binding usable through consecutive image promotions", () => {
     const slotName = createHostedRunnerSlotName(primary.id);

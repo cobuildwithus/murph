@@ -30,9 +30,7 @@ import {
   HOSTED_EXECUTION_USER_ID_HEADER,
   readHostedExecutionBoundUserIdHeader,
 } from "./route-utils/bound-user-header.ts";
-import {
-  isRequestBodyTooLargeError,
-} from "./route-utils/json-body.ts";
+import { RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import {
   decodeRouteParam,
 } from "./route-utils/route-params.ts";
@@ -76,7 +74,7 @@ export async function authorizeRoute(
           limitBytes: options.signatureBodyLimitBytes,
         });
       } catch (error) {
-        if (isRequestBodyTooLargeError(error)) {
+        if (error instanceof RequestBodyTooLargeError) {
           return jsonError("Request body too large.", 413);
         }
 
@@ -141,17 +139,23 @@ export async function authorizeRoute(
         validation,
       });
 
-      if (verified) {
+      if ("claims" in verified) {
         return null;
       }
 
       emitHostedExecutionStructuredLog({
         component: "worker",
-        details: buildWorkerRouteLogDetails({
-          authScheme: "vercel-oidc",
-          reason: "vercel-oidc-verification-failed",
-          routeName,
-        }, context.request),
+        details: {
+          ...buildWorkerRouteLogDetails({
+            authScheme: "vercel-oidc",
+            reason: "vercel-oidc-verification-failed",
+            routeName,
+          }, context.request),
+          verificationFailure: verified.failure,
+          ...(verified.issuedSecondsAgo === undefined
+            ? {}
+            : { issuedSecondsAgo: verified.issuedSecondsAgo }),
+        },
         level: "warn",
         message: "Hosted worker route rejected an internal request after OIDC verification failed.",
         phase: "failed",

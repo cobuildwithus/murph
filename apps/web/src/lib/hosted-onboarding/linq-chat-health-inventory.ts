@@ -21,6 +21,11 @@ import { requireHostedOnboardingLinqConfig } from "./runtime";
 import { normalizeNullableString } from "./shared";
 
 const HOSTED_LINQ_CHAT_HEALTH_PAGE_SIZE = 100;
+// Each listed chat carries its full participant list, about 210 bytes per
+// handle. Sixty-person groups made one 100-chat page 562 KB, past the client's
+// 256 KB default, and every sync failed. 4 MiB fits a page of 100-person chats
+// with room to spare.
+export const HOSTED_LINQ_CHAT_HEALTH_PAGE_MAX_BYTES = 4 * 1024 * 1024;
 export const HOSTED_LINQ_CHAT_HEALTH_SYNC_LIMIT = 5_000;
 
 export type HostedLinqChatHealthInventoryRecord = {
@@ -139,6 +144,7 @@ async function fetchHostedLinqChatHealthPage(input: {
     const page = await runLinqApiRequest({
       apiBaseUrl,
       apiToken,
+      maxResponseBytes: HOSTED_LINQ_CHAT_HEALTH_PAGE_MAX_BYTES,
       request: (client) => client.chats.listChats({
         ...(input.cursor ? { cursor: input.cursor } : {}),
         limit: HOSTED_LINQ_CHAT_HEALTH_PAGE_SIZE,

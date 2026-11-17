@@ -1,9 +1,10 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { parseHostedVoiceCallId } from "../voice-input.ts";
 import {
   readHostedMailboxWakeHighWater,
   type HostedMailboxLaneLag,
 } from "../runtime-control.ts";
-import { parseHostedRuntimeOwnerResponse } from "../runtime-owner.ts";
+import { isHostedStandbyClaimId, parseHostedRuntimeOwnerResponse } from "../runtime-owner.ts";
 import {
   HOSTED_RUNTIME_ENSURE_PROCESSING_RESPONSE_KINDS,
   HOSTED_RUNTIME_PROCESSING_ACCEPTED_ACTIONS,
@@ -279,16 +280,16 @@ export function parseHostedRuntimeEnsureProcessingRequest(
         "Hosted runtime ensure-processing request assistantExecutionBlocked",
       );
   if (assistantExecutionBlocked && processingMode !== "system_mailbox") {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runtime ensure-processing request assistantExecutionBlocked requires system_mailbox processingMode.",
     );
   }
   if (record.voiceCallId !== undefined && effectiveProcessingMode !== "default") {
-    throw new TypeError("Voice reservation requires default processing mode.");
+    throw new ContractValidationError("Voice reservation requires default processing mode.");
   }
   const mailboxWakeHighWater = readHostedMailboxWakeHighWater(record.mailboxWakeHighWater);
   if (record.mailboxWakeHighWater !== undefined && !mailboxWakeHighWater) {
-    throw new TypeError("Hosted runtime ensure-processing request mailboxWakeHighWater requires both mailbox lanes.");
+    throw new ContractValidationError("Hosted runtime ensure-processing request mailboxWakeHighWater requires both mailbox lanes.");
   }
   const conversationWorkPending = record.conversationWorkPending === undefined
     ? undefined
@@ -297,7 +298,7 @@ export function parseHostedRuntimeEnsureProcessingRequest(
         "Hosted runtime ensure-processing request conversationWorkPending",
       );
   if (conversationWorkPending && effectiveProcessingMode !== "default") {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runtime ensure-processing request conversationWorkPending requires default processingMode.",
     );
   }
@@ -323,12 +324,18 @@ export function parseHostedRuntimeEnsureProcessingRequest(
 function parseRuntimeProcessingAdmission(value: unknown, processingMode: string) {
   const admission = parseHostedRuntimeOwnerResponse(value);
   if (!admission.owner || admission.owner.phase === "idle") {
-    throw new TypeError("Runtime admission requires a non-idle Postgres owner.");
+    throw new ContractValidationError("Runtime admission requires a non-idle Postgres owner.");
+  }
+  if (admission.status === "existing" && !isHostedStandbyClaimId(admission.owner.allocationId)) {
+    throw new ContractValidationError("Existing runtime admission allocationId must be a standby claim id.");
+  }
+  if (Date.parse(admission.owner.startedAt ?? "") > 8.64e15 - 30_000) {
+    throw new ContractValidationError("Runtime admission startedAt exceeds the retry timestamp range.");
   }
   if (admission.status === "existing") return admission;
   if (admission.status === "claimed" && admission.owner.phase === "starting"
     && admission.owner.processingMode === processingMode) return admission;
-  throw new TypeError("Runtime admission must be existing or a new claim matching the requested mode.");
+  throw new ContractValidationError("Runtime admission must be existing or a new claim matching the requested mode.");
 }
 
 export function parseHostedRuntimeEnsureProcessingResponse(
@@ -428,7 +435,7 @@ function requireOpaqueIdentifier(value: unknown, label: string): string {
   const text = requireString(value, label);
 
   if (text.length > 192 || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(text)) {
-    throw new TypeError(`${label} must be a bounded opaque identifier.`);
+    throw new ContractValidationError(`${label} must be a bounded opaque identifier.`);
   }
 
   return text;
@@ -438,7 +445,7 @@ function requireNonNegativeBigIntString(value: unknown, label: string): string {
   const text = requireString(value, label);
 
   if (!/^[0-9]+$/u.test(text)) {
-    throw new TypeError(`${label} must be a non-negative base-10 integer string.`);
+    throw new ContractValidationError(`${label} must be a non-negative base-10 integer string.`);
   }
 
   return text;
@@ -454,7 +461,7 @@ function readNullableIsoTimestamp(value: unknown, label: string): string | null 
     !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/u.test(text)
     || Number.isNaN(Date.parse(text))
   ) {
-    throw new TypeError(`${label} must be a valid ISO-8601 timestamp.`);
+    throw new ContractValidationError(`${label} must be a valid ISO-8601 timestamp.`);
   }
 
   return text;
@@ -462,7 +469,7 @@ function readNullableIsoTimestamp(value: unknown, label: string): string | null 
 
 function readRequiredNullableIsoTimestamp(value: unknown, label: string): string | null {
   if (value === undefined) {
-    throw new TypeError(`${label} must be a string or null.`);
+    throw new ContractValidationError(`${label} must be a string or null.`);
   }
 
   return readNullableIsoTimestamp(value, label);
@@ -479,21 +486,21 @@ function readOptionalNullableIsoTimestamp(value: unknown, label: string): string
 function readRequiredIsoTimestamp(value: unknown, label: string): string {
   const timestamp = readRequiredNullableIsoTimestamp(value, label);
   if (timestamp === null) {
-    throw new TypeError(`${label} must be a string.`);
+    throw new ContractValidationError(`${label} must be a string.`);
   }
   return timestamp;
 }
 
 function readRequiredNullableBoundedString(value: unknown, label: string): string | null {
   if (value === undefined) {
-    throw new TypeError(`${label} must be a string or null.`);
+    throw new ContractValidationError(`${label} must be a string or null.`);
   }
   const text = readNullableString(value, label);
   if (text === null) {
     return null;
   }
   if (text.length > 256 || text.trim() !== text || /[\u0000-\u001F\u007F]/u.test(text)) {
-    throw new TypeError(`${label} must be a bounded string or null.`);
+    throw new ContractValidationError(`${label} must be a bounded string or null.`);
   }
   return text;
 }
@@ -509,7 +516,7 @@ function parseAllowedString<T extends string>(
     return text as T;
   }
 
-  throw new TypeError(`${label} is not supported.`);
+  throw new ContractValidationError(`${label} is not supported.`);
 }
 
 function parseNullableAllowedString<T extends string>(
@@ -526,7 +533,7 @@ function parseNullableAllowedString<T extends string>(
 
 function requireExactTrue(value: unknown, label: string): true {
   if (value !== true) {
-    throw new TypeError(`${label} must be true.`);
+    throw new ContractValidationError(`${label} must be true.`);
   }
 
   return true;
@@ -541,7 +548,7 @@ function assertExactKeys(
 
   for (const key of Object.keys(record)) {
     if (!allowed.has(key)) {
-      throw new TypeError(`${label} must not include ${key}.`);
+      throw new ContractValidationError(`${label} must not include ${key}.`);
     }
   }
 }

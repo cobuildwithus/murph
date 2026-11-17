@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { normalizeRelativeVaultPath } from "@murphai/core";
 
 import {
@@ -106,12 +107,12 @@ function decodeParserOutputShape(value: unknown): ParserOutput {
     "text",
   ]);
   if (record.schema !== "murph.parser-output.v1") {
-    throw new TypeError("Parser result has an unsupported schema.");
+    throw new ContractValidationError("Parser result has an unsupported schema.");
   }
 
   const createdAt = boundedString(record.createdAt, "Parser result createdAt", 64);
   if (!isCanonicalIsoTimestamp(createdAt)) {
-    throw new TypeError("Parser result createdAt must be a canonical ISO timestamp.");
+    throw new ContractValidationError("Parser result createdAt must be a canonical ISO timestamp.");
   }
 
   return {
@@ -163,7 +164,7 @@ function decodeArtifactSummary(value: unknown): ParserArtifactSummary {
   ], ["fileName", "mime"]);
   const kind = boundedString(record.kind, "Parser artifact kind", 32);
   if (!PARSER_ARTIFACT_KINDS.has(kind as ParserArtifactKind)) {
-    throw new TypeError("Parser artifact has an unsupported kind.");
+    throw new ContractValidationError("Parser artifact has an unsupported kind.");
   }
 
   const artifact = normalizeParserArtifactIdentity({
@@ -180,10 +181,10 @@ function decodeArtifactSummary(value: unknown): ParserArtifactSummary {
 
 function decodeBlocks(value: unknown, exactRecords = true): ParsedBlock[] {
   if (!Array.isArray(value)) {
-    throw new TypeError("Parser blocks must be an array.");
+    throw new ContractValidationError("Parser blocks must be an array.");
   }
   if (value.length > MAX_PARSER_BLOCKS) {
-    throw new TypeError(`Parser blocks exceed the ${MAX_PARSER_BLOCKS} block limit.`);
+    throw new ContractValidationError(`Parser blocks exceed the ${MAX_PARSER_BLOCKS} block limit.`);
   }
 
   return value.map((entry, index) => {
@@ -203,7 +204,7 @@ function decodeBlocks(value: unknown, exactRecords = true): ParsedBlock[] {
       : expectPlainObject(entry, label);
     const kind = boundedString(record.kind, `${label} kind`, MAX_PARSER_ID_CHARS);
     if (!PARSE_BLOCK_KINDS.has(kind as ParseBlockKind)) {
-      throw new TypeError(`${label} has an unsupported kind.`);
+      throw new ContractValidationError(`${label} has an unsupported kind.`);
     }
 
     return stripUndefined({
@@ -222,10 +223,10 @@ function decodeBlocks(value: unknown, exactRecords = true): ParsedBlock[] {
 
 function decodeTables(value: unknown, exactRecords = true): ParsedTable[] {
   if (!Array.isArray(value)) {
-    throw new TypeError("Parser tables must be an array.");
+    throw new ContractValidationError("Parser tables must be an array.");
   }
   if (value.length > MAX_PARSER_TABLES) {
-    throw new TypeError(`Parser tables exceed the ${MAX_PARSER_TABLES} table limit.`);
+    throw new ContractValidationError(`Parser tables exceed the ${MAX_PARSER_TABLES} table limit.`);
   }
 
   return value.map((entry, index) => {
@@ -234,10 +235,10 @@ function decodeTables(value: unknown, exactRecords = true): ParsedTable[] {
       ? expectExactPlainObject(entry, label, ["id", "page", "rows"], ["page"])
       : expectPlainObject(entry, label);
     if (!Array.isArray(record.rows)) {
-      throw new TypeError(`${label} rows must be an array.`);
+      throw new ContractValidationError(`${label} rows must be an array.`);
     }
     if (record.rows.length > MAX_PARSER_TABLE_ROWS) {
-      throw new TypeError(`${label} exceeds the ${MAX_PARSER_TABLE_ROWS} row limit.`);
+      throw new ContractValidationError(`${label} exceeds the ${MAX_PARSER_TABLE_ROWS} row limit.`);
     }
 
     return stripUndefined({
@@ -245,10 +246,10 @@ function decodeTables(value: unknown, exactRecords = true): ParsedTable[] {
       page: optionalNonnegativeInteger(record.page, `${label} page`),
       rows: record.rows.map((row, rowIndex) => {
         if (!Array.isArray(row)) {
-          throw new TypeError(`${label} row ${rowIndex + 1} must be an array.`);
+          throw new ContractValidationError(`${label} row ${rowIndex + 1} must be an array.`);
         }
         if (row.length > MAX_PARSER_TABLE_COLUMNS) {
-          throw new TypeError(
+          throw new ContractValidationError(
             `${label} row ${rowIndex + 1} exceeds the ${MAX_PARSER_TABLE_COLUMNS} column limit.`,
           );
         }
@@ -286,10 +287,10 @@ function decodeWarnings(
     return undefined;
   }
   if (!Array.isArray(value)) {
-    throw new TypeError("Parser metadata warnings must be an array when provided.");
+    throw new ContractValidationError("Parser metadata warnings must be an array when provided.");
   }
   if (value.length > MAX_PARSER_WARNINGS) {
-    throw new TypeError(`Parser metadata warnings exceed the ${MAX_PARSER_WARNINGS} warning limit.`);
+    throw new ContractValidationError(`Parser metadata warnings exceed the ${MAX_PARSER_WARNINGS} warning limit.`);
   }
 
   return value.map((entry, index) => {
@@ -312,13 +313,13 @@ function decodeScalarMetadata(value: unknown, label: string): Record<string, unk
   const record = expectPlainObject(value, label);
   const entries = Object.entries(record);
   if (entries.length > MAX_PARSER_METADATA_KEYS) {
-    throw new TypeError(`${label} exceeds the ${MAX_PARSER_METADATA_KEYS} key limit.`);
+    throw new ContractValidationError(`${label} exceeds the ${MAX_PARSER_METADATA_KEYS} key limit.`);
   }
 
   const output: Record<string, unknown> = {};
   for (const [key, entry] of entries) {
     if (key.length === 0 || key.length > MAX_PARSER_ID_CHARS) {
-      throw new TypeError(`${label} contains an invalid metadata key.`);
+      throw new ContractValidationError(`${label} contains an invalid metadata key.`);
     }
     if (entry === null || typeof entry === "boolean") {
       output[key] = entry;
@@ -332,7 +333,7 @@ function decodeScalarMetadata(value: unknown, label: string): Record<string, unk
       output[key] = entry;
       continue;
     }
-    throw new TypeError(`${label} contains an unsupported metadata value.`);
+    throw new ContractValidationError(`${label} contains an unsupported metadata value.`);
   }
 
   return output;
@@ -343,7 +344,7 @@ function normalizeStoredPath(value: unknown): string {
   try {
     return normalizeRelativeVaultPath(storedPath);
   } catch (error) {
-    throw new TypeError(error instanceof Error ? error.message : "Parser artifact stored path is invalid.");
+    throw new ContractValidationError(error instanceof Error ? error.message : "Parser artifact stored path is invalid.");
   }
 }
 
@@ -359,12 +360,12 @@ function expectExactPlainObject(
 
   for (const key of Object.keys(record)) {
     if (!allowed.has(key)) {
-      throw new TypeError(`${label} field "${key}" is not supported.`);
+      throw new ContractValidationError(`${label} field "${key}" is not supported.`);
     }
   }
   for (const key of allowed) {
     if (!optional.has(key) && !(key in record)) {
-      throw new TypeError(`${label} is missing field "${key}".`);
+      throw new ContractValidationError(`${label} is missing field "${key}".`);
     }
   }
 
@@ -373,17 +374,17 @@ function expectExactPlainObject(
 
 function expectPlainObject(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError(`${label} must be a plain object.`);
+    throw new ContractValidationError(`${label} must be a plain object.`);
   }
   return value as Record<string, unknown>;
 }
 
 function boundedString(value: unknown, label: string, maxLength: number): string {
   if (typeof value !== "string") {
-    throw new TypeError(`${label} must be a string.`);
+    throw new ContractValidationError(`${label} must be a string.`);
   }
   if (value.length > maxLength) {
-    throw new TypeError(`${label} exceeds the ${maxLength} character limit.`);
+    throw new ContractValidationError(`${label} exceeds the ${maxLength} character limit.`);
   }
   return value;
 }
@@ -391,7 +392,7 @@ function boundedString(value: unknown, label: string, maxLength: number): string
 function nonemptyBoundedString(value: unknown, label: string, maxLength: number): string {
   const result = boundedString(value, label, maxLength);
   if (result.length === 0) {
-    throw new TypeError(`${label} must not be empty.`);
+    throw new ContractValidationError(`${label} must not be empty.`);
   }
   return result;
 }
@@ -412,7 +413,7 @@ function optionalBoundedString(
 
 function nonnegativeInteger(value: unknown, label: string): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) {
-    throw new TypeError(`${label} must be a non-negative integer.`);
+    throw new ContractValidationError(`${label} must be a non-negative integer.`);
   }
   return value;
 }
@@ -435,7 +436,7 @@ function optionalNonnegativeNumber(value: unknown, label: string): number | null
     return null;
   }
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
-    throw new TypeError(`${label} must be a non-negative finite number.`);
+    throw new ContractValidationError(`${label} must be a non-negative finite number.`);
   }
   return value;
 }
@@ -443,7 +444,7 @@ function optionalNonnegativeNumber(value: unknown, label: string): number | null
 function optionalConfidence(value: unknown, label: string): number | null | undefined {
   const confidence = optionalNonnegativeNumber(value, label);
   if (typeof confidence === "number" && confidence > 1) {
-    throw new TypeError(`${label} must be between 0 and 1.`);
+    throw new ContractValidationError(`${label} must be between 0 and 1.`);
   }
   return confidence;
 }

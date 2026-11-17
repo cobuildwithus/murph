@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createHash } from "node:crypto";
 import type {
   MemberActionOutcomeV1,
@@ -133,7 +134,7 @@ function requireHostedExecutionLinqGroupReactionContext(value: string): string {
     normalized.length === 0
     || normalized.length > HOSTED_EXECUTION_LINQ_GROUP_REACTION_CONTEXT_MAX_CHARS
   ) {
-    throw new TypeError("Hosted Linq group reaction context is invalid.");
+    throw new ContractValidationError("Hosted Linq group reaction context is invalid.");
   }
   return normalized;
 }
@@ -354,7 +355,7 @@ function assertHostedExecutionLinqConversationMessageWorkspaceTarget(input: {
   assertHostedExecutionGroupSenderMemberId(input.senderMemberId);
   if (input.linqMessage.threadIsDirect !== false) {
     if (input.senderMemberId !== undefined) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "Hosted direct Linq conversation wake must not carry a group sender member.",
       );
     }
@@ -362,22 +363,22 @@ function assertHostedExecutionLinqConversationMessageWorkspaceTarget(input: {
   }
 
   if (!input.routeAuthority) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted non-direct Linq conversation wake requires thread route authority.",
     );
   }
   if (input.routeAuthority.channel !== "linq") {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted non-direct Linq conversation wake route authority must be Linq.",
     );
   }
   if (input.routeAuthority.containerMemberId !== input.userId) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted non-direct Linq conversation wake must target its route container.",
     );
   }
   if (input.routeAuthority.threadId !== input.linqMessage.chatId) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted non-direct Linq conversation wake route authority must match its chat.",
     );
   }
@@ -437,29 +438,29 @@ function assertHostedExecutionTelegramConversationMessageWorkspaceTarget(input: 
       || input.telegramMessage.senderDisplayName
       || input.telegramMessage.senderUsername
     ) {
-      throw new TypeError(
+      throw new ContractValidationError(
         "Hosted direct Telegram conversation wake must not carry group sender identity.",
       );
     }
     return;
   }
   if (!input.routeAuthority) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted non-direct Telegram conversation wake requires thread route authority.",
     );
   }
   if (input.routeAuthority.channel !== "telegram") {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted non-direct Telegram conversation wake route authority must be Telegram.",
     );
   }
   if (input.routeAuthority.containerMemberId !== input.userId) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted non-direct Telegram conversation wake must target its route container.",
     );
   }
   if (input.routeAuthority.threadId !== input.telegramMessage.threadId) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted non-direct Telegram conversation wake route authority must match its chat.",
     );
   }
@@ -470,7 +471,7 @@ function assertHostedExecutionGroupSenderMemberId(value: string | undefined): vo
     return;
   }
   if (value.trim().length === 0 || value.trim() !== value) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted group sender member id must be a non-empty normalized string.",
     );
   }
@@ -734,7 +735,7 @@ export function buildHostedExecutionAssistantAskRequestedWake(input: {
     Date.parse(ask.expiresAt)
     !== Date.parse(occurredAt) + HOSTED_EXECUTION_ASSISTANT_ASK_REQUEST_TTL_MS
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted execution assistant ask requested expiry must equal occurredAt plus the request TTL.",
     );
   }
@@ -762,7 +763,7 @@ export function buildHostedExecutionAssistantAskCompletedWake(input: {
     "Hosted execution assistant ask completed occurredAt",
   );
   if (Date.parse(ask.expiresAt) <= Date.parse(occurredAt)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted execution assistant ask completion must occur before request expiry.",
     );
   }
@@ -977,7 +978,7 @@ export function buildHostedExecutionMealPhotoCapturedWake(input: {
   sha256: string;
 }): HostedExecutionMealPhotoCapturedWake {
   if (input.occurredAt !== input.capturedAt) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted meal photo wake occurredAt must match capturedAt.",
     );
   }

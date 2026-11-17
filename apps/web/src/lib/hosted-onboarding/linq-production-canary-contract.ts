@@ -1,3 +1,5 @@
+export const LINQ_PRODUCTION_CANARY_OIDC_AUDIENCE = "https://www.withmurph.ai/linq-production-canary";
+
 export type LinqProductionCanaryOutcome = {
   ready: boolean;
   totalGoalCount: number;

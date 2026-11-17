@@ -1748,10 +1748,14 @@ function createResetTransactionFixture(input: {
     input.delivery === null ? [] : [input.delivery ?? makeDelivery()],
   ];
   return {
-    $queryRaw: vi.fn()
-      .mockResolvedValueOnce(rows[0])
-      .mockResolvedValueOnce(rows[1])
-      .mockResolvedValueOnce(rows[2]),
+    $queryRaw: vi.fn(async (...args: unknown[]) => {
+      const [query] = args;
+      if (query && typeof query === "object" && "sql" in query
+        && typeof query.sql === "string" && query.sql.includes('AS "freeIdle"')) {
+        return [{ freeIdle: false }];
+      }
+      return rows.shift();
+    }),
     hostedAiUsagePeriod: {
       updateMany: vi.fn(async () => ({ count: 1 })),
     },

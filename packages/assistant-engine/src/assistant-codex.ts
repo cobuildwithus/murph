@@ -1,4 +1,5 @@
 import { normalizeStoredAssistantModel } from '@murphai/contracts'
+import { ContractValidationError } from '@murphai/contracts/validation-error';
 import { resolveDailyNutritionIntroduction } from './assistant/nutrition-card-introduction.js'
 import {
   completeDynamicToolFailureDiagnostics,
@@ -88,6 +89,7 @@ import type {
   MurphDynamicToolReactionPatch,
   MurphDynamicToolReplyTargetPatch,
   MurphDynamicToolRequest,
+  MurphGroupSharedReadTurnState,
 } from './assistant-codex/dynamic-tools.js'
 import {
   type AssistantStyleTurnSettingsOverlay,
@@ -399,6 +401,21 @@ function isCodexLegacyContextCompactionCompletion(message: CodexRpcMessage): boo
   return message.method === 'thread/compacted'
 }
 
+// The room-model page injected at turn start; show omits its body while it
+// matches. A compaction can summarize that page away, so forget it then.
+interface GroupRoomModelInContext {
+  digest: string | null | undefined
+}
+
+function forgetRoomModelPageAfterCompaction(
+  inContext: GroupRoomModelInContext,
+  message: CodexRpcMessage,
+): void {
+  if (isCodexContextCompactionCompletion(message)) {
+    inContext.digest = null
+  }
+}
+
 function isCodexContextCompactionCompletion(message: CodexRpcMessage): boolean {
   if (isCodexLegacyContextCompactionCompletion(message)) {
     return true
@@ -419,6 +436,16 @@ function observeCodexContextCompactionActivity(
     || isCodexContextCompactionCompletion(message)
   ) {
     tracker.observeProviderActivity()
+  }
+}
+
+// A compaction can summarize away an earlier read_game result, so the next read returns its rules again.
+function forgetGameRulesAfterCompaction(
+  turnState: MurphGroupSharedReadTurnState,
+  message: CodexRpcMessage,
+): void {
+  if (isCodexContextCompactionCompletion(message)) {
+    turnState.gameRulesSent?.clear()
   }
 }
 
@@ -551,6 +578,7 @@ export interface CodexAppServerTurnInput {
   followUpAttachmentAllowed?: boolean | null
   groupConversation?: boolean | null
   groupRoomModelMaintenanceAuthorized?: boolean | null
+  groupRoomModelInjectedDigest?: string | null
   memberMemoryMaintenanceAuthorized?: boolean | null
   materializeWorkspaceArtifacts?: AssistantWorkspaceArtifactMaterializer | null
   productFeedbackRecorder?: AssistantTurnProductFeedbackRecorder | null
@@ -571,6 +599,7 @@ export interface CodexAppServerTurnInput {
   // Sent on every turn/start: a value selects the tier, null explicitly
   // resets a sticky thread-level override back to the default tier.
   serviceTier?: AssistantProviderServiceTier | null
+  promptCacheRetention?: '12h' | null
   progressDelivery?: AssistantProgressDelivery | null
   hostedToolContext?: AssistantHostedToolContext | null
   providerRequestOrdinal?: number | null
@@ -941,7 +970,7 @@ export async function executeCodexAppServerTurn(
   const requestedModel = input.model?.trim().toLowerCase() ?? null
   const currentModel = normalizeStoredAssistantModel(requestedModel)
   if (currentModel !== requestedModel) {
-    throw new TypeError(`Model ${requestedModel} is retired; use ${currentModel}.`)
+    throw new ContractValidationError(`Model ${requestedModel} is retired; use ${currentModel}.`)
   }
   const providerStartCriticalPath = stampAssistantProviderStartCriticalPath(
     input.providerStartCriticalPath,
@@ -3266,6 +3295,9 @@ async function runCodexAppServerTurnOnProcess(
     readProjectionScopeKeyBatches: [],
     roster: null,
   }
+  const groupRoomModelInContext: GroupRoomModelInContext = {
+    digest: input.groupRoomModelInjectedDigest,
+  }
   const automationRelativeDateReferenceWindows: Array<
     AssistantAcceptedTurnInputReferenceWindow | null
   > = [
@@ -4753,6 +4785,7 @@ async function runCodexAppServerTurnOnProcess(
           assistantStyleSettingsOverlay,
           groupRoomModelMaintenanceAuthorized:
             input.groupRoomModelMaintenanceAuthorized === true,
+          groupRoomModelInjectedDigest: groupRoomModelInContext.digest,
           memberMemoryMaintenanceAuthorized:
             input.memberMemoryMaintenanceAuthorized === true,
           abortSignal: input.abortSignal
@@ -4861,8 +4894,7 @@ async function runCodexAppServerTurnOnProcess(
       if (
         result.finalActionPatch?.kind === 'none' &&
         (
-          result.finalActionPatch.owner === 'group-email'
-          || result.finalActionPatch.owner === 'current-sender-ask'
+          ['leave-group', 'group-email', 'current-sender-ask'].includes(result.finalActionPatch.owner ?? '')
         )
       ) {
         if (result.externallyVisibleOutput) {
@@ -5144,6 +5176,8 @@ async function runCodexAppServerTurnOnProcess(
     lastEventError = extractCodexErrorMessage(message) ?? lastEventError
     lastEventErrorInfo = extractCodexErrorInfo(message) ?? lastEventErrorInfo
     observeCodexContextCompactionActivity(finalResponseCompletion, message)
+    forgetGameRulesAfterCompaction(groupSharedReadTurnState, message)
+    forgetRoomModelPageAfterCompaction(groupRoomModelInContext, message)
 
     const normalizedEvent = normalizeCodexEvent(message)
     recordProviderEventReceipt(normalizedEvent)

@@ -1,3 +1,4 @@
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import { after } from "next/server";
 import { parseHostedRuntimeOwnerCommand } from "@murphai/hosted-execution/runtime-owner";
 import { requireHostedCloudflareCallbackJsonRequest } from "@/src/lib/hosted-execution/cloudflare-callback-auth";
@@ -11,7 +12,7 @@ const runWithTiming = createHostedRuntimeCallbackTiming("owner");
 export const POST = withJsonError((request: Request) => runWithTiming(request, async (timing) => {
   const { payload, userId } = await requireHostedCloudflareCallbackJsonRequest(request, { maxBodyBytes: 64 * 1024 });
   timing.authenticated();
-  const command = parseHostedRuntimeOwnerCommand(payload);
+  const command = parseInput(payload, parseHostedRuntimeOwnerCommand);
   const result = await executeHostedRuntimeOwnerCommand({ prisma: getPrisma(), userId, command });
   const released = command.operation === "release" || command.operation === "release_completed"
     || (command.operation === "complete" && command.settledRunnerContainerName !== null);

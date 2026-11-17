@@ -2,6 +2,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 
 import {
   CloudflareHostedControlBrowserVaultReplicaNotFoundError,
+  CloudflareHostedControlMalformedResponseError,
 } from "@murphai/cloudflare-hosted-control/client";
 import { BROWSER_VAULT_REPLICA_CURRENT_GENERATION } from "@murphai/contracts";
 import { generateHostedUserRecipientKeyPair } from "@murphai/runtime-state";
@@ -24,6 +25,7 @@ const TEST_BROWSER_VAULT_METRIC_BUCKET_IDS = Array.from(
 );
 
 const mocks = vi.hoisted(() => ({
+  prepareProgressShareExport: vi.fn(),
   assertBrowserVaultMemberAuthority: vi.fn(),
   afterResponse: vi.fn((callback: () => void | Promise<void>) => {
     void callback();
@@ -46,6 +48,8 @@ const mocks = vi.hoisted(() => ({
   consumeSensitiveActionChallenge: vi.fn(),
   readHostedWorkspaceBrowserVaultSourceStateHash: vi.fn<(snapshotRef: unknown) => string | null>(() => null),
 }));
+
+vi.mock("@/src/lib/game/progress/share-export", () => ({ prepareProgressShareExport: mocks.prepareProgressShareExport }));
 
 vi.mock("next/server", async (importOriginal) => {
   const actual = await importOriginal<typeof import("next/server")>();
@@ -128,6 +132,7 @@ describe("browser vault session route", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.prepareProgressShareExport.mockResolvedValue(async function* () {});
     mocks.signalHostedBrowserVaultRefreshRuntime.mockResolvedValue({
       signalAccepted: true,
       workflowId: "hosted-user-runtime:member_123",
@@ -175,6 +180,39 @@ describe("browser vault session route", () => {
       userId: "member_123",
       version: "1",
     });
+  });
+
+  it.each(["browserPublicKeyJwk", "knownReplicaRef"])("rejects malformed request %s before reading stored data", async (field) => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    const response = await browserVaultSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
+        browserPublicKeyJwk: browser.publicKeyJwk,
+        [field]: {},
+      }),
+    );
+
+    expect(response.status).toBe(400);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({
+      error: { code: "INVALID_REQUEST", message: "Invalid request." },
+    });
+    expect(mocks.readHostedWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("reports a malformed stored replica ref as a server failure", async () => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    mocks.readHostedWorkspace.mockResolvedValue({ browserVaultReplicaRef: {} });
+    const response = await browserVaultSessionRoute.POST(
+      createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
+        browserPublicKeyJwk: browser.publicKeyJwk,
+      }),
+    );
+
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({
+      error: { code: "INTERNAL_ERROR", message: "Internal error." },
+    });
+    expect(mocks.readHostedExecutionControlClientIfConfigured).not.toHaveBeenCalled();
   });
 
   it("returns an empty session when the workspace does not publish a replica ref", async () => {
@@ -678,6 +716,36 @@ describe("browser vault session route", () => {
     });
     expect(mocks.signalHostedBrowserVaultRefreshRuntime).not.toHaveBeenCalled();
   });
+
+  it.each(["granted", "revoked"])(
+    "reports workspace read failures as server errors with %s consent",
+    async (consent) => {
+      const browser = await generateHostedUserRecipientKeyPair();
+      mocks.readHostedHealthDataConsentState.mockResolvedValue(consent);
+      const errorLog = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        for (const failure of [new Error("Database unavailable"), new TypeError("Decrypt failed")]) {
+          mocks.readHostedWorkspace.mockRejectedValueOnce(failure);
+          const response = await settingsVaultExportSessionRoute.POST(
+            createJsonPostRequest("https://join.example.test/api/settings/vault-export/session", {
+              authorization: {
+                signature: `0x${"11".repeat(65)}`,
+                token: "sac_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef",
+              },
+              browserPublicKeyJwk: browser.publicKeyJwk,
+            }),
+          );
+          expect(response.status).toBe(500);
+          await expect(response.json()).resolves.toMatchObject({ error: { code: "INTERNAL_ERROR" } });
+        }
+        expect(errorLog).toHaveBeenCalledTimes(2);
+        expect(mocks.consumeSensitiveActionChallenge).not.toHaveBeenCalled();
+        expect(mocks.signalHostedBrowserVaultRefreshRuntime).not.toHaveBeenCalled();
+      } finally {
+        errorLog.mockRestore();
+      }
+    },
+  );
 
   it("refuses Settings vault export sessions without consuming the challenge when the replica is missing", async () => {
     const browser = await generateHostedUserRecipientKeyPair();
@@ -2138,7 +2206,7 @@ describe("browser vault session route", () => {
     });
   });
 
-  it("returns a 502 when hosted execution control returns an invalid browser vault session", async () => {
+  it.each(["interactive", "legacy export", "bucketed export"] as const)("returns a 502 for an invalid upstream %s session without consuming export approval", async (kind) => {
     const browser = await generateHostedUserRecipientKeyPair();
     mocks.readHostedWorkspace.mockResolvedValue({
       browserVaultReplicaRef: createReplicaRef(),
@@ -2153,19 +2221,29 @@ describe("browser vault session route", () => {
       version: "1",
     });
     const createBrowserVaultSession = vi.fn().mockRejectedValue(
-      new TypeError("Cloudflare browser vault session state must be ready."),
+      new CloudflareHostedControlMalformedResponseError(
+        new Error("Synthetic response validation failure."),
+      ),
     );
 
     mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
       createBrowserVaultSession,
+      createBrowserVaultExportSession: createBrowserVaultSession,
     });
 
-    const response = await browserVaultSessionRoute.POST(
+    const route = kind === "interactive" ? browserVaultSessionRoute : settingsVaultExportSessionRoute;
+    const response = await route.POST(
       createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
         browserPublicKeyJwk: browser.publicKeyJwk,
+        ...(kind === "bucketed export" ? {
+          requestedMetricBuckets: TEST_BROWSER_VAULT_METRIC_BUCKET_IDS,
+          requestedShards: ["core", "labs", "metricsIndex"],
+        } : {}),
       }),
     );
 
+    expect(createBrowserVaultSession).toHaveBeenCalledTimes(1);
+    expect(mocks.consumeSensitiveActionChallenge).not.toHaveBeenCalled();
     expect(response.status).toBe(502);
     await expect(response.json()).resolves.toMatchObject({
       error: {
@@ -2174,6 +2252,47 @@ describe("browser vault session route", () => {
         retryable: false,
       },
     });
+  });
+
+  it.each(["interactive", "legacy export", "bucketed export"] as const)("does not label a client bug as an invalid upstream %s session", async (kind) => {
+    const browser = await generateHostedUserRecipientKeyPair();
+    mocks.readHostedWorkspace.mockResolvedValue({
+      browserVaultReplicaRef: createReplicaRef(),
+      createdAt: "2026-04-20T08:00:00.000Z",
+      checkpointedAt: "2026-04-20T08:00:00.000Z",
+      redactedStatusJson: {},
+      nextWakeAt: null,
+      nextWakeReason: null,
+      snapshotRef: createSnapshotRef("a"),
+      updatedAt: "2026-04-20T08:00:00.000Z",
+      userId: "member_123",
+      version: "1",
+    });
+    const createBrowserVaultSession = vi.fn().mockRejectedValue(
+      new TypeError("Synthetic client bug."),
+    );
+
+    mocks.readHostedExecutionControlClientIfConfigured.mockReturnValue({
+      createBrowserVaultSession,
+      createBrowserVaultExportSession: createBrowserVaultSession,
+    });
+
+    const route = kind === "interactive" ? browserVaultSessionRoute : settingsVaultExportSessionRoute;
+    const response = await route.POST(
+      createJsonPostRequest("https://join.example.test/api/browser-vault/session", {
+        browserPublicKeyJwk: browser.publicKeyJwk,
+        ...(kind === "bucketed export" ? {
+          requestedMetricBuckets: TEST_BROWSER_VAULT_METRIC_BUCKET_IDS,
+          requestedShards: ["core", "labs", "metricsIndex"],
+        } : {}),
+      }),
+    );
+
+    expect(createBrowserVaultSession).toHaveBeenCalledTimes(1);
+    expect(mocks.consumeSensitiveActionChallenge).not.toHaveBeenCalled();
+    expect(response.status).toBe(500);
+    const body = await response.json();
+    expect(body.error.code).toBe("INTERNAL_ERROR");
   });
 
   it("returns empty when hosted execution control cannot find the referenced replica", async () => {

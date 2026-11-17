@@ -11,7 +11,7 @@ export const GET = withJsonError(async (
   context: { params: Promise<{ token: string }> },
 ) => {
   const token = await resolveDecodedRouteParam(context.params, "token");
-  const memberId = request.headers.has("authorization") ? await requireGameMember(request, token) : undefined;
+  const memberId = request.headers.has("authorization") ? await requireGameMember(request) : undefined;
   const preview = await readInvitePreview(token, hasGameMultiplayer(request), memberId);
   if (!preview) throw gameHttpError("INVITE_NOT_FOUND", 404, "That invite isn't available.");
   return jsonOk({ ok: true, preview }, 200, { "Cache-Control": "private, no-store", "Referrer-Policy": "no-referrer" });

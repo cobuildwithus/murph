@@ -15,7 +15,6 @@ import {
 import {
   createHealthEntityCrudGroup,
 } from "./health-entity-command-registry.js";
-import { suggestedCommandsCta } from "./command-factory-primitives.js";
 
 const geneticVariantSlugSchema = z
   .string()
@@ -138,27 +137,7 @@ export function registerGeneticsCommands(
       });
       const saved = toGeneticsSaveResult(context.options.vault, result);
 
-      return context.ok(saved, {
-        cta: suggestedCommandsCta([
-          {
-            command: "genetics show",
-            args: {
-              id: saved.variantId,
-            },
-            description: "Show the saved genetic variant.",
-            options: {
-              vault: true,
-            },
-          },
-          {
-            command: "genetics list",
-            description: "List genetic variants.",
-            options: {
-              vault: true,
-            },
-          },
-        ]),
-      });
+      return saved;
     },
   });
 

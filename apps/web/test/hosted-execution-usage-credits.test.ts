@@ -9,6 +9,7 @@ import {
   reconcileHostedUsageCreditRefundNetReversalTx,
   settleHostedUsageCreditForUsageTx,
 } from "@/src/lib/hosted-execution/usage-credits";
+import { HostedUsageCreditBeneficiaryMissingError } from "@/src/lib/hosted-execution/usage-credit-ledger";
 import {
   readHostedUsageCreditGrantCapacityTx,
 } from "@/src/lib/hosted-execution/usage-credit-grant-capacity";
@@ -33,6 +34,13 @@ describe("hosted usage credits", () => {
       balanceUsdMicros: 0n,
       ledgerVersion: 0n,
     });
+  });
+
+  it("reports a missing ledger owner with its own error, not a domain refusal", async () => {
+    await expect(lockHostedUsageCreditBeneficiaryTx({
+      beneficiaryMemberId: BENEFICIARY_ID,
+      tx: { $queryRaw: vi.fn().mockResolvedValue([]) } as never,
+    })).rejects.toBeInstanceOf(HostedUsageCreditBeneficiaryMissingError);
   });
 
   it("locks and normalizes the beneficiary projection", async () => {

@@ -52,7 +52,7 @@ it.skipIf(!live)('replays synthetic Murph workflows through native Codex with ca
     `base_url = ${JSON.stringify(proxy.baseUrl)}`, 'env_key = "MURPH_CACHE_REPLAY_TOKEN"',
     'wire_api = "responses"', 'requires_openai_auth = false',
     `supports_websockets = ${transport === 'websocket'}`, 'stream_idle_timeout_ms = 90000',
-    ...buildMurphHostedPermissionProfileTomlLines(),
+    ...buildMurphHostedPermissionProfileTomlLines(codexHome),
   ].join('\n'), { mode: 0o600 })
   const common = {
     codexCommand: fileURLToPath(new URL('../node_modules/.bin/codex', import.meta.url)),

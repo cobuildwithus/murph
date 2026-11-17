@@ -98,6 +98,30 @@ Read and apply this guide when touching any of these surfaces:
    - Do not send to purchased, scraped, or otherwise untrusted contact lists.
    - Only message people with a clear user/product relationship and an expected reason to hear from Murph.
 
+## Investigating delayed inbound iMessages
+
+Run the read-only timeline for the hour ending now. To investigate a past incident,
+pass `-v end_utc=<ISO-8601 timestamp with UTC offset>` before `-f`.
+
+```sh
+murph-prod-psql-ro -f apps/web/scripts/linq-webhook-timeline.sql
+```
+
+A long `message_to_event` places the delay before Linq created the webhook.
+A long `event_to_webhook` places it between event creation and Web intake.
+The mailbox uses Linq's `received_at`, then `sent_at`, then event creation time
+when both message timestamps are missing. In that last case the first interval
+is zero and the upstream delay is unknown. The Vercel route log
+`hosted-onboarding.route.linq-webhook.ingress` records which clock was available.
+
+Each timeline row is an accepted mailbox message with an exact provider-event
+match. A blank model or delivery timestamp means that trace lacks the stamp.
+Group replies can have a sent status without a delivery receipt. If the event
+count is zero, check production Vercel request logs for
+`/api/hosted-onboarding/linq/webhook` over the same window. Failed requests can
+leave no event row. If there are no requests either, check Linq's webhook
+delivery history and recheck after traffic resumes to catch late arrivals.
+
 ## Production conversation canary
 
 The hourly Linq canary uses one explicitly configured Photon identity that
@@ -309,6 +333,26 @@ and its bound room are revalidated against the fresh exact two-player provider
 audience. This allows the requested proposal in a newly created chat with no
 inbound history. Cancelled, replaced or expired proposals cannot qualify;
 provider health, route, runtime access and dispatch deduplication still apply.
+The `game-both-win:` lifecycle family is guarded under the game lock before
+provider dispatch, including retries. It requires a retained, unskipped receipt,
+a live bound pair game with a still-earnable offer and no waiting change.
+The compatible reader ships before any offer reservation or both-win writer.
+The writer uses the existing player proposal and other-player approval; a bare
+yes to an offer cannot name a prize. The `both_win` lifecycle reserves one
+`game-both-win:<gameId>` offer after a qualifying post, credit or restore, with
+`sourceRef` equal to the game id so a block skips it. It uses `require_send` in
+the existing bound chat. The existing receipt drain honors `retryAfterAt`, set
+to the latest of the two players' unchanged `morningAfter` results (null falls
+back to now). No new timer or sweep is added, and delivery never repeats the
+morning window check. Generation, queued wake recovery and final dispatch
+skip an offer that is no longer due, has a waiting change or has lost its chat;
+a skipped receipt is never offered again.
+The offer notice carries the pair's first names and tasks, the current prize
+or dare, the prize or dare of earlier settled games between the same two
+players that were bound to this same chat (never one from another chat or
+no chat, because a pair's chat can hold other people), and the latest 40 messages the two players sent in that same room since
+the game started, read with the bounded reader the missed-day notice uses. It
+carries no private label and nothing from another room.
 Game evening room check-ins validate their frozen game and chat witness but do
 not inherit the game-proposal inactivity exemption. They stay subject to the
 90-day pause, the three-accepted-evening unanswered pause and the half-hour

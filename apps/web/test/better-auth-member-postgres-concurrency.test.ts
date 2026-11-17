@@ -1,5 +1,6 @@
 import { removeHostedMemberLinkedAccountProjectionTx } from "../src/lib/hosted-onboarding/linked-account-removal";
 import { randomUUID } from "node:crypto";
+import type { AuthRecord } from "../src/lib/better-auth/record";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const provider = vi.hoisted(() => ({ signal: vi.fn(), codes: new Map<string, string>(), telegram: vi.fn(), key: vi.fn() }));
@@ -76,7 +77,7 @@ import { isHostedAuthReviewMember } from "../src/lib/better-auth/review-account"
 import { prepareHostedAuthSmsOtp } from "../src/lib/better-auth/sms-otp";
 import { syntheticSmsVerification } from "./support/better-auth-sms-verification";
 import { hostedAuthOtpIdentifier } from "../src/lib/better-auth/otp-store";
-import { authLookupKey } from "../src/lib/better-auth/record-crypto";
+import { authLookupKey, openAuthRecord, sealAuthRecord } from "../src/lib/better-auth/record-crypto";
 import { hostedAuthAdapter } from "../src/lib/better-auth/adapter";
 import { getHostedAppSessionFromRequest, revokeHostedAppSessionFromRequest, assertHostedAppSessionCurrentTx } from "../src/lib/hosted-onboarding/app-session";
 import { readHostedAuthSession } from "../src/lib/better-auth/session";
@@ -99,6 +100,10 @@ if (enabled) {
   }
 }
 const configuration = () => ({ baseURL: "https://www.withmurph.ai", secret: "synthetic-better-auth-secret-for-tests-only", prisma: getPrisma() });
+// A first passkey needs a phone or Telegram sign-in, so the enrollment fixtures
+// sign in by phone; a nested fixture gets the next synthetic number.
+const FIXTURE_PHONES = ["+12025550179", "+12025550169"];
+let livePhoneFixtures = 0;
 
 describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition", () => {
   beforeEach(() => {
@@ -132,7 +137,7 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     request(body: unknown, cookieOverride?: string): Request;
     loginAgain(): Promise<string>;
     loginAgainNative(): Promise<string>;
-  }) => Promise<void>, initialKind: "email" | "phone" = "email") {
+  }) => Promise<void>, initialKind: "email" | "phone" = "phone") {
     vi.stubEnv("HOSTED_BETTER_AUTH_ENABLED", "true");
     const prisma = getPrisma();
     const secret = Buffer.alloc(32, 29).toString("base64url");
@@ -141,33 +146,39 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     vi.stubEnv("HOSTED_ONBOARDING_PUBLIC_BASE_URL", baseURL);
     vi.stubEnv("HOSTED_APPROVAL_PASSKEY_ENROLLMENT_ENABLED", "true");
     const requestIp = `2001:db8::${randomUUID().slice(0, 4)}`;
-    const value = initialKind === "email" ? `initial-passkey-${randomUUID()}@example.test` : "+12025550179";
-    const prepared = await prepareHostedAuthOtpMember({ prisma, contact: contact(initialKind, value) });
-    const issue = async () => commitHostedAuthOtp({ baseURL, secret, prisma,
-      ...await prepareHostedAuthOtpMember({ prisma, contact: contact(initialKind, value) }), otp: await send(initialKind, value),
-    });
-    // Use the originally prepared member for first issuance; a second prepare
-    // before commit would generate another canonical ID for an unclaimed email.
-    const issued = await commitHostedAuthOtp({ baseURL, secret, prisma, ...prepared, otp: await send(initialKind, value) });
-    const cookieFor = (headers: Headers) => headers.getSetCookie().find((value) => value.startsWith("murph-auth-session="))?.split(";")[0] ?? "";
-    const cookie = cookieFor(issued.headers);
-    expect(cookie).not.toBe("");
+    const value = initialKind === "email" ? `initial-passkey-${randomUUID()}@example.test` : FIXTURE_PHONES[livePhoneFixtures];
+    if (!value) throw new Error("Add a synthetic phone for this fixture depth.");
+    if (initialKind === "phone") livePhoneFixtures += 1;
     try {
-      await run({ prisma, memberId: issued.memberId, token: issued.token,
-        request: (body, cookieOverride = cookie) => new Request(`${baseURL}/api/settings/approval-passkeys/register`, {
-          method: "POST", headers: { origin: baseURL, cookie: cookieOverride, "content-type": "application/json", "x-vercel-forwarded-for": requestIp }, body: JSON.stringify(body),
-        }),
-        loginAgain: async () => cookieFor((await issue()).headers),
-        loginAgainNative: async () => (await issue()).token,
+      const prepared = await prepareHostedAuthOtpMember({ prisma, contact: contact(initialKind, value) });
+      const issue = async () => commitHostedAuthOtp({ baseURL, secret, prisma,
+        ...await prepareHostedAuthOtpMember({ prisma, contact: contact(initialKind, value) }), otp: await send(initialKind, value),
       });
-    } finally { await prisma.hostedMember.deleteMany({ where: { id: issued.memberId } }); }
+      // Use the originally prepared member for first issuance; a second prepare
+      // before commit would generate another canonical ID for an unclaimed email.
+      const issued = await commitHostedAuthOtp({ baseURL, secret, prisma, ...prepared, otp: await send(initialKind, value) });
+      const cookieFor = (headers: Headers) => headers.getSetCookie().find((value) => value.startsWith("murph-auth-session="))?.split(";")[0] ?? "";
+      const cookie = cookieFor(issued.headers);
+      expect(cookie).not.toBe("");
+      try {
+        await run({ prisma, memberId: issued.memberId, token: issued.token,
+          request: (body, cookieOverride = cookie) => new Request(`${baseURL}/api/settings/approval-passkeys/register`, {
+            method: "POST", headers: { origin: baseURL, cookie: cookieOverride, "content-type": "application/json", "x-vercel-forwarded-for": requestIp }, body: JSON.stringify(body),
+          }),
+          loginAgain: async () => cookieFor((await issue()).headers),
+          loginAgainNative: async () => (await issue()).token,
+        });
+      } finally { await prisma.hostedMember.deleteMany({ where: { id: issued.memberId } }); }
+    } finally { if (initialKind === "phone") livePhoneFixtures -= 1; }
   }
+  // Initial messaging setup (adding a first phone or Telegram) needs an email-only member.
+  const withEmailMember = (run: Parameters<typeof withInitialPasskeyMember>[0]) => withInitialPasskeyMember(run, "email");
 
   // Already-adopted login identity, but no approval aggregate has ever existed.
   // Keep the existing real Better Auth / PostgreSQL / WebAuthn fixtures; only
   // delivery and KMS ports are synthetic. No provider fallback is permitted.
   async function withUnprotectedMember(run: (f: Parameters<Parameters<typeof withInitialPasskeyMember>[0]>[0]) => Promise<void>,
-    initialKind: "email" | "phone" = "email") {
+    initialKind: "email" | "phone" = "phone") {
     return withInitialPasskeyMember(async (f) => {
       vi.stubEnv("HOSTED_BETTER_AUTH_ENABLED", "true");
       vi.stubEnv("VERCEL", "1");
@@ -290,6 +301,48 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     expect((await firstEnrollmentOptions(f.request({}))).status).toBe(200);
   }));
 
+  // A model that can read the member's inbox can complete an email sign-in.
+  it("first enrollment: a fresh email-code session can neither get options nor commit a first passkey", () => withUnprotectedMember(async (f) => {
+    const pending = await requestHostedActionApproval({ ...f, request: {
+      actionFingerprint: "c".repeat(64), actionId: `vault-file-send:${"d".repeat(64)}`, actionKind: "vault.file.send.v1",
+      presentation: { title: "Send a synthetic file?", body: "Send the requested synthetic file to this conversation." }, returnContactKind: "text",
+    } });
+    const session = await getHostedAppSessionFromRequest(f.request({}));
+    expect(Date.now() - session!.primaryAuthenticatedAt!.getTime()).toBeLessThan(60_000);
+    const challenge = await issueHostedActionApprovalChallenge({ ...f, approvalId: pending.approvalId, sessionId: session!.sessionId });
+    expect((await (await credentialAuthenticationOptions(f.request({ token: challenge.token }))).json()).method).toBe("initial");
+    const options = await firstEnrollmentOptions(f.request({}));
+    expect(options.status).toBe(403);
+    expect(await options.json()).toMatchObject({ error: { code: "SENSITIVE_ACTION_FRESH_LOGIN_REQUIRED",
+      message: "Sign in with your phone or Telegram, then add your Murph passkey." } });
+    const key = authenticator();
+    expect((await registerPasskey(f.request({ initialToken: `sac_${"a".repeat(32)}`, response: key.registration() }))).status).toBe(403);
+    expect(await f.prisma.hostedMemberApprovalCredentials.count({ where: { memberId: f.memberId } })).toBe(0);
+    expect(await f.prisma.hostedSensitiveActionChallenge.count({ where: { memberId: f.memberId, kind: "approval.passkey.initial-enrollment" } })).toBe(0);
+    expect((await readHostedActionApproval({ ...f, approvalId: pending.approvalId })).status).toBe("pending");
+  }, "email"));
+
+  it("first enrollment: missing, expired or unrecognized sign-in factor evidence fails closed at options and registration", () => withUnprotectedMember(async (f) => {
+    const session = await getHostedAppSessionFromRequest(f.request({}));
+    const where = { model_id: { model: "verification" as const, id: `apf_${authLookupKey("verification", "primary-factor", session!.sessionId)}` } };
+    const evidence = await f.prisma.hostedAuthRecord.findUniqueOrThrow({ where });
+    expect((await openAuthRecord(evidence, f.prisma)).value).toBe("phone");
+    const registration = await firstEnrollment(f.request);
+    await f.prisma.hostedAuthRecord.delete({ where });
+    expect((await registerPasskey(f.request(registration.payload))).status).toBe(403);
+    expect((await firstEnrollmentOptions(f.request({}))).status).toBe(403);
+    for (const change of [{ value: "passkey" }, { expiresAt: new Date(Date.now() - 1_000) }]) {
+      const altered = await sealAuthRecord("verification", { ...await openAuthRecord(evidence, f.prisma), ...change }, f.prisma);
+      await f.prisma.hostedAuthRecord.deleteMany({ where: { model: "verification", id: evidence.id } });
+      await f.prisma.hostedAuthRecord.create({ data: altered });
+      expect((await firstEnrollmentOptions(f.request({}))).status).toBe(403);
+    }
+    expect(await f.prisma.hostedMemberApprovalCredentials.count({ where: { memberId: f.memberId } })).toBe(0);
+    await f.prisma.hostedAuthRecord.deleteMany({ where: { model: "verification", id: evidence.id } });
+    await f.prisma.hostedAuthRecord.create({ data: evidence });
+    expect((await registerPasskey(f.request(registration.payload))).status).toBe(200);
+  }));
+
   it.each(["stale", "exchanged", "future"] as const)("first enrollment: %s sessions are not fresh proof", (kind) => withUnprotectedMember(async (f) => {
     await hostedAuthAdapter(f.prisma)({ session: { additionalFields: { primaryAuthenticatedAt: { type: "date" } } } }).update({
       model: "session", where: [{ field: "token", value: f.token }],
@@ -388,7 +441,11 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     expect(await response.json()).toMatchObject({ memberId: f.memberId });
     const cookie = response.headers.getSetCookie().find((entry) => entry.startsWith("murph-auth-session="))!.split(";")[0];
     expect((await getHostedAppSessionFromRequest(f.request({}, cookie)))?.primaryAuthenticatedAt).toBeInstanceOf(Date);
-    expect((await firstEnrollmentOptions(f.request({}, cookie))).status).toBe(200);
+    // A fresh email code is still not enough for a first passkey.
+    const options = await firstEnrollmentOptions(f.request({}, cookie));
+    expect(options.status).toBe(kind === "phone" ? 200 : 403);
+    if (kind === "email") expect(await options.json()).toMatchObject({ error: {
+      code: "SENSITIVE_ACTION_FRESH_LOGIN_REQUIRED", message: "Sign in with your phone or Telegram, then add your Murph passkey." } });
     expect(await f.prisma.hostedAuthRecord.count({ where: { memberId: f.memberId, model: "user" } })).toBe(userCount);
   }, kind));
 
@@ -408,7 +465,15 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     await expect(f.prisma.$transaction((tx) => prepared.commitMember(tx))).rejects.toThrow();
     await f.prisma.hostedMemberEmailAuthorization.update({ where: { memberId: other.memberId }, data: { verifiedEmailVerifiedAt: null } });
     expect((await firstEnrollmentOptions(other.request({}))).status).toBe(409);
-  })));
+  }, "email"), "email"));
+
+  // A passkey that predates the phone-or-Telegram rule for a first passkey.
+  async function establishPasskey(f: { memberId: string; prisma: ReturnType<typeof getPrisma> }) {
+    const key = authenticator();
+    const write = await prepareApprovalPasskeyWrite({ ...f, state: await readApprovalPasskeyState(f), credentials: [key.credential] });
+    await f.prisma.$transaction((prisma) => commitApprovalPasskeyWriteTx({ prepared: write, prisma }));
+    return key;
+  }
 
   async function initialEnrollment(request: (body: unknown) => Request) {
     const optionsResponse = await initialPasskeyOptions(request({}));
@@ -434,12 +499,19 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
       const request = (path: string, body: unknown, cookie = f.request({}).headers.get("cookie") ?? "") => new Request(`${baseURL}${path}`, {
         method: "POST", headers: { origin: baseURL, cookie, "content-type": "application/json", "x-vercel-forwarded-for": ip }, body: JSON.stringify(body),
       });
-      const initial: { token: string; options: { challenge: string } } = await (await initialPasskeyOptions(request("/api/settings/approval-passkeys/initial-options", {}))).json();
-      const key = authenticator();
-      expect((await registerPasskey(request("/api/settings/approval-passkeys/register", { initialToken: initial.token, response: key.registration(true, initial.options.challenge) }))).status).toBe(200);
+      const initialOptions = await initialPasskeyOptions(request("/api/settings/approval-passkeys/initial-options", {}));
+      let key: ReturnType<typeof authenticator>;
+      if (initialKind === "phone") {
+        const initial: { token: string; options: { challenge: string } } = await initialOptions.json();
+        key = authenticator();
+        expect((await registerPasskey(request("/api/settings/approval-passkeys/register", { initialToken: initial.token, response: key.registration(true, initial.options.challenge) }))).status).toBe(200);
+      } else {
+        // An email code cannot set up a first passkey; this member's predates that rule.
+        expect(initialOptions.status).toBe(403);
+        key = await establishPasskey(f);
+      }
       const initialMethods = await (await loginMethods(request("/api/settings/login-methods", {}))).json();
       const email: string | null = initialMethods.methods.email;
-      const initialUserEmail = (await readHostedLoginMethods(f.prisma, f.memberId)).user.email;
       const touchedCodes: HostedCredentialChange[] = [];
       try {
         await run({ ...f, email, request,
@@ -474,7 +546,7 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
         });
       } finally {
         for (const change of touchedCodes) {
-          const identifier = change.method === "phone" ? change.value! : `change-email-otp-${initialUserEmail}-${change.value}`;
+          const identifier = change.method === "phone" ? change.value! : `change-email-otp-${f.memberId}:${change.value}`;
           await hostedAuthAdapter(f.prisma)({}).deleteMany({ model: "verification", where: [{ field: "identifier", value: identifier }] });
         }
       }
@@ -506,7 +578,7 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
       } finally {
         await hostedAuthAdapter(f.prisma)({}).deleteMany({ model: "verification", where: [{ field: "identifier", value: change.value }] });
       }
-    });
+    }, "email");
   }
 
   function nativeRequest(token: string, body: unknown, cookies = false) {
@@ -516,7 +588,7 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     });
   }
 
-  it("native phone send issues a real owner challenge and enforces its cooldown", () => withInitialPasskeyMember(async (f) => {
+  it("native phone send issues a real owner challenge and enforces its cooldown", () => withEmailMember(async (f) => {
     vi.stubEnv("HOSTED_BETTER_AUTH_ENABLED", "true");
     const change: HostedCredentialChange = { method: "phone", operation: "set", expectedIdentity: null, value: "+12025550194" };
     await f.prisma.hostedAuthRecord.deleteMany({ where: { id: { in: ["send:cooldown", "send:contact"].map((prefix) => `arl_${authLookupKey("verification", "rate-limit", `${prefix}:phone:${change.value}`)}`) } } });
@@ -530,7 +602,7 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     expect((await readHostedMemberIdentity(f))?.phoneNumber).toBe(change.value);
   }));
 
-  it("native phone send rejected before sending does not start the cooldown", () => withInitialPasskeyMember(async (f) => {
+  it("native phone send rejected before sending does not start the cooldown", () => withEmailMember(async (f) => {
     vi.stubEnv("HOSTED_BETTER_AUTH_ENABLED", "true");
     const change: HostedCredentialChange = { method: "phone", operation: "set", expectedIdentity: null, value: "+12025550193" };
     await f.prisma.hostedAuthRecord.deleteMany({ where: { id: { in: ["send:cooldown", "send:contact"].map((prefix) => `arl_${authLookupKey("verification", "rate-limit", `${prefix}:phone:${change.value}`)}`) } } });
@@ -565,7 +637,7 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     expect((await sendNativePhone(nativeRequest(f.token, { change: f.change }))).status).toBe(429);
     expect((await sendNativePhone(nativeRequest(f.token, { change: { ...f.change, method: "email", value: "test@example.test" } }))).status).toBe(400);
     await verifyNativePhone(nativeRequest(f.token, { change: f.change, code: provider.codes.get(f.change.value!)! }));
-    await withInitialPasskeyMember(async (other) => {
+    await withEmailMember(async (other) => {
       const result = await sendNativePhone(nativeRequest(other.token, { change: f.change }));
       // Clear only the synthetic contact cooldown so conflict reaches its owner.
       if (result.status === 429) {
@@ -579,7 +651,7 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
 
   it.each(["stale", "revoked", "protected"] as const)("native phone preserves %s rejection", (kind) => withInitialPhoneMember(async (f) => {
     if (kind === "revoked") await logoutBrowser(f.request({}));
-    else if (kind === "protected") await registerPasskey(f.request(await initialEnrollment(f.request)));
+    else if (kind === "protected") await establishPasskey(f);
     else await hostedAuthAdapter(f.prisma)({ session: { additionalFields: { primaryAuthenticatedAt: { type: "date" } } } }).update({
       model: "session", where: [{ field: "token", value: f.token }], update: { primaryAuthenticatedAt: new Date(Date.now() - 660_000) },
     });
@@ -612,11 +684,11 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     return { link, body, token };
   }
 
-  it("native Telegram binds a fresh signed proof to the originating member and session, rejecting cookies and replay", () => withInitialPasskeyMember(async (f) => {
+  it("native Telegram binds a fresh signed proof to the originating member and session, rejecting cookies and replay", () => withEmailMember(async (f) => {
     const t = await nativeTelegramFixture(f);
     const wrongSession = await f.loginAgainNative();
     expect((await completeNativeTelegram(nativeRequest(wrongSession, t.body))).status).toBe(401);
-    await withInitialPasskeyMember(async (other) => {
+    await withEmailMember(async (other) => {
       expect((await completeNativeTelegram(nativeRequest(other.token, t.body))).status).toBe(401);
     });
     expect((await completeNativeTelegram(nativeRequest(f.token, t.body, true))).status).toBe(401);
@@ -631,7 +703,7 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     expect(provider.telegram).toHaveBeenCalledTimes(1);
   }));
 
-  it.each(["canceled", "paused", "unpaid", "past_due"] as const)("native Telegram links a %s member without a signup welcome", (billingStatus) => withInitialPasskeyMember(async (f) => {
+  it.each(["canceled", "paused", "unpaid", "past_due"] as const)("native Telegram links a %s member without a signup welcome", (billingStatus) => withEmailMember(async (f) => {
     const t = await nativeTelegramFixture(f);
     await f.prisma.hostedMember.update({ where: { id: f.memberId }, data: { billingStatus } });
     const completed = await completeNativeTelegram(nativeRequest(f.token, t.body));
@@ -649,7 +721,7 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     ["expired token", { exp: 1 }],
     ["wrong audience", { aud: "987654321" }],
     ["wrong issuer", { iss: "https://invalid.example" }],
-  ])("native Telegram rejects %s before linking", (_kind, claims) => withInitialPasskeyMember(async (f) => {
+  ])("native Telegram rejects %s before linking", (_kind, claims) => withEmailMember(async (f) => {
     const t = await nativeTelegramFixture(f);
     const idToken = await t.token(claims as Record<string, unknown>);
     expect((await completeNativeTelegram(nativeRequest(f.token, { ...t.body, idToken }))).status).toBe(401);
@@ -657,7 +729,7 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     expect(provider.telegram).not.toHaveBeenCalled();
   }));
 
-  it.each(["expired", "missing", "token-before-start"])("native Telegram rejects %s pending start", (kind) => withInitialPasskeyMember(async (f) => {
+  it.each(["expired", "missing", "token-before-start"])("native Telegram rejects %s pending start", (kind) => withEmailMember(async (f) => {
     const t = await nativeTelegramFixture(f);
     const adapter = hostedAuthAdapter(f.prisma)({});
     const where = [{ field: "identifier", value: `native-telegram-start:${t.link.startId}` }];
@@ -673,10 +745,10 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     }
   }));
 
-  it("native Telegram rejects a consumed token with a new start from another member", () => withInitialPasskeyMember(async (f) => {
+  it("native Telegram rejects a consumed token with a new start from another member", () => withEmailMember(async (f) => {
     const first = await nativeTelegramFixture(f);
     expect((await completeNativeTelegram(nativeRequest(f.token, first.body))).status).toBe(200);
-    await withInitialPasskeyMember(async (other) => {
+    await withEmailMember(async (other) => {
       const start = await startNativeTelegram(nativeRequest(other.token, {}));
       const { startId } = await start.json();
       const replay = await completeNativeTelegram(nativeRequest(other.token, { startId, idToken: first.body.idToken }));
@@ -686,10 +758,10 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     expect(provider.telegram).toHaveBeenCalledTimes(1);
   }));
 
-  it("native Telegram preserves conflict ownership", () => withInitialPasskeyMember(async (f) => {
+  it("native Telegram preserves conflict ownership", () => withEmailMember(async (f) => {
     const first = await nativeTelegramFixture(f);
     expect((await completeNativeTelegram(nativeRequest(f.token, first.body))).status).toBe(200);
-    await withInitialPasskeyMember(async (other) => {
+    await withEmailMember(async (other) => {
       const second = await nativeTelegramFixture(other);
       const conflict = await completeNativeTelegram(nativeRequest(other.token, second.body));
       expect(await conflict.json()).toMatchObject({ error: { code: "AUTH_CONTACT_IN_USE" } });
@@ -698,17 +770,17 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     });
   }));
 
-  it("native Telegram completion preserves the member attempt budget across bad proofs", () => withInitialPasskeyMember(async (f) => {
+  it("native Telegram completion preserves the member attempt budget across bad proofs", () => withEmailMember(async (f) => {
     const t = await nativeTelegramFixture(f);
     for (let attempt = 0; attempt < 20; attempt++) expect((await completeNativeTelegram(nativeRequest(f.token, { ...t.body, idToken: "invalid" }))).status).toBe(401);
     expect((await completeNativeTelegram(nativeRequest(f.token, t.body))).status).toBe(429);
     expect(provider.telegram).not.toHaveBeenCalled();
   }));
 
-  it.each(["stale", "revoked", "protected"] as const)("native Telegram preserves %s rejection", (kind) => withInitialPasskeyMember(async (f) => {
+  it.each(["stale", "revoked", "protected"] as const)("native Telegram preserves %s rejection", (kind) => withEmailMember(async (f) => {
     const t = await nativeTelegramFixture(f);
     if (kind === "revoked") await logoutBrowser(f.request({}));
-    else if (kind === "protected") await registerPasskey(f.request(await initialEnrollment(f.request)));
+    else if (kind === "protected") await establishPasskey(f);
     else await hostedAuthAdapter(f.prisma)({ session: { additionalFields: { primaryAuthenticatedAt: { type: "date" } } } }).update({
       model: "session", where: [{ field: "token", value: f.token }], update: { primaryAuthenticatedAt: new Date(Date.now() - 660_000) },
     });
@@ -717,14 +789,14 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     expect(provider.telegram).not.toHaveBeenCalled();
   }));
 
-  it("native Telegram concurrent completion sends at most one welcome", () => withInitialPasskeyMember(async (f) => {
+  it("native Telegram concurrent completion sends at most one welcome", () => withEmailMember(async (f) => {
     const t = await nativeTelegramFixture(f);
     const responses = await Promise.all([0, 1].map(() => completeNativeTelegram(nativeRequest(f.token, t.body))));
     expect(responses.filter((response) => response.status === 200)).toHaveLength(1);
     expect(provider.telegram).toHaveBeenCalledTimes(1);
   }));
 
-  it("native Telegram delivery cannot restore an identity removed during the send", () => withInitialPasskeyMember(async (f) => {
+  it("native Telegram delivery cannot restore an identity removed during the send", () => withEmailMember(async (f) => {
     const t = await nativeTelegramFixture(f);
     provider.telegram.mockImplementationOnce(async () => {
       await f.prisma.$transaction((tx) => removeHostedMemberLinkedAccountProjectionTx({
@@ -736,7 +808,7 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     expect((await readHostedMemberRoutingState(f))?.telegramUserId).toBeNull();
   }));
 
-  it.each(["forbidden", "network", "invalid-chat"])("native Telegram keeps awaiting-inbound after %s delivery", (kind) => withInitialPasskeyMember(async (f) => {
+  it.each(["forbidden", "network", "invalid-chat"])("native Telegram keeps awaiting-inbound after %s delivery", (kind) => withEmailMember(async (f) => {
     const t = await nativeTelegramFixture(f);
     if (kind === "invalid-chat") provider.telegram.mockResolvedValue({ ok: true, result: { message_id: 1, chat: { id: 987654321, type: "private" } } });
     else provider.telegram.mockRejectedValue(new Error(kind === "forbidden" ? "Synthetic Telegram 403" : "Synthetic timeout"));
@@ -765,7 +837,7 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
   }));
 
   it.each(["stale", "exchanged", "future", "revoked", "protected"] as const)("rejects initial phone setup after %s authority", (kind) => withInitialPhoneMember(async (f) => {
-    if (kind === "protected") expect((await registerPasskey(f.request(await initialEnrollment(f.request)))).status).toBe(200);
+    if (kind === "protected") await establishPasskey(f);
     else if (kind === "revoked") await logoutBrowser(f.request({}));
     else await hostedAuthAdapter(f.prisma)({ session: { additionalFields: { primaryAuthenticatedAt: { type: "date" } } } }).update({
       model: "session", where: [{ field: "token", value: f.token }],
@@ -777,11 +849,10 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
   }));
 
   it("rechecks approval established during initial phone provider verification", () => withInitialPhoneMember(async (f) => {
-    const registration = await initialEnrollment(f.request);
     const check = sms.check.getMockImplementation()!;
     sms.check.mockImplementationOnce(async (input) => {
       const verified = await check(input);
-      expect((await registerPasskey(f.request(registration))).status).toBe(200);
+      await establishPasskey(f);
       return verified;
     });
     expect((await verifyCredentialCode(f.request({ change: f.change, code: f.code }))).status).toBe(409);
@@ -841,7 +912,7 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     const material = await (await settingsChallenge(f.request("/api/settings/sensitive-action-challenge", { kind: "approval.recovery-key.rotate" }))).json();
     const authorization = { method: "passkey", token: material.token, assertion: replacement.assertion({ counter: 0, customMessage: material.message }) };
     expect((await rotateRecoveryKey(f.request("/api/settings/approval-passkeys/recovery-key", { authorization }))).status).toBe(200);
-  }));
+  }, "phone"));
 
   it("rejects a wrong key, foreign member, changed browser, and missing user verification without consuming recovery", () => withCredentialMember(async (f) => withCredentialMember(async (other) => {
     const key = await f.recoveryKey();
@@ -853,7 +924,7 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     expect((await recoveryRegister(f.request("/api/settings/approval-passkeys/recovery/register", payload, await f.loginAgain()))).status).toBe(403);
     expect((await recoveryRegister(f.request("/api/settings/approval-passkeys/recovery/register", { ...payload, response: replacement.registration(false, result.options.challenge) }))).status).toBe(403);
     expect((await recoveryRegister(f.request("/api/settings/approval-passkeys/recovery/register", payload))).status).toBe(200);
-  })));
+  }, "phone"), "phone"));
 
   it("invalidates a rotated key and its outstanding registration options", () => withCredentialMember(async (f) => {
     const key = await f.recoveryKey();
@@ -863,7 +934,7 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     const payload = { key, token: result.token, response: authenticator().registration(true, result.options.challenge) };
     expect((await recoveryRegister(f.request("/api/settings/approval-passkeys/recovery/register", payload))).status).toBe(403);
     expect((await recoveryOptions(f.request("/api/settings/approval-passkeys/recovery/options", { key: newKey }))).status).toBe(200);
-  }));
+  }, "phone"));
 
   it("admits one concurrent recovery and keeps only its new factor", () => withCredentialMember(async (f) => {
     const key = await f.recoveryKey();
@@ -879,7 +950,7 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     expect((await f.prisma.hostedMemberApprovalCredentials.findUniqueOrThrow({ where: { memberId: f.memberId } })).recoveryHashEncrypted).toBeNull();
     expect((await readApprovalPasskeyState({ memberId: f.memberId, prisma: f.prisma })).credentials.map((entry) => entry.id))
       .toEqual([replacements[responses.findIndex((response) => response.status === 200)].credential.id]);
-  }));
+  }, "phone"));
 
   it("rolls back recovery-key consumption, factor replacement and revocation together on storage failure", () => withCredentialMember(async (f) => {
     const otherCookie = await f.loginAgain();
@@ -899,6 +970,20 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
       await f.prisma.$executeRawUnsafe("DROP FUNCTION auth_test_reject_recovery()");
     }
     expect((await recoveryRegister(f.request("/api/settings/approval-passkeys/recovery/register", payload))).status).toBe(200);
+  }, "phone"));
+
+  it("rejects saved-key recovery from an email-code sign-in without consuming the key", () => withCredentialMember(async (f) => {
+    const key = await f.recoveryKey();
+    const result = await recoveryOptions(f.request("/api/settings/approval-passkeys/recovery/options", { key }));
+    expect(result.status).toBe(403);
+    expect(await result.json()).toMatchObject({ error: { code: "SENSITIVE_ACTION_FRESH_LOGIN_REQUIRED",
+      message: "Sign in with your phone or Telegram, then recover your passkey." } });
+    const replacement = authenticator();
+    expect((await recoveryRegister(f.request("/api/settings/approval-passkeys/recovery/register", {
+      key, token: `sac_${"a".repeat(32)}`, response: replacement.registration() }))).status).toBe(403);
+    expect((await f.prisma.hostedMemberApprovalCredentials.findUniqueOrThrow({ where: { memberId: f.memberId } })).recoveryHashEncrypted).toBeTruthy();
+    expect((await readApprovalPasskeyState({ memberId: f.memberId, prisma: f.prisma })).credentials.map((entry) => entry.id))
+      .not.toContain(replacement.credential.id);
   }));
 
   it.each(["stale", "silent", "suspended"] as const)("rejects %s recovery authority", (state) => withCredentialMember(async (f) => {
@@ -911,7 +996,7 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     });
     expect((await recoveryOptions(f.request("/api/settings/approval-passkeys/recovery/options", { key }))).status).toBe(403);
     expect((await f.prisma.hostedMemberApprovalCredentials.findUniqueOrThrow({ where: { memberId: f.memberId } })).recoveryHashEncrypted).toBeTruthy();
-  }));
+  }, "phone"));
 
   it.each([false, true])("replaces verified email atomically with existing reply alias = %s", (withAlias) => withCredentialMember(async (f) => {
     if (withAlias) await f.prisma.hostedMemberRouting.update({ where: { memberId: f.memberId }, data: { replyAliasGeneration: 4, replyAliasLookupKey: "0123456789abcdef0123456789abcdef" } });
@@ -1010,6 +1095,25 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
     expect(await getHostedAppSessionFromRequest(f.request("/home", {}, otherCookie))).toBeNull();
     expect((await getHostedAppSessionFromRequest(f.request("/home", {})))?.member.id).toBe(f.memberId);
     expect((await removeCredential(f.request("/api/settings/login-methods/remove", { change, authorization }))).status).toBe(409);
+  }));
+
+  it("replaces the previous email-change code on resend", () => withCredentialMember(async (f) => {
+    const change: HostedCredentialChange = { method: "email", operation: "set", expectedIdentity: f.email,
+      value: `resend-${randomUUID()}@example.test` };
+    const previousCode = await f.send(change);
+    const adapter = hostedAuthAdapter(f.prisma)({});
+    const where = [{ field: "identifier", value: `change-email-otp-${f.memberId}:${change.value}` }];
+    const previous = await adapter.findOne<AuthRecord>({ model: "verification", where });
+    expect(previous).not.toBeNull();
+    const code = await f.send(change);
+    expect(await adapter.count({ model: "verification", where })).toBe(1);
+    expect(await adapter.findOne({ model: "verification", where: [{ field: "id", value: previous!.id }] })).toBeNull();
+    const authorization = await f.authorize(change);
+    if (previousCode !== code) {
+      expect((await verifyCredentialCode(f.request("/api/settings/login-methods/otp/verify", { change, code: previousCode, authorization }))).status).toBe(400);
+    }
+    expect((await verifyCredentialCode(f.request("/api/settings/login-methods/otp/verify", { change, code, authorization }))).status).toBe(200);
+    expect((await readHostedMemberEmailAuthorization(f))?.verifiedEmail?.address).toBe(change.value);
   }));
 
   it.each(["email", "phone"] as const)("rolls back %s proof, canonical writes, approval and revocation on a database failure", (method) => withCredentialMember(async (f) => {
@@ -1294,6 +1398,25 @@ describe.skipIf(!enabled)("Better Auth canonical member PostgreSQL composition",
       expect((await commitHostedAuthOtp({ ...configuration(), ...current, otp })).memberId).toBe(memberId);
       expect((await readHostedMemberEmailAuthorization({ memberId, prisma }))?.verifiedEmail?.address).toBe(address);
     } finally { await prisma.hostedMember.deleteMany({ where: { id: { in: [memberId, otherId] } } }); }
+  });
+
+  it("signs in to the member that texted Murph from this iMessage email address", async () => {
+    const prisma = getPrisma(); const memberId = `auth-handle-${randomUUID()}`;
+    const address = `handle-${randomUUID()}@example.test`; const selected = contact("email", address);
+    await prisma.hostedMember.create({ data: { id: memberId } });
+    try {
+      await prisma.$transaction((tx) => upsertHostedMemberIdentity({
+        linqEmailHandle: address, maskedPhoneNumberHint: null, memberId, phoneLookupKey: null, phoneNumber: null,
+        phoneNumberVerifiedAt: null, signupPhoneNumber: null,
+        preparedControlRoot: { domain: "control", userId: memberId, rootKeyId: "synthetic-root" }, prisma: tx,
+      }));
+      const membersBefore = await prisma.hostedMember.count();
+      const prepared = await prepareHostedAuthOtpMember({ contact: selected, prisma });
+      expect(prepared.memberId).toBe(memberId);
+      expect((await commitHostedAuthOtp({ ...configuration(), ...prepared, otp: await send("email", address) })).memberId).toBe(memberId);
+      expect(await prisma.hostedMember.count()).toBe(membersBefore);
+      expect((await readHostedMemberEmailAuthorization({ memberId, prisma }))?.verifiedEmail?.address).toBe(address);
+    } finally { await prisma.hostedMember.deleteMany({ where: { id: memberId } }); }
   });
 
   it("rejects stale signup selection without losing the code or selecting a different member", async () => {

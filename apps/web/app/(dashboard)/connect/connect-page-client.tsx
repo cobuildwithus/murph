@@ -52,7 +52,7 @@ import {
   stripDeviceConnectIntentParams,
 } from "./connect-page-helpers";
 import { SourceCard } from "./connect-source-card";
-import { sortConnectSourcesByConnectionState } from "./connect-source-order";
+import { sortConnectSourcesByConnectionState } from "@/src/lib/device-sync/connect-source-order";
 import type {
   ConnectCallbackInput,
   ConnectCallbackNotice,

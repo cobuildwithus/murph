@@ -30,7 +30,7 @@ Debug the hosted Linq no-reply / continuity failure end to end, identify the act
 ## Verification
 
 - `pnpm exec vitest run --config apps/web/vitest.config.ts apps/web/test/hosted-contact-privacy.test.ts --no-coverage`
-- `env -u NODE_OPTIONS -u MURPH_DEV_CF_WRANGLER_LOG_LEVEL MURPH_DEV_SKIP_RUNNER_BUNDLE=1 MURPH_E2E_STREAM_DEV_LOGS=1 MURPH_E2E_DEBUG_PROGRESS=1 pnpm --dir /Users/willhay/startup1/murph exec vitest run --config apps/cloudflare/vitest.e2e.config.ts apps/cloudflare/test/hosted-local-linq-webhook-e2e.test.ts --no-coverage`
+- `env -u NODE_OPTIONS -u MURPH_DEV_CF_WRANGLER_LOG_LEVEL MURPH_DEV_SKIP_RUNNER_BUNDLE=1 MURPH_E2E_STREAM_DEV_LOGS=1 MURPH_E2E_DEBUG_PROGRESS=1 pnpm --dir ~/startup1/murph exec vitest run --config apps/cloudflare/vitest.e2e.config.ts apps/cloudflare/test/hosted-local-linq-webhook-e2e.test.ts --no-coverage`
 
 Both pass. The signed webhook E2E now shows `assistantDeliveryEffectCount: 1` / `assistantDeliveryOutcomeCount: 1` for both rapid turns.
 Status: completed

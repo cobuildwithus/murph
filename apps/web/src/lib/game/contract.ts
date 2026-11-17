@@ -1,3 +1,4 @@
+export { GAME_ACTIVITIES, type GameActivity } from "@murphai/hosted-execution/runtime-control";
 import type { GameRecapPresentation } from "@murphai/contracts/recap-show";
 /**
  * The weekly game's wire contract: the request bodies of the /api/game/v1
@@ -17,7 +18,7 @@ export type Weekday = (typeof GAME_WEEKDAYS)[number];
  */
 export type GameSchedule = { days: Weekday[] } | { count: number };
 
-export const GAME_STAKE_KINDS = ["winner_gets", "per_miss", "prize", "dare"] as const;
+export const GAME_STAKE_KINDS = ["winner_gets", "per_miss", "prize", "dare", "both_get"] as const;
 export type GameStakeKind = (typeof GAME_STAKE_KINDS)[number];
 
 export interface GameStake {
@@ -68,7 +69,7 @@ export interface GameTermsInput {
 }
 
 /**
- * A daily artifact, or an excuse for a missed day (on-device transcript only).
+ * A daily artifact, or a 1–500-character excuse for a missed day.
  * No audio, raw heart-rate samples, or route coordinates are stored.
  */
 export const GAME_ENTRY_KINDS = ["photo", "heart_rate", "words", "route", "reps", "excuse"] as const;
@@ -113,6 +114,8 @@ export interface GameInviteeLabel {
 
 /** PUT /me/profile */
 export interface SetProfileBody {
+  /** Whole list; omitted keeps it, [] clears it. */
+  notForMe?: string[];
   firstName?: string;
   timeZone?: string;
   /** Omitted keeps the current photo; null removes it. Must be your own upload. */
@@ -126,6 +129,7 @@ export interface SetPlayerPhotoBody {
 }
 
 export interface GameProfileView {
+  notForMe: string[];
   memberId: string;
   firstName: string;
   timeZone: string;
@@ -149,6 +153,12 @@ export interface CreateGameBody {
    * addressed to that member; otherwise it's an open link, as without it.
    */
   inviteeRecipient?: GameInviteRecipient;
+  /**
+   * One-on-one only: the member the challenger picked from the people they
+   * have played, when the app has no number for them. Addressed under the
+   * same rule as `inviteeRecipient`; anyone else gets an open link.
+   */
+  inviteeMemberId?: string;
   previousGameId?: string;
 }
 
@@ -302,10 +312,13 @@ export interface GameReminders {
   canText: boolean;
   offGameIds: string[];
   everyDayGameIds?: string[];
+  /** Games with their own time, in minutes after local midnight; every other game uses minutes. */
+  gameMinutes?: Record<string, number>;
 }
 
 export type GameCommand =
-  | ({ type: "setReminders" } & Omit<GameReminders, "canText">)
+  /** With timeForGameIds, minutes is the own time of just those games (none when empty), and the profile time stays. */
+  | ({ type: "setReminders"; timeForGameIds?: string[] } & Omit<GameReminders, "canText">)
   | ({ type: "replyToPost"; gameId: string; entryId: string } & ReplyToPostBody)
   | { type: "deleteReply"; gameId: string; replyId: string }
   /** POST /games/:id/challenges { entryId: string }. Actor comes from authentication. */
@@ -353,6 +366,7 @@ export interface GamePermissions {
 }
 
 export interface GamePlayerView {
+  notForMe?: string[];
   participation?: GameParticipationView;
   memberId: string | null;
   seat: number;
@@ -440,6 +454,13 @@ export interface GameTicketView {
   /** Redeem by this time: 14 days after the ticket was issued. */
   useBy: string;
   owedByMemberId: string;
+  /**
+   * The verified phone number (E.164) of the player who owes this ticket, so
+   * the holder's Messages can open addressed to them. Only on an open,
+   * unexpired ticket the viewer holds in a two-player game, while that player
+   * is still in it (not left, not blocked). Never logged.
+   */
+  owedByPhone?: string;
   owedToMemberId: string;
   /** True when the viewer holds it (is owed). */
   youHold: boolean;
@@ -521,8 +542,10 @@ export interface GameView {
 
 export interface GameHomeView {
   canStartGroups?: boolean;
-  me: { memberId: string; firstName: string | null; timeZone: string | null; avatarUrl: string | null; usualKind?: GameEntryKind | null };
-  /** Invite-only: whether this member may start a fresh game. Anyone may rematch. Older apps ignore it. */
+  me: { notForMe: string[]; memberId: string; firstName: string | null; timeZone: string | null; avatarUrl: string | null; usualKind?: GameEntryKind | null;
+    /** Caller-only verified NANP area-code hint. Missing means unknown. */
+    areaCode?: string };
+  /** Whether the global game switch is on. Older apps ignore it. */
   canStartGames: boolean;
   /**
    * Games and tickets with people you blocked are left out. Everyone you
@@ -562,6 +585,7 @@ export interface GameHistoryGroupView {
 }
 
 export interface GameHistoryPersonView {
+  notForMe?: string[];
   memberId: string;
   firstName: string;
   avatarUrl?: string;
@@ -597,7 +621,7 @@ export interface GameBlockedPerson {
   firstName: string;
 }
 
-/** What an invite link shows. Only an open invite carries terms; cancellation may name the inviter. */
+/** Only an open invite carries personal details. Closed statuses are for authenticated readers. */
 export type GameInvitePreview =
   | {
       status: "open";
@@ -612,6 +636,8 @@ export type GameInvitePreview =
       talkDelivery?: "pending" | "sent" | "failed";
       lengthDays?: number;
       inviterFirstName: string;
+      /** Current profile photo, signed briefly and included only after sign-in. */
+      inviterAvatarUrl?: string | null;
       /**
        * Never sent. The name a challenger types for the invitee is their own
        * private label, and this preview is served to anyone holding the link
@@ -625,7 +651,7 @@ export type GameInvitePreview =
       expiresAt: string | null;
     }
   | { status: "used"; talkDelivery?: "pending" | "sent" | "failed" }
-  | { status: "expired"; reason?: "cancelled"; inviterFirstName?: string; talkDelivery?: "pending" | "sent" | "failed" };
+  | { status: "expired"; reason?: "cancelled"; talkDelivery?: "pending" | "sent" | "failed" };
 
 export type GameErrorCode =
   | "REPLY_USED"
@@ -666,7 +692,8 @@ export type GameErrorCode =
    * waits until the member agrees to their current versions. `details` names
    * the scope and its documents with those versions.
    */
-  | "TERMS_REQUIRED";
+  | "TERMS_REQUIRED"
+  | "HEALTH_DATA_REQUIRED";
 
 export interface GameError {
   code: GameErrorCode;

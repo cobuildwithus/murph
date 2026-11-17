@@ -1,7 +1,7 @@
 import "server-only";
 
 import { Prisma } from "@prisma/client";
-import { formatTimeZoneDateTimeParts, resolveFloatingIsoTimestampInTimeZone } from "@murphai/contracts";
+import { morningAfter } from "./time";
 import { buildHostedExecutionAssistantNotificationRequestedWake } from "@murphai/hosted-execution";
 import { buildGamePrivateKickoffInstructions, gamePrivateKickoffPolicySchema, type HostedGamePrivateKickoffPolicy } from "@murphai/hosted-execution/runtime-control";
 import { buildHostedLinqDeliveryId } from "../hosted-onboarding/linq-delivery-store";
@@ -10,7 +10,7 @@ import { appendPreparedHostedMailboxEnvelopeTx, prepareHostedMailboxEnvelopeAppe
 import { assertHostedDirectAssistantNotificationRouteAuthority, bindHostedAssistantNotificationDestination, resolveHostedAssistantNotificationDestination } from "../hosted-routing/assistant-notification-destination";
 import { signalHostedMailboxAppendRuntime } from "../hosted-orchestration/signal-runtime";
 import { getPrisma } from "../prisma";
-import { isGameOn } from "./access";
+import { isGameEnabled } from "./access";
 import { readMyGameReminderProjection } from "./direct-tool";
 import { currentTerms, parseStoredTerms } from "./rules";
 import { carryOverGameReminderPreferencesTx } from "./reminder-preferences";
@@ -24,19 +24,6 @@ function rhythm(game: { terms: Prisma.JsonValue; lengthDays: number }) {
   const schedule = currentTerms(parseStoredTerms(game.terms)).schedule;
   return JSON.stringify({ lengthDays: game.lengthDays, schedule: "days" in schedule
     ? { days: [...new Set(schedule.days)].sort((a, b) => a - b) } : schedule });
-}
-
-function morningAfter(now: Date, zone: string): Date | null {
-  try {
-    const local = formatTimeZoneDateTimeParts(now, zone);
-    const minutes = local.hour * 60 + local.minute;
-    if (minutes >= 9 * 60 && minutes < 21 * 60) return now;
-    const day = minutes >= 21 * 60 ? new Date(`${local.dayKey}T00:00:00Z`) : null;
-    if (day) day.setUTCDate(day.getUTCDate() + 1);
-    const date = day?.toISOString().slice(0, 10) ?? local.dayKey;
-    const resolved = resolveFloatingIsoTimestampInTimeZone(`${date}T09:00:00`, zone);
-    return resolved ? new Date(resolved.timestamp) : null;
-  } catch { return null; }
 }
 
 /** The existing game event is the one-time activation marker, including silent rematches. */
@@ -119,9 +106,9 @@ export async function reconcilePrivateGameActivations(now = new Date(), options:
 
 export async function isPrivateKickoffCurrentTx(policy: HostedGamePrivateKickoffPolicy, tx: Prisma.TransactionClient, now: Date): Promise<boolean> {
   if (!enabled() || now >= new Date(policy.expiresAt) || !await canTextGameReminders(policy.memberId, tx)) return false;
-  const game = await tx.game.findUnique({ where: { id: policy.gameId }, select: { status: true, invitees: { select: { memberId: true } },
+  const game = await tx.game.findUnique({ where: { id: policy.gameId }, select: { status: true,
     players: { select: { memberId: true, leftAt: true } } } });
-  return game?.status === "live" && isGameOn(game) && game.players.some(player => player.memberId === policy.memberId && !player.leftAt);
+  return game?.status === "live" && isGameEnabled() && game.players.some(player => player.memberId === policy.memberId && !player.leftAt);
 }
 
 export async function readPrivateKickoffDeliveryAuthority(eventId: string, memberId: string) {

@@ -1,0 +1,18 @@
+{
+  "publishedOn": "2026-11-15",
+  "order": 200,
+  "item": {
+    "id": "connect-a-service",
+    "kind": "feature",
+    "priority": 2,
+    "title": "Connect MCP servers to Murph",
+    "summary": "In Settings, under MCP servers, paste an MCP server's link. Murph signs in if the server offers it, you choose what Murph may look up, and Murph can then use it in your private chats and check-ins.",
+    "details": "For now Murph can only look things up; actions that change things stay off. Every action starts off, and if a server changes one, Murph waits until you look at it again. Removing an MCP server signs Murph out of it. MCP servers never reach group chats.",
+    "relevanceTags": ["connections", "assistant", "settings", "privacy"],
+    "sourcePullRequests": [5035, 5036],
+    "tryIt": {
+      "href": "/settings/connections",
+      "label": "Connect an MCP server"
+    }
+  }
+}

@@ -273,8 +273,8 @@ describe("device sync callback redirect helpers", () => {
     expect(errorSpy).toHaveBeenCalledOnce();
   });
 
-  it("maps shared malformed request errors to the existing 400 JSON shapes", async () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+  it("maps unmarked native failures to sanitized server errors", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     const invalidJsonError = new SyntaxError(
       "Unexpected token ] in JSON at position 3 access_token=tok_fake_sensitive_123",
     );
@@ -284,38 +284,38 @@ describe("device sync callback redirect helpers", () => {
     const invalidJsonResponse = httpModule.jsonError(invalidJsonError);
     const invalidRequestResponse = httpModule.jsonError(invalidRequestError);
 
-    expect(invalidJsonResponse.status).toBe(400);
+    expect(invalidJsonResponse.status).toBe(500);
     await expect(invalidJsonResponse.json()).resolves.toEqual({
       error: {
-        code: "INVALID_JSON",
-        message: "Invalid JSON.",
+        code: "INTERNAL_ERROR",
+        message: "Internal error.",
       },
     });
 
-    expect(invalidRequestResponse.status).toBe(400);
+    expect(invalidRequestResponse.status).toBe(500);
     await expect(invalidRequestResponse.json()).resolves.toEqual({
       error: {
-        code: "INVALID_REQUEST",
-        message: "Invalid request.",
+        code: "INTERNAL_ERROR",
+        message: "Internal error.",
       },
     });
 
-    expect(warnSpy).toHaveBeenCalledTimes(2);
-    expect(warnSpy).toHaveBeenNthCalledWith(1, "Hosted device-sync route failed.", {
+    expect(errorSpy).toHaveBeenCalledTimes(2);
+    expect(errorSpy).toHaveBeenNthCalledWith(1, "Hosted device-sync route failed.", {
       errorMessage: "Unexpected token ] in JSON at position 3 access_token=<redacted-secret>",
-      errorResponseCode: "INVALID_JSON",
+      errorResponseCode: "INTERNAL_ERROR",
       errorType: "SyntaxError",
       internalMessage: "Hosted device-sync route failed unexpectedly.",
     });
-    expect(warnSpy).toHaveBeenNthCalledWith(2, "Hosted device-sync route failed.", {
+    expect(errorSpy).toHaveBeenNthCalledWith(2, "Hosted device-sync route failed.", {
       errorMessage:
         "Expected a shorter callback state value. request_body={\"apiKey\":\"<redacted-secret>\"}",
-      errorResponseCode: "INVALID_REQUEST",
+      errorResponseCode: "INTERNAL_ERROR",
       errorType: "RangeError",
       internalMessage: "Hosted device-sync route failed unexpectedly.",
     });
-    expect(warnSpy.mock.calls[0]?.[1]).not.toBe(invalidJsonError);
-    expect(warnSpy.mock.calls[1]?.[1]).not.toBe(invalidRequestError);
+    expect(errorSpy.mock.calls[0]?.[1]).not.toBe(invalidJsonError);
+    expect(errorSpy.mock.calls[1]?.[1]).not.toBe(invalidRequestError);
   });
 
   it("redacts raw thrown values from internal error logs", async () => {

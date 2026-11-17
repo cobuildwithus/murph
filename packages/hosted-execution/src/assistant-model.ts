@@ -1,4 +1,5 @@
 import { normalizeStoredAssistantModel } from "@murphai/contracts";
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type {
   HostedRuntimeAssistantConfigurationChanges,
   HostedRuntimeAssistantConfigurationControlRequest,
@@ -115,7 +116,7 @@ export function parseHostedRuntimeAssistantConfigurationToolRequest(
     return { action };
   }
   if (action !== "update") {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runtime assistant configuration tool action is not supported.",
     );
   }
@@ -154,7 +155,7 @@ export function parseHostedRuntimeAssistantConfigurationControlRequest(
     return { action };
   }
   if (action !== "update") {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runtime assistant configuration control action is not supported.",
     );
   }
@@ -174,7 +175,7 @@ export function parseHostedRuntimeAssistantConfigurationControlRequest(
     "Hosted runtime assistant configuration control assistantInputId",
   );
   if (!/^ain_[0-9a-f]{32}$/u.test(assistantInputId)) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runtime assistant configuration control assistantInputId is invalid.",
     );
   }
@@ -202,7 +203,7 @@ function parseHostedRuntimeAssistantConfigurationChanges(
         );
   if (model === undefined) {
     if (reasoningEffort === undefined) {
-      throw new TypeError(
+      throw new ContractValidationError(
         `${label} update requires a model or reasoning effort.`,
       );
     }
@@ -243,7 +244,7 @@ export function parseHostedRuntimeAssistantConfigurationToolResponse(
     };
   }
   if (action !== "update") {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runtime assistant configuration tool response action is not supported.",
     );
   }
@@ -256,7 +257,7 @@ export function parseHostedRuntimeAssistantConfigurationToolResponse(
     "Hosted runtime assistant configuration tool appliesAt",
   );
   if (appliesAt !== "next_turn") {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runtime assistant configuration tool appliesAt is not supported.",
     );
   }
@@ -268,7 +269,7 @@ export function parseHostedRuntimeAssistantConfigurationToolResponse(
           "Hosted runtime assistant configuration tool requiredPlan",
         );
   if (requiredPlan !== null && requiredPlan !== "pulse" && requiredPlan !== "edge" && requiredPlan !== "max") {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runtime assistant configuration tool requiredPlan is not supported.",
     );
   }
@@ -358,7 +359,7 @@ function parseHostedRuntimeAssistantProductModel(
   label: string,
 ) {
   if (!isHostedAssistantProductModel(value)) {
-    throw new TypeError(`${label} is not supported.`);
+    throw new ContractValidationError(`${label} is not supported.`);
   }
   return value;
 }
@@ -368,7 +369,7 @@ function parseHostedRuntimeAssistantReasoningEffort(
   label: string,
 ) {
   if (!isHostedAssistantReasoningEffort(value)) {
-    throw new TypeError(`${label} is not supported.`);
+    throw new ContractValidationError(`${label} is not supported.`);
   }
   return value;
 }
@@ -386,7 +387,7 @@ function parseHostedRuntimeAssistantConfigurationUpdateStatus(
     status !== "updated" &&
     status !== "upgrade_required"
   ) {
-    throw new TypeError(
+    throw new ContractValidationError(
       "Hosted runtime assistant configuration tool status is not supported.",
     );
   }

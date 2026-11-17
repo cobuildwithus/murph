@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   HOSTED_LIVE_USAGE_SOURCE,
   HOSTED_LIVE_USAGE_VERSION,
@@ -20,13 +21,13 @@ export function priceHostedLiveUsage(record: AssistantUsageRecord): bigint | nul
     || [record.inputTokens, record.outputTokens, record.cachedInputTokens,
       record.cacheWriteTokens, record.reasoningTokens, record.totalTokens]
       .some((value) => value !== null)) {
-    throw new TypeError("Invalid native Live duration usage record.");
+    throw new ContractValidationError("Invalid native Live duration usage record.");
   }
   const start = record.rawUsageJson?.startDurationMs;
   const end = record.rawUsageJson?.endDurationMs;
   if (typeof start !== "number" || !Number.isSafeInteger(start) || start < 0
     || typeof end !== "number" || !Number.isSafeInteger(end) || end <= start) {
-    throw new TypeError("Live usage requires an increasing duration interval.");
+    throw new ContractValidationError("Live usage requires an increasing duration interval.");
   }
   // $0.05/minute, or 5/6 USD micro per millisecond, with no whole-minute rounding.
   const cumulativeCost = (milliseconds: number) => (BigInt(milliseconds) * 5n + 5n) / 6n;

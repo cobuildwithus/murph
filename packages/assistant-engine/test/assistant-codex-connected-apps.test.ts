@@ -576,6 +576,26 @@ describe("murph connected-app dynamic tools", () => {
     expect(JSON.parse(result.rpcResult.contentItems[0]!.text)).toEqual({ body: literalMarkup });
   });
 
+  it("omits the configured toolkit catalog from model-facing account lists", async () => {
+    const accounts = [{
+      alias: null, connectedAt: "2026-10-01T12:00:00.000Z", id: "ca_synthetic", status: "ACTIVE",
+      toolkit: "googlecalendar", toolkitConfigured: true, toolkitLabel: "Google Calendar", wordId: "maple",
+    }];
+    const connectedApps: AssistantConnectedAppsPort = {
+      request: vi.fn(async () => ({ result: {
+        accounts, toolkits: [{ label: "Gmail", slug: "gmail" }, { label: "Google Calendar", slug: "googlecalendar" }],
+      } })),
+    };
+    const result = await executeMurphDynamicToolRequest({
+      env: {}, fetchImpl: fetch, hostedToolContext: createHostedToolContext(connectedApps),
+      nextUsageOrdinal: () => 1, progressDelivery: createProgressDelivery(),
+      request: { args: { action: "list" }, kind: "connected-apps-manage" },
+    });
+    expect(result.rpcResult.success).toBe(true);
+    // The reading reference names the toolkits and connect rejects others.
+    expect(JSON.parse(result.rpcResult.contentItems[0]!.text)).toEqual({ accounts });
+  });
+
   it("fails closed instead of truncating an oversized provider result", async () => {
     const connectedApps: AssistantConnectedAppsPort = {
       request: vi.fn(async () => ({ result: { body: "x".repeat(130_000) } })),

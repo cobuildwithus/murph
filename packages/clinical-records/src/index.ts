@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { clinicalDocumentAttachmentsSchema } from "./attachments.ts";
 export * from "./attachments.ts";
 export * from "./document-eligibility.ts";
@@ -1022,7 +1023,7 @@ export function countClinicalFhirPageResources(content: string): number {
   try {
     value = JSON.parse(content);
   } catch {
-    throw new TypeError("Clinical FHIR raw page must be valid JSON.");
+    throw new ContractValidationError("Clinical FHIR raw page must be valid JSON.");
   }
 
   if (Array.isArray(value)) {
@@ -1032,7 +1033,7 @@ export function countClinicalFhirPageResources(content: string): number {
     !isClinicalFhirResourceRecord(value)
     || typeof value.resourceType !== "string"
   ) {
-    throw new TypeError("Clinical FHIR raw page must contain a FHIR resource or Bundle.");
+    throw new ContractValidationError("Clinical FHIR raw page must contain a FHIR resource or Bundle.");
   }
   if (value.resourceType !== "Bundle") {
     return 1;
@@ -1041,7 +1042,7 @@ export function countClinicalFhirPageResources(content: string): number {
     return 0;
   }
   if (!Array.isArray(value.entry)) {
-    throw new TypeError("Clinical FHIR Bundle entry must be an array.");
+    throw new ContractValidationError("Clinical FHIR Bundle entry must be an array.");
   }
   return value.entry.length;
 }

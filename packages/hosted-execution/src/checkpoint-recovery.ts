@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createHash } from "node:crypto";
 import type { HostedBrowserVaultReplicaRef } from "./contracts.ts";
 import { parseHostedBrowserVaultReplicaRef } from "./browser-vault.ts";
@@ -25,13 +26,13 @@ export function parseHostedCheckpointRecoveryRequest(value: unknown): HostedChec
   const input = requireObject(value, "Checkpoint recovery request");
   const fields = ["operation", "expectedWorkspaceVersion", "sourceSnapshotFingerprint", "sourceReplicaFingerprint", "replacement"];
   if (Object.keys(input).some((key) => !fields.includes(key))
-    || input.operation !== "stage" && input.operation !== "publish") throw new TypeError("Invalid checkpoint recovery operation.");
+    || input.operation !== "stage" && input.operation !== "publish") throw new ContractValidationError("Invalid checkpoint recovery operation.");
   const expectedWorkspaceVersion = requireString(input.expectedWorkspaceVersion, "Recovery workspace version");
   const sourceSnapshotFingerprint = requireString(input.sourceSnapshotFingerprint, "Recovery snapshot fingerprint");
   const sourceReplicaFingerprint = requireString(input.sourceReplicaFingerprint, "Recovery replica fingerprint");
   if (!/^(0|[1-9][0-9]{0,18})$/.test(expectedWorkspaceVersion)
     || !/^[a-f0-9]{64}$/.test(sourceSnapshotFingerprint) || !/^[a-f0-9]{64}$/.test(sourceReplicaFingerprint)) {
-    throw new TypeError("Invalid checkpoint recovery precondition.");
+    throw new ContractValidationError("Invalid checkpoint recovery precondition.");
   }
   return { operation: input.operation, expectedWorkspaceVersion, sourceSnapshotFingerprint, sourceReplicaFingerprint,
     replacement: parseHostedWorkspaceSnapshotV2Ref(input.replacement) };

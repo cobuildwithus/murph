@@ -1,4 +1,5 @@
 import "server-only";
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { isNativeError } from "node:util/types";
 import { Prisma, type HostedAuthRecord, type PrismaClient } from "@prisma/client";
@@ -151,6 +152,7 @@ function observedSessionErrorCategory(error: unknown) {
   }
   switch (prototype) {
     case AuthRecordChangedError.prototype: return "auth_record_changed";
+    case ContractValidationError.prototype:
     case TypeError.prototype: return "native_type";
     case RangeError.prototype: return "native_range";
     case SyntaxError.prototype: return "native_syntax";

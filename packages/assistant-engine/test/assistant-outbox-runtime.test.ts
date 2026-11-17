@@ -3694,6 +3694,109 @@ describe('assistant outbox runtime', () => {
     ])
   })
 
+  describe('a stored intent that carries a recap video', () => {
+    // The identity Web accepted, and beside it the one decision the Linq sender saved.
+    const recapVideo = {
+      generationId: 'a'.repeat(32),
+      hash: 'b'.repeat(64),
+      byteLength: 5_200_000,
+      form: 'attachment',
+      attachmentId: 'synthetic-attachment',
+    }
+    const recapMessage = 'The mat entered evidence.\nWatch the recap: https://recaps.murph.test/recap/synthetic-game'
+    const seed = async (prefix: string) => {
+      const { paths, vaultRoot } = await createAssistantVault(prefix)
+      const seeded = await createIntent(vaultRoot, { channel: 'linq', message: recapMessage })
+      const file = path.join(paths.outboxDirectory, `${seeded.intentId}.json`)
+      return { file, seeded, vaultRoot }
+    }
+
+    it('is read, kept across rewrites and handed to the Linq sender beside the unchanged message', async () => {
+      const { file, seeded, vaultRoot } = await seed('assistant-outbox-recap-video-')
+      // Nothing writes the field: an intent made today has none, and is stored as before.
+      expect(seeded).not.toHaveProperty('recapVideo')
+      expect(JSON.parse(await readFile(file, 'utf8'))).not.toHaveProperty('recapVideo')
+
+      await writeFile(file, JSON.stringify({ ...seeded, recapVideo }), 'utf8')
+      await expect(readAssistantOutboxIntent(vaultRoot, seeded.intentId)).resolves.toEqual({ ...seeded, recapVideo })
+      await expect(listAssistantOutboxIntentsLocal(vaultRoot)).resolves.toMatchObject([{ intentId: seeded.intentId, recapVideo }])
+
+      mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+        delivery: createDelivery({ channel: 'linq' }),
+        deliveryDeduplicated: false,
+        deliveryTransportIdempotent: false,
+        outboxIntentId: null,
+        session: undefined,
+      })
+      const sent = await dispatchAssistantOutboxIntent({ force: true, intentId: seeded.intentId, vault: vaultRoot })
+      expect(sent.intent.status).toBe('sent')
+      // The message and its media are as for an intent without the field; only the Linq sender's
+      // dependencies carry the saved decision, which it replays.
+      const delivered = mockedDeliverAssistantMessageOverBinding.mock.lastCall?.[0]
+      expect(delivered).toMatchObject({ message: recapMessage })
+      expect(delivered?.media ?? []).toEqual([])
+      expect(JSON.stringify(delivered)).not.toMatch(/recapVideo|synthetic-attachment/u)
+      expect(mockedDeliverAssistantMessageOverBinding.mock.lastCall?.[1]?.linqRecapVideo?.video).toEqual(recapVideo)
+      // The ownership-checked rewrite to "sent" kept the field whole.
+      await expect(readAssistantOutboxIntent(vaultRoot, seeded.intentId)).resolves.toMatchObject({ status: 'sent', recapVideo })
+      expect(JSON.parse(await readFile(file, 'utf8')).recapVideo).toEqual(recapVideo)
+    })
+
+    it.each([
+      ['a hash that is not one', { ...recapVideo, hash: 'not-a-hash' }],
+      ['a file over the size bound', { ...recapVideo, byteLength: 8_000_001 }],
+      ['no generation', { hash: recapVideo.hash, byteLength: recapVideo.byteLength }],
+      ['a path instead of an identity', 'media/recap.mp4'],
+      ['null', null],
+    ])('drops %s and still reads and sends the message', async (_name, malformed) => {
+      const { file, seeded, vaultRoot } = await seed('assistant-outbox-recap-video-malformed-')
+      await writeFile(file, JSON.stringify({ ...seeded, recapVideo: malformed }), 'utf8')
+      const stored = await readAssistantOutboxIntent(vaultRoot, seeded.intentId)
+      expect(stored).toEqual(seeded)
+      expect(stored?.recapVideo).toBeUndefined()
+      mockedDeliverAssistantMessageOverBinding.mockResolvedValueOnce({
+        delivery: createDelivery({ channel: 'linq' }),
+        deliveryDeduplicated: false,
+        deliveryTransportIdempotent: false,
+        outboxIntentId: null,
+        session: undefined,
+      })
+      const sent = await dispatchAssistantOutboxIntent({ force: true, intentId: seeded.intentId, vault: vaultRoot })
+      expect(sent.intent.status).toBe('sent')
+      expect(mockedDeliverAssistantMessageOverBinding.mock.lastCall?.[0]).toMatchObject({ message: recapMessage })
+    })
+
+    it('names the same identity Web returns', async () => {
+      const { recapVideoIdentitySchema } = await import('@murphai/contracts/recap-show')
+      const { assistantOutboxRecapVideoSchema } = await import('@murphai/operator-config/assistant-cli-contracts')
+      const identity = { generationId: recapVideo.generationId, hash: recapVideo.hash, byteLength: recapVideo.byteLength }
+      for (const candidate of [identity, { ...identity, byteLength: 8_000_000 }, { ...identity, byteLength: 8_000_001 }, { ...identity, byteLength: 0 },
+        { ...identity, hash: 'B'.repeat(64) }, { ...identity, generationId: '' }, { ...identity, generationId: 'g'.repeat(129) }, { hash: identity.hash }]) {
+        expect(assistantOutboxRecapVideoSchema.safeParse(candidate).success).toBe(recapVideoIdentitySchema.safeParse(candidate).success)
+      }
+      expect(assistantOutboxRecapVideoSchema.parse(recapVideo)).toEqual(recapVideo)
+    })
+
+    it.skipIf(process.env.MURPH_VERIFY_RECAP_SKEW !== '1')('is the outbox reader\'s rollback floor: the previous release refuses the intent', async () => {
+      const { execFileSync } = await import('node:child_process')
+      const { randomUUID } = await import('node:crypto')
+      const { fileURLToPath } = await import('node:url')
+      const { seeded } = await seed('assistant-outbox-recap-video-skew-')
+      const root = fileURLToPath(new URL('../../../', import.meta.url))
+      const old = new URL(`../../operator-config/src/.recap-video-outbox-skew-${randomUUID()}.ts`, import.meta.url)
+      await writeFile(old, execFileSync('git', ['show', '8e03afa98451f0b7ae0de30531dd8be715f12199:packages/operator-config/src/assistant-cli-contracts.ts'], { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }), { flag: 'wx' })
+      try {
+        const base = await import(old.href) as typeof import('@murphai/operator-config/assistant-cli-contracts')
+        // An intent without the field is the same record to both releases.
+        expect(base.assistantOutboxIntentSchema.parse(seeded)).toEqual(seeded)
+        // The previous release refuses one with it, which is what its reader quarantines.
+        expect(base.assistantOutboxIntentSchema.safeParse({ ...seeded, recapVideo }).success).toBe(false)
+      } finally {
+        await rm(old, { force: true })
+      }
+    })
+  })
+
   it('quarantines stale outbox intents with removed legacy fields instead of normalizing them', async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-04-08T12:05:00.000Z'))

@@ -18,6 +18,10 @@ import { POST as upload } from "../app/api/game/v1/media/route";
 import { POST as post } from "../app/api/game/v1/games/[id]/entries/route";
 import { GET as read } from "../app/api/game/v1/games/[id]/route";
 import { GET as home } from "../app/api/game/v1/home/route";
+import { GET as progress } from "../app/api/game/v1/progress/route";
+import { PUT as progressAmount } from "../app/api/game/v1/progress/measures/[id]/route";
+import { progressSchema } from "../src/lib/game/progress/contract";
+import { progressLookup, sealProgress } from "../src/lib/game/progress/crypto";
 import { POST as recapWatched } from "../app/api/game/v1/games/[id]/recap-watched/route";
 import { DELETE as unblockRoute, PUT as blockRoute } from "../app/api/game/v1/blocks/[memberId]/route";
 import { PUT as blockInviteRoute } from "../app/api/game/v1/invites/[token]/block/route";
@@ -32,6 +36,8 @@ import { serializeHostedNativeSessionToken } from "../src/lib/better-auth/transp
 import type { GameHomeView, GameView } from "../src/lib/game/contract";
 import { assertGameMemberAuthCurrentTx, requireGameMemberAuth } from "../src/lib/game/http/auth";
 import { getPrisma } from "../src/lib/prisma";
+
+vi.mock("next/server", async original => ({ ...await original<typeof import("next/server")>(), after: vi.fn() }));
 
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
 if (enabled) {
@@ -110,7 +116,6 @@ describe.skipIf(!enabled)("game v1 local API smoke", () => {
     mediaDir = await mkdtemp(path.join(process.env.MURPH_VITEST_TEMP_ROOT ?? tmpdir(), "game-api-"));
     vi.stubEnv("MURPH_GAME_MEDIA_DIR", mediaDir);
     vi.stubEnv("MURPH_GAME_ENABLED", "true");
-    vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", "");
     vi.stubEnv("VERCEL_ENV", "");
     vi.stubEnv("HOSTED_AUTH_STORAGE_KEY", Buffer.alloc(32, 17).toString("base64url"));
     vi.stubEnv("HOSTED_BETTER_AUTH_SECRET", Buffer.alloc(32, 9).toString("base64url"));
@@ -140,6 +145,39 @@ describe.skipIf(!enabled)("game v1 local API smoke", () => {
   async function revoke(token: string) {
     await hostedAuthAdapter(getPrisma())({}).delete({ model: "session", where: [{ field: "id", value: `session-${tokenMember.get(token)!}` }] });
   }
+
+  it("rejects overflowing Progress amounts before writing and accepts 10,000 for two completed days", async () => {
+    const actor = await member("Ava"), peer = await member("Leo"), id = randomUUID();
+    const context = { params: Promise.resolve({ id }) };
+    const created = await game(create(request(actor, { gameId: id, inviteeFirstName: "Leo", terms: {
+      startsOn: new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10),
+      tasks: [{ seat: 0, text: "Pushups every day" }, { seat: 1, text: "Pushups every day" }],
+      schedule: { count: 7 }, stakes: [{ kind: "prize", item: "Lunch" }],
+    } })));
+    await game(accept(request(peer, { termsVersion: 1, timeZone: "UTC" }), { params: Promise.resolve({ token: created.inviteToken! }) }));
+    await game(start(request(actor), context));
+    for (let day = 0; day < 2; day++) {
+      if (day) await game(advance(request(actor, { days: 1 }), context));
+      await game(post(request(actor, { entryId: randomUUID(), kind: "words", text: "Done" }), context));
+    }
+    const db = getPrisma(), memberId = tokenMember.get(actor)!;
+    const lookup = progressLookup(memberId, "task", ["pushups every day", "any"]);
+    await db.gameProgressTaskMeasure.create({ data: { memberId, lookup,
+      measureEncrypted: await sealProgress({ memberId, table: "game_progress_task_measure", rowId: lookup, field: "measure" }, { quantity: null, unit: "days", name: "pushups" }) } });
+    const before = progressSchema.parse(await (await progress(request(actor, undefined, "GET"))).json());
+    expect(before.measures[0]).toMatchObject({ needsPerDay: true, total: { value: 2 } });
+    const measureContext = { params: Promise.resolve({ id: before.measures[0].id }) };
+    const awards = await db.gameProgressAward.findMany({ where: { memberId } });
+    for (const perDay of [1e308, 10_001, 1.5]) {
+      expect((await progressAmount(request(actor, { perDay }, "PUT"), measureContext)).status).toBe(400);
+      expect(await db.gameProgressMeasure.count({ where: { memberId } })).toBe(0);
+      expect(await db.gameProgressAward.findMany({ where: { memberId } })).toEqual(awards);
+    }
+    const accepted = await progressAmount(request(actor, { perDay: 10_000 }, "PUT"), measureContext);
+    expect(accepted.status).toBe(200);
+    expect(await accepted.json()).toMatchObject({ ok: true, measure: { id: "pushups.reps", total: { value: 20_000, text: "20,000" } } });
+    expect(await db.gameProgressMeasure.count({ where: { memberId } })).toBe(1);
+  });
 
   function revokeOnBodyRead(token: string, body: unknown, method = "POST") {
     const init: RequestInit & { duplex: "half" } = {
@@ -349,7 +387,7 @@ describe.skipIf(!enabled)("game v1 local API smoke", () => {
     if (unbound) await db.gameInvitee.update({ where: { gameId_seat: { gameId, seat: 1 } }, data: { memberId: null } });
     const routes = await import("@/src/lib/hosted-routing/assistant-notification-destination");
     const linq = await import("@/src/lib/hosted-onboarding/linq-client");
-    const route = vi.spyOn(routes, "readHostedThreadContainerLinqRouteAuthorities").mockResolvedValue({ nonLinqContainerMemberIds: new Set(), unavailableContainerMemberIds: new Set(), authorities: new Map([[room,
+    const route = vi.spyOn(routes, "readHostedThreadContainerLinqRouteAuthorities").mockResolvedValue({ nonLinqContainerMemberIds: new Set(), missingContainerMemberIds: new Set(), unavailableContainerMemberIds: new Set(), authorities: new Map([[room,
       { channel: "linq", threadId: room, containerMemberId: room, accountLookupKey: "synthetic-line" }]]) });
     const summary = vi.spyOn(linq, "getHostedLinqChatSummary").mockResolvedValue(linqRoster({ isGroup: true, handlesComplete: true,
       handles: [{ handle: "+15555550100", isMe: true, status: "active" }, ...people.map(id => ({ handle: `${id}@example.test`, isMe: false, status: "active" }))] }));
@@ -556,6 +594,8 @@ describe.skipIf(!enabled)("game v1 local API smoke", () => {
 
   it("posts every summary kind through dev days and reveals the untouched partner days only in recap", async () => {
     const poster = await member("Poster");
+    const { recordHostedLaunchRequiredConsent } = await import("@/src/lib/legal/consent");
+    await recordHostedLaunchRequiredConsent({ memberId: tokenMember.get(poster)!, prisma: getPrisma(), scope: "launch.health-data" });
     const viewer = await member("Viewer");
     const id = randomUUID();
     const context = { params: Promise.resolve({ id }) };
@@ -588,6 +628,16 @@ describe.skipIf(!enabled)("game v1 local API smoke", () => {
         postedAt: expect.any(String), blurHash: "synthetic-blur",
         ...(mediaKeys.length ? { preview: { kind: artifact.kind, mediaUrl: `/api/game/v1/media/${encodeURIComponent(mediaKeys[0])}` } } : {}) });
     }
+    const progressResponse = await progress(request(poster, undefined, "GET"));
+    expect(progressResponse.status).toBe(200);
+    const progressView = progressSchema.parse(await progressResponse.json());
+    expect(progressView.measures.map(measure => [measure.id, measure.total.value, measure.pending])).toEqual([
+      [expect.stringMatching(/^h[a-z0-9_-]{12}\.days$/iu), 2, true],
+      ["walk.meters", 1200.5, false], ["pushups.reps", 1, false],
+    ]);
+    const awardCount = await getPrisma().gameProgressAward.count({ where: { memberId: tokenMember.get(poster)! } });
+    expect((await progress(request(poster, undefined, "GET"))).status).toBe(200);
+    expect(await getPrisma().gameProgressAward.count({ where: { memberId: tokenMember.get(poster)! } })).toBe(awardCount);
     await game(advance(request(poster, { days: 1 }), context));
     await game(post(request(poster, { entryId: randomUUID(), kind: "words", text: "First" }), context));
     // The shared cap still counts attempts across different artifact kinds.
@@ -604,10 +654,9 @@ describe.skipIf(!enabled)("game v1 local API smoke", () => {
       expect(recap.days[day].others[0].blurHash).toBe("synthetic-blur");
     }
   }, 30_000);
-  describe("invite-only allowlist", () => {
+  describe("open game access", () => {
     const terms = { schedule: { count: 7 }, stakes: [{ kind: "dare", item: "Sing at karaoke" }],
       tasks: [{ seat: 0, text: "Take a walk" }, { seat: 1, text: "Take a walk" }] };
-    afterAll(() => vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", ""));
     // Accepting from 8pm local starts day 1 tomorrow, so play where it is midday now.
     const middayZone = () => {
       const offset = ((12 - new Date().getUTCHours() + 36) % 24) - 12;
@@ -615,69 +664,65 @@ describe.skipIf(!enabled)("game v1 local API smoke", () => {
     };
 
     it.each([false, true])("keeps unblocking reachable after the only opponent is blocked (joined: %s)", async (joined) => {
-      const listed = await account();
+      const creator = await account();
       const invitee = await account();
       const stranger = await account();
-      vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", listed.id);
-      expect((await profile(request(listed.token, { firstName: "Ava", timeZone: "UTC" }, "PUT"))).status).toBe(200);
-      const created = await game(create(request(listed.token, { gameId: randomUUID(), inviteeFirstName: "Leo", terms })));
+
+      expect((await profile(request(creator.token, { firstName: "Ava", timeZone: "UTC" }, "PUT"))).status).toBe(200);
+      const created = await game(create(request(creator.token, { gameId: randomUUID(), inviteeFirstName: "Leo", terms })));
       const token = created.inviteToken!;
       expect((await profile(request(invitee.token, { firstName: "Leo", timeZone: "UTC" }, "PUT", token))).status).toBe(200);
       if (joined) {
         await game(accept(request(invitee.token, { termsVersion: 1, timeZone: "UTC" }), { params: Promise.resolve({ token }) }));
-        expect((await blockRoute(request(invitee.token, undefined, "PUT"), { params: Promise.resolve({ memberId: listed.id }) })).status).toBe(200);
+        expect((await blockRoute(request(invitee.token, undefined, "PUT"), { params: Promise.resolve({ memberId: creator.id }) })).status).toBe(200);
       } else {
         expect((await blockInviteRoute(request(invitee.token, undefined, "PUT"), { params: Promise.resolve({ token }) })).status).toBe(200);
       }
       // No held link is needed to reach You > Blocked people after blocking.
       const response = await home(request(invitee.token, undefined, "GET"));
       expect(response.status).toBe(200);
-      expect((await response.json()).blocked).toEqual([{ firstName: "Ava", memberId: listed.id }]);
-      await refused(create(request(invitee.token, { gameId: randomUUID(), inviteeFirstName: "Sam", terms })));
-      await refused(home(request(stranger.token, undefined, "GET")));
+      expect((await response.json()).blocked).toEqual([{ firstName: "Ava", memberId: creator.id }]);
+      expect((await create(request(invitee.token, { gameId: randomUUID(), inviteeFirstName: "Sam", terms }))).status).toBe(200);
+      expect(await (await home(request(stranger.token, undefined, "GET"))).json()).toMatchObject({ games: [], canStartGames: true });
       vi.stubEnv("MURPH_GAME_ENABLED", "false");
       try {
         await refused(home(request(invitee.token, undefined, "GET")));
-        await refused(unblockRoute(request(invitee.token, undefined, "DELETE"), { params: Promise.resolve({ memberId: listed.id }) }));
+        await refused(unblockRoute(request(invitee.token, undefined, "DELETE"), { params: Promise.resolve({ memberId: creator.id }) }));
       } finally {
         vi.stubEnv("MURPH_GAME_ENABLED", "true");
       }
-      expect((await unblockRoute(request(invitee.token, undefined, "DELETE"), { params: Promise.resolve({ memberId: listed.id }) })).status).toBe(200);
+      expect((await unblockRoute(request(invitee.token, undefined, "DELETE"), { params: Promise.resolve({ memberId: creator.id }) })).status).toBe(200);
       expect(await getPrisma().gameBlock.count({ where: { blockerMemberId: invitee.id } })).toBe(0);
-      await refused(create(request(invitee.token, { gameId: randomUUID(), inviteeFirstName: "Sam", terms })));
+      expect((await create(request(invitee.token, { gameId: randomUUID(), inviteeFirstName: "Sam", terms }))).status).toBe(200);
     });
 
-    it("lets a new unlisted invitee in through a listed member's invite to play, settle, cash in and rematch, but never start fresh", async () => {
-      const listed = await account();
+    it("lets any member set up, play, settle, cash in, rematch and start fresh", async () => {
+      const creator = await account();
       const invitee = await account();
       const stranger = await account();
-      vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", listed.id);
+
       const timeZone = middayZone();
-      expect((await profile(request(listed.token, { firstName: "Listed", timeZone }, "PUT"))).status).toBe(200);
+      expect((await profile(request(creator.token, { firstName: "Starter", timeZone }, "PUT"))).status).toBe(200);
       const id = randomUUID();
       const context = { params: Promise.resolve({ id }) };
-      const created = await game(create(request(listed.token, { gameId: id, inviteeFirstName: "Invitee", terms })));
+      const created = await game(create(request(creator.token, { gameId: id, inviteeFirstName: "Invitee", terms })));
       const token = created.inviteToken!;
 
-      // Before the invite, the routes are missing for the unlisted, as for everyone else.
-      await refused(home(request(invitee.token, undefined, "GET")));
-      await refused(profile(request(invitee.token, { firstName: "Invitee", timeZone: "UTC" }, "PUT")));
-      // Holding the open invite lets them look and set up; Home says they can't start one.
+      // Home and profile setup are open before the member accepts any invite.
       const held = await home(request(invitee.token, undefined, "GET", token));
       expect(held.status).toBe(200);
-      expect(await held.json()).toMatchObject({ canStartGames: false });
-      expect((await profile(request(invitee.token, { firstName: "Invitee", timeZone }, "PUT", token))).status).toBe(200);
-      // The accept route vouches with its own token; no header needed.
+      expect(await held.json()).toMatchObject({ canStartGames: true, games: [] });
+      expect((await profile(request(invitee.token, { firstName: "Invitee", timeZone }, "PUT"))).status).toBe(200);
       expect((await game(accept(request(invitee.token, { termsVersion: 1, timeZone }), { params: Promise.resolve({ token }) }))).status).toBe("live");
 
       const homeView: GameHomeView = await (await home(request(invitee.token, undefined, "GET"))).json();
       expect(homeView.games.map((shown) => shown.id)).toEqual([id]);
-      expect(homeView.canStartGames).toBe(false);
-      const listedHome: GameHomeView = await (await home(request(listed.token, undefined, "GET"))).json();
-      expect(listedHome.canStartGames).toBe(true);
+      expect(homeView.canStartGames).toBe(true);
+      const creatorHome: GameHomeView = await (await home(request(creator.token, undefined, "GET"))).json();
+      expect(creatorHome.canStartGames).toBe(true);
 
       await photo(invitee.token, id, 41);
-      await photo(listed.token, id, 42);
+      await photo(creator.token, id, 42);
       expect((await game(read(request(invitee.token, undefined, "GET"), context))).days[0].others[0].entry?.kind).toBe("photo");
       const proposalId = randomUUID();
       const proposed = await game(proposeChange(request(invitee.token, { proposalId, expectedTermsVersion: 1, change: { kind: "edit", lengthDays: 10 } }), context));
@@ -698,55 +743,50 @@ describe.skipIf(!enabled)("game v1 local API smoke", () => {
       expect(afterwards.games.map((shown) => shown.id)).toContain(id);
       expect(afterwards.wallet.redeemed.map((ticket) => ticket.id)).toContain(won!.id);
 
-      // No fresh game, with anyone.
-      await refused(create(request(invitee.token, { gameId: randomUUID(), inviteeFirstName: "Anyone", terms })));
-      // A rematch goes to the listed player, who answers it by accepting.
-      const rematch = await game(create(request(invitee.token, { gameId: randomUUID(), inviteeFirstName: "Listed", previousGameId: id, terms })));
+      expect((await create(request(invitee.token, { gameId: randomUUID(), inviteeFirstName: "Anyone", terms }))).status).toBe(200);
+      // The other player answers the addressed rematch by accepting.
+      const rematch = await game(create(request(invitee.token, { gameId: randomUUID(), inviteeFirstName: "Starter", previousGameId: id, terms })));
       expect(rematch).toMatchObject({ status: "invited", round: 2 });
-      const theirs: GameHomeView = await (await home(request(listed.token, undefined, "GET"))).json();
+      const theirs: GameHomeView = await (await home(request(creator.token, undefined, "GET"))).json();
       const addressed = theirs.games.find((shown) => shown.id === rematch.id);
       expect(addressed?.inviteToken).toBeTruthy();
-      expect((await game(accept(request(listed.token, { termsVersion: 1, timeZone: "UTC" }), { params: Promise.resolve({ token: addressed!.inviteToken! }) }))).status).toBe("live");
+      expect((await game(accept(request(creator.token, { termsVersion: 1, timeZone: "UTC" }), { params: Promise.resolve({ token: addressed!.inviteToken! }) }))).status).toBe("live");
 
       // A stranger holding a used link, or nothing, still sees no game.
-      await refused(home(request(stranger.token, undefined, "GET", token)));
-      await refused(home(request(stranger.token, undefined, "GET")));
-      await refused(accept(request(stranger.token, { termsVersion: 1, timeZone: "UTC" }), { params: Promise.resolve({ token }) }));
+      expect(await (await home(request(stranger.token, undefined, "GET", token))).json()).toMatchObject({ games: [], canStartGames: true });
+      await refused(read(request(stranger.token, undefined, "GET"), context), "GAME_NOT_FOUND");
+      expect(await (await home(request(stranger.token, undefined, "GET"))).json()).toMatchObject({ games: [], canStartGames: true });
+      expect((await profile(request(stranger.token, { firstName: "Stranger", timeZone: "UTC" }, "PUT"))).status).toBe(200);
+      const taken = await accept(request(stranger.token, { termsVersion: 1, timeZone: "UTC" }), { params: Promise.resolve({ token }) });
+      expect(taken.status).toBe(409);
+      expect((await taken.json()).error.code).toBe("INVITE_USED");
     }, 60_000);
 
-    it("keeps two unlisted members, a listed member's invite to them when the switch is off, and the other direction of a rematch in step", async () => {
-      const listed = await account();
-      const unlisted = await account();
+    it("keeps rematches available in the other direction and hides every member while the switch is off", async () => {
+      const creator = await account();
+      const invitee = await account();
       const other = await account();
-      vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", listed.id);
-      expect((await profile(request(listed.token, { firstName: "Listed", timeZone: "UTC" }, "PUT"))).status).toBe(200);
+
+      expect((await profile(request(creator.token, { firstName: "Starter", timeZone: "UTC" }, "PUT"))).status).toBe(200);
       const id = randomUUID();
       const context = { params: Promise.resolve({ id }) };
-      const created = await game(create(request(listed.token, { gameId: id, inviteeFirstName: "Unlisted", terms })));
-      expect((await profile(request(unlisted.token, { firstName: "Unlisted", timeZone: "UTC" }, "PUT", created.inviteToken!))).status).toBe(200);
-      await game(accept(request(unlisted.token, { termsVersion: 1, timeZone: "UTC" }), { params: Promise.resolve({ token: created.inviteToken! }) }));
-      await game(settle(request(listed.token), context));
+      const created = await game(create(request(creator.token, { gameId: id, inviteeFirstName: "Invitee", terms })));
+      expect((await profile(request(invitee.token, { firstName: "Invitee", timeZone: "UTC" }, "PUT", created.inviteToken!))).status).toBe(200);
+      await game(accept(request(invitee.token, { termsVersion: 1, timeZone: "UTC" }), { params: Promise.resolve({ token: created.inviteToken! }) }));
+      await game(settle(request(creator.token), context));
 
-      // The listed player rematches the unlisted one; the unlisted one answers.
-      const rematch = await game(create(request(listed.token, { gameId: randomUUID(), inviteeFirstName: "Unlisted", previousGameId: id, terms })));
-      const shown: GameHomeView = await (await home(request(unlisted.token, undefined, "GET"))).json();
+      // The original starter can also invite the other player to a rematch.
+      const rematch = await game(create(request(creator.token, { gameId: randomUUID(), inviteeFirstName: "Invitee", previousGameId: id, terms })));
+      const shown: GameHomeView = await (await home(request(invitee.token, undefined, "GET"))).json();
       expect(shown.games.find((candidate) => candidate.id === rematch.id)?.status).toBe("invited");
 
-      // Two unlisted members: the other one never gets in, even with a profile request.
-      await refused(home(request(other.token, undefined, "GET")));
-      await refused(create(request(other.token, { gameId: randomUUID(), inviteeFirstName: "Unlisted", terms })));
-
-      // Off the list entirely (the listed member removed), their games go dark.
-      vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", other.id);
-      await refused(home(request(unlisted.token, undefined, "GET")));
-      await refused(home(request(listed.token, undefined, "GET")));
-      // The global switch off hides it from everyone, the listed included.
-      vi.stubEnv("MURPH_GAME_MEMBER_ALLOWLIST", listed.id);
+      expect(await (await home(request(other.token, undefined, "GET"))).json()).toMatchObject({ games: [], canStartGames: true });
+      // The global switch hides games from both players and strangers.
       vi.stubEnv("MURPH_GAME_ENABLED", "false");
-      await refused(home(request(listed.token, undefined, "GET")));
-      await refused(home(request(unlisted.token, undefined, "GET")));
+      await refused(home(request(creator.token, undefined, "GET")));
+      await refused(home(request(invitee.token, undefined, "GET")));
       vi.stubEnv("MURPH_GAME_ENABLED", "true");
-      expect((await home(request(unlisted.token, undefined, "GET"))).status).toBe(200);
+      expect((await home(request(invitee.token, undefined, "GET"))).status).toBe(200);
     }, 60_000);
   });
 });

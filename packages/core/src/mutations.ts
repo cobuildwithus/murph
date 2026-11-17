@@ -1102,16 +1102,6 @@ async function resolveExplicitEventLifecycle(input: {
   return buildEventSpineLifecycle(eventSpineRevision(latestMatchedEvent.record) + 1);
 }
 
-function prepareEventLedgerEntry<K extends EventKind>({
-  recordId,
-  ...input
-}: BuildEventRecordInput<K>): PreparedJsonlEntry<EventRecordByKind<K>> {
-  return prepareStoredEventLedgerEntry(
-    buildNormalizedEventSeed(input),
-    recordId ?? generateRecordId(ID_PREFIXES.event),
-  );
-}
-
 async function stageJsonlRecord(
   batch: WriteBatch,
   relativePath: string,
@@ -2903,6 +2893,46 @@ function isJunctionSleepStageCycleFallbackObservation(record: EventRecord): bool
     record.dataOrigin?.normalizerVersion === JUNCTION_SLEEP_STAGE_CYCLE_FALLBACK_NORMALIZER_VERSION;
 }
 
+/**
+ * A sleep session's total and stage minutes were keyed on its coverage window
+ * (`sleep-stage-`) before they were keyed on the provider's session id
+ * (`sleep-session-`). The window ref moves a stored record across once, to
+ * one session. Every session a source sends for the same start and end names
+ * that record, and before session refs each of them wrote it, so it holds the
+ * values of the last one. The session whose values it holds takes it over (the
+ * first in the import when none or several do), through that session's first
+ * event in the import, so a member edit stays over the values it was made on;
+ * the others resolve by their own session refs, as they would in an empty vault. After that the session ref owns the record, and a
+ * window ref can only name a stale copy left by an earlier rewrite of the
+ * session's start or end, which must not turn the import into an ambiguous
+ * merge of two live records.
+ */
+function isSupersededJunctionSleepWindowRef(
+  legacyExternalRef: ExternalRef,
+  incomingExternalRef: ExternalRef,
+): boolean {
+  return incomingExternalRef.system === "junction" &&
+    legacyExternalRef.system === "junction" &&
+    legacyExternalRef.resourceType === incomingExternalRef.resourceType &&
+    /^junction-[a-z0-9-]+-sleep$/u.test(incomingExternalRef.resourceType) &&
+    legacyExternalRef.facet === incomingExternalRef.facet &&
+    incomingExternalRef.resourceId.startsWith("sleep-session-") &&
+    legacyExternalRef.resourceId.startsWith("sleep-stage-");
+}
+
+/** Whether an incoming event may adopt the record stored under one of its legacy refs. */
+function claimsLegacyExternalRef(
+  legacyExternalRef: ExternalRef,
+  incomingExternalRef: ExternalRef,
+  incomingRefHasOwner: boolean,
+): boolean {
+  if (eventExternalRefKey(legacyExternalRef) === eventExternalRefKey(incomingExternalRef)) {
+    return false;
+  }
+  return !incomingRefHasOwner
+    || !isSupersededJunctionSleepWindowRef(legacyExternalRef, incomingExternalRef);
+}
+
 function isJunctionSleepStageSummaryLegacyRef(
   legacyExternalRef: ExternalRef,
   incoming: EventRecord,
@@ -3362,17 +3392,81 @@ function hasHistoricalExternalRefUserAuthoredChanges(match: IndexedEventExternal
     userAuthoredEventStateKey(match.record) !== userAuthoredEventStateKey(match.indexedRecord);
 }
 
+/** Whether a claimant carries the provider values its legacy record holds, identity aside. */
+function holdsLegacyProviderContent({ entry, indexedMatch }: LegacyExternalRefReservation): boolean {
+  return eventContentKey(entry.record, { includeProviderAttribution: false })
+    === eventContentKey(indexedMatch.indexedRecord, { includeProviderAttribution: false });
+}
+
+/**
+ * Which event holds each shared sleep window record (see
+ * isSupersededJunctionSleepWindowRef). The session of the first claim whose
+ * values the record holds owns it, else the session of the first claim, and
+ * that session's first claim in the import holds it. The window a session
+ * claims first moves through the session's first event instead, even when that
+ * event names another window: it writes the session's record, so no later copy
+ * leaves the stored record beside it. Any other window the session owns stays
+ * with its claim, which keeps other sessions off it and leaves it a stale copy
+ * once the session has its record.
+ */
+function selectSleepWindowOwners(
+  claimsByRefKey: ReadonlyMap<string, readonly LegacyExternalRefReservation[]>,
+  entries: readonly PreparedDeviceEventEntry[],
+): Map<string, LegacyExternalRefReservation> {
+  const owners = new Map<string, LegacyExternalRefReservation>();
+  if (claimsByRefKey.size === 0) {
+    return owners;
+  }
+  const sessionOf = (entry: PreparedDeviceEventEntry | undefined) =>
+    entry?.record.externalRef && eventExternalRefKey(entry.record.externalRef);
+  const windowByHolder = new Map<PreparedDeviceEventEntry, { refKey: string } & LegacyExternalRefReservation>();
+  for (const [refKey, claims] of claimsByRefKey) {
+    const session = sessionOf((claims.find(holdsLegacyProviderContent) ?? claims[0])?.entry);
+    const holder = claims.find((claim) => sessionOf(claim.entry) === session);
+    if (holder) {
+      owners.set(refKey, holder);
+      windowByHolder.set(holder.entry, { ...holder, refKey });
+    }
+  }
+  const firstEntryBySession = new Map<string, PreparedDeviceEventEntry>();
+  const movedSessions = new Set<string>();
+  for (const entry of entries) {
+    const session = sessionOf(entry);
+    if (!session) {
+      continue;
+    }
+    const first = firstEntryBySession.get(session) ?? entry;
+    firstEntryBySession.set(session, first);
+    const window = windowByHolder.get(entry);
+    if (window && !movedSessions.has(session)) {
+      movedSessions.add(session);
+      owners.set(window.refKey, { entry: first, indexedMatch: window.indexedMatch });
+    }
+  }
+  return owners;
+}
+
 function buildLegacyExternalRefReservations(
   entries: readonly PreparedDeviceEventEntry[],
   index: EventExternalRefIndex,
 ): Map<string, LegacyExternalRefReservation> {
   const reservations = new Map<string, LegacyExternalRefReservation>();
+  // Every claim on a shared sleep window record is in before one holds it.
+  const sleepWindowClaims = new Map<string, LegacyExternalRefReservation[]>();
 
   const reserve = (
     entry: PreparedDeviceEventEntry,
     refKey: string,
     indexedMatch: IndexedEventExternalRefMatch,
+    sharedSleepWindow = false,
   ): void => {
+    if (sharedSleepWindow) {
+      sleepWindowClaims.set(refKey, [
+        ...(sleepWindowClaims.get(refKey) ?? []),
+        { entry, indexedMatch },
+      ]);
+      return;
+    }
     const existing = reservations.get(refKey);
     if (existing && existing.entry !== entry) {
       const externalRef = indexedMatch.indexedExternalRef;
@@ -3400,7 +3494,13 @@ function buildLegacyExternalRefReservations(
     );
     for (const legacyExternalRef of entry.legacyExternalRefs) {
       const legacyRefKey = eventExternalRefKey(legacyExternalRef);
-      if (legacyRefKey === primaryRefKey) {
+      if (
+        !claimsLegacyExternalRef(
+          legacyExternalRef,
+          externalRef,
+          index.latestByRefKey.has(primaryRefKey),
+        )
+      ) {
         continue;
       }
 
@@ -3422,7 +3522,12 @@ function buildLegacyExternalRefReservations(
         continue;
       }
 
-      reserve(entry, legacyRefKey, indexedMatch);
+      reserve(
+        entry,
+        legacyRefKey,
+        indexedMatch,
+        isSupersededJunctionSleepWindowRef(legacyExternalRef, externalRef),
+      );
     }
 
     if (!isIncomingJunctionNoIdProfile(entry.record)) {
@@ -3489,6 +3594,9 @@ function buildLegacyExternalRefReservations(
     }
   }
 
+  selectSleepWindowOwners(sleepWindowClaims, entries).forEach((owner, refKey) => {
+    reserve(owner.entry, refKey, owner.indexedMatch);
+  });
   return reservations;
 }
 
@@ -4385,7 +4493,9 @@ function resolveDeviceEventIdentity(
       legacyExternalRef,
       refKey: eventExternalRefKey(legacyExternalRef),
     }))
-    .filter((match) => match.refKey !== refKey)
+    .filter((match) =>
+      claimsLegacyExternalRef(match.legacyExternalRef, externalRef, primaryMatch !== undefined)
+    )
     .map(({ legacyExternalRef, refKey: legacyRefKey }) => {
       const reservation = legacyReservations.get(legacyRefKey);
       return {
@@ -4418,11 +4528,18 @@ function resolveDeviceEventIdentity(
       refKey: reservedRefKey,
       indexedMatch: reservation.indexedMatch,
     }));
-  const matchedEntries = [
+  // A window record handed to a session's first event (selectSleepWindowOwners)
+  // only stands in for a new record; it never joins a record the event reaches.
+  const isWindowHandoff = (match: { indexedMatch: IndexedEventExternalRefMatch }) =>
+    isSupersededJunctionSleepWindowRef(match.indexedMatch.indexedExternalRef, externalRef);
+  const directMatches = [
     ...(primaryMatch ? [{ refKey, indexedMatch: primaryMatch }] : []),
     ...legacyMatchedEntries,
-    ...implicitReservedEntries,
+    ...implicitReservedEntries.filter((match) => !isWindowHandoff(match)),
   ];
+  const matchedEntries = directMatches.length > 0
+    ? directMatches
+    : implicitReservedEntries.filter(isWindowHandoff);
   const selectedPrimaryMatch = matchedEntries.find((match) => match.refKey === refKey);
   const latest = selectedPrimaryMatch?.indexedMatch.record ?? matchedEntries[0]?.indexedMatch.record;
   let associationSafe = true;

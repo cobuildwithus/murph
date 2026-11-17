@@ -4,7 +4,7 @@ import { prepareHostedDomainRootForWeb, revalidatePreparedHostedDomainRootForWeb
 import { acquireHostedLinqParticipantContactLockTx, createHostedLinqParticipantContactLookupKeyReadCandidates, type HostedLinqParticipantContact } from "../hosted-onboarding/linq-participant-contact";
 import { assertHostedMemberNotSuspended } from "../hosted-onboarding/entitlement";
 import { createHostedMember, lookupHostedMemberByVerifiedEmailAddress, prepareHostedMemberVerifiedEmailReplyAlias, readHostedMemberCoreState, syncHostedMemberVerifiedEmailAuthorization } from "../hosted-onboarding/hosted-member-store";
-import { lookupHostedMemberIdentityByPhoneNumber, readHostedMemberIdentity, upsertHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
+import { lookupHostedMemberIdentityByLinqEmailHandle, lookupHostedMemberIdentityByPhoneNumber, readHostedMemberIdentity, upsertHostedMemberIdentity } from "../hosted-onboarding/hosted-member-identity-store";
 import { readHostedMemberRoutingState } from "../hosted-onboarding/hosted-member-routing-store";
 import { requireHostedInviteForAuthentication } from "../hosted-onboarding/invite-service";
 import { buildHostedMemberPhoneIdentityFields } from "../hosted-onboarding/member-identity-fields";
@@ -24,6 +24,12 @@ async function findCanonicalMember(prisma: Client, contact: HostedLinqParticipan
     ? (await lookupHostedMemberByVerifiedEmailAddress({ address: contact.value, prisma }))?.core ?? null
     : (await lookupHostedMemberIdentityByPhoneNumber({ phoneNumber: contact.value, prisma }))?.core ?? null;
   if (verified) return verified;
+  // A member who texted Murph from this iMessage email address owns it once
+  // the code proves the address; verified-email sync rejects any other owner.
+  if (contact.kind === "email") {
+    const handleOwner = (await lookupHostedMemberIdentityByLinqEmailHandle({ emailAddress: contact.value, prisma }))?.core;
+    if (handleOwner) return handleOwner;
+  }
   // Text-first signup may have only a pending contact. OTP proof can claim its
   // exact stub, but a routing blind index alone is never login authority.
   const pending = await prisma.hostedMemberRouting.findMany({
@@ -126,6 +132,8 @@ async function prepareUnclaimedLogin(prisma: PrismaClient, contact: HostedLinqPa
     }
     if (current) assertHostedMemberNotSuspended(current);
     else if (!invitedMemberId) await createHostedMember({ memberId, billingStatus: HostedBillingStatus.not_started, prisma: tx });
+    // Written once, by the sign-in that claims the member; MCP write approval reads it.
+    await tx.hostedMember.updateMany({ where: { id: memberId, firstSignInMethod: null }, data: { firstSignInMethod: contact.kind } });
     await revalidatePreparedHostedDomainRootForWebTx({ prepared: root, tx });
     if (contact.kind === "email") {
       if (!identity) await upsertHostedMemberIdentity({

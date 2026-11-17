@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { classifyPublicRouteError } from "../src/worker/errors.ts";
 import { readHostedExecutionEnvironment } from "../src/env.ts";
 import type {
   WorkerEnvironmentSource,
@@ -171,6 +172,40 @@ describe("worker meal-photo staging route", () => {
       status: 413,
     });
     expect(mocks.resolveHostedExecutionUserCryptoContext).not.toHaveBeenCalled();
+  });
+
+  it.each([TypeError, RangeError])("keeps storage %s retryable", async ErrorType => {
+    const bucket = new MemoryEncryptedR2Bucket();
+    mocks.resolveHostedExecutionUserCryptoContext.mockResolvedValue({
+      keysById: {}, resolveKeyById: async () => null,
+      rootKey: createTestRootKey(85), rootKeyId: "ingress-root-current",
+    });
+    vi.spyOn(bucket, "put").mockRejectedValueOnce(new ErrorType("Synthetic storage failure."));
+    const context = await createRouteContext({ bucket, bytes: createJpegBytes() });
+    const error = await handleMealPhotoStageRoute(context, "synthetic-owner").catch(error => error);
+    expect(error).toBeInstanceOf(Error);
+    expect(classifyPublicRouteError(error)).toEqual({ status: 500, error: "Internal error." });
+  });
+
+  it.each([new Uint8Array(), new Uint8Array([1, 2, 3]), new Uint8Array([255, 216, 1, 2])])(
+    "preserves malformed JPEG rejection: %j", async bytes => {
+      const context = await createRouteContext({ bytes });
+      const response = await handleMealPhotoStageRoute(context, "synthetic-owner");
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toEqual({ error: "Meal photo payload is invalid." });
+      expect(mocks.resolveHostedExecutionUserCryptoContext).not.toHaveBeenCalled();
+    },
+  );
+
+  it("preserves oversized body and invalid metadata messages", async () => {
+    const oversized = await createRouteContext({ bytes: createJpegBytes(), contentLength: String(HOSTED_MEAL_PHOTO_MAX_BYTES + 1) });
+    const response = await handleMealPhotoStageRoute(oversized, "synthetic-owner");
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toEqual({ error: "Meal photo exceeds the 4 MiB limit." });
+    const metadata = await createRouteContext({ bytes: createJpegBytes(), sha256: "invalid" });
+    const invalid = await handleMealPhotoStageRoute(metadata, "synthetic-owner");
+    expect(invalid.status).toBe(400);
+    await expect(invalid.json()).resolves.toEqual({ error: "Meal photo request metadata is invalid." });
   });
 
   it("accepts an exact 4 MiB JPEG and rejects a mismatched SHA", async () => {

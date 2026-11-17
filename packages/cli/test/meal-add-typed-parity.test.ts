@@ -61,6 +61,7 @@ interface MealAddResult {
 interface ShowResult {
   entity: {
     id: string
+    title?: string
     occurredAt: string | null
     data: Record<string, unknown>
   }
@@ -845,6 +846,8 @@ test.sequential(
       '390',
       '--nutrition-protein-grams',
       '15',
+      '--nutrition-fiber-grams',
+      '0',
       '--nutrition-source',
       'estimated',
       '--nutrition-confidence',
@@ -862,7 +865,7 @@ test.sequential(
         proteinGrams: 15,
         carbsGrams: 51,
         fatGrams: 22,
-        fiberGrams: 8,
+        fiberGrams: 0,
       },
       provenance: {
         source: 'estimated',
@@ -1074,7 +1077,7 @@ test.sequential('meal names persist separately through add import and edit witho
     const edited = await mealCommand<ShowResult>(['edit', saved.mealId, '--name', 'Red lentil soup'])
     assert.equal(edited.exitCode, null)
     const shown = requireData((await mealCommand<ShowResult>(['show', saved.mealId])).envelope)
-    assert.equal(shown.entity.data.title, 'Red lentil soup')
+    assert.equal(shown.entity.title, 'Red lentil soup')
     assert.equal(shown.entity.data.note, saved.note)
     assert.deepEqual(shown.entity.data.nutrition, saved.nutrition)
   }

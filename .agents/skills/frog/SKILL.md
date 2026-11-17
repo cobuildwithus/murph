@@ -73,11 +73,8 @@ that entry untracked, unstaged, or omitted from the commit. If a safe scoped
 commit is blocked, preserve the entry and report the exact blocker instead of
 dropping it.
 
-The wrapper permits only file-backed `list` and `log`; it rejects direct
-publishing, enters the repository root itself, and rejects caller-supplied
-`--cwd` and `--mcp` modes. Local and Action execution use the exact Frog
-`1.1.0` dependency from Murph's reviewed manifest and committed lockfile. The
-Action-only workflow is the sole issue and reconciliation owner.
+`scripts/frog` supports only `list` and `log`. Publishing issues is the
+Frog Action's job, so don't publish an entry yourself.
 
 ## Public-data boundary
 

@@ -128,6 +128,16 @@ it("returns accepted only after typed mailbox admission with session revalidatio
   expect(mocks.current).toHaveBeenLastCalledWith({ member: { id: "member_native" } }, { transaction: true });
 });
 
+it("does not describe an unrelated stream RangeError as a prohibited body", async () => {
+  const response = await DELETE(request("", {
+    method: "DELETE", duplex: "half",
+    body: new ReadableStream({ start(controller) { controller.error(new RangeError("Invalid array length")); } }),
+  }), context());
+  expect(response.status).toBe(500);
+  expect(await response.json()).toEqual({ error: { code: "INTERNAL_ERROR", message: "Internal error." } });
+  expect(mocks.submit).not.toHaveBeenCalled();
+});
+
 it("reports failed admission and does not accept request bodies", async () => {
   mocks.submit.mockRejectedValue(new Error("synthetic mailbox failure"));
   expect(await (await DELETE(request(), context())).json()).toMatchObject({ error: { code: "MEAL_REMOVAL_UNAVAILABLE" } });

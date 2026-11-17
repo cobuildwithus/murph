@@ -101,9 +101,11 @@ const randomUuidMock = vi.fn(() => RESET_ALL_OPERATION_ID);
 let cleanupRender: (() => Promise<void>) | null = null;
 
 function MemberUsageClient(
-  props: Omit<ComponentProps<typeof ProductionMemberUsageClient>, "operatorMemberId">,
+  props: Omit<ComponentProps<typeof ProductionMemberUsageClient>, "operatorMemberId" | "freeIdleMembers">
+    & Partial<Pick<ComponentProps<typeof ProductionMemberUsageClient>, "freeIdleMembers">>,
 ) {
   return createElement(ProductionMemberUsageClient, {
+    freeIdleMembers: [],
     ...props,
     operatorMemberId: TEST_OPERATOR_MEMBER_ID,
   });
@@ -128,6 +130,104 @@ afterEach(async () => {
 });
 
 describe("MemberUsageClient", () => {
+  test("shows ranked free idle rows after the main table and suspends the selected member", async () => {
+    const rows = [{
+      memberId: "hbm_idle_high",
+      maskedPhoneNumberHint: "*** 0101",
+      createdAt: "2026-10-15T12:00:00.000Z",
+      allTimeUsageUsdMicros: "10940000",
+      freeCreditRemainingUsdMicros: "250000",
+      messagesLast7Days: 18,
+    }, {
+      memberId: "hbm_idle_low",
+      maskedPhoneNumberHint: null,
+      createdAt: "2026-10-16T12:00:00.000Z",
+      allTimeUsageUsdMicros: "4250000",
+      freeCreditRemainingUsdMicros: "0",
+      messagesLast7Days: 0,
+    }];
+    const dashboard = makeDashboard();
+    const rendered = await renderClientComponent(createElement(MemberUsageClient, { dashboard, freeIdleMembers: rows }));
+    cleanupRender = rendered.cleanup;
+    const section = rendered.container.querySelector<HTMLElement>('section[aria-label="Free, no games, devices or groups"]')!;
+    const tableRows = [...section.querySelectorAll("tbody tr")];
+    expect(tableRows).toHaveLength(2);
+    expect(tableRows[0]!.textContent).toBe("hbm_idle_high*** 0101Oct 15, 2026$10.94$0.2518Suspend");
+    expect(tableRows[1]!.textContent).toBe("hbm_idle_low—Oct 16, 2026$4.25$0.000Suspend");
+    expect(tableRows[0]!.querySelectorAll("button")).toHaveLength(1);
+    expect(section.querySelectorAll("article")).toHaveLength(2);
+    expect(rendered.container.textContent!.indexOf("hbm_container")).toBeLessThan(rendered.container.textContent!.indexOf("Free, no games, devices or groups"));
+    await clickButton(rendered.window, getButtonByAriaLabel(section, "Suspend for hbm_idle_high"));
+    expect(fetchMock).not.toHaveBeenCalled();
+    fetchMock.mockResolvedValueOnce(Response.json({ suspended: true }));
+    await clickButton(rendered.window, getButtonByAriaLabel(section, "Confirm Suspend for hbm_idle_high"));
+    expect(fetchMock).toHaveBeenCalledExactlyOnceWith("/api/ops/member-suspension", expect.objectContaining({
+      method: "POST", body: JSON.stringify({ memberId: "hbm_idle_high", operation: "suspend" }),
+    }));
+    expect(routerRefresh).toHaveBeenCalledOnce();
+    await rendered.rerender(createElement(MemberUsageClient, { dashboard, freeIdleMembers: [rows[1]!] }));
+    expect(section.textContent).not.toContain("hbm_idle_high");
+    expect(section.textContent).toContain("hbm_idle_low");
+  });
+
+  test("keeps the free idle section with its one-line empty state and no actions", async () => {
+    const rendered = await renderClientComponent(createElement(MemberUsageClient, { dashboard: makeDashboard() }));
+    cleanupRender = rendered.cleanup;
+    const section = rendered.container.querySelector('section[aria-label="Free, no games, devices or groups"]')!;
+    expect(section.textContent).toBe("Free, no games, devices or groupsNo one right now.");
+    expect(section.querySelector("button")).toBeNull();
+  });
+
+  test("suspends and restores a searched person with inline confirmation and no container action", async () => {
+    const dashboard = makeDashboard();
+    dashboard.rows.push({ ...dashboard.rows[0]!, memberId: "hbm_person", memberKind: "member", containerOwnerMemberId: null });
+    dashboard.search = { ...dashboard.search, kind: "phone_last_four", query: "0101", resultCount: 2 };
+    const rendered = await renderClientComponent(createElement(MemberUsageClient, { dashboard }));
+    cleanupRender = rendered.cleanup;
+    const confirm = vi.fn(() => { throw new Error("Native confirmation is forbidden."); });
+    rendered.window.confirm = confirm;
+    expect(rendered.container.querySelector('button[aria-label="Suspend for hbm_container"]')).toBeNull();
+    expect(getButtonByAriaLabel(rendered.container, "Suspend for hbm_person").disabled).toBe(false);
+    await clickButton(rendered.window, getButtonByAriaLabel(rendered.container, "Suspend for hbm_person"));
+    expect(rendered.container.textContent).toContain("Murph stops replying to them. They are not told.");
+    expect(fetchMock).not.toHaveBeenCalled();
+    await clickButton(rendered.window, getButton(rendered.container, "Cancel"));
+    expect(fetchMock).not.toHaveBeenCalled();
+    await clickButton(rendered.window, getButtonByAriaLabel(rendered.container, "Suspend for hbm_person"));
+    fetchMock.mockResolvedValueOnce(Response.json({ suspended: true }));
+    await clickButton(rendered.window, getButtonByAriaLabel(rendered.container, "Confirm Suspend for hbm_person"));
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/ops/member-suspension", expect.objectContaining({
+      method: "POST", body: JSON.stringify({ memberId: "hbm_person", operation: "suspend" }),
+    }));
+    expect(routerRefresh).toHaveBeenCalledOnce();
+    await clickButton(rendered.window, getButtonByAriaLabel(rendered.container, "Restore for hbm_person"));
+    expect(rendered.container.textContent).toContain("Murph can reply again. They are not told.");
+    fetchMock.mockResolvedValueOnce(Response.json({ suspended: false }));
+    await clickButton(rendered.window, getButtonByAriaLabel(rendered.container, "Confirm Restore for hbm_person"));
+    expect(fetchMock).toHaveBeenLastCalledWith("/api/ops/member-suspension", expect.objectContaining({
+      body: JSON.stringify({ memberId: "hbm_person", operation: "restore" }),
+    }));
+    expect(routerRefresh).toHaveBeenCalledTimes(2);
+    expect(confirm).not.toHaveBeenCalled();
+
+  });
+
+  test("keeps the same suspension retryable after a failed save", async () => {
+    const dashboard = makeDashboard();
+    dashboard.rows[0] = { ...dashboard.rows[0]!, memberId: "hbm_person", memberKind: "member" };
+    const rendered = await renderClientComponent(createElement(MemberUsageClient, { dashboard }));
+    cleanupRender = rendered.cleanup;
+    await clickButton(rendered.window, getButtonByAriaLabel(rendered.container, "Suspend for hbm_person"));
+    fetchMock.mockResolvedValueOnce(Response.json({ error: "unavailable" }, { status: 503 }));
+    await clickButton(rendered.window, getButtonByAriaLabel(rendered.container, "Confirm Suspend for hbm_person"));
+    expect(rendered.container.textContent).toContain("Could not save. Try again.");
+    expect(routerRefresh).not.toHaveBeenCalled();
+    fetchMock.mockResolvedValueOnce(Response.json({ suspended: true }));
+    await clickButton(rendered.window, getButtonByAriaLabel(rendered.container, "Confirm Suspend for hbm_person"));
+    expect(fetchMock.mock.calls.map((call) => JSON.parse(String(call[1]?.body)).operation)).toEqual(["suspend", "suspend"]);
+    expect(routerRefresh).toHaveBeenCalledOnce();
+  });
+
   test("renders mutation controls fail-closed before tab-session restoration", () => {
     const markup = renderToStaticMarkup(
       createElement(MemberUsageClient, { dashboard: makeDashboard() }),
@@ -1187,6 +1287,7 @@ describe("MemberUsageClient", () => {
     const sessionStorage = createMemoryStorage();
     const rendered = await renderClientComponent(
       createElement(ProductionMemberUsageClient, {
+        freeIdleMembers: [],
         dashboard: makeDashboard(),
         operatorMemberId: TEST_OPERATOR_MEMBER_ID,
       }),
@@ -1203,6 +1304,7 @@ describe("MemberUsageClient", () => {
 
     await rendered.rerender(
       createElement(ProductionMemberUsageClient, {
+        freeIdleMembers: [],
         dashboard: makeDashboard(),
         operatorMemberId: "hbm_other_ops_operator",
       }),

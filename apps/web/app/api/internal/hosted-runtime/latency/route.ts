@@ -1,3 +1,4 @@
+import { parseInput } from "@murphai/hosted-execution/request-input";
 import { after } from "next/server";
 
 import {
@@ -43,7 +44,7 @@ export const POST = withJsonError(async (request: Request) => {
     maxBodyBytes: HOSTED_RUNTIME_LATENCY_TRACE_BODY_LIMIT_BYTES,
   });
   if (isRecord(payload) && "events" in payload) {
-    const batch = parseHostedRuntimeLatencyTraceBatchRequest(payload);
+    const batch = parseInput(payload, parseHostedRuntimeLatencyTraceBatchRequest);
     // Reject the whole envelope before any write if even one event has the wrong fence.
     const fences = batch.events.map(event => requireMatchingRuntimeWriteFence(request, event.runtimeAttemptId));
     const results: Array<HostedRuntimeLatencyTraceResponse | null> = [];
@@ -57,7 +58,7 @@ export const POST = withJsonError(async (request: Request) => {
     }
     return jsonOk({ results });
   }
-  const { event } = parseHostedRuntimeLatencyTraceRequest(payload);
+  const { event } = parseInput(payload, parseHostedRuntimeLatencyTraceRequest);
   return jsonOk(await recordLatencyEvent(
     event, authenticatedUserId, requireMatchingRuntimeWriteFence(request, event.runtimeAttemptId),
   ));

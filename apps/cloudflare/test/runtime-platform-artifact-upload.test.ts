@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -168,6 +169,8 @@ describe("artifact upload transport recovery", () => {
     new DOMException("The RPC call destroy() was called", "TimeoutError"),
     new RangeError("Synthetic network failure"),
     Object.assign(new Error("fetch failed"), { code: "authorization_error" }),
+    new ContractValidationError("fetch failed"),
+    new ContractValidationError("Network connection lost"),
     new TypeError("Invalid URL"),
     new TypeError("Request body is unusable"),
     new RangeError("Invalid range"),
@@ -181,7 +184,9 @@ describe("artifact upload transport recovery", () => {
   ])("does not replay cancellation, timeout, deterministic, unknown or status failures: %s", async (failure) => {
     const fetchImpl = vi.fn<typeof fetch>().mockRejectedValue(failure);
     const store = createCloudflareArtifactStore({ fetchImpl, timeoutMs: 5_000 });
-    await expect(store.put(createArtifact())).rejects.toBeInstanceOf(HostedRuntimeArtifactWriteError);
+    const result = store.put(createArtifact());
+    if (failure instanceof ContractValidationError) await expect(result).rejects.toBe(failure);
+    else await expect(result).rejects.toBeInstanceOf(HostedRuntimeArtifactWriteError);
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
 

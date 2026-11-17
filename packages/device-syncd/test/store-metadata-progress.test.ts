@@ -13,7 +13,7 @@ describe("bounded sync-result metadata", () => {
         junctionTemporalSweepV1: "synthetic-sweep",
         junctionProfileSummaryCheckedAt: "2025-04-01T00:00:00.000Z",
         junctionProfileSummaryNormalizationRevision: 2,
-        junctionHistoricalBackfillStatus: "coverage_v3_complete",
+        junctionHistoricalBackfillStatus: "coverage_v4_complete",
         junctionHistoricalBackfillEmptyAttempts: 0,
         junctionHistoricalBackfillLastEmptyAt: null,
         junctionHistoricalBackfillWindowStart: "2025-01-01",

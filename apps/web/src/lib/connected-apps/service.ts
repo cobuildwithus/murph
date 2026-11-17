@@ -1,6 +1,7 @@
 import "server-only";
 
 import { reconcileHostedConnectedAppsDiscovery } from "./discovery";
+import { getHostedConnectedAppsReadPolicy, wrapHostedConnectedAppsReadResult } from "./read-policy";
 
 import { createHash, randomBytes } from "node:crypto";
 
@@ -146,6 +147,8 @@ async function runHostedConnectedAppsRequest(input: {
 
   try {
     switch (input.request.operation) {
+      case "read":
+        return await executeConnectedAppsRead({ client, config, memberId: input.memberId, input: input.request.input });
       case "manage":
         return await executeConnectedAppsManagement({
           client,
@@ -154,22 +157,8 @@ async function runHostedConnectedAppsRequest(input: {
           memberId: input.memberId,
           prisma,
         });
-      case "search": {
-        const toolkits = input.request.input.toolkits?.map((toolkit) =>
-          assertHostedConnectedAppsSearchToolkit(config, toolkit)
-        );
-        const sessionId = await ensureHostedConnectedAppsSession({
-          client,
-          config,
-          memberId: input.memberId,
-          prisma,
-        });
-        return reconcileHostedConnectedAppsDiscovery(await client.search({
-          query: input.request.input.query,
-          sessionId,
-          ...(toolkits ? { toolkits } : {}),
-        }));
-      }
+      case "search":
+        return await searchConnectedApps({ client, config, prisma, memberId: input.memberId, input: input.request.input });
       case "execute": {
         const {
           account: selector,
@@ -928,7 +917,7 @@ function mapConnectedAppsError(error: unknown): unknown {
         ...(error.status === null ? {} : { statusCode: error.status }),
         type: error.type,
       },
-      httpStatus: error.retryable ? 503 : 400,
+      httpStatus: connectedAppsProviderHttpStatus(error, error.retryable),
       message: error.retryable
         ? "Connected apps are temporarily unavailable."
         : "The connected-app request could not be completed.",
@@ -952,12 +941,25 @@ function mapConnectedAppsError(error: unknown): unknown {
     cause: error,
     code: "CONNECTED_APPS_PROVIDER_UNAVAILABLE",
     details: buildConnectedAppsProviderErrorDetails(error),
-    httpStatus: retryable ? 503 : 400,
+    httpStatus: connectedAppsProviderHttpStatus(error, retryable),
     message: retryable
       ? "Connected apps are temporarily unavailable."
       : "The connected-app request could not be completed.",
     retryable,
   });
+}
+
+function connectedAppsProviderHttpStatus(
+  error: OpenWeatherAlertsRequestError | ComposioConnectedAppsRequestError,
+  retryable: boolean,
+): number {
+  if (error instanceof ComposioConnectedAppsRequestError) {
+    if (retryable) return 503;
+    // A provider 4xx rejects the request, except 401, which rejects our key.
+    const status = error.status ?? 0;
+    return status >= 400 && status < 500 && status !== 401 ? 400 : 502;
+  }
+  return error.type === "openweather_invalid_arguments" ? 400 : retryable ? 503 : 502;
 }
 
 function isRetryableComposioFailure(
@@ -986,4 +988,51 @@ function buildConnectedAppsProviderErrorDetails(
     details.type = error.type;
   }
   return Object.keys(details).length > 0 ? details : undefined;
+}
+
+async function executeConnectedAppsRead(input: {
+  client: ReturnType<typeof createComposioConnectedAppsClient>;
+  config: ReturnType<typeof readHostedConnectedAppsConfig>;
+  memberId: string;
+  input: Extract<HostedConnectedAppsRequest, { operation: "read" }>["input"];
+}): Promise<unknown> {
+  const { client, config } = input;
+  const { account: selector, toolSlug, arguments: args } = input.input;
+  const policy = getHostedConnectedAppsReadPolicy(toolSlug);
+  if (!policy) {
+    throw hostedOnboardingError({ code: "CONNECTED_APPS_READ_NOT_ALLOWED", httpStatus: 400, message: "That engine read is not supported." });
+  }
+  assertHostedConnectedAppToolkit(config, policy.toolkit);
+  const account = await resolveOwnedConnectedAccount({ client, memberId: input.memberId, selector, scope: "configured", toolkit: policy.toolkit });
+  if (account.toolkit.slug.trim().toLowerCase() !== policy.toolkit) {
+    throw hostedOnboardingError({ code: "CONNECTED_APPS_TOOLKIT_MISMATCH", httpStatus: 400, message: "Choose an account that matches the read." });
+  }
+  return wrapHostedConnectedAppsReadResult(await client.executeDirect({
+    account: account.id, arguments: { ...args, ...policy.forcedArguments },
+    toolSlug, userId: input.memberId, version: policy.version,
+  }), policy.result);
+}
+
+async function searchConnectedApps(input: {
+  client: ReturnType<typeof createComposioConnectedAppsClient>;
+  config: ReturnType<typeof readHostedConnectedAppsConfig>;
+  memberId: string;
+  prisma: PrismaClient;
+  input: Extract<HostedConnectedAppsRequest, { operation: "search" }>["input"];
+}): Promise<unknown> {
+  const { client, config, prisma } = input;
+  const toolkits = input.input.toolkits?.map((toolkit) =>
+    assertHostedConnectedAppsSearchToolkit(config, toolkit)
+  );
+  const sessionId = await ensureHostedConnectedAppsSession({
+    client,
+    config,
+    memberId: input.memberId,
+    prisma,
+  });
+  return reconcileHostedConnectedAppsDiscovery(await client.search({
+    query: input.input.query,
+    sessionId,
+    ...(toolkits ? { toolkits } : {}),
+  }));
 }

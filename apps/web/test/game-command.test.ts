@@ -101,6 +101,12 @@ describe("weekly game command validator", () => {
     expect(codeOf(() => parseGameCommand({ ...command, kind: "reps", data: { ...tape, reps: Array(300).fill(tape.reps[0]) } }))).toBe("OK");
   });
 
+  it.each([1e308, Number.MAX_SAFE_INTEGER + 1, Number.MAX_SAFE_INTEGER, 42_195, 1250.5])("bounds route amounts at admission: %s", distanceM => {
+    const command = { type: "post", gameId: "game_route", entryId: "entry_route", kind: "route", mediaKeys: [PHOTO_KEY],
+      data: { activity: "walk", distanceM, durationSec: 600 } };
+    expect(codeOf(() => parseGameCommand(command))).toBe(distanceM > Number.MAX_SAFE_INTEGER ? "INVALID_REQUEST" : "OK");
+  });
+
   it("validates legacy kind requests and defaults new games to free artifact choice", () => {
     const command = { type: "createGame", gameId: "game_checkin", inviteeFirstName: "Ava", terms: {
       tasks: [{ seat: 0, text: "Pushups" }, { seat: 1, text: "Pushups" }],
@@ -127,6 +133,16 @@ describe("weekly game command validator", () => {
       timeZone: "america/new_york",
       type: "setProfile",
     })).toEqual({ firstName: "Leo", timeZone: "America/New_York", type: "setProfile" });
+  });
+
+  it("parses Not for me alone, rejects unknown activities, and distinguishes omission from clearing", () => {
+    expect(parseGameCommand({ type: "setProfile", notForMe: ["dance", "swimming", "dance", "yoga"] }))
+      .toEqual({ type: "setProfile", notForMe: ["swimming", "yoga", "dance"] });
+    expect(parseGameCommand({ type: "setProfile", notForMe: [] })).toEqual({ type: "setProfile", notForMe: [] });
+    expect(parseGameCommand({ type: "setProfile", firstName: "Player" })).not.toHaveProperty("notForMe");
+    for (const notForMe of [["water"], ["unknown"], [1], "swimming", null]) {
+      expect(codeOf(() => parseGameCommand({ type: "setProfile", notForMe }))).toBe("INVALID_REQUEST");
+    }
   });
 
   it("distinguishes profile photo omission, replacement and removal without requiring unrelated fields", () => {

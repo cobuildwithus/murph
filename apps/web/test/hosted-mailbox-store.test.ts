@@ -1,3 +1,4 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { Buffer } from "node:buffer";
 
 import {
@@ -184,7 +185,7 @@ describe("readHostedMailboxRecentLiveConversationItemIds", () => {
         hostedMailboxItem: { findMany },
       } as never,
       userId: "member_mailbox_1",
-    })).rejects.toThrow(TypeError);
+    })).rejects.toThrow(ContractValidationError);
 
     expect(findMany).not.toHaveBeenCalled();
   });

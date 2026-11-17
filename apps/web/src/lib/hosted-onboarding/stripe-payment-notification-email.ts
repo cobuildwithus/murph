@@ -168,9 +168,11 @@ function resolveHostedStripeInvoicePaymentCategory(
     case "subscription_cycle":
       return null;
     case "subscription_create":
+      return "subscription_create";
     case "subscription_threshold":
+      return "subscription_threshold";
     case "subscription_update":
-      return billingReason;
+      return "subscription_update";
     default:
       return "invoice";
   }

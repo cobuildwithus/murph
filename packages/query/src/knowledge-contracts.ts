@@ -251,12 +251,30 @@ export const knowledgeAbsentPageResultSchema = z.object({
   vault: pathLikeSchema,
 }) satisfies z.ZodType<KnowledgeAbsentPageResult>;
 
+// `knowledge show` omits what the body or the caller already carries: the
+// derived summary, storage fields, empty link lists, and a null degradation.
+// `--raw` adds the stored Markdown, whose frontmatter keeps every omitted field.
+const knowledgeShowPageSchema = knowledgePageSchema.pick({
+  body: true,
+  pageRevisionDigest: true,
+  pageType: true,
+  slug: true,
+  status: true,
+  title: true,
+}).extend({
+  librarySlugs: z.array(knowledgeLibrarySlugSchema).min(1).optional(),
+  markdown: nonEmptyStringSchema.optional(),
+  relatedSlugs: z.array(knowledgeRelatedSlugSchema).min(1).optional(),
+  sourcePaths: z.array(pathLikeSchema).min(1).optional(),
+});
+
 // Both branches are objects; the root type keeps MCP structured results.
 export const knowledgeShowResultSchema = z.union([
-  knowledgeGetResultSchema.extend({
-    page: knowledgePageSchema.partial({ markdown: true }),
+  z.object({
+    degradation: knowledgeReadDegradationSchema.optional(),
+    page: knowledgeShowPageSchema,
   }),
-  knowledgeAbsentPageResultSchema,
+  z.object({ page: z.null() }),
 ]).meta({ type: "object" });
 
 export const knowledgeIndexRebuildResultSchema = z.object({

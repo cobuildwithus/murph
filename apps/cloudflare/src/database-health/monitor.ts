@@ -1,6 +1,8 @@
 import type { DurableObjectSqlStorageLike } from "../user-runner/types.js";
 import {
   classifyOperatorLinqAlertFailure,
+  type OperatorLinqChatIds,
+  readOperatorLinqChatIds,
   sendOperatorLinqAlert,
 } from "../operator-alert/linq.js";
 import {
@@ -197,7 +199,7 @@ interface DatabaseHealthMonitorConfig {
   databaseName: string;
   linqApiBaseUrl: string;
   linqApiToken: string;
-  linqChatIds: readonly [primary: string, secondary: string];
+  linqChatIds: OperatorLinqChatIds;
   organization: string;
   planetScaleServiceToken: string;
   planetScaleServiceTokenId: string;
@@ -1430,17 +1432,7 @@ function buildDatabaseAlertIdempotencyKey(input: {
 function readDatabaseHealthMonitorConfig(
   environment: DatabaseHealthMonitorEnvironment,
 ): DatabaseHealthMonitorConfig {
-  const primaryLinqChatId = requireConfiguredString(
-    environment.HOSTED_DATABASE_ALERT_LINQ_CHAT_ID,
-    "HOSTED_DATABASE_ALERT_LINQ_CHAT_ID",
-  );
-  const secondaryLinqChatId = requireConfiguredString(
-    environment.HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID,
-    "HOSTED_DATABASE_ALERT_LINQ_SECONDARY_CHAT_ID",
-  );
-  if (secondaryLinqChatId === primaryLinqChatId) {
-    throw new Error("Database health alert chat IDs must be distinct.");
-  }
+  const linqChatIds = readOperatorLinqChatIds(environment);
   return {
     branchId: requireConfiguredString(
       environment.HOSTED_DATABASE_ALERT_PLANETSCALE_BRANCH_ID,
@@ -1459,7 +1451,7 @@ function readDatabaseHealthMonitorConfig(
       environment.LINQ_API_TOKEN,
       "LINQ_API_TOKEN",
     ),
-    linqChatIds: [primaryLinqChatId, secondaryLinqChatId],
+    linqChatIds,
     organization: requireConfiguredString(
       environment.HOSTED_DATABASE_ALERT_PLANETSCALE_ORGANIZATION,
       "HOSTED_DATABASE_ALERT_PLANETSCALE_ORGANIZATION",

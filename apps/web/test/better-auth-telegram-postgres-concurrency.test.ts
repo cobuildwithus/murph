@@ -38,6 +38,8 @@ import { sendHostedAuthOtp } from "../src/lib/better-auth/send-otp";
 import { commitHostedAuthOtp } from "../src/lib/better-auth/otp-transaction";
 import { createHostedLinqParticipantContact } from "../src/lib/hosted-onboarding/linq-participant-contact";
 import { readHostedLoginMethods } from "../src/lib/better-auth/credential-change";
+import { readHostedPrimaryAuthenticationFactor } from "../src/lib/better-auth/primary-factor";
+import { commitApprovalPasskeyWriteTx, prepareApprovalPasskeyWrite, readApprovalPasskeyState } from "../src/lib/sensitive-actions/passkey-store";
 
 const enabled = process.env.MURPH_TEST_POSTGRES_CONCURRENCY === "1";
 if (enabled) {
@@ -142,7 +144,11 @@ describe.skipIf(!enabled)("Telegram public login PostgreSQL composition", () => 
     expect(result.status).toBe(200);
     expect(await result.json()).toMatchObject({ memberId });
     const renewedCookie = issuedCookie(result);
-    expect((await getHostedAppSessionFromRequest(request("/home", {}, renewedCookie)))?.primaryAuthenticatedAt).toBeInstanceOf(Date);
+    const renewed = await getHostedAppSessionFromRequest(request("/home", {}, renewedCookie));
+    expect(renewed?.primaryAuthenticatedAt).toBeInstanceOf(Date);
+    // The Telegram proof is what lets this session set up a first passkey.
+    expect(await readHostedPrimaryAuthenticationFactor(prisma, renewed!.sessionId)).toBe("telegram");
+    expect(await readHostedPrimaryAuthenticationFactor(prisma, session!.sessionId)).toBe("telegram");
     const options = await legacyRepairOptions(request("/api/settings/approval-passkeys/initial-options", {}, renewedCookie));
     expect(options.status).toBe(200);
     const registration = await options.json();
@@ -195,10 +201,11 @@ describe.skipIf(!enabled)("Telegram public login PostgreSQL composition", () => 
     vi.stubEnv("HOSTED_APPROVAL_PASSKEY_ENROLLMENT_ENABLED", "true");
     const key = authenticator("synthetic Telegram settings", baseURL);
     const enroll = async () => {
-      const initial = await (await initialPasskeyOptions(request("/api/settings/approval-passkeys/initial-options", {}, member.cookie))).json();
-      expect((await registerPasskey(request("/api/settings/approval-passkeys/register", {
-        initialToken: initial.token, response: key.registration(true, initial.options.challenge),
-      }, member.cookie))).status).toBe(200);
+      // An email code cannot set up a first passkey; this member's predates that rule.
+      expect((await initialPasskeyOptions(request("/api/settings/approval-passkeys/initial-options", {}, member.cookie))).status).toBe(403);
+      const state = await readApprovalPasskeyState({ memberId: member.memberId, prisma });
+      const write = await prepareApprovalPasskeyWrite({ prisma, state, credentials: [key.credential] });
+      await prisma.$transaction((tx) => commitApprovalPasskeyWriteTx({ prepared: write, prisma: tx }));
     };
     if (withApproval) await enroll();
     return { ...member, login, enroll, approve(challenge: { message: string; token: string }) {
@@ -269,6 +276,8 @@ describe.skipIf(!enabled)("Telegram public login PostgreSQL composition", () => 
     expect((await readHostedMemberRoutingState({ memberId: member.memberId, prisma }))?.telegramUserId).toBe(flow.id);
     expect((await prepareHostedAuthTelegramMember({ prisma, telegramUserId: flow.id })).memberId).toBe(member.memberId);
     expect(await prisma.hostedMemberApprovalCredentials.count({ where: { memberId: member.memberId } })).toBe(0);
+    // Linking Telegram later never changes how the account was established, so MCP writes stay off for it.
+    expect((await prisma.hostedMember.findUniqueOrThrow({ where: { id: member.memberId } })).firstSignInMethod).toBe("email");
     expect((await getHostedAppSessionFromRequest(request("/home", {}, member.cookie)))?.member.id).toBe(member.memberId);
     expect((await verifyCredential(request("/api/settings/login-methods/telegram/verify", completion, flow.cookie))).status).toBe(401);
     const replacement = await beginCredential(member);
@@ -378,7 +387,10 @@ describe.skipIf(!enabled)("Telegram public login PostgreSQL composition", () => 
       const result = await complete(request("/api/auth/complete", undefined, cookie));
       expect(result.status).toBe(200); expect(await result.json()).toMatchObject({ ok: true, launchConsentGranted: false });
     }
-    expect((await prisma.hostedMember.findUniqueOrThrow({ where: { id: body.memberId } })).billingStatus).toBe("not_started");
+    const member = await prisma.hostedMember.findUniqueOrThrow({ where: { id: body.memberId } });
+    expect(member.billingStatus).toBe("not_started");
+    // The sign-in that claims the member records how the account was established.
+    expect(member.firstSignInMethod).toBe("telegram");
   });
 
   it("reuses the same member on repeat login and rejects a consumed nonce", async () => {
@@ -445,7 +457,7 @@ describe.skipIf(!enabled)("Telegram public login PostgreSQL composition", () => 
     const { memberId } = await response.json(); memberIds.add(memberId);
     const prepared = await prepareHostedAuthTelegramMember({ prisma, telegramUserId: flow.id });
     await prisma.hostedAuthRecord.deleteMany({ where: { memberId, model: "account" } });
-    await expect(commitHostedAuthSession({ ...prepared, prisma, baseURL, secret, primaryAuthenticatedAt: new Date() })).rejects.toMatchObject({ code: "AUTH_IDENTITY_RECONCILIATION_REQUIRED" });
+    await expect(commitHostedAuthSession({ ...prepared, prisma, baseURL, secret, primaryAuthenticatedAt: new Date(), primaryAuthenticationFactor: "telegram" })).rejects.toMatchObject({ code: "AUTH_IDENTITY_RECONCILIATION_REQUIRED" });
     expect(await prisma.hostedAuthRecord.count({ where: { memberId, model: "session" } })).toBe(1);
     // Canonical messaging routing alone cannot restore a removed login account.
     expect((await finish(await begin(flow.id))).status).toBe(409);

@@ -1,4 +1,9 @@
+import { ContractValidationError } from "@murphai/contracts/validation-error";
+import { hostedWorkspaceSnapshotObjectKey } from "@murphai/hosted-execution/storage-paths";
+import { HostedWorkspaceProgressError } from "@/src/lib/hosted-workspace/store";
+import { parseInput, RequestInputError } from "@murphai/hosted-execution/request-input";
 import {
+  isHostedWorkspaceSnapshotV2Ref,
   parseHostedWorkspaceCheckpointRequest,
   parseHostedWorkspaceCheckpointResponse,
 } from "@murphai/hosted-execution/parsers";
@@ -32,13 +37,17 @@ export const POST = withJsonError((request: Request) => runWithTiming(request, a
   try {
     const requestBody = await readOptionalJsonObject(request);
     failureStage = "request_schema";
-    const body = parseHostedWorkspaceCheckpointRequest(requestBody);
+    const body = parseInput(requestBody, parseHostedWorkspaceCheckpointRequest);
     failureStage = "runtime_authority";
     const runtimeAuthority = readHostedRuntimeCallbackAuthority(request, {
       attemptId: body.attemptId,
       leaseGeneration: body.leaseGeneration,
       workspaceVersion: body.expectedWorkspaceVersion,
     });
+    if (body.snapshotRef && isHostedWorkspaceSnapshotV2Ref(body.snapshotRef)
+      && body.snapshotRef.objectKey !== await hostedWorkspaceSnapshotObjectKey({ userId, snapshotId: body.snapshotRef.snapshotId })) {
+      throw new RequestInputError("Runtime snapshot namespace mismatch.");
+    }
     failureStage = "publication";
     const result = await checkpointHostedRuntimeWorkspace({
       runtimeAuthority,
@@ -106,16 +115,21 @@ export const POST = withJsonError((request: Request) => runWithTiming(request, a
     }));
   } catch (error) {
     reportCheckpointFailure(failureStage, error);
+    if (error instanceof HostedWorkspaceProgressError) {
+      throw new RequestInputError("Invalid request.", { cause: error });
+    }
     throw error;
   }
 }));
 
 function reportCheckpointFailure(stage: CheckpointFailureStage, error: unknown): void {
   try {
-    const code = stage === "publication" && error instanceof TypeError && "code" in error
+    const code = stage === "publication" && error instanceof Error && "code" in error
       ? error.code : undefined;
     console.warn("Hosted workspace checkpoint failed.", {
-      errorClass: error instanceof TypeError ? "type_error"
+      errorClass: error instanceof RequestInputError ? "request_input"
+        : error instanceof ContractValidationError ? "validation"
+        : error instanceof TypeError ? "type_error"
         : error instanceof RangeError ? "range_error"
         : error instanceof Error ? "error" : "non_error",
       ...(code === "HOSTED_WORKSPACE_PROGRESS_REGRESSED"

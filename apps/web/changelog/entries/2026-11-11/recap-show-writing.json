@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-11",
+  "order": 320,
+  "item": {
+    "id": "recap-show-writing",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Recaps that sound like your friends",
+    "summary": "Pair recaps say what happened the way you would, like asking someone to prove their abs, and every show picks a new setting for the two of you.",
+    "details": "No more pages that only state a number, and the prize waits for the ending instead of the cover.",
+    "relevanceTags": ["games", "recaps"],
+    "sourcePullRequests": []
+  }
+}

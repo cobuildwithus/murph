@@ -5,13 +5,12 @@ import { formatTimeZoneDateTimeParts, normalizeIanaTimeZone, resolveFloatingIsoT
 import { GAME_MISSED_ROOM_MAX_GAMES, GAME_ROOM_FAR_APART_HOURS, gameEveningCheckInPolicySchema, gameZoneSpreadHours, type HostedGameEveningCheckInPolicy } from "@murphai/hosted-execution/runtime-control";
 import { buildHostedLinqDeliveryId } from "../hosted-onboarding/linq-delivery-store";
 import { createHostedLinqDeliveryIdempotencyLookupKey } from "../hosted-onboarding/linq-observability-identifiers";
-import { isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { logHostedOnboardingWarning } from "../hosted-onboarding/logging";
-import { acquireHostedMailboxCausalAppendLockTx, readHostedMailboxMaxSeqByLane, readHostedMailboxWakeByDedupeKey } from "../hosted-mailbox/store";
+import { readHostedMailboxWakeByDedupeKey } from "../hosted-mailbox/store";
 import { getPrisma } from "../prisma";
-import { isGameOn } from "./access";
+import { isGameEnabled } from "./access";
 import { lockGamePair } from "./blocks";
-import { GameChatAudienceError, readGameChatAuthority, readGameChatAudience, type GameChatAudience } from "./chat-membership";
+import { readGameChatAudienceRefusal, readGameChatAuthority, readGameChatAudience, type GameChatAudience } from "./chat-membership";
 import { visitGameMissedCheckInPages } from "./missed-check-in";
 import { reminderOpenDay } from "./reminders";
 import { currentTerms, eligibleFromDay, isScheduledDay, remainingPlayers, type RuleState } from "./rules";
@@ -70,6 +69,23 @@ export async function roomCoversEveningGame(roomId: string | null, gameId: strin
   return Boolean(room?.games.some(game => game.row.id === gameId));
 }
 
+/**
+ * The games that would get the private evening text, from stored facts only, for describing reminders: a game
+ * in a group chat whose players live close together gets that chat's check-in instead. Delivery still asks
+ * `roomCoversEveningGame`, which also proves the chat itself.
+ */
+export async function readPrivatelyTextedGameIds(gameIds: readonly string[], now: Date): Promise<Set<string>> {
+  if (!gameIds.length || process.env.MURPH_GAME_EVENING_CHECK_IN_ENABLED !== "true") return new Set(gameIds);
+  const prisma = getPrisma();
+  const games = await prisma.game.findMany({ where: { id: { in: [...gameIds] } }, select: { id: true, chatContainerMemberId: true,
+    players: { where: { leftAt: null, memberId: { not: null } }, select: { memberId: true } } } });
+  const memberIds = [...new Set(games.flatMap(game => game.players.map(player => player.memberId!)))];
+  const zones = new Map((await prisma.gameProfile.findMany({ where: { memberId: { in: memberIds } }, select: { memberId: true, timeZone: true } }))
+    .map(profile => [profile.memberId, profile.timeZone]));
+  return new Set(games.filter(game => !game.chatContainerMemberId
+    || gameZoneSpreadHours(game.players.map(player => zones.get(player.memberId!)), now) >= GAME_ROOM_FAR_APART_HOURS).map(game => game.id));
+}
+
 /** Each game's current players determine eligibility, independently of other games. */
 async function readEligibleRoomGames(roomId: string, ids: readonly string[], worthProving?: (games: Games) => boolean) {
   const prisma = getPrisma();
@@ -78,7 +94,7 @@ async function readEligibleRoomGames(roomId: string, ids: readonly string[], wor
   const audience = await readGameChatAudience(roomId);
   const games: Games = [];
   for (const game of candidates) {
-    if (game.row.status === "live" && game.row.chatContainerMemberId === roomId && isGameOn(game.row)
+    if (game.row.status === "live" && game.row.chatContainerMemberId === roomId && isGameEnabled()
       && await readGameChatAuthority(game.row, roomId, audience)) games.push(game);
   }
   return games.length ? { games, audience } : null;
@@ -113,8 +129,9 @@ function hasDueCandidate(games: Games, now: Date): boolean {
 }
 
 function skipUnprovableRoom(error: unknown): null {
-  const reason = error instanceof GameChatAudienceError ? error.reason
-    : isHostedOnboardingError(error) && ["HOSTED_MEMBER_IDENTITY_LOOKUP_AMBIGUOUS", "HOSTED_MEMBER_VERIFIED_EMAIL_LOOKUP_AMBIGUOUS"].includes(error.code) ? "identity_ambiguous" : null;
+  const reason = readGameChatAudienceRefusal(error);
+  // A bound room with no route can't be sent to, so it is skipped like any other refusal. A pair game is live before its
+  // chat is created, which can wait a day for line capacity, and the removed-line repair detaches a live group's route.
   if (!reason) throw error;
   logHostedOnboardingWarning("game.evening.room-skipped", { reason });
   return null;
@@ -148,7 +165,7 @@ export async function reserveGameEveningCheckIn(roomId: string, gameIds: readonl
       const pairs = room.games.filter(game => game.row.maxPlayers === 2)
         .map(game => game.row.players.map(player => player.memberId!).sort()).sort((a, b) => a.join(":").localeCompare(b.join(":")));
       for (const pair of pairs) await lockGamePair(tx, pair[0]!, pair[1]!);
-      if (!await isEveningBatchCurrentTx(policy, room.memberIds, room.audience, tx, now, false)
+      if (!await isEveningBatchCurrentTx(policy, room.memberIds, room.audience, tx, now)
         || await paused(roomId, gameEveningCheckInHorizons(room.games.map(game => game.state)), date, tx)) return false;
       const result = await tx.hostedLinqDelivery.createMany({ data: [{ id: buildHostedLinqDeliveryId(key), idempotencyKey: key,
         source: "game_lifecycle", sourceRef: `${roomId}:${date}`, template: "game_evening", status: "awaiting_generation",
@@ -196,20 +213,20 @@ export async function prepareGameEveningCheckIn(roomId: string, date: string, no
   if (!dueAt || !gameEveningWindow(dueAt, now)) return null;
   const batch = addressedBatch(room.games, date, now);
   if (!batch.length) return null;
-  const [watermark] = await readHostedMailboxMaxSeqByLane({ userId: roomId, lanes: ["conversation"] });
   const policy = gameEveningCheckInPolicySchema.parse({ kind: "game_evening_check_in", roomId, date,
     eventId: gameEveningEventId(roomId, date), expiresAt: new Date(dueAt.getTime() + WINDOW_MS).toISOString(),
-    conversationLaneSeq: watermark.maxSeq, batch });
+    conversationLaneSeq: "0", batch });
   return { ...room, policy };
 }
 
+/** Game facts decide currentness. Chat never does: what people said is the model's evidence, not a gate. */
 export async function isEveningBatchCurrentTx(policy: HostedGameEveningCheckInPolicy, memberIds: readonly string[],
-  audience: GameChatAudience | undefined, tx: Prisma.TransactionClient, now: Date, checkConversation = true): Promise<boolean> {
+  audience: GameChatAudience | undefined, tx: Prisma.TransactionClient, now: Date): Promise<boolean> {
   if (now >= new Date(policy.expiresAt)) return false;
   const ids = [...new Set(policy.batch.map(game => game.gameId))].sort();
   await tx.$queryRaw`SELECT id FROM game WHERE id IN (${Prisma.join(ids)}) ORDER BY id FOR UPDATE`;
   const games = await loadGameMissedCheckInGames(tx, ids);
-  if (games.length !== ids.length || games.some(game => game.row.status !== "live" || game.row.chatContainerMemberId !== policy.roomId || !isGameOn(game.row))) return false;
+  if (games.length !== ids.length || games.some(game => game.row.status !== "live" || game.row.chatContainerMemberId !== policy.roomId || !isGameEnabled())) return false;
   if (!audience) return false;
   for (const { row } of games) if (!await readGameChatAuthority(row, policy.roomId, audience, tx)) return false;
   memberIds = [...new Set(games.flatMap(game => remainingPlayers(game.state).map(player => player.memberId)))];
@@ -217,11 +234,7 @@ export async function isEveningBatchCurrentTx(policy: HostedGameEveningCheckInPo
   if (profiles.length !== memberIds.length || profiles.some(profile => !normalizeIanaTimeZone(profile.timeZone))
     || gameZoneSpreadHours(profiles.map(profile => profile.timeZone), now) >= GAME_ROOM_FAR_APART_HOURS) return false;
   // Only the addressed games are loaded here, so the room's horizon can't be rebuilt; the frozen expiry above stands.
-  if (JSON.stringify(addressedBatch(games, policy.date, now)) !== JSON.stringify(policy.batch)) return false;
-  if (!checkConversation) return true;
-  await acquireHostedMailboxCausalAppendLockTx({ tx, userId: policy.roomId });
-  const [watermark] = await readHostedMailboxMaxSeqByLane({ prisma: tx, userId: policy.roomId, lanes: ["conversation"] });
-  return watermark.maxSeq === policy.conversationLaneSeq;
+  return JSON.stringify(addressedBatch(games, policy.date, now)) === JSON.stringify(policy.batch);
 }
 
 export async function readGameEveningDeliveryAuthority(eventId: string, roomId: string, target?: string | null) {
