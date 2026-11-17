@@ -7,8 +7,14 @@
     "priority": 2,
     "title": "Clearer Progress share cards",
     "summary": "Progress share cards show your exercise count, distance or time in full, with the activity beside it.",
-    "details": "Time milestones use the same drawing as their medal, and the Privacy choice reflects whether you have allowed share pictures.",
-    "relevanceTags": ["progress", "games", "privacy"],
-    "sourcePullRequests": [5130]
+    "details": "The Privacy choice reflects whether you have allowed share pictures.",
+    "relevanceTags": [
+      "progress",
+      "games",
+      "privacy"
+    ],
+    "sourcePullRequests": [
+      5130
+    ]
   }
 }

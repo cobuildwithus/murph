@@ -6080,8 +6080,8 @@ saved noun, plain miles/km in reader units, whole sleep hours, and whole exercis
 minutes (hours from ten hours). Opaque measures retain medal-only copy and the
 medal's plain amount. Context still describes the landmark height or journey.
 The card boundary converts apostrophes in its four text fields to U+2019.
-Share and medal faces use the same rung drawing, including the `time-` prefix;
-found goals retain a generic medal. No new state is persisted.
+Share and medal faces use the same rung drawing id (the app adds the `time-`
+asset prefix from the medal kind); found goals retain a generic medal. No new state is persisted.
 
 Admission returns an existing row before budgets or source preparation. Otherwise
 it reads the GameProfile photo through the existing game media store, orients

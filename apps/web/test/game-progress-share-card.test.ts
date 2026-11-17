@@ -79,7 +79,7 @@ describe('share card copy and scene facts', () => {
     expect(shareCard(award, 'metric').card.valueText).toBe('10,001 jumper’s reps');
   });
   it.each([
-    ['planks.seconds', 'moonwalk', 'time', 'time-moonwalk'], ['sleep', 'godwit', 'time', 'time-godwit'],
+    ['planks.seconds', 'moonwalk', 'time', 'moonwalk'], ['sleep', 'godwit', 'time', 'godwit'],
     ['pushups.reps', 'mont-blanc', 'height', 'mont-blanc'],
   ] as const)('%s shares the medal drawing', (measure, id, kind, drawing) => {
     const award = rung(measure, id, kind);
@@ -96,7 +96,7 @@ describe('share card copy and scene facts', () => {
   it('matches the godwit journey and keeps the person asleep', () => {
     const result = shareCard(rung('sleep', 'godwit', 'time'), 'metric');
     expect(result.card).toMatchObject({ name: 'A godwit’s nonstop flight', valueText: '216 hours asleep',
-      contextLine: 'You’ve slept as long as this shorebird once flew without landing.', face: { drawing: 'time-godwit' } });
+      contextLine: 'You’ve slept as long as this shorebird once flew without landing.', face: { drawing: 'godwit' } });
     expect(result.prompt).toContain("Asleep curled on a giant bar-tailed godwit's back");
     expect(result.prompt).toContain('moonlit ocean'); expect(result.prompt).toContain('pillow and soft blanket');
     expect(result.prompt).toContain('not an airplane, awake rider or miniature bird');
