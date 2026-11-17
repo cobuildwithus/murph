@@ -757,7 +757,15 @@ async function findVisibleEditable(
 ): Promise<Locator | null> {
   for (const selector of selectors) {
     const locators = frame.locator(selector);
-    for (let index = 0; index < await locators.count(); index += 1) {
+    const count = await locators.count().catch((error: unknown) => {
+      // Stripe can remove a frame after page.frames() snapshots it. The
+      // existing readiness poll will inspect the replacement frame.
+      if (frame.isDetached()) {
+        return 0;
+      }
+      throw error;
+    });
+    for (let index = 0; index < count; index += 1) {
       const locator = locators.nth(index);
       if (
         await locator.isVisible().catch(() => false)
