@@ -1,6 +1,6 @@
 # Earn Health and Friends medals from Progress
 
-Status: active
+Status: completed
 Created: 2026-11-17
 Updated: 2026-11-17
 
@@ -44,7 +44,23 @@ existing contract.
 
 ## Verification
 
-- Focused route, health, friends, state and award tests, including next-read proof.
-- Affected Web typecheck and diff-scoped selector, with exit codes.
-- Complexity, privacy/diff review, owner docs and changelog.
-- Commit, draft PR, exact-head required CI, Ready; no merge or ReviewGPT.
+- Product UX: Patch / Ready. Synthetic main GET journeys prove baseline freeze,
+  Health/age/Steps/Sleep awards, two exercise passes and next-read medal visibility.
+  Denial, missing input, incomplete/pending cohorts, commit-time authority changes,
+  partial failure, original earned dates and never-revoke behavior are covered.
+- Focused Health/Friends/Progress suites: 150 tests, exit 0. Final background
+  suite: 25 tests, exit 0, including two 10,000-amount cardinality cases with one
+  cohort/game-series load, one award commit and one pair lock per subject.
+- `pnpm test:diff` over changed owners: exit 0. Web tests: 16,372 passed,
+  2,883 skipped. Selected guards, typecheck, lint, dev smoke and production build
+  passed. Local dependency installation and generated Prisma artifacts were
+  required before the initial focused invocation could run.
+- `pnpm --dir apps/web typecheck`, Web lint, `pnpm complexity:diff`,
+  `pnpm docs:drift`, changelog generation and its four route tests: exit 0.
+  Existing lint warnings only; no complexity hotspot above 20.
+- Candidate diff/privacy review passed. Architecture owns the new sealed receipt
+  classification; changelog linked to PR #5142. No production input or deploy
+  was exercised; the post-deploy check is the same Progress-then-Prizes journey.
+- Local work complete. Final candidate goes through exact-head required CI
+  before handoff; no merge or ReviewGPT. No open product questions.
+Completed: 2026-11-17

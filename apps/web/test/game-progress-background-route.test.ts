@@ -195,6 +195,32 @@ it("an incomplete main read schedules no settlement", async () => {
   expect(mocks.after).not.toHaveBeenCalled();
 });
 
+it.each([{ peopleCount: 5000, measureCount: 2 }, { peopleCount: 2, measureCount: 5000 }])(
+  "batches 10,000 game amounts across $peopleCount people and $measureCount measures", async ({ peopleCount, measureCount }) => {
+    mocks.raw.mockResolvedValue(null);
+    const people = Array.from({ length: peopleCount }, (_, index) => ({
+      memberId: index === 0 ? "ava" : `friend-${index}`, firstName: index === 0 ? "Ava" : "Leo",
+      avatarUrl: null, me: index === 0, invited: false, joinedOn, daily: null,
+    }));
+    const measures = Array.from({ length: measureCount }, (_, index) => `exercise${index}.reps`);
+    mocks.cohort.mockResolvedValue({ incomplete: false, people });
+    mocks.ids.mockResolvedValue({ incomplete: false, invited: [], ids: people.map(person => person.memberId) });
+    mocks.friendGames.mockResolvedValue({ incomplete: false, pending: [],
+      measures: new Map(measures.map(id => [id, friendMeasure(id)])),
+      amounts: new Map(people.map(person => [person.memberId, measures.map(measureId => ({
+        measureId, date: joinedOn, amount: person.me ? 2 : 1,
+      }))])),
+    });
+    await GET(request()); await drain();
+    expect(mocks.cohort).toHaveBeenCalledTimes(1);
+    expect(mocks.friendGames).toHaveBeenCalledTimes(1);
+    expect(mocks.createAwards).toHaveBeenCalledTimes(1);
+    expect(mocks.pairLock).toHaveBeenCalledTimes(peopleCount - 1);
+    expect(mocks.ids).toHaveBeenCalledTimes(2);
+    expect(awards).toHaveLength((peopleCount - 1) * measureCount);
+  },
+);
+
 it.each(["session", "health", "friendship"])("rechecks %s at commit and leaves no unauthorized facts", async boundary => {
   const logs = vi.spyOn(console, "error").mockImplementation(() => {});
   if (boundary === "session") mocks.current.mockImplementation(async (_auth, db) => { if (db === tx) throw denied(); });
@@ -204,6 +230,7 @@ it.each(["session", "health", "friendship"])("rechecks %s at commit and leaves n
   const earned = await readAwards("ava");
   if (boundary !== "friendship") expect(states).toEqual([]);
   if (boundary !== "health") expect(earned.some(award => award.kind === "friend")).toBe(false);
+  if (boundary === "health") expect(earned.filter(award => award.kind === "friend")).toHaveLength(2);
   expect(logs).toHaveBeenCalledExactlyOnceWith("PROGRESS_BACKGROUND_SETTLEMENT_FAILED");
 });
 
