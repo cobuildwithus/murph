@@ -29,6 +29,7 @@ vi.mock("@/src/lib/browser-vault/loader", async () => {
 import { createBrowserVaultRouteQueryClient, selectBrowserVaultReplicaDemand } from "@/src/lib/browser-vault/loader";
 import type { decodeReadyBrowserVaultSession } from "@/src/lib/browser-vault/loader";
 import { GET } from "../app/api/device-sync/companion/numbers/route";
+import { readSavedCompanionBodyHeight } from "../src/lib/device-sync/companion-numbers";
 
 const savedAt = "2026-11-04T18:00:00.000Z";
 const replicaRef = {
@@ -413,6 +414,27 @@ async function withHeightPoints(points: MetricPoint[]) {
     metricSelectionRows: createBrowserVaultMetricSelectionRows({ generatedAt: savedAt, metricPoints: points }),
   });
 }
+
+it.each([0, 365, 366])("the height-only reader uses the same selection and freshness at %i days", async age => {
+  await withHeightPoints([heightPoint("Manual", addDaysToIsoDate(through, -age), 170.4)]);
+  expect(await readSavedCompanionBodyHeight("member-ava", request().signal)).toBe(age <= 365 ? 170.4 : null);
+  expect(mocks.authority).toHaveBeenCalledTimes(2);
+  expect(mocks.authority).toHaveBeenCalledWith({ memberId: "member-ava", prisma: {} });
+  expect(mocks.control).toHaveBeenCalledTimes(1);
+});
+
+it.each(["absent height", "absent replica"])("the height-only reader returns null for %s", async cause => {
+  if (cause === "absent replica") mocks.workspace.mockResolvedValue(null);
+  expect(await readSavedCompanionBodyHeight("member-ava", request().signal)).toBeNull();
+});
+
+it.each(["before read", "after read"])("the height-only reader enforces health authority %s", async phase => {
+  const denied = hostedOnboardingError({ code: "HOSTED_CONSENT_REQUIRED", httpStatus: 403, message: "Permission required." });
+  if (phase === "after read") mocks.authority.mockResolvedValueOnce(undefined);
+  mocks.authority.mockRejectedValueOnce(denied);
+  await expect(readSavedCompanionBodyHeight("member-ava", request().signal)).rejects.toBe(denied);
+  expect(mocks.control).toHaveBeenCalledTimes(phase === "before read" ? 0 : 1);
+});
 
 it.each(["Manual", "WHOOP", "Junction", "Clinical record"])("serves the newest valid height from %s in cm without another bucket", async source => {
   await withHeightPoints([

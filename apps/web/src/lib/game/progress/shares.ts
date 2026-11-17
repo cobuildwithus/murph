@@ -4,6 +4,7 @@ import { after } from 'next/server';
 import type { GameProgressShare, Prisma } from '@prisma/client';
 import type { ClientUnits } from '../../companion/client-info';
 import { assertBrowserVaultMemberAuthority } from '../../browser-vault/authority';
+import { readSavedCompanionBodyHeight } from '../../device-sync/companion-numbers';
 import { runWithFreshHostedDomainRootUnwrapCache } from '../../hosted-crypto/domain-root-unwrap-cache';
 import { openHostedUserSecureBoxBytes, sealHostedUserSecureBoxBytes } from '../../hosted-crypto/secure-box';
 import { hostedOnboardingError } from '../../hosted-onboarding/errors';
@@ -119,7 +120,7 @@ export async function startProgressShare(input: ShareRequest): Promise<ShareView
     });
     if (admission.inserted) {
       const reference = prepared;
-      after(() => runWithFreshHostedDomainRootUnwrapCache(() => progressEffect(() => generate(input, award, admission.selection.row!, reference, prompt))));
+      after(() => runWithFreshHostedDomainRootUnwrapCache(() => progressEffect(() => generate(input, award, admission.selection.row!, reference))));
       transferred = true;
     }
     return { awardId: input.awardId, card, presentation: presentation(admission.selection, input.awardId, true, Date.now()) };
@@ -133,11 +134,16 @@ async function liveAttempt(tx: Prisma.TransactionClient, input: ShareRequest, ad
   if (selection.row?.status !== 'generating') throw shareNotFound();
 }
 
-async function generate(input: ShareRequest, award: Candidate, row: GameProgressShare, reference: Buffer, prompt: string): Promise<void> {
+async function generate(input: ShareRequest, award: Candidate, row: GameProgressShare, reference: Buffer): Promise<void> {
   let output: Buffer | undefined;
   try {
     await withAuthority(input, award, tx => liveAttempt(tx, input, row));
-    output = await makeShareImage(reference, prompt, row.createdAt.getTime() + SHARE_DEADLINE_MS);
+    const deadline = row.createdAt.getTime() + SHARE_DEADLINE_MS;
+    // Optional likeness context: one replica read; failure keeps the original prompt.
+    const heightCm = await readSavedCompanionBodyHeight(input.memberId, AbortSignal.timeout(Math.max(0, deadline - Date.now()))).catch(() => null);
+    await withAuthority(input, award, tx => liveAttempt(tx, input, row));
+    const { prompt } = shareCard(award, input.units, heightCm);
+    output = await makeShareImage(reference, prompt!, deadline);
     await withAuthority(input, award, tx => liveAttempt(tx, input, row));
     const envelope = await sealHostedUserSecureBoxBytes({ ...progressShareBytesTarget(row.memberId, row.storageKey), value: output });
     await progressMediaStore().putProgressPic({ userId: input.memberId, mediaId: row.storageKey, envelope, hash: createHash('sha256').update(output).digest('hex') });

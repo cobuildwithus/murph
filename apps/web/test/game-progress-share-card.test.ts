@@ -10,6 +10,25 @@ const rung = (measureId: string, id: string, kind: 'height' | 'time', at = 1): C
 
 describe('share card copy and scene facts', () => {
   it.each([
+    rung('pushups.reps', 'mont-blanc', 'height'),
+    rung('planks.seconds', 'moonwalk', 'time'),
+    rung('sleep', 'godwit', 'time'),
+    { key: 'route', kind: 'route', measureId: 'walk.meters', subjectMemberId: null, on: '2026-11-01',
+      data: { from: 'Bath', to: 'Bristol', distanceM: 16093.44 } } satisfies Candidate,
+  ])('adds rounded height only to $measureId prompt framing', award => {
+    const original = shareCard(award, 'us');
+    expect(shareCard(award, 'us', null)).toEqual(original);
+    expect(original.prompt).not.toContain('cm tall');
+    for (const [height, rounded] of [[170.4, 170], [170.6, 171]]) {
+      const result = shareCard(award, 'us', height);
+      const line = `The person is ${rounded} cm tall; keep their real height and build.`;
+      expect(result.prompt!.split('\n')[1]).toBe(line);
+      expect(result.prompt!.replace(`${line}\n`, '')).toBe(original.prompt);
+      expect(result.card).toEqual(original.card);
+      expect(JSON.stringify(result.card)).not.toMatch(/170|171|height|cm tall/u);
+    }
+  });
+  it.each([
     ['pushups.reps', 'us', "You've done enough pushups to scale all 15,766 ft.", '15,766 ft', 'Performing a pushup'],
     ['pullups.reps', 'us', "You've done enough pull-ups to climb all 15,766 ft.", '15,766 ft', 'Doing a pull-up'],
     ['squats.reps', 'metric', "You've done enough squats to climb all 4,805 m.", '4,805 m', 'Doing squats'],

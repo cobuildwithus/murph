@@ -6086,7 +6086,13 @@ Only the insertion winner schedules Next after(), with its own secure-box unwrap
 scope and prepared in-memory reference. The Node route declares maxDuration 300.
 One Web OpenAI images.edit call uses gpt-image-2.6-flare, one generic-named JPEG
 reference, medium quality, 1024x1536 and JPEG compression 90. SDK retries and
-logging are off. The operation owns a 240-second deadline from admission,
+logging are off. After admission, generation reads height once through the existing
+Companion replica loader and latest-valid body-height helper, outside transactions
+and under Browser Vault health authority. A height no older than 365 days is sent
+to OpenAI as whole centimeters in the prompt framing to preserve real proportions.
+Missing height or a failed read leaves the prompt unchanged; share authority is
+rechecked before provider dispatch. Height is never added to card or Messages
+text, persisted in share metadata, or logged. The operation owns a 240-second deadline from admission,
 independent of client disconnect. Output is decoded and encoded once at quality
 90, stripped of metadata and rejected above 2 MiB; no quality retry is made.
 The existing store enforces the 3 MiB envelope bound.
