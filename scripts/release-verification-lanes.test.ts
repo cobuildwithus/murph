@@ -180,8 +180,11 @@ describe("release verification executable lanes", () => {
       );
       expect(Object.keys(outputEntries).sort()).toEqual([
         "hosted_web_test_matrix",
+        "package_coverage",
         "package_matrix",
       ]);
+      // Without a reach filter every package shard runs.
+      expect(outputEntries.package_coverage).toBe("true");
 
       const packageMatrix: unknown = JSON.parse(outputEntries.package_matrix ?? "");
       const hostedWebMatrix: unknown = JSON.parse(

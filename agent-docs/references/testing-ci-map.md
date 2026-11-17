@@ -87,6 +87,22 @@ shutdown. Its 12 cases use the production entrypoint and mailbox importer.
 `host-support.yml` runs the matrix before the broad build in the required
 release build/typecheck job, in addition to normal package coverage. CI admission tests execute the release aggregate and reject unsuccessful shard results.
 
+On a pull request, Host Support runs only the shards its diff can reach
+(`scripts/ci-diff-reach.mjs`, tested by `scripts/ci-diff-reach.test.mjs`). It
+diffs the exact merge commit against its base parent, maps each file to its
+workspace package, and adds every package that depends on one (declared
+dependencies). Either app brings both apps, since each reads the other's files.
+Any file outside a workspace package (root config, lockfile, scripts, docs,
+workflows) or an unreadable diff runs everything, and so does every main push.
+Package coverage keeps a matrix shard whole when any of its packages is
+reached. The Web, PostgreSQL, Cloudflare, and runner-bundle jobs skip when
+nothing reaches them; the browser smoke and CLI host matrix decide inside their
+steps, since a required check must report a result. When an app is reached but
+another package's code is not, the build/typecheck job still runs that
+package's tests that name an app path outside a comment (they read app files).
+`Release checks (ubuntu)` accepts a skipped shard only on a pull request whose
+plan succeeded and marked that shard unreached.
+
 Mailbox fetch phase and pool attribution are covered by
 `hosted-mailbox-fetch-timing.test.ts`, `prisma-store-client.test.ts`, and the
 opt-in local PostgreSQL suites `prisma-store-pool-timing-postgres.test.ts` and
@@ -238,7 +254,11 @@ uses the broad Web Vitest config, enables the concurrency, runtime-log, and
 iMessage enrollment database owners, and splits each shard across four
 workers. Each worker gets its own copy of the migrated database (`CREATE
 DATABASE ... TEMPLATE`) and runs its files serially in it, so no two files
-share a database at once.
+share a database at once. Files are dealt longest first to the least-loaded of
+the 3 x 4 workers by the seconds in `scripts/postgres-test-times.json`; a file
+with no record weighs the median. Every run prints fresh times as
+`[postgres-file-times] {...}`. To refresh the file, save the three shard logs
+and run `sed -n 's/.*\[postgres-file-times\] //p' shard-*.log | jq -s 'add | to_entries | sort_by(.key) | from_entries' > scripts/postgres-test-times.json`.
 Its in-memory receipt requires every selected file exactly once, at least one
 executed case per file, and no skipped, pending, or failed cases. Missing files,
 collection errors, interrupted runs, and an empty inventory fail the existing

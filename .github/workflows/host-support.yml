@@ -47,12 +47,21 @@ jobs:
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
+          fetch-depth: 2
           persist-credentials: false
 
+      # A required check, so it reports success instead of skipping when a
+      # pull request's diff can't reach the CLI (scripts/ci-diff-reach.mjs).
+      - name: Find what the diff reaches
+        id: reach
+        run: node scripts/ci-diff-reach.mjs --github-output "$GITHUB_OUTPUT"
+
       - name: Setup pnpm
+        if: ${{ steps.reach.outputs.cli == 'true' }}
         uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
 
       - name: Setup Node
+        if: ${{ steps.reach.outputs.cli == 'true' }}
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version-file: .nvmrc
@@ -61,9 +70,11 @@ jobs:
           cache: pnpm
 
       - name: Install deps
+        if: ${{ steps.reach.outputs.cli == 'true' }}
         run: pnpm install --frozen-lockfile
 
       - name: Build workspace
+        if: ${{ steps.reach.outputs.cli == 'true' }}
         env:
           # The macOS host leg is the portability check, not the build-speed lane.
           # Keep package-script builds serial there so downstream `tsc -b --force`
@@ -72,9 +83,11 @@ jobs:
         run: pnpm build
 
       - name: Prepare built CLI runtime artifacts
+        if: ${{ steps.reach.outputs.cli == 'true' }}
         run: pnpm build:test-runtime:prepared
 
       - name: Run cross-platform CLI coverage
+        if: ${{ steps.reach.outputs.cli == 'true' }}
         run: env MURPH_PREPARED_CLI_RUNTIME_ARTIFACTS=1 pnpm exec vitest run packages/cli/test/cli-entry.test.ts packages/cli/test/vault-cli-routing.test.ts packages/cli/test/inbox-service-boundaries.test.ts --no-coverage --maxWorkers 1
 
   release-verification-plan-linux:
@@ -83,7 +96,11 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       package_matrix: ${{ steps.verification_plan.outputs.package_matrix }}
+      package_coverage: ${{ steps.verification_plan.outputs.package_coverage }}
       hosted_web_test_matrix: ${{ steps.verification_plan.outputs.hosted_web_test_matrix }}
+      # What a pull request's diff can reach; everything on main pushes.
+      reach_apps: ${{ steps.reach.outputs.apps }}
+      reach_runner_bundle: ${{ steps.reach.outputs.runner_bundle }}
     steps:
       - name: Reject draft pull request proof
         if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
@@ -95,6 +112,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           ref: ${{ github.sha }}
+          fetch-depth: 2
           persist-credentials: false
 
       - name: Setup Node
@@ -102,9 +120,15 @@ jobs:
         with:
           node-version-file: .nvmrc
 
+      - name: Find what the diff reaches
+        id: reach
+        run: node scripts/ci-diff-reach.mjs --github-output "$GITHUB_OUTPUT"
+
       - name: Validate and publish release verification plan
         id: verification_plan
-        run: node scripts/release-verification-plan.mjs --github-output "$GITHUB_OUTPUT"
+        env:
+          REACHED_PACKAGES: ${{ steps.reach.outputs.packages }}
+        run: node scripts/release-verification-plan.mjs --reached-packages "$REACHED_PACKAGES" --github-output "$GITHUB_OUTPUT"
 
   release-build-typecheck-linux:
     name: Release build/typecheck (ubuntu)
@@ -158,6 +182,7 @@ jobs:
           node --test scripts/check-runner-bundle-budget-ci.test.mjs
           node --test scripts/benchmark-event-list.test.mjs
           node --test scripts/benchmark-event-read-import.test.mjs
+          node --test scripts/ci-diff-reach.test.mjs
           node scripts/check-runner-bundle-budget-ci.mjs
 
       - name: Clean workspace build
@@ -195,6 +220,11 @@ jobs:
           MURPH_VITEST_MAX_WORKERS: "2"
         run: pnpm test:repo-tools
 
+      # On a pull request that reaches an app but not these packages' code,
+      # run just the package tests that read app files (no-op otherwise).
+      - name: Test package files that read app files
+        run: node scripts/ci-diff-reach.mjs --run-app-tests
+
       - name: Artifact hygiene
         run: pnpm no-js
 
@@ -205,7 +235,7 @@ jobs:
     name: Release package coverage (${{ matrix.shard }})
     needs:
       - release-verification-plan-linux
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && needs.release-verification-plan-linux.outputs.package_coverage == 'true' }}
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -281,7 +311,9 @@ jobs:
 
   release-web-build-linux:
     name: Release Web build verification (ubuntu)
-    if: ${{ !cancelled() }}
+    needs:
+      - release-verification-plan-linux
+    if: ${{ !cancelled() && needs.release-verification-plan-linux.outputs.reach_apps == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
@@ -319,7 +351,7 @@ jobs:
     name: Release Web tests (${{ matrix.shard }})
     needs:
       - release-verification-plan-linux
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && needs.release-verification-plan-linux.outputs.reach_apps == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
@@ -380,7 +412,9 @@ jobs:
 
   release-web-postgres-linux:
     name: Release Web PostgreSQL (${{ matrix.shard }}/3)
-    if: ${{ !cancelled() }}
+    needs:
+      - release-verification-plan-linux
+    if: ${{ !cancelled() && needs.release-verification-plan-linux.outputs.reach_apps == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     strategy:
@@ -443,7 +477,9 @@ jobs:
 
   release-cloudflare-verification-linux:
     name: Release Cloudflare verification (ubuntu)
-    if: ${{ !cancelled() }}
+    needs:
+      - release-verification-plan-linux
+    if: ${{ !cancelled() && needs.release-verification-plan-linux.outputs.reach_apps == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
@@ -532,38 +568,54 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
         with:
           ref: ${{ github.sha }}
+          fetch-depth: 2
           persist-credentials: false
 
+      # Decided here rather than by the plan job, so this longest job starts
+      # at once; it reports success when a pull request reaches no app.
+      - name: Find what the diff reaches
+        id: reach
+        run: node scripts/ci-diff-reach.mjs --github-output "$GITHUB_OUTPUT"
+
       - name: Setup pnpm
+        if: ${{ steps.reach.outputs.apps == 'true' }}
         uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
 
       - name: Setup Node
+        if: ${{ steps.reach.outputs.apps == 'true' }}
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version-file: .nvmrc
           cache: pnpm
 
       - name: Install deps
+        if: ${{ steps.reach.outputs.apps == 'true' }}
         run: pnpm install --frozen-lockfile
 
       - name: Expose pinned Codex CLI
+        if: ${{ steps.reach.outputs.apps == 'true' }}
         run: echo "$GITHUB_WORKSPACE/packages/assistant-engine/node_modules/.bin" >> "$GITHUB_PATH"
 
       - name: Install Playwright Chromium
         timeout-minutes: 14
         run: scripts/install-playwright-chromium.sh
+        if: ${{ steps.reach.outputs.apps == 'true' }}
 
       - name: Build admission-shaped hosted Web production dist
+        if: ${{ steps.reach.outputs.apps == 'true' }}
         run: |
           pnpm --dir packages/hosted-execution build
           pnpm --dir apps/web build
 
       - name: Run the production admission browser smoke
+        if: ${{ steps.reach.outputs.apps == 'true' }}
         run: pnpm hosted-local e2e hosted-web-browser-smoke
 
   production-runner-bundle-budget-linux:
     name: Production runner bundle budget (ubuntu)
-    if: ${{ !cancelled() }}
+    needs:
+      - release-verification-plan-linux
+    if: ${{ !cancelled() && needs.release-verification-plan-linux.outputs.reach_runner_bundle == 'true' }}
     runs-on: ubuntu-24.04
     env:
       MURPH_RUNNER_BUNDLE_BUILD_CONCURRENCY: "4"
@@ -714,7 +766,11 @@ jobs:
 
       - name: Require every release shard to succeed
         env:
+          EVENT_NAME: ${{ github.event_name }}
           PLAN_RESULT: ${{ needs.release-verification-plan-linux.result }}
+          REACH_PACKAGES: ${{ needs.release-verification-plan-linux.outputs.package_coverage }}
+          REACH_APPS: ${{ needs.release-verification-plan-linux.outputs.reach_apps }}
+          REACH_RUNNER_BUNDLE: ${{ needs.release-verification-plan-linux.outputs.reach_runner_bundle }}
           BUILD_RESULT: ${{ needs.release-build-typecheck-linux.result }}
           PACKAGE_RESULT: ${{ needs.release-package-coverage-linux.result }}
           WEB_BUILD_RESULT: ${{ needs.release-web-build-linux.result }}
@@ -727,10 +783,30 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for result in "$PLAN_RESULT" "$BUILD_RESULT" "$PACKAGE_RESULT" "$WEB_BUILD_RESULT" "$WEB_TEST_RESULT" "$WEB_POSTGRES_RESULT" "$CLOUDFLARE_RESULT" "$BROWSER_SMOKE_RESULT" "$FIXTURE_RESULT" "$BUNDLE_RESULT"; do
-            if [[ "$result" != "success" ]]; then
-              echo "Release proof requires every release shard to succeed." >&2
-              exit 1
+          # Every shard must succeed. On a pull request, the plan may leave out
+          # a shard its diff can't reach (scripts/ci-diff-reach.mjs); that one
+          # must then be skipped. Main pushes reach everything.
+          require() {
+            local label="$1" result="$2" reached="$3"
+            if [[ "$result" == "success" ]]; then
+              return 0
             fi
-          done
-          echo "Release checks satisfied by full release shards."
+            if [[ "${EVENT_NAME:-}" == "pull_request" && "${PLAN_RESULT:-}" == "success" \
+              && "$reached" == "false" && "$result" == "skipped" ]]; then
+              echo "$label: not reached by this pull request's diff."
+              return 0
+            fi
+            echo "Release proof requires every release shard to succeed: $label is '${result}'." >&2
+            exit 1
+          }
+          require "verification plan" "$PLAN_RESULT" true
+          require "build/typecheck" "$BUILD_RESULT" true
+          require "package coverage" "$PACKAGE_RESULT" "${REACH_PACKAGES:-}"
+          require "Web build" "$WEB_BUILD_RESULT" "${REACH_APPS:-}"
+          require "Web tests" "$WEB_TEST_RESULT" "${REACH_APPS:-}"
+          require "Web PostgreSQL" "$WEB_POSTGRES_RESULT" "${REACH_APPS:-}"
+          require "Cloudflare verification" "$CLOUDFLARE_RESULT" "${REACH_APPS:-}"
+          require "browser smoke" "$BROWSER_SMOKE_RESULT" true
+          require "fixture coverage" "$FIXTURE_RESULT" true
+          require "runner bundle budget" "$BUNDLE_RESULT" "${REACH_RUNNER_BUNDLE:-}"
+          echo "Release checks satisfied."

@@ -9,9 +9,9 @@ import { promisify } from "node:util";
 import {
   discoverPostgresTests,
   parsePostgresWorkers,
+  planPostgresShard,
   postgresTestEnvironment,
   selectPostgresShard,
-  splitPostgresWorkers,
   validatePostgresReceipt,
   workerDatabaseUrl,
 } from "./run-postgres-tests.mjs";
@@ -75,7 +75,7 @@ test("the lane enables every existing opt-in owner only for a local test databas
   }
 });
 
-test("workers split a shard into disjoint groups, each with its own database copy", () => {
+test("workers split every shard by recorded time, each with its own database copy", () => {
   assert.deepEqual(parsePostgresWorkers(["--shard", "2/5"]), { shardArgs: ["--shard", "2/5"], workers: 1 });
   assert.deepEqual(parsePostgresWorkers(["--shard", "2/5", "--workers", "4"]),
     { shardArgs: ["--shard", "2/5"], workers: 4 });
@@ -83,22 +83,30 @@ test("workers split a shard into disjoint groups, each with its own database cop
     assert.throws(() => parsePostgresWorkers(["--shard", "1/5", "--workers", ...(value ? [value] : [])]));
   }
   const files = Array.from({ length: 10 }, (_, index) => `file-${index}`);
-  const groups = splitPostgresWorkers(files, 4);
-  assert.deepEqual(groups.map((group) => group.length), [3, 3, 2, 2]);
-  assert.deepEqual(groups.flat().sort(), files.toSorted());
-  assert.equal(splitPostgresWorkers(["only"], 4).length, 1);
+  // file-0 alone outweighs the rest, so it gets a worker to itself; file-9 has
+  // no record and weighs the recorded median (5).
+  const times = { "file-0": 40, ...Object.fromEntries(files.slice(1, 9).map((name, index) =>
+    [name, index + 1])) };
+  const plans = [1, 2].map((index) => planPostgresShard(files, ["--shard", `${index}/2`], 2, times));
+  assert.deepEqual(plans.flat().flat().sort(), files.toSorted(), "every file runs exactly once");
+  assert.deepEqual(plans[0][0], ["file-0"]);
+  const seconds = plans.flat().map((group) =>
+    group.reduce((total, name) => total + (times[name] ?? 5), 0));
+  assert.deepEqual(seconds, [40, 14, 13, 14]);
+  assert.deepEqual(planPostgresShard(files, ["--shard", "2/2"], 2, times), plans[1], "every shard plans alike");
+  assert.deepEqual(planPostgresShard(["only"], ["--shard", "1/1"], 4), [["only"]]);
   const url = workerDatabaseUrl("postgresql://postgres:postgres@127.0.0.1:5432/murph_test_gate", 3);
   assert.equal(url, "postgresql://postgres:postgres@127.0.0.1:5432/murph_test_gate_w3");
   assert.equal(postgresTestEnvironment({ DATABASE_URL: url }).DATABASE_URL, url);
 });
 
 const file = "apps/web/test/owner-postgres.test.ts";
-const passed = { file, state: "passed", tests: ["passed", "passed"] };
+const passed = { file, seconds: 1.5, state: "passed", tests: ["passed", "passed"] };
 
 test("receipts count successful cases without recording paths outside the repo or test data", () => {
   assert.deepEqual(validatePostgresReceipt([file], {
     modules: [passed], errors: 0, reason: "passed",
-  }), { files: 1, tests: 2 });
+  }), { files: 1, tests: 2, times: { [file]: 1.5 } });
 });
 
 test("missing, duplicate, unexpected, empty, skipped, pending and failed cases reject the gate", () => {
