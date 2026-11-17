@@ -67,7 +67,6 @@ afterEach(() => {
 });
 
 const TRANSCRIBE_URL = "http://murph-transcribe.worker/v1/transcribe";
-const PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET = "provider-egress-signing-secret";
 const RUNNER_CONTAINER_NAME = "member_123--v-version_1";
 
 function createCanonicalCheckpointRequest(userId: string): Request {
@@ -204,8 +203,6 @@ function createOutboundEnv(input: {
     ...createHostedExecutionTestEnv(),
     AI: input.AI,
     BUNDLES: {} as RunnerOutboundEnvironmentSource["BUNDLES"],
-    HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
-      PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET,
     ...(input.openAiApiKey ? { OPENAI_API_KEY: input.openAiApiKey } : {}),
     RUNNER_CONTAINER: nativeProviderTestNamespace(() => createPostgresTestOwner({
       attemptId: "attempt_provider_egress_credential",

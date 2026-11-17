@@ -188,8 +188,8 @@ describe("RunnerContainer", () => {
       env: {
         HOSTED_AI_USAGE_REPORTING_SECRET: "fixture-usage-reporting-secret",
         HOSTED_LOG_FINGERPRINT_SECRET: "fixture-log-fingerprint-secret",
-        HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET:
-          "fixture-provider-egress-signing-secret",
+        HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET:
+          "fixture-private-media-capability-secret",
       },
     });
 
@@ -197,7 +197,7 @@ describe("RunnerContainer", () => {
     expect(container.envVars).not.toHaveProperty("HOSTED_LOG_FINGERPRINT_SECRET");
     expect(container.envVars).not.toHaveProperty("HOSTED_AI_USAGE_REPORTING_SECRET");
     expect(container.envVars).not.toHaveProperty(
-      "HOSTED_PROVIDER_EGRESS_CREDENTIAL_SIGNING_SECRET",
+      "HOSTED_PRIVATE_MEDIA_CAPABILITY_SECRET",
     );
   });
 
