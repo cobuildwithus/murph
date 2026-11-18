@@ -23,7 +23,7 @@ import {
 
 import {
   DEPLOY_LIVE_MODEL_TURN_SMOKE_EXPECTED_OUTPUT,
-  isDeployWebAdmissionModel,
+  type DeployAdmissionTier,
   DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
   DEPLOY_LIVE_MODEL_TURN_SMOKE_PROMPT,
   readDeployLiveModelTurnSmokeCodexOutputText,
@@ -100,6 +100,7 @@ export interface HostedContainerHeavyRuntimeCore {
   }): Promise<HostedContainerDirectR2PresignedPutSmokeResult>;
   runLiveModelTurnSmoke(input: {
     model: string;
+    serviceTier?: DeployAdmissionTier;
     signal: AbortSignal;
   }): Promise<HostedContainerLiveModelTurnSmokeResult>;
   runWorkspaceInvocation: typeof runHostedWorkspaceInvocation;
@@ -261,6 +262,7 @@ async function runHostedContainerCodexShellSmoke(input: {
 // production turns use. The raw key never enters the container.
 async function runHostedContainerLiveModelTurnSmoke(input: {
   model: string;
+  serviceTier?: DeployAdmissionTier;
   signal: AbortSignal;
 }): Promise<HostedContainerLiveModelTurnSmokeResult> {
   return await withHostedContainerCodexSmokeWorkspace(input.model, async (workspace) =>
@@ -275,6 +277,7 @@ async function runHostedContainerLiveModelTurnSmoke(input: {
       const child = spawn("codex", [
         "exec",
         "--json",
+        ...(input.serviceTier === "default" ? ["--image", path.join(workspace.smokeVaultRoot, "admission.png")] : []),
         "--skip-git-repo-check",
         "-",
       ], {
@@ -366,7 +369,7 @@ async function runHostedContainerLiveModelTurnSmoke(input: {
         ));
       });
       child.stdin?.end(DEPLOY_LIVE_MODEL_TURN_SMOKE_PROMPT);
-    }), isDeployWebAdmissionModel(input.model));
+    }), input.serviceTier ?? (input.model === DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL ? undefined : "default"));
 }
 
 // Smoke failure text may embed Codex stdout/stderr. Keep only bounded,
@@ -429,7 +432,7 @@ function buildHostedContainerLiveModelTurnSmokeStdoutSafeText(value: string): st
 async function withHostedContainerCodexSmokeWorkspace<T>(
   model: string,
   run: (workspace: { codexHome: string; smokeVaultRoot: string }) => Promise<T>,
-  webAdmission = false,
+  serviceTier?: DeployAdmissionTier,
 ): Promise<T> {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-codex-shell-smoke-"));
   let codexWorkspaceRoot: string | null = null;
@@ -456,6 +459,12 @@ async function withHostedContainerCodexSmokeWorkspace<T>(
       recursive: true,
     });
     await chmod(smokeVaultRoot, 0o700);
+    // A synthetic solid-color tile exercises image input without reading any member data.
+    if (serviceTier === "default") {
+      await writeFile(path.join(smokeVaultRoot, "admission.png"), Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAe0lEQVR4nO3PUQkAIBTAwJfCRkaxfwVD+HEIgwW4zTr764YLGtCCBrSgAS1oQAsa0IIGtKABLWhACxrQgga0oAEtaEALGtCCBrSgAS1oQAsa0IIGtKABLWhACxrQgga0oAEtaEALGtCCBrSgAS1oQAsa0IIGtKABLXjsAjeSALUfSpQiAAAAAElFTkSuQmCC", "base64",
+      ), { mode: 0o600 });
+    }
     await writeFile(
       path.join(smokeVaultRoot, "vault.json"),
       `${JSON.stringify({
@@ -482,7 +491,7 @@ async function withHostedContainerCodexSmokeWorkspace<T>(
     );
     await writeFile(
       path.join(codexHome, "config.toml"),
-      buildHostedContainerCodexShellSmokeConfig(model, webAdmission),
+      buildHostedContainerCodexShellSmokeConfig(model, serviceTier),
       { mode: 0o600 },
     );
 
@@ -533,7 +542,8 @@ function isPathInside(candidate: string, parent: string): boolean {
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
-export function buildHostedContainerCodexShellSmokeConfig(model: string, webAdmission = false): string {
+export function buildHostedContainerCodexShellSmokeConfig(model: string, serviceTier?: DeployAdmissionTier): string {
+  const webAdmission = serviceTier !== undefined;
   const catalog = readHostedCodexModelCatalogJsonPath();
   if (webAdmission && !catalog) throw new Error("Hosted web admission requires the candidate image model catalog.");
   const modelCatalogJson = webAdmission && model === HOSTED_ASSISTANT_ASTRA_MODEL ? `${catalog}.astra` : catalog;
@@ -546,6 +556,7 @@ export function buildHostedContainerCodexShellSmokeConfig(model: string, webAdmi
     'model_provider = "hosted-shell-smoke"',
     'model_reasoning_effort = "low"',
     ...(webAdmission ? ['web_search = "live"'] : []),
+    ...(serviceTier && serviceTier !== "default" ? [`service_tier = "${serviceTier}"`] : []),
     'approval_policy = "never"',
     'sandbox_mode = "danger-full-access"',
     "check_for_update_on_startup = false",

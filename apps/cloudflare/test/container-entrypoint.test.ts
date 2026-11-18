@@ -2018,14 +2018,18 @@ describe("startHostedContainerEntrypoint", () => {
     vi.stubEnv("MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON", catalog);
     try {
       for (const [model, file] of [["gpt-6.2-sol", catalog], ["gpt-6.2-astra", catalog + ".astra"]] as const) {
-        const config = buildHostedContainerCodexShellSmokeConfig(model, true);
+        const config = buildHostedContainerCodexShellSmokeConfig(model, "default");
         expect(config).toContain(`model_catalog_json = "${file}"`);
         expect(config).toContain('web_search = "live"');
         expect(config).toContain("standalone_web_search = true");
         expect(config).toContain("supports_standalone_web_search = true");
+        expect(config).not.toContain("service_tier =");
+        for (const tier of ["flex", "priority"] as const) {
+          expect(buildHostedContainerCodexShellSmokeConfig(model, tier)).toContain(`service_tier = "${tier}"`);
+        }
       }
       vi.stubEnv("MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON", "");
-      expect(() => buildHostedContainerCodexShellSmokeConfig("gpt-6.2-sol", true)).toThrow(/catalog/u);
+      expect(() => buildHostedContainerCodexShellSmokeConfig("gpt-6.2-sol", "default")).toThrow(/catalog/u);
     } finally {
       vi.unstubAllEnvs();
     }

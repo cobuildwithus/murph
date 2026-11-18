@@ -1,44 +1,62 @@
+import { HOSTED_ASSISTANT_PRODUCT_MODELS } from "@murphai/hosted-execution/assistant-model";
 import { describe, expect, it } from "vitest";
 
 import {
+  DEPLOY_MODEL_ADMISSION_PROBES,
   DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
   readDeployLiveModelTurnSmokeCodexOutputText,
-  readDeployLiveModelTurnSmokeOpenAiModel,
+  readDeployLiveModelTurnSmokeRequest,
 } from "../src/deploy-smoke-live-model.ts";
 
 describe("deploy live model turn smoke", () => {
+  it("requires standard, Flex and Priority for every selectable model", () => {
+    for (const model of HOSTED_ASSISTANT_PRODUCT_MODELS) {
+      expect(DEPLOY_MODEL_ADMISSION_PROBES.filter(probe => probe.model === model).map(probe => probe.serviceTier))
+        .toEqual(["default", "flex", "priority"]);
+    }
+  });
+
   it("uses Luna for the bounded live deploy smoke", () => {
     expect(DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL).toBe("gpt-6-luna");
   });
 
   it("reads only the top-level OpenAI Responses model", () => {
-    expect(readDeployLiveModelTurnSmokeOpenAiModel(
+    expect(readDeployLiveModelTurnSmokeRequest(
       JSON.stringify({
         input: "anything Codex emits",
         model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
         stream: true,
       }),
-    )).toBe(DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL);
+    )).toMatchObject({ model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL, serviceTier: "default" });
 
-    expect(readDeployLiveModelTurnSmokeOpenAiModel(
+    expect(readDeployLiveModelTurnSmokeRequest(
       JSON.stringify({ model: "gpt-6.2-sol" }),
     )).toBeNull();
-    expect(readDeployLiveModelTurnSmokeOpenAiModel(
+    expect(readDeployLiveModelTurnSmokeRequest(
       JSON.stringify({ model: ` ${DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL} ` }),
-    )).toBe(DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL);
-    expect(readDeployLiveModelTurnSmokeOpenAiModel("{}")).toBeNull();
-    expect(readDeployLiveModelTurnSmokeOpenAiModel("not json")).toBeNull();
+    )).toMatchObject({ model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL, serviceTier: "default" });
+    expect(readDeployLiveModelTurnSmokeRequest("{}")).toBeNull();
+    expect(readDeployLiveModelTurnSmokeRequest("not json")).toBeNull();
   });
 
   it.each(["gpt-6.2-sol", "gpt-6.2-astra"])("admits %s only with a native web.run request", model => {
     const tools = [{ type: "namespace", name: "web", tools: [{ type: "function", name: "run", parameters: { type: "object" } }] }];
     for (const body of [{ model, tools }, { model, input: [{ type: "additional_tools", tools }] }]) {
-      expect(readDeployLiveModelTurnSmokeOpenAiModel(JSON.stringify(body))).toBe(model);
+      expect(readDeployLiveModelTurnSmokeRequest(JSON.stringify(body))).toMatchObject({ model, serviceTier: "default", web: true, image: false });
     }
     for (const body of [{ model }, { model, input: "web.run" }, { model, tools: [{ name: "web.run" }] },
       { model: "unconfigured", tools }, { model, tools: [{ ...tools[0], tools: [] }] }]) {
-      expect(readDeployLiveModelTurnSmokeOpenAiModel(JSON.stringify(body))).toBeNull();
+      expect(readDeployLiveModelTurnSmokeRequest(JSON.stringify(body))).toBeNull();
     }
+  });
+
+  it("reads the actual Responses tier and image instead of trusting container metadata", () => {
+    const wire = { model: "gpt-6-luna", input: [{ role: "user", content: [{ type: "input_image", image_url: "data:image/png;base64,AA==" }] }] };
+    for (const serviceTier of ["flex", "priority"]) {
+      expect(readDeployLiveModelTurnSmokeRequest(JSON.stringify({ ...wire, service_tier: serviceTier })))
+        .toMatchObject({ serviceTier, image: true });
+    }
+    expect(readDeployLiveModelTurnSmokeRequest(JSON.stringify({ ...wire, service_tier: "bogus" }))).toBeNull();
   });
 
   it("reads the final Codex JSONL agent message as the smoke output", () => {

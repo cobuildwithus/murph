@@ -50,6 +50,7 @@ import {
 } from "../src/runner-container-error-codes.ts";
 import {
   DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
+  DEPLOY_MODEL_ADMISSION_PROBES,
 } from "../src/deploy-smoke-live-model.ts";
 import {
   buildHostedRunnerRedactedErrorJson,
@@ -4582,7 +4583,8 @@ describe("RunnerContainer", () => {
   });
 
   it.each([false, true])("uses a separate single-use model fence for each probe (web admission: %s)", async (webModelAdmission) => {
-    const expectedModels = webModelAdmission ? ["gpt-6.2-sol", "gpt-6.2-astra"] : [DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL];
+    const probes = webModelAdmission ? DEPLOY_MODEL_ADMISSION_PROBES : [{ model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL, serviceTier: undefined }];
+    const expectedModels = probes.map(probe => probe.model);
     const probedModels: string[] = [];
     let fenceActiveDuringTurn: boolean | null = null;
     let secondFenceReadDuringTurn: { active: boolean; model?: string } | null = null;
@@ -4617,12 +4619,15 @@ describe("RunnerContainer", () => {
         expect(url).toBe("http://container/internal/deploy-live-model-turn-smoke");
         const model = new Headers(init?.headers).get("x-murph-smoke-model");
         expect(model).toBe(expectedModels[probedModels.length]);
+        const serviceTier = probes[probedModels.length]?.serviceTier;
+        expect(new Headers(init?.headers).get("x-murph-smoke-service-tier")).toBe(serviceTier ?? null);
         probedModels.push(model!);
         const firstFenceRead = await containerRef?.readDeploySmokeLiveModelTurnFence();
         fenceActiveDuringTurn = firstFenceRead?.active ?? null;
         expect(firstFenceRead).toEqual({
           active: true,
           model,
+          ...(serviceTier ? { serviceTier } : {}),
         });
         secondFenceReadDuringTurn = await containerRef?.readDeploySmokeLiveModelTurnFence() ?? null;
         return new Response(JSON.stringify({
@@ -4654,7 +4659,7 @@ describe("RunnerContainer", () => {
       : { liveModelTurn: { model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL } });
     expect(probedModels).toEqual(expectedModels);
     expect(webModelAdmission ? result.webModelTurns : [result.liveModelTurn]).toEqual(
-      expectedModels.map(model => ({ durationMs: 1_234, egressGrantConsumed: true, model, stdoutBytes: 2_048 })),
+      probes.map(({ model, serviceTier }) => ({ durationMs: 1_234, egressGrantConsumed: true, model, ...(serviceTier ? { serviceTier } : {}), stdoutBytes: 2_048 })),
     );
     expect(result.codexShell).toEqual(createCodexShellSmokeResult());
     expect(fenceActiveDuringTurn).toBe(true);

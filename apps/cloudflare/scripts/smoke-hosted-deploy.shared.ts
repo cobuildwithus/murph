@@ -36,7 +36,7 @@ import {
 } from "../src/hosted-runner-smoke-contract.ts";
 import {
   DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
-  DEPLOY_WEB_MODEL_ADMISSION_MODELS,
+  DEPLOY_MODEL_ADMISSION_PROBES,
 } from "../src/deploy-smoke-live-model.ts";
 import {
   readHostedStandbyMode,
@@ -99,6 +99,7 @@ interface SmokeDirectR2PresignedPutResult {
 }
 
 interface SmokeLiveModelTurnResult {
+  serviceTier?: unknown;
   durationMs?: unknown;
   egressGrantConsumed?: unknown;
   model?: unknown;
@@ -276,7 +277,7 @@ export async function runSmokeHostedDeploy(input: {
   }
 
   if (input.phase === "artifact") {
-    if (shouldSmokeLiveModelTurn) log(`Live candidate web.run admission passed for ${DEPLOY_WEB_MODEL_ADMISSION_MODELS.join(" and ")}.`);
+    if (shouldSmokeLiveModelTurn) log(`Live candidate model admission passed: ${DEPLOY_MODEL_ADMISSION_PROBES.map(p => p.model + "/" + p.serviceTier).join(", ")}.`);
     log("Isolated candidate artifact smoke checks passed.");
     return;
   }
@@ -611,10 +612,13 @@ function assertSmokeModelReceipts(
     return;
   }
   const turns = container.webModelTurns;
-  if (!Array.isArray(turns) || turns.length !== DEPLOY_WEB_MODEL_ADMISSION_MODELS.length) {
+  if (!Array.isArray(turns) || turns.length !== DEPLOY_MODEL_ADMISSION_PROBES.length) {
     throw new Error("Candidate runner did not prove all hosted web model admissions.");
   }
-  DEPLOY_WEB_MODEL_ADMISSION_MODELS.forEach((model, index) => assertSmokeLiveModelTurnResult(turns[index], model));
+  DEPLOY_MODEL_ADMISSION_PROBES.forEach(({ model, serviceTier }, index) => {
+    assertSmokeLiveModelTurnResult(turns[index], model);
+    if (turns[index]?.serviceTier !== serviceTier) throw new Error(`Candidate runner did not prove ${model} on ${serviceTier}.`);
+  });
 }
 
 function assertSmokeLiveModelTurnResult(

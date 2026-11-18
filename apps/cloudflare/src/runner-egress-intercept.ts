@@ -103,7 +103,7 @@ import {
   type HostedRunnerDiagnosticJson,
 } from "./runner-egress-responses-diagnostics.ts";
 import {
-  readDeployLiveModelTurnSmokeOpenAiModel,
+  readDeployLiveModelTurnSmokeRequest,
 } from "./deploy-smoke-live-model.ts";
 export {
   HOSTED_CLOUDFLARE_INJECTED_CREDENTIAL,
@@ -1829,10 +1829,10 @@ function recordHostedXaiSearchUsage(input: {
   });
 }
 
-async function readDeploySmokeLiveModelTurnOpenAiModel(input: {
+async function readDeploySmokeLiveModelTurnRequest(input: {
   pathnameSuffix: string;
   request: Request;
-}): Promise<string | null> {
+}): Promise<ReturnType<typeof readDeployLiveModelTurnSmokeRequest>> {
   if (input.request.method !== "POST" || input.pathnameSuffix !== "/v1/responses") {
     return null;
   }
@@ -1844,7 +1844,7 @@ async function readDeploySmokeLiveModelTurnOpenAiModel(input: {
     return null;
   }
 
-  return readDeployLiveModelTurnSmokeOpenAiModel(
+  return readDeployLiveModelTurnSmokeRequest(
     PROVIDER_REQUEST_TEXT_DECODER.decode(body),
   );
 }
@@ -2251,7 +2251,7 @@ async function authorizeHostedProviderEgress(input: {
   if (!owner && input.providerKind === "openai") {
     const smoke = await authorizeHostedProviderEgressDeploySmokeLiveModelTurn({
       ctx: input.ctx, env: input.env, startedAt, userId: input.userId,
-      deploySmokeLiveModelTurnModel: await readDeploySmokeLiveModelTurnOpenAiModel({
+      smokeRequest: await readDeploySmokeLiveModelTurnRequest({
         pathnameSuffix: input.openAiPathnameSuffix ?? "", request: input.request }),
     });
     if (smoke) return smoke;
@@ -2273,12 +2273,12 @@ async function authorizeHostedProviderEgress(input: {
 
 async function authorizeHostedProviderEgressDeploySmokeLiveModelTurn(input: {
   ctx?: HostedRunnerOutboundContext;
-  deploySmokeLiveModelTurnModel: string | null;
+  smokeRequest: ReturnType<typeof readDeployLiveModelTurnSmokeRequest>;
   env: RunnerOutboundEnvironmentSource;
   startedAt: number;
   userId: string | null;
 }): Promise<HostedProviderEgressAuthorization | null> {
-  if (!input.deploySmokeLiveModelTurnModel) {
+  if (!input.smokeRequest) {
     return null;
   }
   if (input.userId !== null) {
@@ -2303,11 +2303,7 @@ async function authorizeHostedProviderEgressDeploySmokeLiveModelTurn(input: {
       return null;
     }
     const fence = await container.readDeploySmokeLiveModelTurnFence();
-    if (
-      !isHostedDeploySmokeLiveModelTurnFenceResult(fence)
-      || !fence.active
-      || fence.model !== input.deploySmokeLiveModelTurnModel
-    ) {
+    if (!matchesDeploySmokeModelGrant(fence, input.smokeRequest)) {
       return null;
     }
     return {
@@ -2324,6 +2320,15 @@ async function authorizeHostedProviderEgressDeploySmokeLiveModelTurn(input: {
   }
 }
 
+function matchesDeploySmokeModelGrant(
+  fence: unknown,
+  request: NonNullable<ReturnType<typeof readDeployLiveModelTurnSmokeRequest>>,
+): boolean {
+  if (!isHostedDeploySmokeLiveModelTurnFenceResult(fence) || !fence.active || fence.model !== request.model) return false;
+  if (fence.serviceTier === undefined) return request.serviceTier === "default";
+  return fence.serviceTier === request.serviceTier && request.web && (fence.serviceTier !== "default" || request.image);
+}
+
 function readHostedRunnerDeploySmokeContainerNamespace(
   env: RunnerOutboundEnvironmentSource,
 ): RunnerOutboundEnvironmentSource["RUNNER_CONTAINER_SMOKE"] | null {
@@ -2337,6 +2342,7 @@ function readHostedRunnerDeploySmokeContainerNamespace(
 function isHostedDeploySmokeLiveModelTurnFenceResult(value: unknown): value is {
   active: boolean;
   model?: string;
+  serviceTier?: unknown;
 } {
   return Boolean(
     value

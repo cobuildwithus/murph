@@ -194,6 +194,9 @@ describe("hosted runner container image contract", () => {
     const productCatalog = parseCodexModelCatalogJson(runJqFilter(patchFilter, nativeCatalog));
     expect(runJqFilter(validationFilter, productCatalog, { slurp: true }).trim()).toBe("true");
     for (const slug of hostedRunnerProductModelSlugs) {
+      // Product attachment support is independent of whatever the upstream catalog declares.
+      const requiredModalities = slug === "gpt-6.2-sol" ? ["text", "image", "audio"] : ["text", "image"];
+      expect(readCodexModel(productCatalog, slug).input_modalities).toEqual(expect.arrayContaining(requiredModalities));
       const expected = structuredClone(readCodexModel(slug.startsWith("gpt-6.2-") ? launchCatalog : nativeCatalog, slug));
       if (typeof expected.model_messages === "object" && expected.model_messages !== null) {
         Reflect.deleteProperty(expected.model_messages, "collaboration_modes");

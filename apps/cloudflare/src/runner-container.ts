@@ -1,4 +1,4 @@
-import { DEPLOY_WEB_MODEL_ADMISSION_MODELS } from "./deploy-smoke-live-model.ts";
+import { DEPLOY_MODEL_ADMISSION_PROBES, type DeployAdmissionTier } from "./deploy-smoke-live-model.ts";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { HOSTED_EXECUTION_DEFAULT_RUNNER_IDLE_TTL_MS } from "@murphai/hosted-execution/contracts";
 import type { HostedRuntimeOwnerCommand } from "@murphai/hosted-execution/runtime-owner";
@@ -415,6 +415,7 @@ interface HostedExecutionContainerSmokeHealthResult {
   liveModelTurn?: {
     durationMs: number | null;
     egressGrantConsumed: boolean | null;
+    serviceTier?: DeployAdmissionTier;
     model: string | null;
     stdoutBytes: number | null;
   } | null;
@@ -2108,8 +2109,8 @@ export class RunnerContainer extends Container {
       if ("model" in input) return { liveModelTurn: await this.smokeLiveModelTurn(readyTimeoutMs, input) };
       const webModelTurns = [];
       // Serial by design. Each model gets its own single-use egress fence.
-      for (const model of DEPLOY_WEB_MODEL_ADMISSION_MODELS) {
-        webModelTurns.push(await this.smokeLiveModelTurn(readyTimeoutMs, { model }));
+      for (const probe of DEPLOY_MODEL_ADMISSION_PROBES) {
+        webModelTurns.push(await this.smokeLiveModelTurn(readyTimeoutMs, probe));
       }
       return { webModelTurns };
     } catch (error) {
@@ -2121,7 +2122,7 @@ export class RunnerContainer extends Container {
 
   protected async smokeLiveModelTurn(
     _readyTimeoutMs: number,
-    _input: { model: string },
+    _input: { model: string; serviceTier?: DeployAdmissionTier },
   ): Promise<NonNullable<HostedExecutionContainerSmokeHealthResult["liveModelTurn"]>> {
     throw new Error(
       "Hosted runner live model turn smoke is only supported by deploy smoke containers.",
@@ -4047,6 +4048,7 @@ export class DeploySmokeRunnerContainer extends RunnerContainer {
     expiresAtMs: number;
     model: string;
     remainingRequests: number;
+    serviceTier?: DeployAdmissionTier;
   } | null = null;
 
   // Worker-side half of the deploy-smoke live model turn. The container runs
@@ -4056,7 +4058,7 @@ export class DeploySmokeRunnerContainer extends RunnerContainer {
   // The raw key never travels to the container and never appears in logs.
   protected override async smokeLiveModelTurn(
     readyTimeoutMs: number,
-    input: { model: string },
+    input: { model: string; serviceTier?: DeployAdmissionTier },
   ): Promise<NonNullable<HostedExecutionContainerSmokeHealthResult["liveModelTurn"]>> {
     const apiKey = this.environment.OPENAI_API_KEY;
     if (typeof apiKey !== "string" || apiKey.trim().length === 0) {
@@ -4072,13 +4074,17 @@ export class DeploySmokeRunnerContainer extends RunnerContainer {
     this.liveModelTurnSmokeFence = {
       expiresAtMs: Date.now() + smokeTimeoutMs,
       model: input.model,
+      serviceTier: input.serviceTier,
       remainingRequests: 1,
     };
     try {
       const response = await this.containerFetch(
         RUNNER_LIVE_MODEL_TURN_SMOKE_URL,
         {
-          headers: { "x-murph-smoke-model": input.model },
+          headers: {
+            "x-murph-smoke-model": input.model,
+            ...(input.serviceTier ? { "x-murph-smoke-service-tier": input.serviceTier } : {}),
+          },
           method: "POST",
           signal: smokeSignal,
         },
@@ -4106,9 +4112,14 @@ export class DeploySmokeRunnerContainer extends RunnerContainer {
       return {
         durationMs: typeof result.durationMs === "number" ? result.durationMs : null,
         egressGrantConsumed,
+        ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
         model: typeof result.model === "string" ? result.model : null,
         stdoutBytes: typeof result.stdoutBytes === "number" ? result.stdoutBytes : null,
       };
+    } catch (error) {
+      if (!input.serviceTier) throw error;
+      const reason = error instanceof Error ? error.message : "unknown error";
+      throw new Error(`Candidate model admission failed for ${input.model}/${input.serviceTier}: ${reason}`, { cause: error });
     } finally {
       this.liveModelTurnSmokeFence = null;
     }
@@ -4120,6 +4131,7 @@ export class DeploySmokeRunnerContainer extends RunnerContainer {
   // fence so loops or unexpected retries cannot keep using the Worker key.
   async readDeploySmokeLiveModelTurnFence(): Promise<{
     active: boolean;
+    serviceTier?: DeployAdmissionTier;
     model?: string;
   }> {
     const fence = this.liveModelTurnSmokeFence;
@@ -4136,6 +4148,7 @@ export class DeploySmokeRunnerContainer extends RunnerContainer {
     return {
       active: true,
       model: fence.model,
+      ...(fence.serviceTier ? { serviceTier: fence.serviceTier } : {}),
     };
   }
 }

@@ -76,6 +76,7 @@ export interface WorkerDeploySmokeRunnerContainerStubLike
    */
   readDeploySmokeLiveModelTurnFence?(): Promise<{
     active: boolean;
+    serviceTier?: string;
     model?: string;
   }>;
 }

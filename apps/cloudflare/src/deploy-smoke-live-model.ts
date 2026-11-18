@@ -1,22 +1,23 @@
-import {
-  HOSTED_ASSISTANT_ASTRA_MODEL,
-  HOSTED_ASSISTANT_SOL_MODEL,
-} from "@murphai/hosted-execution/assistant-model";
+import { HOSTED_ASSISTANT_PRODUCT_MODELS, isHostedAssistantProductModel } from "@murphai/hosted-execution/assistant-model";
 
-export const DEPLOY_WEB_MODEL_ADMISSION_MODELS = [HOSTED_ASSISTANT_SOL_MODEL, HOSTED_ASSISTANT_ASTRA_MODEL] as const;
-
-export function isDeployWebAdmissionModel(model: unknown): boolean {
-  return DEPLOY_WEB_MODEL_ADMISSION_MODELS.some(candidate => candidate === model);
+// The omitted Responses service_tier is the standard foreground request.
+export const DEPLOY_ADMISSION_TIERS = ["default", "flex", "priority"] as const;
+export type DeployAdmissionTier = (typeof DEPLOY_ADMISSION_TIERS)[number];
+export function isDeployAdmissionTier(value: unknown): value is DeployAdmissionTier {
+  return DEPLOY_ADMISSION_TIERS.some(tier => tier === value);
 }
+export const DEPLOY_MODEL_ADMISSION_PROBES = HOSTED_ASSISTANT_PRODUCT_MODELS.flatMap(model =>
+  DEPLOY_ADMISSION_TIERS.map(serviceTier => ({ model, serviceTier })),
+);
 
 // The serving smoke retains its single, inexpensive Luna turn.
 export const DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL = "gpt-6-luna";
 export const DEPLOY_LIVE_MODEL_TURN_SMOKE_PROMPT = "Reply with exactly: OK";
 export const DEPLOY_LIVE_MODEL_TURN_SMOKE_EXPECTED_OUTPUT = "OK";
 
-export function readDeployLiveModelTurnSmokeOpenAiModel(
+export function readDeployLiveModelTurnSmokeRequest(
   rawBody: string,
-): string | null {
+): { model: string; serviceTier: DeployAdmissionTier; web: boolean; image: boolean } | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(rawBody);
@@ -28,8 +29,8 @@ export function readDeployLiveModelTurnSmokeOpenAiModel(
   }
   const record = parsed as Record<string, unknown>;
   const model = readString(record.model);
-  if (model === DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL) return model;
-  if (!isDeployWebAdmissionModel(model)) return null;
+  const serviceTier = record.service_tier === undefined ? "default" : record.service_tier;
+  if (!isHostedAssistantProductModel(model) || !isDeployAdmissionTier(serviceTier)) return null;
 
   // A successful request with web disabled cannot prove reserved-tool admission.
   // Mixed Code Mode can send namespaces in an additional_tools input item.
@@ -39,10 +40,17 @@ export function readDeployLiveModelTurnSmokeOpenAiModel(
       isPlainRecord(item) && item.type === "additional_tools" && Array.isArray(item.tools) ? item.tools : [],
     ) : []),
   ];
-  return tools.some(tool => isPlainRecord(tool) && tool.type === "namespace" && tool.name === "web"
+  const web = tools.some(tool => isPlainRecord(tool) && tool.type === "namespace" && tool.name === "web"
     && Array.isArray(tool.tools) && tool.tools.some(child =>
       isPlainRecord(child) && child.type === "function" && child.name === "run" && isPlainRecord(child.parameters),
-    )) ? model : null;
+    ));
+  if (!web && model !== DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL) return null;
+  const image = Array.isArray(record.input) && record.input.some(item =>
+    isPlainRecord(item) && item.role === "user" && Array.isArray(item.content) && item.content.some(part =>
+      isPlainRecord(part) && part.type === "input_image" && typeof part.image_url === "string"
+      && part.image_url.startsWith("data:image/"),
+    ));
+  return { model, serviceTier, web, image };
 }
 
 export function readDeployLiveModelTurnSmokeCodexOutputText(stdout: string): string | null {
