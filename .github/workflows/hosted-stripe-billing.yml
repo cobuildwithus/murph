@@ -102,9 +102,9 @@ jobs:
           POSTGRES_USER: postgres
         options: >-
           --health-cmd "pg_isready -U postgres -d murph_hosted_stripe_billing"
-          --health-interval 10s
+          --health-interval 2s
           --health-timeout 5s
-          --health-retries 10
+          --health-retries 50
         ports:
           - 5432:5432
     steps:
