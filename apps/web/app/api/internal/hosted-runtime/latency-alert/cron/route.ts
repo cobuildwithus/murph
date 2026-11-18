@@ -10,12 +10,13 @@ import { runHostedRuntimeTypingAlertMonitor } from "@/src/lib/hosted-runtime-lat
 import { runHostedDeviceImportAlertMonitor } from "@/src/lib/hosted-runtime-progress/device-import-alert-monitor";
 import { runHostedRuntimeProgressAlertMonitor } from "@/src/lib/hosted-runtime-progress/alert-monitor";
 import { runHostedAutomationLossAlertMonitor } from "@/src/lib/hosted-runtime-log/automation-loss-alert-monitor";
+import { runHostedProviderRejectionAlertMonitor } from "@/src/lib/hosted-runtime-log/provider-rejection-alert-monitor";
 import { runHostedRuntimeRunawayAlertMonitor } from "@/src/lib/hosted-runtime-log/runaway-alert-monitor";
 
 export const GET = withJsonError(async (request: Request) => {
   requireVercelCronRequest(request);
 
-  const [typingResult, latencyResult, progressResult, usageOvershootResult, starterAbuseResult, deviceImportResult, runawayResult, automationLossResult, finalReplyDeliveryResult, toolFailureResult, workflowHeartbeatResult] = await Promise.allSettled([
+  const [typingResult, latencyResult, progressResult, usageOvershootResult, starterAbuseResult, deviceImportResult, runawayResult, automationLossResult, providerRejectionResult, finalReplyDeliveryResult, toolFailureResult, workflowHeartbeatResult] = await Promise.allSettled([
     runHostedRuntimeTypingAlertMonitor(),
     runHostedRuntimeLatencyAlertMonitor({
       signal: request.signal,
@@ -30,6 +31,7 @@ export const GET = withJsonError(async (request: Request) => {
     runHostedDeviceImportAlertMonitor({ signal: request.signal }),
     runHostedRuntimeRunawayAlertMonitor({ signal: request.signal }),
     runHostedAutomationLossAlertMonitor({ signal: request.signal }),
+    runHostedProviderRejectionAlertMonitor({ signal: request.signal }),
     runHostedRuntimeFinalReplyDeliveryAlertMonitor(),
     runHostedToolFailureAlertMonitor({ signal: request.signal }),
     runHostedWorkflowHeartbeatAlertMonitor({ signal: request.signal }),
@@ -53,6 +55,7 @@ export const GET = withJsonError(async (request: Request) => {
   if (deviceImportResult.status === "rejected") throw deviceImportResult.reason;
   if (runawayResult.status === "rejected") throw runawayResult.reason;
   if (automationLossResult.status === "rejected") throw automationLossResult.reason;
+  if (providerRejectionResult.status === "rejected") throw providerRejectionResult.reason;
   if (finalReplyDeliveryResult.status === "rejected") throw finalReplyDeliveryResult.reason;
 
   if (toolFailureResult.status === "rejected") throw toolFailureResult.reason;
@@ -62,6 +65,7 @@ export const GET = withJsonError(async (request: Request) => {
     toolFailureAlert: toolFailureResult.value,
     workflowHeartbeatAlert: workflowHeartbeatResult.value,
     automationLossAlert: automationLossResult.value,
+    providerRejectionAlert: providerRejectionResult.value,
     finalReplyDeliveryAlert: finalReplyDeliveryResult.value,
     runtimeRunawayAlert: runawayResult.value,
     deviceImportAlert: deviceImportResult.value,

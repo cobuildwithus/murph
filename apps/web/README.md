@@ -2858,7 +2858,11 @@ Notes:
   WHERE created_at > now() - interval '1 day' GROUP BY outcome`.
 - `/api/internal/hosted-runtime/latency-alert/cron` scans existing Web-owned
   latency and durable mailbox-progress facts every five minutes. It does not
-  signal Temporal, wake Cloudflare, or participate in message processing.
+  signal Temporal, wake Cloudflare, or participate in message processing. It
+  also runs the runtime-log incident monitors, including the provider request
+  rejection alert, which emails when the model provider refuses foreground
+  replies; see
+  [the runtime log database notes](../../docs/hosted-runtime-log-database.md#provider-request-rejection-alert).
 - Hosted Stripe reconciliation now commits local billing facts plus inline
   `member.activated` hosted mailbox input first, then performs activation-path
   managed-user crypto provisioning. Later successful invoices for an already

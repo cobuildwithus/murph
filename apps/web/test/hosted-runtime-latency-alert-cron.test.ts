@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   runHostedToolFailureAlertMonitor: vi.fn(),
   runHostedWorkflowHeartbeatAlertMonitor: vi.fn(),
   runHostedAutomationLossAlertMonitor: vi.fn(),
+  runHostedProviderRejectionAlertMonitor: vi.fn(),
   runHostedRuntimeFinalReplyDeliveryAlertMonitor: vi.fn(),
   runHostedRuntimeRunawayAlertMonitor: vi.fn(),
   runHostedRuntimeTypingAlertMonitor: vi.fn(),
@@ -16,6 +17,10 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/src/lib/hosted-runtime-log/automation-loss-alert-monitor", () => ({
   runHostedAutomationLossAlertMonitor: mocks.runHostedAutomationLossAlertMonitor,
+}));
+
+vi.mock("@/src/lib/hosted-runtime-log/provider-rejection-alert-monitor", () => ({
+  runHostedProviderRejectionAlertMonitor: mocks.runHostedProviderRejectionAlertMonitor,
 }));
 
 vi.mock("@/src/lib/hosted-runtime-log/runaway-alert-monitor", () => ({
@@ -68,6 +73,8 @@ describe("hosted runtime latency alert cron", () => {
     mocks.runHostedWorkflowHeartbeatAlertMonitor.mockReset().mockResolvedValue({ configured: true, outcome: "healthy" });
     mocks.runHostedAutomationLossAlertMonitor.mockReset();
     mocks.runHostedAutomationLossAlertMonitor.mockResolvedValue({ configured: true, health: { anomalous: false }, outcome: "healthy" });
+    mocks.runHostedProviderRejectionAlertMonitor.mockReset();
+    mocks.runHostedProviderRejectionAlertMonitor.mockResolvedValue({ configured: true, health: { anomalous: false }, outcome: "healthy" });
     mocks.runHostedRuntimeRunawayAlertMonitor.mockReset();
     mocks.runHostedRuntimeRunawayAlertMonitor.mockResolvedValue({ configured: true, health: { anomalous: false }, outcome: "healthy" });
     mocks.runHostedDeviceImportAlertMonitor.mockReset();
@@ -132,10 +139,12 @@ describe("hosted runtime latency alert cron", () => {
     expect(mocks.runHostedWorkflowHeartbeatAlertMonitor).toHaveBeenCalledWith({ signal: expect.any(AbortSignal) });
     expect(mocks.runHostedRuntimeRunawayAlertMonitor).toHaveBeenCalledWith({ signal: expect.any(AbortSignal) });
     expect(mocks.runHostedAutomationLossAlertMonitor).toHaveBeenCalledWith({ signal: expect.any(AbortSignal) });
+    expect(mocks.runHostedProviderRejectionAlertMonitor).toHaveBeenCalledWith({ signal: expect.any(AbortSignal) });
     expect(await response.json()).toMatchObject({
       toolFailureAlert: { conditions: [] },
       workflowHeartbeatAlert: { outcome: "healthy" },
       automationLossAlert: { outcome: "healthy" },
+      providerRejectionAlert: { outcome: "healthy" },
       finalReplyDeliveryAlert: { queuedCount: 0, timingScan: "complete" },
       runtimeRunawayAlert: { outcome: "healthy" },
     });
@@ -162,6 +171,7 @@ describe("hosted runtime latency alert cron", () => {
     expect(mocks.runHostedToolFailureAlertMonitor).not.toHaveBeenCalled();
     expect(mocks.runHostedWorkflowHeartbeatAlertMonitor).not.toHaveBeenCalled();
     expect(mocks.runHostedAutomationLossAlertMonitor).not.toHaveBeenCalled();
+    expect(mocks.runHostedProviderRejectionAlertMonitor).not.toHaveBeenCalled();
     expect(mocks.runHostedRuntimeRunawayAlertMonitor).not.toHaveBeenCalled();
     expect(mocks.runHostedDeviceImportAlertMonitor).not.toHaveBeenCalled();
     expect(mocks.runHostedRuntimeTypingAlertMonitor).not.toHaveBeenCalled();
@@ -175,6 +185,7 @@ describe("hosted runtime latency alert cron", () => {
     { failing: "tool_failure" },
     { failing: "workflow_heartbeat" },
     { failing: "automation_loss" },
+    { failing: "provider_rejection" },
     { failing: "runaway" },
     { failing: "device_import" },
     {
@@ -212,6 +223,9 @@ describe("hosted runtime latency alert cron", () => {
       );
       mocks.runHostedAutomationLossAlertMonitor.mockReturnValue(
         failing === "automation_loss" ? failedMonitor : heldMonitor,
+      );
+      mocks.runHostedProviderRejectionAlertMonitor.mockReturnValue(
+        failing === "provider_rejection" ? failedMonitor : heldMonitor,
       );
       mocks.runHostedRuntimeRunawayAlertMonitor.mockReturnValue(
         failing === "runaway" ? failedMonitor : heldMonitor,
