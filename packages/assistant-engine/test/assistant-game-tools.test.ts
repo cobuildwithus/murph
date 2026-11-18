@@ -186,6 +186,7 @@ describe('game dynamic tools', () => {
     { label: 'a counted day in a finished game that left the result alone', args: { operation: 'mark_complete', gameId: 'game_synthetic', date: '2030-03-05', text: 'Read a chapter' },
       result: { status: 'ok', state: { games: [chatGame({ status: 'settled' })] }, dayOutcome: { date: '2030-03-05', status: 'credited' } }, says: GAME_DAY_OUTCOME_GUIDANCE.credited },
     { label: 'a reminder that cannot arrive', args: { operation: 'set_reminder', minutes: 1080 }, result: { status: 'ok', reaches: 'none' }, says: GAME_REMINDER_OUTCOME_GUIDANCE.none },
+    { label: 'a reminder switched off', args: { operation: 'set_reminder', gameId: 'game_synthetic', on: false }, result: { status: 'ok' }, says: GAME_REMINDER_OUTCOME_GUIDANCE.off },
     { label: 'a missing first name', args: approval, result: { status: 'rejected', error: 'PROFILE_REQUIRED: player_sam needs a first name and time zone in the Murph app.' }, says: GAME_REFUSAL_GUIDANCE.PROFILE_REQUIRED },
     { label: 'a yes with no returned state', args: approval, result: { status: 'ok' }, says: '' },
     { label: 'an unexplained refusal', args: approval, result: { status: 'rejected', error: 'TERMS_CHANGED: The terms changed.' }, says: '' },

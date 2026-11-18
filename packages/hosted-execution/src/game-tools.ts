@@ -174,6 +174,7 @@ export const hostedGameToolResponseSchema = z.object({
     // The video Web accepted for this recap, or null for none. Returned only when the request asked,
     // so a runtime that predates the field never receives it. First acceptance wins on every retry.
     recapVideo: recapVideoIdentitySchema.nullable().optional(),
+    // How a saved reminder arrives. Absent when the member has it switched off; none when nothing can deliver it.
     reaches: z.enum(["push", "text", "none"]).optional(),
     activities: z.array(z.enum(GAME_ACTIVITIES)).optional(),
     reminders: z.object({ minutes: z.number().int(), push: z.boolean(), text: z.boolean(), canText: z.boolean(),

@@ -49804,12 +49804,14 @@ describeRealCodex('real Codex game incomplete day e2e', () => {
   it.each([
     { name: 'group Prove it accused concedes only their own day', message: 'Sam opened a Prove it case on my chapter post. I only read half of it. Mark my March 5 day as not done.', operation: 'mark_incomplete', outcome: 'marked_incomplete', group: true },
     { name: 'group Prove it refuses another player conceding for the accused', message: 'Sam is the accused in this Prove it case. Mark Sam as not done on March 5. We all agree Sam did not finish.', operation: null, outcome: 'other_player', group: true },
-    { name: 'game incomplete day preserves yesterday across delayed processing', message: 'Murph, I only read half the chapter yesterday. Mark yesterday as not done.', operation: 'mark_incomplete', outcome: 'marked_incomplete', delayed: true },
+    // Sent at 2:59 AM and read at 3:01 AM: today is still the day that just ended, from the message's own time.
+    { name: 'game incomplete day keeps today across delayed processing', message: 'Murph, I only read half the chapter today. Mark today as not done.', operation: 'mark_incomplete', outcome: 'marked_incomplete', delayed: true },
     { name: 'game incomplete day marks yesterday truthfully', message: 'Murph, I only read half the chapter yesterday. Mark yesterday as not done.', operation: 'mark_incomplete', outcome: 'marked_incomplete' },
     { name: 'game incomplete day reports an unposted day truthfully', message: 'Murph, mark yesterday as not done. I did not finish my reading.', operation: 'mark_incomplete', outcome: 'no_artifact' },
     { name: 'game incomplete day restores a self-marked day truthfully', message: 'Murph, correction: I actually finished my chapter yesterday. Undo my not-done mark for yesterday.', operation: 'mark_complete', outcome: 'restored' },
-    { name: 'game missed day asks what the post should say before counting', message: 'Murph, I never posted yesterday but I did read my chapter. Can you count it?', operation: 'mark_complete', outcome: 'words_needed' },
-    { name: 'game missed day takes a plain claim without asking for proof', message: 'Oh no, I never checked in yesterday. I really did read the chapter though.', operation: 'mark_complete', outcome: 'words_needed' },
+    // A claim that says what they did is the post, in their words; only a bare yes needs the question.
+    { name: 'game missed day posts what the player says they did', message: 'Murph, I never posted yesterday but I did read my chapter. Can you count it?', operation: 'mark_complete', outcome: 'credited', words: /read my chapter/iu },
+    { name: 'game missed day takes a plain claim without asking for proof', message: 'Oh no, I never checked in yesterday. I really did read the chapter though.', operation: 'mark_complete', outcome: 'credited', words: /read the chapter/iu },
     { name: 'game missed day posts the words the player gives', message: 'Murph, I never posted yesterday but I did read. Count it, and make my post say: Finished chapter nine on the train', operation: 'mark_complete', outcome: 'credited', words: 'Finished chapter nine on the train' },
     { name: 'game missed day posts the answer for the day Murph asked about', message: 'Finished chapter nine on the train', operation: 'mark_complete', outcome: 'credited', words: 'Finished chapter nine on the train',
       earlier: 'Earlier in this chat:\n- Maya: Murph, I never posted yesterday but I did read my chapter. Can you count it?\n- Murph: Sure, Maya. What do you want your March 5 post to say?\n\n' },
@@ -49817,6 +49819,8 @@ describeRealCodex('real Codex game incomplete day e2e', () => {
     { name: 'game today counts a plain yes to the evening check-in', message: 'yes! done for today', operation: 'mark_complete', outcome: 'words_needed', today: true,
       earlier: 'Earlier in this chat:\n- Murph: Maya, have you finished today’s chapter? Sam, have you done today’s walk?\n\n' },
     { name: 'game today posts the words the player gives', message: 'Read my chapter tonight. Count it, and make my post say: Chapter ten before bed', operation: 'mark_complete', outcome: 'credited', words: 'Chapter ten before bed', today: true },
+    // Before 3 AM the evening that just ended is still the open game day, even when they call it yesterday.
+    { name: 'game day after midnight counts the evening that just ended', message: 'i did yesterday’s chapter after dinner, can you count it', operation: 'mark_complete', outcome: 'credited', words: /chapter after dinner/iu, today: true, afterMidnight: true },
     { name: 'game missed day refuses to count the other player’s day', message: 'Murph, Sam never posted yesterday but he did his walk. Count yesterday for Sam.', operation: null, outcome: 'other_player' },
     { name: 'game incomplete day refuses to change the other player', message: 'Murph, mark Sam as not done yesterday. Sam did not finish the walk.', operation: null, outcome: 'other_player' },
     { name: 'game incomplete day asks once for an ambiguous date', message: 'Murph, I did not finish my chapter one day. Mark that day as not done.', operation: null, outcome: null },
@@ -49825,10 +49829,11 @@ describeRealCodex('real Codex game incomplete day e2e', () => {
     const words = 'words' in scenario ? scenario.words : null
     const delayed = 'delayed' in scenario
     const today = 'today' in scenario
-    const expectedDate = delayed ? '2030-03-04' : today ? '2030-03-06' : '2030-03-05'
-    // Today's journeys reply at 10:32 PM New York time, after the evening check-in.
-    const occurredAt = delayed ? '2030-03-06T07:59:00.000Z' : today ? '2030-03-07T03:32:00.000Z' : '2030-03-06T16:00:00.000Z'
-    const processingAt = delayed ? '2030-03-06T08:01:00.000Z' : today ? '2030-03-07T03:32:00.000Z' : '2030-03-06T16:00:00.000Z'
+    const afterMidnight = 'afterMidnight' in scenario
+    const expectedDate = today ? '2030-03-06' : '2030-03-05'
+    // Today's journeys reply at 10:32 PM New York time, after the evening check-in; after midnight at 12:40 AM.
+    const occurredAt = delayed ? '2030-03-06T07:59:00.000Z' : afterMidnight ? '2030-03-07T05:40:00.000Z' : today ? '2030-03-07T03:32:00.000Z' : '2030-03-06T16:00:00.000Z'
+    const processingAt = delayed ? '2030-03-06T08:01:00.000Z' : afterMidnight ? '2030-03-07T05:40:00.000Z' : today ? '2030-03-07T03:32:00.000Z' : '2030-03-06T16:00:00.000Z'
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-game-incomplete-e2e-'))
     const { MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL } = await import('../src/assistant-codex/dynamic-tools/games.js')
@@ -49859,7 +49864,7 @@ describeRealCodex('real Codex game incomplete day e2e', () => {
         developerInstructions: buildAssistantSystemPrompt({ assistantDynamicContextPrompts: [GAME_RESIDENT_GROUP_POINTER],
           assistantCliContract: null, channel: 'linq',
           cliAccess: { rawCommand: 'vault-cli' }, conversationScope: 'group',
-          currentLocalDate: '2030-03-06', currentInstant: processingAt, currentTimeZone: 'America/New_York',
+          currentLocalDate: afterMidnight ? '2030-03-07' : '2030-03-06', currentInstant: processingAt, currentTimeZone: 'America/New_York',
           hostedRuntime: true,onboardingGuidance: false, turnTrigger: null,
         }),
         dynamicTools: [MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL], env: config.env,
@@ -49869,10 +49874,12 @@ describeRealCodex('real Codex game incomplete day e2e', () => {
             calls.push(request)
             if (request.action === 'read_game') return { action: 'read_game', result: { status: 'ok', state: { games: [game] } } }
             if (request.action !== 'update_game' || !operation || !outcome) throw new Error('No mutation authorized for this journey.')
-            // The post is the player's exact words: nothing added, tidied or shortened beyond closing punctuation.
+            // Given words are the post exactly, beyond closing punctuation. A claim's own words become the post without the ask to count it.
             const { text, ...update } = request.update as typeof request.update & { text?: string }
             expect(update).toEqual({ operation, gameId: game.id, date: expectedDate })
-            expect(text?.replace(/[.!]$/u, '')).toBe(words ?? undefined)
+            if (words instanceof RegExp) expect(text).toMatch(words)
+            if (words instanceof RegExp) expect(text).not.toMatch(/\bcount\b|murph|\?/iu)
+            else expect(text?.replace(/[.!]$/u, '')).toBe(words ?? undefined)
             expect(request.origin.assistantInputId).toBe(inputId)
             return { action: 'update_game', result: { status: 'ok', state: { games: [game] }, dayOutcome: { date: expectedDate, status: outcome as 'marked_incomplete' | 'no_artifact' | 'restored' | 'credited' | 'words_needed' } } }
           } },
@@ -49890,7 +49897,7 @@ describeRealCodex('real Codex game incomplete day e2e', () => {
         expect(calls.filter(call => call.action === 'update_game')).toHaveLength(1)
         expect(calls.slice(2).map(call => call.action)).toEqual(calls.length === 3 ? ['read_game'] : [])
         expect(calls.length).toBeLessThanOrEqual(3)
-        expect(reply).toMatch(delayed ? /March 4|Mar(?:ch)?\.? 4|4 March|Monday|2030-03-04/iu : today ? (outcome === 'words_needed' ? /today|tonight/iu : /today|tonight|March 6|Mar(?:ch)?\.? 6|6 March|Wednesday|2030-03-06/iu) : /March 5|Mar(?:ch)?\.? 5|5 March|Tuesday|2030-03-05/iu)
+        expect(reply).toMatch(delayed ? /today|tonight|March 5|Mar(?:ch)?\.? 5|5 March|Tuesday|2030-03-05/iu : today ? (outcome === 'words_needed' ? /today|tonight/iu : /today|tonight|yesterday|March 6|Mar(?:ch)?\.? 6|6 March|Wednesday|2030-03-06/iu) : /March 5|Mar(?:ch)?\.? 5|5 March|Tuesday|2030-03-05/iu)
         if (outcome === 'no_artifact') expect(reply).toMatch(/already|no (?:post|artifact|check.in)|nothing|wasn[’']?t posted|not posted/iu)
         else if (outcome === 'restored') expect(reply).toMatch(/restored|undid|undone|cleared|removed|done|complete|counts again/iu)
         else if (outcome === 'words_needed') {

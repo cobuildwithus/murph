@@ -7939,7 +7939,7 @@ and only their current profile zones gate the latest scheduled 8pm horizon; post
 per-game opt-outs affect the addressed set only. One `game_evening` receipt per
 room/date owns the claim, with the room as payload owner. Its immutable event
 key survives delivery metadata rewrites and identifies each of the previous
-three accepted evenings for the unanswered-send pause. The encrypted
+three accepted evenings for the unanswered-send pause; a text in the room or a post in its games since the third ends it. The encrypted
 `game_evening_check_in` policy freezes addressed game/day/member sets, terms
 versions and expiry. The bounded same-day transcript is read at preparation.
 Publication and dispatch recheck the frozen game witness under game locks; an

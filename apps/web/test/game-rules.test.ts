@@ -1195,7 +1195,10 @@ describe("game reminder eligibility", () => {
     expect(gameReminderReach(settings, texted, true)).toBe("text");
     expect(gameReminderReach({ ...settings, canText: false }, texted, true)).toBe("push");
     expect(gameReminderReach({ ...settings, canText: false }, texted, false)).toBe("none");
-    expect(gameReminderReach(settings, { ...texted, on: false }, true)).toBe("none");
+    // Switched off is not the same as unreachable: nothing asks them to turn on notifications.
+    expect(gameReminderReach(settings, { ...texted, on: false }, true)).toBeUndefined();
+    expect(gameReminderReach({ ...settings, push: false, text: false }, texted, true)).toBeUndefined();
+    expect(gameReminderReach({ ...settings, push: false }, { on: true, textedPrivately: false }, false)).toBeUndefined();
     // A game whose group chat carries the evening check-in gets no private text, so only the push reaches them.
     expect(gameReminderReach(settings, { on: true, textedPrivately: false }, true)).toBe("push");
     expect(gameReminderReach(settings, { on: true, textedPrivately: false }, false)).toBe("none");

@@ -138,13 +138,18 @@ function skipUnprovableRoom(error: unknown): null {
 }
 
 /** The latest three sends, not the latest three dates: a paused evening sends nothing, and that mustn't end the pause. */
-async function paused(roomId: string, horizons: Map<string, Date>, date: string, tx: Prisma.TransactionClient): Promise<boolean> {
+async function paused(roomId: string, games: Games, horizons: Map<string, Date>, date: string, tx: Prisma.TransactionClient): Promise<boolean> {
   const keys = [...horizons.keys()].filter(day => day < date).map(day => createHostedLinqDeliveryIdempotencyLookupKey(gameEveningEventId(roomId, day))!);
   const accepted = await tx.hostedLinqDelivery.findMany({ where: { idempotencyKey: { in: keys }, acceptedAt: { not: null } },
     orderBy: { acceptedAt: "desc" }, take: 3, select: { acceptedAt: true } });
   if (accepted.length < 3) return false;
-  const inbound = await tx.hostedMailboxItem.findFirst({ where: { userId: roomId, kind: "conversation.message", lane: "conversation", occurredAt: { gte: accepted[2]!.acceptedAt! } }, select: { id: true } });
-  return !inbound;
+  return !await answeredSince(tx, roomId, { gameId: { in: games.map(game => game.row.id) } }, accepted[2]!.acceptedAt!);
+}
+
+/** A game check-in nobody answers pauses after three sends. A text in its thread or a post in its games since then is an answer. */
+export async function answeredSince(tx: Prisma.TransactionClient, threadUserId: string, posts: Prisma.GameEntryWhereInput, since: Date): Promise<boolean> {
+  const text = await tx.hostedMailboxItem.findFirst({ where: { userId: threadUserId, kind: "conversation.message", lane: "conversation", occurredAt: { gte: since } }, select: { id: true } });
+  return Boolean(text ?? await tx.gameEntry.findFirst({ where: { ...posts, receivedAt: { gte: since } }, select: { id: true } }));
 }
 
 export async function reserveGameEveningCheckIn(roomId: string, gameIds: readonly string[], now: Date): Promise<number> {
@@ -166,7 +171,7 @@ export async function reserveGameEveningCheckIn(roomId: string, gameIds: readonl
         .map(game => game.row.players.map(player => player.memberId!).sort()).sort((a, b) => a.join(":").localeCompare(b.join(":")));
       for (const pair of pairs) await lockGamePair(tx, pair[0]!, pair[1]!);
       if (!await isEveningBatchCurrentTx(policy, room.memberIds, room.audience, tx, now)
-        || await paused(roomId, gameEveningCheckInHorizons(room.games.map(game => game.state)), date, tx)) return false;
+        || await paused(roomId, room.games, gameEveningCheckInHorizons(room.games.map(game => game.state)), date, tx)) return false;
       const result = await tx.hostedLinqDelivery.createMany({ data: [{ id: buildHostedLinqDeliveryId(key), idempotencyKey: key,
         source: "game_lifecycle", sourceRef: `${roomId}:${date}`, template: "game_evening", status: "awaiting_generation",
         targetKind: "thread", payloadOwnerMemberId: roomId, attemptedAt: dueAt, retryAfterAt: dueAt, createdAt: dueAt }], skipDuplicates: true });
