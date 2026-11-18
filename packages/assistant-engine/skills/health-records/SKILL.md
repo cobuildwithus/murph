@@ -26,9 +26,8 @@ value belongs in a lab record, never only in memory or a note.
 | Workouts | the workout commands |
 | Symptoms and notes about the body | the symptom, event or Journal note commands |
 
-Leave unreported workout duration, symptom severity, and intake dose and unit
-out of the write. Include dose and unit together when known. Ask for these
-details only when the member wants them tracked.
+Leave out an unreported workout duration, symptom severity, or dose and unit
+(which go together). Ask for them only if the member wants them tracked.
 
 Never create an allergy record for the absence of allergies.
 
