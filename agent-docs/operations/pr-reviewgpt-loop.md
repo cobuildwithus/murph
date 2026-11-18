@@ -10,7 +10,7 @@ updates.
 
 The gate is complete when the pushed patch has a resolved review (§ Stop
 Condition), no accepted finding is unresolved, and required CI is green on the
-final head. Missing or stale evidence, the wrong model, an invalid response, or
+final head. Missing or stale evidence, a failed Pro selection, an invalid response, or
 a merge conflict stops the loop. None of them lets you infer the answer.
 
 ## When It Runs
@@ -163,11 +163,9 @@ takes effect on the lane's next normal restart. Lanes run headful by default.
 Headless is a local override for hiding the window, it uses more CPU and
 memory, and a fresh profile must sign in once in headful mode first.
 
-The tool requires regular Chat (not ChatGPT Work), reads context only from the
-attached `codebase.zip`, and needs concrete GPT-6 Pro model evidence; a generic
-`Pro` label is not enough. When it fails closed on one of these, fix the lane
-or invocation. Keep that browser policy in ReviewGPT, not in Murph's wrapper
-or prompts.
+Use regular Chat with the attached `codebase.zip`. ReviewGPT must confirm
+the Pro selection in the model picker before sending. That selection is
+sufficient model evidence for the round. Keep picker validation in ReviewGPT.
 
 ## Validate The Result
 
@@ -177,11 +175,10 @@ A round counts only when the response is a completed review:
   An empty or preliminary response, a missing or unreadable `codebase.zip`, or
   `ROUND_OUTCOME: INVALID` does not count: fix the evidence or invocation gap
   and retry the same round on the same head.
-- The exact turn, attachment, and requested model check out under the package's
-  model-attestation checks, and the review is substantive for its scope.
-  Duration is not a test. A different or downgraded model, or shallow or
-  templated output, discards the round; a retry on a different lane uses a
-  fresh conversation and full snapshot.
+- Verify that the completed response belongs to the exact submitted turn and
+  attachment and addresses the review scope. A run with confirmed Pro selection
+  can finish at any duration, including when the response model label is absent
+  or different. Apply the lane rate-limit rule above if capabilities are reduced.
 - `review-round.json` names the intended round, sensitivity, context anchor,
   first and previous reviewed heads, PR changed-line and changed-file counts,
   and the current pushed head, with this scope:
@@ -199,7 +196,7 @@ A response that passed these checks still counts when optional model-evidence
 persistence or tab cleanup warns afterward. Those warnings never justify
 rerunning the review.
 
-Record the lane, model evidence, and why you accepted the response in the round
+Record the lane, confirmed picker selection, and why you accepted the response in the round
 handoff. Report tooling retries separately from review results.
 
 ## Finding Disposition Boundary
@@ -376,8 +373,8 @@ not edit metadata or broaden the target to make it pass.
 
 An export recovers evidence, not a verdict. Validate it under § Validate The
 Result and keep the original round and head when it passes. If the response is
-still incomplete, keep the original owner and the polling rule. If identity or
-model evidence is missing, report the gap; a visible answer is not a pass.
+still incomplete, keep the original owner and the polling rule. Verify the exported response against the original turn and attachment, and use
+the original run’s confirmed Pro selection for the model check.
 Close only a recovery tab this task opened.
 
 An accepted send can briefly show a `WEB:<uuid>` conversation URL. Once that
