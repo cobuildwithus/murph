@@ -35,7 +35,8 @@ export async function healthJourneys(input: {
     input.states.set("steps", state);
   }
   const context = achievementContext(measures, input.states);
-  const candidates = [...roundTotals(context), ...ladderRungs(context),
+  // Hours slept is no medal; sleep counts only on its journeys.
+  const candidates = [...roundTotals(context).filter(candidate => candidate.measureId !== "sleep"), ...ladderRungs(context),
     ...measures.flatMap(measure => routeLegs({ measureId: measure.id,
       legs: input.states.get(measure.id)?.legs ?? [], points: cumulativePoints(measure.amounts) }))];
   return { measures, states: input.states, candidates };

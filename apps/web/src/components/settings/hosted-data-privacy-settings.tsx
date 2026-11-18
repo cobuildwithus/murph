@@ -431,6 +431,12 @@ function HostedDataPrivacySettingsContent(props: {
                   onKeyDown={(event) => {
                     if (event.key === "Enter") {
                       event.preventDefault();
+                      // Enter that confirms an IME composition (Japanese,
+                      // Chinese, Korean) must not delete the account.
+                      // keyCode 229 covers Safari, which clears isComposing first.
+                      if (event.nativeEvent.isComposing || event.keyCode === 229) {
+                        return;
+                      }
                       void handleDeleteConfirmed();
                     }
                   }}

@@ -14,7 +14,24 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."
 // Each app's tests read the other's files (Prisma schema, route contracts),
 // so they are reached together.
 export const COUPLED_APPS = Object.freeze(["apps/cloudflare", "apps/web"]);
-const APP_REFERENCE = /\bapps\/(?:web|cloudflare)\b/u;
+
+// The hosted runner bundle also ships the CLI, which Cloudflare's manifest
+// doesn't list (hostedRunnerBundleOnlyDependencyNames in
+// apps/cloudflare/scripts/runner-bundle-contract.ts; its test checks this).
+export const BUNDLE_ONLY_DEPENDENCIES = Object.freeze({
+  "apps/cloudflare": Object.freeze(["@murphai/murph"]),
+});
+
+const SOURCE_FILE = /\.[cm]?[jt]sx?$/u;
+const TEST_FILE = /\.test\.[cm]?[jt]sx?$/u;
+const COMMENT_LINE = /^\s*(?:\/\/|\*|\/\*)/u;
+// "packages/cli/src", path.join(root, "packages", "cli"), "../../cli/src".
+const WORKSPACE_PATH = /\b((?:apps|packages)\/[\w.-]+)/gu;
+const JOINED_PATH = /["'](apps|packages)["']\s*,\s*["']([\w.-]+)["']/gu;
+const RELATIVE_PATH = /["'`]((?:\.\.\/)+[\w.@-]+)/gu;
+const LOCAL_IMPORT = /(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|\bimport\s+)["'](\.{1,2}\/[^"']+)["']/gu;
+const IMPORT_SUFFIXES = ["", ".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs",
+  "/index.ts", "/index.js"];
 
 /** @param {string} root */
 function workspaceDirs(root) {
@@ -27,29 +44,64 @@ function workspaceDirs(root) {
 }
 
 /**
- * Test files under `directory` that name an app path outside a comment: they
- * read that app's files, so they run whenever an app is reached.
- * @param {string} root @param {string} directory
+ * The other workspace dirs each test file under `dir/test` reads, by a path
+ * outside a comment in it or in a local file it imports (test helpers).
+ * @param {string} root @param {string} dir @param {string[]} dirs
+ * @returns {Map<string, string[]>} test file -> dirs it reads
  */
-function appReferencingTests(root, directory) {
-  const absolute = path.join(root, directory);
-  if (!existsSync(absolute)) return [];
-  const files = [];
-  for (const entry of readdirSync(absolute, { recursive: true, withFileTypes: true })) {
-    if (!entry.isFile() || !/\.test\.[cm]?[jt]sx?$/u.test(entry.name)) continue;
-    const file = path.join(entry.parentPath, entry.name);
-    const code = readFileSync(file, "utf8").split("\n")
-      .filter((line) => !/^\s*(?:\/\/|\*|\/\*)/u.test(line));
-    if (code.some((line) => APP_REFERENCE.test(line))) {
-      files.push(path.relative(root, file).split(path.sep).join("/"));
+function testFileReads(root, dir, dirs) {
+  const testDir = path.join(root, dir, "test");
+  if (!existsSync(testDir)) return new Map();
+  /** @param {string} target */
+  const owner = (target) => dirs.find((candidate) =>
+    target === candidate || target.startsWith(`${candidate}/`));
+  /** @type {Map<string, { reads: Set<string>, imports: string[] }>} */
+  const files = new Map();
+  for (const entry of readdirSync(testDir, { recursive: true, withFileTypes: true })) {
+    if (!entry.isFile() || !SOURCE_FILE.test(entry.name)) continue;
+    const file = path.relative(root, path.join(entry.parentPath, entry.name)).split(path.sep).join("/");
+    const code = readFileSync(path.join(root, file), "utf8").split("\n")
+      .filter((line) => !COMMENT_LINE.test(line)).join("\n");
+    const reads = new Set();
+    for (const [, target] of code.matchAll(WORKSPACE_PATH)) reads.add(owner(target));
+    for (const [, parent, name] of code.matchAll(JOINED_PATH)) reads.add(owner(`${parent}/${name}`));
+    for (const [, relative] of code.matchAll(RELATIVE_PATH)) {
+      for (const base of [path.posix.dirname(file), dir]) {
+        reads.add(owner(path.posix.normalize(path.posix.join(base, relative))));
+      }
+    }
+    reads.delete(undefined);
+    reads.delete(dir);
+    const imports = [...code.matchAll(LOCAL_IMPORT)].map(([, specifier]) =>
+      path.posix.normalize(path.posix.join(path.posix.dirname(file), specifier)));
+    files.set(file, { reads, imports });
+  }
+  /** @param {string} specifier */
+  const resolve = (specifier) => IMPORT_SUFFIXES
+    .flatMap((suffix) => [specifier.replace(/\.[cm]?jsx?$/u, "") + suffix, specifier + suffix])
+    .find((candidate) => files.has(candidate));
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const { reads, imports } of files.values()) {
+      for (const specifier of imports) {
+        for (const read of files.get(resolve(specifier) ?? "")?.reads ?? []) {
+          if (!reads.has(read)) {
+            reads.add(read);
+            grew = true;
+          }
+        }
+      }
     }
   }
-  return files.sort();
+  return new Map([...files].sort(([a], [b]) => a.localeCompare(b))
+    .filter(([file, { reads }]) => TEST_FILE.test(file) && reads.size > 0)
+    .map(([file, { reads }]) => [file, [...reads].sort()]));
 }
 
 /**
  * The workspace: package dirs, who depends on each, and the package test
- * files that read an app's files.
+ * files that read another workspace dir's files. An app whose tests read a
+ * dir depends on it, since apps always run whole.
  * @param {string} root
  */
 export function readWorkspace(root = repoRoot) {
@@ -76,25 +128,38 @@ export function readWorkspace(root = repoRoot) {
       if (dependency && dependency !== dir) dependents.get(dependency)?.push(dir);
     }
   }
-  /** @type {Map<string, string[]>} */
-  const appTests = new Map();
-  for (const dir of dirs.filter((candidate) => candidate.startsWith("packages/"))) {
-    const files = appReferencingTests(root, path.posix.join(dir, "test"));
-    if (files.length > 0) appTests.set(dir, files);
+  for (const [dir, names] of Object.entries(BUNDLE_ONLY_DEPENDENCIES)) {
+    for (const name of names) {
+      const dependency = byName.get(name);
+      if (!dependency) throw new Error(`Unknown bundle-only dependency ${name}.`);
+      dependents.get(dependency)?.push(dir);
+    }
   }
-  return { dirs, dependents, appTests };
+  /** @type {Array<{ dir: string, file: string, reads: string[] }>} */
+  const readers = [];
+  for (const dir of dirs) {
+    for (const [file, reads] of testFileReads(root, dir, dirs)) {
+      if (dir.startsWith("apps/")) {
+        for (const read of reads) dependents.get(read)?.push(dir);
+      } else {
+        readers.push({ dir, file, reads });
+      }
+    }
+  }
+  return { dirs, byName, dependents, readers };
 }
 
 /**
  * `changed` is every workspace dir whose code the diff changes, directly or
- * through a dependency. Both apps run when either is in it; then each other
- * package's tests that read app files run too (`appTests`, by package).
+ * through a dependency. Both apps run when either is in it. Each other
+ * package's test files that read a reached dir's files run too
+ * (`readerTests`, by package).
  * @param {string[]} changedFiles
  * @param {ReturnType<typeof readWorkspace>} workspace
- * @returns {{ full: boolean, changed: string[], apps: boolean, appTests: Record<string, string[]> }}
+ * @returns {{ full: boolean, changed: string[], apps: boolean, readerTests: Record<string, string[]> }}
  */
 export function diffReach(changedFiles, workspace) {
-  const everything = { full: true, changed: [...workspace.dirs], apps: true, appTests: {} };
+  const everything = { full: true, changed: [...workspace.dirs], apps: true, readerTests: {} };
   if (changedFiles.length === 0) return everything;
   const changed = new Set();
   for (const file of changedFiles) {
@@ -113,14 +178,15 @@ export function diffReach(changedFiles, workspace) {
     }
   }
   const apps = COUPLED_APPS.some((app) => changed.has(app));
+  const reached = new Set([...changed, ...(apps ? COUPLED_APPS : [])]);
   /** @type {Record<string, string[]>} */
-  const appTests = {};
-  if (apps) {
-    for (const [dir, files] of workspace.appTests) {
-      if (!changed.has(dir)) appTests[dir] = files;
+  const readerTests = {};
+  for (const { dir, file, reads } of workspace.readers) {
+    if (!changed.has(dir) && reads.some((read) => reached.has(read))) {
+      (readerTests[dir] ??= []).push(file);
     }
   }
-  return { full: false, changed: [...changed].sort(), apps, appTests };
+  return { full: false, changed: [...changed].sort(), apps, readerTests };
 }
 
 /**
@@ -154,21 +220,22 @@ export function reachOutputs(reach) {
     full: String(reach.full),
     // Both apps, and so the Web and Cloudflare jobs, run together.
     apps: String(reach.apps),
-    // The runner bundle is built from Cloudflare's own dependency closure.
+    // The runner bundle is built from Cloudflare's dependency closure plus
+    // its bundle-only dependencies.
     runner_bundle: String(reach.changed.includes("apps/cloudflare")),
     cli: String(reach.changed.includes("packages/cli")),
     packages: JSON.stringify(reach.changed.filter((dir) => dir.startsWith("packages/"))),
-    app_tests: JSON.stringify(reach.appTests),
+    reader_tests: JSON.stringify(reach.readerTests),
   };
 }
 
 /**
- * Runs each reached package's app-file tests through that package's own
- * `test` script, without coverage. Returns the exit code.
+ * Runs each unreached package's test files that read reached files, through
+ * that package's own `test` script, without coverage. Returns the exit code.
  * @param {ReturnType<typeof diffReach>} reach
  */
-function runAppTests(reach) {
-  for (const [dir, files] of Object.entries(reach.appTests)) {
+function runReaderTests(reach) {
+  for (const [dir, files] of Object.entries(reach.readerTests)) {
     const relative = files.map((file) => file.slice(dir.length + 1));
     console.log(`[ci-diff-reach] ${dir}: ${relative.join(" ")}`);
     const result = spawnSync("pnpm", ["--dir", dir, "test", ...relative],
@@ -180,8 +247,8 @@ function runAppTests(reach) {
 
 /** @param {string[]} argv */
 function main(argv) {
-  if (argv.length === 1 && argv[0] === "--run-app-tests") {
-    process.exitCode = runAppTests(currentReach());
+  if (argv.length === 1 && argv[0] === "--run-reader-tests") {
+    process.exitCode = runReaderTests(currentReach());
     return;
   }
   const outputIndex = argv.indexOf("--github-output");

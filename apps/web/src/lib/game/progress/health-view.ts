@@ -14,8 +14,8 @@ export interface HealthMetricInput {
   direction: number;
   wins: StoredAward[];
 }
-const labels = { restingHeartRate: "Resting HR", steps: "Steps", sleep: "Sleep", vo2Max: "VO2 max" } as const;
-const units = { restingHeartRate: "bpm", steps: "steps", sleep: "seconds", vo2Max: "mL/kg/min" } as const;
+const labels = { restingHeartRate: "Resting HR", steps: "Steps", sleep: "Sleep" } as const;
+const units = { restingHeartRate: "bpm", steps: "steps", sleep: "seconds" } as const;
 
 export function healthView(input: {
   joinedOn: string; today: string; snapshot: CompanionHealthSeries | null;
@@ -23,7 +23,7 @@ export function healthView(input: {
 }): Health {
   const from = addDaysToIsoDate(input.today, -6);
   const recent = new Set(input.metrics.filter(metric => metric.daily.some(point => point.date >= from && point.date <= input.today)).map(metric => metric.id));
-  const wearable = recent.has("restingHeartRate") || recent.has("vo2Max");
+  const wearable = recent.has("restingHeartRate");
   const metrics = input.metrics.map((metric): HealthMetric => ({
     ...healthMetricView(metric, input.joinedOn, input.today, input.profile),
     access: recent.has(metric.id) ? "ok" : wearable && metric.id !== "steps" ? "off"
@@ -40,11 +40,11 @@ export function healthView(input: {
   return { joinedOn: input.joinedOn, today: input.today, state, savedAt: input.snapshot?.savedAt ?? null,
     winCount, metrics, sums: input.sums,
     recs: metrics.flatMap((metric, index) => metric.baseline !== null
-      && healthMean14(metric.id, input.metrics[index].daily, input.today) !== null && metric.direction !== "better" ? HEALTH_RECS[metric.id] : []) };
+      && healthMean14(input.metrics[index].daily, input.today) !== null && metric.direction !== "better" ? HEALTH_RECS[metric.id] : []) };
 }
 
 export function healthMetricView(metric: HealthMetricInput, joinedOn: string, today: string, profile: AgeProfile): HealthMetric {
-  const current = healthMean14(metric.id, metric.daily, today);
+  const current = healthMean14(metric.daily, today);
   const change = current !== null && metric.baseline !== null ? current - metric.baseline : null;
   const direction = change === null || change === 0 ? "flat" : change * metric.direction > 0 ? "better" : "worse";
   const highest = Math.max(0, ...metric.wins.filter(award => award.kind === "health").map(award => award.data.level as number));
@@ -52,8 +52,8 @@ export function healthMetricView(metric: HealthMetricInput, joinedOn: string, to
   const source = metric.daily.at(-1)?.source ?? null;
   const daily: HealthMetric["daily"] = [];
   const values = new Map(metric.daily.map(point => [point.date, point.value]));
-  // Preserve gaps explicitly for the chart, within the replica's one-year window.
-  const from = [addDaysToIsoDate(joinedOn, -28), addDaysToIsoDate(today, -364)].sort().at(-1)!;
+  // Every day of the replica's one-year window, gaps explicit, so a chart's whole span has its history.
+  const from = addDaysToIsoDate(today, -364);
   for (let day = from; day <= today; day = addDaysToIsoDate(day, 1)) {
     daily.push([day, values.get(day) ?? null]);
   }
@@ -70,12 +70,12 @@ export function healthMetricView(metric: HealthMetricInput, joinedOn: string, to
         : `Up ${metric.id === "sleep" ? `${formatNumber(amount / 60, "compact")} min` : formatNumber(amount, "compact", 1)}`;
       const detail = age ? award.data.detail as string : "";
       return { medalId: award.id, on: award.on, text: age ? `${title}${share === "half" ? " of" : ""} ${detail}` : healthWinText(metric.id, amount),
-        face: age ? { delta: { icon: "age", text: share } } : healthMedalFace(metric.id, amount, award.data.value as number),
+        face: age ? { delta: { icon: "age", text: share } } : healthMedalFace(metric.id, amount),
         title, detail };
     }),
     next: target === null ? null : { title: metric.wins.length ? "Next" : "Next win", detail:
       `${direction === "worse" ? "Back to " : ""}${healthAmountText(metric.id, target, false)}`,
-      face: healthMedalFace(metric.id, (highest + 1) * metric.step, target) },
+      face: healthMedalFace(metric.id, (highest + 1) * metric.step) },
     age: healthAgeView(metric.id, metric.baseline, current, source, profile, joinedOn) };
 }
 

@@ -28,6 +28,15 @@ async function fixture() {
     "packages/tool/package.json": manifest("tool", ["core"]),
     "packages/tool/test/reads-web.test.ts": "readFileSync('apps/web/public/logo.svg');\n",
     "packages/tool/test/plain.test.ts": "// see apps/web/src for the caller\n",
+    "packages/tool/test/support/catalog.ts":
+      "new URL('../../../../apps/cloudflare/catalog.json', import.meta.url);\n",
+    "packages/tool/test/uses-catalog.test.ts": "import { catalog } from './support/catalog.js';\n",
+    "packages/leaf/test/walks-tool.test.ts": "walk(path.join(root, 'packages', 'tool', 'src'));\n",
+    "packages/leaf/test/reads-cli.test.ts": "new URL('../../cli/src/registry.ts', import.meta.url);\n",
+    // The runner bundle ships the CLI; Cloudflare's tests read solo's files.
+    "packages/cli/package.json": manifest("@murphai/murph"),
+    "packages/solo/package.json": manifest("solo"),
+    "apps/cloudflare/test/reads-solo.test.ts": "readFileSync('packages/solo/data.json');\n",
     "packages/stale/README.md": "no manifest: not a workspace package\n",
   });
   return root;
@@ -37,15 +46,20 @@ test("a change reaches its dependents, and either app brings both apps and their
   const root = await fixture();
   try {
     const workspace = readWorkspace(root);
-    assert.deepEqual(Object.fromEntries(workspace.appTests),
-      { "packages/tool": ["packages/tool/test/reads-web.test.ts"] });
+    assert.deepEqual(workspace.readers, [
+      { dir: "packages/leaf", file: "packages/leaf/test/reads-cli.test.ts", reads: ["packages/cli"] },
+      { dir: "packages/leaf", file: "packages/leaf/test/walks-tool.test.ts", reads: ["packages/tool"] },
+      { dir: "packages/tool", file: "packages/tool/test/reads-web.test.ts", reads: ["apps/web"] },
+      { dir: "packages/tool", file: "packages/tool/test/uses-catalog.test.ts", reads: ["apps/cloudflare"] },
+    ], "comment lines don't count; a helper's reads count for the tests importing it");
 
+    const toolReaders = ["packages/tool/test/reads-web.test.ts", "packages/tool/test/uses-catalog.test.ts"];
     const leaf = diffReach(["packages/leaf/src/index.ts"], workspace);
     assert.deepEqual(leaf, {
       full: false,
       changed: ["apps/web", "packages/leaf"],
       apps: true,
-      appTests: { "packages/tool": ["packages/tool/test/reads-web.test.ts"] },
+      readerTests: { "packages/tool": toolReaders },
     });
     assert.deepEqual(reachOutputs(leaf), {
       full: "false",
@@ -53,17 +67,33 @@ test("a change reaches its dependents, and either app brings both apps and their
       runner_bundle: "false",
       cli: "false",
       packages: '["packages/leaf"]',
-      app_tests: '{"packages/tool":["packages/tool/test/reads-web.test.ts"]}',
+      reader_tests: JSON.stringify({ "packages/tool": toolReaders }),
     });
 
     const core = diffReach(["packages/core/src/a.ts"], workspace);
     assert.deepEqual(core.changed,
       ["apps/cloudflare", "apps/web", "packages/core", "packages/tool"]);
-    assert.deepEqual(core.appTests, {}, "a package whose code changed runs its whole suite");
+    assert.deepEqual(core.readerTests,
+      { "packages/leaf": ["packages/leaf/test/walks-tool.test.ts"] },
+      "a package whose code changed runs its whole suite, not just its readers");
     assert.equal(reachOutputs(core).runner_bundle, "true");
 
     const tool = diffReach(["packages/tool/test/plain.test.ts"], workspace);
-    assert.deepEqual(tool, { full: false, changed: ["packages/tool"], apps: false, appTests: {} });
+    assert.deepEqual(tool, { full: false, changed: ["packages/tool"], apps: false,
+      readerTests: { "packages/leaf": ["packages/leaf/test/walks-tool.test.ts"] } });
+
+    const cli = diffReach(["packages/cli/src/index.ts"], workspace);
+    assert.deepEqual(cli.changed, ["apps/cloudflare", "packages/cli"], "the runner bundle ships the CLI");
+    assert.equal(reachOutputs(cli).runner_bundle, "true");
+    assert.deepEqual(cli.readerTests, {
+      "packages/leaf": ["packages/leaf/test/reads-cli.test.ts"],
+      "packages/tool": toolReaders,
+    });
+
+    const solo = diffReach(["packages/solo/data.json"], workspace);
+    assert.deepEqual(solo.changed, ["apps/cloudflare", "packages/solo"],
+      "an app whose tests read a package's files runs when it changes");
+    assert.equal(solo.apps, true);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -79,7 +109,7 @@ test("anything outside one workspace package, or nothing at all, runs everything
       assert.equal(reach.full, true, JSON.stringify(files));
       assert.equal(reach.apps, true);
       assert.deepEqual(reach.changed, workspace.dirs);
-      assert.deepEqual(reach.appTests, {});
+      assert.deepEqual(reach.readerTests, {});
     }
   } finally {
     await rm(root, { recursive: true, force: true });

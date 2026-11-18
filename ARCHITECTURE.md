@@ -6254,20 +6254,19 @@ with no total medal uses its projection. Shelf picks use that same order, and
 the largest total gets the gold face when that group owns the newest award.
 No new persisted fields are introduced.
 
-Retired streak awards are the explicit exception to append-only retention.
-`apps/web/scripts/migrations/remove-progress-streak-awards.ts` opens at most 100
-sealed awards at a time, deletes only authenticated `kind: streak` rows, and
-advances by the owner/lookup key even when the last row was deleted. It is
-idempotent; no permanent read-time filter or migration marker is added.
-Release requires murph-ios build 112 uploaded first. Keep Progress traffic
-quiesced while old writers drain, run this data migration in the hosted
-environment with the existing database and crypto configuration, and promote
-the new backend before reopening Progress. Do not run it locally against
-production or restore an old streak writer after cleanup. The hosted command is
-`NODE_OPTIONS=--conditions=react-server pnpm exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/migrations/remove-progress-streak-awards.ts`.
-Check that a second pass deletes zero rows and that Progress has no streak
-fields, faces or awards before restoring traffic. Non-streak awards, their
-earned dates and acknowledgement timestamps are unchanged.
+Retired awards are the explicit exception to append-only retention: streaks,
+hours-slept totals and anything VO2 max (Progress Health no longer has VO2).
+`retiredAward` in `awards.ts` names them; `readAwards` skips them until
+`apps/web/scripts/migrations/remove-retired-progress-awards.ts` has deleted them,
+then that filter goes. The script opens at most 100 sealed awards at a time,
+deletes only authenticated retired rows, and advances by the owner/lookup key
+even when the last row was deleted. It is idempotent. Run it in the hosted
+environment with the existing database and crypto configuration after the
+backend that stops writing them is live; never locally against production. The
+hosted command is
+`NODE_OPTIONS=--conditions=react-server pnpm exec tsx --tsconfig apps/web/tsconfig.json apps/web/scripts/migrations/remove-retired-progress-awards.ts`.
+Check that a second pass deletes zero rows. Other awards, their earned dates and
+acknowledgement timestamps are unchanged.
 
 The reader preserves measures with saved ladder or route awards even when their final
 contribution is removed; their total becomes zero and their goals stay editable.
@@ -6423,20 +6422,23 @@ stay absent. Each newly held whole level is a separate candidate dated on the
 hold day. Age lines are 25%, one third and 50%, crossed only from a baseline
 below the line and held under the same coverage rule. Award comparisons use the
 join-date age bracket, so changing brackets does not issue an award. Sleep has
-no age wins. VO2 retains the existing median statistic; the other metrics use
-the mean.
+no age wins. Every metric uses the mean. Progress Health has resting HR, Steps
+and Sleep; VO2 max is not part of it.
 `freezeAndScoreMetric` applies the existing group-report daily metric projection
 ranges to readings before baseline/statistic calculation and to any frozen
 baseline before scoring. Sleep scales those canonical-minute ranges to seconds.
 Out-of-range values are omitted, never clamped; an invalid frozen baseline stays
 stored but cannot issue new wins. Existing earned awards are unchanged. These
-shared ranges bound held-step enumeration to 230 HR, 1,000 Steps, 96 Sleep and
-100 VO2 levels per metric, independent of imported numeric magnitude.
+shared ranges bound held-step enumeration to 230 HR, 1,000 Steps and 96 Sleep
+levels per metric, independent of imported numeric magnitude.
 The current headline uses the current fourteen-day window, not an older
 complete window. Sleep converts canonical minutes to seconds once. All sums
-and scoring inputs remain inside the 365-day replica window.
+and scoring inputs remain inside the 365-day replica window, and each metric's
+`daily` carries that whole window (gaps as null) so a chart's span has its
+history before joining. Steps' round totals are medals; Sleep has no total
+medals, only its journeys.
 Metric access uses the last seven member-local dates, including today. Recent
-resting-HR or VO2 samples establish wearable evidence; a wearable metric with no
+resting-HR samples establish wearable evidence; a wearable metric with no
 sample in that window is `off` when that evidence exists. Phone-only missing
 metrics remain `missing`; Steps does not infer wearable access. Historical
 values, baselines and earned wins remain intact. This is a data-derived hint,
@@ -6450,7 +6452,7 @@ data is used. Recommendations are the fixed map in `health.ts` and appear only
 for a sufficiently observed flat or worsening metric.
 
 Health labels use `progress/format.ts`, including full digits below 10,000,
-clock-style sleep amounts and one-decimal VO2 values. `healthMedalFace` owns
+and clock-style sleep amounts. `healthMedalFace` owns
 both earned and next faces. Age `typical` is the median cutoff from the same
 age, sex and device table as the percentile. Recommendations carry a fixed
 glyph from the contract's closed list, assigned in the existing curated map.

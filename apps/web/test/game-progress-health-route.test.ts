@@ -21,9 +21,8 @@ vi.mock("@/src/lib/game/progress/state", () => ({ patchMeasureState: mocks.patch
 vi.mock("@/src/lib/game/progress/awards", () => ({ readAwards: mocks.awards, settleAwards: mocks.settle }));
 
 
-import { addDaysToIsoDate, measurementEntrySchema } from "@murphai/contracts";
-import { selectMetricSeries } from "@murphai/health-metrics";
-import { extractMetricPointsFromCanonicalEntities } from "@murphai/query";
+import { addDaysToIsoDate } from "@murphai/contracts";
+import { getHostedDomainRootUnwrapCache } from "@/src/lib/hosted-crypto/domain-root-unwrap-cache";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { GET } from "../app/api/game/v1/progress/health/route";
 import { healthSchema, savedHealthSchema } from "@/src/lib/game/progress/contract";
@@ -59,6 +58,15 @@ beforeEach(() => {
   mocks.settle.mockImplementation(async (_member, _candidates, before) => { await before({ transaction: true }); });
 });
 afterEach(() => vi.useRealTimers());
+
+it("reads Health inside the request's root unwrap cache", async () => {
+  mocks.raw.mockImplementationOnce(async () => {
+    expect(getHostedDomainRootUnwrapCache()).toBeDefined();
+    return snapshot();
+  });
+  expect((await GET(request())).status).toBe(200);
+  expect(mocks.raw).toHaveBeenCalledOnce();
+});
 
 it("a vault read failure is one retryable 503 with empty saved presentation and no writes", async () => {
   mocks.raw.mockRejectedValueOnce(hostedOnboardingError({ code: "NUMBERS_PROJECTION_UNAVAILABLE", httpStatus: 503,
@@ -136,7 +144,7 @@ it("returns private uncached health with raw baseline and all crossed levels", a
     metrics: [expect.objectContaining({ id: "restingHeartRate", baseline: { value: 74, text: "74", unit: "bpm" },
       next: { title: "Next win", detail: "73 bpm", face: { delta: { icon: "heart", text: "↓1" } } },
       age: expect.objectContaining({ typical: expect.objectContaining({ unit: "bpm", value: expect.any(Number) }) }) }),
-      expect.any(Object), expect.any(Object), expect.any(Object)] });
+      expect.any(Object), expect.any(Object)] });
   expect(mocks.patch).toHaveBeenCalledWith("ava", "restingHeartRate",
     { baseline: { value: 74, from: "2026-09-23", to: "2026-10-20" } }, expect.any(Function));
   const candidates = mocks.settle.mock.calls[0][1];
@@ -145,35 +153,13 @@ it("returns private uncached health with raw baseline and all crossed levels", a
   expect(mocks.authority).toHaveBeenCalledWith({ memberId: "ava", prisma: { transaction: true } });
 });
 
-it.each([100_000_040, Number.MAX_VALUE])("ignores oversized imported VO2 readings before scoring (%s)", async value => {
-  const through = addDaysToIsoDate(joinedOn, 27);
-  vi.setSystemTime(new Date(`${through}T12:00:00Z`));
-  const points = extractMetricPointsFromCanonicalEntities(Array.from({ length: 56 }, (_, index) => {
-    const date = addDaysToIsoDate(joinedOn, index - 28);
-    const measurement = measurementEntrySchema.parse({ metric: "estimated-vo2-max", unit: "ml/kg/min",
-      value: date < joinedOn ? 40 : value });
-    return { entityId: `reading-${index}`, primaryLookupId: `reading-${index}`, lookupIds: [],
-      family: "event", recordClass: "ledger", kind: "measurement", status: "completed",
-      occurredAt: `${date}T12:00:00Z`, date, path: `events/reading-${index}.md`, title: null, body: null,
-      attributes: { dayKey: date, source: "manual", measurements: [measurement] }, frontmatter: null,
-      links: [], relatedIds: [], stream: null, experimentSlug: null, tags: [] };
-  }));
-  const daily = selectMetricSeries({ points, metricKey: "estimated-vo2-max", grain: "day" }).rows
-    .map(point => ({ date: point.date, value: point.value!, source: point.sourceLabel ?? null, observedAt: point.observedAt! }));
-  expect(daily).toHaveLength(56);
-  expect(daily.at(-1)!.value).toBe(value);
-  mocks.raw.mockResolvedValue({ ...snapshot(), numbers: { restingHeartRate: null, steps: null, sleep: null, vo2Max: { daily } } });
-
+it("leaves VO2 max out of Progress Health", async () => {
+  const raw = snapshot();
+  mocks.raw.mockResolvedValue({ ...raw, numbers: { ...raw.numbers, vo2Max: { daily: raw.numbers.restingHeartRate.daily.map(point => ({ ...point, value: 40 })) } } });
   const response = await GET(request());
   expect(response.status).toBe(200);
-  const metric = healthSchema.parse(await response.json()).metrics.find(metric => metric.id === "vo2Max")!;
-  expect(metric.baseline?.value).toBe(40);
-  expect(metric.wins).toEqual([]);
-  expect(mocks.patch).toHaveBeenCalledWith("ava", "vo2Max",
-    { baseline: { value: 40, from: "2026-09-23", to: "2026-10-20" } }, expect.any(Function));
-  expect(mocks.settle.mock.calls[0][1]).toEqual([]);
-  expect((await GET(request())).status).toBe(200);
-  expect(mocks.settle.mock.calls[1][1]).toEqual([]);
+  expect(healthSchema.parse(await response.json()).metrics.map(metric => metric.id)).toEqual(["restingHeartRate", "steps", "sleep"]);
+  expect(mocks.patch).not.toHaveBeenCalledWith("ava", "vo2Max", expect.anything(), expect.any(Function));
 });
 
 it.each([100_000_074, Number.MAX_VALUE, -Number.MAX_VALUE])("ignores an extreme frozen baseline without rewriting it (%s)", async value => {
@@ -193,7 +179,7 @@ it.each([100_000_074, Number.MAX_VALUE, -Number.MAX_VALUE])("ignores an extreme 
   expect(mocks.settle.mock.calls[0][1]).toEqual([]);
 });
 
-it.each(["restingHeartRate", "steps", "sleep", "vo2Max"] as const)(
+it.each(["restingHeartRate", "steps", "sleep"] as const)(
   "excludes overflow-scale %s values before baseline arithmetic", async id => {
     const daily = snapshot().numbers.restingHeartRate.daily.map(point => ({ ...point, value: Number.MAX_VALUE }));
     mocks.raw.mockResolvedValue({ ...snapshot(), numbers: { restingHeartRate: null, steps: null, sleep: null, vo2Max: null, [id]: { daily } } });
@@ -211,7 +197,6 @@ it.each([
   { id: "restingHeartRate", value: 250, baseline: 250 },
   { id: "steps", value: 1_000_000, baseline: 1_000_000 },
   { id: "sleep", value: 1440, baseline: 86400 },
-  { id: "vo2Max", value: 100, baseline: 100 },
 ] as const)("keeps the inclusive $id limit and excludes corrupt baseline dates", async ({ id, value, baseline }) => {
   const daily = snapshot().numbers.restingHeartRate.daily.slice(0, 28)
     .map((point, index) => ({ ...point, value: index < 20 ? value : value + 1 }));
@@ -317,6 +302,5 @@ it.each([
   const body = healthSchema.parse(await response.json());
   expect(body.today).toBe("2026-11-15");
   expect(body.metrics.find(metric => metric.id === "sleep")!.access).toBe(access);
-  expect(body.metrics.find(metric => metric.id === "vo2Max")!.access).toBe(access);
   expect(body.metrics.find(metric => metric.id === "steps")!.access).toBe("missing");
 });

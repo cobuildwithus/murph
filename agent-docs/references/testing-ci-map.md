@@ -91,15 +91,18 @@ On a pull request, Host Support runs only the shards its diff can reach
 (`scripts/ci-diff-reach.mjs`, tested by `scripts/ci-diff-reach.test.mjs`). It
 diffs the exact merge commit against its base parent, maps each file to its
 workspace package, and adds every package that depends on one (declared
-dependencies). Either app brings both apps, since each reads the other's files.
+dependencies, plus Cloudflare's bundle-only CLI closure, since the runner
+bundle ships the CLI). Either app brings both apps, since each reads the
+other's files.
 Any file outside a workspace package (root config, lockfile, scripts, docs,
 workflows) or an unreadable diff runs everything, and so does every main push.
 Package coverage keeps a matrix shard whole when any of its packages is
 reached. The Web, PostgreSQL, Cloudflare, and runner-bundle jobs skip when
 nothing reaches them; the browser smoke and CLI host matrix decide inside their
-steps, since a required check must report a result. When an app is reached but
-another package's code is not, the build/typecheck job still runs that
-package's tests that name an app path outside a comment (they read app files).
+steps, since a required check must report a result. When a package's code is
+not reached but files its tests read are (a workspace path outside a comment,
+in the test or a local helper it imports), the build/typecheck job still runs
+those test files. An app whose tests read a package's files depends on it.
 `Release checks (ubuntu)` accepts a skipped shard only on a pull request whose
 plan succeeded and marked that shard unreached.
 

@@ -34,7 +34,10 @@ export function visibleAwards(awards: readonly StoredAward[], healthAuthority: b
   return awards.filter(award => healthAuthority || !(award.kind.startsWith("health") || (award.measureId !== null && award.measureId in HEALTH)));
 }
 
-export function medalView(award: StoredAward, gold: boolean, units: ClientUnits): Medal {
+type MeasureLabel = Pick<Progress["measures"][number], "id" | "label">;
+
+/** A friend pass says what it was in; a health number's medal opens Health. */
+export function medalView(award: StoredAward, gold: boolean, units: ClientUnits, measures: readonly MeasureLabel[] = []): Medal {
   let face: Medal["face"], title: string, detail: string;
   if (award.kind === "landmark" || award.kind === "time") {
     const rung = rungFor(award.data.rung as RungDefinition, 0, award.on, units);
@@ -55,14 +58,15 @@ export function medalView(award: StoredAward, gold: boolean, units: ClientUnits)
   } else {
     face = award.data.face as Medal["face"];
     title = award.kind === "healthAge" ? healthAgeTitle(award.data.percentile as number) : award.data.title as string;
-    detail = award.data.detail as string;
+    const label = award.kind === "friend" ? measures.find(measure => measure.id === award.measureId)?.label : undefined;
+    detail = label ? `in ${label.toLowerCase()}, all time` : award.data.detail as string;
   }
-  return { id: award.id, kind: award.kind, gold, earnedOn: award.on, face, title, detail,
-    open: { page: award.data.page as Medal["open"]["page"], measureId: award.measureId } };
+  const page = award.measureId !== null && award.measureId in HEALTH ? "health" : award.data.page as Medal["open"]["page"];
+  return { id: award.id, kind: award.kind, gold, earnedOn: award.on, face, title, detail, open: { page, measureId: award.measureId } };
 }
 
 /** Keep each exercise together; the first total is also its title-coin candidate. */
-export function medalsView(awards: readonly StoredAward[], units: ClientUnits): Medal[] {
+export function medalsView(awards: readonly StoredAward[], units: ClientUnits, measures: readonly MeasureLabel[] = []): Medal[] {
   const totals = new Map<string | null, StoredAward[]>();
   for (const award of awards) if (award.kind === "total" || award.kind === "days") {
     const group = totals.get(award.measureId) ?? [];
@@ -70,16 +74,16 @@ export function medalsView(awards: readonly StoredAward[], units: ClientUnits): 
   }
   for (const group of totals.values()) group.sort((a, b) => (b.data.value as number) - (a.data.value as number));
   return awards.flatMap(award => {
-    if (award.kind !== "total" && award.kind !== "days") return [medalView(award, award === awards[0], units)];
+    if (award.kind !== "total" && award.kind !== "days") return [medalView(award, award === awards[0], units, measures)];
     const group = totals.get(award.measureId) ?? [];
     totals.delete(award.measureId);
     return group.map((item, index) => medalView(item, award === awards[0] && index === 0, units));
   });
 }
 
-function momentWords(kind: Moment["kind"], group: readonly StoredAward[], gold: boolean, units: ClientUnits): Pick<Moment, "title" | "line"> {
+function momentWords(kind: Moment["kind"], group: readonly StoredAward[], gold: boolean, units: ClientUnits, measures: readonly MeasureLabel[]): Pick<Moment, "title" | "line"> {
   const first = group[0];
-  const { title, detail } = medalView(first, gold, units);
+  const { title, detail } = medalView(first, gold, units, measures);
   if (kind === "bigDay") {
     const count = group.length < 10 ? ["Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine"][group.length] : formatNumber(group.length, "compact");
     return { title: `${count} wins in one day`, line: null };
@@ -103,7 +107,7 @@ export function momentsView(awards: readonly StoredAward[], measures: Progress["
     const first = group[0];
     const sameMeasure = group.every(award => award.measureId === first.measureId);
     const kind = group.length > 1 ? "bigDay" : first.kind === "landmark" ? "goal" : first.kind === "time" ? "held" : first.kind === "route" ? "route" : "medal";
-    return { id: `day:${on}`, kind, ...momentWords(kind, group, first === awards[0], units), medalIds: group.map(award => award.id), measureId: sameMeasure ? first.measureId : null,
+    return { id: `day:${on}`, kind, ...momentWords(kind, group, first === awards[0], units, measures), medalIds: group.map(award => award.id), measureId: sameMeasure ? first.measureId : null,
       nextGoal: sameMeasure ? measures.find(measure => measure.id === first.measureId)?.ladder?.next ?? null : null };
   });
 }
@@ -164,7 +168,7 @@ export async function readProgress(memberId: string, units: ClientUnits, beforeM
   });
   // Two units of the same exercise need distinct pills (row 15).
   for (const measure of measures) if (measure.format === "duration" && measures.some(other => other.id !== measure.id && other.label === measure.label)) measure.label += " minutes";
-  const medals = medalsView(awards, units);
+  const medals = medalsView(awards, units, measures);
   const shelf: string[] = [];
   const kinds = new Set<string>();
   for (const medal of medals) {

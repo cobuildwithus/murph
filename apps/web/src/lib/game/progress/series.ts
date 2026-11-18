@@ -6,7 +6,7 @@ import { openGameTexts } from "../crypto";
 import { effectiveTermWords, completedEntry, dayIndexAt, indexGameEntries, termsForDay, type StoredTerms, type TermWords } from "../rules";
 import { hasGameIdentity } from "../roster";
 import { getPrisma } from "../../prisma";
-import { runWithHostedDomainRootUnwrapCache } from "../../hosted-crypto/domain-root-unwrap-cache";
+import { runWithFreshHostedDomainRootUnwrapCache } from "../../hosted-crypto/domain-root-unwrap-cache";
 import { openProgressMany, progressLookup, sealProgressMany } from "./crypto";
 import { inferTask, inferenceClient, normalizeTask, type InferredMeasure, type TaskInput } from "./infer";
 import { EXERCISES, READERS, type DayAmount } from "./registry";
@@ -209,7 +209,7 @@ export function scheduleInference(pending: readonly PendingProgressTask[], befor
       }
     }
     if (!resolved.size) return;
-    await runWithHostedDomainRootUnwrapCache(async () => {
+    await runWithFreshHostedDomainRootUnwrapCache(async () => {
       const data: { memberId: string; lookup: string; measureEncrypted: string }[] = [];
       for (const [memberId, tasks] of resolved) {
         const sealed = await sealProgressMany(memberId, tasks.map(({ task, inferred }) => ({ table: "game_progress_task_measure", rowId: task.lookup, field: "measure", value: inferred })));

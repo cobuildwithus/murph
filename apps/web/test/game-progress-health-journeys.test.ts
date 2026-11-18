@@ -37,6 +37,8 @@ it("uses Sleep's curated time ladder, dates every crossing, and preserves passed
   const journeys = await prepare([metric("sleep", 8 * 3600)]);
   const awards = saved(journeys.candidates);
   const timeAwards = awards.filter(award => award.kind === "time");
+  // Hours slept is no medal: Sleep earns only its journeys.
+  expect(awards.filter(award => award.kind === "total")).toEqual([]);
   expect(timeAwards.map(award => medalView(award, false, "us").title)).toEqual(ladder("time", "sleep").filter(entry => entry.at <= 27 * 8 * 3600).map(entry => entry.name));
   expect(timeAwards[0].on).toBe(joinedOn);
   const view = measureSchema.parse(healthJourneyViews(journeys, awards, today, "us")[0]);
@@ -78,8 +80,8 @@ it("new health, friend and route awards decode through the shared medal view", a
     profile: { age: 35, sex: "female" as const }, means: metric("steps", 60).daily };
   const health = [...healthSteps(context), ...healthAgeShare(context)];
   const friends = friendPasses({ measureId: "pushups.reps", people: [
-    { memberId: "ava", firstName: "Ava", avatarUrl: null, me: true, invited: false, joinedOn, daily: [{ date: today, amount: 100 }] },
-    { memberId: "leo", firstName: "Leo", avatarUrl: null, me: false, invited: false, joinedOn, daily: [{ date: today, amount: 50 }] },
+    { memberId: "ava", firstName: "Ava", avatarUrl: null, me: true, joinedOn, daily: [{ date: today, amount: 100 }] },
+    { memberId: "leo", firstName: "Leo", avatarUrl: null, me: false, joinedOn, daily: [{ date: today, amount: 50 }] },
   ] });
   const routes = (await prepare([metric("steps", 1000)])).candidates;
   for (const award of saved([...health, ...friends, ...routes])) expect(medalSchema.safeParse(medalView(award, false, "us")).success).toBe(true);

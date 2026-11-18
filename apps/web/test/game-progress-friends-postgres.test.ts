@@ -9,7 +9,7 @@ import { lockGamePair } from "../src/lib/game/blocks";
 import { friendsSchema } from "../src/lib/game/progress/contract";
 import { openProgress, progressLookup } from "../src/lib/game/progress/crypto";
 import { readAwards, settleAwards } from "../src/lib/game/progress/awards";
-import { removeProgressStreakAwards } from "../scripts/migrations/remove-progress-streak-awards";
+import { removeRetiredProgressAwards } from "../scripts/migrations/remove-retired-progress-awards";
 import * as inference from "../src/lib/game/progress/infer";
 
 const mocks = vi.hoisted(() => ({ after: vi.fn(), auth: vi.fn() }));
@@ -98,19 +98,22 @@ afterAll(async () => {
 });
 
 describe.skipIf(!enabled)("Friends deferred inference with PostgreSQL", () => {
-  it("migrates only encrypted streak awards across page boundaries and is idempotent", async () => {
+  it("migrates only encrypted retired awards across page boundaries and is idempotent", async () => {
     const ava = await member("Ava");
     await settleAwards(ava, [
       ...Array.from({ length: 105 }, (_, index) => ({ key: `streak:${index + 1}`, kind: "streak", measureId: null,
         subjectMemberId: null, on: "2026-11-01", data: { value: index + 1, page: "streak", evaluator: 1 } })),
+      { key: "total:sleep:3600", kind: "total", measureId: "sleep", subjectMemberId: null, on: "2026-11-01", data: { value: 3600, page: "totals", evaluator: 1 } },
+      { key: "health:vo2Max:1", kind: "health", measureId: "vo2Max", subjectMemberId: null, on: "2026-11-01", data: { level: 1, page: "health", evaluator: 1 } },
+      { key: "total:steps:1000", kind: "total", measureId: "steps", subjectMemberId: null, on: "2026-11-01", data: { value: 1000, page: "totals", evaluator: 1 } },
       ...["total", "days", "landmark", "route", "health"].map(kind => ({ key: `keep:${kind}`, kind,
         measureId: "synthetic", subjectMemberId: null, on: "2026-11-01", data: { value: 100, page: "totals", evaluator: 1 } })),
     ], async () => {});
     const kept = await readAwards(ava);
-    expect(kept.map(award => award.kind).sort()).toEqual(["days", "health", "landmark", "route", "total"]);
-    expect(await removeProgressStreakAwards()).toBe(105);
+    expect(kept.map(award => award.kind).sort()).toEqual(["days", "health", "landmark", "route", "total", "total"]);
+    expect(await removeRetiredProgressAwards()).toBe(107);
     expect(await readAwards(ava)).toEqual(kept);
-    expect(await removeProgressStreakAwards()).toBe(0);
+    expect(await removeRetiredProgressAwards()).toBe(0);
     expect(await readAwards(ava)).toEqual(kept);
   });
 

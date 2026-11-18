@@ -39,7 +39,6 @@ export const HEALTH = {
   restingHeartRate: { step: 1, direction: -1, norms: true },
   steps: { step: 1000, direction: 1, sum: { ladder: "route", stepsPerMile: 2000 }, norms: true },
   sleep: { step: 15 * 60, direction: 1, sum: { ladder: "time" } },
-  vo2Max: { step: 1, direction: 1, norms: true },
 } as const;
 
 export type AwardValue = string | number | boolean | null | AwardValue[] | { [key: string]: AwardValue };

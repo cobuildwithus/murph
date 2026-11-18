@@ -118,6 +118,26 @@ it("distinguishes a valid empty snapshot from a missing meals payload or decrypt
   expect((await GET(request())).status).toBe(503);
 });
 
+it("logs which saved-replica stage failed without its private text", async () => {
+  const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+  try {
+    mocks.control.mockResolvedValueOnce({ state: "empty" });
+    mocks.decode.mockRejectedValueOnce(new Error("synthetic private ciphertext locator"));
+    mocks.decode.mockRejectedValueOnce(new DOMException("The operation was aborted.", "AbortError"));
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const response = await GET(request());
+      expect(response.status).toBe(503);
+      expect(await response.text()).not.toMatch(/session_not_ready|AbortError|ciphertext locator/);
+    }
+    const failures = logged.mock.calls.filter(([message]) => message === "Hosted onboarding route failed.");
+    expect(failures.map(([, details]) => (details as { errorCauseMessage?: string }).errorCauseMessage))
+      .toEqual(["session_not_ready", "Error", "AbortError"]);
+    expect(JSON.stringify(logged.mock.calls)).not.toContain("ciphertext locator");
+  } finally {
+    logged.mockRestore();
+  }
+});
+
 it("returns accepted only after typed mailbox admission with session revalidation", async () => {
   const response = await DELETE(request("", { method: "DELETE" }), context());
   expect(response.status).toBe(202);

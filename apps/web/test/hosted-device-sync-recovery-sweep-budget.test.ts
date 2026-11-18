@@ -176,6 +176,21 @@ async function fixture({ wakeMs = 10, handoffMs = 10 } = {}) {
     await work("unwrap", userId, 40_000, signal);
     throw new Error("Synthetic unwrap unavailable");
   });
+  // The domain-root verify, key imports and payload crypto also run WebCrypto
+  // on the thread pool in real time. Count every call, or a busy CI runner
+  // advances the fake clock past the budget while one is still in flight.
+  const subtle = globalThis.crypto.subtle;
+  for (const name of ["decrypt", "deriveBits", "digest", "encrypt", "importKey", "sign", "unwrapKey", "verify", "wrapKey"] as const) {
+    const original = subtle[name].bind(subtle) as (...args: unknown[]) => Promise<unknown>;
+    vi.spyOn(subtle, name).mockImplementation((async (...args: unknown[]) => {
+      realWork++;
+      try {
+        return await original(...args);
+      } finally {
+        realWork--;
+      }
+    }) as never);
+  }
   return { events, active, rows, writes, elapsed, realWork: () => realWork };
 }
 
