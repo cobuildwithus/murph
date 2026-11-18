@@ -566,7 +566,8 @@
           "expiresAt": "2026-11-18T19:04:00.000Z",
           "typicalSeconds": 80
         },
-        "drawerMapArt": null
+        "drawerMapArt": null,
+        "etaText": "10 weeks"
       },
       "pics": []
     }

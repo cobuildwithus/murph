@@ -474,7 +474,8 @@
         },
         "shareAwardId": null,
         "mapArt": null,
-        "drawerMapArt": null
+        "drawerMapArt": null,
+        "etaText": "10 weeks"
       },
       "pics": []
     }

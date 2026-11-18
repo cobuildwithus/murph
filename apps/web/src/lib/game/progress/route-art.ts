@@ -47,25 +47,26 @@ export async function attachRouteArt(measures: readonly Shown[], states: Readonl
       route.towns = route.towns.map((town, index) => ({ ...town, poster: poster(index) }));
       route.drawerTowns = route.drawerTowns.map((town, index) => ({ ...town, poster: poster(index) }));
       if (mapPaintable(leg)) {
-        route.mapArt = making(artState(rows.get(mapKey(leg.polyline, 'card')), 'map'));
-        route.drawerMapArt = making(artState(rows.get(mapKey(leg.polyline, 'drawer')), 'map'));
+        route.mapArt = mapState(artState(rows.get(mapKey(leg.polyline, 'card')), 'map'));
+        route.drawerMapArt = mapState(artState(rows.get(mapKey(leg.polyline, 'drawer')), 'map'));
       }
     }
   } catch { /* The page shows the plain map. */ }
 }
 
-/** A ready painting is already what the map path serves. */
-const making = (state: ArtState) => state?.state === 'making' ? state : null;
+/** A ready painting is what the map path serves; the app only needs to know it is one. */
+const mapState = (state: ArtState) => state?.state === 'ready' ? { state: 'ready' as const } : state;
 
-/** The card map first, then the last place passed and the next, then the drawer map. */
+/** The card map, the last place passed and the next, the drawer map, then the earlier places passed, newest first. */
 function artJobs(route: Route, leg: RouteLeg): ArtJob[] {
   const passed = route.towns.filter(town => town.passedOn !== null).length - 1;
-  const places = [passed, passed + 1].flatMap(index => leg.towns[index]?.place ? [leg.towns[index]!.place!] : []);
+  const place = (index: number) => leg.towns[index]?.place ? [leg.towns[index]!.place!] : [];
+  const earlier = Array.from({ length: Math.max(0, passed) }, (_, i) => passed - 1 - i).flatMap(place);
   const map = (size: 'card' | 'drawer'): ArtJob[] => mapPaintable(leg)
     ? [{ key: mapKey(leg.polyline, size), kind: 'map', make: signal => makePaintedMap(leg.polyline, size, signal) }] : [];
-  return [...map('card'),
-    ...places.map((place): ArtJob => ({ key: posterKey(place.id), kind: 'poster', make: signal => makePoster(place.label, signal) })),
-    ...map('drawer')];
+  const posters = (places: { id: string; label: string }[]) =>
+    places.map((place): ArtJob => ({ key: posterKey(place.id), kind: 'poster', make: signal => makePoster(place.label, signal) }));
+  return [...map('card'), ...posters([...place(passed), ...place(passed + 1)]), ...map('drawer'), ...posters(earlier)];
 }
 
 /** Legs from before posters learn their towns' public places once, after the response. */

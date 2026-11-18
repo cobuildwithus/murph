@@ -37,9 +37,11 @@ const route = z.object({
   drawerTowns: towns,
   here: z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) }),
   drawerHere: z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) }),
-  /** The card and drawer maps' painting while it's being made. Null: `map` is what to show (painted once ready). */
-  mapArt: making.nullable(),
-  drawerMapArt: making.nullable(),
+  /** The rest at the last 30 days' pace: "10 weeks", "9 days". Null when finished or with no pace yet. */
+  etaText: z.string().nullable(),
+  /** The card and drawer maps' paintings: ready (`map` serves it; names go light), being made, or null (the plain map). */
+  mapArt: z.union([z.object({ state: z.literal("ready") }), making]).nullable(),
+  drawerMapArt: z.union([z.object({ state: z.literal("ready") }), making]).nullable(),
 });
 export type Route = z.infer<typeof route>;
 const pic = z.object({ id: z.string(), takenOn: day, at: z.number() });

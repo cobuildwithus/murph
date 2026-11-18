@@ -8,6 +8,21 @@ import { formatAmount, formatNumber } from './format';
 export const routeMeters = (measureId: string, amount: number) => measureId === 'steps' || measureId.endsWith('.steps') ? amount / 2000 * 1609.344 : amount;
 type Points = readonly [Day, number][];
 const crossingDay = (points: Points, at: number) => points.find(point => point[1] >= at)?.[0] ?? null;
+const dayNumber = (day: Day) => Date.parse(`${day}T00:00:00Z`) / 86_400_000;
+
+/** How long the rest takes at the last 30 days' pace (fewer since the first day): "10 weeks". */
+export function routeEta(meters: Points, remainingM: number): string | null {
+  const last = meters.at(-1);
+  if (!last || remainingM <= 0) return null;
+  const window = Math.min(30, dayNumber(last[0]) - dayNumber(meters[0]![0]) + 1);
+  const before = meters.filter(point => dayNumber(point[0]) <= dayNumber(last[0]) - window).at(-1)?.[1] ?? 0;
+  const perDay = (last[1] - before) / window;
+  if (window < 7 || perDay <= 0) return null;
+  const days = Math.ceil(remainingM / perDay);
+  if (days < 14) return days === 1 ? '1 day' : `${days} days`;
+  const weeks = Math.round(days / 7);
+  return weeks <= 104 ? `${weeks} weeks` : `${Math.round(days / 365)} years`;
+}
 export const routeAwardKey = (measureId: string, leg: RouteLeg, index: number) => `route:${JSON.stringify([measureId, index, leg.from, leg.to, leg.distanceM, leg.startTotal])}`;
 
 /** Named loops keep their label on both the medal and the finished-routes list. */
@@ -66,7 +81,7 @@ export function routeView(measureId: string, state: MeasureState, points: Points
   const map = `/api/game/v1/progress/map?${new URLSearchParams({ measure: measureId, size: 'card' })}`;
   return { name: leg.name ?? `${leg.from} to ${leg.to}`, distanceText: formatAmount(leg.distanceM, 'meters', 'full', units).text,
     walkedText: formatAmount(walked, 'meters', 'compact', units).text, totalText: formatAmount(total, 'meters', 'compact', units).text,
-    progress: walked / leg.distanceM, straightLine: leg.straightLine,
+    progress: walked / leg.distanceM, straightLine: leg.straightLine, etaText: earnedOn ? null : routeEta(meters, leg.distanceM - walked),
     here: routeHere(leg, walked / leg.distanceM, 'card'), drawerHere: routeHere(leg, walked / leg.distanceM, 'drawer'),
     finishedOn: earnedOn, shareAwardId: earned?.id ?? null, map, goalPicked: state.goal !== undefined,
     completed: completions.map(award => ({ name: routeAwardName(award, `${award.data.from} to ${award.data.to}`), finishedOn: award.on, shareAwardId: award.id })),

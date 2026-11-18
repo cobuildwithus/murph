@@ -95,14 +95,14 @@ describe('painted maps', () => {
 });
 
 describe('route art on the Steps read', () => {
-  it('starts the card map, the last passed and next posters, then the drawer map, and shows their states', async () => {
+  it('starts the card map, the last passed and next posters, the drawer map, then earlier posters, and shows their states', async () => {
     const route = routeView('steps', { legs: [leg] }, steps(30), [], 'us')!;
     const startedAt = new Date();
     mocks.ensure.mockImplementation(async jobs => new Map(jobs.slice(0, 2).map((job: { key: string }) => [job.key, { key: job.key, status: 'making', startedAt }])));
     mocks.rows.mockResolvedValue(new Map([[posterKey('dplace-sd'), { key: posterKey('dplace-sd'), status: 'ready', startedAt }]]));
     await attachRouteArt([{ id: 'steps', route }], new Map([['steps', { legs: [leg] }]]), { memberId: 'member-ava', beforeMutationTx: async () => {} });
     expect(mocks.ensure.mock.calls[0]![0].map((job: { key: string }) => job.key))
-      .toEqual([mapKey(polyline, 'card'), posterKey('dplace-dm'), mapKey(polyline, 'drawer')]);
+      .toEqual([mapKey(polyline, 'card'), posterKey('dplace-dm'), mapKey(polyline, 'drawer'), posterKey('dplace-sd')]);
     expect(route.towns.map(town => town.poster?.state ?? null)).toEqual(['ready', 'making', null, null]);
     expect(route.towns[0]!.poster).toEqual({ state: 'ready', path: '/api/game/v1/progress/art/poster%3Av1%3Adplace-sd' });
     expect(route.towns[1]!.stepsText).toBe('60,000 steps');
@@ -112,11 +112,12 @@ describe('route art on the Steps read', () => {
     expect(mocks.after).toHaveLength(0);
   });
 
-  it('reports a ready painting as nothing to wait for', async () => {
+  it('reports a ready painting without its path, since the map path serves it', async () => {
     const route = routeView('steps', { legs: [leg] }, steps(5), [], 'us')!;
     mocks.rows.mockResolvedValue(new Map([[mapKey(polyline, 'card'), { key: mapKey(polyline, 'card'), status: 'ready', startedAt: new Date() }]]));
     await attachRouteArt([{ id: 'steps', route }], new Map([['steps', { legs: [leg] }]]));
-    expect(route.mapArt).toBeNull();
+    expect(route.mapArt).toEqual({ state: 'ready' });
+    expect(route.drawerMapArt).toBeNull();
     expect(mocks.ensure).not.toHaveBeenCalled();
   });
 

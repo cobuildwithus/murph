@@ -460,7 +460,8 @@
         },
         "shareAwardId": "route-sf",
         "mapArt": null,
-        "drawerMapArt": null
+        "drawerMapArt": null,
+        "etaText": null
       },
       "pics": []
     }
