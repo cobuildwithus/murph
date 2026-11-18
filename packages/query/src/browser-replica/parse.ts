@@ -12,7 +12,8 @@ import type {
 } from "../journal-view.ts";
 import { experimentOutcomeSchema } from "@murphai/contracts/experiment-outcome";
 import { parseJournalTiming } from "@murphai/contracts/journal-presentation";
-import { memoryDisplayNameSchema, memoryDemographicsSchema, companionMealsProjectionSchema, companionRunsProjectionSchema } from "@murphai/contracts";
+import { memoryDisplayNameSchema, memoryDemographicsSchema, companionMealsProjectionSchema } from "@murphai/contracts";
+import * as z from "@murphai/contracts/zod-runtime";
 import {
   BROWSER_VAULT_REPLICA_POLICY_ID,
   BROWSER_VAULT_REPLICA_SCHEMA,
@@ -58,6 +59,15 @@ import {
 } from "./metric-buckets.ts";
 import { BROWSER_VAULT_LAB_RESULT_ROW_SCHEMA } from "./lab-results.ts";
 import { BROWSER_VAULT_METRIC_ROW_SCHEMA } from "./metric-points.ts";
+
+/** Each local day's run distance in the vault, for the last year. Absent on replicas built before it shipped: unknown, never zero. */
+const companionRunsProjectionSchema = z.object({
+  schemaVersion: z.literal(1),
+  days: z.array(z.object({
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
+    km: z.number().positive().max(1_000),
+  }).strict()),
+}).strict();
 
 export function parseBrowserVaultReplica(value: unknown, label = "Browser vault replica"): BrowserVaultReplica {
   const record = requireRecord(value, label);

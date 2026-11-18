@@ -1,4 +1,5 @@
-import { addDaysToIsoDate, type CompanionRunsProjection } from "@murphai/contracts";
+import { addDaysToIsoDate } from "@murphai/contracts";
+import type { CompanionRunsProjection } from "./shared.ts";
 import type { VaultReadModel } from "../read-model.ts";
 import type { WearableDataset } from "../wearables/types.ts";
 import { buildActivitySessionDayRollups } from "../wearables/candidates.ts";

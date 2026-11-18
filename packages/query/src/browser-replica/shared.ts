@@ -3,7 +3,6 @@ import type {
   ExperimentOutcome,
   MemoryDemographics,
   CompanionMealsProjection,
-  CompanionRunsProjection,
 } from "@murphai/contracts";
 import {
   BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
@@ -26,6 +25,12 @@ import type {
   MetricStatistic,
 } from "@murphai/health-metrics";
 import type { BrowserVaultMetricBucketId } from "./metric-buckets.ts";
+
+/** Each local day's run distance in the vault, for the last year. Absent on replicas built before it shipped: unknown, never zero. */
+export interface CompanionRunsProjection {
+  schemaVersion: 1;
+  days: { date: string; km: number }[];
+}
 
 export {
   BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
