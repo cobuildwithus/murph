@@ -4063,7 +4063,7 @@ describe("ComputerUseService", () => {
     });
     const service = new ComputerUseService({
       crypto: createFakeCrypto({
-        decryptedRunSecret: "https://proxy.test-browser.onkernel.com:8443/live/1",
+        decryptedRunSecret: "https://proxy.test-browser.onkernel.com/live/1",
       }),
       kernel: createFakeKernel(),
       now: () => now,
@@ -4078,7 +4078,7 @@ describe("ComputerUseService", () => {
       iframeAllow: "autoplay; clipboard-read; clipboard-write",
       interaction: "takeover",
       kind: "open",
-      liveViewUrl: "https://proxy.test-browser.onkernel.com:8443/live/1",
+      liveViewUrl: "https://proxy.test-browser.onkernel.com/live/1",
       purpose: "login",
       suggestedReply: "done",
     });

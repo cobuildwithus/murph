@@ -877,10 +877,9 @@ The Kernel API key stays in `apps/web` only. Cloudflare-hosted execution reaches
 computer-use through signed `web-control.worker` callbacks; neither Cloudflare
 nor Codex dynamic tool payloads receive raw Kernel credentials or live-view
 URLs.
-Kernel live-view origins are code-owned from Kernel's documented
-`*.kernel.sh:8443` and `*.onkernel.com:8443` host families rather than
-operator-managed environment configuration. One canonical host-suffix list
-derives the HTTPS iframe, HTTPS/WebSocket CSP, and URL-validation policies. A
+The HTTPS iframe, HTTPS/WebSocket CSP, and URL validator share one Kernel
+live-view policy. It allows `*.kernel.sh` and `*.onkernel.com` on default
+port 443 and explicit port 8443. A
 Kernel browser session remains available to Web-owned automation when its
 optional live-view URL does not match those sources; direct handoff validates
 the stored URL before publishing a link, and Managed Auth validates before
