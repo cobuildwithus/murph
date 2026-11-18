@@ -5782,6 +5782,9 @@ externalize image/video bytes through owner-scoped hosted media references
 before excluding them from the archive, and hosted canonical write receipts omit
 matching image/video raw payload artifacts only when the same durable raw-write
 receipt carries their media identity, explicit image/video kind, and lifetime.
+For an inbox capture write, the appended capture supplies the attachment candidates.
+Earlier event revisions can preserve those files by raw path. Resolving that lifetime
+requires no typed event inventory or publication of unrelated media.
 Original MIME is descriptive metadata and may be generic or absent at ingress;
 receipt publication and recovery use the catalogue's explicit kind. Canonical
 event writes that retain existing media by reference also publish preservation

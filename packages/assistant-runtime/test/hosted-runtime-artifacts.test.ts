@@ -673,7 +673,7 @@ test.each([
   const restoredRoot = path.join(root, "restored");
   const now = new Date().toISOString();
   const { artifactStore } = createHostedRuntimeArtifactStoreStub();
-  const { mediaStore, getCalls } = createHostedRuntimeMediaStoreStub();
+  const { mediaStore, getCalls, putCalls } = createHostedRuntimeMediaStoreStub();
   let status: ReturnType<typeof hostedCanonicalWriteReceiptLogStatusFields> = {};
   const receipts: HostedCanonicalWritePersistenceInput[] = [];
   const videoBytes = Buffer.from("synthetic video receipt payload");
@@ -683,6 +683,11 @@ test.each([
   );
   try {
     await initializeVault({ vaultRoot, createdAt: now });
+    // The next snapshot owns discovery of previously unpublished captures.
+    const unrelatedPhoto = path.join(root, "unrelated.png");
+    await writeFile(unrelatedPhoto, imageBytes);
+    await addCapture({ vaultRoot, draft: { source: "manual", title: "Archived diagram", note: "Fixture.", occurredAt: now },
+      attachments: [{ role: "photo", sourcePath: unrelatedPhoto }] });
     const snapshot = await snapshotHostedBundleRoots({
       kind: "vault", roots: [{ root: vaultRoot, rootKey: "vault" }],
     });
@@ -731,6 +736,7 @@ test.each([
     });
     const videoPath = capture.stored.attachments.at(-1)?.storedPath;
     assert.ok(videoPath);
+    assert.equal(putCalls.length, scenario.external ? capture.stored.attachments.length : 0);
     await rm(vaultRoot, { recursive: true, force: true });
     const restored = await restoreHostedWorkspaceRuntimeJobWorkspace({
       vaultRoot: restoredRoot,
@@ -1377,11 +1383,18 @@ test("canonical reads, maintenance and reconciliation agree on shard tie-breaks 
       messageId: "history@example.test", occurredAt: "2030-01-01T00:00:00Z", receivedAt: "2030-01-01T00:00:00Z", rawHash: "b".repeat(64), rawSize: 0,
       references: [], replyTo: [], subject: "Synthetic reference", text: "Synthetic history",
     } });
-    await persistCanonicalInboxCapture({ vaultRoot, input: inbox, storedAt: "2030-01-01T00:00:00Z", captureId: "cap_history", eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2W3" });
+    const captureReceipts: HostedCanonicalWritePersistenceInput[] = [];
+    await withHostedCanonicalWritePort({ async persistCanonicalWrite(receipt) { captureReceipts.push(receipt); } },
+      () => persistCanonicalInboxCapture({ vaultRoot, input: inbox, storedAt: "2030-01-01T00:00:00Z",
+        captureId: "cap_history", eventId: "evt_01HQW7K0M9N8P7Q6R5S4T3V2W3" }));
     await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore: store.mediaStore });
     const historical = (await readHostedMediaReferenceCatalogue({ vaultRoot })).entries[0]!;
     const note = await upsertEvent({ vaultRoot, payload: { kind: "note", occurredAt: "2030-01-01T00:00:00Z", source: "manual", title: "Historical evidence", note: "Synthetic", rawRefs: [historical.relativePath] } });
     await appendJsonlRecord({ vaultRoot, relativePath: "ledger/events/2030/2030-02.jsonl", record: { ...note.event, rawRefs: [], lifecycle: { revision: 2, state: "deleted" } } });
+    const promoted = await externalizeHostedCanonicalWriteMediaPayloads({ persistence: captureReceipts[0]!, mediaStore: store.mediaStore, vaultRoot });
+    expect(promoted.receipt.actions).toContainEqual(expect.objectContaining({
+      targetRelativePath: historical.relativePath, mediaRef: expect.objectContaining({ expiresAt: null }),
+    }));
     await publishHostedWorkspaceMediaReferencesForSnapshot({ vaultRoot, mediaStore: store.mediaStore });
     expect(store.deleteCalls).not.toContain(historical.mediaId);
     expect((await readHostedMediaReferenceCatalogue({ vaultRoot })).entries).toEqual([expect.objectContaining({ relativePath: historical.relativePath, expiresAt: null })]);

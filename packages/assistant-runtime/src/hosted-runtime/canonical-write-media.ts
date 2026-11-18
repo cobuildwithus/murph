@@ -1,7 +1,7 @@
 import path from "node:path";
 import { hostedMediaPendingUpload } from "@murphai/runtime-state/node";
 
-import { collectEventRawReferencePaths } from "@murphai/contracts";
+import { assertContract, collectEventRawReferencePaths, inboxCaptureRecordSchema, type InboxCaptureRecord } from "@murphai/contracts";
 import {
   applyHostedCanonicalWriteReceipt,
   canonicalRawArtifactMatches,
@@ -39,6 +39,7 @@ export async function externalizeHostedCanonicalWriteMediaPayloads(input: {
 
   const entries = await publishHostedWorkspaceMediaReferences({
     mediaStore: input.mediaStore,
+    inboxCapture: readInboxCaptureReceipt(input.persistence),
     vaultRoot: input.vaultRoot,
   });
   const mediaRefsByPath = new Map(
@@ -112,6 +113,24 @@ function isRetainedPhotoPath(relativePath: string): boolean {
   return relativePath.startsWith("raw/meals/") || relativePath.startsWith("raw/measurements/");
 }
 
+// Inbox persistence appends one capture record alongside its raw writes.
+function readInboxCaptureReceipt(persistence: HostedCanonicalWritePersistenceInput): InboxCaptureRecord | undefined {
+  if (persistence.receipt.operationType !== "inbox_capture_persist") return undefined;
+  const capture = persistence.receipt.actions.find(action => action.kind === "jsonl_append"
+    && action.targetRelativePath.startsWith(`${VAULT_LAYOUT.inboxCaptureLedgerDirectory}/`));
+  if (capture?.kind !== "jsonl_append" || !capture.contentRef) return undefined;
+  return assertContract<InboxCaptureRecord>(inboxCaptureRecordSchema,
+    JSON.parse(readReceiptPayload(persistence, capture.contentRef)), "inbox capture receipt");
+}
+
+function readReceiptPayload(
+  persistence: HostedCanonicalWritePersistenceInput, ref: HostedCanonicalWriteReceiptContentRef,
+): string {
+  const payload = persistence.payloads.find(item => item.sha256 === ref.sha256 && item.byteLength === ref.byteSize);
+  if (!payload) throw new Error("Canonical write receipt payload is missing.");
+  return Buffer.from(payload.bytes).toString("utf8");
+}
+
 function readCanonicalEventMediaReferencePaths(
   persistence: HostedCanonicalWritePersistenceInput,
 ): Set<string> {
@@ -124,12 +143,7 @@ function readCanonicalEventMediaReferencePaths(
     ) {
       continue;
     }
-    const ref = action.contentRef;
-    const payload = persistence.payloads.find((item) =>
-      item.sha256 === ref.sha256 && item.byteLength === ref.byteSize
-    );
-    if (!payload) throw new Error("Canonical event receipt payload is missing.");
-    const lines = Buffer.from(payload.bytes).toString("utf8").split("\n");
+    const lines = readReceiptPayload(persistence, action.contentRef).split("\n");
     for (const line of lines) {
       if (!line.trim()) continue;
       const record: unknown = JSON.parse(line);
