@@ -3000,6 +3000,10 @@ stable), rejecting missing attestation from an older Worker. Retirement is await
 on success and failure. This fresh proof is independent of cached coordinator
 rows and the separate smoke application; neither proves the serving candidate
 image on its own. The artifact-only phase does not touch serving inventory.
+If this phase rejects a newly staged candidate, the publisher creates a fresh
+Worker version that clears that candidate and retains the active runner. The
+deploy still fails. An exact retry of an existing candidate preserves its
+record because an earlier attempt may already have started the native rollout.
 
 Optional smoke env:
 

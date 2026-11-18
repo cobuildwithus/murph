@@ -206,6 +206,13 @@ export async function runDeployWorkerVersionCli(
               HOSTED_EXECUTION_SMOKE_VERSION_ID: stageVersionId,
               HOSTED_EXECUTION_SMOKE_RUNNER_MANIFEST_PATH: path.join(runnerBundleDir, ".murph-runner-bundle-manifest.json"),
             },
+          }).catch(async (error: unknown) => {
+            if (staged.rejectedConfigPath) {
+              await assertLiveVersion(input.workerName, input.configPath, stageVersionId);
+              const cleared = await uploadVersion(staged.rejectedConfigPath, stageVersionId);
+              await activateVersion(staged.rejectedConfigPath, cleared, stageVersionId);
+            }
+            throw error;
           });
           await assertActivationAllowed(stageVersionId);
           await releaseProvider.admitApplication(serving);

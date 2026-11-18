@@ -164,6 +164,13 @@ describe("runner deployment staging", () => {
     const first = await stageHostedRunnerRelease({ releaseSha: "1".repeat(40), configPath: path.join(directory, "source.json"), currentVersionId: "worker-live", currentVersion: version(), listApplications });
     const second = await stageHostedRunnerRelease({ releaseSha: "1".repeat(40), configPath: path.join(directory, "source.json"), currentVersionId: "staged-worker", currentVersion: version(first.deployment), listApplications });
     expect(second.deployment).toEqual(first.deployment);
+    expect(second.rejectedConfigPath).toBeNull();
+    const cleared = JSON.parse(await readFile(first.rejectedConfigPath!, "utf8"));
+    const stable = JSON.parse(cleared.vars.HOSTED_EXECUTION_RUNNER_DEPLOYMENT);
+    expect(stable).toEqual({ ...first.deployment, candidate: null });
+    const correction = await stageHostedRunnerRelease({ releaseSha: "2".repeat(40), configPath: path.join(directory, "source.json"),
+      currentVersionId: "cleared-worker", currentVersion: version(stable), listApplications });
+    expect(correction.deployment.candidate?.releaseSha).toBe("2".repeat(40));
     await writeFile(path.join(directory, "source.json"), JSON.stringify({ ...config, vars: { ...config.vars, HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT: "a".repeat(64) } }));
     await expect(stageHostedRunnerRelease({ releaseSha: "1".repeat(40), configPath: path.join(directory, "source.json"), currentVersionId: "staged-worker", currentVersion: version(first.deployment), listApplications })).rejects.toThrow("different candidate");
   });
