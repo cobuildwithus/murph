@@ -9,6 +9,6 @@
     "summary": "A friend medal now needs your friend to have done that exercise on at least three days, so you no longer pass someone who never did it or tried it once.",
     "details": "If you passed them before that, the medal comes the next time you pass them.",
     "relevanceTags": ["progress", "games"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [5177]
   }
 }
