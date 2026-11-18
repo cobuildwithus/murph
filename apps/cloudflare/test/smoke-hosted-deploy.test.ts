@@ -33,6 +33,7 @@ import {
 } from "../src/auth-adapter.js";
 import {
   DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
+  DEPLOY_MODEL_ADMISSION_PROBES,
 } from "../src/deploy-smoke-live-model.ts";
 
 import {
@@ -202,8 +203,8 @@ describe("resolveSmokeRunnerManifestPath", () => {
 });
 
 describe("runSmokeHostedDeploy", () => {
-  it.each(["accepted", "missing", "duplicate", "wrong model", "unused grant", "provider rejected"])(
-    "requires both live web model receipts before releasing a production artifact (%s)", async (scenario) => {
+  it.each(["accepted", "missing", "duplicate", "wrong model", "wrong tier", "unused grant", "provider rejected"])(
+    "requires the complete live model and tier receipts before releasing a production artifact (%s)", async (scenario) => {
     const root = await mkdtemp(path.join(os.tmpdir(), "cloudflare-artifact-smoke-"));
     const manifestPath = path.join(root, "manifest.json");
     const manifest = { buildSkipped: false, bundleFingerprint: "expected-bundle", sourceFingerprint: "expected-source" };
@@ -221,11 +222,13 @@ describe("runSmokeHostedDeploy", () => {
           expect(url.pathname).toBe("/internal/deploy/artifact-smoke");
           if (++artifactRequests === 1) return new Response("Old Worker route missing", { status: 404 });
           expect(url.searchParams.get("liveModelTurn")).toBe("1");
-          const turns = ["gpt-6.2-sol", "gpt-6.2-astra"].map(model => ({
+          const turns = DEPLOY_MODEL_ADMISSION_PROBES.map(({ model, serviceTier }) => ({
+            serviceTier,
             durationMs: 1, egressGrantConsumed: true, model, stdoutBytes: 1,
           }));
           if (scenario === "duplicate") turns[1] = turns[0]!;
           if (scenario === "wrong model") turns[1]!.model = "gpt-6-luna";
+          if (scenario === "wrong tier") turns[1]!.serviceTier = "priority";
           if (scenario === "unused grant") turns[1]!.egressGrantConsumed = false;
           return new Response(JSON.stringify({ ok: true, runnerContainer: {
             ...(scenario === "missing" ? {} : { webModelTurns: turns }),
@@ -248,7 +251,7 @@ describe("runSmokeHostedDeploy", () => {
         },
       });
       if (scenario !== "accepted") {
-        await expect(smoke).rejects.toThrow(/admission|expected model|egress grant|synthetic rejection/u);
+        await expect(smoke).rejects.toThrow(/admission|expected model|did not prove|egress grant|synthetic rejection/u);
         expect(artifactRequests).toBe(2);
         return;
       }

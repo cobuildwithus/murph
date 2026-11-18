@@ -309,10 +309,15 @@ function createElevenLabsRequest(input: {
 
 function createDeploySmokeOpenAiRequest(input: {
   model?: string;
+  input?: unknown;
+  tools?: unknown[];
+  serviceTier?: string;
 } = {}): Request {
   return new Request("https://api.openai.com/v1/responses", {
     body: JSON.stringify({
-      input: "anything Codex emits",
+      input: input.input ?? "anything Codex emits",
+      tools: input.tools,
+      service_tier: input.serviceTier,
       model: input.model ?? DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
       stream: true,
     }),
@@ -3133,6 +3138,38 @@ describe("hostedRunnerIntercept", () => {
         message: "Hosted runner provider egress completed.",
       }),
     );
+  });
+
+  it.each([
+    ["default", undefined, true, true, 200],
+    ["flex", "flex", true, false, 200],
+    ["priority", "priority", true, false, 200],
+    ["default", undefined, true, false, 401],
+    ["default", undefined, false, true, 401],
+    ["flex", undefined, true, false, 401],
+    ["flex", "priority", true, false, 401],
+    ["priority", "priority", false, false, 401],
+  ] as const)("checks the candidate grant %s against wire tier %s, web %s, image %s", async (
+    serviceTier, wireTier, web, image, expectedStatus,
+  ) => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("ok"));
+    vi.stubGlobal("fetch", fetchMock);
+    const env = createInterceptEnv({
+      OPENAI_API_KEY: "openai-worker-secret",
+      readActiveRuntimeUserFence: async () => ({ active: false, reason: "no_active_runtime" }),
+      readDeploySmokeLiveModelTurnFence: async () => ({ active: true, model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL, serviceTier }),
+    });
+    const response = await hostedRunnerIntercept(
+      createDeploySmokeOpenAiRequest({
+        serviceTier: wireTier,
+        tools: web ? [{ type: "namespace", name: "web", tools: [{ type: "function", name: "run", parameters: {} }] }] : [],
+        input: image ? [{ role: "user", content: [{ type: "input_image", image_url: "data:image/png;base64,AA==" }] }] : [],
+      }),
+      env,
+      { className: "DeploySmokeRunnerContainer", containerId: "deploy-smoke-container-id" },
+    );
+    expect(response.status).toBe(expectedStatus);
+    expect(Boolean(findFetchCall(fetchMock, "api.openai.com"))).toBe(expectedStatus === 200);
   });
 
   it("denies a second deploy-smoke OpenAI request after the live model turn fence is consumed", async () => {
