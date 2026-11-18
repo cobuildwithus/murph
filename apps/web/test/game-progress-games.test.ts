@@ -282,6 +282,13 @@ describe("Medal words and pages", () => {
   const award = (kind: string, measureId: string, data: Record<string, unknown>) => stored([{ key: `${kind}:${measureId}`, kind, measureId,
     subjectMemberId: kind === "friend" ? "leo" : null, on: "2026-11-05", data: data as never }])[0];
 
+  it("names the exercise on landmark and time medals", () => {
+    const tower = { rung: { at: 1776, target: { kind: "height", id: "one-world-trade-center" } }, page: "totals" };
+    expect(medalView(award("landmark", "pullups.reps", { ...tower, noun: "pull-ups" }), false, "us").detail).toBe("1,776 pull-ups");
+    expect(medalView(award("time", "planks.seconds", { rung: { at: 10800, target: { kind: "time", id: "concorde" } },
+      noun: "planked", page: "totals" }), false, "us").detail).toMatch(/ planked$/);
+  });
+
   it("says what a friend was passed in, all time", () => {
     const passed = award("friend", "pullups.reps", { title: "Passed Leo", detail: "all-time total", page: "friends",
       face: { member: { memberId: "leo", firstName: "Leo", avatarUrl: null } } });
