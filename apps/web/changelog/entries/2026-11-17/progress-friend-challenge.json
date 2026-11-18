@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-17",
+  "order": 230,
+  "item": {
+    "id": "progress-friend-challenge",
+    "kind": "feature",
+    "priority": 3,
+    "title": "Challenge a friend from their drawer",
+    "summary": "Tap a friend on a Friends board and Challenge them to a game on that same thing, with setup already filled in.",
+    "details": "Steps suggests 10,000 steps a day, Sleep suggests lights out by 11, and an exercise suggests your last game's task on it. Every word stays changeable.",
+    "relevanceTags": ["progress", "games"],
+    "sourcePullRequests": [5156]
+  }
+}
