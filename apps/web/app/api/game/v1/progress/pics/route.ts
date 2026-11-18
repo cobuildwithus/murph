@@ -4,7 +4,8 @@ import { parsePicUploadQuery, type PicUploadResponse } from '@/src/lib/game/prog
 import { progressEffect, withProgressJsonError } from '@/src/lib/game/progress/http';
 import { readProgressJpeg } from '@/src/lib/game/progress/jpeg';
 import { picturePin, putProgressPic } from '@/src/lib/game/progress/pics';
-import { cumulativePoints, readGameSeries } from '@/src/lib/game/progress/series';
+import { cumulativePoints } from '@/src/lib/game/progress/series';
+import { readOwnSeries } from '@/src/lib/game/progress/vault-runs';
 import { runWithHostedDomainRootUnwrapCache } from '@/src/lib/hosted-crypto/domain-root-unwrap-cache';
 import { hostedOnboardingError } from '@/src/lib/hosted-onboarding/errors';
 import { jsonOk } from '@/src/lib/hosted-onboarding/http';
@@ -17,7 +18,7 @@ export const POST = withProgressJsonError(async (request: Request) => runWithHos
   return progressEffect(async () => {
     const memberId = auth.member.id;
     const [snapshot, profile] = await Promise.all([
-      readGameSeries(memberId, new Date()),
+      readOwnSeries(memberId, new Date()),
       getPrisma().gameProfile.findUniqueOrThrow({ where: { memberId }, select: { timeZone: true } }),
     ]);
     if (snapshot.incomplete) throw hostedOnboardingError({ code: 'PROGRESS_INCOMPLETE', httpStatus: 503,

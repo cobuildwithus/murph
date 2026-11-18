@@ -99,6 +99,8 @@ export async function readCompanionHealthSeries(
   return {
     timeZone, savedAt: client.replica.generatedAt, freshness, window, stepsWindow,
     demographics, heightCm: requestedMetrics ? null : readCompanionBodyHeight(client, through), numbers,
+    // Null: a replica built before run days shipped. Unknown, never zero.
+    runs: client.replica.runs ?? null,
   };
 }
 

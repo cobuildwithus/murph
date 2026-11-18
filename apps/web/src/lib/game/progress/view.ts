@@ -2,15 +2,14 @@ import "server-only";
 import { ProgressReadTiming } from "./read-timing";
 
 import { formatTimeZoneDateTimeParts } from "@murphai/contracts";
-import { assertBrowserVaultMemberAuthority } from "../../browser-vault/authority";
-import { isHostedOnboardingError } from "../../hosted-onboarding/errors";
 import { getPrisma } from "../../prisma";
 import type { Medal, Moment, Progress } from "./contract";
 import { readAwards, settleAwards, markAwardsSeen, type StoredAward } from "./awards";
 import { ACHIEVEMENTS, HEALTH, type AchievementContext } from "./registry";
 import { measureLadder, measureRungs, projection, roundValues, rungFor } from "./goals";
 import { formatAmount, formatNumber } from "./format";
-import { cumulativePoints, readGameSeries, scheduleInference, type MeasureSeries } from "./series";
+import { cumulativePoints, scheduleInference, type MeasureSeries } from "./series";
+import { hasHealthAuthority, markVaultRunAwards, readOwnSeries } from "./vault-runs";
 import type { BeforeProgressMutation, MeasureState } from "./state";
 import { routeAwardName } from "./route-progress";
 import { BANK, type RungDefinition } from "./bank";
@@ -33,7 +32,7 @@ export function achievementContext(measures: readonly MeasureSeries[], states: R
 }
 
 export function visibleAwards(awards: readonly StoredAward[], healthAuthority: boolean): StoredAward[] {
-  return awards.filter(award => healthAuthority || !(award.kind.startsWith("health") || (award.measureId !== null && award.measureId in HEALTH)));
+  return awards.filter(award => healthAuthority || !(award.kind.startsWith("health") || award.data.health === true || (award.measureId !== null && award.measureId in HEALTH)));
 }
 
 type MeasureLabel = Pick<Progress["measures"][number], "id" | "label">;
@@ -126,24 +125,13 @@ export function measureView(measure: MeasureSeries, state: MeasureState, awards:
     route: routeView(measure.id, state, points, awards, units), pics: [] };
 }
 
-async function healthAuthority(memberId: string): Promise<boolean> {
-  try {
-    await assertBrowserVaultMemberAuthority({ memberId, prisma: getPrisma() });
-    return true;
-  } catch (error) {
-    // A current authority denial removes health facts, without hiding game totals.
-    if (isHostedOnboardingError(error) && [401, 403].includes(error.httpStatus)) return false;
-    throw error;
-  }
-}
-
 export async function readProgress(memberId: string, units: ClientUnits, beforeMutationTx: BeforeProgressMutation, timing = new ProgressReadTiming()): Promise<Progress> {
   const db = getPrisma();
   const profile = await timing.measure("profile", () => db.gameProfile.findUniqueOrThrow({ where: { memberId }, select: { timeZone: true, createdAt: true } }));
   const clock = new Date();
   const today = formatTimeZoneDateTimeParts(clock, profile.timeZone).dayKey;
   const joinedOn = formatTimeZoneDateTimeParts(profile.createdAt, profile.timeZone).dayKey;
-  const snapshot = await timing.measure("gameSeries", () => readGameSeries(memberId, clock, timing));
+  const snapshot = await timing.measure("gameSeries", () => readOwnSeries(memberId, clock, timing));
   const pictures = await timing.measure("pictures", () => readProgressPics(memberId));
   snapshot.incomplete ||= pictures.incomplete;
   let attemptedInsert = false;
@@ -159,7 +147,7 @@ export async function readProgress(memberId: string, units: ClientUnits, beforeM
     }
     if (snapshot.pending.length === 0) {
       const context = achievementContext(snapshot.measures, snapshot.states);
-      attemptedInsert = await timing.measure("awards", () => settleAwards(memberId, ACHIEVEMENTS.flatMap(evaluate => evaluate(context)), beforeMutationTx,
+      attemptedInsert = await timing.measure("awards", () => settleAwards(memberId, markVaultRunAwards(ACHIEVEMENTS.flatMap(evaluate => evaluate(context)), snapshot.vaultRunsMerged), beforeMutationTx,
         { awards: snapshot.awards, timeZone: profile.timeZone }));
     }
     scheduleInference(snapshot.pending.map(task => ({ ...task, memberId })), beforeMutationTx);
@@ -167,7 +155,7 @@ export async function readProgress(memberId: string, units: ClientUnits, beforeM
   // Deleting a friend can cascade-delete their awards after the snapshot.
   const stored = attemptedInsert || snapshot.awards.some(award => award.subjectMemberId !== null)
     ? await timing.measure("awards", () => readAwards(memberId)) : snapshot.awards;
-  const awards = visibleAwards(stored, await timing.measure("auth", () => healthAuthority(memberId)));
+  const awards = visibleAwards(stored, await timing.measure("auth", () => hasHealthAuthority(memberId)));
   return timing.measure("render", () => {
     const measures = snapshot.measures.map(measure => {
       const view = measureView(measure, snapshot.states.get(measure.id) ?? {}, awards, today, units);
@@ -191,7 +179,7 @@ export async function readProgress(memberId: string, units: ClientUnits, beforeM
 }
 
 export async function seeMoments(memberId: string, momentIds: readonly string[], beforeMutationTx: BeforeProgressMutation): Promise<void> {
-  const awards = visibleAwards(await readAwards(memberId), await healthAuthority(memberId));
+  const awards = visibleAwards(await readAwards(memberId), await hasHealthAuthority(memberId));
   const requested = new Set(momentIds);
   const ids = awards.filter(award => requested.has(`day:${award.on}`)).map(award => award.id);
   await markAwardsSeen(memberId, ids, beforeMutationTx);

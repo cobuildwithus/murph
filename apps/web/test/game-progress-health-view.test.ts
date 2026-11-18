@@ -142,7 +142,7 @@ it.each([
   const result = healthView({ joinedOn, today, profile, sums: [],
     snapshot: { timeZone: "UTC", savedAt: `${today}T12:00:00Z`, freshness: "fresh", demographics: null, heightCm: null,
       window: { from: "2025-11-17", through: today }, stepsWindow: { from: "2025-11-17", through: today },
-      numbers: { restingHeartRate: null, vo2Max: null, sleep: null, steps: null } },
+      numbers: { restingHeartRate: null, vo2Max: null, sleep: null, steps: null }, runs: null },
     metrics: [{ ...metric, id, daily: [point(date)] }, { ...metric, id: "sleep", daily: sleepDate ? [point(sleepDate)] : [] }],
   });
   expect(result.metrics.find(item => item.id === "sleep")!.access).toBe(access);

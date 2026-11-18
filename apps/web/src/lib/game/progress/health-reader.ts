@@ -17,6 +17,7 @@ import type { GoalsQuery, HealthMetric, SetMeasureBody } from "./contract";
 import { openProgress, openProgressMany, progressLookup } from "./crypto";
 import { readAwards, settleAwards } from "./awards";
 import { patchMeasureState, type MeasureState, type BeforeProgressMutation } from "./state";
+import { saveVaultRuns } from "./vault-runs";
 import { HEALTH, type Candidate } from "./registry";
 import type { CompanionHealthSeries, RawHealthPoint } from "../../device-sync/companion-numbers";
 import type { AgeProfile } from "./norms";
@@ -173,13 +174,16 @@ export async function settleProgressHealthInBackground(auth: HostedNativeMemberA
   const snapshot = await readCompanionHealthSeries(auth, new AbortController().signal, metricIds, workspace);
   if (!snapshot) return;
   await settleProgressHealth(auth, snapshot, profile, states, now);
+  const authority: BeforeProgressMutation = async tx => {
+    await assertGameMemberAuthCurrentTx(auth, tx);
+    await assertBrowserVaultMemberAuthority({ memberId, prisma: tx });
+  };
+  // Totals and its goals read Running's saved vault runs; this is their one replica read.
+  await saveVaultRuns(memberId, snapshot.savedAt, snapshot.runs, authority);
   if (!healthSettlementCurrent(states.get("restingHeartRate")!.healthSettlement, snapshot.savedAt, profile.timeZone, now)) {
     await patchMeasureState(memberId, "restingHeartRate", { healthSettlement: {
       savedAt: snapshot.savedAt, checkedAt: now.toISOString(), timeZone: snapshot.timeZone, profileTimeZone: profile.timeZone,
-    } }, async tx => {
-      await assertGameMemberAuthCurrentTx(auth, tx);
-      await assertBrowserVaultMemberAuthority({ memberId, prisma: tx });
-    });
+    } }, authority);
   }
 }
 

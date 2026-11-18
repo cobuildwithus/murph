@@ -4,6 +4,8 @@ import { memoryDisplayNameSchema, memoryDemographicsSchema, experimentOutcomeSch
 import { metricPointRecordIds } from "../metrics/index.ts";
 import { buildJournalView } from "../journal-view.ts";
 import { buildCompanionMealsProjection } from "./meals.ts";
+import { buildCompanionRunsProjection } from "./runs.ts";
+import { collectWearableDataset } from "../wearables/candidates.ts";
 import { isDefaultProjectedQueryEntity } from "../query-visibility.ts";
 import type { OverviewWeeklySampleSummary } from "../overview.ts";
 import { summarizeDailySamples, type DailySampleSummary } from "../summaries.ts";
@@ -12,7 +14,7 @@ import { createVaultReadModel, type VaultReadModel } from "../read-model.ts";
 import { resolveAdherenceObservationActivityKind } from "../experiment-adherence.ts";
 import {
   buildWearableAssistantSummaryFromBundle,
-  buildWearableSummaryBundle,
+  buildWearableSummaryBundleFromDataset,
   summarizeWearableSourceHealthFromBundle,
   type WearableAssistantSummary,
   type WearableSourceHealthSummary,
@@ -106,7 +108,8 @@ export async function createBrowserVaultReplica(
     requestedMetrics,
     selectionPoints: selectionMetricPoints,
   });
-  const defaultWearableBundle = buildWearableSummaryBundle(defaultProjectedVault);
+  const wearableDataset = collectWearableDataset(defaultProjectedVault, {});
+  const defaultWearableBundle = buildWearableSummaryBundleFromDataset(wearableDataset);
   const sourceHealthRows = summarizeWearableSourceHealthFromBundle(defaultWearableBundle, { limit: SOURCE_HEALTH_LIMIT })
     .map(projectSourceHealthRow);
   await yieldToBrowserVaultReplicaCancellation(input.signal);
@@ -122,6 +125,7 @@ export async function createBrowserVaultReplica(
     ...(input.demographics ? { demographics: memoryDemographicsSchema.parse(input.demographics) } : {}),
     ...(input.displayName === undefined ? {} : { displayName: memoryDisplayNameSchema.parse(input.displayName) }),
     meals: buildCompanionMealsProjection(input.vault),
+    runs: buildCompanionRunsProjection(defaultProjectedVault, wearableDataset, generatedAt),
     hasLabBiomarkers: metricRows.some((row) =>
       row.sourceKind === "test-result" &&
       row.biomarkerKey !== null &&
