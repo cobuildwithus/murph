@@ -144,11 +144,14 @@ describe.skipIf(!enabled)("Friends deferred inference with PostgreSQL", () => {
     expect(second.chart).toEqual([{ memberId: ava, points: [["2026-11-01", 20], ["2026-11-02", 120]] }, { memberId: leo, points }]);
     expect(JSON.stringify(second)).not.toContain(task);
     // Leo hasn't done pushups on three days, so passing him isn't a medal yet.
+    expect(await readAwards(ava)).toEqual([]);
+    await mocks.after.mock.calls[1][0]();
     const awards = await readAwards(ava);
     expect(awards).toEqual([]);
     expect(friendsSchema.parse(await (await readFriends()).json())).toEqual(second);
+    await mocks.after.mock.calls[2][0]();
     expect(await readAwards(ava)).toEqual(awards);
-    expect(mocks.after).toHaveBeenCalledTimes(1);
+    expect(mocks.after).toHaveBeenCalledTimes(3);
   });
 
   it("keeps the same phrase member-bound in one sequential batch", async () => {

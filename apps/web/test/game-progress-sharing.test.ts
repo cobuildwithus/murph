@@ -2,10 +2,12 @@ import { beforeEach, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 const mocks = vi.hoisted(() => ({
+  roomGames: vi.fn(), groups: vi.fn(), containers: vi.fn(), shares: vi.fn(),
   transaction: vi.fn(), audience: vi.fn(), add: vi.fn(), current: vi.fn(), blocked: vi.fn(),
   game: vi.fn(), route: vi.fn(), finish: vi.fn(), verified: vi.fn(),
 }));
-vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({ $transaction: mocks.transaction }) }));
+vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({ $transaction: mocks.transaction, game: { findMany: mocks.roomGames },
+  hostedGroup: { findMany: mocks.groups }, hostedThreadContainer: { findMany: mocks.containers }, hostedVaultShare: { findMany: mocks.shares } }) }));
 vi.mock("@/src/lib/game/http/auth", () => ({ requireGameMemberAuth: async () => ({ member: { id: "ava" } }),
   assertGameMemberAuthCurrentTx: mocks.current }));
 vi.mock("@/src/lib/hosted-groups/group-store", () => ({ addHostedGroupPairBoardSharingTx: mocks.add, lockHostedGroupRow: vi.fn() }));
@@ -18,7 +20,7 @@ vi.mock("@/src/lib/game/chat-membership", async original => ({
 vi.mock("@/src/lib/game/audience", () => ({ verifiedGameContactKeys: mocks.verified }));
 import { requireGameMemberAuth } from "@/src/lib/game/http/auth";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
-import { shareWithFriends, type FriendRoom } from "@/src/lib/game/progress/friend-sharing";
+import { readFriendRooms, shareWithFriends, type FriendRoom } from "@/src/lib/game/progress/friend-sharing";
 
 const people = [
   { memberId: "leo", firstName: "Leo", avatarUrl: null },
@@ -109,4 +111,27 @@ it("processes the 500-room maximum sequentially and proves every recipient", asy
   expect(mocks.verified).toHaveBeenCalledTimes(1000);
   expect(mocks.current).toHaveBeenCalledTimes(500);
   expect(peak).toBe(1);
+});
+
+it("skips room discovery without friends and skips roster and grant reads without pair games", async () => {
+  mocks.roomGames.mockResolvedValue([]);
+  expect(await readFriendRooms("ava", [])).toEqual({ rooms: [], incomplete: false });
+  expect(mocks.roomGames).not.toHaveBeenCalled();
+  expect(await readFriendRooms("ava", ["leo"])).toEqual({ rooms: [], incomplete: false });
+  expect(mocks.roomGames).toHaveBeenCalledOnce();
+  expect(mocks.groups).not.toHaveBeenCalled();
+  expect(mocks.containers).not.toHaveBeenCalled();
+  expect(mocks.shares).not.toHaveBeenCalled();
+});
+
+it("loads outgoing grants only for the sharing preview", async () => {
+  mocks.roomGames.mockResolvedValue([{ id: "pair", chatContainerMemberId: "room", players: [{ memberId: "ava" }, { memberId: "leo" }] }]);
+  mocks.groups.mockResolvedValue([{ id: "group", runtimeMemberId: "room", members: [] }]);
+  mocks.containers.mockResolvedValue([{ memberId: "room", participants: [{ participantMemberId: "ava" }, { participantMemberId: "leo" }] }]);
+  mocks.shares.mockResolvedValue([]);
+  const initial = await readFriendRooms("ava", ["leo"], false);
+  expect(initial.rooms).toHaveLength(1);
+  expect(mocks.shares).not.toHaveBeenCalled();
+  expect(await readFriendRooms("ava", ["leo"])).toEqual(initial);
+  expect(mocks.shares).toHaveBeenCalledOnce();
 });

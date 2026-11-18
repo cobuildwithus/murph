@@ -37,7 +37,7 @@ describe('Progress map HTTP contract', () => {
   it.each(['card', 'drawer'])('uses settled Health Steps since joining on the %s map', async size => {
     const response = await GET(request(`measure=steps&size=${size}`));
     expect(response.status).toBe(200);
-    expect(mocks.raw).toHaveBeenCalledExactlyOnceWith({ member: { id: 'owner' } }, expect.any(AbortSignal));
+    expect(mocks.raw).toHaveBeenCalledExactlyOnceWith({ member: { id: 'owner' } }, expect.any(AbortSignal), ['steps']);
     expect(mocks.series).not.toHaveBeenCalled();
     expect(mocks.render).toHaveBeenCalledWith({ polyline: leg.polyline, progress: 0.5, size });
     expect(mocks.state).toHaveBeenCalledWith({ where: { memberId_lookup: { memberId: 'owner', lookup: 'steps' } }, select: { stateEncrypted: true } });

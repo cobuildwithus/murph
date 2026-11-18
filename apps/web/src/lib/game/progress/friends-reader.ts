@@ -1,4 +1,7 @@
 import "server-only";
+import { ProgressReadTiming } from "./read-timing";
+import { after } from "next/server";
+import { runWithFreshHostedDomainRootUnwrapCache } from "../../hosted-crypto/domain-root-unwrap-cache";
 import { toLocalDayKey } from "@murphai/contracts";
 import type { HostedNativeMemberAuth } from "../../better-auth/native-auth";
 import type { ClientUnits } from "../../companion/client-info";
@@ -14,53 +17,77 @@ import { readFriendHealthSeries } from "./friend-health";
 import { readFriendRooms, shareWithFriends, type FriendRoom } from "./friend-sharing";
 import { friendChallenge, friendPasses, friendsView, type FriendSeries } from "./friends";
 import { settleAwards } from "./awards";
-import type { DayAmount } from "./registry";
+import type { Candidate, DayAmount } from "./registry";
 import { scheduleInference } from "./series";
 
-export async function readProgressFriends(auth: HostedNativeMemberAuth, query: FriendsQuery, signal: AbortSignal, units: ClientUnits) {
+export async function readProgressFriends(auth: HostedNativeMemberAuth, query: FriendsQuery, signal: AbortSignal, units: ClientUnits, timing = new ProgressReadTiming()) {
   try {
     const db = getPrisma(), memberId = auth.member.id;
-    const cohort = await readFriendCohort(memberId), ids = cohort.people.map(person => person.memberId);
-    if (query.with && !cohort.people.some(person => person.memberId === query.with)) throw gameNotFound();
+    const cohort = await timing.measure("cohort", () => readFriendCohort(memberId));
+    const ids = cohort.people.map(person => person.memberId);
+    timing.counts.friends = ids.length - 1;
+    assertSelectedFriend(query.with, ids);
     const metric = query.measure;
     const health = metric === "steps" || metric === "sleep";
-    const gameRead = readFriendGameSeries(ids);
-    const roomRead = readFriendRooms(memberId, ids.filter(id => id !== memberId)).then(async rooms => {
-      const incomplete = cohort.incomplete || rooms.incomplete;
-      const series = health && !incomplete
-        ? await readFriendHealthSeries({ auth, people: cohort.people, rooms: rooms.rooms, with: query.with,
-            metric, timeZone: cohort.timeZone, signal })
-        : { people: [], incomplete };
-      return { rooms, series };
-    });
+    const gameRead = timing.measure("gameSeries", () => readFriendGameSeries(ids, timing));
+    const roomRead = readFriendsHealth(auth, cohort, query, signal, timing);
     // Drain both branches in the request scope, then inspect errors in their original order.
     await Promise.all([gameRead, roomRead].map(read => read.catch(() => undefined)));
     const games = await gameRead;
-    const pills = friendPills(games, memberId, ids, query.measure);
     const measure = friendMeasure(query.measure);
-    const { rooms, series } = await roomRead;
+    const series = await roomRead;
     let incomplete = series.incomplete || (!health && games.incomplete);
     let people = series.people;
     if (!health && !incomplete) {
       people = cohort.people.map(person => ({ ...person, daily: friendDaily(games.amounts.get(person.memberId) ?? [], query.measure) }));
     }
-    const current = await friendCohortIds(memberId, db);
+    // Recheck once after the private reads. A departure or block must remove the friend before rendering.
+    const current = await timing.measure("cohort", () => friendCohortIds(memberId, db));
     incomplete ||= current.incomplete;
-    people = incomplete ? [] : people.filter(person => current.ids.includes(person.memberId));
-    if (!incomplete && !health && games.pending.length === 0) {
-      await settleGameFriendAwards(auth, games, people, [query.measure]);
+    const currentIds = new Set(current.ids);
+    people = incomplete ? [] : people.filter(person => currentIds.has(person.memberId));
+    const visibleIds = ids.filter(id => currentIds.has(id));
+    const visiblePending = games.pending.filter(task => currentIds.has(task.memberId));
+    const pills = friendPills({ ...games, pending: visiblePending }, memberId, visibleIds, query.measure);
+    if (!current.incomplete) assertSelectedFriend(query.with, visibleIds);
+    await timing.measure("auth", () => assertGameMemberAuthCurrentTx(auth, db));
+    if (people.length > 1 && !health && visiblePending.length === 0 && pills.some(pill => pill.id === metric)) {
+      after(async () => {
+        try {
+          await runWithFreshHostedDomainRootUnwrapCache(() =>
+            settleFriendPasses(auth, people, friendPasses({ measureId: query.measure, people })));
+        } catch {
+          console.error("PROGRESS_BACKGROUND_SETTLEMENT_FAILED");
+        }
+      });
     }
-    await assertGameMemberAuthCurrentTx(auth, db);
-    scheduleFriendInference(auth, games.pending);
-    const shareAudience = incomplete ? [] : sharingPreview(people, rooms.rooms, query.measure);
-    return friendsView({ people, measure, pills, query, units, today: toLocalDayKey(new Date(), cohort.timeZone),
-      shareAudience, incomplete, departureNotice: cohort.departureNotice,
-      challenge: friendChallenge(query.measure, games.tasks.get(memberId)?.get(query.measure)?.text) });
+    scheduleFriendInference(auth, visiblePending);
+    const shareAudience = incomplete ? [] : sharingPreview(people, series.rooms.filter(room => currentIds.has(room.otherMemberId)), query.measure);
+    return await timing.measure("render", () => friendsView({ people, measure, pills, query, units, today: toLocalDayKey(new Date(), cohort.timeZone),
+      shareAudience, incomplete, departureNotice: cohort.departure?.nameEncrypted === current.departure?.nameEncrypted ? cohort.departureNotice : null,
+      challenge: friendChallenge(query.measure, games.tasks.get(memberId)?.get(query.measure)?.text) }));
   } catch (error) {
     if (isHostedOnboardingError(error)) throw error;
     throw hostedOnboardingError({ code: "PROGRESS_FRIENDS_UNAVAILABLE", httpStatus: 503, retryable: true,
       message: "Friends progress is temporarily unavailable." });
   }
+}
+
+function assertSelectedFriend(selected: string | undefined, ids: readonly string[]) {
+  if (selected && !ids.includes(selected)) throw gameNotFound();
+}
+
+async function readFriendsHealth(auth: HostedNativeMemberAuth, cohort: Awaited<ReturnType<typeof readFriendCohort>>,
+  query: FriendsQuery, signal: AbortSignal, timing: ProgressReadTiming) {
+  const metric = query.measure;
+  if (cohort.incomplete || (metric !== "steps" && metric !== "sleep")) {
+    return { people: [], rooms: [], incomplete: cohort.incomplete };
+  }
+  const friendIds = cohort.people.filter(person => !person.me).map(person => person.memberId);
+  const rooms = await timing.measure("rooms", () => readFriendRooms(auth.member.id, friendIds, false));
+  if (rooms.incomplete) return { people: [], rooms: [], incomplete: true };
+  return readFriendHealthSeries({ auth, people: cohort.people, rooms: rooms.rooms, with: query.with,
+    metric, timeZone: cohort.timeZone, signal, timing });
 }
 
 /** All exercise pills share one cohort, one game-series read and one award commit. */
@@ -75,17 +102,23 @@ export async function settleProgressFriends(auth: HostedNativeMemberAuth) {
   if (games.incomplete) return;
   const current = await friendCohortIds(memberId, db);
   if (current.incomplete) return;
-  const people = cohort.people.filter(person => current.ids.includes(person.memberId));
-  if (games.pending.length === 0) await settleGameFriendAwards(auth, games, people, friendExerciseIds(games, memberId, ids));
+  const currentIds = new Set(current.ids);
+  const people = cohort.people.filter(person => currentIds.has(person.memberId));
+  const currentGames = { ...games, pending: games.pending.filter(task => currentIds.has(task.memberId)) };
+  if (currentGames.pending.length === 0) await settleGameFriendAwards(auth, currentGames, people, friendExerciseIds(currentGames, memberId, current.ids));
   await assertGameMemberAuthCurrentTx(auth, db);
-  scheduleFriendInference(auth, games.pending.filter(task => task.memberId !== memberId));
+  scheduleFriendInference(auth, currentGames.pending.filter(task => task.memberId !== memberId));
 }
 
 async function settleGameFriendAwards(auth: HostedNativeMemberAuth, games: FriendGameSeries, people: FriendSeries[], measures: string[]) {
-  const memberId = auth.member.id;
   const candidates = measures.flatMap(measureId => friendPasses({ measureId,
     people: people.map(person => ({ ...person, daily: friendDaily(games.amounts.get(person.memberId) ?? [], measureId) })),
   }));
+  await settleFriendPasses(auth, people, candidates);
+}
+
+async function settleFriendPasses(auth: HostedNativeMemberAuth, people: FriendSeries[], candidates: Candidate[]) {
+  const memberId = auth.member.id;
   await settleAwards(memberId, candidates, async tx => {
     await assertGameMemberAuthCurrentTx(auth, tx);
     for (const subject of [...new Set(candidates.map(candidate => candidate.subjectMemberId!))].sort()) await lockGamePair(tx, memberId, subject);
@@ -134,10 +167,13 @@ function sharingAudience(people: FriendSeries[], rooms: FriendRoom[]): Friends["
 export async function setProgressFriendSharing(auth: HostedNativeMemberAuth, body: SetSharingBody, signal: AbortSignal) {
   try {
     const cohort = await readFriendCohort(auth.member.id);
-    const rooms = await readFriendRooms(auth.member.id, cohort.people.filter(person => !person.me).map(person => person.memberId));
-    if (cohort.incomplete || rooms.incomplete) throw hostedOnboardingError({ code: "PROGRESS_INCOMPLETE", httpStatus: 409,
+    const current = await friendCohortIds(auth.member.id, getPrisma());
+    const currentIds = new Set(current.ids);
+    const people = cohort.people.filter(person => currentIds.has(person.memberId));
+    const rooms = await readFriendRooms(auth.member.id, people.filter(person => !person.me).map(person => person.memberId));
+    if (cohort.incomplete || rooms.incomplete || current.incomplete) throw hostedOnboardingError({ code: "PROGRESS_INCOMPLETE", httpStatus: 409,
       message: "The full sharing audience could not be loaded." });
-    const audience = sharingAudience(cohort.people, rooms.rooms);
+    const audience = sharingAudience(people, rooms.rooms);
     await assertGameMemberAuthCurrentTx(auth, getPrisma());
     return await shareWithFriends({ auth, body, rooms: rooms.rooms, audience, signal });
   } catch (error) {

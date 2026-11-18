@@ -18,7 +18,7 @@ vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({}) }));
 vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({ requireActiveHostedMemberAuthFromBearerToken: mocks.auth }));
 vi.mock("@/src/lib/better-auth/native-auth", () => ({ assertHostedNativeMemberAuthCurrentTx: mocks.current }));
 vi.mock("@/src/lib/browser-vault/authority", () => ({ assertBrowserVaultMemberAuthority: mocks.authority }));
-vi.mock("@/src/lib/hosted-workspace/store", () => ({ readHostedWorkspace: mocks.workspace }));
+vi.mock("@/src/lib/hosted-workspace/store", () => ({ readHostedBrowserVaultReplicaState: mocks.workspace }));
 vi.mock("@/src/lib/hosted-execution/control", () => ({ readHostedExecutionControlClientIfConfigured: () => ({
   createBrowserVaultSession: mocks.control, ensureProcessing: mocks.wake, requestBrowserVaultRefresh: mocks.refresh,
 }) }));
@@ -29,7 +29,7 @@ vi.mock("@/src/lib/browser-vault/loader", async () => {
 import { createBrowserVaultRouteQueryClient, selectBrowserVaultReplicaDemand } from "@/src/lib/browser-vault/loader";
 import type { decodeReadyBrowserVaultSession } from "@/src/lib/browser-vault/loader";
 import { GET } from "../app/api/device-sync/companion/numbers/route";
-import { readSavedCompanionBodyHeight } from "../src/lib/device-sync/companion-numbers";
+import { readCompanionHealthSeries, readSavedCompanionBodyHeight } from "../src/lib/device-sync/companion-numbers";
 
 const savedAt = "2026-11-04T18:00:00.000Z";
 const replicaRef = {
@@ -638,7 +638,6 @@ it("keeps older devices, manual and unknown-source dates in RHR history and comp
 });
 
 it("shares canonical raw days below display rounding, including source and settled steps", async () => {
-  const { readCompanionHealthSeries } = await import("../src/lib/device-sync/companion-numbers");
   const raw = await readCompanionHealthSeries(await mocks.auth(), new AbortController().signal);
   expect(raw?.numbers.restingHeartRate?.latest).toMatchObject({ value: 58.2, source: "Garmin" });
   expect(raw?.numbers.sleep?.unit).toBe("minutes");
@@ -648,4 +647,29 @@ it("shares canonical raw days below display rounding, including source and settl
   expect(raw?.numbers.steps?.daily.some(point => point.date === through)).toBe(false);
   expect(mocks.authority).toHaveBeenCalledTimes(2);
   expect(mocks.current).toHaveBeenCalledTimes(1);
+});
+
+it.each([
+  { metrics: ["steps"] as const, keys: ["steps"] },
+  { metrics: ["sleep"] as const, keys: ["total-sleep-minutes"] },
+  { metrics: ["restingHeartRate", "steps", "sleep"] as const, keys: ["resting-heart-rate", "steps", "total-sleep-minutes"] },
+])("transports and extracts only the requested $metrics with the admitted replica", async ({ metrics, keys }) => {
+  const loaded = mocks.decode.getMockImplementation()!;
+  const series = vi.fn(), height = vi.fn();
+  mocks.decode.mockImplementation(async input => {
+    const result = await loaded(input);
+    series.mockImplementation(result.client.metrics.series.bind(result.client.metrics));
+    return { client: { ...result.client, metrics: { series }, metricSelections: { get: height } } };
+  });
+  const snapshot = await readCompanionHealthSeries(await mocks.auth(), request().signal, metrics,
+    { browserVaultReplicaRef: replicaRef, version: "7" });
+  const requestedMetricBuckets = [...new Set(await Promise.all(keys.map(getBrowserVaultMetricBucketId)))].sort();
+  expect(mocks.control).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ requestedMetricBuckets, replicaRef }));
+  expect(mocks.decode).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ session: expect.objectContaining({ workspaceVersion: "7" }) }));
+  expect(series.mock.calls.map(([query]) => query.metricKey)).toEqual(keys);
+  expect(height).not.toHaveBeenCalled();
+  expect(snapshot?.numbers[metrics[0]]?.daily.length).toBeGreaterThan(0);
+  expect(mocks.workspace).not.toHaveBeenCalled();
+  expect(mocks.current).toHaveBeenCalledOnce();
+  expect(mocks.authority).toHaveBeenCalledTimes(2);
 });

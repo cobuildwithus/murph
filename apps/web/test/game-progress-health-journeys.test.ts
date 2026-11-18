@@ -9,6 +9,7 @@ import { friendPasses } from "../src/lib/game/progress/friends";
 import { medalView } from "../src/lib/game/progress/view";
 import { medalSchema, measureSchema } from "../src/lib/game/progress/contract";
 import { encodePolyline } from "../src/lib/game/progress/route-geometry";
+import * as routes from "../src/lib/game/progress/routes";
 import { ladder } from "../src/lib/game/progress/bank";
 import { projection } from "../src/lib/game/progress/goals";
 import type { HealthMetricInput } from "../src/lib/game/progress/health-view";
@@ -56,7 +57,10 @@ it("composes settled Steps into an about-miles route without mixing measured wal
   expect(before).toHaveBeenCalledWith({ transaction: true });
   const routeAward = journeys.candidates.find(award => award.kind === "route")!;
   expect(routeAward.on).toBe("2026-11-09");
+  const renderRoute = vi.spyOn(routes, "routeView");
   const view = measureSchema.parse(healthJourneyViews(journeys, saved(journeys.candidates), today, "us")[0]);
+  expect(renderRoute).toHaveBeenCalledOnce();
+  renderRoute.mockRestore();
   expect(view.total).toEqual({ value: 27000, text: "27,000", unit: "steps" });
   expect(view.route).toMatchObject({ walkedText: "about 10 mi", progress: 1, goalPicked: false, finishedOn: "2026-11-09" });
   expect(view.route?.map).toContain("measure=steps");

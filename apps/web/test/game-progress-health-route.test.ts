@@ -65,7 +65,7 @@ it("reads Health inside the request's root unwrap cache", async () => {
     return snapshot();
   });
   expect((await GET(request())).status).toBe(200);
-  expect(mocks.raw).toHaveBeenCalledOnce();
+  expect(mocks.raw.mock.calls.map(call => call[2])).toEqual([["restingHeartRate", "steps", "sleep"]]);
 });
 
 it("a vault read failure is one retryable 503 with empty saved presentation and no writes", async () => {

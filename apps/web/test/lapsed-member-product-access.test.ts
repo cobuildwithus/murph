@@ -34,7 +34,7 @@ vi.mock("@/src/lib/device-sync/control-plane", () => ({
     listMemberConnectionStatuses: async () => [], listBoundedConnectionSourcesForConnections: async () => [],
   } }),
 }));
-vi.mock("@/src/lib/hosted-workspace/store", () => ({ readHostedWorkspace: edge.workspace }));
+vi.mock("@/src/lib/hosted-workspace/store", () => ({ readHostedWorkspace: edge.workspace, readHostedBrowserVaultReplicaState: edge.workspace }));
 vi.mock("@/src/lib/hosted-execution/control", () => ({
   readHostedExecutionControlClientIfConfigured: () => ({ createBrowserVaultSession: async () => ({ state: "ready" }) }),
 }));

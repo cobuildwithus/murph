@@ -36,7 +36,8 @@ it("converts raw own minutes and shared-board normalized minutes to seconds once
   expect(result[1].daily).toEqual([{ date: day.date, amount: 27000 }]);
   expect(result[2].daily).toBeNull(); // A group-only friend has no pair grant.
   expect(JSON.stringify(result)).not.toContain("heightCm");
-  expect(mocks.shared).toHaveBeenCalledTimes(1);
+  expect(mocks.shared).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ otherId: "leo", otherMetric: "sleep" }));
+  expect(mocks.raw.mock.calls[0][2]).toEqual(["sleep"]);
 });
 
 it("a private grant never returns its records even when stale bytes remain", async () => {
@@ -53,7 +54,7 @@ it("removes numbers if the pair room is no longer eligible after decryption", as
 
 it("marks the result incomplete if the post-decryption room read reaches its cap", async () => {
   mocks.rooms.mockResolvedValue({ rooms: [], incomplete: true });
-  expect(await read()).toEqual({ people: [], incomplete: true });
+  expect(await read()).toEqual({ people: [], incomplete: true, rooms: [] });
 });
 
 it("reads each of 500 pair rooms once, six shared reads at a time", async () => {
