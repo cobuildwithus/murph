@@ -1136,7 +1136,7 @@ describe("Kernel managed-login handoffs", () => {
       findManagedAuthConnection: vi.fn(async () => failedConnection),
       deleteBrowserByIdOrName: vi.fn(async () => {}),
       createBrowser: vi.fn(async () => ({
-        liveViewUrl: "https://browser.onkernel.com:8443/live/fallback",
+        liveViewUrl: "https://browser.onkernel.com/live/fallback",
         sessionId: "kernel-session-2",
       })),
     });
@@ -1172,7 +1172,7 @@ describe("Kernel managed-login handoffs", () => {
     expect(store.convertManagedLoginHandoffToLogin).toHaveBeenCalledWith({
       browser: {
         kernelLiveViewUrlEncrypted:
-          "https://browser.onkernel.com:8443/live/fallback",
+          "https://browser.onkernel.com/live/fallback",
         kernelSessionId: "kernel-session-2",
       },
       expectedHandoffUpdatedAt: CLAIMED_AT,
@@ -1432,7 +1432,7 @@ describe("Kernel managed-login handoffs", () => {
     store.requireOwnedRun.mockImplementation(async () => run);
     const kernel = createKernel({
       createBrowser: vi.fn(async () => ({
-        liveViewUrl: "https://api.onkernel.com/browser/live/private-capability",
+        liveViewUrl: "https://api.onkernel.com:444/browser/live/private-capability",
         sessionId: "kernel-session-2",
       })),
       findManagedAuthConnection: vi.fn(async () => failedConnection),

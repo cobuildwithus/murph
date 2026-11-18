@@ -4,7 +4,10 @@ export {
   KERNEL_COMPUTER_LIVE_VIEW_HOST_SUFFIXES,
 } from "../../../kernel-live-view-origin";
 
-import { KERNEL_COMPUTER_LIVE_VIEW_HOST_SUFFIXES } from "../../../kernel-live-view-origin";
+import {
+  KERNEL_COMPUTER_LIVE_VIEW_HOST_SUFFIXES,
+  KERNEL_COMPUTER_LIVE_VIEW_PORTS,
+} from "../../../kernel-live-view-origin";
 
 export interface ComputerLiveViewUrlInspection {
   allowed: boolean;
@@ -39,7 +42,7 @@ export function inspectComputerLiveViewUrl(input: {
   const hostnameAllowed = KERNEL_COMPUTER_LIVE_VIEW_HOST_SUFFIXES.some(
     (suffix) => parsedUrl.hostname.endsWith(`.${suffix}`),
   );
-  const portAllowed = parsedUrl.port === "8443";
+  const portAllowed = KERNEL_COMPUTER_LIVE_VIEW_PORTS.includes(parsedUrl.port);
   const protocolAllowed = parsedUrl.protocol === "https:";
   return {
     allowed: protocolAllowed && portAllowed && hostnameAllowed,

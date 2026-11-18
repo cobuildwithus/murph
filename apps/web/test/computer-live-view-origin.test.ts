@@ -15,19 +15,29 @@ describe("hosted computer live-view origins", () => {
       "onkernel.com",
     ]);
     expect(KERNEL_COMPUTER_LIVE_VIEW_FRAME_SOURCES).toEqual([
+      "https://*.kernel.sh",
       "https://*.kernel.sh:8443",
+      "https://*.onkernel.com",
       "https://*.onkernel.com:8443",
     ]);
     expect(KERNEL_COMPUTER_LIVE_VIEW_CONNECT_SOURCES).toEqual([
+      "https://*.kernel.sh",
+      "wss://*.kernel.sh",
       "https://*.kernel.sh:8443",
       "wss://*.kernel.sh:8443",
+      "https://*.onkernel.com",
+      "wss://*.onkernel.com",
       "https://*.onkernel.com:8443",
       "wss://*.onkernel.com:8443",
     ]);
   });
 
   it.each([
+    "https://proxy.jfk-friendly-booth.kernel.sh/browser/live/token",
+    "https://proxy.jfk-friendly-booth.kernel.sh:443/browser/live/token",
     "https://proxy.jfk-friendly-booth.kernel.sh:8443/browser/live/token",
+    "https://proxy.jfk-friendly-booth.onkernel.com/browser/live/token",
+    "https://proxy.jfk-friendly-booth.onkernel.com:443/browser/live/token",
     "https://proxy.jfk-friendly-booth.onkernel.com:8443/browser/live/token",
   ])("allows Kernel wildcard live-view proxy URLs: %s", (url) => {
     expect(isAllowedComputerLiveViewUrl({ url })).toBe(true);
@@ -39,16 +49,18 @@ describe("hosted computer live-view origins", () => {
     "https://kernel.sh:8443/browser/live/token",
     "https://evil-kernel.sh:8443/browser/live/token",
     "https://proxy.example.com:8443/browser/live/token",
-    "https://proxy.onkernel.com/browser/live/token",
+    "https://proxy.onkernel.com:444/browser/live/token",
+    "https://evil-kernel.sh/browser/live/token",
+    "http://proxy.kernel.sh/browser/live/token",
     "http://proxy.onkernel.com:8443/browser/live/token",
     "not a url",
-  ])("rejects non-Kernel live-view URLs: %s", (url) => {
+  ])("rejects disallowed live-view URLs: %s", (url) => {
     expect(isAllowedComputerLiveViewUrl({ url })).toBe(false);
   });
 
   it("describes only the safe validation dimensions of a rejected URL", () => {
     expect(inspectComputerLiveViewUrl({
-      url: "https://api.onkernel.com/browser/live/private-capability",
+      url: "https://api.onkernel.com:444/browser/live/private-capability",
     })).toEqual({
       allowed: false,
       hostnameAllowed: true,
