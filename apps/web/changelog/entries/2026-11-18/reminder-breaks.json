@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-18",
+  "order": 70,
+  "item": {
+    "id": "reminder-breaks",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Pause a reminder until a day you pick",
+    "summary": "Tell Murph \"pause my vitamin reminder till Monday, I'm away\" and it skips until then, then comes back on its own.",
+    "details": "You no longer have to remember to turn it back on. Murph tells you when it will next remind you, and you can end the break early any time.",
+    "relevanceTags": ["reminders"],
+    "sourcePullRequests": [5166]
+  }
+}

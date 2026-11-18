@@ -154,6 +154,7 @@ export interface UpsertAutomationInput extends AutomationScaffoldPayload {
   allowSlugRename?: boolean;
   automationId?: string;
   createOnly?: boolean;
+  resumeAt?: Date;
   /** Scheduler-only lower bound for the first occurrence after a cadence migration. */
   scheduleNotBefore?: Date;
   followUpSourceIntentId?: string;
@@ -181,6 +182,8 @@ export interface PatchAutomationInput {
   instructions?: string;
   lookup: string;
   now?: Date;
+  /** Replace the recurring schedule anchor, clamped to the patch time. */
+  resumeAt?: Date;
   route?: AutomationRoute;
   assistantTargetOverride?: AutomationAssistantTargetOverride | null;
   supportKind?: AutomationSupportKind | null;
@@ -1232,6 +1235,7 @@ export async function patchAutomation(
       continuityPolicy: input.continuityPolicy ?? existingRecord.continuityPolicy,
       instructions: input.instructions ?? existingRecord.instructions,
       now: input.now,
+      resumeAt: input.resumeAt,
       route: input.route ?? existingRecord.route,
       assistantTargetOverride:
         input.assistantTargetOverride === undefined
@@ -1776,9 +1780,19 @@ function resolveAutomationScheduleAnchorAt(input: {
   schedule: AutomationSchedule;
   status: AutomationStatus;
   now: string;
+  resumeAt?: Date;
   scheduleNotBefore?: Date;
 }): string {
-  const { existingRecord, schedule, status, now } = input;
+  const { existingRecord, schedule, status, now, resumeAt } = input;
+  if (resumeAt !== undefined) {
+    if (schedule.kind === "at" || schedule.kind === "deviceActivity") {
+      throw new VaultError(
+        "VAULT_INVALID_INPUT",
+        "resumeAt requires a recurring time schedule.",
+      );
+    }
+    return new Date(Math.max(Date.parse(now), resumeAt.getTime())).toISOString();
+  }
   const anchor = existingRecord === null
     || !isDeepStrictEqual(existingRecord.schedule, schedule)
     || (existingRecord.status !== "active" && status === "active")
@@ -1843,7 +1857,7 @@ async function upsertAutomationWithLatestRegistry(
   assertAutomationActiveUntilMatchesSchedule({ activeUntil, schedule });
   const status = normalizeAutomationStatus(input.status ?? existingRecord?.status);
   const scheduleAnchorAt = resolveAutomationScheduleAnchorAt({ existingRecord, schedule, status, now,
-    scheduleNotBefore: input.scheduleNotBefore });
+    resumeAt: input.resumeAt, scheduleNotBefore: input.scheduleNotBefore });
   const requestedTags = input.tags === undefined
     ? existingRecord?.tags ?? []
     : normalizeAutomationTags(input.tags);

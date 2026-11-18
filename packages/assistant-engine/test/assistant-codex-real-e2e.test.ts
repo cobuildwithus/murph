@@ -426,7 +426,7 @@ import {
   runMealIntakeBenchmarkCase,
 } from './support/meal-intake-benchmark.ts'
 
-import { MURPH_ATTACH_FOLLOW_UP_TOOL } from '../src/assistant-codex/dynamic-tools/automation.ts'
+import { MURPH_ATTACH_FOLLOW_UP_TOOL, MURPH_AUTOMATION_INSPECT_TOOL } from '../src/assistant-codex/dynamic-tools/automation.ts'
 // Production adds this resident sentence to every group chat that has the game
 // tools; hand-built game prompts below carry it the same way.
 import { GAME_RESIDENT_GROUP_POINTER } from '../src/assistant-codex/dynamic-tools/games.ts'
@@ -31829,6 +31829,93 @@ describeRealCodex('real Codex automation edit progress e2e', () => {
       expect(reply).toMatch(/updated|changed|done|set|now say/iu)
       expect(reply).toMatch(/stand up and stretch/iu)
       expect(reply).not.toMatch(/expectedUpdatedAt|schema|version|unable|failed|couldn.t/iu)
+      expect(result.runtimeIssueInputs).toEqual([])
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+})
+
+describeRealCodex('real Codex recurring reminder break e2e', () => {
+  it('takes a vitamin reminder break and confirms Monday evening', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-reminder-break-e2e-'))
+    const now = '2030-01-18T16:00:00.000Z'
+    const timeZone = 'America/New_York'
+    const schedule = { kind: 'dailyLocal', localTime: '19:00', timeZone } as const
+    const automationId = 'automation-vitamin-reminder'
+    const updatedAt = '2030-01-16T12:00:00.000Z'
+    const fixture = createVersionedAutomationPatchFixture({
+      current: {
+        automationId, lookupId: 'vitamin-reminder', title: 'Vitamin reminder',
+        updatedAt, status: 'active', schedule, effectiveTimeZone: timeZone,
+        instructions: 'Remind me to take my vitamin with dinner.',
+        occurrenceProjection: { status: 'resolved', nextOccurrenceAt: '2030-01-19T00:00:00.000Z' },
+      },
+      patch(request, current) {
+        if (!request.resumeAt) throw new Error('Expected a recurring reminder break.')
+        return {
+          ...current,
+          updatedAt: now,
+          occurrenceProjection: {
+            status: 'resolved',
+            nextOccurrenceAt: computeAssistantCronNextRunAt(schedule, request.resumeAt),
+          },
+        }
+      },
+    })
+    try {
+      const codexCommand = normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? 'codex'
+      const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({ codexCommand, directory: workingDirectory })
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never', baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand, codexHome: config.codexHome,
+        developerInstructions: buildAssistantSystemPrompt({
+          assistantCliContract: null, assistantHostedAutomationAvailable: true,
+          assistantProgressUpdatesAvailable: false,
+          channel: 'linq', cliAccess: { rawCommand: 'vault-cli' },
+          conversationScope: 'direct', currentLocalDate: '2030-01-18',
+          currentInstant: now, currentTimeZone: timeZone, hostedRuntime: true,
+          onboardingGuidance: false, ordinaryInboundTurn: true, turnTrigger: 'automation-auto-reply',
+        }),
+        // The pinned hosted catalog does not include the requested live model.
+        // Offer the canonical contracts eagerly so the journey can test the edit.
+        dynamicTools: [MURPH_AUTOMATION_INSPECT_TOOL, MURPH_AUTOMATION_TOOL]
+          .map((tool) => ({ ...tool, deferLoading: false })),
+        env: { ...config.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: catalog },
+        hostedToolContext: {
+          automationTool: { request: fixture.request },
+          computerToolsAvailable: false, currentHostedDeliveryContext: () => null,
+          currentHostedMailboxItemIds: () => [], vaultFileSendAvailable: false,
+          sendVaultFile: async () => { throw new Error('Unexpected file send.') },
+        },
+        model: config.model, modelProvider: config.modelProvider,
+        prompt: [
+          `Conversation context: The member's only vitamin reminder has automationId ${automationId}.`,
+          'Current member message: Can you give my vitamin reminder a break until Monday? I’m out of town this weekend.',
+        ].join('\n'),
+        reasoningEffort: 'low', sandbox: 'workspace-write', workingDirectory,
+      })
+      const attempts = readDynamicToolAttempts(result.jsonEvents)
+        .filter(({ tool }) => tool === MURPH_AUTOMATION_TOOL.name || tool === MURPH_AUTOMATION_INSPECT_TOOL.name)
+        .map(({ argumentsValue }) => argumentsValue)
+      const reply = result.finalMessage.trim()
+      process.stdout.write('[reminder-break-live] ' + JSON.stringify({
+        reply, attempts, actions: fixture.requests.map(({ action }) => action),
+      }) + '\n')
+      expect(attempts).toEqual([
+        { action: 'inspect', lookup: automationId },
+        { action: 'patch', lookup: automationId, expectedUpdatedAt: updatedAt,
+          resumeLocalAt: { date: '2030-01-21', time: '00:00', timeZone } },
+      ])
+      expect(fixture.requests).toEqual([
+        { action: 'inspect', lookup: automationId },
+        { action: 'patch', lookup: automationId, expectedUpdatedAt: updatedAt,
+          resumeAt: new Date('2030-01-21T05:00:00.000Z') },
+      ])
+      expect(reply).toMatch(/Monday/iu)
+      expect(reply).toMatch(/7\s*(?::00)?\s*p\.?m\.?|19:00/iu)
+      expect(reply).not.toMatch(/\?|midnight|expectedUpdatedAt|resumeLocalAt|unable|failed|couldn.t/iu)
       expect(result.runtimeIssueInputs).toEqual([])
     } finally {
       await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])

@@ -354,6 +354,73 @@ describe("markdown document primitives", () => {
       });
   });
 
+  it.each(["2030-01-16T12:00:00.000Z", "2030-01-14T00:00:00.000Z"])(
+    "ends a recurring break at the patch time when resumeAt is %s",
+    async (resumeAt) => {
+      const vaultRoot = await makeVaultRoot();
+      const schedule = { kind: "dailyLocal" as const, localTime: "18:00", timeZone: "UTC" };
+      const { record } = await upsertAutomation({
+        vaultRoot,
+        now: new Date("2030-01-12T12:00:00.000Z"),
+        ...createAutomationPayload({ schedule }),
+      });
+      const target = { lookup: record.automationId, vaultRoot };
+      const breakEnd = new Date("2030-01-21T00:00:00.000Z");
+      const breakPatch = await patchAutomation({
+        ...target,
+        expectedUpdatedAt: record.updatedAt,
+        now: new Date("2030-01-14T12:00:00.000Z"),
+        resumeAt: breakEnd,
+      });
+      expect(breakPatch.record).toMatchObject({
+        schedule,
+        scheduleAnchorAt: breakEnd.toISOString(),
+        status: "active",
+        updatedAt: "2030-01-14T12:00:00.000Z",
+      });
+      const edited = await patchAutomation({
+        ...target,
+        expectedUpdatedAt: breakPatch.record.updatedAt,
+        now: new Date("2030-01-15T12:00:00.000Z"),
+        instructions: "Remind me to open the greenhouse.",
+      });
+      expect(edited.record.scheduleAnchorAt).toBe(breakEnd.toISOString());
+      const now = new Date("2030-01-16T12:00:00.000Z");
+      await patchAutomation({
+        ...target,
+        expectedUpdatedAt: edited.record.updatedAt,
+        now,
+        resumeAt: new Date(resumeAt),
+      });
+      await expect(showAutomation({ vaultRoot, automationId: record.automationId }))
+        .resolves.toMatchObject({ schedule, scheduleAnchorAt: now.toISOString(), status: "active" });
+    },
+  );
+
+  it.each([
+    { kind: "at", at: "2030-01-21T18:00:00.000Z" },
+    { kind: "deviceActivity", after: "2030-01-13T00:00:00.000Z", activityKind: "walk" },
+  ] as const)("rejects a break for a $kind automation", async (schedule) => {
+    const vaultRoot = await makeVaultRoot();
+    const { record } = await upsertAutomation({
+      vaultRoot,
+      now: new Date("2030-01-12T12:00:00.000Z"),
+      ...createAutomationPayload({ schedule }),
+    });
+    await expect(patchAutomation({
+      vaultRoot,
+      lookup: record.automationId,
+      expectedUpdatedAt: record.updatedAt,
+      now: new Date("2030-01-14T12:00:00.000Z"),
+      resumeAt: new Date("2030-01-21T00:00:00.000Z"),
+    })).rejects.toMatchObject({
+      code: "VAULT_INVALID_INPUT",
+      message: "resumeAt requires a recurring time schedule.",
+    });
+    await expect(showAutomation({ vaultRoot, automationId: record.automationId }))
+      .resolves.toEqual(record);
+  });
+
   it("commits a migrated schedule and its not-before anchor together without moving audit time", async () => {
     const vaultRoot = await makeVaultRoot();
     const now = new Date("2030-01-15T17:10:00.000Z");
