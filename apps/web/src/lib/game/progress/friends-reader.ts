@@ -12,7 +12,7 @@ import { friendCohortIds, readFriendCohort } from "./friend-cohort";
 import { friendMeasure, readFriendGameSeries, type FriendGameSeries } from "./friend-games";
 import { readFriendHealthSeries } from "./friend-health";
 import { readFriendRooms, shareWithFriends, type FriendRoom } from "./friend-sharing";
-import { friendPasses, friendsView, type FriendSeries } from "./friends";
+import { friendChallenge, friendPasses, friendsView, type FriendSeries } from "./friends";
 import { settleAwards } from "./awards";
 import type { DayAmount } from "./registry";
 import { scheduleInference } from "./series";
@@ -54,7 +54,8 @@ export async function readProgressFriends(auth: HostedNativeMemberAuth, query: F
     scheduleFriendInference(auth, games.pending);
     const shareAudience = incomplete ? [] : sharingPreview(people, rooms.rooms, query.measure);
     return friendsView({ people, measure, pills, query, units, today: toLocalDayKey(new Date(), cohort.timeZone),
-      shareAudience, incomplete, departureNotice: cohort.departureNotice });
+      shareAudience, incomplete, departureNotice: cohort.departureNotice,
+      challenge: friendChallenge(query.measure, games.tasks.get(memberId)?.get(query.measure)?.text) });
   } catch (error) {
     if (isHostedOnboardingError(error)) throw error;
     throw hostedOnboardingError({ code: "PROGRESS_FRIENDS_UNAVAILABLE", httpStatus: 503, retryable: true,

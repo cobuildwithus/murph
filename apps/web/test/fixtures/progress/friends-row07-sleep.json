@@ -270,5 +270,9 @@
   "shareAsk": false,
   "shareAudience": [],
   "departureNotice": null,
-  "incomplete": false
+  "incomplete": false,
+  "challenge": {
+    "task": "Lights out by 11 every night",
+    "category": "calm"
+  }
 }
