@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { friendAmount, friendPasses, friendsView, type FriendSeries } from "../src/lib/game/progress/friends";
+import { friendAmount, friendChallenge, friendPasses, friendsView, type FriendSeries } from "../src/lib/game/progress/friends";
 
 const measure = { id: "pushups.reps", label: "Pushups", icon: "pushups", format: "count" as const, noun: "pushups" };
 const person = (memberId: string, firstName: string, amount: number, me = false): FriendSeries => ({
@@ -7,7 +7,7 @@ const person = (memberId: string, firstName: string, amount: number, me = false)
   daily: [{ date: "2026-11-01", amount }],
 });
 const view = (people: FriendSeries[]) => friendsView({ units: "us", people, measure, pills: [measure],
-  query: { measure: measure.id, range: "month" }, today: "2026-11-16", shareAudience: [], incomplete: false, departureNotice: null });
+  query: { measure: measure.id, range: "month" }, today: "2026-11-16", shareAudience: [], incomplete: false, departureNotice: null, challenge: null });
 
 it("competition ranks ties 1, 2, 2, 4", () => {
   expect(view([person("sam", "Sam", 960), person("ava", "Ava", 900, true),
@@ -35,7 +35,7 @@ it.each(["pushups.reps", "steps", "sleep"])("charts every ranked person for %s",
   const people = [person("sam", "Sam", 120), person("maya", "Maya", 110), person("leo", "Leo", 100),
     person("ava", "Ava", 90, true), person("jordan", "Jordan", 80), person("priya", "Priya", 70)];
   const result = friendsView({ units: "us", people, measure: { ...measure, id }, pills: [], query: { measure: id, range: "month" },
-    today: "2026-11-16", shareAudience: [], incomplete: false, departureNotice: null });
+    today: "2026-11-16", shareAudience: [], incomplete: false, departureNotice: null, challenge: null });
   expect(result.chart).toEqual(people.map(person => ({ memberId: person.memberId,
     points: [["2026-11-01", person.daily![0].amount]] })));
   expect(result.rows.map(row => row.rank)).toEqual([1, 2, 3, 4, 5, 6]);
@@ -61,7 +61,7 @@ it("filters the drawer's dates without changing the all-time award input", () =>
   ] };
   const people = [me, person("leo", "Leo", 700), person("sam", "Sam", 900)];
   const result = friendsView({ units: "us", people, measure, pills: [measure], query: { measure: measure.id, range: "week", with: "leo" },
-    today: "2026-11-16", shareAudience: [], incomplete: false, departureNotice: null });
+    today: "2026-11-16", shareAudience: [], incomplete: false, departureNotice: null, challenge: null });
   expect(result.rows.map(row => [row.memberId, row.total?.value])).toEqual([["ava", 100], ["leo", 0]]);
   expect(result.chart).toEqual([{ memberId: "ava", points: [["2026-11-16", 100]] }, { memberId: "leo", points: [] }]);
   expect(friendPasses({ measureId: measure.id, people }).map(award => award.on)).toEqual(["2026-10-30", "2026-10-30"]);
@@ -70,4 +70,12 @@ it("filters the drawer's dates without changing the all-time award input", () =>
 it("formats route distance in miles while retaining canonical meters", () => {
   expect(friendAmount(3218.688, { id: "walk.meters", format: "distance", noun: "walked" }, "us"))
     .toEqual({ value: 3218.688, text: "2 mi", unit: "meters" });
+});
+
+it("challenges with Health's sleep idea, steps, or your own last task and its kind of week", () => {
+  expect(friendChallenge("sleep", undefined)).toEqual({ task: "Lights out by 11 every night", category: "calm" });
+  expect(friendChallenge("steps", "ignored")).toEqual({ task: "10,000 steps every day", category: "move" });
+  expect(["pushups.reps", "run.meters", "yoga.seconds"].map(id => friendChallenge(id, "Some task")?.category))
+    .toEqual(["strength", "move", "calm"]);
+  expect(friendChallenge("pushups.reps", undefined)).toBeNull();
 });

@@ -270,5 +270,6 @@
   "shareAsk": false,
   "shareAudience": [],
   "departureNotice": null,
-  "incomplete": false
+  "incomplete": false,
+  "challenge": null
 }

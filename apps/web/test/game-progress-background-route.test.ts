@@ -94,7 +94,7 @@ beforeEach(() => {
   mocks.ids.mockResolvedValue({ incomplete: false, ids: ["ava", "leo"] });
   mocks.rooms.mockResolvedValue({ incomplete: false, rooms: [] });
   const measures = ["pushups.reps", "planks.seconds"];
-  const games: FriendGameSeries = { incomplete: false, pending: [], measures: new Map(measures.map(id => [id, friendMeasure(id)])),
+  const games: FriendGameSeries = { incomplete: false, pending: [], tasks: new Map(), measures: new Map(measures.map(id => [id, friendMeasure(id)])),
     amounts: new Map(["ava", "leo"].map(member => [member, measures.flatMap(measureId => [
       { measureId, date: "2026-11-01", amount: member === "ava" ? 20 : 50 },
       { measureId, date: "2026-11-02", amount: member === "ava" ? 40 : 0 },
@@ -310,7 +310,7 @@ it.each([{ peopleCount: 5000, measureCount: 2 }, { peopleCount: 2, measureCount:
     const measures = Array.from({ length: measureCount }, (_, index) => `exercise${index}.reps`);
     mocks.cohort.mockResolvedValue({ incomplete: false, people });
     mocks.ids.mockResolvedValue({ incomplete: false, ids: people.map(person => person.memberId) });
-    mocks.friendGames.mockResolvedValue({ incomplete: false, pending: [],
+    mocks.friendGames.mockResolvedValue({ incomplete: false, pending: [], tasks: new Map(),
       measures: new Map(measures.map(id => [id, friendMeasure(id)])),
       amounts: new Map(people.map(person => [person.memberId, measures.map(measureId => ({
         measureId, date: joinedOn, amount: person.me ? 2 : 1,

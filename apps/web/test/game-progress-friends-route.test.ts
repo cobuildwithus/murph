@@ -29,7 +29,7 @@ const request = (query = "measure=pushups.reps", units = "us") => new Request(`h
   { headers: { "X-Murph-Client-Units": units } });
 const game = (id: string, memberIds: string[]) => ({ id, wordsOwnerMemberId: memberIds[0],
   terms: { v: 1, versions: [{ n: 1, fromDay: 0, schedule: { count: 7 }, stakes: [] }] },
-  termsWordsEncrypted: JSON.stringify({ v: 1, versions: [{ n: 1, tasks: memberIds.map((_, seat) => ({ seat, text: "40 pushups daily" })), stakes: [] }] }),
+  termsWordsEncrypted: JSON.stringify({ v: 1, versions: [{ n: 1, tasks: memberIds.map((memberId, seat) => ({ seat, text: `${memberId === "ava" ? 40 : 30} pushups daily` })), stakes: [] }] }),
   players: memberIds.map((memberId, seat) => ({ memberId, seat, dayOne: new Date("2026-11-01T00:00:00Z") })),
 });
 const entry = (id: string, gameId: string, memberId: string, dayIndex: number, count: number, attempt = 1) => ({
@@ -133,10 +133,19 @@ it("counts a friend's other games, merges same-day amounts and counts a retake o
   expect(body.incomplete).toBe(false);
   expect(body.rows.map(row => [row.memberId, row.total?.value, row.rank])).toEqual([["ava", 320, 1], ["leo", 250, 2]]);
   expect(body.chart.find(line => line.memberId === "leo")?.points).toEqual([["2026-11-01", 250]]);
-  expect(JSON.stringify(body)).not.toMatch(/other-game|40 pushups daily|payloadEncrypted/);
+  expect(JSON.stringify(body)).not.toMatch(/other-game|30 pushups daily|payloadEncrypted/);
+  expect(body.challenge).toEqual({ task: "40 pushups daily", category: "strength" });
   expect(mocks.games.mock.calls[0][0].where.players.some).toEqual({ memberId: { in: ["ava", "leo"] } });
   expect(mocks.settle.mock.calls[0][1]).toEqual([expect.objectContaining({ kind: "friend", subjectMemberId: "leo", on: "2026-11-02" })]);
   expect(response.headers.get("cache-control")).toBe("private, no-store");
+});
+
+it("challenges with your task from the latest day you played the exercise", async () => {
+  const earlier = { ...game("earlier", ["ava"]), players: [{ memberId: "ava", seat: 0, dayOne: new Date("2026-10-20T00:00:00Z") }] };
+  earlier.termsWordsEncrypted = earlier.termsWordsEncrypted.replace("40 pushups daily", "100 pushups");
+  mocks.games.mockResolvedValue([game("shared", ["ava", "leo"]), earlier]);
+  mocks.entries.mockResolvedValue([entry("later", "shared", "ava", 1, 200), entry("old", "earlier", "ava", 0, 100)]);
+  expect(friendsSchema.parse(await (await GET(request())).json()).challenge?.task).toBe("40 pushups daily");
 });
 
 it.each([["us", "1 mi"], ["metric", "1.6 km"]])("renders ranked distance in requested %s units", async (units, text) => {
@@ -147,6 +156,7 @@ it.each([["us", "1 mi"], ["metric", "1.6 km"]])("renders ranked distance in requ
   const body = friendsSchema.parse(await (await GET(request("measure=walk.meters", units))).json());
   expect(body.rows.find(row => row.me)?.total).toEqual({ value: 1609.344, unit: "meters", text });
   expect(body).not.toHaveProperty("next");
+  expect(body.challenge?.category).toBe("move");
   expect(body.chart.find(line => line.memberId === "ava")?.points).toEqual([["2026-11-01", 1609.344]]);
 });
 

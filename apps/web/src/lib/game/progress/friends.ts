@@ -3,6 +3,7 @@ import type { ClientUnits } from "../../companion/client-info";
 import type { Amount, Friends, FriendsQuery, Measure } from "./contract";
 import type { Candidate } from "./registry";
 import { formatAmount, formatNumber } from "./format";
+import { HEALTH_RECS } from "./health";
 
 export interface FriendSeries {
   memberId: string;
@@ -19,7 +20,7 @@ export function friendsView(input: {
   people: readonly FriendSeries[]; measure: FriendMeasure; pills: Friends["pills"];
   query: FriendsQuery; today: string; shareAudience: Friends["shareAudience"];
   incomplete: boolean; departureNotice: string | null;
-  units: ClientUnits;
+  units: ClientUnits; challenge: Friends["challenge"];
 }): Friends {
   const { measure, query, today } = input;
   const from = query.range === "month" ? `${today.slice(0, 7)}-01`
@@ -48,7 +49,17 @@ export function friendsView(input: {
   return { incomplete: input.incomplete, departureNotice: input.departureNotice,
     pills: input.pills, pill: measure.id, range: query.range, rows, chart,
     shareAsk: (measure.id === "steps" || measure.id === "sleep") && input.shareAudience.length > 0,
-    shareAudience: input.shareAudience };
+    shareAudience: input.shareAudience, challenge: input.challenge };
+}
+
+/** Steps and sleep suggest what Health does; an exercise, your own last task on it. */
+export function friendChallenge(measureId: string, lastTask: string | undefined): Friends["challenge"] {
+  if (measureId === "steps") return { task: "10,000 steps every day", category: "move" };
+  if (measureId === "sleep") return { task: HEALTH_RECS.sleep[0]!.task, category: "calm" };
+  if (!lastTask) return null;
+  const name = measureId.split(".")[0];
+  return { task: lastTask, category: name === "walk" || name === "run" ? "move"
+    : ["meditation", "stretching", "yoga"].includes(name) ? "calm" : "strength" };
 }
 
 export function friendAmount(value: number, measure: Pick<FriendMeasure, "id" | "format" | "noun">, units: ClientUnits): Amount {

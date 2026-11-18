@@ -110,6 +110,8 @@ export const friendsSchema = z.object({
   departureNotice: z.string().nullable(),
   /** Exact two-person room recipients, shown before consent. */
   shareAudience: z.array(person),
+  /** The game a friend's Challenge button sets up on this measure: its task and kind of week. */
+  challenge: z.object({ task: z.string(), category: z.enum(["move", "calm", "strength"]) }).nullable(),
 });
 export type Friends = z.infer<typeof friendsSchema>;
 export const goalsSchema = z.object({

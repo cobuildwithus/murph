@@ -18,6 +18,8 @@ export interface FriendGameSeries {
   amounts: Map<string, DayAmount[]>;
   measures: Map<string, FriendMeasure>;
   pending: PendingProgressTask[];
+  /** Each member's latest task per measure, by the day it counted for. */
+  tasks: Map<string, Map<string, { date: string; text: string }>>;
 }
 
 /** D7: load each current friend's own posts, including games the viewer never joined. */
@@ -30,7 +32,7 @@ export async function readFriendGameSeries(memberIds: string[]): Promise<FriendG
         id: true, terms: true, termsWordsEncrypted: true, wordsOwnerMemberId: true,
         players: { where: { memberId: { in: memberIds } }, take: 10, select: { memberId: true, seat: true, dayOne: true } },
       } });
-    const empty: FriendGameSeries = { incomplete: true, amounts: new Map(), measures: new Map(), pending: [] };
+    const empty: FriendGameSeries = { incomplete: true, amounts: new Map(), measures: new Map(), pending: [], tasks: new Map() };
     if (games.length > GAME_LIMIT) return empty;
     const entries = await db.gameEntry.findMany({ where: { gameId: { in: games.map(game => game.id) },
       memberId: { in: memberIds }, attempt: { gt: 0 }, withdrawnAt: null, OR: [{ incomplete: false }, { incomplete: null }] },
@@ -80,7 +82,7 @@ export async function readFriendGameSeries(memberIds: string[]): Promise<FriendG
       const own = states.get(row.memberId) ?? new Map<string, MeasureState>();
       own.set(stateLookups.get(row.lookup)!, openedStates[index]); states.set(row.memberId, own);
     });
-    const result: FriendGameSeries = { incomplete: false, amounts: new Map(), measures: new Map(), pending: [] };
+    const result: FriendGameSeries = { incomplete: false, amounts: new Map(), measures: new Map(), pending: [], tasks: new Map() };
     const pending = new Map<string, PendingProgressTask>();
     // Retakes have the same obligation key; only the latest surviving attempt counts.
     const surviving = new Map<string, typeof prepared[number]>();
@@ -100,6 +102,9 @@ export async function readFriendGameSeries(memberIds: string[]): Promise<FriendG
       amounts.push({ measureId: contribution.id, date, amount: contribution.amount });
       result.amounts.set(entry.memberId, amounts);
       result.measures.set(contribution.id, friendMeasure(contribution.id));
+      const tasks = result.tasks.get(entry.memberId) ?? new Map<string, { date: string; text: string }>();
+      if ((tasks.get(contribution.id)?.date ?? "") <= date) tasks.set(contribution.id, { date, text: task.text });
+      result.tasks.set(entry.memberId, tasks);
     }
     result.pending = [...pending.values()];
     return result;
