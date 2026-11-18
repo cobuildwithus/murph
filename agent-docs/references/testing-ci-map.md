@@ -1735,7 +1735,9 @@ boundaries are owned by `agent-docs/operations/verification-and-runtime.md`.
   regenerates the
   hosted web Prisma client after migrations, and runs the hosted Linq DB
   configured-line sync/readiness check so DB-backed Linq assignment cannot
-  deploy with an empty assignable line pool or stale generated client.
+  deploy without a configured, enabled line or with a stale generated client.
+  The check ignores line delivery health and provider reputation, which a
+  deploy cannot change and which assignment and egress enforce at runtime.
   Production deploy sync skips provider inventory; provider inventory remains on
   explicit operator/contact-card paths. Normal production Prisma migrations must
   remain backward compatible with the currently deployed app because a

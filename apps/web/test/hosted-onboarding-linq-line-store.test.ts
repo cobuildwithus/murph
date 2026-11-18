@@ -7,7 +7,7 @@ import {
   createHostedPhoneLookupKeyReadCandidates,
 } from "@/src/lib/hosted-onboarding/contact-privacy";
 import {
-  assertHostedLinqAssignableHomeLinePoolReady,
+  assertHostedLinqConfiguredHomeLinePoolReady,
   claimHostedLinqProactiveConversationCapacityTx,
   hasActiveHostedLinqManagedLine,
   readActiveHostedLinqManagedLineLookupKeys,
@@ -608,30 +608,37 @@ describe("readHostedLinqReceiptCorrelatedRecoveryLineTx", () => {
   });
 });
 
-describe("assertHostedLinqAssignableHomeLinePoolReady", () => {
-  it("passes when at least one configured provider-eligible line exists", async () => {
-    const prisma = {
-      hostedLinqLine: {
-        findMany: vi.fn().mockResolvedValue([
-          buildAssignableLineRow("+15550100001"),
-        ]),
-      },
-    } as never;
+describe("assertHostedLinqConfiguredHomeLinePoolReady", () => {
+  it("passes on configuration alone, whatever the line's delivery health or reputation", async () => {
+    const findMany = vi.fn().mockResolvedValue([
+      buildAssignableLineRow("+15550100001"),
+    ]);
+    const prisma = { hostedLinqLine: { findMany } } as never;
 
-    await expect(assertHostedLinqAssignableHomeLinePoolReady({ prisma }))
+    await expect(assertHostedLinqConfiguredHomeLinePoolReady({ prisma }))
       .resolves.toBeUndefined();
+    // A deploy cannot fix runtime health, so a line in warning or at risk
+    // must not block it. Assignment and egress still enforce both.
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        assignmentWeight: { gt: 0 },
+        configuredAt: { not: null },
+        egressPolicy: "enabled",
+        phoneNumberEncrypted: { not: null },
+      },
+    }));
   });
 
-  it("fails visibly when no provider-eligible configured line remains", async () => {
+  it("fails visibly when no line is configured", async () => {
     const prisma = {
       hostedLinqLine: {
         findMany: vi.fn().mockResolvedValue([]),
       },
     } as never;
 
-    await expect(assertHostedLinqAssignableHomeLinePoolReady({ prisma }))
+    await expect(assertHostedLinqConfiguredHomeLinePoolReady({ prisma }))
       .rejects.toMatchObject({
-        code: "HOSTED_LINQ_ASSIGNABLE_LINE_POOL_REQUIRED",
+        code: "HOSTED_LINQ_CONFIGURED_LINE_POOL_REQUIRED",
         httpStatus: 500,
       });
   });

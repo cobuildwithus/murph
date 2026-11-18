@@ -435,6 +435,63 @@ describe("hosted Linq observability stores", () => {
   });
 
   it.each([
+    { code: "4006", marksWarning: false },
+    { code: "4001", marksWarning: true },
+  ])("records a $code failure on its line and marks it warning only for a definite failure", async ({ code, marksWarning }) => {
+    const fixture = createObservabilityPrismaFixture();
+    fixture.hostedLinqDeliveryFindFirst.mockResolvedValue({
+      id: "hld_attempt_789",
+      idempotencyKey: null,
+      phoneNumberLookupKey: "hbidx:phone:runtime-line",
+      sourceRef: null,
+      template: null,
+    });
+    fixture.hostedLinqLineFindUnique.mockResolvedValue({
+      phoneNumberHint: "*** 2523",
+      phoneNumberLookupKey: "hbidx:phone:runtime-line",
+    });
+    // Production 4006 receipts carry no line phone, so the delivery receipt
+    // resolves the line, the same path a definite failure takes.
+    const event = requireParsedProviderEvent(buildProviderEvent({
+      data: {
+        chat_id: "chat_failed_789",
+        error: { code, message: "Delivery uncertain. Message may still go out." },
+        message_id: "msg_failed_789",
+      },
+      eventId: `evt_failed_${code}`,
+      eventType: "message.failed",
+    }));
+
+    await ingestHostedLinqProviderEventTx({
+      event,
+      prisma: fixture.prisma as never,
+      receivedAt: new Date("2026-03-26T12:00:02.000Z"),
+    });
+
+    const lineFailureWrites = fixture.hostedLinqLineUpdateMany.mock.calls
+      .map(([args]) => args as { data: Record<string, unknown>; where: Record<string, unknown> })
+      .filter(({ data }) => data.lastFailureCode === code);
+    expect(lineFailureWrites).toHaveLength(1);
+    expect(lineFailureWrites[0]).toMatchObject({
+      data: {
+        lastReceiptEventId: createHostedLinqProviderEventLookupKey(`evt_failed_${code}`),
+        totalFailedCount: { increment: 1 },
+      },
+      where: { phoneNumberLookupKey: "hbidx:phone:runtime-line" },
+    });
+    if (marksWarning) {
+      expect(lineFailureWrites[0]?.data.healthStatus).toBe("warning");
+    } else {
+      expect(lineFailureWrites[0]?.data).not.toHaveProperty("healthStatus");
+    }
+    expect(fixture.hostedLinqDeliveryUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ failureCode: code, status: "failed" }),
+      }),
+    );
+  });
+
+  it.each([
     "invite_signup",
     "invite_signup_fallback",
   ] as const)("reopens onboarding link notice after %s terminal delivery failure", async (template) => {

@@ -29,6 +29,8 @@ import { normalizeNullableString } from "./shared";
 type HostedLinqLineClient = PrismaClient | Prisma.TransactionClient;
 
 export const HOSTED_LINQ_ASSIGNABLE_HOME_LINE_LIMIT = 250;
+/** Linq `message.failed` code 4006: "Delivery uncertain. Message may still go out." */
+const HOSTED_LINQ_DELIVERY_UNCERTAIN_FAILURE_CODE = "4006";
 export const HOSTED_LINQ_RECENT_MESSAGE_LOAD_WINDOW_MS =
   7 * 24 * 60 * 60 * 1_000;
 
@@ -407,9 +409,16 @@ function buildHostedLinqConfiguredLineSnapshotQuery(input: {
 export async function listHostedLinqAssignableHomeLines(input: {
   prisma: HostedLinqLineClient;
 }): Promise<HostedLinqAssignableHomeLine[]> {
+  return listHostedLinqHomeLinesWhere(input.prisma, buildHostedLinqAssignableHomeLineWhere());
+}
+
+async function listHostedLinqHomeLinesWhere(
+  prisma: HostedLinqLineClient,
+  where: Prisma.HostedLinqLineWhereInput,
+): Promise<HostedLinqAssignableHomeLine[]> {
   const limit = HOSTED_LINQ_ASSIGNABLE_HOME_LINE_LIMIT;
-  const rows = await input.prisma.hostedLinqLine.findMany({
-    where: buildHostedLinqAssignableHomeLineWhere(),
+  const rows = await prisma.hostedLinqLine.findMany({
+    where,
     orderBy: [
       { assignmentWeight: "desc" },
       { phoneNumberLookupKey: "asc" },
@@ -827,27 +836,42 @@ export async function claimHostedLinqProactiveConversationCapacityTx(input: {
   return started.count === 1;
 }
 
-export async function assertHostedLinqAssignableHomeLinePoolReady(input: {
+/**
+ * The deploy gate checks configuration only: at least one configured, enabled
+ * line whose phone number decrypts. Delivery health and provider reputation
+ * change at runtime, a deploy cannot fix them, and assignment and egress
+ * already enforce them on every request.
+ */
+export async function assertHostedLinqConfiguredHomeLinePoolReady(input: {
   prisma: HostedLinqLineClient;
 }): Promise<void> {
-  const lines = await listHostedLinqAssignableHomeLines(input);
+  const lines = await listHostedLinqHomeLinesWhere(
+    input.prisma,
+    buildHostedLinqConfiguredHomeLineWhere(),
+  );
   if (lines.length === 0) {
     throw hostedOnboardingError({
-      code: "HOSTED_LINQ_ASSIGNABLE_LINE_POOL_REQUIRED",
+      code: "HOSTED_LINQ_CONFIGURED_LINE_POOL_REQUIRED",
       httpStatus: 500,
-      message: "Hosted Linq DB home-line cutover requires at least one configured, enabled, healthy assignable line.",
+      message: "Hosted Linq requires at least one configured, enabled line with a readable phone number.",
       retryable: false,
     });
   }
 }
 
-function buildHostedLinqAssignableHomeLineWhere(): Prisma.HostedLinqLineWhereInput {
+function buildHostedLinqConfiguredHomeLineWhere(): Prisma.HostedLinqLineWhereInput {
   return {
     assignmentWeight: { gt: 0 },
     configuredAt: { not: null },
     egressPolicy: "enabled",
-    healthStatus: { in: ["healthy", "unknown"] },
     phoneNumberEncrypted: { not: null },
+  };
+}
+
+function buildHostedLinqAssignableHomeLineWhere(): Prisma.HostedLinqLineWhereInput {
+  return {
+    ...buildHostedLinqConfiguredHomeLineWhere(),
+    healthStatus: { in: ["healthy", "unknown"] },
     ...buildHostedLinqProviderEligibleWhere(),
   };
 }
@@ -1214,7 +1238,12 @@ async function projectMessageFailed(
     where: buildMessageReceiptLineProjectionWhere(phoneNumberLookupKey, progress),
     data: {
       consecutiveFailures: { increment: 1 },
-      healthStatus: "warning",
+      // An uncertain receipt is recorded but says nothing about the line. A
+      // warning would drop the line from new-member assignment until a later
+      // delivered receipt, and with one line that leaves new members without one.
+      ...(event.failureCode === HOSTED_LINQ_DELIVERY_UNCERTAIN_FAILURE_CODE
+        ? {}
+        : { healthStatus: "warning" }),
       lastFailedAt: event.providerCreatedAt,
       lastFailureCode: event.failureCode,
       lastFailureReason: event.failureReason,
