@@ -95,9 +95,11 @@ beforeEach(() => {
   mocks.rooms.mockResolvedValue({ incomplete: false, rooms: [] });
   const measures = ["pushups.reps", "planks.seconds"];
   const games: FriendGameSeries = { incomplete: false, pending: [], tasks: new Map(), measures: new Map(measures.map(id => [id, friendMeasure(id)])),
-    amounts: new Map(["ava", "leo"].map(member => [member, measures.flatMap(measureId => [
-      { measureId, date: "2026-11-01", amount: member === "ava" ? 20 : 50 },
-      { measureId, date: "2026-11-02", amount: member === "ava" ? 40 : 0 },
+    amounts: new Map(["ava", "leo"].map(member => [member, measures.flatMap(measureId => member === "ava" ? [
+      { measureId, date: "2026-11-01", amount: 20 }, { measureId, date: "2026-11-02", amount: 40 },
+    ] : [
+      { measureId, date: "2026-10-30", amount: 10 }, { measureId, date: "2026-10-31", amount: 10 },
+      { measureId, date: "2026-11-01", amount: 30 },
     ])])) };
   mocks.friendGames.mockResolvedValue(games);
   mocks.states.mockImplementation(async ({ where }) => states.filter(row => where.lookup.in.includes(row.lookup)));
@@ -301,7 +303,7 @@ it("an incomplete main read schedules no settlement", async () => {
 });
 
 it.each([{ peopleCount: 5000, measureCount: 2 }, { peopleCount: 2, measureCount: 5000 }])(
-  "batches 10,000 game amounts across $peopleCount people and $measureCount measures", async ({ peopleCount, measureCount }) => {
+  "batches 10,000 passes across $peopleCount people and $measureCount measures", async ({ peopleCount, measureCount }) => {
     mocks.raw.mockResolvedValue(null);
     const people = Array.from({ length: peopleCount }, (_, index) => ({
       memberId: index === 0 ? "ava" : `friend-${index}`, firstName: index === 0 ? "Ava" : "Leo",
@@ -312,9 +314,10 @@ it.each([{ peopleCount: 5000, measureCount: 2 }, { peopleCount: 2, measureCount:
     mocks.ids.mockResolvedValue({ incomplete: false, ids: people.map(person => person.memberId) });
     mocks.friendGames.mockResolvedValue({ incomplete: false, pending: [], tasks: new Map(),
       measures: new Map(measures.map(id => [id, friendMeasure(id)])),
-      amounts: new Map(people.map(person => [person.memberId, measures.map(measureId => ({
-        measureId, date: joinedOn, amount: person.me ? 2 : 1,
-      }))])),
+      // Each friend played three days; you pass them all on the fourth.
+      amounts: new Map(people.map(person => [person.memberId, measures.flatMap(measureId => person.me
+        ? [{ measureId, date: addDaysToIsoDate(joinedOn, 3), amount: 4 }]
+        : [0, 1, 2].map(day => ({ measureId, date: addDaysToIsoDate(joinedOn, day), amount: 1 })))])),
     });
     await GET(request()); await drain();
     expect(mocks.cohort).toHaveBeenCalledTimes(1);

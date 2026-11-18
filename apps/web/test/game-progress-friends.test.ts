@@ -6,6 +6,10 @@ const person = (memberId: string, firstName: string, amount: number, me = false)
   memberId, firstName, avatarUrl: null, me, joinedOn: "2026-10-21",
   daily: [{ date: "2026-11-01", amount }],
 });
+/** A friend who's done the exercise on each of these days. */
+const played = (memberId: string, firstName: string, days: Record<string, number>): FriendSeries => ({
+  ...person(memberId, firstName, 0), daily: Object.entries(days).map(([date, amount]) => ({ date, amount })),
+});
 const view = (people: FriendSeries[]) => friendsView({ units: "us", people, measure, pills: [measure],
   query: { measure: measure.id, range: "month" }, today: "2026-11-16", shareAudience: [], incomplete: false, departureNotice: null, challenge: null });
 
@@ -50,16 +54,33 @@ it("dates an all-time pass on the original crossing and emits it only once", () 
   const me = { ...person("ava", "Ava", 100, true), daily: [
     { date: "2026-11-01", amount: 100 }, { date: "2026-11-03", amount: 200 }, { date: "2026-11-04", amount: 300 },
   ] };
-  const result = friendPasses({ measureId: measure.id, people: [me, person("leo", "Leo", 200)] });
+  const leo = played("leo", "Leo", { "2026-10-29": 50, "2026-10-30": 50, "2026-11-01": 100 });
+  const result = friendPasses({ measureId: measure.id, people: [me, leo] });
   expect(result).toEqual([expect.objectContaining({ key: "friend:pushups.reps:leo", kind: "friend",
     subjectMemberId: "leo", on: "2026-11-03", data: expect.objectContaining({ amount: 300, otherAmount: 200 }) })]);
+});
+
+it("never passes a friend who hasn't done the exercise", () => {
+  const me = { ...person("ava", "Ava", 100, true), daily: [{ date: "2026-11-01", amount: 100 }] };
+  expect(friendPasses({ measureId: measure.id, people: [me, played("leo", "Leo", {})] })).toEqual([]);
+});
+
+it("passing a friend on their first days waits until they've done three", () => {
+  const me = { ...person("ava", "Ava", 0, true), daily: [{ date: "2026-11-02", amount: 60 }, { date: "2026-11-05", amount: 100 }] };
+  const once = played("leo", "Leo", { "2026-11-01": 50 });
+  expect(friendPasses({ measureId: measure.id, people: [me, once] })).toEqual([]);
+  // Leo catches up over two more days; passing him again counts.
+  const caught = played("leo", "Leo", { "2026-11-01": 50, "2026-11-03": 30, "2026-11-04": 30 });
+  expect(friendPasses({ measureId: measure.id, people: [me, caught] })).toEqual([expect.objectContaining({
+    on: "2026-11-05", data: expect.objectContaining({ amount: 160, otherAmount: 110 }) })]);
 });
 
 it("filters the drawer's dates without changing the all-time award input", () => {
   const me = { ...person("ava", "Ava", 900, true), daily: [
     { date: "2026-10-30", amount: 1000 }, { date: "2026-11-01", amount: 900 }, { date: "2026-11-16", amount: 100 },
   ] };
-  const people = [me, person("leo", "Leo", 700), person("sam", "Sam", 900)];
+  const people = [me, played("leo", "Leo", { "2026-10-27": 200, "2026-10-28": 200, "2026-10-29": 300 }),
+    played("sam", "Sam", { "2026-10-27": 300, "2026-10-28": 300, "2026-10-29": 300 })];
   const result = friendsView({ units: "us", people, measure, pills: [measure], query: { measure: measure.id, range: "week", with: "leo" },
     today: "2026-11-16", shareAudience: [], incomplete: false, departureNotice: null, challenge: null });
   expect(result.rows.map(row => [row.memberId, row.total?.value])).toEqual([["ava", 100], ["leo", 0]]);
