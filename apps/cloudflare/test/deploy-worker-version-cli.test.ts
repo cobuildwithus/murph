@@ -326,6 +326,32 @@ describe("runDeployWorkerVersionCli", () => {
     expect(releaseMocks.retireApplication).not.toHaveBeenCalled();
   });
 
+  it("waits for an unchanged pre-upload history to show the new version without repeating the upload", async () => {
+    releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({
+      configPath, promotionConfigPath: configPath, activeApplicationName: "serving-app", workerOnly: true, applications: [], retirements: [],
+    }));
+    releaseMocks.readRecentWorkerVersionIds
+      .mockResolvedValueOnce(["version-direct", "older"])
+      .mockResolvedValueOnce(["version-direct", "older"]);
+    await syntheticDeployment("worker-only");
+    expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledOnce();
+    expect(wranglerMocks.runWranglerLogged.mock.calls.filter(([args]) => args[0] === "versions")).toHaveLength(1);
+  });
+
+  it("stops before activation if the acknowledged upload never appears", async () => {
+    vi.useFakeTimers();
+    try {
+      releaseMocks.readRecentWorkerVersionIds.mockResolvedValue(["version-direct", "older"]);
+      const failure = expect(syntheticDeployment("worker-only")).rejects.toThrow("did not appear in version history");
+      await vi.advanceTimersByTimeAsync(11_000);
+      await failure;
+      expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledOnce();
+      expect(wranglerMocks.runWranglerLogged.mock.calls.filter(([args]) => args[0] === "versions")).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it.each([
     { HOSTED_EXECUTION_RECOVERY_VERSION_ID: recoveryVersionId },
     { HOSTED_EXECUTION_RECOVERY_VERSION_TAG: "trusted-upload" },

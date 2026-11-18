@@ -1858,7 +1858,10 @@ credentials and the active `CLOUDFLARE_IMAGES_SIGNING_KEY` mapping.
 The [raw versions API](https://developers.cloudflare.com/api/resources/workers/subresources/scripts/subresources/versions/methods/list/)
 returns newest first, including inactive uploads. Before upload, latest must be
 the original live version for staging or the verified stage for final promotion.
-After upload, the newest pair must be uploaded/source. Immediately before a
+After upload, the newest pair must be uploaded/source. If the list still shows
+the exact pre-upload snapshot, the workflow briefly polls the read until that
+pair appears. An unexpected version or predecessor stops deployment immediately.
+Polling never repeats the upload. Immediately before a
 secret patch, latest must still be that upload; afterwards the pair must be
 patched/uploaded. A required patch must return a distinct nonempty version ID.
 The final complete secret name/type inventory must match the original baseline

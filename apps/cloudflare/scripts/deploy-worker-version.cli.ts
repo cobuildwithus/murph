@@ -97,12 +97,13 @@ export async function runDeployWorkerVersionCli(
           releaseSha, liveReleaseSha: readLiveRunnerReleaseSha(currentVersion), checkoutDir: deployRoot,
         });
         const stageSourceVersionId = recovery?.id ?? currentVersionId;
-        const assertUploadSource = async (expectedSourceVersionId: string): Promise<void> => {
+        const assertUploadSource = async (expectedSourceVersionId: string): Promise<string[]> => {
           const before = await releaseProvider.readRecentWorkerVersionIds(input.workerName);
           if (before[0] !== expectedSourceVersionId
             || (expectedSourceVersionId === recovery?.id && (before.length !== 2 || before[1] !== currentVersionId))) {
             throw new Error("Worker inheritance source changed before upload; resolve version drift before retrying.");
           }
+          return before;
         };
         if (recovery) {
           assertRecoveryWorkerVersion({
@@ -132,17 +133,14 @@ export async function runDeployWorkerVersionCli(
             configPath, currentVersion, currentVersionId,
             ...(input.includeSecrets ? { secretsFilePath: input.secretsFilePath } : {}),
           });
-          await assertUploadSource(expectedSourceVersionId);
+          const before = await assertUploadSource(expectedSourceVersionId);
           const output = await runWranglerLoggedCaptured([
             "versions", "upload", "--config", configPath, "--name", input.workerName,
             "--message", input.deploymentMessage, "--tag", input.versionTag,
             ...(input.includeSecrets ? ["--secrets-file", input.secretsFilePath] : []),
           ]);
           let versionId = parseWranglerWorkerVersionId(`${output.stdout}\n${output.stderr}`);
-          const after = await releaseProvider.readRecentWorkerVersionIds(input.workerName);
-          if (after.length !== 2 || after[0] !== versionId || after[1] !== expectedSourceVersionId) {
-            throw new Error("Worker version history changed during upload; uploaded version will not be activated.");
-          }
+          await waitForUploadHistory(before, versionId, () => releaseProvider.readRecentWorkerVersionIds(input.workerName));
           let version = await releaseProvider.readWorkerVersion(input.workerName, versionId);
           if (hasRetiredInferenceSecrets(version, versionId)) {
             const beforePatch = await releaseProvider.readRecentWorkerVersionIds(input.workerName);
@@ -265,6 +263,21 @@ export async function runDeployWorkerVersionCli(
   }
 
   return result;
+}
+
+async function waitForUploadHistory(before: readonly string[], uploadedId: string, readHistory: () => Promise<string[]>): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    const observed = await readHistory();
+    if (observed.length === 2 && observed[0] === uploadedId && observed[1] === before[0]) return;
+    if (observed.length !== before.length || observed.some((id, i) => id !== before[i])) {
+      throw new Error("Worker version history changed during upload; uploaded version will not be activated.");
+    }
+    if (Date.now() >= deadline) {
+      throw new Error("Uploaded Worker version did not appear in version history; uploaded version will not be activated.");
+    }
+    await new Promise(resolve => setTimeout(resolve, 500));
+  }
 }
 
 function readRecoveryVersion(source: EnvSource, includeSecrets: boolean): { id: string; tag: string } | null {
