@@ -79,6 +79,13 @@ describe('Progress Mapbox boundary', () => {
     await expect(resolveRoute('Start', 'End')).rejects.toMatchObject({ message: 'The map could not load. Try again.', cause: undefined });
     expect(mockFetch).toHaveBeenCalledTimes(2);
   });
+  it('draws one picture for progress its link rounds together', async () => {
+    mockFetch.mockImplementation(async () => new Response(new Uint8Array([137, 80, 78, 71]), { headers: { 'Content-Type': 'image/png' } }));
+    await renderRouteMap({ polyline, progress: 0.4, size: 'card' });
+    await renderRouteMap({ polyline, progress: 0.4002, size: 'card' });
+    const [first, second] = mockFetch.mock.calls.map(([url]) => String(url));
+    expect(second).toBe(first);
+  });
   it.each([
     { size: 'card', width: 708, height: 405, progress: 0 },
     { size: 'card', width: 708, height: 405, progress: 1 },

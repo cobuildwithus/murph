@@ -1,7 +1,7 @@
 import 'server-only';
 import * as z from '@murphai/contracts/zod-runtime';
 import { hostedOnboardingError } from '../../hosted-onboarding/errors';
-import { cutPolyline, decodePolyline, distanceM, encodePolyline, greatCircle, MAP_SIZES, routeBbox, type Coordinate } from './route-geometry';
+import { cutPolyline, decodePolyline, distanceM, encodePolyline, greatCircle, MAP_SIZES, mapProgress, routeBbox, type Coordinate } from './route-geometry';
 import { BANK } from './bank';
 import type { MapQuery } from './contract';
 
@@ -87,7 +87,7 @@ export async function renderRouteMap(input: { polyline: string; progress: number
   if (!style) throw unavailable();
   const { width, height } = MAP_SIZES[input.size];
   const points = decodePolyline(input.polyline), bbox = routeBbox(points, width, height);
-  const cut = cutPolyline(points, input.progress);
+  const cut = cutPolyline(points, mapProgress(input.progress));
   const path = (color: string, coordinates: Coordinate[]) => `path-4+${color}-1(${encodeURIComponent(encodePolyline(coordinates.length === 1 ? [coordinates[0]!, coordinates[0]!] : coordinates))})`;
   const overlays = [path('CDBEA7', cut.remaining), path('5A6E32', cut.walked)].join(',');
   const response = await mapboxRequest(`/styles/v1/${style}/static/${overlays}/[${bbox.join(',')}]/${width}x${height}.png`, { padding: '0' });

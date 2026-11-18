@@ -4,14 +4,14 @@ import type { Day, MapQuery, Route } from './contract';
 import type { Candidate } from './registry';
 import type { MeasureState, RouteLeg } from './state';
 import type { StoredAward } from './awards';
-import { cutPolyline, decodePolyline, MAP_SIZES, routeBbox, townPosition } from './route-geometry';
+import { cutPolyline, decodePolyline, MAP_SIZES, mapProgress, routeBbox, townPosition } from './route-geometry';
 import { formatAmount } from './format';
 export const routeMeters = (measureId: string, amount: number) => measureId === 'steps' || measureId.endsWith('.steps') ? amount / 2000 * 1609.344 : amount;
 type Points = readonly [Day, number][];
 const crossingDay = (points: Points, at: number) => points.find(point => point[1] >= at)?.[0] ?? null;
-/** The map picture's version, its road and how far along it to a thousandth: a new route or more walked is a new link, so the app never shows an old picture under new towns. */
+/** The map picture's version, its road and how far along it the map draws: a new route or more walked is a new link, so the app never shows an old picture under new towns. */
 const mapVersion = (polyline: string, progress: number) =>
-  createHash('sha256').update(`${polyline}\n${Math.round(progress * 1000)}`).digest('base64url').slice(0, 12);
+  createHash('sha256').update(`${polyline}\n${mapProgress(progress)}`).digest('base64url').slice(0, 12);
 export const routeAwardKey = (measureId: string, leg: RouteLeg, index: number) => `route:${JSON.stringify([measureId, index, leg.from, leg.to, leg.distanceM, leg.startTotal])}`;
 
 /** Named loops keep their label on both the medal and the finished-routes list. */

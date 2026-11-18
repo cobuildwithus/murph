@@ -56,6 +56,13 @@ describe('Progress map HTTP contract', () => {
     expect(await response.json()).toMatchObject({ error: { retryable: true } });
     expect(mocks.raw).toHaveBeenCalledTimes(1); expect(mocks.render).not.toHaveBeenCalled();
   });
+  it('does not draw a Steps map with nothing walked before steps are read', async () => {
+    mocks.raw.mockResolvedValue(null);
+    const response = await GET(request('measure=steps&size=card'));
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ error: { code: 'PROGRESS_INCOMPLETE', retryable: true } });
+    expect(mocks.render).not.toHaveBeenCalled();
+  });
   it.each(['card', 'drawer'])('uses the owner’s frozen leg and rechecks authority for %s', async size => {
     const response = await GET(request(`measure=walk.meters&size=${size}`));
     expect(response.status).toBe(200); expect(response.headers.get('Content-Type')).toBe('image/png');

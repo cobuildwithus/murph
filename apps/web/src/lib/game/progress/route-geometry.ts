@@ -39,6 +39,9 @@ export function encodePolyline(points: readonly Coordinate[]): string {
   return encoded;
 }
 
+/** How far along a route its map draws, to a thousandth; the map link's version rounds the same way, so one link is one picture. */
+export const mapProgress = (progress: number) => Math.round(progress * 1000) / 1000;
+
 /** Split by distance along the geometry, not by vertex count. */
 export function cutPolyline(points: readonly Coordinate[], fraction: number): { walked: Coordinate[]; remaining: Coordinate[] } {
   if (fraction <= 0) return { walked: [points[0]!], remaining: [...points] };

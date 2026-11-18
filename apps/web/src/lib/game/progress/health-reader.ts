@@ -72,13 +72,15 @@ async function readStepsAmounts(auth: HostedNativeMemberAuth, signal: AbortSigna
 export async function readProgressStepsRoute(auth: HostedNativeMemberAuth, signal: AbortSignal) {
   const db = getPrisma(), memberId = auth.member.id;
   const { amounts } = await readStepsAmounts(auth, signal);
+  // Unread steps fail as the Steps page does: drawn from none, the map would show nothing walked under this walk's link.
+  if (amounts === null) throw routeProgressIncomplete();
   const lookup = progressLookup(memberId, "measure", ["steps"]);
   const row = await db.gameProgressMeasure.findUnique({ where: { memberId_lookup: { memberId, lookup } }, select: { stateEncrypted: true } });
   if (!row) throw gameNotFound();
   const state = await openProgress<MeasureState>({ memberId, table: "game_progress_measure", rowId: lookup, field: "state" }, row.stateEncrypted);
   const leg = state.legs?.at(-1);
   if (!leg) throw gameNotFound();
-  const route = routeView("steps", state, cumulativePoints(amounts ?? []), await readAwards(memberId), "us")!;
+  const route = routeView("steps", state, cumulativePoints(amounts), await readAwards(memberId), "us")!;
   return { polyline: leg.polyline, progress: route.progress };
 }
 
