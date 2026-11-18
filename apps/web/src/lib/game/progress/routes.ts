@@ -9,12 +9,15 @@ import { resolveRoute } from './mapbox';
 import { replaceRouteLeg, routeMeters, routeTowns } from './route-progress';
 import { formatAmount } from './format';
 import routesByTimeZone from './bank/routes-tz.json';
+import routesByRegion from './bank/routes-region.json';
+import { gameAreaCode } from '../area-code';
+import type { HostedMemberIdentityState } from '../../hosted-onboarding/hosted-member-identity-store';
 import { BANK, search, type BankEntry } from './bank';
 import type { RouteLeg } from './state';
 
 export { routeLegs, routeView } from './route-progress';
 
-/** The reader resolves firstRouteId through the checked bank and calls this only when legs are absent. */
+/** The reader picks the first route and calls this only when legs are absent. */
 export async function setFirstRoute(memberId: string, measureId: string, route: Omit<RouteLeg, 'startTotal'>, beforeMutationTx: BeforeProgressMutation) {
   return patchMeasureState(memberId, measureId, previous => ({
     legs: previous.legs ?? [{ ...route, startTotal: 0 }],
@@ -67,6 +70,33 @@ export async function setRouteGoal(memberId: string, measureId: string, goal: Me
 /** The curated table names checked bank routes, with no city or GPS lookup. */
 export function firstRouteId(timeZone: string): string {
   return (routesByTimeZone as Record<string, string>)[timeZone] ?? routesByTimeZone.default;
+}
+
+type RegionRoute = { from: string; to: string; km: number };
+const REGIONS: Record<string, readonly RegionRoute[]> = routesByRegion.regions;
+const AREA_CODES: Record<string, string> = routesByRegion.areaCodes;
+const COUNTRIES: Record<string, string> = routesByRegion.countries;
+const FIRST_ROUTE_DAYS = 84;
+const DEFAULT_MILES_PER_DAY = 3;
+
+/** The verified number's NANP area code or calling code picks a region; the number goes no further. */
+export function phoneRouteRegion(identity: Pick<HostedMemberIdentityState, 'phoneNumber' | 'phoneNumberVerifiedAt'> | null): string | null {
+  if (!identity?.phoneNumberVerifiedAt) return null;
+  const areaCode = gameAreaCode(identity);
+  if (areaCode) return AREA_CODES[areaCode] ?? null;
+  const digits = /^\+([2-9]\d{3,14})$/u.exec(identity.phoneNumber ?? '')?.[1];
+  const code = digits && [3, 2, 1].map(length => digits.slice(0, length)).find(prefix => COUNTRIES[prefix]);
+  return code ? COUNTRIES[code]! : null;
+}
+
+/** A regional route you'd finish in about 12 weeks at your pace, else the time-zone pick. */
+export function firstRoutePlaces(timeZone: string, region: string | null, milesPerDay: number | null): { from: string; to: string } {
+  const candidates = region ? REGIONS[region] : undefined;
+  if (!candidates?.length) return routePlaces(BANK.find(entry => entry.kind === 'route' && entry.id === firstRouteId(timeZone))!.name)!;
+  const pace = milesPerDay && milesPerDay > 0 ? milesPerDay : DEFAULT_MILES_PER_DAY;
+  const miss = (route: RegionRoute) => Math.abs(route.km / 1.609344 / pace - FIRST_ROUTE_DAYS);
+  const pick = candidates.reduce((best, route) => miss(route) < miss(best) ? route : best);
+  return { from: pick.from, to: pick.to };
 }
 
 /** The same two endpoints drive typed and checked-bank route goals. */

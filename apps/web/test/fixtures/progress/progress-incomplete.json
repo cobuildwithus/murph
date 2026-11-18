@@ -408,6 +408,7 @@
           {
             "name": "Atlanta",
             "atText": "mile 0",
+            "aheadText": null,
             "x": 0.65,
             "y": 0.9,
             "passedOn": "2026-10-21"
@@ -415,6 +416,7 @@
           {
             "name": "Chattanooga",
             "atText": "2 mi to go",
+            "aheadText": "2 mi to go",
             "x": 0.4,
             "y": 0.1,
             "passedOn": null
@@ -426,6 +428,7 @@
           {
             "name": "Atlanta",
             "atText": "mile 0",
+            "aheadText": null,
             "x": 0.737037,
             "y": 0.9,
             "passedOn": "2026-10-21"
@@ -433,6 +436,7 @@
           {
             "name": "Chattanooga",
             "atText": "2 mi to go",
+            "aheadText": "2 mi to go",
             "x": 0.341975,
             "y": 0.1,
             "passedOn": null

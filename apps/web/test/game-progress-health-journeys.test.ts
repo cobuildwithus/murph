@@ -1,6 +1,8 @@
 import { beforeEach, expect, it, vi } from "vitest";
 import type { MeasureState } from "../src/lib/game/progress/state";
-const mocks = vi.hoisted(() => ({ resolve: vi.fn(), patch: vi.fn(), previous: {} as MeasureState }));
+const mocks = vi.hoisted(() => ({ resolve: vi.fn(), patch: vi.fn(), identity: vi.fn(), previous: {} as MeasureState }));
+vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({}) }));
+vi.mock("@/src/lib/hosted-onboarding/hosted-member-identity-store", () => ({ readHostedMemberIdentity: mocks.identity }));
 vi.mock("@/src/lib/game/progress/mapbox", () => ({ resolveRoute: mocks.resolve }));
 vi.mock("@/src/lib/game/progress/state", () => ({ patchMeasureState: mocks.patch }));
 import { healthJourneys, healthJourneyViews } from "../src/lib/game/progress/health-journeys";
@@ -28,6 +30,7 @@ const prepare = (metrics: HealthMetricInput[], states = new Map<string, MeasureS
 beforeEach(() => {
   vi.resetAllMocks(); mocks.previous = {};
   mocks.resolve.mockImplementation(async (from, to) => ({ ...leg, from, to }));
+  mocks.identity.mockResolvedValue(null);
   mocks.patch.mockImplementation(async (_member, _id, patch, check) => {
     await check({ transaction: true });
     return { ...mocks.previous, ...(typeof patch === "function" ? patch(mocks.previous) : patch) };
@@ -65,6 +68,16 @@ it("composes settled Steps into an about-miles route without mixing measured wal
   expect(view.route).toMatchObject({ walkedText: "10 mi", totalText: "14 mi", progress: 1, goalPicked: false, finishedOn: "2026-11-09" });
   expect(view.route?.map).toContain("measure=steps");
   expect(view.ladder).toBeNull();
+});
+
+it("picks the first Steps route from the verified number's region and the recent pace", async () => {
+  mocks.identity.mockResolvedValue({ phoneNumber: "+16195550123", phoneNumberVerifiedAt: new Date(`${joinedOn}T00:00:00Z`) });
+  await prepare([metric("steps", 3000)]);
+  expect(mocks.resolve).toHaveBeenCalledWith("San Diego", "Los Angeles");
+  mocks.identity.mockRejectedValue(new Error("identity unavailable"));
+  mocks.resolve.mockClear();
+  await prepare([metric("steps", 3000)]);
+  expect(mocks.resolve).toHaveBeenCalledWith("New York", "Washington, D.C.");
 });
 
 it("a route selected during the first resolution wins over the default", async () => {
