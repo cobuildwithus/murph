@@ -223,6 +223,18 @@ export const PINNED_CODEX_OPENAI_EGRESS_INVENTORY = {
   ],
   nonProviderBinaryCandidates: [
     {
+      candidate: "/v1/analytics/codex/turn-costscodex-cliskipping",
+      disposition: "binary_false_positive",
+      owner: "codex-backend",
+      reason: "The patched 0.169.0 Linux binary stores codex-cli and skipping next to the path. The turn_usage client sets the URL path to /v1/analytics/codex/turn-costs.",
+    },
+    {
+      candidate: "/v1/realtimewswsshttpsquicksilverintentmodelrealtime",
+      disposition: "binary_false_positive",
+      owner: "codex-realtime",
+      reason: "The patched 0.169.0 Linux binary joins the realtime path, schemes and query literals. The websocket client sets /v1/realtime and appends intent and model as query parameters.",
+    },
+    {
       candidate: "/v1/agent/registerencrypted",
       disposition: "binary_false_positive",
       owner: "codex-auth",

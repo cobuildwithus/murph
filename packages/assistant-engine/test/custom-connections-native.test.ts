@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { afterEach, expect, it } from 'vitest'
+import manifest from '../package.json' with { type: 'json' }
 import { executeCodexAppServerTurn, stopWarmCodexAppServer } from '../src/assistant-codex.ts'
 import { buildCustomConnectionsThreadConfig } from '../src/assistant/custom-connections.ts'
 import { buildAssistantCodexContractFingerprint } from '../src/assistant/codex-contract-fingerprint.ts'
@@ -141,7 +142,7 @@ it('pinned native member shell denies Codex home writes while workspace and temp
   try {
     const scenario = await prepareScriptedTurnScenario(stub, roots, { additionalTomlLines: buildMurphHostedPermissionProfileTomlLines })
     const { codexHome, codexCommand, workingDirectory } = scenario.turnInput
-    expect(execFileSync(codexCommand, ['--version'], { encoding: 'utf8', env: { ...scenario.turnInput.env, CODEX_HOME: codexHome, HOME: workingDirectory } }).trim()).toBe('codex-cli 0.167.1')
+    expect(execFileSync(codexCommand, ['--version'], { encoding: 'utf8', env: { ...scenario.turnInput.env, CODEX_HOME: codexHome, HOME: workingDirectory } }).trim()).toBe(`codex-cli ${manifest.devDependencies['@openai/codex']}`)
     const original = await readFile(path.join(codexHome, 'config.toml'), 'utf8')
     const temp = await mkdtemp(path.join(tmpdir(), 'murph-sandbox-temp-'))
     const slashTemp = await mkdtemp('/tmp/murph-sandbox-slash-temp-')
