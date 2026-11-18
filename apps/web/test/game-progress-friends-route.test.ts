@@ -136,7 +136,8 @@ it("counts a friend's other games, merges same-day amounts and counts a retake o
   expect(JSON.stringify(body)).not.toMatch(/other-game|30 pushups daily|payloadEncrypted/);
   expect(body.challenge).toEqual({ task: "40 pushups daily", category: "strength" });
   expect(mocks.games.mock.calls[0][0].where.players.some).toEqual({ memberId: { in: ["ava", "leo"] } });
-  expect(mocks.settle.mock.calls[0][1]).toEqual([expect.objectContaining({ kind: "friend", subjectMemberId: "leo", on: "2026-11-02" })]);
+  // Leo has played one day, so passing him isn't a medal yet.
+  expect(mocks.settle.mock.calls[0][1]).toEqual([]);
   expect(response.headers.get("cache-control")).toBe("private, no-store");
 });
 

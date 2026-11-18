@@ -68,7 +68,12 @@ export function friendAmount(value: number, measure: Pick<FriendMeasure, "id" | 
   return { value, text: formatNumber(value, "compact"), unit: measure.id.split(".").at(-1)! };
 }
 
-/** One all-time pass per friend and exercise; a later correction cannot revoke it. */
+/** Days a friend must have done an exercise before passing them in it counts. */
+export const FRIEND_PASS_MIN_DAYS = 3;
+
+/** One all-time pass per friend and exercise; a later correction cannot revoke it.
+ * Passing someone who'd barely done it isn't a pass: they need FRIEND_PASS_MIN_DAYS
+ * days of it by then, or it waits for the next time you pass them. */
 export function friendPasses(input: { measureId: string; people: readonly FriendSeries[] }): Candidate[] {
   if (input.measureId === "steps" || input.measureId === "sleep") return [];
   const me = input.people.find(person => person.me);
@@ -79,12 +84,13 @@ export function friendPasses(input: { measureId: string; people: readonly Friend
     const mine = new Map(me.daily.map(day => [day.date, day.amount]));
     const theirs = new Map(friend.daily.map(day => [day.date, day.amount]));
     const dates = [...new Set([...mine.keys(), ...theirs.keys()])].sort();
-    let myTotal = 0, theirTotal = 0;
+    let myTotal = 0, theirTotal = 0, theirDays = 0;
     for (const on of dates) {
       const wasBehind = myTotal <= theirTotal;
       myTotal += mine.get(on) ?? 0;
       theirTotal += theirs.get(on) ?? 0;
-      if (wasBehind && myTotal > theirTotal) {
+      if ((theirs.get(on) ?? 0) > 0) theirDays += 1;
+      if (wasBehind && myTotal > theirTotal && theirDays >= FRIEND_PASS_MIN_DAYS) {
         candidates.push({ key: `friend:${input.measureId}:${friend.memberId}`, kind: "friend",
           measureId: input.measureId, subjectMemberId: friend.memberId, on,
           data: { title: `Passed ${friend.firstName}`, face: { member: { memberId: friend.memberId,

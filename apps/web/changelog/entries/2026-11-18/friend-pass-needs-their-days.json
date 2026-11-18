@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-18",
+  "order": 100,
+  "item": {
+    "id": "friend-pass-needs-their-days",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Passing a friend counts once they've really played",
+    "summary": "A friend medal now needs your friend to have done that exercise on at least three days, so you no longer pass someone who never did it or tried it once.",
+    "details": "If you passed them before that, the medal comes the next time you pass them.",
+    "relevanceTags": ["progress", "games"],
+    "sourcePullRequests": []
+  }
+}

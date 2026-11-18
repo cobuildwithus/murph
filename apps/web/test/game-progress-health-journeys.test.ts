@@ -81,7 +81,8 @@ it("new health, friend and route awards decode through the shared medal view", a
   const health = [...healthSteps(context), ...healthAgeShare(context)];
   const friends = friendPasses({ measureId: "pushups.reps", people: [
     { memberId: "ava", firstName: "Ava", avatarUrl: null, me: true, joinedOn, daily: [{ date: today, amount: 100 }] },
-    { memberId: "leo", firstName: "Leo", avatarUrl: null, me: false, joinedOn, daily: [{ date: today, amount: 50 }] },
+    { memberId: "leo", firstName: "Leo", avatarUrl: null, me: false, joinedOn, daily: [
+      { date: "2026-11-10", amount: 20 }, { date: "2026-11-11", amount: 20 }, { date: "2026-11-12", amount: 10 }] },
   ] });
   const routes = (await prepare([metric("steps", 1000)])).candidates;
   for (const award of saved([...health, ...friends, ...routes])) expect(medalSchema.safeParse(medalView(award, false, "us")).success).toBe(true);
