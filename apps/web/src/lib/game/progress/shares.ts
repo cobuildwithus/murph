@@ -41,7 +41,7 @@ async function withAuthority<T>(input: ShareRequest, award: Candidate, run: (tx:
   return getPrisma().$transaction(async tx => {
     await lockHostedMemberRow(tx, input.memberId);
     await input.beforeMutationTx(tx);
-    if (award.measureId === 'steps' || award.measureId === 'sleep') await assertBrowserVaultMemberAuthority({ memberId: input.memberId, prisma: tx });
+    if (award.measureId === 'steps' || award.measureId === 'sleep' || award.data.health === true) await assertBrowserVaultMemberAuthority({ memberId: input.memberId, prisma: tx });
     return run(tx);
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }

@@ -3,7 +3,7 @@ vi.mock('server-only', () => ({}));
 const mocks = vi.hoisted(() => ({ auth: vi.fn(), current: vi.fn(), series: vi.fn(), resolve: vi.fn(), render: vi.fn(),
   raw: vi.fn(), health: vi.fn(), profile: vi.fn(), state: vi.fn(), open: vi.fn(), awards: vi.fn() }));
 vi.mock('@/src/lib/game/http/auth', () => ({ requireGameMemberAuth: mocks.auth, assertGameMemberAuthCurrentTx: mocks.current }));
-vi.mock('@/src/lib/game/progress/series', async original => ({ ...await original<typeof import('../src/lib/game/progress/series')>(), readGameSeries: mocks.series }));
+vi.mock('@/src/lib/game/progress/vault-runs', async original => ({ ...await original<typeof import('../src/lib/game/progress/vault-runs')>(), readOwnSeries: mocks.series }));
 vi.mock('@/src/lib/game/progress/mapbox', () => ({ resolveRoute: mocks.resolve, renderRouteMap: mocks.render }));
 vi.mock('@/src/lib/device-sync/companion-numbers', async original => ({ ...await original<typeof import('../src/lib/device-sync/companion-numbers')>(), readCompanionHealthSeries: mocks.raw }));
 vi.mock('@/src/lib/browser-vault/authority', () => ({ assertBrowserVaultMemberAuthority: mocks.health }));

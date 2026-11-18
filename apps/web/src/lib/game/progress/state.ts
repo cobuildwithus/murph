@@ -25,6 +25,8 @@ export interface MeasureState {
   perDay?: number;
   baseline?: { value: number; from: Day; to: Day };
   healthSettlement?: { savedAt: string; checkedAt: string; timeZone: string; profileTimeZone: string };
+  /** Running only: the vault's run meters per day, from the replica saved at savedAt. */
+  vaultRuns?: { savedAt: string; days: [Day, number][] };
 }
 
 /** One state writer. Fields replace whole fields; an eligible baseline freezes once. */

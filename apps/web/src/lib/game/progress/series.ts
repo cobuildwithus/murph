@@ -107,7 +107,7 @@ export function cumulativePoints(amounts: readonly DayAmount[]): [string, number
 }
 
 /** Limit-plus-one reads retain own history even after departure or a game's voiding. */
-export async function readGameSeries(memberId: string, clock: Date, timing = new ProgressReadTiming()) {
+export async function readGameSeries(memberId: string, clock: Date, timing = new ProgressReadTiming(), stateIds: readonly string[] = []) {
   const db = getPrisma();
   const rows = await db.game.findMany({
     where: { players: { some: { memberId, dayOne: { not: null } } }, status: { in: ["live", "settled", "void"] } },
@@ -174,7 +174,7 @@ export async function readGameSeries(memberId: string, clock: Date, timing = new
   const awards = await timing.measure("awards", () => readAwards(memberId));
   const savedMeasures = new Set(awards.flatMap(award => award.measureId && ["landmark", "time", "route"].includes(award.kind)
     && ["reps", "seconds", "meters", "steps"].includes(award.measureId.split(".")[1]) ? [award.measureId] : []));
-  for (const id of savedMeasures) ids.add(id);
+  for (const id of [...savedMeasures, ...stateIds]) ids.add(id);
   const lookups = new Map([...ids].map(id => [progressLookup(memberId, "measure", [id]), id]));
   const stateRows = await db.gameProgressMeasure.findMany({ where: { memberId, lookup: { in: [...lookups.keys()] } }, select: { lookup: true, stateEncrypted: true } });
   const openedStates = await openProgressMany<MeasureState>(stateRows.map(row => ({ memberId, table: "game_progress_measure", rowId: row.lookup, field: "state", value: row.stateEncrypted })));

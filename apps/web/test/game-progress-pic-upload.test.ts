@@ -3,7 +3,7 @@ import sharp from 'sharp';
 vi.mock('server-only', () => ({}));
 const mocks = vi.hoisted(() => ({ auth: vi.fn(), current: vi.fn(), series: vi.fn(), put: vi.fn() }));
 vi.mock('@/src/lib/game/http/auth', () => ({ requireGameMemberAuth: mocks.auth, assertGameMemberAuthCurrentTx: mocks.current }));
-vi.mock('@/src/lib/game/progress/series', async original => ({ ...await original<typeof import('../src/lib/game/progress/series')>(), readGameSeries: mocks.series }));
+vi.mock('@/src/lib/game/progress/vault-runs', async original => ({ ...await original<typeof import('../src/lib/game/progress/vault-runs')>(), readOwnSeries: mocks.series }));
 vi.mock('@/src/lib/game/progress/pics', async original => ({ ...await original<typeof import('../src/lib/game/progress/pics')>(), putProgressPic: mocks.put }));
 vi.mock('@/src/lib/prisma', () => ({ getPrisma: () => ({ gameProfile: { findUniqueOrThrow: async () => ({ timeZone: 'America/New_York' }) } }) }));
 import { POST } from '../app/api/game/v1/progress/pics/route';

@@ -3,6 +3,7 @@ import type {
   ExperimentOutcome,
   MemoryDemographics,
   CompanionMealsProjection,
+  CompanionRunsProjection,
 } from "@murphai/contracts";
 import {
   BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
@@ -259,6 +260,8 @@ export interface BrowserVaultReplica {
   journal?: JournalView;
   /** Absent on older replicas or when canonical timezone is unavailable. */
   meals?: CompanionMealsProjection;
+  /** Absent on replicas built before run days shipped: unknown, never zero. */
+  runs?: CompanionRunsProjection;
   metricGoalProgressRows: BrowserVaultMetricGoalProgressRow[];
   metricRows: BrowserVaultMetricRow[];
   metricSelectionRows: BrowserVaultMetricSelectionRow[];
@@ -285,6 +288,7 @@ type BrowserVaultLegacyCompatibleCoreReplica = Pick<
   | "journal"
   | "meals"
   | "policy"
+  | "runs"
   | "schema"
   | "searchRows"
   | "source"
