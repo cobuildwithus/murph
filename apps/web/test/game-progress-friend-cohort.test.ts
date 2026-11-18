@@ -18,7 +18,7 @@ beforeEach(() => {
   mocks.blocks.mockResolvedValue([]);
   mocks.profiles.mockImplementation(({ where }: { where: { memberId: { in: string[] } } }) =>
     profiles.filter(profile => where.memberId.in.includes(profile.memberId)));
-  mocks.open.mockImplementation((rows: { memberId: string }[]) => rows.map(row => ({ ava: "Ava", leo: "Jordan", sam: "Sam" })[row.memberId]));
+  mocks.open.mockImplementation((rows: { memberId: string }[]) => rows.map(row => ({ ava: "Ava", leo: "Leo", sam: "Sam" })[row.memberId]));
 });
 
 afterEach(() => vi.useRealTimers());
@@ -31,9 +31,10 @@ it.each(["blocked", "blockedBy"])("does not decrypt names across a %s boundary",
   expect(mocks.open.mock.calls[0][0].map((row: { memberId: string }) => row.memberId)).toEqual(["ava", "sam"]);
 });
 
-it("rechecks current friendship after decrypting names", async () => {
-  mocks.games.mockResolvedValueOnce([game]).mockResolvedValueOnce([{ ...game, players: [game.players[0], game.players[2]] }]);
-  expect((await readFriendCohort("ava")).people.map(person => person.memberId)).toEqual(["ava", "sam"]);
+it("opens the admitted names with one cohort and block read before the caller's final check", async () => {
+  expect((await readFriendCohort("ava")).people.map(person => person.memberId)).toEqual(["ava", "leo", "sam"]);
+  expect(mocks.games).toHaveBeenCalledOnce();
+  expect(mocks.blocks).toHaveBeenCalledOnce();
   expect(mocks.games.mock.calls[0][0].where.players.some).toEqual({ memberId: "ava", leftAt: null, joinedAt: { not: null } });
 });
 

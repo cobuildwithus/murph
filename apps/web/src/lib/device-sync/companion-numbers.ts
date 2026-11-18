@@ -14,7 +14,7 @@ import { decodeReadyBrowserVaultSession, parseBrowserVaultSessionResponse } from
 import { readHostedExecutionControlClientIfConfigured } from "../hosted-execution/control";
 import { hostedOnboardingError, isHostedOnboardingError } from "../hosted-onboarding/errors";
 import { requireActiveHostedMemberAuthFromBearerToken } from "../hosted-onboarding/request-auth";
-import { readHostedWorkspace } from "../hosted-workspace/store";
+import { readHostedBrowserVaultReplicaState } from "../hosted-workspace/store";
 import { getPrisma } from "../prisma";
 import { lastSettledStepDay } from "../settled-step-day";
 import { describeCompanionProjectionFailure } from "./companion-projection-failure";
@@ -25,6 +25,9 @@ export const COMPANION_HEALTH_METRICS = {
   steps: { key: "steps", unit: "steps", precision: 0 },
   vo2Max: { key: "estimated-vo2-max", unit: "ml/kg/min", precision: 1 },
 } as const;
+type MetricId = keyof typeof COMPANION_HEALTH_METRICS;
+const allMetrics = Object.keys(COMPANION_HEALTH_METRICS) as MetricId[];
+type ReplicaState = Awaited<ReturnType<typeof readHostedBrowserVaultReplicaState>>;
 const requestedShards = ["core", "metricsIndex"] as const;
 const emptyNumbers = { numbers: null, demographics: null, heightCm: null, freshness: "stale" } as const;
 
@@ -61,10 +64,13 @@ export async function readCompanionNumbers(request: Request) {
 }
 
 /** Shared authority-checked input. Values retain canonical units and precision. */
-export async function readCompanionHealthSeries(auth: HostedNativeMemberAuth, signal: AbortSignal) {
+export async function readCompanionHealthSeries(
+  auth: HostedNativeMemberAuth, signal: AbortSignal, requestedMetrics?: readonly MetricId[], replicaState?: ReplicaState,
+) {
+  const metrics = requestedMetrics ?? allMetrics;
   const prisma = getPrisma();
   await assertBrowserVaultMemberAuthority({ memberId: auth.member.id, prisma });
-  const snapshot = await loadSavedNumbers(auth.member.id, signal);
+  const snapshot = await loadSavedNumbers(auth.member.id, signal, metrics, replicaState);
   // Ciphertext I/O cannot preserve access after session, access or consent loss.
   await assertHostedNativeMemberAuthCurrentTx(auth, prisma);
   await assertBrowserVaultMemberAuthority({ memberId: auth.member.id, prisma });
@@ -86,15 +92,13 @@ export async function readCompanionHealthSeries(auth: HostedNativeMemberAuth, si
   // counts from the first week of the last 90 days.
   const window = { from: addDaysToIsoDate(through, -364), through };
   const stepsWindow = { ...window, through: lastSettledStepDay(now, timeZone) };
+  const numbers: Record<MetricId, RawHealthNumber | null> = { restingHeartRate: null, sleep: null, steps: null, vo2Max: null };
+  for (const id of metrics) {
+    numbers[id] = readRawHealthNumber(client, COMPANION_HEALTH_METRICS[id], id === "steps" ? stepsWindow : window);
+  }
   return {
     timeZone, savedAt: client.replica.generatedAt, freshness, window, stepsWindow,
-    demographics, heightCm: readCompanionBodyHeight(client, through),
-    numbers: {
-      restingHeartRate: readRawHealthNumber(client, COMPANION_HEALTH_METRICS.restingHeartRate, window),
-      sleep: readRawHealthNumber(client, COMPANION_HEALTH_METRICS.sleep, window),
-      steps: readRawHealthNumber(client, COMPANION_HEALTH_METRICS.steps, stepsWindow),
-      vo2Max: readRawHealthNumber(client, COMPANION_HEALTH_METRICS.vo2Max, window),
-    },
+    demographics, heightCm: requestedMetrics ? null : readCompanionBodyHeight(client, through), numbers,
   };
 }
 
@@ -121,15 +125,15 @@ export async function readSavedCompanionBodyHeight(memberId: string, signal: Abo
   return readCompanionBodyHeight(snapshot.client, toLocalDayKey(new Date(), timeZone));
 }
 
-async function loadSavedNumbers(memberId: string, signal: AbortSignal) {
+async function loadSavedNumbers(memberId: string, signal: AbortSignal, metrics: readonly MetricId[] = allMetrics, replicaState?: ReplicaState) {
   try {
-    const workspace = await readHostedWorkspace({ userId: memberId });
+    const workspace = replicaState === undefined ? await readHostedBrowserVaultReplicaState({ userId: memberId }) : replicaState;
     const replicaRef = parseHostedBrowserVaultReplicaRef(workspace?.browserVaultReplicaRef ?? null, "Companion numbers replica");
     if (!replicaRef) return null;
     const control = readHostedExecutionControlClientIfConfigured();
     if (!control) throw numbersUnavailable("control_unconfigured");
     const requestedMetricBuckets = [...new Set(await Promise.all(
-      Object.values(COMPANION_HEALTH_METRICS).map(metric => getBrowserVaultMetricBucketId(metric.key)),
+      metrics.map(id => getBrowserVaultMetricBucketId(COMPANION_HEALTH_METRICS[id].key)),
     ))].sort();
     const keys = await generateHostedUserRecipientKeyPair();
     const session = parseBrowserVaultSessionResponse({

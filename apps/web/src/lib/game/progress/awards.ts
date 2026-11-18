@@ -14,16 +14,18 @@ export interface StoredAward extends Candidate {
 }
 
 /** Append only. Re-reading or a corrected/shrinking total never changes an award. */
-export async function settleAwards(memberId: string, candidates: readonly Candidate[], beforeMutationTx: BeforeProgressMutation): Promise<void> {
-  if (candidates.length === 0) return;
+export async function settleAwards(memberId: string, candidates: readonly Candidate[], beforeMutationTx: BeforeProgressMutation,
+  snapshot?: { awards: readonly StoredAward[]; timeZone: string },
+): Promise<boolean> {
+  if (candidates.length === 0) return false;
   const db = getPrisma();
   const keyed = candidates.map(candidate => ({ candidate, lookup: progressLookup(memberId, "award", [candidate.key]) }));
-  const existing = new Set((await db.gameProgressAward.findMany({
+  const existing = new Set(snapshot ? snapshot.awards.map(award => award.id) : (await db.gameProgressAward.findMany({
     where: { memberId, lookup: { in: keyed.map(row => row.lookup) } }, select: { lookup: true },
   })).map(row => row.lookup));
   const fresh = keyed.filter(row => !existing.has(row.lookup));
-  if (fresh.length === 0) return;
-  const profile = await db.gameProfile.findUniqueOrThrow({ where: { memberId }, select: { timeZone: true } });
+  if (fresh.length === 0) return false;
+  const profile = snapshot ?? await db.gameProfile.findUniqueOrThrow({ where: { memberId }, select: { timeZone: true } });
   const now = new Date();
   const cutoff = addDays(formatTimeZoneDateTimeParts(now, profile.timeZone).dayKey, -7);
   const sealed = await sealProgressMany(memberId, fresh.map(({ candidate, lookup }) => ({
@@ -37,6 +39,8 @@ export async function settleAwards(memberId: string, candidates: readonly Candid
       dataEncrypted: sealed[index], seenAt: candidate.on < cutoff ? now : null,
     })) });
   });
+  // A concurrent writer may have won every insert. Readers still need its rows.
+  return true;
 }
 
 /** Newest first; after authority filtering, only the first visible award is gold. */

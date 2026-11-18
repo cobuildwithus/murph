@@ -21,8 +21,9 @@ export interface FriendRoom {
 }
 
 /** Rooms remain the sole health-sharing owner; a group-game acquaintance gains no grant. */
-export async function readFriendRooms(memberId: string, friendIds: readonly string[]): Promise<{ rooms: FriendRoom[]; incomplete: boolean }> {
+export async function readFriendRooms(memberId: string, friendIds: readonly string[], includeShared = true): Promise<{ rooms: FriendRoom[]; incomplete: boolean }> {
   const db = getPrisma();
+  if (!friendIds.length) return { rooms: [], incomplete: false };
   const games = await db.game.findMany({ where: { maxPlayers: 2, status: { in: ["live", "settled"] },
     chatContainerMemberId: { not: null }, AND: [
       { players: { some: { memberId, leftAt: null } } },
@@ -32,14 +33,15 @@ export async function readFriendRooms(memberId: string, friendIds: readonly stri
     select: { id: true, chatContainerMemberId: true, players: { take: 2, select: { memberId: true } } } });
   if (games.length > 500) return { rooms: [], incomplete: true };
   const roomIds = [...new Set(games.flatMap(game => game.chatContainerMemberId ? [game.chatContainerMemberId] : []))];
+  if (!roomIds.length) return { rooms: [], incomplete: false };
   const [groups, containers, shares] = await Promise.all([
     db.hostedGroup.findMany({ where: { runtimeMemberId: { in: roomIds } }, take: 501,
       select: { id: true, runtimeMemberId: true, members: { take: 3, select: { id: true, memberId: true } } } }),
     db.hostedThreadContainer.findMany({ where: { memberId: { in: roomIds } }, take: 501,
       select: { memberId: true, participants: { where: { removedAt: null }, take: 3, select: { participantMemberId: true } } } }),
-    db.hostedVaultShare.findMany({ where: { grantorMemberId: memberId, destinationMemberId: { in: roomIds }, status: "granted",
+    includeShared ? db.hostedVaultShare.findMany({ where: { grantorMemberId: memberId, destinationMemberId: { in: roomIds }, status: "granted",
       projectionScopeKey: { in: [1, 2].map(index => buildHostedVaultShareProjectionScopeKey(HOSTED_GROUP_BOARD_SCOPES[index])) } },
-      take: 1001, select: { destinationMemberId: true, projectionScopeKey: true } }),
+      take: 1001, select: { destinationMemberId: true, projectionScopeKey: true } }) : [],
   ]);
   const rooms: FriendRoom[] = [];
   for (const runtimeMemberId of roomIds) {

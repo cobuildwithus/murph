@@ -6214,7 +6214,7 @@ applicable. It runs after crypto preparation and inside the committing
 transaction, with no external work. This required callback is the refinement
 of the locked plan's abbreviated persistence signatures.
 
-`settleAwards` reads the profile timezone once, seals the candidate batch, then
+`settleAwards` uses the reader's profile time zone when supplied, seals missing candidates, then
 performs one `createMany` with `skipDuplicates` in one transaction. Its only
 later mutation is `seen_at`; a corrected total cannot revoke or rewrite an
 award. Awards strictly older than seven member-local calendar days at insertion
@@ -6301,13 +6301,22 @@ Moment `title` and nullable `line` are response-only words derived from the
 shown awards; shelf titles and details remain the medal's own. Grouped
 moments describe an earned day, without inventing a post or time of day.
 
-An ordinary complete games read uses eleven domain queries including new award
-settlement (profile twice, games, entries, task cache, measure state, existing award lookups, award insert,
-award reads before and after settlement and live picture metadata), plus existing batched crypto and native/health
-authority owners. Settlement reads candidate lookups once for the member and seals
-only missing awards; when all exist it skips the profile read, sealing and write
-transaction. Inserts still skip duplicates to preserve concurrent append-only
-settlement. There are no per-game or per-entry database calls and at most
+Prizes reads the profile, games, entries, task cache, awards, measure states
+and picture metadata once. Prizes and Health compare candidates to their
+already-open ordered awards. A no-op renders that snapshot, including its
+acknowledgement state. A missing candidate triggers a guarded duplicate-safe
+insert and one ordered reread, even if a concurrent writer won every insert.
+The background Health pass uses the published pointer and version from its
+receipt check and needs no post-insert read for presentation.
+
+Each foreground Prizes, Health and Friends GET emits one
+`game.progress.read.timing` event with its fixed route, bounded pill category,
+elapsed stage and total milliseconds, and counts of games, entries, friends
+and boards. The game-series stage includes its initial award read on Prizes.
+Parallel branches can overlap. Private query values and identifiers stay out
+of the event.
+
+There are no per-game or per-entry database calls and at most
 one domain transaction/pooled connection at a time. First distance reads resolve
 one default route for all missing legs (11 provider requests total), then add
 two domain queries per new route through sequential state CAS writes. Native
@@ -6390,7 +6399,7 @@ session and browser-vault/health authority before reading saved input; absent
 authority or a missing replica produces no health writes. All effects keep the
 page's session and health checks in their committing transactions.
 
-The background cost gate reads the published replica pointer, profile and four
+The background cost gate reads the published replica pointer and version, profile and three
 health measure states before any Cloudflare session or replica decryption.
 After a successful entire batch, the sole state writer saves `healthSettlement`
 on the existing `restingHeartRate` measure. The receipt matches the replica's
@@ -6403,8 +6412,8 @@ completion receipt, not a lease. A baseline's `updated_at` alone cannot prove
 that the later route and award writes succeeded. No new table or column is
 needed. The Health page always loads its chart input but never writes the
 receipt; only the background phase records its completion.
-An eligible batch has one saved-replica session, four metric evaluations, at
-most four baseline CAS writes, one first-route CAS, one award insert and one
+An eligible batch has one saved-replica session, three metric evaluations, at
+most three baseline CAS writes, one first-route CAS, one award insert and one
 receipt CAS, sequentially. First-route resolution retains its eleven bounded
 Mapbox calls; later passes use frozen geometry. Crypto/provider work stays
 outside transactions, with at most one health transaction at a time.
@@ -6418,7 +6427,7 @@ frozen baseline, next is null. Chart, current direction/access, age comparison,
 recommendations, sums and snapshot timestamp require live input and are absent
 from this saved-only contract. Saved age tile audiences come from the sealed
 award detail. Native session and health authority are checked before opening
-saved state and again before returning it. The path performs one four-measure
+saved state and again before returning it. The path performs one three-measure
 set read and one award read, with existing batched decryption, no parallel
 database work, no writes and no additional live read. Other failures retain
 their ordinary error response; failure of the saved read is not swallowed.
@@ -6496,8 +6505,8 @@ creator-owned sealed name, never another name source. A pending row has
 `invited: true`, null total/rank/join date, and no chart line, award or sharing
 audience. Invitations without a member use the existing game id and seat as an
 opaque row identity; no contact identifier is exposed or persisted. A joined
-friend wins over duplicate pending invitations. The cohort is rechecked after
-opening names and again before returning data. Deleted-member notices use the
+friend wins over duplicate pending invitations. The caller rechecks the cohort once after opening private inputs and before
+returning names, a departure notice or rankings. Deleted-member notices use the
 existing viewer-owned `GamePlayer.departedLabel` and `leftAt`; no former member
 identifier or separate deletion ledger is retained. `friend-games.ts` reads
 500 games / 10,000 entries as limit-plus-one batches, including each friend's
@@ -6517,7 +6526,8 @@ session and current friendship while holding the affected pair locks; authority
 loss writes nothing. The next complete read settles awards idempotently.
 Duplicate attempts count once and same-date contributions add together. Friends rank raw amounts with competition
 ranks; private rows have no rank, amount, chart line or gap. Caps set
-`Friends.incomplete` and settle nothing. Friend award commits recheck friendship
+`Friends.incomplete` and settle nothing. Exercise reads schedule pass settlement after the response using the ranked input.
+Friend award commits recheck friendship
 and blocks while holding the affected pair locks. Health pills never produce
 friend awards.
 The main read's background Friends phase returns before game-series loading
@@ -6559,22 +6569,24 @@ source fields, 10,000 cached task fields and 10,000 measure states are opened in
 transactions. Names are one batch of at most 5,001 fields including pending invite labels
 and a departure label. The same 501-game admission query selects at most ten
 player seats and nine invitation seats per game; occupied invitation seats are
-excluded. Pending identities never enter game-amount or pair-health reads. Room discovery uses four set queries, with at most three concurrent
-queries. Pair health reads deduplicate by friend and choose one room; at most
-500 existing board-owner reads run sequentially. Each board owner reads at most
-eight scope snapshots in batches of four with its pre/post grant checks; no
-per-room reads or transactions overlap. Sharing likewise has at most 500
+excluded. Pending identities never enter game-amount or pair-health reads. Exercise pills skip sharing-room discovery. Steps and Sleep discover
+eligible pair rooms, read the viewer's requested replica metric and open
+up to six friend boards concurrently. Each board opens at most one granted
+projection for the selected friend and metric. Its two authority transactions
+retain both membership identities and check the exact grant generation. One
+post-open discovery catches a changed game binding or a bystander in the thread
+or group. Only this last discovery reads outgoing grants for the sharing preview.
+The full pair board retains its four scopes per person. Sharing likewise has at most 500
 sequential provider observations, transactions and post-commit wakes; verified
 contact checks run twice per room. The existing board/sharing owners retain
-their internal database and key-access bounds. Maximum-room tests assert one
-active shared read or transaction, exact provider/contact call counts, and
-commit-boundary authority checks. The health reader opens four measure states,
-freezes at most four baselines sequentially, initializes at most one Steps route
-and performs one award settlement. Steps uses the shared route owner; Sleep uses
+their internal database and key-access bounds. Maximum-room tests assert the board concurrency bound, sequential sharing
+transactions, exact provider/contact call counts, and
+commit-boundary authority checks. The health reader requests resting heart rate, Steps and Sleep and opens their
+measure states. It freezes up to three baselines sequentially, initializes at
+most one Steps route and performs one award settlement. Steps uses the shared route owner; Sleep uses
 the shared time ladder in canonical seconds. Existing awards retain passed
 journeys after corrections. A new route resolves at most eleven provider calls,
-at most two concurrently, before its authority-checked state write. Award reads
-before and after settlement preserve historical presentation. All vault,
+at most two concurrently, before its authority-checked state write. The ordered award snapshot preserves historical presentation. All vault,
 provider and cryptographic work stays outside committing transactions.
 
 ## Weekly Game

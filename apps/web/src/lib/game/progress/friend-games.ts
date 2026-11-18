@@ -1,4 +1,5 @@
 import "server-only";
+import { ProgressReadTiming } from "./read-timing";
 import { addDaysToIsoDate } from "@murphai/contracts";
 import { getPrisma } from "../../prisma";
 import { runWithHostedDomainRootUnwrapCache } from "../../hosted-crypto/domain-root-unwrap-cache";
@@ -23,7 +24,7 @@ export interface FriendGameSeries {
 }
 
 /** D7: load each current friend's own posts, including games the viewer never joined. */
-export async function readFriendGameSeries(memberIds: string[]): Promise<FriendGameSeries> {
+export async function readFriendGameSeries(memberIds: string[], timing = new ProgressReadTiming()): Promise<FriendGameSeries> {
   return runWithHostedDomainRootUnwrapCache(async () => {
     const db = getPrisma();
     const games = await db.game.findMany({ where: { status: { in: ["live", "settled", "void"] },
@@ -33,11 +34,13 @@ export async function readFriendGameSeries(memberIds: string[]): Promise<FriendG
         players: { where: { memberId: { in: memberIds } }, take: 10, select: { memberId: true, seat: true, dayOne: true } },
       } });
     const empty: FriendGameSeries = { incomplete: true, amounts: new Map(), measures: new Map(), pending: [], tasks: new Map() };
+    timing.counts.games = games.length;
     if (games.length > GAME_LIMIT) return empty;
     const entries = await db.gameEntry.findMany({ where: { gameId: { in: games.map(game => game.id) },
       memberId: { in: memberIds }, attempt: { gt: 0 }, withdrawnAt: null, OR: [{ incomplete: false }, { incomplete: null }] },
       take: ENTRY_LIMIT + 1, orderBy: [{ receivedAt: "asc" }, { id: "asc" }],
       select: { id: true, memberId: true, gameId: true, kind: true, dayIndex: true, attempt: true, payloadEncrypted: true } });
+    timing.counts.entries = entries.length;
     if (entries.length > ENTRY_LIMIT) return empty;
     const typedEntries = entries.filter(entry => entry.kind === "reps" || entry.kind === "route");
     const plain = await openGameTexts([

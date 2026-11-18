@@ -1152,11 +1152,13 @@ export async function readHostedGroupBoardData(input: {
   runtimeMemberId: string;
   viewerId: string;
   otherId: string;
+  otherMetric?: "steps" | "sleep";
   now: Date;
   prisma?: PrismaClient;
 }) {
   const prisma = input.prisma ?? getPrisma();
   const scopeKeys = HOSTED_GROUP_BOARD_SCOPES.map(buildHostedVaultShareProjectionScopeKey);
+  const requestedScope = input.otherMetric && scopeKeys[input.otherMetric === "steps" ? 2 : 1];
   const ids = [input.viewerId, input.otherId];
   const captureAuthority = () => prisma.$transaction(async tx => {
     const group = await tx.hostedGroup.findUnique({ where: { id: input.groupId },
@@ -1166,8 +1168,8 @@ export async function readHostedGroupBoardData(input: {
     const runtimeActive = await hasHostedRuntimeActiveAccess(input.runtimeMemberId, { prisma: tx });
     const grants = await tx.hostedVaultShare.findMany({
       where: { destinationMemberId: input.runtimeMemberId, status: "granted",
-        grantorMemberId: { in: group.members.map(member => member.memberId) },
-        projectionScopeKey: { in: scopeKeys },
+        grantorMemberId: { in: group.members.map(member => member.memberId).filter(id => !requestedScope || id === input.otherId) },
+        projectionScopeKey: { in: requestedScope ? [requestedScope] : scopeKeys },
         grantor: { AND: [{ suspendedAt: null }, hostedHealthDataConsentNotRevokedWhere()] } },
       take: 8, orderBy: { id: "asc" },
       select: { id: true, destinationMemberId: true, grantorMemberId: true,

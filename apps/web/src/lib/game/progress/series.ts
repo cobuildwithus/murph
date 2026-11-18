@@ -1,4 +1,5 @@
 import "server-only";
+import { ProgressReadTiming } from "./read-timing";
 
 import { after } from "next/server";
 import type { GameEntryData, GameEntryKind, GameRepsData, GameRouteData } from "../contract";
@@ -106,7 +107,7 @@ export function cumulativePoints(amounts: readonly DayAmount[]): [string, number
 }
 
 /** Limit-plus-one reads retain own history even after departure or a game's voiding. */
-export async function readGameSeries(memberId: string, clock: Date) {
+export async function readGameSeries(memberId: string, clock: Date, timing = new ProgressReadTiming()) {
   const db = getPrisma();
   const rows = await db.game.findMany({
     where: { players: { some: { memberId, dayOne: { not: null } } }, status: { in: ["live", "settled", "void"] } },
@@ -116,12 +117,14 @@ export async function readGameSeries(memberId: string, clock: Date) {
       events: { where: { type: { in: ["cancelled", "blocked"] } }, orderBy: { id: "desc" }, take: 1, select: { createdAt: true } },
       players: { take: 10, select: { memberId: true, seat: true, dayOne: true, timeZone: true, joinedAt: true, leftAt: true } } },
   });
+  timing.counts.games = rows.length;
   const games = rows.slice(0, GAME_LIMIT);
   const entries = await db.gameEntry.findMany({ where: { memberId, gameId: { in: games.map(game => game.id) } },
     take: ENTRY_LIMIT + 1, orderBy: [{ receivedAt: "asc" }, { id: "asc" }],
     select: { id: true, gameId: true, memberId: true, dayIndex: true, attempt: true, kind: true, incomplete: true,
       receivedAt: true, withdrawnAt: true, payloadEncrypted: true },
   });
+  timing.counts.entries = entries.length;
   const incomplete = rows.length > GAME_LIMIT || entries.length > ENTRY_LIMIT;
   const admittedEntries = entries.slice(0, ENTRY_LIMIT);
   const typed = admittedEntries.filter(entry => entry.attempt > 0 && !entry.incomplete && !entry.withdrawnAt && ["reps", "route"].includes(entry.kind));
@@ -168,7 +171,7 @@ export async function readGameSeries(memberId: string, clock: Date) {
     if ("count" in payload) ids.add(READERS[0].measureId(payload));
     else if ("distanceM" in payload) ids.add(READERS[1].measureId(payload));
   }
-  const awards = await readAwards(memberId);
+  const awards = await timing.measure("awards", () => readAwards(memberId));
   const savedMeasures = new Set(awards.flatMap(award => award.measureId && ["landmark", "time", "route"].includes(award.kind)
     && ["reps", "seconds", "meters", "steps"].includes(award.measureId.split(".")[1]) ? [award.measureId] : []));
   for (const id of savedMeasures) ids.add(id);

@@ -168,11 +168,26 @@ describe("Progress HTTP contracts", () => {
     expect(view.measures[0]).toMatchObject({ id: "pushups.reps", pending: false, total: { value: 100 } });
     expect(mocks.after).not.toHaveBeenCalled();
     const original = structuredClone(awards);
-    expect((await GET(request())).status).toBe(200);
+    mocks.awards.mockClear();
+    expect(progressSchema.parse(await (await GET(request())).json())).toEqual(view);
+    expect(mocks.awards).toHaveBeenCalledOnce();
     expect(awards).toEqual(original);
     expect(mocks.current).toHaveBeenCalled();
     expect(mocks.games).toHaveBeenCalledWith(expect.objectContaining({ take: 501 }));
     expect(mocks.entries).toHaveBeenCalledWith(expect.objectContaining({ take: 10001, where: expect.objectContaining({ memberId }) }));
+  });
+  it("rereads an insert lost to another writer and renders its seen state", async () => {
+    mocks.entries.mockResolvedValue([{ ...entryRow(), payloadEncrypted: JSON.stringify({ exercise: "pushups", count: 100, reps: [] }) }]);
+    mocks.createAwards.mockImplementationOnce(({ data }: { data: AwardRow[] }) => {
+      awards.push(...data.map(row => ({ ...row, seenAt: new Date() })));
+      return { count: 0 };
+    });
+    const response = progressSchema.parse(await (await GET(request())).json());
+    expect(mocks.createAwards).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ skipDuplicates: true }));
+    expect(response.medals).toHaveLength(awards.length);
+    expect(response.medals.length).toBeGreaterThan(0);
+    expect(response.moments).toEqual([]);
+    expect(mocks.awards).toHaveBeenCalledTimes(2);
   });
   it.each([8, 10])("supplies each exercise's latest total medal or next coin at %s minutes", async minutes => {
     const planks = gameRow("game-planks");

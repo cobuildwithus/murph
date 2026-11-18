@@ -43,13 +43,12 @@ export async function readFriendCohort(memberId: string) {
       field: "first_name", rowId: profile.memberId, memberId: profile.memberId, value: profile.firstNameEncrypted })),
     ...cohort.departure ? [{ ...labelTarget(memberId, "name"), value: cohort.departure.nameEncrypted }] : [],
   ]));
-  const current = await friendCohortIds(memberId, db);
-  const people: FriendSeries[] = profiles.flatMap((profile, index) => current.ids.includes(profile.memberId) ? [{
+  const people: FriendSeries[] = profiles.map((profile, index) => ({
     memberId: profile.memberId, firstName: names[index]!, avatarUrl: profile.photoKey ? gameMediaUrl(profile.photoKey) : null,
     me: profile.memberId === memberId, joinedOn: toLocalDayKey(profile.createdAt, profile.timeZone), daily: null,
-  }] : []);
-  return { people, incomplete: cohort.incomplete || current.incomplete,
+  }));
+  return { people, incomplete: cohort.incomplete, departure: cohort.departure,
     timeZone: ownProfile.timeZone,
-    departureNotice: cohort.departure && current.departure?.nameEncrypted === cohort.departure.nameEncrypted
+    departureNotice: cohort.departure
       ? `${names[profiles.length] ?? "A friend"} left Murph on ${new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: ownProfile.timeZone }).format(cohort.departure.on)}. Your games with them still count in your totals.` : null };
 }

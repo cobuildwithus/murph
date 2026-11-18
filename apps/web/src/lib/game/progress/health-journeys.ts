@@ -5,7 +5,7 @@ import { roundTotals, ladderRungs } from "./achievements";
 import { achievementContext, measureView } from "./view";
 import { cumulativePoints, type MeasureSeries } from "./series";
 import type { MeasureState, BeforeProgressMutation } from "./state";
-import { firstRouteId, routePlaces, routeLegs, routeView, setFirstRoute } from "./routes";
+import { firstRouteId, routePlaces, routeLegs, setFirstRoute } from "./routes";
 import { resolveRoute } from "./mapbox";
 import { healthSums } from "./health";
 import type { HealthMetricInput } from "./health-view";
@@ -46,9 +46,8 @@ export function healthJourneyViews(journeys: Awaited<ReturnType<typeof healthJou
   return journeys.measures.map(measure => {
     const state = journeys.states.get(measure.id) ?? {};
     const view = measureView(measure, state, awards, today, units);
-    const route = routeView(measure.id, state, view.points, awards, units);
-    if (route && measure.id === "steps") route.walkedText = `about ${route.walkedText}`;
-    return { ...view, source: "wearable" as const, route,
+    if (view.route && measure.id === "steps") view.route.walkedText = `about ${view.route.walkedText}`;
+    return { ...view, source: "wearable" as const,
       total: measure.id === "sleep" && view.total.value >= 86400
         ? { ...view.total, text: `${formatNumber(view.total.value / 86400, "full", 1)} days` }
         : view.total };

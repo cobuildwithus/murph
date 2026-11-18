@@ -1,4 +1,5 @@
 import "server-only";
+import { ProgressReadTiming } from "./read-timing";
 
 import { formatTimeZoneDateTimeParts } from "@murphai/contracts";
 import { assertBrowserVaultMemberAuthority } from "../../browser-vault/authority";
@@ -135,51 +136,55 @@ async function healthAuthority(memberId: string): Promise<boolean> {
   }
 }
 
-export async function readProgress(memberId: string, units: ClientUnits, beforeMutationTx: BeforeProgressMutation): Promise<Progress> {
+export async function readProgress(memberId: string, units: ClientUnits, beforeMutationTx: BeforeProgressMutation, timing = new ProgressReadTiming()): Promise<Progress> {
   const db = getPrisma();
-  const profile = await db.gameProfile.findUniqueOrThrow({ where: { memberId }, select: { timeZone: true, createdAt: true } });
+  const profile = await timing.measure("profile", () => db.gameProfile.findUniqueOrThrow({ where: { memberId }, select: { timeZone: true, createdAt: true } }));
   const clock = new Date();
   const today = formatTimeZoneDateTimeParts(clock, profile.timeZone).dayKey;
   const joinedOn = formatTimeZoneDateTimeParts(profile.createdAt, profile.timeZone).dayKey;
-  const snapshot = await readGameSeries(memberId, clock);
-  const pictures = await readProgressPics(memberId);
+  const snapshot = await timing.measure("gameSeries", () => readGameSeries(memberId, clock, timing));
+  const pictures = await timing.measure("pictures", () => readProgressPics(memberId));
   snapshot.incomplete ||= pictures.incomplete;
+  let stored = snapshot.awards;
   if (!snapshot.incomplete) {
     const firstRoutes = snapshot.measures.filter(measure => !measure.pending
       && (measure.unit === "meters" || measure.unit === "steps") && !snapshot.states.get(measure.id)?.legs);
     if (firstRoutes.length) {
       const places = routePlaces(BANK.find(entry => entry.kind === "route" && entry.id === firstRouteId(profile.timeZone))!.name)!;
       // Mapbox down: the page still loads without a map; the next read sets the first route.
-      const route = await resolveRoute(places.from, places.to).catch(() => null);
+      const route = await timing.measure("journeys", () => resolveRoute(places.from, places.to)).catch(() => null);
       if (route) for (const measure of firstRoutes) snapshot.states.set(measure.id,
         await setFirstRoute(memberId, measure.id, route, beforeMutationTx));
     }
     if (snapshot.pending.length === 0) {
       const context = achievementContext(snapshot.measures, snapshot.states);
-      await settleAwards(memberId, ACHIEVEMENTS.flatMap(evaluate => evaluate(context)), beforeMutationTx);
+      const attemptedInsert = await timing.measure("awards", () => settleAwards(memberId, ACHIEVEMENTS.flatMap(evaluate => evaluate(context)), beforeMutationTx,
+        { awards: stored, timeZone: profile.timeZone }));
+      if (attemptedInsert) stored = await timing.measure("awards", () => readAwards(memberId));
     }
     scheduleInference(snapshot.pending.map(task => ({ ...task, memberId })), beforeMutationTx);
   }
-  const stored = snapshot.incomplete ? snapshot.awards : await readAwards(memberId);
-  const awards = visibleAwards(stored, await healthAuthority(memberId));
-  const measures = snapshot.measures.map(measure => {
-    const view = measureView(measure, snapshot.states.get(measure.id) ?? {}, awards, today, units);
-    view.pics = pictures.pics.filter(pic => pic.measureId === measure.id).map(pic => picturePin(pic, view.points, profile.timeZone));
-    return view;
+  const awards = visibleAwards(stored, await timing.measure("auth", () => healthAuthority(memberId)));
+  return timing.measure("render", () => {
+    const measures = snapshot.measures.map(measure => {
+      const view = measureView(measure, snapshot.states.get(measure.id) ?? {}, awards, today, units);
+      view.pics = pictures.pics.filter(pic => pic.measureId === measure.id).map(pic => picturePin(pic, view.points, profile.timeZone));
+      return view;
+    });
+    // Two units of the same exercise need distinct pills (row 15).
+    for (const measure of measures) if (measure.format === "duration" && measures.some(other => other.id !== measure.id && other.label === measure.label)) measure.label += " minutes";
+    const medals = medalsView(awards, units, measures);
+    const shelf: string[] = [];
+    const kinds = new Set<string>();
+    for (const medal of medals) {
+      const key = `${medal.kind}:${medal.open.measureId ?? ""}`;
+      if (kinds.has(key)) continue;
+      kinds.add(key); shelf.push(medal.id);
+      if (shelf.length === 6) break;
+    }
+    return { joinedOn, today, incomplete: snapshot.incomplete, measures,
+      medals, shelf, moments: momentsView(awards, measures, units), picCount: pictures.pics.length };
   });
-  // Two units of the same exercise need distinct pills (row 15).
-  for (const measure of measures) if (measure.format === "duration" && measures.some(other => other.id !== measure.id && other.label === measure.label)) measure.label += " minutes";
-  const medals = medalsView(awards, units, measures);
-  const shelf: string[] = [];
-  const kinds = new Set<string>();
-  for (const medal of medals) {
-    const key = `${medal.kind}:${medal.open.measureId ?? ""}`;
-    if (kinds.has(key)) continue;
-    kinds.add(key); shelf.push(medal.id);
-    if (shelf.length === 6) break;
-  }
-  return { joinedOn, today, incomplete: snapshot.incomplete, measures,
-    medals, shelf, moments: momentsView(awards, measures, units), picCount: pictures.pics.length };
 }
 
 export async function seeMoments(memberId: string, momentIds: readonly string[], beforeMutationTx: BeforeProgressMutation): Promise<void> {

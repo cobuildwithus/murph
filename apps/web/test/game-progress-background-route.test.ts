@@ -85,9 +85,9 @@ beforeEach(() => {
   vi.resetAllMocks(); vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date(savedAt));
   states = []; awards = [];
   mocks.profile.mockResolvedValue({ timeZone: "UTC", createdAt: new Date(`${joinedOn}T12:00:00Z`) });
-  mocks.replica.mockResolvedValue({ browserVaultReplicaRef: { generatedAt: savedAt } });
+  mocks.replica.mockResolvedValue({ browserVaultReplicaRef: { generatedAt: savedAt }, version: "8" });
   mocks.raw.mockResolvedValue(healthSnapshot());
-  mocks.ownGames.mockResolvedValue({ incomplete: false, measures: [], states: new Map(), awards: [], pending: [] });
+  mocks.ownGames.mockImplementation(async () => ({ incomplete: false, measures: [], states: new Map(), awards: await readAwards("ava"), pending: [] }));
   mocks.cohort.mockResolvedValue({ incomplete: false, people: ["Ava", "Leo"].map(firstName => ({
     memberId: firstName.toLowerCase(), firstName, avatarUrl: null, me: firstName === "Ava", joinedOn, daily: null,
   })) });
@@ -132,6 +132,7 @@ it("freezes pre-join health and earns both exercise passes after the response, v
   expect(states).toEqual([]); expect(awards).toEqual([]); expect(mocks.raw).not.toHaveBeenCalled();
   await drain();
   expect((await healthState())?.baseline).toEqual({ value: 74, from: "2026-09-23", to: "2026-10-20" });
+  expect(mocks.raw.mock.calls[0].slice(2)).toEqual([["restingHeartRate", "steps", "sleep"], { browserVaultReplicaRef: { generatedAt: savedAt }, version: "8" }]);
   const earned = await readAwards("ava");
   expect(earned.filter(award => award.kind === "health").map(award => award.data.level).sort()).toEqual([1, 2, 3]);
   expect(earned.some(award => award.kind === "healthAge")).toBe(true);
@@ -375,4 +376,31 @@ it.each([
   { name: "no receipt", receipt: undefined, publication: savedAt, zone: "UTC", now: savedAt, current: false },
 ])("health cost gate: $name", ({ receipt, publication, zone, now, current }) => {
   expect(healthSettlementCurrent(receipt, publication, zone, new Date(now))).toBe(current);
+});
+
+it("opens Health awards once on a settled replica and keeps the ordered wins", async () => {
+  const read = async () => healthSchema.parse(await (await healthGET(request())).json());
+  const first = await read();
+  expect(first.winCount).toBeGreaterThan(0);
+  expect(mocks.profile).toHaveBeenCalledOnce();
+  expect(mocks.awards).toHaveBeenCalledTimes(2);
+  mocks.awards.mockClear();
+  mocks.createAwards.mockClear();
+  const opened = vi.spyOn(crypto, "openProgressMany");
+  expect(await read()).toEqual(first);
+  expect(mocks.awards).toHaveBeenCalledOnce();
+  expect(opened.mock.calls.filter(([rows]) => rows[0]?.table === "game_progress_award")).toHaveLength(1);
+  expect(mocks.createAwards).not.toHaveBeenCalled();
+});
+
+it("logs the aggregate request once for Prizes and Health, including invalid requests", async () => {
+  const log = vi.spyOn(console, "info").mockImplementation(() => {});
+  expect((await GET(request())).status).toBe(200);
+  expect((await healthGET(request())).status).toBe(200);
+  expect((await healthGET(new Request("https://example.test/progress/health?ava=leo"))).status).toBe(400);
+  const entries = log.mock.calls.map(([line]) => JSON.parse(line));
+  expect(entries.map(row => row.route)).toEqual(["/api/game/v1/progress", "/api/game/v1/progress/health", "/api/game/v1/progress/health"]);
+  for (const row of entries) expect(row).toMatchObject({ event: "game.progress.read.timing", pill: "all",
+    totalMs: expect.any(Number), phaseMs: { auth: expect.any(Number), awards: expect.any(Number), render: expect.any(Number) } });
+  expect(JSON.stringify(entries)).not.toMatch(/ava|leo|birthYear|memberId/i);
 });

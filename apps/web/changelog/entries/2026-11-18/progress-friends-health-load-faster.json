@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-18",
+  "order": 90,
+  "item": {
+    "id": "progress-friends-health-load-faster",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Progress pages open faster",
+    "summary": "Friends Steps and Sleep read only the one number they show from each friend's board, and Prizes and Health skip work when nothing new was earned.",
+    "details": "Friend medals now settle right after the page loads and show up the next time you open it.",
+    "relevanceTags": ["progress", "games"],
+    "sourcePullRequests": []
+  }
+}
