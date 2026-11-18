@@ -577,6 +577,11 @@ unless `MURPH_VERIFY_STEP_PARALLEL=1`.
 - `pnpm hosted-local e2e foreground-reply-priority --profile e2e:stub` runs the
   foreground priority regression. `--process-shard 1/2` and `2/2` run its two
   isolated Vitest processes separately; the private workflow requires both.
+- `pnpm hosted-local e2e linq-delivery` runs one unfiltered Vitest process.
+  To parallelize the stub profile, run `--process-shard 1/2` and
+  `--process-shard 2/2` on separate runners. Both shards are required. Each
+  checks the complete partition against the active Vitest inventory before
+  running its journeys. The opt-in real-model profile keeps its focused run.
 - `pnpm hosted-local e2e vault-persistence --profile e2e:live` runs the opt-in
   real Codex app-server persistence scenario across a restart. The model
   defaults to `gpt-6.1-sol`; `MURPH_HOSTED_LOCAL_LIVE_E2E_MODEL` overrides it.
