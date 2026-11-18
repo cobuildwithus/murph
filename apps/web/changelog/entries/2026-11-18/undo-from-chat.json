@@ -9,6 +9,6 @@
     "summary": "Murph can now take you out of a group game, cancel a Family invite you sent, disconnect a wearable, or stop your health sharing with a group, when you ask in chat.",
     "details": "Before, Murph could start these but sent you to Settings to undo them. Family invites, wearables and group sharing change only when you ask in your private chat with Murph. Leaving a game works in that game's own chat.",
     "relevanceTags": ["games", "family", "devices", "groups"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [5165]
   }
 }
