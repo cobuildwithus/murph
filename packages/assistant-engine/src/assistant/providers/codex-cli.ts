@@ -1,3 +1,5 @@
+import { withHostedFlexCatalog } from '../../assistant-codex/config.js'
+import { resolveHostedFlexModel } from '@murphai/hosted-execution/assistant-model'
 import {
   prepareAssistantDirectCliEnv,
 } from '../../assistant-cli-access.js'
@@ -82,9 +84,21 @@ export async function preinitializeCodexAssistantProcess(
   })
 }
 
+function resolveCodexExecutionTarget(input: AssistantProviderTurnExecutionInput): AssistantProviderTurnExecutionInput {
+  if (input.serviceTier !== 'flex') return input
+  const model = resolveHostedFlexModel(input.providerConfig.target.model)
+  if (!model) return input
+  return {
+    ...input,
+    env: withHostedFlexCatalog(input.env ?? process.env),
+    providerConfig: { ...input.providerConfig, target: { ...input.providerConfig.target, model } },
+  }
+}
+
 export async function executeCodexAssistantTurnAttempt(
-  input: AssistantProviderTurnExecutionInput,
+  requestedInput: AssistantProviderTurnExecutionInput,
 ): Promise<AssistantProviderTurnAttemptResult> {
+  const input = resolveCodexExecutionTarget(requestedInput)
   const providerConfig = input.providerConfig
   const codexProcessLaunchInput =
     resolveCodexAssistantProcessLaunchInput(input)

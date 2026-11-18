@@ -132,7 +132,8 @@ describe("hosted runner container image contract", () => {
 
     expect(readCodexModelSlugs(patchedCatalog).sort()).toEqual([...hostedRunnerProductModelSlugs].sort());
     for (const slug of hostedRunnerProductModelSlugs) {
-      expect(readCodexModelServiceTierIds(patchedCatalog, slug)).toEqual(expect.arrayContaining(["priority", "flex"]));
+      expect(readCodexModelServiceTierIds(patchedCatalog, slug)).toContain("priority");
+      expect(readCodexModelServiceTierIds(patchedCatalog, slug)).not.toContain("flex");
       expect(readCodexModel(patchedCatalog, slug).tool_mode).toBe("code_mode");
     }
     expect(readCodexModelSlugs(patchedCatalog)).not.toContain("gpt-5.6-sol");
@@ -164,10 +165,10 @@ describe("hosted runner container image contract", () => {
       runJqFilter(patchFilter, repatchedCatalog),
     );
 
-    expect(repatchedTargetTierIds.filter((tierId) => tierId === "flex")).toHaveLength(1);
+    expect(repatchedTargetTierIds.filter((tierId) => tierId === "flex")).toHaveLength(0);
     for (const slug of hostedRunnerProductModelSlugs) {
       expect(readCodexModelServiceTierIds(twicePatchedCatalog, slug).filter((tierId) => tierId === "flex"))
-        .toHaveLength(1);
+        .toHaveLength(0);
     }
     expect(runJqFilter(validationFilter, repatchedCatalog, { slurp: true }).trim()).toBe("true");
     expect(runJqFilter(validationFilter, {

@@ -1,5 +1,4 @@
-import { isHostedAssistantProductModel } from "@murphai/hosted-execution/assistant-model";
-import { isDeployAdmissionTier } from "./deploy-smoke-live-model.ts";
+import { isDeployAdmissionModel, isDeployAdmissionTier } from "./deploy-smoke-live-model.ts";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { isRequestInputError, parseInput, RequestInputError, RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import {
@@ -153,7 +152,7 @@ async function runHostedLiveModelSmokeRequest(
     heavyRuntime = await hydrateHeavyRuntime();
     const model = request.headers["x-murph-smoke-model"] ?? heavyRuntime.deployLiveModelTurnSmokeModel;
     const serviceTier = request.headers["x-murph-smoke-service-tier"];
-    if (!isHostedAssistantProductModel(model) || (serviceTier !== undefined && !isDeployAdmissionTier(serviceTier))) {
+    if ((serviceTier !== undefined && !isDeployAdmissionTier(serviceTier)) || !isDeployAdmissionModel(model, serviceTier ?? "default")) {
       writeJsonResponse(response, 400, { ok: false, error: "Unsupported deploy smoke model." });
       return;
     }

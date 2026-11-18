@@ -1,3 +1,5 @@
+import { HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV } from '@murphai/hosted-execution/env'
+import { HOSTED_FLEX_SOL_MODEL } from '@murphai/hosted-execution/assistant-model'
 import { normalizeStoredAssistantModel } from '@murphai/contracts'
 import { ContractValidationError } from '@murphai/contracts/validation-error';
 import { resolveDailyNutritionIntroduction } from './assistant/nutrition-card-introduction.js'
@@ -964,14 +966,18 @@ function buildCodexFinalResponsePresentation(input: {
   }
 }
 
+function assertExecutableCodexModel(input: CodexAppServerTurnInput): void {
+  const model = input.model?.trim().toLowerCase() ?? null
+  if (model === HOSTED_FLEX_SOL_MODEL && input.serviceTier === 'flex' &&
+    input.env?.[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]?.endsWith('.flex')) return
+  const currentModel = normalizeStoredAssistantModel(model)
+  if (currentModel !== model) throw new ContractValidationError(`Model ${model} is retired; use ${currentModel}.`)
+}
+
 export async function executeCodexAppServerTurn(
   input: CodexAppServerTurnInput,
 ): Promise<CodexAppServerTurnResult> {
-  const requestedModel = input.model?.trim().toLowerCase() ?? null
-  const currentModel = normalizeStoredAssistantModel(requestedModel)
-  if (currentModel !== requestedModel) {
-    throw new ContractValidationError(`Model ${requestedModel} is retired; use ${currentModel}.`)
-  }
+  assertExecutableCodexModel(input)
   const providerStartCriticalPath = stampAssistantProviderStartCriticalPath(
     input.providerStartCriticalPath,
     'codexAppServerTurnStartedAtMonotonicMs',

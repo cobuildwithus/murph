@@ -1,3 +1,4 @@
+import { resolveHostedFlexModel } from '@murphai/hosted-execution/assistant-model'
 import { resolveCodexAttemptCapabilities, type CodexAttemptCapabilities } from './codex-attempt-capabilities.js'
 import { buildCustomConnectionsThreadConfig } from './custom-connections.js'
 import type { AskGrokTurnState } from '../assistant-codex/ask-grok-tool.js'
@@ -28,6 +29,7 @@ import {
 import { HOSTED_ASSISTANT_PRIORITY_UNTIL_ENV } from '@murphai/hosted-execution/env'
 import { isHostedAiUsageOpenAiTokenPricingProviderName } from '@murphai/hosted-execution/runtime-control'
 import {
+  withHostedFlexCatalog,
   hasHostedCodexModelCatalogServiceTier,
 } from '../assistant-codex/config.js'
 import {
@@ -1068,8 +1070,8 @@ function resolveCodexAttemptServiceTier(input: {
   }
   return hasHostedCodexModelCatalogServiceTier({
     serviceTier: 'flex',
-    env: input.env,
-    model: input.routeModel,
+    env: withHostedFlexCatalog(input.env),
+    model: resolveHostedFlexModel(input.routeModel),
   })
     ? requestedServiceTier
     : null

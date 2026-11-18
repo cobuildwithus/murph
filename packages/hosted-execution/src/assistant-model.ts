@@ -35,6 +35,25 @@ export const HOSTED_ASSISTANT_PRODUCT_MODELS = [
 export type HostedAssistantProductModel =
   (typeof HOSTED_ASSISTANT_PRODUCT_MODELS)[number];
 
+// These aliases belong to job execution. Stored and member-selectable models stay on the product list.
+export const HOSTED_FLEX_SOL_MODEL = "gpt-6.1-sol";
+export const HOSTED_FLEX_MODELS = [HOSTED_FLEX_SOL_MODEL, HOSTED_ASSISTANT_TERRA_MODEL] as const;
+const flexModelByPreference = {
+  [HOSTED_ASSISTANT_SOL_MODEL]: HOSTED_FLEX_SOL_MODEL,
+  [HOSTED_ASSISTANT_ASTRA_MODEL]: HOSTED_FLEX_SOL_MODEL,
+  [HOSTED_ASSISTANT_TERRA_MODEL]: HOSTED_ASSISTANT_TERRA_MODEL,
+  [HOSTED_ASSISTANT_GPT_6_LUNA_MODEL]: HOSTED_ASSISTANT_TERRA_MODEL,
+  [HOSTED_ASSISTANT_LUNA_MODEL]: HOSTED_ASSISTANT_TERRA_MODEL,
+} as const satisfies Record<HostedAssistantProductModel, typeof HOSTED_FLEX_MODELS[number]>;
+
+export function resolveHostedFlexModel(model: string | null): typeof HOSTED_FLEX_MODELS[number] | null {
+  return isHostedAssistantProductModel(model) ? flexModelByPreference[model] : null;
+}
+
+export function hostedFlexModelCatalogPath(catalog: string): string {
+  return catalog.replace(/\.astra$/u, "") + ".flex";
+}
+
 export const HOSTED_ASSISTANT_OPENAI_PROVIDER = "openai" as const;
 export const HOSTED_ASSISTANT_DEFAULT_PROVIDER =
   HOSTED_ASSISTANT_OPENAI_PROVIDER;

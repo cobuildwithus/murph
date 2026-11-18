@@ -1,4 +1,4 @@
-import { HOSTED_ASSISTANT_ASTRA_MODEL } from "@murphai/hosted-execution/assistant-model";
+import { hostedFlexModelCatalogPath, HOSTED_ASSISTANT_ASTRA_MODEL } from "@murphai/hosted-execution/assistant-model";
 import { createHash } from "node:crypto";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
@@ -546,7 +546,8 @@ export function buildHostedContainerCodexShellSmokeConfig(model: string, service
   const webAdmission = serviceTier !== undefined;
   const catalog = readHostedCodexModelCatalogJsonPath();
   if (webAdmission && !catalog) throw new Error("Hosted web admission requires the candidate image model catalog.");
-  const modelCatalogJson = webAdmission && model === HOSTED_ASSISTANT_ASTRA_MODEL ? `${catalog}.astra` : catalog;
+  const modelCatalogJson = serviceTier === "flex" && catalog ? hostedFlexModelCatalogPath(catalog)
+    : webAdmission && model === HOSTED_ASSISTANT_ASTRA_MODEL ? `${catalog}.astra` : catalog;
 
   return [
     `model = ${JSON.stringify(model)}`,
