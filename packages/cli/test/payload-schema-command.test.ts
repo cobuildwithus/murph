@@ -409,9 +409,9 @@ test('payload-schema commands emit import body schemas without requiring vault s
   }
   assert.equal(
     (activitySession.schema.required as unknown[] | undefined)?.includes('durationMinutes'),
-    true,
+    false,
   )
-  assertJsonSchemaValidation(activitySession.schema, activitySessionRow, false)
+  assertJsonSchemaValidation(activitySession.schema, activitySessionRow, true)
   assertJsonSchemaValidation(activitySession.schema, {
     ...activitySessionRow,
     durationMinutes: 45,

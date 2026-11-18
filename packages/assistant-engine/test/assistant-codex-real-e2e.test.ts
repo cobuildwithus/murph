@@ -20886,6 +20886,52 @@ describeRealCodex('real Codex Journal connected email travel capture e2e', () =>
 })
 
 describeRealCodex('real Codex private Journal capture recovery e2e', () => {
+  it('logs a workout and a medicine without a duration or dose, without guessing or asking', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-sparse-health-log-'))
+    try {
+      const binDirectory = path.join(workingDirectory, 'bin')
+      await initializeVault({ vaultRoot: workingDirectory, timezone: 'UTC' })
+      await materializeRealWorkoutVaultCli({
+        binDirectory,
+        commandLogPath: path.join(workingDirectory, 'commands.log'),
+        vaultRoot: workingDirectory,
+      })
+      const result = await executeRealCodexAppServerTurn({
+        approvalPolicy: 'never',
+        baseInstructions: MURPH_CODEX_BASE_INSTRUCTIONS,
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? undefined,
+        codexHome: config.codexHome,
+        model: config.model,
+        modelProvider: config.modelProvider,
+        developerInstructions: buildDirectConversationDeveloperInstructions(false, null, [], '2026-10-07T15:00:00Z'),
+        dynamicTools: [],
+        env: {
+          ...config.env,
+          PATH: `${binDirectory}:${config.env.PATH ?? ''}`,
+          [MURPH_ASSISTANT_SKILLS_ROOT_ENV]: resolveAssistantSkillsRoot(),
+        },
+        prompt: 'Please log a rowing session this morning, and that I took famotidine at lunch. Just confirm the logs.',
+        reasoningEffort: 'medium',
+        sandbox: 'workspace-write',
+        workingDirectory,
+      })
+      const { events } = await readVaultRawTolerant(workingDirectory)
+      const byKind = new Map(events.map((event) => [event.kind, event.attributes]))
+      expect(events.map((event) => event.kind).sort()).toEqual(['activity_session', 'medication_intake'])
+      expect(byKind.get('activity_session')).toMatchObject({ activityType: 'rowing' })
+      expect(byKind.get('activity_session')).not.toHaveProperty('durationMinutes')
+      expect(byKind.get('medication_intake')).toMatchObject({ medicationName: expect.stringMatching(/famotidine/iu) })
+      expect(byKind.get('medication_intake')).not.toHaveProperty('dose')
+      expect(byKind.get('medication_intake')).not.toHaveProperty('unit')
+      expect(result.finalMessage).toMatch(/saved|logged|recorded/iu)
+      expect(result.finalMessage).not.toMatch(/\?|\d+\s*(?:minutes?|hours?|mg)\b|\/\s*10\b/iu)
+      process.stdout.write(`[sparse-health-log] ${JSON.stringify({ reply: result.finalMessage, records: events.length })}\n`)
+    } finally {
+      await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths])
+    }
+  }, 360_000)
+
   it('vault pass recovery compacts a live conversation and preserves its task', async () => {
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-live-compaction-e2e-'))

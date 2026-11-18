@@ -223,7 +223,8 @@ main sleep. With an explicit main sleep, a short unlabeled session stays a nap.
 A long duplicate stays with main sleep instead of becoming a nap.
 
 Repeated activities of the same kind on one day become one display event. The
-event keeps all source sessions and shows their combined time. Journal hides static profile
+event keeps all source sessions and sums the known durations; a workout logged
+without a duration adds nothing, so `activityMinutes` stays a number. Journal hides static profile
 records and total-sleep metrics already represented by a sleep session. When
 two providers expose the same daily score, Journal uses the provider's product
 term, such as Oura Readiness or Whoop Recovery, without showing a duplicate.

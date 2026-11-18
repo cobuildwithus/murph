@@ -464,7 +464,7 @@ export function registerWorkoutCommands(
         .max(24 * 60)
         .optional()
         .describe(
-          'Typed duration in minutes. Required unless an applicable saved default or workout timestamps supply it.',
+          'Duration in minutes, when known. An applicable saved default or workout timestamps can supply it.',
         ),
       type: z
         .string()

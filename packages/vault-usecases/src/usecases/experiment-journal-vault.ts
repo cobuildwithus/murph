@@ -565,8 +565,8 @@ const experimentContextPayloadSchema = z.union([
     title: z.string().min(1).optional(),
     note: z.string().optional(),
     supplementName: z.string().min(1),
-    dose: z.number().nonnegative(),
-    unit: z.string().min(1),
+    dose: z.number().nonnegative().optional(),
+    unit: z.string().min(1).optional(),
     tags: z.array(slugSchema).optional(),
   }),
 ])

@@ -471,7 +471,9 @@ another's.
 `calendarClosedThroughDate` only after a date has ended in UTC-12, the last
 civil timezone to leave it. Event-local or validated vault time zones still
 determine each workout's disclosed date and local start time, but neither the
-member's current declared timezone nor `time-zone.v0` controls settlement.
+member's current declared timezone nor `time-zone.v0` controls settlement. A
+workout with an unknown duration leaves its local date unobserved in this
+duration-based scope.
 The UTC-12 eligibility threshold can occur up to 26 hours after the member's
 own midnight. A stale visible snapshot stays pending until the next ordinary
 projection refresh advances the watermark; no finite refresh deadline is

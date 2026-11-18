@@ -1231,6 +1231,8 @@ function buildEventPresentation(
     (record) => record.kind === "activity_session",
   );
   if (activitySessions.length > 0) {
+    // A workout logged without a duration adds nothing to the total.
+    const timedSessions = activitySessions.filter((record) => record.durationMinutes !== null).length;
     const activityMinutes = sumNumbers(
       activitySessions.map((record) => record.durationMinutes),
     );
@@ -1254,8 +1256,8 @@ function buildEventPresentation(
       summary:
         activityMinutes > 0
           ? `${formatDuration(activityMinutes)}${
-              activitySessions.length > 1
-                ? ` across ${activitySessions.length} sessions`
+              timedSessions > 1
+                ? ` across ${timedSessions} sessions`
                 : ""
             }`
           : lead.summary,

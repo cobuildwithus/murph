@@ -459,16 +459,11 @@ describe("workout", () => {
     assert.equal(capture.distanceKm, 8);
     assert.equal(capture.title, "50-minute ride");
 
-    assert.throws(
-      () => workoutModule.resolveWorkoutCapture({
-        text: "Easy run around the neighborhood",
-      }),
-      {
-        name: "VaultCliError",
-        code: "invalid_option",
-        message: "Workout duration is missing. Pass --duration <minutes> to record it explicitly.",
-      },
-    );
+    const captureWithoutDuration = workoutModule.resolveWorkoutCapture({
+      text: "Finished a loop on the bike path.",
+      activityType: "cycling",
+    });
+    assert.equal(captureWithoutDuration.durationMinutes, undefined);
 
     const defaultedCapture = workoutModule.resolveWorkoutCapture({
       text: "One hour of yoga, then a 90-minute row, covering 8.56 km; 4 sets of 10 squats.",
@@ -714,17 +709,13 @@ test("format logging does not borrow the manual capture duration default", async
       activityType: "strength-training",
       template: createWorkoutTemplate(),
     });
-    const auditRows = await countAuditRows(vault);
 
-    await assert.rejects(logWorkoutFormat({
+    const logged = await logWorkoutFormat({
       vault,
       name: saved.record.workoutFormatId,
       source: "manual",
-    }), {
-      code: "invalid_option",
-      message: "Workout duration is missing. Pass --duration <minutes> to record it explicitly.",
     });
-    assert.equal(await countAuditRows(vault), auditRows);
+    assert.equal(logged.durationMinutes, undefined);
   });
 });
 
@@ -1168,38 +1159,17 @@ describe("workout-import", () => {
           }],
         },
       };
-      assert.throws(
-        () => workoutModule.buildStructuredWorkoutActivitySessionDraft({
-          payload: noteOnlyPayload,
-          source: "import",
-        }),
-        /Workout duration is missing/u,
-      );
+      const structuredWithoutDuration = workoutModule.buildStructuredWorkoutActivitySessionDraft({
+        payload: noteOnlyPayload,
+        source: "import",
+      });
+      assert.equal(structuredWithoutDuration.durationMinutes, undefined);
       const structuredWithTypedDuration = workoutModule.buildStructuredWorkoutActivitySessionDraft({
         payload: noteOnlyPayload,
         durationMinutes: 45,
         source: "import",
       });
       assert.equal(structuredWithTypedDuration.durationMinutes, 45);
-      assert.throws(
-        () => workoutModule.buildStructuredWorkoutActivitySessionDraft({
-          payload: {
-            title: "Challenge",
-            workout: {
-              sourceApp: "strong",
-              routineName: "Challenge",
-              exercises: [{
-                name: "Squat",
-                order: 1,
-                sets: [{ order: 1, reps: 5 }],
-              }],
-            },
-          },
-          source: "manual",
-        }),
-        /Workout duration is missing/u,
-      );
-
       const replay = await workoutImportModule.importWorkoutCsv({
         vault: tempDir,
         file: csvPath,

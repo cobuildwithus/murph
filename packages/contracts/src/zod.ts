@@ -1196,7 +1196,7 @@ function eventImportJsonlRowSchema<
 
 const symptomEventFieldsShape = {
   symptom: boundedString(1, 120),
-  intensity: integerSchema(0, 10),
+  intensity: integerSchema(0, 10).optional(),
   bodySite: boundedString(1, 120).optional(),
 } satisfies z.ZodRawShape;
 
@@ -1288,16 +1288,28 @@ const testEventFieldsShape = {
   results: z.array(bloodTestResultSchema).min(1).max(500).optional(),
 } satisfies z.ZodRawShape;
 
+const optionalIntakeDoseShape = {
+  dose: numberSchema(0).optional(),
+  unit: patternedString(UNIT_PATTERN).optional(),
+} satisfies z.ZodRawShape;
+
+function withOptionalIntakeDose<T extends z.ZodType<{ dose?: number; unit?: string }>>(schema: T) {
+  return schema.refine(({ dose, unit }) => (dose === undefined) === (unit === undefined), {
+    message: "Dose and unit must be provided together.",
+    path: ["dose"],
+  }).meta({
+    dependentRequired: { dose: ["unit"], unit: ["dose"] },
+  });
+}
+
 const medicationIntakeEventFieldsShape = {
   medicationName: boundedString(1, 160),
-  dose: numberSchema(0),
-  unit: patternedString(UNIT_PATTERN),
+  ...optionalIntakeDoseShape,
 } satisfies z.ZodRawShape;
 
 const supplementIntakeEventFieldsShape = {
   supplementName: boundedString(1, 160),
-  dose: numberSchema(0),
-  unit: patternedString(UNIT_PATTERN),
+  ...optionalIntakeDoseShape,
   ...experimentLinkShape,
 } satisfies z.ZodRawShape;
 
@@ -1375,22 +1387,13 @@ const testEventImportJsonlRowPayloadSchema = eventImportJsonlRowSchema(
   "test",
   testEventFieldsShape,
 );
-const medicationIntakeEventImportJsonlRowPayloadSchema = eventImportJsonlRowSchema(
-  "medication_intake",
-  medicationIntakeEventFieldsShape,
+const medicationIntakeEventImportJsonlRowPayloadSchema = withOptionalIntakeDose(
+  eventImportJsonlRowSchema("medication_intake", medicationIntakeEventFieldsShape),
 );
-const supplementIntakeEventImportJsonlRowPayloadSchema = eventImportJsonlRowSchema(
-  "supplement_intake",
-  supplementIntakeEventFieldsShape,
+const supplementIntakeEventImportJsonlRowPayloadSchema = withOptionalIntakeDose(
+  eventImportJsonlRowSchema("supplement_intake", supplementIntakeEventFieldsShape),
 );
 const activitySessionEventImportJsonlRowPayloadSchema = eventImportJsonlRowSchema(
-  "activity_session",
-  {
-    ...activitySessionEventFieldsShape,
-    durationMinutes: integerSchema(1),
-  },
-);
-const activitySessionEventImportDecisionPayloadSchema = eventImportJsonlRowSchema(
   "activity_session",
   activitySessionEventFieldsShape,
 );
@@ -1449,23 +1452,6 @@ export const versionedExternalRefSchema = externalRefSchema.extend({
   version: writableIsoDateTimeString(200),
 });
 
-const eventImportDecisionPayloadSchema = z.discriminatedUnion("kind", [
-  symptomEventImportJsonlRowPayloadSchema,
-  noteEventImportJsonlRowPayloadSchema,
-  observationEventImportJsonlRowPayloadSchema,
-  clinicalAssertionEventImportJsonlRowPayloadSchema,
-  exposureEventImportJsonlRowPayloadSchema,
-  measurementEventImportJsonlRowPayloadSchema,
-  testEventImportJsonlRowPayloadSchema,
-  medicationIntakeEventImportJsonlRowPayloadSchema,
-  supplementIntakeEventImportJsonlRowPayloadSchema,
-  activitySessionEventImportDecisionPayloadSchema,
-  bodyMeasurementEventImportJsonlRowPayloadSchema,
-  sleepSessionEventImportJsonlRowPayloadSchema,
-  interventionSessionEventImportJsonlRowPayloadSchema,
-  experimentContextEventImportJsonlRowPayloadSchema,
-]);
-
 export const expectedLatestEventSchema = z
   .object({
     eventId: idSchema(ID_PREFIXES.event),
@@ -1476,7 +1462,7 @@ export const expectedLatestEventSchema = z
 export const eventImportUpsertDecisionSchema = z
   .object({
     action: z.literal("upsert"),
-    payload: eventImportDecisionPayloadSchema,
+    payload: publicEventImportJsonlRowPayloadSchema,
     expectedLatest: expectedLatestEventSchema.optional(),
     sourceParent: versionedExternalRefSchema.optional(),
     invalidateFacetPrefixes: z.array(patternedString(SLUG_PATTERN)).min(1).max(8).optional(),
@@ -1597,12 +1583,12 @@ export const eventRecordSchema = withContractMetadata(
       series: boundedString(1, 120).optional(),
       targetDiseases: uniqueArray(boundedString(1, 120), { maxItems: 25, uniqueItems: true }).optional(),
     }),
-    eventSchema("medication_intake", medicationIntakeEventFieldsShape),
+    withOptionalIntakeDose(eventSchema("medication_intake", medicationIntakeEventFieldsShape)),
     eventSchema("procedure", {
       procedure: boundedString(1, 160),
       status: boundedString(1, 64),
     }),
-    eventSchema("supplement_intake", supplementIntakeEventFieldsShape),
+    withOptionalIntakeDose(eventSchema("supplement_intake", supplementIntakeEventFieldsShape)),
     eventSchema("test", testEventFieldsShape),
     eventSchema("activity_session", activitySessionEventFieldsShape),
     eventSchema("body_measurement", bodyMeasurementEventFieldsShape),

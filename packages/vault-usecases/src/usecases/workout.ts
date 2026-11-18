@@ -132,7 +132,7 @@ export interface ResolvedWorkoutCapture {
   note?: string
   title: string
   activityType: string
-  durationMinutes: number
+  durationMinutes: number | undefined
   distanceKm: number | null
   strengthExercises: ActivityStrengthExercise[] | null
 }
@@ -185,22 +185,10 @@ function resolveStructuredDurationMinutes(input: {
   defaultDurationMinutes?: number
   payloadDurationMinutes?: number
   structuredWorkout?: WorkoutSession
-  allowUnknownDuration?: boolean
 }): number | undefined {
-  const explicitDurationMinutes =
-    typeof input.explicitDurationMinutes === 'number'
-      ? validateDurationMinutes(input.explicitDurationMinutes)
-      : undefined
-  if (explicitDurationMinutes !== undefined) {
-    return explicitDurationMinutes
-  }
-
-  const payloadDurationMinutes =
-    typeof input.payloadDurationMinutes === 'number'
-      ? validateDurationMinutes(input.payloadDurationMinutes)
-      : undefined
-  if (payloadDurationMinutes !== undefined) {
-    return payloadDurationMinutes
+  const durationMinutes = input.explicitDurationMinutes ?? input.payloadDurationMinutes
+  if (typeof durationMinutes === 'number') {
+    return validateDurationMinutes(durationMinutes)
   }
 
   const derivedDurationMinutes = deriveDurationMinutesFromTimestamps(
@@ -211,21 +199,7 @@ function resolveStructuredDurationMinutes(input: {
     return derivedDurationMinutes
   }
 
-  if (input.structuredWorkout && input.allowUnknownDuration) {
-    return undefined
-  }
-
-  if (input.defaultDurationMinutes !== undefined) {
-    return validateDurationMinutes(
-      input.defaultDurationMinutes,
-      'Default workout duration',
-    )
-  }
-
-  throw new VaultCliError(
-    'invalid_option',
-    'Workout duration is missing. Pass --duration <minutes> to record it explicitly.',
-  )
+  return resolveDurationMinutes(undefined, input.defaultDurationMinutes)
 }
 
 function normalizeStructuredWorkout(
@@ -292,7 +266,6 @@ export function buildStructuredWorkoutActivitySessionDraft(input: {
   workout?: WorkoutSession | null
   text?: string
   title?: string
-  allowUnknownDuration?: boolean
 }): ActivitySessionDraft {
   const sourcePayload = parseWorkoutImportPayload(input.payload)
   const explicitStructuredWorkout =
@@ -321,7 +294,6 @@ export function buildStructuredWorkoutActivitySessionDraft(input: {
       defaultDurationMinutes: input.defaultDurationMinutes,
       payloadDurationMinutes: valueAsNumber(sourcePayload.durationMinutes),
       structuredWorkout: explicitStructuredWorkout,
-      allowUnknownDuration: input.allowUnknownDuration,
     })
   const distanceKm =
     typeof input.distanceKm === 'number'
@@ -382,13 +354,6 @@ export async function addStructuredWorkoutRecord(input: {
   draft: ActivitySessionDraft
   mediaPaths?: string[]
 }) {
-  const durationMinutes = input.draft.durationMinutes
-  if (durationMinutes === undefined) {
-    throw new VaultCliError(
-      'invalid_option',
-      'Workout duration is missing. Pass --duration <minutes> to record it explicitly.',
-    )
-  }
   const mediaPaths = Array.isArray(input.mediaPaths)
     ? input.mediaPaths.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0)
     : []
@@ -407,6 +372,7 @@ export async function addStructuredWorkoutRecord(input: {
           }
         : {}),
     })
+    const durationMinutes = result.event.durationMinutes
 
     return {
       vault: input.vault,
@@ -418,7 +384,7 @@ export async function addStructuredWorkoutRecord(input: {
       kind: 'activity_session' as const,
       title: result.event.title,
       activityType: result.event.activityType,
-      durationMinutes,
+      ...(durationMinutes !== undefined ? { durationMinutes } : {}),
       distanceKm: typeof result.event.distanceKm === 'number' ? result.event.distanceKm : null,
       workout: result.event.workout ?? null,
       manifestFile: result.manifestPath,
@@ -847,8 +813,8 @@ function slugifyWorkoutType(value: string): string | null {
 
 function resolveDurationMinutes(
   explicitDurationMinutes: number | undefined,
-  defaultDurationMinutes: number | undefined = undefined,
-): number {
+  defaultDurationMinutes: number | undefined,
+): number | undefined {
   if (typeof explicitDurationMinutes === 'number') {
     return validateDurationMinutes(explicitDurationMinutes)
   }
@@ -860,10 +826,7 @@ function resolveDurationMinutes(
     )
   }
 
-  throw new VaultCliError(
-    'invalid_option',
-    'Workout duration is missing. Pass --duration <minutes> to record it explicitly.',
-  )
+  return undefined
 }
 
 function normalizeExplicitDistanceKm(value: number | undefined): number | null {

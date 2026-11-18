@@ -1373,7 +1373,7 @@ test('workout add, show, list, edit, delete, and manifest cover the workout sess
     }),
     'utf8',
   )
-  const structuredMissingDuration = await runWorkoutCli(cli, [
+  const structuredMissingDuration = await runWorkoutCli<{ durationMinutes?: number }>(cli, [
     'workout',
     'import-json',
     '--input',
@@ -1381,23 +1381,10 @@ test('workout add, show, list, edit, delete, and manifest cover the workout sess
     '--vault',
     vaultRoot,
   ])
-  assert.equal(structuredMissingDuration.envelope.ok, false)
-  if (structuredMissingDuration.envelope.ok) {
-    throw new Error('Expected structured import-json without a duration to fail.')
-  }
-  assert.equal(structuredMissingDuration.envelope.error.code, 'invalid_option')
-  const afterRejectedStructured = requireData((await runWorkoutCli<{
-    count: number
-  }>(cli, [
-    'workout',
-    'list',
-    '--vault',
-    vaultRoot,
-  ])).envelope)
-  assert.equal(afterRejectedStructured.count, 1)
+  assert.equal(requireData(structuredMissingDuration.envelope).durationMinutes, undefined)
 
   const minimalCreated = (
-    await runWorkoutCli(cli, [
+    await runWorkoutCli<{ durationMinutes?: number }>(cli, [
       'workout',
       'add',
       'Went for a short walk.',
@@ -1405,12 +1392,7 @@ test('workout add, show, list, edit, delete, and manifest cover the workout sess
       vaultRoot,
     ])
   ).envelope
-  assert.equal(minimalCreated.ok, false)
-  assert.equal(minimalCreated.error.code, 'invalid_option')
-  assert.match(
-    minimalCreated.error.message ?? '',
-    /Workout duration is missing/u,
-  )
+  assert.equal(requireData(minimalCreated).durationMinutes, undefined)
 })
 
 test('workout format save, show, list, and log handle structured input and media overrides', async () => {
@@ -1686,20 +1668,16 @@ test('workout format save, show, list, and log handle structured input and media
     '--vault',
     vaultRoot,
   ])).envelope)
-  const rejectedFormatLog = await runWorkoutCli(cli, [
+  const durationlessFormatLog = requireData((await runWorkoutCli<{ durationMinutes?: number }>(cli, [
     'workout',
     'format',
     'log',
     'No Duration Format',
     '--vault',
     vaultRoot,
-  ])
-  assert.equal(rejectedFormatLog.envelope.ok, false)
-  if (rejectedFormatLog.envelope.ok) {
-    throw new Error('Expected format log without a duration to fail.')
-  }
-  assert.equal(rejectedFormatLog.envelope.error.code, 'invalid_option')
-  const workoutsAfterRejectedFormatLog = requireData((await runWorkoutCli<{
+  ])).envelope)
+  assert.equal(durationlessFormatLog.durationMinutes, undefined)
+  const workoutsAfterFormatLog = requireData((await runWorkoutCli<{
     count: number
   }>(cli, [
     'workout',
@@ -1707,5 +1685,5 @@ test('workout format save, show, list, and log handle structured input and media
     '--vault',
     vaultRoot,
   ])).envelope)
-  assert.equal(workoutsAfterRejectedFormatLog.count, 2)
+  assert.equal(workoutsAfterFormatLog.count, 3)
 })

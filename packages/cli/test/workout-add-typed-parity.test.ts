@@ -50,7 +50,7 @@ interface WorkoutAddResult {
   kind: 'activity_session'
   title: string
   activityType: string
-  durationMinutes: number
+  durationMinutes?: number
   distanceKm: number | null
   workout: WorkoutSession | null
   note: string | null
@@ -397,26 +397,17 @@ test('workout add honors explicit titles with and without positional note text',
   )
 })
 
-test('workout add missing duration fails before writing a note-less typed capture', async () => {
-  const { vaultRoot, workoutCommand } = await createWorkoutVault()
-  const before = await snapshotVaultFiles(vaultRoot)
-
-  const result = await workoutCommand([
-    'add',
-    '--title',
-    'Missing duration',
-    '--type',
-    'running',
+test('workout add saves a typed workout without a duration', async () => {
+  const { cli, vaultRoot, workoutCommand } = await createWorkoutVault()
+  const result = await workoutCommand<WorkoutAddResult>([
+    'add', '--title', 'Trail ride', '--type', 'cycling',
   ])
 
-  assert.equal(result.exitCode, 1)
-  assert.equal(result.envelope.ok, false)
-  assert.equal(result.envelope.error.code, 'invalid_option')
-  assert.match(
-    result.envelope.error.message ?? '',
-    /Workout duration is missing\. Pass --duration <minutes>/u,
-  )
-  assert.deepEqual(await snapshotVaultFiles(vaultRoot), before)
+  const created = requireData(result.envelope)
+  assert.equal(Object.hasOwn(created, 'durationMinutes'), false)
+  const shown = await showWorkout(cli, vaultRoot, created.lookupId)
+  assert.equal(shown.entity.data.activityType, 'cycling')
+  assert.equal(Object.hasOwn(shown.entity.data, 'durationMinutes'), false)
 })
 
 test('workout add and edit help teach compact media, exercise, and set examples', async () => {
