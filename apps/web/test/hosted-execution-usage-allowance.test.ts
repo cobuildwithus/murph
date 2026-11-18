@@ -401,10 +401,12 @@ function buildAggregateOnlyOpenAiImageUsageRecord(): AssistantUsageRecord {
 describe("hosted AI usage allowance pricing", () => {
   it.each([
     ["gpt-6.1-terra", 855_000n, 1_547_500n],
+    ["gpt-6.2-astra", 6_840_000n, 12_380_000n],
+    ["gpt-6.2-sol", 1_710_000n, 3_095_000n],
     ["gpt-6.1-sol", 1_710_000n, 3_095_000n],
     ["gpt-6-sol", 1_720_000n, 3_115_000n],
     ["gpt-6-luna", 86_000n, 155_750n],
-  ] as const)("prices %s with published cache and service-tier rates", (model, shortCost, longCost) => {
+  ] as const)("prices %s with its configured cache and service-tier rates", (model, shortCost, longCost) => {
     for (const [tokenPricingBasis, numerator, denominator] of [
       ["standard", 1n, 1n], ["openai-flex", 1n, 2n], ["openai-priority", 2n, 1n],
     ] as const) {
@@ -422,7 +424,9 @@ describe("hosted AI usage allowance pricing", () => {
         expect(priced).toMatchObject({
           costUsdMicros: expected * numerator / denominator,
           counted: true,
-          pricingVersion: model === "gpt-6.1-terra"
+          pricingVersion: model.startsWith("gpt-6.2-")
+            ? `${tokenPricingBasis === "openai-flex" ? "murph-estimate" : "openai-api-pricing"}-2026-11-17-${model}-${tokenPricingBasis}`
+            : model === "gpt-6.1-terra"
             ? `openai-api-pricing-2026-10-26-gpt-6.1-terra-${tokenPricingBasis}`
             : model === "gpt-6.1-sol"
             ? `openai-api-pricing-2026-09-29-gpt-6.1-sol-${tokenPricingBasis}`

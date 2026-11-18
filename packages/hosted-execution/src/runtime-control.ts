@@ -226,20 +226,20 @@ export const HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS = [
 export type HostedAiUsageAllowancePricedModel =
   (typeof HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS)[number];
 
-// Retired usage remains ingestible during rollout and replay. Never use this
+// Usage can arrive before model activation or after retirement. Never use this
 // accounting-only type as an execution or deployment allowlist.
-export type HostedAiUsageLedgerModel = HostedAiUsageAllowancePricedModel | "gpt-5.6-sol";
+const ledgerOnlyModels = ["gpt-5.6-sol", "gpt-6.2-sol", "gpt-6.2-astra"] as const;
+export type HostedAiUsageLedgerModel = HostedAiUsageAllowancePricedModel | (typeof ledgerOnlyModels)[number];
 
 export function normalizeHostedAiUsageLedgerModelId(value: string): HostedAiUsageLedgerModel | null {
   const historical = value.trim().toLowerCase().split("/").at(-1)?.replace(/-\d{4}-\d{2}-\d{2}$/u, "");
-  return historical === "gpt-5.6-sol" ? historical : normalizeHostedAiUsageAllowancePricedModelId(value);
+  return ledgerOnlyModels.find((model) => model === historical) ?? normalizeHostedAiUsageAllowancePricedModelId(value);
 }
 
 export const HOSTED_AI_USAGE_OPENAI_FLEX_TOKEN_PRICING_MODELS =
   [
     ...HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS,
-    // Historical usage evidence must retain its original Flex pricing basis.
-    "gpt-5.6-sol",
+    ...ledgerOnlyModels,
   ] as readonly HostedAiUsageLedgerModel[];
 
 export type HostedAiUsageOpenAiFlexTokenPricingModel =
@@ -3327,6 +3327,7 @@ export const HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_VERSION = 1;
 export const HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_MAX_BYTES = 16 * 1024;
 
 export interface HostedRuntimeWebProtocolAdmission {
+  pricedAssistantModels: readonly string[];
   recapScore: { upload: unknown; asset: unknown };
   recapVideo: { part: unknown; write: unknown; recover: unknown; result: unknown };
   kind: typeof HOSTED_RUNTIME_WEB_PROTOCOL_ADMISSION_KIND;
