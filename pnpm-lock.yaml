@@ -5,7 +5,7 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
-  '@cobuild/review-gpt@0.5.157>incur': 0.4.25
+  '@cobuild/review-gpt@0.5.158>incur': 0.4.25
   '@cloudflare/vitest-pool-workers@0.16.3>esbuild': 0.28.1
   '@coinbase/cdp-sdk@1.48.3>axios': 1.20.0
   '@hono/node-server@1.19.14>hono': 4.13.18
@@ -82,9 +82,9 @@ patchedDependencies:
   '@cobuild/repo-tools@0.1.18':
     hash: 93a5da9afbb67979d9bd3628c67a396afd5cfe70d77c7ba22c44f83896a6d7f3
     path: patches/@cobuild__repo-tools@0.1.18.patch
-  '@cobuild/review-gpt@0.5.157':
+  '@cobuild/review-gpt@0.5.158':
     hash: fc9ed40b0390818a0e9ff74e6ad6b4b746b9cc8289fca7b95bfb97dbc1e74e0f
-    path: patches/@cobuild__review-gpt@0.5.157.patch
+    path: patches/@cobuild__review-gpt@0.5.158.patch
   frog@1.1.0:
     hash: 753e3dd3975254bf8793addb8f0e8df9b2d0ede4f44603f0f876763171938f3a
     path: patches/frog@1.1.0.patch
@@ -112,8 +112,8 @@ importers:
         specifier: ^0.1.18
         version: 0.1.18(patch_hash=93a5da9afbb67979d9bd3628c67a396afd5cfe70d77c7ba22c44f83896a6d7f3)
       '@cobuild/review-gpt':
-        specifier: 0.5.157
-        version: 0.5.157(patch_hash=fc9ed40b0390818a0e9ff74e6ad6b4b746b9cc8289fca7b95bfb97dbc1e74e0f)(@cfworker/json-schema@4.1.6)(typescript@7.0.2)
+        specifier: 0.5.158
+        version: 0.5.158(patch_hash=fc9ed40b0390818a0e9ff74e6ad6b4b746b9cc8289fca7b95bfb97dbc1e74e0f)(@cfworker/json-schema@4.1.6)(typescript@7.0.2)
       '@elevenlabs/elevenlabs-js':
         specifier: 2.78.0
         version: 2.78.0(bufferutil@4.1.0)(utf-8-validate@6.0.6)
@@ -1540,8 +1540,8 @@ packages:
     resolution: {integrity: sha512-zeeaRYPz2CiRKx7E+FrH8zYG0pWQh4mdKvdoGP+GnNBWQruEDDl/PYkO7mTzMi76yEylNFWA/XrYqOXBEAaqFQ==}
     hasBin: true
 
-  '@cobuild/review-gpt@0.5.157':
-    resolution: {integrity: sha512-BbWQc2hcJiUmMDjo6P4W3SIghY6mkOrXFa1hpph/ndR5mRvonQCbmkauxj2zLZeET8ONnQ1KUEEGh0GhqIyP6Q==}
+  '@cobuild/review-gpt@0.5.158':
+    resolution: {integrity: sha512-u2Itd3/YAJAd0HuGwUJbVJvdWL3LNCEb0CHtguTPA/HTediPpXOhxrnb9W0bQJ41aGvshJS+qwD4tigos949qg==}
     hasBin: true
 
   '@composio/client@0.1.0-alpha.76':
@@ -9142,7 +9142,7 @@ snapshots:
 
   '@cobuild/repo-tools@0.1.18(patch_hash=93a5da9afbb67979d9bd3628c67a396afd5cfe70d77c7ba22c44f83896a6d7f3)': {}
 
-  '@cobuild/review-gpt@0.5.157(patch_hash=fc9ed40b0390818a0e9ff74e6ad6b4b746b9cc8289fca7b95bfb97dbc1e74e0f)(@cfworker/json-schema@4.1.6)(typescript@7.0.2)':
+  '@cobuild/review-gpt@0.5.158(patch_hash=fc9ed40b0390818a0e9ff74e6ad6b4b746b9cc8289fca7b95bfb97dbc1e74e0f)(@cfworker/json-schema@4.1.6)(typescript@7.0.2)':
     dependencies:
       '@cobuild/repo-tools': 0.1.18(patch_hash=93a5da9afbb67979d9bd3628c67a396afd5cfe70d77c7ba22c44f83896a6d7f3)
       incur: 0.4.25

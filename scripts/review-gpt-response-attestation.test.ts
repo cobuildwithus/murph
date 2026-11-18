@@ -96,18 +96,19 @@ describe("installed ReviewGPT response attestation", () => {
     expect(prompt).not.toMatch(/MODEL_CONFIRMATION|confirm.*model/i);
   });
 
-  it("accepts an attested response without a duration floor and keeps exact-turn and digest checks", () => {
+  it("accepts a Pro picker run at any duration and preserves exact-turn and digest checks", () => {
     const attestation = review.modelAttestationForSnapshot(
       "gpt-6-pro", snapshot, true, committedUserTurn.signature,
     );
     expect(attestation.failure).toBe("");
     expect(review.markedResponseDurationFailure({
       targetModel: "gpt-6-pro", responseMarker: "REVIEW_COMPLETE",
-      responseElapsedMs: 0, hasConcreteModelEvidence: Boolean(attestation.evidence),
+      responseElapsedMs: 0,
     })).toBe("");
-    expect(review.modelAttestationForSnapshot("gpt-6-pro", {
-      ...snapshot, modelSlug: "gpt-6-mini",
-    }, true, committedUserTurn.signature).failure).toContain("expected gpt-6-pro");
+    for (const modelSlug of ["", "gpt-6-mini"]) {
+      expect(review.modelAttestationForSnapshot("gpt-6-pro", { ...snapshot, modelSlug },
+        true, committedUserTurn.signature)).toEqual({ evidence: null, failure: "" });
+    }
     expect(review.modelAttestationForSnapshot("gpt-6-pro", snapshot, true,
       "another-request").failure).toContain("committed user turn");
 
