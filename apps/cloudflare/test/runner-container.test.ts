@@ -4581,12 +4581,14 @@ describe("RunnerContainer", () => {
     });
   });
 
-  it("can extend deploy smoke to run a live model turn probe behind the egress fence", async () => {
+  it.each([false, true])("uses a separate single-use model fence for each probe (web admission: %s)", async (webModelAdmission) => {
+    const expectedModels = webModelAdmission ? ["gpt-6.2-sol", "gpt-6.2-astra"] : [DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL];
+    const probedModels: string[] = [];
     let fenceActiveDuringTurn: boolean | null = null;
     let secondFenceReadDuringTurn: { active: boolean; model?: string } | null = null;
     let containerRef: DeploySmokeRunnerContainer | null = null;
     const { container, containerFetch } = createDeploySmokeContainerDouble({
-      containerFetch: vi.fn(async (url: string) => {
+      containerFetch: vi.fn(async (url: string, init?: RequestInit) => {
         if (url.endsWith("/health")) {
           return new Response(JSON.stringify({
             hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
@@ -4613,17 +4615,20 @@ describe("RunnerContainer", () => {
         }
 
         expect(url).toBe("http://container/internal/deploy-live-model-turn-smoke");
+        const model = new Headers(init?.headers).get("x-murph-smoke-model");
+        expect(model).toBe(expectedModels[probedModels.length]);
+        probedModels.push(model!);
         const firstFenceRead = await containerRef?.readDeploySmokeLiveModelTurnFence();
         fenceActiveDuringTurn = firstFenceRead?.active ?? null;
         expect(firstFenceRead).toEqual({
           active: true,
-          model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
+          model,
         });
         secondFenceReadDuringTurn = await containerRef?.readDeploySmokeLiveModelTurnFence() ?? null;
         return new Response(JSON.stringify({
           liveModelTurn: {
             durationMs: 1_234,
-            model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
+            model,
             stdoutBytes: 2_048,
           },
           ok: true,
@@ -4644,18 +4649,13 @@ describe("RunnerContainer", () => {
       active: false,
     });
 
-    const result = await container.smokeHealth({
-      liveModelTurn: {
-        model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
-      },
-    });
-
-    expect(result.liveModelTurn).toEqual({
-      durationMs: 1_234,
-      egressGrantConsumed: true,
-      model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
-      stdoutBytes: 2_048,
-    });
+    const result = await container.smokeHealth(webModelAdmission
+      ? { liveModelTurn: { webModelAdmission: true } }
+      : { liveModelTurn: { model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL } });
+    expect(probedModels).toEqual(expectedModels);
+    expect(webModelAdmission ? result.webModelTurns : [result.liveModelTurn]).toEqual(
+      expectedModels.map(model => ({ durationMs: 1_234, egressGrantConsumed: true, model, stdoutBytes: 2_048 })),
+    );
     expect(result.codexShell).toEqual(createCodexShellSmokeResult());
     expect(fenceActiveDuringTurn).toBe(true);
     expect(secondFenceReadDuringTurn).toEqual({
@@ -4664,7 +4664,7 @@ describe("RunnerContainer", () => {
     await expect(container.readDeploySmokeLiveModelTurnFence()).resolves.toEqual({
       active: false,
     });
-    expect(containerFetch).toHaveBeenCalledTimes(3);
+    expect(containerFetch).toHaveBeenCalledTimes(2 + expectedModels.length);
     const smokeCall = containerFetch.mock.calls.find(([url]) =>
       String(url).endsWith("/internal/deploy-live-model-turn-smoke")
     );

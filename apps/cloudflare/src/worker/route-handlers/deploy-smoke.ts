@@ -152,7 +152,7 @@ export async function handleDeployContainerSmokeRoute(
     }
     result = await container.smokeHealth({
       ...(directR2Smoke ? { directR2PresignedPut: directR2Smoke.containerInput } : {}),
-      ...(liveModelTurnModel ? { liveModelTurn: { model: liveModelTurnModel } } : {}),
+      ...(liveModelTurnModel ? { liveModelTurn: artifactOnly ? { webModelAdmission: true } : { model: liveModelTurnModel } } : {}),
     });
 
     if (directR2Smoke) {

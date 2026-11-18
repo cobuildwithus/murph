@@ -37,10 +37,6 @@ it.each([
       ],
     })
     const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({
-      // Temporary negative control for the PR's first CI run. Reproduce the
-      // pre-#5185 catalog in this test only; the shipping Dockerfile stays fixed.
-      dockerfile: (await readFile(new URL('../../../Dockerfile.cloudflare-hosted-runner', import.meta.url), 'utf8'))
-        .replace('($launch[0].models | map(.experimental_supported_tools -= ["literature_search_query"]))', '$launch[0].models'),
       codexCommand: turnInput.codexCommand, directory: turnInput.codexHome, astraAllowed,
     })
     const { models } = JSON.parse(await readFile(catalog, 'utf8'))

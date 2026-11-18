@@ -1,3 +1,4 @@
+import { isDeployWebAdmissionModel } from "./deploy-smoke-live-model.ts";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { isRequestInputError, parseInput, RequestInputError, RequestBodyTooLargeError } from "@murphai/hosted-execution/request-input";
 import {
@@ -149,8 +150,13 @@ async function runHostedLiveModelSmokeRequest(
   let heavyRuntime: HostedContainerHeavyRuntime | null = null;
   try {
     heavyRuntime = await hydrateHeavyRuntime();
+    const model = request.headers["x-murph-smoke-model"] ?? heavyRuntime.deployLiveModelTurnSmokeModel;
+    if (typeof model !== "string" || (model !== heavyRuntime.deployLiveModelTurnSmokeModel && !isDeployWebAdmissionModel(model))) {
+      writeJsonResponse(response, 400, { ok: false, error: "Unsupported deploy smoke model." });
+      return;
+    }
     const result = await heavyRuntime.runLiveModelTurnSmoke({
-      model: heavyRuntime.deployLiveModelTurnSmokeModel,
+      model,
       signal: signal,
     });
     writeJsonResponse(response, 200, {
