@@ -83,6 +83,7 @@ describe("Progress request boundary", () => {
   });
   it.each(["card", "drawer"])("accepts only the named %s map size for measures and previews", size => {
     expect(parseMapQuery({ measure: "walk.meters", size })).toEqual({ measure: "walk.meters", size });
+    expect(parseMapQuery({ measure: "walk.meters", size, v: "Ab3_x-9" })).toEqual({ measure: "walk.meters", size, v: "Ab3_x-9" });
     expect(parseMapQuery({ from: "London", to: "New York", size })).toEqual({ from: "London", to: "New York", size });
   });
   it.each([

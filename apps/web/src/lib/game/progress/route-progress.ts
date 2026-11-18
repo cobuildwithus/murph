@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { ClientUnits } from '../../companion/client-info';
 import type { Day, MapQuery, Route } from './contract';
 import type { Candidate } from './registry';
@@ -8,6 +9,9 @@ import { formatAmount } from './format';
 export const routeMeters = (measureId: string, amount: number) => measureId === 'steps' || measureId.endsWith('.steps') ? amount / 2000 * 1609.344 : amount;
 type Points = readonly [Day, number][];
 const crossingDay = (points: Points, at: number) => points.find(point => point[1] >= at)?.[0] ?? null;
+/** The map picture's version, its road and how far along it to a thousandth: a new route or more walked is a new link, so the app never shows an old picture under new towns. */
+const mapVersion = (polyline: string, progress: number) =>
+  createHash('sha256').update(`${polyline}\n${Math.round(progress * 1000)}`).digest('base64url').slice(0, 12);
 export const routeAwardKey = (measureId: string, leg: RouteLeg, index: number) => `route:${JSON.stringify([measureId, index, leg.from, leg.to, leg.distanceM, leg.startTotal])}`;
 
 /** Named loops keep their label on both the medal and the finished-routes list. */
@@ -60,7 +64,7 @@ export function routeView(measureId: string, state: MeasureState, points: Points
   const meters: [Day, number][] = points.map(([day, amount]) => [day, routeMeters(measureId, amount)]);
   const total = meters.at(-1)?.[1] ?? 0;
   const walked = earnedOn ? leg.distanceM : Math.min(leg.distanceM, Math.max(0, total - leg.startTotal));
-  const map = `/api/game/v1/progress/map?${new URLSearchParams({ measure: measureId, size: 'card' })}`;
+  const map = `/api/game/v1/progress/map?${new URLSearchParams({ measure: measureId, size: 'card', v: mapVersion(leg.polyline, walked / leg.distanceM) })}`;
   return { name: leg.name ?? `${leg.from} to ${leg.to}`, distanceText: formatAmount(leg.distanceM, 'meters', 'full', units).text,
     walkedText: formatAmount(walked, 'meters', 'compact', units).text, totalText: formatAmount(total, 'meters', 'compact', units).text,
     progress: walked / leg.distanceM, straightLine: leg.straightLine,

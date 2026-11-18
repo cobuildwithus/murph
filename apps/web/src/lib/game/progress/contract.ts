@@ -145,7 +145,8 @@ const picUpload = z.object({ id: z.string().uuid(), measureId: text, takenAt: z.
 export type PicUploadQuery = z.infer<typeof picUpload>;
 const mapSize = z.enum(["card", "drawer"]);
 const mapQuery = z.union([
-  z.strictObject({ measure: text, size: mapSize }),
+  // v: the picture's version (`routeView`); only the app's cache reads it.
+  z.strictObject({ measure: text, size: mapSize, v: text.optional() }),
   z.strictObject({ from: text, to: text, size: mapSize }),
 ]);
 export type MapQuery = z.infer<typeof mapQuery>;
