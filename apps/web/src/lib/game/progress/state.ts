@@ -14,7 +14,8 @@ export interface RouteLeg {
   to: string;
   distanceM: number;
   polyline: string;
-  towns: { name: string; atM: number }[];
+  /** place: the town's public Mapbox place (id, "Del Mar, California, United States"); null when there is none, absent on legs from before posters. */
+  towns: { name: string; atM: number; place?: { id: string; label: string } | null }[];
   straightLine: boolean;
   startTotal: number;
 }

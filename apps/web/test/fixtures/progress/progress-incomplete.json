@@ -411,7 +411,9 @@
             "aheadText": null,
             "x": 0.65,
             "y": 0.9,
-            "passedOn": "2026-10-21"
+            "passedOn": "2026-10-21",
+            "poster": null,
+            "stepsText": null
           },
           {
             "name": "Chattanooga",
@@ -419,7 +421,9 @@
             "aheadText": "2 mi to go",
             "x": 0.4,
             "y": 0.1,
-            "passedOn": null
+            "passedOn": null,
+            "poster": null,
+            "stepsText": null
           }
         ],
         "goalPicked": true,
@@ -431,7 +435,9 @@
             "aheadText": null,
             "x": 0.737037,
             "y": 0.9,
-            "passedOn": "2026-10-21"
+            "passedOn": "2026-10-21",
+            "poster": null,
+            "stepsText": null
           },
           {
             "name": "Chattanooga",
@@ -439,7 +445,9 @@
             "aheadText": "2 mi to go",
             "x": 0.341975,
             "y": 0.1,
-            "passedOn": null
+            "passedOn": null,
+            "poster": null,
+            "stepsText": null
           }
         ],
         "here": {
@@ -450,7 +458,10 @@
           "x": 0.348671,
           "y": 0.113559
         },
-        "shareAwardId": null
+        "shareAwardId": null,
+        "mapArt": null,
+        "drawerMapArt": null,
+        "etaText": "10 weeks"
       },
       "pics": []
     }

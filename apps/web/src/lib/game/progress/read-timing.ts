@@ -7,7 +7,7 @@ type Route = "/api/game/v1/progress" | "/api/game/v1/progress/health" | "/api/ga
 /** One foreground read. Overlapping branches report elapsed time independently. */
 export class ProgressReadTiming {
   readonly phaseMs = { auth: 0, cohort: 0, gameSeries: 0, rooms: 0, ownReplica: 0, friendBoards: 0,
-    awards: 0, profile: 0, pictures: 0, states: 0, scoring: 0, journeys: 0, render: 0 };
+    awards: 0, profile: 0, pictures: 0, states: 0, scoring: 0, journeys: 0, art: 0, render: 0 };
   readonly counts = { games: 0, entries: 0, friends: 0, boards: 0 };
   private pill = "all";
 

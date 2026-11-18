@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { replaceRouteLeg, routeAwardKey, routeLegs, routeView } from '../src/lib/game/progress/route-progress';
+import { replaceRouteLeg, routeAwardKey, routeEta, routeLegs, routeView } from '../src/lib/game/progress/route-progress';
 import { cutPolyline, decodePolyline, encodePolyline, MAP_SIZES, routeBbox, townPosition } from '../src/lib/game/progress/route-geometry';
 import { medalView } from '../src/lib/game/progress/view';
 import { medalSchema } from '../src/lib/game/progress/contract';
@@ -18,6 +18,15 @@ describe('Progress route legs', () => {
       expect(here.y).toBeGreaterThanOrEqual(0); expect(here.y).toBeLessThanOrEqual(1);
     }
     expect(view.here).not.toEqual(view.drawerHere);
+  });
+  it.each([
+    [[['2026-10-01', 0], ['2026-10-31', 30 * 1609.344]], 70, '10 weeks'],
+    [[['2026-10-01', 0], ['2026-10-31', 30 * 1609.344]], 5, '5 days'],
+    [[['2026-10-30', 0], ['2026-10-31', 1609.344]], 100, null],
+    [[['2026-10-01', 0], ['2026-10-31', 0]], 100, null],
+    [[['2026-10-01', 0], ['2026-10-31', 30 * 1609.344]], 0, null],
+  ] as const)('says how long the rest takes at the recent pace: %j with %s miles left', (meters, miles, eta) => {
+    expect(routeEta(meters as unknown as [string, number][], miles * 1609.344)).toBe(eta);
   });
   it('says how far each town ahead is, with the end as what is left to go', () => {
     const mile = 1609.344;
@@ -40,7 +49,7 @@ describe('Progress route legs', () => {
     for (const [size, towns] of [['card', view.towns], ['drawer', view.drawerTowns]] as const) {
       const { width, height } = MAP_SIZES[size];
       const geometry = decodePolyline(route.polyline);
-      expect(towns).toEqual([{ name: 'B', atText, aheadText: null, passedOn: '2026-11-01',
+      expect(towns).toEqual([{ name: 'B', atText, aheadText: null, passedOn: '2026-11-01', poster: null, stepsText: null,
         ...townPosition(geometry.at(-1)!, routeBbox(geometry, width, height)) }]);
     }
     expect(view.towns[0].x).not.toBe(view.drawerTowns[0].x);

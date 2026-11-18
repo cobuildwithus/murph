@@ -31,7 +31,9 @@
         "aheadText": "118 mi to go",
         "x": 0.55,
         "y": 0.75,
-        "passedOn": null
+        "passedOn": null,
+        "poster": null,
+        "stepsText": null
       }
     ]
   },

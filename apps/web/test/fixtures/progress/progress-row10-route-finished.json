@@ -411,7 +411,9 @@
             "aheadText": null,
             "x": 0.9,
             "y": 0.9,
-            "passedOn": "2026-10-21"
+            "passedOn": "2026-10-21",
+            "poster": null,
+            "stepsText": null
           },
           {
             "name": "San Francisco",
@@ -419,7 +421,9 @@
             "aheadText": null,
             "x": 0.1,
             "y": 0.1,
-            "passedOn": "2026-11-14"
+            "passedOn": "2026-11-14",
+            "poster": null,
+            "stepsText": null
           }
         ],
         "goalPicked": true,
@@ -431,7 +435,9 @@
             "aheadText": null,
             "x": 0.95,
             "y": 0.784766,
-            "passedOn": "2026-10-21"
+            "passedOn": "2026-10-21",
+            "poster": null,
+            "stepsText": null
           },
           {
             "name": "San Francisco",
@@ -439,7 +445,9 @@
             "aheadText": null,
             "x": 0.05,
             "y": 0.215234,
-            "passedOn": "2026-11-14"
+            "passedOn": "2026-11-14",
+            "poster": null,
+            "stepsText": null
           }
         ],
         "here": {
@@ -450,7 +458,10 @@
           "x": 0.05,
           "y": 0.215234
         },
-        "shareAwardId": "route-sf"
+        "shareAwardId": "route-sf",
+        "mapArt": null,
+        "drawerMapArt": null,
+        "etaText": null
       },
       "pics": []
     }

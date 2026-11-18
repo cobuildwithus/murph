@@ -6,6 +6,8 @@ import { assertBrowserVaultMemberAuthority } from '@/src/lib/browser-vault/autho
 import { readProgressStepsRoute } from '@/src/lib/game/progress/health-reader';
 import { progressEffect, withProgressJsonError } from '@/src/lib/game/progress/http';
 import { renderRouteMap, resolveRoute } from '@/src/lib/game/progress/mapbox';
+import { readArtBytes } from '@/src/lib/game/progress/place-art';
+import { drawRouteOnPainting, mapKey } from '@/src/lib/game/progress/place-art-make';
 import { routeView } from '@/src/lib/game/progress/routes';
 import { cumulativePoints } from '@/src/lib/game/progress/series';
 import { readOwnSeries } from '@/src/lib/game/progress/vault-runs';
@@ -38,6 +40,10 @@ export const GET = withProgressJsonError(async (request: Request) => runWithHost
       await assertGameMemberAuthCurrentTx(auth, tx);
       if ('measure' in query && query.measure === 'steps') await assertBrowserVaultMemberAuthority({ memberId: auth.member.id, prisma: tx });
     });
+    // The painted map, when one is ready, with today's line drawn on it; else the plain map.
+    const painted = await readArtBytes(mapKey(polyline, query.size))
+      .then(painting => painting && drawRouteOnPainting(painting, polyline, progress, query.size)).catch(() => null);
+    if (painted) return new Response(new Uint8Array(painted), { headers: { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' } });
     return renderRouteMap({ polyline, progress, size: query.size });
   });
 }));
