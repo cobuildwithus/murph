@@ -9,6 +9,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import type { GameHistoryView, GameView } from "../src/lib/game/contract";
 import { decidePost, GameRuleError, type RuleEntry, type RuleState } from "../src/lib/game/rules";
 import { buildGameView } from "../src/lib/game/views";
+import { getHostedDomainRootUnwrapCache } from "../src/lib/hosted-crypto/domain-root-unwrap-cache";
 import { hostedOnboardingError, withRetryableServerFailures } from "../src/lib/hosted-onboarding/errors";
 import { isRecord } from "../src/lib/primitives";
 import { buildCurrentHostedConsentDocumentVersions } from "../src/lib/legal/consent";
@@ -422,6 +423,15 @@ describe("weekly game routes", () => {
 
   describe("App Review Home refresh", () => {
     const initial = { canStartGames: true, games: [], me: { memberId: LEO }, wallet: { held: [], owed: [], redeemed: [] } };
+    it("reads Home inside the request's root unwrap cache", async () => {
+      mocks.readHome.mockImplementationOnce(() => {
+        expect(getHostedDomainRootUnwrapCache()).toBeDefined();
+        return initial;
+      });
+      expect((await routes.home.GET(new Request(`${BASE}/home`))).status).toBe(200);
+      expect(mocks.readHome).toHaveBeenCalledOnce();
+    });
+
     it("starts the ordinary Home read in parallel with review-member detection and never refreshes it", async () => {
       let finish!: (value: boolean) => void;
       mocks.reviewMember.mockImplementation(() => new Promise<boolean>(resolve => { finish = resolve; }));

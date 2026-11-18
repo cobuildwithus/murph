@@ -22,22 +22,27 @@ export async function readProgressFriends(auth: HostedNativeMemberAuth, query: F
     const db = getPrisma(), memberId = auth.member.id;
     const cohort = await readFriendCohort(memberId), ids = cohort.people.map(person => person.memberId);
     if (query.with && !cohort.people.some(person => person.memberId === query.with)) throw gameNotFound();
-    const games = await readFriendGameSeries(ids);
+    const metric = query.measure;
+    const health = metric === "steps" || metric === "sleep";
+    const gameRead = readFriendGameSeries(ids);
+    const roomRead = readFriendRooms(memberId, ids.filter(id => id !== memberId)).then(async rooms => {
+      const incomplete = cohort.incomplete || rooms.incomplete;
+      const series = health && !incomplete
+        ? await readFriendHealthSeries({ auth, people: cohort.people, rooms: rooms.rooms, with: query.with,
+            metric, timeZone: cohort.timeZone, signal })
+        : { people: [], incomplete };
+      return { rooms, series };
+    });
+    // Drain both branches in the request scope, then inspect errors in their original order.
+    await Promise.all([gameRead, roomRead].map(read => read.catch(() => undefined)));
+    const games = await gameRead;
     const pills = friendPills(games, memberId, ids, query.measure);
-    const health = query.measure === "steps" || query.measure === "sleep";
     const measure = friendMeasure(query.measure);
-    const rooms = await readFriendRooms(memberId, ids.filter(id => id !== memberId));
-    let incomplete = cohort.incomplete || (!health && games.incomplete) || rooms.incomplete;
-    let people: FriendSeries[] = [];
-    if (!incomplete) {
-      if (health) {
-        const result = await readFriendHealthSeries({ auth, people: cohort.people, rooms: rooms.rooms,
-          metric: query.measure as "steps" | "sleep", timeZone: cohort.timeZone, signal });
-        people = result.people;
-        incomplete = result.incomplete;
-      } else {
-        people = cohort.people.map(person => ({ ...person, daily: friendDaily(games.amounts.get(person.memberId) ?? [], query.measure) }));
-      }
+    const { rooms, series } = await roomRead;
+    let incomplete = series.incomplete || (!health && games.incomplete);
+    let people = series.people;
+    if (!health && !incomplete) {
+      people = cohort.people.map(person => ({ ...person, daily: friendDaily(games.amounts.get(person.memberId) ?? [], query.measure) }));
     }
     const current = await friendCohortIds(memberId, db);
     incomplete ||= current.incomplete;

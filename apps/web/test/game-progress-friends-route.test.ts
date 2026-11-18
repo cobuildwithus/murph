@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 const mocks = vi.hoisted(() => ({
+  board: vi.fn(), replica: vi.fn(),
   health: vi.fn(), openGameTexts: vi.fn(), states: vi.fn(), games: vi.fn(), entries: vi.fn(), tasks: vi.fn(), openTasks: vi.fn(), settle: vi.fn(), rooms: vi.fn(), current: vi.fn(), cohort: vi.fn(), ids: vi.fn(), after: vi.fn(),
 }));
 vi.mock("next/server", async original => ({ ...await original<typeof import("next/server")>(), after: mocks.after }));
@@ -16,9 +17,13 @@ vi.mock("@/src/lib/game/progress/crypto", () => ({ openProgressMany: mocks.openT
 vi.mock("@/src/lib/game/progress/awards", () => ({ settleAwards: mocks.settle }));
 vi.mock("@/src/lib/game/progress/friend-cohort", () => ({ readFriendCohort: mocks.cohort, friendCohortIds: mocks.ids }));
 vi.mock("@/src/lib/game/progress/friend-health", () => ({ readFriendHealthSeries: mocks.health }));
+vi.mock("@/src/lib/device-sync/companion-numbers", () => ({ readCompanionHealthSeries: mocks.replica }));
+vi.mock("@/src/lib/hosted-groups/group-store", () => ({ readHostedGroupBoardData: mocks.board }));
 vi.mock("@/src/lib/game/progress/friend-sharing", () => ({ readFriendRooms: mocks.rooms }));
 import { GET } from "../app/api/game/v1/progress/friends/route";
 import { friendsSchema } from "@/src/lib/game/progress/contract";
+import { getHostedDomainRootUnwrapCache } from "@/src/lib/hosted-crypto/domain-root-unwrap-cache";
+import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 const request = (query = "measure=pushups.reps", units = "us") => new Request(`https://example.test/api/game/v1/progress/friends?${query}`,
   { headers: { "X-Murph-Client-Units": units } });
@@ -49,6 +54,77 @@ beforeEach(() => {
   mocks.settle.mockImplementation(async (_member, _candidates, before) => { await before({}); });
 });
 afterEach(() => vi.useRealTimers());
+
+it("reads Friends inside the request's root unwrap cache", async () => {
+  mocks.rooms.mockImplementationOnce(async () => {
+    expect(getHostedDomainRootUnwrapCache()).toBeDefined();
+    return { rooms: [], incomplete: false };
+  });
+  expect((await GET(request())).status).toBe(200);
+  expect(mocks.rooms).toHaveBeenCalledOnce();
+});
+
+it("starts games and rooms together and reads health after rooms while games are pending", async () => {
+  let finishGames!: () => void, finishRooms!: () => void;
+  mocks.games.mockImplementationOnce(() => new Promise(resolve => { finishGames = () => resolve([]); }));
+  mocks.rooms.mockImplementationOnce(() => new Promise(resolve => { finishRooms = () => resolve({ rooms: [], incomplete: false }); }));
+  mocks.entries.mockResolvedValue([]);
+  mocks.health.mockResolvedValue({ people: [], incomplete: false });
+  const response = GET(request("measure=steps"));
+  await vi.waitFor(() => {
+    expect(mocks.games).toHaveBeenCalledOnce();
+    expect(mocks.rooms).toHaveBeenCalledOnce();
+  });
+  expect(mocks.health).not.toHaveBeenCalled();
+  finishRooms();
+  await vi.waitFor(() => expect(mocks.health).toHaveBeenCalledOnce());
+  finishGames();
+  expect((await response).status).toBe(200);
+});
+
+it("returns the game failure even if health fails first", async () => {
+  let failGames!: () => void;
+  mocks.games.mockImplementationOnce(() => new Promise((_resolve, reject) => { failGames = () => reject(new Error()); }));
+  mocks.health.mockRejectedValueOnce(hostedOnboardingError({ code: "CONSENT_REQUIRED", httpStatus: 403, message: "Consent required." }));
+  const response = GET(request("measure=steps"));
+  await vi.waitFor(() => expect(mocks.health).toHaveBeenCalledOnce());
+  failGames();
+  const result = await response;
+  expect(result.status).toBe(503);
+  expect(await result.json()).toMatchObject({ error: { code: "PROGRESS_FRIENDS_UNAVAILABLE", retryable: true } });
+});
+
+it("keeps a missing exercise ahead of a room error", async () => {
+  mocks.rooms.mockRejectedValueOnce(new Error());
+  expect((await GET(request("measure=unknown.reps"))).status).toBe(404);
+});
+
+it("reads only the selected Steps board and own replica while retaining the full sharing audience", async () => {
+  const { readFriendHealthSeries } = await vi.importActual<typeof import("@/src/lib/game/progress/friend-health")>("@/src/lib/game/progress/friend-health");
+  mocks.health.mockImplementationOnce(readFriendHealthSeries);
+  const cohort = await mocks.cohort();
+  const people = [...cohort.people, { ...cohort.people[1], memberId: "sam", firstName: "Sam" }];
+  mocks.cohort.mockResolvedValue({ ...cohort, people });
+  mocks.ids.mockResolvedValue({ ids: ["ava", "leo", "sam"], incomplete: false });
+  mocks.rooms.mockResolvedValue({ incomplete: false, rooms: [
+    { otherMemberId: "leo", runtimeMemberId: "room-leo", shared: ["steps"] },
+    { otherMemberId: "sam", runtimeMemberId: "room-sam", shared: [] },
+  ] });
+  const date = "2026-11-10";
+  mocks.replica.mockResolvedValue({ numbers: { steps: { daily: [{ date, value: 4000 }] } } });
+  mocks.board.mockResolvedValue({ people: [{ memberId: "leo", projections: [null, null, {
+    state: "available", records: [{ recordKey: "steps", data: { date, metricKey: "steps", value: 5000, unit: "steps" } }],
+  }] }] });
+  const body = friendsSchema.parse(await (await GET(request("measure=steps&with=leo"))).json());
+  expect(mocks.board).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ otherId: "leo" }));
+  expect(mocks.replica).toHaveBeenCalledOnce();
+  expect(mocks.rooms.mock.calls).toEqual([["ava", ["leo", "sam"]], ["ava", ["leo", "sam"]]]);
+  expect(body.rows.map(row => [row.memberId, row.total?.value, row.rank])).toEqual([["leo", 5000, 1], ["ava", 4000, 2]]);
+  expect(body.chart).toEqual([{ memberId: "leo", points: [[date, 5000]] }, { memberId: "ava", points: [[date, 4000]] }]);
+  expect(body.shareAudience.map(person => person.memberId)).toEqual(["leo", "sam"]);
+  expect(body.shareAsk).toBe(true);
+  expect(body.incomplete).toBe(false);
+});
 
 it("counts a friend's other games, merges same-day amounts and counts a retake once", async () => {
   const response = await GET(request());

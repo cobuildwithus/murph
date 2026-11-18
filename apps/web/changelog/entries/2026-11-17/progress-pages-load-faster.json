@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-17",
+  "order": 220,
+  "item": {
+    "id": "progress-pages-load-faster",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Progress pages load faster",
+    "summary": "Health, Friends and your games home do less repeated work per load, and a friend's drawer reads only that friend's numbers.",
+    "details": "Friends reads game history and shared step or sleep numbers at the same time instead of one after the other. A first walk route finds its towns in half the round trips.",
+    "relevanceTags": ["progress", "games", "health"],
+    "sourcePullRequests": [5149]
+  }
+}
