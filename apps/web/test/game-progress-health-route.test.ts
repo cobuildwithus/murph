@@ -213,7 +213,7 @@ it.each([
   expect(mocks.settle.mock.calls[0][1]).toEqual([]);
 });
 
-it.each([["us", "about 1 mi"], ["metric", "about 1.6 km"]])("renders the Steps journey in requested %s units", async (units, walkedText) => {
+it.each([["us", "1 mi"], ["metric", "1.6 km"]])("renders the Steps journey in requested %s units", async (units, walkedText) => {
   const raw = snapshot();
   mocks.raw.mockResolvedValue({ ...raw, numbers: { ...raw.numbers,
     steps: { daily: [{ date: joinedOn, value: 2000, source: "Garmin", observedAt: `${joinedOn}T12:00:00Z` }] } } });
@@ -265,7 +265,7 @@ it("previews a suggested Steps loop and returns the same wearable measure as Hea
   expect(response.status).toBe(200);
   const body = await response.json();
   expect(body).toMatchObject({ ok: true, measure: { id: "steps", source: "wearable", total: { value: 4000, unit: "steps" },
-    route: { name: loop.name, totalText: "about 2 mi", walkedText: "about 0 mi", progress: 0, goalPicked: true } } });
+    route: { name: loop.name, totalText: "2 mi", walkedText: "0 mi", progress: 0, goalPicked: true } } });
   const health = healthSchema.parse(await (await GET(request())).json());
   expect(body.measure).toEqual(health.sums.find(sum => sum.id === "steps"));
   expect(mocks.resolve).toHaveBeenCalledTimes(2);

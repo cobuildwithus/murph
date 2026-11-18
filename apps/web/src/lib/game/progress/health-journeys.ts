@@ -49,10 +49,6 @@ export function healthJourneyViews(journeys: Awaited<ReturnType<typeof healthJou
 
 export function healthJourneyView(measure: MeasureSeries, state: MeasureState, awards: StoredAward[], today: string, units: ClientUnits) {
   const view = measureView(measure, state, awards, today, units);
-  if (view.route && measure.id === "steps") {
-    view.route.walkedText = `about ${view.route.walkedText}`;
-    view.route.totalText = `about ${view.route.totalText}`;
-  }
   return { ...view, source: "wearable" as const,
     total: measure.id === "sleep" && view.total.value >= 86400
       ? { ...view.total, text: `${formatNumber(view.total.value / 86400, "full", 1)} days` }
