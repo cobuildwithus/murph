@@ -35,7 +35,7 @@ import {
   HOSTED_RUNNER_SMOKE_HEALTH_COMMONS_CLI_GOAL_PROOF_COUNT,
 } from "../src/hosted-runner-smoke-contract.ts";
 import {
-  DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
+  DEPLOY_LIVE_MODEL_TURN_SMOKE_MODELS,
 } from "../src/deploy-smoke-live-model.ts";
 import {
   readHostedStandbyMode,
@@ -100,7 +100,7 @@ interface SmokeDirectR2PresignedPutResult {
 interface SmokeLiveModelTurnResult {
   durationMs?: unknown;
   egressGrantConsumed?: unknown;
-  model?: unknown;
+  models?: unknown;
   stdoutBytes?: unknown;
 }
 
@@ -262,8 +262,8 @@ export async function runSmokeHostedDeploy(input: {
         }),
         versionOverrideHeaders,
         expectDirectR2PresignedPut: shouldSmokeDirectR2PresignedPut,
-        expectLiveModelTurnModel: shouldSmokeLiveModelTurn
-          ? DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL
+        expectLiveModelTurnModels: shouldSmokeLiveModelTurn
+          ? DEPLOY_LIVE_MODEL_TURN_SMOKE_MODELS
           : null,
       });
     } finally {
@@ -304,7 +304,7 @@ export async function runSmokeHostedDeploy(input: {
 
 async function assertRunnerContainerSmoke(input: {
   expectDirectR2PresignedPut: boolean;
-  expectLiveModelTurnModel: string | null;
+  expectLiveModelTurnModels: readonly string[] | null;
   fetchImpl: FetchLike;
   log: (message: string) => void;
   source: EnvSource;
@@ -394,7 +394,7 @@ function assertSmokeStandbyInventory(
 async function readRunnerContainerSmoke(input: {
   attempt: number;
   expectDirectR2PresignedPut: boolean;
-  expectLiveModelTurnModel: string | null;
+  expectLiveModelTurnModels: readonly string[] | null;
   fetchImpl: FetchLike;
   expectedManifest: SmokeRunnerBundleManifest;
   signal: AbortSignal;
@@ -487,10 +487,10 @@ async function readRunnerContainerSmoke(input: {
   if (input.expectDirectR2PresignedPut) {
     assertSmokeDirectR2PresignedPutResult(responsePayload.runnerContainer.directR2PresignedPut);
   }
-  if (input.expectLiveModelTurnModel !== null) {
+  if (input.expectLiveModelTurnModels !== null) {
     assertSmokeLiveModelTurnResult(
       responsePayload.runnerContainer.liveModelTurn,
-      input.expectLiveModelTurnModel,
+      input.expectLiveModelTurnModels,
     );
   }
 
@@ -600,13 +600,19 @@ function assertSmokeDirectR2PresignedPutResult(
 
 function assertSmokeLiveModelTurnResult(
   value: SmokeLiveModelTurnResult | null | undefined,
-  expectedModel: string,
+  expectedModels: readonly string[],
 ): void {
   if (!value || typeof value !== "object") {
     throw new Error("runner container live model turn smoke did not return metadata.");
   }
-  if (value.model !== expectedModel) {
-    throw new Error("runner container live model turn smoke did not use the expected model.");
+  const models: unknown[] = Array.isArray(value.models) ? value.models : [];
+  const missingModels = expectedModels.filter((model) => !models.includes(model));
+  if (missingModels.length > 0 || models.length !== expectedModels.length) {
+    throw new Error(
+      `runner container live model turn smoke did not prove every product model. missing=${
+        JSON.stringify(missingModels)
+      }`,
+    );
   }
   if (typeof value.durationMs !== "number" || value.durationMs <= 0) {
     throw new Error("runner container live model turn smoke reported an invalid duration.");

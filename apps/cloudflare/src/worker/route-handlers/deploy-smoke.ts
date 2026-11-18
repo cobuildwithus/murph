@@ -28,7 +28,7 @@ import {
   HOSTED_WORKSPACE_SNAPSHOT_CONTENT_TYPE,
 } from "../../workspace-snapshot-store.ts";
 import {
-  DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
+  DEPLOY_LIVE_MODEL_TURN_SMOKE_MODELS,
 } from "../../deploy-smoke-live-model.ts";
 import type {
   DeclarativeRoute,
@@ -111,9 +111,9 @@ export async function handleDeployContainerSmokeRoute(
   artifactOnly = false,
 ): Promise<Response> {
   const directR2PresignedPut = context.url.searchParams.get("directR2PresignedPut") === "1";
-  let liveModelTurnModel: string | null;
+  let liveModelTurnModels: readonly string[] | null;
   try {
-    liveModelTurnModel = readDeployContainerSmokeLiveModelTurnModel(context.url);
+    liveModelTurnModels = readDeployContainerSmokeLiveModelTurnModels(context.url);
   } catch {
     return json({
       error: "Unsupported deploy container smoke live model turn.",
@@ -152,7 +152,7 @@ export async function handleDeployContainerSmokeRoute(
     }
     result = await container.smokeHealth({
       ...(directR2Smoke ? { directR2PresignedPut: directR2Smoke.containerInput } : {}),
-      ...(liveModelTurnModel ? { liveModelTurn: { model: liveModelTurnModel } } : {}),
+      ...(liveModelTurnModels ? { liveModelTurn: { models: liveModelTurnModels } } : {}),
     });
 
     if (directR2Smoke) {
@@ -354,9 +354,9 @@ export async function deleteDeployContainerDirectR2PresignedPutSmokeObject(
   await context.env.BUNDLES.delete(objectKey);
 }
 
-// Optional live model turn: the deploy-signed smoke URL carries a boolean flag
-// mirroring `directR2PresignedPut=1`, while the model stays fixed in code.
-export function readDeployContainerSmokeLiveModelTurnModel(url: URL): string | null {
+// Optional live model turns: the deploy-signed smoke URL carries a boolean flag
+// mirroring `directR2PresignedPut=1`, while the models stay fixed in code.
+export function readDeployContainerSmokeLiveModelTurnModels(url: URL): readonly string[] | null {
   const normalized = normalizeDeployContainerSmokeQueryValue(url.searchParams.get("liveModelTurn"));
   if (!normalized) {
     return null;
@@ -364,7 +364,7 @@ export function readDeployContainerSmokeLiveModelTurnModel(url: URL): string | n
   if (normalized !== "1") {
     throw new RangeError("Unsupported deploy container smoke live model turn flag.");
   }
-  return DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL;
+  return DEPLOY_LIVE_MODEL_TURN_SMOKE_MODELS;
 }
 
 // Retry attempt: scopes the smoke Durable Object so each attempt gets its own

@@ -1,8 +1,22 @@
-// One real model turn per enabled production smoke phase; per-PR CI and hosted-local E2E
-// never enable the flag.
-export const DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL = "gpt-6-luna";
+import {
+  HOSTED_ASSISTANT_PRODUCT_MODELS,
+  isHostedAssistantProductModel,
+} from "@murphai/hosted-execution/assistant-model";
+
+// One real turn for every model a member can be routed to, in each enabled
+// production smoke phase. The provider validates requests per model: on
+// 2026-11-18 it rejected every GPT-6.2 request from an image whose single
+// smoked model, Luna, still passed. Per-PR CI and hosted-local E2E never
+// enable the flag.
+export const DEPLOY_LIVE_MODEL_TURN_SMOKE_MODELS: readonly string[] =
+  HOSTED_ASSISTANT_PRODUCT_MODELS;
 export const DEPLOY_LIVE_MODEL_TURN_SMOKE_PROMPT = "Reply with exactly: OK";
 export const DEPLOY_LIVE_MODEL_TURN_SMOKE_EXPECTED_OUTPUT = "OK";
+
+export function readDeployLiveModelTurnSmokeModel(value: unknown): string | null {
+  const model = readString(value);
+  return isHostedAssistantProductModel(model) ? model : null;
+}
 
 export function readDeployLiveModelTurnSmokeOpenAiModel(
   rawBody: string,
@@ -17,11 +31,7 @@ export function readDeployLiveModelTurnSmokeOpenAiModel(
     return null;
   }
   const record = parsed as Record<string, unknown>;
-  const model = readString(record.model);
-  if (model !== DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL) {
-    return null;
-  }
-  return model;
+  return readDeployLiveModelTurnSmokeModel(record.model);
 }
 
 export function readDeployLiveModelTurnSmokeCodexOutputText(stdout: string): string | null {

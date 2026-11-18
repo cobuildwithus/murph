@@ -149,8 +149,15 @@ async function runHostedLiveModelSmokeRequest(
   let heavyRuntime: HostedContainerHeavyRuntime | null = null;
   try {
     heavyRuntime = await hydrateHeavyRuntime();
+    // The Worker names the model; its egress fence admits only that model.
+    const model = heavyRuntime.readLiveModelTurnSmokeModel(
+      new URL(request.url ?? "/", "http://127.0.0.1").searchParams.get("model"),
+    );
+    if (model === null) {
+      throw new Error("Hosted live model turn smoke requires a product model.");
+    }
     const result = await heavyRuntime.runLiveModelTurnSmoke({
-      model: heavyRuntime.deployLiveModelTurnSmokeModel,
+      model,
       signal: signal,
     });
     writeJsonResponse(response, 200, {

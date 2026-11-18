@@ -49,6 +49,16 @@ export const HOSTED_RUNTIME_ENV_PROFILES_ENV =
   "HOSTED_EXECUTION_RUNNER_ENV_PROFILES";
 export { HOSTED_RUNTIME_CODEX_APP_SERVER_COMMAND_ENV };
 export { HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV };
+
+// The runner image carries two catalogs: the standard one, and a superset at
+// the `.astra` suffix for workspaces authorized to select Astra.
+export function resolveHostedCodexModelCatalogPath(input: {
+  imageCatalogPath: string | undefined;
+  astraAllowed: boolean | undefined;
+}): string | undefined {
+  const catalogPath = input.imageCatalogPath?.trim();
+  return catalogPath && input.astraAllowed === true ? `${catalogPath}.astra` : catalogPath;
+}
 export const HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV =
   "HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL";
 // Local-dev-only: ChatGPT-subscription Codex auth.json content seeded by the

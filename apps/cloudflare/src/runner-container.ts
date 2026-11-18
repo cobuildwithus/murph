@@ -414,7 +414,7 @@ interface HostedExecutionContainerSmokeHealthResult {
   liveModelTurn?: {
     durationMs: number | null;
     egressGrantConsumed: boolean | null;
-    model: string | null;
+    models: string[];
     stdoutBytes: number | null;
   } | null;
   liveModelTurnFailure?: string;
@@ -438,7 +438,7 @@ interface HostedExecutionContainerSmokeHealthInput {
     tlsCaCertificatePem?: string;
   };
   liveModelTurn?: {
-    model: string;
+    models: readonly string[];
   };
 }
 
@@ -4040,11 +4040,13 @@ export class DeploySmokeRunnerContainer extends RunnerContainer {
     remainingRequests: number;
   } | null = null;
 
-  // Worker-side half of the deploy-smoke live model turn. The container runs
-  // `codex exec` with the injected-credential placeholder; while the fence
-  // below is open, the Worker egress intercept authorizes this container's
-  // api.openai.com egress and injects the real Worker-owned OPENAI_API_KEY.
-  // The raw key never travels to the container and never appears in logs.
+  // Worker-side half of the deploy-smoke live model turns. The container runs
+  // one `codex exec` per requested model with the injected-credential
+  // placeholder; while the fence below is open, the Worker egress intercept
+  // authorizes this container's api.openai.com egress and injects the real
+  // Worker-owned OPENAI_API_KEY. The raw key never travels to the container
+  // and never appears in logs. Models run one at a time, each under its own
+  // one-request fence, and the first failure ends the smoke.
   protected override async smokeLiveModelTurn(
     readyTimeoutMs: number,
     input: NonNullable<HostedExecutionContainerSmokeHealthInput["liveModelTurn"]>,
@@ -4055,53 +4057,64 @@ export class DeploySmokeRunnerContainer extends RunnerContainer {
         "Hosted runner live model turn smoke requires the OPENAI_API_KEY Worker secret.",
       );
     }
+    if (input.models.length === 0) {
+      throw new Error("Hosted runner live model turn smoke requires at least one model.");
+    }
     const smokeTimeoutMs = Math.max(
       readyTimeoutMs,
       RUNNER_LIVE_MODEL_TURN_SMOKE_MIN_TIMEOUT_MS,
     );
-    const smokeSignal = AbortSignal.timeout(smokeTimeoutMs);
-    this.liveModelTurnSmokeFence = {
-      expiresAtMs: Date.now() + smokeTimeoutMs,
-      model: input.model,
-      remainingRequests: 1,
-    };
-    try {
-      const response = await this.containerFetch(
-        RUNNER_LIVE_MODEL_TURN_SMOKE_URL,
-        {
-          method: "POST",
-          signal: smokeSignal,
-        },
-      );
-      const payload = await readRunnerContainerMetadataJsonObject(response, {
-        signal: smokeSignal,
-      });
-      if (!response.ok || payload.ok !== true) {
-        // The container reports content-free smoke diagnostics; carry them so
-        // deploy failures stay debuggable through the worker layer.
-        const smokeErrorMessage = typeof payload.smokeErrorMessage === "string"
-          ? ` ${payload.smokeErrorMessage.slice(0, 512)}`
-          : "";
-        throw new Error(
-          `Hosted runner container live model turn smoke failed with HTTP ${response.status}.${smokeErrorMessage}`,
-        );
-      }
-      const result = readRunnerContainerMetadataRecordProperty(payload.liveModelTurn);
-      const egressGrantConsumed = this.liveModelTurnSmokeFence?.remainingRequests === 0;
-      if (!egressGrantConsumed) {
-        throw new Error(
-          "Hosted runner container live model turn smoke did not consume the Worker egress grant.",
-        );
-      }
-      return {
-        durationMs: typeof result.durationMs === "number" ? result.durationMs : null,
-        egressGrantConsumed,
-        model: typeof result.model === "string" ? result.model : null,
-        stdoutBytes: typeof result.stdoutBytes === "number" ? result.stdoutBytes : null,
+    const models: string[] = [];
+    let durationMs = 0;
+    let stdoutBytes = 0;
+    for (const model of input.models) {
+      const smokeSignal = AbortSignal.timeout(smokeTimeoutMs);
+      this.liveModelTurnSmokeFence = {
+        expiresAtMs: Date.now() + smokeTimeoutMs,
+        model,
+        remainingRequests: 1,
       };
-    } finally {
-      this.liveModelTurnSmokeFence = null;
+      try {
+        const response = await this.containerFetch(
+          `${RUNNER_LIVE_MODEL_TURN_SMOKE_URL}?model=${encodeURIComponent(model)}`,
+          {
+            method: "POST",
+            signal: smokeSignal,
+          },
+        );
+        const payload = await readRunnerContainerMetadataJsonObject(response, {
+          signal: smokeSignal,
+        });
+        if (!response.ok || payload.ok !== true) {
+          // The container reports content-free smoke diagnostics; carry them so
+          // deploy failures stay debuggable through the worker layer.
+          const smokeErrorMessage = typeof payload.smokeErrorMessage === "string"
+            ? ` ${payload.smokeErrorMessage.slice(0, 512)}`
+            : "";
+          throw new Error(
+            `Hosted runner container live model turn smoke failed for ${model} with HTTP ${response.status}.${smokeErrorMessage}`,
+          );
+        }
+        const result = readRunnerContainerMetadataRecordProperty(payload.liveModelTurn);
+        if (this.liveModelTurnSmokeFence?.remainingRequests !== 0) {
+          throw new Error(
+            `Hosted runner container live model turn smoke did not consume the Worker egress grant for ${model}.`,
+          );
+        }
+        // The consumed one-request fence proves the turn used this model.
+        models.push(model);
+        durationMs += typeof result.durationMs === "number" ? result.durationMs : 0;
+        stdoutBytes += typeof result.stdoutBytes === "number" ? result.stdoutBytes : 0;
+      } finally {
+        this.liveModelTurnSmokeFence = null;
+      }
     }
+    return {
+      durationMs,
+      egressGrantConsumed: true,
+      models,
+      stdoutBytes,
+    };
   }
 
   // Queried by the Worker egress intercept to authorize exactly one

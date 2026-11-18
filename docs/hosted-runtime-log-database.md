@@ -1433,6 +1433,35 @@ Email and incident details contain only counts per allowlisted managed
 automation slug (other slugs, which members can name, read `member_automation`)
 and per allowlisted error code (`other` otherwise).
 
+### Provider request rejection alert
+
+The same five-minute cron runs the provider request rejection monitor. It
+exists because a provider that refuses every request for a model leaves those
+members with no reply at all, and no other monitor reads foreground reply
+failures. A rejected reply is an `assistant.automation_detail` row of type
+`input.reply-failed` with error code `ASSISTANT_CODEX_FAILED` (the `errorCode`
+JSON key, else the `error_code` column), `failureCodexFailureStage:
+"turn_failed"`, `failureRetryable: false` and a numeric
+`failureProviderActionCount` of zero: the provider refused the turn before
+doing any work, so a retry meets the same refusal. Process exits, retryable
+failures and turns that ran a provider action are not counted.
+
+Any rejected reply in the trailing 30 minutes opens one fleet-wide incident
+(`hosted-provider-request-rejection-monitor:v1`), so one bad deploy or provider
+change sends one email, not one per message. It sends during quiet hours,
+reminds after one hour plus jitter while rejections continue, and clears
+without a recovery email once the window holds none. Recipients and timezone
+follow the latency monitor's configuration. Read failures cannot clear an
+existing incident. Each evaluation runs one time-indexed aggregate.
+
+Email and incident details contain only the rejected reply count, the distinct
+member count, the first and last failure times, and counts per allowlisted
+`failureCodexErrorInfo` (`other` for another string, `none` when missing) and
+`failureCodexErrorHttpStatusCode` (a JSON integer from 100 through 599, `other`
+for anything else, `none` when missing). They never contain
+`safeErrorMessage`, subject keys, member identifiers or message text; the
+provider's error text stays in the runner's container logs.
+
 ### Bounded event inventories
 
 For an already-authorized aggregate diagnostic that times out over a day, keep

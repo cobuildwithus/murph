@@ -981,6 +981,36 @@ The extracted `test/support/codex-scripted-provider.ts` owns only the existing
 local fake provider and isolated fixture setup; production still owns process,
 thread, native routing, validation and effects.
 
+The fake provider also enforces the one provider rule that has taken production
+replies down: `web.run` is reserved, and the provider answers 400 unless its
+`parameters` match the provider's own schema. The stub pins the digest of the
+parameters live turns were accepted with (`LIVE_PROVEN_WEB_RUN_PARAMETERS_SHA256`)
+and answers any other shape with the provider's rejection. Codex declares
+`web.run` only for a model provider named as production's is, so only a scenario
+that passes `providerName` exercises the rule; the test
+`declares the live-proven web.run schema for every hosted image catalog model`
+does that for every model in the image catalog built from the current
+Dockerfile filters, then proves the stub rejects the 2026-11-18 incident shape.
+A hermetic test cannot learn what the provider accepts. When a Codex pin,
+model catalog or provider change moves the digest, the test fails; prove the new
+shape with a real turn for each affected model before updating the pin:
+
+```sh
+pnpm test:assistant:live -- --auth provider --model <slug> \
+  --test 'answers an ordinary foreground message with the hosted web schema enabled'
+```
+
+Routine CI still makes no paid provider call. The production deploy smoke is the
+automated live proof: it runs one real turn for every hosted product model
+against the candidate image before the serving image changes
+(`apps/cloudflare/DEPLOY.md`). `container-image-contract.test.ts` keeps the image
+catalog's models equal to `HOSTED_ASSISTANT_PRODUCT_MODELS`, the list that smoke
+runs, and `runner-container.test.ts`, `smoke-hosted-deploy.test.ts` and
+`deploy-smoke-live-model.test.ts` prove one rejected model fails the smoke even
+when the others pass. Web's provider request rejection alert
+(`hosted-provider-rejection-alert-monitor{,-postgres}.test.ts`) is the detection
+behind both.
+
 Run from the repository root with the workspace's supported Node/pnpm and
 installed pinned dependencies (the existing catalog helper also requires `jq`):
 

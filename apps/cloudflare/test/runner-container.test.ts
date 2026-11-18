@@ -49,7 +49,7 @@ import {
   type RunnerContainerColdWaitDirectCause,
 } from "../src/runner-container-error-codes.ts";
 import {
-  DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
+  DEPLOY_LIVE_MODEL_TURN_SMOKE_MODELS,
 } from "../src/deploy-smoke-live-model.ts";
 import {
   buildHostedRunnerRedactedErrorJson,
@@ -4581,8 +4581,8 @@ describe("RunnerContainer", () => {
     });
   });
 
-  it("can extend deploy smoke to run a live model turn probe behind the egress fence", async () => {
-    let fenceActiveDuringTurn: boolean | null = null;
+  it("can extend deploy smoke to run one live turn per product model behind the egress fence", async () => {
+    const fenceReadsDuringTurns: Array<{ active: boolean; model?: string } | undefined> = [];
     let secondFenceReadDuringTurn: { active: boolean; model?: string } | null = null;
     let containerRef: DeploySmokeRunnerContainer | null = null;
     const { container, containerFetch } = createDeploySmokeContainerDouble({
@@ -4612,19 +4612,16 @@ describe("RunnerContainer", () => {
           });
         }
 
-        expect(url).toBe("http://container/internal/deploy-live-model-turn-smoke");
-        const firstFenceRead = await containerRef?.readDeploySmokeLiveModelTurnFence();
-        fenceActiveDuringTurn = firstFenceRead?.active ?? null;
-        expect(firstFenceRead).toEqual({
-          active: true,
-          model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
-        });
+        const smokeUrl = new URL(url);
+        expect(smokeUrl.pathname).toBe("/internal/deploy-live-model-turn-smoke");
+        // Each turn gets a fresh grant for exactly the model the URL names.
+        fenceReadsDuringTurns.push(await containerRef?.readDeploySmokeLiveModelTurnFence());
         secondFenceReadDuringTurn = await containerRef?.readDeploySmokeLiveModelTurnFence() ?? null;
         return new Response(JSON.stringify({
           liveModelTurn: {
-            durationMs: 1_234,
-            model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
-            stdoutBytes: 2_048,
+            durationMs: 100,
+            model: smokeUrl.searchParams.get("model"),
+            stdoutBytes: 10,
           },
           ok: true,
         }), {
@@ -4646,29 +4643,90 @@ describe("RunnerContainer", () => {
 
     const result = await container.smokeHealth({
       liveModelTurn: {
-        model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
+        models: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODELS,
       },
     });
 
+    const modelCount = DEPLOY_LIVE_MODEL_TURN_SMOKE_MODELS.length;
+    expect(modelCount).toBeGreaterThan(1);
     expect(result.liveModelTurn).toEqual({
-      durationMs: 1_234,
+      durationMs: 100 * modelCount,
       egressGrantConsumed: true,
-      model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
-      stdoutBytes: 2_048,
+      models: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODELS,
+      stdoutBytes: 10 * modelCount,
     });
     expect(result.codexShell).toEqual(createCodexShellSmokeResult());
-    expect(fenceActiveDuringTurn).toBe(true);
+    expect(fenceReadsDuringTurns).toEqual(
+      DEPLOY_LIVE_MODEL_TURN_SMOKE_MODELS.map((model) => ({ active: true, model })),
+    );
     expect(secondFenceReadDuringTurn).toEqual({
       active: false,
     });
     await expect(container.readDeploySmokeLiveModelTurnFence()).resolves.toEqual({
       active: false,
     });
-    expect(containerFetch).toHaveBeenCalledTimes(3);
+    expect(containerFetch).toHaveBeenCalledTimes(2 + modelCount);
     const smokeCall = containerFetch.mock.calls.find(([url]) =>
-      String(url).endsWith("/internal/deploy-live-model-turn-smoke")
+      String(url).includes("/internal/deploy-live-model-turn-smoke")
     );
     expect(smokeCall?.[1]?.body).toBeUndefined();
+  });
+
+  it("fails the deploy smoke when the provider rejects one model after another passed", async () => {
+    const turnModels: Array<string | null> = [];
+    let containerRef: DeploySmokeRunnerContainer | null = null;
+    const { container } = createDeploySmokeContainerDouble({
+      containerFetch: vi.fn(async (url: string) => {
+        if (url.endsWith("/health")) {
+          return Response.json({
+            hostedRuntimeArchitectureVersion: HOSTED_RUNTIME_ARCHITECTURE_VERSION,
+            ok: true,
+            service: "cloudflare-hosted-runner-node",
+          });
+        }
+        if (url.endsWith("/internal/deploy-codex-shell-smoke")) {
+          return Response.json({ codexShell: createCodexShellSmokeResult(), ok: true });
+        }
+
+        const model = new URL(url).searchParams.get("model");
+        turnModels.push(model);
+        await containerRef?.readDeploySmokeLiveModelTurnFence();
+        if (model === "gpt-6.2-sol") {
+          return Response.json({
+            error: "Hosted live model turn smoke failed.",
+            ok: false,
+            smokeErrorMessage:
+              "Hosted live model turn smoke codex exec exited with 1. stdoutExcerpt=\"Function 'web.run' is reserved for use by this model and must match the configured schema.\"",
+          }, { status: 500 });
+        }
+        return Response.json({
+          liveModelTurn: { durationMs: 100, model, stdoutBytes: 10 },
+          ok: true,
+        });
+      }),
+      env: {
+        OPENAI_API_KEY: "openai-worker-secret",
+      },
+    });
+    containerRef = container;
+
+    // Luna alone is the smoke that let the 2026-11-18 release through.
+    const result = await container.smokeHealth({
+      liveModelTurn: {
+        models: ["gpt-6-luna", "gpt-6.2-sol", "gpt-6.2-astra"],
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.liveModelTurn).toBeUndefined();
+    expect(result.liveModelTurnFailure).toBe(
+      "Hosted runner container live model turn smoke failed for gpt-6.2-sol with HTTP 500. "
+        + "Hosted live model turn smoke codex exec exited with 1. stdoutExcerpt=\"Function 'web.run' is reserved for use by this model and must match the configured schema.\"",
+    );
+    expect(turnModels).toEqual(["gpt-6-luna", "gpt-6.2-sol"]);
+    await expect(container.readDeploySmokeLiveModelTurnFence()).resolves.toEqual({
+      active: false,
+    });
   });
 
   it("fails a live model turn smoke that does not consume the egress fence", async () => {
@@ -4699,11 +4757,11 @@ describe("RunnerContainer", () => {
           });
         }
 
-        if (url.endsWith("/internal/deploy-live-model-turn-smoke")) {
+        if (url.includes("/internal/deploy-live-model-turn-smoke")) {
           return new Response(JSON.stringify({
             liveModelTurn: {
               durationMs: 1_234,
-              model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
+              model: "gpt-6-luna",
               stdoutBytes: 2_048,
             },
             ok: true,
@@ -4726,14 +4784,14 @@ describe("RunnerContainer", () => {
     // from a container that never started.
     const result = await container.smokeHealth({
       liveModelTurn: {
-        model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
+        models: ["gpt-6-luna"],
       },
     });
 
     expect(result.ok).toBe(false);
     expect(result.liveModelTurn).toBeUndefined();
     expect(result.liveModelTurnFailure).toBe(
-      "Hosted runner container live model turn smoke did not consume the Worker egress grant.",
+      "Hosted runner container live model turn smoke did not consume the Worker egress grant for gpt-6-luna.",
     );
     await expect(container.readDeploySmokeLiveModelTurnFence()).resolves.toEqual({
       active: false,
@@ -4751,7 +4809,7 @@ describe("RunnerContainer", () => {
 
     expect(result.liveModelTurn).toBeUndefined();
     expect(containerFetch.mock.calls.some(([url]) =>
-      String(url).endsWith("/internal/deploy-live-model-turn-smoke")
+      String(url).includes("/internal/deploy-live-model-turn-smoke")
     )).toBe(false);
   });
 
@@ -4783,7 +4841,7 @@ describe("RunnerContainer", () => {
           });
         }
 
-        if (url.endsWith("/internal/deploy-live-model-turn-smoke")) {
+        if (url.includes("/internal/deploy-live-model-turn-smoke")) {
           return new Response(JSON.stringify({
             error: "Hosted live model turn smoke failed.",
             ok: false,
@@ -4808,14 +4866,14 @@ describe("RunnerContainer", () => {
     // from a container that never started.
     const result = await container.smokeHealth({
       liveModelTurn: {
-        model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
+        models: ["gpt-6-luna"],
       },
     });
 
     expect(result.ok).toBe(false);
     expect(result.liveModelTurn).toBeUndefined();
     expect(result.liveModelTurnFailure).toBe(
-      "Hosted runner container live model turn smoke failed with HTTP 500. "
+      "Hosted runner container live model turn smoke failed for gpt-6-luna with HTTP 500. "
         + "Hosted live model turn smoke codex exec exited with 1. stdoutBytes=0 stderrExcerpt=\"insufficient_quota\"",
     );
     await expect(container.readDeploySmokeLiveModelTurnFence()).resolves.toEqual({
@@ -4831,7 +4889,7 @@ describe("RunnerContainer", () => {
     // from a container that never started.
     const result = await container.smokeHealth({
       liveModelTurn: {
-        model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
+        models: ["gpt-6-luna"],
       },
     });
 
@@ -4841,7 +4899,7 @@ describe("RunnerContainer", () => {
       "Hosted runner live model turn smoke requires the OPENAI_API_KEY Worker secret.",
     );
     expect(containerFetch.mock.calls.some(([url]) =>
-      String(url).endsWith("/internal/deploy-live-model-turn-smoke")
+      String(url).includes("/internal/deploy-live-model-turn-smoke")
     )).toBe(false);
   });
 

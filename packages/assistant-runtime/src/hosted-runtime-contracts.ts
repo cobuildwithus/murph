@@ -133,6 +133,7 @@ export {
   HOSTED_RUNTIME_ENV_PROFILE_KEYS,
   HOSTED_RUNTIME_FORWARDED_ENV_LOG_CATEGORY_KEYS,
   readHostedRuntimeCommitTimeoutConfigValue,
+  resolveHostedCodexModelCatalogPath,
 } from "./hosted-runtime/launch-spec.ts";
 export type {
   HostedRuntimeEnvProfileName,

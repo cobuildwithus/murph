@@ -1,31 +1,46 @@
 import { describe, expect, it } from "vitest";
 
+import { HOSTED_ASSISTANT_PRODUCT_MODELS } from "@murphai/hosted-execution/assistant-model";
+
 import {
-  DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
+  DEPLOY_LIVE_MODEL_TURN_SMOKE_MODELS,
   readDeployLiveModelTurnSmokeCodexOutputText,
+  readDeployLiveModelTurnSmokeModel,
   readDeployLiveModelTurnSmokeOpenAiModel,
 } from "../src/deploy-smoke-live-model.ts";
 
 describe("deploy live model turn smoke", () => {
-  it("uses Luna for the bounded live deploy smoke", () => {
-    expect(DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL).toBe("gpt-6-luna");
+  it("smokes every model a member can be routed to", () => {
+    expect(DEPLOY_LIVE_MODEL_TURN_SMOKE_MODELS).toEqual(HOSTED_ASSISTANT_PRODUCT_MODELS);
+    expect(DEPLOY_LIVE_MODEL_TURN_SMOKE_MODELS).toEqual(expect.arrayContaining([
+      "gpt-6.2-sol",
+      "gpt-6.2-astra",
+    ]));
+    expect(readDeployLiveModelTurnSmokeModel(" gpt-6.2-astra ")).toBe("gpt-6.2-astra");
+    expect(readDeployLiveModelTurnSmokeModel("gpt-synthetic-unlisted")).toBeNull();
+    expect(readDeployLiveModelTurnSmokeModel(null)).toBeNull();
   });
 
-  it("reads only the top-level OpenAI Responses model", () => {
-    expect(readDeployLiveModelTurnSmokeOpenAiModel(
-      JSON.stringify({
-        input: "anything Codex emits",
-        model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
-        stream: true,
-      }),
-    )).toBe(DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL);
+  it("reads only a top-level OpenAI Responses product model", () => {
+    for (const model of DEPLOY_LIVE_MODEL_TURN_SMOKE_MODELS) {
+      expect(readDeployLiveModelTurnSmokeOpenAiModel(
+        JSON.stringify({
+          input: "anything Codex emits",
+          model,
+          stream: true,
+        }),
+      )).toBe(model);
+    }
 
     expect(readDeployLiveModelTurnSmokeOpenAiModel(
-      JSON.stringify({ model: "gpt-6.2-sol" }),
+      JSON.stringify({ model: "gpt-synthetic-unlisted" }),
     )).toBeNull();
     expect(readDeployLiveModelTurnSmokeOpenAiModel(
-      JSON.stringify({ model: ` ${DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL} ` }),
-    )).toBe(DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL);
+      JSON.stringify({ input: [{ model: "gpt-6.2-sol" }] }),
+    )).toBeNull();
+    expect(readDeployLiveModelTurnSmokeOpenAiModel(
+      JSON.stringify({ model: " gpt-6-luna " }),
+    )).toBe("gpt-6-luna");
     expect(readDeployLiveModelTurnSmokeOpenAiModel("{}")).toBeNull();
     expect(readDeployLiveModelTurnSmokeOpenAiModel("not json")).toBeNull();
   });
