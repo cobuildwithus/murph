@@ -252,6 +252,7 @@ export type AssistantHostedAutomationToolRequest =
       instructions?: string
       lookup: string
       plannedOccurrenceOffsetMs?: number | null
+      resumeAt?: Date
       retargetToCurrentConversation?: boolean
       schedule?: AutomationSchedule
       slug?: string

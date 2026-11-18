@@ -1196,6 +1196,7 @@ function createHostedAssistantAutomationTool(input: {
           ? {}
           : { plannedOccurrenceOffsetMs: request.plannedOccurrenceOffsetMs }),
         lookup: request.lookup,
+        resumeAt: request.resumeAt,
         ...(request.retargetToCurrentConversation === true
           ? { route }
           : {}),

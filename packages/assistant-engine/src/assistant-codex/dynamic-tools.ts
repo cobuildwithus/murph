@@ -2291,12 +2291,13 @@ function executeInvalidAutomationArgumentsDynamicTool(
     { kind: 'invalid-automation-arguments' }
   >,
 ): MurphDynamicToolExecutionResult {
+  const localAtField = request.localAtField ?? 'schedule.localAt'
   switch (request.safeFailureCode) {
     case 'local_at_gap':
       return toolTextResult(
         false,
         request.resolvedLocalDate && request.localAtTargetKey
-          ? `that local reminder time does not exist because of a daylight-saving change; the trusted host resolved the requested calendar date as ${request.resolvedLocalDate}; tell the user that exact date and ask for another local time; retry with schedule.localAt.date=${request.resolvedLocalDate} instead of relativeDay and localAtRecoveryKey=${request.localAtTargetKey}, or if the participant withdraws or replaces this request call action=dismiss_local_at_recovery with localAtRecoveryKey=${request.localAtTargetKey} and resolvedLocalDate=${request.resolvedLocalDate}`
+          ? `that local reminder time does not exist because of a daylight-saving change; the trusted host resolved the requested calendar date as ${request.resolvedLocalDate}; tell the user that exact date and ask for another local time; retry with ${localAtField}.date=${request.resolvedLocalDate} instead of relativeDay and localAtRecoveryKey=${request.localAtTargetKey}, or if the participant withdraws or replaces this request call action=dismiss_local_at_recovery with localAtRecoveryKey=${request.localAtTargetKey} and resolvedLocalDate=${request.resolvedLocalDate}`
           : 'that local reminder time does not exist because of a daylight-saving change; ask for another local time',
         'invalid_input',
       )
@@ -2304,8 +2305,8 @@ function executeInvalidAutomationArgumentsDynamicTool(
       return toolTextResult(
         false,
         request.resolvedLocalDate && request.localAtTargetKey
-          ? `that local reminder time occurs twice because of a daylight-saving change; the trusted host resolved the requested calendar date as ${request.resolvedLocalDate}; tell the user that exact date and ask whether the earlier or later occurrence is intended; retry with schedule.localAt.date=${request.resolvedLocalDate}, schedule.localAt.fold, and localAtRecoveryKey=${request.localAtTargetKey} instead of relativeDay, or if the participant withdraws or replaces this request call action=dismiss_local_at_recovery with localAtRecoveryKey=${request.localAtTargetKey} and resolvedLocalDate=${request.resolvedLocalDate}`
-          : 'that local reminder time occurs twice because of a daylight-saving change; ask whether the earlier or later occurrence is intended, then retry with schedule.localAt.fold',
+          ? `that local reminder time occurs twice because of a daylight-saving change; the trusted host resolved the requested calendar date as ${request.resolvedLocalDate}; tell the user that exact date and ask whether the earlier or later occurrence is intended; retry with ${localAtField}.date=${request.resolvedLocalDate}, ${localAtField}.fold, and localAtRecoveryKey=${request.localAtTargetKey} instead of relativeDay, or if the participant withdraws or replaces this request call action=dismiss_local_at_recovery with localAtRecoveryKey=${request.localAtTargetKey} and resolvedLocalDate=${request.resolvedLocalDate}`
+          : `that local reminder time occurs twice because of a daylight-saving change; ask whether the earlier or later occurrence is intended, then retry with ${localAtField}.fold`,
         'invalid_input',
       )
     case 'local_at_invalid_timezone':

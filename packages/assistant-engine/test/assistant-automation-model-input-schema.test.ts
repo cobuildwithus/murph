@@ -240,6 +240,16 @@ describe('automation model input schema', () => {
     })
   })
 
+  it('advertises resumeLocalAt on versioned patches with the one-shot wall-clock shape', () => {
+    const patch = { action: 'patch', lookup: 'seedling-reminder', expectedUpdatedAt: '2030-01-14T12:00:00.000Z' }
+    const clock = { time: '00:00', timeZone: 'America/Chicago' }
+    expect(advertisesInput({ ...patch, resumeLocalAt: { ...clock, relativeDay: 'tomorrow' } })).toBe(true)
+    expect(advertisesInput({ ...patch, resumeLocalAt: { ...clock, date: '2030-01-21', fold: 'later' } })).toBe(true)
+    expect(advertisesInput({ ...patch, resumeLocalAt: { date: '2030-01-21', time: '00:00' } })).toBe(false)
+    expect(advertisesInput({ ...patch, resumeAt: '2030-01-21T00:00:00.000Z' })).toBe(false)
+    expect(advertisesInput({ action: 'inspect', lookup: patch.lookup, resumeLocalAt: clock })).toBe(false)
+  })
+
   it('advertises strict action-specific root contracts', () => {
     const schema = MURPH_AUTOMATION_TOOL.inputSchema
 

@@ -126,6 +126,8 @@ type AutomationLocalAtFailureCode =
   | 'local_at_reference_spans_dates'
   | 'local_at_reference_unavailable'
 
+type AutomationLocalAtField = 'schedule.localAt' | 'resumeLocalAt'
+
 class AutomationLocalAtResolutionError extends Error {
   readonly code: AutomationLocalAtFailureCode
   readonly resolvedLocalDate?: string
@@ -142,7 +144,7 @@ class AutomationLocalAtResolutionError extends Error {
   }
 }
 
-const automationOneShotLocalAtSchema = z
+const automationLocalAtSchema = z
   .object({
     date: z
       .string()
@@ -168,7 +170,7 @@ const automationOneShotLocalAtSchema = z
     if ((value.date === undefined) === (value.relativeDay === undefined)) {
       context.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'Provide exactly one of schedule.localAt.date or schedule.localAt.relativeDay.',
+        message: 'Provide exactly one of date or relativeDay.',
         params: { murphExpectedShape: 'exactly_one_date_or_relative_day' },
         path: [],
       })
@@ -178,7 +180,7 @@ const automationOneShotLocalAtSchema = z
 const automationLocalAtScheduleSchema = z
   .object({
     kind: z.literal('at'),
-    localAt: automationOneShotLocalAtSchema.describe(
+    localAt: automationLocalAtSchema.describe(
       'User-authored one-shot local wall-clock time with either an explicit calendar date or preserved relative day, plus 24-hour time and IANA timezone.',
     ),
   })
@@ -351,6 +353,9 @@ const patchAutomationArgumentsSchema = z.object({
     .optional()
     .describe('Replace or clear the planned session offset from the reminder fire.'),
   lookup: automationIdentifierSchema,
+  resumeLocalAt: automationLocalAtSchema.optional().describe(
+    'End of a recurring reminder break in local wall-clock time. Use a time at or before now to resume early.',
+  ),
   retargetToCurrentConversation: z.literal(true).optional(),
   schedule: automationDynamicToolScheduleSchema.optional(),
   status: z.enum(automationStatusValues).optional(),
@@ -369,6 +374,7 @@ const patchAutomationArgumentsSchema = z.object({
     'contextReferences',
     'instructions',
     'plannedOccurrenceOffsetMs',
+    'resumeLocalAt',
     'retargetToCurrentConversation',
     'schedule',
     'status',
@@ -408,18 +414,23 @@ const patchAutomationArgumentsSchema = z.object({
     })
   }
 
-  if (
-    value.localAtRecoveryKey !== undefined
-    && (
-      value.schedule === undefined
-      || !('localAt' in value.schedule)
-      || value.schedule.localAt.date === undefined
-    )
-  ) {
+  const scheduleLocalAt = value.schedule && 'localAt' in value.schedule
+    ? value.schedule.localAt
+    : undefined
+  if (value.resumeLocalAt && scheduleLocalAt) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'A recurring reminder break cannot replace the schedule with a one-shot.',
+      path: ['resumeLocalAt'],
+    })
+  }
+
+  if (value.localAtRecoveryKey !== undefined
+    && (value.resumeLocalAt ?? scheduleLocalAt)?.date === undefined) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
       message:
-        'localAtRecoveryKey is valid only with an explicit schedule.localAt.date retry.',
+        'localAtRecoveryKey is valid only with an explicit schedule.localAt.date or resumeLocalAt.date retry.',
       params: { murphExpectedShape: 'explicit_local_at_date_retry' },
       path: ['localAtRecoveryKey'],
     })
@@ -494,6 +505,7 @@ const AUTOMATION_ARGUMENT_ROOT_KEYS = [
   'lookup',
   'lookups',
   'plannedOccurrenceOffsetMs',
+  'resumeLocalAt',
   'retargetToCurrentConversation',
   'resolvedLocalDate',
   'schedule',
@@ -542,6 +554,7 @@ export const MURPH_AUTOMATION_TOOL = {
       'Interpret stale_recurring_occurrence as an overdue recurrence whose scheduler projection has not advanced. For stale_recurring_occurrence, do not describe the occurrence as current scheduler work, promise automatic recovery, or say that no member action is needed. Do not expose this internal code name.',
       'For deviceActivity schedules, use this canonical shape: `{"kind":"deviceActivity","activityKind":"workout","source":"garmin","after":"2026-01-01T00:00:00.000Z"}` with the requested lowercase source and exact recorded-after cutoff; set schedule.activityKind to workout for workout requests, sleep for sleep requests, or the requested activity kind; omitted activityKind matches all recorded kinds including sleep, and omitted source matches all providers.',
       'For recurring time-based schedules, use these exact canonical shapes: every `{"kind":"every","everyMs":3600000}`; cron `{"kind":"cron","expression":"0 9 * * 1-5","timeZone":"America/Chicago"}`; dailyLocal `{"kind":"dailyLocal","localTime":"09:00","timeZone":"America/Chicago"}`. Changes to an existing automation use `action: patch`, never `action: update`, and every patch requires `lookup` and the inspected `updatedAt` copied into `expectedUpdatedAt`. On save, supportKind and supportSeriesId are a pair for plan-owned support; omit both for ordinary reminders and check-ins. Never invent schedule, update, timezone, route, group, or member fields outside the schema. The exact camel-case field `schedule.timeZone` is valid only for recurring `cron` and `dailyLocal` wall-clock schedules; never use `timezone`, `schedule.timezone`, top-level `timeZone`, or any other invented timezone field.',
+      'For a break, patch only resumeLocalAt to the start of the first local day the reminder should return, or to now to end it early; it then resumes on its own. resumeLocalAt follows the schedule.localAt date, timeZone and DST rules. Confirm the next time from the result.',
     ].join(' '),
   inputSchema: MURPH_AUTOMATION_RUNTIME_INPUT_SCHEMA,
 } as const
@@ -581,6 +594,7 @@ export type AutomationDynamicToolRequest =
       }
       localAtTargetLabel?: string
       localAtTargetKey?: string
+      localAtField?: AutomationLocalAtField
       resolvedLocalDate?: string
       safeFailureCode?: AutomationLocalAtFailureCode
       validationDigest: SafeToolCallValidationDigest
@@ -644,13 +658,8 @@ export function readAutomationDynamicToolRequest(input: {
     localAtAttempt = readAutomationLocalAtAttempt(parsed.args)
     return {
       kind: 'automation',
-      ...(localAtAttempt?.explicitLocalDate && localAtAttempt.recoveryKey
-        ? {
-            localAtRecovery: {
-              recoveryKey: localAtAttempt.recoveryKey,
-              resolvedLocalDate: localAtAttempt.explicitLocalDate,
-            },
-          }
+      ...(localAtAttempt?.localAtRecovery
+        ? { localAtRecovery: localAtAttempt.localAtRecovery }
         : {}),
       ...(parsed.args.action === MURPH_ONBOARDING_FIRST_PERSONAL_READ_ACTION
         ? { onboardingFirstReadCompletionRequested: true as const }
@@ -665,22 +674,7 @@ export function readAutomationDynamicToolRequest(input: {
       kind: 'invalid-automation-arguments',
       ...(error instanceof AutomationLocalAtResolutionError
         ? {
-            ...(localAtAttempt
-              ? {
-                  ...(localAtAttempt.explicitLocalDate &&
-                    localAtAttempt.recoveryKey
-                    ? {
-                        localAtRecovery: {
-                          recoveryKey: localAtAttempt.recoveryKey,
-                          resolvedLocalDate:
-                            localAtAttempt.explicitLocalDate,
-                        },
-                      }
-                    : {}),
-                  localAtTargetKey: localAtAttempt.targetKey,
-                  localAtTargetLabel: localAtAttempt.targetLabel,
-                }
-              : {}),
+            ...localAtAttempt,
             ...(error.resolvedLocalDate
               ? { resolvedLocalDate: error.resolvedLocalDate }
               : {}),
@@ -693,8 +687,8 @@ export function readAutomationDynamicToolRequest(input: {
           message:
             error instanceof Error
               ? error.message
-              : 'schedule.localAt could not be resolved.',
-          path: ['schedule', 'localAt'],
+              : 'The local time could not be resolved.',
+          path: localAtAttempt?.localAtField.split('.') ?? ['schedule', 'localAt'],
         }]),
         rawInput: input.arguments,
         requestedToolName: 'murph.automation',
@@ -709,26 +703,31 @@ export function readAutomationDynamicToolRequest(input: {
 function readAutomationLocalAtAttempt(
   args: z.infer<typeof automationArgumentsSchema>,
 ): {
-  explicitLocalDate: string | null
-  recoveryKey: string | null
-  targetKey: string
-  targetLabel: string
+  localAtField: AutomationLocalAtField
+  localAtRecovery?: { recoveryKey: string; resolvedLocalDate: string }
+  localAtTargetKey: string
+  localAtTargetLabel: string
 } | null {
   if (args.action !== 'save' && args.action !== 'patch') {
     return null
   }
   const schedule = args.schedule
-  if (schedule === undefined || !('localAt' in schedule)) {
+  const resumeLocalAt = args.action === 'patch' ? args.resumeLocalAt : undefined
+  const localAt = resumeLocalAt ?? (schedule && 'localAt' in schedule
+    ? schedule.localAt
+    : undefined)
+  if (localAt === undefined) {
     return null
   }
 
-  const targetKey = args.localAtRecoveryKey
-    ?? buildAutomationLocalAtTargetKey(args)
+  const recoveryKey = args.localAtRecoveryKey
   return {
-    explicitLocalDate: schedule.localAt.date ?? null,
-    recoveryKey: args.localAtRecoveryKey ?? null,
-    targetKey,
-    targetLabel: args.action === 'patch'
+    localAtField: resumeLocalAt === undefined ? 'schedule.localAt' : 'resumeLocalAt',
+    ...(localAt.date && recoveryKey
+      ? { localAtRecovery: { recoveryKey, resolvedLocalDate: localAt.date } }
+      : {}),
+    localAtTargetKey: recoveryKey ?? buildAutomationLocalAtTargetKey(args),
+    localAtTargetLabel: args.action === 'patch'
       ? args.lookup
       : args.title,
   }
@@ -774,11 +773,15 @@ function resolveAutomationDynamicToolRequest(
   if (args.action === 'patch') {
     const {
       localAtRecoveryKey: _localAtRecoveryKey,
+      resumeLocalAt,
       schedule,
       ...rest
     } = args
     return {
       ...rest,
+      ...(resumeLocalAt === undefined
+        ? {}
+        : { resumeAt: resolveAutomationLocalAt(resumeLocalAt, relativeDateReferenceWindow) }),
       ...(schedule === undefined
         ? {}
         : {
@@ -798,25 +801,25 @@ function resolveDynamicAutomationSchedule(
 ): AutomationSchedule {
   if ('localAt' in schedule) {
     return {
-      at: resolveOneShotLocalAt(
+      at: resolveAutomationLocalAt(
         schedule.localAt,
         relativeDateReferenceWindow,
-      ),
+      ).toISOString(),
       kind: 'at',
     }
   }
   return schedule
 }
 
-function resolveOneShotLocalAt(
-  localAt: z.infer<typeof automationOneShotLocalAtSchema>,
+function resolveAutomationLocalAt(
+  localAt: z.infer<typeof automationLocalAtSchema>,
   relativeDateReferenceWindow: AssistantAcceptedTurnInputReferenceWindow | null,
-): string {
+): Date {
   const timeZone = normalizeIanaTimeZone(localAt.timeZone)
   if (!timeZone) {
     throw new AutomationLocalAtResolutionError(
       'local_at_invalid_timezone',
-      'schedule.localAt.timeZone must be a valid IANA timezone.',
+      'timeZone must be a valid IANA timezone.',
     )
   }
 
@@ -837,7 +840,7 @@ function resolveOneShotLocalAt(
     0,
     0,
   )
-  const matches = [...collectOneShotLocalAtOffsets(timeZone, localAsUtcMs)]
+  const matches = [...collectLocalAtOffsets(timeZone, localAsUtcMs)]
     .map((offsetMs) => localAsUtcMs - offsetMs)
     .filter((candidateMs) => {
       const parts = formatTimeZoneDateTimeParts(candidateMs, timeZone)
@@ -852,7 +855,7 @@ function resolveOneShotLocalAt(
   if (uniqueMatches.length === 0) {
     throw new AutomationLocalAtResolutionError(
       'local_at_gap',
-      'schedule.localAt does not exist in that timezone because of a daylight-saving gap.',
+      'The local time does not exist in that timezone because of a daylight-saving gap.',
       formatLocalAtDate(date),
     )
   }
@@ -860,16 +863,16 @@ function resolveOneShotLocalAt(
     if (localAt.fold === undefined) {
       throw new AutomationLocalAtResolutionError(
         'local_at_fold',
-        'schedule.localAt is ambiguous in that timezone because of a daylight-saving fold; choose the earlier or later occurrence.',
+        'The local time is ambiguous in that timezone because of a daylight-saving fold; choose the earlier or later occurrence.',
         formatLocalAtDate(date),
       )
     }
     const selected = localAt.fold === 'earlier'
       ? uniqueMatches[0]
       : uniqueMatches.at(-1)
-    return new Date(selected ?? Number.NaN).toISOString()
+    return new Date(selected ?? Number.NaN)
   }
-  return new Date(uniqueMatches[0] ?? Number.NaN).toISOString()
+  return new Date(uniqueMatches[0] ?? Number.NaN)
 }
 
 function resolveLocalAtRelativeDate(
@@ -878,7 +881,7 @@ function resolveLocalAtRelativeDate(
   referenceWindow: AssistantAcceptedTurnInputReferenceWindow | null,
 ): { day: number; month: number; year: number } {
   if (relativeDay === undefined) {
-    throw new Error('schedule.localAt requires an explicit date or relativeDay.')
+    throw new Error('The local time requires an explicit date or relativeDay.')
   }
   const earliestAtMs = referenceWindow === null
     ? Number.NaN
@@ -893,7 +896,7 @@ function resolveLocalAtRelativeDate(
   ) {
     throw new AutomationLocalAtResolutionError(
       'local_at_reference_unavailable',
-      'schedule.localAt.relativeDay requires the accepted input reference window.',
+      'relativeDay requires the accepted input reference window.',
     )
   }
   const current = formatTimeZoneDateTimeParts(earliestAtMs, timeZone)
@@ -905,7 +908,7 @@ function resolveLocalAtRelativeDate(
   ) {
     throw new AutomationLocalAtResolutionError(
       'local_at_reference_spans_dates',
-      'schedule.localAt.relativeDay is ambiguous because the accepted inputs span calendar dates in that timezone; ask for an explicit YYYY-MM-DD date.',
+      'relativeDay is ambiguous because the accepted inputs span calendar dates in that timezone; ask for an explicit YYYY-MM-DD date.',
     )
   }
   const dayOffset = relativeDay === 'tomorrow' ? 1 : 0
@@ -921,7 +924,7 @@ function resolveLocalAtRelativeDate(
   }
 }
 
-function collectOneShotLocalAtOffsets(
+function collectLocalAtOffsets(
   timeZone: string,
   localAsUtcMs: number,
 ): Set<number> {
@@ -948,13 +951,13 @@ function parseLocalAtDate(
 ): { day: number; month: number; year: number } {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(value)
   if (!match) {
-    throw new Error('schedule.localAt.date must use YYYY-MM-DD format.')
+    throw new Error('date must use YYYY-MM-DD format.')
   }
   const year = Number(match[1])
   const month = Number(match[2])
   const day = Number(match[3])
   if (year < 100) {
-    throw new Error('schedule.localAt.date must be a valid calendar date.')
+    throw new Error('date must be a valid calendar date.')
   }
   const roundTrip = new Date(Date.UTC(year, month - 1, day))
   if (
@@ -962,7 +965,7 @@ function parseLocalAtDate(
     || roundTrip.getUTCMonth() + 1 !== month
     || roundTrip.getUTCDate() !== day
   ) {
-    throw new Error('schedule.localAt.date must be a valid calendar date.')
+    throw new Error('date must be a valid calendar date.')
   }
   return { day, month, year }
 }
@@ -982,7 +985,7 @@ function formatLocalAtDate(input: {
 function parseLocalAtTime(value: string): { hour: number; minute: number } {
   const match = /^([01]\d|2[0-3]):([0-5]\d)$/u.exec(value)
   if (!match) {
-    throw new Error('schedule.localAt.time must use HH:MM format.')
+    throw new Error('time must use HH:MM format.')
   }
   return {
     hour: Number(match[1]),

@@ -1582,6 +1582,41 @@ describe('assistant cron runtime orchestration', () => {
     })
   })
 
+  it.each([
+    [{ kind: 'dailyLocal', localTime: '18:00', timeZone: 'UTC' }, '2030-01-21T17:59:59.999Z', '2030-01-21T18:00:00.000Z'],
+    [{ kind: 'dailyLocal', localTime: '18:00', timeZone: 'UTC' }, '2030-01-21T18:00:00.000Z', '2030-01-22T18:00:00.000Z'],
+    [{ kind: 'cron', expression: '0 18 * * 1', timeZone: 'UTC' }, '2030-01-21T17:59:59.999Z', '2030-01-21T18:00:00.000Z'],
+    [{ kind: 'cron', expression: '0 18 * * 1', timeZone: 'UTC' }, '2030-01-21T18:00:00.000Z', '2030-01-28T18:00:00.000Z'],
+    [{ kind: 'every', everyMs: 3_600_000 }, '2030-01-21T18:00:00.000Z', '2030-01-21T19:00:00.000Z'],
+  ] as const)('projects %j strictly after its future anchor %s', async (schedule, anchor, next) => {
+    vi.useFakeTimers()
+    const now = new Date('2030-01-15T12:00:00.000Z')
+    vi.setSystemTime(now)
+    const { vaultRoot } = await createRuntimeContext('assistant-cron-future-anchor-')
+    const job = await upsertAssistantCronAutomation({
+      instructions: 'Remind me to water the seedlings.',
+      now,
+      route: {
+        channel: 'linq', deliverySource: null, deliveryTarget: 'synthetic-thread',
+        identityId: null, participantId: null, threadId: 'synthetic-thread', threadIsDirect: true,
+      },
+      schedule,
+      slug: 'seedling-reminder',
+      title: 'Seedling reminder',
+      vault: vaultRoot,
+    })
+    const source = job && findCanonicalAutomation(vaultRoot, job.jobId)
+    if (!source?.relativePath) throw new Error('Expected recurring automation source.')
+    source.scheduleAnchorAt = anchor
+
+    await expect(getAssistantCronAutomationTimingProjection(vaultRoot, source.relativePath, 'UTC'))
+      .resolves.toMatchObject({
+        job: { state: { nextRunAt: next } },
+        nextOccurrenceAt: next,
+        occurrenceVerified: true,
+      })
+  })
+
   it('materializes a finite latest-slot occurrence with execution budget and preserves it on reseed', async () => {
     const { vaultRoot } = await createRuntimeContext(
       'assistant-cron-runtime-upsert-one-shot-automation-',

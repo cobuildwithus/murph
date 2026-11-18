@@ -75,6 +75,57 @@ describe('hosted domain dynamic tools', () => {
     })
   })
 
+  it('resolves a reminder break from the accepted local day or an explicit date', () => {
+    const patch = { action: 'patch', lookup: 'seedling-reminder', expectedUpdatedAt: '2030-01-14T12:00:00.000Z' }
+    const clock = { time: '00:00', timeZone: 'Pacific/Honolulu' }
+    const reference = referenceWindow('2030-01-15T09:59:00.000Z')
+    expect(readToolRequest('automation', {
+      ...patch, resumeLocalAt: { ...clock, relativeDay: 'tomorrow' },
+    }, reference)).toEqual({
+      kind: 'automation',
+      request: { ...patch, resumeAt: new Date('2030-01-15T10:00:00.000Z') },
+    })
+    expect(readToolRequest('automation', {
+      ...patch, resumeLocalAt: { ...clock, date: '2030-01-21' },
+    }, null)).toEqual({
+      kind: 'automation',
+      request: { ...patch, resumeAt: new Date('2030-01-21T10:00:00.000Z') },
+    })
+    expect(readToolRequest('automation', {
+      ...patch, resumeLocalAt: { ...clock, date: '2030-01-21', relativeDay: 'tomorrow' },
+    })).toMatchObject({ kind: 'invalid-automation-arguments' })
+  })
+
+  it('reuses fold recovery for resumeLocalAt', async () => {
+    const patch = { action: 'patch', lookup: 'seedling-reminder', expectedUpdatedAt: '2030-11-02T12:00:00.000Z' }
+    const clock = { time: '01:30', timeZone: 'America/New_York' }
+    const request = readToolRequest('automation', {
+      ...patch, resumeLocalAt: { ...clock, relativeDay: 'tomorrow' },
+    }, referenceWindow('2030-11-02T23:00:00.000Z'))
+    if (request?.kind !== 'invalid-automation-arguments') throw new Error('Expected a fold failure.')
+    expect(request).toMatchObject({
+      localAtTargetKey: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      localAtTargetLabel: patch.lookup,
+      resolvedLocalDate: '2030-11-03',
+      safeFailureCode: 'local_at_fold',
+    })
+    const feedback = await executeMurphDynamicToolRequest({
+      env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null, request,
+    })
+    expect(feedback.rpcResult.contentItems[0]).toMatchObject({
+      text: expect.stringContaining('resumeLocalAt.date=2030-11-03, resumeLocalAt.fold'),
+    })
+    expect(readToolRequest('automation', {
+      ...patch,
+      localAtRecoveryKey: request.localAtTargetKey,
+      resumeLocalAt: { ...clock, date: '2030-11-03', fold: 'later' },
+    })).toEqual({
+      kind: 'automation',
+      localAtRecovery: { recoveryKey: request.localAtTargetKey, resolvedLocalDate: '2030-11-03' },
+      request: { ...patch, resumeAt: new Date('2030-11-03T06:30:00.000Z') },
+    })
+  })
+
   it('anchors relative one-shot days to accepted input across a named-zone midnight', () => {
     vi.useFakeTimers()
     try {

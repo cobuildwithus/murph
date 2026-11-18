@@ -3323,6 +3323,20 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {it("checkpoints
         },
         status: "active",
       }));
+
+      const resumeAt = new Date("2026-08-14T04:00:00.000Z");
+      await expect(requestAutomation({
+        action: "patch",
+        expectedUpdatedAt: implicitTimeZoneReminder.updatedAt,
+        lookup: implicitTimeZoneReminder.automationId,
+        resumeAt,
+      })).resolves.toMatchObject({
+        status: "active",
+        occurrenceProjection: { nextOccurrenceAt: "2026-08-14T06:00:00.000Z", status: "resolved" },
+        schedule: implicitTimeZoneReminder.schedule,
+      });
+      await expect(showAutomation({ vaultRoot, automationId: implicitTimeZoneReminder.automationId }))
+        .resolves.toMatchObject({ scheduleAnchorAt: resumeAt.toISOString() });
     } finally {
       await rm(parentRoot, { force: true, recursive: true });
     }
