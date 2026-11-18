@@ -26,7 +26,7 @@ vi.mock('../src/assistant/system-prompt.js', async (importOriginal) => {
 // contract, and its roster and byte envelope track production diagnostics, so
 // it must not fail unrelated tool or prompt changes in the ordinary suite.
 it.skipIf(process.env.MURPH_RUN_REAL_CODEX_E2E !== '1')('composes the production hosted direct capability envelope before any provider work', async () => {
-  const fixture = await createCanonicalLiveFixture({ codexHome: null, env: { PATH: process.env.PATH }, model: 'gpt-6.1-sol', modelProvider: 'openai' }, 'linq', { capabilities: 'production-hosted' })
+  const fixture = await createCanonicalLiveFixture({ codexHome: null, env: { PATH: process.env.PATH }, model: 'gpt-6.2-sol', modelProvider: 'openai' }, 'linq', { capabilities: 'production-hosted' })
   const stop = new Error('synthetic provider boundary reached')
   let captured: Parameters<typeof native.executeCodexAppServerTurn>[0] | undefined
   const observer = vi.spyOn(native, 'executeCodexAppServerTurn').mockImplementation(async (input) => {

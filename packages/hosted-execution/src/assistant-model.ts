@@ -1,3 +1,4 @@
+import { normalizeStoredAssistantModel } from "@murphai/contracts";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type {
   HostedRuntimeAssistantConfigurationChanges,
@@ -16,18 +17,16 @@ import {
 } from "./parsers/assertions.ts";
 
 export const HOSTED_ASSISTANT_LUNA_MODEL = "gpt-5.6-luna" as const;
-export const HOSTED_ASSISTANT_GPT_6_SOL_MODEL = "gpt-6-sol" as const;
 export const HOSTED_ASSISTANT_GPT_6_LUNA_MODEL = "gpt-6-luna" as const;
-export const HOSTED_ASSISTANT_GPT_61_SOL_MODEL = "gpt-6.1-sol" as const;
+export const HOSTED_ASSISTANT_SOL_MODEL = "gpt-6.2-sol" as const;
 export const HOSTED_ASSISTANT_TERRA_MODEL = "gpt-6.1-terra" as const;
 export const HOSTED_ASSISTANT_DEFAULT_MODEL = HOSTED_ASSISTANT_TERRA_MODEL;
 
-export const HOSTED_ASSISTANT_ASTRA_MODEL = "gpt-6-astra" as const;
+export const HOSTED_ASSISTANT_ASTRA_MODEL = "gpt-6.2-astra" as const;
 
 export const HOSTED_ASSISTANT_PRODUCT_MODELS = [
   HOSTED_ASSISTANT_TERRA_MODEL,
-  HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
-  HOSTED_ASSISTANT_GPT_6_SOL_MODEL,
+  HOSTED_ASSISTANT_SOL_MODEL,
   HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
   HOSTED_ASSISTANT_LUNA_MODEL,
   HOSTED_ASSISTANT_ASTRA_MODEL,
@@ -55,6 +54,10 @@ export function parseHostedAssistantModelOverride(
   value: unknown,
 ): HostedAssistantModelOverride | null {
   return isHostedAssistantProductModel(value) ? value : null;
+}
+
+export function parseStoredHostedAssistantModelOverride(value: unknown): HostedAssistantModelOverride | null {
+  return typeof value === "string" ? parseHostedAssistantModelOverride(normalizeStoredAssistantModel(value)) : null;
 }
 
 export const HOSTED_ASSISTANT_REASONING_EFFORTS = [
@@ -310,7 +313,7 @@ function parseHostedRuntimeAssistantConfigurationSnapshot(
     "Hosted runtime assistant configuration availableModels",
   ).filter((model) => model !== "gpt-5.6-sol").map((model) =>
     parseHostedRuntimeAssistantProductModel(
-      model,
+      parseStoredHostedAssistantModelOverride(model),
       "Hosted runtime assistant configuration available model",
     ),
   );
@@ -329,7 +332,7 @@ function parseHostedRuntimeAssistantConfigurationSnapshot(
   );
 
   return {
-    availableModels,
+    availableModels: [...new Set(availableModels)],
     availableReasoningEfforts,
     configurationAvailable,
     dormantSolPreference: requireBoolean(
@@ -337,7 +340,7 @@ function parseHostedRuntimeAssistantConfigurationSnapshot(
       "Hosted runtime assistant configuration dormantSolPreference",
     ),
     model: parseHostedRuntimeAssistantProductModel(
-      record.model === "gpt-5.6-sol" ? HOSTED_ASSISTANT_GPT_61_SOL_MODEL : record.model,
+      parseStoredHostedAssistantModelOverride(record.model),
       "Hosted runtime assistant configuration model",
     ),
     reasoningEffort: parseHostedRuntimeAssistantReasoningEffort(

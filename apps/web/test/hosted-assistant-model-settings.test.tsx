@@ -4,7 +4,7 @@ import path from "node:path";
 
 import {
   HOSTED_ASSISTANT_ASTRA_MODEL,
-  HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
+  HOSTED_ASSISTANT_SOL_MODEL,
   HOSTED_ASSISTANT_GPT_6_LUNA_MODEL,
   HOSTED_ASSISTANT_DEFAULT_MODEL,
 } from "@murphai/hosted-execution/assistant-model";
@@ -70,11 +70,11 @@ test("Terra is the active fallback and Sol is disabled without a subscription", 
     solAvailable: false,
   }));
   const { document } = parseHTML(markup);
-  const sol = document.querySelector('input[id="assistant-model-gpt-6.1-sol"]');
+  const sol = document.querySelector('input[id="assistant-model-gpt-6.2-sol"]');
   const luna = document.querySelector('input[id="assistant-model-gpt-6-luna"]');
   assert.deepEqual(
     [...document.querySelectorAll("input")].map((input) => input.getAttribute("value")),
-    ["gpt-6-luna", "gpt-6.1-terra", "gpt-6.1-sol", "gpt-6-astra"],
+    ["gpt-6-luna", "gpt-6.1-terra", "gpt-6.2-sol", "gpt-6.2-astra"],
   );
   assert.ok(document.querySelector('input[id="assistant-model-gpt-6.1-terra"]')?.hasAttribute("checked"));
   assert.equal(sol?.hasAttribute("disabled"), true);
@@ -103,7 +103,7 @@ test("eligible Pulse members discover the Edge upgrade from the disabled Astra c
   assert.match(markup, /!opacity-100/);
   assert.match(
     markup,
-    /aria-describedby="assistant-model-gpt-6-astra-description assistant-model-gpt-6-astra-meta"/,
+    /aria-describedby="assistant-model-gpt-6.2-astra-description assistant-model-gpt-6.2-astra-meta"/,
   );
   assert.match(markup, />Upgrade to Edge<\/button>/);
   assert.match(markup, /role="radio"/);
@@ -193,7 +193,7 @@ test.each([
   });
   const view = await renderClient(
     createElement(HostedAssistantModelSettings, {
-      availableModels: [HOSTED_ASSISTANT_GPT_6_LUNA_MODEL, HOSTED_ASSISTANT_DEFAULT_MODEL, HOSTED_ASSISTANT_GPT_61_SOL_MODEL, ...(model === HOSTED_ASSISTANT_ASTRA_MODEL ? [model] : [])],
+      availableModels: [HOSTED_ASSISTANT_GPT_6_LUNA_MODEL, HOSTED_ASSISTANT_DEFAULT_MODEL, HOSTED_ASSISTANT_SOL_MODEL, ...(model === HOSTED_ASSISTANT_ASTRA_MODEL ? [model] : [])],
       canUpgradeToEdge: false,
       configurationAvailable: true,
       initialDormantSolPreference: false,
@@ -344,7 +344,7 @@ test("model radios stay labeled and the form becomes busy while saving", async (
       artwork: "sol",
       backgroundAccent: "#d9ad35",
       description: "Deep health intelligence",
-      model: HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
+      model: HOSTED_ASSISTANT_SOL_MODEL,
       name: "Sol",
       usage: "Balanced usage",
     },

@@ -1059,7 +1059,7 @@ describe("handleRunnerOutboundRequest", () => {
     ): Promise<Response> => new Response(JSON.stringify({
       action: "read",
       result: {
-        model: "gpt-6.1-sol",
+        model: "gpt-6.2-sol",
         solAvailable: false,
         tone: "formal",
         voice: "warm",

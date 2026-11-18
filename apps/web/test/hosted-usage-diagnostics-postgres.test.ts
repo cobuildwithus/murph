@@ -29,14 +29,14 @@ describe.skipIf(!enabled)("usage diagnostics SQL boundary", () => {
         operator_task_id text
       ) ON COMMIT DROP`);
       const records = [
-        { memberId, turnId: randomUUID(), model: "gpt-6.1-sol", cost: 999000000n, counted: false },
-        { memberId, turnId: turns[0]!, model: "gpt-6.1-sol", cost: 100000n },
-        { memberId, turnId: turns[0]!, model: "gpt-6.1-sol", cost: 100000n },
+        { memberId, turnId: randomUUID(), model: "gpt-6.2-sol", cost: 999000000n, counted: false },
+        { memberId, turnId: turns[0]!, model: "gpt-6.2-sol", cost: 100000n },
+        { memberId, turnId: turns[0]!, model: "gpt-6.2-sol", cost: 100000n },
         { memberId, turnId: turns[1]!, model: "gpt-6-luna", cost: 10000n, feature: "reaction-routing" },
-        { memberId: otherId, turnId: randomUUID(), model: "gpt-6.1-sol", cost: 100000n },
-        { memberId, turnId: randomUUID(), model: "gpt-6.1-sol", cost: 100000n, at: new Date("2031-06-01T00:00:00Z") },
-        { memberId, turnId: randomUUID(), model: "gpt-6.1-sol", cost: 100000n, operator: "operator_synthetic" },
-        { memberId, turnId: randomUUID(), model: "gpt-6.1-sol", cost: 100000n, at: now },
+        { memberId: otherId, turnId: randomUUID(), model: "gpt-6.2-sol", cost: 100000n },
+        { memberId, turnId: randomUUID(), model: "gpt-6.2-sol", cost: 100000n, at: new Date("2031-06-01T00:00:00Z") },
+        { memberId, turnId: randomUUID(), model: "gpt-6.2-sol", cost: 100000n, operator: "operator_synthetic" },
+        { memberId, turnId: randomUUID(), model: "gpt-6.2-sol", cost: 100000n, at: now },
       ];
       for (const record of records) {
         await tx.$executeRaw`INSERT INTO hosted_ai_usage

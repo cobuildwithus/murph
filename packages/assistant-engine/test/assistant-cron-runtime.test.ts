@@ -666,10 +666,10 @@ describe('assistant cron runtime orchestration', () => {
         schedule: { kind: 'at', at: '2026-04-08T10:00:00.000Z' },
         route: { channel: 'linq', deliveryTarget: 'thread-1', threadId: 'thread-1', identityId: null, participantId: null },
         instructions: 'Send the synthetic reminder.',
-        assistantTargetOverride: { model: 'gpt-6.1-sol', reasoningEffort: 'high' },
+        assistantTargetOverride: { model: 'gpt-6.2-sol', reasoningEffort: 'high' },
       })
       const file = path.join(vaultRoot, first.record.relativePath)
-      await writeFile(file, (await readFile(file, 'utf8')).replace('gpt-6.1-sol', 'gpt-5.6-sol'))
+      await writeFile(file, (await readFile(file, 'utf8')).replace('gpt-6.2-sol', 'gpt-5.6-sol'))
       const nextAt = mode === 'expired' ? '2026-04-08T11:05:00.000Z' : '2026-04-08T10:05:00.000Z'
       const second = await core.upsertAutomation({
         vaultRoot, now: new Date('2026-04-08T08:00:00.000Z'),
@@ -694,7 +694,7 @@ describe('assistant cron runtime orchestration', () => {
       })
       if (mode !== 'expired') {
         expect(cronMocks.sendAssistantMessageLocal).toHaveBeenCalledWith(expect.objectContaining({
-          assistantTargetOverride: expect.objectContaining({ model: 'gpt-6.1-sol', reasoningEffort: 'high' }),
+          assistantTargetOverride: expect.objectContaining({ model: 'gpt-6.2-sol', reasoningEffort: 'high' }),
         }))
       }
       if (mode === 'queue-only') {

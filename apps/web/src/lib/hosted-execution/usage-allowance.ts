@@ -792,10 +792,10 @@ const HOSTED_AI_USAGE_ALLOWANCE_MODEL_TOKEN_PRICING_BASES = {
 // Informational rates share the exact allowance-pricing owner. Historical
 // diagnostics always use recorded ledger cost, never reprice old usage.
 export function readHostedUsageDiagnosticModelRates() {
-  return (["gpt-6.1-terra", "gpt-6.1-sol", "gpt-6-luna"] as const).flatMap((model) =>
+  return (["gpt-6.1-terra", "gpt-6.2-sol", "gpt-6-luna"] as const).flatMap((model) =>
     (["standard", "openai-flex", "openai-priority"] as const).map((pricingBasis) => {
-      const price = HOSTED_AI_USAGE_ALLOWANCE_OPENAI_MODEL_PRICES[model];
       const basis = HOSTED_AI_USAGE_ALLOWANCE_MODEL_TOKEN_PRICING_BASES[model][pricingBasis];
+      const price = HOSTED_AI_USAGE_ALLOWANCE_OPENAI_MODEL_PRICES[model];
       const rate = (value: bigint) => Number(value * basis.multiplierNumerator)
         / Number(basis.multiplierDenominator) / 1_000_000;
       return {

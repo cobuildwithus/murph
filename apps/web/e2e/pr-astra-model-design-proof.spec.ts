@@ -30,10 +30,10 @@ test("Premium model choice shows Astra on phone and desktop", async ({ browser }
       const study = page.locator("#settings-model-save-controls");
       await expect(study).toBeVisible();
       await expect(study.locator('[id="assistant-model-gpt-5.6-sol"]')).toHaveCount(0);
-      await expect(study.locator('[id="assistant-model-gpt-6.1-sol"]')).toHaveCount(1);
+      await expect(study.locator('[id="assistant-model-gpt-6.2-sol"]')).toHaveCount(1);
       await expect(study.getByText("Astra", { exact: true })).toBeVisible();
       await expect(study.getByText("Highest usage", { exact: true })).toBeVisible();
-      await expect(study.locator('[id="assistant-model-gpt-6-astra"]')).toBeEnabled();
+      await expect(study.locator('[id="assistant-model-gpt-6.2-astra"]')).toBeEnabled();
       await page.evaluate(async () => {
         await document.fonts.ready;
         await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
@@ -87,7 +87,7 @@ test("Premium model choice shows Astra on phone and desktop", async ({ browser }
       await page.mouse.move(resting!.x - 24, resting!.y);
       await page.waitForTimeout(200);
       expect(Math.abs((await star.boundingBox())!.x - resting!.x)).toBeLessThan(0.5);
-      await expect(study.locator('[id="assistant-model-gpt-6-astra"]')).toBeEnabled();
+      await expect(study.locator('[id="assistant-model-gpt-6.2-astra"]')).toBeEnabled();
       await study.screenshot({
         path: path.join(outputDir, `astra-models-${width}-reduced-motion.png`),
         style: "nextjs-portal { display: none !important; }",
@@ -95,7 +95,7 @@ test("Premium model choice shows Astra on phone and desktop", async ({ browser }
       await page.emulateMedia({ reducedMotion: "no-preference" });
       const disabledStudy = page.locator('[data-design-variant="pulse-models-locked"]');
       const disabledArtwork = disabledStudy.locator('[data-model-artwork="astra"]');
-      const disabledRadio = disabledStudy.locator('[id="assistant-model-gpt-6-astra"]');
+      const disabledRadio = disabledStudy.locator('[id="assistant-model-gpt-6.2-astra"]');
       await expect(disabledRadio).toBeDisabled();
       // Exercise native pointer targeting and disabled controls outside the inert study shell.
       await disabledArtwork.evaluate((element) => {

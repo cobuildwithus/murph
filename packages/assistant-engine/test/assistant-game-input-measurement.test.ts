@@ -117,7 +117,7 @@ describe.skipIf(process.env.MURPH_MEASURE_GAME_INPUT !== '1')('group game tools 
         const tools = (phase === 'base' ? baselineCatalog.resolveMurphDynamicTools : resolveMurphDynamicTools)(availability)
         const configSource = await nativeDelegationSource(phase)
         const scenario = await prepareScriptedTurnScenario(stub, temporaryPaths, {
-          model: 'gpt-6.1-sol', additionalTomlLines: nativeDelegationConfig(configSource),
+          model: 'gpt-6.2-sol', additionalTomlLines: nativeDelegationConfig(configSource),
         })
         const build = phase === 'base' ? baseline.buildAssistantSystemPromptLayers : buildAssistantSystemPromptLayers
         const layers = build({
@@ -151,7 +151,7 @@ describe.skipIf(process.env.MURPH_MEASURE_GAME_INPUT !== '1')('group game tools 
         assert.ok(capture)
         const body = readRecord(JSON.parse(capture.json))
         assert.ok(body)
-        expect(body.model).toBe('gpt-6.1-sol')
+        expect(body.model).toBe('gpt-6.2-sol')
         expect(capture.json).toContain('functions')
         const outputDirectory = process.env.MURPH_GAME_INPUT_OUTPUT_DIRECTORY
         if (outputDirectory) {
@@ -172,11 +172,11 @@ describe.skipIf(process.env.MURPH_MEASURE_GAME_INPUT !== '1')('group game tools 
       const [before, after] = captures
       assert.ok(before && after)
       process.stdout.write(`[game-input-proof] ${JSON.stringify({
-        scope, fixture, base, model: 'gpt-6.1-sol', nativeDelegation: true, captures,
+        scope, fixture, base, model: 'gpt-6.2-sol', nativeDelegation: true, captures,
         deltaBytes: after.bytes - before.bytes, deltaPercent: (after.bytes - before.bytes) / before.bytes * 100,
         afterReadDeltaBytes: before.afterReadBytes && after.afterReadBytes ? after.afterReadBytes - before.afterReadBytes : null,
         afterReadDeltaPercent: before.afterReadBytes && after.afterReadBytes ? (after.afterReadBytes - before.afterReadBytes) / before.afterReadBytes * 100 : null,
-        tokens: null, tokenDelta: null, tokenLimitation: 'No exact GPT-6.1 Sol tokenizer is configured; no estimate is substituted.',
+        tokens: null, tokenDelta: null, tokenLimitation: 'No exact GPT-6.2 Sol tokenizer is configured; no estimate is substituted.',
       })}\n`)
     } finally {
       vi.restoreAllMocks()

@@ -935,11 +935,11 @@ function createPlatform(input: {
   > = {
     async request(request) {
       const snapshot: HostedRuntimeAssistantConfigurationSnapshot = {
-        availableModels: ["gpt-5.6-luna", "gpt-6-sol"],
+        availableModels: ["gpt-5.6-luna", "gpt-6.2-sol"],
         availableReasoningEfforts: ["low", "medium", "high", "xhigh"],
         configurationAvailable: true,
         dormantSolPreference: false,
-        model: "gpt-6-sol",
+        model: "gpt-6.2-sol",
         reasoningEffort: "low",
         solAvailable: false,
       };
@@ -2042,10 +2042,10 @@ function createAssistantUsageRecord(
     rawUsageJsonHash: null,
     reasoningTokens: null,
     reportingUserId: null,
-    requestedModel: "gpt-6-sol",
+    requestedModel: "gpt-6.2-sol",
     routeId: "primary",
     schema: ASSISTANT_USAGE_SCHEMA,
-    servedModel: "gpt-6-sol",
+    servedModel: "gpt-6.2-sol",
     sessionId: "asst_entrypoint_usage",
     surface: null,
     tokenPricingBasis: "standard",

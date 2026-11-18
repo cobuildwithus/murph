@@ -94,7 +94,7 @@ describe.skipIf(!enabled)("canonical game self-play", () => {
         const address = server.address();
         if (!address || typeof address === "string") throw new Error("Missing loopback listener");
         const code = await new Promise<number | null>((done, fail) => {
-          const child = spawn("pnpm", ["test:assistant:live", "--", "--test", "game selfplay shares canonical state across both players", "--model", "gpt-6.1-sol"], {
+          const child = spawn("pnpm", ["test:assistant:live", "--", "--test", "game selfplay shares canonical state across both players", "--model", "gpt-6.2-sol"], {
             cwd: resolve(import.meta.dirname, "../../.."), stdio: "inherit",
             env: { ...process.env, MURPH_SELFPLAY_BRIDGE_URL: `http://127.0.0.1:${address.port}` },
           });

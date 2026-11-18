@@ -1,3 +1,4 @@
+import { writeHostedOpenAiMixedModeModelCatalogJson } from './codex-model-catalog.ts'
 // Shared credential-free Responses stub for the REAL pinned App Server tests.
 // Only the provider wire and isolated fixture setup live here. Production owns
 // the App Server, thread lifecycle, scheduling, tool dispatch, and validation.
@@ -9,7 +10,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const SCRIPTED_STUB_KEY_ENV = 'MURPH_SCRIPTED_STUB_KEY'
-export const SCRIPTED_MODEL = 'gpt-6.1-sol'
+export const SCRIPTED_MODEL = 'gpt-6.2-sol'
 const SCRIPTED_MODEL_PROVIDER = 'local-stub'
 const codexCommand = process.env.MURPH_TEST_CODEX_COMMAND?.trim() || path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -168,6 +169,9 @@ export async function prepareScriptedTurnScenario(
       codexCommand,
       codexHome,
       env: {
+        MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON: await writeHostedOpenAiMixedModeModelCatalogJson({
+          codexCommand, directory: codexHome,
+        }),
         [options.apiKeyEnv ?? SCRIPTED_STUB_KEY_ENV]: 'scripted-local-key',
         HOME: process.env.HOME,
         PATH: process.env.PATH,

@@ -27,7 +27,7 @@ import { parseHostedExecutionGroupJournalFactPayload } from "../group-journal-fa
 import { parseHostedExecutionDeviceSyncExpectedConnectedAt } from "./device-sync.ts";
 import { parseAssistantUsageRecord } from "../assistant-usage.ts";
 import {
-  parseHostedAssistantModelOverride,
+  parseStoredHostedAssistantModelOverride,
   parseHostedAssistantReasoningEffortOverride,
 } from "../assistant-model.ts";
 import { parseAssistantRuntimeIssueRecord } from "@murphai/runtime-state/node/assistant-runtime-issues";
@@ -7639,7 +7639,7 @@ export function parseHostedWorkspaceReadResponse(
   value: unknown,
 ): HostedWorkspaceReadResponse {
   const record = requireObject(value, "Hosted workspace read response");
-  const hostedAssistantModelOverride = parseHostedAssistantModelOverride(
+  const hostedAssistantModelOverride = parseStoredHostedAssistantModelOverride(
     record.hostedAssistantModelOverride,
   );
   const hostedAssistantReasoningEffortOverride =

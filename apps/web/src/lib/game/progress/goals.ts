@@ -136,7 +136,7 @@ export function checkedGoalLookup(response: Pick<Response, "status" | "output_te
 
 export async function lookupGoal(kind: FoundEntry["kind"], words: string, entries: readonly BankEntry[]) {
   try {
-    const response = await inferenceClient().responses.create({ model: "gpt-6.1-sol", reasoning: { effort: "low" },
+    const response = await inferenceClient().responses.create({ model: "gpt-6.2-sol", reasoning: { effort: "low" },
       tools: [{ type: "web_search" }], tool_choice: "required", store: false, include: ["web_search_call.action.sources"],
       instructions: `Look up the real height or duration requested. Search the web and cite the source of the value.
 For height use metres; for time use seconds. A fictional or unverifiable target has found null.

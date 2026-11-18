@@ -962,7 +962,7 @@ test("SettingsPage reads the app session and persisted account settings into the
     assistant: {
       configurationAvailable: true,
       dormantSolPreference: false,
-      model: "gpt-6.1-sol",
+      model: "gpt-6.2-sol",
       solAvailable: true,
     },
     email: {
@@ -1055,7 +1055,7 @@ test("SettingsPage reads the app session and persisted account settings into the
 
     assert.match(markup, /Hosted billing settings/);
     assert.match(markup, /Hosted AI usage activity/);
-    assert.match(markup, /Hosted assistant model gpt-6\.1-sol true/);
+    assert.match(markup, /Hosted assistant model gpt-6\.2-sol true/);
     assert.match(markup, /Hosted account settings \+15550100001/);
     assert.match(markup, /Manage wearables/);
     assert.match(markup, /href="\/connect"/);
@@ -1114,7 +1114,7 @@ test("SettingsPage reads the app session and persisted account settings into the
       configurationAvailable: true,
       expectedCurrentPlanCode: "launch_monthly",
       initialDormantSolPreference: false,
-      initialModel: "gpt-6.1-sol",
+      initialModel: "gpt-6.2-sol",
       solAvailable: true,
     }, undefined);
     expect(mocks.readHostedAccountSettingsPageSnapshot).toHaveBeenCalledWith({

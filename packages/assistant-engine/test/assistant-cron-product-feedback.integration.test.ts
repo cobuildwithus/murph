@@ -47,7 +47,7 @@ vi.mock('@murphai/operator-config/operator-config', async (original) => ({
   resolveAssistantOperatorDefaults: vi.fn(async () => ({ backend: null, identityId: null, selfDeliveryTargets: null })),
 }))
 const cleanup: string[] = []
-const target = createAssistantModelTarget({ provider: 'codex-cli', model: 'gpt-6.1-sol', reasoningEffort: 'medium',
+const target = createAssistantModelTarget({ provider: 'codex-cli', model: 'gpt-6.2-sol', reasoningEffort: 'medium',
   modelProvider: 'openai', approvalPolicy: 'never', sandbox: 'read-only' })
 if (!target) throw new Error('Expected test target')
 const candidate: HostedRuntimeProductFeedbackRecord = {

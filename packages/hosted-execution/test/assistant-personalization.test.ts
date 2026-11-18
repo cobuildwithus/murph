@@ -94,13 +94,13 @@ describe("hosted assistant personalization contract", () => {
       action: "read",
       result: {
         mainPersona: "scientist", supportingPersona: "navy-seal",
-        model: "gpt-6-sol", solAvailable: true, tone: "casual", voice: "warm",
+        model: "gpt-6.2-sol", solAvailable: true, tone: "casual", voice: "warm",
       },
     })).toEqual({
       action: "read",
       result: {
         mainPersona: "classic", supportingPersona: null,
-        model: "gpt-6-sol", solAvailable: true, tone: "casual", voice: "warm",
+        model: "gpt-6.2-sol", solAvailable: true, tone: "casual", voice: "warm",
       },
     });
   });
@@ -150,7 +150,7 @@ describe("hosted assistant personalization contract", () => {
     })).toThrow();
     expect(() => parseHostedRuntimeAssistantPersonalizationToolRequest({
       action: "update",
-      model: "gpt-6.1-sol",
+      model: "gpt-6.2-sol",
     })).toThrow();
     expect(() => parseHostedRuntimeAssistantPersonalizationToolRequest({
       action: HOSTED_RUNTIME_ASSISTANT_PERSONALITY_UPDATE_ACTION,
@@ -181,7 +181,7 @@ describe("hosted assistant personalization contract", () => {
       result: {
         mainPersona: "classic" as const,
         supportingPersona: null,
-        model: "gpt-6-sol",
+        model: "gpt-6.2-sol",
         modelChangeAppliesNextRun: false,
         modelUpdated: false,
         solAvailable: false,
@@ -194,7 +194,7 @@ describe("hosted assistant personalization contract", () => {
       result: {
         mainPersona: "classic" as const,
         supportingPersona: null,
-        model: "gpt-6-sol",
+        model: "gpt-6.2-sol",
         modelChangeAppliesNextRun: false,
         modelUpdated: false,
         solAvailable: false,
@@ -208,7 +208,7 @@ describe("hosted assistant personalization contract", () => {
       result: {
         mainPersona: "classic" as const,
         supportingPersona: null,
-        model: "gpt-6-sol",
+        model: "gpt-6.2-sol",
         modelChangeAppliesNextRun: false,
         modelUpdated: false,
         solAvailable: true,
@@ -229,7 +229,7 @@ describe("hosted assistant personalization contract", () => {
       result: {
         mainPersona: "classic" as const,
         supportingPersona: null,
-        model: "gpt-6-sol",
+        model: "gpt-6.2-sol",
         solAvailable: false,
         tone: null,
         voice: "upbeat",
@@ -240,7 +240,7 @@ describe("hosted assistant personalization contract", () => {
       result: {
         mainPersona: "classic" as const,
         supportingPersona: null,
-        model: "gpt-6-sol",
+        model: "gpt-6.2-sol",
         solAvailable: false,
         tone: "formal",
         voice: null,
@@ -340,7 +340,7 @@ describe("hosted assistant personalization contract", () => {
     const validResult = {
       mainPersona: "classic" as const,
       supportingPersona: null,
-      model: "gpt-6-sol",
+      model: "gpt-6.2-sol",
       modelChangeAppliesNextRun: false,
       modelUpdated: false,
       solAvailable: true,

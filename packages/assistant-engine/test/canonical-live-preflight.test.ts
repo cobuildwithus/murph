@@ -20,7 +20,7 @@ import * as bootstrap from '../src/assistant/cli-surface-bootstrap.js'
 import { createCanonicalLiveFixture, createCanonicalReminderAutomationPort, runCanonicalReminderJourney } from './support/canonical-live-journeys.js'
 
 const cli = fileURLToPath(new URL('../../cli/dist/bin.js', import.meta.url))
-const config = { codexHome: null, env: {}, model: 'gpt-6-sol', modelProvider: 'openai' }
+const config = { codexHome: null, env: {}, model: 'gpt-6.2-sol', modelProvider: 'openai' }
 
 afterEach(() => { vi.resetAllMocks() })
 

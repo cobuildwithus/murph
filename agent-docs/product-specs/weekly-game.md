@@ -664,7 +664,7 @@ resulting avatar. No private photo is shared with the subject or other players.
   The 90-day iMessage inactivity pause still applies. The feature is off unless
   `MURPH_GAME_EVENING_CHECK_IN_ENABLED` is exactly `true`.
 - **Pair recap show.** When `MURPH_GAME_RECAP_SHOW_ENABLED=true`, the parent
-  GPT-6.1 Sol turn reads retained shared material and the centralized craft guide,
+  GPT-6.2 Sol turn reads retained shared material and the centralized craft guide,
   composes five to seven authored pages, generates selected scenes and an optional
   twenty-second theme song, previews and revises, then submits the finished show.
   Whole real photos use contain sizing. Zero to two “Most likely to” cards get one

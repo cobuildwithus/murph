@@ -385,7 +385,7 @@ describe("Progress HTTP contracts", () => {
     const response = await goals(request("/goals?measure=pushups.reps&q=Mount%20Doom&find=1"));
     expect(goalsSchema.parse(await response.json())).toMatchObject({ match: null, suggestions: [{ id: "half-dome" }], note: "A real mountain to climb." });
     expect(mocks.suggest).toHaveBeenCalledTimes(1);
-    expect(mocks.suggest.mock.calls[0][0]).toMatchObject({ model: "gpt-6.1-sol", reasoning: { effort: "low" }, tools: [{ type: "web_search" }], tool_choice: "required", store: false, text: { format: { type: "json_schema", strict: true } } });
+    expect(mocks.suggest.mock.calls[0][0]).toMatchObject({ model: "gpt-6.2-sol", reasoning: { effort: "low" }, tools: [{ type: "web_search" }], tool_choice: "required", store: false, text: { format: { type: "json_schema", strict: true } } });
     const input = JSON.parse(mocks.suggest.mock.calls[0][0].input);
     expect(Object.keys(input).sort()).toEqual(["bank", "kind", "words"]);
     expect(input).toMatchObject({ kind: "height", words: "Mount Doom", bank: expect.arrayContaining([{ id: "half-dome", name: "Half Dome" }]) });

@@ -48,7 +48,7 @@ export async function runReminderLanguageJourney(config: CanonicalLiveConfig, sc
   const models: (string | null)[] = []
   const evidence: Record<string, unknown> = { scenario: scenario.id, timezone: scenario.timezone, expectedLanguage: scenario.language, providerInputs }
   try {
-    expect(config.model).toBe('gpt-6.1-sol')
+    expect(config.model).toBe('gpt-6.2-sol')
     expect((await readMemoryDocument(fixture.vault)).records).toEqual([])
     const executionContext = { hosted: {
       automationTool: createCanonicalReminderAutomationPort(fixture.vault, automationRequests),

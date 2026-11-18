@@ -684,7 +684,7 @@ test('sendAssistantNotificationLocal persists the turn before outbound delivery 
   }))
 
   const hostedDefaultTarget = createCodexTarget({
-    model: 'gpt-6.1-sol-mini',
+    model: 'gpt-6.2-sol-mini',
   })
   const { sendAssistantNotificationLocal } = await import(
     '../src/assistant/notification-turn.ts'
@@ -1189,7 +1189,7 @@ test('sendAssistantNotificationLocal sends required exact text without a provide
         notificationMode: 'deterministic-exact-text',
       },
       provider: 'codex-cli',
-      providerModel: 'gpt-6.1-sol',
+      providerModel: 'gpt-6.2-sol',
       sessionId: initialSession.sessionId,
       turnId: 'turn-exact',
     }),
@@ -4502,7 +4502,7 @@ test('recap capacity retries retain the generation, native thread and usage basi
         tiers.push(input.input.serviceTier)
         nativeThreads.push(input.resolvedSession.codexResume?.threadId ?? null)
         const usage = extractCodexAssistantProviderUsage({
-          providerConfig: normalizeAssistantProviderConfig({ model: 'gpt-6.1-sol', modelProvider: 'hosted-openai' }),
+          providerConfig: normalizeAssistantProviderConfig({ model: 'gpt-6.2-sol', modelProvider: 'hosted-openai' }),
           rawEvents: complete ? [{ method: 'thread/tokenUsage/updated', params: { threadId: 'recap-native-thread', turnId: 'recap-turn',
             tokenUsage: { total: { inputTokens: 100, outputTokens: 20, totalTokens: 120, cachedInputTokens: 0, reasoningOutputTokens: 0 },
               last: { inputTokens: 100, outputTokens: 20, totalTokens: 120, cachedInputTokens: 0, reasoningOutputTokens: 0 } } } },
@@ -5368,7 +5368,7 @@ test('sendAssistantNotificationLocal surfaces failed delivery results', async ()
   const sharedPlan = createSharedPlan()
   const primaryRoute = createRoute({
     providerOptions: {
-      model: 'gpt-6.1-sol-primary',
+      model: 'gpt-6.2-sol-primary',
     },
     routeId: 'route-primary',
   })
@@ -5494,7 +5494,7 @@ test('sendAssistantNotificationLocal surfaces failed delivery results', async ()
   expect(mocks.createAssistantRuntimeStateService.mock.results[0]?.value.turns.createReceipt)
     .toHaveBeenCalledWith(expect.objectContaining({
       provider: 'codex-cli',
-      providerModel: 'gpt-6.1-sol-primary',
+      providerModel: 'gpt-6.2-sol-primary',
     }))
   expect((deliveryError as Error & {
     details?: Record<string, unknown>
@@ -5506,7 +5506,7 @@ test('sendAssistantNotificationLocal surfaces failed delivery results', async ()
     assistantNotificationProvider: 'codex-cli',
     assistantNotificationProviderBaseUrlOrigin: null,
     assistantNotificationProviderBaseUrlPath: null,
-    assistantNotificationProviderModel: 'gpt-6.1-sol-primary',
+    assistantNotificationProviderModel: 'gpt-6.2-sol-primary',
     assistantNotificationRouteId: 'route-primary',
     assistantNotificationStage: 'delivery',
   })
@@ -5530,7 +5530,7 @@ test('sendAssistantNotificationLocal forwards provider response media to deliver
   const sharedPlan = createSharedPlan()
   const primaryRoute = createRoute({
     providerOptions: {
-      model: 'gpt-6.1-sol-primary',
+      model: 'gpt-6.2-sol-primary',
     },
     routeId: 'route-primary',
   })
@@ -5683,13 +5683,13 @@ test('sendAssistantNotificationLocal annotates terminal provider failures with r
   const primaryRoute = createRoute({
     routeId: 'route-primary',
     providerOptions: {
-      model: 'gpt-6.1-sol-primary',
+      model: 'gpt-6.2-sol-primary',
     },
   })
   const route = createRoute({
     routeId: 'route-provider-failure',
     providerOptions: {
-      model: 'gpt-6.1-sol-mini',
+      model: 'gpt-6.2-sol-mini',
     },
   })
   const mocks = {
@@ -5775,7 +5775,7 @@ test('sendAssistantNotificationLocal annotates terminal provider failures with r
     assistantNotificationProvider: 'codex-cli',
     assistantNotificationProviderBaseUrlOrigin: null,
     assistantNotificationProviderBaseUrlPath: null,
-    assistantNotificationProviderModel: 'gpt-6.1-sol-mini',
+    assistantNotificationProviderModel: 'gpt-6.2-sol-mini',
     assistantNotificationProviderNonReplayableWork: false,
     assistantNotificationRouteId: 'route-provider-failure',
     assistantNotificationStage: 'provider',
@@ -6083,7 +6083,7 @@ function createProviderOptions(
   return serializeAssistantProviderSessionOptions({
     approvalPolicy: 'never',
     provider: 'codex-cli',
-    model: 'gpt-6.1-sol',
+    model: 'gpt-6.2-sol',
     modelProvider: 'hosted-openai',
     reasoningEffort: 'medium',
     sandbox: 'danger-full-access',
@@ -6487,7 +6487,7 @@ function createCodexTarget(
     approvalPolicy: 'never',
     codexCommand: null,
     codexHome: null,
-    model: 'gpt-6.1-sol',
+    model: 'gpt-6.2-sol',
     modelProvider: 'hosted-openai',
     oss: false,
     profile: null,

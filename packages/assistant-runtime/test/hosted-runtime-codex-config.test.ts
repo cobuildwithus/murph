@@ -104,7 +104,7 @@ const CURRENT_TIME_REMINDER_PATTERN =
 const HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL =
   "HOSTED_CODEX_AUTOCOMPACTION_SUMMARY_SENTINEL";
 const EXPECTED_MULTI_AGENT_USAGE_HINT = [
-  "When the active route or skill contract permits delegation, proactively spawn a fresh child for bounded multi-pass CLI work that replaces repeated root passes over a large conversation, even when needed for this reply; use fork_turns none and gpt-6.1-sol medium when model overrides are available unless the user selected another child model.",
+  "When the active route or skill contract permits delegation, proactively spawn a fresh child for bounded multi-pass CLI work that replaces repeated root passes over a large conversation, even when needed for this reply; use fork_turns none and gpt-6.2-sol medium when model overrides are available unless the user selected another child model.",
   "Use the child to replace a later root pass, not duplicate work; unless the user requests delegation, skip tiny tasks whose assignment and readback cost exceeds doing them once in the root.",
   "For any delegated result needed to answer, use native wait_agent, then answer in the same turn. Keep independent onboarding saves nonblocking.",
   "Follow the active route or skill contract for the exact leaf assignment and completion proof.",
@@ -177,7 +177,7 @@ testHostedCliTimingE2e("shared CLI timing: built entry uses hosted permissions a
     const config = buildHostedCodexConfigToml({
       codexHome,
       exposeSpawnAgentModelOverrides: false,
-      model: "gpt-6.1-sol",
+      model: "gpt-6.2-sol",
       reasoningEffort: "low",
       provider: {
         id: HOSTED_LOCAL_TEST_CODEX_MODEL_PROVIDER_ID,
@@ -871,7 +871,7 @@ test("hosted Codex runtime config uses ChatGPT subscription auth in local dev", 
   const result = await prepareHostedCodexRuntimeEnvironment({
     operatorHomeRoot,
     runtimeEnv: {
-      HOSTED_ASSISTANT_MODEL: "gpt-6.1-sol",
+      HOSTED_ASSISTANT_MODEL: "gpt-6.2-sol",
       HOSTED_ASSISTANT_PROVIDER: "openai",
       [HOSTED_RUNTIME_CODEX_CHATGPT_AUTH_JSON_ENV]: encodeChatGptCodexAuthEnvValue(chatGptAuthJson),
       NODE_ENV: "development",
@@ -1291,7 +1291,7 @@ testHostedCodexAuthE2e("operator diagnostic authenticates through hosted OpenAI 
     const result = await executeOperatorDiagnostic({
       codexHome: prepared.codexHome,
       env: prepared.runtimeEnv,
-      model: "gpt-6.1-sol",
+      model: "gpt-6.2-sol",
       modelProvider: resolveHostedOperatorModelProvider(
         prepared.runtimeEnv[HOSTED_CODEX_EFFECTIVE_MODEL_PROVIDER_ID_ENV],
       ),
@@ -1306,7 +1306,7 @@ testHostedCodexAuthE2e("operator diagnostic authenticates through hosted OpenAI 
     assert.ok(authorizationHeaders.every((header) => header === "Bearer synthetic-operator-credential"));
     const modelRequests = requests.filter((body) => body.length > 0);
     assert.equal(modelRequests.length, 1);
-    assert.equal(JSON.parse(modelRequests[0]!).model, "gpt-6.1-sol");
+    assert.equal(JSON.parse(modelRequests[0]!).model, "gpt-6.2-sol");
   } finally {
     await closeHttpServer(server);
   }
@@ -1335,7 +1335,7 @@ testHostedCodexAuthE2e(
       const result = await prepareHostedCodexRuntimeEnvironment({
         operatorHomeRoot,
         runtimeEnv: {
-          HOSTED_ASSISTANT_MODEL: "gpt-6.1-sol",
+          HOSTED_ASSISTANT_MODEL: "gpt-6.2-sol",
           HOSTED_ASSISTANT_PROVIDER: "openai",
           [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
             `${readServerBaseUrl(server)}/v1`,
@@ -1559,7 +1559,7 @@ testHostedCodexAuthE2e(
       const result = await prepareHostedCodexRuntimeEnvironment({
         operatorHomeRoot,
         runtimeEnv: {
-          HOSTED_ASSISTANT_MODEL: "gpt-6.1-sol",
+          HOSTED_ASSISTANT_MODEL: "gpt-6.2-sol",
           HOSTED_ASSISTANT_PROVIDER: "openai",
           [HOSTED_RUNTIME_CODEX_MODEL_PROVIDER_BASE_URL_ENV]:
             `${readServerBaseUrl(server)}/v1`,
@@ -1761,7 +1761,7 @@ async function runHostedCodexAutocompactionE2e(
   try {
     await mkdir(vaultRoot, { recursive: true });
     const providerRuntimeEnv = {
-      HOSTED_ASSISTANT_MODEL: "gpt-6.1-sol",
+      HOSTED_ASSISTANT_MODEL: "gpt-6.2-sol",
       HOSTED_ASSISTANT_PROVIDER: "openai",
       OPENAI_API_KEY: "hosted-autocompaction-e2e-key",
     };
@@ -2442,7 +2442,7 @@ test("hosted Codex config keeps skill instructions and native memory disabled", 
   const config = buildHostedCodexConfigToml({
     codexHome: "/tmp/synthetic-codex-home",
     exposeSpawnAgentModelOverrides: true,
-    model: "gpt-6.1-sol",
+    model: "gpt-6.2-sol",
     provider: {
       id: "openai",
       name: "OpenAI",
@@ -2493,7 +2493,7 @@ test("hosted Codex config promotes permitted leaf delegation with native per-spa
   const config = buildHostedCodexConfigToml({
     codexHome: "/tmp/synthetic-codex-home",
     exposeSpawnAgentModelOverrides: true,
-    model: "gpt-6.1-sol",
+    model: "gpt-6.2-sol",
     provider: {
       id: "openai",
       name: "OpenAI",
@@ -2505,7 +2505,7 @@ test("hosted Codex config promotes permitted leaf delegation with native per-spa
   });
 
   assert.ok(config.includes(
-    "When the active route or skill contract permits delegation, proactively spawn a fresh child for bounded multi-pass CLI work that replaces repeated root passes over a large conversation, even when needed for this reply; use fork_turns none and gpt-6.1-sol medium when model overrides are available unless the user selected another child model.",
+    "When the active route or skill contract permits delegation, proactively spawn a fresh child for bounded multi-pass CLI work that replaces repeated root passes over a large conversation, even when needed for this reply; use fork_turns none and gpt-6.2-sol medium when model overrides are available unless the user selected another child model.",
   ));
   assert.ok(config.includes(
     "Use the child to replace a later root pass, not duplicate work; unless the user requests delegation, skip tiny tasks",
@@ -2790,7 +2790,7 @@ async function startResponsesStubServer(input: {
       response.end(JSON.stringify({
         created_at: Math.floor(Date.now() / 1000),
         id: `resp_hosted_codex_config_${requestIndex}`,
-        model: "gpt-6.1-sol",
+        model: "gpt-6.2-sol",
         output: [
           {
             content: [
@@ -2856,7 +2856,7 @@ async function prepareLegacyBuiltInOpenAiCodexHome(input: {
   await writeFile(
     path.join(codexHome, "config.toml"),
     [
-      'model = "gpt-6.1-sol"',
+      'model = "gpt-6.2-sol"',
       'model_provider = "openai"',
       `openai_base_url = ${JSON.stringify(input.baseUrl)}`,
       'model_reasoning_effort = "medium"',
@@ -2988,7 +2988,7 @@ function enableCodexNativeMemoryForRegression(
       "use_memories = true",
       "generate_memories = true",
       'extract_model = "gpt-5.6-luna"',
-      'consolidation_model = "gpt-6.1-sol"',
+      'consolidation_model = "gpt-6.2-sol"',
       "disable_on_external_context = false",
       `min_rollout_idle_hours = ${options.minRolloutIdleHours ?? 1}`,
       "max_rollouts_per_startup = 1",
@@ -3041,7 +3041,7 @@ function writeResponsesStubStream(input: {
   const completedResponse = {
     created_at: Math.floor(Date.now() / 1000),
     id: input.responseId,
-    model: "gpt-6.1-sol",
+    model: "gpt-6.2-sol",
     output: [outputItem],
     status: "completed",
     usage: input.usage,

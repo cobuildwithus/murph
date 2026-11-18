@@ -1,0 +1,16 @@
+{
+  "publishedOn": "2026-11-17",
+  "order": 100,
+  "item": {
+    "id": "sol-astra-model-refresh",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Sol and Astra use GPT-6.2",
+    "summary": "Chats and reminders that use Sol or Astra now use the GPT-6.2 version of that model.",
+    "details": "Your saved model choice and reasoning setting carry over automatically.",
+    "relevanceTags": [
+      "assistant"
+    ],
+    "sourcePullRequests": []
+  }
+}

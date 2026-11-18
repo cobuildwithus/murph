@@ -21,7 +21,7 @@ describe("deploy live model turn smoke", () => {
     )).toBe(DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL);
 
     expect(readDeployLiveModelTurnSmokeOpenAiModel(
-      JSON.stringify({ model: "gpt-6-sol" }),
+      JSON.stringify({ model: "gpt-6.2-sol" }),
     )).toBeNull();
     expect(readDeployLiveModelTurnSmokeOpenAiModel(
       JSON.stringify({ model: ` ${DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL} ` }),

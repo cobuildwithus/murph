@@ -12,6 +12,7 @@ import * as z from "@murphai/contracts/zod-runtime";
 
 import {
   HOSTED_ASSISTANT_PRODUCT_MODELS,
+  parseStoredHostedAssistantModelOverride,
   type HostedAssistantProductModel,
 } from "./assistant-model.ts";
 
@@ -194,7 +195,7 @@ export const hostedRuntimeAssistantPersonalizationToolRequestSchema = z
 const hostedRuntimeAssistantPersonalizationSnapshotSchema = z.object({
   mainPersona: assistantPersonaIdSchema.transform(() => "classic" as const),
   supportingPersona: assistantPersonaIdSchema.nullable().transform(() => null),
-  model: z.enum(HOSTED_ASSISTANT_PRODUCT_MODELS),
+  model: z.preprocess(parseStoredHostedAssistantModelOverride, z.enum(HOSTED_ASSISTANT_PRODUCT_MODELS)),
   solAvailable: z.boolean(),
   tone: z.enum(assistantTonePreferenceValues),
   voice: z.enum(assistantVoiceOptionIdValues),

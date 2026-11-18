@@ -41,8 +41,7 @@ function readPatchRequest(assistantTargetOverride?: unknown) {
 
 describe('hosted automation model selection', () => {
   it.each([
-    'gpt-6.1-sol',
-    'gpt-6-sol',
+    'gpt-6.2-sol',
     'gpt-6-luna',
     'gpt-5.6-luna',
   ] as const)(
@@ -136,14 +135,14 @@ describe('hosted automation model selection', () => {
     expect(preserved.request).not.toHaveProperty('assistantTargetOverride')
 
     const replaced = readPatchRequest({
-      model: 'gpt-6.1-sol',
+      model: 'gpt-6.2-sol',
     })
     expect(replaced).toMatchObject({
       kind: 'automation',
       request: {
         action: 'patch',
         assistantTargetOverride: {
-          model: 'gpt-6.1-sol',
+          model: 'gpt-6.2-sol',
         },
         lookup: 'burpee-reminder',
       },

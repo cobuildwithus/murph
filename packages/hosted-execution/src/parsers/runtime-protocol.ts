@@ -84,6 +84,13 @@ export function assertHostedRuntimeWebProtocolAdmission(
   assertRuntimeOwnerCompletionEvidence(record.runtimeOwnerCompletion);
   assertRecapScoreEvidence(record.recapScore);
   assertRecapVideoEvidence(record.recapVideo);
+  assertAssistantUsagePricing(record.pricedAssistantModels);
+}
+
+function assertAssistantUsagePricing(priced: unknown): void {
+  if (!Array.isArray(priced) || !priced.includes("gpt-6.2-sol") || !priced.includes("gpt-6.2-astra")) {
+    throw new Error("Hosted Web protocol admission failed: assistant_usage_pricing.");
+  }
 }
 
 /** Web must read a video part, a candidate and an identity request before a runtime that sends them is activated. */

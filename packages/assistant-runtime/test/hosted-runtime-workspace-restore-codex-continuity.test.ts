@@ -1481,7 +1481,7 @@ function createHostedCodexSessionTarget(): AssistantModelTarget {
     approvalPolicy: "never",
     codexCommand: null,
     codexHome: null,
-    model: "gpt-6.1-sol",
+    model: "gpt-6.2-sol",
     modelProvider: "openai",
     oss: false,
     profile: null,

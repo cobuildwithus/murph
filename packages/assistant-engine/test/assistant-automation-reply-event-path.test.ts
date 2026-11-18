@@ -5270,7 +5270,7 @@ describe('assistant auto-reply event-first path', () => {
 
   it.each([true, false])('attests a reaction to a game chat opening from its accepted receipt (exact target=%s)', async (exactTarget) => {
     const vault = await createTempVault()
-    const target = createAssistantModelTarget({ provider: 'codex-cli', model: 'gpt-6.1-sol', approvalPolicy: 'never', sandbox: 'read-only' })
+    const target = createAssistantModelTarget({ provider: 'codex-cli', model: 'gpt-6.2-sol', approvalPolicy: 'never', sandbox: 'read-only' })
     if (!target) throw new Error('Expected synthetic model target.')
     const memberId = 'synthetic-group'
     const bootstrap = await resolveAssistantSession({ vault, target, channel: 'linq', identityId: memberId, threadIsDirect: false })

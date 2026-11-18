@@ -890,11 +890,10 @@ describe("hosted execution coverage gaps", () => {
     );
     expect(assistantModelModule.HOSTED_ASSISTANT_PRODUCT_MODELS).toEqual([
       "gpt-6.1-terra",
-      "gpt-6.1-sol",
-      "gpt-6-sol",
+      "gpt-6.2-sol",
       "gpt-6-luna",
       "gpt-5.6-luna",
-      "gpt-6-astra",
+      "gpt-6.2-astra",
     ]);
     expect("parseHostedWakeLinqMessageReceivedPayload" in rootModule).toBe(
       false,

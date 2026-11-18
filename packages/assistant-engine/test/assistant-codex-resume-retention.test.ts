@@ -16,7 +16,7 @@ import { prepareScriptedTurnScenario, startScriptedResponsesStub } from './suppo
 const roots: string[] = []
 const now = new Date('2026-11-02T12:00:00.000Z')
 const old = '2026-09-01T12:00:00.000Z'
-const target = createAssistantModelTarget({ provider: 'codex-cli', model: 'gpt-6.1-sol' })
+const target = createAssistantModelTarget({ provider: 'codex-cli', model: 'gpt-6.2-sol' })
 afterEach(async () => {
   vi.restoreAllMocks()
   await stopWarmCodexAppServer()

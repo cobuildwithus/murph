@@ -38,7 +38,7 @@ const userId = `member_local_vault_persistence_${runId}`;
 const chatId = `chat_local_vault_persistence_${runId}`;
 const linqWebhookSecret = "linq-local-vault-persistence-secret";
 const safeLiveAssistantModel =
-  process.env.MURPH_HOSTED_LOCAL_LIVE_E2E_MODEL?.trim() || "gpt-6.1-sol";
+  process.env.MURPH_HOSTED_LOCAL_LIVE_E2E_MODEL?.trim() || "gpt-6.2-sol";
 const vaultRelativePath = `bank/hosted-e2e/vault-persistence-${runId}.md`;
 const firstMarker = `first-marker-${randomUUID()}`;
 const assistantProviderMode = process.env.MURPH_E2E_ASSISTANT_PROVIDER_MODE === "live"

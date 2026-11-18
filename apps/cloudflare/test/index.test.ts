@@ -732,7 +732,7 @@ describe("cloudflare worker routes", () => {
       },
     });
     const url = new URL(
-      "https://runner.example.test/internal/deploy/container-smoke?liveModelTurn=gpt-6.1-sol",
+      "https://runner.example.test/internal/deploy/container-smoke?liveModelTurn=gpt-6.2-sol",
     );
     const request = await signWebCallbackControlRequest(
       new Request(url, { method: "POST" }),

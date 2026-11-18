@@ -216,30 +216,30 @@ export type HostedRuntimeControlMailboxKind =
 
 export const HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS = [
   "gpt-6.1-terra",
-  "gpt-6.1-sol",
-  "gpt-6-sol",
+  "gpt-6.2-sol",
   "gpt-6-luna",
-  "gpt-6-astra",
+  "gpt-6.2-astra",
   "gpt-5.6-luna",
 ] as const;
 
 export type HostedAiUsageAllowancePricedModel =
   (typeof HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS)[number];
 
-// Usage can arrive before model activation or after retirement. Never use this
+// Retired usage remains ingestible during rollout and replay. Never use this
 // accounting-only type as an execution or deployment allowlist.
-const ledgerOnlyModels = ["gpt-5.6-sol", "gpt-6.2-sol", "gpt-6.2-astra"] as const;
-export type HostedAiUsageLedgerModel = HostedAiUsageAllowancePricedModel | (typeof ledgerOnlyModels)[number];
+const retiredUsageModels = ["gpt-5.6-sol", "gpt-6-sol", "gpt-6.1-sol", "gpt-6-astra"] as const;
+export type HostedAiUsageLedgerModel = HostedAiUsageAllowancePricedModel | (typeof retiredUsageModels)[number];
 
 export function normalizeHostedAiUsageLedgerModelId(value: string): HostedAiUsageLedgerModel | null {
   const historical = value.trim().toLowerCase().split("/").at(-1)?.replace(/-\d{4}-\d{2}-\d{2}$/u, "");
-  return ledgerOnlyModels.find((model) => model === historical) ?? normalizeHostedAiUsageAllowancePricedModelId(value);
+  return retiredUsageModels.find((model) => model === historical) ?? normalizeHostedAiUsageAllowancePricedModelId(value);
 }
 
 export const HOSTED_AI_USAGE_OPENAI_FLEX_TOKEN_PRICING_MODELS =
   [
     ...HOSTED_AI_USAGE_ALLOWANCE_PRICED_MODELS,
-    ...ledgerOnlyModels,
+    // Historical usage evidence must retain its original Flex pricing basis.
+    ...retiredUsageModels,
   ] as readonly HostedAiUsageLedgerModel[];
 
 export type HostedAiUsageOpenAiFlexTokenPricingModel =

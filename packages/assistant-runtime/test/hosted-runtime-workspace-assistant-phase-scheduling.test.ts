@@ -79,7 +79,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
       adapter: "codex-cli" as const,
       approvalPolicy: "never" as const,
       codexCommand: null,
-      model: "gpt-6.1-sol",
+      model: "gpt-6.2-sol",
       modelProvider: "openai",
       oss: false,
       profile: null,
@@ -712,7 +712,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
   it("prepares hosted assistant automation state before running scheduled automation", async () => {
     const runtimeEnv = {};
     const runtimeForwardedEnv = {
-      HOSTED_ASSISTANT_MODEL: "gpt-6.1-sol",
+      HOSTED_ASSISTANT_MODEL: "gpt-6.2-sol",
       HOSTED_ASSISTANT_PROVIDER: "openai",
       LINQ_API_BASE_URL: "https://linq.example.test",
     };

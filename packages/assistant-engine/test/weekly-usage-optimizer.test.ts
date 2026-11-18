@@ -30,7 +30,7 @@ describe('weekly usage optimizer', () => {
     expect(MURPH_MANAGED_AUTOMATIONS.filter(item => item.automationId === seed.automationId)).toEqual([seed])
     expect(seed).toMatchObject({ ownerScope: 'member', hostedRuntimeOnly: true, continuityPolicy: 'fresh',
       schedule: { kind: 'every', everyMs: 30 * 24 * 60 * 60 * 1000 },
-      assistantTargetOverride: { model: 'gpt-6.1-sol', reasoningEffort: 'medium' } })
+      assistantTargetOverride: { model: 'gpt-6.2-sol', reasoningEffort: 'medium' } })
     expect(seed.instructions).toContain('days=30 and limit=10')
     expect(seed.instructions).not.toContain('days=14')
     expect(seed.instructions).toContain('At most ten model changes per run')

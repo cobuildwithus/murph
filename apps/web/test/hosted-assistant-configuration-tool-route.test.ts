@@ -35,10 +35,10 @@ describe("hosted assistant configuration tool route", () => {
     mocks.handleTool.mockResolvedValue({
       action: "read",
       result: {
-        availableModels: ["gpt-5.6-luna", "gpt-6.1-sol"],
+        availableModels: ["gpt-5.6-luna", "gpt-6.2-sol"],
         availableReasoningEfforts: ["low", "medium", "high", "xhigh"],
         configurationAvailable: true,
-        model: "gpt-6.1-sol",
+        model: "gpt-6.2-sol",
         reasoningEffort: "low",
         solAvailable: false,
       },

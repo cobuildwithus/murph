@@ -48,7 +48,7 @@ import {
 import {
   HOSTED_ASSISTANT_PRODUCT_MODELS,
   HOSTED_ASSISTANT_REASONING_EFFORTS,
-  HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
+  HOSTED_ASSISTANT_SOL_MODEL,
   HOSTED_ASSISTANT_DEFAULT_MODEL,
   type HostedAssistantProductModel,
   type HostedAssistantReasoningEffort,
@@ -168,6 +168,7 @@ describe('assistant codex runtime', () => {
 
   it('preserves explicit steering settings and requires lossless untrusted context retention', () => {
     const contextFeatures = [
+      'features.unified_image_budget=false',
       'features.retain_client_developer_messages=true',
     ]
     expect(withCodexAppServerRuntimeFeatureOverrides(['model="gpt-5"'])).toEqual([
@@ -545,13 +546,13 @@ describe('assistant codex runtime', () => {
     },
     {
       expectedImageDetail: 'original',
-      model: 'gpt-6-sol',
+      model: 'gpt-6.2-sol',
       modelProvider: 'openai',
       providerRequestOrdinal: 1,
     },
     {
       expectedImageDetail: 'original',
-      model: 'gpt-6.1-sol',
+      model: 'gpt-6.2-astra',
       modelProvider: 'openai',
       providerRequestOrdinal: 2,
     },
@@ -1597,7 +1598,7 @@ describe('assistant codex runtime', () => {
         params: {
           arguments: {
             action: 'update',
-            model: HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
+            model: HOSTED_ASSISTANT_SOL_MODEL,
           },
           namespace: 'murph',
           tool: 'assistant_configuration',
@@ -1619,7 +1620,7 @@ describe('assistant codex runtime', () => {
       await firstUpdateStarted.promise
       try {
         expect(configurationCalls).toEqual([
-          `update:${HOSTED_ASSISTANT_GPT_61_SOL_MODEL}`,
+          `update:${HOSTED_ASSISTANT_SOL_MODEL}`,
         ])
       } finally {
         releaseFirstUpdate.resolve()
@@ -1635,7 +1636,7 @@ describe('assistant codex runtime', () => {
         result: { success: true },
       })
       expect(configurationCalls).toEqual([
-        `update:${HOSTED_ASSISTANT_GPT_61_SOL_MODEL}`,
+        `update:${HOSTED_ASSISTANT_SOL_MODEL}`,
         `update:${HOSTED_ASSISTANT_DEFAULT_MODEL}`,
       ])
 

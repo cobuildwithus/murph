@@ -45,7 +45,7 @@ vi.mock('@murphai/operator-config/operator-config', async (original) => ({
 }))
 
 const cleanup: string[] = []
-const target = createAssistantModelTarget({ provider: 'codex-cli', model: 'gpt-6.1-sol', reasoningEffort: 'medium',
+const target = createAssistantModelTarget({ provider: 'codex-cli', model: 'gpt-6.2-sol', reasoningEffort: 'medium',
   modelProvider: 'openai', approvalPolicy: 'never', sandbox: 'read-only' })
 if (!target) throw new Error('Expected test target')
 const create = { action: 'create' as const, question: 'Which day?', options: ['Saturday', 'Sunday'] }

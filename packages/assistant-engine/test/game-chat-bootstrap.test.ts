@@ -12,7 +12,7 @@ import { dispatchAssistantOutboxIntent, listAssistantOutboxIntentsLocal } from '
 test('accepted bootstrap adopts the exact first inbound Linq room and preserves contextual yes history', async () => {
   const vault = await mkdtemp(path.join(tmpdir(), 'murph-bootstrap-continuity-'))
   try {
-    const target = createAssistantModelTarget({ provider: 'codex-cli', model: 'gpt-6.1-sol', approvalPolicy: 'never', sandbox: 'read-only' })
+    const target = createAssistantModelTarget({ provider: 'codex-cli', model: 'gpt-6.2-sol', approvalPolicy: 'never', sandbox: 'read-only' })
     if (!target) throw new Error('Expected synthetic model target.')
     const memberId = 'synthetic-group'
     const bootstrap = await resolveAssistantSession({ vault, target, channel: 'linq', identityId: memberId, threadIsDirect: false })

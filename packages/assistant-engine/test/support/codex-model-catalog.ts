@@ -21,9 +21,9 @@ export async function writeHostedOpenAiMixedModeModelCatalogJson(input: {
   const patchFilter = /\| jq '([^']+)'/u.exec(dockerfile)?.[1]
   const standardFilter = /&& jq '([^']+)' \/tmp\/murph-codex-model-catalog\.openai-flex\.json/u.exec(dockerfile)?.[1]
   if (!patchFilter || !standardFilter) throw new Error('Image catalog filters are missing.')
-  const mergeFilter = /jq --slurpfile terra \/tmp\/codex-model-catalog\.terra\.json '([^']+)'/u.exec(dockerfile)?.[1] ?? '.'
+  const mergeFilter = /jq --slurpfile launch \/tmp\/codex-model-catalog\.6\.2\.json '([^']+)'/u.exec(dockerfile)?.[1] ?? '.'
   const catalogJson = execFileSync('jq', [
-    '--slurpfile', 'terra', fileURLToPath(new URL('../../../../apps/cloudflare/codex-model-catalog.terra.json', import.meta.url)),
+    '--slurpfile', 'launch', fileURLToPath(new URL('../../../../apps/cloudflare/codex-model-catalog.6.2.json', import.meta.url)),
     [
       mergeFilter,
       input.astraAllowed ? patchFilter : `${patchFilter} | ${standardFilter}`,

@@ -14,7 +14,7 @@ describe("private bounded usage diagnostics contract", () => {
         toolOutputUnit: "bytes_not_tokens", toolOutputScope: "latest_profile_per_top_turn" },
     };
     const turn = { ...totals, turnId: "turn_synthetic", occurredAt: report.generatedAt,
-      model: "gpt-6.1-sol", source: "automation-cron", toolOutputCoverage: "available" };
+      model: "gpt-6.2-sol", source: "automation-cron", toolOutputCoverage: "available" };
     for (const tool of [
       { kind: "command", label: "vault-cli automation" },
       { kind: "dynamic_tool", label: "t_automation" },

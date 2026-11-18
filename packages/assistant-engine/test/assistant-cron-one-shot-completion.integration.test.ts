@@ -42,7 +42,7 @@ const today = '2026-09-01T12:20:00.000Z'
 const tomorrow = '2026-09-02T12:20:00.000Z'
 const originalInstructions = 'Send the original reminder.'
 const editedInstructions = 'Send the newly confirmed reminder.'
-const target = createAssistantModelTarget({ provider: 'codex-cli', model: 'gpt-6.1-sol', reasoningEffort: 'medium',
+const target = createAssistantModelTarget({ provider: 'codex-cli', model: 'gpt-6.2-sol', reasoningEffort: 'medium',
   modelProvider: 'openai', approvalPolicy: 'never', sandbox: 'read-only' })
 if (!target) throw new Error('Expected test target')
 const executionContext = { hosted: { memberId: 'member_synthetic', userEnvKeys: [], defaultTarget: target,

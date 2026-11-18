@@ -18,7 +18,7 @@ import {
   HOSTED_ASSISTANT_PRODUCT_MODELS,
   HOSTED_ASSISTANT_REASONING_EFFORT_OVERRIDES,
   HOSTED_ASSISTANT_REASONING_EFFORTS,
-  HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
+  HOSTED_ASSISTANT_SOL_MODEL,
   HOSTED_ASSISTANT_DEFAULT_MODEL,
   isHostedAssistantProductModel,
   isHostedAssistantReasoningEffort,
@@ -352,12 +352,12 @@ describe("hosted runtime control contracts", () => {
   });
 
   it("normalizes hosted AI usage priced model aliases without accepting unpriced models", () => {
-    expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-6.1-sol")).toBe("gpt-6.1-sol");
-    expect(normalizeHostedAiUsageAllowancePricedModelId("openai/gpt-6.1-sol")).toBe("gpt-6.1-sol");
-    expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-6.1-sol-2026-07-08")).toBe("gpt-6.1-sol");
-    expect(normalizeHostedAiUsageAllowancePricedModelId("openai/gpt-6.1-sol-2026-07-08")).toBe("gpt-6.1-sol");
+    expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-6.2-sol")).toBe("gpt-6.2-sol");
+    expect(normalizeHostedAiUsageAllowancePricedModelId("openai/gpt-6.2-sol")).toBe("gpt-6.2-sol");
+    expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-6.2-sol-2026-07-08")).toBe("gpt-6.2-sol");
+    expect(normalizeHostedAiUsageAllowancePricedModelId("openai/gpt-6.2-sol-2026-07-08")).toBe("gpt-6.2-sol");
     expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-5.6-sol")).toBeNull();
-    expect(normalizeHostedAiUsageAllowancePricedModelId("openai/gpt-6.1-sol-2026-07-08")).toBe("gpt-6.1-sol");
+    expect(normalizeHostedAiUsageAllowancePricedModelId("openai/gpt-6-sol-2026-07-08")).toBeNull();
     expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-5.6-luna-2026-07-08")).toBe("gpt-5.6-luna");
     expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-5.5")).toBeNull();
     expect(normalizeHostedAiUsageAllowancePricedModelId("gpt-sol")).toBeNull();
@@ -371,31 +371,29 @@ describe("hosted runtime control contracts", () => {
   it("parses the hosted assistant product models and nullable default override", () => {
     expect(HOSTED_ASSISTANT_PRODUCT_MODELS).toEqual([
       "gpt-6.1-terra",
-      "gpt-6.1-sol",
-      "gpt-6-sol",
+      "gpt-6.2-sol",
       "gpt-6-luna",
       HOSTED_ASSISTANT_LUNA_MODEL,
-      "gpt-6-astra",
+      "gpt-6.2-astra",
     ]);
     expect(HOSTED_ASSISTANT_MODEL_OVERRIDES).toEqual([
       "gpt-6.1-terra",
-      "gpt-6.1-sol",
-      "gpt-6-sol",
+      "gpt-6.2-sol",
       "gpt-6-luna",
       HOSTED_ASSISTANT_LUNA_MODEL,
-      "gpt-6-astra",
+      "gpt-6.2-astra",
     ]);
     expect(isHostedAssistantProductModel(HOSTED_ASSISTANT_LUNA_MODEL)).toBe(true);
     expect(isHostedAssistantProductModel(HOSTED_ASSISTANT_DEFAULT_MODEL)).toBe(true);
-    expect(isHostedAssistantProductModel(HOSTED_ASSISTANT_GPT_61_SOL_MODEL)).toBe(true);
+    expect(isHostedAssistantProductModel(HOSTED_ASSISTANT_SOL_MODEL)).toBe(true);
     expect(isHostedAssistantProductModel("gpt-5.5")).toBe(false);
     expect(parseHostedAssistantModelOverride(HOSTED_ASSISTANT_LUNA_MODEL))
       .toBe(HOSTED_ASSISTANT_LUNA_MODEL);
-    expect(parseHostedAssistantModelOverride(HOSTED_ASSISTANT_GPT_61_SOL_MODEL))
-      .toBe(HOSTED_ASSISTANT_GPT_61_SOL_MODEL);
+    expect(parseHostedAssistantModelOverride(HOSTED_ASSISTANT_SOL_MODEL))
+      .toBe(HOSTED_ASSISTANT_SOL_MODEL);
     expect(parseHostedAssistantModelOverride(HOSTED_ASSISTANT_DEFAULT_MODEL))
       .toBe(HOSTED_ASSISTANT_DEFAULT_MODEL);
-    expect(parseHostedAssistantModelOverride(" gpt-6.1-sol ")).toBeNull();
+    expect(parseHostedAssistantModelOverride(" gpt-6.2-sol ")).toBeNull();
   });
 
   it("parses the common hosted reasoning efforts and nullable low default", () => {
@@ -631,44 +629,30 @@ describe("hosted runtime control contracts", () => {
       .toBe(model);
     expect(normalizeHostedAiUsageAllowanceOpenAiImageModelId(`${model}-2026-09-08`))
       .toBe(model);
-    expect(normalizeHostedAiUsageAllowanceOpenAiImageModelId("gpt-6.1-sol"))
+    expect(normalizeHostedAiUsageAllowanceOpenAiImageModelId("gpt-6.2-sol"))
       .toBeNull();
   });
 
   it.each(["priority", "fast"])("keeps member pricing standard for the platform-funded %s boost", (serviceTier) => {
     expect(resolveHostedAiUsageTokenPricingBasis({
-      model: "gpt-6-sol", providerName: "hosted-openai", serviceTier,
+      model: "gpt-6.2-sol", providerName: "hosted-openai", serviceTier,
     })).toBe("standard");
   });
 
   it("uses OpenAI flex token pricing only for supported OpenAI flex models", () => {
-    expect(resolveHostedAiUsageTokenPricingBasis({
-      model: "gpt-6.1-sol",
-      providerName: "hosted-openai",
-      serviceTier: "flex",
-    })).toBe("openai-flex");
-    expect(resolveHostedAiUsageTokenPricingBasis({
-      model: "openai/gpt-6.1-sol-2026-07-08",
-      providerName: "openai",
-      serviceTier: "flex",
-    })).toBe("openai-flex");
-    expect(resolveHostedAiUsageTokenPricingBasis({
-      model: "gpt-6.1-sol",
-      providerName: "hosted-openai",
-      serviceTier: "flex",
-    })).toBe("openai-flex");
-    expect(resolveHostedAiUsageTokenPricingBasis({
-      model: "openai/gpt-6.1-sol-2026-07-08",
-      providerName: "openai",
-      serviceTier: "flex",
-    })).toBe("openai-flex");
+    for (const model of ["gpt-6.2-sol", "gpt-6.2-astra"]) {
+      expect(resolveHostedAiUsageTokenPricingBasis({ model, providerName: "hosted-openai", serviceTier: "flex" })).toBe("openai-flex");
+    }
+    for (const model of ["gpt-6.1-terra", "openai/gpt-6.1-sol-2026-09-29"]) {
+      expect(resolveHostedAiUsageTokenPricingBasis({ model, providerName: "hosted-openai", serviceTier: "flex" })).toBe("openai-flex");
+    }
     expect(resolveHostedAiUsageTokenPricingBasis({
       model: "openai/gpt-5.6-luna-2026-07-08",
       providerName: "hosted-openai",
       serviceTier: "flex",
     })).toBe("openai-flex");
     expect(resolveHostedAiUsageTokenPricingBasis({
-      model: "gpt-6.1-sol",
+      model: "gpt-6.2-sol",
       providerName: "openai-local-test",
       serviceTier: "flex",
     })).toBe("standard");
@@ -683,7 +667,7 @@ describe("hosted runtime control contracts", () => {
       serviceTier: "flex",
     })).toBe("standard");
     expect(resolveHostedAiUsageTokenPricingBasis({
-      model: "gpt-6.1-sol",
+      model: "gpt-6.2-sol",
       providerName: "hosted-openai",
       serviceTier: null,
     })).toBe("standard");
@@ -2404,13 +2388,13 @@ describe("hosted runtime control contracts", () => {
     expect(parseHostedWorkspaceReadResponse({
       fetchedAt: "2026-04-26T00:00:02.000Z",
       hostedAssistantSubagentModelOverridesAllowed: true,
-      hostedAssistantModelOverride: HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
+      hostedAssistantModelOverride: HOSTED_ASSISTANT_SOL_MODEL,
       hostedAssistantReasoningEffortOverride: "high",
       workspace: null,
     })).toEqual({
       fetchedAt: "2026-04-26T00:00:02.000Z",
       hostedAssistantSubagentModelOverridesAllowed: true,
-      hostedAssistantModelOverride: HOSTED_ASSISTANT_GPT_61_SOL_MODEL,
+      hostedAssistantModelOverride: HOSTED_ASSISTANT_SOL_MODEL,
       hostedAssistantReasoningEffortOverride: "high",
       workspace: null,
     });
@@ -2449,7 +2433,7 @@ describe("hosted runtime control contracts", () => {
     for (const invalidOverride of [
       null,
       "gpt-5.5",
-      " gpt-6.1-sol ",
+      " gpt-6.2-sol ",
       56,
     ]) {
       expect(parseHostedWorkspaceReadResponse({

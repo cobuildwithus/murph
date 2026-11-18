@@ -37,7 +37,7 @@ describe('automation definition inspection', () => {
   ] as const)('preserves bounded inspection: %s', async (_label, instructions, success) => {
     const request = { action: 'inspect' as const, lookup: 'automation_synthetic' }
     const definition = {
-      assistantTargetOverride: { model: 'gpt-6.1-sol', reasoningEffort: 'medium' } as const,
+      assistantTargetOverride: { model: 'gpt-6.2-sol', reasoningEffort: 'medium' } as const,
       managed: false,
       instructions,
       title: 'Afternoon movement',
@@ -90,7 +90,7 @@ describe('host-managed full inspection', () => {
     const result = await executeAutomationDynamicTool({
       automationTool: { async request() { return {
         action: 'inspect', automationId: 'automation_synthetic', managed, contextReferences: [],
-        assistantTargetOverride: { model: 'gpt-6.1-sol' }, instructions, title: 'Synthetic routine',
+        assistantTargetOverride: { model: 'gpt-6.2-sol' }, instructions, title: 'Synthetic routine',
         executionInspection, effectiveTimeZone: 'UTC', lookupId: 'synthetic',
         occurrenceProjection: { status: 'resolved', nextOccurrenceAt: null }, routeBinding: 'preserved',
         schedule: { kind: 'dailyLocal', localTime: '08:00' }, status: 'active', updatedAt: '2030-01-15T10:01:00.000Z',

@@ -31,7 +31,8 @@ jobs:
   recap-video-runner-image:
     name: Recap video in the runner image
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # The exact runner base may need a cold native Codex build before the encode.
+    timeout-minutes: 120
     steps:
       - name: Reject draft pull request proof
         if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft }}
@@ -56,12 +57,14 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Prepare runner base image
+        timeout-minutes: 90
         run: pnpm --dir apps/cloudflare runner:docker:base
 
       # The ordinary test lanes have no ffmpeg, so they check layout, timing and fonts and skip the encode.
       # This runs the whole suite where the video will be made: the hosted runner's own image, with its
       # Debian ffmpeg and no fonts of its own, at the runner's two CPUs and six gigabytes, with no network.
       - name: Draw and encode a recap video in the runner image
+        timeout-minutes: 30
         run: |
           image=$(node --input-type=module -e 'import { hostedLocalRunnerBaseImageTag } from "./apps/cloudflare/scripts/runner-base-image-contract.ts"; process.stdout.write(hostedLocalRunnerBaseImageTag)')
           docker run --rm --network none --cpus 2 --memory 6g \

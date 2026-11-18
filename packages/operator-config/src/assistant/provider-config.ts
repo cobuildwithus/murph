@@ -1,3 +1,4 @@
+import { normalizeStoredAssistantModel } from '@murphai/contracts'
 import {
   assistantProviderSessionOptionsSchema,
   type AssistantApprovalPolicy,
@@ -91,8 +92,10 @@ export function normalizeAssistantProviderConfig(
     )
   }
 
-  if (normalizeNullableString(providerConfigInput?.model)?.toLowerCase() === 'gpt-5.6-sol') {
-    throw new VaultCliError('invalid_option', 'GPT-5.6 Sol is retired; use gpt-6.1-sol.')
+  const requestedModel = normalizeNullableString(providerConfigInput?.model)?.toLowerCase() ?? null
+  const currentModel = normalizeStoredAssistantModel(requestedModel)
+  if (currentModel !== requestedModel) {
+    throw new VaultCliError('invalid_option', `Model ${requestedModel} is retired; use ${currentModel}.`)
   }
 
   return {

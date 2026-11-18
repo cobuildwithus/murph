@@ -32,7 +32,7 @@ import {
 const runNonce = Date.now();
 const userId = `member_local_analyze_video_${runNonce}`;
 const chatId = `chat_local_analyze_video_${runNonce}`;
-const assistantModel = "gpt-6.1-sol";
+const assistantModel = "gpt-6.2-sol";
 const linqApiToken = "linq-local-analyze-video-token";
 const linqWebhookSecret = "linq-local-analyze-video-webhook-secret";
 const successQuestion = "What shape and color is centered in this video?";

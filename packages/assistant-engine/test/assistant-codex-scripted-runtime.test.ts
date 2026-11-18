@@ -593,7 +593,7 @@ describe('real codex app-server with scripted provider', () => {
   it('preserves native Astra async-question text and additive app-server fields', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
-    const scenario = await prepareScriptedTurnScenario({ model: 'gpt-6-astra' })
+    const scenario = await prepareScriptedTurnScenario({ model: 'gpt-6.2-astra' })
     const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
       astraAllowed: true,
       codexCommand: scenario.turnInput.codexCommand,
@@ -2286,7 +2286,7 @@ text(JSON.stringify(result));
     ).toContain('"status":"missing"')
   })
 
-  it.each(['gpt-5.6-luna', 'gpt-6.1-sol'])(
+  it.each(['gpt-5.6-luna', 'gpt-6.2-sol'])(
     'preserves original width for %s and bounds gallery widths through the real app server',
     { timeout: TURN_TIMEOUT_MS },
     async (model) => {
@@ -2937,7 +2937,7 @@ text(result.output);
   it.each([
     ['direct', 'gpt-5.6-luna', false],
     ['group', 'gpt-5.6-luna', false],
-    ['direct', 'gpt-6-astra', true],
+    ['direct', 'gpt-6.2-astra', true],
   ] as const)(
     'carries a delayed V2 %s %s child completion into a later root turn without waiting',
     { timeout: TURN_TIMEOUT_MS },
@@ -3043,7 +3043,7 @@ text(result.output);
   it('keeps fresh Sol child requests free of parent history and member snapshot while accounting native tool work', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
-    const scenario = await prepareScriptedTurnScenario({ multiAgentV2: true, model: 'gpt-6-sol' })
+    const scenario = await prepareScriptedTurnScenario({ multiAgentV2: true, model: 'gpt-6.1-terra' })
     const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
       codexCommand: scenario.turnInput.codexCommand,
       directory: scenario.turnInput.codexHome,
@@ -3063,7 +3063,7 @@ text(result.output);
       {
         requestIncludes: [historySentinel],
         functionCall: { namespace: 'collaboration', name: 'spawn_agent', arguments: {
-          task_name: 'fresh_parcel', fork_turns: 'none', model: 'gpt-6.1-sol', reasoning_effort: 'medium',
+          task_name: 'fresh_parcel', fork_turns: 'none', model: 'gpt-6.2-sol', reasoning_effort: 'medium',
           message: 'Direct private task, read-only within this synthetic workspace. Read parcel.txt with the native shell, report its exact contents, then stop. Do not read other files, write, send messages, or use external tools.',
         } },
       },
@@ -3110,7 +3110,7 @@ text(result.output);
     expect(requests.some((request) => request.functionCallOutputs?.some((output) =>
       output.includes('"timed_out":true'),
     ))).toBe(true)
-    const children = requests.filter((request) => request.model === 'gpt-6.1-sol')
+    const children = requests.filter((request) => request.model === 'gpt-6.2-sol')
     expect(children).toHaveLength(2)
     for (const request of children) {
       const input = request.completeProviderInput?.json
@@ -3132,12 +3132,12 @@ text(result.output);
     expect(children[1]?.completeProviderInput?.json).toContain(childResult)
     expect(childUsages).toHaveLength(1)
     expect(childUsages[0]).toMatchObject({ providerRequestOutcome: 'succeeded', usage: {
-      requestedModel: 'gpt-6.1-sol', servedModel: 'gpt-6.1-sol',
+      requestedModel: 'gpt-6.2-sol', servedModel: 'gpt-6.2-sol',
       usageExtractionSourcePath: 'subagent.turn.tokenUsage.total.delta',
     } })
   })
 
-  it.each(['gpt-5.5', 'gpt-5.6-sol', 'gpt-6-astra'])('rejects an unavailable child model %s before a provider request', {
+  it.each(['gpt-5.5', 'gpt-5.6-sol', 'gpt-6.2-astra'])('rejects an unavailable child model %s before a provider request', {
     timeout: TURN_TIMEOUT_MS,
   }, async (model) => {
     const scenario = await prepareScriptedTurnScenario({
@@ -4002,7 +4002,7 @@ text(result.output);
     })
   })
 
-  it('uses exact GPT-6 Sol mixed mode to discover a condition reminder schema before one save', {
+  it('uses exact GPT-6.2 Sol mixed mode to discover a condition reminder schema before one save', {
     timeout: TURN_TIMEOUT_MS,
   }, async () => {
     expect(MURPH_AUTOMATION_TOOL.deferLoading).toBe(true)
@@ -4083,7 +4083,7 @@ text(result.output);
 
     const result = await executeCodexAppServerTurn({
       ...scenario.turnInput,
-      model: 'gpt-6-sol',
+      model: 'gpt-6.2-sol',
       dynamicTools: [MURPH_AUTOMATION_TOOL, ...MURPH_GROUP_FAMILY_TOOLS],
       env: {
         ...scenario.turnInput.env,
@@ -4135,7 +4135,7 @@ text(result.output);
 
     const summaries = scenario.stub.requestSummariesSinceBaseline()
     expect(summaries[0]).toMatchObject({
-      model: 'gpt-6-sol',
+      model: 'gpt-6.2-sol',
       providerRequestDiagnostics: {
         includesAllTools: true,
         includesAutomation: false,
@@ -8346,12 +8346,12 @@ text(JSON.stringify(result));
     const assistantInputId = `ain_${'g'.repeat(32)}`
     const configurationRequests: unknown[] = []
     const groupSnapshot = (
-      model: 'gpt-6.1-sol' | 'gpt-6-sol',
+      model: 'gpt-6-luna' | 'gpt-6.2-sol',
     ): HostedRuntimeAssistantConfigurationSnapshot => ({
       availableModels: [
         'gpt-5.6-luna',
-        'gpt-6-sol',
-        'gpt-6.1-sol',
+        'gpt-6-luna',
+        'gpt-6.2-sol',
       ],
       availableReasoningEfforts: ['low'],
       configurationAvailable: true,
@@ -8360,8 +8360,8 @@ text(JSON.stringify(result));
       reasoningEffort: 'low' as const,
       solAvailable: true,
     })
-    const currentSnapshot = groupSnapshot('gpt-6.1-sol')
-    const updatedSnapshot = groupSnapshot('gpt-6-sol')
+    const currentSnapshot = groupSnapshot('gpt-6-luna')
+    const updatedSnapshot = groupSnapshot('gpt-6.2-sol')
     const groupDeveloperInstructions = buildAssistantSystemPrompt({
       assistantCliContract: null,
       assistantStyleSettingsAvailable: true,
@@ -8383,7 +8383,7 @@ text(JSON.stringify(result));
           input: `
 const result = await tools.murph__assistant_configuration({
   action: "update",
-  model: "gpt-6-sol",
+  model: "gpt-6.2-sol",
 });
 text(JSON.stringify(result));
 `,
@@ -8416,7 +8416,7 @@ text(JSON.stringify(result));
         },
         computerToolsAvailable: false,
         currentAssistantTarget: () => ({
-          model: 'gpt-6.1-sol',
+          model: currentSnapshot.model,
           provider: 'openai',
           reasoningEffort: 'low',
         }),
@@ -8435,28 +8435,28 @@ text(JSON.stringify(result));
         },
         vaultFileSendAvailable: false,
       },
-      model: 'gpt-6.1-sol',
+      model: currentSnapshot.model,
       prompt:
-        'Use the current group room request to switch this room to GPT-6 Sol, then reply exactly GROUP_MODEL_SWITCH_OK.',
+        'Use the current group room request to switch this room to GPT-6.2 Sol, then reply exactly GROUP_MODEL_SWITCH_OK.',
     })
 
     expect(configurationRequests).toEqual([
       {
         action: 'update',
         assistantInputId,
-        model: 'gpt-6-sol',
+        model: 'gpt-6.2-sol',
       },
     ])
     const summaries = scenario.stub.requestSummariesSinceBaseline()
-    expect(summaries[0]?.model).toBe('gpt-6.1-sol')
-    expect(summaries[1]?.model).toBe('gpt-6.1-sol')
+    expect(summaries[0]?.model).toBe(currentSnapshot.model)
+    expect(summaries[1]?.model).toBe(currentSnapshot.model)
     expect(summaries[0]?.providerRequestDiagnostics).toMatchObject({
       includesAllTools: true,
     })
     const groupConfigurationOutput =
       summaries[1]?.customToolCallOutputs?.join('\n') ?? ''
-    expect(groupConfigurationOutput).toContain('gpt-6.1-sol')
-    expect(groupConfigurationOutput).toContain('gpt-6-sol')
+    expect(groupConfigurationOutput).toContain('gpt-6-luna')
+    expect(groupConfigurationOutput).toContain('gpt-6.2-sol')
     expect(groupConfigurationOutput).toContain('next_turn')
     expect(groupConfigurationOutput).toContain('updated')
     expect(result.finalMessage).toBe('GROUP_MODEL_SWITCH_OK')
@@ -8472,20 +8472,21 @@ text(JSON.stringify(result));
     })
 
     expect(scenario.stub.requestSummariesSinceBaseline()[2]?.model).toBe(
-      'gpt-6-sol',
+      'gpt-6.2-sol',
     )
     expect(nextTurn.finalMessage).toBe('GROUP_MODEL_NEXT_TURN_OK')
     expect(nextTurn.sessionId).toBe(result.sessionId)
     expect(scenario.stub.requestCountSinceBaseline()).toBe(3)
   })
 
-  it('sends flex service tier through real Codex with the patched model catalog', {
+  it.each(['gpt-6.2-sol', 'gpt-6.2-astra'])('sends flex service tier for %s through real Codex with the patched model catalog', {
     timeout: TURN_TIMEOUT_MS,
-  }, async () => {
-    const scenario = await prepareScriptedTurnScenario()
+  }, async (model) => {
+    const scenario = await prepareScriptedTurnScenario({ model })
     const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
       codexCommand: scenario.turnInput.codexCommand,
       directory: scenario.turnInput.codexHome,
+      astraAllowed: model === 'gpt-6.2-astra',
     })
     scenario.stub.queue({ text: 'SCRIPTED_FLEX_OK' })
 
@@ -8502,7 +8503,7 @@ text(JSON.stringify(result));
     expect(result.finalMessage).toBe('SCRIPTED_FLEX_OK')
     expect(scenario.stub.requestSummariesSinceBaseline()).toEqual([
       {
-        model: SCRIPTED_MODEL,
+        model: scenario.turnInput.model,
         serviceTier: 'flex',
       },
     ])
@@ -8750,7 +8751,7 @@ text(JSON.stringify(result));
     })
     expect(compacted).toMatchObject({
       kind: 'compacted',
-      model: SCRIPTED_MODEL,
+      model: scenario.turnInput.model,
       serviceTier: null,
       threadId: seeded.threadId,
     })

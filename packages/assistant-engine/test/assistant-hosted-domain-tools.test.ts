@@ -1574,7 +1574,7 @@ describe('hosted domain dynamic tools', () => {
     const response = {
       action: 'inspect' as const, view: 'model_review' as const,
       automationId: 'automation_synthetic', lookupId: 'synthetic', managed,
-      assistantTargetOverride: { model: 'gpt-6.1-sol' as const, reasoningEffort: 'medium' as const },
+      assistantTargetOverride: { model: 'gpt-6.2-sol' as const, reasoningEffort: 'medium' as const },
       contextReferences: [], title: 'Synthetic review', routeBinding: 'preserved' as const,
       schedule: { kind: 'dailyLocal' as const, localTime: '09:00', timeZone: 'UTC' },
       status: 'active' as const, updatedAt: '2026-10-01T00:00:00.000Z',

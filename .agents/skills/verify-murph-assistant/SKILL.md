@@ -35,7 +35,7 @@ the result.
    pnpm test:assistant:live -- --test "<unique test-name pattern>"
    ```
 
-   It defaults to `gpt-6.1-sol` on the authenticated local ChatGPT/Codex
+   It defaults to `gpt-6.2-sol` on the authenticated local ChatGPT/Codex
    subscription. Pass `--model <model>` only when the product target differs,
    and `--auth provider` only for a configured provider-key lane. A
    subscription run uses the developer's own Codex home and global

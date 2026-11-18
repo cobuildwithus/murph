@@ -525,7 +525,8 @@ jobs:
     name: Release hosted Web browser smoke (ubuntu)
     if: ${{ !cancelled() }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # A new Codex pin can require a cold native build before the browser smoke.
+    timeout-minutes: 120
     services:
       postgres:
         image: postgres:17
@@ -607,8 +608,14 @@ jobs:
           pnpm --dir packages/hosted-execution build
           pnpm --dir apps/web build
 
+      - name: Prepare the exact native runner base
+        if: ${{ steps.reach.outputs.apps == 'true' }}
+        timeout-minutes: 90
+        run: pnpm --dir apps/cloudflare runner:docker:base
+
       - name: Run the production admission browser smoke
         if: ${{ steps.reach.outputs.apps == 'true' }}
+        timeout-minutes: 30
         run: pnpm hosted-local e2e hosted-web-browser-smoke
 
   production-runner-bundle-budget-linux:

@@ -56,8 +56,8 @@ stateDiagram-v2
 | 1: native gameplay | setup, invite, daily home loop, missed completion, Prove it, recap, ticket, rematch | 124 selected UI tests on iOS 27.2 Pro Max: 121 passed, 3 failures investigated below. |
 | 1: canonical rules | change agreement/retry, negotiation, incomplete/restored day, rematch | 60 focused tests passed, including real isolated PostgreSQL. |
 | 1: assistant boundary | game tools and chat bootstrap | 59 deterministic tests passed. |
-| 1: real assistant | prize proposal, contextual schedule approval, replacing counterproposal | Three GPT-6.1 Sol subscription journeys passed; effects and prose reviewed. |
-| 1: composed self-play | both seats post; Maya changes prize; Sam agrees; locked-task refusal; incomplete then restored; settlement | Passed with real GPT-6.1 Sol, production prompts and canonical PostgreSQL operations; four permitted edits applied exactly once. Both seats’ seven Home snapshots decode and project correctly in native tests. |
+| 1: real assistant | prize proposal, contextual schedule approval, replacing counterproposal | Three GPT-6.2 Sol subscription journeys passed; effects and prose reviewed. |
+| 1: composed self-play | both seats post; Maya changes prize; Sam agrees; locked-task refusal; incomplete then restored; settlement | Passed with real GPT-6.2 Sol, production prompts and canonical PostgreSQL operations; four permitted edits applied exactly once. Both seats’ seven Home snapshots decode and project correctly in native tests. |
 | 1: asynchronous native state | post commits, newer Home arrives, older post response returns | Confirmed delayed post and reply snapshot regressions. Added red/green tests for opponent posts, incomplete correction, deletion, retake and overlapping Home reads; fixed at LiveGameService. |
 | 2: visual/native recovery | daily and end states, agreement edits, storage failure, consent, blocking, compact actions | 63 screenshot scenarios passed on Pro Max; 23 UI tests passed on SE, including all five artifact storage failures and 21 bottom-action layouts. Hands-on simulator setup and backtracking passed. |
 | 2: groups | canonical group lifecycle, membership, score and challenge boundaries | 166 isolated PostgreSQL tests passed; no claim of native group UI. |
@@ -93,7 +93,7 @@ MURPH_TEST_POSTGRES_CONCURRENCY=1 pnpm exec vitest run \
 
 Set `DATABASE_URL` to that local test database. Adding
 `MURPH_SELFPLAY_REAL_MODEL=1` starts the focused real-Codex journey through the
-normal local subscription runner, fixed to the requested `gpt-6.1-sol` model.
+normal local subscription runner, fixed to the requested `gpt-6.2-sol` model.
 `MURPH_SELFPLAY_SNAPSHOTS` optionally names a local output directory for the
 synthetic Home responses at each transition, for native decoder/projection proof.
 Without a bridge, the composed assistant case skips in ordinary live-suite runs.

@@ -167,7 +167,7 @@ pnpm test:assistant:live -- --test "<unique test-name pattern>"
 ```
 
 The name pattern is required so the run cannot fan out across the paid suite.
-The default is `gpt-6.1-sol` through the authenticated local ChatGPT/Codex
+The default is `gpt-6.2-sol` through the authenticated local ChatGPT/Codex
 subscription. A subscription run keeps personal configuration and global
 instructions, so report it as developer-local evidence. `--auth provider` uses
 the isolated provider-key route, which is the canonical release evidence. Do

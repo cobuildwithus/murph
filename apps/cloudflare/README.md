@@ -1398,19 +1398,13 @@ image recipe; no manual binary installation or separate release service is neede
 
 ### Astra model catalog
 
-The native runner image has a default GPT-6.1 Sol, GPT-6 Sol/Luna, and GPT-5.6 Luna catalog and an expanded
-`.astra` catalog with `gpt-6-astra` and OpenAI Flex support. The runtime chooses
-the latter only from Web's explicit Max/OpenAI workspace authorization. Missing
-authority, Edge, and group runtimes retain the default catalog and its
-existing delegation choices. The
-pinned Codex 0.167.1 release supplies every entry natively; the image validates
-its bundled catalog without a separate launch supplement. Murph supplies its own base
-instructions for each turn.
-The Astra context window remains at most 272,000 tokens, verified while building the
-image. This bound lets allowance accounting price cumulative Codex turn and
-subagent usage without mistaking multiple requests for one long-context request.
-Changing this bound requires request-level long-context metering first. Astra
-selection remains owned by the Web Max-plan eligibility check.
+The default runner catalog includes Terra, Sol and the supported Luna models.
+Web selects the expanded `.astra` catalog for an eligible managed OpenAI
+workspace. Codex 0.169.0 bundles the Terra and Luna entries. The runner
+merges the pinned OpenAI launch entries for GPT-6.2 Sol and Astra, enables
+mixed Code Mode and Flex for all models, and validates both catalogs at build time.
+Hosted Sol and Astra keep their 272,000-token context limit for turn-level
+usage accounting.
 
 ## Workspace restore benchmark
 

@@ -177,6 +177,17 @@ it.each(["fetch", "body"])("bounds a stalled %s, including fetch implementations
 });
 
 
+it.each([
+  { pricedAssistantModels: undefined },
+  { pricedAssistantModels: ["gpt-6.2-sol"] },
+  { pricedAssistantModels: ["gpt-6.2-astra"] },
+])("blocks activation without both 6.2 price witnesses (%j)", async ({ pricedAssistantModels }) => {
+  const fetchImpl = vi.fn<typeof fetch>(async input =>
+    Response.json({ ...syntheticHostedWebProtocolAdmission(nonceFrom(input)), pricedAssistantModels }, { headers }));
+  await expect(assertHostedWebProtocolAdmission(source, { fetchImpl, sleep: noSleep })).rejects.toThrow("assistant_usage_pricing");
+  expect(fetchImpl).toHaveBeenCalledOnce();
+});
+
 it("blocks new milestone producers before activation against an older Web reader", async () => {
   const fetchImpl = vi.fn<typeof fetch>(async input => {
     const { latencyMilestoneBatchMaxEvents: _unsupported, ...legacy } =
