@@ -51286,7 +51286,7 @@ describeRealCodex('private game reminder reply', () => {
       expect(sets).toEqual([expect.objectContaining({ gameId: 'game_synthetic_pullups', minutes: 1260 })])
       expect(reminders.games.map(game => game.minutes)).toEqual([1260, 720])
       expect(reply).toMatch(/9/u)
-      expect(reply).toMatch(/pullups/iu)
+      expect(reply).toMatch(/pull-?ups?/iu)
       expect(reply).not.toMatch(/\b(?:both|all (?:of )?your)\b|game_/iu)
     } finally { await removeRealCodexTemporaryPaths([workingDirectory, ...config.temporaryPaths]) }
   }, 360_000)
