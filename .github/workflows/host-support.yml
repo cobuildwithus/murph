@@ -188,6 +188,10 @@ jobs:
       - name: Clean workspace build
         run: pnpm build:workspace:clean
 
+      - name: Verify hosted reserved web schema on the provider wire
+        timeout-minutes: 3
+        run: pnpm --dir packages/assistant-engine test test/hosted-reserved-web-schema.test.ts
+
       # Restore only on trusted main pushes, after the cold build, so PR code
       # cannot seed later required checks and the clean build stays cache-free.
       - name: Restore release typecheck build info
