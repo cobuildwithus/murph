@@ -1900,7 +1900,7 @@ Single-upload recovery requires one live version serving 100%, a distinct named 
 with the exact tag and complete live secret name/type inventory, and the raw
 latest pair inactive/live. Its creation time must be strictly after the current
 deployment's creation time, proving it has never been activated; missing timestamps
-or a later rollback fail closed. The pair is checked before image/lifecycle preparation
+fail closed. Previously deployed versions require the staged-rollback proof below. The pair is checked before image/lifecycle preparation
 and again immediately before upload. The original live metadata still owns all
 runner preparation and final expected-secret calculations. Only the fresh upload's
 inheritance source changes; its history pair must be fresh/inactive. Full runner
@@ -1908,6 +1908,14 @@ rollouts then use the ordinary fresh promotion/stage pair, not the recovery/live
 pair. All native PATCH, inventory, live identity, smoke and activation gates
 remain required.
 Only the newly verified version can appear in the deployment receipt or activation.
+
+For an operator rollback from rejected in-place compatibility stages, use the
+same explicit IDs and tags. The protected publisher verifies the full 100%
+deployment sequence from the stable version through the named stages and back
+to stable. All stages must describe the same rejected candidate and the same
+active and previous releases. Before activation, Cloudflare must rebind every
+retained, unsynchronized secret from the exact live version. Synchronized values
+come from the protected payload. A changed history or failed patch stops activation.
 
 The operator must establish that the named upload is their trusted failed attempt.
 Matching names/types cannot prove opaque secret values are equal, and no secret

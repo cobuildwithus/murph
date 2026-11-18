@@ -29,7 +29,7 @@ vi.mock("../scripts/deploy-artifacts.js", async () => ({
 const imageMocks = vi.hoisted(() => ({ prepareHostedContainerDeployImage: vi.fn() }));
 vi.mock("../scripts/prepare-container-deploy-image.ts", () => imageMocks);
 const releaseMocks = vi.hoisted(() => ({
-  stageHostedRunnerRelease: vi.fn(), readWorkerVersion: vi.fn(), readRecentWorkerVersionIds: vi.fn(), removeRetiredInferenceSecrets: vi.fn(), assertDrained: vi.fn(), retireApplication: vi.fn(), assertCapacity: vi.fn(), runSmokeHostedDeploy: vi.fn(), admitApplication: vi.fn(), assertApplicationReady: vi.fn(),
+  stageHostedRunnerRelease: vi.fn(), assertRollbackHistory: vi.fn(), readWorkerVersion: vi.fn(), readRecentWorkerVersionIds: vi.fn(), removeRetiredInferenceSecrets: vi.fn(), assertDrained: vi.fn(), retireApplication: vi.fn(), assertCapacity: vi.fn(), runSmokeHostedDeploy: vi.fn(), admitApplication: vi.fn(), assertApplicationReady: vi.fn(),
 }));
 vi.mock("../scripts/stage-runner-release.ts", async () => ({
   ...await vi.importActual<typeof import("../scripts/stage-runner-release.ts")>("../scripts/stage-runner-release.ts"),
@@ -386,6 +386,43 @@ describe("runDeployWorkerVersionCli", () => {
     expect(releaseMocks.readWorkerVersion.mock.calls.map(([, id]) => id))
       .toEqual(["version-direct", "uploaded-version-1", "uploaded-version-2"]);
   });
+
+  it.each(["verified", "history differs", "active differs", "pending differs", "binding patch failed"])(
+    "requires exact staged rollback history and rebinds opaque live secrets: %s", async scenario => {
+      configureRecoveryUpload();
+      const active = { bank: "primary", id: "stable", releaseSha: "1".repeat(40), bundleFingerprint: "a".repeat(64),
+        sourceFingerprint: "b".repeat(64), executionIdentity: "c".repeat(64), image: `registry.example/a@sha256:${"d".repeat(64)}` };
+      const candidate = { ...active, releaseSha: "2".repeat(40), image: `registry.example/b@sha256:${"e".repeat(64)}` };
+      const readVersion = releaseMocks.readWorkerVersion.getMockImplementation()!;
+      releaseMocks.readWorkerVersion.mockImplementation(async (worker, id) => {
+        const value = await readVersion(worker, id);
+        if (id !== "version-direct" && id !== recoveryVersionId) return value;
+        const rejected = id === recoveryVersionId;
+        const record = {
+          active: rejected && scenario === "active differs" ? { ...active, executionIdentity: "8".repeat(64) } : active,
+          candidate: rejected && scenario !== "pending differs" ? candidate : null, previous: null,
+        };
+        return { ...value, metadata: { created_on: "2025-12-31T12:00:00Z" }, resources: {
+          bindings: [...value.resources.bindings, { type: "plain_text", name: "HOSTED_EXECUTION_RUNNER_DEPLOYMENT", text: JSON.stringify(record) }],
+        } };
+      });
+      releaseMocks.assertRollbackHistory.mockReset();
+      if (scenario === "history differs") releaseMocks.assertRollbackHistory.mockRejectedValue(new Error("rollback history changed"));
+      if (scenario === "binding patch failed") releaseMocks.removeRetiredInferenceSecrets.mockRejectedValue(new Error("cannot inherit from live"));
+      const run = syntheticDeployment("worker-only", recoveryEnv, true);
+      if (scenario !== "verified") {
+        await expect(run).rejects.toThrow(/rollback history|matching rejected stages|inherit from live/);
+        expect(wranglerMocks.runWranglerLogged.mock.calls.filter(([args]) => args[0] === "versions")).toHaveLength(0);
+        return;
+      }
+      await run;
+      expect(releaseMocks.assertRollbackHistory).toHaveBeenCalledExactlyOnceWith("hosted-worker", "version-direct", [recoveryVersionId]);
+      expect(releaseMocks.removeRetiredInferenceSecrets).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+        retainedSecrets: { CRYPTO_KEY: { type: "inherit", version_id: "version-direct" }, OPTIONAL_SECRET: { type: "inherit", version_id: "version-direct" } },
+      }));
+      expect(releaseMocks.stageHostedRunnerRelease).toHaveBeenCalledWith(expect.objectContaining({ requireStableServingImage: true }));
+      expect(syntheticLiveVersion()).toBe("patched-version-1");
+    });
 
   it("refuses recovery without a sole authoritative live version at 100%", async () => {
     configureRecoveryUpload();

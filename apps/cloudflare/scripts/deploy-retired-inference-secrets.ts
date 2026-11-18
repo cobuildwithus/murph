@@ -62,6 +62,16 @@ export async function readExpectedWorkerSecrets(input: {
   return expectedSecrets;
 }
 
+/** A rollback must inherit opaque retained values from the version serving traffic.
+ * Explicit synchronized values are already on the freshly uploaded version. */
+export async function readRollbackSecretSources(currentVersion: unknown, currentVersionId: string, secretsFilePath: string) {
+  const synced = await readJson(secretsFilePath);
+  if (!isObjectRecord(synced)) throw invalid();
+  return Object.fromEntries([...readSecretInventory(currentVersion, currentVersionId).keys()]
+    .filter(name => !retiredSecrets.has(name) && !Object.hasOwn(synced, name))
+    .map(name => [name, { type: "inherit" as const, version_id: currentVersionId }]));
+}
+
 export function hasRetiredInferenceSecrets(version: unknown, versionId: string): boolean {
   const inventory = readSecretInventory(version, versionId);
   return [...retiredSecrets].some(name => inventory.has(name));
@@ -75,6 +85,12 @@ export function assertRecoveryWorkerVersion(input: {
   recoveryVersionId: string;
   recoveryVersionTag: string;
 }): void {
+  assertRecoveryWorkerInventory(input);
+  assertNeverDeployedRecovery(input);
+}
+
+export function assertRecoveryWorkerInventory(input: { currentVersion: unknown; currentVersionId: string;
+  recoveryVersion: unknown; recoveryVersionId: string; recoveryVersionTag: string }) {
   const current = readSecretInventory(input.currentVersion, input.currentVersionId);
   const recovery = readSecretInventory(input.recoveryVersion, input.recoveryVersionId);
   if (input.currentVersionId === input.recoveryVersionId || !input.recoveryVersionTag.trim()
@@ -85,9 +101,12 @@ export function assertRecoveryWorkerVersion(input: {
   if (current.size !== recovery.size || [...current].some(([name, type]) => recovery.get(name) !== type)) {
     throw new Error("Recovery Worker secret inventory differs from the current Worker secrets.");
   }
+}
+
+function assertNeverDeployedRecovery(input: { recoveryVersion: unknown; currentDeploymentCreatedOn: string }) {
   // A version newer than the latest deployment cannot have served traffic.
   // Merely being inactive also describes a previously activated rollback target.
-  const createdOn = isObjectRecord(input.recoveryVersion.metadata) ? input.recoveryVersion.metadata.created_on : undefined;
+  const createdOn = isObjectRecord(input.recoveryVersion) && isObjectRecord(input.recoveryVersion.metadata) ? input.recoveryVersion.metadata.created_on : undefined;
   const uploadedAt = typeof createdOn === "string" ? Date.parse(createdOn) : NaN;
   const deployedAt = Date.parse(input.currentDeploymentCreatedOn);
   if (!Number.isFinite(uploadedAt) || !Number.isFinite(deployedAt) || uploadedAt <= deployedAt) {

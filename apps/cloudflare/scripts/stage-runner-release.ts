@@ -77,6 +77,7 @@ export async function stageHostedRunnerRelease(input: {
   currentVersionId: string;
   immediate?: boolean;
   retainServingRunner?: boolean;
+  requireStableServingImage?: boolean;
   releaseSha: string;
   listApplications: ListCloudflareContainerApplications;
 }): Promise<StagedRunnerRelease> {
@@ -112,6 +113,7 @@ export async function stageHostedRunnerRelease(input: {
   const serving = entries.find(entry => entry.className === activeClass);
   const smoke = entries.find(entry => entry.className === "DeploySmokeRunnerContainer");
   if (!serving?.live || !smoke?.live || smoke.live.max_instances !== 1 || smoke.rendered.max_instances !== 1) throw invalid();
+  assertStableServingImage(serving.live, active, input.requireStableServingImage);
   const specification = runnerApplicationSpecification(serving.rendered, logsEnabled);
   const artifact = {
     releaseSha: input.releaseSha,
@@ -165,6 +167,14 @@ async function writeReleaseConfigs(directory: string, config: Record<string, unk
     await writeFile(rejectedConfigPath, render({ ...deployment, candidate: null }), { encoding: "utf8", flag: "wx" });
   }
   return { configPath, promotionConfigPath, rejectedConfigPath };
+}
+
+function assertStableServingImage(application: Record<string, unknown>, active: HostedRunnerRelease, required?: boolean) {
+  if (!required) return;
+  if (!active.image || application.active_rollout_id || !isObjectRecord(application.configuration)
+    || application.configuration.image !== active.image) {
+    throw new Error("Native serving image is not stable at the rolled-back Worker release.");
+  }
 }
 
 /** Retained releases use native resource ownership. */
@@ -222,7 +232,11 @@ function readNamespaceId(version: unknown, className: string): string {
 }
 /** Public commit of the serving runner release; null when the live record predates release SHAs. */
 export function readLiveRunnerReleaseSha(version: unknown): string | null {
-  return readHostedRunnerDeployment(readReleaseVariables(version))?.active.releaseSha ?? null;
+  return readWorkerRunnerDeployment(version)?.active.releaseSha ?? null;
+}
+
+export function readWorkerRunnerDeployment(version: unknown): HostedRunnerDeployment | null {
+  return readHostedRunnerDeployment(readReleaseVariables(version));
 }
 function readReleaseVariables(version: unknown): Record<string, string> {
   const names = new Set(["HOSTED_EXECUTION_RUNNER_DEPLOYMENT", "HOSTED_EXECUTION_RUNNER_BUNDLE_FINGERPRINT", "HOSTED_EXECUTION_RUNNER_SOURCE_FINGERPRINT"]);

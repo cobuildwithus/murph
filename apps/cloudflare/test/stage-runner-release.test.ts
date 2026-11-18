@@ -37,6 +37,19 @@ describe("runner deployment staging", () => {
   });
   afterEach(async () => { await rm(directory, { recursive: true, force: true }); });
 
+  it.each(["stable", "wrong image", "rollout"])("proves native state before rollback recovery: %s", async scenario => {
+    const active = { ...primary, image };
+    const stage = stageHostedRunnerRelease({ releaseSha: "1".repeat(40), configPath: path.join(directory, "source.json"),
+      currentVersionId: "live", currentVersion: version({ active, previous: null, candidate: null }), requireStableServingImage: true,
+      listApplications: async name => (await listApplications(name)).map(app => ({ ...app,
+        configuration: { ...app.configuration, image: scenario === "wrong image" ? "other" : image },
+        active_rollout_id: scenario === "rollout" ? "pending" : null,
+      })),
+    });
+    if (scenario === "stable") await expect(stage).resolves.toMatchObject({ deployment: { active } });
+    else await expect(stage).rejects.toThrow("Native serving image is not stable");
+  });
+
   it.each([false, true])("keeps the released capacity within one member fleet (reversed=%s)", async (reversed) => {
     const active = reversed ? next : primary;
     const previous = reversed ? primary : next;

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { RETIRED_WORKER_SECRET_NAMES } from "../scripts/deploy-retired-inference-secrets.ts";
 import { createRunnerReleaseProvider } from "../scripts/runner-release-provider.ts";
 
 vi.mock("node:timers/promises", () => ({ setTimeout: async () => {} }));
@@ -63,9 +64,31 @@ describe("recent Worker version metadata", () => {
   });
 });
 
+describe("rollback deployment history", () => {
+  const sequence = ["live", "newest", "older", "live"];
+  it.each(["exact", "reordered", "split", "missing", "foreign"])("validates the full sequence: %s", async scenario => {
+    const ids = scenario === "reordered" ? ["live", "older", "newest", "live"] : [...sequence];
+    if (scenario === "missing") ids.pop();
+    if (scenario === "foreign") ids[3] = "other";
+    const deployments = ids.map((id, index) => ({ versions: [{ version_id: id, percentage: index === 2 && scenario === "split" ? 90 : 100 }] }));
+    const api = createRunnerReleaseProvider({ accountId: "account", apiToken: "test", fetchImpl: async () => Response.json({ success: true, result: { deployments } }) });
+    const read = api.assertRollbackHistory("worker", "live", ["newest", "older"]);
+    if (scenario === "exact") await expect(read).resolves.toBeUndefined();
+    else await expect(read).rejects.toThrow("exact staged Worker deployments");
+  });
+});
 describe("native Worker secret retirement", () => {
   const input = { workerName: "worker/name?", versionMessage: "fixture retirement message", versionTag: "fixture-retirement-tag" };
 
+  it("references an exact live binding in the provider patch without its value", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({ success: true, result: { id: "fresh" } }));
+    const binding = { type: "inherit" as const, version_id: "live-id" };
+    await createRunnerReleaseProvider({ accountId: "account", apiToken: "test", fetchImpl })
+      .removeRetiredInferenceSecrets({ ...input, retainedSecrets: { RETAINED: binding } });
+    expect(JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body)).env).toEqual({
+      ...Object.fromEntries(RETIRED_WORKER_SECRET_NAMES.map(name => [name, null])), RETAINED: binding,
+    });
+  });
   it("removes exactly the retired secrets in one merge patch and returns only the new version ID", async () => {
     const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({
       success: true, result: { id: "retired-version", privateFixture: "discarded" },
