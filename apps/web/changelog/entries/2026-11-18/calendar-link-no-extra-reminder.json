@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-18",
+  "order": 110,
+  "item": {
+    "id": "calendar-link-no-extra-reminder",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "A calendar link no longer adds a Murph reminder",
+    "summary": "Ask Murph for an Add to Calendar link and you get just the link. Your calendar keeps the alert, and Murph adds its own reminder only when you ask for one.",
+    "details": "Low-usage heads-ups also stay out of replies you asked to keep short, and they can end with a plain offer instead of a question.",
+    "relevanceTags": ["reminders"],
+    "sourcePullRequests": []
+  }
+}

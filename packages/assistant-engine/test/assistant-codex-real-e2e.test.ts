@@ -29877,6 +29877,25 @@ describeRealCodex('real Codex stateless calendar link e2e', () => {
   )
 
   it(
+    'makes only the calendar link when that is all a booked appointment asks for',
+    async () => {
+      const { automationRequests, result } = await runRealCodexCalendarLinkTurn([
+        'My physio visit is booked.',
+        'Can you make an Add to Calendar link for it?',
+        'Title "Physio", starting 2026-10-16T09:30:00-04:00 and ending 2026-10-16T10:15:00-04:00, at "Elm Street Physio".',
+      ].join(' '))
+      const calendarActions = readCapabilityRoutingActions(result.jsonEvents).filter((action) =>
+        action.kind === 'dynamic' && action.tool === MURPH_CREATE_CALENDAR_LINK_TOOL.name && action.success)
+      console.info(`[real-codex calendar-link only] ${result.finalMessage.replace(/https:\/\/www\.withmurph\.ai\/calendar\/[A-Za-z0-9_-]+/u, '<calendar-link>').replaceAll(/\s+/gu, ' ').trim()}`)
+      expect(calendarActions.length).toBeGreaterThan(0)
+      // Their calendar keeps the alert, so Murph adds no reminder they did not ask for.
+      expect(automationRequests).toHaveLength(0)
+      expect(result.finalMessage).toMatch(/https:\/\/www\.withmurph\.ai\/calendar\/[A-Za-z0-9_-]+/u)
+    },
+    360_000,
+  )
+
+  it(
     'asks for missing appointment details before creating a calendar link',
     async () => {
       const { automationRequests, result } = await runRealCodexCalendarLinkTurn(

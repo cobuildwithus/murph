@@ -113,7 +113,7 @@ export function executeCreateCalendarLinkDynamicTool(
         type: 'inputText',
         text: JSON.stringify({
           instruction:
-            'The link is ready, and the runtime appends it to your reply, so write the reply without any URL. The link does not set a reminder. When the Appointment reminder rule covers this turn, it still needs its reminder.',
+            'The link is ready, and the runtime appends it to your reply, so write the reply without any URL. The link does not set a Murph reminder; add one only when they also asked for a reminder.',
           status: 'ready',
         }),
       }],
