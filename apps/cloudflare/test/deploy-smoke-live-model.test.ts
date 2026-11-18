@@ -30,6 +30,17 @@ describe("deploy live model turn smoke", () => {
     expect(readDeployLiveModelTurnSmokeOpenAiModel("not json")).toBeNull();
   });
 
+  it.each(["gpt-6.2-sol", "gpt-6.2-astra"])("admits %s only with a native web.run request", model => {
+    const tools = [{ type: "namespace", name: "web", tools: [{ type: "function", name: "run", parameters: { type: "object" } }] }];
+    for (const body of [{ model, tools }, { model, input: [{ type: "additional_tools", tools }] }]) {
+      expect(readDeployLiveModelTurnSmokeOpenAiModel(JSON.stringify(body))).toBe(model);
+    }
+    for (const body of [{ model }, { model, input: "web.run" }, { model, tools: [{ name: "web.run" }] },
+      { model: "unconfigured", tools }, { model, tools: [{ ...tools[0], tools: [] }] }]) {
+      expect(readDeployLiveModelTurnSmokeOpenAiModel(JSON.stringify(body))).toBeNull();
+    }
+  });
+
   it("reads the final Codex JSONL agent message as the smoke output", () => {
     const stdout = [
       JSON.stringify({ type: "thread.started", thread_id: "thread-test" }),

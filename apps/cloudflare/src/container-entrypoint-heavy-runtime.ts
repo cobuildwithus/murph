@@ -1,3 +1,4 @@
+import { HOSTED_ASSISTANT_ASTRA_MODEL } from "@murphai/hosted-execution/assistant-model";
 import { createHash } from "node:crypto";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
@@ -22,6 +23,7 @@ import {
 
 import {
   DEPLOY_LIVE_MODEL_TURN_SMOKE_EXPECTED_OUTPUT,
+  isDeployWebAdmissionModel,
   DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
   DEPLOY_LIVE_MODEL_TURN_SMOKE_PROMPT,
   readDeployLiveModelTurnSmokeCodexOutputText,
@@ -364,7 +366,7 @@ async function runHostedContainerLiveModelTurnSmoke(input: {
         ));
       });
       child.stdin?.end(DEPLOY_LIVE_MODEL_TURN_SMOKE_PROMPT);
-    }));
+    }), isDeployWebAdmissionModel(input.model));
 }
 
 // Smoke failure text may embed Codex stdout/stderr. Keep only bounded,
@@ -427,6 +429,7 @@ function buildHostedContainerLiveModelTurnSmokeStdoutSafeText(value: string): st
 async function withHostedContainerCodexSmokeWorkspace<T>(
   model: string,
   run: (workspace: { codexHome: string; smokeVaultRoot: string }) => Promise<T>,
+  webAdmission = false,
 ): Promise<T> {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-codex-shell-smoke-"));
   let codexWorkspaceRoot: string | null = null;
@@ -479,7 +482,7 @@ async function withHostedContainerCodexSmokeWorkspace<T>(
     );
     await writeFile(
       path.join(codexHome, "config.toml"),
-      buildHostedContainerCodexShellSmokeConfig(model),
+      buildHostedContainerCodexShellSmokeConfig(model, webAdmission),
       { mode: 0o600 },
     );
 
@@ -530,8 +533,10 @@ function isPathInside(candidate: string, parent: string): boolean {
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
-export function buildHostedContainerCodexShellSmokeConfig(model: string): string {
-  const modelCatalogJson = readHostedCodexModelCatalogJsonPath();
+export function buildHostedContainerCodexShellSmokeConfig(model: string, webAdmission = false): string {
+  const catalog = readHostedCodexModelCatalogJsonPath();
+  if (webAdmission && !catalog) throw new Error("Hosted web admission requires the candidate image model catalog.");
+  const modelCatalogJson = webAdmission && model === HOSTED_ASSISTANT_ASTRA_MODEL ? `${catalog}.astra` : catalog;
 
   return [
     `model = ${JSON.stringify(model)}`,
@@ -540,6 +545,7 @@ export function buildHostedContainerCodexShellSmokeConfig(model: string): string
       : []),
     'model_provider = "hosted-shell-smoke"',
     'model_reasoning_effort = "low"',
+    ...(webAdmission ? ['web_search = "live"'] : []),
     'approval_policy = "never"',
     'sandbox_mode = "danger-full-access"',
     "check_for_update_on_startup = false",
@@ -549,6 +555,7 @@ export function buildHostedContainerCodexShellSmokeConfig(model: string): string
     "",
     "[features]",
     "plugins = false",
+    ...(webAdmission ? ["standalone_web_search = true"] : []),
     "multi_agent_v2 = true",
     "",
     '[model_providers."hosted-shell-smoke"]',
@@ -558,6 +565,7 @@ export function buildHostedContainerCodexShellSmokeConfig(model: string): string
     'wire_api = "responses"',
     'requires_openai_auth = false',
     "supports_websockets = false",
+    ...(webAdmission ? ["supports_standalone_web_search = true"] : []),
     // The deploy-smoke egress fence admits exactly one provider request, so a
     // retry could only be refused and would hide the original failure.
     "request_max_retries = 0",

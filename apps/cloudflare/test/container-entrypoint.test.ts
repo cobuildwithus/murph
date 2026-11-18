@@ -2013,10 +2013,29 @@ describe("startHostedContainerEntrypoint", () => {
     });
   });
 
-  it("runs the managed-container live model turn smoke through the codex exec hook", async () => {
+  it("configures native web admission with the image catalog for each model", () => {
+    const catalog = "/synthetic/catalog.json";
+    vi.stubEnv("MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON", catalog);
+    try {
+      for (const [model, file] of [["gpt-6.2-sol", catalog], ["gpt-6.2-astra", catalog + ".astra"]] as const) {
+        const config = buildHostedContainerCodexShellSmokeConfig(model, true);
+        expect(config).toContain(`model_catalog_json = "${file}"`);
+        expect(config).toContain('web_search = "live"');
+        expect(config).toContain("standalone_web_search = true");
+        expect(config).toContain("supports_standalone_web_search = true");
+      }
+      vi.stubEnv("MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON", "");
+      expect(() => buildHostedContainerCodexShellSmokeConfig("gpt-6.2-sol", true)).toThrow(/catalog/u);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it.each([undefined, "gpt-6.2-sol", "gpt-6.2-astra", "unconfigured"])("dispatches only admitted smoke models to Codex (%s)", async selected => {
+    const model = selected ?? DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL;
     const runLiveModelTurnSmoke = vi.fn(async () => ({
       durationMs: 1_234,
-      model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
+      model,
       stdoutBytes: 2_048,
     }));
     const server = await startHostedContainerEntrypoint({
@@ -2034,21 +2053,27 @@ describe("startHostedContainerEntrypoint", () => {
 
     const response = await sendHostedContainerJsonRequest({
       body: "",
+      headers: selected ? { "x-murph-smoke-model": selected } : {},
       path: "/internal/deploy-live-model-turn-smoke",
       port: address.port,
     });
 
+    if (selected === "unconfigured") {
+      expect(response.status).toBe(400);
+      expect(runLiveModelTurnSmoke).not.toHaveBeenCalled();
+      return;
+    }
     expect(response.status).toBe(200);
     expect(response.json).toEqual({
       liveModelTurn: {
         durationMs: 1_234,
-        model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
+        model,
         stdoutBytes: 2_048,
       },
       ok: true,
     });
     expect(runLiveModelTurnSmoke).toHaveBeenCalledWith({
-      model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
+      model,
       signal: expect.any(AbortSignal),
     });
   });

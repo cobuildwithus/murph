@@ -1,3 +1,4 @@
+import { DEPLOY_WEB_MODEL_ADMISSION_MODELS } from "./deploy-smoke-live-model.ts";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { HOSTED_EXECUTION_DEFAULT_RUNNER_IDLE_TTL_MS } from "@murphai/hosted-execution/contracts";
 import type { HostedRuntimeOwnerCommand } from "@murphai/hosted-execution/runtime-owner";
@@ -417,6 +418,7 @@ interface HostedExecutionContainerSmokeHealthResult {
     model: string | null;
     stdoutBytes: number | null;
   } | null;
+  webModelTurns?: NonNullable<HostedExecutionContainerSmokeHealthResult["liveModelTurn"]>[];
   liveModelTurnFailure?: string;
   ok: boolean;
   runnerBundle: {
@@ -437,9 +439,7 @@ interface HostedExecutionContainerSmokeHealthInput {
     presignedPutUrl: string;
     tlsCaCertificatePem?: string;
   };
-  liveModelTurn?: {
-    model: string;
-  };
+  liveModelTurn?: { model: string } | { webModelAdmission: true };
 }
 
 interface RunnerContainerHealth {
@@ -2030,24 +2030,13 @@ export class RunnerContainer extends Container {
         const directR2PresignedPut = input.directR2PresignedPut
           ? await this.smokeDirectR2PresignedPut(readyTimeoutMs, input.directR2PresignedPut)
           : undefined;
-        let liveModelTurn: HostedExecutionContainerSmokeHealthResult["liveModelTurn"] | undefined;
-        let liveModelTurnFailure: string | undefined;
-        if (input.liveModelTurn) {
-          try {
-            liveModelTurn = await this.smokeLiveModelTurn(readyTimeoutMs, input.liveModelTurn);
-          } catch (error) {
-            // Reported, not thrown: the deploy smoke retries a container that
-            // failed to start but must stop on a model turn that ran and failed.
-            liveModelTurnFailure = error instanceof Error ? error.message : String(error);
-          }
-        }
+        const modelSmoke = await this.runRequestedModelSmoke(readyTimeoutMs, input.liveModelTurn);
 
         return {
           codexShell,
           ...(directR2PresignedPut === undefined ? {} : { directR2PresignedPut }),
-          ...(liveModelTurn === undefined ? {} : { liveModelTurn }),
-          ...(liveModelTurnFailure === undefined ? {} : { liveModelTurnFailure }),
-          ok: liveModelTurnFailure === undefined,
+          ...modelSmoke,
+          ok: modelSmoke.liveModelTurnFailure === undefined,
           runnerBundle,
           service: typeof payload.service === "string" ? payload.service : null,
           status: response.status,
@@ -2110,9 +2099,29 @@ export class RunnerContainer extends Container {
     };
   }
 
+  private async runRequestedModelSmoke(
+    readyTimeoutMs: number,
+    input: HostedExecutionContainerSmokeHealthInput["liveModelTurn"],
+  ): Promise<Pick<HostedExecutionContainerSmokeHealthResult, "liveModelTurn" | "webModelTurns" | "liveModelTurnFailure">> {
+    if (!input) return {};
+    try {
+      if ("model" in input) return { liveModelTurn: await this.smokeLiveModelTurn(readyTimeoutMs, input) };
+      const webModelTurns = [];
+      // Serial by design. Each model gets its own single-use egress fence.
+      for (const model of DEPLOY_WEB_MODEL_ADMISSION_MODELS) {
+        webModelTurns.push(await this.smokeLiveModelTurn(readyTimeoutMs, { model }));
+      }
+      return { webModelTurns };
+    } catch (error) {
+      // Startup and version skew are retryable. A failed turn on the expected
+      // candidate is terminal and must arrive with its bundle provenance.
+      return { liveModelTurnFailure: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
   protected async smokeLiveModelTurn(
     _readyTimeoutMs: number,
-    _input: NonNullable<HostedExecutionContainerSmokeHealthInput["liveModelTurn"]>,
+    _input: { model: string },
   ): Promise<NonNullable<HostedExecutionContainerSmokeHealthResult["liveModelTurn"]>> {
     throw new Error(
       "Hosted runner live model turn smoke is only supported by deploy smoke containers.",
@@ -4047,7 +4056,7 @@ export class DeploySmokeRunnerContainer extends RunnerContainer {
   // The raw key never travels to the container and never appears in logs.
   protected override async smokeLiveModelTurn(
     readyTimeoutMs: number,
-    input: NonNullable<HostedExecutionContainerSmokeHealthInput["liveModelTurn"]>,
+    input: { model: string },
   ): Promise<NonNullable<HostedExecutionContainerSmokeHealthResult["liveModelTurn"]>> {
     const apiKey = this.environment.OPENAI_API_KEY;
     if (typeof apiKey !== "string" || apiKey.trim().length === 0) {
@@ -4069,6 +4078,7 @@ export class DeploySmokeRunnerContainer extends RunnerContainer {
       const response = await this.containerFetch(
         RUNNER_LIVE_MODEL_TURN_SMOKE_URL,
         {
+          headers: { "x-murph-smoke-model": input.model },
           method: "POST",
           signal: smokeSignal,
         },
