@@ -1,3 +1,4 @@
+import { executeCodexAssistantTurnAttemptFromInput } from '../src/assistant/codex-runtime.ts'
 import { parseAssistantUsageRecord } from '@murphai/hosted-execution/assistant-usage'
 import { normalizeAssistantProviderConfig } from '@murphai/operator-config/assistant/provider-config'
 import { extractCodexAssistantProviderUsage } from '../src/assistant/providers/helpers.ts'
@@ -8479,34 +8480,41 @@ text(JSON.stringify(result));
     expect(scenario.stub.requestCountSinceBaseline()).toBe(3)
   })
 
-  it.each(['gpt-6.2-sol', 'gpt-6.2-astra'])('sends flex service tier for %s through real Codex with the patched model catalog', {
+  it.each([
+    ['gpt-6.2-sol', 'gpt-6.1-sol'], ['gpt-6.2-astra', 'gpt-6.1-sol'],
+    ['gpt-6.1-terra', 'gpt-6.1-terra'], ['gpt-6-luna', 'gpt-6.1-terra'], ['gpt-5.6-luna', 'gpt-6.1-terra'],
+  ])('routes and prices Flex work for %s through real Codex on %s', {
     timeout: TURN_TIMEOUT_MS,
-  }, async (model) => {
-    const scenario = await prepareScriptedTurnScenario({ model })
-    const modelCatalogJson = await writeHostedOpenAiMixedModeModelCatalogJson({
-      codexCommand: scenario.turnInput.codexCommand,
-      directory: scenario.turnInput.codexHome,
-      astraAllowed: model === 'gpt-6.2-astra',
+  }, async (model, flexModel) => {
+    const scenario = await prepareScriptedTurnScenario({ model, modelProvider: 'openai-local-test', apiKeyEnv: 'OPENAI_API_KEY' })
+    const { codexCommand, codexHome, modelProvider, workingDirectory } = scenario.turnInput
+    const catalog = await writeHostedOpenAiMixedModeModelCatalogJson({
+      codexCommand, directory: codexHome, astraAllowed: model === 'gpt-6.2-astra', includeFlexCatalog: true,
     })
-    scenario.stub.queue({ text: 'SCRIPTED_FLEX_OK' })
-
-    const result = await executeCodexAppServerTurn({
-      ...scenario.turnInput,
-      env: {
-        ...scenario.turnInput.env,
-        [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson,
-      },
-      prompt: 'Reply exactly SCRIPTED_FLEX_OK.',
-      serviceTier: 'flex',
-    })
-
-    expect(result.finalMessage).toBe('SCRIPTED_FLEX_OK')
-    expect(scenario.stub.requestSummariesSinceBaseline()).toEqual([
-      {
-        model: scenario.turnInput.model,
-        serviceTier: 'flex',
-      },
-    ])
+    const env = { ...scenario.turnInput.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: catalog }
+    const providerConfig = { model, modelProvider, codexHome, codexCommand, reasoningEffort: 'low' }
+    // Bind both turns to the same member selection. Only the scheduled request uses Flex.
+    let threadId: string | null = null
+    for (const serviceTier of ['flex', null] as const) {
+      scenario.stub.markRequestBaseline()
+      scenario.stub.queue({ text: 'CHECK_COMPLETE' })
+      const attempt = await executeCodexAssistantTurnAttemptFromInput({
+        providerConfig,
+        turn: {
+          dynamicTools: [], env, workingDirectory, resume: threadId ? { codexThreadId: threadId } : null,
+          userPrompt: 'Return CHECK_COMPLETE.', serviceTier, processLifetime: 'one-shot',
+        },
+      })
+      if (!attempt.ok) throw attempt.error
+      if (threadId) expect(attempt.result.codexThreadId).toBe(threadId)
+      threadId = attempt.result.codexThreadId ?? null
+      expect(threadId).toBeTruthy()
+      const expectedModel = serviceTier ? flexModel : model
+      expect(scenario.stub.requestSummariesSinceBaseline()).toEqual([{ model: expectedModel, serviceTier }])
+      expect(attempt.result.usage).toMatchObject({
+        requestedModel: expectedModel, servedModel: expectedModel, tokenPricingBasis: serviceTier ? 'openai-flex' : 'standard',
+      })
+    }
   })
 
   it.skipIf(!process.env.MURPH_TEST_CODEX_COMMAND)('keeps reply requests opted in and compaction on default retention', {

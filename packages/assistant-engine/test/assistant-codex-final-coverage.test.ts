@@ -314,6 +314,9 @@ async function createHostedCodexFlexCatalog(input: {
     'utf8',
   )
 
+  await writeFile(catalogPath + '.flex', JSON.stringify({ models: ['gpt-6.1-sol', 'gpt-6.1-terra'].map(slug => ({
+    slug, service_tiers: [{ id: 'flex' }],
+  })) }))
   return {
     cleanup: async () => {
       await rm(directory, { force: true, recursive: true })

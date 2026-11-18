@@ -1,3 +1,4 @@
+import { hostedFlexModelCatalogPath } from '@murphai/hosted-execution/assistant-model'
 import { homedir } from 'node:os'
 import { constants as fsConstants, readFileSync, statSync } from 'node:fs'
 import { access,  stat } from 'node:fs/promises'
@@ -99,6 +100,11 @@ export function withCodexAppServerRuntimeFeatureOverrides(
 
 function readCodexConfigOverrideKey(override: string): string {
   return override.split('=', 1)[0]!.trim()
+}
+
+export function withHostedFlexCatalog(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const catalog = env[HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]
+  return catalog ? { ...env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: hostedFlexModelCatalogPath(catalog) } : env
 }
 
 export function hasHostedCodexModelCatalogServiceTier(input: {

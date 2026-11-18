@@ -9,11 +9,13 @@ import {
 } from "../src/deploy-smoke-live-model.ts";
 
 describe("deploy live model turn smoke", () => {
-  it("requires standard, Flex and Priority for every selectable model", () => {
+  it("exercises each foreground model and both scheduled Flex targets", () => {
     for (const model of HOSTED_ASSISTANT_PRODUCT_MODELS) {
-      expect(DEPLOY_MODEL_ADMISSION_PROBES.filter(probe => probe.model === model).map(probe => probe.serviceTier))
-        .toEqual(["default", "flex", "priority"]);
+      expect(DEPLOY_MODEL_ADMISSION_PROBES.filter(probe => probe.model === model && probe.serviceTier !== "flex").map(probe => probe.serviceTier))
+        .toEqual(["default", "priority"]);
     }
+    expect(DEPLOY_MODEL_ADMISSION_PROBES.filter(probe => probe.serviceTier === "flex").map(probe => probe.model).sort())
+      .toEqual(["gpt-6.1-sol", "gpt-6.1-terra"]);
   });
 
   it("uses Luna for the bounded live deploy smoke", () => {
@@ -51,11 +53,13 @@ describe("deploy live model turn smoke", () => {
   });
 
   it("reads the actual Responses tier and image instead of trusting container metadata", () => {
-    const wire = { model: "gpt-6-luna", input: [{ role: "user", content: [{ type: "input_image", image_url: "data:image/png;base64,AA==" }] }] };
+    const wire = { model: "gpt-6.1-terra", tools: [{ type: "namespace", name: "web", tools: [{ type: "function", name: "run", parameters: {} }] }], input: [{ role: "user", content: [{ type: "input_image", image_url: "data:image/png;base64,AA==" }] }] };
     for (const serviceTier of ["flex", "priority"]) {
       expect(readDeployLiveModelTurnSmokeRequest(JSON.stringify({ ...wire, service_tier: serviceTier })))
         .toMatchObject({ serviceTier, image: true });
     }
+    expect(readDeployLiveModelTurnSmokeRequest(JSON.stringify({ ...wire, model: "gpt-6.2-sol", service_tier: "flex" }))).toBeNull();
+    expect(readDeployLiveModelTurnSmokeRequest(JSON.stringify({ ...wire, model: "gpt-6.1-sol", service_tier: "priority" }))).toBeNull();
     expect(readDeployLiveModelTurnSmokeRequest(JSON.stringify({ ...wire, service_tier: "bogus" }))).toBeNull();
   });
 

@@ -228,7 +228,7 @@ describe("runSmokeHostedDeploy", () => {
           }));
           if (scenario === "duplicate") turns[1] = turns[0]!;
           if (scenario === "wrong model") turns[1]!.model = "gpt-6-luna";
-          if (scenario === "wrong tier") turns[1]!.serviceTier = "priority";
+          if (scenario === "wrong tier") turns[1]!.serviceTier = "default";
           if (scenario === "unused grant") turns[1]!.egressGrantConsumed = false;
           return new Response(JSON.stringify({ ok: true, runnerContainer: {
             ...(scenario === "missing" ? {} : { webModelTurns: turns }),

@@ -10,6 +10,7 @@ export async function writeHostedOpenAiMixedModeModelCatalogJson(input: {
   codexCommand: string
   directory: string
   dockerfile?: string
+  includeFlexCatalog?: boolean
   astraAllowed?: boolean
   toolMode?: 'code_mode_only'
 }): Promise<string> {
@@ -32,5 +33,9 @@ export async function writeHostedOpenAiMixedModeModelCatalogJson(input: {
   ], { input: stdout, encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 })
   const modelCatalogJson = path.join(input.directory, 'codex-model-catalog.openai-flex.json')
   await writeFile(modelCatalogJson, catalogJson, { encoding: 'utf8', mode: 0o600 })
+  if (!input.includeFlexCatalog) return modelCatalogJson
+  const flexFilter = /&& jq '([^']+)' \/tmp\/native-codex-models\.json/u.exec(dockerfile)?.[1]
+  if (!flexFilter) throw new Error('Scheduled catalog filter is missing.')
+  await writeFile(modelCatalogJson + '.flex', execFileSync('jq', [flexFilter], { input: stdout, maxBuffer: 10 * 1024 * 1024 }), { mode: 0o600 })
   return modelCatalogJson
 }

@@ -1,4 +1,4 @@
-import { HOSTED_ASSISTANT_PRODUCT_MODELS, isHostedAssistantProductModel } from "@murphai/hosted-execution/assistant-model";
+import { HOSTED_ASSISTANT_PRODUCT_MODELS, HOSTED_FLEX_MODELS } from "@murphai/hosted-execution/assistant-model";
 
 // The omitted Responses service_tier is the standard foreground request.
 export const DEPLOY_ADMISSION_TIERS = ["default", "flex", "priority"] as const;
@@ -6,9 +6,16 @@ export type DeployAdmissionTier = (typeof DEPLOY_ADMISSION_TIERS)[number];
 export function isDeployAdmissionTier(value: unknown): value is DeployAdmissionTier {
   return DEPLOY_ADMISSION_TIERS.some(tier => tier === value);
 }
-export const DEPLOY_MODEL_ADMISSION_PROBES = HOSTED_ASSISTANT_PRODUCT_MODELS.flatMap(model =>
-  DEPLOY_ADMISSION_TIERS.map(serviceTier => ({ model, serviceTier })),
-);
+export const DEPLOY_MODEL_ADMISSION_PROBES = [
+  ...HOSTED_ASSISTANT_PRODUCT_MODELS.flatMap(model =>
+    (["default", "priority"] as const).map(serviceTier => ({ model, serviceTier })),
+  ),
+  ...HOSTED_FLEX_MODELS.map(model => ({ model, serviceTier: "flex" as const })),
+];
+
+export function isDeployAdmissionModel(model: unknown, tier: DeployAdmissionTier): model is string {
+  return DEPLOY_MODEL_ADMISSION_PROBES.some(probe => probe.model === model && probe.serviceTier === tier);
+}
 
 // The serving smoke retains its single, inexpensive Luna turn.
 export const DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL = "gpt-6-luna";
@@ -30,7 +37,7 @@ export function readDeployLiveModelTurnSmokeRequest(
   const record = parsed as Record<string, unknown>;
   const model = readString(record.model);
   const serviceTier = record.service_tier === undefined ? "default" : record.service_tier;
-  if (!isHostedAssistantProductModel(model) || !isDeployAdmissionTier(serviceTier)) return null;
+  if (!isDeployAdmissionTier(serviceTier) || !isDeployAdmissionModel(model, serviceTier)) return null;
 
   // A successful request with web disabled cannot prove reserved-tool admission.
   // Mixed Code Mode can send namespaces in an additional_tools input item.

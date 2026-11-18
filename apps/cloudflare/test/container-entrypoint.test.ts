@@ -2024,9 +2024,12 @@ describe("startHostedContainerEntrypoint", () => {
         expect(config).toContain("standalone_web_search = true");
         expect(config).toContain("supports_standalone_web_search = true");
         expect(config).not.toContain("service_tier =");
-        for (const tier of ["flex", "priority"] as const) {
-          expect(buildHostedContainerCodexShellSmokeConfig(model, tier)).toContain(`service_tier = "${tier}"`);
-        }
+        expect(buildHostedContainerCodexShellSmokeConfig(model, "priority")).toContain('service_tier = "priority"');
+      }
+      for (const model of ["gpt-6.1-sol", "gpt-6.1-terra"]) {
+        const config = buildHostedContainerCodexShellSmokeConfig(model, "flex");
+        expect(config).toContain(`model_catalog_json = "${catalog}.flex"`);
+        expect(config).toContain('service_tier = "flex"');
       }
       vi.stubEnv("MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON", "");
       expect(() => buildHostedContainerCodexShellSmokeConfig("gpt-6.2-sol", "default")).toThrow(/catalog/u);

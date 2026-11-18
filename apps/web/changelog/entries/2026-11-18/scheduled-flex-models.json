@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-18",
+  "order": 100,
+  "item": {
+    "id": "scheduled-flex-models",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Scheduled reminders can use Flex again",
+    "summary": "Murph runs discounted reminders and other scheduled work on GPT-6.1 Sol or Terra, including when you choose GPT-6.2 for chat.",
+    "details": "Your chat keeps the model you picked. If a scheduled job retries on Standard, it uses that choice too.",
+    "relevanceTags": ["reminders", "assistant"],
+    "sourcePullRequests": []
+  }
+}

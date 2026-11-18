@@ -3157,10 +3157,11 @@ describe("hostedRunnerIntercept", () => {
     const env = createInterceptEnv({
       OPENAI_API_KEY: "openai-worker-secret",
       readActiveRuntimeUserFence: async () => ({ active: false, reason: "no_active_runtime" }),
-      readDeploySmokeLiveModelTurnFence: async () => ({ active: true, model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL, serviceTier }),
+      readDeploySmokeLiveModelTurnFence: async () => ({ active: true, model: "gpt-6.1-terra", serviceTier }),
     });
     const response = await hostedRunnerIntercept(
       createDeploySmokeOpenAiRequest({
+        model: "gpt-6.1-terra",
         serviceTier: wireTier,
         tools: web ? [{ type: "namespace", name: "web", tools: [{ type: "function", name: "run", parameters: {} }] }] : [],
         input: image ? [{ role: "user", content: [{ type: "input_image", image_url: "data:image/png;base64,AA==" }] }] : [],

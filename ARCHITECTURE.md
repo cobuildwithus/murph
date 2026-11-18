@@ -412,7 +412,11 @@ the same automation tool through one execution-context factory. Cron supplies it
 verified delivery route before actual turn planning; the shared context has no
 ambient mutation tool. The canonical tool still owns version checks, route
 preservation, and readback. No per-job mutation allowlist or parallel repair API.
-Hosted scheduled turns start on Flex. Managed Journal, weekly digest/insight/
+Hosted scheduled turns start on Flex. Sol and Astra selections use GPT-6.1 Sol
+for Flex attempts. Terra and Luna selections use GPT-6.1 Terra. Flex uses the
+image's dedicated two-model catalog and charges usage to the execution model.
+Foreground turns and Standard retries use the original product selection.
+Managed Journal, weekly digest/insight/
 research and monthly coaching occurrences eligible for the six-hour recovery
 window use Flex for the first five attempts, then Standard from attempt six.
 Ordinary reminders and managed schedules without that extended window use

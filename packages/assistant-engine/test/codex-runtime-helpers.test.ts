@@ -3733,10 +3733,11 @@ describe('Codex assistant registry helpers', () => {
         currentGameRecapScope: () => ({ gameId: 'game_synthetic', eventId: 'game-recap:game_synthetic', pairFingerprint: 'synthetic-pair', ...(show ? { show: true } : {}) }),
       },
     })
-    expect(codexAppServerMocks.executeCodexAppServerTurn).toHaveBeenCalledWith(expect.objectContaining({ serviceTier }))
+    const model = serviceTier === 'flex' ? 'gpt-6.1-sol' : 'gpt-6.2-sol'
+    expect(codexAppServerMocks.executeCodexAppServerTurn).toHaveBeenCalledWith(expect.objectContaining({ model, serviceTier }))
     expect(attempt.ok).toBe(false)
     if (attempt.ok) throw new Error('Expected refusal')
-    if (show) expect(attempt.usage).toMatchObject({ requestedModel: 'gpt-6.2-sol', tokenPricingBasis: basis, inputTokens: null, outputTokens: null })
+    if (show) expect(attempt.usage).toMatchObject({ requestedModel: model, servedModel: model, tokenPricingBasis: basis, inputTokens: null, outputTokens: null })
     else expect(attempt.usage).toBeUndefined()
   })
 
