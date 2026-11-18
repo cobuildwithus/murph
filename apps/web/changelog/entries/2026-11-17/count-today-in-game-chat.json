@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-17",
+  "order": 100,
+  "item": {
+    "id": "count-today-in-game-chat",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Tell Murph you did today's task",
+    "summary": "Tell Murph in your game chat that you did today's task, for example when it checks in that evening, and it can count today, not only days that have already closed.",
+    "details": "Murph asks what you want your post to say, then posts it for today in your words. Games that require a photo or heart-rate check-in still need one.",
+    "relevanceTags": ["games"],
+    "sourcePullRequests": []
+  }
+}

@@ -334,12 +334,12 @@ export function completedEntry(entries: RuleEntries, memberId: string, dayIndex:
  * and `now` the game's: they differ only under dev time travel.
  */
 export function decideDayCompletion(state: RuleState, input: { memberId: string; date: string; incomplete: boolean; credit?: boolean; hasWords?: boolean; now: Date; clock?: Date }): { dayIndex: number; changed: boolean; outcome: GameDayOutcome } {
-  const { player, dayOne, today, closedBefore } = dayCorrectionCalendar(state, input);
+  const { player, dayOne, today } = dayCorrectionCalendar(state, input);
   const dayIndex = daysBetween(dayOne, input.date);
   if (dayIndex < eligibleFromDay(state, player) || dayIndex >= state.game.lengthDays || dayIndex > today) reject("INVALID_REQUEST", "Choose a game day that has already started.");
   const entry = liveEntry(state.entries, input.memberId, dayIndex);
   if (!entry && input.credit && !input.incomplete) {
-    assertCreditableDay(state, player, dayIndex, closedBefore);
+    assertCreditableDay(state, player, dayIndex);
     // The post is the player's own words: until they give them, the day is only known to be countable.
     return { dayIndex, changed: input.hasWords === true, outcome: { date: input.date, status: input.hasWords ? "credited" : "words_needed" } };
   }
@@ -351,17 +351,16 @@ export function decideDayCompletion(state: RuleState, input: { memberId: string;
 
 /**
  * Who may correct a day, and which days exist to correct. A live game runs to
- * the player's current day, and that day is still open. A finished pair game
- * runs to the day it ended on, and every one of its days is closed.
+ * the player's current day. A finished pair game runs to the day it ended on.
  */
-function dayCorrectionCalendar(state: RuleState, input: { memberId: string; now: Date; clock?: Date }): { player: RulePlayer; dayOne: string; today: number; closedBefore: number } {
+function dayCorrectionCalendar(state: RuleState, input: { memberId: string; now: Date; clock?: Date }): { player: RulePlayer; dayOne: string; today: number } {
   const settled = state.game.status === "settled";
   const player = settled ? playerFor(state, input.memberId) : requireLivePlayer(state, input.memberId);
   if (!player || player.leftAt) reject("NOT_A_PLAYER", "You're not in this game.");
   const ended = settled ? settledCorrectionCutoff(state, input.clock ?? input.now, input.now) : null;
   if (isGameDue(state, input.now) || !player.dayOne) reject("GAME_NOT_LIVE", "This game has ended.");
   const today = dayIndexAt(player, ended ?? input.now)!;
-  return { player, dayOne: player.dayOne, today, closedBefore: ended ? today + 1 : today };
+  return { player, dayOne: player.dayOne, today };
 }
 
 /** Why a finished game's days can no longer be corrected, or null while its two players still can. */
@@ -392,12 +391,12 @@ function settledCorrectionCutoff(state: RuleState, clock: Date, now: Date): Date
 }
 
 /**
- * A player's word stands in for a check-in only on a closed, scheduled day that
- * never had a post, in a game that takes any kind of check-in. An open day is
- * still theirs to post; a required photo or heart rate stays required.
+ * A player's word stands in for a check-in only on a scheduled day that never
+ * had a post, today included, in a game that takes any kind of check-in: the
+ * same words post they could write in the app. A required photo or heart rate
+ * stays required.
  */
-function assertCreditableDay(state: RuleState, player: RulePlayer, dayIndex: number, today: number): void {
-  if (dayIndex >= today) reject("INVALID_REQUEST", "That day is still open. Post your check-in before it closes.");
+function assertCreditableDay(state: RuleState, player: RulePlayer, dayIndex: number): void {
   if (!isScheduledDay(state, dayIndex)) reject("INVALID_REQUEST", "That was a day off, so there is nothing to count.");
   if (attemptsUsed(state.entries, player.memberId, dayIndex) > 0) reject("INVALID_REQUEST", "A post for that day was taken down, so it can't be counted now.");
   const required = termsForDay(state.game.terms, dayIndex).checkInKind ?? "photo";

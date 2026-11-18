@@ -94,15 +94,24 @@ describe.skipIf(!enabled)("self-reported game days against PostgreSQL", () => {
     expect(await db.gameEntry.count({ where: { gameId: f.gameId, memberId: f.a } })).toBe(1);
   });
 
-  it("never counts an open day, another player's day, or a day outside the game's own chat", async () => {
+  it("counts today as the same words post the app takes", async () => {
+    const f = await setup(), db = getPrisma();
+    const count = (extra = {}) => f.correct(false, f.today, f.a, f.room, { credit: true, text: "Read a chapter before bed", ...extra });
+    expect(await count({ text: undefined })).toMatchObject({ ok: true, dayOutcome: { status: "words_needed" } });
+    expect(await db.gameEntry.count({ where: { gameId: f.gameId, memberId: f.a } })).toBe(0);
+    expect(await count()).toMatchObject({ ok: true, dayOutcome: { status: "credited" } });
+    const [entry] = await db.gameEntry.findMany({ where: { gameId: f.gameId, memberId: f.a } });
+    expect(entry).toMatchObject({ dayIndex: 1, attempt: 1, kind: "words", incomplete: null, withdrawnAt: null });
+    expect((await readGame(f.gameId, f.a))?.days[1].mine).toMatchObject({ entryId: entry.id, kind: "words", text: "Read a chapter before bed" });
+    expect(await count()).toMatchObject({ ok: true, dayOutcome: { status: "already_complete" } });
+  });
+
+  it("never counts another player's day or a day outside the game's own chat", async () => {
     const f = await setup(), db = getPrisma();
     const count = (date = f.yesterday, actor = f.a, chat = f.room, extra = {}) => f.correct(false, date, actor, chat, { credit: true, text: "Read a chapter", ...extra });
-    // An open day is refused with or without words, so nobody is asked to write a post that cannot land.
-    expect(await count(f.today, f.a, f.room, { text: undefined })).toMatchObject({ ok: false, error: { code: "INVALID_REQUEST", message: expect.stringContaining("still open") } });
     // The words follow the same rules as any written check-in: one short line, and nothing the game refuses.
     for (const text of ["two\nlines", "x".repeat(141), "   "]) expect(await count(f.yesterday, f.a, f.room, { text })).toMatchObject({ ok: false, error: { code: "INVALID_REQUEST" } });
     expect(await count(f.yesterday, f.a, f.room, { text: "Read a chapter, go die" })).toMatchObject({ ok: false, error: { code: "CONTENT_NOT_ALLOWED" } });
-    expect(await count(f.today)).toMatchObject({ ok: false, error: { code: "INVALID_REQUEST", message: expect.stringContaining("still open") } });
     expect((await count(f.yesterday, f.a, f.room, { memberId: f.b })).ok).toBe(false);
     expect(await count(f.yesterday, f.a, f.b)).toMatchObject({ ok: false, error: { code: "NOT_A_PLAYER" } });
     expect(await runGameCommand({ actorMemberId: f.a, command: { type: "setDayCompletion", gameId: f.gameId, date: f.yesterday, incomplete: false, credit: true } })).toMatchObject({ ok: false });

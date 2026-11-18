@@ -813,7 +813,7 @@ describe("a missed day counted on the player's word", () => {
   const count = (state: RuleState, dayIndex: number, now: Date, incomplete = false, hasWords = true) => decideDayCompletion(state, {
     memberId: LEO, date: addDays(playerFor(state, LEO)!.dayOne!, dayIndex), incomplete, credit: true, hasWords, now });
 
-  it("counts a closed scheduled day that never had a post, and nothing else", () => {
+  it("counts a scheduled day that never had a post, today included, and nothing else", () => {
     const state = live(invited(), NYC);
     // The second game day becomes the one day off (Monday is 0).
     const offDay = (new Date(`${addDays(playerFor(state, LEO)!.dayOne!, 1)}T12:00:00Z`).getUTCDay() + 6) % 7;
@@ -822,12 +822,14 @@ describe("a missed day counted on the player's word", () => {
     expect(count(state, 0, now)).toEqual({ dayIndex: 0, changed: true, outcome: { date: playerFor(state, LEO)!.dayOne, status: "credited" } });
     // Without the player's own words the day is only known to be countable; nothing is written.
     expect(count(state, 0, now, false, false)).toEqual({ dayIndex: 0, changed: false, outcome: { date: playerFor(state, LEO)!.dayOne, status: "words_needed" } });
+    // Today counts the same way: it is the words post they could write in the app.
+    expect(count(state, 3, now)).toMatchObject({ dayIndex: 3, changed: true, outcome: { status: "credited" } });
+    expect(count(state, 3, now, false, false)).toMatchObject({ dayIndex: 3, changed: false, outcome: { status: "words_needed" } });
     // A day that can't be counted is refused before anyone is asked for words.
-    expect(() => count(state, 3, now, false, false)).toThrow("still open");
+    expect(() => count(state, 1, now, false, false)).toThrow("day off");
     // Marking not done, and the older restore, still find nothing to change.
     expect(count(state, 0, now, true).outcome.status).toBe("no_artifact");
     expect(decideDayCompletion(state, { memberId: LEO, date: playerFor(state, LEO)!.dayOne!, incomplete: false, now }).outcome.status).toBe("no_artifact");
-    expect(() => count(state, 3, now)).toThrow("still open");
     expect(() => count(state, 1, now)).toThrow("day off");
     expect(() => count(state, 4, now)).toThrow("already started");
     state.game.terms.versions[0].checkInKind = "photo";

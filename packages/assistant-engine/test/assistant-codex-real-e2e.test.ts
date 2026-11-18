@@ -49813,6 +49813,10 @@ describeRealCodex('real Codex game incomplete day e2e', () => {
     { name: 'game missed day posts the words the player gives', message: 'Murph, I never posted yesterday but I did read. Count it, and make my post say: Finished chapter nine on the train', operation: 'mark_complete', outcome: 'credited', words: 'Finished chapter nine on the train' },
     { name: 'game missed day posts the answer for the day Murph asked about', message: 'Finished chapter nine on the train', operation: 'mark_complete', outcome: 'credited', words: 'Finished chapter nine on the train',
       earlier: 'Earlier in this chat:\n- Maya: Murph, I never posted yesterday but I did read my chapter. Can you count it?\n- Murph: Sure, Maya. What do you want your March 5 post to say?\n\n' },
+    // Today is countable too: a plain yes to the evening check-in is the same claim.
+    { name: 'game today counts a plain yes to the evening check-in', message: 'yes! done for today', operation: 'mark_complete', outcome: 'words_needed', today: true,
+      earlier: 'Earlier in this chat:\n- Murph: Maya, have you finished today’s chapter? Sam, have you done today’s walk?\n\n' },
+    { name: 'game today posts the words the player gives', message: 'Read my chapter tonight. Count it, and make my post say: Chapter ten before bed', operation: 'mark_complete', outcome: 'credited', words: 'Chapter ten before bed', today: true },
     { name: 'game missed day refuses to count the other player’s day', message: 'Murph, Sam never posted yesterday but he did his walk. Count yesterday for Sam.', operation: null, outcome: 'other_player' },
     { name: 'game incomplete day refuses to change the other player', message: 'Murph, mark Sam as not done yesterday. Sam did not finish the walk.', operation: null, outcome: 'other_player' },
     { name: 'game incomplete day asks once for an ambiguous date', message: 'Murph, I did not finish my chapter one day. Mark that day as not done.', operation: null, outcome: null },
@@ -49820,9 +49824,11 @@ describeRealCodex('real Codex game incomplete day e2e', () => {
     const { message, operation, outcome } = scenario
     const words = 'words' in scenario ? scenario.words : null
     const delayed = 'delayed' in scenario
-    const expectedDate = delayed ? '2030-03-04' : '2030-03-05'
-    const occurredAt = delayed ? '2030-03-06T07:59:00.000Z' : '2030-03-06T16:00:00.000Z'
-    const processingAt = delayed ? '2030-03-06T08:01:00.000Z' : '2030-03-06T16:00:00.000Z'
+    const today = 'today' in scenario
+    const expectedDate = delayed ? '2030-03-04' : today ? '2030-03-06' : '2030-03-05'
+    // Today's journeys reply at 10:32 PM New York time, after the evening check-in.
+    const occurredAt = delayed ? '2030-03-06T07:59:00.000Z' : today ? '2030-03-07T03:32:00.000Z' : '2030-03-06T16:00:00.000Z'
+    const processingAt = delayed ? '2030-03-06T08:01:00.000Z' : today ? '2030-03-07T03:32:00.000Z' : '2030-03-06T16:00:00.000Z'
     const config = await resolveRealCodexE2eConfig()
     const workingDirectory = await mkdtemp(path.join(tmpdir(), 'murph-game-incomplete-e2e-'))
     const { MURPH_READ_GAME_TOOL, MURPH_UPDATE_GAME_TOOL } = await import('../src/assistant-codex/dynamic-tools/games.js')
@@ -49833,7 +49839,7 @@ describeRealCodex('real Codex game incomplete day e2e', () => {
       id: 'game_synthetic', status: 'live' as const, lengthDays: 7, startsOn: '2030-03-04',
       terms: { n: 1, fromDay: 0, checkInKind: 'any' as const, tasks: [{ seat: 0, text: 'Read a chapter' }, { seat: 1, text: 'Walk' }], schedule: { days: [0, 1, 2, 3, 4, 5, 6] }, stakes: [{ kind: 'prize' as const, item: 'Pick movie night' }] },
       players: [{ memberId: 'player_maya', seat: 0, firstName: 'Maya', dayOne: '2030-03-04', timeZone: 'America/New_York' }, { memberId: 'player_sam', seat: 1, firstName: 'Sam', dayOne: '2030-03-04', timeZone: 'America/New_York' }, ...('group' in scenario ? [{ memberId: 'player_ava', seat: 2, firstName: 'Ava', dayOne: '2030-03-04', timeZone: 'America/New_York' }] : [])],
-      progress: { checkedAt: processingAt, players: [{ memberId: 'player_maya', score: 1, target: 7, currentDayIndex: 2, currentEntryId: null, attemptsRemaining: 2, days: [{ dayIndex: 1, date: '2030-03-05', status: outcome === 'no_artifact' || outcome === 'credited' || outcome === 'words_needed' ? 'missed' as const : 'posted' as const }] }] },
+      progress: { checkedAt: processingAt, players: [{ memberId: 'player_maya', score: 1, target: 7, currentDayIndex: 2, currentEntryId: null, attemptsRemaining: 2, days: [{ dayIndex: 1, date: '2030-03-05', status: !today && (outcome === 'no_artifact' || outcome === 'credited' || outcome === 'words_needed') ? 'missed' as const : 'posted' as const }] }] },
       pendingChange: null,
       changeControls: { canStartNow: false, canEdit: true, canEditSchedule: true, canEditStartDate: false, canEditTasks: false, canEditStakes: true, editableFromDay: 3 },
     }
@@ -49884,7 +49890,7 @@ describeRealCodex('real Codex game incomplete day e2e', () => {
         expect(calls.filter(call => call.action === 'update_game')).toHaveLength(1)
         expect(calls.slice(2).map(call => call.action)).toEqual(calls.length === 3 ? ['read_game'] : [])
         expect(calls.length).toBeLessThanOrEqual(3)
-        expect(reply).toMatch(delayed ? /March 4|Mar(?:ch)?\.? 4|4 March|Monday|2030-03-04/iu : /March 5|Mar(?:ch)?\.? 5|5 March|Tuesday|2030-03-05/iu)
+        expect(reply).toMatch(delayed ? /March 4|Mar(?:ch)?\.? 4|4 March|Monday|2030-03-04/iu : today ? (outcome === 'words_needed' ? /today|tonight/iu : /today|tonight|March 6|Mar(?:ch)?\.? 6|6 March|Wednesday|2030-03-06/iu) : /March 5|Mar(?:ch)?\.? 5|5 March|Tuesday|2030-03-05/iu)
         if (outcome === 'no_artifact') expect(reply).toMatch(/already|no (?:post|artifact|check.in)|nothing|wasn[’']?t posted|not posted/iu)
         else if (outcome === 'restored') expect(reply).toMatch(/restored|undid|undone|cleared|removed|done|complete|counts again/iu)
         else if (outcome === 'words_needed') {
