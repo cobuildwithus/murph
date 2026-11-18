@@ -92,6 +92,7 @@ describe("served Web protocol admission", () => {
     expect(response.status).toBe(200);
     const evidence = await response.json();
     expect(() => assertHostedRuntimeWebProtocolAdmission(evidence, probe.headers.get(HOSTED_EXECUTION_NONCE_HEADER)!)).not.toThrow();
+    expect(evidence.pricedAssistantModels).toEqual(["gpt-6.2-sol", "gpt-6.2-astra"]);
     expect(edges.consume).toHaveBeenCalledOnce();
     expect(edges.consume).toHaveBeenCalledWith(expect.objectContaining({ userId: "system:hosted-runtime-protocol-admission" }));
     expect(edges.write).not.toHaveBeenCalled();
