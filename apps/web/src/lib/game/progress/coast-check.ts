@@ -25,7 +25,8 @@ export async function coastAgreement(photo: Uint8Array, painting: Uint8Array, as
   const height = Math.max(1, Math.round(WIDTH / aspect));
   const white = (r: number, g: number, b: number) => r > 200 && g > 200 && b > 200 && Math.max(r, g, b) - Math.min(r, g, b) < 35;
   const [a, b] = await Promise.all([
-    mask(photo, height, (r, g, bl) => bl > r + 12 && r + g + bl < 330, white),
+    // Deep ocean is near black in the photo, (5, 10, 16): dark and leaning blue is sea too.
+    mask(photo, height, (r, g, bl) => (bl > r + 12 || (r + g + bl < 60 && bl > r + 5 && bl > g + 3)) && r + g + bl < 330, white),
     mask(painting, height, (r, g, bl) => bl > r + 25 && bl >= g - 12, white),
   ]);
   const at = (x: number, y: number) => y * WIDTH + x;

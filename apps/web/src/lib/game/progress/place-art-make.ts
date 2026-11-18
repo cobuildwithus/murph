@@ -10,7 +10,8 @@ import type { MapQuery } from './contract';
 import type { RouteLeg } from './state';
 
 const MODEL = 'gpt-image-2.6-flare';
-const MIN_COAST_AGREEMENT = 0.85;
+// Good paintings score 0.93 to 0.96; a coast moved 15 px of 708 scores 0.85.
+const MIN_COAST_AGREEMENT = 0.88;
 // Below this, a typed leg's frame is a neighborhood, not scenery.
 const PUBLIC_MAP_MIN_M = 50_000;
 

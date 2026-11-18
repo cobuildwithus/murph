@@ -68,6 +68,14 @@ describe('painted maps', () => {
     expect(await coastAgreement(coast, mirrored, 4 / 3)).toBeLessThanOrEqual(0.5);
   });
 
+  it('reads the photo\'s near-black deep ocean as sea', async () => {
+    const water = (width: number, color: { r: number; g: number; b: number }) => sharp({ create: { width, height: 300, channels: 3, background: color } }).png().toBuffer();
+    // Deep ocean far out, lighter water by the shore, then land; painted as one blue sea.
+    const photo = await sharp({ create: { width: 400, height: 300, channels: 3, background: land } }).composite([
+      { input: await water(200, { r: 5, g: 10, b: 16 }), left: 0, top: 0 }, { input: await water(60, { r: 20, g: 50, b: 110 }), left: 200, top: 0 }]).png().toBuffer();
+    expect(await coastAgreement(photo, await coastImage(400, 300, 0.65), 4 / 3)).toBeGreaterThan(0.9);
+  });
+
   it('draws the walked and remaining line over the painting at the map size', async () => {
     const painting = await sharp({ create: { width: 708, height: 640, channels: 3, background: land } }).jpeg().toBuffer();
     const drawn = await drawRouteOnPainting(painting, polyline, 0.5, 'drawer');
