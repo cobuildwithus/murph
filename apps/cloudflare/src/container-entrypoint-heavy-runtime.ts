@@ -1,3 +1,4 @@
+import { HOSTED_ASSISTANT_ASTRA_MODEL } from "@murphai/hosted-execution/assistant-model";
 import { createHash } from "node:crypto";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
@@ -13,9 +14,7 @@ import {
   buildHostedRunnerExecutablePath,
   HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV,
   HOSTED_RUNNER_EXECUTABLE_PATH,
-  resolveHostedCodexModelCatalogPath,
 } from "@murphai/assistant-runtime/hosted-runtime-contracts";
-import { HOSTED_ASSISTANT_ASTRA_MODEL } from "@murphai/hosted-execution/assistant-model";
 import {
   drainHostedAssistantDeliveryControlPlaneWritesBestEffort,
   drainHostedRuntimeDeferredUsageCompletionsBestEffort,
@@ -24,9 +23,10 @@ import {
 
 import {
   DEPLOY_LIVE_MODEL_TURN_SMOKE_EXPECTED_OUTPUT,
+  isDeployWebAdmissionModel,
+  DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
   DEPLOY_LIVE_MODEL_TURN_SMOKE_PROMPT,
   readDeployLiveModelTurnSmokeCodexOutputText,
-  readDeployLiveModelTurnSmokeModel,
 } from "./deploy-smoke-live-model.ts";
 import {
   runHostedWorkspaceInvocation,
@@ -88,6 +88,7 @@ export interface HostedContainerDirectR2PresignedPutSmokeResult {
 
 export interface HostedContainerHeavyRuntimeCore {
   buildLiveModelTurnSmokeSafeText(value: string): string;
+  deployLiveModelTurnSmokeModel: string;
   drainFatalRuntimeBestEffort(input: { timeoutMs: number }): Promise<void>;
   drainShutdownRuntimeBestEffort(input: { timeoutMs: number }): Promise<void>;
   runCodexShellSmoke(input: { signal: AbortSignal }): Promise<HostedContainerCodexShellSmokeResult>;
@@ -97,7 +98,6 @@ export interface HostedContainerHeavyRuntimeCore {
     signal: AbortSignal;
     tlsCaCertificatePem?: string;
   }): Promise<HostedContainerDirectR2PresignedPutSmokeResult>;
-  readLiveModelTurnSmokeModel(value: unknown): string | null;
   runLiveModelTurnSmoke(input: {
     model: string;
     signal: AbortSignal;
@@ -250,10 +250,9 @@ async function runHostedContainerCodexShellSmoke(input: {
 
 // The live model turn is deliberately a single non-interactive `codex exec`
 // subprocess with exit-code semantics. Codex app-server RPC plumbing is
-// already proven by the Codex shell smoke and the hosted-local E2E gates.
-// This step closes the real provider boundary for one deployed model: auth,
-// quota, network, and admission of the request this image's Codex and model
-// catalog build for that model, including the provider-native tools.
+// already proven by the Codex shell smoke and the hosted-local E2E gates;
+// the only boundary this step closes is real OpenAI auth/quota/network for
+// one deployed model turn, so it stays as small as possible.
 //
 // The codex subprocess receives only the well-known injected-credential
 // placeholder: managed-container egress to api.openai.com is intercepted by
@@ -367,7 +366,7 @@ async function runHostedContainerLiveModelTurnSmoke(input: {
         ));
       });
       child.stdin?.end(DEPLOY_LIVE_MODEL_TURN_SMOKE_PROMPT);
-    }));
+    }), isDeployWebAdmissionModel(input.model));
 }
 
 // Smoke failure text may embed Codex stdout/stderr. Keep only bounded,
@@ -430,6 +429,7 @@ function buildHostedContainerLiveModelTurnSmokeStdoutSafeText(value: string): st
 async function withHostedContainerCodexSmokeWorkspace<T>(
   model: string,
   run: (workspace: { codexHome: string; smokeVaultRoot: string }) => Promise<T>,
+  webAdmission = false,
 ): Promise<T> {
   const workspaceRoot = await mkdtemp(path.join(tmpdir(), "hosted-codex-shell-smoke-"));
   let codexWorkspaceRoot: string | null = null;
@@ -482,7 +482,7 @@ async function withHostedContainerCodexSmokeWorkspace<T>(
     );
     await writeFile(
       path.join(codexHome, "config.toml"),
-      buildHostedContainerCodexShellSmokeConfig(model),
+      buildHostedContainerCodexShellSmokeConfig(model, webAdmission),
       { mode: 0o600 },
     );
 
@@ -533,12 +533,10 @@ function isPathInside(candidate: string, parent: string): boolean {
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
-export function buildHostedContainerCodexShellSmokeConfig(model: string): string {
-  // Same catalog choice as a member turn: only an Astra turn reads the superset.
-  const modelCatalogJson = resolveHostedCodexModelCatalogPath({
-    imageCatalogPath: readHostedCodexModelCatalogJsonPath() ?? undefined,
-    astraAllowed: model === HOSTED_ASSISTANT_ASTRA_MODEL,
-  });
+export function buildHostedContainerCodexShellSmokeConfig(model: string, webAdmission = false): string {
+  const catalog = readHostedCodexModelCatalogJsonPath();
+  if (webAdmission && !catalog) throw new Error("Hosted web admission requires the candidate image model catalog.");
+  const modelCatalogJson = webAdmission && model === HOSTED_ASSISTANT_ASTRA_MODEL ? `${catalog}.astra` : catalog;
 
   return [
     `model = ${JSON.stringify(model)}`,
@@ -547,6 +545,7 @@ export function buildHostedContainerCodexShellSmokeConfig(model: string): string
       : []),
     'model_provider = "hosted-shell-smoke"',
     'model_reasoning_effort = "low"',
+    ...(webAdmission ? ['web_search = "live"'] : []),
     'approval_policy = "never"',
     'sandbox_mode = "danger-full-access"',
     "check_for_update_on_startup = false",
@@ -556,6 +555,7 @@ export function buildHostedContainerCodexShellSmokeConfig(model: string): string
     "",
     "[features]",
     "plugins = false",
+    ...(webAdmission ? ["standalone_web_search = true"] : []),
     "multi_agent_v2 = true",
     "",
     '[model_providers."hosted-shell-smoke"]',
@@ -565,6 +565,7 @@ export function buildHostedContainerCodexShellSmokeConfig(model: string): string
     'wire_api = "responses"',
     'requires_openai_auth = false',
     "supports_websockets = false",
+    ...(webAdmission ? ["supports_standalone_web_search = true"] : []),
     // The deploy-smoke egress fence admits exactly one provider request, so a
     // retry could only be refused and would hide the original failure.
     "request_max_retries = 0",
@@ -1030,6 +1031,7 @@ function copyOptionalHostedContainerSmokeEnv(
 
 export const hostedContainerHeavyRuntime: HostedContainerHeavyRuntimeCore = {
   buildLiveModelTurnSmokeSafeText: buildHostedContainerLiveModelTurnSmokeSafeText,
+  deployLiveModelTurnSmokeModel: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
   async drainFatalRuntimeBestEffort(input) {
     await Promise.allSettled([
       drainHostedAssistantDeliveryControlPlaneWritesBestEffort(),
@@ -1047,7 +1049,6 @@ export const hostedContainerHeavyRuntime: HostedContainerHeavyRuntimeCore = {
   },
   runCodexShellSmoke: runHostedContainerCodexShellSmoke,
   runDirectR2PresignedPutSmoke: runHostedContainerDirectR2PresignedPutSmoke,
-  readLiveModelTurnSmokeModel: readDeployLiveModelTurnSmokeModel,
   runLiveModelTurnSmoke: runHostedContainerLiveModelTurnSmoke,
   runWorkspaceInvocation: runHostedWorkspaceInvocation,
   async warmCodexBinary(input) {

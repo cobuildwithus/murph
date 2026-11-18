@@ -12,20 +12,6 @@ import { fileURLToPath } from 'node:url'
 const SCRIPTED_STUB_KEY_ENV = 'MURPH_SCRIPTED_STUB_KEY'
 export const SCRIPTED_MODEL = 'gpt-6.2-sol'
 const SCRIPTED_MODEL_PROVIDER = 'local-stub'
-// api.openai.com rejects the whole request when a function it reserves for the
-// model differs from the schema it has configured. Proven against the live
-// Responses API on 2026-11-18 for every hosted image catalog model: only
-// `parameters` is compared (a changed description is accepted), and one extra
-// property returns the 400 below. This stub applies the same rule, so a Codex
-// pin, model catalog or config change that alters `web.run` fails the scripted
-// suites instead of every member reply. Before changing the digest, prove the
-// new shape on each catalog model with the provider key:
-//   pnpm test:assistant:live -- --auth provider --model <slug> \
-//     --test 'answers an ordinary foreground message with the hosted web schema enabled'
-export const LIVE_PROVEN_WEB_RUN_PARAMETERS_SHA256 =
-  'de3be87e7abfe9b67ba757f27804d4206b51c2a8de9e9799fa7db9ef4abe3539'
-const PROVIDER_RESERVED_WEB_RUN_REJECTION =
-  "Invalid Value: 'tools'. Function 'web.run' is reserved for use by this model and must match the configured schema."
 const codexCommand = process.env.MURPH_TEST_CODEX_COMMAND?.trim() || path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   '../../node_modules/.bin/codex',
@@ -110,8 +96,6 @@ export interface ScriptedProviderRequestSummary {
   functionCallOutputs?: string[]
   imageWidths?: number[]
   model: string | null
-  // Digest of the canonical `web.run` parameters this request declared.
-  reservedWebRunParametersSha256?: string
   providerRequestDiagnostics?: {
     bytes: number
     sha256: string
@@ -142,9 +126,6 @@ export async function prepareScriptedTurnScenario(
     model?: string
     modelProvider?: string
     multiAgentV2?: boolean
-    // Codex declares its provider-native tools, such as `web.run`, only for a
-    // provider named like production's. The default name keeps them out.
-    providerName?: string
   } = {},
 ): Promise<{
   stub: ScriptedStub
@@ -213,7 +194,6 @@ function buildScriptedCodexConfigToml(
     apiKeyEnv?: string
     modelProvider?: string
     multiAgentV2?: boolean
-    providerName?: string
   } = {},
 ): string {
   const modelProvider = options.modelProvider ?? SCRIPTED_MODEL_PROVIDER
@@ -229,7 +209,7 @@ function buildScriptedCodexConfigToml(
     'persistence = "none"',
     '',
     `[model_providers."${modelProvider}"]`,
-    `name = ${JSON.stringify(options.providerName ?? 'Local scripted stub')}`,
+    'name = "Local scripted stub"',
     `base_url = "${baseUrl}"`,
     `env_key = "${options.apiKeyEnv ?? SCRIPTED_STUB_KEY_ENV}"`,
     'wire_api = "responses"',
@@ -287,20 +267,6 @@ export async function startScriptedResponsesStub(): Promise<ScriptedStub> {
       providerRequestDiagnosticsEnabled,
       completeProviderInputEnabled,
     ))
-    const reservedWebRun = requestSummaries[requestSummaries.length - 1]!.reservedWebRunParametersSha256
-    if (reservedWebRun && reservedWebRun !== LIVE_PROVEN_WEB_RUN_PARAMETERS_SHA256) {
-      response.statusCode = 400
-      response.setHeader('content-type', 'application/json')
-      response.end(JSON.stringify({
-        error: {
-          code: null,
-          message: PROVIDER_RESERVED_WEB_RUN_REJECTION,
-          param: 'tools',
-          type: 'invalid_request_error',
-        },
-      }))
-      return
-    }
     const scriptedResponseIndex = queuedResponses.findIndex((candidate) =>
       scriptedResponseMatchesRequest(candidate, requestBody)
     )
@@ -586,23 +552,17 @@ function readScriptedProviderRequestSummary(
   if (includeCompleteInput && body) {
     const { prompt_cache_key: _cacheIdentity, ...completeInput } = body
     completeProviderInput = {
-      json: canonicalJson(completeInput),
+      json: JSON.stringify(completeInput, (_key, value: unknown) => {
+        const record = readRecord(value)
+        return record
+          ? Object.fromEntries(Object.keys(record).sort().map((key) => [key, record[key]]))
+          : value
+      }),
       excludedTransportFields: Object.hasOwn(body, 'prompt_cache_key') ? ['prompt_cache_key'] : [],
     }
   }
-  const webNamespace = tools.find((tool) => tool?.type === 'namespace' && tool.name === 'web')
-  const reservedWebRun = Array.isArray(webNamespace?.tools)
-    ? webNamespace.tools.map(readRecord).find((tool) => tool?.name === 'run')
-    : undefined
   return {
     ...(completeProviderInput ? { completeProviderInput } : {}),
-    ...(reservedWebRun
-      ? {
-          reservedWebRunParametersSha256: createHash('sha256')
-            .update(canonicalJson(reservedWebRun.parameters))
-            .digest('hex'),
-        }
-      : {}),
     ...(customToolCallOutputs.length > 0 ? { customToolCallOutputs } : {}),
     ...(functionCallOutputs.length > 0 ? { functionCallOutputs } : {}),
     ...(imageWidths.length > 0 ? { imageWidths } : {}),
@@ -644,16 +604,6 @@ function readScriptedProviderRequestSummary(
     serviceTier: readString(body?.service_tier),
     ...(toolSearchOutputTools.length > 0 ? { toolSearchOutputTools } : {}),
   }
-}
-
-// Sorts object keys only: array order and every value stay as sent.
-function canonicalJson(value: unknown): string {
-  return JSON.stringify(value, (_key, nested: unknown) => {
-    const record = readRecord(nested)
-    return record
-      ? Object.fromEntries(Object.keys(record).sort().map((key) => [key, record[key]]))
-      : nested
-  })
 }
 
 export function readRecord(value: unknown): Record<string, unknown> | null {

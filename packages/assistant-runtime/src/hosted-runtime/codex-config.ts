@@ -56,7 +56,13 @@ import {
 
 const HOSTED_CODEX_CONFIG_DIR_NAME = ".codex-hosted";
 
-export { resolveHostedCodexModelCatalogPath } from "./launch-spec.ts";
+export function resolveHostedCodexModelCatalogPath(input: {
+  imageCatalogPath: string | undefined;
+  astraAllowed: boolean | undefined;
+}): string | undefined {
+  const catalogPath = input.imageCatalogPath?.trim();
+  return catalogPath && input.astraAllowed === true ? `${catalogPath}.astra` : catalogPath;
+}
 
 const HOSTED_CODEX_CONFIG_FILE_NAME = "config.toml";
 const HOSTED_CODEX_AUTH_FILE_NAME = "auth.json";

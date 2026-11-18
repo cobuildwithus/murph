@@ -39,7 +39,7 @@ import {
   parseBrowserVaultSessionRequest,
 } from "../src/worker/route-handlers/browser-vault-session.ts";
 import {
-  DEPLOY_LIVE_MODEL_TURN_SMOKE_MODELS,
+  DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
 } from "../src/deploy-smoke-live-model.ts";
 
 import {
@@ -655,12 +655,12 @@ describe("cloudflare worker routes", () => {
   });
 
   it("forwards the live model turn flag to the managed container smoke", async () => {
-    const smokeHealth = vi.fn(async (input?: {
+    const smokeHealth = vi.fn(async (input: {
       liveModelTurn?: {
-        models: readonly string[];
+        model: string;
       };
     }) => {
-      if (input?.liveModelTurn?.models !== DEPLOY_LIVE_MODEL_TURN_SMOKE_MODELS) {
+      if (input.liveModelTurn?.model !== DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL) {
         throw new Error("Expected the live model turn smoke input.");
       }
 
@@ -668,7 +668,7 @@ describe("cloudflare worker routes", () => {
         liveModelTurn: {
           durationMs: 1_234,
           egressGrantConsumed: true,
-          models: [...DEPLOY_LIVE_MODEL_TURN_SMOKE_MODELS],
+          model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
           stdoutBytes: 2_048,
         },
         ok: true,
@@ -700,7 +700,7 @@ describe("cloudflare worker routes", () => {
     expect(response.status).toBe(200);
     expect(smokeHealth).toHaveBeenCalledWith({
       liveModelTurn: {
-        models: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODELS,
+        model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
       },
     });
     await expect(response.json()).resolves.toMatchObject({
@@ -709,7 +709,7 @@ describe("cloudflare worker routes", () => {
         liveModelTurn: {
           durationMs: 1_234,
           egressGrantConsumed: true,
-          models: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODELS,
+          model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
           stdoutBytes: 2_048,
         },
       },
@@ -4833,7 +4833,7 @@ describe("deployment standby serving proof", () => {
     expect(h.prepareStandbySlot).toHaveBeenCalledOnce();
     expect(h.retireStandbySlot).toHaveBeenCalledWith({});
     expect(h.smokeHealth).toHaveBeenCalledExactlyOnceWith({
-      liveModelTurn: { models: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODELS },
+      liveModelTurn: { model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL },
     });
     await expect(response.json()).resolves.toMatchObject({ ok: true,
       standbyInventory: { ready: true, readyCount: 2, target: 2, provisioningCount: 0 } });

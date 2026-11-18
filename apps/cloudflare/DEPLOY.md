@@ -1748,13 +1748,7 @@ increase in failed starts, and a candidate p95 no more than one second slower
 than the prior version. A rollback must also preserve the unified-fleet
 identity compatibility floor described in the migration section.
 
-The production smoke also runs one real model turn for every model a member can be routed to (`HOSTED_ASSISTANT_PRODUCT_MODELS`, which a contract test keeps equal to the image catalog's models) inside the deployed runner container (`HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN=true`, set by the deploy workflow's `live_model_turn` input, default on). The Worker asks the container for one model at a time. For each, the container runs a single non-interactive `codex exec` in a scratch workspace with the injected-credential placeholder and the catalog a member turn on that model reads (the `.astra` superset only for Astra); the Worker egress intercept authorizes exactly one deploy-smoke fenced `POST /v1/responses` request for that model and injects the real Worker-owned `OPENAI_API_KEY`, so the smoke proves the rollout target's OpenAI auth, account availability, quota, network path, and the provider's admission of the request this image builds for each model, without the raw key ever entering the container. The container accepts a turn only when Codex JSONL reports the final agent output as exactly `OK`, and the first model that fails ends the smoke.
-
-Every model runs because the provider validates a request per model. On 2026-11-18 it rejected every GPT-6.2 request an image built (a provider-reserved tool whose schema the image's catalog had changed), while the single Luna turn the smoke then ran still passed. The smoke turn carries Codex's native and provider-reserved tools but not Murph's own tools; `assistant-codex-tool-input-contract.test.ts` covers the member tool surface against a stub that enforces the live-proven reserved schema.
-
-Cost posture: each enabled behavioral smoke phase runs one bounded turn per product model per attempt (five models today, about 14,000 input tokens and a two-character reply each), and a retried attempt (a container that never started, or a pre-rollout container) can run them again; an image release checks the isolated artifact before serving replacement and retains the existing post-rollout checks; the flag remains disabled in per-PR CI and hosted-local E2E. Provider retries stay off, so one transient provider error on any model fails the smoke and the release is rerun.
-
-The Worker and the image must agree on this protocol. A Worker with the per-model smoke fails the live turn against an image that predates it (that image runs its one fixed model, which the per-model fence refuses), so the first release that carries the per-model smoke must roll the image, which a normal release from that commit does.
+Before a new production image can replace the member-serving runner, the isolated candidate runs two real `codex exec` requests. Sol uses the image’s standard catalog and Astra uses its enabled catalog. Each request must include the native `web.run` function, reach OpenAI through a one-use, model-specific Worker egress grant, and return the expected answer. The deploy client checks both receipts against the candidate bundle. A missing receipt, provider rejection or incorrect answer blocks replacement. The compatibility Worker is already active at this point and the previous member runner continues serving. A provisioning retry can repeat the pair on a fresh smoke container. The optional post-rollout Luna request remains controlled by `HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN`. Disabling it does not disable production image admission. The raw provider key stays in the Worker; routine PR CI uses a loopback Responses server.
 
 ## Native prompt-cache retention
 
@@ -2977,7 +2971,7 @@ Gradual deploys run managed-container smoke with a longer retry window so Cloudf
   intended root reads succeed while writes, `.runtime/**`, `.codex/**`, environment
   files, other roots, inherited shell secrets, and tool network are denied
 - if `HOSTED_EXECUTION_SMOKE_DIRECT_R2_PRESIGNED_PUT=true`, a managed-container smoke uploads a deterministic payload through a direct R2 presigned `PUT`, verifies it through the Worker R2 binding, and deletes the object
-- if `HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN=true`, the managed-container smoke runs one real turn per hosted product model via `codex exec` inside the deployed container through the Worker OpenAI egress intercept
+- if `HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN=true`, the managed-container smoke runs one real `gpt-6-luna` turn via `codex exec` inside the deployed container through the Worker OpenAI egress intercept
 - if `HOSTED_EXECUTION_SMOKE_USER_ID` is configured, one authenticated `GET /internal/users/:userId/status`
 
 The GitHub deploy workflow enables `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER` for every Worker deploy and sets a longer managed-container retry window for gradual rollouts. It enables `HOSTED_EXECUTION_SMOKE_DIRECT_R2_PRESIGNED_PUT` only when `container_rollout=immediate`, and `HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN` per the `live_model_turn` input (default on).
@@ -3014,7 +3008,7 @@ Optional smoke env:
 - `HOSTED_EXECUTION_SMOKE_OIDC_TOKEN` or `VERCEL_OIDC_TOKEN` for authenticated status auth
 - `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true` to run the deploy-signed managed-container health/fingerprint smoke
 - `HOSTED_EXECUTION_SMOKE_DIRECT_R2_PRESIGNED_PUT=true` to extend the managed-container smoke with the direct R2 presigned upload check; requires `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true`
-- `HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN=true` to extend the managed-container smoke with one real turn per hosted product model; requires `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true`
+- `HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN=true` to extend the managed-container smoke with one real `gpt-6-luna` turn; requires `HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true`
 - `HOSTED_EXECUTION_SMOKE_VERSION_ID` to pin smoke requests to a version in the active deployment; the deploy workflow passes the freshly deployed version
 - `HOSTED_EXECUTION_SMOKE_EXPECTED_STANDBY_MODE` to require `off`, `shadow`, or
   `allocate` from that exact Worker version; omission or mismatch fails the

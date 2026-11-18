@@ -35,7 +35,8 @@ import {
   HOSTED_RUNNER_SMOKE_HEALTH_COMMONS_CLI_GOAL_PROOF_COUNT,
 } from "../src/hosted-runner-smoke-contract.ts";
 import {
-  DEPLOY_LIVE_MODEL_TURN_SMOKE_MODELS,
+  DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
+  DEPLOY_WEB_MODEL_ADMISSION_MODELS,
 } from "../src/deploy-smoke-live-model.ts";
 import {
   readHostedStandbyMode,
@@ -100,7 +101,7 @@ interface SmokeDirectR2PresignedPutResult {
 interface SmokeLiveModelTurnResult {
   durationMs?: unknown;
   egressGrantConsumed?: unknown;
-  models?: unknown;
+  model?: unknown;
   stdoutBytes?: unknown;
 }
 
@@ -205,7 +206,10 @@ export async function runSmokeHostedDeploy(input: {
       "HOSTED_EXECUTION_SMOKE_DIRECT_R2_PRESIGNED_PUT requires HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER=true.",
     );
   }
-  const shouldSmokeLiveModelTurn = readBooleanEnv(
+  // Image admission is mandatory for production even when the optional
+  // post-rollout Luna turn is disabled.
+  const productionArtifact = input.phase === "artifact" && source.HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT === "production";
+  const shouldSmokeLiveModelTurn = productionArtifact || readBooleanEnv(
     source.HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN,
     false,
   );
@@ -262,8 +266,8 @@ export async function runSmokeHostedDeploy(input: {
         }),
         versionOverrideHeaders,
         expectDirectR2PresignedPut: shouldSmokeDirectR2PresignedPut,
-        expectLiveModelTurnModels: shouldSmokeLiveModelTurn
-          ? DEPLOY_LIVE_MODEL_TURN_SMOKE_MODELS
+        expectLiveModelTurnModel: shouldSmokeLiveModelTurn
+          ? DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL
           : null,
       });
     } finally {
@@ -272,6 +276,7 @@ export async function runSmokeHostedDeploy(input: {
   }
 
   if (input.phase === "artifact") {
+    if (shouldSmokeLiveModelTurn) log(`Live candidate web.run admission passed for ${DEPLOY_WEB_MODEL_ADMISSION_MODELS.join(" and ")}.`);
     log("Isolated candidate artifact smoke checks passed.");
     return;
   }
@@ -304,7 +309,7 @@ export async function runSmokeHostedDeploy(input: {
 
 async function assertRunnerContainerSmoke(input: {
   expectDirectR2PresignedPut: boolean;
-  expectLiveModelTurnModels: readonly string[] | null;
+  expectLiveModelTurnModel: string | null;
   fetchImpl: FetchLike;
   log: (message: string) => void;
   source: EnvSource;
@@ -394,7 +399,7 @@ function assertSmokeStandbyInventory(
 async function readRunnerContainerSmoke(input: {
   attempt: number;
   expectDirectR2PresignedPut: boolean;
-  expectLiveModelTurnModels: readonly string[] | null;
+  expectLiveModelTurnModel: string | null;
   fetchImpl: FetchLike;
   expectedManifest: SmokeRunnerBundleManifest;
   signal: AbortSignal;
@@ -443,6 +448,7 @@ async function readRunnerContainerSmoke(input: {
       codexShell?: SmokeCodexShellResult | null;
       directR2PresignedPut?: SmokeDirectR2PresignedPutResult | null;
       liveModelTurn?: SmokeLiveModelTurnResult | null;
+      webModelTurns?: SmokeLiveModelTurnResult[];
       liveModelTurnFailure?: unknown;
       ok?: unknown;
       runnerBundle?: SmokeRunnerBundleManifest | null;
@@ -487,11 +493,8 @@ async function readRunnerContainerSmoke(input: {
   if (input.expectDirectR2PresignedPut) {
     assertSmokeDirectR2PresignedPutResult(responsePayload.runnerContainer.directR2PresignedPut);
   }
-  if (input.expectLiveModelTurnModels !== null) {
-    assertSmokeLiveModelTurnResult(
-      responsePayload.runnerContainer.liveModelTurn,
-      input.expectLiveModelTurnModels,
-    );
+  if (input.expectLiveModelTurnModel !== null) {
+    assertSmokeModelReceipts(url.pathname, responsePayload.runnerContainer, input.expectLiveModelTurnModel);
   }
 
   return runnerBundle;
@@ -598,21 +601,31 @@ function assertSmokeDirectR2PresignedPutResult(
   }
 }
 
+function assertSmokeModelReceipts(
+  pathname: string,
+  container: { liveModelTurn?: SmokeLiveModelTurnResult | null; webModelTurns?: SmokeLiveModelTurnResult[] },
+  expectedModel: string,
+): void {
+  if (pathname !== "/internal/deploy/artifact-smoke") {
+    assertSmokeLiveModelTurnResult(container.liveModelTurn, expectedModel);
+    return;
+  }
+  const turns = container.webModelTurns;
+  if (!Array.isArray(turns) || turns.length !== DEPLOY_WEB_MODEL_ADMISSION_MODELS.length) {
+    throw new Error("Candidate runner did not prove all hosted web model admissions.");
+  }
+  DEPLOY_WEB_MODEL_ADMISSION_MODELS.forEach((model, index) => assertSmokeLiveModelTurnResult(turns[index], model));
+}
+
 function assertSmokeLiveModelTurnResult(
   value: SmokeLiveModelTurnResult | null | undefined,
-  expectedModels: readonly string[],
+  expectedModel: string,
 ): void {
   if (!value || typeof value !== "object") {
     throw new Error("runner container live model turn smoke did not return metadata.");
   }
-  const models: unknown[] = Array.isArray(value.models) ? value.models : [];
-  const missingModels = expectedModels.filter((model) => !models.includes(model));
-  if (missingModels.length > 0 || models.length !== expectedModels.length) {
-    throw new Error(
-      `runner container live model turn smoke did not prove every product model. missing=${
-        JSON.stringify(missingModels)
-      }`,
-    );
+  if (value.model !== expectedModel) {
+    throw new Error("runner container live model turn smoke did not use the expected model.");
   }
   if (typeof value.durationMs !== "number" || value.durationMs <= 0) {
     throw new Error("runner container live model turn smoke reported an invalid duration.");

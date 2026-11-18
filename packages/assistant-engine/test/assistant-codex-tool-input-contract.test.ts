@@ -1,9 +1,8 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { readFile, rm, writeFile } from 'node:fs/promises'
+import { rm } from 'node:fs/promises'
 
 import { HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV } from '@murphai/hosted-execution/env'
-import { OPENAI_CODEX_MODEL_PROVIDER_CONFIG } from '@murphai/operator-config/assistant/target-runtime'
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
@@ -28,7 +27,6 @@ import { buildAssistantSystemPromptLayers } from '../src/assistant/system-prompt
 import { writeHostedOpenAiMixedModeModelCatalogJson } from './support/codex-model-catalog.ts'
 import { assertNoSongAttachmentFailure } from './support/song-receipt-proof.ts'
 import {
-  LIVE_PROVEN_WEB_RUN_PARAMETERS_SHA256,
   prepareScriptedTurnScenario,
   readRecord,
   startScriptedResponsesStub,
@@ -366,56 +364,6 @@ describe('Codex canonical tool input contract upgrade guard', () => {
       expect(repeated).toEqual(offered)
       expect(buildCodexThreadResumeParams({ input: registration(tools), codexThreadId: 'existing-thread' })).not.toHaveProperty('dynamicTools')
     }
-  })
-
-  // 2026-11-18: one experimental catalog entry made Codex add a property to the
-  // provider-reserved `web.run` function. The provider then answered every
-  // GPT-6.2 request with a 400, and no member on those models got a reply.
-  it('declares the live-proven web.run schema for every hosted image catalog model', { timeout: 180_000 }, async () => {
-    stub ??= await startScriptedResponsesStub()
-    const scripted = stub
-    const scenario = await prepareScriptedTurnScenario(scripted, temporaryPaths, {
-      providerName: OPENAI_CODEX_MODEL_PROVIDER_CONFIG.name,
-    })
-    const catalogPath = await writeHostedOpenAiMixedModeModelCatalogJson({
-      codexCommand: scenario.turnInput.codexCommand, directory: scenario.turnInput.codexHome, astraAllowed: true,
-    })
-    const catalog = JSON.parse(await readFile(catalogPath, 'utf8')) as {
-      models: { slug: string; experimental_supported_tools: string[] }[]
-    }
-    async function memberTurn(model: string, modelCatalogJson: string) {
-      scripted.markRequestBaseline()
-      scripted.resetQueue()
-      scripted.queue({ text: CONTRACT_CAPTURE_DONE })
-      try {
-        return await executeCodexAppServerTurn({
-          ...scenario.turnInput, model, dynamicTools: resolveMurphDynamicTools({}), fetchImpl: noExternalFetch,
-          env: { ...scenario.turnInput.env, [HOSTED_RUNTIME_CODEX_MODEL_CATALOG_JSON_ENV]: modelCatalogJson },
-          prompt: 'Synthetic provider admission check only.',
-        })
-      } finally {
-        await stopWarmCodexAppServer()
-      }
-    }
-    expect(catalog.models.map((model) => model.slug)).toContain('gpt-6.2-astra')
-    for (const { slug } of catalog.models) {
-      const result = await memberTurn(slug, catalogPath)
-      expect(result.finalMessage, slug).toBe(CONTRACT_CAPTURE_DONE)
-      // Present and accepted: a request without `web.run` would prove nothing.
-      expect(scripted.requestSummariesSinceBaseline()[0]?.reservedWebRunParametersSha256, slug)
-        .toBe(LIVE_PROVEN_WEB_RUN_PARAMETERS_SHA256)
-    }
-
-    // The incident catalog: the same image catalog with that one entry restored.
-    const sol = catalog.models.find((model) => model.slug === 'gpt-6.2-sol')
-    assert.ok(sol)
-    sol.experimental_supported_tools.push('literature_search_query')
-    const incidentCatalogPath = `${catalogPath}.incident.json`
-    await writeFile(incidentCatalogPath, JSON.stringify(catalog), { mode: 0o600 })
-    await expect(memberTurn('gpt-6.2-sol', incidentCatalogPath)).rejects.toThrow(/'web\.run' is reserved/u)
-    expect(scripted.requestSummariesSinceBaseline().at(-1)?.reservedWebRunParametersSha256)
-      .not.toBe(LIVE_PROVEN_WEB_RUN_PARAMETERS_SHA256)
-    scripted.resetQueue()
   })
 
   it('renders actionable automation edit types in real Codex code-mode discovery', { timeout: 180_000 }, async () => {

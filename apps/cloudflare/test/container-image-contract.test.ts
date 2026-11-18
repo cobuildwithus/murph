@@ -2,14 +2,17 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { readFile } from "node:fs/promises";
 
-import { HOSTED_ASSISTANT_PRODUCT_MODELS } from "@murphai/hosted-execution/assistant-model";
 import { describe, expect, it } from "vitest";
 import {
   buildHostedWranglerDeployConfig,
 } from "../scripts/deploy-automation/wrangler-config.ts";
-// The image catalogs carry exactly the models members can be routed to, which
-// is also the list the deploy live-model smoke runs a real turn for.
-const hostedRunnerProductModelSlugs = HOSTED_ASSISTANT_PRODUCT_MODELS;
+const hostedRunnerProductModelSlugs = [
+  "gpt-6.1-terra",
+  "gpt-6.2-sol",
+  "gpt-6-luna",
+  "gpt-6.2-astra",
+  "gpt-5.6-luna",
+] as const;
 
 function createDeployEnvironment() {
   return {

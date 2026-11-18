@@ -14,7 +14,6 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { HostedAssistantConfigurationError } from "@murphai/operator-config/hosted-assistant-config";
-import { OPENAI_CODEX_MODEL_PROVIDER_CONFIG } from "@murphai/operator-config/assistant/target-runtime";
 import {
   attachHostedRuntimeFailurePhaseCode,
 } from "@murphai/hosted-execution/runtime-control";
@@ -123,6 +122,7 @@ import {
 } from "../src/container-entrypoint-heavy-runtime.js";
 import {
   DEPLOY_LIVE_MODEL_TURN_SMOKE_EXPECTED_OUTPUT,
+  DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
   DEPLOY_LIVE_MODEL_TURN_SMOKE_PROMPT,
 } from "../src/deploy-smoke-live-model.js";
 import { HOSTED_RUNTIME_ARCHITECTURE_VERSION } from "../src/hosted-runtime-architecture.js";
@@ -2013,10 +2013,29 @@ describe("startHostedContainerEntrypoint", () => {
     });
   });
 
-  it("runs the managed-container live model turn smoke for the requested product model", async () => {
-    const runLiveModelTurnSmoke = vi.fn(async (input: { model: string }) => ({
+  it("configures native web admission with the image catalog for each model", () => {
+    const catalog = "/synthetic/catalog.json";
+    vi.stubEnv("MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON", catalog);
+    try {
+      for (const [model, file] of [["gpt-6.2-sol", catalog], ["gpt-6.2-astra", catalog + ".astra"]] as const) {
+        const config = buildHostedContainerCodexShellSmokeConfig(model, true);
+        expect(config).toContain(`model_catalog_json = "${file}"`);
+        expect(config).toContain('web_search = "live"');
+        expect(config).toContain("standalone_web_search = true");
+        expect(config).toContain("supports_standalone_web_search = true");
+      }
+      vi.stubEnv("MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON", "");
+      expect(() => buildHostedContainerCodexShellSmokeConfig("gpt-6.2-sol", true)).toThrow(/catalog/u);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it.each([undefined, "gpt-6.2-sol", "gpt-6.2-astra", "unconfigured"])("dispatches only admitted smoke models to Codex (%s)", async selected => {
+    const model = selected ?? DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL;
+    const runLiveModelTurnSmoke = vi.fn(async () => ({
       durationMs: 1_234,
-      model: input.model,
+      model,
       stdoutBytes: 2_048,
     }));
     const server = await startHostedContainerEntrypoint({
@@ -2034,39 +2053,29 @@ describe("startHostedContainerEntrypoint", () => {
 
     const response = await sendHostedContainerJsonRequest({
       body: "",
-      path: "/internal/deploy-live-model-turn-smoke?model=gpt-6.2-sol",
+      headers: selected ? { "x-murph-smoke-model": selected } : {},
+      path: "/internal/deploy-live-model-turn-smoke",
       port: address.port,
     });
 
+    if (selected === "unconfigured") {
+      expect(response.status).toBe(400);
+      expect(runLiveModelTurnSmoke).not.toHaveBeenCalled();
+      return;
+    }
     expect(response.status).toBe(200);
     expect(response.json).toEqual({
       liveModelTurn: {
         durationMs: 1_234,
-        model: "gpt-6.2-sol",
+        model,
         stdoutBytes: 2_048,
       },
       ok: true,
     });
     expect(runLiveModelTurnSmoke).toHaveBeenCalledWith({
-      model: "gpt-6.2-sol",
+      model,
       signal: expect.any(AbortSignal),
     });
-
-    // The Worker names every model; nothing runs for a missing or unknown one.
-    for (const query of ["", "?model=gpt-synthetic-unlisted"]) {
-      const rejected = await sendHostedContainerJsonRequest({
-        body: "",
-        path: `/internal/deploy-live-model-turn-smoke${query}`,
-        port: address.port,
-      });
-      expect(rejected.status).toBe(500);
-      expect(rejected.json).toEqual({
-        error: "Hosted live model turn smoke failed.",
-        ok: false,
-        smokeErrorMessage: "Hosted live model turn smoke requires a product model.",
-      });
-    }
-    expect(runLiveModelTurnSmoke).toHaveBeenCalledTimes(1);
   });
 
   it("passes the managed-container live model turn smoke prompt through codex exec stdin", async () => {
@@ -2127,14 +2136,14 @@ describe("startHostedContainerEntrypoint", () => {
 
       const response = await sendHostedContainerJsonRequest({
         body: "",
-        path: "/internal/deploy-live-model-turn-smoke?model=gpt-6.2-astra",
+        path: "/internal/deploy-live-model-turn-smoke",
         port: address.port,
       });
 
       expect(response.status).toBe(200);
       expect(response.json).toMatchObject({
         liveModelTurn: {
-          model: "gpt-6.2-astra",
+          model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
         },
         ok: true,
       });
@@ -2156,11 +2165,7 @@ describe("startHostedContainerEntrypoint", () => {
         cwd: expect.stringMatching(/vault$/u),
         stdio: ["pipe", "pipe", "pipe"],
       }));
-      expect(codexConfigToml).toContain('model = "gpt-6.2-astra"');
       expect(codexConfigToml).toContain('model_provider = "hosted-shell-smoke"');
-      // Codex declares provider-native tools such as `web.run` only for a
-      // provider with production's name; any other name blinds this smoke.
-      expect(codexConfigToml).toContain(`name = ${JSON.stringify(OPENAI_CODEX_MODEL_PROVIDER_CONFIG.name)}`);
       expect(codexConfigToml).toContain('env_key = "OPENAI_API_KEY"');
       expect(codexConfigToml).toContain('wire_api = "responses"');
       expect(codexConfigToml).toContain("requires_openai_auth = false");
@@ -2241,7 +2246,7 @@ describe("startHostedContainerEntrypoint", () => {
 
       const response = await sendHostedContainerJsonRequest({
         body: "",
-        path: "/internal/deploy-live-model-turn-smoke?model=gpt-6.2-sol",
+        path: "/internal/deploy-live-model-turn-smoke",
         port: address.port,
       });
 
@@ -2318,19 +2323,6 @@ describe("startHostedContainerEntrypoint", () => {
     );
   });
 
-  it("points each smoke turn at the catalog a member turn on that model reads", () => {
-    vi.stubEnv("MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON", "/synthetic/codex-model-catalog.json");
-    try {
-      expect(buildHostedContainerCodexShellSmokeConfig("gpt-6.2-sol"))
-        .toContain('model_catalog_json = "/synthetic/codex-model-catalog.json"\n');
-      // Astra exists only in the superset catalog.
-      expect(buildHostedContainerCodexShellSmokeConfig("gpt-6.2-astra"))
-        .toContain('model_catalog_json = "/synthetic/codex-model-catalog.json.astra"\n');
-    } finally {
-      vi.unstubAllEnvs();
-    }
-  });
-
   it("surfaces capped ASCII-only live model turn smoke failure diagnostics", async () => {
     const runLiveModelTurnSmoke = vi.fn(async () => {
       throw new Error(
@@ -2352,7 +2344,7 @@ describe("startHostedContainerEntrypoint", () => {
 
     const response = await sendHostedContainerJsonRequest({
       body: "",
-      path: "/internal/deploy-live-model-turn-smoke?model=gpt-6.2-sol",
+      path: "/internal/deploy-live-model-turn-smoke",
       port: address.port,
     });
 

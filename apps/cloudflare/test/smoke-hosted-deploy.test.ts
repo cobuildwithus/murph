@@ -32,7 +32,7 @@ import {
   readBearerAuthorizationToken,
 } from "../src/auth-adapter.js";
 import {
-  DEPLOY_LIVE_MODEL_TURN_SMOKE_MODELS,
+  DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
 } from "../src/deploy-smoke-live-model.ts";
 
 import {
@@ -202,7 +202,8 @@ describe("resolveSmokeRunnerManifestPath", () => {
 });
 
 describe("runSmokeHostedDeploy", () => {
-  it("keeps the artifact smoke off serving inventory while checking provenance and model output", async () => {
+  it.each(["accepted", "missing", "duplicate", "wrong model", "unused grant", "provider rejected"])(
+    "requires both live web model receipts before releasing a production artifact (%s)", async (scenario) => {
     const root = await mkdtemp(path.join(os.tmpdir(), "cloudflare-artifact-smoke-"));
     const manifestPath = path.join(root, "manifest.json");
     const manifest = { buildSkipped: false, bundleFingerprint: "expected-bundle", sourceFingerprint: "expected-source" };
@@ -210,7 +211,7 @@ describe("runSmokeHostedDeploy", () => {
     let artifactRequests = 0;
     try {
       await writeFile(manifestPath, JSON.stringify(manifest));
-      await runSmokeHostedDeploy({
+      const smoke = runSmokeHostedDeploy({
         phase: "artifact", log() {},
         fetchImpl: async input => {
           const url = new URL(String(input)); calls.push(url);
@@ -219,15 +220,25 @@ describe("runSmokeHostedDeploy", () => {
           }
           expect(url.pathname).toBe("/internal/deploy/artifact-smoke");
           if (++artifactRequests === 1) return new Response("Old Worker route missing", { status: 404 });
+          expect(url.searchParams.get("liveModelTurn")).toBe("1");
+          const turns = ["gpt-6.2-sol", "gpt-6.2-astra"].map(model => ({
+            durationMs: 1, egressGrantConsumed: true, model, stdoutBytes: 1,
+          }));
+          if (scenario === "duplicate") turns[1] = turns[0]!;
+          if (scenario === "wrong model") turns[1]!.model = "gpt-6-luna";
+          if (scenario === "unused grant") turns[1]!.egressGrantConsumed = false;
           return new Response(JSON.stringify({ ok: true, runnerContainer: {
+            ...(scenario === "missing" ? {} : { webModelTurns: turns }),
+            ...(scenario === "provider rejected" ? { liveModelTurnFailure: "synthetic rejection" } : {}),
             ok: true, runnerBundle: manifest, service: "cloudflare-hosted-runner-node", codexShell: createCodexShellSmokeResult(),
-            liveModelTurn: { durationMs: 1, egressGrantConsumed: true, models: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODELS, stdoutBytes: 1 },
+            liveModelTurn: { durationMs: 1, egressGrantConsumed: true, model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL, stdoutBytes: 1 },
           } }));
         },
         source: {
           HOSTED_EXECUTION_SMOKE_EXPECTED_STANDBY_MODE: "allocate",
           HOSTED_EXECUTION_STANDBY_TARGET: "2",
-          HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN: "true",
+          HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "production",
+          HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN: "false",
           HOSTED_EXECUTION_SMOKE_RUNNER_MANIFEST_PATH: manifestPath,
           HOSTED_EXECUTION_SMOKE_RUNNER_MAX_ATTEMPTS: "2",
           HOSTED_EXECUTION_SMOKE_RUNNER_RETRY_DELAY_MS: "1",
@@ -236,6 +247,12 @@ describe("runSmokeHostedDeploy", () => {
           HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
         },
       });
+      if (scenario !== "accepted") {
+        await expect(smoke).rejects.toThrow(/admission|expected model|egress grant|synthetic rejection/u);
+        expect(artifactRequests).toBe(2);
+        return;
+      }
+      await smoke;
       const artifactCalls = calls.filter(url => url.pathname === "/internal/deploy/artifact-smoke");
       expect(artifactCalls.map(url => url.searchParams.get("attempt"))).toEqual(["1", "2"]);
       expect(artifactCalls.every(url => url.searchParams.get("liveModelTurn") === "1")).toBe(true);
@@ -818,7 +835,7 @@ describe("runSmokeHostedDeploy", () => {
             liveModelTurn: {
               durationMs: 1_234,
               egressGrantConsumed: true,
-              models: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODELS,
+              model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
               stdoutBytes: 2_048,
             },
             ok: true,
@@ -915,33 +932,18 @@ describe("runSmokeHostedDeploy", () => {
       fetchImpl: buildFetchImpl({
         durationMs: 1_234,
         egressGrantConsumed: true,
-        // Luna alone is the smoke that let the 2026-11-18 release through.
-        models: ["gpt-6-luna"],
+        model: "gpt-other",
         stdoutBytes: 2_048,
       }),
       log() {},
       source,
-    })).rejects.toThrow(
-      "runner container live model turn smoke did not prove every product model. "
-        + `missing=${JSON.stringify(DEPLOY_LIVE_MODEL_TURN_SMOKE_MODELS.filter((model) => model !== "gpt-6-luna"))}`,
-    );
-
-    await expect(runSmokeHostedDeploy({
-      fetchImpl: buildFetchImpl({
-        durationMs: 1_234,
-        egressGrantConsumed: true,
-        models: [...DEPLOY_LIVE_MODEL_TURN_SMOKE_MODELS, "gpt-synthetic-unlisted"],
-        stdoutBytes: 2_048,
-      }),
-      log() {},
-      source,
-    })).rejects.toThrow("runner container live model turn smoke did not prove every product model. missing=[]");
+    })).rejects.toThrow("runner container live model turn smoke did not use the expected model.");
 
     await expect(runSmokeHostedDeploy({
       fetchImpl: buildFetchImpl({
         durationMs: 1_234,
         egressGrantConsumed: false,
-        models: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODELS,
+        model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
         stdoutBytes: 2_048,
       }),
       log() {},
@@ -952,7 +954,7 @@ describe("runSmokeHostedDeploy", () => {
       fetchImpl: buildFetchImpl({
         durationMs: 1_234,
         egressGrantConsumed: true,
-        models: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODELS,
+        model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
         stdoutBytes: 0,
       }),
       log() {},
@@ -1079,7 +1081,7 @@ describe("runSmokeHostedDeploy", () => {
           liveModelTurn: {
             durationMs: 1_234,
             egressGrantConsumed: true,
-            models: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODELS,
+            model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
             stdoutBytes: 2_048,
           },
           ok: true,
@@ -1399,7 +1401,7 @@ describe("runSmokeHostedDeploy", () => {
                   liveModelTurn: {
                     durationMs: 1234,
                     egressGrantConsumed: true,
-                    models: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODELS,
+                    model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
                     stdoutBytes: 128,
                   },
                 }),

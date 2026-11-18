@@ -1,22 +1,18 @@
 import {
-  HOSTED_ASSISTANT_PRODUCT_MODELS,
-  isHostedAssistantProductModel,
+  HOSTED_ASSISTANT_ASTRA_MODEL,
+  HOSTED_ASSISTANT_SOL_MODEL,
 } from "@murphai/hosted-execution/assistant-model";
 
-// One real turn for every model a member can be routed to, in each enabled
-// production smoke phase. The provider validates requests per model: on
-// 2026-11-18 it rejected every GPT-6.2 request from an image whose single
-// smoked model, Luna, still passed. Per-PR CI and hosted-local E2E never
-// enable the flag.
-export const DEPLOY_LIVE_MODEL_TURN_SMOKE_MODELS: readonly string[] =
-  HOSTED_ASSISTANT_PRODUCT_MODELS;
+export const DEPLOY_WEB_MODEL_ADMISSION_MODELS = [HOSTED_ASSISTANT_SOL_MODEL, HOSTED_ASSISTANT_ASTRA_MODEL] as const;
+
+export function isDeployWebAdmissionModel(model: unknown): boolean {
+  return DEPLOY_WEB_MODEL_ADMISSION_MODELS.some(candidate => candidate === model);
+}
+
+// The serving smoke retains its single, inexpensive Luna turn.
+export const DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL = "gpt-6-luna";
 export const DEPLOY_LIVE_MODEL_TURN_SMOKE_PROMPT = "Reply with exactly: OK";
 export const DEPLOY_LIVE_MODEL_TURN_SMOKE_EXPECTED_OUTPUT = "OK";
-
-export function readDeployLiveModelTurnSmokeModel(value: unknown): string | null {
-  const model = readString(value);
-  return isHostedAssistantProductModel(model) ? model : null;
-}
 
 export function readDeployLiveModelTurnSmokeOpenAiModel(
   rawBody: string,
@@ -31,7 +27,22 @@ export function readDeployLiveModelTurnSmokeOpenAiModel(
     return null;
   }
   const record = parsed as Record<string, unknown>;
-  return readDeployLiveModelTurnSmokeModel(record.model);
+  const model = readString(record.model);
+  if (model === DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL) return model;
+  if (!isDeployWebAdmissionModel(model)) return null;
+
+  // A successful request with web disabled cannot prove reserved-tool admission.
+  // Mixed Code Mode can send namespaces in an additional_tools input item.
+  const tools = [
+    ...(Array.isArray(record.tools) ? record.tools : []),
+    ...(Array.isArray(record.input) ? record.input.flatMap(item =>
+      isPlainRecord(item) && item.type === "additional_tools" && Array.isArray(item.tools) ? item.tools : [],
+    ) : []),
+  ];
+  return tools.some(tool => isPlainRecord(tool) && tool.type === "namespace" && tool.name === "web"
+    && Array.isArray(tool.tools) && tool.tools.some(child =>
+      isPlainRecord(child) && child.type === "function" && child.name === "run" && isPlainRecord(child.parameters),
+    )) ? model : null;
 }
 
 export function readDeployLiveModelTurnSmokeCodexOutputText(stdout: string): string | null {

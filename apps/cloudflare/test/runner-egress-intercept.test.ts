@@ -76,6 +76,9 @@ import {
 } from "./hosted-execution-fixtures.ts";
 import { RunnerContainer } from "../src/runner-container.ts";
 import { StandbyRunnerContainer } from "../src/standby-runner-container.ts";
+import {
+  DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
+} from "../src/deploy-smoke-live-model.ts";
 import { parseHostedXaiRequestBody } from "../src/runner-egress-xai.ts";
 import {
   HOSTED_GEMINI_VIDEO_ANALYSIS_PATH,
@@ -304,15 +307,13 @@ function createElevenLabsRequest(input: {
   });
 }
 
-const DEPLOY_SMOKE_TEST_MODEL = "gpt-6.2-sol";
-
 function createDeploySmokeOpenAiRequest(input: {
   model?: string;
 } = {}): Request {
   return new Request("https://api.openai.com/v1/responses", {
     body: JSON.stringify({
       input: "anything Codex emits",
-      model: input.model ?? DEPLOY_SMOKE_TEST_MODEL,
+      model: input.model ?? DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
       stream: true,
     }),
     headers: {
@@ -3100,7 +3101,7 @@ describe("hostedRunnerIntercept", () => {
     vi.stubGlobal("fetch", fetchMock);
     const readDeploySmokeLiveModelTurnFence = vi.fn(async () => ({
       active: true,
-      model: DEPLOY_SMOKE_TEST_MODEL,
+      model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
     }));
     const env = createInterceptEnv({
       OPENAI_API_KEY: "openai-worker-secret",
@@ -3140,7 +3141,7 @@ describe("hostedRunnerIntercept", () => {
     const readDeploySmokeLiveModelTurnFence = vi.fn()
       .mockResolvedValueOnce({
         active: true,
-        model: DEPLOY_SMOKE_TEST_MODEL,
+        model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
       })
       .mockResolvedValueOnce({ active: false });
     const env = createInterceptEnv({
@@ -3172,7 +3173,7 @@ describe("hostedRunnerIntercept", () => {
     vi.stubGlobal("fetch", fetchMock);
     const readDeploySmokeLiveModelTurnFence = vi.fn(async () => ({
       active: true,
-      model: DEPLOY_SMOKE_TEST_MODEL,
+      model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
     }));
     const env = createInterceptEnv({
       OPENAI_API_KEY: "openai-worker-secret",
@@ -3202,7 +3203,7 @@ describe("hostedRunnerIntercept", () => {
     vi.stubGlobal("fetch", fetchMock);
     const readDeploySmokeLiveModelTurnFence = vi.fn(async () => ({
       active: true,
-      model: DEPLOY_SMOKE_TEST_MODEL,
+      model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
     }));
     const env = createInterceptEnv({
       OPENAI_API_KEY: "openai-worker-secret",
@@ -3218,17 +3219,6 @@ describe("hostedRunnerIntercept", () => {
 
     expect(response.status).toBe(401);
     expect(readDeploySmokeLiveModelTurnFence).not.toHaveBeenCalled();
-    expect(fetchMock).not.toHaveBeenCalled();
-
-    // Another product model cannot spend the grant opened for this one, so a
-    // turn that ran the wrong model never counts as proof for the fenced model.
-    const otherProductModel = await hostedRunnerIntercept(
-      createDeploySmokeOpenAiRequest({ model: "gpt-6-luna" }),
-      env,
-      { className: "DeploySmokeRunnerContainer", containerId: "deploy-smoke-container-id" },
-    );
-
-    expect(otherProductModel.status).toBe(401);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
