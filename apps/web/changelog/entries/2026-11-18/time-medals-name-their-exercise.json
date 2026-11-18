@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-18",
+  "order": 100,
+  "item": {
+    "id": "time-medals-name-their-exercise",
+    "kind": "improvement",
+    "priority": 4,
+    "title": "Time medals say what they were for",
+    "summary": "A time medal's caption now names its exercise, like 8 min 19 sec planked, so landmarks from different exercises don't look alike.",
+    "details": "Landmark medals already named theirs. Existing medals pick up the new caption the next time Prizes loads.",
+    "relevanceTags": ["progress", "games"],
+    "sourcePullRequests": [5161]
+  }
+}
