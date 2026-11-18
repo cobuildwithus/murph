@@ -12,6 +12,7 @@
       "access": "ok",
       "direction": "flat",
       "headline": "No wins yet",
+      "change": null,
       "daily": [
         [
           "2026-10-17",
@@ -155,6 +156,7 @@
       "access": "ok",
       "direction": "flat",
       "headline": "No wins yet",
+      "change": null,
       "daily": [
         [
           "2026-10-17",
@@ -297,7 +299,8 @@
       "unit": "seconds",
       "access": "ok",
       "direction": "flat",
-      "headline": "No wins yet",
+      "headline": "7h 05m a night",
+      "change": null,
       "daily": [
         [
           "2026-10-17",
