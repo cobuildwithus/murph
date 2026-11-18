@@ -408,6 +408,7 @@
           {
             "name": "San Diego",
             "atText": "mile 0",
+            "aheadText": null,
             "x": 0.9,
             "y": 0.9,
             "passedOn": "2026-10-21"
@@ -415,6 +416,7 @@
           {
             "name": "San Francisco",
             "atText": "arrived today",
+            "aheadText": null,
             "x": 0.1,
             "y": 0.1,
             "passedOn": "2026-11-14"
@@ -426,6 +428,7 @@
           {
             "name": "San Diego",
             "atText": "mile 0",
+            "aheadText": null,
             "x": 0.95,
             "y": 0.784766,
             "passedOn": "2026-10-21"
@@ -433,6 +436,7 @@
           {
             "name": "San Francisco",
             "atText": "arrived today",
+            "aheadText": null,
             "x": 0.05,
             "y": 0.215234,
             "passedOn": "2026-11-14"

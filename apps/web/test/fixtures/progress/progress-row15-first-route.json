@@ -40,6 +40,7 @@
           {
             "name": "Austin",
             "atText": "mile 0",
+            "aheadText": null,
             "x": 0.7,
             "y": 0.1,
             "passedOn": "2026-11-14"
@@ -47,6 +48,7 @@
           {
             "name": "San Antonio",
             "atText": "77 mi to go",
+            "aheadText": "77 mi to go",
             "x": 0.15,
             "y": 0.8,
             "passedOn": null
@@ -58,6 +60,7 @@
           {
             "name": "Austin",
             "atText": "mile 0",
+            "aheadText": null,
             "x": 0.757143,
             "y": 0.174554,
             "passedOn": "2026-11-14"
@@ -65,6 +68,7 @@
           {
             "name": "San Antonio",
             "atText": "77 mi to go",
+            "aheadText": "77 mi to go",
             "x": 0.05,
             "y": 0.744085,
             "passedOn": null

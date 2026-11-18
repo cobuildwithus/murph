@@ -1,11 +1,13 @@
 import "server-only";
 import type { ClientUnits } from "../../companion/client-info";
-import { BANK } from "./bank";
 import { roundTotals, ladderRungs } from "./achievements";
 import { achievementContext, measureView } from "./view";
 import { cumulativePoints, type MeasureSeries } from "./series";
 import type { MeasureState, BeforeProgressMutation } from "./state";
-import { firstRouteId, routePlaces, routeLegs, setFirstRoute } from "./routes";
+import { firstRoutePlaces, phoneRouteRegion, routeLegs, setFirstRoute } from "./routes";
+import { readHostedMemberIdentity } from "../../hosted-onboarding/hosted-member-identity-store";
+import { getPrisma } from "../../prisma";
+import { addDaysToIsoDate } from "@murphai/contracts";
 import { resolveRoute } from "./mapbox";
 import { healthSums } from "./health";
 import type { HealthMetricInput } from "./health-view";
@@ -18,6 +20,15 @@ export function healthJourneyMeasure(id: "steps" | "sleep", amounts: MeasureSeri
     icon: id, unit: id === "steps" ? "steps" : "seconds", ftPerRep: 1, pending: false, gameOn: false, needsPerDay: false, amounts };
 }
 
+/** Mean settled steps a day over the 30 days ending at the last observed day, as miles; null under 7 observed days. */
+export function recentMilesPerDay(amounts: MeasureSeries["amounts"]): number | null {
+  const last = amounts.filter(day => day.amount > 0).at(-1)?.date;
+  if (!last) return null;
+  const from = addDaysToIsoDate(last, -29);
+  const recent = amounts.filter(day => day.date >= from && day.date <= last && day.amount > 0);
+  return recent.length >= 7 ? recent.reduce((sum, day) => sum + day.amount, 0) / recent.length / 2000 : null;
+}
+
 /** The shared ladder and route owners consume the same retained health amounts. */
 export async function healthJourneys(input: {
   memberId: string; metrics: HealthMetricInput[]; states: Map<string, MeasureState>; awards: readonly StoredAward[];
@@ -28,9 +39,11 @@ export async function healthJourneys(input: {
     const amounts = healthSums(metric.id, metric.daily, input.joinedOn, input.today);
     return healthJourneyMeasure(metric.id, amounts, input.awards) ?? [];
   });
-  if (measures.some(measure => measure.id === "steps") && !input.states.get("steps")?.legs?.length) {
-    const route = BANK.find(entry => entry.id === firstRouteId(input.timeZone))!;
-    const places = routePlaces(route.name)!;
+  const steps = measures.find(measure => measure.id === "steps");
+  if (steps && !input.states.get("steps")?.legs?.length) {
+    // Only the derived region leaves this read. An unreadable identity falls back to the time zone.
+    const identity = await readHostedMemberIdentity({ memberId: input.memberId, prisma: getPrisma() }).catch(() => null);
+    const places = firstRoutePlaces(input.timeZone, phoneRouteRegion(identity), recentMilesPerDay(steps.amounts));
     const leg = await resolveRoute(places.from, places.to);
     const state = await setFirstRoute(input.memberId, "steps", leg, input.beforeMutationTx);
     input.states.set("steps", state);

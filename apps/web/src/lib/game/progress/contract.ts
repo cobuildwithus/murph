@@ -18,7 +18,8 @@ export const rungSchema = z.object({
 export type Rung = z.infer<typeof rungSchema>;
 const ladder = z.object({ kind: z.enum(["height", "time"]), passed: z.array(rungSchema), next: rungSchema.nullable(), goalPicked: z.boolean() });
 export type Ladder = z.infer<typeof ladder>;
-const towns = z.array(z.object({ name: z.string(), atText: z.string(), x: z.number(), y: z.number(), passedOn: day.nullable() }));
+// aheadText, while a town is ahead: "33 mi away", or "416 mi to go" for the end.
+const towns = z.array(z.object({ name: z.string(), atText: z.string(), aheadText: z.string().nullable(), x: z.number(), y: z.number(), passedOn: day.nullable() }));
 const route = z.object({
   name: z.string(), distanceText: z.string(), walkedText: z.string(), totalText: z.string(), progress: z.number(), straightLine: z.boolean(),
   goalPicked: z.boolean(), completed: z.array(z.object({ name: z.string(), finishedOn: day, shareAwardId: z.string() })),

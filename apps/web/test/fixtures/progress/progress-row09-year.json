@@ -787,6 +787,7 @@
           {
             "name": "New York",
             "atText": "mile 0",
+            "aheadText": null,
             "x": 0.9,
             "y": 0.2,
             "passedOn": "2026-02-09"
@@ -794,6 +795,7 @@
           {
             "name": "Tulsa",
             "atText": "2 mi away",
+            "aheadText": "2 mi away",
             "x": 0.48,
             "y": 0.55,
             "passedOn": null
@@ -801,6 +803,7 @@
           {
             "name": "Los Angeles",
             "atText": "1,434 to go",
+            "aheadText": "1,434 mi to go",
             "x": 0.1,
             "y": 0.7,
             "passedOn": null
@@ -818,6 +821,7 @@
           {
             "name": "New York",
             "atText": "mile 0",
+            "aheadText": null,
             "x": 0.95,
             "y": 0.286426,
             "passedOn": "2026-02-09"
@@ -825,6 +829,7 @@
           {
             "name": "Tulsa",
             "atText": "2 mi away",
+            "aheadText": "2 mi away",
             "x": 0.4775,
             "y": 0.535596,
             "passedOn": null
@@ -832,6 +837,7 @@
           {
             "name": "Los Angeles",
             "atText": "1,434 to go",
+            "aheadText": "1,434 mi to go",
             "x": 0.05,
             "y": 0.642383,
             "passedOn": null

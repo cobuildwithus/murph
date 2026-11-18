@@ -34,9 +34,14 @@ export function routeLegs(ctx: { measureId: string; legs: readonly RouteLeg[]; p
 export function routeTowns(leg: RouteLeg, meters: Points, size: MapQuery['size'], units: ClientUnits): Route['towns'] {
   const { width, height } = MAP_SIZES[size];
   const geometry = decodePolyline(leg.polyline), bbox = routeBbox(geometry, width, height);
-  return leg.towns.map(town => ({ name: town.name, atText: `${units === 'metric' ? 'km' : 'mile'} ${formatAmount(town.atM, 'meters', 'full', units).text.split(' ')[0]}`,
-    ...townPosition(cutPolyline(geometry, town.atM / leg.distanceM).walked.at(-1)!, bbox),
-    passedOn: crossingDay(meters, leg.startTotal + town.atM) }));
+  const walked = Math.max(0, (meters.at(-1)?.[1] ?? 0) - leg.startTotal);
+  return leg.towns.map((town, index) => {
+    const passedOn = crossingDay(meters, leg.startTotal + town.atM);
+    const ahead = formatAmount(town.atM - walked, 'meters', 'full', units).text;
+    return { name: town.name, atText: `${units === 'metric' ? 'km' : 'mile'} ${formatAmount(town.atM, 'meters', 'full', units).text.split(' ')[0]}`,
+      aheadText: passedOn ? null : `${ahead} ${index === leg.towns.length - 1 ? 'to go' : 'away'}`,
+      ...townPosition(cutPolyline(geometry, town.atM / leg.distanceM).walked.at(-1)!, bbox), passedOn };
+  });
 }
 
 function routeHere(leg: RouteLeg, progress: number, size: MapQuery['size']): Route['here'] {
