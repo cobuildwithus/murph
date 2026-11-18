@@ -220,6 +220,7 @@ export async function startHostedLocalDevStack(input: {
   abortSignal?: AbortSignal;
   env: NodeJS.ProcessEnv;
   pipeOutput?: boolean;
+  reportReadinessTimings?: boolean;
   stderrTarget?: NodeJS.WritableStream;
   stdoutTarget?: NodeJS.WritableStream;
   webProcessEnvOverrides?: NodeJS.ProcessEnv;
@@ -888,6 +889,13 @@ export async function startHostedLocalDevStack(input: {
       cloudflareDevVars,
       runtimeEnv,
     });
+    const reportReadinessTiming = (phase: string, startedAt: number): void => {
+      if (input.reportReadinessTimings) {
+        const elapsedMs = Math.round(performance.now() - startedAt);
+        (input.stderrTarget ?? process.stderr).write(`[setup] ${phase} after ${elapsedMs}ms.\n`);
+      }
+    };
+    const temporalStartedAt = performance.now();
     temporalRuntime = await startHostedLocalTemporalRuntime({
       abortSignal: abortController.signal,
       cloudflareHostedControlBaseUrl: workerBaseUrl,
@@ -903,6 +911,7 @@ export async function startHostedLocalDevStack(input: {
     }
     if (temporalRuntime?.workerProcess) {
       children.push(temporalRuntime.workerProcess);
+      reportReadinessTiming("Temporal worker launched", temporalStartedAt);
     }
     throwIfAbortSignalAborted(abortController.signal);
 
@@ -1006,6 +1015,7 @@ export async function startHostedLocalDevStack(input: {
 
     const ready = (async (): Promise<void> => {
       try {
+        const healthWaitStartedAt = performance.now();
         readinessChecks.push(
           waitForHealthyHttpEndpoint({
             host: resolveHostedLocalClientWorkerHost(config.workerHost),
@@ -1014,7 +1024,7 @@ export async function startHostedLocalDevStack(input: {
             path: "/health",
             port: config.workerPort,
             protocol: config.workerProtocol,
-          }),
+          }).then(() => reportReadinessTiming("Worker health check passed", healthWaitStartedAt)),
         );
         if (internalWebBaseUrl !== null) {
           readinessChecks.push(
@@ -1025,7 +1035,7 @@ export async function startHostedLocalDevStack(input: {
               path: HOSTED_WEB_HEALTH_PATH,
               port: config.webPort,
               protocol: "http",
-            }),
+            }).then(() => reportReadinessTiming("Web health check passed", healthWaitStartedAt)),
           );
         }
         await Promise.race([

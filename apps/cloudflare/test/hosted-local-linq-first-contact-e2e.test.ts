@@ -2174,6 +2174,7 @@ async function startLinqScenario(
     persistDirPrefix: "murph-hosted-local-linq-first-contact-",
     requiredRunnerEnvProfile: "linq",
     scenarioLabel: "Local hosted Linq e2e",
+    reportReadinessTimings: fastDeployGate && process.env.CI === "true",
     streamLogs: streamDevLogs,
     webProcessEnvOverrides: options.webProcessEnvOverrides,
   });
