@@ -15,7 +15,7 @@ vi.mock("../src/lib/prisma", () => ({
   getPrisma: mocks.getPrisma,
 }));
 vi.mock("../src/lib/hosted-onboarding/linq-line-store", () => ({
-  assertHostedLinqAssignableHomeLinePoolReady: mocks.assertAssignablePoolReady,
+  assertHostedLinqConfiguredHomeLinePoolReady: mocks.assertAssignablePoolReady,
   syncHostedLinqConfiguredLinesTx: mocks.syncConfiguredLines,
 }));
 vi.mock("../src/lib/hosted-onboarding/linq-phone-number-inventory", () => ({

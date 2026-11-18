@@ -510,6 +510,12 @@ Design messaging flows to earn genuine replies early, then keep letting current 
   Current Web code does not advance the legacy generic provider
   status/timestamp/event triplet; it remains a coherent prior-build
   compatibility snapshot until the post-drain contract migration consumes it.
+- A definite `message.failed` receipt marks the line's delivery health
+  `warning` until a newer delivered receipt. Linq code 4006 ("Delivery
+  uncertain. Message may still go out.") is the exception: it is recorded on the
+  delivery and the line's failure counters but leaves line health unchanged.
+  It says nothing about the line, and a warning removes the line from new-member
+  assignment, so with one line a new member would get no line at all.
 - Keep Linq chat health as a content-free latest-state projection keyed by the
   blinded chat identifier. Webhooks are the fast path; bounded inventory
   reconciliation repairs missed or silence-driven changes without calling Linq

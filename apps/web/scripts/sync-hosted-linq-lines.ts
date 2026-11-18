@@ -1,7 +1,7 @@
 import { getPrisma } from "../src/lib/prisma";
 import { readHostedPhoneHint } from "../src/lib/hosted-onboarding/contact-privacy";
 import {
-  assertHostedLinqAssignableHomeLinePoolReady,
+  assertHostedLinqConfiguredHomeLinePoolReady,
   syncHostedLinqConfiguredLinesTx,
 } from "../src/lib/hosted-onboarding/linq-line-store";
 import { sanitizeHostedOnboardingLogString } from "../src/lib/hosted-onboarding/http";
@@ -47,7 +47,7 @@ export async function syncHostedLinqLines(
       console.log("Skipped Linq provider inventory sync.");
     }
 
-    await assertHostedLinqAssignableHomeLinePoolReady({
+    await assertHostedLinqConfiguredHomeLinePoolReady({
       prisma,
     });
   } finally {
