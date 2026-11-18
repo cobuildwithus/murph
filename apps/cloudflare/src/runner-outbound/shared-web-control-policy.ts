@@ -29,6 +29,7 @@ import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_PENDING_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_NO_DATA_OUTREACH_PATH,
+  HOSTED_EXECUTION_DEVICE_SYNC_DISCONNECT_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_SNAPSHOT_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_RECONCILE_PATH,
 } from "@murphai/device-syncd/hosted-runtime";
@@ -217,6 +218,10 @@ export const HOSTED_RUNNER_WEB_CONTROL_ROUTES = {
   deviceSyncReconcile: defineHostedRunnerWebControlPostRoute(
     "device_sync_reconcile",
     HOSTED_EXECUTION_DEVICE_SYNC_RECONCILE_PATH,
+  ),
+  deviceSyncDisconnect: defineHostedRunnerWebControlPostRoute(
+    "device_sync_disconnect",
+    HOSTED_EXECUTION_DEVICE_SYNC_DISCONNECT_PATH,
   ),
   deviceSyncRuntimeApply: defineHostedRunnerWebControlPostRoute(
     "device_sync_runtime_apply",

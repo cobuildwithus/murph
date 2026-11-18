@@ -7,13 +7,28 @@ import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 const mocks = vi.hoisted(() => ({
   ackHostedDeviceSyncDirtyStateProcessed: vi.fn(),
+  assertActiveHostedMemberAccessAllowed: vi.fn(),
+  disconnectOwnedConnection: vi.fn(),
+  isHostedThreadContainerMember: vi.fn(),
   readHostedDeviceSyncPendingDirtyState: vi.fn(),
   readHostedDeviceSyncRuntimeState: vi.fn(),
   requireHostedCloudflareCallbackRequest: vi.fn(),
+  requireHostedCloudflareCallbackJsonRequest: vi.fn(),
 }));
 
 vi.mock("@/src/lib/hosted-execution/cloudflare-callback-auth", () => ({
   requireHostedCloudflareCallbackRequest: mocks.requireHostedCloudflareCallbackRequest,
+  requireHostedCloudflareCallbackJsonRequest: mocks.requireHostedCloudflareCallbackJsonRequest,
+}));
+
+vi.mock("@/src/lib/device-sync/public-ingress-service", () => ({
+  createHostedDeviceSyncPublicIngressService: () => ({ disconnectOwnedConnection: mocks.disconnectOwnedConnection }),
+}));
+
+vi.mock("@/src/lib/hosted-onboarding/member-access", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/src/lib/hosted-onboarding/member-access")>(),
+  assertActiveHostedMemberAccessAllowed: mocks.assertActiveHostedMemberAccessAllowed,
+  isHostedThreadContainerMember: mocks.isHostedThreadContainerMember,
 }));
 
 vi.mock("@/src/lib/device-sync/hosted-runtime-authority", () => ({
@@ -32,6 +47,7 @@ type DirtyAckRouteModule =
 let snapshotRoute: SnapshotRouteModule;
 let dirtyPendingRoute: DirtyPendingRouteModule;
 let dirtyAckRoute: DirtyAckRouteModule;
+let disconnectRoute: typeof import("../app/api/internal/device-sync/disconnect/route");
 
 describe("device-sync internal runtime routes", () => {
   beforeAll(async () => {
@@ -40,10 +56,15 @@ describe("device-sync internal runtime routes", () => {
       "../app/api/internal/device-sync/runtime/dirty-pending/route"
     );
     dirtyAckRoute = await import("../app/api/internal/device-sync/runtime/dirty-ack/route");
+    disconnectRoute = await import("../app/api/internal/device-sync/disconnect/route");
   });
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.requireHostedCloudflareCallbackJsonRequest.mockResolvedValue({
+      payload: { connectionId: "account_sam" }, userId: "member_runtime_1",
+    });
+    mocks.isHostedThreadContainerMember.mockResolvedValue(false);
     mocks.requireHostedCloudflareCallbackRequest.mockResolvedValue("member_runtime_1");
     mocks.readHostedDeviceSyncRuntimeState.mockResolvedValue({
       connections: [],
@@ -232,6 +253,35 @@ describe("device-sync internal runtime routes", () => {
       acked: true,
       schema: "murph.hosted-device-sync-dirty-ack.v1",
     });
+  });
+
+  it.each([
+    [{ connection: { status: "disconnected" } }, "disconnected"],
+    [{ connection: { status: "disconnected" }, alreadyDisconnected: true }, "already_disconnected"],
+    [{ connection: { status: "reauthorization_required" } }, "not_finished"],
+  ] as const)("delegates the exact wearable to the signed member and reports %s", async (result, status) => {
+    mocks.disconnectOwnedConnection.mockResolvedValueOnce(result);
+    const response = await disconnectRoute.POST(jsonRequest({ connectionId: "account_sam" }));
+    expect(response.status).toBe(200);
+    expect(mocks.assertActiveHostedMemberAccessAllowed).toHaveBeenCalledWith({ memberId: "member_runtime_1" });
+    expect(mocks.disconnectOwnedConnection).toHaveBeenCalledWith("member_runtime_1", "account_sam");
+    await expect(response.json()).resolves.toEqual({ status });
+  });
+
+  it("rejects a wearable disconnect from a group container", async () => {
+    mocks.isHostedThreadContainerMember.mockResolvedValueOnce(true);
+    const response = await disconnectRoute.POST(jsonRequest({ connectionId: "account_sam" }));
+    expect(response.status).toBe(403);
+    expect(mocks.disconnectOwnedConnection).not.toHaveBeenCalled();
+  });
+
+  it("rejects a wearable disconnect with an actor in the request body", async () => {
+    mocks.requireHostedCloudflareCallbackJsonRequest.mockResolvedValueOnce({
+      payload: { connectionId: "account_sam", memberId: "member_other" }, userId: "member_runtime_1",
+    });
+    const response = await disconnectRoute.POST(jsonRequest({}));
+    expect(response.status).toBe(400);
+    expect(mocks.disconnectOwnedConnection).not.toHaveBeenCalled();
   });
 });
 

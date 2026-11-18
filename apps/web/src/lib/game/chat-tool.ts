@@ -19,7 +19,7 @@ import { requireHostedRuntimeActiveAccessForUpdateTx } from "../hosted-mailbox/r
 import { resolveHostedGroupMessageSenderMemberId } from "../hosted-groups/group-message-sender";
 import { lockHostedThreadRouteByThreadIdentityTx, assertHostedThreadRouteEgressAuthority } from "../hosted-routing/thread-route-store";
 import { getPrisma } from "../prisma";
-import { readGameChatState, readGameChatProfiles, readGameRecapMaterial, runGameCommand, runGameChatUpdate, acceptGameRecap } from "./service";
+import { readGameChatState, readGameChatProfiles, readGameRecapMaterial, runGameCommand, runGameChatUpdate, acceptGameRecap, type GameCommandResult } from "./service";
 import { isGameRecapGenerationRetired } from "./recap-witness";
 import { acceptedGameRecapMessage, gameRecapMessage } from "./recap-message";
 import { gameRecapToolResult, validateGameRecap, withValidGameSuperlatives, type GameRecapChatMessage } from "./recap";
@@ -89,7 +89,8 @@ async function handleGameChatRequest(input: Input): Promise<HostedGameToolRespon
     // GameView is a personal app view. Never pass it into the shared runtime.
     // Rule messages name only the rule and next step, so Murph can explain a refusal.
     if (!result.ok) return { action: input.request.action, result: { status: "rejected", error: `${result.error.code}: ${result.error.message}`.slice(0, 128) } };
-    if (update.operation === "set_reminder") return { action: "update_game", result: { status: "ok", reaches: result.reaches ?? "none" } };
+    const concise = gameChatUpdateOutcome(update.operation, result);
+    if (concise) return concise;
     dayOutcome = result.dayOutcome;
     chatLine = result.chatLine;
   }
@@ -101,6 +102,15 @@ async function handleGameChatRequest(input: Input): Promise<HostedGameToolRespon
   const response = await gameChatToolResponse(input, playerMemberIds, actor, dayOutcome, photoResult);
   // A day correction that changed a finished game's outcome carries the one line that says so.
   return chatLine ? { ...response, result: { ...response.result, chatLine } } : response;
+}
+
+function gameChatUpdateOutcome(
+  operation: Extract<HostedGameToolRequest, { action: "update_game" }>["update"]["operation"],
+  result: Extract<GameCommandResult, { ok: true }>,
+): HostedGameToolResponse | null {
+  if (operation === "set_reminder") return { action: "update_game", result: { status: "ok", reaches: result.reaches ?? "none" } };
+  if (result.leaveOutcome) return { action: "update_game", result: { status: "ok", leaveOutcome: result.leaveOutcome } };
+  return null;
 }
 
 /** Preserve the fresh complete handle proof through the post-mutation projection. */

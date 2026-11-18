@@ -79,7 +79,7 @@ describe('hosted device dynamic tool recovery', () => {
       : [variant.properties!.action.const]
     const schema: Variant = JSON.parse(JSON.stringify(MURPH_DEVICE_TOOL.inputSchema))
     expect([...new Set(collectActions(schema))].sort()).toEqual([
-      'companion_status', 'configure_no_data_outreach', 'connect', 'list_accounts', 'reconcile',
+      'companion_status', 'configure_no_data_outreach', 'connect', 'disconnect', 'list_accounts', 'reconcile',
     ])
     expect(readDeviceDynamicToolRequest({ tool: 'device', arguments: { action: 'vibrate' } })?.kind)
       .toBe('invalid-device-arguments')
@@ -129,9 +129,31 @@ describe('hosted device dynamic tool recovery', () => {
         validationIssues: [{ expected: 'number', code: 'invalid_type', path: ['afterDays'] }] })
     expect(await feedback({ action: 'vibrate' })).toEqual({ error: 'invalid_device_arguments',
       validationIssues: [{ code: 'invalid_union', note: 'No matching discriminator', discriminator: 'action',
-        options: ['companion_status', 'list_accounts', 'connect', 'reconcile', 'configure_no_data_outreach'],
+        options: ['companion_status', 'list_accounts', 'connect', 'reconcile', 'disconnect', 'configure_no_data_outreach'],
         path: ['action'] }] })
   })
+
+  it.each(['disconnected', 'already_disconnected', 'not_finished'] as const)(
+    'passes through a private disconnect and reports %s',
+    async (status) => {
+      const request = readDeviceDynamicToolRequest({
+        tool: 'device', arguments: { action: 'disconnect', accountId: 'account_maya' },
+      })
+      if (request?.kind !== 'device') throw new Error('Expected device disconnect.')
+      const deviceTool = { request: vi.fn(async () => ({ action: 'disconnect' as const, status })) }
+      const denied = await executeDeviceDynamicTool({ deviceTool, request })
+      expect(denied.rpcResult.success).toBe(false)
+      expect(deviceTool.request).not.toHaveBeenCalled()
+
+      const acceptedInputAuthority = { assistantInputId: 'synthetic-private-input' }
+      const response = await executeDeviceDynamicTool({ acceptedInputAuthority, deviceTool, request })
+      expect(deviceTool.request).toHaveBeenCalledExactlyOnceWith(
+        { action: 'disconnect', accountId: 'account_maya' }, { acceptedInputAuthority, signal: null },
+      )
+      expect(response.rpcResult.success).toBe(true)
+      expect(JSON.parse(response.rpcResult.contentItems[0]!.text!)).toEqual({ action: 'disconnect', status })
+    },
+  )
 
   for (const testCase of [
     {

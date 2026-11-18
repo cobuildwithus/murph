@@ -7,6 +7,7 @@ import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_BODY_LIMIT_BYTES,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_UPDATE_LIMIT,
   buildHostedExecutionDeviceSyncConnectLinkPath,
+  hostedDeviceDisconnectResponseSchema,
   type HostedExecutionDeviceSyncCompletedImport,
   type HostedExecutionDeviceSyncRuntimeApplyRequest,
   type HostedExecutionDeviceSyncRuntimeApplyResponse,
@@ -101,6 +102,19 @@ export function createHostedWebDeviceSyncPort(input: {
       });
 
       return parseHostedExecutionDeviceSyncReconcileResponse(payload);
+    },
+    async disconnectAccount({ connectionId, signal }) {
+      const payload = await fetchHostedWebControlPlaneJson({
+        body: { connectionId },
+        boundUserId: input.boundUserId,
+        description: "Hosted device-sync disconnect",
+        fetchImpl: input.fetchImpl,
+        route: HOSTED_RUNNER_WEB_CONTROL_ROUTES.deviceSyncDisconnect,
+        signal: signal ?? null,
+        timeoutMs: input.timeoutMs,
+        transport: input.transport,
+      });
+      return hostedDeviceDisconnectResponseSchema.parse(payload);
     },
     async applyUpdates(runtimeInput: {
       occurredAt?: string | null;

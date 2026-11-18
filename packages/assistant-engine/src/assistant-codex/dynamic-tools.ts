@@ -753,6 +753,12 @@ const groupArgumentsSchema = z.discriminatedUnion('action', [
       grantId: groupDisclosureGrantIdSchema,
     })
     .strict(),
+  z.object({
+    action: z.literal('revoke_health_sharing'),
+    membershipId: groupMembershipIdSchema,
+    projectionScopes: z.array(groupVaultShareProjectionScopeSchema)
+      .min(1).max(HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length),
+  }).strict(),
   z
     .object({
       action: z.literal('read_current'),
@@ -1025,6 +1031,10 @@ const familyPlanArgumentsSchema = z
   .discriminatedUnion('action', [
     z.object({
       action: z.literal('read_status'),
+    }).strict(),
+    z.object({
+      action: z.literal('revoke_invite'),
+      inviteId: z.string().trim().min(1).max(191),
     }).strict(),
     z.object({
       action: z.literal('start_checkout'),
@@ -4233,11 +4243,20 @@ async function executeFamilyPlanTool(input: {
   if (!familyPlanTool) {
     return toolTextResult(false, 'family plan tools are unavailable for this turn', 'unavailable')
   }
+  if (input.request.action === 'revoke_invite') {
+    const scope = input.hostedToolContext?.currentUserActionScope?.()
+    if (scope?.conversationScope !== 'direct' || !scope.acceptedInputIds.length) {
+      return toolTextResult(false, 'Family invites can only be canceled on request in a private conversation.', 'authority_rejected')
+    }
+  }
 
   try {
     const result = await familyPlanTool.request(input.request)
     return toolTextResult(true, safeToolPayloadText(result))
   } catch (error) {
+    if (input.request.action === 'revoke_invite') {
+      return toolTextResult(false, 'The invite cancellation could not be confirmed. Read Family status before reporting a change.', 'handler_exception', error)
+    }
     if (input.request.action === 'read_status') {
       return toolTextResult(
         false,
@@ -5932,6 +5951,13 @@ async function prepareGroupReferralRequest(
   return { action: input.request.action, participant };
 }
 
+function isGroupSharingAction<Request extends GroupArguments | MurphGroupToolRequest>(
+  request: Request,
+): request is Extract<Request, { action: "post_disclosure_request" | "revoke_disclosure_grant" | "revoke_health_sharing" }> {
+  const { action } = request;
+  return action === "post_disclosure_request" || action === "revoke_disclosure_grant" || action === "revoke_health_sharing";
+}
+
 async function executeGroupTool(
   input: ExecuteGroupToolInput,
 ): Promise<MurphDynamicToolExecutionResult> {
@@ -6096,10 +6122,7 @@ async function executeGroupTool(
       origin: invocationScope.origin,
       question: input.request.question,
     };
-  } else if (
-    input.request.action === "post_disclosure_request" ||
-    input.request.action === "revoke_disclosure_grant"
-  ) {
+  } else if (isGroupSharingAction(input.request)) {
     const userActionScope =
       input.hostedToolContext?.currentUserActionScope?.() ?? null;
     const requiredConversationScope =
@@ -6109,7 +6132,7 @@ async function executeGroupTool(
         false,
         input.request.action === "post_disclosure_request"
           ? "disclosure requests require fresh user input in the current group conversation"
-          : "personal membership and disclosure-grant actions require fresh user input in a personal direct conversation",
+          : "changing personal sharing requires fresh user input in a private conversation",
         'authority_rejected',
       );
     }
@@ -6122,7 +6145,7 @@ async function executeGroupTool(
         false,
         input.request.action === "post_disclosure_request"
           ? "disclosure requests require fresh user-sourced input for this turn"
-          : "personal membership and disclosure-grant actions require fresh user-sourced input for this turn",
+          : "changing personal sharing requires fresh user-sourced input for this turn",
         'authority_rejected',
       );
     }
@@ -7764,7 +7787,7 @@ function parseFamilyPlanArguments(
   const parsed = parseDynamicToolArguments({
     schema: familyPlanArgumentsSchema,
     value,
-    schemaRootKeys: ['action', 'invite'],
+    schemaRootKeys: ['action', 'invite', 'inviteId'],
     toolName: 'murph.family_plan',
   })
   if (!parsed.ok) {
@@ -7789,6 +7812,9 @@ function parseFamilyPlanArguments(
           : {}),
       },
     }
+  }
+  if (parsed.args.action === 'revoke_invite') {
+    return { ok: true, request: parsed.args }
   }
 
   return {
@@ -8005,8 +8031,7 @@ function parseGroupArguments(
     parsed.args.action === "ask" ||
     parsed.args.action === "handoff" ||
     parsed.args.action === "ask_member" ||
-    parsed.args.action === "post_disclosure_request" ||
-    parsed.args.action === "revoke_disclosure_grant" ||
+    isGroupSharingAction(parsed.args) ||
     parsed.args.action === "arm_usage_referral" ||
     parsed.args.action === "cancel_usage_referral"
   ) {

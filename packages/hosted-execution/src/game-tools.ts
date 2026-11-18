@@ -44,8 +44,11 @@ export const hostedGameUpdateSchema = z.discriminatedUnion("operation", [
   z.object({ operation: z.literal("approve"), gameId, proposalId: gameId.optional(), expectedTermsVersion: z.number().int().min(1).optional() }).strict().refine(value => (value.proposalId !== undefined) !== (value.expectedTermsVersion !== undefined), "Approval needs proposalId or expectedTermsVersion."),
   z.object({ operation: z.enum(["decline", "cancel"]), gameId, proposalId: gameId }).strict(),
   z.object({ operation: z.literal("cancel_game"), gameId }).strict(),
+  z.object({ operation: z.literal("leave"), gameId }).strict(),
 ]);
 export type HostedGameUpdate = z.infer<typeof hostedGameUpdateSchema>;
+const gameLeaveOutcomeSchema = z.enum(["left", "left_and_game_ended", "already_left"]);
+export type GameLeaveOutcome = z.infer<typeof gameLeaveOutcomeSchema>;
 const acceptedInputOrigin = z.object({ kind: z.literal("accepted_input"), assistantInputId: ref }).strict();
 const automationOccurrenceOrigin = z.object({ kind: z.literal("automation_occurrence"), automationId: z.string().min(1).max(191), occurrenceAt: z.isoDateTime({ offset: true }) }).strict();
 const gameRecapOrigin = z.object({ kind: z.literal("game_recap"), gameId, eventId: ref }).strict();
@@ -167,6 +170,7 @@ export const hostedGameToolResponseSchema = z.object({
     state: hostedGameChatStateSchema.optional(),
     error: z.string().max(128).optional(),
     dayOutcome: z.object({ date, status: z.enum(["marked_incomplete", "restored", "already_incomplete", "already_complete", "no_artifact", "credited", "words_needed"]) }).strict().optional(),
+    leaveOutcome: gameLeaveOutcomeSchema.optional(),
     photoOutcome: z.enum(["offer", "suppressed", "saved", "dismissed"]).optional(),
     recapGame: z.unknown().optional(),
     recapOutcome: z.string().optional(),

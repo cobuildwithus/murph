@@ -141,6 +141,7 @@ export type AssistantHostedDeviceToolRequest =
       accountId: string
       action: 'reconcile'
     }
+  | { action: 'disconnect'; accountId: string }
   | {
       action: 'configure_no_data_outreach'
       afterDays: number
@@ -193,6 +194,7 @@ export type AssistantHostedDeviceToolResponse =
       occurredAt: string
       status: 'queued'
     }
+  | { action: 'disconnect'; status: 'disconnected' | 'already_disconnected' | 'not_finished' }
   | {
       action: 'configure_no_data_outreach'
       effectiveAfterDays: number | null

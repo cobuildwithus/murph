@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   readHostedFamilyAccessForMember: vi.fn(),
   readHostedFamilyOwnerSnapshotForMember: vi.fn(),
   readHostedMemberStripeBillingRef: vi.fn(),
+  revokeHostedFamilyInvite: vi.fn(),
 }));
 
 vi.mock("@/src/lib/prisma", () => ({
@@ -21,6 +22,7 @@ vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
   issueHostedFamilyInviteFromOwnerTx: mocks.issueHostedFamilyInviteFromOwnerTx,
   readHostedFamilyAccessForMember: mocks.readHostedFamilyAccessForMember,
   readHostedFamilyOwnerSnapshotForMember: mocks.readHostedFamilyOwnerSnapshotForMember,
+  revokeHostedFamilyInvite: mocks.revokeHostedFamilyInvite,
 }));
 
 vi.mock("@/src/lib/hosted-onboarding/shared", () => ({
@@ -96,6 +98,50 @@ describe("hosted runtime Family plan tool", () => {
     expect(mocks.createHostedFamilyBillingCheckout).not.toHaveBeenCalled();
     expect(mocks.ensureHostedAccountGroupForOwnerTx).not.toHaveBeenCalled();
     expect(mocks.readHostedFamilyOwnerSnapshotForMember).not.toHaveBeenCalled();
+  });
+
+  it.each([[true, "revoked"], [false, "nothing_pending"]] as const)(
+    "revokes the exact invite as the signed owner and reports %s",
+    async (revoked, status) => {
+      mocks.revokeHostedFamilyInvite.mockResolvedValueOnce(revoked);
+      await expect(handleHostedRuntimeFamilyPlanTool({
+        memberId: "member_owner",
+        request: { action: "revoke_invite", inviteId: "invite_maya" },
+      })).resolves.toEqual({ action: "revoke_invite", result: { status } });
+      expect(mocks.revokeHostedFamilyInvite).toHaveBeenCalledWith({
+        inviteId: "invite_maya", ownerMemberId: "member_owner",
+      });
+    },
+  );
+
+  it("refuses to revoke a Family invite from a group container", async () => {
+    mocks.isHostedThreadContainerMember.mockResolvedValue(true);
+    await expect(handleHostedRuntimeFamilyPlanTool({
+      memberId: "member_group_container",
+      request: { action: "revoke_invite", inviteId: "invite_maya" },
+    })).rejects.toMatchObject({ httpStatus: 403 });
+    expect(mocks.revokeHostedFamilyInvite).not.toHaveBeenCalled();
+  });
+
+  it("includes exact pending invite IDs only when the runner requests them", async () => {
+    const pending = {
+      id: "invite_maya", planCode: "pulse", status: "pending", targetLabel: "Maya",
+      acceptUrl: null, expiresAt: new Date("2028-06-25T00:00:00.000Z"),
+      targetPhoneHint: null, telegramInviteUrl: null,
+    };
+    mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue({
+      billingActive: true, billingStatus: "active", members: [],
+      invites: [pending, { ...pending, id: "invite_leo", status: "revoked" }],
+    });
+    const read = (includeInviteIds?: boolean) => handleHostedRuntimeFamilyPlanTool({
+      memberId: "member_owner", request: { action: "read_status" }, includeInviteIds,
+    });
+    const legacy = await read();
+    const current = await read(true);
+    expect(legacy).toMatchObject({ result: { pendingInvites: [{ status: "pending" }, { status: "revoked" }] } });
+    expect(JSON.stringify(legacy)).not.toContain("inviteId");
+    expect(current).toMatchObject({ result: { pendingInvites: [{ inviteId: "invite_maya" }, { status: "revoked" }] } });
+    expect(JSON.stringify(current)).not.toContain("invite_leo");
   });
 
   it("starts checkout for an owner without an active Family plan", async () => {

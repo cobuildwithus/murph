@@ -4231,6 +4231,10 @@ they do not claim to derive an unset Web-owned callback base. The `__Host-`
 app-session and callback-proof cookies remain host-only; do not add a Domain
 cookie or cross-host handoff.
 
+A member can disconnect a wearable account from their private chat. The signed
+callback uses the member's exact account ID from `list_accounts` and the same
+owner-scoped disconnect operation as Settings.
+
 Junction's existing setup phase is the account data-admission boundary. A new
 account in `pending_link` or `link_returned` cannot accept ordinary webhook side
 effects, persist dirty work, wake or schedule the runtime, execute queued

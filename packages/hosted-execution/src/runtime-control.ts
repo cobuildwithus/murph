@@ -16,7 +16,7 @@ export { hostedLeaveGroupReasonSchema, hostedLeaveGroupRequestSchema, hostedLeav
 export type { HostedLeaveGroupRequest, HostedLeaveGroupResponse } from "./leave-group.ts";
 import type { HostedGameToolRequest, HostedGameToolResponse } from "./game-tools.ts";
 export { GAME_ACTIVITIES, GAME_TOOL_ACTIONS, GAME_RECAP_GENERATION_RETIRED, parseGameRecapEventId, hostedGameToolRequestSchema, hostedGameToolResponseSchema, hostedGameUpdateSchema, hostedGameChatStateSchema, hostedGamePhotoSchema, hostedGameRecapSchema, hostedGameRecapWriterSchema } from "./game-tools.ts";
-export type { GameActivity, HostedGameToolRequest, HostedGameToolResponse, HostedGameUpdate, HostedGamePhoto, HostedGameChatState, HostedGameRecap } from "./game-tools.ts";
+export type { GameActivity, GameLeaveOutcome, HostedGameToolRequest, HostedGameToolResponse, HostedGameUpdate, HostedGamePhoto, HostedGameChatState, HostedGameRecap } from "./game-tools.ts";
 import {
   HOSTED_MAILBOX_LANES,
   type HostedMailboxLane,
@@ -1386,6 +1386,11 @@ export type HostedRuntimeGroupToolRequest =
       permissionText: string;
     }
   | { action: "revoke_disclosure_grant"; grantId: string }
+  | {
+      action: "revoke_health_sharing";
+      membershipId: string;
+      projectionScopes: readonly HostedVaultShareSelectableProjectionScope[];
+    }
   | { action: "read_current"; disclosureGrantCursor?: string }
   | {
       action: "prepare_next_group";
@@ -1564,6 +1569,12 @@ export type HostedRuntimeGroupToolResponse =
       result:
         | { status: "revoked" }
         | { status: "already_revoked" }
+        | { status: "unavailable"; unavailableReason: string };
+    }
+  | {
+      action: "revoke_health_sharing";
+      result:
+        | { status: "revoked" | "already_revoked" }
         | { status: "unavailable"; unavailableReason: string };
     }
   | {
@@ -1887,7 +1898,10 @@ export type HostedRuntimeGroupEmailEffectResponse =
 export type HostedRuntimeFamilyPlanToolAction =
   | "create_invite"
   | "read_status"
+  | "revoke_invite"
   | "start_checkout";
+
+export const HOSTED_RUNTIME_FAMILY_PLAN_INVITE_IDS_PARAM = "includeInviteIds";
 
 export const HOSTED_PLAN_CODES = ["pulse", "edge"] as const;
 export type HostedPlanCode = (typeof HOSTED_PLAN_CODES)[number];
@@ -1911,6 +1925,7 @@ export type HostedRuntimeFamilyPlanToolRequest =
   | {
       action: "read_status";
     }
+  | { action: "revoke_invite"; inviteId: string }
   | {
       action: "start_checkout";
       confirmedTrialConversion?: true;
@@ -1943,6 +1958,7 @@ export interface HostedRuntimeFamilyPlanToolMember {
 
 export interface HostedRuntimeFamilyPlanToolInvite {
   acceptUrl: string | null;
+  inviteId?: string;
   expiresAt: string;
   planCode: HostedFamilyPlanCode;
   status: string;
@@ -2001,6 +2017,10 @@ export type HostedRuntimeFamilyPlanToolResponse =
   | {
       action: "read_status";
       result: HostedRuntimeFamilyPlanToolStatusResponse;
+    }
+  | {
+      action: "revoke_invite";
+      result: { status: "revoked" | "nothing_pending" };
     }
   | {
       action: "start_checkout";

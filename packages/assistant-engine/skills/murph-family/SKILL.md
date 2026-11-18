@@ -109,8 +109,11 @@ member or Family id into a link.
 
 ## Other Family changes
 
-Changing a seat's tier, removing a member and cancelling an invite all happen
-in Family Settings. When `read_status` shows `owner: true`, send
+An owner can cancel a pending invite in private: pass its `inviteId` from
+`read_status` to `revoke_invite`, and ask which one if several match.
+
+Changing a seat's tier or removing a member happens in Family Settings.
+When `read_status` shows `owner: true`, send
 `https://www.withmurph.ai/settings#family`. Otherwise explain that the Family
 plan owner makes those changes. Never use `start_checkout` for any of them.
 

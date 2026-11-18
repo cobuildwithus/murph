@@ -2,7 +2,7 @@ import { HOSTED_MACHINE_ROUTE_PREFIX } from "@murphai/hosted-execution/routes";
 import { readdir, readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
-import { describe, expect, expectTypeOf, it } from "vitest";
+import { describe, expect, expectTypeOf, it, vi } from "vitest";
 
 import {
   bindHostedRunnerWebControlRoutePath,
@@ -14,6 +14,7 @@ import {
 import {
   fetchHostedWebControlPlaneJson,
 } from "../src/runtime-platform/web-control-transport.ts";
+import { createHostedRuntimeFamilyPlanToolPort } from "../src/runtime-platform/family-plan-tool-port.ts";
 
 type WebControlRequest = Parameters<typeof fetchHostedWebControlPlaneJson>[0];
 
@@ -139,5 +140,30 @@ describe("hosted runtime web-control route contract", () => {
     expect(() => createHostedRunnerDeviceSyncConnectLinkRoute(
       "/api/internal/device-sync/connect-targets/whoop/connect-link/arbitrary",
     )).toThrow("Hosted runtime device-sync connect-link route is invalid.");
+  });
+
+  it("opts into pending Family invite IDs and accepts older Web status responses", async () => {
+    const seatCounts = { active: 1, billed: 2, invited: 1, remaining: 0, used: 2 };
+    const legacyStatus = { action: "read_status", result: {
+      owner: true, billingActive: true, billingStatus: "active", members: [],
+      pendingInvites: [{
+        acceptUrl: null, expiresAt: "2030-07-01T00:00:00.000Z", planCode: "pulse",
+        status: "pending", targetLabel: "Maya", targetPhoneHint: null, telegramInviteUrl: null,
+      }],
+      plans: { edge: seatCounts, max: seatCounts, pulse: seatCounts },
+      seats: { ...seatCounts, min: 2, max: 6 },
+    } };
+    const fetchImpl = vi.fn<typeof fetch>(async (input, init) => {
+      const request = new Request(input, init);
+      expect(new URL(request.url).searchParams.get("includeInviteIds")).toBe("1");
+      await expect(request.json()).resolves.toEqual({ action: "read_status" });
+      return Response.json(legacyStatus);
+    });
+    const port = createHostedRuntimeFamilyPlanToolPort({
+      boundUserId: "member_synthetic", fetchImpl, timeoutMs: 5_000, transport: { mode: "proxy" },
+    });
+    await expect(port.request({ action: "read_status" })).resolves.toMatchObject(legacyStatus);
+    fetchImpl.mockResolvedValueOnce(Response.json({ error: { code: "INVALID_REQUEST" } }, { status: 400 }));
+    await expect(port.request({ action: "revoke_invite", inviteId: "invite_maya" })).rejects.toMatchObject({ status: 400 });
   });
 });

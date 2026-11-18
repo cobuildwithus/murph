@@ -747,6 +747,7 @@ describe("handleHostedRuntimeGroupTool", () => {
       read_next_group: "personal_active",
       read_participant_display_names: "participant_aware",
       revoke_disclosure_grant: "personal_active",
+      revoke_health_sharing: "personal_active",
       read_usage: "participant_aware",
       read_usage_referral: "participant_aware",
       read_shared: "participant_aware",

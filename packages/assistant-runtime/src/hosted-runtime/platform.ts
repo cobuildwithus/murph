@@ -125,6 +125,7 @@ import type {
   HostedRuntimeLabsToolResponse,
 } from "@murphai/hosted-execution/labs";
 import type {
+  HostedDeviceDisconnectResponse,
   HostedExecutionDeviceSyncConnectLinkResponse,
   HostedExecutionDeviceSyncFitbitMigrationCutoverResponse,
   HostedExecutionDeviceSyncDirtyAckRequest,
@@ -587,6 +588,10 @@ export interface HostedRuntimeDeviceSyncPort {
     connectionId: string;
     signal?: AbortSignal | null;
   }): Promise<HostedExecutionDeviceSyncReconcileResponse>;
+  disconnectAccount?(input: {
+    connectionId: string;
+    signal?: AbortSignal | null;
+  }): Promise<HostedDeviceDisconnectResponse>;
   fetchSnapshot(input?: {
     connectionId?: string | null;
     cursor?: HostedExecutionDeviceSyncRuntimeSnapshotCursor | null;

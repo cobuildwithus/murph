@@ -452,6 +452,10 @@ hosted web. The command should create or reuse a scoped family invite while
 respecting the paid-seat invariant. If no paid seats are open, the owner must
 add a Family seat before issuing another invite.
 
+The owner can also cancel an exact pending invite in private chat. Family status
+provides invite IDs to runners that request them. Cancellation uses the same
+transaction as Family Settings and reports whether the invite was still pending.
+
 The web invite flow may compose a one-seat increase with issuance only for a
 normalized phone number or email target, because those channels let the server
 reject a match to an already-active member's verified phone or email before

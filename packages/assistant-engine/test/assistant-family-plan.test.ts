@@ -11,6 +11,46 @@ import {
 } from "../src/assistant/hosted-tool-context.js";
 
 describe("assistant family plan tool", () => {
+  it.each(["revoked", "nothing_pending"] as const)(
+    "passes an exact pending invite ID only on current private input and reports %s",
+    async (status) => {
+      const args = { action: "revoke_invite", inviteId: "invite_maya" };
+      const request = readTestMurphDynamicToolRequest({
+        method: "item/tool/call",
+        params: { arguments: args, namespace: "murph", tool: "family_plan" },
+      });
+      expect(request).toEqual({ kind: "family-plan", request: args });
+      if (!request) throw new Error("Expected Family invite revocation.");
+      const familyPlanTool = {
+        request: vi.fn(async () => ({ action: "revoke_invite" as const, result: { status } })),
+      };
+      const run = (conversationScope: "direct" | "group", acceptedInputIds: string[]) =>
+        executeMurphDynamicToolRequest({
+          env: {}, fetchImpl: fetch, nextUsageOrdinal: () => 0, progressDelivery: null, request,
+          hostedToolContext: {
+            computerToolsAvailable: false, familyPlanTool, vaultFileSendAvailable: false,
+            currentHostedDeliveryContext: () => null,
+            currentHostedMailboxItemIds: () => [],
+            sendVaultFile: async () => { throw new Error("Unavailable"); },
+            currentUserActionScope: () => ({
+              acceptedInputIds, conversationId: "conversation_maya", conversationScope,
+              inboundMailboxItemIds: [], originSessionId: "session_maya", recipientKey: "recipient_maya",
+            }),
+          },
+        });
+      expect((await run("group", ["synthetic_input"])).rpcResult.success).toBe(false);
+      expect((await run("direct", [])).rpcResult.success).toBe(false);
+      expect(familyPlanTool.request).not.toHaveBeenCalled();
+
+      const result = await run("direct", ["synthetic_input"]);
+      expect(result.rpcResult.success).toBe(true);
+      expect(JSON.parse(result.rpcResult.contentItems[0]!.text!)).toEqual({
+        action: "revoke_invite", result: { status },
+      });
+      expect(familyPlanTool.request).toHaveBeenCalledExactlyOnceWith(args);
+    },
+  );
+
   it("exposes the dynamic tool only when the hosted family plan port is available", () => {
     expect(resolveMurphDynamicTools({
       familyPlanAvailable: true,

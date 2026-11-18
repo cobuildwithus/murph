@@ -1757,12 +1757,12 @@ describe.skipIf(!enabled)("group majority changes", () => {
   });
 });
 
-async function leaverChatGame(count = 3) {
+async function leaverChatGame(count = 3, acceptInvites = true) {
   const people = await Promise.all(Array.from({ length: count }, () => person()));
   for (const [i, p] of people.entries()) await ok(p.id, { type: "setProfile", firstName: ["Alex", "Sam", "River", "Taylor"][i], timeZone: "UTC" });
   const room = await exactRoom(people);
-  const game = await create(people[0], people.slice(1), { terms: { ...terms, tasks: [{ seat: 2, text: "Private leaver task" }] } });
-  for (const p of people.slice(1)) await ok(p.id, join(game.token));
+  const game = await create(people[0], people.slice(1), { terms: { ...terms, tasks: count > 2 ? [{ seat: 2, text: "Private leaver task" }] : [] } });
+  if (acceptInvites) for (const p of people.slice(1)) await ok(p.id, join(game.token));
   const members = people.map(p => p.id);
   const context = { multiplayer: true, chatContainerMemberId: room, chatPlayerMemberIds: members,
     chatAudience: await readGameChatAudience(room), beforeMutationTx: async () => {} };
@@ -1805,6 +1805,30 @@ async function expectSharedGame(room: string, gameId: string, kept: boolean) {
 }
 
 describe.skipIf(!enabled)("group chat after departure", () => {
+  it.each([
+    [3, true, "left"],
+    [2, true, "left_and_game_ended"],
+    [2, false, "left_and_game_ended"],
+  ] as const)("lets the speaker leave a %s-person game from its bound chat (accepted: %s)", async (count, accepted, outcome) => {
+    const g = await leaverChatGame(count, accepted);
+    await db.game.update({ where: { id: g.game.id }, data: { chatContainerMemberId: g.room } });
+    const { handleGameChatTool } = await import("@/src/lib/game/chat-tool");
+    const leave = (room: string) => {
+      chatProof.sender = g.people[0].id;
+      chatProof.wake = { ...leaverChatWake(room), occurredAt: new Date().toISOString() };
+      return handleGameChatTool({ memberId: room, multiplayer: true, runtimeIdentity: null, request: {
+        action: "update_game", origin: { kind: "accepted_input", assistantInputId: "ain_synthetic_game_departure" },
+        update: { operation: "leave", gameId: g.game.id },
+      } });
+    };
+
+    expect((await leave(await exactRoom(g.people))).result).toMatchObject({ status: "unavailable" });
+    expect((await leave(g.room)).result).toEqual({ status: "ok", leaveOutcome: outcome });
+    expect((await leave(g.room)).result).toEqual({ status: "ok", leaveOutcome: "already_left" });
+    const ended = await db.game.findUniqueOrThrow({ where: { id: g.game.id }, select: { status: true } });
+    expect(ended.status === "void").toBe(outcome !== "left");
+  });
+
   it.each(["game-first", "text-first"])("keeps reads and commands after both departures: %s", async order => {
     const g = await leaverChatGame();
     const leave = () => ok(g.people[2].id, { type: "leave", gameId: g.game.id });

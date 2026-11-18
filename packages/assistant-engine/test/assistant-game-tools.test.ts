@@ -51,6 +51,21 @@ function splitResult(text: string | undefined) {
 }
 const sharedReadTurn = () => ({ invalid: false, readProjectionScopeKeyBatches: [], roster: null })
 describe('game dynamic tools', () => {
+  it('passes leave through for the current speaker and reports when the game ends', async () => {
+    const reply = hostedGameToolResponseSchema.parse({
+      action: 'update_game', result: { status: 'ok', leaveOutcome: 'left_and_game_ended' },
+    })
+    const request = vi.fn(async () => reply)
+    const args = { messageRef: inputId, operation: 'leave', gameId: 'game_synthetic' }
+    const result = await execute(args, { ...context(), groupTool: { request } })
+    expect(request).toHaveBeenCalledExactlyOnceWith({
+      action: 'update_game', origin, update: { operation: 'leave', gameId: 'game_synthetic' },
+    })
+    expect(splitResult(result.rpcResult.contentItems[0]?.text).guidance)
+      .toContain('with too few players left the game ended')
+    expect(parse('update_game', { ...args, memberId: 'player_sam' })).toMatchObject({ kind: 'invalid-tool-arguments' })
+  })
+
   it('offers and executes Not for me through the private game port only', async () => {
     const requestPort = vi.fn(async () => ({ action: 'my_game_not_for_me' as const, result: { status: 'ok' as const, activities: ['yoga' as const, 'dance' as const] } }))
     const direct = { ...context(), myGameRemindersTool: { request: requestPort }, currentUserActionScope: () => ({

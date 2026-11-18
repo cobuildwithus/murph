@@ -16,6 +16,7 @@ import {
   readHostedFamilyAccessForMember,
   issueHostedFamilyInviteFromOwnerTx,
   readHostedFamilyOwnerSnapshotForMember,
+  revokeHostedFamilyInvite,
 } from "@/src/lib/hosted-onboarding/family-plan";
 import {
   HOSTED_FAMILY_PLAN_DISPLAY,
@@ -35,6 +36,7 @@ import { isHostedThreadContainerMember } from "@/src/lib/hosted-onboarding/membe
 import { getPrisma } from "@/src/lib/prisma";
 
 export async function handleHostedRuntimeFamilyPlanTool(input: {
+  includeInviteIds?: boolean;
   memberId: string;
   request: HostedRuntimeFamilyPlanToolRequest;
 }): Promise<HostedRuntimeFamilyPlanToolResponse> {
@@ -49,8 +51,12 @@ export async function handleHostedRuntimeFamilyPlanTool(input: {
   if (input.request.action === "read_status") {
     return {
       action: "read_status",
-      result: await readHostedRuntimeFamilyPlanToolStatus(input.memberId),
+      result: await readHostedRuntimeFamilyPlanToolStatus(input.memberId, input.includeInviteIds === true),
     };
+  }
+  if (input.request.action === "revoke_invite") {
+    const revoked = await revokeHostedFamilyInvite({ inviteId: input.request.inviteId, ownerMemberId: input.memberId });
+    return { action: "revoke_invite", result: { status: revoked ? "revoked" : "nothing_pending" } };
   }
   if (input.request.action === "start_checkout") {
     return {
@@ -170,6 +176,7 @@ async function startHostedRuntimeFamilyPlanCheckout(
 
 async function readHostedRuntimeFamilyPlanToolStatus(
   memberId: string,
+  includeInviteIds: boolean,
 ): Promise<HostedRuntimeFamilyPlanToolStatusResponse> {
   const prisma = getPrisma();
   const [snapshot, directBillingRef, familyAccess, member] = await Promise.all([
@@ -226,7 +233,10 @@ async function readHostedRuntimeFamilyPlanToolStatus(
       status: member.status,
     })),
     owner: true,
-    pendingInvites: snapshot.invites.map(projectHostedRuntimeFamilyPlanToolInvite),
+    pendingInvites: snapshot.invites.map((invite) => ({
+      ...projectHostedRuntimeFamilyPlanToolInvite(invite),
+      ...(includeInviteIds && invite.status === "pending" ? { inviteId: invite.id } : {}),
+    })),
     plans: snapshot.plans,
     seats: snapshot.seats,
   };

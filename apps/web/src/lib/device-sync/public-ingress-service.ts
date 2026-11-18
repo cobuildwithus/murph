@@ -562,12 +562,7 @@ export class HostedDeviceSyncPublicIngressService {
     warning?: { code: string; historicalResetIncomplete?: true; message: string };
   }> {
     const connection = await this.requireOwnedBrowserConnection(userId, connectionId);
-    const disconnected = await disconnectHostedDeviceSyncConnection({
-      connectionId: connection.id,
-      registry: this.registry,
-      store: this.context.store,
-      userId,
-    });
+    const disconnected = await this.disconnectOwnedConnection(userId, connection.id);
     return {
       connection: this.toBrowserConnection(disconnected.connection),
       // The browser chooses the manual-removal-before-reconnect guidance from this
@@ -583,6 +578,16 @@ export class HostedDeviceSyncPublicIngressService {
           }
         : {}),
     };
+  }
+
+  /** The signed runtime already uses the canonical ID returned by list_accounts. */
+  async disconnectOwnedConnection(userId: string, connectionId: string) {
+    return disconnectHostedDeviceSyncConnection({
+      connectionId,
+      registry: this.registry,
+      store: this.context.store,
+      userId,
+    });
   }
 
   async disconnectConnectionSource(

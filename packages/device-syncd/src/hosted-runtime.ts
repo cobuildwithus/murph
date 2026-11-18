@@ -1,4 +1,5 @@
 import { ContractValidationError } from "@murphai/contracts/validation-error";
+import * as z from "@murphai/contracts/zod-runtime";
 import { COMPANION_HRV_RMSSD_RESOURCE } from "@murphai/contracts";
 import type { JunctionRequestTimeoutDiagnosticDetails } from "./types.ts";
 import { readSafeJunctionRequestTimeoutDiagnostics } from "./junction-request-timeout-diagnostics.ts";
@@ -48,6 +49,15 @@ export const HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_DIRTY_ACK_PATH =
   "/api/internal/device-sync/runtime/dirty-ack";
 export const HOSTED_EXECUTION_DEVICE_SYNC_RECONCILE_PATH =
   "/api/internal/device-sync/reconcile";
+export const HOSTED_EXECUTION_DEVICE_SYNC_DISCONNECT_PATH =
+  "/api/internal/device-sync/disconnect";
+export const hostedDeviceDisconnectRequestSchema = z.object({
+  connectionId: z.string().trim().min(1).max(191),
+}).strict();
+export const hostedDeviceDisconnectResponseSchema = z.object({
+  status: z.enum(["disconnected", "already_disconnected", "not_finished"]),
+}).strict();
+export type HostedDeviceDisconnectResponse = z.infer<typeof hostedDeviceDisconnectResponseSchema>;
 export const HOSTED_EXECUTION_DEVICE_SYNC_NO_DATA_OUTREACH_PATH =
   "/api/internal/device-sync/no-data-outreach";
 export const HOSTED_EXECUTION_DEVICE_SYNC_FITBIT_MIGRATION_CUTOVER_PATH =

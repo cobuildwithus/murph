@@ -2,6 +2,7 @@ import {
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_BODY_LIMIT_BYTES,
   HOSTED_EXECUTION_DEVICE_SYNC_RUNTIME_APPLY_PATH,
   HOSTED_EXECUTION_DEVICE_SYNC_NO_DATA_OUTREACH_PATH,
+  HOSTED_EXECUTION_DEVICE_SYNC_DISCONNECT_PATH,
   type HostedExecutionDeviceSyncRuntimeApplyRequest,
 } from "@murphai/device-syncd/hosted-runtime";
 import { describe, expect, it, vi } from "vitest";
@@ -11,6 +12,22 @@ import {
 } from "../src/runtime-platform/device-sync-port.ts";
 
 describe("hosted device-sync runtime port", () => {
+  it("passes the exact connection ID to Web and fails closed when the route is absent", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      const request = new Request(input, init);
+      expect(new URL(request.url).pathname).toBe(HOSTED_EXECUTION_DEVICE_SYNC_DISCONNECT_PATH);
+      expect(request.method).toBe("POST");
+      await expect(request.json()).resolves.toEqual({ connectionId: "account_maya" });
+      return Response.json({ status: "disconnected" });
+    });
+    const port = createHostedWebDeviceSyncPort({
+      boundUserId: "member_synthetic", fetchImpl: fetchMock, timeoutMs: 5_000, transport: { mode: "proxy" },
+    });
+    await expect(port.disconnectAccount!({ connectionId: "account_maya" })).resolves.toEqual({ status: "disconnected" });
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 404 }));
+    await expect(port.disconnectAccount!({ connectionId: "account_maya" })).rejects.toMatchObject({ status: 404 });
+  });
+
   it("reads only the bound member contact projection and rejects unexpected response fields", async () => {
     const contact = { status: "recently_active", lastContactAt: "2026-10-01T12:00:00.000Z", lastForegroundAt: null };
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
