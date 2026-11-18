@@ -1,16 +1,5 @@
 ARG HOSTED_RUNNER_BASE_IMAGE=ghcr.io/cobuildwithus/murph-cloudflare-runner-base:node24.22.1-codex0.169.0-runtime1
 
-FROM ${HOSTED_RUNNER_BASE_IMAGE} AS runner-app-permissions
-
-USER root
-
-ARG HOSTED_RUNNER_BUNDLE_DIR=.deploy/runner-bundle
-
-COPY --chown=root:root ${HOSTED_RUNNER_BUNDLE_DIR}/ /app/
-
-RUN chmod -R a-w /app \
-  && chmod -R a+rX /app
-
 # Re-layer the exact pinned native runtime beside /app so lazy image loading
 # fetches the app-server hot set before the first provider turn.
 FROM ${HOSTED_RUNNER_BASE_IMAGE} AS runner-codex-hotset
@@ -52,7 +41,11 @@ RUN mkdir -p /usr/local/share/murph \
   && rm -f /tmp/murph-codex-model-catalog.openai-flex.json \
   && rm -f /usr/local/bin/codex
 
-COPY --from=runner-app-permissions --chown=root:root /app/ /app/
+ARG HOSTED_RUNNER_BUNDLE_DIR=.deploy/runner-bundle
+# Apply permissions while the new files are still in the same image layer.
+RUN --mount=type=bind,source=${HOSTED_RUNNER_BUNDLE_DIR},target=/mnt/runner-bundle \
+    cp -a --no-preserve=ownership /mnt/runner-bundle/. /app/ \
+    && chmod -R a-w,a+rX /app
 
 COPY --from=runner-codex-hotset --chown=root:root /opt/murph-codex-hot/ /
 
