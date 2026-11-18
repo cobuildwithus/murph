@@ -102,13 +102,17 @@ export async function readFriendGameSeries(memberIds: string[]): Promise<FriendG
       amounts.push({ measureId: contribution.id, date, amount: contribution.amount });
       result.amounts.set(entry.memberId, amounts);
       result.measures.set(contribution.id, friendMeasure(contribution.id));
-      const tasks = result.tasks.get(entry.memberId) ?? new Map<string, { date: string; text: string }>();
-      if ((tasks.get(contribution.id)?.date ?? "") <= date) tasks.set(contribution.id, { date, text: task.text });
-      result.tasks.set(entry.memberId, tasks);
+      keepLatestTask(result.tasks, entry.memberId, contribution.id, { date, text: task.text });
     }
     result.pending = [...pending.values()];
     return result;
   });
+}
+
+function keepLatestTask(tasks: FriendGameSeries["tasks"], memberId: string, measureId: string, task: { date: string; text: string }) {
+  const own = tasks.get(memberId) ?? new Map<string, { date: string; text: string }>();
+  if ((own.get(measureId)?.date ?? "") <= task.date) own.set(measureId, task);
+  tasks.set(memberId, own);
 }
 
 export function friendMeasure(id: string): FriendMeasure {
