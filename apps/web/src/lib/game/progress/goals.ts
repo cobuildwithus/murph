@@ -14,7 +14,7 @@ import type { StoredAward } from "./awards";
 import { inferenceClient, normalizeTask } from "./infer";
 import { cumulativePoints, readGameSeries, type MeasureSeries } from "./series";
 import { patchMeasureState, type BeforeProgressMutation, type MeasureState } from "./state";
-import { readRouteGoals, routePlaces, setRouteGoal } from "./routes";
+import { readRouteGoals, setRouteGoal } from "./routes";
 
 export function roundValues(total: number, { id, unit }: Pick<MeasureSeries, "id" | "unit">): number[] {
   const factor = unit === "seconds" ? 3600 : unit === "meters" ? 1609.344 : 1;
@@ -194,15 +194,7 @@ export async function setMeasure(memberId: string, measureId: string, body: SetM
     return `${measure.name}.reps`;
   }
   if (measure.unit === "meters" || measure.unit === "steps") {
-    let places: { from: string; to: string } | null;
-    if ("from" in body.goal) places = body.goal;
-    else {
-      const id = body.goal.rungId;
-      const entry = BANK.find(entry => entry.id === id && entry.kind === "route");
-      places = entry ? routePlaces(entry.name) : null;
-    }
-    if (!places) throw invalidGameRequest("Choose a route with two places.");
-    await setRouteGoal(memberId, measureId, places.from, places.to, { points: cumulativePoints(measure.amounts),
+    await setRouteGoal(memberId, measureId, body.goal, { points: cumulativePoints(measure.amounts),
       awards: snapshot.awards, incomplete: snapshot.incomplete, beforeMutationTx });
     return measureId;
   }

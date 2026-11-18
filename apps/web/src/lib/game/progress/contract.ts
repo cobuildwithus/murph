@@ -20,7 +20,7 @@ const ladder = z.object({ kind: z.enum(["height", "time"]), passed: z.array(rung
 export type Ladder = z.infer<typeof ladder>;
 const towns = z.array(z.object({ name: z.string(), atText: z.string(), x: z.number(), y: z.number(), passedOn: day.nullable() }));
 const route = z.object({
-  name: z.string(), distanceText: z.string(), walkedText: z.string(), progress: z.number(), straightLine: z.boolean(),
+  name: z.string(), distanceText: z.string(), walkedText: z.string(), totalText: z.string(), progress: z.number(), straightLine: z.boolean(),
   goalPicked: z.boolean(), completed: z.array(z.object({ name: z.string(), finishedOn: day, shareAwardId: z.string() })),
   finishedOn: day.nullable(), shareAwardId: z.string().nullable(),
   /** Authenticated Progress map path, never a provider URL. */
@@ -124,6 +124,7 @@ export type Goals = z.infer<typeof goalsSchema>;
 
 const text = z.string().trim().min(1);
 const goal = z.union([z.strictObject({ rungId: text }), z.strictObject({ from: text, to: text })]);
+export type MeasureGoal = z.infer<typeof goal>;
 const setMeasure = z.union([z.strictObject({ goal }), z.strictObject({ perDay: z.number().int().min(1).max(10_000) })]);
 export type SetMeasureBody = z.infer<typeof setMeasure>;
 const sharing = z.strictObject({ metrics: z.array(z.enum(["steps", "sleep"])).min(1).max(2)

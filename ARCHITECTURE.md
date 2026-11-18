@@ -6371,8 +6371,8 @@ write rechecks native-session authority inside `patchMeasureState`, outside
 the provider catch, preserving authority and conflict errors. Goals and per-day
 choices use `patchMeasureState`. Distance goals call `setRouteGoal` with the
 complete canonical series, stored awards and current mutation authority. Typed
-and checked two-place bank routes use the same resolver; other long bank entries
-are excluded. No new table, endpoint, flag or preference is introduced.
+routes and checked bank routes with endpoints or loop waypoints use the same
+resolver. No new table, endpoint, flag or preference is introduced.
 
 Fixtures cover new, established, year-long, mixed-unit, no-game, gap, privacy,
 tie and moment states. They are presentation examples, not expected engine
@@ -7179,6 +7179,17 @@ never a member identity, health total or provider token in a client response.
 Route award identity includes the retained leg's position and frozen route
 facts. Replacing an unfinished route cannot inherit another goal's award, and
 repeating a completed route after a correction cannot reuse the prior leg's key.
+
+The Steps goal picker uses Health's settled, retained days since joining. It rechecks
+native session and vault authority before returning a preview or changed wearable
+measure and inside each write transaction. On each route, `totalText` shows the
+measure's cumulative distance and `walkedText` shows distance on the current leg.
+Steps qualifies both estimates with “about”.
+
+Around Iceland uses the same Reykjavík endpoint for the preview, map and save.
+Its bank entry supplies the checked circuit length and ordered via coordinates.
+The resolver geocodes its start once and requires driving geometry for the loop.
+The frozen leg and its completion both retain the route name.
 
 Progress maps resolve two permanent geocodes, one simplified driving route and
 eight sequential place reverse-geocodes for road routes. Only the provider's explicit NoRoute

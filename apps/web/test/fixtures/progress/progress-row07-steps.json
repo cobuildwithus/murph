@@ -402,7 +402,8 @@
       "route": {
         "name": "San Diego to San Francisco",
         "distanceText": "501 mi",
-        "walkedText": "85 mi",
+        "walkedText": "about 85 mi",
+        "totalText": "about 94 mi",
         "progress": 0.16966067864271456,
         "straightLine": false,
         "finishedOn": null,

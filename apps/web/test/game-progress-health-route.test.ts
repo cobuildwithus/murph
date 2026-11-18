@@ -25,7 +25,9 @@ import { addDaysToIsoDate } from "@murphai/contracts";
 import { getHostedDomainRootUnwrapCache } from "@/src/lib/hosted-crypto/domain-root-unwrap-cache";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { GET } from "../app/api/game/v1/progress/health/route";
-import { healthSchema, savedHealthSchema } from "@/src/lib/game/progress/contract";
+import { GET as goals } from "../app/api/game/v1/progress/goals/route";
+import { PUT } from "../app/api/game/v1/progress/measures/[id]/route";
+import { goalsSchema, healthSchema, savedHealthSchema } from "@/src/lib/game/progress/contract";
 import { healthAgeShare, healthSteps } from "@/src/lib/game/progress/health";
 import { encodePolyline } from "@/src/lib/game/progress/route-geometry";
 import type { StoredAward } from "@/src/lib/game/progress/awards";
@@ -220,6 +222,75 @@ it.each([["us", "about 1 mi"], ["metric", "about 1.6 km"]])("renders the Steps j
   const body = healthSchema.parse(await (await GET(request("", units))).json());
   expect(body.sums.find(sum => sum.id === "steps")).toMatchObject({ total: { value: 2000, unit: "steps" }, route: { walkedText } });
   expect(mocks.resolve).not.toHaveBeenCalled();
+});
+
+const stepsUrl = "https://example.test/api/game/v1/progress";
+const stepsGoals = (q?: string) => goals(new Request(`${stepsUrl}/goals?measure=steps${q ? `&q=${encodeURIComponent(q)}` : ""}`));
+const pickSteps = (goal: object) => PUT(new Request(`${stepsUrl}/measures/steps`, {
+  method: "PUT", body: JSON.stringify({ goal }),
+}), { params: Promise.resolve({ id: "steps" }) });
+
+function stepsSnapshot() {
+  const daily = [addDaysToIsoDate(joinedOn, -1), joinedOn].map(date => ({
+    date, value: 4000, source: "Garmin", observedAt: `${date}T12:00:00Z`,
+  }));
+  mocks.raw.mockResolvedValue({ ...snapshot(), numbers: { steps: { daily } } });
+  const leg = { from: "A", to: "B", distanceM: 1609.344, startTotal: 0,
+    towns: [], straightLine: false, polyline: encodePolyline([[0, 0], [1, 0]]) };
+  mocks.resolve.mockImplementation(async (from, to) => ({ ...leg, from, to, name: "Around Iceland", distanceM: 1322000 }));
+  return leg;
+}
+
+it("previews a suggested Steps loop and returns the same wearable measure as Health after rollover", async () => {
+  const first = stepsSnapshot();
+  const initial = goalsSchema.parse(await (await stepsGoals()).json());
+  const loop = initial.suggestions.find(tile => tile.id === "around-iceland")!;
+  expect(loop).toMatchObject({ name: "Around Iceland", atText: "821 mi" });
+  const preview = goalsSchema.parse(await (await stepsGoals(loop.name)).json()).route!;
+  expect(preview).toMatchObject({ from: "Reykjavík, Iceland", to: "Reykjavík, Iceland",
+    distanceText: "821 miles", detail: "By road. You're 2 in, so 819 to go." });
+  const params = new URL(preview.map, stepsUrl).searchParams;
+  expect(Object.fromEntries(params)).toEqual({ from: preview.from, to: preview.to, size: "card" });
+  expect(mocks.awards).not.toHaveBeenCalled();
+  expect(mocks.patch).not.toHaveBeenCalled();
+  mocks.patch.mockImplementationOnce(async (_member, _id, patch, before) => {
+    await before({ transaction: true });
+    const state = patch({ legs: [first] });
+    mocks.measures.mockResolvedValue([{ lookup: "steps", stateEncrypted: "synthetic-sealed" }]);
+    mocks.open.mockResolvedValue([state]);
+    return state;
+  });
+  const response = await pickSteps({ from: preview.from, to: preview.to });
+  expect(response.status).toBe(200);
+  const body = await response.json();
+  expect(body).toMatchObject({ ok: true, measure: { id: "steps", source: "wearable", total: { value: 4000, unit: "steps" },
+    route: { name: loop.name, totalText: "about 2 mi", walkedText: "about 0 mi", progress: 0, goalPicked: true } } });
+  const health = healthSchema.parse(await (await GET(request())).json());
+  expect(body.measure).toEqual(health.sums.find(sum => sum.id === "steps"));
+  expect(mocks.resolve).toHaveBeenCalledTimes(2);
+  expect(mocks.authority).toHaveBeenCalledWith({ memberId: "ava", prisma: { transaction: true } });
+});
+
+it.each(["session", "vault"])("withholds the Steps preview after %s authority is lost during resolution", async boundary => {
+  stepsSnapshot();
+  const check = boundary === "session" ? mocks.current : mocks.authority;
+  check.mockRejectedValueOnce(hostedOnboardingError({ code: "CONSENT_REQUIRED", httpStatus: 403, message: "Consent required." }));
+  const response = await stepsGoals("Around Iceland");
+  expect(mocks.resolve).toHaveBeenCalledOnce();
+  expect(response.status).toBe(403);
+  expect(await response.json()).not.toHaveProperty("route");
+});
+
+it.each(["commit", "response"])("rechecks vault authority for a changed Steps route at %s", async boundary => {
+  stepsSnapshot();
+  const loss = hostedOnboardingError({ code: "CONSENT_REQUIRED", httpStatus: 403, message: "Consent required." });
+  mocks.settle.mockResolvedValue(false);
+  if (boundary === "response") mocks.authority.mockResolvedValueOnce(undefined);
+  mocks.authority.mockRejectedValueOnce(loss);
+  const response = await pickSteps({ rungId: "around-iceland" });
+  expect(response.status).toBe(403);
+  expect(await response.json()).not.toHaveProperty("measure");
+  expect(mocks.settle).toHaveBeenCalledTimes(boundary === "commit" ? 0 : 1);
 });
 
 it("serves curated recommendation glyphs on a flat metric without model work", async () => {

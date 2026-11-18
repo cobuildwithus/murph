@@ -9,6 +9,7 @@ import { openProgress, progressLookup, sealProgress } from "./crypto";
 
 export type BeforeProgressMutation = (tx: Prisma.TransactionClient) => Promise<void>;
 export interface RouteLeg {
+  name?: string;
   from: string;
   to: string;
   distanceM: number;

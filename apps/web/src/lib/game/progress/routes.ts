@@ -1,9 +1,10 @@
 import 'server-only';
 import type { ClientUnits } from '../../companion/client-info';
-import type { Day, Goals, Rung } from './contract';
+import type { Day, Goals, MeasureGoal, Rung } from './contract';
 import type { StoredAward } from './awards';
 import { patchMeasureState, type BeforeProgressMutation } from './state';
 import { hostedOnboardingError } from '../../hosted-onboarding/errors';
+import { invalidGameRequest } from '../http/errors';
 import { resolveRoute } from './mapbox';
 import { replaceRouteLeg, routeMeters, routeTowns } from './route-progress';
 import { formatAmount } from './format';
@@ -20,21 +21,27 @@ export async function setFirstRoute(memberId: string, measureId: string, route: 
   }), beforeMutationTx);
 }
 
-/** Long bank entries require two named places; numeric and planetary goals are excluded. */
+function bankPlaces(entry: BankEntry) {
+  return entry.loop ? { from: entry.loop.start, to: entry.loop.start } : routePlaces(entry.name);
+}
+
+/** Only bank entries with routable places appear in the picker. */
 export async function readRouteGoals(query: string | undefined, unit: 'meters' | 'steps', total: number, units: ClientUnits): Promise<Goals> {
-  const eligible = (entry: BankEntry) => entry.kind === 'route' && routePlaces(entry.name) !== null;
+  const eligible = (entry: BankEntry) => entry.kind === 'route' && bankPlaces(entry) !== null;
   const tile = (entry: BankEntry): Rung => ({ id: entry.id, name: entry.name, short: entry.short, tagline: entry.tagline, shareAwardId: null, drawing: null, at: unit === 'steps' ? entry.at / 1609.344 * 2000 : entry.at,
     atText: formatAmount(entry.at, 'meters', 'full', units).text, blurb: units === 'metric' ? entry.blurbMetric ?? entry.blurb : entry.blurb, where: entry.where, on: null, toGo: null });
   const tiles = BANK.filter(eligible).slice(0, 6).map(tile);
-  if (!query) return { tiles, match: null, suggestions: [], note: null, route: null };
-  const places = routePlaces(query);
+  if (!query) return { tiles, match: null, suggestions: unit === 'steps' ? tiles : [], note: null, route: null };
+  const matches = search(query).filter(eligible);
+  const exact = matches.find(entry => entry.name.toLowerCase() === query.toLowerCase());
+  const places = exact ? bankPlaces(exact) : routePlaces(query);
   if (places) return { tiles, match: null, suggestions: [], note: null,
     route: await routeGoalPreview(places.from, places.to, routeMeters(unit, total), units) };
-  return { tiles, match: null, suggestions: search(query).filter(eligible).slice(0, 4).map(tile), note: null, route: null };
+  return { tiles, match: null, suggestions: matches.slice(0, 4).map(tile), note: null, route: null };
 }
 
 /** BE1/BE2 supply their complete canonical series and live mutation authority. */
-export async function setRouteGoal(memberId: string, measureId: string, from: string, to: string, context: {
+export async function setRouteGoal(memberId: string, measureId: string, goal: MeasureGoal, context: {
   points: readonly [Day, number][];
   awards: readonly StoredAward[];
   incomplete: boolean;
@@ -42,6 +49,10 @@ export async function setRouteGoal(memberId: string, measureId: string, from: st
 }) {
   if (context.incomplete) throw hostedOnboardingError({ code: 'PROGRESS_INCOMPLETE', httpStatus: 503,
     retryable: true, message: 'Progress could not load completely. Try again.' });
+  const entry = 'rungId' in goal ? BANK.find(entry => entry.kind === 'route' && entry.id === goal.rungId) : null;
+  const places = 'from' in goal ? goal : entry && bankPlaces(entry);
+  if (!places) throw invalidGameRequest('Choose a route with two places.');
+  const { from, to } = places;
   const next = await resolveRoute(from, to);
   const total = routeMeters(measureId, context.points.at(-1)?.[1] ?? 0);
   const earned = new Set(context.awards.map(award => award.key));

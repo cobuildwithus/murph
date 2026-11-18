@@ -10,6 +10,11 @@ type Points = readonly [Day, number][];
 const crossingDay = (points: Points, at: number) => points.find(point => point[1] >= at)?.[0] ?? null;
 export const routeAwardKey = (measureId: string, leg: RouteLeg, index: number) => `route:${JSON.stringify([measureId, index, leg.from, leg.to, leg.distanceM, leg.startTotal])}`;
 
+/** Named loops keep their label on both the medal and the finished-routes list. */
+export function routeAwardName(award: StoredAward, fallback: string): string {
+  return typeof award.data.name === 'string' ? award.data.name : fallback;
+}
+
 /** Completed legs survive corrections; changing a goal only replaces the unfinished leg. */
 export function replaceRouteLeg(measureId: string, legs: readonly RouteLeg[], next: Omit<RouteLeg, 'startTotal'>, total: number, earned: ReadonlySet<string>): RouteLeg[] {
   const finished = legs.filter((leg, i) => i < legs.length - 1 || earned.has(routeAwardKey(measureId, leg, i)) || total >= leg.startTotal + leg.distanceM);
@@ -21,7 +26,7 @@ export function routeLegs(ctx: { measureId: string; legs: readonly RouteLeg[]; p
   return ctx.legs.flatMap((leg, index) => {
     const on = crossingDay(points, leg.startTotal + leg.distanceM);
     return on ? [{ key: routeAwardKey(ctx.measureId, leg, index), kind: 'route', measureId: ctx.measureId, subjectMemberId: null, on,
-      data: { from: leg.from, to: leg.to, distanceM: leg.distanceM, startTotal: leg.startTotal, page: 'totals' } }] : [];
+      data: { ...(leg.name && { name: leg.name }), from: leg.from, to: leg.to, distanceM: leg.distanceM, startTotal: leg.startTotal, page: 'totals' } }] : [];
   });
 }
 
@@ -51,11 +56,11 @@ export function routeView(measureId: string, state: MeasureState, points: Points
   const total = meters.at(-1)?.[1] ?? 0;
   const walked = earnedOn ? leg.distanceM : Math.min(leg.distanceM, Math.max(0, total - leg.startTotal));
   const map = `/api/game/v1/progress/map?${new URLSearchParams({ measure: measureId, size: 'card' })}`;
-  return { name: `${leg.from} to ${leg.to}`, distanceText: formatAmount(leg.distanceM, 'meters', 'full', units).text,
-    walkedText: formatAmount(walked, 'meters', 'compact', units).text,
+  return { name: leg.name ?? `${leg.from} to ${leg.to}`, distanceText: formatAmount(leg.distanceM, 'meters', 'full', units).text,
+    walkedText: formatAmount(walked, 'meters', 'compact', units).text, totalText: formatAmount(total, 'meters', 'compact', units).text,
     progress: walked / leg.distanceM, straightLine: leg.straightLine,
     here: routeHere(leg, walked / leg.distanceM, 'card'), drawerHere: routeHere(leg, walked / leg.distanceM, 'drawer'),
     finishedOn: earnedOn, shareAwardId: earned?.id ?? null, map, goalPicked: state.goal !== undefined,
-    completed: completions.map(award => ({ name: `${award.data.from} to ${award.data.to}`, finishedOn: award.on, shareAwardId: award.id })),
+    completed: completions.map(award => ({ name: routeAwardName(award, `${award.data.from} to ${award.data.to}`), finishedOn: award.on, shareAwardId: award.id })),
     towns: routeTowns(leg, meters, 'card', units), drawerTowns: routeTowns(leg, meters, 'drawer', units) };
 }

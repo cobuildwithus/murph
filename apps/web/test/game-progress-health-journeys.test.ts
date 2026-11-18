@@ -62,7 +62,7 @@ it("composes settled Steps into an about-miles route without mixing measured wal
   expect(renderRoute).toHaveBeenCalledOnce();
   renderRoute.mockRestore();
   expect(view.total).toEqual({ value: 27000, text: "27,000", unit: "steps" });
-  expect(view.route).toMatchObject({ walkedText: "about 10 mi", progress: 1, goalPicked: false, finishedOn: "2026-11-09" });
+  expect(view.route).toMatchObject({ walkedText: "about 10 mi", totalText: "about 14 mi", progress: 1, goalPicked: false, finishedOn: "2026-11-09" });
   expect(view.route?.map).toContain("measure=steps");
   expect(view.ladder).toBeNull();
 });

@@ -413,6 +413,7 @@
         "name": "Atlanta to Chattanooga",
         "distanceText": "118 mi",
         "walkedText": "116 mi",
+        "totalText": "116 mi",
         "progress": 0.9830508474576272,
         "straightLine": false,
         "finishedOn": null,

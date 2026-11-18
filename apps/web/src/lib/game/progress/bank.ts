@@ -15,6 +15,7 @@ export interface BankEntry {
   source: string;
   ladder: boolean;
   use: string[];
+  loop?: { start: string; via: number[][] };
 }
 
 export const BANK: readonly BankEntry[] = [
@@ -23,7 +24,7 @@ export const BANK: readonly BankEntry[] = [
     at: entry.kind === "long" ? entry.distance_km! * 1000 : entry.height_ft!,
     short: "short" in entry ? entry.short! : entry.name, tagline: entry.tagline,
     blurbMetric: "blurb_metric" in entry ? entry.blurb_metric! : null, timeText: null,
-    blurb: entry.blurb, where: entry.where, source: entry.source_url, ladder: entry.ladder, use: [],
+    blurb: entry.blurb, where: entry.where, source: entry.source_url, ladder: entry.ladder, use: [], loop: entry.loop,
   })),
   ...times.map(entry => ({
     id: entry.id, name: entry.name, kind: "time" as const, at: entry.seconds, timeText: entry.display,

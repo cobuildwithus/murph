@@ -2,6 +2,7 @@ import 'server-only';
 import * as z from '@murphai/contracts/zod-runtime';
 import { hostedOnboardingError } from '../../hosted-onboarding/errors';
 import { cutPolyline, decodePolyline, distanceM, encodePolyline, greatCircle, MAP_SIZES, routeBbox, type Coordinate } from './route-geometry';
+import { BANK } from './bank';
 import type { MapQuery } from './contract';
 
 const coordinate = z.tuple([z.number().min(-180).max(180), z.number().min(-90).max(90)]);
@@ -45,12 +46,20 @@ async function geocode(place: string): Promise<Coordinate> {
 
 /** Only an explicit NoRoute is a straight line. NoSegment, transport and shape failures are 503s. */
 export async function resolveRoute(from: string, to: string) {
-  const [start, end] = await Promise.all([geocode(from), geocode(to)]);
-  const result = await mapboxJson(`/directions/v5/mapbox/driving/${start.join(',')};${end.join(',')}`,
+  // The picker returns a preview's endpoints on save. A checked loop has the same start and finish.
+  const entry = from === to ? BANK.find(entry => entry.loop?.start === from) : undefined;
+  const loop = entry?.loop;
+  const origin = geocode(from);
+  const [start, end] = await Promise.all([origin, loop ? origin : geocode(to)]);
+  const stops = [start, ...(loop?.via ?? []), end];
+  const result = await mapboxJson(`/directions/v5/mapbox/driving/${stops.map(point => point.join(',')).join(';')}`,
     { geometries: 'polyline', overview: 'simplified', steps: 'false' }, directions);
-  const straightLine = result.code === 'NoRoute';
-  const meters = result.code === 'NoRoute' ? distanceM(start, end) : result.routes[0]!.distance;
-  const polyline = result.code === 'NoRoute' ? encodePolyline(greatCircle(start, end)) : result.routes[0]!.geometry;
+  if (result.code === 'NoRoute') {
+    if (loop) throw unavailable();
+    return { from, to, distanceM: distanceM(start, end), polyline: encodePolyline(greatCircle(start, end)), towns: [], straightLine: true };
+  }
+  const road = result.routes[0]!;
+  const meters = entry?.at ?? road.distance, polyline = road.geometry;
   const points = decodePolyline(polyline);
   const towns: { name: string; atM: number }[] = [];
   const sampleTown = async (i: number) => {
@@ -61,7 +70,7 @@ export async function resolveRoute(from: string, to: string) {
     const town = response.features[0];
     return town && { name: town.properties.name, atM: meters * i / 7 };
   };
-  for (let i = 0; !straightLine && i < 8; i += 2) {
+  for (let i = 0; i < 8; i += 2) {
     const pair = await Promise.allSettled([sampleTown(i), sampleTown(i + 1)]);
     for (const sample of pair) {
       if (sample.status === 'rejected') throw sample.reason;
@@ -69,7 +78,7 @@ export async function resolveRoute(from: string, to: string) {
       if (town && !towns.some(existing => existing.name === town.name)) towns.push(town);
     }
   }
-  return { from, to, distanceM: meters, polyline, towns, straightLine };
+  return { ...(entry && { name: entry.name }), from, to, distanceM: meters, polyline, towns, straightLine: false };
 }
 
 /** The style's source is `mapbox-style.json`, uploaded by hand to the Mapbox account named in `MAPBOX_STYLE_ID`. */
