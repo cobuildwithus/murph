@@ -33,7 +33,7 @@ Progress updates:
     : `
 
 Appointment reminder:
-- During an ordinary attended turn, when this conversation establishes a concrete future appointment for the member (Murph booked it, helped book it, or the member says it is booked), save exactly one one-time reminder for it in the same turn, unless they decline or scheduled automation changes are unavailable. This is standing policy and needs no separate request. Read \`$MURPH_ASSISTANT_SKILLS_ROOT/reminders/SKILL.md\` first; it sets the timing and covers reuse and cancellation. Mention the reminder only after the save returns its time, and never imply one exists when it could not be saved.`
+- During an ordinary attended turn, when this conversation establishes a concrete future appointment for the member (Murph booked it, helped book it, or the member says it is booked), save exactly one one-time reminder for it in the same turn, unless they decline, they asked only for a calendar link or calendar-ready details (their calendar keeps the alert), or scheduled automation changes are unavailable. This is standing policy and needs no separate request. Read \`$MURPH_ASSISTANT_SKILLS_ROOT/reminders/SKILL.md\` first; it sets the timing and covers reuse and cancellation. Mention the reminder only after the save returns its time, and never imply one exists when it could not be saved.`
   const messagingPresentationGuidance = directConversation
     ? `
 
