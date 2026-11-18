@@ -18,7 +18,7 @@ const req = (method = 'GET', body?: string) => new Request(`https://example.test
 beforeEach(() => { vi.resetAllMocks(); mocks.auth.mockResolvedValue({ member: { id: 'member-ava' } }); });
 describe('private Progress share HTTP contract', () => {
   it.each([
-    { state: 'needs_photo' }, { state: 'medal' }, { state: 'available' },
+    { state: 'needs_photo' }, { state: 'medal' }, { state: 'available' }, { state: 'later', availableAt: '2026-11-16T22:00:00.000Z' },
     { state: 'generating', startedAt: '2026-11-16T12:00:00.000Z', expiresAt: '2026-11-16T12:04:00.000Z', typicalSeconds: 55 },
     { state: 'photo', imagePath: `/api/game/v1/progress/shares/${awardId}/image` },
   ] satisfies ShareView['presentation'][])('GET only reads the strict $state view', async presentation => {
@@ -33,9 +33,10 @@ describe('private Progress share HTTP contract', () => {
     expect(shareViewSchema.safeParse(view({ state: 'medal', ...{ code: 'refused' } })).success).toBe(false);
     expect(shareViewSchema.safeParse({ ...view({ state: 'medal' }), presentation: { state: 'failed', code: 'refused' } }).success).toBe(false);
   });
-  it.each([['generating', 202], ['photo', 200], ['medal', 200]] as const)('POST admits once and returns %s with %d', async (state, status) => {
+  it.each([['generating', 202], ['photo', 200], ['medal', 200], ['later', 200]] as const)('POST admits once and returns %s with %d', async (state, status) => {
     const presentation = state === 'generating' ? { state, startedAt: '2026-11-16T12:00:00.000Z', expiresAt: '2026-11-16T12:04:00.000Z', typicalSeconds: 55 }
-      : state === 'photo' ? { state, imagePath: `/api/game/v1/progress/shares/${awardId}/image` } : { state };
+      : state === 'photo' ? { state, imagePath: `/api/game/v1/progress/shares/${awardId}/image` }
+        : state === 'later' ? { state, availableAt: '2026-11-16T22:00:00.000Z' } : { state };
     mocks.start.mockImplementation(async input => { await input.beforeMutationTx({ synthetic: true }); return view(presentation); });
     const response = await POST(req('POST'), context);
     expect(response.status).toBe(status); expect(mocks.start).toHaveBeenCalledTimes(1);
@@ -64,10 +65,7 @@ describe('private Progress share HTTP contract', () => {
     for (const handler of [GET, POST, imageGET]) expect((await handler(req(handler === POST ? 'POST' : 'GET'), context)).status).toBe(401);
     expect(mocks.read).not.toHaveBeenCalled(); expect(mocks.start).not.toHaveBeenCalled(); expect(mocks.image).not.toHaveBeenCalled();
   });
-  it('returns the bounded quota interval without private data and sanitizes infrastructure errors', async () => {
-    mocks.start.mockRejectedValue(hostedOnboardingError({ code: 'PROGRESS_SHARE_LIMIT', httpStatus: 429, message: 'Another picture can be made later.', details: { retryAfterSeconds: 240 } }));
-    const limited = await POST(req('POST'), context); expect(limited.status).toBe(429);
-    expect(await limited.json()).toMatchObject({ error: { details: { retryAfterSeconds: 240 } } });
+  it('sanitizes infrastructure errors', async () => {
     mocks.start.mockRejectedValue(new Error('PRIVATE_PROVIDER_SENTINEL'));
     const failed = await POST(req('POST'), context); expect(failed.status).toBe(503); expect(await failed.text()).not.toContain('PRIVATE_PROVIDER_SENTINEL');
     expect(failed.headers.get('cache-control')).toBe('private, no-store');

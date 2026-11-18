@@ -190,6 +190,8 @@ export const shareViewSchema = z.strictObject({
     z.strictObject({ state: z.literal('needs_photo') }),
     z.strictObject({ state: z.literal('medal') }),
     z.strictObject({ state: z.literal('available') }),
+    /** A quota or another live generation: POST starts nothing before availableAt. */
+    z.strictObject({ state: z.literal('later'), availableAt: z.iso.datetime() }),
     // typicalSeconds: how long a picture usually takes, for a timed 0-100 loader.
     z.strictObject({ state: z.literal('generating'), startedAt: z.iso.datetime(), expiresAt: z.iso.datetime(), typicalSeconds: z.number().int().positive() }),
     z.strictObject({ state: z.literal('photo'), imagePath: z.string() }),
