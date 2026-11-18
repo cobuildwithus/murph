@@ -239,7 +239,6 @@ function buildWorkoutEventDecisions(
         workout: session.workout,
       }) as JsonObject,
       source: 'import',
-      allowUnknownDuration: true,
     })
 
     const payload = {

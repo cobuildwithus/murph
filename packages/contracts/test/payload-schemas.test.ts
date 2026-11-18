@@ -451,6 +451,7 @@ test("event JSONL row payload schemas match public write kinds and reject explic
     },
   };
   assert.equal(safeParseContract(symptomSchema, validSymptom).success, true);
+  assert.equal(safeParseContract(symptomSchema, { ...validSymptom, intensity: undefined }).success, true);
   const activitySession = {
     kind: "activity_session",
     occurredAt: "2026-03-12T11:15:00.000Z",
@@ -468,7 +469,7 @@ test("event JSONL row payload schemas match public write kinds and reject explic
   };
   assert.equal(
     safeParseContract(activitySessionSchema, activitySession).success,
-    false,
+    true,
   );
   assert.equal(
     safeParseContract(activitySessionSchema, {
@@ -571,6 +572,36 @@ test("event JSONL row payload schemas match public write kinds and reject explic
       throw new Error(`expected ${forbiddenKey} to be rejected`);
     }
     assert.match(result.errors.join("\n"), new RegExp(forbiddenKey, "u"));
+  }
+});
+
+test("intake doses require both an amount and a unit when either is supplied", () => {
+  const common = {
+    occurredAt: "2026-03-12T11:15:00.000Z",
+    title: "Morning intake",
+  };
+  for (const payload of [
+    { ...common, kind: "medication_intake", medicationName: "Tablet A" },
+    { ...common, kind: "supplement_intake", supplementName: "Vitamin B12" },
+  ] as const) {
+    const importSchema = publicEventImportJsonlRowPayloadSchemasByKind[payload.kind];
+    const record = {
+      ...payload,
+      schemaVersion: "murph.event.v1",
+      id: "evt_01JQ9R7WF97M1WAB2B4QF2Q1F0",
+      recordedAt: common.occurredAt,
+      dayKey: "2026-03-12",
+      source: "manual",
+    };
+    assert.deepEqual(importSchema.parse(payload), payload);
+    assert.deepEqual(eventRecordSchema.parse(record), record);
+    assert.deepEqual(eventRecordSchema.parse({ ...record, dose: 0, unit: "mg" }), {
+      ...record, dose: 0, unit: "mg",
+    });
+    for (const partial of [{ dose: 5 }, { unit: "mg" }]) {
+      assert.throws(() => importSchema.parse({ ...payload, ...partial }), /Dose and unit must be provided together/u);
+      assert.throws(() => eventRecordSchema.parse({ ...record, ...partial }), /Dose and unit must be provided together/u);
+    }
   }
 });
 

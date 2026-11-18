@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-18",
+  "order": 90,
+  "item": {
+    "id": "log-without-every-detail",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Log a workout, symptom or medicine with just what you know",
+    "summary": "Tell Murph \"went rowing this morning\" or \"took my allergy pill\" and it logs it, without first asking how long, how bad or how much.",
+    "details": "Murph saves the details you give and leaves the rest out, never guessing a number. Add a duration, a 0 to 10 score or a dose any time you want it tracked.",
+    "relevanceTags": ["journal", "workouts"],
+    "sourcePullRequests": []
+  }
+}

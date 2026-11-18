@@ -733,26 +733,16 @@ test('event import-jsonl accepts stdin and rejects invalid lines atomically', as
   assert.equal(unparsableImport.error.code, 'invalid_payload')
 })
 
-test('event import-jsonl requires activity-session duration before writing', async () => {
+test('event import-jsonl keeps activity sessions whose duration is unknown', async () => {
   const workDir = await mkdtemp(path.join(tmpdir(), 'murph-cli-import-jsonl-workout-'))
   const vaultRoot = path.join(workDir, 'vault')
   await runCli(['init', '--vault', vaultRoot])
 
-  const invalidImport = await runCli<EventImportJsonlResult>(
+  const durationlessImport = await runCli<EventImportJsonlResult>(
     ['event', 'import-jsonl', '--input', '-', '--apply', '--vault', vaultRoot],
     { stdin: toJsonl([buildActivitySessionPayload()]) },
   )
-
-  assert.equal(invalidImport.ok, false)
-  if (invalidImport.ok) {
-    throw new Error('expected durationless activity session to fail')
-  }
-  assert.equal(invalidImport.error.code, 'contract_invalid')
-
-  const listAfterInvalid = await runCli<{ count: number }>(
-    ['event', 'list', '--kind', 'activity_session', '--vault', vaultRoot],
-  )
-  assert.equal(requireData(listAfterInvalid).count, 0)
+  assert.equal(requireData(durationlessImport).createdCount, 1)
 
   const validImport = await runCli<EventImportJsonlResult>(
     ['event', 'import-jsonl', '--input', '-', '--apply', '--vault', vaultRoot],
@@ -763,7 +753,7 @@ test('event import-jsonl requires activity-session duration before writing', asy
     },
   )
   assert.equal(validImport.ok, true)
-  assert.equal(requireData(validImport).createdCount, 1)
+  assert.equal(requireData(validImport).supersededCount, 1)
 
   const retry = await runCli<EventImportJsonlResult>(
     ['event', 'import-jsonl', '--input', '-', '--apply', '--vault', vaultRoot],

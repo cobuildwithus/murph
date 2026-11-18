@@ -8444,9 +8444,6 @@ export async function importEventBatch(input: ImportEventBatchInput): Promise<Im
         return;
       }
 
-      // Decisions are the trusted importer-owner path. Their contract permits
-      // verified workout CSV evidence to retain an unknown duration, while the
-      // generic public payload path above remains stricter.
       const record = buildEventImportDecisionRecord(
         { ...decision.payload },
         vault.metadata.timezone,

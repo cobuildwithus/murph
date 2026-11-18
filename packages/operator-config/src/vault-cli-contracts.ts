@@ -528,7 +528,7 @@ export const workoutAddResultSchema = z.object({
   kind: z.literal('activity_session'),
   title: z.string().min(1),
   activityType: z.string().min(1),
-  durationMinutes: z.number().int().positive(),
+  durationMinutes: z.number().int().positive().optional(),
   distanceKm: z.number().nonnegative().nullable(),
   workout: workoutSessionResultSchema.nullable(),
   note: z.string().min(1).nullable(),

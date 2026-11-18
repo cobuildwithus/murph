@@ -40,7 +40,7 @@ interface WorkoutAddEnvelope {
   kind: 'activity_session'
   title: string
   activityType: string
-  durationMinutes: number
+  durationMinutes?: number
   distanceKm: number | null
   workout: Record<string, unknown> | null
   note: string
@@ -497,7 +497,7 @@ templateText: Garage day template.
 )
 
 test(
-  'workout format save requires typed duration instead of parsing template text',
+  'workout format save leaves duration out when only template text mentions it',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-format-'))
 
@@ -510,7 +510,7 @@ test(
       assert.equal(initResult.ok, true)
       assert.equal(requireData(initResult).created, true)
 
-      const missingTypedDuration = await runCli([
+      const saved = requireData(await runCli<WorkoutFormatSaveEnvelope>([
         'workout',
         'format',
         'save',
@@ -518,14 +518,12 @@ test(
         '45 minute strength training.',
         '--vault',
         vaultRoot,
-      ])
+      ]))
 
-      assert.equal(missingTypedDuration.ok, false)
-      assert.equal(missingTypedDuration.error.code, 'invalid_option')
-      assert.match(
-        missingTypedDuration.error.message ?? '',
-        /Pass --duration <minutes> to record it explicitly/u,
-      )
+      const shown = requireData(await runCli<ShowEnvelope>([
+        'workout', 'format', 'show', saved.slug, '--vault', vaultRoot,
+      ]))
+      assert.equal(shown.entity.data.durationMinutes, undefined)
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }
@@ -1196,12 +1194,7 @@ test(
           '--vault',
           vaultRoot,
         ])
-        assert.equal(missingDuration.ok, false)
-        assert.equal(missingDuration.error.code, 'invalid_option')
-        assert.match(
-          missingDuration.error.message ?? '',
-          /Workout duration is missing/u,
-        )
+        assert.equal(requireData(missingDuration).durationMinutes, undefined)
       }
 
       const mixedWithExplicitDuration = await runCli<WorkoutAddEnvelope>([
@@ -1303,11 +1296,7 @@ test('workout capture defaults fill only the typed duration field', async () => 
       '--vault',
       vaultRoot,
     ])
-    assert.equal(initiallyMissing.ok, false)
-    assert.match(
-      initiallyMissing.error.message ?? '',
-      /Workout duration is missing/u,
-    )
+    assert.equal(requireData(initiallyMissing).durationMinutes, undefined)
 
     const saved = await runCli<WorkoutCaptureDefaultsEnvelope>([
       'workout',
@@ -1365,7 +1354,7 @@ test('workout capture defaults fill only the typed duration field', async () => 
   }
 }, WORKOUT_CAPTURE_DEFAULTS_TIMEOUT_MS)
 
-test('workout capture ignores note phrasing while imports and cleared defaults stay strict', async () => {
+test('workout capture ignores note phrasing while imports and cleared defaults preserve unknown duration', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-defaults-'))
 
   try {
@@ -1419,11 +1408,7 @@ test('workout capture ignores note phrasing while imports and cleared defaults s
       '--vault',
       vaultRoot,
     ])
-    assert.equal(importedWithoutDuration.ok, false)
-    assert.match(
-      importedWithoutDuration.error.message ?? '',
-      /Workout duration is missing/u,
-    )
+    assert.equal(requireData(importedWithoutDuration).durationMinutes, undefined)
 
     const cleared = await runCli<WorkoutCaptureDefaultsEnvelope>([
       'workout',
@@ -1445,8 +1430,7 @@ test('workout capture ignores note phrasing while imports and cleared defaults s
       '--vault',
       vaultRoot,
     ])
-    assert.equal(missing.ok, false)
-    assert.match(missing.error.message ?? '', /Workout duration is missing/u)
+    assert.equal(requireData(missing).durationMinutes, undefined)
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }
@@ -1512,15 +1496,14 @@ test('workout capture treats raw text as a note and keeps the manual source boun
         '--vault',
         vaultRoot,
       ])
-      assert.equal(nonManual.ok, false)
-      assert.match(nonManual.error.message ?? '', /Workout duration is missing/u)
+      assert.equal(requireData(nonManual).durationMinutes, undefined)
     }
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }
 }, WORKOUT_CAPTURE_DEFAULTS_TIMEOUT_MS)
 
-test('workout capture promotes one explicit legacy default and rejects conflicts', async () => {
+test('workout capture promotes one explicit legacy default and leaves conflicting defaults unused', async () => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-defaults-'))
 
   try {
@@ -1545,8 +1528,7 @@ test('workout capture promotes one explicit legacy default and rejects conflicts
       '--vault',
       vaultRoot,
     ])
-    assert.equal(conflicting.ok, false)
-    assert.match(conflicting.error.message ?? '', /Workout duration is missing/u)
+    assert.equal(requireData(conflicting).durationMinutes, undefined)
 
     await upsertMemory(vaultRoot, {
       recordId: conflictingPreference.record.id,
@@ -1596,8 +1578,7 @@ test('workout capture promotes one explicit legacy default and rejects conflicts
       '--vault',
       vaultRoot,
     ])
-    assert.equal(afterClear.ok, false)
-    assert.match(afterClear.error.message ?? '', /Workout duration is missing/u)
+    assert.equal(requireData(afterClear).durationMinutes, undefined)
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
   }
@@ -1641,8 +1622,7 @@ test('workout capture ignores unsupported legacy prose and non-manual migration'
         '--vault',
         unsupportedVaultRoot,
       ])
-      assert.equal(result.ok, false)
-      assert.match(result.error.message ?? '', /Workout duration is missing/u)
+      assert.equal(requireData(result).durationMinutes, undefined)
       await assert.rejects(
         access(path.join(unsupportedVaultRoot, 'bank/preferences.json')),
       )
@@ -1673,8 +1653,7 @@ test('workout capture ignores unsupported legacy prose and non-manual migration'
         '--vault',
         vaultRoot,
       ])
-      assert.equal(result.ok, false)
-      assert.match(result.error.message ?? '', /Workout duration is missing/u)
+      assert.equal(requireData(result).durationMinutes, undefined)
     }
     await assert.rejects(access(path.join(vaultRoot, 'bank/preferences.json')))
 
@@ -1727,7 +1706,7 @@ test(
 )
 
 test(
-  'workout add rejects structured payloads that omit duration, timestamps, and freeform note text',
+  'workout add saves structured exercises without duration, timestamps, or freeform note text',
   async () => {
     const vaultRoot = await mkdtemp(path.join(tmpdir(), 'murph-cli-workout-'))
     const payloadPath = path.join(vaultRoot, 'workout.json')
@@ -1761,18 +1740,12 @@ test(
         'utf8',
       )
 
-      await assert.rejects(
-        () =>
-          addWorkoutRecord({
-            vault: vaultRoot,
-            inputFile: payloadPath,
-          }),
-        (error: unknown) =>
-          error instanceof Error
-          && 'code' in error
-          && error.code === 'invalid_option'
-          && /Pass --duration <minutes> to record it explicitly/u.test(error.message),
-      )
+      const result = await addWorkoutRecord({
+        vault: vaultRoot,
+        inputFile: payloadPath,
+      })
+      assert.equal(result.durationMinutes, undefined)
+      assert.equal(result.workout?.exercises[0]?.sets[0]?.reps, 20)
     } finally {
       await rm(vaultRoot, { recursive: true, force: true })
     }

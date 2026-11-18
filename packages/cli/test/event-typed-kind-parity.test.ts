@@ -157,8 +157,6 @@ test('additional typed event schemas expose concrete fields without JSON input',
   assertRequiredOptions(medicationSchema, [
     'vault',
     'medicationName',
-    'dose',
-    'unit',
   ])
 
   assertSchemaProperties(encounterSchema, ['encounterType', 'location', 'providerId'])

@@ -621,7 +621,8 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultServices) {
         .int()
         .min(0)
         .max(10)
-        .describe('Symptom severity on a 0-10 scale.'),
+        .optional()
+        .describe('Optional symptom severity on a 0-10 scale.'),
       bodyRegion: z
         .string()
         .trim()
@@ -654,7 +655,7 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultServices) {
           tag: options.tag,
         })),
         symptom: options.symptom,
-        intensity: options.severity,
+        ...(options.severity !== undefined ? { intensity: options.severity } : {}),
         ...(bodyRegion ? { bodySite: bodyRegion } : {}),
       }
       const result = await upsertEventRecord({
@@ -739,8 +740,8 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultServices) {
         .min(1)
         .max(160)
         .describe('Supplement name, such as magnesium glycinate.'),
-      dose: z.number().nonnegative().describe('Supplement dose amount.'),
-      unit: eventUnitSchema,
+      dose: z.number().nonnegative().optional().describe('Supplement dose amount. Provide --dose and --unit together when known.'),
+      unit: eventUnitSchema.optional().describe('Supplement dose unit. Provide --unit with --dose.'),
       occurredAt: occurredAtOptionSchema
         .optional()
         .describe('Optional occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.'),
@@ -765,8 +766,8 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultServices) {
           tag: options.tag,
         })),
         supplementName: options.supplementName,
-        dose: options.dose,
-        unit: options.unit,
+        ...(options.dose !== undefined ? { dose: options.dose } : {}),
+        ...(options.unit !== undefined ? { unit: options.unit } : {}),
       }
       const result = await upsertEventRecord({
         vault: options.vault,
@@ -794,8 +795,8 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultServices) {
         .min(1)
         .max(160)
         .describe('Medication name, such as metformin.'),
-      dose: z.number().nonnegative().describe('Medication dose amount.'),
-      unit: eventUnitSchema,
+      dose: z.number().nonnegative().optional().describe('Medication dose amount. Provide --dose and --unit together when known.'),
+      unit: eventUnitSchema.optional().describe('Medication dose unit. Provide --unit with --dose.'),
       occurredAt: occurredAtOptionSchema
         .optional()
         .describe('Optional occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.'),
@@ -820,8 +821,8 @@ export function registerEventCommands(cli: Cli.Cli, services: VaultServices) {
           tag: options.tag,
         })),
         medicationName: options.medicationName,
-        dose: options.dose,
-        unit: options.unit,
+        ...(options.dose !== undefined ? { dose: options.dose } : {}),
+        ...(options.unit !== undefined ? { unit: options.unit } : {}),
       }
       const result = await upsertEventRecord({
         vault: options.vault,

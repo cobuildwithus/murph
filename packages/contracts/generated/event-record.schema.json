@@ -3201,8 +3201,7 @@
         "source",
         "title",
         "kind",
-        "symptom",
-        "intensity"
+        "symptom"
       ],
       "additionalProperties": false
     },
@@ -7638,11 +7637,17 @@
         "source",
         "title",
         "kind",
-        "medicationName",
-        "dose",
-        "unit"
+        "medicationName"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "dependentRequired": {
+        "dose": [
+          "unit"
+        ],
+        "unit": [
+          "dose"
+        ]
+      }
     },
     {
       "type": "object",
@@ -8770,11 +8775,17 @@
         "source",
         "title",
         "kind",
-        "supplementName",
-        "dose",
-        "unit"
+        "supplementName"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "dependentRequired": {
+        "dose": [
+          "unit"
+        ],
+        "unit": [
+          "dose"
+        ]
+      }
     },
     {
       "type": "object",

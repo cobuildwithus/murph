@@ -368,6 +368,26 @@ test("Journal turns dense wearable records into main sleep, naps, and grouped ac
   ]);
 });
 
+test("Journal keeps workouts with unknown duration and sums only known durations", () => {
+  const view = buildJournalView(createVaultReadModel({
+    entities: [
+      event("unknown", "activity_session", "2026-08-20T10:00:00.000Z", { activityType: "cycling" }, "Ride"),
+      event("also_unknown", "activity_session", "2026-08-25T10:00:00.000Z", { activityType: "cycling" }, "Ride"),
+      event("known", "activity_session", "2026-08-25T12:00:00.000Z", { activityType: "cycling", durationMinutes: 35 }, "Ride"),
+    ],
+    vaultRoot: "test://journal-unknown-duration",
+  }), [], { asOf: "2026-08-25T22:00:00.000Z" });
+  const mixed = view.days.find((day) => day.date === "2026-08-25")?.events[0];
+  const unknown = view.days.find((day) => day.date === "2026-08-20")?.events[0];
+  assert.equal(mixed?.records.length, 2);
+  assert.equal(mixed?.metrics.activityMinutes, 35);
+  assert.equal(mixed?.summary, "35 min");
+  assert.equal(unknown?.records[0]?.id, "unknown");
+  // The iOS Journal reads activityMinutes as a number: unknown stays 0, never null.
+  assert.equal(unknown?.metrics.activityMinutes, 0);
+  assert.deepEqual(view.weeks.map((week) => week.activityMinutes), [35, 0]);
+});
+
 test("Journal keeps useful workout detail in the activity popover", () => {
   const view = buildJournalView(
     createVaultReadModel({

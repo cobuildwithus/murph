@@ -91,7 +91,7 @@ Never tell the member to start, stop, taper, combine or change the dose or timin
 
 Track the smallest set that could change a decision: one symptom or interference measure, one measure of function, recovery later or the next day when it matters, and what was actually done. Accept rough text or a single phrase. A missing log is missing data. It does not mean a failure or a symptom-free day.
 
-- Save a reported symptom with `vault-cli event symptom add --symptom "<symptom>" --severity <0-10> --note "<context>"`.
+- Save a reported symptom with `vault-cli event symptom add --symptom "<symptom>"`. Add `--severity <0-10>` only for a reported score and `--note` for any context.
 - Save the condition with `vault-cli condition save "<condition>" --clinical-status active --verification-status <confirmed|unconfirmed>`. Use `confirmed` only for a clinician's diagnosis, with the clinician and date in the note. Keep what the member reports, what a clinician documented, what a device recorded and what Murph infers separate.
 - When the member accepts a flare plan or a pacing routine they will reuse, read `behavior-followthrough` and save it as one habit regimen linked with `--related-condition-id <condition-id>`.
 

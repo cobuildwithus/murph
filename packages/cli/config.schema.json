@@ -5554,7 +5554,7 @@
                           "maxLength": 240
                         },
                         "duration": {
-                          "description": "Typed duration in minutes. Required unless an applicable saved default or workout timestamps supply it.",
+                          "description": "Duration in minutes, when known. An applicable saved default or workout timestamps can supply it.",
                           "type": "integer",
                           "exclusiveMinimum": 0,
                           "maximum": 1440
@@ -9405,10 +9405,10 @@
                                   "description": "Symptom name, such as headache or nausea."
                                 },
                                 "severity": {
+                                  "description": "Optional symptom severity on a 0-10 scale.",
                                   "type": "integer",
                                   "minimum": 0,
-                                  "maximum": 10,
-                                  "description": "Symptom severity on a 0-10 scale."
+                                  "maximum": 10
                                 },
                                 "bodyRegion": {
                                   "description": "Optional affected body region.",
@@ -9607,14 +9607,14 @@
                                   "description": "Medication name, such as metformin."
                                 },
                                 "dose": {
+                                  "description": "Medication dose amount. Provide --dose and --unit together when known.",
                                   "type": "number",
-                                  "minimum": 0,
-                                  "description": "Medication dose amount."
+                                  "minimum": 0
                                 },
                                 "unit": {
+                                  "description": "Medication dose unit. Provide --unit with --dose.",
                                   "type": "string",
-                                  "pattern": "^[A-Za-z0-9._/%-]+$",
-                                  "description": "Compact unit such as mg, bpm, ms, count, or %."
+                                  "pattern": "^[A-Za-z0-9._/%-]+$"
                                 },
                                 "occurredAt": {
                                   "description": "Optional occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.",
@@ -9708,14 +9708,14 @@
                                   "description": "Supplement name, such as magnesium glycinate."
                                 },
                                 "dose": {
+                                  "description": "Supplement dose amount. Provide --dose and --unit together when known.",
                                   "type": "number",
-                                  "minimum": 0,
-                                  "description": "Supplement dose amount."
+                                  "minimum": 0
                                 },
                                 "unit": {
+                                  "description": "Supplement dose unit. Provide --unit with --dose.",
                                   "type": "string",
-                                  "pattern": "^[A-Za-z0-9._/%-]+$",
-                                  "description": "Compact unit such as mg, bpm, ms, count, or %."
+                                  "pattern": "^[A-Za-z0-9._/%-]+$"
                                 },
                                 "occurredAt": {
                                   "description": "Optional occurrence timestamp in ISO 8601 form or YYYY-MM-DD form.",

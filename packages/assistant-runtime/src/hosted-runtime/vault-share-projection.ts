@@ -1820,6 +1820,7 @@ export function selectProjectableWorkoutsDays(
   },
 ): HostedVaultShareDeliveryRecord[] {
   const vaultTimeZone = normalizeIanaTimeZone(input.vaultTimeZone);
+  const incompleteDates = new Set<string>();
   const candidatesByRow = new Map<
     ActivitySessionProjectionRow,
     ProjectableWorkoutCandidate
@@ -1854,9 +1855,13 @@ export function selectProjectableWorkoutsDays(
     // copies would be published.
     const kind = normalizeActivityKindToken(row.activityKind ?? "");
     const minutes = row.durationMinutes;
+    if (minutes == null) {
+      // A missing date leaves scoring unobserved. Keep the rest of the window.
+      incompleteDates.add(localStart.date);
+      continue;
+    }
     if (
       (kind !== null && kind.length > HOSTED_VAULT_SHARE_WORKOUT_KIND_MAX_LENGTH)
-      || typeof minutes !== "number"
       || !Number.isFinite(minutes)
       || minutes <= 0
       || minutes > DAY_MAX_MINUTES
@@ -1895,7 +1900,8 @@ export function selectProjectableWorkoutsDays(
 
   const window = readProjectableWorkoutWindow(input.nowMs, vaultTimeZone);
   if (!window) return [];
-  const { calendarClosedThroughDate, windowDates } = window;
+  const { calendarClosedThroughDate } = window;
+  const windowDates = window.windowDates.filter((date) => !incompleteDates.has(date));
   const windowDateSet = new Set(windowDates);
 
   const groups = new Map<string, ProjectableWorkoutCandidate[]>();

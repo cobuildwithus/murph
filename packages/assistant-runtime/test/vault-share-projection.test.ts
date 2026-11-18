@@ -4442,15 +4442,23 @@ describe("selectProjectableWorkoutsDays", () => {
     }
   });
 
-  it("fails closed rather than publishing a partial day when workout details are missing", () => {
-    expect(selectProjectableWorkoutsDays({
+  it("keeps an incomplete workout date unobserved and publishes the rest of the window", () => {
+    const selected = selectProjectableWorkoutsDays({
       nowMs,
       rows: [
         activitySessionRow({
           activityKind: "running",
-          date: ACTIVITY_DAY.date,
+          date: "2026-07-02",
           durationMinutes: 30,
           recordIds: ["evt_complete_workout"],
+          startedAt: "2026-07-02T18:00:00.000Z",
+          timeZone: "UTC",
+        }),
+        activitySessionRow({
+          activityKind: "running",
+          date: ACTIVITY_DAY.date,
+          durationMinutes: 25,
+          recordIds: ["evt_workout_on_incomplete_date"],
           startedAt: "2026-07-03T18:00:00.000Z",
           timeZone: "UTC",
         }),
@@ -4464,7 +4472,11 @@ describe("selectProjectableWorkoutsDays", () => {
         }),
       ],
       vaultTimeZone: "UTC",
-    })).toEqual([]);
+    });
+    expect(findWorkoutsRecord(selected, "2026-07-02")?.data).toMatchObject({
+      workouts: [{ kind: "running", minutes: 30 }],
+    });
+    expect(findWorkoutsRecord(selected, ACTIVITY_DAY.date)).toBeUndefined();
   });
 
   it("scores a settled empty array as observed zero but keeps a missing date unobserved", () => {

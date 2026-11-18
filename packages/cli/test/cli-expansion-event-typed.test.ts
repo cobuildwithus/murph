@@ -139,7 +139,7 @@ test('typed event write schemas expose concrete fields and keep JSON input on ex
   assertRequiredOptions(noteSchema, ['vault', 'note'])
 
   assertSchemaProperties(symptomSchema, ['symptom', 'severity', 'bodyRegion', 'note', 'tag'])
-  assertRequiredOptions(symptomSchema, ['vault', 'symptom', 'severity'])
+  assertRequiredOptions(symptomSchema, ['vault', 'symptom'])
 
   assertSchemaProperties(observationSchema, ['metric', 'value', 'unit', 'note', 'tag'])
   assertRequiredOptions(observationSchema, ['vault', 'metric', 'value', 'unit'])
@@ -154,8 +154,6 @@ test('typed event write schemas expose concrete fields and keep JSON input on ex
   assertRequiredOptions(supplementIntakeSchema, [
     'vault',
     'supplementName',
-    'dose',
-    'unit',
   ])
 
   assert.equal('input' in importJsonSchema.options.properties, true)
@@ -368,6 +366,42 @@ test.sequential('typed event write commands persist common event records without
     assert.equal(requireData(shownSupplement).entity.data.unit, 'mg')
   } finally {
     await rm(vaultRoot, { recursive: true, force: true })
+  }
+})
+
+test('symptom and intake writes preserve unknown details and reject incomplete doses', async () => {
+  const vault = await mkdtemp(path.join(tmpdir(), 'murph-optional-health-fields-'))
+  try {
+    requireData(await runSliceCli(['init', '--vault', vault]))
+    const cases = [
+      { command: 'symptom', nameFlag: '--symptom', name: 'Hoarseness', field: 'symptom', omitted: ['intensity'] },
+      { command: 'medication-intake', nameFlag: '--medication-name', name: 'Tablet A', field: 'medicationName', omitted: ['dose', 'unit'] },
+      { command: 'supplement-intake', nameFlag: '--supplement-name', name: 'Vitamin B12', field: 'supplementName', omitted: ['dose', 'unit'] },
+    ]
+    for (const entry of cases) {
+      const argv = ['event', entry.command, 'add', entry.nameFlag, entry.name, '--vault', vault]
+      const written = requireData(await runSliceCli<EventAddEnvelope>(argv))
+      const { entity } = requireData(await runSliceCli<EventShowEnvelope>([
+        'event', 'show', written.eventId, '--vault', vault,
+      ]))
+      assert.equal(entity.data[entry.field], entry.name)
+      for (const field of entry.omitted) {
+        assert.equal(Object.hasOwn(entity.data, field), false)
+      }
+      if (entry.command !== 'symptom') {
+        for (const partialDose of [['--dose', '5'], ['--unit', 'mg']]) {
+          const rejected = await runSliceCli([...argv, ...partialDose])
+          assert.equal(rejected.ok, false)
+          assert.equal(rejected.error?.code, 'contract_invalid')
+        }
+        const list = requireData(await runSliceCli<{ count: number }>([
+          'event', 'list', '--kind', written.kind, '--vault', vault,
+        ]))
+        assert.equal(list.count, 1)
+      }
+    }
+  } finally {
+    await rm(vault, { recursive: true, force: true })
   }
 })
 

@@ -19,6 +19,13 @@ onboardingGuidance: false,
 }
 
 describe('private Journal capture and recovery instructions', () => {
+  it('saves sparse health facts without asking for the missing details', () => {
+    const { prompt } = privateLayers()
+    expect(prompt).toContain('Omit unreported workout duration, symptom severity, and intake dose and unit.')
+    expect(prompt).toContain('Ask for these details only when the member wants them tracked')
+    expect(prompt).not.toMatch(/ask for a duration only when the saved result has none|ask one question for the rest/u)
+  })
+
   it('supplies the canonical icon catalog and note command without a help round', async () => {
     const skill = await readFile(path.join(resolveAssistantSkillsRoot(), 'journal', 'SKILL.md'), 'utf8')
     // The skill's Icon section lists every id the contract accepts and no other.
