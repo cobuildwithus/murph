@@ -40,6 +40,11 @@ export async function readRouteGoals(query: string | undefined, unit: 'meters' |
   return { tiles, match: null, suggestions: matches.slice(0, 4).map(tile), note: null, route: null };
 }
 
+export function routeProgressIncomplete() {
+  return hostedOnboardingError({ code: 'PROGRESS_INCOMPLETE', httpStatus: 503,
+    retryable: true, message: 'Progress could not load completely. Try again.' });
+}
+
 /** BE1/BE2 supply their complete canonical series and live mutation authority. */
 export async function setRouteGoal(memberId: string, measureId: string, goal: MeasureGoal, context: {
   points: readonly [Day, number][];
@@ -47,8 +52,7 @@ export async function setRouteGoal(memberId: string, measureId: string, goal: Me
   incomplete: boolean;
   beforeMutationTx: BeforeProgressMutation;
 }) {
-  if (context.incomplete) throw hostedOnboardingError({ code: 'PROGRESS_INCOMPLETE', httpStatus: 503,
-    retryable: true, message: 'Progress could not load completely. Try again.' });
+  if (context.incomplete) throw routeProgressIncomplete();
   const entry = 'rungId' in goal ? BANK.find(entry => entry.kind === 'route' && entry.id === goal.rungId) : null;
   const places = 'from' in goal ? goal : entry && bankPlaces(entry);
   if (!places) throw invalidGameRequest('Choose a route with two places.');

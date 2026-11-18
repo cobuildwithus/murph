@@ -30,6 +30,7 @@ import { PUT } from "../app/api/game/v1/progress/measures/[id]/route";
 import { goalsSchema, healthSchema, savedHealthSchema } from "@/src/lib/game/progress/contract";
 import { healthAgeShare, healthSteps } from "@/src/lib/game/progress/health";
 import { encodePolyline } from "@/src/lib/game/progress/route-geometry";
+import { routeLegs } from "@/src/lib/game/progress/route-progress";
 import type { StoredAward } from "@/src/lib/game/progress/awards";
 import notConnected from "./fixtures/progress/health-row08-not-connected.json";
 
@@ -269,6 +270,51 @@ it("previews a suggested Steps loop and returns the same wearable measure as Hea
   expect(body.measure).toEqual(health.sums.find(sum => sum.id === "steps"));
   expect(mocks.resolve).toHaveBeenCalledTimes(2);
   expect(mocks.authority).toHaveBeenCalledWith({ memberId: "ava", prisma: { transaction: true } });
+});
+
+function finishedStepsRoute() {
+  const first = stepsSnapshot();
+  const completion = routeLegs({ measureId: "steps", legs: [first], points: [[joinedOn, 236_000]] })[0]!;
+  const award = { ...completion, id: completion.key, createdAt: new Date(joinedOn), seenAt: null };
+  mocks.awards.mockResolvedValue([award]);
+  mocks.patch.mockImplementation(async (_member, _id, patch, before) => {
+    await before({ transaction: true });
+    return patch({ legs: [first] });
+  });
+  mocks.resolve.mockImplementation(async (from, to) => ({ ...first, from, to }));
+  return { first, award };
+}
+
+it("waits for the Steps replica before previewing or rolling over a finished route", async () => {
+  const { first, award } = finishedStepsRoute();
+  const goal = { from: "B", to: "C" };
+  mocks.raw.mockResolvedValue(null);
+  for (const response of [await pickSteps(goal), await stepsGoals("B to C")]) {
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ error: { code: "PROGRESS_INCOMPLETE", retryable: true } });
+  }
+  expect(mocks.resolve).not.toHaveBeenCalled();
+  expect(mocks.patch).not.toHaveBeenCalled();
+  expect(mocks.settle).not.toHaveBeenCalled();
+
+  const daily = Array.from({ length: 20 }, (_, i) => {
+    const date = addDaysToIsoDate(joinedOn, i);
+    return { date, value: 11_800, source: "Garmin", observedAt: `${date}T12:00:00Z` };
+  });
+  mocks.raw.mockResolvedValue({ ...snapshot(), numbers: { steps: { daily } } });
+  const response = await pickSteps(goal);
+  expect(response.status).toBe(200);
+  expect(await mocks.patch.mock.results[0]!.value).toMatchObject({ legs: [first, { ...goal, startTotal: 189_902.592 }] });
+  expect(await response.json()).toMatchObject({ measure: { total: { value: 236_000 }, route: { progress: 0, finishedOn: null } } });
+  expect(mocks.settle.mock.calls[0]![1]).toEqual([expect.objectContaining({ key: award.key })]);
+});
+
+it("can set a Steps goal when a successful read has no retained steps", async () => {
+  finishedStepsRoute();
+  mocks.raw.mockResolvedValue(snapshot());
+  const response = await pickSteps({ from: "B", to: "C" });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({ measure: { total: { value: 0 }, route: { name: "B to C", goalPicked: true } } });
 });
 
 it.each(["session", "vault"])("withholds the Steps preview after %s authority is lost during resolution", async boundary => {

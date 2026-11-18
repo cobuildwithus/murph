@@ -22,7 +22,7 @@ import type { CompanionHealthSeries, RawHealthPoint } from "../../device-sync/co
 import type { AgeProfile } from "./norms";
 import { healthAgeShare, healthBaseline, healthMeans, healthSteps, healthSums, progressHealthDays } from "./health";
 import { cumulativePoints } from "./series";
-import { readRouteGoals, routeLegs, routeView, setRouteGoal } from "./routes";
+import { readRouteGoals, routeLegs, routeProgressIncomplete, routeView, setRouteGoal } from "./routes";
 import { healthView, savedHealthView, type HealthMetricInput } from "./health-view";
 import { healthJourneyMeasure, healthJourneys, healthJourneyView, healthJourneyViews } from "./health-journeys";
 
@@ -65,7 +65,7 @@ async function readStepsAmounts(auth: HostedNativeMemberAuth, signal: AbortSigna
   const joinedOn = toLocalDayKey(profile.createdAt, timeZone), today = toLocalDayKey(new Date(), timeZone);
   const inRange = healthValueRange("steps");
   const daily = snapshot?.numbers.steps?.daily.filter(point => inRange(point.value)) ?? [];
-  return { amounts: healthSums("steps", daily, joinedOn, today), today, timeZone };
+  return { amounts: snapshot ? healthSums("steps", daily, joinedOn, today) : null, today, timeZone };
 }
 
 /** The map consumes the same settled daily Steps and join-date window as Health. */
@@ -78,12 +78,13 @@ export async function readProgressStepsRoute(auth: HostedNativeMemberAuth, signa
   const state = await openProgress<MeasureState>({ memberId, table: "game_progress_measure", rowId: lookup, field: "state" }, row.stateEncrypted);
   const leg = state.legs?.at(-1);
   if (!leg) throw gameNotFound();
-  const route = routeView("steps", state, cumulativePoints(amounts), await readAwards(memberId), "us")!;
+  const route = routeView("steps", state, cumulativePoints(amounts ?? []), await readAwards(memberId), "us")!;
   return { polyline: leg.polyline, progress: route.progress };
 }
 
 async function readStepsMeasure(auth: HostedNativeMemberAuth, signal: AbortSignal, includeAwards: boolean) {
   const { amounts, today, timeZone } = await readStepsAmounts(auth, signal);
+  if (amounts === null) throw routeProgressIncomplete();
   // Typing a goal only needs awards when no observed days remain.
   const awards = includeAwards || !amounts.length ? await readAwards(auth.member.id) : [];
   const measure = healthJourneyMeasure("steps", amounts, awards);
