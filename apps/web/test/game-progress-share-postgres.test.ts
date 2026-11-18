@@ -154,6 +154,13 @@ describe.skipIf(!enabled)('stored award share admission and publication', () => 
       await expect(openHostedUserSecureBoxBytes({ ...target, ...change })).rejects.toThrow();
     }
   });
+  it('GET never starts a picture: only POST spends an attempt', async () => {
+    const f = await fixture(); await f.decide('allow');
+    for (let n = 0; n < 3; n++) expect((await readProgressShare(f.input)).presentation).toEqual({ state: 'available' });
+    expect(await f.share()).toBeNull(); expect(tasks).toHaveLength(0);
+    expect(mocks.readProfile).not.toHaveBeenCalled(); expect(mocks.make).not.toHaveBeenCalled(); expect(mocks.put).not.toHaveBeenCalled();
+    expect((await startProgressShare(f.input)).presentation.state).toBe('generating'); expect(tasks).toHaveLength(1);
+  });
   it('admits only one different-award attempt concurrently; the other is later until that one is made', async () => {
     const f = await fixture(); await f.decide('allow'); const other = await f.award('second');
     const views = await Promise.all([startProgressShare(f.input), startProgressShare(other)]);
