@@ -21,6 +21,16 @@ describe("recent Worker version metadata", () => {
     expect(fetchImpl.mock.calls[0]?.[1]).toMatchObject({ method: "GET", cache: "no-store" });
   });
 
+  it("reads three ordered versions when proving a two-upload recovery", async () => {
+    const ids = ["latest", "older", "live"];
+    const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({
+      success: true, result: { items: ids.map(id => ({ id })) },
+    }));
+    await expect(createRunnerReleaseProvider({ accountId: "fixture", apiToken: "fixture", fetchImpl })
+      .readRecentWorkerVersionIds("worker", 3)).resolves.toEqual(ids);
+    expect(String(fetchImpl.mock.calls[0]?.[0])).toMatch(/per_page=3$/);
+  });
+
   it("accepts a Worker with only one uploaded version", async () => {
     const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({
       success: true, result: { items: [{ id: "first-upload" }] },

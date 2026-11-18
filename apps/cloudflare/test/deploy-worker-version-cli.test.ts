@@ -326,8 +326,36 @@ describe("runDeployWorkerVersionCli", () => {
     expect(releaseMocks.retireApplication).not.toHaveBeenCalled();
   });
 
+  it("waits for an unchanged pre-upload history to show the new version without repeating the upload", async () => {
+    releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({
+      configPath, promotionConfigPath: configPath, activeApplicationName: "serving-app", workerOnly: true, applications: [], retirements: [],
+    }));
+    releaseMocks.readRecentWorkerVersionIds
+      .mockResolvedValueOnce(["version-direct", "older"])
+      .mockResolvedValueOnce(["version-direct", "older"]);
+    await syntheticDeployment("worker-only");
+    expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledOnce();
+    expect(wranglerMocks.runWranglerLogged.mock.calls.filter(([args]) => args[0] === "versions")).toHaveLength(1);
+  });
+
+  it("stops before activation if the acknowledged upload never appears", async () => {
+    vi.useFakeTimers();
+    try {
+      releaseMocks.readRecentWorkerVersionIds.mockResolvedValue(["version-direct", "older"]);
+      const failure = expect(syntheticDeployment("worker-only")).rejects.toThrow("did not appear in version history");
+      await vi.advanceTimersByTimeAsync(11_000);
+      await failure;
+      expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledOnce();
+      expect(wranglerMocks.runWranglerLogged.mock.calls.filter(([args]) => args[0] === "versions")).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it.each([
     { HOSTED_EXECUTION_RECOVERY_VERSION_ID: recoveryVersionId },
+    { ...recoveryEnv, HOSTED_EXECUTION_RECOVERY_VERSION_ID: [recoveryVersionId, recoveryVersionId].join(","), HOSTED_EXECUTION_RECOVERY_VERSION_TAG: "one,two" },
+    { ...recoveryEnv, HOSTED_EXECUTION_RECOVERY_VERSION_ID: [recoveryVersionId, "22222222-2222-4222-8222-222222222222"].join(",") },
     { HOSTED_EXECUTION_RECOVERY_VERSION_TAG: "trusted-upload" },
     { ...recoveryEnv, HOSTED_EXECUTION_RECOVERY_VERSION_ID: "11111111" },
     { ...recoveryEnv, HOSTED_EXECUTION_RECOVERY_VERSION_ID: ` ${recoveryVersionId}` },
@@ -367,6 +395,47 @@ describe("runDeployWorkerVersionCli", () => {
     expect(releaseMocks.readWorkerVersion).not.toHaveBeenCalled();
     expect(imageMocks.prepareHostedContainerDeployImage).not.toHaveBeenCalled();
   });
+
+  it.each(["complete", "wrong predecessor", "reordered before upload", "unknown after upload", "untrusted tag", "inventory mismatch", "previously live"])(
+    "checks every named inactive upload and the original serving predecessor: %s", async scenario => {
+      configureRecoveryUpload();
+      const older = "22222222-2222-4222-8222-222222222222";
+      const originalRead = releaseMocks.readWorkerVersion.getMockImplementation()!;
+      releaseMocks.readWorkerVersion.mockImplementation(async (worker, id) => {
+        if (id !== older) return originalRead(worker, id);
+        const reference = await originalRead(worker, recoveryVersionId);
+        return { ...reference, id, annotations: { "workers/tag": "older-upload" },
+          metadata: { created_on: scenario === "previously live" ? "2025-12-30T03:00:00Z" : "2026-01-01T12:00:00Z" },
+          ...(scenario === "inventory mismatch" ? { resources: { bindings: [] } } : {}),
+        };
+      });
+      const prior = [recoveryVersionId, older, "version-direct"];
+      const read = releaseMocks.readRecentWorkerVersionIds.getMockImplementation()!;
+      releaseMocks.readRecentWorkerVersionIds
+        .mockResolvedValueOnce(scenario === "wrong predecessor" ? [recoveryVersionId, older, "unknown"] : prior)
+        .mockResolvedValueOnce(scenario === "reordered before upload" ? [older, recoveryVersionId, "version-direct"] : prior);
+      releaseMocks.readRecentWorkerVersionIds.mockImplementation(async () => {
+        const history = await read();
+        if (releaseMocks.readRecentWorkerVersionIds.mock.calls.length === 3) {
+          return [...history, scenario === "unknown after upload" ? "unknown" : older];
+        }
+        return history;
+      });
+      const deployment = syntheticDeployment("worker-only", {
+        HOSTED_EXECUTION_RECOVERY_VERSION_ID: [recoveryVersionId, older].join(","),
+        HOSTED_EXECUTION_RECOVERY_VERSION_TAG: scenario === "untrusted tag" ? "trusted-upload,other" : "trusted-upload,older-upload",
+      }, true);
+      if (scenario === "complete") {
+        await deployment;
+        expect(releaseMocks.readRecentWorkerVersionIds.mock.calls.slice(0, 3).map(call => call[1])).toEqual([3, 3, 3]);
+        expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledOnce();
+      } else {
+        await expect(deployment).rejects.toThrow(/source changed|history changed|identity or tag|secret inventory|never-activated/);
+        expect(wranglerMocks.runWranglerLoggedCaptured).toHaveBeenCalledTimes(scenario === "unknown after upload" ? 1 : 0);
+        expect(wranglerMocks.runWranglerLogged.mock.calls.filter(([args]) => args[0] === "versions")).toHaveLength(0);
+      }
+    },
+  );
 
   it("rejects an untrusted recovery tag before image or lifecycle work", async () => {
     configureRecoveryUpload();

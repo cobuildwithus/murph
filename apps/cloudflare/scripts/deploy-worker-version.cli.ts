@@ -69,7 +69,7 @@ export async function runDeployWorkerVersionCli(
       async deployDirect(input) {
         const retainServingRunner = input.containerRolloutMode === "worker-only";
         const immediate = input.containerRolloutMode === "immediate";
-        const recovery = readRecoveryVersion(env, input.includeSecrets);
+        const recovery = readRecoveryVersions(env, input.includeSecrets);
         // Retaining an image does not attest an older protocol requirement.
         // Worker-only deployments must preserve the same Web consumer floor.
         const admitWeb = () => assertHostedWebProtocolAdmission(env);
@@ -96,21 +96,27 @@ export async function runDeployWorkerVersionCli(
         await assertReleaseNotBehindLive({
           releaseSha, liveReleaseSha: readLiveRunnerReleaseSha(currentVersion), checkoutDir: deployRoot,
         });
-        const stageSourceVersionId = recovery?.id ?? currentVersionId;
-        const assertUploadSource = async (expectedSourceVersionId: string): Promise<void> => {
-          const before = await releaseProvider.readRecentWorkerVersionIds(input.workerName);
+        const stageSourceVersionId = recovery[0]?.id ?? currentVersionId;
+        const readHistory = (expectedSourceVersionId: string) => releaseProvider.readRecentWorkerVersionIds(
+          input.workerName, expectedSourceVersionId === recovery[0]?.id && recovery.length === 2 ? 3 : 2,
+        );
+        const assertUploadSource = async (expectedSourceVersionId: string): Promise<string[]> => {
+          const before = await readHistory(expectedSourceVersionId);
           if (before[0] !== expectedSourceVersionId
-            || (expectedSourceVersionId === recovery?.id && (before.length !== 2 || before[1] !== currentVersionId))) {
+            || (expectedSourceVersionId === recovery[0]?.id && (before.length !== recovery.length + 1
+              || before[recovery.length] !== currentVersionId || recovery.some(({ id }, index) => before[index] !== id)))) {
             throw new Error("Worker inheritance source changed before upload; resolve version drift before retrying.");
           }
+          return before;
         };
-        if (recovery) {
-          assertRecoveryWorkerVersion({
-            currentVersion, currentVersionId,
-            currentDeploymentCreatedOn: current!.created_on,
-            recoveryVersion: await releaseProvider.readWorkerVersion(input.workerName, recovery.id),
-            recoveryVersionId: recovery.id, recoveryVersionTag: recovery.tag,
-          });
+        if (recovery.length) {
+          for (const { id, tag } of recovery) {
+            assertRecoveryWorkerVersion({
+              currentVersion, currentVersionId, currentDeploymentCreatedOn: current!.created_on,
+              recoveryVersion: await releaseProvider.readWorkerVersion(input.workerName, id),
+              recoveryVersionId: id, recoveryVersionTag: tag,
+            });
+          }
           await assertUploadSource(stageSourceVersionId);
         }
         const preparedConfigPath = await prepareHostedContainerDeployImage({
@@ -132,17 +138,14 @@ export async function runDeployWorkerVersionCli(
             configPath, currentVersion, currentVersionId,
             ...(input.includeSecrets ? { secretsFilePath: input.secretsFilePath } : {}),
           });
-          await assertUploadSource(expectedSourceVersionId);
+          const before = await assertUploadSource(expectedSourceVersionId);
           const output = await runWranglerLoggedCaptured([
             "versions", "upload", "--config", configPath, "--name", input.workerName,
             "--message", input.deploymentMessage, "--tag", input.versionTag,
             ...(input.includeSecrets ? ["--secrets-file", input.secretsFilePath] : []),
           ]);
           let versionId = parseWranglerWorkerVersionId(`${output.stdout}\n${output.stderr}`);
-          const after = await releaseProvider.readRecentWorkerVersionIds(input.workerName);
-          if (after.length !== 2 || after[0] !== versionId || after[1] !== expectedSourceVersionId) {
-            throw new Error("Worker version history changed during upload; uploaded version will not be activated.");
-          }
+          await waitForUploadHistory(before, versionId, () => readHistory(expectedSourceVersionId));
           let version = await releaseProvider.readWorkerVersion(input.workerName, versionId);
           if (hasRetiredInferenceSecrets(version, versionId)) {
             const beforePatch = await releaseProvider.readRecentWorkerVersionIds(input.workerName);
@@ -267,18 +270,36 @@ export async function runDeployWorkerVersionCli(
   return result;
 }
 
-function readRecoveryVersion(source: EnvSource, includeSecrets: boolean): { id: string; tag: string } | null {
-  const id = source.HOSTED_EXECUTION_RECOVERY_VERSION_ID;
-  const tag = source.HOSTED_EXECUTION_RECOVERY_VERSION_TAG;
-  if (!id && !tag) return null;
-  if (!id || !tag || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/u.test(id)
-    || !tag.trim() || tag !== tag.trim()) {
-    throw new Error("Worker recovery requires an exact full version UUID and nonempty version tag together.");
+async function waitForUploadHistory(before: readonly string[], uploadedId: string, readHistory: () => Promise<string[]>): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  const expected = [uploadedId, ...before].slice(0, Math.max(2, before.length));
+  for (;;) {
+    const observed = await readHistory();
+    if (observed.length === expected.length && observed.every((id, index) => id === expected[index])) return;
+    if (observed.length !== before.length || observed.some((id, i) => id !== before[i])) {
+      throw new Error("Worker version history changed during upload; uploaded version will not be activated.");
+    }
+    if (Date.now() >= deadline) {
+      throw new Error("Uploaded Worker version did not appear in version history; uploaded version will not be activated.");
+    }
+    await new Promise(resolve => setTimeout(resolve, 500));
   }
-  if (!includeSecrets) {
-    throw new Error("Worker recovery requires synchronized secrets.");
+}
+
+function readRecoveryVersions(source: EnvSource, includeSecrets: boolean): { id: string; tag: string }[] {
+  const idInput = source.HOSTED_EXECUTION_RECOVERY_VERSION_ID;
+  const tagInput = source.HOSTED_EXECUTION_RECOVERY_VERSION_TAG;
+  if (!idInput && !tagInput) return [];
+  const ids = (idInput ?? "").split(",");
+  // Preserve arbitrary legacy single tags. Two uploads require two exact, ordered tags.
+  const tags = ids.length === 1 ? [tagInput ?? ""] : (tagInput ?? "").split(",");
+  if (ids.length > 2 || new Set(ids).size !== ids.length || ids.length !== tags.length
+    || ids.some(id => !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/u.test(id))
+    || tags.some(tag => !tag.trim() || tag !== tag.trim())) {
+    throw new Error("Worker recovery requires an exact full version UUID and nonempty version tag for each of one or two uploads.");
   }
-  return { id, tag };
+  if (!includeSecrets) throw new Error("Worker recovery requires synchronized secrets.");
+  return ids.map((id, index) => ({ id, tag: tags[index]! }));
 }
 
 async function applyHostedTransientLifecycleRules(input: {

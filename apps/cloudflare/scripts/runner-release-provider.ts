@@ -135,12 +135,12 @@ export function createRunnerReleaseProvider(input: {
       const response = await request("Read Worker version", `/workers/scripts/${encodeURIComponent(workerName)}/versions/${encodeURIComponent(versionId)}`);
       return response.result;
     },
-    async readRecentWorkerVersionIds(workerName: string): Promise<string[]> {
+    async readRecentWorkerVersionIds(workerName: string, limit: 2 | 3 = 2): Promise<string[]> {
       const response = await request("Read recent Worker versions",
-        `/workers/scripts/${encodeURIComponent(workerName)}/versions?per_page=2`, "GET", undefined, [workerName]);
+        `/workers/scripts/${encodeURIComponent(workerName)}/versions?per_page=${limit}`, "GET", undefined, [workerName]);
       const items = isObjectRecord(response.result) ? response.result.items : undefined;
       const invalid = () => unavailable("Recent Worker version metadata is invalid.");
-      if (!Array.isArray(items) || items.length === 0 || items.length > 2) throw invalid();
+      if (!Array.isArray(items) || items.length === 0 || items.length > limit) throw invalid();
       const ids = new Set<string>();
       for (const item of items) {
         if (!isObjectRecord(item) || typeof item.id !== "string" || !item.id.trim()

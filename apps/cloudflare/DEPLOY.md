@@ -1858,7 +1858,10 @@ credentials and the active `CLOUDFLARE_IMAGES_SIGNING_KEY` mapping.
 The [raw versions API](https://developers.cloudflare.com/api/resources/workers/subresources/scripts/subresources/versions/methods/list/)
 returns newest first, including inactive uploads. Before upload, latest must be
 the original live version for staging or the verified stage for final promotion.
-After upload, the newest pair must be uploaded/source. Immediately before a
+After upload, the newest pair must be uploaded/source. If the list still shows
+the exact pre-upload snapshot, the workflow briefly polls the read until that
+pair appears. An unexpected version or predecessor stops deployment immediately.
+Polling never repeats the upload. Immediately before a
 secret patch, latest must still be that upload; afterwards the pair must be
 patched/uploaded. A required patch must return a distinct nonempty version ID.
 The final complete secret name/type inventory must match the original baseline
@@ -1885,7 +1888,15 @@ worker-only still retains the serving images. No version deletion is needed.
 Both recovery inputs empty means ordinary deployment; partial, padded or malformed
 values fail closed. Forward these inputs only to the protected apply step.
 
-Recovery requires one live version serving 100%, a distinct named inactive version
+For two consecutive failed uploads, enter two comma-separated UUIDs and two
+comma-separated tags in the same fields, newest first and without surrounding
+spaces. Both uploads must be explicitly trusted. Recovery checks the full
+newest/older/live sequence twice and verifies each inactive version against the
+serving inventory and deployment time. After a fresh upload the three newest
+versions must be fresh/newest/older. An extra unrecognized upload stops the
+release. Single-upload recovery continues to accept an exact tag containing commas.
+
+Single-upload recovery requires one live version serving 100%, a distinct named inactive version
 with the exact tag and complete live secret name/type inventory, and the raw
 latest pair inactive/live. Its creation time must be strictly after the current
 deployment's creation time, proving it has never been activated; missing timestamps
