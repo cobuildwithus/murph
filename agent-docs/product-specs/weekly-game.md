@@ -492,6 +492,11 @@ resulting avatar. No private photo is shared with the subject or other players.
   Relative dates use the acting message’s occurrence time in that player’s
   game timezone, including its 3am boundary; delayed processing cannot shift
   the chosen day. Missing or ambiguous occurrence timestamps need clarification.
+- **Leaving a group game.** A player can leave their own seat on a clear
+  request in the game's bound chat. The app's existing leave rules decide
+  whether the game ends. Murph confirms a departure in one line. A departure
+  that ends the game uses the existing bound-room cancellation notice for
+  that confirmation and retains room access until it dispatches.
 - **Accept notifications.** An invite acceptance that activates a pair game sends
   the other player one push per game: "Sam shook on it." / "Your game starts
   today.", "tomorrow.", a weekday (2–6 days away), or a short date (7+ days away).

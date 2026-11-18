@@ -47,6 +47,7 @@ import {
 } from "./contact-privacy";
 import { getHostedCryptoDomainForLane } from "@murphai/runtime-state";
 import {
+  assertHostedMemberNotSuspended,
   isHostedMemberSuspended,
 } from "./entitlement";
 import { hostedOnboardingError, isHostedOnboardingError } from "./errors";
@@ -6320,6 +6321,27 @@ export async function removeHostedFamilyMemberTx(input: {
   });
 
   return result.count > 0;
+}
+
+export async function revokeHostedFamilyInvite(input: {
+  inviteId: string;
+  ownerMemberId: string;
+}): Promise<boolean> {
+  return getPrisma().$transaction(async (tx) => {
+    const group = await tx.hostedAccountGroup.findUnique({
+      select: { id: true, owner: { select: { suspendedAt: true } } },
+      where: { ownerMemberId: input.ownerMemberId },
+    });
+    if (!group) {
+      throw hostedOnboardingError({
+        code: "HOSTED_FAMILY_OWNER_REQUIRED",
+        httpStatus: 403,
+        message: "Only the family plan owner can cancel family invites.",
+      });
+    }
+    assertHostedMemberNotSuspended(group.owner);
+    return revokeHostedFamilyInviteTx({ ...input, groupId: group.id, tx });
+  }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
 
 export async function revokeHostedFamilyInviteTx(input: {

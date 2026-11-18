@@ -1166,6 +1166,29 @@ function parseHostedRuntimeGroupSharedDataRequest(
   record: Record<string, unknown>,
   action: string,
 ): HostedRuntimeGroupToolRequest | null {
+  if (action === "revoke_health_sharing") {
+    const label = "Group health sharing revocation request";
+    assertAllowedObjectKeys(record, new Set(["action", "membershipId", "projectionScopes"]), label);
+    const projectionScopes = parseHostedRuntimeGroupProjectionScopeArray(
+      record.projectionScopes,
+      `${label} projectionScopes`,
+      HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.filter(({ projectionKind }) =>
+        isHostedVaultShareRecentDateProjectionKind(projectionKind) || projectionKind === "device-sync-status.v0"
+      ),
+    );
+    if (!projectionScopes?.length) {
+      throw new ContractValidationError("Select at least one health sharing permission to revoke.");
+    }
+    return {
+      action,
+      membershipId: parseHostedRuntimeGroupAskBoundedText({
+        label: `${label} membershipId`,
+        maxCodePoints: HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
+        value: record.membershipId,
+      }),
+      projectionScopes,
+    };
+  }
   if (action === "read_participant_display_names") {
     assertAllowedObjectKeys(
       record,
@@ -3075,20 +3098,21 @@ function parseHostedRuntimeGroupDisclosureResponse(
       };
     }
   }
-  if (action === "revoke_disclosure_grant") {
+  if (action === "revoke_disclosure_grant" || action === "revoke_health_sharing") {
+    const label = `Hosted runtime group tool ${action} response`;
     const result = requireObject(
       record.result,
-      "Hosted runtime group tool revoke_disclosure_grant response result",
+      `${label} result`,
     );
     const status = requireString(
       result.status,
-      "Hosted runtime group tool revoke_disclosure_grant response status",
+      `${label} status`,
     );
     if (status === "revoked" || status === "already_revoked") {
       assertAllowedObjectKeys(
         result,
         new Set(["status"]),
-        "Hosted runtime group tool revoke_disclosure_grant response result",
+        `${label} result`,
       );
       return { action, result: { status } };
     }
@@ -3096,7 +3120,7 @@ function parseHostedRuntimeGroupDisclosureResponse(
       assertAllowedObjectKeys(
         result,
         new Set(["status", "unavailableReason"]),
-        "Hosted runtime group tool revoke_disclosure_grant unavailable response result",
+        `${label} unavailable result`,
       );
       return {
         action,
@@ -3104,7 +3128,7 @@ function parseHostedRuntimeGroupDisclosureResponse(
           status,
           unavailableReason: parseHostedRuntimeGroupUnavailableReason(
             result,
-            "Hosted runtime group tool revoke_disclosure_grant unavailableReason",
+            `${label} unavailableReason`,
           ),
         },
       };
@@ -5521,6 +5545,17 @@ export function parseHostedRuntimeFamilyPlanToolRequest(
           }),
     };
   }
+  if (action === "revoke_invite") {
+    assertAllowedObjectKeys(record, new Set(["action", "inviteId"]), "Hosted Family invite revocation request");
+    return {
+      action,
+      inviteId: parseHostedRuntimeGroupAskBoundedText({
+        label: "Hosted Family invite ID",
+        maxCodePoints: 191,
+        value: record.inviteId,
+      }),
+    };
+  }
   if (action !== "create_invite") {
     throw new ContractValidationError(
       "Hosted runtime family plan tool action is not supported.",
@@ -5700,6 +5735,15 @@ export function parseHostedRuntimeFamilyPlanToolResponse(
       action,
       result: parseHostedRuntimeFamilyPlanStatusResponse(record.result),
     };
+  }
+  if (action === "revoke_invite") {
+    assertAllowedObjectKeys(record, new Set(["action", "result"]), "Hosted Family invite revocation response");
+    const result = requireObject(record.result, "Hosted Family invite revocation result");
+    assertAllowedObjectKeys(result, new Set(["status"]), "Hosted Family invite revocation result");
+    if (result.status !== "revoked" && result.status !== "nothing_pending") {
+      throw new ContractValidationError("Hosted Family invite revocation status is not supported.");
+    }
+    return { action, result: { status: result.status } };
   }
   if (action === "create_invite") {
     assertAllowedObjectKeys(
@@ -6173,6 +6217,7 @@ function parseHostedRuntimeFamilyPlanInvite(value: unknown) {
     new Set([
       "acceptUrl",
       "expiresAt",
+      "inviteId",
       "planCode",
       "status",
       "targetLabel",
@@ -6191,6 +6236,9 @@ function parseHostedRuntimeFamilyPlanInvite(value: unknown) {
       record.expiresAt,
       "Hosted runtime family plan invite expiresAt",
     ),
+    ...(record.inviteId === undefined ? {} : {
+      inviteId: requireString(record.inviteId, "Hosted runtime family plan invite ID"),
+    }),
     planCode:
       record.planCode === undefined
         ? ("pulse" as const)

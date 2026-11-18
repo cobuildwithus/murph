@@ -212,6 +212,32 @@ describe.skipIf(!runPostgres)("group offer gesture PostgreSQL replay boundaries"
     });
   });
 
+  it("lets a member revoke a consented health share while keeping their group membership", async () => {
+    const { handleHostedRuntimeGroupTool } = await import("@/src/lib/hosted-groups/group-tool");
+    await withFixture({}, async (f) => {
+      const tap = f.callback("join", "health_share");
+      expect((await f.tap(tap)).handled).toBe(true);
+      const [membership] = await f.memberships();
+      const revoke = (memberId: string) => handleHostedRuntimeGroupTool({ memberId, request: {
+        action: "revoke_health_sharing", membershipId: membership.id,
+        projectionScopes: [{ projectionKind: "sleep-duration-days.v0" }],
+      } });
+      const before = await f.shares();
+      expect(before).toHaveLength(2);
+
+      expect(await revoke(f.ownerMemberId)).toMatchObject({ result: { status: "unavailable", unavailableReason: "membership_unavailable" } });
+      expect(await revoke(f.runtimeMemberId)).toMatchObject({ result: { status: "unavailable", unavailableReason: "personal_runtime_required" } });
+      expect(await f.shares()).toEqual(before);
+      expect(await revoke(f.memberId)).toEqual({ action: "revoke_health_sharing", result: { status: "revoked" } });
+      expect((await f.shares()).map((share) => share.projectionKind)).not.toContain("sleep-duration-days.v0");
+      expect(await f.shares()).toHaveLength(1);
+      expect(await f.memberships()).toEqual([membership]);
+      expect(await revoke(f.memberId)).toEqual({ action: "revoke_health_sharing", result: { status: "already_revoked" } });
+      expect((await f.tap(tap)).handled).toBe(false);
+      expect(await f.shares()).toHaveLength(1);
+    });
+  });
+
   it("two Linq webhook deliveries past the outer marker cannot rejoin across leave", async () => {
     await withFixture({ channel: "linq" }, async (f) => {
       const firstBarrier = createSqlLockBarrier();

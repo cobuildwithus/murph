@@ -1,4 +1,5 @@
 import { parseInput } from "@murphai/hosted-execution/request-input";
+import { HOSTED_RUNTIME_FAMILY_PLAN_INVITE_IDS_PARAM } from "@murphai/hosted-execution/runtime-control";
 import {
   parseHostedRuntimeFamilyPlanToolRequest,
 } from "@murphai/hosted-execution/parsers";
@@ -20,6 +21,7 @@ export const POST = withJsonError(async (request: Request) => {
   const body = parseInput(payload, parseHostedRuntimeFamilyPlanToolRequest);
 
   return jsonOk(await handleHostedRuntimeFamilyPlanTool({
+    includeInviteIds: new URL(request.url).searchParams.get(HOSTED_RUNTIME_FAMILY_PLAN_INVITE_IDS_PARAM) === "1",
     memberId,
     request: body,
   }));

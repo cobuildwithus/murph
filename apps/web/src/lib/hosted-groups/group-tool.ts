@@ -146,6 +146,7 @@ import {
   readHostedGroupParticipantDisplayNameCandidatesByRuntimeMemberId,
   recordHostedGroupJoinOfferTx,
   revokeHostedGroupMemberEmailShareTx,
+  revokeHostedGroupMemberHealthSharesTx,
   type HostedGroupSummary,
   updateHostedGroupDisplayNameByRuntimeMemberIdTx,
 } from "./group-store";
@@ -308,6 +309,7 @@ export const HOSTED_RUNTIME_GROUP_TOOL_ACCESS_CLASSIFICATION = {
   read_next_group: "personal_active",
   read_participant_display_names: "participant_aware",
   revoke_disclosure_grant: "personal_active",
+  revoke_health_sharing: "personal_active",
   read_usage: "participant_aware",
   read_usage_referral: "participant_aware",
   read_shared: "participant_aware",
@@ -543,20 +545,8 @@ export async function handleHostedRuntimeGroupTool(
     return { action: "ask_member", result: admission.result };
   }
 
-  if (input.request.action === "post_disclosure_request") {
-    return handleHostedRuntimeGroupPostDisclosureRequest({
-      linqThread: input.request.linqThread ?? null,
-      memberId: input.memberId,
-      originAssistantInputId: input.request.originAssistantInputId,
-      permissionText: input.request.permissionText,
-    });
-  }
-
-  if (input.request.action === "revoke_disclosure_grant") {
-    return handleHostedRuntimeGroupRevokeDisclosureGrant({
-      grantId: input.request.grantId,
-      memberId: input.memberId,
-    });
+  if (isHostedRuntimeGroupSharingRequest(input.request)) {
+    return handleHostedRuntimeGroupSharingTool(input.memberId, input.request);
   }
 
   if (input.request.action === "list_memberships") {
@@ -1172,6 +1162,57 @@ function buildMembershipSponsorshipUrl(input: {
         publicBaseUrl: input.publicBaseUrl,
       })
     : null;
+}
+
+type HostedRuntimeGroupSharingRequest = Extract<HostedRuntimeGroupToolRequest, {
+  action: "post_disclosure_request" | "revoke_disclosure_grant" | "revoke_health_sharing";
+}>;
+
+function isHostedRuntimeGroupSharingRequest(
+  request: HostedRuntimeGroupToolRequest,
+): request is HostedRuntimeGroupSharingRequest {
+  const { action } = request;
+  return action === "post_disclosure_request" || action === "revoke_disclosure_grant" || action === "revoke_health_sharing";
+}
+
+function handleHostedRuntimeGroupSharingTool(
+  memberId: string,
+  request: HostedRuntimeGroupSharingRequest,
+): Promise<HostedRuntimeGroupToolResponse> {
+  switch (request.action) {
+    case "post_disclosure_request":
+      return handleHostedRuntimeGroupPostDisclosureRequest({
+        linqThread: request.linqThread ?? null,
+        memberId,
+        originAssistantInputId: request.originAssistantInputId,
+        permissionText: request.permissionText,
+      });
+    case "revoke_disclosure_grant":
+      return handleHostedRuntimeGroupRevokeDisclosureGrant({ grantId: request.grantId, memberId });
+    case "revoke_health_sharing":
+      return handleHostedRuntimeGroupRevokeHealthSharing(memberId, request);
+  }
+}
+
+async function handleHostedRuntimeGroupRevokeHealthSharing(
+  memberId: string,
+  request: Extract<HostedRuntimeGroupToolRequest, { action: "revoke_health_sharing" }>,
+): Promise<HostedRuntimeGroupToolResponse> {
+  const access = await readHostedRuntimePersonalActiveAccess(memberId);
+  if (access.status !== "ok") return { action: request.action, result: access };
+  const count = await access.prisma.$transaction((tx) => revokeHostedGroupMemberHealthSharesTx({
+    memberId,
+    membershipId: request.membershipId,
+    projectionScopes: request.projectionScopes,
+    now: new Date(),
+    tx,
+  }), HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
+  return {
+    action: request.action,
+    result: count === null
+      ? { status: "unavailable", unavailableReason: "membership_unavailable" }
+      : { status: count > 0 ? "revoked" : "already_revoked" },
+  };
 }
 
 async function handleHostedRuntimeGroupRevokeDisclosureGrant(input: {

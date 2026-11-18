@@ -15,7 +15,7 @@ const mocks = vi.hoisted(() => ({
   readHostedOnboardingEnvironment: vi.fn(),
   removeHostedFamilyMemberTx: vi.fn(),
   requireHostedAppSessionFromRequest: vi.fn(),
-  revokeHostedFamilyInviteTx: vi.fn(),
+  revokeHostedFamilyInvite: vi.fn(),
   updateHostedFamilyMemberPlan: vi.fn(),
   updateHostedFamilyPlanCapacities: vi.fn(),
   waitForHostedFamilyPlanCapacities: vi.fn(),
@@ -41,7 +41,7 @@ vi.mock("@/src/lib/hosted-onboarding/family-plan", () => ({
   issueHostedFamilyInviteTx: mocks.issueHostedFamilyInviteTx,
   readHostedFamilyOwnerSnapshotForMember: mocks.readHostedFamilyOwnerSnapshotForMember,
   removeHostedFamilyMemberTx: mocks.removeHostedFamilyMemberTx,
-  revokeHostedFamilyInviteTx: mocks.revokeHostedFamilyInviteTx,
+  revokeHostedFamilyInvite: mocks.revokeHostedFamilyInvite,
   updateHostedFamilyMemberPlan: mocks.updateHostedFamilyMemberPlan,
   updateHostedFamilyPlanCapacities: mocks.updateHostedFamilyPlanCapacities,
   waitForHostedFamilyPlanCapacities: mocks.waitForHostedFamilyPlanCapacities,
@@ -111,7 +111,7 @@ beforeEach(async () => {
         ? `https://t.me/withmurph_bot?start=family_${input.inviteCode}`
         : null,
   );
-  mocks.revokeHostedFamilyInviteTx.mockResolvedValue(true);
+  mocks.revokeHostedFamilyInvite.mockResolvedValue(true);
   mocks.removeHostedFamilyMemberTx.mockResolvedValue(true);
   mocks.readHostedFamilyOwnerSnapshotForMember.mockResolvedValue(ownerSnapshot);
   mocks.updateHostedFamilyMemberPlan.mockResolvedValue({
@@ -565,13 +565,13 @@ test("cancels a pending invite", async () => {
 
   expect(response.status).toBe(200);
   await expect(response.json()).resolves.toEqual({ revoked: true });
-  expect(mocks.revokeHostedFamilyInviteTx).toHaveBeenCalledWith(
-    expect.objectContaining({ groupId: "hbag_family", inviteId: "inv_1", ownerMemberId: "member_owner" }),
+  expect(mocks.revokeHostedFamilyInvite).toHaveBeenCalledWith(
+    { inviteId: "inv_1", ownerMemberId: "member_owner" },
   );
 });
 
 test("returns 404 when the invite is no longer pending", async () => {
-  mocks.revokeHostedFamilyInviteTx.mockResolvedValueOnce(false);
+  mocks.revokeHostedFamilyInvite.mockResolvedValueOnce(false);
 
   const response = await inviteCancelRoute.DELETE(
     new Request("https://join.example.test/api/settings/billing/family/invite/inv_1", {

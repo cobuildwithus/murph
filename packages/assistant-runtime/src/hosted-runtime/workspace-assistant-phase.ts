@@ -8869,6 +8869,19 @@ async function readHostedDeviceAccounts(
   };
 }
 
+async function disconnectHostedDeviceAccount(
+  deviceSyncPort: NonNullable<HostedWorkspaceRuntimeAssistantPhaseInput["runtime"]["platform"]["deviceSyncPort"]>,
+  connectionId: string,
+  acceptedInputAuthority: { assistantInputId: string } | undefined,
+  signal: AbortSignal | null,
+) {
+  if (!deviceSyncPort.disconnectAccount || !acceptedInputAuthority) {
+    throw new VaultCliError("device_disconnect_unavailable", "Device disconnection requires a private member request.");
+  }
+  const result = await deviceSyncPort.disconnectAccount({ connectionId, signal });
+  return { action: "disconnect" as const, ...result };
+}
+
 function resolveHostedWorkspaceDeviceTool(input: {
   deviceConnectProviders: readonly { label: string; provider: string }[];
   input: HostedWorkspaceRuntimeAssistantPhaseInput;
@@ -8888,6 +8901,10 @@ function resolveHostedWorkspaceDeviceTool(input: {
       }
       if (request.action === "list_accounts") {
         return readHostedDeviceAccounts(deviceSyncPort, request, signal);
+      }
+
+      if (request.action === "disconnect") {
+        return disconnectHostedDeviceAccount(deviceSyncPort, request.accountId, context?.acceptedInputAuthority, signal);
       }
 
       if (request.action === "reconcile") {

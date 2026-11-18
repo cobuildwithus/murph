@@ -9341,6 +9341,9 @@ function createAbortGuardedDeviceSyncPort(
             guard(() => port.reconcileAccount!(reconcileInput)),
         }
       : {}),
+    ...(port.disconnectAccount
+      ? { disconnectAccount: (disconnectInput) => guard(() => port.disconnectAccount!(disconnectInput)) }
+      : {}),
     fetchDirtyStates: (dirtyInput) =>
       guard(() => port.fetchDirtyStates(dirtyInput)),
     fetchSnapshot: (snapshotInput) =>

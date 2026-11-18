@@ -344,6 +344,7 @@ function buildHostedGroupSimpleActionUnavailable(
         | "my_game_reminders"
         | "my_game_not_for_me"
         | "record_current_sender_journal_fact"
+        | "revoke_health_sharing"
         | "set_current_sender_journal_capture"
         | "set_journal_capture";
     }

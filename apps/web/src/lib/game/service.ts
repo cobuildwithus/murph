@@ -18,7 +18,7 @@ import { fromDbDate, toEntryKind, toRuleState, toRuleStateGame, type GameRow } f
 import { clearGameRecapQuotingEntryTx, gameRecapStoryMayQuoteEntry, readLatestGameRecapEventIdTx, settleGameRecapGenerationTx, readGameRecapStoryWitnesses, readPermittedGameRecapEntryIds } from "./recap-witness";
 import { compareGroupRematch, rematchSeat } from "./rematch";
 
-import { parseGameRecapEventId, hostedGameRecapSchema, type GameNoticeRoom, type HostedGameChatState, type HostedGameUpdate, type HostedGameRecap } from "@murphai/hosted-execution/runtime-control";
+import { parseGameRecapEventId, hostedGameRecapSchema, type GameLeaveOutcome, type GameNoticeRoom, type HostedGameChatState, type HostedGameUpdate, type HostedGameRecap } from "@murphai/hosted-execution/runtime-control";
 import { groupGameRecapPlayers } from "./recap-cohort";
 import { gameChatProgress } from "./chat-progress";
 import { buildGameChallengeInstructions } from "./challenge";
@@ -172,7 +172,7 @@ interface LoadedGame {
   state: RuleState;
 }
 export type GameCommandResult =
-  | { ok: true; game: CreateGameView | null; profile?: GameProfileView; reminders?: GameReminders; reaches?: "push" | "text" | "none"; dayOutcome?: GameDayOutcome;
+  | { ok: true; game: CreateGameView | null; profile?: GameProfileView; reminders?: GameReminders; reaches?: "push" | "text" | "none"; dayOutcome?: GameDayOutcome; leaveOutcome?: GameLeaveOutcome;
     /** Set only when a day correction changed a finished game's outcome: the one line that says so. */
     chatLine?: string }
   | { ok: false; error: GameError; status: number };
@@ -268,11 +268,11 @@ export async function runGameCommand(input: {
     // A recap receipt is the viewer's own; it touches no game state, so it skips the game write path.
     const applied = command.type === "watchRecap" ? await watchRecap({ actor, beforeMutationTx: input.beforeMutationTx }, command.gameId)
       : await runCommand({ chatAudience, actor, now: input.now, chatContainerMemberId: input.chatContainerMemberId, chatPlayerMemberIds: input.chatPlayerMemberIds, beforeMutationTx: input.beforeMutationTx, postGuard: input.postGuard }, command);
-    const { gameId, dayOutcome, composer, chatLine } = typeof applied === "object" && applied !== null ? applied : { gameId: applied };
+    const { gameId, dayOutcome, leaveOutcome, composer, chatLine } = typeof applied === "object" && applied !== null ? applied : { gameId: applied };
     await deliverAppGameEffectsAfterResponse(command, gameId, input.chatContainerMemberId);
     await activatePrivateAfterGameCommand(command, gameId, input.now ?? new Date());
     const game = gameId && !input.chatContainerMemberId ? await readGame(gameId, actor, input.multiplayer) : null;
-    return { game: game && composer ? { ...game, composer } : game, ok: true, ...(dayOutcome ? { dayOutcome } : {}), ...(chatLine ? { chatLine } : {}) };
+    return { game: game && composer ? { ...game, composer } : game, ok: true, ...(dayOutcome ? { dayOutcome } : {}), ...(leaveOutcome ? { leaveOutcome } : {}), ...(chatLine ? { chatLine } : {}) };
   } catch (error) {
     if (error instanceof GameRuleError) {
       return { error: error.error, ok: false, status: GAME_ERROR_STATUS[error.error.code] };
@@ -376,6 +376,8 @@ export async function runGameChatUpdate(input: Omit<Parameters<typeof runGameCom
       command = translated.command;
     } else if (update.operation === "cancel_game") {
       command = { type: "cancelInvite", gameId: update.gameId };
+    } else if (update.operation === "leave") {
+      command = { type: "leave", gameId: update.gameId };
     } else if ("date" in update) {
       command = { type: "setDayCompletion", gameId: update.gameId, date: update.date, incomplete: update.operation === "mark_incomplete",
         ...(update.operation === "mark_complete" ? { credit: true, ...(update.text === undefined ? {} : { text: update.text }) } : {}) };
@@ -541,7 +543,7 @@ interface CommandContext {
 }
 
 /** Applies one command; returns the game to show back, if any. */
-async function runCommand(context: CommandContext, command: Exclude<GameCommand, { type: "setProfile" | "setReminders" | "watchRecap" }>): Promise<string | null | { gameId: string; dayOutcome?: GameDayOutcome; chatLine?: string; composer?: { murphPhoneNumber: string } }> {
+async function runCommand(context: CommandContext, command: Exclude<GameCommand, { type: "setProfile" | "setReminders" | "watchRecap" }>): Promise<string | null | { gameId: string | null; dayOutcome?: GameDayOutcome; leaveOutcome?: GameLeaveOutcome; chatLine?: string; composer?: { murphPhoneNumber: string } }> {
   switch (command.type) {
     case "replyToPost": return replyToPost(context, command);
     case "deleteReply": return deleteReply(context, command);
@@ -1237,22 +1239,25 @@ async function watchRecap(context: CommandContext, gameId: string): Promise<stri
   return gameId;
 }
 
-async function leave(context: CommandContext, gameId: string): Promise<null> {
-  let ended = false;
+async function leave(context: CommandContext, gameId: string): Promise<{ gameId: null; leaveOutcome: GameLeaveOutcome }> {
+  let leaveOutcome: GameLeaveOutcome | null = null;
   await runLocked(gameId, context, async locked => {
     const { loaded, tx, now } = locked;
-    if (await settleLoaded(locked, context.actor)) { ended = true; return []; }
+    const inBoundChat = answeredInBoundChat(context, loaded);
+    if (context.chatContainerMemberId && !inBoundChat) reject("NOT_A_PLAYER", "Use this game’s bound chat.");
+    if (await settleLoaded(locked, context.actor)) return [];
     const decision = decideLeave(loaded.state, context.actor);
+    leaveOutcome = decision === "void" ? "left_and_game_ended" : decision === "already-left" ? "already_left" : "left";
     if (decision === "already-left") return [];
     // A departure changes the electorate, even when it also ends the game.
     await resolveGroupGameChangeTx({ tx, game: loaded.row, actor: context.actor, now: locked.clock,
-      outcome: "change_expired", reason: GAME_ROSTER_CHANGE_REASON, answeredInBoundChat: answeredInBoundChat(context, loaded) });
+      outcome: "change_expired", reason: GAME_ROSTER_CHANGE_REASON, answeredInBoundChat: inBoundChat });
     await tx.gamePlayer.update({ where: { gameId_memberId: { gameId, memberId: context.actor } }, data: { leftAt: now } });
     if (decision === "void") await endGame(tx, gameId, { status: "void", result: Prisma.DbNull });
     return [{ type: "left", payload: { seat: playerFor(loaded.state, context.actor)!.seat } }];
   });
-  if (ended) reject("GAME_NOT_LIVE", "This game has ended.");
-  return null;
+  if (!leaveOutcome) reject("GAME_NOT_LIVE", "This game has ended.");
+  return { gameId: null, leaveOutcome };
 }
 
 async function editTerms(context: CommandContext, command: Extract<GameCommand, { type: "editTerms" }>): Promise<string> {

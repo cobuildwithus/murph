@@ -161,10 +161,10 @@ export const GAME_REFUSAL_GUIDANCE = {
 } as const
 export const MURPH_UPDATE_GAME_TOOL = {
   namespace: 'murph', name: 'update_game',
-  description: "Create or change an app game for the referenced message's sender. Call murph.read_game first in the same turn and follow the rules in its result; they cover starting, agreeing, changing, correcting a day, ending early and reminders. Pass the messageRef of the player whose own words you are acting on, and never act for another player. An ordinary yes or no in conversation counts, so do not ask for special words. Operations: create starts a game. approve and decline are the speaker's answer to an invitation or to a waiting ask. propose asks for a change in a pair game, and for start_now or call_off in any game. edit_terms asks for a change in a group game. cancel withdraws the speaker's own waiting ask. cancel_game calls off a game. mark_incomplete and mark_complete uncount or count one of the speaker's own days. set_reminder sets the speaker's own reminder.",
+  description: "Create or change an app game for the referenced message's sender. Call murph.read_game first in the same turn and follow the rules in its result; they cover starting, agreeing, changing, correcting a day, ending early, leaving and reminders. Pass the messageRef of the player whose own words you are acting on, and never act for another player. An ordinary yes or no in conversation counts, so do not ask for special words. Operations: create starts a game. approve accepts an invitation or a waiting ask. decline rejects a waiting change proposal. propose asks for a change in a pair game, and for start_now or call_off in any game. edit_terms asks for a change in a group game. cancel withdraws the speaker's own waiting ask. cancel_game calls off a game. leave takes the speaker out of a group game, only in its own chat when they clearly ask; a joke or a missed day is not that. mark_incomplete and mark_complete uncount or count one of the speaker's own days. set_reminder sets the speaker's own reminder.",
   inputSchema: { type: 'object', additionalProperties: false, properties: {
     messageRef: { type: 'string', description: "The player's own message in this chat from the last 24 hours asking for or agreeing to exactly this change." },
-    operation: { type: 'string', enum: ['create', 'propose', 'approve', 'decline', 'cancel', 'mark_incomplete', 'mark_complete', 'cancel_game', 'edit_terms', 'set_reminder'] },
+    operation: { type: 'string', enum: ['create', 'propose', 'approve', 'decline', 'cancel', 'mark_incomplete', 'mark_complete', 'cancel_game', 'edit_terms', 'set_reminder', 'leave'] },
     minutes: { type: 'integer', minimum: 0, maximum: 1439, description: "set_reminder only: the speaker's local minutes after midnight." },
     on: { type: 'boolean', description: 'set_reminder only: pass with gameId only when the speaker asks to switch that game on or off. Leave out for a change of time.' },
     date: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$', description: "mark_incomplete and mark_complete only: the day as YYYY-MM-DD in the speaker's game time." },
@@ -498,6 +498,13 @@ function gameUpdateGuidance(payload: GameToolResult, update: HostedGameUpdate, g
   if (update.operation === 'set_reminder') return GAME_REMINDER_OUTCOME_GUIDANCE[('reaches' in payload ? payload.reaches : undefined) ?? 'off']
   if (update.operation === 'create') return GAME_UPDATE_RESULT_GUIDANCE.created
   if (update.operation === 'cancel_game') return GAME_UPDATE_RESULT_GUIDANCE.ended
+  if ('leaveOutcome' in payload && payload.leaveOutcome) {
+    return {
+      left: 'The speaker left the game. Confirm in one line.',
+      left_and_game_ended: 'The speaker left, and with too few players left the game ended. Say both in one line.',
+      already_left: 'The speaker had already left the game. Say so in one line.',
+    }[payload.leaveOutcome]
+  }
   // A yes with no proposalId accepts an invitation.
   if (update.operation === 'approve' && !update.proposalId) return GAME_UPDATE_RESULT_GUIDANCE.joined
   if (!('state' in payload) || !payload.state) return ''

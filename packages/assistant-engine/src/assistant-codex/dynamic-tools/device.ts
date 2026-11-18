@@ -43,6 +43,10 @@ const deviceArgumentsSchema = z.discriminatedUnion('action', [
     accountId: z.string().trim().min(1).max(191),
     action: z.literal('reconcile'),
   }).strict(),
+  z.object({
+    accountId: z.string().trim().min(1).max(191),
+    action: z.literal('disconnect'),
+  }).strict(),
   z.discriminatedUnion('mode', [
     z.object({
       action: z.literal('configure_no_data_outreach'),
@@ -68,6 +72,7 @@ export const MURPH_DEVICE_TOOL = {
     'After an empty recent read, an old lastDataAt means that source stopped sending, and a firstSeenAt minutes or hours ago means its history may still be importing.',
     'connect returns a short-lived connectUrl for a supported provider. Send only that returned URL.',
     'reconcile queues a refresh for one accountId. A queued refresh has not finished yet.',
+    "disconnect removes a whole account by its exact accountId from list_accounts, only on a clear private request; name the device when more than one could match. On not_finished, say they can remove Murph access in the provider's account.",
     "companion_status reports the iPhone app's lastContactAt and lastForegroundAt. Use it with list_accounts when debugging Apple Health.",
     'recently_active means only that the app made contact. It does not show that Health synced, that Health permissions are granted, or that the app keeps running in the background. unknown includes older app versions that do not report.',
     'configure_no_data_outreach sets when Murph checks in after a source goes quiet. Pass a sourceProvider from list_accounts. Use mode after_days with afterDays from 5 to 30, or mode off, or mode default.',
@@ -126,19 +131,19 @@ export async function executeDeviceDynamicTool(input: {
   request: Extract<DeviceDynamicToolRequest, { kind: 'device' }>
 }): Promise<MurphDynamicToolExecutionResult> {
   try {
-    if (
-      input.request.request.action === 'configure_no_data_outreach'
-      && !input.acceptedInputAuthority
-    ) {
+    const action = input.request.request.action
+    const requiresPrivateInput = action === 'configure_no_data_outreach' || action === 'disconnect'
+    if (requiresPrivateInput && !input.acceptedInputAuthority) {
       return deviceTextResult(
         false,
-        'no-data outreach can only be changed from current private member input',
+        action === 'disconnect'
+          ? 'A device can only be disconnected on a current private member request.'
+          : 'no-data outreach can only be changed from current private member input',
         'authority_rejected',
       )
     }
     const response = await input.deviceTool.request(input.request.request, {
-      ...(input.request.request.action === 'configure_no_data_outreach'
-        && input.acceptedInputAuthority
+      ...(requiresPrivateInput && input.acceptedInputAuthority
         ? { acceptedInputAuthority: input.acceptedInputAuthority }
         : {}),
       signal: input.abortSignal ?? null,
@@ -504,7 +509,9 @@ function serializeDeviceToolResponse(
             providerLabel: response.link.providerLabel,
           },
         }
-      : response.action === 'reconcile'
+      : response.action === 'disconnect'
+        ? { action: response.action, status: response.status }
+        : response.action === 'reconcile'
         ? {
           accountId: response.accountId,
           action: response.action,

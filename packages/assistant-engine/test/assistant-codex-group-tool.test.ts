@@ -276,7 +276,7 @@ describe("murph.group dynamic tool", () => {
       ],
       group_data: [
         "action", "audience", "confidence", "date", "displayName", "factIndex", "freshness",
-        "grantId", "history", "participantId", "message_ref", "metric", "note", "noteType", "permissionText",
+        "grantId", "history", "membershipId", "participantId", "message_ref", "metric", "note", "noteType", "permissionText",
         "privateQuestion", "projectionScopes", "standaloneLink", "title", "unit", "value",
       ],
       group_membership: [
@@ -3917,9 +3917,15 @@ describe("murph.group dynamic tool", () => {
       action: "revoke_disclosure_grant",
       grantId: "hdg_member_sleep",
     }));
+    const revokeHealthRequest = readMurphDynamicToolRequest(groupToolCall({
+      action: "revoke_health_sharing",
+      membershipId: "membership_walkers",
+      projectionScopes: [{ projectionKind: "steps-days.v0" }],
+    }));
     if (
       !postRequest || postRequest.kind !== "group"
       || !revokeRequest || revokeRequest.kind !== "group"
+      || !revokeHealthRequest || revokeHealthRequest.kind !== "group"
     ) {
       throw new Error("Expected disclosure group requests.");
     }
@@ -3927,6 +3933,9 @@ describe("murph.group dynamic tool", () => {
     const groupRequest = vi.fn<GroupToolRequest>(async (request) => {
       if (request.action === "post_disclosure_request") {
         return { action: "post_disclosure_request", result: { status: "sent" } };
+      }
+      if (request.action === "revoke_health_sharing") {
+        return { action: request.action, result: { status: "revoked" } };
       }
       return { action: "revoke_disclosure_grant", result: { status: "revoked" } };
     });
@@ -3949,6 +3958,7 @@ describe("murph.group dynamic tool", () => {
     for (const [request, currentUserActionScope] of [
       [postRequest, groupScope],
       [revokeRequest, directScope],
+      [revokeHealthRequest, directScope],
     ] as const) {
       const result = await run(request, currentUserActionScope, groupRequest);
       expect(result.rpcResult.success).toBe(true);
@@ -3963,6 +3973,7 @@ describe("murph.group dynamic tool", () => {
     for (const [request, currentUserActionScope] of [
       [postRequest, directScope],
       [revokeRequest, groupScope],
+      [revokeHealthRequest, groupScope],
     ] as const) {
       const result = await run(request, currentUserActionScope, rejectedGroupRequest);
       expect(result.rpcResult.success).toBe(false);

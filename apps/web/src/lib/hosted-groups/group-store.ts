@@ -2796,6 +2796,36 @@ async function acceptHostedGroupJoinTx(input: {
   };
 }
 
+/** Reuse the sharing editor's scoped revocation without resaving other shares. */
+export async function revokeHostedGroupMemberHealthSharesTx(input: {
+  memberId: string;
+  membershipId: string;
+  now: Date;
+  projectionScopes: readonly HostedVaultShareProjectionScope[];
+  tx: Prisma.TransactionClient;
+}): Promise<number | null> {
+  const { memberId, membershipId, now, projectionScopes, tx } = input;
+  const where = { id: membershipId, memberId };
+  const target = await tx.hostedGroupMember.findUnique({ where, select: { groupId: true } });
+  if (!target) return null;
+
+  await lockHostedGroupRow(tx, target.groupId);
+  await lockHostedMemberRow(tx, memberId);
+  const membership = await tx.hostedGroupMember.findUnique({
+    where,
+    select: { group: { select: { runtimeMemberId: true } }, member: { select: { suspendedAt: true } } },
+  });
+  if (!membership?.group.runtimeMemberId) return null;
+  assertHostedMemberNotSuspended(membership.member);
+  return revokeHostedVaultSharesTx({
+    destinationMemberId: membership.group.runtimeMemberId,
+    grantorMemberId: memberId,
+    now,
+    projectionScopes: includeLegacyHostedGroupSleepProjectionScopes(projectionScopes),
+    tx,
+  });
+}
+
 export async function revokeHostedGroupMemberEmailShareTx(input: {
   groupRuntimeMemberId: string;
   memberId: string;

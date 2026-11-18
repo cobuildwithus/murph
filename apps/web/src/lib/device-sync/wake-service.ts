@@ -927,6 +927,7 @@ export async function disconnectHostedDeviceSyncConnection(input: {
   userId: string;
 }): Promise<{
   connection: PublicDeviceSyncAccount;
+  alreadyDisconnected?: true;
   warning?: { code: string; message: string };
 }> {
   const disconnectStartedAt = toIsoTimestamp(new Date());
@@ -1040,6 +1041,7 @@ export async function disconnectHostedDeviceSyncConnection(input: {
 
   if (target.alreadyDisconnected) {
     return {
+      alreadyDisconnected: true,
       connection: existing,
     };
   }

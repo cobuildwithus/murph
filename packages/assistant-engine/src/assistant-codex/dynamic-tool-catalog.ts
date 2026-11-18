@@ -484,7 +484,7 @@ export const MURPH_FAMILY_PLAN_TOOL = {
   name: 'family_plan',
   deferLoading: true,
   description:
-    `Read the member's Family plan status, start Family checkout, or create an invite. Use read_status when the member asks about Family or when this turn's context says their usage is low. Start checkout or create an invite only when the member asks for it in this turn. Report only what the result says. It never proves that a plan is active, an invite was accepted, or a payment went through.`,
+    `Read Family status, start Family checkout, or create or cancel a pending invite in private. Use read_status when the member asks about Family or when this turn's context says their usage is low. Make changes only on the member's clear request in this turn. For revoke_invite, pass the matching inviteId from read_status and ask which one if several match. Keep invite IDs private and report only what the tool confirms.`,
   inputSchema: {
     oneOf: [
       {
@@ -497,6 +497,15 @@ export const MURPH_FAMILY_PLAN_TOOL = {
           },
         },
         required: ['action'],
+      },
+      {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          action: { type: 'string', enum: ['revoke_invite'] },
+          inviteId: { type: 'string', minLength: 1, maxLength: 191 },
+        },
+        required: ['action', 'inviteId'],
       },
       {
         type: 'object',
@@ -1003,6 +1012,7 @@ export const MURPH_GROUP_TOOL_FAMILY_ACTIONS = {
     'record_current_sender_journal_fact',
     'post_disclosure_request',
     'revoke_disclosure_grant',
+    'revoke_health_sharing',
     'read_shared',
     'offer_access',
     'revoke_own_email_share',
@@ -1176,7 +1186,7 @@ export const MURPH_GROUP_TOOL_PROPERTIES = {
         minLength: 1,
         maxLength: HOSTED_RUNTIME_ASSISTANT_ASK_REQUEST_ID_MAX_CODE_POINTS,
         description:
-          'Required for action="ask", action="handoff", or action="leave_membership". Use the exact opaque membershipId from list_memberships in this conversation; never expose it, guess it, edit it, or take it from the member.',
+          'Required for ask, handoff, leave_membership, or revoke_health_sharing. Use the exact opaque membershipId from list_memberships in this conversation. Keep it out of the reply.',
       },
       avatarPrompt: {
         type: 'string',
@@ -1244,7 +1254,7 @@ export const MURPH_GROUP_TOOL_PROPERTIES = {
         maxItems: HOSTED_VAULT_SHARE_SELECTABLE_PROJECTION_SCOPES.length,
         items: GROUP_VAULT_SHARE_PROJECTION_SCOPE_SCHEMA,
         description:
-          `The kinds of shared data to read or to ask permission for. For read_shared, pass one to three; each covers the last seven days. With audience group_email, pass the scopes the email will use; the host keeps only what each recipient currently shares. For offer_access, pass only the permissions the person asked for. Leaving it out asks for every permission, which is wrong when adding one missing permission. Permissions are separate: sleep timing or connection status does not include sleep duration. An offer never changes existing membership or other permissions, and the host writes the consent prompt and decides whether it is shown in the chat or as a link.`,
+          `The kinds of shared data to read, ask permission for, or revoke. For read_shared, pass one to three; each covers the last seven days. With audience group_email, pass the scopes the email will use; the host keeps only what each recipient currently shares. For offer_access, pass only the permissions the person asked for. Leaving it out asks for every permission, which is wrong when adding one missing permission. Permissions are separate: sleep timing or connection status does not include sleep duration. An offer never changes existing membership or other permissions, and the host writes the consent prompt and decides whether it is shown in the chat or as a link. For revoke_health_sharing, copy them from grantedVaultShareProjectionScopes.`,
       },
       freshness: GROUP_SHARED_FRESHNESS_SCHEMA,
       audience: {
@@ -1367,7 +1377,7 @@ const MURPH_GROUP_TOOL_FAMILY_PROPERTIES = {
     'context', 'grantId', 'membershipId', 'message_ref', 'question',
   ],
   group_data: [
-    'audience', 'confidence', 'date', 'displayName', 'factIndex', 'freshness', 'grantId',
+    'audience', 'confidence', 'date', 'displayName', 'factIndex', 'freshness', 'grantId', 'membershipId',
     'message_ref', 'metric', 'note', 'noteType', 'permissionText',
     'history', 'participantId', 'privateQuestion', 'projectionScopes', 'standaloneLink', 'title', 'unit',
     'value',
@@ -1502,7 +1512,7 @@ export const MURPH_GROUP_CONSULT_TOOL = {
 export const MURPH_GROUP_DATA_TOOL = buildMurphGroupFamilyTool({
   name: 'group_data',
   description:
-    `Shared health data and sharing permissions for this group. read_shared reads what members have shared. offer_access shows the consent prompt. record_current_sender_daily_metric and record_current_sender_journal_fact save something the sender reported. post_disclosure_request and revoke_disclosure_grant manage what a member's private Murph may tell this group. revoke_own_email_share stops the sender's email sharing. In a read_shared result, companionLastContactAt is only when a member's app last made contact, possibly in the background. Its age says nothing about whether the app is closed, Health permission was denied, a sync worked, or why steps are missing. When it is absent, say nothing about the app.`,
+    `Shared health data and sharing permissions. read_shared reads what members have shared. offer_access shows the consent prompt. revoke_health_sharing stops the speaker's own sharing with a group they joined, on a clear private request, using the exact membership and scopes from list_memberships. record_current_sender_daily_metric and record_current_sender_journal_fact save something the sender reported. post_disclosure_request and revoke_disclosure_grant manage what a member's private Murph may tell this group. revoke_own_email_share stops the sender's email sharing. In a read_shared result, companionLastContactAt is only when a member's app last made contact, possibly in the background. Its age says nothing about whether the app is closed, Health permission was denied, a sync worked, or why steps are missing. When it is absent, say nothing about the app.`,
 })
 
 const MURPH_GROUP_DATA_EAGER_TOOL = {

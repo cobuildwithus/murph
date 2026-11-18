@@ -28,6 +28,9 @@ The same link supports both initial join and later sharing changes. It is reusab
 - `profile-name.v0` means the group is allowed to receive the member's memory-backed preferred display name.
 - `group-email.v0` means the group is allowed to resolve the member's verified email for the group's authorized email flow.
 - Health scopes such as `hrv-days.v0` are separate explicit grants. Group membership never implies them.
+- Members can ask their private Murph to stop their ongoing health sharing
+  with a named group. The current membership and exact granted scopes select
+  what the Web revocation clears. The member stays in the group.
 - A missing grant is sufficient to explain why the group lacks permission.
 - An active grant is permission evidence only. It does not prove that the member currently has source data, that the source is fresh, or that the projection has already materialized in the group runtime. Murph should state that distinction when debugging a missing value.
 - If the member is not the group owner or the group has no existing join code, personal Murph reports the membership and grants without inventing or exposing a link. Link creation and disclosure remain owner-authorized actions from the route-bound group runtime.

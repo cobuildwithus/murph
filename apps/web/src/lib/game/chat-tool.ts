@@ -91,6 +91,7 @@ async function handleGameChatRequest(input: Input): Promise<HostedGameToolRespon
     if (!result.ok) return { action: input.request.action, result: { status: "rejected", error: `${result.error.code}: ${result.error.message}`.slice(0, 128) } };
     if (update.operation === "set_reminder") return { action: "update_game", result: { status: "ok", reaches: result.reaches } };
     dayOutcome = result.dayOutcome;
+    if (result.leaveOutcome) return { action: "update_game", result: { status: "ok", leaveOutcome: result.leaveOutcome } };
     chatLine = result.chatLine;
   }
   if (input.request.action !== "read_game") {
