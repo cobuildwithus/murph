@@ -139,8 +139,7 @@ export async function publishHostedWorkspaceMediaReferencesForSnapshot(input: {
   const { existingCatalogue, entries, uploadedMediaCount } = await prepareHostedWorkspaceMediaReferences({
     ...input,
     mediaStore: input.mediaStore,
-    includeColdIngests: true,
-  });
+  }, "snapshot");
   // Save new uploads as well as earlier cleanup pointers before pruning; a
   // failed deletion must not forget another kind's newly uploaded media.
   await writeHostedMediaReferenceCatalogue({
@@ -221,8 +220,8 @@ export async function publishHostedWorkspaceMediaReferences(input: {
   signal?: AbortSignal | null;
   vaultRoot: string;
 }): Promise<HostedMediaReference[]> {
-  const { existingCatalogue, entries } = await prepareHostedWorkspaceMediaReferences(input);
-  const byPath = new Map(existingCatalogue.entries.map((entry) => [entry.relativePath, entry]));
+  const { existingCatalogue, entries } = await prepareHostedWorkspaceMediaReferences(input, input.inboxCapture ?? "workspace");
+  const byPath = new Map(existingCatalogue.entries.map(entry => [entry.relativePath, entry]));
   for (const entry of entries) byPath.set(entry.relativePath, entry);
   await writeHostedMediaReferenceCatalogue({
     catalogue: { ...existingCatalogue, entries: [...byPath.values()], schema: HOSTED_MEDIA_REFS_SCHEMA },
@@ -232,38 +231,35 @@ export async function publishHostedWorkspaceMediaReferences(input: {
 }
 
 async function prepareHostedWorkspaceMediaReferences(input: {
-  inboxCapture?: InboxCaptureRecord;
-  includeColdIngests?: boolean;
   mediaStore: HostedRuntimeMediaStore;
   signal?: AbortSignal | null;
   vaultRoot: string;
-}): Promise<{
+}, source: "snapshot" | "workspace" | InboxCaptureRecord): Promise<{
   entries: HostedMediaReference[];
   existingCatalogue: HostedMediaReferenceCatalogue;
   uploadedMediaCount: number;
 }> {
-  const existingCatalogue = await readHostedMediaReferenceCatalogue({
-    vaultRoot: input.vaultRoot,
-  });
-  const existingByPath = new Map(
-    existingCatalogue.entries.map((entry) => [entry.relativePath, entry]),
-  );
-  const candidates = await collectHostedMediaCandidates(input);
+  const { vaultRoot, signal } = input;
+  const existingCatalogue = await readHostedMediaReferenceCatalogue(input);
+  const existingByPath = new Map(existingCatalogue.entries.map(entry => [entry.relativePath, entry]));
   const now = Date.now();
   const currentMonth = new Date(now).toISOString().slice(0, 7);
-  const coldIngestCutoffMonth = new Date(now - COLD_INGEST_DELAY_MS).toISOString().slice(0, 7);
-  const ingestPaths = input.includeColdIngests
-    ? new Set(await walkVaultFiles(input.vaultRoot, VAULT_LAYOUT.integrationIngestLedgerDirectory))
-    : new Set<string>();
-  for (const relativePath of ingestPaths) {
-    const month = hostedColdIngestMonth(relativePath);
-    if (!month || month >= coldIngestCutoffMonth || existingByPath.has(relativePath)) continue;
-    const logicalPath = relativePath.slice(0, -3);
-    if ([logicalPath, `${logicalPath}.gz`, `${logicalPath}.zip`].some((sibling) => ingestPaths.has(sibling))) continue;
-    candidates.push({ relativePath, mediaKind: "integration-ingest", expiresAt: null,
-      byteSize: null, sha256: null, mimeType: "application/octet-stream", recordedAt: `${month}-01T00:00:00.000Z` });
+  const nextEntries = existingCatalogue.entries.filter(entry => entry.mediaKind === "integration-ingest");
+  if (nextEntries.some(entry => (hostedColdIngestMonth(entry.relativePath) ?? "") >= currentMonth)) {
+    throw new Error("Cold ingest month is not closed; retry with a current workspace clock.");
   }
-  const nextEntries = await collectRetainedMediaReferences(input, existingCatalogue.entries, currentMonth);
+
+  let candidates: HostedMediaCandidate[];
+  if (typeof source === "string") {
+    candidates = await collectWorkspaceMediaCandidates(vaultRoot, signal, source, existingByPath, now);
+    for (const entry of existingCatalogue.entries) {
+      assertHostedMediaReferenceLive(signal);
+      if (!entry.retirementPending && isHostedCanonicalPhotoPath(entry.relativePath)
+        && await hostedPhotoReferenceMayBeLive(vaultRoot, entry)) nextEntries.push(entry);
+    }
+  } else {
+    candidates = await collectInboxReceiptMediaCandidates(vaultRoot, source, signal);
+  }
   let uploadedMediaCount = 0;
 
   for (const candidate of candidates) {
@@ -294,27 +290,9 @@ async function prepareHostedWorkspaceMediaReferences(input: {
         || candidate.byteSize === existing.byteSize
       )
     ) {
-      const mergedEntry = {
-        ...existing,
-        expiresAt: resolveUpdatedHostedMediaExpiresAt(
-          existing.expiresAt,
-          candidate.expiresAt,
-        ),
-        recordedAt: minHostedMediaRecordedAt(
-          existing.recordedAt,
-          normalizeHostedMediaRecordedAt(candidate.recordedAt),
-        ),
-      };
-      if (existing.expiresAt !== mergedEntry.expiresAt) {
-        await input.mediaStore.record?.({
-          byteSize: mergedEntry.byteSize,
-          expiresAt: mergedEntry.expiresAt,
-          mediaId: mergedEntry.mediaId,
-          mediaKind: mergedEntry.mediaKind,
-          sha256: mergedEntry.sha256,
-        });
-      }
-      nextEntries.push(mergedEntry);
+      nextEntries.push(await updateHostedMediaLifetime(
+        input.mediaStore, existing, candidate.expiresAt, normalizeHostedMediaRecordedAt(candidate.recordedAt),
+      ));
     }
   }
 
@@ -323,27 +301,6 @@ async function prepareHostedWorkspaceMediaReferences(input: {
     existingCatalogue,
     uploadedMediaCount,
   };
-}
-
-// Preservation follows canonical retained ownership, independently of upload
-// candidates. Measurement deletion keeps raw evidence; meal retirement does not.
-async function collectRetainedMediaReferences(
-  input: { vaultRoot: string; signal?: AbortSignal | null; inboxCapture?: InboxCaptureRecord },
-  entries: readonly HostedMediaReference[],
-  currentMonth: string,
-): Promise<HostedMediaReference[]> {
-  const retained = entries.filter(entry => entry.mediaKind === "integration-ingest");
-  // A clock rollback must never externalize the current/future month.
-  if (retained.some(entry => (hostedColdIngestMonth(entry.relativePath) ?? "") >= currentMonth)) {
-    throw new Error("Cold ingest month is not closed; retry with a current workspace clock.");
-  }
-  if (input.inboxCapture) return retained;
-  for (const entry of entries) {
-    assertHostedMediaReferenceLive(input.signal);
-    if (!entry.retirementPending && isHostedCanonicalPhotoPath(entry.relativePath)
-      && await hostedPhotoReferenceMayBeLive(input.vaultRoot, entry)) retained.push(entry);
-  }
-  return retained;
 }
 
 // Dropping an entry deletes its object, which may be the only copy. Prove a
@@ -550,26 +507,45 @@ export async function readHostedMediaReferenceCatalogue(input: {
   return readHostedMediaReferenceCatalogueValue(input.vaultRoot);
 }
 
-async function collectHostedMediaCandidates(input: {
-  vaultRoot: string;
-  signal?: AbortSignal | null;
-  includeColdIngests?: boolean;
-  inboxCapture?: InboxCaptureRecord;
-}): Promise<HostedMediaCandidate[]> {
-  const { inboxCapture, vaultRoot, signal } = input;
-  if (inboxCapture && !inboxCapture.attachments.some(readHostedMediaKindFromInboxAttachment)) return [];
-  const inventory = await collectHostedMediaEventInventory(vaultRoot, signal, inboxCapture);
-  const inbox = await collectInboxHostedMediaCandidates({
-    captureRecords: inboxCapture ? [inboxCapture] : undefined,
-    durableRawInboxRefs: inventory.durableRawInboxRefs,
-    signal,
-    vaultRoot,
-  });
-  return dedupeHostedMediaCandidates([
+async function collectWorkspaceMediaCandidates(
+  vaultRoot: string,
+  signal: AbortSignal | null | undefined,
+  source: "snapshot" | "workspace",
+  existingByPath: ReadonlyMap<string, HostedMediaReference>,
+  now: number,
+): Promise<HostedMediaCandidate[]> {
+  const inventory = await collectHostedMediaEventInventory(vaultRoot, signal);
+  const inbox = await collectInboxHostedMediaCandidates({ vaultRoot, signal, durableRawInboxRefs: inventory.durableRawInboxRefs });
+  const candidates = dedupeHostedMediaCandidates([
     ...inbox,
     ...collectCaptureHostedMediaCandidates(inventory.latestEvents),
-    ...(input.includeColdIngests ? collectPhotoCandidates(inventory.latestEvents) : []),
+    ...(source === "snapshot" ? collectPhotoCandidates(inventory.latestEvents) : []),
   ]);
+  if (source === "snapshot") {
+    const cutoff = new Date(now - COLD_INGEST_DELAY_MS).toISOString().slice(0, 7);
+    const ingestPaths = new Set(await walkVaultFiles(vaultRoot, VAULT_LAYOUT.integrationIngestLedgerDirectory));
+    for (const relativePath of ingestPaths) {
+      const month = hostedColdIngestMonth(relativePath);
+      if (!month || month >= cutoff || existingByPath.has(relativePath)) continue;
+      const logicalPath = relativePath.slice(0, -3);
+      if ([logicalPath, `${logicalPath}.gz`, `${logicalPath}.zip`].some(sibling => ingestPaths.has(sibling))) continue;
+      candidates.push({ relativePath, mediaKind: "integration-ingest", expiresAt: null,
+        byteSize: null, sha256: null, mimeType: "application/octet-stream", recordedAt: `${month}-01T00:00:00.000Z` });
+    }
+  }
+  return candidates;
+}
+
+async function collectInboxReceiptMediaCandidates(
+  vaultRoot: string, capture: InboxCaptureRecord, signal?: AbortSignal | null,
+): Promise<HostedMediaCandidate[]> {
+  const paths = new Set(capture.attachments.filter(readHostedMediaKindFromInboxAttachment)
+    .map(attachment => normalizeHostedMediaVaultPath(attachment.storedPath, RAW_INBOX_PREFIX))
+    .filter((path): path is string => path !== null));
+  if (!paths.size) return [];
+  const { durableRawInboxRefs } = await collectHostedMediaEventInventory(vaultRoot, signal, paths);
+  const candidates = await collectInboxHostedMediaCandidates({ vaultRoot, signal, captureRecords: [capture], durableRawInboxRefs });
+  return dedupeHostedMediaCandidates(candidates);
 }
 
 function collectPhotoCandidates(records: readonly EventRecord[]): HostedMediaCandidate[] {
@@ -691,7 +667,7 @@ function collectCaptureHostedMediaCandidates(
 async function collectHostedMediaEventInventory(
   vaultRoot: string,
   signal: AbortSignal | null | undefined,
-  inboxCapture?: InboxCaptureRecord,
+  receiptPaths?: ReadonlySet<string>,
 ): Promise<{
   durableRawInboxRefs: Set<string>;
   latestEvents: EventRecord[];
@@ -700,9 +676,7 @@ async function collectHostedMediaEventInventory(
   const latestEvents = new Map<string, { record: EventRecord; relativePath: string }>();
   // Every historical revision can preserve an inbox attachment. Its stored path is
   // enough to decide retention; unrelated events need no typed revision selection.
-  const receiptPaths = inboxCapture && new Set(inboxCapture.attachments.map(attachment =>
-    normalizeHostedMediaVaultPath(attachment.storedPath, RAW_INBOX_PREFIX)));
-  const containing = inboxCapture ? ["inbox"] : undefined;
+  const containing = receiptPaths ? ["inbox"] : undefined;
   for (const relativePath of await listEventLedgerShardPaths(vaultRoot)) {
     assertHostedMediaReferenceLive(signal);
     // Validate all JSON before inspecting event values, preserving malformed-row errors.
@@ -810,31 +784,8 @@ async function prepareHostedMediaReferenceFromLocalFile(input: {
     && input.existing.byteSize === entry.byteSize
     && input.existing.sha256 === entry.sha256
   ) {
-    const mergedEntry = {
-      ...input.existing,
-      ...entry,
-      expiresAt: resolveUpdatedHostedMediaExpiresAt(
-        input.existing.expiresAt,
-        entry.expiresAt,
-      ),
-      recordedAt: minHostedMediaRecordedAt(
-        input.existing.recordedAt,
-        entry.recordedAt,
-      ),
-    };
-    if (input.existing.expiresAt !== mergedEntry.expiresAt) {
-      await input.mediaStore.record?.({
-        byteSize: mergedEntry.byteSize,
-        expiresAt: mergedEntry.expiresAt,
-        mediaId: mergedEntry.mediaId,
-        mediaKind: mergedEntry.mediaKind,
-        sha256: mergedEntry.sha256,
-      });
-    }
-    return {
-      entry: mergedEntry,
-      uploaded: false,
-    };
+    const retained = await updateHostedMediaLifetime(input.mediaStore, input.existing, entry.expiresAt, entry.recordedAt);
+    return { entry: { ...retained, mimeType: entry.mimeType }, uploaded: false };
   }
   // Full photos need an accepted checkpoint before any remote registration.
   // Thumbnail-v2 intent already has the canonical receipt durability boundary.
@@ -860,6 +811,23 @@ async function prepareHostedMediaReferenceFromLocalFile(input: {
   return { entry, uploaded: true };
 }
 
+
+async function updateHostedMediaLifetime(
+  store: HostedRuntimeMediaStore,
+  existing: HostedMediaReference,
+  candidateExpiry: string | null,
+  recordedAt: string,
+): Promise<HostedMediaReference> {
+  const expiresAt = resolveUpdatedHostedMediaExpiresAt(existing.expiresAt, candidateExpiry);
+  if (expiresAt !== existing.expiresAt) {
+    const { byteSize, mediaId, mediaKind, sha256 } = existing;
+    await store.record?.({ byteSize, expiresAt, mediaId, mediaKind, sha256 });
+  }
+  return {
+    ...existing, expiresAt,
+    recordedAt: minHostedMediaRecordedAt(existing.recordedAt, recordedAt),
+  };
+}
 
 async function localHostedMediaReferenceIsValid(input: {
   entry: HostedMediaReference;
