@@ -366,9 +366,9 @@ jobs:
           POSTGRES_USER: postgres
         options: >-
           --health-cmd "pg_isready -U postgres -d murph_search_test"
-          --health-interval 10s
+          --health-interval 2s
           --health-timeout 5s
-          --health-retries 10
+          --health-retries 50
         ports:
           - 5432:5432
     env:
@@ -431,9 +431,9 @@ jobs:
           POSTGRES_USER: postgres
         options: >-
           --health-cmd "pg_isready -U postgres -d murph_test_gate"
-          --health-interval 10s
+          --health-interval 2s
           --health-timeout 5s
-          --health-retries 10
+          --health-retries 50
         ports:
           - 5432:5432
     env:
@@ -535,9 +535,9 @@ jobs:
           POSTGRES_USER: postgres
         options: >-
           --health-cmd "pg_isready -U postgres -d murph_test"
-          --health-interval 10s
+          --health-interval 2s
           --health-timeout 5s
-          --health-retries 10
+          --health-retries 50
         ports:
           - 5432:5432
     # Production admission runs this scenario on every main commit, after the
