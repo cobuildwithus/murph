@@ -200,19 +200,20 @@ describe("runDeployWorkerVersionCli", () => {
     expect(releaseMocks.assertApplicationReady).toHaveBeenLastCalledWith({ ...serving, listApplications: expect.any(Function) });
   });
 
-  it("leaves the serving image untouched when isolated behavioral smoke fails", async () => {
+  it.each([true, false])("clears only a fresh candidate after artifact rejection (fresh=%s)", async fresh => {
     const serving = { name: renderedContainers[0]!.applicationName, className: "RunnerContainer", applicationId: "serving-app", namespaceId: "serving-namespace", specification: {} };
-    releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({ configPath, promotionConfigPath: `${configPath}.promote`, activeApplicationName: serving.name, workerOnly: false, applications: [serving], retirements: [] }));
+    releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({ configPath, rejectedConfigPath: fresh ? `${configPath}.rejected` : null, promotionConfigPath: `${configPath}.promote`, activeApplicationName: serving.name, workerOnly: false, applications: [serving], retirements: [] }));
     releaseMocks.runSmokeHostedDeploy.mockRejectedValue(new Error("candidate shell failed"));
     await expect(syntheticDeployment("gradual")).rejects.toThrow("candidate shell failed");
     expect(releaseMocks.admitApplication).not.toHaveBeenCalled();
     expect(releaseMocks.runSmokeHostedDeploy).toHaveBeenCalledWith(expect.objectContaining({ phase: "artifact" }));
-    expect(wranglerMocks.runWranglerLogged.mock.calls.filter(([args]) => args[0] === "versions")).toHaveLength(1);
+    expect(wranglerMocks.runWranglerLogged.mock.calls.filter(([args]) => args[0] === "versions")).toHaveLength(fresh ? 2 : 1);
+    if (fresh) expect(wranglerMocks.runWranglerLoggedCaptured.mock.lastCall?.[0]).toContain("/tmp/config.jsonc.rejected");
   });
 
   it("retains the compatible Worker and pending pair after serving rollout failure", async () => {
     const serving = { name: renderedContainers[0]!.applicationName, className: "RunnerContainer", applicationId: "serving-app", namespaceId: "serving-namespace", specification: {} };
-    releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({ configPath, promotionConfigPath: `${configPath}.promote`, activeApplicationName: serving.name, workerOnly: false, applications: [serving], retirements: [] }));
+    releaseMocks.stageHostedRunnerRelease.mockImplementation(async ({ configPath }) => ({ configPath, rejectedConfigPath: `${configPath}.rejected`, promotionConfigPath: `${configPath}.promote`, activeApplicationName: serving.name, workerOnly: false, applications: [serving], retirements: [] }));
     releaseMocks.admitApplication.mockRejectedValue(new Error("lost rollout response"));
     await expect(syntheticDeployment()).rejects.toThrow("lost rollout response");
     expect(wranglerMocks.runWranglerLogged.mock.calls.filter(([args]) => args[0] === "versions")).toHaveLength(1);

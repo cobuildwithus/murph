@@ -21,6 +21,7 @@ export interface StagedRunnerRelease {
   configPath: string;
   deployment: HostedRunnerDeployment;
   promotionConfigPath: string;
+  rejectedConfigPath: string | null;
   workerOnly: boolean;
 }
 
@@ -138,17 +139,32 @@ export async function stageHostedRunnerRelease(input: {
     specification: runnerApplicationSpecification(entry.rendered, logsEnabled),
   }));
   readHostedRunnerDeployment({ HOSTED_EXECUTION_RUNNER_DEPLOYMENT: JSON.stringify(deployment) });
+  const configs = await writeReleaseConfigs(path.dirname(input.configPath), config, vars, effectiveContainers,
+    deployment, promoted, Boolean(liveDeployment?.candidate));
+  return { activeApplicationName: serving.name, applications, retirements, deployment,
+    ...configs, workerOnly: !!input.retainServingRunner };
+}
+
+async function writeReleaseConfigs(directory: string, config: Record<string, unknown>, vars: Record<string, unknown>,
+  effectiveContainers: Record<string, unknown>[], deployment: HostedRunnerDeployment, promoted: HostedRunnerDeployment,
+  resumingCandidate: boolean) {
   const attempt = randomUUID();
-  const configPath = path.join(path.dirname(input.configPath), `wrangler.stage-${attempt}.jsonc`);
-  const promotionConfigPath = path.join(path.dirname(input.configPath), `wrangler.promote-${attempt}.jsonc`);
+  const configPath = path.join(directory, `wrangler.stage-${attempt}.jsonc`);
+  const promotionConfigPath = path.join(directory, `wrangler.promote-${attempt}.jsonc`);
   const render = (release: HostedRunnerDeployment) => `${JSON.stringify({
     ...config, containers: effectiveContainers, vars: { ...vars,
       HOSTED_EXECUTION_RUNNER_DEPLOYMENT: JSON.stringify(release) },
   }, null, 2)}\n`;
   await writeFile(configPath, render(deployment), { encoding: "utf8", flag: "wx" });
   await writeFile(promotionConfigPath, render(promoted), { encoding: "utf8", flag: "wx" });
-  return { activeApplicationName: serving.name, applications, retirements, configPath, deployment,
-    promotionConfigPath, workerOnly: !!input.retainServingRunner };
+  // Only this attempt's fresh candidate can be discarded before native admission.
+  // A resumed candidate may already be serving on some instances.
+  const rejectedConfigPath = deployment.candidate && !resumingCandidate
+    ? path.join(directory, `wrangler.rejected-${attempt}.jsonc`) : null;
+  if (rejectedConfigPath) {
+    await writeFile(rejectedConfigPath, render({ ...deployment, candidate: null }), { encoding: "utf8", flag: "wx" });
+  }
+  return { configPath, promotionConfigPath, rejectedConfigPath };
 }
 
 /** Retained releases use native resource ownership. */
