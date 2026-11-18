@@ -3232,6 +3232,27 @@ model GameProgressShare {
   @@map("game_progress_share")
 }
 
+/// Shared, non-personal place art: one poster per public place, one painting per route map.
+model GamePlaceArt {
+  key         String    @id
+  kind        String
+  status      String
+  bytes       Bytes?
+  attempts    Int       @default(1)
+  startedAt   DateTime  @default(now()) @map("started_at")
+  readyAt     DateTime? @map("ready_at")
+  failureCode String?   @map("failure_code")
+
+  @@map("game_place_art")
+}
+
+model GamePlaceArtBudget {
+  day      DateTime @id @db.Date
+  attempts Int
+
+  @@map("game_place_art_budget")
+}
+
 model GameProgressTaskMeasure {
   memberId         String       @map("member_id")
   lookup           String

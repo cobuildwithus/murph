@@ -16,6 +16,7 @@ import { gameHttpError, gameNotFound, invalidGameRequest } from "../http/errors"
 import type { GoalsQuery, HealthMetric, SetMeasureBody } from "./contract";
 import { openProgress, openProgressMany, progressLookup } from "./crypto";
 import { readAwards, settleAwards } from "./awards";
+import { attachRouteArt } from "./route-art";
 import { patchMeasureState, type MeasureState, type BeforeProgressMutation } from "./state";
 import { HEALTH, type Candidate } from "./registry";
 import type { CompanionHealthSeries, RawHealthPoint } from "../../device-sync/companion-numbers";
@@ -131,6 +132,8 @@ export async function readProgressHealth(auth: HostedNativeMemberAuth, signal: A
     const awards = attemptedInsert ? await timing.measure("awards", () => readAwards(memberId)) : previousAwards;
     for (const model of models) model.wins = awards.filter(award => award.measureId === model.id && ["health", "healthAge"].includes(award.kind));
     const sums = await timing.measure("render", () => healthJourneyViews(journeys, awards, today, units));
+    // The Steps map and its places' posters: start what's missing, after the response.
+    await timing.measure("art", () => attachRouteArt(sums, journeys.states, { memberId, beforeMutationTx: healthAuthority(auth) }));
     // Returning private values also requires current session and health authority.
     await timing.measure("auth", () => assertGameMemberAuthCurrentTx(auth, db));
     await timing.measure("auth", () => assertBrowserVaultMemberAuthority({ memberId, prisma: db }));

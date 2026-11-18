@@ -93,7 +93,7 @@ describe("Progress HTTP contracts", () => {
     const body = goalsSchema.parse(await response.json());
     expect(body).toMatchObject({ note: null, route: { from: "London", to: "Paris", distanceText, detail, straightLine,
       map: "/api/game/v1/progress/map?from=London&to=Paris&size=card" } });
-    expect(body.route!.towns).toEqual(straightLine ? [] : [{ name: "Town", atText: "mile 1.2", aheadText: "1.2 mi to go", x: expect.any(Number), y: expect.any(Number), passedOn: null }]);
+    expect(body.route!.towns).toEqual(straightLine ? [] : [{ name: "Town", atText: "mile 1.2", aheadText: "1.2 mi to go", x: expect.any(Number), y: expect.any(Number), passedOn: null, poster: null, stepsText: null }]);
     expect(mocks.resolveRoute).toHaveBeenCalledExactlyOnceWith("London", "Paris");
     expect(mocks.patch).not.toHaveBeenCalled(); expect(mocks.createAwards).not.toHaveBeenCalled();
   });

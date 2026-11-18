@@ -790,7 +790,9 @@
             "aheadText": null,
             "x": 0.9,
             "y": 0.2,
-            "passedOn": "2026-02-09"
+            "passedOn": "2026-02-09",
+            "poster": null,
+            "stepsText": null
           },
           {
             "name": "Tulsa",
@@ -798,7 +800,9 @@
             "aheadText": "2 mi away",
             "x": 0.48,
             "y": 0.55,
-            "passedOn": null
+            "passedOn": null,
+            "poster": null,
+            "stepsText": null
           },
           {
             "name": "Los Angeles",
@@ -806,7 +810,9 @@
             "aheadText": "1,434 mi to go",
             "x": 0.1,
             "y": 0.7,
-            "passedOn": null
+            "passedOn": null,
+            "poster": null,
+            "stepsText": null
           }
         ],
         "goalPicked": true,
@@ -824,7 +830,9 @@
             "aheadText": null,
             "x": 0.95,
             "y": 0.286426,
-            "passedOn": "2026-02-09"
+            "passedOn": "2026-02-09",
+            "poster": null,
+            "stepsText": null
           },
           {
             "name": "Tulsa",
@@ -832,7 +840,9 @@
             "aheadText": "2 mi away",
             "x": 0.4775,
             "y": 0.535596,
-            "passedOn": null
+            "passedOn": null,
+            "poster": null,
+            "stepsText": null
           },
           {
             "name": "Los Angeles",
@@ -840,7 +850,9 @@
             "aheadText": "1,434 mi to go",
             "x": 0.05,
             "y": 0.642383,
-            "passedOn": null
+            "passedOn": null,
+            "poster": null,
+            "stepsText": null
           }
         ],
         "here": {
@@ -851,7 +863,9 @@
           "x": 0.478194,
           "y": 0.53523
         },
-        "shareAwardId": null
+        "shareAwardId": null,
+        "mapArt": null,
+        "drawerMapArt": null
       },
       "pics": []
     }

@@ -89,3 +89,10 @@ export function townPosition(point: Coordinate, bbox: Bbox): { x: number; y: num
   return { x: (point[0] - bbox[0]) / (bbox[2] - bbox[0]),
     y: (mercatorY(bbox[3]) - mercatorY(point[1])) / (mercatorY(bbox[3]) - mercatorY(bbox[1])) };
 }
+
+/** The same frame grown evenly in height to a canvas of width / height = aspect (never narrower than the frame). */
+export function expandBbox(bbox: Bbox, aspect: number): Bbox {
+  const top = mercatorY(bbox[3]), bottom = mercatorY(bbox[1]);
+  const center = (top + bottom) / 2, half = Math.max(radians(bbox[2] - bbox[0]) / aspect, top - bottom) / 2;
+  return [bbox[0], latitudeAt(center - half), bbox[2], latitudeAt(center + half)];
+}

@@ -6020,7 +6020,7 @@ their separate lane owners.
 Progress persists awards, measure choices, picture and share ownership, and task
 inference. The following classification covers every column of exactly
 `GameProgressAward`, `GameProgressMeasure`, `GameProgressPic` and
-`GameProgressTaskMeasure`, plus `GameProgressShare`; it is not an audit of other game tables.
+`GameProgressTaskMeasure`, plus `GameProgressShare`, `GamePlaceArt` and `GamePlaceArtBudget`; it is not an audit of other game tables.
 
 | Table | Encrypted content | Keyed lookup | Approved operational metadata |
 | --- | --- | --- | --- |
@@ -6029,6 +6029,19 @@ inference. The following classification covers every column of exactly
 | `game_progress_pic` | `meta_encrypted`: measure identity | None | `id`: client UUID; `member_id`: owner FK; `storage_key`: random exclusive Progress object identity; `taken_at`: capture ordering; `retired_at`: permanent retirement time |
 | `game_progress_task_measure` | `measure_encrypted`: inferred name, quantity and unit | `lookup`: member-bound normalized task text plus check-in kind | `member_id`: owner FK; `created_at`: insertion time |
 | `game_progress_share` | None in the row; generated JPEG bytes are sealed in the Progress store | `award_lookup`: existing member-bound award identity | `member_id`: owner FK; `storage_key`: unique random Progress object identity; `status`: generating, ready, failed or retired; `created_at`: admission time; `failure_code`: nullable generation_failed, timeout or refused |
+| `game_place_art` | None: shared public art, plaintext `bytes` (JPEG) | None | `key`: `poster:v1:<Mapbox place id>` or `map:v1:<size>:<sha256 of route geometry>`; `kind`: poster or map; `status`: making, ready or failed; `attempts`: claim fence, at most 3; `started_at`: claim time; `ready_at`: nullable completion time; `failure_code`: nullable generation_failed, timeout, refused or drifted |
+| `game_place_art_budget` | None | None | `day`: UTC date; `attempts`: admitted art attempts that day |
+
+Place art is not member data. A poster is made from a public Mapbox place
+name (`types=place`, never a typed address) and keyed by that place's id; a
+painting is made only for legs of 50 km or more, from Mapbox satellite imagery
+of the frame, and holds no line, pin or name. The member's own line is drawn on
+it per request. Neither row names a member, route text or progress, so everyone
+who reaches the same place or frame reuses one row. Members' route legs keep
+each town's place id and name inside sealed `state_encrypted`. Ready bytes never
+change; an attempt finishes its row only while `attempts` still matches its
+claim. Every admitted attempt, retries included, counts against the UTC day's
+`game_place_art_budget` row in the claim's transaction.
 
 Share ownership uses the member/award composite primary and foreign key. No
 source photo identity is persisted: nothing reads it after admission. The member

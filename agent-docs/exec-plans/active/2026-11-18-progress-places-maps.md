@@ -182,3 +182,17 @@ Response: `audit-packages/plan-progress-places-maps.md`. Outcomes:
 6. **Regional table and pace. Partly accepted.** Pace now comes from the settled Steps days (the window ends at the last observed day, not the profile's today) and needs at least 7 observed days in the last 30; with fewer, the default 3 miles a day applies. The 56-91 day target is a best effort: the nearest candidate wins, and the real road distance from `resolveRoute` can differ from the table's `km`. **Rejected:** moving the regional pairs into `BANK`. BANK holds curated landmark routes with checked sources that the picker lists. A regional pair is a plain city-to-city road route resolved exactly like a typed goal, and its `km` only sizes the pick.
 
 Other notes taken: art generation is admitted at the Steps presentation read (in `after()`, one absolute deadline, route `maxDuration = 300`), never inside the health settlement batch. The new route text is per town (`aheadText`), additive.
+
+## PR A build notes (2026-11-18)
+
+Shipped as written, except:
+
+- **Stored format.** Posters are JPEG q85 and paintings JPEG q88, not PNG. The line is composited per request either way, and JPEG is a quarter of the size.
+- **Coast check.** The check is the share of pixels in a band about 13 px either side of the photo's coastline whose sea or land matches, ignoring white cloud, and it must be at least 0.85. It replaces the median shift. Calibrated on the real E1 paintings: 0.93 to 0.95 for good paintings, 0.79 for a 20x15 px shift, and 0.47 for a mirrored coast. Whole-sea overlap could not tell a 20 px shift from a good painting, so it was dropped. A frame with no coast passes.
+- **Finish poster.** There is no separate `finishPoster`. The 8th town sample is the endpoint, so the last town's `poster` is the destination's.
+- **Map readiness.** `mapArt` and `drawerMapArt` are only `making` or `null`, per review outcome 5. This supersedes the `{ state: 'ready' }` line above.
+- **Scope of admission.** Only the Steps health read starts art. The other measures' routes (Totals) don't report or start art.
+- **Older legs.** The first Steps read after deploy looks up each town's public place once, after the response. A town with no place stores `place: null`, so it is never looked up again.
+- **Serving.** `GET /progress/art/:key` answers with `private, max-age=31536000, immutable`; keys are versioned and the bytes never change.
+- **Medal loader.** `typicalSeconds` is the constant 55. The share row has no ready time to tune it from.
+- **Live proof.** Monterey to Big Sur (via `resolveRoute`, real Mapbox and gpt-image-2.6-flare): the card painting passed the coast check, and the line sits on the painted coast. The Monterey poster kept the plain coral and navy bands. Both came back in 10 s.

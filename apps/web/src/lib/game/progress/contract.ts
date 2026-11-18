@@ -18,8 +18,14 @@ export const rungSchema = z.object({
 export type Rung = z.infer<typeof rungSchema>;
 const ladder = z.object({ kind: z.enum(["height", "time"]), passed: z.array(rungSchema), next: rungSchema.nullable(), goalPicked: z.boolean() });
 export type Ladder = z.infer<typeof ladder>;
+/** Shared place art being made: a timed loader; readiness comes from a later read. */
+const making = z.object({ state: z.literal("making"), startedAt: z.string(), expiresAt: z.string(), typicalSeconds: z.number().int().positive() });
+/** A place's poster: ready at path, being made, or null (none yet). */
+const art = z.union([z.object({ state: z.literal("ready"), path: z.string() }), making]).nullable();
 // aheadText, while a town is ahead: "33 mi away", or "416 mi to go" for the end.
-const towns = z.array(z.object({ name: z.string(), atText: z.string(), aheadText: z.string().nullable(), x: z.number(), y: z.number(), passedOn: day.nullable() }));
+// poster: the place's travel poster. stepsText: Steps only, the steps total on the day you got there.
+const towns = z.array(z.object({ name: z.string(), atText: z.string(), aheadText: z.string().nullable(), x: z.number(), y: z.number(), passedOn: day.nullable(),
+  poster: art, stepsText: z.string().nullable() }));
 const route = z.object({
   name: z.string(), distanceText: z.string(), walkedText: z.string(), totalText: z.string(), progress: z.number(), straightLine: z.boolean(),
   goalPicked: z.boolean(), completed: z.array(z.object({ name: z.string(), finishedOn: day, shareAwardId: z.string() })),
@@ -31,6 +37,9 @@ const route = z.object({
   drawerTowns: towns,
   here: z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) }),
   drawerHere: z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) }),
+  /** The card and drawer maps' painting while it's being made. Null: `map` is what to show (painted once ready). */
+  mapArt: making.nullable(),
+  drawerMapArt: making.nullable(),
 });
 export type Route = z.infer<typeof route>;
 const pic = z.object({ id: z.string(), takenOn: day, at: z.number() });
@@ -178,7 +187,8 @@ export const shareViewSchema = z.strictObject({
     z.strictObject({ state: z.literal('needs_photo') }),
     z.strictObject({ state: z.literal('medal') }),
     z.strictObject({ state: z.literal('available') }),
-    z.strictObject({ state: z.literal('generating'), startedAt: z.iso.datetime(), expiresAt: z.iso.datetime() }),
+    // typicalSeconds: how long a picture usually takes, for a timed 0-100 loader.
+    z.strictObject({ state: z.literal('generating'), startedAt: z.iso.datetime(), expiresAt: z.iso.datetime(), typicalSeconds: z.number().int().positive() }),
     z.strictObject({ state: z.literal('photo'), imagePath: z.string() }),
   ]),
 });

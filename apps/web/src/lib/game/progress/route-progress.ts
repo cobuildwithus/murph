@@ -4,7 +4,7 @@ import type { Candidate } from './registry';
 import type { MeasureState, RouteLeg } from './state';
 import type { StoredAward } from './awards';
 import { cutPolyline, decodePolyline, MAP_SIZES, routeBbox, townPosition } from './route-geometry';
-import { formatAmount } from './format';
+import { formatAmount, formatNumber } from './format';
 export const routeMeters = (measureId: string, amount: number) => measureId === 'steps' || measureId.endsWith('.steps') ? amount / 2000 * 1609.344 : amount;
 type Points = readonly [Day, number][];
 const crossingDay = (points: Points, at: number) => points.find(point => point[1] >= at)?.[0] ?? null;
@@ -31,16 +31,19 @@ export function routeLegs(ctx: { measureId: string; legs: readonly RouteLeg[]; p
 }
 
 /** Map labels share the renderer's viewport. Preview towns have no earned crossing dates. */
-export function routeTowns(leg: RouteLeg, meters: Points, size: MapQuery['size'], units: ClientUnits): Route['towns'] {
+export function routeTowns(leg: RouteLeg, meters: Points, size: MapQuery['size'], units: ClientUnits, measureId?: string): Route['towns'] {
   const { width, height } = MAP_SIZES[size];
   const geometry = decodePolyline(leg.polyline), bbox = routeBbox(geometry, width, height);
   const walked = Math.max(0, (meters.at(-1)?.[1] ?? 0) - leg.startTotal);
   return leg.towns.map((town, index) => {
     const passedOn = crossingDay(meters, leg.startTotal + town.atM);
     const ahead = formatAmount(town.atM - walked, 'meters', 'full', units).text;
+    // Steps on this route by the end of the day you got there.
+    const stepsOn = measureId === 'steps' && passedOn ? meters.find(point => point[0] === passedOn)?.[1] : undefined;
     return { name: town.name, atText: `${units === 'metric' ? 'km' : 'mile'} ${formatAmount(town.atM, 'meters', 'full', units).text.split(' ')[0]}`,
       aheadText: passedOn ? null : `${ahead} ${index === leg.towns.length - 1 ? 'to go' : 'away'}`,
-      ...townPosition(cutPolyline(geometry, town.atM / leg.distanceM).walked.at(-1)!, bbox), passedOn };
+      ...townPosition(cutPolyline(geometry, town.atM / leg.distanceM).walked.at(-1)!, bbox), passedOn,
+      poster: null, stepsText: stepsOn === undefined ? null : `${formatNumber(Math.round((stepsOn - leg.startTotal) / 1609.344 * 2000), 'full')} steps` };
   });
 }
 
@@ -67,5 +70,5 @@ export function routeView(measureId: string, state: MeasureState, points: Points
     here: routeHere(leg, walked / leg.distanceM, 'card'), drawerHere: routeHere(leg, walked / leg.distanceM, 'drawer'),
     finishedOn: earnedOn, shareAwardId: earned?.id ?? null, map, goalPicked: state.goal !== undefined,
     completed: completions.map(award => ({ name: routeAwardName(award, `${award.data.from} to ${award.data.to}`), finishedOn: award.on, shareAwardId: award.id })),
-    towns: routeTowns(leg, meters, 'card', units), drawerTowns: routeTowns(leg, meters, 'drawer', units) };
+    towns: routeTowns(leg, meters, 'card', units, measureId), drawerTowns: routeTowns(leg, meters, 'drawer', units, measureId), mapArt: null, drawerMapArt: null };
 }

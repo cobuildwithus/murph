@@ -40,7 +40,7 @@ describe('Progress route legs', () => {
     for (const [size, towns] of [['card', view.towns], ['drawer', view.drawerTowns]] as const) {
       const { width, height } = MAP_SIZES[size];
       const geometry = decodePolyline(route.polyline);
-      expect(towns).toEqual([{ name: 'B', atText, aheadText: null, passedOn: '2026-11-01',
+      expect(towns).toEqual([{ name: 'B', atText, aheadText: null, passedOn: '2026-11-01', poster: null, stepsText: null,
         ...townPosition(geometry.at(-1)!, routeBbox(geometry, width, height)) }]);
     }
     expect(view.towns[0].x).not.toBe(view.drawerTowns[0].x);

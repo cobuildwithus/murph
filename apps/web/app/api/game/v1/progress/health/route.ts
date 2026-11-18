@@ -6,6 +6,8 @@ import { readProgressHealth } from "@/src/lib/game/progress/health-reader";
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 
 export const dynamic = "force-dynamic";
+// Place art the read starts runs after the response, under its own 240 s deadline.
+export const maxDuration = 300;
 export const GET = withProgressReadTiming("/api/game/v1/progress/health", withJsonError(async (request: Request, timing: ProgressReadTiming) => {
   const auth = await timing.measure("auth", () => requireGameMemberAuth(request));
   if (new URL(request.url).searchParams.size) throw invalidGameRequest("Health does not accept query parameters.");
