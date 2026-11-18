@@ -6,6 +6,7 @@ import {
   createBrowserVaultReplica,
   createVaultReadModel,
   parseBrowserVaultCoreShard,
+  parseBrowserVaultReplica,
   splitBrowserVaultReplica,
 } from "../src/browser.ts";
 import { resolveCanonicalRecordClass, type CanonicalEntity } from "../src/canonical-entities.ts";
@@ -61,6 +62,14 @@ test("run days count a watch run and its imported mirror once, add distinct runs
 
   const shards = await splitBrowserVaultReplica(replica);
   const core = parseBrowserVaultCoreShard(JSON.parse(JSON.stringify(shards.core)));
+  assert.deepEqual(assembleBrowserVaultCoreReplica(core).runs, replica.runs);
+});
+
+test("a run that rounds to no distance is left out, and the replica still parses", async () => {
+  const replica = await runDays([watchRun("evt_blip", "2026-11-13", "09", 0.0002), loggedRun("evt_real", "2026-11-12", 4.2)]);
+  assert.deepEqual(replica.runs?.days, [{ date: "2026-11-12", km: 4.2 }]);
+  assert.deepEqual(parseBrowserVaultReplica(JSON.parse(JSON.stringify(replica))).runs, replica.runs);
+  const core = parseBrowserVaultCoreShard(JSON.parse(JSON.stringify((await splitBrowserVaultReplica(replica)).core)));
   assert.deepEqual(assembleBrowserVaultCoreReplica(core).runs, replica.runs);
 });
 

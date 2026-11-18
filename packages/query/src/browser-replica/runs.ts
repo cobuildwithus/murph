@@ -5,6 +5,7 @@ import { buildActivitySessionDayRollups } from "../wearables/candidates.ts";
 import { readWearableExternalRef } from "../wearables/observation.ts";
 
 const RUN_LOOKBACK_DAYS = 365;
+const DAY = /^\d{4}-\d{2}-\d{2}$/u;
 // "run", "running", "trail_running", "Treadmill Run", "virtual-run".
 const RUN = /(?:^|-)run(?:ning)?(?:$|-)/u;
 
@@ -43,8 +44,11 @@ export function buildCompanionRunsProjection(
     logged.set(entity.date, (logged.get(entity.date) ?? 0) + km);
   }
   const days = [...new Set([...device.keys(), ...logged.keys()])]
-    .filter((date) => date >= from && date <= generatedAt.slice(0, 10))
+    // Every row must parse: one bad day would block the member's whole replica.
+    .filter((date) => DAY.test(date) && date >= from && date <= generatedAt.slice(0, 10))
     .sort()
-    .map((date) => ({ date, km: Math.min(1_000, Math.round(Math.max(device.get(date) ?? 0, logged.get(date) ?? 0) * 1000) / 1000) }));
+    .map((date) => ({ date, km: Math.min(1_000, Math.round(Math.max(device.get(date) ?? 0, logged.get(date) ?? 0) * 1000) / 1000) }))
+    // A run under half a meter (a watch started and stopped) rounds to no distance.
+    .filter((day) => day.km > 0);
   return { schemaVersion: 1, days };
 }
