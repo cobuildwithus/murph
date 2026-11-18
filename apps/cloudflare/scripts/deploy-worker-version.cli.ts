@@ -18,11 +18,12 @@ import { assertHostedWebProtocolAdmission } from "./deploy-web-protocol.ts";
 import { resolveDeployWorkerCliPaths } from "./deploy-worker-version-paths.js";
 import { assertReleaseNotBehindLive } from "./deploy-release-order.ts";
 import { readLiveRunnerReleaseSha, stageHostedRunnerRelease } from "./stage-runner-release.ts";
+import { verifyRecoverySources } from "./deploy-rollback-recovery.ts";
 import { createRunnerReleaseProvider } from "./runner-release-provider.ts";
 import { runSmokeHostedDeploy } from "./smoke-hosted-deploy.shared.ts";
 import { prepareHostedContainerDeployImage } from "./prepare-container-deploy-image.ts";
 import {
-  assertRecoveryWorkerVersion,
+  readRollbackSecretSources,
   assertRetiredInferenceSecretsRemoved,
   hasRetiredInferenceSecrets,
   readExpectedWorkerSecrets,
@@ -109,16 +110,12 @@ export async function runDeployWorkerVersionCli(
           }
           return before;
         };
-        if (recovery.length) {
-          for (const { id, tag } of recovery) {
-            assertRecoveryWorkerVersion({
-              currentVersion, currentVersionId, currentDeploymentCreatedOn: current!.created_on,
-              recoveryVersion: await releaseProvider.readWorkerVersion(input.workerName, id),
-              recoveryVersionId: id, recoveryVersionTag: tag,
-            });
-          }
-          await assertUploadSource(stageSourceVersionId);
-        }
+        const recoveredRollback = await verifyRecoverySources({
+          currentVersion, currentVersionId, currentDeploymentCreatedOn: current!.created_on,
+          sources: await Promise.all(recovery.map(async source => ({ ...source, version: await releaseProvider.readWorkerVersion(input.workerName, source.id) }))),
+          assertRollbackHistory: () => releaseProvider.assertRollbackHistory(input.workerName, currentVersionId, recovery.map(({ id }) => id)),
+        });
+        if (recovery.length) await assertUploadSource(stageSourceVersionId);
         const preparedConfigPath = await prepareHostedContainerDeployImage({
           accountId: requireConfiguredString(env.CLOUDFLARE_ACCOUNT_ID, "CLOUDFLARE_ACCOUNT_ID"),
           configPath: input.configPath,
@@ -127,7 +124,7 @@ export async function runDeployWorkerVersionCli(
         await applyHostedTransientLifecycleRules({ deployRoot, source: env });
         const staged = await stageHostedRunnerRelease({
           configPath: preparedConfigPath,
-          currentVersion, releaseSha, retainServingRunner, immediate,
+          currentVersion, releaseSha, retainServingRunner, immediate, requireStableServingImage: recoveredRollback,
           currentVersionId,
           listApplications: containerProvider.listApplications,
         });
@@ -147,11 +144,14 @@ export async function runDeployWorkerVersionCli(
           let versionId = parseWranglerWorkerVersionId(`${output.stdout}\n${output.stderr}`);
           await waitForUploadHistory(before, versionId, () => readHistory(expectedSourceVersionId));
           let version = await releaseProvider.readWorkerVersion(input.workerName, versionId);
-          if (hasRetiredInferenceSecrets(version, versionId)) {
+          const retainedSecrets = recoveredRollback && expectedSourceVersionId === stageSourceVersionId
+            ? await readRollbackSecretSources(currentVersion, currentVersionId, input.secretsFilePath) : undefined;
+          if (hasRetiredInferenceSecrets(version, versionId) || retainedSecrets) {
             const beforePatch = await releaseProvider.readRecentWorkerVersionIds(input.workerName);
             if (beforePatch[0] !== versionId) throw new Error("Worker version changed before secret retirement; no patch attempted.");
             const patchedId = await releaseProvider.removeRetiredInferenceSecrets({
               workerName: input.workerName, versionMessage: input.deploymentMessage, versionTag: input.versionTag,
+              ...(retainedSecrets ? { retainedSecrets } : {}),
             });
             const afterPatch = await releaseProvider.readRecentWorkerVersionIds(input.workerName);
             if (patchedId === versionId || afterPatch.length !== 2 || afterPatch[0] !== patchedId || afterPatch[1] !== versionId) {

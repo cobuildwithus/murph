@@ -135,6 +135,15 @@ export function createRunnerReleaseProvider(input: {
       const response = await request("Read Worker version", `/workers/scripts/${encodeURIComponent(workerName)}/versions/${encodeURIComponent(versionId)}`);
       return response.result;
     },
+    async assertRollbackHistory(workerName: string, liveId: string, rejectedIds: string[]): Promise<void> {
+      const response = await request("Read rollback deployments", `/workers/scripts/${encodeURIComponent(workerName)}/deployments`);
+      const deployments = isObjectRecord(response.result) ? response.result.deployments : null;
+      const expected = [liveId, ...rejectedIds, liveId];
+      if (!Array.isArray(deployments) || !expected.every((id, index) => {
+        const versions = deployments[index]?.versions;
+        return Array.isArray(versions) && versions.length === 1 && versions[0]?.percentage === 100 && versions[0]?.version_id === id;
+      })) throw unavailable("Rollback does not follow the exact staged Worker deployments.");
+    },
     async readRecentWorkerVersionIds(workerName: string, limit: 2 | 3 = 2): Promise<string[]> {
       const response = await request("Read recent Worker versions",
         `/workers/scripts/${encodeURIComponent(workerName)}/versions?per_page=${limit}`, "GET", undefined, [workerName]);
@@ -149,10 +158,10 @@ export function createRunnerReleaseProvider(input: {
       }
       return [...ids];
     },
-    async removeRetiredInferenceSecrets(input: { workerName: string; versionMessage: string; versionTag: string }): Promise<string> {
+    async removeRetiredInferenceSecrets(input: { workerName: string; versionMessage: string; versionTag: string; retainedSecrets?: Readonly<Record<string, { type: "inherit"; version_id: string }>> }): Promise<string> {
       const response = await request("Retire inference secrets",
         `/workers/workers/${encodeURIComponent(input.workerName)}/versions/latest`, "PATCH", {
-          env: Object.fromEntries(RETIRED_WORKER_SECRET_NAMES.map(name => [name, null])),
+          env: { ...input.retainedSecrets, ...Object.fromEntries(RETIRED_WORKER_SECRET_NAMES.map(name => [name, null])) },
           annotations: { "workers/message": input.versionMessage, "workers/tag": input.versionTag },
         }, [input.workerName, input.versionMessage, input.versionTag], "application/merge-patch+json");
       const version = response.result;
