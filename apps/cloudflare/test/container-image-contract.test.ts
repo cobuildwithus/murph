@@ -198,6 +198,12 @@ describe("hosted runner container image contract", () => {
       if (typeof expected.model_messages === "object" && expected.model_messages !== null) {
         Reflect.deleteProperty(expected.model_messages, "collaboration_modes");
       }
+      if (slug === "gpt-6.2-sol" || slug === "gpt-6.2-astra") {
+        const tools = expected.experimental_supported_tools;
+        if (!Array.isArray(tools)) throw new Error("Launch catalog is missing experimental tools.");
+        expected.experimental_supported_tools = tools.filter(tool => tool !== "literature_search_query");
+        expect(readCodexModel(productCatalog, slug).experimental_supported_tools).not.toContain("literature_search_query");
+      }
       expect(readCodexModel(productCatalog, slug)).not.toHaveProperty("model_messages.collaboration_modes");
       expect(readCodexModel(productCatalog, slug)).toMatchObject({
         ...expected,

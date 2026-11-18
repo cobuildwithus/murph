@@ -1792,7 +1792,9 @@ full product-model catalog; missing authority fails closed.
 The standard runner catalog contains GPT-6.1 Terra, GPT-6.2 Sol, GPT-6 Luna
 and GPT-5.6 Luna. Codex 0.169.0 bundles Terra and Luna. The pinned
 `apps/cloudflare/codex-model-catalog.6.2.json` supplies the official refreshed
-Sol and Astra entries. The image validates its exact model set and keeps Sol
+Sol and Astra entries. The image omits their experimental literature-search
+command so Codex generates the standalone `web.run` schema accepted by the
+provider. Standard web search remains available. The image validates its exact model set and keeps Sol
 and Astra at 272K context for turn-level usage accounting. Terra retains 500K.
 Web separately derives Astra authority from the canonical available models
 and managed OpenAI provider; only an explicitly authorized workspace selects the
