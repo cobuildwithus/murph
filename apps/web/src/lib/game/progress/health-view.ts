@@ -59,7 +59,7 @@ export function healthMetricView(metric: HealthMetricInput, joinedOn: string, to
   }
   return { id: metric.id, label: labels[metric.id], unit: units[metric.id],
     access: metric.daily.length ? "ok" : "missing", direction,
-    headline: healthHeadline(metric.id, change),
+    ...healthHeadlines(metric.id, change, daily, today),
     daily, baseline: metric.baseline === null ? null : healthAmount(metric.id, metric.baseline),
     wins: metric.wins.map(award => {
       const amount = award.data.amount as number;
@@ -90,9 +90,30 @@ export function savedHealthView(joinedOn: string, today: string, metrics: Health
     }) };
 }
 
+/** Sleep leads with your usual night and says its change since joining under it; the rest lead with the change. */
+function healthHeadlines(metric: HealthMetric["id"], change: number | null, daily: HealthMetric["daily"],
+  today: string): Pick<HealthMetric, "headline" | "change"> {
+  const night = metric === "sleep" ? usualNight(daily, today) : null;
+  if (night === null) return { headline: healthHeadline(metric, change), change: null };
+  return { headline: `${healthAmount(metric, night).text}m a night`,
+    change: change === null ? null : `${change === 0 ? "No change" : healthChange(metric, change)} since joining` };
+}
+
 function healthHeadline(metric: HealthMetric["id"], change: number | null): string {
-  return change === null ? "Not enough data yet" : change === 0 ? "No change yet"
-    : `${change > 0 ? "Up" : "Down"} ${healthAmountText(metric, Math.abs(change), true)}`;
+  return change === null ? "Not enough data yet" : change === 0 ? "No change yet" : healthChange(metric, change);
+}
+
+function healthChange(metric: HealthMetric["id"], change: number): string {
+  return `${change > 0 ? "Up" : "Down"} ${healthAmountText(metric, Math.abs(change), true)}`;
+}
+
+/** The 7 days to the latest night, as the chart's average line ends; none without a night in the last 7. */
+function usualNight(daily: HealthMetric["daily"], today: string): number | null {
+  const nights = daily.flatMap(([day, value]) => value === null ? [] : [{ day, value }]);
+  const latest = nights.at(-1)?.day;
+  if (latest === undefined || latest < addDaysToIsoDate(today, -6)) return null;
+  const week = nights.filter(night => night.day >= addDaysToIsoDate(latest, -6));
+  return week.reduce((sum, night) => sum + night.value, 0) / week.length;
 }
 
 function healthAgeView(metric: HealthMetric["id"], baseline: number | null, current: number | null,

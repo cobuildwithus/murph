@@ -12,6 +12,7 @@
       "access": "ok",
       "direction": "better",
       "headline": "Down 2 bpm",
+      "change": null,
       "daily": [
         [
           "2026-09-23",
@@ -312,7 +313,8 @@
       "unit": "seconds",
       "access": "ok",
       "direction": "worse",
-      "headline": "Down 10 min",
+      "headline": "6h 56m a night",
+      "change": "Down 10 min since joining",
       "daily": [
         [
           "2026-09-23",
@@ -552,6 +554,7 @@
       "access": "ok",
       "direction": "better",
       "headline": "Up 1,400 a day",
+      "change": null,
       "daily": [
         [
           "2026-09-23",

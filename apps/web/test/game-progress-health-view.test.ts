@@ -34,7 +34,7 @@ it("a worse reading preserves the earned win and points to the next unearned lev
 it("renders seconds once and gives sleep no age comparison", () => {
   const result = healthMetricView({ ...metric, id: "sleep", baseline: 28800, step: 900, direction: 1,
     daily: metric.daily.map(point => ({ ...point, value: 25200 })) }, joinedOn, today, profile);
-  expect(result.headline).toBe("Down 60 min");
+  expect(result).toMatchObject({ headline: "7h 00m a night", change: "Down 60 min since joining", direction: "worse" });
   expect(result.baseline).toEqual({ value: 28800, text: "8h 00", unit: "seconds" });
   expect(result.age).toBeNull();
   expect(result.next).toMatchObject({ detail: "Back to 8h 15", face: { delta: { icon: "sleep", text: "+15m" } } });
@@ -54,6 +54,38 @@ it.each([
 
 it.each([[1400, "+1,400"], [2000, "+2,000"], [12000, "+12k"]])("formats a %s Steps face through D20", (amount, text) => {
   expect(healthMedalFace("steps", amount)).toEqual({ delta: { icon: "steps", text } });
+});
+
+const sleep = { ...metric, id: "sleep" as const, baseline: 25620, step: 900, direction: 1 };
+const nights = (values: number[], last = today) => values.map((value, index) =>
+  ({ ...metric.daily[0], date: addDaysToIsoDate(last, index - values.length + 1), value }));
+
+it("leads sleep with the last 7 nights' average and puts the change since joining under it", () => {
+  const result = healthMetricView({ ...sleep, daily: nights([...Array(7).fill(28320), 27720, 28920, 27720, 28920, 28320, 28320, 28320]) },
+    joinedOn, today, profile);
+  expect(result).toMatchObject({ headline: "7h 52m a night", change: "Up 45 min since joining", direction: "better" });
+  expect(healthMetricView({ ...sleep, daily: nights(Array(14).fill(25620)) }, joinedOn, today, profile))
+    .toMatchObject({ headline: "7h 07m a night", change: "No change since joining", direction: "flat" });
+});
+
+it("shows sleep's hours without a change line before there is a baseline", () => {
+  const result = healthMetricView({ ...sleep, baseline: null, daily: nights(Array(14).fill(28320)) }, joinedOn, today, profile);
+  expect(result).toMatchObject({ headline: "7h 52m a night", change: null, next: null });
+});
+
+it("averages the 7 days to the latest night, where the chart's average line ends", () => {
+  // Last night isn't in yet: the line ends yesterday and reaches back to the 8th day ago.
+  const daily = nights([21600, ...Array(6).fill(28800)], addDaysToIsoDate(today, -1));
+  expect(healthMetricView({ ...sleep, daily }, joinedOn, today, profile).headline).toBe("7h 43m a night");
+  const old = healthMetricView({ ...sleep, daily: nights([28800], addDaysToIsoDate(today, -7)) }, joinedOn, today, profile);
+  expect(old).toMatchObject({ headline: "Not enough data yet", change: null });
+});
+
+it("keeps resting HR and steps headlines as the change, with no line under them", () => {
+  expect(healthMetricView(metric, joinedOn, today, profile)).toMatchObject({ headline: "Down 1 bpm", change: null });
+  expect(healthMetricView({ ...metric, id: "steps", baseline: 6000, step: 1000, direction: 1,
+    daily: metric.daily.map(point => ({ ...point, value: 8000 })) }, joinedOn, today, profile))
+    .toMatchObject({ headline: "Up 2,000 a day", change: null });
 });
 
 it.each([
