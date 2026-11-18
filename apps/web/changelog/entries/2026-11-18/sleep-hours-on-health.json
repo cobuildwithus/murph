@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-18",
+  "order": 100,
+  "item": {
+    "id": "sleep-hours-on-health",
+    "kind": "feature",
+    "priority": 3,
+    "title": "See how long you sleep on Health",
+    "summary": "Health in Progress has a Sleep page again, and it leads with your usual night, like 7h 52m a night, with how much that's changed since you joined right under it.",
+    "details": "The number is your average over your last 7 nights, the same place the chart's line ends. Hours slept still stay off Totals and medals. Coming with the next app update.",
+    "relevanceTags": ["progress", "wearables"],
+    "sourcePullRequests": [5181]
+  }
+}
