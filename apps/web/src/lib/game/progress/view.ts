@@ -43,7 +43,8 @@ export function medalView(award: StoredAward, gold: boolean, units: ClientUnits,
     const rung = rungFor(award.data.rung as RungDefinition, 0, award.on, units);
     face = rung.drawing === null ? { generic: true } : { drawing: rung.drawing };
     title = rung.name;
-    detail = award.kind === "time" ? rung.atText : `${formatNumber(Math.ceil(rung.at), "compact")} ${award.data.noun}`;
+    // Both name their exercise: a pushups landmark and a pull-ups one can be the same tower.
+    detail = award.kind === "time" ? `${rung.atText} ${award.data.noun}` : `${formatNumber(Math.ceil(rung.at), "compact")} ${award.data.noun}`;
   } else if (award.kind === "total" || award.kind === "days") {
     const value = award.data.value as number, unit = award.data.unit as MeasureSeries["unit"];
     const amount = formatAmount(value, unit, "compact", units);
