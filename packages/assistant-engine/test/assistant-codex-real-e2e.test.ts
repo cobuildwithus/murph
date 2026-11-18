@@ -602,6 +602,30 @@ describeRealCodex('assistant token efficiency reminder routing', () => {
   }, 480_000)
 })
 
+describeRealCodex('hosted web tool admission', () => {
+  it('answers an ordinary foreground message with the hosted web schema enabled', async () => {
+    const config = await resolveRealCodexE2eConfig()
+    const fixture = await createCanonicalLiveFixture(config, 'linq', { capabilities: 'production-hosted' })
+    try {
+      fixture.env.MURPH_HOSTED_CODEX_MODEL_CATALOG_JSON = await writeHostedOpenAiMixedModeModelCatalogJson({
+        codexCommand: normalizeEnvString(process.env.MURPH_REAL_CODEX_COMMAND) ?? 'codex',
+        directory: fixture.root,
+        astraAllowed: config.model === 'gpt-6.2-astra',
+      })
+      const before = await listCanonicalWriteEvidence(fixture.vault)
+      const { response } = await fixture.message('What is the total of 17 and 14? Answer with just the number.', {
+        deliverResponse: false,
+      })
+      expect(response.trim()).toMatch(/^31[.!]?$/u)
+      expect(await listCanonicalWriteEvidence(fixture.vault)).toEqual(before)
+      process.stdout.write(`[hosted-web-tool-admission] ${JSON.stringify({ model: config.model, reply: response })}\n`)
+    } finally {
+      await fixture.close()
+      await removeRealCodexTemporaryPaths(config.temporaryPaths)
+    }
+  }, 180_000)
+})
+
 describeRealCodex('assistant workout timing correction', () => {
   it('duration correction keeps a manually calculated end time consistent without duplicating the workout', async () => {
     const config = await resolveRealCodexE2eConfig()

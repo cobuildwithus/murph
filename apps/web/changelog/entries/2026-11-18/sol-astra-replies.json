@@ -1,0 +1,15 @@
+{
+  "publishedOn": "2026-11-18",
+  "order": 100,
+  "item": {
+    "id": "sol-astra-replies",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Sol and Astra reply again",
+    "summary": "Fixed a problem that could leave a message unanswered in chats using GPT-6.2 Sol or Astra.",
+    "relevanceTags": [
+      "assistant"
+    ],
+    "sourcePullRequests": []
+  }
+}
