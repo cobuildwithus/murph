@@ -3,6 +3,7 @@ import { RequestInputError } from "@murphai/hosted-execution/request-input";
 import { requireGameMemberAuth, assertGameMemberAuthCurrentTx } from "@/src/lib/game/http/auth";
 import { invalidGameRequest } from "@/src/lib/game/http/errors";
 import { parseSetMeasureBody } from "@/src/lib/game/progress/contract";
+import { setStepsMeasure } from "@/src/lib/game/progress/health-reader";
 import { setMeasure } from "@/src/lib/game/progress/goals";
 import { readProgress } from "@/src/lib/game/progress/view";
 import { resolveDecodedRouteParam } from "@/src/lib/http";
@@ -21,6 +22,7 @@ export const PUT = withProgressJsonError(async (request: Request, context: { par
   const body = parseSetMeasureBody(raw);
   const beforeMutationTx = (tx: Parameters<typeof assertGameMemberAuthCurrentTx>[1]) => assertGameMemberAuthCurrentTx(auth, tx);
   return progressEffect(async () => {
+    if (id === "steps") return jsonOk({ ok: true, measure: await setStepsMeasure(auth, request.signal, body, units) });
     const measureId = await setMeasure(auth.member.id, id, body, beforeMutationTx);
     const view = await readProgress(auth.member.id, units, beforeMutationTx);
     return jsonOk({ ok: true, measure: view.measures.find(measure => measure.id === measureId)! });

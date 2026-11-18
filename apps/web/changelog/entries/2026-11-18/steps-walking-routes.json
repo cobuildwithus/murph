@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-18",
+  "order": 200,
+  "item": {
+    "id": "steps-walking-routes",
+    "kind": "feature",
+    "priority": 3,
+    "title": "Choose where your steps take you",
+    "summary": "Open Steps in Totals to see how far you’ve walked and pick a route, including a lap of Iceland’s Ring Road.",
+    "details": "Murph estimates distance from your recorded steps. When you finish a route and start another, your walking total carries over.",
+    "relevanceTags": ["progress", "steps"],
+    "sourcePullRequests": []
+  }
+}

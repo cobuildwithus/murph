@@ -778,6 +778,7 @@
         "name": "New York to Los Angeles",
         "distanceText": "2,794 mi",
         "walkedText": "1,360 mi",
+        "totalText": "1,861 mi",
         "progress": 0.4867573371510379,
         "straightLine": false,
         "finishedOn": null,

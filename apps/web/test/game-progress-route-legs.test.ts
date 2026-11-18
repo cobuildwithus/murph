@@ -28,7 +28,7 @@ describe('Progress route legs', () => {
     const route = { ...leg, distanceM, towns: [{ name: 'B', atM: distanceM }], polyline: encodePolyline([[0, 50], [2, 49]]) };
     const points: [string, number][] = [['2026-11-01', distanceM]];
     const view = routeView('walk.meters', { legs: [route] }, points, [], 'us')!;
-    expect(view).toMatchObject({ distanceText, walkedText: text, map: '/api/game/v1/progress/map?measure=walk.meters&size=card' });
+    expect(view).toMatchObject({ distanceText, walkedText: text, totalText: text, map: '/api/game/v1/progress/map?measure=walk.meters&size=card' });
     for (const [size, towns] of [['card', view.towns], ['drawer', view.drawerTowns]] as const) {
       const { width, height } = MAP_SIZES[size];
       const geometry = decodePolyline(route.polyline);
@@ -55,6 +55,15 @@ describe('Progress route legs', () => {
     expect(awards.map(award => [award.key, award.on])).toEqual([[routeAwardKey('walk.meters', legs[0]!, 0), '2026-11-02'], [routeAwardKey('walk.meters', legs[1]!, 1), '2026-11-09']]);
     expect(routeLegs({ measureId: 'walk.meters', legs, points })).toEqual(awards);
     for (const award of awards) expect(medalSchema.safeParse(medalView({ ...award, id: 'award', createdAt: new Date(), seenAt: null }, false, 'us')).success).toBe(true);
+  });
+  it('keeps the loop name on its medal and in completed routes after a new pick', () => {
+    const loop = { ...leg, name: 'Around Iceland', from: 'Reykjavík, Iceland', to: 'Reykjavík, Iceland' };
+    const points: [string, number][] = [['2026-11-02', 100]];
+    const [candidate] = routeLegs({ measureId: 'walk.meters', legs: [loop], points });
+    const award = { ...candidate, id: 'award', createdAt: new Date(), seenAt: null };
+    expect(medalView(award, false, 'us').title).toBe('Around Iceland');
+    const view = routeView('walk.meters', { legs: [loop, { ...next, startTotal: 100 }] }, points, [award], 'us');
+    expect(view?.completed).toEqual([{ name: 'Around Iceland', finishedOn: '2026-11-02', shareAwardId: 'award' }]);
   });
   it('does not transfer an old goal award to a replacement in the same leg slot', () => {
     const award = routeLegs({ measureId: 'walk.meters', legs: [leg], points: [['2026-11-02', 100]] })[0]!;

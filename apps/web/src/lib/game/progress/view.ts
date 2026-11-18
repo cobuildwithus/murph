@@ -12,6 +12,7 @@ import { measureLadder, measureRungs, projection, roundValues, rungFor } from ".
 import { formatAmount, formatNumber } from "./format";
 import { cumulativePoints, readGameSeries, scheduleInference, type MeasureSeries } from "./series";
 import type { BeforeProgressMutation, MeasureState } from "./state";
+import { routeAwardName } from "./route-progress";
 import { BANK, type RungDefinition } from "./bank";
 import type { ClientUnits } from "../../companion/client-info";
 import { firstRouteId, routePlaces, routeView, setFirstRoute } from "./routes";
@@ -55,7 +56,7 @@ export function medalView(award: StoredAward, gold: boolean, units: ClientUnits,
       : unit === "days" ? `${amount.text} days` : amount.text;
     detail = award.data.noun as string;
   } else if (award.kind === "route") {
-    face = { drawing: "route" }; title = award.data.to as string;
+    face = { drawing: "route" }; title = routeAwardName(award, award.data.to as string);
     detail = `${formatAmount(award.data.distanceM as number, "meters", "full", units).text} from ${award.data.from}`;
   } else {
     face = award.data.face as Medal["face"];

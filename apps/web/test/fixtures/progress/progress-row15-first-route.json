@@ -31,6 +31,7 @@
         "name": "Austin to San Antonio",
         "distanceText": "80 mi",
         "walkedText": "3 mi",
+        "totalText": "3 mi",
         "progress": 0.0375,
         "straightLine": false,
         "finishedOn": null,

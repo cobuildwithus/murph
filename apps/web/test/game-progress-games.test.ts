@@ -123,13 +123,13 @@ describe("credited game dates", () => {
 
 describe("checked ladders and permanent crossings", () => {
   it("uses only checked entries, exactly the curated ladders and lets search find non-ladder goals", () => {
-    expect(BANK).toHaveLength(504);
+    expect(BANK).toHaveLength(505);
     expect(ladder("height", "")).toHaveLength(70);
     expect(ladder("time", "plank")).toHaveLength(30);
     expect(ladder("time", "sleep")).toHaveLength(30);
     expect(ladder("time", "sleep").some(entry => entry.id === "plank-record")).toBe(false);
     expect(search("half dome").map(entry => entry.id)).toContain("half-dome");
-    expect(BANK.some(entry => entry.name.includes("Iceland"))).toBe(false);
+    expect(search("Iceland")).toMatchObject([{ id: "around-iceland", kind: "route", name: "Around Iceland", at: 1322000 }]);
   });
   it("dates every crossed rung and round to the crossing day, then keeps passes after a correction", () => {
     const source = game("big", task("1400 pushups", { quantity: 1400, unit: "reps", name: "pushups" }));

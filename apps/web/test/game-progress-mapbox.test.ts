@@ -45,6 +45,18 @@ describe('Progress Mapbox boundary', () => {
     expect(urls[0]!.searchParams.get('permanent')).toBe('true');
     expect(JSON.stringify(result)).not.toContain('synthetic-token');
   });
+  it('routes the Iceland loop through ordered waypoints and uses the checked length for its towns', async () => {
+    respond('Ok');
+    const name = 'Reykjavík, Iceland';
+    const route = await resolveRoute(name, name);
+    expect(route).toMatchObject({ name: 'Around Iceland', distanceM: 1322000, straightLine: false, polyline });
+    const urls = mockFetch.mock.calls.map(call => call[0] as URL);
+    expect(urls.filter(url => url.pathname.endsWith('/forward'))).toHaveLength(1);
+    const stops = urls[1]!.pathname.split('/').at(-1)!.split(';');
+    expect(stops).toEqual([stops[0], '-18.09,65.68', '-14.4,65.26', '-14.22,65.03', '-15.21,64.27', '-19.01,63.42', stops[0]]);
+    respond('NoRoute');
+    await expect(resolveRoute(name, name)).rejects.toMatchObject({ httpStatus: 503, retryable: true });
+  });
   it('uses great-circle geometry only for explicit NoRoute', async () => {
     respond('NoRoute');
     const result = await resolveRoute('Start', 'End');

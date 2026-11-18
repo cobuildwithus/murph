@@ -150,7 +150,7 @@ describe("Progress HTTP contracts", () => {
     const response = await goals(request("/goals?measure=walk.meters&q=London%20to%20Paris"));
     const view = goalsSchema.parse(await response.json());
     expect(view.route).toMatchObject({ from: "London", to: "Paris", straightLine: false });
-    expect(view.tiles.every(tile => tile.name.split(" to ").length === 2)).toBe(true);
+    expect(view.tiles.every(tile => tile.id === "around-iceland" || tile.name.split(" to ").length === 2)).toBe(true);
     expect(view.tiles.some(tile => ["to-the-moon", "5k"].includes(tile.id))).toBe(false);
     expect(mocks.patch).not.toHaveBeenCalled(); expect(mocks.suggest).not.toHaveBeenCalled();
   });

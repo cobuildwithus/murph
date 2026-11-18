@@ -37,7 +37,7 @@ describe('Progress route goal mutation', () => {
   it('rolls over the state observed after Mapbox, preserving completed legs and other fields', async () => {
     const previous = JSON.stringify({ legs: [leg], baseline: { value: 10, from: '2026-10-01', to: '2026-10-28' } });
     mocks.resolve.mockImplementation(async () => { mocks.find.mockResolvedValue({ stateEncrypted: previous }); return next; });
-    const result = await setRouteGoal('owner', 'walk.meters', 'B', 'C', context());
+    const result = await setRouteGoal('owner', 'walk.meters', { from: 'B', to: 'C' }, context());
     expect(result).toEqual({ goal: { route: { from: 'B', to: 'C' } }, baseline: { value: 10, from: '2026-10-01', to: '2026-10-28' },
       legs: [leg, { ...next, startTotal: 120 }] });
     expect(mocks.write).toHaveBeenCalledWith({ where: { memberId: 'owner', lookup: 'lookup', stateEncrypted: previous }, data: { stateEncrypted: 'sealed-next' } });
@@ -46,18 +46,18 @@ describe('Progress route goal mutation', () => {
   });
   it('keeps an awarded completion when the canonical total shrinks', async () => {
     mocks.find.mockResolvedValue({ stateEncrypted: JSON.stringify({ legs: [leg] }) });
-    const result = await setRouteGoal('owner', 'walk.meters', 'B', 'C', { ...context(), points: [['2026-11-03', 80]],
+    const result = await setRouteGoal('owner', 'walk.meters', { from: 'B', to: 'C' }, { ...context(), points: [['2026-11-03', 80]],
       awards: [{ key: routeAwardKey('walk.meters', leg, 0), kind: 'route', measureId: 'walk.meters', subjectMemberId: null,
         on: '2026-11-02', data: {}, id: 'award', createdAt: new Date('2026-11-02'), seenAt: null }] });
     expect(result.legs).toEqual([leg, { ...next, startTotal: 80 }]);
   });
   it('returns a conflict once if another writer changes the observed ciphertext', async () => {
     mocks.find.mockResolvedValue({ stateEncrypted: '{}' }); mocks.write.mockResolvedValue({ count: 0 });
-    await expect(setRouteGoal('owner', 'walk.meters', 'B', 'C', context())).rejects.toMatchObject({ code: 'GAME_PROGRESS_STATE_CONFLICT', retryable: true });
+    await expect(setRouteGoal('owner', 'walk.meters', { from: 'B', to: 'C' }, context())).rejects.toMatchObject({ code: 'GAME_PROGRESS_STATE_CONFLICT', retryable: true });
     expect(mocks.write).toHaveBeenCalledTimes(1); expect(mocks.resolve).toHaveBeenCalledTimes(1);
   });
   it('does not freeze a rollover from an incomplete input', async () => {
-    await expect(setRouteGoal('owner', 'walk.meters', 'B', 'C', { ...context(), incomplete: true })).rejects.toMatchObject({ httpStatus: 503, retryable: true });
+    await expect(setRouteGoal('owner', 'walk.meters', { from: 'B', to: 'C' }, { ...context(), incomplete: true })).rejects.toMatchObject({ httpStatus: 503, retryable: true });
     expect(mocks.resolve).not.toHaveBeenCalled(); expect(mocks.write).not.toHaveBeenCalled();
   });
   it.each([

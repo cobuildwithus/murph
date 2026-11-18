@@ -12,6 +12,12 @@ import type { HealthMetricInput } from "./health-view";
 import type { StoredAward } from "./awards";
 import { formatNumber } from "./format";
 
+export function healthJourneyMeasure(id: "steps" | "sleep", amounts: MeasureSeries["amounts"], awards: readonly StoredAward[]): MeasureSeries | null {
+  if (amounts.length === 0 && !awards.some(award => award.measureId === id && ["total", "time", "route"].includes(award.kind))) return null;
+  return { id, name: id, label: id === "steps" ? "Steps" : "Sleep", noun: id === "steps" ? "steps" : "slept",
+    icon: id, unit: id === "steps" ? "steps" : "seconds", ftPerRep: 1, pending: false, gameOn: false, needsPerDay: false, amounts };
+}
+
 /** The shared ladder and route owners consume the same retained health amounts. */
 export async function healthJourneys(input: {
   memberId: string; metrics: HealthMetricInput[]; states: Map<string, MeasureState>; awards: readonly StoredAward[];
@@ -20,12 +26,7 @@ export async function healthJourneys(input: {
   const measures: MeasureSeries[] = input.metrics.flatMap(metric => {
     if (metric.id !== "steps" && metric.id !== "sleep") return [];
     const amounts = healthSums(metric.id, metric.daily, input.joinedOn, input.today);
-    if (amounts.length === 0 && !input.awards.some(award => award.measureId === metric.id
-      && ["total", "time", "route"].includes(award.kind))) return [];
-    return [{ id: metric.id, name: metric.id, label: metric.id === "steps" ? "Steps" : "Sleep",
-      noun: metric.id === "steps" ? "steps" : "slept", icon: metric.id,
-      unit: metric.id === "steps" ? "steps" : "seconds", ftPerRep: 1,
-      pending: false, gameOn: false, needsPerDay: false, amounts }];
+    return healthJourneyMeasure(metric.id, amounts, input.awards) ?? [];
   });
   if (measures.some(measure => measure.id === "steps") && !input.states.get("steps")?.legs?.length) {
     const route = BANK.find(entry => entry.id === firstRouteId(input.timeZone))!;
@@ -43,13 +44,13 @@ export async function healthJourneys(input: {
 }
 
 export function healthJourneyViews(journeys: Awaited<ReturnType<typeof healthJourneys>>, awards: StoredAward[], today: string, units: ClientUnits) {
-  return journeys.measures.map(measure => {
-    const state = journeys.states.get(measure.id) ?? {};
-    const view = measureView(measure, state, awards, today, units);
-    if (view.route && measure.id === "steps") view.route.walkedText = `about ${view.route.walkedText}`;
-    return { ...view, source: "wearable" as const,
-      total: measure.id === "sleep" && view.total.value >= 86400
-        ? { ...view.total, text: `${formatNumber(view.total.value / 86400, "full", 1)} days` }
-        : view.total };
-  });
+  return journeys.measures.map(measure => healthJourneyView(measure, journeys.states.get(measure.id) ?? {}, awards, today, units));
+}
+
+export function healthJourneyView(measure: MeasureSeries, state: MeasureState, awards: StoredAward[], today: string, units: ClientUnits) {
+  const view = measureView(measure, state, awards, today, units);
+  return { ...view, source: "wearable" as const,
+    total: measure.id === "sleep" && view.total.value >= 86400
+      ? { ...view.total, text: `${formatNumber(view.total.value / 86400, "full", 1)} days` }
+      : view.total };
 }

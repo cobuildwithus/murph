@@ -12,8 +12,8 @@ import { lastSettledStepDay } from "../../settled-step-day";
 import { getPrisma } from "../../prisma";
 import { hostedOnboardingError, isHostedOnboardingError } from "../../hosted-onboarding/errors";
 import { assertGameMemberAuthCurrentTx } from "../http/auth";
-import { gameHttpError, gameNotFound } from "../http/errors";
-import type { HealthMetric } from "./contract";
+import { gameHttpError, gameNotFound, invalidGameRequest } from "../http/errors";
+import type { GoalsQuery, HealthMetric, SetMeasureBody } from "./contract";
 import { openProgress, openProgressMany, progressLookup } from "./crypto";
 import { readAwards, settleAwards } from "./awards";
 import { patchMeasureState, type MeasureState, type BeforeProgressMutation } from "./state";
@@ -22,9 +22,9 @@ import type { CompanionHealthSeries, RawHealthPoint } from "../../device-sync/co
 import type { AgeProfile } from "./norms";
 import { healthAgeShare, healthBaseline, healthMeans, healthSteps, healthSums, progressHealthDays } from "./health";
 import { cumulativePoints } from "./series";
-import { routeView } from "./routes";
+import { readRouteGoals, routeLegs, routeProgressIncomplete, routeView, setRouteGoal } from "./routes";
 import { healthView, savedHealthView, type HealthMetricInput } from "./health-view";
-import { healthJourneys, healthJourneyViews } from "./health-journeys";
+import { healthJourneyMeasure, healthJourneys, healthJourneyView, healthJourneyViews } from "./health-journeys";
 
 const metricIds = Object.keys(HEALTH) as HealthMetric["id"][];
 
@@ -50,21 +50,65 @@ async function readSavedHealth(auth: HostedNativeMemberAuth, joinedOn: string, t
   return timing.measure("render", () => savedHealthView(joinedOn, today, metrics));
 }
 
+function healthAuthority(auth: HostedNativeMemberAuth): BeforeProgressMutation {
+  return async tx => {
+    await assertGameMemberAuthCurrentTx(auth, tx);
+    await assertBrowserVaultMemberAuthority({ memberId: auth.member.id, prisma: tx });
+  };
+}
+
+async function readStepsAmounts(auth: HostedNativeMemberAuth, signal: AbortSignal) {
+  const snapshot = await readCompanionHealthSeries(auth, signal, ["steps"]);
+  const profile = await getPrisma().gameProfile.findUnique({ where: { memberId: auth.member.id }, select: { createdAt: true, timeZone: true } });
+  if (!profile) throw gameNotFound();
+  const { timeZone } = profile;
+  const joinedOn = toLocalDayKey(profile.createdAt, timeZone), today = toLocalDayKey(new Date(), timeZone);
+  const inRange = healthValueRange("steps");
+  const daily = snapshot?.numbers.steps?.daily.filter(point => inRange(point.value)) ?? [];
+  return { amounts: snapshot ? healthSums("steps", daily, joinedOn, today) : null, today, timeZone };
+}
+
 /** The map consumes the same settled daily Steps and join-date window as Health. */
 export async function readProgressStepsRoute(auth: HostedNativeMemberAuth, signal: AbortSignal) {
   const db = getPrisma(), memberId = auth.member.id;
-  const snapshot = await readCompanionHealthSeries(auth, signal, ["steps"]);
-  const profile = await db.gameProfile.findUnique({ where: { memberId }, select: { createdAt: true, timeZone: true } });
+  const { amounts } = await readStepsAmounts(auth, signal);
   const lookup = progressLookup(memberId, "measure", ["steps"]);
   const row = await db.gameProgressMeasure.findUnique({ where: { memberId_lookup: { memberId, lookup } }, select: { stateEncrypted: true } });
-  if (!profile || !row) throw gameNotFound();
+  if (!row) throw gameNotFound();
   const state = await openProgress<MeasureState>({ memberId, table: "game_progress_measure", rowId: lookup, field: "state" }, row.stateEncrypted);
   const leg = state.legs?.at(-1);
   if (!leg) throw gameNotFound();
-  const joinedOn = toLocalDayKey(profile.createdAt, profile.timeZone), today = toLocalDayKey(new Date(), profile.timeZone);
-  const points = cumulativePoints(healthSums("steps", snapshot?.numbers.steps?.daily ?? [], joinedOn, today));
-  const route = routeView("steps", state, points, await readAwards(memberId), "us")!;
+  const route = routeView("steps", state, cumulativePoints(amounts ?? []), await readAwards(memberId), "us")!;
   return { polyline: leg.polyline, progress: route.progress };
+}
+
+async function readStepsMeasure(auth: HostedNativeMemberAuth, signal: AbortSignal, includeAwards: boolean) {
+  const { amounts, today, timeZone } = await readStepsAmounts(auth, signal);
+  if (amounts === null) throw routeProgressIncomplete();
+  // Typing a goal only needs awards when no observed days remain.
+  const awards = includeAwards || !amounts.length ? await readAwards(auth.member.id) : [];
+  const measure = healthJourneyMeasure("steps", amounts, awards);
+  if (!measure) throw gameNotFound();
+  return { measure, points: cumulativePoints(amounts), awards, today, timeZone };
+}
+
+export async function readStepsGoals(auth: HostedNativeMemberAuth, signal: AbortSignal, query: GoalsQuery, units: ClientUnits) {
+  const { points } = await readStepsMeasure(auth, signal, false);
+  const goals = await readRouteGoals(query.q, "steps", points.at(-1)?.[1] ?? 0, units);
+  await healthAuthority(auth)(getPrisma());
+  return goals;
+}
+
+export async function setStepsMeasure(auth: HostedNativeMemberAuth, signal: AbortSignal, body: SetMeasureBody, units: ClientUnits) {
+  if ("perDay" in body) throw invalidGameRequest("This measure already has an amount.");
+  const { measure, points, awards, today, timeZone } = await readStepsMeasure(auth, signal, true);
+  const beforeMutationTx = healthAuthority(auth), memberId = auth.member.id;
+  const state = await setRouteGoal(memberId, "steps", body.goal, { points, awards, incomplete: false, beforeMutationTx });
+  const candidates = routeLegs({ measureId: "steps", legs: state.legs!, points });
+  const inserted = await settleAwards(memberId, candidates, beforeMutationTx, { awards, timeZone });
+  const currentAwards = inserted ? await readAwards(memberId) : awards;
+  await beforeMutationTx(getPrisma());
+  return healthJourneyView(measure, state, currentAwards, today, units);
 }
 
 export async function readProgressHealth(auth: HostedNativeMemberAuth, signal: AbortSignal, units: ClientUnits, timing = new ProgressReadTiming()) {
@@ -152,10 +196,7 @@ async function settleProgressHealth(
   // Award comparisons stay in the join-date age bracket; a birthday is not an improvement.
   const awardProfile = { ...ageProfile, age: ageProfile.age === null ? null
     : ageProfile.age - Number(today.slice(0, 4)) + Number(joinedOn.slice(0, 4)) };
-  const beforeMutationTx: BeforeProgressMutation = async tx => {
-    await assertGameMemberAuthCurrentTx(auth, tx);
-    await assertBrowserVaultMemberAuthority({ memberId, prisma: tx });
-  };
+  const beforeMutationTx = healthAuthority(auth);
   const previousAwards = await timing.measure("awards", () => readAwards(memberId));
   const models: HealthMetricInput[] = [];
   const candidates: Candidate[] = [];
@@ -173,16 +214,20 @@ async function settleProgressHealth(
   return { models, journeys, ageProfile, previousAwards, attemptedInsert };
 }
 
+function healthValueRange(id: HealthMetric["id"]) {
+  const { minValue, maxValue } = HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_SPECS
+    .find(spec => spec.metricKey === COMPANION_HEALTH_METRICS[id].key)!;
+  const scale = id === "sleep" ? 60 : 1;
+  // Reuse the reporting owner's bounds for live readings and frozen baselines.
+  return (value: number) => value >= minValue * scale && value <= maxValue * scale;
+}
+
 async function freezeAndScoreMetric(input: {
   memberId: string; id: HealthMetric["id"]; daily: RawHealthPoint[]; joinedOn: string; profile: AgeProfile;
   state: MeasureState; beforeMutationTx: BeforeProgressMutation;
 }) {
   const { memberId, id, joinedOn, profile, beforeMutationTx } = input;
-  const { minValue, maxValue } = HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_SPECS
-    .find(spec => spec.metricKey === COMPANION_HEALTH_METRICS[id].key)!;
-  const scale = id === "sleep" ? 60 : 1;
-  // Reuse the reporting owner's bounds for live readings and frozen baselines.
-  const inRange = (value: number) => value >= minValue * scale && value <= maxValue * scale;
+  const inRange = healthValueRange(id);
   const daily = input.daily.filter(point => inRange(point.value));
   let state = input.state;
   const proposed = state.baseline?.value ?? healthBaseline(daily, joinedOn);
