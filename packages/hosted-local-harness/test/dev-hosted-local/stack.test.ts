@@ -1247,14 +1247,24 @@ describe("hosted local dev stack", () => {
 
     const { startHostedLocalDevStack } = await import("../../src/dev-hosted-local/stack.ts");
 
+    const stderrTarget = new CapturingWritable();
+    const workerHealth = Promise.withResolvers<void>();
+    waitForHealthyHttpEndpoint.mockImplementationOnce(() => workerHealth.promise);
     const stack = await startHostedLocalDevStack({
+      reportReadinessTimings: true,
+      stderrTarget,
       env: {
         ...process.env,
         MURPH_DEV_TEMPORAL_WORKER_PACKAGE_DIR:
           "../murph-cloud/packages/hosted-orchestrator-temporal",
       },
     });
+    expect(stderrTarget.text()).toMatch(/\[setup\] Temporal worker launched after \d+ms\./u);
+    await vi.waitFor(() => expect(stderrTarget.text()).toMatch(/\[setup\] Web health check passed after \d+ms\./u));
+    expect(stderrTarget.text()).not.toContain("Worker health check passed");
+    workerHealth.resolve();
     await stack.ready;
+    expect(stderrTarget.text()).toMatch(/\[setup\] Worker health check passed after \d+ms\./u);
     await stack.stop();
 
     expect(startHostedLocalTemporalRuntime).toHaveBeenCalledWith(expect.objectContaining({

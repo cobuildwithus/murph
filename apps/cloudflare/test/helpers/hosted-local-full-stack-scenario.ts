@@ -251,6 +251,7 @@ interface HostedLocalFullStackScenarioInput {
   reuseLocalDatabase?: boolean;
   scenarioLabel: string;
   seedEnvironment?: NodeJS.ProcessEnv;
+  reportReadinessTimings?: boolean;
   streamLogs?: boolean;
   testControls?: boolean;
   webProcessEnvOverrides?: NodeJS.ProcessEnv;
@@ -439,6 +440,7 @@ async function startHostedLocalFullStackScenarioAttempt(
       }),
       statusPath: (userId: string) => `/internal/users/${encodeURIComponent(userId)}/status`,
       streamLogs: input.streamLogs,
+      reportReadinessTimings: input.reportReadinessTimings,
       testControls,
       webProcessEnvOverrides: {
         ...buildHostedLocalFullStackHostProcessEnvOverrides(runtimeEnv),

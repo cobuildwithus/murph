@@ -163,6 +163,7 @@ export async function startHostedLocalDevHarness(input: {
   resetPersistDir?: boolean;
   statusHeaders?: (userId: string) => HeadersInit;
   statusPath?: (userId: string) => string;
+  reportReadinessTimings?: boolean;
   streamLogs?: boolean;
   testControls?: boolean;
   webProcessEnvOverrides?: NodeJS.ProcessEnv;
@@ -229,6 +230,7 @@ export async function startHostedLocalDevHarness(input: {
     stack = await startHostedLocalDevStack({
       env: runtimeEnv,
       pipeOutput: streamLogs,
+      reportReadinessTimings: input.reportReadinessTimings,
       ...(input.abortSignal ? { abortSignal: input.abortSignal } : {}),
       ...(input.webProcessEnvOverrides
         ? { webProcessEnvOverrides: input.webProcessEnvOverrides }

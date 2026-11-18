@@ -147,6 +147,8 @@ export interface HostedLocalE2eScenario {
    * process-scoped full-stack profiles from the same test file.
    */
   vitestProcessTestNamePatterns?: readonly [string, ...string[]];
+  /** Optional parallel partition for a scenario that normally runs unfiltered. */
+  vitestShardOnlyTestNamePatterns?: readonly [string, ...string[]];
   /**
    * Normal hosted E2E scenarios run the production Worker/Runner/UserRunner
    * graph. Set this only for deliberate fault-injection scenarios that need
@@ -155,6 +157,32 @@ export interface HostedLocalE2eScenario {
    */
   testControls?: boolean;
 }
+
+// Each first-contact journey seeds its own member. Keep the ordered steps
+// inside each journey together and balance the six fast-gate journeys 3 + 3.
+const linqDeliveryProcessShardPatterns = [
+  [
+    "derives stable numeric",
+    "extracts only the first retry_later",
+    "summarizes direct-wake",
+    "releases a blocked direct-wake",
+    "sends the first-contact",
+    "continues a real Web-model",
+    "sends a Linq reply",
+    "reconciles a lost rich-link",
+    "does not repeat the signup",
+    "hosted local Linq checkpoint replay",
+  ].join("|"),
+  [
+    "falls back to URL text",
+    "recovers a pre-accept rich-link",
+    "delivers model-authored progress",
+    "keeps Linq context",
+    "keeps replying when",
+    "hosted local Linq direct retry recovery",
+    "hosted local Linq stale scheduled wake",
+  ].join("|"),
+] as const;
 
 export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
   {
@@ -295,7 +323,7 @@ export const hostedLocalE2eScenarios: readonly HostedLocalE2eScenario[] = [
             "continues a real Web-model first turn through the hosted runtime",
           ],
         }
-      : {}),
+      : { vitestShardOnlyTestNamePatterns: linqDeliveryProcessShardPatterns }),
   },
   {
     file:
@@ -606,7 +634,7 @@ function selectHostedLocalE2eProcessShard(
   if (shard === undefined) return scenarios;
   const match = /^([1-9][0-9]*)\/([1-9][0-9]*)$/u.exec(shard);
   const scenario = scenarios[0];
-  const patterns = scenario?.vitestProcessTestNamePatterns;
+  const patterns = scenario?.vitestShardOnlyTestNamePatterns ?? scenario?.vitestProcessTestNamePatterns;
   const index = Number(match?.[1]);
   const count = Number(match?.[2]);
   if (
@@ -995,7 +1023,8 @@ async function runHostedLocalVitestForScenarios(input: {
       env: buildHostedLocalVitestScenarioEnv(input),
       files: [scenario.file],
       // Shard admission still validates the complete registry partition.
-      patterns: resolveHostedLocalE2eScenarios(scenario.name)[0]?.vitestProcessTestNamePatterns
+      patterns: scenario.vitestShardOnlyTestNamePatterns
+        ?? resolveHostedLocalE2eScenarios(scenario.name)[0]?.vitestProcessTestNamePatterns
         ?? scenario.vitestProcessTestNamePatterns,
     });
   }

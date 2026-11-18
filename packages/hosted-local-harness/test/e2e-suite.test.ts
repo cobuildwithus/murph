@@ -202,6 +202,31 @@ describe("hosted-local E2E suite preparation", () => {
     expect(commands()).toEqual(complete);
   });
 
+  test("Linq delivery only filters the single Vitest run when a shard is requested", async () => {
+    const run = async (processShard?: string) => {
+      runForegroundCommand.mockClear();
+      await runHostedLocalE2eSuite({
+        env: {}, prepareRunnerBundle: false, scenario: "linq-delivery", processShard,
+      });
+      const runs = runForegroundCommand.mock.calls.filter(([cmd]) => cmd.args.includes("vitest"));
+      expect(runs).toHaveLength(1);
+      return runs[0]![0].args;
+    };
+    expect(await run()).not.toContain("--testNamePattern");
+    expect(assertHostedLocalVitestSelection).not.toHaveBeenCalled();
+    const selected = [];
+    for (const shard of ["1/2", "2/2"]) {
+      const args = await run(shard);
+      expect(args).toContain("--testNamePattern");
+      selected.push(args[args.indexOf("--testNamePattern") + 1]);
+    }
+    expect(new Set(selected).size).toBe(2);
+    expect(assertHostedLocalVitestSelection).toHaveBeenCalledTimes(2);
+    for (const call of [1, 2]) {
+      expect(assertHostedLocalVitestSelection).toHaveBeenNthCalledWith(call, expect.objectContaining({ patterns: selected }));
+    }
+  });
+
   test.each(["", "0/2", "3/2", "1/1", "1/3", "1/2junk", "9007199254740993/2"])(
     "rejects invalid or stale process inventory %s before setup",
     async (processShard) => {

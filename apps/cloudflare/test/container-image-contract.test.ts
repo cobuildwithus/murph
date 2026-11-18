@@ -44,10 +44,11 @@ function createDeployEnvironment() {
 
 describe("hosted runner container image contract", () => {
   it("keeps base-image publication trusted and deploy secrets outside the image", async () => {
-    const [baseDockerfile, finalDockerfile, workflow] = await Promise.all([
+    const [baseDockerfile, finalDockerfile, workflow, sandboxWorkflow] = await Promise.all([
       readFile(new URL("../../../Dockerfile.cloudflare-hosted-runner-base", import.meta.url), "utf8"),
       readFile(new URL("../../../Dockerfile.cloudflare-hosted-runner", import.meta.url), "utf8"),
       readFile(new URL("../../../.github/workflows/cloudflare-runner-base-image.yml", import.meta.url), "utf8"),
+      readFile(new URL("../../../.github/workflows/cloudflare-runner-permission-sandbox.yml", import.meta.url), "utf8"),
     ]);
 
     expect(workflow).toContain("permissions:\n  contents: read\n  packages: write");
@@ -59,6 +60,15 @@ describe("hosted runner container image contract", () => {
     }
     expect(baseDockerfile).toContain("git apply --check /tmp/codex-websocket-ack.patch");
     expect(baseDockerfile).toContain("git apply --check /tmp/codex-prompt-cache-retention.patch");
+    const sandboxTriggers = sandboxWorkflow.split(/\n  (?:pull_request|push):\n/u).slice(1);
+    expect(sandboxTriggers).toHaveLength(2);
+    for (const [, path] of baseDockerfile.matchAll(/^COPY (patches\/\S+\.patch) /gmu)) {
+      const pathFilter = `      - "${path}"\n`;
+      expect(workflow).toContain(pathFilter);
+      for (const trigger of sandboxTriggers) {
+        expect(trigger).toContain(pathFilter);
+      }
+    }
     expect(baseDockerfile).toContain("sha256sum /opt/codex/codex-resources/bwrap");
     expect(baseDockerfile).toContain("export CODEX_BWRAP_SHA256=");
   });
