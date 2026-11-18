@@ -5,6 +5,7 @@ import { getPrisma } from "../../prisma";
 import { runWithHostedDomainRootUnwrapCache } from "../../hosted-crypto/domain-root-unwrap-cache";
 import type { GameEntryData, GameEntryKind } from "../contract";
 import { openGameTexts } from "../crypto";
+import { gameNotFound } from "../http/errors";
 import { effectiveTermWords, parseStoredTerms, parseTermWords, termsForDay } from "../rules";
 import { openProgressMany, progressLookup } from "./crypto";
 import { EXERCISES, type DayAmount } from "./registry";
@@ -122,6 +123,7 @@ export function friendMeasure(id: string): FriendMeasure {
   if (id === "steps" || id === "sleep") return { id, label: id === "steps" ? "Steps" : "Sleep", icon: id,
     noun: id, format: id === "steps" ? "count" : "duration" };
   const [name, unit] = id.split(".");
+  if (!name) throw gameNotFound();
   const exercise = Object.entries(EXERCISES).find(([key]) => key === name)?.[1];
   return { id, label: exercise?.label ?? name[0].toUpperCase() + name.slice(1),
     icon: exercise?.icon ?? "dumbbell", noun: name,

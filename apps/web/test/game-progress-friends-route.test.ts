@@ -95,9 +95,9 @@ it("returns the game failure even if health fails first", async () => {
   expect(await result.json()).toMatchObject({ error: { code: "PROGRESS_FRIENDS_UNAVAILABLE", retryable: true } });
 });
 
-it("rejects a missing exercise without reading rooms", async () => {
+it.each(["unknown.reps", ".reps"])("returns 404 for %s without reading rooms", async measure => {
   mocks.rooms.mockRejectedValueOnce(new Error());
-  expect((await GET(request("measure=unknown.reps"))).status).toBe(404);
+  expect((await GET(request(`measure=${measure}`))).status).toBe(404);
   expect(mocks.rooms).not.toHaveBeenCalled();
 });
 
@@ -181,8 +181,7 @@ it("withholds a friend blocked while loading private game inputs", async () => {
   const body = friendsSchema.parse(await response.json());
   expect(body.rows.map(row => row.memberId)).toEqual(["ava"]);
   expect(mocks.settle).not.toHaveBeenCalled();
-  await mocks.after.mock.calls[0][0]();
-  expect(mocks.settle.mock.calls[0][1]).toEqual([]);
+  expect(mocks.after).not.toHaveBeenCalled();
 });
 
 it("uses each untyped post's terms version and group seat override", async () => {

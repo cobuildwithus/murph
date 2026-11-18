@@ -36,6 +36,7 @@ vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({
 
 import { addDaysToIsoDate } from "@murphai/contracts";
 import { GET } from "../app/api/game/v1/progress/route";
+import { GET as friendsGET } from "../app/api/game/v1/progress/friends/route";
 import { GET as healthGET } from "../app/api/game/v1/progress/health/route";
 import { healthSchema, progressSchema } from "@/src/lib/game/progress/contract";
 import { openProgress, progressLookup } from "@/src/lib/game/progress/crypto";
@@ -206,6 +207,50 @@ it.each(["cohort", "games", "current", "pending"])("never settles Friends from %
   await GET(request()); await drain();
   expect((await readAwards("ava")).some(award => award.kind === "friend")).toBe(false);
   if (boundary === "pending") expect(mocks.inference).toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({ memberId: "leo" })]), expect.any(Function));
+});
+
+it("rereads a no-op Prizes snapshot only when it contains a friend award", async () => {
+  await GET(request()); await drain();
+  expect(awards.some(row => row.subjectMemberId)).toBe(true);
+  mocks.awards.mockClear().mockResolvedValueOnce([...awards]);
+  awards = awards.filter(row => !row.subjectMemberId);
+  mocks.createAwards.mockClear();
+  const view = progressSchema.parse(await (await GET(request())).json());
+  expect(view.medals.map(medal => medal.id).sort()).toEqual(awards.map(row => row.lookup).sort());
+  expect(mocks.awards).toHaveBeenCalledTimes(2);
+  mocks.awards.mockClear();
+  expect(progressSchema.parse(await (await GET(request())).json())).toEqual(view);
+  expect(mocks.awards).toHaveBeenCalledOnce();
+  expect(mocks.createAwards).not.toHaveBeenCalled();
+});
+
+const passReads = [
+  ["Prizes", () => GET(request())],
+  ["Friends", () => friendsGET(new Request("https://example.test/api/game/v1/progress/friends?measure=pushups.reps"))],
+] as const;
+
+async function gamesWithDepartingFriend(): Promise<FriendGameSeries> {
+  const cohort = await mocks.cohort();
+  mocks.cohort.mockResolvedValue({ ...cohort, timeZone: "UTC", people: [
+    ...cohort.people, { ...cohort.people[1], memberId: "departing", firstName: "Reed" },
+  ] });
+  return mocks.friendGames();
+}
+
+it.each(passReads)("%s settles a remaining friend's pass despite a departed friend's pending task", async (_page, read) => {
+  const games = await gamesWithDepartingFriend();
+  games.pending.push({ memberId: "departing", lookup: "unresolved", text: "Balance drill", kind: "photo", inferred: null });
+  expect((await read()).status).toBe(200); await drain();
+  const passes = (await readAwards("ava")).filter(award => award.kind === "friend" && award.measureId === "pushups.reps");
+  expect(passes.map(award => award.subjectMemberId)).toEqual(["leo"]);
+});
+
+it.each(passReads)("%s excludes an exercise shared only with a departed friend from pass settlement", async (_page, read) => {
+  const games = await gamesWithDepartingFriend();
+  games.amounts.set("departing", games.amounts.get("leo")!);
+  games.amounts.delete("leo");
+  expect((await read()).status).toBe(200); await drain();
+  expect((await readAwards("ava")).filter(award => award.kind === "friend")).toEqual([]);
 });
 
 it("skips background Friends input work without co-players", async () => {

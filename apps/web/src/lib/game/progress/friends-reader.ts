@@ -51,7 +51,7 @@ export async function readProgressFriends(auth: HostedNativeMemberAuth, query: F
     const pills = friendPills({ ...games, pending: visiblePending }, memberId, visibleIds, query.measure);
     if (!current.incomplete) assertSelectedFriend(query.with, visibleIds);
     await timing.measure("auth", () => assertGameMemberAuthCurrentTx(auth, db));
-    if (!incomplete && !health && games.pending.length === 0) {
+    if (people.length > 1 && !health && visiblePending.length === 0 && pills.some(pill => pill.id === metric)) {
       after(async () => {
         try {
           await runWithFreshHostedDomainRootUnwrapCache(() =>
@@ -102,10 +102,12 @@ export async function settleProgressFriends(auth: HostedNativeMemberAuth) {
   if (games.incomplete) return;
   const current = await friendCohortIds(memberId, db);
   if (current.incomplete) return;
-  const people = cohort.people.filter(person => current.ids.includes(person.memberId));
-  if (games.pending.length === 0) await settleGameFriendAwards(auth, games, people, friendExerciseIds(games, memberId, ids));
+  const currentIds = new Set(current.ids);
+  const people = cohort.people.filter(person => currentIds.has(person.memberId));
+  const currentGames = { ...games, pending: games.pending.filter(task => currentIds.has(task.memberId)) };
+  if (currentGames.pending.length === 0) await settleGameFriendAwards(auth, currentGames, people, friendExerciseIds(currentGames, memberId, current.ids));
   await assertGameMemberAuthCurrentTx(auth, db);
-  scheduleFriendInference(auth, games.pending.filter(task => task.memberId !== memberId && current.ids.includes(task.memberId)));
+  scheduleFriendInference(auth, currentGames.pending.filter(task => task.memberId !== memberId));
 }
 
 async function settleGameFriendAwards(auth: HostedNativeMemberAuth, games: FriendGameSeries, people: FriendSeries[], measures: string[]) {

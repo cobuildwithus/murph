@@ -6304,7 +6304,9 @@ moments describe an earned day, without inventing a post or time of day.
 Prizes reads the profile, games, entries, task cache, awards, measure states
 and picture metadata once. Prizes and Health compare candidates to their
 already-open ordered awards. A no-op renders that snapshot, including its
-acknowledgement state. A missing candidate triggers a guarded duplicate-safe
+acknowledgement state, unless Prizes finds an award with a subject member.
+Prizes rereads those ordered awards because account deletion can remove a subject's rows.
+A missing candidate triggers a guarded duplicate-safe
 insert and one ordered reread, even if a concurrent writer won every insert.
 The background Health pass uses the published pointer and version from its
 receipt check and needs no post-insert read for presentation.

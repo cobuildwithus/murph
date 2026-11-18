@@ -145,7 +145,7 @@ export async function readProgress(memberId: string, units: ClientUnits, beforeM
   const snapshot = await timing.measure("gameSeries", () => readGameSeries(memberId, clock, timing));
   const pictures = await timing.measure("pictures", () => readProgressPics(memberId));
   snapshot.incomplete ||= pictures.incomplete;
-  let stored = snapshot.awards;
+  let attemptedInsert = false;
   if (!snapshot.incomplete) {
     const firstRoutes = snapshot.measures.filter(measure => !measure.pending
       && (measure.unit === "meters" || measure.unit === "steps") && !snapshot.states.get(measure.id)?.legs);
@@ -158,12 +158,14 @@ export async function readProgress(memberId: string, units: ClientUnits, beforeM
     }
     if (snapshot.pending.length === 0) {
       const context = achievementContext(snapshot.measures, snapshot.states);
-      const attemptedInsert = await timing.measure("awards", () => settleAwards(memberId, ACHIEVEMENTS.flatMap(evaluate => evaluate(context)), beforeMutationTx,
-        { awards: stored, timeZone: profile.timeZone }));
-      if (attemptedInsert) stored = await timing.measure("awards", () => readAwards(memberId));
+      attemptedInsert = await timing.measure("awards", () => settleAwards(memberId, ACHIEVEMENTS.flatMap(evaluate => evaluate(context)), beforeMutationTx,
+        { awards: snapshot.awards, timeZone: profile.timeZone }));
     }
     scheduleInference(snapshot.pending.map(task => ({ ...task, memberId })), beforeMutationTx);
   }
+  // Deleting a friend can cascade-delete their awards after the snapshot.
+  const stored = attemptedInsert || snapshot.awards.some(award => award.subjectMemberId !== null)
+    ? await timing.measure("awards", () => readAwards(memberId)) : snapshot.awards;
   const awards = visibleAwards(stored, await timing.measure("auth", () => healthAuthority(memberId)));
   return timing.measure("render", () => {
     const measures = snapshot.measures.map(measure => {
