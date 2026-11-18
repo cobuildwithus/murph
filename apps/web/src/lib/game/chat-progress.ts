@@ -22,7 +22,7 @@ export function gameChatProgress(state: RuleState, now: Date, asOf: Date = now):
     const days: Progress["players"][number]["days"] = player.dayOne ? Array.from({ length: Math.max(0, endDay - firstDay) }, (_, offset) => {
       const dayIndex = firstDay + offset;
       const date = addDays(player.dayOne!, dayIndex);
-      const posted = state.game.seats === 10 ? liveEntry(entries, player.memberId, dayIndex) : completedEntry(entries, player.memberId, dayIndex);
+      const posted = completedEntry(entries, player.memberId, dayIndex);
       const closed = state.game.status === "settled" || now.getTime() >= dayStartInstant(addDays(date, 1), player.timeZone).getTime() + GAME_GRACE_MS;
       const status = posted ? "posted" : !isScheduledDay(state, dayIndex) ? "off"
         : today === null || dayIndex > today ? "upcoming"

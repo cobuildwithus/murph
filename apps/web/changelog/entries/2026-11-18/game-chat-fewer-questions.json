@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-18",
+  "order": 100,
+  "item": {
+    "id": "game-chat-fewer-questions",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Murph counts your game day in one message",
+    "summary": "Tell Murph what you did, like \"read my chapter tonight\", and it posts that for the day without asking what the post should say.",
+    "details": "After midnight, \"yesterday\" and \"last night\" now count the evening that just ended, since a game day runs until 3 AM. Turning a game reminder off now just turns it off, instead of asking you to switch on notifications. Group game progress no longer shows a day you marked not done as posted. Evening check-ins keep coming while you post in the app, even if you don't text back.",
+    "relevanceTags": ["games"],
+    "sourcePullRequests": [5163]
+  }
+}

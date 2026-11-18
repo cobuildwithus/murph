@@ -103,7 +103,7 @@ describe.skipIf(!enabled)("private game evening PostgreSQL", () => {
     expect([...await readPrivatelyTextedGameIds([together], now)]).toEqual([together]);
   });
 
-  it("pauses after three accepted unanswered texts at any of their times, though dispatch rewrote their receipts", async () => {
+  it.each(["text", "post"] as const)("pauses after three accepted unanswered texts at any of their times, though dispatch rewrote their receipts, until a %s answers", async answer => {
     const owner = await member(); await game(owner);
     const sent = [["2026-11-03", 1140, "accepted"], ["2026-11-05", 720, "accepted"], ["2026-11-05", 1140, "failed"], ["2026-11-05", 1200, "accepted"]] as const;
     for (const [index, [day, minutes, status]] of sent.entries()) {
@@ -116,10 +116,12 @@ describe.skipIf(!enabled)("private game evening PostgreSQL", () => {
         attemptedAt: at, createdAt: at, ...(status === "accepted" ? { acceptedAt: at } : {}) } });
     }
     expect(await reserveDuePrivateEveningCheckIns(now)).toBe(0);
-    await db.$transaction(tx => appendHostedMailboxEnvelopeTx({ tx, envelope: buildHostedExecutionTelegramConversationMessageWake({
+    if (answer === "text") await db.$transaction(tx => appendHostedMailboxEnvelopeTx({ tx, envelope: buildHostedExecutionTelegramConversationMessageWake({
       eventId: `private-evening-reply-${randomUUID()}`, userId: owner, occurredAt: now.toISOString(),
       telegramMessage: { messageId: "2", schema: "murph.hosted-telegram-message.v1", text: "on it", threadId: "123", threadIsDirect: true },
     }) }));
+    // A post in another of their games answers the texts; this game is still open tonight.
+    else await db.gameEntry.create({ data: { id: `entry_${randomUUID()}`, gameId: await game(owner), memberId: owner, dayIndex: 0, attempt: 1, kind: "words", receivedAt: now } });
     expect(await reserveDuePrivateEveningCheckIns(now)).toBe(1);
   });
 

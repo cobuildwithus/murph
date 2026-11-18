@@ -11,7 +11,7 @@ import { signalHostedMailboxAppendRuntime } from "../hosted-orchestration/signal
 import { getPrisma } from "../prisma";
 import { isGameEnabled } from "./access";
 import { readMyGameReminderProjection } from "./direct-tool";
-import { roomCoversEveningGame } from "./evening-check-in";
+import { answeredSince, roomCoversEveningGame } from "./evening-check-in";
 import { gameReminderWindow, reminderOpenDay } from "./reminders";
 import { currentTerms } from "./rules";
 import { canTextGameReminders, loadGameMissedCheckInGames } from "./service";
@@ -47,7 +47,7 @@ async function currentEvening(memberId: string, date: string, minutes: number, n
 }
 
 /**
- * Three accepted private texts with no reply since, within four weeks and at any of their times, pause them until they write.
+ * Three accepted private texts with no reply or game post since, within four weeks and at any of their times, pause them until they write or post.
  * Their published wakes keep the event ids: dispatch rewrites a receipt's template and source, never its idempotency key.
  */
 async function privateEveningPaused(memberId: string, date: string, tx: Prisma.TransactionClient) {
@@ -58,9 +58,7 @@ async function privateEveningPaused(memberId: string, date: string, tx: Prisma.T
     idempotencyKey: { in: wakes.map(wake => createHostedLinqDeliveryIdempotencyLookupKey(wake.dedupeKey)!) } },
     orderBy: { acceptedAt: "desc" }, take: 3, select: { acceptedAt: true } });
   if (latest.length < 3) return false;
-  const since = latest[2]!.acceptedAt!;
-  const inbound = await tx.hostedMailboxItem.findFirst({ where: { userId: memberId, kind: "conversation.message", lane: "conversation", occurredAt: { gte: since } }, select: { id: true } });
-  return !inbound;
+  return !await answeredSince(tx, memberId, { memberId }, latest[2]!.acceptedAt!);
 }
 
 /** One receipt per member, profile-local reminder date and reminder time. */

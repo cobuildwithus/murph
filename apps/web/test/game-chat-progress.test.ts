@@ -32,6 +32,16 @@ describe("shared game progress", () => {
     expect(JSON.stringify(result)).not.toMatch(/private|excuse|media|withdrawn/iu);
     expect(result.players[1].days[0].status).toBe("missed");
   });
+  it("never shows a day its player marked not done as posted, in a pair or a group game", () => {
+    for (const seats of [2, 10]) {
+      const input = state(); input.game.seats = seats;
+      input.entries = [{ id: "entry_marked", memberId: "player_a", dayIndex: 0, kind: "words", attempt: 1, incomplete: true,
+        receivedAt: new Date("2030-03-04T12:00:00Z"), blurHash: null, withdrawnAt: null, mediaKeys: [] }];
+      const player = gameChatProgress(input, new Date("2030-03-05T12:00:00Z")).players[0];
+      expect(player.days[0].status).not.toBe("posted");
+      expect(player.score).toBe(0);
+    }
+  });
   it("uses historical terms for earlier dates and the updated schedule only from its effective day", () => {
     const input = state();
     input.game.terms.versions.push({ n: 2, fromDay: 2, schedule: { days: [5,6] }, stakes: [] });

@@ -3,12 +3,16 @@ import { attemptsUsed, currentTerms, dayIndexAt, eligibleFromDay, entriesForDay,
   needsPostToday, scorePlayer, type RulePlayer, type RuleState } from "./rules";
 import { addDays } from "./time";
 
-/** How a reminder for the selected games reaches the player. Text only when one of them gets the private text, not its group chat's check-in. */
+/**
+ * How a reminder for the selected games reaches the player: undefined when they have it switched off, and "none" when it is on
+ * but nothing can deliver it. Text only when one of them gets the private text, not its group chat's check-in.
+ */
 export function gameReminderReach(input: { push: boolean; text: boolean; canText: boolean },
-  selected: { on: boolean; textedPrivately: boolean }, hasPushRoute: boolean): "push" | "text" | "none" {
-  if (!selected.on) return "none";
+  selected: { on: boolean; textedPrivately: boolean }, hasPushRoute: boolean): "push" | "text" | "none" | undefined {
+  if (!selected.on) return undefined;
   if (input.text && input.canText && selected.textedPrivately) return "text";
-  return input.push && hasPushRoute ? "push" : "none";
+  if (!input.push) return undefined;
+  return hasPushRoute ? "push" : "none";
 }
 
 /** Posting eligibility first; count games add urgency without requiring a perfect game. */

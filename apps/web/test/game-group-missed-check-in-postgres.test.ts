@@ -426,7 +426,7 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     await expect(send()).rejects.toMatchObject({ code: "GAME_CHANGE_SUPERSEDED" });
   });
 
-  it("pauses after three accepted scheduled evenings even when delivery metadata was rewritten", async () => {
+  it.each(["text", "post"] as const)("pauses after three accepted scheduled evenings even when delivery metadata was rewritten, until a %s answers", async answer => {
     vi.stubEnv("MURPH_GAME_EVENING_CHECK_IN_ENABLED", "true");
     const f = await fixture(3), id = await f.addGame();
     const fourth = "2030-03-07", at = new Date("2030-03-07T20:05:00Z");
@@ -441,7 +441,9 @@ describe.skipIf(!enabled)("group missed-day PostgreSQL", () => {
     // A paused evening sends nothing, and that must not end the pause.
     const fifthEvent = gameEveningEventId(f.roomId, "2030-03-08"); events.push(fifthEvent);
     expect(await reserveGameEveningCheckIn(f.roomId, [id], new Date("2030-03-08T20:05:00Z"))).toBe(0);
-    await conversation(f, "I'm here.");
+    // A post in the app answers the check-in as surely as a text in the room.
+    if (answer === "text") await conversation(f, "I'm here.");
+    else await db.gameEntry.create({ data: { id: randomUUID(), gameId: id, memberId: f.people[0]!.id, dayIndex: 0, attempt: 1, kind: "words", receivedAt: new Date("2030-03-07T12:00:00Z") } });
     expect(await reserveGameEveningCheckIn(f.roomId, [id], at)).toBe(1);
   });
 

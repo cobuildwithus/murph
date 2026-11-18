@@ -89,7 +89,7 @@ async function handleGameChatRequest(input: Input): Promise<HostedGameToolRespon
     // GameView is a personal app view. Never pass it into the shared runtime.
     // Rule messages name only the rule and next step, so Murph can explain a refusal.
     if (!result.ok) return { action: input.request.action, result: { status: "rejected", error: `${result.error.code}: ${result.error.message}`.slice(0, 128) } };
-    if (update.operation === "set_reminder") return { action: "update_game", result: { status: "ok", reaches: result.reaches ?? "none" } };
+    if (update.operation === "set_reminder") return { action: "update_game", result: { status: "ok", reaches: result.reaches } };
     dayOutcome = result.dayOutcome;
     chatLine = result.chatLine;
   }
