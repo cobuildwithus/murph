@@ -143,8 +143,9 @@ describe.skipIf(!enabled)("Friends deferred inference with PostgreSQL", () => {
     expect(second.rows.map(row => [row.memberId, row.total?.value, row.rank])).toEqual([[ava, 120, 1], [leo, total, 2]]);
     expect(second.chart).toEqual([{ memberId: ava, points: [["2026-11-01", 20], ["2026-11-02", 120]] }, { memberId: leo, points }]);
     expect(JSON.stringify(second)).not.toContain(task);
+    // Leo hasn't done pushups on three days, so passing him isn't a medal yet.
     const awards = await readAwards(ava);
-    expect(awards).toEqual([expect.objectContaining({ kind: "friend", subjectMemberId: leo, on: "2026-11-02" })]);
+    expect(awards).toEqual([]);
     expect(friendsSchema.parse(await (await readFriends()).json())).toEqual(second);
     expect(await readAwards(ava)).toEqual(awards);
     expect(mocks.after).toHaveBeenCalledTimes(1);
