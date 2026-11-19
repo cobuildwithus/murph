@@ -1130,6 +1130,9 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: HostedGr
       ...(options.history ? { dateCoverage: dateCoverage
         ?? pageHostedGroupSharedHistory([], options.history).dateCoverage } : {}),
     };
+    if (!await sharedSnapshotAuthorityCurrent(prisma, input.runtimeMemberId, capture, readableGrantIds)) {
+      return { status: "unavailable", unavailableReason: "shared_data_unavailable" };
+    }
     return new TextEncoder().encode(JSON.stringify(result)).byteLength
       > HOSTED_GROUP_SHARED_READ_RESPONSE_MAX_BYTES - 1024
       ? sharedReadCapacityUnavailable() : result;
@@ -1139,6 +1142,33 @@ export async function readHostedGroupSharedDataByRuntimeMemberId(input: HostedGr
       unavailableReason: "shared_data_unavailable",
     };
   }
+}
+
+async function sharedSnapshotAuthorityCurrent(
+  prisma: PrismaClient, runtimeMemberId: string,
+  capture: Extract<HostedGroupSharedReadCapture, { status: "ok" }>,
+  readableGrantIds: ReadonlySet<string>,
+): Promise<boolean> {
+  if (!readableGrantIds.size) return true;
+  const participantIds = capture.members.map(member => member.participantId);
+  const generations = new Map(capture.shares.map(share => [share.id, share.grantedAt.getTime()]));
+  return prisma.$transaction(async tx => {
+    if (!await hasHostedRuntimeActiveAccess(runtimeMemberId, { prisma: tx })) return false;
+    const group = await tx.hostedGroup.findUnique({
+      where: { runtimeMemberId }, select: { members: {
+        where: { id: { in: participantIds } }, take: participantIds.length, select: { id: true },
+      } },
+    });
+    if (group?.members.length !== participantIds.length) return false;
+    const grants = await tx.hostedVaultShare.findMany({
+      where: {
+        id: { in: [...readableGrantIds] }, destinationMemberId: runtimeMemberId, status: "granted",
+        grantor: { AND: [activeHostedMemberAccessWhere(), hostedHealthDataConsentNotRevokedWhere()] },
+      },
+      select: { id: true, grantedAt: true }, take: readableGrantIds.size,
+    });
+    return grants.length === readableGrantIds.size && grants.every(grant => generations.get(grant.id) === grant.grantedAt.getTime());
+  }, { ...HOSTED_ONBOARDING_TRANSACTION_OPTIONS, isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
 }
 
 export interface HostedGroupBoardProjection {
