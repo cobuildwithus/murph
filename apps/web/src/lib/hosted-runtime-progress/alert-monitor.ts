@@ -12,6 +12,9 @@ import {
   readHostedRuntimeAiAllowedMemberIds,
 } from "../hosted-onboarding/member-access";
 import {
+  HOSTED_ACCESS_RESTORATION_RUNTIME_EVENT_ID_PREFIX,
+} from "../hosted-onboarding/member-access-runtime-handoff";
+import {
   runHostedOperationalEmailIncident,
   type HostedOperationalAlertMonitorOutcome,
   type HostedOperationalAlertMonitorSpec,
@@ -27,6 +30,9 @@ import { writeHostedRuntimeLogs } from "../hosted-runtime-log/write";
 import { getPrisma } from "../prisma";
 
 export const HOSTED_RUNTIME_PROGRESS_STALL_THRESHOLD_MS = 15 * 60_000;
+// Work queued while a member had no access drains over several wakes after
+// restore. Its clock starts at restore and allows this long before alerting.
+export const HOSTED_RUNTIME_PROGRESS_ACCESS_RESTORE_DRAIN_MS = 60 * 60_000;
 export const HOSTED_RUNTIME_PROGRESS_REMINDER_INTERVAL_MS = 6 * 60 * 60_000;
 export const HOSTED_RUNTIME_PROGRESS_ALERT_SAMPLE_LIMIT = 20;
 const HOSTED_RUNTIME_PROGRESS_ALERT_OBSERVATION_BUDGET_MS = 10_000;
@@ -51,6 +57,7 @@ const MONITOR_STATUS = {
 type HostedRuntimeProgressPrismaClient = Prisma.TransactionClient;
 
 export interface HostedRuntimeProgressHealthRow {
+  accessRestoredAt?: Date | null;
   foregroundCheckpointEvidence: unknown;
   checkpointEvidence: unknown;
   deliveryAcceptedAt: Date | null;
@@ -491,7 +498,8 @@ async function readHostedRuntimeProgressCandidatePage(input: {
         pending_head.kind AS head_kind,
         pending_head.dedupe_key AS head_dedupe_key,
         pending_head.pending_count,
-        pending_head.aged_high_water_seq
+        pending_head.aged_high_water_seq,
+        pending_head.access_restored_at
       FROM lane_boundary
       JOIN LATERAL (
         SELECT
@@ -504,7 +512,17 @@ async function readHostedRuntimeProgressCandidatePage(input: {
           COUNT(*) OVER () AS pending_count,
           MAX(mailbox_item.lane_seq) FILTER (
             WHERE mailbox_item.created_at <= ${input.stalledBefore}
-          ) OVER () AS aged_high_water_seq
+          ) OVER () AS aged_high_water_seq,
+          -- Rows ahead of a pending system-lane restore marker were queued
+          -- while the member had no access; their clock starts at restore.
+          MAX(mailbox_item.created_at) FILTER (
+            WHERE mailbox_item.lane = 'system'
+              AND mailbox_item.kind = 'runtime.maintenance-requested'
+              AND starts_with(
+                mailbox_item.dedupe_key,
+                ${HOSTED_ACCESS_RESTORATION_RUNTIME_EVENT_ID_PREFIX}
+              )
+          ) OVER () AS access_restored_at
         FROM hosted_mailbox_item AS mailbox_item
         WHERE mailbox_item.user_id = lane_boundary.user_id
           AND mailbox_item.lane = lane_boundary.lane
@@ -642,6 +660,7 @@ async function readHostedRuntimeProgressCandidatePage(input: {
     progress_lane AS (
       SELECT
         progress_evidence.user_id,
+        progress_evidence.access_restored_at,
         progress_evidence.foreground_checkpoint_evidence,
         progress_evidence.delivery_accepted_at,
         progress_evidence.checkpoint_evidence,
@@ -669,6 +688,11 @@ async function readHostedRuntimeProgressCandidatePage(input: {
             AND NOT progress_evidence.has_pre_denial_evidence
             AND progress_evidence.first_post_denial_at IS NOT NULL
             THEN progress_evidence.first_post_denial_at
+          WHEN progress_evidence.access_restored_at IS NOT NULL
+            THEN GREATEST(
+              progress_evidence.head_created_at,
+              progress_evidence.access_restored_at
+            )
           ELSE progress_evidence.head_created_at
         END AS progress_origin_at,
         (
@@ -694,6 +718,7 @@ async function readHostedRuntimeProgressCandidatePage(input: {
       FROM progress_evidence
     )
     SELECT
+      progress_lane.access_restored_at AS "accessRestoredAt",
       progress_lane.foreground_checkpoint_evidence AS "foregroundCheckpointEvidence",
       progress_lane.checkpoint_evidence AS "checkpointEvidence",
       progress_lane.delivery_accepted_at AS "deliveryAcceptedAt",
@@ -958,8 +983,10 @@ function classifyHostedRuntimeProgressRow(
   if (isSystemWorkAwaitingForegroundCheckpoint(row, now)) {
     return "fresh";
   }
-  return now.getTime() - progressOriginAtMs
-      >= HOSTED_RUNTIME_PROGRESS_STALL_THRESHOLD_MS
+  const thresholdMs = row.accessRestoredAt != null
+    ? HOSTED_RUNTIME_PROGRESS_ACCESS_RESTORE_DRAIN_MS
+    : HOSTED_RUNTIME_PROGRESS_STALL_THRESHOLD_MS;
+  return now.getTime() - progressOriginAtMs >= thresholdMs
     ? "stalled"
     : "fresh";
 }

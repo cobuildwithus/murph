@@ -6,6 +6,8 @@ import type { Prisma } from "@prisma/client";
 import { appendHostedMailboxEnvelopeTx } from "../hosted-mailbox/store";
 
 const HOSTED_ACCESS_RESTORATION_OCCURRED_AT = "1970-01-01T00:00:00.000Z";
+export const HOSTED_ACCESS_RESTORATION_RUNTIME_EVENT_ID_PREFIX =
+  "runtime-control:access-restored:";
 
 export interface HostedAccessRestorationRuntimeHandoff {
   hostedExecutionEventId: string;
@@ -27,7 +29,7 @@ export function buildHostedAccessRestorationRuntimeEventId(input: {
     }))
     .digest("hex")
     .slice(0, 32);
-  return `runtime-control:access-restored:${fingerprint}`;
+  return `${HOSTED_ACCESS_RESTORATION_RUNTIME_EVENT_ID_PREFIX}${fingerprint}`;
 }
 
 export async function appendHostedAccessRestorationRuntimeHandoffTx(input: {

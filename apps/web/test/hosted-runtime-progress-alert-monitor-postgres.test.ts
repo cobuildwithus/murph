@@ -7,7 +7,9 @@ import {
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { HOSTED_MAILBOX_RETENTION_MS } from "@/src/lib/hosted-mailbox/store";
+import { buildHostedAccessRestorationRuntimeEventId } from "@/src/lib/hosted-onboarding/member-access-runtime-handoff";
 import {
+  HOSTED_RUNTIME_PROGRESS_ACCESS_RESTORE_DRAIN_MS,
   readHostedRuntimeProgressHealth,
 } from "@/src/lib/hosted-runtime-progress/alert-monitor";
 import {
@@ -76,6 +78,94 @@ describe.skipIf(!runPostgresProof)(
           }
           await tx.hostedMailboxItem.update({ where: { id: `${userId}-system-item-1` }, data: { kind: "device-sync.wake" } });
           await expect(read()).resolves.toMatchObject({ anomalous: true, excludedUsageBlockedSystemLaneCount: 0 });
+          completed = true;
+          throw rollback;
+        }, { timeout: 30_000 });
+      } catch (error) {
+        if (error !== rollback) throw error;
+      } finally {
+        await prisma.$disconnect();
+      }
+      expect(completed).toBe(true);
+    });
+
+    it("ages work queued during a lapse from access restore with a drain allowance", async () => {
+      const prisma = createPrismaClient({ databaseUrl, poolMax: 1 });
+      const rollback = new Error("Rollback access-restore drain proof.");
+      const userId = `progress-restore-proof-${randomUUID()}`;
+      const now = new Date("2026-08-10T16:00:00Z");
+      const lapsedAt = new Date(+now - 11 * 24 * 60 * 60_000);
+      const restoredAt = new Date(+now - 2 * 60_000);
+      const restoreKey = buildHostedAccessRestorationRuntimeEventId({
+        memberId: userId,
+        sourceEventId: "evt_restore_proof",
+        sourceType: "stripe",
+      });
+      let completed = false;
+      try {
+        await prisma.$transaction(async (tx) => {
+          await tx.hostedMember.create({ data: {
+            ...member(userId, HostedBillingStatus.active), usageCreditBalanceUsdMicros: 1_000_000n,
+          } });
+          await seedProgressLaneItems({ tx, userId, lane: "system", rows: [
+            { createdAt: lapsedAt, laneSeq: 1n, kind: "member.action.completed" },
+            { createdAt: new Date(+lapsedAt + 60_000), laneSeq: 2n },
+            {
+              createdAt: restoredAt,
+              dedupeKey: restoreKey,
+              kind: "runtime.maintenance-requested",
+              laneSeq: 3n,
+            },
+          ] });
+          await tx.hostedWorkspace.create({ data: { userId,
+            redactedStatusJson: { hostedMailboxSystemImportedSeq: "3" },
+          } });
+          const read = (at = now) => readHostedRuntimeProgressHealth({ now: at, prisma: tx });
+          await expect(read()).resolves.toMatchObject({
+            anomalous: false, stalledSystemLaneCount: 0,
+          });
+          const drainEnd = +restoredAt + HOSTED_RUNTIME_PROGRESS_ACCESS_RESTORE_DRAIN_MS;
+          await expect(read(new Date(drainEnd - 1))).resolves.toMatchObject({
+            anomalous: false, stalledSystemLaneCount: 0,
+          });
+          // A restore that never drains still alerts, aged from the restore.
+          await expect(read(new Date(drainEnd))).resolves.toMatchObject({
+            anomalous: true,
+            oldestStalledAgeMs: HOSTED_RUNTIME_PROGRESS_ACCESS_RESTORE_DRAIN_MS,
+            pendingItemCount: 3,
+            stalledSystemLaneCount: 1,
+          });
+          // Once the marker is handled, later work follows the ordinary clock.
+          const afterRestore = new Date(+restoredAt + 60_000);
+          await tx.hostedMailboxItem.create({ data: {
+            createdAt: afterRestore,
+            dedupeKey: `${userId}-system-dedupe-4`,
+            id: `${userId}-system-item-4`,
+            kind: "device-sync.wake",
+            lane: "system",
+            laneSeq: 4n,
+            occurredAt: afterRestore,
+            payloadSchema: "murph.runtime-progress-proof.v1",
+            userId,
+          } });
+          await tx.hostedMailboxLaneCounter.update({
+            where: { userId_lane: { userId, lane: "system" } },
+            data: { consumedSeq: 3n, nextSeq: 5n },
+          });
+          await expect(read(new Date(+afterRestore + 15 * 60_000))).resolves.toMatchObject({
+            anomalous: true, stalledSystemLaneCount: 1,
+          });
+          await tx.hostedMailboxLaneCounter.update({
+            where: { userId_lane: { userId, lane: "system" } },
+            data: { consumedSeq: 0n },
+          });
+          // Only the access-restored marker moves the clock.
+          await tx.hostedMailboxItem.update({ where: { id: `${userId}-system-item-3` }, data: {
+            dedupeKey: "runtime-control:group-share-projection:synthetic",
+          } });
+          await expect(read()).resolves.toMatchObject({
+            anomalous: true, oldestStalledAgeMs: +now - +lapsedAt, stalledSystemLaneCount: 1,
+          });
           completed = true;
           throw rollback;
         }, { timeout: 30_000 });
@@ -1439,6 +1529,7 @@ async function seedProgressLaneItems(input: {
     aiUsageDeniedAt?: Date;
     consumedAt?: Date;
     createdAt: Date;
+    dedupeKey?: string;
     kind?: string;
     laneSeq: bigint;
   }[];
@@ -1466,7 +1557,8 @@ async function seedProgressLaneItems(input: {
         ? {}
         : { consumedAt: row.consumedAt }),
       createdAt: row.createdAt,
-      dedupeKey: `${input.userId}-${input.lane}-dedupe-${row.laneSeq}`,
+      dedupeKey: row.dedupeKey
+        ?? `${input.userId}-${input.lane}-dedupe-${row.laneSeq}`,
       id: `${input.userId}-${input.lane}-item-${row.laneSeq}`,
       kind: row.kind ?? (input.lane === "conversation"
         ? "conversation.message"

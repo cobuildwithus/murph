@@ -2059,6 +2059,11 @@ monitor records only an aggregate excluded-system-lane count and never changes
 mailbox acknowledgements, allowance, or execution. When allowance returns, the
 original handling age applies again. This remains a contiguous-frontier monitor,
 not proof of completion for every later retained system item.
+Access restoration is different: while a `runtime-control:access-restored:`
+marker is still pending in the system lane, every row ahead of it was queued
+while the member had no access. That head ages from the newest pending marker
+and alerts after 60 minutes, not 15, because draining the backlog takes several
+wakes. Once the marker is handled, later rows use the ordinary clock.
 Every other unhandled system head ages from mailbox creation.
 Imported `member.activated`, `device-sync.wake`, and `meal-photo.captured` heads
 may await a foreground checkpoint within its existing publication deadline.
