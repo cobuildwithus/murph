@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { replaceRouteLeg, routeAwardKey, routeEta, routeLegs, routeView } from '../src/lib/game/progress/route-progress';
+import { replaceRouteLeg, routeAwardKey, routeEtaDays, routeEtaText, routeLegs, routeView } from '../src/lib/game/progress/route-progress';
 import { cutPolyline, decodePolyline, encodePolyline, MAP_SIZES, routeBbox, townPosition } from '../src/lib/game/progress/route-geometry';
 import { medalView } from '../src/lib/game/progress/view';
 import { medalSchema } from '../src/lib/game/progress/contract';
@@ -26,7 +26,9 @@ describe('Progress route legs', () => {
     [[['2026-10-01', 0], ['2026-10-31', 0]], 100, null],
     [[['2026-10-01', 0], ['2026-10-31', 30 * 1609.344]], 0, null],
   ] as const)('says how long the rest takes at the recent pace: %j with %s miles left', (meters, miles, eta) => {
-    expect(routeEta(meters as unknown as [string, number][], miles * 1609.344)).toBe(eta);
+    const points: [string, number][] = meters.map(([day, amount]) => [day, amount]);
+    const days = routeEtaDays(points, miles * 1609.344, points.at(-1)![0]);
+    expect(routeEtaText(days)).toBe(eta);
   });
   it('says how far each town ahead is, with the end as what is left to go', () => {
     const mile = 1609.344;
@@ -78,6 +80,15 @@ describe('Progress route legs', () => {
     expect(result.at(-1)!.startedOn).toBe(count === 2 ? '2026-11-19' : undefined);
     if (count === 2) expect(result[0]).toEqual(leg);
   });
+  it('credits backfilled crossings no earlier than the saved start day', () => {
+    const later = { ...leg, startTotal: 100, startedOn: '2026-11-14' };
+    const points: [string, number][] = [['2026-11-08', 220]];
+    expect(routeLegs({ measureId: 'walk.meters', legs: [leg, later], points })[1]?.on).toBe(later.startedOn);
+    const view = routeView('walk.meters', { legs: [leg, later] }, points, [], 'metric', later.startedOn);
+    expect(view?.towns[0]?.passedOn).toBe(later.startedOn);
+    expect(view?.chart?.points).toEqual([[later.startedOn, 0.1]]);
+  });
+
   it('dates every completion on its crossing day, with stable keys independent of the read date', () => {
     const legs = [leg, { ...next, startTotal: 120 }];
     const points: [string, number][] = [['2026-11-01', 90], ['2026-11-02', 120], ['2026-11-09', 320]];

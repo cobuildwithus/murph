@@ -6,7 +6,7 @@ import { patchMeasureState, type BeforeProgressMutation } from './state';
 import { hostedOnboardingError } from '../../hosted-onboarding/errors';
 import { invalidGameRequest } from '../http/errors';
 import { PlaceNotFound, previewRoute, resolveRoute, type PlaceFixer } from './mapbox';
-import { replaceRouteLeg, routeMeters, routeTowns } from './route-progress';
+import { completedRouteLegs, replaceRouteLeg, routeMeters, routeTowns } from './route-progress';
 import { formatAmount } from './format';
 import routesByTimeZone from './bank/routes-tz.json';
 import routesByRegion from './bank/routes-region.json';
@@ -29,7 +29,8 @@ function bankPlaces(entry: BankEntry) {
 }
 
 /** Only bank entries with routable places appear in the picker. With a fixer, a typed place's slip is fixed; a place found nowhere is named. */
-export async function readRouteGoals(query: string | undefined, unit: 'meters' | 'steps', total: number, units: ClientUnits, fix?: PlaceFixer): Promise<Goals> {
+export async function readRouteGoals(query: string | undefined, unit: 'meters' | 'steps', total: number, units: ClientUnits,
+  context: { measureId: string; legs: readonly RouteLeg[]; awards: readonly StoredAward[] }, fix?: PlaceFixer): Promise<Goals> {
   const eligible = (entry: BankEntry) => entry.kind === 'route' && bankPlaces(entry) !== null;
   const tile = (entry: BankEntry): Rung => ({ id: entry.id, name: entry.name, short: entry.short, tagline: entry.tagline, shareAwardId: null, drawing: null, at: unit === 'steps' ? entry.at / 1609.344 * 2000 : entry.at,
     atText: formatAmount(entry.at, 'meters', 'full', units).text, blurb: units === 'metric' ? entry.blurbMetric ?? entry.blurb : entry.blurb, where: entry.where, on: null, toGo: null });
@@ -40,8 +41,10 @@ export async function readRouteGoals(query: string | undefined, unit: 'meters' |
   const places = exact ? bankPlaces(exact) : routePlaces(query);
   if (places) {
     try {
+      const totalM = routeMeters(unit, total);
+      const completed = completedRouteLegs(context.measureId, context.legs, totalM, new Set(context.awards.map(award => award.key)));
       return { tiles, match: null, suggestions: [], note: null,
-        route: await routeGoalPreview(places.from, places.to, routeMeters(unit, total), units, exact ? undefined : fix) };
+        route: await routeGoalPreview(places.from, places.to, completed.length ? 0 : totalM, units, exact ? undefined : fix) };
     } catch (error) {
       if (!(error instanceof PlaceNotFound)) throw error;
       return { tiles, match: null, suggestions: tiles.slice(0, 3), note: null, route: null, notFound: error.typed };

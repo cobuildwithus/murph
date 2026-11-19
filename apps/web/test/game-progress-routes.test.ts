@@ -94,6 +94,13 @@ describe("Progress HTTP contracts", () => {
     expect(mocks.games).not.toHaveBeenCalled();
   });
 
+  it("previews the full remaining distance after a completed route", async () => {
+    mocks.entries.mockResolvedValue([routeEntry()]);
+    await savedRoute({ legs: [routeLeg] });
+    mocks.resolveRoute.mockResolvedValue({ ...routeLeg, distanceM: 5 * 1609.344 });
+    const response = await goals(request("/goals?measure=walk.meters&q=London%20to%20Paris"));
+    expect(goalsSchema.parse(await response.json()).route?.detail).toBe("By road. You're 0 in, so 5 to go.");
+  });
   it.each([
     { distance: 501, total: 116, distanceText: "501 miles", detail: "By road. You're 116 in, so 385 to go.", straightLine: false },
     { distance: 8.4, total: 1.2, distanceText: "8.4 miles", detail: "By road. You're 1.2 in, so 7.2 to go.", straightLine: false },

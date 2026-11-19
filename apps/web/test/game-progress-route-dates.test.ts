@@ -35,6 +35,11 @@ describe('Progress route dates and words', () => {
     expect(view.chart).toEqual({ unit: 'km', distance: 160.93, points: [['2026-11-19', 2]] });
   });
 
+  it('drops both arrival estimates after thirty inactive days', () => {
+    const view = routeView('walk.meters', { legs: [leg] }, daily(8), [], 'us', '2026-11-07');
+    expect(view).toMatchObject({ etaOn: null, etaText: null });
+  });
+
   it('starts a later leg on its saved day, at zero', () => {
     const points = daily(48);
     const later = { ...leg, startTotal: 30 * MILE, startedOn: '2026-10-29' };
