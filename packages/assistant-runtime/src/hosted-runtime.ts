@@ -232,7 +232,7 @@ import {
   deferHostedSystemMailboxItemAfterVaultShareProjectionFailure,
   enqueueHostedSystemMailboxItem,
   prepareHostedSystemMailboxItemForCheckpoint,
-  publishHostedSystemMailboxMemberActionReceipt,
+  publishHostedMemberActionReceipts,
   recordHostedSystemMailboxItemAfterCheckpoint,
   recordHostedMemberActionBatch,
   retainHostedSystemMailboxItemUntilDeliveryWake,
@@ -4070,7 +4070,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             return "idle";
           }
           const batch = preparation?.memberActionBatch;
-          const publishedBatchItems = new Set<string>();
+          let publishedBatchItems: ReadonlySet<string> | undefined;
           const recordSystemMailboxItem = async (recordInput: {
             exactDeliveryCompleted: boolean;
             item: HostedSystemMailboxCheckpointPreparationRecordItem;
@@ -4378,16 +4378,12 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             // exhausted transient retries retire here so later work can run.
             // The canonical outcome is already checkpointed. A lost response is
             // safe to repeat at the ordinary cleanup boundary below.
-            await Promise.all((batch ?? [recordItem]).map(async (item) => {
-              try {
-                await publishHostedSystemMailboxMemberActionReceipt({
-                  item, runtime: foregroundRuntime, signal: runtimeAbortController.signal,
-                });
-                publishedBatchItems.add(item.itemId);
-              } catch {
-                // Cleanup retries an unconfirmed receipt with the same identity.
-              }
-            }));
+            publishedBatchItems = await publishHostedMemberActionReceipts({
+              items: batch ?? [recordItem],
+              runtime: foregroundRuntime,
+              signal: runtimeAbortController.signal,
+              shouldYield: shouldYieldSystemMailboxWork,
+            });
             assertRuntimeNotAborted();
             if (shouldYieldSystemMailboxWork()) {
               return "preempted";

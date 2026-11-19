@@ -19,7 +19,7 @@ import { importHostedMailboxPrefixAndCheckpoint } from "../src/hosted-runtime/ma
 import { createHostedWorkspaceBridgeMailboxImporter } from "../src/hosted-runtime/snapshot-bridge-mailbox.ts";
 import { createHostedRuntimeResolvedConfig } from "./hosted-runtime-test-helpers.ts";
 import { createHostedMailboxRoutingPlan } from "../src/hosted-runtime/mailbox-routing.ts";
-import { enqueueHostedSystemMailboxItem } from "../src/hosted-runtime/system-mailbox.ts";
+import { enqueueHostedSystemMailboxItem, prepareHostedSystemMailboxItemForCheckpoint } from "../src/hosted-runtime/system-mailbox.ts";
 import {
   readHostedSystemMailboxProgress,
   readHostedSystemMailboxState,
@@ -155,6 +155,57 @@ test.each([false, true])("AI-denied actions and clinical import checkpoint and r
   }
 });
 
+async function enqueueDisplayNameEdit(vaultRoot: string, index: number, actionId: string) {
+  const wake = buildHostedExecutionMemberActionRequestedWake({
+    eventId: `member.action.requested:${actionId}`, memberId: TEST_USER_ID,
+    occurredAt: TEST_NOW, request: { actionId, requestedAt: TEST_NOW, schemaVersion: 1,
+      action: { kind: "display-name.set", version: 1, displayName: `Cedar ${index + 1}` } },
+  });
+  const item = createMailboxItem({ id: `queued_${index}`, kind: wake.kind,
+    lane: "system", laneSeq: String(index + 1), dedupeKey: wake.eventId });
+  const route = createHostedMailboxRoutingPlan(item);
+  if (route.state !== "route") throw new Error("Invalid synthetic route");
+  await enqueueHostedSystemMailboxItem({
+    item: { ...createResolvedRuntimeControlSystemMailboxItem(item), route }, vaultRoot, wake,
+  });
+}
+
+test.each([false, true])("an edit group ends at the observed queue or a foreground wake (yield=%s)", async (yieldToChat) => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-ready-edits-"));
+  try {
+    await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+    await enqueueDisplayNameEdit(vaultRoot, 0, randomUUID());
+    await enqueueDisplayNameEdit(vaultRoot, 1, randomUUID());
+    let arrivalObserved = false;
+    await prepareHostedSystemMailboxItemForCheckpoint({
+      batchMemberActions: true,
+      // Arrival during the unlocked admission read must not extend this save.
+      async assistantAskCompletionOccurredBefore() {
+        if (!arrivalObserved) await enqueueDisplayNameEdit(vaultRoot, 2, randomUUID());
+        arrivalObserved = true;
+        return null;
+      },
+      runtime: {
+        commitTimeoutMs: null, forwardedEnv: {}, platformEnv: {}, userEnv: {},
+        platform: createPlatform({
+          mailboxPort: createMailboxPort({ events: [], items: [] }),
+          workspacePort: createWorkspacePort({ checkpointRequests: [], events: [], workspace: createWorkspaceState({}) }),
+        }),
+        resolvedConfig: createHostedRuntimeResolvedConfig(),
+      },
+      runtimeEnv: {},
+      shouldYieldBackgroundMaintenance: () => arrivalObserved && yieldToChat,
+      vaultRoot,
+    });
+    const state = await readHostedSystemMailboxState(vaultRoot);
+    expect(state.pending.map((item) => item.status)).toEqual([
+      "recording", yieldToChat ? "pending" : "recording", "pending",
+    ]);
+  } finally {
+    await removeTempRoot(vaultRoot);
+  }
+});
+
 test.each([
   { mode: "default", interrupt: false, failReceipt: false, count: 2 },
   { mode: "system_mailbox", interrupt: false, failReceipt: false, count: 2 },
@@ -177,18 +228,7 @@ test.each([
     await initializeVault({ createdAt: TEST_NOW, vaultRoot });
     await ensureHostedBootstrapMetadataForSystemMailboxTest(vaultRoot);
     for (const [index, actionId] of actionIds.entries()) {
-      const wake = buildHostedExecutionMemberActionRequestedWake({
-        eventId: `member.action.requested:${actionId}`, memberId: TEST_USER_ID,
-        occurredAt: TEST_NOW, request: { actionId, requestedAt: TEST_NOW, schemaVersion: 1,
-          action: { kind: "display-name.set", version: 1, displayName: `Cedar ${index + 1}` } },
-      });
-      const item = createMailboxItem({ id: `queued_${index}`, kind: wake.kind,
-        lane: "system", laneSeq: String(index + 1), dedupeKey: wake.eventId });
-      const route = createHostedMailboxRoutingPlan(item);
-      if (route.state !== "route") throw new Error("Invalid synthetic route");
-      await enqueueHostedSystemMailboxItem({
-        item: { ...createResolvedRuntimeControlSystemMailboxItem(item), route }, vaultRoot, wake,
-      });
+      await enqueueDisplayNameEdit(vaultRoot, index, actionId);
     }
     await writeMailboxImportStateFile(vaultRoot, { ...createEmptyHostedMailboxImportState(),
       watermarks: { conversation: "0", system: String(count) } });
@@ -263,7 +303,7 @@ test.each([
       rejectLastReceipt = false;
       result = await run(false);
     }
-    if (!interrupt && !failReceipt) expect(copies).toBe(Math.ceil(count / 4));
+    if (!interrupt && !failReceipt) expect(copies).toBe(1);
     expect(peakReceipts).toBe(Math.min(4, count));
     expect(result.immediateRecheckRequested).not.toBe(true);
     expect(result.nextWakeAt == null || Date.parse(result.nextWakeAt) > Date.now()).toBe(true);

@@ -405,17 +405,29 @@ type MailboxPreparationInput = {
   vaultRoot: string;
 };
 
-const MEMBER_ACTION_BATCH_LIMIT = 4;
+type MemberActionSuccessor = { previousId: string; itemId: string };
 
 export async function prepareHostedSystemMailboxItemForCheckpoint(
   input: MailboxPreparationInput,
 ): Promise<HostedSystemMailboxCheckpointPreparation | null> {
-  const first = await prepareOneSystemMailboxItem(input, []);
+  // Freeze this pass at the queue already on disk. New arrivals get another
+  // turn; an active producer cannot postpone this group's durable save.
+  const { pending } = await readHostedSystemMailboxState(input.vaultRoot);
+  const staged = new Set<string>();
+  const matchesSelection = createPreparationSelection(input, staged);
+  if (!pending.some(matchesSelection)) return null;
+  const first = await prepareOneSystemMailboxItem(input, matchesSelection, null);
   if (!input.batchMemberActions || !isPreparedMemberAction(first)) return first;
+  const start = pending.findIndex((item) => item.itemId === first.itemId);
+  if (start < 0) return first;
   const batch = [first.item];
-  while (batch.length < MEMBER_ACTION_BATCH_LIMIT && !input.shouldYieldBackgroundMaintenance?.()) {
+  for (let i = start + 1; i < pending.length; i++) {
+    const candidate = pending[i]!;
+    if (candidate.wake.kind !== "member.action.requested" || input.shouldYieldBackgroundMaintenance?.()) break;
     input.signal?.throwIfAborted();
-    const next = await prepareOneSystemMailboxItem(input, batch);
+    const previousId = pending[i - 1]!.itemId;
+    staged.add(previousId);
+    const next = await prepareOneSystemMailboxItem(input, matchesSelection, { previousId, itemId: candidate.itemId });
     if (!isPreparedMemberAction(next)) break;
     batch.push(next.item);
   }
@@ -432,29 +444,28 @@ function isPreparedMemberAction(value: HostedSystemMailboxCheckpointPreparation 
 }
 
 function mayClaimNextBatchItem(
-  batch: readonly HostedSystemMailboxPendingItem[],
+  successor: MemberActionSuccessor | null,
   state: HostedSystemMailboxState,
   selected: HostedSystemMailboxPendingItem | null | undefined,
   input: MailboxPreparationInput,
 ): boolean {
-  const previous = batch.at(-1);
-  if (!previous) return true;
+  if (!successor) return true;
   if (
     input.shouldYieldBackgroundMaintenance?.()
     || selected?.wake.kind !== "member.action.requested"
+    || selected.itemId !== successor.itemId
     || selected.mailboxLaneSeq === null
     || (selected.status !== "pending" && !(selected.status === "recording"
       && selected.postCheckpointRecord?.kind === "member-action.outcome-recorded"))
   ) return false;
-  const index = state.pending.findIndex((item) => item.itemId === previous.itemId);
+  const index = state.pending.findIndex((item) => item.itemId === successor.previousId);
   return index >= 0 && state.pending[index + 1]?.itemId === selected.itemId;
 }
 
 function createPreparationSelection(
   input: MailboxPreparationInput,
-  batch: readonly HostedSystemMailboxPendingItem[],
+  staged: ReadonlySet<string>,
 ) {
-  const staged = new Set(batch.map((item) => item.itemId));
   return (item: HostedSystemMailboxPendingItem) =>
     !staged.has(item.itemId)
     && !input.excludedRouteActions?.includes(item.routeAction)
@@ -469,20 +480,14 @@ function createPreparationSelection(
 
 async function prepareOneSystemMailboxItem(
   input: MailboxPreparationInput,
-  batch: readonly HostedSystemMailboxPendingItem[],
+  matchesSelection: (item: HostedSystemMailboxPendingItem) => boolean,
+  successor: MemberActionSuccessor | null,
 ): Promise<HostedSystemMailboxCheckpointPreparation | null> {
   const startedAt = (input.now ?? (() => new Date().toISOString()))();
   const hasAssistantAskCompletionCutoff = Object.hasOwn(
     input,
     "assistantAskCompletionOccurredBefore",
   );
-  const matchesSelection = createPreparationSelection(input, batch);
-  // A negative snapshot only ends this pass. Later imports remain queued; a
-  // positive snapshot must still be re-read and claimed under the write lock.
-  const snapshot = await readHostedSystemMailboxState(input.vaultRoot);
-  if (!snapshot.pending.some(matchesSelection)) {
-    return null;
-  }
   // Resolve conversation chronology only for a nonempty selection, and keep
   // those input-file reads outside the shared write critical section.
   const assistantAskCompletionOccurredBefore = await resolveAssistantAskCompletionCutoff(
@@ -539,7 +544,7 @@ async function prepareOneSystemMailboxItem(
         now: startedAt,
         state: selectionState,
       });
-      if (!mayClaimNextBatchItem(batch, state, pending, input)) {
+      if (!mayClaimNextBatchItem(successor, state, pending, input)) {
         return { result: null, write: false };
       }
       if (!pending) {
@@ -1118,6 +1123,25 @@ export function resolveHostedDeviceSyncCompletionRecordInput(input: {
   return { deviceSyncCompletionAcceptedInCurrentAdmission: true };
 }
 
+const MEMBER_ACTION_RECEIPT_CONCURRENCY = 4;
+
+async function forEachMemberActionReceipt(
+  items: readonly HostedSystemMailboxPendingItem[],
+  visit: (item: HostedSystemMailboxPendingItem) => Promise<void>,
+  signal?: AbortSignal | null,
+  shouldYield?: () => boolean,
+): Promise<void> {
+  for (let i = 0; i < items.length; i += MEMBER_ACTION_RECEIPT_CONCURRENCY) {
+    signal?.throwIfAborted();
+    if (shouldYield?.()) return;
+    const group = items.slice(i, i + MEMBER_ACTION_RECEIPT_CONCURRENCY);
+    const results = await Promise.allSettled(group.map(visit));
+    for (const result of results) {
+      if (result.status === "rejected") throw result.reason;
+    }
+  }
+}
+
 // Only the external receipts overlap. Vault mutations have already run in
 // order and the shared snapshot contains every exact outcome for replay.
 export async function recordHostedMemberActionBatch(input: {
@@ -1128,17 +1152,13 @@ export async function recordHostedMemberActionBatch(input: {
   vaultRoot: string;
   alreadyPublished?: ReadonlySet<string>;
 }) {
-  input.signal?.throwIfAborted();
-  const results = await Promise.allSettled(input.items.map(async (item) => {
+  await forEachMemberActionReceipt(input.items, async (item) => {
     if (input.alreadyPublished?.has(item.itemId)) {
       await removeHostedSystemMailboxPendingItemIfCurrent({ item, vaultRoot: input.vaultRoot });
       return;
     }
     await recordHostedSystemMailboxItemAfterCheckpoint({ ...input, item });
-  }));
-  for (const result of results) {
-    if (result.status === "rejected") throw result.reason;
-  }
+  }, input.signal);
   const state = await readHostedSystemMailboxState(input.vaultRoot);
   const imported = await readHostedMailboxImportState({ vaultRoot: input.vaultRoot });
   const { handledThroughSeq } = resolveHostedSystemMailboxProgress({
@@ -1308,21 +1328,32 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
   }
 }
 
-export async function publishHostedSystemMailboxMemberActionReceipt(input: {
-  item: HostedSystemMailboxPendingItem;
+export async function publishHostedMemberActionReceipts(input: {
+  items: readonly HostedSystemMailboxPendingItem[];
   runtime: HostedSystemMailboxRuntime;
-  signal?: AbortSignal | null;
-}): Promise<void> {
-  if (input.item.postCheckpointRecord?.kind !== "member-action.outcome-recorded") {
-    throw new TypeError("Expected a checkpointed member-action receipt.");
-  }
-  await recordHostedSystemMailboxPostCheckpointRecord({
-    operatorHomeRoot: null,
-    record: input.item.postCheckpointRecord,
-    runtime: input.runtime,
-    signal: input.signal,
-    vaultRoot: null,
-  });
+  signal: AbortSignal;
+  shouldYield: () => boolean;
+}): Promise<ReadonlySet<string>> {
+  const published = new Set<string>();
+  await forEachMemberActionReceipt(input.items, async (item) => {
+    if (item.postCheckpointRecord?.kind !== "member-action.outcome-recorded") {
+      throw new TypeError("Expected a checkpointed member-action receipt.");
+    }
+    try {
+      await recordHostedSystemMailboxPostCheckpointRecord({
+        operatorHomeRoot: null,
+        record: item.postCheckpointRecord,
+        runtime: input.runtime,
+        signal: input.signal,
+        vaultRoot: null,
+      });
+      published.add(item.itemId);
+    } catch {
+      // Cleanup retries an unconfirmed receipt with its original identity.
+      input.signal.throwIfAborted();
+    }
+  }, input.signal, input.shouldYield);
+  return published;
 }
 
 export async function deferHostedMemberActionAfterBrowserVaultFailure(input: {

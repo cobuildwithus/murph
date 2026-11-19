@@ -1101,10 +1101,10 @@ Device hints, restored timers, imports, activity scheduling, and exact
 acknowledgments all use the workspace-owned mailbox path. Common durable effects
 retain their existing delivery and shutdown behavior.
 
-The runner drains ready ordered mailbox work in the same invocation. Up to four
-adjacent, eligible member edits can share one workspace snapshot. The runner
+The runner drains ready ordered mailbox work in the same invocation. Adjacent ready
+member edits already queued at the start of a pass share one workspace snapshot. The runner
 applies them in queue order, checks for foreground work between edits, and
-publishes their individual receipts concurrently after the snapshot commits.
+publishes up to four individual receipts concurrently after the snapshot commits.
 The snapshot contains the exact outcomes. If publication stops partway, the
 next runner can retry those receipts using their original identities. A fenced
 progress update records the handled system sequence. On restore, it retires
