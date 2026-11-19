@@ -431,3 +431,12 @@ test("Oura record emitters preserve the first getter exception and stop before l
   }), (error: unknown) => error === failure);
   assert.deepEqual(reads, ["identity", "sleep"]);
 });
+
+test("offset sleep timestamps retain the local wake day", () => {
+  const payload = normalizeOuraSnapshot({ sleeps: [{
+    id: "night", bedtime_start: "2026-05-03T23:00:00+10:00",
+    bedtime_end: "2026-05-04T06:00:00+10:00", total_sleep_duration: 21600,
+  }] });
+  assert.equal(payload.events?.find(event => event.kind === "sleep_session")?.dayKey, "2026-05-04");
+  assert.equal(payload.events?.find(event => event.fields?.metric === "sleep-total-minutes")?.dayKey, "2026-05-04");
+});

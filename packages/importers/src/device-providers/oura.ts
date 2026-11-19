@@ -492,7 +492,9 @@ function emitOuraSleep(
 ): void {
   const sleepId = stringId(sleep.id) ?? `sleep-${events.length + 1}`;
   const startAt = firstIso(sleep.bedtime_start, sleep.start_datetime, sleep.start_time, sleep.start);
-  const endAt = firstIso(sleep.bedtime_end, sleep.end_datetime, sleep.end_time, sleep.end);
+  const endTimes = [sleep.bedtime_end, sleep.end_datetime, sleep.end_time, sleep.end];
+  const endTime = endTimes.find(value => firstIso(value) !== undefined);
+  const endAt = firstIso(endTime);
   const recordedAt =
     firstIso(sleep.timestamp, sleep.updated_at, sleep.updatedAt, endAt, startAt) ?? importedAt;
   const occurredAt = startAt ?? recordedAt;
@@ -500,6 +502,7 @@ function emitOuraSleep(
     stringId(sleep.day),
     stringId(sleep.date),
     stringId(sleep.sleep_date),
+    endTime,
     endAt,
     recordedAt,
     occurredAt,
