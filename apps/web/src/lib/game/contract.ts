@@ -648,6 +648,12 @@ export type GameInvitePreview =
       terms: GameTermsVersion;
       /** The picked Day 1, if the challenger chose one. */
       startsOn: string | null;
+      /**
+       * One-on-one with no picked Day 1: the earliest Day 1 the players
+       * already in allow if accepted now. The reader's own clock can make it
+       * later still.
+       */
+      earliestStart?: string | null;
       expiresAt: string | null;
     }
   | { status: "used"; talkDelivery?: "pending" | "sent" | "failed" }

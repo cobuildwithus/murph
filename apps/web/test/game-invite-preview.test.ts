@@ -111,6 +111,17 @@ describe("public invite preview privacy", () => {
     expect(sign).not.toHaveBeenCalled();
   });
 
+  it("projects the challenger's earliest Day 1 for a pair invite with no picked start", async () => {
+    const row = { ...await invite(), players: [{ ...player, timeZone: "America/New_York" }] };
+    db.game.findUnique.mockResolvedValue(row);
+    // 7am in New York: today. 3pm: tomorrow, whatever the reader's clock says.
+    expect(await readInvitePreview("synthetic-invite")).toMatchObject({ earliestStart: "2026-11-12" });
+    db.$queryRaw.mockResolvedValueOnce([{ now: new Date("2026-11-12T20:00:00Z") }]);
+    expect(await readInvitePreview("synthetic-invite")).toMatchObject({ earliestStart: "2026-11-13" });
+    db.game.findUnique.mockResolvedValue({ ...row, startsOn: new Date("2026-11-20T00:00:00Z") });
+    expect(await readInvitePreview("synthetic-invite")).not.toHaveProperty("earliestStart");
+  });
+
   it("signs the current inviter photo only for a signed-in open pair preview", async () => {
     const row = await invite();
     db.game.findUnique.mockResolvedValue(row);
