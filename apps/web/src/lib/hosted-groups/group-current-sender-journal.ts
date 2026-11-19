@@ -11,7 +11,10 @@ import type {
   HostedExecutionAssistantAskAcceptedInputOrigin,
   HostedExecutionGroupJournalFactPayload,
 } from "@murphai/hosted-execution/contracts";
-import type { HostedRuntimeGroupJournalActionResult } from "@murphai/hosted-execution/runtime-control";
+import {
+  HOSTED_RUNTIME_GROUP_JOURNAL_EVENT_ID_PREFIX,
+  type HostedRuntimeGroupJournalActionResult,
+} from "@murphai/hosted-execution/runtime-control";
 
 import { appendHostedMailboxEnvelopeWithIdentityTx } from "../hosted-mailbox/store";
 import { resolveHostedAssistantNotificationDestination } from "../hosted-routing/assistant-notification-destination";
@@ -320,7 +323,7 @@ function createGroupJournalId(input: {
     .update("\0")
     .update(input.kind)
     .digest("hex");
-  return `group_journal_${digest}`;
+  return `${HOSTED_RUNTIME_GROUP_JOURNAL_EVENT_ID_PREFIX}${digest}`;
 }
 
 function handledAdmission(
