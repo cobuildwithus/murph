@@ -135,9 +135,8 @@ describe("Strava importer adapter", () => {
           kind: "observation",
           fields: expect.objectContaining({
             metric: "external-resource-deleted",
-            resourceType: "activity",
-            deleted: true,
-            sourceEventType: "activity.delete",
+            value: 1,
+            unit: "boolean",
           }),
         }),
       ]),
