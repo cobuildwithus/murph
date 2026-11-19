@@ -31,18 +31,15 @@ function projectionUnavailable(stage: string) {
   });
 }
 
-export async function readCompanionMeals(request: Request, recoverUploadIds = true) {
+export async function readCompanionMeals(request: Request) {
   const prisma = getPrisma();
   const auth = await requireActiveHostedMemberAuthFromBearerToken(request, prisma);
   await assertBrowserVaultMemberAuthority({ memberId: auth.member.id, prisma });
   const snapshot = await loadSavedMeals(auth.member.id, request.signal);
-  if (recoverUploadIds) await recoverCompanionMealUploadIds({
-    memberId: auth.member.id, prisma, projection: snapshot.projection, entities: snapshot.entities,
-  });
   // External ciphertext loading cannot preserve access after consent/session loss.
   await assertHostedNativeMemberAuthCurrentTx(auth, prisma);
   await assertBrowserVaultMemberAuthority({ memberId: auth.member.id, prisma });
-  return { auth, prisma, savedAt: snapshot.savedAt, projection: snapshot.projection };
+  return { auth, prisma, ...snapshot };
 }
 
 async function loadSavedMeals(memberId: string, signal: AbortSignal): Promise<{
@@ -73,7 +70,7 @@ async function loadSavedMeals(memberId: string, signal: AbortSignal): Promise<{
     const loaded = await decodeReadyBrowserVaultSession({ session, privateKeyJwk: keys.privateKeyJwk, expectedMemberId: memberId, signal });
     const replica = loaded.client.replica;
     if (!replica.meals || (replica.generation ?? 0) < 17) throw projectionUnavailable("replica_meals_missing");
-    return { savedAt: replica.generatedAt, projection: structuredClone(replica.meals), entities: replica.entities };
+    return { savedAt: replica.generatedAt, projection: replica.meals, entities: replica.entities };
   } catch (error) {
     // Keep this read's own stage; every other failure stays a retryable 503.
     if (isHostedOnboardingError(error) && error.code === "MEALS_PROJECTION_UNAVAILABLE") throw error;
@@ -110,7 +107,7 @@ export function requireProjectedMeal(projection: CompanionMealsProjection, id: s
 }
 
 export async function queueCompanionMealRemoval(request: Request, id: string) {
-  const { auth, prisma, projection } = await readCompanionMeals(request, false);
+  const { auth, prisma, projection } = await readCompanionMeals(request);
   requireProjectedMeal(projection, id);
   try {
     await readRawBodyBuffer(request, { limitBytes: 0 });
@@ -134,6 +131,10 @@ export async function queueCompanionMealRemoval(request: Request, id: string) {
 
 /** Sign only meals selected for this response, then recheck live owner authority. */
 export async function presentCompanionMeals(state: Awaited<ReturnType<typeof readCompanionMeals>>, meals: CompanionMeal[]) {
+  const selected = meals.map(meal => ({ ...meal }));
+  const lookedUpReceipts = await recoverCompanionMealUploadIds({
+    memberId: state.auth.member.id, prisma: state.prisma, meals: selected, entities: state.entities,
+  });
   const descriptors = new Map<string, { mediaId: string; sha256: string; byteSize: number }>();
   for (const meal of meals) {
     if (!meal.thumbnail) continue;
@@ -144,11 +145,11 @@ export async function presentCompanionMeals(state: Awaited<ReturnType<typeof rea
   const deliveries = descriptors.size && control
     ? await control.mealThumbnailDeliveries({ userId: state.auth.member.id, photos: [...descriptors.values()] }) : null;
   const urls = new Map(deliveries?.map(delivery => [delivery.mediaId, delivery.url]) ?? []);
-  if (descriptors.size && control) {
+  if (lookedUpReceipts || (descriptors.size && control)) {
     await assertHostedNativeMemberAuthCurrentTx(state.auth, state.prisma);
     await assertBrowserVaultMemberAuthority({ memberId: state.auth.member.id, prisma: state.prisma });
   }
-  return meals.map(({ thumbnail, ...meal }) => {
+  return selected.map(({ thumbnail, ...meal }) => {
     const url = thumbnail ? urls.get(createHostedMediaReferenceId({ ...thumbnail, mediaKind: "image" })) : undefined;
     return { ...meal, photo: url && thumbnail ? { url, width: thumbnail.width, height: thumbnail.height } : null };
   });

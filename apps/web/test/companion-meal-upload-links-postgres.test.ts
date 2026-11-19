@@ -40,13 +40,13 @@ it.skipIf(!enabled)("matches only owner-bound automatic receipts, with one bound
         externalRef: { system: "meal-photo-capture", resourceType: "photo", resourceId: captureId },
       } }));
       const query = vi.spyOn(tx, "$queryRaw");
-      await recoverCompanionMealUploadIds({ memberId: "member_fixture", prisma: tx, projection, entities });
+      await recoverCompanionMealUploadIds({ memberId: "member_fixture", prisma: tx, meals: projection.days[0]!.meals, entities });
       expect(query).toHaveBeenCalledTimes(1);
       expect(projection.days[0]!.meals.map(meal => meal.uploadId)).toEqual([captureIds[0], null, null, null, null]);
       // Explicit IDs win and removed meals cannot acquire a link from stale entities.
       projection.days[0]!.meals = [{ ...projection.days[0]!.meals[0]!, uploadId: "explicit-phone-id" }];
       query.mockClear();
-      await recoverCompanionMealUploadIds({ memberId: "member_fixture", prisma: tx, projection, entities });
+      await recoverCompanionMealUploadIds({ memberId: "member_fixture", prisma: tx, meals: projection.days[0]!.meals, entities });
       expect(projection.days[0]!.meals[0]!.uploadId).toBe("explicit-phone-id");
       expect(query).not.toHaveBeenCalled();
       await tx.$executeRawUnsafe("DROP TABLE hosted_mailbox_item");
