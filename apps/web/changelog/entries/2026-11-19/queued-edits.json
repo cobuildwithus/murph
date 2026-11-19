@@ -9,6 +9,6 @@
     "summary": "When several meal or workout edits are waiting, Murph can save them one after another in the same session.",
     "details": "Murph saves progress after each edit so an interrupted session can pick up where it left off.",
     "relevanceTags": ["meals", "workouts"],
-    "sourcePullRequests": []
+    "sourcePullRequests": [5208]
   }
 }
