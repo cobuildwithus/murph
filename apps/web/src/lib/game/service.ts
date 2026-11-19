@@ -3012,10 +3012,11 @@ async function acceptGameRecapTx(tx: Prisma.TransactionClient, input: SealGameRe
 export async function readGamePhotoPostingStateTx(tx: Prisma.TransactionClient, gameId: string, actor: string) {
   await tx.$queryRaw`SELECT id FROM game WHERE id = ${gameId} FOR UPDATE`;
   const [loaded] = await loadGames(tx, [gameId]);
-  if (!loaded || loaded.state.game.status !== "live" || isGameDecided(loaded.state)) return null;
+  if (!loaded || loaded.state.game.status !== "live") return null;
   const player = playerFor(loaded.state, actor);
   if (!player || player.leftAt) return null;
   const now = gameNow(await databaseNow(tx), loaded.row);
+  if (isGameDecided(loaded.state, now)) return null;
   const dayIndex = dayIndexAt(player, now);
   if (dayIndex === null || dayIndex < 0 || dayIndex >= loaded.row.lengthDays || !player.dayOne) return null;
   return { now, dayIndex, player, scheduled: isScheduledDay(loaded.state, dayIndex), offDayMessage: gameOffDayMessage(loaded.state, player, dayIndex),
