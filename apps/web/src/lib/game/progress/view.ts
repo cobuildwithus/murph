@@ -9,8 +9,8 @@ import { readAwards, settleAwards, markAwardsSeen, type StoredAward } from "./aw
 import { ACHIEVEMENTS, HEALTH, type AchievementContext } from "./registry";
 import { measureLadder, measureRungs, projection, roundValues, rungFor } from "./goals";
 import { formatAmount, formatNumber } from "./format";
-import { cumulativePoints, scheduleInference, type MeasureSeries } from "./series";
-import { hasHealthAuthority, markVaultRunAwards, readOwnSeries } from "./vault-runs";
+import { cumulativePoints, describeMeasure, scheduleInference, type MeasureSeries, type TodayCheckIn } from "./series";
+import { hasHealthAuthority, markVaultRunAwards, readOwnSeries, RUN_MEASURE_ID } from "./vault-runs";
 import type { BeforeProgressMutation, MeasureState } from "./state";
 import { routeAwardName } from "./route-progress";
 import { BANK, type RungDefinition } from "./bank";
@@ -129,6 +129,21 @@ export function measureView(measure: MeasureSeries, state: MeasureState, awards:
     route: routeView(measure.id, state, points, awards, units, today), pics: [] };
 }
 
+/** Before today's check-in is in, the measure as the next read will show it: the same view with that day's
+ * amount added. Vault runs count a day's larger of game and vault runs, so Running promises nothing then. */
+export function checkInView(checkIn: TodayCheckIn, snapshot: { measures: readonly MeasureSeries[]; states: ReadonlyMap<string, MeasureState>; vaultRunsMerged: boolean },
+  measures: readonly Progress["measures"][number][], awards: readonly StoredAward[], today: string, units: ClientUnits): Progress["checkIns"] {
+  const shown = measures.find(measure => measure.id === checkIn.measureId);
+  const entry = { gameId: checkIn.gameId, measureId: checkIn.measureId };
+  if (checkIn.adds === null) return shown ? [{ ...entry, after: null }] : [];
+  if (checkIn.measureId === RUN_MEASURE_ID && snapshot.vaultRunsMerged) return [];
+  const series = snapshot.measures.find(measure => measure.id === checkIn.measureId)
+    ?? { ...describeMeasure(checkIn.measureId, checkIn.name, checkIn.text), pending: false, gameOn: true, needsPerDay: checkIn.needsPerDay, amounts: [] };
+  const after = measureView({ ...series, amounts: [...series.amounts, { measureId: checkIn.measureId, date: checkIn.date, amount: checkIn.adds }] },
+    snapshot.states.get(checkIn.measureId) ?? {}, awards, today, units);
+  return [{ ...entry, after: { ...after, label: shown?.label ?? after.label, pics: shown?.pics ?? [] } }];
+}
+
 export async function readProgress(memberId: string, units: ClientUnits, beforeMutationTx: BeforeProgressMutation, timing = new ProgressReadTiming()): Promise<Progress> {
   const db = getPrisma();
   const profile = await timing.measure("profile", () => db.gameProfile.findUnique({ where: { memberId }, select: { timeZone: true, createdAt: true } }));
@@ -179,8 +194,9 @@ export async function readProgress(memberId: string, units: ClientUnits, beforeM
       kinds.add(key); shelf.push(medal.id);
       if (shelf.length === 6) break;
     }
+    const checkIns = snapshot.checkIns.flatMap(checkIn => checkInView(checkIn, snapshot, measures, awards, today, units));
     return { joinedOn, today, incomplete: snapshot.incomplete, measures,
-      medals, shelf, moments: momentsView(awards, measures, units), picCount: pictures.pics.length };
+      medals, shelf, moments: momentsView(awards, measures, units), picCount: pictures.pics.length, checkIns };
   });
 }
 

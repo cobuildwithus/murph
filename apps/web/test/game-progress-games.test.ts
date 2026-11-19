@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { gameSeries, cumulativePoints } from "../src/lib/game/progress/series";
+import { gameSeries, cumulativePoints, todayCheckIns } from "../src/lib/game/progress/series";
 import { gameDays } from "../src/lib/game/progress/game-days";
 import { BANK, ladder, search, rungEntry } from "../src/lib/game/progress/bank";
 import { measureLadder, projection, roundValues, rungFor } from "../src/lib/game/progress/goals";
 import { formatAmount, formatNumber } from "../src/lib/game/progress/format";
 import { ACHIEVEMENTS } from "../src/lib/game/progress/registry";
-import { achievementContext, medalView, medalsView, measureView, momentsView, visibleAwards } from "../src/lib/game/progress/view";
+import { achievementContext, checkInView, medalView, medalsView, measureView, momentsView, visibleAwards } from "../src/lib/game/progress/view";
 import { retiredAward, type StoredAward } from "../src/lib/game/progress/awards";
 import { game, memberId, post, task } from "./support/progress-games";
 
@@ -81,6 +81,50 @@ describe("Progress source contributions", () => {
     const next = game("next", reps);
     expect(gameSeries([old], memberId, new Map())[0].gameOn).toBe(false);
     expect(gameSeries([old, next], memberId, new Map())[0].gameOn).toBe(true);
+  });
+});
+
+describe("today's check-ins", () => {
+  const pullups = () => game("pullups", task("20 pullups", { quantity: 20, unit: "reps", name: "pullups" }));
+  const read = (source: ReturnType<typeof game>, runsMerged = false) => {
+    const measures = gameSeries([source], memberId, new Map());
+    const shown = measures.map(measure => measureView(measure, {}, [], "2026-11-05", "us"));
+    return todayCheckIns([source], memberId, new Map()).flatMap(checkIn =>
+      checkInView(checkIn, { measures, states: new Map(), vaultRunsMerged: runsMerged }, shown, [], "2026-11-05", "us"));
+  };
+
+  it("shows the measure exactly as the next read will once today's post is in", () => {
+    const source = pullups();
+    post(source, 3, "photo", null);
+    const [before] = read(source);
+    expect(before).toMatchObject({ gameId: "pullups", measureId: "pullups.reps",
+      after: { total: { value: 40, text: "40" }, today: { value: 20, text: "20" } } });
+    post(source, 4, "photo", null);
+    expect(before.after).toEqual(measureView(gameSeries([source], memberId, new Map())[0], {}, [], "2026-11-05", "us"));
+    expect(read(source)).toEqual([{ gameId: "pullups", measureId: "pullups.reps", after: null }]);
+  });
+
+  it("starts a measure no post has added to yet, as its first read will show it", () => {
+    const source = pullups();
+    const [before] = read(source);
+    post(source, 4, "photo", null);
+    expect(before.after).toEqual(measureView(gameSeries([source], memberId, new Map())[0], {}, [], "2026-11-05", "us"));
+  });
+
+  it("names the measure a counted post went to, not the task's", () => {
+    const source = game("move", task("Move", null));
+    post(source, 4, "reps", { exercise: "pushups", count: 25, reps: [] });
+    expect(read(source)).toEqual([{ gameId: "move", measureId: "pushups.reps", after: null }]);
+  });
+
+  it("promises nothing for a task Murph is still reading, a day off, a game that's over, one you left or Running with vault runs", () => {
+    const off = pullups(); off.state.game.terms.versions[0].schedule = { days: [0] };
+    const settled = pullups(); settled.state.game.status = "settled";
+    const left = pullups(); left.state.players[0].leftAt = new Date("2026-11-04T12:00:00Z");
+    const run = game("run", task("2 miles run", { quantity: 2, unit: "miles", name: "run" }));
+    for (const source of [game("pending", task("Move", null)), off, settled, left]) expect(read(source)).toEqual([]);
+    expect(read(run, true)).toEqual([]);
+    expect(read(run)).toMatchObject([{ measureId: "run.meters", after: { today: { value: 3218.688 } } }]);
   });
 });
 

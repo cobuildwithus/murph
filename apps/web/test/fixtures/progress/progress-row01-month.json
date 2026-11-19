@@ -572,5 +572,136 @@
     "friend-leo"
   ],
   "moments": [],
-  "picCount": 3
+  "picCount": 3,
+  "checkIns": [
+    {
+      "gameId": "game-pushups",
+      "measureId": "pushups.reps",
+      "after": null
+    },
+    {
+      "gameId": "game-pullups",
+      "measureId": "pullups.reps",
+      "after": {
+        "id": "pullups.reps",
+        "label": "Pull-ups",
+        "noun": "pull-ups",
+        "icon": "pullups",
+        "format": "count",
+        "source": "games",
+        "pending": false,
+        "gameOn": true,
+        "needsPerDay": false,
+        "total": {
+          "value": 400,
+          "text": "400",
+          "unit": "reps"
+        },
+        "today": {
+          "value": 20,
+          "text": "+20",
+          "unit": "reps"
+        },
+        "points": [
+          [
+            "2026-10-21",
+            0.0
+          ],
+          [
+            "2026-10-22",
+            29.231
+          ],
+          [
+            "2026-10-24",
+            58.462
+          ],
+          [
+            "2026-10-26",
+            87.692
+          ],
+          [
+            "2026-10-28",
+            116.923
+          ],
+          [
+            "2026-10-30",
+            146.154
+          ],
+          [
+            "2026-11-01",
+            175.385
+          ],
+          [
+            "2026-11-02",
+            204.615
+          ],
+          [
+            "2026-11-04",
+            233.846
+          ],
+          [
+            "2026-11-06",
+            263.077
+          ],
+          [
+            "2026-11-08",
+            292.308
+          ],
+          [
+            "2026-11-10",
+            321.538
+          ],
+          [
+            "2026-11-12",
+            350.769
+          ],
+          [
+            "2026-11-14",
+            400
+          ]
+        ],
+        "projection": {
+          "value": 500,
+          "label": "500 by Nov 24",
+          "on": "2026-11-24"
+        },
+        "ladder": {
+          "kind": "height",
+          "passed": [
+            {
+              "id": "golden-gate-bridge-towers",
+              "name": "Golden Gate Bridge towers",
+              "drawing": "golden-gate-bridge-towers",
+              "at": 746,
+              "atText": "746 ft",
+              "blurb": "The towers of San Francisco's orange suspension bridge, opened in 1937.",
+              "where": "San Francisco, USA",
+              "on": "2026-11-12",
+              "toGo": null,
+              "short": "Golden Gate towers",
+              "tagline": "Orange towers above the bay",
+              "shareAwardId": "pull-golden"
+            }
+          ],
+          "next": {
+            "id": "eiffel-tower",
+            "name": "Eiffel Tower",
+            "drawing": "eiffel-tower",
+            "at": 1083,
+            "atText": "1,083 ft",
+            "blurb": "Paris's iron tower, built for the 1889 World's Fair and meant to be temporary.",
+            "where": "Paris, France",
+            "on": null,
+            "toGo": "162 to go",
+            "short": "Eiffel Tower",
+            "tagline": "An iron tower above the rooftops",
+            "shareAwardId": null
+          },
+          "goalPicked": false
+        },
+        "route": null,
+        "pics": []
+      }
+    }
+  ]
 }
