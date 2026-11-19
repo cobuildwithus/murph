@@ -243,14 +243,14 @@ const DEFAULT_SAMPLE_UNITS = Object.freeze({
 } as const satisfies Record<SampleStream, string>);
 
 const SAMPLE_VALUE_SUFFIX_ALIASES = Object.freeze({
-  glucose: ["mg/dl", "mg dl", "mg_dl", "mmol/l", "mmol l", "mmol_l"],
+  glucose: ["mg/dl", "mg dl", "mg_dl"],
   heart_rate: ["bpm", "beats/min", "beats per minute", "beat/min", "beat per minute", "hr"],
   spo2: ["%", "percent", "percentage"],
   hrv: ["ms", "millisecond", "milliseconds"],
   respiratory_rate: ["rpm", "breaths/min", "breaths per minute", "breaths/minute"],
   sleep_stage: [],
   steps: ["steps", "step", "count"],
-  temperature: ["c", "celsius", "f", "fahrenheit", "deg c", "deg f"],
+  temperature: ["celsius", "deg c", "c"],
 } as const satisfies Record<SampleStream, readonly string[]>);
 
 interface RecognizedSampleColumn {
@@ -351,9 +351,9 @@ export async function prepareCsvSampleImport(
     for (const collector of collectors) {
       collector.rowCount += 1;
       const rawValue = String(row[collector.valueIndex] ?? "");
-      const value = normalizeOptionalNumber(rawValue, collector.stream);
+      const value = parseSampleValue(rawValue, collector.stream, collector.unit);
 
-      if (!recordedAt || value === undefined) {
+      if (!recordedAt || typeof value !== "number") {
         const skipReason = resolveSkipReason(recordedAt, value);
         collector.skipReasonCounts.set(skipReason, (collector.skipReasonCounts.get(skipReason) ?? 0) + 1);
         continue;
@@ -886,10 +886,10 @@ function normalizeComparableText(value: string): string {
     .replace(/[^a-z0-9]+/gu, "");
 }
 
-function resolveSkipReason(recordedAt: string | undefined, value: number | undefined): string {
+function resolveSkipReason(recordedAt: string | undefined, value: number | "unit mismatch" | undefined): string {
   const reasons = [
     !recordedAt ? "unparseable timestamp" : null,
-    value === undefined ? "non-numeric value" : null,
+    typeof value === "number" ? null : value ?? "non-numeric value",
   ].filter((entry): entry is string => entry !== null);
 
   return reasons.join("; ");
@@ -904,44 +904,29 @@ function createCsvInferenceError(field: "tsColumn" | "valueColumn"): CsvSampleIm
   return new CsvSampleImportError({ code });
 }
 
-function normalizeOptionalNumber(value: unknown, stream: SampleStream): number | undefined {
-  if (value === undefined || value === null) {
-    return undefined;
-  }
-
-  const trimmed = String(value).trim();
-
-  if (trimmed.length === 0 || /^(?:--+|n\/a|na|null|none|nan)$/iu.test(trimmed)) {
-    return undefined;
-  }
-
-  const normalizedBase = trimmed
-    .replace(/[°]/gu, "")
-    .replace(/\s+/gu, " ")
-    .trim();
-  const candidates = new Set([normalizedBase, normalizedBase.toLowerCase()]);
-
-  for (const suffix of SAMPLE_VALUE_SUFFIX_ALIASES[stream]) {
-    candidates.add(stripNumericSuffix(normalizedBase, suffix));
-  }
-
-  for (const candidate of candidates) {
-    const numeric = Number(candidate);
-
-    if (Number.isFinite(numeric)) {
-      return numeric;
-    }
-
-    const groupedNumeric = normalizeGroupedNumberCandidate(candidate);
-    if (groupedNumeric !== null) {
-      const grouped = Number(groupedNumeric);
-      if (Number.isFinite(grouped)) {
-        return grouped;
-      }
+function parseSampleValue(raw: string, stream: SampleStream, unit: string): number | "unit mismatch" | undefined {
+  const cell = raw.replaceAll("°", "").trim().toLowerCase().replace(/\s+/gu, " ");
+  const batchUnit = unit.replaceAll("°", "").trim().toLowerCase().replace(/\s+/gu, " ");
+  const alternative = stream === "glucose" ? ["mmol/l", "mmol l", "mmol_l"]
+    : stream === "temperature" ? ["fahrenheit", "deg f", "f"] : [];
+  for (const aliases of [SAMPLE_VALUE_SUFFIX_ALIASES[stream], alternative]) {
+    for (const suffix of aliases) {
+      const stripped = stripNumericSuffix(cell, suffix);
+      if (stripped === cell) continue;
+      const numeric = parseCellNumber(stripped);
+      if (numeric === undefined) continue;
+      const compatible = (aliases === SAMPLE_VALUE_SUFFIX_ALIASES[stream] && batchUnit === DEFAULT_SAMPLE_UNITS[stream].toLowerCase())
+        || aliases.some(alias => alias === batchUnit);
+      return compatible ? numeric : "unit mismatch";
     }
   }
+  return parseCellNumber(cell);
+}
 
-  return undefined;
+function parseCellNumber(cell: string): number | undefined {
+  if (!cell) return undefined;
+  const numeric = Number(normalizeGroupedNumberCandidate(cell) ?? cell);
+  return Number.isFinite(numeric) ? numeric : undefined;
 }
 
 function normalizeGroupedNumberCandidate(value: string): string | null {

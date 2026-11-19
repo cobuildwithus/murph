@@ -943,3 +943,19 @@ test("importCsvSamples with the real core runtime writes a batch manifest with r
     "context",
   ]);
 });
+
+test("CSV reports explicit sample units that disagree with the ledger unit", async () => {
+  const filePath = await createTempFile("measurements.csv", [
+    "timestamp,glucose,temperature",
+    "2026-05-08T08:00:00Z,5 mmol/L,97 F",
+    "2026-05-09T08:00:00Z,94 mg/dL,36 C",
+  ].join("\n"));
+  const plan = await prepareCsvSampleImport({ filePath, timeZone: "UTC" });
+  assert.deepEqual(plan.imports.map(entry => entry.payload.samples.map(sample => sample.value)), [[94], [36]]);
+  for (const entry of plan.imports) assert.deepEqual(entry.skipReasons, [{ reason: "unit mismatch", count: 1 }]);
+
+  const fahrenheit = await prepareCsvSampleImport({
+    filePath, stream: "temperature", valueColumn: "temperature", tsColumn: "timestamp", unit: "°F", timeZone: "UTC",
+  });
+  assert.deepEqual(fahrenheit.imports[0]!.payload.samples.map(sample => sample.value), [97]);
+});
