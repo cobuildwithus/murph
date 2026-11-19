@@ -218,12 +218,11 @@ function normalizeRecurringScheduleTimeZone(
 }
 
 function normalizeAutomationStatus(value: unknown): AutomationStatus {
-  const normalized = normalizeNullableString(typeof value === "string" ? value : null);
-  if (normalized && automationStatusValues.includes(normalized as AutomationStatus)) {
-    return normalized as AutomationStatus;
+  if (value === undefined || value === null || value === "") return "active";
+  if (!automationStatusValues.includes(value as AutomationStatus)) {
+    throw new Error("Automation status must be active, paused, or archived.");
   }
-
-  return "active";
+  return value as AutomationStatus;
 }
 
 function normalizeAutomationContinuityPolicy(
@@ -578,6 +577,7 @@ async function loadAutomationRecords(
         .slice(offset, offset + AUTOMATION_DOCUMENT_READ_CONCURRENCY)
         .map(async (relativePath) => {
           const document = await readMarkdownDocument(vaultRoot, relativePath);
+          if (!matchesAutomationStatus(normalizeAutomationStatus(document.attributes.status), options.status)) return null;
           return parseAutomationRecord(document);
         }),
     );
@@ -586,7 +586,7 @@ async function loadAutomationRecords(
       if (outcome.status === "rejected") {
         throw outcome.reason;
       }
-      if (matchesAutomationOptions(outcome.value, options)) {
+      if (outcome.value && matchesAutomationOptions(outcome.value, options)) {
         records.push(outcome.value);
       }
     }
@@ -646,7 +646,6 @@ function matchesAutomationOptions(
   options: AutomationListOptions,
 ): boolean {
   return !options.excludeAutomationIds?.includes(record.automationId) &&
-    matchesAutomationStatus(record.status, options.status) &&
     matchesAutomationExactTag(record, options.exactTag) &&
     matchesAutomationText(record, options.text);
 }

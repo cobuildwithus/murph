@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -198,3 +198,23 @@ function createDeferred(): {
     },
   };
 }
+
+it("rejects a malformed explicit automation status", async () => {
+  const vaultRoot = await createVaultRoot();
+  const file = "bank/automations/schedule.md";
+  await writeAutomationDocument(vaultRoot, file, "Schedule");
+  const document = await readFile(path.join(vaultRoot, file), "utf8");
+  await writeFile(path.join(vaultRoot, file), document.replace("status: active", "status: pause"));
+  await expect(listAutomations(vaultRoot, { status: "active" })).rejects.toThrow(/status/u);
+});
+
+it("lists active schedules when a paused schedule has a malformed interval", async () => {
+  const vaultRoot = await createVaultRoot();
+  const file = "bank/automations/paused.md";
+  await writeAutomationDocument(vaultRoot, "bank/automations/current.md", "Current");
+  await writeAutomationDocument(vaultRoot, file, "Paused");
+  const document = await readFile(path.join(vaultRoot, file), "utf8");
+  await writeFile(path.join(vaultRoot, file), document.replace("status: active", "status: paused").replace("everyMs: 60000", "everyMs: -1"));
+  expect((await listAutomations(vaultRoot, { status: "active" })).map(record => record.title)).toEqual(["Current"]);
+  await expect(listAutomations(vaultRoot)).rejects.toThrow(/everyMs/u);
+});
