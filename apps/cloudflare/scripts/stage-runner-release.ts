@@ -1,3 +1,4 @@
+import { retainedAdmissionVariables } from "./deploy-model-admission.ts";
 import { randomUUID } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -84,7 +85,7 @@ export async function stageHostedRunnerRelease(input: {
   const config: unknown = JSON.parse(await readFile(input.configPath, "utf8"));
   if (!isObjectRecord(config) || !isObjectRecord(config.vars)
     || !Array.isArray(config.containers) || typeof config.name !== "string") throw invalid();
-  const vars = config.vars;
+  const vars = retainedAdmissionVariables(config.vars, input.currentVersion);
   const liveVars = readReleaseVariables(input.currentVersion);
   const liveDeployment = readHostedRunnerDeployment(liveVars);
   const active: HostedRunnerRelease = liveDeployment?.active ?? {

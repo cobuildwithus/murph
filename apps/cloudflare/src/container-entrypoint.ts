@@ -150,6 +150,10 @@ async function runHostedLiveModelSmokeRequest(
   let heavyRuntime: HostedContainerHeavyRuntime | null = null;
   try {
     heavyRuntime = await hydrateHeavyRuntime();
+    if (request.headers["x-murph-smoke-contract"] === "measure") {
+      writeJsonResponse(response, 200, { digest: await heavyRuntime.measureModelRequestContract(signal) });
+      return;
+    }
     const model = request.headers["x-murph-smoke-model"] ?? heavyRuntime.deployLiveModelTurnSmokeModel;
     const serviceTier = request.headers["x-murph-smoke-service-tier"];
     if ((serviceTier !== undefined && !isDeployAdmissionTier(serviceTier)) || !isDeployAdmissionModel(model, serviceTier ?? "default")) {

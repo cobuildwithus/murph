@@ -1,4 +1,4 @@
-import { DEPLOY_MODEL_ADMISSION_PROBES, type DeployAdmissionTier } from "./deploy-smoke-live-model.ts";
+import { deployAdmissionProbes, type DeployAdmissionTier } from "./deploy-smoke-live-model.ts";
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { HOSTED_EXECUTION_DEFAULT_RUNNER_IDLE_TTL_MS } from "@murphai/hosted-execution/contracts";
 import type { HostedRuntimeOwnerCommand } from "@murphai/hosted-execution/runtime-owner";
@@ -419,6 +419,7 @@ interface HostedExecutionContainerSmokeHealthResult {
     model: string | null;
     stdoutBytes: number | null;
   } | null;
+  admissionDigest?: string;
   webModelTurns?: NonNullable<HostedExecutionContainerSmokeHealthResult["liveModelTurn"]>[];
   liveModelTurnFailure?: string;
   ok: boolean;
@@ -440,7 +441,7 @@ interface HostedExecutionContainerSmokeHealthInput {
     presignedPutUrl: string;
     tlsCaCertificatePem?: string;
   };
-  liveModelTurn?: { model: string } | { webModelAdmission: true };
+  liveModelTurn?: { model: string } | { webModelAdmission: true; previousDigest?: string; measure?: boolean };
 }
 
 interface RunnerContainerHealth {
@@ -2103,21 +2104,34 @@ export class RunnerContainer extends Container {
   private async runRequestedModelSmoke(
     readyTimeoutMs: number,
     input: HostedExecutionContainerSmokeHealthInput["liveModelTurn"],
-  ): Promise<Pick<HostedExecutionContainerSmokeHealthResult, "liveModelTurn" | "webModelTurns" | "liveModelTurnFailure">> {
+  ): Promise<Pick<HostedExecutionContainerSmokeHealthResult, "liveModelTurn" | "webModelTurns" | "admissionDigest" | "liveModelTurnFailure">> {
     if (!input) return {};
     try {
       if ("model" in input) return { liveModelTurn: await this.smokeLiveModelTurn(readyTimeoutMs, input) };
+      const admissionDigest = input.measure ? await this.measureAdmissionDigest(readyTimeoutMs) : null;
       const webModelTurns = [];
       // Serial by design. Each model gets its own single-use egress fence.
-      for (const probe of DEPLOY_MODEL_ADMISSION_PROBES) {
+      for (const probe of deployAdmissionProbes(Boolean(admissionDigest && admissionDigest === input.previousDigest))) {
         webModelTurns.push(await this.smokeLiveModelTurn(readyTimeoutMs, probe));
       }
-      return { webModelTurns };
+      return { webModelTurns, ...(admissionDigest ? { admissionDigest } : {}) };
     } catch (error) {
       // Startup and version skew are retryable. A failed turn on the expected
       // candidate is terminal and must arrive with its bundle provenance.
       return { liveModelTurnFailure: error instanceof Error ? error.message : String(error) };
     }
+  }
+
+  private async measureAdmissionDigest(readyTimeoutMs: number): Promise<string | null> {
+    try {
+      const signal = AbortSignal.timeout(Math.max(readyTimeoutMs, RUNNER_LIVE_MODEL_TURN_SMOKE_MIN_TIMEOUT_MS));
+      const response = await this.containerFetch(RUNNER_LIVE_MODEL_TURN_SMOKE_URL, {
+        method: "POST", headers: { "x-murph-smoke-contract": "measure" }, signal,
+      });
+      const result = await readRunnerContainerMetadataJsonObject(response, { signal });
+      if (response.ok && typeof result.digest === "string" && /^[a-f0-9]{64}$/u.test(result.digest)) return result.digest;
+    } catch { /* Unavailable evidence requires every live probe. */ }
+    return null;
   }
 
   protected async smokeLiveModelTurn(

@@ -150,9 +150,14 @@ export async function handleDeployContainerSmokeRoute(
     if (checkServing) {
       await proveDeployRunnerTarget(context.env);
     }
+    const previousDigest = context.url.searchParams.get("admission");
+    const artifactModelTurn = {
+      webModelAdmission: true as const,
+      ...(previousDigest !== null ? { measure: true, previousDigest } : {}),
+    };
     result = await container.smokeHealth({
       ...(directR2Smoke ? { directR2PresignedPut: directR2Smoke.containerInput } : {}),
-      ...(liveModelTurnModel ? { liveModelTurn: artifactOnly ? { webModelAdmission: true } : { model: liveModelTurnModel } } : {}),
+      ...(liveModelTurnModel ? { liveModelTurn: artifactOnly ? artifactModelTurn : { model: liveModelTurnModel } } : {}),
     });
 
     if (directR2Smoke) {

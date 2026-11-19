@@ -13,6 +13,10 @@ export const DEPLOY_MODEL_ADMISSION_PROBES = [
   ...HOSTED_FLEX_MODELS.map(model => ({ model, serviceTier: "flex" as const })),
 ];
 
+export function deployAdmissionProbes(reuse: boolean) {
+  return reuse ? [{ model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL, serviceTier: "default" as const }] : DEPLOY_MODEL_ADMISSION_PROBES;
+}
+
 export function isDeployAdmissionModel(model: unknown, tier: DeployAdmissionTier): model is string {
   return DEPLOY_MODEL_ADMISSION_PROBES.some(probe => probe.model === model && probe.serviceTier === tier);
 }

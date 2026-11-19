@@ -36,7 +36,7 @@ import {
 } from "../src/hosted-runner-smoke-contract.ts";
 import {
   DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL,
-  DEPLOY_MODEL_ADMISSION_PROBES,
+  deployAdmissionProbes,
 } from "../src/deploy-smoke-live-model.ts";
 import {
   readHostedStandbyMode,
@@ -183,6 +183,8 @@ export function resolveSmokeExpectedStandbyMode(
 
 export async function runSmokeHostedDeploy(input: {
   phase?: "artifact" | "serving";
+  previousAdmissionDigest?: string | null;
+  onModelAdmission?: (digest: string) => void;
   fetchImpl?: FetchLike;
   log?: (message: string) => void;
   source?: EnvSource;
@@ -263,9 +265,11 @@ export async function runSmokeHostedDeploy(input: {
           directR2PresignedPut: shouldSmokeDirectR2PresignedPut,
           liveModelTurn: shouldSmokeLiveModelTurn,
           phase: input.phase,
+          previousDigest: input.previousAdmissionDigest,
           smokeBaseUrl,
         }),
         versionOverrideHeaders,
+        onModelAdmission: input.onModelAdmission,
         expectDirectR2PresignedPut: shouldSmokeDirectR2PresignedPut,
         expectLiveModelTurnModel: shouldSmokeLiveModelTurn
           ? DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL
@@ -277,7 +281,6 @@ export async function runSmokeHostedDeploy(input: {
   }
 
   if (input.phase === "artifact") {
-    if (shouldSmokeLiveModelTurn) log(`Live candidate model admission passed: ${DEPLOY_MODEL_ADMISSION_PROBES.map(p => p.model + "/" + p.serviceTier).join(", ")}.`);
     log("Isolated candidate artifact smoke checks passed.");
     return;
   }
@@ -309,6 +312,7 @@ export async function runSmokeHostedDeploy(input: {
 }
 
 async function assertRunnerContainerSmoke(input: {
+  onModelAdmission?: (digest: string) => void;
   expectDirectR2PresignedPut: boolean;
   expectLiveModelTurnModel: string | null;
   fetchImpl: FetchLike;
@@ -398,7 +402,9 @@ function assertSmokeStandbyInventory(
 }
 
 async function readRunnerContainerSmoke(input: {
+  log: (message: string) => void;
   attempt: number;
+  onModelAdmission?: (digest: string) => void;
   expectDirectR2PresignedPut: boolean;
   expectLiveModelTurnModel: string | null;
   fetchImpl: FetchLike;
@@ -449,6 +455,7 @@ async function readRunnerContainerSmoke(input: {
       codexShell?: SmokeCodexShellResult | null;
       directR2PresignedPut?: SmokeDirectR2PresignedPutResult | null;
       liveModelTurn?: SmokeLiveModelTurnResult | null;
+      admissionDigest?: string;
       webModelTurns?: SmokeLiveModelTurnResult[];
       liveModelTurnFailure?: unknown;
       ok?: unknown;
@@ -495,7 +502,7 @@ async function readRunnerContainerSmoke(input: {
     assertSmokeDirectR2PresignedPutResult(responsePayload.runnerContainer.directR2PresignedPut);
   }
   if (input.expectLiveModelTurnModel !== null) {
-    assertSmokeModelReceipts(url.pathname, responsePayload.runnerContainer, input.expectLiveModelTurnModel);
+    assertSmokeModelReceipts(url, responsePayload.runnerContainer, input.expectLiveModelTurnModel, input);
   }
 
   return runnerBundle;
@@ -528,11 +535,13 @@ function redactSmokeFailureBody(value: string): string {
 function buildRunnerContainerSmokeUrl(input: {
   directR2PresignedPut: boolean;
   liveModelTurn: boolean;
+  previousDigest?: string | null;
   phase?: "artifact" | "serving";
   smokeBaseUrl: string;
 }): string {
   const url = new URL(input.phase === "artifact"
     ? "/internal/deploy/artifact-smoke" : "/internal/deploy/container-smoke", input.smokeBaseUrl);
+  if (input.phase === "artifact" && input.previousDigest !== undefined) url.searchParams.set("admission", input.previousDigest ?? "measure");
   if (input.directR2PresignedPut) {
     url.searchParams.set("directR2PresignedPut", "1");
   }
@@ -603,22 +612,28 @@ function assertSmokeDirectR2PresignedPutResult(
 }
 
 function assertSmokeModelReceipts(
-  pathname: string,
-  container: { liveModelTurn?: SmokeLiveModelTurnResult | null; webModelTurns?: SmokeLiveModelTurnResult[] },
+  url: URL,
+  container: { liveModelTurn?: SmokeLiveModelTurnResult | null; webModelTurns?: SmokeLiveModelTurnResult[]; admissionDigest?: string },
   expectedModel: string,
+  evidence: { log: (message: string) => void; onModelAdmission?: (digest: string) => void },
 ): void {
-  if (pathname !== "/internal/deploy/artifact-smoke") {
+  if (url.pathname !== "/internal/deploy/artifact-smoke") {
     assertSmokeLiveModelTurnResult(container.liveModelTurn, expectedModel);
     return;
   }
+  const digest = container.admissionDigest;
+  const measured = typeof digest === "string" && /^[a-f0-9]{64}$/u.test(digest) ? digest : null;
+  const probes = deployAdmissionProbes(measured !== null && measured === url.searchParams.get("admission"));
   const turns = container.webModelTurns;
-  if (!Array.isArray(turns) || turns.length !== DEPLOY_MODEL_ADMISSION_PROBES.length) {
+  if (!Array.isArray(turns) || turns.length !== probes.length) {
     throw new Error("Candidate runner did not prove all hosted web model admissions.");
   }
-  DEPLOY_MODEL_ADMISSION_PROBES.forEach(({ model, serviceTier }, index) => {
+  probes.forEach(({ model, serviceTier }, index) => {
     assertSmokeLiveModelTurnResult(turns[index], model);
     if (turns[index]?.serviceTier !== serviceTier) throw new Error(`Candidate runner did not prove ${model} on ${serviceTier}.`);
   });
+  evidence.log(`Live candidate model admission passed: ${probes.map(p => p.model + "/" + p.serviceTier).join(", ")}.`);
+  if (measured) evidence.onModelAdmission?.(measured);
 }
 
 function assertSmokeLiveModelTurnResult(
