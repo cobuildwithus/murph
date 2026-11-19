@@ -316,6 +316,12 @@ const gameV1CompatibleStatements = new Set([
   `ALTER TABLE "game_entry" ADD CONSTRAINT "game_entry_attempt_check" CHECK ("kind" IN ('photo', 'heart_rate', 'words', 'route', 'reps', 'excuse') AND "attempt" BETWEEN 0 AND 2 AND ("attempt" = 0) = ("kind" = 'excuse')) NOT VALID`,
 ]);
 
+// Change photo: the share's primary key moves to its already unique storage
+// key, which the next statement adopts. Live code reads share rows by column.
+const gameProgressShareAttemptsCompatibleStatements = new Set([
+  'ALTER TABLE "game_progress_share" DROP CONSTRAINT "game_progress_share_pkey"',
+]);
+
 const incompatiblePredeploySqlPatterns = [
   {
     label: "ADD CONSTRAINT CHECK",
@@ -527,7 +533,9 @@ export async function findHostedWebPrismaPredeployDestructiveMigrations(
       .filter((statement) => entry.name !== "20261022220000_game_v1"
         || !gameV1CompatibleStatements.has(statement.replace(/\s+/gu, " ").trim()))
       .filter((statement) => entry.name !== "20261101230000_game_many_per_pair"
-        || !gameManyPerPairCompatibleStatements.has(statement.replace(/\s+/gu, " ").trim()));
+        || !gameManyPerPairCompatibleStatements.has(statement.replace(/\s+/gu, " ").trim()))
+      .filter((statement) => entry.name !== "20261119200000_game_progress_share_attempts"
+        || !gameProgressShareAttemptsCompatibleStatements.has(statement.replace(/\s+/gu, " ").trim()));
     const compatibleReasons =
       hostedWebPrismaPredeployCompatibleMigrationReasons.get(entry.name);
     const destructivePattern = incompatiblePredeploySqlPatterns.find(

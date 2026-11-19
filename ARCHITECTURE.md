@@ -6020,7 +6020,7 @@ their separate lane owners.
 Progress persists awards, measure choices, picture and share ownership, and task
 inference. The following classification covers every column of exactly
 `GameProgressAward`, `GameProgressMeasure`, `GameProgressPic` and
-`GameProgressTaskMeasure`, plus `GameProgressShare`, `GamePlaceArt` and `GamePlaceArtBudget`; it is not an audit of other game tables.
+`GameProgressTaskMeasure`, plus `GameProgressShare`, `GameProgressSharePhoto`, `GamePlaceArt` and `GamePlaceArtBudget`; it is not an audit of other game tables.
 
 | Table | Encrypted content | Keyed lookup | Approved operational metadata |
 | --- | --- | --- | --- |
@@ -6028,7 +6028,8 @@ inference. The following classification covers every column of exactly
 | `game_progress_measure` | `state_encrypted`: goal, latest checked found goal, frozen route legs/geometry/towns, per-day amount, frozen baseline, health settlement receipt | `lookup`: member-bound measure identity | `member_id`: owner FK; `updated_at`: mutation time |
 | `game_progress_pic` | `meta_encrypted`: measure identity | None | `id`: client UUID; `member_id`: owner FK; `storage_key`: random exclusive Progress object identity; `taken_at`: capture ordering; `retired_at`: permanent retirement time |
 | `game_progress_task_measure` | `measure_encrypted`: inferred name, quantity and unit | `lookup`: member-bound normalized task text plus check-in kind | `member_id`: owner FK; `created_at`: insertion time |
-| `game_progress_share` | None in the row; generated JPEG bytes are sealed in the Progress store | `award_lookup`: existing member-bound award identity | `member_id`: owner FK; `storage_key`: unique random Progress object identity; `status`: generating, ready, failed or retired; `created_at`: admission time; `failure_code`: nullable generation_failed, timeout or refused |
+| `game_progress_share` | None in the row; generated JPEG bytes are sealed in the Progress store | `award_lookup`: existing member-bound award identity | `storage_key`: primary key, the random Progress object identity of one picture attempt; `member_id`: owner FK; `status`: generating, ready, failed or retired; `created_at`: admission time, also the public attempt id (base 36); `failure_code`: nullable generation_failed, timeout or refused |
+| `game_progress_share_photo` | None in the row; the prepared medal photo JPEG is sealed in the Progress store | None | `storage_key`: primary key, random Progress object identity; `member_id`: owner FK; `status`: pending, current or retired; `created_at`: pick time |
 | `game_place_art` | None: shared public art, plaintext `bytes` (JPEG) | None | `key`: `poster:v1:<Mapbox place id>` or `map:v1:<size>:<sha256 of route geometry>`; `kind`: poster or map; `status`: making, ready or failed; `attempts`: claim fence, at most 3; `started_at`: claim time; `ready_at`: nullable completion time; `failure_code`: nullable generation_failed, timeout, refused or drifted |
 | `game_place_art_budget` | None | None | `day`: UTC date; `attempts`: admitted art attempts that day |
 
@@ -6043,10 +6044,22 @@ change; an attempt finishes its row only while `attempts` still matches its
 claim. Every admitted attempt, retries included, counts against the UTC day's
 `game_place_art_budget` row in the claim's transaction.
 
-Share ownership uses the member/award composite primary and foreign key. No
-source photo identity is persisted: nothing reads it after admission. The member
-GameProfile owns the current photo key; changing it leaves admitted shares alone.
-An index covers member/admission time. Share
+Each share row is one picture attempt, keyed by its storage key, with the
+member/award foreign key. Change photo adds an attempt for the same award; the
+drawer shows the newest attempt unless it failed or ran out of time while an
+older picture is ready. Publishing a replacement retires the award's older ready
+attempt in the same transaction. Every attempt row stays for the quota and
+cleanup. Indexes cover member/admission time and member/award/admission time.
+
+The medal photo is a copy, not a game media reference: `game_progress_share_photo`
+owns each prepared JPEG copy, written `pending` under the member fence before the
+store write, swapped to `current` (retiring the member's other copies) after it,
+and forgotten only after its object is purged, so a failed purge replays on the
+next pick, Turn off or account deletion. Pictures start from the current copy, so
+start reads no game media and runs no image preparation. Profile photo changes
+leave both the copy and admitted shares alone. Photo bytes use the same lane,
+scope and purpose with the `game_progress_share_photo` table, storage key row AAD
+and `bytes` field. Share
 bytes use the member-private-field lane, `game-progress` scope and purpose,
 `game_progress_share` table, storage key row AAD and `bytes` field. They are
 private health-related content, including likeness and activity, and never enter
@@ -6068,9 +6081,10 @@ legal decision and share retirement together. First denial records a declined
 event without fabricating a grant. Identical decisions add no audit event; a
 repeated denial still purges retained keys. The existing Web Privacy revoke route
 uses this owner; the generic accept route cannot grant this separate disclosure.
+Denial also retires every medal photo copy and purges it after commit.
 Regrant never revives a retired share. Progress picture deletion has no share
 coupling. Account suspension fences new work before
-share cleanup, picture cleanup and row/key cascades, in that order. Failures block
+share cleanup, medal photo cleanup, picture cleanup and row/key cascades, in that order. Failures block
 successful deletion and retain cleanup identities. Each share collection reads
 at most 10,001 keys, rejects more than 10,000 before effects, and purges serially
 outside transactions (one connection at a time, no decryption or provider calls).

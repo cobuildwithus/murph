@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-const mocks = vi.hoisted(() => ({ many: vi.fn(), find: vi.fn(), read: vi.fn(), open: vi.fn(), auth: vi.fn() }));
-vi.mock('../src/lib/prisma', () => ({ getPrisma: () => ({ gameProgressShare: { findMany: mocks.many, findUnique: mocks.find } }) }));
+const mocks = vi.hoisted(() => ({ many: vi.fn(), find: vi.fn(), photo: vi.fn(), read: vi.fn(), open: vi.fn(), auth: vi.fn() }));
+vi.mock('../src/lib/prisma', () => ({ getPrisma: () => ({ gameProgressShare: { findMany: mocks.many, findUnique: mocks.find }, gameProgressSharePhoto: { findFirst: mocks.photo } }) }));
 vi.mock('../src/lib/game/progress/media-store', async original => ({ ...await original<object>(), progressMediaStore: () => ({ readProgressPic: mocks.read }) }));
 vi.mock('../src/lib/hosted-crypto/secure-box', () => ({ openHostedUserSecureBoxBytes: mocks.open }));
 import { prepareProgressShareExport } from '../src/lib/game/progress/share-export';
@@ -50,6 +50,17 @@ describe('account share export', () => {
     expect(exported).toBe(count); expect(mocks.many).toHaveBeenCalledOnce();
     expect(mocks.find).toHaveBeenCalledTimes(count); expect(mocks.auth).toHaveBeenCalledTimes(count);
     expect(peak).toBe(count ? 1 : 0); expect(mocks.read).not.toHaveBeenCalled();
+  });
+  it('adds the current medal photo copy with its own AAD and no storage key', async () => {
+    mocks.many.mockResolvedValue([]); mocks.photo.mockResolvedValue({ storageKey: 'progress/photo-reserved.jpg', createdAt: new Date('2026-11-02') });
+    const bytes = new Uint8Array([4, 5, 6]); mocks.open.mockResolvedValue(bytes);
+    const records = (await prepareProgressShareExport('owner', mocks.auth))();
+    const result = await records.next();
+    expect(JSON.parse(result.value!)).toEqual({ progressSharePhoto: { createdAt: '2026-11-02T00:00:00.000Z', jpegBase64: 'BAUG' } });
+    expect(mocks.photo).toHaveBeenCalledWith({ where: { memberId: 'owner', status: 'current' }, select: { storageKey: true, createdAt: true } });
+    expect(mocks.open).toHaveBeenCalledWith(expect.objectContaining({ aad: { purpose: 'game-progress', table: 'game_progress_share_photo', rowId: 'progress/photo-reserved.jpg', field: 'bytes' } }));
+    expect(result.value).not.toContain('reserved'); expect(bytes).toEqual(new Uint8Array(3)); expect(mocks.auth).toHaveBeenCalledTimes(2);
+    expect((await records.next()).done).toBe(true);
   });
   it('missing media fails visibly without exporting a partial picture', async () => {
     mocks.read.mockResolvedValue(null);

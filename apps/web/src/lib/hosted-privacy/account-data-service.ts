@@ -105,7 +105,7 @@ import {
 } from "./account-deletion-cleanup";
 import { sha256Hex } from "../primitives";
 import { deleteProgressPicsForAccount } from "../game/progress/pics";
-import { deleteProgressSharesForAccount } from "../game/progress/share-cleanup";
+import { deleteProgressSharesForAccount, deleteSharePhotosForAccount } from "../game/progress/share-cleanup";
 import { applyGameAccountDeletionTx, prepareGameAccountDeletion } from "../game/account-deletion";
 
 export type {
@@ -144,6 +144,12 @@ export const HOSTED_ACCOUNT_DATA_STORE_COVERAGE = [
     label: "Private Progress share pictures",
     deletion: "live-delete",
     note: "After suspension, retires share rows and permanently tombstones generated objects before source pictures or member rows cascade. Failed cleanup retains identities and blocks deletion. The approved account export includes share attempt metadata and ready JPEGs; it omits storage keys and private prompts.",
+  },
+  {
+    slug: "prisma.game_progress_share_photo",
+    label: "Private medal photo copies",
+    deletion: "live-delete",
+    note: "After suspension, retires every medal photo row and permanently tombstones each sealed copy before member rows cascade; a row is forgotten only after its copy is purged, so failed cleanup retains the key and blocks deletion. The approved account export includes the current copy's JPEG and omits storage keys.",
   },
   {
     slug: "prisma.hosted_member",
@@ -1079,6 +1085,7 @@ async function deleteHostedAccountDataInternal(input: {
   }
 
   await deleteProgressSharesForAccount(deletionMemberIds, input.prisma);
+  await deleteSharePhotosForAccount(deletionMemberIds, input.prisma);
   await deleteProgressPicsForAccount(deletionMemberIds, input.prisma);
 
   const preparedHostedGroupIds = await listHostedAccountDeletionTargetGroupIds({
