@@ -65,7 +65,7 @@ describe.skipIf(!enabled)("shared place art store", () => {
       { key: "poster:v1:test-g", kind: "poster", make: async () => Buffer.from("third") },
     ], new Map());
     expect([...started.keys()]).toEqual(["poster:v1:test-e", "poster:v1:test-f"]);
-    expect(artState(started.get("poster:v1:test-e"), "poster")).toMatchObject({ state: "making", typicalSeconds: 50 });
+    expect(artState(started.get("poster:v1:test-e"), "poster")).toMatchObject({ state: "making", typicalSeconds: 8 });
     await Promise.all(after.jobs.map(job => job()));
     const rows = await readArtRows(["poster:v1:test-e", "poster:v1:test-f", "poster:v1:test-g"]);
     expect(artState(rows.get("poster:v1:test-e"), "poster")).toEqual({ state: "ready", path: "/api/game/v1/progress/art/poster%3Av1%3Atest-e" });

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 const mocks = vi.hoisted(() => ({
   raw: vi.fn(), current: vi.fn(), authority: vi.fn(), patch: vi.fn(), settle: vi.fn(), awards: vi.fn(),
-  resolve: vi.fn(), profile: vi.fn(), measures: vi.fn(), open: vi.fn(),
+  resolve: vi.fn(), profile: vi.fn(), measures: vi.fn(), open: vi.fn(), art: vi.fn(),
 }));
 vi.mock("@/src/lib/game/http/auth", () => ({ requireGameMemberAuth: async () => ({ member: { id: "ava" } }),
   assertGameMemberAuthCurrentTx: mocks.current }));
@@ -19,6 +19,7 @@ vi.mock("@/src/lib/game/progress/crypto", () => ({ openProgressMany: mocks.open,
 vi.mock("@/src/lib/game/progress/mapbox", () => ({ resolveRoute: mocks.resolve }));
 vi.mock("@/src/lib/game/progress/state", () => ({ patchMeasureState: mocks.patch }));
 vi.mock("@/src/lib/game/progress/awards", () => ({ readAwards: mocks.awards, settleAwards: mocks.settle }));
+vi.mock("@/src/lib/game/progress/route-art", () => ({ attachRouteArt: mocks.art }));
 
 
 import { addDaysToIsoDate } from "@murphai/contracts";
@@ -266,6 +267,10 @@ it("previews a suggested Steps loop and returns the same wearable measure as Hea
   const body = await response.json();
   expect(body).toMatchObject({ ok: true, measure: { id: "steps", source: "wearable", total: { value: 4000, unit: "steps" },
     route: { name: loop.name, totalText: "2 mi", walkedText: "0 mi", progress: 0, goalPicked: true } } });
+  // The new route's map and posters start with the pick, not on the next Health read.
+  expect(mocks.art).toHaveBeenCalledExactlyOnceWith([expect.objectContaining({ id: "steps", route: expect.objectContaining({ name: loop.name }) })],
+    new Map([["steps", expect.objectContaining({ legs: expect.arrayContaining([expect.objectContaining({ to: preview.to })]) })]]),
+    { memberId: "ava", beforeMutationTx: expect.any(Function) });
   const health = healthSchema.parse(await (await GET(request())).json());
   expect(body.measure).toEqual(health.sums.find(sum => sum.id === "steps"));
   expect(mocks.resolve).toHaveBeenCalledTimes(2);

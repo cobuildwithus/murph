@@ -4,12 +4,13 @@ import type { Prisma } from "@prisma/client";
 import type { TermWords } from "../src/lib/game/rules";
 
 const mocks = vi.hoisted(() => ({ games: vi.fn(), entries: vi.fn(), tasks: vi.fn(), states: vi.fn(), awards: vi.fn(),
-  createAwards: vi.fn(), updateSeen: vi.fn(), patch: vi.fn(), after: vi.fn(), auth: vi.fn(), current: vi.fn(), health: vi.fn(), transaction: vi.fn(), suggest: vi.fn(), pictures: vi.fn(), resolveRoute: vi.fn(), consume: vi.fn() }));
+  createAwards: vi.fn(), updateSeen: vi.fn(), patch: vi.fn(), after: vi.fn(), auth: vi.fn(), current: vi.fn(), health: vi.fn(), transaction: vi.fn(), suggest: vi.fn(), pictures: vi.fn(), resolveRoute: vi.fn(), consume: vi.fn(),
+  profileCreatedAt: { value: new Date("2026-11-01T12:00:00Z") } }));
 vi.mock("@/src/lib/better-auth/rate-limit", () => ({ hostedAuthRateLimitStorage: () => ({ consume: mocks.consume }) }));
 vi.mock("next/server", async original => ({ ...await original<typeof import("next/server")>(), after: mocks.after }));
 vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({
   game: { findMany: mocks.games }, gameEntry: { findMany: mocks.entries },
-  gameProfile: { findUniqueOrThrow: async () => ({ timeZone: "UTC", createdAt: new Date("2026-11-01T12:00:00Z") }) },
+  gameProfile: { findUniqueOrThrow: async () => ({ timeZone: "UTC", createdAt: mocks.profileCreatedAt.value }) },
   gameProgressTaskMeasure: { findMany: mocks.tasks }, gameProgressMeasure: { findMany: mocks.states },
   gameProgressAward: { findMany: mocks.awards }, gameProgressPic: { findMany: mocks.pictures }, $transaction: mocks.transaction,
 }) }));
@@ -63,6 +64,7 @@ const routeEntry = () => ({ ...entryRow(), kind: "route", payloadEncrypted: JSON
 let awards: AwardRow[];
 beforeEach(() => {
   vi.resetAllMocks();
+  mocks.profileCreatedAt.value = new Date("2026-11-01T12:00:00Z");
   vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date("2026-11-05T12:00:00Z"));
   awards = [];
   mocks.consume.mockResolvedValue({ allowed: true });
@@ -153,6 +155,11 @@ describe("Progress HTTP contracts", () => {
     expect(view.tiles.every(tile => tile.id === "around-iceland" || tile.name.split(" to ").length === 2)).toBe(true);
     expect(view.tiles.some(tile => ["to-the-moon", "5k"].includes(tile.id))).toBe(false);
     expect(mocks.patch).not.toHaveBeenCalled(); expect(mocks.suggest).not.toHaveBeenCalled();
+  });
+  it("starts the charts on the day they started the app, or Oct 19 for anyone on it before", async () => {
+    mocks.games.mockResolvedValue([]); mocks.entries.mockResolvedValue([]);
+    mocks.profileCreatedAt.value = new Date("2026-02-10T12:00:00Z");
+    expect((await (await GET(request())).json()).joinedOn).toBe("2026-10-19");
   });
   it("builds the before-game screen without retired streak fields", async () => {
     mocks.games.mockResolvedValue([]); mocks.entries.mockResolvedValue([]);

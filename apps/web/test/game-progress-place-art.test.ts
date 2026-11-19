@@ -115,7 +115,7 @@ describe('route art on the Steps read', () => {
     expect(route.towns[0]!.poster).toEqual({ state: 'ready', path: '/api/game/v1/progress/art/poster%3Av1%3Adplace-sd' });
     expect(route.towns[1]!.stepsText).toBe('60,000 steps');
     expect(route.drawerTowns[1]!.poster?.state).toBe('making');
-    expect(route.mapArt).toMatchObject({ state: 'making', typicalSeconds: 80 });
+    expect(route.mapArt).toMatchObject({ state: 'making', typicalSeconds: 14 });
     expect(route.drawerMapArt).toBeNull();
     expect(mocks.after).toHaveLength(0);
   });

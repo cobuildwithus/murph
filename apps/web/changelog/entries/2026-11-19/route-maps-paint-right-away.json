@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-19",
+  "order": 110,
+  "item": {
+    "id": "route-maps-paint-right-away",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "New walking routes start painting right away",
+    "summary": "Pick a new Steps route and its painted map starts as soon as you pick it, instead of waiting for you to come back to Totals.",
+    "details": "The map, poster and medal picture loaders now count on the times these pictures really take, and your Totals charts start on the day you started using the app.",
+    "relevanceTags": ["progress"],
+    "sourcePullRequests": [5209]
+  }
+}
