@@ -718,6 +718,29 @@ describe("hosted web production migration guard", () => {
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 
+  test("limits share-attempt compatibility to the reviewed primary key move", async () => {
+    const migrationsDir = await mkdtemp(path.join(tmpdir(), "hosted-web-prisma-migrations-"));
+    const migrationId = "20261119200000_game_progress_share_attempts";
+    try {
+      const sql = await readFile(path.join(appRoot, "prisma", "migrations", migrationId, "migration.sql"), "utf8");
+      await writeMigrationSql(migrationsDir, migrationId, sql);
+      assert.deepEqual(await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir), []);
+      for (const extra of ['ALTER TABLE "game_progress_award" DROP CONSTRAINT "game_progress_award_pkey";',
+        'ALTER TABLE "game_progress_share" DROP CONSTRAINT "game_progress_share_award_fkey";']) {
+        await writeMigrationSql(migrationsDir, migrationId, `${sql}\n${extra}`);
+        assert.deepEqual((await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir)).map(({ reason }) => reason), ["DROP CONSTRAINT"]);
+      }
+      await writeMigrationSql(migrationsDir, migrationId, sql);
+      await writeMigrationSql(migrationsDir, "20261119200001_unreviewed_share_change", sql);
+      assert.deepEqual(
+        (await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir)).map(({ migrationId }) => migrationId),
+        ["20261119200001_unreviewed_share_change"],
+      );
+    } finally {
+      await rm(migrationsDir, { force: true, recursive: true });
+    }
+  });
+
   test("limits negotiation compatibility to the exact reviewed game constraint expansion", async () => {
     const migrationsDir = await mkdtemp(path.join(tmpdir(), "hosted-web-prisma-migrations-"));
     const migrationId = "20261022071000_game_negotiation";
