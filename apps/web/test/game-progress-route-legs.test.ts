@@ -36,6 +36,15 @@ describe('Progress route legs', () => {
     expect(view.towns.map(town => town.aheadText)).toEqual([null, '33 mi away', '416 mi to go']);
     expect(routeView('walk.meters', { legs: [route] }, [['2026-11-01', 33 * mile]], [], 'metric')!.towns.at(-1)!.aheadText).toBe('669 km to go');
   });
+  it('gives the map a new link for a new road or more walked, and the same one otherwise', () => {
+    const route = { ...leg, distanceM: 1000, polyline: encodePolyline([[0, 50], [2, 49]]) };
+    const map = (legs: typeof route[], walked: number) => routeView('walk.meters', { legs }, [['2026-11-01', walked]], [], 'us')!.map;
+    expect(map([route], 400)).toBe(map([route], 400));
+    // Less than a thousandth further draws the same picture.
+    expect(map([route], 400.2)).toBe(map([route], 400));
+    expect(map([route], 500)).not.toBe(map([route], 400));
+    expect(map([{ ...route, polyline: encodePolyline([[0, 50], [3, 48]]) }], 400)).not.toBe(map([route], 400));
+  });
   it.each([
     { miles: 8.4, text: '8.4 mi', distanceText: '8.4 mi', atText: 'mile 8.4' },
     { miles: 116.4, text: '116 mi', distanceText: '116 mi', atText: 'mile 116' },
@@ -45,7 +54,8 @@ describe('Progress route legs', () => {
     const route = { ...leg, distanceM, towns: [{ name: 'B', atM: distanceM }], polyline: encodePolyline([[0, 50], [2, 49]]) };
     const points: [string, number][] = [['2026-11-01', distanceM]];
     const view = routeView('walk.meters', { legs: [route] }, points, [], 'us')!;
-    expect(view).toMatchObject({ distanceText, walkedText: text, totalText: text, map: '/api/game/v1/progress/map?measure=walk.meters&size=card' });
+    expect(view).toMatchObject({ distanceText, walkedText: text, totalText: text });
+    expect(view.map).toMatch(/^\/api\/game\/v1\/progress\/map\?measure=walk\.meters&size=card&v=[\w-]{12}$/);
     for (const [size, towns] of [['card', view.towns], ['drawer', view.drawerTowns]] as const) {
       const { width, height } = MAP_SIZES[size];
       const geometry = decodePolyline(route.polyline);

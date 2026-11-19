@@ -69,6 +69,19 @@ describe('Progress map HTTP contract', () => {
     expect(await response.json()).toMatchObject({ error: { retryable: true } });
     expect(mocks.raw).toHaveBeenCalledTimes(1); expect(mocks.render).not.toHaveBeenCalled();
   });
+  it('draws as far along as the link\'s version says', async () => {
+    // 400.2 of 1,000 m: the link's version rounds it to 0.4, so the picture does too.
+    mocks.series.mockResolvedValue({ ...snapshot(), measures: [{ id: 'walk.meters', amounts: [{ date: '2026-11-01', amount: 400.2 }] }] });
+    expect((await GET(request('measure=walk.meters&size=card'))).status).toBe(200);
+    expect(mocks.render).toHaveBeenCalledWith({ polyline: leg.polyline, progress: 0.4, size: 'card' });
+  });
+  it('does not draw a Steps map with nothing walked before steps are read', async () => {
+    mocks.raw.mockResolvedValue(null);
+    const response = await GET(request('measure=steps&size=card'));
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ error: { code: 'PROGRESS_INCOMPLETE', retryable: true } });
+    expect(mocks.render).not.toHaveBeenCalled();
+  });
   it.each(['card', 'drawer'])('uses the owner’s frozen leg and rechecks authority for %s', async size => {
     const response = await GET(request(`measure=walk.meters&size=${size}`));
     expect(response.status).toBe(200); expect(response.headers.get('Content-Type')).toBe('image/png');

@@ -143,6 +143,20 @@ describe('route art on the Steps read', () => {
     expect(mocks.patch.mock.calls[0]![2]({ legs: [{ ...older, polyline: 'other' }] })).toEqual({});
   });
 
+  it('gives the map a new link each time a painting comes in', async () => {
+    const link = async (sizes: ('card' | 'drawer')[]) => {
+      const route = routeView('steps', { legs: [leg] }, steps(5), [], 'us')!;
+      mocks.rows.mockResolvedValue(new Map(sizes.map(size => [mapKey(polyline, size), { key: mapKey(polyline, size), status: 'ready', startedAt: new Date() }])));
+      await attachRouteArt([{ id: 'steps', route }], new Map([['steps', { legs: [leg] }]]));
+      return route.map;
+    };
+    const plain = routeView('steps', { legs: [leg] }, steps(5), [], 'us')!.map;
+    const card = await link(['card']), both = await link(['card', 'drawer']);
+    expect(await link([])).toBe(plain);
+    expect(new Set([plain, card, both]).size).toBe(3);
+    expect(card).toMatch(/^\/api\/game\/v1\/progress\/map\?measure=steps&size=card&v=[\w-]{12}$/);
+  });
+
   it('leaves the plain map when the art store cannot be read', async () => {
     const route = routeView('steps', { legs: [leg] }, steps(5), [], 'us')!;
     mocks.rows.mockRejectedValue(new Error('db down'));

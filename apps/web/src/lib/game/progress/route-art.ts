@@ -5,6 +5,7 @@ import { reversePlace } from './mapbox';
 import { artState, ensureArt, readArtRows, type ArtJob, type ArtState } from './place-art';
 import { makePaintedMap, makePoster, mapKey, mapPaintable, posterKey } from './place-art-make';
 import { cutPolyline, decodePolyline } from './route-geometry';
+import { routeMapLink } from './route-progress';
 import { patchMeasureState, type BeforeProgressMutation, type MeasureState, type RouteLeg } from './state';
 
 type Shown = { id: string; route: Route | null };
@@ -39,7 +40,7 @@ export async function attachRouteArt(measures: readonly Shown[], states: Readonl
       });
       rows = new Map([...rows, ...await ensureArt(jobs, rows)]);
     }
-    for (const { route, leg } of items) {
+    for (const { id, route, leg } of items) {
       const poster = (index: number) => {
         const place = leg.towns[index]?.place;
         return place ? artState(rows.get(posterKey(place.id)), 'poster') : null;
@@ -49,6 +50,9 @@ export async function attachRouteArt(measures: readonly Shown[], states: Readonl
       if (mapPaintable(leg)) {
         route.mapArt = mapState(artState(rows.get(mapKey(leg.polyline, 'card')), 'map'));
         route.drawerMapArt = mapState(artState(rows.get(mapKey(leg.polyline, 'drawer')), 'map'));
+        // A painting that came in is a new picture at the same path: a new link, so the app fetches it.
+        const painted = (['card', 'drawer'] as const).filter(size => (size === 'card' ? route.mapArt : route.drawerMapArt)?.state === 'ready');
+        if (painted.length) route.map = routeMapLink(id, leg.polyline, route.progress, painted);
       }
     }
   } catch { /* The page shows the plain map. */ }

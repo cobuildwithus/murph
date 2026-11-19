@@ -1,9 +1,10 @@
+import { createHash } from 'node:crypto';
 import type { ClientUnits } from '../../companion/client-info';
 import type { Day, MapQuery, Route } from './contract';
 import type { Candidate } from './registry';
 import type { MeasureState, RouteLeg } from './state';
 import type { StoredAward } from './awards';
-import { cutPolyline, decodePolyline, MAP_SIZES, routeBbox, townPosition } from './route-geometry';
+import { cutPolyline, decodePolyline, MAP_SIZES, mapProgress, routeBbox, townPosition } from './route-geometry';
 import { formatAmount, formatNumber } from './format';
 export const routeMeters = (measureId: string, amount: number) => measureId === 'steps' || measureId.endsWith('.steps') ? amount / 2000 * 1609.344 : amount;
 type Points = readonly [Day, number][];
@@ -22,6 +23,12 @@ export function routeEta(meters: Points, remainingM: number): string | null {
   if (days < 14) return days === 1 ? '1 day' : `${days} days`;
   const weeks = Math.round(days / 7);
   return weeks <= 104 ? `${weeks} weeks` : `${Math.round(days / 365)} years`;
+}
+
+/** A route's map link. Its version (`v`) is the road, how far along it the map draws, and which sizes have a painting ready: a new route, more walked or a painting coming in is a new link, so the app never keeps an old picture. */
+export function routeMapLink(measureId: string, polyline: string, progress: number, painted: readonly ('card' | 'drawer')[] = []) {
+  const v = createHash('sha256').update([polyline, mapProgress(progress), ...painted].join('\n')).digest('base64url').slice(0, 12);
+  return `/api/game/v1/progress/map?${new URLSearchParams({ measure: measureId, size: 'card', v })}`;
 }
 export const routeAwardKey = (measureId: string, leg: RouteLeg, index: number) => `route:${JSON.stringify([measureId, index, leg.from, leg.to, leg.distanceM, leg.startTotal])}`;
 
@@ -78,7 +85,7 @@ export function routeView(measureId: string, state: MeasureState, points: Points
   const meters: [Day, number][] = points.map(([day, amount]) => [day, routeMeters(measureId, amount)]);
   const total = meters.at(-1)?.[1] ?? 0;
   const walked = earnedOn ? leg.distanceM : Math.min(leg.distanceM, Math.max(0, total - leg.startTotal));
-  const map = `/api/game/v1/progress/map?${new URLSearchParams({ measure: measureId, size: 'card' })}`;
+  const map = routeMapLink(measureId, leg.polyline, walked / leg.distanceM);
   return { name: leg.name ?? `${leg.from} to ${leg.to}`, distanceText: formatAmount(leg.distanceM, 'meters', 'full', units).text,
     walkedText: formatAmount(walked, 'meters', 'compact', units).text, totalText: formatAmount(total, 'meters', 'compact', units).text,
     progress: walked / leg.distanceM, straightLine: leg.straightLine, etaText: earnedOn ? null : routeEta(meters, leg.distanceM - walked),
