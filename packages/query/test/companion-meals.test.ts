@@ -142,3 +142,27 @@ it("preserves private thumbnail metadata through the encrypted core projection",
   const decoded = assembleBrowserVaultCoreReplica(parseBrowserVaultCoreShard(JSON.parse(JSON.stringify(shards.core))));
   expect(decoded.meals?.days[0]?.meals[0]?.thumbnail).toEqual(thumbnail);
 });
+
+it("truncates meal notes at a complete Unicode scalar", () => {
+  const record = meal("meal_unicode", "2026-06-02T18:20:00Z");
+  record.attributes.note = "a".repeat(118) + "🥕 soup";
+  const projection = buildCompanionMealsProjection(createVaultReadModel({
+    vaultRoot: "browser://fixture", metadata: { timezone: "UTC" }, entities: [record],
+  }));
+  expect(projection?.days[0]?.meals[0]?.name).toBe("a".repeat(118) + "…");
+});
+
+it("groups date-only imported meals by provider day and timed meals by vault day", () => {
+  const instant = "2026-06-02T00:00:00.000Z";
+  const records = ["2026-06-02", instant].map((observedAtRaw, index) => {
+    const record = meal(`meal_${index}`, instant, { calories: 320 });
+    record.attributes.dataOrigin = { aggregatorProvider: "junction", observedAtRaw };
+    return record;
+  });
+  const projection = buildCompanionMealsProjection(createVaultReadModel({
+    vaultRoot: "browser://fixture", metadata: { timezone: "America/Denver" }, entities: records,
+  }));
+  expect(projection?.days.map(day => [day.date, day.meals[0]?.id])).toEqual([
+    ["2026-06-02", "meal_0"], ["2026-06-01", "meal_1"],
+  ]);
+});

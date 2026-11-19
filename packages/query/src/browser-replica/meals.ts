@@ -6,7 +6,7 @@ import {
   type CompanionMealDay,
   type CompanionMealsProjection,
 } from "@murphai/contracts";
-import { normalizeIanaTimeZone, toLocalDayKey } from "@murphai/contracts";
+import { isStrictIsoDate, normalizeIanaTimeZone, toLocalDayKey } from "@murphai/contracts";
 import { selectMealNutritionRecords } from "../meal-selection.ts";
 import type { VaultReadModel } from "../read-model.ts";
 
@@ -38,7 +38,7 @@ export function buildCompanionMealsProjection(vault: VaultReadModel): CompanionM
       fiberGrams: numberOrNull(totals?.fiberGrams),
       uploadId: companionMealUploadIdSchema.safeParse(attributes.uploadId).data ?? null,
     };
-    const date = toLocalDayKey(eatenAt, timeZone);
+    const date = mealDay(attributes.dataOrigin, eatenAt, timeZone);
     const day = days.get(date) ?? {
       date, calories: null, proteinGrams: null, carbsGrams: null, fatGrams: null,
       mealCount: 0, calorieMealCount: 0, meals: [],
@@ -58,6 +58,11 @@ export function buildCompanionMealsProjection(vault: VaultReadModel): CompanionM
   return companionMealsProjectionSchema.parse({ schemaVersion: 1, timeZone, days: ordered });
 }
 
+function mealDay(origin: unknown, eatenAt: string, timeZone: string): string {
+  const rawDate = asRecord(origin)?.observedAtRaw;
+  return typeof rawDate === "string" && isStrictIsoDate(rawDate) ? rawDate : toLocalDayKey(eatenAt, timeZone);
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown> : null;
@@ -74,7 +79,7 @@ function mealName(attributes: Record<string, unknown>): string | null {
       .replace(/^(?:(?:breakfast|lunch|dinner|snack)\s*:\s*|estimated\b\s*:?\s*|photo shows\b\s*:?\s*|retained image(?: reviewed)?\s*:\s*)+/iu, "")
       .split(/;| - /u, 1)[0]!.trim();
     if (!text || text.toLowerCase() === "meal") continue;
-    return text.length > 120 ? `${text.slice(0, 119)}…` : text;
+    return text.length > 120 ? `${text.slice(0, 119).replace(/[\uD800-\uDBFF]$/u, "")}…` : text;
   }
   return null;
 }
