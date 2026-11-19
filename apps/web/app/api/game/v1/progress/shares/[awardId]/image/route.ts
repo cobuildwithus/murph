@@ -10,7 +10,7 @@ type Context = { params: Promise<{ awardId: string }> };
 export const GET = withProgressJsonError(async (request: Request, context: Context) => runWithHostedDomainRootUnwrapCache(async () => {
   const auth = await requireGameMemberAuth(request), { awardId } = await context.params;
   if (!/^[A-Za-z0-9:_-]{1,200}$/u.test(awardId)) throw shareNotFound();
-  return progressEffect(async () => {
+  return progressEffect('read_share_image', async () => {
     const bytes = await readProgressShareImage({ memberId: auth.member.id, awardId, units: clientUnits(request),
       beforeMutationTx: tx => assertGameMemberAuthCurrentTx(auth, tx) });
     try { return new Response(new Uint8Array(bytes), { headers: { 'Content-Type': 'image/jpeg', 'X-Content-Type-Options': 'nosniff' } }); }

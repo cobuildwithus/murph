@@ -15,11 +15,11 @@ export const POST = withProgressJsonError(async (request: Request) => runWithHos
   const auth = await requireGameMemberAuth(request);
   const input = parsePicUploadQuery(Object.fromEntries(new URL(request.url).searchParams));
   const bytes = await readProgressJpeg(request);
-  return progressEffect(async () => {
+  return progressEffect('upload_picture', async () => {
     const memberId = auth.member.id;
     const [snapshot, profile] = await Promise.all([
-      readOwnSeries(memberId, new Date()),
-      getPrisma().gameProfile.findUniqueOrThrow({ where: { memberId }, select: { timeZone: true } }),
+      progressEffect('read_picture_series', () => readOwnSeries(memberId, new Date())),
+      progressEffect('read_picture_profile', () => getPrisma().gameProfile.findUniqueOrThrow({ where: { memberId }, select: { timeZone: true } })),
     ]);
     if (snapshot.incomplete) throw hostedOnboardingError({ code: 'PROGRESS_INCOMPLETE', httpStatus: 503,
       retryable: true, message: 'Progress could not load completely. Try again.' });

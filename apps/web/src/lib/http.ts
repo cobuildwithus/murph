@@ -562,7 +562,7 @@ function describeJsonRouteLogContext(args: readonly unknown[]): JsonRouteLogCont
   };
 }
 
-function describeLoggedErrorType(error: unknown): string {
+export function describeLoggedErrorType(error: unknown): string {
   if (error instanceof Error) {
     const constructorName = error.constructor?.name;
 

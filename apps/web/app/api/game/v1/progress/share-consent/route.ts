@@ -8,12 +8,12 @@ import { getPrisma } from '@/src/lib/prisma';
 export const maxDuration = 300;
 export const GET = withProgressJsonError(async (request: Request) => {
   const auth = await requireGameMemberAuth(request);
-  return jsonOk(await progressEffect(() => readProgressShareConsent({ memberId: auth.member.id, prisma: getPrisma() })));
+  return jsonOk(await progressEffect('read_share_consent', () => readProgressShareConsent({ memberId: auth.member.id, prisma: getPrisma() })));
 });
 
 export const PUT = withProgressJsonError(async (request: Request) => {
   const auth = await requireGameMemberAuth(request);
   const { decision } = parseShareConsent(await readJsonObject(request, { limitBytes: 256 }));
-  return jsonOk(await progressEffect(() => decideProgressShareConsent({ memberId: auth.member.id, decision, prisma: getPrisma(),
+  return jsonOk(await progressEffect('update_share_consent', () => decideProgressShareConsent({ memberId: auth.member.id, decision, prisma: getPrisma(),
     beforeMutationTx: tx => assertGameMemberAuthCurrentTx(auth, tx) })));
 });

@@ -1,4 +1,10 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
+import sharp from "sharp";
+import * as controlAuth from "../src/lib/hosted-execution/auth-adapter";
+import { provisionActiveHostedDomainRootEnvelopeForUserOnly } from "../src/lib/hosted-crypto/domain-root-store";
+import { runWithHostedDomainRootUnwrapCache } from "../src/lib/hosted-crypto/domain-root-unwrap-cache";
+import { putProgressPic, readProgressPic } from "../src/lib/game/progress/pics";
+import { localRosterCrypto } from "./support/roster-postgres";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getPrisma } from "../src/lib/prisma";
 import { markAwardsSeen, readAwards, settleAwards } from "../src/lib/game/progress/awards";
@@ -32,10 +38,45 @@ async function readState(memberId: string) {
 }
 
 beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date("2026-11-16T01:00:00Z")); });
-afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 afterAll(async () => { if (enabled) await db.hostedMember.deleteMany({ where: { id: { in: members } } }); });
 
 describe.skipIf(!enabled)("Progress PostgreSQL invariants", () => {
+  it.each(["lowercase", "uppercase"])("stages and reopens a phone-sized JPEG on first upload and replay (%s UUID)", async casing => {
+    localRosterCrypto();
+    vi.stubGlobal("__murphHostedSecureBoxStringTestCodec", undefined);
+    const owner = await member();
+    await provisionActiveHostedDomainRootEnvelopeForUserOnly({ userId: owner, domain: "control" });
+    const width = 2048, height = 1536;
+    const jpeg = await sharp(randomBytes(width * height * 3), { raw: { width, height, channels: 3 } }).jpeg({ quality: 78 }).toBuffer();
+    expect(jpeg.length).toBeGreaterThan(1.5 * 1024 * 1024);
+    expect(jpeg.length).toBeLessThanOrEqual(2 * 1024 * 1024);
+    const id = randomUUID();
+    const input = { id: casing === "uppercase" ? id.toUpperCase() : id, measureId: "squats.reps", takenAt: "2026-07-14T15:23:41.637Z" };
+    const hash = createHash("sha256").update(jpeg).digest("hex");
+    const keys: string[] = [];
+    let envelope: string;
+    vi.stubEnv("HOSTED_EXECUTION_CONTROL_URL", "https://control.example.test");
+    vi.spyOn(controlAuth, "createHostedExecutionVercelOidcBearerTokenProvider").mockReturnValue(async () => "synthetic");
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+      if (init?.method === "GET") return Response.json({ envelope, hash });
+      expect(String(url)).toBe(`https://control.example.test/internal/users/${owner}/progress-pics/stage`);
+      const headers = new Headers(init?.headers);
+      expect(headers.get("x-murph-recap-hash")).toBe(hash);
+      keys.push(headers.get("x-murph-recap-media-id")!);
+      if (typeof init?.body !== "string") throw new Error("Expected a sealed envelope");
+      envelope = init.body;
+      expect(Buffer.byteLength(envelope)).toBeLessThan(3 * 1024 * 1024);
+      return Response.json({ stored: true });
+    });
+    const upload = () => runWithHostedDomainRootUnwrapCache(() => putProgressPic(owner, input, jpeg, authorized));
+    await upload();
+    await upload();
+    const row = await db.gameProgressPic.findUniqueOrThrow({ where: { id: input.id } });
+    expect(row.takenAt.toISOString()).toBe(input.takenAt);
+    expect(keys).toEqual([row.storageKey, row.storageKey]);
+    expect(Buffer.from(await readProgressPic(owner, input.id)).equals(jpeg)).toBe(true);
+  });
   it("starts time-total awards at ten minutes and preserves earned dates through repeated reads and corrections", async () => {
     const id = await member();
     const source = game("time", task("4 min planks", { quantity: 4, unit: "minutes", name: "planks" }));

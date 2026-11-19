@@ -17,7 +17,7 @@ export async function prepareProgressShareExport(memberId: string, assertCurrent
     retryable: true, message: 'Picture export could not load completely. Try again.' });
   return async function* records() {
     for (const row of rows) {
-      yield await runWithFreshHostedDomainRootUnwrapCache(() => progressEffect(async () => {
+      yield await runWithFreshHostedDomainRootUnwrapCache(() => progressEffect('export_share', async () => {
         await assertCurrent();
         const current = await db.gameProgressShare.findUnique({ where: { storageKey: row.storageKey }, select: { status: true, failureCode: true } });
         if (!current) throw exportUnavailable();
@@ -36,7 +36,7 @@ export async function prepareProgressShareExport(memberId: string, assertCurrent
     }
     // The medal photo's current copy, the one Change uses: the member's own photo, prepared for pictures.
     const photo = await db.gameProgressSharePhoto.findFirst({ where: { memberId, status: 'current' }, select: { storageKey: true, createdAt: true } });
-    if (photo) yield await runWithFreshHostedDomainRootUnwrapCache(() => progressEffect(async () => {
+    if (photo) yield await runWithFreshHostedDomainRootUnwrapCache(() => progressEffect('export_share_photo', async () => {
       await assertCurrent();
       const bytes = await openSharePhoto(memberId, photo.storageKey);
       if (!bytes) throw exportUnavailable();

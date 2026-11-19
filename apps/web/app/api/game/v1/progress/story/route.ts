@@ -14,5 +14,5 @@ export const GET = withProgressJsonError(async (request: Request) => runWithHost
   const query = parseStoryQuery(Object.fromEntries(new URL(request.url).searchParams));
   // A Steps town is on the Steps route, which holds the same authority as the rest of Steps.
   const authority = query.measure === 'steps' ? healthAuthority(auth) : (tx: Parameters<typeof assertGameMemberAuthCurrentTx>[1]) => assertGameMemberAuthCurrentTx(auth, tx);
-  return jsonOk(await progressEffect(() => readTownStory(auth.member.id, query, authority)));
+  return jsonOk(await progressEffect('read_story', () => readTownStory(auth.member.id, query, authority)));
 }));

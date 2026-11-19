@@ -46,10 +46,17 @@ describe('Progress JPEG upload HTTP contract', () => {
     expect(mocks.series).not.toHaveBeenCalled(); expect(mocks.put).not.toHaveBeenCalled();
   });
   it('returns one private retryable failure without provider content', async () => {
-    mocks.put.mockRejectedValue(new Error('private-provider-body'));
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const error = new TypeError('private-provider-body');
+    error.name = 'private-provider-name';
+    mocks.put.mockRejectedValue(error);
     const response = await POST(request(query));
     expect(response.status).toBe(503); expect(response.headers.get('Cache-Control')).toBe('private, no-store');
     expect(await response.json()).toEqual({ error: { code: 'PROGRESS_UNAVAILABLE', message: 'Progress could not load. Try again.', retryable: true } });
     expect(mocks.put).toHaveBeenCalledTimes(1);
+    expect(log).toHaveBeenCalledExactlyOnceWith('Hosted onboarding route failed.', expect.objectContaining({
+      errorDetails: { operationName: 'upload_picture', type: 'TypeError' },
+    }));
+    expect(JSON.stringify(log.mock.calls)).not.toContain('private-provider');
   });
 });
