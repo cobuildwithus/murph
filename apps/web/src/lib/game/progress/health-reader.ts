@@ -111,8 +111,11 @@ export async function setStepsMeasure(auth: HostedNativeMemberAuth, signal: Abor
   const candidates = routeLegs({ measureId: "steps", legs: state.legs!, points });
   const inserted = await settleAwards(memberId, candidates, beforeMutationTx, { awards, timeZone });
   const currentAwards = inserted ? await readAwards(memberId) : awards;
+  const view = healthJourneyView(measure, state, currentAwards, today, units);
+  // A new route's map and first posters start now, not on the next Health read.
+  await attachRouteArt([view], new Map([["steps", state]]), { memberId, beforeMutationTx });
   await beforeMutationTx(getPrisma());
-  return healthJourneyView(measure, state, currentAwards, today, units);
+  return view;
 }
 
 export async function readProgressHealth(auth: HostedNativeMemberAuth, signal: AbortSignal, units: ClientUnits, timing = new ProgressReadTiming()) {
