@@ -3,11 +3,10 @@ import { assertBrowserVaultMemberAuthority } from "../../browser-vault/authority
 import { isHostedOnboardingError } from "../../hosted-onboarding/errors";
 import { getPrisma } from "../../prisma";
 import type { Day } from "./contract";
-import { openProgress, progressLookup } from "./crypto";
 import type { Candidate } from "./registry";
 import { describeMeasure, readGameSeries, type MeasureSeries } from "./series";
 import { ProgressReadTiming } from "./read-timing";
-import { patchMeasureState, type BeforeProgressMutation, type MeasureState } from "./state";
+import { patchMeasureState, type BeforeProgressMutation } from "./state";
 
 /** Game run check-ins and vault runs share one Running measure. */
 export const RUN_MEASURE_ID = "run.meters";
@@ -30,12 +29,10 @@ export async function hasHealthAuthority(memberId: string): Promise<boolean> {
 export async function saveVaultRuns(memberId: string, savedAt: string,
   runs: { days: readonly { date: string; km: number }[] } | null, beforeMutationTx: BeforeProgressMutation) {
   if (!runs) return;
-  const lookup = progressLookup(memberId, "measure", [RUN_MEASURE_ID]);
-  const row = await getPrisma().gameProgressMeasure.findUnique({ where: { memberId_lookup: { memberId, lookup } }, select: { stateEncrypted: true } });
-  const previous = row ? await openProgress<MeasureState>({ memberId, table: "game_progress_measure", rowId: lookup, field: "state" }, row.stateEncrypted) : {};
-  if (previous.vaultRuns?.savedAt === savedAt || (!runs.days.length && !previous.vaultRuns)) return;
-  await patchMeasureState(memberId, RUN_MEASURE_ID, { vaultRuns: { savedAt,
-    days: runs.days.map(day => [day.date, Math.round(day.km * 1000)] as [Day, number]) } }, beforeMutationTx);
+  await patchMeasureState(memberId, RUN_MEASURE_ID, previous => {
+    if (previous.vaultRuns ? Date.parse(previous.vaultRuns.savedAt) >= Date.parse(savedAt) : !runs.days.length) return previous;
+    return { vaultRuns: { savedAt, days: runs.days.map(day => [day.date, Math.round(day.km * 1000)] as [Day, number]) } };
+  }, beforeMutationTx);
 }
 
 /** The member's own Progress input: game series, with vault runs in Running while health consent holds. */

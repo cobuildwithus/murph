@@ -1,14 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('server-only', () => ({}));
-const mocks = vi.hoisted(() => ({ find: vi.fn(), patch: vi.fn(), authority: vi.fn(), series: vi.fn() }));
-vi.mock('../src/lib/prisma', () => ({ getPrisma: () => ({ gameProgressMeasure: { findUnique: mocks.find } }) }));
-vi.mock('../src/lib/game/progress/crypto', () => ({ progressLookup: () => 'lookup', openProgress: async (_target: object, value: string) => JSON.parse(value) }));
+const mocks = vi.hoisted(() => ({ patch: vi.fn(), authority: vi.fn(), series: vi.fn() }));
+vi.mock('../src/lib/prisma', () => ({ getPrisma: () => ({}) }));
 vi.mock('../src/lib/game/progress/state', () => ({ patchMeasureState: mocks.patch }));
 vi.mock('../src/lib/browser-vault/authority', () => ({ assertBrowserVaultMemberAuthority: mocks.authority }));
 vi.mock('../src/lib/game/progress/series', async original => ({ ...await original<typeof import('../src/lib/game/progress/series')>(), readGameSeries: mocks.series }));
 import { markVaultRunAwards, mergeVaultRuns, readOwnSeries, RUN_MEASURE_ID, saveVaultRuns } from '../src/lib/game/progress/vault-runs';
 import { visibleAwards } from '../src/lib/game/progress/view';
 import { hostedOnboardingError } from '../src/lib/hosted-onboarding/errors';
+import type { MeasureState } from '../src/lib/game/progress/state';
 import type { MeasureSeries } from '../src/lib/game/progress/series';
 import type { Candidate } from '../src/lib/game/progress/registry';
 
@@ -60,20 +60,21 @@ describe('vault runs in Running', () => {
     expect(visibleAwards([stored(marked)], true)).toHaveLength(1);
   });
 
-  it('saves run days once per replica, and never from an older replica', async () => {
-    await saveVaultRuns('ava', 's1', null, before);
-    expect(mocks.find).not.toHaveBeenCalled();
-    mocks.find.mockResolvedValue(null);
-    await saveVaultRuns('ava', 's1', { days: [] }, before);
+  it('saves run days once per replica and clears them on a newer empty replica', async () => {
+    let state: MeasureState = {};
+    mocks.patch.mockImplementation(async (_member, _measure, patch) => { state = patch(state); });
+    const savedAt = '2026-11-12T17:00:00Z';
+    await saveVaultRuns('ava', savedAt, null, before);
     expect(mocks.patch).not.toHaveBeenCalled();
-    await saveVaultRuns('ava', 's1', { days: [{ date: '2026-11-12', km: 5.25 }] }, before);
-    expect(mocks.patch).toHaveBeenCalledWith('ava', RUN_MEASURE_ID, { vaultRuns: { savedAt: 's1', days: [['2026-11-12', 5250]] } }, before);
-    mocks.patch.mockClear();
-    mocks.find.mockResolvedValue({ stateEncrypted: JSON.stringify({ vaultRuns: { savedAt: 's1', days: [['2026-11-12', 5250]] } }) });
-    await saveVaultRuns('ava', 's1', { days: [{ date: '2026-11-12', km: 5.25 }] }, before);
-    expect(mocks.patch).not.toHaveBeenCalled();
-    // A deleted last run clears the saved days.
-    await saveVaultRuns('ava', 's2', { days: [] }, before);
-    expect(mocks.patch).toHaveBeenCalledWith('ava', RUN_MEASURE_ID, { vaultRuns: { savedAt: 's2', days: [] } }, before);
+    await saveVaultRuns('ava', savedAt, { days: [] }, before);
+    expect(state).toEqual({});
+    await saveVaultRuns('ava', savedAt, { days: [{ date: '2026-11-12', km: 5.25 }] }, before);
+    expect(state.vaultRuns).toEqual({ savedAt, days: [['2026-11-12', 5250]] });
+    const saved = state;
+    await saveVaultRuns('ava', savedAt, { days: [] }, before);
+    expect(state).toBe(saved);
+    const newer = '2026-11-12T18:00:00Z';
+    await saveVaultRuns('ava', newer, { days: [] }, before);
+    expect(state.vaultRuns).toEqual({ savedAt: newer, days: [] });
   });
 });

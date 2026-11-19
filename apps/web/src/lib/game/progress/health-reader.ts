@@ -190,11 +190,12 @@ export async function settleProgressHealthInBackground(auth: HostedNativeMemberA
   };
   // Totals and its goals read Running's saved vault runs; this is their one replica read.
   await saveVaultRuns(memberId, snapshot.savedAt, snapshot.runs, authority);
-  if (!healthSettlementCurrent(states.get("restingHeartRate")!.healthSettlement, snapshot.savedAt, profile.timeZone, now)) {
-    await patchMeasureState(memberId, "restingHeartRate", { healthSettlement: {
-      savedAt: snapshot.savedAt, checkedAt: now.toISOString(), timeZone: snapshot.timeZone, profileTimeZone: profile.timeZone,
-    } }, authority);
-  }
+  await patchMeasureState(memberId, "restingHeartRate", previous => {
+    const receipt = previous.healthSettlement;
+    if (receipt && (Date.parse(receipt.savedAt) > Date.parse(snapshot.savedAt)
+      || (receipt.savedAt === snapshot.savedAt && Date.parse(receipt.checkedAt) > now.getTime()))) return previous;
+    return { healthSettlement: { savedAt: snapshot.savedAt, checkedAt: now.toISOString(), timeZone: snapshot.timeZone, profileTimeZone: profile.timeZone } };
+  }, authority);
 }
 
 /** The page and background share every baseline, journey and award write. */
