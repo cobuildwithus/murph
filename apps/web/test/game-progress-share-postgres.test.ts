@@ -377,6 +377,12 @@ describe.skipIf(!enabled)('Change photo attempts', () => {
     expect(tasks).toHaveLength(2); expect(mocks.make).toHaveBeenCalledTimes(2);
     expect(await db.gameProgressShare.count({ where: { memberId: f.memberId } })).toBe(2);
   });
+  it('serves the ready image while its replacement is generating', async () => {
+    const f = await fixture(), first = await made(f);
+    await startProgressShare(f.input, first);
+    expect((await readProgressShare(f.input)).presentation.state).toBe('generating');
+    expect(Buffer.from(await readProgressShareImage(f.input))).toEqual(source);
+  });
   it('a failed Change photo shows the picture it would have replaced', async () => {
     const f = await fixture(), first = await made(f);
     mocks.make.mockRejectedValueOnce(new ShareImageError('refused'));
@@ -429,6 +435,21 @@ describe.skipIf(!enabled)('medal photo copies', () => {
     await expect(f.pick()).rejects.toThrow();
     expect((await f.photos()).map(row => row.storageKey)).toEqual([first!.storageKey]);
     expect(mocks.purge).toHaveBeenCalledTimes(1);
+  });
+  it('accepts a noisy JPEG within the published upload limits', async () => {
+    const f = await fixture('pushups.reps', { photo: false });
+    const width = 2048, height = 2048;
+    const pixels = createHash('shake256', { outputLength: width * height * 3 }).update('texture').digest();
+    const bytes = await sharp(pixels, { raw: { width, height, channels: 3 } }).jpeg({ quality: 45 }).toBuffer();
+    expect(bytes.byteLength).toBeLessThan(2 * 1024 * 1024);
+    await putSharePhoto(f.memberId, { from: 'bytes', bytes }, f.input.beforeMutationTx);
+    expect((await readSharePhoto(f.memberId)).byteLength).toBeLessThanOrEqual(2 * 1024 * 1024);
+  });
+  it('reports a superseded pick when a second upload publishes first', async () => {
+    const f = await fixture(), put = mocks.put.getMockImplementation()!;
+    mocks.put.mockImplementationOnce(async request => { await put(request); await f.pick(); });
+    await expect(f.pick()).rejects.toMatchObject({ httpStatus: 409, code: 'PROGRESS_SHARE_PHOTO_SUPERSEDED' });
+    expect((await f.photos()).map(row => row.status)).toEqual(['current']);
   });
   it('a pick after Turn off is refused and stores nothing', async () => {
     const f = await fixture('pushups.reps', { photo: false });

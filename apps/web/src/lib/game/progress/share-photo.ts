@@ -1,4 +1,5 @@
 import 'server-only';
+import sharp from 'sharp';
 import { createHash, randomBytes } from 'node:crypto';
 import type { Prisma } from '@prisma/client';
 import { openHostedUserSecureBoxBytes, sealHostedUserSecureBoxBytes } from '../../hosted-crypto/secure-box';
@@ -47,8 +48,12 @@ async function sourceBytes(memberId: string, source: SharePhotoSource): Promise<
 export async function putSharePhoto(memberId: string, source: SharePhotoSource, beforeMutationTx: BeforeProgressMutation): Promise<void> {
   const original = await sourceBytes(memberId, source);
   let prepared: Buffer;
-  try { prepared = await prepareShareJpeg(original); }
-  catch { throw unavailable(); }
+  try {
+    const image = sharp(original, { limitInputPixels: 40_000_000 }).resize({ width: 1280, height: 1280, fit: 'inside', withoutEnlargement: true });
+    prepared = await prepareShareJpeg(image);
+  } catch {
+    throw hostedOnboardingError({ code: 'PROGRESS_SHARE_PHOTO_INVALID', httpStatus: 400, message: 'Choose another photo. This one could not be prepared.' });
+  }
   finally { original.fill(0); }
   const storageKey = `progress/${randomBytes(16).toString('hex')}.jpg`;
   try {
@@ -56,9 +61,9 @@ export async function putSharePhoto(memberId: string, source: SharePhotoSource, 
     const envelope = await sealHostedUserSecureBoxBytes({ ...bytesTarget(memberId, storageKey), value: prepared });
     await progressMediaStore().putProgressPic({ userId: memberId, mediaId: storageKey, envelope, hash: createHash('sha256').update(prepared).digest('hex') });
     await withMember(memberId, beforeMutationTx, async tx => {
-      // A Turn off since the insert already retired and purged this copy.
       const mine = await tx.gameProgressSharePhoto.updateMany({ where: { storageKey, status: 'pending' }, data: { status: 'current' } });
-      if (mine.count !== 1) throw turnedOff();
+      if (mine.count !== 1) throw hostedOnboardingError({ code: 'PROGRESS_SHARE_PHOTO_SUPERSEDED', httpStatus: 409,
+        message: 'Your photo selection changed. Open the picker to see the current photo.' });
       await tx.gameProgressSharePhoto.updateMany({ where: { memberId, status: { not: 'retired' }, storageKey: { not: storageKey } }, data: { status: 'retired' } });
     });
   } catch (error) {
