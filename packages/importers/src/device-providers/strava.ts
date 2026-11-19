@@ -237,11 +237,11 @@ export function normalizeStravaSnapshot(snapshot: StravaSnapshotInput): Normaliz
 
   pushEvidencePart(evidenceParts, createEvidencePart("athlete", "athlete.json", athlete));
 
-  for (const activity of activities) {
-    const activityId = stringId(activity.id) ?? `activity-${events.length + 1}`;
+  for (const [index, activity] of activities.entries()) {
+    const activityId = stringId(activity.id) ?? `activity-${index + 1}`;
     const role = `activity:${activityId}`;
     const version = firstIso(activity.updated_at, activity.updatedAt, activity.start_date, activity.startDate);
-    const occurredAt = firstIso(activity.start_date, activity.startDate) ?? importedAt;
+    const occurredAt = firstIso(activity.start_date, activity.startDate, activity.start_date_local, activity.startDateLocal);
     const recordedAt = firstIso(
       activity.updated_at,
       activity.updatedAt,
@@ -257,9 +257,8 @@ export function normalizeStravaSnapshot(snapshot: StravaSnapshotInput): Normaliz
       ? Math.max(1, Math.round(durationSeconds / 60))
       : undefined;
     const movingTimeMinutes = movingSeconds !== undefined ? movingSeconds / 60 : undefined;
-    const startAt = firstIso(activity.start_date, activity.startDate) ?? occurredAt;
-    const endAt = addSecondsToIso(startAt, durationSeconds);
-    const dayKey = firstDayKey(activity.start_date_local, activity.start_date, occurredAt, recordedAt);
+    const endAt = addSecondsToIso(occurredAt, durationSeconds);
+    const dayKey = firstDayKey(activity.start_date_local, activity.startDateLocal, occurredAt);
     const sportName =
       firstString(activity.sport_type, activity.sportType, activity.type, activity.activity_type, activity.activityType)
       ?? "Activity";
@@ -292,7 +291,7 @@ export function normalizeStravaSnapshot(snapshot: StravaSnapshotInput): Normaliz
               sourceWorkoutId: activityId,
               sport: activityType,
               sportName,
-              startedAt: startAt,
+              startedAt: occurredAt,
               endedAt: endAt,
               movingTimeMinutes,
               sessionNote: trimToLength(title, 160),
