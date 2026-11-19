@@ -202,9 +202,11 @@ describe.skipIf(!enabled)("Linq local departure on migrated PostgreSQL", () => {
     await entered;
     const creating = db.$transaction(prisma => ensureHostedThreadContainerRouteTx({ channel: "linq", accountLookupKey: account,
       ownerMemberId: owner, occurredAt: new Date(), threadId: chat, prisma }));
+    // Expect the refusal before it can arrive: it may land while the departure is still being awaited.
+    const refused = expect(creating).rejects.toMatchObject({ code: "HOSTED_LINQ_GROUP_LEFT" });
     release();
     await expect(leaving).resolves.toMatchObject({ status: "left" });
-    await expect(creating).rejects.toMatchObject({ code: "HOSTED_LINQ_GROUP_LEFT" });
+    await refused;
   });
   it("survives container deletion and full prior-key retirement, including dormant unbound markers", async () => {
     await leave();
