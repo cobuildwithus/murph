@@ -18,6 +18,7 @@ import { assertHostedWebProtocolAdmission } from "./deploy-web-protocol.ts";
 import { resolveDeployWorkerCliPaths } from "./deploy-worker-version-paths.js";
 import { assertReleaseNotBehindLive } from "./deploy-release-order.ts";
 import { readLiveRunnerReleaseSha, stageHostedRunnerRelease } from "./stage-runner-release.ts";
+import { previousAdmissionDigest, productionAdmissionProof, stampAdmissionProof } from "./deploy-model-admission.ts";
 import { verifyRecoverySources } from "./deploy-rollback-recovery.ts";
 import { createRunnerReleaseProvider } from "./runner-release-provider.ts";
 import { runSmokeHostedDeploy } from "./smoke-hosted-deploy.shared.ts";
@@ -194,11 +195,19 @@ export async function runDeployWorkerVersionCli(
           await releaseProvider.assertApplicationReady({ ...application, listApplications: containerProvider.listApplications });
         }
         await activateVersion(staged.configPath, stageVersionId, currentVersionId);
+        const proof = serving && env.HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT === "production"
+          ? await productionAdmissionProof({ deployRoot, releaseSha, workflowSha: env.GITHUB_SHA,
+            secretsFile: input.includeSecrets ? input.secretsFilePath : undefined, day: new Date().toISOString().slice(0, 10) }) : null;
+        let admittedDigest: string | null = null;
         if (serving) {
           // This endpoint cannot allocate member slots, even if an older Worker
           // receives the request during edge propagation (it returns 404).
           await runSmokeHostedDeploy({
             phase: "artifact",
+            ...(proof ? {
+              previousAdmissionDigest: previousAdmissionDigest(currentVersion, proof),
+              onModelAdmission: (digest: string) => { admittedDigest = digest; },
+            } : {}),
             source: {
               ...env,
               HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
@@ -236,12 +245,15 @@ export async function runDeployWorkerVersionCli(
           source: {
             ...env,
             HOSTED_EXECUTION_RUNNER_DEPLOYMENT: JSON.stringify(staged.deployment),
+            ...(staged.workerOnly && env.HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT === "production"
+              ? { HOSTED_EXECUTION_SMOKE_LIVE_MODEL_TURN: "true" } : {}),
             HOSTED_EXECUTION_SMOKE_RUNNER_CONTAINER: "true",
             HOSTED_EXECUTION_SMOKE_VERSION_ID: stageVersionId,
             HOSTED_EXECUTION_SMOKE_RUNNER_MANIFEST_PATH: path.join(runnerBundleDir, ".murph-runner-bundle-manifest.json"),
           },
         });
         await assertLiveVersion(input.workerName, input.configPath, stageVersionId);
+        if (admittedDigest) await stampAdmissionProof(staged.promotionConfigPath, `${proof}:${admittedDigest}`);
         const workerVersionId = staged.workerOnly ? stageVersionId : await uploadVersion(staged.promotionConfigPath, stageVersionId);
         if (!staged.workerOnly) await activateVersion(staged.promotionConfigPath, workerVersionId, stageVersionId);
         const after = await readCloudflareContainerApplicationIdentities(

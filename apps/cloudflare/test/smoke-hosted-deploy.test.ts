@@ -203,7 +203,7 @@ describe("resolveSmokeRunnerManifestPath", () => {
 });
 
 describe("runSmokeHostedDeploy", () => {
-  it.each(["accepted", "missing", "duplicate", "wrong model", "wrong tier", "unused grant", "provider rejected"])(
+  it.each(["accepted", "reuse", "changed contract", "absent proof", "missing", "duplicate", "wrong model", "wrong tier", "unused grant", "provider rejected"])(
     "requires the complete live model and tier receipts before releasing a production artifact (%s)", async (scenario) => {
     const root = await mkdtemp(path.join(os.tmpdir(), "cloudflare-artifact-smoke-"));
     const manifestPath = path.join(root, "manifest.json");
@@ -214,6 +214,7 @@ describe("runSmokeHostedDeploy", () => {
       await writeFile(manifestPath, JSON.stringify(manifest));
       const smoke = runSmokeHostedDeploy({
         phase: "artifact", log() {},
+        ...(scenario === "reuse" || scenario === "changed contract" ? { previousAdmissionDigest: "a".repeat(64) } : {}),
         fetchImpl: async input => {
           const url = new URL(String(input)); calls.push(url);
           if (url.pathname === "/" || url.pathname === "/health") {
@@ -222,7 +223,9 @@ describe("runSmokeHostedDeploy", () => {
           expect(url.pathname).toBe("/internal/deploy/artifact-smoke");
           if (++artifactRequests === 1) return new Response("Old Worker route missing", { status: 404 });
           expect(url.searchParams.get("liveModelTurn")).toBe("1");
-          const turns = DEPLOY_MODEL_ADMISSION_PROBES.map(({ model, serviceTier }) => ({
+          const onlyLuna = ["reuse", "changed contract", "absent proof"].includes(scenario);
+          const probes = onlyLuna ? [{ model: "gpt-6-luna", serviceTier: "default" as const }] : DEPLOY_MODEL_ADMISSION_PROBES;
+          const turns = probes.map(({ model, serviceTier }) => ({
             serviceTier,
             durationMs: 1, egressGrantConsumed: true, model, stdoutBytes: 1,
           }));
@@ -231,6 +234,7 @@ describe("runSmokeHostedDeploy", () => {
           if (scenario === "wrong tier") turns[1]!.serviceTier = "default";
           if (scenario === "unused grant") turns[1]!.egressGrantConsumed = false;
           return new Response(JSON.stringify({ ok: true, runnerContainer: {
+            ...(onlyLuna ? { admissionDigest: (scenario === "changed contract" ? "b" : "a").repeat(64) } : {}),
             ...(scenario === "missing" ? {} : { webModelTurns: turns }),
             ...(scenario === "provider rejected" ? { liveModelTurnFailure: "synthetic rejection" } : {}),
             ok: true, runnerBundle: manifest, service: "cloudflare-hosted-runner-node", codexShell: createCodexShellSmokeResult(),
@@ -250,7 +254,7 @@ describe("runSmokeHostedDeploy", () => {
           HOSTED_WEB_CALLBACK_SIGNING_PRIVATE_JWK: TEST_HOSTED_WEB_CALLBACK_PRIVATE_JWK_JSON,
         },
       });
-      if (scenario !== "accepted") {
+      if (scenario !== "accepted" && scenario !== "reuse") {
         await expect(smoke).rejects.toThrow(/admission|expected model|did not prove|egress grant|synthetic rejection/u);
         expect(artifactRequests).toBe(2);
         return;

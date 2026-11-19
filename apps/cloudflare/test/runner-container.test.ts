@@ -4582,8 +4582,11 @@ describe("RunnerContainer", () => {
     });
   });
 
-  it.each([false, true])("uses a separate single-use model fence for each probe (web admission: %s)", async (webModelAdmission) => {
-    const probes = webModelAdmission ? DEPLOY_MODEL_ADMISSION_PROBES : [{ model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL, serviceTier: undefined }];
+  it.each(["serving", "full", "same", "changed", "unavailable"])("uses a separate single-use provider grant for each required probe (%s)", async scenario => {
+    const webModelAdmission = scenario !== "serving";
+    const measure = !["serving", "full"].includes(scenario);
+    const probes = scenario === "same" ? [{ model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL, serviceTier: "default" as const }]
+      : webModelAdmission ? DEPLOY_MODEL_ADMISSION_PROBES : [{ model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL, serviceTier: undefined }];
     const expectedModels = probes.map(probe => probe.model);
     const probedModels: string[] = [];
     let fenceActiveDuringTurn: boolean | null = null;
@@ -4617,6 +4620,10 @@ describe("RunnerContainer", () => {
         }
 
         expect(url).toBe("http://container/internal/deploy-live-model-turn-smoke");
+        if (new Headers(init?.headers).get("x-murph-smoke-contract") === "measure") {
+          expect(await containerRef?.readDeploySmokeLiveModelTurnFence()).toEqual({ active: false });
+          return Response.json(scenario === "unavailable" ? {} : { digest: "a".repeat(64) });
+        }
         const model = new Headers(init?.headers).get("x-murph-smoke-model");
         expect(model).toBe(expectedModels[probedModels.length]);
         const serviceTier = probes[probedModels.length]?.serviceTier;
@@ -4655,7 +4662,7 @@ describe("RunnerContainer", () => {
     });
 
     const result = await container.smokeHealth(webModelAdmission
-      ? { liveModelTurn: { webModelAdmission: true } }
+      ? { liveModelTurn: { webModelAdmission: true, measure, previousDigest: (scenario === "same" ? "a" : "b").repeat(64) } }
       : { liveModelTurn: { model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL } });
     expect(probedModels).toEqual(expectedModels);
     expect(webModelAdmission ? result.webModelTurns : [result.liveModelTurn]).toEqual(
@@ -4669,7 +4676,7 @@ describe("RunnerContainer", () => {
     await expect(container.readDeploySmokeLiveModelTurnFence()).resolves.toEqual({
       active: false,
     });
-    expect(containerFetch).toHaveBeenCalledTimes(2 + expectedModels.length);
+    expect(containerFetch).toHaveBeenCalledTimes(2 + expectedModels.length + Number(measure));
     const smokeCall = containerFetch.mock.calls.find(([url]) =>
       String(url).endsWith("/internal/deploy-live-model-turn-smoke")
     );

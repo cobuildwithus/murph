@@ -1,4 +1,5 @@
 import { hostedFlexModelCatalogPath, HOSTED_ASSISTANT_ASTRA_MODEL } from "@murphai/hosted-execution/assistant-model";
+import { measureModelRequestContract } from "./deploy-model-request-contract.ts";
 import { createHash } from "node:crypto";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
@@ -98,6 +99,7 @@ export interface HostedContainerHeavyRuntimeCore {
     signal: AbortSignal;
     tlsCaCertificatePem?: string;
   }): Promise<HostedContainerDirectR2PresignedPutSmokeResult>;
+  measureModelRequestContract(signal: AbortSignal): Promise<string>;
   runLiveModelTurnSmoke(input: {
     model: string;
     serviceTier?: DeployAdmissionTier;
@@ -264,6 +266,7 @@ async function runHostedContainerLiveModelTurnSmoke(input: {
   model: string;
   serviceTier?: DeployAdmissionTier;
   signal: AbortSignal;
+  localCaptureUrl?: string;
 }): Promise<HostedContainerLiveModelTurnSmokeResult> {
   return await withHostedContainerCodexSmokeWorkspace(input.model, async (workspace) =>
     await new Promise((resolve, reject) => {
@@ -277,6 +280,7 @@ async function runHostedContainerLiveModelTurnSmoke(input: {
       const child = spawn("codex", [
         "exec",
         "--json",
+        ...(input.localCaptureUrl ? ["-c", `model_providers.hosted-shell-smoke.base_url=${JSON.stringify(input.localCaptureUrl)}`] : []),
         ...(input.serviceTier === "default" ? ["--image", path.join(workspace.smokeVaultRoot, "admission.png")] : []),
         "--skip-git-repo-check",
         "-",
@@ -489,9 +493,13 @@ async function withHostedContainerCodexSmokeWorkspace<T>(
       ].join("\n"),
       { mode: 0o600 },
     );
+    // Standard probes retain the native instructions and exercise image input.
+    // Priority probes exercise the same complete tool contract with a short synthetic task.
+    const instructionFile = serviceTier === "priority" ? path.join(smokeVaultRoot, "admission-instructions.md") : undefined;
+    if (instructionFile) await writeFile(instructionFile, "Return the requested acknowledgement.", { mode: 0o600 });
     await writeFile(
       path.join(codexHome, "config.toml"),
-      buildHostedContainerCodexShellSmokeConfig(model, serviceTier),
+      buildHostedContainerCodexShellSmokeConfig(model, serviceTier, instructionFile),
       { mode: 0o600 },
     );
 
@@ -542,7 +550,7 @@ function isPathInside(candidate: string, parent: string): boolean {
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
-export function buildHostedContainerCodexShellSmokeConfig(model: string, serviceTier?: DeployAdmissionTier): string {
+export function buildHostedContainerCodexShellSmokeConfig(model: string, serviceTier?: DeployAdmissionTier, instructionFile?: string): string {
   const webAdmission = serviceTier !== undefined;
   const catalog = readHostedCodexModelCatalogJsonPath();
   if (webAdmission && !catalog) throw new Error("Hosted web admission requires the candidate image model catalog.");
@@ -551,6 +559,7 @@ export function buildHostedContainerCodexShellSmokeConfig(model: string, service
 
   return [
     `model = ${JSON.stringify(model)}`,
+    ...(instructionFile ? [`model_instructions_file = ${JSON.stringify(instructionFile)}`] : []),
     ...(modelCatalogJson
       ? [`model_catalog_json = ${JSON.stringify(modelCatalogJson)}`]
       : []),
@@ -1062,6 +1071,8 @@ export const hostedContainerHeavyRuntime: HostedContainerHeavyRuntimeCore = {
   runCodexShellSmoke: runHostedContainerCodexShellSmoke,
   runDirectR2PresignedPutSmoke: runHostedContainerDirectR2PresignedPutSmoke,
   runLiveModelTurnSmoke: runHostedContainerLiveModelTurnSmoke,
+  measureModelRequestContract: signal => measureModelRequestContract((probe, localCaptureUrl) =>
+    runHostedContainerLiveModelTurnSmoke({ ...probe, localCaptureUrl, signal })),
   runWorkspaceInvocation: runHostedWorkspaceInvocation,
   async warmCodexBinary(input) {
     // Only the runner image bakes this catalog beside the pinned Codex binary.
