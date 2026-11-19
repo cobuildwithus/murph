@@ -3,6 +3,7 @@ import { assessBrowserVaultReplicaFreshness } from "@murphai/hosted-execution";
 import { parseHostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/parsers";
 import { generateHostedUserRecipientKeyPair } from "@murphai/runtime-state";
 
+import { assertHostedNativeMemberAuthCurrentTx } from "@/src/lib/better-auth/native-auth";
 import { assertBrowserVaultMemberAuthority } from "@/src/lib/browser-vault/authority";
 import { decodeReadyBrowserVaultSession, parseBrowserVaultSessionResponse } from "@/src/lib/browser-vault/loader";
 import { readHostedExecutionControlClientIfConfigured } from "@/src/lib/hosted-execution/control";
@@ -50,6 +51,7 @@ export const GET = withJsonError(async (request: Request) => {
       signal: request.signal,
     });
     // Recheck live access after the external read and before disclosing health data.
+    await assertHostedNativeMemberAuthCurrentTx(auth, prisma);
     await assertBrowserVaultMemberAuthority({ memberId: auth.member.id, prisma });
     return jsonOk({ journal: loaded.client.replica.journal ?? null, freshness: session.freshness });
   } catch (error) {
