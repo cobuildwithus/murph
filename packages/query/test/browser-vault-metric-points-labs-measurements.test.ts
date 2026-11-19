@@ -81,7 +81,7 @@ async function createBrowserVaultReplicaFromVault(input: CreateReplicaInput) {
 
 test("browser-vault metric points project manual measurements, metric samples, and blood-test results through one primitive", async () => {
   const replica = await createBrowserVaultReplicaFromVault({
-    generatedAt: "2026-05-02T12:00:00.000Z",
+    generatedAt: "2026-05-04T12:00:00.000Z",
     sourceBundleHash: "f".repeat(64),
     vault: createVaultReadModel({
       entities: [
