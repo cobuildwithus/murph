@@ -124,7 +124,7 @@ import {
   type GameTerms,
   type TermWords,
 } from "./rules";
-import { addDays, daysBetween, gameLocalDate, morningAfter } from "./time";
+import { acceptanceStartDate, addDays, daysBetween, gameLocalDate, morningAfter } from "./time";
 import { agreedDayOne, gameChangeCancellationNeedsNotice, decideApprovedGameChange, pendingGameChangeView, decideGameChange, gameChangeControls, gameChangeMajority, normalizeGroupGameChange, gameChangeRefusal, isGameChangeExpired, isGameChangeOutdated, isSameGameChange, parsePendingGameChange, type StoredGamePendingChange } from "./changes";
 import { prepareGameChangeWords, readPendingGameChanges, type PreparedGameChangeWords } from "./change-words";
 import { deliverGameChangeProposal } from "./chat-delivery";
@@ -3518,7 +3518,7 @@ export async function readInvitePreview(token: string, multiplayer = false, memb
   const now = gameNow(await databaseNow(getPrisma()), row);
   const closed = await closedInvitePreview(row, now);
   if (closed && !memberId) return null;
-  const preview = closed ?? await openInvitePreview(row, multiplayer, memberId, blocks);
+  const preview = closed ?? await openInvitePreview(row, multiplayer, memberId, blocks, now);
   if (row.maxPlayers !== 10) return preview;
   return withGroupTalkPreview(row, preview, memberId, now);
 }
@@ -3574,7 +3574,7 @@ async function groupInviteOpen(row: GameRow, now: Date): Promise<boolean> {
   return !isGameDue(toRuleState(row, entries), now);
 }
 
-async function openInvitePreview(row: PreviewGame, multiplayer: boolean, memberId: string | undefined, blocks: GameBlocks | null): Promise<GameInvitePreview> {
+async function openInvitePreview(row: PreviewGame, multiplayer: boolean, memberId: string | undefined, blocks: GameBlocks | null, now: Date): Promise<GameInvitePreview> {
   // The invitee's name stays out: the challenger typed it as their own private
   // label, and this preview is public to anyone holding the link.
   const [inviterFirstName, words] = await openGameTexts([
@@ -3593,12 +3593,23 @@ async function openInvitePreview(row: PreviewGame, multiplayer: boolean, memberI
     inviterFirstName: inviterFirstName ?? "",
     ...(memberId !== undefined && row.maxPlayers === 2 ? { inviterAvatarUrl: await inviterAvatar(row, memberId) } : {}),
     startsOn: game.startsOn,
+    ...(row.maxPlayers === 2 && !game.startsOn ? { earliestStart: earliestPairStart(row, now) } : {}),
     status: "open",
     supportsNegotiation: row.maxPlayers === 2,
     ...(row.maxPlayers === 2 ? { supportsTalk: true } : {}),
     lengthDays: row.lengthDays,
     terms: previewTerms,
   };
+}
+
+/**
+ * Accepting now, Day 1 is no earlier than this: the latest of the players'
+ * own start days (`decideJoin`). The reader's phone takes the later of this
+ * and its own, so a challenger past 3pm makes "Starts tomorrow".
+ */
+function earliestPairStart(row: PreviewGame, now: Date): string | null {
+  const starts = row.players.flatMap(player => !player.leftAt && player.timeZone ? [acceptanceStartDate(now, player.timeZone)] : []).sort();
+  return starts.at(-1) ?? null;
 }
 
 /**
