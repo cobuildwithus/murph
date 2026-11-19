@@ -1,6 +1,6 @@
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import type { CanonicalEntity } from "../canonical-entities.ts";
-import { memoryDisplayNameSchema, memoryDemographicsSchema, experimentOutcomeSchema } from "@murphai/contracts";
+import { memoryDisplayNameSchema, memoryDemographicsSchema, experimentOutcomeSchema, normalizeIanaTimeZone, toLocalDayKey } from "@murphai/contracts";
 import { metricPointRecordIds } from "../metrics/index.ts";
 import { buildJournalView } from "../journal-view.ts";
 import { buildCompanionMealsProjection } from "./meals.ts";
@@ -82,13 +82,15 @@ export async function createBrowserVaultReplica(
   const requestedMetricKeys = new Set(requestedMetrics.map((metric) => metric.metricKey));
   const explicitRequestedMetricKeys = new Set(explicitRequestedMetrics.map((metric) => metric.metricKey));
   const anchoredMetricRecords = collectExperimentMeasurementAnchorRecords(defaultProjectedVault.entities);
-  const cutoff = subtractDaysFromIsoDate(generatedAt.slice(0, 10), METRIC_LOOKBACK_DAYS);
+  const zone = input.vault.metadata?.timezone;
+  const today = toLocalDayKey(generatedAt, normalizeIanaTimeZone(typeof zone === "string" ? zone : null) ?? "UTC");
+  const cutoff = subtractDaysFromIsoDate(today, METRIC_LOOKBACK_DAYS);
   const metricPoints = allMetricPoints.filter((point) =>
     isBrowserVaultMetricRowPoint(point, requestedMetricKeys) &&
     (point.effectiveDate >= cutoff || isAnchoredBrowserMetricPoint(point, anchoredMetricRecords))
   );
   const selectionMetricPoints = allMetricPoints.filter((point) =>
-    isBrowserVaultRequestedMetricPoint(point, requestedMetricKeys) &&
+    point.effectiveDate <= today && isBrowserVaultRequestedMetricPoint(point, requestedMetricKeys) &&
     (point.effectiveDate >= cutoff ||
       isAnchoredBrowserMetricPoint(point, anchoredMetricRecords) ||
       isBrowserVaultRequestedMetricPoint(point, explicitRequestedMetricKeys))
@@ -125,7 +127,7 @@ export async function createBrowserVaultReplica(
     ...(input.demographics ? { demographics: memoryDemographicsSchema.parse(input.demographics) } : {}),
     ...(input.displayName === undefined ? {} : { displayName: memoryDisplayNameSchema.parse(input.displayName) }),
     meals: buildCompanionMealsProjection(input.vault),
-    runs: buildCompanionRunsProjection(defaultProjectedVault, wearableDataset, generatedAt),
+    runs: buildCompanionRunsProjection(defaultProjectedVault, wearableDataset, today),
     hasLabBiomarkers: metricRows.some((row) =>
       row.sourceKind === "test-result" &&
       row.biomarkerKey !== null &&
