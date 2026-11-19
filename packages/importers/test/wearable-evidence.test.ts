@@ -367,8 +367,7 @@ test("pushDeletionObservation bounds deletion artifact names while preserving ev
     (evidenceParts[0]?.content as { resourceType?: string } | undefined)?.resourceType,
     longResourceType,
   );
-  assert.equal(
-    (events[0]?.fields as { sourceEventType?: string } | undefined)?.sourceEventType,
-    longSourceEventType,
-  );
+  assert.deepEqual(events[0]?.evidenceRoles, [evidenceParts[0]?.role]);
+  assert.equal(events[0]?.note, `Webhook event: ${longSourceEventType}`);
+  assert.partialDeepStrictEqual(evidenceParts[0]?.content, { sourceEventType: longSourceEventType });
 });
