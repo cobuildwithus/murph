@@ -1101,11 +1101,16 @@ Device hints, restored timers, imports, activity scheduling, and exact
 acknowledgments all use the workspace-owned mailbox path. Common durable effects
 retain their existing delivery and shutdown behavior.
 
-The runner processes ready ordered mailbox items in the same invocation. After
-each item reaches its checkpoint and leaves the queue, the current execution
-owner checks the queue again. The default owner admits new conversation input
-before starting the next item. The system owner also checks for foreground work
-and assistant deadlines between items. A retained item keeps its retry deadline.
+The runner drains ready ordered mailbox work in the same invocation. Up to four
+adjacent, eligible member edits can share one workspace snapshot. The runner
+applies them in queue order, checks for foreground work between edits, and
+publishes their individual receipts concurrently after the snapshot commits.
+The snapshot contains the exact outcomes. If publication stops partway, the
+next runner can retry those receipts using their original identities. A fenced
+progress update records the handled system sequence. On restore, it retires
+covered member-action receipts from the saved copy. A failed receipt or a
+blocked sequence instead requires a snapshot of the remaining work and retry
+deadline. Other mailbox items keep their existing checkpoint boundaries.
 Independent device and clinical imports keep their existing admission budgets.
 
 After the dedicated system-mailbox lane checkpoints completed workspace work,

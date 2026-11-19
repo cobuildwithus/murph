@@ -40,6 +40,7 @@ import {
 import type {
   HostedLegacyUsageReferralAuthorityClassification,
 } from "./events/assistant-notification.ts";
+import { readHostedMailboxImportState } from "./mailbox-state.ts";
 import type {
   HostedMailboxItemImportOutcome,
   HostedMailboxResolvedImportItem,
@@ -62,6 +63,8 @@ import {
   readHostedSystemMailboxState,
   removeHostedSystemMailboxPendingItemIfCurrent,
   resolveHostedSystemMailboxNextWakeCandidate,
+  resolveHostedSystemMailboxProgress,
+  resolveHostedSystemMailboxWakeCandidates,
   usesHostedModelFreeSystemMailboxSelection,
   systemMailboxItemIsDue,
   updateHostedSystemMailboxPendingItem,
@@ -130,7 +133,7 @@ type HostedSystemMailboxCodexConnectionFailure = {
   codexErrorHttpStatusCode?: number;
 };
 
-export type HostedSystemMailboxCheckpointPreparation =
+export type HostedSystemMailboxCheckpointPreparation = (
   | {
       assistantNotificationValidationFailureReason?:
         HostedAssistantNotificationValidationFailureReason;
@@ -163,7 +166,7 @@ export type HostedSystemMailboxCheckpointPreparation =
       item: HostedSystemMailboxPendingItem;
       itemId: string;
       status: "recording";
-    };
+    }) & { memberActionBatch?: readonly HostedSystemMailboxPendingItem[] };
 
 type HostedSystemMailboxPreparationSelection =
   | {
@@ -379,7 +382,8 @@ async function resolveAssistantAskCompletionCutoff(
   return (typeof cutoff === "function" ? await cutoff() : cutoff) ?? null;
 }
 
-export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
+type MailboxPreparationInput = {
+  batchMemberActions?: boolean;
   assistantExecutionBlocked?: boolean;
   pendingOnly?: boolean;
   excludedRouteActions?: readonly HostedSystemMailboxRouteAction[];
@@ -399,14 +403,61 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   backgroundMaintenanceYieldReason?: HostedBackgroundMaintenanceYieldReason;
   vaultRoot: string;
-}): Promise<HostedSystemMailboxCheckpointPreparation | null> {
-  const startedAt = (input.now ?? (() => new Date().toISOString()))();
-  const hasAssistantAskCompletionCutoff = Object.hasOwn(
-    input,
-    "assistantAskCompletionOccurredBefore",
-  );
-  const matchesSelection = (item: HostedSystemMailboxPendingItem) =>
-    !input.excludedRouteActions?.includes(item.routeAction)
+};
+
+const MEMBER_ACTION_BATCH_LIMIT = 4;
+
+export async function prepareHostedSystemMailboxItemForCheckpoint(
+  input: MailboxPreparationInput,
+): Promise<HostedSystemMailboxCheckpointPreparation | null> {
+  const first = await prepareOneSystemMailboxItem(input, []);
+  if (!input.batchMemberActions || !isPreparedMemberAction(first)) return first;
+  const batch = [first.item];
+  while (batch.length < MEMBER_ACTION_BATCH_LIMIT && !input.shouldYieldBackgroundMaintenance?.()) {
+    input.signal?.throwIfAborted();
+    const next = await prepareOneSystemMailboxItem(input, batch);
+    if (!isPreparedMemberAction(next)) break;
+    batch.push(next.item);
+  }
+  return batch.length > 1 ? { ...first, memberActionBatch: batch } : first;
+}
+
+function isPreparedMemberAction(value: HostedSystemMailboxCheckpointPreparation | null): value is Extract<
+  HostedSystemMailboxCheckpointPreparation, { status: "processed" | "recording" }
+> {
+  return (value?.status === "processed" || value?.status === "recording")
+    && value.item.wake.kind === "member.action.requested"
+    && value.item.mailboxLaneSeq !== null
+    && value.item.postCheckpointRecord?.kind === "member-action.outcome-recorded";
+}
+
+function mayClaimNextBatchItem(
+  batch: readonly HostedSystemMailboxPendingItem[],
+  state: HostedSystemMailboxState,
+  selected: HostedSystemMailboxPendingItem | null | undefined,
+  input: MailboxPreparationInput,
+): boolean {
+  const previous = batch.at(-1);
+  if (!previous) return true;
+  if (
+    input.shouldYieldBackgroundMaintenance?.()
+    || selected?.wake.kind !== "member.action.requested"
+    || selected.mailboxLaneSeq === null
+    || (selected.status !== "pending" && !(selected.status === "recording"
+      && selected.postCheckpointRecord?.kind === "member-action.outcome-recorded"))
+  ) return false;
+  const index = state.pending.findIndex((item) => item.itemId === previous.itemId);
+  return index >= 0 && state.pending[index + 1]?.itemId === selected.itemId;
+}
+
+function createPreparationSelection(
+  input: MailboxPreparationInput,
+  batch: readonly HostedSystemMailboxPendingItem[],
+) {
+  const staged = new Set(batch.map((item) => item.itemId));
+  return (item: HostedSystemMailboxPendingItem) =>
+    !staged.has(item.itemId)
+    && !input.excludedRouteActions?.includes(item.routeAction)
     && (input.allowedRouteActions?.includes(item.routeAction)
       ?? item.routeAction !== "run-assistant-ask")
     && (input.allowedMailboxDedupeKeyPrefixes == null
@@ -414,6 +465,18 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
         item.mailboxDedupeKey.startsWith(prefix)))
     && (input.allowedWakeKinds == null
       || input.allowedWakeKinds.includes(item.wake.kind));
+}
+
+async function prepareOneSystemMailboxItem(
+  input: MailboxPreparationInput,
+  batch: readonly HostedSystemMailboxPendingItem[],
+): Promise<HostedSystemMailboxCheckpointPreparation | null> {
+  const startedAt = (input.now ?? (() => new Date().toISOString()))();
+  const hasAssistantAskCompletionCutoff = Object.hasOwn(
+    input,
+    "assistantAskCompletionOccurredBefore",
+  );
+  const matchesSelection = createPreparationSelection(input, batch);
   // A negative snapshot only ends this pass. Later imports remain queued; a
   // positive snapshot must still be re-read and claimed under the write lock.
   const snapshot = await readHostedSystemMailboxState(input.vaultRoot);
@@ -476,6 +539,9 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
         now: startedAt,
         state: selectionState,
       });
+      if (!mayClaimNextBatchItem(batch, state, pending, input)) {
+        return { result: null, write: false };
+      }
       if (!pending) {
         const compacted = retireHostedCoveredDeviceHints({
           continuationItemIds,
@@ -1050,6 +1116,43 @@ export function resolveHostedDeviceSyncCompletionRecordInput(input: {
     return {};
   }
   return { deviceSyncCompletionAcceptedInCurrentAdmission: true };
+}
+
+// Only the external receipts overlap. Vault mutations have already run in
+// order and the shared snapshot contains every exact outcome for replay.
+export async function recordHostedMemberActionBatch(input: {
+  items: readonly HostedSystemMailboxPendingItem[];
+  assistantExecutionBlocked?: boolean;
+  runtime: HostedSystemMailboxRuntime;
+  signal?: AbortSignal | null;
+  vaultRoot: string;
+  alreadyPublished?: ReadonlySet<string>;
+}) {
+  input.signal?.throwIfAborted();
+  const results = await Promise.allSettled(input.items.map(async (item) => {
+    if (input.alreadyPublished?.has(item.itemId)) {
+      await removeHostedSystemMailboxPendingItemIfCurrent({ item, vaultRoot: input.vaultRoot });
+      return;
+    }
+    await recordHostedSystemMailboxItemAfterCheckpoint({ ...input, item });
+  }));
+  for (const result of results) {
+    if (result.status === "rejected") throw result.reason;
+  }
+  const state = await readHostedSystemMailboxState(input.vaultRoot);
+  const imported = await readHostedMailboxImportState({ vaultRoot: input.vaultRoot });
+  const { handledThroughSeq } = resolveHostedSystemMailboxProgress({
+    state, importedSeq: imported.watermarks.system,
+  });
+  const { next } = await resolveHostedSystemMailboxWakeCandidates({ ...input, state });
+  return {
+    nextWakeAt: next.at,
+    nextWakeReason: next.reason,
+    // Only a handled prefix can prove that all journals in the snapshot are
+    // retired. Persist a partial failure or a pinned frontier in the usual way.
+    requiresFollowUpCheckpoint: input.items.some((item) =>
+      item.mailboxLaneSeq === null || BigInt(item.mailboxLaneSeq) > BigInt(handledThroughSeq)),
+  };
 }
 
 export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {

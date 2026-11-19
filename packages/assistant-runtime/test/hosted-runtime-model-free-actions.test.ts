@@ -1,11 +1,11 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { resolveAssistantStatePaths } from "@murphai/runtime-state/node/assistant-state-fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { expect, test, vi } from "vitest";
-import { addMeal, findEventByExternalRef, initializeVault, readPreferencesDocument } from "@murphai/core";
-import { workoutSessionSchema, type MemberActionOutcomeV1 } from "@murphai/contracts";
+import { addMeal, findEventByExternalRef, initializeVault, readMemoryDocument, readPreferencesDocument } from "@murphai/core";
+import { resolveMemoryDisplayName, workoutSessionSchema, type MemberActionOutcomeV1 } from "@murphai/contracts";
 import { readMealNutritionTotals } from "@murphai/query";
 import { addLiveWorkoutExercise, showWorkoutRecord, startLiveWorkout } from "@murphai/vault-usecases/workouts";
 import { deriveWorkoutActionBinding } from "@murphai/operator-config/workout-action-binding";
@@ -139,9 +139,8 @@ test.each([false, true])("AI-denied actions and clinical import checkpoint and r
     });
     expect([...outcomes.values()].map(({ status }) => status)).toEqual(["applied", "applied"]);
     await restoreAndRun(); // Restore the completed snapshot and verify replay causes no new effects.
-    // Each action publishes once before share projection and repeats the same
-    // deterministic receipt at cleanup. A lost early response can land at cleanup.
-    expect(recordMemberActionOutcome).toHaveBeenCalledTimes(4);
+    // Only an unconfirmed receipt needs another publication.
+    expect(recordMemberActionOutcome).toHaveBeenCalledTimes(retryReceipt ? 3 : 2);
     expect(fetchPage).toHaveBeenCalledTimes(1);
     expect(recordClinicalOutcome).toHaveBeenCalledTimes(1);
     expect(runAssistantPhase).not.toHaveBeenCalled();
@@ -156,11 +155,24 @@ test.each([false, true])("AI-denied actions and clinical import checkpoint and r
   }
 });
 
-test.each([false, true])("drains queued member actions in order and resumes after shutdown (interrupt=%s)", async (interrupt) => {
+test.each([
+  { mode: "default", interrupt: false, failReceipt: false, count: 2 },
+  { mode: "system_mailbox", interrupt: false, failReceipt: false, count: 2 },
+  { mode: "default", interrupt: true, failReceipt: false, count: 2 },
+  { mode: "system_mailbox", interrupt: true, failReceipt: false, count: 2 },
+  { mode: "default", interrupt: false, failReceipt: true, count: 2 },
+  { mode: "system_mailbox", interrupt: false, failReceipt: true, count: 2 },
+  { mode: "default", interrupt: false, failReceipt: false, count: 8 },
+  { mode: "system_mailbox", interrupt: false, failReceipt: false, count: 8 },
+] as const)("groups ordered edits and recovers receipts ($mode, count=$count, interrupt=$interrupt, failure=$failReceipt)", async ({
+  mode, interrupt, failReceipt, count,
+}) => {
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-drain-action-"));
   const events: string[] = [];
   const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
-  const actionIds = ["e3ee1a2e-afc7-4882-9fbd-0b37de853df1", "12492dc6-8244-4fa4-8689-527a42fd416a"];
+  const actionIds = Array.from({ length: count }, () => randomUUID());
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(TEST_NOW));
   try {
     await initializeVault({ createdAt: TEST_NOW, vaultRoot });
     await ensureHostedBootstrapMetadataForSystemMailboxTest(vaultRoot);
@@ -179,21 +191,27 @@ test.each([false, true])("drains queued member actions in order and resumes afte
       });
     }
     await writeMailboxImportStateFile(vaultRoot, { ...createEmptyHostedMailboxImportState(),
-      watermarks: { conversation: "0", system: "2" } });
+      watermarks: { conversation: "0", system: String(count) } });
     const snapshot = await createVaultSnapshotBundle({ vaultRoot });
     const received: string[] = [];
+    let copies = 0;
     const artifactBytesByHash = new Map([[snapshot.hash, snapshot.bytes]]);
     let workspace = createWorkspaceState({ snapshotRef: snapshot.snapshotRef, version: "0" });
     const workspacePort = createWorkspacePort({ checkpointRequests, events, workspace });
+    let rejectLastReceipt = failReceipt;
+    let activeReceipts = 0;
+    let peakReceipts = 0;
     const run = async (stopAfterFirst: boolean) => {
       await removeTempRoot(vaultRoot);
       const shutdown = new AbortController();
       return await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({ request: {
-        processingMode: "default", runnerIdleTtlMs: 1, workspaceVersion: workspace.version,
+        processingMode: mode, ...(mode === "system_mailbox" ? { assistantExecutionBlocked: true } : {}),
+        runnerIdleTtlMs: 1, workspaceVersion: workspace.version,
       } }), {
         vaultRoot, shutdownSignal: shutdown.signal,
         async importItem() { throw new Error("Unexpected import"); },
         async createCheckpointSnapshot() {
+          copies++;
           const next = await createVaultSnapshotBundle({ vaultRoot });
           artifactBytesByHash.set(next.hash, next.bytes);
           return { snapshotRef: next.snapshotRef };
@@ -202,14 +220,24 @@ test.each([false, true])("drains queued member actions in order and resumes afte
           artifactBytesByHash,
           mailboxPort: { ...createMailboxPort({ events, items: [] }), async recordMemberActionOutcome(outcome) {
             expect(outcome.status).toBe("applied");
-            received.push(outcome.actionId);
+            expect(workspace.snapshotRef).not.toEqual(snapshot.snapshotRef);
+            activeReceipts++;
+            peakReceipts = Math.max(peakReceipts, activeReceipts);
+            try {
+              // Cross an event-loop turn so overlapping calls are observable.
+              await new Promise<void>((resolve) => setImmediate(resolve));
+              if (rejectLastReceipt && outcome.actionId === actionIds.at(-1)) throw new Error("Receipt unavailable");
+              received.push(outcome.actionId);
+            } finally {
+              activeReceipts--;
+            }
           } },
           workspacePort: {
             async read() { return { fetchedAt: TEST_NOW, workspace }; },
             async checkpoint(request) {
               const response = await workspacePort.checkpoint(request);
               workspace = response.workspace;
-              if (stopAfterFirst && workspace.redactedStatus?.hostedMailboxSystemHandledThroughSeq === "1") {
+              if (stopAfterFirst && request.reason === "idle_shutdown") {
                 shutdown.abort();
               }
               return response;
@@ -220,20 +248,40 @@ test.each([false, true])("drains queued member actions in order and resumes afte
     };
     let result = await run(interrupt);
     if (interrupt) {
-      expect(received).toEqual(actionIds.slice(0, 1));
-      expect((await readHostedSystemMailboxState(vaultRoot)).pending.map((item) => item.itemId)).toEqual(["queued_1"]);
+      expect(received).toEqual([]);
+      expect((await readHostedSystemMailboxState(vaultRoot)).pending.map((item) => item.status)).toEqual(["recording", "recording"]);
       result = await run(false);
     }
+    if (failReceipt) {
+      expect(received).toEqual(actionIds.slice(0, -1));
+      const { pending } = await readHostedSystemMailboxState(vaultRoot);
+      expect(pending).toHaveLength(1);
+      expect(pending[0]).toMatchObject({ status: "recording", itemId: "queued_1" });
+      const retryAt = Date.parse(pending[0]!.nextAttemptAt!);
+      expect(retryAt).toBeGreaterThan(Date.now());
+      vi.setSystemTime(new Date(retryAt + 1));
+      rejectLastReceipt = false;
+      result = await run(false);
+    }
+    if (!interrupt && !failReceipt) expect(copies).toBe(Math.ceil(count / 4));
+    expect(peakReceipts).toBe(Math.min(4, count));
     expect(result.immediateRecheckRequested).not.toBe(true);
     expect(result.nextWakeAt == null || Date.parse(result.nextWakeAt) > Date.now()).toBe(true);
-    expect(received).toEqual(actionIds);
+    expect(new Set(received)).toEqual(new Set(actionIds));
+    expect((await readHostedSystemMailboxState(vaultRoot)).pending).toEqual([]);
+    expect(resolveMemoryDisplayName(await readMemoryDocument(vaultRoot))?.displayName).toBe(`Cedar ${count}`);
+    const receiptsBeforeRestore = received.slice();
+    await run(false);
+    expect(received).toEqual(receiptsBeforeRestore);
     expect((await readHostedSystemMailboxState(vaultRoot)).pending).toEqual([]);
   } finally {
+    vi.useRealTimers();
     await removeTempRoot(vaultRoot);
   }
 });
 
 test.each([false, true])("validated completion receipt advances checkpointed import without execution (prior action=%s)", async (priorAction) => {
+  mocks.runAssistantAutomationPass.mockClear();
   const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-member-completion-import-"));
   const events: string[] = [];
   const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];

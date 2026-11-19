@@ -148,13 +148,22 @@ export async function readHostedSystemMailboxHandledThroughSeq(input: {
 }
 
 /** The new fenced invocation owns the workspace; previous in-process attempts are gone. */
-export async function recoverHostedSystemMailboxClaims(vaultRoot: string): Promise<void> {
+export async function recoverHostedSystemMailboxClaims(vaultRoot: string, handledThrough = 0n): Promise<void> {
   await updateHostedSystemMailboxState(vaultRoot, (state) => {
-    if (!state.pending.some((item) => item.status === "sending")) {
+    // A status checkpoint can retire an entire batch while retaining the
+    // snapshot with its replay journals. A crash before that publication
+    // leaves the old frontier and the exact receipts available to resend.
+    const pending = state.pending.filter((item) => !(
+      item.status === "recording" && item.wake.kind === "member.action.requested"
+      && item.postCheckpointRecord?.kind === "member-action.outcome-recorded"
+      && item.postCheckpointRecord.outcome.actionId === item.wake.request.actionId
+      && item.mailboxLaneSeq !== null && BigInt(item.mailboxLaneSeq) <= handledThrough
+    ));
+    if (pending.length === state.pending.length && !pending.some((item) => item.status === "sending")) {
       return { result: undefined, write: false };
     }
     return {
-      pending: state.pending.map((item) => item.status === "sending"
+      pending: pending.map((item) => item.status === "sending"
         ? { ...item, status: "pending" as const }
         : item),
     };
