@@ -98,11 +98,14 @@ or eligible Group signup flow before hosted image generation or editing.
 A saved card alone grants no image access. Ordinary text chat remains available
 within the existing Starter allowance. Active paid plans and Family sponsorship
 retain their existing image access. Group image generation and editing require
-available usage plus either an active group sponsorship authorization or a
-fulfilled, paid usage-credit purchase for that group with credit remaining.
-House allowance and ops-granted credit alone do not qualify. The image access
-check reads at most one sponsorship and one purchase, sequentially, without
-loading payer details or changing ordinary text-chat usage admission.
+available usage plus one paid funding source: the group owner's own paid plan or
+active Family sponsorship (a group runs on its owner's account, so everyone in
+it can make images), an active group sponsorship authorization, or a fulfilled,
+paid usage-credit purchase for that group with credit remaining. A suspended
+owner, or one on Starter, a trial or lapsed billing, does not qualify. House
+allowance and ops-granted credit alone do not qualify. The image access check
+reads the owner, then at most one sponsorship and one purchase, sequentially,
+without changing ordinary text-chat usage admission.
 
 Web derives image permission from the canonical usage gate: denied usage stays
 denied; allowed direct Starter requires a subscription; groups also require the

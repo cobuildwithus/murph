@@ -1,19 +1,39 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ gate: vi.fn() }));
-vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({ readHostedAiUsageGate: mocks.gate }));
+const mocks = vi.hoisted(() => ({ family: vi.fn(), gate: vi.fn() }));
+vi.mock("@/src/lib/hosted-execution/usage-allowance", () => ({
+  hasHostedFamilySponsoredPlan: mocks.family,
+  readHostedAiUsageGate: mocks.gate,
+}));
 import { readHostedImageGenerationAccess } from "@/src/lib/hosted-onboarding/image-generation-access";
 
 const prisma = {
   hostedGroupSponsorshipAuthorization: { findFirst: vi.fn() },
+  hostedThreadContainer: { findUnique: vi.fn() },
   hostedUsageCreditPurchase: { findFirst: vi.fn() },
 };
+const owner = (input: {
+  billingStatus?: string;
+  currentBillingPhase?: string | null;
+  suspendedAt?: Date | null;
+} = {}) => ({
+  owner: {
+    id: "owner_synthetic",
+    billingStatus: input.billingStatus ?? "active",
+    suspendedAt: input.suspendedAt ?? null,
+    billingRef: input.currentBillingPhase === undefined
+      ? null
+      : { currentBillingPhase: input.currentBillingPhase, currentCheckoutOffer: null, stripeSubscriptionLookupKey: null },
+  },
+});
 const read = () => readHostedImageGenerationAccess({ memberId: "member_synthetic", prisma: prisma as never });
 describe("image funding authority", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     prisma.hostedGroupSponsorshipAuthorization.findFirst.mockResolvedValue(null);
     prisma.hostedUsageCreditPurchase.findFirst.mockResolvedValue(null);
+    prisma.hostedThreadContainer.findUnique.mockResolvedValue(owner({ billingStatus: "not_started" }));
+    mocks.family.mockResolvedValue(false);
   });
 
   it("requires subscription access while Starter text usage remains available", async () => {
@@ -60,6 +80,47 @@ describe("image funding authority", () => {
     });
   });
 
+  it("lets everyone in a group make images when its owner pays for a plan", async () => {
+    mocks.gate.mockResolvedValue({ allowed: true, allowanceSource: "thread_container" });
+    prisma.hostedThreadContainer.findUnique.mockResolvedValue(owner({ currentBillingPhase: "paid" }));
+    await expect(read()).resolves.toEqual({ allowed: true, reason: "allowed" });
+    expect(prisma.hostedThreadContainer.findUnique).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ where: { memberId: "member_synthetic" } }),
+    );
+    expect(mocks.family).not.toHaveBeenCalled();
+    expect(prisma.hostedGroupSponsorshipAuthorization.findFirst).not.toHaveBeenCalled();
+    expect(prisma.hostedUsageCreditPurchase.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("lets everyone in a group make images when its owner is on a paid Family plan", async () => {
+    mocks.gate.mockResolvedValue({ allowed: true, allowanceSource: "thread_container" });
+    mocks.family.mockResolvedValue(true);
+    await expect(read()).resolves.toEqual({ allowed: true, reason: "allowed" });
+    expect(mocks.family).toHaveBeenCalledExactlyOnceWith({ memberId: "owner_synthetic", prisma });
+    expect(prisma.hostedGroupSponsorshipAuthorization.findFirst).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a Starter owner", owner()],
+    ["a lapsed paid owner", owner({ billingStatus: "past_due", currentBillingPhase: "paid" })],
+    ["a trial owner", owner({ currentBillingPhase: "trial" })],
+    ["a suspended paid owner", owner({ currentBillingPhase: "paid", suspendedAt: new Date("2026-01-01T00:00:00Z") })],
+  ])("does not fund group images from %s", async (_label, container) => {
+    mocks.gate.mockResolvedValue({ allowed: true, allowanceSource: "thread_container" });
+    prisma.hostedThreadContainer.findUnique.mockResolvedValue(container);
+    await expect(read()).resolves.toEqual({ allowed: false, reason: "subscription_required" });
+  });
+
+  it("does not fund group images from a suspended owner's Family plan", async () => {
+    mocks.gate.mockResolvedValue({ allowed: true, allowanceSource: "thread_container" });
+    prisma.hostedThreadContainer.findUnique.mockResolvedValue(
+      owner({ suspendedAt: new Date("2026-01-01T00:00:00Z") }),
+    );
+    mocks.family.mockResolvedValue(true);
+    await expect(read()).resolves.toEqual({ allowed: false, reason: "subscription_required" });
+    expect(mocks.family).not.toHaveBeenCalled();
+  });
+
   it("allows an active group sponsorship without another purchase read", async () => {
     mocks.gate.mockResolvedValue({ allowed: true, allowanceSource: "thread_container" });
     prisma.hostedGroupSponsorshipAuthorization.findFirst.mockResolvedValue({ id: "sponsorship_synthetic" });
@@ -92,6 +153,13 @@ describe("image funding authority", () => {
       await expect(read()).rejects.toThrow("unavailable");
     },
   );
+
+  it("does not grant group access when the owner read is unavailable", async () => {
+    mocks.gate.mockResolvedValue({ allowed: true, allowanceSource: "thread_container" });
+    prisma.hostedThreadContainer.findUnique.mockRejectedValue(new Error("unavailable"));
+    await expect(read()).rejects.toThrow("unavailable");
+    expect(prisma.hostedGroupSponsorshipAuthorization.findFirst).not.toHaveBeenCalled();
+  });
 
   it.each(["direct_starter", "direct_paid_member_plan", "family_sponsored_plan", "thread_container"])(
     "preserves inactive, suspended, and exhausted %s denials", async (allowanceSource) => {

@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-18",
+  "order": 120,
+  "item": {
+    "id": "group-images-owner-plan",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Your plan covers pictures in your group chats",
+    "summary": "If you pay for Murph, everyone in a group chat you started can ask Murph for pictures. Before, those requests failed with a subscription error.",
+    "details": "Family plans count too. Group sponsors and purchased group usage still work as before.",
+    "relevanceTags": ["groups", "images"],
+    "sourcePullRequests": [5203]
+  }
+}

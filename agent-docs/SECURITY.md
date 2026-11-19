@@ -1286,8 +1286,10 @@ Existing product admission, delivery and runtime safety rules still apply.
   revocation, and every new handshake revalidates runtime authority. Normal
   Pulse or eligible Group signup
   owns personal recovery; existing paid and Family allowances remain authoritative.
-  Group image access additionally requires an active sponsorship authorization
-  or remaining credit on a fulfilled, paid purchase for that exact container.
+  Group image access additionally requires that the container owner has their
+  own paid plan or active Family sponsorship, an active sponsorship
+  authorization, or remaining credit on a fulfilled, paid purchase for that
+  exact container.
   House allowance and ops-granted credit alone never establish paid image access.
   See the [Starter usage owner](product-specs/starter-usage.md#text-entry-and-image-access)
   for billing authority, abuse email signals, and deployment ordering.

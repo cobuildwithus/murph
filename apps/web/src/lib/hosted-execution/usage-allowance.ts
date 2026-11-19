@@ -373,6 +373,18 @@ async function resolveHostedAiUsageAllowanceBillingRefForMember(input: {
   };
 }
 
+/** True when an active Family group sponsors this member's plan. Callers own
+ * the member's own suspension check, as the allowance resolver does. */
+export async function hasHostedFamilySponsoredPlan(input: {
+  memberId: string;
+  prisma: Prisma.TransactionClient;
+}): Promise<boolean> {
+  return (await readHostedFamilySponsoredBillingRefForMember({
+    memberId: input.memberId,
+    tx: input.prisma,
+  })) !== null;
+}
+
 async function readHostedFamilySponsoredBillingRefForMember(input: {
   memberId: string;
   tx: Prisma.TransactionClient;

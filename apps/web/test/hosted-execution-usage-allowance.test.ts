@@ -4779,11 +4779,12 @@ function createAllowanceTx(input: {
 
 describe("image access through the canonical usage gate", () => {
   it.each([
-    { funding: "house allowance only", sponsored: false, purchased: false, credit: 0n, allowed: false },
-    { funding: "ops credit only", sponsored: false, purchased: false, credit: 5_000_000n, allowed: false },
-    { funding: "active sponsorship", sponsored: true, purchased: false, credit: 0n, allowed: true },
-    { funding: "remaining paid credit", sponsored: false, purchased: true, credit: 5_000_000n, allowed: true },
-  ])("checks group image funding with $funding", async ({ sponsored, purchased, credit, allowed }) => {
+    { funding: "house allowance only", sponsored: false, purchased: false, ownerPaid: false, credit: 0n, allowed: false },
+    { funding: "ops credit only", sponsored: false, purchased: false, ownerPaid: false, credit: 5_000_000n, allowed: false },
+    { funding: "active sponsorship", sponsored: true, purchased: false, ownerPaid: false, credit: 0n, allowed: true },
+    { funding: "remaining paid credit", sponsored: false, purchased: true, ownerPaid: false, credit: 5_000_000n, allowed: true },
+    { funding: "a paid owner", sponsored: false, purchased: false, ownerPaid: true, credit: 0n, allowed: true },
+  ])("checks group image funding with $funding", async ({ sponsored, purchased, ownerPaid, credit, allowed }) => {
     const prisma = {
       ...createGatePrisma({
         threadContainerLimitUsdMicros: 4_500_000n,
@@ -4793,6 +4794,18 @@ describe("image access through the canonical usage gate", () => {
       }),
       hostedGroupSponsorshipAuthorization: {
         findFirst: vi.fn(async () => sponsored ? { id: "sponsorship_synthetic" } : null),
+      },
+      hostedThreadContainer: {
+        findUnique: vi.fn(async () => ({
+          owner: {
+            id: "member_owner",
+            billingStatus: ownerPaid ? HostedBillingStatus.active : HostedBillingStatus.not_started,
+            suspendedAt: null,
+            billingRef: ownerPaid
+              ? { currentBillingPhase: "paid", currentCheckoutOffer: null, stripeSubscriptionLookupKey: null }
+              : null,
+          },
+        })),
       },
       hostedUsageCreditPurchase: {
         findFirst: vi.fn(async () => purchased ? { id: "purchase_synthetic" } : null),
