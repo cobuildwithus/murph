@@ -15,21 +15,23 @@ import { authorizeLockedPreviewReads, authorizeMediaRead, authorizeMediaReads, m
 import { gameMediaKeyOf } from "../views";
 import { readRawBodyBuffer } from "../../http";
 import { gameHttpError, gameMediaUnavailable, invalidGameRequest } from "./errors";
+import type { GameRequestTiming } from "./timing";
 
 /**
  * Stores a photo under the member's prefix, keyed by its bytes: a retry
  * returns the same key. Entry photos and invite label photos share it.
  */
-export async function uploadGameMedia(input: { memberId: string; request: Request }): Promise<string> {
-  const { request } = input;
+export async function uploadGameMedia(input: { memberId: string; request: Request; timing: GameRequestTiming }): Promise<string> {
+  const { request, timing } = input;
   const contentType = parseGameMediaContentType(request.headers.get("content-type"));
   if (!contentType) throw invalidGameRequest("Content-Type must be image/jpeg or image/heic.");
   requireStorage();
-  const bytes = await readRawBodyBuffer(request, { limitBytes: GAME_MEDIA_MAX_BYTES });
+  const bytes = await timing.measure("body", () => readRawBodyBuffer(request, { limitBytes: GAME_MEDIA_MAX_BYTES }));
   if (bytes.byteLength === 0 || !matchesGameMediaContentType(bytes, contentType)) {
     throw invalidGameRequest("The upload doesn't match its Content-Type.");
   }
-  return withRetryableServerFailures(() => putGameMedia({ bytes, contentType, prefix: mediaKeyPrefixFor(input.memberId) }));
+  return timing.measure("store", () => withRetryableServerFailures(() =>
+    putGameMedia({ bytes, contentType, prefix: mediaKeyPrefixFor(input.memberId) })));
 }
 
 /**

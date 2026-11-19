@@ -516,6 +516,19 @@ describe("weekly game routes", () => {
       expect(mocks.runGameCommand).toHaveBeenCalledWith({ actorMemberId: LEO, multiplayer: false, beforeMutationTx: expect.any(Function), command });
     });
 
+    it("logs one timing line per command: its type, whether it worked and each stage", async () => {
+      const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+      mocks.runGameCommand.mockResolvedValueOnce({ ok: false, error: { code: "GAME_ENDED", message: "That game is over." }, status: 409 });
+      await routes.entries.POST(writeRequest("POST", `/games/${GAME_ID}/entries`, { entryId: "entry_1", kind: "photo", mediaKeys: [] }), params({ id: GAME_ID }));
+      await routes.entries.POST(writeRequest("POST", `/games/${GAME_ID}/entries`, { entryId: "entry_1", kind: "photo", mediaKeys: [] }), params({ id: GAME_ID }));
+
+      const lines = info.mock.calls.map(([line]) => JSON.parse(String(line))).filter(line => line.event === "game.command.timing");
+      expect(lines.map(line => [line.type, line.ok])).toEqual([["post", false], ["post", true]]);
+      expect(Object.keys(lines[1].phaseMs)).toEqual(["auth", "body", "terms", "command"]);
+      expect(lines[1].totalMs).toBeGreaterThanOrEqual(0);
+      info.mockRestore();
+    });
+
     it("lets the path's ids win over the body's", async () => {
       await routes.accept.POST(
         writeRequest("POST", "/invites/tok_1/accept", { termsVersion: 1, timeZone: "UTC", token: "tok_other", type: "redeem" }),
@@ -895,6 +908,16 @@ describe("weekly game routes", () => {
       const response = await routes.upload.POST(uploadRequest({ headers }));
 
       expect(response.status).toBe(400);
+    });
+
+    it("logs how long the upload spent reading the photo and storing it", async () => {
+      const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+      await routes.upload.POST(uploadRequest());
+
+      const [line] = info.mock.calls.map(([logged]) => JSON.parse(String(logged))).filter(logged => logged.event === "game.media.upload.timing");
+      expect(line).toMatchObject({ ok: true });
+      expect(Object.keys(line.phaseMs)).toEqual(["auth", "body", "store"]);
+      info.mockRestore();
     });
 
     it("takes HEIC only with an image brand, so an M4A can't pass as a photo", async () => {
