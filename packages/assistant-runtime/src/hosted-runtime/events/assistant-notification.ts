@@ -49,6 +49,8 @@ import {
 import {
   HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_EVENT_ID_PREFIX,
   HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_TTL_MS,
+  HOSTED_RUNTIME_GROUP_JOURNAL_EVENT_ID_PREFIX,
+  HOSTED_RUNTIME_GROUP_JOURNAL_QUESTION_TTL_MS,
 } from "@murphai/hosted-execution/runtime-control";
 import { VaultCliError } from "@murphai/operator-config/vault-cli-errors";
 import { emitHostedAssistantContextTraceLog } from "../context-diagnostics.ts";
@@ -68,6 +70,8 @@ const HOSTED_ASSISTANT_NOTIFICATION_EVENT_PREFIX =
   "assistant.notification.requested:";
 const HOSTED_GROUP_CONTEXT_HANDOFF_EXPIRED_ERROR_CODE =
   "HOSTED_GROUP_CONTEXT_HANDOFF_EXPIRED";
+const HOSTED_GROUP_JOURNAL_QUESTION_EXPIRED_ERROR_CODE =
+  "HOSTED_GROUP_JOURNAL_QUESTION_EXPIRED";
 const HOSTED_OPERATOR_TASK_ALREADY_COMPLETED_ERROR_CODE =
   "HOSTED_OPERATOR_TASK_ALREADY_COMPLETED";
 const HOSTED_OPERATOR_TASK_EXPIRED_ERROR_CODE = "HOSTED_OPERATOR_TASK_EXPIRED";
@@ -898,6 +902,8 @@ function buildAssistantNotificationInput(
         }
       }
     : null;
+  const beforeDelivery = authorizeOperatorTask
+    ?? createHostedGroupJournalQuestionExpiryCheck(wake);
   const scopedExecutionContext = scopeGameHostExecutionContext(wake, executionContext, groupToolPort);
   const notificationInput = buildAssistantNotificationInputFromRoute({
     assistantTurnOrdinal: "assistant-notification:1",
@@ -915,7 +921,7 @@ function buildAssistantNotificationInput(
             }
           },
         }),
-    ...(authorizeOperatorTask ? { beforeDelivery: authorizeOperatorTask } : {}),
+    ...(beforeDelivery ? { beforeDelivery } : {}),
     deliveryDedupeToken: wake.notification.deliveryDedupeToken ?? null,
     deliveryDispatchMode: forceQueueOnly
       ? "queue-only"
@@ -1163,6 +1169,29 @@ function requireHostedGroupContextHandoffNotification(
     ), { retryable: false });
   }
   return occurredAtMs + HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_TTL_MS;
+}
+
+// A private group Journal question refers to something said in the group, so
+// one that could not reach the member in time is dropped instead of sent late.
+function createHostedGroupJournalQuestionExpiryCheck(
+  wake: HostedExecutionAssistantNotificationRequestedWake,
+): (() => void) | null {
+  if (!wake.eventId.startsWith(HOSTED_RUNTIME_GROUP_JOURNAL_EVENT_ID_PREFIX)) {
+    return null;
+  }
+  const occurredAtMs = Date.parse(wake.occurredAt);
+  return () => {
+    if (
+      !Number.isFinite(occurredAtMs)
+      || Date.now() >= occurredAtMs + HOSTED_RUNTIME_GROUP_JOURNAL_QUESTION_TTL_MS
+    ) {
+      throw new VaultCliError(
+        HOSTED_GROUP_JOURNAL_QUESTION_EXPIRED_ERROR_CODE,
+        "Hosted group Journal question expired before delivery.",
+        { retryable: false },
+      );
+    }
+  };
 }
 
 function requireHostedOperatorMessageNotification(
@@ -1503,6 +1532,13 @@ function resolveHostedNotificationTerminalNoSend(error: unknown): {
   if (isHostedOperatorTaskTerminalNoSendError(error)) return {
     message: "Hosted operator message ended without a new delivery intent.",
     extraDetails: { eventCode: "assistant.notification.operator_task_terminal_no_send", terminalDisposition: deriveHostedExecutionErrorCode(error) },
+  };
+  if (
+    error instanceof VaultCliError
+    && error.code === HOSTED_GROUP_JOURNAL_QUESTION_EXPIRED_ERROR_CODE
+  ) return {
+    message: "Group Journal question ended without delivery after its window elapsed.",
+    extraDetails: { eventCode: "assistant.notification.group_journal_question_expired_terminal_no_send", terminalDisposition: "group_journal_question_expired" },
   };
   return null;
 }

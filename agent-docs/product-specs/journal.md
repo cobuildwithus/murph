@@ -91,6 +91,8 @@ factor.
 Automatic capture always writes to the member's private Journal. An
 authenticated group can propose a clear fact about its sender after the member
 accepts one private global choice. Unclear facts get one private question. A
+private question that cannot reach the member within 24 hours, for example
+while their access is paused, is dropped instead of arriving late. A
 member can exclude one group or all groups. The group never receives private
 Journal data.
 

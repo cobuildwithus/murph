@@ -1184,6 +1184,9 @@ export const HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_EVENT_ID_PREFIX =
   "assistant.notification.requested:group-context-handoff:";
 export const HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_MAX_CODE_POINTS = 4_000;
 export const HOSTED_RUNTIME_GROUP_CONTEXT_HANDOFF_TTL_MS = 10 * 60 * 1_000;
+export const HOSTED_RUNTIME_GROUP_JOURNAL_EVENT_ID_PREFIX = "group_journal_";
+// A private group Journal question not delivered within this window is dropped.
+export const HOSTED_RUNTIME_GROUP_JOURNAL_QUESTION_TTL_MS = 24 * 60 * 60 * 1_000;
 export const HOSTED_RUNTIME_GROUP_SENDER_HANDLE_MAX_CODE_POINTS = 512;
 // Vercel Functions request ceiling: https://vercel.com/docs/functions/limitations#request-body-size
 export const HOSTED_WEB_REQUEST_MAX_BYTES = 4.5 * 1024 * 1024;
