@@ -27,7 +27,7 @@ import type { BeforeProgressMutation } from './state';
 const SHARE_TYPICAL_SECONDS = 14;
 
 export interface ShareRequest { memberId: string; awardId: string; units: ClientUnits; beforeMutationTx: BeforeProgressMutation }
-type Selection = { row: GameProgressShare | null; consent: 'allowed' | 'denied'; photoKey: string | null };
+type Selection = { row: GameProgressShare | null; consent: 'allowed' | 'denied'; photoKey: string | null; availableAt: number | null };
 const identity = (input: ShareRequest) => ({ memberId_awardLookup: { memberId: input.memberId, awardLookup: input.awardId } });
 export const shareNotFound = () => hostedOnboardingError({ code: 'PROGRESS_SHARE_NOT_FOUND', httpStatus: 404, message: 'That share is not available.' });
 const unavailable = () => hostedOnboardingError({ code: 'PROGRESS_SHARE_UNAVAILABLE', httpStatus: 503, retryable: true, message: 'That picture could not load. Try again.' });
@@ -54,30 +54,43 @@ async function readSelection(tx: Prisma.TransactionClient, input: ShareRequest):
   const row = await tx.gameProgressShare.findUnique({ where: identity(input) });
   const { decision: consent } = await readProgressShareConsent({ memberId: input.memberId, prisma: tx });
   const profile = row ? null : await tx.gameProfile.findUnique({ where: { memberId: input.memberId }, select: { photoKey: true } });
-  const selection = { row, consent, photoKey: profile?.photoKey ?? null } satisfies Selection;
+  const photoKey = profile?.photoKey ?? null;
+  // A picture that could start reads the quota too, so no open promises one that POST would refuse.
+  const availableAt = photoKey !== null && consent === 'allowed' ? await readAvailableAt(tx, input.memberId) : null;
+  const selection = { row, consent, photoKey, availableAt } satisfies Selection;
   if (row?.status === 'ready' && consent === 'allowed') await assertPhotoAuthority(tx, input, selection);
   return selection;
 }
 
+async function readAvailableAt(tx: Prisma.TransactionClient, memberId: string): Promise<number | null> {
+  const now = Date.now();
+  const rows = await tx.gameProgressShare.findMany({ where: { memberId, createdAt: { gt: new Date(now - 30 * 86_400_000) } },
+    select: { createdAt: true, status: true }, orderBy: { createdAt: 'desc' }, take: 31 });
+  return shareAvailableAt(rows, now);
+}
+
 function presentation(selection: Selection, awardId: string, eligible: boolean, now: number): ShareView['presentation'] {
-  const { row, consent, photoKey } = selection;
+  const { row, consent, photoKey, availableAt } = selection;
   if (!eligible || row?.status === 'retired' || row?.status === 'failed') return { state: 'medal' };
   if (consent === 'denied') return { state: 'medal' };
-  if (row === null) return { state: photoKey === null ? 'needs_photo' : 'available' };
+  if (row === null && photoKey === null) return { state: 'needs_photo' };
+  if (row === null) return availableAt === null ? { state: 'available' } : { state: 'later', availableAt: new Date(availableAt).toISOString() };
   if (row.status === 'ready') return { state: 'photo', imagePath: `/api/game/v1/progress/shares/${awardId}/image` };
   const expiresAt = row.createdAt.getTime() + SHARE_DEADLINE_MS;
   return now >= expiresAt ? { state: 'medal' } : { state: 'generating', startedAt: row.createdAt.toISOString(), expiresAt: new Date(expiresAt).toISOString(), typicalSeconds: SHARE_TYPICAL_SECONDS };
 }
 
-/** One bounded rolling-window read covers both quotas and active work. Terminal attempts still count. */
-export function shareRetryAfter(rows: readonly Pick<GameProgressShare, 'createdAt' | 'status'>[], now: number): number {
+/** One bounded rolling-window read covers both quotas and active work. Terminal attempts still count.
+ * Null while POST would admit; otherwise when it next will, at most 30 days on. */
+export function shareAvailableAt(rows: readonly Pick<GameProgressShare, 'createdAt' | 'status'>[], now: number): number | null {
   const day = 86_400_000, month = 30 * day;
   const recent = rows.filter(row => row.createdAt.getTime() > now - month).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
   const deadlines = recent.filter(row => row.status === 'generating').map(row => row.createdAt.getTime() + SHARE_DEADLINE_MS);
   if (recent.length >= 30) deadlines.push(recent[29].createdAt.getTime() + month);
   const daily = recent.filter(row => row.createdAt.getTime() > now - day);
   if (daily.length >= 5) deadlines.push(daily[4].createdAt.getTime() + day);
-  return Math.min(month / 1000, Math.max(0, Math.ceil((Math.max(now, ...deadlines) - now) / 1000)));
+  const at = Math.min(now + month, Math.max(now, ...deadlines));
+  return at > now ? at : null;
 }
 
 async function assertPhotoAuthority(tx: Prisma.TransactionClient, input: ShareRequest, selection: Selection): Promise<void> {
@@ -109,16 +122,12 @@ export async function startProgressShare(input: ShareRequest): Promise<ShareView
     finally { source.bytes.fill(0); }
     const admission = await withAuthority(input, award, async tx => {
       const selection = await readSelection(tx, input);
-      if (selection.row) return { selection, inserted: false };
+      // Another award admitted meanwhile, or the quota filled: `later`, as a fresh open would say.
+      if (selection.row || selection.availableAt !== null) return { selection, inserted: false };
       if (selection.photoKey !== current.photoKey) throw unavailable();
       await assertPhotoAuthority(tx, input, selection);
-      const now = new Date();
-      const rows = await tx.gameProgressShare.findMany({ where: { memberId: input.memberId, createdAt: { gt: new Date(now.getTime() - 30 * 86_400_000) } },
-        select: { createdAt: true, status: true }, orderBy: { createdAt: 'desc' }, take: 31 });
-      const retryAfterSeconds = shareRetryAfter(rows, now.getTime());
-      if (retryAfterSeconds) throw hostedOnboardingError({ code: 'PROGRESS_SHARE_LIMIT', httpStatus: 429, message: 'Another picture can be made later.', details: { retryAfterSeconds } });
       const row = await tx.gameProgressShare.create({ data: { memberId: input.memberId, awardLookup: input.awardId,
-        storageKey: `progress/${randomBytes(16).toString('hex')}.jpg`, status: 'generating', createdAt: now } });
+        storageKey: `progress/${randomBytes(16).toString('hex')}.jpg`, status: 'generating', createdAt: new Date() } });
       return { selection: { ...selection, row }, inserted: true };
     });
     if (admission.inserted) {

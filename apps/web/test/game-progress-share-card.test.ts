@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { shareActivity, shareCard } from '../src/lib/game/progress/share-card';
-import { shareRetryAfter } from '../src/lib/game/progress/shares';
+import { shareAvailableAt } from '../src/lib/game/progress/shares';
 import type { Candidate } from '../src/lib/game/progress/registry';
 import type { ClientUnits } from '../src/lib/companion/client-info';
 import { BANK } from '../src/lib/game/progress/bank';
@@ -165,5 +165,5 @@ describe('fixed rolling attempt budgets', () => {
     [rows(29, 2 * day), 0], [rows(30, 2 * day), 28 * 86400], [rows(31, 2 * day), 28 * 86400],
     [rows(30, 30 * day), 0], [rows(1, 0, 'generating'), 240], [rows(1, 240000, 'generating'), 0],
     [rows(5, 0, 'retired'), 86400], [rows(1, 0, 'ready'), 0],
-  ])('computes a bounded next explicit-open interval', (attempts, wait) => expect(shareRetryAfter(attempts, now)).toBe(wait));
+  ])('computes a bounded next explicit-open time', (attempts, wait) => expect(shareAvailableAt(attempts, now)).toBe(wait ? now + wait * 1000 : null));
 });

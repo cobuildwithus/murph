@@ -6098,7 +6098,7 @@ The bearer-only `GET/POST /api/game/v1/progress/shares/:awardId`, image GET and
 no-store responses. POST accepts no body. The native consent operation accepts
 only allow/deny with disclosure version 1 and uses the same atomic owner as Web
 withdrawal. The share view contains server copy, the existing MedalFace and one
-strict needs_photo/medal/available/generating/photo presentation. No recorded
+strict needs_photo/medal/available/later/generating/photo presentation. No recorded
 choice allows pictures; an explicit denial turns them off. The consent GET uses
 the same reader as share admission and returns only `{ decision: "allowed" | "denied" }`,
 matching PUT, for the native Privacy choice. It reads one grant and, only if absent,
@@ -6120,9 +6120,12 @@ and strips metadata outside locks, then rechecks that photo key under the member
 fence. Neither a missing profile photo nor unreadable bytes spends an attempt. One
 31-row rolling-window read limits admission to five attempts per 24 hours,
 thirty per 30 days and one unexpired generation. Failed and retired attempts
-still count. A pre-admission source failure returns a sanitized 503 without a
-row or quota use; a limit returns 429 and bounded retryAfterSeconds. Losing
-prepared buffers are cleared. No attempt is restarted or regenerated.
+still count. GET and POST read the same window for an award with no row, so a
+limit is the `later` presentation with a bounded availableAt (when POST next
+admits) on both, before any source read; nothing presents `available` that POST
+would refuse. A pre-admission source failure returns a sanitized 503 without a
+row or quota use. Losing prepared buffers are cleared. No attempt is restarted
+or regenerated.
 
 Only the insertion winner schedules Next after(), with its own secure-box unwrap
 scope and prepared in-memory reference. The Node route declares maxDuration 300.

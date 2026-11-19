@@ -154,13 +154,42 @@ describe.skipIf(!enabled)('stored award share admission and publication', () => 
       await expect(openHostedUserSecureBoxBytes({ ...target, ...change })).rejects.toThrow();
     }
   });
-  it('admits only one different-award attempt concurrently, without charging the rejected request', async () => {
+  it('GET never starts a picture: only POST spends an attempt', async () => {
+    const f = await fixture(); await f.decide('allow');
+    for (let n = 0; n < 3; n++) expect((await readProgressShare(f.input)).presentation).toEqual({ state: 'available' });
+    expect(await f.share()).toBeNull(); expect(tasks).toHaveLength(0);
+    expect(mocks.readProfile).not.toHaveBeenCalled(); expect(mocks.make).not.toHaveBeenCalled(); expect(mocks.put).not.toHaveBeenCalled();
+    expect((await startProgressShare(f.input)).presentation.state).toBe('generating'); expect(tasks).toHaveLength(1);
+  });
+  it('admits only one different-award attempt concurrently; the other is later until that one is made', async () => {
     const f = await fixture(); await f.decide('allow'); const other = await f.award('second');
-    const outcomes = await Promise.allSettled([startProgressShare(f.input), startProgressShare(other)]);
-    expect(outcomes.filter(result => result.status === 'fulfilled')).toHaveLength(1);
-    expect(outcomes.find(result => result.status === 'rejected')).toMatchObject({ reason: { httpStatus: 429, details: { retryAfterSeconds: expect.any(Number) } } });
+    const views = await Promise.all([startProgressShare(f.input), startProgressShare(other)]);
+    expect(views.map(view => view.presentation.state).sort()).toEqual(['generating', 'later']);
     expect(await db.gameProgressShare.count({ where: { memberId: f.memberId } })).toBe(1); expect(tasks).toHaveLength(1);
+    const admitted = (await db.gameProgressShare.findFirstOrThrow({ where: { memberId: f.memberId } })).createdAt.getTime();
+    const waiting = views.find(view => view.presentation.state === 'later')!, again = waiting.awardId === f.input.awardId ? f.input : other;
+    expect(Date.parse((waiting.presentation as { availableAt: string }).availableAt)).toBe(admitted + 240_000);
+    expect((await readProgressShare(again)).presentation.state).toBe('later');
     await tasks[0]();
+    expect((await readProgressShare(again)).presentation).toEqual({ state: 'available' });
+  });
+  it('a sixth picture in a day is later on GET and POST, reads no photo and starts once the day has passed', async () => {
+    const f = await fixture(); await f.decide('allow');
+    for (let n = 0; n < 5; n++) { await startProgressShare(await f.award(`made-${n}`)); await tasks.at(-1)!(); }
+    expect(await db.gameProgressShare.count({ where: { memberId: f.memberId, status: 'ready' } })).toBe(5);
+    // Made 23 hours ago, so the day passes within the session's life.
+    const madeAt = Date.now() - 23 * 3_600_000;
+    await db.gameProgressShare.updateMany({ where: { memberId: f.memberId }, data: { createdAt: new Date(madeAt) } });
+    mocks.readProfile.mockClear();
+    const later = await readProgressShare(f.input);
+    expect(later.presentation.state).toBe('later');
+    const availableAt = Date.parse((later.presentation as { availableAt: string }).availableAt);
+    expect(availableAt).toBe(madeAt + 86_400_000);
+    expect((await startProgressShare(f.input)).presentation).toEqual(later.presentation);
+    expect(await f.share()).toBeNull(); expect(tasks).toHaveLength(5); expect(mocks.readProfile).not.toHaveBeenCalled();
+    vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(availableAt);
+    expect((await readProgressShare(f.input)).presentation).toEqual({ state: 'available' });
+    expect((await startProgressShare(f.input)).presentation.state).toBe('generating');
   });
   it.each(['read', 'preparation'])('source %s failure spends no attempt', async phase => {
     const f = await fixture(); await f.decide('allow');
@@ -196,15 +225,21 @@ describe.skipIf(!enabled)('stored award share admission and publication', () => 
     await expect(startProgressShare(f.input)).rejects.toMatchObject({ httpStatus: 503 });
     expect(await f.share()).toBeNull(); expect(tasks).toHaveLength(0);
   });
-  it.each([[5, 0], [30, 2], [31, 2]])('rejects %i persisted attempts aged %i days before insertion or effects', async (count, days) => {
+  it.each([[5, 0, 4, 1], [30, 2, 29, 30], [31, 2, 29, 30]])('%i persisted attempts aged %i days are later before insertion or effects', async (count, days, nth, windowDays) => {
     const f = await fixture(); await f.decide('allow');
+    const createdAt: number[] = [];
     for (let n = 0; n < count; n++) {
       const other = await f.award(`budget-${n}`);
+      createdAt.unshift(Date.now() - days * 86400000);
       await db.gameProgressShare.create({ data: { memberId: f.memberId, awardLookup: other.awardId,
-        storageKey: `progress/${randomUUID()}.jpg`, status: n % 2 ? 'retired' : 'failed', createdAt: new Date(Date.now() - days * 86400000) } });
+        storageKey: `progress/${randomUUID()}.jpg`, status: n % 2 ? 'retired' : 'failed', createdAt: new Date(createdAt[0]) } });
     }
-    await expect(startProgressShare(f.input)).rejects.toMatchObject({ httpStatus: 429 });
-    expect(await f.share()).toBeNull(); expect(tasks).toHaveLength(0); expect(mocks.put).not.toHaveBeenCalled(); expect(mocks.purge).not.toHaveBeenCalled();
+    const view = await startProgressShare(f.input);
+    expect(view.presentation.state).toBe('later');
+    expect(Date.parse((view.presentation as { availableAt: string }).availableAt)).toBe(createdAt[nth] + windowDays * 86400000);
+    expect((await readProgressShare(f.input)).presentation).toEqual(view.presentation);
+    expect(await f.share()).toBeNull(); expect(tasks).toHaveLength(0); expect(mocks.readProfile).not.toHaveBeenCalled();
+    expect(mocks.put).not.toHaveBeenCalled(); expect(mocks.purge).not.toHaveBeenCalled();
   });
   it.each(['generation_failed', 'refused', 'timeout'] as const)('terminal %s is a medal with no repeat dispatch', async code => {
     const f = await fixture(); await f.decide('allow');

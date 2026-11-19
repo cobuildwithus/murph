@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-19",
+  "order": 120,
+  "item": {
+    "id": "medal-pictures-say-later",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Medal pictures no longer look stuck",
+    "summary": "Once you've made the day's medal pictures, another medal shows its medal card right away, instead of looking like a picture is on its way and then giving up.",
+    "details": "You can make 5 medal pictures a day. The next one can be made a day after the earliest of them.",
+    "relevanceTags": ["progress"],
+    "sourcePullRequests": [5180]
+  }
+}
