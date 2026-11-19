@@ -1,8 +1,13 @@
 # Medal share: the postcard
 
-Status: active
+Shipped on 2026-11-19. The server half (#5210) went live in production at 19:19 UTC. The migration was applied: the share's primary key is `storage_key` and `game_progress_share_photo` exists. No 5xx followed the deploy. The app half is murph-ios #706, which passed ReviewGPT rounds 1 and 2 and went out in TestFlight build 119 at 20:36 UTC. Both release workflows passed on that build's commit.
+
+Changes during the build: CI's complexity guard split `postcard()` into route, height and time functions, and the HostedMember privacy seam test now lists the photo relation. In the app, a dark top band inks the postmark light, the SE row drops the pill's icon before it wraps, and an open drawer reads the share again when "Back at" passes.
+
+Status: completed
 Created: 2026-11-19
-Updated: 2026-11-19 (after the plan review)
+Updated: 2026-11-19
+Completed: 2026-11-19
 
 ## Goal
 
