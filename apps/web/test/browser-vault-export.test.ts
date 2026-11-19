@@ -188,6 +188,16 @@ test("includes streamed share metadata and JPEG bytes in the approved export", a
   expect(JSON.parse(await result.blob.text())).toEqual({ ...fixture.replica, progressShares: [share] });
 });
 
+test("includes the medal photo after the shares in the approved export", async () => {
+  const fixture = await createBucketedExportFixture();
+  runtimeMocks.decryptHostedStoragePayload.mockImplementation(async ({ envelope }) => fixture.plaintextByCiphertext.get(envelope.ciphertext));
+  const share = { awardId: 'opaque-award', status: 'ready', createdAt: '2026-11-01T00:00:00.000Z', failureCode: null, jpegBase64: 'AQID' };
+  const photo = { createdAt: '2026-11-02T00:00:00.000Z', jpegBase64: 'BAUG' };
+  const body = [await fixture.response.text(), JSON.stringify({ progressShare: share }), JSON.stringify({ progressSharePhoto: photo })].join('\n') + '\n';
+  const result = await loadBrowserVaultExport({ authorization: createAuthorization(), fetchImpl: vi.fn<typeof fetch>().mockResolvedValue(new Response(body)) });
+  expect(JSON.parse(await result.blob.text())).toEqual({ ...fixture.replica, progressShares: [share], progressSharePhoto: photo });
+});
+
 test.each([
   {
     mutate(response: Record<string, unknown>) {

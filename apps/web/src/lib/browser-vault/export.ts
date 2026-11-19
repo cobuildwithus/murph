@@ -133,8 +133,17 @@ export async function loadBrowserVaultExport({
       : await loadBucketedBrowserVaultExport({ replicaKey, session, signal });
 
     const shareParts: BlobPart[] = [];
+    // The medal photo comes last, on its own record.
+    let photoPart: BlobPart[] = [];
     for await (const value of records) {
       const record = requireRecord(value, 'Progress share export record');
+      if (record.progressSharePhoto !== undefined) {
+        const photo = requireRecord(record.progressSharePhoto, 'Medal photo export');
+        requireIsoTimestamp(photo.createdAt, 'Medal photo createdAt');
+        requireString(photo.jpegBase64, 'Medal photo JPEG');
+        photoPart = [',"progressSharePhoto":', new Blob([JSON.stringify(photo)])];
+        continue;
+      }
       const share = requireRecord(record.progressShare, 'Progress share export');
       requireString(share.awardId, 'Progress share awardId');
       requireIsoTimestamp(share.createdAt, 'Progress share createdAt');
@@ -143,7 +152,7 @@ export async function loadBrowserVaultExport({
       if (shareParts.length) shareParts.push(',');
       shareParts.push(new Blob([JSON.stringify(share)]));
     }
-    const blob = new Blob([payload.blob.slice(0, -1), ',"progressShares":[', ...shareParts, ']}'], { type: VAULT_EXPORT_MIME_TYPE });
+    const blob = new Blob([payload.blob.slice(0, -1), ',"progressShares":[', ...shareParts, ']', ...photoPart, '}'], { type: VAULT_EXPORT_MIME_TYPE });
     return {
       blob,
       deviceSyncImportPending: session.deviceSyncImportPending,
