@@ -9,6 +9,7 @@ import { renderRouteMap, resolveRoute } from '@/src/lib/game/progress/mapbox';
 import { readArtBytes } from '@/src/lib/game/progress/place-art';
 import { drawRouteOnPainting, mapKey } from '@/src/lib/game/progress/place-art-make';
 import { mapProgress } from '@/src/lib/game/progress/route-geometry';
+import { mapVersion } from '@/src/lib/game/progress/route-progress';
 import { routeView } from '@/src/lib/game/progress/routes';
 import { cumulativePoints } from '@/src/lib/game/progress/series';
 import { readOwnSeries } from '@/src/lib/game/progress/vault-runs';
@@ -43,8 +44,10 @@ export const GET = withProgressJsonError(async (request: Request) => runWithHost
     });
     // Drawn as far along as the link's version says, so one link is one picture.
     progress = mapProgress(progress);
-    // The painted map, when one is ready, with today's line drawn on it; else the plain map.
-    const painted = await readArtBytes(mapKey(polyline, query.size))
+    // The painted map, when one is ready, with today's line drawn on it; else the plain map. A link
+    // made before any painting stays the plain map, so the app's state and its picture agree.
+    const plainLink = 'v' in query && query.v === mapVersion(polyline, progress);
+    const painted = plainLink ? null : await readArtBytes(mapKey(polyline, query.size))
       .then(painting => painting && drawRouteOnPainting(painting, polyline, progress, query.size)).catch(() => null);
     if (painted) return new Response(new Uint8Array(painted), { headers: { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' } });
     return renderRouteMap({ polyline, progress, size: query.size });

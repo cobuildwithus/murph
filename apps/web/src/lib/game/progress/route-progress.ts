@@ -25,10 +25,13 @@ export function routeEta(meters: Points, remainingM: number): string | null {
   return weeks <= 104 ? `${weeks} weeks` : `${Math.round(days / 365)} years`;
 }
 
-/** A route's map link. Its version (`v`) is the road, how far along it the map draws, and which sizes have a painting ready: a new route, more walked or a painting coming in is a new link, so the app never keeps an old picture. */
+/** A route's map version: the road, how far along it the map draws, and which sizes have a painting ready. */
+export const mapVersion = (polyline: string, progress: number, painted: readonly ('card' | 'drawer')[] = []) =>
+  createHash('sha256').update([polyline, mapProgress(progress), ...painted].join('\n')).digest('base64url').slice(0, 12);
+
+/** A route's map link. A new route, more walked or a painting coming in is a new version (`v`), so the app never keeps an old picture. */
 export function routeMapLink(measureId: string, polyline: string, progress: number, painted: readonly ('card' | 'drawer')[] = []) {
-  const v = createHash('sha256').update([polyline, mapProgress(progress), ...painted].join('\n')).digest('base64url').slice(0, 12);
-  return `/api/game/v1/progress/map?${new URLSearchParams({ measure: measureId, size: 'card', v })}`;
+  return `/api/game/v1/progress/map?${new URLSearchParams({ measure: measureId, size: 'card', v: mapVersion(polyline, progress, painted) })}`;
 }
 export const routeAwardKey = (measureId: string, leg: RouteLeg, index: number) => `route:${JSON.stringify([measureId, index, leg.from, leg.to, leg.distanceM, leg.startTotal])}`;
 

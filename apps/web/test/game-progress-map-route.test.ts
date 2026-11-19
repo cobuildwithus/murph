@@ -16,7 +16,7 @@ vi.mock('@/src/lib/prisma', () => ({ getPrisma: () => ({
 }) }));
 import { GET } from '../app/api/game/v1/progress/map/route';
 import { encodePolyline } from '../src/lib/game/progress/route-geometry';
-import { routeLegs } from '../src/lib/game/progress/route-progress';
+import { mapVersion, routeLegs } from '../src/lib/game/progress/route-progress';
 import { hostedOnboardingError } from '../src/lib/hosted-onboarding/errors';
 const leg = { from: 'London', to: 'Paris', distanceM: 1000, startTotal: 0, straightLine: false, towns: [], polyline: encodePolyline([[0, 50], [2, 49]]) };
 const snapshot = () => ({ incomplete: false, states: new Map([['walk.meters', { legs: [leg] }]]), awards: [],
@@ -46,6 +46,16 @@ describe('Progress map HTTP contract', () => {
     expect(mocks.render).not.toHaveBeenCalled();
     mocks.art.mockRejectedValue(new Error('db down'));
     expect((await GET(request('measure=walk.meters&size=card'))).headers.get('content-type')).toBe('image/png');
+  });
+  it('keeps a link made before the painting the plain map, so the app\'s state and picture agree', async () => {
+    const sharp = (await import('sharp')).default;
+    mocks.art.mockResolvedValue({ bytes: await sharp({ create: { width: 708, height: 405, channels: 3, background: '#8aa060' } }).jpeg().toBuffer() });
+    // The walk measure's map: 500 of 1000 m.
+    const plain = await GET(request(`measure=walk.meters&size=card&v=${mapVersion(leg.polyline, 0.5)}`));
+    expect(plain.headers.get('content-type')).toBe('image/png');
+    expect(mocks.art).not.toHaveBeenCalled();
+    const painted = await GET(request(`measure=walk.meters&size=card&v=${mapVersion(leg.polyline, 0.5, ['card'])}`));
+    expect(painted.headers.get('content-type')).toBe('image/jpeg');
   });
   it.each(['card', 'drawer'])('uses settled Health Steps since joining on the %s map', async size => {
     const response = await GET(request(`measure=steps&size=${size}`));

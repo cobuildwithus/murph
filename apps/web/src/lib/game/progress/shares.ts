@@ -22,8 +22,9 @@ import { readProgressShareConsent } from './share-consent';
 import { makeShareImage, prepareShareJpeg, SHARE_DEADLINE_MS, ShareImageError } from './share-image';
 import type { BeforeProgressMutation } from './state';
 
-// Timed loaders only; readiness comes from a later read.
-const SHARE_TYPICAL_SECONDS = 55;
+// Timed loaders only; readiness comes from a later read. Production's medal
+// pictures take 10 to 12 s, like a painted map.
+const SHARE_TYPICAL_SECONDS = 14;
 
 export interface ShareRequest { memberId: string; awardId: string; units: ClientUnits; beforeMutationTx: BeforeProgressMutation }
 type Selection = { row: GameProgressShare | null; consent: 'allowed' | 'denied'; photoKey: string | null };

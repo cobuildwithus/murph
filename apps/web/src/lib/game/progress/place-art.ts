@@ -20,8 +20,10 @@ export const ART_DEADLINE_MS = 240_000;
 const DAILY_ATTEMPTS = 150;
 const MAX_ATTEMPTS = 3;
 const RETRY_AFTER_MS = 3_600_000;
-// Timed loaders only: readiness always comes from a later read.
-const TYPICAL_SECONDS: Record<ArtKind, number> = { poster: 50, map: 80 };
+// Timed loaders only: readiness always comes from a later read. A little over
+// production's times (Nov 19: posters 5 to 7 s, maps 11 to 12 s), so the count
+// lands near the end and the app reads again just after.
+const TYPICAL_SECONDS: Record<ArtKind, number> = { poster: 8, map: 14 };
 
 export const artPath = (key: string) => `/api/game/v1/progress/art/${encodeURIComponent(key)}`;
 type Row = { key: string; status: string; startedAt: Date };

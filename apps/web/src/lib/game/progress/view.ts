@@ -19,6 +19,9 @@ import { resolveRoute } from "./mapbox";
 import { picturePin, readProgressPics } from "./pics";
 import { healthAgeTitle } from "./health";
 
+// Charts moved their day 0 to the app on Nov 19, 2026; anyone on it earlier starts a month before.
+const CHARTS_FROM = "2026-10-19";
+
 export function achievementContext(measures: readonly MeasureSeries[], states: ReadonlyMap<string, MeasureState>): AchievementContext {
   return { measures: measures.map(measure => {
     const points = cumulativePoints(measure.amounts);
@@ -130,7 +133,8 @@ export async function readProgress(memberId: string, units: ClientUnits, beforeM
   const profile = await timing.measure("profile", () => db.gameProfile.findUniqueOrThrow({ where: { memberId }, select: { timeZone: true, createdAt: true } }));
   const clock = new Date();
   const today = formatTimeZoneDateTimeParts(clock, profile.timeZone).dayKey;
-  const joinedOn = formatTimeZoneDateTimeParts(profile.createdAt, profile.timeZone).dayKey;
+  // Day 0 of the charts: the day they started the app, and for everyone on it before then, Oct 19.
+  const joinedOn = [formatTimeZoneDateTimeParts(profile.createdAt, profile.timeZone).dayKey, CHARTS_FROM].sort().at(-1)!;
   const snapshot = await timing.measure("gameSeries", () => readOwnSeries(memberId, clock, timing));
   const pictures = await timing.measure("pictures", () => readProgressPics(memberId));
   snapshot.incomplete ||= pictures.incomplete;
