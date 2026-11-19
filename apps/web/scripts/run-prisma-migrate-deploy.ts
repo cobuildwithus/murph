@@ -107,6 +107,12 @@ const hostedWebPrismaPredeployHistoricalMigrationIds = new Set([
 
 const hostedWebPrismaPredeployCompatibleMigrationReasons = new Map([
   [
+    "20261119213000_game_place_art_story",
+    // Only widens place art kinds to stories; old rows and writers remain valid.
+    // Replace atomically with NOT VALID, then validate without the metadata lock.
+    new Set(["ADD CONSTRAINT CHECK", "DROP CONSTRAINT"]),
+  ],
+  [
     "20261116210000_game_profile_not_for_me",
     // A constant empty-array default preserves existing rows and old writers.
     new Set(["ADD COLUMN NOT NULL"]),
