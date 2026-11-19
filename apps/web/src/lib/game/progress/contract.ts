@@ -24,8 +24,9 @@ const making = z.object({ state: z.literal("making"), startedAt: z.string(), exp
 const art = z.union([z.object({ state: z.literal("ready"), path: z.string() }), making]).nullable();
 // aheadText, while a town is ahead: "33 mi away", or "416 mi to go" for the end.
 // poster: the place's travel poster. stepsText: Steps only, the steps total on the day you got there.
+// at: how far along, in the chart's unit. region: the state or province (US, Canada) or the country; regionCode: "DE", "ON".
 const towns = z.array(z.object({ name: z.string(), atText: z.string(), aheadText: z.string().nullable(), x: z.number(), y: z.number(), passedOn: day.nullable(),
-  poster: art, stepsText: z.string().nullable() }));
+  poster: art, stepsText: z.string().nullable(), at: z.number(), region: z.string().nullable(), regionCode: z.string().nullable() }));
 const route = z.object({
   name: z.string(), distanceText: z.string(), walkedText: z.string(), totalText: z.string(), progress: z.number(), straightLine: z.boolean(),
   goalPicked: z.boolean(), completed: z.array(z.object({ name: z.string(), finishedOn: day, shareAwardId: z.string() })),
@@ -39,6 +40,14 @@ const route = z.object({
   drawerHere: z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) }),
   /** The rest at the last 30 days' pace: "10 weeks", "9 days". Null when finished or with no pace yet. */
   etaText: z.string().nullable(),
+  /** The day this leg started (null when that can't be known), and the day the rest lands at that pace (null when finished or with no pace yet). */
+  startedOn: day.nullable(), etaOn: day.nullable(),
+  /** The leg's days so far, after its distance: "in 48 days". Null without a start day. */
+  daysText: z.string().nullable(),
+  /** "86 mi left"; null when finished. */
+  remainingText: z.string().nullable(),
+  /** The leg's running total from startedOn, in `unit` ("mi" or "km"), up to `distance`. Null without a start day. */
+  chart: z.object({ unit: z.string(), distance: z.number(), points: z.array(point) }).nullable(),
   /** The card and drawer maps' paintings: ready (`map` serves it; names go light), being made, or null (the plain map). */
   mapArt: z.union([z.object({ state: z.literal("ready") }), making]).nullable(),
   drawerMapArt: z.union([z.object({ state: z.literal("ready") }), making]).nullable(),
@@ -132,7 +141,11 @@ export const goalsSchema = z.object({
   tiles: z.array(rungSchema), match: rungSchema.nullable(), suggestions: z.array(rungSchema),
   note: z.string().nullable(),
   route: z.object({ from: z.string(), to: z.string(), distanceText: z.string(), detail: z.string(),
-    straightLine: z.boolean(), map: z.string(), towns: route.shape.towns }).nullable(),
+    straightLine: z.boolean(), map: z.string(), towns: route.shape.towns,
+    /** A place typed with a slip, found as the one Mapbox and Luna agree on: "Lisbn" as "Lisbon". */
+    fixed: z.object({ typed: z.string(), showing: z.string() }).nullable() }).nullable(),
+  /** Two places typed and one found nowhere, even as a slip: its words, as typed. Absent otherwise. */
+  notFound: z.string().optional(),
 });
 export type Goals = z.infer<typeof goalsSchema>;
 
@@ -152,6 +165,15 @@ export type FriendsQuery = z.infer<typeof friendsQuery>;
 const goalsQuery = z.object({ measure: text, q: text.optional(), find: z.literal("1").optional() })
   .refine(query => query.find === undefined || query.q !== undefined);
 export type GoalsQuery = z.infer<typeof goalsQuery>;
+const storyQuery = z.strictObject({ measure: text, town: z.string().regex(/^\d{1,2}$/u).transform(Number) });
+export type StoryQuery = z.infer<typeof storyQuery>;
+/** GET story: the back of a passed town's postcard, written once per place for everyone. */
+export const storySchema = z.discriminatedUnion("state", [
+  z.object({ state: z.literal("ready"), title: z.string(), facts: z.array(z.string()) }),
+  z.object({ state: z.literal("making"), typicalSeconds: z.number().int().positive() }),
+  z.object({ state: z.literal("failed") }),
+]);
+export type StoryView = z.infer<typeof storySchema>;
 const picUpload = z.object({ id: z.string().uuid(), measureId: text, takenAt: z.iso.datetime({ offset: true }) });
 export type PicUploadQuery = z.infer<typeof picUpload>;
 const mapSize = z.enum(["card", "drawer"]);
@@ -175,6 +197,7 @@ export const parseFriendsQuery = (value: unknown): FriendsQuery => parse(friends
 export const parseGoalsQuery = (value: unknown): GoalsQuery => parse(goalsQuery, value);
 export const parsePicUploadQuery = (value: unknown): PicUploadQuery => parse(picUpload, value);
 export const parseMapQuery = (value: unknown): MapQuery => parse(mapQuery, value);
+export const parseStoryQuery = (value: unknown): StoryQuery => parse(storyQuery, value);
 
 export type SetMeasureResponse = { ok: true; measure: Measure };
 export type SetSharingResponse = { ok: true; sharedWith: (z.infer<typeof person> & { metrics: SetSharingBody["metrics"] })[] };

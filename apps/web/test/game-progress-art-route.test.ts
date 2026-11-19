@@ -21,6 +21,11 @@ describe('shared place art HTTP contract', () => {
   it.each(['poster:v1:dplace-missing', 'progress/abc.jpg', 'poster:v2:x', 'map:v1:card:has space'])('answers 404 for %s', async key => {
     expect((await get(key)).status).toBe(404);
   });
+  it('never serves a postcard story as an image, even a saved one', async () => {
+    mocks.art.mockResolvedValue({ bytes: new TextEncoder().encode('{"title":"River mills town"}') });
+    expect((await get('story:v1:dplace-dm')).status).toBe(404);
+    expect(mocks.art).not.toHaveBeenCalled();
+  });
   it('needs a signed-in member', async () => {
     mocks.auth.mockRejectedValue(hostedOnboardingError({ code: 'AUTH_REQUIRED', httpStatus: 401, message: 'Sign in.' }));
     expect((await get('poster:v1:dplace-dm')).status).toBe(401);

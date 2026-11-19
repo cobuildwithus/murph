@@ -33,9 +33,13 @@
         "y": 0.75,
         "passedOn": null,
         "poster": null,
-        "stepsText": null
+        "stepsText": null,
+        "at": 118,
+        "region": null,
+        "regionCode": null
       }
-    ]
+    ],
+    "fixed": null
   },
   "note": null
 }

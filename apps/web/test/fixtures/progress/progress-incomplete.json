@@ -413,7 +413,10 @@
             "y": 0.9,
             "passedOn": "2026-10-21",
             "poster": null,
-            "stepsText": null
+            "stepsText": null,
+            "at": 0,
+            "region": null,
+            "regionCode": null
           },
           {
             "name": "Chattanooga",
@@ -423,7 +426,10 @@
             "y": 0.1,
             "passedOn": null,
             "poster": null,
-            "stepsText": null
+            "stepsText": null,
+            "at": 2,
+            "region": null,
+            "regionCode": null
           }
         ],
         "goalPicked": true,
@@ -437,7 +443,10 @@
             "y": 0.9,
             "passedOn": "2026-10-21",
             "poster": null,
-            "stepsText": null
+            "stepsText": null,
+            "at": 0,
+            "region": null,
+            "regionCode": null
           },
           {
             "name": "Chattanooga",
@@ -447,7 +456,10 @@
             "y": 0.1,
             "passedOn": null,
             "poster": null,
-            "stepsText": null
+            "stepsText": null,
+            "at": 2,
+            "region": null,
+            "regionCode": null
           }
         ],
         "here": {
@@ -461,7 +473,25 @@
         "shareAwardId": null,
         "mapArt": null,
         "drawerMapArt": null,
-        "etaText": "10 weeks"
+        "etaText": "10 weeks",
+        "startedOn": "2026-10-21",
+        "daysText": "in 25 days",
+        "etaOn": "2027-01-23",
+        "remainingText": "2 mi left",
+        "chart": {
+          "unit": "mi",
+          "distance": 118,
+          "points": [
+            [
+              "2026-10-21",
+              0
+            ],
+            [
+              "2026-11-14",
+              116
+            ]
+          ]
+        }
       },
       "pics": []
     }

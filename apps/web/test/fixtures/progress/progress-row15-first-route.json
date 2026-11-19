@@ -45,7 +45,10 @@
             "y": 0.1,
             "passedOn": "2026-11-14",
             "poster": null,
-            "stepsText": null
+            "stepsText": null,
+            "at": 0,
+            "region": null,
+            "regionCode": null
           },
           {
             "name": "San Antonio",
@@ -55,7 +58,10 @@
             "y": 0.8,
             "passedOn": null,
             "poster": null,
-            "stepsText": null
+            "stepsText": null,
+            "at": 77,
+            "region": null,
+            "regionCode": null
           }
         ],
         "goalPicked": false,
@@ -69,7 +75,10 @@
             "y": 0.174554,
             "passedOn": "2026-11-14",
             "poster": null,
-            "stepsText": null
+            "stepsText": null,
+            "at": 0,
+            "region": null,
+            "regionCode": null
           },
           {
             "name": "San Antonio",
@@ -79,7 +88,10 @@
             "y": 0.744085,
             "passedOn": null,
             "poster": null,
-            "stepsText": null
+            "stepsText": null,
+            "at": 77,
+            "region": null,
+            "regionCode": null
           }
         ],
         "here": {
@@ -93,7 +105,21 @@
         "shareAwardId": null,
         "mapArt": null,
         "drawerMapArt": null,
-        "etaText": "10 weeks"
+        "etaText": "10 weeks",
+        "startedOn": "2026-11-14",
+        "daysText": "in 1 day",
+        "etaOn": "2027-01-23",
+        "remainingText": "77 mi left",
+        "chart": {
+          "unit": "mi",
+          "distance": 80,
+          "points": [
+            [
+              "2026-11-14",
+              0
+            ]
+          ]
+        }
       },
       "pics": []
     }

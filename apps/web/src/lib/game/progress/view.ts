@@ -125,7 +125,7 @@ export function measureView(measure: MeasureSeries, state: MeasureState, awards:
     source: "games", pending: measure.pending, gameOn: measure.gameOn, needsPerDay: measure.needsPerDay,
     total: formatAmount(points.at(-1)?.[1] ?? 0, measure.unit, "full", units), today: todayValue > 0 ? formatAmount(todayValue, measure.unit, "compact", units) : null,
     points, projection: projection(measure, today, units), ladder: measureLadder(measure, state, awards, units),
-    route: routeView(measure.id, state, points, awards, units), pics: [] };
+    route: routeView(measure.id, state, points, awards, units, today), pics: [] };
 }
 
 export async function readProgress(memberId: string, units: ClientUnits, beforeMutationTx: BeforeProgressMutation, timing = new ProgressReadTiming()): Promise<Progress> {

@@ -60,6 +60,7 @@ describe('Progress route legs', () => {
       const { width, height } = MAP_SIZES[size];
       const geometry = decodePolyline(route.polyline);
       expect(towns).toEqual([{ name: 'B', atText, aheadText: null, passedOn: '2026-11-01', poster: null, stepsText: null,
+        at: Math.round(distanceM / 1609.344 * 100) / 100, region: null, regionCode: null,
         ...townPosition(geometry.at(-1)!, routeBbox(geometry, width, height)) }]);
     }
     expect(view.towns[0].x).not.toBe(view.drawerTowns[0].x);
@@ -71,8 +72,10 @@ describe('Progress route legs', () => {
     { total: 120, earned: [], count: 2, start: 120 },
     { total: 80, earned: [0], count: 2, start: 80 },
   ])('rolls over at $total, preserving earned legs $earned', ({ total, earned, count, start }) => {
-    const result = replaceRouteLeg('walk.meters', [leg], next, total, new Set(earned.map(() => routeAwardKey('walk.meters', leg, 0))));
+    const result = replaceRouteLeg('walk.meters', [leg], next, total, new Set(earned.map(() => routeAwardKey('walk.meters', leg, 0))), '2026-11-19');
     expect(result).toHaveLength(count); expect(result.at(-1)!.startTotal).toBe(start);
+    // A later leg keeps the day it started; a replaced first leg starts on its first counted day.
+    expect(result.at(-1)!.startedOn).toBe(count === 2 ? '2026-11-19' : undefined);
     if (count === 2) expect(result[0]).toEqual(leg);
   });
   it('dates every completion on its crossing day, with stable keys independent of the read date', () => {
@@ -102,7 +105,7 @@ describe('Progress route legs', () => {
   });
   it('does not reuse an old completion when a repeated leg starts at the same corrected total', () => {
     const award = routeLegs({ measureId: 'walk.meters', legs: [leg], points: [['2026-11-01', 100]] })[0]!;
-    const legs = replaceRouteLeg('walk.meters', [leg], leg, 0, new Set([award.key]));
+    const legs = replaceRouteLeg('walk.meters', [leg], leg, 0, new Set([award.key]), '2026-11-02');
     const view = routeView('walk.meters', { legs }, [['2026-11-02', 0]],
       [{ ...award, id: 'award', createdAt: new Date('2026-11-01'), seenAt: null }], 'us')!;
     expect(legs).toHaveLength(2); expect(view.shareAwardId).toBeNull(); expect(view.finishedOn).toBeNull(); expect(view.progress).toBe(0);

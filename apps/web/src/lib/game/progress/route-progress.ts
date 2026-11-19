@@ -6,24 +6,36 @@ import type { MeasureState, RouteLeg } from './state';
 import type { StoredAward } from './awards';
 import { cutPolyline, decodePolyline, MAP_SIZES, mapProgress, routeBbox, townPosition } from './route-geometry';
 import { formatAmount, formatNumber } from './format';
+import { placeRegion } from './place-region';
 export const routeMeters = (measureId: string, amount: number) => measureId === 'steps' || measureId.endsWith('.steps') ? amount / 2000 * 1609.344 : amount;
 type Points = readonly [Day, number][];
 const crossingDay = (points: Points, at: number) => points.find(point => point[1] >= at)?.[0] ?? null;
 const dayNumber = (day: Day) => Date.parse(`${day}T00:00:00Z`) / 86_400_000;
+const addDays = (day: Day, days: number): Day => new Date((dayNumber(day) + days) * 86_400_000).toISOString().slice(0, 10);
 
-/** How long the rest takes at the last 30 days' pace (fewer since the first day): "10 weeks". */
-export function routeEta(meters: Points, remainingM: number): string | null {
+/** Days the rest takes at the last 30 days' pace (fewer since the first day); null with under a week of pace or none. */
+export function routeEtaDays(meters: Points, remainingM: number): number | null {
   const last = meters.at(-1);
   if (!last || remainingM <= 0) return null;
   const window = Math.min(30, dayNumber(last[0]) - dayNumber(meters[0]![0]) + 1);
   const before = meters.filter(point => dayNumber(point[0]) <= dayNumber(last[0]) - window).at(-1)?.[1] ?? 0;
   const perDay = (last[1] - before) / window;
   if (window < 7 || perDay <= 0) return null;
-  const days = Math.ceil(remainingM / perDay);
+  return Math.ceil(remainingM / perDay);
+}
+
+/** How long the rest takes at that pace: "10 weeks". */
+export function routeEta(meters: Points, remainingM: number): string | null {
+  const days = routeEtaDays(meters, remainingM);
+  if (days === null) return null;
   if (days < 14) return days === 1 ? '1 day' : `${days} days`;
   const weeks = Math.round(days / 7);
   return weeks <= 104 ? `${weeks} weeks` : `${Math.round(days / 365)} years`;
 }
+
+/** A distance unit's meters, as the chart counts it. */
+const unitMeters = (units: ClientUnits) => units === 'metric' ? 1000 : 1609.344;
+const round = (value: number, places: number) => Math.round(value * 10 ** places) / 10 ** places;
 
 /** A route's map version: the road, how far along it the map draws, and which sizes have a painting ready. */
 export const mapVersion = (polyline: string, progress: number, painted: readonly ('card' | 'drawer')[] = []) =>
@@ -40,10 +52,10 @@ export function routeAwardName(award: StoredAward, fallback: string): string {
   return typeof award.data.name === 'string' ? award.data.name : fallback;
 }
 
-/** Completed legs survive corrections; changing a goal only replaces the unfinished leg. */
-export function replaceRouteLeg(measureId: string, legs: readonly RouteLeg[], next: Omit<RouteLeg, 'startTotal'>, total: number, earned: ReadonlySet<string>): RouteLeg[] {
+/** Completed legs survive corrections; changing a goal only replaces the unfinished leg. A later leg keeps the day it started. */
+export function replaceRouteLeg(measureId: string, legs: readonly RouteLeg[], next: Omit<RouteLeg, 'startTotal' | 'startedOn'>, total: number, earned: ReadonlySet<string>, today: Day): RouteLeg[] {
   const finished = legs.filter((leg, i) => i < legs.length - 1 || earned.has(routeAwardKey(measureId, leg, i)) || total >= leg.startTotal + leg.distanceM);
-  return [...finished, { ...next, startTotal: finished.length ? total : 0 }];
+  return [...finished, finished.length ? { ...next, startTotal: total, startedOn: today } : { ...next, startTotal: 0 }];
 }
 
 export function routeLegs(ctx: { measureId: string; legs: readonly RouteLeg[]; points: Points }): Candidate[] {
@@ -66,6 +78,7 @@ export function routeTowns(leg: RouteLeg, meters: Points, size: MapQuery['size']
     // Steps on this route by the end of the day you got there.
     const stepsOn = measureId === 'steps' && passedOn ? meters.find(point => point[0] === passedOn)?.[1] : undefined;
     return { name: town.name, atText: `${units === 'metric' ? 'km' : 'mile'} ${formatAmount(town.atM, 'meters', 'full', units).text.split(' ')[0]}`,
+      at: round(town.atM / unitMeters(units), 2), ...placeRegion(town.place?.label),
       aheadText: passedOn ? null : `${ahead} ${index === leg.towns.length - 1 ? 'to go' : 'away'}`,
       ...townPosition(cutPolyline(geometry, town.atM / leg.distanceM).walked.at(-1)!, bbox), passedOn,
       poster: null, stepsText: stepsOn === undefined ? null : `${formatNumber(Math.round((stepsOn - leg.startTotal) / 1609.344 * 2000), 'full')} steps` };
@@ -78,8 +91,43 @@ function routeHere(leg: RouteLeg, progress: number, size: MapQuery['size']): Rou
   return townPosition(cutPolyline(geometry, progress).walked.at(-1)!, routeBbox(geometry, width, height));
 }
 
+/**
+ * The day a leg started. A later leg saves its own; the first starts on its series' first counted day (imported runs
+ * and the Steps window included, never sign-up); an older later leg on the day the total reached its start. Null
+ * when what's left of the series can't say.
+ */
+function legStart(legs: readonly RouteLeg[], index: number, meters: Points): Day | null {
+  const leg = legs[index]!;
+  if (leg.startedOn) return leg.startedOn;
+  if (index === 0) return meters[0]?.[0] ?? null;
+  return leg.startTotal > 0 ? crossingDay(meters, leg.startTotal) : null;
+}
+
+/** "In N days" counts from the start day through today: the same days as the miles walked on the leg. */
+function legDates(startedOn: Day | null, meters: Points, today: Day, remainingM: number, finished: boolean) {
+  const days = startedOn === null ? null : Math.max(1, dayNumber(today) - dayNumber(startedOn) + 1);
+  const etaDays = finished ? null : routeEtaDays(meters, remainingM);
+  return { startedOn, etaOn: etaDays === null ? null : addDays(today, etaDays),
+    daysText: days === null ? null : `in ${formatNumber(days, 'full')} ${days === 1 ? 'day' : 'days'}` };
+}
+
+/**
+ * The leg's own running total for the app's line, from its start day, in the member's distance unit. An earned
+ * finish holds from its day on, as the map and headline say, even after the series it was earned on shrinks.
+ */
+function legChart(leg: RouteLeg, meters: Points, startedOn: Day, earnedOn: Day | null, units: ClientUnits): NonNullable<Route['chart']> {
+  const per = unitMeters(units);
+  const along = (total: number) => Math.min(leg.distanceM, Math.max(0, total - leg.startTotal));
+  const days = new Map<Day, number>([[startedOn, 0]]);
+  for (const [day, total] of meters) if (day >= startedOn && (!earnedOn || day < earnedOn)) days.set(day, along(total));
+  if (earnedOn && earnedOn >= startedOn) days.set(earnedOn, leg.distanceM);
+  return { unit: units === 'metric' ? 'km' : 'mi', distance: round(leg.distanceM / per, 2),
+    points: [...days].sort(([a], [b]) => a.localeCompare(b)).map(([day, value]): [Day, number] => [day, round(value / per, 2)]) };
+}
+
 /** Label coordinates belong to the linked card PNG; display that image without cropping. */
-export function routeView(measureId: string, state: MeasureState, points: Points, awards: readonly StoredAward[], units: ClientUnits): Route | null {
+export function routeView(measureId: string, state: MeasureState, points: Points, awards: readonly StoredAward[], units: ClientUnits,
+  today: Day = points.at(-1)?.[0] ?? new Date().toISOString().slice(0, 10)): Route | null {
   const legs = state.legs ?? [], leg = legs.at(-1);
   if (!leg) return null;
   const completions = awards.filter(award => award.kind === 'route' && award.measureId === measureId);
@@ -89,7 +137,11 @@ export function routeView(measureId: string, state: MeasureState, points: Points
   const total = meters.at(-1)?.[1] ?? 0;
   const walked = earnedOn ? leg.distanceM : Math.min(leg.distanceM, Math.max(0, total - leg.startTotal));
   const map = routeMapLink(measureId, leg.polyline, walked / leg.distanceM);
+  const startedOn = legStart(legs, legs.length - 1, meters);
   return { name: leg.name ?? `${leg.from} to ${leg.to}`, distanceText: formatAmount(leg.distanceM, 'meters', 'full', units).text,
+    ...legDates(startedOn, meters, today, leg.distanceM - walked, earnedOn !== null),
+    remainingText: earnedOn ? null : `${formatAmount(leg.distanceM - walked, 'meters', 'full', units).text} left`,
+    chart: startedOn === null ? null : legChart(leg, meters, startedOn, earnedOn, units),
     walkedText: formatAmount(walked, 'meters', 'compact', units).text, totalText: formatAmount(total, 'meters', 'compact', units).text,
     progress: walked / leg.distanceM, straightLine: leg.straightLine, etaText: earnedOn ? null : routeEta(meters, leg.distanceM - walked),
     here: routeHere(leg, walked / leg.distanceM, 'card'), drawerHere: routeHere(leg, walked / leg.distanceM, 'drawer'),

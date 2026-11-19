@@ -702,6 +702,24 @@ describe("hosted web production migration guard", () => {
     }
   });
 
+  test("limits the place art story kind to constraint replacement", async () => {
+    const migrationsDir = await mkdtemp(path.join(tmpdir(), "hosted-web-prisma-migrations-"));
+    const migrationId = "20261119213000_game_place_art_story";
+    try {
+      const sql = await readFile(path.join(appRoot, "prisma", "migrations", migrationId, "migration.sql"), "utf8");
+      await writeMigrationSql(migrationsDir, migrationId, sql);
+      assert.deepEqual(await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir), []);
+      await writeMigrationSql(migrationsDir, migrationId, `${sql}\nALTER TABLE game_place_art DROP COLUMN bytes;`);
+      assert.deepEqual(
+        (await findHostedWebPrismaPredeployDestructiveMigrations(migrationsDir))
+          .map(({ migrationId: id, reason }) => ({ migrationId: id, reason })),
+        [{ migrationId, reason: "DROP COLUMN" }],
+      );
+    } finally {
+      await rm(migrationsDir, { force: true, recursive: true });
+    }
+  });
+
   test("limits many-game compatibility to the two obsolete roster guards", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "game-many-migration-"));
     const migrationId = "20261101230000_game_many_per_pair";

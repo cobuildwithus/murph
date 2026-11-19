@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { Response } from "openai/resources/responses/responses";
 import * as z from "@murphai/contracts/zod-runtime";
+import { formatTimeZoneDateTimeParts } from "@murphai/contracts";
 import type { ClientUnits } from "../../companion/client-info";
 import { hostedAuthRateLimitStorage } from "../../better-auth/rate-limit";
 import { getPrisma } from "../../prisma";
@@ -16,6 +17,7 @@ import { cumulativePoints, type MeasureSeries } from "./series";
 import { readOwnSeries } from "./vault-runs";
 import { patchMeasureState, type BeforeProgressMutation, type MeasureState } from "./state";
 import { readRouteGoals, setRouteGoal } from "./routes";
+import { memberPlaceFixer } from "./place-fix";
 
 export function roundValues(total: number, { id, unit }: Pick<MeasureSeries, "id" | "unit">): number[] {
   const factor = unit === "seconds" ? 3600 : unit === "meters" ? 1609.344 : 1;
@@ -162,7 +164,7 @@ export async function readGoals(memberId: string, query: GoalsQuery, units: Clie
   const measure = snapshot.measures.find(measure => measure.id === query.measure);
   if (!measure) throw gameNotFound();
   const total = cumulativePoints(measure.amounts).at(-1)?.[1] ?? 0;
-  if (measure.unit === "meters" || measure.unit === "steps") return readRouteGoals(query.q, measure.unit, total, units);
+  if (measure.unit === "meters" || measure.unit === "steps") return readRouteGoals(query.q, measure.unit, total, units, memberPlaceFixer(memberId));
   const kind = measure.unit === "reps" ? "height" : measure.unit === "seconds" ? "time" : null;
   if (!kind) return { tiles: [], match: null, suggestions: [], note: null, route: null };
   const passed = new Set(snapshot.awards.filter(award => award.measureId === measure.id && ["landmark", "time"].includes(award.kind))
@@ -195,8 +197,9 @@ export async function setMeasure(memberId: string, measureId: string, body: SetM
     return `${measure.name}.reps`;
   }
   if (measure.unit === "meters" || measure.unit === "steps") {
+    const profile = await getPrisma().gameProfile.findUniqueOrThrow({ where: { memberId }, select: { timeZone: true } });
     await setRouteGoal(memberId, measureId, body.goal, { points: cumulativePoints(measure.amounts),
-      awards: snapshot.awards, incomplete: snapshot.incomplete, beforeMutationTx });
+      awards: snapshot.awards, incomplete: snapshot.incomplete, today: formatTimeZoneDateTimeParts(new Date(), profile.timeZone).dayKey, beforeMutationTx });
     return measureId;
   }
   if ("from" in body.goal) throw invalidGameRequest("Choose a route for a distance measure.");
