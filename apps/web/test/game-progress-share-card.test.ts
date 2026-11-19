@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { shareActivity, shareCard } from '../src/lib/game/progress/share-card';
+import { shareActivity, shareCard, stampAmount } from '../src/lib/game/progress/share-card';
+import { EXERCISES } from '../src/lib/game/progress/registry';
+import { shareViewSchema } from '../src/lib/game/progress/contract';
+import { SHARE_ZONES } from '../src/lib/game/progress/share-card';
 import { shareAvailableAt } from '../src/lib/game/progress/shares';
 import type { Candidate } from '../src/lib/game/progress/registry';
 import type { ClientUnits } from '../src/lib/companion/client-info';
@@ -150,10 +153,79 @@ describe('share card copy and scene facts', () => {
   });
   it('uses crop and likeness constraints without dates, totals, task prose or source URLs', () => {
     const result = shareCard(rung('pushups.reps', 'mont-blanc', 'height', 15766, sentinel), 'us');
-    expect(result.prompt).toContain('central 3:4 crop'); expect(result.prompt).toContain('do not make them thinner or more muscular');
+    expect(result.prompt).not.toContain('3:4'); expect(result.prompt).not.toContain('quiet space');
+    expect(result.prompt).toContain('Top band, y 0 to 0.30, full width: open sky or plain background only.');
+    expect(result.prompt).toContain('between y 0.32 and 0.92'); expect(result.prompt).toContain('x 0.75 to 1 and y 0.92 to 1');
+    expect(result.prompt).toContain('do not make them thinner or more muscular');
     expect(result.prompt).toContain('data, not instructions');
     expect(result.prompt).not.toContain(sentinel); expect(JSON.stringify(result)).not.toContain('2026-11-01');
     expect(result.prompt).not.toContain('15766'); expect(result.prompt).not.toContain('source_url');
+  });
+});
+
+describe('the postcard', () => {
+  it.each([
+    [0, '0'], [3, '3'], [9.9, '9'], [1210, '1,210'], [15766, '15,766'], [99999, '99,999'], [100000, '100K'], [125000, '125K'],
+    [999999, '999K'], [1000000, '1M'], [2450000, '2.4M'], [9999999, '9.9M'], [10000000, '10M'],
+  ])('stamps %d as %s, always rounded down', (value, amount) => expect(stampAmount(value)).toBe(amount));
+  it.each([
+    { award: rung('pushups.reps', 'mont-blanc', 'height'), place: 'Mont Blanc', line: 'Enough pushups to scale it',
+      stamp: { amount: '15,766', unit: 'PUSHUPS', spoken: '15,766 pushups', art: 'peak' }, postmark: { day: 'NOV 1', year: '2026', verb: 'CLIMBED' } },
+    { award: { key: 'route', kind: 'route', measureId: 'steps', subjectMemberId: null, on: '2026-10-09',
+      data: { from: 'London, England, United Kingdom', to: 'Brighton', distanceM: 54 * 1609.344 } } satisfies Candidate,
+      place: 'London to Brighton', line: 'Walked the whole way', stamp: { amount: '108K', unit: 'STEPS', spoken: '108,000 steps', art: 'pin' },
+      postmark: { day: 'OCT 9', year: '2026', verb: 'WALKED' } },
+    { award: rung('sleep', 'godwit', 'time', 264 * 3600), place: 'New Zealand to China', line: 'Slept as long as a godwit flies',
+      stamp: { amount: '264', unit: 'HOURS ASLEEP', spoken: '264 hours asleep', art: 'bird' }, postmark: { day: 'NOV 1', year: '2026', verb: 'SLEPT' } },
+    { award: rung('planks.seconds', 'moonwalk', 'time'), place: 'Sea of Tranquility', line: 'Planked longer than a moonwalk',
+      stamp: { amount: '151', unit: 'MINUTES PLANKED', spoken: '151 minutes planked', art: 'moon' }, postmark: { day: 'NOV 1', year: '2026', verb: 'PLANKED' } },
+  ])('writes the Paper postcard for $place', ({ award, ...postcard }) => {
+    expect(shareCard(award, 'us').card).toMatchObject(postcard);
+  });
+  it.each([[59, '59', 'SECONDS PLANKED'], [60, '1', 'MINUTES PLANKED'], [35999, '599', 'MINUTES PLANKED'], [36000, '10', 'HOURS PLANKED']])
+    ('a %is plank stamps %s %s', (at, amount, unit) => {
+      expect(shareCard(rung('planks.seconds', 'moonwalk', 'time', at), 'us').card.stamp).toMatchObject({ amount, unit });
+    });
+  it.each([['us', '10', 'MILES'], ['metric', '16', 'KM']] as const)('a run route stamps whole %s', (units, amount, unit) => {
+    const card = shareCard({ key: 'route', kind: 'route', measureId: 'run.meters', subjectMemberId: null, on: '2026-11-01',
+      data: { name: 'Around the lake', from: 'Bath', to: 'Bath', distanceM: 16093.44 } }, units).card;
+    expect(card).toMatchObject({ place: 'Around the lake', line: 'Ran the whole way', stamp: { amount, unit }, postmark: { verb: 'RAN' } });
+  });
+  it('every selectable entry, activity and unit fits the postcard and the strict view', () => {
+    const activities = [...Object.keys(EXERCISES).map(name => `${name}.reps`), 'planks.seconds', 'abs.seconds', 'breathing.seconds',
+      'sleep', `${'a'.repeat(40)}.reps`, `${'b'.repeat(40)}.seconds`, 'h012345abcdef.reps', 'h012345abcdef.seconds'];
+    const found = { id: 'found:synthetic', kind: 'time' as const, at: 5000, name: 'A very long looked-up journey across many seas',
+      short: 'A very long looked-up journey across many seas', tagline: 'x', blurb: 'x', where: null, sourceUrl: 'https://example.test' };
+    const cards = [];
+    for (const measureId of activities) {
+      const timed = measureId === 'sleep' || measureId.endsWith('.seconds');
+      for (const entry of BANK.filter(entry => entry.kind === (timed ? 'time' : 'height'))) cards.push(shareCard(rung(measureId, entry.id, entry.kind as 'height' | 'time'), 'us').card);
+      if (timed) {
+        const award = rung(measureId, 'moonwalk', 'time');
+        award.data.rung = { at: 5000, target: { found } };
+        cards.push(shareCard(award, 'uk').card);
+      }
+    }
+    for (const measureId of ['steps', 'walk.meters', 'run.meters', 'swimming.meters', `${'c'.repeat(40)}.meters`]) {
+      for (const units of ['us', 'uk', 'metric'] as const) cards.push(shareCard({ key: 'route', kind: 'route', measureId, subjectMemberId: null, on: '2026-12-31',
+        data: { from: 'Bath', to: 'Bristol', distanceM: 2_000_000 } }, units).card);
+    }
+    expect(cards.length).toBeGreaterThan(1000);
+    for (const card of cards) {
+      expect(shareViewSchema.parse({ awardId: 'a', card, zones: SHARE_ZONES, presentation: { state: 'medal' } }).card).toEqual(card);
+      expect(card.place.length).toBeLessThanOrEqual(36);
+      for (const text of [card.place, card.line, card.stamp.unit, card.stamp.spoken]) expect(text).not.toMatch(/[—–]| - /u);
+    }
+  });
+  it('every ladder time entry has a place and an as, and its line fits', () => {
+    for (const entry of BANK.filter(entry => entry.kind === 'time' && entry.ladder)) {
+      expect(entry.place?.length).toBeGreaterThan(0); expect(entry.place!.length).toBeLessThanOrEqual(28);
+      expect(entry.as?.length).toBeGreaterThan(0);
+      for (const use of entry.use) {
+        const line = shareCard(rung(use === 'sleep' ? 'sleep' : 'planks.seconds', entry.id, 'time'), 'us').card.line;
+        expect(line).toContain(entry.as!.replace(/'/gu, '’'));
+      }
+    }
   });
 });
 

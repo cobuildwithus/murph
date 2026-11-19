@@ -3,7 +3,7 @@ import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import { getPrisma } from '../src/lib/prisma';
 import { PROGRESS_SHARE_CONSENT_SCOPE } from '../src/lib/legal/consent';
 import { decideProgressShareConsent } from '../src/lib/game/progress/share-consent';
-import { deleteProgressSharesForAccount } from '../src/lib/game/progress/share-cleanup';
+import { deleteProgressSharesForAccount, deleteSharePhotosForAccount } from '../src/lib/game/progress/share-cleanup';
 import * as cleanup from '../src/lib/game/progress/share-cleanup';
 
 const mocks = vi.hoisted(() => ({ purge: vi.fn() }));
@@ -22,7 +22,7 @@ async function fixture() {
   await db.gameProgressPic.create({ data: { id: sourcePicId, memberId, takenAt: new Date(), storageKey: `progress/${randomUUID()}.jpg`, metaEncrypted: 'synthetic-sealed-meta' } });
   const share = await db.gameProgressShare.create({ data: { memberId, awardLookup, storageKey: `progress/${randomUUID()}.jpg`, status: 'generating' } });
   const decide = (decision: 'allow' | 'deny') => decideProgressShareConsent({ memberId, decision, prisma: db, beforeMutationTx: noExtraAuth });
-  const read = () => db.gameProgressShare.findUniqueOrThrow({ where: { memberId_awardLookup: { memberId, awardLookup } } });
+  const read = () => db.gameProgressShare.findUniqueOrThrow({ where: { storageKey: share.storageKey } });
   const events = () => db.hostedConsentEvent.findMany({ where: { memberId }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
   return { memberId, sourcePicId, awardLookup, share, decide, read, events };
 }
@@ -78,6 +78,19 @@ describe.skipIf(!enabled)('Progress consent and cleanup PostgreSQL atomicity', (
     await deleteProgressSharesForAccount([f.memberId], db);
     expect(mocks.purge).toHaveBeenLastCalledWith(f.memberId, f.share.storageKey);
     expect(await db.gameProgressAward.count({ where: { memberId: f.memberId } })).toBe(1);
+  });
+
+  it('account cleanup purges every medal photo copy before cascade, and a failed purge keeps the key', async () => {
+    const f = await fixture(), keys = [`progress/${randomUUID()}.jpg`, `progress/${randomUUID()}.jpg`];
+    await db.gameProgressSharePhoto.createMany({ data: [{ storageKey: keys[0]!, memberId: f.memberId, status: 'retired' }, { storageKey: keys[1]!, memberId: f.memberId, status: 'current' }] });
+    mocks.purge.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('injected purge failure'));
+    await expect(deleteSharePhotosForAccount([f.memberId], db)).rejects.toThrow('injected purge failure');
+    expect(await db.gameProgressSharePhoto.findMany({ where: { memberId: f.memberId }, select: { status: true } })).toEqual([{ status: 'retired' }]);
+    await deleteSharePhotosForAccount([f.memberId], db);
+    expect(await db.gameProgressSharePhoto.count({ where: { memberId: f.memberId } })).toBe(0);
+    // The key whose purge failed is purged again; the other is not.
+    const purged = mocks.purge.mock.calls.map(call => call[1]);
+    expect(purged.slice(0, 2).sort()).toEqual([...keys].sort()); expect(purged[2]).toBe(purged[1]);
   });
 
   it('binds each share to its owner award and removes rows on account cascade', async () => {

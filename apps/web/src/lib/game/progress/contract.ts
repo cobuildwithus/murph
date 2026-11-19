@@ -183,9 +183,16 @@ export type ProgressWriteResponse = { ok: true }; // DELETE pic, POST seen
 // GET pics/:id returns image/jpeg; GET map returns image/png. No JSON envelope.
 
 /** Passed-item drawer. Terminal image failure intentionally presents the medal. */
+const shareBox = z.strictObject({ x: z.number(), y: z.number(), w: z.number(), h: z.number() });
 export const shareViewSchema = z.strictObject({
   awardId: z.string(),
-  card: z.strictObject({ name: z.string(), contextLine: z.string(), valueText: z.string(), face: medalFace, messageText: z.string() }),
+  // name, contextLine, valueText, face and messageText are build 118's card; the postcard reads the rest.
+  card: z.strictObject({ name: z.string(), contextLine: z.string(), valueText: z.string(), face: medalFace, messageText: z.string(),
+    place: z.string().min(1), line: z.string().min(1).max(32),
+    stamp: z.strictObject({ amount: z.string().min(1).max(8), unit: z.string().min(1).max(16), spoken: z.string(), art: z.enum(['peak', 'pin', 'bird', 'moon']) }),
+    postmark: z.strictObject({ day: z.string(), year: z.string(), verb: z.string() }) }),
+  /** Fractions of the 2:3 picture the prompt keeps plain; the app checks faces against marks. */
+  zones: z.strictObject({ words: shareBox, marks: shareBox, wordmark: shareBox, person: z.strictObject({ y: z.number(), h: z.number() }) }),
   presentation: z.discriminatedUnion('state', [
     z.strictObject({ state: z.literal('needs_photo') }),
     z.strictObject({ state: z.literal('medal') }),
@@ -194,7 +201,8 @@ export const shareViewSchema = z.strictObject({
     z.strictObject({ state: z.literal('later'), availableAt: z.iso.datetime() }),
     // typicalSeconds: how long a picture usually takes, for a timed 0-100 loader.
     z.strictObject({ state: z.literal('generating'), startedAt: z.iso.datetime(), expiresAt: z.iso.datetime(), typicalSeconds: z.number().int().positive() }),
-    z.strictObject({ state: z.literal('photo'), imagePath: z.string() }),
+    // attempt names this picture for Change photo; availableAt is when Change photo can next make one.
+    z.strictObject({ state: z.literal('photo'), imagePath: z.string(), attempt: z.string(), availableAt: z.iso.datetime().optional() }),
   ]),
 });
 export type ShareView = z.infer<typeof shareViewSchema>;
@@ -202,3 +210,9 @@ export type ShareView = z.infer<typeof shareViewSchema>;
 export type ShareConsentResponse = { decision: 'allowed' | 'denied' };
 const shareConsent = z.strictObject({ decision: z.enum(['allow', 'deny']), disclosureVersion: z.literal(1) });
 export const parseShareConsent = (value: unknown) => parse(shareConsent, value);
+/** POST shares/:id: empty, or Change photo naming the shown attempt. */
+const shareStart = z.strictObject({ replaces: z.string().regex(/^[0-9a-z]{1,16}$/u) });
+export const parseShareStart = (value: unknown) => parse(shareStart, value);
+/** PUT share-photo as JSON; Take one and From Photos send the JPEG itself. GET returns image/jpeg. */
+const sharePhoto = z.union([z.strictObject({ from: z.literal('profile') }), z.strictObject({ from: z.literal('post'), entryId: z.string().min(1).max(200) })]);
+export const parseSharePhoto = (value: unknown) => parse(sharePhoto, value);

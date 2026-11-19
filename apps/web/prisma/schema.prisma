@@ -718,6 +718,7 @@ model HostedMember {
   progressMeasures               GameProgressMeasure[]
   progressPics                   GameProgressPic[]
   progressShares                 GameProgressShare[]
+  progressSharePhotos            GameProgressSharePhoto[]
   progressTaskMeasures           GameProgressTaskMeasure[]
   phoneCalls                     HostedPhoneCall[]
   physicalNotes                  HostedPhysicalNote[]
@@ -3185,7 +3186,7 @@ model GameProgressAward {
   seenAt          DateTime?    @map("seen_at")
   member          HostedMember @relation("ProgressAwardOwner", fields: [memberId], references: [id], onDelete: Cascade)
   subject         HostedMember? @relation("ProgressAwardSubject", fields: [subjectMemberId], references: [id], onDelete: Cascade)
-  share           GameProgressShare?
+  shares          GameProgressShare[]
 
   @@id([memberId, lookup])
   @@index([memberId, earnedOn(sort: Desc), createdAt(sort: Desc), lookup(sort: Desc)])
@@ -3217,19 +3218,33 @@ model GameProgressPic {
   @@map("game_progress_pic")
 }
 
+/// One row per picture attempt. Change photo adds an attempt; every row counts toward the quota and keeps its key for cleanup.
 model GameProgressShare {
+  storageKey  String       @id @map("storage_key")
   memberId    String       @map("member_id")
   awardLookup String       @map("award_lookup")
-  storageKey  String       @unique @map("storage_key")
   status      String
   createdAt   DateTime     @default(now()) @map("created_at")
   failureCode String?      @map("failure_code")
   member      HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
   award       GameProgressAward @relation(fields: [memberId, awardLookup], references: [memberId, lookup], onDelete: Cascade)
 
-  @@id([memberId, awardLookup])
   @@index([memberId, createdAt])
+  @@index([memberId, awardLookup, createdAt])
   @@map("game_progress_share")
+}
+
+/// The member's medal photo: a sealed, prepared copy in the Progress store. Ownership is written before the store write,
+/// and retired rows keep their keys so a failed purge replays on the next Turn off or on account deletion.
+model GameProgressSharePhoto {
+  storageKey String       @id @map("storage_key")
+  memberId   String       @map("member_id")
+  status     String
+  createdAt  DateTime     @default(now()) @map("created_at")
+  member     HostedMember @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([memberId, status])
+  @@map("game_progress_share_photo")
 }
 
 /// Shared, non-personal place art: one poster per public place, one painting per route map.

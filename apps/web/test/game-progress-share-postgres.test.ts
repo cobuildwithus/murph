@@ -8,15 +8,15 @@ vi.mock('../src/lib/game/progress/share-image', async original => ({ ...await or
 vi.mock('../src/lib/game/media', () => ({ readGameMedia: mocks.readProfile }));
 vi.mock('../src/lib/game/progress/media-store', async original => ({ ...await original<object>(), progressMediaStore: () => ({ readProgressPic: mocks.read, putProgressPic: mocks.put }), purgeProgressMedia: mocks.purge }));
 import { getPrisma } from '../src/lib/prisma';
-import { openHostedUserSecureBoxBytes, sealHostedUserSecureBoxBytes } from '../src/lib/hosted-crypto/secure-box';
+import { openHostedUserSecureBoxBytes } from '../src/lib/hosted-crypto/secure-box';
 import * as secureBox from '../src/lib/hosted-crypto/secure-box';
 import * as roots from '../src/lib/hosted-crypto/domain-root-store';
 import { HOSTED_DOMAIN_ROOT_KEY_ENVELOPE_SCHEMA, type HostedCryptoDomain, type HostedDomainRootKeyEnvelopeV1 } from '@murphai/runtime-state';
-import * as imageBoundary from '../src/lib/game/progress/share-image';
 import { assertHostedAuthSessionCurrentTx } from '../src/lib/better-auth/session';
 import { recordHostedLaunchRequiredConsent, revokeHostedConsentScope } from '../src/lib/legal/consent';
 import { readProgressShare, startProgressShare, readProgressShareImage, type ShareRequest } from '../src/lib/game/progress/shares';
 import { decideProgressShareConsent } from '../src/lib/game/progress/share-consent';
+import { putSharePhoto, readSharePhoto } from '../src/lib/game/progress/share-photo';
 import { sealProgress, progressLookup } from '../src/lib/game/progress/crypto';
 import { ShareImageError } from '../src/lib/game/progress/share-image';
 import type { Candidate } from '../src/lib/game/progress/registry';
@@ -55,7 +55,7 @@ beforeEach(async () => {
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
 afterAll(async () => { if (enabled) await db.hostedMember.deleteMany({ where: { id: { in: members } } }); });
 
-async function fixture(measureId = 'pushups.reps') {
+async function fixture(measureId = 'pushups.reps', { photo = true } = {}) {
   const memberId = randomUUID(), sourceKey = `profile/${randomUUID()}.jpg`;
   members.push(memberId);
   await db.hostedMember.create({ data: { id: memberId, billingStatus: measureId === 'sleep' || measureId === 'steps' ? 'active' : 'not_started' } });
@@ -80,8 +80,12 @@ async function fixture(measureId = 'pushups.reps') {
     return { memberId, awardId, beforeMutationTx, units: 'us' as const };
   };
   const input = await award('first');
-  const share = () => db.gameProgressShare.findUnique({ where: { memberId_awardLookup: { memberId, awardLookup: input.awardId } } });
-  return { memberId, sourceKey, input, award, decide, share, sessionId: row.id };
+  const share = () => db.gameProgressShare.findFirst({ where: { memberId, awardLookup: input.awardId }, orderBy: { createdAt: 'desc' } });
+  const pick = () => putSharePhoto(memberId, { from: 'profile' }, beforeMutationTx);
+  const photos = () => db.gameProgressSharePhoto.findMany({ where: { memberId }, orderBy: { createdAt: 'asc' } });
+  // The medal photo: one real pick, then a clean slate for the source and store mocks.
+  if (photo) { await pick(); mocks.readProfile.mockClear(); mocks.put.mockClear(); mocks.read.mockClear(); }
+  return { memberId, sourceKey, input, award, decide, share, pick, photos, sessionId: row.id };
 }
 
 describe.skipIf(!enabled)('stored award share admission and publication', () => {
@@ -131,15 +135,17 @@ describe.skipIf(!enabled)('stored award share admission and publication', () => 
   });
   it('resolves simultaneous opens once, keeps saved dates and returns the same encrypted photo', async () => {
     const f = await fixture(); await f.decide('allow');
-    const prepared: Buffer[] = [], prepare = imageBoundary.prepareShareJpeg;
-    vi.spyOn(imageBoundary, 'prepareShareJpeg').mockImplementation(async bytes => { const result = await prepare(bytes); prepared.push(result); return result; });
+    const opened: Uint8Array[] = [], open = secureBox.openHostedUserSecureBoxBytes;
+    vi.spyOn(secureBox, 'openHostedUserSecureBoxBytes').mockImplementation(async request => {
+      const bytes = await open(request); if (request.aad.table === 'game_progress_share_photo') opened.push(bytes); return bytes;
+    });
     let release!: () => void, reads = 0;
-    const bothReading = new Promise<void>(resolve => { release = resolve; }), read = mocks.readProfile.getMockImplementation()!;
-    mocks.readProfile.mockImplementation(async request => { if (++reads === 2) release(); await bothReading; return read(request); });
+    const bothReading = new Promise<void>(resolve => { release = resolve; }), read = mocks.read.getMockImplementation()!;
+    mocks.read.mockImplementation(async request => { if (++reads <= 2) { if (reads === 2) release(); await bothReading; } return read(request); });
     const before = await db.gameProgressAward.findMany({ where: { memberId: f.memberId } });
     const [a, b] = await Promise.all([startProgressShare(f.input), startProgressShare(f.input)]);
     expect(a.presentation.state).toBe('generating'); expect(b.presentation).toEqual(a.presentation); expect(tasks).toHaveLength(1);
-    expect(prepared).toHaveLength(2); expect(prepared.filter(bytes => bytes.every(byte => byte === 0))).toHaveLength(1);
+    expect(opened).toHaveLength(2); expect(opened.filter(bytes => bytes.every(byte => byte === 0))).toHaveLength(1);
     await tasks[0](); expect(mocks.make).toHaveBeenCalledTimes(1);
     const row = (await f.share())!; expect(row.status).toBe('ready');
     const envelope = stored.get(key(f.memberId, row.storageKey))!;
@@ -148,6 +154,7 @@ describe.skipIf(!enabled)('stored award share admission and publication', () => 
     expect((await startProgressShare(f.input)).presentation.state).toBe('photo'); expect(tasks).toHaveLength(1);
     expect(await db.gameProgressAward.findMany({ where: { memberId: f.memberId } })).toEqual(before);
     expect(await db.gameProgressPic.count({ where: { memberId: f.memberId } })).toBe(0);
+    expect(opened.every(bytes => bytes.every(byte => byte === 0))).toBe(true);
     const target = { userId: f.memberId, lane: 'hosted-member-private-field' as const, scope: 'game-progress',
       aad: { purpose: 'game-progress', table: 'game_progress_share', rowId: row.storageKey, field: 'bytes' }, value: envelope };
     for (const change of [{ userId: 'member-leo' }, { aad: { ...target.aad, rowId: 'other' } }, { aad: { ...target.aad, table: 'game_progress_pic' } }]) {
@@ -180,48 +187,50 @@ describe.skipIf(!enabled)('stored award share admission and publication', () => 
     // Made 23 hours ago, so the day passes within the session's life.
     const madeAt = Date.now() - 23 * 3_600_000;
     await db.gameProgressShare.updateMany({ where: { memberId: f.memberId }, data: { createdAt: new Date(madeAt) } });
-    mocks.readProfile.mockClear();
+    mocks.read.mockClear();
     const later = await readProgressShare(f.input);
     expect(later.presentation.state).toBe('later');
     const availableAt = Date.parse((later.presentation as { availableAt: string }).availableAt);
     expect(availableAt).toBe(madeAt + 86_400_000);
     expect((await startProgressShare(f.input)).presentation).toEqual(later.presentation);
-    expect(await f.share()).toBeNull(); expect(tasks).toHaveLength(5); expect(mocks.readProfile).not.toHaveBeenCalled();
+    expect(await f.share()).toBeNull(); expect(tasks).toHaveLength(5); expect(mocks.read).not.toHaveBeenCalled();
     vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(availableAt);
     expect((await readProgressShare(f.input)).presentation).toEqual({ state: 'available' });
     expect((await startProgressShare(f.input)).presentation.state).toBe('generating');
   });
-  it.each(['read', 'preparation'])('source %s failure spends no attempt', async phase => {
+  it.each(['missing', 'store failure'])('a medal photo copy %s spends no attempt and keeps the pick', async phase => {
     const f = await fixture(); await f.decide('allow');
-    if (phase === 'read') mocks.readProfile.mockResolvedValueOnce(null);
-    else vi.spyOn(imageBoundary, 'prepareShareJpeg').mockRejectedValueOnce(new Error('PRIVATE_SOURCE_SENTINEL'));
+    if (phase === 'missing') mocks.read.mockResolvedValueOnce(null);
+    else mocks.read.mockRejectedValueOnce(new Error('PRIVATE_SOURCE_SENTINEL'));
     await expect(startProgressShare(f.input)).rejects.toMatchObject({ httpStatus: 503 });
     expect(await f.share()).toBeNull(); expect(tasks).toHaveLength(0);
+    expect((await f.photos()).map(row => row.status)).toEqual(['current']);
   });
-  it('uses the profile photo without any Progress pics or recorded choice', async () => {
+  it('starts from the sealed medal photo: no game media read, no Progress pics, no recorded choice', async () => {
     const f = await fixture('sleep');
     await startProgressShare(f.input);
-    expect(mocks.readProfile).toHaveBeenCalledWith(f.sourceKey);
+    expect(mocks.readProfile).not.toHaveBeenCalled();
     await tasks[0]();
     expect((await f.share())!.status).toBe('ready');
+    expect(Buffer.from(reference!).every(byte => byte === 0)).toBe(true);
     expect(await db.gameProgressPic.count({ where: { memberId: f.memberId } })).toBe(0);
   });
-  it('needs_photo uses the existing profile upload and spends no quota', async () => {
-    const f = await fixture();
-    await db.gameProfile.update({ where: { memberId: f.memberId }, data: { photoKey: null } });
+  it('needs_photo until a pick, and the pick never touches the profile photo', async () => {
+    const f = await fixture('pushups.reps', { photo: false });
     expect((await readProgressShare(f.input)).presentation).toEqual({ state: 'needs_photo' });
     expect((await startProgressShare(f.input)).presentation).toEqual({ state: 'needs_photo' });
-    expect(await f.share()).toBeNull(); expect(tasks).toHaveLength(0); expect(mocks.readProfile).not.toHaveBeenCalled();
-    await db.gameProfile.update({ where: { memberId: f.memberId }, data: { photoKey: f.sourceKey } });
+    expect(await f.share()).toBeNull(); expect(tasks).toHaveLength(0);
+    await f.pick();
+    expect(mocks.readProfile).toHaveBeenCalledExactlyOnceWith(f.sourceKey);
+    expect((await db.gameProfile.findUniqueOrThrow({ where: { memberId: f.memberId } })).photoKey).toBe(f.sourceKey);
+    expect((await readProgressShare(f.input)).presentation).toEqual({ state: 'available' });
     await startProgressShare(f.input); await tasks[0]();
     expect((await f.share())!.status).toBe('ready');
   });
-  it('photo changes during preparation spend no attempt', async () => {
+  it('a new pick between the photo read and admission spends no attempt', async () => {
     const f = await fixture();
-    mocks.readProfile.mockImplementationOnce(async () => {
-      await db.gameProfile.update({ where: { memberId: f.memberId }, data: { photoKey: null } });
-      return { bytes: Buffer.from(source), contentType: 'image/jpeg' };
-    });
+    const read = mocks.read.getMockImplementation()!;
+    mocks.read.mockImplementationOnce(async request => { const result = await read(request); await f.pick(); return result; });
     await expect(startProgressShare(f.input)).rejects.toMatchObject({ httpStatus: 503 });
     expect(await f.share()).toBeNull(); expect(tasks).toHaveLength(0);
   });
@@ -238,7 +247,7 @@ describe.skipIf(!enabled)('stored award share admission and publication', () => 
     expect(view.presentation.state).toBe('later');
     expect(Date.parse((view.presentation as { availableAt: string }).availableAt)).toBe(createdAt[nth] + windowDays * 86400000);
     expect((await readProgressShare(f.input)).presentation).toEqual(view.presentation);
-    expect(await f.share()).toBeNull(); expect(tasks).toHaveLength(0); expect(mocks.readProfile).not.toHaveBeenCalled();
+    expect(await f.share()).toBeNull(); expect(tasks).toHaveLength(0); expect(mocks.read).not.toHaveBeenCalled();
     expect(mocks.put).not.toHaveBeenCalled(); expect(mocks.purge).not.toHaveBeenCalled();
   });
   it.each(['generation_failed', 'refused', 'timeout'] as const)('terminal %s is a medal with no repeat dispatch', async code => {
@@ -246,7 +255,7 @@ describe.skipIf(!enabled)('stored award share admission and publication', () => 
     mocks.make.mockRejectedValue(new ShareImageError(code));
     await startProgressShare(f.input); await tasks[0]();
     expect(await f.share()).toMatchObject({ status: 'failed', failureCode: code });
-    mocks.readProfile.mockRejectedValue(new Error('Duplicate POST must not read source bytes'));
+    mocks.read.mockRejectedValue(new Error('Duplicate POST must not read source bytes'));
     expect((await startProgressShare(f.input)).presentation).toEqual({ state: 'medal' });
     expect(tasks).toHaveLength(1); expect(mocks.purge).toHaveBeenCalledTimes(1);
   });
@@ -287,8 +296,8 @@ describe.skipIf(!enabled)('stored award share admission and publication', () => 
   });
   it('account suspension during pre-admission source access blocks the insert', async () => {
     const f = await fixture(); await f.decide('allow');
-    const read = mocks.readProfile.getMockImplementation()!;
-    mocks.readProfile.mockImplementationOnce(async request => { await db.hostedMember.update({ where: { id: f.memberId }, data: { suspendedAt: new Date() } }); return read(request); });
+    const read = mocks.read.getMockImplementation()!;
+    mocks.read.mockImplementationOnce(async request => { await db.hostedMember.update({ where: { id: f.memberId }, data: { suspendedAt: new Date() } }); return read(request); });
     await expect(startProgressShare(f.input)).rejects.toMatchObject({ code: 'HOSTED_MEMBER_SUSPENDED' });
     expect(await f.share()).toBeNull(); expect(tasks).toHaveLength(0);
   });
@@ -341,6 +350,101 @@ describe.skipIf(!enabled)('stored award share admission and publication', () => 
     await expect(tasks[0]()).rejects.toMatchObject({ code: 'PROGRESS_UNAVAILABLE', httpStatus: 503 });
     expect(await f.share()).toMatchObject({ status: 'failed', failureCode: 'generation_failed' });
     expect((await startProgressShare(f.input)).presentation).toEqual({ state: 'medal' });
-    await f.decide('deny'); expect(mocks.purge).toHaveBeenCalledTimes(2);
+    // Turn off purges the failed attempt's key again and the medal photo's copy.
+    await f.decide('deny'); expect(mocks.purge).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe.skipIf(!enabled)('Change photo attempts', () => {
+  const made = async (f: Awaited<ReturnType<typeof fixture>>) => {
+    await startProgressShare(f.input); await tasks.at(-1)!();
+    const view = await readProgressShare(f.input);
+    expect(view.presentation.state).toBe('photo');
+    return (view.presentation as { attempt: string }).attempt;
+  };
+  it('makes exactly one new picture, keeps the old one until it is ready, and a retry starts nothing', async () => {
+    const f = await fixture(), first = await made(f), old = (await f.share())!;
+    await f.pick();
+    const [a, b] = await Promise.all([startProgressShare(f.input, first), startProgressShare(f.input, first)]);
+    expect(a.presentation.state).toBe('generating'); expect(b.presentation).toEqual(a.presentation); expect(tasks).toHaveLength(2);
+    expect(stored.has(key(f.memberId, old.storageKey))).toBe(true);
+    await tasks[1]();
+    const now = await readProgressShare(f.input), attempt = (now.presentation as { attempt: string }).attempt;
+    expect(now.presentation.state).toBe('photo'); expect(attempt).not.toBe(first);
+    expect(await db.gameProgressShare.findUnique({ where: { storageKey: old.storageKey } })).toMatchObject({ status: 'retired' });
+    expect(stored.has(key(f.memberId, old.storageKey))).toBe(false);
+    expect((await startProgressShare(f.input, first)).presentation).toEqual(now.presentation);
+    expect(tasks).toHaveLength(2); expect(mocks.make).toHaveBeenCalledTimes(2);
+    expect(await db.gameProgressShare.count({ where: { memberId: f.memberId } })).toBe(2);
+  });
+  it('a failed Change photo shows the picture it would have replaced', async () => {
+    const f = await fixture(), first = await made(f);
+    mocks.make.mockRejectedValueOnce(new ShareImageError('refused'));
+    await startProgressShare(f.input, first); await tasks[1]();
+    const view = await readProgressShare(f.input);
+    expect(view.presentation).toMatchObject({ state: 'photo', attempt: first });
+    expect(Buffer.from(await readProgressShareImage(f.input))).toEqual(source);
+  });
+  it('says when Change photo can next make one and spends nothing before then', async () => {
+    const f = await fixture(); await made(f);
+    for (let n = 0; n < 4; n++) await made({ ...f, input: await f.award(`more-${n}`) });
+    const view = await readProgressShare(f.input), presentation = view.presentation as { attempt: string; availableAt?: string };
+    expect(presentation.availableAt).toBeDefined();
+    expect((await startProgressShare(f.input, presentation.attempt)).presentation).toEqual(view.presentation);
+    expect(tasks).toHaveLength(5);
+  });
+  it('Turn off retires every attempt and purges every key', async () => {
+    const f = await fixture(), first = await made(f);
+    await f.pick(); await startProgressShare(f.input, first); await tasks[1]();
+    await f.decide('deny');
+    const rows = await db.gameProgressShare.findMany({ where: { memberId: f.memberId } });
+    expect(rows.map(row => row.status)).toEqual(['retired', 'retired']);
+    for (const row of rows) expect(stored.has(key(f.memberId, row.storageKey))).toBe(false);
+  });
+});
+
+describe.skipIf(!enabled)('medal photo copies', () => {
+  it('a second pick retires and forgets the first copy; GET returns the current one', async () => {
+    const f = await fixture(), [first] = await f.photos();
+    await f.pick();
+    const rows = await f.photos();
+    expect(rows.map(row => row.status)).toEqual(['current']); expect(rows[0]!.storageKey).not.toBe(first!.storageKey);
+    expect(tombstones.has(key(f.memberId, first!.storageKey))).toBe(true);
+    const bytes = Buffer.from(await readSharePhoto(f.memberId));
+    expect((await sharp(bytes).metadata()).format).toBe('jpeg');
+    expect(stored.get(key(f.memberId, rows[0]!.storageKey))).not.toContain(bytes.toString('base64'));
+  });
+  it('a failed purge keeps the retired row, and Turn off purges it', async () => {
+    const f = await fixture();
+    mocks.purge.mockRejectedValueOnce(new Error('PRIVATE_STORAGE_SENTINEL'));
+    await f.pick();
+    expect((await f.photos()).map(row => row.status).sort()).toEqual(['current', 'retired']);
+    await f.decide('deny');
+    expect(await f.photos()).toEqual([]);
+    await expect(readSharePhoto(f.memberId)).rejects.toMatchObject({ httpStatus: 404 });
+  });
+  it('a store failure retires and purges the request\'s own copy', async () => {
+    const f = await fixture(), [first] = await f.photos();
+    mocks.put.mockRejectedValueOnce(new Error('PRIVATE_STORAGE_SENTINEL'));
+    await expect(f.pick()).rejects.toThrow();
+    expect((await f.photos()).map(row => row.storageKey)).toEqual([first!.storageKey]);
+    expect(mocks.purge).toHaveBeenCalledTimes(1);
+  });
+  it('a pick after Turn off is refused and stores nothing', async () => {
+    const f = await fixture('pushups.reps', { photo: false });
+    await f.decide('deny');
+    await expect(f.pick()).rejects.toMatchObject({ httpStatus: 409, code: 'PROGRESS_SHARE_PHOTO_OFF' });
+    expect(await f.photos()).toEqual([]); expect(mocks.put).not.toHaveBeenCalled();
+  });
+  it('a Turn off during the upload wins: the copy is purged and the pick fails', async () => {
+    const f = await fixture('pushups.reps', { photo: false }), put = mocks.put.getMockImplementation()!;
+    mocks.put.mockImplementationOnce(async request => { await put(request); await f.decide('deny'); });
+    await expect(f.pick()).rejects.toMatchObject({ code: 'PROGRESS_SHARE_PHOTO_OFF' });
+    expect(await f.photos()).toEqual([]); expect(stored.size).toBe(0);
+  });
+  it('another member\'s or a missing post is not a source', async () => {
+    const f = await fixture('pushups.reps', { photo: false });
+    await expect(putSharePhoto(f.memberId, { from: 'post', entryId: 'entry-not-mine' }, f.input.beforeMutationTx)).rejects.toMatchObject({ httpStatus: 404 });
+    expect(mocks.readProfile).not.toHaveBeenCalled(); expect(await f.photos()).toEqual([]);
   });
 });

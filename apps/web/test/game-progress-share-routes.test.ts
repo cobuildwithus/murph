@@ -1,26 +1,32 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-const mocks = vi.hoisted(() => ({ auth: vi.fn(), current: vi.fn(), read: vi.fn(), start: vi.fn(), image: vi.fn(), decide: vi.fn(), grant: vi.fn(), event: vi.fn() }));
+const mocks = vi.hoisted(() => ({ auth: vi.fn(), current: vi.fn(), read: vi.fn(), start: vi.fn(), image: vi.fn(), decide: vi.fn(), grant: vi.fn(), event: vi.fn(), pick: vi.fn(), photo: vi.fn() }));
 vi.mock('@/src/lib/game/http/auth', () => ({ requireGameMemberAuth: mocks.auth, assertGameMemberAuthCurrentTx: mocks.current }));
 vi.mock('@/src/lib/game/progress/shares', async original => ({ ...await original<object>(), readProgressShare: mocks.read, startProgressShare: mocks.start, readProgressShareImage: mocks.image }));
 vi.mock('@/src/lib/game/progress/share-consent', async original => ({ ...await original<object>(), decideProgressShareConsent: mocks.decide }));
+vi.mock('@/src/lib/game/progress/share-photo', () => ({ putSharePhoto: mocks.pick, readSharePhoto: mocks.photo }));
 vi.mock('@/src/lib/prisma', () => ({ getPrisma: () => ({ hostedConsentGrant: { findUnique: mocks.grant }, hostedConsentEvent: { findFirst: mocks.event } }) }));
 import { GET, POST, maxDuration } from '../app/api/game/v1/progress/shares/[awardId]/route';
 import { GET as imageGET } from '../app/api/game/v1/progress/shares/[awardId]/image/route';
 import { GET as consentGET, PUT } from '../app/api/game/v1/progress/share-consent/route';
+import { GET as photoGET, PUT as photoPUT } from '../app/api/game/v1/progress/share-photo/route';
+import { SHARE_ZONES } from '../src/lib/game/progress/share-card';
 import { shareViewSchema, type ShareView } from '../src/lib/game/progress/contract';
 import { shareNotFound } from '../src/lib/game/progress/shares';
 import { hostedOnboardingError } from '../src/lib/hosted-onboarding/errors';
 const awardId = 'opaque:game-progress-award:v1:synthetic';
 const context = { params: Promise.resolve({ awardId }) };
-const card = { name: 'Mont Blanc', contextLine: 'You’ve done enough pushups to scale all 15,766 ft.', valueText: '15,766 pushups', face: { drawing: 'mont-blanc' }, messageText: 'I’ve done enough pushups to scale Mont Blanc' };
-const view = (presentation: ShareView['presentation']): ShareView => ({ awardId, card, presentation });
+const card = { name: 'Mont Blanc', contextLine: 'You’ve done enough pushups to scale all 15,766 ft.', valueText: '15,766 pushups', face: { drawing: 'mont-blanc' }, messageText: 'I’ve done enough pushups to scale Mont Blanc',
+  place: 'Mont Blanc', line: 'Enough pushups to scale it', stamp: { amount: '15,766', unit: 'PUSHUPS', spoken: '15,766 pushups', art: 'peak' as const },
+  postmark: { day: 'OCT 1', year: '2026', verb: 'CLIMBED' } };
+const view = (presentation: ShareView['presentation']): ShareView => ({ awardId, card, zones: SHARE_ZONES, presentation });
 const req = (method = 'GET', body?: string) => new Request(`https://example.test/api/game/v1/progress/shares/${awardId}`, { method, body });
 beforeEach(() => { vi.resetAllMocks(); mocks.auth.mockResolvedValue({ member: { id: 'member-ava' } }); });
 describe('private Progress share HTTP contract', () => {
   it.each([
     { state: 'needs_photo' }, { state: 'medal' }, { state: 'available' }, { state: 'later', availableAt: '2026-11-16T22:00:00.000Z' },
     { state: 'generating', startedAt: '2026-11-16T12:00:00.000Z', expiresAt: '2026-11-16T12:04:00.000Z', typicalSeconds: 55 },
-    { state: 'photo', imagePath: `/api/game/v1/progress/shares/${awardId}/image` },
+    { state: 'photo', imagePath: `/api/game/v1/progress/shares/${awardId}/image`, attempt: 'mh4x1k2a' },
+    { state: 'photo', imagePath: `/api/game/v1/progress/shares/${awardId}/image`, attempt: 'mh4x1k2a', availableAt: '2026-11-16T22:00:00.000Z' },
   ] satisfies ShareView['presentation'][])('GET only reads the strict $state view', async presentation => {
     mocks.read.mockResolvedValue(view(presentation));
     const response = await GET(req(), context);
@@ -35,14 +41,19 @@ describe('private Progress share HTTP contract', () => {
   });
   it.each([['generating', 202], ['photo', 200], ['medal', 200], ['later', 200]] as const)('POST admits once and returns %s with %d', async (state, status) => {
     const presentation = state === 'generating' ? { state, startedAt: '2026-11-16T12:00:00.000Z', expiresAt: '2026-11-16T12:04:00.000Z', typicalSeconds: 55 }
-      : state === 'photo' ? { state, imagePath: `/api/game/v1/progress/shares/${awardId}/image` }
+      : state === 'photo' ? { state, imagePath: `/api/game/v1/progress/shares/${awardId}/image`, attempt: 'mh4x1k2a' }
         : state === 'later' ? { state, availableAt: '2026-11-16T22:00:00.000Z' } : { state };
     mocks.start.mockImplementation(async input => { await input.beforeMutationTx({ synthetic: true }); return view(presentation); });
     const response = await POST(req('POST'), context);
-    expect(response.status).toBe(status); expect(mocks.start).toHaveBeenCalledTimes(1);
+    expect(response.status).toBe(status); expect(mocks.start).toHaveBeenCalledExactlyOnceWith(expect.anything(), undefined);
     expect(mocks.current).toHaveBeenCalledWith({ member: { id: 'member-ava' } }, { synthetic: true }); expect(maxDuration).toBe(300);
   });
-  it.each(['{}', '{"prompt":"PRIVATE_TASK_SENTINEL"}', '{"memberId":"member-leo"}', '{"url":"https://example.test"}'])('rejects every nonempty body before admission', async body => {
+  it('Change photo passes the attempt it replaces', async () => {
+    mocks.start.mockResolvedValue(view({ state: 'medal' }));
+    expect((await POST(req('POST', '{"replaces":"mh4x1k2a"}'), context)).status).toBe(200);
+    expect(mocks.start).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ awardId }), 'mh4x1k2a');
+  });
+  it.each(['{}', '{"prompt":"PRIVATE_TASK_SENTINEL"}', '{"memberId":"member-leo"}', '{"url":"https://example.test"}', '{"replaces":"../image"}', '{"replaces":"a","prompt":"x"}', 'not json'])('rejects every other body before admission', async body => {
     expect([400, 413]).toContain((await POST(req('POST', body), context)).status); expect(mocks.start).not.toHaveBeenCalled();
   });
   it.each([GET, POST, imageGET])('invalid, absent and foreign awards return indistinguishable private 404s', async handler => {
@@ -69,6 +80,34 @@ describe('private Progress share HTTP contract', () => {
     mocks.start.mockRejectedValue(new Error('PRIVATE_PROVIDER_SENTINEL'));
     const failed = await POST(req('POST'), context); expect(failed.status).toBe(503); expect(await failed.text()).not.toContain('PRIVATE_PROVIDER_SENTINEL');
     expect(failed.headers.get('cache-control')).toBe('private, no-store');
+  });
+});
+describe('medal photo', () => {
+  const photoRequest = (method: string, body?: BodyInit, type?: string) => new Request('https://example.test/api/game/v1/progress/share-photo',
+    { method, body, headers: type ? { 'content-type': type } : {} });
+  it.each([{ from: 'profile' }, { from: 'post', entryId: 'entry-synthetic' }])('PUT %o resolves the source on the server', async body => {
+    mocks.pick.mockImplementation(async (_member, _source, before) => before({ synthetic: true }));
+    const response = await photoPUT(photoRequest('PUT', JSON.stringify(body), 'application/json'));
+    expect(response.status).toBe(200); expect(await response.json()).toEqual({ ok: true });
+    expect(mocks.pick).toHaveBeenCalledExactlyOnceWith('member-ava', body, expect.any(Function));
+    expect(mocks.current).toHaveBeenCalledWith({ member: { id: 'member-ava' } }, { synthetic: true });
+  });
+  it.each([{ from: 'post' }, { from: 'profile', key: 'profile/x.jpg' }, { from: 'url', url: 'https://example.test/a.jpg' }])('PUT rejects %o', async body => {
+    expect((await photoPUT(photoRequest('PUT', JSON.stringify(body), 'application/json'))).status).toBe(400); expect(mocks.pick).not.toHaveBeenCalled();
+  });
+  it('PUT rejects a JPEG body that is not a JPEG before any effect', async () => {
+    expect((await photoPUT(photoRequest('PUT', new Uint8Array([1, 2, 3]), 'image/jpeg'))).status).toBe(400); expect(mocks.pick).not.toHaveBeenCalled();
+  });
+  it('GET returns the private JPEG and never caches it', async () => {
+    mocks.photo.mockResolvedValue(new Uint8Array([255, 216, 255, 217]));
+    const response = await photoGET(photoRequest('GET'));
+    expect(response.headers.get('content-type')).toBe('image/jpeg'); expect(response.headers.get('cache-control')).toBe('private, no-store');
+    expect([...new Uint8Array(await response.arrayBuffer())]).toEqual([255, 216, 255, 217]);
+  });
+  it.each([photoGET, photoPUT])('requires bearer authority', async handler => {
+    mocks.auth.mockRejectedValue(hostedOnboardingError({ code: 'AUTH_REQUIRED', httpStatus: 401, message: 'Sign in to continue.' }));
+    expect((await handler(photoRequest(handler === photoPUT ? 'PUT' : 'GET', handler === photoPUT ? '{"from":"profile"}' : undefined, 'application/json'))).status).toBe(401);
+    expect(mocks.pick).not.toHaveBeenCalled(); expect(mocks.photo).not.toHaveBeenCalled();
   });
 });
 describe('native face-use decision', () => {

@@ -3,7 +3,7 @@ import type { PrismaClient } from '@prisma/client';
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS, lockHostedMemberRow } from '../../hosted-onboarding/shared';
 import { PROGRESS_SHARE_CONSENT_SCOPE, recordHostedConsentDecisionTx } from '../../legal/consent';
 import type { BeforeProgressMutation } from './state';
-import { purgeProgressShares, retireProgressSharesTx } from './share-cleanup';
+import { purgeProgressShares, purgeRetiredSharePhotos, retireProgressSharesTx, retireSharePhotosTx } from './share-cleanup';
 import type { ShareConsentResponse } from './contract';
 
 /** No recorded choice allows pictures; an explicit denial turns them off. */
@@ -30,9 +30,12 @@ export async function decideProgressShareConsent(input: {
     await input.beforeMutationTx(tx);
     await recordHostedConsentDecisionTx({ tx, memberId, decision, scope: PROGRESS_SHARE_CONSENT_SCOPE,
       source: 'ios-progress-share', now: new Date(), metadata: { disclosureVersion: 1 } });
-    return decision === 'deny' ? retireProgressSharesTx(tx, { memberId }) : [];
+    if (decision === 'allow') return [];
+    await retireSharePhotosTx(tx, memberId);
+    return retireProgressSharesTx(tx, { memberId });
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
-  // Repeated denial skips its audit write but still purges every retained key.
+  // Repeated denial skips its audit write but still purges every retained key and the medal photo's copies.
   await purgeProgressShares(memberId, keys);
+  if (decision === 'deny') await purgeRetiredSharePhotos(memberId, prisma);
   return { decision: decision === 'allow' ? 'allowed' : 'denied' };
 }
