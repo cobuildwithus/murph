@@ -83,9 +83,13 @@ const moment = z.object({
   title: z.string(), line: z.string().nullable(),
 });
 export type Moment = z.infer<typeof moment>;
+/** Each live game's check-in today and the measure it adds to. Before it's in, `after` is that measure
+ * as it will read once it is, so Home can show it the moment a post is in, before Progress reads again. */
+const checkIn = z.object({ gameId: z.string(), measureId: z.string(), after: measureSchema.nullable() });
 export const progressSchema = z.object({
   joinedOn: day, today: day, incomplete: z.boolean(), measures: z.array(measureSchema),
   medals: z.array(medalSchema), shelf: z.array(z.string()).max(6), moments: z.array(moment), picCount: z.number(),
+  checkIns: z.array(checkIn),
 });
 export type Progress = z.infer<typeof progressSchema>;
 

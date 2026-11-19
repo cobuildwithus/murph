@@ -99,6 +99,28 @@ export function gameSeries(games: readonly ProgressGame[], memberId: string, sta
   return [...measures.values()].map(measure => ({ ...measure, gameOn: measure.gameOn || live.has(measure.id) }));
 }
 
+export interface TodayCheckIn { gameId: string; measureId: string; name: string; text: string; date: string; needsPerDay: boolean;
+  /** What the check-in will add; null once it's in. */
+  adds: number | null }
+
+/** Each live game's check-in today and the measure it adds to. Before it's in, `adds` is what a photo or
+ * words post adds; one that brings its own count (reps, a route) adds that instead, which only the app knows.
+ * A task Murph is still reading promises nothing. */
+export function todayCheckIns(games: readonly ProgressGame[], memberId: string, states: ReadonlyMap<string, MeasureState>): TodayCheckIn[] {
+  return games.flatMap(game => {
+    const player = game.state.players.find(player => player.memberId === memberId)!;
+    const today = dayIndexAt(player, game.now)!;
+    const day = game.state.game.status === "live" && !player.leftAt ? gameDays(game, memberId)?.find(day => day.dayIndex === today) : undefined;
+    if (!day) return [];
+    const task = game.tasks.get(termsForDay(game.state.game.terms, today).n)!;
+    const entry = completedEntry(indexGameEntries(game.state.entries), memberId, today);
+    const contribution = entry ? entryContribution(entry.kind, game.payloads.get(entry.id), task, states) : taskContribution(task, states);
+    if (contribution.pending) return [];
+    return [{ gameId: game.state.game.id, measureId: contribution.id, name: contribution.name, text: task.text, date: day.date,
+      needsPerDay: contribution.needsPerDay, adds: entry ? null : contribution.amount }];
+  });
+}
+
 export function cumulativePoints(amounts: readonly DayAmount[]): [string, number][] {
   const days = new Map<string, number>();
   for (const amount of amounts) days.set(amount.date, (days.get(amount.date) ?? 0) + amount.amount);
@@ -194,7 +216,7 @@ export async function readGameSeries(memberId: string, clock: Date, timing = new
     const name = id.split(".")[0];
     measures.push({ ...describeMeasure(id, name, name), pending: false, gameOn: false, needsPerDay: false, amounts: [] });
   }
-  return { states, measures, awards, incomplete, pending };
+  return { states, measures, awards, incomplete, pending, checkIns: todayCheckIns(facts, memberId, states) };
 }
 
 /** Deduplicated, sequential provider work after the response; one batched cache insert. */
