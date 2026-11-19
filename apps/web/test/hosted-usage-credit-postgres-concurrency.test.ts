@@ -3452,12 +3452,14 @@ describe.skipIf(!runPostgresConcurrencyProof)(
           observer: fixture.observer,
           pid: await grantPid.promise,
         });
+        // Expect the refusal before it can arrive: it lands as soon as the deletion commits.
+        const refused = expect(grantTransaction).rejects.toThrow(
+          "Hosted usage-credit beneficiary does not exist.",
+        );
         releaseDeletion.resolve();
 
         await deletionTransaction;
-        await expect(grantTransaction).rejects.toThrow(
-          "Hosted usage-credit beneficiary does not exist.",
-        );
+        await refused;
         await expect(Promise.all([
           fixture.observer.hostedMember.count({
             where: { id: fixture.beneficiaryMemberId },
