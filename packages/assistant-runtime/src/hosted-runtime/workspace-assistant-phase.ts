@@ -3633,6 +3633,8 @@ function mergeContinuingSystemMailboxAssistantPhaseResult(input: {
   const invocationLocalAssistantWakeAt =
     input.assistantResult.invocationLocalAssistantWakeAt ?? null;
   const common = {
+    preparedSystemMailboxItemId: input.assistantResult.preparedSystemMailboxItemId
+      ?? input.systemMailboxResult.preparedSystemMailboxItemId,
     ...(browserVaultReplicaRefreshRequested
       ? { browserVaultReplicaRefreshRequested: true as const }
       : {}),
@@ -4891,6 +4893,7 @@ async function runRequiredGroupRoomModelInitializationPhase(input: {
     continueAssistantLane: true,
     result: {
       checkpointReason: "system_mailbox_receipt",
+      preparedSystemMailboxItemId: preparation.itemId,
       progressed: true,
       redactedStatus: {
         hostedGroupRoomModelInitializationProcessed: 1,
@@ -4927,6 +4930,7 @@ function buildPrePlanningMemberPreferencesMailboxProcessedResult(input: {
   return {
     ...(afterCheckpoint ? { afterCheckpoint } : {}),
     checkpointReason: "system_mailbox_receipt",
+    preparedSystemMailboxItemId: input.preparation.itemId,
     progressed: true,
     redactedStatus: {
       hostedMemberPreferencesPrePlanningProcessed: input.processed,
@@ -5866,6 +5870,7 @@ async function runSystemMailboxMaintenancePhase(
         ? { nextWakeReason: nextWake.reason }
         : {}),
       progressed: true,
+      preparedSystemMailboxItemId: shouldRecordSystemMailbox ? systemMailboxPreparation.itemId : undefined,
       ...(systemMailboxProgressed ? { systemMailboxProgressed: true as const } : {}),
       redactedStatus: {
         ...buildHostedWorkspaceAssistantPhaseRedactedStatus({
@@ -5873,11 +5878,7 @@ async function runSystemMailboxMaintenancePhase(
           nextWakeAt,
           outboxTerminalizedSendingCount: 0,
           progressed: true,
-          systemMailboxPrepared:
-            systemMailboxPreparation.status === "retryable_failed"
-              || systemMailboxPreparation.status === "preempted"
-              ? 0
-              : 1,
+          systemMailboxPrepared: Number(shouldRecordSystemMailbox),
           systemMailboxRetryableFailed:
             systemMailboxPreparation.status === "retryable_failed" ? 1 : 0,
         }),

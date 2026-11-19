@@ -98,8 +98,7 @@ test.each([false, true])("AI-denied actions and clinical import checkpoint and r
         throw new Error("Synthetic response loss after receipt acceptance");
       }
     });
-    for (let attempt = 0; attempt < 8; attempt++) {
-      vi.setSystemTime(new Date(Date.parse(TEST_NOW) + attempt * 5 * 60_000));
+    const restoreAndRun = async () => {
       await removeTempRoot(vaultRoot);
       await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({ request: {
         processingMode: "system_mailbox", assistantExecutionBlocked: true, workspaceVersion: workspace.version, runnerIdleTtlMs: 1,
@@ -123,7 +122,8 @@ test.each([false, true])("AI-denied actions and clinical import checkpoint and r
           clinicalRecordsPort: { fetchPage, readRun: async () => ({ status: "ready", run }), recordOutcome: recordClinicalOutcome },
         },
       });
-    }
+    };
+    await restoreAndRun();
     expect(await readMealNutritionTotals(vaultRoot)).toMatchObject({ mealCount: 0 });
     expect(workoutSessionSchema.parse((await showWorkoutRecord(vaultRoot, started.eventId)).entity.data.workout).exercises[0]?.sets[0]?.reps).toBe(8);
     expect(await readPreferencesDocument(vaultRoot)).toMatchObject({ assistant: { tone: "formal" } });
@@ -138,6 +138,7 @@ test.each([false, true])("AI-denied actions and clinical import checkpoint and r
       hostedMailboxSystemModelFreeWakeVersion: workspace.version,
     });
     expect([...outcomes.values()].map(({ status }) => status)).toEqual(["applied", "applied"]);
+    await restoreAndRun(); // Restore the completed snapshot and verify replay causes no new effects.
     // Each action publishes once before share projection and repeats the same
     // deterministic receipt at cleanup. A lost early response can land at cleanup.
     expect(recordMemberActionOutcome).toHaveBeenCalledTimes(4);
@@ -151,6 +152,83 @@ test.each([false, true])("AI-denied actions and clinical import checkpoint and r
     expect(mocks.executeConsentedReadOnlyAssistantAsk).not.toHaveBeenCalled();
   } finally {
     vi.useRealTimers();
+    await removeTempRoot(vaultRoot);
+  }
+});
+
+test.each([false, true])("drains queued member actions in order and resumes after shutdown (interrupt=%s)", async (interrupt) => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-drain-action-"));
+  const events: string[] = [];
+  const checkpointRequests: HostedWorkspaceCheckpointRequest[] = [];
+  const actionIds = ["e3ee1a2e-afc7-4882-9fbd-0b37de853df1", "12492dc6-8244-4fa4-8689-527a42fd416a"];
+  try {
+    await initializeVault({ createdAt: TEST_NOW, vaultRoot });
+    await ensureHostedBootstrapMetadataForSystemMailboxTest(vaultRoot);
+    for (const [index, actionId] of actionIds.entries()) {
+      const wake = buildHostedExecutionMemberActionRequestedWake({
+        eventId: `member.action.requested:${actionId}`, memberId: TEST_USER_ID,
+        occurredAt: TEST_NOW, request: { actionId, requestedAt: TEST_NOW, schemaVersion: 1,
+          action: { kind: "display-name.set", version: 1, displayName: `Cedar ${index + 1}` } },
+      });
+      const item = createMailboxItem({ id: `queued_${index}`, kind: wake.kind,
+        lane: "system", laneSeq: String(index + 1), dedupeKey: wake.eventId });
+      const route = createHostedMailboxRoutingPlan(item);
+      if (route.state !== "route") throw new Error("Invalid synthetic route");
+      await enqueueHostedSystemMailboxItem({
+        item: { ...createResolvedRuntimeControlSystemMailboxItem(item), route }, vaultRoot, wake,
+      });
+    }
+    await writeMailboxImportStateFile(vaultRoot, { ...createEmptyHostedMailboxImportState(),
+      watermarks: { conversation: "0", system: "2" } });
+    const snapshot = await createVaultSnapshotBundle({ vaultRoot });
+    const received: string[] = [];
+    const artifactBytesByHash = new Map([[snapshot.hash, snapshot.bytes]]);
+    let workspace = createWorkspaceState({ snapshotRef: snapshot.snapshotRef, version: "0" });
+    const workspacePort = createWorkspacePort({ checkpointRequests, events, workspace });
+    const run = async (stopAfterFirst: boolean) => {
+      await removeTempRoot(vaultRoot);
+      const shutdown = new AbortController();
+      return await runHostedWorkspaceRuntimeJobInProcess(createWorkspaceRuntimeJobInput({ request: {
+        processingMode: "default", runnerIdleTtlMs: 1, workspaceVersion: workspace.version,
+      } }), {
+        vaultRoot, shutdownSignal: shutdown.signal,
+        async importItem() { throw new Error("Unexpected import"); },
+        async createCheckpointSnapshot() {
+          const next = await createVaultSnapshotBundle({ vaultRoot });
+          artifactBytesByHash.set(next.hash, next.bytes);
+          return { snapshotRef: next.snapshotRef };
+        },
+        platform: createPlatform({
+          artifactBytesByHash,
+          mailboxPort: { ...createMailboxPort({ events, items: [] }), async recordMemberActionOutcome(outcome) {
+            expect(outcome.status).toBe("applied");
+            received.push(outcome.actionId);
+          } },
+          workspacePort: {
+            async read() { return { fetchedAt: TEST_NOW, workspace }; },
+            async checkpoint(request) {
+              const response = await workspacePort.checkpoint(request);
+              workspace = response.workspace;
+              if (stopAfterFirst && workspace.redactedStatus?.hostedMailboxSystemHandledThroughSeq === "1") {
+                shutdown.abort();
+              }
+              return response;
+            },
+          },
+        }),
+      });
+    };
+    let result = await run(interrupt);
+    if (interrupt) {
+      expect(received).toEqual(actionIds.slice(0, 1));
+      expect((await readHostedSystemMailboxState(vaultRoot)).pending.map((item) => item.itemId)).toEqual(["queued_1"]);
+      result = await run(false);
+    }
+    expect(result.immediateRecheckRequested).not.toBe(true);
+    expect(result.nextWakeAt == null || Date.parse(result.nextWakeAt) > Date.now()).toBe(true);
+    expect(received).toEqual(actionIds);
+    expect((await readHostedSystemMailboxState(vaultRoot)).pending).toEqual([]);
+  } finally {
     await removeTempRoot(vaultRoot);
   }
 });

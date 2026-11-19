@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-11-03
+Last verified: 2026-11-19
 
 ## Postgres runtime authority
 
@@ -1100,6 +1100,13 @@ assistant phase has no inline device executor or turn-local dirty-ack buffer.
 Device hints, restored timers, imports, activity scheduling, and exact
 acknowledgments all use the workspace-owned mailbox path. Common durable effects
 retain their existing delivery and shutdown behavior.
+
+The runner processes ready ordered mailbox items in the same invocation. After
+each item reaches its checkpoint and leaves the queue, the current execution
+owner checks the queue again. The default owner admits new conversation input
+before starting the next item. The system owner also checks for foreground work
+and assistant deadlines between items. A retained item keeps its retry deadline.
+Independent device and clinical imports keep their existing admission budgets.
 
 After the dedicated system-mailbox lane checkpoints completed workspace work,
 finishes projection, and records completion, it offers one additional bounded

@@ -1,0 +1,14 @@
+{
+  "publishedOn": "2026-11-19",
+  "order": 200,
+  "item": {
+    "id": "queued-edits",
+    "kind": "improvement",
+    "priority": 2,
+    "title": "Less waiting between queued edits",
+    "summary": "When several meal or workout edits are waiting, Murph can save them one after another in the same session.",
+    "details": "Murph saves progress after each edit so an interrupted session can pick up where it left off.",
+    "relevanceTags": ["meals", "workouts"],
+    "sourcePullRequests": []
+  }
+}
