@@ -14,7 +14,8 @@ export interface RouteLeg {
   to: string;
   distanceM: number;
   polyline: string;
-  towns: { name: string; atM: number }[];
+  /** place: the town's public Mapbox place (id, "Del Mar, California, United States"); null when there is none, absent on legs from before posters. */
+  towns: { name: string; atM: number; place?: { id: string; label: string } | null }[];
   straightLine: boolean;
   startTotal: number;
 }
@@ -25,6 +26,8 @@ export interface MeasureState {
   perDay?: number;
   baseline?: { value: number; from: Day; to: Day };
   healthSettlement?: { savedAt: string; checkedAt: string; timeZone: string; profileTimeZone: string };
+  /** Running only: the vault's run meters per day, from the replica saved at savedAt. */
+  vaultRuns?: { savedAt: string; days: [Day, number][] };
 }
 
 /** One state writer. Fields replace whole fields; an eligible baseline freezes once. */

@@ -22,6 +22,9 @@ import { readProgressShareConsent } from './share-consent';
 import { makeShareImage, prepareShareJpeg, SHARE_DEADLINE_MS, ShareImageError } from './share-image';
 import type { BeforeProgressMutation } from './state';
 
+// Timed loaders only; readiness comes from a later read.
+const SHARE_TYPICAL_SECONDS = 55;
+
 export interface ShareRequest { memberId: string; awardId: string; units: ClientUnits; beforeMutationTx: BeforeProgressMutation }
 type Selection = { row: GameProgressShare | null; consent: 'allowed' | 'denied'; photoKey: string | null };
 const identity = (input: ShareRequest) => ({ memberId_awardLookup: { memberId: input.memberId, awardLookup: input.awardId } });
@@ -41,7 +44,7 @@ async function withAuthority<T>(input: ShareRequest, award: Candidate, run: (tx:
   return getPrisma().$transaction(async tx => {
     await lockHostedMemberRow(tx, input.memberId);
     await input.beforeMutationTx(tx);
-    if (award.measureId === 'steps' || award.measureId === 'sleep') await assertBrowserVaultMemberAuthority({ memberId: input.memberId, prisma: tx });
+    if (award.measureId === 'steps' || award.measureId === 'sleep' || award.data.health === true) await assertBrowserVaultMemberAuthority({ memberId: input.memberId, prisma: tx });
     return run(tx);
   }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
 }
@@ -62,7 +65,7 @@ function presentation(selection: Selection, awardId: string, eligible: boolean, 
   if (row === null) return { state: photoKey === null ? 'needs_photo' : 'available' };
   if (row.status === 'ready') return { state: 'photo', imagePath: `/api/game/v1/progress/shares/${awardId}/image` };
   const expiresAt = row.createdAt.getTime() + SHARE_DEADLINE_MS;
-  return now >= expiresAt ? { state: 'medal' } : { state: 'generating', startedAt: row.createdAt.toISOString(), expiresAt: new Date(expiresAt).toISOString() };
+  return now >= expiresAt ? { state: 'medal' } : { state: 'generating', startedAt: row.createdAt.toISOString(), expiresAt: new Date(expiresAt).toISOString(), typicalSeconds: SHARE_TYPICAL_SECONDS };
 }
 
 /** One bounded rolling-window read covers both quotas and active work. Terminal attempts still count. */

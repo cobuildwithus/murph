@@ -6,8 +6,12 @@ import { assertBrowserVaultMemberAuthority } from '@/src/lib/browser-vault/autho
 import { readProgressStepsRoute } from '@/src/lib/game/progress/health-reader';
 import { progressEffect, withProgressJsonError } from '@/src/lib/game/progress/http';
 import { renderRouteMap, resolveRoute } from '@/src/lib/game/progress/mapbox';
+import { readArtBytes } from '@/src/lib/game/progress/place-art';
+import { drawRouteOnPainting, mapKey } from '@/src/lib/game/progress/place-art-make';
+import { mapProgress } from '@/src/lib/game/progress/route-geometry';
 import { routeView } from '@/src/lib/game/progress/routes';
-import { cumulativePoints, readGameSeries } from '@/src/lib/game/progress/series';
+import { cumulativePoints } from '@/src/lib/game/progress/series';
+import { readOwnSeries } from '@/src/lib/game/progress/vault-runs';
 import { runWithHostedDomainRootUnwrapCache } from '@/src/lib/hosted-crypto/domain-root-unwrap-cache';
 import { hostedOnboardingError } from '@/src/lib/hosted-onboarding/errors';
 import { getPrisma } from '@/src/lib/prisma';
@@ -24,7 +28,7 @@ export const GET = withProgressJsonError(async (request: Request) => runWithHost
     } else if (query.measure === 'steps') {
       ({ polyline, progress } = await readProgressStepsRoute(auth, request.signal));
     } else {
-      const snapshot = await readGameSeries(auth.member.id, new Date());
+      const snapshot = await readOwnSeries(auth.member.id, new Date());
       if (snapshot.incomplete) throw hostedOnboardingError({ code: 'PROGRESS_INCOMPLETE', httpStatus: 503,
         retryable: true, message: 'Progress could not load completely. Try again.' });
       const measure = snapshot.measures.find(measure => measure.id === query.measure);
@@ -37,6 +41,12 @@ export const GET = withProgressJsonError(async (request: Request) => runWithHost
       await assertGameMemberAuthCurrentTx(auth, tx);
       if ('measure' in query && query.measure === 'steps') await assertBrowserVaultMemberAuthority({ memberId: auth.member.id, prisma: tx });
     });
+    // Drawn as far along as the link's version says, so one link is one picture.
+    progress = mapProgress(progress);
+    // The painted map, when one is ready, with today's line drawn on it; else the plain map.
+    const painted = await readArtBytes(mapKey(polyline, query.size))
+      .then(painting => painting && drawRouteOnPainting(painting, polyline, progress, query.size)).catch(() => null);
+    if (painted) return new Response(new Uint8Array(painted), { headers: { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' } });
     return renderRouteMap({ polyline, progress, size: query.size });
   });
 }));

@@ -415,7 +415,9 @@
             "aheadText": null,
             "x": 0.8,
             "y": 0.95,
-            "passedOn": "2026-10-21"
+            "passedOn": "2026-10-21",
+            "poster": null,
+            "stepsText": null
           },
           {
             "name": "Del Mar",
@@ -423,7 +425,9 @@
             "aheadText": null,
             "x": 0.7,
             "y": 0.8,
-            "passedOn": "2026-10-26"
+            "passedOn": "2026-10-26",
+            "poster": null,
+            "stepsText": null
           },
           {
             "name": "Oceanside",
@@ -431,7 +435,9 @@
             "aheadText": null,
             "x": 0.65,
             "y": 0.7,
-            "passedOn": "2026-10-31"
+            "passedOn": "2026-10-31",
+            "poster": null,
+            "stepsText": null
           },
           {
             "name": "San Clemente",
@@ -439,7 +445,9 @@
             "aheadText": null,
             "x": 0.6,
             "y": 0.6,
-            "passedOn": "2026-11-07"
+            "passedOn": "2026-11-07",
+            "poster": null,
+            "stepsText": null
           },
           {
             "name": "Irvine",
@@ -447,7 +455,9 @@
             "aheadText": null,
             "x": 0.55,
             "y": 0.5,
-            "passedOn": "2026-11-14"
+            "passedOn": "2026-11-14",
+            "poster": null,
+            "stepsText": null
           },
           {
             "name": "LA",
@@ -455,7 +465,9 @@
             "aheadText": "33 mi away",
             "x": 0.48,
             "y": 0.4,
-            "passedOn": null
+            "passedOn": null,
+            "poster": null,
+            "stepsText": null
           },
           {
             "name": "San Francisco",
@@ -463,7 +475,9 @@
             "aheadText": "416 mi to go",
             "x": 0.1,
             "y": 0.1,
-            "passedOn": null
+            "passedOn": null,
+            "poster": null,
+            "stepsText": null
           }
         ],
         "goalPicked": true,
@@ -475,7 +489,9 @@
             "aheadText": null,
             "x": 0.8375,
             "y": 0.820361,
-            "passedOn": "2026-10-21"
+            "passedOn": "2026-10-21",
+            "poster": null,
+            "stepsText": null
           },
           {
             "name": "Del Mar",
@@ -483,7 +499,9 @@
             "aheadText": null,
             "x": 0.725,
             "y": 0.713574,
-            "passedOn": "2026-10-26"
+            "passedOn": "2026-10-26",
+            "poster": null,
+            "stepsText": null
           },
           {
             "name": "Oceanside",
@@ -491,7 +509,9 @@
             "aheadText": null,
             "x": 0.66875,
             "y": 0.642383,
-            "passedOn": "2026-10-31"
+            "passedOn": "2026-10-31",
+            "poster": null,
+            "stepsText": null
           },
           {
             "name": "San Clemente",
@@ -499,7 +519,9 @@
             "aheadText": null,
             "x": 0.6125,
             "y": 0.571191,
-            "passedOn": "2026-11-07"
+            "passedOn": "2026-11-07",
+            "poster": null,
+            "stepsText": null
           },
           {
             "name": "Irvine",
@@ -507,7 +529,9 @@
             "aheadText": null,
             "x": 0.55625,
             "y": 0.5,
-            "passedOn": "2026-11-14"
+            "passedOn": "2026-11-14",
+            "poster": null,
+            "stepsText": null
           },
           {
             "name": "LA",
@@ -515,7 +539,9 @@
             "aheadText": "33 mi away",
             "x": 0.4775,
             "y": 0.428809,
-            "passedOn": null
+            "passedOn": null,
+            "poster": null,
+            "stepsText": null
           },
           {
             "name": "San Francisco",
@@ -523,7 +549,9 @@
             "aheadText": "416 mi to go",
             "x": 0.05,
             "y": 0.215234,
-            "passedOn": null
+            "passedOn": null,
+            "poster": null,
+            "stepsText": null
           }
         ],
         "here": {
@@ -534,7 +562,10 @@
           "x": 0.553934,
           "y": 0.497906
         },
-        "shareAwardId": null
+        "shareAwardId": null,
+        "mapArt": null,
+        "drawerMapArt": null,
+        "etaText": "10 weeks"
       },
       "pics": []
     }

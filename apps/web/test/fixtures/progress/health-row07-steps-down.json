@@ -372,7 +372,12 @@
             "aheadText": null,
             "x": 0.8,
             "y": 0.95,
-            "passedOn": "2026-10-21"
+            "passedOn": "2026-10-21",
+            "poster": {
+              "state": "ready",
+              "path": "/api/game/v1/progress/art/poster%3Av1%3Adplace0"
+            },
+            "stepsText": "41,250 steps"
           },
           {
             "name": "Del Mar",
@@ -380,7 +385,12 @@
             "aheadText": null,
             "x": 0.7,
             "y": 0.8,
-            "passedOn": "2026-10-26"
+            "passedOn": "2026-10-26",
+            "poster": {
+              "state": "ready",
+              "path": "/api/game/v1/progress/art/poster%3Av1%3Adplace1"
+            },
+            "stepsText": "82,500 steps"
           },
           {
             "name": "Oceanside",
@@ -388,7 +398,12 @@
             "aheadText": null,
             "x": 0.65,
             "y": 0.7,
-            "passedOn": "2026-10-31"
+            "passedOn": "2026-10-31",
+            "poster": {
+              "state": "ready",
+              "path": "/api/game/v1/progress/art/poster%3Av1%3Adplace2"
+            },
+            "stepsText": "123,750 steps"
           },
           {
             "name": "San Clemente",
@@ -396,7 +411,12 @@
             "aheadText": null,
             "x": 0.6,
             "y": 0.6,
-            "passedOn": "2026-11-07"
+            "passedOn": "2026-11-07",
+            "poster": {
+              "state": "ready",
+              "path": "/api/game/v1/progress/art/poster%3Av1%3Adplace3"
+            },
+            "stepsText": "165,000 steps"
           },
           {
             "name": "Irvine",
@@ -404,7 +424,12 @@
             "aheadText": null,
             "x": 0.55,
             "y": 0.5,
-            "passedOn": "2026-11-14"
+            "passedOn": "2026-11-14",
+            "poster": {
+              "state": "ready",
+              "path": "/api/game/v1/progress/art/poster%3Av1%3Adplace4"
+            },
+            "stepsText": "206,250 steps"
           },
           {
             "name": "LA",
@@ -412,7 +437,14 @@
             "aheadText": "33 mi away",
             "x": 0.48,
             "y": 0.4,
-            "passedOn": null
+            "passedOn": null,
+            "poster": {
+              "state": "making",
+              "startedAt": "2026-11-18T19:00:00.000Z",
+              "expiresAt": "2026-11-18T19:04:00.000Z",
+              "typicalSeconds": 50
+            },
+            "stepsText": null
           },
           {
             "name": "San Francisco",
@@ -420,7 +452,9 @@
             "aheadText": "416 mi to go",
             "x": 0.1,
             "y": 0.1,
-            "passedOn": null
+            "passedOn": null,
+            "poster": null,
+            "stepsText": null
           }
         ],
         "goalPicked": true,
@@ -432,7 +466,12 @@
             "aheadText": null,
             "x": 0.8375,
             "y": 0.820361,
-            "passedOn": "2026-10-21"
+            "passedOn": "2026-10-21",
+            "poster": {
+              "state": "ready",
+              "path": "/api/game/v1/progress/art/poster%3Av1%3Adplace0"
+            },
+            "stepsText": "41,250 steps"
           },
           {
             "name": "Del Mar",
@@ -440,7 +479,12 @@
             "aheadText": null,
             "x": 0.725,
             "y": 0.713574,
-            "passedOn": "2026-10-26"
+            "passedOn": "2026-10-26",
+            "poster": {
+              "state": "ready",
+              "path": "/api/game/v1/progress/art/poster%3Av1%3Adplace1"
+            },
+            "stepsText": "82,500 steps"
           },
           {
             "name": "Oceanside",
@@ -448,7 +492,12 @@
             "aheadText": null,
             "x": 0.66875,
             "y": 0.642383,
-            "passedOn": "2026-10-31"
+            "passedOn": "2026-10-31",
+            "poster": {
+              "state": "ready",
+              "path": "/api/game/v1/progress/art/poster%3Av1%3Adplace2"
+            },
+            "stepsText": "123,750 steps"
           },
           {
             "name": "San Clemente",
@@ -456,7 +505,12 @@
             "aheadText": null,
             "x": 0.6125,
             "y": 0.571191,
-            "passedOn": "2026-11-07"
+            "passedOn": "2026-11-07",
+            "poster": {
+              "state": "ready",
+              "path": "/api/game/v1/progress/art/poster%3Av1%3Adplace3"
+            },
+            "stepsText": "165,000 steps"
           },
           {
             "name": "Irvine",
@@ -464,7 +518,12 @@
             "aheadText": null,
             "x": 0.55625,
             "y": 0.5,
-            "passedOn": "2026-11-14"
+            "passedOn": "2026-11-14",
+            "poster": {
+              "state": "ready",
+              "path": "/api/game/v1/progress/art/poster%3Av1%3Adplace4"
+            },
+            "stepsText": "206,250 steps"
           },
           {
             "name": "LA",
@@ -472,7 +531,14 @@
             "aheadText": "33 mi away",
             "x": 0.4775,
             "y": 0.428809,
-            "passedOn": null
+            "passedOn": null,
+            "poster": {
+              "state": "making",
+              "startedAt": "2026-11-18T19:00:00.000Z",
+              "expiresAt": "2026-11-18T19:04:00.000Z",
+              "typicalSeconds": 50
+            },
+            "stepsText": null
           },
           {
             "name": "San Francisco",
@@ -480,7 +546,9 @@
             "aheadText": "416 mi to go",
             "x": 0.05,
             "y": 0.215234,
-            "passedOn": null
+            "passedOn": null,
+            "poster": null,
+            "stepsText": null
           }
         ],
         "here": {
@@ -491,7 +559,15 @@
           "x": 0.553934,
           "y": 0.497906
         },
-        "shareAwardId": null
+        "shareAwardId": null,
+        "mapArt": {
+          "state": "making",
+          "startedAt": "2026-11-18T19:00:00.000Z",
+          "expiresAt": "2026-11-18T19:04:00.000Z",
+          "typicalSeconds": 80
+        },
+        "drawerMapArt": null,
+        "etaText": "10 weeks"
       },
       "pics": []
     }

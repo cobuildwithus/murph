@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('server-only', () => ({}));
-import { resolveRoute, renderRouteMap } from '../src/lib/game/progress/mapbox';
+import { resolveRoute, renderRouteMap, reversePlace, satelliteImage } from '../src/lib/game/progress/mapbox';
 import { decodePolyline, encodePolyline, routeBbox } from '../src/lib/game/progress/route-geometry';
 const polyline = encodePolyline([[-117.16, 32.72], [-118.24, 34.05], [-122.42, 37.77]]);
 const feature = (name: string, coordinates: [number, number]) => ({ features: [{ properties: { name }, geometry: { coordinates } }] });
@@ -15,6 +15,21 @@ function respond(code: string, status = 200, reverse = async () => Response.json
   });
 }
 describe('Progress Mapbox boundary', () => {
+  it('keeps a town\'s public place id and full name, and null when Mapbox has none', async () => {
+    mockFetch.mockResolvedValueOnce(Response.json({ features: [{ geometry: { coordinates: [-117.27, 32.96] },
+      properties: { name: 'Del Mar', mapbox_id: 'dplace-dm', place_formatted: 'California, United States' } }] }));
+    expect(await reversePlace([-117.27, 32.96])).toEqual({ name: 'Del Mar', place: { id: 'dplace-dm', label: 'Del Mar, California, United States' } });
+    mockFetch.mockResolvedValueOnce(Response.json(feature('Somewhere', [0, 0])));
+    expect(await reversePlace([0, 0])).toEqual({ name: 'Somewhere', place: null });
+    expect((mockFetch.mock.calls[0]![0] as URL).searchParams.get('types')).toBe('place');
+  });
+  it('asks for plain satellite of exactly the frame, with no overlays, logo or attribution', async () => {
+    mockFetch.mockResolvedValueOnce(new Response(new Uint8Array([137, 80, 78, 71])));
+    await satelliteImage([-118.5, 32.5, -117, 34.2], 1536, 1024, new AbortController().signal);
+    const url = mockFetch.mock.calls[0]![0] as URL;
+    expect(decodeURIComponent(url.pathname)).toBe('/styles/v1/mapbox/satellite-v9/static/[-118.5,32.5,-117,34.2]/768x512@2x');
+    expect(Object.fromEntries(url.searchParams)).toMatchObject({ padding: '0', attribution: 'false', logo: 'false' });
+  });
   it('keeps the first occurrence in sample order with two reverse geocodes in flight', async () => {
     const names = ['Start', 'Valley', 'Start', 'Ridge', 'Valley', 'Lake', 'Lake', 'End'];
     let next = 0, active = 0, peak = 0;
@@ -31,7 +46,7 @@ describe('Progress Mapbox boundary', () => {
     expect(next).toBe(8);
     expect(peak).toBe(2);
     expect(completed[0]).toBe(1);
-    expect(route.towns).toEqual([0, 1, 3, 5, 7].map(i => ({ name: names[i], atM: 800000 * i / 7 })));
+    expect(route.towns).toEqual([0, 1, 3, 5, 7].map(i => ({ name: names[i], atM: 800000 * i / 7, place: null })));
   });
   it('resolves both ends, driving geometry and exactly eight place samples', async () => {
     respond('Ok');
@@ -78,13 +93,6 @@ describe('Progress Mapbox boundary', () => {
     mockFetch.mockRejectedValue(new Error('private body and synthetic-token'));
     await expect(resolveRoute('Start', 'End')).rejects.toMatchObject({ message: 'The map could not load. Try again.', cause: undefined });
     expect(mockFetch).toHaveBeenCalledTimes(2);
-  });
-  it('draws one picture for progress its link rounds together', async () => {
-    mockFetch.mockImplementation(async () => new Response(new Uint8Array([137, 80, 78, 71]), { headers: { 'Content-Type': 'image/png' } }));
-    await renderRouteMap({ polyline, progress: 0.4, size: 'card' });
-    await renderRouteMap({ polyline, progress: 0.4002, size: 'card' });
-    const [first, second] = mockFetch.mock.calls.map(([url]) => String(url));
-    expect(second).toBe(first);
   });
   it.each([
     { size: 'card', width: 708, height: 405, progress: 0 },

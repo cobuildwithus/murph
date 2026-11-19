@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('server-only', () => ({}));
 const mocks = vi.hoisted(() => ({ auth: vi.fn(), current: vi.fn(), series: vi.fn(), resolve: vi.fn(), render: vi.fn(),
-  raw: vi.fn(), health: vi.fn(), profile: vi.fn(), state: vi.fn(), open: vi.fn(), awards: vi.fn() }));
+  raw: vi.fn(), health: vi.fn(), profile: vi.fn(), state: vi.fn(), open: vi.fn(), awards: vi.fn(), art: vi.fn() }));
 vi.mock('@/src/lib/game/http/auth', () => ({ requireGameMemberAuth: mocks.auth, assertGameMemberAuthCurrentTx: mocks.current }));
-vi.mock('@/src/lib/game/progress/series', async original => ({ ...await original<typeof import('../src/lib/game/progress/series')>(), readGameSeries: mocks.series }));
+vi.mock('@/src/lib/game/progress/vault-runs', async original => ({ ...await original<typeof import('../src/lib/game/progress/vault-runs')>(), readOwnSeries: mocks.series }));
 vi.mock('@/src/lib/game/progress/mapbox', () => ({ resolveRoute: mocks.resolve, renderRouteMap: mocks.render }));
 vi.mock('@/src/lib/device-sync/companion-numbers', async original => ({ ...await original<typeof import('../src/lib/device-sync/companion-numbers')>(), readCompanionHealthSeries: mocks.raw }));
 vi.mock('@/src/lib/browser-vault/authority', () => ({ assertBrowserVaultMemberAuthority: mocks.health }));
@@ -11,7 +11,7 @@ vi.mock('@/src/lib/game/progress/crypto', () => ({ openProgress: mocks.open,
   progressLookup: (_member: string, _purpose: string, parts: string[]) => parts.join(':') }));
 vi.mock('@/src/lib/game/progress/awards', () => ({ readAwards: mocks.awards }));
 vi.mock('@/src/lib/prisma', () => ({ getPrisma: () => ({
-  gameProfile: { findUnique: mocks.profile }, gameProgressMeasure: { findUnique: mocks.state },
+  gameProfile: { findUnique: mocks.profile }, gameProgressMeasure: { findUnique: mocks.state }, gamePlaceArt: { findFirst: mocks.art },
   $transaction: (run: (tx: object) => Promise<void>) => run({ synthetic: true }),
 }) }));
 import { GET } from '../app/api/game/v1/progress/map/route';
@@ -26,7 +26,7 @@ beforeEach(() => {
   vi.resetAllMocks(); mocks.auth.mockResolvedValue({ member: { id: 'owner' } });
   mocks.series.mockResolvedValue(snapshot()); mocks.resolve.mockResolvedValue(leg);
   mocks.profile.mockResolvedValue({ createdAt: new Date('2026-11-01T12:00:00Z'), timeZone: 'UTC' });
-  mocks.state.mockResolvedValue({ stateEncrypted: 'synthetic-sealed' }); mocks.awards.mockResolvedValue([]);
+  mocks.state.mockResolvedValue({ stateEncrypted: 'synthetic-sealed' }); mocks.awards.mockResolvedValue([]); mocks.art.mockResolvedValue(null);
   mocks.open.mockResolvedValue({ legs: [{ ...leg, distanceM: 1609.344 }] });
   mocks.raw.mockResolvedValue({ numbers: { steps: { daily: [
     { date: '2026-10-31', value: 10000 }, { date: '2026-11-01', value: 1000 },
@@ -34,6 +34,19 @@ beforeEach(() => {
   mocks.render.mockImplementation(async () => new Response(new Uint8Array([137, 80, 78, 71]), { headers: { 'Content-Type': 'image/png' } }));
 });
 describe('Progress map HTTP contract', () => {
+  it('serves the painted map with today\'s line when one is ready, else the plain map', async () => {
+    const sharp = (await import('sharp')).default;
+    mocks.art.mockResolvedValue({ bytes: await sharp({ create: { width: 708, height: 405, channels: 3, background: '#8aa060' } }).jpeg().toBuffer() });
+    const painted = await GET(request('measure=walk.meters&size=card'));
+    expect(painted.status).toBe(200);
+    expect(painted.headers.get('content-type')).toBe('image/jpeg');
+    expect(painted.headers.get('cache-control')).toBe('private, no-store');
+    expect(await sharp(Buffer.from(await painted.arrayBuffer())).metadata()).toMatchObject({ width: 708, height: 405 });
+    expect(mocks.art.mock.calls[0]![0]).toMatchObject({ where: { key: expect.stringMatching(/^map:v1:card:/u), status: 'ready' } });
+    expect(mocks.render).not.toHaveBeenCalled();
+    mocks.art.mockRejectedValue(new Error('db down'));
+    expect((await GET(request('measure=walk.meters&size=card'))).headers.get('content-type')).toBe('image/png');
+  });
   it.each(['card', 'drawer'])('uses settled Health Steps since joining on the %s map', async size => {
     const response = await GET(request(`measure=steps&size=${size}`));
     expect(response.status).toBe(200);
@@ -55,6 +68,12 @@ describe('Progress map HTTP contract', () => {
     expect(response.status).toBe(503);
     expect(await response.json()).toMatchObject({ error: { retryable: true } });
     expect(mocks.raw).toHaveBeenCalledTimes(1); expect(mocks.render).not.toHaveBeenCalled();
+  });
+  it('draws as far along as the link\'s version says', async () => {
+    // 400.2 of 1,000 m: the link's version rounds it to 0.4, so the picture does too.
+    mocks.series.mockResolvedValue({ ...snapshot(), measures: [{ id: 'walk.meters', amounts: [{ date: '2026-11-01', amount: 400.2 }] }] });
+    expect((await GET(request('measure=walk.meters&size=card'))).status).toBe(200);
+    expect(mocks.render).toHaveBeenCalledWith({ polyline: leg.polyline, progress: 0.4, size: 'card' });
   });
   it('does not draw a Steps map with nothing walked before steps are read', async () => {
     mocks.raw.mockResolvedValue(null);

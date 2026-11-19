@@ -39,7 +39,8 @@ for (const filtered of [false, true]) {
     const build = wearables.buildWearableSummaryBundle;
     const selectHealth = wearables.summarizeWearableSourceHealthFromBundle;
     const selectAssistant = wearables.buildWearableAssistantSummaryFromBundle;
-    const bundles = vi.spyOn(wearables, "buildWearableSummaryBundle").mockImplementation((...args) => freeze(build(...args)));
+    const buildFromDataset = wearables.buildWearableSummaryBundleFromDataset;
+    const bundles = vi.spyOn(wearables, "buildWearableSummaryBundleFromDataset").mockImplementation((...args) => freeze(buildFromDataset(...args)));
     const collected = vi.spyOn(candidates, "collectWearableDataset");
     const health = vi.spyOn(wearables, "summarizeWearableSourceHealthFromBundle");
     const assistant = vi.spyOn(wearables, "buildWearableAssistantSummaryFromBundle");

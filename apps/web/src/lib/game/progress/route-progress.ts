@@ -5,13 +5,31 @@ import type { Candidate } from './registry';
 import type { MeasureState, RouteLeg } from './state';
 import type { StoredAward } from './awards';
 import { cutPolyline, decodePolyline, MAP_SIZES, mapProgress, routeBbox, townPosition } from './route-geometry';
-import { formatAmount } from './format';
+import { formatAmount, formatNumber } from './format';
 export const routeMeters = (measureId: string, amount: number) => measureId === 'steps' || measureId.endsWith('.steps') ? amount / 2000 * 1609.344 : amount;
 type Points = readonly [Day, number][];
 const crossingDay = (points: Points, at: number) => points.find(point => point[1] >= at)?.[0] ?? null;
-/** The map picture's version, its road and how far along it the map draws: a new route or more walked is a new link, so the app never shows an old picture under new towns. */
-const mapVersion = (polyline: string, progress: number) =>
-  createHash('sha256').update(`${polyline}\n${mapProgress(progress)}`).digest('base64url').slice(0, 12);
+const dayNumber = (day: Day) => Date.parse(`${day}T00:00:00Z`) / 86_400_000;
+
+/** How long the rest takes at the last 30 days' pace (fewer since the first day): "10 weeks". */
+export function routeEta(meters: Points, remainingM: number): string | null {
+  const last = meters.at(-1);
+  if (!last || remainingM <= 0) return null;
+  const window = Math.min(30, dayNumber(last[0]) - dayNumber(meters[0]![0]) + 1);
+  const before = meters.filter(point => dayNumber(point[0]) <= dayNumber(last[0]) - window).at(-1)?.[1] ?? 0;
+  const perDay = (last[1] - before) / window;
+  if (window < 7 || perDay <= 0) return null;
+  const days = Math.ceil(remainingM / perDay);
+  if (days < 14) return days === 1 ? '1 day' : `${days} days`;
+  const weeks = Math.round(days / 7);
+  return weeks <= 104 ? `${weeks} weeks` : `${Math.round(days / 365)} years`;
+}
+
+/** A route's map link. Its version (`v`) is the road, how far along it the map draws, and which sizes have a painting ready: a new route, more walked or a painting coming in is a new link, so the app never keeps an old picture. */
+export function routeMapLink(measureId: string, polyline: string, progress: number, painted: readonly ('card' | 'drawer')[] = []) {
+  const v = createHash('sha256').update([polyline, mapProgress(progress), ...painted].join('\n')).digest('base64url').slice(0, 12);
+  return `/api/game/v1/progress/map?${new URLSearchParams({ measure: measureId, size: 'card', v })}`;
+}
 export const routeAwardKey = (measureId: string, leg: RouteLeg, index: number) => `route:${JSON.stringify([measureId, index, leg.from, leg.to, leg.distanceM, leg.startTotal])}`;
 
 /** Named loops keep their label on both the medal and the finished-routes list. */
@@ -35,16 +53,19 @@ export function routeLegs(ctx: { measureId: string; legs: readonly RouteLeg[]; p
 }
 
 /** Map labels share the renderer's viewport. Preview towns have no earned crossing dates. */
-export function routeTowns(leg: RouteLeg, meters: Points, size: MapQuery['size'], units: ClientUnits): Route['towns'] {
+export function routeTowns(leg: RouteLeg, meters: Points, size: MapQuery['size'], units: ClientUnits, measureId?: string): Route['towns'] {
   const { width, height } = MAP_SIZES[size];
   const geometry = decodePolyline(leg.polyline), bbox = routeBbox(geometry, width, height);
   const walked = Math.max(0, (meters.at(-1)?.[1] ?? 0) - leg.startTotal);
   return leg.towns.map((town, index) => {
     const passedOn = crossingDay(meters, leg.startTotal + town.atM);
     const ahead = formatAmount(town.atM - walked, 'meters', 'full', units).text;
+    // Steps on this route by the end of the day you got there.
+    const stepsOn = measureId === 'steps' && passedOn ? meters.find(point => point[0] === passedOn)?.[1] : undefined;
     return { name: town.name, atText: `${units === 'metric' ? 'km' : 'mile'} ${formatAmount(town.atM, 'meters', 'full', units).text.split(' ')[0]}`,
       aheadText: passedOn ? null : `${ahead} ${index === leg.towns.length - 1 ? 'to go' : 'away'}`,
-      ...townPosition(cutPolyline(geometry, town.atM / leg.distanceM).walked.at(-1)!, bbox), passedOn };
+      ...townPosition(cutPolyline(geometry, town.atM / leg.distanceM).walked.at(-1)!, bbox), passedOn,
+      poster: null, stepsText: stepsOn === undefined ? null : `${formatNumber(Math.round((stepsOn - leg.startTotal) / 1609.344 * 2000), 'full')} steps` };
   });
 }
 
@@ -64,12 +85,12 @@ export function routeView(measureId: string, state: MeasureState, points: Points
   const meters: [Day, number][] = points.map(([day, amount]) => [day, routeMeters(measureId, amount)]);
   const total = meters.at(-1)?.[1] ?? 0;
   const walked = earnedOn ? leg.distanceM : Math.min(leg.distanceM, Math.max(0, total - leg.startTotal));
-  const map = `/api/game/v1/progress/map?${new URLSearchParams({ measure: measureId, size: 'card', v: mapVersion(leg.polyline, walked / leg.distanceM) })}`;
+  const map = routeMapLink(measureId, leg.polyline, walked / leg.distanceM);
   return { name: leg.name ?? `${leg.from} to ${leg.to}`, distanceText: formatAmount(leg.distanceM, 'meters', 'full', units).text,
     walkedText: formatAmount(walked, 'meters', 'compact', units).text, totalText: formatAmount(total, 'meters', 'compact', units).text,
-    progress: walked / leg.distanceM, straightLine: leg.straightLine,
+    progress: walked / leg.distanceM, straightLine: leg.straightLine, etaText: earnedOn ? null : routeEta(meters, leg.distanceM - walked),
     here: routeHere(leg, walked / leg.distanceM, 'card'), drawerHere: routeHere(leg, walked / leg.distanceM, 'drawer'),
     finishedOn: earnedOn, shareAwardId: earned?.id ?? null, map, goalPicked: state.goal !== undefined,
     completed: completions.map(award => ({ name: routeAwardName(award, `${award.data.from} to ${award.data.to}`), finishedOn: award.on, shareAwardId: award.id })),
-    towns: routeTowns(leg, meters, 'card', units), drawerTowns: routeTowns(leg, meters, 'drawer', units) };
+    towns: routeTowns(leg, meters, 'card', units, measureId), drawerTowns: routeTowns(leg, meters, 'drawer', units, measureId), mapArt: null, drawerMapArt: null };
 }

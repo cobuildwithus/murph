@@ -19,7 +19,7 @@ beforeEach(() => { vi.resetAllMocks(); mocks.auth.mockResolvedValue({ member: { 
 describe('private Progress share HTTP contract', () => {
   it.each([
     { state: 'needs_photo' }, { state: 'medal' }, { state: 'available' },
-    { state: 'generating', startedAt: '2026-11-16T12:00:00.000Z', expiresAt: '2026-11-16T12:04:00.000Z' },
+    { state: 'generating', startedAt: '2026-11-16T12:00:00.000Z', expiresAt: '2026-11-16T12:04:00.000Z', typicalSeconds: 55 },
     { state: 'photo', imagePath: `/api/game/v1/progress/shares/${awardId}/image` },
   ] satisfies ShareView['presentation'][])('GET only reads the strict $state view', async presentation => {
     mocks.read.mockResolvedValue(view(presentation));
@@ -34,7 +34,7 @@ describe('private Progress share HTTP contract', () => {
     expect(shareViewSchema.safeParse({ ...view({ state: 'medal' }), presentation: { state: 'failed', code: 'refused' } }).success).toBe(false);
   });
   it.each([['generating', 202], ['photo', 200], ['medal', 200]] as const)('POST admits once and returns %s with %d', async (state, status) => {
-    const presentation = state === 'generating' ? { state, startedAt: '2026-11-16T12:00:00.000Z', expiresAt: '2026-11-16T12:04:00.000Z' }
+    const presentation = state === 'generating' ? { state, startedAt: '2026-11-16T12:00:00.000Z', expiresAt: '2026-11-16T12:04:00.000Z', typicalSeconds: 55 }
       : state === 'photo' ? { state, imagePath: `/api/game/v1/progress/shares/${awardId}/image` } : { state };
     mocks.start.mockImplementation(async input => { await input.beforeMutationTx({ synthetic: true }); return view(presentation); });
     const response = await POST(req('POST'), context);

@@ -1,12 +1,14 @@
 import 'server-only';
 import * as z from '@murphai/contracts/zod-runtime';
 import { hostedOnboardingError } from '../../hosted-onboarding/errors';
-import { cutPolyline, decodePolyline, distanceM, encodePolyline, greatCircle, MAP_SIZES, mapProgress, routeBbox, type Coordinate } from './route-geometry';
+import { cutPolyline, decodePolyline, distanceM, encodePolyline, greatCircle, MAP_SIZES, routeBbox, type Coordinate } from './route-geometry';
 import { BANK } from './bank';
 import type { MapQuery } from './contract';
+import type { RouteLeg } from './state';
 
 const coordinate = z.tuple([z.number().min(-180).max(180), z.number().min(-90).max(90)]);
-const geocoding = z.object({ features: z.array(z.object({ geometry: z.object({ coordinates: coordinate }), properties: z.object({ name: z.string() }) })) });
+const geocoding = z.object({ features: z.array(z.object({ geometry: z.object({ coordinates: coordinate }),
+  properties: z.object({ name: z.string(), mapbox_id: z.string().max(200).optional(), place_formatted: z.string().max(300).optional() }) })) });
 const directions = z.discriminatedUnion('code', [
   z.object({ code: z.literal('NoRoute') }),
   z.object({ code: z.literal('Ok'), routes: z.array(z.object({ distance: z.number().positive(), geometry: z.string().min(2) })).min(1) }),
@@ -61,14 +63,10 @@ export async function resolveRoute(from: string, to: string) {
   const road = result.routes[0]!;
   const meters = entry?.at ?? road.distance, polyline = road.geometry;
   const points = decodePolyline(polyline);
-  const towns: { name: string; atM: number }[] = [];
+  const towns: RouteLeg['towns'] = [];
   const sampleTown = async (i: number) => {
-    const at = cutPolyline(points, i / 7).walked.at(-1)!;
-    const response = await mapboxJson('/search/geocode/v6/reverse', {
-      longitude: String(at[0]), latitude: String(at[1]), types: 'place', limit: '1', permanent: 'true',
-    }, geocoding);
-    const town = response.features[0];
-    return town && { name: town.properties.name, atM: meters * i / 7 };
+    const town = await reversePlace(cutPolyline(points, i / 7).walked.at(-1)!);
+    return town && { ...town, atM: meters * i / 7 };
   };
   for (let i = 0; i < 8; i += 2) {
     const pair = await Promise.allSettled([sampleTown(i), sampleTown(i + 1)]);
@@ -81,13 +79,32 @@ export async function resolveRoute(from: string, to: string) {
   return { ...(entry && { name: entry.name }), from, to, distanceM: meters, polyline, towns, straightLine: false };
 }
 
+/** The town (Mapbox place) a point is in: the public identity a poster is keyed and prompted by. */
+export async function reversePlace(at: Coordinate): Promise<{ name: string; place: { id: string; label: string } | null } | null> {
+  const response = await mapboxJson('/search/geocode/v6/reverse', {
+    longitude: String(at[0]), latitude: String(at[1]), types: 'place', limit: '1', permanent: 'true',
+  }, geocoding);
+  const town = response.features[0]?.properties;
+  if (!town) return null;
+  return { name: town.name, place: town.mapbox_id ? { id: town.mapbox_id,
+    label: town.place_formatted ? `${town.name}, ${town.place_formatted}` : town.name } : null };
+}
+
+/** Plain satellite of exactly `bbox` at `width` x `height` pixels: no overlays, logo or attribution. */
+export async function satelliteImage(bbox: readonly number[], width: number, height: number, signal: AbortSignal): Promise<Buffer> {
+  signal.throwIfAborted();
+  const response = await mapboxRequest(`/styles/v1/mapbox/satellite-v9/static/[${bbox.join(',')}]/${width / 2}x${height / 2}@2x`,
+    { padding: '0', attribution: 'false', logo: 'false' });
+  return Buffer.from(await response.arrayBuffer());
+}
+
 /** The style's source is `mapbox-style.json`, uploaded by hand to the Mapbox account named in `MAPBOX_STYLE_ID`. */
 export async function renderRouteMap(input: { polyline: string; progress: number; size: MapQuery['size'] }): Promise<Response> {
   const style = process.env.MAPBOX_STYLE_ID;
   if (!style) throw unavailable();
   const { width, height } = MAP_SIZES[input.size];
   const points = decodePolyline(input.polyline), bbox = routeBbox(points, width, height);
-  const cut = cutPolyline(points, mapProgress(input.progress));
+  const cut = cutPolyline(points, input.progress);
   const path = (color: string, coordinates: Coordinate[]) => `path-4+${color}-1(${encodeURIComponent(encodePolyline(coordinates.length === 1 ? [coordinates[0]!, coordinates[0]!] : coordinates))})`;
   const overlays = [path('CDBEA7', cut.remaining), path('5A6E32', cut.walked)].join(',');
   const response = await mapboxRequest(`/styles/v1/${style}/static/${overlays}/[${bbox.join(',')}]/${width}x${height}.png`, { padding: '0' });

@@ -13,6 +13,7 @@ import type {
 import { experimentOutcomeSchema } from "@murphai/contracts/experiment-outcome";
 import { parseJournalTiming } from "@murphai/contracts/journal-presentation";
 import { memoryDisplayNameSchema, memoryDemographicsSchema, companionMealsProjectionSchema } from "@murphai/contracts";
+import * as z from "@murphai/contracts/zod-runtime";
 import {
   BROWSER_VAULT_REPLICA_POLICY_ID,
   BROWSER_VAULT_REPLICA_SCHEMA,
@@ -59,6 +60,15 @@ import {
 import { BROWSER_VAULT_LAB_RESULT_ROW_SCHEMA } from "./lab-results.ts";
 import { BROWSER_VAULT_METRIC_ROW_SCHEMA } from "./metric-points.ts";
 
+/** Each local day's run distance in the vault, for the last year. Absent on replicas built before it shipped: unknown, never zero. */
+const companionRunsProjectionSchema = z.object({
+  schemaVersion: z.literal(1),
+  days: z.array(z.object({
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/u),
+    km: z.number().positive().max(1_000),
+  }).strict()),
+}).strict();
+
 export function parseBrowserVaultReplica(value: unknown, label = "Browser vault replica"): BrowserVaultReplica {
   const record = requireRecord(value, label);
   const schema = requireString(record.schema, `${label}.schema`);
@@ -95,6 +105,7 @@ export function parseBrowserVaultReplica(value: unknown, label = "Browser vault 
     ...(record.demographics === undefined ? {} : { demographics: memoryDemographicsSchema.parse(record.demographics) }),
     ...(record.displayName === undefined ? {} : { displayName: memoryDisplayNameSchema.parse(record.displayName) }),
     ...(record.meals === undefined ? {} : { meals: companionMealsProjectionSchema.parse(record.meals) }),
+    ...(record.runs === undefined ? {} : { runs: companionRunsProjectionSchema.parse(record.runs) }),
     labResultRows: readOptionalArray(record.labResultRows, `${label}.labResultRows`).map((entry, index) =>
       parseLabResultRow(entry, `${label}.labResultRows[${index}]`)
     ),
@@ -137,6 +148,7 @@ export function parseBrowserVaultCoreShard(
     ...(record.demographics === undefined ? {} : { demographics: memoryDemographicsSchema.parse(record.demographics) }),
     ...(record.displayName === undefined ? {} : { displayName: memoryDisplayNameSchema.parse(record.displayName) }),
     ...(record.meals === undefined ? {} : { meals: companionMealsProjectionSchema.parse(record.meals) }),
+    ...(record.runs === undefined ? {} : { runs: companionRunsProjectionSchema.parse(record.runs) }),
     policy: parsePolicy(record.policy, `${label}.policy`),
     schema: BROWSER_VAULT_CORE_SHARD_SCHEMA,
     timelineRows: requireArray(record.timelineRows, `${label}.timelineRows`).map((entry, index) =>

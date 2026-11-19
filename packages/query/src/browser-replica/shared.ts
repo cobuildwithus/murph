@@ -26,6 +26,12 @@ import type {
 } from "@murphai/health-metrics";
 import type { BrowserVaultMetricBucketId } from "./metric-buckets.ts";
 
+/** Each local day's run distance in the vault, for the last year. Absent on replicas built before it shipped: unknown, never zero. */
+export interface CompanionRunsProjection {
+  schemaVersion: 1;
+  days: { date: string; km: number }[];
+}
+
 export {
   BROWSER_VAULT_REPLICA_CURRENT_GENERATION,
   BROWSER_VAULT_REPLICA_SCHEMA,
@@ -259,6 +265,8 @@ export interface BrowserVaultReplica {
   journal?: JournalView;
   /** Absent on older replicas or when canonical timezone is unavailable. */
   meals?: CompanionMealsProjection;
+  /** Absent on replicas built before run days shipped: unknown, never zero. */
+  runs?: CompanionRunsProjection;
   metricGoalProgressRows: BrowserVaultMetricGoalProgressRow[];
   metricRows: BrowserVaultMetricRow[];
   metricSelectionRows: BrowserVaultMetricSelectionRow[];
@@ -285,6 +293,7 @@ type BrowserVaultLegacyCompatibleCoreReplica = Pick<
   | "journal"
   | "meals"
   | "policy"
+  | "runs"
   | "schema"
   | "searchRows"
   | "source"
