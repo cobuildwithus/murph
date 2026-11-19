@@ -328,18 +328,26 @@ describe("cloudflare worker routes", () => {
       HOSTED_EXECUTION_RUNNER_DEPLOYMENT: JSON.stringify({ active: release, candidate: null, previous: null }),
       HOSTED_EXECUTION_STANDBY_MODE: "allocate",
       HOSTED_EXECUTION_STANDBY_TARGET: "2",
+      CF_VERSION_METADATA: { id: "candidate-worker", tag: "synthetic", timestamp: "2030-01-01T00:00:00Z" },
       RUNNER_CONTAINER: { getByName: memberAccess },
       NEXT_RUNNER_CONTAINER: { getByName: memberAccess },
       STANDBY_COORDINATOR: { getByName: memberAccess },
     });
     const url = new URL("https://runner.example.test/internal/deploy/artifact-smoke");
     expect((await worker.fetch(new Request(url, { method: "POST" }), env)).status).toBe(401);
+    url.searchParams.set("workerVersion", "prior-worker");
+    const stale = await signWebCallbackControlRequest(new Request(url, { method: "POST" }), env);
+    const smokeNamespace = vi.spyOn(env.RUNNER_CONTAINER_SMOKE, "getByName");
+    expect((await worker.fetch(stale, env)).status).toBe(503);
+    expect(smokeNamespace).not.toHaveBeenCalled();
+    url.searchParams.set("workerVersion", "candidate-worker");
     const headers = await createHostedWebCallbackSignatureHeaders({
       environment: readHostedExecutionEnvironment(asWorkerStringEnvironment(env)).webCallbackSigning,
       method: "POST", path: url.pathname, payload: "", search: url.search,
     });
     const response = await worker.fetch(new Request(url, { method: "POST", headers }), env);
     expect(response.status).toBe(200);
+    expect(response.headers.get("x-murph-artifact-worker-version")).toBe("candidate-worker");
     expect(await response.json()).toMatchObject({ ok: true, runnerContainer: { ok: true, codexShell: createCodexShellSmokeResult() } });
     expect(memberAccess).not.toHaveBeenCalled();
   });

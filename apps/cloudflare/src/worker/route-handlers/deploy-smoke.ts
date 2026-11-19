@@ -70,7 +70,7 @@ export const deploySmokeRoutes: readonly DeclarativeRoute<WorkerRouteContext>[] 
   },
   {
     authorization: "web-callback-signature",
-    handle: (context) => handleDeployContainerSmokeRoute(context, true),
+    handle: handleDeployArtifactSmokeRoute,
     match: matchExactPath("/internal/deploy/artifact-smoke"),
     methods: ["POST"],
     name: "deploy-artifact-smoke",
@@ -103,6 +103,17 @@ export function handleTemporalWorkerBindingAdmissionRoute(
   const response = json(admission);
   response.headers.set("cache-control", "no-store");
   response.headers.set("pragma", "no-cache");
+  return response;
+}
+
+async function handleDeployArtifactSmokeRoute(context: WorkerRouteContext): Promise<Response> {
+  const version = readWorkerVersionId(context.env);
+  const expected = context.url.searchParams.get("workerVersion");
+  if (expected !== null && expected !== version) {
+    return json({ ok: false, error: "Candidate Worker has not reached this edge." }, 503);
+  }
+  const response = await handleDeployContainerSmokeRoute(context, true);
+  if (version) response.headers.set("x-murph-artifact-worker-version", version);
   return response;
 }
 

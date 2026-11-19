@@ -203,22 +203,24 @@ describe("resolveSmokeRunnerManifestPath", () => {
 });
 
 describe("runSmokeHostedDeploy", () => {
-  it.each(["accepted", "reuse", "changed contract", "absent proof", "missing", "duplicate", "wrong model", "wrong tier", "unused grant", "provider rejected"])(
+  it.each(["accepted", "stale Worker", "unversioned Worker", "reuse", "changed contract", "absent proof", "missing", "duplicate", "wrong model", "wrong tier", "unused grant", "provider rejected"])(
     "requires the complete live model and tier receipts before releasing a production artifact (%s)", async (scenario) => {
     const root = await mkdtemp(path.join(os.tmpdir(), "cloudflare-artifact-smoke-"));
     const manifestPath = path.join(root, "manifest.json");
     const manifest = { buildSkipped: false, bundleFingerprint: "expected-bundle", sourceFingerprint: "expected-source" };
     const calls: URL[] = [];
     let artifactRequests = 0;
+    const checkVersion = ["accepted", "stale Worker", "unversioned Worker"].includes(scenario);
+    const onModelAdmission = vi.fn();
     try {
       await writeFile(manifestPath, JSON.stringify(manifest));
       const smoke = runSmokeHostedDeploy({
-        phase: "artifact", log() {},
+        phase: "artifact", log() {}, onModelAdmission,
         ...(scenario === "reuse" || scenario === "changed contract" ? { previousAdmissionDigest: "a".repeat(64) } : {}),
         fetchImpl: async input => {
           const url = new URL(String(input)); calls.push(url);
           if (url.pathname === "/" || url.pathname === "/health") {
-            return new Response(JSON.stringify({ ok: true, service: "cloudflare-hosted-runner", standbyMode: "allocate" }));
+            return new Response(JSON.stringify({ ok: true, service: "cloudflare-hosted-runner", standbyMode: "allocate", workerVersionId: "candidate-worker" }));
           }
           expect(url.pathname).toBe("/internal/deploy/artifact-smoke");
           if (++artifactRequests === 1) return new Response("Old Worker route missing", { status: 404 });
@@ -233,15 +235,22 @@ describe("runSmokeHostedDeploy", () => {
           if (scenario === "wrong model") turns[1]!.model = "gpt-6-luna";
           if (scenario === "wrong tier") turns[1]!.serviceTier = "default";
           if (scenario === "unused grant") turns[1]!.egressGrantConsumed = false;
-          return new Response(JSON.stringify({ ok: true, runnerContainer: {
-            ...(onlyLuna ? { admissionDigest: (scenario === "changed contract" ? "b" : "a").repeat(64) } : {}),
-            ...(scenario === "missing" ? {} : { webModelTurns: turns }),
-            ...(scenario === "provider rejected" ? { liveModelTurnFailure: "synthetic rejection" } : {}),
-            ok: true, runnerBundle: manifest, service: "cloudflare-hosted-runner-node", codexShell: createCodexShellSmokeResult(),
-            liveModelTurn: { durationMs: 1, egressGrantConsumed: true, model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL, stdoutBytes: 1 },
-          } }));
+          const headers = new Headers();
+          if (scenario === "accepted") headers.set("x-murph-artifact-worker-version", "candidate-worker");
+          if (scenario === "stale Worker") headers.set("x-murph-artifact-worker-version", "previous-worker");
+          return new Response(JSON.stringify({ ok: true,
+            runnerContainer: {
+              ...(checkVersion ? { admissionDigest: "c".repeat(64) } : {}),
+              ...(onlyLuna ? { admissionDigest: (scenario === "changed contract" ? "b" : "a").repeat(64) } : {}),
+              ...(scenario === "missing" ? {} : { webModelTurns: turns }),
+              ...(scenario === "provider rejected" ? { liveModelTurnFailure: "synthetic rejection" } : {}),
+              ok: true, runnerBundle: manifest, service: "cloudflare-hosted-runner-node", codexShell: createCodexShellSmokeResult(),
+              liveModelTurn: { durationMs: 1, egressGrantConsumed: true, model: DEPLOY_LIVE_MODEL_TURN_SMOKE_MODEL, stdoutBytes: 1 },
+            },
+          }), { headers });
         },
         source: {
+          ...(checkVersion ? { HOSTED_EXECUTION_SMOKE_VERSION_ID: "candidate-worker", CF_WORKER_NAME: "example-worker" } : {}),
           HOSTED_EXECUTION_SMOKE_EXPECTED_STANDBY_MODE: "allocate",
           HOSTED_EXECUTION_STANDBY_TARGET: "2",
           HOSTED_EXECUTION_VERCEL_OIDC_ENVIRONMENT: "production",
@@ -255,12 +264,17 @@ describe("runSmokeHostedDeploy", () => {
         },
       });
       if (scenario !== "accepted" && scenario !== "reuse") {
-        await expect(smoke).rejects.toThrow(/admission|expected model|did not prove|egress grant|synthetic rejection/u);
+        await expect(smoke).rejects.toThrow(/admission|expected model|did not prove|egress grant|synthetic rejection|artifact smoke.*Worker version/u);
+        expect(onModelAdmission).not.toHaveBeenCalled();
         expect(artifactRequests).toBe(2);
         return;
       }
       await smoke;
       const artifactCalls = calls.filter(url => url.pathname === "/internal/deploy/artifact-smoke");
+      if (checkVersion) {
+        expect(artifactCalls.every(url => url.searchParams.get("workerVersion") === "candidate-worker")).toBe(true);
+        expect(onModelAdmission).toHaveBeenCalledWith("c".repeat(64));
+      }
       expect(artifactCalls.map(url => url.searchParams.get("attempt"))).toEqual(["1", "2"]);
       expect(artifactCalls.every(url => url.searchParams.get("liveModelTurn") === "1")).toBe(true);
     } finally { await rm(root, { recursive: true, force: true }); }

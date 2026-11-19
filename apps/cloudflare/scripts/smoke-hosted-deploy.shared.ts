@@ -266,6 +266,7 @@ export async function runSmokeHostedDeploy(input: {
           liveModelTurn: shouldSmokeLiveModelTurn,
           phase: input.phase,
           previousDigest: input.previousAdmissionDigest,
+          workerVersion: smokeVersionId,
           smokeBaseUrl,
         }),
         versionOverrideHeaders,
@@ -448,6 +449,7 @@ async function readRunnerContainerSmoke(input: {
       : new Error(message);
   }
 
+  assertArtifactWorkerVersion(url, response);
   const responsePayload = await response.json() as {
     ok?: unknown;
     standbyInventory?: SmokeStandbyInventory | null;
@@ -532,15 +534,25 @@ function redactSmokeFailureBody(value: string): string {
     );
 }
 
+function assertArtifactWorkerVersion(url: URL, response: Response): void {
+  // The banner and this POST can reach different edge versions during propagation.
+  const expected = url.searchParams.get("workerVersion");
+  if (expected && response.headers.get("x-murph-artifact-worker-version") !== expected) {
+    throw new RunnerContainerSmokeRetryableError("Candidate artifact smoke did not run the requested Worker version.");
+  }
+}
+
 function buildRunnerContainerSmokeUrl(input: {
   directR2PresignedPut: boolean;
   liveModelTurn: boolean;
   previousDigest?: string | null;
+  workerVersion: string | null;
   phase?: "artifact" | "serving";
   smokeBaseUrl: string;
 }): string {
   const url = new URL(input.phase === "artifact"
     ? "/internal/deploy/artifact-smoke" : "/internal/deploy/container-smoke", input.smokeBaseUrl);
+  if (input.phase === "artifact" && input.workerVersion) url.searchParams.set("workerVersion", input.workerVersion);
   if (input.phase === "artifact" && input.previousDigest !== undefined) url.searchParams.set("admission", input.previousDigest ?? "measure");
   if (input.directR2PresignedPut) {
     url.searchParams.set("directR2PresignedPut", "1");
