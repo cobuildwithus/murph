@@ -3,14 +3,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Prisma } from "@prisma/client";
 import type { TermWords } from "../src/lib/game/rules";
 
-const mocks = vi.hoisted(() => ({ games: vi.fn(), entries: vi.fn(), tasks: vi.fn(), states: vi.fn(), awards: vi.fn(),
+const mocks = vi.hoisted(() => ({ profile: vi.fn(), games: vi.fn(), entries: vi.fn(), tasks: vi.fn(), states: vi.fn(), awards: vi.fn(),
   createAwards: vi.fn(), updateSeen: vi.fn(), patch: vi.fn(), after: vi.fn(), auth: vi.fn(), current: vi.fn(), health: vi.fn(), transaction: vi.fn(), suggest: vi.fn(), pictures: vi.fn(), resolveRoute: vi.fn(), preview: vi.fn(), consume: vi.fn(),
   profileCreatedAt: { value: new Date("2026-11-01T12:00:00Z") } }));
 vi.mock("@/src/lib/better-auth/rate-limit", () => ({ hostedAuthRateLimitStorage: () => ({ consume: mocks.consume }) }));
 vi.mock("next/server", async original => ({ ...await original<typeof import("next/server")>(), after: mocks.after }));
 vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({
   game: { findMany: mocks.games }, gameEntry: { findMany: mocks.entries },
-  gameProfile: { findUniqueOrThrow: async () => ({ timeZone: "UTC", createdAt: mocks.profileCreatedAt.value }) },
+  gameProfile: { findUnique: mocks.profile, findUniqueOrThrow: async () => {
+    const profile = await mocks.profile();
+    if (!profile) throw new Error("Missing game profile");
+    return profile;
+  } },
   gameProgressTaskMeasure: { findMany: mocks.tasks }, gameProgressMeasure: { findMany: mocks.states },
   gameProgressAward: { findMany: mocks.awards }, gameProgressPic: { findMany: mocks.pictures }, $transaction: mocks.transaction,
 }) }));
@@ -67,6 +71,7 @@ beforeEach(() => {
   vi.resetAllMocks();
   mocks.profileCreatedAt.value = new Date("2026-11-01T12:00:00Z");
   vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date("2026-11-05T12:00:00Z"));
+  mocks.profile.mockImplementation(async () => ({ timeZone: "UTC", createdAt: mocks.profileCreatedAt.value }));
   awards = [];
   mocks.consume.mockResolvedValue({ allowed: true });
   mocks.auth.mockResolvedValue({ member: { id: memberId } }); mocks.current.mockResolvedValue(undefined); mocks.health.mockResolvedValue(undefined);
@@ -81,6 +86,14 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); });
 
 describe("Progress HTTP contracts", () => {
+  it("directs a member without a profile to setup", async () => {
+    mocks.profile.mockResolvedValue(null);
+    const response = await GET(request());
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: { code: "PROFILE_REQUIRED" } });
+    expect(mocks.games).not.toHaveBeenCalled();
+  });
+
   it.each([
     { distance: 501, total: 116, distanceText: "501 miles", detail: "By road. You're 116 in, so 385 to go.", straightLine: false },
     { distance: 8.4, total: 1.2, distanceText: "8.4 miles", detail: "By road. You're 1.2 in, so 7.2 to go.", straightLine: false },
