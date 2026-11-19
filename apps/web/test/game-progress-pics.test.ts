@@ -69,6 +69,14 @@ describe('Progress picture ownership and deletion', () => {
     await expect(deleteProgressPic('owner', id, mocks.auth)).rejects.toMatchObject({ httpStatus: 503, retryable: true, cause: undefined });
     expect(mocks.update).toHaveBeenCalledTimes(1);
   });
+  it.each([
+    ['seal_picture_bytes', mocks.seal], ['stage_picture', mocks.put],
+  ] as const)('identifies a failed %s without retaining provider content', async (operationName, fail) => {
+    mocks.find.mockResolvedValue(row);
+    fail.mockRejectedValueOnce(new RangeError('private-provider-body'));
+    await expect(putProgressPic('owner', { id, measureId: 'pushups.reps', takenAt: row.takenAt.toISOString() }, new Uint8Array([1, 2]), mocks.auth))
+      .rejects.toMatchObject({ code: 'PROGRESS_UNAVAILABLE', details: { operationName, type: 'RangeError' }, cause: undefined });
+  });
   it('uses the existing immutable key on upload replay and never uploads for a retired/colliding UUID', async () => {
     mocks.find.mockResolvedValue(row);
     const input = { id, measureId: 'pushups.reps', takenAt: row.takenAt.toISOString() };

@@ -14,13 +14,13 @@ function picId(value: string): string {
 
 export const GET = withProgressJsonError(async (request: Request, context: Context) => {
   const auth = await requireGameMemberAuth(request), id = picId((await context.params).id);
-  return progressEffect(async () => new Response(new Uint8Array(await readProgressPic(auth.member.id, id)), {
+  return progressEffect('read_picture', async () => new Response(new Uint8Array(await readProgressPic(auth.member.id, id)), {
     headers: { 'Content-Type': 'image/jpeg', 'X-Content-Type-Options': 'nosniff' },
   }));
 });
 
 export const DELETE = withProgressJsonError(async (request: Request, context: Context) => {
   const auth = await requireGameMemberAuth(request), id = picId((await context.params).id);
-  await progressEffect(() => deleteProgressPic(auth.member.id, id, tx => assertGameMemberAuthCurrentTx(auth, tx)));
+  await progressEffect('delete_picture', () => deleteProgressPic(auth.member.id, id, tx => assertGameMemberAuthCurrentTx(auth, tx)));
   return jsonOk({ ok: true });
 });

@@ -151,7 +151,7 @@ export async function startProgressShare(input: ShareRequest, replaces?: string)
     });
     if (admission.inserted) {
       const source = reference;
-      after(() => runWithFreshHostedDomainRootUnwrapCache(() => progressEffect(() => generate(input, award, admission.selection.row!, source))));
+      after(() => runWithFreshHostedDomainRootUnwrapCache(() => progressEffect('generate_share', () => generate(input, award, admission.selection.row!, source))));
       transferred = true;
     }
     return { awardId: input.awardId, card, zones: SHARE_ZONES, presentation: presentation(admission.selection, input.awardId, true, Date.now()) };

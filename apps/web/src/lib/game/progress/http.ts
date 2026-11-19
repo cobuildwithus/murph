@@ -1,3 +1,4 @@
+import { describeLoggedErrorType } from '../../http';
 import { hostedOnboardingError, isHostedOnboardingError } from '../../hosted-onboarding/errors';
 import { withJsonError } from '../../hosted-onboarding/http';
 
@@ -12,10 +13,11 @@ export function withProgressJsonError<Args extends unknown[]>(handler: (...args:
 }
 
 /** Private dependency errors never include provider text, health values or media keys. */
-export async function progressEffect<T>(run: () => Promise<T>): Promise<T> {
+export async function progressEffect<T>(operationName: string, run: () => Promise<T>): Promise<T> {
   try { return await run(); }
   catch (error) {
     if (isHostedOnboardingError(error)) throw error;
-    throw hostedOnboardingError({ code: 'PROGRESS_UNAVAILABLE', httpStatus: 503, retryable: true, message: 'Progress could not load. Try again.' });
+    throw hostedOnboardingError({ code: 'PROGRESS_UNAVAILABLE', httpStatus: 503, retryable: true, message: 'Progress could not load. Try again.',
+      details: { operationName, type: describeLoggedErrorType(error) } });
   }
 }

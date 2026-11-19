@@ -5,6 +5,7 @@ import type { PrismaClient } from '@prisma/client';
 import { openHostedUserSecureBoxBytes, sealHostedUserSecureBoxBytes } from '../../hosted-crypto/secure-box';
 import { hostedOnboardingError } from '../../hosted-onboarding/errors';
 import { getPrisma } from '../../prisma';
+import { progressEffect } from './http';
 import { openProgress, openProgressMany, sealProgress } from './crypto';
 import type { BeforeProgressMutation } from './state';
 import type { Day, Pic, PicUploadQuery } from './contract';
@@ -25,18 +26,26 @@ const conflict = () => hostedOnboardingError({ code: 'PROGRESS_PIC_CONFLICT', ht
 export async function putProgressPic(memberId: string, input: PicUploadQuery, bytes: Uint8Array, beforeMutationTx: BeforeProgressMutation): Promise<void> {
   const db = getPrisma(), control = progressMediaStore();
   const storageKey = `progress/${randomBytes(16).toString('hex')}.jpg`;
-  const metaEncrypted = await sealProgress(metaTarget(memberId, input.id), { measureId: input.measureId });
-  const row = await db.$transaction(async tx => {
+  // PostgreSQL returns UUIDs in lowercase when the metadata is reopened.
+  const metaEncrypted = await progressEffect('seal_picture_metadata', () =>
+    sealProgress(metaTarget(memberId, input.id.toLowerCase()), { measureId: input.measureId }));
+  const row = await progressEffect('register_picture', () => db.$transaction(async tx => {
     await beforeMutationTx(tx);
     await tx.gameProgressPic.createMany({ data: [{ id: input.id, memberId, storageKey, takenAt: new Date(input.takenAt), metaEncrypted }], skipDuplicates: true });
     return tx.gameProgressPic.findFirst({ where: { id: input.id, memberId, retiredAt: null } });
-  });
+  }));
   if (!row) throw conflict();
-  const meta = await openProgress<{ measureId: string }>(metaTarget(memberId, row.id), row.metaEncrypted);
+  const meta = await progressEffect('open_picture_metadata', () =>
+    openProgress<{ measureId: string }>(metaTarget(memberId, row.id), row.metaEncrypted));
   if (meta.measureId !== input.measureId || row.takenAt.getTime() !== Date.parse(input.takenAt)) throw conflict();
-  const envelope = await sealHostedUserSecureBoxBytes({ ...bytesTarget(memberId, row.storageKey), value: bytes });
-  await control.putProgressPic({ userId: memberId, mediaId: row.storageKey, envelope, hash: createHash('sha256').update(bytes).digest('hex') });
-  if (!await db.gameProgressPic.findFirst({ where: { id: input.id, memberId, retiredAt: null }, select: { id: true } })) throw conflict();
+  const envelope = await progressEffect('seal_picture_bytes', () =>
+    sealHostedUserSecureBoxBytes({ ...bytesTarget(memberId, row.storageKey), value: bytes }));
+  await progressEffect('stage_picture', () => control.putProgressPic({
+    userId: memberId, mediaId: row.storageKey, envelope, hash: createHash('sha256').update(bytes).digest('hex'),
+  }));
+  const live = await progressEffect('recheck_picture', () =>
+    db.gameProgressPic.findFirst({ where: { id: input.id, memberId, retiredAt: null }, select: { id: true } }));
+  if (!live) throw conflict();
 }
 
 export async function readProgressPic(memberId: string, id: string): Promise<Uint8Array> {

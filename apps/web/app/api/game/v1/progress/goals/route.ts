@@ -11,7 +11,7 @@ export const GET = withProgressJsonError(async (request: Request) => runWithHost
   const auth = await requireGameMemberAuth(request);
   const units = clientUnits(request);
   const query = parseGoalsQuery(Object.fromEntries(new URL(request.url).searchParams));
-  return jsonOk(await progressEffect(() => query.measure === "steps"
+  return jsonOk(await progressEffect('read_goals', () => query.measure === "steps"
     ? readStepsGoals(auth, request.signal, query, units)
     : readGoals(auth.member.id, query, units, tx => assertGameMemberAuthCurrentTx(auth, tx))));
 }));

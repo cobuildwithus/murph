@@ -21,7 +21,7 @@ export const GET = withProgressJsonError(async (request: Request) => runWithHost
   const auth = await requireGameMemberAuth(request);
   const units = clientUnits(request);
   const query = parseMapQuery(Object.fromEntries(new URL(request.url).searchParams));
-  return progressEffect(async () => {
+  return progressEffect('read_map', async () => {
     let polyline: string, progress: number;
     if ('from' in query) {
       // A preview's picture needs only the road, not its towns.

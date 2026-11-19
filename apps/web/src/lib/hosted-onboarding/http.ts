@@ -119,8 +119,8 @@ function mapHostedOnboardingError(error: unknown) {
   if (error.code === "HOSTED_VAULT_SHARE_DELIVERY_DEFERRED") {
     return { ...mapping, log: null };
   }
-  // Result-size attribution is log-only; preserve the existing response body.
-  if (error.code === "CONNECTED_APPS_RESULT_TOO_LARGE") {
+  // Operational diagnostics belong only in the route log.
+  if (error.code === "CONNECTED_APPS_RESULT_TOO_LARGE" || error.code === "PROGRESS_UNAVAILABLE") {
     delete mapping.error.details;
   }
   const logDetails = describeHostedOnboardingDomainErrorDetailsForLog(error.details);

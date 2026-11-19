@@ -12,7 +12,7 @@ export const runtime = 'nodejs';
 /** The medal photo the Settings row and the photo step show. */
 export const GET = withProgressJsonError(async (request: Request) => runWithHostedDomainRootUnwrapCache(async () => {
   const auth = await requireGameMemberAuth(request);
-  return progressEffect(async () => new Response(new Uint8Array(await readSharePhoto(auth.member.id)), {
+  return progressEffect('read_share_photo', async () => new Response(new Uint8Array(await readSharePhoto(auth.member.id)), {
     headers: { 'Content-Type': 'image/jpeg', 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' },
   }));
 }));
@@ -23,6 +23,6 @@ export const PUT = withProgressJsonError(async (request: Request) => runWithHost
   const isJpeg = request.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() === 'image/jpeg';
   const source = isJpeg ? { from: 'bytes' as const, bytes: await readProgressJpeg(request) }
     : parseSharePhoto(await readJsonObject(request, { limitBytes: 512 }));
-  await progressEffect(() => putSharePhoto(auth.member.id, source, tx => assertGameMemberAuthCurrentTx(auth, tx)));
+  await progressEffect('save_share_photo', () => putSharePhoto(auth.member.id, source, tx => assertGameMemberAuthCurrentTx(auth, tx)));
   return jsonOk({ ok: true });
 }));

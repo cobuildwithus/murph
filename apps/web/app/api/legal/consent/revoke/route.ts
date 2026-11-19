@@ -32,7 +32,7 @@ export const POST = withJsonError(async (request: Request) => {
   const consent = parseHostedConsentRevokeRequest(body);
 
   if (consent.scope === PROGRESS_SHARE_CONSENT_SCOPE) {
-    await progressEffect(() => decideProgressShareConsent({ memberId: auth.member.id, decision: 'deny', prisma,
+    await progressEffect('revoke_share_consent', () => decideProgressShareConsent({ memberId: auth.member.id, decision: 'deny', prisma,
       beforeMutationTx: tx => assertHostedAppSessionCurrentTx({ memberId: auth.member.id, prisma: tx,
         request, sessionId: auth.sessionId, authProof: auth.authProof }) }));
     return jsonOk(await readHostedConsentStatus({ memberId: auth.member.id, prisma }));

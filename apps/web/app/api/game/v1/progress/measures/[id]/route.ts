@@ -21,7 +21,7 @@ export const PUT = withProgressJsonError(async (request: Request, context: { par
   });
   const body = parseSetMeasureBody(raw);
   const beforeMutationTx = (tx: Parameters<typeof assertGameMemberAuthCurrentTx>[1]) => assertGameMemberAuthCurrentTx(auth, tx);
-  return progressEffect(async () => {
+  return progressEffect('update_measure', async () => {
     if (id === "steps") return jsonOk({ ok: true, measure: await setStepsMeasure(auth, request.signal, body, units) });
     const measureId = await setMeasure(auth.member.id, id, body, beforeMutationTx);
     const view = await readProgress(auth.member.id, units, beforeMutationTx);

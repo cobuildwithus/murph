@@ -190,7 +190,7 @@ export const POST = withJsonError(async (request: Request) => {
     scheduleBrowserVaultRefreshAfterResponse({ userId: auth.member.id });
   }
 
-  const shareRecords = await progressEffect(() => prepareProgressShareExport(auth.member.id, () =>
+  const shareRecords = await progressEffect('prepare_share_export', () => prepareProgressShareExport(auth.member.id, () =>
     prisma.$transaction(tx => assertHostedAppSessionCurrentTx({ memberId: auth.member.id, prisma: tx,
       request, sessionId: auth.sessionId, authProof: auth.authProof }))));
 

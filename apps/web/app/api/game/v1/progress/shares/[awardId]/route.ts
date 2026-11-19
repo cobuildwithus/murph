@@ -25,7 +25,7 @@ async function shareRequest(request: Request, context: Context) {
 
 export const GET = withProgressJsonError(async (request: Request, context: Context) => runWithHostedDomainRootUnwrapCache(async () => {
   const input = await shareRequest(request, context);
-  return jsonOk(await progressEffect(() => readProgressShare(input)));
+  return jsonOk(await progressEffect('read_share', () => readProgressShare(input)));
 }));
 
 export const POST = withProgressJsonError(async (request: Request, context: Context) => runWithHostedDomainRootUnwrapCache(async () => {
@@ -33,6 +33,6 @@ export const POST = withProgressJsonError(async (request: Request, context: Cont
   // Empty starts the first picture; { replaces } is Change photo.
   const body = await readRawBodyBuffer(request, { limitBytes: 256 });
   const replaces = body.length === 0 ? undefined : parseShareStart(parseJson(body)).replaces;
-  const view = await progressEffect(() => startProgressShare(input, replaces));
+  const view = await progressEffect('start_share', () => startProgressShare(input, replaces));
   return jsonOk(view, view.presentation.state === 'generating' ? 202 : 200);
 }));
