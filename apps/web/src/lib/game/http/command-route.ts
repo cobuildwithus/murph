@@ -5,6 +5,7 @@ import { runGameCommand } from "../service";
 import { assertGameMemberAuthCurrentTx, requireCurrentTermsFor, requireGameMemberAuth } from "./auth";
 import { gameCommandError } from "./errors";
 import { hasGameMultiplayer } from "./capability";
+import { GameRequestTiming } from "./timing";
 
 const BODY_LIMIT_BYTES = 64 * 1024;
 
@@ -26,16 +27,26 @@ export async function respondToGameCommand(
     limitBytes?: number;
   } = { body: true },
 ): Promise<Response> {
-  const auth = await withRetryableServerFailures(() => requireGameMemberAuth(request));
-  const memberId = auth.member.id;
-  const body = options.body ? await readJsonObject(request, { limitBytes: options.limitBytes ?? BODY_LIMIT_BYTES }) : {};
-  const built = command(body);
-  return withRetryableServerFailures(async () => {
-    await requireCurrentTermsFor(memberId, built);
-    const result = await runGameCommand({ actorMemberId: memberId, command: built, multiplayer: hasGameMultiplayer(request),
-      beforeMutationTx: tx => assertGameMemberAuthCurrentTx(auth, tx) });
-    if (!result.ok) throw gameCommandError(result.error, result.status);
-    const game = result.game && options.answer ? await options.answer(result.game, { command: built, memberId }) : result.game;
-    return jsonOk({ ok: true, game, ...(result.profile ? { profile: result.profile } : {}) });
-  });
+  const timing = new GameRequestTiming("game.command.timing");
+  let type = "unknown", ok = false;
+  try {
+    const auth = await timing.measure("auth", () => withRetryableServerFailures(() => requireGameMemberAuth(request)));
+    const memberId = auth.member.id;
+    const body = options.body ? await timing.measure("body", () => readJsonObject(request, { limitBytes: options.limitBytes ?? BODY_LIMIT_BYTES })) : {};
+    const built = command(body);
+    type = String(built.type);
+    const response = await withRetryableServerFailures(async () => {
+      await timing.measure("terms", () => requireCurrentTermsFor(memberId, built));
+      const result = await timing.measure("command", () => runGameCommand({ actorMemberId: memberId, command: built,
+        multiplayer: hasGameMultiplayer(request), beforeMutationTx: tx => assertGameMemberAuthCurrentTx(auth, tx) }));
+      if (!result.ok) throw gameCommandError(result.error, result.status);
+      const { answer } = options, answered = result.game;
+      const game = answered && answer ? await timing.measure("answer", () => answer(answered, { command: built, memberId })) : answered;
+      return jsonOk({ ok: true, game, ...(result.profile ? { profile: result.profile } : {}) });
+    });
+    ok = true;
+    return response;
+  } finally {
+    timing.log({ type, ok });
+  }
 }
