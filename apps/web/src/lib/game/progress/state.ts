@@ -18,6 +18,8 @@ export interface RouteLeg {
   towns: { name: string; atM: number; place?: { id: string; label: string } | null }[];
   straightLine: boolean;
   startTotal: number;
+  /** The member's day it started; absent on legs from before start days and on first legs (they start on their first counted day). */
+  startedOn?: Day;
 }
 export interface MeasureState {
   goal?: { rungId: string } | { route: { from: string; to: string } } | { found: FoundEntry };

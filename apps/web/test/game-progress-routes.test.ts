@@ -4,7 +4,7 @@ import type { Prisma } from "@prisma/client";
 import type { TermWords } from "../src/lib/game/rules";
 
 const mocks = vi.hoisted(() => ({ games: vi.fn(), entries: vi.fn(), tasks: vi.fn(), states: vi.fn(), awards: vi.fn(),
-  createAwards: vi.fn(), updateSeen: vi.fn(), patch: vi.fn(), after: vi.fn(), auth: vi.fn(), current: vi.fn(), health: vi.fn(), transaction: vi.fn(), suggest: vi.fn(), pictures: vi.fn(), resolveRoute: vi.fn(), consume: vi.fn(),
+  createAwards: vi.fn(), updateSeen: vi.fn(), patch: vi.fn(), after: vi.fn(), auth: vi.fn(), current: vi.fn(), health: vi.fn(), transaction: vi.fn(), suggest: vi.fn(), pictures: vi.fn(), resolveRoute: vi.fn(), preview: vi.fn(), consume: vi.fn(),
   profileCreatedAt: { value: new Date("2026-11-01T12:00:00Z") } }));
 vi.mock("@/src/lib/better-auth/rate-limit", () => ({ hostedAuthRateLimitStorage: () => ({ consume: mocks.consume }) }));
 vi.mock("next/server", async original => ({ ...await original<typeof import("next/server")>(), after: mocks.after }));
@@ -18,7 +18,8 @@ vi.mock("@/src/lib/game/http/auth", () => ({ requireGameMemberAuth: mocks.auth, 
 vi.mock("@/src/lib/browser-vault/authority", () => ({ assertBrowserVaultMemberAuthority: mocks.health }));
 vi.mock("@/src/lib/game/progress/settlement", () => ({ scheduleProgressSettlement: vi.fn() }));
 vi.mock("@/src/lib/game/progress/state", () => ({ patchMeasureState: mocks.patch }));
-vi.mock("@/src/lib/game/progress/mapbox", () => ({ resolveRoute: mocks.resolveRoute }));
+vi.mock("@/src/lib/game/progress/mapbox", () => ({ resolveRoute: mocks.resolveRoute, previewRoute: async (from: string, to: string, fix?: unknown) => mocks.preview.getMockImplementation()
+  ? mocks.preview(from, to, fix) : ({ leg: await mocks.resolveRoute(from, to), query: { from, to }, fixed: null }), PlaceNotFound: class PlaceNotFound extends Error { constructor(readonly typed: string) { super(typed); } } }));
 vi.mock("@/src/lib/game/progress/infer", async original => ({ ...await original<typeof import("../src/lib/game/progress/infer")>(),
   inferenceClient: () => ({ responses: { create: mocks.suggest } }) }));
 // Keep the test port's sealed content opaque to the rows and exercise the production batch bindings.
@@ -95,7 +96,8 @@ describe("Progress HTTP contracts", () => {
     const body = goalsSchema.parse(await response.json());
     expect(body).toMatchObject({ note: null, route: { from: "London", to: "Paris", distanceText, detail, straightLine,
       map: "/api/game/v1/progress/map?from=London&to=Paris&size=card" } });
-    expect(body.route!.towns).toEqual(straightLine ? [] : [{ name: "Town", atText: "mile 1.2", aheadText: "1.2 mi to go", x: expect.any(Number), y: expect.any(Number), passedOn: null, poster: null, stepsText: null }]);
+    expect(body.route!.towns).toEqual(straightLine ? [] : [{ name: "Town", atText: "mile 1.2", aheadText: "1.2 mi to go", x: expect.any(Number), y: expect.any(Number), passedOn: null, poster: null, stepsText: null, at: 1.2, region: null, regionCode: null }]);
+    expect(body.route!.fixed).toBeNull(); expect(body.notFound).toBeUndefined();
     expect(mocks.resolveRoute).toHaveBeenCalledExactlyOnceWith("London", "Paris");
     expect(mocks.patch).not.toHaveBeenCalled(); expect(mocks.createAwards).not.toHaveBeenCalled();
   });
@@ -145,6 +147,26 @@ describe("Progress HTTP contracts", () => {
     expect(response.status).toBe(200);
     expect((await response.json()).measure.route).toMatchObject({ name: "Boston to New York", progress: 0, goalPicked: true });
     expect(mocks.resolveRoute).toHaveBeenCalledExactlyOnceWith("Boston", "New York");
+  });
+  it("previews a fixed place under the words that find it again, and names a place found nowhere", async () => {
+    mocks.entries.mockResolvedValue([routeEntry()]);
+    mocks.preview.mockImplementation(async (from: string, _to: string, fix: unknown) => {
+      expect(fix).toEqual(expect.any(Function));
+      return { leg: { ...routeLeg, from, to: "Lisbon", distanceM: 1609.344 * 1200, straightLine: true, towns: [] },
+        query: { from, to: "Lisbon, Lisbon, Portugal" }, fixed: { typed: "Lisbn", showing: "Lisbon" } };
+    });
+    const fixed = goalsSchema.parse(await (await goals(request("/goals?measure=walk.meters&q=London%20to%20Lisbn"))).json());
+    expect(fixed.route).toMatchObject({ from: "London", to: "Lisbon, Lisbon, Portugal", fixed: { typed: "Lisbn", showing: "Lisbon" },
+      map: "/api/game/v1/progress/map?from=London&to=Lisbon%2C+Lisbon%2C+Portugal&size=card" });
+    const { PlaceNotFound } = await import("@/src/lib/game/progress/mapbox");
+    mocks.preview.mockRejectedValue(new PlaceNotFound("Grandmas house"));
+    const missing = await goals(request("/goals?measure=walk.meters&q=London%20to%20Grandmas%20house"));
+    expect(missing.status).toBe(200);
+    const body = goalsSchema.parse(await missing.json());
+    expect(body).toMatchObject({ route: null, notFound: "Grandmas house", note: null });
+    mocks.preview.mockRejectedValue(new Error("provider down"));
+    expect((await goals(request("/goals?measure=walk.meters&q=London%20to%20Lisbon"))).status).toBe(503);
+    mocks.preview.mockReset();
   });
   it("returns route tiles and a typed preview without offering non-place routes", async () => {
     mocks.entries.mockResolvedValue([routeEntry()]);

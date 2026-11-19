@@ -413,7 +413,10 @@
             "y": 0.9,
             "passedOn": "2026-10-21",
             "poster": null,
-            "stepsText": null
+            "stepsText": null,
+            "at": 0,
+            "region": null,
+            "regionCode": null
           },
           {
             "name": "San Francisco",
@@ -423,7 +426,10 @@
             "y": 0.1,
             "passedOn": "2026-11-14",
             "poster": null,
-            "stepsText": null
+            "stepsText": null,
+            "at": 0,
+            "region": null,
+            "regionCode": null
           }
         ],
         "goalPicked": true,
@@ -437,7 +443,10 @@
             "y": 0.784766,
             "passedOn": "2026-10-21",
             "poster": null,
-            "stepsText": null
+            "stepsText": null,
+            "at": 0,
+            "region": null,
+            "regionCode": null
           },
           {
             "name": "San Francisco",
@@ -447,7 +456,10 @@
             "y": 0.215234,
             "passedOn": "2026-11-14",
             "poster": null,
-            "stepsText": null
+            "stepsText": null,
+            "at": 0,
+            "region": null,
+            "regionCode": null
           }
         ],
         "here": {
@@ -461,7 +473,25 @@
         "shareAwardId": "route-sf",
         "mapArt": null,
         "drawerMapArt": null,
-        "etaText": null
+        "etaText": null,
+        "startedOn": "2026-10-21",
+        "daysText": "in 25 days",
+        "etaOn": null,
+        "remainingText": null,
+        "chart": {
+          "unit": "mi",
+          "distance": 501,
+          "points": [
+            [
+              "2026-10-21",
+              0
+            ],
+            [
+              "2026-11-14",
+              501
+            ]
+          ]
+        }
       },
       "pics": []
     }

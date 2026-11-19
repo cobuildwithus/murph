@@ -377,7 +377,10 @@
               "state": "ready",
               "path": "/api/game/v1/progress/art/poster%3Av1%3Adplace0"
             },
-            "stepsText": "41,250 steps"
+            "stepsText": "41,250 steps",
+            "at": 0,
+            "region": null,
+            "regionCode": null
           },
           {
             "name": "Del Mar",
@@ -390,7 +393,10 @@
               "state": "ready",
               "path": "/api/game/v1/progress/art/poster%3Av1%3Adplace1"
             },
-            "stepsText": "82,500 steps"
+            "stepsText": "82,500 steps",
+            "at": 19,
+            "region": null,
+            "regionCode": null
           },
           {
             "name": "Oceanside",
@@ -403,7 +409,10 @@
               "state": "ready",
               "path": "/api/game/v1/progress/art/poster%3Av1%3Adplace2"
             },
-            "stepsText": "123,750 steps"
+            "stepsText": "123,750 steps",
+            "at": 38,
+            "region": null,
+            "regionCode": null
           },
           {
             "name": "San Clemente",
@@ -416,7 +425,10 @@
               "state": "ready",
               "path": "/api/game/v1/progress/art/poster%3Av1%3Adplace3"
             },
-            "stepsText": "165,000 steps"
+            "stepsText": "165,000 steps",
+            "at": 59,
+            "region": null,
+            "regionCode": null
           },
           {
             "name": "Irvine",
@@ -429,7 +441,10 @@
               "state": "ready",
               "path": "/api/game/v1/progress/art/poster%3Av1%3Adplace4"
             },
-            "stepsText": "206,250 steps"
+            "stepsText": "206,250 steps",
+            "at": 84,
+            "region": null,
+            "regionCode": null
           },
           {
             "name": "LA",
@@ -444,7 +459,10 @@
               "expiresAt": "2026-11-18T19:04:00.000Z",
               "typicalSeconds": 50
             },
-            "stepsText": null
+            "stepsText": null,
+            "at": 33,
+            "region": null,
+            "regionCode": null
           },
           {
             "name": "San Francisco",
@@ -454,7 +472,10 @@
             "y": 0.1,
             "passedOn": null,
             "poster": null,
-            "stepsText": null
+            "stepsText": null,
+            "at": 416,
+            "region": null,
+            "regionCode": null
           }
         ],
         "goalPicked": true,
@@ -471,7 +492,10 @@
               "state": "ready",
               "path": "/api/game/v1/progress/art/poster%3Av1%3Adplace0"
             },
-            "stepsText": "41,250 steps"
+            "stepsText": "41,250 steps",
+            "at": 0,
+            "region": null,
+            "regionCode": null
           },
           {
             "name": "Del Mar",
@@ -484,7 +508,10 @@
               "state": "ready",
               "path": "/api/game/v1/progress/art/poster%3Av1%3Adplace1"
             },
-            "stepsText": "82,500 steps"
+            "stepsText": "82,500 steps",
+            "at": 19,
+            "region": null,
+            "regionCode": null
           },
           {
             "name": "Oceanside",
@@ -497,7 +524,10 @@
               "state": "ready",
               "path": "/api/game/v1/progress/art/poster%3Av1%3Adplace2"
             },
-            "stepsText": "123,750 steps"
+            "stepsText": "123,750 steps",
+            "at": 38,
+            "region": null,
+            "regionCode": null
           },
           {
             "name": "San Clemente",
@@ -510,7 +540,10 @@
               "state": "ready",
               "path": "/api/game/v1/progress/art/poster%3Av1%3Adplace3"
             },
-            "stepsText": "165,000 steps"
+            "stepsText": "165,000 steps",
+            "at": 59,
+            "region": null,
+            "regionCode": null
           },
           {
             "name": "Irvine",
@@ -523,7 +556,10 @@
               "state": "ready",
               "path": "/api/game/v1/progress/art/poster%3Av1%3Adplace4"
             },
-            "stepsText": "206,250 steps"
+            "stepsText": "206,250 steps",
+            "at": 84,
+            "region": null,
+            "regionCode": null
           },
           {
             "name": "LA",
@@ -538,7 +574,10 @@
               "expiresAt": "2026-11-18T19:04:00.000Z",
               "typicalSeconds": 50
             },
-            "stepsText": null
+            "stepsText": null,
+            "at": 33,
+            "region": null,
+            "regionCode": null
           },
           {
             "name": "San Francisco",
@@ -548,7 +587,10 @@
             "y": 0.215234,
             "passedOn": null,
             "poster": null,
-            "stepsText": null
+            "stepsText": null,
+            "at": 416,
+            "region": null,
+            "regionCode": null
           }
         ],
         "here": {
@@ -567,7 +609,25 @@
           "typicalSeconds": 80
         },
         "drawerMapArt": null,
-        "etaText": "10 weeks"
+        "etaText": "10 weeks",
+        "startedOn": "2026-10-21",
+        "daysText": "in 25 days",
+        "etaOn": "2027-01-23",
+        "remainingText": "416 mi left",
+        "chart": {
+          "unit": "mi",
+          "distance": 501,
+          "points": [
+            [
+              "2026-10-21",
+              0
+            ],
+            [
+              "2026-11-14",
+              85
+            ]
+          ]
+        }
       },
       "pics": []
     }

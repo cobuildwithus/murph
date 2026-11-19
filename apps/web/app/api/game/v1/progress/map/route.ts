@@ -5,7 +5,7 @@ import { parseMapQuery } from '@/src/lib/game/progress/contract';
 import { assertBrowserVaultMemberAuthority } from '@/src/lib/browser-vault/authority';
 import { readProgressStepsRoute } from '@/src/lib/game/progress/health-reader';
 import { progressEffect, withProgressJsonError } from '@/src/lib/game/progress/http';
-import { renderRouteMap, resolveRoute } from '@/src/lib/game/progress/mapbox';
+import { renderRouteMap, resolveRouteGeometry } from '@/src/lib/game/progress/mapbox';
 import { readArtBytes } from '@/src/lib/game/progress/place-art';
 import { drawRouteOnPainting, mapKey } from '@/src/lib/game/progress/place-art-make';
 import { mapProgress } from '@/src/lib/game/progress/route-geometry';
@@ -24,7 +24,8 @@ export const GET = withProgressJsonError(async (request: Request) => runWithHost
   return progressEffect(async () => {
     let polyline: string, progress: number;
     if ('from' in query) {
-      polyline = (await resolveRoute(query.from, query.to)).polyline;
+      // A preview's picture needs only the road, not its towns.
+      polyline = (await resolveRouteGeometry(query.from, query.to)).polyline;
       progress = 0;
     } else if (query.measure === 'steps') {
       ({ polyline, progress } = await readProgressStepsRoute(auth, request.signal));

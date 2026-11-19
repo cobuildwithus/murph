@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('server-only', () => ({}));
-import { resolveRoute, renderRouteMap, reversePlace, satelliteImage } from '../src/lib/game/progress/mapbox';
+import { PlaceNotFound, previewRoute, resolveRoute, resolveRouteGeometry, renderRouteMap, reversePlace, satelliteImage, type FoundPlace } from '../src/lib/game/progress/mapbox';
 import { decodePolyline, encodePolyline, routeBbox } from '../src/lib/game/progress/route-geometry';
 const polyline = encodePolyline([[-117.16, 32.72], [-118.24, 34.05], [-122.42, 37.77]]);
 const feature = (name: string, coordinates: [number, number]) => ({ features: [{ properties: { name }, geometry: { coordinates } }] });
@@ -110,5 +110,90 @@ describe('Progress Mapbox boundary', () => {
     expect(response.headers.get('content-type')).toBe('image/png');
     expect([...new Uint8Array(await response.arrayBuffer())]).toEqual([137, 80, 78, 71]);
     expect(JSON.stringify([...response.headers])).not.toContain('synthetic-token');
+  });
+});
+
+describe('Progress place fixes', () => {
+  const lisbon = { name: 'Lisbon', mapbox_id: 'dplace-lis', place_formatted: 'Lisbon, Portugal' };
+  const lisbonLabel = 'Lisbon, Lisbon, Portugal';
+  const found = (properties: object, coordinates: [number, number]) => ({ properties, geometry: { coordinates } });
+  /** Start is found; "Lisbn" is not, its close spellings are Lisbon and a namesake, and its qualified label finds `kept`. */
+  function places(kept = found(lisbon, [-9.14, 38.72])) {
+    mockFetch.mockImplementation(async (url: URL) => {
+      const q = url.searchParams.get('q');
+      if (url.pathname.endsWith('/forward')) {
+        if (q === 'Start') return Response.json({ features: [found({ name: 'Start' }, [-117.16, 32.72])] });
+        if (q === lisbonLabel) return Response.json({ features: [kept] });
+        if (url.searchParams.get('autocomplete') === 'true') return Response.json({ features: [found(lisbon, [-9.14, 38.72]),
+          found({ name: 'Lisbon', mapbox_id: 'dplace-lis-nd', place_formatted: 'North Dakota, United States' }, [-97.68, 46.44])] });
+        return Response.json({ features: [] });
+      }
+      if (url.pathname.endsWith('/reverse')) return Response.json(feature('Town', [-118, 34]));
+      return Response.json({ code: 'Ok', routes: [{ distance: 800000, geometry: polyline }] });
+    });
+  }
+  const forwards = () => mockFetch.mock.calls.map(call => call[0] as URL).filter(url => url.pathname.endsWith('/forward'));
+
+  it('looks a slip up once among close spellings and saves the fixed place under its qualified label', async () => {
+    places();
+    const fix = vi.fn(async (_typed: string, candidates: readonly FoundPlace[]) => candidates[0]!);
+    const preview = await previewRoute('Start', 'Lisbn', fix);
+    expect(fix).toHaveBeenCalledExactlyOnceWith('Lisbn', [
+      { at: [-9.14, 38.72], id: 'dplace-lis', name: 'Lisbon', label: lisbonLabel },
+      { at: [-97.68, 46.44], id: 'dplace-lis-nd', name: 'Lisbon', label: 'Lisbon, North Dakota, United States' }]);
+    expect(preview.fixed).toEqual({ typed: 'Lisbn', showing: 'Lisbon' });
+    expect(preview.query).toEqual({ from: 'Start', to: lisbonLabel });
+    expect(preview.leg).toMatchObject({ from: 'Start', to: 'Lisbon' });
+    const near = forwards().find(url => url.searchParams.get('autocomplete') === 'true')!;
+    expect(near.searchParams.get('permanent')).toBeNull(); expect(near.searchParams.get('limit')).toBe('5');
+    expect(forwards().find(url => url.searchParams.get('q') === lisbonLabel)!.searchParams.get('permanent')).toBe('true');
+    // The save looks the label up directly: no close spellings, no fixer, same short name.
+    mockFetch.mockClear();
+    expect(await resolveRoute('Start', lisbonLabel)).toMatchObject({ from: 'Start', to: 'Lisbon' });
+    expect(forwards().map(url => url.searchParams.get('autocomplete'))).toEqual(['false', 'false']);
+  });
+
+  it.each([
+    ['picks none', async () => null],
+    ['fails', async () => { throw new Error('decisions down'); }],
+  ])('names the typed words when the fixer %s', async (_, fixer) => {
+    places();
+    const fix = vi.fn(fixer);
+    await expect(previewRoute('Start', 'Lisbn', fix).catch(error => { if (error instanceof PlaceNotFound) return error.typed; throw error; }))
+      .resolves.toBe('Lisbn');
+  });
+
+  it('refuses a pick whose qualified label finds a different place', async () => {
+    places(found({ name: 'Lisbon', mapbox_id: 'dplace-other', place_formatted: 'Lisbon, Portugal' }, [-9.14, 38.72]));
+    await expect(previewRoute('Start', 'Lisbn', async (_typed, candidates) => candidates[0]!)).rejects.toBeInstanceOf(PlaceNotFound);
+  });
+
+  it('skips the fixer with no close spellings, and never fixes without one', async () => {
+    mockFetch.mockImplementation(async (url: URL) => url.searchParams.get('q') === 'Start'
+      ? Response.json({ features: [found({ name: 'Start' }, [-117.16, 32.72])] }) : Response.json({ features: [] }));
+    const fix = vi.fn(async () => null);
+    await expect(previewRoute('Start', 'Grandmas house', fix)).rejects.toMatchObject({ typed: 'Grandmas house' });
+    expect(fix).not.toHaveBeenCalled();
+    mockFetch.mockClear();
+    await expect(resolveRoute('Start', 'Grandmas house')).rejects.toMatchObject({ httpStatus: 404, code: 'PROGRESS_PLACE_NOT_FOUND' });
+    expect(forwards().every(url => url.searchParams.get('autocomplete') === 'false')).toBe(true);
+  });
+
+  it('keeps two towns of one name and drops one place sampled twice', async () => {
+    const towns = [['Springfield', 'dplace-a'], ['Springfield', 'dplace-b'], ['Springfield', 'dplace-b'], ['Hill', null]];
+    let next = 0;
+    respond('Ok', 200, async () => {
+      const [name, id] = towns[Math.min(next++, towns.length - 1)]!;
+      return Response.json({ features: [found({ name, ...(id && { mapbox_id: id, place_formatted: 'Illinois, United States' }) }, [-118, 34])] });
+    });
+    const route = await resolveRoute('Start', 'End');
+    expect(route.towns.map(town => [town.name, town.place?.id ?? null])).toEqual([['Springfield', 'dplace-a'], ['Springfield', 'dplace-b'], ['Hill', null]]);
+  });
+
+  it('draws a preview picture from the road alone, with no town lookups', async () => {
+    respond('Ok');
+    expect(await resolveRouteGeometry('Start', 'End')).toMatchObject({ polyline, straightLine: false });
+    expect(mockFetch.mock.calls.map(call => (call[0] as URL).pathname).filter(path => path.endsWith('/reverse'))).toEqual([]);
+    expect(mockFetch).toHaveBeenCalledTimes(3);
   });
 });

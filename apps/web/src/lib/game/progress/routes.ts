@@ -5,7 +5,7 @@ import type { StoredAward } from './awards';
 import { patchMeasureState, type BeforeProgressMutation } from './state';
 import { hostedOnboardingError } from '../../hosted-onboarding/errors';
 import { invalidGameRequest } from '../http/errors';
-import { resolveRoute } from './mapbox';
+import { PlaceNotFound, previewRoute, resolveRoute, type PlaceFixer } from './mapbox';
 import { replaceRouteLeg, routeMeters, routeTowns } from './route-progress';
 import { formatAmount } from './format';
 import routesByTimeZone from './bank/routes-tz.json';
@@ -28,8 +28,8 @@ function bankPlaces(entry: BankEntry) {
   return entry.loop ? { from: entry.loop.start, to: entry.loop.start } : routePlaces(entry.name);
 }
 
-/** Only bank entries with routable places appear in the picker. */
-export async function readRouteGoals(query: string | undefined, unit: 'meters' | 'steps', total: number, units: ClientUnits): Promise<Goals> {
+/** Only bank entries with routable places appear in the picker. With a fixer, a typed place's slip is fixed; a place found nowhere is named. */
+export async function readRouteGoals(query: string | undefined, unit: 'meters' | 'steps', total: number, units: ClientUnits, fix?: PlaceFixer): Promise<Goals> {
   const eligible = (entry: BankEntry) => entry.kind === 'route' && bankPlaces(entry) !== null;
   const tile = (entry: BankEntry): Rung => ({ id: entry.id, name: entry.name, short: entry.short, tagline: entry.tagline, shareAwardId: null, drawing: null, at: unit === 'steps' ? entry.at / 1609.344 * 2000 : entry.at,
     atText: formatAmount(entry.at, 'meters', 'full', units).text, blurb: units === 'metric' ? entry.blurbMetric ?? entry.blurb : entry.blurb, where: entry.where, on: null, toGo: null });
@@ -38,8 +38,15 @@ export async function readRouteGoals(query: string | undefined, unit: 'meters' |
   const matches = search(query).filter(eligible);
   const exact = matches.find(entry => entry.name.toLowerCase() === query.toLowerCase());
   const places = exact ? bankPlaces(exact) : routePlaces(query);
-  if (places) return { tiles, match: null, suggestions: [], note: null,
-    route: await routeGoalPreview(places.from, places.to, routeMeters(unit, total), units) };
+  if (places) {
+    try {
+      return { tiles, match: null, suggestions: [], note: null,
+        route: await routeGoalPreview(places.from, places.to, routeMeters(unit, total), units, exact ? undefined : fix) };
+    } catch (error) {
+      if (!(error instanceof PlaceNotFound)) throw error;
+      return { tiles, match: null, suggestions: tiles.slice(0, 3), note: null, route: null, notFound: error.typed };
+    }
+  }
   return { tiles, match: null, suggestions: matches.slice(0, 4).map(tile), note: null, route: null };
 }
 
@@ -53,6 +60,8 @@ export async function setRouteGoal(memberId: string, measureId: string, goal: Me
   points: readonly [Day, number][];
   awards: readonly StoredAward[];
   incomplete: boolean;
+  /** The member's day: a new leg after a finished one starts on it. */
+  today: Day;
   beforeMutationTx: BeforeProgressMutation;
 }) {
   if (context.incomplete) throw routeProgressIncomplete();
@@ -60,11 +69,12 @@ export async function setRouteGoal(memberId: string, measureId: string, goal: Me
   const places = 'from' in goal ? goal : entry && bankPlaces(entry);
   if (!places) throw invalidGameRequest('Choose a route with two places.');
   const { from, to } = places;
+  // A previewed route's words find its places again, a fixed one's included: no fixer here.
   const next = await resolveRoute(from, to);
   const total = routeMeters(measureId, context.points.at(-1)?.[1] ?? 0);
   const earned = new Set(context.awards.map(award => award.key));
   return patchMeasureState(memberId, measureId, previous => ({ goal: { route: { from, to } },
-    legs: replaceRouteLeg(measureId, previous.legs ?? [], next, total, earned) }), context.beforeMutationTx);
+    legs: replaceRouteLeg(measureId, previous.legs ?? [], next, total, earned, context.today) }), context.beforeMutationTx);
 }
 
 /** The curated table names checked bank routes, with no city or GPS lookup. */
@@ -105,13 +115,14 @@ export function routePlaces(name: string): { from: string; to: string } | null {
   return parts.length === 2 && parts.every(part => part.trim().length > 0) ? { from: parts[0]!.trim(), to: parts[1]!.trim() } : null;
 }
 
-export async function routeGoalPreview(from: string, to: string, totalM: number, units: ClientUnits): Promise<NonNullable<Goals['route']>> {
-  const route = await resolveRoute(from, to);
+export async function routeGoalPreview(from: string, to: string, totalM: number, units: ClientUnits, fix?: PlaceFixer): Promise<NonNullable<Goals['route']>> {
+  const { leg: route, query, fixed } = await previewRoute(from, to, fix);
   const current = formatAmount(totalM, 'meters', 'compact', units).text.split(' ')[0];
   const remaining = formatAmount(Math.max(0, route.distanceM - totalM), 'meters', 'compact', units).text.split(' ')[0];
   const detail = route.straightLine ? 'As the crow flies. No road crosses the ocean, so Murph counts the straight line.'
     : `By road. You're ${current} in, so ${remaining} to go.`;
-  return { from, to, distanceText: formatAmount(route.distanceM, 'meters', 'full', units).text.replace(' mi', ' miles'), detail,
-    straightLine: route.straightLine, towns: routeTowns({ ...route, startTotal: 0 }, [], 'card', units),
-    map: `/api/game/v1/progress/map?${new URLSearchParams({ from, to, size: 'card' })}` };
+  // The words that find these places again, so the map and the save draw the same route.
+  return { from: query.from, to: query.to, distanceText: formatAmount(route.distanceM, 'meters', 'full', units).text.replace(' mi', ' miles'), detail,
+    straightLine: route.straightLine, towns: routeTowns({ ...route, startTotal: 0 }, [], 'card', units), fixed,
+    map: `/api/game/v1/progress/map?${new URLSearchParams({ from: query.from, to: query.to, size: 'card' })}` };
 }

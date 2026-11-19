@@ -39,29 +39,84 @@ async function mapboxJson<T>(path: string, query: Record<string, string>, schema
   catch { throw unavailable(); }
 }
 
-async function geocode(place: string): Promise<Coordinate> {
+/** A place Mapbox found: its public id, its name, and its qualified label ("Newark, Delaware, United States"). */
+export interface FoundPlace { at: Coordinate; id: string | null; name: string; label: string }
+type Feature = z.infer<typeof geocoding>['features'][number];
+const foundPlace = ({ geometry, properties }: Feature): FoundPlace => ({ at: geometry.coordinates, id: properties.mapbox_id ?? null,
+  name: properties.name, label: properties.place_formatted ? `${properties.name}, ${properties.place_formatted}` : properties.name });
+
+/** Typed words nothing matched, in the goals preview: it names them instead of failing. */
+export class PlaceNotFound extends Error {
+  constructor(readonly typed: string) { super('Place not found.'); }
+}
+const placeNotFound = () => hostedOnboardingError({ code: 'PROGRESS_PLACE_NOT_FOUND', httpStatus: 404, message: 'That place was not found. Try a nearby city.' });
+
+/** Picks the place typed words meant from Mapbox's close spellings, or none. Only the goals preview has one. */
+export type PlaceFixer = (typed: string, candidates: readonly FoundPlace[]) => Promise<FoundPlace | null>;
+
+async function lookUp(place: string): Promise<FoundPlace | null> {
   const result = await mapboxJson('/search/geocode/v6/forward', { q: place, limit: '1', autocomplete: 'false', permanent: 'true' }, geocoding);
-  const match = result.features[0];
-  if (!match) throw hostedOnboardingError({ code: 'PROGRESS_PLACE_NOT_FOUND', httpStatus: 404, message: 'That place was not found. Try a nearby city.' });
-  return match.geometry.coordinates;
+  return result.features[0] ? foundPlace(result.features[0]) : null;
 }
 
-/** Only an explicit NoRoute is a straight line. NoSegment, transport and shape failures are 503s. */
-export async function resolveRoute(from: string, to: string) {
+const samePlace = (a: FoundPlace, b: FoundPlace) => a.id && b.id ? a.id === b.id : distanceM(a.at, b.at) <= 2_000;
+
+/**
+ * The place typed words name. A miss with a fixer asks Mapbox for close spellings (not kept, so not permanent),
+ * the fixer picks one, and the permanent lookup of its qualified label must find that same place.
+ */
+async function geocode(place: string, fix?: PlaceFixer): Promise<{ place: FoundPlace; fixed: boolean }> {
+  const found = await lookUp(place);
+  if (found) return { place: found, fixed: false };
+  if (!fix) throw placeNotFound();
+  const near = await mapboxJson('/search/geocode/v6/forward', { q: place, limit: '5', autocomplete: 'true' }, geocoding);
+  // A fixer that fails is a miss: the slip is shown as not found, never as an outage.
+  const pick = near.features.length ? await fix(place, near.features.map(foundPlace)).catch(() => null) : null;
+  const kept = pick && await lookUp(pick.label);
+  if (!pick || !kept || !samePlace(kept, pick)) throw new PlaceNotFound(place);
+  return { place: kept, fixed: true };
+}
+
+/** What a leg calls a place: its short name when the words were its qualified label (a fixed place, saved), else the words. */
+const legName = (words: string, place: FoundPlace) => words.toLowerCase() === place.label.toLowerCase() ? place.name : words;
+
+/**
+ * The road between two places, or the straight line over an ocean. Only an explicit NoRoute is a straight line;
+ * NoSegment, transport and shape failures are 503s. `query` holds the words that find each place again (a fixed
+ * place's qualified label), so a preview's map and its save look up the same places with no fixer.
+ */
+export async function resolveRouteGeometry(from: string, to: string, fix?: PlaceFixer) {
   // The picker returns a preview's endpoints on save. A checked loop has the same start and finish.
   const entry = from === to ? BANK.find(entry => entry.loop?.start === from) : undefined;
   const loop = entry?.loop;
-  const origin = geocode(from);
-  const [start, end] = await Promise.all([origin, loop ? origin : geocode(to)]);
-  const stops = [start, ...(loop?.via ?? []), end];
+  const origin = geocode(from, fix);
+  const [start, end] = await Promise.all([origin, loop ? origin : geocode(to, fix)]);
+  const query = { from: start.fixed ? start.place.label : from, to: end.fixed ? end.place.label : to };
+  const fixed = start.fixed ? { typed: from, showing: start.place.name } : end.fixed ? { typed: to, showing: end.place.name } : null;
+  const names = { entry, query, fixed, from: legName(query.from, start.place), to: legName(query.to, end.place) };
+  const stops = [start.place.at, ...(loop?.via ?? []), end.place.at];
   const result = await mapboxJson(`/directions/v5/mapbox/driving/${stops.map(point => point.join(',')).join(';')}`,
     { geometries: 'polyline', overview: 'simplified', steps: 'false' }, directions);
   if (result.code === 'NoRoute') {
     if (loop) throw unavailable();
-    return { from, to, distanceM: distanceM(start, end), polyline: encodePolyline(greatCircle(start, end)), towns: [], straightLine: true };
+    return { ...names, distanceM: distanceM(start.place.at, end.place.at), polyline: encodePolyline(greatCircle(start.place.at, end.place.at)), straightLine: true };
   }
   const road = result.routes[0]!;
-  const meters = entry?.at ?? road.distance, polyline = road.geometry;
+  return { ...names, distanceM: entry?.at ?? road.distance, polyline: road.geometry, straightLine: false };
+}
+
+/** The route and the towns along it, sampled at eighths of the road: what a leg keeps. */
+export async function resolveRoute(from: string, to: string): Promise<Omit<RouteLeg, 'startTotal'>> {
+  return (await previewRoute(from, to)).leg;
+}
+
+/** A route for the goals preview: its leg, the words that find its places again, and a fixed place's words. */
+export async function previewRoute(from: string, to: string, fix?: PlaceFixer) {
+  const { entry, query, fixed, ...geometry } = await resolveRouteGeometry(from, to, fix);
+  const base = { ...(entry && { name: entry.name }), from: geometry.from, to: geometry.to, distanceM: geometry.distanceM,
+    polyline: geometry.polyline, straightLine: geometry.straightLine };
+  if (geometry.straightLine) return { leg: { ...base, towns: [] }, query, fixed };
+  const meters = geometry.distanceM, polyline = geometry.polyline;
   const points = decodePolyline(polyline);
   const towns: RouteLeg['towns'] = [];
   const sampleTown = async (i: number) => {
@@ -73,10 +128,12 @@ export async function resolveRoute(from: string, to: string) {
     for (const sample of pair) {
       if (sample.status === 'rejected') throw sample.reason;
       const town = sample.value;
-      if (town && !towns.some(existing => existing.name === town.name)) towns.push(town);
+      // Two towns of one name are two towns; one place sampled twice is one.
+      const same = (existing: RouteLeg['towns'][number]) => town && existing.place && town.place ? existing.place.id === town.place.id : existing.name === town?.name;
+      if (town && !towns.some(same)) towns.push(town);
     }
   }
-  return { ...(entry && { name: entry.name }), from, to, distanceM: meters, polyline, towns, straightLine: false };
+  return { leg: { ...base, towns }, query, fixed };
 }
 
 /** The town (Mapbox place) a point is in: the public identity a poster is keyed and prompted by. */

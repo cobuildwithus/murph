@@ -17,6 +17,7 @@ import type { GoalsQuery, HealthMetric, SetMeasureBody } from "./contract";
 import { openProgress, openProgressMany, progressLookup } from "./crypto";
 import { readAwards, settleAwards } from "./awards";
 import { attachRouteArt } from "./route-art";
+import { memberPlaceFixer } from "./place-fix";
 import { patchMeasureState, type MeasureState, type BeforeProgressMutation } from "./state";
 import { saveVaultRuns } from "./vault-runs";
 import { HEALTH, type Candidate } from "./registry";
@@ -52,7 +53,8 @@ async function readSavedHealth(auth: HostedNativeMemberAuth, joinedOn: string, t
   return timing.measure("render", () => savedHealthView(joinedOn, today, metrics));
 }
 
-function healthAuthority(auth: HostedNativeMemberAuth): BeforeProgressMutation {
+/** Steps reads and writes: the member's session, and their vault's authority over health data. */
+export function healthAuthority(auth: HostedNativeMemberAuth): BeforeProgressMutation {
   return async tx => {
     await assertGameMemberAuthCurrentTx(auth, tx);
     await assertBrowserVaultMemberAuthority({ memberId: auth.member.id, prisma: tx });
@@ -98,7 +100,7 @@ async function readStepsMeasure(auth: HostedNativeMemberAuth, signal: AbortSigna
 
 export async function readStepsGoals(auth: HostedNativeMemberAuth, signal: AbortSignal, query: GoalsQuery, units: ClientUnits) {
   const { points } = await readStepsMeasure(auth, signal, false);
-  const goals = await readRouteGoals(query.q, "steps", points.at(-1)?.[1] ?? 0, units);
+  const goals = await readRouteGoals(query.q, "steps", points.at(-1)?.[1] ?? 0, units, memberPlaceFixer(auth.member.id));
   await healthAuthority(auth)(getPrisma());
   return goals;
 }
@@ -107,7 +109,7 @@ export async function setStepsMeasure(auth: HostedNativeMemberAuth, signal: Abor
   if ("perDay" in body) throw invalidGameRequest("This measure already has an amount.");
   const { measure, points, awards, today, timeZone } = await readStepsMeasure(auth, signal, true);
   const beforeMutationTx = healthAuthority(auth), memberId = auth.member.id;
-  const state = await setRouteGoal(memberId, "steps", body.goal, { points, awards, incomplete: false, beforeMutationTx });
+  const state = await setRouteGoal(memberId, "steps", body.goal, { points, awards, incomplete: false, today, beforeMutationTx });
   const candidates = routeLegs({ measureId: "steps", legs: state.legs!, points });
   const inserted = await settleAwards(memberId, candidates, beforeMutationTx, { awards, timeZone });
   const currentAwards = inserted ? await readAwards(memberId) : awards;

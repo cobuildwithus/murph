@@ -38,7 +38,8 @@
     "straightLine": true,
     "map": "/api/game/v1/progress/map?from=London&to=New+York&size=card",
     "detail": "As the crow flies. No road crosses the ocean, so Murph counts the straight line.",
-    "towns": []
+    "towns": [],
+    "fixed": null
   },
   "note": null
 }

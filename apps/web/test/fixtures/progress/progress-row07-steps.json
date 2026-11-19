@@ -417,7 +417,10 @@
             "y": 0.95,
             "passedOn": "2026-10-21",
             "poster": null,
-            "stepsText": null
+            "stepsText": null,
+            "at": 0,
+            "region": null,
+            "regionCode": null
           },
           {
             "name": "Del Mar",
@@ -427,7 +430,10 @@
             "y": 0.8,
             "passedOn": "2026-10-26",
             "poster": null,
-            "stepsText": null
+            "stepsText": null,
+            "at": 19,
+            "region": null,
+            "regionCode": null
           },
           {
             "name": "Oceanside",
@@ -437,7 +443,10 @@
             "y": 0.7,
             "passedOn": "2026-10-31",
             "poster": null,
-            "stepsText": null
+            "stepsText": null,
+            "at": 38,
+            "region": null,
+            "regionCode": null
           },
           {
             "name": "San Clemente",
@@ -447,7 +456,10 @@
             "y": 0.6,
             "passedOn": "2026-11-07",
             "poster": null,
-            "stepsText": null
+            "stepsText": null,
+            "at": 59,
+            "region": null,
+            "regionCode": null
           },
           {
             "name": "Irvine",
@@ -457,7 +469,10 @@
             "y": 0.5,
             "passedOn": "2026-11-14",
             "poster": null,
-            "stepsText": null
+            "stepsText": null,
+            "at": 84,
+            "region": null,
+            "regionCode": null
           },
           {
             "name": "LA",
@@ -467,7 +482,10 @@
             "y": 0.4,
             "passedOn": null,
             "poster": null,
-            "stepsText": null
+            "stepsText": null,
+            "at": 33,
+            "region": null,
+            "regionCode": null
           },
           {
             "name": "San Francisco",
@@ -477,7 +495,10 @@
             "y": 0.1,
             "passedOn": null,
             "poster": null,
-            "stepsText": null
+            "stepsText": null,
+            "at": 416,
+            "region": null,
+            "regionCode": null
           }
         ],
         "goalPicked": true,
@@ -491,7 +512,10 @@
             "y": 0.820361,
             "passedOn": "2026-10-21",
             "poster": null,
-            "stepsText": null
+            "stepsText": null,
+            "at": 0,
+            "region": null,
+            "regionCode": null
           },
           {
             "name": "Del Mar",
@@ -501,7 +525,10 @@
             "y": 0.713574,
             "passedOn": "2026-10-26",
             "poster": null,
-            "stepsText": null
+            "stepsText": null,
+            "at": 19,
+            "region": null,
+            "regionCode": null
           },
           {
             "name": "Oceanside",
@@ -511,7 +538,10 @@
             "y": 0.642383,
             "passedOn": "2026-10-31",
             "poster": null,
-            "stepsText": null
+            "stepsText": null,
+            "at": 38,
+            "region": null,
+            "regionCode": null
           },
           {
             "name": "San Clemente",
@@ -521,7 +551,10 @@
             "y": 0.571191,
             "passedOn": "2026-11-07",
             "poster": null,
-            "stepsText": null
+            "stepsText": null,
+            "at": 59,
+            "region": null,
+            "regionCode": null
           },
           {
             "name": "Irvine",
@@ -531,7 +564,10 @@
             "y": 0.5,
             "passedOn": "2026-11-14",
             "poster": null,
-            "stepsText": null
+            "stepsText": null,
+            "at": 84,
+            "region": null,
+            "regionCode": null
           },
           {
             "name": "LA",
@@ -541,7 +577,10 @@
             "y": 0.428809,
             "passedOn": null,
             "poster": null,
-            "stepsText": null
+            "stepsText": null,
+            "at": 33,
+            "region": null,
+            "regionCode": null
           },
           {
             "name": "San Francisco",
@@ -551,7 +590,10 @@
             "y": 0.215234,
             "passedOn": null,
             "poster": null,
-            "stepsText": null
+            "stepsText": null,
+            "at": 416,
+            "region": null,
+            "regionCode": null
           }
         ],
         "here": {
@@ -565,7 +607,25 @@
         "shareAwardId": null,
         "mapArt": null,
         "drawerMapArt": null,
-        "etaText": "10 weeks"
+        "etaText": "10 weeks",
+        "startedOn": "2026-10-21",
+        "daysText": "in 25 days",
+        "etaOn": "2027-01-23",
+        "remainingText": "416 mi left",
+        "chart": {
+          "unit": "mi",
+          "distance": 501,
+          "points": [
+            [
+              "2026-10-21",
+              0
+            ],
+            [
+              "2026-11-14",
+              85
+            ]
+          ]
+        }
       },
       "pics": []
     }
