@@ -4407,10 +4407,10 @@ conversation reply already owns the foreground pass, the existing scheduler
 finishes that reply first and then selects at most one due
 `member.action.requested` item before another provider pass or unrelated system
 work. A validated terminal `member.action.completed` receipt advances the import
-watermark without entering the executable mailbox; historical queued receipts
-still use the no-op consumer. The workout owner resolves an exact persisted
-action-id replay first, then derives exactly
-one unfinished record from the opaque revision binding, locks that canonical
+watermark. When restoring a saved queue, the runtime validates historical
+completion receipts and drops those with no outstanding checkpoint callback.
+The workout owner resolves an exact persisted action-id replay first, then
+derives exactly one unfinished record from the opaque revision binding, locks that canonical
 workout id, revalidates the binding and authority-free visible shape, applies
 the complete batch in one canonical write, converges exact retries, and rejects
 stale or ambiguous state. No global active or focused workout owns targeting.

@@ -1370,7 +1370,12 @@ function parseHostedSystemMailboxStateValue(value: unknown): HostedSystemMailbox
         && isHostedRetiredAssistantNotificationProfile(wake.notification.notificationPromptProfile)) {
         return [];
       }
-      return [parseHostedSystemMailboxPendingItem(value)];
+      const item = parseHostedSystemMailboxPendingItem(value);
+      // Older runners queued a copy of the outcome Web had already recorded.
+      if (item.wake.kind === "member.action.completed" && item.postCheckpointRecord === null) {
+        return [];
+      }
+      return [item];
     }),
   };
 }

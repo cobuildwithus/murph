@@ -1,0 +1,15 @@
+{
+  "publishedOn": "2026-11-19",
+  "order": 100,
+  "item": {
+    "id": "chat-after-workspace-restore",
+    "kind": "improvement",
+    "priority": 3,
+    "title": "Faster replies after Murph restarts",
+    "summary": "When Murph restarts, old confirmations for actions you already took can no longer hold up your next reply.",
+    "relevanceTags": [
+      "chat"
+    ],
+    "sourcePullRequests": [5206]
+  }
+}
