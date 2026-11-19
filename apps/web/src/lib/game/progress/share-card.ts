@@ -91,38 +91,48 @@ function duration(seconds: number, verb: string): ReturnType<typeof count> {
   return count(value, verb ? `${unit} ${verb.toUpperCase()}` : unit, verb ? `${word} ${verb}` : word);
 }
 
+type Postmark = Postcard['postmark'];
+
+function routePostcard(award: Candidate, units: ClientUnits, activity: string | null, date: Omit<Postmark, 'verb'>): Postcard {
+  const { from, to, distanceM, name } = award.data as { from: string; to: string; distanceM: number; name?: string };
+  const walking = activity === 'walk' || activity === 'steps', running = activity === 'run';
+  const end = (place: string) => place.split(',')[0]!.trim();
+  const miles = distanceM / 1609.344;
+  const stamp = award.measureId === 'steps' ? count(miles * 2000, 'STEPS', 'steps')
+    : units === 'metric' ? count(distanceM / 1000, 'KM', 'kilometers') : count(miles, 'MILES', 'miles');
+  return { place: name ?? `${end(from)} to ${end(to)}`, line: walking ? 'Walked the whole way' : running ? 'Ran the whole way' : 'Went the whole way',
+    stamp: { ...stamp, art: 'pin' }, postmark: { ...date, verb: walking ? 'WALKED' : running ? 'RAN' : 'WENT' } };
+}
+
+function heightPostcard(name: string, at: number, activity: string | null, date: Omit<Postmark, 'verb'>): Postcard {
+  const unit = REP_UNITS[activity ?? ''];
+  const reps = count(Math.ceil(at), unit ?? 'REPS', unit ? activity! : 'reps');
+  return { place: fit(name, 28), line: short(`Enough ${activity ?? 'reps'} to ${activity === 'pushups' ? 'scale' : 'climb'} it`, 'Enough reps to climb it'),
+    stamp: { ...reps, art: 'peak' }, postmark: { ...date, verb: 'CLIMBED' } };
+}
+
+function timePostcard(place: string, as: string | null, at: number, measureId: string, activity: string | null, date: Omit<Postmark, 'verb'>): Postcard {
+  if (measureId === 'sleep') {
+    return { place, line: short(`Slept as long as ${as ?? 'it took'}`, 'Slept as long as it took'),
+      stamp: { ...count(at / 3600, 'HOURS ASLEEP', 'hours asleep'), art: 'bird' }, postmark: { ...date, verb: 'SLEPT' } };
+  }
+  const planking = activity === 'planks';
+  const doing = planking ? 'Planked' : activity === null ? 'Held on' : `Did ${activity}`;
+  return { place, line: short(`${doing} longer than ${as ?? 'it lasted'}`, 'Held on longer than it lasted'),
+    stamp: { ...duration(at, planking ? 'planked' : ''), art: 'moon' }, postmark: { ...date, verb: planking ? 'PLANKED' : 'DONE' } };
+}
+
 /** The postcard's words and marks. Every saved award gets them; bank `place` and `as` only make them warmer. */
 function postcard(award: Candidate, units: ClientUnits, activity: string | null): Postcard {
   const [year, month, day] = award.on.split('-');
   const date = { day: `${MONTHS[Number(month) - 1]} ${Number(day)}`, year: year! };
-  if (award.kind === 'route') {
-    const { from, to, distanceM, name } = award.data as { from: string; to: string; distanceM: number; name?: string };
-    const walking = activity === 'walk' || activity === 'steps', running = activity === 'run';
-    const end = (place: string) => place.split(',')[0]!.trim();
-    const stamp = award.measureId === 'steps' ? count(distanceM / 1609.344 * 2000, 'STEPS', 'steps')
-      : units === 'metric' ? count(distanceM / 1000, 'KM', 'kilometers') : count(distanceM / 1609.344, 'MILES', 'miles');
-    return { place: name ?? `${end(from)} to ${end(to)}`, line: walking ? 'Walked the whole way' : running ? 'Ran the whole way' : 'Went the whole way',
-      stamp: { ...stamp, art: 'pin' }, postmark: { ...date, verb: walking ? 'WALKED' : running ? 'RAN' : 'WENT' } };
-  }
+  if (award.kind === 'route') return routePostcard(award, units, activity, date);
   const definition = award.data.rung as RungDefinition;
   const entry = rungEntry(definition);
   const rung = rungFor(definition, 0, award.on, units);
-  if (entry.kind === 'height') {
-    const unit = REP_UNITS[activity ?? ''];
-    const reps = count(Math.ceil(rung.at), unit ?? 'REPS', unit ? activity! : 'reps');
-    return { place: fit(entry.name, 28), line: short(`Enough ${activity ?? 'reps'} to ${activity === 'pushups' ? 'scale' : 'climb'} it`, 'Enough reps to climb it'),
-      stamp: { ...reps, art: 'peak' }, postmark: { ...date, verb: 'CLIMBED' } };
-  }
+  if (entry.kind === 'height') return heightPostcard(entry.name, rung.at, activity, date);
   const bank = 'place' in entry ? entry : null;
-  const place = bank?.place ?? fit(entry.short, 28);
-  if (award.measureId === 'sleep') {
-    return { place, line: short(`Slept as long as ${bank?.as ?? 'it took'}`, 'Slept as long as it took'),
-      stamp: { ...count(rung.at / 3600, 'HOURS ASLEEP', 'hours asleep'), art: 'bird' }, postmark: { ...date, verb: 'SLEPT' } };
-  }
-  const planking = activity === 'planks';
-  const doing = planking ? 'Planked' : activity === null ? 'Held on' : `Did ${activity}`;
-  return { place, line: short(`${doing} longer than ${bank?.as ?? 'it lasted'}`, 'Held on longer than it lasted'),
-    stamp: { ...duration(rung.at, planking ? 'planked' : ''), art: 'moon' }, postmark: { ...date, verb: planking ? 'PLANKED' : 'DONE' } };
+  return timePostcard(bank?.place ?? fit(entry.short, 28), bank?.as ?? null, rung.at, award.measureId!, activity, date);
 }
 
 function buildShareCard(award: Candidate, units: ClientUnits, heightCm: number | null): Built {
