@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { resolveAssistantStatePaths } from "@murphai/runtime-state/node/assistant-state-fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { expect, test, vi } from "vitest";
@@ -18,9 +19,13 @@ import { importHostedMailboxPrefixAndCheckpoint } from "../src/hosted-runtime/ma
 import { createHostedWorkspaceBridgeMailboxImporter } from "../src/hosted-runtime/snapshot-bridge-mailbox.ts";
 import { createHostedRuntimeResolvedConfig } from "./hosted-runtime-test-helpers.ts";
 import { createHostedMailboxRoutingPlan } from "../src/hosted-runtime/mailbox-routing.ts";
-import { enqueueHostedSystemMailboxItem, prepareHostedSystemMailboxItemForCheckpoint,
-  recordHostedSystemMailboxItemAfterCheckpoint } from "../src/hosted-runtime/system-mailbox.ts";
-import { readHostedSystemMailboxState } from "../src/hosted-runtime/system-mailbox-state.ts";
+import { enqueueHostedSystemMailboxItem } from "../src/hosted-runtime/system-mailbox.ts";
+import {
+  readHostedSystemMailboxProgress,
+  readHostedSystemMailboxState,
+  resolveHostedSystemMailboxNextWakeCandidate,
+  updateHostedSystemMailboxState,
+} from "../src/hosted-runtime/system-mailbox-state.ts";
 import {
   TEST_NOW, TEST_USER_ID, createMailboxItem, createMailboxPort, createPlatform,
   createBrowserVaultReplicaRef, createResolvedRuntimeControlSystemMailboxItem, createVaultSnapshotBundle, createWorkspacePort,
@@ -268,45 +273,50 @@ test.each(["malformed", "wrong member"] as const)("completion import rejects %s 
   }
 });
 
-test("historical queued completion item drains through its no-op consumer", async () => {
-  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-member-completion-historical-"));
-  const events: string[] = [];
-  const actionId = "d8653d1f-fb8d-400b-8efe-d3fbdc9f9830";
-  const wake = buildHostedExecutionMemberActionCompletedWake({
-    eventId: `member.action.completed:${actionId}`, memberId: TEST_USER_ID,
-    occurredAt: TEST_NOW,
-    outcome: { actionId, completedAt: TEST_NOW, schemaVersion: 1,
-      status: "applied", reason: null },
-  });
-  const item = createMailboxItem({ id: "historical_completion", kind: wake.kind,
-    lane: "system", laneSeq: "1", dedupeKey: wake.eventId });
-  const route = createHostedMailboxRoutingPlan(item);
-  if (route.state !== "route") throw new Error("Invalid historical route");
-  const callback = vi.fn(async () => { throw new Error("Historical no-op must not record again"); });
+test("restored action receipts advance the system frontier without scheduling another pass", async () => {
+  const vaultRoot = await mkdtemp(path.join(tmpdir(), "murph-restored-action-receipts-"));
   try {
-    await initializeVault({ createdAt: TEST_NOW, vaultRoot });
-    await enqueueHostedSystemMailboxItem({
-      item: { ...createResolvedRuntimeControlSystemMailboxItem(item), route }, vaultRoot, wake,
+    await updateHostedSystemMailboxState(vaultRoot, () => ({ pending: [] }));
+    const statePath = path.join(resolveAssistantStatePaths(vaultRoot).assistantStateRoot, "hosted-system-mailbox.json");
+    const envelope = JSON.parse(await readFile(statePath, "utf8"));
+    // Write the old snapshot directly because current imports never queue these receipts.
+    envelope.value.pending = ["pending", "sending", "recording"].map((status, i) => {
+      const actionId = `00000000-0000-4000-8000-00000000000${i}`;
+      const wake = buildHostedExecutionMemberActionCompletedWake({
+        eventId: `member.action.completed:${actionId}`, memberId: TEST_USER_ID, occurredAt: TEST_NOW,
+        outcome: { actionId, completedAt: TEST_NOW, schemaVersion: 1, status: "applied", reason: null },
+      });
+      return {
+        itemId: `receipt-${i}`, mailboxDedupeKey: wake.eventId, mailboxLaneSeq: String(i + 1),
+        occurredAt: TEST_NOW, routeAction: "apply-member-action", status, wake,
+      };
     });
-    const runtime = {
-      commitTimeoutMs: null, forwardedEnv: {}, platformEnv: {}, userEnv: {},
-      resolvedConfig: createHostedRuntimeResolvedConfig(),
-      platform: createPlatform({
-        mailboxPort: { ...createMailboxPort({ events, items: [] }),
-          recordMemberActionOutcome: callback }, workspacePort: null,
-      }),
-    };
-    const prepared = await prepareHostedSystemMailboxItemForCheckpoint({
-      allowedRouteActions: ["apply-member-action"], runtime, runtimeEnv: {},
-      retainProcessedItemUntilRecorded: true, vaultRoot,
+    await writeFile(statePath, JSON.stringify(envelope));
+    expect(await readHostedSystemMailboxProgress({ importedSeq: "3", vaultRoot })).toMatchObject({
+      firstPendingSeq: null, handledThroughSeq: "3", modelFreeWakeAt: null,
     });
-    expect(prepared?.status).toBe("processed");
-    if (!prepared || prepared.status !== "processed") throw new Error("Expected historical no-op");
-    expect(prepared.item.postCheckpointRecord).toBeNull();
-    expect((await readHostedSystemMailboxState(vaultRoot)).pending[0]?.status).toBe("recording");
-    await recordHostedSystemMailboxItemAfterCheckpoint({ item: prepared.item, runtime, vaultRoot });
-    expect((await readHostedSystemMailboxState(vaultRoot)).pending).toEqual([]);
-    expect(callback).not.toHaveBeenCalled();
+    expect((await resolveHostedSystemMailboxNextWakeCandidate({ vaultRoot })).at).toBeNull();
+
+    // A checkpointed request still owns publication of its outcome to Web.
+    const actionId = "947bcf58-5cab-4061-9c8f-4bfb687b2171";
+    const request = buildHostedExecutionMemberActionRequestedWake({
+      eventId: `member.action.requested:${actionId}`, memberId: TEST_USER_ID, occurredAt: TEST_NOW,
+      request: { actionId, schemaVersion: 1, requestedAt: TEST_NOW,
+        action: { kind: "meal.delete", version: 1, mealId: "meal_synthetic" } },
+    });
+    envelope.value.pending.push({
+      itemId: "request", mailboxDedupeKey: request.eventId, mailboxLaneSeq: "4",
+      occurredAt: TEST_NOW, routeAction: "apply-member-action", status: "recording", wake: request,
+      postCheckpointRecord: { kind: "member-action.outcome-recorded",
+        outcome: { actionId, completedAt: TEST_NOW, schemaVersion: 1, status: "applied", reason: null } },
+    });
+    await writeFile(statePath, JSON.stringify(envelope));
+    expect(await readHostedSystemMailboxProgress({ importedSeq: "4", vaultRoot })).toMatchObject({
+      firstPendingSeq: "4", handledThroughSeq: "3",
+    });
+    expect((await readHostedSystemMailboxState(vaultRoot)).pending).toMatchObject([
+      { itemId: "request", status: "recording", postCheckpointRecord: { outcome: { actionId } } },
+    ]);
   } finally {
     await removeTempRoot(vaultRoot);
   }
