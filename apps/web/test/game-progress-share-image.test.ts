@@ -59,7 +59,7 @@ describe('one private OpenAI edit boundary', () => {
   it('fails a fixed oversized encode without another quality pass', async () => {
     const oversized = Buffer.alloc(2 * 1024 * 1024 + 1, 1);
     const buffer = vi.spyOn(sharp.prototype, 'toBuffer').mockResolvedValueOnce(oversized);
-    await expect(prepareShareJpeg(synthetic)).rejects.toMatchObject({ code: 'generation_failed' });
+    await expect(prepareShareJpeg(sharp(synthetic))).rejects.toMatchObject({ code: 'generation_failed' });
     expect(buffer).toHaveBeenCalledTimes(1); expect(oversized.every(byte => byte === 0)).toBe(true); buffer.mockRestore();
   });
 });

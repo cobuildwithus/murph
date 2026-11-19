@@ -342,6 +342,22 @@ it("returns the Health page while a background receipt commits against the same 
   expect((await healthState())?.healthSettlement?.savedAt).toBe(savedAt);
 });
 
+it("keeps run days and the settlement receipt from the newest replica", async () => {
+  const older = "2026-11-16T08:00:00.000Z";
+  const days = [{ date: "2026-11-13", km: 2 }, { date: "2026-11-14", km: 6 }];
+  for (const [version, runs] of [[savedAt, days], [older, days.slice(0, 1)]] as const) {
+    mocks.replica.mockResolvedValue({ browserVaultReplicaRef: { generatedAt: version } });
+    mocks.raw.mockResolvedValue({ ...healthSnapshot(), savedAt: version, runs: { days: runs } });
+    await GET(request());
+    await drain();
+  }
+  const lookup = progressLookup("ava", "measure", ["run.meters"]);
+  const row = states.find(state => state.lookup === lookup)!;
+  const running = await openProgress<MeasureState>({ memberId: "ava", table: "game_progress_measure", rowId: lookup, field: "state" }, row.stateEncrypted);
+  expect(running.vaultRuns).toEqual({ savedAt, days: [["2026-11-13", 2000], ["2026-11-14", 6000]] });
+  expect((await healthState())?.healthSettlement?.savedAt).toBe(savedAt);
+});
+
 it("an incomplete main read schedules no settlement", async () => {
   mocks.ownGames.mockResolvedValue({ incomplete: true, measures: [], states: new Map(), awards: [], pending: [] });
   expect(progressSchema.parse(await (await GET(request())).json()).incomplete).toBe(true);

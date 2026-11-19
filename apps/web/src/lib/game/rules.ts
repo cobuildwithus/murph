@@ -251,7 +251,7 @@ export function canChallengeGame(state: RuleState, challenges: readonly RuleChal
 export function decideChallenge(state: RuleState, challenges: readonly RuleChallenge[], input: {
   memberId: string; entryId: string; visibleEntryIds: ReadonlySet<string>; now: Date;
 }): { commandKey: string; payload: { v: 1; entryId: string } } {
-  requireLivePlayer(state, input.memberId);
+  requireLivePlayer(state, input.memberId, input.now);
   if (state.game.seats !== 10 && !isPairRoster(remainingPlayers(state))) reject("INVALID_REQUEST", "Prove it is available in two-player games.");
   if (isGameDue(state, input.now)) reject("GAME_NOT_LIVE", "This game has ended.");
   if (!state.game.chatContainerMemberId) reject("CHAT_UNAVAILABLE", "This game needs its shared chat first.");
@@ -355,7 +355,7 @@ export function decideDayCompletion(state: RuleState, input: { memberId: string;
  */
 function dayCorrectionCalendar(state: RuleState, input: { memberId: string; now: Date; clock?: Date }): { player: RulePlayer; dayOne: string; today: number } {
   const settled = state.game.status === "settled";
-  const player = settled ? playerFor(state, input.memberId) : requireLivePlayer(state, input.memberId);
+  const player = settled ? playerFor(state, input.memberId) : requireLivePlayer(state, input.memberId, input.now);
   if (!player || player.leftAt) reject("NOT_A_PLAYER", "You're not in this game.");
   const ended = settled ? settledCorrectionCutoff(state, input.clock ?? input.now, input.now) : null;
   if (isGameDue(state, input.now) || !player.dayOne) reject("GAME_NOT_LIVE", "This game has ended.");
@@ -419,18 +419,23 @@ export function hasUnlockedDay(entries: RuleEntries, memberId: string, dayIndex:
 export function isGameDue(state: RuleState, now: Date): boolean {
   const { game } = state;
   if (game.status === "invited" || game.status === "negotiating") return isGameInviteExpired(game, now);
-  return game.status === "live" && (settleDueAt(state) <= now || isGameDecided(state));
+  return game.status === "live" && (settleDueAt(state) <= now || isGameDecided(state, now));
 }
 
 /** Nobody can change the score: both remaining pair players have finished. */
-export function isGameDecided(state: RuleState): boolean {
+export function isGameDecided(state: RuleState, now: Date): boolean {
   const players = remainingPlayers(state);
   if (state.game.seats !== 2 || state.game.status !== "live" || !isPairRoster(players) || players.some(player => !player.dayOne)) return false;
   const entries = indexGameEntries(state.entries);
   const schedule = currentTerms(state.game.terms).schedule;
   if ("count" in schedule) return players.every(player => scorePlayer(state, player, undefined, entries).score >= schedule.count);
   for (let day = state.game.lengthDays - 1; day >= 0; day--) {
-    if (isScheduledDay(state, day)) return players.every(player => completedEntry(entries, player.memberId, day) !== null);
+    if (!isScheduledDay(state, day)) continue;
+    return players.every(player => {
+      if (!completedEntry(entries, player.memberId, day)) return false;
+      const start = dayStartInstant(addDays(player.dayOne!, day), player.timeZone).getTime();
+      return now.getTime() >= start + GAME_GRACE_MS || !graceOpen(state, player, day - 1, entries);
+    });
   }
   return false;
 }
@@ -774,7 +779,7 @@ export function decidePost(
     now: Date;
   },
 ): PostDecision {
-  const player = requireLivePlayer(state, input.memberId);
+  const player = requireLivePlayer(state, input.memberId, input.now);
   if (input.kind === "excuse") return { attempt: 0, dayIndex: excuseDay(state, player, input.now), graceUsed: false, withdrawEntryId: null };
   if (input.kind !== "words" && input.mediaKeys.length === 0) reject("MEDIA_MISSING", "Add the check-in image first.");
   if (input.mediaKeys.some((key) => !key.startsWith(input.mediaKeyPrefix))) {
@@ -874,7 +879,7 @@ export function decideWithdraw(
   state: RuleState,
   input: { memberId: string; entryId: string; now: Date },
 ): { withdraw: { entryId: string; dayIndex: number } | null } {
-  const player = requireLivePlayer(state, input.memberId);
+  const player = requireLivePlayer(state, input.memberId, input.now);
   const entry = state.entries.find((candidate) => candidate.id === input.entryId);
   if (!entry || entry.memberId !== player.memberId || entry.attempt === 0) reject("GAME_NOT_FOUND", "That post isn't yours.");
   if (entry.withdrawnAt) return { withdraw: null };
@@ -917,10 +922,10 @@ export function decideDevAdvance(state: RuleState, days: number): { addMs: numbe
   return { addMs: days * 24 * 60 * 60 * 1000 };
 }
 
-function requireLivePlayer(state: RuleState, memberId: string): RulePlayer {
+function requireLivePlayer(state: RuleState, memberId: string, now: Date): RulePlayer {
   const player = playerFor(state, memberId);
   if (!player || player.leftAt) reject("NOT_A_PLAYER", "You're not in this game.");
-  if (state.game.status !== "live" || !player.dayOne || isGameDecided(state)) reject("GAME_NOT_LIVE", "This game isn't live.");
+  if (state.game.status !== "live" || !player.dayOne || isGameDecided(state, now)) reject("GAME_NOT_LIVE", "This game isn't live.");
   return player;
 }
 

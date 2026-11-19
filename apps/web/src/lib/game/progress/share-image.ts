@@ -9,8 +9,8 @@ export class ShareImageError extends Error {
 }
 
 /** Orient once and strip metadata; a fixed encode never retries quality. */
-export async function prepareShareJpeg(bytes: Uint8Array): Promise<Buffer> {
-  const result = await sharp(bytes, { limitInputPixels: 40_000_000 }).rotate().jpeg({ quality: 90 }).toBuffer();
+export async function prepareShareJpeg(image: ReturnType<typeof sharp>): Promise<Buffer> {
+  const result = await image.rotate().jpeg({ quality: 90 }).toBuffer();
   if (result.length > 2 * 1024 * 1024) { result.fill(0); throw new ShareImageError('generation_failed'); }
   return result;
 }
@@ -31,7 +31,7 @@ export async function makeShareImage(reference: Uint8Array, prompt: string, expi
     if (!encoded || encoded.length > 12 * 1024 * 1024 || !/^[A-Za-z0-9+/]+={0,2}$/u.test(encoded)) throw new ShareImageError('generation_failed');
     decoded = Buffer.from(encoded, 'base64');
     result.data = [];
-    const output = await prepareShareJpeg(decoded);
+    const output = await prepareShareJpeg(sharp(decoded, { limitInputPixels: 40_000_000 }));
     if (Date.now() >= expiresAt) { output.fill(0); throw new ShareImageError('timeout'); }
     return output;
   } catch (error) {

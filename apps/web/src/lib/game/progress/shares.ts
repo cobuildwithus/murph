@@ -205,9 +205,12 @@ async function generate(input: ShareRequest, award: Candidate, row: GameProgress
 export async function readProgressShareImage(input: ShareRequest): Promise<Uint8Array> {
   const award = await readAward(input);
   const live = () => withAuthority(input, award, async tx => {
-    const selection = await readSelection(tx, input);
-    if (selection.row?.status !== 'ready' || selection.consent !== 'allowed') throw shareNotFound();
-    return selection.row;
+    const row = await tx.gameProgressShare.findFirst({ where: { memberId: input.memberId, awardLookup: input.awardId, status: 'ready' },
+      orderBy: { createdAt: 'desc' } });
+    if (!row) throw shareNotFound();
+    const { decision } = await readProgressShareConsent({ memberId: input.memberId, prisma: tx });
+    await assertPhotoAuthority(tx, input, decision);
+    return row;
   });
   const row = await live();
   const stored = await progressMediaStore().readProgressPic({ userId: input.memberId, mediaId: row.storageKey });

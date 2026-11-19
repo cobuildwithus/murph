@@ -44,7 +44,13 @@ export async function patchMeasureState(
   const target = { memberId, table: "game_progress_measure", rowId: lookup, field: "state" } as const;
   const row = await db.gameProgressMeasure.findUnique({ where: { memberId_lookup: { memberId, lookup } }, select: { stateEncrypted: true } });
   const previous = row ? await openProgress<MeasureState>(target, row.stateEncrypted) : {};
-  const state = { ...previous, ...(typeof patch === "function" ? patch(previous) : patch), ...(previous.baseline ? { baseline: previous.baseline } : {}) };
+  const changes = typeof patch === "function" ? patch(previous) : patch;
+  // A versioned writer can keep the observed state without rewriting its ciphertext.
+  if (changes === previous) {
+    await beforeMutationTx(db);
+    return previous;
+  }
+  const state = { ...previous, ...changes, ...(previous.baseline ? { baseline: previous.baseline } : {}) };
   const stateEncrypted = await sealProgress(target, state);
   await db.$transaction(async tx => {
     await beforeMutationTx(tx);

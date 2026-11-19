@@ -2,6 +2,7 @@ import "server-only";
 import { ProgressReadTiming } from "./read-timing";
 
 import { formatTimeZoneDateTimeParts } from "@murphai/contracts";
+import { gameHttpError } from "../http/errors";
 import { getPrisma } from "../../prisma";
 import type { Medal, Moment, Progress } from "./contract";
 import { readAwards, settleAwards, markAwardsSeen, type StoredAward } from "./awards";
@@ -130,7 +131,8 @@ export function measureView(measure: MeasureSeries, state: MeasureState, awards:
 
 export async function readProgress(memberId: string, units: ClientUnits, beforeMutationTx: BeforeProgressMutation, timing = new ProgressReadTiming()): Promise<Progress> {
   const db = getPrisma();
-  const profile = await timing.measure("profile", () => db.gameProfile.findUniqueOrThrow({ where: { memberId }, select: { timeZone: true, createdAt: true } }));
+  const profile = await timing.measure("profile", () => db.gameProfile.findUnique({ where: { memberId }, select: { timeZone: true, createdAt: true } }));
+  if (!profile) throw gameHttpError("PROFILE_REQUIRED", 409, "Add your first name and time zone first.");
   const clock = new Date();
   const today = formatTimeZoneDateTimeParts(clock, profile.timeZone).dayKey;
   // Day 0 of the charts: the day they started the app, and for everyone on it before then, Oct 19.

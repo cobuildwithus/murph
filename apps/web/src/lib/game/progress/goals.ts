@@ -164,7 +164,8 @@ export async function readGoals(memberId: string, query: GoalsQuery, units: Clie
   const measure = snapshot.measures.find(measure => measure.id === query.measure);
   if (!measure) throw gameNotFound();
   const total = cumulativePoints(measure.amounts).at(-1)?.[1] ?? 0;
-  if (measure.unit === "meters" || measure.unit === "steps") return readRouteGoals(query.q, measure.unit, total, units, memberPlaceFixer(memberId));
+  if (measure.unit === "meters" || measure.unit === "steps") return readRouteGoals(query.q, measure.unit, total, units,
+    { measureId: measure.id, legs: snapshot.states.get(measure.id)?.legs ?? [], awards: snapshot.awards }, memberPlaceFixer(memberId));
   const kind = measure.unit === "reps" ? "height" : measure.unit === "seconds" ? "time" : null;
   if (!kind) return { tiles: [], match: null, suggestions: [], note: null, route: null };
   const passed = new Set(snapshot.awards.filter(award => award.measureId === measure.id && ["landmark", "time"].includes(award.kind))

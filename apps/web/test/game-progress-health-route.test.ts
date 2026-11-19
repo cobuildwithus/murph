@@ -248,12 +248,14 @@ it("previews a suggested Steps loop and returns the same wearable measure as Hea
   const initial = goalsSchema.parse(await (await stepsGoals()).json());
   const loop = initial.suggestions.find(tile => tile.id === "around-iceland")!;
   expect(loop).toMatchObject({ name: "Around Iceland", atText: "821 mi" });
+  mocks.measures.mockResolvedValue([{ lookup: "steps", stateEncrypted: "synthetic-sealed" }]);
+  mocks.open.mockResolvedValue([{ legs: [first] }]);
   const preview = goalsSchema.parse(await (await stepsGoals(loop.name)).json()).route!;
   expect(preview).toMatchObject({ from: "Reykjavík, Iceland", to: "Reykjavík, Iceland",
-    distanceText: "821 miles", detail: "By road. You're 2 in, so 819 to go." });
+    distanceText: "821 miles", detail: "By road. You're 0 in, so 821 to go." });
   const params = new URL(preview.map, stepsUrl).searchParams;
   expect(Object.fromEntries(params)).toEqual({ from: preview.from, to: preview.to, size: "card" });
-  expect(mocks.awards).not.toHaveBeenCalled();
+  expect(mocks.awards).toHaveBeenCalledOnce();
   expect(mocks.patch).not.toHaveBeenCalled();
   mocks.patch.mockImplementationOnce(async (_member, _id, patch, before) => {
     await before({ transaction: true });

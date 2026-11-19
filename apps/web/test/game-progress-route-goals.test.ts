@@ -21,7 +21,7 @@ describe('Progress route goal mutation', () => {
     { unit: 'meters', total: 116 * 1609.344 }, { unit: 'steps', total: 116 * 2000 },
   ] as const)('converts the $unit total once for a route preview', async ({ unit, total }) => {
     mocks.resolve.mockResolvedValue({ ...next, distanceM: 501 * 1609.344, polyline: encodePolyline([[0, 50], [2, 49]]) });
-    const result = await readRouteGoals('London to Paris', unit, total, 'us');
+    const result = await readRouteGoals('London to Paris', unit, total, 'us', { measureId: unit, legs: [], awards: [] });
     expect(result.route).toMatchObject({ distanceText: '501 miles', detail: "By road. You're 116 in, so 385 to go." });
     expect(mocks.write).not.toHaveBeenCalled();
   });

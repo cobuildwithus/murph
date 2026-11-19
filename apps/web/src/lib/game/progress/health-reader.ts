@@ -31,13 +31,13 @@ import { healthJourneyMeasure, healthJourneys, healthJourneyView, healthJourneyV
 
 const metricIds = Object.keys(HEALTH) as HealthMetric["id"][];
 
-async function readHealthStates(memberId: string): Promise<Map<string, MeasureState>> {
-  const lookups = metricIds.map(id => progressLookup(memberId, "measure", [id]));
+async function readHealthStates(memberId: string, ids = metricIds): Promise<Map<string, MeasureState>> {
+  const lookups = ids.map(id => progressLookup(memberId, "measure", [id]));
   const rows = await getPrisma().gameProgressMeasure.findMany({ where: { memberId, lookup: { in: lookups } },
     take: 4, select: { lookup: true, stateEncrypted: true } });
   const opened = await openProgressMany<MeasureState>(rows.map(row => ({ memberId, table: "game_progress_measure",
     rowId: row.lookup, field: "state", value: row.stateEncrypted })));
-  return new Map(metricIds.map((id, index) => [id, opened[rows.findIndex(row => row.lookup === lookups[index])] ?? {}]));
+  return new Map(ids.map((id, index) => [id, opened[rows.findIndex(row => row.lookup === lookups[index])] ?? {}]));
 }
 
 async function readSavedHealth(auth: HostedNativeMemberAuth, joinedOn: string, today: string, timing: ProgressReadTiming) {
@@ -91,7 +91,7 @@ export async function readProgressStepsRoute(auth: HostedNativeMemberAuth, signa
 async function readStepsMeasure(auth: HostedNativeMemberAuth, signal: AbortSignal, includeAwards: boolean) {
   const { amounts, today, timeZone } = await readStepsAmounts(auth, signal);
   if (amounts === null) throw routeProgressIncomplete();
-  // Typing a goal only needs awards when no observed days remain.
+  // Saved awards preserve journeys and finished legs even after corrected or expired readings.
   const awards = includeAwards || !amounts.length ? await readAwards(auth.member.id) : [];
   const measure = healthJourneyMeasure("steps", amounts, awards);
   if (!measure) throw gameNotFound();
@@ -99,8 +99,11 @@ async function readStepsMeasure(auth: HostedNativeMemberAuth, signal: AbortSigna
 }
 
 export async function readStepsGoals(auth: HostedNativeMemberAuth, signal: AbortSignal, query: GoalsQuery, units: ClientUnits) {
-  const { points } = await readStepsMeasure(auth, signal, false);
-  const goals = await readRouteGoals(query.q, "steps", points.at(-1)?.[1] ?? 0, units, memberPlaceFixer(auth.member.id));
+  const memberId = auth.member.id;
+  const legs = query.q ? (await readHealthStates(memberId, ["steps"])).get("steps")?.legs ?? [] : [];
+  const { points, awards } = await readStepsMeasure(auth, signal, legs.length > 0);
+  const goals = await readRouteGoals(query.q, "steps", points.at(-1)?.[1] ?? 0, units,
+    { measureId: "steps", legs, awards }, memberPlaceFixer(memberId));
   await healthAuthority(auth)(getPrisma());
   return goals;
 }
@@ -190,11 +193,12 @@ export async function settleProgressHealthInBackground(auth: HostedNativeMemberA
   };
   // Totals and its goals read Running's saved vault runs; this is their one replica read.
   await saveVaultRuns(memberId, snapshot.savedAt, snapshot.runs, authority);
-  if (!healthSettlementCurrent(states.get("restingHeartRate")!.healthSettlement, snapshot.savedAt, profile.timeZone, now)) {
-    await patchMeasureState(memberId, "restingHeartRate", { healthSettlement: {
-      savedAt: snapshot.savedAt, checkedAt: now.toISOString(), timeZone: snapshot.timeZone, profileTimeZone: profile.timeZone,
-    } }, authority);
-  }
+  await patchMeasureState(memberId, "restingHeartRate", previous => {
+    const receipt = previous.healthSettlement;
+    if (receipt && (Date.parse(receipt.savedAt) > Date.parse(snapshot.savedAt)
+      || (receipt.savedAt === snapshot.savedAt && Date.parse(receipt.checkedAt) > now.getTime()))) return previous;
+    return { healthSettlement: { savedAt: snapshot.savedAt, checkedAt: now.toISOString(), timeZone: snapshot.timeZone, profileTimeZone: profile.timeZone } };
+  }, authority);
 }
 
 /** The page and background share every baseline, journey and award write. */

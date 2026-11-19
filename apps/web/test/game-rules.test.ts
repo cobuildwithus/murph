@@ -938,7 +938,7 @@ describe("a finished pair game's days can still be corrected for 7 days", () => 
   it("treats only the days that had started when the game ended as its days", () => {
     // Any 3 of 7 days: Leo reached 3 on the third day, Ava on the fourth, and the game ended that evening.
     const early = settled({ schedule: { count: 3 }, lastDay: 3, missed: [[3], [0]], endedAt: (state) => at(state, LEO, 3, 20) });
-    expect(isGameDecided({ ...early, game: { ...early.game, status: "live" } })).toBe(true);
+    expect(isGameDecided({ ...early, game: { ...early.game, status: "live" } }, early.game.settledAt!)).toBe(true);
     // Days before the end are closed, and so is the day it ended on.
     expect(correct(early, 0, 3 * DAY, { memberId: AVA }).outcome.status).toBe("credited");
     expect(correct(early, 3, 3 * DAY).outcome.status).toBe("credited");
@@ -1135,7 +1135,7 @@ describe("decided pair endings", () => {
   }
   it("ends at both last posts and closes score edits, retakes, withdrawal and Prove it", () => {
     const state = finished();
-    expect(isGameDecided(state)).toBe(true);
+    expect(isGameDecided(state, at)).toBe(true);
     expect(isGameDue(state, at)).toBe(true);
     expect(codeOf(() => decideWithdraw(state, { memberId: LEO, entryId: state.entries[0].id, now: at }))).toBe("GAME_NOT_LIVE");
     expect(codeOf(() => post(state, LEO, at))).toBe("GAME_NOT_LIVE");
@@ -1148,38 +1148,52 @@ describe("decided pair endings", () => {
   it("requires both remaining players and complete credit; groups keep their natural end", () => {
     const state = finished();
     state.entries[0].incomplete = true;
-    expect(isGameDecided(state)).toBe(false);
+    expect(isGameDecided(state, at)).toBe(false);
     expect(() => post(state, LEO, at)).not.toThrow();
     state.entries[0].incomplete = false;
     state.players[0].leftAt = at;
-    expect(isGameDecided(state)).toBe(false);
+    expect(isGameDecided(state, at)).toBe(false);
     state.players[0].leftAt = null;
     state.players[0].dayOne = null;
-    expect(isGameDecided(state)).toBe(false);
+    expect(isGameDecided(state, at)).toBe(false);
     state.players[0].dayOne = state.players[1].dayOne;
     state.game.seats = 10;
-    expect(isGameDecided(state)).toBe(false);
+    expect(isGameDecided(state, at)).toBe(false);
     expect(isGameDue(state, at)).toBe(false);
   });
+  it("keeps a pair game open for an eligible previous-day photo", () => {
+    const now = new Date("2026-10-23T07:20:00Z");
+    let state = live(invited(EVERY_DAY), NYC);
+    for (const player of state.players) player.dayOne = "2026-10-17";
+    state = post(state, LEO, new Date("2026-10-22T16:00:00Z"));
+    for (const member of [LEO, AVA]) state = post(state, member, now);
+    expect(isGameDue(state, now)).toBe(false);
+    expect(isGameDue(state, new Date("2026-10-23T08:00:00Z"))).toBe(true);
+    state = post(state, AVA, now, { captureAgeMs: 25 * 60_000 });
+    expect(state.entries.at(-1)?.dayIndex).toBe(5);
+    expect(isGameDue(state, now)).toBe(true);
+    expect(state.players.map(player => scorePlayer(state, player).score)).toEqual([2, 2]);
+  });
+
   it("ends after the last scheduled weekday despite trailing days off", () => {
     let state = live(invited({ days: [0, 1, 2, 3, 4] }), NYC);
     for (const player of state.players) player.dayOne = "2026-10-19";
     // Monday Day 1, Friday Day 5, with the weekend still in the seven-day span.
     const friday = new Date("2026-10-23T16:00:00Z");
     for (const member of [LEO, AVA]) state = post(state, member, friday);
-    expect(isGameDecided(state)).toBe(true);
+    expect(isGameDecided(state, friday)).toBe(true);
   });
   it("ends any-3-of-7 only after both reach three, excluding incomplete posts", () => {
     let state = live(invited({ count: 3 }), NYC);
     for (let day = 0; day < 3; day++) {
       const now = new Date(`2026-10-${17 + day}T16:00:00Z`);
       state = post(state, LEO, now);
-      expect(isGameDecided(state)).toBe(false);
+      expect(isGameDecided(state, at)).toBe(false);
       state = post(state, AVA, now);
     }
-    expect(isGameDecided(state)).toBe(true);
+    expect(isGameDecided(state, at)).toBe(true);
     state.entries[0].incomplete = true;
-    expect(isGameDecided(state)).toBe(false);
+    expect(isGameDecided(state, at)).toBe(false);
   });
   it.each(["invited", "negotiating"] as const)("preserves %s expiry", status => {
     const state = invited(); state.game.status = status;

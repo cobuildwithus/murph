@@ -14,19 +14,19 @@ const dayNumber = (day: Day) => Date.parse(`${day}T00:00:00Z`) / 86_400_000;
 const addDays = (day: Day, days: number): Day => new Date((dayNumber(day) + days) * 86_400_000).toISOString().slice(0, 10);
 
 /** Days the rest takes at the last 30 days' pace (fewer since the first day); null with under a week of pace or none. */
-export function routeEtaDays(meters: Points, remainingM: number): number | null {
-  const last = meters.at(-1);
+export function routeEtaDays(meters: Points, remainingM: number, today: Day): number | null {
+  const last = meters.filter(([day]) => day <= today).at(-1);
   if (!last || remainingM <= 0) return null;
-  const window = Math.min(30, dayNumber(last[0]) - dayNumber(meters[0]![0]) + 1);
-  const before = meters.filter(point => dayNumber(point[0]) <= dayNumber(last[0]) - window).at(-1)?.[1] ?? 0;
+  const end = dayNumber(today);
+  const window = Math.min(30, end - dayNumber(meters[0]![0]) + 1);
+  const before = meters.filter(([day]) => dayNumber(day) <= end - window).at(-1)?.[1] ?? 0;
   const perDay = (last[1] - before) / window;
   if (window < 7 || perDay <= 0) return null;
   return Math.ceil(remainingM / perDay);
 }
 
 /** How long the rest takes at that pace: "10 weeks". */
-export function routeEta(meters: Points, remainingM: number): string | null {
-  const days = routeEtaDays(meters, remainingM);
+export function routeEtaText(days: number | null): string | null {
   if (days === null) return null;
   if (days < 14) return days === 1 ? '1 day' : `${days} days`;
   const weeks = Math.round(days / 7);
@@ -52,16 +52,27 @@ export function routeAwardName(award: StoredAward, fallback: string): string {
   return typeof award.data.name === 'string' ? award.data.name : fallback;
 }
 
+export function completedRouteLegs(measureId: string, legs: readonly RouteLeg[], totalM: number, earned: ReadonlySet<string>) {
+  return legs.filter((leg, i) => i < legs.length - 1 || earned.has(routeAwardKey(measureId, leg, i)) || totalM >= leg.startTotal + leg.distanceM);
+}
+
 /** Completed legs survive corrections; changing a goal only replaces the unfinished leg. A later leg keeps the day it started. */
 export function replaceRouteLeg(measureId: string, legs: readonly RouteLeg[], next: Omit<RouteLeg, 'startTotal' | 'startedOn'>, total: number, earned: ReadonlySet<string>, today: Day): RouteLeg[] {
-  const finished = legs.filter((leg, i) => i < legs.length - 1 || earned.has(routeAwardKey(measureId, leg, i)) || total >= leg.startTotal + leg.distanceM);
+  const finished = completedRouteLegs(measureId, legs, total, earned);
   return [...finished, finished.length ? { ...next, startTotal: total, startedOn: today } : { ...next, startTotal: 0 }];
+}
+
+/** Corrections before a saved start count as opening distance on that day. */
+function pointsFromStart(meters: Points, start: Day | undefined): Points {
+  if (!start) return meters;
+  const opening = meters.filter(([day]) => day <= start).at(-1);
+  return [...(opening ? [[start, opening[1]] as [Day, number]] : []), ...meters.filter(([day]) => day > start)];
 }
 
 export function routeLegs(ctx: { measureId: string; legs: readonly RouteLeg[]; points: Points }): Candidate[] {
   const points: [Day, number][] = ctx.points.map(([day, amount]) => [day, routeMeters(ctx.measureId, amount)]);
   return ctx.legs.flatMap((leg, index) => {
-    const on = crossingDay(points, leg.startTotal + leg.distanceM);
+    const on = crossingDay(pointsFromStart(points, leg.startedOn), leg.startTotal + leg.distanceM);
     return on ? [{ key: routeAwardKey(ctx.measureId, leg, index), kind: 'route', measureId: ctx.measureId, subjectMemberId: null, on,
       data: { ...(leg.name && { name: leg.name }), from: leg.from, to: leg.to, distanceM: leg.distanceM, startTotal: leg.startTotal, page: 'totals' } }] : [];
   });
@@ -106,8 +117,8 @@ function legStart(legs: readonly RouteLeg[], index: number, meters: Points): Day
 /** "In N days" counts from the start day through today: the same days as the miles walked on the leg. */
 function legDates(startedOn: Day | null, meters: Points, today: Day, remainingM: number, finished: boolean) {
   const days = startedOn === null ? null : Math.max(1, dayNumber(today) - dayNumber(startedOn) + 1);
-  const etaDays = finished ? null : routeEtaDays(meters, remainingM);
-  return { startedOn, etaOn: etaDays === null ? null : addDays(today, etaDays),
+  const etaDays = finished ? null : routeEtaDays(meters, remainingM, today);
+  return { startedOn, etaText: routeEtaText(etaDays), etaOn: etaDays === null ? null : addDays(today, etaDays),
     daysText: days === null ? null : `in ${formatNumber(days, 'full')} ${days === 1 ? 'day' : 'days'}` };
 }
 
@@ -138,14 +149,15 @@ export function routeView(measureId: string, state: MeasureState, points: Points
   const walked = earnedOn ? leg.distanceM : Math.min(leg.distanceM, Math.max(0, total - leg.startTotal));
   const map = routeMapLink(measureId, leg.polyline, walked / leg.distanceM);
   const startedOn = legStart(legs, legs.length - 1, meters);
+  const legMeters = pointsFromStart(meters, leg.startedOn);
   return { name: leg.name ?? `${leg.from} to ${leg.to}`, distanceText: formatAmount(leg.distanceM, 'meters', 'full', units).text,
     ...legDates(startedOn, meters, today, leg.distanceM - walked, earnedOn !== null),
     remainingText: earnedOn ? null : `${formatAmount(leg.distanceM - walked, 'meters', 'full', units).text} left`,
-    chart: startedOn === null ? null : legChart(leg, meters, startedOn, earnedOn, units),
+    chart: startedOn === null ? null : legChart(leg, legMeters, startedOn, earnedOn, units),
     walkedText: formatAmount(walked, 'meters', 'compact', units).text, totalText: formatAmount(total, 'meters', 'compact', units).text,
-    progress: walked / leg.distanceM, straightLine: leg.straightLine, etaText: earnedOn ? null : routeEta(meters, leg.distanceM - walked),
+    progress: walked / leg.distanceM, straightLine: leg.straightLine,
     here: routeHere(leg, walked / leg.distanceM, 'card'), drawerHere: routeHere(leg, walked / leg.distanceM, 'drawer'),
     finishedOn: earnedOn, shareAwardId: earned?.id ?? null, map, goalPicked: state.goal !== undefined,
     completed: completions.map(award => ({ name: routeAwardName(award, `${award.data.from} to ${award.data.to}`), finishedOn: award.on, shareAwardId: award.id })),
-    towns: routeTowns(leg, meters, 'card', units, measureId), drawerTowns: routeTowns(leg, meters, 'drawer', units, measureId), mapArt: null, drawerMapArt: null };
+    towns: routeTowns(leg, legMeters, 'card', units, measureId), drawerTowns: routeTowns(leg, legMeters, 'drawer', units, measureId), mapArt: null, drawerMapArt: null };
 }
