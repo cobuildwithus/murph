@@ -184,6 +184,7 @@ import { normalizeHostedFutureWakeAt } from "./wake-time.ts";
 import {
   prepareHostedSystemMailboxItemForCheckpoint,
   recordHostedSystemMailboxItemAfterCheckpoint,
+  recordHostedMemberActionBatch,
   resolveHostedDeviceSyncCompletionRecordInput,
   resolveHostedSystemMailboxNextWakeAt,
   resolveHostedSystemMailboxNextWakeCandidate,
@@ -3633,6 +3634,8 @@ function mergeContinuingSystemMailboxAssistantPhaseResult(input: {
   const invocationLocalAssistantWakeAt =
     input.assistantResult.invocationLocalAssistantWakeAt ?? null;
   const common = {
+    preparedSystemMailboxItemId: input.assistantResult.preparedSystemMailboxItemId
+      ?? input.systemMailboxResult.preparedSystemMailboxItemId,
     ...(browserVaultReplicaRefreshRequested
       ? { browserVaultReplicaRefreshRequested: true as const }
       : {}),
@@ -3842,22 +3845,21 @@ interface DeferredHostedSystemMailboxPostCheckpointRecord {
   };
 }
 
-function shouldDeferHostedSystemMailboxRecordAfterDurableCheckpoint(
-  input: HostedSystemMailboxPendingItem,
-): boolean {
-  return input.postCheckpointRecord?.kind === "vault-share.projection";
-}
-
 function deferHostedSystemMailboxPostCheckpointRecord(input: Parameters<
   typeof recordHostedSystemMailboxItemAfterCheckpoint
 >[0] & {
   followUpWakeAt: string;
-}): DeferredHostedSystemMailboxPostCheckpointRecord {
-  const { followUpWakeAt, ...recordInput } = input;
+  batch?: readonly HostedSystemMailboxPendingItem[];
+}): DeferredHostedSystemMailboxPostCheckpointRecord | null {
+  const { followUpWakeAt, batch, ...recordInput } = input;
   const requiresVaultShareProjectionResult =
     recordInput.item.postCheckpointRecord?.kind === "vault-share.projection";
+  if (!batch && !requiresVaultShareProjectionResult) return null;
   const afterDurableCheckpoint: HostedWorkspaceDurableCheckpointEffect = Object.assign(
     async (context?: HostedWorkspaceDurableCheckpointEffectContext) => {
+      if (batch) {
+        return await recordHostedMemberActionBatch({ ...recordInput, items: batch, signal: context?.signal });
+      }
       const result = await recordHostedSystemMailboxItemAfterCheckpoint({
         ...recordInput,
         ...(requiresVaultShareProjectionResult && context?.vaultShareProjectionResult
@@ -4891,6 +4893,7 @@ async function runRequiredGroupRoomModelInitializationPhase(input: {
     continueAssistantLane: true,
     result: {
       checkpointReason: "system_mailbox_receipt",
+      preparedSystemMailboxItemId: preparation.itemId,
       progressed: true,
       redactedStatus: {
         hostedGroupRoomModelInitializationProcessed: 1,
@@ -4927,6 +4930,7 @@ function buildPrePlanningMemberPreferencesMailboxProcessedResult(input: {
   return {
     ...(afterCheckpoint ? { afterCheckpoint } : {}),
     checkpointReason: "system_mailbox_receipt",
+    preparedSystemMailboxItemId: input.preparation.itemId,
     progressed: true,
     redactedStatus: {
       hostedMemberPreferencesPrePlanningProcessed: input.processed,
@@ -5535,6 +5539,7 @@ async function runSystemMailboxMaintenancePhase(
     ?? (deferSystemMailboxPreparationForDelivery
       ? null
       : await prepareHostedSystemMailboxItemForCheckpoint({
+          batchMemberActions: !hasBackgroundSelection,
           ...(input.backgroundRouteActions
             ? { allowedRouteActions: input.backgroundRouteActions }
             : {}),
@@ -5746,8 +5751,8 @@ async function runSystemMailboxMaintenancePhase(
       : null,
   ]);
   const nextWakeAt = nextWake.at;
-  const shouldRecordSystemMailbox = systemMailboxPreparation.status === "processed"
-    || systemMailboxPreparation.status === "recording";
+  const preparedCount = countPreparedSystemMailboxItems(systemMailboxPreparation);
+  const shouldRecordSystemMailbox = preparedCount > 0;
   const browserVaultReplicaRefreshRequested =
     isBrowserVaultReplicaRefreshSystemMailboxPreparation(systemMailboxPreparation);
   const foregroundPrioritySystemCompletionProcessed =
@@ -5866,6 +5871,7 @@ async function runSystemMailboxMaintenancePhase(
         ? { nextWakeReason: nextWake.reason }
         : {}),
       progressed: true,
+      preparedSystemMailboxItemId: shouldRecordSystemMailbox ? systemMailboxPreparation.itemId : undefined,
       ...(systemMailboxProgressed ? { systemMailboxProgressed: true as const } : {}),
       redactedStatus: {
         ...buildHostedWorkspaceAssistantPhaseRedactedStatus({
@@ -5873,11 +5879,7 @@ async function runSystemMailboxMaintenancePhase(
           nextWakeAt,
           outboxTerminalizedSendingCount: 0,
           progressed: true,
-          systemMailboxPrepared:
-            systemMailboxPreparation.status === "retryable_failed"
-              || systemMailboxPreparation.status === "preempted"
-              ? 0
-              : 1,
+          systemMailboxPrepared: preparedCount,
           systemMailboxRetryableFailed:
             systemMailboxPreparation.status === "retryable_failed" ? 1 : 0,
         }),
@@ -5970,15 +5972,11 @@ async function runSystemMailboxPostCheckpointPhase(input: {
       runtime: input.input.runtime,
       vaultRoot: input.input.restored.vaultRoot,
     };
-    const deferredSystemMailboxRecord =
-      shouldDeferHostedSystemMailboxRecordAfterDurableCheckpoint(
-        input.systemMailboxPreparation.item,
-      )
-        ? deferHostedSystemMailboxPostCheckpointRecord({
-            ...statusCallbackInput,
-            followUpWakeAt: new Date(resolveHostedAssistantPhaseNowMs(input.input)).toISOString(),
-          })
-        : null;
+    const deferredSystemMailboxRecord = deferHostedSystemMailboxPostCheckpointRecord({
+      ...statusCallbackInput,
+      batch: input.systemMailboxPreparation.memberActionBatch,
+      followUpWakeAt: new Date(resolveHostedAssistantPhaseNowMs(input.input)).toISOString(),
+    });
     const clinicalOutcomeCancellation =
       input.systemMailboxPreparation.item.postCheckpointRecord?.kind
         === "clinical-records.outcome-recorded"
@@ -9258,6 +9256,11 @@ function resolveHostedAssistantTimerCheckpointReason(input: {
     return "provider_cleanup";
   }
   return "canonical_runtime_commit";
+}
+
+function countPreparedSystemMailboxItems(preparation: HostedSystemMailboxCheckpointPreparation): number {
+  if (preparation.status !== "processed" && preparation.status !== "recording") return 0;
+  return preparation.memberActionBatch?.length ?? 1;
 }
 
 function resolveHostedSystemMailboxCheckpointReason(input: {

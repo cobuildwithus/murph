@@ -2202,28 +2202,12 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
         fetchRequests.map((request) => request.lanes.map((lane) => lane.lane)),
         [["system"]],
       );
-      assert.deepEqual(
-        (await readHostedSystemMailboxState(vaultRoot)).pending.map((item) =>
-          item.itemId
-        ),
-        [refreshItem.id],
-      );
-      assert.equal(
-        checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
-        "1",
-      );
       assert.ok(browserWriteCalls >= 1);
       assert.ok(browserPublishCalls >= 1);
       assert.ok(
         requireEventIndex(events, "workspace.checkpoint")
           < requireEventIndex(events, "browser-vault.publish:1"),
       );
-      assert.equal(firstResult.status, "scheduled");
-
-      const secondResult = await runSystemPass(
-        "attempt_group_journal_model_free_second",
-      );
-
       assert.deepEqual((await readHostedSystemMailboxState(vaultRoot)).pending, []);
       assert.equal(
         checkpointRequests.at(-1)?.redactedStatus?.hostedMailboxSystemHandledThroughSeq,
@@ -2231,9 +2215,9 @@ describe("hosted workspace runtime entrypoint", () => {test("reads workspace, im
       );
       expect(mocks.prepareHostedCodexRuntimeEnvironment).not.toHaveBeenCalled();
       expect(mocks.prepareHostedCodexAssistantProcess).not.toHaveBeenCalled();
-      assert.equal(secondResult.status, "idle");
-      assert.equal(secondResult.nextWakeAt, null);
-      assert.equal(secondResult.nextWakeReason ?? null, null);
+      assert.equal(firstResult.status, "idle");
+      assert.equal(firstResult.nextWakeAt, null);
+      assert.equal(firstResult.nextWakeReason ?? null, null);
     } finally {
       vi.useRealTimers();
       await removeTempRoot(vaultRoot);

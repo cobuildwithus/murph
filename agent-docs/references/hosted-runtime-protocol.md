@@ -1,6 +1,6 @@
 # Hosted Mailbox Runtime Protocol
 
-Last verified: 2026-11-03
+Last verified: 2026-11-19
 
 ## Postgres runtime authority
 
@@ -1100,6 +1100,18 @@ assistant phase has no inline device executor or turn-local dirty-ack buffer.
 Device hints, restored timers, imports, activity scheduling, and exact
 acknowledgments all use the workspace-owned mailbox path. Common durable effects
 retain their existing delivery and shutdown behavior.
+
+The runner drains ready ordered mailbox work in the same invocation. Adjacent ready
+member edits already queued at the start of a pass share one workspace snapshot. The runner
+applies them in queue order, checks for foreground work between edits, and
+publishes up to four individual receipts concurrently after the snapshot commits.
+The snapshot contains the exact outcomes. If publication stops partway, the
+next runner can retry those receipts using their original identities. A fenced
+progress update records the handled system sequence. On restore, it retires
+covered member-action receipts from the saved copy. A failed receipt or a
+blocked sequence instead requires a snapshot of the remaining work and retry
+deadline. Other mailbox items keep their existing checkpoint boundaries.
+Independent device and clinical imports keep their existing admission budgets.
 
 After the dedicated system-mailbox lane checkpoints completed workspace work,
 finishes projection, and records completion, it offers one additional bounded

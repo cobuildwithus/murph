@@ -40,6 +40,7 @@ import {
 import type {
   HostedLegacyUsageReferralAuthorityClassification,
 } from "./events/assistant-notification.ts";
+import { readHostedMailboxImportState } from "./mailbox-state.ts";
 import type {
   HostedMailboxItemImportOutcome,
   HostedMailboxResolvedImportItem,
@@ -62,6 +63,8 @@ import {
   readHostedSystemMailboxState,
   removeHostedSystemMailboxPendingItemIfCurrent,
   resolveHostedSystemMailboxNextWakeCandidate,
+  resolveHostedSystemMailboxProgress,
+  resolveHostedSystemMailboxWakeCandidates,
   usesHostedModelFreeSystemMailboxSelection,
   systemMailboxItemIsDue,
   updateHostedSystemMailboxPendingItem,
@@ -130,7 +133,7 @@ type HostedSystemMailboxCodexConnectionFailure = {
   codexErrorHttpStatusCode?: number;
 };
 
-export type HostedSystemMailboxCheckpointPreparation =
+export type HostedSystemMailboxCheckpointPreparation = (
   | {
       assistantNotificationValidationFailureReason?:
         HostedAssistantNotificationValidationFailureReason;
@@ -163,7 +166,7 @@ export type HostedSystemMailboxCheckpointPreparation =
       item: HostedSystemMailboxPendingItem;
       itemId: string;
       status: "recording";
-    };
+    }) & { memberActionBatch?: readonly HostedSystemMailboxPendingItem[] };
 
 type HostedSystemMailboxPreparationSelection =
   | {
@@ -379,7 +382,8 @@ async function resolveAssistantAskCompletionCutoff(
   return (typeof cutoff === "function" ? await cutoff() : cutoff) ?? null;
 }
 
-export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
+type MailboxPreparationInput = {
+  batchMemberActions?: boolean;
   assistantExecutionBlocked?: boolean;
   pendingOnly?: boolean;
   excludedRouteActions?: readonly HostedSystemMailboxRouteAction[];
@@ -399,14 +403,72 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
   shouldYieldBackgroundMaintenance?: (() => boolean) | null;
   backgroundMaintenanceYieldReason?: HostedBackgroundMaintenanceYieldReason;
   vaultRoot: string;
-}): Promise<HostedSystemMailboxCheckpointPreparation | null> {
-  const startedAt = (input.now ?? (() => new Date().toISOString()))();
-  const hasAssistantAskCompletionCutoff = Object.hasOwn(
-    input,
-    "assistantAskCompletionOccurredBefore",
-  );
-  const matchesSelection = (item: HostedSystemMailboxPendingItem) =>
-    !input.excludedRouteActions?.includes(item.routeAction)
+};
+
+type MemberActionSuccessor = { previousId: string; itemId: string };
+
+export async function prepareHostedSystemMailboxItemForCheckpoint(
+  input: MailboxPreparationInput,
+): Promise<HostedSystemMailboxCheckpointPreparation | null> {
+  // Freeze this pass at the queue already on disk. New arrivals get another
+  // turn; an active producer cannot postpone this group's durable save.
+  const { pending } = await readHostedSystemMailboxState(input.vaultRoot);
+  const staged = new Set<string>();
+  const matchesSelection = createPreparationSelection(input, staged);
+  if (!pending.some(matchesSelection)) return null;
+  const first = await prepareOneSystemMailboxItem(input, matchesSelection, null);
+  if (!input.batchMemberActions || !isPreparedMemberAction(first)) return first;
+  const start = pending.findIndex((item) => item.itemId === first.itemId);
+  if (start < 0) return first;
+  const batch = [first.item];
+  for (let i = start + 1; i < pending.length; i++) {
+    const candidate = pending[i]!;
+    if (candidate.wake.kind !== "member.action.requested" || input.shouldYieldBackgroundMaintenance?.()) break;
+    input.signal?.throwIfAborted();
+    const previousId = pending[i - 1]!.itemId;
+    staged.add(previousId);
+    const next = await prepareOneSystemMailboxItem(input, matchesSelection, { previousId, itemId: candidate.itemId });
+    if (!isPreparedMemberAction(next)) break;
+    batch.push(next.item);
+  }
+  return batch.length > 1 ? { ...first, memberActionBatch: batch } : first;
+}
+
+function isPreparedMemberAction(value: HostedSystemMailboxCheckpointPreparation | null): value is Extract<
+  HostedSystemMailboxCheckpointPreparation, { status: "processed" | "recording" }
+> {
+  return (value?.status === "processed" || value?.status === "recording")
+    && value.item.wake.kind === "member.action.requested"
+    && value.item.mailboxLaneSeq !== null
+    && value.item.postCheckpointRecord?.kind === "member-action.outcome-recorded";
+}
+
+function mayClaimNextBatchItem(
+  successor: MemberActionSuccessor | null,
+  state: HostedSystemMailboxState,
+  selected: HostedSystemMailboxPendingItem | null | undefined,
+  input: MailboxPreparationInput,
+): boolean {
+  if (!successor) return true;
+  if (
+    input.shouldYieldBackgroundMaintenance?.()
+    || selected?.wake.kind !== "member.action.requested"
+    || selected.itemId !== successor.itemId
+    || selected.mailboxLaneSeq === null
+    || (selected.status !== "pending" && !(selected.status === "recording"
+      && selected.postCheckpointRecord?.kind === "member-action.outcome-recorded"))
+  ) return false;
+  const index = state.pending.findIndex((item) => item.itemId === successor.previousId);
+  return index >= 0 && state.pending[index + 1]?.itemId === selected.itemId;
+}
+
+function createPreparationSelection(
+  input: MailboxPreparationInput,
+  staged: ReadonlySet<string>,
+) {
+  return (item: HostedSystemMailboxPendingItem) =>
+    !staged.has(item.itemId)
+    && !input.excludedRouteActions?.includes(item.routeAction)
     && (input.allowedRouteActions?.includes(item.routeAction)
       ?? item.routeAction !== "run-assistant-ask")
     && (input.allowedMailboxDedupeKeyPrefixes == null
@@ -414,12 +476,18 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
         item.mailboxDedupeKey.startsWith(prefix)))
     && (input.allowedWakeKinds == null
       || input.allowedWakeKinds.includes(item.wake.kind));
-  // A negative snapshot only ends this pass. Later imports remain queued; a
-  // positive snapshot must still be re-read and claimed under the write lock.
-  const snapshot = await readHostedSystemMailboxState(input.vaultRoot);
-  if (!snapshot.pending.some(matchesSelection)) {
-    return null;
-  }
+}
+
+async function prepareOneSystemMailboxItem(
+  input: MailboxPreparationInput,
+  matchesSelection: (item: HostedSystemMailboxPendingItem) => boolean,
+  successor: MemberActionSuccessor | null,
+): Promise<HostedSystemMailboxCheckpointPreparation | null> {
+  const startedAt = (input.now ?? (() => new Date().toISOString()))();
+  const hasAssistantAskCompletionCutoff = Object.hasOwn(
+    input,
+    "assistantAskCompletionOccurredBefore",
+  );
   // Resolve conversation chronology only for a nonempty selection, and keep
   // those input-file reads outside the shared write critical section.
   const assistantAskCompletionOccurredBefore = await resolveAssistantAskCompletionCutoff(
@@ -476,6 +544,9 @@ export async function prepareHostedSystemMailboxItemForCheckpoint(input: {
         now: startedAt,
         state: selectionState,
       });
+      if (!mayClaimNextBatchItem(successor, state, pending, input)) {
+        return { result: null, write: false };
+      }
       if (!pending) {
         const compacted = retireHostedCoveredDeviceHints({
           continuationItemIds,
@@ -1052,6 +1123,58 @@ export function resolveHostedDeviceSyncCompletionRecordInput(input: {
   return { deviceSyncCompletionAcceptedInCurrentAdmission: true };
 }
 
+const MEMBER_ACTION_RECEIPT_CONCURRENCY = 4;
+
+async function forEachMemberActionReceipt(
+  items: readonly HostedSystemMailboxPendingItem[],
+  visit: (item: HostedSystemMailboxPendingItem) => Promise<void>,
+  signal?: AbortSignal | null,
+  shouldYield?: () => boolean,
+): Promise<void> {
+  for (let i = 0; i < items.length; i += MEMBER_ACTION_RECEIPT_CONCURRENCY) {
+    signal?.throwIfAborted();
+    if (shouldYield?.()) return;
+    const group = items.slice(i, i + MEMBER_ACTION_RECEIPT_CONCURRENCY);
+    const results = await Promise.allSettled(group.map(visit));
+    for (const result of results) {
+      if (result.status === "rejected") throw result.reason;
+    }
+  }
+}
+
+// Only the external receipts overlap. Vault mutations have already run in
+// order and the shared snapshot contains every exact outcome for replay.
+export async function recordHostedMemberActionBatch(input: {
+  items: readonly HostedSystemMailboxPendingItem[];
+  assistantExecutionBlocked?: boolean;
+  runtime: HostedSystemMailboxRuntime;
+  signal?: AbortSignal | null;
+  vaultRoot: string;
+  alreadyPublished?: ReadonlySet<string>;
+}) {
+  await forEachMemberActionReceipt(input.items, async (item) => {
+    if (input.alreadyPublished?.has(item.itemId)) {
+      await removeHostedSystemMailboxPendingItemIfCurrent({ item, vaultRoot: input.vaultRoot });
+      return;
+    }
+    await recordHostedSystemMailboxItemAfterCheckpoint({ ...input, item });
+  }, input.signal);
+  const state = await readHostedSystemMailboxState(input.vaultRoot);
+  const imported = await readHostedMailboxImportState({ vaultRoot: input.vaultRoot });
+  const { handledThroughSeq } = resolveHostedSystemMailboxProgress({
+    state, importedSeq: imported.watermarks.system,
+  });
+  const { next } = await resolveHostedSystemMailboxWakeCandidates({ ...input, state });
+  return {
+    nextWakeAt: next.at,
+    nextWakeReason: next.reason,
+    // Only a handled prefix can prove that all journals in the snapshot are
+    // retired. Persist a partial failure or a pinned frontier in the usual way.
+    requiresFollowUpCheckpoint: input.items.some((item) =>
+      item.mailboxLaneSeq === null || BigInt(item.mailboxLaneSeq) > BigInt(handledThroughSeq)),
+  };
+}
+
 export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
   assistantExecutionBlocked?: boolean;
   deviceSyncCompletionAcceptedInCurrentAdmission?: boolean;
@@ -1205,21 +1328,32 @@ export async function recordHostedSystemMailboxItemAfterCheckpoint(input: {
   }
 }
 
-export async function publishHostedSystemMailboxMemberActionReceipt(input: {
-  item: HostedSystemMailboxPendingItem;
+export async function publishHostedMemberActionReceipts(input: {
+  items: readonly HostedSystemMailboxPendingItem[];
   runtime: HostedSystemMailboxRuntime;
-  signal?: AbortSignal | null;
-}): Promise<void> {
-  if (input.item.postCheckpointRecord?.kind !== "member-action.outcome-recorded") {
-    throw new TypeError("Expected a checkpointed member-action receipt.");
-  }
-  await recordHostedSystemMailboxPostCheckpointRecord({
-    operatorHomeRoot: null,
-    record: input.item.postCheckpointRecord,
-    runtime: input.runtime,
-    signal: input.signal,
-    vaultRoot: null,
-  });
+  signal: AbortSignal;
+  shouldYield: () => boolean;
+}): Promise<ReadonlySet<string>> {
+  const published = new Set<string>();
+  await forEachMemberActionReceipt(input.items, async (item) => {
+    if (item.postCheckpointRecord?.kind !== "member-action.outcome-recorded") {
+      throw new TypeError("Expected a checkpointed member-action receipt.");
+    }
+    try {
+      await recordHostedSystemMailboxPostCheckpointRecord({
+        operatorHomeRoot: null,
+        record: item.postCheckpointRecord,
+        runtime: input.runtime,
+        signal: input.signal,
+        vaultRoot: null,
+      });
+      published.add(item.itemId);
+    } catch {
+      // Cleanup retries an unconfirmed receipt with its original identity.
+      input.signal.throwIfAborted();
+    }
+  }, input.signal, input.shouldYield);
+  return published;
 }
 
 export async function deferHostedMemberActionAfterBrowserVaultFailure(input: {

@@ -3659,6 +3659,7 @@ describe("runHostedWorkspaceAssistantPhase runtime logs", () => {
     expect(mocks.runHostedAssistantAutomationLane).not.toHaveBeenCalled();
     expect(result).toEqual(expect.objectContaining({
       nextWakeAt: now,
+      preparedSystemMailboxItemId: "system_mailbox_item_member_preferences_11",
       progressed: true,
       redactedStatus: expect.objectContaining({
         hostedMemberPreferencesPrePlanningPageLimit: 10,

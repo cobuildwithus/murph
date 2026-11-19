@@ -232,8 +232,9 @@ import {
   deferHostedSystemMailboxItemAfterVaultShareProjectionFailure,
   enqueueHostedSystemMailboxItem,
   prepareHostedSystemMailboxItemForCheckpoint,
-  publishHostedSystemMailboxMemberActionReceipt,
+  publishHostedMemberActionReceipts,
   recordHostedSystemMailboxItemAfterCheckpoint,
+  recordHostedMemberActionBatch,
   retainHostedSystemMailboxItemUntilDeliveryWake,
   retireHostedCoveredDeviceHintsAfterImport,
   resolveHostedBrowserVaultRefreshAttempt,
@@ -1382,6 +1383,13 @@ function hostedSystemMailboxCheckpointPreparationNeedsCheckpoint(
     || preparation.checkpointRequired;
 }
 
+function mailboxHasSuccessorAfterRemoval(
+  state: HostedSystemMailboxState,
+  preparedItemId: string,
+): boolean {
+  return state.pending.length > 0 && !state.pending.some((item) => item.itemId === preparedItemId);
+}
+
 function readHostedSystemMailboxCheckpointPreparationRecordItem(
   preparation: HostedSystemMailboxCheckpointPreparation | null,
 ): HostedSystemMailboxCheckpointPreparationRecordItem | null {
@@ -2109,8 +2117,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
       vaultRoot: restored.vaultRoot,
     });
     assertRuntimeNotAborted();
-    await recoverHostedSystemMailboxClaims(restored.vaultRoot);
     let activeWorkspace = workspaceRead.workspace;
+    await recoverHostedSystemMailboxClaims(restored.vaultRoot, readCheckpointedSystemHandledThrough(activeWorkspace));
     let pendingCanonicalReceiptCount = restored.canonicalWriteReceiptCount;
     const canonicalWriteReceiptLogBlocksBackgroundMaintenance = (): boolean =>
       pendingCanonicalReceiptCount
@@ -3214,6 +3222,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         systemMailboxState,
         vaultRoot: restored.vaultRoot,
       });
+      let orderedMailboxRecordWake: HostedRuntimeWakeCandidate | null = null;
       let systemMailboxPostRecordWake: HostedRuntimeWakeCandidate | null = null;
       let independentCompletionMetadataPending: "record" | "replay" | null = null;
       const rememberSystemMailboxPostRecordWake = (
@@ -3230,6 +3239,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         systemMailboxState?: HostedSystemMailboxState,
       ) => await resolveSystemMailboxModeWake([
         ...(systemMailboxPostRecordWake?.at ? [systemMailboxPostRecordWake] : []),
+        ...(orderedMailboxRecordWake?.at ? [orderedMailboxRecordWake] : []),
         ...extraCandidates,
       ], systemMailboxState);
       const finishMailboxImportEffectsOnce = async () => {
@@ -3614,6 +3624,11 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             redactedStatus: activeWorkspace.redactedStatus ?? null,
             vaultRoot: restored.vaultRoot,
           })) return;
+        await publishSystemMailboxProgress(wake);
+      };
+      const publishSystemMailboxProgress = async (
+        wake: Awaited<ReturnType<typeof resolveCurrentSystemMailboxModeWake>>,
+      ): Promise<void> => {
         // Publish the final wake/progress after completion and derived-index
         // maintenance, retaining the archive and its durable replay journal.
         const checkpoint = await checkpointRuntimeRedactedStatus({
@@ -3623,6 +3638,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           redactedStatus: currentRedactedStatus,
           workspace: activeWorkspace,
         });
+        checkpointReportedConversationInputAhead ||= checkpoint.conversationInputAhead === true;
         activeWorkspace = checkpoint.workspace;
         currentRedactedStatus = checkpoint.workspace.redactedStatus ?? {};
       };
@@ -3825,16 +3841,14 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         });
         return invocationResult;
       };
+      type OrderedMailboxPass = "preempted" | "idle" | { recordedItemId: string };
       const runSystemMailboxLifecycleItem = async (inputItem: {
         allowedRouteActions: HostedSystemMailboxPreparationInput["allowedRouteActions"];
         allowedWakeKinds: HostedSystemMailboxPreparationInput["allowedWakeKinds"];
         stagePrefix: string;
-      }): Promise<{
-        preempted: boolean;
-        prepared: boolean;
-      }> => {
+      }): Promise<OrderedMailboxPass> => {
         if (await qualifySystemMailboxForegroundWake(consumeForegroundWake())) {
-          return { preempted: true, prepared: false };
+          return "preempted";
         }
         const acceptedProgressCheckpointOrdinalBeforePreparation =
           acceptedCanonicalSystemProgressCheckpointOrdinal;
@@ -3855,6 +3869,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             write: async () => {
               const preparation = await prepareHostedSystemMailboxItemForCheckpoint({
                 assistantExecutionBlocked,
+                batchMemberActions: true,
                 allowedRouteActions: inputItem.allowedRouteActions,
                 allowedWakeKinds: inputItem.allowedWakeKinds,
                 excludedRouteActions: HOSTED_WORKSPACE_SYSTEM_WORK_ACTIONS,
@@ -3973,7 +3988,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             systemMailboxProgressedSinceCheckpoint ||= preparationSystemProgressed;
           }
           if (preparation?.status === "preempted") {
-            return { preempted: true, prepared: true };
+            return "preempted";
           }
           const preparationWake =
             resolveHostedSystemMailboxCheckpointPreparationWake(preparation);
@@ -4049,19 +4064,18 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                 `${inputItem.stagePrefix}.checkpoint.release_prepared_delivery`,
               );
             }
-            return { preempted: true, prepared: preparation !== null };
+            return "preempted";
           }
           if (!recordItem) {
-            return { preempted: false, prepared: preparation !== null };
+            return "idle";
           }
+          const batch = preparation?.memberActionBatch;
+          let publishedBatchItems: ReadonlySet<string> | undefined;
           const recordSystemMailboxItem = async (recordInput: {
             exactDeliveryCompleted: boolean;
             item: HostedSystemMailboxCheckpointPreparationRecordItem;
             vaultShareProjectionResult?: HostedVaultShareProjectionOfferResult;
-          }): Promise<{
-            preempted: boolean;
-            prepared: boolean;
-          }> => {
+          }): Promise<OrderedMailboxPass> => {
             const recordWakeInterruption = createHostedRuntimeCheckpointWakeInterruption({
               enabled: true,
               runtimeWakeSignal: options.runtimeWakeSignal ?? null,
@@ -4072,63 +4086,63 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                   recordWakeInterruption.signal,
                 ])
               : runtimeAbortController.signal;
+            const recordContext = {
+              assistantExecutionBlocked,
+              runtime: foregroundRuntime,
+              signal: recordSignal,
+              vaultRoot: restored.vaultRoot,
+            };
             try {
-              const recordResult = await recordHostedSystemMailboxItemAfterCheckpoint({
-                assistantExecutionBlocked,
-                item: recordInput.item,
-                operatorHomeRoot: restored.operatorHomeRoot,
-                runtime: foregroundRuntime,
-                signal: recordSignal,
-                ...(recordInput.vaultShareProjectionResult
-                  ? {
-                      vaultShareProjectionResult:
-                        recordInput.vaultShareProjectionResult,
-                    }
-                  : {}),
-                vaultRoot: restored.vaultRoot,
-              });
-              const recordWake = selectHostedRuntimeWakeCandidate([
-                createHostedRuntimeWakeCandidate(
-                  recordInput.exactDeliveryCompleted
-                    ? null
-                    : recordResult.nextWakeAt,
-                  isHostedSystemMailboxModelFreeExactNotificationItem(
-                      recordInput.item,
-                    )
-                    && recordResult.nextWakeAt
+              let needsSnapshot = true;
+              if (batch) {
+                const result = await recordHostedMemberActionBatch({
+                  ...recordContext,
+                  alreadyPublished: publishedBatchItems,
+                  items: batch,
+                });
+                orderedMailboxRecordWake = createHostedRuntimeWakeCandidate(result.nextWakeAt, result.nextWakeReason);
+                needsSnapshot = result.requiresFollowUpCheckpoint || runtimeStateDirty;
+              } else {
+                const result = await recordHostedSystemMailboxItemAfterCheckpoint({
+                  ...recordContext,
+                  item: recordInput.item,
+                  operatorHomeRoot: restored.operatorHomeRoot,
+                  vaultShareProjectionResult: recordInput.vaultShareProjectionResult,
+                });
+                orderedMailboxRecordWake = createHostedRuntimeWakeCandidate(
+                  recordInput.exactDeliveryCompleted ? null : result.nextWakeAt,
+                  isHostedSystemMailboxModelFreeExactNotificationItem(recordInput.item) && result.nextWakeAt
                     ? HOSTED_RUNTIME_ASSISTANT_DELIVERY_WAKE_REASON
-                    : recordResult.nextWakeReason ?? null,
-                ),
-                recordInput.exactDeliveryCompleted
-                  || recordInput.item.postCheckpointRecord
+                    : result.nextWakeReason ?? null,
+                );
+                const actionWake = recordInput.exactDeliveryCompleted || recordInput.item.postCheckpointRecord
                   ? null
-                  : preparationWake,
-              ]);
-              rememberSystemMailboxPostRecordWake(
-                recordResult.deviceSyncWake ?? recordWake,
-              );
-              await checkpointSystemMailboxMode(
-                `${inputItem.stagePrefix}.checkpoint.record`,
-                recordWake.at ? [recordWake] : [],
-                recordWakeInterruption.signal,
-              );
+                  : preparationWake;
+                rememberSystemMailboxPostRecordWake(
+                  result.deviceSyncWake ?? actionWake ?? createHostedRuntimeWakeCandidate(null, null),
+                );
+              }
+              if (needsSnapshot) {
+                await checkpointSystemMailboxMode(
+                  `${inputItem.stagePrefix}.checkpoint.record`, [], recordWakeInterruption.signal,
+                );
+              } else {
+                await publishSystemMailboxProgress(await resolveCurrentSystemMailboxModeWake());
+              }
             } catch (error) {
               await recordWakeInterruption.dispose();
               if (
                 observeForegroundWake(recordWakeInterruption.takeNotification())
               ) {
-                return { preempted: true, prepared: true };
+                return "preempted";
               }
               throw error;
             }
             await recordWakeInterruption.dispose();
             observeForegroundWake(recordWakeInterruption.takeNotification());
-            return {
-              preempted:
-                checkpointReportedConversationInputAhead
-                || shouldYieldSystemMailboxWork(),
-              prepared: true,
-            };
+            return checkpointReportedConversationInputAhead || shouldYieldSystemMailboxWork()
+              ? "preempted"
+              : { recordedItemId: recordInput.item.itemId };
           };
           if (ownsExactModelFreeDelivery && exactDeliveryIntentState?.terminal) {
             return await recordSystemMailboxItem({
@@ -4137,7 +4151,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             });
           }
           if (ownsExactModelFreeDelivery && exactDeliveryEffects.length === 0) {
-            return { preempted: true, prepared: true };
+            return "preempted";
           }
           if (ownsExactModelFreeDelivery) {
             const persistedDelivery = await runHostedWorkspaceCanonicalWriteAtBoundary({
@@ -4223,7 +4237,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                   )],
                 );
               }
-              return { preempted: true, prepared: true };
+              return "preempted";
             }
             return await recordSystemMailboxItem({
               exactDeliveryCompleted: true,
@@ -4252,7 +4266,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           };
           let projectionOpportunity = isMemberActionRecord ? null : await offerProjection();
           if (!isMemberActionRecord && (!projectionOpportunity || shouldYieldSystemMailboxWork())) {
-            return { preempted: true, prepared: true };
+            return "preempted";
           }
           const browserVaultRefreshAttempt =
             resolveHostedBrowserVaultRefreshAttempt(recordItem) ?? "initial";
@@ -4324,7 +4338,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             return true;
           };
           if (await deferMemberActionRefreshFailure()) {
-            return { preempted: true, prepared: true };
+            return "preempted";
           }
           const refreshPreempted = async (): Promise<boolean> => {
             const refreshDisposition = classifyHostedBrowserVaultReplicaRefresh(refresh);
@@ -4355,31 +4369,28 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
             }
             return false;
           };
-          if (await refreshPreempted()) return { preempted: true, prepared: true };
+          if (await refreshPreempted()) return "preempted";
           if (shouldYieldSystemMailboxWork()) {
-            return { preempted: true, prepared: true };
+            return "preempted";
           }
           if (isMemberActionRecord) {
             // A newer publish owner wins a conflict. Oversized replicas and
             // exhausted transient retries retire here so later work can run.
             // The canonical outcome is already checkpointed. A lost response is
             // safe to repeat at the ordinary cleanup boundary below.
-            try {
-              await publishHostedSystemMailboxMemberActionReceipt({
-                item: recordItem,
-                runtime: foregroundRuntime,
-                signal: runtimeAbortController.signal,
-              });
-            } catch (error) {
-              // Cleanup publication owns the existing retry/wake behavior.
-              if (runtimeAbortController.signal.aborted) throw error;
-            }
+            publishedBatchItems = await publishHostedMemberActionReceipts({
+              items: batch ?? [recordItem],
+              runtime: foregroundRuntime,
+              signal: runtimeAbortController.signal,
+              shouldYield: shouldYieldSystemMailboxWork,
+            });
+            assertRuntimeNotAborted();
             if (shouldYieldSystemMailboxWork()) {
-              return { preempted: true, prepared: true };
+              return "preempted";
             }
             projectionOpportunity = await offerProjection();
             if (!projectionOpportunity || shouldYieldSystemMailboxWork()) {
-              return { preempted: true, prepared: true };
+              return "preempted";
             }
           }
           return await recordSystemMailboxItem({
@@ -4390,6 +4401,32 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
               : {}),
           });
         });
+      };
+
+      const drainReadyOrderedSystemMailbox = async () => {
+        while (true) {
+          const pass = await runSystemMailboxLifecycleItem({
+            allowedRouteActions: modelFreeRouteActions,
+            allowedWakeKinds: modelFreeWakeKinds,
+            stagePrefix: "system_mailbox.model_free",
+          });
+          assertRuntimeNotAborted();
+          if (pass === "preempted") return null;
+
+          const state = await readHostedSystemMailboxState(restored.vaultRoot);
+          const projectedWake = await resolveCurrentSystemMailboxModeWake([], state);
+          // Only a retired item opens the next pass. A retained claim or
+          // retry keeps its existing wake and cannot spin in this invocation.
+          if (
+            pass === "idle"
+            || !mailboxHasSuccessorAfterRemoval(state, pass.recordedItemId)
+            || !hostedRuntimeWakeIsDue(projectedWake.systemMailboxWakeAt)
+            || (!assistantExecutionBlocked && hostedRuntimeDefaultProcessingWakeIsDue(projectedWake))
+            || shouldYieldSystemMailboxWork()
+          ) return projectedWake;
+          // The next pass owns the due queue hint. Keep independent deadlines.
+          orderedMailboxRecordWake = null;
+        }
       };
 
       const runSystemMailboxWork = async (): Promise<HostedWorkspaceInvocationResult> => {
@@ -4436,8 +4473,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           return await returnSystemMailboxModeResult();
         }
 
-        // Replay already-durable journals before new work, so one idle save
-        // carries both cleanup and the next bounded pass. Never restart after it.
+        // Replay durable import journals before starting this admission's
+        // independent device and clinical work.
         await finishIndependentSystemWorkAfterCheckpoint(false);
         workspaceSystemWork.resume();
         workspaceSystemWork.kick(modelFreeRouteActions);
@@ -4474,17 +4511,8 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           return await returnSystemMailboxModeResult();
         }
 
-        const modelFreePass = await runSystemMailboxLifecycleItem({
-          allowedRouteActions: modelFreeRouteActions,
-          allowedWakeKinds: modelFreeWakeKinds,
-          stagePrefix: "system_mailbox.model_free",
-        });
-        assertRuntimeNotAborted();
-        if (modelFreePass.preempted) {
-          return await returnSystemMailboxModeResult();
-        }
-
-        const projectedWake = await resolveCurrentSystemMailboxModeWake();
+        const projectedWake = await drainReadyOrderedSystemMailbox();
+        if (!projectedWake) return await returnSystemMailboxModeResult();
         await checkpointSystemMailboxCompletion(projectedWake);
         if (
           importOrStartupCheckpointPending
@@ -5202,7 +5230,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
                 effectResult.redactedStatus,
               );
             }
-            await checkpointReplayableDeviceCompletion(effectResult);
+            await checkpointReplayableSystemCompletion(effectResult);
             const effectWake = readHostedWorkspaceDurableCheckpointEffectResult(effectResult);
             requiresFollowUpCheckpoint ||= effectWake.requiresFollowUpCheckpoint;
             if (effectWake.nextWakeAt) {
@@ -5347,7 +5375,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         nextWakeAt: pendingWake.nextWakeAt,
       });
     };
-    const checkpointReplayableDeviceCompletion = async (
+    const checkpointReplayableSystemCompletion = async (
       result: HostedWorkspaceDurableCheckpointEffectResult | null | void,
     ): Promise<void> => {
       if (result?.requiresFollowUpCheckpoint !== false) return;
@@ -6334,6 +6362,17 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           };
         }
       };
+      const runNextCheckpointedMailboxItem = async (signal: AbortSignal): Promise<void> => {
+        const preparedItemId = result.assistantPhaseResult?.preparedSystemMailboxItemId;
+        if (!preparedItemId || mailboxBudgetExhausted() || resolveForegroundProcessingMode() !== "default") return;
+        const state = await readHostedSystemMailboxState(restored.vaultRoot);
+        if (!mailboxHasSuccessorAfterRemoval(state, preparedItemId)) return;
+        const { next } = await resolveHostedSystemMailboxWakeCandidates({ state, vaultRoot: restored.vaultRoot });
+        if (next.executionClass === "default_owned") {
+          await runForegroundPass({ requestIdKind: "checkpoint-wake", signal });
+          if (!runtimeStateDirty) await drainCleanDurableCheckpointEffects();
+        }
+      };
       const runForegroundMailboxWakeIfWork = async (input: {
         includeReadyImageCompletion?: boolean;
         initialMailboxPrefetch?: HostedMailboxPrefixPrefetch | null;
@@ -6779,7 +6818,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
         return runtimeStateDirty;
       };
       const prepareInvocationRelease = async (): Promise<void> => {
-        await closeDetachedAssistantAskBeforeWorkspaceRelease();
+        if (mayFinishRuntime()) await closeDetachedAssistantAskBeforeWorkspaceRelease();
       };
       const finishCleanRuntimeInvocation = async () => {
         assertRuntimeNotAborted();
@@ -7956,6 +7995,7 @@ async function runHostedWorkspaceRuntimeJobInProcessImpl(
           // restart optional work after this invocation published its snapshot.
           scheduleReplacementForRetainedMailboxWake();
         }
+        await runOptionalPostCheckpointWork(() => runNextCheckpointedMailboxItem(postCheckpointWorkSignal));
         const invocationResult = await finishDirtyRuntimeInvocation({
           browserVaultRefresh,
           idleMaintenance,
@@ -9660,6 +9700,10 @@ function shouldCheckpointHostedReplayBudgetProgressBeforeForeground(input: {
     && consumedConversationSeq !== null
     && nextConversationSeq > previousConversationSeq
     && nextConversationSeq <= consumedConversationSeq;
+}
+
+function readCheckpointedSystemHandledThrough(workspace: HostedWorkspaceState | null): bigint {
+  return parseHostedMailboxSeqOrNull(workspace?.redactedStatus?.hostedMailboxSystemHandledThroughSeq) ?? 0n;
 }
 
 function parseHostedMailboxSeqOrNull(value: unknown): bigint | null {

@@ -356,6 +356,8 @@ interface HostedWorkspaceRunnerAssistantPhaseResultBase {
   nextWakeReason?: string | null;
   nextWakeAutonomous?: true;
   redactedStatus?: HostedRuntimeRedactedJson | null;
+  // Invocation-local. Removal at the durable boundary admits the next queued item.
+  preparedSystemMailboxItemId?: string;
   systemMailboxProgressed?: true;
 }
 
