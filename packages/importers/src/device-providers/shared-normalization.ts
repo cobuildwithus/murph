@@ -493,15 +493,11 @@ export function pushDeletionObservation(
         options.occurredAt,
         "deleted",
       ),
-      fields: stripUndefined({
+      fields: {
         metric: "external-resource-deleted",
         value: 1,
         unit: "boolean",
-        provider: options.provider,
-        resourceType: options.resourceType,
-        deleted: true,
-        sourceEventType: options.sourceEventType,
-      }),
+      },
     }),
   );
 }

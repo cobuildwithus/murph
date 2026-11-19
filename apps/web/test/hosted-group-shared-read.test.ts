@@ -292,7 +292,7 @@ async function replaceAndReadProjectionRecords(input: {
   const hostedVaultShareFindMany = vi.fn().mockImplementation(
     (args: { where?: { id?: unknown } }) => Promise.resolve(
       args.where?.id
-        ? [{ id: row.id, projectionSnapshotCiphertext }]
+        ? [{ id: row.id, grantedAt: row.grantedAt, projectionSnapshotCiphertext }]
         : [row],
     ),
   );
@@ -2202,6 +2202,23 @@ describe("plain-grant group history reads", () => {
     await expect(decryptHostedVaultShareProjectionSnapshots({ entries: [{ ...share, ciphertext: "published" }],
       requestedHistoryDays: 90 })).resolves.toEqual([records(90)]);
   });
+  it("withholds a shared answer when a grant changes after loading its snapshot", async () => {
+    const { prisma, hostedVaultShareFindMany } = fixture();
+    const read = hostedVaultShareFindMany.getMockImplementation()!;
+    let loaded = false;
+    hostedVaultShareFindMany.mockImplementation(async args => {
+      if (loaded) return [];
+      const rows = await read(args);
+      if (args.select?.projectionSnapshotCiphertext) loaded = true;
+      return rows;
+    });
+    const result = await readHostedGroupSharedDataByRuntimeMemberId({
+      prisma, runtimeMemberId: RUNTIME_MEMBER_ID, projectionScopes: [STEPS_SCOPE],
+    });
+    expect(loaded).toBe(true);
+    expect(result.status).toBe("unavailable");
+  });
+
   it("cannot substitute a regrant ciphertext for an id captured before revocation", async () => {
     const { prisma, hostedVaultShareFindMany } = fixture();
     const original = hostedVaultShareFindMany.getMockImplementation()!;
@@ -2236,13 +2253,14 @@ it("bounds a maximum 200-member three-scope read to sequential four-snapshot bat
   for (const [request] of hostedVaultShareFindMany.mock.calls.slice(0, 2)) {
     expect(request.take).toBe(1_201); // One overflow sentinel, no duplicate history authority.
   }
-  expect(transaction).toHaveBeenCalledTimes(201);
-  expect(hostedVaultShareFindMany).toHaveBeenCalledTimes(202);
-  expect(mocks.hasHostedRuntimeActiveAccess).toHaveBeenCalledTimes(201);
-  for (const [request] of hostedVaultShareFindMany.mock.calls.slice(2)) {
+  expect(transaction).toHaveBeenCalledTimes(202);
+  expect(hostedVaultShareFindMany).toHaveBeenCalledTimes(203);
+  expect(mocks.hasHostedRuntimeActiveAccess).toHaveBeenCalledTimes(202);
+  for (const [request] of hostedVaultShareFindMany.mock.calls.slice(2, -1)) {
     expect(request).toMatchObject({ take: 4, select: { id: true, projectionSnapshotCiphertext: true }, where: { destinationMemberId: RUNTIME_MEMBER_ID, status: "granted" } });
     expect(request.where.id.in).toHaveLength(4);
   }
+  expect(hostedVaultShareFindMany).toHaveBeenLastCalledWith(expect.objectContaining({ take: 800, select: { id: true, grantedAt: true } }));
 });
 
 it.each([

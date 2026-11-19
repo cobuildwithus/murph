@@ -84,3 +84,37 @@ test("run activity names", () => {
   for (const name of ["run", "Running", "trail_running", "Treadmill Run", "virtual-run", "indoor running"]) assert.ok(isRunActivity(name), name);
   for (const name of ["walk", "rowing", "Functional strength training", "brunch", "cycling", null]) assert.ok(!isRunActivity(name), String(name));
 });
+
+test("Running includes today's local run before UTC midnight", async () => {
+  const run = loggedRun("evt_local", "2026-05-12", 2.5);
+  run.occurredAt = "2026-05-11T22:00:00Z";
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-05-11T22:30:00Z", metricPoints: [], sourceBundleHash: "runs-projection",
+    vault: createVaultReadModel({ entities: [run], metadata: { timezone: "Asia/Tokyo" }, vaultRoot: "browser://vault" }),
+  });
+  assert.deepEqual(replica.runs?.days, [{ date: "2026-05-12", km: 2.5 }]);
+});
+
+test("Running counts compact Strava sport types from saved sessions", async () => {
+  const replica = await runDays([
+    watchRun("evt_trail", "2026-11-10", "08", 3, "strava", { activityType: "trailrun" }),
+    watchRun("evt_virtual", "2026-11-11", "08", 5, "strava", { activityType: "virtualrun" }),
+  ]);
+  assert.deepEqual(replica.runs?.days, [{ date: "2026-11-10", km: 3 }, { date: "2026-11-11", km: 5 }]);
+});
+
+test("Running adds a timed logged run that is separate from the day's watch runs", async () => {
+  const date = "2026-11-12";
+  const log = loggedRun("evt_evening", date, 5);
+  log.attributes.workout = { startedAt: `${date}T19:00:00Z`, endedAt: `${date}T19:40:00Z` };
+  const watch = watchRun("evt_morning", date, "08", 3);
+  const mirror = loggedRun("evt_copy", date, 3);
+  mirror.attributes.workout = { startedAt: `${date}T08:00:00Z`, endedAt: `${date}T08:40:00Z` };
+  assert.deepEqual((await runDays([watch, log])).runs?.days, [{ date, km: 8 }]);
+  assert.deepEqual((await runDays([watch, log, mirror])).runs?.days, [{ date, km: 8 }]);
+  const afternoon = watchRun("evt_afternoon", date, "14", 4);
+  mirror.attributes.distanceKm = 6;
+  assert.deepEqual((await runDays([watch, afternoon, mirror])).runs?.days, [{ date, km: 10 }]);
+  delete log.attributes.workout;
+  assert.deepEqual((await runDays([watch, log])).runs?.days, [{ date, km: 5 }]);
+});

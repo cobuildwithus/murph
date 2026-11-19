@@ -2571,3 +2571,21 @@ function requireNumber(value: unknown, label: string): number {
   }
   return value;
 }
+
+it("reports the ledger family and line of an unreadable refresh without publishing", async () => {
+  const { refreshHostedBrowserVaultReplicaFromRuntime } = await import("../src/hosted-runtime/browser-vault-replica.ts");
+  const root = await mkdtemp(path.join(os.tmpdir(), "ledger-refresh-"));
+  try {
+    await writeVaultFile(root, "ledger/events/2026/2026-05.jsonl", "\n{");
+    const publishRef = vi.fn(), write = vi.fn();
+    const refresh = await refreshHostedBrowserVaultReplicaFromRuntime({
+      vaultRoot: root, workspace: createWorkspaceState(),
+      platform: createPlatform({ browserVaultReplicaPort: { publishRef, write } }),
+    });
+    expect(refresh).toEqual({ status: "refresh_failed", ledgerFamily: "events", lineNumber: 2 });
+    expect(write).not.toHaveBeenCalled();
+    expect(publishRef).not.toHaveBeenCalled();
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

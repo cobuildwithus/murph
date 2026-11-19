@@ -4,6 +4,7 @@ import { isCloudflareHostedControlBrowserVaultReplicaNotFoundError } from "@murp
 import { addDaysToIsoDate, toLocalDayKey } from "@murphai/contracts";
 import { isManualMetricSource, normalizeMetricValue, resolveMetricDefinition, selectMetricWindowComparison } from "@murphai/health-metrics";
 import { assessBrowserVaultReplicaFreshness } from "@murphai/hosted-execution";
+import { HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_SPECS } from "@murphai/hosted-execution/vault-share";
 import { parseHostedBrowserVaultReplicaRef } from "@murphai/hosted-execution/parsers";
 import { getBrowserVaultMetricBucketId, type BrowserVaultMetricSeriesCapableQueryClient } from "@murphai/query/browser-replica-client";
 import { generateHostedUserRecipientKeyPair } from "@murphai/runtime-state";
@@ -171,6 +172,7 @@ export function readRawHealthNumber(
   window: { from: string; through: string },
 ) {
   const definition = resolveMetricDefinition(metric.key)!;
+  const { minValue, maxValue } = HOSTED_VAULT_SHARE_DAILY_METRIC_PROJECTION_SPECS.find(spec => spec.metricKey === metric.key)!;
   const byDate = new Map<string, RawHealthPoint>();
   const rows = client.metrics.series({ metricKey: metric.key, from: window.from, to: window.through, grain: "day" });
   // Series rows end each date on its highest-priority source, so the last stands;
@@ -178,7 +180,7 @@ export function readRawHealthNumber(
   for (const row of rows) {
     if (row.statistic !== "value" || row.comparator != null) continue;
     const normalized = normalizeMetricValue({ metricKey: metric.key, unit: row.unit, value: row.value });
-    if (normalized.canonicalValue === null) continue;
+    if (normalized.canonicalValue === null || normalized.canonicalValue < minValue || normalized.canonicalValue > maxValue) continue;
     // As on the board: a worn device can hold 0 for days it counted no steps; 0 is not a reading.
     if (metric.key === "steps" && normalized.canonicalValue === 0) continue;
     byDate.set(row.date, { date: row.date, value: normalized.canonicalValue, source: row.sourceLabel, observedAt: row.observedAt });

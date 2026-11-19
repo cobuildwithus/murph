@@ -135,9 +135,8 @@ describe("Strava importer adapter", () => {
           kind: "observation",
           fields: expect.objectContaining({
             metric: "external-resource-deleted",
-            resourceType: "activity",
-            deleted: true,
-            sourceEventType: "activity.delete",
+            value: 1,
+            unit: "boolean",
           }),
         }),
       ]),
@@ -259,4 +258,13 @@ describe("Strava importer adapter", () => {
       }),
     ).rejects.toThrow(/Strava snapshot deletions\[0\] must be an object/u);
   });
+});
+
+it("retains undated activity evidence without crediting an import-day workout", async () => {
+  const payload = await prepareDeviceProviderSnapshotImport({ provider: "strava", snapshot: {
+    importedAt: "2026-05-04T15:00:00Z",
+    activities: [{ sport_type: "Run", elapsed_time: 900, distance: 2200 }, { sport_type: "Walk", elapsed_time: 300 }],
+  } });
+  expect(payload.evidenceParts?.map(part => part.role)).toEqual(["activity:activity-1", "activity:activity-2"]);
+  expect(payload.events?.filter(event => event.kind === "activity_session") ?? []).toEqual([]);
 });

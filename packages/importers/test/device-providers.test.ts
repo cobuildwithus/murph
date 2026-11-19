@@ -1022,7 +1022,7 @@ test.each([
       (event) =>
         event.kind === "observation" &&
         event.fields?.metric === "external-resource-deleted" &&
-        event.fields?.resourceType === "workout",
+        event.externalRef?.resourceType === "workout",
     ),
   );
   assert.ok(
@@ -1146,7 +1146,6 @@ test("prepareDeviceProviderSnapshotImport preserves Oura deletion alias preceden
   assert.equal(deletionEvent?.externalRef?.resourceId, "session-42");
   assert.equal(deletionEvent?.occurredAt, "2026-03-16T10:30:00.000Z");
   assert.equal(deletionEvent?.note, "Webhook event: session.deleted");
-  assert.equal(deletionEvent?.fields?.sourceEventType, "session.deleted");
   assert.match(deletionArtifact?.fileName ?? "", /^deletion-session-session.deleted-[0-9a-f]{64}\.json$/u);
   assert.ok(!deletionArtifact?.role.includes("session-42"));
 });
@@ -1173,8 +1172,7 @@ test("prepareDeviceProviderSnapshotImport records Oura daily aggregate deletions
   );
 
   assert.equal(deletionEvent?.fields?.metric, "external-resource-deleted");
-  assert.equal(deletionEvent?.fields?.resourceType, "daily-readiness");
-  assert.equal(deletionEvent?.fields?.sourceEventType, "daily_readiness.deleted");
+  assert.equal(deletionEvent?.note, "Webhook event: daily_readiness.deleted");
   assert.ok(
     payload.evidenceParts?.some(
       (artifact) => artifact.role.startsWith("deletion:daily-readiness:daily_readiness.deleted:"),
@@ -3385,7 +3383,7 @@ test("prepareDeviceProviderSnapshotImport records WHOOP deletions as append-only
 
   assert.equal(deletionEvent?.kind, "observation");
   assert.equal(deletionEvent?.fields?.metric, "external-resource-deleted");
-  assert.equal(deletionEvent?.fields?.deleted, true);
+  assert.equal(deletionEvent?.externalRef?.facet, "deleted");
   assert.match(deletionArtifact?.fileName ?? "", /^deletion-sleep-sleep.deleted-[0-9a-f]{64}\.json$/u);
   assert.ok(!deletionArtifact?.role.includes("sleep-9"));
 });
@@ -4664,4 +4662,21 @@ test("WHOOP record emitters keep lookup indexing before the first record excepti
     }],
   }), (error: unknown) => error === failure);
   assert.deepEqual(reads, ["profile", "sleep.id", "cycle.id", "sleep.id", "sleep.start"]);
+});
+
+test("a provider deletion and a new activity commit in one canonical batch", async () => {
+  const vaultRoot = await makeTempDirectory("mixed-provider-batch");
+  try {
+    await coreRuntime.initializeVault({ vaultRoot });
+    const result = await importDeviceProviderSnapshot<CoreDeviceImportResult>({
+      provider: "strava", vaultRoot, snapshot: {
+        importedAt: "2026-05-07T12:00:00Z",
+        activities: [{ id: 27, sport_type: "Run", start_date: "2026-05-07T08:00:00Z", elapsed_time: 1200 }],
+        deletions: [{ resource_type: "activity", resource_id: "19", occurred_at: "2026-05-07T09:00:00Z" }],
+      },
+    }, { corePort: coreRuntime });
+    assert.equal(result.events.length, 2);
+  } finally {
+    await rm(vaultRoot, { recursive: true, force: true });
+  }
 });

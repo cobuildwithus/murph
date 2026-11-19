@@ -1,6 +1,7 @@
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import {
   formatTimeZoneDateTimeParts,
+  isStrictIsoDate,
   normalizeStrictIsoTimestamp,
 } from "@murphai/contracts";
 
@@ -77,6 +78,9 @@ export function normalizeFlexibleTimestamp(value: unknown, timeZone: string): st
   if (naiveParts) {
     return naiveTimestampPartsToIso(naiveParts, timeZone);
   }
+
+  const datePrefix = /^(\d{4}-\d{2}-\d{2})(?=[T ])/iu.exec(trimmed)?.[1];
+  if (datePrefix && !isStrictIsoDate(datePrefix)) return undefined;
 
   if (/(?:z|gmt|utc|[+-]\d{2}:?\d{2})$/iu.test(trimmed)) {
     const parsedMilliseconds = Date.parse(trimmed);
@@ -173,7 +177,7 @@ function finalizeNaiveTimestampParts(parts: NaiveTimestampParts): NaiveTimestamp
   return parts;
 }
 
-function naiveTimestampPartsToIso(parts: NaiveTimestampParts, timeZone: string): string {
+function naiveTimestampPartsToIso(parts: NaiveTimestampParts, timeZone: string): string | undefined {
   let guessMs = Date.UTC(
     parts.year,
     parts.month - 1,
@@ -213,7 +217,7 @@ function naiveTimestampPartsToIso(parts: NaiveTimestampParts, timeZone: string):
     guessMs += delta;
   }
 
-  return new Date(guessMs).toISOString();
+  return undefined;
 }
 
 export function parseDelimitedRows(text: string, delimiter = ","): string[][] {

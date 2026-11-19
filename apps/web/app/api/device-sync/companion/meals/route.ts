@@ -2,9 +2,9 @@ import { readCompanionMeals, readMealPage, presentCompanionMeals } from "@/src/l
 import { jsonOk, withJsonError } from "@/src/lib/hosted-onboarding/http";
 
 export const GET = withJsonError(async (request: Request) => {
+  const { cursor, limit } = readMealPage(request.url);
   const state = await readCompanionMeals(request);
   const { projection, savedAt } = state;
-  const { cursor, limit } = readMealPage(request.url);
   const remaining = projection.days.filter(day => cursor === null || day.date < cursor);
   const selected = remaining.slice(0, limit);
   const meals = await presentCompanionMeals(state, selected.flatMap(day => day.meals));

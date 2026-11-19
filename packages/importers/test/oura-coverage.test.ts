@@ -270,8 +270,8 @@ test("normalizeOuraSnapshot covers sleep deleted, rest, nap, and partial timing 
   );
   assert.equal(payload.accountId, "oura-user-user-id-2");
   assert.equal(payload.provenance?.ouraUserId, "oura-user-user-id-2");
-  assert.equal(deletedSleepEvent?.fields?.resourceType, "sleep");
-  assert.equal(deletedSleepEvent?.fields?.sourceEventType, "sleep.deleted");
+  assert.equal(deletedSleepEvent?.externalRef?.resourceType, "sleep");
+  assert.equal(deletedSleepEvent?.note, "Webhook event: sleep.deleted");
   assert.deepEqual(
     payload.events?.filter((event) => event.kind === "sleep_session")
       .map((event) => [event.externalRef?.resourceId, event.title]),
@@ -327,11 +327,11 @@ test("normalizeOuraSnapshot covers deletion resource and event fallbacks", () =>
     event.externalRef?.resourceId,
     event.externalRef?.resourceType,
     event.externalRef?.facet,
-    event.fields?.sourceEventType,
+    event.note,
   ]), [
-    ["sleep-camel", "sleep", "deleted", "sleep.deleted"],
-    ["session-camel", "session", "deleted", "session.deleted"],
-    ["workout-snake", "workout", "deleted", "workout.deleted"],
+    ["sleep-camel", "sleep", "deleted", "Webhook event: sleep.deleted"],
+    ["session-camel", "session", "deleted", "Webhook event: session.deleted"],
+    ["workout-snake", "workout", "deleted", "Webhook event: workout.deleted"],
   ]);
   for (const prefix of [
     "deletion:sleep:sleep.deleted:",
@@ -430,4 +430,13 @@ test("Oura record emitters preserve the first getter exception and stop before l
     sessions: [{ get start_datetime(): never { throw new Error("later section was read"); } }],
   }), (error: unknown) => error === failure);
   assert.deepEqual(reads, ["identity", "sleep"]);
+});
+
+test("offset sleep timestamps retain the local wake day", () => {
+  const payload = normalizeOuraSnapshot({ sleeps: [{
+    id: "night", bedtime_start: "2026-05-03T23:00:00+10:00",
+    bedtime_end: "2026-05-04T06:00:00+10:00", total_sleep_duration: 21600,
+  }] });
+  assert.equal(payload.events?.find(event => event.kind === "sleep_session")?.dayKey, "2026-05-04");
+  assert.equal(payload.events?.find(event => event.fields?.metric === "sleep-total-minutes")?.dayKey, "2026-05-04");
 });

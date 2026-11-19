@@ -1175,3 +1175,14 @@ test("browser vault replica excludes dense provider observations but keeps displ
   assert.equal(replica.timelineRows.some((row) => row.id === "evt_raw_import_point"), false);
   assert.equal(replica.timelineRows.some((row) => row.id === "evt_display_device_fact"), true);
 });
+
+test("current height selects the latest eligible local date", async () => {
+  const metricPoints = ["2026-04-20", "2026-04-21"].map((effectiveDate, index) =>
+    createMetricPoint({ biomarkerKey: null, effectiveDate, metricKey: "body-height",
+      recordId: `height-${index}`, unit: "cm", value: 174 + index }));
+  const replica = await createBrowserVaultReplica({
+    generatedAt: "2026-04-21T01:00:00Z", metricPoints, sourceBundleHash: "height-selection",
+    vault: createVaultReadModel({ vaultRoot: "browser://fixture", metadata: { timezone: "America/Denver" }, entities: [] }),
+  });
+  assert.equal(replica.metricSelectionRows.find(row => row.metricKey === "body-height")?.effectiveDate, "2026-04-20");
+});

@@ -278,7 +278,7 @@ it("recovers legacy exact automatic upload links in list and detail, then rechec
   expect(await (await detail(request(), context())).json()).toEqual({ timeZone: projection.timeZone, savedAt, meal: { ...meal, uploadId: captureId, photo: null } });
   expect(mocks.uploadLinks).toHaveBeenCalledTimes(2);
   expect(mocks.uploadLinks.mock.calls[0]![0].values).toEqual(["member_native", [captureId]]);
-  expect(mocks.current.mock.invocationCallOrder[0]).toBeGreaterThan(mocks.uploadLinks.mock.invocationCallOrder[0]!);
+  expect(mocks.current.mock.invocationCallOrder[1]).toBeGreaterThan(mocks.uploadLinks.mock.invocationCallOrder[0]!);
   expect(JSON.stringify(list)).not.toContain("externalRef");
   mocks.uploadLinks.mockResolvedValue([]);
   expect((await (await detail(request(), context())).json()).meal.uploadId).toBeNull();
@@ -355,4 +355,18 @@ it("preserves the meal-removal unavailable response on an action identity collis
   const response = await DELETE(request(), context());
   expect(response.status).toBe(503);
   expect(await response.json()).toMatchObject({ error: { code: "MEAL_REMOVAL_UNAVAILABLE", retryable: true } });
+});
+
+it("looks up capture receipts only for the requested day or detail", async () => {
+  const entities = days.map((day, index) => ({ family: "event", kind: "meal", attributes: {
+    mealId: day.meals[0]!.id,
+    externalRef: { system: "meal-photo-capture", resourceType: "photo", resourceId: String(index).repeat(64) },
+  } }));
+  mocks.decode.mockResolvedValue({ client: { replica: { generation: 17, generatedAt: savedAt, meals: projection, entities } } });
+  mocks.uploadLinks.mockResolvedValue([]);
+  expect((await GET(request("?limit=1"))).status).toBe(200);
+  expect((await detail(request(), context(days[1]!.meals[0]!.id))).status).toBe(200);
+  expect(mocks.uploadLinks.mock.calls.map(([query]) => query.values[1])).toEqual([
+    ["0".repeat(64)], ["1".repeat(64)],
+  ]);
 });

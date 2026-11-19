@@ -3,9 +3,10 @@ import { ContractValidationError } from "@murphai/contracts/validation-error";
 import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 vi.mock("server-only", () => ({}));
-const mocks = vi.hoisted(() => ({ auth: vi.fn(), authority: vi.fn(), workspace: vi.fn(), control: vi.fn(), decode: vi.fn() }));
+const mocks = vi.hoisted(() => ({ auth: vi.fn(), current: vi.fn(), authority: vi.fn(), workspace: vi.fn(), control: vi.fn(), decode: vi.fn() }));
 vi.mock("@/src/lib/prisma", () => ({ getPrisma: () => ({}) }));
 vi.mock("@/src/lib/hosted-onboarding/request-auth", () => ({ requireActiveHostedMemberAuthFromBearerToken: mocks.auth }));
+vi.mock("@/src/lib/better-auth/native-auth", () => ({ assertHostedNativeMemberAuthCurrentTx: mocks.current }));
 vi.mock("@/src/lib/browser-vault/authority", () => ({ assertBrowserVaultMemberAuthority: mocks.authority }));
 vi.mock("@/src/lib/hosted-workspace/store", () => ({ readHostedWorkspace: mocks.workspace }));
 vi.mock("@/src/lib/hosted-execution/control", () => ({ readHostedExecutionControlClientIfConfigured: () => ({ createBrowserVaultSession: mocks.control }) }));
@@ -82,4 +83,12 @@ it("reports rejected decrypted replica data as a server error", async () => {
   const response = await GET(request());
   expect(response.status).toBe(500);
   expect(await response.json()).toEqual({ error: { code: "INTERNAL_ERROR", message: "Internal error." } });
+});
+
+it("requires current native authentication after Journal decoding", async () => {
+  mocks.current.mockRejectedValue(hostedOnboardingError({ code: "UNAUTHORIZED", httpStatus: 401, message: "Sign in required." }));
+  const response = await GET(request());
+  expect(response.status).toBe(401);
+  expect(mocks.current.mock.invocationCallOrder[0]).toBeGreaterThan(mocks.decode.mock.invocationCallOrder[0]!);
+  expect(await response.json()).not.toHaveProperty("journal");
 });

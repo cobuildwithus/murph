@@ -937,7 +937,7 @@ test("Journal counts canonical total sleep observations as a sleep night", () =>
   assert.equal(view.weeks[0]?.averageSleepMinutes, 450);
 });
 
-test("Journal hides canonical total sleep already represented by a session", () => {
+test("Journal reports measured sleep while hiding the redundant total row", () => {
   const entities = [
     event("main", "sleep_session", "2026-08-25T08:00:00.000Z", {
       durationMinutes: 450,
@@ -945,7 +945,7 @@ test("Journal hides canonical total sleep already represented by a session", () 
     }, "Sleep"),
     event("total", "observation", "2026-08-25T08:00:00.000Z", {
       metric: "total-sleep-minutes",
-      value: 475,
+      value: 395,
       unit: "minutes",
     }, "Total sleep"),
   ];
@@ -957,9 +957,9 @@ test("Journal hides canonical total sleep already represented by a session", () 
 
   assert.equal(view.eventCount, 1);
   assert.deepEqual(view.days[0]?.events[0]?.records.map((record) => record.id), ["main"]);
-  assert.equal(view.days[0]?.events[0]?.metrics.sleepMinutes, 450);
+  assert.equal(view.days[0]?.events[0]?.metrics.sleepMinutes, 395);
   assert.equal(view.weeks[0]?.sleepNights, 1);
-  assert.equal(view.weeks[0]?.averageSleepMinutes, 450);
+  assert.equal(view.weeks[0]?.averageSleepMinutes, 395);
 });
 
 test("Journal keeps observation sleep days from merging adjacent nights", () => {
@@ -1260,4 +1260,29 @@ test("Journal presents matching main sleep copies once without erasing conflicti
   assert.equal(view.days[0]?.events[0]?.metrics.sleepMinutes, 430);
   assert.equal(build([sleep("direct", "whoop-v2"), sleep("other", "apple-health-kit", 390)])
     .days[0]?.events[0]?.records.length, 2);
+});
+
+test("linked workouts on different days retain their weekly totals", () => {
+  const sunday = event("first", "activity_session", "2026-06-07T18:00:00Z", { durationMinutes: 35 }, "Row");
+  const monday = event("second", "activity_session", "2026-06-08T18:00:00Z", { durationMinutes: 25 },
+    "Row", [{ type: "related_to", targetId: sunday.entityId }]);
+  const view = buildJournalView(createVaultReadModel({ entities: [sunday, monday], vaultRoot: "test://workouts" }),
+    [], { asOf: "2026-06-08" });
+  assert.deepEqual(view.days.map(day => [day.date, day.events[0]?.metrics.activityMinutes]), [
+    ["2026-06-08", 25], ["2026-06-07", 35],
+  ]);
+  assert.deepEqual(view.weeks.map(week => week.activityMinutes), [25, 35]);
+});
+
+test("Journal keeps complete weekly activity totals when the entry limit cuts a week", () => {
+  const activities = [
+    event("early", "activity_session", "2026-06-01T09:00:00Z", { durationMinutes: 18 }, "Walk"),
+    event("late", "activity_session", "2026-06-05T09:00:00Z", { durationMinutes: 27 }, "Swim"),
+  ];
+  const notes = Array.from({ length: 1499 }, (_, index) =>
+    event(`note_${index}`, "note", "2026-06-10T09:00:00Z", { note: "Routine check" }, "Note"));
+  const view = buildJournalView(createVaultReadModel({ entities: [...activities, ...notes], vaultRoot: "test://weekly" }),
+    [], { asOf: "2026-06-10" });
+  assert.equal(view.recordCount, 1500);
+  assert.equal(view.weeks.find(week => week.startDate === "2026-06-01")?.activityMinutes, 45);
 });

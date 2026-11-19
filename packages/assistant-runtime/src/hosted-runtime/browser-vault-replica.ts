@@ -19,7 +19,7 @@ import {
   type MemoryDemographics,
 } from "@murphai/contracts";
 
-import { readMemoryDemographics } from "@murphai/core";
+import { isVaultError, readMemoryDemographics } from "@murphai/core";
 import { readProjectableProfileName } from "./vault-share-projection.ts";
 
 async function readReplicaDisplayName(vaultRoot: string): Promise<string | undefined> {
@@ -190,8 +190,21 @@ export type HostedBrowserVaultReplicaRefreshResult =
       status: "deferred_source_changed";
     }
   | {
+      status: "refresh_failed";
+      ledgerFamily: string;
+      lineNumber: number;
+    }
+  | {
       status: "publish_conflict" | "skipped_no_port" | "workspace_missing" | "refresh_failed";
     };
+
+function ledgerParseDiagnostic(error: unknown) {
+  if (!isVaultError(error) || error.code !== "VAULT_INVALID_JSONL") return undefined;
+  const { relativePath, lineNumber } = error.details;
+  const ledgerFamily = typeof relativePath === "string" && /^ledger\/(events|samples)\//u.exec(relativePath)?.[1];
+  if (!ledgerFamily || typeof lineNumber !== "number" || !Number.isSafeInteger(lineNumber) || lineNumber < 1) return undefined;
+  return { ledgerFamily, lineNumber };
+}
 
 const DEFAULT_HOSTED_BROWSER_VAULT_REFRESH_TIMEOUT_MS = 60_000;
 const utf8Encoder = new TextEncoder();
@@ -452,6 +465,7 @@ export async function refreshHostedBrowserVaultReplicaFromRuntime(input: {
 
     return {
       status: "refresh_failed",
+      ...ledgerParseDiagnostic(error),
     };
   } finally {
     cancellation.cleanup();

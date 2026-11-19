@@ -673,3 +673,15 @@ it.each([
   expect(mocks.current).toHaveBeenCalledOnce();
   expect(mocks.authority).toHaveBeenCalledTimes(2);
 });
+
+it("keeps the latest eligible Steps and Sleep when newer values exceed daily bounds", async () => {
+  shards = await splitBrowserVaultReplica(fixture([
+    row("steps", from, 5400, "count"), row("steps", stepsThrough, -12, "count"),
+    row("total-sleep-minutes", from, 410, "minutes"), row("total-sleep-minutes", through, 1700, "minutes"),
+  ]));
+  const { numbers } = await (await GET(request())).json();
+  expect(numbers.steps.daily).toEqual([{ date: from, value: 5400 }]);
+  expect(numbers.sleep.daily).toEqual([{ date: from, value: 410 }]);
+  expect(numbers.steps.latest.date).toBe(from);
+  expect(numbers.sleep.latest.date).toBe(from);
+});

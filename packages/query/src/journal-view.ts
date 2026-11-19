@@ -145,12 +145,11 @@ export function buildJournalView(
       asOfDate,
     ),
     ...journalMetricCandidates(metricPoints, fromDate, asOfDate),
-  ])
-    .sort(compareCandidates)
-    .slice(0, MAX_RECORDS);
-  const builtEvents = groupJournalCandidates(candidates);
-  const weeks = buildJournalWeekSummaries(builtEvents);
-  const events = builtEvents;
+  ]).sort(compareCandidates);
+  const visible = candidates.slice(0, MAX_RECORDS);
+  const events = groupJournalCandidates(visible);
+  const weeks = buildJournalWeekSummaries(candidates.length === visible.length
+    ? events : groupJournalCandidates(candidates));
   const daysByDate = new Map<string, JournalEvent[]>();
   for (const event of events) {
     const dayEvents = daysByDate.get(event.date) ?? [];
@@ -170,7 +169,7 @@ export function buildJournalView(
   return {
     days,
     eventCount: events.length,
-    recordCount: candidates.length,
+    recordCount: visible.length,
     weeks,
     windowDays,
   };
@@ -493,15 +492,13 @@ function normalizeJournalCandidates(
       )
       .map((candidate) => `${candidate.date}:${candidate.metricKey}`),
   );
-  const sleepSessionsByDate = normalizeSleepJournalCandidates(normalized);
-  const hasSleepSession = new Set(sleepSessionsByDate.keys());
+  normalizeSleepJournalCandidates(normalized);
   const scoreContext = buildJournalScoreContext(normalized);
 
   return normalized.filter((candidate) =>
     shouldKeepJournalCandidate({
       candidate,
       canonicalObservationMetrics,
-      hasSleepSession,
       ...scoreContext,
     }),
   );
@@ -509,7 +506,7 @@ function normalizeJournalCandidates(
 
 function normalizeSleepJournalCandidates(
   candidates: readonly JournalCandidate[],
-): Map<string, JournalCandidate[]> {
+): void {
   const sleepSessionsByDate = new Map<string, JournalCandidate[]>();
   for (const candidate of candidates) {
     if (candidate.kind !== "sleep_session") continue;
@@ -542,7 +539,6 @@ function normalizeSleepJournalCandidates(
       session.timing = isMain ? "night" : "timed";
     }
   }
-  return sleepSessionsByDate;
 }
 
 function buildJournalScoreContext(candidates: readonly JournalCandidate[]): {
@@ -576,7 +572,6 @@ function buildJournalScoreContext(candidates: readonly JournalCandidate[]): {
 function shouldKeepJournalCandidate(input: {
   candidate: JournalCandidate;
   canonicalObservationMetrics: ReadonlySet<string>;
-  hasSleepSession: ReadonlySet<string>;
   preferRecoveryDates: ReadonlySet<string>;
   readinessByDate: ReadonlyMap<string, number>;
   recoveryByDate: ReadonlyMap<string, number>;
@@ -588,12 +583,6 @@ function shouldKeepJournalCandidate(input: {
     input.canonicalObservationMetrics.has(
       `${candidate.date}:${candidate.metricKey}`,
     )
-  ) {
-    return false;
-  }
-  if (
-    candidate.metricKey === "total-sleep-minutes" &&
-    input.hasSleepSession.has(candidate.date)
   ) {
     return false;
   }
@@ -624,7 +613,7 @@ function groupJournalCandidates(
   const parent = new Map(
     candidates.map((candidate) => [candidate.id, candidate.id]),
   );
-  const candidateIds = new Set(parent.keys());
+  const candidateDates = new Map(candidates.map(candidate => [candidate.id, candidate.date]));
   const hintOwner = new Map<string, string>();
 
   const find = (id: string): string => {
@@ -642,7 +631,7 @@ function groupJournalCandidates(
 
   for (const candidate of candidates) {
     for (const relatedId of candidate.relatedIds) {
-      if (candidateIds.has(relatedId)) union(candidate.id, relatedId);
+      if (candidateDates.get(relatedId) === candidate.date) union(candidate.id, relatedId);
     }
     if (candidate.groupHint) {
       const existing = hintOwner.get(candidate.groupHint);
@@ -661,9 +650,11 @@ function groupJournalCandidates(
 
   return [...groups.values()].map((records) => {
     const sorted = records.sort(compareCandidates);
-    const displayRecords = collapseMirroredJournalSessions(sorted);
+    const sessions = collapseMirroredJournalSessions(sorted);
+    const displayRecords = sessions.some(record => record.kind === "sleep_session")
+      ? sessions.filter(record => record.metricKey !== "total-sleep-minutes") : sessions;
     const lead = selectLeadRecord(displayRecords);
-    const presentation = buildEventPresentation(displayRecords, lead);
+    const presentation = buildEventPresentation(sessions, lead);
     return {
       date: lead.date,
       details: presentation.details,
@@ -1273,10 +1264,8 @@ function buildEventPresentation(
     sleepSessions.length > 0 ||
     records.some((record) => record.groupHint?.startsWith("sleep:"))
   ) {
-    const sleepMinutes = maxNumber([
-      ...sleepSessions.map((record) => record.durationMinutes),
-      metricValue(records, "total-sleep-minutes"),
-    ]);
+    const sleepMinutes = metricValue(records, "total-sleep-minutes")
+      ?? maxNumber(sleepSessions.map((record) => record.durationMinutes));
     const sleepScore = metricValue(records, "sleep-score");
     const summaryParts = [
       sleepMinutes === null ? null : formatDuration(sleepMinutes),

@@ -1,17 +1,18 @@
 import "server-only";
 
-import type { CompanionMealsProjection } from "@murphai/contracts";
+import type { CompanionMeal } from "@murphai/contracts";
 import { Prisma, type PrismaClient } from "@prisma/client";
 
 /** Recover only links proven by canonical provenance AND this member's ingress. */
 export async function recoverCompanionMealUploadIds(input: {
   memberId: string;
   prisma: Pick<PrismaClient, "$queryRaw">;
-  projection: CompanionMealsProjection;
+  meals: CompanionMeal[];
   entities: Array<{ family: string; kind: string; attributes: Record<string, unknown> }>;
-}): Promise<void> {
-  const meals = new Map(input.projection.days.flatMap(day => day.meals)
+}): Promise<boolean> {
+  const meals = new Map(input.meals
     .filter(meal => meal.uploadId === null).map(meal => [meal.id, meal]));
+  if (!meals.size) return false;
   const candidates = new Map<string, string>();
   for (const entity of input.entities) {
     if (entity.family !== "event" || entity.kind !== "meal") continue;
@@ -25,7 +26,7 @@ export async function recoverCompanionMealUploadIds(input: {
     }
   }
   const captureIds = [...new Set(candidates.values())];
-  if (!captureIds.length) return;
+  if (!captureIds.length) return false;
   // The (user_id, kind, created_at) index confines the scan to this member's
   // capture metadata. DISTINCT + candidate membership bounds output by meals.
   // Manual hashes are deliberately excluded; no ciphertext or timestamps read.
@@ -41,4 +42,5 @@ export async function recoverCompanionMealUploadIds(input: {
   for (const [mealId, captureId] of candidates) {
     if (confirmed.has(captureId)) meals.get(mealId)!.uploadId = captureId;
   }
+  return true;
 }

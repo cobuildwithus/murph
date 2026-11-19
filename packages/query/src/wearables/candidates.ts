@@ -652,7 +652,7 @@ function aggregateActivitySessionCandidates(
     .sort(compareAggregateByDateDesc);
 }
 
-function dedupeActivitySessionCandidates(
+export function dedupeActivitySessionCandidates(
   candidates: readonly WearableMetricCandidate[],
 ): WearableMetricCandidate[] {
   const deduped: WearableMetricCandidate[] = [];

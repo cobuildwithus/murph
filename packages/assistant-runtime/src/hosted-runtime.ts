@@ -8103,6 +8103,10 @@ function buildHostedBrowserVaultRefreshLogDetails(
           browserVaultReplicaSourceTotalBytes: refresh.source.totalBytes,
         }
       : {}),
+    ...("ledgerFamily" in refresh ? {
+      browserVaultLedgerFamily: refresh.ledgerFamily,
+      browserVaultLedgerLineNumber: refresh.lineNumber,
+    } : {}),
     browserVaultRefreshStatus: refresh.status,
   };
 }

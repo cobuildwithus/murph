@@ -72,7 +72,7 @@ it("preserves filtered automation ordering, body, pagination, and fresh canonica
     });
   }
   await writeAutomation(vault, "98-second", { id: "auto_b", status: "paused" });
-  await writeAutomation(vault, "99-last", { id: "auto_a", status: "legacy-unknown" });
+  await writeAutomation(vault, "99-last", { id: "auto_a", status: "active" });
 
   const options = {
     status: ["active", "paused"],
@@ -106,7 +106,7 @@ it("preserves filtered automation ordering, body, pagination, and fresh canonica
 it.each([
   { everyMs: 0, instructions: "Valid body", error: /schedule\.everyMs/u },
   { everyMs: 60000, instructions: "   ", error: /instructions body/u },
-])("validates excluded archived documents after a matching limited result: $error", async ({
+])("validates a malformed archive after a limited result only when its status is requested: $error", async ({
   everyMs, instructions, error,
 }) => {
   const vault = await createVault();
@@ -122,6 +122,9 @@ it.each([
   });
 
   const options = { status: ["active", "paused"], limit: 1 };
-  await expect(listAutomations(vault, options)).rejects.toThrow(error);
-  await expect(listAutomationPage(vault, options)).rejects.toThrow(error);
+  const items = await listAutomations(vault, options);
+  expect(items.map(item => item.automationId)).toEqual(["auto_active"]);
+  expect(await listAutomationPage(vault, options)).toEqual({ items, nextCursor: null, totalCount: 1 });
+  await expect(listAutomations(vault, { limit: 1 })).rejects.toThrow(error);
+  await expect(listAutomationPage(vault, { status: "archived", limit: 1 })).rejects.toThrow(error);
 });
