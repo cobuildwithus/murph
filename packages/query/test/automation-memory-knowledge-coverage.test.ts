@@ -137,7 +137,6 @@ describe("automation helpers", () => {
         "automationId: auto_alpha_summary",
         "slug: alpha-summary",
         "title: Alpha summary",
-        "status: nonsense",
         "schedule:",
         "  kind: every",
         "  everyMs: 60000",
