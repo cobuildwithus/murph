@@ -100,3 +100,14 @@ it("challenges with Health's sleep idea, steps, or your own last task and its ki
     .toEqual(["strength", "move", "calm"]);
   expect(friendChallenge("pushups.reps", undefined)).toBeNull();
 });
+
+it.each(["sleep", "steps"])("leaves an unobserved %s range unranked and counts an observed zero", id => {
+  const people = [played("nora", "Nora", { "2026-04-30": 180 }), played("priya", "Priya", { "2026-05-02": 0 }),
+    { ...played("jordan", "Jordan", { "2026-05-03": 30 }), me: true }];
+  const result = friendsView({ people, units: "us", measure: { ...measure, id }, pills: [],
+    query: { measure: id, range: "month" }, today: "2026-05-08", shareAudience: [],
+    incomplete: false, departureNotice: null, challenge: null });
+  expect(result.rows).toMatchObject([{ memberId: "jordan", rank: 1 }, { memberId: "priya", rank: 2, total: { value: 0 } },
+    { memberId: "nora", private: false, rank: null, total: null }]);
+  expect(result.chart.map(line => line.memberId)).toEqual(["jordan", "priya"]);
+});
