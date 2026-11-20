@@ -19,9 +19,12 @@ const NIGHT = "#1C1915";
  * device is a computer; this view paints the night ground. On a computer an
  * open invite shows a code for that link in place of the buttons: the game is
  * on the phone. The device decides that, never the width, so a wide phone or
- * tablet keeps its buttons; width only moves the code beside the card.
+ * tablet keeps its buttons; width only moves the code beside the card. A phone
+ * the app doesn't run on gets neither: it's told to open the link on an iPhone.
  */
-export function GameInviteView(props: { appUrl: string; inviteUrl: string; onComputer: boolean; preview: GameInvitePreview | null }) {
+export function GameInviteView(props: {
+  appUrl: string; inviteUrl: string; onComputer: boolean; onOtherPhone?: boolean; preview: GameInvitePreview | null;
+}) {
   const { preview } = props;
   return (
     <div className="@container flex flex-1 flex-col bg-[#1C1915] text-[#FFFCF6]">
@@ -31,7 +34,7 @@ export function GameInviteView(props: { appUrl: string; inviteUrl: string; onCom
             <Image alt="Murph" className="h-[25px] w-auto" height={25} priority src="/logo-dark.svg" width={112} />
           </div>
           {preview?.status === "open"
-            ? <OpenInvite appUrl={props.onComputer ? null : props.appUrl} preview={preview} />
+            ? <OpenInvite appUrl={props.onComputer || props.onOtherPhone ? null : props.appUrl} onOtherPhone={props.onOtherPhone} preview={preview} />
             : <ClosedInvite preview={preview} />}
         </div>
         {preview?.status === "open" && props.onComputer ? (
@@ -47,8 +50,8 @@ export function GameInviteView(props: { appUrl: string; inviteUrl: string; onCom
   );
 }
 
-/** `appUrl` is null on a computer, where the code stands in for the buttons. */
-function OpenInvite({ appUrl, preview }: { appUrl: string | null; preview: OpenPreview }) {
+/** `appUrl` is null on a computer, where the code stands in for the buttons, and on a phone the app doesn't run on. */
+function OpenInvite({ appUrl, onOtherPhone, preview }: { appUrl: string | null; onOtherPhone?: boolean; preview: OpenPreview }) {
   const checkIn = describeCheckIn(preview.terms.checkInKind);
   return (
     <>
@@ -92,6 +95,10 @@ function OpenInvite({ appUrl, preview }: { appUrl: string | null; preview: OpenP
             </a>
           </p>
         </div>
+      ) : onOtherPhone ? (
+        <p className="mt-auto pt-10 text-center text-[15px] font-medium leading-5 text-[#FFFCF6]/60 sm:mt-0 sm:pt-12">
+          Murph is an iPhone app. Open this link on an iPhone to play.
+        </p>
       ) : null}
     </>
   );

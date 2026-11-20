@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { cache } from "react";
 
-import { isAppleMobileUserAgent } from "@/src/lib/apple-mobile";
+import { isAppleMobileUserAgent, isOtherMobileUserAgent } from "@/src/lib/apple-mobile";
 import { gameInviteAppUrl } from "@/src/lib/game/access";
 import { readInvitePreview } from "@/src/lib/game/service";
 import { resolveDecodedRouteParam } from "@/src/lib/http";
@@ -41,6 +41,8 @@ export async function generateMetadata(props: GameInvitePageProps): Promise<Meta
 
 export default async function GameInvitePage(props: GameInvitePageProps) {
   const token = await resolveDecodedRouteParam(props.params, "token");
+  const userAgent = (await headers()).get("user-agent");
+  const onOtherPhone = isOtherMobileUserAgent(userAgent);
   return (
     <main className="flex min-h-dvh flex-col bg-[#1C1915]">
       {/* The night ground reaches past the page: overscroll and Safari's bars. */}
@@ -48,7 +50,8 @@ export default async function GameInvitePage(props: GameInvitePageProps) {
       <GameInviteView
         appUrl={gameInviteAppUrl(token)}
         inviteUrl={`${MURPH_PUBLIC_SITE_URL}/g/${encodeURIComponent(token)}`}
-        onComputer={!isAppleMobileUserAgent((await headers()).get("user-agent"))}
+        onComputer={!isAppleMobileUserAgent(userAgent) && !onOtherPhone}
+        onOtherPhone={onOtherPhone}
         preview={await readPreview(token)}
       />
     </main>
