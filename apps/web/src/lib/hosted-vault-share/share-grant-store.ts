@@ -145,6 +145,11 @@ export async function grantHostedVaultShareTx(input: {
   return { id: nextGenerationId, requiresProjection: true };
 }
 
+export function hostedVaultShareRevocation(now: Date) {
+  return { projectionSnapshotCiphertext: null, projectionSourceWorkspaceVersion: null,
+    revokedAt: now, status: "revoked", updatedAt: now };
+}
+
 export async function revokeHostedVaultSharesTx(input: {
   tx: Prisma.TransactionClient;
   destinationMemberId: string;
@@ -161,13 +166,7 @@ export async function revokeHostedVaultSharesTx(input: {
   }
 
   const result = await input.tx.hostedVaultShare.updateMany({
-    data: {
-      projectionSnapshotCiphertext: null,
-      projectionSourceWorkspaceVersion: null,
-      revokedAt: input.now,
-      status: "revoked",
-      updatedAt: input.now,
-    },
+    data: hostedVaultShareRevocation(input.now),
     where: {
       destinationMemberId: input.destinationMemberId,
       ...(input.grantorMemberId ? { grantorMemberId: input.grantorMemberId } : {}),

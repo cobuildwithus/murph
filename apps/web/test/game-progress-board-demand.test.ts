@@ -25,6 +25,7 @@ beforeEach(() => {
   mocks.runtime.mockResolvedValue(true);
   mocks.group.mockResolvedValue({ runtimeMemberId: "room", members });
   mocks.grants.mockImplementation(({ where, select }) => {
+    if (select.status) return [];
     if (select.grantedAt) return grants.filter(grant => where.grantorMemberId.in.includes(grant.grantorMemberId)
       && where.projectionScopeKey.in.includes(grant.projectionScopeKey));
     return where.id.in.map((id: string) => ({ id, projectionSnapshotCiphertext: "sealed" }));

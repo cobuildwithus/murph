@@ -340,3 +340,12 @@ it("withholds the drawer and a superseded departure notice on the final cohort c
   expect(view.departureNotice).toBeNull();
   expect(view.chart.map(row => row.memberId)).toEqual(["ava"]);
 });
+
+it("returns an actionable non-retryable result for missing health consent", async () => {
+  mocks.health.mockRejectedValueOnce(hostedOnboardingError({ code: "HOSTED_CONSENT_REQUIRED", httpStatus: 403,
+    message: "Consent required.", details: { missingScopes: ["launch.health-data"] } }));
+  const response = await GET(request("measure=sleep"));
+  expect(response.status).toBe(403);
+  expect(await response.json()).toMatchObject({ error: { code: "HOSTED_CONSENT_REQUIRED", retryable: false,
+    details: { missingScopes: ["launch.health-data"] } } });
+});

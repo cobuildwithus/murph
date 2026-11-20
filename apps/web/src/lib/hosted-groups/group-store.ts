@@ -1,7 +1,7 @@
 import { ContractValidationError } from "@murphai/contracts/validation-error";
 import "server-only";
 import { createHash } from "node:crypto";
-import { HOSTED_GROUP_BOARD_SCOPES } from "./board-scopes";
+import { boardSharingRevision, HOSTED_GROUP_BOARD_SCOPES } from "./board-scopes";
 import { readSharedCompanionContact } from "./shared-companion-presence";
 import { requiresConnectionSourceReconnect } from "../device-sync/browser-connection-source";
 
@@ -1176,6 +1176,28 @@ export interface HostedGroupBoardProjection {
   records: HostedRuntimeGroupSharedRecord[];
 }
 
+async function readBoardSharingState(tx: Prisma.TransactionClient, memberId: string, runtimeMemberId: string) {
+  const rows = await tx.hostedVaultShare.findMany({
+    where: { grantorMemberId: memberId, destinationMemberId: runtimeMemberId,
+      projectionScopeKey: { in: HOSTED_GROUP_BOARD_SCOPES.map(buildHostedVaultShareProjectionScopeKey) } },
+    orderBy: { id: "asc" }, take: HOSTED_GROUP_BOARD_SCOPES.length,
+    select: { id: true, status: true, projectionScopeKey: true },
+  });
+  return { revision: boardSharingRevision(memberId, runtimeMemberId, rows), revoked: rows.filter(row => row.status === "revoked").map(row => row.projectionScopeKey) };
+}
+
+async function assertBoardSharingCurrent(tx: Prisma.TransactionClient, memberId: string, runtimeMemberId: string,
+  expected: string | undefined, selected: readonly HostedVaultShareProjectionScope[]) {
+  await lockHostedMemberRow(tx, memberId);
+  const current = await readBoardSharingState(tx, memberId, runtimeMemberId);
+  // Older forms can still withdraw and make first grants. Restoring a revoked scope needs a fresh read.
+  const restores = selected.some(scope => current.revoked.includes(buildHostedVaultShareProjectionScopeKey(scope)));
+  if (expected === undefined ? restores : current.revision !== expected) {
+    throw hostedOnboardingError({ code: "BOARD_SHARING_CHANGED", httpStatus: 409,
+      message: "Your sharing choices changed. Open the person’s board to review them." });
+  }
+}
+
 /** At most two members and eight snapshots. No names, contacts or roster disclosure. */
 export async function readHostedGroupBoardData(input: {
   groupId: string;
@@ -1190,7 +1212,7 @@ export async function readHostedGroupBoardData(input: {
   const scopeKeys = HOSTED_GROUP_BOARD_SCOPES.map(buildHostedVaultShareProjectionScopeKey);
   const requestedScope = input.otherMetric && scopeKeys[input.otherMetric === "steps" ? 2 : 1];
   const ids = [input.viewerId, input.otherId];
-  const captureAuthority = () => prisma.$transaction(async tx => {
+  const captureAuthority = (includeSharingRevision = false) => prisma.$transaction(async tx => {
     const group = await tx.hostedGroup.findUnique({ where: { id: input.groupId },
       select: { runtimeMemberId: true, members: { where: { memberId: { in: ids } },
         take: 2, select: { id: true, memberId: true } } } });
@@ -1210,7 +1232,9 @@ export async function readHostedGroupBoardData(input: {
         activeHostedMemberAccessWhere(), hostedHealthDataConsentNotRevokedWhere(),
       ] } }, take: 8, select: { id: true },
     }) : [];
-    return { members: group.members, grants, readableIds: new Set(readable.map(grant => grant.id)) };
+    const sharingRevision = includeSharingRevision
+      ? (await readBoardSharingState(tx, input.viewerId, input.runtimeMemberId)).revision : undefined;
+    return { members: group.members, grants, sharingRevision, readableIds: new Set(readable.map(grant => grant.id)) };
   }, { ...HOSTED_ONBOARDING_TRANSACTION_OPTIONS, isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead });
 
   const captured = await captureAuthority();
@@ -1233,12 +1257,13 @@ export async function readHostedGroupBoardData(input: {
     throw hostedOnboardingError({ code: "BOARD_PROJECTION_UNAVAILABLE", httpStatus: 503, retryable: true,
       message: "Shared numbers are temporarily unavailable." });
   });
-  const current = await captureAuthority();
+  const current = await captureAuthority(!requestedScope);
   if (!current) return null;
   const membershipId = current.members.find(member => member.memberId === input.viewerId)?.id ?? null;
   if (viewerMembership !== membershipId) return null;
   return {
     membershipId,
+    sharingRevision: current.sharingRevision,
     myScopes: current.grants.filter(grant => grant.grantorMemberId === input.viewerId).map(grant => grant.projectionScopeKey),
     people: ids.map(memberId => {
       const membership = current.members.find(member => member.memberId === memberId);
@@ -2496,6 +2521,7 @@ export async function saveHostedGroupBoardSharingTx(input: {
   runtimeMemberId: string;
   memberId: string;
   expectedMembershipId: string | null;
+  expectedSharingRevision?: string;
   selectedVaultShareProjectionScopes: readonly HostedVaultShareProjectionScope[];
   now: Date;
   tx: Prisma.TransactionClient;
@@ -2507,6 +2533,8 @@ export async function saveHostedGroupBoardSharingTx(input: {
   if (group?.runtimeMemberId !== input.runtimeMemberId) {
     throw hostedOnboardingError({ code: "HOSTED_GROUP_NOT_ACTIVE", httpStatus: 404, message: "This group is no longer available." });
   }
+  await assertBoardSharingCurrent(input.tx, input.memberId, input.runtimeMemberId,
+    input.expectedSharingRevision, input.selectedVaultShareProjectionScopes);
   return acceptHostedGroupJoinTx({
     ...input, additiveOnly: false, confirmationPublicBaseUrl: null,
     joinOrigin: "web", policyProjectionScopes: HOSTED_GROUP_BOARD_SCOPES,
@@ -2520,6 +2548,7 @@ export async function addHostedGroupPairBoardSharingTx(input: {
   memberId: string;
   otherMemberId: string;
   expectedMembershipId: string | null;
+  expectedSharingRevision?: string;
   metrics: readonly ("steps" | "sleep")[];
   now: Date;
   tx: Prisma.TransactionClient;
@@ -2538,11 +2567,12 @@ export async function addHostedGroupPairBoardSharingTx(input: {
     throw hostedOnboardingError({ code: "PROGRESS_SHARING_AUDIENCE_CHANGED", httpStatus: 409,
       message: "The people in this room changed. Reload before sharing." });
   }
+  const selectedVaultShareProjectionScopes = HOSTED_GROUP_BOARD_SCOPES.filter((_, index) =>
+    index === 1 && input.metrics.includes("sleep") || index === 2 && input.metrics.includes("steps"));
+  await assertBoardSharingCurrent(input.tx, input.memberId, input.runtimeMemberId, input.expectedSharingRevision, selectedVaultShareProjectionScopes);
   return acceptHostedGroupJoinTx({
     ...input, additiveOnly: true, confirmationPublicBaseUrl: null, joinOrigin: "web",
-    policyProjectionScopes: HOSTED_GROUP_BOARD_SCOPES,
-    selectedVaultShareProjectionScopes: HOSTED_GROUP_BOARD_SCOPES.filter((_, index) =>
-      index === 1 && input.metrics.includes("sleep") || index === 2 && input.metrics.includes("steps")),
+    policyProjectionScopes: HOSTED_GROUP_BOARD_SCOPES, selectedVaultShareProjectionScopes,
   });
 }
 

@@ -169,8 +169,11 @@ function sharingPreview(people: FriendSeries[], rooms: FriendRoom[], measure: st
 }
 
 function sharingAudience(people: FriendSeries[], rooms: FriendRoom[]): Friends["shareAudience"] {
-  return people.filter(person => rooms.some(room => room.otherMemberId === person.memberId))
-    .map(({ memberId, firstName, avatarUrl }) => ({ memberId, firstName, avatarUrl }));
+  const byMember = new Map(rooms.map(room => [room.otherMemberId, room]));
+  return people.flatMap(({ memberId, firstName, avatarUrl }) => {
+    const room = byMember.get(memberId);
+    return room ? [{ memberId, firstName, avatarUrl, sharingRevision: room.sharingRevision }] : [];
+  });
 }
 
 export async function setProgressFriendSharing(auth: HostedNativeMemberAuth, body: SetSharingBody, signal: AbortSignal) {

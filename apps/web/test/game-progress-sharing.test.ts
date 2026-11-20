@@ -39,18 +39,23 @@ beforeEach(() => {
   mocks.audience.mockImplementation((room: string) => Promise.resolve({ threadId: room,
     contacts: [{}, {}], memberIds: ["ava", room.slice(5)] }));
   mocks.route.mockImplementation(({ threadId }: { threadId: string }) => Promise.resolve({ containerMemberId: threadId }));
-  mocks.game.mockResolvedValue({ id: "game" });
+  mocks.game.mockImplementation(({ where }) => {
+    const other = where.AND[1].players.some.memberId;
+    return Promise.resolve({ id: `game-${other}`, chatContainerMemberId: `room-${other}` });
+  });
   mocks.add.mockResolvedValue({ membershipId: "membership" });
   mocks.blocked.mockResolvedValue(false);
   mocks.verified.mockResolvedValue(["synthetic-key"]);
 });
 
 it("checks every provider pair, commits additive grants and reports the exact audience", async () => {
-  expect(await run()).toEqual({ ok: true, sharedWith: people.map(person => ({ ...person, metrics: ["steps", "sleep"] })) });
+  const revision = "a".repeat(64);
+  expect(await run({ body: { share: true, metrics: ["steps", "sleep"], audience: ["leo", "sam"],
+    expectedSharingRevisions: { leo: revision } } })).toEqual({ ok: true, sharedWith: people.map(person => ({ ...person, metrics: ["steps", "sleep"] })) });
   expect(mocks.audience).toHaveBeenCalledTimes(2);
   expect(mocks.current).toHaveBeenCalledTimes(2);
   expect(mocks.add).toHaveBeenCalledTimes(2);
-  expect(mocks.add).toHaveBeenCalledWith(expect.objectContaining({ memberId: "ava", otherMemberId: "leo", metrics: ["steps", "sleep"] }));
+  expect(mocks.add).toHaveBeenCalledWith(expect.objectContaining({ memberId: "ava", otherMemberId: "leo", metrics: ["steps", "sleep"], expectedSharingRevision: revision }));
 });
 
 it("does not grant a newly discovered person who was absent from the consent prompt", async () => {
@@ -76,8 +81,7 @@ it.each(["block", "game departed", "session revoked"])("rechecks %s inside the g
 
 it("returns the first committed outcome when a later room fails", async () => {
   mocks.add.mockResolvedValueOnce({ membershipId: "membership" }).mockRejectedValueOnce(new Error("Synthetic provider failure."));
-  await expect(run()).rejects.toMatchObject({ httpStatus: 503, retryable: true,
-    details: { sharedWith: [{ ...people[0], metrics: ["steps", "sleep"] }] } });
+  expect(await run()).toEqual({ ok: true, partial: true, sharedWith: [{ ...people[0], metrics: ["steps", "sleep"] }] });
   expect(mocks.transaction).toHaveBeenCalledTimes(2);
 });
 
@@ -132,6 +136,19 @@ it("loads outgoing grants only for the sharing preview", async () => {
   const initial = await readFriendRooms("ava", ["leo"], false);
   expect(initial.rooms).toHaveLength(1);
   expect(mocks.shares).not.toHaveBeenCalled();
-  expect(await readFriendRooms("ava", ["leo"])).toEqual(initial);
+  expect((await readFriendRooms("ava", ["leo"])).rooms).toEqual([{ ...initial.rooms[0], sharingRevision: expect.stringMatching(/^[0-9a-f]{64}$/u) }]);
   expect(mocks.shares).toHaveBeenCalledOnce();
+});
+
+it.each([true, false])("uses only the latest bound game per friend, including when eligible is %s", async eligible => {
+  const pair = [{ memberId: "ava" }, { memberId: "leo" }];
+  const ids = ["recent", "earlier"];
+  mocks.roomGames.mockResolvedValue(ids.map(id => ({ id, chatContainerMemberId: id, players: pair })));
+  mocks.groups.mockResolvedValue(ids.map(id => ({ id, runtimeMemberId: id, members: [] })));
+  mocks.containers.mockResolvedValue(ids.map(id => ({ memberId: id,
+    participants: (!eligible && id === "recent" ? [...pair, { memberId: "nora" }] : pair)
+      .map(person => ({ participantMemberId: person.memberId })) })));
+  mocks.shares.mockResolvedValue([]);
+  const { rooms } = await readFriendRooms("ava", ["leo"]);
+  expect(rooms.map(room => room.gameId)).toEqual(eligible ? ["recent"] : []);
 });

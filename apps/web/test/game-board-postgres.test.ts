@@ -30,13 +30,14 @@ import { getPrisma } from "@/src/lib/prisma";
 import { hostedAuthAdapter } from "@/src/lib/better-auth/adapter";
 import { serializeHostedNativeSessionToken } from "@/src/lib/better-auth/transport";
 import { readPairBoard, savePairBoardSharing as saveSharing } from "@/src/lib/game/board";
-import { readHostedGroupBoardData, leaveHostedGroupMemberTx } from "@/src/lib/hosted-groups/group-store";
+import { addHostedGroupPairBoardSharingTx, readHostedGroupBoardData, leaveHostedGroupMemberTx } from "@/src/lib/hosted-groups/group-store";
 import { hasHostedRuntimeActiveAccess } from "@/src/lib/hosted-mailbox/runtime-access";
 import { recordHostedConsentGrant, revokeHostedConsentScope, buildCurrentHostedConsentDocumentVersions } from "@/src/lib/legal/consent";
 import { createHostedEmailLookupKey } from "@/src/lib/hosted-onboarding/contact-privacy";
 import { createHostedLinqParticipantContact } from "@/src/lib/hosted-onboarding/linq-participant-contact";
 import { grantHostedVaultShareTx } from "@/src/lib/hosted-vault-share/share-grant-store";
 import { encryptHostedVaultShareProjectionSnapshot } from "@/src/lib/hosted-vault-share/projection-snapshot";
+import { readFriendRooms } from "@/src/lib/game/progress/friend-sharing";
 import { addDays } from "@/src/lib/game/time";
 import { GET } from "../app/api/game/v1/people/[memberId]/board/route";
 import { PUT } from "../app/api/game/v1/people/[memberId]/board/sharing/route";
@@ -277,6 +278,70 @@ describe.skipIf(!enabled)("pair board PostgreSQL authority and routes", () => {
     expect(numbers.steps.daily).toHaveLength(days);
     expect(numbers.steps.daily.every(point => point.date <= through)).toBe(true);
     expect(numbers.restingHeartRate).toMatchObject({ latest: { date: "2026-11-05", value: 65 } });
+  });
+  it("withdraws deselected Progress grants in earlier pair rooms and preserves unrelated grants", async () => {
+    const f = await fixture(true);
+    const room = randomUUID(), groupId = randomUUID(), gameId = randomUUID();
+    members.push(room); groups.push(groupId); games.push(gameId);
+    await db.hostedMember.create({ data: { id: room, billingStatus: "active" } });
+    await db.hostedGroup.create({ data: { id: groupId, ownerMemberId: f.b, runtimeMemberId: room,
+      members: { create: [f.a, f.b].map(memberId => ({ id: randomUUID(), memberId, role: "member", joinedAt: new Date() })) } } });
+    await db.hostedThreadContainer.create({ data: { memberId: room, ownerMemberId: f.b, participants: {
+      create: [f.a, f.b].map(id => ({ participantMemberId: id, handleLookupKey: id, firstSeenAt: new Date(), lastSeenAt: new Date() })) } } });
+    await db.game.create({ data: { id: gameId, createdBy: f.a, wordsOwnerMemberId: f.a, chatContainerMemberId: room,
+      createdAt: new Date("2025-02-01"), status: "settled", lengthDays: 10, terms: {}, termsWordsEncrypted: "synthetic",
+      players: { create: [f.a, f.b].map((memberId, seat) => ({ memberId, seat, joinedAt: new Date(), timeZone: "UTC" })) } } });
+    for (const [owner, kind] of [[f.a, "sleep-duration-days.v0"], [f.a, "steps-days.v0"],
+      [f.a, "vo2-max-days.v0"], [f.b, "sleep-duration-days.v0"]] as const) {
+      await db.$transaction(tx => grantHostedVaultShareTx({ tx, grantorMemberId: owner, destinationMemberId: room,
+        now: new Date(), projectionScope: hostedVaultShareProjectionKindToScope(kind) }));
+    }
+    await savePairBoardSharing(f.a, f.b, { expectedMembershipId: (await f.read())!.membershipId, numbers: ["steps"] });
+    const grants = await db.hostedVaultShare.findMany({ where: { destinationMemberId: room, status: "granted" },
+      select: { grantorMemberId: true, projectionKind: true } });
+    expect(grants).toHaveLength(3);
+    expect(grants).not.toContainEqual({ grantorMemberId: f.a, projectionKind: "sleep-duration-days.v0" });
+  });
+
+  it("requires a fresh board before restoring a revoked permission", async () => {
+    const f = await fixture(true);
+    await f.share(f.a, "sleep-duration-days.v0");
+    await f.share(f.a, "steps-days.v0");
+    const context = { params: Promise.resolve({ memberId: f.b }) };
+    const original = (await (await GET(f.request(), context)).json()).board;
+    const save = (numbers: string[], expectedSharingRevision?: string) => PUT(f.request({
+      numbers, expectedMembershipId: original.membershipId, expectedSharingRevision,
+    }), context);
+    expect((await save(["steps"], original.sharingRevision)).status).toBe(200);
+    for (const revision of [original.sharingRevision, undefined]) {
+      const response = await save(["sleep"], revision);
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({ error: { code: "BOARD_SHARING_CHANGED", retryable: false } });
+      expect((await f.read())?.myShares).toEqual(["steps"]);
+    }
+    const current = (await (await GET(f.request(), context)).json()).board;
+    expect((await save(["sleep"], current.sharingRevision)).status).toBe(200);
+    expect((await f.read())?.myShares).toEqual(["sleep"]);
+  });
+  it("honors a revocation between the Friends preview and save, then accepts a new preview", async () => {
+    const f = await fixture(true);
+    await db.hostedThreadContainerParticipant.createMany({ data: [f.a, f.b].map(id => ({
+      containerMemberId: f.room, participantMemberId: id, handleLookupKey: id, firstSeenAt: new Date(), lastSeenAt: new Date(),
+    })) });
+    await f.share(f.a, "steps-days.v0");
+    const preview = async () => (await readFriendRooms(f.a, [f.b])).rooms[0];
+    const original = await preview();
+    const grant = (expectedSharingRevision?: string) => db.$transaction(tx => addHostedGroupPairBoardSharingTx({
+      ...original, memberId: f.a, expectedMembershipId: original.membershipId, metrics: ["steps"], expectedSharingRevision,
+      now: new Date(), tx,
+    }));
+    await savePairBoardSharing(f.a, f.b, { expectedMembershipId: original.membershipId, numbers: [] });
+    for (const revision of [original.sharingRevision, undefined]) {
+      await expect(grant(revision)).rejects.toMatchObject({ code: "BOARD_SHARING_CHANGED" });
+    }
+    expect((await f.read())?.myShares).toEqual([]);
+    await grant((await preview()).sharingRevision);
+    expect((await f.read())?.myShares).toEqual(["steps"]);
   });
   it("preserves an unshown scope, deselects, repeats and keeps committed grants when waking fails", async () => {
     const f = await fixture(true);

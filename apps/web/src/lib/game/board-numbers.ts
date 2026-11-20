@@ -34,7 +34,7 @@ export interface BoardPerson {
   numbers: Record<BoardMetric, BoardNumber>;
 }
 export interface PairBoard {
-  groupId: string; membershipId: string | null; firstGameOn: string;
+  groupId: string; membershipId: string | null; sharingRevision?: string; firstGameOn: string;
   window: { from: string; through: string }; myShares: BoardMetric[];
   people: BoardPerson[]; crowns: Record<BoardMetric | "inARow", string | null>;
 }

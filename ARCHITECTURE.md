@@ -6598,16 +6598,29 @@ The chart includes every ranked row within the existing reader cap, in ranking
 order. A ranked person with no points in the selected range has an empty point
 array; private and invited rows never have a chart entry.
 
-Friend Steps/Sleep reads use the existing pair-board projection grants and its
-180-day retained history, not another member's private replica. Pair rooms must
-have exactly two humans and no extra group membership. The consent preview
+Friend Steps/Sleep reads use pair-board projection grants and their 180-day
+retained history. A shared series with no observation in the selected range has
+a null total and rank. An observed zero participates in ranking. The newest
+bound pair game selects the room for both the board and Friends. It must have
+exactly two humans and no extra group membership for a Friends grant. The consent preview
 names every recipient; `SetSharingBody.audience` echoes those ids so a changed
 audience cannot silently receive a grant. Every granting transaction rechecks
 the live-provider-backed route, current pair, verified contacts, block/consent/
 session state and room roster. `addHostedGroupPairBoardSharingTx` adds only Steps/Sleep through the
 existing sharing owner, preserving HR/VO2 and every other grant. Declining
-removes nothing. Success and partial-failure responses list committed
-`sharedWith` recipients; no retry loop or alternate sharing state exists.
+removes nothing. A save that stops after a room commits returns HTTP 200 with
+the committed `sharedWith` recipients and `partial: true` if any recipient
+was missed. A refusal before the first commit keeps its error status.
+
+Full boards and Friends consent previews include a per-room `sharingRevision`
+derived from the sender's four board grant generations and their statuses.
+The pair board echoes `expectedSharingRevision`. Friends echoes
+`expectedSharingRevisions` keyed by recipient member ID. Saves compare each
+supplied revision under the group and sender locks. A mismatch returns
+`BOARD_SHARING_CHANGED` (409). Requests without a revision can withdraw or
+make a first grant. Restoring a revoked scope requires a current revision.
+Deselecting Steps or Sleep on the person board also withdraws that scope from
+older eligible rooms for the same pair in the same transaction.
 
 Progress collection bounds are 500 games, 10,000 entries and at most 5,000
 current player identities. Deferred friend inference admits at most 10,000
