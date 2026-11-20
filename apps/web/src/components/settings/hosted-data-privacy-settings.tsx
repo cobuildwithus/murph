@@ -102,12 +102,11 @@ function HostedDataPrivacySettingsWithSecureApproval(props: { account: DeletionA
 
 /** Whose account: the browser the app opens may hold someone else's session. */
 function HostedSignedInAccountRow(props: { accountHint: string | null }) {
-  if (!props.accountHint) return null;
   return (
     <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 pb-4">
       <UserRound className="size-[18px] shrink-0 text-muted-foreground" strokeWidth={1.6} aria-hidden="true" />
-      <span className="font-serif text-base tracking-tight text-foreground">
-        Signed in as {props.accountHint}
+      <span className="font-serif text-base tracking-tight text-foreground [overflow-wrap:anywhere]">
+        {props.accountHint ? `Signed in as ${props.accountHint}` : "Signed in"}
       </span>
       <JoinInviteSignOutButtonIsland appearance="ghost" idleLabel="Sign out" />
     </div>

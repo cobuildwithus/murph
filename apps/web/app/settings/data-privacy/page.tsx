@@ -6,7 +6,7 @@ import { PageHeader } from "@/src/components/ui/page-header";
 import { getHostedAccountDeletionPageSession } from "@/src/lib/hosted-onboarding/app-session";
 import { isHostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 import { countHostedFamilySponsoredMembers } from "@/src/lib/hosted-onboarding/family-plan";
-import { readHostedMemberPhoneHint } from "@/src/lib/hosted-onboarding/hosted-member-identity-store";
+import { readHostedMemberAccountHint } from "@/src/lib/hosted-onboarding/hosted-member-store";
 import { getHostedPageAuthSnapshot } from "@/src/lib/hosted-onboarding/page-auth";
 import { getPrisma } from "@/src/lib/prisma";
 import { createMurphPageMetadata } from "@/src/lib/site-metadata";
@@ -34,7 +34,7 @@ export default async function SettingsDataPrivacyPage() {
   // session on a shared phone: say whose account deletion would remove.
   const [accountHint, familyCovered] = authenticatedMember
     ? await Promise.all([
-      readHostedMemberPhoneHint({ memberId: authenticatedMember.id, prisma: getPrisma() }),
+      readHostedMemberAccountHint({ memberId: authenticatedMember.id, prisma: getPrisma() }),
       // Deleting an owner ends Family for everyone it covers: the
       // confirmation says so.
       countHostedFamilySponsoredMembers({ ownerMemberId: authenticatedMember.id, prisma: getPrisma() }),
