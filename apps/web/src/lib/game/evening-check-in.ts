@@ -75,18 +75,29 @@ async function roomEveningPlayers(roomId: string, db: Prisma.TransactionClient, 
   return admitted;
 }
 
-/** A private check-in is only eligible when the room's own check-in cannot cover this game. */
-export async function roomCoversEveningGame(roomId: string | null, gameId: string, now: Date): Promise<boolean> {
-  if (!roomId || process.env.MURPH_GAME_EVENING_CHECK_IN_ENABLED !== "true") return false;
-  const room = await readRoom(roomId, undefined, now).catch(skipUnprovableRoom);
-  return Boolean(room?.games.some(game => game.row.id === gameId));
+export type RoomEvidence = Map<string, GameChatAudience | null | "unknown">;
+
+async function prepareRoomEvidence(room: string): Promise<GameChatAudience | null | "unknown"> {
+  try { return await readGameChatAudience(room); }
+  catch (error) { return readGameChatAudienceRefusal(error) ? null : "unknown"; }
 }
 
-/**
- * The games that would get the private evening text, from stored facts only, for describing reminders: a game
- * in a group chat whose players live close together gets that chat's check-in instead. Delivery still asks
- * `roomCoversEveningGame`, which also proves the chat itself.
- */
+/** Each database pass recomputes admission. Only preparation may fetch missing provider evidence. */
+export function privateRoomCheck(db: Prisma.TransactionClient, now: Date, evidence: RoomEvidence, prepare: boolean) {
+  const admissions = new Map<string, Map<string, string[]>>();
+  return async (game: Games[number]) => {
+    const room = game.row.chatContainerMemberId;
+    if (!room || process.env.MURPH_GAME_EVENING_CHECK_IN_ENABLED !== "true") return false;
+    if (prepare && !evidence.has(room)) evidence.set(room, await prepareRoomEvidence(room));
+    const audience = evidence.get(room);
+    if (audience === null) return false;
+    if (!audience || audience === "unknown") return true;
+    if (!admissions.has(room)) admissions.set(room, await roomEveningPlayers(room, db, now));
+    return admissions.get(room)!.has(game.row.id) && Boolean(await readGameChatAuthority(game.row, room, audience, db));
+  };
+}
+
+/** Settings describe admission from stored room facts. Delivery also proves the provider audience. */
 export async function readPrivatelyTextedGameIds(gameIds: readonly string[], now: Date): Promise<Set<string>> {
   if (!gameIds.length || process.env.MURPH_GAME_EVENING_CHECK_IN_ENABLED !== "true") return new Set(gameIds);
   const prisma = getPrisma();

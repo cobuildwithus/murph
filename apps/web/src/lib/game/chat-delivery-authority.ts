@@ -13,10 +13,10 @@ import { gameResolutionNoticeKind, parseGameResolutionNotice, readGameChangeReso
 import { currentTerms, isGameInviteExpired, parseStoredTerms } from "./rules";
 import { readHostedMailboxWakeByDedupeKey } from "../hosted-mailbox/store";
 import { GameChatAudienceError, readGroupGameNoticeAuthority, sameGamePlayers } from "./chat-membership";
-import type { HostedGameEveningCheckInPolicy, HostedGameGroupMissedCheckInPolicy, HostedGamePrivateEveningCheckInPolicy, HostedGamePrivateKickoffPolicy } from "@murphai/hosted-execution/runtime-control";
+import type { HostedGameEveningCheckInPolicy, HostedGameGroupMissedCheckInPolicy, HostedGamePrivateKickoffPolicy } from "@murphai/hosted-execution/runtime-control";
 import { isGroupMissedDayBatchCurrentTx } from "./group-missed-day";
 import { isEveningBatchCurrentTx } from "./evening-check-in";
-import { isPrivateEveningCurrentTx } from "./private-notification";
+import { isPrivateEveningCurrentTx, type readPrivateEveningDeliveryAuthority } from "./private-notification";
 import { isPrivateKickoffCurrentTx } from "./private-kickoff";
 import { isMissedCheckInExpired } from "./missed-check-in";
 
@@ -29,7 +29,7 @@ export async function assertGameProposalDeliveryCurrentTx(input: {
   rematchTermsVersion?: number | null;
   groupMissedPolicy?: HostedGameGroupMissedCheckInPolicy;
   eveningPolicy?: HostedGameEveningCheckInPolicy;
-  privateEveningPolicy?: HostedGamePrivateEveningCheckInPolicy;
+  privateEveningAuthority?: NonNullable<Awaited<ReturnType<typeof readPrivateEveningDeliveryAuthority>>>;
   privateKickoffPolicy?: HostedGamePrivateKickoffPolicy;
   tx: Prisma.TransactionClient;
   now?: Date;
@@ -70,9 +70,10 @@ async function assertGameBothWinDeliveryCurrentTx(input: Parameters<typeof asser
 }
 
 async function assertPrivateEveningDeliveryCurrentTx(input: Parameters<typeof assertGameProposalDeliveryCurrentTx>[0], key: string): Promise<true> {
-  const policy = input.privateEveningPolicy;
+  const authority = input.privateEveningAuthority;
+  const policy = authority?.policy;
   if (!policy || policy.eventId !== key || policy.memberId !== input.containerMemberId
-    || !await isPrivateEveningCurrentTx(policy, input.tx, input.now ?? new Date())) return stale();
+    || !await isPrivateEveningCurrentTx(policy, input.tx, input.now ?? new Date(), authority.evidence)) return stale();
   return true;
 }
 

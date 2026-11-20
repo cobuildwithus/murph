@@ -138,7 +138,7 @@ export const POST = withJsonError(async (request: Request) => {
   });
   const gameChatAuthority = await readGameProposalDeliveryPlayers(idempotencyKey, userId, gameTarget);
   const rematchTermsVersion = await readGameRematchDeliveryRevision(idempotencyKey, userId);
-  const privateEveningPolicy = idempotencyKey?.startsWith("game-evening-private:")
+  const privateEveningAuthority = idempotencyKey?.startsWith("game-evening-private:")
     ? await readPrivateEveningDeliveryAuthority(idempotencyKey, userId) : null;
   const privateKickoffPolicy = idempotencyKey?.startsWith("game-dm:")
     ? await readPrivateKickoffDeliveryAuthority(idempotencyKey, userId) : null;
@@ -180,7 +180,7 @@ export const POST = withJsonError(async (request: Request) => {
     const requestedGameProposal = await assertGameProposalDeliveryCurrentTx({
       deliveryIdempotencyKey: idempotencyKey,
       containerMemberId: userId,
-      privateEveningPolicy: privateEveningPolicy ?? undefined,
+      privateEveningAuthority: privateEveningAuthority ?? undefined,
       privateKickoffPolicy: privateKickoffPolicy ?? undefined,
       ...gameAuthority,
       rematchTermsVersion,
