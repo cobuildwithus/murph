@@ -162,8 +162,8 @@ async function readHandoffSessionOrAuthState() {
   } catch (error) {
     if (
       isHostedOnboardingError(error)
-      && error.code === "AUTH_REQUIRED"
-      && error.httpStatus === 401
+      && ((error.code === "AUTH_REQUIRED" && error.httpStatus === 401)
+        || (error.code === "HOSTED_ACCESS_REQUIRED" && error.httpStatus === 403))
     ) {
       return null;
     }
