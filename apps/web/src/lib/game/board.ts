@@ -2,6 +2,7 @@ import "server-only";
 import { Prisma } from "@prisma/client";
 import { formatTimeZoneDateTimeParts } from "@murphai/contracts";
 import { buildHostedVaultShareProjectionScopeKey } from "@murphai/hosted-execution/vault-share";
+import { hostedVaultShareRevocation } from "../hosted-vault-share/share-grant-store";
 import { getPrisma } from "../prisma";
 import { lastSettledStepDay } from "../settled-step-day";
 import { HOSTED_ONBOARDING_TRANSACTION_OPTIONS } from "../hosted-onboarding/shared";
@@ -99,13 +100,37 @@ export async function readPairBoard(viewerId: string, otherId: string): Promise<
       inARow: facts.streaks.get(person.memberId) ?? null,
       numbers: { restingHeartRate: number(0), sleep: number(1), steps: number(2), vo2Max: number(3) } };
   });
-  return { groupId: binding.groupId, membershipId: shared.membershipId, firstGameOn: facts.firstGameOn, window,
+  return { groupId: binding.groupId, membershipId: shared.membershipId, sharingRevision: shared.sharingRevision, firstGameOn: facts.firstGameOn, window,
     myShares: BOARD_METRICS.filter((_, index) => shared.myScopes.includes(buildHostedVaultShareProjectionScopeKey(HOSTED_GROUP_BOARD_SCOPES[index]))),
     people, crowns: boardCrowns(people) };
 }
 
+// Earlier versions of Friends granted Steps/Sleep in every eligible room for a person.
+async function revokeEarlierPairShares(tx: Db, viewerId: string, otherId: string, currentRoom: string,
+  selected: readonly BoardMetric[], now: Date) {
+  const withdrawn = BOARD_METRICS.flatMap((metric, index) =>
+    (metric === "steps" || metric === "sleep") && !selected.includes(metric) ? [HOSTED_GROUP_BOARD_SCOPES[index]] : []);
+  if (!withdrawn.length) return;
+  const pair = [viewerId, otherId];
+  await tx.hostedVaultShare.updateMany({
+    where: {
+      grantorMemberId: viewerId, status: "granted", destinationMemberId: { not: currentRoom },
+      projectionScopeKey: { in: withdrawn.map(buildHostedVaultShareProjectionScopeKey) },
+      destination: {
+        chatHostedGames: { some: pairWhere(viewerId, otherId) },
+        hostedGroupRuntime: { members: { every: { memberId: { in: pair } } } },
+        threadContainer: {
+          AND: pair.map(participantMemberId => ({ participants: { some: { participantMemberId, removedAt: null } } })),
+          participants: { none: { removedAt: null, participantMemberId: { notIn: pair } } },
+        },
+      },
+    },
+    data: hostedVaultShareRevocation(now),
+  });
+}
+
 export async function savePairBoardSharing(viewerId: string, otherId: string, input: {
-  expectedMembershipId: string | null; numbers: readonly BoardMetric[];
+  expectedMembershipId: string | null; expectedSharingRevision?: string; numbers: readonly BoardMetric[];
   beforeMutationTx: (tx: Prisma.TransactionClient) => Promise<void>;
 }, signal?: AbortSignal): Promise<PairBoard | null> {
   if (!isGameBoardEnabled()) throw gameNotFound();
@@ -141,8 +166,12 @@ export async function savePairBoardSharing(viewerId: string, otherId: string, in
           if (!(await verifiedGameContactKeys(tx, memberId, audience.contacts)).length) throw gameNotFound();
         }
       }
-      return saveHostedGroupBoardSharingTx({ ...binding, memberId: viewerId, expectedMembershipId: input.expectedMembershipId,
-        selectedVaultShareProjectionScopes: HOSTED_GROUP_BOARD_SCOPES.filter((_, index) => input.numbers.includes(BOARD_METRICS[index])), now: new Date(), tx });
+      const now = new Date();
+      const result = await saveHostedGroupBoardSharingTx({ ...binding, memberId: viewerId, expectedMembershipId: input.expectedMembershipId,
+        expectedSharingRevision: input.expectedSharingRevision,
+        selectedVaultShareProjectionScopes: HOSTED_GROUP_BOARD_SCOPES.filter((_, index) => input.numbers.includes(BOARD_METRICS[index])), now, tx });
+      await revokeEarlierPairShares(tx, viewerId, otherId, binding.runtimeMemberId, input.numbers, now);
+      return result;
     }, HOSTED_ONBOARDING_TRANSACTION_OPTIONS);
   } catch (error) {
     if (isHostedOnboardingError(error) && error.code === "HOSTED_GROUP_MEMBERSHIP_CHANGED") {

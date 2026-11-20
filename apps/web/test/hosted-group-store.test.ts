@@ -314,6 +314,7 @@ function buildTx(input?: {
       }),
     },
     hostedVaultShare: {
+      findMany: vi.fn(async () => []),
       count: vi.fn(async (args: {
         where: { destinationMemberId?: string; projectionScopeKey?: string };
       }) => {

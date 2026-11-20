@@ -97,6 +97,14 @@ afterAll(async () => {
   await db.hostedMember.deleteMany({ where: { id: { in: members } } });
 });
 
+it.skipIf(!enabled)("returns the required consent scopes for a signed-in Friends health reader", async () => {
+  await fixture("12 pushups");
+  const response = await GET(new Request("https://example.test/api/game/v1/progress/friends?measure=sleep"));
+  expect(response.status).toBe(403);
+  expect(await response.json()).toMatchObject({ error: { code: "HOSTED_CONSENT_REQUIRED", retryable: false,
+    details: { missingScopes: expect.arrayContaining(["launch.health-data"]) } } });
+});
+
 describe.skipIf(!enabled)("Friends deferred inference with PostgreSQL", () => {
   it("migrates only encrypted retired awards across page boundaries and is idempotent", async () => {
     const ava = await member("Ava");

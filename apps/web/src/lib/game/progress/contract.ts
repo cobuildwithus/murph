@@ -136,7 +136,7 @@ export const friendsSchema = z.object({
   shareAsk: z.boolean(),
   departureNotice: z.string().nullable(),
   /** Exact two-person room recipients, shown before consent. */
-  shareAudience: z.array(person),
+  shareAudience: z.array(person.extend({ sharingRevision: z.string().optional() })),
   /** The game a friend's Challenge button sets up on this measure: its task and kind of week. */
   challenge: z.object({ task: z.string(), category: z.enum(["move", "calm", "strength"]) }).nullable(),
 });
@@ -160,6 +160,7 @@ const setMeasure = z.union([z.strictObject({ goal }), z.strictObject({ perDay: z
 export type SetMeasureBody = z.infer<typeof setMeasure>;
 const sharing = z.strictObject({ metrics: z.array(z.enum(["steps", "sleep"])).min(1).max(2)
   .refine(values => new Set(values).size === values.length), share: z.boolean(),
+  expectedSharingRevisions: z.record(text, z.string().regex(/^[0-9a-f]{64}$/u)).optional(),
   audience: z.array(text).max(5000).refine(values => new Set(values).size === values.length) });
 export type SetSharingBody = z.infer<typeof sharing>;
 const seen = z.strictObject({ momentIds: z.array(text) });
@@ -204,7 +205,7 @@ export const parseMapQuery = (value: unknown): MapQuery => parse(mapQuery, value
 export const parseStoryQuery = (value: unknown): StoryQuery => parse(storyQuery, value);
 
 export type SetMeasureResponse = { ok: true; measure: Measure };
-export type SetSharingResponse = { ok: true; sharedWith: (z.infer<typeof person> & { metrics: SetSharingBody["metrics"] })[] };
+export type SetSharingResponse = { ok: true; partial?: boolean; sharedWith: (z.infer<typeof person> & { metrics: SetSharingBody["metrics"] })[] };
 export type PicUploadResponse = { ok: true; pic: Pic };
 export type ProgressWriteResponse = { ok: true }; // DELETE pic, POST seen
 // GET pics/:id returns image/jpeg; GET map returns image/png. No JSON envelope.

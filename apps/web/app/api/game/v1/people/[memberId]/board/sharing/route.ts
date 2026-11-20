@@ -15,12 +15,16 @@ export const PUT = withJsonError(async (request: Request, context: { params: Pro
     || !body.expectedMembershipId.trim() || body.expectedMembershipId.length > 200)) throw invalidGameRequest("Include the membership you last read, or null to join.");
   if (!Array.isArray(body.numbers) || body.numbers.length > 4 || body.numbers.some(value =>
     !BOARD_METRICS.some(metric => metric === value))) throw invalidGameRequest("Choose numbers from this board.");
+  const { expectedSharingRevision } = body;
+  if (expectedSharingRevision !== undefined && (typeof expectedSharingRevision !== "string" || !/^[0-9a-f]{64}$/u.test(expectedSharingRevision))) {
+    throw invalidGameRequest("Include the sharing revision from the board.");
+  }
   const requested = body.numbers;
   const numbers = BOARD_METRICS.filter(metric => requested.includes(metric));
   const expectedMembershipId = body.expectedMembershipId;
   const otherId = await resolveDecodedRouteParam(context.params, "memberId");
   const board = await withRetryableServerFailures(() => savePairBoardSharing(auth.member.id, otherId,
-    { expectedMembershipId, numbers,
+    { expectedMembershipId, expectedSharingRevision, numbers,
       beforeMutationTx: tx => assertGameMemberAuthCurrentTx(auth, tx) }, request.signal));
   return jsonOk({ board }, 200, { "Cache-Control": "private, no-store" });
 });

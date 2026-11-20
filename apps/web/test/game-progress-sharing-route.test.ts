@@ -3,7 +3,6 @@ const mocks = vi.hoisted(() => ({ share: vi.fn() }));
 vi.mock("@/src/lib/game/http/auth", () => ({ requireGameMemberAuth: async () => ({ member: { id: "ava" } }) }));
 vi.mock("@/src/lib/game/progress/friends-reader", () => ({ setProgressFriendSharing: mocks.share }));
 import { PUT } from "../app/api/game/v1/progress/friends/sharing/route";
-import { hostedOnboardingError } from "@/src/lib/hosted-onboarding/errors";
 
 const request = (body: object) => new Request("https://example.test/api/game/v1/progress/friends/sharing", {
   method: "PUT", body: JSON.stringify(body), headers: { "Content-Type": "application/json" },
@@ -32,11 +31,9 @@ it("passes the exact approved audience once and returns only committed recipient
   expect(mocks.share).toHaveBeenCalledExactlyOnceWith({ member: { id: "ava" } }, body, expect.any(AbortSignal));
 });
 
-it("preserves committed outcomes in a partial failure response", async () => {
-  const sharedWith = [{ memberId: "leo", firstName: "Leo", avatarUrl: null, metrics: ["steps"] }];
-  mocks.share.mockRejectedValueOnce(hostedOnboardingError({ code: "PROGRESS_SHARING_AUDIENCE_CHANGED", httpStatus: 409,
-    message: "Your sharing audience changed. Reload before sharing.", details: { sharedWith } }));
-  const response = await PUT(request({ metrics: ["steps"], share: true, audience: ["leo", "sam"] }));
-  expect(response.status).toBe(409);
-  expect(await response.json()).toMatchObject({ error: { code: "PROGRESS_SHARING_AUDIENCE_CHANGED", details: { sharedWith } } });
+it("accepts the per-recipient revisions from the Friends preview", async () => {
+  const body = { metrics: ["sleep"], share: true, audience: ["nora"], expectedSharingRevisions: { nora: "a".repeat(64) } };
+  mocks.share.mockResolvedValueOnce({ ok: true, sharedWith: [] });
+  expect((await PUT(request(body))).status).toBe(200);
+  expect(mocks.share).toHaveBeenCalledWith(expect.anything(), body, expect.any(AbortSignal));
 });
