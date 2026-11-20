@@ -76,6 +76,17 @@ describe.skipIf(!enabled)("private game evening PostgreSQL", () => {
     expect(await db.$transaction(tx => isPrivateEveningCurrentTx(policy, tx, now))).toBe(false);
   });
 
+  it("keeps an early private follow-up from moving to the next game day", async () => {
+    const owner = await member(), id = await game(owner);
+    await db.gameProfile.update({ where: { memberId: owner }, data: { reminderMinutes: 135 } });
+    const at = new Date("2026-11-07T03:15:00Z");
+    expect(await reserveDuePrivateEveningCheckIns(at)).toBe(0);
+    const policy = { kind: "game_private_evening_check_in" as const, eventId: privateEveningEventId(owner, "2026-11-07", 135),
+      memberId: owner, date: "2026-11-07", expiresAt: "2026-11-07T03:45:00.000Z", conversationLaneSeq: "0",
+      batch: [{ gameId: id, termsVersion: 1, dayIndex: 1 }] };
+    expect(await db.$transaction(tx => isPrivateEveningCurrentTx(policy, tx, at))).toBe(false);
+  });
+
   it("finds a private reminder after twenty already posted games", async () => {
     const owner = await member(), ids = [];
     for (let i = 0; i < 21; i++) ids.push(await game(owner));

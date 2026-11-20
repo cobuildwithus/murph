@@ -1,5 +1,6 @@
 import "server-only";
 
+import { resolveFloatingIsoTimestampInTimeZone } from "@murphai/contracts";
 import { Prisma } from "@prisma/client";
 import { buildHostedExecutionAssistantNotificationRequestedWake } from "@murphai/hosted-execution";
 import { buildGamePrivateEveningInstructions, gamePrivateEveningCheckInPolicySchema, type HostedGamePrivateEveningCheckInPolicy } from "@murphai/hosted-execution/runtime-control";
@@ -13,7 +14,7 @@ import { isGameEnabled } from "./access";
 import { readMyGameReminderProjection } from "./direct-tool";
 import { answeredSince, roomCoversEveningGame } from "./evening-check-in";
 import { collectReminderGames, REMINDER_GAME_LIMIT, reminderSeatsAt, gameReminderWindow, reminderOpenDay } from "./reminders";
-import { currentTerms } from "./rules";
+import { currentTerms, dayIndexAt } from "./rules";
 import { canTextGameReminders, loadGameMissedCheckInGames } from "./service";
 import { addDays } from "./time";
 
@@ -29,14 +30,18 @@ async function currentEvening(memberId: string, date: string, minutes: number, n
   if (!profile?.reminderText) return null;
   const window = gameReminderWindow(now, profile.timeZone, (minutes + 60) % 1440);
   if (!window || window.day !== date) return null;
+  const slotDate = minutes >= 23 * 60 ? addDays(date, -1) : date;
+  const slotClock = new Date(minutes * 60_000).toISOString().slice(11, 19);
+  const slot = resolveFloatingIsoTimestampInTimeZone(`${slotDate}T${slotClock}`, profile.timeZone);
+  if (!slot) return null;
   const batch = await collectReminderGames(after => db.gamePlayer.findMany({
     where: reminderSeatsAt(memberId, minutes, profile.reminderMinutes, after), select: { gameId: true, reminderEveryDay: true },
     orderBy: { gameId: "asc" }, take: REMINDER_GAME_LIMIT,
-  }), seats => privateSubjects(db, memberId, seats, now));
+  }), seats => privateSubjects(db, memberId, seats, now, new Date(slot.timestamp)));
   return batch.length ? { batch, expiresAt: window.expiresAt } : null;
 }
 
-async function privateSubjects(db: Prisma.TransactionClient, memberId: string, seats: { gameId: string; reminderEveryDay: boolean }[], now: Date) {
+async function privateSubjects(db: Prisma.TransactionClient, memberId: string, seats: { gameId: string; reminderEveryDay: boolean }[], now: Date, slot: Date) {
   const loaded = await loadGameMissedCheckInGames(db, seats.map(seat => seat.gameId));
   const batch = [];
   for (const game of loaded.sort((a, b) => a.row.id.localeCompare(b.row.id))) {
@@ -45,7 +50,7 @@ async function privateSubjects(db: Prisma.TransactionClient, memberId: string, s
     // An unreadable room cannot authorize a private fallback for this game.
     if (!seat || !player || !isGameEnabled() || await roomCoversEveningGame(game.row.chatContainerMemberId, game.row.id, now).catch(() => true)) continue;
     const dayIndex = reminderOpenDay(game.state, player, new Date(now.getTime() + Number(game.row.devClockOffsetMs)), seat.reminderEveryDay);
-    if (dayIndex !== null) batch.push({ gameId: game.row.id, termsVersion: currentTerms(game.state.game.terms).n, dayIndex });
+    if (dayIndex !== null && dayIndex === dayIndexAt(player, new Date(slot.getTime() + Number(game.row.devClockOffsetMs)))) batch.push({ gameId: game.row.id, termsVersion: currentTerms(game.state.game.terms).n, dayIndex });
   }
   return batch;
 }
